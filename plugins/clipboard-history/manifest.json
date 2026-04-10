@@ -1,0 +1,41 @@
+{
+  "id": "clipboard-history",
+  "name": "clipboard-history",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "剪贴板历史",
+  "description": "查看和管理剪贴板历史记录，支持文本、图片、文件",
+  "type": "productivity",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "window": {
+    "width": 800,
+    "height": 600,
+    "minWidth": 600,
+    "minHeight": 400,
+    "maxWidth": 1200,
+    "maxHeight": 900
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "查看剪贴板历史",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "剪贴板"
+        },
+        {
+          "type": "keyword",
+          "value": "clipboard"
+        },
+        {
+          "type": "keyword",
+          "value": "cb"
+        }
+      ]
+    }
+  ]
+}

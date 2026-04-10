@@ -1,0 +1,87 @@
+{
+  "id": "ai-translator",
+  "name": "ai-translator",
+  "version": "1.0.1",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "AI 翻译",
+  "description": "使用系统内置 AI 的翻译插件，支持语言选择与模型配置",
+  "type": "ai",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "window": {
+    "width": 800,
+    "height": 800,
+    "minWidth": 560,
+    "minHeight": 420
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "AI 翻译",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "ai-translator"
+        },
+        {
+          "type": "keyword",
+          "value": "翻译"
+        },
+        {
+          "type": "keyword",
+          "value": "translate"
+        },
+        {
+          "type": "regex",
+          "match": "^\\s*\\S[\\s\\S]*$",
+          "explain": "翻译输入文本",
+          "label": "翻译文本",
+          "minLength": 2,
+          "maxLength": 20000
+        },
+        {
+          "type": "over",
+          "label": "翻译选中文本",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      ]
+    },
+    {
+      "code": "compare",
+      "explain": "同屏翻译对比",
+      "route": "/compare",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "同屏翻译"
+        },
+        {
+          "type": "keyword",
+          "value": "对比翻译"
+        },
+        {
+          "type": "keyword",
+          "value": "compare-translate"
+        }
+      ]
+    },
+    {
+      "code": "settings",
+      "explain": "翻译设置",
+      "route": "/settings",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "翻译设置"
+        },
+        {
+          "type": "keyword",
+          "value": "translator-settings"
+        }
+      ]
+    }
+  ]
+}

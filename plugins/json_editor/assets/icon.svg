@@ -1,0 +1,57 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#D946EF"/>
+              <stop offset="0.55" stop-color="#A21CAF"/>
+              <stop offset="1" stop-color="#701A75"/>
+            </linearGradient>
+            <linearGradient id="window" x1="200" y1="200" x2="800" y2="800" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#312E81" stop-opacity="0.95"/>
+              <stop offset="1" stop-color="#1E1B4B" stop-opacity="0.95"/>
+            </linearGradient>
+            <linearGradient id="node" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#F472B6"/>
+              <stop offset="1" stop-color="#DB2777"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="200" cy="200" r="160" fill="#FDF4FF" fill-opacity="0.1"/>
+            <circle cx="850" cy="850" r="140" fill="#701A75" fill-opacity="0.2"/>
+
+            <!-- Window Shadow -->
+            <rect x="180" y="240" width="660" height="540" rx="36" fill="#4A044E" fill-opacity="0.4"/>
+            <!-- Window -->
+            <rect x="160" y="220" width="660" height="540" rx="36" fill="url(#window)" stroke="#FDF4FF" stroke-opacity="0.2" stroke-width="6"/>
+            
+            <!-- Window Header -->
+            <rect x="160" y="220" width="660" height="70" rx="36" fill="#4338CA" fill-opacity="0.5"/>
+            <circle cx="220" cy="255" r="14" fill="#EF4444"/>
+            <circle cx="270" cy="255" r="14" fill="#F59E0B"/>
+            <circle cx="320" cy="255" r="14" fill="#10B981"/>
+
+            <!-- Braces -->
+            <text x="512" y="660" font-family="'Menlo', 'Monaco', monospace" font-weight="900" font-size="440" text-anchor="middle" fill="#E879F9" fill-opacity="0.15">{   }</text>
+            
+            <!-- JSON Tree -->
+            <path d="M400 460 l80 -80 M400 460 l80 80 M480 380 l80 -60 M480 380 l80 60 M480 540 l80 -40 M480 540 l80 40 M560 580 l80 20" stroke="#F472B6" stroke-width="14" stroke-linecap="round"/>
+            
+            <circle cx="400" cy="460" r="32" fill="url(#node)" stroke="#FDF4FF" stroke-width="6"/>
+            <circle cx="480" cy="380" r="28" fill="url(#node)" stroke="#FDF4FF" stroke-width="6"/>
+            <circle cx="480" cy="540" r="28" fill="url(#node)" stroke="#FDF4FF" stroke-width="6"/>
+            <circle cx="560" cy="320" r="20" fill="#FBCFE8" stroke="#FDF4FF" stroke-width="4"/>
+            <circle cx="560" cy="440" r="20" fill="#FBCFE8" stroke="#FDF4FF" stroke-width="4"/>
+            <circle cx="560" cy="500" r="20" fill="#FBCFE8" stroke="#FDF4FF" stroke-width="4"/>
+            <circle cx="560" cy="580" r="20" fill="#FBCFE8" stroke="#FDF4FF" stroke-width="4"/>
+            <circle cx="640" cy="600" r="20" fill="#FBCFE8" stroke="#FDF4FF" stroke-width="4"/>
+        
+</svg>

@@ -1,0 +1,48 @@
+{
+  "id": "text_compare",
+  "name": "text-compare",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "文本/代码对比",
+  "description": "并排对比两段文本或代码，支持语法高亮、从剪贴板与文件载入、左右交换与分隔符拆分输入",
+  "type": "developer",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 640
+  },
+  "window": {
+    "width": 1180,
+    "height": 760
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "文本与代码对比",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "diff"
+        },
+        {
+          "type": "keyword",
+          "value": "对比"
+        },
+        {
+          "type": "keyword",
+          "value": "compare"
+        },
+        {
+          "type": "regex",
+          "match": "[\\s\\S]{10,}",
+          "explain": "多行文本",
+          "minLength": 10
+        }
+      ]
+    }
+  ]
+}

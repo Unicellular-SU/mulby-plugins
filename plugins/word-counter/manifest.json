@@ -1,0 +1,57 @@
+{
+  "id": "word-counter",
+  "name": "word-counter",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "productivity",
+  "displayName": "字数统计",
+  "description": "统计文本的字符数、汉字数、英文词数、句子、段落与阅读时间",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 680
+  },
+  "window": {
+    "width": 920,
+    "height": 720,
+    "minWidth": 560,
+    "minHeight": 520,
+    "maxWidth": 1400,
+    "maxHeight": 1000
+  },
+  "features": [
+    {
+      "code": "open-counter",
+      "explain": "打开字数统计面板",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "字数统计"
+        },
+        {
+          "type": "keyword",
+          "value": "字符统计"
+        },
+        {
+          "type": "keyword",
+          "value": "word count"
+        }
+      ]
+    },
+    {
+      "code": "count-selection",
+      "explain": "统计当前选中文本",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "over",
+          "label": "统计字数",
+          "minLength": 1
+        }
+      ]
+    }
+  ]
+}

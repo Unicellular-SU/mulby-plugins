@@ -1,0 +1,64 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#FBBF24"/>
+              <stop offset="0.55" stop-color="#F59E0B"/>
+              <stop offset="1" stop-color="#B45309"/>
+            </linearGradient>
+            <linearGradient id="board" x1="300" y1="180" x2="800" y2="800" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#FEF3C7"/>
+                <stop offset="1" stop-color="#FDE68A"/>
+            </linearGradient>
+            <linearGradient id="clip" x1="400" y1="100" x2="600" y2="250" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#E5E7EB"/>
+                <stop offset="1" stop-color="#9CA3AF"/>
+            </linearGradient>
+            <linearGradient id="clock" x1="450" y1="450" x2="850" y2="850" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#3B82F6"/>
+                <stop offset="1" stop-color="#1D4ED8"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="200" cy="800" r="140" fill="#B45309" fill-opacity="0.15"/>
+            <circle cx="840" cy="200" r="120" fill="#FEF3C7" fill-opacity="0.15"/>
+            
+            <!-- Board Shadow -->
+            <rect x="230" y="190" width="560" height="700" rx="48" fill="#B45309" fill-opacity="0.25"/>
+            <!-- Board Base -->
+            <rect x="210" y="170" width="560" height="700" rx="48" fill="url(#board)" stroke="#FFFBEB" stroke-width="8"/>
+            
+            <!-- Document Lines -->
+            <rect x="280" y="290" width="200" height="24" rx="12" fill="#F59E0B" fill-opacity="0.4"/>
+            <rect x="280" y="370" width="420" height="24" rx="12" fill="#F59E0B" fill-opacity="0.2"/>
+            <rect x="280" y="450" width="380" height="24" rx="12" fill="#F59E0B" fill-opacity="0.2"/>
+            <rect x="280" y="530" width="400" height="24" rx="12" fill="#F59E0B" fill-opacity="0.2"/>
+            <rect x="280" y="610" width="250" height="24" rx="12" fill="#F59E0B" fill-opacity="0.2"/>
+
+            <!-- Clip Hardware Shadow -->
+            <path d="M370 180 h280 v60 a30 30 0 0 1 -30 30 h-220 a30 30 0 0 1 -30 -30 z" fill="#B45309" fill-opacity="0.25"/>
+            <!-- Clip Hardware -->
+            <path d="M370 150 h280 v60 a30 30 0 0 1 -30 30 h-220 a30 30 0 0 1 -30 -30 z" fill="url(#clip)" stroke="#F9FAFB" stroke-width="8"/>
+            <rect x="450" y="110" width="120" height="60" rx="20" fill="url(#clip)" stroke="#F9FAFB" stroke-width="8"/>
+            <circle cx="510" cy="140" r="16" fill="#4B5563"/>
+            
+            <!-- Clock Shadow -->
+            <circle cx="700" cy="650" r="180" fill="#B45309" fill-opacity="0.25"/>
+            <!-- Clock Overlay -->
+            <circle cx="680" cy="630" r="180" fill="url(#clock)" stroke="#93C5FD" stroke-width="12"/>
+            <circle cx="680" cy="630" r="140" fill="none" stroke="#EFF6FF" stroke-width="32" stroke-linecap="round"/>
+            <!-- Arrow Head -->
+            <path d="M520 630 L550 560 L600 600 Z" fill="#EFF6FF"/>
+            <!-- Clock Hands -->
+            <path d="M680 540 v90 l60 60" fill="none" stroke="#EFF6FF" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+        
+</svg>

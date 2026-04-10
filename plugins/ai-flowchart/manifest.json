@@ -1,0 +1,60 @@
+{
+  "id": "ai-flowchart",
+  "name": "ai-flowchart",
+  "displayName": "AI 图表",
+  "version": "1.1.0",
+  "author": "Mulby",
+  "type": "ai",
+  "description": "AI 智能生成流程图、泳道图、ER 图，支持对话式编辑、自定义节点和导出",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 600
+  },
+  "window": {
+    "type": "default",
+    "width": 1200,
+    "height": 800,
+    "minWidth": 800,
+    "minHeight": 600
+  },
+  "features": [
+    {
+      "code": "generate",
+      "explain": "AI 生成图表（流程图/泳道图/ER图）",
+      "mode": "detached",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "流程图"
+        },
+        {
+          "type": "keyword",
+          "value": "flowchart"
+        },
+        {
+          "type": "keyword",
+          "value": "fc"
+        },
+        {
+          "type": "keyword",
+          "value": "泳道图"
+        },
+        {
+          "type": "keyword",
+          "value": "swimlane"
+        },
+        {
+          "type": "keyword",
+          "value": "ER图"
+        },
+        {
+          "type": "keyword",
+          "value": "er"
+        }
+      ]
+    }
+  ]
+}

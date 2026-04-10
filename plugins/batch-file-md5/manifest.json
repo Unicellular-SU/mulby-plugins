@@ -1,0 +1,47 @@
+{
+  "id": "batch-file-md5",
+  "name": "batch-file-md5",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "utility",
+  "displayName": "批量文件 MD5",
+  "description": "为单个或多个文件计算 MD5，采用流式读取以兼顾大文件与多文件并行，支持从启动器附带文件或本界面选择。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 640
+  },
+  "window": {
+    "width": 720,
+    "height": 680,
+    "minWidth": 480,
+    "minHeight": 520
+  },
+  "features": [
+    {
+      "code": "open-md5",
+      "explain": "打开批量 MD5 工具",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "文件MD5" },
+        { "type": "keyword", "value": "批量MD5" },
+        { "type": "keyword", "value": "MD5校验" },
+        { "type": "keyword", "value": "计算MD5" }
+      ]
+    },
+    {
+      "code": "hash-with-files",
+      "explain": "对选中的文件计算 MD5",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "files",
+          "fileType": "file",
+          "minLength": 1
+        }
+      ]
+    }
+  ]
+}

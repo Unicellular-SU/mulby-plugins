@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    ;(() => {
+      const theme = new URLSearchParams(window.location.search).get('theme')
+      const systemPrefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
+      const shouldUseDark = theme ? theme === 'dark' : systemPrefersDark
+      document.documentElement.classList.toggle('dark', shouldUseDark)
+    })()
+  </script>
+  <title>unit-converter</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./main.tsx"></script>
+</body>
+</html>

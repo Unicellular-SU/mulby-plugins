@@ -1,0 +1,92 @@
+{
+  "id": "quick-shot-editor",
+  "name": "quick-shot-editor",
+  "version": "1.0.2",
+  "author": "mulby",
+  "type": "productivity",
+  "displayName": "快截标注",
+  "description": "快速唤起区域截图或全屏截图，支持划线、箭头、框选、马赛克、复制到剪贴板和保存到本地。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 820,
+    "defaultDetached": true
+  },
+  "window": {
+    "width": 1360,
+    "height": 900,
+    "minWidth": 980,
+    "minHeight": 720,
+    "maxWidth": 1680,
+    "maxHeight": 1280
+  },
+  "features": [
+    {
+      "code": "quick-region-shot",
+      "explain": "区域截图",
+      "mode": "detached",
+      "preCapture": "region",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "截图"
+        },
+        {
+          "type": "keyword",
+          "value": "区域截图"
+        },
+        {
+          "type": "keyword",
+          "value": "快速截图"
+        }
+      ]
+    },
+    {
+      "code": "quick-full-shot",
+      "explain": "全屏截图",
+      "mode": "detached",
+      "preCapture": "fullscreen",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "全屏截图"
+        },
+        {
+          "type": "keyword",
+          "value": "整屏截图"
+        }
+      ]
+    },
+    {
+      "code": "open-studio",
+      "explain": "截图工作台",
+      "mode": "detached",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "截图编辑"
+        },
+        {
+          "type": "keyword",
+          "value": "截图工作台"
+        },
+        {
+          "type": "keyword",
+          "value": "shot editor"
+        }
+      ]
+    },
+    {
+      "code": "edit-image",
+      "explain": "编辑传入的图片",
+      "mode": "detached",
+      "cmds": [
+        {
+          "type": "img"
+        }
+      ]
+    }
+  ]
+}

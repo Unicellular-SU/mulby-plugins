@@ -1,0 +1,48 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#60A5FA"/>
+              <stop offset="0.55" stop-color="#3B82F6"/>
+              <stop offset="1" stop-color="#1E3A8A"/>
+            </linearGradient>
+            <linearGradient id="bubble1" x1="200" y1="200" x2="600" y2="600" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#EFF6FF"/>
+              <stop offset="1" stop-color="#DBEAFE"/>
+            </linearGradient>
+            <linearGradient id="bubble2" x1="400" y1="400" x2="800" y2="800" gradientUnits="userSpaceOnUse">
+               <stop offset="0" stop-color="#1E40AF"/>
+               <stop offset="1" stop-color="#1E3A8A"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="240" cy="800" r="150" fill="#1E3A8A" fill-opacity="0.2"/>
+            <circle cx="800" cy="200" r="120" fill="#BFDBFE" fill-opacity="0.1"/>
+            
+            <!-- Shadow for bubble 1 -->
+            <path d="M620 640 L620 500 C620 400 540 320 440 320 L270 320 C170 320 90 400 90 500 C90 600 170 680 270 680 L400 680 L460 760 L480 680 L520 680" fill="#1E3A8A" fill-opacity="0.15" transform="translate(10, 14)"/>
+            
+            <!-- Shadow for bubble 2 -->
+            <path d="M420 520 L420 660 C420 760 500 840 600 840 L770 840 C870 840 950 760 950 660 C950 560 870 480 770 480 L640 480 L580 400 L560 480 L520 480" fill="#1E40AF" fill-opacity="0.15" transform="translate(10, 14)"/>
+
+            <!-- Bubble 1: English -->
+            <path d="M620 640 L620 500 C620 380 520 280 400 280 L280 280 C160 280 60 380 60 500 C60 620 160 720 280 720 L400 720 L480 820 L480 720 L500 720 C570 720 620 680 620 640 Z" fill="url(#bubble1)"/>
+            <path d="M620 640 L620 500 C620 380 520 280 400 280 L280 280 C160 280 60 380 60 500 C60 620 160 720 280 720 L400 720 L480 820 L480 720 L500 720 C570 720 620 680 620 640 Z" stroke="#93C5FD" stroke-width="8"/>
+            <text x="340" y="580" font-family="-apple-system, sans-serif" font-weight="800" font-size="220" text-anchor="middle" fill="#1E3A8A">A</text>
+            <path d="M220 580 L280 420 L340 580 M240 520 L320 520" stroke="#1E3A8A" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <!-- Bubble 2: Chinese -->
+            <path d="M420 520 L420 660 C420 780 520 880 640 880 L760 880 C880 880 980 780 980 660 C980 540 880 440 760 440 L640 440 L560 340 L560 440 L540 440 C470 440 420 480 420 520 Z" fill="url(#bubble2)"/>
+            <path d="M420 520 L420 660 C420 780 520 880 640 880 L760 880 C880 880 980 780 980 660 C980 540 880 440 760 440 L640 440 L560 340 L560 440 L540 440 C470 440 420 480 420 520 Z" stroke="#60A5FA" stroke-width="8"/>
+            <text x="700" y="740" font-family="'PingFang SC', -apple-system, sans-serif" font-weight="900" font-size="220" text-anchor="middle" fill="#EFF6FF">文</text>
+        
+</svg>

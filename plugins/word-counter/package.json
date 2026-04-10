@@ -1,0 +1,28 @@
+{
+  "name": "word-counter",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "mulby dev",
+    "build": "npm run build:backend && npm run build:ui",
+    "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",
+    "build:ui": "vite build",
+    "pack": "mulby pack"
+  },
+  "dependencies": {
+    "lucide-react": "^0.562.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.1"
+  }
+}

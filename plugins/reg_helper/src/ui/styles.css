@@ -1,0 +1,8 @@
+/* 全局基础样式 */
+html {
+  font-size: 14px;
+}
+
+html.dark {
+  color-scheme: dark;
+}

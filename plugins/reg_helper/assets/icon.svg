@@ -1,0 +1,64 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#475569"/>
+              <stop offset="0.55" stop-color="#334155"/>
+              <stop offset="1" stop-color="#0F172A"/>
+            </linearGradient>
+            <linearGradient id="panel" x1="200" y1="200" x2="800" y2="800" gradientUnits="userSpaceOnUse">
+               <stop offset="0" stop-color="#1E293B" stop-opacity="0.95"/>
+               <stop offset="1" stop-color="#0F172A" stop-opacity="0.95"/>
+            </linearGradient>
+            <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
+               <stop offset="0" stop-color="#34D399"/>
+               <stop offset="1" stop-color="#10B981"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="800" cy="200" r="160" fill="#F8FAFC" fill-opacity="0.05"/>
+            <circle cx="200" cy="800" r="100" fill="#0F172A" fill-opacity="0.3"/>
+
+            <!-- Panel Shadow -->
+            <rect x="160" y="260" width="704" height="504" rx="40" fill="#020617" fill-opacity="0.5"/>
+            <!-- Panel -->
+            <rect x="140" y="240" width="704" height="504" rx="40" fill="url(#panel)" stroke="#475569" stroke-width="6"/>
+
+            <!-- Top bar -->
+            <rect x="140" y="240" width="704" height="60" rx="40" fill="#334155" fill-opacity="0.5"/>
+            <circle cx="200" cy="270" r="12" fill="#EF4444"/>
+            <circle cx="240" cy="270" r="12" fill="#F59E0B"/>
+            <circle cx="280" cy="270" r="12" fill="#10B981"/>
+
+            <!-- Regex Graphic -->
+            <!-- Highlight Box 1 -->
+            <rect x="360" y="420" width="100" height="120" rx="20" fill="url(#glow)" fill-opacity="0.2" stroke="#10B981" stroke-width="4"/>
+            <circle cx="410" cy="480" r="12" fill="#34D399"/>
+            
+            <!-- Highlight Box 2 -->
+            <rect x="520" y="420" width="100" height="120" rx="20" fill="url(#glow)" fill-opacity="0.2" stroke="#10B981" stroke-width="4"/>
+            <!-- asterisk -->
+            <path d="M570 460 v40 M550 480 h40 M555 465 l30 30 M585 465 l-30 30" stroke="#34D399" stroke-width="8" stroke-linecap="round"/>
+
+            <!-- Connectors -->
+            <path d="M260 480 h100 M460 480 h60 M620 480 h100" fill="none" stroke="#94A3B8" stroke-width="12" stroke-linecap="round"/>
+            <circle cx="280" cy="480" r="16" fill="#F8FAFC"/>
+            <circle cx="700" cy="480" r="16" fill="#F8FAFC"/>
+            
+            <!-- Slashes -->
+            <path d="M210 580 l60 -200 M710 580 l60 -200" fill="none" stroke="#10B981" stroke-width="24" stroke-linecap="round"/>
+            
+            <circle cx="340" cy="580" r="8" fill="#34D399"/>
+            <circle cx="480" cy="620" r="12" fill="#34D399"/>
+            <circle cx="600" cy="380" r="10" fill="#34D399"/>
+        
+</svg>

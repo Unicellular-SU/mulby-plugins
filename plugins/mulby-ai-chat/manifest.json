@@ -1,0 +1,32 @@
+{
+  "id": "mulby-ai-chat",
+  "name": "mulby-ai-chat",
+  "version": "1.0.0",
+  "author": "mulby",
+  "displayName": "AI 助手",
+  "type": "ai",
+  "description": "支持多轮对话的 AI 聊天助手，支持多模型切换、流式输出、附件上传、AI Skills",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true
+  },
+  "window": {
+    "width": 900,
+    "height": 640,
+    "minWidth": 680,
+    "minHeight": 480
+  },
+  "features": [
+    {
+      "code": "chat",
+      "explain": "打开 AI 对话面板",
+      "cmds": [
+        { "type": "keyword", "value": "ai" },
+        { "type": "keyword", "value": "chat" },
+        { "type": "keyword", "value": "助手" }
+      ]
+    }
+  ]
+}

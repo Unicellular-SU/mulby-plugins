@@ -1,0 +1,34 @@
+{
+  "name": "ai-flowchart",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "mulby dev",
+    "build": "npm run build:backend && npm run build:ui",
+    "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",
+    "build:ui": "vite build",
+    "pack": "npm run build && mulby pack"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^2.0.4",
+    "@xyflow/react": "^12.10.1",
+    "html-to-image": "^1.11.13",
+    "lucide-react": "^0.562.0",
+    "nanoid": "^5.1.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "esbuild": "^0.27.4",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.1"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "id": "unit-converter",
+  "name": "unit-converter",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "productivity",
+  "displayName": "单位转换",
+  "description": "支持 10 类单位与货币的实时转换工具",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.svg",
+  "pluginSetting": {
+    "single": true,
+    "height": 760
+  },
+  "window": {
+    "width": 800,
+    "height": 800,
+    "minWidth": 720,
+    "minHeight": 620,
+    "maxWidth": 1800,
+    "maxHeight": 1200
+  },
+  "features": [
+    {
+      "code": "open-converter",
+      "explain": "打开数值转换面板",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "单位换算"
+        },
+        {
+          "type": "keyword",
+          "value": "单位转换"
+        },
+        {
+          "type": "keyword",
+          "value": "数值转换"
+        },
+        {
+          "type": "keyword",
+          "value": "converter"
+        }
+      ]
+    },
+    {
+      "code": "convert-selection",
+      "explain": "转换当前选中的数值",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "over",
+          "label": "转换数值",
+          "minLength": 1
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "generatedAt": "2026-03-14T18:53:42.151761+00:00",
+  "inputs": {
+    "appSvg": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\assets\\icon-source\\word-counter-app.svg",
+    "traySvg": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\assets\\icon-source\\word-counter-app.svg",
+    "appPadding": 0.08,
+    "trayPadding": 0.06,
+    "trayColor": "#000000"
+  },
+  "bundleRoot": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter",
+  "outputs": {
+    "desktopPreviewDir": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\build\\icons\\desktop",
+    "appWindowsIco": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\build\\icon.ico",
+    "appMacIcns": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\build\\icon.icns",
+    "appLinuxDir": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\build\\icons\\linux",
+    "trayWindowsIco": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\tray\\win\\icon.ico",
+    "trayLinuxPng": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\tray\\linux\\icon.png",
+    "trayMacTemplate": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\tray\\mac\\iconTemplate.png",
+    "trayMacTemplate2x": "D:\\Node.js\\mulby_example\\plugins\\word-counter\\generated-icons\\word-counter\\tray\\mac\\iconTemplate@2x.png"
+  },
+  "copiedIntoProject": {},
+  "recommendedElectronBuilderConfig": {
+    "directories": {
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "icon": "build/icon.ico"
+    },
+    "linux": {
+      "icon": "build/icons/linux"
+    }
+  },
+  "notes": [
+    "Desktop shortcuts and launchers reuse the packaged app icon; Electron does not define a second desktop-only icon asset.",
+    "Use a dedicated tray SVG when the app icon has text or fine detail.",
+    "macOS tray assets are exported as monochrome template images.",
+    "Linux tray exact display size varies by desktop environment; 24px is the default export."
+  ]
+}

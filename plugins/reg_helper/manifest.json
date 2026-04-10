@@ -1,0 +1,31 @@
+{
+  "id": "reg_helper",
+  "name": "reg_helper",
+  "version": "2.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "正则编辑器",
+  "description": "JavaScript正则表达式编辑器，支持实时高亮匹配、替换预览、常用预设和速查表",
+  "type": "developer",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "features": [
+    {
+      "code": "main",
+      "explain": "正则表达式编辑器",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "regex",
+          "label": "正则编辑器"
+        },
+        {
+          "type": "keyword",
+          "value": "正则",
+          "label": "正则表达式编辑器"
+        }
+      ]
+    }
+  ]
+}

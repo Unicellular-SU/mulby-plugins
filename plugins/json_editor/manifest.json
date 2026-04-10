@@ -1,0 +1,52 @@
+{
+  "id": "json_editor",
+  "name": "json_editor",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "JSON 编辑器",
+  "description": "强大的 JSON 编辑工具，支持格式化、压缩、校验、转换、树形编辑和过滤",
+  "type": "developer",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 600
+  },
+  "window": {
+    "width": 900,
+    "height": 700
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "JSON 编辑器",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "json"
+        },
+        {
+          "type": "regex",
+          "match": "^[\\s]*[\\{\\[]",
+          "explain": "JSON 数据",
+          "minLength": 2
+        },
+        {
+          "type": "regex",
+          "match": "^\\s*<",
+          "explain": "XML 数据",
+          "minLength": 3
+        },
+        {
+          "type": "regex",
+          "match": "^[a-zA-Z_][-a-zA-Z0-9_]*\\s*:",
+          "explain": "YAML 数据",
+          "minLength": 5
+        }
+      ]
+    }
+  ]
+}

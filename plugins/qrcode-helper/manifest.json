@@ -1,0 +1,97 @@
+{
+  "id": "qrcode-helper",
+  "name": "qrcode-helper",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "二维码助手",
+  "description": "简单好用的二维码生成与识别工具",
+  "type": "utility",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "features": [
+    {
+      "code": "main",
+      "explain": "二维码助手",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "qrcode"
+        }
+      ]
+    },
+    {
+      "code": "generate",
+      "explain": "转二维码",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^.{1,500}$",
+          "label": "转二维码"
+        }
+      ]
+    },
+    {
+      "code": "scan",
+      "explain": "识别二维码",
+      "cmds": [
+        {
+          "type": "img",
+          "exts": [
+            "jpg",
+            "png"
+          ]
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "generate_qrcode",
+      "description": "生成二维码，传入待生成文本，传出 base64 格式图片数据。例如：可以将 URL 或任意文本转换为一张二维码图片",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "要生成二维码的文本内容，比如网址、文字等"
+          }
+        },
+        "required": ["text"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "base64Image": {
+            "type": "string",
+            "description": "生成的二维码图片，格式为 Base64 data URL (e.g. data:image/png;base64,...)"
+          }
+        }
+      }
+    },
+    {
+      "name": "decode_qrcode",
+      "description": "识别并解码二维码图片，传入 base64 格式的图片数据（data URL），返回识别到的文本内容",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base64Image": {
+            "type": "string",
+            "description": "要识别的二维码图片，格式为 Base64 data URL (e.g. data:image/png;base64,...)"
+          }
+        },
+        "required": ["base64Image"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "识别到的二维码内容文本"
+          }
+        }
+      }
+    }
+  ]
+}

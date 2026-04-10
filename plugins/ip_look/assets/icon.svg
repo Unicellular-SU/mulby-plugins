@@ -1,0 +1,60 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#34D399"/>
+              <stop offset="0.55" stop-color="#10B981"/>
+              <stop offset="1" stop-color="#047857"/>
+            </linearGradient>
+            <linearGradient id="globe" x1="200" y1="200" x2="800" y2="800" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#D1FAE5" stop-opacity="0.9"/>
+              <stop offset="1" stop-color="#A7F3D0" stop-opacity="0.5"/>
+            </linearGradient>
+            <linearGradient id="pin" x1="450" y1="250" x2="570" y2="500" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#EF4444"/>
+              <stop offset="1" stop-color="#991B1B"/>
+            </linearGradient>
+            <linearGradient id="pin-core" x1="480" y1="300" x2="540" y2="350" gradientUnits="userSpaceOnUse">
+               <stop offset="0" stop-color="#FFFFFF"/>
+               <stop offset="1" stop-color="#FCA5A5"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="800" cy="800" r="140" fill="#047857" fill-opacity="0.2"/>
+            <circle cx="200" cy="200" r="110" fill="#D1FAE5" fill-opacity="0.1"/>
+            
+            <!-- Globe Shadow -->
+            <circle cx="530" cy="530" r="280" fill="#047857" fill-opacity="0.4"/>
+            <!-- Globe -->
+            <circle cx="512" cy="512" r="280" fill="url(#globe)" stroke="#ECFDF5" stroke-width="12"/>
+            
+            <!-- Lat/Long Lines -->
+            <ellipse cx="512" cy="512" rx="140" ry="280" fill="none" stroke="#059669" stroke-width="12" stroke-opacity="0.6"/>
+            <ellipse cx="512" cy="512" rx="280" ry="140" fill="none" stroke="#059669" stroke-width="12" stroke-opacity="0.6"/>
+            <path d="M232 512 h560" fill="none" stroke="#059669" stroke-width="12" stroke-opacity="0.6"/>
+            <path d="M512 232 v560" fill="none" stroke="#059669" stroke-width="12" stroke-opacity="0.6"/>
+
+            <!-- Nodes & Network Lines -->
+            <path d="M300 300 L700 700 M240 640 L760 380 M200 400 L800 600" fill="none" stroke="#ECFDF5" stroke-width="6" stroke-opacity="0.8" stroke-dasharray="16 16"/>
+            <circle cx="300" cy="300" r="16" fill="#FEF3C7"/>
+            <circle cx="700" cy="700" r="16" fill="#FEF3C7"/>
+            <circle cx="240" cy="640" r="16" fill="#FEF3C7"/>
+            <circle cx="760" cy="380" r="16" fill="#FEF3C7"/>
+            
+            <!-- Pin Shadow -->
+            <ellipse cx="512" cy="590" rx="40" ry="16" fill="#047857" fill-opacity="0.6"/>
+            
+            <!-- Pin -->
+            <path d="M512 250 c -70 0 -110 40 -110 110 c 0 80 110 180 110 180 c 0 0 110 -100 110 -180 c 0 -70 -40 -110 -110 -110 z" fill="url(#pin)" stroke="#FEF2F2" stroke-width="8"/>
+            <circle cx="512" cy="360" r="40" fill="url(#pin-core)"/>
+        
+</svg>

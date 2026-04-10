@@ -1,0 +1,26 @@
+{
+  "id": "ip_look",
+  "name": "ip_look",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "IP 查询",
+  "description": "查询本机IP和任意IP的地理位置信息",
+  "type": "network",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "features": [
+    {
+      "code": "main",
+      "explain": "主功能",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)$",
+          "label": "IP查询"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1e3a5f"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#60a5fa"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <!-- 背景圆角矩形 -->
+  <rect width="512" height="512" rx="108" fill="url(#bg)"/>
+  <!-- 开始节点 -->
+  <rect x="196" y="60" width="120" height="48" rx="24" fill="#22c55e" opacity="0.9"/>
+  <text x="256" y="90" text-anchor="middle" fill="white" font-size="20" font-family="sans-serif" font-weight="600">开始</text>
+  <!-- 连线1 -->
+  <line x1="256" y1="108" x2="256" y2="150" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <!-- 处理节点 -->
+  <rect x="176" y="150" width="160" height="56" rx="10" fill="#2563eb" opacity="0.85"/>
+  <text x="256" y="184" text-anchor="middle" fill="white" font-size="18" font-family="sans-serif">AI 生成</text>
+  <!-- 连线2 -->
+  <line x1="256" y1="206" x2="256" y2="250" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <!-- 判断节点（菱形） -->
+  <g transform="translate(256, 292)">
+    <rect x="-42" y="-42" width="84" height="84" rx="6" fill="#f59e0b" opacity="0.85" transform="rotate(45)"/>
+    <text x="0" y="7" text-anchor="middle" fill="white" font-size="16" font-family="sans-serif" font-weight="600">判断</text>
+  </g>
+  <!-- 左分支 -->
+  <line x1="215" y1="292" x2="130" y2="292" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <line x1="130" y1="292" x2="130" y2="370" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <!-- 右分支 -->
+  <line x1="297" y1="292" x2="382" y2="292" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <line x1="382" y1="292" x2="382" y2="370" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <!-- 左处理节点 -->
+  <rect x="66" y="370" width="128" height="48" rx="10" fill="#8b5cf6" opacity="0.85"/>
+  <text x="130" y="400" text-anchor="middle" fill="white" font-size="16" font-family="sans-serif">编辑</text>
+  <!-- 右处理节点 -->
+  <rect x="318" y="370" width="128" height="48" rx="10" fill="#8b5cf6" opacity="0.85"/>
+  <text x="382" y="400" text-anchor="middle" fill="white" font-size="16" font-family="sans-serif">导出</text>
+  <!-- 汇合 -->
+  <line x1="130" y1="418" x2="130" y2="448" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <line x1="382" y1="418" x2="382" y2="448" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <line x1="130" y1="448" x2="382" y2="448" stroke="#60a5fa" stroke-width="3" stroke-dasharray="6,4"/>
+  <line x1="256" y1="448" x2="256" y2="460" stroke="#60a5fa" stroke-width="3"/>
+  <!-- AI 星标装饰 -->
+  <text x="420" y="100" fill="#fbbf24" font-size="40" opacity="0.7">✦</text>
+  <text x="72" y="160" fill="#60a5fa" font-size="28" opacity="0.5">✦</text>
+</svg>

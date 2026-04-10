@@ -1,0 +1,134 @@
+name: Build Plugins
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+
+      - name: Generate release tag
+        id: release_meta
+        run: echo "tag=v$(date -u +'%Y.%m.%d-%H%M')" >> "$GITHUB_OUTPUT"
+
+      - name: Install latest mulby-cli globally
+        run: npm install -g mulby-cli
+
+      - name: Install Chromium dependencies for screenshots
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libxkbcommon0 libxdamage1 libgbm1 libpango-1.0-0 \
+            libcairo2 libasound2t64 libxrandr2 libxcomposite1 libxcursor1 \
+            libxfixes3 libxi6 libxtst6 libx11-xcb1 libdrm2 fonts-noto-color-emoji
+
+      - name: Install root dependencies (puppeteer)
+        run: npm install
+
+      - name: Create releases directory
+        run: mkdir -p releases
+
+      - name: Build and pack all plugins
+        run: |
+          PLUGINS_JSON='{"version":"1.0.0","plugins":[]}'
+          RELEASE_TAG="${{ steps.release_meta.outputs.tag }}"
+          
+          for plugin_dir in plugins/*/; do
+            if [ -f "$plugin_dir/package.json" ]; then
+              plugin_name=$(basename "$plugin_dir")
+              echo "Processing plugin: $plugin_name"
+              
+              # Use subshell to isolate directory changes
+              (
+                cd "$plugin_dir" || exit 1
+                
+                npm install --include=dev || exit 1
+                npm run build || exit 1
+
+                # 如果 screenshots 目录不存在或为空，则自动生成截图
+                if [ ! -d "screenshots" ] || [ -z "$(ls -A screenshots 2>/dev/null)" ]; then
+                  echo "No screenshots found for $plugin_name, generating..."
+                  cd ../..
+                  node scripts/screenshot-plugin-ui.js "$plugin_name" || echo "Warning: screenshot generation failed for $plugin_name, continuing..."
+                  cd "$plugin_dir" || exit 1
+                fi
+
+                npm run pack || exit 1
+                
+                # Find and move the inplugin file
+                inplugin_file=$(ls -1 *.inplugin 2>/dev/null | head -n1)
+                if [ -z "$inplugin_file" ]; then
+                  echo "Error: No .inplugin file generated for $plugin_name"
+                  exit 1
+                fi
+                
+                echo "Found inplugin file: $inplugin_file"
+                mv "$inplugin_file" ../../releases/
+                
+                # Build Plugin Store Index v2 (Rich Metadata) entry
+                if [ -f "manifest.json" ]; then
+                  cd ../..
+                  BASE_RAW="https://raw.githubusercontent.com/${{ github.repository }}/main"
+                  REPO_URL="${{ github.server_url }}/${{ github.repository }}"
+                  node scripts/build-plugin-index-entry.js "$plugin_name" "$inplugin_file" "$BASE_RAW" "$REPO_URL" "$RELEASE_TAG" >> plugins_temp.jsonl
+                  cd - > /dev/null
+                fi
+              ) || {
+                echo "Failed to process plugin: $plugin_name"
+                exit 1
+              }
+            fi
+          done
+          
+          # Combine all plugin info into plugins.json
+          if [ -f "plugins_temp.jsonl" ]; then
+            node -e "
+              const fs = require('fs');
+              const lines = fs.readFileSync('plugins_temp.jsonl', 'utf-8').trim().split('\n');
+              const plugins = lines.map(line => JSON.parse(line));
+              const output = {
+                version: '1.0.0',
+                plugins: plugins
+              };
+              console.log(JSON.stringify(output, null, 2));
+            " > plugins.json
+            rm plugins_temp.jsonl
+          else
+            echo "$PLUGINS_JSON" > plugins.json
+          fi
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag }}
+          name: ${{ steps.release_meta.outputs.tag }}
+          generate_release_notes: true
+          files: releases/*.inplugin
+
+      - name: Commit and push plugins index updates
+        if: success()
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "github-actions[bot]"
+          git add plugins.json plugins/*/screenshots/
+          if git diff --staged --quiet; then
+            echo "No plugins index updates to commit."
+          else
+            git commit -m "chore: update plugins index [skip ci]"
+            git push
+          fi

@@ -1,0 +1,36 @@
+{
+  "name": "bulk-image-studio",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "mulby dev",
+    "build": "npm run build:backend && npm run build:ui",
+    "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js --packages=external",
+    "build:ui": "vite build",
+    "pack": "mulby pack"
+  },
+  "dependencies": {
+    "gif-encoder-2": "^1.0.5",
+    "lucide-react": "^0.562.0",
+    "p-limit": "^7.3.0",
+    "pdf-lib": "^1.17.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-easy-crop": "^5.5.7",
+    "react-router-dom": "^7.13.2",
+    "sharp": "^0.34.5",
+    "svgo": "^4.0.1",
+    "to-ico": "^1.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.1"
+  }
+}

@@ -1,0 +1,86 @@
+:root {
+    /* iOS 26 Glassmorphism & Colors */
+    --primary-color: #007AFF;
+    --primary-hover: #0062cc;
+    /* Vibrant Mesh Gradient Background - Light (Default) */
+    --bg-gradient: radial-gradient(circle at 0% 0%, #E3F2FD 0%, #E1F5FE 50%, #F3E5F5 100%),
+        radial-gradient(circle at 100% 100%, #E8EAF6 0%, #E0F7FA 100%);
+
+    /* Premium Glass Effect - Bright White */
+    --glass-bg: rgba(255, 255, 255, 0.85);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.8);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+    --glass-blur: blur(24px);
+    --glass-saturation: saturate(180%);
+
+    /* Text Colors */
+    --text-primary: #000000;
+    --text-secondary: #505055;
+    --text-tertiary: #86868b;
+
+    /* Dimensions & Spacing */
+    --sidebar-width: 80px;
+    /* Compact */
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 8px;
+    --header-height: 60px;
+}
+
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+body {
+    background: var(--bg-gradient);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
+#root {
+    height: 100%;
+    width: 100%;
+}
+
+/* Glass Utility */
+.glass-panel {
+    background: var(--glass-bg);
+    backdrop-filter: var(--glass-blur) var(--glass-saturation);
+    -webkit-backdrop-filter: var(--glass-blur) var(--glass-saturation);
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* UI Elements */
+button {
+    font-family: inherit;
+    user-select: none;
+}
+
+/* Custom Scrollbar for WebKit */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(142, 142, 147, 0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(142, 142, 147, 0.5);
+}

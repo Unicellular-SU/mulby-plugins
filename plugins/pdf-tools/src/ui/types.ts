@@ -1,0 +1,49 @@
+export interface PDFInfo {
+    pageCount: number;
+    title: string;
+    author: string;
+}
+
+export interface SplitRange {
+    start: number;
+    end: number;
+    name: string;
+}
+
+export interface WatermarkConfig {
+    type: 'text' | 'image';
+    text?: string;
+    imagePath?: string;
+    layout: 'center' | 'tile';
+    width?: number;
+    height?: number;
+    scale?: number;
+    opacity: number;
+    rotate: number;
+    color?: string;
+    fontSize?: number;
+    gap?: number;
+}
+
+declare global {
+    interface Window {
+        pdfApi?: {
+            // I/O Utils
+            readFile: (path: string) => Promise<Uint8Array>;
+            saveFile: (path: string, data: Uint8Array) => Promise<string>;
+            ensureDir: (path: string) => Promise<void>;
+            openPath: (path: string) => Promise<void>;
+
+            // Node-side PDF Lib operations (Non-rendering)
+            getPDFInfo: (path: string) => Promise<PDFInfo>;
+            splitPDFByPage: (path: string, outputDir: string, prefix?: string) => Promise<string[]>;
+            splitPDFByRanges: (path: string, ranges: SplitRange[], outputDir: string) => Promise<string[]>;
+            mergePDFs: (files: string[], outputDir: string, fileName?: string) => Promise<string>;
+            watermarkPDF: (path: string, config: WatermarkConfig, outputDir: string) => Promise<string>;
+
+            // Legacy / Proxied (Optional, if we want to support old calls temporarily)
+            extractImages: (path: string, outputDir: string) => Promise<string[]>;
+        };
+
+    }
+}

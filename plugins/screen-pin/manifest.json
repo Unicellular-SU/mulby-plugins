@@ -1,0 +1,47 @@
+{
+  "id": "screen-pin",
+  "name": "screen-pin",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "utility",
+  "displayName": "截图置顶",
+  "description": "区域截图后将截图钉在屏幕最上层，支持拖动、右键关闭、多窗口共存。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": false,
+    "height": 100
+  },
+  "window": {
+    "type": "borderless",
+    "width": 400,
+    "height": 300
+  },
+  "features": [
+    {
+      "code": "pin-screenshot",
+      "explain": "区域截图并置顶显示",
+      "mode": "detached",
+      "preCapture": "region",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "截图置顶"
+        },
+        {
+          "type": "keyword",
+          "value": "pin截图"
+        },
+        {
+          "type": "keyword",
+          "value": "screen pin"
+        },
+        {
+          "type": "keyword",
+          "value": "贴图"
+        }
+      ]
+    }
+  ]
+}

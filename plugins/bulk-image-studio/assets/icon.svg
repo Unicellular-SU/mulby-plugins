@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bulk-bg" x1="72" y1="56" x2="456" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3b82f6"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="url(#bulk-bg)"/>
+  <!-- 后层卡片：批量感 -->
+  <rect x="100" y="112" width="268" height="208" rx="32" stroke="rgba(255,255,255,0.38)" stroke-width="14" fill="rgba(255,255,255,0.1)"/>
+  <rect x="122" y="134" width="268" height="208" rx="32" stroke="rgba(255,255,255,0.55)" stroke-width="14" fill="rgba(255,255,255,0.08)"/>
+  <!-- 前层主图框 -->
+  <rect x="146" y="158" width="268" height="208" rx="32" stroke="#fff" stroke-width="18" fill="rgba(255,255,255,0.06)"/>
+  <circle cx="220" cy="236" r="34" fill="#fff" opacity="0.92"/>
+  <path
+    d="M168 318 L236 250 L298 296 L366 222"
+    stroke="#fff"
+    stroke-width="18"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    opacity="0.92"
+  />
+  <!-- 右下角叠片：暗示多图 / 合并 -->
+  <rect x="314" y="288" width="92" height="72" rx="14" fill="rgba(255,255,255,0.42)" stroke="#fff" stroke-width="10"/>
+  <rect x="332" y="306" width="92" height="72" rx="14" fill="rgba(255,255,255,0.28)" stroke="rgba(255,255,255,0.85)" stroke-width="8"/>
+</svg>

@@ -1,0 +1,49 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F1B56E"/>
+      <stop offset="0.55" stop-color="#C66731"/>
+      <stop offset="1" stop-color="#7B3316"/>
+    </linearGradient>
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43.2643) scale(470.438 611.611)">
+      <stop stop-color="#FFF7E6" stop-opacity="0.84"/>
+      <stop offset="0.6" stop-color="#FFF7E6" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FFF7E6" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="paper" x1="320" y1="238" x2="702" y2="774" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF9F1"/>
+      <stop offset="1" stop-color="#F2E0C8"/>
+    </linearGradient>
+    <linearGradient id="badge" x1="642" y1="534" x2="812" y2="738" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF4DE"/>
+      <stop offset="1" stop-color="#F1CA8B"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+
+  <circle cx="792" cy="246" r="126" fill="#FFF7E6" fill-opacity="0.1"/>
+  <circle cx="248" cy="808" r="156" fill="#5B230D" fill-opacity="0.12"/>
+
+  <rect x="266" y="212" width="470" height="594" rx="92" fill="#8D3D1E" fill-opacity="0.14"/>
+  <rect x="278" y="194" width="470" height="594" rx="92" fill="url(#paper)"/>
+  <rect x="278" y="194" width="470" height="594" rx="92" stroke="#F9DEB7" stroke-width="10"/>
+
+  <rect x="344" y="304" width="188" height="34" rx="17" fill="#B85C2B"/>
+  <rect x="344" y="386" width="340" height="28" rx="14" fill="#D18A55"/>
+  <rect x="344" y="446" width="286" height="28" rx="14" fill="#D18A55" fill-opacity="0.78"/>
+  <rect x="344" y="506" width="314" height="28" rx="14" fill="#D18A55" fill-opacity="0.78"/>
+
+  <rect x="344" y="618" width="78" height="94" rx="28" fill="#E0A55B"/>
+  <rect x="448" y="576" width="78" height="136" rx="28" fill="#C66731"/>
+  <rect x="552" y="534" width="78" height="178" rx="28" fill="#8D3D1E"/>
+
+  <circle cx="726" cy="632" r="108" fill="#8C3D1E" fill-opacity="0.14"/>
+  <circle cx="726" cy="616" r="108" fill="url(#badge)"/>
+  <circle cx="726" cy="616" r="103" stroke="#8C3D1E" stroke-opacity="0.16" stroke-width="10"/>
+
+  <rect x="664" y="568" width="30" height="96" rx="15" fill="#8D3D1E"/>
+  <rect x="709" y="544" width="30" height="144" rx="15" fill="#C66731"/>
+  <rect x="754" y="584" width="30" height="104" rx="15" fill="#AF5628"/>
+</svg>

@@ -1,0 +1,88 @@
+{
+  "id": "bulk-image-studio",
+  "name": "bulk-image-studio",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "productivity",
+  "displayName": "图片批量工坊",
+  "description": "批量压缩/转格式/改尺寸/水印/圆角/补边/裁剪/旋转/翻转；合并 PDF、长图与 GIF；手动连续裁剪。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true
+  },
+  "window": {
+    "width": 1280,
+    "height": 860,
+    "minWidth": 960,
+    "minHeight": 640,
+    "maxWidth": 1920,
+    "maxHeight": 1200
+  },
+  "features": [
+    {
+      "code": "batch-hub",
+      "explain": "打开批量图片处理",
+      "route": "batch",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "图片批量"
+        },
+        {
+          "type": "keyword",
+          "value": "批量处理图片"
+        },
+        {
+          "type": "keyword",
+          "value": "图片批量处理"
+        }
+      ]
+    },
+    {
+      "code": "merge-hub",
+      "explain": "打开图片合并（PDF / 长图 / GIF）",
+      "route": "merge",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "图片合并"
+        },
+        {
+          "type": "keyword",
+          "value": "合并 PDF"
+        },
+        {
+          "type": "keyword",
+          "value": "合并长图"
+        }
+      ]
+    },
+    {
+      "code": "manual-crop",
+      "explain": "手动裁剪并自动切换下一张",
+      "route": "crop",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "手动裁剪"
+        },
+        {
+          "type": "keyword",
+          "value": "连续裁剪"
+        }
+      ]
+    },
+    {
+      "code": "edit-images",
+      "explain": "从图片附件打开批量处理",
+      "route": "batch",
+      "cmds": [
+        {
+          "type": "img"
+        }
+      ]
+    }
+  ]
+}

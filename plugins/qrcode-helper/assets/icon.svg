@@ -1,0 +1,70 @@
+
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    
+            <linearGradient id="bg" x1="136" y1="112" x2="904" y2="912" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#60A5FA"/>
+              <stop offset="0.55" stop-color="#2563EB"/>
+              <stop offset="1" stop-color="#1E3A8A"/>
+            </linearGradient>
+            <linearGradient id="scan" x1="100" y1="512" x2="924" y2="512" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#67E8F9" stop-opacity="0"/>
+              <stop offset="0.2" stop-color="#67E8F9" stop-opacity="1"/>
+              <stop offset="0.8" stop-color="#22D3EE" stop-opacity="1"/>
+              <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+            </linearGradient>
+        
+    <radialGradient id="shine" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(292 240) rotate(43) scale(470 611)">
+      <stop stop-color="#FFFFFF" stop-opacity="0.25"/>
+      <stop offset="0.6" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#bg)"/>
+  <rect x="72" y="72" width="880" height="880" rx="236" fill="url(#shine)"/>
+  
+            <circle cx="200" cy="200" r="140" fill="#DBEAFE" fill-opacity="0.1"/>
+            <circle cx="800" cy="800" r="140" fill="#1E3A8A" fill-opacity="0.2"/>
+
+            <!-- QR Code Blocks Background Shadow -->
+            <rect x="250" y="250" width="524" height="524" rx="40" fill="#1E3A8A" fill-opacity="0.25"/>
+            <!-- QR Code Base -->
+            <rect x="230" y="230" width="524" height="524" rx="40" fill="#EFF6FF"/>
+            
+            <!-- Positioning Squares -->
+            <rect x="280" y="280" width="140" height="140" rx="20" fill="#1D4ED8"/>
+            <rect x="310" y="310" width="80" height="80" rx="10" fill="#EFF6FF"/>
+            <rect x="340" y="340" width="20" height="20" rx="4" fill="#1D4ED8"/>
+
+            <rect x="564" y="280" width="140" height="140" rx="20" fill="#1D4ED8"/>
+            <rect x="594" y="310" width="80" height="80" rx="10" fill="#EFF6FF"/>
+            <rect x="624" y="340" width="20" height="20" rx="4" fill="#1D4ED8"/>
+
+            <rect x="280" y="564" width="140" height="140" rx="20" fill="#1D4ED8"/>
+            <rect x="310" y="594" width="80" height="80" rx="10" fill="#EFF6FF"/>
+            <rect x="340" y="624" width="20" height="20" rx="4" fill="#1D4ED8"/>
+
+            <!-- Random QR Blocks (Simulated) -->
+            <rect x="440" y="280" width="40" height="40" rx="8" fill="#1D4ED8"/>
+            <rect x="500" y="280" width="40" height="80" rx="8" fill="#1D4ED8"/>
+            <rect x="440" y="340" width="80" height="40" rx="8" fill="#1D4ED8"/>
+            <rect x="280" y="440" width="100" height="40" rx="8" fill="#1D4ED8"/>
+            <rect x="400" y="440" width="40" height="100" rx="8" fill="#1D4ED8"/>
+            <rect x="460" y="440" width="60" height="60" rx="8" fill="#1D4ED8"/>
+            <rect x="540" y="440" width="160" height="40" rx="8" fill="#1D4ED8"/>
+            <rect x="660" y="500" width="40" height="100" rx="8" fill="#1D4ED8"/>
+            <rect x="564" y="564" width="60" height="60" rx="8" fill="#1D4ED8"/>
+            <rect x="640" y="624" width="60" height="80" rx="8" fill="#1D4ED8"/>
+            <rect x="460" y="600" width="80" height="40" rx="8" fill="#1D4ED8"/>
+            <rect x="460" y="660" width="40" height="40" rx="8" fill="#1D4ED8"/>
+
+            <!-- Scanner Bracket Shadows -->
+            <path d="M220 320 v-100 h100 M800 320 v-100 h-100 M220 700 v100 h100 M800 700 v100 h-100" fill="none" stroke="#1E3A8A" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.3" transform="translate(10, 10)"/>
+            <!-- Scanner Brackets -->
+            <path d="M200 300 v-100 h100 M820 300 v-100 h-100 M200 720 v100 h100 M820 720 v100 h-100" fill="none" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+
+            <!-- Glow / Scanning Line -->
+            <ellipse cx="512" cy="512" rx="400" ry="24" fill="url(#scan)"/>
+            <rect x="180" y="508" width="664" height="8" rx="4" fill="#FFFFFF"/>
+        
+</svg>

@@ -1,0 +1,7 @@
+node_modules
+dist
+/ui/
+.DS_Store
+*.log
+*.inplugin
+generated-icons/
