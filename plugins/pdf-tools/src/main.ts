@@ -1,41 +1,116 @@
+type Attachment = { path?: string; name?: string }
+type ClipboardFile = { path?: string; name?: string }
+type InputPayloadLike = { text?: unknown; input?: unknown; attachments?: unknown }
+
 interface PluginContext {
   api: {
-    clipboard: {
-      readText: () => string
-      writeText: (text: string) => Promise<void>
-      readImage: () => ArrayBuffer | null
-      getFormat: () => string
-    }
     notification: {
       show: (message: string, type?: string) => void
     }
-    features?: {
-      getFeatures: (codes?: string[]) => Array<{ code: string }>
-      setFeature: (feature: {
-        code: string
-        explain?: string
-        icon?: string
-        platform?: string | string[]
-        mode?: 'ui' | 'silent' | 'detached'
-        route?: string
-        mainHide?: boolean
-        mainPush?: boolean
-        cmds: Array<
-          | string
-          | { type: 'keyword'; value: string; explain?: string }
-          | { type: 'regex'; match: string; explain?: string; label?: string; minLength?: number; maxLength?: number }
-          | { type: 'files'; exts?: string[]; fileType?: 'file' | 'directory' | 'any'; match?: string; minLength?: number; maxLength?: number }
-          | { type: 'img'; exts?: string[] }
-          | { type: 'over'; label?: string; exclude?: string; minLength?: number; maxLength?: number }
-        >
-      }) => void
-      removeFeature: (code: string) => boolean
-      redirectHotKeySetting: (cmdLabel: string, autocopy?: boolean) => void
-      redirectAiModelsSetting: () => void
+    clipboard?: {
+      readFiles?: () => ClipboardFile[] | Promise<ClipboardFile[]>
     }
   }
-  input?: string
+  input?: unknown
   featureCode?: string
+  attachments?: Attachment[]
+}
+
+interface PendingInitData {
+  featureCode?: string
+  route?: string
+  input?: string
+  attachments?: Attachment[]
+}
+
+const FEATURE_ROUTE_MAP: Record<string, string> = {
+  merge: 'merge',
+  split: 'split',
+  compress: 'compress',
+  watermark: 'watermark',
+  'extract-img': 'extract-img',
+  'pdf-to-img': 'pdf-to-img',
+  'pdf-to-word': 'pdf-to-word',
+  'pdf-to-ppt': 'pdf-to-ppt',
+  'pdf-to-excel': 'pdf-to-excel',
+}
+
+let pendingInit: PendingInitData | null = null;
+
+function normalizeAttachments(raw: unknown): Attachment[] {
+  if (!Array.isArray(raw)) return [];
+  const result: Attachment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const path = typeof (item as { path?: unknown }).path === 'string' ? (item as { path: string }).path : undefined;
+    const name = typeof (item as { name?: unknown }).name === 'string' ? (item as { name: string }).name : undefined;
+    if (!path && !name) continue;
+    result.push({ path, name });
+  }
+  return result;
+}
+
+function parseInputPayload(rawInput: unknown): { inputText?: string; attachments: Attachment[] } {
+  if (!rawInput) return { attachments: [] };
+
+  // input could be plain text path, JSON string, or object payload.
+  if (typeof rawInput === 'string') {
+    const trimmed = rawInput.trim();
+    try {
+      const parsed = JSON.parse(trimmed) as InputPayloadLike;
+      const parsedInput = typeof parsed.text === 'string'
+        ? parsed.text
+        : (typeof parsed.input === 'string' ? parsed.input : trimmed);
+      return {
+        inputText: parsedInput,
+        attachments: normalizeAttachments(parsed.attachments),
+      };
+    } catch {
+      return { inputText: rawInput, attachments: [] };
+    }
+  }
+
+  if (typeof rawInput === 'object') {
+    const payload = rawInput as InputPayloadLike;
+    const inputText = typeof payload.text === 'string'
+      ? payload.text
+      : (typeof payload.input === 'string' ? payload.input : undefined);
+    return {
+      inputText,
+      attachments: normalizeAttachments(payload.attachments),
+    };
+  }
+
+  return { attachments: [] };
+}
+
+async function resolveInitPayload(context: PluginContext): Promise<PendingInitData> {
+  const route = context.featureCode ? FEATURE_ROUTE_MAP[context.featureCode] : undefined;
+  const parsed = parseInputPayload(context.input);
+
+  const mergedAttachments = [...normalizeAttachments(context.attachments), ...parsed.attachments];
+  const dedupedAttachments = Array.from(
+    new Map(mergedAttachments.map((item) => [`${item.path || ''}|${item.name || ''}`, item])).values(),
+  );
+
+  if (!dedupedAttachments.length && context.api.clipboard?.readFiles) {
+    try {
+      const clipboardFiles = await context.api.clipboard.readFiles();
+      const clipboardAttachments = normalizeAttachments(clipboardFiles).filter((item) =>
+        typeof item.path === 'string' ? /\.pdf$/i.test(item.path) : true,
+      );
+      dedupedAttachments.push(...clipboardAttachments);
+    } catch {
+      // ignore clipboard fallback errors
+    }
+  }
+
+  return {
+    featureCode: context.featureCode,
+    route,
+    input: parsed.inputText,
+    attachments: dedupedAttachments,
+  };
 }
 
 export function onLoad() {
@@ -55,9 +130,20 @@ export function onDisable() {
 }
 
 export async function run(context: PluginContext) {
-  const { notification } = context.api
-  notification.show('插件已启动')
+  const { notification } = context.api;
+  pendingInit = await resolveInitPayload(context);
+
+  notification.show('PDF 工具箱已就绪');
 }
 
-const plugin = { onLoad, onUnload, onEnable, onDisable, run }
+export async function getPendingInit() {
+  return pendingInit;
+}
+
+export async function clearPendingInit() {
+  pendingInit = null;
+  return true;
+}
+
+const plugin = { onLoad, onUnload, onEnable, onDisable, run, getPendingInit, clearPendingInit }
 export default plugin

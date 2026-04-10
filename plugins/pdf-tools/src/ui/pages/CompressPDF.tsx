@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Minimize2, Trash2, FileText, CheckCircle, AlertCircle, RefreshCcw } from 'lucide-react';
 import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
 import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
+import { getInitPdfPaths } from '../utils/initPayload';
 
 interface FileStatus {
     status: 'pending' | 'processing' | 'success' | 'error';
@@ -144,11 +145,12 @@ const FileItem: React.FC<{
 };
 
 const CompressPDF: React.FC = () => {
-    const { dialog, notification, system } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [files, setFiles] = useState<string[]>([]);
     const [statusMap, setStatusMap] = useState<Record<string, FileStatus>>({});
     const [processing, setProcessing] = useState(false);
     const [qualityLevel, setQualityLevel] = useState<'high' | 'medium' | 'low'>('medium');
+    const appliedInitRef = useRef(false);
 
     const addFiles = (incoming: string[]) => {
         const uniqueIncoming = incoming.filter(path => /\.pdf$/i.test(path));
@@ -167,6 +169,34 @@ const CompressPDF: React.FC = () => {
             return next;
         });
     };
+
+    useEffect(() => {
+        const applyFromInit = async (payload?: { input?: unknown; attachments?: Array<{ path?: string; name?: string }> }) => {
+            if (appliedInitRef.current) return;
+            const allPaths = await getInitPdfPaths(payload, clipboard.readFiles);
+            if (!allPaths.length) return;
+            appliedInitRef.current = true;
+            addFiles(allPaths);
+            void window.mulby?.host?.call('pdf-tools', 'clearPendingInit');
+        };
+
+        const off = window.mulby?.onPluginInit?.((payload) => {
+            void applyFromInit(payload);
+        });
+
+        void (async () => {
+            try {
+                const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+                await applyFromInit(res?.data as { input?: unknown; attachments?: Array<{ path?: string; name?: string }> } | undefined);
+            } catch {
+                // host not ready, ignore
+            }
+        })();
+
+        return () => {
+            if (typeof off === 'function') off();
+        };
+    }, []);
 
     const handleAddFiles = async () => {
         const result = await dialog.showOpenDialog({

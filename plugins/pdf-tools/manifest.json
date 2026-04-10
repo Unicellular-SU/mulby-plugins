@@ -4,8 +4,8 @@
   "version": "1.0.0",
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
-  "displayName": "PDF 拆分工具",
-  "description": "将PDF文件按页面拆分为多个独立文档，支持自动拆分和手动拆分",
+  "displayName": "PDF 工具箱",
+  "description": "提供 PDF 合并、拆分、压缩、水印、提图与格式转换的一站式处理能力",
   "type": "utility",
   "main": "dist/main.js",
   "ui": "ui/index.html",
@@ -17,21 +17,102 @@
   },
   "features": [
     {
-      "code": "split",
-      "explain": "拆分PDF文件",
+      "code": "merge",
+      "explain": "合并多个 PDF 文件",
+      "route": "merge",
+      "mode": "ui",
       "cmds": [
-        {
-          "type": "keyword",
-          "value": "pdf拆分"
-        },
-        {
-          "type": "files",
-          "exts": [
-            ".pdf"
-          ],
-          "minLength": 1,
-          "maxLength": 1
-        }
+        { "type": "keyword", "value": "pdf合并" },
+        { "type": "keyword", "value": "merge pdf" },
+        { "type": "files", "exts": [".pdf"], "minLength": 2, "maxLength": 50 }
+      ]
+    },
+    {
+      "code": "split",
+      "explain": "拆分 PDF 文件",
+      "route": "split",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf拆分" },
+        { "type": "keyword", "value": "split pdf" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 1 }
+      ]
+    },
+    {
+      "code": "compress",
+      "explain": "压缩 PDF 文件体积",
+      "route": "compress",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf压缩" },
+        { "type": "keyword", "value": "compress pdf" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 50 }
+      ]
+    },
+    {
+      "code": "watermark",
+      "explain": "为 PDF 添加文字或图片水印",
+      "route": "watermark",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf水印" },
+        { "type": "keyword", "value": "watermark pdf" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 50 }
+      ]
+    },
+    {
+      "code": "extract-img",
+      "explain": "提取 PDF 内嵌图片",
+      "route": "extract-img",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf提取图片" },
+        { "type": "keyword", "value": "extract pdf images" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 50 }
+      ]
+    },
+    {
+      "code": "pdf-to-img",
+      "explain": "将 PDF 页面转换为图片",
+      "route": "pdf-to-img",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf转图片" },
+        { "type": "keyword", "value": "pdf to image" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 50 }
+      ]
+    },
+    {
+      "code": "pdf-to-word",
+      "explain": "将 PDF 转换为 Word 文档",
+      "route": "pdf-to-word",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf转word" },
+        { "type": "keyword", "value": "pdf to word" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 20 }
+      ]
+    },
+    {
+      "code": "pdf-to-ppt",
+      "explain": "将 PDF 转换为 PPT",
+      "route": "pdf-to-ppt",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf转ppt" },
+        { "type": "keyword", "value": "pdf to ppt" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 20 }
+      ]
+    },
+    {
+      "code": "pdf-to-excel",
+      "explain": "将 PDF 转换为 Excel",
+      "route": "pdf-to-excel",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf转excel" },
+        { "type": "keyword", "value": "pdf to excel" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 20 }
       ]
     }
   ]

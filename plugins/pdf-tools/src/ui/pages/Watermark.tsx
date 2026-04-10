@@ -4,13 +4,15 @@ import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { WatermarkConfig } from '../types';
 import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
+import { getInitPdfPaths } from '../utils/initPayload';
 
 const Watermark: React.FC = () => {
-    const { dialog, notification, system } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [files, setFiles] = useState<string[]>([]);
     const [processing, setProcessing] = useState(false);
     const [preview, setPreview] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'settings' | 'files'>('settings');
+    const appliedInitRef = React.useRef(false);
 
     // Layout Calculation State
     const resizeObserverRef = React.useRef<ResizeObserver | null>(null);
@@ -99,6 +101,34 @@ const Watermark: React.FC = () => {
             setFiles(prev => [...new Set([...prev, ...result])]);
         }
     };
+
+    useEffect(() => {
+        const applyFromInit = async (payload?: { input?: unknown; attachments?: Array<{ path?: string; name?: string }> }) => {
+            if (appliedInitRef.current) return;
+            const allPaths = await getInitPdfPaths(payload, clipboard.readFiles);
+            if (!allPaths.length) return;
+            appliedInitRef.current = true;
+            setFiles(prev => [...new Set([...prev, ...allPaths])]);
+            void window.mulby?.host?.call('pdf-tools', 'clearPendingInit');
+        };
+
+        const off = window.mulby?.onPluginInit?.((payload) => {
+            void applyFromInit(payload);
+        });
+
+        void (async () => {
+            try {
+                const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+                await applyFromInit(res?.data as { input?: unknown; attachments?: Array<{ path?: string; name?: string }> } | undefined);
+            } catch {
+                // host not ready, ignore
+            }
+        })();
+
+        return () => {
+            if (typeof off === 'function') off();
+        };
+    }, []);
 
     const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
         const pathPdfs = paths.filter(path => /\.pdf$/i.test(path));

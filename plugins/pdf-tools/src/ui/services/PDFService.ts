@@ -27,7 +27,52 @@ export interface ConversionProgress {
 export type ProgressCallback = (progress: ConversionProgress) => void;
 
 class PDFService {
+    private static readonly MAX_DOCUMENT_CACHE = 4;
+    private static readonly MAX_THUMBNAIL_CACHE = 120;
+    private documentCache = new Map<string, Promise<any>>();
+    private thumbnailCache = new Map<string, string>();
+
+    private extractFileName(filePath: string): string {
+        return filePath.split(/[/\\]/).pop() || '';
+    }
+
+    private replacePdfSuffix(filePath: string, nextSuffix: string): string {
+        const name = this.extractFileName(filePath);
+        return name.toLowerCase().endsWith('.pdf')
+            ? `${name.slice(0, -4)}${nextSuffix}`
+            : `converted${nextSuffix}`;
+    }
+
+    private async joinOutputPath(outputDir: string, fileName: string): Promise<string> {
+        const api = getApi();
+        if (typeof api.joinPath === 'function') {
+            return api.joinPath(outputDir, fileName);
+        }
+        const normalizedDir = outputDir.replace(/[\\/]+$/, '');
+        return `${normalizedDir}/${fileName}`;
+    }
+
+    private pruneDocumentCache() {
+        while (this.documentCache.size > PDFService.MAX_DOCUMENT_CACHE) {
+            const oldestKey = this.documentCache.keys().next().value as string | undefined;
+            if (!oldestKey) break;
+            this.documentCache.delete(oldestKey);
+        }
+    }
+
+    private pruneThumbnailCache() {
+        while (this.thumbnailCache.size > PDFService.MAX_THUMBNAIL_CACHE) {
+            const oldestKey = this.thumbnailCache.keys().next().value as string | undefined;
+            if (!oldestKey) break;
+            this.thumbnailCache.delete(oldestKey);
+        }
+    }
+
     async getDocument(pdfPath: string) {
+        const cachedPromise = this.documentCache.get(pdfPath);
+        if (cachedPromise) return cachedPromise;
+
+        const loader = (async () => {
         try {
             const api = getApi();
             const data = await api.readFile(pdfPath);
@@ -41,6 +86,17 @@ class PDFService {
             console.error('Failed to load PDF:', e);
             throw new Error(`无法加载PDF文件: ${e.message}`);
         }
+        })();
+
+        this.documentCache.set(pdfPath, loader);
+        this.pruneDocumentCache();
+
+        try {
+            return await loader;
+        } catch (e) {
+            this.documentCache.delete(pdfPath);
+            throw e;
+        }
     }
 
     /**
@@ -50,10 +106,8 @@ class PDFService {
         const api = getApi();
 
         // 使用后端提取（直接从流中提取图片）
-        // @ts-ignore
         if (api.extractPDFImages) {
             if (onProgress) onProgress({ current: 0, total: 100, status: '正在通过后端提取图片...' });
-            // @ts-ignore
             const results = await api.extractPDFImages(pdfPath, outputDir);
             if (results) return results;
         }
@@ -115,12 +169,8 @@ class PDFService {
 
             const buffer = await blob.arrayBuffer();
 
-            // Path handling
-            const fileName = `page_${i.toString().padStart(3, '0')}.png`; // Pad numbers for ordering
-            const isWindows = outputDir.includes('\\');
-            const separator = isWindows ? '\\' : '/';
-            const cleanDir = outputDir.endsWith(separator) ? outputDir.slice(0, -1) : outputDir;
-            const finalPath = `${cleanDir}${separator}${fileName}`;
+            const fileName = `page_${i.toString().padStart(3, '0')}.png`;
+            const finalPath = await this.joinOutputPath(outputDir, fileName);
 
             await api.saveFile(finalPath, new Uint8Array(buffer));
             outputPaths.push(finalPath);
@@ -132,9 +182,7 @@ class PDFService {
     async getThumbnail(pdfPath: string): Promise<string | null> {
         const api = getApi();
         try {
-            // @ts-ignore
             if (api.getPDFImagePreview) {
-                // @ts-ignore
                 const preview = await api.getPDFImagePreview(pdfPath);
                 if (preview) return preview;
             }
@@ -213,13 +261,8 @@ class PDFService {
         const doc = new Document({ sections: [{ children }] });
         const buffer = await Packer.toBuffer(doc);
 
-        // Construct filename
-        // Basic path parsing
-        const fileName = pdfPath.split(/[/\\]/).pop()?.replace('.pdf', '.docx') || 'converted.docx';
-        const isWindows = outputDir.includes('\\');
-        const separator = isWindows ? '\\' : '/';
-        const cleanDir = outputDir.endsWith(separator) ? outputDir.slice(0, -1) : outputDir;
-        const outputPath = `${cleanDir}${separator}${fileName}`;
+        const fileName = this.replacePdfSuffix(pdfPath, '.docx');
+        const outputPath = await this.joinOutputPath(outputDir, fileName);
 
         await api.saveFile(outputPath, new Uint8Array(buffer));
         return outputPath;
@@ -275,11 +318,8 @@ class PDFService {
         // Generate Blob
         const data = await pptx.write({ outputType: 'arraybuffer' }) as ArrayBuffer;
 
-        const fileName = pdfPath.split(/[/\\]/).pop()?.replace('.pdf', '.pptx') || 'converted.pptx';
-        const isWindows = outputDir.includes('\\');
-        const separator = isWindows ? '\\' : '/';
-        const cleanDir = outputDir.endsWith(separator) ? outputDir.slice(0, -1) : outputDir;
-        const outputPath = `${cleanDir}${separator}${fileName}`;
+        const fileName = this.replacePdfSuffix(pdfPath, '.pptx');
+        const outputPath = await this.joinOutputPath(outputDir, fileName);
 
         await api.saveFile(outputPath, new Uint8Array(data));
         return outputPath;
@@ -306,11 +346,8 @@ class PDFService {
         // Write to buffer
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 
-        const fileName = pdfPath.split(/[/\\]/).pop()?.replace('.pdf', '.xlsx') || 'converted.xlsx';
-        const isWindows = outputDir.includes('\\');
-        const separator = isWindows ? '\\' : '/';
-        const cleanDir = outputDir.endsWith(separator) ? outputDir.slice(0, -1) : outputDir;
-        const outputPath = `${cleanDir}${separator}${fileName}`;
+        const fileName = this.replacePdfSuffix(pdfPath, '.xlsx');
+        const outputPath = await this.joinOutputPath(outputDir, fileName);
 
         await api.saveFile(outputPath, new Uint8Array(wbout));
         return outputPath;
@@ -322,15 +359,17 @@ class PDFService {
 
     async getFileSize(filePath: string): Promise<number> {
         const api = getApi();
-        // @ts-ignore
         if (api.getFileSize) {
-            // @ts-ignore
             return await api.getFileSize(filePath);
         }
         return 0;
     }
 
     async renderPageToDataURL(pdfPath: string, pageNum: number, scale = 0.5): Promise<string> {
+        const cacheKey = `${pdfPath}::${pageNum}::${scale}`;
+        const cached = this.thumbnailCache.get(cacheKey);
+        if (cached) return cached;
+
         const pdf = await this.getDocument(pdfPath);
         const page = await pdf.getPage(pageNum);
         const viewport = page.getViewport({ scale });
@@ -348,7 +387,10 @@ class PDFService {
         } as any;
         await page.render(renderContext).promise;
 
-        return canvas.toDataURL('image/png');
+        const dataUrl = canvas.toDataURL('image/png');
+        this.thumbnailCache.set(cacheKey, dataUrl);
+        this.pruneThumbnailCache();
+        return dataUrl;
     }
 
     /**
@@ -533,11 +575,8 @@ class PDFService {
 
         // 构造文件名
         const suffix = compressionSucceeded ? '_compressed.pdf' : '_original_copy.pdf';
-        const fileName = pdfPath.split(/[/\\]/).pop()?.replace('.pdf', suffix) || 'result.pdf';
-        const isWindows = outputDir.includes('\\');
-        const separator = isWindows ? '\\' : '/';
-        const cleanDir = outputDir.endsWith(separator) ? outputDir.slice(0, -1) : outputDir;
-        const outputPath = `${cleanDir}${separator}${fileName}`;
+        const fileName = this.replacePdfSuffix(pdfPath, suffix);
+        const outputPath = await this.joinOutputPath(outputDir, fileName);
 
         await api.saveFile(outputPath, finalBytes);
 

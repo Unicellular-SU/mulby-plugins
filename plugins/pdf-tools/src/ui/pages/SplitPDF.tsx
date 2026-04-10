@@ -9,7 +9,7 @@ import { PDFInfo, SplitRange } from '../types';
 // PDFPageThumbnail moved to SharedPDFComponents
 
 const SplitPDF: React.FC = () => {
-    const { dialog, notification, system } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [file, setFile] = useState<string | null>(null);
     const [info, setInfo] = useState<PDFInfo | null>(null);
     const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -72,25 +72,81 @@ const SplitPDF: React.FC = () => {
         }
     };
 
+    const extractPdfPaths = (payload?: { input?: string; attachments?: Array<{ path?: string; name?: string }> }): string[] => {
+        const attachmentPaths = (payload?.attachments || [])
+            .map(item => item?.path)
+            .filter((path): path is string => typeof path === 'string' && /\.pdf$/i.test(path));
+
+        const fromInput = new Set<string>();
+        const input = payload?.input;
+        if (typeof input === 'string' && input.trim().length > 0) {
+            const trimmed = input.trim();
+            if (/\.pdf$/i.test(trimmed)) {
+                fromInput.add(trimmed);
+            }
+
+            // newline/comma list fallback
+            trimmed
+                .split(/[\n,;]/)
+                .map(part => part.trim().replace(/^['"]|['"]$/g, ''))
+                .filter(part => /\.pdf$/i.test(part))
+                .forEach(part => fromInput.add(part));
+
+            // JSON payload fallback
+            try {
+                const parsed = JSON.parse(trimmed) as { attachments?: Array<{ path?: string }>; input?: string };
+                (parsed.attachments || [])
+                    .map(item => item?.path)
+                    .filter((path): path is string => typeof path === 'string' && /\.pdf$/i.test(path))
+                    .forEach(path => fromInput.add(path));
+                if (typeof parsed.input === 'string' && /\.pdf$/i.test(parsed.input)) {
+                    fromInput.add(parsed.input);
+                }
+            } catch {
+                // ignore non-JSON input
+            }
+        }
+
+        return [...new Set([...attachmentPaths, ...fromInput])];
+    };
+
     useEffect(() => {
-        const applyFromInit = (payload?: { input?: string; attachments?: Array<{ path?: string }> }) => {
+    const applyFromInit = async (payload?: { input?: string; attachments?: Array<{ path?: string; name?: string }> }) => {
             if (appliedInitRef.current) return;
-            const attachmentPath = payload?.attachments?.find(item => typeof item.path === 'string' && /\.pdf$/i.test(item.path || ''))?.path;
-            const inputPath = typeof payload?.input === 'string' && /\.pdf$/i.test(payload.input) ? payload.input : undefined;
-            const initPath = attachmentPath || inputPath;
-            if (!initPath) return;
+            let pdfPaths = extractPdfPaths(payload);
+            if (!pdfPaths.length) {
+                try {
+                    const clipFiles = await clipboard.readFiles();
+                    pdfPaths = clipFiles
+                        .map(item => item?.path)
+                        .filter((path): path is string => typeof path === 'string' && /\.pdf$/i.test(path));
+                } catch {
+                    // ignore clipboard fallback failure
+                }
+            }
+            if (!pdfPaths.length) return;
+
+            const initPath = pdfPaths[0];
             appliedInitRef.current = true;
-            void loadFile(initPath);
+            await loadFile(initPath);
+            if (pdfPaths.length > 1) {
+                notification.show(`检测到 ${pdfPaths.length} 个 PDF，拆分仅加载第一个`, 'info');
+            }
+            try {
+                await window.mulby?.host?.call('pdf-tools', 'clearPendingInit');
+            } catch {
+                // ignore clear failure
+            }
         };
 
         const off = window.mulby?.onPluginInit?.((payload) => {
-            applyFromInit(payload);
+            void applyFromInit(payload);
         });
 
         void (async () => {
             try {
                 const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
-                applyFromInit(res?.data as { input?: string; attachments?: Array<{ path?: string }> } | undefined);
+                await applyFromInit(res?.data as { input?: string; attachments?: Array<{ path?: string; name?: string }> } | undefined);
             } catch {
                 // host not ready, ignore
             }

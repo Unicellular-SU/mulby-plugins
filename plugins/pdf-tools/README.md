@@ -1,65 +1,59 @@
-# pdf-tools
+# PDF Tools
 
-插件描述
+Mulby 的 PDF 工具箱插件，提供常见文档处理能力：合并、拆分、压缩、水印、提取图片和格式转换。
 
-## 功能特性
+## 功能清单
 
-- 功能 1
-- 功能 2
-- 功能 3
+- `merge`：合并多个 PDF，支持调整顺序。
+- `split`：按页自动拆分，或按范围手动拆分。
+- `compress`：按质量等级压缩 PDF，自动兜底保留原文件。
+- `watermark`：添加文字或图片水印，支持居中和平铺。
+- `extract-img`：提取 PDF 内嵌图片资源。
+- `pdf-to-img`：将每页渲染成图片输出。
+- `pdf-to-word`：转换为 Word（文本优先，扫描件回退为图片页）。
+- `pdf-to-ppt`：转换为 PPT（文本优先，扫描件回退为图片页）。
+- `pdf-to-excel`：提取文本并生成 Excel。
 
-## 触发方式
+## 使用方式
 
-- `pdf-tools` - 主功能
+- 在 Mulby 中通过关键词触发，如 `pdf合并`、`pdf拆分`、`pdf压缩`。
+- 也支持直接拖入 PDF 文件触发对应功能。
+- 输出默认写入系统下载目录。
+
+## 结果与输出规则
+
+- 合并输出：`merged.pdf`
+- 拆分输出：
+  - 自动拆分：`<原文件名>/<原文件名>_N.pdf`
+  - 范围拆分：`<自定义名称>.pdf`
+- 压缩输出：
+  - 成功压缩：`<原文件名>_compressed.pdf`
+  - 未压缩成功：`<原文件名>_original_copy.pdf`
+- 水印输出：`<原文件名>_watermark.pdf`
+- 提图输出：`<原文件名>_images/`
+- PDF 转图片输出：`<原文件名>_pages/`
+- 格式转换输出：同名 `.docx` / `.pptx` / `.xlsx`
+
+## 已知限制
+
+- 复杂排版、表格、字体嵌入文档在格式转换中可能出现还原偏差。
+- 扫描件（图片型 PDF）在转 Word/PPT 时通常以图片页形式导出。
+- 压缩模式对文本型 PDF 会优先尝试对象流优化，对图片型 PDF 会采用光栅化策略。
 
 ## 开发
 
-### 安装依赖
-
 ```bash
 npm install
-```
-
-### 开发模式
-
-```bash
-npm run dev
-```
-
-### 构建
-
-```bash
 npm run build
-```
-
-### 打包
-
-```bash
 npm run pack
 ```
 
-## 项目结构
+## 验收建议
 
-```
-pdf-tools/
-├── manifest.json              # 插件配置
-├── package.json
-├── src/
-│   ├── main.ts                # 后端入口
-│   ├── ui/
-│   │   ├── App.tsx            # 主应用
-│   │   ├── main.tsx           # UI 入口
-│   │   ├── index.html         # HTML 模板
-│   │   ├── styles.css         # 全局样式
-│   │   ├── hooks/
-│   │   │   └── useMulby.ts  # Mulby API Hook
-│   │   └── types/
-│   │       └── mulby.d.ts   # 类型定义
-├── dist/                      # 后端构建输出
-├── ui/                        # UI 构建输出
-└── icon.png                   # 插件图标
-```
+- 用 1 个文本型 PDF + 1 个扫描件 PDF 覆盖全部功能。
+- 验证中文路径与空格路径输出是否正常。
+- 验证在 macOS / Windows 下输出路径与文件命名一致。
 
-## 许可证
+## License
 
-MIT License
+MIT

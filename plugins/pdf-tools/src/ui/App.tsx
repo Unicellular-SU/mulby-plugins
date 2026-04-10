@@ -15,15 +15,36 @@ const App: React.FC = () => {
   const [activePath, setActivePath] = useState('merge');
   const appliedInitRef = useRef(false);
 
+  const featureRouteMap: Record<string, string> = {
+    merge: 'merge',
+    split: 'split',
+    compress: 'compress',
+    watermark: 'watermark',
+    'extract-img': 'extract-img',
+    'pdf-to-img': 'pdf-to-img',
+    'pdf-to-word': 'pdf-to-word',
+    'pdf-to-ppt': 'pdf-to-ppt',
+    'pdf-to-excel': 'pdf-to-excel',
+  };
+
   useEffect(() => {
-    const applyInitRoute = (payload?: { featureCode?: string; input?: string; attachments?: Array<{ path?: string }> }) => {
+    const applyInitRoute = (payload?: { featureCode?: string; route?: string; input?: string; attachments?: Array<{ path?: string }> }) => {
       if (appliedInitRef.current) return;
       const hasPdf = Boolean(
         payload?.attachments?.some(item => typeof item.path === 'string' && /\.pdf$/i.test(item.path || '')) ||
         (typeof payload?.input === 'string' && /\.pdf$/i.test(payload.input))
       );
 
-      if (payload?.featureCode === 'split' || hasPdf) {
+      const mappedRoute = (payload?.route && featureRouteMap[payload.route]) ||
+        (payload?.featureCode && featureRouteMap[payload.featureCode]);
+
+      if (mappedRoute) {
+        setActivePath(mappedRoute);
+        appliedInitRef.current = true;
+        return;
+      }
+
+      if (hasPdf) {
         setActivePath('split');
         appliedInitRef.current = true;
       }
@@ -36,7 +57,7 @@ const App: React.FC = () => {
     void (async () => {
       try {
         const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
-        applyInitRoute(res?.data as { featureCode?: string; input?: string; attachments?: Array<{ path?: string }> } | undefined);
+        applyInitRoute(res?.data as { featureCode?: string; route?: string; input?: string; attachments?: Array<{ path?: string }> } | undefined);
       } catch {
         // host not ready, ignore
       }

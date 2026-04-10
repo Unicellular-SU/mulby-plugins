@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Combine, Trash2, FileText, ArrowUp, ArrowDown } from 'lucide-react';
 import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
 import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
+import { getInitPdfPaths } from '../utils/initPayload';
 import '../types';
 
 const FileItem: React.FC<{
@@ -92,14 +93,43 @@ const FileItem: React.FC<{
 };
 
 const MergePDF: React.FC = () => {
-    const { dialog, notification, system } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [files, setFiles] = useState<string[]>([]);
     const [merging, setMerging] = useState(false);
+    const appliedInitRef = useRef(false);
 
     const mergeUniqueFiles = (incoming: string[]) => {
         if (!incoming.length) return;
         setFiles(prev => [...new Set([...prev, ...incoming])]);
     };
+
+    useEffect(() => {
+        const applyFromInit = async (payload?: { input?: unknown; attachments?: Array<{ path?: string; name?: string }> }) => {
+            if (appliedInitRef.current) return;
+            const allPaths = await getInitPdfPaths(payload, clipboard.readFiles);
+            if (!allPaths.length) return;
+            appliedInitRef.current = true;
+            mergeUniqueFiles(allPaths);
+            void window.mulby?.host?.call('pdf-tools', 'clearPendingInit');
+        };
+
+        const off = window.mulby?.onPluginInit?.((payload) => {
+            void applyFromInit(payload);
+        });
+
+        void (async () => {
+            try {
+                const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+                await applyFromInit(res?.data as { input?: unknown; attachments?: Array<{ path?: string; name?: string }> } | undefined);
+            } catch {
+                // host not ready, ignore
+            }
+        })();
+
+        return () => {
+            if (typeof off === 'function') off();
+        };
+    }, []);
 
     const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
         const pathPdfs = paths.filter(path => /\.pdf$/i.test(path));
@@ -166,7 +196,8 @@ const MergePDF: React.FC = () => {
             const outputPath = await window.pdfApi?.mergePDFs(files, outputDir);
 
             if (outputPath) {
-                notification.show('合并成功！', 'success');
+                const fileName = outputPath.split(/[/\\]/).pop() || outputPath;
+                notification.show(`合并成功：${fileName}`, 'success');
                 // shell.showItemInFolder(outputPath); // Prevent hiding window
                 setFiles([]); // Clear after success
             }

@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FileText, Presentation, Sheet, FileQuestion } from 'lucide-react';
 import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { PDFHeader, PDFUploadArea, PDFPageThumbnail } from '../components/SharedPDFComponents';
+import { getInitPdfPaths } from '../utils/initPayload';
 import '../types';
 import { PDFInfo } from '../types';
 
@@ -11,11 +12,12 @@ interface ConvertFormatProps {
 }
 
 const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
-    const { dialog, shell, notification, system } = useMulby('pdf-tools');
+    const { dialog, shell, notification, system, clipboard } = useMulby('pdf-tools');
     const [file, setFile] = useState<string | null>(null);
     const [info, setInfo] = useState<PDFInfo | null>(null);
     const [pdfDoc, setPdfDoc] = useState<any>(null); // pdfjs-dist document proxy
     const [processing, setProcessing] = useState(false);
+    const appliedInitRef = useRef(false);
 
     const loadFile = async (filePath: string) => {
         setFile(filePath);
@@ -31,6 +33,37 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             notification.show('读取PDF失败', 'error');
         }
     };
+
+    useEffect(() => {
+        const applyFromInit = async (payload?: { input?: unknown; attachments?: Array<{ path?: string; name?: string }> }) => {
+            if (appliedInitRef.current) return;
+            const allPaths = await getInitPdfPaths(payload, clipboard.readFiles);
+            const initPath = allPaths[0];
+            if (!initPath) return;
+            appliedInitRef.current = true;
+            await loadFile(initPath);
+            void window.mulby?.host?.call('pdf-tools', 'clearPendingInit');
+        };
+
+        const off = window.mulby?.onPluginInit?.((payload) => {
+            void applyFromInit(payload);
+        });
+
+        void (async () => {
+            try {
+                const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+                await applyFromInit(res?.data as { input?: unknown; attachments?: Array<{ path?: string; name?: string }> } | undefined);
+            } catch {
+                // host not ready, ignore
+            }
+        })();
+
+        return () => {
+            if (typeof off === 'function') {
+                off();
+            }
+        };
+    }, []);
 
     const titles = {
         word: 'PDF 转 Word',
@@ -116,14 +149,6 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             setProcessing(false);
         }
     };
-
-    // Clean up pdfDoc when unmounting or changing file
-    useEffect(() => {
-        return () => {
-            // If we needed to destroy the doc, pdfjs usually handles it, 
-            // but good to reset state if file changes handled by setFile(null) logic if needed.
-        };
-    }, [file]);
 
     return (
         <div style={{ padding: '16px', height: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>

@@ -6,20 +6,73 @@ const fs = require('fs');
 const fsPromises = fs.promises;
 const path = require('path');
 const os = require('os');
-const { Document, Packer, Paragraph, TextRun } = require('docx');
-const PptxGenJS = require('pptxgenjs');
-const XLSX = require('xlsx');
 
 // Sync File Logger
 const logPath = path.join(__dirname, 'debug.log');
+const MAX_LOG_SIZE_BYTES = 1024 * 1024;
 
 function logToFile(message) {
     try {
+        if (fs.existsSync(logPath)) {
+            const stat = fs.statSync(logPath);
+            if (stat.size > MAX_LOG_SIZE_BYTES) {
+                const backupPath = `${logPath}.1`;
+                if (fs.existsSync(backupPath)) {
+                    fs.unlinkSync(backupPath);
+                }
+                fs.renameSync(logPath, backupPath);
+            }
+        }
         const timestamp = new Date().toISOString();
         const logLine = `[${timestamp}] ${message}\n`;
         fs.appendFileSync(logPath, logLine);
     } catch (e) {
         // ignore logging error
+    }
+}
+
+function withTimestampSuffix(fileName) {
+    const ext = path.extname(fileName);
+    const base = path.basename(fileName, ext);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    return `${base}_${stamp}${ext}`;
+}
+
+async function ensureUniqueOutputPath(dir, fileName) {
+    const ext = path.extname(fileName);
+    const base = path.basename(fileName, ext);
+    let candidate = path.join(dir, fileName);
+    let index = 1;
+    while (true) {
+        try {
+            await fsPromises.access(candidate, fs.constants.F_OK);
+            candidate = path.join(dir, `${base}_${index}${ext}`);
+            index++;
+        } catch {
+            return candidate;
+        }
+    }
+}
+
+async function writeWithFallback(outputDir, fileName, data) {
+    try {
+        await fsPromises.mkdir(outputDir, { recursive: true });
+        const targetPath = await ensureUniqueOutputPath(outputDir, fileName);
+        await fsPromises.writeFile(targetPath, data);
+        return targetPath;
+    } catch (error) {
+        const code = error && typeof error === 'object' ? error.code : '';
+        if (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY') {
+            throw error;
+        }
+
+        // fallback for protected/locked dirs (e.g. Downloads permission or file lock)
+        const fallbackDir = path.join(os.tmpdir(), 'mulby-pdf-tools-output');
+        await fsPromises.mkdir(fallbackDir, { recursive: true });
+        const fallbackFile = withTimestampSuffix(fileName);
+        const fallbackPath = path.join(fallbackDir, fallbackFile);
+        await fsPromises.writeFile(fallbackPath, data);
+        return fallbackPath;
     }
 }
 
@@ -75,6 +128,10 @@ window.pdfApi = {
 
     ensureDir: async (dirPath) => {
         await fsPromises.mkdir(dirPath, { recursive: true });
+    },
+
+    joinPath: (...parts) => {
+        return path.join(...parts);
     },
 
     // === 纯 Node.js PDF 操作 (pdf-lib) ===
@@ -290,10 +347,8 @@ window.pdfApi = {
                 copiedPages.forEach((page) => mergedPdf.addPage(page));
             }
 
-            await fsPromises.mkdir(outputDir, { recursive: true });
-            const outputPath = path.join(outputDir, fileName);
             const pdfBytes = await mergedPdf.save();
-            await fsPromises.writeFile(outputPath, pdfBytes);
+            const outputPath = await writeWithFallback(outputDir, fileName, pdfBytes);
             return outputPath;
         } catch (error) {
             throw new Error(`合并PDF失败: ${error.message}`);
