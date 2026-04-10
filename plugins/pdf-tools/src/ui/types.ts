@@ -31,6 +31,7 @@ declare global {
             // I/O Utils
             readFile: (path: string) => Promise<Uint8Array>;
             saveFile: (path: string, data: Uint8Array) => Promise<string>;
+            saveTempFileFromDrop: (fileName: string, data: Uint8Array) => Promise<string>;
             ensureDir: (path: string) => Promise<void>;
             openPath: (path: string) => Promise<void>;
 

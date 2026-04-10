@@ -17,6 +17,21 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
     const [pdfDoc, setPdfDoc] = useState<any>(null); // pdfjs-dist document proxy
     const [processing, setProcessing] = useState(false);
 
+    const loadFile = async (filePath: string) => {
+        setFile(filePath);
+
+        try {
+            const nextInfo = await window.pdfApi?.getPDFInfo(filePath);
+            setInfo(nextInfo || null);
+
+            const doc = await pdfService.getDocument(filePath);
+            setPdfDoc(doc);
+        } catch (error) {
+            console.error(error);
+            notification.show('读取PDF失败', 'error');
+        }
+    };
+
     const titles = {
         word: 'PDF 转 Word',
         ppt: 'PDF 转 PPT',
@@ -40,21 +55,33 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
         });
 
         if (result && result.length > 0) {
-            const filePath = result[0];
-            setFile(filePath);
+            await loadFile(result[0]);
+        }
+    };
 
-            try {
-                // Get info
-                const info = await window.pdfApi?.getPDFInfo(filePath);
-                setInfo(info || null);
+    const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
+        const pathPdf = paths.find(path => /\.pdf$/i.test(path));
+        if (pathPdf) {
+            await loadFile(pathPdf);
+            return;
+        }
 
-                // Load doc for preview
-                const doc = await pdfService.getDocument(filePath);
-                setPdfDoc(doc);
-            } catch (error) {
-                console.error(error);
-                notification.show('读取PDF失败', 'error');
+        const droppedPdf = rawFiles.find(file => file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+        if (!droppedPdf) {
+            notification.show('请拖入 PDF 文件', 'warning');
+            return;
+        }
+
+        try {
+            const bytes = new Uint8Array(await droppedPdf.arrayBuffer());
+            const tempPath = await window.pdfApi?.saveTempFileFromDrop(droppedPdf.name || 'dropped.pdf', bytes);
+            if (!tempPath) {
+                notification.show('拖放文件读取失败，请重试', 'error');
+                return;
             }
+            await loadFile(tempPath);
+        } catch {
+            notification.show('拖放文件读取失败，请重试', 'error');
         }
     };
 
@@ -110,7 +137,11 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             />
 
             {!file ? (
-                <PDFUploadArea onClick={handleSelectFile} title="点击选择 PDF 文件" />
+                <PDFUploadArea
+                    onClick={handleSelectFile}
+                    title="点击选择 PDF 文件"
+                    onFileDrop={(paths, rawFiles) => { void handleDroppedFiles(paths, rawFiles); }}
+                />
             ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     {/* Settings / Info Area */}

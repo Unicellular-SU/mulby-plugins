@@ -83,6 +83,11 @@ const PDFToImage: React.FC = () => {
     const [files, setFiles] = useState<string[]>([]);
     const [processing, setProcessing] = useState(false);
 
+    const mergeUniqueFiles = (incoming: string[]) => {
+        if (!incoming.length) return;
+        setFiles(prev => [...new Set([...prev, ...incoming])]);
+    };
+
     const handleAddFiles = async () => {
         const result = await dialog.showOpenDialog({
             title: '选择 PDF 文件',
@@ -91,10 +96,36 @@ const PDFToImage: React.FC = () => {
         });
 
         if (result && result.length > 0) {
-            // Filter duplicates
-            const newFiles = result.filter(f => !files.includes(f));
-            setFiles([...files, ...newFiles]);
+            mergeUniqueFiles(result.filter(path => /\.pdf$/i.test(path)));
         }
+    };
+
+    const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
+        const pathPdfs = paths.filter(path => /\.pdf$/i.test(path));
+        const tempFiles: string[] = [];
+
+        for (const rawFile of rawFiles) {
+            const isPdf = rawFile.type === 'application/pdf' || /\.pdf$/i.test(rawFile.name || '');
+            if (!isPdf) continue;
+
+            const hasPath = typeof (rawFile as File & { path?: string }).path === 'string' && Boolean((rawFile as File & { path?: string }).path);
+            if (hasPath) continue;
+
+            try {
+                const bytes = new Uint8Array(await rawFile.arrayBuffer());
+                const tempPath = await window.pdfApi?.saveTempFileFromDrop(rawFile.name || 'dropped.pdf', bytes);
+                if (tempPath) tempFiles.push(tempPath);
+            } catch {
+                // ignore single file persistence failure and continue others
+            }
+        }
+
+        const finalFiles = [...new Set([...pathPdfs, ...tempFiles])];
+        if (!finalFiles.length) {
+            notification.show('请拖入 PDF 文件', 'warning');
+            return;
+        }
+        mergeUniqueFiles(finalFiles);
     };
 
     const handleRemoveFile = (index: number) => {
@@ -150,7 +181,11 @@ const PDFToImage: React.FC = () => {
             />
 
             {files.length === 0 ? (
-                <PDFUploadArea onClick={handleAddFiles} title="点击添加 PDF 文件" />
+                <PDFUploadArea
+                    onClick={handleAddFiles}
+                    title="点击添加 PDF 文件"
+                    onFileDrop={(paths, rawFiles) => { void handleDroppedFiles(paths, rawFiles); }}
+                />
             ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>

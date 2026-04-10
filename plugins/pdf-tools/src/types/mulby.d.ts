@@ -1,5 +1,30 @@
 // Mulby API 类型定义
 
+type Disposable = () => void
+
+interface ResolvedIcon {
+  type: 'url' | 'svg' | 'data-url' | 'emoji'
+  value: string
+}
+
+type InputAttachmentKind = 'file' | 'image'
+
+interface InputAttachment {
+  id: string
+  name: string
+  size: number
+  kind: InputAttachmentKind
+  mime?: string
+  ext?: string
+  path?: string
+  dataUrl?: string
+}
+
+interface InputPayload {
+  text: string
+  attachments: InputAttachment[]
+}
+
 interface ClipboardFileInfo {
   path: string
   name: string
@@ -14,43 +39,7 @@ interface MulbyClipboard {
   writeImage(image: string | ArrayBuffer): Promise<void>
   readFiles(): Promise<ClipboardFileInfo[]>
   writeFiles(files: string | string[]): Promise<boolean>
-  getFormat(): Promise<'text' | 'image' | 'files' | 'empty'>
-}
-
-interface ClipboardHistoryItem {
-  id: string
-  type: 'text' | 'image' | 'files'
-  content: string
-  plainText?: string
-  files?: string[]
-  timestamp: number
-  size: number
-  favorite: boolean
-  tags?: string[]
-}
-
-interface ClipboardHistoryStats {
-  total: number
-  text: number
-  image: number
-  files: number
-  favorite: number
-}
-
-interface MulbyClipboardHistory {
-  query(options?: {
-    type?: 'text' | 'image' | 'files'
-    search?: string
-    favorite?: boolean
-    limit?: number
-    offset?: number
-  }): Promise<ClipboardHistoryItem[]>
-  get(id: string): Promise<ClipboardHistoryItem | null>
-  copy(id: string): Promise<{ success: boolean; error?: string }>
-  toggleFavorite(id: string): Promise<{ success: boolean }>
-  delete(id: string): Promise<{ success: boolean }>
-  clear(): Promise<{ success: boolean }>
-  stats(): Promise<ClipboardHistoryStats>
+  getFormat(): Promise<'text' | 'image' | 'files' | 'html' | 'empty'>
 }
 
 interface MulbyInput {
@@ -79,6 +68,7 @@ interface BrowserWindowProxy {
   setTitle(title: string): Promise<void>
   setSize(width: number, height: number): Promise<void>
   setPosition(x: number, y: number): Promise<void>
+  setOpacity(opacity: number): Promise<void>
   postMessage(channel: string, ...args: unknown[]): Promise<void>
 }
 
@@ -86,20 +76,42 @@ interface MulbyWindow {
   hide(isRestorePreWindow?: boolean): void
   show(): void
   setSize(width: number, height: number): void
-  setExpendHeight(height: number): void
+  setExpendHeight(height: number, allowResize?: boolean): void
   center(): void
-  create(url: string, options?: { width?: number; height?: number; title?: string }): Promise<BrowserWindowProxy | null>
+  create(url: string, options?: {
+    width?: number; height?: number; title?: string;
+    type?: 'default' | 'borderless' | 'fullscreen';
+    titleBar?: boolean;
+    fullscreen?: boolean;
+    alwaysOnTop?: boolean;
+    resizable?: boolean;
+    x?: number; y?: number;
+    minWidth?: number; minHeight?: number;
+    maxWidth?: number; maxHeight?: number;
+    opacity?: number;
+    transparent?: boolean;
+  }): Promise<BrowserWindowProxy | null>
   close(): void
   detach(): void
   setAlwaysOnTop(flag: boolean): void
+  setOpacity(opacity: number): Promise<void>
+  getOpacity(): Promise<number>
   getMode(): Promise<'attached' | 'detached'>
   getWindowType(): Promise<'main' | 'detach'>
   minimize(): void
   maximize(): void
-  getState(): Promise<{ isMaximized: boolean; isAlwaysOnTop: boolean }>
+  getState(): Promise<{ isMaximized: boolean; isAlwaysOnTop: boolean; opacity: number }>
+  resizeDrag(payload: {
+    edge: 'top' | 'right' | 'bottom' | 'left' | 'top-left' | 'top-right' | 'bottom-right' | 'bottom-left'
+    startX: number
+    startY: number
+    currentX: number
+    currentY: number
+    baseBounds: { x: number; y: number; width: number; height: number }
+  }): void
   reload(): void
   sendToParent(channel: string, ...args: unknown[]): void
-  onChildMessage(callback: (channel: string, ...args: unknown[]) => void): void
+  onChildMessage(callback: (channel: string, ...args: unknown[]) => void): Disposable
   findInPage(text: string, options?: { forward?: boolean; findNext?: boolean; matchCase?: boolean }): Promise<number>
   stopFindInPage(action?: 'clearSelection' | 'keepSelection' | 'activateSelection'): void
   startDrag(filePath: string | string[]): void
@@ -112,21 +124,157 @@ interface MulbySubInput {
   focus(): void
   blur(): void
   select(): void
-  onChange(callback: (data: { text: string }) => void): void
+  onChange(callback: (data: { text: string }) => void): Disposable
+}
+
+type ThemeMode = 'light' | 'dark' | 'system'
+
+interface ThemeInfo {
+  mode: ThemeMode
+  actual: 'light' | 'dark'
 }
 
 interface MulbyTheme {
-  get(): Promise<{ mode: 'light' | 'dark' | 'system'; actual: 'light' | 'dark' }>
-  set(mode: 'light' | 'dark' | 'system'): Promise<{ mode: 'light' | 'dark' | 'system'; actual: 'light' | 'dark' }>
+  get(): Promise<ThemeInfo>
+  set(mode: ThemeMode): Promise<ThemeInfo>
   getActual(): Promise<'light' | 'dark'>
+}
+
+type PluginCmd =
+  | { type: 'keyword'; value: string; explain?: string }
+  | { type: 'regex'; match: string; explain?: string; label?: string; minLength?: number; maxLength?: number }
+  | { type: 'files'; exts?: string[]; fileType?: 'file' | 'directory' | 'any'; match?: string; minLength?: number; maxLength?: number }
+  | { type: 'img'; exts?: string[] }
+  | { type: 'over'; label?: string; exclude?: string; minLength?: number; maxLength?: number }
+  | { type: 'window'; app?: string; title?: string; bundleId?: string; label?: string }
+
+type CommandKind = 'launch' | 'match'
+
+interface PluginCommandItem {
+  pluginId: string
+  pluginName: string
+  pluginDisplayName: string
+  featureCode: string
+  featureExplain: string
+  cmdId: string
+  cmdType: PluginCmd['type']
+  cmdSignature: string
+  commandKind: CommandKind
+  displayLabel: string
+  explain?: string
+  bindable: boolean
+  disabled: boolean
+}
+
+interface PluginCommandShortcutBinding {
+  id: string
+  pluginId: string
+  featureCode: string
+  cmdId: string
+  cmdSignature: string
+  commandLabel: string
+  accelerator: string
+  createdAt: number
+  updatedAt: number
+}
+
+type PluginCommandShortcutBindingState =
+  | 'active'
+  | 'plugin-disabled'
+  | 'plugin-missing'
+  | 'feature-missing'
+  | 'command-missing'
+  | 'command-not-bindable'
+  | 'command-disabled'
+  | 'system-reserved-shortcut'
+  | 'shortcut-conflict'
+  | 'invalid-shortcut'
+
+interface PluginCommandShortcutBindingRecord extends PluginCommandShortcutBinding {
+  state: PluginCommandShortcutBindingState
+  pluginDisplayName?: string
+  featureExplain?: string
+  cmdType?: PluginCmd['type']
+}
+
+interface PluginCommandShortcutBindInput {
+  pluginId: string
+  featureCode: string
+  cmdId: string
+  cmdSignature: string
+  commandLabel: string
+  accelerator: string
+}
+
+interface PluginCommandShortcutBindResult {
+  success: boolean
+  error?: string
+  state?: PluginCommandShortcutBindingState
+  binding?: PluginCommandShortcutBindingRecord
+}
+
+interface PluginCommandShortcutValidationResult {
+  ok: boolean
+  error?: string
+  state?: PluginCommandShortcutBindingState
+}
+
+interface PluginCommandRunInput {
+  pluginId: string
+  featureCode: string
+  cmdId: string
+  cmdSignature: string
+  input?: string | InputPayload
+}
+
+interface PluginCommandDisabledToggleInput {
+  pluginId: string
+  featureCode: string
+  cmdId: string
+  cmdSignature: string
+  disabled: boolean
+}
+
+interface PluginCommandDisabledToggleResult {
+  success: boolean
+  disabled: boolean
+  error?: string
 }
 
 interface PluginInfo {
   id: string
   name: string
   displayName: string
-  description?: string
-  features: Array<{ code: string; explain?: string }>
+  description: string
+  version?: string
+  author?: string
+  homepage?: string
+  main?: string
+  ui?: string
+  window?: {
+    type?: 'default' | 'borderless' | 'fullscreen'
+    titleBar?: boolean
+    width?: number
+    height?: number
+    minWidth?: number
+    minHeight?: number
+    maxWidth?: number
+    maxHeight?: number
+    opacity?: number
+    transparent?: boolean
+  }
+  icon?: ResolvedIcon
+  path?: string
+  builtin?: boolean
+  isDev?: boolean
+  features: Array<{
+    code: string
+    explain: string
+    cmds: PluginCmd[]
+    mode?: 'ui' | 'silent' | 'detached'
+    route?: string
+    icon?: ResolvedIcon
+  }>
   enabled: boolean
 }
 
@@ -135,9 +283,10 @@ interface PluginSearchResult {
   pluginName: string
   displayName: string
   featureCode: string
-  featureExplain?: string
-  matchType: 'keyword' | 'regex' | 'prefix' | 'exact' | string
-  icon?: string
+  featureExplain: string
+  featureRoute?: string
+  matchType: 'keyword' | 'regex' | 'files' | 'img' | 'over'
+  icon?: ResolvedIcon
 }
 
 interface BackgroundPluginInfo {
@@ -156,11 +305,76 @@ interface BackgroundPluginInfo {
   missedHeartbeats?: number
 }
 
+interface OpenSystemPluginPayload {
+  pluginId: string
+  route?: string
+}
+
+interface SystemPluginBeforeAttachPayload {
+  requestId: string
+  pluginId: string
+}
+
+interface MulbyApp {
+  onOpenSystemPlugin(callback: (payload: OpenSystemPluginPayload) => void): Disposable
+  onSystemPluginBeforeAttach(callback: (payload: SystemPluginBeforeAttachPayload) => void | Promise<void>): Disposable
+  onOpenAiSettings(callback: () => void): Disposable
+  onOpenAiMcpSettings(callback: () => void): Disposable
+  onOpenAiSkillsSettings(callback: () => void): Disposable
+  onOpenAiToolsSettings(callback: () => void): Disposable
+  onOpenPluginStore(callback: () => void): Disposable
+  onOpenPluginManager(callback: () => void): Disposable
+  onOpenBackgroundPlugins(callback: () => void): Disposable
+  onOpenTaskScheduler(callback: () => void): Disposable
+  onOpenLogViewer(callback: () => void): Disposable
+  onOpenStorageExplorer(callback: () => void): Disposable
+  onOpenCommandShortcuts(callback: (payload?: { cmdLabel?: string }) => void): Disposable
+}
+
+interface MulbySystemPlugin {
+  setActive(pluginId: string | null): Promise<boolean>
+  notifyReadyForAttach(requestId: string): Promise<boolean>
+  getActive(): Promise<string | null>
+}
+
+interface MulbySystemPageState {
+  open: boolean
+  mode: 'none' | 'attached' | 'detached'
+  page: string | null
+  title: string
+}
+
+interface MulbySystemPage {
+  open(payload: {
+    page: 'settings' | 'plugin-manager' | 'plugin-store' | 'background-plugins' | 'task-scheduler' | 'log-viewer' | 'ai-settings' | 'ai-mcp-settings' | 'ai-skills-settings'
+    settingsSection?: 'general' | 'shortcuts' | 'commandQuickLaunch' | 'commandAll' | 'permissions' | 'security' | 'developer' | 'about'
+    shortcutCommandHint?: string
+  }): Promise<boolean>
+  close(): Promise<boolean>
+  detach(): Promise<boolean>
+  reload(): Promise<boolean>
+  getMode(): Promise<'none' | 'attached' | 'detached'>
+  getState(): Promise<MulbySystemPageState>
+  onStateChange(callback: (state: MulbySystemPageState) => void): Disposable
+}
+
 interface MulbyPlugin {
   getAll(): Promise<PluginInfo[]>
-  search(query: string): Promise<PluginSearchResult[]>
-  run(name: string, featureCode: string, input?: string): Promise<{ success: boolean; hasUI?: boolean; error?: string }>
-  install(filePath: string): Promise<{ success: boolean; pluginName?: string; error?: string }>
+  listCommands(pluginId?: string): Promise<PluginCommandItem[]>
+  search(query: string | InputPayload): Promise<PluginSearchResult[]>
+  run(name: string, featureCode: string, input?: string | InputPayload): Promise<{ success: boolean; hasUI?: boolean; error?: string }>
+  runCommand(input: PluginCommandRunInput): Promise<{ success: boolean; hasUI?: boolean; error?: string }>
+  getRecentUsed(limit?: number): Promise<PluginSearchResult[]>
+  install(filePath: string): Promise<{
+    success: boolean
+    pluginName?: string
+    pluginId?: string
+    action?: 'installed' | 'updated' | 'already-installed' | 'downgrade-blocked'
+    isUpdate?: boolean
+    oldVersion?: string
+    newVersion?: string
+    error?: string
+  }>
   enable(name: string): Promise<{ success: boolean; error?: string }>
   disable(name: string): Promise<{ success: boolean; error?: string }>
   uninstall(name: string): Promise<{ success: boolean; error?: string }>
@@ -170,8 +384,13 @@ interface MulbyPlugin {
   listBackground(): Promise<BackgroundPluginInfo[]>
   startBackground(pluginId: string): Promise<{ success: boolean; error?: string }>
   stopBackground(pluginId: string): Promise<{ success: boolean }>
-  getBackgroundInfo(pluginId: string): Promise<BackgroundPluginInfo>
-  stopPlugin(pluginId: string): Promise<void>
+  getBackgroundInfo(pluginId: string): Promise<BackgroundPluginInfo | null>
+  stopPlugin(pluginId: string): Promise<{ success: boolean }>
+  listCommandShortcuts(pluginId?: string): Promise<PluginCommandShortcutBindingRecord[]>
+  bindCommandShortcut(input: PluginCommandShortcutBindInput): Promise<PluginCommandShortcutBindResult>
+  unbindCommandShortcut(bindingId: string): Promise<{ success: boolean }>
+  validateCommandShortcut(accelerator: string, bindingId?: string): Promise<PluginCommandShortcutValidationResult>
+  setCommandDisabled(input: PluginCommandDisabledToggleInput): Promise<PluginCommandDisabledToggleResult>
 }
 
 interface DisplayInfo {
@@ -214,6 +433,50 @@ interface MulbyScreen {
   colorPick(): Promise<ColorPickResult | null>
 }
 
+interface CommandAuditItem {
+  id: string
+  source: string
+  command: string
+  args: string[]
+  cwd?: string
+  shell: boolean
+  allowed: boolean
+  pluginId?: string
+  createdAt: number
+}
+
+interface CommandRunnerSettings {
+  enabled: boolean
+  requireConsent: boolean
+  allowShell: boolean
+  allowList?: string[]
+  denyList?: string[]
+}
+
+interface RunCommandInput {
+  command: string
+  args?: string[]
+  cwd?: string
+  env?: Record<string, string>
+  timeoutMs?: number
+  shell?: boolean
+}
+
+interface RunCommandResult {
+  success: boolean
+  command: string
+  args: string[]
+  cwd?: string
+  shell: boolean
+  stdout: string
+  stderr: string
+  exitCode: number | null
+  signal: string | null
+  durationMs: number
+  timedOut: boolean
+  truncated: boolean
+}
+
 interface MulbyShell {
   openPath(path: string): Promise<string>
   openExternal(url: string): Promise<void>
@@ -221,6 +484,12 @@ interface MulbyShell {
   openFolder(path: string): Promise<string>
   trashItem(path: string): Promise<void>
   beep(): Promise<void>
+  runCommand(input: RunCommandInput): Promise<RunCommandResult>
+  getRunCommandPolicy(): Promise<CommandRunnerSettings>
+  updateRunCommandPolicy(patch: Partial<CommandRunnerSettings>): Promise<CommandRunnerSettings>
+  listRunCommandAudit(limit?: number): Promise<CommandAuditItem[]>
+  clearRunCommandAudit(): Promise<CommandRunnerSettings>
+  clearRunCommandTrusted(): Promise<CommandRunnerSettings>
 }
 
 interface MulbyDialog {
@@ -278,7 +547,11 @@ interface MulbySystem {
   getPath(name: 'home' | 'appData' | 'userData' | 'temp' | 'exe' | 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' | 'logs'): Promise<string>
   getEnv(name: string): Promise<string | undefined>
   getIdleTime(): Promise<number>
-  getFileIcon(filePath: string): Promise<string>
+  getFileIcon(filePath: string, options?: { size?: number; kind?: 'app' | 'file' }): Promise<string>
+  getFileIcons(
+    requests: Array<{ key: string; path: string; kind?: 'app' | 'file'; size?: number }>,
+    options?: { size?: number; concurrency?: number }
+  ): Promise<Array<{ key: string; path: string; kind: 'app' | 'file'; icon: string }>>
   getNativeId(): Promise<string>
   isDev(): Promise<boolean>
   isMacOS(): Promise<boolean>
@@ -299,7 +572,7 @@ interface MulbyShortcut {
   unregister(accelerator: string): Promise<void>
   unregisterAll(): Promise<void>
   isRegistered(accelerator: string): Promise<boolean>
-  onTriggered(callback: (accelerator: string) => void): void
+  onTriggered(callback: (accelerator: string) => void): Disposable
 }
 
 interface MulbySecurity {
@@ -320,12 +593,12 @@ interface MulbyPower {
   getSystemIdleState(idleThreshold: number): Promise<'active' | 'idle' | 'locked' | 'unknown'>
   isOnBatteryPower(): Promise<boolean>
   getCurrentThermalState(): Promise<'unknown' | 'nominal' | 'fair' | 'serious' | 'critical'>
-  onSuspend(callback: () => void): void
-  onResume(callback: () => void): void
-  onAC(callback: () => void): void
-  onBattery(callback: () => void): void
-  onLockScreen(callback: () => void): void
-  onUnlockScreen(callback: () => void): void
+  onSuspend(callback: () => void): Disposable
+  onResume(callback: () => void): Disposable
+  onAC(callback: () => void): Disposable
+  onBattery(callback: () => void): Disposable
+  onLockScreen(callback: () => void): Disposable
+  onUnlockScreen(callback: () => void): Disposable
 }
 
 interface MulbyTray {
@@ -339,17 +612,21 @@ interface MulbyTray {
 
 interface MulbyNetwork {
   isOnline(): Promise<boolean>
+  onOnline(callback: () => void): void
+  onOffline(callback: () => void): void
+}
+
+interface ContextMenuItem {
+  label: string
+  type?: 'normal' | 'separator' | 'checkbox' | 'radio'
+  checked?: boolean
+  enabled?: boolean
+  id?: string
+  submenu?: ContextMenuItem[]
 }
 
 interface MulbyMenu {
-  showContextMenu(items: {
-    label: string
-    type?: 'normal' | 'separator' | 'checkbox' | 'radio'
-    checked?: boolean
-    enabled?: boolean
-    id?: string
-    submenu?: any[]
-  }[]): Promise<string | null>
+  showContextMenu(items: ContextMenuItem[]): Promise<string | null>
 }
 
 interface MulbyGeolocation {
@@ -361,6 +638,7 @@ interface MulbyGeolocation {
     latitude: number
     longitude: number
     accuracy: number
+    source: 'native' | 'ip'
     altitude?: number | null
     altitudeAccuracy?: number | null
     heading?: number | null
@@ -380,22 +658,45 @@ interface MulbyTTS {
 
 interface MulbyStorage {
   get(key: string, namespace?: string): Promise<unknown>
-  set(key: string, value: unknown, namespace?: string): Promise<void>
-  remove(key: string, namespace?: string): Promise<void>
+  set(key: string, value: unknown, namespace?: string): Promise<boolean>
+  remove(key: string, namespace?: string): Promise<boolean>
+  getAll(namespace?: string): Promise<unknown>
+  getAllWithMeta(namespace: string): Promise<unknown>
+  listNamespaces(): Promise<unknown>
+  clear(namespace: string): Promise<unknown>
+  // V2 methods
+  list(options?: { prefix?: string; startsAfter?: string; limit?: number; order?: 'asc' | 'desc'; namespace?: string }): Promise<{ items: { key: string; size: number; updatedAt: number; version: number }[]; nextCursor?: string }>
+  getMany(keys: string[], options?: { namespace?: string }): Promise<{ key: string; found: boolean; value?: unknown; version?: number; updatedAt?: number }[]>
+  setMany(items: { key: string; value: unknown; expectedVersion?: number | null }[], options?: { namespace?: string; atomic?: boolean }): Promise<{ success: boolean; results: { key: string; ok: boolean; version?: number; error?: string }[] }>
+  getMeta(key: string, options?: { namespace?: string }): Promise<{ found: boolean; value?: unknown; version?: number; updatedAt?: number }>
+  setWithVersion(key: string, value: unknown, options?: { namespace?: string; expectedVersion?: number | null }): Promise<{ ok: boolean; version?: number; conflict?: { currentVersion: number } }>
+  removeWithVersion(key: string, options?: { namespace?: string; expectedVersion?: number }): Promise<{ ok: boolean; error?: string }>
+  transaction(ops: { op: 'set' | 'remove'; key: string; value?: unknown; expectedVersion?: number | null }[], options?: { namespace?: string }): Promise<{ success: boolean; committed: number }>
+  append(key: string, chunk: unknown, options?: { namespace?: string; maxItems?: number }): Promise<{ ok: boolean; newLength: number; version: number }>
+  watch(options: { namespace?: string; prefix?: string }, callback: (event: { type: 'set' | 'remove' | 'clear'; key: string; namespace: string; version?: number; updatedAt: number }) => void): () => void
 }
 
-interface MulbyMessaging {
-  send(targetPluginId: string, type: string, payload: unknown): Promise<void>
-  broadcast(type: string, payload: unknown): Promise<void>
-  on(handler: (message: {
-    id: string
-    from: string
-    to?: string
-    type: string
-    payload: unknown
-    timestamp: number
-  }) => void | Promise<void>): void
-  off(handler?: (message: any) => void): void
+interface Task {
+  id: string
+  name?: string
+  pluginId?: string
+  status?: string
+  type?: string
+  [key: string]: unknown
+}
+
+interface TaskExecution {
+  id: string
+  taskId: string
+  status?: string
+  [key: string]: unknown
+}
+
+interface TaskSchedulerEvent {
+  type: string
+  taskId?: string
+  executionId?: string
+  [key: string]: unknown
 }
 
 interface MulbyScheduler {
@@ -413,19 +714,22 @@ interface MulbyScheduler {
     description?: string
     endTime?: number
     maxExecutions?: number
-  }): Promise<any>
-  cancelTask(taskId: string): Promise<void>
-  pauseTask(taskId: string): Promise<void>
-  resumeTask(taskId: string): Promise<void>
-  listTasks(filter?: { status?: string; type?: string; limit?: number; offset?: number }): Promise<any[]>
+  }): Promise<Task>
+  cancelTask(taskId: string): Promise<{ success: boolean }>
+  pauseTask(taskId: string): Promise<{ success: boolean }>
+  resumeTask(taskId: string): Promise<{ success: boolean }>
+  listTasks(filter?: { pluginId?: string; status?: string; type?: string; limit?: number; offset?: number }): Promise<Task[]>
   getTaskCount(filter?: { status?: string; type?: string }): Promise<number>
-  getTask(taskId: string): Promise<any>
+  getTask(taskId: string): Promise<Task | null>
   deleteTasks(taskIds: string[]): Promise<{ success: boolean; deletedCount: number }>
   cleanupTasks(olderThan?: number): Promise<{ success: boolean; deletedCount: number }>
-  getExecutions(taskId: string, limit?: number): Promise<any[]>
-  validateCron(expression: string): boolean
-  getNextCronTime(expression: string, after?: Date): Date
-  describeCron(expression: string): string
+  getExecutions(taskId: string, limit?: number): Promise<TaskExecution[]>
+  validateCron(expression: string): Promise<boolean>
+  getNextCronTime(expression: string, after?: Date): Promise<Date>
+  describeCron(expression: string): Promise<string>
+  subscribe(): Promise<{ success: boolean; error?: string }>
+  unsubscribe(): Promise<{ success: boolean; error?: string }>
+  onEvent(callback: (event: TaskSchedulerEvent) => void): Disposable
 }
 
 interface HttpResponse {
@@ -447,6 +751,177 @@ interface MulbyHttp {
   post(url: string, body?: unknown, headers?: Record<string, string>): Promise<HttpResponse>
   put(url: string, body?: unknown, headers?: Record<string, string>): Promise<HttpResponse>
   delete(url: string, headers?: Record<string, string>): Promise<HttpResponse>
+}
+
+interface ShortcutStatusMap {
+  [accelerator: string]: boolean
+}
+
+interface AppSettings {
+  [key: string]: unknown
+}
+
+interface StartupOpenAtLoginState {
+  supported: boolean
+  enabled: boolean
+}
+
+type UpdateCenterStatus = 'idle' | 'checking' | 'up-to-date' | 'update-available' | 'error'
+
+interface UpdateCenterState {
+  status: UpdateCenterStatus
+  currentVersion: string
+  latestVersion?: string
+  hasUpdate: boolean
+  releasePageUrl: string
+  latestReleaseApiUrl: string
+  releaseName?: string
+  releasePublishedAt?: string
+  releaseNotes?: string
+  message?: string
+  lastCheckedAt?: number
+}
+
+interface MulbySettings {
+  get(): Promise<{ settings: AppSettings; shortcutStatus: ShortcutStatusMap }>
+  update(partial: Partial<AppSettings>): Promise<{ settings: AppSettings; shortcutStatus: ShortcutStatusMap }>
+  reset(): Promise<{ settings: AppSettings; shortcutStatus: ShortcutStatusMap }>
+  pauseShortcuts(): Promise<ShortcutStatusMap>
+  resumeShortcuts(): Promise<ShortcutStatusMap>
+  setShortcutRecordingActive(active: boolean): Promise<boolean>
+  onShortcutCaptured(callback: (accelerator: string) => void): Disposable
+  getOpenAtLoginState(): Promise<StartupOpenAtLoginState>
+  setOpenAtLogin(enabled: boolean): Promise<StartupOpenAtLoginState>
+  getUpdateCenterState(): Promise<UpdateCenterState>
+  checkAppUpdates(): Promise<UpdateCenterState>
+  openUpdateReleasePage(): Promise<boolean>
+  downloadUpdate(): Promise<unknown>
+  installUpdate(): Promise<unknown>
+  onUpdateStateChanged(callback: (state: unknown) => void): Disposable
+  onShortcutStatusChanged(callback: (status: unknown) => void): Disposable
+}
+
+interface MulbyDeveloper {
+  addPluginPath(path: string): Promise<{ success: boolean; error?: string }>
+  removePluginPath(path: string): Promise<{ success: boolean }>
+  reloadPlugins(): Promise<{ success: boolean }>
+  selectDirectory(): Promise<string | null>
+}
+
+interface DesktopFileSearchResult {
+  name: string
+  path: string
+  isDirectory: boolean
+  size?: number
+}
+
+interface DesktopAppSearchResult {
+  name: string
+  path: string
+  kind: 'application' | 'shortcut' | 'executable'
+  iconPath?: string
+}
+
+interface MulbyDesktop {
+  searchFiles(query: string, limit?: number): Promise<DesktopFileSearchResult[]>
+  searchApps(query: string, limit?: number): Promise<DesktopAppSearchResult[]>
+}
+
+interface PluginStoreFetchResult {
+  success?: boolean
+  plugins?: unknown[]
+  error?: string
+  [key: string]: unknown
+}
+
+interface PluginStoreInstallFromUrlInput {
+  url: string
+  enabled?: boolean
+}
+
+interface PluginStoreInstallResult {
+  success: boolean
+  pluginId?: string
+  error?: string
+  [key: string]: unknown
+}
+
+interface InstalledPluginUpdateResult {
+  updates?: unknown[]
+  error?: string
+  [key: string]: unknown
+}
+
+interface PluginStoreBatchUpdateResult {
+  success: boolean
+  error?: string
+  updatedPluginIds?: string[]
+  [key: string]: unknown
+}
+
+interface MulbyPluginStore {
+  fetch(): Promise<PluginStoreFetchResult>
+  installFromUrl(input: PluginStoreInstallFromUrlInput): Promise<PluginStoreInstallResult>
+  checkUpdatesInstalled(): Promise<InstalledPluginUpdateResult>
+  updateAll(pluginIds?: string[]): Promise<PluginStoreBatchUpdateResult>
+}
+
+interface TrayMenuRecentItem {
+  id: string
+  type: 'plugin' | 'command'
+  title: string
+  subtitle: string
+  timestamp: number
+  pluginId?: string
+  featureCode?: string
+}
+
+interface TrayMenuState {
+  platform: string
+  openAtLogin: {
+    supported: boolean
+    enabled: boolean
+  }
+  status: {
+    backgroundPluginCount: number
+    activeHostCount: number
+    runningTaskCount: number
+    pendingTaskCount: number
+    pausedTaskCount: number
+  }
+  recentActions: TrayMenuRecentItem[]
+}
+
+interface MulbyTrayMenu {
+  getState(): Promise<TrayMenuState>
+  action(action: string, payload?: Record<string, unknown>): Promise<{ success: boolean; state?: TrayMenuState; error?: string }>
+  close(): Promise<{ success: boolean }>
+  onState(callback: (state: TrayMenuState) => void): Disposable
+}
+
+interface LogEntry {
+  timestamp: number
+  level: 'debug' | 'info' | 'warn' | 'error' | 'crash'
+  pluginId: string
+  message: string
+  args?: unknown[]
+  crashDetails?: {
+    reason: string
+    exitCode?: number
+    windowId?: number
+  }
+}
+
+interface MulbyLog {
+  debug(message: string, ...args: unknown[]): void
+  info(message: string, ...args: unknown[]): void
+  warn(message: string, ...args: unknown[]): void
+  error(message: string, ...args: unknown[]): void
+  getLogs(options?: { pluginId?: string; level?: string; limit?: number }): Promise<LogEntry[]>
+  clear(pluginId?: string): Promise<{ success: boolean }>
+  getLogsDir(): Promise<string>
+  subscribe(): Promise<{ success: boolean }>
+  onLog(callback: (entry: LogEntry) => void): Disposable
 }
 
 type AiSkillSource = 'manual' | 'local-dir' | 'zip' | 'json' | 'builtin' | 'system'
@@ -515,7 +990,7 @@ type AiModelParameters = {
 }
 type AiMcpSelection = { mode?: 'off' | 'manual' | 'auto'; serverIds?: string[]; allowedToolIds?: string[] }
 type AiSkillSelection = {
-  mode?: 'off' | 'manual' | 'auto'
+  mode?: 'off' | 'manual' | 'progressive'
   skillIds?: string[]
   variables?: Record<string, string>
 }
@@ -630,7 +1105,6 @@ type AiSkillRecord = {
     author?: string
     tags?: string[]
     triggerPhrases?: string[]
-    mode?: 'manual' | 'auto' | 'both'
     promptTemplate?: string
     mcpPolicy?: AiSkillMcpPolicy
     capabilities?: string[]
@@ -640,7 +1114,6 @@ type AiSkillRecord = {
 type AiSkillSettings = {
   enabled: boolean
   activeSkillIds: string[]
-  autoSelect?: { enabled?: boolean; maxSkillsPerCall?: number; minScore?: number }
   records: AiSkillRecord[]
 }
 type AiSkillPreview = {
@@ -653,6 +1126,7 @@ type AiSkillResolveResult = {
   selectedSkillIds: string[]
   selectedSkillNames: string[]
   selectedSkills?: Array<{ id: string; source: AiSkillSource; trustLevel: AiSkillTrustLevel }>
+  availableSkillsPrompt?: string
   systemPrompts: string[]
   mergedMcp?: AiMcpSelection
   toolContextPatch?: AiToolContext['mcpScope']
@@ -673,7 +1147,6 @@ type AiSkillCreateWithAiInput = {
   replaceSkillId?: string
   enabled?: boolean
   trustLevel?: AiSkillTrustLevel
-  modePreference?: 'manual' | 'auto' | 'both'
 }
 type AiSkillCreateWithAiResult = {
   record: AiSkillRecord
@@ -688,6 +1161,7 @@ type AiSkillCreateProgressChunk = {
 type AiToolContext = {
   pluginName?: string
   internalTag?: string
+  requestId?: string
   mcpScope?: { allowedServerIds?: string[]; allowedToolIds?: string[] }
 }
 type AiSettings = {
@@ -720,29 +1194,14 @@ interface MulbyAi {
     refresh(): Promise<AiSkillRecord[]>
     listEnabled(): Promise<AiSkillRecord[]>
     get(skillId: string): Promise<AiSkillRecord | null>
-    listCreateModels(): Promise<AiSkillCreateModelOption[]>
-    createWithAi(input: AiSkillCreateWithAiInput): Promise<AiSkillCreateWithAiResult>
-    createWithAiStream(
-      input: AiSkillCreateWithAiInput,
-      onChunk: (chunk: AiSkillCreateProgressChunk) => void
-    ): AiPromiseLike<AiSkillCreateWithAiResult>
-    create(input: {
-      id?: string
-      name: string
-      description?: string
-      promptTemplate?: string
-      tags?: string[]
-      triggerPhrases?: string[]
-      mode?: 'manual' | 'auto' | 'both'
-      capabilities?: string[]
-      internalTools?: string[]
-      enabled?: boolean
+    install(input: {
+      source: 'local-dir' | 'zip' | 'npx'
+      ref: string
+      skills?: string[]
+      command?: string
       trustLevel?: AiSkillTrustLevel
-      mcpPolicy?: AiSkillMcpPolicy
-    }): Promise<AiSkillRecord>
-    install(input: { source: 'local-dir' | 'zip'; ref: string; trustLevel?: AiSkillTrustLevel; enabled?: boolean }): Promise<AiSkillRecord[]>
-    importFromJson(input: { json: string; trustLevel?: AiSkillTrustLevel; enabled?: boolean }): Promise<AiSkillRecord[]>
-    update(skillId: string, patch: Partial<AiSkillRecord>): Promise<AiSkillRecord>
+      enabled?: boolean
+    }): Promise<AiSkillRecord[]>
     remove(skillId: string): Promise<void>
     enable(skillId: string): Promise<AiSkillRecord>
     disable(skillId: string): Promise<AiSkillRecord>
@@ -750,7 +1209,7 @@ interface MulbyAi {
     resolve(option: AiOption): Promise<AiSkillResolveResult>
   }
   tokens: {
-    estimate(input: { model?: string; messages: AiMessage[]; outputText?: string }): Promise<AiTokenBreakdown>
+    estimate(input: { model?: string; messages: AiMessage[]; attachments?: AiAttachmentRef[]; outputText?: string }): Promise<AiTokenBreakdown>
   }
   attachments: {
     upload(input: { filePath?: string; buffer?: ArrayBuffer; mimeType: string; purpose?: string }): Promise<AiAttachmentRef>
@@ -783,7 +1242,7 @@ interface MulbyAi {
     get(): Promise<AiSettings>
     update(next: Partial<AiSettings>): Promise<AiSettings>
   }
-  mcp?: {
+  mcp: {
     listServers(): Promise<AiMcpServer[]>
     getServer(serverId: string): Promise<AiMcpServer | null>
     upsertServer(server: AiMcpServer): Promise<AiMcpServer>
@@ -795,6 +1254,27 @@ interface MulbyAi {
     listTools(serverId: string): Promise<AiMcpTool[]>
     abort(callId: string): Promise<boolean>
     getLogs(serverId: string): Promise<AiMcpServerLogEntry[]>
+  }
+  tooling: {
+    webSearch: {
+      /** 获取当前网络搜索原始配置 */
+      get(): Promise<Record<string, unknown>>
+      /** 更新网络搜索配置（部分更新） */
+      update(partial: Record<string, unknown>): Promise<Record<string, unknown>>
+      /** 获取当前网络搜索配置（含可用 provider 列表） */
+      getSettings(): Promise<{
+        activeProvider: string
+        providers: Array<{ id: string; name: string; type: 'local' | 'api' | 'custom' }>
+      }>
+      /** 修改当前激活的搜索 provider */
+      setActiveProvider(providerId: string): Promise<{ success: boolean; activeProvider: string }>
+    }
+    pluginTools: {
+      /** 获取当前被禁用的插件工具列表 */
+      getDisabled(): Promise<string[]>
+      /** 设置被禁用的插件工具列表（全量替换） */
+      setDisabled(disabledList: string[]): Promise<string[]>
+    }
   }
 }
 
@@ -822,7 +1302,7 @@ interface MulbyFilesystem {
 
 interface MulbyHost {
   invoke(pluginName: string, method: string, ...args: unknown[]): Promise<unknown>
-  call(pluginName: string, method: string, ...args: unknown[]): Promise<{ data: any }>
+  call(pluginName: string, method: string, ...args: unknown[]): Promise<{ success: boolean; data: unknown }>
   status(pluginName: string): Promise<{ ready: boolean; active: boolean }>
   restart(pluginName: string): Promise<boolean>
 }
@@ -859,47 +1339,68 @@ interface MulbyFFmpeg {
   run(args: string[], onProgress?: (progress: FFmpegRunProgress) => void): FFmpegTask
 }
 
-interface Attachment {
-  id: string
-  name: string
-  size: number
-  kind: 'file' | 'image'
-  mime?: string
-  ext?: string
-  path?: string
-  dataUrl?: string
-}
+type Attachment = InputAttachment
 
 interface PluginInitData {
   pluginName: string
   featureCode: string
-  feature?: string
   input: string
   mode?: string
   route?: string
   attachments?: Attachment[]
 }
 
+interface MulbyOnboarding {
+  getSettings(): Promise<unknown>
+  updateShortcut(action: string, accelerator: string): Promise<unknown>
+  updateTheme(mode: string): Promise<unknown>
+  updateAiProvider(provider: {
+    id: string
+    type?: string
+    label?: string
+    enabled: boolean
+    apiKey?: string
+    baseURL?: string
+  }): Promise<unknown>
+  updateStoreSources(sources: {
+    id: string
+    name: string
+    url: string
+    enabled: boolean
+    priority: number
+  }[]): Promise<unknown>
+  complete(): Promise<unknown>
+  onClose(callback: () => void): Disposable
+}
+
 interface MulbyAPI {
+  onboarding: MulbyOnboarding
+  app: MulbyApp
+  systemPlugin: MulbySystemPlugin
+  systemPage: MulbySystemPage
   clipboard: MulbyClipboard
-  clipboardHistory: MulbyClipboardHistory
   input: MulbyInput
   notification: MulbyNotification
   window: MulbyWindow
   subInput: MulbySubInput
   plugin: MulbyPlugin
+  pluginStore: MulbyPluginStore
   theme?: MulbyTheme
   ai: MulbyAi
   screen: MulbyScreen
   shell: MulbyShell
+  desktop: MulbyDesktop
   dialog: MulbyDialog
   system: MulbySystem
   permission: MulbyPermission
   shortcut: MulbyShortcut
   security: MulbySecurity
+  settings: MulbySettings
+  developer: MulbyDeveloper
   media: MulbyMedia
   power: MulbyPower
   tray: MulbyTray
+  trayMenu: MulbyTrayMenu
   network: MulbyNetwork
   menu: MulbyMenu
   geolocation: MulbyGeolocation
@@ -907,14 +1408,21 @@ interface MulbyAPI {
   storage: MulbyStorage
   http: MulbyHttp
   filesystem: MulbyFilesystem
-  messaging: MulbyMessaging
   scheduler: MulbyScheduler
-  host?: MulbyHost
-  onPluginInit(callback: (data: PluginInitData) => void): void
-  onPluginAttach?(callback: (data: { pluginName: string; displayName: string; featureCode: string; input: string; uiPath: string; preloadPath: string }) => void): void
-  onPluginDetached?(callback: () => void): void
-  onThemeChange?(callback: (theme: 'light' | 'dark') => void): void
-  onWindowStateChange?(callback: (state: { isMaximized: boolean }) => void): void
+  host: MulbyHost
+  log: MulbyLog
+  onPluginInit(callback: (data: PluginInitData) => void): Disposable
+  onPluginAttach(callback: (data: {
+    pluginName: string
+    displayName: string
+    featureCode: string
+    input: string
+    attachments?: Attachment[]
+    mode: 'panel'
+  }) => void): Disposable
+  onPluginDetached(callback: () => void): Disposable
+  onThemeChange(callback: (theme: 'light' | 'dark') => void): Disposable
+  onWindowStateChange(callback: (state: { isMaximized: boolean }) => void): Disposable
   inbrowser: {
     goto: (url: string, headers?: Record<string, string>, timeout?: number) => any
     useragent: (ua: string) => any
@@ -956,9 +1464,80 @@ interface MulbyAPI {
     clearInBrowserCache: () => Promise<boolean>
     run: (idOrOptions?: number | any, options?: any) => Promise<any[]>
   }
+  openclaw: {
+    getSettings(): Promise<unknown>
+    updateSettings(partial: unknown): Promise<unknown>
+    connect(): Promise<unknown>
+    disconnect(): Promise<unknown>
+    getStatus(): Promise<unknown>
+    testConnection(settings: unknown): Promise<unknown>
+    onStatusChanged(callback: (status: unknown) => void): Disposable
+    onInvoked(callback: (data: unknown) => void): Disposable
+    getLogs(): Promise<unknown>
+    clearLogs(): Promise<unknown>
+    onLog(callback: (entry: unknown) => void): Disposable
+    onLogsCleared(callback: () => void): Disposable
+  }
   sharp: MulbySharpFunction
   getSharpVersion: () => Promise<{ sharp: Record<string, string>; format: Record<string, any> }>
   ffmpeg: MulbyFFmpeg
+}
+
+interface BackendClipboardHistoryItem {
+  id: string
+  type: 'text' | 'image' | 'files'
+  content: string
+  plainText?: string
+  files?: string[]
+  timestamp: number
+  size: number
+  favorite: boolean
+  tags?: string[]
+}
+
+interface BackendClipboardHistoryStats {
+  total: number
+  text: number
+  image: number
+  files: number
+  favorite: number
+}
+
+interface BackendClipboardHistory {
+  query(options?: {
+    type?: 'text' | 'image' | 'files'
+    search?: string
+    favorite?: boolean
+    limit?: number
+    offset?: number
+  }): Promise<BackendClipboardHistoryItem[]>
+  get(id: string): Promise<BackendClipboardHistoryItem | null>
+  copy(id: string): Promise<{ success: boolean; error?: string }>
+  toggleFavorite(id: string): Promise<{ success: boolean }>
+  delete(id: string): Promise<{ success: boolean }>
+  clear(): Promise<{ success: boolean }>
+  stats(): Promise<BackendClipboardHistoryStats>
+}
+
+interface BackendMessaging {
+  send(targetPluginId: string, type: string, payload: unknown): Promise<void>
+  broadcast(type: string, payload: unknown): Promise<void>
+  on(handler: (message: {
+    id: string
+    from: string
+    to?: string
+    type: string
+    payload: unknown
+    timestamp: number
+  }) => void | Promise<void>): void
+  off(handler: (message: {
+    id: string
+    from: string
+    to?: string
+    type: string
+    payload: unknown
+    timestamp: number
+  }) => void | Promise<void>): void
 }
 
 type BackendPermissionType = 'geolocation' | 'camera' | 'microphone' | 'notifications' | 'screen' | 'accessibility' | 'contacts' | 'calendar'
@@ -1015,9 +1594,10 @@ interface BackendMulbyAi {
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
     edit(input: { imageAttachmentId: string; prompt: string; model: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
   }
+  }
 }
 
-interface BackendPluginAPI {
+interface BackendPluginAPIDirect {
   clipboard: {
     readText(): string
     writeText(text: string): Promise<void>
@@ -1026,7 +1606,7 @@ interface BackendPluginAPI {
     readFiles(): Array<{ path: string; name: string; size: number; isDirectory: boolean }>
     getFormat(): 'text' | 'image' | 'files' | 'empty'
   }
-  clipboardHistory: MulbyClipboardHistory
+  clipboardHistory: BackendClipboardHistory
   notification: MulbyNotification
   storage: {
     get(key: string): unknown
@@ -1034,6 +1614,18 @@ interface BackendPluginAPI {
     remove(key: string): unknown
     clear(): unknown
     keys(): string[]
+    has(key: string): boolean
+    getAll(): Record<string, unknown>
+    bulkSet(entries: Record<string, unknown>): void
+    // V2 methods
+    list(options?: { prefix?: string; startsAfter?: string; limit?: number; order?: 'asc' | 'desc' }): { items: { key: string; size: number; updatedAt: number; version: number }[]; nextCursor?: string }
+    getMany(keys: string[]): { key: string; found: boolean; value?: unknown; version?: number; updatedAt?: number }[]
+    setMany(items: { key: string; value: unknown; expectedVersion?: number | null }[], options?: { atomic?: boolean }): { success: boolean; results: { key: string; ok: boolean; version?: number; error?: string }[] }
+    getMeta(key: string): { found: boolean; value?: unknown; version?: number; updatedAt?: number }
+    setWithVersion(key: string, value: unknown, expectedVersion?: number | null): { ok: boolean; version?: number; conflict?: { currentVersion: number } }
+    removeWithVersion(key: string, expectedVersion?: number): { ok: boolean; error?: string }
+    transaction(ops: { op: 'set' | 'remove'; key: string; value?: unknown; expectedVersion?: number | null }[]): { success: boolean; committed: number }
+    append(key: string, chunk: unknown, options?: { maxItems?: number }): { ok: boolean; newLength: number; version: number }
   }
   filesystem: {
     readFile(path: string, encoding?: 'utf-8' | 'base64'): Promise<string | Uint8Array>
@@ -1049,6 +1641,7 @@ interface BackendPluginAPI {
     join(...paths: string[]): string
     dirname(path: string): string
     basename(path: string, ext?: string): string
+    getDataPath(...subPaths: string[]): string
   }
   http: MulbyHttp
   screen: {
@@ -1092,6 +1685,10 @@ interface BackendPluginAPI {
     getPath(name: 'home' | 'appData' | 'userData' | 'temp' | 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos'): Promise<string>
     getEnv(name: string): Promise<string>
     getIdleTime(): Promise<number>
+    isMacOS(): boolean
+    isWindows(): boolean
+    isLinux(): boolean
+    onActiveWindowChange(callback: (info: { app: string; title: string; pid?: number; bundleId?: string }) => void): () => void
   }
   shortcut: {
     register(accelerator: string, callback: () => void): boolean
@@ -1127,7 +1724,18 @@ interface BackendPluginAPI {
   network: {
     isOnline(): boolean
   }
-  input: Record<string, (...args: any[]) => any>
+  input: {
+    hideMainWindowPasteText(text: string): Promise<boolean>
+    hideMainWindowPasteImage(image: string | Uint8Array | ArrayBuffer): Promise<boolean>
+    hideMainWindowPasteFile(filePaths: string | string[]): Promise<boolean>
+    hideMainWindowTypeString(text: string): Promise<boolean>
+    restoreWindows(): Promise<boolean>
+    simulateKeyboardTap(key: string, ...modifiers: string[]): Promise<boolean>
+    simulateMouseMove(x: number, y: number): Promise<boolean>
+    simulateMouseClick(x: number, y: number): Promise<boolean>
+    simulateMouseDoubleClick(x: number, y: number): Promise<boolean>
+    simulateMouseRightClick(x: number, y: number): Promise<boolean>
+  }
   permission: {
     getStatus(type: BackendPermissionType): any
     request(type: BackendPermissionType): Promise<any>
@@ -1153,16 +1761,32 @@ interface BackendPluginAPI {
         | { type: 'files'; exts?: string[]; fileType?: 'file' | 'directory' | 'any'; match?: string; minLength?: number; maxLength?: number }
         | { type: 'img'; exts?: string[] }
         | { type: 'over'; label?: string; exclude?: string; minLength?: number; maxLength?: number }
+        | { type: 'window'; app?: string; title?: string; bundleId?: string; label?: string }
       >
     }): void
     removeFeature(code: string): boolean
     redirectHotKeySetting(cmdLabel: string, autocopy?: boolean): void
     redirectAiModelsSetting(): void
   }
-  messaging: MulbyMessaging
+  messaging: BackendMessaging
   ai: BackendMulbyAi
   scheduler: BackendScheduler
+  tools: {
+    register(name: string, handler: (args: unknown) => unknown | Promise<unknown>): void
+    unregister(name: string): void
+  }
 }
+
+type Asyncify<T> = {
+  [K in keyof T]:
+    T[K] extends (...args: infer Args) => infer Result
+      ? (...args: Args) => Promise<Awaited<Result>>
+      : T[K] extends object
+        ? Asyncify<T[K]>
+        : T[K]
+}
+
+type BackendPluginAPI = Asyncify<BackendPluginAPIDirect>
 
 interface BackendPluginContext {
   api: BackendPluginAPI
@@ -1179,17 +1803,31 @@ interface MulbySharpProxy {
   rotate(angle?: number, options?: object): MulbySharpProxy
   flip(): MulbySharpProxy
   flop(): MulbySharpProxy
+  affine(matrix: number[][], options?: object): MulbySharpProxy
+  median(size?: number): MulbySharpProxy
   blur(sigma?: number): MulbySharpProxy
   sharpen(options?: object): MulbySharpProxy
   flatten(options?: object): MulbySharpProxy
   gamma(gamma?: number): MulbySharpProxy
   negate(options?: object): MulbySharpProxy
+  normalise(options?: object): MulbySharpProxy
   normalize(options?: object): MulbySharpProxy
+  clahe(options: object): MulbySharpProxy
+  convolve(options: object): MulbySharpProxy
   threshold(threshold?: number, options?: object): MulbySharpProxy
+  linear(a?: number | number[], b?: number | number[]): MulbySharpProxy
+  recomb(inputMatrix: number[][]): MulbySharpProxy
   modulate(options?: object): MulbySharpProxy
   tint(color: string | object): MulbySharpProxy
   greyscale(greyscale?: boolean): MulbySharpProxy
   grayscale(grayscale?: boolean): MulbySharpProxy
+  pipelineColorspace(colorspace: string): MulbySharpProxy
+  toColorspace(colorspace: string): MulbySharpProxy
+  removeAlpha(): MulbySharpProxy
+  ensureAlpha(alpha?: number): MulbySharpProxy
+  extractChannel(channel: number | 'red' | 'green' | 'blue' | 'alpha'): MulbySharpProxy
+  joinChannel(images: string | ArrayBuffer | Uint8Array | Array<string | ArrayBuffer | Uint8Array>, options?: object): MulbySharpProxy
+  bandbool(boolOp: 'and' | 'or' | 'eor'): MulbySharpProxy
   composite(images: object[]): MulbySharpProxy
   png(options?: object): MulbySharpProxy
   jpeg(options?: object): MulbySharpProxy
@@ -1197,7 +1835,15 @@ interface MulbySharpProxy {
   gif(options?: object): MulbySharpProxy
   tiff(options?: object): MulbySharpProxy
   avif(options?: object): MulbySharpProxy
+  heif(options?: object): MulbySharpProxy
+  raw(options?: object): MulbySharpProxy
   withMetadata(options?: object): MulbySharpProxy
+  keepExif(): MulbySharpProxy
+  withExif(exif: object): MulbySharpProxy
+  keepIccProfile(): MulbySharpProxy
+  withIccProfile(icc: string, options?: object): MulbySharpProxy
+  timeout(options: { seconds: number }): MulbySharpProxy
+  tile(options?: object): MulbySharpProxy
   clone(): MulbySharpProxy
   toBuffer(options?: object): Promise<ArrayBuffer>
   toFile(fileOut: string): Promise<{ format: string; width: number; height: number; channels: number; size: number }>

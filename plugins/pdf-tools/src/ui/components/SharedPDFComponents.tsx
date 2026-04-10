@@ -57,6 +57,7 @@ interface PDFUploadAreaProps {
     title?: string;
     subTitle?: string;
     icon?: React.ReactNode;
+    onFileDrop?: (paths: string[], rawFiles?: File[]) => void;
     compact?: boolean; // For when there is a list but we still want an upload button? Or just full page.
 }
 
@@ -64,16 +65,102 @@ export const PDFUploadArea: React.FC<PDFUploadAreaProps> = ({
     onClick,
     title = "点击选择 PDF 文件",
     subTitle = "或将文件拖放到此处",
-    icon
+    icon,
+    onFileDrop
 }) => {
+    const [isDragging, setIsDragging] = useState(false);
+
+    const parseDroppedPathText = (raw: string): string[] => {
+        if (!raw) return [];
+
+        const lines = raw
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .filter(line => !line.startsWith('#'));
+
+        return lines.map(line => {
+            if (line.startsWith('file://')) {
+                try {
+                    return decodeURIComponent(line.replace(/^file:\/\//, ''));
+                } catch {
+                    return line.replace(/^file:\/\//, '');
+                }
+            }
+            return line;
+        });
+    };
+
+    const collectFilePaths = (event: React.DragEvent<HTMLDivElement>): string[] => {
+        const dt = event.dataTransfer;
+        if (!dt) return [];
+
+        const candidates = new Set<string>();
+
+        const fileList = dt.files;
+        for (let i = 0; i < (fileList?.length || 0); i++) {
+            const file = fileList[i] as File & { path?: string };
+            if (typeof file.path === 'string' && file.path.length > 0) {
+                candidates.add(file.path);
+            }
+        }
+
+        const uriList = dt.getData('text/uri-list');
+        for (const path of parseDroppedPathText(uriList)) {
+            candidates.add(path);
+        }
+
+        const plainText = dt.getData('text/plain');
+        for (const path of parseDroppedPathText(plainText)) {
+            candidates.add(path);
+        }
+
+        return [...candidates].filter(Boolean);
+    };
+
+    const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setIsDragging(false);
+
+        if (!onFileDrop) {
+            return;
+        }
+
+        const dt = event.dataTransfer;
+        const filePaths = collectFilePaths(event);
+        const rawFiles = dt?.files ? Array.from(dt.files) : [];
+
+        if (filePaths.length > 0 || rawFiles.length > 0) {
+            onFileDrop(filePaths, rawFiles);
+        }
+    };
+
     return (
         <div
             onClick={onClick}
+            onDragOver={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsDragging(true);
+            }}
+            onDragEnter={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setIsDragging(true);
+            }}
+            onDragLeave={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                setIsDragging(false);
+            }}
+            onDrop={handleDrop}
             style={{
                 flex: 1,
-                background: 'rgba(255,255,255,0.5)',
+                background: isDragging ? 'rgba(0, 122, 255, 0.06)' : 'rgba(255,255,255,0.5)',
                 borderRadius: '24px',
-                border: '3px dashed rgba(0, 122, 255, 0.2)',
+                border: `3px dashed ${isDragging ? 'var(--primary-color)' : 'rgba(0, 122, 255, 0.2)'}`,
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -88,8 +175,8 @@ export const PDFUploadArea: React.FC<PDFUploadAreaProps> = ({
                 e.currentTarget.style.transform = 'scale(0.99)';
             }}
             onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.5)';
-                e.currentTarget.style.borderColor = 'rgba(0, 122, 255, 0.2)';
+                e.currentTarget.style.background = isDragging ? 'rgba(0, 122, 255, 0.06)' : 'rgba(255,255,255,0.5)';
+                e.currentTarget.style.borderColor = isDragging ? 'var(--primary-color)' : 'rgba(0, 122, 255, 0.2)';
                 e.currentTarget.style.transform = 'none';
             }}
         >

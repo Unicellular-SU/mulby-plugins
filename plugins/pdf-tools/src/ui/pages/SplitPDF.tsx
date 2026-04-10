@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Scissors, Plus, Trash2, ArrowRight, LayoutGrid, List } from 'lucide-react';
 import { PDFHeader, PDFUploadArea, PDFPageThumbnail } from '../components/SharedPDFComponents';
 import { useMulby } from '../hooks/useMulby';
@@ -16,6 +16,48 @@ const SplitPDF: React.FC = () => {
     const [mode, setMode] = useState<'auto' | 'manual'>('auto');
     const [ranges, setRanges] = useState<SplitRange[]>([]);
     const [splitting, setSplitting] = useState(false);
+    const appliedInitRef = useRef(false);
+
+    const loadFile = async (filePath: string) => {
+        setFile(filePath);
+        try {
+            const nextInfo = await window.pdfApi?.getPDFInfo(filePath);
+            setInfo(nextInfo || null);
+            setRanges([{ start: 1, end: nextInfo?.pageCount || 1, name: 'part_1' }]);
+
+            const doc = await pdfService.getDocument(filePath);
+            setPdfDoc(doc);
+        } catch (error) {
+            console.error(error);
+            notification.show('读取PDF失败', 'error');
+        }
+    };
+
+    const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
+        const pdfPath = paths.find(path => /\.pdf$/i.test(path));
+        if (pdfPath) {
+            await loadFile(pdfPath);
+            return;
+        }
+
+        const droppedPdf = rawFiles.find(file => file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+        if (!droppedPdf) {
+            notification.show('请拖入 PDF 文件', 'warning');
+            return;
+        }
+
+        try {
+            const bytes = new Uint8Array(await droppedPdf.arrayBuffer());
+            const tempPath = await window.pdfApi?.saveTempFileFromDrop(droppedPdf.name || 'dropped.pdf', bytes);
+            if (!tempPath) {
+                notification.show('拖放文件读取失败，请重试', 'error');
+                return;
+            }
+            await loadFile(tempPath);
+        } catch (error) {
+            notification.show('拖放文件读取失败，请重试', 'error');
+        }
+    };
 
     const handleSelectFile = async () => {
         const result = await dialog.showOpenDialog({
@@ -26,23 +68,40 @@ const SplitPDF: React.FC = () => {
 
         if (result && result.length > 0) {
             const filePath = result[0];
-            setFile(filePath);
-
-            try {
-                // Get info
-                const info = await window.pdfApi?.getPDFInfo(filePath);
-                setInfo(info || null);
-                setRanges([{ start: 1, end: info?.pageCount || 1, name: 'part_1' }]);
-
-                // Load doc for preview
-                const doc = await pdfService.getDocument(filePath);
-                setPdfDoc(doc);
-            } catch (error) {
-                console.error(error);
-                notification.show('读取PDF失败', 'error');
-            }
+            await loadFile(filePath);
         }
     };
+
+    useEffect(() => {
+        const applyFromInit = (payload?: { input?: string; attachments?: Array<{ path?: string }> }) => {
+            if (appliedInitRef.current) return;
+            const attachmentPath = payload?.attachments?.find(item => typeof item.path === 'string' && /\.pdf$/i.test(item.path || ''))?.path;
+            const inputPath = typeof payload?.input === 'string' && /\.pdf$/i.test(payload.input) ? payload.input : undefined;
+            const initPath = attachmentPath || inputPath;
+            if (!initPath) return;
+            appliedInitRef.current = true;
+            void loadFile(initPath);
+        };
+
+        const off = window.mulby?.onPluginInit?.((payload) => {
+            applyFromInit(payload);
+        });
+
+        void (async () => {
+            try {
+                const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+                applyFromInit(res?.data as { input?: string; attachments?: Array<{ path?: string }> } | undefined);
+            } catch {
+                // host not ready, ignore
+            }
+        })();
+
+        return () => {
+            if (typeof off === 'function') {
+                off();
+            }
+        };
+    }, []);
 
     const handleSplit = async () => {
         if (!file) return;
@@ -102,7 +161,7 @@ const SplitPDF: React.FC = () => {
             />
 
             {!file ? (
-                <PDFUploadArea onClick={handleSelectFile} title="点击选择 PDF 文件" />
+                <PDFUploadArea onClick={handleSelectFile} title="点击选择 PDF 文件" onFileDrop={(paths, rawFiles) => { void handleDroppedFiles(paths, rawFiles); }} />
             ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     {/* Settings Area */}

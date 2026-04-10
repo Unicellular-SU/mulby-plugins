@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import MainLayout from './components/Layout/MainLayout';
 import './styles/global.css';
 
@@ -13,6 +13,35 @@ import CompressPDF from './pages/CompressPDF';
 
 const App: React.FC = () => {
   const [activePath, setActivePath] = useState('merge');
+  const appliedInitRef = useRef(false);
+
+  useEffect(() => {
+    const applyInitRoute = (payload?: { featureCode?: string; input?: string; attachments?: Array<{ path?: string }> }) => {
+      if (appliedInitRef.current) return;
+      const hasPdf = Boolean(
+        payload?.attachments?.some(item => typeof item.path === 'string' && /\.pdf$/i.test(item.path || '')) ||
+        (typeof payload?.input === 'string' && /\.pdf$/i.test(payload.input))
+      );
+
+      if (payload?.featureCode === 'split' || hasPdf) {
+        setActivePath('split');
+        appliedInitRef.current = true;
+      }
+    };
+
+    window.mulby?.onPluginInit?.((payload) => {
+      applyInitRoute(payload);
+    });
+
+    void (async () => {
+      try {
+        const res = await window.mulby?.host?.call('pdf-tools', 'getPendingInit');
+        applyInitRoute(res?.data as { featureCode?: string; input?: string; attachments?: Array<{ path?: string }> } | undefined);
+      } catch {
+        // host not ready, ignore
+      }
+    })();
+  }, []);
 
   const renderContent = () => {
     switch (activePath) {

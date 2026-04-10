@@ -100,6 +100,34 @@ const Watermark: React.FC = () => {
         }
     };
 
+    const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
+        const pathPdfs = paths.filter(path => /\.pdf$/i.test(path));
+        const tempFiles: string[] = [];
+
+        for (const rawFile of rawFiles) {
+            const isPdf = rawFile.type === 'application/pdf' || /\.pdf$/i.test(rawFile.name || '');
+            if (!isPdf) continue;
+
+            const hasPath = typeof (rawFile as File & { path?: string }).path === 'string' && Boolean((rawFile as File & { path?: string }).path);
+            if (hasPath) continue;
+
+            try {
+                const bytes = new Uint8Array(await rawFile.arrayBuffer());
+                const tempPath = await window.pdfApi?.saveTempFileFromDrop(rawFile.name || 'dropped.pdf', bytes);
+                if (tempPath) tempFiles.push(tempPath);
+            } catch {
+                // ignore single file persistence failure and continue others
+            }
+        }
+
+        const finalFiles = [...new Set([...pathPdfs, ...tempFiles])];
+        if (!finalFiles.length) {
+            notification.show('请拖入 PDF 文件', 'warning');
+            return;
+        }
+        setFiles(prev => [...new Set([...prev, ...finalFiles])]);
+    };
+
     const handleSelectImage = async () => {
         const result = await dialog.showOpenDialog({
             title: '选择图片水印',
@@ -166,7 +194,7 @@ const Watermark: React.FC = () => {
             />
 
             {files.length === 0 ? (
-                <PDFUploadArea onClick={handleSelectFiles} />
+                <PDFUploadArea onClick={handleSelectFiles} onFileDrop={(paths, rawFiles) => { void handleDroppedFiles(paths, rawFiles); }} />
             ) : (
                 <div style={{ flex: 1, display: 'flex', gap: '16px', overflow: 'hidden' }}>
 

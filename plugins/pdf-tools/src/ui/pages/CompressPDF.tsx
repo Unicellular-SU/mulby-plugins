@@ -150,6 +150,24 @@ const CompressPDF: React.FC = () => {
     const [processing, setProcessing] = useState(false);
     const [qualityLevel, setQualityLevel] = useState<'high' | 'medium' | 'low'>('medium');
 
+    const addFiles = (incoming: string[]) => {
+        const uniqueIncoming = incoming.filter(path => /\.pdf$/i.test(path));
+        if (!uniqueIncoming.length) return;
+
+        const existing = new Set(files);
+        const appended = uniqueIncoming.filter(path => !existing.has(path));
+        if (!appended.length) return;
+
+        setFiles(prev => [...prev, ...appended]);
+        setStatusMap(prev => {
+            const next = { ...prev };
+            appended.forEach(path => {
+                next[path] = next[path] || { status: 'pending', progress: 0 };
+            });
+            return next;
+        });
+    };
+
     const handleAddFiles = async () => {
         const result = await dialog.showOpenDialog({
             title: '选择 PDF 文件',
@@ -158,16 +176,36 @@ const CompressPDF: React.FC = () => {
         });
 
         if (result && result.length > 0) {
-            const newFiles = result.filter(f => !files.includes(f));
-            setFiles(prev => [...prev, ...newFiles]);
-
-            // Initialize status for new files
-            const newStatusMap = { ...statusMap };
-            newFiles.forEach(f => {
-                newStatusMap[f] = { status: 'pending', progress: 0 };
-            });
-            setStatusMap(newStatusMap);
+            addFiles(result);
         }
+    };
+
+    const handleDroppedFiles = async (paths: string[], rawFiles: File[] = []) => {
+        const pathPdfs = paths.filter(path => /\.pdf$/i.test(path));
+        const tempFiles: string[] = [];
+
+        for (const rawFile of rawFiles) {
+            const isPdf = rawFile.type === 'application/pdf' || /\.pdf$/i.test(rawFile.name || '');
+            if (!isPdf) continue;
+
+            const hasPath = typeof (rawFile as File & { path?: string }).path === 'string' && Boolean((rawFile as File & { path?: string }).path);
+            if (hasPath) continue;
+
+            try {
+                const bytes = new Uint8Array(await rawFile.arrayBuffer());
+                const tempPath = await window.pdfApi?.saveTempFileFromDrop(rawFile.name || 'dropped.pdf', bytes);
+                if (tempPath) tempFiles.push(tempPath);
+            } catch {
+                // ignore single file persistence failure and continue others
+            }
+        }
+
+        const finalFiles = [...new Set([...pathPdfs, ...tempFiles])];
+        if (!finalFiles.length) {
+            notification.show('请拖入 PDF 文件', 'warning');
+            return;
+        }
+        addFiles(finalFiles);
     };
 
     const handleRemoveFile = (index: number) => {
@@ -325,7 +363,11 @@ const CompressPDF: React.FC = () => {
             )}
 
             {files.length === 0 ? (
-                <PDFUploadArea onClick={handleAddFiles} title="点击添加 PDF 文件" />
+                <PDFUploadArea
+                    onClick={handleAddFiles}
+                    title="点击添加 PDF 文件"
+                    onFileDrop={(paths, rawFiles) => { void handleDroppedFiles(paths, rawFiles); }}
+                />
             ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     <div style={{ flex: 1, overflowY: 'auto', paddingRight: '4px' }}>

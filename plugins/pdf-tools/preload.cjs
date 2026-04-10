@@ -5,6 +5,7 @@ const { PDFDocument, degrees, rgb, StandardFonts, PDFName, PDFDict, PDFRawStream
 const fs = require('fs');
 const fsPromises = fs.promises;
 const path = require('path');
+const os = require('os');
 const { Document, Packer, Paragraph, TextRun } = require('docx');
 const PptxGenJS = require('pptxgenjs');
 const XLSX = require('xlsx');
@@ -46,6 +47,22 @@ window.pdfApi = {
             return filePath;
         } catch (error) {
             throw new Error(`保存文件失败: ${error.message}`);
+        }
+    },
+
+    saveTempFileFromDrop: async (fileName, data) => {
+        try {
+            const safeName = String(fileName || 'dropped.pdf').replace(/[^\w.\-()\u4e00-\u9fa5]/g, '_');
+            const ext = path.extname(safeName).toLowerCase();
+            const base = ext ? safeName.slice(0, -ext.length) : safeName;
+            const finalName = `${base || 'dropped'}${ext || '.pdf'}`;
+            const dir = path.join(os.tmpdir(), 'mulby-pdf-tools-drop');
+            await fsPromises.mkdir(dir, { recursive: true });
+            const tempPath = path.join(dir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${finalName}`);
+            await fsPromises.writeFile(tempPath, Buffer.from(data));
+            return tempPath;
+        } catch (error) {
+            throw new Error(`保存拖放临时文件失败: ${error.message}`);
         }
     },
 
