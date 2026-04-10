@@ -20,6 +20,7 @@ CLEAN_UP=true
 DRY_RUN=false
 SANDBOX_MODE=false
 GITHUB_REPO=""  # Optional: owner/repo format for generating real GitHub URLs
+RELEASE_TAG=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -40,6 +41,10 @@ while [[ $# -gt 0 ]]; do
       GITHUB_REPO="$2"  # Format: owner/repo
       shift 2
       ;;
+    --release-tag)
+      RELEASE_TAG="$2"  # Format: vYYYY.MM.DD-HHmm
+      shift 2
+      ;;
     --help)
       echo "Usage: ./build-local.sh [OPTIONS]"
       echo ""
@@ -47,7 +52,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --no-cleanup    Keep build artifacts and node_modules (default: cleanup)"
       echo "  --dry-run       Show what would be done without executing"
       echo "  --sandbox       Run in a temporary directory (safest for testing)"
-      echo "  --repo OWNER/REPO  Generate GitHub download URLs (e.g., --repo Unicellular-SU/mulby_plugins)"
+      echo "  --repo OWNER/REPO  Generate GitHub download URLs (e.g., --repo Unicellular-SU/mulby-plugins)"
+      echo "  --release-tag TAG  Use a specific release tag (e.g., --release-tag v2026.04.10-1200)"
       echo "  --help          Show this help message"
       exit 0
       ;;
@@ -131,6 +137,11 @@ build_plugins() {
   PLUGINS_JSON='{"version":"1.0.0","plugins":[]}'
   FAILED_PLUGINS=()
   SUCCESS_COUNT=0
+  EFFECTIVE_RELEASE_TAG="$RELEASE_TAG"
+
+  if [ -z "$EFFECTIVE_RELEASE_TAG" ]; then
+    EFFECTIVE_RELEASE_TAG="v$(date -u +'%Y.%m.%d-%H%M')"
+  fi
   
   for plugin_dir in plugins/*/; do
     if [ -f "$plugin_dir/package.json" ]; then
@@ -175,7 +186,7 @@ build_plugins() {
             BASE_RAW="./"
             REPO_URL=""
           fi
-          node scripts/build-plugin-index-entry.js "$plugin_name" "$inplugin_file" "$BASE_RAW" "$REPO_URL" >> plugins_temp.jsonl
+          node scripts/build-plugin-index-entry.js "$plugin_name" "$inplugin_file" "$BASE_RAW" "$REPO_URL" "$EFFECTIVE_RELEASE_TAG" >> plugins_temp.jsonl
           cd - > /dev/null
         fi
       ); then

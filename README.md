@@ -1,32 +1,79 @@
-# mulby_plugins
+# Mulby Plugins
 
-Welcome to the `mulby_plugins` project! This repository is designed to manage and build a collection of plugins for the Mulby platform. Each plugin is contained within its own directory and can be built and packaged automatically using GitHub Actions.
+Mulby 插件集合仓库。每个插件位于 `plugins/<plugin-name>/`，支持统一构建、打包，并通过 GitHub Release 分发 `.inplugin` 产物。
 
-## Project Structure
+## 当前发布策略
 
-- **plugins/**: Contains all the individual plugins.
-  - **plugin-1/**: Directory for the first plugin.
-  - **plugin-2/**: Directory for the second plugin.
-- **releases/**: This folder will contain the packaged files for each plugin after they are built.
-- **.github/workflows/**: Contains the GitHub Actions workflow configuration for automated builds.
-- **.gitignore**: Specifies files and directories to be ignored by Git.
+- `.inplugin` 统一作为 GitHub Release 资产发布。
+- 发布 tag 使用时间格式：`vYYYY.MM.DD-HHmm`。
+- `plugins.json` 用于插件索引。
+- `releases/` 仅作为 CI 或本地构建时的临时输出目录（已在 `.gitignore` 忽略）。
 
-## Adding New Plugins
+## 仓库结构
 
-To add a new plugin:
+- `plugins/`：所有插件源码目录（每个插件独立维护）。
+- `scripts/`：构建、截图、索引生成脚本。
+- `.github/workflows/build.yml`：主发布工作流（`push main` 触发）。
+- `plugins.json`：插件索引文件（包含下载地址、图标、截图、元数据）。
+- `build-local.sh`：本地一键构建脚本（用于本地预检，不参与 CI 必需流程）。
 
-1. Create a new directory under the `plugins/` folder.
-2. Add a `package.json` file with the necessary metadata, including a `pack` script to handle the packaging process.
-3. Ensure that your plugin adheres to the project's structure and conventions.
+## 分支与开发流程（推荐）
 
-## Building Plugins
+建议使用 `dev` + feature 分支，避免在 `main` 直接开发：
 
-The project uses GitHub Actions to automatically build each plugin when new submissions are made. The build process will execute the `pack` script defined in each plugin's `package.json`, and the output will be placed in the `releases/` folder.
+1. 从 `dev` 拉出功能分支：
+   - `feature/<plugin-or-topic>`
+2. 功能完成后合并回 `dev` 做集成验证。
+3. 准备发布时，将 `dev` 合并到 `main`。
+4. `push main` 后由 GitHub Actions 自动打包并发布 Release。
 
-## Contributing
+## scripts 目录脚本说明
 
-Contributions are welcome! Please fork the repository and submit a pull request with your changes. Make sure to follow the project's structure and guidelines.
+### `scripts/build-all-plugins.js`
+
+- 作用：遍历 `plugins/` 下插件，执行 `npm run build`。
+- 特点：只做“构建”，不打包、不生成 `plugins.json`。
+- 用途：快速检查多个插件是否可编译通过。
+- 命令：`npm run build-all`
+
+### `scripts/screenshot-plugin-ui.js`
+
+- 作用：为有 UI 的插件自动构建并截取首屏图，输出到 `plugins/<name>/screenshots/1.png`，同时补充 `1.txt` caption。
+- 依赖：根目录安装 `puppeteer`。
+- 用途：用于补齐插件商店截图资源。
+- 命令：
+  - `npm run screenshot-plugins`（全部）
+  - `npm run screenshot-plugins -- <plugin-name>`（指定插件）
+
+### `scripts/build-plugin-index-entry.js`
+
+- 作用：根据单个插件 `manifest`/`README` 生成一条 `plugins.json` 索引记录（JSON line）。
+- 关键能力：
+  - 计算 `.inplugin` 的 `sha256`
+  - 生成 icon/screenshot 链接
+  - 生成下载链接（Release 资产地址）
+- 主要由 CI 工作流调用，不建议手工频繁调用。
+
+## `build-local.sh` 
+
+常用示例：
+
+- `./build-local.sh`
+- `./build-local.sh --repo Unicellular-SU/mulby-plugins`
+- `./build-local.sh --dry-run`
+- `./build-local.sh --no-cleanup`
+
+## 新增插件最小要求
+
+在 `plugins/<new-plugin>/` 中至少包含：
+
+- `manifest.json`
+- `package.json`（含 `build` / `pack` 脚本）
+- `src/main.ts`（后端入口）
+- `src/ui/*`（如为 UI 插件）
+- `README.md`
+- `icon.png`（建议保留可编辑 SVG 源）
 
 ## License
 
-This project is licensed under the MIT License. See the LICENSE file for more details.
+MIT
