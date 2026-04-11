@@ -1,5 +1,31 @@
 # PDF Tools Refactoring Progress
 
+## 2026-04-10
+
+### Full Page Arranger Feature
+
+#### Completed Tasks
+- **Contract & Routing**: Added `arrange` feature to `manifest.json`, backend route map, UI route map, and sidebar navigation.
+- **Backend API**: Implemented `getPDFPageMeta` and `arrangePDF` in `preload.cjs` with support for:
+  - Page reordering and deletion (via ordered page list)
+  - Per-page rotation (90-degree normalized)
+  - Page extraction export
+  - Crop modes: box crop and margin crop
+  - Export strategy: default new file + optional overwrite original
+  - Write fallback for permission/lock errors
+- **UI Implementation**: Added `PageArranger.tsx` full page with:
+  - Single PDF loading (click/drag/init payload)
+  - Drag-and-drop page reordering
+  - Multi-select page operations
+  - Batch rotation, deletion with one-step undo, extraction
+  - Crop editor with draggable rectangle handles and margin sliders
+  - Export controls with overwrite toggle
+- **Type Synchronization**: Extended `src/ui/types.ts` with arranger API request/response and page meta types.
+
+#### Verification
+- `npm run build` passed after implementation.
+- No new linter errors in changed TypeScript files.
+
 ## 2026-01-20
 
 ### PDF Compression Feature

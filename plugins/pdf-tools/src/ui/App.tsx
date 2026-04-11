@@ -10,6 +10,7 @@ import ExtractImages from './pages/ExtractImages';
 import PDFToImage from './pages/PDFToImage';
 import ConvertFormat from './pages/ConvertFormat';
 import CompressPDF from './pages/CompressPDF';
+import PageArranger from './pages/PageArranger.tsx';
 
 const App: React.FC = () => {
   const [activePath, setActivePath] = useState('merge');
@@ -18,6 +19,7 @@ const App: React.FC = () => {
   const featureRouteMap: Record<string, string> = {
     merge: 'merge',
     split: 'split',
+    arrange: 'arrange',
     compress: 'compress',
     watermark: 'watermark',
     'extract-img': 'extract-img',
@@ -70,6 +72,8 @@ const App: React.FC = () => {
         return <MergePDF />;
       case 'split':
         return <SplitPDF />;
+      case 'arrange':
+        return <PageArranger />;
       case 'watermark':
         return <Watermark />;
       case 'extract-img':

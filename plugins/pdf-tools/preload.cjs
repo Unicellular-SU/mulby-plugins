@@ -76,6 +76,104 @@ async function writeWithFallback(outputDir, fileName, data) {
     }
 }
 
+function normalizeRotateAngle(angle) {
+    const n = Number(angle);
+    if (!Number.isFinite(n)) return 0;
+    const rounded = Math.round(n / 90) * 90;
+    const wrapped = ((rounded % 360) + 360) % 360;
+    return wrapped;
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function toSafePdfFileName(rawName, fallbackName) {
+    const normalized = String(rawName || fallbackName || 'output.pdf')
+        .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
+        .trim();
+    return normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`;
+}
+
+function computeCropRect(page, crop) {
+    const pageWidth = page.getWidth();
+    const pageHeight = page.getHeight();
+    if (!crop || typeof crop !== 'object') return null;
+
+    if (crop.mode === 'box' && crop.box) {
+        const unit = crop.unit === 'pt' ? 'pt' : 'ratio';
+        let left;
+        let bottom;
+        let width;
+        let height;
+
+        if (unit === 'pt') {
+            left = Number(crop.box.left);
+            bottom = Number(crop.box.bottom);
+            width = Number(crop.box.width);
+            height = Number(crop.box.height);
+        } else {
+            const ratioLeft = clamp(Number(crop.box.left || 0), 0, 1);
+            const ratioBottom = clamp(Number(crop.box.bottom || 0), 0, 1);
+            const ratioWidth = clamp(Number(crop.box.width || 1), 0, 1);
+            const ratioHeight = clamp(Number(crop.box.height || 1), 0, 1);
+            left = ratioLeft * pageWidth;
+            bottom = ratioBottom * pageHeight;
+            width = ratioWidth * pageWidth;
+            height = ratioHeight * pageHeight;
+        }
+
+        if (!Number.isFinite(left) || !Number.isFinite(bottom) || !Number.isFinite(width) || !Number.isFinite(height)) {
+            return null;
+        }
+
+        left = clamp(left, 0, pageWidth);
+        bottom = clamp(bottom, 0, pageHeight);
+        width = clamp(width, 1, pageWidth - left);
+        height = clamp(height, 1, pageHeight - bottom);
+        return { left, bottom, width, height };
+    }
+
+    if (crop.mode === 'margin' && crop.margin) {
+        const unit = crop.unit === 'pt' ? 'pt' : 'ratio';
+        let top = Number(crop.margin.top || 0);
+        let right = Number(crop.margin.right || 0);
+        let bottom = Number(crop.margin.bottom || 0);
+        let left = Number(crop.margin.left || 0);
+
+        if (unit !== 'pt') {
+            top = clamp(top, 0, 0.95) * pageHeight;
+            right = clamp(right, 0, 0.95) * pageWidth;
+            bottom = clamp(bottom, 0, 0.95) * pageHeight;
+            left = clamp(left, 0, 0.95) * pageWidth;
+        }
+
+        const width = pageWidth - left - right;
+        const height = pageHeight - top - bottom;
+        if (width <= 1 || height <= 1) {
+            return null;
+        }
+
+        return {
+            left: clamp(left, 0, pageWidth - 1),
+            bottom: clamp(bottom, 0, pageHeight - 1),
+            width: clamp(width, 1, pageWidth),
+            height: clamp(height, 1, pageHeight),
+        };
+    }
+
+    return null;
+}
+
+async function writeOverwriteAtomically(targetPath, data) {
+    const dir = path.dirname(targetPath);
+    const base = path.basename(targetPath, '.pdf');
+    const tempPath = path.join(dir, `${base}.tmp.${Date.now()}.pdf`);
+    await fsPromises.writeFile(tempPath, data);
+    await fsPromises.rename(tempPath, targetPath);
+    return targetPath;
+}
+
 // Global Error Handlers
 process.on('uncaughtException', (err) => {
     logToFile(`[Uncaught Exception] ${err.stack || err}`);
@@ -148,6 +246,105 @@ window.pdfApi = {
             };
         } catch (error) {
             throw new Error(`获取PDF信息失败: ${error.message}`);
+        }
+    },
+
+    getPDFPageMeta: async (pdfPath) => {
+        try {
+            const pdfBytes = await fsPromises.readFile(pdfPath);
+            const pdf = await PDFDocument.load(pdfBytes);
+            const pages = pdf.getPages().map((page, index) => ({
+                index: index + 1,
+                width: page.getWidth(),
+                height: page.getHeight(),
+                rotation: page.getRotation().angle || 0,
+            }));
+            return {
+                pageCount: pages.length,
+                pages,
+            };
+        } catch (error) {
+            throw new Error(`获取PDF页面信息失败: ${error.message}`);
+        }
+    },
+
+    arrangePDF: async (options) => {
+        try {
+            const sourcePath = options?.sourcePath;
+            if (!sourcePath || typeof sourcePath !== 'string') {
+                throw new Error('缺少 sourcePath');
+            }
+
+            const sourceBytes = await fsPromises.readFile(sourcePath);
+            const sourceDoc = await PDFDocument.load(sourceBytes);
+            const sourcePageCount = sourceDoc.getPageCount();
+
+            const pagesInput = Array.isArray(options?.pages) ? options.pages : [];
+            if (!pagesInput.length) {
+                throw new Error('pages 不能为空');
+            }
+
+            const normalizedPages = pagesInput.map((item, index) => {
+                const sourceIndex = Number(item?.sourceIndex);
+                if (!Number.isInteger(sourceIndex) || sourceIndex < 1 || sourceIndex > sourcePageCount) {
+                    throw new Error(`第 ${index + 1} 项 sourceIndex 无效`);
+                }
+                return {
+                    sourceIndex,
+                    rotate: normalizeRotateAngle(item?.rotate || 0),
+                    crop: item?.crop || null,
+                };
+            });
+
+            let arrangedPages = normalizedPages;
+            if (Array.isArray(options?.extractIndices) && options.extractIndices.length > 0) {
+                arrangedPages = options.extractIndices.map((n, idx) => {
+                    const oneBased = Number(n);
+                    if (!Number.isInteger(oneBased) || oneBased < 1 || oneBased > normalizedPages.length) {
+                        throw new Error(`extractIndices 第 ${idx + 1} 项无效`);
+                    }
+                    return normalizedPages[oneBased - 1];
+                });
+            }
+
+            const targetDoc = await PDFDocument.create();
+            for (const item of arrangedPages) {
+                const [copiedPage] = await targetDoc.copyPages(sourceDoc, [item.sourceIndex - 1]);
+                if (item.rotate) {
+                    copiedPage.setRotation(degrees(item.rotate));
+                }
+
+                const cropRect = computeCropRect(copiedPage, item.crop);
+                if (cropRect) {
+                    copiedPage.setCropBox(cropRect.left, cropRect.bottom, cropRect.width, cropRect.height);
+                }
+
+                targetDoc.addPage(copiedPage);
+            }
+
+            const outputBytes = await targetDoc.save({ useObjectStreams: true });
+            const overwriteOriginal = Boolean(options?.overwriteOriginal);
+
+            if (overwriteOriginal) {
+                try {
+                    const outputPath = await writeOverwriteAtomically(sourcePath, outputBytes);
+                    return { outputPath, pageCount: arrangedPages.length, overwritten: true };
+                } catch (error) {
+                    const fallbackName = withTimestampSuffix(path.basename(sourcePath));
+                    const fallbackPath = await writeWithFallback(path.dirname(sourcePath), fallbackName, outputBytes);
+                    return { outputPath: fallbackPath, pageCount: arrangedPages.length, overwritten: false };
+                }
+            }
+
+            const outputDir = typeof options?.outputDir === 'string' && options.outputDir.trim()
+                ? options.outputDir.trim()
+                : path.dirname(sourcePath);
+            const suggestedName = options?.fileName || `${path.basename(sourcePath, '.pdf')}_arranged.pdf`;
+            const fileName = toSafePdfFileName(suggestedName, 'arranged.pdf');
+            const outputPath = await writeWithFallback(outputDir, fileName, outputBytes);
+            return { outputPath, pageCount: arrangedPages.length, overwritten: false };
+        } catch (error) {
+            throw new Error(`编排PDF失败: ${error.message}`);
         }
     },
 

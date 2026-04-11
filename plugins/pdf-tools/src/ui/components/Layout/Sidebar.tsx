@@ -8,7 +8,8 @@ import {
     FileText,
     Presentation,
     Sheet,
-    Minimize2
+    Minimize2,
+    GalleryVerticalEnd
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -19,6 +20,7 @@ interface SidebarProps {
 const NAV_ITEMS = [
     { id: 'merge', icon: Combine, label: 'PDF 合并' },
     { id: 'split', icon: Scissors, label: 'PDF 拆分' },
+    { id: 'arrange', icon: GalleryVerticalEnd, label: '页面编排器' },
     { id: 'compress', icon: Minimize2, label: 'PDF 压缩' },
     { id: 'watermark', icon: Droplet, label: 'PDF 水印' },
     { id: 'extract-img', icon: ImageIcon, label: '提取图片' },

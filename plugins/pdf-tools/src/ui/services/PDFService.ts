@@ -365,14 +365,15 @@ class PDFService {
         return 0;
     }
 
-    async renderPageToDataURL(pdfPath: string, pageNum: number, scale = 0.5): Promise<string> {
-        const cacheKey = `${pdfPath}::${pageNum}::${scale}`;
+    async renderPageToDataURL(pdfPath: string, pageNum: number, scale = 0.5, rotation = 0): Promise<string> {
+        const normalizedRotation = ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
+        const cacheKey = `${pdfPath}::${pageNum}::${scale}::${normalizedRotation}`;
         const cached = this.thumbnailCache.get(cacheKey);
         if (cached) return cached;
 
         const pdf = await this.getDocument(pdfPath);
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale, rotation: normalizedRotation });
 
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;

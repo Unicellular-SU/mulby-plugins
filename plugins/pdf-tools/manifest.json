@@ -1,7 +1,7 @@
 {
   "id": "pdf-tools",
   "name": "pdf-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
   "displayName": "PDF 工具箱",
@@ -35,6 +35,17 @@
       "cmds": [
         { "type": "keyword", "value": "pdf拆分" },
         { "type": "keyword", "value": "split pdf" },
+        { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 1 }
+      ]
+    },
+    {
+      "code": "arrange",
+      "explain": "单文件页面编排（重排/旋转/删除/提取/裁剪）",
+      "route": "arrange",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "pdf编排" },
+        { "type": "keyword", "value": "page arranger" },
         { "type": "files", "exts": [".pdf"], "minLength": 1, "maxLength": 1 }
       ]
     },

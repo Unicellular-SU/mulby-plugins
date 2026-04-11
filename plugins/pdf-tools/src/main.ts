@@ -26,6 +26,7 @@ interface PendingInitData {
 const FEATURE_ROUTE_MAP: Record<string, string> = {
   merge: 'merge',
   split: 'split',
+  arrange: 'arrange',
   compress: 'compress',
   watermark: 'watermark',
   'extract-img': 'extract-img',
