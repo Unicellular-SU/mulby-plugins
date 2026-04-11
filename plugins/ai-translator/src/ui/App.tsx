@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeftRight, Copy, Columns, Loader2, RefreshCw, Save, Settings2 } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
 import CompareView from './CompareView'
@@ -112,6 +112,8 @@ export default function App() {
   const [loadingModels, setLoadingModels] = useState(false)
   const [isTranslating, setIsTranslating] = useState(false)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+  const [isUiReady, setIsUiReady] = useState(false)
+  const didAutoTranslateRef = useRef(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -143,6 +145,7 @@ export default function App() {
       setTargetLanguage(saved.defaultTargetLanguage)
       setSelectedModelId(saved.modelId)
       await loadModels(saved.modelId)
+      setIsUiReady(true)
     })()
   }, [])
 
@@ -294,6 +297,16 @@ export default function App() {
     if (!match) return selectedModelId
     return match.providerLabel ? `${match.providerLabel} / ${match.label}` : match.label
   }, [selectedModelId, models])
+
+  useEffect(() => {
+    if (!isUiReady) return
+    if (didAutoTranslateRef.current) return
+    if (viewMode !== 'translate') return
+    if (!inputText.trim()) return
+
+    didAutoTranslateRef.current = true
+    void handleTranslate()
+  }, [inputText, isUiReady, viewMode])
 
   return (
     <div className="translator-root">
