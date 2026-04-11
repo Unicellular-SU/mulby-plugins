@@ -1,15 +1,24 @@
 /**
- * 遍历 plugins 目录下的所有插件，依次执行 npm run build。
- * 如果插件没有 package.json 或没有 build 脚本，则跳过。
+ * 多包 workspace：先在仓库根执行一次 pnpm install，再对每个有 build 脚本的插件执行 pnpm run build。
+ * 若插件没有 package.json 或没有 build 脚本，则跳过。
  */
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const pluginsDir = path.resolve(__dirname, '..', 'plugins');
+const repoRoot = path.resolve(__dirname, '..');
+const pluginsDir = path.join(repoRoot, 'plugins');
 const dirs = fs.readdirSync(pluginsDir).filter((name) => {
   return fs.statSync(path.join(pluginsDir, name)).isDirectory();
 });
+
+console.log('📦 在仓库根安装 workspace 依赖（pnpm install）...');
+try {
+  execSync('pnpm install', { cwd: repoRoot, stdio: 'inherit' });
+} catch {
+  console.error('❌ 根目录 pnpm install 失败（请确认已安装 pnpm，且与 package.json 中 packageManager 版本一致）');
+  process.exit(1);
+}
 
 let success = 0;
 let skipped = 0;
@@ -40,10 +49,9 @@ for (const dir of dirs) {
     continue;
   }
 
-  // 执行 npm run build
   console.log(`\n🔨 正在构建 ${dir} ...`);
   try {
-    execSync('npm run build', { cwd: pluginPath, stdio: 'inherit' });
+    execSync('pnpm run build', { cwd: pluginPath, stdio: 'inherit' });
     console.log(`✅ ${dir} 构建成功`);
     success++;
   } catch {

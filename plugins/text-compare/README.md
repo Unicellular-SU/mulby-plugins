@@ -40,25 +40,25 @@
 
 矢量稿为 [`assets/icon.svg`](assets/icon.svg)。根目录 [`icon.png`](icon.png)（512×512，供 `manifest.icon` 与打包使用）由 **generate-electron-icons** 流程从 SVG 栅格化生成。
 
-在插件目录执行（需已 `npm install` 以安装 `sharp`，需系统 `python3` 与 Pillow `PIL`）：
+在插件目录执行（需已 `pnpm install` 以安装 `sharp`，需系统 `python3` 与 Pillow `PIL`）：
 
 ```bash
 cd plugins/text-compare
-npm install
-npm run icons
+pnpm install
+pnpm run icons
 ```
 
-脚本默认调用 `~/.cursor/skills/generate-electron-icons/scripts/generate_electron_icons.py`；若 skill 不在该路径，可设置环境变量 `GENERATE_ELECTRON_ICONS_SCRIPT` 指向 `generate_electron_icons.py`，再将 `generated-icons/text-compare/build/icon.png` 复制为根目录 `icon.png`（`npm run icons` 已自动完成复制）。
+脚本默认调用 `~/.cursor/skills/generate-electron-icons/scripts/generate_electron_icons.py`；若 skill 不在该路径，可设置环境变量 `GENERATE_ELECTRON_ICONS_SCRIPT` 指向 `generate_electron_icons.py`，再将 `generated-icons/text-compare/build/icon.png` 复制为根目录 `icon.png`（`pnpm run icons` 已自动完成复制）。
 
-修改 `assets/icon.svg` 后请重新执行 `npm run icons` 再执行 `npm run pack`。
+修改 `assets/icon.svg` 后请重新执行 `pnpm run icons` 再执行 `pnpm run pack`。
 
 ## 构建与打包
 
 ```bash
 cd plugins/text-compare
-npm install
-npm run build
-npm run pack
+pnpm install
+pnpm run build
+pnpm run pack
 ```
 
 生成物：`text-compare-1.0.0.inplugin`（版本以 `manifest.json` 为准）。
@@ -76,7 +76,7 @@ npm run pack
 4. 使用「贴左」「贴右」从剪贴板载入；使用「左文件」「右文件」从磁盘载入（需宿主授权文件访问）。
 5. 点击「交换」，确认左右内容互换。
 6. 切换 Mulby 明暗主题，确认编辑器主题跟随。
-7. 执行 `npm run pack` 后安装 `.inplugin`，确认可正常加载。
+7. 执行 `pnpm run pack` 后安装 `.inplugin`，确认可正常加载。
 
 ## 仓库信息
 

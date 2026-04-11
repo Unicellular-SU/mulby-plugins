@@ -3,11 +3,11 @@
  * 先 build 再虚拟渲染首屏并截图，保存到 plugins/<name>/screenshots/1.png
  *
  * 使用方式（在仓库根目录）：
- *   npm run screenshot-plugins           # 为所有有 build 的插件先 build 再截图
- *   npm run screenshot-plugins -- ai-translator   # 仅指定插件
+ *   pnpm run screenshot-plugins           # 为所有有 build 的插件先 build 再截图
+ *   pnpm run screenshot-plugins -- ai-translator   # 仅指定插件
  *   node scripts/screenshot-plugin-ui.js [plugin_name...]
  *
- * 依赖：在仓库根目录执行 npm install（安装 puppeteer）
+ * 依赖：在仓库根目录执行 pnpm install（安装 puppeteer 等）
  */
 
 const fs = require('fs');
@@ -75,12 +75,11 @@ function getPluginsWithUiToScreenshot() {
   return getPluginsWithBuild().filter(hasManifestUi);
 }
 
-/** 在插件目录执行 npm install（静默）再 npm run build */
+/** 在插件目录执行 pnpm run build（需已在仓库根执行过 pnpm install） */
 function buildPlugin(pluginName) {
   const cwd = path.join(pluginsDir, pluginName);
   try {
-    execSync('npm install --include=dev', { cwd, stdio: 'pipe' });
-    execSync('npm run build', { cwd, stdio: 'inherit' });
+    execSync('pnpm run build', { cwd, stdio: 'inherit' });
     return true;
   } catch {
     return false;
@@ -151,6 +150,14 @@ async function main() {
   }
 
   console.log('待处理插件:', candidates.join(', '));
+  console.log('');
+  console.log('在仓库根安装 workspace 依赖（pnpm install）...');
+  try {
+    execSync('pnpm install', { cwd: repoRoot, stdio: 'inherit' });
+  } catch {
+    console.error('pnpm install 失败，请确认已安装 pnpm 且与 package.json 中 packageManager 一致');
+    process.exit(1);
+  }
   console.log('');
 
   for (const name of candidates) {

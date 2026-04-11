@@ -24,10 +24,10 @@
 
 ```bash
 cd plugins/batch-file-md5
-npm install
-npm run icon    # 可选：从 assets/icon.svg 生成根目录 icon.png（512×512）
-npm run build
-npm run pack
+pnpm install
+pnpm run icon    # 可选：从 assets/icon.svg 生成根目录 icon.png（512×512）
+pnpm run build
+pnpm run pack
 ```
 
 ## 在 Mulby 中验收

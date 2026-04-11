@@ -16,10 +16,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '25'
+          cache: 'pnpm'
 
       - name: Generate release tag
         id: release_meta
@@ -37,8 +43,8 @@ jobs:
             libcairo2 libasound2t64 libxrandr2 libxcomposite1 libxcursor1 \
             libxfixes3 libxi6 libxtst6 libx11-xcb1 libdrm2 fonts-noto-color-emoji
 
-      - name: Install root dependencies (puppeteer)
-        run: npm install
+      - name: Install dependencies (pnpm workspace)
+        run: pnpm install --frozen-lockfile
 
       - name: Create releases directory
         run: mkdir -p releases
@@ -57,8 +63,7 @@ jobs:
               (
                 cd "$plugin_dir" || exit 1
                 
-                npm install --include=dev || exit 1
-                npm run build || exit 1
+                pnpm run build || exit 1
 
                 # 如果 screenshots 目录不存在或为空，则自动生成截图
                 if [ ! -d "screenshots" ] || [ -z "$(ls -A screenshots 2>/dev/null)" ]; then
@@ -68,7 +73,7 @@ jobs:
                   cd "$plugin_dir" || exit 1
                 fi
 
-                npm run pack || exit 1
+                pnpm run pack || exit 1
                 
                 # Find and move the inplugin file
                 inplugin_file=$(ls -1 *.inplugin 2>/dev/null | head -n1)

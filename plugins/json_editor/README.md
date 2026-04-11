@@ -135,25 +135,25 @@ city: 北京
 ### 安装依赖
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 开发模式
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 ### 构建
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 ### 打包
 
 ```bash
-npm run pack
+pnpm run pack
 ```
 
 ## 项目结构
@@ -161,7 +161,7 @@ npm run pack
 ```
 json_editor/
 ├── manifest.json              # 插件配置
-├── package.json               # npm 配置
+├── package.json               # 包配置（pnpm）
 ├── src/
 │   ├── main.ts                # 后端入口
 │   ├── ui/

@@ -38,9 +38,9 @@
 ## 开发
 
 ```bash
-npm install   # 安装依赖
-npm run build # 构建
-npm run pack  # 打包 .inplugin
+pnpm install   # 安装依赖
+pnpm run build # 构建
+pnpm run pack  # 打包 .inplugin
 ```
 
 ## 项目结构

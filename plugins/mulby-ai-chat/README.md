@@ -57,9 +57,9 @@
 ## 构建
 
 ```bash
-npm install
-npm run build
-npm run pack   # 打包为 .inplugin
+pnpm install
+pnpm run build
+pnpm run pack   # 打包为 .inplugin
 ```
 
 ## 注意事项

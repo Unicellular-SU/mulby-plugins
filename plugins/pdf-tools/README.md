@@ -49,9 +49,9 @@ Mulby 的 PDF 工具箱插件，提供常见文档处理能力：合并、拆分
 ## 开发
 
 ```bash
-npm install
-npm run build
-npm run pack
+pnpm install
+pnpm run build
+pnpm run pack
 ```
 
 ## 验收建议

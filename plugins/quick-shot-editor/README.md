@@ -24,7 +24,7 @@
 ## 开发
 
 ```bash
-npm install
-npm run build
-npm run pack
+pnpm install
+pnpm run build
+pnpm run pack
 ```

@@ -41,9 +41,9 @@
 ## 构建与打包
 
 ```bash
-npm install
-npm run build
-npm run pack
+pnpm install
+pnpm run build
+pnpm run pack
 ```
 
 ## 依赖与前置条件

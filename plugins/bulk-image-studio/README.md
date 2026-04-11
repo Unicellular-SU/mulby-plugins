@@ -7,7 +7,7 @@ Mulby 插件：在独立窗口中完成**批量图片处理**、**多图合并**
 - 后端使用 **sharp**（含原生二进制）、**pdf-lib**、**svgo**、**gif-encoder-2**、**to-ico** 等，均已在 `package.json` 的 `dependencies` 中声明。
 - **`mulby pack` 生成的 `.inplugin` 体积较小，通常不会打入完整 `node_modules`**。若安装后在 Mulby 中报错无法加载 `sharp`，请在**插件解压/安装目录**执行：
   ```bash
-  npm install
+  pnpm install
   ```
   然后再在 Mulby 中启用插件。
 - 部分格式（TIFF、AVIF、ICO、GIF 等）是否可用取决于当前平台的 **libvips / sharp** 构建；若单张失败，批量结果里会记录该文件错误信息。
@@ -64,9 +64,9 @@ Mulby 插件：在独立窗口中完成**批量图片处理**、**多图合并**
 
 ```bash
 cd bulk-image-studio
-npm install
-npm run build    # esbuild 后端 + Vite UI
-npm run pack     # 生成 bulk-image-studio-1.0.0.inplugin
+pnpm install
+pnpm run build    # esbuild 后端 + Vite UI
+pnpm run pack     # 生成 bulk-image-studio-1.0.0.inplugin
 ```
 
 - 后端入口：`src/main.ts` → `dist/main.js`（`sharp` 在 esbuild 中 **external**）。

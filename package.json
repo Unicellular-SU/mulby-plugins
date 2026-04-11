@@ -2,6 +2,7 @@
   "name": "mulby_plugins",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@9.15.4",
   "scripts": {
     "build-all": "node scripts/build-all-plugins.js",
     "screenshot-plugins": "node scripts/screenshot-plugin-ui.js"

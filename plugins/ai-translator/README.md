@@ -28,8 +28,8 @@ node ../packages/mulby-cli/dist/index.js create ai-translator
 ## 开发与打包
 
 ```bash
-npm install
-npm run dev
-npm run build
-npm run pack
+pnpm install
+pnpm run dev
+pnpm run build
+pnpm run pack
 ```

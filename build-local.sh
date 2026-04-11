@@ -142,7 +142,12 @@ build_plugins() {
   if [ -z "$EFFECTIVE_RELEASE_TAG" ]; then
     EFFECTIVE_RELEASE_TAG="v$(date -u +'%Y.%m.%d-%H%M')"
   fi
-  
+
+  if [ "$DRY_RUN" = false ]; then
+    print_info "Installing workspace dependencies (pnpm)..."
+    pnpm install --frozen-lockfile || exit 1
+  fi
+
   for plugin_dir in plugins/*/; do
     if [ -f "$plugin_dir/package.json" ]; then
       plugin_name=$(basename "$plugin_dir")
@@ -157,14 +162,11 @@ build_plugins() {
       if (
         cd "$plugin_dir" || exit 1
         
-        print_info "  Installing dependencies..."
-        npm install --include=dev --legacy-peer-deps 2>&1 | grep -E "(added|up to date|npm warn)" | tail -1
-        
         print_info "  Building..."
-        npm run build 2>&1 | tail -3
+        pnpm run build 2>&1 | tail -3
         
         print_info "  Packing..."
-        npm run pack 2>&1 | grep -E "(打包|✓|Error)" || true
+        pnpm run pack 2>&1 | grep -E "(打包|✓|Error)" || true
         
         # Find and move the inplugin file
         inplugin_file=$(ls -1 *.inplugin 2>/dev/null | head -n1)
