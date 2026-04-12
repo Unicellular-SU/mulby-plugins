@@ -1,0 +1,93 @@
+{
+  "id": "git-download-helper",
+  "name": "git-download-helper",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "Git下载助手",
+  "description": "将 GitHub 文件链接转换为国内加速下载链接，并调用本地下载器或浏览器下载。",
+  "type": "utility",
+  "main": "dist/main.js",
+  "icon": "icon.png",
+  "features": [
+    {
+      "code": "download-github-url",
+      "explain": "下载 GitHub 链接",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^https?://(?:github\\.com|raw\\.githubusercontent\\.com)/\\S+$",
+          "label": "加速下载 GitHub 链接"
+        }
+      ]
+    },
+    {
+      "code": "download-from-clipboard",
+      "explain": "从剪贴板下载 GitHub 链接",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "git下载助手"
+        },
+        {
+          "type": "keyword",
+          "value": "github下载"
+        }
+      ]
+    },
+    {
+      "code": "set-accelerator-prefix",
+      "explain": "设置加速前缀",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^(?:gdh|git下载)\\s+prefix\\s+https?://\\S+$",
+          "label": "设置加速前缀"
+        }
+      ]
+    },
+    {
+      "code": "set-downloader-command",
+      "explain": "设置下载器命令",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^(?:gdh|git下载)\\s+cmd\\s+.+$",
+          "label": "设置下载器命令"
+        }
+      ]
+    },
+    {
+      "code": "set-downloader-args",
+      "explain": "设置下载器参数模板",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^(?:gdh|git下载)\\s+args\\s+.+$",
+          "label": "设置下载器参数模板"
+        }
+      ]
+    },
+    {
+      "code": "clear-downloader-config",
+      "explain": "清除下载器配置",
+      "cmds": [
+        {
+          "type": "regex",
+          "match": "^(?:gdh|git下载)\\s+clear$",
+          "label": "清除下载器配置"
+        }
+      ]
+    },
+    {
+      "code": "show-config",
+      "explain": "查看当前配置",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "gdh config"
+        }
+      ]
+    }
+  ]
+}

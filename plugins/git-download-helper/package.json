@@ -1,0 +1,13 @@
+{
+  "name": "git-download-helper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "mulby dev",
+    "build": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",
+    "pack": "mulby pack"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11"
+  }
+}
