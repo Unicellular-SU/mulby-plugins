@@ -16,6 +16,8 @@ import type {
 } from './pipeline/types'
 import { hostLog, PLUGIN_LOG, summarizeFiles, summarizeSteps } from './plugin-log'
 
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 const PLUGIN_TAG = PLUGIN_LOG
@@ -71,8 +73,8 @@ export async function run(context: PluginContext) {
   })
 }
 
-export const host = {
-  async getPendingInit(_context: PluginContext): Promise<{ route: string; paths: string[] }> {
+export const rpc = {
+  async getPendingInit(): Promise<{ route: string; paths: string[] }> {
     const data = { route: pendingRoute ?? 'batch', paths: [...pendingPaths] }
     hostLog('getPendingInit', {
       route: data.route,
@@ -85,83 +87,83 @@ export const host = {
     return data
   },
 
-  async batchProcess(context: PluginContext, payload: BatchProcessPayload): Promise<BatchProcessResult> {
+  async batchProcess(payload: BatchProcessPayload): Promise<BatchProcessResult> {
     hostLog('batchProcess:incoming', {
       payloadDefined: payload != null,
       nameSuffix: payload?.nameSuffix,
       fileSummary: summarizeFiles(payload?.files),
       stepsSummary: summarizeSteps(payload?.steps),
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     return runBatchProcess(fs, payload)
   },
 
-  async batchCommit(context: PluginContext, payload: BatchCommitPayload): Promise<BatchCommitResult> {
+  async batchCommit(payload: BatchCommitPayload): Promise<BatchCommitResult> {
     hostLog('batchCommit:incoming', {
       mode: payload?.mode,
       otherDir: payload?.otherDir,
       nameSuffix: payload?.nameSuffix,
       itemCount: payload?.items?.length,
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     return commitBatchStaging(fs, payload)
   },
 
-  async batchDiscardStaging(context: PluginContext, payload: BatchDiscardPayload): Promise<void> {
+  async batchDiscardStaging(payload: BatchDiscardPayload): Promise<void> {
     hostLog('batchDiscardStaging', { itemCount: payload?.items?.length })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     return discardBatchStaging(fs, payload)
   },
 
-  async mergePdf(context: PluginContext, payload: MergePdfPayload): Promise<void> {
+  async mergePdf(payload: MergePdfPayload): Promise<void> {
     hostLog('mergePdf:incoming', {
       outPath: payload?.outPath,
       fileSummary: summarizeFiles(payload?.files),
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     const dir = path.dirname(payload.outPath)
     await Promise.resolve(fs.mkdir(dir))
     await mergeToPdf(fs, payload)
   },
 
-  async mergeStrip(context: PluginContext, payload: MergeStripPayload): Promise<void> {
+  async mergeStrip(payload: MergeStripPayload): Promise<void> {
     hostLog('mergeStrip:incoming', {
       outPath: payload?.outPath,
       direction: payload?.direction,
       fileSummary: summarizeFiles(payload?.files),
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     const dir = path.dirname(payload.outPath)
     await Promise.resolve(fs.mkdir(dir))
     await mergeToStrip(fs, payload)
   },
 
-  async mergeGif(context: PluginContext, payload: MergeGifPayload): Promise<void> {
+  async mergeGif(payload: MergeGifPayload): Promise<void> {
     hostLog('mergeGif:incoming', {
       outPath: payload?.outPath,
       frameDelayMs: payload?.frameDelayMs,
       loop: payload?.loop,
       fileSummary: summarizeFiles(payload?.files),
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     const dir = path.dirname(payload.outPath)
     await Promise.resolve(fs.mkdir(dir))
     await mergeToGif(fs, payload)
   },
 
-  async manualCropApply(context: PluginContext, payload: ManualCropPayload): Promise<void> {
+  async manualCropApply(payload: ManualCropPayload): Promise<void> {
     hostLog('manualCropApply:incoming', {
       filePath: payload?.filePath,
       filePathType: payload?.filePath === undefined ? 'undefined' : typeof payload?.filePath,
       outPath: payload?.outPath,
       rect: payload?.rect,
     })
-    const fs = context.api.filesystem
+    const fs = mulby.filesystem
     const dir = path.dirname(payload.outPath)
     await Promise.resolve(fs.mkdir(dir))
     await applyManualCrop(fs, payload)
   },
 }
 
-const plugin = { onLoad, onUnload, onEnable, onDisable, run, host }
+const plugin = { onLoad, onUnload, onEnable, onDisable, run }
 export default plugin

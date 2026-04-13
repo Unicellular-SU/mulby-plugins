@@ -1,5 +1,7 @@
 /// <reference path="./types/mulby.d.ts" />
 // PluginContext 类型由 src/types/mulby.d.ts 提供
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 export function onLoad() {
@@ -19,18 +21,17 @@ export function onDisable() {
 }
 
 export async function run(context: PluginContext) {
-  const { notification } = context.api
   if (context.featureCode === 'settings') {
-    notification.show('已打开翻译设置')
+    mulby.notification.show('已打开翻译设置')
     return
   }
 
   if (context.featureCode === 'compare') {
-    notification.show('已打开同屏翻译')
+    mulby.notification.show('已打开同屏翻译')
     return
   }
 
-  notification.show('AI 翻译已启动')
+  mulby.notification.show('AI 翻译已启动')
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

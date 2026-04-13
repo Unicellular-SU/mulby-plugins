@@ -1,16 +1,9 @@
 type Attachment = { path?: string; name?: string }
 type ClipboardFile = { path?: string; name?: string }
 type InputPayloadLike = { text?: unknown; input?: unknown; attachments?: unknown }
+declare const mulby: any;
 
 interface PluginContext {
-  api: {
-    notification: {
-      show: (message: string, type?: string) => void
-    }
-    clipboard?: {
-      readFiles?: () => ClipboardFile[] | Promise<ClipboardFile[]>
-    }
-  }
   input?: unknown
   featureCode?: string
   attachments?: Attachment[]
@@ -94,9 +87,9 @@ async function resolveInitPayload(context: PluginContext): Promise<PendingInitDa
     new Map(mergedAttachments.map((item) => [`${item.path || ''}|${item.name || ''}`, item])).values(),
   );
 
-  if (!dedupedAttachments.length && context.api.clipboard?.readFiles) {
+  if (!dedupedAttachments.length && mulby.clipboard?.readFiles) {
     try {
-      const clipboardFiles = await context.api.clipboard.readFiles();
+      const clipboardFiles = await mulby.clipboard.readFiles();
       const clipboardAttachments = normalizeAttachments(clipboardFiles).filter((item) =>
         typeof item.path === 'string' ? /\.pdf$/i.test(item.path) : true,
       );
@@ -131,20 +124,19 @@ export function onDisable() {
 }
 
 export async function run(context: PluginContext) {
-  const { notification } = context.api;
   pendingInit = await resolveInitPayload(context);
-
-  notification.show('PDF 工具箱已就绪');
+  mulby.notification.show('PDF 工具箱已就绪');
 }
 
-export async function getPendingInit() {
-  return pendingInit;
+export const rpc = {
+  async getPendingInit() {
+    return pendingInit;
+  },
+  async clearPendingInit() {
+    pendingInit = null;
+    return true;
+  },
 }
 
-export async function clearPendingInit() {
-  pendingInit = null;
-  return true;
-}
-
-const plugin = { onLoad, onUnload, onEnable, onDisable, run, getPendingInit, clearPendingInit }
+const plugin = { onLoad, onUnload, onEnable, onDisable, run }
 export default plugin

@@ -1,5 +1,7 @@
 /// <reference path="./types/mulby.d.ts" />
 
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 const PLUGIN_TAG = '[word-counter]'
@@ -29,7 +31,7 @@ export async function run(context: PluginContext) {
   const input = context.input?.trim() ?? ''
 
   if (featureCode === 'count-selection' && input.length === 0) {
-    context.api.notification.show('未检测到选中文本，请先选中内容后再试一次。', 'warning')
+    mulby.notification.show('未检测到选中文本，请先选中内容后再试一次。', 'warning')
     return
   }
 

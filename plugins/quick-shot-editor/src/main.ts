@@ -1,5 +1,7 @@
 /// <reference path="./types/mulby.d.ts" />
 
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 const PLUGIN_TAG = '[quick-shot-editor]'

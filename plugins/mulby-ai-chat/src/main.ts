@@ -1,4 +1,5 @@
 // 插件后端入口（不依赖 PluginContext 类型导入，直接使用 any）
+declare const mulby: any;
 
 // ============================================================
 // 插件生命周期
@@ -16,22 +17,22 @@ export async function run(_context: any) {
 }
 
 // ============================================================
-// Host 方法：供 UI 调用的后端桥接
+// RPC 方法：供 UI 调用的后端桥接
 // ============================================================
-export const host = {
+export const rpc = {
   /**
    * 获取可用模型列表
    */
-  async getAllModels(context: any) {
-    return await context.api.ai.allModels();
+  async getAllModels() {
+    return await mulby.ai.allModels();
   },
 
   /**
    * 连通性检查
    */
-  async ping(_context: any) {
+  async ping() {
     return { ok: true };
   },
 };
 
-export default { onLoad, onUnload, run, host };
+export default { onLoad, onUnload, run };

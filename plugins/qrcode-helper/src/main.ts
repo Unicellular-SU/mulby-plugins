@@ -1,6 +1,7 @@
 import * as qrcode from 'qrcode'
 import Jimp from 'jimp'
 import jsqr from 'jsqr'
+declare const mulby: any;
 
 interface PluginContext {
   api: {
@@ -39,11 +40,11 @@ interface PluginContext {
   featureCode?: string
 }
 
-export function onLoad(context: PluginContext) {
+export function onLoad() {
   console.log('[qrcode-helper] 插件已加载')
-  if (context?.api?.tools) {
+  if (mulby?.tools) {
     // 生成二维码：文本 -> base64 图片
-    context.api.tools.register('generate_qrcode', async (args: any) => {
+    mulby.tools.register('generate_qrcode', async (args: any) => {
       if (!args || typeof args.text !== 'string') {
         throw new Error('generate_qrcode failed: invalid text argument')
       }
@@ -52,7 +53,7 @@ export function onLoad(context: PluginContext) {
     })
 
     // 解码二维码：base64 图片 -> 文本
-    context.api.tools.register('decode_qrcode', async (args: any) => {
+    mulby.tools.register('decode_qrcode', async (args: any) => {
       if (!args || typeof args.base64Image !== 'string') {
         throw new Error('decode_qrcode failed: invalid base64Image argument')
       }
@@ -70,11 +71,11 @@ export function onLoad(context: PluginContext) {
   }
 }
 
-export function onUnload(context: PluginContext) {
+export function onUnload() {
   console.log('[qrcode-helper] 插件已卸载')
-  if (context?.api?.tools) {
-    context.api.tools.unregister('generate_qrcode')
-    context.api.tools.unregister('decode_qrcode')
+  if (mulby?.tools) {
+    mulby.tools.unregister('generate_qrcode')
+    mulby.tools.unregister('decode_qrcode')
   }
 }
 
@@ -86,9 +87,8 @@ export function onDisable() {
   console.log('[qrcode-helper] 插件已禁用')
 }
 
-export async function run(context: PluginContext) {
-  const { notification } = context.api
-  notification.show('插件已启动')
+export async function run(_context: PluginContext) {
+  mulby.notification.show('插件已启动')
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

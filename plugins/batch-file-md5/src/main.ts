@@ -1,9 +1,12 @@
 /// <reference path="./types/mulby.d.ts" />
 
-import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import path from 'node:path'
+declare const require: any;
+const { createHash } = require('node:crypto')
+const { createReadStream } = require('node:fs')
+const { stat } = require('node:fs/promises')
+const path = require('node:path')
+
+declare const mulby: any;
 
 type PluginContext = BackendPluginContext
 
@@ -45,7 +48,7 @@ function md5FileStream(filePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const hash = createHash('md5')
     const rs = createReadStream(filePath, { highWaterMark: STREAM_HIGH_WATER_MARK })
-    rs.on('data', (chunk: Buffer) => hash.update(chunk))
+    rs.on('data', (chunk: any) => hash.update(chunk))
     rs.on('error', reject)
     rs.on('end', () => resolve(hash.digest('hex')))
   })
@@ -75,15 +78,14 @@ export type HashFileRow = {
   error?: string
 }
 
-export const host = {
-  async getPendingInit(_context: PluginContext): Promise<{ paths: string[] }> {
+export const rpc = {
+  async getPendingInit(): Promise<{ paths: string[] }> {
     const paths = [...pendingPaths]
     pendingPaths = []
     return { paths }
   },
 
   async hashFiles(
-    _context: PluginContext,
     filePaths: string[],
     concurrency?: number
   ): Promise<{ results: HashFileRow[]; elapsedMs: number }> {
@@ -115,5 +117,5 @@ export const host = {
   }
 }
 
-const plugin = { onLoad, onUnload, onEnable, onDisable, run, host }
+const plugin = { onLoad, onUnload, onEnable, onDisable, run }
 export default plugin

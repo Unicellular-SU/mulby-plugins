@@ -1,3 +1,5 @@
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 const PLUGIN_TAG = '[git-download-helper]'
@@ -18,13 +20,13 @@ function ensurePrefix(prefix: string): string {
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
 }
 
-function readStorageString(context: PluginContext, key: string): string | undefined {
-  const raw = context.api.storage.get(key)
+function readStorageString(key: string): string | undefined {
+  const raw = mulby.storage.get(key)
   return typeof raw === 'string' ? raw : undefined
 }
 
-function writeStorageString(context: PluginContext, key: string, value: string) {
-  context.api.storage.set(key, value)
+function writeStorageString(key: string, value: string) {
+  mulby.storage.set(key, value)
 }
 
 function extractPayload(raw: string, commandPrefixes: string[]): string | null {
@@ -98,11 +100,11 @@ function parseArgsTemplate(template: string): string[] {
   return result
 }
 
-async function tryRunDownloader(context: PluginContext, downloadUrl: string): Promise<boolean> {
-  const command = readStorageString(context, STORAGE_KEYS.downloaderCommand)?.trim()
+async function tryRunDownloader(downloadUrl: string): Promise<boolean> {
+  const command = readStorageString(STORAGE_KEYS.downloaderCommand)?.trim()
   if (!command) return false
 
-  const template = readStorageString(context, STORAGE_KEYS.downloaderArgsTemplate) ?? '{url}'
+  const template = readStorageString(STORAGE_KEYS.downloaderArgsTemplate) ?? '{url}'
   const parsed = parseArgsTemplate(template)
   const hasPlaceholder = parsed.some((part) => part.includes('{url}'))
   const args = parsed.map((part) => part.replaceAll('{url}', downloadUrl))
@@ -110,7 +112,7 @@ async function tryRunDownloader(context: PluginContext, downloadUrl: string): Pr
     args.push(downloadUrl)
   }
 
-  await context.api.shell.runCommand({
+  await mulby.shell.runCommand({
     command,
     args,
     timeoutMs: 15000
@@ -118,41 +120,41 @@ async function tryRunDownloader(context: PluginContext, downloadUrl: string): Pr
   return true
 }
 
-function notify(context: PluginContext, message: string, type: 'success' | 'warning' | 'error' = 'success') {
-  context.api.notification.show(message, type)
+function notify(message: string, type: 'success' | 'warning' | 'error' = 'success') {
+  mulby.notification.show(message, type)
 }
 
-async function handleDownload(context: PluginContext, maybeUrl: string) {
+async function handleDownload(maybeUrl: string) {
   const candidate = maybeUrl.trim()
   if (!candidate) {
-    notify(context, '未检测到链接，请输入或复制 GitHub 文件地址。', 'warning')
+    notify('未检测到链接，请输入或复制 GitHub 文件地址。', 'warning')
     return
   }
 
   if (!isGithubUrl(candidate)) {
-    notify(context, '仅支持 github.com 或 raw.githubusercontent.com 链接。', 'warning')
+    notify('仅支持 github.com 或 raw.githubusercontent.com 链接。', 'warning')
     return
   }
 
-  const prefix = readStorageString(context, STORAGE_KEYS.acceleratorPrefix) ?? DEFAULT_ACCELERATOR_PREFIX
+  const prefix = readStorageString(STORAGE_KEYS.acceleratorPrefix) ?? DEFAULT_ACCELERATOR_PREFIX
   const accelerated = buildAcceleratedUrl(prefix, candidate)
 
   try {
-    const usedDownloader = await tryRunDownloader(context, accelerated)
+    const usedDownloader = await tryRunDownloader(accelerated)
     if (usedDownloader) {
-      await context.api.clipboard.writeText(accelerated)
-      notify(context, '已调用下载器并复制加速链接到剪贴板。')
+      await mulby.clipboard.writeText(accelerated)
+      notify('已调用下载器并复制加速链接到剪贴板。')
       return
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log(`调用下载器失败: ${message}`)
-    notify(context, '下载器调用失败，已自动回退浏览器下载。', 'warning')
+    notify('下载器调用失败，已自动回退浏览器下载。', 'warning')
   }
 
-  await context.api.shell.openExternal(accelerated)
-  await context.api.clipboard.writeText(accelerated)
-  notify(context, '已使用浏览器打开加速链接，并复制到剪贴板。')
+  await mulby.shell.openExternal(accelerated)
+  await mulby.clipboard.writeText(accelerated)
+  notify('已使用浏览器打开加速链接，并复制到剪贴板。')
 }
 
 export function onLoad() {
@@ -176,65 +178,65 @@ export async function run(context: PluginContext) {
   const input = context.input?.trim() ?? ''
 
   if (featureCode === 'download-github-url') {
-    await handleDownload(context, input)
+    await handleDownload(input)
     return
   }
 
   if (featureCode === 'download-from-clipboard') {
-    const clipText = context.api.clipboard.readText().trim()
-    await handleDownload(context, clipText)
+    const clipText = mulby.clipboard.readText().trim()
+    await handleDownload(clipText)
     return
   }
 
   if (featureCode === 'set-accelerator-prefix') {
     const payload = extractPayload(input, ['gdh prefix ', 'git下载 prefix '])
     if (!payload || !/^https?:\/\/\S+$/i.test(payload)) {
-      notify(context, '格式错误。示例：gdh prefix https://gh-proxy.com/', 'warning')
+      notify('格式错误。示例：gdh prefix https://gh-proxy.com/', 'warning')
       return
     }
-    writeStorageString(context, STORAGE_KEYS.acceleratorPrefix, payload)
-    notify(context, `加速前缀已更新为：${ensurePrefix(payload)}`)
+    writeStorageString(STORAGE_KEYS.acceleratorPrefix, payload)
+    notify(`加速前缀已更新为：${ensurePrefix(payload)}`)
     return
   }
 
   if (featureCode === 'set-downloader-command') {
     const payload = extractPayload(input, ['gdh cmd ', 'git下载 cmd '])
     if (!payload) {
-      notify(context, '格式错误。示例：gdh cmd IDMan.exe', 'warning')
+      notify('格式错误。示例：gdh cmd IDMan.exe', 'warning')
       return
     }
-    writeStorageString(context, STORAGE_KEYS.downloaderCommand, payload)
-    notify(context, `下载器命令已更新：${payload}`)
+    writeStorageString(STORAGE_KEYS.downloaderCommand, payload)
+    notify(`下载器命令已更新：${payload}`)
     return
   }
 
   if (featureCode === 'set-downloader-args') {
     const payload = extractPayload(input, ['gdh args ', 'git下载 args '])
     if (!payload) {
-      notify(context, '格式错误。示例：gdh args /d "{url}" /n /a', 'warning')
+      notify('格式错误。示例：gdh args /d "{url}" /n /a', 'warning')
       return
     }
-    writeStorageString(context, STORAGE_KEYS.downloaderArgsTemplate, payload)
-    notify(context, `下载器参数模板已更新：${payload}`)
+    writeStorageString(STORAGE_KEYS.downloaderArgsTemplate, payload)
+    notify(`下载器参数模板已更新：${payload}`)
     return
   }
 
   if (featureCode === 'clear-downloader-config') {
-    context.api.storage.remove(STORAGE_KEYS.downloaderCommand)
-    context.api.storage.remove(STORAGE_KEYS.downloaderArgsTemplate)
-    notify(context, '下载器配置已清除，后续将回退到浏览器下载。')
+    mulby.storage.remove(STORAGE_KEYS.downloaderCommand)
+    mulby.storage.remove(STORAGE_KEYS.downloaderArgsTemplate)
+    notify('下载器配置已清除，后续将回退到浏览器下载。')
     return
   }
 
   if (featureCode === 'show-config') {
-    const prefix = readStorageString(context, STORAGE_KEYS.acceleratorPrefix) ?? DEFAULT_ACCELERATOR_PREFIX
-    const cmd = readStorageString(context, STORAGE_KEYS.downloaderCommand) ?? '(未配置)'
-    const args = readStorageString(context, STORAGE_KEYS.downloaderArgsTemplate) ?? '(未配置，默认 {url})'
-    notify(context, `前缀: ${ensurePrefix(prefix)} | 命令: ${cmd} | 参数: ${args}`)
+    const prefix = readStorageString(STORAGE_KEYS.acceleratorPrefix) ?? DEFAULT_ACCELERATOR_PREFIX
+    const cmd = readStorageString(STORAGE_KEYS.downloaderCommand) ?? '(未配置)'
+    const args = readStorageString(STORAGE_KEYS.downloaderArgsTemplate) ?? '(未配置，默认 {url})'
+    notify(`前缀: ${ensurePrefix(prefix)} | 命令: ${cmd} | 参数: ${args}`)
     return
   }
 
-  notify(context, '未识别的功能触发，请检查 manifest 配置。', 'warning')
+  notify('未识别的功能触发，请检查 manifest 配置。', 'warning')
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

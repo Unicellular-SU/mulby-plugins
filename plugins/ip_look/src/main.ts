@@ -1,3 +1,5 @@
+declare const mulby: any;
+
 interface PluginContext {
   api: {
     clipboard: {
@@ -55,8 +57,7 @@ export function onDisable() {
 }
 
 export async function run(context: PluginContext) {
-  const { notification } = context.api
-  notification.show('插件已启动')
+  mulby.notification.show('插件已启动')
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

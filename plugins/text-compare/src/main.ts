@@ -1,3 +1,5 @@
+declare const mulby: any;
+
 interface PluginContext {
   api: {
     notification: {
@@ -22,9 +24,8 @@ export function onDisable() {
   console.log('[text_compare] 插件已禁用')
 }
 
-export async function run(context: PluginContext) {
-  const { notification } = context.api
-  notification.show('文本/代码对比已打开', 'info')
+export async function run(_context: PluginContext) {
+  mulby.notification.show('文本/代码对比已打开', 'info')
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

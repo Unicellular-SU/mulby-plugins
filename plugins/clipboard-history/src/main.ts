@@ -1,3 +1,5 @@
+declare const mulby: any;
+
 interface PluginContext {
   api: {
     clipboard: {
@@ -45,27 +47,27 @@ export function onDisable() {
   console.log('[剪贴板历史] 插件已禁用')
 }
 
-export async function run(context: PluginContext) {
+export async function run(_context: PluginContext) {
   // 插件启动时不做任何操作，所有逻辑在 UI 中处理
 }
 
-// 导出 host 方法供 UI 调用
-export const host = {
+// 导出 rpc 方法供 UI 调用
+export const rpc = {
   // 查询历史记录
-  async queryHistory(context: PluginContext, options?: {
+  async queryHistory(options?: {
     type?: 'text' | 'image' | 'files'
     search?: string
     favorite?: boolean
     limit?: number
     offset?: number
   }) {
-    const { clipboardHistory } = context.api
+    const { clipboardHistory } = mulby
     return await clipboardHistory.query(options)
   },
 
   // 复制历史记录到剪贴板
-  async copyToClipboard(context: PluginContext, id: string) {
-    const { clipboardHistory, notification } = context.api
+  async copyToClipboard(id: string) {
+    const { clipboardHistory, notification } = mulby
     const result = await clipboardHistory.copy(id)
 
     if (result.success) {
@@ -78,14 +80,14 @@ export const host = {
   },
 
   // 切换收藏状态
-  async toggleFavorite(context: PluginContext, id: string) {
-    const { clipboardHistory } = context.api
+  async toggleFavorite(id: string) {
+    const { clipboardHistory } = mulby
     return await clipboardHistory.toggleFavorite(id)
   },
 
   // 删除记录
-  async deleteItem(context: PluginContext, id: string) {
-    const { clipboardHistory, notification } = context.api
+  async deleteItem(id: string) {
+    const { clipboardHistory, notification } = mulby
     const result = await clipboardHistory.delete(id)
 
     if (result.success) {
@@ -98,8 +100,8 @@ export const host = {
   },
 
   // 清空历史（保留收藏）
-  async clearHistory(context: PluginContext) {
-    const { clipboardHistory, notification } = context.api
+  async clearHistory() {
+    const { clipboardHistory, notification } = mulby
     const result = await clipboardHistory.clear()
 
     if (result.success) {
@@ -112,11 +114,11 @@ export const host = {
   },
 
   // 获取统计信息
-  async getStats(context: PluginContext) {
-    const { clipboardHistory } = context.api
+  async getStats() {
+    const { clipboardHistory } = mulby
     return await clipboardHistory.stats()
   }
 }
 
-const plugin = { onLoad, onUnload, onEnable, onDisable, run, host }
+const plugin = { onLoad, onUnload, onEnable, onDisable, run }
 export default plugin

@@ -1,5 +1,7 @@
 /// <reference path="./types/mulby.d.ts" />
 
+declare const mulby: any;
+
 type PluginContext = BackendPluginContext
 
 const TAG = '[unit-converter]'
@@ -29,7 +31,7 @@ export async function run(context: PluginContext) {
   const input = context.input?.trim() ?? ''
 
   if (featureCode === 'convert-selection' && !input) {
-    context.api.notification.show('未检测到可转换内容，请先选中带单位的数值。', 'warning')
+    mulby.notification.show('未检测到可转换内容，请先选中带单位的数值。', 'warning')
     return
   }
 
