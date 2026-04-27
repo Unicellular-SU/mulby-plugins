@@ -188,7 +188,7 @@ export default function BatchPage({ seedPaths }: Props) {
   const presetsLoadedRef = useRef(false)
 
   useEffect(() => {
-    if (seedPaths.length) setFiles((f) => [...new Set([...f, ...seedPaths])])
+    setFiles([...new Set(seedPaths)])
   }, [seedPaths])
 
   useEffect(() => {

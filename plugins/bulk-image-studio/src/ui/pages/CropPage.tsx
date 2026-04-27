@@ -181,7 +181,7 @@ export default function CropPage({ seedPaths }: Props) {
   )
 
   useEffect(() => {
-    if (seedPaths.length) setFiles((f) => [...new Set([...f, ...seedPaths])])
+    setFiles([...new Set(seedPaths)])
   }, [seedPaths])
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { Images, Layers, Scissors } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
@@ -25,6 +25,7 @@ const PLUGIN_ID = 'bulk-image-studio'
 export default function App() {
   const { host } = useMulby(PLUGIN_ID)
   const [seedPaths, setSeedPaths] = useState<string[]>([])
+  const pluginInitReceivedRef = useRef(false)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -35,12 +36,11 @@ export default function App() {
     })
 
     window.mulby?.onPluginInit?.((data: PluginInitData) => {
+      pluginInitReceivedRef.current = true
       const paths = (data.attachments ?? [])
         .map((a) => a.path)
         .filter((p): p is string => typeof p === 'string' && p.length > 0)
-      if (paths.length) {
-        setSeedPaths((prev) => [...new Set([...prev, ...paths])])
-      }
+      setSeedPaths([...new Set(paths)])
       if (data.route) {
         const r = data.route.replace(/^\//, '')
         window.location.hash = `#/${r}`
@@ -51,10 +51,10 @@ export default function App() {
       try {
         const res = await host.call('getPendingInit')
         const d = res?.data as { route?: string; paths?: string[] } | undefined
-        if (d?.paths?.length) {
-          setSeedPaths((prev) => [...new Set([...prev, ...d.paths!])])
+        if (!pluginInitReceivedRef.current && Array.isArray(d?.paths)) {
+          setSeedPaths([...new Set(d.paths)])
         }
-        if (d?.route) {
+        if (!pluginInitReceivedRef.current && d?.route) {
           const r = d.route.replace(/^\//, '')
           window.location.hash = `#/${r}`
         }

@@ -1,0 +1,47 @@
+{
+  "id": "screen-color-picker",
+  "name": "screen-color-picker",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "utility",
+  "displayName": "屏幕取色器",
+  "description": "从屏幕任意位置拾取颜色，支持 HEX/RGB/HSL 复制与历史色板。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": true,
+    "height": 640
+  },
+  "window": {
+    "width": 500,
+    "height": 640,
+    "minWidth": 420,
+    "minHeight": 560
+  },
+  "features": [
+    {
+      "code": "open_color_picker",
+      "explain": "打开屏幕取色器",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "屏幕取色"
+        },
+        {
+          "type": "keyword",
+          "value": "取色器"
+        },
+        {
+          "type": "keyword",
+          "value": "color picker"
+        },
+        {
+          "type": "keyword",
+          "value": "pick color"
+        }
+      ]
+    }
+  ]
+}

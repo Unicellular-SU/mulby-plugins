@@ -83,7 +83,7 @@ export default function MergePage({ seedPaths }: Props) {
   const mergeSaveDirRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
-    if (seedPaths.length) setFiles((f) => [...new Set([...f, ...seedPaths])])
+    setFiles([...new Set(seedPaths)])
   }, [seedPaths])
 
   useEffect(() => {
