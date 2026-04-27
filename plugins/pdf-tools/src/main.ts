@@ -99,10 +99,21 @@ async function resolveInitPayload(context: PluginContext): Promise<PendingInitDa
     }
   }
 
+  let inputText = parsed.inputText;
+  if (inputText && dedupedAttachments.length > 0) {
+    const trimmed = inputText.trim();
+    const isBareName = trimmed.length > 0 && !trimmed.includes('/') && !trimmed.includes('\\');
+    if (isBareName && dedupedAttachments.some(a => a.path?.endsWith('/' + trimmed) || a.path?.endsWith('\\' + trimmed) || a.name === trimmed)) {
+      inputText = undefined;
+    } else if (dedupedAttachments.some(a => a.path === trimmed)) {
+      inputText = undefined;
+    }
+  }
+
   return {
     featureCode: context.featureCode,
     route,
-    input: parsed.inputText,
+    input: inputText,
     attachments: dedupedAttachments,
   };
 }

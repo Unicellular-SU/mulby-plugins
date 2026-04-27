@@ -37,6 +37,20 @@ function parseInputToPdfPaths(input: unknown): string[] {
     return [...paths];
 }
 
+function deduplicatePaths(paths: string[]): string[] {
+    const unique = [...new Set(paths)];
+    if (unique.length <= 1) return unique;
+    const fullPaths = new Set(unique.filter(p => p.includes('/') || p.includes('\\')));
+    return unique.filter(p => {
+        if (fullPaths.has(p)) return true;
+        const name = p;
+        for (const fp of fullPaths) {
+            if (fp.endsWith('/' + name) || fp.endsWith('\\' + name)) return false;
+        }
+        return true;
+    });
+}
+
 export async function getInitPdfPaths(
     payload?: InitPayload,
     readClipboardFiles?: () => ClipboardFile[] | Promise<ClipboardFile[]>
@@ -46,7 +60,7 @@ export async function getInitPdfPaths(
         .filter((path): path is string => typeof path === 'string' && /\.pdf$/i.test(path));
 
     const fromInput = parseInputToPdfPaths(payload?.input);
-    const all = [...new Set([...fromAttachments, ...fromInput])];
+    const all = deduplicatePaths([...fromAttachments, ...fromInput]);
     if (all.length) return all;
 
     if (!readClipboardFiles) return [];

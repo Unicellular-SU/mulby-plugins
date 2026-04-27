@@ -85,14 +85,12 @@ const SplitPDF: React.FC = () => {
                 fromInput.add(trimmed);
             }
 
-            // newline/comma list fallback
             trimmed
                 .split(/[\n,;]/)
                 .map(part => part.trim().replace(/^['"]|['"]$/g, ''))
                 .filter(part => /\.pdf$/i.test(part))
                 .forEach(part => fromInput.add(part));
 
-            // JSON payload fallback
             try {
                 const parsed = JSON.parse(trimmed) as { attachments?: Array<{ path?: string }>; input?: string };
                 (parsed.attachments || [])
@@ -107,7 +105,17 @@ const SplitPDF: React.FC = () => {
             }
         }
 
-        return [...new Set([...attachmentPaths, ...fromInput])];
+        const unique = [...new Set([...attachmentPaths, ...fromInput])];
+        if (unique.length <= 1) return unique;
+        const fullPaths = new Set(unique.filter(p => p.includes('/') || p.includes('\\')));
+        return unique.filter(p => {
+            if (fullPaths.has(p)) return true;
+            const name = p;
+            for (const fp of fullPaths) {
+                if (fp.endsWith('/' + name) || fp.endsWith('\\' + name)) return false;
+            }
+            return true;
+        });
     };
 
     useEffect(() => {
