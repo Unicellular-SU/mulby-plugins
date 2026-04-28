@@ -1,9 +1,9 @@
 import path from 'node:path'
 import os from 'node:os'
 import { randomBytes } from 'node:crypto'
-import sharp from 'sharp'
 import { optimize } from 'svgo'
 import toIco from 'to-ico'
+import { sharp, type OverlayOptions, type SharpLike } from './sharp-client'
 import type {
   BatchCommitPayload,
   BatchCommitResult,
@@ -122,11 +122,11 @@ type RasterPipelineState = {
 }
 
 async function applyRasterStep(
-  img: sharp.Sharp,
+  img: SharpLike,
   step: BatchStep,
   fs: MulbyFilesystem,
   state: RasterPipelineState
-): Promise<sharp.Sharp> {
+): Promise<SharpLike> {
   switch (step.kind) {
     case 'compress':
       state.compressQuality = step.quality ?? 80
@@ -220,7 +220,7 @@ async function applyRasterStep(
         step.rotateDeg ?? 0
       )
       if (step.tile) {
-        const composites: sharp.OverlayOptions[] = []
+        const composites: OverlayOptions[] = []
         const stepX = mw + margin
         const stepY = mh + margin
         for (let y = -mh; y < ch + mh; y += stepY) {
@@ -273,7 +273,7 @@ async function applyRasterStep(
       const mw2 = wmMeta2.width || mw
       const mh2 = wmMeta2.height || mh
       if (step.tile) {
-        const composites: sharp.OverlayOptions[] = []
+        const composites: OverlayOptions[] = []
         const stepX = mw2 + margin
         const stepY = mh2 + margin
         for (let y = -mh2; y < ch + mh2; y += stepY) {
@@ -292,7 +292,7 @@ async function applyRasterStep(
 }
 
 async function encodeSharpOutput(
-  img: sharp.Sharp,
+  img: SharpLike,
   format: string,
   quality: number | undefined
 ): Promise<Buffer> {
@@ -311,7 +311,7 @@ async function encodeSharpOutput(
     case 'tiff':
       return img.tiff({ compression: 'lzw' }).toBuffer()
     case 'bmp':
-      return img.bmp().toBuffer()
+      throw new Error('当前 Mulby sharp API 不支持输出 BMP，请选择 PNG/JPEG/WebP/TIFF/AVIF/GIF/ICO')
     case 'gif':
       return img.gif().toBuffer()
     case 'ico': {

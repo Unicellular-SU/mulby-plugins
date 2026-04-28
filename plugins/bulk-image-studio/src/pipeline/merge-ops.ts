@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { PDFDocument } from 'pdf-lib'
-import sharp from 'sharp'
+import { sharp, type OverlayOptions } from './sharp-client'
 import {
   DEFAULT_MERGE_STRIP_CROP,
   type ManualCropPayload,
@@ -152,7 +152,7 @@ export async function mergeToStrip(fs: MulbyFilesystem, payload: MergeStripPaylo
 
   const { r, g, b } = hexToRgb(background)
 
-  const composites: sharp.OverlayOptions[] = []
+  const composites: OverlayOptions[] = []
   let ox = 0
   let oy = 0
   for (let i = 0; i < bufs.length; i++) {

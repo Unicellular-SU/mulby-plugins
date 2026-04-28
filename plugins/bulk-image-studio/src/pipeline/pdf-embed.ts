@@ -1,5 +1,5 @@
 import { PDFDocument, type PDFImage } from 'pdf-lib'
-import sharp from 'sharp'
+import { sharp } from './sharp-client'
 
 export const PDF_A4_W = 595.28
 export const PDF_A4_H = 841.89

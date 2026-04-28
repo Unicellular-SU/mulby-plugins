@@ -1051,6 +1051,13 @@ interface BackendPluginAPI {
     basename(path: string, ext?: string): string
   }
   http: MulbyHttp
+  sharp: {
+    execute(payload: {
+      input?: string | ArrayBuffer | Uint8Array | object | any[]
+      options?: object
+      operations: Array<{ method: string; args: unknown[] }>
+    }): Promise<unknown>
+  }
   screen: {
     getAllDisplays(): Promise<any[]>
     getPrimaryDisplay(): Promise<any>
