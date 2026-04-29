@@ -1,51 +1,113 @@
 import {
+  Circle,
+  Clipboard,
+  Droplets,
+  Eraser,
+  Grid3x3,
+  Hash,
+  Highlighter,
+  LucideIcon,
+  Minus,
   MousePointer2,
+  MoveRight,
   Pencil,
   Redo2,
   Save,
   Square,
-  X,
-  Clipboard,
-  MoveRight,
-  Undo2
+  Trash2,
+  Type as TypeIcon,
+  Undo2,
+  X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMulby } from './hooks/useMulby'
 
-type Tool = 'select' | 'rect' | 'arrow' | 'pen'
+type Tool =
+  | 'select'
+  | 'line'
+  | 'rect'
+  | 'ellipse'
+  | 'arrow'
+  | 'pen'
+  | 'highlighter'
+  | 'text'
+  | 'step'
+  | 'mosaic'
+  | 'blur'
+  | 'eraser'
 
 type Point = {
   x: number
   y: number
 }
 
-type RectAnnotation = {
-  id: string
-  type: 'rect'
-  start: Point
-  end: Point
-  color: string
-  size: number
+type Rect = {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
-type ArrowAnnotation = {
+type StrokeAnnotation = {
   id: string
-  type: 'arrow'
-  start: Point
-  end: Point
-  color: string
-  size: number
-}
-
-type PenAnnotation = {
-  id: string
-  type: 'pen'
+  type: 'pen' | 'highlighter'
   points: Point[]
   color: string
   size: number
 }
 
-type Annotation = RectAnnotation | ArrowAnnotation | PenAnnotation
+type ShapeAnnotation = {
+  id: string
+  type: 'line' | 'rect' | 'ellipse' | 'arrow'
+  start: Point
+  end: Point
+  color: string
+  size: number
+}
+
+type TextAnnotation = {
+  id: string
+  type: 'text'
+  point: Point
+  text: string
+  color: string
+  size: number
+}
+
+type StepAnnotation = {
+  id: string
+  type: 'step'
+  point: Point
+  value: string
+  color: string
+  size: number
+}
+
+type EffectAnnotation = {
+  id: string
+  type: 'mosaic' | 'blur'
+  start: Point
+  end: Point
+  color: string
+  size: number
+}
+
+type Annotation = StrokeAnnotation | ShapeAnnotation | TextAnnotation | StepAnnotation | EffectAnnotation
+
+function isStrokeAnnotation(annotation: Annotation): annotation is StrokeAnnotation {
+  return annotation.type === 'pen' || annotation.type === 'highlighter'
+}
+
+function isDragAnnotation(annotation: Annotation): annotation is ShapeAnnotation | EffectAnnotation {
+  return (
+    annotation.type === 'line' ||
+    annotation.type === 'rect' ||
+    annotation.type === 'ellipse' ||
+    annotation.type === 'arrow' ||
+    annotation.type === 'mosaic' ||
+    annotation.type === 'blur'
+  )
+}
 
 type CaptureRegion = {
   x: number
@@ -86,7 +148,7 @@ type LoadedImage = {
 }
 
 const PLUGIN_ID = 'screenshot-annotator'
-const TOOLBAR_HEIGHT = 56
+const TOOLBAR_HEIGHT = 96
 const TOOLBAR_MIN_WIDTH = 760
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7']
 
@@ -126,6 +188,118 @@ const defaultFileName = () => {
   return `screenshot-${stamp}.png`
 }
 
+function normalizeRect(start: Point, end: Point): Rect {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y)
+  }
+}
+
+function getDisplaySize(image: LoadedImage) {
+  const regionWidth = image.region?.width
+  const regionHeight = image.region?.height
+
+  if (regionWidth && regionHeight) {
+    return { width: regionWidth, height: regionHeight }
+  }
+
+  return {
+    width: Math.max(240, Math.round(image.width / image.scaleFactor)),
+    height: Math.max(120, Math.round(image.height / image.scaleFactor))
+  }
+}
+
+function clampRect(rect: Rect, canvas: HTMLCanvasElement): Rect {
+  const x = Math.max(0, Math.min(rect.x, canvas.width))
+  const y = Math.max(0, Math.min(rect.y, canvas.height))
+  const maxX = Math.max(0, Math.min(rect.x + rect.width, canvas.width))
+  const maxY = Math.max(0, Math.min(rect.y + rect.height, canvas.height))
+
+  return {
+    x,
+    y,
+    width: Math.max(0, maxX - x),
+    height: Math.max(0, maxY - y)
+  }
+}
+
+function pointDistanceToSegment(point: Point, start: Point, end: Point) {
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const lengthSquared = dx * dx + dy * dy
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y)
+  }
+
+  const t = Math.max(0, Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+  const projection = {
+    x: start.x + t * dx,
+    y: start.y + t * dy
+  }
+
+  return Math.hypot(point.x - projection.x, point.y - projection.y)
+}
+
+function isPointInRect(point: Point, rect: Rect, padding = 0) {
+  return (
+    point.x >= rect.x - padding &&
+    point.y >= rect.y - padding &&
+    point.x <= rect.x + rect.width + padding &&
+    point.y <= rect.y + rect.height + padding
+  )
+}
+
+function hitTestAnnotation(point: Point, annotations: Annotation[]) {
+  for (let index = annotations.length - 1; index >= 0; index -= 1) {
+    const annotation = annotations[index]
+
+    if (annotation.type === 'pen' || annotation.type === 'highlighter') {
+      for (let pointIndex = 1; pointIndex < annotation.points.length; pointIndex += 1) {
+        if (pointDistanceToSegment(point, annotation.points[pointIndex - 1], annotation.points[pointIndex]) <= annotation.size + 6) {
+          return annotation.id
+        }
+      }
+    }
+
+    if (annotation.type === 'line' || annotation.type === 'arrow') {
+      if (pointDistanceToSegment(point, annotation.start, annotation.end) <= annotation.size + 8) {
+        return annotation.id
+      }
+    }
+
+    if (
+      annotation.type === 'rect' ||
+      annotation.type === 'ellipse' ||
+      annotation.type === 'mosaic' ||
+      annotation.type === 'blur'
+    ) {
+      if (isPointInRect(point, normalizeRect(annotation.start, annotation.end), annotation.size + 4)) {
+        return annotation.id
+      }
+    }
+
+    if (annotation.type === 'text') {
+      const width = Math.max(80, annotation.text.length * annotation.size * 0.62)
+      const height = annotation.size * 1.5
+      if (isPointInRect(point, { x: annotation.point.x, y: annotation.point.y, width, height }, 8)) {
+        return annotation.id
+      }
+    }
+
+    if (annotation.type === 'step') {
+      const radius = Math.max(14, annotation.size * 0.7)
+      if (Math.hypot(point.x - annotation.point.x, point.y - annotation.point.y) <= radius + 8) {
+        return annotation.id
+      }
+    }
+  }
+
+  return null
+}
+
 function drawArrowHead(
   context: CanvasRenderingContext2D,
   start: Point,
@@ -149,30 +323,183 @@ function drawArrowHead(
   context.stroke()
 }
 
+function pixelateRect(context: CanvasRenderingContext2D, rect: Rect, cellSize: number) {
+  const safeRect = clampRect(rect, context.canvas)
+  if (safeRect.width < 2 || safeRect.height < 2) {
+    return
+  }
+
+  const cell = Math.max(6, Math.round(cellSize))
+  const smallCanvas = document.createElement('canvas')
+  smallCanvas.width = Math.max(1, Math.ceil(safeRect.width / cell))
+  smallCanvas.height = Math.max(1, Math.ceil(safeRect.height / cell))
+
+  const smallContext = smallCanvas.getContext('2d')
+  if (!smallContext) {
+    return
+  }
+
+  smallContext.drawImage(
+    context.canvas,
+    safeRect.x,
+    safeRect.y,
+    safeRect.width,
+    safeRect.height,
+    0,
+    0,
+    smallCanvas.width,
+    smallCanvas.height
+  )
+
+  context.save()
+  context.imageSmoothingEnabled = false
+  context.drawImage(smallCanvas, 0, 0, smallCanvas.width, smallCanvas.height, safeRect.x, safeRect.y, safeRect.width, safeRect.height)
+  context.strokeStyle = 'rgba(255, 255, 255, 0.45)'
+  context.lineWidth = Math.max(1, cell / 14)
+  context.strokeRect(safeRect.x, safeRect.y, safeRect.width, safeRect.height)
+  context.restore()
+}
+
+function blurRect(context: CanvasRenderingContext2D, rect: Rect, radius: number) {
+  const safeRect = clampRect(rect, context.canvas)
+  if (safeRect.width < 2 || safeRect.height < 2) {
+    return
+  }
+
+  const sourceCanvas = document.createElement('canvas')
+  sourceCanvas.width = safeRect.width
+  sourceCanvas.height = safeRect.height
+
+  const sourceContext = sourceCanvas.getContext('2d')
+  if (!sourceContext) {
+    return
+  }
+
+  sourceContext.drawImage(context.canvas, safeRect.x, safeRect.y, safeRect.width, safeRect.height, 0, 0, safeRect.width, safeRect.height)
+
+  context.save()
+  context.filter = `blur(${Math.max(2, radius)}px)`
+  context.drawImage(sourceCanvas, safeRect.x, safeRect.y)
+  context.filter = 'none'
+  context.setLineDash([10, 7])
+  context.strokeStyle = 'rgba(255, 255, 255, 0.42)'
+  context.lineWidth = Math.max(1, radius / 8)
+  context.strokeRect(safeRect.x, safeRect.y, safeRect.width, safeRect.height)
+  context.restore()
+}
+
+function drawTextAnnotation(context: CanvasRenderingContext2D, annotation: TextAnnotation) {
+  const fontSize = Math.max(14, annotation.size)
+  const lines = annotation.text.split(/\r?\n/).filter(Boolean)
+
+  context.save()
+  context.font = `700 ${fontSize}px "Segoe UI", "PingFang SC", sans-serif`
+  context.textBaseline = 'top'
+  context.lineJoin = 'round'
+  context.lineWidth = Math.max(2, fontSize * 0.12)
+  context.strokeStyle = 'rgba(6, 11, 20, 0.72)'
+  context.fillStyle = annotation.color
+
+  lines.forEach((line, index) => {
+    const y = annotation.point.y + index * fontSize * 1.25
+    context.strokeText(line, annotation.point.x, y)
+    context.fillText(line, annotation.point.x, y)
+  })
+
+  context.restore()
+}
+
+function drawStepAnnotation(context: CanvasRenderingContext2D, annotation: StepAnnotation) {
+  const radius = Math.max(14, annotation.size * 0.7)
+
+  context.save()
+  context.fillStyle = annotation.color
+  context.shadowColor = 'rgba(5, 12, 22, 0.34)'
+  context.shadowBlur = 14
+  context.beginPath()
+  context.arc(annotation.point.x, annotation.point.y, radius, 0, Math.PI * 2)
+  context.fill()
+
+  context.shadowBlur = 0
+  context.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+  context.lineWidth = Math.max(2, radius * 0.12)
+  context.stroke()
+  context.fillStyle = '#fff'
+  context.font = `800 ${Math.max(14, radius)}px "Segoe UI", sans-serif`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(annotation.value, annotation.point.x, annotation.point.y)
+  context.restore()
+}
+
 function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotation) {
+  if (annotation.type === 'mosaic') {
+    pixelateRect(context, normalizeRect(annotation.start, annotation.end), annotation.size * 3)
+    return
+  }
+
+  if (annotation.type === 'blur') {
+    blurRect(context, normalizeRect(annotation.start, annotation.end), annotation.size)
+    return
+  }
+
+  if (annotation.type === 'text') {
+    drawTextAnnotation(context, annotation)
+    return
+  }
+
+  if (annotation.type === 'step') {
+    drawStepAnnotation(context, annotation)
+    return
+  }
+
   context.save()
   context.lineCap = 'round'
   context.lineJoin = 'round'
   context.strokeStyle = annotation.color
   context.lineWidth = annotation.size
 
-  if (annotation.type === 'rect') {
-    const x = Math.min(annotation.start.x, annotation.end.x)
-    const y = Math.min(annotation.start.y, annotation.end.y)
-    const width = Math.abs(annotation.end.x - annotation.start.x)
-    const height = Math.abs(annotation.end.y - annotation.start.y)
-    context.strokeRect(x, y, width, height)
+  if (annotation.type === 'highlighter') {
+    context.globalAlpha = 0.34
+    context.lineWidth = annotation.size * 2.5
   }
 
-  if (annotation.type === 'arrow') {
+  if (annotation.type === 'rect') {
+    const rect = normalizeRect(annotation.start, annotation.end)
+    context.fillStyle = `${annotation.color}1f`
+    context.strokeRect(rect.x, rect.y, rect.width, rect.height)
+    context.fillRect(rect.x, rect.y, rect.width, rect.height)
+  }
+
+  if (annotation.type === 'ellipse') {
+    const rect = normalizeRect(annotation.start, annotation.end)
+    context.fillStyle = `${annotation.color}1f`
+    context.beginPath()
+    context.ellipse(
+      rect.x + rect.width / 2,
+      rect.y + rect.height / 2,
+      rect.width / 2,
+      rect.height / 2,
+      0,
+      0,
+      Math.PI * 2
+    )
+    context.fill()
+    context.stroke()
+  }
+
+  if (annotation.type === 'line' || annotation.type === 'arrow') {
     context.beginPath()
     context.moveTo(annotation.start.x, annotation.start.y)
     context.lineTo(annotation.end.x, annotation.end.y)
     context.stroke()
-    drawArrowHead(context, annotation.start, annotation.end, annotation.size)
+
+    if (annotation.type === 'arrow') {
+      drawArrowHead(context, annotation.start, annotation.end, annotation.size)
+    }
   }
 
-  if (annotation.type === 'pen' && annotation.points.length > 1) {
+  if ((annotation.type === 'pen' || annotation.type === 'highlighter') && annotation.points.length > 1) {
     context.beginPath()
     context.moveTo(annotation.points[0].x, annotation.points[0].y)
     annotation.points.slice(1).forEach((point) => {
@@ -247,17 +574,7 @@ export default function App() {
       return { width: 0, height: 0 }
     }
 
-    const regionWidth = image.region?.width
-    const regionHeight = image.region?.height
-
-    if (regionWidth && regionHeight) {
-      return { width: regionWidth, height: regionHeight }
-    }
-
-    return {
-      width: Math.max(240, Math.round(image.width / image.scaleFactor)),
-      height: Math.max(120, Math.round(image.height / image.scaleFactor))
-    }
+    return getDisplaySize(image)
   }, [image])
 
   const commitAnnotations = useCallback((next: Annotation[]) => {
@@ -286,7 +603,10 @@ export default function App() {
     window.mulby?.window?.setAlwaysOnTop?.(true)
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      const target = event.target as HTMLElement | null
+      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+
+      if (event.key === 'Escape' && !isTyping) {
         window.mulby?.window?.close()
       }
     }
@@ -327,6 +647,8 @@ export default function App() {
           setRedoStack([])
           setStatus(`${element.naturalWidth} x ${element.naturalHeight}`)
 
+          const displaySize = getDisplaySize(nextImage)
+
           if (attachment.capture?.region) {
             const { x, y, width, height } = attachment.capture.region
             void window.mulby?.window?.setBounds?.({
@@ -335,6 +657,14 @@ export default function App() {
               width: Math.max(width, TOOLBAR_MIN_WIDTH),
               height: height + TOOLBAR_HEIGHT
             })
+          } else {
+            void (async () => {
+              await window.mulby?.window?.setBounds?.({
+                width: Math.max(displaySize.width, TOOLBAR_MIN_WIDTH),
+                height: displaySize.height + TOOLBAR_HEIGHT
+              })
+              window.mulby?.window?.center?.()
+            })()
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : '截图打开失败'
@@ -354,12 +684,42 @@ export default function App() {
       return
     }
 
-    event.currentTarget.setPointerCapture(event.pointerId)
     const point = getPoint(event)
+
+    if (tool === 'eraser') {
+      const hitId = hitTestAnnotation(point, annotations)
+      if (hitId) {
+        commitAnnotations(annotations.filter((annotation) => annotation.id !== hitId))
+        setStatus('已删除标注')
+      }
+      return
+    }
+
+    if (tool === 'text') {
+      const text = window.prompt('输入文字')?.trim()
+      if (text) {
+        commitAnnotations([
+          ...annotations,
+          { id: createId(), type: 'text', point, text, color, size: Math.max(18, size * 4) }
+        ])
+      }
+      return
+    }
+
+    if (tool === 'step') {
+      const nextValue = String(annotations.filter((annotation) => annotation.type === 'step').length + 1)
+      commitAnnotations([
+        ...annotations,
+        { id: createId(), type: 'step', point, value: nextValue, color, size: Math.max(22, size * 4) }
+      ])
+      return
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId)
     dragStartRef.current = point
 
-    const nextDraft: Annotation = tool === 'pen'
-      ? { id: createId(), type: 'pen', points: [point], color, size }
+    const nextDraft: Annotation = tool === 'pen' || tool === 'highlighter'
+      ? { id: createId(), type: tool, points: [point], color, size }
       : {
           id: createId(),
           type: tool,
@@ -380,9 +740,15 @@ export default function App() {
     }
 
     const point = getPoint(event)
-    const nextDraft: Annotation = currentDraft.type === 'pen'
-      ? { ...currentDraft, points: [...currentDraft.points, point] }
-      : { ...currentDraft, end: point }
+    let nextDraft: Annotation
+
+    if (isStrokeAnnotation(currentDraft)) {
+      nextDraft = { ...currentDraft, points: [...currentDraft.points, point] }
+    } else if (isDragAnnotation(currentDraft)) {
+      nextDraft = { ...currentDraft, end: point }
+    } else {
+      nextDraft = currentDraft
+    }
 
     activeDraftRef.current = nextDraft
     setDraft(nextDraft)
@@ -399,10 +765,15 @@ export default function App() {
     dragStartRef.current = null
     setDraft(null)
 
-    const hasArea = currentDraft.type === 'pen'
-      ? currentDraft.points.length > 1
-      : Math.abs(currentDraft.end.x - currentDraft.start.x) > 2 ||
+    let hasArea = false
+
+    if (isStrokeAnnotation(currentDraft)) {
+      hasArea = currentDraft.points.length > 1
+    } else if (isDragAnnotation(currentDraft)) {
+      hasArea =
+        Math.abs(currentDraft.end.x - currentDraft.start.x) > 2 ||
         Math.abs(currentDraft.end.y - currentDraft.start.y) > 2
+    }
 
     if (hasArea) {
       commitAnnotations([...annotations, currentDraft])
@@ -433,6 +804,15 @@ export default function App() {
       setAnnotations(next)
       return stack.slice(0, -1)
     })
+  }
+
+  const handleClear = () => {
+    if (annotations.length === 0) {
+      return
+    }
+
+    commitAnnotations([])
+    setStatus('已清空')
   }
 
   const handleCopy = async () => {
@@ -479,16 +859,24 @@ export default function App() {
     }
   }
 
-  const toolItems: Array<{ key: Tool; icon: typeof MousePointer2; label: string }> = [
+  const toolItems: Array<{ key: Tool; icon: LucideIcon; label: string }> = [
     { key: 'select', icon: MousePointer2, label: '选择' },
+    { key: 'line', icon: Minus, label: '直线' },
     { key: 'rect', icon: Square, label: '矩形' },
+    { key: 'ellipse', icon: Circle, label: '圆形' },
     { key: 'arrow', icon: MoveRight, label: '箭头' },
-    { key: 'pen', icon: Pencil, label: '画笔' }
+    { key: 'pen', icon: Pencil, label: '画笔' },
+    { key: 'highlighter', icon: Highlighter, label: '高亮' },
+    { key: 'text', icon: TypeIcon, label: '文字' },
+    { key: 'step', icon: Hash, label: '编号' },
+    { key: 'mosaic', icon: Grid3x3, label: '马赛克' },
+    { key: 'blur', icon: Droplets, label: '模糊' },
+    { key: 'eraser', icon: Eraser, label: '橡皮擦' }
   ]
 
   return (
     <div className="annotator-root">
-      <main className="canvas-shell" style={{ height: cssSize.height || 'calc(100vh - 56px)' }}>
+      <main className="canvas-shell" style={{ height: cssSize.height || `calc(100vh - ${TOOLBAR_HEIGHT}px)` }}>
         {image ? (
           <canvas
             ref={canvasRef}
@@ -508,70 +896,76 @@ export default function App() {
       </main>
 
       <footer className="toolbar">
-        <div className="tool-group">
-          {toolItems.map((item) => {
-            const Icon = item.icon
-            return (
+        <div className="toolbar-row">
+          <div className="tool-group primary-tools">
+            {toolItems.map((item) => {
+              const Icon = item.icon
+              return (
+                <button
+                  key={item.key}
+                  className={`icon-button ${tool === item.key ? 'is-active' : ''}`}
+                  title={item.label}
+                  type="button"
+                  onClick={() => setTool(item.key)}
+                >
+                  <Icon size={18} />
+                </button>
+              )
+            })}
+          </div>
+          <div className="status-line">{status}</div>
+        </div>
+
+        <div className="toolbar-row">
+          <div className="tool-group color-group" aria-label="颜色">
+            {COLORS.map((item) => (
               <button
-                key={item.key}
-                className={`icon-button ${tool === item.key ? 'is-active' : ''}`}
-                title={item.label}
+                key={item}
+                className={`swatch ${color === item ? 'is-active' : ''}`}
+                style={{ backgroundColor: item }}
+                title={item}
                 type="button"
-                onClick={() => setTool(item.key)}
-              >
-                <Icon size={18} />
-              </button>
-            )
-          })}
-        </div>
+                onClick={() => setColor(item)}
+              />
+            ))}
+          </div>
 
-        <div className="tool-group color-group" aria-label="颜色">
-          {COLORS.map((item) => (
-            <button
-              key={item}
-              className={`swatch ${color === item ? 'is-active' : ''}`}
-              style={{ backgroundColor: item }}
-              title={item}
-              type="button"
-              onClick={() => setColor(item)}
+          <label className="size-control" title="线宽">
+            <span>{size}</span>
+            <input
+              min="2"
+              max="14"
+              type="range"
+              value={size}
+              onChange={(event) => setSize(Number(event.target.value))}
             />
-          ))}
-        </div>
+          </label>
 
-        <label className="size-control" title="线宽">
-          <span>{size}</span>
-          <input
-            min="2"
-            max="14"
-            type="range"
-            value={size}
-            onChange={(event) => setSize(Number(event.target.value))}
-          />
-        </label>
+          <div className="tool-group history-group">
+            <button className="icon-button" title="撤销" type="button" onClick={handleUndo} disabled={!undoStack.length}>
+              <Undo2 size={18} />
+            </button>
+            <button className="icon-button" title="重做" type="button" onClick={handleRedo} disabled={!redoStack.length}>
+              <Redo2 size={18} />
+            </button>
+            <button className="icon-button" title="清空" type="button" onClick={handleClear} disabled={!annotations.length}>
+              <Trash2 size={18} />
+            </button>
+          </div>
 
-        <div className="tool-group">
-          <button className="icon-button" title="撤销" type="button" onClick={handleUndo} disabled={!undoStack.length}>
-            <Undo2 size={18} />
-          </button>
-          <button className="icon-button" title="重做" type="button" onClick={handleRedo} disabled={!redoStack.length}>
-            <Redo2 size={18} />
-          </button>
-        </div>
-
-        <div className="status-line">{status}</div>
-
-        <div className="tool-group command-group">
-          <button className="command-button" type="button" onClick={handleCopy} disabled={!image}>
-            <Clipboard size={17} />
-            复制
-          </button>
-          <button className="command-button" type="button" onClick={handleSave} disabled={!image}>
-            <Save size={17} />
-            保存
-          </button>
-          <button className="icon-button close-button" title="关闭" type="button" onClick={() => mulby.window.close()}>
-            <X size={18} />
-          </button>
+          <div className="tool-group command-group">
+            <button className="command-button" type="button" onClick={handleCopy} disabled={!image}>
+              <Clipboard size={17} />
+              复制
+            </button>
+            <button className="command-button" type="button" onClick={handleSave} disabled={!image}>
+              <Save size={17} />
+              保存
+            </button>
+            <button className="icon-button close-button" title="关闭" type="button" onClick={() => mulby.window.close()}>
+              <X size={18} />
+            </button>
+          </div>
         </div>
       </footer>
     </div>

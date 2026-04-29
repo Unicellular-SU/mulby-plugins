@@ -11,7 +11,7 @@
   "icon": "icon.png",
   "pluginSetting": {
     "single": false,
-    "height": 56,
+    "height": 96,
     "defaultDetached": true
   },
   "window": {
@@ -21,9 +21,9 @@
     "alwaysOnTop": true,
     "position": "capture-region",
     "fit": "capture-region-with-toolbar",
-    "captureToolbarHeight": 56,
+    "captureToolbarHeight": 96,
     "width": 960,
-    "height": 596,
+    "height": 636,
     "minWidth": 760,
     "minHeight": 120,
     "maxWidth": 4096,
