@@ -1,0 +1,54 @@
+{
+  "id": "screenshot-annotator",
+  "name": "screenshot-annotator",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "productivity",
+  "displayName": "截图标注",
+  "description": "区域截图后在透明独立窗口中快速添加矩形、箭头和画笔标注，并复制或保存为 PNG。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "single": false,
+    "height": 56,
+    "defaultDetached": true
+  },
+  "window": {
+    "type": "borderless",
+    "titleBar": false,
+    "transparent": true,
+    "alwaysOnTop": true,
+    "position": "capture-region",
+    "fit": "capture-region-with-toolbar",
+    "captureToolbarHeight": 56,
+    "width": 960,
+    "height": 596,
+    "minWidth": 760,
+    "minHeight": 120,
+    "maxWidth": 4096,
+    "maxHeight": 4096
+  },
+  "features": [
+    {
+      "code": "annotate",
+      "explain": "截图标注",
+      "mode": "detached",
+      "preCapture": "region",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "截图标注"
+        },
+        {
+          "type": "keyword",
+          "value": "screenshot"
+        },
+        {
+          "type": "keyword",
+          "value": "annotate"
+        }
+      ]
+    }
+  ]
+}
