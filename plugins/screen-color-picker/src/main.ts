@@ -25,7 +25,14 @@ export function onDisable() {
 }
 
 export async function run(context: PluginContext) {
-  console.log(`${PLUGIN_TAG} feature=${context.featureCode ?? 'open_color_picker'}`)
+  const featureCode = context.featureCode ?? 'open_color_picker'
+  const input = context.input?.trim() ?? ''
+
+  if (featureCode === 'recognize-color' && !input) {
+    console.log(`${PLUGIN_TAG} recognize-color triggered without input`)
+  }
+
+  console.log(`${PLUGIN_TAG} feature=${featureCode}, input=${input.slice(0, 40)}`)
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }

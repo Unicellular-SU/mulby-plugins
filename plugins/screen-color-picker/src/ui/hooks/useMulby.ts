@@ -17,6 +17,10 @@ export function useMulby(pluginId: string) {
       },
       notification: {
         show: (message: string, type?: NotifyType) => window.mulby?.notification?.show(message, type)
+      },
+      window: {
+        hide: () => window.mulby?.window?.hide(),
+        show: () => window.mulby?.window?.show()
       }
     }),
     [pluginId]
