@@ -49,7 +49,6 @@ import {
   type Annotation,
   type EditorImage,
   type EditorTool,
-  exportAnnotatedBlob,
   exportAnnotatedDataUrl,
   normalizeRect,
   type Point,
@@ -73,19 +72,6 @@ import {
   sleep
 } from './image-utils'
 import { useMulby } from './hooks/useMulby'
-
-/** 让出一帧，使 React 有机会渲染 busy 状态后再开始重活 */
-const yieldFrame = () =>
-  new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
-
-/** 将 Blob 异步转为 data URL */
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
 
 interface PluginAttachment {
   id: string
@@ -195,7 +181,32 @@ export default function App() {
   const spaceKeyRef = useRef(false)
   const inlineTextRef = useRef<HTMLTextAreaElement | null>(null)
 
+  // rAF 节流：避免 pointerMove 高频触发 React 渲染
+  const panDeltaRef = useRef({ x: 0, y: 0 })
+  const panRafRef = useRef(0)
+  const penPointsRef = useRef<Point[]>([])
+  const penRafRef = useRef(0)
+  const dragDeltaRef = useRef({ x: 0, y: 0 })
+  const dragRafRef = useRef(0)
+  const draftEndRef = useRef<Point>({ x: 0, y: 0 })
+  const draftEndRafRef = useRef(0)
+  const mosaicRafRef = useRef(0)
+  const mosaicEndRef = useRef<Point>({ x: 0, y: 0 })
+  // 供 wheel handler 稳定引用，避免每帧重新注册事件
+  const zoomRef = useRef(zoom)
+  const panXRef = useRef(panX)
+  const panYRef = useRef(panY)
+  zoomRef.current = zoom
+  panXRef.current = panX
+  panYRef.current = panY
+
   annotationsRef.current = annotations
+
+  // 用 ref 追踪最新 draft/dragging，避免 finishDraft 闭包过期
+  const draftAnnotationRef = useRef(draftAnnotation)
+  const draggingAnnotationIdRef = useRef(draggingAnnotationId)
+  draftAnnotationRef.current = draftAnnotation
+  draggingAnnotationIdRef.current = draggingAnnotationId
 
   const activeToolMeta = useMemo(
     () => TOOL_OPTIONS.find((option) => option.key === activeTool) ?? TOOL_OPTIONS[0],
@@ -559,32 +570,21 @@ export default function App() {
       return
     }
 
-    setBusyLabel('正在复制到剪贴板')
-    setErrorMessage(null)
-
     try {
-      // 让 UI 先渲染 busy 状态
-      await yieldFrame()
-
-      const blob = await exportAnnotatedBlob({
+      const dataUrl = exportAnnotatedDataUrl({
         imageElement: imageElementRef.current,
         image: baseImage,
         annotations: annotationsRef.current
       })
-
-      if (!blob) {
+      if (!dataUrl) {
         throw new Error('无法生成图片数据')
       }
-
-      const dataUrl = await blobToDataUrl(blob)
       await clipboard.writeImage(dataUrl)
       setStatusLine('已复制到剪贴板。')
       notification.show('已复制到剪贴板', 'success')
     } catch (error) {
       console.error('[quick-shot-editor] copy to clipboard failed', error)
       notification.show('复制到剪贴板失败', 'error')
-    } finally {
-      setBusyLabel(null)
     }
   }, [baseImage, clipboard, notification])
 
@@ -594,23 +594,14 @@ export default function App() {
     }
 
     try {
-      setBusyLabel('正在导出 PNG')
-      setErrorMessage(null)
-
-      // 让 UI 先渲染 busy 状态
-      await yieldFrame()
-
-      const blob = await exportAnnotatedBlob({
+      const dataUrl = exportAnnotatedDataUrl({
         imageElement: imageElementRef.current,
         image: baseImage,
         annotations: annotationsRef.current
       })
-
-      if (!blob) {
+      if (!dataUrl) {
         throw new Error('无法生成图片数据')
       }
-
-      const exportedDataUrl = await blobToDataUrl(blob)
 
       const picturesDir = await system.getPath('pictures')
       const defaultPath = joinSystemPath(
@@ -624,20 +615,16 @@ export default function App() {
         filters: [{ name: 'PNG 图片', extensions: ['png'] }]
       })
 
-      if (!pickedPath) {
-        return
-      }
+      if (!pickedPath) return
 
       const finalPath = ensurePngPath(pickedPath)
-      await filesystem.writeFile(finalPath, dataUrlToBase64(exportedDataUrl), 'base64')
+      await filesystem.writeFile(finalPath, dataUrlToBase64(dataUrl), 'base64')
       setLastSavedPath(finalPath)
       setStatusLine('已保存到本地。')
       notification.show('截图已保存到本地', 'success')
     } catch (error) {
       console.error('[quick-shot-editor] failed to save image', error)
       notification.show('保存失败', 'error')
-    } finally {
-      setBusyLabel(null)
     }
   }, [baseImage, dialog, filesystem, notification, system])
 
@@ -854,6 +841,17 @@ export default function App() {
     }
   }, [baseImage])
 
+  // 卸载时清理所有 rAF 句柄
+  useEffect(() => {
+    return () => {
+      cancelAnimationFrame(panRafRef.current)
+      cancelAnimationFrame(penRafRef.current)
+      cancelAnimationFrame(dragRafRef.current)
+      cancelAnimationFrame(draftEndRafRef.current)
+      cancelAnimationFrame(mosaicRafRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
@@ -952,20 +950,16 @@ export default function App() {
       }
       event.preventDefault()
       const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX
-      const newZoom = Math.min(
-        4,
-        Math.max(0.25, zoom * (1 - delta * 0.002))
-      )
-      if (newZoom === zoom) {
-        return
-      }
+      const currentZoom = zoomRef.current
+      const newZoom = Math.min(4, Math.max(0.25, currentZoom * (1 - delta * 0.002)))
+      if (newZoom === currentZoom) return
       const rect = canvasRef.current.getBoundingClientRect()
-      const layout = createLayout(baseImage, viewport, { zoom, panX, panY })
+      const layout = createLayout(baseImage, viewport, { zoom: currentZoom, panX: panXRef.current, panY: panYRef.current })
       const cx = event.clientX - rect.left
       const cy = event.clientY - rect.top
       const ix = (cx - layout.offsetX) / layout.scale
       const iy = (cy - layout.offsetY) / layout.scale
-      const fitScale = layout.scale / zoom
+      const fitScale = layout.scale / currentZoom
       const newScale = fitScale * newZoom
       const newOffsetX = cx - ix * newScale
       const newOffsetY = cy - iy * newScale
@@ -975,14 +969,12 @@ export default function App() {
       setPanX(newOffsetX - centerX)
       setPanY(newOffsetY - centerY)
     },
-    [baseImage, viewport, zoom, panX, panY]
+    [baseImage, viewport]
   )
 
   useEffect(() => {
     const el = stageRef.current
-    if (!el) {
-      return
-    }
+    if (!el) return
     el.addEventListener('wheel', handleWheel, { passive: false })
     return () => el.removeEventListener('wheel', handleWheel)
   }, [handleWheel])
@@ -1236,171 +1228,198 @@ export default function App() {
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!baseImage || !canvasRef.current) {
-        return
-      }
+      if (!baseImage || !canvasRef.current) return
 
       if (isPanningRef.current) {
-        const dx = event.clientX - lastPanClientRef.current.x
-        const dy = event.clientY - lastPanClientRef.current.y
+        panDeltaRef.current.x += event.clientX - lastPanClientRef.current.x
+        panDeltaRef.current.y += event.clientY - lastPanClientRef.current.y
         lastPanClientRef.current = { x: event.clientX, y: event.clientY }
-        setPanX((prev) => prev + dx)
-        setPanY((prev) => prev + dy)
-        return
-      }
-
-      // 拖动已有标注（任意类型）
-      if (draggingAnnotationId) {
-        const currentPoint = pointFromPointerEvent(
-          event,
-          canvasRef.current,
-          baseImage,
-          viewport,
-          true,
-          viewportTransform
-        )
-        if (currentPoint) {
-          const delta = {
-            x: currentPoint.x - dragStartRef.current.x,
-            y: currentPoint.y - dragStartRef.current.y
-          }
-          dragStartRef.current = currentPoint
-          const updated = annotationsRef.current.map((a) =>
-            a.id === draggingAnnotationId ? moveAnnotation(a, delta) : a
-          )
-          annotationsRef.current = updated
-          setAnnotations(updated)
+        if (!panRafRef.current) {
+          panRafRef.current = requestAnimationFrame(() => {
+            panRafRef.current = 0
+            const { x, y } = panDeltaRef.current
+            panDeltaRef.current = { x: 0, y: 0 }
+            if (x !== 0) setPanX((prev) => prev + x)
+            if (y !== 0) setPanY((prev) => prev + y)
+          })
         }
         return
       }
 
-      const currentPoint = pointFromPointerEvent(
-        event,
-        canvasRef.current,
-        baseImage,
-        viewport,
-        true,
-        viewportTransform
-      )
-
-      if (!currentPoint) {
+      // 拖动已有标注：累积位移，rAF 批量更新
+      if (draggingAnnotationId) {
+        const currentPoint = pointFromPointerEvent(event, canvasRef.current, baseImage, viewport, true, viewportTransform)
+        if (currentPoint) {
+          dragDeltaRef.current.x += currentPoint.x - dragStartRef.current.x
+          dragDeltaRef.current.y += currentPoint.y - dragStartRef.current.y
+          dragStartRef.current = currentPoint
+          if (!dragRafRef.current) {
+            dragRafRef.current = requestAnimationFrame(() => {
+              dragRafRef.current = 0
+              const { x, y } = dragDeltaRef.current
+              dragDeltaRef.current = { x: 0, y: 0 }
+              if (x === 0 && y === 0) return
+              const updated = annotationsRef.current.map((a) =>
+                a.id === draggingAnnotationId ? moveAnnotation(a, { x, y }) : a
+              )
+              annotationsRef.current = updated
+              setAnnotations(updated)
+            })
+          }
+        }
         return
       }
+
+      const currentPoint = pointFromPointerEvent(event, canvasRef.current, baseImage, viewport, true, viewportTransform)
+      if (!currentPoint) return
 
       if (draftSelection) {
-        const startPoint = {
-          x: draftSelection.x,
-          y: draftSelection.y
-        }
-
-        setDraftSelection(normalizeRect(startPoint, currentPoint))
+        setDraftSelection(normalizeRect({ x: draftSelection.x, y: draftSelection.y }, currentPoint))
         return
       }
 
-      if (!draftAnnotation) {
-        return
-      }
+      if (!draftAnnotation) return
 
       if (draftAnnotation.kind === 'pen' || draftAnnotation.kind === 'highlighter') {
-        setDraftAnnotation({
-          ...draftAnnotation,
-          points: [...draftAnnotation.points, currentPoint]
-        })
+        penPointsRef.current.push(currentPoint)
+        if (!penRafRef.current) {
+          penRafRef.current = requestAnimationFrame(() => {
+            penRafRef.current = 0
+            const batch = penPointsRef.current.splice(0)
+            if (!batch.length) return
+            setDraftAnnotation((prev) => {
+              if (!prev || (prev.kind !== 'pen' && prev.kind !== 'highlighter')) return prev
+              return { ...prev, points: [...prev.points, ...batch] }
+            })
+          })
+        }
         return
       }
 
       if (draftAnnotation.kind === 'mosaic' || draftAnnotation.kind === 'blur') {
-        const startPoint = {
-          x: draftAnnotation.rect.x,
-          y: draftAnnotation.rect.y
+        mosaicEndRef.current = currentPoint
+        if (!mosaicRafRef.current) {
+          mosaicRafRef.current = requestAnimationFrame(() => {
+            mosaicRafRef.current = 0
+            const end = mosaicEndRef.current
+            setDraftAnnotation((prev) => {
+              if (!prev || (prev.kind !== 'mosaic' && prev.kind !== 'blur')) return prev
+              return { ...prev, rect: normalizeRect({ x: prev.rect.x, y: prev.rect.y }, end) }
+            })
+          })
         }
-
-        setDraftAnnotation({
-          ...draftAnnotation,
-          rect: normalizeRect(startPoint, currentPoint)
-        })
         return
       }
 
-      setDraftAnnotation({
-        ...draftAnnotation,
-        end: (() => {
-          // Shift 约束 rect/ellipse 为正方形/正圆
-          if (
-            shiftKeyRef.current &&
-            (draftAnnotation.kind === 'rect' || draftAnnotation.kind === 'ellipse')
-          ) {
-            const narrow = draftAnnotation as { start: Point }
-            const dx = currentPoint.x - narrow.start.x
-            const dy = currentPoint.y - narrow.start.y
-            const side = Math.max(Math.abs(dx), Math.abs(dy))
-            return { x: narrow.start.x + side * Math.sign(dx), y: narrow.start.y + side * Math.sign(dy) }
-          }
-          return currentPoint
-        })()
-      } as Annotation)
+      // line / arrow / rect / ellipse：只更新 end 点
+      draftEndRef.current = currentPoint
+      if (!draftEndRafRef.current) {
+        draftEndRafRef.current = requestAnimationFrame(() => {
+          draftEndRafRef.current = 0
+          const end = draftEndRef.current
+          setDraftAnnotation((prev) => {
+            if (!prev) return prev
+            const endPt = (() => {
+              if (shiftKeyRef.current && (prev.kind === 'rect' || prev.kind === 'ellipse') && 'start' in prev) {
+                const dx = end.x - prev.start.x
+                const dy = end.y - prev.start.y
+                const side = Math.max(Math.abs(dx), Math.abs(dy))
+                return { x: prev.start.x + side * Math.sign(dx), y: prev.start.y + side * Math.sign(dy) }
+              }
+              return end
+            })()
+            return { ...prev, end: endPt } as Annotation
+          })
+        })
+      }
     },
     [baseImage, draftAnnotation, draftSelection, draggingAnnotationId, viewport, viewportTransform]
   )
 
   const finishDraftAnnotation = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
+      // 取消所有待处理的 rAF
+      cancelAnimationFrame(penRafRef.current)
+      cancelAnimationFrame(dragRafRef.current)
+      cancelAnimationFrame(draftEndRafRef.current)
+      cancelAnimationFrame(mosaicRafRef.current)
+      penRafRef.current = dragRafRef.current = draftEndRafRef.current = mosaicRafRef.current = 0
+
       if (isPanningRef.current) {
         isPanningRef.current = false
-        try {
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        } catch {
-          // ignore
-        }
+        cancelAnimationFrame(panRafRef.current)
+        panRafRef.current = 0
+        try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
         return
       }
 
-      // 结束标注拖动
-      if (draggingAnnotationId) {
-        try {
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        } catch {
-          // ignore
-        }
+      const dragId = draggingAnnotationIdRef.current
+      if (dragId) {
+        try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
         setDraggingAnnotationId(null)
         setStatusLine('已移动标注。')
         return
       }
 
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-      } catch {
-        // ignore when the pointer was already released
-      }
+      try { event.currentTarget.releasePointerCapture(event.pointerId) } catch { /* ignore */ }
 
       if (draftSelection) {
         if (draftSelection.width > 6 && draftSelection.height > 6) {
           setSelectionRect(draftSelection)
           setStatusLine('裁剪选区已更新。')
         }
-
         setDraftSelection(null)
         return
       }
 
-      if (!draftAnnotation) {
-        return
-      }
+      // 用 ref 读取最新 draft，合并未刷新的 rAF 增量
+      const currentDraft = draftAnnotationRef.current
+      if (!currentDraft) return
 
-      if (annotationHasRenderableArea(draftAnnotation)) {
-        replaceAnnotations([...annotationsRef.current, draftAnnotation], {
-          recordHistory: true
-        })
-        setStatusLine(`已添加${activeToolMeta.label}。`)
+      let finalDraft: Annotation = currentDraft
+      if ((currentDraft.kind === 'pen' || currentDraft.kind === 'highlighter') && penPointsRef.current.length) {
+        finalDraft = { ...currentDraft, points: [...currentDraft.points, ...penPointsRef.current] }
+        penPointsRef.current = []
+      }
+      if ((currentDraft.kind === 'mosaic' || currentDraft.kind === 'blur') && mosaicEndRef.current) {
+        const end = mosaicEndRef.current
+        finalDraft = { ...currentDraft, rect: normalizeRect({ x: currentDraft.rect.x, y: currentDraft.rect.y }, end) } as Annotation
+      }
+      if (
+        (currentDraft.kind === 'line' || currentDraft.kind === 'arrow' || currentDraft.kind === 'rect' || currentDraft.kind === 'ellipse') &&
+        draftEndRef.current
+      ) {
+        const end = draftEndRef.current
+        const endPt = shiftKeyRef.current && (currentDraft.kind === 'rect' || currentDraft.kind === 'ellipse')
+          ? (() => {
+              const s = (currentDraft as { start: Point }).start
+              const dx = end.x - s.x; const dy = end.y - s.y
+              const side = Math.max(Math.abs(dx), Math.abs(dy))
+              return { x: s.x + side * Math.sign(dx), y: s.y + side * Math.sign(dy) }
+            })()
+          : end
+        finalDraft = { ...currentDraft, end: endPt } as Annotation
       }
 
       setDraftAnnotation(null)
+
+      if (annotationHasRenderableArea(finalDraft)) {
+        replaceAnnotations([...annotationsRef.current, finalDraft], { recordHistory: true })
+        setStatusLine(`已添加${activeToolMeta.label}。`)
+      }
     },
-    [activeToolMeta.label, draftAnnotation, draftSelection, draggingAnnotationId, replaceAnnotations]
+    [activeToolMeta.label, draftSelection, replaceAnnotations]
   )
 
   const cancelDraftAnnotation = useCallback(() => {
     isPanningRef.current = false
+    cancelAnimationFrame(panRafRef.current)
+    cancelAnimationFrame(penRafRef.current)
+    cancelAnimationFrame(dragRafRef.current)
+    cancelAnimationFrame(draftEndRafRef.current)
+    cancelAnimationFrame(mosaicRafRef.current)
+    panRafRef.current = penRafRef.current = dragRafRef.current = draftEndRafRef.current = mosaicRafRef.current = 0
+    panDeltaRef.current = { x: 0, y: 0 }
     setDraftAnnotation(null)
     setDraftSelection(null)
     setDraggingAnnotationId(null)
