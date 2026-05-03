@@ -1,7 +1,7 @@
 {
   "id": "unit-converter",
   "name": "unit-converter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "mulby",
   "type": "productivity",
   "displayName": "单位转换",
@@ -29,19 +29,7 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "单位换算"
-        },
-        {
-          "type": "keyword",
           "value": "单位转换"
-        },
-        {
-          "type": "keyword",
-          "value": "数值转换"
-        },
-        {
-          "type": "keyword",
-          "value": "converter"
         }
       ]
     },
@@ -53,7 +41,8 @@
         {
           "type": "over",
           "label": "转换数值",
-          "minLength": 1
+          "minLength": 1,
+          "exclude": "^[^\\d]*$"
         }
       ]
     }

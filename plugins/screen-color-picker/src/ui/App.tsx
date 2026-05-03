@@ -60,7 +60,60 @@ function rgbToHsl(r: number, g: number, b: number) {
   if (h < 0) h += 360
   const l = (max + min) / 2
   const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1))
-  return `hsl(${h}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`
+  return { h, s: Math.round(s * 100), l: Math.round(l * 100), text: `hsl(${h}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)` }
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  const sn = s / 100
+  const ln = l / 100
+  const c = (1 - Math.abs(2 * ln - 1)) * sn
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
+  const m = ln - c / 2
+  let rp = 0, gp = 0, bp = 0
+  if (h < 60) { rp = c; gp = x }
+  else if (h < 120) { rp = x; gp = c }
+  else if (h < 180) { gp = c; bp = x }
+  else if (h < 240) { gp = x; bp = c }
+  else if (h < 300) { rp = x; bp = c }
+  else { rp = c; bp = x }
+  return {
+    r: Math.round((rp + m) * 255),
+    g: Math.round((gp + m) * 255),
+    b: Math.round((bp + m) * 255)
+  }
+}
+
+function parseColorValue(raw: string): string | null {
+  const input = raw.trim()
+  if (!input) return null
+
+  const hexMatch = input.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/)
+  if (hexMatch) return normalizeHex(input)
+
+  const rgbMatch = input.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*(?:0?\.\d+|1(?:\.0)?|[01]))?\s*\)$/)
+  if (rgbMatch) {
+    const r = Number(rgbMatch[1])
+    const g = Number(rgbMatch[2])
+    const b = Number(rgbMatch[3])
+    if (r <= 255 && g <= 255 && b <= 255) {
+      const hex = [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')
+      return `#${hex.toUpperCase()}`
+    }
+  }
+
+  const hslMatch = input.match(/^hsla?\(\s*(\d{1,3})\s*,\s*(\d{1,3})%\s*,\s*(\d{1,3})%\s*(?:,\s*(?:0?\.\d+|1(?:\.0)?|[01]))?\s*\)$/)
+  if (hslMatch) {
+    const h = Number(hslMatch[1])
+    const s = Number(hslMatch[2])
+    const l = Number(hslMatch[3])
+    if (h <= 360 && s <= 100 && l <= 100) {
+      const { r, g, b } = hslToRgb(h, s, l)
+      const hex = [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')
+      return `#${hex.toUpperCase()}`
+    }
+  }
+
+  return null
 }
 
 function buildPalette(hexRaw: string): PaletteItem {
@@ -69,13 +122,13 @@ function buildPalette(hexRaw: string): PaletteItem {
   return {
     hex,
     rgb: rgb.text,
-    hsl: rgbToHsl(rgb.r, rgb.g, rgb.b),
+    hsl: rgbToHsl(rgb.r, rgb.g, rgb.b).text,
     ts: Date.now()
   }
 }
 
 export default function App() {
-  const { clipboard, notification, screen, storage } = useMulby(PLUGIN_ID)
+  const { clipboard, notification, screen, storage, window: mulbyWindow } = useMulby(PLUGIN_ID)
   const [activeColor, setActiveColor] = useState<PaletteItem>(buildPalette('#4F46E5'))
   const [history, setHistory] = useState<PaletteItem[]>([])
   const [busy, setBusy] = useState(false)
@@ -86,6 +139,20 @@ export default function App() {
     document.documentElement.classList.toggle('dark', initialTheme === 'dark')
     window.mulby?.onThemeChange?.((newTheme) => {
       document.documentElement.classList.toggle('dark', newTheme === 'dark')
+    })
+    window.mulby?.onPluginInit?.((data) => {
+      if (data.featureCode === 'recognize-color' && data.input) {
+        const hex = parseColorValue(data.input)
+        if (hex) {
+          const color = buildPalette(hex)
+          setActiveColor(color)
+          setHistory((prev) => [color, ...prev.filter((item) => item.hex !== color.hex)].slice(0, HISTORY_LIMIT))
+          clipboard.writeText(color.hex)
+          notification.show(`已识别颜色 ${color.hex}，并复制到剪贴板。`, 'success')
+        } else {
+          notification.show('无法识别的颜色值，请选中 HEX / RGB / HSL 格式的颜色值。', 'warning')
+        }
+      }
     })
   }, [])
 
@@ -112,6 +179,7 @@ export default function App() {
   async function pickColor() {
     if (busy) return
     setBusy(true)
+    mulbyWindow.hide()
     try {
       let pickedHex = ''
       let pickedFrom: 'mulby' | 'eyedropper' | 'none' = 'none'
@@ -153,6 +221,7 @@ export default function App() {
         notification.show('取色失败，请重试。', 'error')
       }
     } finally {
+      mulbyWindow.show()
       setBusy(false)
     }
   }

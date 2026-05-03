@@ -1,0 +1,66 @@
+{
+  "id": "ctool",
+  "name": "ctool",
+  "version": "1.0.0",
+  "author": "baiy / Mulby adapter",
+  "homepage": "https://github.com/baiy/Ctool",
+  "displayName": "Ctool",
+  "description": "移植 Ctool 到 Mulby，提供哈希、加密、编码、JSON、二维码、代码格式化、单位换算等开发常用工具集合",
+  "type": "developer",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "license": "MIT",
+  "assets": [
+    "dist/main.js"
+  ],
+  "pluginSetting": {
+    "single": true,
+    "height": 760
+  },
+  "window": {
+    "width": 1180,
+    "height": 760,
+    "minWidth": 900,
+    "minHeight": 620,
+    "maxWidth": 1800,
+    "maxHeight": 1200
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "Ctool 开发工具箱",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "ctool"
+        },
+        {
+          "type": "keyword",
+          "value": "开发工具"
+        },
+        {
+          "type": "keyword",
+          "value": "程序工具"
+        },
+        {
+          "type": "keyword",
+          "value": "json工具"
+        },
+        {
+          "type": "keyword",
+          "value": "base64"
+        },
+        {
+          "type": "keyword",
+          "value": "hash"
+        },
+        {
+          "type": "keyword",
+          "value": "时间戳"
+        }
+      ]
+    }
+  ]
+}

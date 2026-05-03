@@ -1,0 +1,53 @@
+{
+  "id": "web-translator",
+  "name": "web-translator",
+  "version": "1.0.0",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "displayName": "网页翻译",
+  "description": "在标签页中打开常用网页翻译站，并自动填入 Mulby 搜索框输入的文本",
+  "type": "productivity",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "webview": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "height": 720
+  },
+  "window": {
+    "width": 1180,
+    "height": 820,
+    "minWidth": 760,
+    "minHeight": 560
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "网页翻译",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "网页翻译"
+        },
+        {
+          "type": "regex",
+          "match": "^\\s*\\S[\\s\\S]*$",
+          "label": "网页翻译",
+          "explain": "用网页翻译站翻译输入文本",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        {
+          "type": "over",
+          "label": "网页翻译选中文本",
+          "minLength": 1,
+          "maxLength": 20000
+        }
+      ]
+    }
+  ]
+}
