@@ -361,6 +361,52 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@25.6.0)
 
+  plugins/moyu:
+    dependencies:
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      '@types/react':
+        specifier: ^18.3.3
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.28)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.1
+        version: 4.7.0(vite@5.4.21(@types/node@20.19.39))
+      autoprefixer:
+        specifier: ^10.4.19
+        version: 10.4.27(postcss@8.5.9)
+      esbuild:
+        specifier: ^0.20.0
+        version: 0.20.2
+      postcss:
+        specifier: ^8.4.38
+        version: 8.5.9
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
+      tailwindcss:
+        specifier: ^3.4.4
+        version: 3.4.19
+      typescript:
+        specifier: ^5.2.2
+        version: 5.9.3
+      vite:
+        specifier: ^5.3.1
+        version: 5.4.21(@types/node@20.19.39)
+
   plugins/mulby-ai-chat:
     dependencies:
       '@types/react-syntax-highlighter':
@@ -822,6 +868,40 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^5.3.1
+        version: 5.4.21(@types/node@25.6.0)
+
+  plugins/web-translator:
+    dependencies:
+      lucide-react:
+        specifier: ^0.562.0
+        version: 0.562.0(react@18.3.1)
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.2.0
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18.2.0
+        version: 18.3.7(@types/react@18.3.28)
+      '@vitejs/plugin-react':
+        specifier: ^4.2.0
+        version: 4.7.0(vite@5.4.21(@types/node@25.6.0))
+      esbuild:
+        specifier: ^0.20.0
+        version: 0.20.2
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.0
         version: 5.4.21(@types/node@25.6.0)
 
   plugins/word-counter:
