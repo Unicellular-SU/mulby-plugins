@@ -1,0 +1,19 @@
+{
+  "name": "ctool",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "mulby dev",
+    "build": "pnpm run build:backend && pnpm run build:ui",
+    "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",
+    "build:ui": "node scripts/sync-ctool-ui.mjs",
+    "sync-ui": "node scripts/sync-ctool-ui.mjs",
+    "icon": "node scripts/finalize-icon.mjs",
+    "pack": "mulby pack"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.0.0"
+  }
+}

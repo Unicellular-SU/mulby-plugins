@@ -10,3 +10,4 @@ plugins/*/ui
 *.inplugin
 plugins_temp.jsonl
 releases/
+upstream/
