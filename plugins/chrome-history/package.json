@@ -1,0 +1,28 @@
+{
+  "name": "mulby-chrome-history",
+  "version": "2.2.0",
+  "main": "dist/main.js",
+  "license": "MIT",
+  "scripts": {
+    "build": "npm run build:backend && npm run build:ui && npm run copy:assets",
+    "build:backend": "node scripts/build-backend.js",
+    "build:ui": "vite build",
+    "copy:assets": "node scripts/copy-assets.js",
+    "pack": "npm run build && mulby pack"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "lucide-react": "^0.562.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/sql.js": "^1.4.9",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.2.2"
+  }
+}

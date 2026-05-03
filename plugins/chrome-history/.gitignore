@@ -1,0 +1,6 @@
+search_*
+node_modules
+dist
+ui
+*.inplugin
+.DS_Store

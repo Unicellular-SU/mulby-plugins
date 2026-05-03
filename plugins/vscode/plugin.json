@@ -1,0 +1,29 @@
+{
+  "name": "830ef6d0",
+  "pluginName": "vscode",
+  "description": "快速搜索vscode历史项目并且在vscode中打开",
+  "version": "v3.2.0",
+  "preload": "preload.js",
+  "author": "莫回首",
+  "homepage": "https://github.com/mohuishou/utools",
+  "logo": "icon/icon.png",
+  "features": [
+    {
+      "code": "vsc-ide",
+      "explain": "类 vscode ide 列表",
+      "cmds": [
+        "vsc-ide"
+      ],
+      "icon": "icon/icon.png"
+    },
+    {
+      "code": "vsc-add-ide",
+      "explain": "新增 vscode ide",
+      "cmds": [
+        "vsc-add-ide",
+        "新增 IDE"
+      ],
+      "icon": "icon/icon.png"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "id": "chrome-history",
+  "name": "chrome-history",
+  "displayName": "浏览器历史记录搜索",
+  "version": "2.2.0",
+  "description": "快速搜索 Chrome/Edge 等 Chromium 浏览器历史记录，支持多个关键词筛选。",
+  "author": "莫回首",
+  "homepage": "https://github.com/mohuishou/utools",
+  "type": "productivity",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "pluginSetting": {
+    "height": 520
+  },
+  "window": {
+    "width": 760,
+    "height": 560,
+    "minWidth": 520,
+    "minHeight": 360
+  },
+  "features": [
+    {
+      "code": "ch",
+      "explain": "搜索 Chrome/Edge 历史记录",
+      "icon": "icon.png",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "ch" },
+        { "type": "keyword", "value": "edge" },
+        { "type": "keyword", "value": "Chrome历史记录" },
+        { "type": "keyword", "value": "Edge历史记录" },
+        {
+          "type": "over",
+          "label": "搜索浏览器历史记录",
+          "minLength": 1
+        },
+        {
+          "type": "regex",
+          "match": "^ch\\s+.+",
+          "label": "搜索浏览器历史记录"
+        }
+      ]
+    },
+    {
+      "code": "ch-setting",
+      "explain": "设置 Chrome Profile 目录",
+      "icon": "icon.png",
+      "mode": "silent",
+      "cmds": [
+        {
+          "type": "files",
+          "label": "设置为 Chrome Profile 目录",
+          "fileType": "directory",
+          "minLength": 1,
+          "maxLength": 1
+        }
+      ]
+    }
+  ]
+}

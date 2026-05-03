@@ -1,0 +1,37 @@
+{
+  "name": "vscode",
+  "displayName": "VS Code History",
+  "version": "1.0.0",
+  "description": "快速搜索 VS Code 历史项目并且在 IDE 中打开",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "author": "莫回首",
+  "homepage": "https://github.com/mohuishou/utools",
+  "icon": "icon.png",
+  "type": "developer",
+  "permissions": {
+    "runCommand": true
+  },
+  "pluginSetting": {
+    "height": 520
+  },
+  "features": [
+    {
+      "code": "vsc-ide",
+      "explain": "管理 VS Code IDE 列表",
+      "cmds": [{ "type": "keyword", "value": "vsc-ide" }],
+      "mode": "ui",
+      "route": "ide-list"
+    },
+    {
+      "code": "vsc-add-ide",
+      "explain": "新增 VS Code IDE",
+      "cmds": [
+        { "type": "keyword", "value": "vsc-add-ide" },
+        { "type": "keyword", "value": "新增 IDE" }
+      ],
+      "mode": "ui",
+      "route": "add-ide"
+    }
+  ]
+}
