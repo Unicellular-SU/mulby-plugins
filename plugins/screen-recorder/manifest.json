@@ -12,7 +12,9 @@
   "permissions": {
     "screen": true,
     "microphone": true,
-    "inputMonitor": true
+    "inputMonitor": true,
+    "accessibility": true,
+    "notification": true
   },
   "pluginSetting": {
     "single": true,

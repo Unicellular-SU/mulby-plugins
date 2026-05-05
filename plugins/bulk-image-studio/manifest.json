@@ -9,6 +9,9 @@
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",
+  "permissions": {
+    "notification": true
+  },
   "pluginSetting": {
     "single": true
   },

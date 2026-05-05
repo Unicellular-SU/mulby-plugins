@@ -11,7 +11,8 @@
   "ui": "ui/index.html",
   "icon": "icon.png",
   "permissions": {
-    "webview": true
+    "webview": true,
+    "notification": true
   },
   "pluginSetting": {
     "single": true,

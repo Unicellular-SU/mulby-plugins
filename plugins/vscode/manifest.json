@@ -10,7 +10,8 @@
   "icon": "icon.png",
   "type": "developer",
   "permissions": {
-    "runCommand": true
+    "runCommand": true,
+    "notification": true
   },
   "pluginSetting": {
     "height": 520

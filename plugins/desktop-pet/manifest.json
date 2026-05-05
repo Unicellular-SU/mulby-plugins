@@ -10,7 +10,8 @@
   "icon": "icon.png",
   "permissions": {
     "inputMonitor": true,
-    "ai": true
+    "ai": true,
+    "accessibility": true
   },
   "features": [
     {

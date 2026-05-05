@@ -9,6 +9,11 @@
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",
+  "permissions": {
+    "screen": true,
+    "clipboard": true,
+    "notification": true
+  },
   "pluginSetting": {
     "single": false,
     "height": 100

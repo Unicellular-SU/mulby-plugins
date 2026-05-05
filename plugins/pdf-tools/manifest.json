@@ -11,6 +11,10 @@
   "ui": "ui/index.html",
   "preload": "preload.cjs",
   "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
   "window": {
     "width": 800,
     "height": 600

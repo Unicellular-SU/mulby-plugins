@@ -10,6 +10,10 @@
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
   "window": {
     "width": 800,
     "height": 600,
