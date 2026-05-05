@@ -10,6 +10,8 @@
   "ui": "ui/index.html",
   "icon": "icon.png",
   "permissions": {
+    "screen": true,
+    "microphone": true,
     "inputMonitor": true
   },
   "pluginSetting": {

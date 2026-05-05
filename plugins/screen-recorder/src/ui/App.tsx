@@ -234,6 +234,19 @@ function toErrorMessage(error: unknown) {
   return '操作失败，请稍后重试。'
 }
 
+function formatPermissionStatus(status?: string) {
+  const labels: Record<string, string> = {
+    authorized: '已授权',
+    granted: '已授权',
+    denied: '已拒绝',
+    restricted: '受系统策略限制',
+    limited: '受限访问',
+    'not-determined': '尚未决定',
+    unknown: '未知'
+  }
+  return status ? labels[status] ?? status : '未知'
+}
+
 function isSystemMediaPermissionError(error: unknown) {
   const message = toErrorMessage(error).toLowerCase()
   return (
@@ -242,6 +255,27 @@ function isSystemMediaPermissionError(error: unknown) {
     message.includes('not allowed') ||
     message.includes('denied by system')
   )
+}
+
+function createScreenPermissionMessage(error: unknown, screenStatus?: string, retriedWithoutSystemAudio = false) {
+  const retryText = retriedWithoutSystemAudio
+    ? '系统声音失败后已尝试降级为仅录制画面，但桌面视频流仍被拒绝。'
+    : ''
+  return [
+    '录屏权限不足：需要 manifest.permissions.screen（屏幕录制权限）。',
+    `当前系统屏幕录制状态：${formatPermissionStatus(screenStatus)}。`,
+    '如果宿主日志提示缺少 camera，这是宿主把 Electron 桌面视频流误判为摄像头权限；录屏流应校验 screen，不应要求 camera。',
+    retryText,
+    `原始错误：${toErrorMessage(error)}`
+  ].filter(Boolean).join('')
+}
+
+function createMicrophonePermissionMessage(error?: unknown, microphoneStatus?: string) {
+  return [
+    '麦克风权限不足：需要 manifest.permissions.microphone（麦克风权限）。',
+    `当前系统麦克风状态：${formatPermissionStatus(microphoneStatus)}。`,
+    error ? `原始错误：${toErrorMessage(error)}` : ''
+  ].filter(Boolean).join('')
 }
 
 function buildShortcutLabel(event: InputMonitorEvent) {
@@ -268,6 +302,10 @@ function displayToOverlayTarget(display: DisplayInfo): OverlayTarget {
     displayId: display.id,
     scaleFactor: display.scaleFactor
   }
+}
+
+function getClockNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
 }
 
 function App() {
@@ -317,7 +355,9 @@ function RecorderPanel() {
   const overlayCleanupRef = useRef<(() => void) | null>(null)
   const overlayTargetRef = useRef<OverlayTarget | null>(null)
   const durationTimerRef = useRef<number | null>(null)
-  const startedAtRef = useRef(0)
+  const startedAtMsRef = useRef(0)
+  const accumulatedDurationMsRef = useRef(0)
+  const backgroundThrottlingDisabledRef = useRef(false)
   const cancelStartRef = useRef(false)
   const settingsReadyRef = useRef(false)
   const statusRef = useRef<RecorderStatus>('idle')
@@ -416,16 +456,28 @@ function RecorderPanel() {
       }))
       setNotice(nextScreens.length > 0 ? '录制源已更新。' : '未发现可录制屏幕，请检查系统录屏权限。')
     } catch (error) {
-      setErrorMessage(`刷新录制源失败：${toErrorMessage(error)}`)
+      const screenStatus = await permission?.getStatus?.('screen').catch(() => undefined)
+      const message = isSystemMediaPermissionError(error)
+        ? createScreenPermissionMessage(error, screenStatus)
+        : toErrorMessage(error)
+      setErrorMessage(`刷新录制源失败：${message}`)
       notification.show('刷新录制源失败', 'error')
     } finally {
       setSourcesLoading(false)
     }
-  }, [notification, screen])
+  }, [notification, permission, screen])
 
   useEffect(() => {
     void refreshSources()
   }, [refreshSources])
+
+  const getElapsedDurationSec = useCallback(() => {
+    let elapsedMs = accumulatedDurationMsRef.current
+    if (startedAtMsRef.current > 0) {
+      elapsedMs += Math.max(0, getClockNow() - startedAtMsRef.current)
+    }
+    return Math.max(0, Math.floor(elapsedMs / 1000))
+  }, [])
 
   const stopDurationTimer = useCallback(() => {
     if (durationTimerRef.current) {
@@ -433,11 +485,31 @@ function RecorderPanel() {
       durationTimerRef.current = null
     }
 
-    if (startedAtRef.current > 0) {
-      const elapsed = Math.floor((Date.now() - startedAtRef.current) / 1000)
-      setMetrics((current) => ({ ...current, durationSec: Math.max(current.durationSec, elapsed) }))
+    if (startedAtMsRef.current > 0) {
+      accumulatedDurationMsRef.current += Math.max(0, getClockNow() - startedAtMsRef.current)
+      startedAtMsRef.current = 0
     }
+
+    const elapsed = Math.floor(accumulatedDurationMsRef.current / 1000)
+    setMetrics((current) => ({ ...current, durationSec: Math.max(current.durationSec, elapsed) }))
   }, [])
+
+  const disableControlPanelThrottling = useCallback(() => {
+    if (backgroundThrottlingDisabledRef.current || !mulbyWindow.setBackgroundThrottling) return
+    backgroundThrottlingDisabledRef.current = true
+    void mulbyWindow.setBackgroundThrottling(false).catch((error: unknown) => {
+      backgroundThrottlingDisabledRef.current = false
+      console.warn('[screen-recorder] disable background throttling failed', error)
+    })
+  }, [mulbyWindow])
+
+  const restoreControlPanelThrottling = useCallback(() => {
+    if (!backgroundThrottlingDisabledRef.current) return
+    backgroundThrottlingDisabledRef.current = false
+    void mulbyWindow.setBackgroundThrottling?.(true).catch((error: unknown) => {
+      console.warn('[screen-recorder] restore background throttling failed', error)
+    })
+  }, [mulbyWindow])
 
   const cleanupSession = useCallback(() => {
     stopDurationTimer()
@@ -451,7 +523,8 @@ function RecorderPanel() {
     micStreamRef.current = null
     recorderRef.current = null
     overlayTargetRef.current = null
-  }, [stopDurationTimer])
+    restoreControlPanelThrottling()
+  }, [restoreControlPanelThrottling, stopDurationTimer])
 
   useEffect(() => {
     return () => {
@@ -475,14 +548,24 @@ function RecorderPanel() {
   )
 
   const getMicrophoneStream = useCallback(async () => {
+    const microphoneStatus = await media.getAccessStatus('microphone').catch(() => undefined)
     const hasAccess = await media.hasMicrophoneAccess()
     if (!hasAccess) {
       const granted = await media.askForAccess('microphone')
       if (!granted) {
-        throw new Error('未获得麦克风权限。')
+        throw new Error(createMicrophonePermissionMessage(undefined, microphoneStatus))
       }
     }
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    } catch (error) {
+      if (isSystemMediaPermissionError(error)) {
+        const latestStatus = await media.getAccessStatus('microphone').catch(() => microphoneStatus)
+        throw new Error(createMicrophonePermissionMessage(error, latestStatus))
+      }
+      throw error
+    }
   }, [media])
 
   const mixAudioStreams = useCallback((videoStream: MediaStream, microphoneStream: MediaStream) => {
@@ -564,21 +647,37 @@ function RecorderPanel() {
         return navigator.mediaDevices.getUserMedia(constraints as MediaStreamConstraints)
       }
 
+      const createScreenPermissionError = async (error: unknown, retriedWithoutSystemAudio = false) => {
+        const screenStatus = await permission?.getStatus?.('screen').catch(() => undefined)
+        return new Error(createScreenPermissionMessage(error, screenStatus, retriedWithoutSystemAudio))
+      }
+
       try {
         const stream = await requestDesktopStream(settings.systemAudio)
         return { stream }
       } catch (error) {
-        if (!settings.systemAudio || !isSystemMediaPermissionError(error)) {
+        if (!isSystemMediaPermissionError(error)) {
           throw error
+        }
+
+        if (!settings.systemAudio) {
+          throw await createScreenPermissionError(error)
         }
 
         console.warn('[screen-recorder] system audio capture failed, retrying without audio', error)
         setNotice('系统声音采集被系统拒绝，已降级为仅录制画面。')
-        const stream = await requestDesktopStream(false)
-        return { stream }
+        try {
+          const stream = await requestDesktopStream(false)
+          return { stream }
+        } catch (retryError) {
+          if (isSystemMediaPermissionError(retryError)) {
+            throw await createScreenPermissionError(retryError, true)
+          }
+          throw retryError
+        }
       }
     },
-    [screen, settings.frameRate, settings.systemAudio]
+    [permission, screen, settings.frameRate, settings.systemAudio]
   )
 
   const createRegionStream = useCallback(
@@ -975,24 +1074,31 @@ function RecorderPanel() {
 
   const startDurationTimer = useCallback(() => {
     if (durationTimerRef.current) window.clearInterval(durationTimerRef.current)
-    startedAtRef.current = Date.now()
-    durationTimerRef.current = window.setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startedAtRef.current) / 1000)
+    startedAtMsRef.current = getClockNow()
+
+    const updateDuration = () => {
+      const elapsed = getElapsedDurationSec()
       setMetrics((current) => ({ ...current, durationSec: elapsed }))
+      mulbyWindow.invalidate?.()
       if (autoStopSeconds > 0 && elapsed >= autoStopSeconds && statusRef.current === 'recording') {
         stopDurationTimer()
         setStatus('processing')
         setMetrics((current) => ({ ...current, progressLabel: '正在整理录制数据' }))
         recorderRef.current?.stop()
       }
-    }, 1000)
-  }, [autoStopSeconds, stopDurationTimer])
+    }
+
+    updateDuration()
+    durationTimerRef.current = window.setInterval(updateDuration, 1000)
+  }, [autoStopSeconds, getElapsedDurationSec, mulbyWindow, stopDurationTimer])
 
   const startRecording = useCallback(async () => {
     if (!canStart) return
 
     cancelStartRef.current = false
     chunksRef.current = []
+    startedAtMsRef.current = 0
+    accumulatedDurationMsRef.current = 0
     setErrorMessage('')
     setMetrics(EMPTY_METRICS)
     setStatus('preparing')
@@ -1002,6 +1108,8 @@ function RecorderPanel() {
       if (typeof MediaRecorder === 'undefined') {
         throw new Error('当前运行环境不支持 MediaRecorder。')
       }
+
+      disableControlPanelThrottling()
 
       if (settings.overlay.mouseTrail || settings.overlay.clickEffect || settings.overlay.keystroke) {
         const trusted = await permission?.isAccessibilityTrusted?.().catch(() => true)
@@ -1019,8 +1127,6 @@ function RecorderPanel() {
         return
       }
 
-      overlayCleanupRef.current = await startOverlay()
-
       if (settings.startDelay > 0) {
         setStatus('countdown')
         for (let remaining = settings.startDelay; remaining > 0; remaining -= 1) {
@@ -1031,10 +1137,28 @@ function RecorderPanel() {
             return
           }
           setCountdown(remaining)
+          mulbyWindow.invalidate?.()
           await sleep(1000)
         }
         setCountdown(0)
       }
+
+      if (cancelStartRef.current) {
+        cleanupSession()
+        setStatus('idle')
+        return
+      }
+
+      setStatus('preparing')
+      setNotice('正在显示 Overlay。')
+      const overlayCleanup = await startOverlay()
+      if (cancelStartRef.current) {
+        overlayCleanup()
+        cleanupSession()
+        setStatus('idle')
+        return
+      }
+      overlayCleanupRef.current = overlayCleanup
 
       const recorder = new MediaRecorder(stream, {
         mimeType: getSupportedMimeType(),
@@ -1044,10 +1168,17 @@ function RecorderPanel() {
       recorder.ondataavailable = (event) => {
         if (event.data.size <= 0) return
         chunksRef.current.push(event.data)
-        setMetrics((current) => ({ ...current, fileSize: current.fileSize + event.data.size }))
+        const elapsed = getElapsedDurationSec()
+        setMetrics((current) => ({
+          ...current,
+          durationSec: Math.max(current.durationSec, elapsed),
+          fileSize: current.fileSize + event.data.size
+        }))
+        mulbyWindow.invalidate?.()
       }
 
       recorder.onerror = () => {
+        restoreControlPanelThrottling()
         setErrorMessage('录制过程中发生错误。')
         setStatus('error')
       }
@@ -1082,9 +1213,13 @@ function RecorderPanel() {
     buildRecordingStream,
     canStart,
     cleanupSession,
+    disableControlPanelThrottling,
     finalizeRecording,
+    getElapsedDurationSec,
+    mulbyWindow,
     notification,
     permission,
+    restoreControlPanelThrottling,
     settings.bitrateMbps,
     settings.overlay.clickEffect,
     settings.overlay.keystroke,
@@ -1115,9 +1250,10 @@ function RecorderPanel() {
     const recorder = recorderRef.current
     if (!recorder || recorder.state !== 'recording') return
     recorder.pause()
+    stopDurationTimer()
     setStatus('paused')
     setNotice('录制已暂停。')
-  }, [])
+  }, [stopDurationTimer])
 
   const resumeRecording = useCallback(() => {
     const recorder = recorderRef.current
@@ -1125,7 +1261,8 @@ function RecorderPanel() {
     recorder.resume()
     setStatus('recording')
     setNotice('录制中。')
-  }, [])
+    startDurationTimer()
+  }, [startDurationTimer])
 
   const handleRegionPick = useCallback(async () => {
     try {

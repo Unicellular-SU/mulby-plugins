@@ -1,0 +1,47 @@
+{
+  "name": "desktop-pet",
+  "version": "1.0.0",
+  "displayName": "桌面宠物",
+  "description": "一只活泼的桌面伴侣，能感知你的鼠标和键盘操作并做出有趣反应",
+  "type": "entertainment",
+  "author": "Mulby Team",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "inputMonitor": true,
+    "ai": true
+  },
+  "features": [
+    {
+      "code": "pet",
+      "explain": "桌面宠物",
+      "mode": "detached",
+      "mainHide": true,
+      "cmds": [
+        { "type": "keyword", "value": "宠物" },
+        { "type": "keyword", "value": "pet" },
+        { "type": "keyword", "value": "桌面宠物" }
+      ]
+    }
+  ],
+  "window": {
+    "width": 120,
+    "height": 120,
+    "type": "borderless",
+    "titleBar": false,
+    "transparent": true,
+    "alwaysOnTop": true,
+    "resizable": false,
+    "focusable": false,
+    "visibleOnAllWorkspaces": true,
+    "visibleOnFullScreen": true,
+    "skipTaskbar": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "background": true,
+    "idleTimeoutMs": "never",
+    "maxRuntime": 0
+  }
+}
