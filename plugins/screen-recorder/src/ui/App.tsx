@@ -261,12 +261,16 @@ function createScreenPermissionMessage(error: unknown, screenStatus?: string, re
   const retryText = retriedWithoutSystemAudio
     ? '系统声音失败后已尝试降级为仅录制画面，但桌面视频流仍被拒绝。'
     : ''
+  const rawMessage = toErrorMessage(error)
+  const missingManifest = rawMessage.includes('manifest.permissions.screen')
   return [
-    '录屏权限不足：需要 manifest.permissions.screen（屏幕录制权限）。',
+    missingManifest
+      ? '录屏权限不足：插件未声明 manifest.permissions.screen（屏幕录制权限）。'
+      : '录屏被拒绝：插件已声明 manifest.permissions.screen，但桌面媒体流被宿主或系统拒绝。',
     `当前系统屏幕录制状态：${formatPermissionStatus(screenStatus)}。`,
-    '如果宿主日志提示缺少 camera，这是宿主把 Electron 桌面视频流误判为摄像头权限；录屏流应校验 screen，不应要求 camera。',
+    '如果宿主日志出现 requested media permission without a concrete audio/video type，说明 Electron 没带 media details 时没有匹配到 pending desktop capture，需要宿主按插件或窗口维度关联这次桌面录制请求。',
     retryText,
-    `原始错误：${toErrorMessage(error)}`
+    `原始错误：${rawMessage}`
   ].filter(Boolean).join('')
 }
 
@@ -659,6 +663,8 @@ function RecorderPanel() {
         if (!isSystemMediaPermissionError(error)) {
           throw error
         }
+
+        console.warn('[screen-recorder] desktop capture getUserMedia failed', error)
 
         if (!settings.systemAudio) {
           throw await createScreenPermissionError(error)
