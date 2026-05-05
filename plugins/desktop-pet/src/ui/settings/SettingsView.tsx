@@ -1,6 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { DEFAULT_PERSONALITY, type PetPersonality } from '../engine/ai-chat'
-import { DEFAULT_COLORS, type PetColorScheme } from '../engine/sprite'
+import { getPrebuiltPetList, getPrebuiltBlueprint, getPrebuiltPreviewSvg } from '../engine/prebuilt-pets'
+import { generateAllSprites } from '../engine/pet-blueprint'
+import type { PetSpriteSet, PetSpriteKey } from '../engine/pet-standard'
+import { CORE_SPRITES } from '../engine/pet-standard'
 import './settings.css'
 
 const TRAITS = [
@@ -20,12 +23,13 @@ const FREQUENCIES = [
 export default function SettingsView() {
   const [tab, setTab] = useState<'personality' | 'appearance'>('personality')
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
-  const [colors, setColors] = useState<PetColorScheme>(DEFAULT_COLORS)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
-  const [genPrompt, setGenPrompt] = useState('')
-  const [generating, setGenerating] = useState(false)
+  const [selectedPet, setSelectedPet] = useState('cat')
+  const [colorPrompt, setColorPrompt] = useState('')
+  const [recoloring, setRecoloring] = useState(false)
   const [toast, setToast] = useState('')
-  const previewRef = useRef<HTMLCanvasElement>(null)
+
+  const petList = getPrebuiltPetList()
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -37,8 +41,8 @@ export default function SettingsView() {
       try {
         const saved = await window.mulby.storage.get('pet-personality')
         if (saved) setPersonality(saved as PetPersonality)
-        const savedColors = await window.mulby.storage.get('pet-colors')
-        if (savedColors) setColors(savedColors as PetColorScheme)
+        const savedPetId = await window.mulby.storage.get('pet-selected-id')
+        if (savedPetId && typeof savedPetId === 'string') setSelectedPet(savedPetId)
       } catch {}
 
       try {
@@ -55,122 +59,105 @@ export default function SettingsView() {
     load()
   }, [])
 
-  useEffect(() => {
-    drawPreview()
-  }, [colors])
-
-  const drawPreview = useCallback(() => {
-    const canvas = previewRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')!
-    const s = 80
-    const u = s / 16
-    ctx.clearRect(0, 0, s, s)
-
-    ctx.fillStyle = colors.body
-    ctx.beginPath()
-    ctx.roundRect(4 * u, 7 * u, 8 * u, 5 * u, 2 * u)
-    ctx.fill()
-    ctx.fillStyle = colors.belly
-    ctx.beginPath()
-    ctx.roundRect(5.5 * u, 8.5 * u, 5 * u, 3 * u, 1.5 * u)
-    ctx.fill()
-
-    ctx.fillStyle = colors.body
-    ctx.beginPath()
-    ctx.roundRect(4 * u, 3 * u, 8 * u, 5 * u, 2.5 * u)
-    ctx.fill()
-
-    ctx.fillStyle = colors.body
-    ctx.beginPath()
-    ctx.moveTo(4.5 * u, 3.5 * u)
-    ctx.lineTo(6 * u, 1.5 * u)
-    ctx.lineTo(7 * u, 3.5 * u)
-    ctx.closePath()
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(9 * u, 3.5 * u)
-    ctx.lineTo(10 * u, 1.5 * u)
-    ctx.lineTo(11.5 * u, 3.5 * u)
-    ctx.closePath()
-    ctx.fill()
-
-    ctx.fillStyle = colors.earInner
-    ctx.beginPath()
-    ctx.moveTo(5.2 * u, 3.5 * u)
-    ctx.lineTo(6 * u, 2.2 * u)
-    ctx.lineTo(6.5 * u, 3.5 * u)
-    ctx.closePath()
-    ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(9.5 * u, 3.5 * u)
-    ctx.lineTo(10 * u, 2.2 * u)
-    ctx.lineTo(10.8 * u, 3.5 * u)
-    ctx.closePath()
-    ctx.fill()
-
-    ctx.fillStyle = '#333'
-    ctx.beginPath()
-    ctx.ellipse(6.2 * u, 5 * u, 0.5 * u, 0.7 * u, 0, 0, Math.PI * 2)
-    ctx.ellipse(9.8 * u, 5 * u, 0.5 * u, 0.7 * u, 0, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.fillStyle = colors.nose
-    ctx.beginPath()
-    ctx.arc(8 * u, 6.2 * u, 0.35 * u, 0, Math.PI * 2)
-    ctx.fill()
-  }, [colors])
-
-  const handleSave = async () => {
+  const handleSavePersonality = async () => {
     try {
       await window.mulby.storage.set('pet-personality', personality)
-      await window.mulby.storage.set('pet-colors', colors)
       showToast('设置已保存')
-      window.mulby.window.sendToParent('settings-updated', { personality, colors })
+      window.mulby.window.sendToParent('settings-updated', { personality })
     } catch (err) {
       console.error('Save error:', err)
     }
   }
 
-  const handleGenerateColors = async () => {
-    if (!genPrompt.trim() || generating) return
-    setGenerating(true)
+  const handleSelectPet = async (petId: string) => {
+    setSelectedPet(petId)
+    const blueprint = getPrebuiltBlueprint(petId)
+    if (!blueprint) return
+
+    const allSprites = generateAllSprites(blueprint)
+    const sprites: Partial<Record<PetSpriteKey, string>> = {}
+    for (const key of CORE_SPRITES) {
+      if (allSprites[key]) sprites[key] = allSprites[key]
+    }
+
+    const spriteSet: PetSpriteSet = {
+      id: `prebuilt_${petId}`,
+      name: blueprint.name,
+      description: blueprint.description,
+      sprites,
+      createdAt: Date.now(),
+    }
+
+    await window.mulby.storage.set('pet-sprites', spriteSet)
+    await window.mulby.storage.set('pet-selected-id', petId)
+    window.mulby.window.sendToParent('sprites-updated', { spriteSet })
+    showToast(`已选择: ${blueprint.name}`)
+  }
+
+  const handleRecolor = async () => {
+    if (!colorPrompt.trim() || recoloring) return
+    setRecoloring(true)
 
     try {
       const ai = window.mulby.ai
-      const result = await ai.call({
-        model: personality.model || models[0]?.id || 'openai:gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `你是一个宠物配色设计师。用户会描述他们想要的宠物外观风格，你需要返回一个 JSON 配色方案。
-格式必须严格为：{"body":"#hex","belly":"#hex","bodyDark":"#hex","earInner":"#hex","nose":"#hex"}
-body=主体色，belly=肚皮（浅色），bodyDark=阴影色（深色），earInner=耳朵内侧，nose=鼻子
-只返回 JSON，不要其他文字。`
-          },
-          { role: 'user', content: genPrompt }
-        ],
-        params: { temperature: 0.8, maxOutputTokens: 100 },
-        capabilities: [],
-        toolingPolicy: { enableInternalTools: false },
-        mcp: { mode: 'off' },
-        skills: { mode: 'off' },
-      })
+      let result = ''
+      const req = ai.call(
+        {
+          model: personality.model || models[0]?.id || '',
+          messages: [
+            {
+              role: 'system',
+              content: `你是一个配色设计师。用户会描述想要的宠物颜色风格，你需要返回一个 5 色调色板 JSON。
+格式：["#主体色", "#深色/描边", "#浅色/肚皮", "#点缀色", "#次要色"]
+只返回 JSON 数组，不要其他文字。确保颜色之间有足够对比度。`
+            },
+            { role: 'user', content: colorPrompt }
+          ],
+          params: { temperature: 0.7, maxOutputTokens: 100 },
+          capabilities: [],
+          toolingPolicy: { enableInternalTools: false },
+          mcp: { mode: 'off' },
+          skills: { mode: 'off' },
+        },
+        (chunk: any) => {
+          if (chunk.chunkType === 'text' && chunk.content) {
+            result += chunk.content
+          }
+        }
+      )
+      await req
 
-      const text = result?.content || ''
-      const match = text.match(/\{[^}]+\}/)
+      const match = result.match(/\[[\s\S]*?\]/)
       if (match) {
-        const parsed = JSON.parse(match[0]) as PetColorScheme
-        if (parsed.body && parsed.belly && parsed.bodyDark && parsed.earInner && parsed.nose) {
-          setColors(parsed)
-          showToast('配色方案已生成')
+        const colors = JSON.parse(match[0]) as string[]
+        if (colors.length >= 5) {
+          const blueprint = getPrebuiltBlueprint(selectedPet, colors)
+          if (blueprint) {
+            const allSprites = generateAllSprites(blueprint)
+            const sprites: Partial<Record<PetSpriteKey, string>> = {}
+            for (const key of CORE_SPRITES) {
+              if (allSprites[key]) sprites[key] = allSprites[key]
+            }
+
+            const spriteSet: PetSpriteSet = {
+              id: `recolor_${selectedPet}_${Date.now()}`,
+              name: `${petList.find(p => p.id === selectedPet)?.name || ''} (自定义)`,
+              description: colorPrompt,
+              sprites,
+              createdAt: Date.now(),
+            }
+
+            await window.mulby.storage.set('pet-sprites', spriteSet)
+            window.mulby.window.sendToParent('sprites-updated', { spriteSet })
+            showToast('配色已更新')
+          }
         }
       }
     } catch (err) {
-      console.error('Generate error:', err)
-      showToast('生成失败，请重试')
+      console.error('Recolor error:', err)
+      showToast('换色失败')
     } finally {
-      setGenerating(false)
+      setRecoloring(false)
     }
   }
 
@@ -181,7 +168,7 @@ body=主体色，belly=肚皮（浅色），bodyDark=阴影色（深色），ear
           性格设定
         </button>
         <button className={`tab ${tab === 'appearance' ? 'active' : ''}`} onClick={() => setTab('appearance')}>
-          外观定制
+          选择宠物
         </button>
       </div>
 
@@ -272,61 +259,54 @@ body=主体色，belly=肚皮（浅色），bodyDark=阴影色（深色），ear
 
         {tab === 'appearance' && (
           <div className="panel-content">
-            <div className="preview-section">
-              <canvas ref={previewRef} width={80} height={80} className="color-preview" />
-              <div className="color-swatches">
-                {([
-                  ['body', '主体'],
-                  ['belly', '肚皮'],
-                  ['bodyDark', '阴影'],
-                  ['earInner', '耳朵'],
-                  ['nose', '鼻子'],
-                ] as const).map(([key, label]) => (
-                  <div key={key} className="swatch-item">
-                    <input
-                      type="color"
-                      value={colors[key]}
-                      onChange={e => setColors(c => ({ ...c, [key]: e.target.value }))}
-                      className="swatch-input"
-                    />
-                    <span className="swatch-label">{label}</span>
-                  </div>
-                ))}
+            <div className="field">
+              <label className="field-label">选择宠物</label>
+              <div className="pet-gallery">
+                {petList.map(pet => {
+                  const svg = getPrebuiltPreviewSvg(pet.id)
+                  const src = svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : ''
+                  return (
+                    <button
+                      key={pet.id}
+                      className={`pet-card ${selectedPet === pet.id ? 'active' : ''}`}
+                      onClick={() => handleSelectPet(pet.id)}
+                    >
+                      {src && <img src={src} className="pet-card-img" />}
+                      <span className="pet-card-name">{pet.name}</span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
             <div className="ai-gen-section">
-              <label className="field-label">AI 生成配色</label>
+              <label className="field-label">AI 换色</label>
+              <p className="field-hint">描述你想要的颜色风格，AI 会为当前宠物生成新配色</p>
               <div className="gen-row">
                 <input
                   className="field-input"
-                  value={genPrompt}
-                  onChange={e => setGenPrompt(e.target.value)}
-                  placeholder="描述想要的风格，如：橘猫、赛博朋克、蓝色小龙..."
-                  onKeyDown={e => e.key === 'Enter' && handleGenerateColors()}
+                  value={colorPrompt}
+                  onChange={e => setColorPrompt(e.target.value)}
+                  placeholder="如：赛博朋克霓虹色、粉色系、暗黑风格..."
+                  onKeyDown={e => e.key === 'Enter' && handleRecolor()}
                 />
                 <button
                   className="gen-btn"
-                  onClick={handleGenerateColors}
-                  disabled={generating || !genPrompt.trim()}
+                  onClick={handleRecolor}
+                  disabled={recoloring || !colorPrompt.trim()}
                 >
-                  {generating ? '...' : '生成'}
+                  {recoloring ? '...' : '换色'}
                 </button>
               </div>
             </div>
-
-            <button
-              className="reset-colors-btn"
-              onClick={() => { setColors(DEFAULT_COLORS); showToast('已恢复默认配色') }}
-            >
-              恢复默认配色
-            </button>
           </div>
         )}
       </div>
 
       <div className="settings-footer">
-        <button className="save-btn" onClick={handleSave}>保存设置</button>
+        {tab === 'personality' && (
+          <button className="save-btn" onClick={handleSavePersonality}>保存设置</button>
+        )}
       </div>
 
       {toast && <div className="toast-wrap"><div className="toast">{toast}</div></div>}

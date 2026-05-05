@@ -87,8 +87,11 @@ interface MulbyWindow {
   hide(isRestorePreWindow?: boolean): void
   show(): void
   setSize(width: number, height: number): void
+  setPosition(x: number, y: number): void
   setExpendHeight(height: number): void
   center(): void
+  focus(): void
+  terminatePlugin(): void
   create(url: string, options?: {
     width?: number
     height?: number
@@ -106,6 +109,12 @@ interface MulbyWindow {
     maxHeight?: number
     opacity?: number
     transparent?: boolean
+    focusable?: boolean
+    skipTaskbar?: boolean
+    ignoreMouseEvents?: boolean
+    forwardMouseEvents?: boolean
+    visibleOnAllWorkspaces?: boolean
+    visibleOnFullScreen?: boolean
   }): Promise<BrowserWindowProxy | null>
   close(): void
   detach(): void
@@ -900,10 +909,19 @@ interface PluginInitData {
   attachments?: Attachment[]
 }
 
+interface MulbyInputMonitor {
+  isAvailable(): Promise<boolean>
+  requireAccessibility(): Promise<void>
+  start(options: { mouse?: boolean; keyboard?: boolean; throttleMs?: number }): Promise<string | null>
+  stop(sessionId: string): void
+  onEvent(callback: (event: any) => void): void
+}
+
 interface MulbyAPI {
   clipboard: MulbyClipboard
   clipboardHistory: MulbyClipboardHistory
   input: MulbyInput
+  inputMonitor: MulbyInputMonitor
   notification: MulbyNotification
   window: MulbyWindow
   subInput: MulbySubInput

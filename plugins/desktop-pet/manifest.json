@@ -28,7 +28,9 @@
   ],
   "window": {
     "width": 120,
-    "height": 120,
+    "height": 200,
+    "minWidth": 120,
+    "minHeight": 200,
     "type": "borderless",
     "titleBar": false,
     "transparent": true,

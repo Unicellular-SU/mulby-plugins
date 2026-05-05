@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
+import { SvgPetRenderer } from './engine/svg-renderer'
 import { PixelCatRenderer, DEFAULT_COLORS, type PetColorScheme } from './engine/sprite'
 import {
   createInitialState,
@@ -7,56 +8,105 @@ import {
   updatePosition,
   behaviorToAnimation,
 } from './engine/behavior'
-import type { PetState, DisplayBounds } from './engine/types'
+import type { PetState, DisplayBounds, BehaviorType } from './engine/types'
 import { PET_SIZE } from './engine/types'
 import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason } from './engine/ai-chat'
+import type { PetSpriteSet, PetExpression, PetPose } from './engine/pet-standard'
 
-const BUBBLE_WIDTH = 180
-const BUBBLE_HEIGHT = 60
+const BUBBLE_AREA_HEIGHT = 80
+const WIN_WIDTH = 120
+const WIN_HEIGHT = PET_SIZE + BUBBLE_AREA_HEIGHT
+
+function behaviorToPose(behavior: BehaviorType): PetPose {
+  switch (behavior) {
+    case 'wander':
+    case 'chase':
+      return 'walk_1'
+    case 'sit':
+      return 'sit'
+    case 'sleep':
+      return 'sleep'
+    case 'jump':
+      return 'jump'
+    case 'happy':
+    case 'cheer':
+    case 'celebrate':
+      return 'wave'
+    default:
+      return 'stand'
+  }
+}
+
+function behaviorToExpression(behavior: BehaviorType): PetExpression {
+  switch (behavior) {
+    case 'happy':
+    case 'cheer':
+    case 'celebrate':
+      return 'happy'
+    case 'surprised':
+      return 'surprised'
+    case 'sleep':
+      return 'sleepy'
+    default:
+      return 'neutral'
+  }
+}
 
 export default function PetView() {
+  const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stateRef = useRef<PetState | null>(null)
   const boundsRef = useRef<DisplayBounds | null>(null)
-  const rendererRef = useRef<PixelCatRenderer | null>(null)
+  const svgRendererRef = useRef<SvgPetRenderer | null>(null)
+  const canvasRendererRef = useRef<PixelCatRenderer | null>(null)
+  const useSvgRef = useRef(false)
   const lastTimeRef = useRef(0)
   const inputSessionRef = useRef<string | null>(null)
   const chatRef = useRef<AIChatController | null>(null)
   const idleCheckRef = useRef(0)
   const lastTypingRef = useRef(0)
   const typingCountRef = useRef(0)
-  const bubbleWinRef = useRef<any>(null)
+  const typingPauseTimerRef = useRef<number>(0)
   const lastWinPosRef = useRef({ x: -1, y: -1 })
+  const currentExpressionRef = useRef<PetExpression>('neutral')
+  const expressionTimerRef = useRef<number>(0)
 
-  const showBubble = useCallback(async (text: string) => {
-    const bw = bubbleWinRef.current
-    if (!bw) return
-    try {
-      await bw.postMessage('bubble-show', text)
-      await bw.show()
-      positionBubble()
-    } catch {}
+  const [bubbleText, setBubbleText] = useState('')
+  const [bubbleVisible, setBubbleVisible] = useState(false)
+  const bubbleTimerRef = useRef<number>(0)
+
+  const showBubble = useCallback((text: string) => {
+    setBubbleText(text)
+    setBubbleVisible(true)
+    clearTimeout(bubbleTimerRef.current)
+    bubbleTimerRef.current = window.setTimeout(() => {
+      setBubbleVisible(false)
+    }, 5000)
   }, [])
 
-  const updateBubble = useCallback(async (text: string) => {
-    const bw = bubbleWinRef.current
-    if (!bw) return
-    try {
-      await bw.postMessage('bubble-update', text)
-      await bw.show()
-      positionBubble()
-    } catch {}
-  }, [])
+  const updateBubbleText = useCallback((text: string) => {
+    setBubbleText(text)
+    if (!bubbleVisible) setBubbleVisible(true)
+    clearTimeout(bubbleTimerRef.current)
+    bubbleTimerRef.current = window.setTimeout(() => {
+      setBubbleVisible(false)
+    }, 5000)
+  }, [bubbleVisible])
 
-  const positionBubble = useCallback(() => {
-    const bw = bubbleWinRef.current
-    const state = stateRef.current
-    if (!bw || !state) return
-    try {
-      const x = Math.round(state.position.x - BUBBLE_WIDTH / 2 + PET_SIZE / 2)
-      const y = Math.round(state.position.y - BUBBLE_HEIGHT - 4)
-      bw.setPosition(x, y)
-    } catch {}
+  const setExpression = useCallback((expression: PetExpression, durationMs = 5000) => {
+    currentExpressionRef.current = expression
+    if (svgRendererRef.current) {
+      svgRendererRef.current.setExpression(expression)
+    }
+    clearTimeout(expressionTimerRef.current)
+    if (expression !== 'neutral') {
+      expressionTimerRef.current = window.setTimeout(() => {
+        currentExpressionRef.current = 'neutral'
+        if (svgRendererRef.current) {
+          svgRendererRef.current.setExpression('neutral')
+        }
+      }, durationMs)
+    }
   }, [])
 
   const triggerSpeak = useCallback(async (reason: TriggerReason) => {
@@ -65,14 +115,15 @@ export default function PetView() {
     if (!chat || !state) return
     if (!chat.canSpeak(reason)) return
 
-    const text = await chat.speak(reason, state.behavior, (partial) => {
-      updateBubble(partial)
+    const result = await chat.speak(reason, state.behavior, (partial) => {
+      updateBubbleText(partial)
     })
 
-    if (text) {
-      showBubble(text)
+    if (result) {
+      showBubble(result.text)
+      setExpression(result.expression)
     }
-  }, [showBubble, updateBubble])
+  }, [showBubble, updateBubbleText, setExpression])
 
   const openSettings = useCallback(async () => {
     try {
@@ -115,9 +166,11 @@ export default function PetView() {
         break
       case 'cheer':
         if (state) { state.behavior = 'cheer'; state.animTimer = 0 }
+        setExpression('excited')
         break
       case 'sleep':
         if (state) { state.behavior = 'sleep'; state.animTimer = 0 }
+        setExpression('sleepy')
         break
       case 'hide':
         window.mulby.window.hide()
@@ -129,25 +182,39 @@ export default function PetView() {
         window.mulby.window.terminatePlugin()
         break
     }
-  }, [openSettings, triggerSpeak])
+  }, [openSettings, triggerSpeak, setExpression])
 
   const init = useCallback(async () => {
+    const container = containerRef.current
     const canvas = canvasRef.current
-    if (!canvas) return
-
-    const renderer = new PixelCatRenderer(canvas)
-    rendererRef.current = renderer
+    if (!container || !canvas) return
 
     let personality = DEFAULT_PERSONALITY
     let colors = DEFAULT_COLORS
+    let spriteSet: PetSpriteSet | null = null
+
     try {
       const savedP = await window.mulby.storage.get('pet-personality')
       if (savedP) personality = savedP as PetPersonality
       const savedC = await window.mulby.storage.get('pet-colors')
       if (savedC) colors = savedC as PetColorScheme
+      const savedS = await window.mulby.storage.get('pet-sprites')
+      if (savedS) spriteSet = savedS as PetSpriteSet
     } catch {}
 
-    renderer.setColors(colors)
+    if (spriteSet && spriteSet.sprites['stand_neutral']) {
+      useSvgRef.current = true
+      canvas.style.display = 'none'
+      const svgRenderer = new SvgPetRenderer(container, PET_SIZE)
+      svgRenderer.loadSpriteSet(spriteSet)
+      svgRendererRef.current = svgRenderer
+    } else {
+      useSvgRef.current = false
+      const canvasRenderer = new PixelCatRenderer(canvas)
+      canvasRenderer.setColors(colors)
+      canvasRendererRef.current = canvasRenderer
+    }
+
     chatRef.current = new AIChatController(personality)
 
     const display = await window.mulby.screen.getPrimaryDisplay()
@@ -159,30 +226,8 @@ export default function PetView() {
 
     await window.mulby.window.setPosition(
       Math.round(state.position.x),
-      Math.round(state.position.y)
+      Math.round(state.position.y - BUBBLE_AREA_HEIGHT)
     )
-
-    try {
-      const bw = await window.mulby.window.create('?view=bubble', {
-        width: BUBBLE_WIDTH,
-        height: BUBBLE_HEIGHT,
-        type: 'borderless',
-        titleBar: false,
-        transparent: true,
-        alwaysOnTop: true,
-        focusable: false,
-        skipTaskbar: true,
-        ignoreMouseEvents: true,
-        forwardMouseEvents: false,
-        resizable: false,
-        visibleOnAllWorkspaces: true,
-        visibleOnFullScreen: true,
-      })
-      bubbleWinRef.current = bw
-      await bw.hide()
-    } catch (e) {
-      console.error('Create bubble window failed:', e)
-    }
 
     const available = await window.mulby.inputMonitor.isAvailable()
     if (!available) {
@@ -217,7 +262,10 @@ export default function PetView() {
 
           if (typingCountRef.current >= 30) {
             typingCountRef.current = 0
-            triggerSpeak('typing_fast')
+            clearTimeout(typingPauseTimerRef.current)
+            typingPauseTimerRef.current = window.setTimeout(() => {
+              triggerSpeak('typing_fast')
+            }, 2000)
           }
         }
 
@@ -241,12 +289,31 @@ export default function PetView() {
 
     window.mulby.window.onChildMessage((channel: string, ...args: any[]) => {
       if (channel === 'settings-updated' && args[0]) {
-        const { personality: newP, colors: newC } = args[0]
+        const { personality: newP } = args[0]
         if (newP) {
           chatRef.current?.updatePersonality(newP)
         }
-        if (newC) {
-          rendererRef.current?.setColors(newC)
+      }
+      if (channel === 'sprites-updated' && args[0]) {
+        const { spriteSet: newS } = args[0]
+        if (newS && newS.sprites['stand_neutral']) {
+          useSvgRef.current = true
+          if (canvas) canvas.style.display = 'none'
+          if (!svgRendererRef.current) {
+            svgRendererRef.current = new SvgPetRenderer(container, PET_SIZE)
+          }
+          svgRendererRef.current.loadSpriteSet(newS)
+        } else {
+          useSvgRef.current = false
+          if (canvas) canvas.style.display = 'block'
+          if (svgRendererRef.current) {
+            svgRendererRef.current.destroy()
+            svgRendererRef.current = null
+          }
+          if (!canvasRendererRef.current) {
+            canvasRendererRef.current = new PixelCatRenderer(canvas)
+            canvasRendererRef.current.setColors(colors)
+          }
         }
       }
     })
@@ -273,9 +340,7 @@ export default function PetView() {
   const gameLoop = useCallback((timestamp: number) => {
     const state = stateRef.current
     const bounds = boundsRef.current
-    const renderer = rendererRef.current
-    const canvas = canvasRef.current
-    if (!state || !bounds || !renderer || !canvas) {
+    if (!state || !bounds) {
       requestAnimationFrame(gameLoop)
       return
     }
@@ -295,22 +360,36 @@ export default function PetView() {
     state.velocity = getVelocity(state, bounds)
     updatePosition(state, bounds)
 
-    const animName = behaviorToAnimation(state.behavior, state.facing)
-    renderer.play(animName)
-    renderer.setFlipped(state.facing === 'left')
-    renderer.update(delta)
-    renderer.render()
+    if (useSvgRef.current && svgRendererRef.current) {
+      const pose = behaviorToPose(state.behavior)
+      const baseExpr = behaviorToExpression(state.behavior)
+      const expr = currentExpressionRef.current !== 'neutral'
+        ? currentExpressionRef.current
+        : baseExpr
+      svgRendererRef.current.setPose(pose)
+      svgRendererRef.current.setExpression(expr)
+      svgRendererRef.current.setFlipped(state.facing === 'left')
+      svgRendererRef.current.update(delta)
+    } else if (canvasRendererRef.current) {
+      const canvas = canvasRef.current
+      if (canvas) {
+        const animName = behaviorToAnimation(state.behavior, state.facing)
+        canvasRendererRef.current.play(animName)
+        canvasRendererRef.current.setFlipped(state.facing === 'left')
+        canvasRendererRef.current.update(delta)
+        canvasRendererRef.current.render()
+      }
+    }
 
     const newX = Math.round(state.position.x)
-    const newY = Math.round(state.position.y)
+    const newY = Math.round(state.position.y - BUBBLE_AREA_HEIGHT)
     if (newX !== lastWinPosRef.current.x || newY !== lastWinPosRef.current.y) {
       lastWinPosRef.current = { x: newX, y: newY }
       window.mulby.window.setPosition(newX, newY)
-      positionBubble()
     }
 
     requestAnimationFrame(gameLoop)
-  }, [positionBubble])
+  }, [])
 
   useEffect(() => {
     init()
@@ -321,24 +400,64 @@ export default function PetView() {
       if (idleCheckRef.current) {
         clearInterval(idleCheckRef.current)
       }
-      if (bubbleWinRef.current) {
-        try { bubbleWinRef.current.close() } catch {}
+      clearTimeout(typingPauseTimerRef.current)
+      clearTimeout(expressionTimerRef.current)
+      clearTimeout(bubbleTimerRef.current)
+      if (svgRendererRef.current) {
+        svgRendererRef.current.destroy()
       }
     }
   }, [init])
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={PET_SIZE}
-      height={PET_SIZE}
-      onClick={() => triggerSpeak('user_click')}
-      onContextMenu={e => { e.preventDefault(); showContextMenu() }}
-      style={{
-        background: 'transparent',
-        cursor: 'pointer',
-        display: 'block',
-      }}
-    />
+    <div style={{ width: WIN_WIDTH, height: WIN_HEIGHT, position: 'relative' }}>
+      {/* Bubble area (top) */}
+      <div
+        style={{
+          width: WIN_WIDTH,
+          height: BUBBLE_AREA_HEIGHT,
+          display: 'flex',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          padding: '4px 6px',
+          pointerEvents: 'none',
+          overflow: 'hidden',
+        }}
+      >
+        {bubbleVisible && bubbleText && (
+          <div className="bubble-container bubble-enter">
+            <div className="bubble-box">
+              <span className="bubble-text">{bubbleText}</span>
+            </div>
+            <div className="bubble-arrow" />
+          </div>
+        )}
+      </div>
+
+      {/* Pet area (bottom) */}
+      <div
+        ref={containerRef}
+        onClick={() => triggerSpeak('user_click')}
+        onContextMenu={e => { e.preventDefault(); showContextMenu() }}
+        style={{
+          width: PET_SIZE,
+          height: PET_SIZE,
+          cursor: 'pointer',
+          position: 'relative',
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          width={PET_SIZE}
+          height={PET_SIZE}
+          style={{
+            display: 'block',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+          }}
+        />
+      </div>
+    </div>
   )
 }

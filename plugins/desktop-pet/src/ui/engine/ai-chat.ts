@@ -1,4 +1,6 @@
 import type { BehaviorType } from './types'
+import type { PetExpression } from './pet-standard'
+import { emotionToExpression } from './pet-standard'
 
 export interface PetPersonality {
   name: string
@@ -12,6 +14,11 @@ export interface PetPersonality {
     morning: boolean
     lateNight: boolean
   }
+}
+
+export interface SpeakResult {
+  text: string
+  expression: PetExpression
 }
 
 export const DEFAULT_PERSONALITY: PetPersonality = {
@@ -42,11 +49,18 @@ function buildSystemPrompt(personality: PetPersonality): string {
   return `你是"${personality.name}"，一只住在用户桌面上的像素风格宠物。
 ${traitDesc}
 规则：
-- 回复必须简短（15字以内），适合显示在小气泡里
+- 回复格式必须是: [emotion]文字内容
+- emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
+- 文字内容必须简短（15字以内），适合显示在小气泡里
 - 用中文回复
 - 不要用markdown格式
 - 根据用户的行为做出自然反应
-- 表现得像一个有生命的桌面伙伴`
+- 表现得像一个有生命的桌面伙伴
+
+示例回复:
+[joy]今天天气真好喵~
+[curiosity]你在写什么呀？
+[sleepiness]好困...要休息了`
 }
 
 export type TriggerReason =
@@ -104,7 +118,7 @@ export class AIChatController {
     reason: TriggerReason,
     currentBehavior: BehaviorType,
     onChunk?: (text: string) => void
-  ): Promise<string | null> {
+  ): Promise<SpeakResult | null> {
     if (!this.personality.model) return null
     if (this.isGenerating) return null
 
@@ -129,7 +143,7 @@ export class AIChatController {
         {
           model: this.personality.model,
           messages,
-          params: { maxOutputTokens: 50, temperature: 0.9 },
+          params: { maxOutputTokens: 80, temperature: 0.9 },
           capabilities: [],
           toolingPolicy: { enableInternalTools: false },
           mcp: { mode: 'off' },
@@ -142,7 +156,8 @@ export class AIChatController {
           }
           if (chunk.chunkType === 'text' && chunk.content) {
             result += chunk.content
-            onChunk?.(result)
+            const { text } = parseEmotionResponse(result)
+            onChunk?.(text)
           }
         }
       )
@@ -162,7 +177,9 @@ export class AIChatController {
         }
       }
 
-      return result || null
+      if (!result) return null
+      const { text, expression } = parseEmotionResponse(result)
+      return text ? { text, expression } : null
     } catch (err: any) {
       const isAbort = err?.name === 'AbortError'
         || String(err?.message).toLowerCase().includes('aborted')
@@ -201,4 +218,14 @@ export class AIChatController {
         return `[打个招呼吧]`
     }
   }
+}
+
+function parseEmotionResponse(raw: string): { text: string; expression: PetExpression } {
+  const match = raw.match(/^\[(\w+)\](.*)/)
+  if (match) {
+    const emotion = match[1]
+    const text = match[2].trim()
+    return { text, expression: emotionToExpression(emotion) }
+  }
+  return { text: raw.trim(), expression: 'neutral' }
 }
