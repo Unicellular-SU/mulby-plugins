@@ -11,7 +11,9 @@
   "icon": "icon.png",
   "pluginSetting": {
     "single": true,
-    "height": 680
+    "height": 680,
+    "background": true,
+    "persistent": true
   },
   "window": {
     "width": 920,
@@ -45,11 +47,12 @@
       "code": "count-selection",
       "explain": "统计当前选中文本",
       "mode": "ui",
+      "mainPush": true,
       "cmds": [
         {
           "type": "over",
           "label": "统计字数",
-          "minLength": 1
+          "minLength": 80
         }
       ]
     }

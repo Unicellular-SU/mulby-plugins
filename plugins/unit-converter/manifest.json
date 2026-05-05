@@ -11,7 +11,9 @@
   "icon": "icon.svg",
   "pluginSetting": {
     "single": true,
-    "height": 760
+    "height": 760,
+    "background": true,
+    "persistent": true
   },
   "window": {
     "width": 800,
@@ -37,6 +39,7 @@
       "code": "convert-selection",
       "explain": "转换当前选中的数值",
       "mode": "ui",
+      "mainPush": true,
       "cmds": [
         {
           "type": "over",
