@@ -1,0 +1,59 @@
+{
+  "id": "screen-recorder",
+  "name": "screen-recorder",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "media",
+  "displayName": "录屏助手",
+  "description": "全屏、窗口和自定义区域录制，支持鼠标轨迹、点击标记、键盘显示、音频录制和自动停止。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "inputMonitor": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "background": true,
+    "idleTimeoutMs": "never",
+    "maxRuntime": 0,
+    "defaultDetached": true
+  },
+  "window": {
+    "width": 400,
+    "height": 560,
+    "minWidth": 360,
+    "minHeight": 480,
+    "maxWidth": 520,
+    "maxHeight": 720,
+    "type": "borderless",
+    "titleBar": false,
+    "alwaysOnTop": true,
+    "resizable": false
+  },
+  "features": [
+    {
+      "code": "record",
+      "explain": "录屏助手",
+      "mode": "detached",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "录屏"
+        },
+        {
+          "type": "keyword",
+          "value": "屏幕录制"
+        },
+        {
+          "type": "keyword",
+          "value": "screen record"
+        },
+        {
+          "type": "keyword",
+          "value": "screen recorder"
+        }
+      ]
+    }
+  ]
+}

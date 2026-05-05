@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Screen recorder icon">
+  <defs>
+    <linearGradient id="bg" x1="104" y1="80" x2="408" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1f7a8c"/>
+      <stop offset="1" stop-color="#2a9d8f"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="190" y1="156" x2="322" y2="288" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c9f4ef"/>
+    </linearGradient>
+    <filter id="shadow" x="40" y="52" width="432" height="424" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#0b2e35" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="64" y="72" width="384" height="368" rx="92" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="126" y="142" width="260" height="208" rx="32" fill="#f8fbfb"/>
+  <rect x="151" y="168" width="210" height="132" rx="18" fill="#172026"/>
+  <circle cx="256" cy="234" r="54" fill="url(#lens)"/>
+  <circle cx="256" cy="234" r="25" fill="#d1495b"/>
+  <rect x="220" y="374" width="72" height="18" rx="9" fill="#f8fbfb" opacity="0.95"/>
+  <path d="M190 392h132" stroke="#f8fbfb" stroke-width="22" stroke-linecap="round"/>
+  <path d="M347 191l58-34c13-8 29 2 29 17v118c0 15-16 25-29 17l-58-34z" fill="#ffc857"/>
+  <path d="M180 101h152" stroke="#ffffff" stroke-width="20" stroke-linecap="round" opacity="0.35"/>
+</svg>
