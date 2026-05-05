@@ -168,6 +168,7 @@ const MODE_OPTIONS: Array<{ id: RecordMode; label: string; description: string; 
 const START_DELAY_OPTIONS: Array<0 | 3 | 5> = [0, 3, 5]
 const AUTO_STOP_OPTIONS = [1, 3, 5, 10, 30]
 const BITRATE_OPTIONS = [3, 5, 8, 12]
+const CLICK_MARKER_TTL_MS = 650
 
 function mergeSettings(saved: Partial<RecorderSettings> | undefined): RecorderSettings {
   return {
@@ -245,6 +246,24 @@ function formatPermissionStatus(status?: string) {
     unknown: '未知'
   }
   return status ? labels[status] ?? status : '未知'
+}
+
+function normalizeClickMarkerLabel(value: string | undefined, fallback: string) {
+  const trimmed = value?.trim()
+  if (!trimmed) return fallback
+
+  const Segmenter = (Intl as unknown as {
+    Segmenter?: new (locale?: string, options?: { granularity: 'grapheme' }) => {
+      segment(input: string): Iterable<{ segment: string }>
+    }
+  }).Segmenter
+
+  if (Segmenter) {
+    const first = new Segmenter(undefined, { granularity: 'grapheme' }).segment(trimmed)[Symbol.iterator]().next()
+    return first.done ? fallback : first.value.segment
+  }
+
+  return Array.from(trimmed)[0] ?? fallback
 }
 
 function isSystemMediaPermissionError(error: unknown) {
@@ -549,6 +568,18 @@ function RecorderPanel() {
       }))
     },
     []
+  )
+
+  const requestInputFocus = useCallback(
+    (element: HTMLInputElement) => {
+      mulbyWindow.focus?.()
+      window.setTimeout(() => {
+        if (document.activeElement !== element) {
+          element.focus()
+        }
+      }, 0)
+    },
+    [mulbyWindow]
   )
 
   const getMicrophoneStream = useCallback(async () => {
@@ -1437,6 +1468,30 @@ function RecorderPanel() {
                   </select>
                 </label>
                 <label>
+                  <span>左键标志</span>
+                  <input
+                    className="emoji-input"
+                    value={settings.overlay.leftEmoji}
+                    maxLength={8}
+                    placeholder="👆"
+                    onMouseDown={(event) => requestInputFocus(event.currentTarget)}
+                    onChange={(event) => updateOverlaySetting('leftEmoji', event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="inline-grid">
+                <label>
+                  <span>右键标志</span>
+                  <input
+                    className="emoji-input"
+                    value={settings.overlay.rightEmoji}
+                    maxLength={8}
+                    placeholder="👉"
+                    onMouseDown={(event) => requestInputFocus(event.currentTarget)}
+                    onChange={(event) => updateOverlaySetting('rightEmoji', event.target.value)}
+                  />
+                </label>
+                <label>
                   <span>键盘位置</span>
                   <select
                     value={settings.overlay.keyPosition}
@@ -1813,6 +1868,7 @@ function OverlayView() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const trailRef = useRef<TrailPoint[]>([])
   const clicksRef = useRef<ClickEffect[]>([])
+  const drawRef = useRef<(() => void) | null>(null)
   const [keys, setKeys] = useState<KeyBubble[]>([])
 
   useEffect(() => {
@@ -1862,6 +1918,9 @@ function OverlayView() {
               timestamp: now
             }
           ]
+          if (!config.mouseTrail) {
+            drawRef.current?.()
+          }
         }
       }
 
@@ -1902,6 +1961,7 @@ function OverlayView() {
     if (!canvas || !context) return
 
     let animationId = 0
+    let cleanupTimer = 0
     const resize = () => {
       const dpr = window.devicePixelRatio || 1
       canvas.width = Math.round(window.innerWidth * dpr)
@@ -1911,12 +1971,33 @@ function OverlayView() {
       context.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
 
+    const drawClickMarker = (click: ClickEffect) => {
+      const isRight = click.button === 'right' || click.button === '2'
+      const color = config.clickTheme === 'professional' ? '75, 85, 99' : isRight ? '209, 73, 91' : '31, 122, 140'
+      const radius = config.clickTheme === 'minimal' ? 16 : 18
+
+      context.strokeStyle = `rgb(${color})`
+      context.lineWidth = config.clickTheme === 'minimal' ? 2 : 3
+      context.beginPath()
+      context.arc(click.x, click.y, radius, 0, Math.PI * 2)
+      context.stroke()
+
+      if (config.clickTheme !== 'minimal') {
+        const markerLabel = normalizeClickMarkerLabel(isRight ? config.rightEmoji : config.leftEmoji, isRight ? 'R' : 'L')
+        context.fillStyle = `rgb(${color})`
+        context.font = '600 20px "Apple Color Emoji", "Segoe UI Emoji", -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
+        context.textAlign = 'center'
+        context.textBaseline = 'middle'
+        context.fillText(markerLabel, click.x, click.y - 42)
+      }
+    }
+
     const draw = () => {
       const now = Date.now()
       context.clearRect(0, 0, window.innerWidth, window.innerHeight)
 
       trailRef.current = trailRef.current.filter((point) => now - point.timestamp < 2000)
-      clicksRef.current = clicksRef.current.filter((click) => now - click.timestamp < 900)
+      clicksRef.current = clicksRef.current.filter((click) => now - click.timestamp < CLICK_MARKER_TTL_MS)
 
       if (config.mouseTrail) {
         context.lineCap = 'round'
@@ -1936,36 +2017,29 @@ function OverlayView() {
       }
 
       if (config.clickEffect) {
-        clicksRef.current.forEach((click) => {
-          const age = now - click.timestamp
-          const progress = Math.min(1, age / 900)
-          const alpha = 1 - progress
-          const isRight = click.button === 'right' || click.button === '2'
-          const color = config.clickTheme === 'professional' ? '75, 85, 99' : isRight ? '209, 73, 91' : '31, 122, 140'
-          context.strokeStyle = `rgba(${color}, ${alpha})`
-          context.lineWidth = config.clickTheme === 'minimal' ? 2 : 3
-          context.beginPath()
-          context.arc(click.x, click.y, 18 + progress * 36, 0, Math.PI * 2)
-          context.stroke()
-
-          if (config.clickTheme !== 'minimal') {
-            context.fillStyle = `rgba(${color}, ${Math.max(0, alpha - 0.15)})`
-            context.font = '600 18px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
-            context.textAlign = 'center'
-            context.textBaseline = 'middle'
-            context.fillText(isRight ? config.rightEmoji : config.leftEmoji, click.x, click.y - 42)
-          }
-        })
+        clicksRef.current.forEach(drawClickMarker)
       }
 
-      animationId = window.requestAnimationFrame(draw)
+      if (config.mouseTrail) {
+        animationId = window.requestAnimationFrame(draw)
+      }
     }
 
     resize()
     window.addEventListener('resize', resize)
+    drawRef.current = draw
     draw()
+    if (config.clickEffect && !config.mouseTrail) {
+      cleanupTimer = window.setInterval(draw, CLICK_MARKER_TTL_MS)
+    }
     return () => {
       window.removeEventListener('resize', resize)
+      if (drawRef.current === draw) {
+        drawRef.current = null
+      }
+      if (cleanupTimer) {
+        window.clearInterval(cleanupTimer)
+      }
       window.cancelAnimationFrame(animationId)
     }
   }, [config.clickEffect, config.clickTheme, config.leftEmoji, config.mouseTrail, config.rightEmoji])
