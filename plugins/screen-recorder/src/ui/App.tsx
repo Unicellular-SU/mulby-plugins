@@ -115,6 +115,8 @@ interface ClickEffect {
   x: number
   y: number
   button: string
+  color: string
+  label: string
   timestamp: number
 }
 
@@ -169,6 +171,34 @@ const START_DELAY_OPTIONS: Array<0 | 3 | 5> = [0, 3, 5]
 const AUTO_STOP_OPTIONS = [1, 3, 5, 10, 30]
 const BITRATE_OPTIONS = [3, 5, 8, 12]
 const CLICK_MARKER_TTL_MS = 650
+const TRAIL_POINT_TTL_MS = 2000
+const MAX_TRAIL_POINTS = 120
+const MAX_CLICK_MARKERS = 24
+const MAX_KEY_BUBBLES = 8
+const KEY_BUBBLE_TTL_MS = 2600
+const KEY_REPEAT_MERGE_MS = 120
+const OVERLAY_INPUT_THROTTLE_MS = 33
+const OVERLAY_CANVAS_DPR_CAP = 1.25
+
+function trimOldest<T>(items: T[], maxLength: number) {
+  if (items.length > maxLength) {
+    items.splice(0, items.length - maxLength)
+  }
+}
+
+function pruneExpiredItems<T extends { timestamp: number }>(items: T[], now: number, ttlMs: number) {
+  const originalLength = items.length
+  let writeIndex = 0
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index]
+    if (now - item.timestamp < ttlMs) {
+      items[writeIndex] = item
+      writeIndex += 1
+    }
+  }
+  items.length = writeIndex
+  return items.length !== originalLength
+}
 
 function mergeSettings(saved: Partial<RecorderSettings> | undefined): RecorderSettings {
   return {
@@ -749,7 +779,7 @@ function RecorderPanel() {
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(region.width))
       canvas.height = Math.max(1, Math.round(region.height))
-      const context = canvas.getContext('2d')
+      const context = canvas.getContext('2d', { alpha: false, desynchronized: true })
       if (!context) {
         throw new Error('无法创建区域裁剪画布。')
       }
@@ -759,8 +789,15 @@ function RecorderPanel() {
       const sw = Math.max(1, Math.round(region.width * scaleX))
       const sh = Math.max(1, Math.round(region.height * scaleY))
       let frameId = 0
+      let lastFrameMs = 0
+      const frameIntervalMs = 1000 / settings.frameRate
 
-      const drawFrame = () => {
+      const drawFrame = (timestamp = getClockNow()) => {
+        if (lastFrameMs > 0 && timestamp - lastFrameMs < frameIntervalMs - 1) {
+          frameId = window.requestAnimationFrame(drawFrame)
+          return
+        }
+        lastFrameMs = timestamp
         context.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
         frameId = window.requestAnimationFrame(drawFrame)
       }
@@ -859,6 +896,7 @@ function RecorderPanel() {
     const params = new URLSearchParams({
       view: 'overlay',
       config: encodeURIComponent(JSON.stringify(settings.overlay)),
+      inputThrottleMs: String(OVERLAY_INPUT_THROTTLE_MS),
       displayId: String(target.displayId ?? ''),
       displayX: String(target.x),
       displayY: String(target.y),
@@ -903,59 +941,18 @@ function RecorderPanel() {
       childWindow.showInactive()
     ])
 
-    const inputMonitor = window.mulby?.inputMonitor
-    if (!inputMonitor) {
-      setNotice('Overlay 已显示，但当前 Mulby 运行时未暴露 inputMonitor。')
-      return () => {
-        void childWindow.destroy().catch(() => {})
+    const disposeOverlayStatus = mulbyWindow.onChildMessage((channel: string, payload: unknown) => {
+      if (channel === 'overlay-status' && typeof payload === 'string') {
+        setNotice(payload)
       }
-    }
-
-    let sessionId: string | null = null
-    let disposeInput: Disposable | undefined
-
-    try {
-      const available = await inputMonitor.isAvailable()
-      if (!available) {
-        setNotice('Overlay 已显示，但全局输入监听原生模块不可用。')
-        return () => {
-          void childWindow.destroy().catch(() => {})
-        }
-      }
-
-      const hasAccess = await inputMonitor.requireAccessibility()
-      if (!hasAccess) {
-        setNotice('Overlay 已显示，但未获得辅助功能权限，无法显示点击和键盘效果。')
-        return () => {
-          void childWindow.destroy().catch(() => {})
-        }
-      }
-
-      sessionId = await inputMonitor.start({
-        mouse: settings.overlay.mouseTrail || settings.overlay.clickEffect,
-        keyboard: settings.overlay.keystroke,
-        throttleMs: settings.frameRate === 60 ? 16 : 33
-      })
-      if (!sessionId) {
-        setNotice('Overlay 已显示，但 inputMonitor 会话启动失败。')
-      } else {
-        disposeInput = inputMonitor.onEvent((event) => {
-          void childWindow.postMessage('input-event', event).catch(() => {})
-        })
-        setNotice(`Overlay 输入效果已启用，覆盖 ${Math.round(target.width)} x ${Math.round(target.height)}。`)
-      }
-    } catch (error) {
-      setNotice(`Overlay 输入监听未启用：${toErrorMessage(error)}`)
-    }
+    })
+    setNotice(`Overlay 已显示，覆盖 ${Math.round(target.width)} x ${Math.round(target.height)}。`)
 
     return () => {
-      disposeInput?.()
-      if (sessionId) {
-        void inputMonitor.stop(sessionId).catch(() => {})
-      }
+      disposeOverlayStatus?.()
       void childWindow.destroy().catch(() => {})
     }
-  }, [activeScreenSource, getDisplayForSource, mulbyWindow, settings.frameRate, settings.overlay])
+  }, [activeScreenSource, getDisplayForSource, mulbyWindow, settings.overlay])
 
   const buildRecordingStream = useCallback(async () => {
     let videoBundle: StreamBundle
@@ -1865,11 +1862,128 @@ function OverlayView() {
     }),
     [params]
   )
+  const overlayDebug = params.get('debug') === '1'
+  const inputThrottleMs = Math.max(16, Number(params.get('inputThrottleMs') ?? OVERLAY_INPUT_THROTTLE_MS) || OVERLAY_INPUT_THROTTLE_MS)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const trailRef = useRef<TrailPoint[]>([])
   const clicksRef = useRef<ClickEffect[]>([])
   const drawRef = useRef<(() => void) | null>(null)
+  const keysRef = useRef<KeyBubble[]>([])
+  const keyRenderFrameRef = useRef(0)
+  const lastKeyRef = useRef({ label: '', timestamp: 0 })
   const [keys, setKeys] = useState<KeyBubble[]>([])
+
+  const scheduleKeysRender = useCallback(() => {
+    if (keyRenderFrameRef.current) return
+    keyRenderFrameRef.current = window.requestAnimationFrame(() => {
+      keyRenderFrameRef.current = 0
+      setKeys([...keysRef.current])
+    })
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (keyRenderFrameRef.current) {
+        window.cancelAnimationFrame(keyRenderFrameRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const context = canvas?.getContext('2d', { alpha: true, desynchronized: true })
+    if (!canvas || !context) return
+
+    let animationId = 0
+    let canvasWidth = window.innerWidth
+    let canvasHeight = window.innerHeight
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, OVERLAY_CANVAS_DPR_CAP)
+      canvasWidth = window.innerWidth
+      canvasHeight = window.innerHeight
+      canvas.width = Math.max(1, Math.round(canvasWidth * dpr))
+      canvas.height = Math.max(1, Math.round(canvasHeight * dpr))
+      canvas.style.width = `${canvasWidth}px`
+      canvas.style.height = `${canvasHeight}px`
+      context.setTransform(dpr, 0, 0, dpr, 0, 0)
+    }
+
+    const drawClickMarker = (click: ClickEffect) => {
+      const radius = config.clickTheme === 'minimal' ? 16 : 18
+
+      context.strokeStyle = `rgb(${click.color})`
+      context.lineWidth = config.clickTheme === 'minimal' ? 2 : 3
+      context.beginPath()
+      context.arc(click.x, click.y, radius, 0, Math.PI * 2)
+      context.stroke()
+
+      if (config.clickTheme !== 'minimal' && click.label) {
+        context.fillStyle = `rgb(${click.color})`
+        context.font = '600 20px "Apple Color Emoji", "Segoe UI Emoji", -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
+        context.textAlign = 'center'
+        context.textBaseline = 'middle'
+        context.fillText(click.label, click.x, click.y - 42)
+      }
+    }
+
+    const hasVisibleOverlay = () =>
+      (config.mouseTrail && trailRef.current.length > 1) || (config.clickEffect && clicksRef.current.length > 0)
+
+    const draw = () => {
+      animationId = 0
+      const now = Date.now()
+      pruneExpiredItems(trailRef.current, now, TRAIL_POINT_TTL_MS)
+      pruneExpiredItems(clicksRef.current, now, CLICK_MARKER_TTL_MS)
+
+      context.clearRect(0, 0, canvasWidth, canvasHeight)
+
+      if (config.mouseTrail) {
+        context.lineCap = 'round'
+        context.lineJoin = 'round'
+        for (let index = 1; index < trailRef.current.length; index += 1) {
+          const previous = trailRef.current[index - 1]
+          const point = trailRef.current[index]
+          const age = now - point.timestamp
+          const alpha = Math.max(0, 1 - age / TRAIL_POINT_TTL_MS)
+          context.strokeStyle = `rgba(31, 122, 140, ${alpha * 0.72})`
+          context.lineWidth = 3
+          context.beginPath()
+          context.moveTo(previous.x, previous.y)
+          context.lineTo(point.x, point.y)
+          context.stroke()
+        }
+      }
+
+      if (config.clickEffect) {
+        clicksRef.current.forEach(drawClickMarker)
+      }
+
+      if (hasVisibleOverlay()) {
+        animationId = window.requestAnimationFrame(draw)
+      }
+    }
+
+    const scheduleDraw = () => {
+      if (animationId) return
+      animationId = window.requestAnimationFrame(draw)
+    }
+
+    resize()
+    window.addEventListener('resize', resize)
+    drawRef.current = scheduleDraw
+    scheduleDraw()
+
+    return () => {
+      window.removeEventListener('resize', resize)
+      if (drawRef.current === scheduleDraw) {
+        drawRef.current = null
+      }
+      if (animationId) {
+        window.cancelAnimationFrame(animationId)
+      }
+    }
+  }, [config.clickEffect, config.clickTheme, config.mouseTrail])
 
   useEffect(() => {
     const toLocalPoint = (event: InputMonitorEvent) => {
@@ -1897,39 +2011,80 @@ function OverlayView() {
       return alreadyLocal ? { x: event.x, y: event.y } : null
     }
 
+    const sendStatus = (message: string) => {
+      window.mulby?.window?.sendToParent?.('overlay-status', message)
+    }
+
+    const appendTrailPoint = (x: number, y: number, now: number) => {
+      const trail = trailRef.current
+      const previous = trail[trail.length - 1]
+      if (previous) {
+        const dx = x - previous.x
+        const dy = y - previous.y
+        if (dx * dx + dy * dy < 4) return
+      }
+      trail.push({ x, y, timestamp: now })
+      trimOldest(trail, MAX_TRAIL_POINTS)
+      drawRef.current?.()
+    }
+
+    const appendClickMarker = (event: InputMonitorEvent, x: number, y: number, now: number) => {
+      const isRight = event.button === 'right' || event.button === '2'
+      const color = config.clickTheme === 'professional' ? '75, 85, 99' : isRight ? '209, 73, 91' : '31, 122, 140'
+      const label =
+        config.clickTheme === 'minimal' ? '' : normalizeClickMarkerLabel(isRight ? config.rightEmoji : config.leftEmoji, isRight ? 'R' : 'L')
+
+      clicksRef.current.push({
+        id: `${now}-${clicksRef.current.length}`,
+        x,
+        y,
+        button: event.button ?? 'left',
+        color,
+        label,
+        timestamp: now
+      })
+      trimOldest(clicksRef.current, MAX_CLICK_MARKERS)
+      drawRef.current?.()
+    }
+
+    const appendKeyBubble = (event: InputMonitorEvent, now: number) => {
+      const label = buildShortcutLabel(event)
+      if (!label) return
+
+      const lastKey = lastKeyRef.current
+      if (lastKey.label === label && now - lastKey.timestamp < KEY_REPEAT_MERGE_MS) return
+      lastKeyRef.current = { label, timestamp: now }
+
+      keysRef.current.push({ id: `${now}-${label}`, label, timestamp: now })
+      trimOldest(keysRef.current, MAX_KEY_BUBBLES)
+      scheduleKeysRender()
+    }
+
     const handleInputEvent = (event: InputMonitorEvent) => {
       const now = Date.now()
       const type = (event.type ?? '').toLowerCase()
 
-      if (type.includes('mouse')) {
+      if (type === 'mousemove' && config.mouseTrail) {
         const point = toLocalPoint(event)
-        if (!point) return
-        if (config.mouseTrail) {
-          trailRef.current = [...trailRef.current.slice(-120), { x: point.x, y: point.y, timestamp: now }]
-        }
-        if (config.clickEffect && type === 'mousedown') {
-          clicksRef.current = [
-            ...clicksRef.current.slice(-24),
-            {
-              id: `${now}-${Math.random()}`,
-              x: point.x,
-              y: point.y,
-              button: event.button ?? 'left',
-              timestamp: now
-            }
-          ]
-          if (!config.mouseTrail) {
-            drawRef.current?.()
-          }
-        }
+        if (point) appendTrailPoint(point.x, point.y, now)
+        return
+      }
+
+      if (type === 'mousedown' && config.clickEffect) {
+        const point = toLocalPoint(event)
+        if (point) appendClickMarker(event, point.x, point.y, now)
+        return
       }
 
       if (config.keystroke && (event.key || event.keyCode) && type === 'keydown') {
-        const label = buildShortcutLabel(event)
-        if (!label) return
-        setKeys((current) => [...current.slice(-7), { id: `${now}-${label}`, label, timestamp: now }])
+        appendKeyBubble(event, now)
       }
     }
+
+    const disposeChildMessage = window.mulby?.window?.onChildMessage?.((channel: string, ...args: unknown[]) => {
+      if (channel !== 'input-event') return
+      handleInputEvent(args[0] as InputMonitorEvent)
+    })
 
     const parseMessage = (event: MessageEvent) => {
       const data = event.data as { channel?: string; args?: unknown[]; payload?: unknown } | unknown[]
@@ -1943,129 +2098,105 @@ function OverlayView() {
       }
     }
 
-    const disposeChildMessage = window.mulby?.window?.onChildMessage?.((channel: string, ...args: unknown[]) => {
-      if (channel !== 'input-event') return
-      handleInputEvent(args[0] as InputMonitorEvent)
-    })
+    const inputMonitor = window.mulby?.inputMonitor
+    let cancelled = false
+    let sessionId: string | null = null
+    let disposeInput: Disposable | undefined
+
+    async function startInputMonitor() {
+      if (!inputMonitor) {
+        sendStatus('Overlay 已显示，但当前 Mulby 运行时未暴露 inputMonitor。')
+        return
+      }
+
+      try {
+        const available = await inputMonitor.isAvailable()
+        if (!available) {
+          sendStatus('Overlay 已显示，但全局输入监听原生模块不可用。')
+          return
+        }
+
+        const hasAccess = await inputMonitor.requireAccessibility()
+        if (!hasAccess) {
+          sendStatus('Overlay 已显示，但未获得辅助功能权限，无法显示点击和键盘效果。')
+          return
+        }
+
+        sessionId = await inputMonitor.start({
+          mouse: config.mouseTrail || config.clickEffect,
+          keyboard: config.keystroke,
+          throttleMs: inputThrottleMs
+        })
+        if (!sessionId) {
+          sendStatus('Overlay 已显示，但 inputMonitor 会话启动失败。')
+          return
+        }
+
+        if (cancelled) {
+          await inputMonitor.stop(sessionId).catch(() => {})
+          return
+        }
+
+        disposeInput = inputMonitor.onEvent(handleInputEvent)
+        sendStatus(`Overlay 输入效果已启用，事件采样 ${inputThrottleMs}ms。`)
+      } catch (error) {
+        sendStatus(`Overlay 输入监听未启用：${toErrorMessage(error)}`)
+      }
+    }
 
     window.addEventListener('message', parseMessage)
+    void startInputMonitor()
+
     return () => {
+      cancelled = true
+      disposeInput?.()
+      if (sessionId && inputMonitor) {
+        void inputMonitor.stop(sessionId).catch(() => {})
+      }
       disposeChildMessage?.()
       window.removeEventListener('message', parseMessage)
     }
-  }, [config.clickEffect, config.keystroke, config.mouseTrail, overlayBounds.height, overlayBounds.width, overlayBounds.x, overlayBounds.y])
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    const context = canvas?.getContext('2d')
-    if (!canvas || !context) return
-
-    let animationId = 0
-    let cleanupTimer = 0
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1
-      canvas.width = Math.round(window.innerWidth * dpr)
-      canvas.height = Math.round(window.innerHeight * dpr)
-      canvas.style.width = `${window.innerWidth}px`
-      canvas.style.height = `${window.innerHeight}px`
-      context.setTransform(dpr, 0, 0, dpr, 0, 0)
-    }
-
-    const drawClickMarker = (click: ClickEffect) => {
-      const isRight = click.button === 'right' || click.button === '2'
-      const color = config.clickTheme === 'professional' ? '75, 85, 99' : isRight ? '209, 73, 91' : '31, 122, 140'
-      const radius = config.clickTheme === 'minimal' ? 16 : 18
-
-      context.strokeStyle = `rgb(${color})`
-      context.lineWidth = config.clickTheme === 'minimal' ? 2 : 3
-      context.beginPath()
-      context.arc(click.x, click.y, radius, 0, Math.PI * 2)
-      context.stroke()
-
-      if (config.clickTheme !== 'minimal') {
-        const markerLabel = normalizeClickMarkerLabel(isRight ? config.rightEmoji : config.leftEmoji, isRight ? 'R' : 'L')
-        context.fillStyle = `rgb(${color})`
-        context.font = '600 20px "Apple Color Emoji", "Segoe UI Emoji", -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
-        context.textAlign = 'center'
-        context.textBaseline = 'middle'
-        context.fillText(markerLabel, click.x, click.y - 42)
-      }
-    }
-
-    const draw = () => {
-      const now = Date.now()
-      context.clearRect(0, 0, window.innerWidth, window.innerHeight)
-
-      trailRef.current = trailRef.current.filter((point) => now - point.timestamp < 2000)
-      clicksRef.current = clicksRef.current.filter((click) => now - click.timestamp < CLICK_MARKER_TTL_MS)
-
-      if (config.mouseTrail) {
-        context.lineCap = 'round'
-        context.lineJoin = 'round'
-        for (let index = 1; index < trailRef.current.length; index += 1) {
-          const previous = trailRef.current[index - 1]
-          const point = trailRef.current[index]
-          const age = now - point.timestamp
-          const alpha = Math.max(0, 1 - age / 2000)
-          context.strokeStyle = `rgba(31, 122, 140, ${alpha * 0.72})`
-          context.lineWidth = 3
-          context.beginPath()
-          context.moveTo(previous.x, previous.y)
-          context.lineTo(point.x, point.y)
-          context.stroke()
-        }
-      }
-
-      if (config.clickEffect) {
-        clicksRef.current.forEach(drawClickMarker)
-      }
-
-      if (config.mouseTrail) {
-        animationId = window.requestAnimationFrame(draw)
-      }
-    }
-
-    resize()
-    window.addEventListener('resize', resize)
-    drawRef.current = draw
-    draw()
-    if (config.clickEffect && !config.mouseTrail) {
-      cleanupTimer = window.setInterval(draw, CLICK_MARKER_TTL_MS)
-    }
-    return () => {
-      window.removeEventListener('resize', resize)
-      if (drawRef.current === draw) {
-        drawRef.current = null
-      }
-      if (cleanupTimer) {
-        window.clearInterval(cleanupTimer)
-      }
-      window.cancelAnimationFrame(animationId)
-    }
-  }, [config.clickEffect, config.clickTheme, config.leftEmoji, config.mouseTrail, config.rightEmoji])
+  }, [
+    config.clickEffect,
+    config.clickTheme,
+    config.keystroke,
+    config.leftEmoji,
+    config.mouseTrail,
+    config.rightEmoji,
+    inputThrottleMs,
+    overlayBounds.height,
+    overlayBounds.width,
+    overlayBounds.x,
+    overlayBounds.y,
+    scheduleKeysRender
+  ])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
       const now = Date.now()
-      setKeys((current) => current.filter((key) => now - key.timestamp < 2600))
+      if (pruneExpiredItems(keysRef.current, now, KEY_BUBBLE_TTL_MS)) {
+        scheduleKeysRender()
+      }
     }, 300)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [scheduleKeysRender])
 
   return (
     <div className="overlay-root">
       <canvas ref={canvasRef} />
-      <div className="overlay-debug-frame" aria-hidden="true">
-        <span className="overlay-corner top-left">TL</span>
-        <span className="overlay-corner top-right">TR</span>
-        <span className="overlay-corner bottom-left">BL</span>
-        <span className="overlay-corner bottom-right">BR</span>
-        <span className="overlay-debug-meta">
-          {overlayBounds.displayId ? `屏幕 ${overlayBounds.displayId} · ` : ''}
-          {Math.round(overlayBounds.x)}, {Math.round(overlayBounds.y)} · {Math.round(overlayBounds.width)} x{' '}
-          {Math.round(overlayBounds.height)}
-        </span>
-      </div>
+      {overlayDebug ? (
+        <div className="overlay-debug-frame" aria-hidden="true">
+          <span className="overlay-corner top-left">TL</span>
+          <span className="overlay-corner top-right">TR</span>
+          <span className="overlay-corner bottom-left">BL</span>
+          <span className="overlay-corner bottom-right">BR</span>
+          <span className="overlay-debug-meta">
+            {overlayBounds.displayId ? `屏幕 ${overlayBounds.displayId} · ` : ''}
+            {Math.round(overlayBounds.x)}, {Math.round(overlayBounds.y)} · {Math.round(overlayBounds.width)} x{' '}
+            {Math.round(overlayBounds.height)}
+          </span>
+        </div>
+      ) : null}
       <div className={`key-bubbles ${config.keyPosition}`}>
         {keys.map((key) => (
           <span key={key.id}>{key.label}</span>
