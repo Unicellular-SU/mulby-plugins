@@ -246,11 +246,13 @@ export default function SettingsView() {
                 ['typing', '打字时评论'],
                 ['morning', '早晨问候'],
                 ['lateNight', '深夜提醒'],
+                ['clipboard', '剪贴板内容响应'],
+                ['mousePattern', '鼠标行为响应'],
               ] as const).map(([key, label]) => (
                 <label key={key} className="trigger-item">
                   <input
                     type="checkbox"
-                    checked={personality.triggers[key]}
+                    checked={personality.triggers[key] ?? true}
                     onChange={e => setPersonality(p => ({
                       ...p,
                       triggers: { ...p.triggers, [key]: e.target.checked }

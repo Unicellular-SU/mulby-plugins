@@ -2,6 +2,7 @@ import type { BehaviorType } from './types'
 import type { PetExpression } from './pet-standard'
 import { emotionToExpression } from './pet-standard'
 import { PetMemoryController } from './pet-memory'
+import type { PetStats } from './pet-stats'
 
 export interface PetPersonality {
   name: string
@@ -14,6 +15,8 @@ export interface PetPersonality {
     typing: boolean
     morning: boolean
     lateNight: boolean
+    clipboard: boolean
+    mousePattern: boolean
   }
 }
 
@@ -32,6 +35,8 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
     typing: true,
     morning: true,
     lateNight: true,
+    clipboard: true,
+    mousePattern: true,
   },
 }
 
@@ -42,16 +47,30 @@ const TRAIT_PROMPTS: Record<string, string> = {
   warm: '你性格温暖治愈，总是鼓励和关心用户，说话像拥抱一样让人安心，是最贴心的小伙伴。',
 }
 
-function buildSystemPrompt(personality: PetPersonality): string {
+function buildSystemPrompt(personality: PetPersonality, stats?: PetStats | null): string {
   const traitDesc = personality.trait === 'custom'
     ? (personality.customPrompt || '你是一只可爱的桌面宠物。')
     : TRAIT_PROMPTS[personality.trait]
+
+  let statsBlock = ''
+  if (stats) {
+    const days = Math.max(1, Math.ceil((Date.now() - (stats.createdAt || Date.now())) / 86_400_000))
+    const level = stats.intimacy >= 80 ? '亲密' : stats.intimacy >= 50 ? '温暖' : stats.intimacy >= 20 ? '普通' : '冷淡'
+    statsBlock = `\n【你和用户的关系】
+- 亲密度: ${stats.intimacy}/100 (${level})
+- 相伴天数: ${days}天
+- 连续签到: ${stats.streakDays}天
+- 今日番茄: ${stats.pomodoroToday}个
+- 累计互动: ${stats.totalInteractions}次
+- 心情: ${stats.mood}
+（亲密度越低你越傲娇冷淡，亲密度越高你越主动热情。根据关系深度调整语气）\n`
+  }
 
   return `你是"${personality.name}"，一只住在用户桌面上的像素风格小幽灵宠物。
 
 【核心性格（最重要，严格遵守）】
 ${traitDesc}
-
+${statsBlock}
 【格式规则】
 - 回复格式必须是: [emotion]文字内容
 - emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
@@ -98,11 +117,16 @@ export class AIChatController {
   private triggeredOnce = new Set<string>()
   private memory = new PetMemoryController()
   private extractCounter = 0
+  private statsGetter: (() => PetStats) | null = null
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
     this.loadHistory()
     this.memory.load()
+  }
+
+  setStatsGetter(getter: () => PetStats) {
+    this.statsGetter = getter
   }
 
   getMemoryController(): PetMemoryController {
@@ -173,7 +197,8 @@ export class AIChatController {
 
     const contextKeywords = this.extractKeywords(userMessage)
     const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
-    const systemPrompt = buildSystemPrompt(this.personality) + memoryPrompt
+    const stats = this.statsGetter?.() ?? null
+    const systemPrompt = buildSystemPrompt(this.personality, stats) + memoryPrompt
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
@@ -250,7 +275,8 @@ export class AIChatController {
 
     const contextKeywords = this.extractKeywords(userText)
     const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
-    const systemPrompt = buildSystemPrompt(this.personality) + memoryPrompt
+    const stats = this.statsGetter?.() ?? null
+    const systemPrompt = buildSystemPrompt(this.personality, stats) + memoryPrompt
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },

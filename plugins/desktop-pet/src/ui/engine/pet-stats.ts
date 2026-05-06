@@ -14,6 +14,9 @@ export interface PetStats {
   pomodoroToday: number
   pomodoroTotal: number
   lastActiveDate: string
+  lastChatDate: string
+  ignoredCount: number
+  dailyIntimacyGain: number
 }
 
 const STORAGE_KEY = 'pet-stats'
@@ -40,6 +43,9 @@ function createDefaultStats(): PetStats {
     pomodoroToday: 0,
     pomodoroTotal: 0,
     lastActiveDate: todayStr(),
+    lastChatDate: todayStr(),
+    ignoredCount: 0,
+    dailyIntimacyGain: 0,
   }
 }
 
@@ -65,6 +71,7 @@ export class PetStatsController {
     const today = todayStr()
     if (this.stats.lastActiveDate && this.stats.lastActiveDate !== today) {
       this.stats.pomodoroToday = 0
+      this.stats.dailyIntimacyGain = 0
     }
     this.stats.lastActiveDate = today
     this.dirty = true
@@ -76,6 +83,20 @@ export class PetStatsController {
     if (gap > 2) {
       const penalty = (gap - 2) * 2
       this.stats.intimacy = Math.max(0, this.stats.intimacy - penalty)
+      this.dirty = true
+    }
+
+    if (this.stats.lastChatDate) {
+      const chatGap = daysBetween(this.stats.lastChatDate, todayStr())
+      if (chatGap >= 3) {
+        this.stats.intimacy = Math.max(0, this.stats.intimacy - 5)
+        this.dirty = true
+      }
+    }
+
+    if (this.stats.ignoredCount >= 5) {
+      this.stats.intimacy = Math.max(0, this.stats.intimacy - 3)
+      this.stats.ignoredCount = 0
       this.dirty = true
     }
   }
@@ -124,7 +145,15 @@ export class PetStatsController {
     const now = Date.now()
     if (now - this.lastChatTime < 600_000) return
     this.lastChatTime = now
+    this.stats.lastChatDate = todayStr()
+    this.stats.ignoredCount = 0
     this.addIntimacy(1)
+    this.save()
+  }
+
+  recordIgnored() {
+    this.stats.ignoredCount++
+    this.dirty = true
     this.save()
   }
 
@@ -137,7 +166,11 @@ export class PetStatsController {
   }
 
   private addIntimacy(amount: number) {
-    this.stats.intimacy = Math.min(100, this.stats.intimacy + amount)
+    const MAX_DAILY = 15
+    if (this.stats.dailyIntimacyGain >= MAX_DAILY) return
+    const effective = Math.min(amount, MAX_DAILY - this.stats.dailyIntimacyGain)
+    this.stats.intimacy = Math.min(100, this.stats.intimacy + effective)
+    this.stats.dailyIntimacyGain += effective
     this.updateMood()
     this.dirty = true
   }

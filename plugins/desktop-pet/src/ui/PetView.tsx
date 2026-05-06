@@ -81,6 +81,10 @@ export default function PetView() {
   const chatWindowOpenRef = useRef(false)
   const chatInputProxyRef = useRef<any>(null)
   const clickTimerRef = useRef<number>(0)
+  const mouseMoveSumRef = useRef(0)
+  const mouseMoveResetRef = useRef(0)
+  const clickBurstRef = useRef<number[]>([])
+  const lastMousePatternTime = useRef(0)
 
   const positionBubble = useCallback((pos: { x: number; y: number }, bubbleWidth: number, bubbleHeight: number) => {
     const winCenterX = pos.x + WIN_SIZE / 2
@@ -357,6 +361,7 @@ export default function PetView() {
     }
 
     chatRef.current = new AIChatController(personality)
+    chatRef.current.setStatsGetter(() => statsRef.current.getStats())
 
     const display = await window.mulby.screen.getPrimaryDisplay()
     const bounds: DisplayBounds = display.workArea
@@ -425,8 +430,37 @@ export default function PetView() {
         if (!s) return
 
         if (event.type === 'mouseMove') {
+          const prev = s.lastMousePos
+          if (prev.x >= 0) {
+            const dx = event.x - prev.x
+            const dy = event.y - prev.y
+            mouseMoveSumRef.current += Math.sqrt(dx * dx + dy * dy)
+          }
           s.lastMousePos = { x: event.x, y: event.y }
           s.idleTimer = 0
+
+          const now = Date.now()
+          if (now - mouseMoveResetRef.current > 2000) {
+            const mp = chatRef.current?.getPersonality()?.triggers?.mousePattern ?? true
+            if (mp && mouseMoveSumRef.current > 3000 && now - lastMousePatternTime.current > 180_000) {
+              lastMousePatternTime.current = now
+              triggerSpeak('behavior_change')
+            }
+            mouseMoveSumRef.current = 0
+            mouseMoveResetRef.current = now
+          }
+        }
+
+        if (event.type === 'mouseDown') {
+          const now = Date.now()
+          clickBurstRef.current.push(now)
+          clickBurstRef.current = clickBurstRef.current.filter(t => now - t < 2000)
+          const mpClick = chatRef.current?.getPersonality()?.triggers?.mousePattern ?? true
+          if (mpClick && clickBurstRef.current.length > 5 && now - lastMousePatternTime.current > 180_000) {
+            lastMousePatternTime.current = now
+            triggerSpeak('behavior_change')
+            clickBurstRef.current = []
+          }
         }
 
         if (event.type === 'keyDown') {
@@ -545,40 +579,58 @@ export default function PetView() {
     }, 60_000)
 
     let lastClipText = ''
+    let lastClipCommentTime = 0
     window.setInterval(async () => {
       if (pomodoroRef.current) return
       try {
         const text = await window.mulby.clipboard.readText()
-        if (!text || text === lastClipText || text.length < 20) return
+        if (!text || text === lastClipText || text.length < 10) return
         lastClipText = text
-        const nonChinese = text.replace(/[\u4e00-\u9fff]/g, '').length
-        if (nonChinese / text.length < 0.7) return
 
-        setExpression('surprised')
         const chat = chatRef.current
         if (!chat) return
+        const p = chat.getPersonality()
+        if (!p.model) return
+        if (p.triggers && (p.triggers as any).clipboard === false) return
+
         const ai = (window as any).mulby?.ai
-        const model = chat.getPersonality().model
-        if (!ai || !model) return
+        if (!ai) return
 
-        const resp = await ai.call({
-          model,
-          messages: [
-            { role: 'system', content: '你是翻译助手。将用户给出的英文翻译成简洁的中文，只返回翻译结果，不超过30字。' },
-            { role: 'user', content: text.slice(0, 200) },
-          ],
-          params: { maxOutputTokens: 60, temperature: 0.3 },
-          capabilities: [],
-          toolingPolicy: { enableInternalTools: false },
-          mcp: { mode: 'off' },
-          skills: { mode: 'off' },
-        })
+        const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length
+        const chineseRatio = chineseCount / text.length
 
-        if (resp?.content) {
-          const translated = typeof resp.content === 'string' ? resp.content : ''
-          if (translated) {
-            showBubble(`📋 ${translated}`)
-            setExpression('happy')
+        if (chineseRatio < 0.3 && text.length >= 20) {
+          setExpression('surprised')
+          const resp = await ai.call({
+            model: p.model,
+            messages: [
+              { role: 'system', content: '你是翻译助手。将用户给出的英文翻译成简洁的中文，只返回翻译结果，不超过50字。' },
+              { role: 'user', content: text.slice(0, 200) },
+            ],
+            params: { maxOutputTokens: 80, temperature: 0.3 },
+            capabilities: [],
+            toolingPolicy: { enableInternalTools: false },
+            mcp: { mode: 'off' },
+            skills: { mode: 'off' },
+          })
+          if (resp?.content) {
+            const translated = typeof resp.content === 'string' ? resp.content : ''
+            if (translated) {
+              showBubble(translated)
+              setExpression('happy')
+            }
+          }
+        } else if (chineseRatio >= 0.5 && text.length > 10) {
+          const now = Date.now()
+          if (now - lastClipCommentTime < 300_000) return
+          lastClipCommentTime = now
+          const result = await chat.chat(
+            `[用户刚刚复制了一段文字："${text.slice(0, 80)}"]`,
+            (partial) => updateBubbleText(partial)
+          )
+          if (result) {
+            showBubble(result.text)
+            setExpression(result.expression)
           }
         }
       } catch {}
