@@ -11,7 +11,9 @@
   "permissions": {
     "inputMonitor": true,
     "ai": true,
-    "accessibility": true
+    "accessibility": true,
+    "clipboard": true,
+    "screen": true
   },
   "features": [
     {

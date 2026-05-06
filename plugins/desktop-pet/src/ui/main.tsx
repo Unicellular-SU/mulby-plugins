@@ -14,6 +14,14 @@ function Root() {
     const BubbleView = React.lazy(() => import('./BubbleView'))
     return <React.Suspense fallback={null}><BubbleView /></React.Suspense>
   }
+  if (view === 'chat-input') {
+    const ChatInputView = React.lazy(() => import('./ChatInputView'))
+    return <React.Suspense fallback={null}><ChatInputView /></React.Suspense>
+  }
+  if (view === 'bubble-popup') {
+    const BubblePopupView = React.lazy(() => import('./BubblePopupView'))
+    return <React.Suspense fallback={null}><BubblePopupView /></React.Suspense>
+  }
   const PetView = React.lazy(() => import('./PetView'))
   return <React.Suspense fallback={null}><PetView /></React.Suspense>
 }

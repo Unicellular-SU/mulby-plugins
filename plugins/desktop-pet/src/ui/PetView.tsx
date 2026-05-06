@@ -13,6 +13,7 @@ import { PET_SIZE } from './engine/types'
 import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason } from './engine/ai-chat'
 import type { PetSpriteSet, PetExpression, PetPose } from './engine/pet-standard'
 import { SLIME_SPRITE_SET } from './engine/slime-sprites'
+import { PetStatsController } from './engine/pet-stats'
 
 const BUBBLE_AREA_HEIGHT = 80
 const WIN_WIDTH = 120
@@ -64,6 +65,7 @@ export default function PetView() {
   const lastTimeRef = useRef(0)
   const inputSessionRef = useRef<string | null>(null)
   const chatRef = useRef<AIChatController | null>(null)
+  const statsRef = useRef<PetStatsController>(new PetStatsController())
   const idleCheckRef = useRef(0)
   const lastTypingRef = useRef(0)
   const typingCountRef = useRef(0)
@@ -76,14 +78,50 @@ export default function PetView() {
   const [bubbleVisible, setBubbleVisible] = useState(false)
   const bubbleTimerRef = useRef<number>(0)
   const initedRef = useRef(false)
+  const pomodoroRef = useRef<number>(0)
+  const pomodoroStartRef = useRef(0)
+  const chatWindowOpenRef = useRef(false)
 
   const showBubble = useCallback((text: string) => {
-    setBubbleText(text)
-    setBubbleVisible(true)
+    const isLong = text.length > 30
+    if (isLong) {
+      showBubbleWindow(text)
+    } else {
+      setBubbleText(text)
+      setBubbleVisible(true)
+    }
     clearTimeout(bubbleTimerRef.current)
     bubbleTimerRef.current = window.setTimeout(() => {
       setBubbleVisible(false)
-    }, 5000)
+    }, isLong ? 8000 : 5000)
+  }, [])
+
+  const showBubbleWindow = useCallback(async (text: string) => {
+    const pos = lastWinPosRef.current
+    const petCenterX = pos.x + PET_SIZE / 2
+    const bubbleWidth = 200
+    const bubbleHeight = Math.min(120, 40 + text.length * 1.5)
+    const bx = Math.round(petCenterX - bubbleWidth / 2)
+    const by = Math.round(pos.y - bubbleHeight - 4)
+
+    const encoded = encodeURIComponent(text)
+    try {
+      await window.mulby.window.create(`?view=bubble-popup&text=${encoded}`, {
+        width: bubbleWidth,
+        height: Math.round(bubbleHeight),
+        x: bx,
+        y: by,
+        type: 'borderless',
+        titleBar: false,
+        transparent: true,
+        alwaysOnTop: true,
+        resizable: false,
+        focusable: false,
+        skipTaskbar: true,
+        ignoreMouseEvents: true,
+        forwardMouseEvents: true,
+      })
+    } catch {}
   }, [])
 
   const updateBubbleText = useCallback((text: string) => {
@@ -124,6 +162,54 @@ export default function PetView() {
     if (result) {
       showBubble(result.text)
       setExpression(result.expression)
+      statsRef.current.recordChat()
+    }
+  }, [])
+
+  const openChatInput = useCallback(async () => {
+    if (chatWindowOpenRef.current) return
+    chatWindowOpenRef.current = true
+
+    const pos = lastWinPosRef.current
+    const inputWidth = 220
+    const inputHeight = 44
+    const petCenterX = pos.x + PET_SIZE / 2
+    const inputX = Math.round(petCenterX - inputWidth / 2)
+    const inputY = pos.y + WIN_HEIGHT + 4
+
+    try {
+      await window.mulby.window.create('?view=chat-input', {
+        width: inputWidth,
+        height: inputHeight,
+        x: inputX,
+        y: inputY,
+        type: 'borderless',
+        titleBar: false,
+        transparent: true,
+        alwaysOnTop: true,
+        resizable: false,
+        focusable: true,
+        skipTaskbar: true,
+      })
+    } catch (e) {
+      console.error('Open chat input failed:', e)
+    }
+  }, [])
+
+  const handleChatMessage = useCallback(async (text: string) => {
+    if (!text.trim()) return
+    const chat = chatRef.current
+    if (!chat) return
+
+    const result = await chat.chat(text.trim(), (partial) => {
+      updateBubbleText(partial)
+    })
+
+    if (result) {
+      showBubble(result.text)
+      setExpression(result.expression)
+      statsRef.current.recordChat()
+      statsRef.current.recordInteraction()
     }
   }, [])
 
@@ -144,16 +230,58 @@ export default function PetView() {
     }
   }, [])
 
+  const togglePomodoro = useCallback(() => {
+    if (pomodoroRef.current) {
+      clearInterval(pomodoroRef.current)
+      pomodoroRef.current = 0
+      pomodoroStartRef.current = 0
+      showBubble('没关系，下次继续~')
+      setExpression('sad')
+      return
+    }
+
+    const FOCUS_MINUTES = 25
+    pomodoroStartRef.current = Date.now()
+    setExpression('sleepy')
+    showBubble(`🍅 专注 ${FOCUS_MINUTES} 分钟开始！`)
+
+    pomodoroRef.current = window.setInterval(() => {
+      const elapsed = Date.now() - pomodoroStartRef.current
+      const remaining = FOCUS_MINUTES * 60_000 - elapsed
+
+      if (remaining <= 0) {
+        clearInterval(pomodoroRef.current)
+        pomodoroRef.current = 0
+        pomodoroStartRef.current = 0
+        statsRef.current.recordPomodoroComplete(FOCUS_MINUTES)
+        setExpression('excited')
+        showBubble('🎉 专注完成！休息一下吧~')
+        return
+      }
+
+      const min = Math.floor(remaining / 60_000)
+      const sec = Math.floor((remaining % 60_000) / 1000)
+      setBubbleText(`🍅 ${min}:${sec.toString().padStart(2, '0')}`)
+      setBubbleVisible(true)
+    }, 1000)
+  }, [showBubble, setExpression])
+
   const showContextMenu = useCallback(async () => {
+    const stats = statsRef.current.getStats()
+    const pomodoroLabel = pomodoroRef.current
+      ? '⏹ 停止专注'
+      : '🍅 开始专注 (25分钟)'
+
     const result = await window.mulby.menu.showContextMenu([
-      { label: '设置', id: 'settings' },
+      { label: '💬 对话', id: 'chat' },
+      { label: pomodoroLabel, id: 'pomodoro' },
       { type: 'separator', label: '' },
-      { label: '打招呼', id: 'greet' },
-      { label: '加油', id: 'cheer' },
-      { label: '休息', id: 'sleep' },
+      { label: `❤️ 亲密度: ${stats.intimacy}`, id: 'stats', enabled: false },
+      { label: `🍅 今日: ${stats.pomodoroToday} 个`, id: 'stats2', enabled: false },
       { type: 'separator', label: '' },
-      { label: '隐藏', id: 'hide' },
-      { label: '关闭', id: 'close' },
+      { label: '⚙️ 设置', id: 'settings' },
+      { label: '😴 暂时隐藏', id: 'hide' },
+      { label: '❌ 退出', id: 'close' },
     ])
 
     const state = stateRef.current
@@ -163,16 +291,11 @@ export default function PetView() {
       case 'settings':
         openSettings()
         break
-      case 'greet':
-        triggerSpeak('user_click')
+      case 'chat':
+        openChatInput()
         break
-      case 'cheer':
-        if (state) { state.behavior = 'cheer'; state.animTimer = 0 }
-        setExpression('excited')
-        break
-      case 'sleep':
-        if (state) { state.behavior = 'sleep'; state.animTimer = 0 }
-        setExpression('sleepy')
+      case 'pomodoro':
+        togglePomodoro()
         break
       case 'hide':
         window.mulby.window.hide()
@@ -184,7 +307,7 @@ export default function PetView() {
         window.mulby.window.terminatePlugin()
         break
     }
-  }, [openSettings, triggerSpeak, setExpression])
+  }, [openSettings, openChatInput, setExpression, togglePomodoro])
 
   const init = useCallback(async () => {
     if (initedRef.current) return
@@ -200,6 +323,16 @@ export default function PetView() {
       if (savedP) personality = savedP as PetPersonality
     } catch {}
     const colors = DEFAULT_COLORS
+
+    await statsRef.current.load()
+    const signedIn = statsRef.current.signIn()
+    if (signedIn) {
+      setTimeout(() => {
+        const streak = statsRef.current.getStats().streakDays
+        showBubble(streak > 1 ? `连续签到 ${streak} 天！` : '今日签到~')
+        setExpression('happy')
+      }, 3000)
+    }
 
     const spriteSet = SLIME_SPRITE_SET
 
@@ -261,6 +394,7 @@ export default function PetView() {
           s.lastMousePos = { x: event.x, y: event.y }
           s.idleTimer = 0
         }
+
         if (event.type === 'keyDown') {
           s.lastKeyTime = Date.now()
           s.idleTimer = 0
@@ -305,6 +439,14 @@ export default function PetView() {
           chatRef.current?.updatePersonality(newP)
         }
       }
+      if (channel === 'chat-message' && args[0]) {
+        chatWindowOpenRef.current = false
+        const text = typeof args[0] === 'string' ? args[0] : args[0].text
+        if (text) handleChatMessage(text)
+      }
+      if (channel === 'chat-closed') {
+        chatWindowOpenRef.current = false
+      }
       if (channel === 'sprites-updated' && args[0]) {
         const { spriteSet: newS } = args[0]
         if (newS && newS.sprites['stand_neutral']) {
@@ -347,6 +489,63 @@ export default function PetView() {
         triggerSpeak('idle')
       }
     }, 120_000)
+
+    let waterMinutes = 0
+    let restMinutes = 0
+    window.setInterval(() => {
+      if (pomodoroRef.current) return
+      waterMinutes++
+      restMinutes++
+      if (waterMinutes >= 45) {
+        waterMinutes = 0
+        showBubble('该喝水啦~ 💧')
+        setExpression('neutral')
+      }
+      if (restMinutes >= 90) {
+        restMinutes = 0
+        showBubble('休息一下眼睛吧~ 👀')
+        setExpression('sleepy')
+      }
+    }, 60_000)
+
+    let lastClipText = ''
+    window.setInterval(async () => {
+      if (pomodoroRef.current) return
+      try {
+        const text = await window.mulby.clipboard.readText()
+        if (!text || text === lastClipText || text.length < 20) return
+        lastClipText = text
+        const nonChinese = text.replace(/[\u4e00-\u9fff]/g, '').length
+        if (nonChinese / text.length < 0.7) return
+
+        setExpression('surprised')
+        const chat = chatRef.current
+        if (!chat) return
+        const ai = (window as any).mulby?.ai
+        if (!ai || !personality.model) return
+
+        const resp = await ai.call({
+          model: personality.model,
+          messages: [
+            { role: 'system', content: '你是翻译助手。将用户给出的英文翻译成简洁的中文，只返回翻译结果，不超过30字。' },
+            { role: 'user', content: text.slice(0, 200) },
+          ],
+          params: { maxOutputTokens: 60, temperature: 0.3 },
+          capabilities: [],
+          toolingPolicy: { enableInternalTools: false },
+          mcp: { mode: 'off' },
+          skills: { mode: 'off' },
+        })
+
+        if (resp?.content) {
+          const translated = typeof resp.content === 'string' ? resp.content : ''
+          if (translated) {
+            showBubble(`📋 ${translated}`)
+            setExpression('happy')
+          }
+        }
+      } catch {}
+    }, 5000)
 
     lastTimeRef.current = performance.now()
     requestAnimationFrame(gameLoop)
@@ -452,7 +651,7 @@ export default function PetView() {
       {/* Pet area (bottom) */}
       <div
         ref={containerRef}
-        onClick={() => triggerSpeak('user_click')}
+        onClick={() => { openChatInput(); statsRef.current.recordInteraction() }}
         onContextMenu={e => { e.preventDefault(); showContextMenu() }}
         style={{
           width: PET_SIZE,

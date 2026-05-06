@@ -1,6 +1,7 @@
 import type { BehaviorType } from './types'
 import type { PetExpression } from './pet-standard'
 import { emotionToExpression } from './pet-standard'
+import { PetMemoryController } from './pet-memory'
 
 export interface PetPersonality {
   name: string
@@ -93,10 +94,17 @@ export class AIChatController {
   private isGenerating = false
   private requestId: string | null = null
   private triggeredOnce = new Set<string>()
+  private memory = new PetMemoryController()
+  private extractCounter = 0
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
     this.loadHistory()
+    this.memory.load()
+  }
+
+  getMemoryController(): PetMemoryController {
+    return this.memory
   }
 
   private async loadHistory() {
@@ -157,8 +165,12 @@ export class AIChatController {
 
     const userMessage = this.buildUserMessage(reason, currentBehavior)
 
+    const contextKeywords = this.extractKeywords(userMessage)
+    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const systemPrompt = buildSystemPrompt(this.personality) + memoryPrompt
+
     const messages = [
-      { role: 'system' as const, content: buildSystemPrompt(this.personality) },
+      { role: 'system' as const, content: systemPrompt },
       ...this.context.history.slice(-CONTEXT_WINDOW),
       { role: 'user' as const, content: userMessage },
     ]
@@ -203,6 +215,7 @@ export class AIChatController {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
+        this.maybeExtractMemory()
       }
 
       if (!result) return null
@@ -219,11 +232,101 @@ export class AIChatController {
     }
   }
 
+  async chat(
+    userText: string,
+    onChunk?: (text: string) => void
+  ): Promise<SpeakResult | null> {
+    if (!this.personality.model || this.isGenerating) return null
+    const ai = (window as any).mulby?.ai
+    if (!ai) return null
+
+    this.isGenerating = true
+    this.lastSpeakTime = Date.now()
+
+    const contextKeywords = this.extractKeywords(userText)
+    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const systemPrompt = buildSystemPrompt(this.personality) + memoryPrompt
+
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...this.context.history.slice(-CONTEXT_WINDOW),
+      { role: 'user' as const, content: userText },
+    ]
+
+    let result = ''
+
+    try {
+      const req = ai.call(
+        {
+          model: this.personality.model,
+          messages,
+          params: { maxOutputTokens: 80, temperature: 0.9 },
+          capabilities: [],
+          toolingPolicy: { enableInternalTools: false },
+          mcp: { mode: 'off' },
+          skills: { mode: 'off' },
+        },
+        (chunk: any) => {
+          if (chunk.__requestId) { this.requestId = chunk.__requestId; return }
+          if (chunk.chunkType === 'text' && chunk.content) {
+            result += chunk.content
+            const { text } = parseEmotionResponse(result)
+            onChunk?.(text)
+          }
+        }
+      )
+
+      const finalMsg = await req
+      if (finalMsg?.content && typeof finalMsg.content === 'string') {
+        result = finalMsg.content
+      }
+
+      if (result) {
+        this.context.history.push(
+          { role: 'user', content: userText },
+          { role: 'assistant', content: result }
+        )
+        if (this.context.history.length > MAX_HISTORY) {
+          this.context.history = this.context.history.slice(-MAX_HISTORY)
+        }
+        this.saveHistory()
+        this.maybeExtractMemory()
+      }
+
+      if (!result) return null
+      const { text, expression } = parseEmotionResponse(result)
+      return text ? { text, expression } : null
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError'
+        || String(err?.message).toLowerCase().includes('aborted')
+      if (!isAbort) console.error('[ai-chat] chat error:', err)
+      return null
+    } finally {
+      this.isGenerating = false
+      this.requestId = null
+    }
+  }
+
   abort() {
     if (this.requestId) {
       const ai = (window as any).mulby?.ai
       ai?.abort?.(this.requestId)
     }
+  }
+
+  private maybeExtractMemory() {
+    this.extractCounter++
+    if (this.extractCounter % 3 !== 0) return
+    const recent = this.context.history.slice(-6)
+    this.memory.extractMemoryFromChat(this.personality.model, recent)
+  }
+
+  private extractKeywords(text: string): string[] {
+    const clean = text.replace(/[[\]，。！？、：""''（）\s]/g, ' ')
+    return clean
+      .split(' ')
+      .filter(w => w.length >= 2)
+      .slice(0, 5)
   }
 
   private buildUserMessage(reason: TriggerReason, behavior: BehaviorType): string {

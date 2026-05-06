@@ -38,7 +38,6 @@ canvas {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   text-align: center;
   max-width: 100%;
-  overflow: hidden;
 }
 
 .bubble-text {
@@ -75,4 +74,28 @@ canvas {
 @keyframes bubble-out {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(-4px) scale(0.95); }
+}
+
+.pet-chat-input {
+  width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 12px;
+  background: rgba(20, 20, 40, 0.9);
+  color: #f0eef6;
+  font-size: 11px;
+  outline: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 0.2s;
+}
+
+.pet-chat-input:focus {
+  border-color: rgba(167, 139, 250, 0.7);
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.2);
+}
+
+.pet-chat-input::placeholder {
+  color: rgba(240, 238, 246, 0.3);
 }
