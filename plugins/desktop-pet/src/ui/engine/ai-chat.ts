@@ -88,6 +88,7 @@ export class AIChatController {
   private lastSpeakTime = 0
   private isGenerating = false
   private requestId: string | null = null
+  private triggeredOnce = new Set<string>()
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
@@ -108,6 +109,12 @@ export class AIChatController {
     if (reason === 'typing_fast' && !triggers.typing) return false
     if (reason === 'morning' && !triggers.morning) return false
     if (reason === 'late_night' && !triggers.lateNight) return false
+
+    if (reason === 'morning' || reason === 'late_night') {
+      if (this.triggeredOnce.has(reason)) return false
+      this.triggeredOnce.add(reason)
+      return true
+    }
 
     const cooldown = FREQUENCY_COOLDOWN[this.personality.frequency]
     const elapsed = Date.now() - this.lastSpeakTime

@@ -12,6 +12,7 @@ import type { PetState, DisplayBounds, BehaviorType } from './engine/types'
 import { PET_SIZE } from './engine/types'
 import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason } from './engine/ai-chat'
 import type { PetSpriteSet, PetExpression, PetPose } from './engine/pet-standard'
+import { SLIME_SPRITE_SET } from './engine/slime-sprites'
 
 const BUBBLE_AREA_HEIGHT = 80
 const WIN_WIDTH = 120
@@ -74,6 +75,7 @@ export default function PetView() {
   const [bubbleText, setBubbleText] = useState('')
   const [bubbleVisible, setBubbleVisible] = useState(false)
   const bubbleTimerRef = useRef<number>(0)
+  const initedRef = useRef(false)
 
   const showBubble = useCallback((text: string) => {
     setBubbleText(text)
@@ -86,12 +88,12 @@ export default function PetView() {
 
   const updateBubbleText = useCallback((text: string) => {
     setBubbleText(text)
-    if (!bubbleVisible) setBubbleVisible(true)
+    setBubbleVisible(true)
     clearTimeout(bubbleTimerRef.current)
     bubbleTimerRef.current = window.setTimeout(() => {
       setBubbleVisible(false)
     }, 5000)
-  }, [bubbleVisible])
+  }, [])
 
   const setExpression = useCallback((expression: PetExpression, durationMs = 5000) => {
     currentExpressionRef.current = expression
@@ -123,7 +125,7 @@ export default function PetView() {
       showBubble(result.text)
       setExpression(result.expression)
     }
-  }, [showBubble, updateBubbleText, setExpression])
+  }, [])
 
   const openSettings = useCallback(async () => {
     try {
@@ -185,22 +187,21 @@ export default function PetView() {
   }, [openSettings, triggerSpeak, setExpression])
 
   const init = useCallback(async () => {
+    if (initedRef.current) return
+    initedRef.current = true
+
     const container = containerRef.current
     const canvas = canvasRef.current
     if (!container || !canvas) return
 
     let personality = DEFAULT_PERSONALITY
-    let colors = DEFAULT_COLORS
-    let spriteSet: PetSpriteSet | null = null
-
     try {
       const savedP = await window.mulby.storage.get('pet-personality')
       if (savedP) personality = savedP as PetPersonality
-      const savedC = await window.mulby.storage.get('pet-colors')
-      if (savedC) colors = savedC as PetColorScheme
-      const savedS = await window.mulby.storage.get('pet-sprites')
-      if (savedS) spriteSet = savedS as PetSpriteSet
     } catch {}
+    const colors = DEFAULT_COLORS
+
+    const spriteSet = SLIME_SPRITE_SET
 
     if (spriteSet && spriteSet.sprites['stand_neutral']) {
       useSvgRef.current = true
@@ -222,6 +223,16 @@ export default function PetView() {
     boundsRef.current = bounds
 
     const state = createInitialState(bounds)
+    try {
+      const savedPos = await window.mulby.storage.get('pet-position')
+      if (savedPos && typeof savedPos === 'object') {
+        const sp = savedPos as { x: number; y: number }
+        if (sp.x >= bounds.x && sp.x <= bounds.x + bounds.width - PET_SIZE &&
+            sp.y >= bounds.y + 80 && sp.y <= bounds.y + bounds.height - PET_SIZE) {
+          state.position = sp
+        }
+      }
+    } catch {}
     stateRef.current = state
 
     await window.mulby.window.setPosition(
@@ -328,14 +339,18 @@ export default function PetView() {
     idleCheckRef.current = window.setInterval(() => {
       const s = stateRef.current
       if (!s) return
+      try {
+        window.mulby.storage.set('pet-position', { x: s.position.x, y: s.position.y })
+      } catch {}
       if (s.idleTimer > 300_000) {
+        s.idleTimer = 0
         triggerSpeak('idle')
       }
-    }, 60_000)
+    }, 120_000)
 
     lastTimeRef.current = performance.now()
     requestAnimationFrame(gameLoop)
-  }, [triggerSpeak])
+  }, [])
 
   const gameLoop = useCallback((timestamp: number) => {
     const state = stateRef.current

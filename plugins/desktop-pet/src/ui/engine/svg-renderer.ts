@@ -53,7 +53,7 @@ const ANIM_KEYFRAMES = `
 
 export class SvgPetRenderer {
   private container: HTMLElement
-  private imgEl: HTMLImageElement
+  private svgWrap: HTMLDivElement
   private styleEl: HTMLStyleElement
   private spriteSet: PetSpriteSet | null = null
   private availableKeys: Set<PetSpriteKey> = new Set()
@@ -74,16 +74,15 @@ export class SvgPetRenderer {
     this.styleEl.textContent = ANIM_KEYFRAMES.replace(/VAR_FLIP/g, '')
     document.head.appendChild(this.styleEl)
 
-    this.imgEl = document.createElement('img')
-    this.imgEl.style.width = '100%'
-    this.imgEl.style.height = '100%'
-    this.imgEl.style.imageRendering = 'pixelated'
-    this.imgEl.style.position = 'absolute'
-    this.imgEl.style.top = '0'
-    this.imgEl.style.left = '0'
-    this.imgEl.style.transformOrigin = 'center bottom'
-    this.imgEl.draggable = false
-    this.container.appendChild(this.imgEl)
+    this.svgWrap = document.createElement('div')
+    this.svgWrap.style.width = '100%'
+    this.svgWrap.style.height = '100%'
+    this.svgWrap.style.imageRendering = 'pixelated'
+    this.svgWrap.style.position = 'absolute'
+    this.svgWrap.style.top = '0'
+    this.svgWrap.style.left = '0'
+    this.svgWrap.style.transformOrigin = 'center bottom'
+    this.container.appendChild(this.svgWrap)
 
     this.updateAnimation()
   }
@@ -153,20 +152,20 @@ export class SvgPetRenderer {
 
   private updateAnimation() {
     const flipStr = this.state.flipped ? 'scaleX(-1)' : ''
-    const poseBase = this.state.pose.startsWith('walk_') ? 'walk_1' : this.state.pose
 
     this.styleEl.textContent = ANIM_KEYFRAMES.replace(/VAR_FLIP/g, flipStr)
 
+    const poseBase = this.state.pose.startsWith('walk_') ? 'walk_1' : this.state.pose
     const anim = POSE_ANIMATIONS[poseBase] || POSE_ANIMATIONS['stand']
-    this.imgEl.style.animation = 'none'
-    void this.imgEl.offsetHeight
-    this.imgEl.style.animation = anim
+    if (this.svgWrap.style.animation !== anim) {
+      this.svgWrap.style.animation = anim
+    }
   }
 
   private doBlink() {
     if (this.state.pose === 'sleep') return
-    this.imgEl.style.animation = 'pet-blink 0.3s ease'
-    setTimeout(() => this.updateAnimation(), 300)
+    this.svgWrap.style.opacity = '0.8'
+    setTimeout(() => { this.svgWrap.style.opacity = '1' }, 150)
   }
 
   private applySprite() {
@@ -179,15 +178,17 @@ export class SvgPetRenderer {
     const svg = this.spriteSet.sprites[key]
     if (!svg) return
 
-    const dataUrl = svg.startsWith('data:')
-      ? svg
-      : `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-
-    this.imgEl.src = dataUrl
+    this.svgWrap.innerHTML = svg
+    const svgEl = this.svgWrap.querySelector('svg')
+    if (svgEl) {
+      svgEl.style.width = '100%'
+      svgEl.style.height = '100%'
+      svgEl.style.display = 'block'
+    }
   }
 
   destroy() {
-    this.container.removeChild(this.imgEl)
+    this.container.removeChild(this.svgWrap)
     document.head.removeChild(this.styleEl)
   }
 }

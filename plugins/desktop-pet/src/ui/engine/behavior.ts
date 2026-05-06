@@ -20,7 +20,7 @@ export function createInitialState(bounds: DisplayBounds): PetState {
     behavior: 'idle',
     position: {
       x: bounds.x + bounds.width / 2 - PET_SIZE / 2,
-      y: bounds.y + bounds.height - PET_SIZE,
+      y: bounds.y + bounds.height - PET_SIZE - 40,
     },
     velocity: { x: 0, y: 0 },
     facing: 'right',
@@ -66,8 +66,8 @@ export function decideBehavior(state: PetState, event: InputEvent | null): Behav
         const mouse = { x: event.x, y: event.y }
         const dist = distance(petCenter, mouse)
         if (dist > 300) return 'chase'
-        if (dist < 150 && dist > 50) return 'look'
-        if (behavior === 'chase' && dist < 60) return 'idle'
+        if (dist < 200 && dist > 80) return 'look'
+        if (behavior === 'chase' && dist < CHASE_STOP_DIST + 20) return 'idle'
         return behavior
       }
 
@@ -102,6 +102,8 @@ export function decideBehavior(state: PetState, event: InputEvent | null): Behav
     state.keyBurstCount = Math.max(0, state.keyBurstCount - 0.5)
   }
 
+  if (behavior === 'chase' || behavior === 'look') return behavior
+
   if (idleTimer > 60000 && behavior === 'sit') return 'sleep'
   if (idleTimer > 30000 && behavior !== 'sleep' && behavior !== 'sit') return 'sit'
   if (idleTimer > 8000 && behavior === 'idle') return 'wander'
@@ -109,15 +111,25 @@ export function decideBehavior(state: PetState, event: InputEvent | null): Behav
   return behavior
 }
 
+const CHASE_STOP_DIST = 100
+
 export function getVelocity(state: PetState, bounds: DisplayBounds): Point {
   switch (state.behavior) {
     case 'chase': {
-      const dx = state.lastMousePos.x - (state.position.x + PET_SIZE / 2)
-      const dy = state.lastMousePos.y - (state.position.y + PET_SIZE / 2)
+      const petCx = state.position.x + PET_SIZE / 2
+      const petCy = state.position.y + PET_SIZE / 2
+      const dx = state.lastMousePos.x - petCx
+      const dy = state.lastMousePos.y - petCy
       const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < 40) return { x: 0, y: 0 }
-      const speed = dist > 200 ? RUN_SPEED : MOVE_SPEED
-      return { x: (dx / dist) * speed, y: (dy / dist) * speed }
+      if (dist < CHASE_STOP_DIST) return { x: 0, y: 0 }
+      const targetX = state.lastMousePos.x - (dx / dist) * CHASE_STOP_DIST
+      const targetY = state.lastMousePos.y - (dy / dist) * CHASE_STOP_DIST
+      const tdx = targetX - petCx
+      const tdy = targetY - petCy
+      const tdist = Math.sqrt(tdx * tdx + tdy * tdy)
+      if (tdist < 3) return { x: 0, y: 0 }
+      const speed = dist > 250 ? RUN_SPEED : MOVE_SPEED
+      return { x: (tdx / tdist) * speed, y: (tdy / tdist) * speed }
     }
 
     case 'wander': {
@@ -134,15 +146,15 @@ export function getVelocity(state: PetState, bounds: DisplayBounds): Point {
 }
 
 export function updatePosition(state: PetState, bounds: DisplayBounds): void {
-  state.position.x += state.velocity.x
-  state.position.y += state.velocity.y
+  const MAX_STEP = 10
+  const vx = Math.max(-MAX_STEP, Math.min(MAX_STEP, state.velocity.x))
+  const vy = Math.max(-MAX_STEP, Math.min(MAX_STEP, state.velocity.y))
+  state.position.x += vx
+  state.position.y += vy
 
   state.position.x = Math.max(bounds.x, Math.min(state.position.x, bounds.x + bounds.width - PET_SIZE))
-  state.position.y = Math.max(bounds.y, Math.min(state.position.y, bounds.y + bounds.height - PET_SIZE))
-
-  if (state.behavior === 'idle' || state.behavior === 'wander' || state.behavior === 'sit' || state.behavior === 'sleep') {
-    state.position.y = bounds.y + bounds.height - PET_SIZE
-  }
+  const minY = bounds.y + 80
+  state.position.y = Math.max(minY, Math.min(state.position.y, bounds.y + bounds.height - PET_SIZE))
 
   if (state.velocity.x > 0.1) state.facing = 'right'
   if (state.velocity.x < -0.1) state.facing = 'left'
