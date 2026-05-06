@@ -134,6 +134,7 @@ interface MulbyWindow {
   invalidate(): void
   hide(isRestorePreWindow?: boolean): void
   show(): void
+  focus?(): Promise<void> | void
   setSize(width: number, height: number): void
   setPosition(x: number, y: number): void
   setBounds(bounds: { x?: number; y?: number; width?: number; height?: number }): Promise<boolean>
@@ -506,6 +507,9 @@ interface CaptureSource {
   thumbnailDataUrl: string
   displayId?: string
   appIconDataUrl?: string
+  bounds?: { x: number; y: number; width: number; height: number }
+  windowBounds?: { x: number; y: number; width: number; height: number }
+  captureBounds?: { x: number; y: number; width: number; height: number }
 }
 
 interface ColorPickResult {

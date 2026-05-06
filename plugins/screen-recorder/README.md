@@ -9,7 +9,7 @@
 - 区域录制：打开透明全屏选择器，框选区域后通过 Canvas 实时裁剪录制。
 - 音频录制：支持系统声音和麦克风；两路音频同时启用时在 UI 侧混音。默认关闭系统声音，避免在不支持系统音频的环境中阻断画面录制。
 - 自动停止：支持 1、3、5、10、30 分钟自动停止。
-- Overlay 效果：使用 Mulby child window 高级窗口 API 创建透明、置顶、鼠标穿透的覆盖层，并通过 `inputMonitor` 显示鼠标轨迹、点击标记和键盘输入。
+- Overlay 效果：全屏和区域录制使用 Mulby child window 高级窗口 API 创建透明、置顶、鼠标穿透的覆盖层，并通过 `inputMonitor` 显示鼠标轨迹、点击标记和键盘输入。窗口录制会优先把这些效果内嵌合成到录制流本身，避免 macOS 窗口采集漏掉独立 Overlay 窗口。
 - 设置持久化：录制参数、音频开关、Overlay 开关会保存到 Mulby Storage。
 
 ## 触发方式
@@ -32,6 +32,7 @@
 - macOS 录屏需要系统屏幕录制权限。
 - 麦克风录制需要麦克风权限；只有开启麦克风开关时才会请求麦克风流。
 - 鼠标轨迹和键盘显示依赖 Mulby 运行时的 `inputMonitor` 能力；插件已在 `manifest.permissions.inputMonitor` 中声明权限。如果当前版本未暴露该能力或原生模块不可用，核心录屏仍可使用。
+- 窗口录制的鼠标轨迹和点击内嵌合成需要窗口源提供 `bounds`、`windowBounds` 或 `captureBounds`（屏幕逻辑坐标）。如果宿主暂未提供窗口 bounds，窗口录制仍会内嵌键盘按键，但无法准确映射全局鼠标坐标到目标窗口。
 - 当前 Mulby 宿主如果把 Electron 桌面视频流的 `media/video` 请求映射成 `camera`，会导致录屏被当作摄像头权限拒绝；录屏助手实际需要的是 `screen`，不需要摄像头权限。
 - Overlay 窗口依赖 `window.create()` 的 `ignoreMouseEvents`、`forwardMouseEvents`、`focusable: false`、`skipTaskbar` 和 `alwaysOnTopLevel: "screen-saver"` 等能力，避免覆盖层阻止点击后方应用。
 - 录制期间会调用 `window.setBackgroundThrottling(false)`，避免透明 Overlay 触发宿主窗口计时器和重绘被系统节流；录制清理时会恢复为 `true`。

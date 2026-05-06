@@ -52,6 +52,13 @@ interface OverlayTarget {
   scaleFactor?: number
 }
 
+interface CaptureBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 interface RecorderSettings {
   mode: RecordMode
   displaySourceId: string
@@ -198,6 +205,29 @@ function pruneExpiredItems<T extends { timestamp: number }>(items: T[], now: num
   }
   items.length = writeIndex
   return items.length !== originalLength
+}
+
+function isOverlayEnabled(overlay: OverlayConfig) {
+  return overlay.mouseTrail || overlay.clickEffect || overlay.keystroke
+}
+
+function normalizeCaptureBounds(value: unknown): CaptureBounds | null {
+  if (!value || typeof value !== 'object') return null
+  const bounds = value as Partial<CaptureBounds>
+  const { x, y, width, height } = bounds
+  if ([x, y, width, height].every((item) => typeof item === 'number' && Number.isFinite(item)) && width! > 0 && height! > 0) {
+    return { x: x!, y: y!, width: width!, height: height! }
+  }
+  return null
+}
+
+function getCaptureSourceBounds(source?: CaptureSource | null) {
+  const candidate = source as (CaptureSource & {
+    bounds?: unknown
+    windowBounds?: unknown
+    captureBounds?: unknown
+  }) | null | undefined
+  return normalizeCaptureBounds(candidate?.bounds) ?? normalizeCaptureBounds(candidate?.windowBounds) ?? normalizeCaptureBounds(candidate?.captureBounds)
 }
 
 function mergeSettings(saved: Partial<RecorderSettings> | undefined): RecorderSettings {
@@ -361,6 +391,115 @@ function getClockNow() {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
 }
 
+function getClickEffectPresentation(button: string | undefined, config: OverlayConfig) {
+  const isRight = button === 'right' || button === '2'
+  const color = config.clickTheme === 'professional' ? '75, 85, 99' : isRight ? '209, 73, 91' : '31, 122, 140'
+  const label =
+    config.clickTheme === 'minimal' ? '' : normalizeClickMarkerLabel(isRight ? config.rightEmoji : config.leftEmoji, isRight ? 'R' : 'L')
+  return { color, label }
+}
+
+function drawRoundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const maxRadius = Math.min(radius, width / 2, height / 2)
+  context.beginPath()
+  context.moveTo(x + maxRadius, y)
+  context.lineTo(x + width - maxRadius, y)
+  context.quadraticCurveTo(x + width, y, x + width, y + maxRadius)
+  context.lineTo(x + width, y + height - maxRadius)
+  context.quadraticCurveTo(x + width, y + height, x + width - maxRadius, y + height)
+  context.lineTo(x + maxRadius, y + height)
+  context.quadraticCurveTo(x, y + height, x, y + height - maxRadius)
+  context.lineTo(x, y + maxRadius)
+  context.quadraticCurveTo(x, y, x + maxRadius, y)
+  context.closePath()
+}
+
+function drawTrail(context: CanvasRenderingContext2D, trail: TrailPoint[], now: number) {
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  for (let index = 1; index < trail.length; index += 1) {
+    const previous = trail[index - 1]
+    const point = trail[index]
+    const age = now - point.timestamp
+    const alpha = Math.max(0, 1 - age / TRAIL_POINT_TTL_MS)
+    context.strokeStyle = `rgba(31, 122, 140, ${alpha * 0.72})`
+    context.lineWidth = 3
+    context.beginPath()
+    context.moveTo(previous.x, previous.y)
+    context.lineTo(point.x, point.y)
+    context.stroke()
+  }
+}
+
+function drawClickMarker(context: CanvasRenderingContext2D, click: ClickEffect, theme: ClickTheme) {
+  const radius = theme === 'minimal' ? 16 : 18
+
+  context.strokeStyle = `rgb(${click.color})`
+  context.lineWidth = theme === 'minimal' ? 2 : 3
+  context.beginPath()
+  context.arc(click.x, click.y, radius, 0, Math.PI * 2)
+  context.stroke()
+
+  if (theme !== 'minimal' && click.label) {
+    context.fillStyle = `rgb(${click.color})`
+    context.font = '600 20px "Apple Color Emoji", "Segoe UI Emoji", -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    context.fillText(click.label, click.x, click.y - 42)
+  }
+}
+
+function drawKeyBubbles(
+  context: CanvasRenderingContext2D,
+  keys: KeyBubble[],
+  position: KeystrokePosition,
+  width: number,
+  height: number,
+  now: number
+) {
+  if (keys.length === 0) return
+
+  context.save()
+  context.font = '800 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  context.textBaseline = 'middle'
+
+  const gap = 8
+  const bubbleHeight = 34
+  const paddingX = 12
+  const bubbles = keys.map((key) => ({
+    key,
+    width: Math.max(34, Math.ceil(context.measureText(key.label).width + paddingX * 2))
+  }))
+  const totalWidth = bubbles.reduce((sum, item) => sum + item.width, 0) + gap * Math.max(0, bubbles.length - 1)
+  const margin = 48
+  const startX =
+    position === 'bottom-left'
+      ? margin
+      : position === 'bottom-right'
+        ? Math.max(margin, width - margin - totalWidth)
+        : Math.max(margin, (width - totalWidth) / 2)
+  const y = position === 'top-center' ? margin : Math.max(margin, height - margin - bubbleHeight)
+
+  let cursorX = startX
+  for (const bubble of bubbles) {
+    const age = now - bubble.key.timestamp
+    const fade = Math.min(1, Math.max(0, (KEY_BUBBLE_TTL_MS - age) / 400))
+    context.globalAlpha = fade
+    drawRoundedRect(context, cursorX, y, bubble.width, bubbleHeight, 17)
+    context.fillStyle = 'rgba(9, 16, 20, 0.76)'
+    context.fill()
+    context.strokeStyle = 'rgba(255, 255, 255, 0.16)'
+    context.lineWidth = 1
+    context.stroke()
+    context.fillStyle = '#ffffff'
+    context.textAlign = 'center'
+    context.fillText(bubble.key.label, cursorX + bubble.width / 2, y + bubbleHeight / 2)
+    cursorX += bubble.width + gap
+  }
+
+  context.restore()
+}
+
 function App() {
   const routeView = useMemo(() => new URLSearchParams(window.location.search).get('view') ?? 'main', [])
 
@@ -407,6 +546,7 @@ function RecorderPanel() {
   const cleanupRef = useRef<(() => void) | null>(null)
   const overlayCleanupRef = useRef<(() => void) | null>(null)
   const overlayTargetRef = useRef<OverlayTarget | null>(null)
+  const resetCompositeOverlayRef = useRef<(() => void) | null>(null)
   const durationTimerRef = useRef<number | null>(null)
   const startedAtMsRef = useRef(0)
   const accumulatedDurationMsRef = useRef(0)
@@ -576,6 +716,7 @@ function RecorderPanel() {
     micStreamRef.current = null
     recorderRef.current = null
     overlayTargetRef.current = null
+    resetCompositeOverlayRef.current = null
     restoreControlPanelThrottling()
   }, [restoreControlPanelThrottling, stopDurationTimer])
 
@@ -819,6 +960,222 @@ function RecorderPanel() {
     [activeScreenSource, createSourceStream, getDisplayForRegion, screenSources, settings.frameRate]
   )
 
+  const createWindowCompositedStream = useCallback(
+    async (source: CaptureSource | undefined, sourceStream: MediaStream, sourceCleanup?: () => void): Promise<StreamBundle> => {
+      const videoTrack = sourceStream.getVideoTracks()[0]
+      if (!videoTrack) {
+        return { stream: sourceStream, cleanup: sourceCleanup }
+      }
+
+      const sourceBounds = getCaptureSourceBounds(source)
+      const wantsMouseOverlay = settings.overlay.mouseTrail || settings.overlay.clickEffect
+      if (!sourceBounds && wantsMouseOverlay) {
+        setNotice('窗口源未提供 bounds，窗口录制暂时只能内嵌显示键盘按键。')
+      }
+
+      const video = document.createElement('video')
+      video.muted = true
+      video.playsInline = true
+      const ready = new Promise<void>((resolve) => {
+        video.onloadedmetadata = () => resolve()
+      })
+      video.srcObject = sourceStream
+      await ready
+      await video.play()
+
+      const trackSettings = videoTrack.getSettings()
+      const width = Math.max(1, Math.round(video.videoWidth || trackSettings.width || sourceBounds?.width || 1280))
+      const height = Math.max(1, Math.round(video.videoHeight || trackSettings.height || sourceBounds?.height || 720))
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d', { alpha: false, desynchronized: true })
+      if (!context) {
+        throw new Error('无法创建窗口录制合成画布。')
+      }
+
+      const trail: TrailPoint[] = []
+      const clicks: ClickEffect[] = []
+      const keys: KeyBubble[] = []
+      const compositeStream = canvas.captureStream(settings.frameRate)
+      sourceStream.getAudioTracks().forEach((track) => compositeStream.addTrack(track))
+
+      let frameId = 0
+      let lastFrameMs = 0
+      let sessionId: string | null = null
+      let disposeInput: Disposable | undefined
+      const frameIntervalMs = 1000 / settings.frameRate
+      const inputMonitor = window.mulby?.inputMonitor
+      const scaleX = sourceBounds ? width / sourceBounds.width : 1
+      const scaleY = sourceBounds ? height / sourceBounds.height : 1
+
+      const resetOverlayState = () => {
+        trail.length = 0
+        clicks.length = 0
+        keys.length = 0
+        context.clearRect(0, 0, width, height)
+        context.drawImage(video, 0, 0, width, height)
+      }
+      resetCompositeOverlayRef.current = resetOverlayState
+
+      const toWindowPoint = (event: InputMonitorEvent) => {
+        if (!sourceBounds || typeof event.x !== 'number' || typeof event.y !== 'number') return null
+        const localX = (event.x - sourceBounds.x) * scaleX
+        const localY = (event.y - sourceBounds.y) * scaleY
+        const tolerance = 10
+        if (localX < -tolerance || localY < -tolerance || localX > width + tolerance || localY > height + tolerance) {
+          return null
+        }
+        return {
+          x: Math.min(width, Math.max(0, localX)),
+          y: Math.min(height, Math.max(0, localY))
+        }
+      }
+
+      const appendTrailPoint = (x: number, y: number, now: number) => {
+        const previous = trail[trail.length - 1]
+        if (previous) {
+          const dx = x - previous.x
+          const dy = y - previous.y
+          if (dx * dx + dy * dy < 4) return
+        }
+        trail.push({ x, y, timestamp: now })
+        trimOldest(trail, MAX_TRAIL_POINTS)
+      }
+
+      const appendClickMarker = (event: InputMonitorEvent, x: number, y: number, now: number) => {
+        const presentation = getClickEffectPresentation(event.button, settings.overlay)
+        clicks.push({
+          id: `${now}-${clicks.length}`,
+          x,
+          y,
+          button: event.button ?? 'left',
+          color: presentation.color,
+          label: presentation.label,
+          timestamp: now
+        })
+        trimOldest(clicks, MAX_CLICK_MARKERS)
+      }
+
+      const appendKeyBubble = (event: InputMonitorEvent, now: number) => {
+        const label = buildShortcutLabel(event)
+        if (!label) return
+        const previous = keys[keys.length - 1]
+        if (previous?.label === label && now - previous.timestamp < KEY_REPEAT_MERGE_MS) return
+        keys.push({ id: `${now}-${label}`, label, timestamp: now })
+        trimOldest(keys, MAX_KEY_BUBBLES)
+      }
+
+      const handleInputEvent = (event: InputMonitorEvent) => {
+        const now = Date.now()
+        const type = (event.type ?? '').toLowerCase()
+        if (type === 'mousemove' && settings.overlay.mouseTrail) {
+          const point = toWindowPoint(event)
+          if (point) appendTrailPoint(point.x, point.y, now)
+          return
+        }
+
+        if (type === 'mousedown' && settings.overlay.clickEffect) {
+          const point = toWindowPoint(event)
+          if (point) appendClickMarker(event, point.x, point.y, now)
+          return
+        }
+
+        if (settings.overlay.keystroke && (event.key || event.keyCode) && type === 'keydown') {
+          appendKeyBubble(event, now)
+        }
+      }
+
+      const drawFrame = (timestamp = getClockNow()) => {
+        if (lastFrameMs > 0 && timestamp - lastFrameMs < frameIntervalMs - 1) {
+          frameId = window.requestAnimationFrame(drawFrame)
+          return
+        }
+        lastFrameMs = timestamp
+        const now = Date.now()
+        pruneExpiredItems(trail, now, TRAIL_POINT_TTL_MS)
+        pruneExpiredItems(clicks, now, CLICK_MARKER_TTL_MS)
+        pruneExpiredItems(keys, now, KEY_BUBBLE_TTL_MS)
+
+        context.clearRect(0, 0, width, height)
+        context.drawImage(video, 0, 0, width, height)
+
+        if (settings.overlay.mouseTrail) {
+          drawTrail(context, trail, now)
+        }
+        if (settings.overlay.clickEffect) {
+          clicks.forEach((click) => drawClickMarker(context, click, settings.overlay.clickTheme))
+        }
+        if (settings.overlay.keystroke) {
+          drawKeyBubbles(context, keys, settings.overlay.keyPosition, width, height, now)
+        }
+
+        frameId = window.requestAnimationFrame(drawFrame)
+      }
+
+      async function startInputMonitor() {
+        if (!inputMonitor) {
+          setNotice('窗口内嵌 Overlay 已启用，但当前 Mulby 运行时未暴露 inputMonitor。')
+          return
+        }
+
+        try {
+          const available = await inputMonitor.isAvailable()
+          if (!available) {
+            setNotice('窗口内嵌 Overlay 已启用，但全局输入监听原生模块不可用。')
+            return
+          }
+
+          const hasAccess = await inputMonitor.requireAccessibility()
+          if (!hasAccess) {
+            setNotice('窗口内嵌 Overlay 已启用，但未获得辅助功能权限，无法合成鼠标和键盘效果。')
+            return
+          }
+
+          sessionId = await inputMonitor.start({
+            mouse: wantsMouseOverlay,
+            keyboard: settings.overlay.keystroke,
+            throttleMs: OVERLAY_INPUT_THROTTLE_MS
+          })
+          if (!sessionId) {
+            setNotice('窗口内嵌 Overlay 已启用，但 inputMonitor 会话启动失败。')
+            return
+          }
+
+          disposeInput = inputMonitor.onEvent(handleInputEvent)
+          setNotice(sourceBounds ? '窗口模式将把鼠标和键盘效果内嵌合成到录制视频。' : '窗口模式将把键盘效果内嵌合成到录制视频。')
+        } catch (error) {
+          setNotice(`窗口内嵌 Overlay 输入监听未启用：${toErrorMessage(error)}`)
+        }
+      }
+
+      drawFrame()
+      await startInputMonitor()
+
+      return {
+        stream: compositeStream,
+        cleanup: () => {
+          if (frameId) {
+            window.cancelAnimationFrame(frameId)
+          }
+          disposeInput?.()
+          if (sessionId && inputMonitor) {
+            void inputMonitor.stop(sessionId).catch(() => {})
+          }
+          if (resetCompositeOverlayRef.current === resetOverlayState) {
+            resetCompositeOverlayRef.current = null
+          }
+          video.pause()
+          video.srcObject = null
+          stopStream(compositeStream)
+          sourceCleanup?.()
+          stopStream(sourceStream)
+        }
+      }
+    },
+    [settings.frameRate, settings.overlay]
+  )
+
   const selectRegion = useCallback(async () => {
     const display = await getDisplayFallback()
     const params = new URLSearchParams({
@@ -962,7 +1319,10 @@ function RecorderPanel() {
       videoBundle = await createSourceStream(activeScreenSource?.id ?? '')
     } else if (settings.mode === 'window') {
       overlayTargetRef.current = displayToOverlayTarget(await getDisplayForSource(activeWindowSource))
-      videoBundle = await createSourceStream(activeWindowSource?.id ?? '')
+      const sourceBundle = await createSourceStream(activeWindowSource?.id ?? '')
+      videoBundle = isOverlayEnabled(settings.overlay)
+        ? await createWindowCompositedStream(activeWindowSource, sourceBundle.stream, sourceBundle.cleanup)
+        : sourceBundle
     } else {
       const region = await ensureRegion()
       overlayTargetRef.current = displayToOverlayTarget(await getDisplayForRegion(region))
@@ -994,6 +1354,7 @@ function RecorderPanel() {
     activeScreenSource?.id,
     activeWindowSource?.id,
     activeWindowSource,
+    createWindowCompositedStream,
     createRegionStream,
     createSourceStream,
     ensureRegion,
@@ -1003,7 +1364,8 @@ function RecorderPanel() {
     mixAudioStreams,
     activeScreenSource,
     settings.microphone,
-    settings.mode
+    settings.mode,
+    settings.overlay
   ])
 
   const finalizeRecording = useCallback(
@@ -1183,16 +1545,19 @@ function RecorderPanel() {
         return
       }
 
-      setStatus('preparing')
-      setNotice('正在显示 Overlay。')
-      const overlayCleanup = await startOverlay()
-      if (cancelStartRef.current) {
-        overlayCleanup()
-        cleanupSession()
-        setStatus('idle')
-        return
+      const useVisibleOverlay = settings.mode !== 'window' && isOverlayEnabled(settings.overlay)
+      if (useVisibleOverlay) {
+        setStatus('preparing')
+        setNotice('正在显示 Overlay。')
+        const overlayCleanup = await startOverlay()
+        if (cancelStartRef.current) {
+          overlayCleanup()
+          cleanupSession()
+          setStatus('idle')
+          return
+        }
+        overlayCleanupRef.current = overlayCleanup
       }
-      overlayCleanupRef.current = overlayCleanup
 
       const recorder = new MediaRecorder(stream, {
         mimeType: getSupportedMimeType(),
@@ -1232,6 +1597,7 @@ function RecorderPanel() {
       }
 
       recorderRef.current = recorder
+      resetCompositeOverlayRef.current?.()
       recorder.start(1000)
       setStatus('recording')
       setNotice('录制中。')
@@ -1255,9 +1621,11 @@ function RecorderPanel() {
     permission,
     restoreControlPanelThrottling,
     settings.bitrateMbps,
+    settings.mode,
     settings.overlay.clickEffect,
     settings.overlay.keystroke,
     settings.overlay.mouseTrail,
+    settings.overlay,
     settings.startDelay,
     startDurationTimer,
     startOverlay
