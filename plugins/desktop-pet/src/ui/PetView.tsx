@@ -154,6 +154,7 @@ export default function PetView() {
   }, [])
 
   const triggerSpeak = useCallback(async (reason: TriggerReason) => {
+    if (pomodoroRef.current && reason !== 'user_click') return
     const chat = chatRef.current
     const state = stateRef.current
     if (!chat || !state) return
@@ -249,7 +250,7 @@ export default function PetView() {
     const FOCUS_MINUTES = 25
     pomodoroStartRef.current = Date.now()
     setExpression('sleepy')
-    showBubble(`🍅 专注 ${FOCUS_MINUTES} 分钟开始！`)
+    showBubble(`专注 ${FOCUS_MINUTES} 分钟开始！`)
 
     pomodoroRef.current = window.setInterval(() => {
       const elapsed = Date.now() - pomodoroStartRef.current
@@ -261,32 +262,32 @@ export default function PetView() {
         pomodoroStartRef.current = 0
         statsRef.current.recordPomodoroComplete(FOCUS_MINUTES)
         setExpression('excited')
-        showBubble('🎉 专注完成！休息一下吧~')
+        showBubble('专注完成！休息一下吧~')
         return
       }
 
       const min = Math.floor(remaining / 60_000)
       const sec = Math.floor((remaining % 60_000) / 1000)
-      updateBubbleText(`🍅 ${min}:${sec.toString().padStart(2, '0')}`)
+      updateBubbleText(`专注 ${min}:${sec.toString().padStart(2, '0')}`)
     }, 1000)
   }, [showBubble, setExpression])
 
   const showContextMenu = useCallback(async () => {
     const stats = statsRef.current.getStats()
     const pomodoroLabel = pomodoroRef.current
-      ? '⏹ 停止专注'
-      : '🍅 开始专注 (25分钟)'
+      ? '停止专注'
+      : '开始专注 (25分钟)'
 
     const result = await window.mulby.menu.showContextMenu([
-      { label: '💬 对话', id: 'chat' },
+      { label: '对话', id: 'chat' },
       { label: pomodoroLabel, id: 'pomodoro' },
       { type: 'separator', label: '' },
-      { label: `❤️ 亲密度: ${stats.intimacy}`, id: 'stats', enabled: false },
-      { label: `🍅 今日: ${stats.pomodoroToday} 个`, id: 'stats2', enabled: false },
+      { label: `亲密度: ${stats.intimacy}`, id: 'stats', enabled: false },
+      { label: `今日番茄: ${stats.pomodoroToday} 个`, id: 'stats2', enabled: false },
       { type: 'separator', label: '' },
-      { label: '⚙️ 设置', id: 'settings' },
-      { label: '😴 暂时隐藏', id: 'hide' },
-      { label: '❌ 退出', id: 'close' },
+      { label: '设置', id: 'settings' },
+      { label: '暂时隐藏', id: 'hide' },
+      { label: '退出', id: 'close' },
     ])
 
     const state = stateRef.current

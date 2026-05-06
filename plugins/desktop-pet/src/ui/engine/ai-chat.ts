@@ -55,7 +55,7 @@ ${traitDesc}
 【格式规则】
 - 回复格式必须是: [emotion]文字内容
 - emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
-- 文字内容简短（20字以内），适合气泡显示
+- 文字内容简短（100字以内），适合气泡显示
 - 用中文回复，不要markdown
 - 根据用户行为做出符合你性格的自然反应
 - 你是有生命的桌面伙伴，要有性格特色
@@ -221,7 +221,6 @@ export class AIChatController {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
-        this.maybeExtractMemory()
       }
 
       if (!result) return null
