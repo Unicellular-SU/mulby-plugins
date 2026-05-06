@@ -82,6 +82,10 @@ const FREQUENCY_COOLDOWN: Record<string, number> = {
   'click-only': Infinity,
 }
 
+const HISTORY_STORAGE_KEY = 'pet-chat-history'
+const MAX_HISTORY = 100
+const CONTEXT_WINDOW = 50
+
 export class AIChatController {
   private personality: PetPersonality
   private context: ChatContext = { history: [] }
@@ -92,6 +96,22 @@ export class AIChatController {
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
+    this.loadHistory()
+  }
+
+  private async loadHistory() {
+    try {
+      const saved = await (window as any).mulby?.storage?.get(HISTORY_STORAGE_KEY)
+      if (Array.isArray(saved)) {
+        this.context.history = saved.slice(-MAX_HISTORY)
+      }
+    } catch {}
+  }
+
+  private saveHistory() {
+    try {
+      (window as any).mulby?.storage?.set(HISTORY_STORAGE_KEY, this.context.history)
+    } catch {}
   }
 
   updatePersonality(p: PetPersonality) {
@@ -139,7 +159,7 @@ export class AIChatController {
 
     const messages = [
       { role: 'system' as const, content: buildSystemPrompt(this.personality) },
-      ...this.context.history.slice(-10),
+      ...this.context.history.slice(-CONTEXT_WINDOW),
       { role: 'user' as const, content: userMessage },
     ]
 
@@ -179,9 +199,10 @@ export class AIChatController {
           { role: 'user', content: userMessage },
           { role: 'assistant', content: result }
         )
-        if (this.context.history.length > 20) {
-          this.context.history = this.context.history.slice(-20)
+        if (this.context.history.length > MAX_HISTORY) {
+          this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
+        this.saveHistory()
       }
 
       if (!result) return null

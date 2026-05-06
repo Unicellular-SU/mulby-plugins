@@ -94,7 +94,7 @@ export function resolveSpriteKey(
 
 export const EXPRESSION_FROM_EMOTION: Record<string, PetExpression> = {
   joy: 'happy',
-  love: 'happy',
+  love: 'love',
   gratitude: 'happy',
   amusement: 'excited',
   excitement: 'excited',

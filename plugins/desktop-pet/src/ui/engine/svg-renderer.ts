@@ -17,6 +17,17 @@ const POSE_ANIMATIONS: Record<string, string> = {
   wave: 'pet-wave 0.5s ease-in-out 2',
 }
 
+const EXPR_ANIMATIONS: Record<string, string> = {
+  happy: 'pet-bounce 0.4s ease-out',
+  excited: 'pet-bounce 0.3s ease-out 2',
+  sad: 'pet-droop 0.5s ease-out forwards',
+  angry: 'pet-shake 0.3s ease-in-out 2',
+  surprised: 'pet-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+  love: 'pet-pulse 0.8s ease-in-out 2',
+  sleepy: 'pet-droop 0.6s ease-out forwards',
+  shy: 'pet-shrink 0.4s ease-out forwards',
+}
+
 const ANIM_KEYFRAMES = `
 @keyframes pet-idle {
   0%, 100% { transform: translateY(0) VAR_FLIP; }
@@ -44,6 +55,33 @@ const ANIM_KEYFRAMES = `
   0%, 100% { transform: rotate(0) VAR_FLIP; }
   25% { transform: rotate(-3deg) VAR_FLIP; }
   75% { transform: rotate(3deg) VAR_FLIP; }
+}
+@keyframes pet-bounce {
+  0% { transform: translateY(0) VAR_FLIP; }
+  40% { transform: translateY(-5px) VAR_FLIP; }
+  100% { transform: translateY(0) VAR_FLIP; }
+}
+@keyframes pet-droop {
+  0% { transform: translateY(0) VAR_FLIP; }
+  100% { transform: translateY(2px) VAR_FLIP; }
+}
+@keyframes pet-shake {
+  0%, 100% { transform: translateX(0) VAR_FLIP; }
+  25% { transform: translateX(-2px) VAR_FLIP; }
+  75% { transform: translateX(2px) VAR_FLIP; }
+}
+@keyframes pet-pop {
+  0% { transform: scale(1) VAR_FLIP; }
+  50% { transform: scale(1.15) VAR_FLIP; }
+  100% { transform: scale(1) VAR_FLIP; }
+}
+@keyframes pet-pulse {
+  0%, 100% { transform: scale(1) VAR_FLIP; }
+  50% { transform: scale(1.08) VAR_FLIP; }
+}
+@keyframes pet-shrink {
+  0% { transform: scale(1) VAR_FLIP; }
+  100% { transform: scale(0.92) VAR_FLIP; }
 }
 @keyframes pet-blink {
   0%, 90%, 100% { opacity: 1; }
@@ -79,6 +117,7 @@ export class SvgPetRenderer {
     this.svgWrap.style.height = '100%'
     this.svgWrap.style.imageRendering = 'pixelated'
     this.svgWrap.style.position = 'absolute'
+    this.svgWrap.style.opacity = '0.7'
     this.svgWrap.style.top = '0'
     this.svgWrap.style.left = '0'
     this.svgWrap.style.transformOrigin = 'center bottom'
@@ -103,6 +142,29 @@ export class SvgPetRenderer {
     if (this.state.expression === expression) return
     this.state.expression = expression
     this.applySprite()
+    this.playExpressionAnim(expression)
+  }
+
+  private exprAnimTimer = 0
+
+  private playExpressionAnim(expression: PetExpression) {
+    const exprAnim = EXPR_ANIMATIONS[expression]
+    if (!exprAnim) return
+
+    clearTimeout(this.exprAnimTimer)
+    this.svgWrap.style.animation = 'none'
+    void this.svgWrap.offsetHeight
+    this.svgWrap.style.animation = exprAnim
+
+    const dur = parseFloat(exprAnim.match(/[\d.]+s/)?.[0] || '0.5') * 1000
+    const count = parseInt(exprAnim.match(/(\d+)$/)?.[1] || '1')
+    const isFwd = exprAnim.includes('forwards')
+
+    if (!isFwd) {
+      this.exprAnimTimer = window.setTimeout(() => {
+        this.updateAnimation()
+      }, dur * count + 50)
+    }
   }
 
   setPose(pose: PetPose) {
@@ -164,8 +226,8 @@ export class SvgPetRenderer {
 
   private doBlink() {
     if (this.state.pose === 'sleep') return
-    this.svgWrap.style.opacity = '0.8'
-    setTimeout(() => { this.svgWrap.style.opacity = '1' }, 150)
+    this.svgWrap.style.opacity = '0.5'
+    setTimeout(() => { this.svgWrap.style.opacity = '0.7' }, 150)
   }
 
   private applySprite() {
