@@ -556,10 +556,11 @@ export default function PetView() {
         const chat = chatRef.current
         if (!chat) return
         const ai = (window as any).mulby?.ai
-        if (!ai || !personality.model) return
+        const model = chat.getPersonality().model
+        if (!ai || !model) return
 
         const resp = await ai.call({
-          model: personality.model,
+          model,
           messages: [
             { role: 'system', content: '你是翻译助手。将用户给出的英文翻译成简洁的中文，只返回翻译结果，不超过30字。' },
             { role: 'user', content: text.slice(0, 200) },

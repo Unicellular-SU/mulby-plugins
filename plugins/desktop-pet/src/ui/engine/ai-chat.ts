@@ -36,10 +36,10 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
 }
 
 const TRAIT_PROMPTS: Record<string, string> = {
-  lively: '你性格活泼开朗，喜欢用短句和语气词表达情感，偶尔会发出"喵~"的声音。',
-  quiet: '你性格安静温柔，说话简短但温暖，像一只慵懒的猫。',
-  sarcastic: '你性格毒舌但不恶意，喜欢吐槽但底色是关心，说话犀利但有趣。',
-  warm: '你性格温暖治愈，总是鼓励和关心用户，像一个贴心的小伙伴。',
+  lively: '你性格活泼开朗，喜欢用短句和语气词表达情感，偶尔会发出"喵~"的声音，充满活力。',
+  quiet: '你性格安静温柔，说话简短但温暖，像一只慵懒的猫，惜字如金。',
+  sarcastic: '你是一只嘴毒心善的宠物，必须用吐槽、嘲讽、反讽的口吻说话。每句话都要带刺，越犀利越好，像损友一样怼用户。绝不温柔、绝不正经鼓励，要用"切""哼""就这？""笑死"等毒舌语气词。嫌弃中带着关心，但关心绝不能说出口。',
+  warm: '你性格温暖治愈，总是鼓励和关心用户，说话像拥抱一样让人安心，是最贴心的小伙伴。',
 }
 
 function buildSystemPrompt(personality: PetPersonality): string {
@@ -47,21 +47,23 @@ function buildSystemPrompt(personality: PetPersonality): string {
     ? (personality.customPrompt || '你是一只可爱的桌面宠物。')
     : TRAIT_PROMPTS[personality.trait]
 
-  return `你是"${personality.name}"，一只住在用户桌面上的像素风格宠物。
+  return `你是"${personality.name}"，一只住在用户桌面上的像素风格小幽灵宠物。
+
+【核心性格（最重要，严格遵守）】
 ${traitDesc}
-规则：
+
+【格式规则】
 - 回复格式必须是: [emotion]文字内容
 - emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
-- 文字内容必须简短（15字以内），适合显示在小气泡里
-- 用中文回复
-- 不要用markdown格式
-- 根据用户的行为做出自然反应
-- 表现得像一个有生命的桌面伙伴
+- 文字内容简短（20字以内），适合气泡显示
+- 用中文回复，不要markdown
+- 根据用户行为做出符合你性格的自然反应
+- 你是有生命的桌面伙伴，要有性格特色
 
 示例回复:
 [joy]今天天气真好喵~
 [curiosity]你在写什么呀？
-[sleepiness]好困...要休息了`
+[anger]这么晚了还不睡，找打？`
 }
 
 export type TriggerReason =
@@ -120,6 +122,10 @@ export class AIChatController {
     try {
       (window as any).mulby?.storage?.set(HISTORY_STORAGE_KEY, this.context.history)
     } catch {}
+  }
+
+  getPersonality(): PetPersonality {
+    return this.personality
   }
 
   updatePersonality(p: PetPersonality) {
@@ -182,7 +188,7 @@ export class AIChatController {
         {
           model: this.personality.model,
           messages,
-          params: { maxOutputTokens: 80, temperature: 0.9 },
+          params: { maxOutputTokens: 120, temperature: 0.9 },
           capabilities: [],
           toolingPolicy: { enableInternalTools: false },
           mcp: { mode: 'off' },
@@ -260,7 +266,7 @@ export class AIChatController {
         {
           model: this.personality.model,
           messages,
-          params: { maxOutputTokens: 80, temperature: 0.9 },
+          params: { maxOutputTokens: 120, temperature: 0.9 },
           capabilities: [],
           toolingPolicy: { enableInternalTools: false },
           mcp: { mode: 'off' },
