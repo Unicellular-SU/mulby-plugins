@@ -32,7 +32,7 @@
 - macOS 录屏需要系统屏幕录制权限。
 - 麦克风录制需要麦克风权限；只有开启麦克风开关时才会请求麦克风流。
 - 鼠标轨迹和键盘显示依赖 Mulby 运行时的 `inputMonitor` 能力；插件已在 `manifest.permissions.inputMonitor` 中声明权限。如果当前版本未暴露该能力或原生模块不可用，核心录屏仍可使用。
-- 窗口录制的鼠标轨迹和点击内嵌合成需要窗口源提供 `bounds`、`windowBounds` 或 `captureBounds`（屏幕逻辑坐标）。如果宿主暂未提供窗口 bounds，窗口录制仍会内嵌键盘按键，但无法准确映射全局鼠标坐标到目标窗口。
+- 窗口录制的鼠标轨迹和点击内嵌合成会优先调用 `screen.getWindowBounds(sourceId)` 获取窗口屏幕逻辑坐标，并兼容窗口源上的 `bounds`、`windowBounds` 或 `captureBounds`。如果宿主暂未提供窗口 bounds，窗口录制仍会内嵌键盘按键，但无法准确映射全局鼠标坐标到目标窗口。
 - 当前 Mulby 宿主如果把 Electron 桌面视频流的 `media/video` 请求映射成 `camera`，会导致录屏被当作摄像头权限拒绝；录屏助手实际需要的是 `screen`，不需要摄像头权限。
 - Overlay 窗口依赖 `window.create()` 的 `ignoreMouseEvents`、`forwardMouseEvents`、`focusable: false`、`skipTaskbar` 和 `alwaysOnTopLevel: "screen-saver"` 等能力，避免覆盖层阻止点击后方应用。
 - 录制期间会调用 `window.setBackgroundThrottling(false)`，避免透明 Overlay 触发宿主窗口计时器和重绘被系统节流；录制清理时会恢复为 `true`。

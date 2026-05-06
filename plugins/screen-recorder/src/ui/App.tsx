@@ -967,10 +967,11 @@ function RecorderPanel() {
         return { stream: sourceStream, cleanup: sourceCleanup }
       }
 
-      const sourceBounds = getCaptureSourceBounds(source)
+      const sourceBounds =
+        (source?.id ? normalizeCaptureBounds(await screen.getWindowBounds?.(source.id).catch(() => null)) : null) ?? getCaptureSourceBounds(source)
       const wantsMouseOverlay = settings.overlay.mouseTrail || settings.overlay.clickEffect
       if (!sourceBounds && wantsMouseOverlay) {
-        setNotice('窗口源未提供 bounds，窗口录制暂时只能内嵌显示键盘按键。')
+        setNotice('窗口源未提供 bounds，窗口录制暂时只能内嵌显示键盘按键。请确认宿主支持 screen.getWindowBounds(sourceId)。')
       }
 
       const video = document.createElement('video')
@@ -1173,7 +1174,7 @@ function RecorderPanel() {
         }
       }
     },
-    [settings.frameRate, settings.overlay]
+    [screen, settings.frameRate, settings.overlay]
   )
 
   const selectRegion = useCallback(async () => {
