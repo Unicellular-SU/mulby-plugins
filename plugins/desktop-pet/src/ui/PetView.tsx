@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { SvgPetRenderer } from './engine/svg-renderer'
 import { PixelCatRenderer, DEFAULT_COLORS, type PetColorScheme } from './engine/sprite'
 import {
@@ -15,9 +15,7 @@ import type { PetSpriteSet, PetExpression, PetPose } from './engine/pet-standard
 import { SLIME_SPRITE_SET } from './engine/slime-sprites'
 import { PetStatsController } from './engine/pet-stats'
 
-const BUBBLE_AREA_HEIGHT = 80
-const WIN_WIDTH = 120
-const WIN_HEIGHT = PET_SIZE + BUBBLE_AREA_HEIGHT
+const WIN_SIZE = 80
 
 function behaviorToPose(behavior: BehaviorType): PetPose {
   switch (behavior) {
@@ -74,64 +72,70 @@ export default function PetView() {
   const currentExpressionRef = useRef<PetExpression>('neutral')
   const expressionTimerRef = useRef<number>(0)
 
-  const [bubbleText, setBubbleText] = useState('')
-  const [bubbleVisible, setBubbleVisible] = useState(false)
   const bubbleTimerRef = useRef<number>(0)
+  const bubbleProxyRef = useRef<any>(null)
+  const bubbleVisibleRef = useRef(false)
   const initedRef = useRef(false)
   const pomodoroRef = useRef<number>(0)
   const pomodoroStartRef = useRef(0)
   const chatWindowOpenRef = useRef(false)
+  const chatInputProxyRef = useRef<any>(null)
+
+  const positionBubble = useCallback((pos: { x: number; y: number }, bubbleWidth: number, bubbleHeight: number) => {
+    const winCenterX = pos.x + WIN_SIZE / 2
+    const bx = Math.round(winCenterX - bubbleWidth / 2)
+    const by = Math.round(pos.y - bubbleHeight - 4)
+    return { x: bx, y: by }
+  }, [])
 
   const showBubble = useCallback((text: string) => {
-    const isLong = text.length > 30
-    if (isLong) {
-      showBubbleWindow(text)
-    } else {
-      setBubbleText(text)
-      setBubbleVisible(true)
-    }
-    clearTimeout(bubbleTimerRef.current)
-    bubbleTimerRef.current = window.setTimeout(() => {
-      setBubbleVisible(false)
-    }, isLong ? 8000 : 5000)
-  }, [])
+    const proxy = bubbleProxyRef.current
+    if (!proxy) return
 
-  const showBubbleWindow = useCallback(async (text: string) => {
+    const bubbleWidth = text.length <= 15 ? 120 : text.length <= 40 ? 160 : 200
+    const bubbleHeight = text.length <= 15 ? 44 : text.length <= 40 ? 64 : 100
+
     const pos = lastWinPosRef.current
-    const petCenterX = pos.x + PET_SIZE / 2
-    const bubbleWidth = 200
-    const bubbleHeight = Math.min(120, 40 + text.length * 1.5)
-    const bx = Math.round(petCenterX - bubbleWidth / 2)
-    const by = Math.round(pos.y - bubbleHeight - 4)
+    const { x, y } = positionBubble(pos, bubbleWidth, bubbleHeight)
 
-    const encoded = encodeURIComponent(text)
-    try {
-      await window.mulby.window.create(`?view=bubble-popup&text=${encoded}`, {
-        width: bubbleWidth,
-        height: Math.round(bubbleHeight),
-        x: bx,
-        y: by,
-        type: 'borderless',
-        titleBar: false,
-        transparent: true,
-        alwaysOnTop: true,
-        resizable: false,
-        focusable: false,
-        skipTaskbar: true,
-        ignoreMouseEvents: true,
-        forwardMouseEvents: true,
-      })
-    } catch {}
-  }, [])
+    proxy.setBounds({ x, y, width: bubbleWidth, height: bubbleHeight })
+    proxy.postMessage('bubble-update', text)
+    proxy.setOpacity(1)
+    if (!bubbleVisibleRef.current) {
+      proxy.showInactive?.() ?? proxy.show()
+    }
+    bubbleVisibleRef.current = true
+
+    clearTimeout(bubbleTimerRef.current)
+    const duration = text.length > 40 ? 8000 : 5000
+    bubbleTimerRef.current = window.setTimeout(() => {
+      proxy.setOpacity(0)
+      bubbleVisibleRef.current = false
+    }, duration)
+  }, [positionBubble])
 
   const updateBubbleText = useCallback((text: string) => {
-    setBubbleText(text)
-    setBubbleVisible(true)
+    const proxy = bubbleProxyRef.current
+    if (!proxy) return
+    proxy.postMessage('bubble-update', text)
+
+    if (!bubbleVisibleRef.current) {
+      const bubbleWidth = text.length <= 15 ? 120 : text.length <= 40 ? 160 : 200
+      const bubbleHeight = text.length <= 15 ? 44 : text.length <= 40 ? 64 : 100
+      const pos = lastWinPosRef.current
+      const { x, y } = positionBubble(pos, bubbleWidth, bubbleHeight)
+      proxy.setBounds({ x, y, width: bubbleWidth, height: bubbleHeight })
+      proxy.setOpacity(1)
+      proxy.showInactive?.() ?? proxy.show()
+      bubbleVisibleRef.current = true
+    }
+
     clearTimeout(bubbleTimerRef.current)
     bubbleTimerRef.current = window.setTimeout(() => {
-      setBubbleVisible(false)
+      proxy.setOpacity(0)
+      bubbleVisibleRef.current = false
     }, 5000)
-  }, [])
+  }, [positionBubble])
 
   const setExpression = useCallback((expression: PetExpression, durationMs = 5000) => {
     currentExpressionRef.current = expression
@@ -166,21 +170,22 @@ export default function PetView() {
     }
   }, [])
 
+  const CHAT_INPUT_WIDTH = 220
+  const CHAT_INPUT_HEIGHT = 44
+
   const openChatInput = useCallback(async () => {
     if (chatWindowOpenRef.current) return
     chatWindowOpenRef.current = true
 
     const pos = lastWinPosRef.current
-    const inputWidth = 220
-    const inputHeight = 44
-    const petCenterX = pos.x + PET_SIZE / 2
-    const inputX = Math.round(petCenterX - inputWidth / 2)
-    const inputY = pos.y + WIN_HEIGHT + 4
+    const petCenterX = pos.x + WIN_SIZE / 2
+    const inputX = Math.round(petCenterX - CHAT_INPUT_WIDTH / 2)
+    const inputY = pos.y + WIN_SIZE + 4
 
     try {
-      await window.mulby.window.create('?view=chat-input', {
-        width: inputWidth,
-        height: inputHeight,
+      const proxy = await window.mulby.window.create('?view=chat-input', {
+        width: CHAT_INPUT_WIDTH,
+        height: CHAT_INPUT_HEIGHT,
         x: inputX,
         y: inputY,
         type: 'borderless',
@@ -191,6 +196,7 @@ export default function PetView() {
         focusable: true,
         skipTaskbar: true,
       })
+      chatInputProxyRef.current = proxy
     } catch (e) {
       console.error('Open chat input failed:', e)
     }
@@ -261,8 +267,7 @@ export default function PetView() {
 
       const min = Math.floor(remaining / 60_000)
       const sec = Math.floor((remaining % 60_000) / 1000)
-      setBubbleText(`🍅 ${min}:${sec.toString().padStart(2, '0')}`)
-      setBubbleVisible(true)
+      updateBubbleText(`🍅 ${min}:${sec.toString().padStart(2, '0')}`)
     }, 1000)
   }, [showBubble, setExpression])
 
@@ -370,8 +375,35 @@ export default function PetView() {
 
     await window.mulby.window.setPosition(
       Math.round(state.position.x),
-      Math.round(state.position.y - BUBBLE_AREA_HEIGHT)
+      Math.round(state.position.y)
     )
+
+    try {
+      const bubbleProxy = await window.mulby.window.create('?view=bubble-overlay', {
+        width: 120,
+        height: 44,
+        x: -200,
+        y: -200,
+        type: 'borderless',
+        titleBar: false,
+        transparent: true,
+        alwaysOnTop: true,
+        resizable: false,
+        focusable: false,
+        skipTaskbar: true,
+        ignoreMouseEvents: true,
+        forwardMouseEvents: true,
+        visibleOnAllWorkspaces: true,
+        visibleOnFullScreen: true,
+        opacity: 0,
+      })
+      if (bubbleProxy) {
+        bubbleProxyRef.current = bubbleProxy
+        setTimeout(() => bubbleProxy.hide(), 500)
+      }
+    } catch (e) {
+      console.error('[pet] create bubble window failed:', e)
+    }
 
     const available = await window.mulby.inputMonitor.isAvailable()
     if (!available) {
@@ -441,11 +473,13 @@ export default function PetView() {
       }
       if (channel === 'chat-message' && args[0]) {
         chatWindowOpenRef.current = false
+        chatInputProxyRef.current = null
         const text = typeof args[0] === 'string' ? args[0] : args[0].text
         if (text) handleChatMessage(text)
       }
       if (channel === 'chat-closed') {
         chatWindowOpenRef.current = false
+        chatInputProxyRef.current = null
       }
       if (channel === 'sprites-updated' && args[0]) {
         const { spriteSet: newS } = args[0]
@@ -596,10 +630,25 @@ export default function PetView() {
     }
 
     const newX = Math.round(state.position.x)
-    const newY = Math.round(state.position.y - BUBBLE_AREA_HEIGHT)
+    const newY = Math.round(state.position.y)
     if (newX !== lastWinPosRef.current.x || newY !== lastWinPosRef.current.y) {
       lastWinPosRef.current = { x: newX, y: newY }
       window.mulby.window.setPosition(newX, newY)
+
+      if (bubbleVisibleRef.current && bubbleProxyRef.current) {
+        const proxy = bubbleProxyRef.current
+        proxy.setPosition(
+          Math.round(newX + WIN_SIZE / 2 - 80),
+          Math.round(newY - 52)
+        )
+      }
+
+      if (chatWindowOpenRef.current && chatInputProxyRef.current) {
+        chatInputProxyRef.current.setPosition(
+          Math.round(newX + WIN_SIZE / 2 - CHAT_INPUT_WIDTH / 2),
+          newY + WIN_SIZE + 4
+        )
+      }
     }
 
     requestAnimationFrame(gameLoop)
@@ -624,31 +673,16 @@ export default function PetView() {
   }, [init])
 
   return (
-    <div style={{ width: WIN_WIDTH, height: WIN_HEIGHT, position: 'relative' }}>
-      {/* Bubble area (top) */}
-      <div
-        style={{
-          width: WIN_WIDTH,
-          height: BUBBLE_AREA_HEIGHT,
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'center',
-          padding: '4px 6px',
-          pointerEvents: 'none',
-          overflow: 'hidden',
-        }}
-      >
-        {bubbleVisible && bubbleText && (
-          <div className="bubble-container bubble-enter">
-            <div className="bubble-box">
-              <span className="bubble-text">{bubbleText}</span>
-            </div>
-            <div className="bubble-arrow" />
-          </div>
-        )}
-      </div>
-
-      {/* Pet area (bottom) */}
+    <div
+      style={{
+        width: WIN_SIZE,
+        height: WIN_SIZE,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(255, 100, 100, 0.3)',
+      }}
+    >
       <div
         ref={containerRef}
         onClick={() => { openChatInput(); statsRef.current.recordInteraction() }}
