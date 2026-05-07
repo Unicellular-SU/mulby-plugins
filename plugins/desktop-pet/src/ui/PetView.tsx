@@ -10,7 +10,11 @@ import {
 } from './engine/behavior'
 import type { PetState, DisplayBounds, BehaviorType } from './engine/types'
 import { PET_SIZE } from './engine/types'
-import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason, type GeoContext } from './engine/ai-chat'
+import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason, type GeoContext, type PetReminder } from './engine/ai-chat'
+import { checkFestival, checkBirthday } from './engine/festivals'
+import { AchievementController } from './engine/achievements'
+import { PetDiaryController } from './engine/pet-diary'
+import { startGame, checkAnswer, getGameAnswer, type GameType, type GameSession } from './engine/mini-games'
 import type { PetExpression, PetPose } from './engine/pet-standard'
 import { SLIME_SPRITE_SET } from './engine/slime-sprites'
 import { PetStatsController, type PetMood } from './engine/pet-stats'
@@ -72,6 +76,21 @@ function behaviorToExpression(behavior: BehaviorType): PetExpression {
   }
 }
 
+function weatherCodeToName(code: number): string {
+  if (code <= 1) return '晴'
+  if (code <= 3) return '多云'
+  if (code <= 48) return '雾'
+  if (code <= 55) return '毛毛雨'
+  if (code <= 65) return '雨'
+  if (code <= 67) return '冻雨'
+  if (code <= 75) return '雪'
+  if (code <= 77) return '雪粒'
+  if (code <= 82) return '阵雨'
+  if (code <= 86) return '阵雪'
+  if (code >= 95) return '雷暴'
+  return '未知'
+}
+
 export default function PetView() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -108,11 +127,27 @@ export default function PetView() {
   const mouseMoveResetRef = useRef(0)
   const clickBurstRef = useRef<number[]>([])
   const lastMousePatternTime = useRef(0)
+  const achieveRef = useRef<AchievementController>(new AchievementController())
+  const diaryRef = useRef<PetDiaryController>(new PetDiaryController())
+  const reminderTimersRef = useRef<number[]>([])
+  const festivalCheckedRef = useRef(false)
+  const weatherTimerRef = useRef<number>(0)
+  const gameSessionRef = useRef<GameSession | null>(null)
+
+  const calcBubbleSize = useCallback((text: string) => {
+    const len = text.length
+    const width = len <= 12 ? 120 : len <= 25 ? 160 : len <= 50 ? 200 : Math.min(260, 200 + Math.ceil((len - 50) / 20) * 10)
+    const charsPerLine = Math.floor((width - 16) / 11)
+    const lines = Math.max(1, Math.ceil(len / charsPerLine))
+    const textHeight = Math.ceil(lines * 15.4)
+    const height = textHeight + 10 + 8
+    return { width, height }
+  }, [])
 
   const positionBubble = useCallback((pos: { x: number; y: number }, bubbleWidth: number, bubbleHeight: number) => {
     const winCenterX = pos.x + WIN_SIZE / 2
     const bx = Math.round(winCenterX - bubbleWidth / 2)
-    const by = Math.round(pos.y - bubbleHeight - 4)
+    const by = Math.max(0, Math.round(pos.y - bubbleHeight - 4))
     return { x: bx, y: by }
   }, [])
 
@@ -120,8 +155,7 @@ export default function PetView() {
     const proxy = bubbleProxyRef.current
     if (!proxy) return
 
-    const bubbleWidth = text.length <= 15 ? 120 : text.length <= 40 ? 160 : 200
-    const bubbleHeight = text.length <= 15 ? 44 : text.length <= 40 ? 64 : 100
+    const { width: bubbleWidth, height: bubbleHeight } = calcBubbleSize(text)
     bubbleSizeRef.current = { width: bubbleWidth, height: bubbleHeight }
 
     const pos = lastWinPosRef.current
@@ -141,15 +175,14 @@ export default function PetView() {
       proxy.setOpacity(0)
       bubbleVisibleRef.current = false
     }, duration)
-  }, [positionBubble])
+  }, [positionBubble, calcBubbleSize])
 
   const updateBubbleText = useCallback((text: string) => {
     const proxy = bubbleProxyRef.current
     if (!proxy) return
     proxy.postMessage('bubble-update', text)
 
-    const bubbleWidth = text.length <= 15 ? 120 : text.length <= 40 ? 160 : 200
-    const bubbleHeight = text.length <= 15 ? 44 : text.length <= 40 ? 64 : 100
+    const { width: bubbleWidth, height: bubbleHeight } = calcBubbleSize(text)
     const prev = bubbleSizeRef.current
 
     if (!bubbleVisibleRef.current) {
@@ -242,6 +275,34 @@ export default function PetView() {
 
   const handleChatMessage = useCallback(async (text: string) => {
     if (!text.trim()) return
+
+    const session = gameSessionRef.current
+    if (session?.active) {
+      session.attempts++
+      if (text.trim() === '放弃' || text.trim() === '不知道') {
+        showBubble(getGameAnswer(session.answer))
+        setExpression('sad')
+        gameSessionRef.current = null
+        return
+      }
+      const { correct, expression, response } = checkAnswer(text.trim(), session.answer)
+      showBubble(response)
+      setExpression(expression)
+      if (correct) {
+        statsRef.current.recordInteraction()
+        statsRef.current.recordChat()
+        gameSessionRef.current = null
+        checkAchievements()
+      } else if (session.attempts >= 3) {
+        setTimeout(() => {
+          showBubble(getGameAnswer(session.answer))
+          setExpression('neutral')
+          gameSessionRef.current = null
+        }, 2500)
+      }
+      return
+    }
+
     const chat = chatRef.current
     if (!chat) return
 
@@ -284,22 +345,23 @@ export default function PetView() {
       return
     }
 
-    const FOCUS_MINUTES = 25
+    const minutes = chatRef.current?.getPersonality()?.pomodoroMinutes || 25
     pomodoroStartRef.current = Date.now()
     setExpression('sleepy')
-    showBubble(`专注 ${FOCUS_MINUTES} 分钟开始！`)
+    showBubble(`专注 ${minutes} 分钟开始！`)
 
     pomodoroRef.current = window.setInterval(() => {
       const elapsed = Date.now() - pomodoroStartRef.current
-      const remaining = FOCUS_MINUTES * 60_000 - elapsed
+      const remaining = minutes * 60_000 - elapsed
 
       if (remaining <= 0) {
         clearInterval(pomodoroRef.current)
         pomodoroRef.current = 0
         pomodoroStartRef.current = 0
-        statsRef.current.recordPomodoroComplete(FOCUS_MINUTES)
+        statsRef.current.recordPomodoroComplete(minutes)
         setExpression('excited')
         showBubble('专注完成！休息一下吧~')
+        checkAchievements()
         return
       }
 
@@ -309,11 +371,84 @@ export default function PetView() {
     }, 1000)
   }, [showBubble, setExpression])
 
+  const checkAchievements = useCallback(() => {
+    const stats = statsRef.current.getStats()
+    const newAchs = achieveRef.current.checkAll(stats)
+    if (newAchs.length > 0) {
+      const first = newAchs[0]
+      setTimeout(() => {
+        setExpression('excited')
+        showBubble(`成就解锁：${first.title}！${first.desc}`)
+      }, 1500)
+    }
+  }, [showBubble, setExpression])
+
+  const scheduleReminders = useCallback((reminders: PetReminder[]) => {
+    reminderTimersRef.current.forEach(t => clearTimeout(t))
+    reminderTimersRef.current = []
+    const now = new Date()
+    for (const r of reminders) {
+      if (!r.enabled) continue
+      const target = new Date(now)
+      target.setHours(r.hour, r.minute, 0, 0)
+      if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1)
+      const delay = target.getTime() - now.getTime()
+      const tid = window.setTimeout(() => {
+        showBubble(r.label)
+        setExpression('surprised')
+        scheduleReminders(reminders)
+      }, delay)
+      reminderTimersRef.current.push(tid)
+    }
+  }, [showBubble, setExpression])
+
+  const fetchWeather = useCallback(async (geo: GeoContext) => {
+    try {
+      const resp = await window.mulby.http.get(
+        `https://api.open-meteo.com/v1/forecast?latitude=${geo.latitude}&longitude=${geo.longitude}&current=temperature_2m,weather_code&timezone=auto`,
+        {}
+      )
+      if (resp.status === 200) {
+        const data = JSON.parse(resp.data)
+        const temp = data.current?.temperature_2m
+        const code = data.current?.weather_code ?? -1
+        const weatherName = weatherCodeToName(code)
+        const updatedGeo: GeoContext = { ...geo, temperature: temp, weather: weatherName }
+        chatRef.current?.setGeoContext(updatedGeo)
+        await window.mulby.storage.set('pet-geo', updatedGeo)
+      }
+    } catch {}
+  }, [])
+
+  const startMiniGame = useCallback(async (type: GameType) => {
+    const chat = chatRef.current
+    if (!chat) return
+    const p = chat.getPersonality()
+    if (!p.model) {
+      showBubble('还没配置 AI 模型，去设置里选一个吧~')
+      return
+    }
+
+    showBubble('让我想一个好题目...')
+    setExpression('excited')
+
+    const result = await startGame(type, p.model, (text) => updateBubbleText(text))
+    if (result) {
+      showBubble(result.question)
+      setExpression(result.expression)
+      gameSessionRef.current = { type, active: true, answer: result.answer ?? '', attempts: 0 }
+    } else {
+      showBubble('啊，出题失败了...')
+      setExpression('sad')
+    }
+  }, [showBubble, setExpression, updateBubbleText])
+
   const showContextMenu = useCallback(async () => {
     const stats = statsRef.current.getStats()
+    const minutes = chatRef.current?.getPersonality()?.pomodoroMinutes || 25
     const pomodoroLabel = pomodoroRef.current
       ? '停止专注'
-      : '开始专注 (25分钟)'
+      : `开始专注 (${minutes}分钟)`
     const moodLabels: Record<string, string> = {
       ecstatic: '欣喜若狂', happy: '开心', content: '满足', neutral: '平静',
       bored: '无聊', lonely: '孤独', sad: '难过', grumpy: '暴躁', sleepy: '困倦',
@@ -322,6 +457,10 @@ export default function PetView() {
     const result = await window.mulby.menu.showContextMenu([
       { label: '对话', id: 'chat' },
       { label: pomodoroLabel, id: 'pomodoro' },
+      { type: 'separator', label: '' },
+      { label: '猜谜语', id: 'game_riddle' },
+      { label: '成语接龙', id: 'game_idiom' },
+      { label: '冷知识问答', id: 'game_trivia' },
       { type: 'separator', label: '' },
       { label: `心情: ${moodLabels[stats.mood] || stats.mood}`, id: 'mood', enabled: false },
       { label: `亲密度: ${stats.intimacy}`, id: 'stats', enabled: false },
@@ -344,6 +483,15 @@ export default function PetView() {
       case 'pomodoro':
         togglePomodoro()
         break
+      case 'game_riddle':
+        startMiniGame('riddle')
+        break
+      case 'game_idiom':
+        startMiniGame('idiom')
+        break
+      case 'game_trivia':
+        startMiniGame('trivia')
+        break
       case 'hide':
         window.mulby.window.hide()
         break
@@ -354,7 +502,7 @@ export default function PetView() {
         window.mulby.window.terminatePlugin()
         break
     }
-  }, [openSettings, openChatInput, setExpression, togglePomodoro])
+  }, [openSettings, openChatInput, setExpression, togglePomodoro, startMiniGame])
 
   const init = useCallback(async () => {
     if (initedRef.current) return
@@ -367,11 +515,14 @@ export default function PetView() {
     let personality = DEFAULT_PERSONALITY
     try {
       const savedP = await window.mulby.storage.get('pet-personality')
-      if (savedP) personality = savedP as PetPersonality
+      if (savedP) personality = { ...DEFAULT_PERSONALITY, ...(savedP as Partial<PetPersonality>) }
     } catch {}
     const colors = DEFAULT_COLORS
 
     await statsRef.current.load()
+    await achieveRef.current.load()
+    await diaryRef.current.load()
+
     const signedIn = statsRef.current.signIn()
     if (signedIn) {
       setTimeout(() => {
@@ -380,6 +531,8 @@ export default function PetView() {
         setExpression('happy')
       }, 3000)
     }
+
+    setTimeout(() => checkAchievements(), signedIn ? 5000 : 2000)
 
     const spriteSet = SLIME_SPRITE_SET
 
@@ -402,7 +555,10 @@ export default function PetView() {
     try {
       const savedGeo = await window.mulby.storage.get('pet-geo')
       if (savedGeo && typeof savedGeo === 'object') {
-        chatRef.current.setGeoContext(savedGeo as GeoContext)
+        const geo = savedGeo as GeoContext
+        chatRef.current.setGeoContext(geo)
+        fetchWeather(geo)
+        weatherTimerRef.current = window.setInterval(() => fetchWeather(geo), 30 * 60_000)
       } else {
         geoMissingRef.current = true
         setTimeout(() => {
@@ -412,6 +568,28 @@ export default function PetView() {
         }, signedIn ? 12000 : 8000)
       }
     } catch {}
+
+    if (!festivalCheckedRef.current) {
+      festivalCheckedRef.current = true
+      const festival = checkFestival()
+      const isBirthday = checkBirthday(personality.birthday)
+      const greetDelay = signedIn ? 6000 : 4000
+      if (isBirthday) {
+        setTimeout(() => {
+          showBubble('生日快乐！！今天是属于你的特别日子~')
+          setExpression('excited')
+        }, greetDelay)
+      } else if (festival) {
+        setTimeout(() => {
+          showBubble(festival.greeting)
+          setExpression(festival.expression as any)
+        }, greetDelay + (signedIn ? 5000 : 0))
+      }
+    }
+
+    if (personality.reminders?.length) {
+      scheduleReminders(personality.reminders)
+    }
 
     const display = await window.mulby.screen.getPrimaryDisplay()
     const bounds: DisplayBounds = display.workArea
@@ -557,6 +735,7 @@ export default function PetView() {
         const { personality: newP } = args[0]
         if (newP) {
           chatRef.current?.updatePersonality(newP)
+          if (newP.reminders?.length) scheduleReminders(newP.reminders)
         }
       }
       if (channel === 'chat-message' && args[0]) {
@@ -610,6 +789,21 @@ export default function PetView() {
       if (s.idleTimer > 300_000) {
         s.idleTimer = 0
         triggerSpeak('idle')
+      }
+
+      const hour = new Date().getHours()
+      if (hour >= 21 && !diaryRef.current.hasTodayEntry()) {
+        const chat = chatRef.current
+        if (chat) {
+          const p = chat.getPersonality()
+          const st = statsRef.current.getStats()
+          diaryRef.current.generateDiary(p.model, p.name, st, []).then(entry => {
+            if (entry) {
+              showBubble('今天的日记写好啦，去设置里看看吧~')
+              setExpression('happy')
+            }
+          })
+        }
       }
     }, 120_000)
 
@@ -778,6 +972,8 @@ export default function PetView() {
       clearTimeout(typingPauseTimerRef.current)
       clearTimeout(expressionTimerRef.current)
       clearTimeout(bubbleTimerRef.current)
+      clearInterval(weatherTimerRef.current)
+      reminderTimersRef.current.forEach(t => clearTimeout(t))
       if (svgRendererRef.current) {
         svgRendererRef.current.destroy()
       }
@@ -826,7 +1022,15 @@ export default function PetView() {
             longPressRef.current = 0
           }
         }}
-        onContextMenu={e => { e.preventDefault(); showContextMenu() }}
+        onContextMenu={e => {
+          e.preventDefault()
+          if (longPressRef.current) {
+            clearTimeout(longPressRef.current)
+            longPressRef.current = 0
+          }
+          longPressFiredRef.current = true
+          showContextMenu()
+        }}
         style={{
           width: PET_SIZE,
           height: PET_SIZE,

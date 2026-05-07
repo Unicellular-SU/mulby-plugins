@@ -1,7 +1,9 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { DEFAULT_PERSONALITY, type PetPersonality } from '../engine/ai-chat'
+import { DEFAULT_PERSONALITY, type PetPersonality, type PetReminder } from '../engine/ai-chat'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import type { PetMemory } from '../engine/pet-memory'
+import { ALL_ACHIEVEMENTS, type UnlockedAchievement } from '../engine/achievements'
+import type { DiaryEntry } from '../engine/pet-diary'
 import './settings.css'
 
 function Icon({ d, color = 'currentColor', size = 16 }: { d: string; color?: string; size?: number }) {
@@ -20,6 +22,10 @@ const ICONS = {
   trash: 'M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
   mapPin: 'M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0zM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
   refresh: 'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
+  plus: 'M12 5v14M5 12h14',
+  cake: 'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M7 8v3M12 8v3M17 8v3M7 4h.01M12 4h.01M17 4h.01',
 } as const
 
 function StatsIcon({ icon, children }: { icon: keyof typeof ICONS; children: ReactNode }) {
@@ -45,16 +51,32 @@ const FREQUENCIES = [
   { id: 'click-only', label: '仅点击' },
 ] as const
 
+const POMODORO_OPTIONS = [
+  { value: 5, label: '5 分钟' },
+  { value: 15, label: '15 分钟' },
+  { value: 25, label: '25 分钟' },
+  { value: 45, label: '45 分钟' },
+  { value: 60, label: '60 分钟' },
+]
+
+function generateReminderId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
+}
+
 export default function SettingsView() {
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
-  const [tab, setTab] = useState<'personality' | 'stats' | 'memory'>('personality')
+  const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
   const [memories, setMemories] = useState<PetMemory[]>([])
   const [memoryFilter, setMemoryFilter] = useState<'all' | 'pinned'>('all')
   const [geoInfo, setGeoInfo] = useState<{ latitude: number; longitude: number; city?: string; region?: string } | null>(null)
   const [geoLoading, setGeoLoading] = useState(false)
+  const [unlocked, setUnlocked] = useState<UnlockedAchievement[]>([])
+  const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>([])
+  const [newReminderLabel, setNewReminderLabel] = useState('')
+  const [newReminderTime, setNewReminderTime] = useState('09:00')
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -65,7 +87,7 @@ export default function SettingsView() {
     const load = async () => {
       try {
         const saved = await window.mulby.storage.get('pet-personality')
-        if (saved) setPersonality(saved as PetPersonality)
+        if (saved) setPersonality({ ...DEFAULT_PERSONALITY, ...(saved as Partial<PetPersonality>) })
       } catch {}
 
       try {
@@ -95,6 +117,16 @@ export default function SettingsView() {
           setGeoInfo(savedGeo as typeof geoInfo)
         }
       } catch {}
+
+      try {
+        const savedAchs = await window.mulby.storage.get('pet-achievements')
+        if (Array.isArray(savedAchs)) setUnlocked(savedAchs)
+      } catch {}
+
+      try {
+        const savedDiary = await window.mulby.storage.get('pet-diary')
+        if (Array.isArray(savedDiary)) setDiaryEntries(savedDiary)
+      } catch {}
     }
     load()
   }, [])
@@ -103,18 +135,30 @@ export default function SettingsView() {
     setGeoLoading(true)
     try {
       const status = await window.mulby.geolocation.getAccessStatus()
-      let canGet = status === 'granted'
-      if (status === 'not-determined') {
-        const newStatus = await window.mulby.geolocation.requestAccess()
-        canGet = newStatus === 'granted'
-      }
-      if (!canGet) {
-        showToast('未获得定位权限')
+
+      if (status === 'denied' || status === 'restricted') {
+        await window.mulby.geolocation.openSettings()
+        showToast('请在系统设置中开启定位权限')
         setGeoLoading(false)
         return
       }
 
-      const pos = await window.mulby.geolocation.getCurrentPosition()
+      if (status === 'not-determined' || status === 'unknown') {
+        const nextStatus = await window.mulby.geolocation.requestAccess()
+        if (nextStatus === 'denied' || nextStatus === 'restricted') {
+          await window.mulby.geolocation.openSettings()
+          showToast('请在系统设置中开启定位权限')
+          setGeoLoading(false)
+          return
+        }
+      }
+
+      let pos: { latitude: number; longitude: number } | null = null
+      try {
+        pos = await window.mulby.geolocation.getCurrentPosition()
+      } catch (e) {
+        console.error('getCurrentPosition failed:', e)
+      }
       if (!pos) {
         showToast('无法获取位置')
         setGeoLoading(false)
@@ -178,6 +222,32 @@ export default function SettingsView() {
     setMemories(updated)
     await window.mulby.storage.set('pet-memories', updated)
     showToast('已删除')
+  }
+
+  const addReminder = () => {
+    if (!newReminderLabel.trim()) return
+    const [h, m] = newReminderTime.split(':').map(Number)
+    const reminder: PetReminder = {
+      id: generateReminderId(),
+      label: newReminderLabel.trim(),
+      hour: h,
+      minute: m,
+      enabled: true,
+    }
+    setPersonality(p => ({ ...p, reminders: [...(p.reminders || []), reminder] }))
+    setNewReminderLabel('')
+    setNewReminderTime('09:00')
+  }
+
+  const removeReminder = (id: string) => {
+    setPersonality(p => ({ ...p, reminders: (p.reminders || []).filter(r => r.id !== id) }))
+  }
+
+  const toggleReminder = (id: string) => {
+    setPersonality(p => ({
+      ...p,
+      reminders: (p.reminders || []).map(r => r.id === id ? { ...r, enabled: !r.enabled } : r),
+    }))
   }
 
   const renderMemory = () => {
@@ -296,19 +366,90 @@ export default function SettingsView() {
     )
   }
 
+  const renderAchievements = () => {
+    const unlockedIds = new Set(unlocked.map(u => u.id))
+    const unlockedMap = new Map(unlocked.map(u => [u.id, u]))
+
+    return (
+      <div className="panel-content">
+        <div className="achievement-summary">
+          <StatsIcon icon="star">成就</StatsIcon>
+          <span>{unlocked.length} / {ALL_ACHIEVEMENTS.length}</span>
+        </div>
+        <div className="achievement-grid">
+          {ALL_ACHIEVEMENTS.map(ach => {
+            const isUnlocked = unlockedIds.has(ach.id)
+            const info = unlockedMap.get(ach.id)
+            return (
+              <div key={ach.id} className={`achievement-item ${isUnlocked ? 'unlocked' : 'locked'}`}>
+                <div className="achievement-icon-wrap">
+                  <Icon d={ach.icon} size={20} color={isUnlocked ? 'var(--accent)' : '#ccc'} />
+                </div>
+                <div className="achievement-info">
+                  <span className="achievement-title">{ach.title}</span>
+                  <span className="achievement-desc">{ach.desc}</span>
+                  {isUnlocked && info && (
+                    <span className="achievement-date">{new Date(info.unlockedAt).toLocaleDateString()}</span>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  const renderDiary = () => {
+    const sorted = [...diaryEntries].sort((a, b) => b.createdAt - a.createdAt)
+    const moodEmoji: Record<string, string> = {
+      ecstatic: '(^o^)', happy: '(^_^)', content: '(•‿•)', neutral: '(-_-)',
+      bored: '(-.-)zzZ', lonely: '(T_T)', sad: '(;_;)', grumpy: '(>_<)', sleepy: '(-.-)zzZ',
+    }
+
+    return (
+      <div className="panel-content">
+        {sorted.length === 0 ? (
+          <div className="memory-empty">还没有日记呢，晚上9点后会自动生成哦</div>
+        ) : sorted.map(entry => (
+          <div key={entry.date} className="diary-entry">
+            <div className="diary-header">
+              <span className="diary-date">{entry.date}</span>
+              <span className="diary-mood">{moodEmoji[entry.mood] || ''}</span>
+            </div>
+            <div className="diary-content">{entry.content}</div>
+            {entry.highlights.length > 0 && (
+              <div className="diary-highlights">
+                {entry.highlights.map((h, i) => (
+                  <span key={i} className="diary-highlight-tag">{h}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const reminders = personality.reminders || []
+
   return (
     <div className="settings-root">
       <div className="settings-header">
         <div className="tab-bar">
-          <button className={`tab ${tab === 'personality' ? 'active' : ''}`} onClick={() => setTab('personality')}>性格设置</button>
-          <button className={`tab ${tab === 'stats' ? 'active' : ''}`} onClick={() => setTab('stats')}>我的宠物</button>
+          <button className={`tab ${tab === 'personality' ? 'active' : ''}`} onClick={() => setTab('personality')}>设置</button>
+          <button className={`tab ${tab === 'stats' ? 'active' : ''}`} onClick={() => setTab('stats')}>状态</button>
           <button className={`tab ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>记忆</button>
+          <button className={`tab ${tab === 'achievements' ? 'active' : ''}`} onClick={() => setTab('achievements')}>成就</button>
+          <button className={`tab ${tab === 'diary' ? 'active' : ''}`} onClick={() => setTab('diary')}>日记</button>
         </div>
       </div>
 
       <div className="settings-body">
         {tab === 'stats' && renderStats()}
         {tab === 'memory' && renderMemory()}
+        {tab === 'achievements' && renderAchievements()}
+        {tab === 'diary' && renderDiary()}
         {tab === 'personality' && <div className="panel-content">
           <div className="field">
             <label className="field-label">宠物名称</label>
@@ -363,6 +504,79 @@ export default function SettingsView() {
                   {f.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field-label">
+              <Icon d={ICONS.target} size={14} color="var(--accent)" /> 番茄钟时长
+            </label>
+            <div className="freq-row">
+              {POMODORO_OPTIONS.map(o => (
+                <button
+                  key={o.value}
+                  className={`freq-btn ${(personality.pomodoroMinutes || 25) === o.value ? 'active' : ''}`}
+                  onClick={() => setPersonality(p => ({ ...p, pomodoroMinutes: o.value }))}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field-label">
+              <Icon d={ICONS.cake} size={14} color="var(--accent)" /> 你的生日
+            </label>
+            <input
+              type="date"
+              className="field-input"
+              value={personality.birthday || ''}
+              onChange={e => setPersonality(p => ({ ...p, birthday: e.target.value }))}
+            />
+          </div>
+
+          <div className="field">
+            <label className="field-label">
+              <Icon d={ICONS.bell} size={14} color="var(--accent)" /> 定时提醒
+            </label>
+            <div className="reminder-list">
+              {reminders.map(r => (
+                <div key={r.id} className="reminder-item">
+                  <label className="trigger-item" style={{ flex: 1 }}>
+                    <input
+                      type="checkbox"
+                      checked={r.enabled}
+                      onChange={() => toggleReminder(r.id)}
+                    />
+                    <span>{r.label}</span>
+                  </label>
+                  <span className="reminder-time">{String(r.hour).padStart(2, '0')}:{String(r.minute).padStart(2, '0')}</span>
+                  <button className="mem-action-btn delete" onClick={() => removeReminder(r.id)} style={{ marginLeft: 4 }}>
+                    <Icon d={ICONS.trash} size={12} />
+                  </button>
+                </div>
+              ))}
+              <div className="reminder-add">
+                <input
+                  className="field-input"
+                  value={newReminderLabel}
+                  onChange={e => setNewReminderLabel(e.target.value)}
+                  placeholder="提醒内容"
+                  style={{ flex: 1 }}
+                  maxLength={20}
+                />
+                <input
+                  type="time"
+                  className="field-input"
+                  value={newReminderTime}
+                  onChange={e => setNewReminderTime(e.target.value)}
+                  style={{ width: 85 }}
+                />
+                <button className="gen-btn" onClick={addReminder} disabled={!newReminderLabel.trim()}>
+                  <Icon d={ICONS.plus} size={12} />
+                </button>
+              </div>
             </div>
           </div>
 

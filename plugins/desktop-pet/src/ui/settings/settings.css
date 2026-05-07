@@ -552,3 +552,169 @@
   display: flex;
   gap: 6px;
 }
+
+.achievement-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--accent-bg), var(--pink-bg));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+}
+
+.achievement-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.achievement-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  transition: all 0.2s;
+}
+
+.achievement-item.unlocked {
+  border-color: rgba(155, 125, 212, 0.25);
+  background: rgba(155, 125, 212, 0.06);
+}
+
+.achievement-item.locked {
+  opacity: 0.45;
+}
+
+.achievement-icon-wrap {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--accent-bg);
+  flex-shrink: 0;
+}
+
+.achievement-item.locked .achievement-icon-wrap {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.achievement-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.achievement-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.achievement-desc {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.achievement-date {
+  font-size: 9px;
+  color: var(--text-dim);
+}
+
+.reminder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reminder-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+}
+
+.reminder-time {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.reminder-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.reminder-add .field-input {
+  font-size: 12px;
+  padding: 6px 8px;
+}
+
+.reminder-add .gen-btn {
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.diary-entry {
+  padding: 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.diary-date {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.diary-mood {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.diary-content {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.diary-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.diary-highlight-tag {
+  font-size: 10px;
+  color: var(--pink);
+  background: var(--pink-bg);
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(232, 160, 191, 0.2);
+}

@@ -41,10 +41,8 @@ canvas {
 }
 
 .bubble-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 6;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 
 .bubble-arrow {

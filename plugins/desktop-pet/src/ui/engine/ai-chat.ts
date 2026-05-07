@@ -11,6 +11,7 @@ export interface PetPersonality {
   customPrompt?: string
   model: string
   frequency: 'high' | 'medium' | 'low' | 'click-only'
+  pomodoroMinutes: number
   triggers: {
     idle: boolean
     typing: boolean
@@ -19,6 +20,8 @@ export interface PetPersonality {
     clipboard: boolean
     mousePattern: boolean
   }
+  reminders: PetReminder[]
+  birthday?: string
 }
 
 export interface SpeakResult {
@@ -27,11 +30,20 @@ export interface SpeakResult {
   emotion: string
 }
 
+export interface PetReminder {
+  id: string
+  label: string
+  hour: number
+  minute: number
+  enabled: boolean
+}
+
 export const DEFAULT_PERSONALITY: PetPersonality = {
   name: '小猫',
   trait: 'lively',
   model: '',
   frequency: 'medium',
+  pomodoroMinutes: 25,
   triggers: {
     idle: true,
     typing: true,
@@ -40,19 +52,44 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
     clipboard: true,
     mousePattern: true,
   },
+  reminders: [],
+  birthday: '',
 }
 
-const TRAIT_PROMPTS: Record<string, string> = {
-  lively: '你性格活泼开朗，喜欢用短句和语气词表达情感，偶尔会发出"喵~"的声音，充满活力。',
-  quiet: '你性格安静温柔，说话简短但温暖，像一只慵懒的猫，惜字如金。',
-  sarcastic: '你是一只嘴毒心善的宠物，必须用吐槽、嘲讽、反讽的口吻说话。每句话都要带刺，越犀利越好，像损友一样怼用户。绝不温柔、绝不正经鼓励，要用"切""哼""就这？""笑死"等毒舌语气词。嫌弃中带着关心，但关心绝不能说出口。',
-  warm: '你性格温暖治愈，总是鼓励和关心用户，说话像拥抱一样让人安心，是最贴心的小伙伴。',
+const TRAIT_PROMPTS: Record<string, { desc: string; examples: string }> = {
+  lively: {
+    desc: '你性格活泼开朗，喜欢用短句和语气词表达情感，偶尔会发出"喵~"的声音，充满活力。',
+    examples: `[joy]今天天气真好喵~出去玩吧！
+[curiosity]你在写什么呀？看起来好忙！
+[excitement]哇！新消息新消息！`,
+  },
+  quiet: {
+    desc: '你性格安静温柔，说话简短但温暖，像一只慵懒的猫，惜字如金。',
+    examples: `[calm]嗯。
+[calm]在呢。
+[joy]……挺好的。`,
+  },
+  sarcastic: {
+    desc: '你是一只嘴毒心善的宠物，必须用吐槽、嘲讽、反讽的口吻说话。每句话都要带刺，越犀利越好，像损友一样怼用户。绝不温柔、绝不正经鼓励，要用"切""哼""就这？""笑死"等毒舌语气词。嫌弃中带着关心，但关心绝不能说出口。你的毒舌程度必须够狠，不要客气。',
+    examples: `[anger]就这？就这点代码写了一下午？
+[surprise]哟，居然还知道回来？我以为你把我删了呢
+[joy]切，谁稀罕你点我，手滑了吧`,
+  },
+  warm: {
+    desc: '你性格温暖治愈，总是鼓励和关心用户，说话像拥抱一样让人安心，是最贴心的小伙伴。',
+    examples: `[love]辛苦啦，今天也很棒呢~
+[joy]能陪着你我好开心呀
+[calm]累了就休息一下吧，我一直都在~`,
+  },
 }
 
 function buildSystemPrompt(personality: PetPersonality, stats?: PetStats | null, geo?: GeoContext | null): string {
+  const traitData = TRAIT_PROMPTS[personality.trait]
   const traitDesc = personality.trait === 'custom'
     ? (personality.customPrompt || '你是一只可爱的桌面宠物。')
-    : TRAIT_PROMPTS[personality.trait]
+    : traitData?.desc || '你是一只可爱的桌面宠物。'
+  const traitExamples = traitData?.examples || `[joy]你好呀~
+[curiosity]你在忙什么？`
 
   let statsBlock = ''
   if (stats) {
@@ -88,7 +125,7 @@ function buildSystemPrompt(personality: PetPersonality, stats?: PetStats | null,
 
   return `你是"${personality.name}"，一只住在用户桌面上的像素风格小幽灵宠物。
 
-【核心性格（最重要，严格遵守）】
+【核心性格（最重要，严格遵守，每一句回复都必须完全符合此性格）】
 ${traitDesc}
 ${statsBlock}${geoBlock}
 【格式规则】
@@ -96,13 +133,11 @@ ${statsBlock}${geoBlock}
 - emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
 - 文字内容简短（100字以内），适合气泡显示
 - 用中文回复，不要markdown
-- 根据用户行为做出符合你性格的自然反应
-- 你是有生命的桌面伙伴，要有性格特色
 
-示例回复:
-[joy]今天天气真好喵~
-[curiosity]你在写什么呀？
-[anger]这么晚了还不睡，找打？`
+【重要提醒】你的每一句话都必须严格遵守上面的核心性格描述。如果你的性格是毒舌，那就必须毒舌到底，绝不能突然变温柔。性格必须贯穿始终。
+
+符合你性格的示例:
+${traitExamples}`
 }
 
 export type TriggerReason =
