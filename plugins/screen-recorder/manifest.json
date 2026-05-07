@@ -1,7 +1,7 @@
 {
   "id": "screen-recorder",
   "name": "screen-recorder",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "mulby",
   "type": "media",
   "displayName": "录屏助手",
@@ -18,9 +18,6 @@
   },
   "pluginSetting": {
     "single": true,
-    "background": true,
-    "idleTimeoutMs": "never",
-    "maxRuntime": 0,
     "defaultDetached": true
   },
   "window": {
