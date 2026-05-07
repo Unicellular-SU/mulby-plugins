@@ -998,7 +998,8 @@ export default function PetView() {
         onMouseLeave={() => {
           window.mulby.window.setIgnoreMouseEvents(true, { forward: true })
         }}
-        onPointerDown={() => {
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
           longPressFiredRef.current = false
           longPressRef.current = window.setTimeout(() => {
             longPressFiredRef.current = true
@@ -1006,7 +1007,8 @@ export default function PetView() {
             openChatInput()
           }, 400)
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
+          if (e.button !== 0) return
           if (longPressRef.current) {
             clearTimeout(longPressRef.current)
             longPressRef.current = 0
