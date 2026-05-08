@@ -786,6 +786,9 @@ export default function PetView() {
           if (newP.reminders?.length) scheduleReminders(newP.reminders)
         }
       }
+      if (channel === 'chat-history-updated') {
+        void chatRef.current?.reloadHistoryFromStorage()
+      }
       if (channel === 'chat-message' && args[0]) {
         chatWindowOpenRef.current = false
         chatInputProxyRef.current = null

@@ -168,8 +168,22 @@ export type TriggerReason =
   | 'user_click'
   | 'behavior_change'
 
+/** 与 Mulby storage 键 `pet-chat-history` 对应；assistant 可含模型思考过程（仅供展示，不参与 API） */
+export interface PetChatHistoryItem {
+  role: 'user' | 'assistant'
+  content: string
+  /** 推理模型思考片段，仅 assistant 可能有 */
+  reasoning?: string
+  /** 该轮完成时的 Unix 毫秒时间戳；user 与 assistant 成对写入相同值 */
+  at?: number
+}
+
+export const PET_CHAT_HISTORY_STORAGE_KEY = 'pet-chat-history'
+
+const MAX_REASONING_STORED = 6000
+
 interface ChatContext {
-  history: Array<{ role: 'user' | 'assistant'; content: string }>
+  history: PetChatHistoryItem[]
 }
 
 const FREQUENCY_COOLDOWN: Record<string, number> = {
@@ -179,7 +193,7 @@ const FREQUENCY_COOLDOWN: Record<string, number> = {
   'click-only': Infinity,
 }
 
-const HISTORY_STORAGE_KEY = 'pet-chat-history'
+const HISTORY_STORAGE_KEY = PET_CHAT_HISTORY_STORAGE_KEY
 const MAX_HISTORY = 100
 const CONTEXT_WINDOW = 50
 
@@ -207,8 +221,25 @@ export class AIChatController {
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
-    this.loadHistory()
+    void this.loadHistoryInternal()
     this.memory.load()
+  }
+
+  private normalizeHistoryItem(raw: unknown): PetChatHistoryItem | null {
+    if (!raw || typeof raw !== 'object') return null
+    const o = raw as Record<string, unknown>
+    if (o.role !== 'user' && o.role !== 'assistant') return null
+    const content = typeof o.content === 'string' ? o.content : ''
+    const reasoningRaw = o.role === 'assistant' && typeof o.reasoning === 'string' ? o.reasoning.trim() : ''
+    const item: PetChatHistoryItem = { role: o.role, content }
+    if (reasoningRaw) item.reasoning = reasoningRaw.slice(0, MAX_REASONING_STORED)
+    if (typeof o.at === 'number' && Number.isFinite(o.at) && o.at > 0) item.at = o.at
+    return item
+  }
+
+  /** 设置页清空历史后由父窗口通知，同步内存中的上下文 */
+  async reloadHistoryFromStorage(): Promise<void> {
+    await this.loadHistoryInternal()
   }
 
   setStatsController(controller: PetStatsController) {
@@ -220,13 +251,22 @@ export class AIChatController {
     this.geoContext = geo
   }
 
-  private async loadHistory() {
+  private async loadHistoryInternal() {
     try {
       const saved = await (window as any).mulby?.storage?.get(HISTORY_STORAGE_KEY)
-      if (Array.isArray(saved)) {
-        this.context.history = saved.slice(-MAX_HISTORY)
+      if (!Array.isArray(saved)) {
+        this.context.history = []
+        return
       }
-    } catch {}
+      const next: PetChatHistoryItem[] = []
+      for (const raw of saved.slice(-MAX_HISTORY)) {
+        const item = this.normalizeHistoryItem(raw)
+        if (item) next.push(item)
+      }
+      this.context.history = next
+    } catch {
+      this.context.history = []
+    }
   }
 
   private saveHistory() {
@@ -287,9 +327,13 @@ export class AIChatController {
     const stats = this.statsGetter?.() ?? null
     const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext) + memoryPrompt
 
+    const historyMessages = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.content,
+    }))
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.context.history.slice(-CONTEXT_WINDOW),
+      ...historyMessages,
       { role: 'user' as const, content: userMessage },
     ]
 
@@ -380,9 +424,13 @@ export class AIChatController {
 
       if (result) {
         const stored = sanitizeAssistantForHistory(result)
+        const reasoningStored = reasoningBuf.trim()
+          ? reasoningBuf.trim().slice(0, MAX_REASONING_STORED)
+          : undefined
+        const at = Date.now()
         this.context.history.push(
-          { role: 'user', content: userMessage },
-          { role: 'assistant', content: stored || result }
+          { role: 'user', content: userMessage, at },
+          { role: 'assistant', content: stored || result, at, ...(reasoningStored ? { reasoning: reasoningStored } : {}) }
         )
         if (this.context.history.length > MAX_HISTORY) {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
@@ -422,9 +470,13 @@ export class AIChatController {
     const stats = this.statsGetter?.() ?? null
     const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext) + memoryPrompt
 
+    const historyMessagesChat = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.content,
+    }))
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.context.history.slice(-CONTEXT_WINDOW),
+      ...historyMessagesChat,
       { role: 'user' as const, content: userText },
     ]
 
@@ -515,9 +567,13 @@ export class AIChatController {
 
       if (result) {
         const stored = sanitizeAssistantForHistory(result)
+        const reasoningStored = reasoningBuf.trim()
+          ? reasoningBuf.trim().slice(0, MAX_REASONING_STORED)
+          : undefined
+        const at = Date.now()
         this.context.history.push(
-          { role: 'user', content: userText },
-          { role: 'assistant', content: stored || result }
+          { role: 'user', content: userText, at },
+          { role: 'assistant', content: stored || result, at, ...(reasoningStored ? { reasoning: reasoningStored } : {}) }
         )
         if (this.context.history.length > MAX_HISTORY) {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
@@ -552,7 +608,7 @@ export class AIChatController {
   private maybeExtractMemory() {
     this.extractCounter++
     if (this.extractCounter % 3 !== 0) return
-    const recent = this.context.history.slice(-6)
+    const recent = this.context.history.slice(-6).map(m => ({ role: m.role, content: m.content }))
     this.memory.extractMemoryFromChat(this.personality.model, recent)
   }
 

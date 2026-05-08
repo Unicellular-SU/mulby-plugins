@@ -1,5 +1,13 @@
-import { useState, useEffect, type ReactNode } from 'react'
-import { DEFAULT_PERSONALITY, type PetPersonality, type PetReminder, type GeoContext } from '../engine/ai-chat'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import {
+  DEFAULT_PERSONALITY,
+  PET_CHAT_HISTORY_STORAGE_KEY,
+  type PetPersonality,
+  type PetReminder,
+  type GeoContext,
+  type PetChatHistoryItem,
+} from '../engine/ai-chat'
+import { stripPresentationMarkers } from '../engine/presentation'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import type { PetMemory } from '../engine/pet-memory'
 import { ALL_ACHIEVEMENTS, type UnlockedAchievement } from '../engine/achievements'
@@ -63,11 +71,46 @@ function generateReminderId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
 }
 
+function formatHistoryAssistantText(raw: string): string {
+  return stripPresentationMarkers(raw).trim() || raw.trim()
+}
+
+function formatDialogueDateTime(ms: number): string {
+  return new Date(ms).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+/** 将存储中的 user/assistant 成对转为展示用轮次（新在前） */
+function groupChatTurns(items: PetChatHistoryItem[]): Array<{ user: string; assistant: string; reasoning?: string; at?: number }> {
+  const out: Array<{ user: string; assistant: string; reasoning?: string; at?: number }> = []
+  for (let i = 0; i + 1 < items.length; i += 2) {
+    const u = items[i]
+    const a = items[i + 1]
+    if (u?.role === 'user' && a?.role === 'assistant') {
+      const at = typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : (typeof u.at === 'number' && Number.isFinite(u.at) ? u.at : undefined)
+      out.push({
+        user: u.content,
+        assistant: formatHistoryAssistantText(a.content),
+        reasoning: a.reasoning?.trim() || undefined,
+        at,
+      })
+    }
+  }
+  return out.reverse()
+}
+
 export default function SettingsView() {
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
-  const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary'>('personality')
+  const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary' | 'dialogue'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
   const [memories, setMemories] = useState<PetMemory[]>([])
   const [memoryFilter, setMemoryFilter] = useState<'all' | 'pinned'>('all')
@@ -81,6 +124,7 @@ export default function SettingsView() {
   const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>([])
   const [newReminderLabel, setNewReminderLabel] = useState('')
   const [newReminderTime, setNewReminderTime] = useState('09:00')
+  const [chatHistory, setChatHistory] = useState<PetChatHistoryItem[]>([])
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -139,6 +183,36 @@ export default function SettingsView() {
     }
     load()
   }, [])
+
+  const loadChatHistory = useCallback(async () => {
+    try {
+      const raw = await window.mulby.storage.get(PET_CHAT_HISTORY_STORAGE_KEY)
+      if (!Array.isArray(raw)) {
+        setChatHistory([])
+        return
+      }
+      const items: PetChatHistoryItem[] = []
+      for (const x of raw) {
+        if (!x || typeof x !== 'object') continue
+        const o = x as Record<string, unknown>
+        if (o.role !== 'user' && o.role !== 'assistant') continue
+        if (typeof o.content !== 'string') continue
+        const item: PetChatHistoryItem = { role: o.role, content: o.content }
+        if (o.role === 'assistant' && typeof o.reasoning === 'string' && o.reasoning.trim()) {
+          item.reasoning = o.reasoning.trim()
+        }
+        if (typeof o.at === 'number' && Number.isFinite(o.at) && o.at > 0) item.at = o.at
+        items.push(item)
+      }
+      setChatHistory(items)
+    } catch {
+      setChatHistory([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'dialogue') void loadChatHistory()
+  }, [tab, loadChatHistory])
 
   const handleFetchGeo = async () => {
     setGeoLoading(true)
@@ -498,6 +572,71 @@ export default function SettingsView() {
     )
   }
 
+  const handleClearChatHistory = async () => {
+    if (!window.confirm('确定清空全部对话历史吗？此操作不可恢复。')) return
+    try {
+      await window.mulby.storage.set(PET_CHAT_HISTORY_STORAGE_KEY, [])
+      setChatHistory([])
+      window.mulby.window.sendToParent('chat-history-updated')
+      showToast('对话历史已清空')
+    } catch (e) {
+      console.error(e)
+      showToast('清空失败')
+    }
+  }
+
+  const renderDialogue = () => {
+    const turns = groupChatTurns(chatHistory)
+    return (
+      <div className="panel-content dialogue-panel">
+        <p className="dialogue-intro">
+          展示宠物与模型的对话上下文：包括你输入的内容、自动触发时的说明（如闲置、点击等），以及宠物的回复；每轮带日期与时间（新产生的对话才会记录时间）。若模型支持推理，会显示灰色「思考」片段。
+        </p>
+        <div className="dialogue-toolbar">
+          <button type="button" className="gen-btn" onClick={() => void loadChatHistory()}>
+            <Icon d={ICONS.refresh} size={12} /> 刷新
+          </button>
+          <button type="button" className="mem-action-btn delete" onClick={() => void handleClearChatHistory()}>
+            <Icon d={ICONS.trash} size={12} /> 清空历史
+          </button>
+        </div>
+        {turns.length === 0 ? (
+          <div className="memory-empty">暂无对话记录。与宠物聊天或等待自动搭话后，这里会出现历史。</div>
+        ) : (
+          <div className="dialogue-list">
+            {turns.map((t, idx) => (
+              <div key={turns.length - idx} className="dialogue-turn">
+                <div className="dialogue-turn-meta">
+                  {t.at != null ? (
+                    <time className="dialogue-time" dateTime={new Date(t.at).toISOString()}>
+                      {formatDialogueDateTime(t.at)}
+                    </time>
+                  ) : (
+                    <span className="dialogue-time dialogue-time-unknown">（无时间记录）</span>
+                  )}
+                </div>
+                <div className="dialogue-block dialogue-user">
+                  <span className="dialogue-label">用户 / 上下文</span>
+                  <div className="dialogue-text">{t.user}</div>
+                </div>
+                {t.reasoning && (
+                  <div className="dialogue-block dialogue-reasoning">
+                    <span className="dialogue-label">思考</span>
+                    <div className="dialogue-text dialogue-reasoning-body">{t.reasoning}</div>
+                  </div>
+                )}
+                <div className="dialogue-block dialogue-assistant">
+                  <span className="dialogue-label">宠物发言</span>
+                  <div className="dialogue-text">{t.assistant}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   const renderDiary = () => {
     const sorted = [...diaryEntries].sort((a, b) => b.createdAt - a.createdAt)
     const moodEmoji: Record<string, string> = {
@@ -540,6 +679,7 @@ export default function SettingsView() {
           <button className={`tab ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>记忆</button>
           <button className={`tab ${tab === 'achievements' ? 'active' : ''}`} onClick={() => setTab('achievements')}>成就</button>
           <button className={`tab ${tab === 'diary' ? 'active' : ''}`} onClick={() => setTab('diary')}>日记</button>
+          <button className={`tab ${tab === 'dialogue' ? 'active' : ''}`} onClick={() => setTab('dialogue')}>对话</button>
         </div>
       </div>
 
@@ -548,6 +688,7 @@ export default function SettingsView() {
         {tab === 'memory' && renderMemory()}
         {tab === 'achievements' && renderAchievements()}
         {tab === 'diary' && renderDiary()}
+        {tab === 'dialogue' && renderDialogue()}
         {tab === 'personality' && <div className="panel-content">
           <div className="field">
             <label className="field-label">宠物名称</label>
