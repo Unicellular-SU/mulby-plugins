@@ -1,6 +1,7 @@
 import type { PetExpression, PetPose, PetSpriteKey, PetSpriteSet } from './pet-standard'
 import { resolveSpriteKey } from './pet-standard'
 import { logPetPresentation } from './presentation-debug'
+import { sanitizeSvgString } from './sprite-sanitize'
 
 export interface SvgRendererState {
   pose: PetPose
@@ -350,13 +351,16 @@ export class SvgPetRenderer {
   }
 
   private syncTrailContent() {
-    this.ghostTrail.innerHTML = this.svgWrap.innerHTML
-    const trailSvg = this.ghostTrail.querySelector('svg')
-    if (trailSvg) {
-      trailSvg.style.width = '100%'
-      trailSvg.style.height = '100%'
-      trailSvg.style.display = 'block'
+    while (this.ghostTrail.firstChild) {
+      this.ghostTrail.removeChild(this.ghostTrail.firstChild)
     }
+    const sourceSvg = this.svgWrap.querySelector('svg')
+    if (!sourceSvg) return
+    const cloned = sourceSvg.cloneNode(true) as SVGSVGElement
+    cloned.style.width = '100%'
+    cloned.style.height = '100%'
+    cloned.style.display = 'block'
+    this.ghostTrail.appendChild(cloned)
   }
 
   setFlipped(flipped: boolean) {
@@ -446,19 +450,30 @@ export class SvgPetRenderer {
       })
       return
     }
+
+    const sanitized = sanitizeSvgString(svg)
+    if (!sanitized) {
+      logPetPresentation('renderer.sprite.rejected', {
+        key,
+        reason: 'sanitize-failed',
+        size: svg.length,
+      })
+      return
+    }
+
     logPetPresentation('renderer.sprite.apply', {
       requested: `${this.state.pose}_${this.state.expression}`,
       applied: key,
       fallback: key !== `${this.state.pose}_${this.state.expression}`,
     })
 
-    this.svgWrap.innerHTML = svg
-    const svgEl = this.svgWrap.querySelector('svg')
-    if (svgEl) {
-      svgEl.style.width = '100%'
-      svgEl.style.height = '100%'
-      svgEl.style.display = 'block'
+    while (this.svgWrap.firstChild) {
+      this.svgWrap.removeChild(this.svgWrap.firstChild)
     }
+    sanitized.style.width = '100%'
+    sanitized.style.height = '100%'
+    sanitized.style.display = 'block'
+    this.svgWrap.appendChild(sanitized)
 
     if (this.isMoving) {
       this.syncTrailContent()
@@ -468,8 +483,18 @@ export class SvgPetRenderer {
   destroy() {
     clearTimeout(this.exprAnimTimer)
     clearTimeout(this.namedAnimTimer)
-    this.container.removeChild(this.svgWrap)
-    this.container.removeChild(this.ghostTrail)
-    document.head.removeChild(this.styleEl)
+    const safeRemove = (parent: ParentNode | null, child: Element) => {
+      if (!parent) return
+      if (child.parentNode === parent) {
+        try {
+          parent.removeChild(child)
+        } catch {
+          /* node already detached */
+        }
+      }
+    }
+    safeRemove(this.container, this.svgWrap)
+    safeRemove(this.container, this.ghostTrail)
+    safeRemove(document.head, this.styleEl)
   }
 }

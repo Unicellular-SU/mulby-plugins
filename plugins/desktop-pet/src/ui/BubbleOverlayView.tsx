@@ -1,20 +1,24 @@
 import { useState, useEffect } from 'react'
 
+const MAX_REPLY_LEN = 2000
+const MAX_REASONING_LEN = 4000
+
 export default function BubbleOverlayView() {
   const [reply, setReply] = useState('')
   const [reasoning, setReasoning] = useState('')
 
   useEffect(() => {
     window.mulby.window.onChildMessage((channel: string, ...args: any[]) => {
-      if (channel === 'bubble-update' && args[0] != null) {
-        const raw = args[0]
-        if (typeof raw === 'string') {
-          setReply(raw)
-          setReasoning('')
-        } else if (typeof raw === 'object' && typeof raw.reply === 'string') {
-          setReply(raw.reply)
-          setReasoning(typeof raw.reasoning === 'string' ? raw.reasoning : '')
-        }
+      if (channel !== 'bubble-update' || args[0] == null) return
+      const raw = args[0]
+      if (typeof raw === 'string') {
+        setReply(raw.slice(0, MAX_REPLY_LEN))
+        setReasoning('')
+        return
+      }
+      if (raw && typeof raw === 'object' && typeof raw.reply === 'string') {
+        setReply(raw.reply.slice(0, MAX_REPLY_LEN))
+        setReasoning(typeof raw.reasoning === 'string' ? raw.reasoning.slice(0, MAX_REASONING_LEN) : '')
       }
     })
   }, [])

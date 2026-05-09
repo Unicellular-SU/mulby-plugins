@@ -1,5 +1,7 @@
 import type { PetExpression } from './pet-standard'
 import { emotionToExpression } from './pet-standard'
+import { extractJsonObject } from './json-utils'
+import { logPetPresentation } from './presentation-debug'
 
 export type GameType = 'riddle' | 'idiom' | 'trivia'
 
@@ -60,14 +62,24 @@ export async function startGame(
     if (resp?.content && typeof resp.content === 'string') result = resp.content
 
     if (!result) return null
-    const parsed = JSON.parse(result.trim())
-    if (!parsed?.question || !parsed?.answer) return null
+    const { data: parsed, reason } = extractJsonObject<{ question?: string; answer?: string }>(result)
+    if (!parsed) {
+      logPetPresentation('mini-game.parse-failed', { type, reason, sample: result.slice(0, 120) })
+      return null
+    }
+    const question = typeof parsed.question === 'string' ? parsed.question.trim() : ''
+    const answer = typeof parsed.answer === 'string' ? parsed.answer.trim() : ''
+    if (!question || !answer) return null
 
-    const questionText = `[小游戏·${GAME_LABELS[type]}]\n${parsed.question}`
+    const questionText = `[小游戏·${GAME_LABELS[type]}]\n${question}`
     onChunk?.(questionText)
 
-    return { question: questionText, answer: parsed.answer, expression: 'excited' }
-  } catch {
+    return { question: questionText, answer, expression: 'excited' }
+  } catch (err) {
+    logPetPresentation('mini-game.start.error', {
+      type,
+      message: (err as Error)?.message ?? String(err),
+    })
     return null
   }
 }

@@ -1,9 +1,18 @@
 import { useEffect, useMemo } from 'react'
 
+const MAX_POPUP_LEN = 2000
+
 export default function BubblePopupView() {
   const text = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
-    return decodeURIComponent(params.get('text') || '')
+    const raw = params.get('text') || ''
+    let decoded = raw
+    try {
+      decoded = decodeURIComponent(raw)
+    } catch {
+      decoded = raw
+    }
+    return decoded.slice(0, MAX_POPUP_LEN)
   }, [])
 
   useEffect(() => {

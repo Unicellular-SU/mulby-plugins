@@ -8,6 +8,7 @@ import {
   type PetChatHistoryItem,
 } from '../engine/ai-chat'
 import { stripPresentationMarkers } from '../engine/presentation'
+import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import type { PetMemory } from '../engine/pet-memory'
 import { ALL_ACHIEVEMENTS, type UnlockedAchievement } from '../engine/achievements'
@@ -135,8 +136,10 @@ export default function SettingsView() {
     const load = async () => {
       try {
         const saved = await window.mulby.storage.get('pet-personality')
-        if (saved) setPersonality({ ...DEFAULT_PERSONALITY, ...(saved as Partial<PetPersonality>) })
-      } catch {}
+        if (saved) setPersonality(normalizePersonality(saved, DEFAULT_PERSONALITY))
+      } catch (err) {
+        console.error('Load personality failed:', err)
+      }
 
       try {
         const allModels = await window.mulby.ai.allModels()
@@ -147,39 +150,66 @@ export default function SettingsView() {
         if (!personality.model && textModels.length > 0) {
           setPersonality(p => ({ ...p, model: textModels[0].id }))
         }
-      } catch {}
+      } catch (err) {
+        console.error('Load AI models failed:', err)
+      }
 
       try {
         const savedStats = await window.mulby.storage.get('pet-stats')
-        if (savedStats) setStats(savedStats as PetStats)
-      } catch {}
+        if (savedStats && typeof savedStats === 'object') setStats(savedStats as PetStats)
+      } catch (err) {
+        console.error('Load stats failed:', err)
+      }
 
       try {
         const savedMems = await window.mulby.storage.get('pet-memories')
-        if (Array.isArray(savedMems)) setMemories(savedMems as PetMemory[])
-      } catch {}
+        if (Array.isArray(savedMems)) {
+          const valid: PetMemory[] = []
+          for (const m of savedMems) {
+            if (!m || typeof m !== 'object') continue
+            const obj = m as Record<string, unknown>
+            if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
+            valid.push(m as PetMemory)
+          }
+          setMemories(valid)
+        }
+      } catch (err) {
+        console.error('Load memories failed:', err)
+      }
 
       try {
         const savedGeo = await window.mulby.storage.get('pet-geo')
         if (savedGeo && typeof savedGeo === 'object') {
           const g = savedGeo as GeoContext
-          setGeoInfo(g)
-          setManualLat(String(g.latitude))
-          setManualLon(String(g.longitude))
-          setManualCity(g.city ?? '')
-          setManualRegion(g.region ?? '')
+          if (Number.isFinite(g.latitude) && Number.isFinite(g.longitude)) {
+            setGeoInfo(g)
+            setManualLat(String(g.latitude))
+            setManualLon(String(g.longitude))
+            setManualCity(g.city ?? '')
+            setManualRegion(g.region ?? '')
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.error('Load geo failed:', err)
+      }
 
       try {
         const savedAchs = await window.mulby.storage.get('pet-achievements')
-        if (Array.isArray(savedAchs)) setUnlocked(savedAchs)
-      } catch {}
+        if (Array.isArray(savedAchs)) {
+          setUnlocked(savedAchs.filter(a => a && typeof a === 'object' && typeof (a as any).id === 'string') as UnlockedAchievement[])
+        }
+      } catch (err) {
+        console.error('Load achievements failed:', err)
+      }
 
       try {
         const savedDiary = await window.mulby.storage.get('pet-diary')
-        if (Array.isArray(savedDiary)) setDiaryEntries(savedDiary)
-      } catch {}
+        if (Array.isArray(savedDiary)) {
+          setDiaryEntries(savedDiary.filter(d => d && typeof d === 'object' && typeof (d as any).date === 'string') as DiaryEntry[])
+        }
+      } catch (err) {
+        console.error('Load diary failed:', err)
+      }
     }
     load()
   }, [])
@@ -205,7 +235,8 @@ export default function SettingsView() {
         items.push(item)
       }
       setChatHistory(items)
-    } catch {
+    } catch (err) {
+      console.error('Load chat history failed:', err)
       setChatHistory([])
     }
   }, [])
@@ -213,6 +244,21 @@ export default function SettingsView() {
   useEffect(() => {
     if (tab === 'dialogue') void loadChatHistory()
   }, [tab, loadChatHistory])
+
+  useEffect(() => {
+    const notifyClosed = () => {
+      try {
+        window.mulby.window.sendToParent('settings-closed')
+      } catch {}
+    }
+    window.addEventListener('beforeunload', notifyClosed)
+    window.addEventListener('pagehide', notifyClosed)
+    return () => {
+      notifyClosed()
+      window.removeEventListener('beforeunload', notifyClosed)
+      window.removeEventListener('pagehide', notifyClosed)
+    }
+  }, [])
 
   const handleFetchGeo = async () => {
     setGeoLoading(true)
@@ -256,11 +302,17 @@ export default function SettingsView() {
           { 'User-Agent': 'MulbyDesktopPet/1.0' }
         )
         if (resp.status === 200) {
-          const data = JSON.parse(resp.data)
-          geo.city = data.address?.city || data.address?.town || data.address?.county || ''
-          geo.region = data.address?.state || data.address?.province || ''
+          try {
+            const data = JSON.parse(resp.data)
+            geo.city = data.address?.city || data.address?.town || data.address?.county || ''
+            geo.region = data.address?.state || data.address?.province || ''
+          } catch (parseErr) {
+            console.warn('Reverse geocoding parse failed:', parseErr)
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Reverse geocoding failed:', err)
+      }
 
       await window.mulby.storage.set('pet-geo', geo)
       setGeoInfo(geo)

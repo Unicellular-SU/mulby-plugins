@@ -62,7 +62,7 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
     typing: true,
     morning: true,
     lateNight: true,
-    clipboard: true,
+    clipboard: false,
     mousePattern: true,
   },
   reminders: [],
@@ -311,7 +311,11 @@ export class AIChatController {
   private saveHistory() {
     try {
       (window as any).mulby?.storage?.set(HISTORY_STORAGE_KEY, this.context.history)
-    } catch {}
+    } catch (err) {
+      logPetPresentation('chat.history.save-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
   }
 
   getPersonality(): PetPersonality {

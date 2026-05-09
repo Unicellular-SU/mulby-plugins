@@ -3,6 +3,8 @@
  * Tracks interactions, focus time, streaks, and affects AI personality tone.
  */
 
+import { logPetPresentation } from './presentation-debug'
+
 export type PetMood = 'ecstatic' | 'happy' | 'content' | 'neutral' | 'bored' | 'lonely' | 'sad' | 'grumpy' | 'sleepy'
 
 export interface PetStats {
@@ -88,9 +90,26 @@ export class PetStatsController {
     try {
       const saved = await (window as any).mulby?.storage?.get(STORAGE_KEY)
       if (saved && typeof saved === 'object') {
-        this.stats = { ...createDefaultStats(), ...(saved as Partial<PetStats>) }
+        const merged = { ...createDefaultStats(), ...(saved as Partial<PetStats>) }
+        merged.intimacy = Math.max(0, Math.min(100, Math.round(Number(merged.intimacy) || 10)))
+        merged.totalInteractions = Math.max(0, Math.round(Number(merged.totalInteractions) || 0))
+        merged.totalFocusMinutes = Math.max(0, Math.round(Number(merged.totalFocusMinutes) || 0))
+        merged.streakDays = Math.max(0, Math.round(Number(merged.streakDays) || 0))
+        merged.moodScore = Math.max(-100, Math.min(100, Math.round(Number(merged.moodScore) || 0)))
+        merged.pomodoroToday = Math.max(0, Math.round(Number(merged.pomodoroToday) || 0))
+        merged.pomodoroTotal = Math.max(0, Math.round(Number(merged.pomodoroTotal) || 0))
+        merged.ignoredCount = Math.max(0, Math.round(Number(merged.ignoredCount) || 0))
+        merged.dailyIntimacyGain = Math.max(0, Math.round(Number(merged.dailyIntimacyGain) || 0))
+        if (typeof merged.lastSignInDate !== 'string') merged.lastSignInDate = ''
+        if (typeof merged.lastActiveDate !== 'string') merged.lastActiveDate = todayStr()
+        if (typeof merged.lastChatDate !== 'string') merged.lastChatDate = todayStr()
+        this.stats = merged
       }
-    } catch {}
+    } catch (err) {
+      logPetPresentation('stats.load.error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
 
     this.checkDayRollover()
     this.checkInactivityPenalty()
@@ -258,6 +277,10 @@ export class PetStatsController {
     this.dirty = false
     try {
       await (window as any).mulby?.storage?.set(STORAGE_KEY, this.stats)
-    } catch {}
+    } catch (err) {
+      logPetPresentation('stats.save.error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
   }
 }

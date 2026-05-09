@@ -1,4 +1,5 @@
 import type { PetStats } from './pet-stats'
+import { logPetPresentation } from './presentation-debug'
 
 export interface Achievement {
   id: string
@@ -41,14 +42,34 @@ export class AchievementController {
   async load() {
     try {
       const saved = await (window as any).mulby?.storage?.get(STORAGE_KEY)
-      if (Array.isArray(saved)) this.unlocked = saved
-    } catch {}
+      if (Array.isArray(saved)) {
+        const valid: UnlockedAchievement[] = []
+        for (const item of saved) {
+          if (!item || typeof item !== 'object') continue
+          const o = item as Record<string, unknown>
+          if (typeof o.id !== 'string') continue
+          const unlockedAt = typeof o.unlockedAt === 'number' && Number.isFinite(o.unlockedAt)
+            ? o.unlockedAt
+            : Date.now()
+          valid.push({ id: o.id, unlockedAt })
+        }
+        this.unlocked = valid
+      }
+    } catch (err) {
+      logPetPresentation('achievements.load.error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
   }
 
   private async save() {
     try {
       await (window as any).mulby?.storage?.set(STORAGE_KEY, this.unlocked)
-    } catch {}
+    } catch (err) {
+      logPetPresentation('achievements.save.error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
   }
 
   getUnlocked(): UnlockedAchievement[] {
