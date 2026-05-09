@@ -13,7 +13,7 @@ import {
   stripPresentationMarkers,
   tryExtractPresentationMarker,
 } from './presentation'
-import { PetMemoryController } from './pet-memory'
+import { PetMemoryController, type ConsolidateMemoriesResult } from './pet-memory'
 import type { PetStats } from './pet-stats'
 import type { PetStatsController } from './pet-stats'
 import { logPetPresentation } from './presentation-debug'
@@ -273,7 +273,6 @@ export class AIChatController {
   private requestId: string | null = null
   private triggeredOnce = new Set<string>()
   private memory = new PetMemoryController()
-  private extractCounter = 0
   private statsGetter: (() => PetStats) | null = null
   private statsController: PetStatsController | null = null
   private geoContext: GeoContext | null = null
@@ -846,24 +845,37 @@ export class AIChatController {
     }
   }
 
-  /** 提取记忆：每次对话都尝试一次（包含首次），由 PetMemoryController 内部决定是否真正写入 */
+  /**
+   * 自动提炼：每轮对话结束后增加「距上次成功」计数；仅当达到轮次与冷却时间门槛时才请求模型。
+   */
   private maybeExtractMemory() {
-    this.extractCounter++
-    const recent = this.context.history.slice(-6).map(m => ({ role: m.role, content: m.content }))
+    this.memory.notifyUserTurnEnded()
+    if (!this.memory.shouldAttemptAutoExtract()) return
+    const recent = this.context.history.slice(-16).map(m => ({ role: m.role, content: m.content }))
     if (recent.length < 2) return
-    void this.memory.extractMemoryFromChat(this.personality.model, recent)
+    this.memory.markExtractAttempt()
+    void this.memory.extractMemoriesFromChatBatch(this.personality.model, recent)
   }
 
-  /** 暴露给设置页主动调用 */
+  /** 设置页「立即抽取」：绕过轮次与间隔门控，仍使用批量提炼与归并逻辑 */
   async forceExtractMemory(): Promise<void> {
     if (!this.personality.model) return
-    const recent = this.context.history.slice(-8).map(m => ({ role: m.role, content: m.content }))
+    const recent = this.context.history.slice(-20).map(m => ({ role: m.role, content: m.content }))
     if (recent.length < 2) return
-    await this.memory.extractMemoryFromChat(this.personality.model, recent)
+    this.memory.markExtractAttempt()
+    await this.memory.extractMemoriesFromChatBatch(this.personality.model, recent)
   }
 
   getMemoryController(): PetMemoryController {
     return this.memory
+  }
+
+  /** 设置页「整理重复记忆」：合并未固定条目中的语义重复项 */
+  async consolidateMemories(): Promise<ConsolidateMemoriesResult> {
+    if (!this.personality.model) {
+      return { ok: false, mergesApplied: 0, entriesRemoved: 0, reason: 'no-model' }
+    }
+    return this.memory.consolidateUnpinnedMemories(this.personality.model)
   }
 
   private extractKeywords(text: string): string[] {

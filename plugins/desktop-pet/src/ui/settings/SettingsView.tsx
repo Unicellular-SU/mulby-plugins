@@ -41,6 +41,7 @@ const ICONS = {
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   plus: 'M12 5v14M5 12h14',
   cake: 'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M7 8v3M12 8v3M17 8v3M7 4h.01M12 4h.01M17 4h.01',
+  layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
 } as const
 
 function StatsIcon({ icon, children }: { icon: keyof typeof ICONS; children: ReactNode }) {
@@ -133,6 +134,7 @@ export default function SettingsView() {
   const [newReminderTime, setNewReminderTime] = useState('09:00')
   const [chatHistory, setChatHistory] = useState<PetChatHistoryItem[]>([])
   const [extractingMemory, setExtractingMemory] = useState(false)
+  const [consolidatingMemory, setConsolidatingMemory] = useState(false)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -450,15 +452,28 @@ export default function SettingsView() {
           </div>
         </div>
         <div className="memory-toolbar" style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button type="button" className="gen-btn" onClick={handleManualExtractMemory} disabled={extractingMemory}>
+          <button type="button" className="gen-btn" onClick={handleManualExtractMemory} disabled={extractingMemory || consolidatingMemory}>
             <Icon d={ICONS.plus} size={12} /> {extractingMemory ? '抽取中...' : '立即抽取记忆'}
+          </button>
+          <button
+            type="button"
+            className="gen-btn"
+            onClick={() => void handleManualConsolidateMemory()}
+            disabled={
+              consolidatingMemory
+              || extractingMemory
+              || !personality.model
+              || memories.filter(m => !m.pinned).length < 2
+            }
+          >
+            <Icon d={ICONS.layers} size={12} /> {consolidatingMemory ? '整理中...' : '整理重复记忆'}
           </button>
           <button type="button" className="gen-btn" onClick={handleRefreshMemories}>
             <Icon d={ICONS.refresh} size={12} /> 刷新
           </button>
           <span className="field-hint" style={{ flex: 1, fontSize: 11, opacity: 0.7 }}>
-            说明：在助手回复写入对话历史后，会异步调用模型从最近几条对话里抽取 1 条「关于你的」事实/偏好/习惯/事件；若对话里没有有价值信息、模型返回空，则不会新增。
-            若长期处于「没有记忆」：请先在「性格」页选好文本模型；尽量和宠物多聊几句带个人信息的内容（仅系统触发的搭话往往抽不出记忆）；也可在本页点「立即抽取记忆」重试。
+            说明：助手回复写入历史后，会在「至少多轮对话」且「距上次提炼间隔一段时间」后，自动用模型从最近一批对话里批量提炼 0～3 条「长期有用」的记忆（事实/偏好/习惯/事件）；模型认为没有值得记的会不落库。
+            可随时点「立即抽取」绕过等待（仍会归并与去重）。条数较多时可用「整理重复记忆」对已保存的未固定条目做一次模型合并（固定条目不参与）。若长期没有新记忆：请在「性格」页选好模型，并聊一些带稳定个人信息的内容。
           </span>
         </div>
         {filtered.length === 0 && (
@@ -641,6 +656,43 @@ export default function SettingsView() {
         </div>
       </div>
     )
+  }
+
+  const handleManualConsolidateMemory = async () => {
+    if (consolidatingMemory || extractingMemory) return
+    if (!personality.model) {
+      showToast('请先在「性格」页选择文本模型')
+      return
+    }
+    const unpinned = memories.filter(m => !m.pinned).length
+    if (unpinned < 2) {
+      showToast('至少需要 2 条未固定记忆才适合整理')
+      return
+    }
+    setConsolidatingMemory(true)
+    try {
+      window.mulby.window.sendToParent('settings-consolidate-memory')
+      showToast('已请求整理重复记忆，请稍后点刷新查看')
+      setTimeout(async () => {
+        try {
+          const savedMems = await window.mulby.storage.get('pet-memories')
+          if (Array.isArray(savedMems)) {
+            const valid: PetMemory[] = []
+            for (const m of savedMems) {
+              if (!m || typeof m !== 'object') continue
+              const obj = m as Record<string, unknown>
+              if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
+              valid.push(m as PetMemory)
+            }
+            setMemories(valid)
+          }
+        } catch (err) {
+          console.error('Refresh memories after consolidate failed:', err)
+        }
+      }, 5500)
+    } finally {
+      setTimeout(() => setConsolidatingMemory(false), 5500)
+    }
   }
 
   const handleManualExtractMemory = async () => {

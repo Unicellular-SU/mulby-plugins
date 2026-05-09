@@ -1045,6 +1045,10 @@ export default function PetView() {
           }
           return
         }
+        case 'settings-consolidate-memory': {
+          void chatRef.current?.consolidateMemories()
+          return
+        }
         case 'settings-extract-memory': {
           void chatRef.current?.forceExtractMemory()
           return
