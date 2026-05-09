@@ -1,6 +1,7 @@
 import {
   buildBubbleDetailState,
   buildBubblePreviewState,
+  estimateBubbleWindowSize,
   normalizeBubbleStreamPayload,
 } from './bubble-stream'
 
@@ -63,8 +64,18 @@ function testNormalizeAcceptsLegacyStringPayload() {
   assertEqual(normalized.reasoning, '')
 }
 
+function testWindowSizeCoversReasoningSummaryReplyAndHint() {
+  const size = estimateBubbleWindowSize({
+    reply: '收到啦。',
+    reasoning: '第一步：观察上下文。',
+  })
+
+  assert(size.height >= 70, `reasoning reply bubble needs room for summary, reply and hint, got ${size.height}`)
+}
+
 testPreviewUsesTailOfLongReasoning()
 testPreviewKeepsReplyVisibleWhenReasoningExists()
 testPreviewCapsSingleLongReasoningLine()
 testDetailKeepsFullStreamingContent()
 testNormalizeAcceptsLegacyStringPayload()
+testWindowSizeCoversReasoningSummaryReplyAndHint()

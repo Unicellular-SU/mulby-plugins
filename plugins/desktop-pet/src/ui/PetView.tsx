@@ -38,6 +38,7 @@ import {
 } from './engine/mouse-passthrough'
 import {
   buildBubblePreviewState,
+  estimateBubbleWindowSize,
   normalizeBubbleStreamPayload,
   PET_CURRENT_BUBBLE_STORAGE_KEY,
   type BubbleStreamPayload,
@@ -147,6 +148,7 @@ export default function PetView() {
   const latestBubblePayloadRef = useRef<BubbleStreamPayload>({ reply: '', reasoning: '' })
   const bubbleVisibleRef = useRef(false)
   const bubbleSizeRef = useRef({ width: 120, height: 44 })
+  const bubblePayloadSeqRef = useRef(0)
   const initedRef = useRef(false)
   const pomodoroRef = useRef<number>(0)
   const pomodoroStartRef = useRef(0)
@@ -186,17 +188,6 @@ export default function PetView() {
   const mousePassthroughRef = useRef<PetMousePassthroughState | null>(null)
   const mousePassthroughPollRef = useRef<number>(0)
   const windowBoundsRef = useRef<WindowBounds | null>(null)
-
-  const calcBubbleSize = useCallback((text: string) => {
-    const len = text.length
-    const width = len <= 12 ? 120 : len <= 25 ? 160 : len <= 50 ? 200 : Math.min(260, 200 + Math.ceil((len - 50) / 20) * 10)
-    // 略保守的每行字数，减少中英文混排、标点换行与估算不一致导致的裁切
-    const charsPerLine = Math.max(4, Math.floor((width - 16) / 12))
-    const lines = Math.max(1, Math.ceil(len / charsPerLine))
-    const textHeight = Math.ceil(lines * 15.4)
-    const height = textHeight + 10 + 8 + 12
-    return { width, height }
-  }, [])
 
   const positionBubble = useCallback((pos: { x: number; y: number }, bubbleWidth: number, bubbleHeight: number) => {
     const winCenterX = pos.x + WIN_SIZE / 2
@@ -341,8 +332,9 @@ export default function PetView() {
     persistLatestBubblePayload(payload)
     const preview = buildBubblePreviewState(payload)
     const measure = preservedReasoning ? bubbleMeasureString(payload) : text
+    bubblePayloadSeqRef.current++
 
-    const { width: bubbleWidth, height: bubbleHeight } = calcBubbleSize(measure)
+    const { width: bubbleWidth, height: bubbleHeight } = estimateBubbleWindowSize(preservedReasoning ? payload : text)
     bubbleSizeRef.current = { width: bubbleWidth, height: bubbleHeight }
 
     const pos = lastWinPosRef.current
@@ -378,7 +370,7 @@ export default function PetView() {
       safeProxyCall(() => proxy.setOpacity(0), 'set-opacity-0')
       bubbleVisibleRef.current = false
     }, duration)
-  }, [positionBubble, calcBubbleSize, bubbleMeasureString, persistLatestBubblePayload, safeProxyCall])
+  }, [positionBubble, bubbleMeasureString, persistLatestBubblePayload, safeProxyCall])
 
   const openBubbleDetail = useCallback(async () => {
     const payload = latestBubblePayloadRef.current
@@ -442,7 +434,8 @@ export default function PetView() {
     persistLatestBubblePayload(normalized)
     const preview = buildBubblePreviewState(normalized)
     const measure = bubbleMeasureString(normalized)
-    const { width: bubbleWidth, height: bubbleHeight } = calcBubbleSize(measure)
+    bubblePayloadSeqRef.current++
+    const { width: bubbleWidth, height: bubbleHeight } = estimateBubbleWindowSize(normalized)
     const prev = bubbleSizeRef.current
     const pos = lastWinPosRef.current
 
@@ -482,7 +475,7 @@ export default function PetView() {
       safeProxyCall(() => proxy.setOpacity(0), 'set-opacity-0')
       bubbleVisibleRef.current = false
     }, duration)
-  }, [positionBubble, calcBubbleSize, bubbleMeasureString, persistLatestBubblePayload, safeProxyCall])
+  }, [positionBubble, bubbleMeasureString, persistLatestBubblePayload, safeProxyCall])
 
   const setExpression = useCallback((expression: PetExpression, durationMs = 5000) => {
     logPetPresentation('pet.set-expression', {
@@ -1273,6 +1266,31 @@ export default function PetView() {
         }
         case 'bubble-detail-closed': {
           bubbleDetailProxyRef.current = null
+          return
+        }
+        case 'bubble-measured': {
+          const payload = args[0]
+          if (!payload || typeof payload !== 'object') return
+          const width = typeof (payload as any).width === 'number' ? Math.ceil((payload as any).width) : 0
+          const height = typeof (payload as any).height === 'number' ? Math.ceil((payload as any).height) : 0
+          const proxy = bubbleProxyRef.current
+          if (!proxy || !bubbleVisibleRef.current || width <= 0 || height <= 0) return
+          const current = bubbleSizeRef.current
+          const nextWidth = Math.max(current.width, width + 8)
+          const nextHeight = Math.max(current.height, height + 8)
+          if (nextWidth === current.width && nextHeight === current.height) return
+
+          const seq = bubblePayloadSeqRef.current
+          window.setTimeout(() => {
+            if (seq !== bubblePayloadSeqRef.current) return
+            const currentAfterDelay = bubbleSizeRef.current
+            if (nextWidth <= currentAfterDelay.width && nextHeight <= currentAfterDelay.height) return
+            bubbleSizeRef.current = { width: nextWidth, height: nextHeight }
+            const pos = lastWinPosRef.current
+            const { x, y } = positionBubble(pos, nextWidth, nextHeight)
+            safeProxyCall(() => proxy.setBounds?.({ x, y, width: nextWidth, height: nextHeight })
+              ?? (proxy.setSize?.(nextWidth, nextHeight), proxy.setPosition?.(x, y)), 'bubble-measured-set-bounds')
+          }, 0)
           return
         }
         case 'chat-message': {

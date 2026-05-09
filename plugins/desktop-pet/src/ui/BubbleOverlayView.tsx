@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { buildBubblePreviewState, normalizeBubbleStreamPayload, type BubblePreviewState } from './engine/bubble-stream'
 
 const MAX_REPLY_LEN = 2000
 
 export default function BubbleOverlayView() {
   const [preview, setPreview] = useState<BubblePreviewState>(() => buildBubblePreviewState({ reply: '', reasoning: '' }))
+  const bubbleRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     window.mulby.window.onChildMessage((channel: string, ...args: any[]) => {
@@ -16,6 +17,18 @@ export default function BubbleOverlayView() {
       }))
     })
   }, [])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const el = bubbleRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const width = Math.ceil(Math.max(rect.width, el.scrollWidth))
+      const height = Math.ceil(Math.max(rect.height, el.scrollHeight))
+      window.mulby.window.sendToParent('bubble-measured', { width, height })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [preview])
 
   if (!preview.reply && !preview.hasReasoning) return null
 
@@ -35,6 +48,7 @@ export default function BubbleOverlayView() {
       background: 'transparent',
     }}>
       <button
+        ref={bubbleRef}
         type="button"
         className={`bubble-container bubble-enter bubble-preview-button ${preview.hasReasoning ? 'is-clickable' : ''}`}
         onClick={openDetail}
