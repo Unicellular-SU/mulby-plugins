@@ -17,7 +17,7 @@ import {
 import { getCatalogSummary, publicApiCatalog, restrictedApiCatalog } from '../shared/api-catalog'
 import { methodDetails } from '../shared/method-details'
 import { apiExamples, ensureCatalogCoverage, groupExamplesByCategory } from './examples/registry'
-import type { ApiExampleModule, ExampleResult, RunnableExample } from './examples/types'
+import type { ApiExampleModule, CopyText, ExampleResult, PlaygroundControl, RunnableExample } from './examples/types'
 import {
   categoryTranslations,
   exampleTranslations,
@@ -45,6 +45,10 @@ function formatValue(value: unknown) {
   if (value === undefined) return 'undefined'
   if (typeof value === 'string') return value
   return JSON.stringify(value, null, 2)
+}
+
+function localizeCopy(text: CopyText, language: Language) {
+  return typeof text === 'string' ? text : localize(text, language)
 }
 
 function getModuleTitle(module: ApiExampleModule, language: Language) {
@@ -99,6 +103,8 @@ export default function App() {
   const [selectedMethod, setSelectedMethod] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [result, setResult] = useState<ExampleResult | null>(null)
+  const [logOpen, setLogOpen] = useState(false)
+  const [activityLog, setActivityLog] = useState<Array<{ id: string; ok: boolean; label: string; at: string; warning?: string }>>([])
 
   const filteredExamples = useMemo(
     () => apiExamples.filter((module) => matchesQuery(module, query)),
@@ -140,6 +146,46 @@ export default function App() {
         title: exampleLabel,
         warning: error instanceof Error ? error.message : String(error)
       })
+    } finally {
+      setRunningId(null)
+    }
+  }
+
+  async function runPlaygroundControl(control: PlaygroundControl) {
+    const label = localizeCopy(control.label, language)
+    setRunningId(control.id)
+    setResult(null)
+    try {
+      const nextResult = await control.run()
+      const localizedResult = { ...nextResult, title: label }
+      setResult(localizedResult)
+      setActivityLog((items) => [
+        {
+          id: control.id,
+          ok: localizedResult.ok,
+          label,
+          at: new Date().toLocaleTimeString(),
+          warning: localizedResult.warning
+        },
+        ...items
+      ].slice(0, 12))
+    } catch (error) {
+      const failure = {
+        ok: false,
+        title: label,
+        warning: error instanceof Error ? error.message : String(error)
+      }
+      setResult(failure)
+      setActivityLog((items) => [
+        {
+          id: control.id,
+          ok: false,
+          label,
+          at: new Date().toLocaleTimeString(),
+          warning: failure.warning
+        },
+        ...items
+      ].slice(0, 12))
     } finally {
       setRunningId(null)
     }
@@ -212,6 +258,7 @@ export default function App() {
                     onClick={() => {
                       setSelectedCode(module.code)
                       setSelectedMethod(null)
+                      setResult(null)
                     }}
                   >
                     <span>{getModuleTitle(module, language)}</span>
@@ -231,19 +278,90 @@ export default function App() {
             <h2>{selectedTitle}</h2>
             <p>{selectedSummary}</p>
           </div>
-          <div className="coverage">
-            <span className={coverage.missingPublic.length === 0 ? 'coverage-ok' : 'coverage-warn'}>
-              {coverage.missingPublic.length === 0 ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-              {localize(uiText.publicCoverage, language)} {publicApiCatalog.length - coverage.missingPublic.length}/
-              {publicApiCatalog.length}
-            </span>
-            <span className={coverage.missingRestricted.length === 0 ? 'coverage-ok' : 'coverage-warn'}>
-              {coverage.missingRestricted.length === 0 ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-              {localize(uiText.boundaries, language)} {restrictedApiCatalog.length - coverage.missingRestricted.length}/
-              {restrictedApiCatalog.length}
-            </span>
+          <div className="header-tools">
+
+            <div className="activity-wrap">
+              <button
+                type="button"
+                className="activity-toggle"
+                onClick={() => setLogOpen((open) => !open)}
+                aria-expanded={logOpen}
+              >
+                <TerminalSquare size={15} />
+                <span>{localize(uiText.activityLog, language)}</span>
+                <strong>{activityLog.length}</strong>
+              </button>
+              {logOpen ? (
+                <div className="activity-popover">
+                  <h4>{localize(uiText.activityLog, language)}</h4>
+                  <div className="activity-log">
+                    {activityLog.length ? (
+                      activityLog.map((entry) => (
+                        <div key={`${entry.id}:${entry.at}`} className={entry.ok ? 'log-row ok' : 'log-row error'}>
+                          <span>{entry.at}</span>
+                          <strong>{entry.label}</strong>
+                          {entry.warning ? <small>{entry.warning}</small> : null}
+                        </div>
+                      ))
+                    ) : (
+                      <p>{localize(uiText.emptyLog, language)}</p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
+
+        {selected.playground ? (
+          <section className="panel playground-panel">
+            <div className="playground-header">
+              <div>
+                <span className="eyebrow">{localize(uiText.livePlayground, language)}</span>
+                <h3>{localizeCopy(selected.playground.title, language)}</h3>
+                <p>{localizeCopy(selected.playground.description, language)}</p>
+              </div>
+              <div className="result-view-list" aria-label={localize(uiText.resultViews, language)}>
+                {selected.playground.resultViews.map((view) => (
+                  <span key={view} className="pill">{view}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="playground-grid">
+              <div className="playground-controls">
+                {selected.playground.controls.map((control) => (
+                  <button
+                    key={control.id}
+                    type="button"
+                    className={control.cleanup ? 'playground-action cleanup' : 'playground-action'}
+                    onClick={() => runPlaygroundControl(control)}
+                    disabled={runningId === control.id}
+                  >
+                    <span>{localizeCopy(control.label, language)}</span>
+                    <small>{localizeCopy(control.description, language)}</small>
+                    <span className={`safety ${control.safety}`}>{localize(safetyTranslations[control.safety], language)}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="playground-output">
+                <section className="result-panel inline">
+                  <h3>{localize(uiText.output, language)}</h3>
+                  {result ? (
+                    <div className={result.ok ? 'result ok' : 'result error'}>
+                      <strong>{result.title}</strong>
+                      {result.warning ? <p>{result.warning}</p> : null}
+                      <pre><code>{formatValue(result.data)}</code></pre>
+                    </div>
+                  ) : (
+                    <p className="empty-output">{localize(uiText.emptyOutput, language)}</p>
+                  )}
+                </section>
+              </div>
+            </div>
+          </section>
+        ) : null}
 
         <div className="detail-grid">
           <section className="panel module-panel">
@@ -322,7 +440,7 @@ export default function App() {
           </section>
 
           <section className="panel examples-panel">
-            <h3>{localize(uiText.examples, language)}</h3>
+            <h3>{localize(selected.playground ? uiText.runnableReference : uiText.examples, language)}</h3>
             <div className="examples-list">
               {selected.examples.map((example) => (
                 <article key={example.id} className="example-card">
@@ -333,7 +451,10 @@ export default function App() {
                     </div>
                     <span className={`safety ${example.safety}`}>{localize(safetyTranslations[example.safety], language)}</span>
                   </div>
-                  <pre><code>{example.code}</code></pre>
+                  <details className="code-disclosure" open={!selected.playground}>
+                    <summary>{localize(uiText.referenceCode, language)}</summary>
+                    <pre><code>{example.code}</code></pre>
+                  </details>
                   <div className="example-actions">
                     <button
                       type="button"
@@ -363,18 +484,20 @@ export default function App() {
           </section>
         </div>
 
-        <section className="panel result-panel">
-          <h3>{localize(uiText.output, language)}</h3>
-          {result ? (
-            <div className={result.ok ? 'result ok' : 'result error'}>
-              <strong>{result.title}</strong>
-              {result.warning ? <p>{result.warning}</p> : null}
-              <pre><code>{formatValue(result.data)}</code></pre>
-            </div>
-          ) : (
-            <p className="empty-output">{localize(uiText.emptyOutput, language)}</p>
-          )}
-        </section>
+        {selected.playground ? null : (
+          <section className="panel result-panel">
+            <h3>{localize(uiText.output, language)}</h3>
+            {result ? (
+              <div className={result.ok ? 'result ok' : 'result error'}>
+                <strong>{result.title}</strong>
+                {result.warning ? <p>{result.warning}</p> : null}
+                <pre><code>{formatValue(result.data)}</code></pre>
+              </div>
+            ) : (
+              <p className="empty-output">{localize(uiText.emptyOutput, language)}</p>
+            )}
+          </section>
+        )}
       </section>
     </main>
   )

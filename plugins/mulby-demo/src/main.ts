@@ -306,6 +306,38 @@ async function messagingLoopback(api: any) {
   return { received }
 }
 
+function trayIcon(color = '#2563eb') {
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${color}"/><path d="M18 42V22h8l6 10 6-10h8v20h-7V30l-5 8h-4l-5-8v12h-7z" fill="white"/></svg>`
+  )
+}
+
+async function trayCreate(api: any) {
+  const created = await api.tray.create({
+    icon: trayIcon(),
+    tooltip: 'Mulby demo tray API',
+    title: 'Demo'
+  })
+  const exists = await api.tray.exists()
+  return { created, exists, keptVisible: true }
+}
+
+async function trayStatus(api: any) {
+  return { exists: await api.tray.exists() }
+}
+
+async function trayUpdate(api: any) {
+  await api.tray.setTooltip(`Mulby demo tray tooltip ${new Date().toLocaleTimeString()}`)
+  await api.tray.setTitle('API')
+  await api.tray.setIcon(trayIcon('#0f766e'))
+  return { exists: await api.tray.exists(), updated: true }
+}
+
+async function trayDestroy(api: any) {
+  await api.tray.destroy()
+  return { exists: await api.tray.exists(), destroyed: true }
+}
+
 async function trayLifecycle(api: any) {
   const icon = 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#2563eb"/><path d="M18 42V22h8l6 10 6-10h8v20h-7V30l-5 8h-4l-5-8v12h-7z" fill="white"/></svg>'
@@ -459,6 +491,10 @@ const backendExamples: Record<string, (api: any) => Promise<unknown>> = {
   lifecycleState: lifecycleSnapshot,
   hostInvokeSystemInfo,
   messagingLoopback,
+  trayCreate,
+  trayStatus,
+  trayUpdate,
+  trayDestroy,
   trayLifecycle,
   backendStorageRoundtrip,
   clipboardHistoryStats,

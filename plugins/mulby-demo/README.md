@@ -13,6 +13,7 @@
 - Exercise method-level public API coverage, including guarded calls for environment-mutating APIs such as Plugin Store install/update.
 - Review restricted APIs that are intentionally excluded from runnable third-party examples.
 - Switch between English and Chinese documentation in the UI.
+- Use Live Playground controls for visible APIs such as windows, tray, dialogs, clipboard, screen capture, shell actions, InBrowser, and shortcuts. These controls keep observable resources alive until an explicit cleanup action.
 
 ## 功能
 
@@ -23,6 +24,7 @@
 - 覆盖公开 API 的方法级示例，包括对会改变环境的 API 使用受控目标或错误捕获保护。
 - 查看被排除在可运行第三方示例之外的内部或设置专属 API 边界。
 - 在界面中切换英文和中文说明。
+- 对窗口、托盘、对话框、剪贴板、屏幕捕获、Shell 操作、InBrowser 和快捷键等可见 API 使用实时演示控件；可观察资源会保持到用户显式点击清理操作。
 
 ## Commands
 
@@ -104,6 +106,30 @@ mulby-demo/
    `- registry.test.mjs
 ```
 
+## Live Playground Architecture
+
+Each module can define an optional `playground` in its `src/ui/examples/*.example.ts` entry. A playground contains:
+
+- `controls`: user-triggered actions with labels, method coverage, safety labels, optional cleanup markers, and runnable handlers.
+- `resultViews`: the result shapes developers should expect, such as status, preview, table, external UI, log, or JSON.
+- `code`: short reference snippets shown under a collapsible code section.
+
+The UI discovers these definitions from the same registry as the API examples. Adding a new interactive API demo should not require editing `App.tsx`; add the module metadata and handler next to the module example instead.
+
+Long-lived examples must split create/update/read/cleanup into separate controls. For example, `window.create` creates and keeps a child window open, while a separate close action disposes it. Tray, shortcut, sub-input, and browser examples follow the same rule.
+
+## 实时演示架构
+
+每个模块都可以在自己的 `src/ui/examples/*.example.ts` 条目中定义可选 `playground`。实时演示包含：
+
+- `controls`：由用户触发的操作，包含标签、方法覆盖、安全标签、可选清理标记和可运行处理函数。
+- `resultViews`：开发者应关注的结果形态，例如状态、预览、表格、外部界面、日志或 JSON。
+- `code`：放在折叠代码区内的短参考片段。
+
+UI 会从与 API 示例相同的注册表中自动发现这些定义。新增交互式 API 演示时，不应修改 `App.tsx`；只需要在对应模块示例旁补充元数据和处理函数。
+
+长生命周期示例必须拆分为创建、更新、读取、清理等独立控件。例如 `window.create` 只负责创建并保持子窗口打开，关闭由单独的 close 操作完成。托盘、快捷键、子输入和浏览器示例也遵循同样规则。
+
 ## Development
 
 ```bash
@@ -128,7 +154,7 @@ pnpm --filter mulby-demo pack
 6. Run `pnpm --filter mulby-demo test` to confirm registry, layout, bilingual coverage, backend RPC safety, and method-level API coverage.
 7. Run `pnpm --filter mulby-demo build` to verify the plugin bundle.
 
-Example modules should include summary, methods, contexts, permissions, notes, runnable snippets, and a clear safety label.
+Example modules should include summary, methods, contexts, permissions, notes, runnable snippets, and a clear safety label. For visible APIs, also add a `playground` with real controls and an explicit cleanup action when the API creates persistent state.
 
 ## 新增 API 示例
 
@@ -140,4 +166,4 @@ Example modules should include summary, methods, contexts, permissions, notes, r
 6. 运行 `pnpm --filter mulby-demo test` 检查注册表、布局、双语覆盖、后端 RPC 安全性和方法级 API 覆盖。
 7. 运行 `pnpm --filter mulby-demo build` 验证插件打包产物。
 
-每个示例模块应包含功能简介、方法列表、运行上下文、权限、注意事项、可运行代码片段和明确的安全标签。
+每个示例模块应包含功能简介、方法列表、运行上下文、权限、注意事项、可运行代码片段和明确的安全标签。对于可见 API，还应添加带真实控件的 `playground`，并在 API 创建持久状态时提供显式清理操作。

@@ -91,6 +91,73 @@ test('public API demos are runnable and are not documentation-only placeholders'
   assert.deepEqual(invalid, [])
 })
 
+test('interactive playground modules expose observable controls instead of code-only demos', async () => {
+  const { apiExamples } = await importRegistryFixture()
+  const expectedInteractiveModules = [
+    'clipboard',
+    'clipboard-history',
+    'dialog',
+    'filesystem',
+    'http',
+    'inbrowser',
+    'input',
+    'media',
+    'menu',
+    'network',
+    'notification',
+    'permission',
+    'screen',
+    'shell',
+    'shortcut',
+    'sub-input',
+    'theme',
+    'tray',
+    'window'
+  ]
+  const missing = []
+  const invalid = []
+
+  for (const code of expectedInteractiveModules) {
+    const module = apiExamples.find((entry) => entry.code === code)
+    if (!module) {
+      missing.push(code)
+      continue
+    }
+
+    if (module.playground?.kind !== 'interactive') {
+      missing.push(code)
+      continue
+    }
+
+    if (!Array.isArray(module.playground.controls) || module.playground.controls.length === 0) {
+      invalid.push(`${code}:controls`)
+    }
+    if (!Array.isArray(module.playground.resultViews) || module.playground.resultViews.length === 0) {
+      invalid.push(`${code}:resultViews`)
+    }
+  }
+
+  assert.deepEqual(missing, [])
+  assert.deepEqual(invalid, [])
+})
+
+test('child window playground keeps windows open until an explicit close action', async () => {
+  const { apiExamples } = await importRegistryFixture()
+  const module = apiExamples.find((entry) => entry.code === 'window')
+  assert.ok(module?.playground, 'window module should have an interactive playground')
+
+  const createAction = module.playground.controls.find((control) => control.id === 'window.create')
+  const closeAction = module.playground.controls.find((control) => control.id === 'window.closeChild')
+  assert.ok(createAction, 'window playground should expose create child action')
+  assert.ok(closeAction, 'window playground should expose explicit close child action')
+  assert.equal(createAction.cleanup, false)
+  assert.equal(closeAction.cleanup, true)
+
+  const childExample = module.examples.find((example) => example.id === 'window-child')
+  assert.ok(childExample, 'window-child example should exist')
+  assert.doesNotMatch(childExample.code, /await child\?\.close\(\)/)
+})
+
 test('every public API method has clickable detail metadata', async () => {
   const { methodDetails, publicApiCatalog } = await importRegistryFixture()
   const missing = []

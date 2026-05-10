@@ -1,5 +1,60 @@
 import type { ApiExampleModule } from './types'
-import { attempt, catalogModule, callBackendExample, mulby, unavailable } from './helpers'
+import { attempt, catalogModule, callBackendExample, mulby, playground, text, unavailable } from './helpers'
+
+async function readClipboardPlayground() {
+  const api = mulby()
+  if (!api?.clipboard) return unavailable('Clipboard read')
+  const [format, textValue] = await Promise.all([
+    api.clipboard.getFormat(),
+    api.clipboard.readText()
+  ])
+  const image = await api.clipboard.readImage()
+  const files = await api.clipboard.readFiles()
+  return {
+    ok: true,
+    title: 'Clipboard read',
+    data: {
+      format,
+      textPreview: String(textValue ?? '').slice(0, 240),
+      imageBytes: image?.byteLength ?? image?.length ?? 0,
+      files: Array.isArray(files) ? files.slice(0, 10) : files
+    }
+  }
+}
+
+async function writeClipboardTextPlayground() {
+  const api = mulby()
+  if (!api?.clipboard) return unavailable('Clipboard write text')
+  const value = `Mulby demo clipboard sample ${new Date().toISOString()}`
+  await api.clipboard.writeText(value)
+  return { ok: true, title: 'Clipboard write text', data: { written: value } }
+}
+
+async function writeClipboardImagePlayground() {
+  const api = mulby()
+  if (!api?.clipboard) return unavailable('Clipboard write image')
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAQAAAAAYLlVAAAAkElEQVR42u3PMQ0AAAwCoNm/9HI83BLIOdwqCgAAAAAAAAAAAAAAAAAA4P8D1wABq2wWmQAAAABJRU5ErkJggg=='
+  const result = await api.clipboard.writeImage?.(image)
+  return { ok: true, title: 'Clipboard write image', data: { result, imagePreview: image } }
+}
+
+async function readClipboardHistoryStats() {
+  const data = await callBackendExample('clipboardHistoryStats')
+  if ((data as any)?.warning) return data as any
+  return { ok: true, title: 'Clipboard history stats', data }
+}
+
+async function queryClipboardHistory() {
+  const data = await callBackendExample('clipboardHistoryQuery')
+  if ((data as any)?.warning) return data as any
+  return { ok: true, title: 'Clipboard history query', data }
+}
+
+async function guardedClipboardHistoryDelete() {
+  const data = await callBackendExample('clipboardHistoryDeleteGuard')
+  if ((data as any)?.warning) return data as any
+  return { ok: true, title: 'Clipboard history guarded delete', data }
+}
 
 export const dataExamples: ApiExampleModule[] = [
   catalogModule('storage', {
@@ -162,6 +217,46 @@ off()`,
       'Requires `manifest.permissions.clipboard: true` for clipboard and clipboard-history access.',
       'This demo reads text and format by default; write examples use explicit demo text.'
     ],
+    playground: playground(
+      text('Clipboard inspector', '剪贴板检查器'),
+      text(
+        'Read the current clipboard, then write explicit demo text or image payloads when requested.',
+        '读取当前剪贴板，并在用户点击时写入明确标记的演示文本或图片。'
+      ),
+      [
+        {
+          id: 'clipboard.read',
+          label: text('Read clipboard', '读取剪贴板'),
+          description: text('Shows current format, text preview, image size, and file entries.', '显示当前格式、文本预览、图片大小和文件条目。'),
+          methods: ['clipboard.readText', 'clipboard.readImage', 'clipboard.readFiles', 'clipboard.getFormat'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `const format = await window.mulby.clipboard.getFormat()\nconst text = await window.mulby.clipboard.readText()`,
+          run: readClipboardPlayground
+        },
+        {
+          id: 'clipboard.writeText',
+          label: text('Write text', '写入文本'),
+          description: text('Writes a timestamped demo string.', '写入带时间戳的演示文本。'),
+          methods: ['clipboard.writeText'],
+          safety: 'writes-plugin-data',
+          cleanup: false,
+          code: `await window.mulby.clipboard.writeText('Mulby demo clipboard sample')`,
+          run: writeClipboardTextPlayground
+        },
+        {
+          id: 'clipboard.writeImage',
+          label: text('Write image', '写入图片'),
+          description: text('Writes a small demo PNG data URL to the clipboard.', '向剪贴板写入一个小型演示 PNG data URL。'),
+          methods: ['clipboard.writeImage'],
+          safety: 'writes-plugin-data',
+          cleanup: false,
+          code: `await window.mulby.clipboard.writeImage(dataUrl)`,
+          run: writeClipboardImagePlayground
+        }
+      ],
+      ['status', 'preview', 'json']
+    ),
     examples: [
       {
         id: 'clipboard-read',
@@ -225,6 +320,46 @@ off()`,
       'Clipboard history is user data. Prefer small limits and avoid rendering sensitive content by default.',
       'The host currently exposes clipboard history reliably through backend `context.api.clipboardHistory`; renderer examples call it through Host RPC.'
     ],
+    playground: playground(
+      text('Clipboard history workbench', '剪贴板历史工作台'),
+      text(
+        'Use backend Host RPC to read stats, query recent records, and run guarded destructive operations.',
+        '通过后端 Host RPC 读取统计、查询最近记录，并执行带保护的破坏性操作。'
+      ),
+      [
+        {
+          id: 'clipboardHistory.stats',
+          label: text('Read stats', '读取统计'),
+          description: text('Reads aggregate clipboard history counts.', '读取剪贴板历史聚合统计。'),
+          methods: ['clipboardHistory.stats'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryStats')`,
+          run: readClipboardHistoryStats
+        },
+        {
+          id: 'clipboardHistory.query',
+          label: text('Query recent', '查询最近记录'),
+          description: text('Queries recent items and exercises get/copy/favorite toggles without leaving favorites changed.', '查询最近项目，并演示 get/copy/favorite 切换且不改变收藏状态。'),
+          methods: ['clipboardHistory.query', 'clipboardHistory.get', 'clipboardHistory.copy', 'clipboardHistory.toggleFavorite'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryQuery')`,
+          run: queryClipboardHistory
+        },
+        {
+          id: 'clipboardHistory.delete',
+          label: text('Guarded delete', '保护性删除'),
+          description: text('Calls delete with an impossible demo id and does not clear user history.', '使用不可能存在的演示 id 调用 delete，不清空用户历史。'),
+          methods: ['clipboardHistory.delete', 'clipboardHistory.clear'],
+          safety: 'requires-permission',
+          cleanup: true,
+          code: `await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryDeleteGuard')`,
+          run: guardedClipboardHistoryDelete
+        }
+      ],
+      ['status', 'table', 'json']
+    ),
     examples: [
       {
         id: 'clipboard-history-stats',

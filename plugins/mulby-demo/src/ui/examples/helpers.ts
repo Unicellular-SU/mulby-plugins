@@ -1,5 +1,14 @@
 import { publicApiCatalog, restrictedApiCatalog } from '../../shared/api-catalog'
-import type { ApiExampleModule, ExampleResult, MulbyApi, RunnableExample } from './types'
+import type {
+  ApiExampleModule,
+  CopyText,
+  ExampleResult,
+  InteractivePlayground,
+  MulbyApi,
+  PlaygroundControl,
+  ResultViewKind,
+  RunnableExample
+} from './types'
 
 type MulbyWindow = Window & { mulby?: MulbyApi }
 type RunnableExampleInput = Omit<RunnableExample, 'methods'> & Partial<Pick<RunnableExample, 'methods'>>
@@ -107,5 +116,24 @@ export function restrictedModule(code: string, notes: string[] = []): ApiExample
         code: `// ${catalog.title} is documented as out of scope for runnable third-party examples.\n// Covered methods: ${catalog.methods.join(', ')}`
       }
     ]
+  }
+}
+
+export function text(en: string, zh: string): CopyText {
+  return { en, zh }
+}
+
+export function playground(
+  title: CopyText,
+  description: CopyText,
+  controls: PlaygroundControl[],
+  resultViews: ResultViewKind[] = ['status', 'json', 'log']
+): InteractivePlayground {
+  return {
+    kind: 'interactive',
+    title,
+    description,
+    controls,
+    resultViews
   }
 }

@@ -49,6 +49,12 @@ export const uiText = {
   optional: { en: 'optional', zh: '可选' },
   notes: { en: 'Notes', zh: '注意事项' },
   examples: { en: 'Examples', zh: '示例' },
+  livePlayground: { en: 'Live playground', zh: '实时演示' },
+  controls: { en: 'Controls', zh: '操作' },
+  resultViews: { en: 'Result views', zh: '结果视图' },
+  activityLog: { en: 'Activity log', zh: '操作日志' },
+  referenceCode: { en: 'Reference code', zh: '参考代码' },
+  runnableReference: { en: 'Runnable reference snippets', zh: '可运行参考片段' },
   output: { en: 'Output', zh: '输出' },
   copySnippet: { en: 'Copy snippet', zh: '复制代码片段' },
   copiedSnippet: { en: 'Copied snippet', zh: '已复制代码片段' },
@@ -62,6 +68,10 @@ export const uiText = {
   emptyOutput: {
     en: 'Run an example to inspect its result. Documentation-only examples show the snippet payload.',
     zh: '运行示例后可在这里查看结果。仅文档示例会展示代码片段内容。'
+  },
+  emptyLog: {
+    en: 'Run a playground action to see a timestamped activity log.',
+    zh: '运行实时演示操作后，这里会显示带时间戳的日志。'
   }
 } satisfies Record<string, LocalizedText>
 

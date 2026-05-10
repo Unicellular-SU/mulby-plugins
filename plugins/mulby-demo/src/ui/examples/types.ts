@@ -11,6 +11,34 @@ export interface ExampleResult {
 
 export type MulbyApi = Record<string, any>
 
+export interface LocalizedCopy {
+  en: string
+  zh: string
+}
+
+export type CopyText = string | LocalizedCopy
+
+export type ResultViewKind = 'status' | 'log' | 'preview' | 'table' | 'json' | 'external'
+
+export interface PlaygroundControl {
+  id: string
+  label: CopyText
+  description: CopyText
+  methods: string[]
+  safety: RunnableExample['safety']
+  cleanup?: boolean
+  code?: string
+  run: () => Promise<ExampleResult>
+}
+
+export interface InteractivePlayground {
+  kind: 'interactive'
+  title: CopyText
+  description: CopyText
+  controls: PlaygroundControl[]
+  resultViews: ResultViewKind[]
+}
+
 export interface RunnableExample {
   id: string
   label: string
@@ -30,6 +58,7 @@ export interface ApiExampleModule {
   methods: string[]
   permissions?: string[]
   notes: string[]
+  playground?: InteractivePlayground
   examples: RunnableExample[]
 }
 

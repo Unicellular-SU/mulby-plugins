@@ -1,5 +1,140 @@
 import type { ApiExampleModule } from './types'
-import { catalogModule, mulby, unavailable } from './helpers'
+import { catalogModule, mulby, playground, text, unavailable } from './helpers'
+
+async function readScreenPlayground() {
+  const api = mulby()
+  if (!api?.screen) return unavailable('Screen displays')
+  const [displays, primary, cursor] = await Promise.all([
+    api.screen.getAllDisplays(),
+    api.screen.getPrimaryDisplay(),
+    api.screen.getCursorScreenPoint()
+  ])
+  return { ok: true, title: 'Screen displays', data: { displays, primary, cursor } }
+}
+
+async function listScreenSourcesPlayground() {
+  const api = mulby()
+  if (!api?.screen) return unavailable('Screen sources')
+  const sources = await api.screen.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 120, height: 90 } })
+  return {
+    ok: true,
+    title: 'Screen sources',
+    data: {
+      count: sources?.length ?? 0,
+      sources: sources?.slice?.(0, 8)
+    }
+  }
+}
+
+async function captureScreenPlayground() {
+  const api = mulby()
+  if (!api?.screen) return unavailable('Screen capture')
+  const shot = await api.screen.capture({ format: 'png' })
+  return {
+    ok: true,
+    title: 'Screen capture',
+    data: {
+      bytes: shot?.byteLength ?? shot?.length ?? 0,
+      note: 'Capture bytes are returned without rendering the full image in JSON output.'
+    }
+  }
+}
+
+async function readPermissionStatuses() {
+  const api = mulby()
+  if (!api?.permission) return unavailable('Permission status')
+  const types = ['geolocation', 'camera', 'microphone', 'screen', 'accessibility']
+  const statuses = await Promise.all(types.map(async (type) => [type, await api.permission.getStatus(type)]))
+  const canRequest = await Promise.all(types.map(async (type) => [type, await api.permission.canRequest(type)]))
+  const accessibilityTrusted = await api.permission.isAccessibilityTrusted()
+  return {
+    ok: true,
+    title: 'Permission status',
+    data: {
+      statuses: Object.fromEntries(statuses),
+      canRequest: Object.fromEntries(canRequest),
+      accessibilityTrusted,
+      openSystemSettings: typeof api.permission.openSystemSettings
+    }
+  }
+}
+
+async function requestMicrophonePermission() {
+  const api = mulby()
+  if (!api?.permission) return unavailable('Permission request')
+  const result = await api.permission.request('microphone')
+  return { ok: true, title: 'Permission request', data: { type: 'microphone', result } }
+}
+
+async function readMediaStatuses() {
+  const api = mulby()
+  if (!api?.media) return unavailable('Media status')
+  const [camera, microphone, hasCamera, hasMicrophone] = await Promise.all([
+    api.media.getAccessStatus('camera'),
+    api.media.getAccessStatus('microphone'),
+    api.media.hasCameraAccess(),
+    api.media.hasMicrophoneAccess()
+  ])
+  return { ok: true, title: 'Media status', data: { camera, microphone, hasCamera, hasMicrophone } }
+}
+
+async function requestMicrophoneMedia() {
+  const api = mulby()
+  if (!api?.media) return unavailable('Media request')
+  const microphoneRequest = await api.media.askForAccess('microphone')
+  return { ok: true, title: 'Media request', data: { microphoneRequest } }
+}
+
+async function pasteDemoText() {
+  const api = mulby()
+  if (!api?.input) return unavailable('Input paste text')
+  const result = await api.input.hideMainWindowPasteText('Mulby demo input text')
+  const restore = await api.input.restoreWindows?.()
+  return { ok: true, title: 'Input paste text', data: { result, restore } }
+}
+
+async function simulateEscapeKey() {
+  const api = mulby()
+  if (!api?.input) return unavailable('Input keyboard')
+  const result = await api.input.simulateKeyboardTap('Escape')
+  return { ok: true, title: 'Input keyboard', data: { result } }
+}
+
+async function simulateMouseProbe() {
+  const api = mulby()
+  if (!api?.input) return unavailable('Input mouse')
+  const move = await api.input.simulateMouseMove(1, 1)
+  const click = await api.input.simulateMouseClick(1, 1)
+  return { ok: true, title: 'Input mouse', data: { move, click } }
+}
+
+const demoShortcut = 'CommandOrControl+Shift+Alt+D'
+
+async function registerDemoShortcut() {
+  const api = mulby()
+  if (!api?.shortcut) return unavailable('Shortcut register')
+  const triggered: string[] = []
+  const off = api.shortcut.onTriggered?.((value: string) => triggered.push(value))
+  const registered = await api.shortcut.register(demoShortcut)
+  const isRegistered = await api.shortcut.isRegistered(demoShortcut)
+  off?.()
+  return { ok: true, title: 'Shortcut register', data: { accelerator: demoShortcut, registered, isRegistered, triggered } }
+}
+
+async function unregisterDemoShortcut() {
+  const api = mulby()
+  if (!api?.shortcut) return unavailable('Shortcut unregister')
+  await api.shortcut.unregister(demoShortcut)
+  const afterUnregister = await api.shortcut.isRegistered(demoShortcut)
+  return { ok: true, title: 'Shortcut unregister', data: { accelerator: demoShortcut, afterUnregister } }
+}
+
+async function unregisterAllShortcuts() {
+  const api = mulby()
+  if (!api?.shortcut) return unavailable('Shortcut unregister all')
+  const result = await api.shortcut.unregisterAll()
+  return { ok: true, title: 'Shortcut unregister all', data: { result } }
+}
 
 export const systemExamples: ApiExampleModule[] = [
   catalogModule('system', {
@@ -97,6 +232,33 @@ export const systemExamples: ApiExampleModule[] = [
       'Request calls may show system UI. This reference reads status first.',
       'Manifest permissions are required before host permission prompts are meaningful.'
     ],
+    playground: playground(
+      text('Permission workbench', '权限工作台'),
+      text('Read permission status first, then request only explicit user-selected permissions.', '先读取权限状态，再仅请求用户明确选择的权限。'),
+      [
+        {
+          id: 'permission.status',
+          label: text('Read statuses', '读取状态'),
+          description: text('Reads common permission status and requestability.', '读取常见权限状态和是否可请求。'),
+          methods: ['permission.getStatus', 'permission.canRequest', 'permission.isAccessibilityTrusted', 'permission.openSystemSettings'],
+          safety: 'safe',
+          cleanup: false,
+          code: `await window.mulby.permission.getStatus('microphone')\nawait window.mulby.permission.canRequest('microphone')`,
+          run: readPermissionStatuses
+        },
+        {
+          id: 'permission.request',
+          label: text('Request microphone', '请求麦克风'),
+          description: text('Requests microphone permission through the host.', '通过宿主请求麦克风权限。'),
+          methods: ['permission.request'],
+          safety: 'opens-system-ui',
+          cleanup: false,
+          code: `await window.mulby.permission.request('microphone')`,
+          run: requestMicrophonePermission
+        }
+      ],
+      ['status', 'external', 'json']
+    ),
     examples: [
       {
         id: 'permission-status',
@@ -178,6 +340,46 @@ export const systemExamples: ApiExampleModule[] = [
       'Screen capture calls require `permissions.screen` and may require OS-level screen recording permission.',
       'This demo reads display metadata by default; capture calls are shown as code snippets.'
     ],
+    playground: playground(
+      text('Screen capture workbench', '屏幕捕获工作台'),
+      text(
+        'Inspect displays, list available capture sources, and run explicit capture actions.',
+        '检查显示器、列出可捕获源，并显式运行截图操作。'
+      ),
+      [
+        {
+          id: 'screen.getAllDisplays',
+          label: text('Read displays', '读取显示器'),
+          description: text('Shows display bounds, primary display, and cursor position.', '显示显示器边界、主显示器和鼠标位置。'),
+          methods: ['screen.getAllDisplays', 'screen.getPrimaryDisplay', 'screen.getCursorScreenPoint', 'screen.getDisplayNearestPoint', 'screen.getDisplayMatching'],
+          safety: 'safe',
+          cleanup: false,
+          code: `const displays = await window.mulby.screen.getAllDisplays()`,
+          run: readScreenPlayground
+        },
+        {
+          id: 'screen.getSources',
+          label: text('List sources', '列出捕获源'),
+          description: text('Lists screen/window capture sources with small thumbnails.', '列出屏幕和窗口捕获源及小缩略图。'),
+          methods: ['screen.getSources', 'screen.getWindowBounds', 'screen.getMediaStreamConstraints'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `await window.mulby.screen.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 120, height: 90 } })`,
+          run: listScreenSourcesPlayground
+        },
+        {
+          id: 'screen.capture',
+          label: text('Capture screen', '截取屏幕'),
+          description: text('Runs a PNG capture and reports byte size.', '执行 PNG 截图并返回字节大小。'),
+          methods: ['screen.capture', 'screen.captureRegion', 'screen.screenCapture', 'screen.colorPick', 'screen.screenToDipPoint', 'screen.dipToScreenPoint', 'screen.screenToDipRect', 'screen.dipToScreenRect'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `const shot = await window.mulby.screen.capture({ format: 'png' })`,
+          run: captureScreenPlayground
+        }
+      ],
+      ['status', 'preview', 'table', 'json']
+    ),
     examples: [
       {
         id: 'screen-displays',
@@ -282,6 +484,33 @@ export const systemExamples: ApiExampleModule[] = [
     category: 'system',
     contexts: ['renderer', 'backend'],
     notes: ['Camera and microphone permissions must be declared separately in manifest.'],
+    playground: playground(
+      text('Media permission checker', '媒体权限检查器'),
+      text('Read camera and microphone access, then request microphone access explicitly.', '读取摄像头和麦克风访问状态，并显式请求麦克风访问。'),
+      [
+        {
+          id: 'media.status',
+          label: text('Read access', '读取访问状态'),
+          description: text('Reads camera and microphone access states.', '读取摄像头和麦克风访问状态。'),
+          methods: ['media.getAccessStatus', 'media.hasCameraAccess', 'media.hasMicrophoneAccess'],
+          safety: 'safe',
+          cleanup: false,
+          code: `await window.mulby.media.getAccessStatus('camera')\nawait window.mulby.media.hasMicrophoneAccess()`,
+          run: readMediaStatuses
+        },
+        {
+          id: 'media.askForAccess',
+          label: text('Request microphone', '请求麦克风'),
+          description: text('Requests microphone access.', '请求麦克风访问权限。'),
+          methods: ['media.askForAccess'],
+          safety: 'requires-permission',
+          cleanup: false,
+          code: `await window.mulby.media.askForAccess('microphone')`,
+          run: requestMicrophoneMedia
+        }
+      ],
+      ['status', 'external', 'json']
+    ),
     examples: [
       {
         id: 'media-status',
@@ -318,6 +547,43 @@ export const systemExamples: ApiExampleModule[] = [
       'Input automation affects other apps. Prefer explicit user actions and restore windows after paste/type flows.',
       'This reference runs the calls with small demo payloads and catches permission or focus errors in the output.'
     ],
+    playground: playground(
+      text('Input automation controls', '输入自动化控制台'),
+      text('Run explicit paste, keyboard, and mouse automation actions with visible result output.', '显式运行粘贴、键盘和鼠标自动化操作，并展示结果。'),
+      [
+        {
+          id: 'input.hideMainWindowPasteText',
+          label: text('Paste demo text', '粘贴演示文本'),
+          description: text('Hides the main window, pastes text, then restores windows.', '隐藏主窗口、粘贴文本，然后恢复窗口。'),
+          methods: ['input.hideMainWindowPasteText', 'input.restoreWindows'],
+          safety: 'opens-system-ui',
+          cleanup: true,
+          code: `await window.mulby.input.hideMainWindowPasteText('Mulby demo')\nawait window.mulby.input.restoreWindows()`,
+          run: pasteDemoText
+        },
+        {
+          id: 'input.simulateKeyboardTap',
+          label: text('Press Escape', '按下 Escape'),
+          description: text('Simulates a small keyboard tap.', '模拟一次小范围键盘按键。'),
+          methods: ['input.simulateKeyboardTap', 'input.hideMainWindowTypeString', 'input.hideMainWindowPasteImage', 'input.hideMainWindowPasteFile'],
+          safety: 'opens-system-ui',
+          cleanup: false,
+          code: `await window.mulby.input.simulateKeyboardTap('Escape')`,
+          run: simulateEscapeKey
+        },
+        {
+          id: 'input.mouse',
+          label: text('Mouse probe', '鼠标探测'),
+          description: text('Moves and clicks at a tiny coordinate used by the reference demo.', '在参考示例的小坐标处移动并点击鼠标。'),
+          methods: ['input.simulateMouseMove', 'input.simulateMouseClick', 'input.simulateMouseDoubleClick', 'input.simulateMouseRightClick'],
+          safety: 'opens-system-ui',
+          cleanup: false,
+          code: `await window.mulby.input.simulateMouseMove(1, 1)\nawait window.mulby.input.simulateMouseClick(1, 1)`,
+          run: simulateMouseProbe
+        }
+      ],
+      ['status', 'external', 'json']
+    ),
     examples: [
       {
         id: 'input-actions',
@@ -412,6 +678,43 @@ export const systemExamples: ApiExampleModule[] = [
       'Register shortcuts on explicit user action and unregister them on unload.',
       'Use `plugin.bindCommandShortcut` for command shortcuts managed by Mulby settings.'
     ],
+    playground: playground(
+      text('Global shortcut workbench', '全局快捷键工作台'),
+      text('Register a demo shortcut, inspect its state, and explicitly unregister it.', '注册演示快捷键、查看状态，并显式注销。'),
+      [
+        {
+          id: 'shortcut.register',
+          label: text('Register shortcut', '注册快捷键'),
+          description: text('Registers CommandOrControl+Shift+Alt+D.', '注册 CommandOrControl+Shift+Alt+D。'),
+          methods: ['shortcut.register', 'shortcut.isRegistered', 'shortcut.onTriggered'],
+          safety: 'opens-system-ui',
+          cleanup: false,
+          code: `await window.mulby.shortcut.register('CommandOrControl+Shift+Alt+D')`,
+          run: registerDemoShortcut
+        },
+        {
+          id: 'shortcut.unregister',
+          label: text('Unregister shortcut', '注销快捷键'),
+          description: text('Unregisters the demo shortcut.', '注销演示快捷键。'),
+          methods: ['shortcut.unregister'],
+          safety: 'safe',
+          cleanup: true,
+          code: `await window.mulby.shortcut.unregister('CommandOrControl+Shift+Alt+D')`,
+          run: unregisterDemoShortcut
+        },
+        {
+          id: 'shortcut.unregisterAll',
+          label: text('Unregister all', '注销全部'),
+          description: text('Clears plugin-owned shortcuts.', '清理插件自有快捷键。'),
+          methods: ['shortcut.unregisterAll'],
+          safety: 'safe',
+          cleanup: true,
+          code: `await window.mulby.shortcut.unregisterAll()`,
+          run: unregisterAllShortcuts
+        }
+      ],
+      ['status', 'log', 'external', 'json']
+    ),
     examples: [
       {
         id: 'shortcut-register',
