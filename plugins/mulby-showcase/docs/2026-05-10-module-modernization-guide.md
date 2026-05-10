@@ -124,3 +124,17 @@ Manual review:
 - Manifest updates are part of API migration; `geolocation` needed an explicit permission.
 - Raw data should omit large Data URL content while preserving enough shape for debugging.
 - A reusable panel component reduces repeated work for later modules.
+
+## Clipboard Module Lessons
+
+- `clipboard.md` and `clipboard-history.md` both require `permissions.clipboard`.
+- When a documented renderer API is missing from the local plugin type definitions, update `src/types/mulby.d.ts` to match the host docs before using it.
+- If a plugin-facing API is documented for both renderer and backend but the renderer path returns no data or behaves inconsistently, compare with a working plugin and prefer a backend `rpc` bridge:
+  - expose `export const rpc = { methodName() { return mulby.namespace.method() } }` in `src/main.ts`;
+  - call it from UI with `useMulby('<manifest.id>').host.call('methodName', ...args)`;
+  - use `manifest.id` for scoped plugin ids such as `@mulby/showcase`, because host processes are keyed by plugin id.
+- For clipboard history, use backend `mulby.clipboardHistory` through `host.call` in showcase. The current host preload does not expose `window.mulby.clipboardHistory`, while the backend worker exposes `mulby.clipboardHistory` and the standalone clipboard history plugin uses the same route.
+- Clipboard history belongs in the main workflow, not only the API panel, because it is a user-facing management feature.
+- Keep destructive history actions explicit. `clipboardHistory.clear()` clears non-favorite records, so label it as clearing non-favorites rather than all records.
+- Redact image history content and Data URLs in `rawData`; show image previews in the main UI only when they are useful.
+- Prefer using `useMulby()` namespaces such as `dialog` instead of direct `window.mulby.*` calls inside modules.

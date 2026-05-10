@@ -68,10 +68,46 @@ interface MulbyClipboard {
   readText(): Promise<string>
   writeText(text: string): Promise<void>
   readImage(): Promise<ArrayBuffer | null>
-  writeImage(image: string | ArrayBuffer): Promise<void>
+  writeImage(image: string | ArrayBuffer | Uint8Array): Promise<boolean>
   readFiles(): Promise<ClipboardFileInfo[]>
   writeFiles(files: string | string[]): Promise<boolean>
   getFormat(): Promise<'text' | 'image' | 'files' | 'html' | 'empty'>
+}
+
+interface ClipboardHistoryItem {
+  id: string
+  type: 'text' | 'image' | 'files'
+  content: string
+  plainText?: string
+  files?: string[]
+  timestamp: number
+  size: number
+  favorite: boolean
+  tags?: string[]
+}
+
+interface ClipboardHistoryStats {
+  total: number
+  text: number
+  image: number
+  files: number
+  favorite: number
+}
+
+interface MulbyClipboardHistory {
+  query(options?: {
+    type?: 'text' | 'image' | 'files'
+    search?: string
+    favorite?: boolean
+    limit?: number
+    offset?: number
+  }): Promise<ClipboardHistoryItem[]>
+  get(id: string): Promise<ClipboardHistoryItem | null>
+  copy(id: string): Promise<{ success: boolean; error?: string }>
+  toggleFavorite(id: string): Promise<{ success: boolean }>
+  delete(id: string): Promise<{ success: boolean }>
+  clear(): Promise<{ success: boolean }>
+  stats(): Promise<ClipboardHistoryStats>
 }
 
 interface MulbyInput {
@@ -1694,6 +1730,7 @@ interface MulbyAPI {
   systemPlugin: MulbySystemPlugin
   systemPage: MulbySystemPage
   clipboard: MulbyClipboard
+  clipboardHistory: MulbyClipboardHistory
   input: MulbyInput
   inputMonitor: MulbyInputMonitor
   notification: MulbyNotification

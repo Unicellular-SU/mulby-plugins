@@ -13,6 +13,7 @@ interface PluginContext {
       readImage: () => ArrayBuffer | null
       getFormat: () => string
     }
+    clipboardHistory: ClipboardHistoryApi
     notification: {
       show: (message: string, type?: string) => void
     }
@@ -40,6 +41,50 @@ interface PluginContext {
   }
   input?: string
   featureCode?: string
+}
+
+type ClipboardHistoryType = 'text' | 'image' | 'files'
+
+interface ClipboardHistoryQueryOptions {
+  type?: ClipboardHistoryType
+  search?: string
+  favorite?: boolean
+  limit?: number
+  offset?: number
+}
+
+interface ClipboardHistoryItem {
+  id: string
+  type: ClipboardHistoryType
+  content: string
+  plainText?: string
+  files?: string[]
+  timestamp: number
+  size: number
+  favorite: boolean
+  tags?: string[]
+}
+
+interface ClipboardHistoryStats {
+  total: number
+  text: number
+  image: number
+  files: number
+  favorite: number
+}
+
+interface ClipboardHistoryApi {
+  query: (options?: ClipboardHistoryQueryOptions) => Promise<ClipboardHistoryItem[]>
+  get: (id: string) => Promise<ClipboardHistoryItem | null>
+  copy: (id: string) => Promise<{ success: boolean; error?: string }>
+  toggleFavorite: (id: string) => Promise<{ success: boolean }>
+  delete: (id: string) => Promise<{ success: boolean }>
+  clear: () => Promise<{ success: boolean }>
+  stats: () => Promise<ClipboardHistoryStats>
+}
+
+declare const mulby: {
+  clipboardHistory: ClipboardHistoryApi
 }
 
 /**
@@ -153,6 +198,36 @@ export async function run(context: PluginContext) {
     default:
       // 不显示通知，让 UI 自己处理
       break
+  }
+}
+
+export const rpc = {
+  queryClipboardHistory(options?: ClipboardHistoryQueryOptions) {
+    return mulby.clipboardHistory.query(options)
+  },
+
+  getClipboardHistoryItem(id: string) {
+    return mulby.clipboardHistory.get(id)
+  },
+
+  copyClipboardHistoryItem(id: string) {
+    return mulby.clipboardHistory.copy(id)
+  },
+
+  toggleClipboardHistoryFavorite(id: string) {
+    return mulby.clipboardHistory.toggleFavorite(id)
+  },
+
+  deleteClipboardHistoryItem(id: string) {
+    return mulby.clipboardHistory.delete(id)
+  },
+
+  clearClipboardHistory() {
+    return mulby.clipboardHistory.clear()
+  },
+
+  getClipboardHistoryStats() {
+    return mulby.clipboardHistory.stats()
   }
 }
 
