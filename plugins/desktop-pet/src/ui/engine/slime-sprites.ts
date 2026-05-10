@@ -8,19 +8,19 @@ import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetSpriteSet, type
 
 // ====== Solid white fill covering entire ghost silhouette (prevents see-through) ======
 
-const BODY_FILL = `<path fill="#DEDEDD" d="M29 22h6v1H29zM27 23h10v1H27zM26 24h12v1H26zM25 25h14v1H25zM25 26h14v1H25zM24 27h16v1H24zM24 28h16v1H24zM24 29h16v1H24zM24 30h16v1H24zM24 31h16v1H24zM24 32h16v1H24zM23 33h18v1H23zM22 34h20v1H22zM22 35h20v1H22zM23 36h18v1H23zM24 37h16v1H24zM26 38h12v1H26zM27 39h10v1H27zM31 40h2v1H31z"/>`
+const BODY_FILL = `<path fill="#23201e" d="M29 22h6v1h-6zM28 23h1v1h-1zM35 23h2v1h-2zM25 25h1v1h-1zM38 25h1v1h-1zM38 26h1v1h-1zM24 27h1v1h-1zM39 27h1v1h-1zM24 28h1v1h-1zM39 28h1v1h-1zM24 29h1v1h-1zM39 29h1v1h-1zM24 30h1v1h-1zM39 30h1v1h-1zM24 31h1v1h-1zM39 31h1v1h-1zM24 32h1v1h-1zM39 32h1v1h-1zM22 34h1v1h-1zM23 36h1v1h-1zM40 36h1v1h-1zM37 38h1v1h-1zM31 40h2v1h-2z"/>`
 
 // ====== Shared body structure (outline + shading, no face) ======
 
-const BODY_OUTLINE = `<path fill="#23201E" d="M29 22h6v1H29zM28 23h1v1H28zM35 23h2v1H35zM25 25h1v1H25zM38 25h1v1H38zM38 26h1v1H38zM24 27h1v1H24zM39 27h1v1H39zM24 28h1v1H24zM39 28h1v1H39zM24 29h1v1H24zM39 29h1v1H39zM24 30h1v1H24zM35 30h1v1H35zM39 30h1v1H39zM24 31h1v1H24zM31 31h2v1H31zM39 31h1v1H39zM24 32h1v1H24zM39 32h1v1H39zM22 34h1v1H22zM23 36h1v1H23zM40 36h1v1H40zM37 38h1v1H37zM31 40h2v1H31z"/>`
+const BODY_OUTLINE = `<path fill="#1a1916" d="M27 23h1v1h-1zM26 24h1v1h-1zM37 24h1v1h-1zM25 26h1v1h-1zM23 33h1v1h-1zM40 33h1v1h-1zM41 34h1v1h-1zM22 35h1v1h-1zM41 35h1v1h-1zM24 37h2v1h-2zM38 37h2v1h-2zM26 38h1v1h-1zM27 39h4v1h-4zM33 39h4v1h-4z"/>`
 
-const BODY_DARK = `<path fill="#1A1916" d="M27 23h1v1H27zM26 24h1v1H26zM37 24h1v1H37zM25 26h1v1H25zM23 33h1v1H23zM40 33h1v1H40zM41 34h1v1H41zM22 35h1v1H22zM41 35h1v1H41zM24 37h2v1H24zM38 37h2v1H38zM26 38h1v1H26zM27 39h4v1H27zM33 39h4v1H33z"/>`
+const BODY_DARK = `<path fill="#dededd" d="M29 23h6v1h-6zM27 24h10v1h-10zM26 25h12v1h-12zM26 26h12v1h-12zM25 27h14v1h-14zM25 28h14v1h-14zM25 29h14v1h-14zM25 30h14v1h-14zM25 31h14v1h-14zM25 32h14v1h-14zM24 33h16v1h-16zM23 34h18v1h-18zM23 35h2v1h-2zM26 35h12v1h-12zM39 35h2v1h-2zM27 36h10v1h-10zM27 37h2v1h-2zM30 37h4v1h-4zM35 37h2v1h-2zM31 38h2v1h-2z"/>`
 
-const BODY_MAIN = `<path fill="#DEDEDD" d="M29 23h6v1H29zM27 24h3v1H27zM31 24h6v1H31zM26 25h3v1H26zM31 25h7v1H31zM26 26h1v1H26zM30 26h8v1H30zM25 27h2v1H25zM30 27h5v1H30zM36 27h3v1H36zM25 28h2v1H25zM30 28h4v1H30zM37 28h2v1H37zM25 29h2v1H25zM30 29h4v1H30zM37 29h2v1H37zM25 30h3v1H25zM29 30h6v1H29zM36 30h3v1H36zM25 31h1v1H25zM27 31h4v1H27zM33 31h4v1H33zM38 31h1v1H38zM25 32h1v1H25zM29 32h6v1H29zM38 32h1v1H38zM24 33h3v1H24zM28 33h8v1H28zM37 33h3v1H37zM23 34h18v1H23zM23 35h2v1H23zM26 35h12v1H26zM39 35h2v1H39zM27 36h10v1H27zM27 37h2v1H27zM30 37h4v1H30zM35 37h2v1H35zM31 38h2v1H31z"/>`
+const BODY_MAIN = `<path fill="#908f8e" d="M25 35h1v1h-1zM38 35h1v1h-1zM25 36h2v1h-2zM37 36h2v1h-2zM26 37h1v1h-1zM29 37h1v1h-1zM34 37h1v1h-1zM37 37h1v1h-1zM27 38h3v1h-3zM33 38h3v1h-3zM31 39h2v1h-2z"/>`
 
-const BODY_SHADOW = `<path fill="#908F8E" d="M25 35h1v1H25zM38 35h1v1H38zM25 36h2v1H25zM37 36h2v1H37zM26 37h1v1H26zM29 37h1v1H29zM34 37h1v1H34zM37 37h1v1H37zM27 38h3v1H27zM33 38h3v1H33zM31 39h2v1H31z"/>`
+const BODY_SHADOW = `<path fill="#8a8a89" d="M24 36h1v1h-1zM39 36h1v1h-1zM30 38h1v1h-1zM36 38h1v1h-1z"/>`
 
-const BODY_SHADOW2 = `<path fill="#8A8A89" d="M24 36h1v1H24zM39 36h1v1H39zM30 38h1v1H30zM36 38h1v1H36z"/>`
+const BODY_SHADOW2 = ``
 
 // ====== Face components for expressions ======
 
@@ -103,28 +103,28 @@ const SHY: FaceParts = {
   mouth: '',
 }
 
-// Curious: uneven raised eyes and a tiny question mouth
+// Curious: one wide searching eye, one raised small eye, and a tiny offset mouth
 const CURIOUS: FaceParts = {
-  eyes: `<path fill="#1A1916" d="M27 27h2v1H27zM35 28h2v1H35zM27 28h3v1H27zM34 29h3v1H34zM28 29h1v1H28zM35 30h1v1H35z"/>`,
-  highlights: `<path fill="#F7F7F7" d="M28 28h1v1H28zM35 29h1v1H35z"/>`,
+  eyes: `<path fill="#1A1916" d="M27 27h3v1H27zM35 27h2v1H35zM27 28h1v1H27zM29 28h1v1H29zM34 28h3v1H34zM27 29h3v1H27zM35 29h1v1H35z"/>`,
+  highlights: `<path fill="#F7F7F7" d="M28 28h1v1H28z"/>`,
   blush: '',
-  mouth: `<path fill="#1A1916" d="M32 31h1v1H32z"/>`,
+  mouth: `<path fill="#1A1916" d="M32 31h1v1H32zM33 32h1v1H33z"/>`,
 }
 
-// Confused: mismatched eyes and a crooked mouth
+// Confused: a clear question mark in the middle of the face
 const CONFUSED: FaceParts = {
-  eyes: `<path fill="#1A1916" d="M27 28h3v1H27zM35 27h1v1H35zM34 28h3v1H34zM28 29h1v1H28zM36 29h1v1H36z"/>`,
+  eyes: `<path fill="#1A1916" d="M30 27h4v1H30zM29 28h1v1H29zM34 28h1v1H34zM34 29h1v1H34zM33 30h1v1H33zM32 31h1v1H32zM32 33h1v1H32z"/>`,
   highlights: '',
   blush: '',
-  mouth: `<path fill="#1A1916" d="M31 31h1v1H31zM32 32h2v1H32z"/>`,
+  mouth: '',
 }
 
-// Proud: confident closed eyes and a small smirk
+// Proud: tilted brows, uneven eyes, and a confident crooked smirk
 const PROUD: FaceParts = {
-  eyes: `<path fill="#1A1916" d="M27 28h1v1H27zM28 29h2v1H28zM34 29h2v1H34zM36 28h1v1H36z"/>`,
+  eyes: `<path fill="#1A1916" d="M27 27h1v1H27zM36 27h1v1H36zM28 28h3v1H28zM33 28h3v1H33zM27 29h2v1H27zM35 29h2v1H35zM29 30h1v1H29zM34 30h1v1H34z"/>`,
   highlights: '',
-  blush: `<path fill="#CF8E8C" d="M26 31h2v1H26zM36 31h2v1H36z"/>`,
-  mouth: `<path fill="#1A1916" d="M31 31h2v1H31zM33 30h1v1H33z"/>`,
+  blush: '',
+  mouth: `<path fill="#1A1916" d="M30 31h1v1H30zM31 32h2v1H31zM33 31h1v1H33z"/>`,
 }
 
 // Scared: wide eyes, tiny mouth, and a cold sweat pixel
