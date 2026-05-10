@@ -22,3 +22,11 @@ test('filesystem backend example only uses Mulby unlink for files', () => {
   assert.doesNotMatch(match[0], /api\.filesystem\.unlink\(dirPath\)/)
   assert.match(match[0], /rmSync\(dirPath,\s*\{\s*recursive:\s*true,\s*force:\s*true\s*\}\)/)
 })
+
+test('clipboard history demos run through backend api instead of missing renderer preload api', () => {
+  assert.match(mainSource, /async function clipboardHistoryStats\(api: any\)/)
+  assert.match(mainSource, /api\.clipboardHistory\.stats\(\)/)
+  assert.match(mainSource, /async function clipboardHistoryQuery\(api: any\)/)
+  assert.match(mainSource, /api\.clipboardHistory\.query\(\{\s*limit: 5\s*\}\)/)
+  assert.match(mainSource, /clipboardHistoryDeleteGuard/)
+})

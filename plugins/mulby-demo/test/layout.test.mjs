@@ -30,3 +30,10 @@ test('sidebar, content, and cards can shrink and scroll independently', () => {
   assert.match(rule('pre'), /overflow-x:\s*auto/)
   assert.match(rule('pre'), /white-space:\s*pre-wrap/)
 })
+
+test('method chips are interactive controls with visible selected state', () => {
+  assert.match(rule('.method-chip'), /cursor:\s*pointer/)
+  assert.match(rule('.method-chip'), /background:\s*transparent/)
+  assert.match(rule('.method-chip.active code'), /background:\s*#19324d/)
+  assert.match(rule('.method-detail'), /overflow-wrap|padding:\s*12px/)
+})

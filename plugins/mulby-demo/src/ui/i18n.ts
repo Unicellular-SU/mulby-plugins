@@ -41,6 +41,12 @@ export const uiText = {
   publicCoverage: { en: 'Public coverage', zh: '公开 API 覆盖' },
   boundaries: { en: 'Boundaries', zh: '边界 API' },
   methods: { en: 'Methods', zh: '方法' },
+  methodDetail: { en: 'Method detail', zh: '方法详情' },
+  inputs: { en: 'Inputs', zh: '输入参数' },
+  returns: { en: 'Returns', zh: '输出参数' },
+  methodNotes: { en: 'Method notes', zh: '方法注意事项' },
+  required: { en: 'required', zh: '必填' },
+  optional: { en: 'optional', zh: '可选' },
   notes: { en: 'Notes', zh: '注意事项' },
   examples: { en: 'Examples', zh: '示例' },
   output: { en: 'Output', zh: '输出' },
@@ -124,7 +130,7 @@ export const moduleTranslations: Record<string, ModuleTranslation> = {
     summary: '在显式剪贴板权限下查询和管理 Mulby 剪贴板历史。',
     notes: [
       '剪贴板历史属于用户数据；应使用较小限制，并默认避免展示敏感内容。',
-      'delete/clear 等变更调用只在这里文档化，不由参考界面直接执行。'
+      '当前宿主通过后端 `context.api.clipboardHistory` 稳定暴露剪贴板历史；渲染端示例会通过 Host RPC 调用它。'
     ]
   },
   security: {

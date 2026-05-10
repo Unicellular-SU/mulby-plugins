@@ -355,6 +355,47 @@ async function backendStorageRoundtrip(api: any) {
   }
 }
 
+async function clipboardHistoryStats(api: any) {
+  const stats = await api.clipboardHistory.stats()
+  return { stats }
+}
+
+async function clipboardHistoryQuery(api: any) {
+  const records = await api.clipboardHistory.query({ limit: 5 })
+  const first = records[0]
+  const firstRecord = first ? await api.clipboardHistory.get(first.id) : null
+  let copyResult: unknown = null
+  let favoriteToggle: unknown = null
+
+  if (first) {
+    copyResult = await api.clipboardHistory.copy(first.id)
+    const one = await api.clipboardHistory.toggleFavorite(first.id)
+    const two = await api.clipboardHistory.toggleFavorite(first.id)
+    favoriteToggle = { one, two }
+  }
+
+  return {
+    records: records.map((item: any) => ({
+      id: item.id,
+      type: item.type,
+      size: item.size,
+      favorite: item.favorite,
+      timestamp: item.timestamp
+    })),
+    firstRecord: firstRecord ? { id: firstRecord.id, type: firstRecord.type, favorite: firstRecord.favorite } : null,
+    copyResult,
+    favoriteToggle
+  }
+}
+
+async function clipboardHistoryDeleteGuard(api: any) {
+  const deleteResult = await api.clipboardHistory.delete('mulby-demo-nonexistent-id')
+  return {
+    deleteResult,
+    clear: 'Not executed by default because it clears user clipboard history. The API call is intentionally shown in the snippet for explicit manual use.'
+  }
+}
+
 async function backendSharpSample(api: any) {
   const result = await api.sharp.execute({
     input: {
@@ -420,6 +461,9 @@ const backendExamples: Record<string, (api: any) => Promise<unknown>> = {
   messagingLoopback,
   trayLifecycle,
   backendStorageRoundtrip,
+  clipboardHistoryStats,
+  clipboardHistoryQuery,
+  clipboardHistoryDeleteGuard,
   backendSharpSample,
   backendAiSnapshot,
   pluginToolEcho,

@@ -223,7 +223,7 @@ off()`,
     contexts: ['renderer', 'backend'],
     notes: [
       'Clipboard history is user data. Prefer small limits and avoid rendering sensitive content by default.',
-      'Mutating calls such as delete/clear are documented but not executed by this reference UI.'
+      'The host currently exposes clipboard history reliably through backend `context.api.clipboardHistory`; renderer examples call it through Host RPC.'
     ],
     examples: [
       {
@@ -232,12 +232,11 @@ off()`,
         description: 'Reads aggregate clipboard history counts.',
         methods: ['clipboardHistory.stats'],
         safety: 'requires-permission',
-        code: `const stats = await window.mulby.clipboardHistory.stats()`,
+        code: `const stats = await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryStats')`,
         async run() {
-          const api = mulby()
-          if (!api?.clipboardHistory) return unavailable('Clipboard history stats')
-          const stats = await api.clipboardHistory.stats()
-          return { ok: true, title: 'Clipboard history stats', data: stats }
+          const data = await callBackendExample('clipboardHistoryStats')
+          if ((data as any)?.warning) return data as any
+          return { ok: true, title: 'Clipboard history stats', data }
         }
       },
       {
@@ -246,37 +245,11 @@ off()`,
         description: 'Queries recent records, reads the first record by id, copies it, toggles favorite twice, and leaves history unchanged.',
         methods: ['clipboardHistory.query', 'clipboardHistory.get', 'clipboardHistory.copy', 'clipboardHistory.toggleFavorite'],
         safety: 'requires-permission',
-        code: `const records = await window.mulby.clipboardHistory.query({ limit: 5 })\nconst first = records[0]\nif (first) {\n  await window.mulby.clipboardHistory.get(first.id)\n  await window.mulby.clipboardHistory.copy(first.id)\n  await window.mulby.clipboardHistory.toggleFavorite(first.id)\n  await window.mulby.clipboardHistory.toggleFavorite(first.id)\n}`,
+        code: `const result = await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryQuery')`,
         async run() {
-          const api = mulby()
-          if (!api?.clipboardHistory) return unavailable('Clipboard history query')
-          const records = await api.clipboardHistory.query({ limit: 5 })
-          const first = records[0]
-          const firstRecord = first ? await api.clipboardHistory.get(first.id) : null
-          let copyResult: unknown = null
-          let favoriteToggle: unknown = null
-          if (first) {
-            copyResult = await api.clipboardHistory.copy(first.id)
-            const one = await api.clipboardHistory.toggleFavorite(first.id)
-            const two = await api.clipboardHistory.toggleFavorite(first.id)
-            favoriteToggle = { one, two }
-          }
-          return {
-            ok: true,
-            title: 'Clipboard history query',
-            data: {
-              records: records.map((item: any) => ({
-                id: item.id,
-                type: item.type,
-                size: item.size,
-                favorite: item.favorite,
-                timestamp: item.timestamp
-              })),
-              firstRecord: firstRecord ? { id: firstRecord.id, type: firstRecord.type, favorite: firstRecord.favorite } : null,
-              copyResult,
-              favoriteToggle
-            }
-          }
+          const data = await callBackendExample('clipboardHistoryQuery')
+          if ((data as any)?.warning) return data as any
+          return { ok: true, title: 'Clipboard history query', data }
         }
       },
       {
@@ -285,19 +258,11 @@ off()`,
         description: 'Executes delete with a demo-only impossible id and skips destructive clear unless the user opts into editing the snippet.',
         methods: ['clipboardHistory.delete', 'clipboardHistory.clear'],
         safety: 'requires-permission',
-        code: `await window.mulby.clipboardHistory.delete('mulby-demo-nonexistent-id')\n// await window.mulby.clipboardHistory.clear()`,
+        code: `await window.mulby.host.call('mulby-demo', 'runBackendExample', 'clipboardHistoryDeleteGuard')\n// context.api.clipboardHistory.clear()`,
         async run() {
-          const api = mulby()
-          if (!api?.clipboardHistory) return unavailable('Clipboard history delete guard')
-          const deleteResult = await api.clipboardHistory.delete('mulby-demo-nonexistent-id')
-          return {
-            ok: true,
-            title: 'Clipboard history delete guard',
-            data: {
-              deleteResult,
-              clear: 'Not executed by default because it clears user clipboard history. The API call is intentionally shown in the snippet for explicit manual use.'
-            }
-          }
+          const data = await callBackendExample('clipboardHistoryDeleteGuard')
+          if ((data as any)?.warning) return data as any
+          return { ok: true, title: 'Clipboard history delete guard', data }
         }
       }
     ]

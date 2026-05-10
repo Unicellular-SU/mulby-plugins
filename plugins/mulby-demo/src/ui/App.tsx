@@ -15,6 +15,7 @@ import {
   TerminalSquare
 } from 'lucide-react'
 import { getCatalogSummary, publicApiCatalog, restrictedApiCatalog } from '../shared/api-catalog'
+import { methodDetails } from '../shared/method-details'
 import { apiExamples, ensureCatalogCoverage, groupExamplesByCategory } from './examples/registry'
 import type { ApiExampleModule, ExampleResult, RunnableExample } from './examples/types'
 import {
@@ -95,6 +96,7 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(() => normalizeLanguage(navigator.language))
   const [query, setQuery] = useState('')
   const [selectedCode, setSelectedCode] = useState(apiExamples[0]?.code ?? '')
+  const [selectedMethod, setSelectedMethod] = useState<string | null>(null)
   const [runningId, setRunningId] = useState<string | null>(null)
   const [result, setResult] = useState<ExampleResult | null>(null)
 
@@ -110,6 +112,10 @@ export default function App() {
   const selectedSummary = getModuleSummary(selected, language)
   const selectedNotes = getModuleNotes(selected, language)
   const selectedCategory = getCategoryLabel(selected.category, selected.category, language)
+  const activeMethod = selected.methods.includes(selectedMethod ?? '')
+    ? selectedMethod
+    : selected.methods[0] ?? null
+  const activeMethodDetail = activeMethod ? methodDetails[activeMethod] : null
 
   async function runExample(example: RunnableExample) {
     const exampleLabel = getExampleLabel(example, language)
@@ -203,7 +209,10 @@ export default function App() {
                   <button
                     key={module.code}
                     className={module.code === selected.code ? 'nav-item active' : 'nav-item'}
-                    onClick={() => setSelectedCode(module.code)}
+                    onClick={() => {
+                      setSelectedCode(module.code)
+                      setSelectedMethod(null)
+                    }}
                   >
                     <span>{getModuleTitle(module, language)}</span>
                     <small>{module.methods.length}</small>
@@ -250,9 +259,59 @@ export default function App() {
             <h3>{localize(uiText.methods, language)}</h3>
             <div className="method-list">
               {selected.methods.map((method) => (
-                <code key={method}>{method}</code>
+                <button
+                  key={method}
+                  type="button"
+                  className={method === activeMethod ? 'method-chip active' : 'method-chip'}
+                  onClick={() => setSelectedMethod(method)}
+                >
+                  <code>{method}</code>
+                </button>
               ))}
             </div>
+
+            {activeMethodDetail ? (
+              <section className="method-detail" aria-live="polite">
+                <div className="method-detail-header">
+                  <span className="eyebrow">{localize(uiText.methodDetail, language)}</span>
+                  <code>{activeMethodDetail.signature}</code>
+                </div>
+                <p>{localize(activeMethodDetail.summary, language)}</p>
+                <div className="meta-row method-contexts">
+                  {activeMethodDetail.contexts.map((context) => (
+                    <span key={context} className="pill">{context}</span>
+                  ))}
+                </div>
+
+                <h4>{localize(uiText.inputs, language)}</h4>
+                <div className="method-io-list">
+                  {activeMethodDetail.inputs.map((input) => (
+                    <div key={`${activeMethodDetail.method}:${input.name}`} className="method-io-row">
+                      <div>
+                        <strong>{input.name}</strong>
+                        <span>{input.required ? localize(uiText.required, language) : localize(uiText.optional, language)}</span>
+                      </div>
+                      <code>{input.type}</code>
+                      <p>{localize(input.description, language)}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <h4>{localize(uiText.returns, language)}</h4>
+                <p>{localize(activeMethodDetail.returns, language)}</p>
+
+                {activeMethodDetail.notes?.length ? (
+                  <>
+                    <h4>{localize(uiText.methodNotes, language)}</h4>
+                    <ul className="notes-list">
+                      {activeMethodDetail.notes.map((note) => (
+                        <li key={note.en}>{localize(note, language)}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </section>
+            ) : null}
 
             <h3>{localize(uiText.notes, language)}</h3>
             <ul className="notes-list">
