@@ -1241,12 +1241,16 @@ export default function PetView() {
           }
           return
         }
-        case 'settings-consolidate-memory': {
-          void chatRef.current?.consolidateMemories()
+        case 'settings-refresh-life-profile': {
+          void chatRef.current?.forceRefreshLifeProfile()
           return
         }
-        case 'settings-extract-memory': {
-          void chatRef.current?.forceExtractMemory()
+        case 'settings-clear-life-profile': {
+          void chatRef.current?.clearLifeProfile()
+          return
+        }
+        case 'life-profile-updated': {
+          void chatRef.current?.reloadLifeProfileFromStorage()
           return
         }
         case 'chat-history-updated': {

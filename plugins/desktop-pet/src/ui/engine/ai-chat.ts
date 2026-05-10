@@ -13,7 +13,7 @@ import {
   stripPresentationMarkers,
   tryExtractPresentationMarker,
 } from './presentation'
-import { PetMemoryController, type ConsolidateMemoriesResult } from './pet-memory'
+import { LifeProfileController, type LifeProfileRefreshResult } from './pet-life-profile'
 import type { PetStats } from './pet-stats'
 import type { PetStatsController } from './pet-stats'
 import { logPetPresentation } from './presentation-debug'
@@ -272,7 +272,7 @@ export class AIChatController {
   private isGenerating = false
   private requestId: string | null = null
   private triggeredOnce = new Set<string>()
-  private memory = new PetMemoryController()
+  private lifeProfile = new LifeProfileController()
   private statsGetter: (() => PetStats) | null = null
   private statsController: PetStatsController | null = null
   private geoContext: GeoContext | null = null
@@ -281,7 +281,7 @@ export class AIChatController {
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
     void this.loadHistoryInternal()
-    this.memory.load()
+    void this.lifeProfile.load()
   }
 
   private normalizeHistoryItem(raw: unknown): PetChatHistoryItem | null {
@@ -394,10 +394,9 @@ export class AIChatController {
 
     const userMessage = this.buildUserMessage(reason, currentBehavior)
 
-    const contextKeywords = this.extractKeywords(userMessage)
-    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userMessage, reason)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + memoryPrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + lifeProfilePrompt
 
     const historyMessages = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
       role: h.role as 'user' | 'assistant',
@@ -586,7 +585,7 @@ export class AIChatController {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
-        this.maybeExtractMemory()
+        this.maybeRefreshLifeProfile()
       }
 
       if (!result) return null
@@ -624,10 +623,9 @@ export class AIChatController {
     this.isGenerating = true
     this.lastSpeakTime = Date.now()
 
-    const contextKeywords = this.extractKeywords(userText)
-    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userText)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + memoryPrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + lifeProfilePrompt
 
     const historyMessagesChat = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
       role: h.role as 'user' | 'assistant',
@@ -811,7 +809,7 @@ export class AIChatController {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
-        this.maybeExtractMemory()
+        this.maybeRefreshLifeProfile()
       }
 
       if (!result) return null
@@ -846,44 +844,36 @@ export class AIChatController {
   }
 
   /**
-   * 自动提炼：每轮对话结束后增加「距上次成功」计数；仅当达到轮次与冷却时间门槛时才请求模型。
+   * 自动刷新生活档案：每轮对话结束后增加计数；仅当达到轮次与冷却时间门槛时才请求模型。
    */
-  private maybeExtractMemory() {
-    this.memory.notifyUserTurnEnded()
-    if (!this.memory.shouldAttemptAutoExtract()) return
+  private maybeRefreshLifeProfile() {
+    this.lifeProfile.notifyUserTurnEnded()
+    if (!this.lifeProfile.shouldAttemptAutoUpdate()) return
     const recent = this.context.history.slice(-16).map(m => ({ role: m.role, content: m.content }))
     if (recent.length < 2) return
-    this.memory.markExtractAttempt()
-    void this.memory.extractMemoriesFromChatBatch(this.personality.model, recent)
+    this.lifeProfile.markUpdateAttempt()
+    void this.lifeProfile.refreshFromChatBatch(this.personality.model, recent)
   }
 
-  /** 设置页「立即抽取」：绕过轮次与间隔门控，仍使用批量提炼与归并逻辑 */
-  async forceExtractMemory(): Promise<void> {
-    if (!this.personality.model) return
-    const recent = this.context.history.slice(-20).map(m => ({ role: m.role, content: m.content }))
-    if (recent.length < 2) return
-    this.memory.markExtractAttempt()
-    await this.memory.extractMemoriesFromChatBatch(this.personality.model, recent)
-  }
-
-  getMemoryController(): PetMemoryController {
-    return this.memory
-  }
-
-  /** 设置页「整理重复记忆」：合并未固定条目中的语义重复项 */
-  async consolidateMemories(): Promise<ConsolidateMemoriesResult> {
+  /** 设置页「更新记忆」：绕过轮次与间隔门控，仍使用批量档案更新逻辑 */
+  async forceRefreshLifeProfile(): Promise<LifeProfileRefreshResult> {
     if (!this.personality.model) {
-      return { ok: false, mergesApplied: 0, entriesRemoved: 0, reason: 'no-model' }
+      return { ok: false, upsertsApplied: 0, deletesApplied: 0, rejected: 0, reason: 'no-model' }
     }
-    return this.memory.consolidateUnpinnedMemories(this.personality.model)
+    const recent = this.context.history.slice(-20).map(m => ({ role: m.role, content: m.content }))
+    if (recent.length < 2) {
+      return { ok: false, upsertsApplied: 0, deletesApplied: 0, rejected: 0, reason: 'too-few-messages' }
+    }
+    this.lifeProfile.markUpdateAttempt()
+    return this.lifeProfile.refreshFromChatBatch(this.personality.model, recent)
   }
 
-  private extractKeywords(text: string): string[] {
-    const clean = text.replace(/[[\]，。！？、：""''（）\s]/g, ' ')
-    return clean
-      .split(' ')
-      .filter(w => w.length >= 2)
-      .slice(0, 5)
+  async reloadLifeProfileFromStorage(): Promise<void> {
+    await this.lifeProfile.load()
+  }
+
+  async clearLifeProfile(): Promise<void> {
+    await this.lifeProfile.clear()
   }
 
   private buildUserMessage(reason: TriggerReason, behavior: BehaviorType): string {
