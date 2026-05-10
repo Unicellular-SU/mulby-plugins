@@ -10,6 +10,9 @@
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
   "minAppVersion": "1.0.0",
+  "permissions": {
+    "geolocation": true
+  },
   "features": [
     {
       "code": "main",
