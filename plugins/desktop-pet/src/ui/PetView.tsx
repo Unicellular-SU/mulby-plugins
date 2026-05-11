@@ -20,6 +20,21 @@ import { SLIME_SPRITE_SET } from './engine/slime-sprites'
 import { PetStatsController, type PetMood } from './engine/pet-stats'
 import { validateSpriteSet } from './engine/sprite-sanitize'
 import {
+  DEFAULT_ECOSYSTEM_SETTINGS,
+  PET_ECOSYSTEM_SETTINGS_STORAGE_KEY,
+  PetGameStatsController,
+  PetNeedsController,
+  PetQuestController,
+  PetTimelineController,
+  WORK_MODE_LABELS,
+  classifyWorkMode,
+  expressionFromNeeds,
+  normalizeEcosystemSettings,
+  type PetEcosystemSettings,
+  type QuestEvent,
+  type WorkMode,
+} from './engine/pet-ecosystem'
+import {
   normalizePersonality,
   validateChatMessage,
   validateGeoUpdated,
@@ -195,6 +210,13 @@ export default function PetView() {
   const activeWindowTimerRef = useRef<number>(0)
   const lastActiveAppRef = useRef<string>('')
   const lastAppSwitchSpeakRef = useRef<number>(0)
+  const needsRef = useRef<PetNeedsController>(new PetNeedsController())
+  const timelineRef = useRef<PetTimelineController>(new PetTimelineController())
+  const questsRef = useRef<PetQuestController>(new PetQuestController())
+  const gameStatsRef = useRef<PetGameStatsController>(new PetGameStatsController())
+  const ecosystemSettingsRef = useRef<PetEcosystemSettings>({ ...DEFAULT_ECOSYSTEM_SETTINGS })
+  const currentWorkModeRef = useRef<WorkMode>('casual')
+  const routineMinutesRef = useRef({ hydration: 0, rest: 0 })
   const mousePassthroughRef = useRef<PetMousePassthroughState | null>(null)
   const mousePassthroughPollRef = useRef<number>(0)
   const windowBoundsRef = useRef<WindowBounds | null>(null)
@@ -331,6 +353,39 @@ export default function PetView() {
 
     await syncMousePassthroughToCursor()
   }, [syncMousePassthroughToCursor])
+
+  const syncEcosystemContext = useCallback(() => {
+    const mode = currentWorkModeRef.current
+    chatRef.current?.setEcosystemContext({
+      mode,
+      modeLabel: WORK_MODE_LABELS[mode],
+      needs: needsRef.current.getSnapshot(),
+      quests: questsRef.current.getState(),
+    })
+  }, [])
+
+  const noteEcosystemEvent = useCallback((
+    eventType: string,
+    label: string,
+    options: {
+      needEvent?: string
+      questEvent?: QuestEvent
+      mode?: WorkMode
+      app?: string
+      score?: number
+    } = {}
+  ) => {
+    void timelineRef.current.record(eventType, label, {
+      mode: options.mode,
+      app: options.app,
+      score: options.score,
+    })
+    if (options.needEvent) void needsRef.current.applyEvent(options.needEvent).then(syncEcosystemContext)
+    if (options.questEvent && ecosystemSettingsRef.current.questsEnabled) {
+      void questsRef.current.applyEvent(options.questEvent).then(syncEcosystemContext)
+    }
+    syncEcosystemContext()
+  }, [syncEcosystemContext])
 
   const showBubble = useCallback((text: string, options?: { preserveReasoning?: boolean }) => {
     const proxy = bubbleProxyRef.current
@@ -567,6 +622,7 @@ export default function PetView() {
     }
     if (intent.emotion) {
       statsRef.current.applyEmotion(intent.emotion)
+      void needsRef.current.applyEvent('interaction').then(syncEcosystemContext)
     }
     if (intent.animation) {
       svgRendererRef.current?.playAnimation(intent.animation)
@@ -574,13 +630,14 @@ export default function PetView() {
     if (intent.movement) {
       startPresentationMove(intent.movement, durationMs)
     }
-  }, [setExpression, startPresentationMove])
+  }, [setExpression, startPresentationMove, syncEcosystemContext])
 
   const triggerSpeak = useCallback(async (reason: TriggerReason) => {
     if (pomodoroRef.current && reason !== 'user_click') return
     const chat = chatRef.current
     const state = stateRef.current
     if (!chat || !state) return
+    syncEcosystemContext()
     if (!chat.canSpeak(reason)) return
 
     const result = await chat.speak(reason, state.behavior, {
@@ -592,8 +649,12 @@ export default function PetView() {
       showBubble(result.text, { preserveReasoning: true })
       if (result.expression !== 'neutral') setExpression(result.expression)
       statsRef.current.recordChat()
+      noteEcosystemEvent('chat', reason === 'user_click' ? '和宠物聊了一句' : '宠物主动搭话', {
+        needEvent: 'chat',
+        questEvent: 'chat',
+      })
     }
-  }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression])
+  }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression, syncEcosystemContext, noteEcosystemEvent])
 
   const CHAT_INPUT_WIDTH = 220
   const CHAT_INPUT_HEIGHT = 44
@@ -645,6 +706,8 @@ export default function PetView() {
       if (text.trim() === '放弃' || text.trim() === '不知道') {
         showBubble(getGameAnswer(session.answer))
         setExpression('sad')
+        void gameStatsRef.current.recordResult(false)
+        noteEcosystemEvent('game_give_up', '放弃了小游戏', { needEvent: 'game_wrong' })
         gameSessionRef.current = null
         return
       }
@@ -654,9 +717,16 @@ export default function PetView() {
       if (correct) {
         statsRef.current.recordInteraction()
         statsRef.current.recordChat()
+        void gameStatsRef.current.recordResult(true)
+        noteEcosystemEvent('game_correct', `答对了${session.type === 'riddle' ? '谜语' : session.type === 'idiom' ? '成语题' : '冷知识'}`, {
+          needEvent: 'game_correct',
+          questEvent: 'game_correct',
+        })
         gameSessionRef.current = null
         checkAchievements()
       } else if (session.attempts >= 3) {
+        void gameStatsRef.current.recordResult(false)
+        noteEcosystemEvent('game_wrong', '小游戏三次没有答对', { needEvent: 'game_wrong' })
         setTimeout(() => {
           showBubble(getGameAnswer(session.answer))
           setExpression('neutral')
@@ -679,8 +749,12 @@ export default function PetView() {
       if (result.expression !== 'neutral') setExpression(result.expression)
       statsRef.current.recordChat()
       statsRef.current.recordInteraction()
+      noteEcosystemEvent('chat', '和宠物主动聊天', {
+        needEvent: 'chat',
+        questEvent: 'chat',
+      })
     }
-  }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression])
+  }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression, noteEcosystemEvent])
 
   const openSettings = useCallback(async () => {
     if (settingsProxyRef.current) {
@@ -717,6 +791,7 @@ export default function PetView() {
       pomodoroStartRef.current = 0
       showBubble('没关系，下次继续~')
       setExpression('sad')
+      noteEcosystemEvent('pomodoro_cancel', '取消了一次专注', { needEvent: 'pomodoro_cancel' })
       return
     }
 
@@ -724,6 +799,7 @@ export default function PetView() {
     pomodoroStartRef.current = Date.now()
     setExpression('sleepy')
     showBubble(`专注 ${minutes} 分钟开始！`)
+    noteEcosystemEvent('pomodoro_start', `开始 ${minutes} 分钟专注`, { needEvent: 'pomodoro_start' })
 
     let lastMinShown = -1
     pomodoroRef.current = window.setInterval(() => {
@@ -737,6 +813,10 @@ export default function PetView() {
         statsRef.current.recordPomodoroComplete(minutes)
         setExpression('excited')
         showBubble('专注完成！休息一下吧~')
+        noteEcosystemEvent('pomodoro_complete', `完成 ${minutes} 分钟专注`, {
+          needEvent: 'pomodoro_complete',
+          questEvent: 'pomodoro_complete',
+        })
         checkAchievements()
         return
       }
@@ -754,7 +834,7 @@ export default function PetView() {
       }
     }, 1000)
     // checkAchievements 在 setInterval 回调真正执行时才查找，无需放进 deps
-  }, [showBubble, setExpression, updateBubbleText, safeProxyCall])
+  }, [showBubble, setExpression, updateBubbleText, safeProxyCall, noteEcosystemEvent])
 
   const checkAchievements = useCallback(() => {
     const stats = statsRef.current.getStats()
@@ -781,11 +861,12 @@ export default function PetView() {
       const tid = window.setTimeout(() => {
         showBubble(r.label)
         setExpression('surprised')
+        noteEcosystemEvent('reminder', `提醒：${r.label}`, { needEvent: 'reminder' })
         scheduleReminders(reminders)
       }, delay)
       reminderTimersRef.current.push(tid)
     }
-  }, [showBubble, setExpression])
+  }, [showBubble, setExpression, noteEcosystemEvent])
 
   const weatherFetchVersionRef = useRef(0)
   const fetchWeather = useCallback(async (geo: GeoContext) => {
@@ -846,18 +927,25 @@ export default function PetView() {
     if (result) {
       showBubble(result.question)
       setExpression(result.expression)
+      void gameStatsRef.current.recordPlayed()
+      noteEcosystemEvent('game_start', `开始${type === 'riddle' ? '猜谜语' : type === 'idiom' ? '成语接龙' : '冷知识问答'}`, {
+        needEvent: 'game_start',
+        questEvent: 'game_played',
+      })
       gameSessionRef.current = { type, active: true, answer: result.answer ?? '', attempts: 0 }
     } else {
       showBubble('啊，出题失败了...')
       setExpression('sad')
     }
-  }, [showBubble, setExpression, updateBubbleText])
+  }, [showBubble, setExpression, updateBubbleText, noteEcosystemEvent])
 
   const showContextMenu = useCallback(async () => {
     if (contextMenuOpenRef.current) return
     contextMenuOpenRef.current = true
 
     const stats = statsRef.current.getStats()
+    const quests = questsRef.current.getState()
+    const questDone = quests.quests.filter(q => q.completed).length
     const minutes = chatRef.current?.getPersonality()?.pomodoroMinutes || 25
     const pomodoroLabel = pomodoroRef.current
       ? '停止专注'
@@ -883,6 +971,8 @@ export default function PetView() {
         { label: '冷知识问答', id: 'game_trivia' },
         { type: 'separator', label: '' },
         { label: `心情: ${moodLabels[stats.mood] || stats.mood}`, id: 'mood', enabled: false },
+        { label: `模式: ${WORK_MODE_LABELS[currentWorkModeRef.current]}`, id: 'mode', enabled: false },
+        { label: `今日目标: ${questDone}/${quests.quests.length}`, id: 'quests', enabled: false },
         { label: `亲密度: ${stats.intimacy}`, id: 'stats', enabled: false },
         { label: `今日番茄: ${stats.pomodoroToday} 个`, id: 'stats2', enabled: false },
         { type: 'separator', label: '' },
@@ -961,6 +1051,20 @@ export default function PetView() {
     await statsRef.current.load()
     await achieveRef.current.load()
     await diaryRef.current.load()
+    await needsRef.current.load()
+    await timelineRef.current.load()
+    await questsRef.current.load()
+    await gameStatsRef.current.load()
+    try {
+      ecosystemSettingsRef.current = normalizeEcosystemSettings(
+        await window.mulby.storage.get(PET_ECOSYSTEM_SETTINGS_STORAGE_KEY)
+      )
+    } catch (err) {
+      logPetPresentation('pet.ecosystem-settings.load-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
+    noteEcosystemEvent('startup', '宠物启动并完成签到', { needEvent: 'startup' })
 
     const signedIn = statsRef.current.signIn()
     if (signedIn) {
@@ -984,6 +1088,7 @@ export default function PetView() {
 
     chatRef.current = new AIChatController(personality)
     chatRef.current.setStatsController(statsRef.current)
+    syncEcosystemContext()
 
     try {
       const savedGeo = await window.mulby.storage.get('pet-geo')
@@ -1235,7 +1340,17 @@ export default function PetView() {
           const current = chatRef.current?.getPersonality() ?? DEFAULT_PERSONALITY
           const newP = normalizePersonality(rawP, current)
           chatRef.current?.updatePersonality(newP)
-          if (newP.reminders.length) scheduleReminders(newP.reminders)
+          if (newP.reminders.length) {
+            scheduleReminders(newP.reminders)
+          } else {
+            reminderTimersRef.current.forEach(t => clearTimeout(t))
+            reminderTimersRef.current = []
+          }
+          const rawSettings = (payload as Record<string, unknown>).ecosystemSettings
+          if (rawSettings) {
+            ecosystemSettingsRef.current = normalizeEcosystemSettings(rawSettings)
+            syncEcosystemContext()
+          }
           return
         }
         case 'settings-closed': {
@@ -1361,6 +1476,8 @@ export default function PetView() {
         })
       }
       statsRef.current.decayMood()
+      syncEcosystemContext()
+      void needsRef.current.save()
       if (s.idleTimer > 300_000) {
         s.idleTimer = 0
         triggerSpeak('idle')
@@ -1372,8 +1489,11 @@ export default function PetView() {
         if (chat) {
           const p = chat.getPersonality()
           const st = statsRef.current.getStats()
-          diaryRef.current.generateDiary(p.model, p.name, st, []).then(entry => {
+          const recentChat = chat.getRecentHistory(12)
+          const todayEvents = timelineRef.current.getTodaySummary(12)
+          diaryRef.current.generateDiary(p.model, p.name, st, recentChat, todayEvents).then(entry => {
             if (entry) {
+              noteEcosystemEvent('diary', '生成了今天的日记')
               showBubble('今天的日记写好啦，去设置里看看吧~')
               setExpression('happy')
             }
@@ -1391,13 +1511,28 @@ export default function PetView() {
         if (!data || typeof data !== 'object') return
         const app = typeof data.app === 'string' ? data.app : ''
         if (!app) return
+        const ecosystemSettings = ecosystemSettingsRef.current
+        const rawTitle = typeof data.title === 'string' ? data.title.slice(0, 200) : ''
         const ctx: ActiveWindowContext = {
           app: app.slice(0, 64),
-          title: typeof data.title === 'string' ? data.title.slice(0, 200) : '',
+          title: ecosystemSettings.useWindowTitleContext ? rawTitle : '',
           bundleId: typeof data.bundleId === 'string' ? data.bundleId.slice(0, 200) : undefined,
           changedAt: typeof data.changedAt === 'number' ? data.changedAt : Date.now(),
         }
         chatRef.current?.setActiveWindow(ctx)
+        if (ecosystemSettings.workModeEnabled) {
+          const mode = classifyWorkMode({ ...ctx, title: rawTitle }, ecosystemSettings.useWindowTitleContext)
+          if (mode !== currentWorkModeRef.current) {
+            currentWorkModeRef.current = mode
+            noteEcosystemEvent('work_mode', `切换到${WORK_MODE_LABELS[mode]}模式`, {
+              needEvent: `work_${mode}`,
+              mode,
+              app: ctx.app,
+            })
+          } else {
+            syncEcosystemContext()
+          }
+        }
         if (app !== lastActiveAppRef.current) {
           lastActiveAppRef.current = app
           const now = Date.now()
@@ -1413,21 +1548,24 @@ export default function PetView() {
       }
     }, 3000)
 
-    let waterMinutes = 0
-    let restMinutes = 0
+    routineMinutesRef.current = { hydration: 0, rest: 0 }
     waterTimerRef.current = window.setInterval(() => {
       if (pomodoroRef.current) return
-      waterMinutes++
-      restMinutes++
-      if (waterMinutes >= 45) {
-        waterMinutes = 0
+      const ecosystemSettings = ecosystemSettingsRef.current
+      if (!ecosystemSettings.routinesEnabled) return
+      routineMinutesRef.current.hydration++
+      routineMinutesRef.current.rest++
+      if (routineMinutesRef.current.hydration >= ecosystemSettings.hydrationReminderMinutes) {
+        routineMinutesRef.current.hydration = 0
         showBubble('该喝水啦~ 💧')
         setExpression('neutral')
+        noteEcosystemEvent('routine', '提醒喝水', { needEvent: 'routine_hydration' })
       }
-      if (restMinutes >= 90) {
-        restMinutes = 0
+      if (routineMinutesRef.current.rest >= ecosystemSettings.eyeRestReminderMinutes) {
+        routineMinutesRef.current.rest = 0
         showBubble('休息一下眼睛吧~ 👀')
         setExpression('sleepy')
+        noteEcosystemEvent('routine', '提醒休息眼睛', { needEvent: 'routine_rest' })
       }
     }, 60_000)
 
@@ -1570,8 +1708,13 @@ export default function PetView() {
       } else if (behaviorExpr !== 'neutral') {
         expr = behaviorExpr
       } else {
-        const mood = statsRef.current.getMood()
-        expr = MOOD_EXPRESSION[mood] ?? 'neutral'
+        const needExpr = expressionFromNeeds(needsRef.current.getSnapshot())
+        if (needExpr !== 'neutral') {
+          expr = needExpr
+        } else {
+          const mood = statsRef.current.getMood()
+          expr = MOOD_EXPRESSION[mood] ?? 'neutral'
+        }
       }
       svgRendererRef.current.setPose(pose)
       svgRendererRef.current.setExpression(expr)
@@ -1673,6 +1816,10 @@ export default function PetView() {
           if (!longPressFiredRef.current) {
             triggerSpeak('user_click')
             statsRef.current.recordInteraction()
+            noteEcosystemEvent('interaction', '点击宠物互动', {
+              needEvent: 'interaction',
+              questEvent: 'interaction',
+            })
           }
         }}
         onPointerLeave={() => {

@@ -16,6 +16,7 @@ import {
 import { LifeProfileController, type LifeProfileRefreshResult } from './pet-life-profile'
 import type { PetStats } from './pet-stats'
 import type { PetStatsController } from './pet-stats'
+import type { PetEcosystemContext } from './pet-ecosystem'
 import { logPetPresentation } from './presentation-debug'
 
 export interface PetPersonality {
@@ -96,11 +97,34 @@ const TRAIT_PROMPTS: Record<string, { desc: string; examples: string }> = {
   },
 }
 
+export function buildCurrentTimeContext(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const date = now.getDate()
+  const hour = now.getHours()
+  const minute = now.getMinutes()
+  const timeZone = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '系统本地时区'
+    } catch {
+      return '系统本地时区'
+    }
+  })()
+  const offsetMinutes = -now.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  const offset = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  return `${year}年${month}月${date}日 ${weekdays[now.getDay()]} ${pad(hour)}:${pad(minute)}，时区 ${timeZone} (${offset})`
+}
+
 function buildSystemPrompt(
   personality: PetPersonality,
   stats?: PetStats | null,
   geo?: GeoContext | null,
   activeWindow?: ActiveWindowContext | null,
+  ecosystem?: PetEcosystemContext | null,
 ): string {
   const traitData = TRAIT_PROMPTS[personality.trait]
   const traitDesc = personality.trait === 'custom'
@@ -108,6 +132,7 @@ function buildSystemPrompt(
     : traitData?.desc || '你是一只可爱的桌面宠物。'
   const traitExamples = traitData?.examples || `你好呀~
 你在忙什么？`
+  const timeBlock = `\n【当前本地时间】\n- ${buildCurrentTimeContext()}\n- 回答涉及日期、时间、早晚、午休、深夜时必须以这里为准；不要凭模型常识猜测当前时间\n`
 
   let statsBlock = ''
   if (stats) {
@@ -149,11 +174,18 @@ function buildSystemPrompt(
     activeWindowBlock += '\n- 这是上下文信息：标题里可能含私密内容，不要复述、不要照搬、不要询问敏感细节；如果用户切到了不同应用，可以自然地体现你注意到了\n'
   }
 
+  let ecosystemBlock = ''
+  if (ecosystem) {
+    const n = ecosystem.needs
+    const done = ecosystem.quests.quests.filter(q => q.completed).length
+    ecosystemBlock = `\n【宠物生态状态】\n- 当前模式: ${ecosystem.modeLabel}\n- 需求: 精力${n.energy}/100、关注${n.attention}/100、好奇${n.curiosity}/100、专注${n.focus}/100、补水${n.hydration}/100\n- 今日小目标: ${done}/${ecosystem.quests.quests.length} 已完成\n- 这些状态会影响你的语气和主动程度；不要逐项汇报，除非用户问\n`
+  }
+
   return `你是"${personality.name}"，一只住在用户桌面上的像素风格小幽灵宠物。
 
 【核心性格（最重要，严格遵守，每一句回复都必须完全符合此性格）】
 ${traitDesc}
-${statsBlock}${geoBlock}${activeWindowBlock}
+${timeBlock}${statsBlock}${geoBlock}${activeWindowBlock}${ecosystemBlock}
 【表现控制（必须优先使用工具）】
 1) 回复过程中需要变脸时调用 pet_show_expression，例如开心用 happy/love，疑惑用 curious/confused，专注用 focused，害怕用 scared，得意用 proud，晕乎用 dizzy，生气用 angry。
 2) 需要动作或动画时调用 pet_perform_action，例如 jump、wave、sit、sleep、hover、peek、spin、dance、hide、focus、cheer、celebrate、wobble。
@@ -277,6 +309,7 @@ export class AIChatController {
   private statsController: PetStatsController | null = null
   private geoContext: GeoContext | null = null
   private activeWindow: ActiveWindowContext | null = null
+  private ecosystemContext: PetEcosystemContext | null = null
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
@@ -319,6 +352,10 @@ export class AIChatController {
     return this.activeWindow
   }
 
+  setEcosystemContext(context: PetEcosystemContext | null) {
+    this.ecosystemContext = context
+  }
+
   private async loadHistoryInternal() {
     try {
       const saved = await (window as any).mulby?.storage?.get(HISTORY_STORAGE_KEY)
@@ -351,6 +388,13 @@ export class AIChatController {
     return this.personality
   }
 
+  getRecentHistory(limit = 12): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return this.context.history.slice(-limit).map(h => ({
+      role: h.role,
+      content: h.role === 'assistant' ? sanitizeAssistantForHistory(h.content) : h.content,
+    }))
+  }
+
   updatePersonality(p: PetPersonality) {
     this.personality = p
   }
@@ -360,6 +404,9 @@ export class AIChatController {
     if (reason === 'user_click') return true
 
     if (this.personality.frequency === 'click-only') return false
+    if (this.ecosystemContext?.needs.attention != null && this.ecosystemContext.needs.attention < 18) {
+      if (reason !== 'morning' && reason !== 'late_night') return false
+    }
 
     const triggers = this.personality.triggers
     if (reason === 'idle' && !triggers.idle) return false
@@ -396,7 +443,7 @@ export class AIChatController {
 
     const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userMessage, reason)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + lifeProfilePrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow, this.ecosystemContext) + lifeProfilePrompt
 
     const historyMessages = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
       role: h.role as 'user' | 'assistant',
@@ -625,7 +672,7 @@ export class AIChatController {
 
     const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userText)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow) + lifeProfilePrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow, this.ecosystemContext) + lifeProfilePrompt
 
     const historyMessagesChat = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
       role: h.role as 'user' | 'assistant',
@@ -877,26 +924,26 @@ export class AIChatController {
   }
 
   private buildUserMessage(reason: TriggerReason, behavior: BehaviorType): string {
-    const hour = new Date().getHours()
+    const time = buildCurrentTimeContext()
     const app = this.activeWindow?.app ? `（用户刚切到 ${this.activeWindow.app}）` : ''
 
     switch (reason) {
       case 'idle':
-        return `[用户已经闲置了一会儿，当前时间${hour}点]`
+        return `[用户已经闲置了一会儿，当前本地时间：${time}]`
       case 'typing_fast':
-        return `[用户正在快速打字工作中]`
+        return `[用户正在快速打字工作中，当前本地时间：${time}]`
       case 'morning':
-        return `[早上好！用户刚开始使用电脑，现在是${hour}点]`
+        return `[早上好！用户刚开始使用电脑，当前本地时间：${time}]`
       case 'late_night':
-        return `[已经是深夜${hour}点了，用户还在电脑前]`
+        return `[用户可能在深夜使用电脑，先核对当前本地时间：${time}]`
       case 'user_click':
-        return `[用户点击了你，想和你互动]`
+        return `[用户点击了你，想和你互动。当前本地时间：${time}]`
       case 'behavior_change':
-        return `[你现在的状态是：${behavior}]`
+        return `[你现在的状态是：${behavior}。当前本地时间：${time}]`
       case 'app_switch':
-        return `[用户切换到了新的应用窗口${app}，自然地搭句话即可，不要直接照念应用名]`
+        return `[用户切换到了新的应用窗口${app}，当前本地时间：${time}。自然地搭句话即可，不要直接照念应用名]`
       default:
-        return `[打个招呼吧]`
+        return `[打个招呼吧。当前本地时间：${time}]`
     }
   }
 }

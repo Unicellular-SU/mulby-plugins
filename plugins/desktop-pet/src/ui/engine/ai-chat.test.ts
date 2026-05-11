@@ -1,4 +1,4 @@
-import { compactPetReply } from './ai-chat'
+import { buildCurrentTimeContext, compactPetReply } from './ai-chat'
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message)
@@ -22,5 +22,14 @@ function testCompactPetReplyHidesStageDirections() {
   assert(actual.startsWith('我说'), `dialogue should remain: ${actual}`)
 }
 
+function testCurrentTimeContextIncludesConcreteLocalDateAndTime() {
+  const actual = buildCurrentTimeContext(new Date(2026, 4, 11, 10, 4))
+
+  assert(actual.includes('2026年5月11日'), `time context should include local date: ${actual}`)
+  assert(actual.includes('10:04'), `time context should include local time: ${actual}`)
+  assert(actual.includes('UTC'), `time context should include utc offset: ${actual}`)
+}
+
 testCompactPetReplyRemovesPresentationNoiseAndKeepsBubbleShort()
 testCompactPetReplyHidesStageDirections()
+testCurrentTimeContextIncludesConcreteLocalDateAndTime()

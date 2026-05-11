@@ -18,6 +18,28 @@ import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose } from '..
 import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import {
+  DEFAULT_ECOSYSTEM_SETTINGS,
+  NEED_LABELS,
+  PET_ECOSYSTEM_SETTINGS_STORAGE_KEY,
+  PET_GAME_STATS_STORAGE_KEY,
+  PET_NEEDS_STORAGE_KEY,
+  PET_QUESTS_STORAGE_KEY,
+  PET_TIMELINE_STORAGE_KEY,
+  WORK_MODE_LABELS,
+  normalizeEcosystemSettings,
+  normalizeGameStats,
+  normalizeNeeds,
+  normalizeQuestState,
+  normalizeTimeline,
+  todayStr,
+  type PetEcosystemSettings,
+  type PetGameStats,
+  type PetNeedsSnapshot,
+  type PetQuestState,
+  type PetTimelineEvent,
+  type WorkMode,
+} from '../engine/pet-ecosystem'
+import {
   LIFE_PROFILE_CATEGORIES,
   LIFE_PROFILE_CATEGORY_LABELS,
   PET_LIFE_PROFILE_STORAGE_KEY,
@@ -184,8 +206,13 @@ export default function SettingsView() {
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
-  const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
+  const [tab, setTab] = useState<'personality' | 'ecosystem' | 'reminders' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
+  const [needs, setNeeds] = useState<PetNeedsSnapshot>(() => normalizeNeeds(null))
+  const [quests, setQuests] = useState<PetQuestState>(() => normalizeQuestState(null))
+  const [gameStats, setGameStats] = useState<PetGameStats>(() => normalizeGameStats(null))
+  const [timeline, setTimeline] = useState<PetTimelineEvent[]>([])
+  const [ecosystemSettings, setEcosystemSettings] = useState<PetEcosystemSettings>({ ...DEFAULT_ECOSYSTEM_SETTINGS })
   const [lifeProfile, setLifeProfile] = useState<PetLifeProfile>(() => createEmptyLifeProfile())
   const [editingLifeMemoryId, setEditingLifeMemoryId] = useState<string | null>(null)
   const [editingLifeMemoryContent, setEditingLifeMemoryContent] = useState('')
@@ -206,6 +233,27 @@ export default function SettingsView() {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
   }
+
+  const loadEcosystem = useCallback(async (showSuccess = false, includeSettings = false) => {
+    try {
+      const [rawNeeds, rawQuests, rawGameStats, rawTimeline, rawSettings] = await Promise.all([
+        window.mulby.storage.get(PET_NEEDS_STORAGE_KEY),
+        window.mulby.storage.get(PET_QUESTS_STORAGE_KEY),
+        window.mulby.storage.get(PET_GAME_STATS_STORAGE_KEY),
+        window.mulby.storage.get(PET_TIMELINE_STORAGE_KEY),
+        includeSettings ? window.mulby.storage.get(PET_ECOSYSTEM_SETTINGS_STORAGE_KEY) : Promise.resolve(undefined),
+      ])
+      setNeeds(normalizeNeeds(rawNeeds))
+      setQuests(normalizeQuestState(rawQuests))
+      setGameStats(normalizeGameStats(rawGameStats))
+      setTimeline(normalizeTimeline(rawTimeline))
+      if (includeSettings) setEcosystemSettings(normalizeEcosystemSettings(rawSettings))
+      if (showSuccess) showToast('生态状态已刷新')
+    } catch (err) {
+      console.error('Load ecosystem failed:', err)
+      if (showSuccess) showToast('刷新失败')
+    }
+  }, [])
 
   useEffect(() => {
     const load = async () => {
@@ -235,6 +283,8 @@ export default function SettingsView() {
       } catch (err) {
         console.error('Load stats failed:', err)
       }
+
+      await loadEcosystem(false, true)
 
       try {
         const savedProfile = await window.mulby.storage.get(PET_LIFE_PROFILE_STORAGE_KEY)
@@ -278,7 +328,7 @@ export default function SettingsView() {
       }
     }
     load()
-  }, [])
+  }, [loadEcosystem])
 
   const loadChatHistory = useCallback(async () => {
     try {
@@ -438,8 +488,9 @@ export default function SettingsView() {
   const handleSave = async () => {
     try {
       await window.mulby.storage.set('pet-personality', personality)
+      await window.mulby.storage.set(PET_ECOSYSTEM_SETTINGS_STORAGE_KEY, ecosystemSettings)
       showToast('设置已保存')
-      window.mulby.window.sendToParent('settings-updated', { personality })
+      window.mulby.window.sendToParent('settings-updated', { personality, ecosystemSettings })
     } catch (err) {
       console.error('Save error:', err)
     }
@@ -641,15 +692,95 @@ export default function SettingsView() {
     )
   }
 
-  const renderStats = () => {
-    if (!stats) return <div className="panel-content"><p style={{ opacity: 0.6 }}>暂无数据</p></div>
+  const renderLocationSettings = () => (
+    <div className="geo-card">
+      <div className="geo-header">
+        <StatsIcon icon="mapPin">位置信息</StatsIcon>
+      </div>
+      {geoInfo ? (
+        <div className="geo-summary-line">
+          <span className="geo-text">
+            {geoInfo.region && geoInfo.city
+              ? `${geoInfo.region} · ${geoInfo.city}`
+              : geoInfo.city || `${geoInfo.latitude.toFixed(4)}, ${geoInfo.longitude.toFixed(4)}`}
+          </span>
+        </div>
+      ) : (
+        <p className="field-hint geo-intro-hint">未设置。可填写下方坐标与城市后点「保存位置」，或使用 GPS 自动获取。</p>
+      )}
+
+      <div className="geo-manual-grid">
+        <div className="field geo-field-tight">
+          <label className="field-label">纬度</label>
+          <input
+            className="field-input"
+            inputMode="decimal"
+            value={manualLat}
+            onChange={e => setManualLat(e.target.value)}
+            placeholder="如 39.9042"
+          />
+        </div>
+        <div className="field geo-field-tight">
+          <label className="field-label">经度</label>
+          <input
+            className="field-input"
+            inputMode="decimal"
+            value={manualLon}
+            onChange={e => setManualLon(e.target.value)}
+            placeholder="如 116.4074"
+          />
+        </div>
+      </div>
+      <div className="field geo-field-tight">
+        <label className="field-label">城市</label>
+        <input
+          className="field-input"
+          value={manualCity}
+          onChange={e => setManualCity(e.target.value)}
+          placeholder="如 北京"
+          maxLength={40}
+        />
+      </div>
+      <div className="field geo-field-tight">
+        <label className="field-label">省份 / 地区（选填）</label>
+        <input
+          className="field-input"
+          value={manualRegion}
+          onChange={e => setManualRegion(e.target.value)}
+          placeholder="如 北京市"
+          maxLength={40}
+        />
+      </div>
+
+      <div className="geo-footer-actions">
+        <button type="button" className="gen-btn full-width" onClick={handleSaveManualGeo}>
+          保存位置
+        </button>
+        <div className="geo-actions geo-actions-row">
+          <button type="button" className="gen-btn" onClick={handleFetchGeo} disabled={geoLoading}>
+            <Icon d={ICONS.refresh} size={12} /> {geoLoading ? '获取中...' : (geoInfo ? 'GPS 定位' : '获取当前位置')}
+          </button>
+          {geoInfo && (
+            <button type="button" className="mem-action-btn delete" onClick={handleClearGeo}>
+              <Icon d={ICONS.trash} size={12} /> 清除
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderStatsOverview = () => {
+    if (!stats) {
+      return <p style={{ opacity: 0.6 }}>暂无数据</p>
+    }
     const days = Math.floor((Date.now() - stats.createdAt) / 86_400_000)
     const moodScore = stats.moodScore ?? 0
     const moodPercent = Math.round((moodScore + 100) / 2)
     const moodName = MOOD_LABELS[(stats.mood as PetMood) ?? 'neutral'] || '平静'
 
     return (
-      <div className="panel-content">
+      <>
         <div className="mood-bar">
           <div className="mood-label">
             <StatsIcon icon="smile">心情</StatsIcon>
@@ -660,83 +791,7 @@ export default function SettingsView() {
           </div>
         </div>
 
-        <div className="geo-card">
-          <div className="geo-header">
-            <StatsIcon icon="mapPin">位置信息</StatsIcon>
-          </div>
-          {geoInfo ? (
-            <div className="geo-summary-line">
-              <span className="geo-text">
-                {geoInfo.region && geoInfo.city
-                  ? `${geoInfo.region} · ${geoInfo.city}`
-                  : geoInfo.city || `${geoInfo.latitude.toFixed(4)}, ${geoInfo.longitude.toFixed(4)}`}
-              </span>
-            </div>
-          ) : (
-            <p className="field-hint geo-intro-hint">未设置。可填写下方坐标与城市后点「保存位置」，或使用 GPS 自动获取。</p>
-          )}
-
-          <div className="geo-manual-grid">
-            <div className="field geo-field-tight">
-              <label className="field-label">纬度</label>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                value={manualLat}
-                onChange={e => setManualLat(e.target.value)}
-                placeholder="如 39.9042"
-              />
-            </div>
-            <div className="field geo-field-tight">
-              <label className="field-label">经度</label>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                value={manualLon}
-                onChange={e => setManualLon(e.target.value)}
-                placeholder="如 116.4074"
-              />
-            </div>
-          </div>
-          <div className="field geo-field-tight">
-            <label className="field-label">城市</label>
-            <input
-              className="field-input"
-              value={manualCity}
-              onChange={e => setManualCity(e.target.value)}
-              placeholder="如 北京"
-              maxLength={40}
-            />
-          </div>
-          <div className="field geo-field-tight">
-            <label className="field-label">省份 / 地区（选填）</label>
-            <input
-              className="field-input"
-              value={manualRegion}
-              onChange={e => setManualRegion(e.target.value)}
-              placeholder="如 北京市"
-              maxLength={40}
-            />
-          </div>
-
-          <div className="geo-footer-actions">
-            <button type="button" className="gen-btn full-width" onClick={handleSaveManualGeo}>
-              保存位置
-            </button>
-            <div className="geo-actions geo-actions-row">
-              <button type="button" className="gen-btn" onClick={handleFetchGeo} disabled={geoLoading}>
-                <Icon d={ICONS.refresh} size={12} /> {geoLoading ? '获取中...' : (geoInfo ? 'GPS 定位' : '获取当前位置')}
-              </button>
-              {geoInfo && (
-                <button type="button" className="mem-action-btn delete" onClick={handleClearGeo}>
-                  <Icon d={ICONS.trash} size={12} /> 清除
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="stats-card">
+        <div className="stats-card compact">
           <div className="stats-row"><StatsIcon icon="heart">亲密度</StatsIcon><span className="stats-value">{stats.intimacy}/100</span></div>
           <div className="stats-row"><StatsIcon icon="calendar">连续签到</StatsIcon><span className="stats-value">{stats.streakDays} 天</span></div>
           <div className="stats-row"><StatsIcon icon="target">今日番茄</StatsIcon><span className="stats-value">{stats.pomodoroToday} 个</span></div>
@@ -745,6 +800,208 @@ export default function SettingsView() {
           <div className="stats-row"><StatsIcon icon="hand">累计互动</StatsIcon><span className="stats-value">{stats.totalInteractions} 次</span></div>
           <div className="stats-row"><StatsIcon icon="gift">相伴天数</StatsIcon><span className="stats-value">{days} 天</span></div>
         </div>
+      </>
+    )
+  }
+
+  const renderEcosystem = () => {
+    const needKeys = Object.keys(NEED_LABELS) as Array<keyof typeof NEED_LABELS>
+    const latestMode = [...timeline].reverse().find(e => e.mode)?.mode ?? 'casual'
+    const todayEvents = timeline
+      .filter(e => todayStr(e.at) === todayStr())
+      .slice(-18)
+      .reverse()
+    const completedQuests = quests.quests.filter(q => q.completed).length
+    const completionRate = quests.quests.length
+      ? Math.round((completedQuests / quests.quests.length) * 100)
+      : 0
+
+    return (
+      <div className="panel-content ecosystem-panel">
+        <div className="ecosystem-summary">
+          <div>
+            <span className="ecosystem-kicker">当前模式</span>
+            <strong>{WORK_MODE_LABELS[latestMode as WorkMode]}</strong>
+          </div>
+          <div>
+            <span className="ecosystem-kicker">今日目标</span>
+            <strong>{completedQuests}/{quests.quests.length}</strong>
+          </div>
+          <div>
+            <span className="ecosystem-kicker">小游戏积分</span>
+            <strong>{gameStats.score}</strong>
+          </div>
+        </div>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">基础状态</div>
+          {renderStatsOverview()}
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">需求状态</div>
+          <div className="needs-grid">
+            {needKeys.map(key => (
+              <div key={key} className="need-row">
+                <div className="need-row-top">
+                  <span>{NEED_LABELS[key]}</span>
+                  <span>{needs[key]}/100</span>
+                </div>
+                <div className="need-track">
+                  <div className="need-fill" style={{ width: `${needs[key]}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">每日任务 · {completionRate}%</div>
+          <div className="quest-list">
+            {quests.quests.map(q => (
+              <div key={q.id} className={`quest-item ${q.completed ? 'completed' : ''}`}>
+                <div>
+                  <span className="quest-title">{q.title}</span>
+                  <span className="quest-desc">{q.desc}</span>
+                </div>
+                <span className="quest-progress">{q.progress}/{q.target}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">小游戏成长</div>
+          <div className="stats-card compact">
+            <div className="stats-row"><StatsIcon icon="star">积分</StatsIcon><span className="stats-value">{gameStats.score}</span></div>
+            <div className="stats-row"><StatsIcon icon="target">今日游玩</StatsIcon><span className="stats-value">{gameStats.playedToday} 次</span></div>
+            <div className="stats-row"><StatsIcon icon="check">今日答对</StatsIcon><span className="stats-value">{gameStats.correctToday} 次</span></div>
+            <div className="stats-row"><StatsIcon icon="layers">连续答对</StatsIcon><span className="stats-value">{gameStats.streak} / 最佳 {gameStats.bestStreak}</span></div>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">生态控制</div>
+          <div className="trigger-list">
+            <label className="trigger-item">
+              <input
+                type="checkbox"
+                checked={ecosystemSettings.questsEnabled}
+                onChange={e => setEcosystemSettings(s => ({ ...s, questsEnabled: e.target.checked }))}
+              />
+              <span>启用每日任务</span>
+            </label>
+          </div>
+          <div className="dialogue-toolbar">
+            <button type="button" className="gen-btn" onClick={() => void loadEcosystem(true)}>
+              <Icon d={ICONS.refresh} size={12} /> 刷新生态状态
+            </button>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">今日时间线</div>
+          {todayEvents.length === 0 ? (
+            <div className="memory-empty">今天还没有生态事件</div>
+          ) : (
+            <div className="timeline-list">
+              {todayEvents.map(event => (
+                <div key={event.id} className="timeline-item">
+                  <time>{new Date(event.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
+                  <span>{event.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  const renderReminders = () => {
+    const reminders = personality.reminders || []
+    return (
+      <div className="panel-content">
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">节律提醒</div>
+          <div className="trigger-list">
+            <label className="trigger-item">
+              <input
+                type="checkbox"
+                checked={ecosystemSettings.routinesEnabled}
+                onChange={e => setEcosystemSettings(s => ({ ...s, routinesEnabled: e.target.checked }))}
+              />
+              <span>启用喝水与休息节律提醒</span>
+            </label>
+          </div>
+          <div className="ecosystem-number-row">
+            <label className="field">
+              <span className="field-label">喝水间隔（分钟）</span>
+              <input
+                className="field-input"
+                type="number"
+                min={15}
+                max={180}
+                value={ecosystemSettings.hydrationReminderMinutes}
+                onChange={e => setEcosystemSettings(s => ({ ...s, hydrationReminderMinutes: Number(e.target.value) || s.hydrationReminderMinutes }))}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">休息间隔（分钟）</span>
+              <input
+                className="field-input"
+                type="number"
+                min={20}
+                max={240}
+                value={ecosystemSettings.eyeRestReminderMinutes}
+                onChange={e => setEcosystemSettings(s => ({ ...s, eyeRestReminderMinutes: Number(e.target.value) || s.eyeRestReminderMinutes }))}
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">定时提醒</div>
+          <div className="reminder-list">
+            {reminders.length === 0 && <div className="memory-category-empty">暂无自定义提醒</div>}
+            {reminders.map(r => (
+              <div key={r.id} className="reminder-item">
+                <label className="trigger-item" style={{ flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={r.enabled}
+                    onChange={() => toggleReminder(r.id)}
+                  />
+                  <span>{r.label}</span>
+                </label>
+                <span className="reminder-time">{String(r.hour).padStart(2, '0')}:{String(r.minute).padStart(2, '0')}</span>
+                <button className="mem-action-btn delete" onClick={() => removeReminder(r.id)} style={{ marginLeft: 4 }}>
+                  <Icon d={ICONS.trash} size={12} />
+                </button>
+              </div>
+            ))}
+            <div className="reminder-add">
+              <input
+                className="field-input"
+                value={newReminderLabel}
+                onChange={e => setNewReminderLabel(e.target.value)}
+                placeholder="提醒内容"
+                style={{ flex: 1 }}
+                maxLength={20}
+              />
+              <input
+                type="time"
+                className="field-input"
+                value={newReminderTime}
+                onChange={e => setNewReminderTime(e.target.value)}
+                style={{ width: 85 }}
+              />
+              <button className="gen-btn" onClick={addReminder} disabled={!newReminderLabel.trim()}>
+                <Icon d={ICONS.plus} size={12} />
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     )
   }
@@ -969,15 +1226,13 @@ export default function SettingsView() {
       </div>
     )
   }
-
-  const reminders = personality.reminders || []
-
   return (
     <div className="settings-root">
       <div className="settings-header">
         <div className="tab-bar">
           <button className={`tab ${tab === 'personality' ? 'active' : ''}`} onClick={() => setTab('personality')}>设置</button>
-          <button className={`tab ${tab === 'stats' ? 'active' : ''}`} onClick={() => setTab('stats')}>状态</button>
+          <button className={`tab ${tab === 'ecosystem' ? 'active' : ''}`} onClick={() => setTab('ecosystem')}>生态</button>
+          <button className={`tab ${tab === 'reminders' ? 'active' : ''}`} onClick={() => setTab('reminders')}>提醒</button>
           <button className={`tab ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>记忆</button>
           <button className={`tab ${tab === 'achievements' ? 'active' : ''}`} onClick={() => setTab('achievements')}>成就</button>
           <button className={`tab ${tab === 'diary' ? 'active' : ''}`} onClick={() => setTab('diary')}>日记</button>
@@ -987,7 +1242,8 @@ export default function SettingsView() {
       </div>
 
       <div className="settings-body">
-        {tab === 'stats' && renderStats()}
+        {tab === 'ecosystem' && renderEcosystem()}
+        {tab === 'reminders' && renderReminders()}
         {tab === 'memory' && renderMemory()}
         {tab === 'achievements' && renderAchievements()}
         {tab === 'diary' && renderDiary()}
@@ -1079,47 +1335,29 @@ export default function SettingsView() {
             />
           </div>
 
+          {renderLocationSettings()}
+
           <div className="field">
             <label className="field-label">
-              <Icon d={ICONS.bell} size={14} color="var(--accent)" /> 定时提醒
+              <Icon d={ICONS.layers} size={14} color="var(--accent)" /> 上下文与隐私
             </label>
-            <div className="reminder-list">
-              {reminders.map(r => (
-                <div key={r.id} className="reminder-item">
-                  <label className="trigger-item" style={{ flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={r.enabled}
-                      onChange={() => toggleReminder(r.id)}
-                    />
-                    <span>{r.label}</span>
-                  </label>
-                  <span className="reminder-time">{String(r.hour).padStart(2, '0')}:{String(r.minute).padStart(2, '0')}</span>
-                  <button className="mem-action-btn delete" onClick={() => removeReminder(r.id)} style={{ marginLeft: 4 }}>
-                    <Icon d={ICONS.trash} size={12} />
-                  </button>
-                </div>
-              ))}
-              <div className="reminder-add">
+            <div className="trigger-list">
+              <label className="trigger-item">
                 <input
-                  className="field-input"
-                  value={newReminderLabel}
-                  onChange={e => setNewReminderLabel(e.target.value)}
-                  placeholder="提醒内容"
-                  style={{ flex: 1 }}
-                  maxLength={20}
+                  type="checkbox"
+                  checked={ecosystemSettings.workModeEnabled}
+                  onChange={e => setEcosystemSettings(s => ({ ...s, workModeEnabled: e.target.checked }))}
                 />
+                <span>根据当前应用识别工作模式</span>
+              </label>
+              <label className="trigger-item">
                 <input
-                  type="time"
-                  className="field-input"
-                  value={newReminderTime}
-                  onChange={e => setNewReminderTime(e.target.value)}
-                  style={{ width: 85 }}
+                  type="checkbox"
+                  checked={ecosystemSettings.useWindowTitleContext}
+                  onChange={e => setEcosystemSettings(s => ({ ...s, useWindowTitleContext: e.target.checked }))}
                 />
-                <button className="gen-btn" onClick={addReminder} disabled={!newReminderLabel.trim()}>
-                  <Icon d={ICONS.plus} size={12} />
-                </button>
-              </div>
+                <span>允许窗口标题参与短期 AI 上下文</span>
+              </label>
             </div>
           </div>
 
@@ -1151,7 +1389,7 @@ export default function SettingsView() {
         </div>}
       </div>
 
-      {tab === 'personality' && <div className="settings-footer">
+      {(tab === 'personality' || tab === 'ecosystem' || tab === 'reminders') && <div className="settings-footer">
         <button className="save-btn" onClick={handleSave}>保存设置</button>
       </div>}
 

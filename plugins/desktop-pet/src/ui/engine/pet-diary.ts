@@ -77,6 +77,7 @@ export class PetDiaryController {
     petName: string,
     stats: { intimacy: number; pomodoroToday: number; totalInteractions: number; mood: string; moodScore: number },
     recentChat: Array<{ role: string; content: string }>,
+    recentEvents: string[] = [],
   ) {
     if (this.hasTodayEntry()) return null
 
@@ -91,6 +92,7 @@ export class PetDiaryController {
       .slice(-10)
       .map(m => `${m.role === 'user' ? '主人' : petName}: ${m.content}`)
       .join('\n')
+    const eventSummary = recentEvents.slice(-12).join('\n')
 
     try {
       const resp = await ai.call({
@@ -112,6 +114,8 @@ export class PetDiaryController {
 - 亲密度: ${stats.intimacy}
 - 今日番茄钟: ${stats.pomodoroToday}个
 - 累计互动: ${stats.totalInteractions}次
+- 今日事件:
+${eventSummary || '（今天没有特别事件）'}
 - 今日对话:
 ${chatSummary || '（今天没有对话）'}`
           },
