@@ -25,6 +25,18 @@ console.log('[App] Module imports loaded')
 type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments'
 type ScreenAutoAction = 'region-capture' | null
 
+interface ShowcaseAttachment {
+  id?: string
+  name?: string
+  size?: number
+  kind?: string
+  mime?: string
+  ext?: string
+  path?: string
+  dataUrl?: string
+  capture?: unknown
+}
+
 const featureToModule: Record<string, ModuleId> = {
   main: 'sysinfo',
   sysinfo: 'sysinfo',
@@ -120,6 +132,7 @@ export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleId>(getInitialModule)
   const [screenAutoAction, setScreenAutoAction] = useState<ScreenAutoAction>(null)
   const [attachmentsData, setAttachmentsData] = useState<any[]>([])
+  const [screenAttachments, setScreenAttachments] = useState<ShowcaseAttachment[]>([])
 
   // 初始化主题
   useTheme()
@@ -140,9 +153,13 @@ export default function App() {
         setScreenAutoAction(null)
       } else if (data.featureCode === 'screenshot') {
         setActiveModule('screen')
-        setScreenAutoAction('region-capture')
+        setScreenAttachments(data.attachments || [])
+        setScreenAutoAction(data.attachments?.some((attachment) => attachment.kind === 'image' && attachment.dataUrl) ? null : 'region-capture')
       } else if (data.featureCode && data.featureCode in featureToModule) {
         setActiveModule(featureToModule[data.featureCode])
+        if (featureToModule[data.featureCode] !== 'screen') {
+          setScreenAttachments([])
+        }
         setScreenAutoAction(null)
       }
 
@@ -181,6 +198,7 @@ export default function App() {
         activeModule === 'screen' ? (
           <ActiveModuleComponent
             autoAction={screenAutoAction}
+            attachments={screenAttachments}
             onAutoActionDone={() => setScreenAutoAction(null)}
           />
         ) : (

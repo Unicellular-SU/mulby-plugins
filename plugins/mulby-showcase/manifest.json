@@ -13,7 +13,8 @@
   "permissions": {
     "geolocation": true,
     "clipboard": true,
-    "accessibility": true
+    "accessibility": true,
+    "screen": true
   },
   "features": [
     {
@@ -41,6 +42,7 @@
     {
       "code": "screenshot",
       "explain": "区域截图并进入图片编辑",
+      "preCapture": "region",
       "cmds": [
         {
           "type": "keyword",

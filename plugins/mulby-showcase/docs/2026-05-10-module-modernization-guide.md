@@ -165,3 +165,12 @@ Manual review:
 - Build response previews as a single string before passing them to `CodeBlock`; adjacent JSX expressions create `string[]` children and break strict TypeScript checks.
 - `network.onOnline()` and `network.onOffline()` are renderer-only event helpers. The page can record event callbacks, while backend examples should only use `network.isOnline()`.
 - Do not add host settings, proxy configuration, update-center, plugin-store, or command-runner network examples to this page; keep it focused on plugin-facing HTTP and online status APIs.
+
+## Screen Module Lessons
+
+- Capture APIs require `permissions.screen`: `getSources`, `getWindowBounds`, `capture`, `captureRegion`, `getMediaStreamConstraints`, `screenCapture`, and `colorPick`. Add only this permission for screen capture; camera capture belongs in the Media module.
+- `manifest.features[].preCapture` is plugin-facing and useful for screenshot workflows. When enabled, read image attachments from `onPluginInit()` and handle missing `capture.region` gracefully because platform implementations can return only an image.
+- Cover newer screen APIs in the same module: `getWindowBounds`, `captureRegion`, `getMediaStreamConstraints`, `screenToDipPoint`, `dipToScreenPoint`, `screenToDipRect`, and `dipToScreenRect`.
+- `getMediaStreamConstraints({ audio: true })` needs `permissions.screen` plus `permissions.microphone`. If the screen page demonstrates audio recording constraints, show microphone permission state but keep camera permission in Media.
+- Avoid routing from the screen page into unrelated plugins or host pages. Color picking should demonstrate `screen.colorPick()` and clipboard copy only, not plugin orchestration.
+- Raw data should summarize thumbnails and screenshots instead of storing full Data URLs. Include capture metadata, selected source IDs, bounds, generated media constraints, coordinate conversions, and operation logs.
