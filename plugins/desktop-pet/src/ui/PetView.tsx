@@ -206,6 +206,8 @@ export default function PetView() {
   const waterTimerRef = useRef<number>(0)
   const clipboardTimerRef = useRef<number>(0)
   const settingsProxyRef = useRef<any>(null)
+  const settingsOpeningRef = useRef<Promise<void> | null>(null)
+  const settingsWindowIdRef = useRef(0)
   const contextMenuOpenRef = useRef(false)
   const activeWindowTimerRef = useRef<number>(0)
   const lastActiveAppRef = useRef<string>('')
@@ -756,33 +758,74 @@ export default function PetView() {
     }
   }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression, noteEcosystemEvent])
 
+  const focusExistingSettings = useCallback(async (proxy: any) => {
+    try {
+      await proxy.show?.()
+    } catch (err) {
+      logPetPresentation('pet.settings.show-existing-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+      return false
+    }
+
+    try {
+      await proxy.focus?.()
+    } catch (err) {
+      logPetPresentation('pet.settings.focus-existing-failed', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
+    return true
+  }, [])
+
   const openSettings = useCallback(async () => {
-    if (settingsProxyRef.current) {
-      try {
-        await settingsProxyRef.current.show?.()
-        await settingsProxyRef.current.focus?.()
-      } catch {}
+    if (settingsOpeningRef.current) {
+      await settingsOpeningRef.current
       return
     }
-    try {
-      const proxy = await window.mulby.window.create('?view=settings', {
-        width: 680,
-        height: 720,
-        title: '宠物设置',
-        type: 'default',
-        titleBar: true,
-        resizable: true,
-        transparent: false,
-        alwaysOnTop: true,
-      })
-      if (proxy) {
-        settingsProxyRef.current = proxy
+
+    const task = (async () => {
+      const existing = settingsProxyRef.current
+      if (existing) {
+        const focused = await focusExistingSettings(existing)
+        if (focused) return
+        if (settingsProxyRef.current === existing) {
+          settingsProxyRef.current = null
+        }
       }
-    } catch (e) {
-      console.error('Open settings failed:', e)
-      settingsProxyRef.current = null
+
+      const settingsWindowId = settingsWindowIdRef.current + 1
+      settingsWindowIdRef.current = settingsWindowId
+
+      try {
+        const proxy = await window.mulby.window.create(`?view=settings&settingsWindowId=${settingsWindowId}`, {
+          width: 680,
+          height: 720,
+          title: '宠物设置',
+          type: 'default',
+          titleBar: true,
+          resizable: true,
+          transparent: false,
+          alwaysOnTop: true,
+        })
+        if (proxy) {
+          settingsProxyRef.current = proxy
+        }
+      } catch (e) {
+        console.error('Open settings failed:', e)
+        settingsProxyRef.current = null
+      }
+    })()
+
+    settingsOpeningRef.current = task
+    try {
+      await task
+    } finally {
+      if (settingsOpeningRef.current === task) {
+        settingsOpeningRef.current = null
+      }
     }
-  }, [])
+  }, [focusExistingSettings])
 
   const togglePomodoro = useCallback(() => {
     if (pomodoroRef.current) {
@@ -1354,6 +1397,16 @@ export default function PetView() {
           return
         }
         case 'settings-closed': {
+          const payload = args[0]
+          if (payload && typeof payload === 'object') {
+            const settingsWindowId = (payload as Record<string, unknown>).settingsWindowId
+            if (
+              typeof settingsWindowId === 'number'
+              && settingsWindowId !== settingsWindowIdRef.current
+            ) {
+              return
+            }
+          }
           settingsProxyRef.current = null
           return
         }

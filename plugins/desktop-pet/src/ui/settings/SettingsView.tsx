@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   DEFAULT_PERSONALITY,
   PET_CHAT_HISTORY_STORAGE_KEY,
@@ -84,6 +84,13 @@ const ICONS = {
 
 function StatsIcon({ icon, children }: { icon: keyof typeof ICONS; children: ReactNode }) {
   return <span className="stats-icon"><Icon d={ICONS[icon]} color="var(--accent)" />{children}</span>
+}
+
+function readSettingsWindowId(): number | null {
+  const value = new URLSearchParams(window.location.search).get('settingsWindowId')
+  if (!value) return null
+  const id = Number(value)
+  return Number.isFinite(id) && id > 0 ? id : null
 }
 
 const MOOD_LABELS: Record<PetMood, string> = {
@@ -203,6 +210,8 @@ function groupChatTurns(items: PetChatHistoryItem[]): Array<{ user: string; assi
 }
 
 export default function SettingsView() {
+  const settingsWindowIdRef = useRef(readSettingsWindowId())
+  const closedNotifiedRef = useRef(false)
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
@@ -363,8 +372,12 @@ export default function SettingsView() {
 
   useEffect(() => {
     const notifyClosed = () => {
+      if (closedNotifiedRef.current) return
+      closedNotifiedRef.current = true
       try {
-        window.mulby.window.sendToParent('settings-closed')
+        window.mulby.window.sendToParent('settings-closed', {
+          settingsWindowId: settingsWindowIdRef.current,
+        })
       } catch {}
     }
     window.addEventListener('beforeunload', notifyClosed)
