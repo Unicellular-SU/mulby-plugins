@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, BookOpen, CheckCircle2, ClipboardList, Code, FileText, Gamepad2, Image, Keyboard, Lightbulb, MousePointerClick, Paperclip, Pin, Puzzle, Sparkles, Table, Type, Zap } from 'lucide-react'
-import { PageHeader, Card, Button, CodeBlock } from '../../components'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, BookOpen, CheckCircle2, ClipboardList, FileText, Gamepad2, Image, Keyboard, Lightbulb, MousePointerClick, Paperclip, Pin, RotateCcw, Sparkles, Table, Type, Zap } from 'lucide-react'
+import { PageHeader, Card, Button, ApiReferencePanel } from '../../components'
+import type { ApiExample, ApiReferenceGroup } from '../../components'
 import { useMulby, useNotification } from '../../hooks'
 
 // 延迟函数
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export function InputModule() {
     const { input, dialog, system, permission, screen } = useMulby()
@@ -16,44 +17,83 @@ export function InputModule() {
     const [keyboardModifiers, setKeyboardModifiers] = useState('')
     const [mouseX, setMouseX] = useState(100)
     const [mouseY, setMouseY] = useState(100)
-    const [currentMousePos, setCurrentMousePos] = useState<{ x: number; y: number } | null>(null)
+    const [currentMousePos, setCurrentMousePos] = useState<{
+        x: number
+        y: number
+    } | null>(null)
     const [busyAction, setBusyAction] = useState<string | null>(null)
     const [accessibilityTrusted, setAccessibilityTrusted] = useState<boolean | null>(null)
     const [isMacOS, setIsMacOS] = useState<boolean>(false)
     const [scriptLog, setScriptLog] = useState<string[]>([])
+    const [lastAction, setLastAction] = useState<{
+        name: string
+        success: boolean
+        at: string
+        message?: string
+    } | null>(null)
 
-    const runAction = useCallback(async (name: string, action: () => Promise<boolean>) => {
-        setBusyAction(name)
-        try {
-            const ok = await action()
-            if (ok) {
-                notify.success('已发送输入到目标应用')
-            } else {
-                notify.error('发送失败，请检查目标应用是否可接收输入')
+    const runAction = useCallback(
+        async (name: string, action: () => Promise<boolean>) => {
+            setBusyAction(name)
+            try {
+                const ok = await action()
+                setLastAction({
+                    name,
+                    success: ok,
+                    at: new Date().toLocaleTimeString(),
+                    message: ok ? '输入已发送到目标应用' : '目标应用未接收输入或平台能力受限',
+                })
+                if (ok) {
+                    notify.success('已发送输入到目标应用')
+                } else {
+                    notify.error('发送失败，请检查目标应用是否可接收输入')
+                }
+            } catch (error) {
+                setLastAction({
+                    name,
+                    success: false,
+                    at: new Date().toLocaleTimeString(),
+                    message: error instanceof Error ? error.message : String(error),
+                })
+                notify.error('执行失败，请确认权限与环境依赖')
+            } finally {
+                setBusyAction(null)
             }
-        } catch (error) {
-            notify.error('执行失败，请确认权限与环境依赖')
-        } finally {
-            setBusyAction(null)
-        }
-    }, [notify])
+        },
+        [notify],
+    )
 
-    const runSimulateAction = useCallback(async (name: string, action: () => Promise<boolean>) => {
-        setBusyAction(name)
-        try {
-            const ok = await action()
-            if (ok) {
-                notify.success('模拟操作已发送到目标应用')
-            } else {
+    const runSimulateAction = useCallback(
+        async (name: string, action: () => Promise<boolean>) => {
+            setBusyAction(name)
+            try {
+                const ok = await action()
+                setLastAction({
+                    name,
+                    success: ok,
+                    at: new Date().toLocaleTimeString(),
+                    message: ok ? '模拟操作已发送到目标应用' : '模拟操作失败或平台能力受限',
+                })
+                if (ok) {
+                    notify.success('模拟操作已发送到目标应用')
+                } else {
+                    notify.error('模拟操作失败，请确认权限与环境依赖')
+                }
+            } catch (error) {
+                setLastAction({
+                    name,
+                    success: false,
+                    at: new Date().toLocaleTimeString(),
+                    message: error instanceof Error ? error.message : String(error),
+                })
                 notify.error('模拟操作失败，请确认权限与环境依赖')
+                console.error(error)
+            } finally {
+                setBusyAction(null)
             }
-        } catch (error) {
-            notify.error('模拟操作失败，请确认权限与环境依赖')
-            console.error(error)
-        } finally {
-            setBusyAction(null)
-        }
-    }, [notify])
+        },
+        [notify],
+    )
 
     const loadAccessibilityStatus = useCallback(async () => {
         try {
@@ -93,7 +133,7 @@ export function InputModule() {
     const handlePasteFile = async () => {
         const files = await dialog.showOpenDialog({
             title: '选择要粘贴的文件',
-            properties: ['openFile', 'multiSelections']
+            properties: ['openFile', 'multiSelections'],
         })
         if (!files || files.length === 0) return
         await runAction('pasteFile', () => input.hideMainWindowPasteFile(files))
@@ -103,7 +143,7 @@ export function InputModule() {
         const files = await dialog.showOpenDialog({
             title: '选择要粘贴的图片',
             filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
-            properties: ['openFile']
+            properties: ['openFile'],
         })
         if (!files || files.length === 0) return
         await runAction('pasteImagePath', () => input.hideMainWindowPasteImage(files[0]))
@@ -134,11 +174,12 @@ export function InputModule() {
             return
         }
         const modifiers = keyboardModifiers.trim()
-            ? keyboardModifiers.split(',').map(m => m.trim()).filter(Boolean)
+            ? keyboardModifiers
+                  .split(',')
+                  .map((m) => m.trim())
+                  .filter(Boolean)
             : []
-        await runSimulateAction('keyboardTap', () =>
-            input.simulateKeyboardTap(keyboardKey.trim(), ...modifiers)
-        )
+        await runSimulateAction('keyboardTap', () => input.simulateKeyboardTap(keyboardKey.trim(), ...modifiers))
     }
 
     // 获取当前鼠标位置
@@ -180,7 +221,7 @@ export function InputModule() {
     const runWpsAutoScript = async () => {
         setBusyAction('wpsScript')
         setScriptLog([])
-        const log = (msg: string) => setScriptLog(prev => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
+        const log = (msg: string) => setScriptLog((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
 
         try {
             const modKey = isMacOS ? 'command' : 'ctrl'
@@ -295,7 +336,7 @@ export function InputModule() {
     const runWpsTableScript = async () => {
         setBusyAction('wpsTableScript')
         setScriptLog([])
-        const log = (msg: string) => setScriptLog(prev => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
+        const log = (msg: string) => setScriptLog((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
 
         try {
             const modKey = isMacOS ? 'command' : 'ctrl'
@@ -326,7 +367,7 @@ export function InputModule() {
                 ['需求分析', '张三', '已完成', '100%'],
                 ['UI设计', '李四', '进行中', '60%'],
                 ['前端开发', '王五', '待开始', '0%'],
-                ['后端开发', '赵六', '待开始', '0%']
+                ['后端开发', '赵六', '待开始', '0%'],
             ]
 
             for (let i = 0; i < tableData.length; i++) {
@@ -362,7 +403,7 @@ export function InputModule() {
     const runQuickFormatScript = async () => {
         setBusyAction('quickFormat')
         setScriptLog([])
-        const log = (msg: string) => setScriptLog(prev => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
+        const log = (msg: string) => setScriptLog((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${msg}`])
 
         try {
             const modKey = isMacOS ? 'command' : 'ctrl'
@@ -395,6 +436,10 @@ export function InputModule() {
         }
     }
 
+    const handleRestoreWindows = async () => {
+        await runAction('restoreWindows', () => input.restoreWindows())
+    }
+
     const handleOpenAccessibilitySettings = async () => {
         const ok = await permission.openSystemSettings('accessibility')
         if (ok) {
@@ -404,477 +449,664 @@ export function InputModule() {
         }
     }
 
-    const tutorialText = `// 文本粘贴
-await input.hideMainWindowPasteText('Hello Mulby')
+    const apiGroups: ApiReferenceGroup[] = useMemo(
+        () => [
+            {
+                title: 'Input API',
+                items: [
+                    {
+                        name: 'input.hideMainWindowPasteText(text)',
+                        description: '隐藏主窗口，将文本写入剪贴板并粘贴到目标应用。',
+                    },
+                    {
+                        name: 'input.hideMainWindowPasteImage(image)',
+                        description: '隐藏主窗口，将图片路径、Data URL 或二进制图片粘贴到目标应用。',
+                    },
+                    {
+                        name: 'input.hideMainWindowPasteFile(filePaths)',
+                        description: '隐藏主窗口，将一个或多个文件路径粘贴到目标应用。Windows 当前可能返回 false。',
+                    },
+                    {
+                        name: 'input.hideMainWindowTypeString(text)',
+                        description: '隐藏主窗口并模拟键入文本，不依赖剪贴板。',
+                    },
+                    {
+                        name: 'input.restoreWindows()',
+                        description: '连续输入完成后恢复被输入 API 隐藏的窗口。',
+                    },
+                    {
+                        name: 'input.simulateKeyboardTap(key, ...modifiers)',
+                        description: '隐藏主窗口并模拟单键或组合键。',
+                    },
+                    {
+                        name: 'input.simulateMouseMove(x, y)',
+                        description: '隐藏主窗口并移动鼠标到屏幕坐标。',
+                    },
+                    {
+                        name: 'input.simulateMouseClick(x, y)',
+                        description: '隐藏主窗口并模拟鼠标左键单击。',
+                    },
+                    {
+                        name: 'input.simulateMouseDoubleClick(x, y)',
+                        description: '隐藏主窗口并模拟鼠标左键双击。',
+                    },
+                    {
+                        name: 'input.simulateMouseRightClick(x, y)',
+                        description: '隐藏主窗口并模拟鼠标右键点击。',
+                    },
+                ],
+            },
+            {
+                title: 'Related APIs',
+                items: [
+                    {
+                        name: 'screen.getCursorScreenPoint()',
+                        description: '获取当前鼠标屏幕坐标，用于鼠标模拟操作。',
+                    },
+                    {
+                        name: 'system.isMacOS()',
+                        description: '判断平台，选择 command 或 ctrl 等平台差异键。',
+                    },
+                    {
+                        name: 'permission.isAccessibilityTrusted()',
+                        description: '检查 macOS 辅助功能授权状态。',
+                    },
+                    {
+                        name: "permission.openSystemSettings('accessibility')",
+                        description: '打开辅助功能系统设置。',
+                    },
+                ],
+            },
+        ],
+        [],
+    )
 
-// 图片粘贴 (路径 / DataURL / Buffer)
-await input.hideMainWindowPasteImage('/path/to/image.png')
+    const apiExamples: ApiExample[] = useMemo(
+        () => [
+            {
+                title: '粘贴和键入',
+                code: `await window.mulby.input.hideMainWindowPasteText('Hello Mulby')
+await window.mulby.input.hideMainWindowPasteImage('/path/to/image.png')
+await window.mulby.input.hideMainWindowPasteFile(['/path/a.txt', '/path/b.txt'])
+await window.mulby.input.hideMainWindowTypeString('Typing...')`,
+            },
+            {
+                title: '连续输入并恢复窗口',
+                code: `await window.mulby.input.hideMainWindowTypeString('username')
+await window.mulby.input.simulateKeyboardTap('tab')
+await window.mulby.input.hideMainWindowTypeString('password')
+await window.mulby.input.simulateKeyboardTap('enter')
+await window.mulby.input.restoreWindows()`,
+            },
+            {
+                title: '键盘和鼠标模拟',
+                code: `await window.mulby.input.simulateKeyboardTap('s', 'ctrl', 'shift')
 
-// 文件粘贴 (单个或数组)
-await input.hideMainWindowPasteFile(['/path/a.txt', '/path/b.txt'])
+const pos = await window.mulby.screen.getCursorScreenPoint()
+await window.mulby.input.simulateMouseMove(pos.x, pos.y)
+await window.mulby.input.simulateMouseClick(pos.x, pos.y)`,
+            },
+            {
+                title: '自动化脚本片段',
+                code: `const modKey = isMacOS ? 'command' : 'ctrl'
 
-// 模拟键入
-await input.hideMainWindowTypeString('Typing...')`
+await window.mulby.input.hideMainWindowPasteText('我的文档标题')
+await window.mulby.input.simulateKeyboardTap('a', modKey)
+await window.mulby.input.simulateKeyboardTap('b', modKey)
+await window.mulby.input.simulateKeyboardTap('enter')
+await window.mulby.input.hideMainWindowPasteText('这是正文内容...')
+await window.mulby.input.restoreWindows()`,
+            },
+        ],
+        [],
+    )
 
-    const simulateTutorialText = `// 模拟单个键
-await input.simulateKeyboardTap('enter')
-
-// 模拟组合键 (macOS 粘贴)
-await input.simulateKeyboardTap('v', 'command')
-
-// 模拟组合键 (Windows/Linux 粘贴)
-await input.simulateKeyboardTap('v', 'ctrl')
-
-// 多个修饰键组合 Ctrl+Shift+S
-await input.simulateKeyboardTap('s', 'ctrl', 'shift')
-
-// 鼠标移动到指定坐标
-await input.simulateMouseMove(100, 100)
-
-// 鼠标左键单击
-await input.simulateMouseClick(150, 200)
-
-// 鼠标左键双击
-await input.simulateMouseDoubleClick(150, 200)
-
-// 鼠标右键点击
-await input.simulateMouseRightClick(200, 250)
-
-// 获取当前鼠标位置
-const pos = await screen.getCursorScreenPoint()
-console.log(\`鼠标位置: (\${pos.x}, \${pos.y})\`)`
+    const rawData = {
+        platform: {
+            isMacOS,
+            accessibilityTrusted,
+        },
+        inputState: {
+            pasteTextLength: pasteText.length,
+            typeTextLength: typeText.length,
+            keyboardKey,
+            keyboardModifiers,
+            mouse: {
+                x: mouseX,
+                y: mouseY,
+                current: currentMousePos,
+            },
+            busyAction,
+            lastAction,
+        },
+        scriptLog,
+    }
 
     return (
         <div className="main-content">
-            <PageHeader
-                icon={Keyboard}
-                title="输入控制"
-                description="隐藏主窗口并向外部应用发送粘贴或键入操作"
-            />
-            <div className="page-content">
-                <Card title="权限检查" icon={CheckCircle2} actions={
-                    isMacOS ? (
-                        <Button variant="secondary" onClick={handleOpenAccessibilitySettings}>
-                            打开系统设置
-                        </Button>
-                    ) : null
-                }>
-                    {isMacOS ? (
-                        <div style={{ display: 'grid', gap: '8px' }}>
-                            <div style={{ color: 'var(--text-secondary)' }}>
-                                当前状态：{accessibilityTrusted === null ? '未知' : (accessibilityTrusted ? '已授权' : '未授权')}
-                            </div>
-                            {!accessibilityTrusted && (
-                                <div style={{ color: 'var(--warning)' }}>
-                                    需要在“辅助功能”中允许 Mulby/Electron 发送按键，才能模拟输入。
+            <PageHeader icon={Keyboard} title="输入控制" description="隐藏主窗口并向外部应用发送粘贴或键入操作" />
+            <div className="page-with-api-panel">
+                <div className="page-content">
+                    <Card
+                        title="权限检查"
+                        icon={CheckCircle2}
+                        actions={
+                            isMacOS ? (
+                                <Button variant="secondary" onClick={handleOpenAccessibilitySettings}>
+                                    打开系统设置
+                                </Button>
+                            ) : null
+                        }
+                    >
+                        {isMacOS ? (
+                            <div style={{ display: 'grid', gap: '8px' }}>
+                                <div style={{ color: 'var(--text-secondary)' }}>
+                                    当前状态：
+                                    {accessibilityTrusted === null ? '未知' : accessibilityTrusted ? '已授权' : '未授权'}
                                 </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div style={{ color: 'var(--text-secondary)' }}>
-                            非 macOS 平台无需辅助功能权限。
-                        </div>
-                    )}
-                </Card>
-
-                <Card title="使用教程" icon={Pin}>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div>1. <strong>打开目标应用</strong>（例如文本编辑器、浏览器、聊天窗口）。</div>
-                        <div>2. <strong>在目标应用中放置光标</strong>，确保它是你希望接收输入的位置。</div>
-                        <div>3. <strong>唤起 Mulby</strong>（通过快捷键 Alt+Space）。</div>
-                        <div>4. <strong>点击下方操作按钮</strong>，Mulby 会自动隐藏并向目标应用发送操作。</div>
-                        <div style={{ marginTop: '8px', padding: '8px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
-                            <Lightbulb className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
-                            <strong>原理</strong>：所有模拟操作都会先隐藏 Mulby 窗口，让目标应用获得焦点，然后再执行模拟操作。
-                        </div>
-                    </div>
-                </Card>
-
-                <Card title="粘贴文本" icon={FileText} actions={
-                    <Button onClick={handlePasteText} loading={busyAction === 'pasteText'}>
-                        粘贴到目标应用
-                    </Button>
-                }>
-                    <div className="input-group">
-                        <label className="input-label">文本内容</label>
-                        <input
-                            className="input"
-                            placeholder="输入要粘贴的文本"
-                            value={pasteText}
-                            onChange={(e) => setPasteText(e.target.value)}
-                        />
-                    </div>
-                </Card>
-
-                <Card title="模拟键入" icon={Type} actions={
-                    <Button onClick={handleTypeString} loading={busyAction === 'typeString'}>
-                        发送键入
-                    </Button>
-                }>
-                    <div className="input-group">
-                        <label className="input-label">键入内容</label>
-                        <input
-                            className="input"
-                            placeholder="输入要键入的文本"
-                            value={typeText}
-                            onChange={(e) => setTypeText(e.target.value)}
-                        />
-                    </div>
-                </Card>
-
-                <Card title="粘贴图片" icon={Image} actions={
-                    <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-                        <Button variant="secondary" onClick={handlePasteImageFromPath} loading={busyAction === 'pasteImagePath'}>
-                            从文件粘贴
-                        </Button>
-                        <Button variant="secondary" onClick={handlePasteImageSample} loading={busyAction === 'pasteImageSample'}>
-                            发送示例图片
-                        </Button>
-                    </div>
-                }>
-                    <div style={{ color: 'var(--text-secondary)' }}>
-                        图片将写入剪贴板后模拟粘贴，可用于聊天窗口或文档编辑器。
-                    </div>
-                </Card>
-
-                <Card title="粘贴文件" icon={Paperclip} actions={
-                    <Button onClick={handlePasteFile} loading={busyAction === 'pasteFile'}>
-                        选择文件并粘贴
-                    </Button>
-                }>
-                    <div style={{ color: 'var(--text-secondary)' }}>
-                        选择一个或多个文件，目标应用需支持文件粘贴（如文件管理器或聊天软件）。
-                    </div>
-                </Card>
-
-                <Card title="粘贴/键入 API 示例" icon={Puzzle}>
-                    <CodeBlock>{tutorialText}</CodeBlock>
-                </Card>
-
-                {/* 模拟按键部分 */}
-                <div style={{ marginTop: '24px', marginBottom: '16px', fontWeight: 600, fontSize: '18px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Gamepad2 className="section-icon" aria-hidden="true" size={18} strokeWidth={2} />
-                    <span>模拟按键与鼠标</span>
-                </div>
-
-                <Card title="模拟操作说明" icon={Lightbulb}>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div>模拟按键和鼠标操作会<strong>先隐藏 Mulby 窗口</strong>，让之前活跃的应用获得焦点，然后发送模拟操作。</div>
-                        <div>这适用于以下场景：</div>
-                        <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
-                            <li>向编辑器发送快捷键（如 Ctrl+S 保存）</li>
-                            <li>在表单中自动输入并提交（模拟 Enter）</li>
-                            <li>自动化点击桌面上的某个位置</li>
-                        </ul>
-                    </div>
-                </Card>
-
-                <Card title="模拟键盘按键" icon={Keyboard} actions={
-                    <Button onClick={handleSimulateKeyboardTap} loading={busyAction === 'keyboardTap'}>
-                        模拟按键
-                    </Button>
-                }>
-                    <div style={{ display: 'grid', gap: '12px' }}>
-                        <div className="input-group">
-                            <label className="input-label">按键名称</label>
-                            <input
-                                className="input"
-                                placeholder="如: enter, a, f5, space"
-                                value={keyboardKey}
-                                onChange={(e) => setKeyboardKey(e.target.value)}
-                            />
-                            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                                支持: a-z, 0-9, enter, tab, space, backspace, delete, escape, up/down/left/right, f1-f12 等
+                                {!accessibilityTrusted && <div style={{ color: 'var(--warning)' }}>需要在“辅助功能”中允许 Mulby/Electron 发送按键，才能模拟输入。</div>}
                             </div>
-                        </div>
-                        <div className="input-group">
-                            <label className="input-label">修饰键（可选，逗号分隔）</label>
-                            <input
-                                className="input"
-                                placeholder="如: ctrl 或 ctrl,shift 或 command"
-                                value={keyboardModifiers}
-                                onChange={(e) => setKeyboardModifiers(e.target.value)}
-                            />
-                            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                                支持: ctrl, alt, shift, command (macOS), meta, super, win
-                            </div>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card title="模拟鼠标操作" icon={MousePointerClick} actions={
-                    <div style={{ display: 'flex', gap: 'var(--spacing-sm)', flexWrap: 'wrap' }}>
-                        <Button variant="secondary" onClick={handleGetMousePosition}>
-                            获取鼠标位置
-                        </Button>
-                        <Button variant="secondary" onClick={handleSimulateMouseMove} loading={busyAction === 'mouseMove'}>
-                            移动鼠标
-                        </Button>
-                        <Button onClick={handleSimulateMouseClick} loading={busyAction === 'mouseClick'}>
-                            左键单击
-                        </Button>
-                        <Button variant="secondary" onClick={handleSimulateMouseDoubleClick} loading={busyAction === 'mouseDoubleClick'}>
-                            左键双击
-                        </Button>
-                        <Button variant="secondary" onClick={handleSimulateMouseRightClick} loading={busyAction === 'mouseRightClick'}>
-                            右键点击
-                        </Button>
-                    </div>
-                }>
-                    <div style={{ display: 'grid', gap: '12px' }}>
-                        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-                            <div className="input-group" style={{ flex: 1 }}>
-                                <label className="input-label">X 坐标</label>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    placeholder="X"
-                                    value={mouseX}
-                                    onChange={(e) => setMouseX(Number(e.target.value))}
-                                />
-                            </div>
-                            <div className="input-group" style={{ flex: 1 }}>
-                                <label className="input-label">Y 坐标</label>
-                                <input
-                                    className="input"
-                                    type="number"
-                                    placeholder="Y"
-                                    value={mouseY}
-                                    onChange={(e) => setMouseY(Number(e.target.value))}
-                                />
-                            </div>
-                        </div>
-                        {currentMousePos && (
-                            <div style={{ padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: '6px', fontSize: '14px' }}>
-                                当前鼠标位置: <strong>({currentMousePos.x}, {currentMousePos.y})</strong>
-                            </div>
+                        ) : (
+                            <div style={{ color: 'var(--text-secondary)' }}>非 macOS 平台无需辅助功能权限。</div>
                         )}
-                        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            坐标以屏幕左上角为原点，单位为像素。点击"获取鼠标位置"可以获取当前鼠标坐标。
-                        </div>
-                    </div>
-                </Card>
+                    </Card>
 
-                <Card title="常用快捷键示例" icon={Zap}>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('copy', () => input.simulateKeyboardTap('c', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'copy'}
+                    <Card
+                        title="使用教程"
+                        icon={Pin}
+                        actions={
+                            <Button variant="secondary" onClick={handleRestoreWindows} loading={busyAction === 'restoreWindows'}>
+                                <RotateCcw className="inline-icon" aria-hidden="true" size={14} />
+                                恢复窗口
+                            </Button>
+                        }
+                    >
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
                         >
-                            复制 (Cmd/Ctrl+C)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('paste', () => input.simulateKeyboardTap('v', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'paste'}
-                        >
-                            粘贴 (Cmd/Ctrl+V)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('cut', () => input.simulateKeyboardTap('x', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'cut'}
-                        >
-                            剪切 (Cmd/Ctrl+X)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('save', () => input.simulateKeyboardTap('s', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'save'}
-                        >
-                            保存 (Cmd/Ctrl+S)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('undo', () => input.simulateKeyboardTap('z', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'undo'}
-                        >
-                            撤销 (Cmd/Ctrl+Z)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('selectAll', () => input.simulateKeyboardTap('a', isMacOS ? 'command' : 'ctrl'))}
-                            loading={busyAction === 'selectAll'}
-                        >
-                            全选 (Cmd/Ctrl+A)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('enter', () => input.simulateKeyboardTap('enter'))}
-                            loading={busyAction === 'enter'}
-                        >
-                            回车 (Enter)
-                        </Button>
-                        <Button
-                            variant="secondary"
-                            onClick={() => runSimulateAction('escape', () => input.simulateKeyboardTap('escape'))}
-                            loading={busyAction === 'escape'}
-                        >
-                            取消 (Escape)
-                        </Button>
-                    </div>
-                </Card>
-
-                <Card title="模拟按键 API 示例" icon={BookOpen}>
-                    <CodeBlock>{simulateTutorialText}</CodeBlock>
-                </Card>
-
-                <Card title="注意事项" icon={AlertTriangle}>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div><strong>macOS:</strong> 需要在系统偏好设置中授予辅助功能权限。</div>
-                        <div><strong>Windows:</strong> 某些受保护的应用可能无法接收模拟输入。</div>
-                        <div><strong>Linux:</strong> 依赖 xdotool 工具，Wayland 环境可能受限。</div>
-                        <div><strong>坐标系统:</strong> 鼠标坐标以整个屏幕左上角为原点，多显示器环境下需注意坐标计算。</div>
-                    </div>
-                </Card>
-
-                {/* WPS 自动化脚本部分 */}
-                <div style={{ marginTop: '24px', marginBottom: '16px', fontWeight: 600, fontSize: '18px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <FileText className="section-icon" aria-hidden="true" size={18} strokeWidth={2} />
-                    <span>WPS 文档自动化脚本</span>
-                </div>
-
-                <Card title="使用说明" icon={BookOpen}>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>操作步骤：</div>
-                        <div>1. 打开 WPS 文字，新建或打开一个文档</div>
-                        <div>2. 将光标放置在文档中你希望开始操作的位置</div>
-                        <div>3. 按 <kbd style={{ padding: '2px 6px', background: 'var(--bg-tertiary)', borderRadius: '4px', fontSize: '12px' }}>Alt+Space</kbd> 唤起 Mulby</div>
-                        <div>4. 进入"输入控制"模块，点击下方任一脚本按钮</div>
-                        <div>5. Mulby 会自动隐藏，脚本将在 WPS 中执行</div>
-                        <div style={{ marginTop: '8px', padding: '8px', background: 'var(--warning)', color: '#000', borderRadius: '6px', opacity: 0.8 }}>
-                            <AlertTriangle className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
-                            <span>脚本执行期间请勿操作键盘鼠标，否则可能干扰自动化流程</span>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card title="自动创建格式化文档" icon={FileText} actions={
-                    <Button onClick={runWpsAutoScript} loading={busyAction === 'wpsScript'}>
-                        执行脚本
-                    </Button>
-                }>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div>此脚本将自动执行以下操作：</div>
-                        <ul style={{ margin: '4px 0', paddingLeft: '20px', lineHeight: 1.8 }}>
-                            <li>输入标题并设置<strong>加粗、居中</strong></li>
-                            <li>输入正文段落</li>
-                            <li>创建功能列表</li>
-                            <li>添加时间戳</li>
-                            <li>自动保存文档</li>
-                        </ul>
-                        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            预计执行时间：约 8-10 秒
-                        </div>
-                    </div>
-                </Card>
-
-                <Card title="快速插入表格" icon={Table} actions={
-                    <Button onClick={runWpsTableScript} loading={busyAction === 'wpsTableScript'}>
-                        执行脚本
-                    </Button>
-                }>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div>此脚本将自动插入一个项目进度表：</div>
-                        <ul style={{ margin: '4px 0', paddingLeft: '20px', lineHeight: 1.8 }}>
-                            <li>输入表格标题（加粗）</li>
-                            <li>使用 Tab 分隔输入表格数据</li>
-                            <li>包含 5 行 4 列的示例数据</li>
-                            <li>自动保存文档</li>
-                        </ul>
-                        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                            <Lightbulb className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
-                            <span>提示：输入后可以选中表格区域，使用 WPS 的"文本转表格"功能</span>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card title="快速格式化选中文本" icon={Sparkles} actions={
-                    <Button onClick={runQuickFormatScript} loading={busyAction === 'quickFormat'}>
-                        执行脚本
-                    </Button>
-                }>
-                    <div style={{ display: 'grid', gap: '8px', color: 'var(--text-secondary)' }}>
-                        <div><strong>使用前请先在 WPS 中选中要格式化的文本</strong></div>
-                        <div>此脚本将对选中文本应用：</div>
-                        <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
-                            <li><strong>加粗</strong> (Ctrl+B)</li>
-                            <li><em>斜体</em> (Ctrl+I)</li>
-                            <li><u>下划线</u> (Ctrl+U)</li>
-                        </ul>
-                    </div>
-                </Card>
-
-                {/* 脚本执行日志 */}
-                {scriptLog.length > 0 && (
-                    <Card title="执行日志" icon={ClipboardList} actions={
-                        <Button variant="secondary" onClick={() => setScriptLog([])}>
-                            清空日志
-                        </Button>
-                    }>
-                        <div style={{
-                            maxHeight: '200px',
-                            overflowY: 'auto',
-                            padding: '8px 12px',
-                            background: 'var(--bg-tertiary)',
-                            borderRadius: '6px',
-                            fontFamily: 'monospace',
-                            fontSize: '12px',
-                            lineHeight: 1.8
-                        }}>
-                            {scriptLog.map((log, index) => (
-                                <div key={index} style={{
-                                    color: log.includes('执行出错') ? 'var(--error)' :
-                                           log.includes('完成') ? 'var(--success)' :
-                                           log.includes('请确保') ? 'var(--warning)' :
-                                           'var(--text-secondary)'
-                                }}>
-                                    {log}
-                                </div>
-                            ))}
+                            <div>
+                                1. <strong>打开目标应用</strong>
+                                （例如文本编辑器、浏览器、聊天窗口）。
+                            </div>
+                            <div>
+                                2. <strong>在目标应用中放置光标</strong>
+                                ，确保它是你希望接收输入的位置。
+                            </div>
+                            <div>
+                                3. <strong>唤起 Mulby</strong>（通过快捷键 Alt+Space）。
+                            </div>
+                            <div>
+                                4. <strong>点击下方操作按钮</strong>，Mulby 会自动隐藏并向目标应用发送操作。
+                            </div>
+                            <div
+                                style={{
+                                    marginTop: '8px',
+                                    padding: '8px',
+                                    background: 'var(--bg-tertiary)',
+                                    borderRadius: '6px',
+                                }}
+                            >
+                                <Lightbulb className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
+                                <strong>原理</strong>：所有模拟操作都会先隐藏 Mulby 窗口，让目标应用获得焦点，然后再执行模拟操作。
+                            </div>
                         </div>
                     </Card>
-                )}
 
-                <Card title="自动化脚本代码示例" icon={Code}>
-                    <CodeBlock>{`// WPS 自动化脚本示例
-async function wpsAutoScript() {
-  const modKey = isMacOS ? 'command' : 'ctrl';
+                    <Card
+                        title="粘贴文本"
+                        icon={FileText}
+                        actions={
+                            <Button onClick={handlePasteText} loading={busyAction === 'pasteText'}>
+                                粘贴到目标应用
+                            </Button>
+                        }
+                    >
+                        <div className="input-group">
+                            <label className="input-label">文本内容</label>
+                            <input className="input" placeholder="输入要粘贴的文本" value={pasteText} onChange={(e) => setPasteText(e.target.value)} />
+                        </div>
+                    </Card>
 
-  // 1. 输入中文标题（使用 Paste 方式，支持中文）
-  await input.hideMainWindowPasteText('我的文档标题');
-  await delay(300);
+                    <Card
+                        title="模拟键入"
+                        icon={Type}
+                        actions={
+                            <Button onClick={handleTypeString} loading={busyAction === 'typeString'}>
+                                发送键入
+                            </Button>
+                        }
+                    >
+                        <div className="input-group">
+                            <label className="input-label">键入内容</label>
+                            <input className="input" placeholder="输入要键入的文本" value={typeText} onChange={(e) => setTypeText(e.target.value)} />
+                        </div>
+                    </Card>
 
-  // 2. 全选并加粗
-  await input.simulateKeyboardTap('a', modKey);
-  await delay(200);
-  await input.simulateKeyboardTap('b', modKey);
-  await delay(200);
+                    <Card
+                        title="粘贴图片"
+                        icon={Image}
+                        actions={
+                            <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                                <Button variant="secondary" onClick={handlePasteImageFromPath} loading={busyAction === 'pasteImagePath'}>
+                                    从文件粘贴
+                                </Button>
+                                <Button variant="secondary" onClick={handlePasteImageSample} loading={busyAction === 'pasteImageSample'}>
+                                    发送示例图片
+                                </Button>
+                            </div>
+                        }
+                    >
+                        <div style={{ color: 'var(--text-secondary)' }}>图片将写入剪贴板后模拟粘贴，可用于聊天窗口或文档编辑器。</div>
+                    </Card>
 
-  // 3. 设置居中
-  await input.simulateKeyboardTap('e', modKey);
-  await delay(200);
+                    <Card
+                        title="粘贴文件"
+                        icon={Paperclip}
+                        actions={
+                            <Button onClick={handlePasteFile} loading={busyAction === 'pasteFile'}>
+                                选择文件并粘贴
+                            </Button>
+                        }
+                    >
+                        <div style={{ color: 'var(--text-secondary)' }}>选择一个或多个文件，目标应用需支持文件粘贴（如文件管理器或聊天软件）。</div>
+                    </Card>
 
-  // 4. 移动到行尾，换行
-  await input.simulateKeyboardTap('end');
-  await delay(100);
-  await input.simulateKeyboardTap('enter');
-  await delay(100);
+                    {/* 模拟按键部分 */}
+                    <div
+                        style={{
+                            marginTop: '24px',
+                            marginBottom: '16px',
+                            fontWeight: 600,
+                            fontSize: '18px',
+                            color: 'var(--text-primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                        }}
+                    >
+                        <Gamepad2 className="section-icon" aria-hidden="true" size={18} strokeWidth={2} />
+                        <span>模拟按键与鼠标</span>
+                    </div>
 
-  // 5. 输入正文（使用 Paste 方式，支持中文）
-  await input.hideMainWindowPasteText('这是正文内容...');
-  await delay(300);
+                    <Card title="模拟操作说明" icon={Lightbulb}>
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div>
+                                模拟按键和鼠标操作会<strong>先隐藏 Mulby 窗口</strong>
+                                ，让之前活跃的应用获得焦点，然后发送模拟操作。
+                            </div>
+                            <div>这适用于以下场景：</div>
+                            <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
+                                <li>向编辑器发送快捷键（如 Ctrl+S 保存）</li>
+                                <li>在表单中自动输入并提交（模拟 Enter）</li>
+                                <li>自动化点击桌面上的某个位置</li>
+                            </ul>
+                        </div>
+                    </Card>
 
-  // 6. 保存文档
-  await input.simulateKeyboardTap('s', modKey);
-}
+                    <Card
+                        title="模拟键盘按键"
+                        icon={Keyboard}
+                        actions={
+                            <Button onClick={handleSimulateKeyboardTap} loading={busyAction === 'keyboardTap'}>
+                                模拟按键
+                            </Button>
+                        }
+                    >
+                        <div style={{ display: 'grid', gap: '12px' }}>
+                            <div className="input-group">
+                                <label className="input-label">按键名称</label>
+                                <input className="input" placeholder="如: enter, a, f5, space" value={keyboardKey} onChange={(e) => setKeyboardKey(e.target.value)} />
+                                <div
+                                    style={{
+                                        fontSize: '12px',
+                                        color: 'var(--text-tertiary)',
+                                        marginTop: '4px',
+                                    }}
+                                >
+                                    支持: a-z, 0-9, enter, tab, space, backspace, delete, escape, up/down/left/right, f1-f12 等
+                                </div>
+                            </div>
+                            <div className="input-group">
+                                <label className="input-label">修饰键（可选，逗号分隔）</label>
+                                <input className="input" placeholder="如: ctrl 或 ctrl,shift 或 command" value={keyboardModifiers} onChange={(e) => setKeyboardModifiers(e.target.value)} />
+                                <div
+                                    style={{
+                                        fontSize: '12px',
+                                        color: 'var(--text-tertiary)',
+                                        marginTop: '4px',
+                                    }}
+                                >
+                                    支持: ctrl, alt, shift, command (macOS), meta, super, win
+                                </div>
+                            </div>
+                        </div>
+                    </Card>
 
-// 重要提示：
-// - hideMainWindowPasteText: 通过剪贴板粘贴，支持中文
-// - hideMainWindowTypeString: 模拟键盘输入，仅支持英文
-// - 每个操作之间需要适当的延迟 (100-300ms)`}</CodeBlock>
-                </Card>
+                    <Card
+                        title="模拟鼠标操作"
+                        icon={MousePointerClick}
+                        actions={
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    gap: 'var(--spacing-sm)',
+                                    flexWrap: 'wrap',
+                                }}
+                            >
+                                <Button variant="secondary" onClick={handleGetMousePosition}>
+                                    获取鼠标位置
+                                </Button>
+                                <Button variant="secondary" onClick={handleSimulateMouseMove} loading={busyAction === 'mouseMove'}>
+                                    移动鼠标
+                                </Button>
+                                <Button onClick={handleSimulateMouseClick} loading={busyAction === 'mouseClick'}>
+                                    左键单击
+                                </Button>
+                                <Button variant="secondary" onClick={handleSimulateMouseDoubleClick} loading={busyAction === 'mouseDoubleClick'}>
+                                    左键双击
+                                </Button>
+                                <Button variant="secondary" onClick={handleSimulateMouseRightClick} loading={busyAction === 'mouseRightClick'}>
+                                    右键点击
+                                </Button>
+                            </div>
+                        }
+                    >
+                        <div style={{ display: 'grid', gap: '12px' }}>
+                            <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                                <div className="input-group" style={{ flex: 1 }}>
+                                    <label className="input-label">X 坐标</label>
+                                    <input className="input" type="number" placeholder="X" value={mouseX} onChange={(e) => setMouseX(Number(e.target.value))} />
+                                </div>
+                                <div className="input-group" style={{ flex: 1 }}>
+                                    <label className="input-label">Y 坐标</label>
+                                    <input className="input" type="number" placeholder="Y" value={mouseY} onChange={(e) => setMouseY(Number(e.target.value))} />
+                                </div>
+                            </div>
+                            {currentMousePos && (
+                                <div
+                                    style={{
+                                        padding: '8px 12px',
+                                        background: 'var(--bg-tertiary)',
+                                        borderRadius: '6px',
+                                        fontSize: '14px',
+                                    }}
+                                >
+                                    当前鼠标位置:{' '}
+                                    <strong>
+                                        ({currentMousePos.x}, {currentMousePos.y})
+                                    </strong>
+                                </div>
+                            )}
+                            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>坐标以屏幕左上角为原点，单位为像素。点击"获取鼠标位置"可以获取当前鼠标坐标。</div>
+                        </div>
+                    </Card>
+
+                    <Card title="常用快捷键示例" icon={Zap}>
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <Button variant="secondary" onClick={() => runSimulateAction('copy', () => input.simulateKeyboardTap('c', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'copy'}>
+                                复制 (Cmd/Ctrl+C)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('paste', () => input.simulateKeyboardTap('v', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'paste'}>
+                                粘贴 (Cmd/Ctrl+V)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('cut', () => input.simulateKeyboardTap('x', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'cut'}>
+                                剪切 (Cmd/Ctrl+X)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('save', () => input.simulateKeyboardTap('s', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'save'}>
+                                保存 (Cmd/Ctrl+S)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('undo', () => input.simulateKeyboardTap('z', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'undo'}>
+                                撤销 (Cmd/Ctrl+Z)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('selectAll', () => input.simulateKeyboardTap('a', isMacOS ? 'command' : 'ctrl'))} loading={busyAction === 'selectAll'}>
+                                全选 (Cmd/Ctrl+A)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('enter', () => input.simulateKeyboardTap('enter'))} loading={busyAction === 'enter'}>
+                                回车 (Enter)
+                            </Button>
+                            <Button variant="secondary" onClick={() => runSimulateAction('escape', () => input.simulateKeyboardTap('escape'))} loading={busyAction === 'escape'}>
+                                取消 (Escape)
+                            </Button>
+                        </div>
+                    </Card>
+
+                    <Card title="注意事项" icon={AlertTriangle}>
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div>
+                                <strong>macOS:</strong> 需要在系统偏好设置中授予辅助功能权限。
+                            </div>
+                            <div>
+                                <strong>Windows:</strong> 某些受保护的应用可能无法接收模拟输入。
+                            </div>
+                            <div>
+                                <strong>Linux:</strong> 依赖 xdotool 工具，Wayland 环境可能受限。
+                            </div>
+                            <div>
+                                <strong>坐标系统:</strong> 鼠标坐标以整个屏幕左上角为原点，多显示器环境下需注意坐标计算。
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* WPS 自动化脚本部分 */}
+                    <div
+                        style={{
+                            marginTop: '24px',
+                            marginBottom: '16px',
+                            fontWeight: 600,
+                            fontSize: '18px',
+                            color: 'var(--text-primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                        }}
+                    >
+                        <FileText className="section-icon" aria-hidden="true" size={18} strokeWidth={2} />
+                        <span>WPS 文档自动化脚本</span>
+                    </div>
+
+                    <Card title="使用说明" icon={BookOpen}>
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div style={{ fontWeight: 500, color: 'var(--text-primary)' }}>操作步骤：</div>
+                            <div>1. 打开 WPS 文字，新建或打开一个文档</div>
+                            <div>2. 将光标放置在文档中你希望开始操作的位置</div>
+                            <div>
+                                3. 按{' '}
+                                <kbd
+                                    style={{
+                                        padding: '2px 6px',
+                                        background: 'var(--bg-tertiary)',
+                                        borderRadius: '4px',
+                                        fontSize: '12px',
+                                    }}
+                                >
+                                    Alt+Space
+                                </kbd>{' '}
+                                唤起 Mulby
+                            </div>
+                            <div>4. 进入"输入控制"模块，点击下方任一脚本按钮</div>
+                            <div>5. Mulby 会自动隐藏，脚本将在 WPS 中执行</div>
+                            <div
+                                style={{
+                                    marginTop: '8px',
+                                    padding: '8px',
+                                    background: 'var(--warning)',
+                                    color: '#000',
+                                    borderRadius: '6px',
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <AlertTriangle className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
+                                <span>脚本执行期间请勿操作键盘鼠标，否则可能干扰自动化流程</span>
+                            </div>
+                        </div>
+                    </Card>
+
+                    <Card
+                        title="自动创建格式化文档"
+                        icon={FileText}
+                        actions={
+                            <Button onClick={runWpsAutoScript} loading={busyAction === 'wpsScript'}>
+                                执行脚本
+                            </Button>
+                        }
+                    >
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div>此脚本将自动执行以下操作：</div>
+                            <ul
+                                style={{
+                                    margin: '4px 0',
+                                    paddingLeft: '20px',
+                                    lineHeight: 1.8,
+                                }}
+                            >
+                                <li>
+                                    输入标题并设置<strong>加粗、居中</strong>
+                                </li>
+                                <li>输入正文段落</li>
+                                <li>创建功能列表</li>
+                                <li>添加时间戳</li>
+                                <li>自动保存文档</li>
+                            </ul>
+                            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>预计执行时间：约 8-10 秒</div>
+                        </div>
+                    </Card>
+
+                    <Card
+                        title="快速插入表格"
+                        icon={Table}
+                        actions={
+                            <Button onClick={runWpsTableScript} loading={busyAction === 'wpsTableScript'}>
+                                执行脚本
+                            </Button>
+                        }
+                    >
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div>此脚本将自动插入一个项目进度表：</div>
+                            <ul
+                                style={{
+                                    margin: '4px 0',
+                                    paddingLeft: '20px',
+                                    lineHeight: 1.8,
+                                }}
+                            >
+                                <li>输入表格标题（加粗）</li>
+                                <li>使用 Tab 分隔输入表格数据</li>
+                                <li>包含 5 行 4 列的示例数据</li>
+                                <li>自动保存文档</li>
+                            </ul>
+                            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                                <Lightbulb className="inline-icon" aria-hidden="true" size={16} strokeWidth={2} />
+                                <span>提示：输入后可以选中表格区域，使用 WPS 的"文本转表格"功能</span>
+                            </div>
+                        </div>
+                    </Card>
+
+                    <Card
+                        title="快速格式化选中文本"
+                        icon={Sparkles}
+                        actions={
+                            <Button onClick={runQuickFormatScript} loading={busyAction === 'quickFormat'}>
+                                执行脚本
+                            </Button>
+                        }
+                    >
+                        <div
+                            style={{
+                                display: 'grid',
+                                gap: '8px',
+                                color: 'var(--text-secondary)',
+                            }}
+                        >
+                            <div>
+                                <strong>使用前请先在 WPS 中选中要格式化的文本</strong>
+                            </div>
+                            <div>此脚本将对选中文本应用：</div>
+                            <ul style={{ margin: '4px 0', paddingLeft: '20px' }}>
+                                <li>
+                                    <strong>加粗</strong> (Ctrl+B)
+                                </li>
+                                <li>
+                                    <em>斜体</em> (Ctrl+I)
+                                </li>
+                                <li>
+                                    <u>下划线</u> (Ctrl+U)
+                                </li>
+                            </ul>
+                        </div>
+                    </Card>
+
+                    {/* 脚本执行日志 */}
+                    {scriptLog.length > 0 && (
+                        <Card
+                            title="执行日志"
+                            icon={ClipboardList}
+                            actions={
+                                <Button variant="secondary" onClick={() => setScriptLog([])}>
+                                    清空日志
+                                </Button>
+                            }
+                        >
+                            <div
+                                style={{
+                                    maxHeight: '200px',
+                                    overflowY: 'auto',
+                                    padding: '8px 12px',
+                                    background: 'var(--bg-tertiary)',
+                                    borderRadius: '6px',
+                                    fontFamily: 'monospace',
+                                    fontSize: '12px',
+                                    lineHeight: 1.8,
+                                }}
+                            >
+                                {scriptLog.map((log, index) => (
+                                    <div
+                                        key={index}
+                                        style={{
+                                            color: log.includes('执行出错') ? 'var(--error)' : log.includes('完成') ? 'var(--success)' : log.includes('请确保') ? 'var(--warning)' : 'var(--text-secondary)',
+                                        }}
+                                    >
+                                        {log}
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    )}
+                </div>
+                <ApiReferencePanel apiGroups={apiGroups} examples={apiExamples} rawData={rawData} />
             </div>
         </div>
     )

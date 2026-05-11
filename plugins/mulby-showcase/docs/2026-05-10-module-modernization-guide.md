@@ -138,3 +138,12 @@ Manual review:
 - Keep destructive history actions explicit. `clipboardHistory.clear()` clears non-favorite records, so label it as clearing non-favorites rather than all records.
 - Redact image history content and Data URLs in `rawData`; show image previews in the main UI only when they are useful.
 - Prefer using `useMulby()` namespaces such as `dialog` instead of direct `window.mulby.*` calls inside modules.
+
+## Input Module Lessons
+
+- `input.md` currently supports paste text, paste image, paste file, type string, restore windows, keyboard tap, and mouse move/click/double-click/right-click.
+- Include `input.restoreWindows()` as a real action when the page demonstrates continuous input flows. It is part of the current API and prevents hidden-window state from lingering after scripts.
+- Keep `inputMonitor` separate from the basic input-control page unless the module explicitly demonstrates global input listening. It requires `permissions.inputMonitor` and may also require `permissions.accessibility`, so adding it changes the plugin's privacy/permission surface.
+- If the page calls `permission.isAccessibilityTrusted()` or `permission.openSystemSettings('accessibility')`, add `permissions.accessibility` to `manifest.json`; those permission APIs are gated by the same manifest permission.
+- Use `screen.getCursorScreenPoint()` as a related API for mouse-coordinate demos, but keep it in the related API group rather than treating it as an input method.
+- Run a TypeScript check or targeted symbol scan after cleaning imports. Vite/esbuild can build while still leaving unresolved JSX identifiers in TSX.
