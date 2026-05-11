@@ -10,29 +10,41 @@ export interface SvgRendererState {
 }
 
 const POSE_ANIMATIONS: Record<string, string> = {
-  stand: 'pet-float 3s ease-in-out infinite',
-  walk_1: 'pet-drift 0.4s ease-in-out',
-  walk_2: 'pet-drift 0.4s ease-in-out',
-  sit: 'pet-settle 3.5s ease-in-out infinite',
-  sleep: 'pet-slumber 5s ease-in-out infinite',
-  jump: 'pet-ascend 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
-  wave: 'pet-wiggle 0.6s ease-in-out 3',
+  stand: 'pet-float 3.2s ease-in-out infinite',
+  walk_1: 'pet-walk-step-a 0.52s ease-in-out',
+  walk_2: 'pet-walk-step-b 0.52s ease-in-out',
+  sit: 'pet-settle 4.2s ease-in-out infinite',
+  sleep: 'pet-slumber 5.4s ease-in-out infinite',
+  jump: 'pet-ascend 0.62s ease-out',
+  wave: 'pet-wave-idle 1.4s ease-in-out infinite',
+  hover: 'pet-hover-loop 2.7s ease-in-out infinite',
+  peek: 'pet-peek-idle 1.8s ease-in-out infinite',
+  spin: 'pet-spin-loop 1.4s ease-in-out infinite',
+  dance: 'pet-dance-loop 1s ease-in-out infinite',
+  hide: 'pet-hide-idle 2.4s ease-in-out infinite',
+  focus: 'pet-focus-idle 2s ease-in-out infinite',
 }
 
 const EXPR_ANIMATIONS: Record<string, string> = {
   happy: 'pet-bounce 0.5s ease-out',
-  excited: 'pet-spin-bounce 0.6s ease-out',
+  excited: 'pet-cheer 0.75s ease-out',
   sad: 'pet-droop 0.6s ease-out forwards',
   angry: 'pet-flicker 0.4s ease-in-out 3',
   surprised: 'pet-phase 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
   love: 'pet-glow-pulse 1s ease-in-out 2',
-  sleepy: 'pet-droop 0.8s ease-out forwards',
+  sleepy: 'pet-drowsy 1.1s ease-out forwards',
   shy: 'pet-hide 0.5s ease-out forwards',
+  curious: 'pet-peek 0.75s ease-out',
+  confused: 'pet-wobble 0.85s ease-in-out',
+  proud: 'pet-bounce 0.55s ease-out',
+  scared: 'pet-flicker 0.35s ease-in-out 4',
+  focused: 'pet-focus-pulse 1s ease-in-out 2',
+  dizzy: 'pet-wobble 1s ease-in-out',
 }
 
 const NAMED_ANIMATIONS: Record<string, string> = {
   bounce: 'pet-bounce 0.5s ease-out',
-  spin_bounce: 'pet-spin-bounce 0.6s ease-out',
+  spin_bounce: 'pet-cheer 0.75s ease-out',
   droop: 'pet-droop 0.6s ease-out forwards',
   flicker: 'pet-flicker 0.4s ease-in-out 3',
   phase: 'pet-phase 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
@@ -52,83 +64,154 @@ const POSE_OPACITY: Record<string, number> = {
   sleep: 0.45,
   jump: 0.75,
   wave: 0.8,
+  hover: 0.72,
+  peek: 0.74,
+  spin: 0.76,
+  dance: 0.78,
+  hide: 0.52,
+  focus: 0.7,
 }
 
 const ANIM_KEYFRAMES = `
-/* Ghost float: gentle hovering with subtle sway and rotation */
+/* All animations move the wrapper only; the SVG silhouette is never squashed or stretched. */
 @keyframes pet-float {
   0%, 100% { transform: translateY(0) translateX(0) rotate(0deg) VAR_FLIP; }
-  25% { transform: translateY(-4px) translateX(1.5px) rotate(0.8deg) VAR_FLIP; }
-  50% { transform: translateY(-6px) translateX(0) rotate(0deg) VAR_FLIP; }
-  75% { transform: translateY(-4px) translateX(-1.5px) rotate(-0.8deg) VAR_FLIP; }
+  30% { transform: translateY(-5px) translateX(2px) rotate(0.8deg) VAR_FLIP; }
+  55% { transform: translateY(-8px) translateX(0) rotate(0deg) VAR_FLIP; }
+  80% { transform: translateY(-4px) translateX(-2px) rotate(-0.8deg) VAR_FLIP; }
 }
 
-/* Ghost drift: floating movement with bob */
-@keyframes pet-drift {
-  0%, 100% { transform: translateY(0) VAR_FLIP; }
-  30% { transform: translateY(-5px) VAR_FLIP; }
-  60% { transform: translateY(-2px) VAR_FLIP; }
+/* Walk frame A: light forward glide. */
+@keyframes pet-walk-step-a {
+  0% { transform: translateY(0) translateX(0) rotate(0deg) VAR_FLIP; }
+  35% { transform: translateY(-6px) translateX(3px) rotate(1.8deg) VAR_FLIP; }
+  70% { transform: translateY(-2px) translateX(4px) rotate(0.8deg) VAR_FLIP; }
+  100% { transform: translateY(0) translateX(0) rotate(0deg) VAR_FLIP; }
 }
 
-/* Settling down: slow breathing while sinking */
+/* Walk frame B: alternate glide with a different timing accent. */
+@keyframes pet-walk-step-b {
+  0% { transform: translateY(-2px) translateX(0) rotate(0deg) VAR_FLIP; }
+  40% { transform: translateY(-4px) translateX(-3px) rotate(-1.8deg) VAR_FLIP; }
+  75% { transform: translateY(-7px) translateX(-4px) rotate(-0.6deg) VAR_FLIP; }
+  100% { transform: translateY(-2px) translateX(0) rotate(0deg) VAR_FLIP; }
+}
+
+/* Sit: slower, lower hover with drowsy opacity. */
 @keyframes pet-settle {
-  0%, 100% { transform: scale(1) translateY(0) rotate(0deg) VAR_FLIP; }
-  30% { transform: scale(1.02) translateY(-1px) rotate(0.3deg) VAR_FLIP; }
-  60% { transform: scale(0.99) translateY(1px) rotate(-0.3deg) VAR_FLIP; }
+  0%, 100% { transform: translateY(4px) rotate(0deg) VAR_FLIP; opacity: 0.62; }
+  40% { transform: translateY(1px) rotate(0.45deg) VAR_FLIP; opacity: 0.68; }
+  75% { transform: translateY(6px) rotate(-0.45deg) VAR_FLIP; opacity: 0.56; }
 }
 
-/* Sleep: very slow dreamy float, ghost fading in and out */
+/* Sleep: dreamy float, using opacity and blur instead of extra SVG marks. */
 @keyframes pet-slumber {
-  0%, 100% { transform: scale(1) translateY(0) rotate(0deg) VAR_FLIP; opacity: 0.45; }
-  25% { transform: scale(1.01) translateY(1px) rotate(0.5deg) VAR_FLIP; opacity: 0.4; }
-  50% { transform: scale(1.02) translateY(2px) rotate(0deg) VAR_FLIP; opacity: 0.35; }
-  75% { transform: scale(1.01) translateY(1px) rotate(-0.5deg) VAR_FLIP; opacity: 0.4; }
+  0%, 100% { transform: translateY(5px) rotate(-0.8deg) VAR_FLIP; opacity: 0.46; filter: blur(0px); }
+  30% { transform: translateY(7px) rotate(-0.3deg) VAR_FLIP; opacity: 0.4; filter: blur(0.2px); }
+  60% { transform: translateY(9px) rotate(0.6deg) VAR_FLIP; opacity: 0.34; filter: blur(0.35px); }
 }
 
-/* Ascend: ghost rising high with ethereal stretch */
+/* Jump: a short float-hop without silhouette deformation. */
 @keyframes pet-ascend {
-  0% { transform: translateY(0) scale(1, 1) VAR_FLIP; }
-  25% { transform: translateY(-14px) scale(0.88, 1.12) VAR_FLIP; }
-  50% { transform: translateY(-18px) scale(0.85, 1.15) VAR_FLIP; opacity: 0.5; }
-  75% { transform: translateY(-8px) scale(1.06, 0.94) VAR_FLIP; opacity: 0.7; }
-  100% { transform: translateY(0) scale(1) VAR_FLIP; }
-}
-
-/* Wiggle: excited ghostly wobble */
-@keyframes pet-wiggle {
-  0%, 100% { transform: rotate(0deg) translateY(0) VAR_FLIP; }
-  15% { transform: rotate(-6deg) translateY(-3px) VAR_FLIP; }
-  35% { transform: rotate(6deg) translateY(-5px) VAR_FLIP; }
-  55% { transform: rotate(-4deg) translateY(-3px) VAR_FLIP; }
-  75% { transform: rotate(4deg) translateY(-4px) VAR_FLIP; }
-}
-
-/* Bounce: happy hop with slight spin */
-@keyframes pet-bounce {
   0% { transform: translateY(0) rotate(0deg) VAR_FLIP; }
-  20% { transform: translateY(-10px) rotate(3deg) VAR_FLIP; }
-  45% { transform: translateY(-3px) rotate(-1deg) VAR_FLIP; }
-  65% { transform: translateY(-7px) rotate(2deg) VAR_FLIP; }
+  28% { transform: translateY(-14px) rotate(-2deg) VAR_FLIP; }
+  55% { transform: translateY(-19px) rotate(1.8deg) VAR_FLIP; opacity: 0.66; }
+  78% { transform: translateY(-7px) rotate(-0.8deg) VAR_FLIP; opacity: 0.74; }
   100% { transform: translateY(0) rotate(0deg) VAR_FLIP; }
 }
 
-/* Spin-bounce: excited double bounce with rotation */
-@keyframes pet-spin-bounce {
-  0% { transform: translateY(0) rotate(0deg) scale(1) VAR_FLIP; }
-  20% { transform: translateY(-12px) rotate(8deg) scale(1.08) VAR_FLIP; }
-  40% { transform: translateY(-4px) rotate(-3deg) scale(0.97) VAR_FLIP; }
-  60% { transform: translateY(-10px) rotate(5deg) scale(1.05) VAR_FLIP; }
-  80% { transform: translateY(-2px) rotate(-2deg) scale(0.98) VAR_FLIP; }
-  100% { transform: translateY(0) rotate(0deg) scale(1) VAR_FLIP; }
+/* Wiggle: greeting/excitement through rotation only. */
+@keyframes pet-wiggle {
+  0%, 100% { transform: rotate(0deg) translateY(0) VAR_FLIP; }
+  18% { transform: rotate(-6deg) translateY(-4px) VAR_FLIP; }
+  40% { transform: rotate(6deg) translateY(-6px) VAR_FLIP; }
+  62% { transform: rotate(-4deg) translateY(-4px) VAR_FLIP; }
+  82% { transform: rotate(3deg) translateY(-2px) VAR_FLIP; }
 }
 
-/* Droop: sad ghost sinking and fading */
+/* Wave: friendly side-to-side hover; the face carries the gesture. */
+@keyframes pet-wave-idle {
+  0%, 100% { transform: rotate(0deg) translateY(0) VAR_FLIP; }
+  30% { transform: rotate(-4deg) translateY(-4px) VAR_FLIP; }
+  60% { transform: rotate(4deg) translateY(-2px) VAR_FLIP; }
+}
+
+/* Hover: higher airy float with a wider drift path. */
+@keyframes pet-hover-loop {
+  0%, 100% { transform: translateY(-4px) translateX(0) rotate(0deg) VAR_FLIP; opacity: 0.72; }
+  25% { transform: translateY(-13px) translateX(5px) rotate(1.8deg) VAR_FLIP; opacity: 0.78; }
+  50% { transform: translateY(-18px) translateX(0) rotate(0deg) VAR_FLIP; opacity: 0.7; }
+  75% { transform: translateY(-11px) translateX(-5px) rotate(-1.8deg) VAR_FLIP; opacity: 0.76; }
+}
+
+/* Peek: curious side lean without changing the SVG body. */
+@keyframes pet-peek-idle {
+  0%, 100% { transform: translateX(0) translateY(0) rotate(0deg) VAR_FLIP; }
+  35% { transform: translateX(8px) translateY(-5px) rotate(5deg) VAR_FLIP; }
+  70% { transform: translateX(-4px) translateY(-2px) rotate(-2.5deg) VAR_FLIP; }
+}
+
+/* Spin: playful ghost turn using rotation only. */
+@keyframes pet-spin-loop {
+  0%, 100% { transform: translateY(0) rotate(0deg) VAR_FLIP; opacity: 0.76; }
+  25% { transform: translateY(-7px) rotate(8deg) VAR_FLIP; opacity: 0.62; }
+  50% { transform: translateY(-2px) rotate(-6deg) VAR_FLIP; opacity: 0.82; }
+  75% { transform: translateY(-9px) rotate(5deg) VAR_FLIP; opacity: 0.68; }
+}
+
+/* Dance: rhythmic sway for lively moments. */
+@keyframes pet-dance-loop {
+  0%, 100% { transform: translateX(0) translateY(0) rotate(0deg) VAR_FLIP; }
+  20% { transform: translateX(-7px) translateY(-6px) rotate(-7deg) VAR_FLIP; }
+  40% { transform: translateX(6px) translateY(-3px) rotate(6deg) VAR_FLIP; }
+  65% { transform: translateX(-4px) translateY(-8px) rotate(-4deg) VAR_FLIP; }
+  85% { transform: translateX(4px) translateY(-2px) rotate(3deg) VAR_FLIP; }
+}
+
+/* Hide pose: turned-away idle, expressed through opacity and offset. */
+@keyframes pet-hide-idle {
+  0%, 100% { transform: translateX(-4px) translateY(2px) rotate(-4deg) VAR_FLIP; opacity: 0.54; }
+  50% { transform: translateX(-8px) translateY(-2px) rotate(-6deg) VAR_FLIP; opacity: 0.44; }
+}
+
+/* Focus pose: steady hover with a cool glow. */
+@keyframes pet-focus-idle {
+  0%, 100% { transform: translateY(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+  50% { transform: translateY(-6px) rotate(0.4deg) VAR_FLIP; filter: brightness(1.14) drop-shadow(0 0 5px rgba(120, 170, 190, 0.35)); }
+}
+
+/* Bounce: happy float-pop. */
+@keyframes pet-bounce {
+  0% { transform: translateY(0) rotate(0deg) VAR_FLIP; }
+  22% { transform: translateY(-12px) rotate(2.8deg) VAR_FLIP; }
+  48% { transform: translateY(-3px) rotate(-1deg) VAR_FLIP; }
+  70% { transform: translateY(-7px) rotate(1.6deg) VAR_FLIP; }
+  100% { transform: translateY(0) rotate(0deg) VAR_FLIP; }
+}
+
+/* Cheer: energetic glow and light hops, not body stretching. */
+@keyframes pet-cheer {
+  0% { transform: translateY(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+  20% { transform: translateY(-11px) rotate(-4deg) VAR_FLIP; filter: brightness(1.16); }
+  42% { transform: translateY(-2px) rotate(2deg) VAR_FLIP; filter: brightness(1); }
+  64% { transform: translateY(-9px) rotate(4deg) VAR_FLIP; filter: brightness(1.2); }
+  82% { transform: translateY(-3px) rotate(-1.5deg) VAR_FLIP; filter: brightness(1.08); }
+  100% { transform: translateY(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+}
+
+/* Drowsy: eyelid expression plus a tiny downward drift. */
+@keyframes pet-drowsy {
+  0% { transform: translateY(0) rotate(0deg) VAR_FLIP; opacity: 0.72; filter: blur(0px); }
+  100% { transform: translateY(6px) rotate(-0.8deg) VAR_FLIP; opacity: 0.55; filter: blur(0.15px); }
+}
+
+/* Droop: sad ghost sinking and fading. */
 @keyframes pet-droop {
-  0% { transform: translateY(0) scale(1) rotate(0deg) VAR_FLIP; }
-  100% { transform: translateY(4px) scale(0.96) rotate(-2deg) VAR_FLIP; opacity: 0.5; }
+  0% { transform: translateY(0) rotate(0deg) VAR_FLIP; }
+  100% { transform: translateY(7px) rotate(-1.8deg) VAR_FLIP; opacity: 0.5; }
 }
 
-/* Flicker: angry ghost rapidly flickering in and out */
+/* Flicker: angry ghost rapidly flickering in place. */
 @keyframes pet-flicker {
   0%, 100% { transform: translateX(0) VAR_FLIP; opacity: 0.8; }
   10% { transform: translateX(-3px) VAR_FLIP; opacity: 0.4; }
@@ -140,49 +223,58 @@ const ANIM_KEYFRAMES = `
   90% { transform: translateX(1px) VAR_FLIP; opacity: 0.75; }
 }
 
-/* Phase: surprised ghost briefly phasing through reality */
+/* Phase: surprised ghost briefly blinking through reality. */
 @keyframes pet-phase {
-  0% { transform: scale(1) VAR_FLIP; opacity: 0.7; }
-  25% { transform: scale(1.25) VAR_FLIP; opacity: 0.3; }
-  50% { transform: scale(0.9) VAR_FLIP; opacity: 0.9; }
-  75% { transform: scale(1.05) VAR_FLIP; opacity: 0.6; }
-  100% { transform: scale(1) VAR_FLIP; opacity: 0.7; }
+  0% { transform: translateY(0) rotate(0deg) VAR_FLIP; opacity: 0.7; filter: blur(0px); }
+  25% { transform: translateY(-9px) rotate(-3deg) VAR_FLIP; opacity: 0.3; filter: blur(0.75px); }
+  50% { transform: translateY(2px) rotate(1.8deg) VAR_FLIP; opacity: 0.92; filter: blur(0px); }
+  75% { transform: translateY(-4px) rotate(-1deg) VAR_FLIP; opacity: 0.62; filter: blur(0.25px); }
+  100% { transform: translateY(0) rotate(0deg) VAR_FLIP; opacity: 0.7; filter: blur(0px); }
 }
 
-/* Glow-pulse: love ghost warmly glowing */
+/* Glow-pulse: love ghost warmly glowing. */
 @keyframes pet-glow-pulse {
-  0%, 100% { transform: scale(1) VAR_FLIP; filter: brightness(1) drop-shadow(0 0 0px transparent); }
-  50% { transform: scale(1.08) VAR_FLIP; filter: brightness(1.2) drop-shadow(0 0 6px rgba(207, 142, 140, 0.6)); }
+  0%, 100% { transform: translateY(0) VAR_FLIP; filter: brightness(1) drop-shadow(0 0 0px transparent); }
+  50% { transform: translateY(-5px) VAR_FLIP; filter: brightness(1.25) drop-shadow(0 0 8px rgba(207, 142, 140, 0.65)); }
 }
 
-/* Hide: shy ghost shrinking and turning away */
+/* Hide: shy ghost turning away through opacity and rotation. */
 @keyframes pet-hide {
-  0% { transform: scale(1) rotate(0deg) translateX(0) VAR_FLIP; }
-  40% { transform: scale(0.88) rotate(-5deg) translateX(-3px) VAR_FLIP; opacity: 0.5; }
-  100% { transform: scale(0.85) rotate(-4deg) translateX(-2px) VAR_FLIP; opacity: 0.55; }
+  0% { transform: rotate(0deg) translateX(0) VAR_FLIP; }
+  40% { transform: rotate(-5deg) translateX(-5px) VAR_FLIP; opacity: 0.48; }
+  100% { transform: rotate(-4deg) translateX(-4px) VAR_FLIP; opacity: 0.55; }
 }
 
-/* Ghost wobble: being blown by wind */
+/* Wobble: playful side sway without changing proportions. */
 @keyframes pet-wobble {
   0%, 100% { transform: rotate(0deg) translateX(0) translateY(0) VAR_FLIP; }
-  10% { transform: rotate(-10deg) translateX(-5px) translateY(-2px) VAR_FLIP; }
-  25% { transform: rotate(8deg) translateX(4px) translateY(-4px) VAR_FLIP; }
-  40% { transform: rotate(-6deg) translateX(-3px) translateY(-2px) VAR_FLIP; }
-  55% { transform: rotate(5deg) translateX(2px) translateY(-3px) VAR_FLIP; }
-  70% { transform: rotate(-3deg) translateX(-2px) translateY(-1px) VAR_FLIP; }
-  85% { transform: rotate(2deg) translateX(1px) translateY(-2px) VAR_FLIP; }
+  12% { transform: rotate(-7deg) translateX(-6px) translateY(-2px) VAR_FLIP; }
+  28% { transform: rotate(6deg) translateX(5px) translateY(-5px) VAR_FLIP; }
+  45% { transform: rotate(-4deg) translateX(-4px) translateY(-2px) VAR_FLIP; }
+  62% { transform: rotate(3.5deg) translateX(4px) translateY(-4px) VAR_FLIP; }
+  80% { transform: rotate(-2deg) translateX(-2px) translateY(-2px) VAR_FLIP; }
 }
 
-/* Ghost celebrate: joyful spinning rise */
+/* Celebrate: bright ghostly orbit using position, opacity, and glow only. */
 @keyframes pet-celebrate {
-  0% { transform: translateY(0) scale(1) rotate(0deg) VAR_FLIP; }
-  15% { transform: translateY(-12px) scale(1.1) rotate(8deg) VAR_FLIP; }
-  30% { transform: translateY(-6px) scale(1.05) rotate(-5deg) VAR_FLIP; }
-  45% { transform: translateY(-16px) scale(1.12) rotate(10deg) VAR_FLIP; opacity: 0.5; }
-  60% { transform: translateY(-8px) scale(1.05) rotate(-6deg) VAR_FLIP; opacity: 0.8; }
-  75% { transform: translateY(-14px) scale(1.08) rotate(5deg) VAR_FLIP; opacity: 0.55; }
-  90% { transform: translateY(-4px) scale(1.02) rotate(-2deg) VAR_FLIP; }
-  100% { transform: translateY(0) scale(1) rotate(0deg) VAR_FLIP; }
+  0% { transform: translateY(0) translateX(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+  18% { transform: translateY(-13px) translateX(4px) rotate(4deg) VAR_FLIP; filter: brightness(1.18) drop-shadow(0 0 5px rgba(207, 142, 140, 0.5)); }
+  36% { transform: translateY(-5px) translateX(-4px) rotate(-3deg) VAR_FLIP; filter: brightness(1); }
+  58% { transform: translateY(-17px) translateX(3px) rotate(5deg) VAR_FLIP; opacity: 0.62; filter: brightness(1.22) drop-shadow(0 0 8px rgba(207, 142, 140, 0.55)); }
+  76% { transform: translateY(-7px) translateX(-2px) rotate(-2deg) VAR_FLIP; opacity: 0.82; filter: brightness(1.08); }
+  100% { transform: translateY(0) translateX(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+}
+
+@keyframes pet-peek {
+  0% { transform: translateX(0) translateY(0) rotate(0deg) VAR_FLIP; }
+  35% { transform: translateX(6px) translateY(-5px) rotate(4deg) VAR_FLIP; }
+  70% { transform: translateX(-3px) translateY(-2px) rotate(-2deg) VAR_FLIP; }
+  100% { transform: translateX(0) translateY(0) rotate(0deg) VAR_FLIP; }
+}
+
+@keyframes pet-focus-pulse {
+  0%, 100% { transform: translateY(0) rotate(0deg) VAR_FLIP; filter: brightness(1); }
+  50% { transform: translateY(-3px) rotate(0deg) VAR_FLIP; filter: brightness(1.12) drop-shadow(0 0 5px rgba(120, 170, 190, 0.35)); }
 }
 `
 
@@ -193,7 +285,7 @@ export class SvgPetRenderer {
   private styleEl: HTMLStyleElement
   private spriteSet: PetSpriteSet | null = null
   private availableKeys: Set<PetSpriteKey> = new Set()
-  private currentKey: PetSpriteKey = 'stand_neutral'
+  private currentKey: PetSpriteKey | null = null
   private state: SvgRendererState = { pose: 'stand', expression: 'neutral', flipped: false }
   private walkFrame = 0
   private walkTimer = 0
@@ -257,6 +349,13 @@ export class SvgPetRenderer {
     })
     this.state.expression = expression
     this.applySprite()
+    if (expression === 'neutral') {
+      this.transientAnimationToken++
+      this.transientAnimationActive = false
+      this.svgWrap.style.filter = ''
+      this.updateAnimation()
+      return
+    }
     this.playExpressionAnim(expression)
   }
 
@@ -275,10 +374,12 @@ export class SvgPetRenderer {
     void this.svgWrap.offsetHeight
     this.svgWrap.style.animation = exprAnim
 
-    if (expression === 'love' || expression === 'excited') {
+    if (expression === 'love' || expression === 'excited' || expression === 'proud') {
       this.svgWrap.style.filter = 'drop-shadow(0 0 4px rgba(207, 142, 140, 0.5))'
     } else if (expression === 'angry') {
       this.svgWrap.style.filter = 'drop-shadow(0 0 3px rgba(200, 80, 80, 0.4))'
+    } else if (expression === 'focused' || expression === 'curious') {
+      this.svgWrap.style.filter = 'drop-shadow(0 0 3px rgba(120, 170, 190, 0.35))'
     }
 
     const dur = parseFloat(exprAnim.match(/[\d.]+s/)?.[0] || '0.5') * 1000
@@ -379,6 +480,7 @@ export class SvgPetRenderer {
         if (this.state.pose !== walkPose) {
           this.state.pose = walkPose
           this.applySprite()
+          this.updateAnimation()
         }
       }
     } else {
@@ -410,8 +512,7 @@ export class SvgPetRenderer {
 
     this.styleEl.textContent = ANIM_KEYFRAMES.replace(/VAR_FLIP/g, flipStr)
 
-    const poseBase = this.state.pose.startsWith('walk_') ? 'walk_1' : this.state.pose
-    const anim = POSE_ANIMATIONS[poseBase] || POSE_ANIMATIONS['stand']
+    const anim = POSE_ANIMATIONS[this.state.pose] || POSE_ANIMATIONS['stand']
     if (this.svgWrap.style.animation !== anim) {
       this.svgWrap.style.animation = anim
     }
@@ -438,7 +539,7 @@ export class SvgPetRenderer {
     }
 
     const key = resolveSpriteKey(this.availableKeys, this.state.pose, this.state.expression)
-    if (key === this.currentKey) return
+    if (key === this.currentKey && this.svgWrap.firstChild) return
     this.currentKey = key
 
     const svg = this.spriteSet.sprites[key]

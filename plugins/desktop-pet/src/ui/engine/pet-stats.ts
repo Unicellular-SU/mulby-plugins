@@ -59,10 +59,10 @@ function createDefaultStats(): PetStats {
 
 const EMOTION_MOOD_DELTA: Record<string, number> = {
   joy: 15, love: 20, excitement: 18, amusement: 12, gratitude: 10, pride: 10,
-  curiosity: 8, surprise: 5, calm: 3,
+  curiosity: 8, surprise: 5, calm: 3, focus: 6, concentration: 6,
   shyness: -2, nervousness: -5, confusion: -5,
   disappointment: -8, worry: -10, sadness: -15, anger: -12, annoyance: -8,
-  sleepiness: -3, tiredness: -5, fear: -10,
+  sleepiness: -3, tiredness: -5, fear: -10, dizziness: -4,
 }
 
 function moodFromScore(score: number, hour: number): PetMood {

@@ -10,13 +10,26 @@ import {
 import {
   ACTION_LIST,
   EMOTION_LIST,
+  presentationIntentForAction,
   stripPresentationMarkers,
   type PresentationIntent,
 } from '../engine/presentation'
 import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose } from '../engine/pet-standard'
 import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
-import type { PetMemory } from '../engine/pet-memory'
+import {
+  LIFE_PROFILE_CATEGORIES,
+  LIFE_PROFILE_CATEGORY_LABELS,
+  PET_LIFE_PROFILE_STORAGE_KEY,
+  countLifeProfileItems,
+  createEmptyLifeProfile,
+  normalizeLifeProfile,
+  removeLifeProfileItem,
+  updateLifeProfileItemContent,
+  type LifeProfileCategory,
+  type LifeProfileItem,
+  type PetLifeProfile,
+} from '../engine/pet-life-profile'
 import { ALL_ACHIEVEMENTS, type UnlockedAchievement } from '../engine/achievements'
 import type { DiaryEntry } from '../engine/pet-diary'
 import './settings.css'
@@ -40,6 +53,9 @@ const ICONS = {
   star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   plus: 'M12 5v14M5 12h14',
+  edit: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z',
+  check: 'M20 6L9 17l-5-5',
+  x: 'M18 6L6 18M6 6l12 12',
   cake: 'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M7 8v3M12 8v3M17 8v3M7 4h.01M12 4h.01M17 4h.01',
   layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
 } as const
@@ -51,6 +67,56 @@ function StatsIcon({ icon, children }: { icon: keyof typeof ICONS; children: Rea
 const MOOD_LABELS: Record<PetMood, string> = {
   ecstatic: '欣喜若狂', happy: '开心', content: '满足', neutral: '平静',
   bored: '无聊', lonely: '孤独', sad: '难过', grumpy: '暴躁', sleepy: '困倦',
+}
+
+const EXPRESSION_LABELS: Record<PetExpression, string> = {
+  neutral: '平静',
+  happy: '开心',
+  sad: '难过',
+  surprised: '惊讶',
+  sleepy: '困倦',
+  angry: '生气',
+  excited: '兴奋',
+  shy: '害羞',
+  love: '喜欢',
+  curious: '好奇',
+  confused: '困惑',
+  proud: '得意',
+  scared: '害怕',
+  focused: '专注',
+  dizzy: '晕乎',
+}
+
+const POSE_LABELS: Record<PetPose, string> = {
+  stand: '站立',
+  walk_1: '前进',
+  walk_2: '漫步',
+  sit: '坐下',
+  sleep: '睡眠',
+  jump: '跳跃',
+  wave: '挥手',
+  hover: '悬浮',
+  peek: '探头',
+  spin: '旋转',
+  dance: '摇摆',
+  hide: '躲藏',
+  focus: '专注',
+}
+
+const PLAYGROUND_POSE_FACE: Record<PetPose, PetExpression> = {
+  stand: 'neutral',
+  walk_1: 'neutral',
+  walk_2: 'curious',
+  sit: 'sleepy',
+  sleep: 'sleepy',
+  jump: 'excited',
+  wave: 'happy',
+  hover: 'neutral',
+  peek: 'curious',
+  spin: 'dizzy',
+  dance: 'excited',
+  hide: 'shy',
+  focus: 'focused',
 }
 
 const TRAITS = [
@@ -120,8 +186,10 @@ export default function SettingsView() {
   const [toast, setToast] = useState('')
   const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
-  const [memories, setMemories] = useState<PetMemory[]>([])
-  const [memoryFilter, setMemoryFilter] = useState<'all' | 'pinned'>('all')
+  const [lifeProfile, setLifeProfile] = useState<PetLifeProfile>(() => createEmptyLifeProfile())
+  const [editingLifeMemoryId, setEditingLifeMemoryId] = useState<string | null>(null)
+  const [editingLifeMemoryContent, setEditingLifeMemoryContent] = useState('')
+  const [refreshingLifeProfile, setRefreshingLifeProfile] = useState(false)
   const [geoInfo, setGeoInfo] = useState<GeoContext | null>(null)
   const [geoLoading, setGeoLoading] = useState(false)
   const [manualLat, setManualLat] = useState('')
@@ -133,8 +201,6 @@ export default function SettingsView() {
   const [newReminderLabel, setNewReminderLabel] = useState('')
   const [newReminderTime, setNewReminderTime] = useState('09:00')
   const [chatHistory, setChatHistory] = useState<PetChatHistoryItem[]>([])
-  const [extractingMemory, setExtractingMemory] = useState(false)
-  const [consolidatingMemory, setConsolidatingMemory] = useState(false)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -171,19 +237,10 @@ export default function SettingsView() {
       }
 
       try {
-        const savedMems = await window.mulby.storage.get('pet-memories')
-        if (Array.isArray(savedMems)) {
-          const valid: PetMemory[] = []
-          for (const m of savedMems) {
-            if (!m || typeof m !== 'object') continue
-            const obj = m as Record<string, unknown>
-            if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
-            valid.push(m as PetMemory)
-          }
-          setMemories(valid)
-        }
+        const savedProfile = await window.mulby.storage.get(PET_LIFE_PROFILE_STORAGE_KEY)
+        setLifeProfile(normalizeLifeProfile(savedProfile))
       } catch (err) {
-        console.error('Load memories failed:', err)
+        console.error('Load life profile failed:', err)
       }
 
       try {
@@ -388,23 +445,59 @@ export default function SettingsView() {
     }
   }
 
-  const handleTogglePin = async (id: string) => {
-    const updated = memories.map(m => {
-      if (m.id !== id) return m
-      const pinnedCount = memories.filter(x => x.pinned).length
-      if (!m.pinned && pinnedCount >= 10) return m
-      return { ...m, pinned: !m.pinned }
-    })
-    setMemories(updated)
-    await window.mulby.storage.set('pet-memories', updated)
-    showToast('已更新')
+  const loadLifeProfile = async (showSuccess = false) => {
+    try {
+      const savedProfile = await window.mulby.storage.get(PET_LIFE_PROFILE_STORAGE_KEY)
+      setLifeProfile(normalizeLifeProfile(savedProfile))
+      if (showSuccess) showToast('已刷新')
+    } catch (err) {
+      console.error('Refresh life profile failed:', err)
+      showToast('刷新失败')
+    }
   }
 
-  const handleDeleteMemory = async (id: string) => {
-    const updated = memories.filter(m => m.id !== id)
-    setMemories(updated)
-    await window.mulby.storage.set('pet-memories', updated)
-    showToast('已删除')
+  const persistLifeProfile = async (next: PetLifeProfile, message: string) => {
+    const normalized = normalizeLifeProfile(next)
+    await window.mulby.storage.set(PET_LIFE_PROFILE_STORAGE_KEY, normalized)
+    setLifeProfile(normalized)
+    window.mulby.window.sendToParent('life-profile-updated')
+    showToast(message)
+  }
+
+  const startEditLifeMemory = (item: LifeProfileItem) => {
+    setEditingLifeMemoryId(item.id)
+    setEditingLifeMemoryContent(item.content)
+  }
+
+  const cancelEditLifeMemory = () => {
+    setEditingLifeMemoryId(null)
+    setEditingLifeMemoryContent('')
+  }
+
+  const handleSaveLifeMemory = async (id: string) => {
+    const result = updateLifeProfileItemContent(lifeProfile, id, editingLifeMemoryContent)
+    if (!result.ok) {
+      showToast(result.reason === 'unsafe' ? '这条内容不适合保存为记忆' : '请输入记忆内容')
+      return
+    }
+    await persistLifeProfile(result.profile, '已保存')
+    cancelEditLifeMemory()
+  }
+
+  const handleDeleteLifeMemory = async (id: string) => {
+    const next = removeLifeProfileItem(lifeProfile, id)
+    await persistLifeProfile(next, '已删除')
+    if (editingLifeMemoryId === id) cancelEditLifeMemory()
+  }
+
+  const handleClearLifeProfile = async () => {
+    if (!window.confirm('确定清空全部生活档案吗？此操作不可恢复。')) return
+    const empty = createEmptyLifeProfile()
+    await window.mulby.storage.set(PET_LIFE_PROFILE_STORAGE_KEY, empty)
+    setLifeProfile(empty)
+    cancelEditLifeMemory()
+    window.mulby.window.sendToParent('settings-clear-life-profile')
+    showToast('生活档案已清空')
   }
 
   const addReminder = () => {
@@ -433,84 +526,116 @@ export default function SettingsView() {
     }))
   }
 
-  const renderMemory = () => {
-    const filtered = memoryFilter === 'pinned'
-      ? memories.filter(m => m.pinned)
-      : memories
+  const formatLifeMemoryMeta = (item: LifeProfileItem) => {
+    const source = item.source === 'manual' ? '手动' : '自动'
+    const date = new Date(item.updatedAt).toLocaleDateString()
+    return `${source} · 可信度 ${item.confidence}/5 · ${date}`
+  }
 
-    const typeLabels: Record<string, string> = {
-      fact: '事实', preference: '偏好', event: '事件', habit: '习惯'
+  const renderLifeProfileItem = (item: LifeProfileItem) => {
+    const isEditing = editingLifeMemoryId === item.id
+    return (
+      <div key={item.id} className="memory-item">
+        <div className="memory-item-top">
+          <span className="memory-type">{LIFE_PROFILE_CATEGORY_LABELS[item.category]}</span>
+          <span className="memory-date">{formatLifeMemoryMeta(item)}</span>
+        </div>
+        {isEditing ? (
+          <textarea
+            className="memory-edit-input"
+            value={editingLifeMemoryContent}
+            onChange={e => setEditingLifeMemoryContent(e.target.value)}
+            maxLength={120}
+            rows={3}
+            autoFocus
+          />
+        ) : (
+          <div className="memory-content">{item.content}</div>
+        )}
+        <div className="memory-actions">
+          {isEditing ? (
+            <>
+              <button className="mem-action-btn save" onClick={() => void handleSaveLifeMemory(item.id)}>
+                <Icon d={ICONS.check} size={12} /> 保存
+              </button>
+              <button className="mem-action-btn" onClick={cancelEditLifeMemory}>
+                <Icon d={ICONS.x} size={12} /> 取消
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="mem-action-btn" onClick={() => startEditLifeMemory(item)}>
+                <Icon d={ICONS.edit} size={12} /> 编辑
+              </button>
+              <button className="mem-action-btn delete" onClick={() => void handleDeleteLifeMemory(item.id)}>
+                <Icon d={ICONS.trash} size={12} /> 删除
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const renderLifeProfileCategory = (category: LifeProfileCategory) => {
+    const items = lifeProfile[category]
+    return (
+      <section key={category} className="memory-category">
+        <div className="memory-category-header">
+          <span>{LIFE_PROFILE_CATEGORY_LABELS[category]}</span>
+          <span>{items.length}</span>
+        </div>
+        {items.length === 0 ? (
+          <div className="memory-category-empty">暂无内容</div>
+        ) : (
+          <div className="memory-list">
+            {items.map(renderLifeProfileItem)}
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  const handleManualRefreshLifeProfile = async () => {
+    if (refreshingLifeProfile) return
+    if (!personality.model) {
+      showToast('请先在「性格」页选择文本模型')
+      return
     }
+    setRefreshingLifeProfile(true)
+    try {
+      window.mulby.window.sendToParent('settings-refresh-life-profile')
+      showToast('已请求更新生活档案，请稍后刷新查看')
+      setTimeout(() => void loadLifeProfile(), 6000)
+    } finally {
+      setTimeout(() => setRefreshingLifeProfile(false), 6000)
+    }
+  }
 
+  const renderMemory = () => {
+    const total = countLifeProfileItems(lifeProfile)
     return (
       <div className="panel-content">
         <div className="memory-header">
-          <span className="memory-count">共 {memories.length} 条记忆</span>
-          <div className="memory-filter">
-            <button className={`filter-btn ${memoryFilter === 'all' ? 'active' : ''}`} onClick={() => setMemoryFilter('all')}>全部</button>
-            <button className={`filter-btn ${memoryFilter === 'pinned' ? 'active' : ''}`} onClick={() => setMemoryFilter('pinned')}>固定</button>
-          </div>
+          <span className="memory-count">生活档案 · 共 {total} 条</span>
         </div>
-        <div className="memory-toolbar" style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button type="button" className="gen-btn" onClick={handleManualExtractMemory} disabled={extractingMemory || consolidatingMemory}>
-            <Icon d={ICONS.plus} size={12} /> {extractingMemory ? '抽取中...' : '立即抽取记忆'}
+        <div className="memory-toolbar">
+          <button type="button" className="gen-btn" onClick={() => void handleManualRefreshLifeProfile()} disabled={refreshingLifeProfile}>
+            <Icon d={ICONS.plus} size={12} /> {refreshingLifeProfile ? '更新中...' : '更新记忆'}
           </button>
-          <button
-            type="button"
-            className="gen-btn"
-            onClick={() => void handleManualConsolidateMemory()}
-            disabled={
-              consolidatingMemory
-              || extractingMemory
-              || !personality.model
-              || memories.filter(m => !m.pinned).length < 2
-            }
-          >
-            <Icon d={ICONS.layers} size={12} /> {consolidatingMemory ? '整理中...' : '整理重复记忆'}
-          </button>
-          <button type="button" className="gen-btn" onClick={handleRefreshMemories}>
+          <button type="button" className="gen-btn" onClick={() => void loadLifeProfile(true)}>
             <Icon d={ICONS.refresh} size={12} /> 刷新
           </button>
-          <span className="field-hint" style={{ flex: 1, fontSize: 11, opacity: 0.7 }}>
-            说明：助手回复写入历史后，会在「至少多轮对话」且「距上次提炼间隔一段时间」后，自动用模型从最近一批对话里批量提炼 0～3 条「长期有用」的记忆（事实/偏好/习惯/事件）；模型认为没有值得记的会不落库。
-            可随时点「立即抽取」绕过等待（仍会归并与去重）。条数较多时可用「整理重复记忆」对已保存的未固定条目做一次模型合并（固定条目不参与）。若长期没有新记忆：请在「性格」页选好模型，并聊一些带稳定个人信息的内容。
-          </span>
+          <button type="button" className="mem-action-btn delete" onClick={() => void handleClearLifeProfile()}>
+            <Icon d={ICONS.trash} size={12} /> 清空档案
+          </button>
         </div>
-        {filtered.length === 0 && (
-          <div className="memory-empty">
-            {memoryFilter === 'pinned' ? '暂无固定记忆' : '宠物还没有形成记忆，多互动几次吧'}
-          </div>
-        )}
-        <div className="memory-list">
-          {filtered.map(m => (
-            <div key={m.id} className={`memory-item ${m.pinned ? 'pinned' : ''}`}>
-              <div className="memory-item-top">
-                <span className="memory-type">{typeLabels[m.type] || m.type}</span>
-                <span className="memory-date">{new Date(m.createdAt).toLocaleDateString()}</span>
-              </div>
-              <div className="memory-content">{m.content}</div>
-              {m.tags.length > 0 && (
-                <div className="memory-tags">
-                  {m.tags.map((t, i) => <span key={i} className="memory-tag">{t}</span>)}
-                </div>
-              )}
-              <div className="memory-actions">
-                <button
-                  className={`mem-action-btn ${m.pinned ? 'unpin' : 'pin'}`}
-                  onClick={() => handleTogglePin(m.id)}
-                  title={m.pinned ? '取消固定' : '固定'}
-                >
-                  <Icon d={ICONS.pin} size={12} /> {m.pinned ? '取消固定' : '固定'}
-                </button>
-                <button
-                  className="mem-action-btn delete"
-                  onClick={() => handleDeleteMemory(m.id)}
-                >
-                  <Icon d={ICONS.trash} size={12} /> 删除
-                </button>
-              </div>
-            </div>
-          ))}
+        <p className="memory-description">
+          宠物会在多轮对话后节流更新生活档案，记录稳定事实、偏好、习惯、关系线索和少量近期事件。你可以在这里修正或删除任何内容。
+        </p>
+        {total === 0 && <div className="memory-empty">宠物还没有形成生活档案，多聊几次吧</div>}
+        <div className="memory-categories">
+          {LIFE_PROFILE_CATEGORIES.map(renderLifeProfileCategory)}
         </div>
       </div>
     )
@@ -658,90 +783,6 @@ export default function SettingsView() {
     )
   }
 
-  const handleManualConsolidateMemory = async () => {
-    if (consolidatingMemory || extractingMemory) return
-    if (!personality.model) {
-      showToast('请先在「性格」页选择文本模型')
-      return
-    }
-    const unpinned = memories.filter(m => !m.pinned).length
-    if (unpinned < 2) {
-      showToast('至少需要 2 条未固定记忆才适合整理')
-      return
-    }
-    setConsolidatingMemory(true)
-    try {
-      window.mulby.window.sendToParent('settings-consolidate-memory')
-      showToast('已请求整理重复记忆，请稍后点刷新查看')
-      setTimeout(async () => {
-        try {
-          const savedMems = await window.mulby.storage.get('pet-memories')
-          if (Array.isArray(savedMems)) {
-            const valid: PetMemory[] = []
-            for (const m of savedMems) {
-              if (!m || typeof m !== 'object') continue
-              const obj = m as Record<string, unknown>
-              if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
-              valid.push(m as PetMemory)
-            }
-            setMemories(valid)
-          }
-        } catch (err) {
-          console.error('Refresh memories after consolidate failed:', err)
-        }
-      }, 5500)
-    } finally {
-      setTimeout(() => setConsolidatingMemory(false), 5500)
-    }
-  }
-
-  const handleManualExtractMemory = async () => {
-    if (extractingMemory) return
-    setExtractingMemory(true)
-    try {
-      window.mulby.window.sendToParent('settings-extract-memory')
-      showToast('已请求宠物抽取记忆，请稍后刷新查看')
-      setTimeout(async () => {
-        try {
-          const savedMems = await window.mulby.storage.get('pet-memories')
-          if (Array.isArray(savedMems)) {
-            const valid: PetMemory[] = []
-            for (const m of savedMems) {
-              if (!m || typeof m !== 'object') continue
-              const obj = m as Record<string, unknown>
-              if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
-              valid.push(m as PetMemory)
-            }
-            setMemories(valid)
-          }
-        } catch (err) {
-          console.error('Refresh memories failed:', err)
-        }
-      }, 4500)
-    } finally {
-      setTimeout(() => setExtractingMemory(false), 4500)
-    }
-  }
-
-  const handleRefreshMemories = async () => {
-    try {
-      const savedMems = await window.mulby.storage.get('pet-memories')
-      if (Array.isArray(savedMems)) {
-        const valid: PetMemory[] = []
-        for (const m of savedMems) {
-          if (!m || typeof m !== 'object') continue
-          const obj = m as Record<string, unknown>
-          if (typeof obj.id !== 'string' || typeof obj.content !== 'string') continue
-          valid.push(m as PetMemory)
-        }
-        setMemories(valid)
-        showToast('已刷新')
-      }
-    } catch (err) {
-      console.error('Refresh memories failed:', err)
-    }
-  }
-
   const handleClearChatHistory = async () => {
     if (!window.confirm('确定清空全部对话历史吗？此操作不可恢复。')) return
     try {
@@ -829,9 +870,13 @@ export default function SettingsView() {
             {ALL_EXPRESSIONS.map((expr: PetExpression) => (
               <button
                 key={`expr-${expr}`}
-                className="freq-btn"
+                className="freq-btn playground-token"
                 onClick={() => triggerPetIntent({ face: expr, durationMs: 4000 })}
-              >{expr}</button>
+                title={`${EXPRESSION_LABELS[expr]} / ${expr}`}
+              >
+                <span className="playground-token-main">{EXPRESSION_LABELS[expr]}</span>
+                <span className="playground-token-sub">{expr}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -842,9 +887,17 @@ export default function SettingsView() {
             {ALL_POSES.map((pose: PetPose) => (
               <button
                 key={`pose-${pose}`}
-                className="freq-btn"
-                onClick={() => triggerPetIntent({ face: 'neutral', pose, durationMs: 4000 })}
-              >{pose}</button>
+                className="freq-btn playground-token"
+                onClick={() => triggerPetIntent({
+                  face: PLAYGROUND_POSE_FACE[pose],
+                  pose,
+                  durationMs: pose === 'sleep' ? 5000 : 4000,
+                })}
+                title={`${POSE_LABELS[pose]} / ${pose}`}
+              >
+                <span className="playground-token-main">{POSE_LABELS[pose]}</span>
+                <span className="playground-token-sub">{pose}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -870,27 +923,12 @@ export default function SettingsView() {
                 key={`act-${action}`}
                 className="freq-btn"
                 onClick={() => {
-                  const intent: PresentationIntent = (() => {
-                    if (action === 'jump') return { face: 'excited', pose: 'jump', emotion: 'excitement', animation: 'ascend', durationMs: 3500 }
-                    if (action === 'wave') return { face: 'happy', pose: 'wave', emotion: 'joy', animation: 'wiggle', durationMs: 3500 }
-                    if (action === 'sit') return { face: 'sleepy', pose: 'sit', durationMs: 4000 }
-                    if (action === 'sleep') return { face: 'sleepy', pose: 'sleep', emotion: 'sleepiness', durationMs: 5000 }
-                    if (action === 'cheer') return { face: 'excited', pose: 'wave', emotion: 'excitement', animation: 'wiggle', durationMs: 3500 }
-                    if (action === 'celebrate') return { face: 'excited', pose: 'wave', emotion: 'joy', animation: 'celebrate', durationMs: 4000 }
-                    if (action === 'wobble') return { face: 'surprised', pose: 'stand', emotion: 'surprise', animation: 'wobble', durationMs: 3500 }
-                    if (action === 'happy') return { face: 'happy', pose: 'wave', emotion: 'joy', animation: 'bounce', durationMs: 3500 }
-                    if (action === 'surprised') return { face: 'surprised', pose: 'stand', emotion: 'surprise', animation: 'phase', durationMs: 3500 }
-                    if (action.startsWith('move_')) {
-                      const dir = action.slice('move_'.length)
-                      const map: Record<string, [number, number]> = {
-                        left: [-80, 0], right: [80, 0], up: [0, -80], down: [0, 80],
-                        up_left: [-80, -80], up_right: [80, -80], down_left: [-80, 80], down_right: [80, 80],
-                      }
-                      const v = map[dir] ?? [0, 0]
-                      return { face: 'neutral', pose: 'walk_1', movement: { dx: v[0], dy: v[1] }, durationMs: 1800 }
-                    }
-                    return { face: 'neutral', pose: 'stand', durationMs: 3000 }
-                  })()
+                  const durationMs = action.startsWith('move_') || action === 'chase' || action === 'wander' || action === 'walk'
+                    ? 1800
+                    : action === 'sleep'
+                      ? 5000
+                      : 3500
+                  const intent = presentationIntentForAction(action, { durationMs })
                   triggerPetIntent(intent)
                 }}
               >{action}</button>

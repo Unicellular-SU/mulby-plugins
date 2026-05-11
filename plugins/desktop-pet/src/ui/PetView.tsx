@@ -72,16 +72,24 @@ function behaviorToPose(behavior: BehaviorType): PetPose {
     case 'wander':
     case 'chase':
       return 'walk_1'
+    case 'look':
+      return 'peek'
     case 'sit':
       return 'sit'
     case 'sleep':
       return 'sleep'
     case 'jump':
       return 'jump'
+    case 'surprised':
+      return 'stand'
     case 'happy':
+      return 'wave'
     case 'cheer':
+      return 'dance'
     case 'celebrate':
       return 'wave'
+    case 'wobble':
+      return 'dance'
     default:
       return 'stand'
   }
@@ -94,11 +102,13 @@ function behaviorToExpression(behavior: BehaviorType): PetExpression {
     case 'cheer':
       return 'excited'
     case 'celebrate':
-      return 'happy'
+      return 'love'
     case 'surprised':
       return 'surprised'
+    case 'look':
+      return 'curious'
     case 'wobble':
-      return 'surprised'
+      return 'dizzy'
     case 'sleep':
       return 'sleepy'
     case 'sit':
@@ -1241,12 +1251,16 @@ export default function PetView() {
           }
           return
         }
-        case 'settings-consolidate-memory': {
-          void chatRef.current?.consolidateMemories()
+        case 'settings-refresh-life-profile': {
+          void chatRef.current?.forceRefreshLifeProfile()
           return
         }
-        case 'settings-extract-memory': {
-          void chatRef.current?.forceExtractMemory()
+        case 'settings-clear-life-profile': {
+          void chatRef.current?.clearLifeProfile()
+          return
+        }
+        case 'life-profile-updated': {
+          void chatRef.current?.reloadLifeProfileFromStorage()
           return
         }
         case 'chat-history-updated': {
