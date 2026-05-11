@@ -758,9 +758,17 @@ export default function PetView() {
     }
   }, [applyPresentationIntent, updateBubbleText, showBubble, setExpression, noteEcosystemEvent])
 
+  const isLiveChildActionResult = useCallback((result: unknown) => {
+    return result !== null && result !== false
+  }, [])
+
   const focusExistingSettings = useCallback(async (proxy: any) => {
     try {
-      await proxy.show?.()
+      const showResult = await proxy.show?.()
+      if (!isLiveChildActionResult(showResult)) {
+        logPetPresentation('pet.settings.show-existing-stale', { result: showResult ?? null })
+        return false
+      }
     } catch (err) {
       logPetPresentation('pet.settings.show-existing-error', {
         message: (err as Error)?.message ?? String(err),
@@ -769,14 +777,19 @@ export default function PetView() {
     }
 
     try {
-      await proxy.focus?.()
+      const focusResult = await proxy.focus?.()
+      if (!isLiveChildActionResult(focusResult)) {
+        logPetPresentation('pet.settings.focus-existing-stale', { result: focusResult ?? null })
+        return false
+      }
     } catch (err) {
       logPetPresentation('pet.settings.focus-existing-failed', {
         message: (err as Error)?.message ?? String(err),
       })
+      return false
     }
     return true
-  }, [])
+  }, [isLiveChildActionResult])
 
   const openSettings = useCallback(async () => {
     if (settingsOpeningRef.current) {
