@@ -18,12 +18,13 @@ import {
   SharpModule,
   FFmpegModule,
   AttachmentsModule,
-  AIModule
+  AIModule,
+  SchedulerModule
 } from './modules'
 
 console.log('[App] Module imports loaded')
 
-type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai'
+type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler'
 type ScreenAutoAction = 'region-capture' | null
 
 interface ShowcaseAttachment {
@@ -62,7 +63,8 @@ const featureToModule: Record<string, ModuleId> = {
   ffmpeg: 'ffmpeg',
   'showcase:ffmpeg': 'ffmpeg',
   'attachments': 'attachments',
-  ai: 'ai'
+  ai: 'ai',
+  scheduler: 'scheduler'
 }
 
 function handleDynamicCommand(featureCode: string, input?: string) {
@@ -120,7 +122,8 @@ const moduleComponents: Record<ModuleId, React.ComponentType<any>> = {
   'sharp': SharpModule,
   'ffmpeg': FFmpegModule,
   'attachments': AttachmentsModule,
-  ai: AIModule
+  ai: AIModule,
+  scheduler: SchedulerModule
 }
 
 // 从 URL 参数或插件初始化数据获取默认模块

@@ -273,3 +273,16 @@ Manual review:
 - Attachment and image examples should be guarded by model availability and user-selected paths. Show clear unavailable states when no image-capable model is configured.
 - Redact large generated assets in `rawData`: show base64 lengths, previews, MIME type, token usage, and attachment IDs rather than dumping full images or file contents.
 - Add a focused regression test for new modules that checks routing, manifest feature registration, API panel usage, required APIs, documented abort pattern, and excluded host-only APIs.
+
+## Scheduler Module Lessons
+
+- Keep task creation in the plugin backend. The current docs mark `scheduler.schedule(task)` as a backend API, so the showcase UI should call `host.call('@mulby/showcase', 'scheduleShowcaseDelayTask' | 'scheduleShowcaseOnceTask' | 'scheduleShowcaseRepeatTask', input)` and let `src/main.ts` call `mulby.scheduler.schedule()`.
+- Renderer code should demonstrate task inspection and management: `scheduler.listTasks`, `getTask`, `getTaskCount`, `getExecutions`, `pauseTask`, `resumeTask`, `cancelTask`, `deleteTasks`, `cleanupTasks`, `subscribe`, `onEvent`, `unsubscribe`, and Cron helpers.
+- Do not demonstrate the host task scheduler system page, `systemPage.open({ page: 'task-scheduler' })`, `app.onOpenTaskScheduler`, or host settings redirects. Those are host UI surfaces, not normal plugin-facing workflows.
+- Filter task lists by the plugin id (`@mulby/showcase`) when using renderer APIs. Backend `context.api.scheduler.list()` injects plugin id automatically, but renderer IPC exposes a global scheduler list and needs explicit scoping.
+- Scheduler callbacks exported from `src/main.ts` are invoked by the current host worker as `(context, payload, task)`, even though docs also describe a single-object `{ api, payload, task }` shape. Write callbacks defensively so they can resolve payload/task from either form.
+- Always return a small serializable value from task callbacks; it is recorded in execution history. Avoid returning large payloads, binary data, or sensitive data.
+- Event subscriptions must store the disposer returned by `scheduler.onEvent()` and call both the disposer and `scheduler.unsubscribe()` on unmount or when stopping the stream.
+- Repeat-task demos should set a visible `maxExecutions` default to avoid leaving unbounded recurring tasks behind. Cleanup actions should be explicit and describe that only terminal records are cleaned by `cleanupTasks()`.
+- Destructive actions should be scoped and visible: delete only the selected task through `deleteTasks([task.id])`; use confirmation before deleting non-terminal tasks or running broader cleanup.
+- Add a focused module regression test for new missing modules. Check the right-side API panel, route/sidebar/manifest registration, backend callback/RPC exports, used scheduler APIs, and excluded host-only API names.

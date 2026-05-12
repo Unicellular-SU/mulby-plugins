@@ -1,6 +1,7 @@
 
 import {
     Bot,
+    CalendarClock,
     Clipboard,
     Film,
     FolderOpen,
@@ -46,6 +47,7 @@ const modules: ModuleItem[] = [
     { id: 'security', icon: ShieldCheck, label: '存储与安全' },
     { id: 'attachments', icon: PackageOpen, label: '附件' },
     { id: 'ai', icon: WandSparkles, label: 'AI' },
+    { id: 'scheduler', icon: CalendarClock, label: '任务调度' },
 ]
 
 export function Sidebar({ activeModule, onModuleChange }: SidebarProps) {

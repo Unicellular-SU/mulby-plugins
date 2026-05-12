@@ -1127,7 +1127,7 @@ interface MulbyScheduler {
   pauseTask(taskId: string): Promise<{ success: boolean }>
   resumeTask(taskId: string): Promise<{ success: boolean }>
   listTasks(filter?: { pluginId?: string; status?: string; type?: string; limit?: number; offset?: number }): Promise<Task[]>
-  getTaskCount(filter?: { status?: string; type?: string }): Promise<number>
+  getTaskCount(filter?: { pluginId?: string; status?: string; type?: string }): Promise<number>
   getTask(taskId: string): Promise<Task | null>
   deleteTasks(taskIds: string[]): Promise<{ success: boolean; deletedCount: number }>
   cleanupTasks(olderThan?: number): Promise<{ success: boolean; deletedCount: number }>

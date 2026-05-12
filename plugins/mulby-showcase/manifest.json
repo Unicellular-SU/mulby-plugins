@@ -348,6 +348,20 @@
           "value": "AI 示例"
         }
       ]
+    },
+    {
+      "code": "scheduler",
+      "explain": "任务调度 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "scheduler"
+        },
+        {
+          "type": "keyword",
+          "value": "任务调度"
+        }
+      ]
     }
   ]
 }

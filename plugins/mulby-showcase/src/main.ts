@@ -92,9 +92,128 @@ interface AiToolDemoInput {
   prompt?: string
 }
 
+type SchedulerTaskKind = 'delay' | 'once' | 'repeat'
+
+interface SchedulerTask {
+  id: string
+  pluginId?: string
+  name: string
+  type: SchedulerTaskKind
+  status: string
+  callback: string
+  payload?: unknown
+  createdAt?: number
+  nextRunTime?: number
+  executionCount?: number
+  failureCount?: number
+  [key: string]: unknown
+}
+
+interface SchedulerTaskPayload {
+  message?: string
+  label?: string
+  kind?: SchedulerTaskKind
+  createdAt?: number
+  source?: string
+}
+
+interface SchedulerCallbackContext {
+  api?: {
+    notification?: {
+      show: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => Promise<void> | void
+    }
+  }
+  payload?: SchedulerTaskPayload
+  task?: SchedulerTask
+}
+
+interface ScheduleDelayTaskInput {
+  delayMs?: number
+  message?: string
+  name?: string
+}
+
+interface ScheduleOnceTaskInput {
+  delayMs?: number
+  message?: string
+  name?: string
+}
+
+interface ScheduleRepeatTaskInput {
+  cron?: string
+  maxExecutions?: number
+  message?: string
+  name?: string
+}
+
+interface BackendSchedulerApi {
+  schedule(task: {
+    name: string
+    type: SchedulerTaskKind
+    callback: string
+    time?: number
+    cron?: string
+    delay?: number
+    payload?: SchedulerTaskPayload
+    maxRetries?: number
+    retryDelay?: number
+    timeout?: number
+    description?: string
+    endTime?: number
+    maxExecutions?: number
+  }): Promise<SchedulerTask>
+}
+
 declare const mulby: {
   clipboardHistory: ClipboardHistoryApi
   ai: BackendAiApi
+  scheduler: BackendSchedulerApi
+  notification: {
+    show: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => Promise<void> | void
+  }
+}
+
+const SHOWCASE_TASK_PREFIX = 'Mulby Showcase'
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numericValue = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numericValue)) return fallback
+  return Math.max(min, Math.min(max, Math.round(numericValue)))
+}
+
+function normalizeSchedulerMessage(message: string | undefined, fallback: string) {
+  const text = message?.trim()
+  return text || fallback
+}
+
+function schedulerPayload(kind: SchedulerTaskKind, message: string, label: string): SchedulerTaskPayload {
+  return {
+    kind,
+    message,
+    label,
+    createdAt: Date.now(),
+    source: 'scheduler-module'
+  }
+}
+
+function resolveSchedulerCallbackData(
+  context?: SchedulerCallbackContext,
+  payload?: SchedulerTaskPayload,
+  task?: SchedulerTask
+) {
+  return {
+    payload: payload ?? context?.payload ?? {},
+    task: task ?? context?.task
+  }
+}
+
+async function showSchedulerNotification(
+  context: SchedulerCallbackContext | undefined,
+  message: string,
+  type: 'info' | 'success' | 'warning' | 'error' = 'success'
+) {
+  const notification = context?.api?.notification ?? mulby.notification
+  await notification.show(message, type)
 }
 
 /**
@@ -208,6 +327,61 @@ export async function run(context: PluginContext) {
     default:
       // 不显示通知，让 UI 自己处理
       break
+  }
+}
+
+export async function onShowcaseDelayTask(
+  context?: SchedulerCallbackContext,
+  payload?: SchedulerTaskPayload,
+  task?: SchedulerTask
+) {
+  const data = resolveSchedulerCallbackData(context, payload, task)
+  const message = normalizeSchedulerMessage(data.payload.message, 'Showcase 延迟任务已执行')
+  await showSchedulerNotification(context, message, 'success')
+
+  return {
+    success: true,
+    kind: 'delay',
+    message,
+    taskId: data.task?.id,
+    executedAt: new Date().toISOString()
+  }
+}
+
+export async function onShowcaseOnceTask(
+  context?: SchedulerCallbackContext,
+  payload?: SchedulerTaskPayload,
+  task?: SchedulerTask
+) {
+  const data = resolveSchedulerCallbackData(context, payload, task)
+  const message = normalizeSchedulerMessage(data.payload.message, 'Showcase 一次性任务已执行')
+  await showSchedulerNotification(context, message, 'success')
+
+  return {
+    success: true,
+    kind: 'once',
+    message,
+    taskId: data.task?.id,
+    executedAt: new Date().toISOString()
+  }
+}
+
+export async function onShowcaseRepeatTask(
+  context?: SchedulerCallbackContext,
+  payload?: SchedulerTaskPayload,
+  task?: SchedulerTask
+) {
+  const data = resolveSchedulerCallbackData(context, payload, task)
+  const message = normalizeSchedulerMessage(data.payload.message, 'Showcase 重复任务已执行')
+  await showSchedulerNotification(context, message, 'info')
+
+  return {
+    success: true,
+    kind: 'repeat',
+    message,
+    taskId: data.task?.id,
+    executionCount: data.task?.executionCount,
+    executedAt: new Date().toISOString()
   }
 }
 
@@ -328,6 +502,56 @@ export const rpc = {
 
   getClipboardHistoryStats() {
     return mulby.clipboardHistory.stats()
+  },
+
+  scheduleShowcaseDelayTask(input?: ScheduleDelayTaskInput) {
+    const delayMs = clampNumber(input?.delayMs, 5000, 1000, 24 * 60 * 60 * 1000)
+    const message = normalizeSchedulerMessage(input?.message, 'Showcase 延迟任务已执行')
+
+    return mulby.scheduler.schedule({
+      name: input?.name?.trim() || `${SHOWCASE_TASK_PREFIX} Delay`,
+      description: 'Mulby Showcase 任务调度模块创建的延迟任务。',
+      type: 'delay',
+      delay: delayMs,
+      callback: 'onShowcaseDelayTask',
+      payload: schedulerPayload('delay', message, '延迟任务'),
+      maxRetries: 0,
+      timeout: 15000
+    })
+  },
+
+  scheduleShowcaseOnceTask(input?: ScheduleOnceTaskInput) {
+    const delayMs = clampNumber(input?.delayMs, 30000, 1000, 7 * 24 * 60 * 60 * 1000)
+    const message = normalizeSchedulerMessage(input?.message, 'Showcase 一次性任务已执行')
+
+    return mulby.scheduler.schedule({
+      name: input?.name?.trim() || `${SHOWCASE_TASK_PREFIX} Once`,
+      description: 'Mulby Showcase 任务调度模块创建的一次性任务。',
+      type: 'once',
+      time: Date.now() + delayMs,
+      callback: 'onShowcaseOnceTask',
+      payload: schedulerPayload('once', message, '一次性任务'),
+      maxRetries: 0,
+      timeout: 15000
+    })
+  },
+
+  scheduleShowcaseRepeatTask(input?: ScheduleRepeatTaskInput) {
+    const cron = input?.cron?.trim() || '0 */1 * * * *'
+    const maxExecutions = clampNumber(input?.maxExecutions, 3, 1, 24)
+    const message = normalizeSchedulerMessage(input?.message, 'Showcase 重复任务已执行')
+
+    return mulby.scheduler.schedule({
+      name: input?.name?.trim() || `${SHOWCASE_TASK_PREFIX} Repeat`,
+      description: 'Mulby Showcase 任务调度模块创建的重复任务，默认限制执行次数以避免长期残留。',
+      type: 'repeat',
+      cron,
+      callback: 'onShowcaseRepeatTask',
+      payload: schedulerPayload('repeat', message, '重复任务'),
+      maxExecutions,
+      maxRetries: 0,
+      timeout: 15000
+    })
   }
 }
 
