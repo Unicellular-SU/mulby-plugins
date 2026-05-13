@@ -322,3 +322,21 @@ Manual review:
 - `plugin.outPlugin(false)` closes the current plugin UI. Keep it as a clearly labeled page-level action with confirmation so users do not accidentally close the showcase while exploring.
 - Lifecycle event listeners (`onPluginInit`, `onPluginAttach`, `onPluginDetached`, `onPluginOut`, `onPluginLaunchStart`, `onPluginLaunchEnd`) should return disposers and clean up on unmount. Keep event payloads summarized in raw data.
 - Add a focused regression test for plugin orchestration modules that checks right-side API panel usage, route/sidebar/manifest registration, all intended plugin APIs, lifecycle events, and excluded host-only/plugin-manager API names.
+
+## Dynamic Features Module Lessons
+
+- `features` is a backend plugin API. The showcase UI should call backend `rpc` methods through `host.call('@mulby/showcase', ...)`, and the backend should use `context.api.features` in lifecycle hooks or global `mulby.features` inside `export const rpc`.
+- Keep dynamic feature codes plugin-owned and scoped, for example `showcase:*`. `features.setFeature()` overwrites the same code, so the UI can safely use one editable demo record and a reset action.
+- Register baseline dynamic features from both `onLoad(context)` and `onBackground(context)` because MainPush and background plugin activation depend on the host worker having registered callbacks.
+- MainPush has two parts: a feature with `mainPush: true` and an `over` command, plus backend `features.onMainPush()` and `features.onMainPushSelect()` handlers. The select handler should return `false` when it has handled the action without opening UI.
+- Do not demonstrate dynamic-feature helpers that redirect into host configuration surfaces. Shortcut and AI-model redirects belong to host UI workflows, not plugin showcase pages.
+- Keep destructive cleanup explicit. A reset action should delete only known showcase-owned dynamic feature codes, then re-register the baseline examples.
+
+## Log Module Lessons
+
+- `log` is renderer-facing in the current host. Use `window.mulby.log` through `useMulby()` for `debug`, `info`, `warn`, `error`, `getLogs`, `clear`, `getLogsDir`, `subscribe`, and `onLog`.
+- Log writing methods are fire-and-forget IPC sends, so refresh the queried list shortly after writing if the UI should show the new entry.
+- `log.subscribe()` starts live delivery to the current window, and `log.onLog(callback)` returns the disposer for the local listener. Store the disposer in a ref and clean it up on unmount or when stopping the subscription.
+- `log.clear(pluginId?)` is destructive. Default to the current plugin id and confirm before clearing; avoid presenting global log clearing as the normal path.
+- Raw data should summarize entries and truncate long messages or args. Plugin logs can contain user data, provider payloads, stack traces, or other sensitive details.
+- Do not route users to host log viewers or system pages from the showcase. The plugin-facing demo should stay inside the page with query results, live entries, and the API panel.

@@ -5,6 +5,56 @@
  * 对于纯 UI 插件，后端主要用于初始化和资源管理。
  */
 
+type DynamicFeatureMode = 'ui' | 'silent' | 'detached'
+type DynamicFeatureCmd =
+  | string
+  | { type: 'keyword'; value: string; explain?: string }
+  | { type: 'regex'; match: string; explain?: string; label?: string; minLength?: number; maxLength?: number }
+  | { type: 'files'; label?: string; exts?: string[]; fileType?: 'file' | 'directory' | 'any'; match?: string; minLength?: number; maxLength?: number }
+  | { type: 'img'; label?: string; exts?: string[] }
+  | { type: 'over'; label?: string; exclude?: string; minLength?: number; maxLength?: number }
+
+interface DynamicFeatureInput {
+  code: string
+  explain?: string
+  icon?: string
+  platform?: string | string[]
+  mode?: DynamicFeatureMode
+  route?: string
+  mainHide?: boolean
+  mainPush?: boolean
+  cmds: DynamicFeatureCmd[]
+}
+
+interface DynamicFeatureRecord extends Omit<DynamicFeatureInput, 'cmds'> {
+  explain: string
+  cmds: DynamicFeatureCmd[]
+}
+
+interface MainPushItem {
+  title: string
+  text: string
+  icon?: string
+  [key: string]: unknown
+}
+
+interface MainPushAction {
+  code: string
+  type: string
+  payload: string
+  option?: MainPushItem
+}
+
+interface BackendFeaturesApi {
+  getFeatures: (codes?: string[]) => DynamicFeatureRecord[] | Promise<DynamicFeatureRecord[]>
+  setFeature: (feature: DynamicFeatureInput) => void | Promise<void>
+  removeFeature: (code: string) => boolean | Promise<boolean>
+  redirectHotKeySetting: (cmdLabel: string, autocopy?: boolean) => void | Promise<void>
+  redirectAiModelsSetting: () => void | Promise<void>
+  onMainPush?: (callback: (action: MainPushAction) => MainPushItem[] | Promise<MainPushItem[]>) => void | Promise<void>
+  onMainPushSelect?: (callback: (action: MainPushAction & { option: MainPushItem }) => boolean | Promise<boolean>) => void | Promise<void>
+}
+
 interface PluginContext {
   api: {
     clipboard: {
@@ -21,23 +71,7 @@ interface PluginContext {
       get: (key: string) => Promise<unknown>
       set: (key: string, value: unknown) => Promise<void>
     }
-    features: {
-      getFeatures: (codes?: string[]) => Array<{ code: string }>
-      setFeature: (feature: {
-        code: string
-        explain?: string
-        icon?: string
-        platform?: string | string[]
-        mode?: 'ui' | 'silent' | 'detached'
-        route?: string
-        mainHide?: boolean
-        mainPush?: boolean
-        cmds: Array<string | { type: 'keyword' | 'regex'; value?: string; match?: string; explain?: string }>
-      }) => void
-      removeFeature: (code: string) => boolean
-      redirectHotKeySetting: (cmdLabel: string, autocopy?: boolean) => void
-      redirectAiModelsSetting: () => void
-    }
+    features: BackendFeaturesApi
     messaging: BackendMessagingApi
   }
   input?: string
@@ -159,6 +193,21 @@ interface HostRpcSafeBackendApiInput {
   storageKey?: string
 }
 
+interface SetShowcaseDynamicFeatureInput {
+  code?: string
+  explain?: string
+  keyword?: string
+  regex?: string
+  mode?: DynamicFeatureMode
+  route?: string
+  mainHide?: boolean
+  mainPush?: boolean
+}
+
+interface ShowcaseDynamicFeatureCodeInput {
+  code?: string
+}
+
 type SchedulerTaskKind = 'delay' | 'once' | 'repeat'
 
 interface SchedulerTask {
@@ -238,6 +287,11 @@ interface BackendStorageApi {
   keys?: () => Promise<string[]>
 }
 
+interface BackendClipboardApi {
+  readText: () => string | Promise<string>
+  writeText: (text: string) => Promise<void> | void
+}
+
 interface NodeLikeProcess {
   pid?: number
   platform?: string
@@ -251,6 +305,8 @@ declare const mulby: {
   scheduler: BackendSchedulerApi
   messaging: BackendMessagingApi
   storage: BackendStorageApi
+  clipboard: BackendClipboardApi
+  features: BackendFeaturesApi
   notification: {
     show: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => Promise<void> | void
   }
@@ -258,8 +314,11 @@ declare const mulby: {
 
 const SHOWCASE_PLUGIN_ID = '@mulby/showcase'
 const SHOWCASE_TASK_PREFIX = 'Mulby Showcase'
+const DYNAMIC_FEATURE_DEMO_CODE = 'showcase:dynamic-demo'
+const MAIN_PUSH_FEATURE_CODE = 'showcase:main-push'
 const recentMessages: ShowcaseMessageRecord[] = []
 let showcaseMessagingHandler: ((message: PluginMessage) => void | Promise<void>) | null = null
+let showcaseMainPushRegistered = false
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number) {
   const numericValue = typeof value === 'number' ? value : Number(value)
@@ -386,11 +445,76 @@ function registerShowcaseMessaging(context: PluginContext) {
   context.api.messaging.on(showcaseMessagingHandler)
 }
 
+function normalizeDynamicFeatureCode(code: string | undefined) {
+  const normalized = code?.trim()
+  if (!normalized) return DYNAMIC_FEATURE_DEMO_CODE
+  return normalized.startsWith('showcase:') ? normalized : `showcase:${normalized}`
+}
+
+function buildShowcaseDynamicFeature(input?: SetShowcaseDynamicFeatureInput): DynamicFeatureInput {
+  const code = normalizeDynamicFeatureCode(input?.code)
+  const explain = input?.explain?.trim() || '动态指令：页面创建的示例'
+  const keyword = input?.keyword?.trim() || 'showcase dynamic'
+  const regex = input?.regex?.trim()
+  const cmds: DynamicFeatureCmd[] = [{ type: 'keyword', value: keyword, explain }]
+
+  if (regex) {
+    cmds.push({
+      type: 'regex',
+      match: regex,
+      explain: '页面创建的 regex 动态指令',
+      label: 'Showcase regex 动态指令'
+    })
+  }
+
+  return {
+    code,
+    explain,
+    mode: input?.mode || 'ui',
+    route: input?.route?.trim() || 'features',
+    mainHide: Boolean(input?.mainHide),
+    mainPush: Boolean(input?.mainPush),
+    cmds
+  }
+}
+
+async function registerShowcaseMainPush(features: BackendFeaturesApi) {
+  if (showcaseMainPushRegistered || !features.onMainPush || !features.onMainPushSelect) return
+
+  await features.onMainPush(async (action) => {
+    if (action.code !== MAIN_PUSH_FEATURE_CODE) return []
+    const payload = action.payload || ''
+    const preview = payload.trim().slice(0, 40) || '空文本'
+
+    return [
+      {
+        title: `复制：${preview}`,
+        text: 'Mulby Showcase MainPush 示例项',
+        value: payload
+      },
+      {
+        title: `长度：${payload.length}`,
+        text: '选择后复制输入长度说明',
+        value: `输入文本长度：${payload.length}`
+      }
+    ]
+  })
+
+  await features.onMainPushSelect(async (action) => {
+    const text = String(action.option?.value || action.option?.title || '')
+    await mulby.clipboard.writeText(text)
+    await mulby.notification.show('MainPush 示例已复制到剪贴板', 'success')
+    return false
+  })
+
+  showcaseMainPushRegistered = true
+}
+
 /**
  * 插件加载时调用
  * 用于初始化资源、注册服务等
  */
-export function onLoad(context?: PluginContext) {
+export async function onLoad(context?: PluginContext) {
   if (!context) return
 
   registerShowcaseMessaging(context)
@@ -398,7 +522,8 @@ export function onLoad(context?: PluginContext) {
   const features = context.api.features
   if (!features) return
 
-  registerDynamicFeatures(features)
+  await registerDynamicFeatures(features)
+  await registerShowcaseMainPush(features)
 }
 
 /**
@@ -426,9 +551,13 @@ export function onEnable() {
 export function onDisable() {
 }
 
-export function onBackground(context?: PluginContext) {
+export async function onBackground(context?: PluginContext) {
   if (context) {
     registerShowcaseMessaging(context)
+    if (context.api.features) {
+      await registerDynamicFeatures(context.api.features)
+      await registerShowcaseMainPush(context.api.features)
+    }
   }
 }
 
@@ -478,6 +607,9 @@ export async function run(context: PluginContext) {
     case 'showcase:mac-only':
       notification.show('macOS 专用动态指令已触发')
       break
+    case DYNAMIC_FEATURE_DEMO_CODE:
+      notification.show('页面创建的动态指令已触发')
+      break
     case 'showcase:refresh-features': {
       const features = context.api.features
       if (!features) {
@@ -485,9 +617,9 @@ export async function run(context: PluginContext) {
         break
       }
       for (const code of getDynamicFeatureCodes()) {
-        features.removeFeature(code)
+        await features.removeFeature(code)
       }
-      registerDynamicFeatures(features)
+      await registerDynamicFeatures(features)
       notification.show('动态指令已清理并重新注册')
       break
     }
@@ -785,6 +917,47 @@ export const rpc = {
     return mulby.clipboardHistory.stats()
   },
 
+  listShowcaseDynamicFeatures(input?: { codes?: string[] }) {
+    return mulby.features.getFeatures(input?.codes)
+  },
+
+  async setShowcaseDynamicFeature(input?: SetShowcaseDynamicFeatureInput) {
+    const feature = buildShowcaseDynamicFeature(input)
+    await mulby.features.setFeature(feature)
+
+    return {
+      success: true,
+      feature,
+      updatedAt: new Date().toISOString()
+    }
+  },
+
+  async removeShowcaseDynamicFeature(input?: ShowcaseDynamicFeatureCodeInput) {
+    const code = normalizeDynamicFeatureCode(input?.code)
+    const removed = await mulby.features.removeFeature(code)
+
+    return {
+      success: Boolean(removed),
+      code,
+      removedAt: new Date().toISOString()
+    }
+  },
+
+  async resetShowcaseDynamicFeatures() {
+    for (const code of getDynamicFeatureCodes()) {
+      await mulby.features.removeFeature(code)
+    }
+
+    await registerDynamicFeatures(mulby.features)
+    await registerShowcaseMainPush(mulby.features)
+
+    return {
+      success: true,
+      features: await mulby.features.getFeatures(getDynamicFeatureCodes()),
+      resetAt: new Date().toISOString()
+    }
+  },
+
   scheduleShowcaseDelayTask(input?: ScheduleDelayTaskInput) {
     const delayMs = clampNumber(input?.delayMs, 5000, 1000, 24 * 60 * 60 * 1000)
     const message = normalizeSchedulerMessage(input?.message, 'Showcase 延迟任务已执行')
@@ -902,19 +1075,21 @@ function getDynamicFeatureCodes(): string[] {
     'showcase:mac-only',
     'showcase:refresh-features',
     'showcase:ui-settings',
-    'showcase:ui-detached'
+    'showcase:ui-detached',
+    DYNAMIC_FEATURE_DEMO_CODE,
+    MAIN_PUSH_FEATURE_CODE
   ]
 }
 
-function registerDynamicFeatures(features: NonNullable<PluginContext['api']['features']>) {
-  features.setFeature({
+async function registerDynamicFeatures(features: NonNullable<PluginContext['api']['features']>) {
+  await features.setFeature({
     code: 'showcase:today',
     explain: '动态指令：显示今日日期',
     mode: 'silent',
     cmds: ['today', '日期']
   })
 
-  features.setFeature({
+  await features.setFeature({
     code: 'showcase:reverse',
     explain: '动态指令：反转输入文本',
     mode: 'silent',
@@ -924,7 +1099,7 @@ function registerDynamicFeatures(features: NonNullable<PluginContext['api']['fea
     ]
   })
 
-  features.setFeature({
+  await features.setFeature({
     code: 'showcase:mac-only',
     explain: '动态指令：仅 macOS 可见',
     mode: 'silent',
@@ -932,14 +1107,14 @@ function registerDynamicFeatures(features: NonNullable<PluginContext['api']['fea
     cmds: ['mac only', 'macos']
   })
 
-  features.setFeature({
+  await features.setFeature({
     code: 'showcase:refresh-features',
     explain: '动态指令：清理并刷新指令',
     mode: 'silent',
     cmds: ['清理动态指令', '刷新动态指令', 'refresh features']
   })
 
-  features.setFeature({
+  await features.setFeature({
     code: 'showcase:ui-settings',
     explain: '动态指令：打开设置面板',
     mode: 'ui',
@@ -947,11 +1122,34 @@ function registerDynamicFeatures(features: NonNullable<PluginContext['api']['fea
     cmds: ['showcase settings', 'showcase ui']
   })
 
-  features.setFeature({
+  await features.setFeature({
     code: 'showcase:ui-detached',
     explain: '动态指令：以独立窗口打开',
     mode: 'detached',
     route: 'settings',
     cmds: ['showcase detached', 'showcase window']
   })
+
+  await features.setFeature({
+    code: DYNAMIC_FEATURE_DEMO_CODE,
+    explain: '动态指令：页面创建的示例',
+    mode: 'ui',
+    route: 'features',
+    cmds: [
+      { type: 'keyword', value: 'showcase dynamic', explain: '打开动态指令模块' },
+      { type: 'regex', match: '^showcase\\s+feature\\s+.+', explain: '动态指令 regex 示例' }
+    ]
+  })
+
+  await features.setFeature({
+    code: MAIN_PUSH_FEATURE_CODE,
+    explain: '动态指令：MainPush 搜索推送',
+    mode: 'silent',
+    mainPush: true,
+    cmds: [
+      { type: 'over', label: 'Showcase MainPush', minLength: 1, maxLength: 200 }
+    ]
+  })
+
+  await registerShowcaseMainPush(features)
 }

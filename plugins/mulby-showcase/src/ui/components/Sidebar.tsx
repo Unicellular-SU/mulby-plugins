@@ -3,10 +3,12 @@ import {
     Bot,
     CalendarClock,
     Clipboard,
+    FileText,
     Film,
     FolderOpen,
     Image,
     Keyboard,
+    ListChecks,
     MessageSquare,
     Monitor,
     Network,
@@ -54,6 +56,8 @@ const modules: ModuleItem[] = [
     { id: 'messaging', icon: MessageSquare, label: '插件通信' },
     { id: 'host-rpc', icon: Terminal, label: 'Host RPC' },
     { id: 'plugin', icon: Puzzle, label: '插件编排' },
+    { id: 'features', icon: ListChecks, label: '动态指令' },
+    { id: 'log', icon: FileText, label: '日志' },
 ]
 
 export function Sidebar({ activeModule, onModuleChange }: SidebarProps) {

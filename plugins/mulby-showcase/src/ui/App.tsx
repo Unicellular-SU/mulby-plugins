@@ -22,12 +22,14 @@ import {
   SchedulerModule,
   MessagingModule,
   HostRPCModule,
-  PluginOrchestrationModule
+  PluginOrchestrationModule,
+  DynamicFeaturesModule,
+  LogModule
 } from './modules'
 
 console.log('[App] Module imports loaded')
 
-type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc' | 'plugin'
+type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc' | 'plugin' | 'features' | 'log'
 type ScreenAutoAction = 'region-capture' | null
 
 interface ShowcaseAttachment {
@@ -60,6 +62,8 @@ const featureToModule: Record<string, ModuleId> = {
   screenshot: 'screen',
   'showcase:ui-settings': 'settings',
   'showcase:ui-detached': 'settings',
+  'showcase:dynamic-demo': 'features',
+  'showcase:main-push': 'features',
   'showcase:inbrowser': 'inbrowser',
   sharp: 'sharp',
   'showcase:sharp': 'sharp',
@@ -70,7 +74,9 @@ const featureToModule: Record<string, ModuleId> = {
   scheduler: 'scheduler',
   messaging: 'messaging',
   'host-rpc': 'host-rpc',
-  plugin: 'plugin'
+  plugin: 'plugin',
+  features: 'features',
+  log: 'log'
 }
 
 function handleDynamicCommand(featureCode: string, input?: string) {
@@ -132,7 +138,9 @@ const moduleComponents: Record<ModuleId, React.ComponentType<any>> = {
   scheduler: SchedulerModule,
   messaging: MessagingModule,
   'host-rpc': HostRPCModule,
-  plugin: PluginOrchestrationModule
+  plugin: PluginOrchestrationModule,
+  features: DynamicFeaturesModule,
+  log: LogModule
 }
 
 // 从 URL 参数或插件初始化数据获取默认模块

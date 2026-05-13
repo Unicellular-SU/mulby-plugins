@@ -413,6 +413,34 @@
           "value": "插件编排"
         }
       ]
+    },
+    {
+      "code": "features",
+      "explain": "动态指令 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "features"
+        },
+        {
+          "type": "keyword",
+          "value": "动态指令"
+        }
+      ]
+    },
+    {
+      "code": "log",
+      "explain": "日志 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "log"
+        },
+        {
+          "type": "keyword",
+          "value": "日志"
+        }
+      ]
     }
   ]
 }
