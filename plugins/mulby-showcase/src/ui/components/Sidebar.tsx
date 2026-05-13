@@ -15,6 +15,7 @@ import {
     Settings,
     ShieldCheck,
     SlidersHorizontal,
+    Terminal,
     Volume2,
     WandSparkles,
 } from 'lucide-react'
@@ -50,6 +51,7 @@ const modules: ModuleItem[] = [
     { id: 'ai', icon: WandSparkles, label: 'AI' },
     { id: 'scheduler', icon: CalendarClock, label: '任务调度' },
     { id: 'messaging', icon: MessageSquare, label: '插件通信' },
+    { id: 'host-rpc', icon: Terminal, label: 'Host RPC' },
 ]
 
 export function Sidebar({ activeModule, onModuleChange }: SidebarProps) {

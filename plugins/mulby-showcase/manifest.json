@@ -381,6 +381,24 @@
           "value": "插件通信"
         }
       ]
+    },
+    {
+      "code": "host-rpc",
+      "explain": "Host RPC API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "host rpc"
+        },
+        {
+          "type": "keyword",
+          "value": "Host RPC"
+        },
+        {
+          "type": "keyword",
+          "value": "后端调用"
+        }
+      ]
     }
   ]
 }

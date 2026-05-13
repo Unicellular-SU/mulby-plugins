@@ -134,6 +134,31 @@ interface AiToolDemoInput {
   prompt?: string
 }
 
+interface HostRpcEchoInput {
+  text?: string
+  upperCase?: boolean
+  tags?: string[]
+}
+
+type HostRpcNotificationType = 'info' | 'success' | 'warning' | 'error'
+
+interface HostRpcNotifyInput {
+  message?: string
+  type?: HostRpcNotificationType
+}
+
+interface HostRpcStorageInput {
+  key?: string
+  value?: unknown
+}
+
+interface HostRpcSafeBackendApiInput {
+  includeTime?: boolean
+  includeStoredValue?: boolean
+  timezone?: string
+  storageKey?: string
+}
+
 type SchedulerTaskKind = 'delay' | 'once' | 'repeat'
 
 interface SchedulerTask {
@@ -206,11 +231,26 @@ interface BackendSchedulerApi {
   }): Promise<SchedulerTask>
 }
 
+interface BackendStorageApi {
+  get: (key: string) => Promise<unknown>
+  set: (key: string, value: unknown) => Promise<void> | void
+  remove?: (key: string) => Promise<void> | void
+  keys?: () => Promise<string[]>
+}
+
+interface NodeLikeProcess {
+  pid?: number
+  platform?: string
+  version?: string
+  uptime?: () => number
+}
+
 declare const mulby: {
   clipboardHistory: ClipboardHistoryApi
   ai: BackendAiApi
   scheduler: BackendSchedulerApi
   messaging: BackendMessagingApi
+  storage: BackendStorageApi
   notification: {
     show: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => Promise<void> | void
   }
@@ -265,6 +305,31 @@ async function showSchedulerNotification(
 function normalizeMessageType(type: string | undefined, fallback = 'showcase-test') {
   const normalized = type?.trim()
   return normalized || fallback
+}
+
+function normalizeHostRpcStorageKey(key: string | undefined) {
+  const normalized = key?.trim()
+  return normalized || 'host-rpc-demo:roundtrip'
+}
+
+function normalizeHostRpcNotificationType(type: HostRpcNotificationType | undefined): HostRpcNotificationType {
+  const allowed: HostRpcNotificationType[] = ['info', 'success', 'warning', 'error']
+  return type && allowed.includes(type) ? type : 'info'
+}
+
+function getBackendRuntimeInfo() {
+  const runtime = (globalThis as { process?: NodeLikeProcess }).process
+
+  return {
+    pid: runtime?.pid ?? null,
+    platform: runtime?.platform ?? 'unknown',
+    node: runtime?.version ?? 'unknown',
+    uptime: typeof runtime?.uptime === 'function' ? runtime.uptime() : null
+  }
+}
+
+function formatBackendError(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function normalizeTargetPluginId(targetPluginId: string | undefined) {
@@ -522,6 +587,105 @@ export const rpc = {
       text: input?.upperCase ? text.toUpperCase() : text,
       length: text.length,
       receivedAt: new Date().toISOString()
+    }
+  },
+
+  getHostRpcBackendStatus() {
+    return {
+      ok: true,
+      pluginId: SHOWCASE_PLUGIN_ID,
+      runtime: getBackendRuntimeInfo(),
+      rpcNamespace: 'rpc',
+      methodStyle: 'no-context-offset',
+      methods: [
+        'getHostRpcBackendStatus',
+        'echoHostRpcPayload',
+        'notifyFromHostRpc',
+        'storageRoundtripFromHostRpc',
+        'safeBackendApiCall'
+      ],
+      at: new Date().toISOString()
+    }
+  },
+
+  echoHostRpcPayload(input?: HostRpcEchoInput) {
+    const text = input?.text || ''
+    const tags = Array.isArray(input?.tags)
+      ? input.tags
+        .filter(tag => typeof tag === 'string' && tag.trim())
+        .map(tag => tag.trim())
+        .slice(0, 8)
+      : []
+
+    return {
+      text: input?.upperCase ? text.toUpperCase() : text,
+      originalText: text,
+      upperCase: Boolean(input?.upperCase),
+      length: text.length,
+      tags,
+      receivedAt: new Date().toISOString()
+    }
+  },
+
+  async notifyFromHostRpc(input?: HostRpcNotifyInput) {
+    const message = input?.message?.trim() || 'Host RPC notify'
+    const type = normalizeHostRpcNotificationType(input?.type)
+    await mulby.notification.show(message, type)
+
+    return {
+      success: true,
+      message,
+      type,
+      notifiedAt: new Date().toISOString()
+    }
+  },
+
+  async storageRoundtripFromHostRpc(input?: HostRpcStorageInput) {
+    const key = normalizeHostRpcStorageKey(input?.key)
+    const value = input && 'value' in input
+      ? input.value
+      : {
+        text: 'Host RPC storage roundtrip',
+        source: 'host-rpc-module',
+        createdAt: new Date().toISOString()
+      }
+
+    await mulby.storage.set(key, value)
+    const stored = await mulby.storage.get(key)
+
+    return {
+      success: true,
+      key,
+      stored,
+      savedAt: new Date().toISOString()
+    }
+  },
+
+  async safeBackendApiCall(input?: HostRpcSafeBackendApiInput) {
+    const storageKey = normalizeHostRpcStorageKey(input?.storageKey)
+    let stored: unknown = null
+    let storageError: string | null = null
+
+    if (input?.includeStoredValue !== false) {
+      try {
+        stored = await mulby.storage.get(storageKey)
+      } catch (error) {
+        storageError = formatBackendError(error)
+      }
+    }
+
+    return {
+      ok: true,
+      pluginId: SHOWCASE_PLUGIN_ID,
+      backendStatus: rpc.getHostRpcBackendStatus(),
+      time: input?.includeTime === false ? null : rpc.getShowcaseTime({ timezone: input?.timezone }),
+      storage: {
+        key: storageKey,
+        enabled: input?.includeStoredValue !== false,
+        stored,
+        error: storageError
+      },
+      checkedAt: new Date().toISOString()
     }
   },
 

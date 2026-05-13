@@ -298,3 +298,14 @@ Manual review:
 - For request/response demos, include a message type convention such as `showcase-ping` and `showcase-pong`, and include the original message id in the response payload.
 - Do not expose host-only message bus monitoring, message history, plugin manager, developer, settings, or system-page APIs in the messaging module.
 - Add a focused regression test for messaging modules that checks backend subscription/RPC exports, right-side API panel usage, route/sidebar/manifest registration, and excluded host-only API names.
+
+## Host RPC Module Lessons
+
+- Use `export const rpc = { ... }` for new plugin backend methods. Methods under `rpc` receive exactly the arguments sent by the UI and do not get the legacy implicit `context` first argument.
+- UI pages should call `useMulby('@mulby/showcase')` and use the wrapped `host` object. Page code should call `host.call('method', input)`, `host.invoke('namespace.method')`, `host.status()`, and `host.restart()` without manually passing the plugin id.
+- `host.call()` returns the host worker envelope `{ success, data, error? }`. Each page should unwrap it in one helper and throw a clear error when `success` is false.
+- Use `host.invoke()` only for plugin-facing API namespaces that are safe to demonstrate from the current plugin context. The Host RPC page uses `clipboard.readText` as a small read example; do not use it to expose host settings, system pages, plugin-store, developer, super panel, tray-menu, onboarding, or system-plugin APIs.
+- `host.restart()` is disruptive because it restarts the plugin backend process. Keep it behind an explicit confirmation, clear stale backend state after calling it, and refresh status after a short delay.
+- Backend RPC return values must be serializable. Raw data should summarize clipboard and storage values with type, length, keys, and previews instead of dumping long text, binary data, or sensitive values.
+- Storage examples in this module should stay narrowly scoped to proving backend API access through RPC. Full storage coverage remains in the Storage and Security module.
+- Add a focused regression test for Host RPC that checks right-side API panel usage, route/sidebar/manifest registration, backend `rpc` exports, used Host API methods, and excluded host-only API names.
