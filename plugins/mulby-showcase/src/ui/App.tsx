@@ -21,12 +21,13 @@ import {
   AIModule,
   SchedulerModule,
   MessagingModule,
-  HostRPCModule
+  HostRPCModule,
+  PluginOrchestrationModule
 } from './modules'
 
 console.log('[App] Module imports loaded')
 
-type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc'
+type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc' | 'plugin'
 type ScreenAutoAction = 'region-capture' | null
 
 interface ShowcaseAttachment {
@@ -68,7 +69,8 @@ const featureToModule: Record<string, ModuleId> = {
   ai: 'ai',
   scheduler: 'scheduler',
   messaging: 'messaging',
-  'host-rpc': 'host-rpc'
+  'host-rpc': 'host-rpc',
+  plugin: 'plugin'
 }
 
 function handleDynamicCommand(featureCode: string, input?: string) {
@@ -129,7 +131,8 @@ const moduleComponents: Record<ModuleId, React.ComponentType<any>> = {
   ai: AIModule,
   scheduler: SchedulerModule,
   messaging: MessagingModule,
-  'host-rpc': HostRPCModule
+  'host-rpc': HostRPCModule,
+  plugin: PluginOrchestrationModule
 }
 
 // 从 URL 参数或插件初始化数据获取默认模块

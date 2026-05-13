@@ -12,6 +12,7 @@ import {
     Network,
     PackageOpen,
     PanelsTopLeft,
+    Puzzle,
     Settings,
     ShieldCheck,
     SlidersHorizontal,
@@ -52,6 +53,7 @@ const modules: ModuleItem[] = [
     { id: 'scheduler', icon: CalendarClock, label: '任务调度' },
     { id: 'messaging', icon: MessageSquare, label: '插件通信' },
     { id: 'host-rpc', icon: Terminal, label: 'Host RPC' },
+    { id: 'plugin', icon: Puzzle, label: '插件编排' },
 ]
 
 export function Sidebar({ activeModule, onModuleChange }: SidebarProps) {

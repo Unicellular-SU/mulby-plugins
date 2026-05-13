@@ -309,3 +309,16 @@ Manual review:
 - Backend RPC return values must be serializable. Raw data should summarize clipboard and storage values with type, length, keys, and previews instead of dumping long text, binary data, or sensitive values.
 - Storage examples in this module should stay narrowly scoped to proving backend API access through RPC. Full storage coverage remains in the Storage and Security module.
 - Add a focused regression test for Host RPC that checks right-side API panel usage, route/sidebar/manifest registration, backend `rpc` exports, used Host API methods, and excluded host-only API names.
+
+## Plugin Orchestration Module Lessons
+
+- Keep this page focused on plugin-facing orchestration: discovery (`getAll`, `listCommands`, `search`, `getRecentUsed`), execution (`run`, `runCommand`, `redirect`, `outPlugin`), command preferences, shortcut bindings, background status, and lifecycle events.
+- Do not expose plugin manager flows as primary examples. `install`, `uninstall`, `enable`, `disable`, plugin-store update/install flows, developer tools, system pages, and host settings belong to the host UI, not a third-party plugin showcase.
+- `plugin.getAll()` returns useful metadata such as `enabled`, `builtin`, `isDev`, and feature lists. Reading these fields is safe, but avoid adding actions that mutate installed plugin state.
+- `plugin.runCommand()` needs a concrete `PluginCommandItem` with `pluginId`, `featureCode`, `cmdId`, and `cmdSignature`; select commands from `plugin.listCommands()` instead of reconstructing signatures by hand.
+- Shortcut APIs have real persistent side effects. Always validate first with `plugin.validateCommandShortcut()`, then require explicit confirmation before `bindCommandShortcut()` or `unbindCommandShortcut()`.
+- `plugin.setCommandDisabled()` changes search and shortcut behavior. Keep it scoped to the selected command, confirm before toggling, and refresh `listCommands()` afterward.
+- Background APIs can affect running services. `listBackground()` and `getBackgroundInfo()` are safe read paths; `startBackground()`, `stopBackground()`, and `prewarm()` should be visibly labeled and scoped to the selected plugin.
+- `plugin.outPlugin(false)` closes the current plugin UI. Keep it as a clearly labeled page-level action with confirmation so users do not accidentally close the showcase while exploring.
+- Lifecycle event listeners (`onPluginInit`, `onPluginAttach`, `onPluginDetached`, `onPluginOut`, `onPluginLaunchStart`, `onPluginLaunchEnd`) should return disposers and clean up on unmount. Keep event payloads summarized in raw data.
+- Add a focused regression test for plugin orchestration modules that checks right-side API panel usage, route/sidebar/manifest registration, all intended plugin APIs, lifecycle events, and excluded host-only/plugin-manager API names.

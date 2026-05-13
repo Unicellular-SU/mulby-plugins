@@ -399,6 +399,20 @@
           "value": "后端调用"
         }
       ]
+    },
+    {
+      "code": "plugin",
+      "explain": "插件编排 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "plugin api"
+        },
+        {
+          "type": "keyword",
+          "value": "插件编排"
+        }
+      ]
     }
   ]
 }
