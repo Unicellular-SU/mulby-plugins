@@ -1,0 +1,48 @@
+{
+  "id": "@mulby/messaging-tester",
+  "name": "messaging-tester",
+  "version": "1.0.0",
+  "displayName": "插件通信测试器",
+  "description": "配合 Mulby 功能展示插件验证插件消息点对点发送、自动回包和广播订阅",
+  "type": "development",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "minAppVersion": "1.0.0",
+  "permissions": {
+    "notification": true
+  },
+  "pluginSetting": {
+    "background": true,
+    "persistent": true,
+    "idleTimeoutMs": "never"
+  },
+  "window": {
+    "width": 920,
+    "height": 680,
+    "minWidth": 720,
+    "minHeight": 520
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "打开插件通信测试器",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "messaging-tester"
+        },
+        {
+          "type": "keyword",
+          "value": "消息测试"
+        },
+        {
+          "type": "keyword",
+          "value": "通信测试"
+        }
+      ]
+    }
+  ]
+}

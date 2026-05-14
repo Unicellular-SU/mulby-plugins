@@ -14,6 +14,13 @@ export type PetExpression =
   | 'angry'
   | 'excited'
   | 'shy'
+  | 'love'
+  | 'curious'
+  | 'confused'
+  | 'proud'
+  | 'scared'
+  | 'focused'
+  | 'dizzy'
 
 export type PetPose =
   | 'stand'
@@ -23,15 +30,23 @@ export type PetPose =
   | 'sleep'
   | 'jump'
   | 'wave'
+  | 'hover'
+  | 'peek'
+  | 'spin'
+  | 'dance'
+  | 'hide'
+  | 'focus'
 
 export type PetSpriteKey = `${PetPose}_${PetExpression}`
 
 export const ALL_EXPRESSIONS: PetExpression[] = [
-  'neutral', 'happy', 'sad', 'surprised', 'sleepy', 'angry', 'excited', 'shy'
+  'neutral', 'happy', 'sad', 'surprised', 'sleepy', 'angry', 'excited', 'shy', 'love',
+  'curious', 'confused', 'proud', 'scared', 'focused', 'dizzy'
 ]
 
 export const ALL_POSES: PetPose[] = [
-  'stand', 'walk_1', 'walk_2', 'sit', 'sleep', 'jump', 'wave'
+  'stand', 'walk_1', 'walk_2', 'sit', 'sleep', 'jump', 'wave',
+  'hover', 'peek', 'spin', 'dance', 'hide', 'focus'
 ]
 
 /**
@@ -39,24 +54,7 @@ export const ALL_POSES: PetPose[] = [
  * These are the SVGs that must be generated for each pet.
  */
 export const CORE_SPRITES: PetSpriteKey[] = [
-  'stand_neutral',
-  'stand_happy',
-  'stand_sad',
-  'stand_surprised',
-  'stand_sleepy',
-  'stand_angry',
-  'stand_excited',
-  'stand_shy',
-  'walk_1_neutral',
-  'walk_2_neutral',
-  'sit_neutral',
-  'sit_happy',
-  'sit_sleepy',
-  'sleep_sleepy',
-  'jump_excited',
-  'jump_happy',
-  'wave_happy',
-  'wave_neutral',
+  ...ALL_POSES.flatMap(pose => ALL_EXPRESSIONS.map(expression => `${pose}_${expression}` as PetSpriteKey)),
 ]
 
 export interface PetSpriteSet {
@@ -98,22 +96,25 @@ export const EXPRESSION_FROM_EMOTION: Record<string, PetExpression> = {
   gratitude: 'happy',
   amusement: 'excited',
   excitement: 'excited',
-  curiosity: 'surprised',
+  curiosity: 'curious',
   surprise: 'surprised',
-  confusion: 'surprised',
+  confusion: 'confused',
   sadness: 'sad',
   disappointment: 'sad',
   worry: 'sad',
   anger: 'angry',
   annoyance: 'angry',
-  fear: 'surprised',
+  fear: 'scared',
   sleepiness: 'sleepy',
   tiredness: 'sleepy',
   calm: 'neutral',
   shyness: 'shy',
   embarrassment: 'shy',
-  pride: 'happy',
-  nervousness: 'surprised',
+  pride: 'proud',
+  nervousness: 'scared',
+  focus: 'focused',
+  concentration: 'focused',
+  dizziness: 'dizzy',
 }
 
 export function emotionToExpression(emotion: string): PetExpression {

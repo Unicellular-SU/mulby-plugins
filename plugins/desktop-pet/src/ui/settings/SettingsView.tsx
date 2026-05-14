@@ -1,7 +1,57 @@
-import { useState, useEffect, type ReactNode } from 'react'
-import { DEFAULT_PERSONALITY, type PetPersonality, type PetReminder, type GeoContext } from '../engine/ai-chat'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import {
+  DEFAULT_PERSONALITY,
+  PET_CHAT_HISTORY_STORAGE_KEY,
+  type PetPersonality,
+  type PetReminder,
+  type GeoContext,
+  type PetChatHistoryItem,
+} from '../engine/ai-chat'
+import {
+  ACTION_LIST,
+  EMOTION_LIST,
+  presentationIntentForAction,
+  stripPresentationMarkers,
+  type PresentationIntent,
+} from '../engine/presentation'
+import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose } from '../engine/pet-standard'
+import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
-import type { PetMemory } from '../engine/pet-memory'
+import {
+  DEFAULT_ECOSYSTEM_SETTINGS,
+  NEED_LABELS,
+  PET_ECOSYSTEM_SETTINGS_STORAGE_KEY,
+  PET_GAME_STATS_STORAGE_KEY,
+  PET_NEEDS_STORAGE_KEY,
+  PET_QUESTS_STORAGE_KEY,
+  PET_TIMELINE_STORAGE_KEY,
+  WORK_MODE_LABELS,
+  normalizeEcosystemSettings,
+  normalizeGameStats,
+  normalizeNeeds,
+  normalizeQuestState,
+  normalizeTimeline,
+  todayStr,
+  type PetEcosystemSettings,
+  type PetGameStats,
+  type PetNeedsSnapshot,
+  type PetQuestState,
+  type PetTimelineEvent,
+  type WorkMode,
+} from '../engine/pet-ecosystem'
+import {
+  LIFE_PROFILE_CATEGORIES,
+  LIFE_PROFILE_CATEGORY_LABELS,
+  PET_LIFE_PROFILE_STORAGE_KEY,
+  countLifeProfileItems,
+  createEmptyLifeProfile,
+  normalizeLifeProfile,
+  removeLifeProfileItem,
+  updateLifeProfileItemContent,
+  type LifeProfileCategory,
+  type LifeProfileItem,
+  type PetLifeProfile,
+} from '../engine/pet-life-profile'
 import { ALL_ACHIEVEMENTS, type UnlockedAchievement } from '../engine/achievements'
 import type { DiaryEntry } from '../engine/pet-diary'
 import './settings.css'
@@ -25,16 +75,77 @@ const ICONS = {
   star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   plus: 'M12 5v14M5 12h14',
+  edit: 'M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z',
+  check: 'M20 6L9 17l-5-5',
+  x: 'M18 6L6 18M6 6l12 12',
   cake: 'M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1M2 21h20M7 8v3M12 8v3M17 8v3M7 4h.01M12 4h.01M17 4h.01',
+  layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
 } as const
 
 function StatsIcon({ icon, children }: { icon: keyof typeof ICONS; children: ReactNode }) {
   return <span className="stats-icon"><Icon d={ICONS[icon]} color="var(--accent)" />{children}</span>
 }
 
+function readSettingsWindowId(): number | null {
+  const value = new URLSearchParams(window.location.search).get('settingsWindowId')
+  if (!value) return null
+  const id = Number(value)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
 const MOOD_LABELS: Record<PetMood, string> = {
   ecstatic: '欣喜若狂', happy: '开心', content: '满足', neutral: '平静',
   bored: '无聊', lonely: '孤独', sad: '难过', grumpy: '暴躁', sleepy: '困倦',
+}
+
+const EXPRESSION_LABELS: Record<PetExpression, string> = {
+  neutral: '平静',
+  happy: '开心',
+  sad: '难过',
+  surprised: '惊讶',
+  sleepy: '困倦',
+  angry: '生气',
+  excited: '兴奋',
+  shy: '害羞',
+  love: '喜欢',
+  curious: '好奇',
+  confused: '困惑',
+  proud: '得意',
+  scared: '害怕',
+  focused: '专注',
+  dizzy: '晕乎',
+}
+
+const POSE_LABELS: Record<PetPose, string> = {
+  stand: '站立',
+  walk_1: '前进',
+  walk_2: '漫步',
+  sit: '坐下',
+  sleep: '睡眠',
+  jump: '跳跃',
+  wave: '挥手',
+  hover: '悬浮',
+  peek: '探头',
+  spin: '旋转',
+  dance: '摇摆',
+  hide: '躲藏',
+  focus: '专注',
+}
+
+const PLAYGROUND_POSE_FACE: Record<PetPose, PetExpression> = {
+  stand: 'neutral',
+  walk_1: 'neutral',
+  walk_2: 'curious',
+  sit: 'sleepy',
+  sleep: 'sleepy',
+  jump: 'excited',
+  wave: 'happy',
+  hover: 'neutral',
+  peek: 'curious',
+  spin: 'dizzy',
+  dance: 'excited',
+  hide: 'shy',
+  focus: 'focused',
 }
 
 const TRAITS = [
@@ -63,14 +174,58 @@ function generateReminderId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
 }
 
+function formatHistoryAssistantText(raw: string): string {
+  return stripPresentationMarkers(raw).trim() || raw.trim()
+}
+
+function formatDialogueDateTime(ms: number): string {
+  return new Date(ms).toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+/** 将存储中的 user/assistant 成对转为展示用轮次（新在前） */
+function groupChatTurns(items: PetChatHistoryItem[]): Array<{ user: string; assistant: string; reasoning?: string; at?: number }> {
+  const out: Array<{ user: string; assistant: string; reasoning?: string; at?: number }> = []
+  for (let i = 0; i + 1 < items.length; i += 2) {
+    const u = items[i]
+    const a = items[i + 1]
+    if (u?.role === 'user' && a?.role === 'assistant') {
+      const at = typeof a.at === 'number' && Number.isFinite(a.at) ? a.at : (typeof u.at === 'number' && Number.isFinite(u.at) ? u.at : undefined)
+      out.push({
+        user: u.content,
+        assistant: formatHistoryAssistantText(a.content),
+        reasoning: a.reasoning?.trim() || undefined,
+        at,
+      })
+    }
+  }
+  return out.reverse()
+}
+
 export default function SettingsView() {
+  const settingsWindowIdRef = useRef(readSettingsWindowId())
+  const closedNotifiedRef = useRef(false)
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
-  const [tab, setTab] = useState<'personality' | 'stats' | 'memory' | 'achievements' | 'diary'>('personality')
+  const [tab, setTab] = useState<'personality' | 'ecosystem' | 'reminders' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
-  const [memories, setMemories] = useState<PetMemory[]>([])
-  const [memoryFilter, setMemoryFilter] = useState<'all' | 'pinned'>('all')
+  const [needs, setNeeds] = useState<PetNeedsSnapshot>(() => normalizeNeeds(null))
+  const [quests, setQuests] = useState<PetQuestState>(() => normalizeQuestState(null))
+  const [gameStats, setGameStats] = useState<PetGameStats>(() => normalizeGameStats(null))
+  const [timeline, setTimeline] = useState<PetTimelineEvent[]>([])
+  const [ecosystemSettings, setEcosystemSettings] = useState<PetEcosystemSettings>({ ...DEFAULT_ECOSYSTEM_SETTINGS })
+  const [lifeProfile, setLifeProfile] = useState<PetLifeProfile>(() => createEmptyLifeProfile())
+  const [editingLifeMemoryId, setEditingLifeMemoryId] = useState<string | null>(null)
+  const [editingLifeMemoryContent, setEditingLifeMemoryContent] = useState('')
+  const [refreshingLifeProfile, setRefreshingLifeProfile] = useState(false)
   const [geoInfo, setGeoInfo] = useState<GeoContext | null>(null)
   const [geoLoading, setGeoLoading] = useState(false)
   const [manualLat, setManualLat] = useState('')
@@ -81,18 +236,42 @@ export default function SettingsView() {
   const [diaryEntries, setDiaryEntries] = useState<DiaryEntry[]>([])
   const [newReminderLabel, setNewReminderLabel] = useState('')
   const [newReminderTime, setNewReminderTime] = useState('09:00')
+  const [chatHistory, setChatHistory] = useState<PetChatHistoryItem[]>([])
 
   const showToast = (msg: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
   }
 
+  const loadEcosystem = useCallback(async (showSuccess = false, includeSettings = false) => {
+    try {
+      const [rawNeeds, rawQuests, rawGameStats, rawTimeline, rawSettings] = await Promise.all([
+        window.mulby.storage.get(PET_NEEDS_STORAGE_KEY),
+        window.mulby.storage.get(PET_QUESTS_STORAGE_KEY),
+        window.mulby.storage.get(PET_GAME_STATS_STORAGE_KEY),
+        window.mulby.storage.get(PET_TIMELINE_STORAGE_KEY),
+        includeSettings ? window.mulby.storage.get(PET_ECOSYSTEM_SETTINGS_STORAGE_KEY) : Promise.resolve(undefined),
+      ])
+      setNeeds(normalizeNeeds(rawNeeds))
+      setQuests(normalizeQuestState(rawQuests))
+      setGameStats(normalizeGameStats(rawGameStats))
+      setTimeline(normalizeTimeline(rawTimeline))
+      if (includeSettings) setEcosystemSettings(normalizeEcosystemSettings(rawSettings))
+      if (showSuccess) showToast('生态状态已刷新')
+    } catch (err) {
+      console.error('Load ecosystem failed:', err)
+      if (showSuccess) showToast('刷新失败')
+    }
+  }, [])
+
   useEffect(() => {
     const load = async () => {
       try {
         const saved = await window.mulby.storage.get('pet-personality')
-        if (saved) setPersonality({ ...DEFAULT_PERSONALITY, ...(saved as Partial<PetPersonality>) })
-      } catch {}
+        if (saved) setPersonality(normalizePersonality(saved, DEFAULT_PERSONALITY))
+      } catch (err) {
+        console.error('Load personality failed:', err)
+      }
 
       try {
         const allModels = await window.mulby.ai.allModels()
@@ -103,41 +282,111 @@ export default function SettingsView() {
         if (!personality.model && textModels.length > 0) {
           setPersonality(p => ({ ...p, model: textModels[0].id }))
         }
-      } catch {}
+      } catch (err) {
+        console.error('Load AI models failed:', err)
+      }
 
       try {
         const savedStats = await window.mulby.storage.get('pet-stats')
-        if (savedStats) setStats(savedStats as PetStats)
-      } catch {}
+        if (savedStats && typeof savedStats === 'object') setStats(savedStats as PetStats)
+      } catch (err) {
+        console.error('Load stats failed:', err)
+      }
+
+      await loadEcosystem(false, true)
 
       try {
-        const savedMems = await window.mulby.storage.get('pet-memories')
-        if (Array.isArray(savedMems)) setMemories(savedMems as PetMemory[])
-      } catch {}
+        const savedProfile = await window.mulby.storage.get(PET_LIFE_PROFILE_STORAGE_KEY)
+        setLifeProfile(normalizeLifeProfile(savedProfile))
+      } catch (err) {
+        console.error('Load life profile failed:', err)
+      }
 
       try {
         const savedGeo = await window.mulby.storage.get('pet-geo')
         if (savedGeo && typeof savedGeo === 'object') {
           const g = savedGeo as GeoContext
-          setGeoInfo(g)
-          setManualLat(String(g.latitude))
-          setManualLon(String(g.longitude))
-          setManualCity(g.city ?? '')
-          setManualRegion(g.region ?? '')
+          if (Number.isFinite(g.latitude) && Number.isFinite(g.longitude)) {
+            setGeoInfo(g)
+            setManualLat(String(g.latitude))
+            setManualLon(String(g.longitude))
+            setManualCity(g.city ?? '')
+            setManualRegion(g.region ?? '')
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.error('Load geo failed:', err)
+      }
 
       try {
         const savedAchs = await window.mulby.storage.get('pet-achievements')
-        if (Array.isArray(savedAchs)) setUnlocked(savedAchs)
-      } catch {}
+        if (Array.isArray(savedAchs)) {
+          setUnlocked(savedAchs.filter(a => a && typeof a === 'object' && typeof (a as any).id === 'string') as UnlockedAchievement[])
+        }
+      } catch (err) {
+        console.error('Load achievements failed:', err)
+      }
 
       try {
         const savedDiary = await window.mulby.storage.get('pet-diary')
-        if (Array.isArray(savedDiary)) setDiaryEntries(savedDiary)
-      } catch {}
+        if (Array.isArray(savedDiary)) {
+          setDiaryEntries(savedDiary.filter(d => d && typeof d === 'object' && typeof (d as any).date === 'string') as DiaryEntry[])
+        }
+      } catch (err) {
+        console.error('Load diary failed:', err)
+      }
     }
     load()
+  }, [loadEcosystem])
+
+  const loadChatHistory = useCallback(async () => {
+    try {
+      const raw = await window.mulby.storage.get(PET_CHAT_HISTORY_STORAGE_KEY)
+      if (!Array.isArray(raw)) {
+        setChatHistory([])
+        return
+      }
+      const items: PetChatHistoryItem[] = []
+      for (const x of raw) {
+        if (!x || typeof x !== 'object') continue
+        const o = x as Record<string, unknown>
+        if (o.role !== 'user' && o.role !== 'assistant') continue
+        if (typeof o.content !== 'string') continue
+        const item: PetChatHistoryItem = { role: o.role, content: o.content }
+        if (o.role === 'assistant' && typeof o.reasoning === 'string' && o.reasoning.trim()) {
+          item.reasoning = o.reasoning.trim()
+        }
+        if (typeof o.at === 'number' && Number.isFinite(o.at) && o.at > 0) item.at = o.at
+        items.push(item)
+      }
+      setChatHistory(items)
+    } catch (err) {
+      console.error('Load chat history failed:', err)
+      setChatHistory([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'dialogue') void loadChatHistory()
+  }, [tab, loadChatHistory])
+
+  useEffect(() => {
+    const notifyClosed = () => {
+      if (closedNotifiedRef.current) return
+      closedNotifiedRef.current = true
+      try {
+        window.mulby.window.sendToParent('settings-closed', {
+          settingsWindowId: settingsWindowIdRef.current,
+        })
+      } catch {}
+    }
+    window.addEventListener('beforeunload', notifyClosed)
+    window.addEventListener('pagehide', notifyClosed)
+    return () => {
+      notifyClosed()
+      window.removeEventListener('beforeunload', notifyClosed)
+      window.removeEventListener('pagehide', notifyClosed)
+    }
   }, [])
 
   const handleFetchGeo = async () => {
@@ -182,11 +431,17 @@ export default function SettingsView() {
           { 'User-Agent': 'MulbyDesktopPet/1.0' }
         )
         if (resp.status === 200) {
-          const data = JSON.parse(resp.data)
-          geo.city = data.address?.city || data.address?.town || data.address?.county || ''
-          geo.region = data.address?.state || data.address?.province || ''
+          try {
+            const data = JSON.parse(resp.data)
+            geo.city = data.address?.city || data.address?.town || data.address?.county || ''
+            geo.region = data.address?.state || data.address?.province || ''
+          } catch (parseErr) {
+            console.warn('Reverse geocoding parse failed:', parseErr)
+          }
         }
-      } catch {}
+      } catch (err) {
+        console.warn('Reverse geocoding failed:', err)
+      }
 
       await window.mulby.storage.set('pet-geo', geo)
       setGeoInfo(geo)
@@ -246,30 +501,67 @@ export default function SettingsView() {
   const handleSave = async () => {
     try {
       await window.mulby.storage.set('pet-personality', personality)
+      await window.mulby.storage.set(PET_ECOSYSTEM_SETTINGS_STORAGE_KEY, ecosystemSettings)
       showToast('设置已保存')
-      window.mulby.window.sendToParent('settings-updated', { personality })
+      window.mulby.window.sendToParent('settings-updated', { personality, ecosystemSettings })
     } catch (err) {
       console.error('Save error:', err)
     }
   }
 
-  const handleTogglePin = async (id: string) => {
-    const updated = memories.map(m => {
-      if (m.id !== id) return m
-      const pinnedCount = memories.filter(x => x.pinned).length
-      if (!m.pinned && pinnedCount >= 10) return m
-      return { ...m, pinned: !m.pinned }
-    })
-    setMemories(updated)
-    await window.mulby.storage.set('pet-memories', updated)
-    showToast('已更新')
+  const loadLifeProfile = async (showSuccess = false) => {
+    try {
+      const savedProfile = await window.mulby.storage.get(PET_LIFE_PROFILE_STORAGE_KEY)
+      setLifeProfile(normalizeLifeProfile(savedProfile))
+      if (showSuccess) showToast('已刷新')
+    } catch (err) {
+      console.error('Refresh life profile failed:', err)
+      showToast('刷新失败')
+    }
   }
 
-  const handleDeleteMemory = async (id: string) => {
-    const updated = memories.filter(m => m.id !== id)
-    setMemories(updated)
-    await window.mulby.storage.set('pet-memories', updated)
-    showToast('已删除')
+  const persistLifeProfile = async (next: PetLifeProfile, message: string) => {
+    const normalized = normalizeLifeProfile(next)
+    await window.mulby.storage.set(PET_LIFE_PROFILE_STORAGE_KEY, normalized)
+    setLifeProfile(normalized)
+    window.mulby.window.sendToParent('life-profile-updated')
+    showToast(message)
+  }
+
+  const startEditLifeMemory = (item: LifeProfileItem) => {
+    setEditingLifeMemoryId(item.id)
+    setEditingLifeMemoryContent(item.content)
+  }
+
+  const cancelEditLifeMemory = () => {
+    setEditingLifeMemoryId(null)
+    setEditingLifeMemoryContent('')
+  }
+
+  const handleSaveLifeMemory = async (id: string) => {
+    const result = updateLifeProfileItemContent(lifeProfile, id, editingLifeMemoryContent)
+    if (!result.ok) {
+      showToast(result.reason === 'unsafe' ? '这条内容不适合保存为记忆' : '请输入记忆内容')
+      return
+    }
+    await persistLifeProfile(result.profile, '已保存')
+    cancelEditLifeMemory()
+  }
+
+  const handleDeleteLifeMemory = async (id: string) => {
+    const next = removeLifeProfileItem(lifeProfile, id)
+    await persistLifeProfile(next, '已删除')
+    if (editingLifeMemoryId === id) cancelEditLifeMemory()
+  }
+
+  const handleClearLifeProfile = async () => {
+    if (!window.confirm('确定清空全部生活档案吗？此操作不可恢复。')) return
+    const empty = createEmptyLifeProfile()
+    await window.mulby.storage.set(PET_LIFE_PROFILE_STORAGE_KEY, empty)
+    setLifeProfile(empty)
+    cancelEditLifeMemory()
+    window.mulby.window.sendToParent('settings-clear-life-profile')
+    showToast('生活档案已清空')
   }
 
   const addReminder = () => {
@@ -298,73 +590,210 @@ export default function SettingsView() {
     }))
   }
 
-  const renderMemory = () => {
-    const filtered = memoryFilter === 'pinned'
-      ? memories.filter(m => m.pinned)
-      : memories
+  const formatLifeMemoryMeta = (item: LifeProfileItem) => {
+    const source = item.source === 'manual' ? '手动' : '自动'
+    const date = new Date(item.updatedAt).toLocaleDateString()
+    return `${source} · 可信度 ${item.confidence}/5 · ${date}`
+  }
 
-    const typeLabels: Record<string, string> = {
-      fact: '事实', preference: '偏好', event: '事件', habit: '习惯'
-    }
-
+  const renderLifeProfileItem = (item: LifeProfileItem) => {
+    const isEditing = editingLifeMemoryId === item.id
     return (
-      <div className="panel-content">
-        <div className="memory-header">
-          <span className="memory-count">共 {memories.length} 条记忆</span>
-          <div className="memory-filter">
-            <button className={`filter-btn ${memoryFilter === 'all' ? 'active' : ''}`} onClick={() => setMemoryFilter('all')}>全部</button>
-            <button className={`filter-btn ${memoryFilter === 'pinned' ? 'active' : ''}`} onClick={() => setMemoryFilter('pinned')}>固定</button>
-          </div>
+      <div key={item.id} className="memory-item">
+        <div className="memory-item-top">
+          <span className="memory-type">{LIFE_PROFILE_CATEGORY_LABELS[item.category]}</span>
+          <span className="memory-date">{formatLifeMemoryMeta(item)}</span>
         </div>
-        {filtered.length === 0 && (
-          <div className="memory-empty">
-            {memoryFilter === 'pinned' ? '暂无固定记忆' : '宠物还没有形成记忆，多互动几次吧'}
-          </div>
+        {isEditing ? (
+          <textarea
+            className="memory-edit-input"
+            value={editingLifeMemoryContent}
+            onChange={e => setEditingLifeMemoryContent(e.target.value)}
+            maxLength={120}
+            rows={3}
+            autoFocus
+          />
+        ) : (
+          <div className="memory-content">{item.content}</div>
         )}
-        <div className="memory-list">
-          {filtered.map(m => (
-            <div key={m.id} className={`memory-item ${m.pinned ? 'pinned' : ''}`}>
-              <div className="memory-item-top">
-                <span className="memory-type">{typeLabels[m.type] || m.type}</span>
-                <span className="memory-date">{new Date(m.createdAt).toLocaleDateString()}</span>
-              </div>
-              <div className="memory-content">{m.content}</div>
-              {m.tags.length > 0 && (
-                <div className="memory-tags">
-                  {m.tags.map((t, i) => <span key={i} className="memory-tag">{t}</span>)}
-                </div>
-              )}
-              <div className="memory-actions">
-                <button
-                  className={`mem-action-btn ${m.pinned ? 'unpin' : 'pin'}`}
-                  onClick={() => handleTogglePin(m.id)}
-                  title={m.pinned ? '取消固定' : '固定'}
-                >
-                  <Icon d={ICONS.pin} size={12} /> {m.pinned ? '取消固定' : '固定'}
-                </button>
-                <button
-                  className="mem-action-btn delete"
-                  onClick={() => handleDeleteMemory(m.id)}
-                >
-                  <Icon d={ICONS.trash} size={12} /> 删除
-                </button>
-              </div>
-            </div>
-          ))}
+        <div className="memory-actions">
+          {isEditing ? (
+            <>
+              <button className="mem-action-btn save" onClick={() => void handleSaveLifeMemory(item.id)}>
+                <Icon d={ICONS.check} size={12} /> 保存
+              </button>
+              <button className="mem-action-btn" onClick={cancelEditLifeMemory}>
+                <Icon d={ICONS.x} size={12} /> 取消
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="mem-action-btn" onClick={() => startEditLifeMemory(item)}>
+                <Icon d={ICONS.edit} size={12} /> 编辑
+              </button>
+              <button className="mem-action-btn delete" onClick={() => void handleDeleteLifeMemory(item.id)}>
+                <Icon d={ICONS.trash} size={12} /> 删除
+              </button>
+            </>
+          )}
         </div>
       </div>
     )
   }
 
-  const renderStats = () => {
-    if (!stats) return <div className="panel-content"><p style={{ opacity: 0.6 }}>暂无数据</p></div>
+  const renderLifeProfileCategory = (category: LifeProfileCategory) => {
+    const items = lifeProfile[category]
+    return (
+      <section key={category} className="memory-category">
+        <div className="memory-category-header">
+          <span>{LIFE_PROFILE_CATEGORY_LABELS[category]}</span>
+          <span>{items.length}</span>
+        </div>
+        {items.length === 0 ? (
+          <div className="memory-category-empty">暂无内容</div>
+        ) : (
+          <div className="memory-list">
+            {items.map(renderLifeProfileItem)}
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  const handleManualRefreshLifeProfile = async () => {
+    if (refreshingLifeProfile) return
+    if (!personality.model) {
+      showToast('请先在「性格」页选择文本模型')
+      return
+    }
+    setRefreshingLifeProfile(true)
+    try {
+      window.mulby.window.sendToParent('settings-refresh-life-profile')
+      showToast('已请求更新生活档案，请稍后刷新查看')
+      setTimeout(() => void loadLifeProfile(), 6000)
+    } finally {
+      setTimeout(() => setRefreshingLifeProfile(false), 6000)
+    }
+  }
+
+  const renderMemory = () => {
+    const total = countLifeProfileItems(lifeProfile)
+    return (
+      <div className="panel-content">
+        <div className="memory-header">
+          <span className="memory-count">生活档案 · 共 {total} 条</span>
+        </div>
+        <div className="memory-toolbar">
+          <button type="button" className="gen-btn" onClick={() => void handleManualRefreshLifeProfile()} disabled={refreshingLifeProfile}>
+            <Icon d={ICONS.plus} size={12} /> {refreshingLifeProfile ? '更新中...' : '更新记忆'}
+          </button>
+          <button type="button" className="gen-btn" onClick={() => void loadLifeProfile(true)}>
+            <Icon d={ICONS.refresh} size={12} /> 刷新
+          </button>
+          <button type="button" className="mem-action-btn delete" onClick={() => void handleClearLifeProfile()}>
+            <Icon d={ICONS.trash} size={12} /> 清空档案
+          </button>
+        </div>
+        <p className="memory-description">
+          宠物会在多轮对话后节流更新生活档案，记录稳定事实、偏好、习惯、关系线索和少量近期事件。你可以在这里修正或删除任何内容。
+        </p>
+        {total === 0 && <div className="memory-empty">宠物还没有形成生活档案，多聊几次吧</div>}
+        <div className="memory-categories">
+          {LIFE_PROFILE_CATEGORIES.map(renderLifeProfileCategory)}
+        </div>
+      </div>
+    )
+  }
+
+  const renderLocationSettings = () => (
+    <div className="geo-card">
+      <div className="geo-header">
+        <StatsIcon icon="mapPin">位置信息</StatsIcon>
+      </div>
+      {geoInfo ? (
+        <div className="geo-summary-line">
+          <span className="geo-text">
+            {geoInfo.region && geoInfo.city
+              ? `${geoInfo.region} · ${geoInfo.city}`
+              : geoInfo.city || `${geoInfo.latitude.toFixed(4)}, ${geoInfo.longitude.toFixed(4)}`}
+          </span>
+        </div>
+      ) : (
+        <p className="field-hint geo-intro-hint">未设置。可填写下方坐标与城市后点「保存位置」，或使用 GPS 自动获取。</p>
+      )}
+
+      <div className="geo-manual-grid">
+        <div className="field geo-field-tight">
+          <label className="field-label">纬度</label>
+          <input
+            className="field-input"
+            inputMode="decimal"
+            value={manualLat}
+            onChange={e => setManualLat(e.target.value)}
+            placeholder="如 39.9042"
+          />
+        </div>
+        <div className="field geo-field-tight">
+          <label className="field-label">经度</label>
+          <input
+            className="field-input"
+            inputMode="decimal"
+            value={manualLon}
+            onChange={e => setManualLon(e.target.value)}
+            placeholder="如 116.4074"
+          />
+        </div>
+      </div>
+      <div className="field geo-field-tight">
+        <label className="field-label">城市</label>
+        <input
+          className="field-input"
+          value={manualCity}
+          onChange={e => setManualCity(e.target.value)}
+          placeholder="如 北京"
+          maxLength={40}
+        />
+      </div>
+      <div className="field geo-field-tight">
+        <label className="field-label">省份 / 地区（选填）</label>
+        <input
+          className="field-input"
+          value={manualRegion}
+          onChange={e => setManualRegion(e.target.value)}
+          placeholder="如 北京市"
+          maxLength={40}
+        />
+      </div>
+
+      <div className="geo-footer-actions">
+        <button type="button" className="gen-btn full-width" onClick={handleSaveManualGeo}>
+          保存位置
+        </button>
+        <div className="geo-actions geo-actions-row">
+          <button type="button" className="gen-btn" onClick={handleFetchGeo} disabled={geoLoading}>
+            <Icon d={ICONS.refresh} size={12} /> {geoLoading ? '获取中...' : (geoInfo ? 'GPS 定位' : '获取当前位置')}
+          </button>
+          {geoInfo && (
+            <button type="button" className="mem-action-btn delete" onClick={handleClearGeo}>
+              <Icon d={ICONS.trash} size={12} /> 清除
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  const renderStatsOverview = () => {
+    if (!stats) {
+      return <p style={{ opacity: 0.6 }}>暂无数据</p>
+    }
     const days = Math.floor((Date.now() - stats.createdAt) / 86_400_000)
     const moodScore = stats.moodScore ?? 0
     const moodPercent = Math.round((moodScore + 100) / 2)
     const moodName = MOOD_LABELS[(stats.mood as PetMood) ?? 'neutral'] || '平静'
 
     return (
-      <div className="panel-content">
+      <>
         <div className="mood-bar">
           <div className="mood-label">
             <StatsIcon icon="smile">心情</StatsIcon>
@@ -375,83 +804,7 @@ export default function SettingsView() {
           </div>
         </div>
 
-        <div className="geo-card">
-          <div className="geo-header">
-            <StatsIcon icon="mapPin">位置信息</StatsIcon>
-          </div>
-          {geoInfo ? (
-            <div className="geo-summary-line">
-              <span className="geo-text">
-                {geoInfo.region && geoInfo.city
-                  ? `${geoInfo.region} · ${geoInfo.city}`
-                  : geoInfo.city || `${geoInfo.latitude.toFixed(4)}, ${geoInfo.longitude.toFixed(4)}`}
-              </span>
-            </div>
-          ) : (
-            <p className="field-hint geo-intro-hint">未设置。可填写下方坐标与城市后点「保存位置」，或使用 GPS 自动获取。</p>
-          )}
-
-          <div className="geo-manual-grid">
-            <div className="field geo-field-tight">
-              <label className="field-label">纬度</label>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                value={manualLat}
-                onChange={e => setManualLat(e.target.value)}
-                placeholder="如 39.9042"
-              />
-            </div>
-            <div className="field geo-field-tight">
-              <label className="field-label">经度</label>
-              <input
-                className="field-input"
-                inputMode="decimal"
-                value={manualLon}
-                onChange={e => setManualLon(e.target.value)}
-                placeholder="如 116.4074"
-              />
-            </div>
-          </div>
-          <div className="field geo-field-tight">
-            <label className="field-label">城市</label>
-            <input
-              className="field-input"
-              value={manualCity}
-              onChange={e => setManualCity(e.target.value)}
-              placeholder="如 北京"
-              maxLength={40}
-            />
-          </div>
-          <div className="field geo-field-tight">
-            <label className="field-label">省份 / 地区（选填）</label>
-            <input
-              className="field-input"
-              value={manualRegion}
-              onChange={e => setManualRegion(e.target.value)}
-              placeholder="如 北京市"
-              maxLength={40}
-            />
-          </div>
-
-          <div className="geo-footer-actions">
-            <button type="button" className="gen-btn full-width" onClick={handleSaveManualGeo}>
-              保存位置
-            </button>
-            <div className="geo-actions geo-actions-row">
-              <button type="button" className="gen-btn" onClick={handleFetchGeo} disabled={geoLoading}>
-                <Icon d={ICONS.refresh} size={12} /> {geoLoading ? '获取中...' : (geoInfo ? 'GPS 定位' : '获取当前位置')}
-              </button>
-              {geoInfo && (
-                <button type="button" className="mem-action-btn delete" onClick={handleClearGeo}>
-                  <Icon d={ICONS.trash} size={12} /> 清除
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="stats-card">
+        <div className="stats-card compact">
           <div className="stats-row"><StatsIcon icon="heart">亲密度</StatsIcon><span className="stats-value">{stats.intimacy}/100</span></div>
           <div className="stats-row"><StatsIcon icon="calendar">连续签到</StatsIcon><span className="stats-value">{stats.streakDays} 天</span></div>
           <div className="stats-row"><StatsIcon icon="target">今日番茄</StatsIcon><span className="stats-value">{stats.pomodoroToday} 个</span></div>
@@ -460,6 +813,208 @@ export default function SettingsView() {
           <div className="stats-row"><StatsIcon icon="hand">累计互动</StatsIcon><span className="stats-value">{stats.totalInteractions} 次</span></div>
           <div className="stats-row"><StatsIcon icon="gift">相伴天数</StatsIcon><span className="stats-value">{days} 天</span></div>
         </div>
+      </>
+    )
+  }
+
+  const renderEcosystem = () => {
+    const needKeys = Object.keys(NEED_LABELS) as Array<keyof typeof NEED_LABELS>
+    const latestMode = [...timeline].reverse().find(e => e.mode)?.mode ?? 'casual'
+    const todayEvents = timeline
+      .filter(e => todayStr(e.at) === todayStr())
+      .slice(-18)
+      .reverse()
+    const completedQuests = quests.quests.filter(q => q.completed).length
+    const completionRate = quests.quests.length
+      ? Math.round((completedQuests / quests.quests.length) * 100)
+      : 0
+
+    return (
+      <div className="panel-content ecosystem-panel">
+        <div className="ecosystem-summary">
+          <div>
+            <span className="ecosystem-kicker">当前模式</span>
+            <strong>{WORK_MODE_LABELS[latestMode as WorkMode]}</strong>
+          </div>
+          <div>
+            <span className="ecosystem-kicker">今日目标</span>
+            <strong>{completedQuests}/{quests.quests.length}</strong>
+          </div>
+          <div>
+            <span className="ecosystem-kicker">小游戏积分</span>
+            <strong>{gameStats.score}</strong>
+          </div>
+        </div>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">基础状态</div>
+          {renderStatsOverview()}
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">需求状态</div>
+          <div className="needs-grid">
+            {needKeys.map(key => (
+              <div key={key} className="need-row">
+                <div className="need-row-top">
+                  <span>{NEED_LABELS[key]}</span>
+                  <span>{needs[key]}/100</span>
+                </div>
+                <div className="need-track">
+                  <div className="need-fill" style={{ width: `${needs[key]}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">每日任务 · {completionRate}%</div>
+          <div className="quest-list">
+            {quests.quests.map(q => (
+              <div key={q.id} className={`quest-item ${q.completed ? 'completed' : ''}`}>
+                <div>
+                  <span className="quest-title">{q.title}</span>
+                  <span className="quest-desc">{q.desc}</span>
+                </div>
+                <span className="quest-progress">{q.progress}/{q.target}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">小游戏成长</div>
+          <div className="stats-card compact">
+            <div className="stats-row"><StatsIcon icon="star">积分</StatsIcon><span className="stats-value">{gameStats.score}</span></div>
+            <div className="stats-row"><StatsIcon icon="target">今日游玩</StatsIcon><span className="stats-value">{gameStats.playedToday} 次</span></div>
+            <div className="stats-row"><StatsIcon icon="check">今日答对</StatsIcon><span className="stats-value">{gameStats.correctToday} 次</span></div>
+            <div className="stats-row"><StatsIcon icon="layers">连续答对</StatsIcon><span className="stats-value">{gameStats.streak} / 最佳 {gameStats.bestStreak}</span></div>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">生态控制</div>
+          <div className="trigger-list">
+            <label className="trigger-item">
+              <input
+                type="checkbox"
+                checked={ecosystemSettings.questsEnabled}
+                onChange={e => setEcosystemSettings(s => ({ ...s, questsEnabled: e.target.checked }))}
+              />
+              <span>启用每日任务</span>
+            </label>
+          </div>
+          <div className="dialogue-toolbar">
+            <button type="button" className="gen-btn" onClick={() => void loadEcosystem(true)}>
+              <Icon d={ICONS.refresh} size={12} /> 刷新生态状态
+            </button>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">今日时间线</div>
+          {todayEvents.length === 0 ? (
+            <div className="memory-empty">今天还没有生态事件</div>
+          ) : (
+            <div className="timeline-list">
+              {todayEvents.map(event => (
+                <div key={event.id} className="timeline-item">
+                  <time>{new Date(event.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
+                  <span>{event.label}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  const renderReminders = () => {
+    const reminders = personality.reminders || []
+    return (
+      <div className="panel-content">
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">节律提醒</div>
+          <div className="trigger-list">
+            <label className="trigger-item">
+              <input
+                type="checkbox"
+                checked={ecosystemSettings.routinesEnabled}
+                onChange={e => setEcosystemSettings(s => ({ ...s, routinesEnabled: e.target.checked }))}
+              />
+              <span>启用喝水与休息节律提醒</span>
+            </label>
+          </div>
+          <div className="ecosystem-number-row">
+            <label className="field">
+              <span className="field-label">喝水间隔（分钟）</span>
+              <input
+                className="field-input"
+                type="number"
+                min={15}
+                max={180}
+                value={ecosystemSettings.hydrationReminderMinutes}
+                onChange={e => setEcosystemSettings(s => ({ ...s, hydrationReminderMinutes: Number(e.target.value) || s.hydrationReminderMinutes }))}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">休息间隔（分钟）</span>
+              <input
+                className="field-input"
+                type="number"
+                min={20}
+                max={240}
+                value={ecosystemSettings.eyeRestReminderMinutes}
+                onChange={e => setEcosystemSettings(s => ({ ...s, eyeRestReminderMinutes: Number(e.target.value) || s.eyeRestReminderMinutes }))}
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="ecosystem-section">
+          <div className="ecosystem-section-title">定时提醒</div>
+          <div className="reminder-list">
+            {reminders.length === 0 && <div className="memory-category-empty">暂无自定义提醒</div>}
+            {reminders.map(r => (
+              <div key={r.id} className="reminder-item">
+                <label className="trigger-item" style={{ flex: 1 }}>
+                  <input
+                    type="checkbox"
+                    checked={r.enabled}
+                    onChange={() => toggleReminder(r.id)}
+                  />
+                  <span>{r.label}</span>
+                </label>
+                <span className="reminder-time">{String(r.hour).padStart(2, '0')}:{String(r.minute).padStart(2, '0')}</span>
+                <button className="mem-action-btn delete" onClick={() => removeReminder(r.id)} style={{ marginLeft: 4 }}>
+                  <Icon d={ICONS.trash} size={12} />
+                </button>
+              </div>
+            ))}
+            <div className="reminder-add">
+              <input
+                className="field-input"
+                value={newReminderLabel}
+                onChange={e => setNewReminderLabel(e.target.value)}
+                placeholder="提醒内容"
+                style={{ flex: 1 }}
+                maxLength={20}
+              />
+              <input
+                type="time"
+                className="field-input"
+                value={newReminderTime}
+                onChange={e => setNewReminderTime(e.target.value)}
+                style={{ width: 85 }}
+              />
+              <button className="gen-btn" onClick={addReminder} disabled={!newReminderLabel.trim()}>
+                <Icon d={ICONS.plus} size={12} />
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
     )
   }
@@ -498,6 +1053,162 @@ export default function SettingsView() {
     )
   }
 
+  const handleClearChatHistory = async () => {
+    if (!window.confirm('确定清空全部对话历史吗？此操作不可恢复。')) return
+    try {
+      await window.mulby.storage.set(PET_CHAT_HISTORY_STORAGE_KEY, [])
+      setChatHistory([])
+      window.mulby.window.sendToParent('chat-history-updated')
+      showToast('对话历史已清空')
+    } catch (e) {
+      console.error(e)
+      showToast('清空失败')
+    }
+  }
+
+  const renderDialogue = () => {
+    const turns = groupChatTurns(chatHistory)
+    return (
+      <div className="panel-content dialogue-panel">
+        <p className="dialogue-intro">
+          展示宠物与模型的对话上下文：包括你输入的内容、自动触发时的说明（如闲置、点击等），以及宠物的回复；每轮带日期与时间（新产生的对话才会记录时间）。若模型支持推理，会显示灰色「思考」片段。
+        </p>
+        <div className="dialogue-toolbar">
+          <button type="button" className="gen-btn" onClick={() => void loadChatHistory()}>
+            <Icon d={ICONS.refresh} size={12} /> 刷新
+          </button>
+          <button type="button" className="mem-action-btn delete" onClick={() => void handleClearChatHistory()}>
+            <Icon d={ICONS.trash} size={12} /> 清空历史
+          </button>
+        </div>
+        {turns.length === 0 ? (
+          <div className="memory-empty">暂无对话记录。与宠物聊天或等待自动搭话后，这里会出现历史。</div>
+        ) : (
+          <div className="dialogue-list">
+            {turns.map((t, idx) => (
+              <div key={turns.length - idx} className="dialogue-turn">
+                <div className="dialogue-turn-meta">
+                  {t.at != null ? (
+                    <time className="dialogue-time" dateTime={new Date(t.at).toISOString()}>
+                      {formatDialogueDateTime(t.at)}
+                    </time>
+                  ) : (
+                    <span className="dialogue-time dialogue-time-unknown">（无时间记录）</span>
+                  )}
+                </div>
+                <div className="dialogue-block dialogue-user">
+                  <span className="dialogue-label">用户 / 上下文</span>
+                  <div className="dialogue-text">{t.user}</div>
+                </div>
+                {t.reasoning && (
+                  <div className="dialogue-block dialogue-reasoning">
+                    <span className="dialogue-label">思考</span>
+                    <div className="dialogue-text dialogue-reasoning-body">{t.reasoning}</div>
+                  </div>
+                )}
+                <div className="dialogue-block dialogue-assistant">
+                  <span className="dialogue-label">宠物发言</span>
+                  <div className="dialogue-text">{t.assistant}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const triggerPetIntent = useCallback((intent: PresentationIntent) => {
+    try {
+      window.mulby.window.sendToParent('settings-trigger-action', { intent })
+      showToast(`已触发：${intent.face}${intent.pose ? '/' + intent.pose : ''}${intent.animation ? '/' + intent.animation : ''}`)
+    } catch (err) {
+      console.error('Trigger intent failed:', err)
+    }
+  }, [])
+
+  const renderPlayground = () => {
+    return (
+      <div className="panel-content">
+        <p className="field-hint" style={{ marginBottom: 12 }}>
+          以下为 `pet-standard` / `presentation` 里定义的表情、姿势、情绪与动作指令；点击会通过主窗口实时套用，与 AI 工具调用的表现一致。
+        </p>
+
+        <div className="field">
+          <label className="field-label">表情</label>
+          <div className="freq-row" style={{ flexWrap: 'wrap' }}>
+            {ALL_EXPRESSIONS.map((expr: PetExpression) => (
+              <button
+                key={`expr-${expr}`}
+                className="freq-btn playground-token"
+                onClick={() => triggerPetIntent({ face: expr, durationMs: 4000 })}
+                title={`${EXPRESSION_LABELS[expr]} / ${expr}`}
+              >
+                <span className="playground-token-main">{EXPRESSION_LABELS[expr]}</span>
+                <span className="playground-token-sub">{expr}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="field-label">姿势</label>
+          <div className="freq-row" style={{ flexWrap: 'wrap' }}>
+            {ALL_POSES.map((pose: PetPose) => (
+              <button
+                key={`pose-${pose}`}
+                className="freq-btn playground-token"
+                onClick={() => triggerPetIntent({
+                  face: PLAYGROUND_POSE_FACE[pose],
+                  pose,
+                  durationMs: pose === 'sleep' ? 5000 : 4000,
+                })}
+                title={`${POSE_LABELS[pose]} / ${pose}`}
+              >
+                <span className="playground-token-main">{POSE_LABELS[pose]}</span>
+                <span className="playground-token-sub">{pose}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="field-label">情绪 / 心情</label>
+          <div className="freq-row" style={{ flexWrap: 'wrap' }}>
+            {EMOTION_LIST.map(emotion => (
+              <button
+                key={`emo-${emotion}`}
+                className="freq-btn"
+                onClick={() => triggerPetIntent({ face: 'happy', emotion, durationMs: 4000 })}
+              >{emotion}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label className="field-label">动作 / 动画组合</label>
+          <div className="freq-row" style={{ flexWrap: 'wrap' }}>
+            {ACTION_LIST.map(action => (
+              <button
+                key={`act-${action}`}
+                className="freq-btn"
+                onClick={() => {
+                  const durationMs = action.startsWith('move_') || action === 'chase' || action === 'wander' || action === 'walk'
+                    ? 1800
+                    : action === 'sleep'
+                      ? 5000
+                      : 3500
+                  const intent = presentationIntentForAction(action, { durationMs })
+                  triggerPetIntent(intent)
+                }}
+              >{action}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderDiary = () => {
     const sorted = [...diaryEntries].sort((a, b) => b.createdAt - a.createdAt)
     const moodEmoji: Record<string, string> = {
@@ -528,26 +1239,29 @@ export default function SettingsView() {
       </div>
     )
   }
-
-  const reminders = personality.reminders || []
-
   return (
     <div className="settings-root">
       <div className="settings-header">
         <div className="tab-bar">
           <button className={`tab ${tab === 'personality' ? 'active' : ''}`} onClick={() => setTab('personality')}>设置</button>
-          <button className={`tab ${tab === 'stats' ? 'active' : ''}`} onClick={() => setTab('stats')}>状态</button>
+          <button className={`tab ${tab === 'ecosystem' ? 'active' : ''}`} onClick={() => setTab('ecosystem')}>生态</button>
+          <button className={`tab ${tab === 'reminders' ? 'active' : ''}`} onClick={() => setTab('reminders')}>提醒</button>
           <button className={`tab ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>记忆</button>
           <button className={`tab ${tab === 'achievements' ? 'active' : ''}`} onClick={() => setTab('achievements')}>成就</button>
           <button className={`tab ${tab === 'diary' ? 'active' : ''}`} onClick={() => setTab('diary')}>日记</button>
+          <button className={`tab ${tab === 'dialogue' ? 'active' : ''}`} onClick={() => setTab('dialogue')}>对话</button>
+          <button className={`tab ${tab === 'playground' ? 'active' : ''}`} onClick={() => setTab('playground')}>表现预览</button>
         </div>
       </div>
 
       <div className="settings-body">
-        {tab === 'stats' && renderStats()}
+        {tab === 'ecosystem' && renderEcosystem()}
+        {tab === 'reminders' && renderReminders()}
         {tab === 'memory' && renderMemory()}
         {tab === 'achievements' && renderAchievements()}
         {tab === 'diary' && renderDiary()}
+        {tab === 'dialogue' && renderDialogue()}
+        {tab === 'playground' && renderPlayground()}
         {tab === 'personality' && <div className="panel-content">
           <div className="field">
             <label className="field-label">宠物名称</label>
@@ -634,47 +1348,29 @@ export default function SettingsView() {
             />
           </div>
 
+          {renderLocationSettings()}
+
           <div className="field">
             <label className="field-label">
-              <Icon d={ICONS.bell} size={14} color="var(--accent)" /> 定时提醒
+              <Icon d={ICONS.layers} size={14} color="var(--accent)" /> 上下文与隐私
             </label>
-            <div className="reminder-list">
-              {reminders.map(r => (
-                <div key={r.id} className="reminder-item">
-                  <label className="trigger-item" style={{ flex: 1 }}>
-                    <input
-                      type="checkbox"
-                      checked={r.enabled}
-                      onChange={() => toggleReminder(r.id)}
-                    />
-                    <span>{r.label}</span>
-                  </label>
-                  <span className="reminder-time">{String(r.hour).padStart(2, '0')}:{String(r.minute).padStart(2, '0')}</span>
-                  <button className="mem-action-btn delete" onClick={() => removeReminder(r.id)} style={{ marginLeft: 4 }}>
-                    <Icon d={ICONS.trash} size={12} />
-                  </button>
-                </div>
-              ))}
-              <div className="reminder-add">
+            <div className="trigger-list">
+              <label className="trigger-item">
                 <input
-                  className="field-input"
-                  value={newReminderLabel}
-                  onChange={e => setNewReminderLabel(e.target.value)}
-                  placeholder="提醒内容"
-                  style={{ flex: 1 }}
-                  maxLength={20}
+                  type="checkbox"
+                  checked={ecosystemSettings.workModeEnabled}
+                  onChange={e => setEcosystemSettings(s => ({ ...s, workModeEnabled: e.target.checked }))}
                 />
+                <span>根据当前应用识别工作模式</span>
+              </label>
+              <label className="trigger-item">
                 <input
-                  type="time"
-                  className="field-input"
-                  value={newReminderTime}
-                  onChange={e => setNewReminderTime(e.target.value)}
-                  style={{ width: 85 }}
+                  type="checkbox"
+                  checked={ecosystemSettings.useWindowTitleContext}
+                  onChange={e => setEcosystemSettings(s => ({ ...s, useWindowTitleContext: e.target.checked }))}
                 />
-                <button className="gen-btn" onClick={addReminder} disabled={!newReminderLabel.trim()}>
-                  <Icon d={ICONS.plus} size={12} />
-                </button>
-              </div>
+                <span>允许窗口标题参与短期 AI 上下文</span>
+              </label>
             </div>
           </div>
 
@@ -706,7 +1402,7 @@ export default function SettingsView() {
         </div>}
       </div>
 
-      {tab === 'personality' && <div className="settings-footer">
+      {(tab === 'personality' || tab === 'ecosystem' || tab === 'reminders') && <div className="settings-footer">
         <button className="save-btn" onClick={handleSave}>保存设置</button>
       </div>}
 

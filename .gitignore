@@ -11,3 +11,4 @@ plugins/*/ui
 plugins_temp.jsonl
 releases/
 upstream/
+.cursor/

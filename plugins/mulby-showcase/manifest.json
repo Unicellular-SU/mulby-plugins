@@ -1,0 +1,453 @@
+{
+  "id": "@mulby/showcase",
+  "name": "mulby-showcase",
+  "version": "1.0.0",
+  "displayName": "Mulby 功能展示",
+  "description": "综合展示 Mulby 所有 API 能力的示例插件，涵盖系统信息、剪贴板、文件管理、网络、屏幕捕获、媒体、高级设置和安全存储等功能",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
+  "minAppVersion": "1.0.0",
+  "permissions": {
+    "geolocation": true,
+    "clipboard": true,
+    "accessibility": true,
+    "screen": true,
+    "microphone": true,
+    "camera": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "background": true,
+    "persistent": true,
+    "idleTimeoutMs": "never"
+  },
+  "window": {
+    "width": 1180,
+    "height": 760,
+    "minWidth": 920,
+    "minHeight": 620,
+    "backgroundThrottling": false
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "打开功能展示面板",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "showcase"
+        },
+        {
+          "type": "keyword",
+          "value": "demo"
+        },
+        {
+          "type": "keyword",
+          "value": "示例"
+        },
+        {
+          "type": "keyword",
+          "value": "功能展示"
+        }
+      ]
+    },
+    {
+      "code": "screenshot",
+      "explain": "区域截图并进入图片编辑",
+      "preCapture": "region",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "sc"
+        },
+        {
+          "type": "keyword",
+          "value": "截图"
+        },
+        {
+          "type": "keyword",
+          "value": "screenshot"
+        }
+      ]
+    },
+    {
+      "code": "sysinfo",
+      "explain": "查看系统信息",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "sysinfo"
+        },
+        {
+          "type": "keyword",
+          "value": "系统信息"
+        }
+      ]
+    },
+    {
+      "code": "clipboard",
+      "explain": "剪贴板管理",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "cb"
+        },
+        {
+          "type": "keyword",
+          "value": "剪贴板"
+        }
+      ]
+    },
+    {
+      "code": "input",
+      "explain": "输入控制示例",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "input"
+        },
+        {
+          "type": "keyword",
+          "value": "输入"
+        }
+      ]
+    },
+    {
+      "code": "files",
+      "explain": "文件管理",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "files"
+        },
+        {
+          "type": "keyword",
+          "value": "文件"
+        }
+      ]
+    },
+    {
+      "code": "network",
+      "explain": "网络与HTTP测试",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "http"
+        },
+        {
+          "type": "keyword",
+          "value": "网络"
+        }
+      ]
+    },
+    {
+      "code": "screen",
+      "explain": "屏幕截图与显示器信息",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "screenshot"
+        },
+        {
+          "type": "keyword",
+          "value": "截图"
+        },
+        {
+          "type": "keyword",
+          "value": "screen"
+        }
+      ]
+    },
+    {
+      "code": "media",
+      "explain": "媒体与语音合成",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "tts"
+        },
+        {
+          "type": "keyword",
+          "value": "语音"
+        },
+        {
+          "type": "keyword",
+          "value": "朗读"
+        },
+        {
+          "type": "keyword",
+          "value": "media"
+        },
+        {
+          "type": "keyword",
+          "value": "媒体"
+        },
+        {
+          "type": "keyword",
+          "value": "camera"
+        },
+        {
+          "type": "keyword",
+          "value": "摄像头"
+        },
+        {
+          "type": "keyword",
+          "value": "麦克风"
+        },
+        {
+          "type": "keyword",
+          "value": "录音"
+        }
+      ]
+    },
+    {
+      "code": "window-api",
+      "explain": "窗口控制、子窗口与窗口通信",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "window"
+        },
+        {
+          "type": "keyword",
+          "value": "窗口"
+        },
+        {
+          "type": "keyword",
+          "value": "窗口API"
+        }
+      ]
+    },
+    {
+      "code": "child-window",
+      "explain": "子窗口通信展示",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "child-window"
+        },
+        {
+          "type": "keyword",
+          "value": "子窗口"
+        }
+      ]
+    },
+    {
+      "code": "inbrowser",
+      "explain": "InBrowser 自动化浏览器",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "inbrowser"
+        },
+        {
+          "type": "keyword",
+          "value": "browser"
+        },
+        {
+          "type": "keyword",
+          "value": "浏览器自动化"
+        }
+      ]
+    },
+    {
+      "code": "sharp",
+      "explain": "Sharp 图像处理",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "sharp"
+        },
+        {
+          "type": "keyword",
+          "value": "图像处理"
+        },
+        {
+          "type": "keyword",
+          "value": "图片处理"
+        }
+      ]
+    },
+    {
+      "code": "ffmpeg",
+      "explain": "FFmpeg 音视频处理",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "ffmpeg"
+        },
+        {
+          "type": "keyword",
+          "value": "音视频处理"
+        },
+        {
+          "type": "keyword",
+          "value": "视频处理"
+        },
+        {
+          "type": "keyword",
+          "value": "转码"
+        }
+      ]
+    },
+    {
+      "code": "settings",
+      "explain": "插件界面设置",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "settings"
+        },
+        {
+          "type": "keyword",
+          "value": "设置"
+        }
+      ]
+    },
+    {
+      "code": "security",
+      "explain": "存储与安全",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "security"
+        },
+        {
+          "type": "keyword",
+          "value": "storage"
+        },
+        {
+          "type": "keyword",
+          "value": "安全"
+        },
+        {
+          "type": "keyword",
+          "value": "存储"
+        },
+        {
+          "type": "keyword",
+          "value": "存储与安全"
+        }
+      ]
+    },
+    {
+      "code": "attachments",
+      "explain": "附件接收展示",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "attachments"
+        },
+        {
+          "type": "keyword",
+          "value": "附件"
+        }
+      ]
+    },
+    {
+      "code": "ai",
+      "explain": "AI API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "ai"
+        },
+        {
+          "type": "keyword",
+          "value": "AI 示例"
+        }
+      ]
+    },
+    {
+      "code": "scheduler",
+      "explain": "任务调度 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "scheduler"
+        },
+        {
+          "type": "keyword",
+          "value": "任务调度"
+        }
+      ]
+    },
+    {
+      "code": "messaging",
+      "explain": "插件通信 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "messaging"
+        },
+        {
+          "type": "keyword",
+          "value": "插件通信"
+        }
+      ]
+    },
+    {
+      "code": "host-rpc",
+      "explain": "Host RPC API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "host rpc"
+        },
+        {
+          "type": "keyword",
+          "value": "Host RPC"
+        },
+        {
+          "type": "keyword",
+          "value": "后端调用"
+        }
+      ]
+    },
+    {
+      "code": "plugin",
+      "explain": "插件编排 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "plugin api"
+        },
+        {
+          "type": "keyword",
+          "value": "插件编排"
+        }
+      ]
+    },
+    {
+      "code": "features",
+      "explain": "动态指令 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "features"
+        },
+        {
+          "type": "keyword",
+          "value": "动态指令"
+        }
+      ]
+    },
+    {
+      "code": "log",
+      "explain": "日志 API",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "log"
+        },
+        {
+          "type": "keyword",
+          "value": "日志"
+        }
+      ]
+    }
+  ]
+}

@@ -26,6 +26,10 @@ function Root() {
     const BubbleOverlayView = React.lazy(() => import('./BubbleOverlayView'))
     return <React.Suspense fallback={null}><BubbleOverlayView /></React.Suspense>
   }
+  if (view === 'bubble-detail') {
+    const BubbleDetailView = React.lazy(() => import('./BubbleDetailView'))
+    return <React.Suspense fallback={null}><BubbleDetailView /></React.Suspense>
+  }
   const PetView = React.lazy(() => import('./PetView'))
   return <React.Suspense fallback={null}><PetView /></React.Suspense>
 }

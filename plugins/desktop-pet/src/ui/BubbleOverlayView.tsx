@@ -1,25 +1,41 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { buildBubblePreviewState, normalizeBubbleStreamPayload, type BubblePreviewState } from './engine/bubble-stream'
+
+const MAX_REPLY_LEN = 2000
 
 export default function BubbleOverlayView() {
-  const [reply, setReply] = useState('')
-  const [reasoning, setReasoning] = useState('')
+  const [preview, setPreview] = useState<BubblePreviewState>(() => buildBubblePreviewState({ reply: '', reasoning: '' }))
+  const bubbleRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     window.mulby.window.onChildMessage((channel: string, ...args: any[]) => {
-      if (channel === 'bubble-update' && args[0] != null) {
-        const raw = args[0]
-        if (typeof raw === 'string') {
-          setReply(raw)
-          setReasoning('')
-        } else if (typeof raw === 'object' && typeof raw.reply === 'string') {
-          setReply(raw.reply)
-          setReasoning(typeof raw.reasoning === 'string' ? raw.reasoning : '')
-        }
-      }
+      if (channel !== 'bubble-update' || args[0] == null) return
+      const normalized = normalizeBubbleStreamPayload(args[0])
+      setPreview(buildBubblePreviewState({
+        reply: normalized.reply.slice(0, MAX_REPLY_LEN),
+        reasoning: normalized.reasoning,
+      }))
     })
   }, [])
 
-  if (!reply && !reasoning) return null
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const el = bubbleRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const width = Math.ceil(Math.max(rect.width, el.scrollWidth))
+      const height = Math.ceil(Math.max(rect.height, el.scrollHeight))
+      window.mulby.window.sendToParent('bubble-measured', { width, height })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [preview])
+
+  if (!preview.reply && !preview.hasReasoning) return null
+
+  const openDetail = () => {
+    if (!preview.hasReasoning) return
+    window.mulby.window.sendToParent('bubble-detail-open')
+  }
 
   return (
     <div style={{
@@ -31,17 +47,26 @@ export default function BubbleOverlayView() {
       padding: '4px',
       background: 'transparent',
     }}>
-      <div className="bubble-container bubble-enter">
-        <div className="bubble-box" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
-          {reasoning ? (
-            <div className="bubble-reasoning">
-              {reasoning}
+      <button
+        ref={bubbleRef}
+        type="button"
+        className={`bubble-container bubble-enter bubble-preview-button ${preview.hasReasoning ? 'is-clickable' : ''}`}
+        onClick={openDetail}
+        title={preview.hasReasoning ? '查看完整思考过程' : undefined}
+      >
+        <div className="bubble-box bubble-preview-box">
+          {preview.hasReasoning ? (
+            <div className="bubble-reasoning-summary">
+              <span>{preview.statusLabel}</span>
+              <span>{preview.reasoningChars} 字</span>
             </div>
           ) : null}
-          {reply ? <span className="bubble-text">{reply}</span> : null}
+          {preview.reasoningPreview ? <div className="bubble-reasoning-preview">{preview.reasoningPreview}</div> : null}
+          {preview.reply ? <span className="bubble-text">{preview.reply}</span> : null}
+          {preview.hasReasoning ? <span className="bubble-detail-hint">点击查看完整思考</span> : null}
         </div>
         <div className="bubble-arrow" />
-      </div>
+      </button>
     </div>
   )
 }

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mulby API Lab icon">
+  <defs>
+    <linearGradient id="panel" x1="96" y1="80" x2="416" y2="432" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d9f0ec"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="140" y1="120" x2="384" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <filter id="shadow" x="64" y="56" width="384" height="408" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#164e63" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#f5faf9"/>
+  <g filter="url(#shadow)">
+    <rect x="92" y="76" width="328" height="360" rx="52" fill="url(#panel)" stroke="#b9d8d2" stroke-width="10"/>
+  </g>
+  <rect x="132" y="120" width="248" height="56" rx="20" fill="#17313b"/>
+  <circle cx="166" cy="148" r="9" fill="#5eead4"/>
+  <circle cx="196" cy="148" r="9" fill="#93c5fd"/>
+  <circle cx="226" cy="148" r="9" fill="#facc15"/>
+  <g fill="none" stroke="url(#accent)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M190 238l-42 42 42 42" stroke-width="28"/>
+    <path d="M322 238l42 42-42 42" stroke-width="28"/>
+    <path d="M280 218l-48 124" stroke-width="26"/>
+  </g>
+  <g fill="#17313b">
+    <rect x="152" y="366" width="72" height="18" rx="9"/>
+    <rect x="246" y="366" width="114" height="18" rx="9" opacity="0.78"/>
+  </g>
+</svg>

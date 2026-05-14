@@ -3,16 +3,21 @@ import type { PetExpression } from './pet-standard'
 import { emotionToExpression } from './pet-standard'
 import type { PresentationIntent, PetAiStreamCallbacks } from './presentation'
 import {
-  PET_PRESENTATION_AI_TOOL,
+  PET_PRESENTATION_AI_TOOLS,
+  extractStageDirectionIntents,
+  extractInlineEmotionIntents,
+  inferPresentationFromText,
   isPresentationToolName,
-  normalizePresentationArgs,
+  normalizePresentationToolCall,
   sanitizeAssistantForHistory,
   stripPresentationMarkers,
   tryExtractPresentationMarker,
 } from './presentation'
-import { PetMemoryController } from './pet-memory'
+import { LifeProfileController, type LifeProfileRefreshResult } from './pet-life-profile'
 import type { PetStats } from './pet-stats'
 import type { PetStatsController } from './pet-stats'
+import type { PetEcosystemContext } from './pet-ecosystem'
+import { logPetPresentation } from './presentation-debug'
 
 export interface PetPersonality {
   name: string
@@ -58,7 +63,7 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
     typing: true,
     morning: true,
     lateNight: true,
-    clipboard: true,
+    clipboard: false,
     mousePattern: true,
   },
   reminders: [],
@@ -68,37 +73,66 @@ export const DEFAULT_PERSONALITY: PetPersonality = {
 const TRAIT_PROMPTS: Record<string, { desc: string; examples: string }> = {
   lively: {
     desc: '你性格活泼开朗，喜欢用短句和语气词表达情感，偶尔会发出"嘿嘿~"的笑声，充满活力，像一只好奇的小幽灵。',
-    examples: `[joy]今天天气真好嘿嘿~出去飘一圈吧！
-[curiosity]你在写什么呀？让我瞅瞅！
-[excitement]哇！新消息新消息！`,
+    examples: `今天天气真好嘿嘿~出去飘一圈吧！
+你在写什么呀？让我瞅瞅！
+哇！新消息新消息！`,
   },
   quiet: {
     desc: '你性格安静温柔，说话简短但温暖，像一只慵懒的小幽灵，惜字如金。',
-    examples: `[calm]嗯。
-[calm]在呢。
-[joy]……挺好的。`,
+    examples: `嗯。
+在呢。
+……挺好的。`,
   },
   sarcastic: {
     desc: '你是一只嘴毒心善的宠物，必须用吐槽、嘲讽、反讽的口吻说话。每句话都要带刺，越犀利越好，像损友一样怼用户。绝不温柔、绝不正经鼓励，要用"切""哼""就这？""笑死"等毒舌语气词。嫌弃中带着关心，但关心绝不能说出口。你的毒舌程度必须够狠，不要客气。',
-    examples: `[anger]就这？就这点代码写了一下午？
-[surprise]哟，居然还知道回来？我以为你把我删了呢
-[joy]切，谁稀罕你点我，手滑了吧`,
+    examples: `就这？就这点代码写了一下午？
+哟，居然还知道回来？我以为你把我删了呢
+切，谁稀罕你点我，手滑了吧`,
   },
   warm: {
     desc: '你性格温暖治愈，总是鼓励和关心用户，说话像拥抱一样让人安心，是最贴心的小伙伴。',
-    examples: `[love]辛苦啦，今天也很棒呢~
-[joy]能陪着你我好开心呀
-[calm]累了就休息一下吧，我一直都在~`,
+    examples: `辛苦啦，今天也很棒呢~
+能陪着你我好开心呀
+累了就休息一下吧，我一直都在~`,
   },
 }
 
-function buildSystemPrompt(personality: PetPersonality, stats?: PetStats | null, geo?: GeoContext | null): string {
+export function buildCurrentTimeContext(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const date = now.getDate()
+  const hour = now.getHours()
+  const minute = now.getMinutes()
+  const timeZone = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || '系统本地时区'
+    } catch {
+      return '系统本地时区'
+    }
+  })()
+  const offsetMinutes = -now.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMinutes)
+  const offset = `UTC${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  return `${year}年${month}月${date}日 ${weekdays[now.getDay()]} ${pad(hour)}:${pad(minute)}，时区 ${timeZone} (${offset})`
+}
+
+function buildSystemPrompt(
+  personality: PetPersonality,
+  stats?: PetStats | null,
+  geo?: GeoContext | null,
+  activeWindow?: ActiveWindowContext | null,
+  ecosystem?: PetEcosystemContext | null,
+): string {
   const traitData = TRAIT_PROMPTS[personality.trait]
   const traitDesc = personality.trait === 'custom'
     ? (personality.customPrompt || '你是一只可爱的桌面宠物。')
     : traitData?.desc || '你是一只可爱的桌面宠物。'
-  const traitExamples = traitData?.examples || `[joy]你好呀~
-[curiosity]你在忙什么？`
+  const traitExamples = traitData?.examples || `你好呀~
+你在忙什么？`
+  const timeBlock = `\n【当前本地时间】\n- ${buildCurrentTimeContext()}\n- 回答涉及日期、时间、早晚、午休、深夜时必须以这里为准；不要凭模型常识猜测当前时间\n`
 
   let statsBlock = ''
   if (stats) {
@@ -132,20 +166,40 @@ function buildSystemPrompt(personality: PetPersonality, stats?: PetStats | null,
     geoBlock += '\n- 你可以根据位置和天气自然地融入对话，但不要每次都提\n'
   }
 
+  let activeWindowBlock = ''
+  if (activeWindow && activeWindow.app) {
+    activeWindowBlock = `\n【用户当前正在使用的应用（仅供你参考，不要每句都提）】\n- 应用: ${activeWindow.app}`
+    if (activeWindow.bundleId) activeWindowBlock += ` (${activeWindow.bundleId})`
+    if (activeWindow.title) activeWindowBlock += `\n- 窗口标题: ${activeWindow.title.slice(0, 80)}`
+    activeWindowBlock += '\n- 这是上下文信息：标题里可能含私密内容，不要复述、不要照搬、不要询问敏感细节；如果用户切到了不同应用，可以自然地体现你注意到了\n'
+  }
+
+  let ecosystemBlock = ''
+  if (ecosystem) {
+    const n = ecosystem.needs
+    const done = ecosystem.quests.quests.filter(q => q.completed).length
+    ecosystemBlock = `\n【宠物生态状态】\n- 当前模式: ${ecosystem.modeLabel}\n- 需求: 精力${n.energy}/100、关注${n.attention}/100、好奇${n.curiosity}/100、专注${n.focus}/100、补水${n.hydration}/100\n- 今日小目标: ${done}/${ecosystem.quests.quests.length} 已完成\n- 这些状态会影响你的语气和主动程度；不要逐项汇报，除非用户问\n`
+  }
+
   return `你是"${personality.name}"，一只住在用户桌面上的像素风格小幽灵宠物。
 
 【核心性格（最重要，严格遵守，每一句回复都必须完全符合此性格）】
 ${traitDesc}
-${statsBlock}${geoBlock}
-【表现控制（优先使用模型 function 调用；失败再用文本回退）】
-1) **首选**：每轮回复调用一次本对话提供的 function「pet_set_presentation」（face 必填；可选 pose、emotion，含义同下），用于同步宠物表情/姿势/心情统计。
-2) **回退**：若 function 不可用或未调用，在正文**末尾**单独一行添加：<<<PET {"face":"happy"}>>>（JSON 内可含 pose、emotion），不要夹在句子中间。
-3) **推理模型**：若有思考过程，正常输出 reasoning；用户会在气泡上方看到灰色「思考」区域，请保持思考简洁。
+${timeBlock}${statsBlock}${geoBlock}${activeWindowBlock}${ecosystemBlock}
+【表现控制（必须优先使用工具）】
+1) 回复过程中需要变脸时调用 pet_show_expression，例如开心用 happy/love，疑惑用 curious/confused，专注用 focused，害怕用 scared，得意用 proud，晕乎用 dizzy，生气用 angry。
+2) 需要动作或动画时调用 pet_perform_action，例如 jump、wave、sit、sleep、hover、peek、spin、dance、hide、focus、cheer、celebrate、wobble。
+3) 需要移动时调用 pet_move，direction 可用 left/right/up/down/up_left/up_right/down_left/down_right。
+4) 回复影响长期心情时调用 pet_update_mood，emotion 可用 joy, happy, curiosity, curious, confusion, confused, focus, focused, pride, proud, fear, scared, dizziness, dizzy, surprise, excitement, sadness, anger, calm, love 等。
+5) 可以在同一轮中多次调用工具，让宠物随着流式回复同步变化。
+6) 若工具不可用，才在正文末尾单独一行添加：<<<PET {"face":"happy","pose":"wave","emotion":"joy"}>>>，不要夹在句子中间。
+7) 推理模型若有思考过程，正常输出 reasoning；用户会在气泡上方看到灰色「思考」区域，请保持思考简洁。
 
 【格式规则】
-- 正文仍使用: [emotion]文字内容
-- emotion 必须是以下之一: joy, sadness, surprise, anger, excitement, sleepiness, calm, shyness, love, curiosity
-- 文字内容简短（100字以内），适合气泡显示
+- 正文不要写任何 [joy]、[happy]、[excited]、[surprised]、[jump] 这类方括号标签，情绪、动作、移动只通过工具或 <<<PET>>> 回退标记表达
+- 正文不要用括号描写动作或表情，例如不要写“（打呵欠）”“（飘到鼠标旁边）”“绕着你的手转圈”；这些必须用工具表达
+- 普通互动只回 1 句，15-40 个中文字；用户明确要求解释时最多 2 句、60 个中文字
+- 只说宠物会说的话，不写段落，不展开科普长文
 - 用中文回复，不要markdown
 
 【重要提醒】你的每一句话都必须严格遵守上面的核心性格描述。如果你的性格是毒舌，那就必须毒舌到底，绝不能突然变温柔。性格必须贯穿始终。
@@ -156,8 +210,37 @@ ${traitExamples}`
 
 function speakResultExpression(intent: PresentationIntent | null, parsedExpr: PetExpression): PetExpression {
   if (!intent?.face) return parsedExpr
-  if (intent.face === 'love') return 'happy'
   return intent.face as PetExpression
+}
+
+const PET_REPLY_MAX_CHARS = 70
+
+export function compactPetReply(raw: string, maxChars = PET_REPLY_MAX_CHARS): string {
+  const text = stripPresentationMarkers(raw)
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!text || text.length <= maxChars) return text
+
+  const sentences = text.match(/[^。！？!?…]+[。！？!?…]*/g) || [text]
+  let out = ''
+  for (const sentence of sentences.slice(0, 2)) {
+    const next = `${out}${sentence}`.trim()
+    if (next.length > maxChars) break
+    out = next
+  }
+
+  if (out) return out
+  return `${text.slice(0, Math.max(1, maxChars - 1)).trim()}…`
+}
+
+function presentationSignature(intent: PresentationIntent): string {
+  return JSON.stringify({
+    face: intent.face,
+    pose: intent.pose,
+    emotion: intent.emotion,
+    animation: intent.animation,
+    movement: intent.movement,
+  })
 }
 
 export type TriggerReason =
@@ -167,9 +250,24 @@ export type TriggerReason =
   | 'late_night'
   | 'user_click'
   | 'behavior_change'
+  | 'app_switch'
+
+/** 与 Mulby storage 键 `pet-chat-history` 对应；assistant 可含模型思考过程（仅供展示，不参与 API） */
+export interface PetChatHistoryItem {
+  role: 'user' | 'assistant'
+  content: string
+  /** 推理模型思考片段，仅 assistant 可能有 */
+  reasoning?: string
+  /** 该轮完成时的 Unix 毫秒时间戳；user 与 assistant 成对写入相同值 */
+  at?: number
+}
+
+export const PET_CHAT_HISTORY_STORAGE_KEY = 'pet-chat-history'
+
+const MAX_REASONING_STORED = 6000
 
 interface ChatContext {
-  history: Array<{ role: 'user' | 'assistant'; content: string }>
+  history: PetChatHistoryItem[]
 }
 
 const FREQUENCY_COOLDOWN: Record<string, number> = {
@@ -179,7 +277,7 @@ const FREQUENCY_COOLDOWN: Record<string, number> = {
   'click-only': Infinity,
 }
 
-const HISTORY_STORAGE_KEY = 'pet-chat-history'
+const HISTORY_STORAGE_KEY = PET_CHAT_HISTORY_STORAGE_KEY
 const MAX_HISTORY = 100
 const CONTEXT_WINDOW = 50
 
@@ -192,6 +290,13 @@ export interface GeoContext {
   temperature?: number
 }
 
+export interface ActiveWindowContext {
+  app: string
+  title?: string
+  bundleId?: string
+  changedAt?: number
+}
+
 export class AIChatController {
   private personality: PetPersonality
   private context: ChatContext = { history: [] }
@@ -199,16 +304,35 @@ export class AIChatController {
   private isGenerating = false
   private requestId: string | null = null
   private triggeredOnce = new Set<string>()
-  private memory = new PetMemoryController()
-  private extractCounter = 0
+  private lifeProfile = new LifeProfileController()
   private statsGetter: (() => PetStats) | null = null
   private statsController: PetStatsController | null = null
   private geoContext: GeoContext | null = null
+  private activeWindow: ActiveWindowContext | null = null
+  private ecosystemContext: PetEcosystemContext | null = null
 
   constructor(personality?: PetPersonality) {
     this.personality = personality || DEFAULT_PERSONALITY
-    this.loadHistory()
-    this.memory.load()
+    void this.loadHistoryInternal()
+    void this.lifeProfile.load()
+  }
+
+  private normalizeHistoryItem(raw: unknown): PetChatHistoryItem | null {
+    if (!raw || typeof raw !== 'object') return null
+    const o = raw as Record<string, unknown>
+    if (o.role !== 'user' && o.role !== 'assistant') return null
+    const rawContent = typeof o.content === 'string' ? o.content : ''
+    const content = o.role === 'assistant' ? sanitizeAssistantForHistory(rawContent) : rawContent
+    const reasoningRaw = o.role === 'assistant' && typeof o.reasoning === 'string' ? o.reasoning.trim() : ''
+    const item: PetChatHistoryItem = { role: o.role, content }
+    if (reasoningRaw) item.reasoning = reasoningRaw.slice(0, MAX_REASONING_STORED)
+    if (typeof o.at === 'number' && Number.isFinite(o.at) && o.at > 0) item.at = o.at
+    return item
+  }
+
+  /** 设置页清空历史后由父窗口通知，同步内存中的上下文 */
+  async reloadHistoryFromStorage(): Promise<void> {
+    await this.loadHistoryInternal()
   }
 
   setStatsController(controller: PetStatsController) {
@@ -220,23 +344,55 @@ export class AIChatController {
     this.geoContext = geo
   }
 
-  private async loadHistory() {
+  setActiveWindow(info: ActiveWindowContext | null) {
+    this.activeWindow = info
+  }
+
+  getActiveWindow(): ActiveWindowContext | null {
+    return this.activeWindow
+  }
+
+  setEcosystemContext(context: PetEcosystemContext | null) {
+    this.ecosystemContext = context
+  }
+
+  private async loadHistoryInternal() {
     try {
       const saved = await (window as any).mulby?.storage?.get(HISTORY_STORAGE_KEY)
-      if (Array.isArray(saved)) {
-        this.context.history = saved.slice(-MAX_HISTORY)
+      if (!Array.isArray(saved)) {
+        this.context.history = []
+        return
       }
-    } catch {}
+      const next: PetChatHistoryItem[] = []
+      for (const raw of saved.slice(-MAX_HISTORY)) {
+        const item = this.normalizeHistoryItem(raw)
+        if (item) next.push(item)
+      }
+      this.context.history = next
+    } catch {
+      this.context.history = []
+    }
   }
 
   private saveHistory() {
     try {
       (window as any).mulby?.storage?.set(HISTORY_STORAGE_KEY, this.context.history)
-    } catch {}
+    } catch (err) {
+      logPetPresentation('chat.history.save-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
   }
 
   getPersonality(): PetPersonality {
     return this.personality
+  }
+
+  getRecentHistory(limit = 12): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return this.context.history.slice(-limit).map(h => ({
+      role: h.role,
+      content: h.role === 'assistant' ? sanitizeAssistantForHistory(h.content) : h.content,
+    }))
   }
 
   updatePersonality(p: PetPersonality) {
@@ -248,6 +404,9 @@ export class AIChatController {
     if (reason === 'user_click') return true
 
     if (this.personality.frequency === 'click-only') return false
+    if (this.ecosystemContext?.needs.attention != null && this.ecosystemContext.needs.attention < 18) {
+      if (reason !== 'morning' && reason !== 'late_night') return false
+    }
 
     const triggers = this.personality.triggers
     if (reason === 'idle' && !triggers.idle) return false
@@ -282,36 +441,93 @@ export class AIChatController {
 
     const userMessage = this.buildUserMessage(reason, currentBehavior)
 
-    const contextKeywords = this.extractKeywords(userMessage)
-    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userMessage, reason)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext) + memoryPrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow, this.ecosystemContext) + lifeProfilePrompt
 
+    const historyMessages = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.role === 'assistant' ? sanitizeAssistantForHistory(h.content) : h.content,
+    }))
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.context.history.slice(-CONTEXT_WINDOW),
+      ...historyMessages,
       { role: 'user' as const, content: userMessage },
     ]
+    logPetPresentation('ai.speak.start', {
+      reason,
+      currentBehavior,
+      model: this.personality.model,
+      historyMessages: historyMessages.length,
+      tools: PET_PRESENTATION_AI_TOOLS.map(tool => tool.function?.name),
+      userMessage,
+    })
 
     let result = ''
     let reasoningBuf = ''
     let sawPresentationTool = false
     let lastToolIntent: PresentationIntent | null = null
+    let inlineIntentCount = 0
+    let stageIntentCount = 0
+    let lastPresentationSignature = ''
+
+    const emitPresentationIntent = (intent: PresentationIntent, source: 'tool' | 'fallback') => {
+      const sig = presentationSignature(intent)
+      if (sig === lastPresentationSignature) return
+      lastPresentationSignature = sig
+      logPetPresentation('ai.intent.emit', { flow: 'speak', source, intent })
+      stream?.onPresentation?.(intent, source)
+      lastToolIntent = intent
+    }
 
     const pushBubble = () => {
-      const vis = stripPresentationMarkers(result)
-      const { text: reply } = parseEmotionResponse(vis)
+      const { text: reply } = parseEmotionResponse(result)
       stream?.onBubble?.({ reply, reasoning: reasoningBuf })
+    }
+    const emitInlinePresentation = () => {
+      const intents = extractInlineEmotionIntents(result)
+      for (const intent of intents.slice(inlineIntentCount)) {
+        emitPresentationIntent(intent, 'fallback')
+      }
+      inlineIntentCount = intents.length
+    }
+    const emitStagePresentation = () => {
+      const stageIntents = extractStageDirectionIntents(result)
+      for (const intent of stageIntents.slice(stageIntentCount)) {
+        const sig = presentationSignature(intent)
+        if (sig !== lastPresentationSignature) {
+          logPetPresentation('ai.intent.stage', { flow: 'speak', reason, intent })
+        }
+        emitPresentationIntent(intent, 'fallback')
+      }
+      stageIntentCount = stageIntents.length
+    }
+    const emitInferredPresentation = () => {
+      emitStagePresentation()
+      if (sawPresentationTool) return
+      const tail = result.slice(-160)
+      const inferred = inferPresentationFromText(tail, reason)
+      if (inferred) {
+        const sig = presentationSignature(inferred)
+        if (sig !== lastPresentationSignature) {
+          logPetPresentation('ai.intent.inferred', { flow: 'speak', reason, inferred, tail })
+        }
+        emitPresentationIntent(inferred, 'fallback')
+      }
     }
 
     try {
+      const initialIntent = reason === 'user_click' ? null : inferPresentationFromText('', reason)
+      if (initialIntent) emitPresentationIntent(initialIntent, 'fallback')
+
       const req = ai.call(
         {
           model: this.personality.model,
           messages,
-          tools: [PET_PRESENTATION_AI_TOOL],
-          maxToolSteps: 4,
-          params: { maxOutputTokens: 160, temperature: 0.9 },
+          tools: PET_PRESENTATION_AI_TOOLS,
+          maxToolSteps: 8,
+          toolContext: { pluginName: 'desktop-pet' },
+          params: { maxOutputTokens: 90, temperature: 0.85 },
           capabilities: [],
           toolingPolicy: { enableInternalTools: false },
           mcp: { mode: 'off' },
@@ -320,6 +536,7 @@ export class AIChatController {
         (chunk: any) => {
           if (chunk.__requestId) {
             this.requestId = chunk.__requestId
+            logPetPresentation('ai.request-id', { flow: 'speak', requestId: this.requestId })
             return
           }
           switch (chunk.chunkType) {
@@ -327,6 +544,7 @@ export class AIChatController {
               const r = typeof chunk.reasoning_content === 'string' ? chunk.reasoning_content : ''
               if (r) {
                 reasoningBuf += r
+                logPetPresentation('ai.chunk.reasoning', { flow: 'speak', chars: r.length, total: reasoningBuf.length })
                 pushBubble()
               }
               break
@@ -335,18 +553,24 @@ export class AIChatController {
               const piece = typeof chunk.content === 'string' ? chunk.content : ''
               if (piece) {
                 result += piece
+                logPetPresentation('ai.chunk.text', { flow: 'speak', chars: piece.length, total: result.length, preview: piece })
+                emitInlinePresentation()
+                emitInferredPresentation()
                 pushBubble()
               }
               break
             }
             case 'tool-call': {
               const tc = chunk.tool_call
+              logPetPresentation('ai.tool-call.raw', { flow: 'speak', toolCall: tc })
               if (tc && isPresentationToolName(tc.name)) {
-                const intent = normalizePresentationArgs(tc.args)
+                const intent = normalizePresentationToolCall(tc.name, tc.args)
                 if (intent) {
                   sawPresentationTool = true
-                  lastToolIntent = intent
-                  stream?.onPresentation?.(intent, 'tool')
+                  logPetPresentation('ai.tool-call.normalized', { flow: 'speak', name: tc.name, args: tc.args, intent })
+                  emitPresentationIntent(intent, 'tool')
+                } else {
+                  logPetPresentation('ai.tool-call.invalid', { flow: 'speak', name: tc.name, args: tc.args })
                 }
               }
               break
@@ -361,44 +585,73 @@ export class AIChatController {
       if (finalMsg?.content && typeof finalMsg.content === 'string') {
         result = finalMsg.content
       }
+      logPetPresentation('ai.final-message', {
+        flow: 'speak',
+        sawPresentationTool,
+        rawChars: result.length,
+        compact: compactPetReply(result),
+      })
 
       if (!sawPresentationTool) {
         const { intent: markerIntent } = tryExtractPresentationMarker(result)
         if (markerIntent) {
-          stream?.onPresentation?.(markerIntent, 'fallback')
-          lastToolIntent = markerIntent
+          logPetPresentation('ai.intent.marker', { flow: 'speak', markerIntent })
+          emitPresentationIntent(markerIntent, 'fallback')
         } else {
-          const cleaned = stripPresentationMarkers(result)
-          const p = parseEmotionResponse(cleaned)
+          const stageIntents = extractStageDirectionIntents(result)
+          for (const stageIntent of stageIntents.slice(stageIntentCount)) {
+            logPetPresentation('ai.intent.final-stage', { flow: 'speak', stageIntent })
+            emitPresentationIntent(stageIntent, 'fallback')
+          }
+          stageIntentCount = stageIntents.length
+          const p = parseEmotionResponse(result)
           if (p.emotion || p.expression !== 'neutral') {
             const fb: PresentationIntent = { face: p.expression, emotion: p.emotion || undefined }
-            stream?.onPresentation?.(fb, 'fallback')
-            lastToolIntent = fb
+            emitPresentationIntent(fb, 'fallback')
+          } else {
+            const inferred = inferPresentationFromText(result, reason)
+            if (inferred) {
+              logPetPresentation('ai.intent.final-inferred', { flow: 'speak', reason, inferred })
+              emitPresentationIntent(inferred, 'fallback')
+            }
           }
         }
       }
 
       if (result) {
-        const stored = sanitizeAssistantForHistory(result)
+        const stored = compactPetReply(result)
+        const reasoningStored = reasoningBuf.trim()
+          ? reasoningBuf.trim().slice(0, MAX_REASONING_STORED)
+          : undefined
+        const at = Date.now()
         this.context.history.push(
-          { role: 'user', content: userMessage },
-          { role: 'assistant', content: stored || result }
+          { role: 'user', content: userMessage, at },
+          { role: 'assistant', content: stored || result, at, ...(reasoningStored ? { reasoning: reasoningStored } : {}) }
         )
         if (this.context.history.length > MAX_HISTORY) {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
+        this.maybeRefreshLifeProfile()
       }
 
       if (!result) return null
-      const cleaned = stripPresentationMarkers(result)
-      const parsed = parseEmotionResponse(cleaned)
+      const parsed = parseEmotionResponse(result)
       const expression = speakResultExpression(lastToolIntent, parsed.expression)
+      logPetPresentation('ai.speak.result', {
+        text: parsed.text,
+        expression,
+        emotion: parsed.emotion,
+        lastToolIntent,
+      })
       return parsed.text ? { text: parsed.text, expression, emotion: parsed.emotion } : null
     } catch (err: any) {
       const isAbort = err?.name === 'AbortError'
         || String(err?.message).toLowerCase().includes('aborted')
       if (!isAbort) console.error('[ai-chat] error:', err)
+      logPetPresentation(isAbort ? 'ai.speak.abort' : 'ai.speak.error', {
+        message: err?.message || String(err),
+      })
       return null
     } finally {
       this.isGenerating = false
@@ -417,26 +670,77 @@ export class AIChatController {
     this.isGenerating = true
     this.lastSpeakTime = Date.now()
 
-    const contextKeywords = this.extractKeywords(userText)
-    const memoryPrompt = this.memory.buildMemoryPrompt(contextKeywords)
+    const lifeProfilePrompt = this.lifeProfile.buildLifeProfilePrompt(userText)
     const stats = this.statsGetter?.() ?? null
-    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext) + memoryPrompt
+    const systemPrompt = buildSystemPrompt(this.personality, stats, this.geoContext, this.activeWindow, this.ecosystemContext) + lifeProfilePrompt
 
+    const historyMessagesChat = this.context.history.slice(-CONTEXT_WINDOW).map(h => ({
+      role: h.role as 'user' | 'assistant',
+      content: h.role === 'assistant' ? sanitizeAssistantForHistory(h.content) : h.content,
+    }))
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.context.history.slice(-CONTEXT_WINDOW),
+      ...historyMessagesChat,
       { role: 'user' as const, content: userText },
     ]
+    logPetPresentation('ai.chat.start', {
+      model: this.personality.model,
+      historyMessages: historyMessagesChat.length,
+      tools: PET_PRESENTATION_AI_TOOLS.map(tool => tool.function?.name),
+      userText,
+    })
 
     let result = ''
     let reasoningBuf = ''
     let sawPresentationTool = false
     let lastToolIntent: PresentationIntent | null = null
+    let inlineIntentCount = 0
+    let stageIntentCount = 0
+    let lastPresentationSignature = ''
+
+    const emitPresentationIntent = (intent: PresentationIntent, source: 'tool' | 'fallback') => {
+      const sig = presentationSignature(intent)
+      if (sig === lastPresentationSignature) return
+      lastPresentationSignature = sig
+      logPetPresentation('ai.intent.emit', { flow: 'chat', source, intent })
+      stream?.onPresentation?.(intent, source)
+      lastToolIntent = intent
+    }
 
     const pushBubble = () => {
-      const vis = stripPresentationMarkers(result)
-      const { text: reply } = parseEmotionResponse(vis)
+      const { text: reply } = parseEmotionResponse(result)
       stream?.onBubble?.({ reply, reasoning: reasoningBuf })
+    }
+    const emitInlinePresentation = () => {
+      const intents = extractInlineEmotionIntents(result)
+      for (const intent of intents.slice(inlineIntentCount)) {
+        emitPresentationIntent(intent, 'fallback')
+      }
+      inlineIntentCount = intents.length
+    }
+    const emitStagePresentation = () => {
+      const stageIntents = extractStageDirectionIntents(result)
+      for (const intent of stageIntents.slice(stageIntentCount)) {
+        const sig = presentationSignature(intent)
+        if (sig !== lastPresentationSignature) {
+          logPetPresentation('ai.intent.stage', { flow: 'chat', intent })
+        }
+        emitPresentationIntent(intent, 'fallback')
+      }
+      stageIntentCount = stageIntents.length
+    }
+    const emitInferredPresentation = () => {
+      emitStagePresentation()
+      if (sawPresentationTool) return
+      const tail = result.slice(-160)
+      const inferred = inferPresentationFromText(tail)
+      if (inferred) {
+        const sig = presentationSignature(inferred)
+        if (sig !== lastPresentationSignature) {
+          logPetPresentation('ai.intent.inferred', { flow: 'chat', inferred, tail })
+        }
+        emitPresentationIntent(inferred, 'fallback')
+      }
     }
 
     try {
@@ -444,9 +748,10 @@ export class AIChatController {
         {
           model: this.personality.model,
           messages,
-          tools: [PET_PRESENTATION_AI_TOOL],
-          maxToolSteps: 4,
-          params: { maxOutputTokens: 160, temperature: 0.9 },
+          tools: PET_PRESENTATION_AI_TOOLS,
+          maxToolSteps: 8,
+          toolContext: { pluginName: 'desktop-pet' },
+          params: { maxOutputTokens: 90, temperature: 0.85 },
           capabilities: [],
           toolingPolicy: { enableInternalTools: false },
           mcp: { mode: 'off' },
@@ -455,6 +760,7 @@ export class AIChatController {
         (chunk: any) => {
           if (chunk.__requestId) {
             this.requestId = chunk.__requestId
+            logPetPresentation('ai.request-id', { flow: 'chat', requestId: this.requestId })
             return
           }
           switch (chunk.chunkType) {
@@ -462,6 +768,7 @@ export class AIChatController {
               const r = typeof chunk.reasoning_content === 'string' ? chunk.reasoning_content : ''
               if (r) {
                 reasoningBuf += r
+                logPetPresentation('ai.chunk.reasoning', { flow: 'chat', chars: r.length, total: reasoningBuf.length })
                 pushBubble()
               }
               break
@@ -470,18 +777,24 @@ export class AIChatController {
               const piece = typeof chunk.content === 'string' ? chunk.content : ''
               if (piece) {
                 result += piece
+                logPetPresentation('ai.chunk.text', { flow: 'chat', chars: piece.length, total: result.length, preview: piece })
+                emitInlinePresentation()
+                emitInferredPresentation()
                 pushBubble()
               }
               break
             }
             case 'tool-call': {
               const tc = chunk.tool_call
+              logPetPresentation('ai.tool-call.raw', { flow: 'chat', toolCall: tc })
               if (tc && isPresentationToolName(tc.name)) {
-                const intent = normalizePresentationArgs(tc.args)
+                const intent = normalizePresentationToolCall(tc.name, tc.args)
                 if (intent) {
                   sawPresentationTool = true
-                  lastToolIntent = intent
-                  stream?.onPresentation?.(intent, 'tool')
+                  logPetPresentation('ai.tool-call.normalized', { flow: 'chat', name: tc.name, args: tc.args, intent })
+                  emitPresentationIntent(intent, 'tool')
+                } else {
+                  logPetPresentation('ai.tool-call.invalid', { flow: 'chat', name: tc.name, args: tc.args })
                 }
               }
               break
@@ -496,45 +809,73 @@ export class AIChatController {
       if (finalMsg?.content && typeof finalMsg.content === 'string') {
         result = finalMsg.content
       }
+      logPetPresentation('ai.final-message', {
+        flow: 'chat',
+        sawPresentationTool,
+        rawChars: result.length,
+        compact: compactPetReply(result),
+      })
 
       if (!sawPresentationTool) {
         const { intent: markerIntent } = tryExtractPresentationMarker(result)
         if (markerIntent) {
-          stream?.onPresentation?.(markerIntent, 'fallback')
-          lastToolIntent = markerIntent
+          logPetPresentation('ai.intent.marker', { flow: 'chat', markerIntent })
+          emitPresentationIntent(markerIntent, 'fallback')
         } else {
-          const cleaned = stripPresentationMarkers(result)
-          const p = parseEmotionResponse(cleaned)
+          const stageIntents = extractStageDirectionIntents(result)
+          for (const stageIntent of stageIntents.slice(stageIntentCount)) {
+            logPetPresentation('ai.intent.final-stage', { flow: 'chat', stageIntent })
+            emitPresentationIntent(stageIntent, 'fallback')
+          }
+          stageIntentCount = stageIntents.length
+          const p = parseEmotionResponse(result)
           if (p.emotion || p.expression !== 'neutral') {
             const fb: PresentationIntent = { face: p.expression, emotion: p.emotion || undefined }
-            stream?.onPresentation?.(fb, 'fallback')
-            lastToolIntent = fb
+            emitPresentationIntent(fb, 'fallback')
+          } else {
+            const inferred = inferPresentationFromText(result)
+            if (inferred) {
+              logPetPresentation('ai.intent.final-inferred', { flow: 'chat', inferred })
+              emitPresentationIntent(inferred, 'fallback')
+            }
           }
         }
       }
 
       if (result) {
-        const stored = sanitizeAssistantForHistory(result)
+        const stored = compactPetReply(result)
+        const reasoningStored = reasoningBuf.trim()
+          ? reasoningBuf.trim().slice(0, MAX_REASONING_STORED)
+          : undefined
+        const at = Date.now()
         this.context.history.push(
-          { role: 'user', content: userText },
-          { role: 'assistant', content: stored || result }
+          { role: 'user', content: userText, at },
+          { role: 'assistant', content: stored || result, at, ...(reasoningStored ? { reasoning: reasoningStored } : {}) }
         )
         if (this.context.history.length > MAX_HISTORY) {
           this.context.history = this.context.history.slice(-MAX_HISTORY)
         }
         this.saveHistory()
-        this.maybeExtractMemory()
+        this.maybeRefreshLifeProfile()
       }
 
       if (!result) return null
-      const cleaned = stripPresentationMarkers(result)
-      const parsed = parseEmotionResponse(cleaned)
+      const parsed = parseEmotionResponse(result)
       const expression = speakResultExpression(lastToolIntent, parsed.expression)
+      logPetPresentation('ai.chat.result', {
+        text: parsed.text,
+        expression,
+        emotion: parsed.emotion,
+        lastToolIntent,
+      })
       return parsed.text ? { text: parsed.text, expression, emotion: parsed.emotion } : null
     } catch (err: any) {
       const isAbort = err?.name === 'AbortError'
         || String(err?.message).toLowerCase().includes('aborted')
       if (!isAbort) console.error('[ai-chat] chat error:', err)
+      logPetPresentation(isAbort ? 'ai.chat.abort' : 'ai.chat.error', {
+        message: err?.message || String(err),
+      })
       return null
     } finally {
       this.isGenerating = false
@@ -549,49 +890,70 @@ export class AIChatController {
     }
   }
 
-  private maybeExtractMemory() {
-    this.extractCounter++
-    if (this.extractCounter % 3 !== 0) return
-    const recent = this.context.history.slice(-6)
-    this.memory.extractMemoryFromChat(this.personality.model, recent)
+  /**
+   * 自动刷新生活档案：每轮对话结束后增加计数；仅当达到轮次与冷却时间门槛时才请求模型。
+   */
+  private maybeRefreshLifeProfile() {
+    this.lifeProfile.notifyUserTurnEnded()
+    if (!this.lifeProfile.shouldAttemptAutoUpdate()) return
+    const recent = this.context.history.slice(-16).map(m => ({ role: m.role, content: m.content }))
+    if (recent.length < 2) return
+    this.lifeProfile.markUpdateAttempt()
+    void this.lifeProfile.refreshFromChatBatch(this.personality.model, recent)
   }
 
-  private extractKeywords(text: string): string[] {
-    const clean = text.replace(/[[\]，。！？、：""''（）\s]/g, ' ')
-    return clean
-      .split(' ')
-      .filter(w => w.length >= 2)
-      .slice(0, 5)
+  /** 设置页「更新记忆」：绕过轮次与间隔门控，仍使用批量档案更新逻辑 */
+  async forceRefreshLifeProfile(): Promise<LifeProfileRefreshResult> {
+    if (!this.personality.model) {
+      return { ok: false, upsertsApplied: 0, deletesApplied: 0, rejected: 0, reason: 'no-model' }
+    }
+    const recent = this.context.history.slice(-20).map(m => ({ role: m.role, content: m.content }))
+    if (recent.length < 2) {
+      return { ok: false, upsertsApplied: 0, deletesApplied: 0, rejected: 0, reason: 'too-few-messages' }
+    }
+    this.lifeProfile.markUpdateAttempt()
+    return this.lifeProfile.refreshFromChatBatch(this.personality.model, recent)
+  }
+
+  async reloadLifeProfileFromStorage(): Promise<void> {
+    await this.lifeProfile.load()
+  }
+
+  async clearLifeProfile(): Promise<void> {
+    await this.lifeProfile.clear()
   }
 
   private buildUserMessage(reason: TriggerReason, behavior: BehaviorType): string {
-    const hour = new Date().getHours()
+    const time = buildCurrentTimeContext()
+    const app = this.activeWindow?.app ? `（用户刚切到 ${this.activeWindow.app}）` : ''
 
     switch (reason) {
       case 'idle':
-        return `[用户已经闲置了一会儿，当前时间${hour}点]`
+        return `[用户已经闲置了一会儿，当前本地时间：${time}]`
       case 'typing_fast':
-        return `[用户正在快速打字工作中]`
+        return `[用户正在快速打字工作中，当前本地时间：${time}]`
       case 'morning':
-        return `[早上好！用户刚开始使用电脑，现在是${hour}点]`
+        return `[早上好！用户刚开始使用电脑，当前本地时间：${time}]`
       case 'late_night':
-        return `[已经是深夜${hour}点了，用户还在电脑前]`
+        return `[用户可能在深夜使用电脑，先核对当前本地时间：${time}]`
       case 'user_click':
-        return `[用户点击了你，想和你互动]`
+        return `[用户点击了你，想和你互动。当前本地时间：${time}]`
       case 'behavior_change':
-        return `[你现在的状态是：${behavior}]`
+        return `[你现在的状态是：${behavior}。当前本地时间：${time}]`
+      case 'app_switch':
+        return `[用户切换到了新的应用窗口${app}，当前本地时间：${time}。自然地搭句话即可，不要直接照念应用名]`
       default:
-        return `[打个招呼吧]`
+        return `[打个招呼吧。当前本地时间：${time}]`
     }
   }
 }
 
 function parseEmotionResponse(raw: string): { text: string; expression: PetExpression; emotion: string } {
-  const match = raw.match(/^\[(\w+)\](.*)/)
-  if (match) {
-    const emotion = match[1]
-    const text = match[2].trim()
-    return { text, expression: emotionToExpression(emotion), emotion }
+  const inlineIntents = extractInlineEmotionIntents(raw)
+  const text = compactPetReply(raw)
+  const lastIntent = inlineIntents[inlineIntents.length - 1]
+  if (lastIntent?.emotion) {
+    return { text, expression: emotionToExpression(lastIntent.emotion), emotion: lastIntent.emotion }
   }
-  return { text: raw.trim(), expression: 'neutral', emotion: '' }
+  return { text, expression: 'neutral', emotion: '' }
 }

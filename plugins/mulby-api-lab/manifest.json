@@ -1,0 +1,181 @@
+{
+  "id": "mulby-api-lab",
+  "name": "mulby-api-lab",
+  "version": "1.0.0",
+  "displayName": "Mulby API Lab",
+  "description": "按模块演示 Mulby 插件 API 能力的安全全覆盖示例插件。",
+  "type": "developer",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "author": "Mulby",
+  "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+  "minAppVersion": "1.0.0",
+  "permissions": {
+    "clipboard": true,
+    "notification": true,
+    "screen": true,
+    "microphone": true,
+    "camera": true,
+    "geolocation": true,
+    "accessibility": true,
+    "inputMonitor": true,
+    "runCommand": true,
+    "envKeys": ["PATH", "COMSPEC", "SHELL"]
+  },
+  "pluginSetting": {
+    "single": true,
+    "background": true,
+    "height": 720,
+    "idleTimeoutMs": "never",
+    "resourceLimits": "medium"
+  },
+  "window": {
+    "width": 1180,
+    "height": 760,
+    "minWidth": 920,
+    "minHeight": 620,
+    "backgroundThrottling": false
+  },
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo a JSON-compatible payload from Mulby API Lab.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Message to echo."
+          }
+        },
+        "required": ["message"],
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "ok": { "type": "boolean" },
+          "message": { "type": "string" },
+          "receivedAt": { "type": "number" }
+        }
+      }
+    },
+    {
+      "name": "summarize_api_module",
+      "description": "Return a short summary for a Mulby API module covered by API Lab.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "moduleId": {
+            "type": "string",
+            "description": "Module id, for example system, clipboard, ai, scheduler."
+          }
+        },
+        "required": ["moduleId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "safe_file_probe",
+      "description": "Safely inspect a file path using metadata-only checks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Local path to inspect."
+          }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "features": [
+    {
+      "code": "lab-main",
+      "explain": "打开 Mulby API Lab 总览",
+      "mode": "ui",
+      "route": "overview",
+      "cmds": [
+        { "type": "keyword", "value": "api lab" },
+        { "type": "keyword", "value": "mulby api" },
+        { "type": "keyword", "value": "api实验室" },
+        { "type": "keyword", "value": "api-lab" }
+      ]
+    },
+    {
+      "code": "lab-search",
+      "explain": "搜索 API 模块和方法",
+      "mode": "ui",
+      "route": "search",
+      "cmds": [
+        { "type": "keyword", "value": "api search" },
+        { "type": "regex", "match": "^api\\s+.+", "label": "搜索 Mulby API", "minLength": 5 }
+      ]
+    },
+    {
+      "code": "lab-files",
+      "explain": "展示文件和图片附件输入",
+      "mode": "ui",
+      "route": "attachments",
+      "cmds": [
+        { "type": "keyword", "value": "api files" },
+        { "type": "files", "label": "API Lab 文件附件", "fileType": "any", "minLength": 1 },
+        { "type": "img", "label": "API Lab 图片附件", "exts": [".png", ".jpg", ".jpeg", ".webp", ".gif"] }
+      ]
+    },
+    {
+      "code": "lab-over",
+      "explain": "展示划词输入和文本处理",
+      "mode": "ui",
+      "route": "input",
+      "cmds": [
+        { "type": "over", "label": "API Lab 划词输入", "minLength": 1, "maxLength": 10000 }
+      ]
+    },
+    {
+      "code": "lab-precapture",
+      "explain": "区域截图预捕获并展示附件元数据",
+      "mode": "detached",
+      "route": "screen",
+      "preCapture": "region",
+      "cmds": [
+        { "type": "keyword", "value": "api capture" },
+        { "type": "keyword", "value": "api截图" }
+      ]
+    },
+    {
+      "code": "lab-silent",
+      "explain": "运行安全静默 API smoke test",
+      "mode": "silent",
+      "mainHide": false,
+      "cmds": [
+        { "type": "keyword", "value": "api smoke" },
+        { "type": "keyword", "value": "api自检" }
+      ]
+    },
+    {
+      "code": "lab-mainpush",
+      "explain": "MainPush 动态搜索结果演示",
+      "mode": "ui",
+      "route": "plugin",
+      "mainPush": true,
+      "cmds": [
+        { "type": "keyword", "value": "api push" },
+        { "type": "regex", "match": "^api-push\\s+.*", "label": "API Lab MainPush", "minLength": 8 }
+      ]
+    },
+    {
+      "code": "lab-window",
+      "explain": "独立窗口和窗口控制 API 演示",
+      "mode": "detached",
+      "route": "window",
+      "cmds": [
+        { "type": "keyword", "value": "api window" },
+        { "type": "window", "label": "API Lab 当前窗口上下文" }
+      ]
+    }
+  ]
+}

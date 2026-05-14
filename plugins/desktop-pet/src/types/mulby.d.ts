@@ -89,6 +89,7 @@ interface MulbyWindow {
   setSize(width: number, height: number): void
   setPosition(x: number, y: number): void
   setExpendHeight(height: number): void
+  getBounds?(): Promise<{ x: number; y: number; width: number; height: number } | null>
   center(): void
   focus(): void
   terminatePlugin(): void
@@ -302,6 +303,13 @@ interface AppInfo {
   userDataPath: string
 }
 
+interface ActiveWindowInfo {
+  app: string
+  title: string
+  pid?: number
+  bundleId?: string
+}
+
 interface MulbySystem {
   getSystemInfo(): Promise<SystemInfo>
   getAppInfo(): Promise<AppInfo>
@@ -314,6 +322,17 @@ interface MulbySystem {
   isMacOS(): Promise<boolean>
   isWindows(): Promise<boolean>
   isLinux(): Promise<boolean>
+  /**
+   * 返回主进程已缓存的前台窗口（可经插件 Worker 序列化）。
+   * 主应用会常驻订阅活跃窗口以维持缓存。
+   */
+  getCachedActiveWindow?(): Promise<ActiveWindowInfo | null>
+  /** 必要时触发系统查询；多数情况用 getCachedActiveWindow */
+  getActiveWindow?(): Promise<ActiveWindowInfo | null>
+  /**
+   * 在主进程内注册回调；在插件 Worker 内调用时，返回值含取消函数，无法经 IPC 回传，应避免在 Worker 中使用。
+   */
+  onActiveWindowChange?(callback: (info: ActiveWindowInfo) => void): () => void
 }
 
 interface MulbyPermission {
