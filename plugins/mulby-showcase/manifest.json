@@ -24,6 +24,13 @@
     "persistent": true,
     "idleTimeoutMs": "never"
   },
+  "window": {
+    "width": 1180,
+    "height": 760,
+    "minWidth": 920,
+    "minHeight": 620,
+    "backgroundThrottling": false
+  },
   "features": [
     {
       "code": "main",
