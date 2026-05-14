@@ -469,19 +469,19 @@ export function InputModule() {
                 items: [
                     {
                         name: 'input.hideMainWindowPasteText(text)',
-                        description: '隐藏主窗口，将文本写入剪贴板并粘贴到目标应用。',
+                        description: '将文本写入剪贴板并粘贴到目标应用。附着窗口会隐藏，独立窗口保持可见。',
                     },
                     {
                         name: 'input.hideMainWindowPasteImage(image)',
-                        description: '隐藏主窗口，将图片路径、Data URL 或二进制图片粘贴到目标应用。',
+                        description: '将图片路径、Data URL 或二进制图片粘贴到目标应用。附着窗口会隐藏，独立窗口保持可见。',
                     },
                     {
                         name: 'input.hideMainWindowPasteFile(filePaths)',
-                        description: '隐藏主窗口，将一个或多个文件路径写入系统文件剪贴板并粘贴到目标应用。',
+                        description: '将一个或多个文件路径写入系统文件剪贴板并粘贴到目标应用。附着窗口会隐藏，独立窗口保持可见。',
                     },
                     {
                         name: 'input.hideMainWindowTypeString(text)',
-                        description: '隐藏主窗口并模拟键入文本，不依赖剪贴板。',
+                        description: '将焦点切回目标应用并模拟键入文本，不依赖剪贴板。',
                     },
                     {
                         name: 'input.restoreWindows()',
@@ -489,23 +489,23 @@ export function InputModule() {
                     },
                     {
                         name: 'input.simulateKeyboardTap(key, ...modifiers)',
-                        description: '隐藏主窗口并模拟单键或组合键。',
+                        description: '将焦点切回目标应用并模拟单键或组合键。',
                     },
                     {
                         name: 'input.simulateMouseMove(x, y)',
-                        description: '隐藏主窗口并移动鼠标到屏幕坐标。',
+                        description: '将焦点切回目标应用并移动鼠标到屏幕坐标。',
                     },
                     {
                         name: 'input.simulateMouseClick(x, y)',
-                        description: '隐藏主窗口并模拟鼠标左键单击。',
+                        description: '将焦点切回目标应用并模拟鼠标左键单击。',
                     },
                     {
                         name: 'input.simulateMouseDoubleClick(x, y)',
-                        description: '隐藏主窗口并模拟鼠标左键双击。',
+                        description: '将焦点切回目标应用并模拟鼠标左键双击。',
                     },
                     {
                         name: 'input.simulateMouseRightClick(x, y)',
-                        description: '隐藏主窗口并模拟鼠标右键点击。',
+                        description: '将焦点切回目标应用并模拟鼠标右键点击。',
                     },
                 ],
             },
@@ -599,7 +599,7 @@ await window.mulby.input.restoreWindows()`,
 
     return (
         <div className="main-content">
-            <PageHeader icon={Keyboard} title="输入控制" description="隐藏主窗口并向外部应用发送粘贴或键入操作" />
+            <PageHeader icon={Keyboard} title="输入控制" description="向外部应用发送粘贴、键入和键鼠模拟操作" />
             <div className="page-with-api-panel">
                 <div className="page-content">
                     <Card
