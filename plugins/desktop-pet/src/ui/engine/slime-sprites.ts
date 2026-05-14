@@ -103,12 +103,12 @@ const SHY: FaceParts = {
   mouth: '',
 }
 
-// Curious: one wide searching eye, one raised small eye, and a tiny offset mouth
+// Curious: almond black outline；眼洞内上格一格眼白、下格瞳孔黑（避免上格透出身体灰）
 const CURIOUS: FaceParts = {
-  eyes: `<path fill="#1A1916" d="M27 27h3v1H27zM35 27h2v1H35zM27 28h1v1H27zM29 28h1v1H29zM34 28h3v1H34zM27 29h3v1H27zM35 29h1v1H35z"/>`,
-  highlights: `<path fill="#F7F7F7" d="M28 28h1v1H28z"/>`,
-  blush: '',
-  mouth: `<path fill="#1A1916" d="M32 31h1v1H32zM33 32h1v1H33z"/>`,
+  eyes: `<path fill="#1A1916" d="M28 27h1v1H28zM35 27h1v1H35zM27 28h1v1H27zM29 28h1v1H29zM34 28h1v1H34zM36 28h1v1H36zM27 29h1v1H27zM28 29h1v1H28zM29 29h1v1H29zM34 29h1v1H34zM35 29h1v1H35zM36 29h1v1H36zM28 30h1v1H28zM35 30h1v1H35z"/>`,
+  highlights: `<path fill="#F7F7F7" d="M28 28h1v1H28zM35 28h1v1H35z"/>`,
+  blush: `<path fill="#CF8E8C" d="M26 31h1v1H26zM37 31h1v1H37zM26 32h2v1H26zM36 32h2v1H36z"/>`,
+  mouth: `<path fill="#1A1916" d="M31 31h2v1H31z"/>`,
 }
 
 // Confused: a clear question mark in the middle of the face
