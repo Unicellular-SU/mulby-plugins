@@ -41,11 +41,16 @@ input {
 }
 
 .annotator-root {
+  position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr) 96px;
   width: 100%;
   height: 100%;
   background: transparent;
+}
+
+.annotator-root.is-empty {
+  grid-template-rows: 1fr;
 }
 
 .canvas-shell {
@@ -58,17 +63,61 @@ input {
   background: transparent;
 }
 
+.canvas-stack {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pending-preview {
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2);
+}
+
+.screenshot-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
 .annotation-canvas {
   display: block;
-  max-width: 100vw;
-  max-height: calc(100vh - 96px);
   background: #fff;
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.2);
   touch-action: none;
 }
 
+.inline-text-editor {
+  position: absolute;
+  z-index: 2;
+  min-height: 42px;
+  max-width: min(560px, calc(100vw - 24px));
+  padding: 7px 9px;
+  resize: both;
+  overflow: hidden;
+  border: 2px solid rgba(96, 165, 250, 0.92);
+  border-radius: 8px;
+  outline: none;
+  background: rgba(6, 11, 20, 0.46);
+  box-shadow: 0 12px 34px rgba(6, 11, 20, 0.26);
+  font-family: "Segoe UI", "PingFang SC", sans-serif;
+  font-weight: 700;
+  line-height: 1.25;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  -webkit-app-region: no-drag;
+}
+
+.inline-text-editor::placeholder {
+  color: rgba(255, 255, 255, 0.62);
+}
+
 .tool-select {
-  cursor: default;
+  cursor: grab;
 }
 
 .tool-rect,
@@ -78,7 +127,8 @@ input {
 .tool-pen,
 .tool-highlighter,
 .tool-mosaic,
-.tool-blur {
+.tool-blur,
+.tool-crop {
   cursor: crosshair;
 }
 
@@ -92,13 +142,10 @@ input {
 }
 
 .empty-state {
-  display: grid;
-  place-items: center;
+  display: block;
   width: 100%;
   height: 100%;
-  color: #e2e8f0;
-  background: rgba(15, 23, 42, 0.8);
-  font-size: 13px;
+  background: transparent;
 }
 
 .toolbar {
@@ -106,20 +153,101 @@ input {
   grid-template-rows: 36px 36px;
   gap: 8px;
   width: 100%;
-  min-width: 760px;
+  min-width: 1080px;
   height: 96px;
   padding: 8px 10px 7px;
   overflow-x: hidden;
   overflow-y: hidden;
   border-top: 1px solid var(--toolbar-border);
   background: var(--toolbar-bg);
-  -webkit-app-region: drag;
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.resize-layer {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+
+.resize-handle {
+  position: absolute;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.resize-top,
+.resize-bottom {
+  left: 12px;
+  right: 12px;
+  height: 7px;
+  cursor: ns-resize;
+}
+
+.resize-top {
+  top: 0;
+}
+
+.resize-bottom {
+  bottom: 0;
+}
+
+.resize-left,
+.resize-right {
+  top: 12px;
+  bottom: 12px;
+  width: 7px;
+  cursor: ew-resize;
+}
+
+.resize-left {
+  left: 0;
+}
+
+.resize-right {
+  right: 0;
+}
+
+.resize-top-left,
+.resize-top-right,
+.resize-bottom-right,
+.resize-bottom-left {
+  width: 14px;
+  height: 14px;
+}
+
+.resize-top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-bottom-right {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.resize-bottom-left {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
 }
 
 .toolbar-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -149,6 +277,17 @@ input {
   margin-left: auto;
 }
 
+.adjust-group {
+  max-width: 294px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.adjust-group::-webkit-scrollbar {
+  display: none;
+}
+
 .icon-button,
 .command-button,
 .swatch {
@@ -164,6 +303,7 @@ input {
   border: 1px solid transparent;
   color: var(--text);
   background: var(--button-bg);
+  cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
@@ -208,6 +348,7 @@ input {
   border: 2px solid transparent;
   border-radius: 999px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  cursor: pointer;
 }
 
 .swatch.is-active {
@@ -216,16 +357,29 @@ input {
 
 .size-control {
   height: 36px;
-  padding: 0 10px;
+  padding: 0 9px;
   border-radius: 8px;
   color: var(--muted);
   background: var(--button-bg);
   font-size: 12px;
 }
 
+.size-control span {
+  white-space: nowrap;
+}
+
+.size-control strong {
+  min-width: 20px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
 .size-control input {
-  width: 88px;
+  width: 72px;
   accent-color: #60a5fa;
+  cursor: pointer;
 }
 
 .status-line {
