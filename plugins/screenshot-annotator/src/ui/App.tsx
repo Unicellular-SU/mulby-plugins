@@ -97,6 +97,7 @@ type TextAnnotation = {
   text: string
   color: string
   size: number
+  boxWidth?: number
 }
 
 type StepAnnotation = {
@@ -174,12 +175,52 @@ type InlineTextEdit = {
   text: string
   color: string
   size: number
+  boxWidth: number
+  insertIndex: number
+}
+
+type InlineStepEdit = {
+  id: string
+  point: Point
+  value: string
+  color: string
+  size: number
+}
+
+type ResizeHandle =
+  | 'resize-n'
+  | 'resize-ne'
+  | 'resize-e'
+  | 'resize-se'
+  | 'resize-s'
+  | 'resize-sw'
+  | 'resize-w'
+  | 'resize-nw'
+
+type EditHandleMode = 'move' | 'line-start' | 'line-end' | 'text-width' | ResizeHandle
+
+type EditHandle = {
+  id: string
+  mode: EditHandleMode
+}
+
+type EditDragState = EditHandle & {
+  pointerId: number
+  startPoint: Point
+  snapshot: Annotation
+  annotationsSnapshot: Annotation[]
+  moved: boolean
 }
 
 const PLUGIN_ID = 'screenshot-annotator'
 const TOOLBAR_HEIGHT = 96
 const TOOLBAR_MIN_WIDTH = 1080
 const HISTORY_LIMIT = 30
+const EDIT_HANDLE_VISUAL_SIZE = 10
+const EDIT_HANDLE_HIT_VISUAL_SIZE = 18
+const TEXT_BOX_DEFAULT_VISUAL_WIDTH = 240
+const TEXT_BOX_MIN_WIDTH = 72
+const STEP_LABEL_MAX_LENGTH = 6
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7']
 const RESIZE_EDGES: ResizeEdge[] = [
   'top',
@@ -398,6 +439,47 @@ function isPointInRect(point: Point, rect: Rect, padding = 0) {
   )
 }
 
+function isPointNearRectStroke(point: Point, rect: Rect, tolerance: number) {
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false
+  }
+
+  const insideOuter = isPointInRect(point, rect, tolerance)
+  const insideInner =
+    rect.width > tolerance * 2 &&
+    rect.height > tolerance * 2 &&
+    isPointInRect(
+      point,
+      {
+        x: rect.x + tolerance,
+        y: rect.y + tolerance,
+        width: rect.width - tolerance * 2,
+        height: rect.height - tolerance * 2
+      }
+    )
+
+  return insideOuter && !insideInner
+}
+
+function isPointNearEllipseStroke(point: Point, rect: Rect, tolerance: number) {
+  const radiusX = rect.width / 2
+  const radiusY = rect.height / 2
+
+  if (radiusX <= 0 || radiusY <= 0) {
+    return false
+  }
+
+  const centerX = rect.x + radiusX
+  const centerY = rect.y + radiusY
+  const normalizedDistance = Math.hypot(
+    (point.x - centerX) / radiusX,
+    (point.y - centerY) / radiusY
+  )
+  const normalizedTolerance = tolerance / Math.max(1, Math.min(radiusX, radiusY))
+
+  return Math.abs(normalizedDistance - 1) <= normalizedTolerance
+}
+
 function isStrokeAnnotation(annotation: Annotation): annotation is StrokeAnnotation {
   return annotation.type === 'pen' || annotation.type === 'highlighter'
 }
@@ -413,22 +495,123 @@ function isDragAnnotation(annotation: Annotation): annotation is ShapeAnnotation
   )
 }
 
+function getEditableAnnotationTypeForTool(tool: Tool): Annotation['type'] | null {
+  if (
+    tool === 'line' ||
+    tool === 'rect' ||
+    tool === 'ellipse' ||
+    tool === 'arrow' ||
+    tool === 'pen' ||
+    tool === 'highlighter' ||
+    tool === 'text' ||
+    tool === 'step' ||
+    tool === 'mosaic' ||
+    tool === 'blur'
+  ) {
+    return tool
+  }
+
+  return null
+}
+
+function visualSizeToImageSize(visualSize: number, imageToCssScale: number) {
+  return Math.max(1, visualSize / Math.max(imageToCssScale, 0.01))
+}
+
+function isWideTextCharacter(character: string) {
+  const codePoint = character.codePointAt(0) ?? 0
+  return (
+    (codePoint >= 0x1100 && codePoint <= 0x11ff) ||
+    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
+    (codePoint >= 0xac00 && codePoint <= 0xd7af) ||
+    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+    (codePoint >= 0xff00 && codePoint <= 0xffef)
+  )
+}
+
+function estimateTextWidth(text: string, fontSize: number) {
+  return Array.from(text).reduce((width, character) => {
+    if (character === ' ') {
+      return width + fontSize * 0.34
+    }
+
+    if (isWideTextCharacter(character)) {
+      return width + fontSize
+    }
+
+    return width + fontSize * 0.58
+  }, 0)
+}
+
+function getTextBoxWidth(annotation: TextAnnotation) {
+  const fontSize = Math.max(14, annotation.size)
+
+  if (annotation.boxWidth && Number.isFinite(annotation.boxWidth)) {
+    return Math.max(TEXT_BOX_MIN_WIDTH, fontSize * 4, annotation.boxWidth)
+  }
+
+  const paddingX = Math.max(8, fontSize * 0.28)
+  const estimatedWidth = annotation.text.split(/\r?\n/).reduce((maxWidth, line) => {
+    return Math.max(maxWidth, estimateTextWidth(line, fontSize))
+  }, 0)
+
+  return Math.max(TEXT_BOX_MIN_WIDTH, fontSize * 4, estimatedWidth + paddingX * 2)
+}
+
+function wrapTextParagraph(
+  paragraph: string,
+  maxWidth: number,
+  measureText: (text: string) => number
+) {
+  if (!paragraph) {
+    return ['']
+  }
+
+  const lines: string[] = []
+  let currentLine = ''
+
+  Array.from(paragraph.replace(/\t/g, ' ')).forEach((character) => {
+    const nextLine = `${currentLine}${character}`
+    if (currentLine && measureText(nextLine) > maxWidth) {
+      lines.push(currentLine.trimEnd())
+      currentLine = character.trimStart()
+      return
+    }
+
+    currentLine = nextLine
+  })
+
+  lines.push(currentLine.trimEnd())
+  return lines
+}
+
+function getWrappedTextLines(
+  annotation: TextAnnotation,
+  measureText?: (text: string) => number
+) {
+  const fontSize = Math.max(14, annotation.size)
+  const paddingX = Math.max(8, fontSize * 0.28)
+  const boxWidth = getTextBoxWidth(annotation)
+  const maxLineWidth = Math.max(fontSize, boxWidth - paddingX * 2)
+  const measure = measureText ?? ((line: string) => estimateTextWidth(line, fontSize))
+  const lines = annotation.text.split(/\r?\n/).flatMap((paragraph) =>
+    wrapTextParagraph(paragraph, maxLineWidth, measure)
+  )
+
+  return lines.length ? lines : ['']
+}
+
 function getTextBounds(annotation: TextAnnotation): Rect {
   const fontSize = Math.max(14, annotation.size)
-  const lines = annotation.text.split(/\r?\n/).filter(Boolean)
-  const displayLines = lines.length ? lines : ['']
-  const estimatedCharWidth = fontSize * 0.68
   const paddingX = Math.max(8, fontSize * 0.28)
   const paddingY = Math.max(6, fontSize * 0.2)
   const lineHeight = fontSize * 1.25
-  const width = displayLines.reduce((max, line) => {
-    return Math.max(max, line.length * estimatedCharWidth)
-  }, 0) + paddingX * 2
+  const displayLines = getWrappedTextLines(annotation)
 
   return {
     x: annotation.point.x,
     y: annotation.point.y,
-    width: Math.max(72, width),
+    width: Math.max(TEXT_BOX_MIN_WIDTH, getTextBoxWidth(annotation), paddingX * 2),
     height: displayLines.length * lineHeight + paddingY * 2
   }
 }
@@ -514,8 +697,15 @@ function hitTestAnnotation(point: Point, annotations: Annotation[], filterType?:
       continue
     }
 
-    if (annotation.type === 'rect' || annotation.type === 'ellipse') {
-      if (isPointInRect(point, normalizeRect(annotation.start, annotation.end), annotation.size + 8)) {
+    if (annotation.type === 'rect') {
+      if (isPointNearRectStroke(point, normalizeRect(annotation.start, annotation.end), annotation.size + 8)) {
+        return annotation.id
+      }
+      continue
+    }
+
+    if (annotation.type === 'ellipse') {
+      if (isPointNearEllipseStroke(point, normalizeRect(annotation.start, annotation.end), annotation.size + 8)) {
         return annotation.id
       }
       continue
@@ -597,28 +787,312 @@ function moveAnnotation(annotation: Annotation, delta: Point): Annotation {
   }
 }
 
-function drawArrowHead(
+function snapPointTo45Degrees(origin: Point, point: Point): Point {
+  const dx = point.x - origin.x
+  const dy = point.y - origin.y
+  const length = Math.hypot(dx, dy)
+
+  if (length === 0) {
+    return point
+  }
+
+  const snappedAngle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
+  return {
+    x: origin.x + Math.cos(snappedAngle) * length,
+    y: origin.y + Math.sin(snappedAngle) * length
+  }
+}
+
+function snapPointToSquare(origin: Point, point: Point): Point {
+  const dx = point.x - origin.x
+  const dy = point.y - origin.y
+  const side = Math.max(Math.abs(dx), Math.abs(dy))
+
+  return {
+    x: origin.x + (dx < 0 ? -side : side),
+    y: origin.y + (dy < 0 ? -side : side)
+  }
+}
+
+function getResizeHandlePoints(rect: Rect): Array<{ mode: ResizeHandle; point: Point }> {
+  const left = rect.x
+  const right = rect.x + rect.width
+  const top = rect.y
+  const bottom = rect.y + rect.height
+  const centerX = rect.x + rect.width / 2
+  const centerY = rect.y + rect.height / 2
+
+  return [
+    { mode: 'resize-nw', point: { x: left, y: top } },
+    { mode: 'resize-n', point: { x: centerX, y: top } },
+    { mode: 'resize-ne', point: { x: right, y: top } },
+    { mode: 'resize-e', point: { x: right, y: centerY } },
+    { mode: 'resize-se', point: { x: right, y: bottom } },
+    { mode: 'resize-s', point: { x: centerX, y: bottom } },
+    { mode: 'resize-sw', point: { x: left, y: bottom } },
+    { mode: 'resize-w', point: { x: left, y: centerY } }
+  ]
+}
+
+function resizeRectFromHandle(rect: Rect, mode: ResizeHandle, point: Point, keepSquare: boolean) {
+  const handle = mode.replace('resize-', '')
+  let left = rect.x
+  let right = rect.x + rect.width
+  let top = rect.y
+  let bottom = rect.y + rect.height
+  const isCorner = handle.length === 2
+  const minSize = 4
+
+  if (keepSquare && isCorner) {
+    const fixedCorner = {
+      x: handle.includes('w') ? right : left,
+      y: handle.includes('n') ? bottom : top
+    }
+    const controlledPoint = snapPointToSquare(fixedCorner, point)
+
+    if (handle.includes('w')) {
+      left = controlledPoint.x
+    } else {
+      right = controlledPoint.x
+    }
+
+    if (handle.includes('n')) {
+      top = controlledPoint.y
+    } else {
+      bottom = controlledPoint.y
+    }
+  } else {
+    if (handle.includes('w')) {
+      left = point.x
+    }
+    if (handle.includes('e')) {
+      right = point.x
+    }
+    if (handle.includes('n')) {
+      top = point.y
+    }
+    if (handle.includes('s')) {
+      bottom = point.y
+    }
+  }
+
+  if (Math.abs(right - left) < minSize) {
+    const direction = right >= left ? 1 : -1
+    if (handle.includes('w')) {
+      left = right - direction * minSize
+    } else if (handle.includes('e')) {
+      right = left + direction * minSize
+    }
+  }
+
+  if (Math.abs(bottom - top) < minSize) {
+    const direction = bottom >= top ? 1 : -1
+    if (handle.includes('n')) {
+      top = bottom - direction * minSize
+    } else if (handle.includes('s')) {
+      bottom = top + direction * minSize
+    }
+  }
+
+  return {
+    start: { x: left, y: top },
+    end: { x: right, y: bottom }
+  }
+}
+
+function resizeAnnotation(
+  annotation: Annotation,
+  mode: EditHandleMode,
+  startPoint: Point,
+  currentPoint: Point,
+  modifiers: { shiftKey: boolean }
+): Annotation {
+  if (mode === 'move') {
+    return moveAnnotation(annotation, {
+      x: currentPoint.x - startPoint.x,
+      y: currentPoint.y - startPoint.y
+    })
+  }
+
+  if ((annotation.type === 'line' || annotation.type === 'arrow') && mode === 'line-start') {
+    const nextStart = modifiers.shiftKey
+      ? snapPointTo45Degrees(annotation.end, currentPoint)
+      : currentPoint
+    return { ...annotation, start: nextStart }
+  }
+
+  if ((annotation.type === 'line' || annotation.type === 'arrow') && mode === 'line-end') {
+    const nextEnd = modifiers.shiftKey
+      ? snapPointTo45Degrees(annotation.start, currentPoint)
+      : currentPoint
+    return { ...annotation, end: nextEnd }
+  }
+
+  if ((annotation.type === 'rect' || annotation.type === 'ellipse') && mode.startsWith('resize-')) {
+    const nextRect = resizeRectFromHandle(
+      normalizeRect(annotation.start, annotation.end),
+      mode as ResizeHandle,
+      currentPoint,
+      modifiers.shiftKey
+    )
+    return { ...annotation, ...nextRect }
+  }
+
+  if (annotation.type === 'text' && mode === 'text-width') {
+    return {
+      ...annotation,
+      boxWidth: Math.max(TEXT_BOX_MIN_WIDTH, currentPoint.x - annotation.point.x)
+    }
+  }
+
+  return annotation
+}
+
+function isPointInHandle(point: Point, handlePoint: Point, handleSize: number) {
+  const halfSize = handleSize / 2
+  return isPointInRect(
+    point,
+    {
+      x: handlePoint.x - halfSize,
+      y: handlePoint.y - halfSize,
+      width: handleSize,
+      height: handleSize
+    }
+  )
+}
+
+function hitTestEditHandle(
+  point: Point,
+  annotation: Annotation,
+  imageToCssScale: number,
+  includeMove = true
+): EditHandle | null {
+  const hitSize = visualSizeToImageSize(EDIT_HANDLE_HIT_VISUAL_SIZE, imageToCssScale)
+  const hitRadius = hitSize / 2
+
+  if (annotation.type === 'line' || annotation.type === 'arrow') {
+    if (Math.hypot(point.x - annotation.start.x, point.y - annotation.start.y) <= hitRadius) {
+      return { id: annotation.id, mode: 'line-start' }
+    }
+
+    if (Math.hypot(point.x - annotation.end.x, point.y - annotation.end.y) <= hitRadius) {
+      return { id: annotation.id, mode: 'line-end' }
+    }
+  }
+
+  if (annotation.type === 'rect' || annotation.type === 'ellipse') {
+    const hitHandle = getResizeHandlePoints(normalizeRect(annotation.start, annotation.end)).find((handle) =>
+      isPointInHandle(point, handle.point, hitSize)
+    )
+
+    if (hitHandle) {
+      return { id: annotation.id, mode: hitHandle.mode }
+    }
+  }
+
+  if (annotation.type === 'text') {
+    const bounds = getTextBounds(annotation)
+    const widthHandle = {
+      x: bounds.x + bounds.width,
+      y: bounds.y + bounds.height
+    }
+
+    if (isPointInHandle(point, widthHandle, hitSize)) {
+      return { id: annotation.id, mode: 'text-width' }
+    }
+  }
+
+  if (includeMove && hitTestAnnotation(point, [annotation]) === annotation.id) {
+    return { id: annotation.id, mode: 'move' }
+  }
+
+  return null
+}
+
+function cursorForEditMode(mode: EditHandleMode, dragging = false) {
+  if (mode === 'move') {
+    return dragging ? 'grabbing' : 'move'
+  }
+
+  if (mode === 'line-start' || mode === 'line-end') {
+    return 'crosshair'
+  }
+
+  if (mode === 'text-width' || mode === 'resize-e' || mode === 'resize-w') {
+    return 'ew-resize'
+  }
+
+  if (mode === 'resize-n' || mode === 'resize-s') {
+    return 'ns-resize'
+  }
+
+  if (mode === 'resize-ne' || mode === 'resize-sw') {
+    return 'nesw-resize'
+  }
+
+  return 'nwse-resize'
+}
+
+function drawTaperedArrow(
   context: CanvasRenderingContext2D,
   start: Point,
   end: Point,
   size: number
 ) {
-  const angle = Math.atan2(end.y - start.y, end.x - start.x)
-  const length = Math.max(14, size * 4.4)
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const length = Math.hypot(dx, dy)
+
+  if (length < 1) {
+    return
+  }
+
+  const directionX = dx / length
+  const directionY = dy / length
+  const normalX = -directionY
+  const normalY = directionX
+  const tailWidth = Math.max(1.5, size * 0.45)
+  const shaftWidth = Math.max(tailWidth + 1, size * 1.35)
+  const headLength = Math.min(Math.max(12, size * 4.8), length * 0.62)
+  const headWidth = Math.max(shaftWidth * 2.45, size * 4.2)
+  const headBase = {
+    x: end.x - directionX * headLength,
+    y: end.y - directionY * headLength
+  }
 
   context.save()
+  context.fillStyle = context.strokeStyle
   context.beginPath()
-  context.moveTo(end.x, end.y)
-  context.lineTo(
-    end.x - length * Math.cos(angle - Math.PI / 7),
-    end.y - length * Math.sin(angle - Math.PI / 7)
+  context.moveTo(
+    start.x + normalX * tailWidth / 2,
+    start.y + normalY * tailWidth / 2
   )
   context.lineTo(
-    end.x - length * Math.cos(angle + Math.PI / 7),
-    end.y - length * Math.sin(angle + Math.PI / 7)
+    headBase.x + normalX * shaftWidth / 2,
+    headBase.y + normalY * shaftWidth / 2
+  )
+  context.lineTo(
+    headBase.x + normalX * headWidth / 2,
+    headBase.y + normalY * headWidth / 2
+  )
+  context.lineTo(end.x, end.y)
+  context.lineTo(
+    headBase.x - normalX * headWidth / 2,
+    headBase.y - normalY * headWidth / 2
+  )
+  context.lineTo(
+    headBase.x - normalX * shaftWidth / 2,
+    headBase.y - normalY * shaftWidth / 2
+  )
+  context.lineTo(
+    start.x - normalX * tailWidth / 2,
+    start.y - normalY * tailWidth / 2
   )
   context.closePath()
-  context.fillStyle = context.strokeStyle
+  context.fill()
+
+  context.beginPath()
+  context.arc(start.x, start.y, tailWidth / 2, 0, Math.PI * 2)
   context.fill()
   context.restore()
 }
@@ -708,56 +1182,19 @@ function blurRect(context: CanvasRenderingContext2D, rect: Rect, radius: number)
   context.restore()
 }
 
-function drawRoundedRect(
-  context: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  radius: number
-) {
-  const safeRadius = Math.min(radius, width / 2, height / 2)
-  context.beginPath()
-  context.moveTo(x + safeRadius, y)
-  context.lineTo(x + width - safeRadius, y)
-  context.quadraticCurveTo(x + width, y, x + width, y + safeRadius)
-  context.lineTo(x + width, y + height - safeRadius)
-  context.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height)
-  context.lineTo(x + safeRadius, y + height)
-  context.quadraticCurveTo(x, y + height, x, y + height - safeRadius)
-  context.lineTo(x, y + safeRadius)
-  context.quadraticCurveTo(x, y, x + safeRadius, y)
-  context.closePath()
-}
-
 function drawTextAnnotation(context: CanvasRenderingContext2D, annotation: TextAnnotation) {
   const fontSize = Math.max(14, annotation.size)
-  const lines = annotation.text.split(/\r?\n/).filter(Boolean)
-  const displayLines = lines.length ? lines : ['']
   const lineHeight = fontSize * 1.25
 
   context.save()
   context.font = `700 ${fontSize}px "Segoe UI", "PingFang SC", sans-serif`
   context.textBaseline = 'top'
 
-  const maxWidth = displayLines.reduce((largest, line) => {
-    return Math.max(largest, context.measureText(line).width)
-  }, 0)
   const paddingX = Math.max(8, fontSize * 0.28)
   const paddingY = Math.max(6, fontSize * 0.2)
-  const blockWidth = Math.max(72, maxWidth + paddingX * 2)
-  const blockHeight = displayLines.length * lineHeight + paddingY * 2
-
-  drawRoundedRect(
-    context,
-    annotation.point.x,
-    annotation.point.y,
-    blockWidth,
-    blockHeight,
-    Math.max(8, fontSize * 0.18)
-  )
-  context.fillStyle = 'rgba(6, 11, 20, 0.42)'
-  context.fill()
+  const blockWidth = getTextBoxWidth(annotation)
+  const maxLineWidth = Math.max(fontSize, blockWidth - paddingX * 2)
+  const displayLines = getWrappedTextLines(annotation, (line) => context.measureText(line).width)
 
   context.lineJoin = 'round'
   context.lineWidth = Math.max(2, fontSize * 0.12)
@@ -766,8 +1203,8 @@ function drawTextAnnotation(context: CanvasRenderingContext2D, annotation: TextA
 
   displayLines.forEach((line, index) => {
     const y = annotation.point.y + paddingY + index * lineHeight
-    context.strokeText(line, annotation.point.x + paddingX, y)
-    context.fillText(line, annotation.point.x + paddingX, y)
+    context.strokeText(line, annotation.point.x + paddingX, y, maxLineWidth)
+    context.fillText(line, annotation.point.x + paddingX, y, maxLineWidth)
   })
 
   context.restore()
@@ -789,10 +1226,10 @@ function drawStepAnnotation(context: CanvasRenderingContext2D, annotation: StepA
   context.lineWidth = Math.max(2, radius * 0.12)
   context.stroke()
   context.fillStyle = '#fff'
-  context.font = `800 ${Math.max(14, radius)}px "Segoe UI", sans-serif`
+  context.font = `800 ${Math.max(12, radius * (annotation.value.length > 2 ? 0.82 : 1))}px "Segoe UI", sans-serif`
   context.textAlign = 'center'
   context.textBaseline = 'middle'
-  context.fillText(annotation.value, annotation.point.x, annotation.point.y)
+  context.fillText(annotation.value, annotation.point.x, annotation.point.y, radius * 1.55)
   context.restore()
 }
 
@@ -830,14 +1267,11 @@ function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotatio
 
   if (annotation.type === 'rect') {
     const rect = normalizeRect(annotation.start, annotation.end)
-    context.fillStyle = `${annotation.color}1f`
     context.strokeRect(rect.x, rect.y, rect.width, rect.height)
-    context.fillRect(rect.x, rect.y, rect.width, rect.height)
   }
 
   if (annotation.type === 'ellipse') {
     const rect = normalizeRect(annotation.start, annotation.end)
-    context.fillStyle = `${annotation.color}1f`
     context.beginPath()
     context.ellipse(
       rect.x + rect.width / 2,
@@ -848,19 +1282,18 @@ function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotatio
       0,
       Math.PI * 2
     )
-    context.fill()
     context.stroke()
   }
 
-  if (annotation.type === 'line' || annotation.type === 'arrow') {
+  if (annotation.type === 'line') {
     context.beginPath()
     context.moveTo(annotation.start.x, annotation.start.y)
     context.lineTo(annotation.end.x, annotation.end.y)
     context.stroke()
+  }
 
-    if (annotation.type === 'arrow') {
-      drawArrowHead(context, annotation.start, annotation.end, annotation.size)
-    }
+  if (annotation.type === 'arrow') {
+    drawTaperedArrow(context, annotation.start, annotation.end, annotation.size)
   }
 
   if ((annotation.type === 'pen' || annotation.type === 'highlighter') && annotation.points.length > 1) {
@@ -910,34 +1343,101 @@ function drawSelectionOverlay(context: CanvasRenderingContext2D, rect: Rect) {
   context.restore()
 }
 
-function drawAnnotationHighlight(context: CanvasRenderingContext2D, annotation: Annotation) {
+function drawAnnotationHighlight(
+  context: CanvasRenderingContext2D,
+  annotation: Annotation,
+  imageToCssScale: number
+) {
+  const handleSize = visualSizeToImageSize(EDIT_HANDLE_VISUAL_SIZE, imageToCssScale)
+  const halfHandle = handleSize / 2
+  const strokeWidth = Math.max(1, visualSizeToImageSize(1.5, imageToCssScale))
+
+  const drawSquareHandle = (point: Point) => {
+    context.fillStyle = '#f8fafc'
+    context.strokeStyle = '#2563eb'
+    context.lineWidth = strokeWidth
+    context.fillRect(point.x - halfHandle, point.y - halfHandle, handleSize, handleSize)
+    context.strokeRect(point.x - halfHandle, point.y - halfHandle, handleSize, handleSize)
+  }
+
+  const drawCircleHandle = (point: Point) => {
+    context.fillStyle = '#f8fafc'
+    context.strokeStyle = '#2563eb'
+    context.lineWidth = strokeWidth
+    context.beginPath()
+    context.arc(point.x, point.y, halfHandle, 0, Math.PI * 2)
+    context.fill()
+    context.stroke()
+  }
+
+  context.save()
+  context.setLineDash([8, 5])
+  context.lineWidth = strokeWidth
+  context.strokeStyle = '#60a5fa'
+
+  if (annotation.type === 'line' || annotation.type === 'arrow') {
+    context.beginPath()
+    context.moveTo(annotation.start.x, annotation.start.y)
+    context.lineTo(annotation.end.x, annotation.end.y)
+    context.stroke()
+    context.setLineDash([])
+    drawCircleHandle(annotation.start)
+    drawCircleHandle(annotation.end)
+    context.restore()
+    return
+  }
+
+  if (annotation.type === 'rect' || annotation.type === 'ellipse') {
+    const rect = normalizeRect(annotation.start, annotation.end)
+
+    if (annotation.type === 'ellipse') {
+      context.beginPath()
+      context.ellipse(
+        rect.x + rect.width / 2,
+        rect.y + rect.height / 2,
+        rect.width / 2,
+        rect.height / 2,
+        0,
+        0,
+        Math.PI * 2
+      )
+      context.stroke()
+    } else {
+      context.strokeRect(rect.x, rect.y, rect.width, rect.height)
+    }
+
+    context.setLineDash([])
+    getResizeHandlePoints(rect).forEach((handle) => drawSquareHandle(handle.point))
+    context.restore()
+    return
+  }
+
   const bounds = getAnnotationBounds(annotation)
-  const margin = Math.max(5, annotation.size * 0.3)
+  const margin = visualSizeToImageSize(5, imageToCssScale)
   const x = bounds.x - margin
   const y = bounds.y - margin
   const width = bounds.width + margin * 2
   const height = bounds.height + margin * 2
 
-  context.save()
-  context.setLineDash([8, 5])
-  context.lineWidth = Math.max(1.5, annotation.size * 0.12)
-  context.strokeStyle = '#60a5fa'
+  if (annotation.type === 'step') {
+    const radius = Math.max(14, annotation.size * 0.7) + margin
+    context.beginPath()
+    context.arc(annotation.point.x, annotation.point.y, radius, 0, Math.PI * 2)
+    context.stroke()
+    context.restore()
+    return
+  }
+
   context.strokeRect(x, y, width, height)
   context.setLineDash([])
 
-  const handleSize = Math.max(6, annotation.size * 0.35)
-  const halfHandle = handleSize / 2
-  context.fillStyle = '#60a5fa'
-  const handles = [
-    [x, y],
-    [x + width, y],
-    [x, y + height],
-    [x + width, y + height]
-  ]
+  if (annotation.type === 'text') {
+    drawSquareHandle({
+      x: bounds.x + bounds.width,
+      y: bounds.y + bounds.height
+    })
+  }
 
-  handles.forEach(([handleX, handleY]) => {
-    context.fillRect(handleX - halfHandle, handleY - halfHandle, handleSize, handleSize)
-  })
   context.restore()
 }
 
@@ -948,8 +1448,9 @@ function renderCanvas(args: {
   draft: Annotation | null
   cropRect: Rect | null
   selectedAnnotationId: string | null
+  imageToCssScale: number
 }) {
-  const { canvas, image, annotations, draft, cropRect, selectedAnnotationId } = args
+  const { canvas, image, annotations, draft, cropRect, selectedAnnotationId, imageToCssScale } = args
 
   if (!canvas || !image) {
     return
@@ -977,7 +1478,7 @@ function renderCanvas(args: {
   if (selectedAnnotationId) {
     const selectedAnnotation = annotations.find((annotation) => annotation.id === selectedAnnotationId)
     if (selectedAnnotation) {
-      drawAnnotationHighlight(context, selectedAnnotation)
+      drawAnnotationHighlight(context, selectedAnnotation, imageToCssScale)
     }
   }
 }
@@ -1004,13 +1505,14 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const annotationsRef = useRef<Annotation[]>([])
   const activeDraftRef = useRef<Annotation | null>(null)
+  const editDragRef = useRef<EditDragState | null>(null)
   const dragStartRef = useRef<Point | null>(null)
-  const dragSnapshotRef = useRef<Annotation[] | null>(null)
-  const dragMovedRef = useRef(false)
   const cropStartRef = useRef<Point | null>(null)
   const textEditSnapshotRef = useRef<Annotation[] | null>(null)
   const inlineTextEditRef = useRef<InlineTextEdit | null>(null)
+  const inlineStepEditRef = useRef<InlineStepEdit | null>(null)
   const inlineTextRef = useRef<HTMLTextAreaElement | null>(null)
+  const inlineStepRef = useRef<HTMLInputElement | null>(null)
   const inlineBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const imageLoadTokenRef = useRef(0)
   const resizeStateRef = useRef<{
@@ -1045,10 +1547,12 @@ export default function App() {
   const [mosaicSize, setMosaicSize] = useState(18)
   const [blurSize, setBlurSize] = useState(14)
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
-  const [draggingAnnotationId, setDraggingAnnotationId] = useState<string | null>(null)
+  const [activeEditMode, setActiveEditMode] = useState<EditHandleMode | null>(null)
+  const [canvasCursor, setCanvasCursor] = useState<string | null>(null)
   const [cropRect, setCropRect] = useState<Rect | null>(null)
   const [draftCropRect, setDraftCropRect] = useState<Rect | null>(null)
   const [inlineTextEdit, setInlineTextEdit] = useState<InlineTextEdit | null>(null)
+  const [inlineStepEdit, setInlineStepEdit] = useState<InlineStepEdit | null>(null)
   const [undoStack, setUndoStack] = useState<Annotation[][]>([])
   const [redoStack, setRedoStack] = useState<Annotation[][]>([])
   const [status, setStatus] = useState('等待截图')
@@ -1159,18 +1663,24 @@ export default function App() {
   )
 
   const resetEditingState = useCallback(() => {
+    if (editDragRef.current) {
+      annotationsRef.current = editDragRef.current.annotationsSnapshot
+      setAnnotations(editDragRef.current.annotationsSnapshot)
+    }
+
     activeDraftRef.current = null
+    editDragRef.current = null
     dragStartRef.current = null
-    dragSnapshotRef.current = null
-    dragMovedRef.current = false
     cropStartRef.current = null
     textEditSnapshotRef.current = null
     setDraft(null)
     setDraftCropRect(null)
     setCropRect(null)
     setInlineTextEdit(null)
+    setInlineStepEdit(null)
     setSelectedAnnotationId(null)
-    setDraggingAnnotationId(null)
+    setActiveEditMode(null)
+    setCanvasCursor(null)
   }, [])
 
   const loadTransformedImage = useCallback(
@@ -1230,15 +1740,20 @@ export default function App() {
   }, [inlineTextEdit])
 
   useEffect(() => {
+    inlineStepEditRef.current = inlineStepEdit
+  }, [inlineStepEdit])
+
+  useEffect(() => {
     renderCanvas({
       canvas: canvasRef.current,
       image,
       annotations,
       draft,
       cropRect: draftCropRect ?? cropRect,
-      selectedAnnotationId
+      selectedAnnotationId,
+      imageToCssScale
     })
-  }, [annotations, cropRect, draft, draftCropRect, image, selectedAnnotationId])
+  }, [annotations, cropRect, draft, draftCropRect, image, imageToCssScale, selectedAnnotationId])
 
   useEffect(() => {
     document.documentElement.classList.add('transparent')
@@ -1296,7 +1811,7 @@ export default function App() {
       }
 
       if (event.key === 'Escape' && !isTyping) {
-        if (draft || draftCropRect || cropRect || selectedAnnotationId || draggingAnnotationId) {
+        if (draft || draftCropRect || cropRect || selectedAnnotationId || activeEditMode) {
           resetEditingState()
           setStatus('已取消选择')
           return
@@ -1323,7 +1838,7 @@ export default function App() {
     cropRect,
     draft,
     draftCropRect,
-    draggingAnnotationId,
+    activeEditMode,
     replaceAnnotations,
     resetEditingState,
     selectedAnnotationId
@@ -1404,6 +1919,15 @@ export default function App() {
       requestAnimationFrame(() => inlineTextRef.current?.focus())
     }
   }, [inlineTextEdit?.id])
+
+  useEffect(() => {
+    if (inlineStepEdit && inlineStepRef.current) {
+      requestAnimationFrame(() => {
+        inlineStepRef.current?.focus()
+        inlineStepRef.current?.select()
+      })
+    }
+  }, [inlineStepEdit?.id])
 
   const getPointFromClient = useCallback((clientX: number, clientY: number): Point => {
     const canvas = canvasRef.current
@@ -1685,17 +2209,22 @@ export default function App() {
 
     const text = currentEdit.text.trim()
     const baseSnapshot = textEditSnapshotRef.current
+    const textAnnotation: TextAnnotation | null = text
+      ? {
+          id: currentEdit.id,
+          type: 'text',
+          point: currentEdit.point,
+          text,
+          color: currentEdit.color,
+          size: currentEdit.size,
+          boxWidth: currentEdit.boxWidth
+        }
+      : null
     const nextAnnotations = text
       ? [
-          ...annotationsRef.current,
-          {
-            id: currentEdit.id,
-            type: 'text' as const,
-            point: currentEdit.point,
-            text,
-            color: currentEdit.color,
-            size: currentEdit.size
-          }
+          ...annotationsRef.current.slice(0, currentEdit.insertIndex),
+          textAnnotation!,
+          ...annotationsRef.current.slice(currentEdit.insertIndex)
         ]
       : annotationsRef.current
 
@@ -1706,24 +2235,28 @@ export default function App() {
     inlineTextEditRef.current = null
     textEditSnapshotRef.current = null
     setInlineTextEdit(null)
-    setSelectedAnnotationId(null)
-    setStatus(text ? '已添加文字' : '已取消文字')
+    setSelectedAnnotationId(text ? currentEdit.id : null)
+    setStatus(text ? (baseSnapshot ? '已更新文字' : '已添加文字') : '已取消文字')
   }, [replaceAnnotations])
 
   const cancelInlineText = useCallback(() => {
-    if (textEditSnapshotRef.current) {
-      annotationsRef.current = textEditSnapshotRef.current
-      setAnnotations(textEditSnapshotRef.current)
+    const currentEdit = inlineTextEditRef.current
+    const baseSnapshot = textEditSnapshotRef.current
+    if (baseSnapshot) {
+      annotationsRef.current = baseSnapshot
+      setAnnotations(baseSnapshot)
     }
 
     textEditSnapshotRef.current = null
     inlineTextEditRef.current = null
     setInlineTextEdit(null)
+    setSelectedAnnotationId(baseSnapshot ? currentEdit?.id ?? null : null)
     setStatus('已取消文字')
   }, [])
 
   const startInlineTextEdit = useCallback((annotation: TextAnnotation) => {
     textEditSnapshotRef.current = annotationsRef.current
+    const insertIndex = Math.max(0, annotationsRef.current.findIndex((item) => item.id === annotation.id))
     const nextAnnotations = annotationsRef.current.filter((item) => item.id !== annotation.id)
     annotationsRef.current = nextAnnotations
     setAnnotations(nextAnnotations)
@@ -1733,13 +2266,121 @@ export default function App() {
       point: annotation.point,
       text: annotation.text,
       color: annotation.color,
+      size: annotation.size,
+      boxWidth: getTextBoxWidth(annotation),
+      insertIndex
+    })
+  }, [])
+
+  const commitInlineStep = useCallback(() => {
+    const currentEdit = inlineStepEditRef.current
+    if (!currentEdit) {
+      return
+    }
+
+    const value = currentEdit.value.trim().replace(/\s+/g, ' ').slice(0, STEP_LABEL_MAX_LENGTH)
+
+    if (!value) {
+      inlineStepEditRef.current = null
+      setInlineStepEdit(null)
+      setSelectedAnnotationId(currentEdit.id)
+      setStatus('编号不能为空')
+      return
+    }
+
+    const target = annotationsRef.current.find((annotation) => annotation.id === currentEdit.id)
+    if (target?.type === 'step' && target.value !== value) {
+      replaceAnnotations(
+        annotationsRef.current.map((annotation) => (
+          annotation.id === currentEdit.id && annotation.type === 'step'
+            ? { ...annotation, value }
+            : annotation
+        )),
+        { recordHistory: true }
+      )
+      setStatus('已更新编号')
+    }
+
+    inlineStepEditRef.current = null
+    setInlineStepEdit(null)
+    setSelectedAnnotationId(currentEdit.id)
+  }, [replaceAnnotations])
+
+  const cancelInlineStep = useCallback(() => {
+    const currentEdit = inlineStepEditRef.current
+    inlineStepEditRef.current = null
+    setInlineStepEdit(null)
+    setSelectedAnnotationId(currentEdit?.id ?? null)
+    setStatus('已取消编号编辑')
+  }, [])
+
+  const startInlineStepEdit = useCallback((annotation: StepAnnotation) => {
+    setSelectedAnnotationId(annotation.id)
+    setInlineStepEdit({
+      id: annotation.id,
+      point: annotation.point,
+      value: annotation.value,
+      color: annotation.color,
       size: annotation.size
     })
   }, [])
 
+  const getEditHandleAtPoint = useCallback(
+    (point: Point, filterType?: Annotation['type']) => {
+      const selected = selectedAnnotationId
+        ? annotationsRef.current.find((annotation) => annotation.id === selectedAnnotationId)
+        : null
+      const selectedHandle = selected && (!filterType || selected.type === filterType)
+        ? hitTestEditHandle(point, selected, imageToCssScale, false)
+        : null
+
+      if (selectedHandle) {
+        return selectedHandle
+      }
+
+      const hitId = hitTestAnnotation(point, annotationsRef.current, filterType)
+      const hitAnnotation = hitId
+        ? annotationsRef.current.find((annotation) => annotation.id === hitId)
+        : null
+
+      return hitAnnotation
+        ? hitTestEditHandle(point, hitAnnotation, imageToCssScale)
+        : null
+    },
+    [imageToCssScale, selectedAnnotationId]
+  )
+
+  const startAnnotationEditDrag = useCallback(
+    (
+      editHandle: EditHandle,
+      point: Point,
+      event: ReactPointerEvent<HTMLCanvasElement>
+    ) => {
+      const targetAnnotation = annotationsRef.current.find((annotation) => annotation.id === editHandle.id)
+      if (!targetAnnotation) {
+        return false
+      }
+
+      event.currentTarget.setPointerCapture(event.pointerId)
+      editDragRef.current = {
+        ...editHandle,
+        pointerId: event.pointerId,
+        startPoint: point,
+        snapshot: targetAnnotation,
+        annotationsSnapshot: annotationsRef.current,
+        moved: false
+      }
+      setActiveEditMode(editHandle.mode)
+      setCanvasCursor(cursorForEditMode(editHandle.mode, true))
+      setStatus(editHandle.mode === 'move' ? '拖动以移动标注' : '拖动控制点调整标注')
+      return true
+    },
+    []
+  )
+
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
-      if (!image || busy) {
+      if (!image || busy || event.button !== 0) {
         return
       }
 
@@ -1749,17 +2390,16 @@ export default function App() {
         commitInlineText()
       }
 
-      if (tool === 'select') {
-        const hitId = hitTestAnnotation(point, annotationsRef.current)
-        setSelectedAnnotationId(hitId)
+      if (inlineStepEdit) {
+        commitInlineStep()
+      }
 
-        if (hitId) {
-          event.currentTarget.setPointerCapture(event.pointerId)
-          setDraggingAnnotationId(hitId)
-          dragStartRef.current = point
-          dragSnapshotRef.current = annotationsRef.current
-          dragMovedRef.current = false
-          setStatus('拖动以移动标注')
+      if (tool === 'select') {
+        const editHandle = getEditHandleAtPoint(point)
+        setSelectedAnnotationId(editHandle?.id ?? null)
+
+        if (editHandle) {
+          startAnnotationEditDrag(editHandle, point, event)
         }
         return
       }
@@ -1777,29 +2417,34 @@ export default function App() {
         return
       }
 
-      if (tool === 'text') {
-        const hitTextId = hitTestAnnotation(point, annotationsRef.current, 'text')
-        const hitText = hitTextId
-          ? annotationsRef.current.find((annotation) => annotation.id === hitTextId)
-          : null
+      const editableType = getEditableAnnotationTypeForTool(tool)
+      const editHandle = editableType
+        ? getEditHandleAtPoint(point, editableType)
+        : null
 
-        if (hitText?.type === 'text') {
-          startInlineTextEdit(hitText)
+      if (editHandle) {
+        setSelectedAnnotationId(editHandle.id)
+        if (startAnnotationEditDrag(editHandle, point, event)) {
           return
         }
+      }
 
+      if (tool === 'text') {
         setSelectedAnnotationId(null)
         setInlineTextEdit({
           id: createId('text'),
           point,
           text: '',
           color,
-          size: toImageSize(textSize)
+          size: toImageSize(textSize),
+          boxWidth: toImageSize(TEXT_BOX_DEFAULT_VISUAL_WIDTH),
+          insertIndex: annotationsRef.current.length
         })
         return
       }
 
       if (tool === 'step') {
+        const id = createId('step')
         const nextValue = String(
           annotationsRef.current.filter((annotation) => annotation.type === 'step').length + 1
         )
@@ -1807,7 +2452,7 @@ export default function App() {
           [
             ...annotationsRef.current,
             {
-              id: createId('step'),
+              id,
               type: 'step',
               point,
               value: nextValue,
@@ -1817,7 +2462,7 @@ export default function App() {
           ],
           { recordHistory: true }
         )
-        setSelectedAnnotationId(null)
+        setSelectedAnnotationId(id)
         setStatus(`已添加编号 ${nextValue}`)
         return
       }
@@ -1886,12 +2531,16 @@ export default function App() {
       busy,
       color,
       commitInlineText,
+      commitInlineStep,
+      getEditHandleAtPoint,
       getPointFromClient,
       image,
+      inlineStepEdit,
       inlineTextEdit,
       mosaicSize,
       replaceAnnotations,
       stepSize,
+      startAnnotationEditDrag,
       startInlineTextEdit,
       strokeSize,
       textSize,
@@ -1907,22 +2556,24 @@ export default function App() {
       }
 
       const point = getPointFromClient(event.clientX, event.clientY)
+      const editDrag = editDragRef.current
 
-      if (draggingAnnotationId && dragStartRef.current) {
-        const delta = {
-          x: point.x - dragStartRef.current.x,
-          y: point.y - dragStartRef.current.y
-        }
-
-        if (delta.x !== 0 || delta.y !== 0) {
-          const nextAnnotations = annotationsRef.current.map((annotation) => {
-            return annotation.id === draggingAnnotationId ? moveAnnotation(annotation, delta) : annotation
-          })
-          annotationsRef.current = nextAnnotations
-          setAnnotations(nextAnnotations)
-          dragStartRef.current = point
-          dragMovedRef.current = true
-        }
+      if (editDrag && editDrag.pointerId === event.pointerId) {
+        const nextAnnotation = resizeAnnotation(
+          editDrag.snapshot,
+          editDrag.mode,
+          editDrag.startPoint,
+          point,
+          { shiftKey: event.shiftKey }
+        )
+        const nextAnnotations = annotationsRef.current.map((annotation) =>
+          annotation.id === editDrag.id ? nextAnnotation : annotation
+        )
+        annotationsRef.current = nextAnnotations
+        setAnnotations(nextAnnotations)
+        editDrag.moved = editDrag.moved ||
+          Math.hypot(point.x - editDrag.startPoint.x, point.y - editDrag.startPoint.y) > 0.25
+        setCanvasCursor(cursorForEditMode(editDrag.mode, true))
         return
       }
 
@@ -1933,6 +2584,14 @@ export default function App() {
 
       const currentDraft = activeDraftRef.current
       if (!currentDraft || !dragStartRef.current) {
+        const editableType = getEditableAnnotationTypeForTool(tool)
+        if (tool === 'select' || editableType) {
+          const hoverHandle = getEditHandleAtPoint(point, editableType ?? undefined)
+          const nextCursor = hoverHandle ? cursorForEditMode(hoverHandle.mode) : null
+          setCanvasCursor((currentCursor) => (
+            currentCursor === nextCursor ? currentCursor : nextCursor
+          ))
+        }
         return
       }
 
@@ -1941,7 +2600,12 @@ export default function App() {
       if (isStrokeAnnotation(currentDraft)) {
         nextDraft = { ...currentDraft, points: [...currentDraft.points, point] }
       } else if (isDragAnnotation(currentDraft)) {
-        nextDraft = { ...currentDraft, end: point }
+        const nextPoint = event.shiftKey && (currentDraft.type === 'line' || currentDraft.type === 'arrow')
+          ? snapPointTo45Degrees(currentDraft.start, point)
+          : event.shiftKey && (currentDraft.type === 'rect' || currentDraft.type === 'ellipse')
+            ? snapPointToSquare(currentDraft.start, point)
+            : point
+        nextDraft = { ...currentDraft, end: nextPoint }
       } else {
         nextDraft = currentDraft
       }
@@ -1949,7 +2613,7 @@ export default function App() {
       activeDraftRef.current = nextDraft
       setDraft(nextDraft)
     },
-    [draftCropRect, draggingAnnotationId, getPointFromClient, image]
+    [draftCropRect, getEditHandleAtPoint, getPointFromClient, image, tool]
   )
 
   const handlePointerUp = useCallback(
@@ -1960,17 +2624,18 @@ export default function App() {
         // Pointer capture may already be released when the pointer leaves the canvas.
       }
 
-      if (draggingAnnotationId) {
-        if (dragMovedRef.current && dragSnapshotRef.current) {
-          setUndoStack((stack) => [...stack.slice(-(HISTORY_LIMIT - 1)), dragSnapshotRef.current!])
+      const editDrag = editDragRef.current
+      if (editDrag && editDrag.pointerId === event.pointerId) {
+        if (editDrag.moved) {
+          setUndoStack((stack) => [...stack.slice(-(HISTORY_LIMIT - 1)), editDrag.annotationsSnapshot])
           setRedoStack([])
-          setStatus('已移动标注')
+          setStatus(editDrag.mode === 'move' ? '已移动标注' : '已调整标注')
         }
 
-        setDraggingAnnotationId(null)
-        dragStartRef.current = null
-        dragSnapshotRef.current = null
-        dragMovedRef.current = false
+        editDragRef.current = null
+        setActiveEditMode(null)
+        setCanvasCursor(null)
+        setSelectedAnnotationId(editDrag.id)
         return
       }
 
@@ -1995,10 +2660,21 @@ export default function App() {
 
       if (annotationHasRenderableArea(currentDraft)) {
         replaceAnnotations([...annotationsRef.current, currentDraft], { recordHistory: true })
+        setSelectedAnnotationId(currentDraft.id)
         setStatus('已添加标注')
       }
     },
-    [draftCropRect, draggingAnnotationId, replaceAnnotations]
+    [draftCropRect, replaceAnnotations]
+  )
+
+  const handlePointerLeave = useCallback(
+    (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (!editDragRef.current && !activeDraftRef.current) {
+        setCanvasCursor(null)
+      }
+      handlePointerUp(event)
+    },
+    [handlePointerUp]
   )
 
   const handlePointerCancel = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -2008,22 +2684,30 @@ export default function App() {
       // Ignore stale pointer capture.
     }
 
+    const editDrag = editDragRef.current
+    if (editDrag && editDrag.pointerId === event.pointerId) {
+      annotationsRef.current = editDrag.annotationsSnapshot
+      setAnnotations(editDrag.annotationsSnapshot)
+    }
+
     activeDraftRef.current = null
+    editDragRef.current = null
     dragStartRef.current = null
     cropStartRef.current = null
     setDraft(null)
     setDraftCropRect(null)
-    setDraggingAnnotationId(null)
+    setActiveEditMode(null)
+    setCanvasCursor(null)
   }, [])
 
   const handleDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLCanvasElement>) => {
-      if (!image || tool !== 'text') {
+      if (!image) {
         return
       }
 
       const point = getPointFromClient(event.clientX, event.clientY)
-      const hitId = hitTestAnnotation(point, annotationsRef.current, 'text')
+      const hitId = hitTestAnnotation(point, annotationsRef.current)
       if (!hitId) {
         return
       }
@@ -2031,20 +2715,31 @@ export default function App() {
       const annotation = annotationsRef.current.find((item) => item.id === hitId)
       if (annotation?.type === 'text') {
         startInlineTextEdit(annotation)
+        return
+      }
+
+      if (annotation?.type === 'step') {
+        startInlineStepEdit(annotation)
       }
     },
-    [getPointFromClient, image, startInlineTextEdit, tool]
+    [getPointFromClient, image, startInlineStepEdit, startInlineTextEdit]
   )
 
   const handleClear = useCallback(() => {
-    if (annotationsRef.current.length === 0) {
+    const snapshot = textEditSnapshotRef.current ?? annotationsRef.current
+    if (snapshot.length === 0 && !inlineTextEdit && !inlineStepEdit) {
       return
     }
 
-    replaceAnnotations([], { recordHistory: true })
+    inlineTextEditRef.current = null
+    inlineStepEditRef.current = null
+    textEditSnapshotRef.current = null
+    setInlineTextEdit(null)
+    setInlineStepEdit(null)
+    replaceAnnotations([], { recordHistory: snapshot.length > 0, historySnapshot: snapshot })
     setSelectedAnnotationId(null)
     setStatus('已清空')
-  }, [replaceAnnotations])
+  }, [inlineStepEdit, inlineTextEdit, replaceAnnotations])
 
   const handleCopy = useCallback(async () => {
     if (!image) {
@@ -2053,6 +2748,10 @@ export default function App() {
 
     if (inlineTextEdit) {
       commitInlineText()
+    }
+
+    if (inlineStepEdit) {
+      commitInlineStep()
     }
 
     try {
@@ -2064,7 +2763,15 @@ export default function App() {
       setStatus(message)
       mulby.notification.show(message, 'error')
     }
-  }, [commitInlineText, image, inlineTextEdit, mulby.clipboard, mulby.notification])
+  }, [
+    commitInlineStep,
+    commitInlineText,
+    image,
+    inlineStepEdit,
+    inlineTextEdit,
+    mulby.clipboard,
+    mulby.notification
+  ])
 
   const handleSave = useCallback(async () => {
     if (!image) {
@@ -2073,6 +2780,10 @@ export default function App() {
 
     if (inlineTextEdit) {
       commitInlineText()
+    }
+
+    if (inlineStepEdit) {
+      commitInlineStep()
     }
 
     try {
@@ -2101,8 +2812,10 @@ export default function App() {
       mulby.notification.show(message, 'error')
     }
   }, [
+    commitInlineStep,
     commitInlineText,
     image,
+    inlineStepEdit,
     inlineTextEdit,
     mulby.dialog,
     mulby.filesystem,
@@ -2129,6 +2842,10 @@ export default function App() {
         commitInlineText()
       }
 
+      if (inlineStepEdit) {
+        commitInlineStep()
+      }
+
       setBusy(busyLabel)
       setStatus(busyLabel)
 
@@ -2145,7 +2862,15 @@ export default function App() {
         setBusy(null)
       }
     },
-    [commitInlineText, image, inlineTextEdit, loadTransformedImage, mulby.notification]
+    [
+      commitInlineStep,
+      commitInlineText,
+      image,
+      inlineStepEdit,
+      inlineTextEdit,
+      loadTransformedImage,
+      mulby.notification
+    ]
   )
 
   const applyCropSelection = useCallback(async () => {
@@ -2237,7 +2962,7 @@ export default function App() {
 
     if (targetType === 'step') {
       return {
-        label: '编号',
+        label: '尺寸',
         min: 18,
         max: 64,
         value: selectedAnnotation ? toVisualSize(selectedAnnotation.size) : stepSize,
@@ -2325,11 +3050,39 @@ export default function App() {
   const canEditImage = Boolean(image && hasSharp && !busy)
   const hasVisualContent = Boolean(image || pendingPreview)
   const inlineTextPosition = inlineTextEdit && image
-    ? {
-        left: inlineTextEdit.point.x * imageToCssScale,
-        top: inlineTextEdit.point.y * imageToCssScale,
-        fontSize: Math.max(14, inlineTextEdit.size * imageToCssScale)
-      }
+    ? (() => {
+        const previewAnnotation: TextAnnotation = {
+          id: inlineTextEdit.id,
+          type: 'text',
+          point: inlineTextEdit.point,
+          text: inlineTextEdit.text,
+          color: inlineTextEdit.color,
+          size: inlineTextEdit.size,
+          boxWidth: inlineTextEdit.boxWidth
+        }
+        const bounds = getTextBounds(previewAnnotation)
+        const fontSize = Math.max(14, inlineTextEdit.size * imageToCssScale)
+
+        return {
+          left: inlineTextEdit.point.x * imageToCssScale,
+          top: inlineTextEdit.point.y * imageToCssScale,
+          width: bounds.width * imageToCssScale,
+          height: Math.max(42, bounds.height * imageToCssScale),
+          fontSize
+        }
+      })()
+    : null
+  const inlineStepPosition = inlineStepEdit && image
+    ? (() => {
+        const radius = Math.max(14, inlineStepEdit.size * 0.7)
+        return {
+          left: (inlineStepEdit.point.x - radius) * imageToCssScale,
+          top: (inlineStepEdit.point.y - radius) * imageToCssScale,
+          width: radius * 2 * imageToCssScale,
+          height: radius * 2 * imageToCssScale,
+          fontSize: Math.max(12, radius * imageToCssScale * 0.78)
+        }
+      })()
     : null
 
   return (
@@ -2352,14 +3105,16 @@ export default function App() {
               style={{
                 width: cssSize.width,
                 height: cssSize.height,
-                cursor: draggingAnnotationId ? 'grabbing' : undefined
+                cursor: activeEditMode
+                  ? cursorForEditMode(activeEditMode, true)
+                  : canvasCursor ?? undefined
               }}
               onDoubleClick={handleDoubleClick}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerCancel}
-              onPointerLeave={handlePointerUp}
+              onPointerLeave={handlePointerLeave}
             />
             {inlineTextEdit && inlineTextPosition && (
               <textarea
@@ -2368,15 +3123,21 @@ export default function App() {
                 style={{
                   left: inlineTextPosition.left,
                   top: inlineTextPosition.top,
+                  width: inlineTextPosition.width,
+                  height: inlineTextPosition.height,
                   fontSize: inlineTextPosition.fontSize,
                   color: inlineTextEdit.color,
                   minWidth: Math.max(120, inlineTextPosition.fontSize * 4)
                 }}
                 value={inlineTextEdit.text}
                 onChange={(event) => {
+                  const text = event.target.value
                   setInlineTextEdit((current) => (
-                    current ? { ...current, text: event.target.value } : null
+                    current ? { ...current, text } : null
                   ))
+                  if (inlineTextEditRef.current) {
+                    inlineTextEditRef.current = { ...inlineTextEditRef.current, text }
+                  }
                 }}
                 onBlur={() => {
                   inlineBlurTimerRef.current = setTimeout(() => {
@@ -2395,6 +3156,55 @@ export default function App() {
                   event.stopPropagation()
                 }}
                 placeholder="输入文字"
+              />
+            )}
+            {inlineStepEdit && inlineStepPosition && (
+              <input
+                ref={inlineStepRef}
+                className="inline-step-editor"
+                style={{
+                  left: inlineStepPosition.left,
+                  top: inlineStepPosition.top,
+                  width: inlineStepPosition.width,
+                  height: inlineStepPosition.height,
+                  fontSize: inlineStepPosition.fontSize,
+                  backgroundColor: inlineStepEdit.color
+                }}
+                value={inlineStepEdit.value}
+                maxLength={STEP_LABEL_MAX_LENGTH}
+                onChange={(event) => {
+                  const value = event.target.value.slice(0, STEP_LABEL_MAX_LENGTH)
+                  setInlineStepEdit((current) => (
+                    current ? { ...current, value } : null
+                  ))
+                  if (inlineStepEditRef.current) {
+                    inlineStepEditRef.current = { ...inlineStepEditRef.current, value }
+                  }
+                }}
+                onBlur={() => {
+                  inlineBlurTimerRef.current = setTimeout(() => {
+                    inlineBlurTimerRef.current = null
+                    commitInlineStep()
+                  }, 80)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    if (inlineBlurTimerRef.current) {
+                      clearTimeout(inlineBlurTimerRef.current)
+                      inlineBlurTimerRef.current = null
+                    }
+                    commitInlineStep()
+                  }
+                  if (event.key === 'Escape') {
+                    if (inlineBlurTimerRef.current) {
+                      clearTimeout(inlineBlurTimerRef.current)
+                      inlineBlurTimerRef.current = null
+                    }
+                    cancelInlineStep()
+                  }
+                  event.stopPropagation()
+                }}
               />
             )}
           </div>
@@ -2440,7 +3250,11 @@ export default function App() {
                       if (inlineTextEdit && item.key !== 'text') {
                         commitInlineText()
                       }
+                      if (inlineStepEdit && item.key !== 'step') {
+                        commitInlineStep()
+                      }
                       setTool(item.key)
+                      setCanvasCursor(null)
                       if (item.key !== 'select') {
                         setSelectedAnnotationId(null)
                       }
@@ -2492,7 +3306,13 @@ export default function App() {
               <button className="icon-button" title="重做" type="button" onClick={handleRedo} disabled={!redoStack.length}>
                 <Redo2 size={18} />
               </button>
-              <button className="icon-button" title="清空标注" type="button" onClick={handleClear} disabled={!annotations.length}>
+              <button
+                className="icon-button"
+                title="清空标注"
+                type="button"
+                onClick={handleClear}
+                disabled={!annotations.length && !inlineTextEdit && !inlineStepEdit}
+              >
                 <Trash2 size={18} />
               </button>
             </div>

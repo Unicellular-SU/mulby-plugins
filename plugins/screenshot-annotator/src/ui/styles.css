@@ -36,7 +36,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -98,22 +99,39 @@ input {
   min-height: 42px;
   max-width: min(560px, calc(100vw - 24px));
   padding: 7px 9px;
-  resize: both;
+  resize: none;
   overflow: hidden;
-  border: 2px solid rgba(96, 165, 250, 0.92);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   outline: none;
-  background: rgba(6, 11, 20, 0.46);
-  box-shadow: 0 12px 34px rgba(6, 11, 20, 0.26);
+  background: transparent;
+  box-shadow: none;
   font-family: "Segoe UI", "PingFang SC", sans-serif;
   font-weight: 700;
   line-height: 1.25;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+  white-space: pre-wrap;
   -webkit-app-region: no-drag;
 }
 
 .inline-text-editor::placeholder {
   color: rgba(255, 255, 255, 0.62);
+}
+
+.inline-step-editor {
+  position: absolute;
+  z-index: 3;
+  padding: 0 4px;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  outline: 2px solid rgba(37, 99, 235, 0.88);
+  color: #fff;
+  font-family: "Segoe UI", sans-serif;
+  font-weight: 800;
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(5, 12, 22, 0.35);
+  box-shadow: 0 12px 28px rgba(5, 12, 22, 0.28);
+  -webkit-app-region: no-drag;
 }
 
 .tool-select {
