@@ -1,4 +1,5 @@
 import { List, X } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
 export interface Chapter {
   index: number
@@ -12,6 +13,17 @@ export default function ChapterPanel({ chapters, activeIndex, onSelect, onClose 
   onSelect: (chapter: Chapter) => void
   onClose: () => void
 }) {
+  const listRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (listRef.current && activeIndex >= 0 && activeIndex < chapters.length) {
+      const activeEl = listRef.current.children[activeIndex] as HTMLElement
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: 'center' })
+      }
+    }
+  }, [activeIndex, chapters.length])
+
   return (
     <div className="absolute inset-0 z-40 flex flex-row-reverse">
       {/* Backdrop */}
@@ -33,7 +45,7 @@ export default function ChapterPanel({ chapters, activeIndex, onSelect, onClose 
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" ref={listRef}>
           {chapters.length === 0 ? (
             <div className="p-6 text-center text-sm text-[var(--text-3)]">
               未识别到章节标题

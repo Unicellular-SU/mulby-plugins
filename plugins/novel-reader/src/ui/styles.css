@@ -3,40 +3,43 @@
 @tailwind utilities;
 
 :root {
-  --bg: #f8f5f0;
-  --surface: #ffffff;
-  --border: #e5d5c0;
-  --text-1: #2c1810;
-  --text-2: #6b5344;
-  --text-3: #9b8575;
-  --accent: #c47f3a;
-  --accent-hover: #d4954f;
-  --danger: #c94a4a;
-  --danger-hover: #d96060;
+  /* Default System Light or Forced Light */
+  --bg: #ffffff;
+  --surface: #f9fafb;
+  --border: #e5e7eb;
+  --text-1: #111827;
+  --text-2: #374151;
+  --text-3: #6b7280;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
 }
 
-:root.dark {
-  --bg: #1a1410;
-  --surface: #2a2018;
-  --border: #4a3828;
-  --text-1: #f0e6d8;
-  --text-2: #c0a890;
-  --text-3: #8a7060;
-  --accent: #d4954f;
-  --accent-hover: #e0a868;
-  --danger: #d96060;
-  --danger-hover: #e87878;
+:root.dark:not(.theme-light), :root.theme-dark {
+  /* System Dark or Forced Dark */
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --border: #334155;
+  --text-1: #f8fafc;
+  --text-2: #cbd5e1;
+  --text-3: #94a3b8;
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --danger: #f87171;
+  --danger-hover: #fca5a5;
 }
 
 :root.sepia {
-  --bg: #f4ecd8;
-  --surface: #faf5e8;
-  --border: #d4c5a0;
-  --text-1: #5b4636;
-  --text-2: #8a7060;
-  --text-3: #a89480;
-  --accent: #c47f3a;
-  --accent-hover: #d4954f;
+  /* Green Eye Protection */
+  --bg: #cce8cf;
+  --surface: #dcf2df;
+  --border: #b1d8b6;
+  --text-1: #2a3d2c;
+  --text-2: #3d5940;
+  --text-3: #587d5b;
+  --accent: #2e7d32;
+  --accent-hover: #388e3c;
   --danger: #c94a4a;
   --danger-hover: #d96060;
 }

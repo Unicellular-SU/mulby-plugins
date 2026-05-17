@@ -20,7 +20,7 @@ export interface BookEntry {
 export interface ReaderSettings {
   fontSize: number
   lineHeight: number
-  theme: 'light' | 'dark' | 'sepia'
+  theme: 'system' | 'light' | 'dark' | 'sepia'
 }
 
 export default function App() {
@@ -36,14 +36,14 @@ export default function App() {
   const [settings, setSettings] = useState<ReaderSettings>({
     fontSize: 18,
     lineHeight: 1.8,
-    theme: 'light',
+    theme: 'system',
   })
 
   useEffect(() => {
     async function init() {
       try {
         const saved = await call('getSettings')
-        if (saved) setSettings(saved)
+        if (saved) setSettings({ ...saved, theme: saved.theme || 'system' })
       } catch {
         // Use defaults
       } finally {
@@ -53,12 +53,38 @@ export default function App() {
     init()
   }, [])
 
+  const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>('light')
+
   useEffect(() => {
-    document.documentElement.classList.remove('dark', 'sepia')
-    if (settings.theme !== 'light') {
-      document.documentElement.classList.add(settings.theme)
+    // Fetch initial system theme from Mulby
+    window.mulby?.theme?.getActual?.().then((actual) => {
+      setSystemTheme(actual || 'light')
+    }).catch(() => {})
+
+    // Listen for theme changes from Mulby
+    window.mulby?.onThemeChange?.((theme) => {
+      setSystemTheme(theme)
+    })
+  }, [])
+
+  useEffect(() => {
+    const root = document.documentElement
+    root.classList.remove('theme-light', 'theme-dark', 'sepia', 'dark')
+    
+    if (settings.theme === 'light') {
+      root.classList.add('theme-light')
+    } else if (settings.theme === 'dark') {
+      root.classList.add('theme-dark')
+    } else if (settings.theme === 'sepia') {
+      root.classList.add('sepia')
+    } else if (settings.theme === 'system') {
+      if (systemTheme === 'dark') {
+        root.classList.add('dark')
+      } else {
+        root.classList.add('theme-light')
+      }
     }
-  }, [settings.theme])
+  }, [settings.theme, systemTheme])
 
   const importAndOpen = useCallback(async (filePath: string) => {
     try {

@@ -63,6 +63,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
   const [scrollProgress, setScrollProgress] = useState(book.progress)
   const [activeChapter, setActiveChapter] = useState(0)
   const restoringRef = useRef(false)
+  const pendingScrollRef = useRef<number | null>(null)
 
   const chapters = chapterIndex ? toPanelChapters(chapterIndex) : []
   const showChaptersRef = useRef(false)
@@ -109,7 +110,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     return data
   }, [book.filePath, book.id, getCurrentScrollProgress, host, restoreScrollProgress])
 
-  const loadChapterByIndex = useCallback(async (chaptersSource: ChapterIndex[], idx: number) => {
+  const loadChapterByIndex = useCallback(async (chaptersSource: ChapterIndex[], idx: number, targetScroll: number = 0) => {
     if (idx < 0 || idx >= chaptersSource.length) return false
 
     const cached = preloadCache.current.get(idx)
@@ -118,8 +119,8 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
       setCurrentChapterIdx(idx)
       setActiveChapter(idx)
       setReadingMode('chapter')
-      setScrollProgress(0)
-      if (containerRef.current) containerRef.current.scrollTop = 0
+      setScrollProgress(targetScroll)
+      pendingScrollRef.current = targetScroll
       return true
     }
 
@@ -131,14 +132,33 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
       setCurrentChapterIdx(idx)
       setActiveChapter(idx)
       setReadingMode('chapter')
-      setScrollProgress(0)
-      if (containerRef.current) containerRef.current.scrollTop = 0
+      setScrollProgress(targetScroll)
+      pendingScrollRef.current = targetScroll
       return true
     } catch (err) {
       console.error('[novel-reader] loadChapter failed:', err)
       return false
     }
   }, [book.filePath, host])
+
+  useEffect(() => {
+    if (readingMode === 'chapter' && chapterContent && pendingScrollRef.current !== null) {
+      const target = pendingScrollRef.current
+      pendingScrollRef.current = null
+      
+      restoringRef.current = true
+      requestAnimationFrame(() => {
+        const el = containerRef.current
+        if (el) {
+          const maxScroll = el.scrollHeight - el.clientHeight
+          el.scrollTop = Math.max(0, maxScroll * target)
+        }
+        requestAnimationFrame(() => {
+          restoringRef.current = false
+        })
+      })
+    }
+  }, [chapterContent, readingMode])
 
   const initialProgressRef = useRef(book.progress)
   useEffect(() => {
@@ -200,9 +220,13 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
 
       // Step 2: If chapters already exist, switch to chapter mode directly
       if (previewChapters.length > 0) {
-        const initialIdx = resolveInitialChapterIndex(previewChapters, initialProgress)
-        await loadChapterByIndex(previewChapters, initialIdx)
+        const exactProgress = initialProgress * previewChapters.length
+        const initialIdx = Math.max(0, Math.min(previewChapters.length - 1, Math.floor(exactProgress)))
+        const targetScroll = Math.max(0, Math.min(0.99, exactProgress - initialIdx))
+        
+        await loadChapterByIndex(previewChapters, initialIdx, targetScroll)
         if (!cancelled) setIndexingDone(true)
+        if (book.indexing) call('clearIndexingState', book.id)
         return
       }
 
@@ -210,6 +234,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
       if (previewIndexed) {
         await loadFullTextFallback()
         if (!cancelled) setIndexingDone(true)
+        if (book.indexing) call('clearIndexingState', book.id)
         return
       }
 
@@ -230,8 +255,10 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
         if (nextChapters.length > 0) {
           setChapterIndex(nextChapters)
           setHasChapters(true)
-          const initialIdx = resolveInitialChapterIndex(nextChapters, initialProgress)
-          await loadChapterByIndex(nextChapters, initialIdx)
+          const exactProgress = initialProgress * nextChapters.length
+          const initialIdx = Math.max(0, Math.min(nextChapters.length - 1, Math.floor(exactProgress + 0.000001)))
+          const targetScroll = Math.max(0, Math.min(0.999, exactProgress - Math.floor(exactProgress + 0.000001)))
+          await loadChapterByIndex(nextChapters, initialIdx, targetScroll)
         } else {
           setHasChapters(false)
           await loadFullTextFallback()
@@ -381,7 +408,8 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     return () => window.removeEventListener('keydown', handler)
   }, [handleBossKey, handleChapterSelect, chapterIndex, currentChapterIdx, readingMode])
 
-  const percent = Math.round(overallProgress * 100)
+  const percentValue = overallProgress * 100
+  const percentStr = percentValue.toFixed(1)
 
   return (
     <div className="flex flex-col h-full">
@@ -408,7 +436,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
             <List size={16} />
           </button>
         )}
-        <span className="text-xs text-[var(--text-3)]">{percent}%</span>
+        <span className="text-xs text-[var(--text-3)]">{percentStr}%</span>
       </div>
 
       {/* Indexing banner */}
@@ -469,7 +497,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
                 </p>
               )}
               <p className="text-xs text-[var(--text-3)]">
-                {percent >= 99 ? '已读完' : `已阅读 ${percent}%`}
+                {percentValue >= 99.9 ? '已读完' : `已阅读 ${percentStr}%`}
               </p>
             </div>
           </>
@@ -478,15 +506,35 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
 
       {/* Bottom bar */}
       <div className="shrink-0 flex items-center justify-between px-4 py-2 border-t border-[var(--border)] bg-[var(--surface)]">
-        <span className="text-xs text-[var(--text-3)]">
+        <span className="text-xs text-[var(--text-3)] flex-1">
           {readingMode === 'chapter' && chapterIndex
             ? `${currentChapterIdx + 1}/${chapterIndex.length}章`
-            : `进度 ${percent}%`}
+            : `进度 ${percentStr}%`}
         </span>
-        <div className="flex items-center gap-2">
-          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} title="返回书架" onClick={onBack}>
-            <ArrowLeft size={16} />
-          </button>
+        
+        {readingMode === 'chapter' && chapterIndex && (
+          <div className="flex items-center justify-center gap-4 flex-1">
+            <button 
+              className="p-1.5 rounded hover:bg-[var(--border)] transition-colors text-[var(--text-2)] disabled:opacity-30 text-sm"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              onClick={() => handleChapterSelect({ index: currentChapterIdx, title: '', charPosition: 0 })}
+              disabled={currentChapterIdx <= 0}
+            >
+              上一章
+            </button>
+            <button 
+              className="p-1.5 rounded hover:bg-[var(--border)] transition-colors text-[var(--text-2)] disabled:opacity-30 text-sm"
+              style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+              onClick={() => handleChapterSelect({ index: currentChapterIdx + 2, title: '', charPosition: 0 })}
+              disabled={currentChapterIdx >= chapterIndex.length - 1}
+            >
+              下一章
+            </button>
+          </div>
+        )}
+        {!readingMode || readingMode === 'full' || !chapterIndex ? <div className="flex-1" /> : null}
+
+        <div className="flex items-center justify-end gap-2 flex-1">
           <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} title="设置" onClick={() => setShowSettings(true)}>
             <Settings size={16} />
           </button>

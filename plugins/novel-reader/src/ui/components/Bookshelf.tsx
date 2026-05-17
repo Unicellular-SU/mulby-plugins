@@ -56,6 +56,15 @@ export default function Bookshelf({ onOpenBook, onImportBook }: {
     setBooks(list ?? [])
   }, [host])
 
+  useEffect(() => {
+    const hasIndexing = books.some((b) => b.indexing)
+    if (!hasIndexing) return
+    const timer = setInterval(() => {
+      refreshBooks()
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [books, refreshBooks])
+
   const handleAddBook = useCallback(async () => {
     const result = await dialog.showOpenDialog({
       title: '选择小说文件',
@@ -121,7 +130,7 @@ export default function Bookshelf({ onOpenBook, onImportBook }: {
                     />
                   </div>
                   <span className="text-xs text-[var(--text-3)]">
-                    {Math.round(book.progress * 100)}%
+                    {(book.progress * 100).toFixed(1)}%
                   </span>
                 </div>
                 {book.indexing ? (
@@ -131,7 +140,7 @@ export default function Bookshelf({ onOpenBook, onImportBook }: {
                   </p>
                 ) : book.chapterCount > 0 ? (
                   <p className="text-xs text-[var(--text-3)] mt-1">
-                    {book.chapterCount}章 · {formatChars(book.totalChars)}字
+                    {book.chapterCount}章 · {formatChars(book.totalChars)}
                   </p>
                 ) : null}
               </div>

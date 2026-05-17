@@ -80,7 +80,8 @@ async function readFileCached(ctx: PluginContext, filePath: string): Promise<str
   const cached = fileCache.get(filePath)
   if (cached !== undefined) return cached
   const raw = await readFsFile(filePath)
-  const detected = jschardet.detect(raw)
+  const sample = raw.length > 100000 ? raw.subarray(0, 100000) : raw
+  const detected = jschardet.detect(Buffer.from(sample))
   const encoding = (detected && detected.encoding && detected.confidence > 0.8) ? detected.encoding : 'utf-8'
   const text = iconv.decode(raw, encoding)
   cacheFile(filePath, text)
@@ -105,7 +106,7 @@ function trimPreviewText(text: string, truncated: boolean): string {
 async function readFilePreview(filePath: string): Promise<{ text: string; truncated: boolean }> {
   const cached = fileCache.get(filePath)
   if (cached !== undefined) {
-    return { text: cached, truncated: false }
+    return { text: cached.slice(0, PREVIEW_BYTES), truncated: cached.length > PREVIEW_BYTES }
   }
 
   const stats = await statFs(filePath)
@@ -191,11 +192,11 @@ function normalizeSettings(data: unknown): ReaderSettings {
     value
     && typeof value.fontSize === 'number'
     && typeof value.lineHeight === 'number'
-    && (value.theme === 'light' || value.theme === 'dark' || value.theme === 'sepia')
+    && (value.theme === 'light' || value.theme === 'dark' || value.theme === 'sepia' || value.theme === 'system')
   ) {
     return value as ReaderSettings
   }
-  return { fontSize: 18, lineHeight: 1.8, theme: 'light' }
+  return { fontSize: 18, lineHeight: 1.8, theme: 'system' }
 }
 
 async function updateBookEntry(ctx: PluginContext, bookId: string, patch: Partial<BookEntry>): Promise<BookEntry | null> {
@@ -261,6 +262,16 @@ export const host = {
     const storedIndex = normalizeStoredIndex(await storage.get(`${CHAPTER_INDEX_PREFIX}${id}`))
     const hasCompletedIndex = Boolean(storedIndex)
 
+    let estimatedChars = existing?.totalChars ?? 0
+    if (!hasCompletedIndex && estimatedChars === 0) {
+      try {
+        const stats = await statFs(filePath)
+        estimatedChars = typeof stats?.size === 'number' ? stats.size : 0
+      } catch (err) {
+        /* ignore */
+      }
+    }
+
     const entry: BookEntry = {
       id,
       title: titleFromPath(filePath),
@@ -269,7 +280,7 @@ export const host = {
       lastReadAt: existing?.lastReadAt ?? 0,
       progress: existing?.progress ?? 0,
       chapterCount: hasCompletedIndex ? storedIndex!.chapters.length : 0,
-      totalChars: storedIndex?.totalChars ?? existing?.totalChars ?? 0,
+      totalChars: storedIndex?.totalChars ?? estimatedChars,
       indexing: !hasCompletedIndex,
     }
 
@@ -281,13 +292,31 @@ export const host = {
 
     await storage.set(BOOKSHELF_KEY, books)
     log(`导入: ${entry.title}`)
+
+    if (!hasCompletedIndex) {
+      host.indexBook(ctx, filePath, id).catch((err) => {
+        console.error('[novel-reader] Background indexing failed:', err)
+      })
+    }
+
     return { book: entry }
+  },
+
+  async clearIndexingState(ctx: PluginContext, bookId: string) {
+    await updateBookEntry(ctx, bookId, { indexing: false })
   },
 
   // 快速返回正文首屏，避免等待整本书读取完成
   async openBookPreview(ctx: PluginContext, filePath: string, bookId: string) {
     const preview = await readFilePreview(filePath)
     const storedIndex = normalizeStoredIndex(await ctx.api.storage.get(`${CHAPTER_INDEX_PREFIX}${bookId}`))
+
+    if (storedIndex) {
+      await updateBookEntry(ctx, bookId, {
+        chapterCount: storedIndex.chapters.length,
+        indexing: false,
+      })
+    }
 
     return {
       text: preview.text,

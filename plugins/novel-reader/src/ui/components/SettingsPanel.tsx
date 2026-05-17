@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { X, Sun, Moon, BookOpen } from 'lucide-react'
+import { X, Sun, Moon, BookOpen, Monitor } from 'lucide-react'
 import type { ReaderSettings } from '../App'
 
 const FONT_SIZES = [12, 14, 16, 18, 20, 22, 24, 26, 28]
@@ -10,6 +10,7 @@ const LINE_HEIGHTS = [
   { label: '宽松', value: 2.5 },
 ]
 const THEMES: { key: ReaderSettings['theme']; label: string; icon: typeof Sun }[] = [
+  { key: 'system', label: '系统', icon: Monitor },
   { key: 'light', label: '浅色', icon: Sun },
   { key: 'dark', label: '深色', icon: Moon },
   { key: 'sepia', label: '护眼', icon: BookOpen },
@@ -86,7 +87,7 @@ export default function SettingsPanel({ settings, onChange, onClose }: {
         {/* Theme */}
         <div>
           <label className="block text-sm text-[var(--text-2)] mb-2">主题</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {THEMES.map((t) => {
               const Icon = t.icon
               return (
