@@ -2,9 +2,9 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 
 /**
  * 截图置顶插件 - 统一入口：
- * 通过 onPluginInit 的 route 字段判断当前窗口角色：
- * - 没有 mode=pin → CaptureHost：接收 preCapture 截图，创建 Pin 子窗口
- * - 有 mode=pin → PinWindow：展示截图，支持拖动、右键关闭
+ * 由 Mulby 在 preCapture 后直接打开 detached 透明窗口：
+ * - 图片未准备好时渲染透明空状态
+ * - 图片准备好后展示截图，支持拖动、右键关闭、双击关闭
  */
 
 // 附件类型
@@ -17,6 +17,13 @@ interface Attachment {
   ext?: string
   path?: string
   dataUrl?: string
+  capture?: {
+    type: 'region' | 'fullscreen'
+    region?: CaptureRegion
+    display?: {
+      scaleFactor?: number
+    }
+  }
 }
 
 interface PluginInitData {
@@ -25,14 +32,129 @@ interface PluginInitData {
   input: string
   mode?: string
   route?: string
+  params?: Record<string, string>
   attachments?: Attachment[]
 }
 
+type WindowBounds = { x: number; y: number; width: number; height: number }
+
+type DisplaySize = { width: number; height: number }
+
+type CaptureRegion = {
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor?: number
+}
+
+type DragState = {
+  pointerId: number
+  startScreenX: number
+  startScreenY: number
+  startWindowX: number
+  startWindowY: number
+  lastScreenX: number
+  lastScreenY: number
+  frameId: number | null
+  ready: boolean
+}
+
+type PinImageData = {
+  dataUrl: string
+  region?: CaptureRegion
+  scaleFactor: number
+}
+
+const LARGE_WINDOW_MARGIN = 24
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function getPreviewDisplaySize(data: {
+  region?: CaptureRegion
+  scaleFactor: number
+  naturalWidth?: number
+  naturalHeight?: number
+}) {
+  if (data.region?.width && data.region.height) {
+    return {
+      width: data.region.width,
+      height: data.region.height
+    }
+  }
+
+  if (data.naturalWidth && data.naturalHeight) {
+    return {
+      width: Math.max(80, Math.round(data.naturalWidth / data.scaleFactor)),
+      height: Math.max(60, Math.round(data.naturalHeight / data.scaleFactor))
+    }
+  }
+
+  return {
+    width: Math.max(240, window.innerWidth),
+    height: Math.max(160, window.innerHeight)
+  }
+}
+
+function buildConstrainedBounds(args: {
+  displaySize: DisplaySize
+  region?: CaptureRegion
+  workArea?: { x: number; y: number; width: number; height: number }
+}) {
+  const requestedWidth = Math.max(1, Math.round(args.displaySize.width))
+  const requestedHeight = Math.max(1, Math.round(args.displaySize.height))
+
+  if (!args.region || !args.workArea) {
+    return {
+      width: requestedWidth,
+      height: requestedHeight
+    }
+  }
+
+  const shouldInsetLargeWindow =
+    requestedWidth >= args.workArea.width - LARGE_WINDOW_MARGIN * 2 ||
+    requestedHeight >= args.workArea.height - LARGE_WINDOW_MARGIN * 2
+  const safeWorkArea = shouldInsetLargeWindow
+    ? {
+        x: args.workArea.x + LARGE_WINDOW_MARGIN,
+        y: args.workArea.y + LARGE_WINDOW_MARGIN,
+        width: Math.max(1, args.workArea.width - LARGE_WINDOW_MARGIN * 2),
+        height: Math.max(1, args.workArea.height - LARGE_WINDOW_MARGIN * 2)
+      }
+    : args.workArea
+
+  const width = Math.max(1, Math.min(requestedWidth, safeWorkArea.width))
+  const height = Math.max(1, Math.min(requestedHeight, safeWorkArea.height))
+
+  return {
+    x: clamp(args.region.x, safeWorkArea.x, safeWorkArea.x + Math.max(0, safeWorkArea.width - width)),
+    y: clamp(args.region.y, safeWorkArea.y, safeWorkArea.y + Math.max(0, safeWorkArea.height - height)),
+    width,
+    height
+  }
+}
+
+function loadImage(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('截图加载失败'))
+    image.src = dataUrl
+  })
+}
+
 export default function App() {
-  // 通过 state 切换模式，由 onPluginInit 的 route 决定
-  const [viewMode, setViewMode] = useState<'loading' | 'capture' | 'pin'>('loading')
-  const [imgSrc, setImgSrc] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'loading' | 'pin'>('loading')
+  const [pinImage, setPinImage] = useState<PinImageData | null>(null)
   const hasHandled = useRef(false)
+
+  const closeCurrentWindowSoon = useCallback((delay = 120) => {
+    window.setTimeout(() => {
+      window.mulby?.window?.close?.()
+    }, delay)
+  }, [])
 
   /**
    * 从附件中提取截图 Data URL
@@ -53,43 +175,70 @@ export default function App() {
     return null
   }, [])
 
-  /**
-   * 创建 Pin 子窗口
-   */
-  const createPinWindow = useCallback(async (dataUrl: string) => {
-    try {
-      const imgSize = await getImageSize(dataUrl)
-      const maxW = 800, maxH = 600
-      let w = imgSize.width, h = imgSize.height
-      if (w > maxW || h > maxH) {
-        const scale = Math.min(maxW / w, maxH / h)
-        w = Math.round(w * scale)
-        h = Math.round(h * scale)
-      }
-
-      const encodedData = encodeURIComponent(dataUrl)
-      await window.mulby?.window?.create?.(
-        `/index.html?mode=pin&img=${encodedData}`,
-        {
-          width: w,
-          height: h,
-          type: 'borderless',
-          alwaysOnTop: true,
-          resizable: true,
-          titleBar: false,
-          transparent: true,
-        } as any
-      )
-    } catch (err) {
-      console.error('[screen-pin] 创建 Pin 窗口失败:', err)
-      window.mulby?.notification?.show('创建置顶窗口失败', 'error')
+  const resolveWindowBounds = useCallback(async (displaySize: DisplaySize, region?: CaptureRegion) => {
+    if (!region) {
+      return buildConstrainedBounds({ displaySize })
     }
 
-    // 关闭主窗口
-    setTimeout(() => {
-      window.mulby?.window?.close?.()
-    }, 300)
+    try {
+      const display = await window.mulby?.screen?.getDisplayMatching?.({
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height
+      })
+
+      return buildConstrainedBounds({
+        displaySize,
+        region,
+        workArea: display?.workArea ?? display?.bounds
+      })
+    } catch {
+      return buildConstrainedBounds({ displaySize, region })
+    }
   }, [])
+
+  const applyWindowBoundsForImage = useCallback(async (
+    displaySize: DisplaySize,
+    region?: CaptureRegion,
+    shouldCenter = false
+  ) => {
+    const bounds = await resolveWindowBounds(displaySize, region)
+    await window.mulby?.window?.setBounds?.(bounds)
+
+    if (shouldCenter) {
+      window.mulby?.window?.center?.()
+    }
+  }, [resolveWindowBounds])
+
+  const openPinImage = useCallback(async (nextImage: PinImageData) => {
+    const previewSize = getPreviewDisplaySize({
+      region: nextImage.region,
+      scaleFactor: nextImage.scaleFactor
+    })
+
+    setPinImage(nextImage)
+    setViewMode('pin')
+    window.mulby?.window?.setAlwaysOnTop?.(true)
+    void applyWindowBoundsForImage(previewSize, nextImage.region, !nextImage.region)
+
+    try {
+      const image = await loadImage(nextImage.dataUrl)
+      if (!nextImage.region) {
+        const displaySize = getPreviewDisplaySize({
+          scaleFactor: nextImage.scaleFactor,
+          naturalWidth: image.naturalWidth,
+          naturalHeight: image.naturalHeight
+        })
+        void applyWindowBoundsForImage(displaySize, undefined, true)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '截图加载失败'
+      console.error('[screen-pin] 截图加载失败:', err)
+      window.mulby?.notification?.show(message, 'error')
+      closeCurrentWindowSoon()
+    }
+  }, [applyWindowBoundsForImage, closeCurrentWindowSoon])
 
   useEffect(() => {
     // 初始化主题
@@ -106,56 +255,65 @@ export default function App() {
       if (hasHandled.current) return
       hasHandled.current = true
 
-      // 通过 route 字段判断是否为 Pin 子窗口
+      // 兼容旧版子窗口 route / params；新版直接使用 preCapture 附件。
       const route = data.route || ''
       const routeParams = new URLSearchParams(route.split('?')[1] || '')
-      const isPinWindow = routeParams.get('mode') === 'pin'
+      const searchParams = new URLSearchParams(window.location.search)
+      const initParams = data.params || {}
 
-      if (isPinWindow) {
-        // ===== Pin 子窗口模式：从 route 参数中提取图片 =====
-        const imgParam = routeParams.get('img')
-        if (imgParam) {
-          setImgSrc(decodeURIComponent(imgParam))
-        }
-        setViewMode('pin')
-        // 确保置顶
-        window.mulby?.window?.setAlwaysOnTop?.(true)
+      const legacyImgParam = initParams.img || routeParams.get('img') || searchParams.get('img')
+      if (legacyImgParam) {
+        void openPinImage({
+          dataUrl: decodeURIComponent(legacyImgParam),
+          scaleFactor: window.devicePixelRatio || 1
+        })
+        return
+      }
+
+      const imgAttachment = data.attachments?.find(a => a.kind === 'image')
+      if (imgAttachment) {
+        resolveAttachmentDataUrl(imgAttachment).then(dataUrl => {
+          if (dataUrl) {
+            void openPinImage({
+              dataUrl,
+              region: imgAttachment.capture?.region,
+              scaleFactor:
+                imgAttachment.capture?.region?.scaleFactor ??
+                imgAttachment.capture?.display?.scaleFactor ??
+                window.devicePixelRatio ??
+                1
+            })
+          } else {
+            window.mulby?.notification?.show('未获取到截图数据', 'warning')
+            closeCurrentWindowSoon()
+          }
+        })
       } else {
-        // ===== 主窗口模式：接收 preCapture 数据并创建 Pin 子窗口 =====
-        setViewMode('capture')
-        const imgAttachment = data.attachments?.find(a => a.kind === 'image')
-        if (imgAttachment) {
-          resolveAttachmentDataUrl(imgAttachment).then(dataUrl => {
-            if (dataUrl) {
-              createPinWindow(dataUrl)
-            } else {
-              window.mulby?.notification?.show('未获取到截图数据', 'warning')
-            }
-          })
-        } else {
-          window.mulby?.notification?.show('未获取到截图', 'warning')
-        }
+        window.mulby?.notification?.show('未获取到截图', 'warning')
+        closeCurrentWindowSoon()
       }
     })
-  }, [createPinWindow, resolveAttachmentDataUrl])
+  }, [closeCurrentWindowSoon, openPinImage, resolveAttachmentDataUrl])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        window.mulby?.window?.close?.()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [])
 
   if (viewMode === 'loading') {
-    return <div className="pin-loading"><div className="spinner" /></div>
-  }
-
-  if (viewMode === 'capture') {
-    return (
-      <div className="capture-host">
-        <div className="capture-hint">
-          <div className="spinner" />
-          <span>正在创建置顶窗口...</span>
-        </div>
-      </div>
-    )
+    return null
   }
 
   // ===== Pin 模式 =====
-  return <PinView imgSrc={imgSrc} />
+  return <PinView imgSrc={pinImage?.dataUrl ?? null} />
 }
 
 /**
@@ -163,7 +321,17 @@ export default function App() {
  */
 function PinView({ imgSrc }: { imgSrc: string | null }) {
   const [currentOpacity, setCurrentOpacity] = useState(1)
+  const [isImageReady, setIsImageReady] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const dragStateRef = useRef<DragState | null>(null)
+
+  const cancelDragFrame = useCallback(() => {
+    const dragState = dragStateRef.current
+    if (dragState?.frameId !== null && dragState?.frameId !== undefined) {
+      window.cancelAnimationFrame(dragState.frameId)
+      dragState.frameId = null
+    }
+  }, [])
 
   // 调用原生 Window API 设置窗口透明度
   const applyOpacity = useCallback(async (value: number) => {
@@ -174,6 +342,93 @@ function PinView({ imgSrc }: { imgSrc: string | null }) {
       console.error('[screen-pin] setOpacity 失败:', err)
     }
   }, [])
+
+  const moveWindowToPointer = useCallback((dragState: DragState) => {
+    const nextX = Math.round(dragState.startWindowX + dragState.lastScreenX - dragState.startScreenX)
+    const nextY = Math.round(dragState.startWindowY + dragState.lastScreenY - dragState.startScreenY)
+    const win = window.mulby?.window
+
+    if (win?.setPosition) {
+      win.setPosition(nextX, nextY)
+    } else if (win?.setBounds) {
+      void win.setBounds({ x: nextX, y: nextY })
+    }
+  }, [])
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+
+    const win = window.mulby?.window
+    if (!win?.getBounds || (!win.setBounds && !win.setPosition)) return
+
+    const pointerId = e.pointerId
+    const startScreenX = e.screenX
+    const startScreenY = e.screenY
+    e.currentTarget.setPointerCapture(pointerId)
+
+    void win.getBounds().then((bounds: WindowBounds | null) => {
+      if (!bounds || dragStateRef.current?.pointerId !== pointerId) return
+
+      dragStateRef.current.startWindowX = bounds.x
+      dragStateRef.current.startWindowY = bounds.y
+      dragStateRef.current.ready = true
+    }).catch((err: unknown) => {
+      console.error('[screen-pin] 获取窗口位置失败:', err)
+      dragStateRef.current = null
+    })
+
+    dragStateRef.current = {
+      pointerId,
+      startScreenX,
+      startScreenY,
+      startWindowX: 0,
+      startWindowY: 0,
+      lastScreenX: startScreenX,
+      lastScreenY: startScreenY,
+      frameId: null,
+      ready: false,
+    }
+  }, [])
+
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== e.pointerId) return
+
+    dragState.lastScreenX = e.screenX
+    dragState.lastScreenY = e.screenY
+
+    if (!dragState.ready) return
+    if (dragState.frameId !== null) return
+
+    dragState.frameId = window.requestAnimationFrame(() => {
+      dragState.frameId = null
+      moveWindowToPointer(dragState)
+    })
+  }, [moveWindowToPointer])
+
+  const finishPointerDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const dragState = dragStateRef.current
+    if (!dragState || dragState.pointerId !== e.pointerId) return
+
+    cancelDragFrame()
+    dragStateRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+  }, [cancelDragFrame])
+
+  useEffect(() => {
+    return () => {
+      cancelDragFrame()
+      dragStateRef.current = null
+    }
+  }, [cancelDragFrame])
+
+  useEffect(() => {
+    setIsImageReady(false)
+  }, [imgSrc])
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -229,32 +484,42 @@ function PinView({ imgSrc }: { imgSrc: string | null }) {
   }, [imgSrc])
 
   const handleDoubleClick = useCallback(() => {
+    cancelDragFrame()
+    dragStateRef.current = null
     window.mulby?.window?.close?.()
-  }, [])
+  }, [cancelDragFrame])
 
   if (!imgSrc) {
-    return <div className="pin-loading"><div className="spinner" /></div>
+    return null
   }
 
   return (
     <div
       ref={containerRef}
-      className="pin-container"
+      className={`pin-container ${isImageReady ? 'is-ready' : 'is-waiting'}`}
       onContextMenu={handleContextMenu}
       onDoubleClick={handleDoubleClick}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishPointerDrag}
+      onPointerCancel={finishPointerDrag}
     >
-      <div className="pin-drag-handle" />
-      <img className="pin-image" src={imgSrc} alt="截图" draggable={false} />
+      <img
+        className="pin-image"
+        src={imgSrc}
+        alt="截图"
+        draggable={false}
+        onLoad={() => {
+          setIsImageReady(true)
+          window.mulby?.window?.show?.()
+          window.mulby?.window?.setAlwaysOnTop?.(true)
+        }}
+        onError={() => {
+          window.mulby?.notification?.show('截图加载失败', 'error')
+          window.mulby?.window?.close?.()
+        }}
+      />
       <div className="pin-border" />
     </div>
   )
-}
-
-function getImageSize(dataUrl: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight })
-    img.onerror = () => resolve({ width: 400, height: 300 })
-    img.src = dataUrl
-  })
 }

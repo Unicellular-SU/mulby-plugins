@@ -29,7 +29,8 @@ export function onDisable() {
 export async function run(context: PluginContext) {
   const featureCode = context.featureCode ?? 'pin-screenshot'
   console.log(`${PLUGIN_TAG} feature=${featureCode}`)
-  // 核心逻辑在 UI 侧完成：screenCapture → 创建 pin 子窗口
+  await mulby.window.setAlwaysOnTop?.(true)
+  // 核心逻辑在 UI 侧完成：读取 preCapture 截图附件并显示当前 detached 窗口
 }
 
 const plugin = { onLoad, onUnload, onEnable, onDisable, run }
