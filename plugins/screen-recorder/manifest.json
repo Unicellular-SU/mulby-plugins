@@ -1,7 +1,7 @@
 {
   "id": "screen-recorder",
   "name": "screen-recorder",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "mulby",
   "type": "media",
   "displayName": "录屏助手",
