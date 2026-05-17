@@ -1,7 +1,9 @@
 /// <reference path="./types/mulby.d.ts" />
 
 declare const require: any
-const { open: openFsFile, stat: statFs } = require('node:fs/promises')
+const { readFile: readFsFile, open: openFsFile, stat: statFs } = require('node:fs/promises')
+const jschardet = require('jschardet')
+const iconv = require('iconv-lite')
 
 type PluginContext = BackendPluginContext
 
@@ -77,8 +79,10 @@ function cacheFile(filePath: string, text: string) {
 async function readFileCached(ctx: PluginContext, filePath: string): Promise<string> {
   const cached = fileCache.get(filePath)
   if (cached !== undefined) return cached
-  const raw = await ctx.api.filesystem.readFile(filePath, 'utf-8')
-  const text = typeof raw === 'string' ? raw : new TextDecoder('utf-8').decode(raw)
+  const raw = await readFsFile(filePath)
+  const detected = jschardet.detect(raw)
+  const encoding = (detected && detected.encoding && detected.confidence > 0.8) ? detected.encoding : 'utf-8'
+  const text = iconv.decode(raw, encoding)
   cacheFile(filePath, text)
   return text
 }
@@ -113,7 +117,12 @@ async function readFilePreview(filePath: string): Promise<{ text: string; trunca
     const result = await fileHandle.read(buffer, 0, buffer.length, 0)
     const bytesRead = typeof result?.bytesRead === 'number' ? result.bytesRead : 0
     const truncated = typeof stats?.size === 'number' ? stats.size > bytesRead : false
-    const text = new TextDecoder('utf-8').decode(buffer.subarray(0, bytesRead))
+    
+    const subarray = buffer.subarray(0, bytesRead)
+    const detected = jschardet.detect(Buffer.from(subarray))
+    const encoding = (detected && detected.encoding && detected.confidence > 0.8) ? detected.encoding : 'utf-8'
+    const text = iconv.decode(Buffer.from(subarray), encoding)
+    
     return {
       text: trimPreviewText(text, truncated),
       truncated,

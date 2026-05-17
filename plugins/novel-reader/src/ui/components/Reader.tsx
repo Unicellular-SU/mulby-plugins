@@ -14,70 +14,19 @@ interface ChapterIndex {
   endOffset: number
 }
 
-const CHAPTER_PATTERNS = [
-  /^第[零一二三四五六七八九十百千\d]+[章节回卷].*/,
-  /^Chapter\s+\d+.*/i,
-  /^[1-9]\d*[、，.]\s*\S/,
-]
-
-const INDEX_CHUNK_SIZE = 800
-
-function waitForNextIndexChunk() {
-  return new Promise<void>((resolve) => {
-    setTimeout(resolve, 0)
-  })
-}
-
-async function buildChapterIndex(
-  text: string,
-  onProgress: (progress: number) => void,
-  isCancelled: () => boolean,
-): Promise<ChapterIndex[]> {
-  const lines = text.split('\n')
-  const chapters: ChapterIndex[] = []
-  let offset = 0
-
-  if (lines.length === 0) {
-    onProgress(1)
-    return chapters
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    if (isCancelled()) return chapters
-
-    const line = lines[i]
-    const trimmed = line.trim()
-    const matched = CHAPTER_PATTERNS.some((re) => re.test(trimmed))
-
-    if (matched && trimmed.length <= 40) {
-      if (chapters.length > 0) {
-        chapters[chapters.length - 1].endOffset = Math.max(chapters[chapters.length - 1].startOffset, offset - 1)
-      }
-      chapters.push({ title: trimmed, startOffset: offset, endOffset: text.length })
-    }
-
-    offset += line.length + 1
-
-    if (i % INDEX_CHUNK_SIZE === INDEX_CHUNK_SIZE - 1) {
-      onProgress(Math.min(0.99, (i + 1) / lines.length))
-      await waitForNextIndexChunk()
-    }
-  }
-
-  if (chapters.length > 0) {
-    chapters[chapters.length - 1].endOffset = text.length
-  }
-
-  onProgress(1)
-  return chapters
-}
-
 function toPanelChapters(chapters: ChapterIndex[]): Chapter[] {
   return chapters.map((ch, i) => ({
     index: i + 1,
     title: ch.title,
     charPosition: ch.startOffset,
   }))
+}
+
+function resolveInitialChapterIndex(chapters: ChapterIndex[], progress: number): number {
+  if (chapters.length === 0) return 0
+  if (progress <= 0) return 0
+  if (progress >= 1) return chapters.length - 1
+  return Math.max(0, Math.min(chapters.length - 1, Math.floor(progress * chapters.length)))
 }
 
 export default function Reader({ book, settings, onBack, onSettingsChange }: {
@@ -128,10 +77,10 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
 
   const getCurrentScrollProgress = useCallback(() => {
     const el = containerRef.current
-    if (!el) return scrollProgress
+    if (!el) return 0
     const maxScroll = el.scrollHeight - el.clientHeight
     return maxScroll > 0 ? el.scrollTop / maxScroll : 0
-  }, [scrollProgress])
+  }, [])
 
   const restoreScrollProgress = useCallback((progress: number) => {
     restoringRef.current = true
@@ -147,12 +96,63 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     })
   }, [])
 
+  const loadFullTextFallback = useCallback(async () => {
+    const data = await call('openBookData', book.filePath, book.id)
+    const nextText = typeof data?.text === 'string' ? data.text : ''
+    if (!nextText) return data
+
+    const currentProgress = readingModeRef.current === 'full' ? getCurrentScrollProgress() : 0
+    setFullText(nextText)
+    if (readingModeRef.current === 'full') {
+      restoreScrollProgress(currentProgress)
+    }
+    return data
+  }, [book.filePath, book.id, getCurrentScrollProgress, host, restoreScrollProgress])
+
+  const loadChapterByIndex = useCallback(async (chaptersSource: ChapterIndex[], idx: number) => {
+    if (idx < 0 || idx >= chaptersSource.length) return false
+
+    const cached = preloadCache.current.get(idx)
+    if (cached !== undefined) {
+      setChapterContent(cached)
+      setCurrentChapterIdx(idx)
+      setActiveChapter(idx)
+      setReadingMode('chapter')
+      setScrollProgress(0)
+      if (containerRef.current) containerRef.current.scrollTop = 0
+      return true
+    }
+
+    const ch = chaptersSource[idx]
+    try {
+      const text = await call('readChapter', book.filePath, ch.startOffset, ch.endOffset)
+      preloadCache.current.set(idx, text)
+      setChapterContent(text)
+      setCurrentChapterIdx(idx)
+      setActiveChapter(idx)
+      setReadingMode('chapter')
+      setScrollProgress(0)
+      if (containerRef.current) containerRef.current.scrollTop = 0
+      return true
+    } catch (err) {
+      console.error('[novel-reader] loadChapter failed:', err)
+      return false
+    }
+  }, [book.filePath, host])
+
+  const initialProgressRef = useRef(book.progress)
+  useEffect(() => {
+    initialProgressRef.current = book.progress
+  }, [book.id])
+
   // ── Init: load text first → then index ──
 
   useEffect(() => {
     let cancelled = false
+    let progressTimer: number | null = null
 
     async function init() {
+      const initialProgress = initialProgressRef.current
       setIsLoadingText(true)
       setIsIndexing(false)
       setIndexingProgress(0)
@@ -162,22 +162,27 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
       setCurrentChapterIdx(0)
       setActiveChapter(0)
       setReadingMode('full')
+      setScrollProgress(initialProgress)
       preloadCache.current.clear()
 
       // Step 1: Load a preview first so the reader can render immediately
       let previewText = ''
       let previewLoaded = false
+      let previewIndexed = false
+      let previewChapters: ChapterIndex[] = []
       try {
         const preview = await call('openBookPreview', book.filePath, book.id)
         if (cancelled) return
 
         previewText = preview?.text ?? ''
         previewLoaded = true
+        previewIndexed = Boolean(preview?.indexed)
+        previewChapters = preview?.chapters ?? []
 
         setFullText(previewText)
 
-        if (preview?.chapters?.length > 0) {
-          setChapterIndex(preview.chapters)
+        if (previewChapters.length > 0) {
+          setChapterIndex(previewChapters)
           setHasChapters(true)
         } else {
           setHasChapters(false)
@@ -193,60 +198,52 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
         return
       }
 
-      // Step 2: Load the full text in the background, then continue indexing if needed
+      // Step 2: If chapters already exist, switch to chapter mode directly
+      if (previewChapters.length > 0) {
+        const initialIdx = resolveInitialChapterIndex(previewChapters, initialProgress)
+        await loadChapterByIndex(previewChapters, initialIdx)
+        if (!cancelled) setIndexingDone(true)
+        return
+      }
+
+      // Step 3: No chapters yet. If we've already indexed and found none, load full text as fallback.
+      if (previewIndexed) {
+        await loadFullTextFallback()
+        if (!cancelled) setIndexingDone(true)
+        return
+      }
+
+      // Step 4: Build the catalog in the backend so the reader thread stays responsive.
+      setIsIndexing(true)
+      setIndexingProgress(0.05)
+      progressTimer = window.setInterval(() => {
+        setIndexingProgress((value) => Math.min(0.9, value + 0.05))
+      }, 250)
+
       try {
-        const data = await call('openBookData', book.filePath, book.id)
+        const result = await call('indexBook', book.filePath, book.id)
         if (cancelled) return
 
-        const fullTextData = data?.text ?? previewText
-        const storedChapters: ChapterIndex[] = data?.chapters ?? []
-        const alreadyIndexed = Boolean(data?.indexed)
-        const currentProgress = readingModeRef.current === 'full' ? getCurrentScrollProgress() : 0
-
-        setFullText(fullTextData)
-        if (readingModeRef.current === 'full') {
-          restoreScrollProgress(currentProgress)
-        }
-
-        if (storedChapters.length > 0) {
-          setChapterIndex(storedChapters)
-          setHasChapters(true)
-          setIndexingDone(true)
-          return
-        }
-
-        setChapterIndex(null)
-        setHasChapters(false)
-
-        if (alreadyIndexed) {
-          setIndexingDone(true)
-          return
-        }
-
-        setIsIndexing(true)
-        setIndexingProgress(0)
-
-        const parsed = await buildChapterIndex(
-          fullTextData,
-          setIndexingProgress,
-          () => cancelled,
-        )
-        if (cancelled) return
-
-        const result = await call('saveChapterIndex', book.id, parsed, fullTextData.length)
-        if (cancelled) return
-
-        const nextChapters: ChapterIndex[] = result?.chapters ?? parsed
+        const nextChapters: ChapterIndex[] = result?.chapters ?? []
+        setIndexingProgress(1)
 
         if (nextChapters.length > 0) {
           setChapterIndex(nextChapters)
           setHasChapters(true)
+          const initialIdx = resolveInitialChapterIndex(nextChapters, initialProgress)
+          await loadChapterByIndex(nextChapters, initialIdx)
         } else {
           setHasChapters(false)
+          await loadFullTextFallback()
         }
       } catch (err) {
-        console.error('[novel-reader] background load failed:', err)
+        console.error('[novel-reader] indexBook failed:', err)
+        await loadFullTextFallback()
       } finally {
+        if (progressTimer !== null) {
+          window.clearInterval(progressTimer)
+          progressTimer = null
+        }
         if (!cancelled) {
           setIsIndexing(false)
           setIndexingDone(true)
@@ -255,20 +252,26 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     }
 
     init()
-    return () => { cancelled = true }
-  }, [book.id])
+    return () => {
+      cancelled = true
+      if (progressTimer !== null) {
+        window.clearInterval(progressTimer)
+      }
+    }
+  }, [book.id, book.filePath, host, loadChapterByIndex, loadFullTextFallback])
 
   // ── Restore full-text reading progress after the first paint ──
 
   useEffect(() => {
-    if (isLoadingText || readingMode !== 'full' || !fullText || book.progress <= 0) return
+    const initialProgress = initialProgressRef.current
+    if (isLoadingText || readingMode !== 'full' || !fullText || initialProgress <= 0) return
 
     restoringRef.current = true
     const firstFrame = requestAnimationFrame(() => {
       const el = containerRef.current
       if (el) {
         const maxScroll = el.scrollHeight - el.clientHeight
-        el.scrollTop = Math.max(0, maxScroll * book.progress)
+        el.scrollTop = Math.max(0, maxScroll * initialProgress)
       }
       requestAnimationFrame(() => {
         restoringRef.current = false
@@ -276,30 +279,7 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     })
 
     return () => cancelAnimationFrame(firstFrame)
-  }, [book.id, book.progress, fullText, isLoadingText, readingMode, restoreScrollProgress])
-
-  // ── Load chapter content ──
-
-  const loadChapterContent = useCallback(async (idx: number) => {
-    if (!chapterIndex || idx < 0 || idx >= chapterIndex.length) return
-    if (preloadCache.current.has(idx)) {
-      setChapterContent(preloadCache.current.get(idx)!)
-      setCurrentChapterIdx(idx)
-      setReadingMode('chapter')
-      setScrollProgress(0)
-      return
-    }
-    const ch = chapterIndex[idx]
-    try {
-      const text = await call('readChapter', book.filePath, ch.startOffset, ch.endOffset)
-      setChapterContent(text)
-      setCurrentChapterIdx(idx)
-      setReadingMode('chapter')
-      setScrollProgress(0)
-    } catch (err) {
-      console.error('[novel-reader] loadChapter failed:', err)
-    }
-  }, [chapterIndex, book.filePath, host])
+  }, [book.id, fullText, isLoadingText, readingMode, restoreScrollProgress])
 
   // ── Preload ──
 
@@ -361,12 +341,10 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
   const handleChapterSelect = useCallback((ch: Chapter) => {
     const idx = ch.index - 1
     if (chapterIndex && idx >= 0 && idx < chapterIndex.length) {
-      loadChapterContent(idx)
-      setActiveChapter(idx)
-      if (containerRef.current) containerRef.current.scrollTop = 0
+      void loadChapterByIndex(chapterIndex, idx)
     }
     setShowChapters(false)
-  }, [chapterIndex, loadChapterContent])
+  }, [chapterIndex, loadChapterByIndex])
 
   // ── Boss key ──
 
@@ -412,10 +390,10 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
         className="shrink-0 flex items-center gap-3 px-4 py-2 border-b border-[var(--border)]"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <button
-          className="p-1.5 rounded-lg hover:bg-[var(--border)] transition-colors"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-          onClick={onBack}
+          <button
+            className="p-1.5 rounded-lg hover:bg-[var(--border)] transition-colors"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            onClick={onBack}
         >
           <ArrowLeft size={18} />
         </button>
@@ -506,13 +484,13 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
             : `进度 ${percent}%`}
         </span>
         <div className="flex items-center gap-2">
-          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" title="返回书架" onClick={onBack}>
+          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} title="返回书架" onClick={onBack}>
             <ArrowLeft size={16} />
           </button>
-          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" title="设置" onClick={() => setShowSettings(true)}>
+          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} title="设置" onClick={() => setShowSettings(true)}>
             <Settings size={16} />
           </button>
-          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" title="老板键 (Esc)" onClick={handleBossKey}>
+          <button className="p-2 rounded-lg hover:bg-[var(--border)] transition-colors text-[var(--text-2)]" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} title="老板键 (Esc)" onClick={handleBossKey}>
             <EyeOff size={16} />
           </button>
         </div>
