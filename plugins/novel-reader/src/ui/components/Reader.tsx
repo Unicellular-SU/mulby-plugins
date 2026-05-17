@@ -220,9 +220,21 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
 
       // Step 2: If chapters already exist, switch to chapter mode directly
       if (previewChapters.length > 0) {
-        const exactProgress = initialProgress * previewChapters.length
-        const initialIdx = Math.max(0, Math.min(previewChapters.length - 1, Math.floor(exactProgress)))
-        const targetScroll = Math.max(0, Math.min(0.99, exactProgress - initialIdx))
+        let initialIdx = 0
+        let targetScroll = 0
+        if (book.currentChapterIdx !== undefined && book.currentChapterIdx >= 0) {
+          initialIdx = book.currentChapterIdx
+          targetScroll = book.chapterProgress ?? 0
+        } else {
+          const exactProgress = initialProgress * previewChapters.length
+          initialIdx = Math.max(0, Math.min(previewChapters.length - 1, Math.floor(exactProgress)))
+          targetScroll = exactProgress - initialIdx
+          if (targetScroll <= 0 && initialIdx > 0) {
+            initialIdx -= 1
+            targetScroll = 1.0
+          }
+          targetScroll = Math.max(0, Math.min(1, targetScroll))
+        }
         
         await loadChapterByIndex(previewChapters, initialIdx, targetScroll)
         if (!cancelled) setIndexingDone(true)
@@ -262,8 +274,13 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
             targetScroll = book.chapterProgress ?? 0
           } else {
             const exactProgress = initialProgress * nextChapters.length
-            initialIdx = Math.max(0, Math.min(nextChapters.length - 1, Math.floor(exactProgress + 0.000001)))
-            targetScroll = Math.max(0, Math.min(0.999, exactProgress - Math.floor(exactProgress + 0.000001)))
+            initialIdx = Math.max(0, Math.min(nextChapters.length - 1, Math.floor(exactProgress)))
+            targetScroll = exactProgress - initialIdx
+            if (targetScroll <= 0 && initialIdx > 0) {
+              initialIdx -= 1
+              targetScroll = 1.0
+            }
+            targetScroll = Math.max(0, Math.min(1, targetScroll))
           }
           await loadChapterByIndex(nextChapters, initialIdx, targetScroll)
         } else {
@@ -360,8 +377,14 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
   // ── Overall progress ──
 
   const overallProgress = readingMode === 'chapter' && chapterIndex
-    ? (currentChapterIdx + (scrollProgress > 0.95 ? 1 : scrollProgress)) / Math.max(chapterIndex.length, 1)
+    ? (currentChapterIdx + scrollProgress) / Math.max(chapterIndex.length, 1)
     : scrollProgress
+
+  // Ensure we save progress on unmount or mode change
+  const latestProgressRef = useRef({ overallProgress, currentChapterIdx, scrollProgress, readingMode })
+  useEffect(() => {
+    latestProgressRef.current = { overallProgress, currentChapterIdx, scrollProgress, readingMode }
+  }, [overallProgress, currentChapterIdx, scrollProgress, readingMode])
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -369,6 +392,13 @@ export default function Reader({ book, settings, onBack, onSettingsChange }: {
     }, 500)
     return () => clearTimeout(timer)
   }, [overallProgress, currentChapterIdx, scrollProgress, readingMode, book.id, host])
+
+  useEffect(() => {
+    return () => {
+      const state = latestProgressRef.current
+      call('saveProgress', book.id, state.overallProgress, state.readingMode === 'chapter' ? state.currentChapterIdx : -1, state.scrollProgress)
+    }
+  }, [book.id, host])
 
   // ── Chapter navigation ──
 
