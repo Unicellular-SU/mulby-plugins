@@ -1,7 +1,7 @@
 {
   "id": "screenshot-annotator",
   "name": "screenshot-annotator",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "mulby",
   "type": "productivity",
   "displayName": "截图标注",
@@ -48,11 +48,7 @@
         },
         {
           "type": "keyword",
-          "value": "screenshot"
-        },
-        {
-          "type": "keyword",
-          "value": "annotate"
+          "value": "sc"
         }
       ]
     },
@@ -68,11 +64,7 @@
         },
         {
           "type": "keyword",
-          "value": "screenshot history"
-        },
-        {
-          "type": "keyword",
-          "value": "history"
+          "value": "sch"
         }
       ]
     }

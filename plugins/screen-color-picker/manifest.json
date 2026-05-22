@@ -1,7 +1,7 @@
 {
   "id": "screen-color-picker",
   "name": "screen-color-picker",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "mulby",
   "type": "utility",
   "displayName": "屏幕取色器",
@@ -32,19 +32,7 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "屏幕取色"
-        },
-        {
-          "type": "keyword",
           "value": "取色器"
-        },
-        {
-          "type": "keyword",
-          "value": "color picker"
-        },
-        {
-          "type": "keyword",
-          "value": "pick color"
         }
       ]
     },

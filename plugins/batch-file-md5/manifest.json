@@ -1,7 +1,7 @@
 {
   "id": "batch-file-md5",
   "name": "batch-file-md5",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "mulby",
   "type": "utility",
   "displayName": "批量文件 MD5",
@@ -29,10 +29,10 @@
       "explain": "打开批量 MD5 工具",
       "mode": "ui",
       "cmds": [
-        { "type": "keyword", "value": "文件MD5" },
-        { "type": "keyword", "value": "批量MD5" },
-        { "type": "keyword", "value": "MD5校验" },
-        { "type": "keyword", "value": "计算MD5" }
+        {
+          "type": "keyword",
+          "value": "md5"
+        }
       ]
     },
     {

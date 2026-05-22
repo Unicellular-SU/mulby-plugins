@@ -1,7 +1,7 @@
 {
   "id": "screen-pin",
   "name": "screen-pin",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "author": "mulby",
   "type": "utility",
   "displayName": "截图置顶",
@@ -47,15 +47,7 @@
         },
         {
           "type": "keyword",
-          "value": "pin截图"
-        },
-        {
-          "type": "keyword",
           "value": "screen pin"
-        },
-        {
-          "type": "keyword",
-          "value": "贴图"
         }
       ]
     }

@@ -1,7 +1,7 @@
 {
   "id": "screen-recorder",
   "name": "screen-recorder",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "mulby",
   "type": "media",
   "displayName": "录屏助手",
@@ -40,19 +40,11 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "录屏"
-        },
-        {
-          "type": "keyword",
           "value": "屏幕录制"
         },
         {
           "type": "keyword",
           "value": "screen record"
-        },
-        {
-          "type": "keyword",
-          "value": "screen recorder"
         }
       ]
     }

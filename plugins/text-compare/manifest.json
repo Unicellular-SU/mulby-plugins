@@ -1,7 +1,7 @@
 {
   "id": "text_compare",
   "name": "text-compare",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
   "displayName": "文本/代码对比",
@@ -35,10 +35,6 @@
         {
           "type": "keyword",
           "value": "对比"
-        },
-        {
-          "type": "keyword",
-          "value": "compare"
         },
         {
           "type": "regex",

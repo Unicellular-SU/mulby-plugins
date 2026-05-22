@@ -1,7 +1,7 @@
 {
   "id": "ctool",
   "name": "ctool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "baiy / Mulby adapter",
   "homepage": "https://github.com/baiy/Ctool",
   "displayName": "Ctool",
@@ -39,30 +39,6 @@
         {
           "type": "keyword",
           "value": "ctool"
-        },
-        {
-          "type": "keyword",
-          "value": "开发工具"
-        },
-        {
-          "type": "keyword",
-          "value": "程序工具"
-        },
-        {
-          "type": "keyword",
-          "value": "json工具"
-        },
-        {
-          "type": "keyword",
-          "value": "base64"
-        },
-        {
-          "type": "keyword",
-          "value": "hash"
-        },
-        {
-          "type": "keyword",
-          "value": "时间戳"
         }
       ]
     }

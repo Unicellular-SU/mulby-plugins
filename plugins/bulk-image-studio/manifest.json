@@ -1,7 +1,7 @@
 {
   "id": "bulk-image-studio",
   "name": "bulk-image-studio",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "mulby",
   "type": "productivity",
   "displayName": "图片批量工坊",
@@ -31,14 +31,6 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "图片批量"
-        },
-        {
-          "type": "keyword",
-          "value": "批量处理图片"
-        },
-        {
-          "type": "keyword",
           "value": "图片批量处理"
         }
       ]
@@ -51,14 +43,6 @@
         {
           "type": "keyword",
           "value": "图片合并"
-        },
-        {
-          "type": "keyword",
-          "value": "合并 PDF"
-        },
-        {
-          "type": "keyword",
-          "value": "合并长图"
         }
       ]
     },
@@ -69,11 +53,7 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "手动裁剪"
-        },
-        {
-          "type": "keyword",
-          "value": "连续裁剪"
+          "value": "图片裁剪"
         }
       ]
     },

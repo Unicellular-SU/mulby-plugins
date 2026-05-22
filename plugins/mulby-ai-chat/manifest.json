@@ -1,7 +1,7 @@
 {
   "id": "mulby-ai-chat",
   "name": "mulby-ai-chat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "mulby",
   "displayName": "AI 助手",
   "type": "ai",
@@ -26,9 +26,10 @@
       "code": "chat",
       "explain": "打开 AI 对话面板",
       "cmds": [
-        { "type": "keyword", "value": "ai" },
-        { "type": "keyword", "value": "chat" },
-        { "type": "keyword", "value": "助手" }
+        {
+          "type": "keyword",
+          "value": "AI助手"
+        }
       ]
     }
   ]

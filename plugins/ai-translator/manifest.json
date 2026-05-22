@@ -1,7 +1,7 @@
 {
   "id": "ai-translator",
   "name": "ai-translator",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
   "displayName": "AI 翻译",
@@ -27,10 +27,6 @@
       "cmds": [
         {
           "type": "keyword",
-          "value": "ai-translator"
-        },
-        {
-          "type": "keyword",
           "value": "翻译"
         },
         {
@@ -43,12 +39,6 @@
           "explain": "翻译输入文本",
           "label": "翻译文本",
           "minLength": 2,
-          "maxLength": 20000
-        },
-        {
-          "type": "over",
-          "label": "翻译选中文本",
-          "minLength": 1,
           "maxLength": 20000
         }
       ]
@@ -64,26 +54,7 @@
         },
         {
           "type": "keyword",
-          "value": "对比翻译"
-        },
-        {
-          "type": "keyword",
           "value": "compare-translate"
-        }
-      ]
-    },
-    {
-      "code": "settings",
-      "explain": "翻译设置",
-      "route": "/settings",
-      "cmds": [
-        {
-          "type": "keyword",
-          "value": "翻译设置"
-        },
-        {
-          "type": "keyword",
-          "value": "translator-settings"
         }
       ]
     }

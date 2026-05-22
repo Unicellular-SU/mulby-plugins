@@ -1,7 +1,7 @@
 {
   "id": "qrcode-helper",
   "name": "qrcode-helper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Mulby",
   "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
   "displayName": "二维码助手",
@@ -15,16 +15,6 @@
     "notification": true
   },
   "features": [
-    {
-      "code": "main",
-      "explain": "二维码助手",
-      "cmds": [
-        {
-          "type": "keyword",
-          "value": "qrcode"
-        }
-      ]
-    },
     {
       "code": "generate",
       "explain": "转二维码",
@@ -62,7 +52,9 @@
             "description": "要生成二维码的文本内容，比如网址、文字等"
           }
         },
-        "required": ["text"]
+        "required": [
+          "text"
+        ]
       },
       "outputSchema": {
         "type": "object",
@@ -85,7 +77,9 @@
             "description": "要识别的二维码图片，格式为 Base64 data URL (e.g. data:image/png;base64,...)"
           }
         },
-        "required": ["base64Image"]
+        "required": [
+          "base64Image"
+        ]
       },
       "outputSchema": {
         "type": "object",

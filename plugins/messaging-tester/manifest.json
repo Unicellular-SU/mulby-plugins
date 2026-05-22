@@ -1,7 +1,7 @@
 {
   "id": "@mulby/messaging-tester",
   "name": "messaging-tester",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "插件通信测试器",
   "description": "配合 Mulby 功能展示插件验证插件消息点对点发送、自动回包和广播订阅",
   "type": "development",
@@ -30,14 +30,6 @@
       "code": "main",
       "explain": "打开插件通信测试器",
       "cmds": [
-        {
-          "type": "keyword",
-          "value": "messaging-tester"
-        },
-        {
-          "type": "keyword",
-          "value": "消息测试"
-        },
         {
           "type": "keyword",
           "value": "通信测试"

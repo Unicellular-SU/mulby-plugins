@@ -1,7 +1,7 @@
 {
   "id": "word-counter",
   "name": "word-counter",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "mulby",
   "type": "productivity",
   "displayName": "字数统计",
@@ -29,25 +29,6 @@
   },
   "features": [
     {
-      "code": "open-counter",
-      "explain": "打开字数统计面板",
-      "mode": "ui",
-      "cmds": [
-        {
-          "type": "keyword",
-          "value": "字数统计"
-        },
-        {
-          "type": "keyword",
-          "value": "字符统计"
-        },
-        {
-          "type": "keyword",
-          "value": "word count"
-        }
-      ]
-    },
-    {
       "code": "count-selection",
       "explain": "统计当前选中文本",
       "mode": "ui",
@@ -56,7 +37,7 @@
         {
           "type": "over",
           "label": "统计字数",
-          "minLength": 80
+          "minLength": 50
         }
       ]
     }

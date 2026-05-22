@@ -2,7 +2,7 @@
   "id": "chrome-history",
   "name": "chrome-history",
   "displayName": "浏览器历史记录搜索",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "快速搜索 Chrome/Edge 等 Chromium 浏览器历史记录，支持多个关键词筛选。",
   "author": "莫回首",
   "homepage": "https://github.com/mohuishou/utools",
@@ -29,10 +29,6 @@
       "icon": "icon.png",
       "mode": "ui",
       "cmds": [
-        { "type": "keyword", "value": "ch" },
-        { "type": "keyword", "value": "edge" },
-        { "type": "keyword", "value": "Chrome历史记录" },
-        { "type": "keyword", "value": "Edge历史记录" },
         {
           "type": "over",
           "label": "搜索浏览器历史记录",
