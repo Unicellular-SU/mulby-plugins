@@ -698,7 +698,12 @@ export default function App() {
       <main className="workspace">
         <section className={`panel editor-panel ${editorMode === 'markdown' ? 'mode-source' : 'mode-wysiwyg'}`}>
           <div className="editor-shell">
-            <div ref={hostRef} className="editor-host" />
+            <div className="editor-layout">
+              <aside className="editor-outline-slot" aria-hidden="true" />
+              <div className="editor-canvas">
+                <div ref={hostRef} className="editor-host" />
+              </div>
+            </div>
           </div>
         </section>
       </main>
