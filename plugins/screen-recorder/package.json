@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "dev": "mulby dev",
+    "test:unit": "esbuild src/ui/ffmpeg-args.test.ts --bundle --platform=node --format=esm --outfile=dist/ffmpeg-args.test.mjs && node dist/ffmpeg-args.test.mjs",
     "build": "pnpm run build:backend && pnpm run build:ui",
     "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",
     "build:ui": "vite build",

@@ -1,0 +1,29 @@
+export function buildMp4TranscodeArgs(inputPath: string, outputPath: string): string[] {
+  return [
+    '-i',
+    inputPath,
+    '-vf',
+    'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+    '-c:v',
+    'libx264',
+    '-pix_fmt',
+    'yuv420p',
+    '-preset',
+    'fast',
+    '-crf',
+    '23',
+    '-tag:v',
+    'avc1',
+    '-movflags',
+    'faststart',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '128k',
+    '-map',
+    '0:v',
+    '-map',
+    '0:a?',
+    outputPath
+  ]
+}
