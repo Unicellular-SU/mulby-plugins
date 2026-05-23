@@ -19,6 +19,7 @@
   --outline-slot-width: clamp(220px, 18vw, 320px);
   --canvas-pad-start: clamp(32px, 3vw, 56px);
   --canvas-pad-end: clamp(20px, 2vw, 36px);
+  --pane-header-height: 36px;
   --radius-xl: 20px;
   --radius-lg: 14px;
   --radius-md: 12px;
@@ -58,8 +59,7 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   font-family:
-    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC",
-    sans-serif;
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
 }
 
 button {
@@ -190,6 +190,50 @@ button {
   transform: none;
 }
 
+.action-btn-icon,
+.formatter-btn-icon,
+.mode-btn-icon {
+  position: relative;
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.action-btn-icon[data-tooltip]::after,
+.formatter-btn-icon[data-tooltip]::after,
+.mode-btn-icon[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translate(-50%, 4px);
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(36, 36, 34, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+  z-index: 30;
+}
+
+.action-btn-icon:hover::after,
+.action-btn-icon:focus-visible::after,
+.formatter-btn-icon:hover::after,
+.formatter-btn-icon:focus-visible::after,
+.mode-btn-icon:hover::after,
+.mode-btn-icon:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .status-bar {
   display: flex;
   align-items: center;
@@ -283,22 +327,15 @@ button {
   background: var(--outline-bg);
   border-right: 1px solid var(--border);
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .outline-panel {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 18px 14px 20px;
-}
-
-.outline-title {
-  margin-bottom: 18px;
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: center;
-  letter-spacing: 0.02em;
+  padding: 14px 14px 20px;
 }
 
 .outline-empty {
@@ -368,10 +405,45 @@ button {
 .editor-canvas {
   min-width: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-host {
+  flex: 1;
+}
+
+.editor-pane-header {
+  height: var(--pane-header-height);
+  min-height: var(--pane-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  /* border-bottom: 1px solid var(--border); */
+  background: var(--panel-strong);
+}
+
+.outline-pane-header {
+  background: var(--outline-bg);
+}
+
+.pane-header-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-canvas-header .pane-header-label {
+  max-width: 100%;
 }
 
 .editor-panel .toastui-editor-defaultUI {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   border: 0;
   border-radius: 0;
@@ -409,7 +481,10 @@ button {
 
 .editor-panel .toastui-editor-ww-container .toastui-editor-contents,
 .editor-panel .toastui-editor-md-container .toastui-editor,
-.editor-panel .toastui-editor-md-container .toastui-editor-md-preview .toastui-editor-contents {
+.editor-panel
+  .toastui-editor-md-container
+  .toastui-editor-md-preview
+  .toastui-editor-contents {
   max-width: none;
   margin: 0;
   color: var(--text-primary);
@@ -419,7 +494,9 @@ button {
   margin-top: 0 !important;
 }
 
-.editor-panel.mode-wysiwyg .toastui-editor-ww-container .toastui-editor-contents {
+.editor-panel.mode-wysiwyg
+  .toastui-editor-ww-container
+  .toastui-editor-contents {
   padding: 8px var(--canvas-pad-end) 18px var(--canvas-pad-start);
   height: auto !important;
 }
@@ -433,7 +510,10 @@ button {
   min-height: 100%;
 }
 
-.editor-panel.mode-wysiwyg .toastui-editor-ww-container .toastui-editor-contents > * {
+.editor-panel.mode-wysiwyg
+  .toastui-editor-ww-container
+  .toastui-editor-contents
+  > * {
   max-width: min(var(--content-max-width), 100%);
   margin-right: auto;
 }
@@ -442,8 +522,7 @@ button {
 .editor-panel .toastui-editor-contents p {
   margin: 0 0 0.78em;
   font-family:
-    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC",
-    sans-serif;
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
   font-size: 17px;
   line-height: 1.8;
 }
@@ -455,8 +534,7 @@ button {
 .editor-panel .toastui-editor-contents h5,
 .editor-panel .toastui-editor-contents h6 {
   font-family:
-    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC",
-    sans-serif;
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
   color: var(--text-primary);
   font-weight: 700;
 }
@@ -488,8 +566,7 @@ button {
   margin: 0.35em 0 0.9em 1.45em;
   padding-left: 0.2em;
   font-family:
-    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC",
-    sans-serif;
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
   font-size: 17px;
   line-height: 1.8;
 }
@@ -522,8 +599,7 @@ button {
 .editor-panel .toastui-editor-md-code-block,
 .editor-panel.mode-source .CodeMirror-lines,
 .editor-panel.mode-source .CodeMirror pre {
-  font-family:
-    "SFMono-Regular", "Menlo", "Monaco", "JetBrains Mono", monospace;
+  font-family: "SFMono-Regular", "Menlo", "Monaco", "JetBrains Mono", monospace;
 }
 
 .editor-panel .toastui-editor-contents code {
@@ -571,7 +647,9 @@ button {
   line-height: 1.7;
 }
 
-.editor-panel.mode-source .toastui-editor-md-container .toastui-editor-contents {
+.editor-panel.mode-source
+  .toastui-editor-md-container
+  .toastui-editor-contents {
   font-size: 14px;
   line-height: 1.7;
 }
@@ -585,7 +663,8 @@ button {
   font-size: inherit;
 }
 
-.editor-panel.mode-source .toastui-editor-md-heading.toastui-editor-md-delimiter.setext,
+.editor-panel.mode-source
+  .toastui-editor-md-heading.toastui-editor-md-delimiter.setext,
 .editor-panel.mode-source .toastui-editor-md-code,
 .editor-panel.mode-source .toastui-editor-md-code-block,
 .editor-panel.mode-source .toastui-editor-md-meta,
@@ -626,12 +705,21 @@ button {
     padding-top: 12px;
   }
 
+  .action-btn-icon,
+  .formatter-btn-icon,
+  .mode-btn-icon {
+    width: 40px;
+    min-width: 40px;
+  }
+
   .status-group-metrics {
     margin-left: 0;
     justify-content: flex-start;
   }
 
-  .editor-panel.mode-wysiwyg .toastui-editor-ww-container .toastui-editor-contents {
+  .editor-panel.mode-wysiwyg
+    .toastui-editor-ww-container
+    .toastui-editor-contents {
     padding: 8px 16px 14px;
   }
 

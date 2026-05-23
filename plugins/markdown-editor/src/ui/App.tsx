@@ -769,41 +769,79 @@ export default function App() {
 
   const lineCount = content.length === 0 ? 0 : content.split('\n').length
   const charCount = Array.from(content).length
+  const documentName = activeFilePath ? basename(activeFilePath) : '未命名.md'
 
   return (
     <div className={`app theme-${theme}`}>
       {!chromeCollapsed && (
         <header className="toolbar">
           <div className="toolbar-actions">
-            <button type="button" className="action-btn" onMouseDown={(event) => event.preventDefault()} onClick={handleOpenFile}>
+            <button
+              type="button"
+              className="action-btn action-btn-icon"
+              aria-label="打开文件"
+              data-tooltip="打开文件"
+              title="打开文件"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={handleOpenFile}
+            >
               <FileInput size={15} />
-              打开
-            </button>
-            <button type="button" className="action-btn" onMouseDown={(event) => event.preventDefault()} onClick={handlePasteClipboard}>
-              <ClipboardPaste size={15} />
-              粘贴
             </button>
             <button
               type="button"
-              className="action-btn action-btn-primary"
+              className="action-btn action-btn-icon"
+              aria-label="粘贴"
+              data-tooltip="粘贴"
+              title="粘贴"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={handlePasteClipboard}
+            >
+              <ClipboardPaste size={15} />
+            </button>
+            <button
+              type="button"
+              className="action-btn action-btn-primary action-btn-icon"
+              aria-label={saving ? '保存中' : '保存草稿'}
+              data-tooltip={saving ? '保存中' : '保存草稿'}
+              title={saving ? '保存中' : '保存草稿'}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void persistDraft(true)}
               disabled={saving}
             >
               <Save size={15} />
-              {saving ? '保存中' : '保存草稿'}
             </button>
-            <button type="button" className="action-btn" onMouseDown={(event) => event.preventDefault()} onClick={handleExportFile}>
+            <button
+              type="button"
+              className="action-btn action-btn-icon"
+              aria-label="导出 .md"
+              data-tooltip="导出 .md"
+              title="导出 .md"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={handleExportFile}
+            >
               <FileDown size={15} />
-              导出 .md
             </button>
-            <button type="button" className="action-btn" onMouseDown={(event) => event.preventDefault()} onClick={() => void handleCopyMarkdown()}>
+            <button
+              type="button"
+              className="action-btn action-btn-icon"
+              aria-label="复制"
+              data-tooltip="复制"
+              title="复制"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void handleCopyMarkdown()}
+            >
               <Copy size={15} />
-              复制
             </button>
-            <button type="button" className="action-btn action-btn-danger" onMouseDown={(event) => event.preventDefault()} onClick={handleClear}>
+            <button
+              type="button"
+              className="action-btn action-btn-danger action-btn-icon"
+              aria-label="清空"
+              data-tooltip="清空"
+              title="清空"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={handleClear}
+            >
               <Eraser size={15} />
-              清空
             </button>
           </div>
 
@@ -814,13 +852,14 @@ export default function App() {
                 <button
                   key={item.label}
                   type="button"
-                  className="formatter-btn"
+                  className="formatter-btn formatter-btn-icon"
+                  aria-label={item.title}
+                  data-tooltip={item.title}
                   title={item.title}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={item.onClick}
                 >
                   <Icon size={15} />
-                  {item.label}
                 </button>
               )
             })}
@@ -829,21 +868,25 @@ export default function App() {
           <div className="toolbar-footer">
             <button
               type="button"
-              className={`mode-btn ${editorMode === 'markdown' ? 'active' : ''}`}
+              className={`mode-btn mode-btn-icon ${editorMode === 'markdown' ? 'active' : ''}`}
+              aria-label={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
+              data-tooltip={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
+              title={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => switchMode(editorMode === 'wysiwyg' ? 'markdown' : 'wysiwyg')}
             >
               {editorMode === 'wysiwyg' ? <FileCode2 size={15} /> : <ScanText size={15} />}
-              {editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
             </button>
             <button
               type="button"
-              className="mode-btn chrome-toggle-btn"
+              className="mode-btn mode-btn-icon chrome-toggle-btn"
+              aria-label="隐藏顶部栏"
+              data-tooltip="隐藏顶部栏"
+              title="隐藏顶部栏"
               onMouseDown={(event) => event.preventDefault()}
               onClick={toggleChrome}
             >
               <ChevronUp size={15} />
-              隐藏顶部栏
             </button>
           </div>
         </header>
@@ -880,8 +923,10 @@ export default function App() {
           <div className="editor-shell">
             <div className="editor-layout">
               <aside className="editor-outline-slot">
+                <div className="editor-pane-header outline-pane-header">
+                  <span className="pane-header-label">大纲</span>
+                </div>
                 <div className="outline-panel">
-                  <div className="outline-title">大纲</div>
                   {outlineEntries.length === 0 ? (
                     <div className="outline-empty">当前文档还没有标题</div>
                   ) : (
@@ -903,6 +948,9 @@ export default function App() {
                 </div>
               </aside>
               <div className="editor-canvas">
+                <div className="editor-pane-header editor-canvas-header">
+                  <span className="pane-header-label">{documentName}</span>
+                </div>
                 <div ref={hostRef} className="editor-host" />
               </div>
             </div>
