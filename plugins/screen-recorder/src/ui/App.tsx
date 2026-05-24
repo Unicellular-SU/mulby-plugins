@@ -24,6 +24,7 @@ import {
   X
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { buildMp4TranscodeArgs } from './ffmpeg-args'
 import { useMulby } from './hooks/useMulby'
 
 const PLUGIN_ID = 'screen-recorder'
@@ -1399,29 +1400,7 @@ function RecorderPanel() {
 
         setMetrics((current) => ({ ...current, progressLabel: '转码为 MP4' }))
         const task = ffmpeg.run(
-          [
-            '-i',
-            tempWebm,
-            '-c:v',
-            'libx264',
-            '-preset',
-            'fast',
-            '-crf',
-            '23',
-            '-tag:v',
-            'avc1',
-            '-movflags',
-            'faststart',
-            '-c:a',
-            'aac',
-            '-b:a',
-            '128k',
-            '-map',
-            '0:v',
-            '-map',
-            '0:a?',
-            tempMp4
-          ],
+          buildMp4TranscodeArgs(tempWebm, tempMp4),
           (progress: { percent?: number; time?: string }) => {
             const percent = typeof progress.percent === 'number' ? `${Math.round(progress.percent)}%` : progress.time ?? ''
             setMetrics((current) => ({ ...current, progressLabel: `转码中 ${percent}`.trim() }))
