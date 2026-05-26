@@ -1,7 +1,7 @@
 {
   "id": "@mulby/showcase",
   "name": "mulby-showcase",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "Mulby 功能展示",
   "description": "综合展示 Mulby 所有 API 能力的示例插件，涵盖系统信息、剪贴板、文件管理、网络、屏幕捕获、媒体、高级设置和安全存储等功能",
   "main": "dist/main.js",

@@ -13,6 +13,8 @@ interface ClipboardHistoryItem {
   size: number
   favorite: boolean
   tags?: string[]
+  sourceApp?: string
+  sourceTitle?: string
 }
 
 interface Stats {
@@ -243,8 +245,8 @@ export default function App() {
         <div className="list-item-content">
           <div className="list-item-preview">{preview}</div>
           <div className="list-item-meta">
+            <span>{item.sourceApp || '未知来源'}</span>
             <span>{formatTime(item.timestamp)}</span>
-            <span>{formatSize(item.size)}</span>
           </div>
         </div>
         {item.favorite && <Star size={14} className="list-item-star" />}
@@ -339,6 +341,7 @@ export default function App() {
         {/* 详情底部 */}
         <div className="detail-footer">
           <div className="detail-meta">
+            <span>来源：{selectedItem.sourceApp || '未知'}{selectedItem.sourceTitle ? ` — ${selectedItem.sourceTitle}` : ''}</span>
             <span>时间：{new Date(selectedItem.timestamp).toLocaleString('zh-CN')}</span>
             <span>大小：{formatSize(selectedItem.size)}</span>
           </div>

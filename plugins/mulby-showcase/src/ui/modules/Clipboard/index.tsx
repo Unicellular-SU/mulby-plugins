@@ -42,6 +42,8 @@ interface ClipboardHistoryItem {
     size: number
     favorite: boolean
     tags?: string[]
+    sourceApp?: string
+    sourceTitle?: string
 }
 
 interface ClipboardHistoryStats {
@@ -658,6 +660,7 @@ if (items.length > 0) {
                                                         {historyTypeLabel(item.type)}
                                                     </StatusBadge>
                                                     {item.favorite && <Star className="inline-icon" aria-hidden="true" size={14} />}
+                                                    <span>{item.sourceApp || '未知来源'}</span>
                                                     <span>{new Date(item.timestamp).toLocaleString()}</span>
                                                     <span>{formatFileSize(item.size)}</span>
                                                 </div>
@@ -699,6 +702,8 @@ if (items.length > 0) {
                                 <span className="info-value">{formatFileSize(selectedHistoryItem.size)}</span>
                                 <span className="info-label">收藏</span>
                                 <span className="info-value">{selectedHistoryItem.favorite ? '是' : '否'}</span>
+                                <span className="info-label">来源</span>
+                                <span className="info-value">{selectedHistoryItem.sourceApp || '未知'}{selectedHistoryItem.sourceTitle ? ` — ${selectedHistoryItem.sourceTitle}` : ''}</span>
                             </div>
                             <div style={{ marginTop: 'var(--spacing-md)' }}>
                                 {selectedHistoryItem.type === 'image' ? (
