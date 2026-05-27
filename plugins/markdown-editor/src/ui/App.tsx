@@ -39,6 +39,16 @@ const STORAGE_DRAFT_KEY = 'draft:markdown-editor:v1'
 const STORAGE_CHROME_KEY = 'ui:markdown-editor:chrome-collapsed:v1'
 const DEFAULT_EXPORT_NAME = 'markdown-note.md'
 const EDITOR_PLACEHOLDER = '在这里开始写 Markdown'
+const WYSIWYG_HEADING_SELECTOR = [
+  '.toastui-editor-ww-container .toastui-editor-contents h1',
+  '.toastui-editor-ww-container .toastui-editor-contents h2',
+  '.toastui-editor-ww-container .toastui-editor-contents h3',
+  '.toastui-editor-ww-container .toastui-editor-contents h4',
+  '.toastui-editor-ww-container .toastui-editor-contents h5',
+  '.toastui-editor-ww-container .toastui-editor-contents h6'
+].join(', ')
+const WYSIWYG_SCROLL_SELECTOR = '.toastui-editor-ww-container'
+const MARKDOWN_SCROLL_SELECTOR = '.toastui-editor-md-container .ProseMirror'
 
 interface PluginInitData {
   pluginName: string
@@ -68,8 +78,6 @@ interface ToolbarButtonItem {
   disabled?: boolean
   danger?: boolean
 }
-
-const WYSIWYG_SCROLL_SELECTOR = '.toastui-editor-ww-container'
 
 type SpellcheckSurface = HTMLElement & { spellcheck?: boolean }
 
@@ -235,6 +243,48 @@ function alignCodeBlockLanguageInput(host: HTMLElement | null, codeBlock: HTMLEl
   floatingInput.style.top = `${top}px`
   floatingInput.style.left = `${left}px`
   floatingInput.style.right = 'auto'
+}
+
+function syncWysiwygHeadingTargets(host: HTMLElement, outlineEntries: OutlineEntry[]) {
+  const headings = Array.from(host.querySelectorAll<HTMLElement>(WYSIWYG_HEADING_SELECTOR))
+
+  headings.forEach((heading, index) => {
+    const entry = outlineEntries[index]
+    if (entry) {
+      heading.dataset.outlineId = entry.id
+    } else {
+      delete heading.dataset.outlineId
+    }
+  })
+
+  return headings
+}
+
+function findWysiwygHeadingForEntry(
+  host: HTMLElement,
+  outlineEntries: OutlineEntry[],
+  entry: OutlineEntry
+) {
+  const headings = syncWysiwygHeadingTargets(host, outlineEntries)
+  const index = outlineEntries.findIndex((item) => item.id === entry.id)
+
+  return headings.find((heading) => heading.dataset.outlineId === entry.id) ?? headings[index] ?? null
+}
+
+function scrollElementIntoContainer(target: HTMLElement, container: HTMLElement, offset = 24) {
+  const nextTop = container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - offset
+  container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+}
+
+function scrollMarkdownLineIntoView(host: HTMLElement, line: number) {
+  const scrollContainer = host.querySelector<HTMLElement>(MARKDOWN_SCROLL_SELECTOR)
+  const lineElement = scrollContainer?.children.item(Math.max(0, line - 1))
+
+  if (!(lineElement instanceof HTMLElement) || !scrollContainer) {
+    return
+  }
+
+  scrollElementIntoContainer(lineElement, scrollContainer)
 }
 
 export default function App() {
@@ -429,28 +479,15 @@ export default function App() {
       return
     }
 
-    const headingSelector = '.toastui-editor-ww-container .toastui-editor-contents h1, .toastui-editor-ww-container .toastui-editor-contents h2, .toastui-editor-ww-container .toastui-editor-contents h3, .toastui-editor-ww-container .toastui-editor-contents h4, .toastui-editor-ww-container .toastui-editor-contents h5, .toastui-editor-ww-container .toastui-editor-contents h6'
     const scrollContainer = host.querySelector<HTMLElement>(WYSIWYG_SCROLL_SELECTOR)
     let frameId = 0
-
-    const syncHeadingTargets = () => {
-      const headings = Array.from(host.querySelectorAll<HTMLElement>(headingSelector))
-      headings.forEach((heading, index) => {
-        const entry = outlineEntries[index]
-        if (entry) {
-          heading.dataset.outlineId = entry.id
-        } else {
-          delete heading.dataset.outlineId
-        }
-      })
-    }
 
     const syncActiveOutline = () => {
       if (editorMode !== 'wysiwyg' || !scrollContainer) {
         return
       }
 
-      const headings = Array.from(host.querySelectorAll<HTMLElement>(`${headingSelector}[data-outline-id]`))
+      const headings = syncWysiwygHeadingTargets(host, outlineEntries).filter((heading) => heading.dataset.outlineId)
       if (headings.length === 0) {
         return
       }
@@ -473,7 +510,6 @@ export default function App() {
     const scheduleSync = () => {
       window.cancelAnimationFrame(frameId)
       frameId = window.requestAnimationFrame(() => {
-        syncHeadingTargets()
         syncActiveOutline()
       })
     }
@@ -536,18 +572,17 @@ export default function App() {
 
     if (editorMode === 'markdown') {
       editor.setSelection([entry.line, 1], [entry.line, 1])
+      scrollMarkdownLineIntoView(host, entry.line)
       editor.focus()
       return
     }
 
-    const target = host.querySelector<HTMLElement>(`[data-outline-id="${entry.id}"]`)
+    const target = findWysiwygHeadingForEntry(host, outlineEntries, entry)
     const scrollContainer = host.querySelector<HTMLElement>(WYSIWYG_SCROLL_SELECTOR)
     if (target && scrollContainer) {
-      const nextTop = scrollContainer.scrollTop + target.getBoundingClientRect().top - scrollContainer.getBoundingClientRect().top - 24
-      scrollContainer.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
-      editor.focus()
+      scrollElementIntoContainer(target, scrollContainer)
     }
-  }, [editorMode])
+  }, [editorMode, outlineEntries])
 
   const isDirty = hydrated && content !== lastPersistedRef.current
 
