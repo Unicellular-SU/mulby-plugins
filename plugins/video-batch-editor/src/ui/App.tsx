@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardList,
+  Crop,
   Download,
   FileDown,
   FileVideo2,
@@ -12,6 +13,7 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  RotateCw,
   Scissors,
   Settings2,
   Sparkles,
@@ -24,6 +26,9 @@ import { useMulby } from './hooks/useMulby'
 const PLUGIN_ID = 'video-batch-editor'
 
 type VideoPreset = 'mp4-h264' | 'mp4-h265' | 'webm' | 'cover-jpg'
+type TimeMode = 'full' | 'range' | 'first' | 'remove-start'
+type CropMode = 'none' | 'manual' | 'center-square' | 'center-portrait' | 'center-landscape'
+type OrientationMode = 'keep' | 'landscape' | 'portrait' | 'square' | 'rotate-left' | 'rotate-right'
 type FfmpegStatus = 'checking' | 'available' | 'missing' | 'idle' | 'downloading' | 'running'
 type JobRunStatus = 'ready' | 'running' | 'done' | 'failed' | 'stopped'
 
@@ -56,8 +61,16 @@ type PreparedJob = {
 type JobOptions = {
   preset: VideoPreset
   outputDirectory?: string
+  timeMode: TimeMode
   trimStartSeconds: number
   trimDurationSeconds: number
+  removeStartSeconds: number
+  cropMode: CropMode
+  cropX: number
+  cropY: number
+  cropWidth: number
+  cropHeight: number
+  orientationMode: OrientationMode
   width: number
   height: number
   videoBitrateKbps: number
@@ -88,6 +101,30 @@ const PRESETS: Array<{ value: VideoPreset; label: string; hint: string }> = [
   { value: 'mp4-h265', label: 'MP4 / H.265', hint: '体积优先' },
   { value: 'webm', label: 'WebM / VP9', hint: '网页分发' },
   { value: 'cover-jpg', label: '封面 JPG', hint: '截帧导出' }
+]
+
+const TIME_MODES: Array<{ value: TimeMode; label: string }> = [
+  { value: 'full', label: '完整视频' },
+  { value: 'range', label: '指定片段' },
+  { value: 'first', label: '截取开头' },
+  { value: 'remove-start', label: '去掉开头' }
+]
+
+const CROP_MODES: Array<{ value: CropMode; label: string }> = [
+  { value: 'none', label: '不裁剪' },
+  { value: 'manual', label: '手动裁剪' },
+  { value: 'center-square', label: '中心 1:1' },
+  { value: 'center-portrait', label: '中心 9:16' },
+  { value: 'center-landscape', label: '中心 16:9' }
+]
+
+const ORIENTATION_MODES: Array<{ value: OrientationMode; label: string }> = [
+  { value: 'keep', label: '保持原方向' },
+  { value: 'landscape', label: '转横屏 16:9' },
+  { value: 'portrait', label: '转竖屏 9:16' },
+  { value: 'square', label: '转方屏 1:1' },
+  { value: 'rotate-left', label: '左转 90°' },
+  { value: 'rotate-right', label: '右转 90°' }
 ]
 
 function unwrapHostData<T>(value: unknown): T | undefined {
@@ -126,6 +163,10 @@ function baseName(filePath: string) {
 
 function presetLabel(value: VideoPreset) {
   return PRESETS.find((preset) => preset.value === value)?.label ?? value
+}
+
+function optionLabel<T extends string>(items: Array<{ value: T; label: string }>, value: T) {
+  return items.find((item) => item.value === value)?.label ?? value
 }
 
 function jobStatusLabel(status: JobRunStatus) {
@@ -181,8 +222,16 @@ export default function App() {
   const [options, setOptions] = useState<JobOptions>({
     preset: 'mp4-h264',
     outputDirectory: '',
+    timeMode: 'full',
     trimStartSeconds: 0,
-    trimDurationSeconds: 0,
+    trimDurationSeconds: 10,
+    removeStartSeconds: 0,
+    cropMode: 'none',
+    cropX: 0,
+    cropY: 0,
+    cropWidth: 1080,
+    cropHeight: 1080,
+    orientationMode: 'keep',
     width: 1920,
     height: 1080,
     videoBitrateKbps: 4500,
@@ -579,9 +628,14 @@ export default function App() {
     }
   }
 
-  const updateNumberOption = (key: keyof Pick<JobOptions, 'trimStartSeconds' | 'trimDurationSeconds' | 'width' | 'height' | 'videoBitrateKbps' | 'crf'>, value: string) => {
+  const updateNumberOption = (key: keyof Pick<JobOptions, 'trimStartSeconds' | 'trimDurationSeconds' | 'removeStartSeconds' | 'cropX' | 'cropY' | 'cropWidth' | 'cropHeight' | 'width' | 'height' | 'videoBitrateKbps' | 'crf'>, value: string) => {
     const numeric = value === '' ? 0 : Number(value)
     setOptions((previous) => ({ ...previous, [key]: Number.isFinite(numeric) ? numeric : 0 }))
+    setJobs([])
+  }
+
+  const updateOption = <T extends keyof JobOptions>(key: T, value: JobOptions[T]) => {
+    setOptions((previous) => ({ ...previous, [key]: value }))
     setJobs([])
   }
 
@@ -733,10 +787,7 @@ export default function App() {
             <span>导出预设</span>
             <select
               value={options.preset}
-              onChange={(event) => {
-                setOptions((previous) => ({ ...previous, preset: event.target.value as VideoPreset }))
-                setJobs([])
-              }}
+              onChange={(event) => updateOption('preset', event.target.value as VideoPreset)}
             >
               {PRESETS.map((preset) => (
                 <option key={preset.value} value={preset.value}>
@@ -746,29 +797,173 @@ export default function App() {
             </select>
           </label>
 
-          <div className="field-grid">
+          <div className="config-group">
+            <div className="group-title">
+              <Scissors size={15} />
+              <span>批量截取</span>
+              <em>{optionLabel(TIME_MODES, options.timeMode)}</em>
+            </div>
             <label className="field">
-              <span><Scissors size={14} /> 起点秒</span>
-              <input
-                type="number"
-                min={0}
-                value={options.trimStartSeconds}
-                onChange={(event) => updateNumberOption('trimStartSeconds', event.target.value)}
-              />
+              <span>截取方式</span>
+              <select
+                value={options.timeMode}
+                onChange={(event) => updateOption('timeMode', event.target.value as TimeMode)}
+              >
+                {TIME_MODES.map((mode) => (
+                  <option key={mode.value} value={mode.value}>
+                    {mode.label}
+                  </option>
+                ))}
+              </select>
             </label>
-            <label className="field">
-              <span><Scissors size={14} /> 时长秒</span>
-              <input
-                type="number"
-                min={0}
-                value={options.trimDurationSeconds}
-                onChange={(event) => updateNumberOption('trimDurationSeconds', event.target.value)}
-              />
-            </label>
+
+            {options.timeMode === 'range' && (
+              <div className="field-grid">
+                <label className="field">
+                  <span>起点秒</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={options.trimStartSeconds}
+                    onChange={(event) => updateNumberOption('trimStartSeconds', event.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  <span>时长秒</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={options.trimDurationSeconds}
+                    onChange={(event) => updateNumberOption('trimDurationSeconds', event.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+
+            {options.timeMode === 'first' && (
+              <label className="field">
+                <span>截取前 N 秒</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={options.trimDurationSeconds}
+                  onChange={(event) => updateNumberOption('trimDurationSeconds', event.target.value)}
+                />
+              </label>
+            )}
+
+            {options.timeMode === 'remove-start' && (
+              <label className="field">
+                <span>去掉开头秒数</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={options.removeStartSeconds}
+                  onChange={(event) => updateNumberOption('removeStartSeconds', event.target.value)}
+                />
+              </label>
+            )}
           </div>
 
           {options.preset !== 'cover-jpg' && (
-            <>
+            <div className="config-group">
+              <div className="group-title">
+                <Crop size={15} />
+                <span>画面裁剪</span>
+                <em>{optionLabel(CROP_MODES, options.cropMode)}</em>
+              </div>
+              <label className="field">
+                <span>裁剪模式</span>
+                <select
+                  value={options.cropMode}
+                  onChange={(event) => updateOption('cropMode', event.target.value as CropMode)}
+                >
+                  {CROP_MODES.map((mode) => (
+                    <option key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {options.cropMode === 'manual' && (
+                <>
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>X</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={options.cropX}
+                        onChange={(event) => updateNumberOption('cropX', event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Y</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={options.cropY}
+                        onChange={(event) => updateNumberOption('cropY', event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="field-grid">
+                    <label className="field">
+                      <span>裁剪宽度</span>
+                      <input
+                        type="number"
+                        min={2}
+                        step={2}
+                        value={options.cropWidth}
+                        onChange={(event) => updateNumberOption('cropWidth', event.target.value)}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>裁剪高度</span>
+                      <input
+                        type="number"
+                        min={2}
+                        step={2}
+                        value={options.cropHeight}
+                        onChange={(event) => updateNumberOption('cropHeight', event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {options.preset !== 'cover-jpg' && (
+            <div className="config-group">
+              <div className="group-title">
+                <RotateCw size={15} />
+                <span>横竖屏转换</span>
+                <em>{optionLabel(ORIENTATION_MODES, options.orientationMode)}</em>
+              </div>
+              <label className="field">
+                <span>方向/比例</span>
+                <select
+                  value={options.orientationMode}
+                  onChange={(event) => updateOption('orientationMode', event.target.value as OrientationMode)}
+                >
+                  {ORIENTATION_MODES.map((mode) => (
+                    <option key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          {options.preset !== 'cover-jpg' && options.orientationMode === 'keep' && (
+            <div className="config-group compact-group">
+              <div className="group-title">
+                <span>输出尺寸</span>
+                <em>{options.width || '-'} x {options.height || '-'}</em>
+              </div>
               <div className="field-grid">
                 <label className="field">
                   <span>宽度</span>
@@ -791,7 +986,16 @@ export default function App() {
                   />
                 </label>
               </div>
+            </div>
+          )}
 
+          {options.preset !== 'cover-jpg' && (
+            <div className="config-group">
+              <div className="group-title">
+                <Gauge size={15} />
+                <span>编码参数</span>
+                <em>{options.preset === 'webm' ? `${options.videoBitrateKbps} kbps` : `CRF ${options.crf}`}</em>
+              </div>
               <label className="field">
                 <span><Gauge size={14} /> 码率 kbps</span>
                 <input
@@ -820,12 +1024,11 @@ export default function App() {
                   value={options.watermarkText}
                   placeholder="可选"
                   onChange={(event) => {
-                    setOptions((previous) => ({ ...previous, watermarkText: event.target.value }))
-                    setJobs([])
+                    updateOption('watermarkText', event.target.value)
                   }}
                 />
               </label>
-            </>
+            </div>
           )}
 
           <label className="field">
@@ -835,10 +1038,7 @@ export default function App() {
                 type="text"
                 value={options.outputDirectory}
                 placeholder="默认原目录"
-                onChange={(event) => {
-                  setOptions((previous) => ({ ...previous, outputDirectory: event.target.value }))
-                  setJobs([])
-                }}
+                onChange={(event) => updateOption('outputDirectory', event.target.value)}
               />
               <button type="button" className="icon-button" onClick={pickOutputDirectory} aria-label="选择输出目录">
                 <FolderOpen size={17} />

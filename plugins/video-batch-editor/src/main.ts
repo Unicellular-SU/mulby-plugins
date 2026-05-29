@@ -8,12 +8,23 @@ const path = require('node:path')
 type PluginContext = BackendPluginContext
 
 type VideoPreset = 'mp4-h264' | 'mp4-h265' | 'webm' | 'cover-jpg'
+type TimeMode = 'full' | 'range' | 'first' | 'remove-start'
+type CropMode = 'none' | 'manual' | 'center-square' | 'center-portrait' | 'center-landscape'
+type OrientationMode = 'keep' | 'landscape' | 'portrait' | 'square' | 'rotate-left' | 'rotate-right'
 
 type JobOptions = {
   preset: VideoPreset
   outputDirectory?: string
+  timeMode?: TimeMode
   trimStartSeconds?: number
   trimDurationSeconds?: number
+  removeStartSeconds?: number
+  cropMode?: CropMode
+  cropX?: number
+  cropY?: number
+  cropWidth?: number
+  cropHeight?: number
+  orientationMode?: OrientationMode
   width?: number
   height?: number
   videoBitrateKbps?: number
@@ -118,17 +129,35 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   return Math.min(max, Math.max(min, value))
 }
 
+function clampEvenNumber(value: unknown, fallback: number, min: number, max: number) {
+  const numeric = clampNumber(value, fallback, min, max)
+  if (numeric <= 0) return 0
+  return Math.max(min, Math.floor(numeric / 2) * 2)
+}
+
 function normalizeOptions(options: JobOptions): Required<Omit<JobOptions, 'outputDirectory' | 'watermarkText'>> & {
   outputDirectory?: string
   watermarkText?: string
 } {
+  const timeMode = options.timeMode ?? (options.trimDurationSeconds && options.trimDurationSeconds > 0 ? 'range' : 'full')
+  const cropMode = options.cropMode ?? 'none'
+  const orientationMode = options.orientationMode ?? 'keep'
+
   return {
     preset: options.preset ?? 'mp4-h264',
     outputDirectory: options.outputDirectory,
+    timeMode,
     trimStartSeconds: clampNumber(options.trimStartSeconds, 0, 0, 86400),
     trimDurationSeconds: clampNumber(options.trimDurationSeconds, 0, 0, 86400),
-    width: clampNumber(options.width, 1920, 0, 7680),
-    height: clampNumber(options.height, 1080, 0, 4320),
+    removeStartSeconds: clampNumber(options.removeStartSeconds, 0, 0, 86400),
+    cropMode,
+    cropX: clampNumber(options.cropX, 0, 0, 7680),
+    cropY: clampNumber(options.cropY, 0, 0, 4320),
+    cropWidth: clampEvenNumber(options.cropWidth, 1080, 2, 7680),
+    cropHeight: clampEvenNumber(options.cropHeight, 1080, 2, 4320),
+    orientationMode,
+    width: clampEvenNumber(options.width, 1920, 0, 7680),
+    height: clampEvenNumber(options.height, 1080, 0, 4320),
     videoBitrateKbps: clampNumber(options.videoBitrateKbps, 4500, 300, 100000),
     crf: clampNumber(options.crf, 23, 0, 51),
     watermarkText: options.watermarkText?.trim() || undefined
@@ -141,41 +170,122 @@ function outputExtension(preset: VideoPreset) {
   return '.mp4'
 }
 
+function buildTrimArgs(args: string[], options: ReturnType<typeof normalizeOptions>) {
+  if (options.timeMode === 'range') {
+    if (options.trimStartSeconds > 0) {
+      args.push('-ss', String(options.trimStartSeconds))
+    }
+    return
+  }
+
+  if (options.timeMode === 'first') {
+    return
+  }
+
+  if (options.timeMode === 'remove-start' && options.removeStartSeconds > 0) {
+    args.push('-ss', String(options.removeStartSeconds))
+  }
+}
+
+function appendDurationArgs(args: string[], options: ReturnType<typeof normalizeOptions>) {
+  if ((options.timeMode === 'range' || options.timeMode === 'first') && options.trimDurationSeconds > 0) {
+    args.push('-t', String(options.trimDurationSeconds))
+  }
+}
+
+function buildCropFilters(options: ReturnType<typeof normalizeOptions>) {
+  if (options.cropMode === 'manual') {
+    if (options.cropWidth <= 0 || options.cropHeight <= 0) return []
+    return [`crop=${options.cropWidth}:${options.cropHeight}:${options.cropX}:${options.cropY}`]
+  }
+  if (options.cropMode === 'center-square') {
+    return ['crop=trunc(min(iw\\,ih)/2)*2:trunc(min(iw\\,ih)/2)*2']
+  }
+  if (options.cropMode === 'center-portrait') {
+    return ['crop=trunc(min(iw\\,ih*9/16)/2)*2:trunc(min(ih\\,iw*16/9)/2)*2']
+  }
+  if (options.cropMode === 'center-landscape') {
+    return ['crop=trunc(min(iw\\,ih*16/9)/2)*2:trunc(min(ih\\,iw*9/16)/2)*2']
+  }
+  return []
+}
+
+function buildOrientationFilters(options: ReturnType<typeof normalizeOptions>) {
+  if (options.orientationMode === 'rotate-left') return ['transpose=2']
+  if (options.orientationMode === 'rotate-right') return ['transpose=1']
+  if (options.orientationMode === 'portrait') {
+    return [
+      'scale=1080:1920:force_original_aspect_ratio=decrease',
+      'pad=1080:1920:(ow-iw)/2:(oh-ih)/2'
+    ]
+  }
+  if (options.orientationMode === 'landscape') {
+    return [
+      'scale=1920:1080:force_original_aspect_ratio=decrease',
+      'pad=1920:1080:(ow-iw)/2:(oh-ih)/2'
+    ]
+  }
+  if (options.orientationMode === 'square') {
+    return [
+      'scale=1080:1080:force_original_aspect_ratio=decrease',
+      'pad=1080:1080:(ow-iw)/2:(oh-ih)/2'
+    ]
+  }
+  return []
+}
+
+function buildResizeFilters(options: ReturnType<typeof normalizeOptions>) {
+  if (options.orientationMode !== 'keep' || options.width <= 0 && options.height <= 0) return []
+  const width = options.width > 0 ? String(options.width) : '-2'
+  const height = options.height > 0 ? String(options.height) : '-2'
+  return [`scale=${width}:${height}:force_original_aspect_ratio=decrease`]
+}
+
+function buildVideoFilters(options: ReturnType<typeof normalizeOptions>) {
+  const filters: string[] = [
+    ...buildCropFilters(options),
+    ...buildOrientationFilters(options),
+    ...buildResizeFilters(options)
+  ]
+
+  if (options.watermarkText) {
+    const text = options.watermarkText.replace(/[':\\]/g, '\\$&')
+    filters.push(`drawtext=text='${text}':x=w-tw-32:y=h-th-28:fontcolor=white@0.86:fontsize=28:shadowcolor=black@0.5:shadowx=2:shadowy=2`)
+  }
+
+  return filters
+}
+
 function buildOutputPath(sourcePath: string, options: ReturnType<typeof normalizeOptions>) {
   const parsed = path.parse(sourcePath)
   const outputDir = options.outputDirectory || parsed.dir
-  const suffix = options.preset === 'cover-jpg' ? '_cover' : '_edited'
+  const suffixParts = [
+    options.timeMode !== 'full' ? 'clip' : '',
+    options.cropMode !== 'none' ? 'crop' : '',
+    options.orientationMode !== 'keep' ? options.orientationMode.replace('rotate-', 'rot-') : '',
+    options.preset === 'cover-jpg' ? 'cover' : 'edited'
+  ].filter(Boolean)
+  const suffix = `_${suffixParts.join('_')}`
   return path.join(outputDir, `${parsed.name}${suffix}${outputExtension(options.preset)}`)
 }
 
 function buildArgs(sourcePath: string, outputPath: string, options: ReturnType<typeof normalizeOptions>) {
   const args: string[] = ['-y']
 
-  if (options.trimStartSeconds > 0) {
-    args.push('-ss', String(options.trimStartSeconds))
-  }
-
+  buildTrimArgs(args, options)
   args.push('-i', sourcePath)
-
-  if (options.trimDurationSeconds > 0) {
-    args.push('-t', String(options.trimDurationSeconds))
-  }
+  appendDurationArgs(args, options)
 
   if (options.preset === 'cover-jpg') {
+    const filters = buildVideoFilters(options)
+    if (filters.length > 0) {
+      args.push('-vf', filters.join(','))
+    }
     args.push('-frames:v', '1', '-q:v', '2', outputPath)
     return args
   }
 
-  const filters: string[] = []
-  if (options.width > 0 || options.height > 0) {
-    const width = options.width > 0 ? String(options.width) : '-2'
-    const height = options.height > 0 ? String(options.height) : '-2'
-    filters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease`)
-  }
-  if (options.watermarkText) {
-    const text = options.watermarkText.replace(/[':\\]/g, '\\$&')
-    filters.push(`drawtext=text='${text}':x=w-tw-32:y=h-th-28:fontcolor=white@0.86:fontsize=28:shadowcolor=black@0.5:shadowx=2:shadowy=2`)
-  }
+  const filters = buildVideoFilters(options)
   if (filters.length > 0) {
     args.push('-vf', filters.join(','))
   }

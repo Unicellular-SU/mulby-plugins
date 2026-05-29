@@ -5,7 +5,7 @@
   "author": "mulby",
   "type": "media",
   "displayName": "视频批量编辑",
-  "description": "面向批量压缩、格式转换、时长裁剪、水印和封面生成的视频处理插件。",
+  "description": "面向批量压缩、格式转换、时长截取、画面裁剪、横竖屏转换、水印和封面生成的视频处理插件。",
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",
