@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Pause, Play, RotateCcw, SkipForward } from 'lucide-react'
+import { Pause, Play, RotateCcw, SkipForward, X } from 'lucide-react'
 import { useTodos } from '../hooks/useTodos'
 import { usePomodoro, formatTimer } from '../hooks/usePomodoro'
 import { useMulby } from '../hooks/useMulby'
@@ -21,7 +21,9 @@ export default function FocusView() {
 
   const effectiveSettings = settings || DEFAULT_SETTINGS
   const activeTodos = todos.filter((t) => !t.done)
-  const activeId = effectiveSettings.activeTodoId || activeTodos.find((t) => t.pinned)?.id || activeTodos[0]?.id
+  const activeId = effectiveSettings.activeTodoId !== undefined 
+    ? effectiveSettings.activeTodoId 
+    : (activeTodos.find((t) => t.pinned)?.id || activeTodos[0]?.id)
   const activeTodo = activeTodos.find((t) => t.id === activeId)
 
   const pomodoroCount = activeTodo?.focusMinutes
@@ -48,7 +50,7 @@ export default function FocusView() {
 
   useEffect(() => {
     void win?.setBackgroundThrottling?.(false)
-    void win?.setSize?.(560, 520)
+    void win?.setSize?.(400, 600)
     return () => {
       void win?.setBackgroundThrottling?.(true)
     }
@@ -66,16 +68,21 @@ export default function FocusView() {
     return () => window.removeEventListener('keydown', onKey)
   }, [toggle, reset, skipBreak, win])
 
-  const circumference = 2 * Math.PI * 88
+  const circumference = 2 * Math.PI * 100
   const dashOffset = circumference * (1 - progress)
 
   return (
     <div className="focus-view">
-      <header className="focus-header">
+      <header className="focus-header" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
         <span>{PHASE_LABEL[phase]}</span>
-        <span className="focus-stats">
-          今日 {stats?.pomodoroToday ?? 0} 番茄
-        </span>
+        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} className="flex items-center gap-2">
+          <span className="focus-stats">
+            今日 {stats?.pomodoroToday ?? 0} 番茄
+          </span>
+          <button type="button" className="btn-icon" onClick={() => void win?.close?.()} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
       </header>
 
       <div className="focus-task">
@@ -84,7 +91,7 @@ export default function FocusView() {
           id="focus-todo"
           className="input select"
           value={activeId || ''}
-          onChange={(e) => void saveSettings({ activeTodoId: e.target.value || undefined })}
+          onChange={(e) => void saveSettings({ activeTodoId: e.target.value })}
         >
           <option value="">无绑定任务</option>
           {activeTodos.map((t) => (
@@ -101,14 +108,14 @@ export default function FocusView() {
         )}
       </div>
 
-      <div className={`focus-timer ${showComplete ? 'focus-timer--complete' : ''}`}>
-        <svg className="focus-ring" viewBox="0 0 200 200" aria-hidden>
-          <circle className="focus-ring__bg" cx="100" cy="100" r="88" />
+      <div className={`focus-timer ${showComplete ? 'focus-timer--complete' : ''} ${running ? 'focus-timer--running' : ''}`}>
+        <svg className="focus-ring" viewBox="0 0 220 220" aria-hidden>
+          <circle className="focus-ring__bg" cx="110" cy="110" r="100" />
           <circle
             className={`focus-ring__fg ${isBreak ? 'focus-ring__fg--break' : ''}`}
-            cx="100"
-            cy="100"
-            r="88"
+            cx="110"
+            cy="110"
+            r="100"
             strokeDasharray={circumference}
             strokeDashoffset={dashOffset}
           />
@@ -135,15 +142,15 @@ export default function FocusView() {
       </div>
 
       <div className="focus-actions">
-        <button type="button" className="btn-focus" onClick={toggle} aria-label={running ? '暂停' : '开始'}>
-          {running ? <Pause size={22} /> : <Play size={22} />}
+        <button type="button" className="btn-focus" onClick={toggle} aria-label={running ? '暂停' : '开始'} title="开始/暂停 (Space)">
+          {running ? <Pause size={28} /> : <Play size={28} className="ml-1" />}
         </button>
-        <button type="button" className="btn-ghost" onClick={reset} aria-label="重置">
-          <RotateCcw size={18} />
+        <button type="button" className="btn-ghost" onClick={reset} aria-label="重置" title="重置 (R)">
+          <RotateCcw size={22} />
         </button>
         {isBreak && (
-          <button type="button" className="btn-ghost" onClick={skipBreak} aria-label="跳过休息">
-            <SkipForward size={18} />
+          <button type="button" className="btn-ghost" onClick={skipBreak} aria-label="跳过休息" title="跳过休息 (S)">
+            <SkipForward size={22} />
           </button>
         )}
       </div>

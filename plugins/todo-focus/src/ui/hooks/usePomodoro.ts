@@ -44,7 +44,7 @@ export function usePomodoro(
       setRemaining((r) => r - 1)
     }, 1000)
     return () => clearInterval(id)
-  }, [running, remaining, phase, settings])
+  }, [running, phase, settings])
 
   useEffect(() => {
     if (remaining > 0 || phase === 'idle' || !settings) return

@@ -36,7 +36,7 @@ export default function ListView({ initialInput = '' }: ListViewProps) {
     toggleChecklistItem,
     removeChecklistItem,
   } = useTodos()
-  const { plugin, notification } = useMulby(PLUGIN_ID)
+  const { plugin, notification, window: win } = useMulby(PLUGIN_ID)
 
   const [newTitle, setNewTitle] = useState(initialInput)
   const [newPriority, setNewPriority] = useState<'high' | 'medium' | 'low' | undefined>()
@@ -224,7 +224,14 @@ export default function ListView({ initialInput = '' }: ListViewProps) {
       if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); void toggleDone(current.id); return }
       if (e.key === 'e') { e.preventDefault(); startEdit(current); return }
       if (e.key === 'd') { e.preventDefault(); handleDelete(current.id, e.shiftKey); return }
-      if (e.key === 'p') { e.preventDefault(); void updateTodo(current.id, { pinned: !current.pinned }); void saveSettings({ activeTodoId: current.id }); return }
+      if (e.key === 'p') {
+        e.preventDefault()
+        void (async () => {
+          await updateTodo(current.id, { pinned: !current.pinned })
+          await saveSettings({ activeTodoId: current.id })
+        })()
+        return
+      }
       if (e.key === 'Tab') {
         e.preventDefault()
         setExpandedId((prev) => prev === current.id ? null : current.id)
@@ -245,20 +252,23 @@ export default function ListView({ initialInput = '' }: ListViewProps) {
 
   return (
     <div className="list-view">
-      <header className="header">
+      <header className="header" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}>
         <div className="header-main">
           <h1 className="header-title">待办番茄</h1>
           <p className="header-sub">
             今日番茄 {stats?.pomodoroToday ?? 0} · 专注 {stats?.focusMinutesToday ?? 0} 分钟
           </p>
         </div>
-        <div className="header-actions">
+        <div className="header-actions" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <button type="button" className="btn-secondary btn-sm" onClick={() => setAiOpen(true)}>
             <Sparkles size={14} />
             AI 助手
           </button>
           <button type="button" className="btn-ghost" onClick={() => setShowHelp((h) => !h)} aria-label="快捷键">
             <HelpCircle size={18} />
+          </button>
+          <button type="button" className="btn-icon" onClick={() => void win?.close?.()} aria-label="关闭">
+            <X size={18} />
           </button>
         </div>
       </header>
@@ -322,10 +332,18 @@ export default function ListView({ initialInput = '' }: ListViewProps) {
         <input
           ref={filterRef}
           className="input filter-input"
+          style={{ flex: 'none' }}
           placeholder="过滤待办…"
           value={filterText}
           onChange={(e) => setFilterText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Escape' && setFilterOpen(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              setFilterOpen(false)
+              setFilterText('')
+              e.preventDefault()
+              e.stopPropagation()
+            }
+          }}
         />
       )}
 
@@ -434,9 +452,9 @@ export default function ListView({ initialInput = '' }: ListViewProps) {
                       </button>
                     </div>
 
-                    {isExpanded && item.checklist && (
+                    {isExpanded && (
                       <ChecklistPanel
-                        items={item.checklist}
+                        items={item.checklist || []}
                         onToggle={(cid) => void toggleChecklistItem(item.id, cid)}
                         onAdd={(text) => void addChecklistItem(item.id, text)}
                         onRemove={(cid) => void removeChecklistItem(item.id, cid)}

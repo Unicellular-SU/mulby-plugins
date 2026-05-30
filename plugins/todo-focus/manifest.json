@@ -1,7 +1,7 @@
 {
   "id": "todo-focus",
   "name": "todo-focus",
-  "version": "2.0.1",
+  "version": "2.0.3",
   "author": "mulby",
   "type": "productivity",
   "displayName": "待办番茄",
@@ -20,6 +20,8 @@
     "background": true
   },
   "window": {
+    "type": "borderless",
+    "titleBar": false,
     "width": 720,
     "height": 640,
     "minWidth": 400,

@@ -1015,10 +1015,60 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ===== Focus View ===== */
 .focus-view {
+  position: relative;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: var(--bg);
+  overflow: hidden;
+  animation: view-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.focus-view::before, .focus-view::after {
+  content: '';
+  position: absolute;
+  width: 50vw;
+  height: 50vw;
+  max-width: 400px;
+  max-height: 400px;
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  opacity: 0.6;
+  pointer-events: none;
+  animation: blob-float 15s infinite alternate ease-in-out;
+}
+.focus-view::before {
+  top: -100px;
+  left: -100px;
+  background: var(--accent-soft);
+}
+.focus-view::after {
+  bottom: -100px;
+  right: -100px;
+  background: rgba(59, 130, 246, 0.08);
+  animation-delay: -7s;
+}
+
+:root.dark .focus-view::before, :root.dark .focus-view::after {
+  opacity: 0.2;
+}
+
+@keyframes blob-float {
+  0% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+.focus-header, .focus-task, .focus-timer, .focus-actions, .focus-hint {
+  position: relative;
+  z-index: 1;
 }
 
 .focus-header {
@@ -1030,16 +1080,45 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   margin-bottom: 16px;
 }
 
-.focus-task { width: 100%; max-width: 360px; margin-bottom: 24px; }
-.focus-task label { font-size: 12px; color: var(--text-2); display: block; margin-bottom: 6px; }
-.focus-task-name { margin-top: 8px; font-size: 18px; font-weight: 600; text-align: center; }
-.focus-task-count { margin-top: 4px; font-size: 12px; color: var(--text-3); text-align: center; }
+.focus-task { 
+  width: 100%; 
+  max-width: 360px; 
+  margin-bottom: 24px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.03);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+:root.dark .focus-task {
+  background: rgba(30, 41, 59, 0.4);
+  border-color: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+.focus-task:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.05);
+}
+:root.dark .focus-task:hover {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+}
+
+.focus-task label { font-size: 12px; font-weight: 500; color: var(--text-2); display: block; margin-bottom: 8px; }
+.focus-task-name { margin-top: 12px; font-size: 18px; font-weight: 700; text-align: center; letter-spacing: -0.01em; }
+.focus-task-count { margin-top: 6px; font-size: 12px; color: var(--text-3); text-align: center; font-weight: 500; }
 
 .focus-timer {
   position: relative;
-  width: 200px;
-  height: 200px;
-  margin-bottom: 24px;
+  width: 220px;
+  height: 220px;
+  margin-bottom: 32px;
+  filter: drop-shadow(0 12px 32px rgba(0,0,0,0.05));
+}
+:root.dark .focus-timer {
+  filter: drop-shadow(0 12px 32px rgba(0,0,0,0.3));
 }
 
 .focus-timer--complete { animation: pulse-scale 700ms ease; }
@@ -1050,17 +1129,33 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   100% { transform: scale(1); }
 }
 
-.focus-ring { width: 100%; height: 100%; transform: rotate(-90deg); }
-.focus-ring__bg { fill: none; stroke: var(--border); stroke-width: 8; }
+.focus-ring { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.focus-ring__bg { fill: none; stroke: var(--border); stroke-width: 8; transition: stroke 0.3s; }
 .focus-ring__fg {
   fill: none;
   stroke: var(--focus-ring);
   stroke-width: 8;
   stroke-linecap: round;
-  transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease;
+  transition: stroke-dashoffset 1s cubic-bezier(0.16, 1, 0.3, 1), stroke 0.3s ease;
+}
+
+.focus-timer--running .focus-ring__fg {
+  animation: ring-pulse 2s infinite alternate ease-in-out;
+}
+
+@keyframes ring-pulse {
+  from { filter: drop-shadow(0 0 4px var(--accent-soft)); }
+  to { filter: drop-shadow(0 0 16px var(--accent)); }
 }
 
 .focus-ring__fg--break { stroke: #06b6d4; }
+.focus-timer--running .focus-ring__fg--break {
+  animation: ring-pulse-break 2s infinite alternate ease-in-out;
+}
+@keyframes ring-pulse-break {
+  from { filter: drop-shadow(0 0 4px rgba(6, 182, 212, 0.2)); }
+  to { filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.8)); }
+}
 
 .focus-complete-check {
   position: absolute;
@@ -1086,22 +1181,49 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 42px;
-  font-weight: 700;
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  background: linear-gradient(135deg, var(--text-1), var(--text-2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 4px 16px rgba(0,0,0,0.04);
 }
 
-.focus-actions { display: flex; gap: 12px; align-items: center; }
+.focus-actions { display: flex; gap: 16px; align-items: center; }
 .btn-focus {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
   justify-content: center;
   padding: 0;
+  box-shadow: 0 8px 24px var(--accent-soft);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.btn-focus:hover { background: var(--accent-hover); }
+.btn-focus:hover { 
+  background: var(--accent-hover); 
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 12px 32px var(--accent-soft);
+}
+.btn-focus:active {
+  transform: translateY(1px) scale(0.95);
+  box-shadow: 0 4px 12px var(--accent-soft);
+}
+
+.btn-ghost {
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover {
+  transform: scale(1.1);
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+:root.dark .btn-ghost:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
 .focus-hint { margin-top: 20px; font-size: 11px; color: var(--text-3); }
 
 /* ===== Utilities ===== */
