@@ -1,0 +1,34 @@
+{
+  "id": "calc-pad",
+  "name": "calc-pad",
+  "version": "1.0.0",
+  "type": "productivity",
+  "displayName": "计算稿纸",
+  "description": "高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true
+  },
+  "window": {
+    "width": 680,
+    "height": 560,
+    "minWidth": 480,
+    "minHeight": 400,
+    "maxWidth": 1000,
+    "maxHeight": 800
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "计算稿纸",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "计算稿纸" },
+        { "type": "keyword", "value": "calc" },
+        { "type": "keyword", "value": "计算器" }
+      ]
+    }
+  ]
+}

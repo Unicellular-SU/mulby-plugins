@@ -1,0 +1,43 @@
+/* src/ui/styles.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-paper: #FAFAF8;
+  }
+  .dark {
+    --bg-paper: #1A1A1A;
+  }
+  
+  html, body {
+    @apply h-full overflow-hidden;
+    background-color: var(--bg-paper);
+    /* Subtle paper texture using noise or gradient if desired, keeping it clean for now */
+  }
+  
+  /* Make app drag region for custom window if borderless */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-700 rounded-full;
+  }
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    @apply bg-gray-400 dark:bg-gray-600;
+  }
+}

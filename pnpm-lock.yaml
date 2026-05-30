@@ -217,6 +217,52 @@ importers:
         specifier: ^5.3.1
         version: 5.4.21(@types/node@25.6.0)
 
+  plugins/calc-pad:
+    dependencies:
+      lucide-react:
+        specifier: ^0.400.0
+        version: 0.400.0(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
+      '@types/react':
+        specifier: ^18.3.3
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.28)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.1
+        version: 4.7.0(vite@5.4.21(@types/node@20.19.39))
+      autoprefixer:
+        specifier: ^10.4.19
+        version: 10.4.27(postcss@8.5.13)
+      esbuild:
+        specifier: ^0.20.0
+        version: 0.20.2
+      postcss:
+        specifier: ^8.4.38
+        version: 8.5.13
+      sharp:
+        specifier: ^0.34.5
+        version: 0.34.5
+      tailwindcss:
+        specifier: ^3.4.4
+        version: 3.4.19
+      typescript:
+        specifier: ^5.2.2
+        version: 5.9.3
+      vite:
+        specifier: ^5.3.1
+        version: 5.4.21(@types/node@20.19.39)
+
   plugins/chrome-history:
     dependencies:
       '@vitejs/plugin-react':
@@ -4187,6 +4233,11 @@ packages:
     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
     engines: {node: '>=12'}
 
+  lucide-react@0.400.0:
+    resolution: {integrity: sha512-rpp7pFHh3Xd93KHixNgB0SqThMHpYNzsGUu69UaQbSZ75Q/J3m5t6EhKyMT3m4w2WOxmJ2mY0tD3vebnXqQryQ==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
   lucide-react@0.562.0:
     resolution: {integrity: sha512-82hOAu7y0dbVuFfmO4bYF1XEwYk/mEbM5E+b1jgci/udUBEE/R7LF5Ip0CCEmXe8AybRM8L+04eP+LGZeDvkiw==}
     peerDependencies:
@@ -8082,22 +8133,22 @@ snapshots:
 
   inherits@2.0.4: {}
 
-  ink-select-input@4.2.2(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2):
+  ink-select-input@4.2.2(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2):
     dependencies:
       arr-rotate: 1.0.0
       figures: 3.2.0
-      ink: 3.2.0(@types/react@18.3.28)(react@17.0.2)
+      ink: 3.2.0(@types/react@18.3.28)(react@18.3.1)
       lodash.isequal: 4.5.0
       react: 17.0.2
 
-  ink-text-input@4.0.3(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2):
+  ink-text-input@4.0.3(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2):
     dependencies:
       chalk: 4.1.2
-      ink: 3.2.0(@types/react@18.3.28)(react@17.0.2)
+      ink: 3.2.0(@types/react@18.3.28)(react@18.3.1)
       react: 17.0.2
       type-fest: 0.15.1
 
-  ink@3.2.0(@types/react@18.3.28)(react@17.0.2):
+  ink@3.2.0(@types/react@18.3.28)(react@18.3.1):
     dependencies:
       ansi-escapes: 4.3.2
       auto-bind: 4.0.0
@@ -8110,9 +8161,9 @@ snapshots:
       is-ci: 2.0.0
       lodash: 4.18.1
       patch-console: 1.0.0
-      react: 17.0.2
+      react: 18.3.1
       react-devtools-core: 4.28.5
-      react-reconciler: 0.26.2(react@17.0.2)
+      react-reconciler: 0.26.2(react@18.3.1)
       scheduler: 0.20.2
       signal-exit: 3.0.7
       slice-ansi: 3.0.0
@@ -8354,6 +8405,10 @@ snapshots:
       yallist: 3.1.1
 
   lru-cache@7.18.3: {}
+
+  lucide-react@0.400.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   lucide-react@0.562.0(react@18.3.1):
     dependencies:
@@ -8782,9 +8837,9 @@ snapshots:
       commander: 12.1.0
       esbuild: 0.20.2
       fs-extra: 11.3.5
-      ink: 3.2.0(@types/react@18.3.28)(react@17.0.2)
-      ink-select-input: 4.2.2(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2)
-      ink-text-input: 4.0.3(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2)
+      ink: 3.2.0(@types/react@18.3.28)(react@18.3.1)
+      ink-select-input: 4.2.2(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2)
+      ink-text-input: 4.0.3(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2)
       inquirer: 13.4.3(@types/node@25.6.0)
       js-tiktoken: 1.0.21
       openai: 6.38.0(ws@8.20.0)
@@ -9222,11 +9277,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-reconciler@0.26.2(react@17.0.2):
+  react-reconciler@0.26.2(react@18.3.1):
     dependencies:
       loose-envify: 1.4.0
       object-assign: 4.1.1
-      react: 17.0.2
+      react: 18.3.1
       scheduler: 0.20.2
 
   react-refresh@0.17.0: {}
