@@ -1,8 +1,7 @@
 {
-  "$schema": "./node_modules/.mulby/manifest-schema.json",
   "id": "todo-focus",
   "name": "todo-focus",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "mulby",
   "type": "productivity",
   "displayName": "待办番茄",
