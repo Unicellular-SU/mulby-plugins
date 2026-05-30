@@ -3,7 +3,11 @@ import { useMulby } from './hooks/useMulby'
 import {
   Copy, Check, Languages, Loader2, Type, Table2, FunctionSquare,
   ImageIcon, Download, RotateCcw, Sparkles, Cpu, Settings, X,
+  Camera, FolderOpen, FileSpreadsheet, FileImage,
 } from 'lucide-react'
+import { latexToSvg, markdownTableToExcelHtml, markdownTableToTsv, normalizeLatex } from './exportUtils'
+import { shouldProcessPluginInit } from './pluginInitSession'
+import { requestCaptureRecognition } from './captureRecognition'
 
 type OcrMode = 'text' | 'table' | 'formula'
 type OcrEngine = 'native' | 'ai'
@@ -66,7 +70,7 @@ export default function App() {
   const [translating, setTranslating] = useState(false)
   const [translation, setTranslation] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const hasInitRef = useRef(false)
+  const lastInitNonceRef = useRef<number | string | null>(null)
   const [mode, setMode] = useState<OcrMode>('text')
   const [engine, setEngine] = useState<OcrEngine>('native')
   const [showSettings, setShowSettings] = useState(false)
@@ -162,7 +166,7 @@ export default function App() {
     mulby.ai.attachments.delete(attachment.attachmentId).catch(() => {})
 
     if (!abortedRef.current) {
-      const finalText = finalMsg?.content || streamTextRef.current
+      const finalText = typeof finalMsg?.content === 'string' ? finalMsg.content : streamTextRef.current
       setResult({ text: finalText, mode: ocrMode, engine: 'ai' })
       return finalText
     }
@@ -194,9 +198,8 @@ export default function App() {
   }, [doNativeOcr, doAiOcrStream])
 
   useEffect(() => {
-    if (hasInitRef.current) return
     const dispose = mulby.onPluginInit((data: any) => {
-      hasInitRef.current = true
+      if (!shouldProcessPluginInit(lastInitNonceRef, data)) return
       if (data.attachments?.[0]?.dataUrl) {
         const dataUrl = data.attachments[0].dataUrl
         setImageDataUrl(dataUrl)
@@ -227,6 +230,92 @@ export default function App() {
       mulby.notification.show('已复制到剪贴板')
       setTimeout(() => setCopied(false), 2000)
     } catch {}
+  }
+
+  const handleCaptureImage = async () => {
+    if (loading) return
+    setError(null)
+    try {
+      const result = await requestCaptureRecognition(mulby)
+      if (!result.success && result.error !== 'Capture cancelled') {
+        setError(result.error || '截图失败，请检查屏幕录制权限')
+      }
+    } catch (err: any) {
+      setError(err?.message || '截图失败，请检查屏幕录制权限')
+    }
+  }
+
+  const handlePickImage = async () => {
+    if (loading) return
+    setError(null)
+    try {
+      const paths = await mulby.dialog.showOpenDialog({
+        title: '选择要识别的图片',
+        buttonLabel: '识别图片',
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp'] }],
+      })
+      const filePath = paths?.[0]
+      if (filePath) await loadImageFromPath(filePath)
+    } catch (err: any) {
+      setError(err?.message || '选择图片失败')
+    }
+  }
+
+  const handleCopyMarkdownTable = async () => {
+    if (!result?.text) return
+    try {
+      await mulby.clipboard.writeText(result.text)
+      mulby.notification.show('已复制 Markdown 表格')
+    } catch {}
+  }
+
+  const handleCopyExcelTable = async () => {
+    if (!result?.text) return
+    try {
+      await mulby.clipboard.writeText(markdownTableToTsv(result.text))
+      mulby.notification.show('已复制 Excel 可粘贴格式')
+    } catch {}
+  }
+
+  const handleExportExcelTable = async () => {
+    if (!result?.text) return
+    try {
+      const path = await mulby.dialog.showSaveDialog({
+        title: '导出 Excel 表格',
+        defaultPath: `ocr_table_${Date.now()}.xls`,
+        filters: [{ name: 'Excel Workbook', extensions: ['xls'] }],
+      })
+      if (!path) return
+      await mulby.filesystem.writeFile(path, markdownTableToExcelHtml(result.text), 'utf-8')
+      mulby.notification.show('Excel 文件已导出')
+    } catch (err: any) {
+      setError(err?.message || '导出 Excel 失败')
+    }
+  }
+
+  const handleCopyLatex = async () => {
+    if (!result?.text) return
+    try {
+      await mulby.clipboard.writeText(normalizeLatex(result.text))
+      mulby.notification.show('已复制 LaTeX')
+    } catch {}
+  }
+
+  const handleExportFormulaImage = async () => {
+    if (!result?.text) return
+    try {
+      const path = await mulby.dialog.showSaveDialog({
+        title: '导出公式图片',
+        defaultPath: `ocr_formula_${Date.now()}.svg`,
+        filters: [{ name: 'SVG Image', extensions: ['svg'] }],
+      })
+      if (!path) return
+      await mulby.filesystem.writeFile(path, latexToSvg(result.text), 'utf-8')
+      mulby.notification.show('公式图片已导出')
+    } catch (err: any) {
+      setError(err?.message || '导出公式图片失败')
+    }
   }
 
   const handleCopyTranslation = async () => {
@@ -261,7 +350,7 @@ export default function App() {
       })
 
       const finalMsg = await req
-      setTranslation(finalMsg?.content || streamTranslation)
+      setTranslation(typeof finalMsg?.content === 'string' ? finalMsg.content : streamTranslation)
     } catch (err: any) {
       setError(err?.message || '翻译失败，请检查 AI 配置')
     } finally {
@@ -304,8 +393,30 @@ export default function App() {
   ]
 
   const activeEngine = mode !== 'text' ? 'ai' : engine
-  const currentModelLabel = selectedModel ? (models.find(m => m.id === selectedModel)?.label || selectedModel.split(':').pop() || selectedModel) : '默认模型'
   const currentLangLabel = LANGUAGES.find(l => l.id === targetLang)?.label || targetLang
+
+  const resultActions = result?.text ? (
+    <>
+      <button onClick={handleRetry} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="重新识别"><RotateCcw className="w-3.5 h-3.5" /></button>
+      {result.mode === 'text' && <button onClick={handleTranslate} disabled={translating} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-blue-500 transition-colors disabled:opacity-50" title={`翻译为${currentLangLabel}`}><Languages className="w-3.5 h-3.5" /></button>}
+      {result.mode === 'table' && (
+        <>
+          <button onClick={handleCopyMarkdownTable} className="px-2 py-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-700 text-[11px] text-zinc-500 hover:text-blue-500 transition-colors" title="复制 Markdown 表格">MD</button>
+          <button onClick={handleCopyExcelTable} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-emerald-500 transition-colors" title="复制 Excel"><FileSpreadsheet className="w-3.5 h-3.5" /></button>
+          <button onClick={handleExportExcelTable} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-emerald-500 transition-colors" title="导出 Excel"><Download className="w-3.5 h-3.5" /></button>
+        </>
+      )}
+      {result.mode === 'formula' && (
+        <>
+          <button onClick={handleCopyLatex} className="px-2 py-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-700 text-[11px] text-zinc-500 hover:text-blue-500 transition-colors" title="复制 LaTeX">TeX</button>
+          <button onClick={handleExportFormulaImage} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-amber-500 transition-colors" title="导出公式图片"><FileImage className="w-3.5 h-3.5" /></button>
+        </>
+      )}
+      <button onClick={handleCopy} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-green-500 transition-colors" title="复制原始结果">
+        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </>
+  ) : null
 
   return (
     <div className="flex flex-col h-screen bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
@@ -317,6 +428,14 @@ export default function App() {
           <h1 className="text-sm font-semibold">OCR 文字识别</h1>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={handleCaptureImage} disabled={loading}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50">
+            <Camera className="w-3.5 h-3.5" />截图识别
+          </button>
+          <button onClick={handlePickImage} disabled={loading}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-zinc-100 dark:bg-zinc-700/60 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">
+            <FolderOpen className="w-3.5 h-3.5" />选择图片
+          </button>
           <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-700/60 rounded-lg p-0.5">
             {modeItems.map(({ key, label, icon: Icon }) => (
               <button key={key} onClick={() => handleModeChange(key)}
@@ -384,11 +503,22 @@ export default function App() {
         <div className="w-2/5 border-r border-zinc-200 dark:border-zinc-700 flex flex-col min-h-0">
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-100 dark:border-zinc-700/50 shrink-0">
             <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1"><ImageIcon className="w-3 h-3" /> 截图预览</span>
-            {imageDataUrl && <button onClick={handleSaveImage} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="保存截图"><Download className="w-3.5 h-3.5" /></button>}
+            <div className="flex items-center gap-1">
+              <button onClick={handleCaptureImage} disabled={loading} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-blue-500 transition-colors disabled:opacity-50" title="重新截图"><Camera className="w-3.5 h-3.5" /></button>
+              <button onClick={handlePickImage} disabled={loading} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-blue-500 transition-colors disabled:opacity-50" title="选择图片"><FolderOpen className="w-3.5 h-3.5" /></button>
+              {imageDataUrl && <button onClick={handleSaveImage} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="保存图片"><Download className="w-3.5 h-3.5" /></button>}
+            </div>
           </div>
           <div className="flex-1 flex items-center justify-center p-3 overflow-auto bg-zinc-50/50 dark:bg-zinc-800/30">
             {imageDataUrl ? <img src={imageDataUrl} alt="Screenshot" className="max-w-full max-h-full object-contain rounded-md shadow-sm" /> : (
-              <div className="text-center text-zinc-400 dark:text-zinc-500"><ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-30" /><p className="text-xs">等待截图...</p></div>
+              <div className="text-center text-zinc-400 dark:text-zinc-500">
+                <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <p className="text-xs mb-3">截图或选择图片后自动识别</p>
+                <div className="flex items-center justify-center gap-2">
+                  <button onClick={handleCaptureImage} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50"><Camera className="w-3.5 h-3.5" />截图</button>
+                  <button onClick={handlePickImage} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"><FolderOpen className="w-3.5 h-3.5" />选图</button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -397,15 +527,7 @@ export default function App() {
           <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-100 dark:border-zinc-700/50 shrink-0">
             <span className="text-xs text-zinc-500 dark:text-zinc-400">{loading ? '识别中...' : '识别结果'}</span>
             <div className="flex items-center gap-1">
-              {result?.text && (
-                <>
-                  <button onClick={handleRetry} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="重新识别"><RotateCcw className="w-3.5 h-3.5" /></button>
-                  <button onClick={handleTranslate} disabled={translating} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-blue-500 transition-colors disabled:opacity-50" title={`翻译为${currentLangLabel}`}><Languages className="w-3.5 h-3.5" /></button>
-                  <button onClick={handleCopy} className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-green-500 transition-colors" title="复制">
-                    {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-                </>
-              )}
+              {resultActions}
             </div>
           </div>
 
@@ -445,7 +567,14 @@ export default function App() {
                 )}
               </div>
             ) : !imageDataUrl ? (
-              <div className="flex flex-col items-center justify-center h-full gap-2 text-zinc-400 dark:text-zinc-500"><Type className="w-10 h-10 opacity-20" /><p className="text-xs">截图后自动识别</p></div>
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-400 dark:text-zinc-500">
+                <Type className="w-10 h-10 opacity-20" />
+                <p className="text-xs">截图或选择图片后自动识别</p>
+                <div className="flex items-center gap-2">
+                  <button onClick={handleCaptureImage} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-blue-500 text-white hover:bg-blue-600 transition-colors disabled:opacity-50"><Camera className="w-3.5 h-3.5" />截图识别</button>
+                  <button onClick={handlePickImage} disabled={loading} className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50"><FolderOpen className="w-3.5 h-3.5" />选择图片</button>
+                </div>
+              </div>
             ) : null}
           </div>
         </div>

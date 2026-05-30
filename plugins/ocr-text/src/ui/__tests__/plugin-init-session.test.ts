@@ -11,6 +11,22 @@ describe('plugin init session handling', () => {
     assert.equal(shouldProcessPluginInit(lastNonceRef, { nonce: 1002 }), true)
   })
 
+  it('keeps processing hot launches after the first accepted payload', () => {
+    const lastNonceRef: { current: number | string | null } = { current: null }
+    const processed: string[] = []
+
+    for (const payload of [
+      { nonce: 2001, image: 'first-capture' },
+      { nonce: 2002, image: 'second-capture' },
+    ]) {
+      if (shouldProcessPluginInit(lastNonceRef, payload)) {
+        processed.push(payload.image)
+      }
+    }
+
+    assert.deepEqual(processed, ['first-capture', 'second-capture'])
+  })
+
   it('keeps handling init payloads when nonce is unavailable', () => {
     const lastNonceRef: { current: number | string | null } = { current: null }
 
