@@ -55,11 +55,11 @@
       "id": "batch-file-md5",
       "name": "batch-file-md5",
       "displayName": "批量文件 MD5",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "author": "mulby",
       "description": "为单个或多个文件计算 MD5，采用流式读取以兼顾大文件与多文件并行，支持从启动器附带文件或本界面选择。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.25-1441/batch-file-md5-1.0.1.inplugin",
-      "lastPackageTime": "2026-05-25T14:42:11.025Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-2011/batch-file-md5-1.0.2.inplugin",
+      "lastPackageTime": "2026-05-30T20:11:51.035Z",
       "type": "utility",
       "details": "# 批量文件 MD5（batch-file-md5）\r\n\r\n在 Mulby 内为**单个或多个本地文件**计算 MD5。后端使用 **Node 流式读取**（约 1MB 缓冲）避免大文件占满内存，并对多文件做 **有限并行**（默认 6 路，上限 32），在常见 SSD 上能较快跑完批量任务。\r\n\r\n## 功能与命令\r\n\r\n| 触发方式 | 说明 |\r\n|----------|------|\r\n| 关键词：`文件MD5`、`批量MD5`、`MD5校验`、`计算MD5` | 打开插件面板 |\r\n| 命令类型：文件（可多文件） | 从启动器附带文件打开并自动加入队列 |\r\n\r\n## 使用说明\r\n\r\n1. 点击 **选择文件**，在系统对话框中多选文件；或将文件 **拖入** 插件窗口（需 Electron 提供的本地路径，一般从资源管理器拖入有效）。\r\n2. 点击 **开始计算**，结果逐行显示：MD5、文件大小；出错或文件夹会显示原因。\r\n3. **复制全部**：按 `md5  完整路径` 格式复制多行（类似 `md5sum` 列表）；单行可用每行右侧的复制按钮。\r\n\r\n## 技术说明\r\n\r\n- **UI**：拟态（内外阴影）+ 磨砂玻璃（`backdrop-filter`），支持 Mulby 明暗主题。\r\n- **后端**：`crypto.createHash('md5')` + `fs.createReadStream`，无额外原生依赖，便于打包为 `.inplugin`。\r\n\r\n## 构建\r\n\r\n```bash\r\ncd plugins/batch-file-md5\r\npnpm install\r\npnpm run icon    # 可选：从 assets/icon.svg 生成根目录 icon.png（512×512）\r\npnpm run build\r\npnpm run pack\r\n```\r\n\r\n## 在 Mulby 中验收\r\n\r\n1. 附加开发目录或安装打包后的 `.inplugin`，启用插件。\r\n2. 用关键词打开面板，选择 1 个小文件，结果应为 32 位小写十六进制 MD5。\r\n3. 多选多个文件，确认耗时与结果条数一致；故意加入一个文件夹路径应显示跳过或错误提示。\r\n4. 从支持「文件」类命令的入口附带多个文件打开，确认列表自动带入。",
       "icon": {
@@ -72,7 +72,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "6d1d21aceb21b79f8dc0cae8cf3ceacc731f76630454dbb8f5ef0246ae7733bb",
+      "sha256": "5184bb0ccac6c25c8d648171ecec9b64c70c9be66f0a3cfc0f61343f5e079c06",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/batch-file-md5"
     },
@@ -770,11 +770,11 @@
       "id": "todo-focus",
       "name": "todo-focus",
       "displayName": "待办番茄",
-      "version": "2.0.1",
+      "version": "2.0.3",
       "author": "mulby",
       "description": "轻量待办、置顶便签、沉浸式番茄钟与 AI 拆解/总结，支持关键字与划词快速捕获",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-1436/todo-focus-2.0.1.inplugin",
-      "lastPackageTime": "2026-05-30T14:36:54.331Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-2011/todo-focus-2.0.3.inplugin",
+      "lastPackageTime": "2026-05-30T20:12:44.800Z",
       "type": "productivity",
       "details": "# 待办番茄 (todo-focus)\n\n轻量待办管理插件，支持置顶便签、沉浸式番茄钟，以及 AI 拆解/总结。可通过 Mulby 关键字或划词快速静默添加待办。\n\n## 功能\n\n- **待办列表**：创建、完成、编辑、删除、筛选、置顶焦点任务\n- **全键盘操作**：`n` 新建、`j/k` 移动、`Enter` 完成、`e` 编辑、`d` 删除、`/` 搜索\n- **便签窗**：独立置顶小窗展示未完成待办\n- **番茄钟**：专注 / 短休 / 长休循环，可绑定当前任务\n- **AI 助手**：长文本拆解为多条待办；今日待办智能总结\n- **快速捕获**：`todo 标题` / `待办 标题` / `td 标题` 静默添加；划词添加\n\n## 触发方式\n\n| 触发 | 说明 |\n|------|------|\n| `待办` / `todo` / `番茄待办` | 打开主面板 |\n| `todo 买牛奶` 等 | 静默添加（正则匹配） |\n| 划词 +「添加为待办」 | 静默添加选中文本 |\n| `便签` / `待办便签` | 打开置顶便签窗 |\n| `专注` / `番茄钟` | 打开番茄钟专注窗 |\n\n## 快捷键（主面板）\n\n| 按键 | 行为 |\n|------|------|\n| `n` / `Ctrl+N` | 新建 |\n| `j` / `k` | 上下选择 |\n| `Enter` / `Space` | 完成/切换 |\n| `e` | 编辑 |\n| `d` / `Shift+D` | 删除 / 直接删除 |\n| `p` | 置顶为焦点任务 |\n| `/` | 过滤 |\n| `f` | 打开专注窗 |\n| `s` | 打开便签窗 |\n| `1` / `2` / `3` | 全部 / 进行中 / 已完成 |\n\n## 开发\n\n```bash\ncd plugins/todo-focus\nnpm install\nnpm run build\nnpm run pack\n```\n\n## AI 配置\n\n需在 Mulby 中配置可用 AI 模型；在插件内点击「加载模型」并选择模型后，方可使用拆解与总结功能。\n\n## 手动验收\n\n1. 输入 `待办 测试任务` → 收到通知，主面板可见新待办\n2. 划词添加待办\n3. 主面板键盘完成新建/完成/删除\n4. `便签` 打开置顶窗，单击勾选完成\n5. `专注` 开始番茄钟，完成后统计递增\n6. AI 拆解与总结（需已配置模型）\n7. `npm run pack` 生成 `.inplugin` 可安装",
       "icon": {
@@ -787,9 +787,59 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "b72f785d1f82ce03a5db3bfa4d66c378cf74dd882b4e71b20048e8e26a5c2edf",
+      "sha256": "c066b7d73dabb2f43dbb46e8131f38385325fbc829b72c3cc77a038d5347c304",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/todo-focus"
+    },
+    {
+      "id": "batch-rename",
+      "name": "batch-rename",
+      "displayName": "批量重命名",
+      "version": "1.0.0",
+      "author": "mulby",
+      "description": "工业级文件重命名工具，支持复杂逻辑的批量处理",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-2011/batch-rename-1.0.0.inplugin",
+      "lastPackageTime": "2026-05-30T20:12:18.505Z",
+      "type": "other",
+      "details": "# batch-rename\n\n插件描述\n\n## 功能特性\n\n- 功能 1\n- 功能 2\n- 功能 3\n\n## 触发方式\n\n- `batch-rename` - 主功能\n\n## 命令执行权限\n\n默认模板不会开启命令执行权限。只有插件后端确实需要调用 `context.api.shell.runCommand` 或全局 `mulby.shell.runCommand` 时，才在 `manifest.json` 中声明 `commandExecution.direct`：\n\n```json\n{\n  \"permissions\": {\n    \"commandExecution\": {\n      \"direct\": {\n        \"enabled\": true,\n        \"defaultProfile\": \"workspace\",\n        \"maxProfile\": \"workspace\"\n      }\n    }\n  }\n}\n```\n\n调用时可用 `executionProfile` 请求 `sandbox`、`workspace` 或 `trusted`，但不能超过 manifest 允许的 `maxProfile`。如果插件承载自己的 AI，并希望这个 AI 使用 Mulby 内置命令型能力，需要单独声明 `commandExecution.ai`；旧版 `runCommand: true` 只兼容插件自身直接调命令，不授权 AI 生成命令。\n\n## 目录授权\n\n插件可以在运行时申请用户确认的目录访问权限，不需要在 manifest 中预声明。获得 `readwrite` 授权后，该目录会扩展当前插件的命令 workspace root；但命令执行本身仍需要 `commandExecution.direct` 或 `commandExecution.ai`。\n\n```ts\nconst grant = await context.api.directoryAccess.request({\n  mode: 'readwrite',\n  reason: '在用户选择的项目目录中运行命令'\n})\n\nif (grant) {\n  await context.api.shell.runCommand({\n    command: 'git',\n    args: ['status'],\n    cwd: grant.path,\n    executionProfile: 'workspace'\n  })\n}\n```\n\n## 插件通信\n\n后端可以使用 `context.api.messaging` 或全局 `mulby.messaging` 与其他插件通信。需要长期接收消息时，把订阅注册在后端，并让 UI 通过 `window.mulby.host.call(...)` 读取后端缓存；不要把消息缓存只放在前端。\n\n```ts\nlet messageHandler: ((message: PluginMessage) => void | Promise<void>) | null = null\nconst recentMessages: PluginMessage[] = []\n\nfunction registerMessaging(api: BackendPluginAPI) {\n  if (messageHandler) api.messaging.off(messageHandler)\n  messageHandler = (message) => {\n    recentMessages.unshift(message)\n    recentMessages.splice(50)\n  }\n  api.messaging.on(messageHandler)\n}\n\nexport function onLoad(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport function onBackground(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport const rpc = {\n  getRecentMessages() {\n    return recentMessages\n  }\n}\n```\n\n如果插件没有打开 UI 时也要接收消息，在 `manifest.json` 中启用后台运行。是否跟随 Mulby 启动由用户在插件窗口菜单或搜索结果右键菜单中勾选：\n\n```json\n{\n  \"pluginSetting\": {\n    \"background\": true,\n    \"persistent\": true,\n    \"idleTimeoutMs\": \"never\"\n  }\n}\n```\n\n## 窗口与截图\n\nReact 模板适合可视化插件。需要独立窗口时，将功能配置为 `mode: \"detached\"`；需要截图后打开标注界面时，可组合 `preCapture: \"region\"` 和窗口配置 `type: \"borderless\"`、`transparent: true`、`position: \"capture-region\"`、`fit: \"capture-region-with-toolbar\"`。\n\nmacOS 上，独立插件窗口会使用 Mulby 的应用级 Dock 图标表示。Dock 图标会优先显示“宿主图标 + 最近聚焦插件图标”的组合样式，多窗口时显示数量徽标。Dock 右键菜单可用于切换或关闭插件窗口；系统 Dock 的“退出”仍然退出宿主应用。\n\n`skipTaskbar` 只表示请求隐藏具体窗口的任务栏/Dock 呈现，不能作为隐藏 Mulby 应用级 Dock 图标的开关。\n\n## 旧插件兼容窗口\n\n新插件优先使用单入口 UI + 前端路由。迁移 zTools/uTools 风格插件时，如果必须打开不同 HTML 文件并为窗口指定独立 preload，可以使用 `window.mulby.window.create(path, { loadMode: \"file\" })`。\n\n```ts\nconst regionWindow = await window.mulby.window.create('region/index.html?key=abc', {\n  loadMode: 'file',\n  preload: 'region/preload.cjs',\n  width: 640,\n  height: 480\n})\n```\n\n文件模式只允许加载插件目录内的相对 HTML 文件，`preload` 只允许插件目录内的 `.js` / `.cjs` 文件。额外 HTML、窗口专属 preload、`.node` 原生模块和外部二进制不会自动进入包内，需要写入 `manifest.assets`：\n\n```json\n{\n  \"assets\": [\n    \"region\",\n    \"effect\",\n    \"countdown.html\",\n    \"region/preload.cjs\",\n    \"addon-darwin-arm64.node\",\n    \"bin/aperture\"\n  ]\n}\n```\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。若插件放置于基于 pnpm workspace 的父仓库（如 `plugins/<name>/` 目录），通常建议直接在**仓库根目录**执行一次 `pnpm install`。也可以在当前插件目录单独执行。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建\n\n```bash\npnpm run build\n```\n\n### 打包\n\n```bash\npnpm run pack\n```\n\n## 项目结构\n\n```\nbatch-rename/\n├── manifest.json              # 插件配置\n├── package.json\n├── src/\n│   ├── main.ts                # 后端入口\n│   ├── types/\n│   │   └── mulby.d.ts         # 类型定义（含 BackendPluginContext）\n│   ├── ui/\n│   │   ├── App.tsx            # 主应用\n│   │   ├── main.tsx           # UI 入口\n│   │   ├── index.html         # HTML 模板\n│   │   ├── styles.css         # 全局样式\n│   │   ├── hooks/\n│   │   │   └── useMulby.ts    # Mulby API Hook\n│   ├── legacy/                # 可选：旧插件兼容 HTML/preload 源文件\n├── dist/                      # 后端构建输出\n├── ui/                        # UI 构建输出\n├── assets/                    # 可选：manifest.assets 打包资源\n└── icon.png                   # 插件图标\n```\n\n## 许可证\n\nMIT License",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/batch-rename/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/batch-rename/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "dc8fe97c3b1e174dabb8b3d6120f303e80eb982b859706a27687b35811ba4d81",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/batch-rename"
+    },
+    {
+      "id": "calc-pad",
+      "name": "calc-pad",
+      "displayName": "计算稿纸",
+      "version": "1.0.0",
+      "author": "Unknown",
+      "description": "高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-2011/calc-pad-1.0.0.inplugin",
+      "lastPackageTime": "2026-05-30T20:12:36.804Z",
+      "type": "productivity",
+      "details": "# 计算稿纸 (Calc Pad)\n\n高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。\n\n## 特性\n\n- **实时计算**：输入算式即刻获得结果。\n- **自动保存**：所有稿纸自动持久化，无需手动保存。\n- **行间备注**：可以为任意计算行添加说明备注。\n- **多稿纸管理**：随时新建、切换、删除多个稿纸。\n- **丰富运算支持**：支持 `+`、`-`、`*`、`/`、`^`、`%` 和括号嵌套，提供千分位格式化显示。\n- **键盘驱动**：\n  - `Enter`：完成当前输入，如无输入则将上一行结果带入新行\n  - `↑` / `↓`：在各计算行间切换焦点，支持随时修改历史算式\n  - `Cmd/Ctrl + B`：为当前行添加/编辑备注\n  - `Cmd/Ctrl + C`：快速复制当前所有算式和结果\n  - `Cmd/Ctrl + N`：新建空白稿纸\n  - `Cmd/Ctrl + R`：清空当前稿纸\n\n## 唤起方式\n\n在 Mulby 中输入关键字：`计算稿纸`、`calc`、`计算器`\n\n## 示例\n\n```\n55+88+7689*543\n                       = 4,175,270\n                       \n2^5+888+99*878.467\n                       = 87,888.233\n```",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/calc-pad/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/calc-pad/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "e20dbbe52145c3f51bce322c764c68148766dd126edd2370ade3b4a2134e3b68",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/calc-pad"
     }
   ]
 }
