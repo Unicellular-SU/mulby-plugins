@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-800 antialiased dark:bg-[#0a0a0f] dark:text-slate-200;
+  }
+}
+
+@layer utilities {
+  .checkerboard-bg {
+    background-image: linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+      linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+      linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  }
+  
+  .dark .checkerboard-bg {
+    background-image: linear-gradient(45deg, #1e1e24 25%, transparent 25%),
+      linear-gradient(-45deg, #1e1e24 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #1e1e24 75%),
+      linear-gradient(-45deg, transparent 75%, #1e1e24 75%);
+  }
+  
+  .glass-panel {
+    @apply bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-lg dark:shadow-xl;
+  }
+
+  .btn-primary {
+    @apply flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-medium transition-all shadow-[0_0_20px_rgba(99,102,241,0.2)] hover:shadow-[0_0_25px_rgba(99,102,241,0.4)] disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium transition-all border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+}

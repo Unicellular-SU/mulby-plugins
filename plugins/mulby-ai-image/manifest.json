@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/.mulby/manifest-schema.json",
+  "id": "mulby-ai-image",
+  "name": "mulby-ai-image",
+  "version": "1.0.0",
+  "author": "mulby",
+  "displayName": "AI 图像处理",
+  "description": "AI 驱动的一站式图像处理工具：文字生图、智能去背景、无损放大、AI 修图",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
+  "window": {
+    "width": 1100,
+    "height": 750,
+    "minWidth": 900,
+    "minHeight": 600,
+    "type": "default"
+  },
+  "pluginSetting": {
+    "single": true
+  },
+  "features": [
+    {
+      "code": "ai-image-generate",
+      "explain": "AI 生成图片 - 输入文字描述生成高质量图片",
+      "cmds": [
+        { "type": "keyword", "value": "生图" },
+        { "type": "keyword", "value": "ai画" }
+      ]
+    }
+  ]
+}
