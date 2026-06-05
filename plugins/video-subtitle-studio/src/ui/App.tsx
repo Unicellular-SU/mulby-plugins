@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { normalizeOpenAiTranscription, normalizeVolcengineTranscription, buildOpenAiTranscriptionRequest } from './lib/asr'
 import { cleanupFiles, extractAudioChunks, getMediaDurationMs } from './lib/audio'
 import { mergeChunkResults, type AudioChunk } from './lib/chunking'
-import { exportJson, exportSrt, exportVtt, formatVttTime, type SubtitleCue } from './lib/subtitles'
+import { exportJson, exportSrt, exportVtt, formatVttTime, mergeSubtitles, splitByText, splitByTime, splitByWord, type SubtitleCue } from './lib/subtitles'
 import { translateSubtitles } from './lib/translate'
 import { PROJECT_EXTENSION, parseProject, projectFileName, serializeProject } from './lib/project'
 import { useMulby } from './hooks/useMulby'
 import { useHistoryState } from './hooks/useHistoryState'
-import { CueList } from './components/CueList'
+import { CueList, type SplitRequest } from './components/CueList'
 import { VideoPreview, type VideoPreviewHandle } from './components/VideoPreview'
 
 type ProviderId = 'openai' | 'volcengine'
@@ -725,6 +725,32 @@ export default function App() {
     setCues((current) => current.filter((cue) => cue.id !== id))
   }, [])
 
+  const splitCue = useCallback((id: string, request: SplitRequest) => {
+    setCues((current) => {
+      const index = current.findIndex((cue) => cue.id === id)
+      if (index < 0) return current
+      const cue = current[index]
+      const pair =
+        request.kind === 'text'
+          ? splitByText(cue, request.textIndex)
+          : request.kind === 'time'
+            ? splitByTime(cue, request.splitMs)
+            : splitByWord(cue, request.wordIndex)
+      const next = [...current.slice(0, index), pair[0], pair[1], ...current.slice(index + 1)]
+      return next.map((item, idx) => ({ ...item, id: `cue-${idx + 1}` }))
+    })
+  }, [])
+
+  const mergeCue = useCallback((id: string) => {
+    setCues((current) => {
+      const index = current.findIndex((cue) => cue.id === id)
+      if (index <= 0) return current
+      const merged = mergeSubtitles(current[index - 1], current[index])
+      const next = [...current.slice(0, index - 1), merged, ...current.slice(index + 1)]
+      return next.map((item, idx) => ({ ...item, id: `cue-${idx + 1}` }))
+    })
+  }, [])
+
   function setVolcengineApiMode(mode: VolcengineApiMode) {
     setSettings((current) => {
       const autoResourceIds = ['volc.bigasr.auc_turbo', 'volc.seedasr.auc', 'volc.bigasr.auc', '']
@@ -901,7 +927,17 @@ export default function App() {
               <p className="mt-2 max-w-md text-sm text-slate-400">长视频会按 8 分钟分片并保留重叠窗口，再把每段时间戳回填到全局时间轴。</p>
             </div>
           ) : (
-            <CueList cues={cues} onChange={updateCue} onDelete={deleteCue} activeCueId={activeCue?.id ?? null} onSeek={seekToCue} />
+            <CueList
+              cues={cues}
+              onChange={updateCue}
+              onDelete={deleteCue}
+              onSplit={splitCue}
+              onMerge={mergeCue}
+              currentTimeMs={currentTimeMs}
+              formatTime={formatVttTime}
+              activeCueId={activeCue?.id ?? null}
+              onSeek={seekToCue}
+            />
           )}
         </section>
       </main>

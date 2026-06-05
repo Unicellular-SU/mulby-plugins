@@ -70,23 +70,78 @@ export function exportJson(cues: SubtitleCue[]) {
   return JSON.stringify(cues, null, 2)
 }
 
-function splitTextByIndex(text: string, preferredIndex: number) {
-  const trimmed = text.trim()
-  if (!trimmed) return ['', '']
-  const midpoint = Math.max(1, Math.min(preferredIndex, trimmed.length - 1))
-  const before = trimmed.lastIndexOf(' ', midpoint)
-  const after = trimmed.indexOf(' ', midpoint)
-  const splitAt = before > 0 ? before : after > 0 ? after : midpoint
-  return [trimmed.slice(0, splitAt).trim(), trimmed.slice(splitAt).trim()]
+function clampBoundaryMs(cue: SubtitleCue, splitMs: number) {
+  return Math.max(cue.startMs + 1, Math.min(Math.round(splitMs), cue.endMs - 1))
 }
 
+function splitTextAtIndex(text: string, index: number): [string, string] {
+  const length = text.length
+  if (length === 0) return ['', '']
+  const clamped = Math.max(0, Math.min(index, length))
+  // For space-separated text, snap to the nearest word boundary so we don't cut words apart.
+  const hasSpaces = /\s/.test(text)
+  if (hasSpaces) {
+    const before = text.lastIndexOf(' ', clamped - 1)
+    const after = text.indexOf(' ', clamped)
+    const snap = clamped - (before >= 0 ? before : -1) <= (after >= 0 ? after : length) - clamped && before > 0 ? before : after > 0 ? after : clamped
+    return [text.slice(0, snap).trim(), text.slice(snap).trim()]
+  }
+  return [text.slice(0, clamped).trim(), text.slice(clamped).trim()]
+}
+
+function buildSplitPair(cue: SubtitleCue, boundaryMs: number, leftText: string, rightText: string, leftWords?: SubtitleWord[], rightWords?: SubtitleWord[]): [SubtitleCue, SubtitleCue] {
+  const left: SubtitleCue = { ...cue, id: `${cue.id}-1`, endMs: boundaryMs, text: leftText }
+  const right: SubtitleCue = { ...cue, id: `${cue.id}-2`, startMs: boundaryMs, text: rightText }
+  if (leftWords) left.words = leftWords
+  else delete left.words
+  if (rightWords) right.words = rightWords
+  else delete right.words
+  // Translation cannot be meaningfully split; keep it only on the left to avoid duplication.
+  if (cue.translation) delete right.translation
+  return [left, right]
+}
+
+/** Split by a text-cursor index. Time boundary is derived from the character ratio. */
+export function splitByText(cue: SubtitleCue, textIndex: number): [SubtitleCue, SubtitleCue] {
+  const length = cue.text.length || 1
+  const ratio = Math.max(0, Math.min(textIndex / length, 1))
+  const boundaryMs = clampBoundaryMs(cue, cue.startMs + (cue.endMs - cue.startMs) * ratio)
+  const [leftText, rightText] = splitTextAtIndex(cue.text, textIndex)
+  return buildSplitPair(cue, boundaryMs, leftText, rightText)
+}
+
+/** Split by a time point. Text boundary is derived from the time ratio. */
+export function splitByTime(cue: SubtitleCue, splitMs: number): [SubtitleCue, SubtitleCue] {
+  const boundaryMs = clampBoundaryMs(cue, splitMs)
+  const span = cue.endMs - cue.startMs || 1
+  const ratio = (boundaryMs - cue.startMs) / span
+  const textIndex = Math.round(cue.text.length * ratio)
+  const [leftText, rightText] = splitTextAtIndex(cue.text, textIndex)
+  return buildSplitPair(cue, boundaryMs, leftText, rightText)
+}
+
+/** Split before the word at wordIndex using its exact timestamp and text. */
+export function splitByWord(cue: SubtitleCue, wordIndex: number): [SubtitleCue, SubtitleCue] {
+  const words = cue.words ?? []
+  if (wordIndex <= 0 || wordIndex >= words.length) {
+    // Nothing meaningful to split on; fall back to a midpoint split.
+    return splitByTime(cue, Math.round((cue.startMs + cue.endMs) / 2))
+  }
+  const boundaryMs = clampBoundaryMs(cue, words[wordIndex].startMs)
+  const leftWords = words.slice(0, wordIndex)
+  const rightWords = words.slice(wordIndex)
+  const joiner = /\s/.test(cue.text) ? ' ' : ''
+  const leftText = leftWords.map((word) => word.text).join(joiner).trim()
+  const rightText = rightWords.map((word) => word.text).join(joiner).trim()
+  return buildSplitPair(cue, boundaryMs, leftText, rightText, leftWords, rightWords)
+}
+
+/** Backwards-compatible helper: split at a time point, optionally using a preferred text index. */
 export function splitSubtitle(cue: SubtitleCue, splitMs: number, preferredTextIndex?: number): [SubtitleCue, SubtitleCue] {
-  const boundary = Math.max(cue.startMs + 1, Math.min(splitMs, cue.endMs - 1))
-  const [leftText, rightText] = splitTextByIndex(cue.text, preferredTextIndex ?? Math.floor(cue.text.length / 2))
-  return [
-    { ...cue, id: `${cue.id}-1`, endMs: boundary, text: leftText },
-    { ...cue, id: `${cue.id}-2`, startMs: boundary, text: rightText }
-  ]
+  const boundaryMs = clampBoundaryMs(cue, splitMs)
+  const textIndex = preferredTextIndex ?? Math.floor(cue.text.length / 2)
+  const [leftText, rightText] = splitTextAtIndex(cue.text, textIndex)
+  return buildSplitPair(cue, boundaryMs, leftText, rightText)
 }
 
 export function mergeSubtitles(left: SubtitleCue, right: SubtitleCue): SubtitleCue {
