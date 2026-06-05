@@ -848,8 +848,8 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "AI 驱动的一站式图像处理工具：文字生图、智能去背景、无损放大、AI 修图",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.31-1647/mulby-ai-image-1.0.0.inplugin",
-      "lastPackageTime": "2026-05-31T16:48:22.538Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.05-0354/mulby-ai-image-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-05T03:55:18.652Z",
       "type": "other",
       "details": "# mulby-ai-image\n\n插件描述\n\n## 功能特性\n\n- 功能 1\n- 功能 2\n- 功能 3\n\n## 触发方式\n\n- `mulby-ai-image` - 主功能\n\n## 命令执行权限\n\n默认模板不会开启命令执行权限。只有插件后端确实需要调用 `context.api.shell.runCommand` 或全局 `mulby.shell.runCommand` 时，才在 `manifest.json` 中声明 `commandExecution.direct`：\n\n```json\n{\n  \"permissions\": {\n    \"commandExecution\": {\n      \"direct\": {\n        \"enabled\": true,\n        \"defaultProfile\": \"workspace\",\n        \"maxProfile\": \"workspace\"\n      }\n    }\n  }\n}\n```\n\n调用时可用 `executionProfile` 请求 `sandbox`、`workspace` 或 `trusted`，但不能超过 manifest 允许的 `maxProfile`。如果插件承载自己的 AI，并希望这个 AI 使用 Mulby 内置命令型能力，需要单独声明 `commandExecution.ai`；旧版 `runCommand: true` 只兼容插件自身直接调命令，不授权 AI 生成命令。\n\n## 目录授权\n\n插件可以在运行时申请用户确认的目录访问权限，不需要在 manifest 中预声明。获得 `readwrite` 授权后，该目录会扩展当前插件的命令 workspace root；但命令执行本身仍需要 `commandExecution.direct` 或 `commandExecution.ai`。\n\n```ts\nconst grant = await context.api.directoryAccess.request({\n  mode: 'readwrite',\n  reason: '在用户选择的项目目录中运行命令'\n})\n\nif (grant) {\n  await context.api.shell.runCommand({\n    command: 'git',\n    args: ['status'],\n    cwd: grant.path,\n    executionProfile: 'workspace'\n  })\n}\n```\n\n## 插件通信\n\n后端可以使用 `context.api.messaging` 或全局 `mulby.messaging` 与其他插件通信。需要长期接收消息时，把订阅注册在后端，并让 UI 通过 `window.mulby.host.call(...)` 读取后端缓存；不要把消息缓存只放在前端。\n\n```ts\nlet messageHandler: ((message: PluginMessage) => void | Promise<void>) | null = null\nconst recentMessages: PluginMessage[] = []\n\nfunction registerMessaging(api: BackendPluginAPI) {\n  if (messageHandler) api.messaging.off(messageHandler)\n  messageHandler = (message) => {\n    recentMessages.unshift(message)\n    recentMessages.splice(50)\n  }\n  api.messaging.on(messageHandler)\n}\n\nexport function onLoad(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport function onBackground(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport const rpc = {\n  getRecentMessages() {\n    return recentMessages\n  }\n}\n```\n\n如果插件没有打开 UI 时也要接收消息，在 `manifest.json` 中启用后台运行。是否跟随 Mulby 启动由用户在插件窗口菜单或搜索结果右键菜单中勾选：\n\n```json\n{\n  \"pluginSetting\": {\n    \"background\": true,\n    \"persistent\": true,\n    \"idleTimeoutMs\": \"never\"\n  }\n}\n```\n\n## 窗口与截图\n\nReact 模板适合可视化插件。需要独立窗口时，将功能配置为 `mode: \"detached\"`；需要截图后打开标注界面时，可组合 `preCapture: \"region\"` 和窗口配置 `type: \"borderless\"`、`transparent: true`、`position: \"capture-region\"`、`fit: \"capture-region-with-toolbar\"`。\n\nmacOS 上，独立插件窗口会使用 Mulby 的应用级 Dock 图标表示。Dock 图标会优先显示“宿主图标 + 最近聚焦插件图标”的组合样式，多窗口时显示数量徽标。Dock 右键菜单可用于切换或关闭插件窗口；系统 Dock 的“退出”仍然退出宿主应用。\n\n`skipTaskbar` 只表示请求隐藏具体窗口的任务栏/Dock 呈现，不能作为隐藏 Mulby 应用级 Dock 图标的开关。\n\n## 旧插件兼容窗口\n\n新插件优先使用单入口 UI + 前端路由。迁移 zTools/uTools 风格插件时，如果必须打开不同 HTML 文件并为窗口指定独立 preload，可以使用 `window.mulby.window.create(path, { loadMode: \"file\" })`。\n\n```ts\nconst regionWindow = await window.mulby.window.create('region/index.html?key=abc', {\n  loadMode: 'file',\n  preload: 'region/preload.cjs',\n  width: 640,\n  height: 480\n})\n```\n\n文件模式只允许加载插件目录内的相对 HTML 文件，`preload` 只允许插件目录内的 `.js` / `.cjs` 文件。额外 HTML、窗口专属 preload、`.node` 原生模块和外部二进制不会自动进入包内，需要写入 `manifest.assets`：\n\n```json\n{\n  \"assets\": [\n    \"region\",\n    \"effect\",\n    \"countdown.html\",\n    \"region/preload.cjs\",\n    \"addon-darwin-arm64.node\",\n    \"bin/aperture\"\n  ]\n}\n```\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。若插件放置于基于 pnpm workspace 的父仓库（如 `plugins/<name>/` 目录），通常建议直接在**仓库根目录**执行一次 `pnpm install`。也可以在当前插件目录单独执行。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建\n\n```bash\npnpm run build\n```\n\n### 打包\n\n```bash\npnpm run pack\n```\n\n## 项目结构\n\n```\nmulby-ai-image/\n├── manifest.json              # 插件配置\n├── package.json\n├── src/\n│   ├── main.ts                # 后端入口\n│   ├── types/\n│   │   └── mulby.d.ts         # 类型定义（含 BackendPluginContext）\n│   ├── ui/\n│   │   ├── App.tsx            # 主应用\n│   │   ├── main.tsx           # UI 入口\n│   │   ├── index.html         # HTML 模板\n│   │   ├── styles.css         # 全局样式\n│   │   ├── hooks/\n│   │   │   └── useMulby.ts    # Mulby API Hook\n│   ├── legacy/                # 可选：旧插件兼容 HTML/preload 源文件\n├── dist/                      # 后端构建输出\n├── ui/                        # UI 构建输出\n├── assets/                    # 可选：manifest.assets 打包资源\n└── icon.png                   # 插件图标\n```\n\n## 许可证\n\nMIT License",
       "icon": {
@@ -862,7 +862,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "a9f3c6c8cf3b77815cb5d1e11c026b24b4e9b553992f3a3b4cd3a293063f3940",
+      "sha256": "fd5f8e59ad02ae140dd74f382b1860a07a78ed7ba1a2ba6b0e8c22071f4690a1",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-ai-image"
     },
@@ -873,8 +873,8 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "收藏常用文本、代码和图片，一键快速粘贴",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.31-1647/mulby-memo-1.0.0.inplugin",
-      "lastPackageTime": "2026-05-31T16:48:49.702Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.05-0354/mulby-memo-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-05T03:55:26.350Z",
       "type": "other",
       "details": "# mulby-memo (备忘快贴)\n\n一款为 Mulby 设计的剪贴板与片段管理插件，支持快速收藏文本、代码和图片，并能一键快速粘贴。\n\n## 功能特性\n\n- **一键收藏**：支持通过快捷键或关键字，将剪贴板内容（纯文本、代码、图片）默默保存。\n- **分类管理**：支持将备忘分为「文本」、「代码」和「图片」三类。\n- **快速粘贴**：在界面中点击任意备忘录，即可自动将其粘贴到之前活跃的应用程序中。\n- **精美界面**：适配明暗主题，采用 Tailwind 构建的现代化卡片式交互。\n\n## 触发方式\n\n- `备忘快贴` 或 `mulby-memo`：打开插件主界面查看与管理备忘录。\n- `默默记录到备忘快贴` 或 `保存为备忘`：不打开主界面，直接在后台将输入框的内容或剪贴板图片保存到数据库。\n\n## 使用方法\n\n1. **收藏文本**：在 Mulby 输入框输入文本后，选择「保存为备忘」。\n2. **收藏图片**：在其他应用复制图片后，唤出 Mulby，选择「保存图片为备忘」。\n3. **快速调用**：唤出 Mulby 输入「备忘快贴」，在列表中点击需要的片段，即可完成一键自动粘贴。\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建与打包\n\n```bash\npnpm run build\npnpm run pack\n```\n\n打包产物为 `.inplugin` 格式，可在 Mulby 插件中心进行离线安装。",
       "icon": {
@@ -887,9 +887,33 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "ba2431ed041d49fce73f45d74d79997ac8e1eb7f746965f4d1a64cfe53f87194",
+      "sha256": "2b3b517270fa6e81a32d8ef18151386f2aefe4a17ac79f0eb6ad177182ef70e0",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-memo"
+    },
+    {
+      "name": "disk-assistant",
+      "displayName": "磁盘助手",
+      "version": "1.0.0",
+      "author": "mulby",
+      "description": "分析和可视化磁盘空间占用情况，快速定位大文件和占用空间最多的目录。",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.05-0354/disk-assistant-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-05T03:55:10.789Z",
+      "type": "utility",
+      "details": "# 磁盘助手 (Disk Assistant)\r\n\r\n一款 Mulby 插件，帮助您分析和可视化磁盘空间占用情况。\r\n\r\n## 功能特性\r\n\r\n- **目录扫描** - 递归扫描指定目录，统计所有文件和文件夹的大小\r\n- **矩形图可视化** - 使用 Treemap 直观展示空间占用分布，一目了然\r\n- **列表视图** - 支持按大小、名称、类型、日期排序的文件列表\r\n- **搜索过滤** - 按文件名或扩展名搜索，快速定位特定类型的文件\r\n- **磁盘分区信息** - 显示各磁盘分区的总容量、可用空间和已用百分比\r\n- **目录导航** - 面包屑导航，支持点击文件夹深入查看子目录\r\n- **文件定位** - 一键在系统文件管理器中定位文件\r\n- **高性能扫描** - 异步扫描 + 实时进度显示，处理大量文件时不会卡顿\r\n\r\n## 使用方式\r\n\r\n### 触发命令\r\n\r\n在 Mulby 搜索栏输入以下关键词即可打开插件：\r\n\r\n- `磁盘` - 打开磁盘助手\r\n- `disk` - 打开磁盘助手\r\n- `空间` - 打开磁盘助手\r\n- `space` - 打开磁盘助手\r\n\r\n### 操作流程\r\n\r\n1. 打开插件后，点击 **\"选择目录\"** 按钮选择要分析的目录，或点击磁盘分区按钮扫描整个分区\r\n2. 等待扫描完成，进度条会实时显示扫描状态\r\n3. 扫描完成后：\r\n   - **矩形图视图**：色块大小代表占用空间，点击色块可深入子目录\r\n   - **列表视图**：可排序、搜索的文件列表，支持类型筛选\r\n4. 使用面包屑导航返回上级目录\r\n5. 双击列表中的文件夹可进入查看\r\n\r\n## 技术栈\r\n\r\n- React 18 + TypeScript\r\n- Tailwind CSS\r\n- Vite\r\n- Lucide React Icons\r\n- Node.js fs API（后端扫描）\r\n\r\n## 构建\r\n\r\n```bash\r\n# 安装依赖\r\npnpm install\r\n\r\n# 构建\r\nnpm run build\r\n\r\n# 打包为 .inplugin\r\nnpm run pack\r\n```\r\n\r\n## 项目结构\r\n\r\n```\r\ndisk-assistant/\r\n├── manifest.json          # 插件配置\r\n├── package.json           # 依赖配置\r\n├── vite.config.ts         # Vite 构建配置\r\n├── tailwind.config.js     # Tailwind CSS 配置\r\n├── tsconfig.json          # TypeScript 配置\r\n├── icon.png               # 插件图标 (512x512)\r\n├── assets/\r\n│   └── icon.svg           # 图标源文件\r\n├── src/\r\n│   ├── main.ts            # 后端入口（目录扫描逻辑）\r\n│   ├── types/\r\n│   │   └── mulby.d.ts     # 类型声明\r\n│   └── ui/\r\n│       ├── index.html     # 前端入口 HTML\r\n│       ├── main.tsx       # React 入口\r\n│       ├── App.tsx        # 主界面组件\r\n│       ├── styles.css     # 全局样式\r\n│       └── hooks/\r\n│           └── useMulby.ts # Mulby API Hook\r\n└── screenshots/           # 截图目录\r\n```\r\n\r\n## 验收清单\r\n\r\n在 Mulby 中验证以下功能：\r\n\r\n1. ✅ 插件可正常加载，无 manifest 错误\r\n2. ✅ 输入 \"磁盘\" 或 \"disk\" 可触发插件\r\n3. ✅ 点击\"选择目录\"可选择本地目录并开始扫描\r\n4. ✅ 扫描进度条实时显示，可取消扫描\r\n5. ✅ 矩形图视图正确显示文件大小分布\r\n6. ✅ 列表视图支持排序和搜索\r\n7. ✅ 可点击文件夹深入查看子目录\r\n8. ✅ 面包屑导航可返回上级目录\r\n9. ✅ 文件定位功能可在文件管理器中打开",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/disk-assistant/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/disk-assistant/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "94d9c96ccf440595348c600cb5108a79ac05a772080b26618b16dfb60ff350b1",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/disk-assistant"
     }
   ]
 }
