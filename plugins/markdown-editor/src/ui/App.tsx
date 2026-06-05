@@ -29,6 +29,8 @@ import {
 } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
 import { useDraftStorage } from './hooks/useDraftStorage'
+import { FindReplaceBar, type FindReplaceMode } from './components/FindReplaceBar'
+import { findMatches, replaceAll as replaceAllInText, replaceRange, type SearchMatch } from './services/search'
 import {
   createExportDocument,
   exportDocxFile,
@@ -285,6 +287,13 @@ export default function App() {
   const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findMode, setFindMode] = useState<FindReplaceMode>('find')
+  const [findQuery, setFindQuery] = useState('')
+  const [findReplacement, setFindReplacement] = useState('')
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false)
+  const [findWholeWord, setFindWholeWord] = useState(false)
+  const [findIndex, setFindIndex] = useState(0)
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const contentRef = useRef(content)
@@ -299,6 +308,10 @@ export default function App() {
   modeRef.current = editorMode
   activeFilePathRef.current = activeFilePath
   const outlineEntries = useMemo(() => parseOutline(content), [content])
+  const searchMatches = useMemo<SearchMatch[]>(
+    () => (findOpen && findQuery ? findMatches(content, findQuery, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord }) : []),
+    [content, findOpen, findQuery, findCaseSensitive, findWholeWord]
+  )
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -719,12 +732,109 @@ export default function App() {
   }, [activeFilePath, focusEditor, handleSaveFileAs, notification, writeToFile])
 
   useEffect(() => {
+    if (findIndex > 0 && findIndex >= searchMatches.length) {
+      setFindIndex(searchMatches.length > 0 ? searchMatches.length - 1 : 0)
+    }
+  }, [findIndex, searchMatches.length])
+
+  const goToMatch = useCallback((index: number, matches: SearchMatch[]) => {
+    if (matches.length === 0) {
+      return
+    }
+    const normalized = ((index % matches.length) + matches.length) % matches.length
+    setFindIndex(normalized)
+
+    const editor = editorRef.current
+    const host = hostRef.current
+    const match = matches[normalized]
+    if (!editor || !host || !match) {
+      return
+    }
+
+    // Selection by source position only works reliably in markdown mode.
+    if (modeRef.current !== 'markdown') {
+      editor.changeMode('markdown', false)
+      setEditorMode('markdown')
+    }
+
+    window.requestAnimationFrame(() => {
+      editor.setSelection([match.line, match.column], [match.endLine, match.endColumn])
+      scrollMarkdownLineIntoView(host, match.line)
+    })
+  }, [])
+
+  const openFind = useCallback((mode: FindReplaceMode) => {
+    const editor = editorRef.current
+    const selected = editor?.getSelectedText?.() ?? ''
+    setFindMode(mode)
+    setFindOpen(true)
+    setFindIndex(0)
+    if (selected && !selected.includes('\n')) {
+      setFindQuery(selected)
+    }
+  }, [])
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false)
+    focusEditor()
+  }, [focusEditor])
+
+  const handleFindNext = useCallback(() => {
+    goToMatch(findIndex + 1, searchMatches)
+  }, [findIndex, goToMatch, searchMatches])
+
+  const handleFindPrev = useCallback(() => {
+    goToMatch(findIndex - 1, searchMatches)
+  }, [findIndex, goToMatch, searchMatches])
+
+  const handleReplaceOne = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor || searchMatches.length === 0) {
+      return
+    }
+    const target = searchMatches[Math.min(findIndex, searchMatches.length - 1)]
+    const source = editor.getMarkdown()
+    const next = replaceRange(source, target.start, target.end, findReplacement)
+    editor.setMarkdown(next, false)
+    setContent(next)
+
+    const remaining = findMatches(next, findQuery, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord })
+    window.requestAnimationFrame(() => {
+      goToMatch(findIndex, remaining)
+    })
+  }, [findCaseSensitive, findIndex, findQuery, findReplacement, findWholeWord, goToMatch, searchMatches])
+
+  const handleReplaceAll = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor || searchMatches.length === 0) {
+      return
+    }
+    const count = searchMatches.length
+    const source = editor.getMarkdown()
+    const next = replaceAllInText(source, findQuery, findReplacement, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord })
+    editor.setMarkdown(next, false)
+    setContent(next)
+    setFindIndex(0)
+    notification.show(`已替换 ${count} 处`, 'success')
+  }, [findCaseSensitive, findQuery, findReplacement, findWholeWord, notification, searchMatches])
+
+  useEffect(() => {
     const handleKeydown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) {
         return
       }
 
       const key = event.key.toLowerCase()
+      if (key === 'f') {
+        event.preventDefault()
+        openFind('find')
+        return
+      }
+      if (key === 'h') {
+        event.preventDefault()
+        openFind('replace')
+        return
+      }
       if (key === 's') {
         event.preventDefault()
         if (event.shiftKey) {
@@ -765,7 +875,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeydown)
     }
-  }, [handleRedo, handleSaveFile, handleSaveFileAs, handleUndo, persistDraft])
+  }, [handleRedo, handleSaveFile, handleSaveFileAs, handleUndo, openFind, persistDraft])
 
   const documentName = activeFilePath ? basename(activeFilePath) : '未命名.md'
 
@@ -1302,6 +1412,26 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                <FindReplaceBar
+                  open={findOpen}
+                  mode={findMode}
+                  query={findQuery}
+                  replacement={findReplacement}
+                  caseSensitive={findCaseSensitive}
+                  wholeWord={findWholeWord}
+                  matchCount={searchMatches.length}
+                  currentIndex={findIndex}
+                  onQueryChange={setFindQuery}
+                  onReplacementChange={setFindReplacement}
+                  onToggleCaseSensitive={() => setFindCaseSensitive((value) => !value)}
+                  onToggleWholeWord={() => setFindWholeWord((value) => !value)}
+                  onToggleMode={() => setFindMode((value) => (value === 'find' ? 'replace' : 'find'))}
+                  onNext={handleFindNext}
+                  onPrev={handleFindPrev}
+                  onReplaceOne={handleReplaceOne}
+                  onReplaceAll={handleReplaceAll}
+                  onClose={closeFind}
+                />
                 <div ref={hostRef} className="editor-host" />
               </div>
             </div>
