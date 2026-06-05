@@ -1,4 +1,4 @@
-import { Download, FileVideo, FolderOpen, Languages, Loader2, Play, Redo2, RefreshCw, Save, Scissors, Settings2, Undo2, Wand2, X } from 'lucide-react'
+import { Download, FileVideo, FolderOpen, Languages, Loader2, Play, Redo2, RefreshCw, Save, SaveAll, Scissors, Settings2, Undo2, Wand2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { normalizeOpenAiTranscription, normalizeVolcengineTranscription, buildOpenAiTranscriptionRequest } from './lib/asr'
 import { cleanupFiles, extractAudioChunks, getMediaDurationMs } from './lib/audio'
@@ -326,6 +326,7 @@ export default function App() {
   const [retryingIndex, setRetryingIndex] = useState<number | null>(null)
   const chunkPathsRef = useRef<string[]>([])
   const [currentTimeMs, setCurrentTimeMs] = useState(0)
+  const [projectPath, setProjectPath] = useState('')
   const videoRef = useRef<VideoPreviewHandle | null>(null)
 
   const totalText = useMemo(() => cues.map((cue) => cue.text).join('\n'), [cues])
@@ -394,11 +395,33 @@ export default function App() {
       return
     }
     const timer = setTimeout(() => {
+      if (projectPath) {
+        // Bound to a project file: persist there and keep the storage draft empty
+        // so reopening never shows a stale "unsaved draft" prompt.
+        const content = serializeProject({
+          videoPath,
+          durationMs,
+          cues,
+          meta: {
+            provider: settings.provider,
+            targetLanguage: settings.targetLanguage,
+            translateModel: settings.translateModel || undefined
+          }
+        })
+        const result = filesystem?.writeFile?.(projectPath, content, 'utf-8')
+        if (result && typeof result.then === 'function') {
+          result
+            .then(() => setStatus(`已自动保存到工程：${fileName(projectPath)}`))
+            .catch(() => undefined)
+        }
+        clearDraft()
+        return
+      }
       const snapshot: DraftSnapshot = { videoPath, durationMs, cues, savedAt: new Date().toISOString() }
       void storage?.set?.(DRAFT_KEY, snapshot)
     }, DRAFT_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [cues, videoPath, durationMs, clearDraft])
+  }, [cues, videoPath, durationMs, clearDraft, projectPath, settings, filesystem])
 
   useEffect(() => {
     return () => {
@@ -434,6 +457,7 @@ export default function App() {
   async function loadVideo(path: string) {
     setVideoPath(path)
     cueHistory.reset([])
+    setProjectPath('')
     setStatus('读取视频时长')
     try {
       const nextDuration = await getMediaDurationMs(path)
@@ -635,34 +659,59 @@ export default function App() {
     notification?.show?.('字幕已导出', 'success')
   }
 
+  async function writeProjectTo(savePath: string) {
+    const content = serializeProject({
+      videoPath,
+      durationMs,
+      cues,
+      meta: {
+        provider: settings.provider,
+        targetLanguage: settings.targetLanguage,
+        translateModel: settings.translateModel || undefined
+      }
+    })
+    await filesystem?.writeFile?.(savePath, content, 'utf-8')
+    setProjectPath(savePath)
+    clearDraft()
+    setStatus(`工程已保存：${fileName(savePath)}`)
+    notification?.show?.('工程已保存', 'success')
+  }
+
+  async function promptSavePath() {
+    return (await dialog?.showSaveDialog?.({
+      title: '保存工程',
+      defaultPath: projectPath || projectFileName(videoPath),
+      filters: [{ name: '字幕工程', extensions: [PROJECT_EXTENSION] }]
+    })) as string | undefined
+  }
+
   async function saveProject() {
     if (!cues.length) {
       notification?.show?.('当前没有可保存的字幕', 'warning')
       return
     }
-    const savePath = await dialog?.showSaveDialog?.({
-      title: '保存工程',
-      defaultPath: projectFileName(videoPath),
-      filters: [{ name: '字幕工程', extensions: [PROJECT_EXTENSION] }]
-    })
-    if (!savePath) return
-
     try {
-      const content = serializeProject({
-        videoPath,
-        durationMs,
-        cues,
-        meta: {
-          provider: settings.provider,
-          targetLanguage: settings.targetLanguage,
-          translateModel: settings.translateModel || undefined
-        }
-      })
-      await filesystem?.writeFile?.(savePath, content, 'utf-8')
-      setStatus(`工程已保存：${fileName(savePath)}`)
-      notification?.show?.('工程已保存', 'success')
+      const savePath = projectPath || (await promptSavePath())
+      if (!savePath) return
+      await writeProjectTo(savePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存工程失败'
+      setStatus(message)
+      notification?.show?.(message, 'error')
+    }
+  }
+
+  async function saveProjectAs() {
+    if (!cues.length) {
+      notification?.show?.('当前没有可保存的字幕', 'warning')
+      return
+    }
+    try {
+      const savePath = await promptSavePath()
+      if (!savePath) return
+      await writeProjectTo(savePath)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '另存为失败'
       setStatus(message)
       notification?.show?.(message, 'error')
     }
@@ -689,6 +738,7 @@ export default function App() {
       setVideoPath(project.videoPath)
       setDurationMs(project.durationMs)
       cueHistory.reset(project.cues)
+      setProjectPath(path)
       setStatus(
         `已导入工程：${fileName(path)}（${project.cues.length} 条字幕${
           project.savedAt ? ` · 保存于 ${new Date(project.savedAt).toLocaleString()}` : ''
@@ -782,9 +832,18 @@ export default function App() {
               <FolderOpen size={16} />
               <span className="hidden sm:inline">导入工程</span>
             </button>
-            <button className="btn-secondary" onClick={saveProject} disabled={busy || !cues.length}>
+            <button
+              className="btn-secondary"
+              onClick={saveProject}
+              disabled={busy || !cues.length}
+              title={projectPath ? `保存到 ${fileName(projectPath)}` : '保存工程'}
+            >
               <Save size={16} />
               <span className="hidden sm:inline">保存工程</span>
+            </button>
+            <button className="btn-secondary" onClick={saveProjectAs} disabled={busy || !cues.length} title="另存为新文件">
+              <SaveAll size={16} />
+              <span className="hidden sm:inline">另存为</span>
             </button>
             <button className="btn-secondary" onClick={() => setShowSettings(true)}>
               <Settings2 size={16} />
@@ -822,6 +881,7 @@ export default function App() {
               <div className="min-w-0">
                 <p className="truncate font-medium">{videoPath ? fileName(videoPath) : '尚未导入视频'}</p>
                 <p className="text-sm text-slate-400">{durationMs ? `时长 ${formatVttTime(durationMs)}` : '支持 mp4/mov/mkv/webm/avi/m4v'}</p>
+                {projectPath && <p className="mt-0.5 truncate text-xs text-cyan-300/80" title={projectPath}>工程：{fileName(projectPath)}</p>}
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
