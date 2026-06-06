@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
 import { createPortal } from 'react-dom'
-import Editor, { type EditorType } from '@toast-ui/editor'
-import '@toast-ui/editor/dist/toastui-editor.css'
-import '@toast-ui/editor/dist/theme/toastui-editor-dark.css'
+import {
+  LiveMarkdownEditor,
+  type EditorSelectionInfo,
+  type LiveMarkdownEditorHandle
+} from './editor/LiveMarkdownEditor'
+import { type CommandPayload } from './editor/markdownCommands'
 import {
   Bold,
   ChevronDown,
@@ -11,7 +14,6 @@ import {
   ClipboardPaste,
   Code2,
   Copy,
-  FileCode2,
   FileDown,
   FileInput,
   FilePlus2,
@@ -27,7 +29,6 @@ import {
   Quote,
   Redo2,
   Save,
-  ScanText,
   SeparatorHorizontal,
   Sparkles,
   Undo2
@@ -39,7 +40,7 @@ import { AiPanel } from './components/AiPanel'
 import { AiBubble } from './components/AiBubble'
 import { ImageGenDialog } from './components/ImageGenDialog'
 import { buildImageAlt, normalizeBase64 } from './services/imageGen'
-import { containsRenderableMarkdown } from './services/markdown'
+import { renderMarkdownDocument } from './services/markdownHtml'
 import {
   appendHistoryItem,
   docKeyForPath,
@@ -49,7 +50,6 @@ import {
   type ImageHistoryMap
 } from './services/imageHistory'
 import { type BubbleRect } from './services/bubble'
-import { readSelectionBubbleSnapshot } from './services/selectionBubble'
 import { findMatches, replaceAll as replaceAllInText, replaceRange, type SearchMatch } from './services/search'
 import {
   base64ToBytes,
@@ -84,18 +84,14 @@ const STORAGE_AI_MODEL_KEY = 'ai:markdown-editor:model:v1'
 const STORAGE_AI_IMAGE_MODEL_KEY = 'ai:markdown-editor:image-model:v1'
 const STORAGE_AI_IMAGE_HISTORY_KEY = 'ai:markdown-editor:image-history:v1'
 const IMAGE_HISTORY_DIRNAME = 'gen-history'
+
+/** A document offset range in the CodeMirror editor. */
+interface EditorRange {
+  from: number
+  to: number
+}
 const DEFAULT_EXPORT_NAME = 'markdown-note.md'
 const EDITOR_PLACEHOLDER = '在这里开始写 Markdown'
-const WYSIWYG_HEADING_SELECTOR = [
-  '.toastui-editor-ww-container .toastui-editor-contents h1',
-  '.toastui-editor-ww-container .toastui-editor-contents h2',
-  '.toastui-editor-ww-container .toastui-editor-contents h3',
-  '.toastui-editor-ww-container .toastui-editor-contents h4',
-  '.toastui-editor-ww-container .toastui-editor-contents h5',
-  '.toastui-editor-ww-container .toastui-editor-contents h6'
-].join(', ')
-const WYSIWYG_SCROLL_SELECTOR = '.toastui-editor-ww-container'
-const MARKDOWN_SCROLL_SELECTOR = '.toastui-editor-md-container .ProseMirror'
 
 interface PluginInitData {
   pluginName: string
@@ -120,8 +116,6 @@ interface ToolbarButtonItem {
   disabled?: boolean
   danger?: boolean
 }
-
-type SpellcheckSurface = HTMLElement & { spellcheck?: boolean }
 
 function basename(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
@@ -301,87 +295,6 @@ function parseOutline(markdown: string): OutlineEntry[] {
   return entries
 }
 
-function applyTextInputPreferences(root: ParentNode | null) {
-  if (!root || !('querySelectorAll' in root)) {
-    return
-  }
-
-  root.querySelectorAll<SpellcheckSurface>('[contenteditable="true"], textarea, input').forEach((element) => {
-    element.setAttribute('spellcheck', 'false')
-    element.setAttribute('autocorrect', 'off')
-    element.setAttribute('autocapitalize', 'off')
-    element.setAttribute('data-gramm', 'false')
-    element.setAttribute('data-gramm_editor', 'false')
-    element.setAttribute('data-enable-grammarly', 'false')
-    element.setAttribute('translate', 'no')
-    element.spellcheck = false
-  })
-}
-
-function alignCodeBlockLanguageInput(host: HTMLElement | null, codeBlock: HTMLElement | null) {
-  if (!host || !codeBlock) {
-    return
-  }
-
-  const floatingInput = host.querySelector<HTMLElement>('.toastui-editor-ww-code-block-language')
-  const container = floatingInput?.parentElement
-  if (!floatingInput || !container) {
-    return
-  }
-
-  const blockRect = codeBlock.getBoundingClientRect()
-  const containerRect = container.getBoundingClientRect()
-  const top = Math.max(12, blockRect.top - containerRect.top + 10)
-  const left = Math.max(12, blockRect.right - containerRect.left - floatingInput.offsetWidth - 10)
-
-  floatingInput.style.position = 'absolute'
-  floatingInput.style.top = `${top}px`
-  floatingInput.style.left = `${left}px`
-  floatingInput.style.right = 'auto'
-}
-
-function syncWysiwygHeadingTargets(host: HTMLElement, outlineEntries: OutlineEntry[]) {
-  const headings = Array.from(host.querySelectorAll<HTMLElement>(WYSIWYG_HEADING_SELECTOR))
-
-  headings.forEach((heading, index) => {
-    const entry = outlineEntries[index]
-    if (entry) {
-      heading.dataset.outlineId = entry.id
-    } else {
-      delete heading.dataset.outlineId
-    }
-  })
-
-  return headings
-}
-
-function findWysiwygHeadingForEntry(
-  host: HTMLElement,
-  outlineEntries: OutlineEntry[],
-  entry: OutlineEntry
-) {
-  const headings = syncWysiwygHeadingTargets(host, outlineEntries)
-  const index = outlineEntries.findIndex((item) => item.id === entry.id)
-
-  return headings.find((heading) => heading.dataset.outlineId === entry.id) ?? headings[index] ?? null
-}
-
-function scrollElementIntoContainer(target: HTMLElement, container: HTMLElement, offset = 24) {
-  const nextTop = container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top - offset
-  container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
-}
-
-function scrollMarkdownLineIntoView(host: HTMLElement, line: number) {
-  const scrollContainer = host.querySelector<HTMLElement>(MARKDOWN_SCROLL_SELECTOR)
-  const lineElement = scrollContainer?.children.item(Math.max(0, line - 1))
-
-  if (!(lineElement instanceof HTMLElement) || !scrollContainer) {
-    return
-  }
-
-  scrollElementIntoContainer(lineElement, scrollContainer)
-}
-
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [content, setContent] = useState('')
@@ -391,7 +304,6 @@ export default function App() {
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [chromeCollapsed, setChromeCollapsed] = useState(false)
-  const [editorMode, setEditorMode] = useState<EditorType>('wysiwyg')
   const [activeOutlineId, setActiveOutlineId] = useState<string | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -417,25 +329,23 @@ export default function App() {
   // fresh menu phase even if one was already showing.
   const [bubbleSummonKey, setBubbleSummonKey] = useState(0)
   const hostRef = useRef<HTMLDivElement>(null)
-  const editorRef = useRef<Editor | null>(null)
+  const editorRef = useRef<LiveMarkdownEditorHandle | null>(null)
   const contentRef = useRef(content)
-  const modeRef = useRef<EditorType>('wysiwyg')
   const lastPersistedRef = useRef('')
   const activeFilePathRef = useRef<string | null>(null)
   const hasInitPayloadRef = useRef(false)
   const aiOpenRef = useRef(false)
   const bubblePinnedRef = useRef(false)
-  const bubbleRangeRef = useRef<ReturnType<Editor['getSelection']> | null>(null)
+  const bubbleRangeRef = useRef<EditorRange | null>(null)
   // Editor range captured when the image generator opens, so an inserted image
   // lands at the original caret instead of replacing the prompt selection.
-  const imageRangeRef = useRef<ReturnType<Editor['getSelection']> | null>(null)
+  const imageRangeRef = useRef<EditorRange | null>(null)
   // Mirrors imageHistoryMap for stable reads inside callbacks (avoids stale closures).
   const imageHistoryMapRef = useRef<ImageHistoryMap>({})
   const { ai, clipboard, dialog, filesystem, notification, storage, system } = useMulby(PLUGIN_ID)
   const draftStorage = useDraftStorage(storage, STORAGE_DRAFT_KEY)
 
   contentRef.current = content
-  modeRef.current = editorMode
   activeFilePathRef.current = activeFilePath
   aiOpenRef.current = aiOpen
   imageHistoryMapRef.current = imageHistoryMap
@@ -484,8 +394,6 @@ export default function App() {
       setActiveFilePath(null)
       setSavedAt(null)
       lastPersistedRef.current = ''
-      setEditorMode('wysiwyg')
-      editorRef.current?.changeMode('wysiwyg', false)
       startTransition(() => {
         setContent(incoming)
       })
@@ -534,149 +442,53 @@ export default function App() {
     }
   }, [draftStorage, storage])
 
+  // Resolves Markdown image hrefs so the live preview can load them: relative
+  // paths resolve against the bound document's directory; data/http/file pass
+  // through unchanged.
+  const resolveEditorImageUrl = useCallback(
+    (href: string) => {
+      const baseDir = activeFilePath ? getDirectory(activeFilePath) : ''
+      return resolveImageHref(href, baseDir) ?? href
+    },
+    [activeFilePath]
+  )
+
+  // Editor edits flow up as the markdown source of truth.
+  const handleEditorChange = useCallback((value: string) => {
+    setContent(value)
+  }, [])
+
+  // Drives the floating AI bubble from the live editor selection. The CM6
+  // selection rect is read straight from the view, so it works in any scroll
+  // position without DOM-selection guessing.
+  const handleEditorSelection = useCallback((info: EditorSelectionInfo) => {
+    if (aiOpenRef.current || bubblePinnedRef.current) {
+      return
+    }
+    if (!info.hasFocus || !info.text.trim() || info.from === info.to) {
+      setBubbleAnchor(null)
+      return
+    }
+    const rect = editorRef.current?.getSelectionRect()
+    if (!rect) {
+      setBubbleAnchor(null)
+      return
+    }
+    setBubbleSelection(info.text)
+    setBubbleAnchor(rect)
+  }, [])
+
+  // Push external content changes (open file, draft restore, organize images,
+  // undo across documents) into the editor when they diverge from its value.
   useEffect(() => {
-    const host = hostRef.current
-    if (!host) {
+    const handle = editorRef.current
+    if (!handle) {
       return
     }
-
-    const editor = new Editor({
-      el: host,
-      height: '100%',
-      minHeight: '100%',
-      initialValue: contentRef.current,
-      initialEditType: modeRef.current,
-      previewStyle: 'vertical',
-      hideModeSwitch: true,
-      toolbarItems: [],
-      autofocus: true,
-      usageStatistics: false,
-      placeholder: EDITOR_PLACEHOLDER,
-      theme: theme === 'dark' ? 'dark' : 'light',
-      events: {
-        change: () => {
-          const next = editor.getMarkdown()
-          setContent(next)
-        }
-      }
-    })
-
-    editorRef.current = editor
-
-    const syncEditorSurfaces = () => {
-      const { mdEditor, wwEditor } = editor.getEditorElements()
-      applyTextInputPreferences(mdEditor)
-      applyTextInputPreferences(wwEditor)
-    }
-
-    syncEditorSurfaces()
-
-    // Floating AI bubble: listen on both editor surfaces + selectionchange.
-    // Toast UI selection is authoritative; DOM rect is read after a short delay
-    // so ProseMirror has time to sync after mouseup.
-    let bubbleFrame = 0
-    let bubbleTimer = 0
-
-    const refreshBubbleFromSelection = () => {
-      if (aiOpenRef.current || bubblePinnedRef.current) {
-        return
-      }
-      const snapshot = readSelectionBubbleSnapshot(editor, host)
-      if (!snapshot) {
-        setBubbleAnchor(null)
-        return
-      }
-      setBubbleSelection(snapshot.text)
-      setBubbleAnchor(snapshot.anchor)
-    }
-
-    const scheduleBubbleRefresh = () => {
-      window.cancelAnimationFrame(bubbleFrame)
-      window.clearTimeout(bubbleTimer)
-      bubbleFrame = window.requestAnimationFrame(() => {
-        bubbleTimer = window.setTimeout(refreshBubbleFromSelection, 16)
-      })
-    }
-
-    const handleBubblePointerUp = (event: Event) => {
-      const target = event.target
-      if (!(target instanceof Node)) {
-        return
-      }
-      if (!host.contains(target)) {
-        return
-      }
-      scheduleBubbleRefresh()
-    }
-
-    const handleBubbleSelectionChange = () => {
-      if (aiOpenRef.current || bubblePinnedRef.current) {
-        return
-      }
-      const domSelection = window.getSelection()
-      if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
-        setBubbleAnchor(null)
-        return
-      }
-      scheduleBubbleRefresh()
-    }
-
-    host.addEventListener('mouseup', handleBubblePointerUp, true)
-    host.addEventListener('keyup', handleBubblePointerUp, true)
-    document.addEventListener('selectionchange', handleBubbleSelectionChange)
-    window.addEventListener('scroll', scheduleBubbleRefresh, true)
-
-    editor.on('changeMode', () => {
-      setEditorMode(editor.isWysiwygMode() ? 'wysiwyg' : 'markdown')
-      window.requestAnimationFrame(syncEditorSurfaces)
-    })
-
-    const handleEditorClick = (event: MouseEvent) => {
-      const target = event.target
-      if (!(target instanceof HTMLElement)) {
-        return
-      }
-
-      const codeBlock = target.closest('.toastui-editor-ww-code-block')
-      if (!codeBlock) {
-        return
-      }
-
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          alignCodeBlockLanguageInput(host, codeBlock as HTMLElement)
-          syncEditorSurfaces()
-        })
-      })
-    }
-
-    host.addEventListener('click', handleEditorClick, true)
-
-    return () => {
-      window.cancelAnimationFrame(bubbleFrame)
-      window.clearTimeout(bubbleTimer)
-      host.removeEventListener('mouseup', handleBubblePointerUp, true)
-      host.removeEventListener('keyup', handleBubblePointerUp, true)
-      document.removeEventListener('selectionchange', handleBubbleSelectionChange)
-      window.removeEventListener('scroll', scheduleBubbleRefresh, true)
-      host.removeEventListener('click', handleEditorClick, true)
-      editor.destroy()
-      editorRef.current = null
-    }
-  }, [theme])
-
-  useEffect(() => {
-    const editor = editorRef.current
-    if (!editor) {
+    if (handle.getValue() === content) {
       return
     }
-
-    const current = editor.getMarkdown()
-    if (current === content) {
-      return
-    }
-
-    editor.setMarkdown(content, false)
+    handle.setValue(content)
   }, [content])
 
   useEffect(() => {
@@ -691,101 +503,55 @@ export default function App() {
   }, [activeOutlineId, outlineEntries])
 
   useEffect(() => {
-    const host = hostRef.current
-    if (!host || outlineEntries.length === 0) {
+    const handle = editorRef.current
+    const view = handle?.getView()
+    if (!handle || !view || outlineEntries.length === 0) {
       return
     }
 
-    const scrollContainer = host.querySelector<HTMLElement>(WYSIWYG_SCROLL_SELECTOR)
+    const scroller = view.scrollDOM
     let frameId = 0
 
     const syncActiveOutline = () => {
-      if (editorMode !== 'wysiwyg' || !scrollContainer) {
-        return
-      }
-
-      const headings = syncWysiwygHeadingTargets(host, outlineEntries).filter((heading) => heading.dataset.outlineId)
-      if (headings.length === 0) {
-        return
-      }
-
-      const containerTop = scrollContainer.getBoundingClientRect().top
-      let candidateId = headings[0].dataset.outlineId ?? null
-
-      headings.forEach((heading) => {
-        const headingTop = heading.getBoundingClientRect().top - containerTop
-        if (headingTop <= 72) {
-          candidateId = heading.dataset.outlineId ?? candidateId
+      const containerTop = scroller.getBoundingClientRect().top
+      let candidateId = outlineEntries[0].id
+      for (const entry of outlineEntries) {
+        const coords = view.coordsAtPos(handle.posForLine(entry.line))
+        if (coords && coords.top - containerTop <= 72) {
+          candidateId = entry.id
         }
-      })
-
-      if (candidateId) {
-        setActiveOutlineId((current) => current === candidateId ? current : candidateId)
       }
+      setActiveOutlineId((current) => (current === candidateId ? current : candidateId))
     }
 
     const scheduleSync = () => {
       window.cancelAnimationFrame(frameId)
-      frameId = window.requestAnimationFrame(() => {
-        syncActiveOutline()
-      })
+      frameId = window.requestAnimationFrame(syncActiveOutline)
     }
 
     scheduleSync()
-
-    if (scrollContainer) {
-      scrollContainer.addEventListener('scroll', syncActiveOutline, { passive: true })
-    }
+    scroller.addEventListener('scroll', syncActiveOutline, { passive: true })
 
     return () => {
       window.cancelAnimationFrame(frameId)
-      if (scrollContainer) {
-        scrollContainer.removeEventListener('scroll', syncActiveOutline)
-      }
+      scroller.removeEventListener('scroll', syncActiveOutline)
     }
-  }, [chromeCollapsed, editorMode, outlineEntries, content])
+  }, [chromeCollapsed, outlineEntries, content])
 
   const focusEditor = useCallback(() => {
     editorRef.current?.focus()
   }, [])
 
-  const switchMode = useCallback((mode: EditorType) => {
-    const editor = editorRef.current
-    if (!editor || modeRef.current === mode) {
-      return
-    }
-
-    editor.changeMode(mode, false)
-    setEditorMode(mode)
-    editor.focus()
-  }, [])
-
-  const execCommand = useCallback((name: string, payload?: Record<string, unknown>) => {
-    const editor = editorRef.current
-    if (!editor) {
-      return
-    }
-
-    editor.exec(name, payload)
-    editor.focus()
+  const execCommand = useCallback((name: string, payload?: CommandPayload) => {
+    editorRef.current?.runCommand(name, payload)
   }, [])
 
   const handleUndo = useCallback(() => {
-    const editor = editorRef.current
-    if (!editor) {
-      return
-    }
-    editor.exec('undo')
-    editor.focus()
+    editorRef.current?.runCommand('undo')
   }, [])
 
   const handleRedo = useCallback(() => {
-    const editor = editorRef.current
-    if (!editor) {
-      return
-    }
-    editor.exec('redo')
-    editor.focus()
+    editorRef.current?.runCommand('redo')
   }, [])
 
   const toggleChrome = useCallback(() => {
@@ -798,33 +564,22 @@ export default function App() {
 
   const handleOutlineSelect = useCallback((entry: OutlineEntry) => {
     const editor = editorRef.current
-    const host = hostRef.current
-    if (!editor || !host) {
+    if (!editor) {
       return
     }
-
     setActiveOutlineId(entry.id)
-
-    if (editorMode === 'markdown') {
-      editor.setSelection([entry.line, 1], [entry.line, 1])
-      scrollMarkdownLineIntoView(host, entry.line)
-      editor.focus()
-      return
-    }
-
-    const target = findWysiwygHeadingForEntry(host, outlineEntries, entry)
-    const scrollContainer = host.querySelector<HTMLElement>(WYSIWYG_SCROLL_SELECTOR)
-    if (target && scrollContainer) {
-      scrollElementIntoContainer(target, scrollContainer)
-    }
-  }, [editorMode, outlineEntries])
+    const pos = editor.posForLine(entry.line)
+    editor.setSelection(pos, pos)
+    editor.scrollToPos(pos)
+    editor.focus()
+  }, [])
 
   const isDirty = hydrated && content !== lastPersistedRef.current
 
   const persistDraft = useCallback(async (showToast: boolean) => {
     setSaving(true)
     try {
-      const current = editorRef.current?.getMarkdown() ?? contentRef.current
+      const current = editorRef.current?.getValue() ?? contentRef.current
       const payload = await draftStorage.saveDraft(current)
       lastPersistedRef.current = current
       setSavedAt(payload?.updatedAt ?? Date.now())
@@ -884,17 +639,16 @@ export default function App() {
       startTransition(() => {
         setContent(fileContent)
       })
-      switchMode('wysiwyg')
       notification.show('文件已载入', 'success')
       focusEditor()
     } catch (error) {
       console.error('[markdown-editor] handleOpenFile', error)
       notification.show('读取文件失败', 'error')
     }
-  }, [dialog, filesystem, focusEditor, notification, switchMode])
+  }, [dialog, filesystem, focusEditor, notification])
 
   const writeToFile = useCallback(async (path: string) => {
-    const current = editorRef.current?.getMarkdown() ?? contentRef.current
+    const current = editorRef.current?.getValue() ?? contentRef.current
     await filesystem.writeFile(path, current, 'utf-8')
     lastPersistedRef.current = current
     setActiveFilePath(path)
@@ -962,22 +716,13 @@ export default function App() {
     setFindIndex(normalized)
 
     const editor = editorRef.current
-    const host = hostRef.current
     const match = matches[normalized]
-    if (!editor || !host || !match) {
+    if (!editor || !match) {
       return
     }
-
-    // Selection by source position only works reliably in markdown mode.
-    if (modeRef.current !== 'markdown') {
-      editor.changeMode('markdown', false)
-      setEditorMode('markdown')
-    }
-
-    window.requestAnimationFrame(() => {
-      editor.setSelection([match.line, match.column], [match.endLine, match.endColumn])
-      scrollMarkdownLineIntoView(host, match.line)
-    })
+    // CM6 selects by source offset directly — no mode switch required.
+    editor.setSelection(match.start, match.end)
+    editor.scrollToPos(match.start)
   }, [])
 
   const openFind = useCallback((mode: FindReplaceMode) => {
@@ -1021,9 +766,9 @@ export default function App() {
       return
     }
     const target = searchMatches[Math.min(findIndex, searchMatches.length - 1)]
-    const source = editor.getMarkdown()
+    const source = editor.getValue()
     const next = replaceRange(source, target.start, target.end, findReplacement)
-    editor.setMarkdown(next, false)
+    editor.setValue(next)
     setContent(next)
 
     const remaining = findMatches(next, findQuery, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord })
@@ -1038,9 +783,9 @@ export default function App() {
       return
     }
     const count = searchMatches.length
-    const source = editor.getMarkdown()
+    const source = editor.getValue()
     const next = replaceAllInText(source, findQuery, findReplacement, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord })
-    editor.setMarkdown(next, false)
+    editor.setValue(next)
     setContent(next)
     setFindIndex(0)
     notification.show(`已替换 ${count} 处`, 'success')
@@ -1113,9 +858,8 @@ export default function App() {
   const documentName = activeFilePath ? basename(activeFilePath) : '未命名.md'
 
   const getCurrentExportDocument = useCallback(() => {
-    const editor = editorRef.current
-    const markdown = editor?.getMarkdown() ?? contentRef.current
-    const html = editor?.getHTML() ?? ''
+    const markdown = editorRef.current?.getValue() ?? contentRef.current
+    const html = renderMarkdownDocument(markdown)
 
     return createExportDocument({
       markdown,
@@ -1226,45 +970,20 @@ export default function App() {
     void storage.set(STORAGE_AI_MODEL_KEY, model).catch(() => undefined)
   }, [storage])
 
-  // Inserts Markdown text at the caret. In source mode the raw Markdown is
-  // exactly what the user should see; in WYSIWYG mode, Markdown that would
-  // otherwise show as literal source (headings, lists, emphasis, links…) is
-  // applied through a brief mode round-trip so it renders as formatted content
-  // instead of leaking syntax characters into the document.
+  // Inserts Markdown text at the caret. The live editor renders Markdown in
+  // place, so the raw source is exactly what should be inserted.
   const insertMarkdownText = useCallback(
-    (editor: Editor, text: string, asBlock = false) => {
-      const payload = asBlock ? `\n\n${text}\n` : text
-      if (editor.isWysiwygMode() && containsRenderableMarkdown(text)) {
-        editor.changeMode('markdown', true)
-        editor.insertText(payload)
-        editor.changeMode('wysiwyg', true)
-      } else {
-        editor.insertText(payload)
-      }
+    (editor: LiveMarkdownEditorHandle, text: string, asBlock = false) => {
+      editor.insertText(asBlock ? `\n\n${text}\n` : text)
     },
     []
   )
 
-  // Replaces the given range (or the live selection) with Markdown text, keeping
-  // WYSIWYG rendering correct the same way insertMarkdownText does.
+  // Replaces the given range (or the live selection) with Markdown text. CM6
+  // renders the inserted Markdown live, so no mode handling is needed.
   const replaceMarkdownText = useCallback(
-    (editor: Editor, text: string, range?: ReturnType<Editor['getSelection']> | null) => {
-      if (editor.isWysiwygMode() && containsRenderableMarkdown(text)) {
-        if (range) {
-          try {
-            editor.setSelection(range[0], range[1])
-          } catch {
-            // Fall back to the current selection.
-          }
-        }
-        editor.changeMode('markdown', true)
-        editor.replaceSelection(text)
-        editor.changeMode('wysiwyg', true)
-      } else if (range) {
-        editor.replaceSelection(text, range[0], range[1])
-      } else {
-        editor.replaceSelection(text)
-      }
+    (editor: LiveMarkdownEditorHandle, text: string, range?: EditorRange | null) => {
+      editor.replaceSelection(text, range)
     },
     []
   )
@@ -1276,7 +995,7 @@ export default function App() {
     }
     // Mode-aware so Markdown renders in WYSIWYG instead of showing raw source.
     replaceMarkdownText(editor, text)
-    setContent(editor.getMarkdown())
+    setContent(editor.getValue())
     setAiOpen(false)
     notification.show('已替换选中文字', 'success')
     editor.focus()
@@ -1289,7 +1008,7 @@ export default function App() {
     }
     // Insert on its own line so generated blocks don't glue onto existing text.
     insertMarkdownText(editor, text, true)
-    setContent(editor.getMarkdown())
+    setContent(editor.getValue())
     setAiOpen(false)
     notification.show('已插入 AI 结果', 'success')
     editor.focus()
@@ -1340,7 +1059,7 @@ export default function App() {
     const range = bubbleRangeRef.current
     // Mode-aware so Markdown renders in WYSIWYG instead of showing raw source.
     replaceMarkdownText(editor, text, range)
-    setContent(editor.getMarkdown())
+    setContent(editor.getValue())
     notification.show('已替换选中文字', 'success')
     closeBubble()
     editor.focus()
@@ -1356,13 +1075,13 @@ export default function App() {
     if (range) {
       // Collapse to the end of the original selection, then insert below it.
       try {
-        editor.setSelection(range[1], range[1])
+        editor.setSelection(range.to, range.to)
       } catch {
         // Keep the current caret.
       }
     }
     insertMarkdownText(editor, text, true)
-    setContent(editor.getMarkdown())
+    setContent(editor.getValue())
     notification.show('已插入 AI 结果', 'success')
     closeBubble()
     editor.focus()
@@ -1389,13 +1108,8 @@ export default function App() {
       return
     }
 
-    let text = ''
-    let rect: BubbleRect | null = null
-    const snapshot = readSelectionBubbleSnapshot(editor, host)
-    if (snapshot) {
-      text = snapshot.text
-      rect = snapshot.anchor
-    }
+    const text = editor.getSelectedText()
+    let rect: BubbleRect | null = text ? editor.getSelectionRect() : null
 
     if (!rect) {
       const hostRect = host.getBoundingClientRect()
@@ -1404,15 +1118,7 @@ export default function App() {
       rect = { left, top, right: left, bottom: top, width: 0, height: 0 }
     }
 
-    if (editor && text) {
-      try {
-        bubbleRangeRef.current = editor.getSelection()
-      } catch {
-        bubbleRangeRef.current = null
-      }
-    } else {
-      bubbleRangeRef.current = null
-    }
+    bubbleRangeRef.current = text ? editor.getSelection() : null
     bubblePinnedRef.current = true
     setBubbleSelection(text)
     setBubbleAnchor(rect)
@@ -1467,8 +1173,8 @@ export default function App() {
     // Use the editor's addImage command so the image renders as an <img> node in
     // WYSIWYG mode and is written as `![alt](url)` in source mode — inserting raw
     // Markdown via insertText would only show the literal syntax in WYSIWYG.
-    editor.exec('addImage', { imageUrl, altText: alt })
-    setContent(editor.getMarkdown())
+    editor.runCommand('addImage', { imageUrl, altText: alt })
+    setContent(editor.getValue())
     editor.focus()
   }, [saveImageData])
 
@@ -1514,7 +1220,7 @@ export default function App() {
         // Collapse to the end of the captured range so the prompt text isn't
         // overwritten when the image is inserted.
         try {
-          editor.setSelection(range[1], range[1])
+          editor.setSelection(range.to, range.to)
         } catch {
           // Ignore: fall back to the editor's current caret.
         }
@@ -1578,7 +1284,7 @@ export default function App() {
       const range = imageRangeRef.current
       if (range) {
         try {
-          editor.setSelection(range[1], range[1])
+          editor.setSelection(range.to, range.to)
         } catch {
           // Fall back to the current caret.
         }
@@ -1632,7 +1338,7 @@ export default function App() {
     if (!editor) {
       return
     }
-    const source = editor.getMarkdown()
+    const source = editor.getValue()
     if (!hasInlineDataImage(source)) {
       notification.show('当前文档没有内联 base64 图片', 'info')
       focusEditor()
@@ -1645,7 +1351,7 @@ export default function App() {
         focusEditor()
         return
       }
-      editor.setMarkdown(markdown, false)
+      editor.setValue(markdown)
       setContent(markdown)
       notification.show(`已整理 ${extracted} 张内联图片为文件引用`, 'success')
       focusEditor()
@@ -1693,7 +1399,7 @@ export default function App() {
 
       // Mode-aware: pasted Markdown renders in WYSIWYG, stays raw in source mode.
       insertMarkdownText(editor, insertText)
-      setContent(editor.getMarkdown())
+      setContent(editor.getValue())
       setSourceLabel('来自剪贴板')
       notification.show(
         extractedImages > 0
@@ -1710,7 +1416,7 @@ export default function App() {
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
-      const current = editorRef.current?.getMarkdown() ?? contentRef.current
+      const current = editorRef.current?.getValue() ?? contentRef.current
       await clipboard.writeText(current)
       notification.show('Markdown 已复制到剪贴板', 'success')
       focusEditor()
@@ -1728,10 +1434,9 @@ export default function App() {
     lastPersistedRef.current = ''
     setClearConfirmOpen(false)
     void draftStorage.clearDraft().catch(() => undefined)
-    switchMode('wysiwyg')
     focusEditor()
     notification.show('已新建空白文档', 'info')
-  }, [draftStorage, focusEditor, notification, switchMode])
+  }, [draftStorage, focusEditor, notification])
 
   const handleClear = useCallback(() => {
     if (isDirty) {
@@ -2210,17 +1915,6 @@ export default function App() {
           <div className="toolbar-footer">
             <button
               type="button"
-              className={`mode-btn mode-btn-icon ${editorMode === 'markdown' ? 'active' : ''}`}
-              aria-label={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
-              data-tooltip={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
-              title={editorMode === 'wysiwyg' ? '进入源代码模式' : '返回普通模式'}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => switchMode(editorMode === 'wysiwyg' ? 'markdown' : 'wysiwyg')}
-            >
-              {editorMode === 'wysiwyg' ? <FileCode2 size={15} /> : <ScanText size={15} />}
-            </button>
-            <button
-              type="button"
               className="mode-btn mode-btn-icon chrome-toggle-btn"
               aria-label="隐藏顶部栏"
               data-tooltip="隐藏顶部栏"
@@ -2235,7 +1929,7 @@ export default function App() {
       )}
 
       <main className="workspace">
-        <section className={`panel editor-panel ${editorMode === 'markdown' ? 'mode-source' : 'mode-wysiwyg'}`}>
+        <section className="panel editor-panel">
           <div className="editor-shell">
             <div className="editor-layout">
               <aside className="editor-outline-slot">
@@ -2306,7 +2000,17 @@ export default function App() {
                   onReplaceAll={handleReplaceAll}
                   onClose={closeFind}
                 />
-                <div ref={hostRef} className="editor-host" />
+                <div ref={hostRef} className="editor-host">
+                  <LiveMarkdownEditor
+                    ref={editorRef}
+                    initialValue={contentRef.current}
+                    theme={theme}
+                    placeholder={EDITOR_PLACEHOLDER}
+                    onChange={handleEditorChange}
+                    onSelectionChange={handleEditorSelection}
+                    resolveImageUrl={resolveEditorImageUrl}
+                  />
+                </div>
               </div>
             </div>
           </div>
