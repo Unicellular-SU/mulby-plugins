@@ -298,6 +298,15 @@ export class GameEngine {
 
       hero.attackCooldown = Math.max(0, hero.attackCooldown - dt)
       hero.skillCooldown = Math.max(0, hero.skillCooldown - dt)
+
+      // === 非活跃英雄自动攻击 ===
+      if (i !== this.state.activeHeroIndex && hero.attackCooldown <= 0) {
+        const target = this.findNearestEnemy(hero)
+        if (target && this.dist(hero, target) < hero.def.range + target.def.size + 20) {
+          this.heroAttack(hero, target, 0.5)
+          hero.attackCooldown = hero.def.attackSpeed * 3
+        }
+      }
     }
 
     // === 切换英雄 (1-3) - 无论当前活跃状态都可以切换 ===
@@ -436,9 +445,9 @@ export class GameEngine {
     return crit
   }
 
-  private heroAttack(hero: HeroState, target: EnemyState) {
-    const atk = this.getHeroAttack(hero)
-    const isCrit = Math.random() < this.getCritChance(hero)
+  private heroAttack(hero: HeroState, target: EnemyState, damageMult = 1) {
+    const atk = this.getHeroAttack(hero) * damageMult
+    const isCrit = Math.random() < this.getCritChance(hero) * damageMult // 非活跃英雄降低暴击率
     const damage = isCrit ? atk * 1.8 : atk
     const isRanged = hero.def.range > 60
 
