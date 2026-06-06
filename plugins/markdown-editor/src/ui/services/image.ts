@@ -161,6 +161,59 @@ export function toFileUrl(filePath: string): string {
 }
 
 /**
+ * Normalizes an `<img>` src into a URL that a browser `<img>` element can load
+ * during export. `data:` / `http(s):` / `file:` / `blob:` URLs pass through
+ * untouched; absolute filesystem paths become `file://` URLs; relative paths are
+ * resolved against the bound document directory. Returns `null` when a relative
+ * path cannot be resolved (no bound directory) so callers can skip it.
+ */
+export function resolveImageHref(src: string, baseDir: string): string | null {
+  const trimmed = src.trim()
+  if (!trimmed) {
+    return null
+  }
+  if (/^(data:|https?:|file:|blob:)/i.test(trimmed)) {
+    return trimmed
+  }
+  // Absolute filesystem path (POSIX "/..." or Windows "C:\..." / "C:/...").
+  if (trimmed.startsWith('/') || /^[a-zA-Z]:[/\\]/.test(trimmed)) {
+    return toFileUrl(trimmed)
+  }
+  if (!baseDir) {
+    return null
+  }
+  const relative = trimmed.replace(/^\.\//, '')
+  return toFileUrl(joinPath(baseDir, relative))
+}
+
+export interface ImageSize {
+  width: number
+  height: number
+}
+
+/**
+ * Scales an image's natural pixel size down to fit a maximum width while
+ * preserving aspect ratio. Dimensions are rounded to whole pixels (min 1).
+ * Non-positive natural sizes fall back to the max width with a 4:3 ratio.
+ */
+export function fitImageSize(natural: ImageSize, maxWidth: number): ImageSize {
+  const safeMax = maxWidth > 0 ? maxWidth : 1
+  const width = natural.width > 0 ? natural.width : safeMax
+  const height = natural.height > 0 ? natural.height : Math.round(safeMax * 0.75)
+  if (width <= safeMax) {
+    return {
+      width: Math.max(1, Math.round(width)),
+      height: Math.max(1, Math.round(height))
+    }
+  }
+  const ratio = safeMax / width
+  return {
+    width: safeMax,
+    height: Math.max(1, Math.round(height * ratio))
+  }
+}
+
+/**
  * Saves an image into an arbitrary directory (creating it if needed) and
  * returns the absolute path. Used when there is no bound document to anchor a
  * relative path against.

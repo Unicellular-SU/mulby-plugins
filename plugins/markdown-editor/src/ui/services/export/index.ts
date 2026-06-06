@@ -19,4 +19,12 @@ export async function exportHtmlFile(
 export { replaceExtension }
 export { exportPdfFile } from './pdf'
 export { exportDocxFile } from './docx'
-export type { ExportDocument, ExportFilesystem, ExportFormat, ExportSource } from './types'
+export type {
+  ExportDocument,
+  ExportFilesystem,
+  ExportFormat,
+  ExportImage,
+  ExportImageResolver,
+  ExportImageType,
+  ExportSource
+} from './types'

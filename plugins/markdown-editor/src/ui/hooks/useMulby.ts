@@ -12,12 +12,68 @@ interface PluginInitData {
   route?: string
 }
 
+interface AiMessageLike {
+  role: 'system' | 'user' | 'assistant'
+  content?: string
+}
+
+interface AiCallOption {
+  model?: string
+  messages: AiMessageLike[]
+  [key: string]: unknown
+}
+
+type AiCallResult = Promise<unknown> & { abort?: () => void }
+
+interface AiModelInfo {
+  id?: string
+  label?: string
+  endpointType?: string
+  supportedEndpointTypes?: string[]
+}
+
+interface AiImageGenInput {
+  model: string
+  prompt: string
+  size?: string
+  count?: number
+}
+
+interface AiImageGenResult {
+  images: string[]
+  tokens?: { inputTokens: number; outputTokens: number }
+}
+
+interface AiImageProgressChunk {
+  type: 'status' | 'preview'
+  stage?: 'start' | 'partial' | 'finalizing' | 'completed' | 'fallback'
+  message?: string
+  image?: string
+  index?: number
+  received?: number
+  total?: number
+}
+
+type AiImageStreamResult = Promise<AiImageGenResult> & { abort?: () => void }
+
 interface WindowMulby {
   clipboard?: {
     readText: () => Promise<string>
     writeText: (text: string) => Promise<void>
     readImage?: () => Promise<ArrayBuffer | null>
     getFormat?: () => Promise<'text' | 'image' | 'files' | 'empty'>
+  }
+  ai?: {
+    call?: (option: AiCallOption, onChunk?: (chunk: unknown) => void) => AiCallResult
+    allModels?: () => Promise<AiModelInfo[]>
+    abort?: (requestId: string) => Promise<void>
+    images?: {
+      generate?: (input: AiImageGenInput) => Promise<AiImageGenResult>
+      generateStream?: (
+        input: AiImageGenInput,
+        onChunk: (chunk: AiImageProgressChunk) => void
+      ) => AiImageStreamResult
+    }
   }
   storage?: {
     get: (key: string, pluginId?: string) => Promise<unknown>
@@ -102,6 +158,46 @@ export function useMulby(pluginId?: string) {
     },
     system: {
       getPath: (name: string) => window.mulby?.system?.getPath?.(name) ?? Promise.resolve('')
+    },
+    ai: {
+      call: (option: AiCallOption, onChunk?: (chunk: unknown) => void): AiCallResult => {
+        const host = window.mulby?.ai?.call
+        if (host) {
+          return host(option, onChunk)
+        }
+        const fallback = Promise.reject(new Error('当前环境未启用 Mulby AI 能力')) as AiCallResult
+        fallback.abort = () => undefined
+        // Avoid unhandled-rejection noise when the result is never awaited.
+        fallback.catch(() => undefined)
+        return fallback
+      },
+      allModels: (): Promise<AiModelInfo[]> => window.mulby?.ai?.allModels?.() ?? Promise.resolve([]),
+      abort: (requestId: string) => window.mulby?.ai?.abort?.(requestId) ?? Promise.resolve(),
+      images: {
+        generate: (input: AiImageGenInput): Promise<AiImageGenResult> => {
+          const host = window.mulby?.ai?.images?.generate
+          if (host) {
+            return host(input)
+          }
+          return Promise.reject(new Error('当前环境未启用 Mulby 生图能力'))
+        },
+        generateStream: (
+          input: AiImageGenInput,
+          onChunk: (chunk: AiImageProgressChunk) => void
+        ): AiImageStreamResult => {
+          const host = window.mulby?.ai?.images?.generateStream
+          if (host) {
+            return host(input, onChunk)
+          }
+          const fallback = Promise.reject(
+            new Error('当前环境未启用 Mulby 生图能力')
+          ) as AiImageStreamResult
+          fallback.abort = () => undefined
+          // Avoid unhandled-rejection noise when the result is never awaited.
+          fallback.catch(() => undefined)
+          return fallback
+        }
+      }
     }
   }), [pluginId])
 }

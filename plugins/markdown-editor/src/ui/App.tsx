@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from 'react'
+import { createPortal } from 'react-dom'
 import Editor, { type EditorType } from '@toast-ui/editor'
 import '@toast-ui/editor/dist/toastui-editor.css'
 import '@toast-ui/editor/dist/theme/toastui-editor-dark.css'
@@ -18,6 +19,7 @@ import {
   Heading1,
   Heading2,
   Image as ImageIcon,
+  ImagePlus,
   Images,
   Italic,
   Link2,
@@ -27,20 +29,39 @@ import {
   Save,
   ScanText,
   SeparatorHorizontal,
+  Sparkles,
   Undo2
 } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
 import { useDraftStorage } from './hooks/useDraftStorage'
 import { FindReplaceBar, type FindReplaceMode } from './components/FindReplaceBar'
+import { AiPanel } from './components/AiPanel'
+import { AiBubble } from './components/AiBubble'
+import { ImageGenDialog } from './components/ImageGenDialog'
+import { buildImageAlt, normalizeBase64 } from './services/imageGen'
+import { containsRenderableMarkdown } from './services/markdown'
+import {
+  appendHistoryItem,
+  docKeyForPath,
+  getHistoryForDoc,
+  makeHistoryId,
+  normalizeHistoryMap,
+  type ImageHistoryMap
+} from './services/imageHistory'
+import { type BubbleRect } from './services/bubble'
+import { readSelectionBubbleSnapshot } from './services/selectionBubble'
 import { findMatches, replaceAll as replaceAllInText, replaceRange, type SearchMatch } from './services/search'
 import {
+  base64ToBytes,
   buildDataUrl,
-  buildImageMarkdown,
   extensionFromMime,
   extractInlineImages,
+  fitImageSize,
+  getDirectory,
   getExtension,
   hasInlineDataImage,
   mimeFromExtension,
+  resolveImageHref,
   saveImageAsset,
   saveImageToDir,
   toFileUrl
@@ -51,12 +72,18 @@ import {
   exportHtmlFile,
   exportPdfFile,
   replaceExtension,
-  type ExportFormat
+  type ExportFormat,
+  type ExportImage,
+  type ExportImageResolver
 } from './services/export'
 
 const PLUGIN_ID = 'markdown-editor'
 const STORAGE_DRAFT_KEY = 'draft:markdown-editor:v1'
 const STORAGE_CHROME_KEY = 'ui:markdown-editor:chrome-collapsed:v1'
+const STORAGE_AI_MODEL_KEY = 'ai:markdown-editor:model:v1'
+const STORAGE_AI_IMAGE_MODEL_KEY = 'ai:markdown-editor:image-model:v1'
+const STORAGE_AI_IMAGE_HISTORY_KEY = 'ai:markdown-editor:image-history:v1'
+const IMAGE_HISTORY_DIRNAME = 'gen-history'
 const DEFAULT_EXPORT_NAME = 'markdown-note.md'
 const EDITOR_PLACEHOLDER = '在这里开始写 Markdown'
 const WYSIWYG_HEADING_SELECTOR = [
@@ -128,6 +155,73 @@ async function readFileAsUtf8(
     return new TextDecoder('utf-8').decode(raw)
   }
   return ''
+}
+
+/** Max image display width (px) used when embedding pictures into exports. */
+const MAX_EXPORT_IMAGE_WIDTH = 600
+
+/**
+ * Decodes an image URL via a canvas to obtain raw bytes + display size for
+ * embedding. Output is normalized to PNG so any browser-decodable source
+ * (png/jpg/gif/webp/bmp/svg) becomes a .docx-compatible picture. Returns null
+ * when the image cannot be decoded or the canvas is tainted (cross-origin
+ * without CORS) so the caller can fall back to a text placeholder.
+ */
+async function loadImageForExport(href: string): Promise<ExportImage | null> {
+  const image = new Image()
+  image.crossOrigin = 'anonymous'
+  image.decoding = 'async'
+  image.src = href
+
+  try {
+    await image.decode()
+  } catch {
+    const loaded = await new Promise<boolean>((resolve) => {
+      if (image.complete && image.naturalWidth > 0) {
+        resolve(true)
+        return
+      }
+      image.onload = () => resolve(true)
+      image.onerror = () => resolve(false)
+    })
+    if (!loaded) {
+      return null
+    }
+  }
+
+  const naturalWidth = image.naturalWidth
+  const naturalHeight = image.naturalHeight
+  if (!naturalWidth || !naturalHeight) {
+    return null
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = naturalWidth
+  canvas.height = naturalHeight
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return null
+  }
+  context.drawImage(image, 0, 0)
+
+  const blob = await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((value) => resolve(value), 'image/png')
+  })
+  if (!blob) {
+    return null
+  }
+
+  const buffer = await blob.arrayBuffer()
+  const { width, height } = fitImageSize(
+    { width: naturalWidth, height: naturalHeight },
+    MAX_EXPORT_IMAGE_WIDTH
+  )
+  return {
+    data: new Uint8Array(buffer),
+    width,
+    height,
+    type: 'png'
+  }
 }
 
 function formatTimestamp(value: number | null) {
@@ -308,6 +402,20 @@ export default function App() {
   const [findCaseSensitive, setFindCaseSensitive] = useState(false)
   const [findWholeWord, setFindWholeWord] = useState(false)
   const [findIndex, setFindIndex] = useState(0)
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiSelection, setAiSelection] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [imageGenOpen, setImageGenOpen] = useState(false)
+  const [imageGenPrompt, setImageGenPrompt] = useState('')
+  const [imageModel, setImageModel] = useState('')
+  // Per-document AI image-generation history (persisted so reopening the
+  // generator shows everything produced for the current document).
+  const [imageHistoryMap, setImageHistoryMap] = useState<ImageHistoryMap>({})
+  const [bubbleAnchor, setBubbleAnchor] = useState<BubbleRect | null>(null)
+  const [bubbleSelection, setBubbleSelection] = useState('')
+  // Bumped each time the bubble is summoned via shortcut so it remounts with a
+  // fresh menu phase even if one was already showing.
+  const [bubbleSummonKey, setBubbleSummonKey] = useState(0)
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const contentRef = useRef(content)
@@ -315,16 +423,39 @@ export default function App() {
   const lastPersistedRef = useRef('')
   const activeFilePathRef = useRef<string | null>(null)
   const hasInitPayloadRef = useRef(false)
-  const { clipboard, dialog, filesystem, notification, storage, system } = useMulby(PLUGIN_ID)
+  const aiOpenRef = useRef(false)
+  const bubblePinnedRef = useRef(false)
+  const bubbleRangeRef = useRef<ReturnType<Editor['getSelection']> | null>(null)
+  // Editor range captured when the image generator opens, so an inserted image
+  // lands at the original caret instead of replacing the prompt selection.
+  const imageRangeRef = useRef<ReturnType<Editor['getSelection']> | null>(null)
+  // Mirrors imageHistoryMap for stable reads inside callbacks (avoids stale closures).
+  const imageHistoryMapRef = useRef<ImageHistoryMap>({})
+  const { ai, clipboard, dialog, filesystem, notification, storage, system } = useMulby(PLUGIN_ID)
   const draftStorage = useDraftStorage(storage, STORAGE_DRAFT_KEY)
 
   contentRef.current = content
   modeRef.current = editorMode
   activeFilePathRef.current = activeFilePath
+  aiOpenRef.current = aiOpen
+  imageHistoryMapRef.current = imageHistoryMap
   const outlineEntries = useMemo(() => parseOutline(content), [content])
   const searchMatches = useMemo<SearchMatch[]>(
     () => (findOpen && findQuery ? findMatches(content, findQuery, { caseSensitive: findCaseSensitive, wholeWord: findWholeWord }) : []),
     [content, findOpen, findQuery, findCaseSensitive, findWholeWord]
+  )
+  // The current document's image-generation history, with display URLs resolved
+  // for the generator dialog. Recomputes when the bound file or history changes.
+  const currentImageHistory = useMemo(
+    () =>
+      getHistoryForDoc(imageHistoryMap, docKeyForPath(activeFilePath)).map((entry) => ({
+        id: entry.id,
+        prompt: entry.prompt,
+        size: entry.size,
+        url: toFileUrl(entry.path),
+        createdAt: entry.createdAt
+      })),
+    [imageHistoryMap, activeFilePath]
   )
 
   useEffect(() => {
@@ -364,13 +495,23 @@ export default function App() {
 
     async function loadDraft() {
       try {
-        const [draft, collapsedValue] = await Promise.all([
+        const [draft, collapsedValue, savedModel, savedImageModel, savedImageHistory] = await Promise.all([
           draftStorage.loadDraft(),
-          storage.get(STORAGE_CHROME_KEY)
+          storage.get(STORAGE_CHROME_KEY),
+          storage.get(STORAGE_AI_MODEL_KEY),
+          storage.get(STORAGE_AI_IMAGE_MODEL_KEY),
+          storage.get(STORAGE_AI_IMAGE_HISTORY_KEY)
         ])
 
         if (!cancelled) {
           setChromeCollapsed(collapsedValue === true)
+          if (typeof savedModel === 'string') {
+            setAiModel(savedModel)
+          }
+          if (typeof savedImageModel === 'string') {
+            setImageModel(savedImageModel)
+          }
+          setImageHistoryMap(normalizeHistoryMap(savedImageHistory))
         }
 
         if (!cancelled && !hasInitPayloadRef.current && draft) {
@@ -429,6 +570,62 @@ export default function App() {
     }
 
     syncEditorSurfaces()
+
+    // Floating AI bubble: listen on both editor surfaces + selectionchange.
+    // Toast UI selection is authoritative; DOM rect is read after a short delay
+    // so ProseMirror has time to sync after mouseup.
+    let bubbleFrame = 0
+    let bubbleTimer = 0
+
+    const refreshBubbleFromSelection = () => {
+      if (aiOpenRef.current || bubblePinnedRef.current) {
+        return
+      }
+      const snapshot = readSelectionBubbleSnapshot(editor, host)
+      if (!snapshot) {
+        setBubbleAnchor(null)
+        return
+      }
+      setBubbleSelection(snapshot.text)
+      setBubbleAnchor(snapshot.anchor)
+    }
+
+    const scheduleBubbleRefresh = () => {
+      window.cancelAnimationFrame(bubbleFrame)
+      window.clearTimeout(bubbleTimer)
+      bubbleFrame = window.requestAnimationFrame(() => {
+        bubbleTimer = window.setTimeout(refreshBubbleFromSelection, 16)
+      })
+    }
+
+    const handleBubblePointerUp = (event: Event) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (!host.contains(target)) {
+        return
+      }
+      scheduleBubbleRefresh()
+    }
+
+    const handleBubbleSelectionChange = () => {
+      if (aiOpenRef.current || bubblePinnedRef.current) {
+        return
+      }
+      const domSelection = window.getSelection()
+      if (!domSelection || domSelection.rangeCount === 0 || domSelection.isCollapsed) {
+        setBubbleAnchor(null)
+        return
+      }
+      scheduleBubbleRefresh()
+    }
+
+    host.addEventListener('mouseup', handleBubblePointerUp, true)
+    host.addEventListener('keyup', handleBubblePointerUp, true)
+    document.addEventListener('selectionchange', handleBubbleSelectionChange)
+    window.addEventListener('scroll', scheduleBubbleRefresh, true)
+
     editor.on('changeMode', () => {
       setEditorMode(editor.isWysiwygMode() ? 'wysiwyg' : 'markdown')
       window.requestAnimationFrame(syncEditorSurfaces)
@@ -456,6 +653,12 @@ export default function App() {
     host.addEventListener('click', handleEditorClick, true)
 
     return () => {
+      window.cancelAnimationFrame(bubbleFrame)
+      window.clearTimeout(bubbleTimer)
+      host.removeEventListener('mouseup', handleBubblePointerUp, true)
+      host.removeEventListener('keyup', handleBubblePointerUp, true)
+      document.removeEventListener('selectionchange', handleBubbleSelectionChange)
+      window.removeEventListener('scroll', scheduleBubbleRefresh, true)
       host.removeEventListener('click', handleEditorClick, true)
       editor.destroy()
       editorRef.current = null
@@ -788,6 +991,17 @@ export default function App() {
     }
   }, [])
 
+  const openAiPanel = useCallback(() => {
+    const editor = editorRef.current
+    setAiSelection(editor?.getSelectedText?.() ?? '')
+    setAiOpen(true)
+    // Dismiss the floating bubble so the two AI surfaces never overlap. Inlined
+    // (not via closeBubble) to avoid a forward reference / TDZ at definition time.
+    bubblePinnedRef.current = false
+    bubbleRangeRef.current = null
+    setBubbleAnchor(null)
+  }, [])
+
   const closeFind = useCallback(() => {
     setFindOpen(false)
     focusEditor()
@@ -849,6 +1063,11 @@ export default function App() {
         openFind('replace')
         return
       }
+      if (key === 'k') {
+        event.preventDefault()
+        openAiPanel()
+        return
+      }
       if (key === 's') {
         event.preventDefault()
         if (event.shiftKey) {
@@ -889,7 +1108,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeydown)
     }
-  }, [handleRedo, handleSaveFile, handleSaveFileAs, handleUndo, openFind, persistDraft])
+  }, [handleRedo, handleSaveFile, handleSaveFileAs, handleUndo, openAiPanel, openFind, persistDraft])
 
   const documentName = activeFilePath ? basename(activeFilePath) : '未命名.md'
 
@@ -909,6 +1128,24 @@ export default function App() {
     setExportMenuOpen(false)
     focusEditor()
   }, [focusEditor])
+
+  // Resolves an <img> src from the export HTML into decoded bytes + display size
+  // so DOCX export can embed real pictures. Relative paths anchor to the bound
+  // document directory; unresolved images degrade to a text placeholder.
+  const resolveExportImage = useCallback<ExportImageResolver>(async (src) => {
+    const boundPath = activeFilePathRef.current
+    const baseDir = boundPath ? getDirectory(boundPath) : ''
+    const href = resolveImageHref(src, baseDir)
+    if (!href) {
+      return null
+    }
+    try {
+      return await loadImageForExport(href)
+    } catch (error) {
+      console.error('[markdown-editor] resolveExportImage', error)
+      return null
+    }
+  }, [])
 
   const handleExportByFormat = useCallback(async (format: ExportFormat) => {
     try {
@@ -960,7 +1197,7 @@ export default function App() {
       } else if (format === 'pdf') {
         await exportPdfFile(exportDocument, target)
       } else {
-        await exportDocxFile(exportDocument, target, filesystem)
+        await exportDocxFile(exportDocument, target, filesystem, resolveExportImage)
       }
 
       setActiveFilePath(target)
@@ -973,11 +1210,228 @@ export default function App() {
       notification.show('导出文件失败', 'error')
       focusEditor()
     }
-  }, [activeFilePath, closeExportMenu, dialog, filesystem, focusEditor, getCurrentExportDocument, notification])
+  }, [activeFilePath, closeExportMenu, dialog, filesystem, focusEditor, getCurrentExportDocument, notification, resolveExportImage])
 
   const handleOpenExportMenu = useCallback(() => {
     setExportMenuOpen(true)
   }, [])
+
+  const closeAiPanel = useCallback(() => {
+    setAiOpen(false)
+    focusEditor()
+  }, [focusEditor])
+
+  const handleAiModelChange = useCallback((model: string) => {
+    setAiModel(model)
+    void storage.set(STORAGE_AI_MODEL_KEY, model).catch(() => undefined)
+  }, [storage])
+
+  // Inserts Markdown text at the caret. In source mode the raw Markdown is
+  // exactly what the user should see; in WYSIWYG mode, Markdown that would
+  // otherwise show as literal source (headings, lists, emphasis, links…) is
+  // applied through a brief mode round-trip so it renders as formatted content
+  // instead of leaking syntax characters into the document.
+  const insertMarkdownText = useCallback(
+    (editor: Editor, text: string, asBlock = false) => {
+      const payload = asBlock ? `\n\n${text}\n` : text
+      if (editor.isWysiwygMode() && containsRenderableMarkdown(text)) {
+        editor.changeMode('markdown', true)
+        editor.insertText(payload)
+        editor.changeMode('wysiwyg', true)
+      } else {
+        editor.insertText(payload)
+      }
+    },
+    []
+  )
+
+  // Replaces the given range (or the live selection) with Markdown text, keeping
+  // WYSIWYG rendering correct the same way insertMarkdownText does.
+  const replaceMarkdownText = useCallback(
+    (editor: Editor, text: string, range?: ReturnType<Editor['getSelection']> | null) => {
+      if (editor.isWysiwygMode() && containsRenderableMarkdown(text)) {
+        if (range) {
+          try {
+            editor.setSelection(range[0], range[1])
+          } catch {
+            // Fall back to the current selection.
+          }
+        }
+        editor.changeMode('markdown', true)
+        editor.replaceSelection(text)
+        editor.changeMode('wysiwyg', true)
+      } else if (range) {
+        editor.replaceSelection(text, range[0], range[1])
+      } else {
+        editor.replaceSelection(text)
+      }
+    },
+    []
+  )
+
+  const handleAiReplaceSelection = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    // Mode-aware so Markdown renders in WYSIWYG instead of showing raw source.
+    replaceMarkdownText(editor, text)
+    setContent(editor.getMarkdown())
+    setAiOpen(false)
+    notification.show('已替换选中文字', 'success')
+    editor.focus()
+  }, [notification, replaceMarkdownText])
+
+  const handleAiInsert = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    // Insert on its own line so generated blocks don't glue onto existing text.
+    insertMarkdownText(editor, text, true)
+    setContent(editor.getMarkdown())
+    setAiOpen(false)
+    notification.show('已插入 AI 结果', 'success')
+    editor.focus()
+  }, [insertMarkdownText, notification])
+
+  const handleAiCopy = useCallback((text: string) => {
+    void clipboard.writeText(text)
+      .then(() => notification.show('已复制 AI 结果', 'success'))
+      .catch(() => notification.show('复制失败', 'error'))
+  }, [clipboard, notification])
+
+  const closeBubble = useCallback(() => {
+    bubblePinnedRef.current = false
+    bubbleRangeRef.current = null
+    setBubbleAnchor(null)
+  }, [])
+
+  const shouldKeepBubbleOpenOnTarget = useCallback((target: Node) => {
+    const host = hostRef.current
+    return !!host && host.contains(target)
+  }, [])
+
+  // Pins the bubble and captures the live editor selection range the moment an
+  // action starts (selection is still alive because the chips preventDefault on
+  // mousedown). Subsequent activations keep the original range so applying a
+  // result always targets the originally selected text.
+  const handleBubbleActivate = useCallback(() => {
+    if (bubblePinnedRef.current) {
+      return
+    }
+    const editor = editorRef.current
+    if (editor) {
+      try {
+        bubbleRangeRef.current = editor.getSelection()
+      } catch {
+        bubbleRangeRef.current = null
+      }
+    }
+    bubblePinnedRef.current = true
+  }, [])
+
+  const handleBubbleReplace = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      closeBubble()
+      return
+    }
+    const range = bubbleRangeRef.current
+    // Mode-aware so Markdown renders in WYSIWYG instead of showing raw source.
+    replaceMarkdownText(editor, text, range)
+    setContent(editor.getMarkdown())
+    notification.show('已替换选中文字', 'success')
+    closeBubble()
+    editor.focus()
+  }, [closeBubble, notification, replaceMarkdownText])
+
+  const handleBubbleInsert = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      closeBubble()
+      return
+    }
+    const range = bubbleRangeRef.current
+    if (range) {
+      // Collapse to the end of the original selection, then insert below it.
+      try {
+        editor.setSelection(range[1], range[1])
+      } catch {
+        // Keep the current caret.
+      }
+    }
+    insertMarkdownText(editor, text, true)
+    setContent(editor.getMarkdown())
+    notification.show('已插入 AI 结果', 'success')
+    closeBubble()
+    editor.focus()
+  }, [closeBubble, insertMarkdownText, notification])
+
+  const handleBubbleExpand = useCallback(() => {
+    const editor = editorRef.current
+    setAiSelection(editor?.getSelectedText?.() ?? '')
+    setAiOpen(true)
+    closeBubble()
+  }, [closeBubble])
+
+  // Cmd/Ctrl+J summons the AI bubble regardless of whether text is selected.
+  // With a selection it behaves like the on-select toolbar; with a collapsed
+  // caret it anchors at the caret (or the editor's top area as a fallback) and
+  // the bubble operates on the whole document.
+  const summonBubble = useCallback(() => {
+    if (aiOpenRef.current) {
+      return
+    }
+    const host = hostRef.current
+    const editor = editorRef.current
+    if (!host || !editor) {
+      return
+    }
+
+    let text = ''
+    let rect: BubbleRect | null = null
+    const snapshot = readSelectionBubbleSnapshot(editor, host)
+    if (snapshot) {
+      text = snapshot.text
+      rect = snapshot.anchor
+    }
+
+    if (!rect) {
+      const hostRect = host.getBoundingClientRect()
+      const left = hostRect.left + Math.min(hostRect.width / 2, 240)
+      const top = hostRect.top + 72
+      rect = { left, top, right: left, bottom: top, width: 0, height: 0 }
+    }
+
+    if (editor && text) {
+      try {
+        bubbleRangeRef.current = editor.getSelection()
+      } catch {
+        bubbleRangeRef.current = null
+      }
+    } else {
+      bubbleRangeRef.current = null
+    }
+    bubblePinnedRef.current = true
+    setBubbleSelection(text)
+    setBubbleAnchor(rect)
+    setBubbleSummonKey((key) => key + 1)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey
+      if (mod && !event.shiftKey && !event.altKey && (event.key === 'j' || event.key === 'J')) {
+        event.preventDefault()
+        summonBubble()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [summonBubble])
 
   // Persists raw image bytes to disk and returns the short URL to reference it
   // by: a portable `assets/` relative path when a file is bound, otherwise a
@@ -1010,10 +1464,151 @@ export default function App() {
       // Last-resort fallback keeps the image usable even if disk write fails.
       imageUrl = buildDataUrl(data, mimeFromExtension(safeExt))
     }
-    editor.insertText(buildImageMarkdown(imageUrl, alt))
+    // Use the editor's addImage command so the image renders as an <img> node in
+    // WYSIWYG mode and is written as `![alt](url)` in source mode — inserting raw
+    // Markdown via insertText would only show the literal syntax in WYSIWYG.
+    editor.exec('addImage', { imageUrl, altText: alt })
     setContent(editor.getMarkdown())
     editor.focus()
   }, [saveImageData])
+
+  const handleImageModelChange = useCallback((model: string) => {
+    setImageModel(model)
+    void storage.set(STORAGE_AI_IMAGE_MODEL_KEY, model).catch(() => undefined)
+  }, [storage])
+
+  // Opens the AI image generator. Captures the current editor range so a later
+  // insert targets the original caret, and closes any open AI surface first.
+  const openImageGen = useCallback((prompt: string) => {
+    const editor = editorRef.current
+    if (editor) {
+      try {
+        imageRangeRef.current = editor.getSelection()
+      } catch {
+        imageRangeRef.current = null
+      }
+    } else {
+      imageRangeRef.current = null
+    }
+    closeBubble()
+    setAiOpen(false)
+    setImageGenPrompt(prompt)
+    setImageGenOpen(true)
+  }, [closeBubble])
+
+  const closeImageGen = useCallback(() => {
+    setImageGenOpen(false)
+    focusEditor()
+  }, [focusEditor])
+
+  const handleInsertGeneratedImage = useCallback(async (base64: string, prompt: string) => {
+    const normalized = normalizeBase64(base64)
+    if (!normalized) {
+      notification.show('没有可插入的图片', 'warning')
+      return
+    }
+    const editor = editorRef.current
+    if (editor) {
+      const range = imageRangeRef.current
+      if (range) {
+        // Collapse to the end of the captured range so the prompt text isn't
+        // overwritten when the image is inserted.
+        try {
+          editor.setSelection(range[1], range[1])
+        } catch {
+          // Ignore: fall back to the editor's current caret.
+        }
+      }
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = base64ToBytes(normalized)
+    } catch (error) {
+      console.error('[markdown-editor] handleInsertGeneratedImage decode', error)
+      notification.show('图片解码失败', 'error')
+      return
+    }
+    await embedImage(bytes, 'png', buildImageAlt(prompt))
+    setSourceLabel('来自 AI 生图')
+    setImageGenOpen(false)
+    notification.show('已插入生成的图片', 'success')
+  }, [embedImage, notification])
+
+  // Saves a freshly generated image to the plugin's gen-history folder and
+  // records its metadata under the current document, so it remains visible in
+  // the generator even if it is never inserted (and survives reopening).
+  const persistImageGeneration = useCallback(async (base64: string, prompt: string, size: string) => {
+    const normalized = normalizeBase64(base64)
+    if (!normalized) {
+      return
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = base64ToBytes(normalized)
+    } catch {
+      return
+    }
+    try {
+      const userData = await system.getPath('userData')
+      const dir = `${userData.replace(/[/\\]+$/, '')}/${PLUGIN_ID}/${IMAGE_HISTORY_DIRNAME}`
+      const absolutePath = await saveImageToDir(filesystem, dir, bytes, 'png')
+      const docKey = docKeyForPath(activeFilePathRef.current)
+      const item = { id: makeHistoryId(), prompt, size, path: absolutePath, createdAt: Date.now() }
+      setImageHistoryMap((prev) => {
+        const next = appendHistoryItem(prev, docKey, item)
+        void storage.set(STORAGE_AI_IMAGE_HISTORY_KEY, next).catch(() => undefined)
+        return next
+      })
+    } catch (error) {
+      console.error('[markdown-editor] persistImageGeneration', error)
+    }
+  }, [filesystem, storage, system])
+
+  // Inserts a previously generated image (chosen from the history strip) by
+  // reading it back from disk and routing through the normal image embed path.
+  const handleInsertHistoryImage = useCallback(async (id: string) => {
+    const docKey = docKeyForPath(activeFilePathRef.current)
+    const item = getHistoryForDoc(imageHistoryMapRef.current, docKey).find((entry) => entry.id === id)
+    if (!item) {
+      notification.show('找不到该历史图片', 'warning')
+      return
+    }
+    const editor = editorRef.current
+    if (editor) {
+      const range = imageRangeRef.current
+      if (range) {
+        try {
+          editor.setSelection(range[1], range[1])
+        } catch {
+          // Fall back to the current caret.
+        }
+      }
+    }
+    let raw: string
+    try {
+      const data = await filesystem.readFile(item.path, 'base64')
+      raw = typeof data === 'string' ? data : ''
+    } catch (error) {
+      console.error('[markdown-editor] handleInsertHistoryImage read', error)
+      notification.show('读取历史图片失败，文件可能已被删除', 'error')
+      return
+    }
+    let bytes: Uint8Array
+    try {
+      bytes = base64ToBytes(normalizeBase64(raw))
+    } catch {
+      notification.show('历史图片解码失败', 'error')
+      return
+    }
+    if (bytes.byteLength === 0) {
+      notification.show('历史图片为空', 'warning')
+      return
+    }
+    await embedImage(bytes, 'png', buildImageAlt(item.prompt))
+    setSourceLabel('来自生图历史')
+    setImageGenOpen(false)
+    notification.show('已插入历史图片', 'success')
+  }, [embedImage, filesystem, notification])
 
   // Extracts every inline base64 image in the given markdown to disk, returning
   // the rewritten markdown and how many were extracted. References that cannot
@@ -1096,7 +1691,8 @@ export default function App() {
         extractedImages = extracted
       }
 
-      editor.insertText(insertText)
+      // Mode-aware: pasted Markdown renders in WYSIWYG, stays raw in source mode.
+      insertMarkdownText(editor, insertText)
       setContent(editor.getMarkdown())
       setSourceLabel('来自剪贴板')
       notification.show(
@@ -1110,7 +1706,7 @@ export default function App() {
       console.error('[markdown-editor] handlePasteClipboard', error)
       notification.show('读取剪贴板失败', 'error')
     }
-  }, [clipboard, embedImage, extractMarkdownImages, notification])
+  }, [clipboard, embedImage, extractMarkdownImages, insertMarkdownText, notification])
 
   const handleCopyMarkdown = useCallback(async () => {
     try {
@@ -1394,6 +1990,20 @@ export default function App() {
         onClick: handlePasteClipboard
       }
     ],
+    [
+      {
+        key: 'ai',
+        title: 'AI 助手（润色/续写/翻译/总结，Ctrl/Cmd+K）',
+        icon: Sparkles,
+        onClick: openAiPanel
+      },
+      {
+        key: 'ai-image',
+        title: 'AI 生图（根据描述或选中文字生成图片）',
+        icon: ImagePlus,
+        onClick: () => openImageGen('')
+      }
+    ],
     toolbarActions.slice(0, 2).map((item) => ({
       key: item.label,
       title: item.title,
@@ -1520,6 +2130,55 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <AiPanel
+        open={aiOpen}
+        ai={ai}
+        selection={aiSelection}
+        documentText={content}
+        model={aiModel}
+        onModelChange={handleAiModelChange}
+        onReplaceSelection={handleAiReplaceSelection}
+        onInsert={handleAiInsert}
+        onCopy={handleAiCopy}
+        onNotify={notification.show}
+        onClose={closeAiPanel}
+      />
+
+      {bubbleAnchor && !aiOpen && createPortal(
+        <AiBubble
+          key={bubbleSummonKey}
+          anchor={bubbleAnchor}
+          ai={ai}
+          model={aiModel}
+          selection={bubbleSelection}
+          documentText={content}
+          onActivate={handleBubbleActivate}
+          onReplace={handleBubbleReplace}
+          onInsert={handleBubbleInsert}
+          onCopy={handleAiCopy}
+          onExpand={handleBubbleExpand}
+          onImage={openImageGen}
+          onNotify={notification.show}
+          onClose={closeBubble}
+          shouldKeepOpenOnTarget={shouldKeepBubbleOpenOnTarget}
+        />,
+        document.body
+      )}
+
+      <ImageGenDialog
+        open={imageGenOpen}
+        ai={ai}
+        initialPrompt={imageGenPrompt}
+        model={imageModel}
+        history={currentImageHistory}
+        onModelChange={handleImageModelChange}
+        onGenerated={persistImageGeneration}
+        onInsert={handleInsertGeneratedImage}
+        onInsertHistory={handleInsertHistoryImage}
+        onNotify={notification.show}
+        onClose={closeImageGen}
+      />
 
       {!chromeCollapsed && (
         <header className="toolbar">

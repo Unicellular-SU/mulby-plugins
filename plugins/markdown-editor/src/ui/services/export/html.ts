@@ -1,3 +1,4 @@
+import { enhanceExportBody } from './enhance'
 import type { ExportSource } from './types'
 
 function escapeHtml(value: string) {
@@ -32,7 +33,8 @@ export function replaceExtension(fileName: string, nextExtension: string) {
 }
 
 export function buildExportHtml({ markdown, html, documentName }: ExportSource) {
-  const bodyHtml = sanitizeBodyHtml(html).trim() || `<pre>${escapeHtml(markdown)}</pre>`
+  const sanitized = sanitizeBodyHtml(html).trim() || `<pre>${escapeHtml(markdown)}</pre>`
+  const { bodyHtml, headHtml, bodyScripts } = enhanceExportBody(sanitized, markdown)
   const title = escapeHtml(documentName.replace(/\.[^.]+$/, '') || 'Markdown 文档')
 
   return `<!doctype html>
@@ -173,15 +175,30 @@ export function buildExportHtml({ markdown, html, documentName }: ExportSource) 
         margin: 1.6em 0;
       }
 
+      pre.mermaid {
+        background: transparent;
+        border: 0;
+        padding: 0;
+        overflow: visible;
+        text-align: center;
+      }
+
+      pre.mermaid svg {
+        max-width: 100%;
+        height: auto;
+      }
+
       @page {
         margin: 18mm 16mm 18mm;
       }
     </style>
+    ${headHtml}
   </head>
   <body>
     <article>
       ${bodyHtml}
     </article>
+    ${bodyScripts}
   </body>
 </html>`
 }

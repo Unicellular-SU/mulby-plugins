@@ -189,6 +189,10 @@ button {
 
 .toolbar {
   background: var(--panel-bg);
+  /* Establish a stacking context above the editor so button tooltips that hang
+     below the toolbar are never covered by the editor canvas. */
+  position: relative;
+  z-index: 5;
 }
 
 .toolbar {
@@ -334,7 +338,19 @@ button {
   transition:
     opacity 0.14s ease,
     transform 0.14s ease;
-  z-index: 30;
+  z-index: 60;
+}
+
+/* The :hover transform on these buttons creates a stacking context that would
+   otherwise trap the tooltip behind later sibling buttons. Lifting the hovered
+   button's own z-index keeps its tooltip above every neighbour. */
+.action-btn-icon:hover,
+.action-btn-icon:focus-visible,
+.formatter-btn-icon:hover,
+.formatter-btn-icon:focus-visible,
+.mode-btn-icon:hover,
+.mode-btn-icon:focus-visible {
+  z-index: 50;
 }
 
 .action-btn-icon:hover::after,
@@ -989,4 +1005,749 @@ button {
 
 .find-close-btn:hover {
   color: var(--danger);
+}
+
+/* AI assistant dialog */
+.ai-dialog {
+  width: min(620px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+
+.ai-dialog-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.ai-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.ai-close-btn:hover {
+  background: var(--panel-muted);
+  color: var(--danger);
+}
+
+.ai-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-action-chip {
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+}
+
+.ai-action-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.ai-action-chip.active {
+  background: var(--accent-soft);
+  border-color: rgba(92, 126, 168, 0.3);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ai-action-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.ai-hint-warn {
+  color: var(--danger);
+}
+
+.ai-hint-muted {
+  color: var(--text-muted);
+}
+
+.ai-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ai-field-model {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ai-field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-select {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--editor-paper);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.ai-select:focus {
+  border-color: var(--accent);
+}
+
+.ai-select:disabled {
+  opacity: 0.6;
+}
+
+.ai-instruction {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--editor-paper);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.ai-instruction:focus {
+  border-color: var(--accent);
+}
+
+.ai-output {
+  min-height: 140px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-muted);
+}
+
+.ai-output-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family:
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.ai-output-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.ai-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-actions-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-dialog-actions .action-btn {
+  gap: 6px;
+}
+
+.ai-run-btn {
+  background: var(--accent-soft);
+  border-color: rgba(92, 126, 168, 0.24);
+  color: var(--accent);
+}
+
+.ai-run-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.ai-stop-btn {
+  border-color: rgba(192, 91, 91, 0.24);
+  color: var(--danger);
+}
+
+.ai-apply-btn:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: rgba(92, 126, 168, 0.24);
+  color: var(--accent);
+}
+
+.ai-status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-spin {
+  animation: ai-spin 0.9s linear infinite;
+}
+
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* AI image generation dialog */
+.image-gen-dialog {
+  width: min(560px, 100%);
+}
+
+.image-gen-prompt {
+  min-height: 72px;
+}
+
+.image-gen-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-muted);
+}
+
+.image-gen-stage {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.image-gen-img {
+  display: block;
+  max-width: 100%;
+  max-height: 336px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--editor-paper);
+}
+
+.image-gen-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 13px;
+}
+
+.image-gen-empty,
+.image-gen-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.image-gen-history {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.image-gen-history-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.image-gen-history-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.image-gen-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--editor-paper);
+  cursor: pointer;
+  transition:
+    border-color 0.14s ease,
+    transform 0.14s ease;
+}
+
+.image-gen-thumb:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.image-gen-thumb.is-active {
+  border-color: var(--accent);
+}
+
+.image-gen-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ai-actions-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Floating AI selection bubble */
+.ai-bubble {
+  position: fixed;
+  z-index: 9999;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--panel-strong);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+  animation: ai-bubble-in 0.13s ease;
+}
+
+:root.dark .ai-bubble {
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.42);
+}
+
+@keyframes ai-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ai-bubble-card {
+  width: min(360px, calc(100vw - 24px));
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-bubble-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+}
+
+.ai-bubble-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.ai-bubble-chip:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ai-bubble-chip svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.ai-bubble-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border-strong);
+}
+
+.ai-bubble-scope {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.ai-bubble-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.ai-bubble-icon-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ai-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-bubble-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ai-bubble-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-bubble-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-bubble-field-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-bubble-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--editor-paper);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.ai-bubble-select:focus {
+  border-color: var(--accent);
+}
+
+.ai-bubble-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--editor-paper);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+
+.ai-bubble-textarea:focus {
+  border-color: var(--accent);
+}
+
+.ai-bubble-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.ai-bubble-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-bubble-output {
+  min-height: 56px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-muted);
+}
+
+.ai-bubble-output-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family:
+    "PingFang SC", "Helvetica Neue", "Helvetica", "Noto Sans CJK SC", sans-serif;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+}
+
+.ai-bubble-output-placeholder {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Rendered Markdown for the "问一问" explanation. */
+.ai-bubble-output-md {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.ai-bubble-output-md > :first-child {
+  margin-top: 0;
+}
+
+.ai-bubble-output-md > :last-child {
+  margin-bottom: 0;
+}
+
+.ai-bubble-output-md p,
+.ai-bubble-output-md ul,
+.ai-bubble-output-md ol,
+.ai-bubble-output-md blockquote,
+.ai-bubble-output-md pre {
+  margin: 0 0 0.6em;
+}
+
+.ai-bubble-output-md h1,
+.ai-bubble-output-md h2,
+.ai-bubble-output-md h3,
+.ai-bubble-output-md h4,
+.ai-bubble-output-md h5,
+.ai-bubble-output-md h6 {
+  margin: 0.8em 0 0.4em;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.ai-bubble-output-md h1 {
+  font-size: 1.3em;
+}
+
+.ai-bubble-output-md h2 {
+  font-size: 1.2em;
+}
+
+.ai-bubble-output-md h3 {
+  font-size: 1.1em;
+}
+
+.ai-bubble-output-md h4,
+.ai-bubble-output-md h5,
+.ai-bubble-output-md h6 {
+  font-size: 1em;
+}
+
+.ai-bubble-output-md ul,
+.ai-bubble-output-md ol {
+  padding-left: 1.4em;
+}
+
+.ai-bubble-output-md li + li {
+  margin-top: 0.2em;
+}
+
+.ai-bubble-output-md a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.ai-bubble-output-md a:hover {
+  text-decoration: underline;
+}
+
+.ai-bubble-output-md code {
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.16));
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.ai-bubble-output-md pre {
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.16));
+}
+
+.ai-bubble-output-md pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.ai-bubble-output-md blockquote {
+  margin-left: 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.ai-bubble-output-md hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0.8em 0;
+}
+
+.ai-bubble-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-bubble-actions-result {
+  flex-wrap: wrap;
+}
+
+.ai-bubble-actions-spacer {
+  flex: 1 1 auto;
+}
+
+.ai-bubble-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.ai-bubble-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--panel-muted);
+  color: var(--accent);
+}
+
+.ai-bubble-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-bubble-btn-primary:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: rgba(92, 126, 168, 0.3);
+  color: var(--accent);
+}
+
+.ai-bubble-btn-stop {
+  border-color: rgba(192, 91, 91, 0.3);
+  color: var(--danger);
+}
+
+.ai-bubble-btn-stop:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(192, 91, 91, 0.08);
+  color: var(--danger);
+}
+
+.ai-bubble-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-bubble-spin {
+  animation: ai-spin 0.9s linear infinite;
 }

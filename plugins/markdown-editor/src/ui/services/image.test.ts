@@ -7,12 +7,14 @@ import {
   extensionFromMime,
   extractInlineImages,
   findInlineDataImages,
+  fitImageSize,
   getDirectory,
   getExtension,
   hasInlineDataImage,
   joinPath,
   mimeFromExtension,
   parseDataUrl,
+  resolveImageHref,
   toFileUrl
 } from './image'
 
@@ -101,5 +103,29 @@ assert.equal(inline[1].alt, '')
   assert.equal(result.extracted, 0)
   assert.equal(result.markdown, clean)
 }
+
+// resolveImageHref: data / http / file / blob URLs pass through untouched
+assert.equal(resolveImageHref('data:image/png;base64,SGk=', '/docs'), 'data:image/png;base64,SGk=')
+assert.equal(resolveImageHref('https://example.com/a.png', '/docs'), 'https://example.com/a.png')
+assert.equal(resolveImageHref('file:///already/url.png', '/docs'), 'file:///already/url.png')
+assert.equal(resolveImageHref('blob:abc-123', '/docs'), 'blob:abc-123')
+// absolute filesystem paths become file:// URLs
+assert.equal(resolveImageHref('/a b/pic.png', '/docs'), 'file:///a%20b/pic.png')
+assert.equal(resolveImageHref('C:\\img\\p.png', '/docs'), 'file:///C%3A/img/p.png')
+// relative paths resolve against the bound document directory
+assert.equal(resolveImageHref('assets/x.png', '/docs/note'), 'file:///docs/note/assets/x.png')
+assert.equal(resolveImageHref('./assets/x.png', '/docs/note'), 'file:///docs/note/assets/x.png')
+// relative path with no base directory cannot be resolved
+assert.equal(resolveImageHref('assets/x.png', ''), null)
+assert.equal(resolveImageHref('   ', '/docs'), null)
+
+// fitImageSize: small images are kept (rounded), large images scale to maxWidth
+assert.deepEqual(fitImageSize({ width: 300, height: 200 }, 600), { width: 300, height: 200 })
+assert.deepEqual(fitImageSize({ width: 1200, height: 600 }, 600), { width: 600, height: 300 })
+assert.deepEqual(fitImageSize({ width: 1000, height: 333 }, 600), { width: 600, height: 200 })
+// non-positive natural sizes fall back to maxWidth with a 4:3 ratio
+assert.deepEqual(fitImageSize({ width: 0, height: 0 }, 600), { width: 600, height: 450 })
+// dimensions never drop below 1px
+assert.deepEqual(fitImageSize({ width: 4000, height: 1 }, 600), { width: 600, height: 1 })
 
 console.log('markdown-editor image unit tests passed')
