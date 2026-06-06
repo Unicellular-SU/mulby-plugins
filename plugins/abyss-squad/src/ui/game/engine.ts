@@ -632,11 +632,10 @@ export class GameEngine {
 
       const speedMult = enemy.slowTimer > 0 ? 0.5 : 1
 
-      // 寻找目标英雄
-      const aliveHeroes = heroes.filter(h => !h.isDead)
-      if (aliveHeroes.length === 0) continue
-      const targetIdx = Math.min(enemy.targetHeroId, heroes.length - 1)
-      const target = heroes[targetIdx] && !heroes[targetIdx].isDead ? heroes[targetIdx] : aliveHeroes[0]
+      // 寻找目标英雄：始终优先攻击活跃英雄
+      const activeHero = heroes[this.state.activeHeroIndex]
+      const target = (activeHero && !activeHero.isDead) ? activeHero : heroes.find(h => !h.isDead)
+      if (!target) continue
 
       const dist = this.dist(enemy, target)
       const attackRange = enemy.def.range + target.def.size
