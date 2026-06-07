@@ -320,6 +320,11 @@ export function VibePanel({
   const [iconBusy, setIconBusy] = useState(false)
   const [iconDone, setIconDone] = useState(false)
   const [iconDataUrl, setIconDataUrl] = useState<string | null>(null)
+  // 图标生成实时进度（治"重做图标看似卡死"）：流式累计绘制字符 + 阶段，配合定时器让耗时秒数持续跳动
+  const [iconProgress, setIconProgress] = useState<string | null>(null)
+  const iconStartRef = useRef(0)
+  const iconCharsRef = useRef(0)
+  const iconPhaseRef = useRef<'thinking' | 'drawing' | 'image'>('thinking')
   const [packing, setPacking] = useState(false)
   const [packed, setPacked] = useState(false)
 
@@ -361,6 +366,18 @@ export function VibePanel({
   const resetAbort = () => { abortedRef.current = false; reqIdRef.current = null }
   // 流式回调里捕获本次请求 id，供「停止」时精确 abort（也适用于无工具的纯文本/JSON 调用）
   const captureReqId = (chunk: any) => { if (chunk?.__requestId) reqIdRef.current = chunk.__requestId }
+  // 图标专用流式回调：捕获 reqId + 实时累计绘制进度（reasoning=构思，text=正在写 SVG）
+  const onIconChunk = (chunk: any) => {
+    if (chunk?.__requestId) { reqIdRef.current = chunk.__requestId; return }
+    if (abortedRef.current) return
+    const ct = chunk?.chunkType
+    if (ct === 'reasoning') {
+      if (iconPhaseRef.current !== 'drawing') iconPhaseRef.current = 'thinking'
+    } else if (ct === 'text' || typeof chunk?.content === 'string') {
+      const piece = ct === 'text' && typeof chunk?.text === 'string' ? chunk.text : (typeof chunk?.content === 'string' ? chunk.content : '')
+      if (piece) { iconCharsRef.current += piece.length; iconPhaseRef.current = 'drawing' }
+    }
+  }
   const deliverStartedRef = useRef(false)
   const eventSeq = useRef(0)
 
@@ -1101,7 +1118,7 @@ export function VibePanel({
             { role: 'user', content: attempt === 0 ? base : `${base}\n\n上次没有给出可用的 SVG。请严格只返回 SVG 源码本身。` }
           ],
           skills: { mode: 'off' }, mcp: { mode: 'off' }, toolingPolicy: { enableInternalTools: false }
-        }, captureReqId)
+        }, onIconChunk)
         if (abortedRef.current) return null
         const content = typeof res?.content === 'string' ? res.content : Array.isArray(res?.content) ? res.content.map((x: any) => x?.text ?? '').join('\n') : ''
         const svg = extractSvg(content)
@@ -1153,36 +1170,71 @@ export function VibePanel({
     const a = ai()
     let produced = false
     if (announce) turnEventsRef.current = []
+    // 分步计时：定位「图标生成卡在哪一步」（SVG 生成 / SVG→PNG 渲染 / 图像模型回退 / 插件重载）
+    const t0 = Date.now()
+    const secs = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+    let svgMs = 0, renderMs = 0, imgMs = 0, reloadMs = 0
+    // 实时进度（A 方案）：定时刷新"已 Xs"，即便模型长时间思考也不像卡死；不改提示词/模型，保证图标质量
+    const renderProgress = () => {
+      const el = Math.round((Date.now() - iconStartRef.current) / 1000)
+      const chars = iconCharsRef.current
+      setIconProgress(
+        iconPhaseRef.current === 'image' ? `正在用图像模型绘制图标… ${el}s`
+          : iconPhaseRef.current === 'drawing' ? `正在绘制图标… ${el}s（已生成 ${chars} 字）`
+            : `AI 正在构思图标… ${el}s`
+      )
+    }
+    let progressTimer: ReturnType<typeof setInterval> | undefined
     try {
       setIconBusy(true)
       resetAbort()
+      iconStartRef.current = Date.now(); iconCharsRef.current = 0; iconPhaseRef.current = 'thinking'
+      renderProgress()
+      progressTimer = setInterval(renderProgress, 500)
       pushEvent('icon', 'ai', force ? '按主题与功能重新设计图标…' : '生成图标 SVG…', (styleHint || '').slice(0, 40) || undefined)
+      const tSvg = Date.now()
       const svg = await requestIconSvg(a, contract, styleHint)
+      svgMs = Date.now() - tSvg
+      addLog('info', `⏱ [Vibe] 图标 SVG 生成 ${secs(svgMs)}${svg ? '' : '（未拿到可用 SVG）'}`)
       if (abortedRef.current) { pushEvent('icon', 'note', '已停止图标生成'); return }
       const sharp = sharpApi()
       if (svg && typeof sharp === 'function') {
         try {
           try { await fs?.writeFile?.(`${createdPath}/assets/icon.svg`, svg) } catch { /* 可选 */ }
           const bytes = new TextEncoder().encode(svg)
+          const tRender = Date.now()
           await sharp(bytes).resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(`${createdPath}/icon.png`)
+          renderMs = Date.now() - tRender
           produced = true
-          pushEvent('icon', 'write', '已渲染 icon.png（SVG → 512 PNG）')
+          pushEvent('icon', 'write', '已渲染 icon.png（SVG → 512 PNG）', secs(renderMs))
         } catch {
           pushEvent('icon', 'note', 'SVG 渲染失败，改用图像模型…')
         }
       }
-      if (!produced && !abortedRef.current) produced = await generateIconViaImageModel(a, fs, contract, styleHint)
+      if (!produced && !abortedRef.current) {
+        iconPhaseRef.current = 'image'; renderProgress()
+        const tImg = Date.now()
+        produced = await generateIconViaImageModel(a, fs, contract, styleHint)
+        imgMs = Date.now() - tImg
+        addLog('info', `⏱ [Vibe] 图像模型回退 ${secs(imgMs)}${produced ? '' : '（未产出）'}`)
+      }
       if (abortedRef.current) { pushEvent('icon', 'note', '已停止图标生成'); return }
 
       if (produced) {
         setIconDone(true)
         void loadIconPreview()
+        const tReload = Date.now()
         try { await dev.ensureLoaded(createdPath) } catch { /* 重载失败不影响图标已写入 */ }
+        reloadMs = Date.now() - tReload
         await onSyncWorkbench?.()
+        const totalMs = Date.now() - t0
+        const breakdown = `SVG ${secs(svgMs)}${renderMs ? ` · 渲染 ${secs(renderMs)}` : ''}${imgMs ? ` · 图像回退 ${secs(imgMs)}` : ''}${reloadMs ? ` · 重载 ${secs(reloadMs)}` : ''}`
+        addLog('success', `✔ [Vibe] 图标完成，总耗时 ${secs(totalMs)}（${breakdown}）`)
+        pushEvent('icon', 'note', `图标耗时 ${secs(totalMs)}`, breakdown)
         if (announce && activeId) {
-          appendMessage(activeId, mkMsg('assistant', '图标已重新生成 ✓，并已应用到插件（顶部状态条与交付页都能看到新图标）。不满意可以再说一句，比如「换成蓝色科技风」「再简洁一点」。', { actions: collectTurnActions() }))
+          appendMessage(activeId, mkMsg('assistant', `图标已重新生成 ✓（耗时 ${secs(totalMs)}：${breakdown}），并已应用到插件。不满意可以再说一句，比如「换成蓝色科技风」「再简洁一点」。`, { actions: collectTurnActions() }))
         }
-        if (announce) pushToast('success', '图标已更新')
+        if (announce) pushToast('success', `图标已更新（${secs(totalMs)}）`)
       } else {
         pushEvent('icon', 'note', '未能生成图标（当前环境无 SVG/图像能力）')
         if (announce && activeId) {
@@ -1194,6 +1246,8 @@ export function VibePanel({
       pushEvent('icon', 'error', `图标生成失败：${e instanceof Error ? e.message : ''}`)
       if (announce && activeId) appendMessage(activeId, mkMsg('assistant', `图标生成失败了：${e instanceof Error ? e.message : '未知错误'}。要不要再试一次？`))
     } finally {
+      if (progressTimer) clearInterval(progressTimer)
+      setIconProgress(null)
       setIconBusy(false)
     }
   }
@@ -1350,6 +1404,33 @@ export function VibePanel({
       await loadChanges()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '回滚失败')
+    } finally {
+      setRestoringHash(null)
+    }
+  }
+
+  // 一键撤销到「本次 AI 改动之前」：取最近一个影子快照还原点（"AI 改动前"/"新会话基线"）并回滚重建。
+  // 影子库回滚前会自动快照当前态，故本操作可逆——丢弃的改动仍能在版本列表里找回。
+  const undoToBeforeAI = async () => {
+    if (!createdPath || aiActive || busy || restoringHash) return
+    try {
+      const log = await dev.hostCall<{ available?: boolean; commits?: VcsCommit[] }>('vcs_log', { root: createdPath, limit: 50 })
+      if (log?.available === false) { pushToast('error', 'git 不可用，无法撤销'); return }
+      const target = (log?.commits || []).find((c) => /AI 改动前|新会话基线/.test(c.message || ''))
+      if (!target) { pushToast('info', '暂无「AI 改动前」还原点可撤销'); return }
+      setRestoringHash(target.hash)
+      const r = await dev.hostCall<{ ok?: boolean; available?: boolean; reason?: string; removed?: number }>('vcs_restore', { root: createdPath, hash: target.hash })
+      if (!r?.ok) { pushToast('error', r?.reason || '撤销失败'); return }
+      const removedTip = r.removed ? `，清理 ${r.removed} 个新增文件` : ''
+      pushEvent('repair', 'note', `已撤销到「${target.message}」(${target.short})`)
+      addLog('info', `↩ [Vibe] 撤销到 ${target.short}「${target.message}」，正在重新构建载入`)
+      recordMessage(mkMsg('assistant', `已撤销到「${target.message}」(${target.short})${removedTip}。本次 AI 改动已丢弃；如需找回，可在交付页版本列表恢复「自动保存：回滚前的当前状态」。`))
+      pushToast('success', '已撤销到 AI 改动前，正在重新构建')
+      pendingCommitMsgRef.current = '撤销到 AI 改动前'
+      await runBuildAndLoad()
+      await loadVersions()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : '撤销失败')
     } finally {
       setRestoringHash(null)
     }
@@ -1985,11 +2066,14 @@ export function VibePanel({
             status={pluginStatus}
             statusBusy={building || packing}
             iconBusy={iconBusy}
+            iconProgress={iconProgress}
             packed={packed}
             onOpenPlugin={openPlugin}
             onTryIt={tryIt}
             onPack={doPack}
             onRegenIcon={() => void generateIcon({ force: true, announce: true })}
+            onUndoToBefore={undoToBeforeAI}
+            undoing={!!restoringHash}
             onClearMessages={() => { if (activeId) clearMessages(activeId) }}
             onNewConversation={newConversation}
           />

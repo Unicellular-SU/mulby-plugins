@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Sparkles, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, MessageSquarePlus, Image as ImageIcon, StopCircle } from 'lucide-react'
+import { Send, Loader2, Sparkles, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, MessageSquarePlus, Image as ImageIcon, StopCircle, RotateCcw } from 'lucide-react'
 import { useSession } from './SessionProvider'
 import { Markdown } from './Markdown'
 import type { VibeMessage, VibeSessionState, BrainstormOption } from './types'
@@ -50,11 +50,14 @@ interface Props {
   status?: { name: string; loaded: boolean; trigger: string; icon?: string | null } | null
   statusBusy?: boolean
   iconBusy?: boolean
+  iconProgress?: string | null
   packed?: boolean
   onOpenPlugin?: () => void
   onTryIt?: () => void
   onPack?: () => void
   onRegenIcon?: () => void
+  onUndoToBefore?: () => void
+  undoing?: boolean
   onClearMessages?: () => void
   onNewConversation?: () => void
 }
@@ -64,7 +67,7 @@ export function ChatPanel({
   brainstorm, onPickIdea, onMoreIdeas, onUseSeed, onDismissBrainstorm, examples,
   contractPending, onConfirmGenerate,
   pendingPrompt, onPromptDismiss,
-  status, statusBusy, iconBusy, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onClearMessages, onNewConversation
+  status, statusBusy, iconBusy, iconProgress, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onUndoToBefore, undoing, onClearMessages, onNewConversation
 }: Props) {
   const { activeSession } = useSession()
   const [text, setText] = useState('')
@@ -141,6 +144,16 @@ export function ChatPanel({
           </div>
           {status.trigger && <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">触发词：{status.trigger}</div>}
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+            {onUndoToBefore && (
+              <button
+                onClick={onUndoToBefore}
+                disabled={statusBusy || aiActive || undoing}
+                className="inline-flex items-center gap-1 h-6 px-2 text-[10px] font-medium rounded-md text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300/70 dark:border-amber-700/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50"
+                title="一键撤销到本次 AI 改动之前（可逆，丢弃的改动仍可在版本列表恢复）"
+              >
+                {undoing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} 撤销 AI 改动
+              </button>
+            )}
             <button onClick={onOpenPlugin} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打开插件窗口"><Rocket size={11} /> 打开</button>
             <button onClick={onTryIt} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="复制触发词去主输入框试用"><ExternalLink size={11} /> 试用</button>
             <button onClick={onPack} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打包为 .inplugin"><Package size={11} /> {packed ? '已打包' : '打包'}</button>
@@ -200,7 +213,7 @@ export function ChatPanel({
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-              <Loader2 size={11} className="animate-spin" /> AI 处理中…
+              <Loader2 size={11} className="animate-spin" /> {iconProgress || 'AI 处理中…'}
             </div>
           ))}
           <div ref={messagesEndRef} />

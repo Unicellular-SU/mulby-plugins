@@ -26,6 +26,8 @@ import {
 } from 'node:fs'
 import { join, resolve, dirname, relative, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
+import { createHash } from 'node:crypto'
 
 declare const __dirname: string
 
@@ -56,23 +58,123 @@ function gitAvailable(): boolean {
   return gitAvailableCache
 }
 
-function isGitRepo(root: string): boolean {
-  const r = git(root, ['rev-parse', '--is-inside-work-tree'])
-  return r.ok && r.out.trim() === 'true'
+// ---------------- 影子快照仓库（shadow snapshot，参考 opencode） ----------------
+// 历史存放在用户数据目录下的「独立 git-dir」，--work-tree 指向插件目录：
+// 快照/回滚完全不在插件目录创建 .git，绝不污染用户自己的版本控制（哪怕用户自己 git init 管这个插件）。
+
+/** 快照库根目录（与插件目录物理隔离） */
+function snapshotsBaseDir(): string {
+  return join(homedir(), '.mulby', 'vibe-snapshots')
+}
+/** 某插件根目录对应的影子 git-dir（按绝对路径 hash 命名，互不冲突） */
+function shadowGitDir(root: string): string {
+  const key = createHash('sha1').update(resolve(root)).digest('hex').slice(0, 16)
+  return join(snapshotsBaseDir(), `${key}.git`)
+}
+/** 快照排除项（写入影子库 info/exclude）：大目录与产物，避免快照膨胀 */
+const SNAPSHOT_EXCLUDES = [
+  'node_modules/', 'dist/', 'build/', '.git/', '.codegraph/', '.vibe-backup/',
+  '.vite/', '.DS_Store', '*.inplugin', '*.log', ''
+].join('\n')
+/** 单文件快照体积上限（>2MB 物理跳过，参考 opencode 的大文件拦截） */
+const MAX_SNAPSHOT_FILE_BYTES = 2_000_000
+
+/** 在影子库上执行 git（自动带 --git-dir 与 --work-tree） */
+function sgit(root: string, args: string[], timeoutMs = 20_000) {
+  return git(root, ['--git-dir', shadowGitDir(root), '--work-tree', root, ...args], timeoutMs)
 }
 
-/** 确保仓库存在：首次 init 并写入 .gitignore（若缺）+ 首个提交 */
-function ensureRepo(root: string): { ok: boolean; err?: string } {
-  if (isGitRepo(root)) return { ok: true }
-  const init = git(root, ['init'])
-  if (!init.ok) return { ok: false, err: init.err || 'git init 失败' }
-  const giPath = join(root, '.gitignore')
-  if (!existsSync(giPath)) {
-    try {
-      writeFileSync(giPath, ['node_modules/', 'dist/', '.codegraph/', '.vibe-backup/', '*.inplugin', '.DS_Store', ''].join('\n'), 'utf-8')
-    } catch { /* 忽略 */ }
+/** 影子库是否已就绪（git 可用且已 init） */
+function shadowRepoReady(root: string): boolean {
+  return gitAvailable() && existsSync(shadowGitDir(root))
+}
+
+/** 确保影子库存在（首次 init + 关 bare + 写 info/exclude；excludes 每次刷新） */
+function ensureShadowRepo(root: string): { ok: boolean; err?: string } {
+  if (!gitAvailable()) return { ok: false, err: '系统未安装 git' }
+  const gitDir = shadowGitDir(root)
+  try {
+    if (!existsSync(gitDir)) {
+      mkdirSync(gitDir, { recursive: true })
+      const init = git(root, ['--git-dir', gitDir, 'init', '-q'])
+      if (!init.ok) return { ok: false, err: init.err || 'git init 失败' }
+      sgit(root, ['config', 'core.bare', 'false'])
+    }
+    try { writeFileSync(join(gitDir, 'info', 'exclude'), SNAPSHOT_EXCLUDES, 'utf-8') } catch { /* 忽略 */ }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, err: e instanceof Error ? e.message : 'init 失败' }
   }
-  return { ok: true }
+}
+
+/** 取消暂存超过体积上限的大文件（2MB 物理拦截），避免快照膨胀 */
+function unstageOversized(root: string): void {
+  const staged = sgit(root, ['diff', '--cached', '--name-only'])
+  if (!staged.ok) return
+  for (const rel of staged.out.split('\n').map((s) => s.trim()).filter(Boolean)) {
+    try {
+      const abs = join(root, rel)
+      if (existsSync(abs) && statSync(abs).size > MAX_SNAPSHOT_FILE_BYTES) {
+        sgit(root, ['reset', '-q', '--', rel])
+      }
+    } catch { /* 忽略单个文件 */ }
+  }
+}
+
+/** 生成一个快照（commit 到影子库）。无改动且已有基线时返回 nochange:true。 */
+function takeSnapshot(root: string, message: string): { ok: boolean; available?: boolean; nochange?: boolean; hash?: string; reason?: string } {
+  if (!gitAvailable()) return { ok: false, available: false, reason: '系统未安装 git' }
+  const ensured = ensureShadowRepo(root)
+  if (!ensured.ok) return { ok: false, available: true, reason: ensured.err }
+  sgit(root, ['add', '-A'])
+  unstageOversized(root)
+  const hasHead = sgit(root, ['rev-parse', '--verify', '--quiet', 'HEAD']).ok
+  const staged = sgit(root, ['diff', '--cached', '--name-only'])
+  if (hasHead && staged.ok && !staged.out.trim()) return { ok: true, nochange: true }
+  const c = sgit(root, ['commit', '-q', '--allow-empty', '-m', String(message || '快照').slice(0, 200)])
+  if (!c.ok) return { ok: false, available: true, reason: c.err || '快照失败' }
+  const head = sgit(root, ['rev-parse', '--short', 'HEAD'])
+  return { ok: true, hash: head.ok ? head.out.trim() : '' }
+}
+
+/**
+ * 回滚到某快照：① 先把当前态存一份（可逆）② 用目标树覆盖工作区（批量，失败降级单文件自愈）
+ * ③ 物理强删未跟踪残留（AI 新建但不在目标快照里的垃圾文件），node_modules 等被 exclude 不删。
+ */
+function restoreSnapshot(root: string, hash: string): { ok: boolean; available?: boolean; hash?: string; removed?: number; reason?: string } {
+  if (!gitAvailable()) return { ok: false, available: false, reason: '系统未安装 git' }
+  const ensured = ensureShadowRepo(root)
+  if (!ensured.ok) return { ok: false, available: true, reason: ensured.err }
+  if (!hash) return { ok: false, available: true, reason: '缺少目标版本 hash' }
+  // ① 回滚前先快照当前态（不丢任何东西，可再前进）
+  sgit(root, ['add', '-A'])
+  unstageOversized(root)
+  const dirty = sgit(root, ['diff', '--cached', '--name-only'])
+  if (dirty.ok && dirty.out.trim()) sgit(root, ['commit', '-q', '-m', '自动保存：回滚前的当前状态'])
+  // ② 用目标树覆盖索引+工作区（批量），失败降级单文件 checkout 自愈
+  const rt = sgit(root, ['read-tree', '-u', '--reset', hash])
+  if (!rt.ok) {
+    const files = sgit(root, ['ls-tree', '-r', '--name-only', hash])
+    if (!files.ok) return { ok: false, available: true, reason: rt.err || '回滚失败' }
+    for (const rel of files.out.split('\n').map((s) => s.trim()).filter(Boolean)) {
+      sgit(root, ['checkout', hash, '--', rel])
+    }
+  }
+  // ③ 物理强删未跟踪残留（exclude 的 node_modules/dist 等不会被列出，安全）
+  let removed = 0
+  const others = sgit(root, ['ls-files', '--others', '--exclude-standard'])
+  if (others.ok) {
+    for (const rel of others.out.split('\n').map((s) => s.trim()).filter(Boolean)) {
+      try {
+        const abs = join(root, rel)
+        if (abs !== root && abs.startsWith(root + sep)) {
+          rmSync(abs, { force: true })
+          removed += 1
+        }
+      } catch { /* 忽略单个文件 */ }
+    }
+  }
+  return { ok: true, hash, removed }
 }
 
 /** 读取/写入 manifest.json 的 version 并做语义化自增 */
@@ -291,6 +393,9 @@ export const rpc = {
     } else if (!snapshotsByRoot.has(root)) {
       snapshotsByRoot.set(root, new Map<string, string | null>())
     }
+    // 影子库自动快照：在 AI 改动之前留一个还原点（"AI 写崩→一键回到改动前"）。
+    // nochange 时跳过；失败不影响会话（git 不可用等优雅降级）。
+    try { takeSnapshot(root, input?.fresh ? '新会话基线' : 'AI 改动前') } catch { /* 忽略 */ }
     return { ok: true, root }
   },
 
@@ -690,12 +795,12 @@ export const rpc = {
     }
   },
 
-  /** 版本管理：探测 git 是否可用 + 该目录是否已是仓库 */
+  /** 版本管理：探测 git 是否可用 + 该目录是否已有影子快照历史 */
   vcs_status(input: { root?: string }) {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
     if (!gitAvailable()) return { available: false, reason: '系统未安装 git' }
     if (!root || !existsSync(root)) return { available: true, repo: false }
-    return { available: true, repo: isGitRepo(root) }
+    return { available: true, repo: shadowRepoReady(root) }
   },
 
   /**
@@ -706,8 +811,6 @@ export const rpc = {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
     if (!root || !existsSync(root)) return { ok: false, reason: '目录不存在' }
     if (!gitAvailable()) return { ok: false, available: false, reason: '系统未安装 git' }
-    const ensured = ensureRepo(root)
-    if (!ensured.ok) return { ok: false, available: true, reason: ensured.err }
     let version: string | undefined
     if (input?.bump) {
       const b = bumpManifestVersion(root, input.bump)
@@ -715,26 +818,22 @@ export const rpc = {
     } else {
       try { version = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf-8'))?.version } catch { /* ignore */ }
     }
-    git(root, ['add', '-A'])
-    const status = git(root, ['status', '--porcelain'])
-    if (status.ok && !status.out.trim()) return { ok: true, nochange: true, version }
-    const msg = String(input?.message || '更新').slice(0, 200)
-    const c = git(root, ['commit', '-m', msg])
-    if (!c.ok) return { ok: false, available: true, reason: c.err || '提交失败' }
-    const head = git(root, ['rev-parse', '--short', 'HEAD'])
-    const hash = head.ok ? head.out.trim() : ''
-    if (input?.tag && version) git(root, ['tag', '-f', `v${version}`])
-    return { ok: true, hash, version }
+    // 写入影子库（不污染插件目录）
+    const snap = takeSnapshot(root, String(input?.message || '更新'))
+    if (!snap.ok) return { ok: false, available: snap.available, reason: snap.reason }
+    if (snap.nochange) return { ok: true, nochange: true, version }
+    if (input?.tag && version) sgit(root, ['tag', '-f', `v${version}`])
+    return { ok: true, hash: snap.hash, version }
   },
 
   /** 读取版本历史（提交列表，含 tag 引用） */
   vcs_log(input: { root?: string; limit?: number }) {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
     if (!gitAvailable()) return { available: false, commits: [] as unknown[] }
-    if (!root || !isGitRepo(root)) return { available: true, repo: false, commits: [] as unknown[] }
+    if (!root || !shadowRepoReady(root)) return { available: true, repo: false, commits: [] as unknown[] }
     const limit = Math.min(typeof input?.limit === 'number' ? input.limit : 50, 200)
     const SEP = '\x1f'
-    const r = git(root, ['log', '-n', String(limit), `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%cI${SEP}%D`])
+    const r = sgit(root, ['log', '-n', String(limit), `--pretty=format:%H${SEP}%h${SEP}%s${SEP}%cI${SEP}%D`])
     if (!r.ok) return { available: true, repo: true, commits: [] as unknown[] }
     const commits = r.out.split('\n').filter(Boolean).map((line) => {
       const [hash, short, message, dateISO, refs] = line.split(SEP)
@@ -747,11 +846,11 @@ export const rpc = {
   /** 查看某次提交的改动（patch）；不传 hash 看工作区相对 HEAD 的改动 */
   vcs_diff(input: { root?: string; hash?: string }) {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
-    if (!gitAvailable() || !root || !isGitRepo(root)) return { available: false, patch: '' }
+    if (!gitAvailable() || !root || !shadowRepoReady(root)) return { available: false, patch: '' }
     const hash = String(input?.hash || '').trim()
     const r = hash
-      ? git(root, ['show', '--no-color', '--stat', '-p', hash])
-      : git(root, ['diff', '--no-color', 'HEAD'])
+      ? sgit(root, ['show', '--no-color', '--stat', '-p', hash])
+      : sgit(root, ['diff', '--no-color', 'HEAD'])
     let patch = r.out || ''
     let truncated = false
     if (patch.length > 80_000) { patch = patch.slice(0, 80_000); truncated = true }
@@ -765,24 +864,8 @@ export const rpc = {
   vcs_restore(input: { root?: string; hash?: string }) {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
     const hash = String(input?.hash || '').trim()
-    if (!gitAvailable() || !root || !isGitRepo(root)) return { ok: false, available: false, reason: 'git 不可用或非仓库' }
-    if (!hash) return { ok: false, reason: '缺少目标版本 hash' }
-    // 先把当前（含未跟踪）改动整体存为一个提交，保证回滚可逆、不丢任何东西
-    git(root, ['add', '-A'])
-    const status = git(root, ['status', '--porcelain'])
-    if (status.ok && status.out.trim()) {
-      git(root, ['commit', '-m', '自动保存：回滚前的当前状态'])
-    }
-    // 用目标提交的整棵树覆盖索引与工作区：会删除该版本之后新增的文件，确保「忠实回滚」。
-    // HEAD 不动（仍指向自动保存的提交），回滚后工作区为相对 HEAD 的未提交改动，
-    // 交由前端重新构建载入并提交一条「回滚」记录；历史保留，可再前进。
-    const rt = git(root, ['read-tree', '-u', '--reset', hash])
-    if (!rt.ok) {
-      // 兜底：read-tree 失败时退回旧行为（至少还原已跟踪文件，但不删新增文件）
-      const co = git(root, ['checkout', hash, '--', '.'])
-      if (!co.ok) return { ok: false, available: true, reason: rt.err || co.err || '回滚失败' }
-    }
-    return { ok: true, hash }
+    // 影子库回滚：回滚前自动快照（可逆）→ 目标树覆盖工作区（批量，失败降级单文件）→ 物理删未跟踪残留
+    return restoreSnapshot(root, hash)
   }
 }
 
