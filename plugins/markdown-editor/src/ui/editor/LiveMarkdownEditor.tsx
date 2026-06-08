@@ -61,7 +61,12 @@ interface LiveMarkdownEditorProps {
   /** Whether inline AI completion (ghost text) is enabled. */
   completionEnabled?: boolean
   /** Fetches an inline completion for the caret context; resolve '' for none. */
-  requestCompletion?: (prefix: string, suffix: string, signal: AbortSignal) => Promise<string>
+  requestCompletion?: (
+    prefix: string,
+    suffix: string,
+    signal: AbortSignal,
+    onPartial?: (text: string) => void
+  ) => Promise<string>
 }
 
 const markdownHighlight = HighlightStyle.define([
@@ -174,9 +179,9 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
           livePreviewExtension(),
           inlineCompletion({
             getEnabled: () => completionEnabledRef.current === true,
-            fetch: (prefix, suffix, signal) =>
+            fetch: (prefix, suffix, signal, onPartial) =>
               requestCompletionRef.current
-                ? requestCompletionRef.current(prefix, suffix, signal)
+                ? requestCompletionRef.current(prefix, suffix, signal, onPartial)
                 : Promise.resolve('')
           }),
           resolverCompartment.of(imageUrlResolver.of(resolverRef.current ?? ((href: string) => href))),

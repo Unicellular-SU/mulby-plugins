@@ -24,22 +24,72 @@ export function buildCompletionPrompt(prefix: string, suffix: string): AiPrompt 
   return { system, user }
 }
 
+export interface CompletionAdvance {
+  /** Whether `committed` is a prefix of the suggestion (the ghost can advance). */
+  matched: boolean
+  /** The remaining ghost text after consuming `committed` ('' when fully typed). */
+  rest: string
+}
+
+/**
+ * Reconciles an inline suggestion against text the user actually committed (e.g.
+ * via an IME composition). `committed` is the *final* text typed from where the
+ * ghost started — for Chinese this is the resolved characters, never the
+ * intermediate pinyin. When it's a prefix of the suggestion the ghost advances
+ * (consuming those characters); otherwise it's a mismatch and the caller should
+ * drop the ghost. This keeps "type-through" working under IME, where the per-
+ * keystroke insertions are latin pinyin that never match the CJK suggestion.
+ */
+export function advanceCompletionByCommit(suggestion: string, committed: string): CompletionAdvance {
+  if (committed && suggestion.startsWith(committed)) {
+    return { matched: true, rest: suggestion.slice(committed.length) }
+  }
+  return { matched: false, rest: '' }
+}
+
+/**
+ * Next number of characters to reveal for the typewriter ghost-text animation.
+ * Ease-out: reveal a larger chunk when far behind the target, slowing to one
+ * character near the end — so a long suggestion appears quickly but a short one
+ * still visibly "types out" instead of popping in. Never exceeds `targetLen`.
+ */
+export function nextRevealLength(shown: number, targetLen: number): number {
+  if (shown >= targetLen) {
+    return targetLen
+  }
+  const step = Math.max(1, Math.ceil((targetLen - shown) / 6))
+  return Math.min(targetLen, shown + step)
+}
+
 /**
  * Requests a single inline completion. Resolves with the suggestion text (or ''
  * when there's nothing to add / the request was aborted). Aborting the signal
- * cancels the underlying AI request.
+ * cancels the underlying AI request. `onPartial` (optional) receives the growing
+ * suggestion as it streams in, so the caller can show ghost text immediately.
  */
 export async function requestCompletion(
   ai: AiClient,
   model: string | undefined,
   prefix: string,
   suffix: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onPartial?: (text: string) => void
 ): Promise<string> {
   if (signal.aborted) {
     return ''
   }
-  const handle = runAiAction({ ai, model, prompt: buildCompletionPrompt(prefix, suffix) })
+  let acc = ''
+  const handle = runAiAction({
+    ai,
+    model,
+    prompt: buildCompletionPrompt(prefix, suffix),
+    onDelta: onPartial
+      ? (delta) => {
+          acc += delta
+          onPartial(acc.replace(/\s+$/, ''))
+        }
+      : undefined
+  })
   const onAbort = () => handle.abort()
   signal.addEventListener('abort', onAbort, { once: true })
   try {

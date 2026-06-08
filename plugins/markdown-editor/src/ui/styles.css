@@ -721,6 +721,49 @@ button {
   pointer-events: none;
 }
 
+/* Inline AI completion loading hint: three pulsing dots at the caret while the
+   model is generating, so the wait is visible (cleared on the first token). */
+.cm-ghost-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 0.15em;
+  vertical-align: middle;
+  pointer-events: none;
+  user-select: none;
+}
+.cm-ghost-loading i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent, var(--text-muted));
+  opacity: 0.35;
+  animation: cm-ghost-loading-pulse 1s infinite ease-in-out both;
+}
+.cm-ghost-loading i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.cm-ghost-loading i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes cm-ghost-loading-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+  40% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cm-ghost-loading i {
+    animation-duration: 2s;
+  }
+}
+
 .cm-editor-host {
   height: 100%;
   min-height: 0;

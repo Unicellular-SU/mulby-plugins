@@ -1743,10 +1743,11 @@ export default function App() {
     void storage.set(STORAGE_AI_MODEL_KEY, model).catch(() => undefined)
   }, [storage])
 
-  // Fetches an inline ghost-text completion using the current AI model.
+  // Fetches an inline ghost-text completion using the current AI model. Forwards
+  // streaming partials so the ghost text grows as it generates.
   const requestInlineCompletion = useCallback(
-    (prefix: string, suffix: string, signal: AbortSignal) =>
-      requestCompletion(ai, aiModel || undefined, prefix, suffix, signal),
+    (prefix: string, suffix: string, signal: AbortSignal, onPartial?: (text: string) => void) =>
+      requestCompletion(ai, aiModel || undefined, prefix, suffix, signal, onPartial),
     [ai, aiModel]
   )
 
