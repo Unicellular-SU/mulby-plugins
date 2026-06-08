@@ -10,6 +10,7 @@ import { generateEvent } from './data/events'
 import { getRandomAffix, ELITE_AFFIXES } from './data/eliteAffixes'
 import { randomActiveItem } from './data/activeItems'
 import { checkTeamSynergies } from './data/teamSynergies'
+import * as sfx from './sfx'
 
 let nextId = 1
 const uid = () => nextId++
@@ -243,6 +244,7 @@ export class GameEngine {
     if (!hero || hero.isDead) return
 
     ai.cooldownRemaining = ai.def.cooldown
+    sfx.sfxActiveItem()
     const { effectType, value } = ai.def
 
     switch (effectType) {
@@ -1094,6 +1096,7 @@ export class GameEngine {
 
   private damageHero(hero: HeroState, damage: number, _attacker: EnemyState) {
     if (hero.isDead) return
+    sfx.sfxHeroHurt()
 
     // 闪避检查
     const dodgeStacks = this.getAbilityStacks(hero, 'dodge')
@@ -1172,6 +1175,7 @@ export class GameEngine {
       } else {
         hero.isDead = true
         hero.hp = 0
+        sfx.sfxHeroDeath()
         this.spawnParticles(hero.x, hero.y, '#555', 15)
         this.checkGameOver()
       }
@@ -1319,6 +1323,8 @@ export class GameEngine {
     enemy.hp = 0
     this.enemiesKilledThisFloor++
     this.state.runStats.enemiesKilled++
+    if (enemy.def.isBoss) sfx.sfxBossKill()
+    else sfx.sfxKill()
 
     // === 精英敌人额外奖励 ===
     if (enemy.isElite) {
@@ -1620,6 +1626,7 @@ export class GameEngine {
       if (d < loot.pickupRadius + hero.def.size) {
         if (loot.type === 'crystal') {
           this.state.crystals += loot.value
+          if (loot.value > 0) sfx.sfxCrystal()
         } else if (loot.type === 'xp') {
           hero.xp += loot.value
           this.checkLevelUp(hero)
@@ -1819,6 +1826,7 @@ export class GameEngine {
       this.portalSpawned = true
       this.portalX = ROOM_W / 2
       this.portalY = ROOM_H / 2
+      sfx.sfxPortal()
     }
 
     if (this.portalSpawned) {

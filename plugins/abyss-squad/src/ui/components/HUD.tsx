@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { HeroState, ActiveSynergy, ActiveItemState, TeamSynergyDef } from '../game/types'
+import * as sfx from '../game/sfx'
 
 interface FloorInfo {
   level: number
@@ -21,6 +22,13 @@ interface Props {
 
 export default function HUD({ heroes, activeHeroIndex, floorInfo, crystals, synergies, activeItem, teamSynergies, onQuit }: Props) {
   const [hoverHero, setHoverHero] = useState<number | null>(null)
+  const [muted, setMuted] = useState(sfx.isMuted())
+
+  const toggleMute = () => {
+    const next = !muted
+    setMuted(next)
+    sfx.setMuted(next)
+  }
   return (
     <div className="hud-overlay">
       {/* 顶部信息栏 */}
@@ -41,6 +49,14 @@ export default function HUD({ heroes, activeHeroIndex, floorInfo, crystals, syne
           <span className="crystal-icon">◆</span>
           <span>{crystals}</span>
         </div>
+        <button
+          className="btn-quit"
+          style={{ marginRight: 8 }}
+          onClick={toggleMute}
+          title={muted ? '开启音效' : '关闭音效'}
+        >
+          {muted ? '🔇' : '🔊'}
+        </button>
         <button className="btn-quit" onClick={onQuit}>✕</button>
       </div>
 

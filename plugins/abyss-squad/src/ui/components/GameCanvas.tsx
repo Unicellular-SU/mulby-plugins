@@ -3,6 +3,7 @@ import { GameEngine, type GameEvent } from '../game/engine'
 import { GameRenderer } from '../game/renderer'
 import { createInputState, setupInputHandlers } from '../game/input'
 import type { MetaProgress, AbilityDef, RoomEvent, RunStats } from '../game/types'
+import * as sfx from '../game/sfx'
 import HUD from './HUD'
 import LevelUpModal from './LevelUpModal'
 import EventRoom from './EventRoom'
@@ -27,19 +28,33 @@ export default function GameCanvas({ meta, heroIds, onRunEnd, onQuit }: Props) {
   const handleEvent = useCallback((event: GameEvent) => {
     switch (event.type) {
       case 'level_up':
+        sfx.sfxLevelUp()
         setLevelUpChoices(event.choices)
         const lvlHero = engineRef.current?.state.heroes.find(h => h.def.name === event.heroName)
         setLevelUpHero({ name: event.heroName, color: event.heroColor, abilities: lvlHero?.abilities || [] })
         break
       case 'synergy':
+        sfx.sfxSynergy()
         setSynergyPopup({ name: event.name, desc: event.desc, color: event.color })
         setTimeout(() => setSynergyPopup(null), 3000)
         break
       case 'run_end':
+        if (event.floor >= 10) sfx.sfxVictory()
+        else sfx.sfxGameOver()
         onRunEnd(event.crystals, event.floor, event.runStats)
         break
       case 'event_room':
+        sfx.sfxEvent()
         setCurrentEvent(event.event)
+        break
+      case 'floor_clear':
+        sfx.sfxNewFloor()
+        break
+      case 'item_drop':
+        sfx.sfxPickup()
+        break
+      case 'achievement':
+        sfx.sfxAchievement()
         break
     }
   }, [onRunEnd])
@@ -55,6 +70,9 @@ export default function GameCanvas({ meta, heroIds, onRunEnd, onQuit }: Props) {
     const renderer = new GameRenderer(ctx, 800, 600)
     engineRef.current = engine
     rendererRef.current = renderer
+
+    // 恢复音频上下文（浏览器要求用户交互后播放）
+    sfx.resumeAudio()
 
     const cleanup = setupInputHandlers(canvas, engine.input)
     engine.start()
