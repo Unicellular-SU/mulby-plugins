@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Sparkles, Wand2, FolderSearch, Loader2, Check, ChevronRight, ChevronLeft,
+  Sparkles, Wand2, FolderSearch, Loader2, Check, ChevronRight, X,
   Hammer, ShieldCheck, FolderOpen, AlertTriangle,
   RefreshCw, Image as ImageIcon, Settings2, Rocket, FileText, Lightbulb,
   Pencil, Boxes, FileEdit, FileSearch, Terminal, Bug, Wrench, ListChecks,
@@ -298,6 +298,7 @@ export function VibePanel({
   const [targetDir, setTargetDir] = useState('')
   const [editPath, setEditPath] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   // 生成深度：full=一次性完整实现（默认）；minimal=先最小可跑再扩展（适合复杂/不确定需求）
   const [genDepth, setGenDepth] = useState<'full' | 'minimal'>('full')
 
@@ -781,13 +782,13 @@ export function VibePanel({
       const c = normalizeContract(parsed, desc)
       setContract(c)
       setStage(1)
-      if (sid) appendMessage(sid, mkMsg('assistant', `插件设定（契约）已就绪：${c.displayName}——${contractSummary(c)}。在右侧点「确认并生成」我就开始写代码；想改设定可在中间面板编辑。`))
+      if (sid) appendMessage(sid, mkMsg('assistant', `插件设定（契约）已就绪：${c.displayName}——${contractSummary(c)}。在下方对话点「确认并生成」我就开始写代码；想改设定可点顶部「详情」展开编辑。`))
       addLog('success', `✔ [Vibe] 契约已生成：${contractSummary(c)}`)
     } catch (e) {
       const c = defaultContract(desc)
       setContract(c)
       setStage(1)
-      if (sid) appendMessage(sid, mkMsg('assistant', '规划没成功，我先用了一份默认设定，你可以在中间面板编辑后点「确认并生成」。'))
+      if (sid) appendMessage(sid, mkMsg('assistant', '规划没成功，我先用了一份默认设定，你可以点顶部「详情」展开编辑后再点「确认并生成」。'))
       addLog('warn', `⚠ [Vibe] 规划失败，已用默认契约：${e instanceof Error ? e.message : ''}`)
     } finally {
       setPlanning(false)
@@ -835,7 +836,7 @@ export function VibePanel({
       }
       setContract(c)
       setStage(1)
-      if (sid) appendMessage(sid, mkMsg('assistant', `已读取「${c.displayName}」的现状。改动设定：${c.editSummary || desc}。在右侧点「确认并生成」我就开始改。`))
+      if (sid) appendMessage(sid, mkMsg('assistant', `已读取「${c.displayName}」的现状。改动设定：${c.editSummary || desc}。在下方对话点「确认并生成」我就开始改。`))
       addLog('success', `✔ [Vibe] 改造契约已读入：${c.displayName}（${c.pluginId}）`)
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '分析失败')
@@ -1966,7 +1967,7 @@ export function VibePanel({
   }
 
   function resetState() {
-    setStage(0); setMaxStage(0); setContract(null); setEvents([]); setToolCalls(0); setNarration('')
+    setStage(0); setMaxStage(0); setContract(null); setEvents([]); setToolCalls(0); setNarration(''); setDrawerOpen(false)
     setGenerated(false); setExpanded(false); setExpanding(false)
     setCreatedPath(''); setBuilt(false); setBuildLog(''); setLoaded(false); setLoadedId(undefined)
     setIconDone(false); setIconDataUrl(null); setPacked(false); setDevtoolsOn(null); setOpened(false)
@@ -2232,184 +2233,157 @@ export function VibePanel({
   }
 
   return (
-    <div className="flex h-full">
-      {/* 左：阶段导航 + 模型 */}
-      <aside className="w-56 shrink-0 border-r border-slate-200 dark:border-slate-800 overflow-auto bg-white/40 dark:bg-slate-900/30 p-3 flex flex-col">
-        <div className="flex items-center gap-2 px-1.5 mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-          <Sparkles size={15} className="text-emerald-500" /> {vibeMode === 'edit' ? '一句话改插件' : '一句话造插件'}
-        </div>
-        <div className="px-1.5 mb-1.5 text-[10px] text-slate-400 dark:text-slate-500">进度（对话驱动，无需手动切换）</div>
-        {/* 只读进度指示：阶段由对话推进，不再点击跳转 */}
-        <ol className="space-y-1">
-          {STAGES.map((s) => {
+    <div className="flex flex-col h-full">
+      {/* 顶部细条：项目切换 + 只读阶段进度 + 模型 + 详情抽屉 + 重新开始 */}
+      <header className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/30">
+        <Sparkles size={15} className="text-emerald-500 shrink-0" />
+        <div className="min-w-0 max-w-[220px] shrink"><SessionSwitcher onNewSession={startNewProject} onNewConversation={newConversation} /></div>
+        {/* 只读阶段进度（紧凑横向 stepper；窄屏隐藏）*/}
+        <ol className="hidden lg:flex items-center gap-0.5 text-[11px] ml-1 shrink-0">
+          {STAGES.map((s, i) => {
             const active = s.id === stage
             const done = s.id < stage
-            const Icon = s.icon
             return (
-              <li key={s.id}>
-                <div
+              <li key={s.id} className="flex items-center gap-0.5">
+                {i > 0 && <ChevronRight size={12} className="text-slate-300 dark:text-slate-600" />}
+                <span
                   title={done ? '已完成' : active ? '当前阶段' : '未开始'}
-                  className={`w-full text-left flex items-center gap-2.5 px-2.5 py-2 rounded-lg ${active ? 'bg-emerald-500/10 border border-emerald-500/30' : 'border border-transparent'} ${active || done ? '' : 'opacity-60'}`}
+                  className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${active ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : done ? 'text-slate-500 dark:text-slate-400' : s.id > maxStage ? 'text-slate-300 dark:text-slate-600' : 'text-slate-400'}`}
                 >
-                  <span className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${done ? 'bg-emerald-500 text-white' : active ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400'}`}>
-                    {done ? <Check size={13} /> : <Icon size={13} />}
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-medium ${done ? 'bg-emerald-500 text-white anim-check' : active ? 'bg-emerald-500/20' : 'bg-slate-200 dark:bg-slate-700'}`}>
+                    {done ? <Check size={10} /> : s.id + 1}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block text-xs font-medium text-slate-700 dark:text-slate-200 truncate">{s.id + 1}. {s.title}</span>
-                    <span className="block text-[10px] text-slate-400 dark:text-slate-500 mono truncate">{s.sub}</span>
-                  </span>
-                </div>
+                  {s.title}
+                </span>
               </li>
             )
           })}
         </ol>
-        <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800">
-          <div className="text-[10px] text-slate-400 dark:text-slate-500 mb-1.5">生成模型</div>
-          <select className="input-base text-xs w-full" value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} disabled={modelLoading || modelOptions.length === 0} title={selectedModel || '宿主默认模型'}>
-            {modelLoading && <option value="">加载模型中…</option>}
-            {!modelLoading && modelOptions.length === 0 && <option value="">宿主默认模型</option>}
-            {modelOptions.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-          </select>
-        </div>
+        <span className="flex-1" />
+        <select
+          className="input-base text-xs h-7 py-0 max-w-[150px] hidden md:block shrink-0"
+          value={selectedModel}
+          onChange={(e) => setSelectedModel(e.target.value)}
+          disabled={modelLoading || modelOptions.length === 0}
+          title={selectedModel || '宿主默认模型'}
+        >
+          {modelLoading && <option value="">加载模型中…</option>}
+          {!modelLoading && modelOptions.length === 0 && <option value="">宿主默认模型</option>}
+          {modelOptions.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+        </select>
+        {contract && (
+          <button
+            className={`btn-ghost h-7 px-2 text-[11px] shrink-0 ${drawerOpen ? 'bg-slate-100 dark:bg-slate-800/70 text-emerald-600 dark:text-emerald-400' : ''}`}
+            onClick={() => setDrawerOpen((v) => !v)}
+            title="插件详情：契约设定 / 验收清单 / 版本历史 / 一致性"
+          >
+            <ListChecks size={14} /> 详情
+          </button>
+        )}
         {stage > 0 && (
-          <button className="btn-ghost mt-auto text-xs justify-center" onClick={resetAll} disabled={busy}>
+          <button className="btn-ghost h-7 px-2 text-[11px] shrink-0" onClick={resetAll} disabled={busy} title="清空并重新开始">
             <RefreshCw size={13} /> 重新开始
           </button>
         )}
-      </aside>
+      </header>
 
-      {/* 右：阶段内容 */}
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex-1 overflow-auto px-6 py-5">
-          {stage === 0 && (
-            <DescribeStage
-              vibeMode={vibeMode} setVibeMode={setVibeMode}
-              targetDir={targetDir} setTargetDir={setTargetDir}
-              editPath={editPath} setEditPath={setEditPath}
-              knownPlugins={knownPlugins}
-              showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
-              genDepth={genDepth} setGenDepth={setGenDepth}
-              onPickDir={onPickDir} disabled={busy}
-            />
+      <div className="flex flex-1 min-h-0">
+        {/* 主区：项目设置(仅描述阶段) + 对话主线 */}
+        <main className="flex-1 min-w-0 flex flex-col">
+          {stage === 0 && !contract && (
+            <div className="shrink-0 max-h-[45%] overflow-auto border-b border-slate-200 dark:border-slate-800 px-5 py-4 anim-in">
+              <DescribeStage
+                vibeMode={vibeMode} setVibeMode={setVibeMode}
+                targetDir={targetDir} setTargetDir={setTargetDir}
+                editPath={editPath} setEditPath={setEditPath}
+                knownPlugins={knownPlugins}
+                showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
+                genDepth={genDepth} setGenDepth={setGenDepth}
+                onPickDir={onPickDir} disabled={busy}
+              />
+            </div>
           )}
-          {stage === 1 && contract && (
-            <ContractStage contract={contract} setContract={setContract} editable={!generating} />
-          )}
-          {stage === 2 && (
-            <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
-          )}
-          {stage === 3 && contract && (
-            <DeliverStage
-              contract={contract} createdPath={createdPath}
-              building={building} built={built} buildLog={buildLog}
-              loaded={loaded} loadedId={loadedId}
-              repairing={repairing} expanding={expanding}
-              iconBusy={iconBusy} iconDone={iconDone} iconDataUrl={iconDataUrl}
-              devtoolsOn={devtoolsOn} devtoolsBusy={devtoolsBusy} opened={opened}
-              events={events}
-              changes={changes} rollingBack={rollingBack} onRollback={doRollback}
-              coreVerified={coreVerified} onToggleCoreVerified={() => setCoreVerified((v) => !v)}
-              conformance={conformance} confRepairing={confRepairing} onRepairConformance={repairConformance}
-              smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
-              versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
-              onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
-              onRebuild={runBuildAndLoad} onRepair={runRepair}
+          <div className="flex-1 min-h-0">
+            <ChatPanel
+              onSend={handleChatSend}
+              disabled={busy && !iterating}
+              busy={iterating || generating || iconBusy}
+              routing={routing}
+              aiActive={aiActive}
+              onStop={stopAgent}
+              streamingText={(iterating || generating) ? narration : ''}
+              brainstorm={brainstorm}
+              onPickIdea={pickIdea}
+              onMoreIdeas={() => { if (brainstorm) void runBrainstorm(brainstorm.seed) }}
+              onUseSeed={useBrainstormSeed}
+              onDismissBrainstorm={() => setBrainstorm(null)}
+              examples={vibeMode === 'edit' ? EDIT_EXAMPLES : EXAMPLES}
+              contractPending={contractPending}
+              onConfirmGenerate={generatePlan}
+              plan={plan}
+              planPhase={planPhase}
+              onStartPlan={executePlan}
+              onReplan={generatePlan}
+              pendingPrompt={pendingPrompt}
+              onPromptDismiss={() => setPendingPrompt(null)}
+              status={pluginStatus}
+              statusBusy={building || packing}
+              iconBusy={iconBusy}
+              iconProgress={iconProgress}
+              packed={packed}
+              onOpenPlugin={openPlugin}
+              onTryIt={tryIt}
+              onPack={doPack}
               onRegenIcon={() => void generateIcon({ force: true, announce: true })}
-              onOpenDir={() => dev.openPluginDir(createdPath)}
-              onEnableDevtools={enableDevtools}
+              onUndoToBefore={undoToBeforeAI}
+              undoing={!!restoringHash}
+              onClearMessages={() => { if (activeId) clearMessages(activeId) }}
             />
-          )}
-        </div>
+          </div>
+        </main>
 
-        {/* 底部：仅保留阶段导航；动作（停止/重新生成/状态）统一在右侧对话与状态卡，避免重复入口 */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 dark:border-slate-800 shrink-0">
-          <button className="btn-ghost" onClick={() => setStage((s) => Math.max(0, s - 1) as Stage)} disabled={stage === 0 || busy}>
-            <ChevronLeft size={15} /> 上一步
-          </button>
-
-          {stage === 0 && (
-            planning ? (
-              <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 dark:text-slate-400">
-                <Loader2 size={14} className="animate-spin" /> {vibeMode === 'edit' ? '分析中…' : '规划中…'}
-              </span>
-            ) : (maxStage > 0 && contract) ? (
-              <button className="btn-primary" onClick={() => setStage(1)}>下一步 <ChevronRight size={15} /></button>
-            ) : (
-              <span className="text-[12px] text-slate-400 dark:text-slate-500">在右侧对话框描述需求即可开始 →</span>
-            )
-          )}
-
-          {stage === 1 && (
-            generated ? (
-              <button className="btn-primary" onClick={() => setStage((maxStage >= 3 ? 3 : 2) as Stage)}>下一步 <ChevronRight size={15} /></button>
-            ) : (
-              <span className="text-[12px] text-slate-400 dark:text-slate-500">在右侧对话点「确认并生成」开始 →</span>
-            )
-          )}
-
-          {stage === 2 && (
-            (generating || expanding) ? (
-              <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-500 dark:text-slate-400">
-                <Loader2 size={14} className="animate-spin" /> 生成中…（在右侧对话可停止）
-              </span>
-            ) : generated ? (
-              <button className="btn-primary" onClick={() => setStage(3)}>
-                <Rocket size={15} /> 去构建与交付 <ChevronRight size={15} />
-              </button>
-            ) : (
-              <span className="text-[12px] text-slate-400 dark:text-slate-500">在右侧对话操作 →</span>
-            )
-          )}
-
-          {stage === 3 && (
-            <span className="text-[12px] text-slate-400 dark:text-slate-500">插件状态见右侧对话栏顶部 →</span>
-          )}
-        </div>
+        {/* 进阶详情抽屉（方案A：默认关，点顶部「详情」展开；进阶/质检功能在此按需出现）*/}
+        {drawerOpen && (
+          <aside className="w-96 max-w-[44%] shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 flex flex-col anim-drawer">
+            <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><ListChecks size={15} className="text-emerald-500" /> 插件详情</span>
+              <button className="btn-ghost h-7 w-7 p-0 justify-center" onClick={() => setDrawerOpen(false)} title="关闭"><X size={15} /></button>
+            </div>
+            <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
+              {!contract && (
+                <div className="text-[12px] text-slate-400 dark:text-slate-500 leading-relaxed">还没有插件项目。在对话里描述需求、生成插件后，这里会显示契约设定、验收清单、版本历史等详情。</div>
+              )}
+              {contract && (
+                <ContractStage contract={contract} setContract={setContract} editable={!generating && !generated} />
+              )}
+              {stage >= 2 && events.length > 0 && (
+                <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
+              )}
+              {stage === 3 && contract && (
+                <DeliverStage
+                  contract={contract} createdPath={createdPath}
+                  building={building} built={built} buildLog={buildLog}
+                  loaded={loaded} loadedId={loadedId}
+                  repairing={repairing} expanding={expanding}
+                  iconBusy={iconBusy} iconDone={iconDone} iconDataUrl={iconDataUrl}
+                  devtoolsOn={devtoolsOn} devtoolsBusy={devtoolsBusy} opened={opened}
+                  events={events}
+                  changes={changes} rollingBack={rollingBack} onRollback={doRollback}
+                  coreVerified={coreVerified} onToggleCoreVerified={() => setCoreVerified((v) => !v)}
+                  conformance={conformance} confRepairing={confRepairing} onRepairConformance={repairConformance}
+                  smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
+                  versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
+                  onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
+                  onRebuild={runBuildAndLoad} onRepair={runRepair}
+                  onRegenIcon={() => void generateIcon({ force: true, announce: true })}
+                  onOpenDir={() => dev.openPluginDir(createdPath)}
+                  onEnableDevtools={enableDevtools}
+                />
+              )}
+            </div>
+          </aside>
+        )}
       </div>
-
-      {/* 右：会话列表 + 全局对话主线 */}
-      <aside className="w-80 shrink-0 border-l border-slate-200 dark:border-slate-800 flex flex-col bg-white/40 dark:bg-slate-900/30">
-        <div className="p-2 border-b border-slate-200 dark:border-slate-700 shrink-0">
-          <SessionSwitcher onNewSession={startNewProject} onNewConversation={newConversation} />
-        </div>
-        <div className="flex-1 min-h-0">
-          <ChatPanel
-            onSend={handleChatSend}
-            disabled={busy && !iterating}
-            busy={iterating || generating || iconBusy}
-            routing={routing}
-            aiActive={aiActive}
-            onStop={stopAgent}
-            streamingText={(iterating || generating) ? narration : ''}
-            brainstorm={brainstorm}
-            onPickIdea={pickIdea}
-            onMoreIdeas={() => { if (brainstorm) void runBrainstorm(brainstorm.seed) }}
-            onUseSeed={useBrainstormSeed}
-            onDismissBrainstorm={() => setBrainstorm(null)}
-            examples={vibeMode === 'edit' ? EDIT_EXAMPLES : EXAMPLES}
-            contractPending={contractPending}
-            onConfirmGenerate={generatePlan}
-            plan={plan}
-            planPhase={planPhase}
-            onStartPlan={executePlan}
-            onReplan={generatePlan}
-            pendingPrompt={pendingPrompt}
-            onPromptDismiss={() => setPendingPrompt(null)}
-            status={pluginStatus}
-            statusBusy={building || packing}
-            iconBusy={iconBusy}
-            iconProgress={iconProgress}
-            packed={packed}
-            onOpenPlugin={openPlugin}
-            onTryIt={tryIt}
-            onPack={doPack}
-            onRegenIcon={() => void generateIcon({ force: true, announce: true })}
-            onUndoToBefore={undoToBeforeAI}
-            undoing={!!restoringHash}
-            onClearMessages={() => { if (activeId) clearMessages(activeId) }}
-          />
-        </div>
-      </aside>
     </div>
   )
 }
@@ -2461,7 +2435,7 @@ function DescribeStage({
           {isEdit ? <Pencil size={20} className="text-emerald-500" /> : <Lightbulb size={20} className="text-emerald-500" />}
         </div>
         <div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{isEdit ? '选一个插件，在右侧对话说要改什么' : '设好目标，在右侧对话描述你的插件'}</h2>
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{isEdit ? '选一个插件，在下方对话说要改什么' : '设好目标，在下方对话描述你的插件'}</h2>
           <p className="text-[11px] text-slate-400 dark:text-slate-500">{isEdit ? 'AI 会读懂现有代码，按需改写、构建并重新载入' : '先确认结构化「契约」，再由 AI 实现、构建、载入'}</p>
         </div>
       </div>
@@ -2495,7 +2469,7 @@ function DescribeStage({
         </Field>
       )}
 
-      <Field label="生成方式" hint={genDepth === 'full' ? '一次性生成尽量完整、开箱即用的版本（推荐）' : '先生成能跑通的最小骨架，之后在右侧对话里说「继续完善」即可逐步补全（适合复杂/不确定需求）'}>
+      <Field label="生成方式" hint={genDepth === 'full' ? '一次性生成尽量完整、开箱即用的版本（推荐）' : '先生成能跑通的最小骨架，之后在下方对话里说「继续完善」即可逐步补全（适合复杂/不确定需求）'}>
         <div className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/70">
           <ModeBtn active={genDepth === 'full'} disabled={disabled} onClick={() => setGenDepth('full')} icon={<Rocket size={14} />} label="完整实现" />
           <ModeBtn active={genDepth === 'minimal'} disabled={disabled} onClick={() => setGenDepth('minimal')} icon={<Lightbulb size={14} />} label="最小可跑" />
@@ -2506,8 +2480,8 @@ function DescribeStage({
         <Sparkles size={15} className="text-emerald-500 shrink-0 mt-0.5" />
         <span>
           {isEdit
-            ? '选好上面的插件后，在右侧对话框直接说要改什么（例如「界面改成暗色，并加一个复制按钮」），我会读懂代码再改写。'
-            : '设好目标目录与生成方式后，在右侧对话框用一句话描述你想要的插件，我会先帮你想几个方向，挑一个就开始生成。'}
+            ? '选好上面的插件后，在下方对话框直接说要改什么（例如「界面改成暗色，并加一个复制按钮」），我会读懂代码再改写。'
+            : '设好目标目录与生成方式后，在下方对话框用一句话描述你想要的插件，我会先帮你想几个方向，挑一个就开始生成。'}
         </span>
       </div>
 
@@ -2516,7 +2490,7 @@ function DescribeStage({
       </button>
       {showAdvanced && (
         <div className="text-[12px] text-slate-500 dark:text-slate-400 rounded-lg border border-slate-200 dark:border-slate-700 p-3 leading-relaxed">
-          下一步会生成一份可编辑的「契约」（功能/触发词/模式/权限），确认后由本工具确定性写出 manifest.json，再让 AI 实现代码并立即构建载入。生成方式为「完整实现」时一次性产出可用版本；「最小可跑」则先产出最小骨架，之后在右侧对话里继续描述需求即可逐步完善（构建若没通过可一键「AI 修复」，也能「打开调试」）。
+          下一步会生成一份可编辑的「契约」（功能/触发词/模式/权限），确认后由本工具确定性写出 manifest.json，再让 AI 实现代码并立即构建载入。生成方式为「完整实现」时一次性产出可用版本；「最小可跑」则先产出最小骨架，之后在下方对话里继续描述需求即可逐步完善（构建若没通过可一键「AI 修复」，也能「打开调试」）。
         </div>
       )}
     </div>
@@ -2709,7 +2683,7 @@ function DeliverStage({
             <button className="btn-secondary" onClick={onOpenDir}><FolderOpen size={15} /> 打开目录</button>
             <button className="btn-ghost" onClick={onRebuild} disabled={building}><Hammer size={15} /> 重新构建</button>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">「打开 / 试用 / 打包」已收进右侧对话栏顶部的状态条，可随时操作；想继续完善，直接在对话里说「帮我改…」即可。</p>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">「打开 / 试用 / 打包」已收进对话栏顶部的状态条，可随时操作；想继续完善，直接在对话里说「帮我改…」即可。</p>
           {smoke.length > 0 && <SmokeList smoke={smoke} />}
         </div>
       )}

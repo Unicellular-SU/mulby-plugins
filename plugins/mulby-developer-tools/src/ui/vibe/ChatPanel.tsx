@@ -290,7 +290,7 @@ export function ChatPanel({
                 {(plan || []).map((t, i) => (
                   <div key={t.id} className="flex items-start gap-1.5 text-[11px]">
                     <span className="mt-0.5 shrink-0">
-                      {t.status === 'done' ? <CheckCircle2 size={13} className="text-emerald-500" />
+                      {t.status === 'done' ? <CheckCircle2 size={13} className="text-emerald-500 anim-check" />
                         : t.status === 'in_progress' ? <Loader2 size={13} className="text-indigo-500 animate-spin" />
                         : t.status === 'failed' ? <AlertTriangle size={13} className="text-rose-500" />
                         : <Circle size={13} className="text-slate-300 dark:text-slate-600" />}
@@ -336,7 +336,7 @@ export function ChatPanel({
             <button onClick={onConfirmGenerate} disabled={disabled || busy} className="btn-primary h-7 px-2.5 text-[11px]">
               <Play size={12} /> 确认并制定计划
             </button>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">想改设定可在中间面板编辑</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">想改设定可点顶部「详情」展开</span>
           </div>
         </div>
       )}
