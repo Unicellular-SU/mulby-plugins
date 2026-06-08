@@ -146,6 +146,9 @@ export function runMarkdownCommand(view: EditorView, name: string, payload: Comm
     case 'code':
       wrapSelection(view, '`')
       break
+    case 'highlight':
+      wrapSelection(view, '==')
+      break
     case 'heading':
       setHeading(view, payload.level ?? 1)
       break

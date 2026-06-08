@@ -38,6 +38,20 @@ import { useDraftStorage } from './hooks/useDraftStorage'
 import { FindReplaceBar, type FindReplaceMode } from './components/FindReplaceBar'
 import { AiPanel } from './components/AiPanel'
 import { AiBubble } from './components/AiBubble'
+import { ContextMenu } from './components/ContextMenu'
+import { buildContextMenu, type MenuItem } from './services/contextMenu'
+import { describeNodeAt, type EditorNodeContext } from './editor/nodeContext'
+import {
+  addColumn,
+  addRow,
+  parseTable,
+  removeColumn,
+  removeRow,
+  serializeTable,
+  setColumnAlign,
+  type TableAlign,
+  type TableData
+} from './editor/tableModel'
 import { ImageGenDialog } from './components/ImageGenDialog'
 import { buildImageAlt, normalizeBase64 } from './services/imageGen'
 import { renderMarkdownDocument } from './services/markdownHtml'
@@ -328,6 +342,11 @@ export default function App() {
   // Bumped each time the bubble is summoned via shortcut so it remounts with a
   // fresh menu phase even if one was already showing.
   const [bubbleSummonKey, setBubbleSummonKey] = useState(0)
+  // Right-click context menu: position + item tree. The construct under the click
+  // (for link/image/table actions) is stashed in a ref so the dispatcher can read
+  // its url / range / cell coordinates.
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const menuTargetRef = useRef<EditorNodeContext | null>(null)
   const hostRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<LiveMarkdownEditorHandle | null>(null)
   const contentRef = useRef(content)
@@ -1544,6 +1563,289 @@ export default function App() {
     }
   }, [embedImageFile, notification])
 
+  // ---- Right-click context menu ----
+  // Applies a structural table edit (from a context-menu action) by reading the
+  // table source from the stashed range, mutating the parsed model, and writing
+  // it back. `row` is -1 for the header row.
+  const applyTableEdit = useCallback(
+    (target: EditorNodeContext | null, mutate: (table: TableData, row: number, col: number) => TableData) => {
+      const view = editorRef.current?.getView()
+      if (!view || !target || target.kind !== 'table') {
+        return
+      }
+      const src = view.state.doc.sliceString(target.from, target.to)
+      const parsed = parseTable(src)
+      if (!parsed) {
+        return
+      }
+      const insert = serializeTable(mutate(parsed, target.row, target.col))
+      if (insert !== src) {
+        view.dispatch({ changes: { from: target.from, to: target.to, insert } })
+      }
+      editorRef.current?.focus()
+    },
+    []
+  )
+
+  const handleMenuSelect = useCallback(
+    (id: string) => {
+      const editor = editorRef.current
+      const view = editor?.getView()
+      if (!editor || !view) {
+        return
+      }
+      const target = menuTargetRef.current
+      const openUrl = (url: string) => {
+        if (!url) {
+          return
+        }
+        const shell = (window as unknown as { mulby?: { shell?: { openExternal?: (u: string) => unknown } } })
+          .mulby?.shell
+        if (shell?.openExternal) {
+          void shell.openExternal(url)
+        } else {
+          window.open(url, '_blank', 'noopener')
+        }
+      }
+      switch (id) {
+        case 'cut': {
+          const text = editor.getSelectedText()
+          if (text) {
+            void clipboard.writeText(text)
+            editor.replaceSelection('')
+          }
+          break
+        }
+        case 'copy': {
+          const text = editor.getSelectedText()
+          if (text) {
+            void clipboard.writeText(text)
+          }
+          break
+        }
+        case 'paste':
+          void handlePasteClipboard()
+          break
+        case 'fmt-bold':
+          execCommand('bold')
+          break
+        case 'fmt-italic':
+          execCommand('italic')
+          break
+        case 'fmt-strike':
+          execCommand('strike')
+          break
+        case 'fmt-code':
+          execCommand('code')
+          break
+        case 'fmt-highlight':
+          execCommand('highlight')
+          break
+        case 'cv-h1':
+          execCommand('heading', { level: 1 })
+          break
+        case 'cv-h2':
+        case 'ins-h2':
+          execCommand('heading', { level: 2 })
+          break
+        case 'cv-h3':
+          execCommand('heading', { level: 3 })
+          break
+        case 'cv-quote':
+        case 'ins-quote':
+          execCommand('blockQuote')
+          break
+        case 'cv-ul':
+        case 'ins-ul':
+          execCommand('bulletList')
+          break
+        case 'cv-ol':
+        case 'ins-ol':
+          execCommand('orderedList')
+          break
+        case 'cv-task':
+        case 'ins-task':
+          execCommand('taskList')
+          break
+        case 'cv-codeblock': {
+          const text = editor.getSelectedText()
+          editor.replaceSelection('```\n' + text + '\n```')
+          break
+        }
+        case 'make-link':
+        case 'ins-link':
+          handleInsertLink()
+          break
+        case 'ins-codeblock': {
+          const { from } = editor.getSelection()
+          editor.insertText('```\n\n```')
+          editor.setSelection(from + 4, from + 4)
+          editor.focus()
+          break
+        }
+        case 'ins-table':
+          editor.insertText('\n| 列1 | 列2 |\n| --- | --- |\n| 内容 | 内容 |\n')
+          editor.focus()
+          break
+        case 'ins-hr':
+          execCommand('hr')
+          break
+        case 'ins-image':
+          void handleInsertImage()
+          break
+        case 'ins-math': {
+          const { from } = editor.getSelection()
+          editor.insertText('$$\n\n$$')
+          editor.setSelection(from + 3, from + 3)
+          editor.focus()
+          break
+        }
+        case 'ai':
+          summonBubble()
+          break
+        case 'find':
+          openFind('find')
+          break
+        case 'replace':
+          openFind('replace')
+          break
+        case 'select-all': {
+          const len = editor.getValue().length
+          editor.setSelection(0, len)
+          editor.focus()
+          break
+        }
+        case 'link-open':
+          if (target?.kind === 'link') {
+            openUrl(target.url)
+          }
+          break
+        case 'link-copy':
+          if (target?.kind === 'link' && target.url) {
+            void clipboard.writeText(target.url)
+          }
+          break
+        case 'link-edit':
+          if (target?.kind === 'link') {
+            editor.setSelection(target.from, target.to)
+            editor.focus()
+          }
+          break
+        case 'link-unlink':
+          if (target?.kind === 'link') {
+            const src = view.state.doc.sliceString(target.from, target.to)
+            const match = /^\[([^\]]*)\]/.exec(src)
+            view.dispatch({ changes: { from: target.from, to: target.to, insert: match ? match[1] : src } })
+            editor.focus()
+          }
+          break
+        case 'image-copy':
+          if (target?.kind === 'image' && target.url) {
+            void clipboard.writeText(target.url)
+          }
+          break
+        case 'image-open':
+          if (target?.kind === 'image') {
+            openUrl(target.url)
+          }
+          break
+        case 'image-remove':
+          if (target?.kind === 'image') {
+            view.dispatch({ changes: { from: target.from, to: target.to, insert: '' } })
+            editor.focus()
+          }
+          break
+        case 'table-row-above':
+          applyTableEdit(target, (table, row) => addRow(table, Math.max(0, row)))
+          break
+        case 'table-row-below':
+          applyTableEdit(target, (table, row) => addRow(table, row < 0 ? 0 : row + 1))
+          break
+        case 'table-row-del':
+          applyTableEdit(target, (table, row) => (row < 0 ? table : removeRow(table, row)))
+          break
+        case 'table-col-left':
+          applyTableEdit(target, (table, _row, col) => addColumn(table, col))
+          break
+        case 'table-col-right':
+          applyTableEdit(target, (table, _row, col) => addColumn(table, col + 1))
+          break
+        case 'table-col-del':
+          applyTableEdit(target, (table, _row, col) => removeColumn(table, col))
+          break
+        case 'table-align-none':
+        case 'table-align-left':
+        case 'table-align-center':
+        case 'table-align-right':
+          applyTableEdit(target, (table, _row, col) =>
+            setColumnAlign(table, col, id.replace('table-align-', '') as TableAlign)
+          )
+          break
+        default:
+          break
+      }
+    },
+    [applyTableEdit, clipboard, execCommand, handleInsertImage, handleInsertLink, handlePasteClipboard, openFind, summonBubble]
+  )
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) {
+      return
+    }
+    const onContextMenu = (event: MouseEvent) => {
+      const editor = editorRef.current
+      const view = editor?.getView()
+      if (!editor || !view) {
+        return
+      }
+      event.preventDefault()
+      const targetEl = event.target as HTMLElement
+      let pos: number | null = null
+      try {
+        pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+      } catch {
+        pos = null
+      }
+      if (pos == null) {
+        try {
+          pos = view.posAtDOM(targetEl)
+        } catch {
+          pos = null
+        }
+      }
+      if (pos == null) {
+        pos = view.state.selection.main.head
+      }
+      let node: EditorNodeContext = { kind: 'text' }
+      try {
+        node = describeNodeAt(view, targetEl, pos)
+      } catch {
+        node = { kind: 'text' }
+      }
+      const hasSelection = editor.getSelectedText().length > 0
+      // No selection on plain text: move the caret to the click point so
+      // paste / insert target where the user clicked (standard editor behavior).
+      if (!hasSelection && node.kind === 'text') {
+        editor.setSelection(pos, pos)
+      }
+      menuTargetRef.current = node
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        items: buildContextMenu({
+          hasSelection,
+          node: node.kind === 'text' ? null : node.kind,
+          tableHeader: node.kind === 'table' ? node.header : undefined
+        })
+      })
+    }
+    host.addEventListener('contextmenu', onContextMenu)
+    return () => host.removeEventListener('contextmenu', onContextMenu)
+  }, [])
+
   const exportMenuOptions: Array<{ format: ExportFormat; label: string; description: string }> = [
     { format: 'markdown', label: 'Markdown (.md)', description: '导出原始 Markdown 内容' },
     { format: 'html', label: 'HTML (.html)', description: '导出可在浏览器中打开的网页文档' },
@@ -1869,6 +2171,16 @@ export default function App() {
           shouldKeepOpenOnTarget={shouldKeepBubbleOpenOnTarget}
         />,
         document.body
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onSelect={handleMenuSelect}
+          onClose={closeContextMenu}
+        />
       )}
 
       <ImageGenDialog
