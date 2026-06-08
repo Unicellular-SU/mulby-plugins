@@ -38,6 +38,20 @@ assert.ok(TRANSLATE_LANGUAGES.some((lang) => lang.value === '英文'))
 }
 
 {
+  // polish/translate include surrounding context as a separate read-only block
+  const withCtx = buildPrompt({ action: 'polish', text: '选中片段', context: '前后文参考' })
+  assert.ok(withCtx.user.includes('<<<CONTEXT'))
+  assert.ok(withCtx.user.includes('前后文参考'))
+  assert.ok(withCtx.user.includes('<<<SOURCE'))
+  // no context → no CONTEXT block
+  const noCtx = buildPrompt({ action: 'polish', text: '选中片段' })
+  assert.ok(!noCtx.user.includes('<<<CONTEXT'))
+  const transCtx = buildPrompt({ action: 'translate', text: 'hi', language: '日文', context: 'surrounding' })
+  assert.ok(transCtx.user.includes('<<<CONTEXT'))
+  assert.ok(transCtx.user.includes('surrounding'))
+}
+
+{
   const translate = buildPrompt({ action: 'translate', text: '你好', language: '日文' })
   assert.ok(translate.user.includes('日文'))
   assert.ok(translate.user.includes('你好'))

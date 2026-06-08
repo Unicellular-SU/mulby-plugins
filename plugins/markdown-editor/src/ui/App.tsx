@@ -158,6 +158,8 @@ interface EditorRange {
 }
 const DEFAULT_EXPORT_NAME = 'markdown-note.md'
 const EDITOR_PLACEHOLDER = '在这里开始写 Markdown'
+// How many chars on each side of the selection to pass as AI coherence context.
+const SELECTION_CONTEXT_WINDOW = 600
 
 interface PluginInitData {
   pluginName: string
@@ -381,6 +383,9 @@ export default function App() {
   const [findIndex, setFindIndex] = useState(0)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiSelection, setAiSelection] = useState('')
+  // Read-only context around the selection, passed to the AI surfaces so
+  // polish/translate stay coherent (pronouns / terminology / tone).
+  const [aiContext, setAiContext] = useState('')
   const [aiModel, setAiModel] = useState('')
   const [imageGenOpen, setImageGenOpen] = useState(false)
   const [imageGenPrompt, setImageGenPrompt] = useState('')
@@ -390,6 +395,7 @@ export default function App() {
   const [imageHistoryMap, setImageHistoryMap] = useState<ImageHistoryMap>({})
   const [bubbleAnchor, setBubbleAnchor] = useState<BubbleRect | null>(null)
   const [bubbleSelection, setBubbleSelection] = useState('')
+  const [bubbleContext, setBubbleContext] = useState('')
   // Bumped each time the bubble is summoned via shortcut so it remounts with a
   // fresh menu phase even if one was already showing.
   const [bubbleSummonKey, setBubbleSummonKey] = useState(0)
@@ -1040,6 +1046,35 @@ export default function App() {
     setContent(value)
   }, [setContent])
 
+  // Reads the text surrounding a selection range (defaults to the live editor
+  // selection) so polish/translate get coherence context — pronouns, terminology
+  // and tone. Returns '' for a collapsed / empty selection.
+  const readSelectionContext = useCallback((range?: { from: number; to: number }): string => {
+    const editor = editorRef.current
+    if (!editor) {
+      return ''
+    }
+    let from = range?.from
+    let to = range?.to
+    if (from == null || to == null) {
+      try {
+        const sel = editor.getSelection()
+        from = sel.from
+        to = sel.to
+      } catch {
+        return ''
+      }
+    }
+    if (from === to) {
+      return ''
+    }
+    const doc = editor.getValue()
+    const before = doc.slice(Math.max(0, from - SELECTION_CONTEXT_WINDOW), from)
+    const after = doc.slice(to, to + SELECTION_CONTEXT_WINDOW)
+    const ctx = `${before}【选中片段】${after}`.trim()
+    return ctx === '【选中片段】' ? '' : ctx
+  }, [])
+
   // Drives the floating AI bubble from the live editor selection. The CM6
   // selection rect is read straight from the view, so it works in any scroll
   // position without DOM-selection guessing.
@@ -1057,8 +1092,9 @@ export default function App() {
       return
     }
     setBubbleSelection(info.text)
+    setBubbleContext(readSelectionContext({ from: info.from, to: info.to }))
     setBubbleAnchor(rect)
-  }, [])
+  }, [readSelectionContext])
 
   // Push external content changes (open file, draft restore, organize images,
   // undo across documents) into the editor when they diverge from its value.
@@ -1386,13 +1422,14 @@ export default function App() {
   const openAiPanel = useCallback(() => {
     const editor = editorRef.current
     setAiSelection(editor?.getSelectedText?.() ?? '')
+    setAiContext(readSelectionContext())
     setAiOpen(true)
     // Dismiss the floating bubble so the two AI surfaces never overlap. Inlined
     // (not via closeBubble) to avoid a forward reference / TDZ at definition time.
     bubblePinnedRef.current = false
     bubbleRangeRef.current = null
     setBubbleAnchor(null)
-  }, [])
+  }, [readSelectionContext])
 
   const closeFind = useCallback(() => {
     setFindOpen(false)
@@ -1828,9 +1865,10 @@ export default function App() {
   const handleBubbleExpand = useCallback(() => {
     const editor = editorRef.current
     setAiSelection(editor?.getSelectedText?.() ?? '')
+    setAiContext(readSelectionContext())
     setAiOpen(true)
     closeBubble()
-  }, [closeBubble])
+  }, [closeBubble, readSelectionContext])
 
   // Cmd/Ctrl+J summons the AI bubble regardless of whether text is selected.
   // With a selection it behaves like the on-select toolbar; with a collapsed
@@ -1859,9 +1897,10 @@ export default function App() {
     bubbleRangeRef.current = text ? editor.getSelection() : null
     bubblePinnedRef.current = true
     setBubbleSelection(text)
+    setBubbleContext(text ? readSelectionContext() : '')
     setBubbleAnchor(rect)
     setBubbleSummonKey((key) => key + 1)
-  }, [])
+  }, [readSelectionContext])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -2908,6 +2947,7 @@ export default function App() {
         ai={ai}
         selection={aiSelection}
         documentText={content}
+        contextText={aiContext}
         model={aiModel}
         onModelChange={handleAiModelChange}
         onReplaceSelection={handleAiReplaceSelection}
@@ -2925,6 +2965,7 @@ export default function App() {
           model={aiModel}
           selection={bubbleSelection}
           documentText={content}
+          contextText={bubbleContext}
           onActivate={handleBubbleActivate}
           onReplace={handleBubbleReplace}
           onInsert={handleBubbleInsert}

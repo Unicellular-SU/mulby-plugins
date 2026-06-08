@@ -114,6 +114,8 @@ export interface PromptInput {
   language?: string
   /** Free-form instruction for the custom action. */
   instruction?: string
+  /** Surrounding read-only context (text around the selection) for coherence. */
+  context?: string
 }
 
 export interface AiPrompt {
@@ -128,6 +130,24 @@ function fenceText(text: string): string {
   return ['<<<SOURCE', text, 'SOURCE>>>'].join('\n')
 }
 
+/** Wraps surrounding context in its own delimiter so it's never confused with the source. */
+function fenceContext(text: string): string {
+  return ['<<<CONTEXT', text, 'CONTEXT>>>'].join('\n')
+}
+
+/**
+ * A read-only context block for polish/translate: gives the model the text
+ * around the selection so pronouns, terminology and tone stay coherent, while
+ * making clear it must not rewrite/translate or output the context itself.
+ */
+function contextBlock(context: string | undefined, verb: string): string {
+  const ctx = (context || '').trim()
+  if (!ctx) {
+    return ''
+  }
+  return `\n以下是所选片段在文中的上下文，仅供你理解语气、指代与术语，请勿${verb}或输出这段上下文本身：\n${fenceContext(ctx)}\n`
+}
+
 /** Builds the system + user prompt for a given AI action. */
 export function buildPrompt(input: PromptInput): AiPrompt {
   const text = input.text ?? ''
@@ -135,13 +155,13 @@ export function buildPrompt(input: PromptInput): AiPrompt {
     case 'polish':
       return {
         system: `${SHARED_SYSTEM_RULES}\n保持原文语言、格式与含义，只优化表达。`,
-        user: `请润色下面的内容，保持原意与 Markdown 结构：\n${fenceText(text)}`
+        user: `请润色下面的内容，保持原意与 Markdown 结构：${contextBlock(input.context, '改写')}\n${fenceText(text)}`
       }
     case 'translate': {
       const language = (input.language || '英文').trim()
       return {
         system: `${SHARED_SYSTEM_RULES}\n保留原文的 Markdown 结构（标题、列表、代码块、链接等），代码块内的代码不要翻译。`,
-        user: `请把下面的内容翻译成${language}：\n${fenceText(text)}`
+        user: `请把下面的内容翻译成${language}：${contextBlock(input.context, '翻译')}\n${fenceText(text)}`
       }
     }
     case 'continue': {

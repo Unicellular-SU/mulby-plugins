@@ -33,6 +33,7 @@ import {
 } from '../services/ai'
 import { computeBubblePosition, type BubblePosition, type BubbleRect } from '../services/bubble'
 import { renderMarkdownToHtml } from '../services/markdown'
+import { diffTokens } from '../services/diff'
 
 type NotifyType = 'info' | 'success' | 'warning' | 'error'
 
@@ -48,6 +49,8 @@ interface AiBubbleProps {
   selection: string
   /** Whole-document markdown, used as the input when there is no selection. */
   documentText: string
+  /** Read-only context around the selection (coherence for polish/translate). */
+  contextText: string
   /** Fired the first time an action is started, so the parent can pin the
    *  bubble and capture the editor selection range for later applying. */
   onActivate: () => void
@@ -97,6 +100,7 @@ export function AiBubble({
   model,
   selection,
   documentText,
+  contextText,
   onActivate,
   onReplace,
   onInsert,
@@ -114,6 +118,10 @@ export function AiBubble({
   const [output, setOutput] = useState('')
   // Free-form follow-up that refines the current result (multi-turn on output).
   const [refineText, setRefineText] = useState('')
+  // Whether the result is shown as a before→after diff against the selection.
+  const [diffView, setDiffView] = useState(false)
+  // Streamed model reasoning ("thinking"), shown before any output arrives.
+  const [reasoning, setReasoning] = useState('')
   const [pos, setPos] = useState<BubblePosition | null>(null)
   const [moreOpen, setMoreOpen] = useState(false)
   const bubbleRef = useRef<HTMLDivElement>(null)
@@ -234,16 +242,22 @@ export function AiBubble({
         // selected passage (or the whole document when nothing is selected).
         documentText: primaryText,
         language: lang,
-        instruction: instr
+        instruction: instr,
+        // Surrounding context improves coherence for polish/translate; only
+        // meaningful when a real selection exists.
+        context: hasSelection ? contextText : ''
       })
 
+      setDiffView(false)
+      setReasoning('')
       setOutput('')
       setPhase('running')
       const handle = runAiAction({
         ai,
         model: model || undefined,
         prompt,
-        onDelta: (delta) => setOutput((prev) => prev + delta)
+        onDelta: (delta) => setOutput((prev) => prev + delta),
+        onReasoning: (delta) => setReasoning((prev) => prev + delta)
       })
       handleRef.current = handle
 
@@ -262,7 +276,7 @@ export function AiBubble({
         }
       }
     },
-    [ai, hasSelection, instruction, language, model, onNotify, primaryText]
+    [ai, contextText, hasSelection, instruction, language, model, onNotify, primaryText]
   )
 
   // Refine the current result with a follow-up instruction. Operates on the
@@ -276,13 +290,16 @@ export function AiBubble({
       }
       const prompt = buildRefinePrompt(base, ins)
       setRefineText('')
+      setDiffView(false)
+      setReasoning('')
       setOutput('')
       setPhase('running')
       const handle = runAiAction({
         ai,
         model: model || undefined,
         prompt,
-        onDelta: (delta) => setOutput((prev) => prev + delta)
+        onDelta: (delta) => setOutput((prev) => prev + delta),
+        onReasoning: (delta) => setReasoning((prev) => prev + delta)
       })
       handleRef.current = handle
       try {
@@ -344,6 +361,7 @@ export function AiBubble({
     handleRef.current = null
     setOutput('')
     setRefineText('')
+    setDiffView(false)
     setMoreOpen(false)
     setPhase('menu')
   }, [])
@@ -518,7 +536,26 @@ export function AiBubble({
             <div className="ai-bubble-result">
               <div className="ai-bubble-output" aria-live="polite">
                 {output ? (
-                  // "问一问" produces an explanation meant to be read, so render its
+                  // Diff preview: show the before→after change against the selection
+                  // so the user reviews edits before replacing.
+                  diffView && hasSelection && phase === 'result' ? (
+                    <div className="ai-bubble-output-diff">
+                      {diffTokens(selection, trimmedOutput).map((seg, idx) => (
+                        <span
+                          key={idx}
+                          className={
+                            seg.op === 'delete'
+                              ? 'ai-diff-del'
+                              : seg.op === 'insert'
+                                ? 'ai-diff-ins'
+                                : undefined
+                          }
+                        >
+                          {seg.text}
+                        </span>
+                      ))}
+                    </div>
+                  ) : // "问一问" produces an explanation meant to be read, so render its
                   // Markdown once the result settles. Other actions output text that
                   // goes back into the document, so we keep the raw source visible.
                   // During streaming we always show raw text for live feedback.
@@ -530,6 +567,9 @@ export function AiBubble({
                   ) : (
                     <pre className="ai-bubble-output-text">{output}</pre>
                   )
+                ) : phase === 'running' && reasoning ? (
+                  // Show the model's reasoning while it "thinks", before any output.
+                  <div className="ai-bubble-output-reasoning">{reasoning}</div>
                 ) : (
                   <span className="ai-bubble-output-placeholder">
                     {phase === 'running' ? '正在生成…' : '没有生成内容，可重试'}
@@ -584,7 +624,7 @@ export function AiBubble({
               {phase === 'running' ? (
                 <div className="ai-bubble-actions">
                   <span className="ai-bubble-status">
-                    <Loader2 size={12} className="ai-bubble-spin" /> 生成中
+                    <Loader2 size={12} className="ai-bubble-spin" /> {reasoning && !output ? '思考中' : '生成中'}
                   </span>
                   <button
                     type="button"
@@ -615,6 +655,17 @@ export function AiBubble({
                   >
                     <RotateCcw size={13} />
                   </button>
+                  {hasSelection && (
+                    <button
+                      type="button"
+                      className={`ai-bubble-btn${diffView ? ' is-active' : ''}`}
+                      title={diffView ? '查看结果原文' : '对照改动（替换前预览）'}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => setDiffView((value) => !value)}
+                    >
+                      {diffView ? '结果' : '对照'}
+                    </button>
+                  )}
                   <span className="ai-bubble-actions-spacer" />
                   <button
                     type="button"

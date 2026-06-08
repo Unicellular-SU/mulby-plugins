@@ -13,6 +13,7 @@ import {
   type AiClient,
   type AiRequestHandle
 } from '../services/ai'
+import { diffTokens } from '../services/diff'
 
 export interface AiModelOption {
   id: string
@@ -26,6 +27,8 @@ interface AiPanelProps {
   selection: string
   /** Whole document markdown, used as fallback / context. */
   documentText: string
+  /** Read-only context around the selection (coherence for polish/translate). */
+  contextText: string
   /** Persisted model id; '' means "host default". */
   model: string
   onModelChange: (model: string) => void
@@ -45,6 +48,7 @@ export function AiPanel({
   ai,
   selection,
   documentText,
+  contextText,
   model,
   onModelChange,
   onReplaceSelection,
@@ -62,6 +66,10 @@ export function AiPanel({
   const [running, setRunning] = useState(false)
   // Free-form follow-up that refines the current result (multi-turn on output).
   const [refineText, setRefineText] = useState('')
+  // Whether the result is shown as a before→after diff against the selection.
+  const [diffView, setDiffView] = useState(false)
+  // Streamed model reasoning ("thinking"), shown before any output arrives.
+  const [reasoning, setReasoning] = useState('')
   const handleRef = useRef<AiRequestHandle | null>(null)
   const modelsFetchedRef = useRef(false)
   const outputRef = useRef<HTMLDivElement>(null)
@@ -104,6 +112,8 @@ export function AiPanel({
       setRunning(false)
       setOutput('')
       setRefineText('')
+      setDiffView(false)
+      setReasoning('')
     }
   }, [open])
 
@@ -143,16 +153,20 @@ export function AiPanel({
       text: primaryText,
       documentText,
       language,
-      instruction
+      instruction,
+      context: hasSelection ? contextText : ''
     })
 
+    setDiffView(false)
+    setReasoning('')
     setOutput('')
     setRunning(true)
     const handle = runAiAction({
       ai,
       model: model || undefined,
       prompt,
-      onDelta: (delta) => setOutput((prev) => prev + delta)
+      onDelta: (delta) => setOutput((prev) => prev + delta),
+      onReasoning: (delta) => setReasoning((prev) => prev + delta)
     })
     handleRef.current = handle
 
@@ -169,7 +183,7 @@ export function AiPanel({
       }
       setRunning(false)
     }
-  }, [action, ai, documentText, hasSelection, instruction, language, meta.needsSelection, model, onNotify, primaryText, running])
+  }, [action, ai, contextText, documentText, hasSelection, instruction, language, meta.needsSelection, model, onNotify, primaryText, running])
 
   // Refine the current result with a follow-up instruction (iterates on output).
   const refine = useCallback(
@@ -184,13 +198,16 @@ export function AiPanel({
       }
       const prompt = buildRefinePrompt(base, ins)
       setRefineText('')
+      setDiffView(false)
+      setReasoning('')
       setOutput('')
       setRunning(true)
       const handle = runAiAction({
         ai,
         model: model || undefined,
         prompt,
-        onDelta: (delta) => setOutput((prev) => prev + delta)
+        onDelta: (delta) => setOutput((prev) => prev + delta),
+        onReasoning: (delta) => setReasoning((prev) => prev + delta)
       })
       handleRef.current = handle
       try {
@@ -308,7 +325,25 @@ export function AiPanel({
 
         <div className="ai-output" ref={outputRef} aria-live="polite">
           {output ? (
-            <pre className="ai-output-text">{output}</pre>
+            diffView && hasSelection && !running ? (
+              <div className="ai-output-diff">
+                {diffTokens(selection, trimmedOutput).map((seg, idx) => (
+                  <span
+                    key={idx}
+                    className={
+                      seg.op === 'delete' ? 'ai-diff-del' : seg.op === 'insert' ? 'ai-diff-ins' : undefined
+                    }
+                  >
+                    {seg.text}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <pre className="ai-output-text">{output}</pre>
+            )
+          ) : running && reasoning ? (
+            // The model's reasoning while it "thinks", before any output arrives.
+            <div className="ai-output-reasoning">{reasoning}</div>
           ) : (
             <span className="ai-output-placeholder">
               {running ? '正在生成…' : '点击下方「生成」开始'}
@@ -381,6 +416,17 @@ export function AiPanel({
                 <Sparkles size={14} /> {trimmedOutput ? '重新生成' : '生成'}
               </button>
             )}
+            {!running && hasSelection && trimmedOutput.length > 0 && (
+              <button
+                type="button"
+                className={`action-btn${diffView ? ' is-active' : ''}`}
+                title={diffView ? '查看结果原文' : '对照改动（替换前预览）'}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setDiffView((value) => !value)}
+              >
+                {diffView ? '结果' : '对照'}
+              </button>
+            )}
           </div>
           <div className="ai-actions-right">
             <button
@@ -419,7 +465,11 @@ export function AiPanel({
         {(loadingModels || running) && (
           <div className="ai-status-line">
             <Loader2 size={12} className="ai-spin" />
-            {loadingModels ? '正在加载模型…' : '生成中，可随时停止'}
+            {loadingModels
+              ? '正在加载模型…'
+              : reasoning && !output
+                ? '思考中，可随时停止'
+                : '生成中，可随时停止'}
           </div>
         )}
       </div>
