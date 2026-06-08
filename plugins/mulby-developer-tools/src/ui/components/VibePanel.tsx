@@ -730,6 +730,7 @@ export function VibePanel({
     '· 输入是“有固定格式的数据”（金额/URL/IP/手机号/时间/颜色…）→ 用 regex 并给 sample；可再附 1 个 keyword 兜底方便用户用关键词搜到。',
     '· 处理“任意文本”→ 用 over。· 处理“拖入文件/图片”→ files/img。· 只是“打开一个界面/工具”→ keyword。',
     '示例：需求“把数字金额转人民币大写”应输出 triggers: [ {"type":"regex","match":"^-?[0-9]+(\\\\.[0-9]{1,2})?$","label":"金额转大写","minLength":1,"maxLength":40,"sample":"1234.56"}, {"type":"keyword","value":"大写金额"} ]。',
+    '能力与权限：本提示词末尾附有「当前 Mulby 宿主真实可用的 API 清单」。只为确实会用到的能力开启对应 permissions（用到剪贴板才开 clipboard、用到通知才开 notification…），并确保所选 template/features/triggers 都能由这些真实能力落地，不要臆造平台做不到的功能。',
     '',
     `用户需求：${text}`
   ].join('\n')
@@ -775,7 +776,7 @@ export function VibePanel({
     try {
       addLog('info', '▶ [Vibe] AI 正在规划契约…')
       let parsed: any = null
-      try { parsed = await aiJson('你是严格的 JSON 生成器，只输出可解析的 JSON 对象。', planPrompt(desc)) } catch { /* fallback */ }
+      try { parsed = await aiJson('你是严格的 JSON 生成器，只输出可解析的 JSON 对象。', withApiSurface(planPrompt(desc))) } catch { /* fallback */ }
       if (abortedRef.current) { addLog('info', '⏹ [Vibe] 已停止规划'); return }
       const c = normalizeContract(parsed, desc)
       setContract(c)
@@ -1114,6 +1115,10 @@ export function VibePanel({
     '只输出 JSON：{ "todos": [ { "title": "简短步骤名(≤20字)", "detail": "这一步具体做什么(一句话)" } ] }，不要解释、不要 Markdown 代码块。',
     '要求：3–6 步，按依赖与实现顺序排列；每步是一个独立、可验证的开发动作（如"实现核心处理逻辑""搭建主界面 UI""接入剪贴板/通知能力""完善错误处理与边界""自检构建并修复问题"）；计划要落到下方列出的功能/触发方式与 Mulby 真实能力（见末尾 API 清单）上，不要排出平台做不到的步骤。',
     '不要把"创建脚手架/写 manifest.json"列进去（已自动完成）；最后一步通常是"自检构建并修复问题"。',
+    '步骤拆解原则：① 顺序≈ 后端核心(src/main.ts 的 run/onLoad 主逻辑) → 前端界面(仅 template=react 才有 src/ui) → 能力接入(剪贴板/通知/文件/AI…) → 边界与错误处理 → 自检构建；② 纯命令/无界面插件(basic) 不要排"搭建 UI"这类步骤；③ 每步只描述"做什么(可验证的产出)"，不写具体代码或文件全路径；④ detail 一句话点明该步落到哪个功能/触发/能力上。',
+    '示例(仅供参考结构，按真实需求与上面契约调整步数和内容)：',
+    '- 有界面(react)：实现核心处理逻辑 → 搭建主界面与交互 → 接入所需 Mulby 能力 → 完善边界与错误提示 → 自检构建并修复；',
+    '- 无界面(basic，如"金额转大写")：在 run() 解析输入金额 → 实现转换核心算法 → 校验非法输入并返回友好结果 → 自检构建并修复。',
     c.isEdit ? `这是对现有插件的改造，需求：${c.editSummary || sentence}` : `插件需求：${sentence}`,
     `契约：${contractSummary(c)}`,
     `功能与触发：${c.features.map((f) => `${f.code}(${f.mode}) ← ${f.triggers.map(triggerLabel).join('、') || '无触发'}`).join('；')}`
@@ -2032,6 +2037,7 @@ export function VibePanel({
     '你是 Mulby 插件创意助手。根据用户的初步想法，发散出 3-4 个具体、可落地、彼此差异明显的 Mulby 桌面插件方向。',
     '只输出 JSON：{ "options": [ { "title": "简短中文方向名", "pitch": "一句话说明能做什么/卖点", "trigger": "触发方式（如：关键词唤起 / 处理选中文本 / 拖入图片 / 正则匹配金额）" } ] }。',
     '要求：贴近桌面效率/开发工具场景、对新手友好、避免雷同、可被一个小插件实现。',
+    '每个方向都必须能用本提示词末尾附带的「当前 Mulby 宿主真实可用的 API 清单」实现，不要臆造平台做不到的功能（无对应能力就不要发散需要它的方向）。',
     `用户的初步想法：${seed}`
   ].join('\n')
 
@@ -2051,7 +2057,7 @@ export function VibePanel({
     setBrainstorm({ loading: true, options: [], seed })
     resetAbort()
     try {
-      const obj = await aiJson('你是 Mulby 插件创意助手，只输出可解析的 JSON 对象。', brainstormPrompt(seed))
+      const obj = await aiJson('你是 Mulby 插件创意助手，只输出可解析的 JSON 对象。', withApiSurface(brainstormPrompt(seed)))
       if (abortedRef.current) { setBrainstorm(null); addLog('info', '⏹ [Vibe] 已停止发散'); return }
       const options = normalizeBrainstorm(obj)
       if (!options.length) { setBrainstorm(null); seedAsRequirement(seed); return }
