@@ -2,12 +2,17 @@ import assert from 'node:assert/strict'
 import {
   addColumn,
   addRow,
+  escapeCell,
   moveColumn,
   moveRow,
+  nextAlign,
   parseTable,
   removeColumn,
   removeRow,
   serializeTable,
+  setCell,
+  setColumnAlign,
+  unescapeCell,
   type TableData
 } from './tableModel'
 
@@ -109,6 +114,53 @@ assert.equal(parseTable('| only header |'), null)
   assert.equal(t!.headers[0], 'a \\| b')
   const out = parseTable(serializeTable(t!))!
   assert.equal(out.headers[0], 'a \\| b')
+}
+
+// setColumnAlign updates only the targeted column's alignment.
+{
+  const t = parseTable(SRC)!
+  const out = setColumnAlign(t, 1, 'right')
+  assert.deepEqual(out.aligns, ['left', 'right', 'right'])
+  // original untouched
+  assert.deepEqual(t.aligns, ['left', 'center', 'right'])
+  // out-of-range is a no-op clone
+  assert.deepEqual(setColumnAlign(t, 9, 'left').aligns, t.aligns)
+}
+
+// nextAlign cycles none -> left -> center -> right -> none.
+{
+  assert.equal(nextAlign('none'), 'left')
+  assert.equal(nextAlign('left'), 'center')
+  assert.equal(nextAlign('center'), 'right')
+  assert.equal(nextAlign('right'), 'none')
+}
+
+// setCell writes header (row -1) and body cells, leaving the rest intact.
+{
+  const t = parseTable(SRC)!
+  const h = setCell(t, -1, 0, 'AA')
+  assert.equal(h.headers[0], 'AA')
+  assert.deepEqual(t.headers[0], 'A') // pure
+  const b = setCell(t, 1, 2, 'ZZ')
+  assert.equal(b.rows[1][2], 'ZZ')
+  // out-of-range row/col is a no-op
+  assert.deepEqual(setCell(t, 9, 9, 'x').rows, t.rows)
+}
+
+// escapeCell collapses newlines and escapes pipes (idempotent for already-escaped).
+{
+  assert.equal(escapeCell('a | b'), 'a \\| b')
+  assert.equal(escapeCell('a \\| b'), 'a \\| b') // not double-escaped
+  assert.equal(escapeCell('line1\nline2'), 'line1 line2')
+  assert.equal(escapeCell('  spaced  '), 'spaced')
+}
+
+// unescapeCell shows the friendly editing form (bare pipe).
+{
+  assert.equal(unescapeCell('a \\| b'), 'a | b')
+  assert.equal(unescapeCell('plain'), 'plain')
+  // round-trip: edit form -> commit form is stable
+  assert.equal(escapeCell(unescapeCell('a \\| b')), 'a \\| b')
 }
 
 console.log('markdown-editor tableModel unit tests passed')

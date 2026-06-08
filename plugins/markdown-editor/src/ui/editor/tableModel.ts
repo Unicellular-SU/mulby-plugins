@@ -198,3 +198,58 @@ export function moveRow(table: TableData, from: number, to: number): TableData {
   moveItem(t.rows, from, to)
   return t
 }
+
+/** Sets the alignment of the column at `at`. */
+export function setColumnAlign(table: TableData, at: number, align: TableAlign): TableData {
+  const t = clone(table)
+  if (at >= 0 && at < t.aligns.length) {
+    t.aligns[at] = align
+  }
+  return t
+}
+
+/** The alignment cycle used by the column-align control: none → left → center → right → none. */
+export function nextAlign(align: TableAlign): TableAlign {
+  switch (align) {
+    case 'none':
+      return 'left'
+    case 'left':
+      return 'center'
+    case 'center':
+      return 'right'
+    default:
+      return 'none'
+  }
+}
+
+/** Writes a single cell value (header row -1, body rows 0-based) into the model. */
+export function setCell(table: TableData, row: number, col: number, value: string): TableData {
+  const t = clone(table)
+  if (col < 0 || col >= t.headers.length) {
+    return t
+  }
+  if (row < 0) {
+    t.headers[col] = value
+  } else if (row < t.rows.length) {
+    t.rows[row][col] = value
+  }
+  return t
+}
+
+/**
+ * Unescapes a cell's source form into the friendlier text shown while editing:
+ * `\|` → `|`. (GFM requires a literal pipe inside a cell to be backslash-escaped;
+ * the editor shows the bare pipe and re-escapes on commit.)
+ */
+export function unescapeCell(source: string): string {
+  return source.replace(/\\\|/g, '|')
+}
+
+/**
+ * Escapes user-typed cell text back into a safe GFM cell: newlines collapse to a
+ * space (a cell can't span lines) and every pipe is escaped to `\|`. Idempotent —
+ * an already-escaped `\|` stays `\|` rather than becoming `\\|`.
+ */
+export function escapeCell(text: string): string {
+  return text.replace(/\r?\n+/g, ' ').replace(/\\?\|/g, '\\|').trim()
+}

@@ -16,6 +16,7 @@
 import { EditorState } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
 import { emojiForShortcode } from './emoji'
+import { parseTable } from './tableModel'
 
 export interface HideRange {
   from: number
@@ -346,29 +347,55 @@ export function computeLivePreview(state: EditorState): LivePreviewDecorations {
       }
 
       if (name === 'Table') {
-        // Render a GFM table as a real table (block widget) unless a selection
-        // sits inside it (then reveal the source for editing). Measured over the
-        // table's whole lines so a click anywhere in it reveals the source.
+        // A GFM table renders as a real table (block widget). Two cases:
+        //   - Top-level table: ALWAYS rendered as an interactive, in-place
+        //     editable grid (Obsidian-style). Clicking a cell edits it directly
+        //     instead of switching the whole block to raw source — no layout
+        //     churn from toggling source/render. (The grid stays put; only the
+        //     focused cell swaps to raw text, handled in the widget.)
+        //   - Table nested in a blockquote: rendered read-only, revealed as raw
+        //     source when a selection sits inside it (editing through the `>`
+        //     prefixes is unsafe to write back).
+        // A malformed table (parse fails) emits no widget so its raw source shows
+        // and can be fixed by hand.
         const from = doc.lineAt(node.from).from
         const to = doc.lineAt(Math.min(node.to, doc.length)).to
-        if (!isBlockActive(from, to)) {
-          const qd = quoteDepthAt(from)
-          const raw = doc.sliceString(from, to)
+        const qd = quoteDepthAt(from)
+        const raw = doc.sliceString(from, to)
+        if (qd > 0) {
+          if (!isBlockActive(from, to)) {
+            widgets.push({
+              from,
+              to,
+              kind: 'table',
+              data: {
+                source: stripQuotePrefix(raw, qd),
+                indent: String(indentColsAt(from)),
+                quoteDepth: String(qd)
+              },
+              block: true
+            })
+            occupied.push({ from, to })
+            return false
+          }
+          return undefined
+        }
+        if (parseTable(raw)) {
           widgets.push({
             from,
             to,
             kind: 'table',
             data: {
-              source: qd > 0 ? stripQuotePrefix(raw, qd) : raw,
+              source: raw,
               indent: String(indentColsAt(from)),
-              quoteDepth: String(qd)
+              quoteDepth: '0'
             },
             block: true
           })
           occupied.push({ from, to })
           return false // don't decorate inside the replaced block
         }
-        return undefined
+        return undefined // malformed: leave the raw source visible to fix
       }
 
       if (name === 'ListMark') {

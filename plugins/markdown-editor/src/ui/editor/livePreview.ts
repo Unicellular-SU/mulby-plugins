@@ -30,7 +30,7 @@ import {
   type WidgetRange
 } from './livePreviewModel'
 import { listFoldRange, type FoldRange } from './listFold'
-import { buildInteractiveTable, isTableControlEvent } from './tableEditor'
+import { buildInteractiveTable } from './tableEditor'
 import { renderMarkdownDocument } from '../services/markdownHtml'
 
 /** Resolves a Markdown image href into a URL the <img> can actually load. */
@@ -264,11 +264,17 @@ class TableWidget extends WidgetType {
     applyBlockIndent(el, this.indent)
     return wrapQuoted(el, this.quoteDepth)
   }
-  ignoreEvent(event: Event) {
-    // Control elements (add / delete / drag grips) are owned by the widget, so
-    // CodeMirror must ignore those events. Clicks elsewhere on the table fall
-    // through so the caret lands in the source and reveals it for editing.
-    return isTableControlEvent(event)
+  ignoreEvent() {
+    // The table is fully self-managed: cells are contenteditable and the widget
+    // handles its own controls / in-place editing. Tell CodeMirror to ignore all
+    // events inside it so it never moves its own caret into the (atomic) block or
+    // fights the cell editing.
+    return true
+  }
+  ignoreMutation() {
+    // In-cell editing mutates the widget DOM; CodeMirror's DOM observer must not
+    // try to reconcile those changes back to document state.
+    return true
   }
 }
 

@@ -238,13 +238,23 @@ assert.equal(headingSlug('not a heading'), null)
   assert.ok((table?.data.source ?? '').includes('| a | b |'), 'carries table source')
 }
 
-// Caret inside a table reveals the source (no widget) so it can be edited —
-// this is what makes a single click on a rendered table switch to edit mode.
+// Obsidian-style in-place editing: a non-quoted table stays rendered even when
+// the caret is inside it (the cell is edited in place rather than switching the
+// whole block to raw source).
 {
   const doc = 'intro\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\ntail'
   const state = stateFor(doc, doc.indexOf('| a |') + 2)
   const deco = computeLivePreview(state)
-  assert.ok(!findWidget(deco.widgets, 'table'), 'table revealed when caret is inside it')
+  assert.ok(findWidget(deco.widgets, 'table'), 'table stays rendered with caret inside (edited in place)')
+}
+
+// A malformed table (no delimiter row -> not parseable) emits no widget so its
+// raw source stays visible to fix by hand.
+{
+  const doc = 'intro\n\n| a | b |\n| 1 | 2 |\n\ntail'
+  const state = stateFor(doc, doc.indexOf('tail'))
+  const deco = computeLivePreview(state)
+  assert.ok(!findWidget(deco.widgets, 'table'), 'malformed table is not rendered as a widget')
 }
 
 // A selection that merely spans across a table (not contained in it) keeps the

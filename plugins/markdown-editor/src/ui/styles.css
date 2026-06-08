@@ -1147,8 +1147,18 @@ button {
 .cm-md-add-row:hover {
   opacity: 1;
 }
+/* Editable cell body: idle shows the inline-Markdown render, focus swaps to the
+   raw cell text (Obsidian-style in-place editing). No frame or highlight —
+   clicking a cell simply places the text caret. A min size keeps empty cells
+   clickable. */
 .cm-md-cellbody {
-  display: inline;
+  display: inline-block;
+  min-width: 1.2em;
+  min-height: 1.2em;
+  outline: none;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Rendered Mermaid diagram (block widget). */
