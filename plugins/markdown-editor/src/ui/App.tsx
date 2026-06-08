@@ -1563,6 +1563,53 @@ export default function App() {
     }
   }, [])
 
+  // Inlines every <img> in the export HTML as a data URL so renderers without a
+  // base path / file access (the headless PDF browser, or an HTML file opened
+  // elsewhere) still show images. Relative paths anchor to the bound document
+  // directory; already-inline (data:) and unresolvable images are left as-is.
+  const inlineExportImages = useCallback(async (html: string): Promise<string> => {
+    const boundPath = activeFilePathRef.current
+    const baseDir = boundPath ? getDirectory(boundPath) : ''
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const images = Array.from(doc.querySelectorAll('img'))
+    await Promise.all(
+      images.map(async (img) => {
+        const src = img.getAttribute('src') ?? ''
+        if (!src || src.startsWith('data:')) {
+          return
+        }
+        const href = resolveImageHref(src, baseDir)
+        if (!href) {
+          return
+        }
+        try {
+          const loaded = await loadImageForExport(href)
+          if (loaded) {
+            img.setAttribute('src', buildDataUrl(loaded.data, 'image/png'))
+          }
+        } catch (error) {
+          console.error('[markdown-editor] inlineExportImages', error)
+        }
+      })
+    )
+    return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`
+  }, [])
+
+  // Writes export HTML to a temp file under userData and returns its file:// URL.
+  // PDF export loads this instead of a data: URL, which overflows Chromium's
+  // navigation URL length limit once images are inlined as data URLs.
+  const prepareExportPageUrl = useCallback(
+    async (html: string): Promise<string> => {
+      const userData = await system.getPath('userData')
+      const dir = `${userData.replace(/[/\\]+$/, '')}/${PLUGIN_ID}`
+      await filesystem.mkdir(dir)
+      const filePath = `${dir}/.pdf-export.html`
+      await filesystem.writeFile(filePath, html, 'utf-8')
+      return toFileUrl(filePath)
+    },
+    [filesystem, system]
+  )
+
   const handleExportByFormat = useCallback(async (format: ExportFormat) => {
     try {
       const exportDocument = getCurrentExportDocument()
@@ -1619,9 +1666,19 @@ export default function App() {
           )
         )
       } else if (format === 'html') {
-        await exportHtmlFile(exportDocument, target, filesystem)
+        const inlinedHtml = await inlineExportImages(exportDocument.fullHtml)
+        await exportHtmlFile({ ...exportDocument, fullHtml: inlinedHtml }, target, filesystem)
       } else if (format === 'pdf') {
-        await exportPdfFile(exportDocument, target)
+        const inlinedHtml = await inlineExportImages(exportDocument.fullHtml)
+        let pageUrl: string | undefined
+        try {
+          pageUrl = await prepareExportPageUrl(inlinedHtml)
+        } catch (error) {
+          // Fall back to the data: URL (works for small docs without images).
+          console.error('[markdown-editor] prepareExportPageUrl', error)
+          pageUrl = undefined
+        }
+        await exportPdfFile({ ...exportDocument, fullHtml: inlinedHtml }, target, pageUrl)
       } else {
         await exportDocxFile(exportDocument, target, filesystem, resolveExportImage)
       }
@@ -1635,7 +1692,7 @@ export default function App() {
       notification.show('导出文件失败', 'error')
       focusEditor()
     }
-  }, [activeFilePath, activeTabIdRef, closeExportMenu, dialog, filesystem, focusEditor, getCurrentExportDocument, notification, resolveExportImage, setTabs])
+  }, [activeFilePath, activeTabIdRef, closeExportMenu, dialog, filesystem, focusEditor, getCurrentExportDocument, inlineExportImages, notification, prepareExportPageUrl, resolveExportImage, setTabs])
 
   const handleOpenExportMenu = useCallback(() => {
     setExportMenuOpen(true)

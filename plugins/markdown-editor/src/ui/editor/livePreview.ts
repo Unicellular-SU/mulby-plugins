@@ -124,7 +124,12 @@ class ImageWidget extends WidgetType {
       other.width === this.width &&
       other.height === this.height &&
       other.block === this.block &&
-      other.indent === this.indent
+      other.indent === this.indent &&
+      // Compare the *resolved* src too: when the image resolver changes (e.g. the
+      // bound file path becomes known after a session restore), the same raw url
+      // resolves to a different src, so the widget must rebuild instead of reusing
+      // the stale (broken) DOM.
+      other.resolve(other.url) === this.resolve(this.url)
     )
   }
   toDOM() {
@@ -735,7 +740,13 @@ const blockDecorationField = StateField.define<DecorationSet>({
     return buildBlockDecorations(state)
   },
   update(value, tr) {
-    if (tr.docChanged || tr.selection) {
+    // Rebuild on doc/selection changes, and when the image resolver changes (the
+    // bound file path becoming known after restore re-resolves relative images).
+    if (
+      tr.docChanged ||
+      tr.selection ||
+      tr.startState.facet(imageUrlResolver) !== tr.state.facet(imageUrlResolver)
+    ) {
       return buildBlockDecorations(tr.state)
     }
     return value
@@ -925,7 +936,17 @@ export function livePreviewExtension(): Extension {
         const foldChanged = update.transactions.some((tr) =>
           tr.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect))
         )
-        if (update.docChanged || update.selectionSet || update.viewportChanged || foldChanged) {
+        // The image resolver changing (bound path known after restore) must also
+        // rebuild so inline images re-resolve to a valid src.
+        const resolverChanged =
+          update.startState.facet(imageUrlResolver) !== update.state.facet(imageUrlResolver)
+        if (
+          update.docChanged ||
+          update.selectionSet ||
+          update.viewportChanged ||
+          foldChanged ||
+          resolverChanged
+        ) {
           this.decorations = buildInlineDecorations(update.view)
         }
       }
