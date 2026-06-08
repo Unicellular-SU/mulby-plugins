@@ -1,6 +1,6 @@
 import type { RoomEvent } from '../types'
 
-export function generateEvent(floorLevel: number, crystals: number): RoomEvent {
+export function generateEvent(floorLevel: number, crystals: number, heroHasItems = false): RoomEvent {
   const types: Array<'merchant' | 'altar' | 'treasure_trap'> = ['merchant', 'altar', 'treasure_trap']
   // 每 3 层必出商人，其余随机
   const type = (floorLevel % 3 === 0) ? 'merchant' : types[Math.floor(Math.random() * types.length)]
@@ -26,7 +26,7 @@ export function generateEvent(floorLevel: number, crystals: number): RoomEvent {
         desc: '古老的祭坛散发着诡异的光芒，似乎在呼唤着什么...',
         choices: [
           { label: '献祭 20% HP → 获得随机能力', cost: 20, costType: 'hp_percent', reward: 'random_ability' },
-          { label: '献祭一个道具 → 获得更高品质道具', cost: 1, costType: 'item', reward: 'upgrade_item' },
+          { label: '献祭一个道具 → 获得更高品质道具', cost: 1, costType: 'item', reward: 'upgrade_item', disabled: !heroHasItems },
           { label: '离开', reward: 'none' },
         ],
       }

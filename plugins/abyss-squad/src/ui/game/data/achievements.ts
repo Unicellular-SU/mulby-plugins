@@ -8,7 +8,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'synergy_master', name: '协同大师', desc: '单局触发 3 种协同效果', rewardCrystals: 50, category: 'basic' },
   { id: 'all_heroes', name: '全能战队', desc: '历史使用过所有 5 个英雄', rewardCrystals: 80, category: 'basic' },
   // === 挑战成就 ===
-  { id: 'mage_solo', name: '法师独裁', desc: '全法师阵容通关第 5 层', rewardCrystals: 60, category: 'challenge' },
+  { id: 'mage_solo', name: '孤胆英雄', desc: '单人上阵通关第 5 层', rewardCrystals: 60, category: 'challenge' },
   { id: 'boss_no_damage', name: '无伤 Boss', desc: '击杀 Boss 时全队满血', rewardCrystals: 50, category: 'challenge' },
   { id: 'speed_run', name: '速通达人', desc: '10 分钟内通关', rewardCrystals: 80, category: 'challenge' },
   { id: 'collector', name: '收集狂', desc: '单局收集 8 个道具', rewardCrystals: 30, category: 'challenge' },
@@ -39,7 +39,7 @@ export function checkNewAchievements(meta: MetaProgress, stats: RunStats, curren
         unlocked = new Set([...meta.allHeroesUsed, ...stats.heroesUsed]).size >= 5
         break
       case 'mage_solo':
-        unlocked = stats.heroesUsed.every(h => h === 'mage') && stats.maxFloor >= 5
+        unlocked = stats.heroesUsed.length <= 1 && stats.maxFloor >= 5
         break
       case 'boss_no_damage':
         unlocked = stats.bossKilledFullHp

@@ -57,6 +57,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false)
   const [runResult, setRunResult] = useState<{ crystals: number; floor: number } | null>(null)
   const [selectedHeroes, setSelectedHeroes] = useState<string[]>([])
+  const [newAchievements, setNewAchievements] = useState<Array<{ id: string; name: string; rewardCrystals: number }>>([])
 
   // 加载存档
   useEffect(() => {
@@ -91,6 +92,7 @@ export default function App() {
 
   const handleRunEnd = (crystals: number, floor: number, runStats?: RunStats) => {
     setRunResult({ crystals, floor })
+    setNewAchievements([])
     updateMeta(prev => {
       const next: MetaProgress = {
         ...prev,
@@ -105,6 +107,12 @@ export default function App() {
         const newAchs = checkNewAchievements(next, runStats, prev.achievements || [])
         if (newAchs.length > 0) {
           next.achievements = [...(prev.achievements || []), ...newAchs]
+          // B6: 记录新解锁的成就用于显示
+          const achDetails = newAchs.map(achId => {
+            const achDef = ACHIEVEMENTS.find(a => a.id === achId)
+            return achDef ? { id: achDef.id, name: achDef.name, rewardCrystals: achDef.rewardCrystals } : null
+          }).filter(Boolean) as Array<{ id: string; name: string; rewardCrystals: number }>
+          setNewAchievements(achDetails)
           // 发放水晶奖励
           for (const achId of newAchs) {
             const achDef = ACHIEVEMENTS.find(a => a.id === achId)
@@ -195,6 +203,7 @@ export default function App() {
         <GameOver
           crystals={runResult.crystals}
           floor={runResult.floor}
+          newAchievements={newAchievements}
           onContinue={handleGoHub}
           onMenu={handleGoMenu}
           onRetry={handleStartRun}

@@ -326,7 +326,10 @@ export class GameEngine {
         break
       case 'random_ability': {
         if (hero && !hero.isDead) {
-          const pool = ABILITIES.filter(a => !hero.abilities.some(ha => ha.def.id === a.id && ha.stacks >= a.maxStacks))
+          // B5: 与升级随机池相同的可用能力过滤
+          const availableIds = new Set([...DEFAULT_ABILITIES, ...this.meta.unlockedAbilities])
+          const availablePool = ABILITIES.filter(a => availableIds.has(a.id))
+          const pool = availablePool.filter(a => !hero.abilities.some(ha => ha.def.id === a.id && ha.stacks >= a.maxStacks))
           if (pool.length > 0) {
             const ab = pool[Math.floor(Math.random() * pool.length)]
             const existing = hero.abilities.find(ha => ha.def.id === ab.id)
@@ -360,7 +363,7 @@ export class GameEngine {
         break
       }
       case 'rare_item_plus_enemies': {
-        // 稀有道具
+        // 稀有道具（敌人由 setupWave 之后生成）
         const rares = ITEMS.filter(it => it.rarity === 'rare' || it.rarity === 'epic')
         if (rares.length > 0 && hero && !hero.isDead) {
           const item = rares[Math.floor(Math.random() * rares.length)]
@@ -371,9 +374,6 @@ export class GameEngine {
             this.onEvent({ type: 'item_drop', item })
           }
         }
-        // 生成 3 个强敌
-        const pool = FLOOR_ENEMY_POOLS[this.state.floorLevel] || FLOOR_ENEMY_POOLS[1]
-        for (let i = 0; i < 3; i++) this.spawnEnemy(pool, this.state.floorLevel + 2)
         break
       }
       case 'safe_loot':
@@ -391,6 +391,12 @@ export class GameEngine {
     this.state.isEventPending = false
     this.state.currentEvent = null
     this.setupWave(this.state.floorLevel)
+
+    // B4: 稀有道具敌人放在 setupWave 之后生成，避免被覆盖
+    if (choice.reward === 'rare_item_plus_enemies') {
+      const pool = FLOOR_ENEMY_POOLS[this.state.floorLevel] || FLOOR_ENEMY_POOLS[1]
+      for (let i = 0; i < 3; i++) this.spawnEnemy(pool, this.state.floorLevel + 2)
+    }
   }
 
   // ========== 游戏循环 ==========
@@ -1633,6 +1639,7 @@ export class GameEngine {
   private equipItem(hero: HeroState, item: ItemDef) {
     const slotIdx = item.slot === 'weapon' ? 0 : item.slot === 'artifact' ? 1 : 2
     hero.items[slotIdx] = { def: item }
+    this.state.runStats.itemsCollected.push(item.id) // B2: 记录拾取的道具
     this.spawnDamageNumber(hero.x, hero.y - 20, item.name, item.color, false)
     this.onEvent({ type: 'item_drop', item })
     this.checkSynergies(hero)
@@ -1714,6 +1721,7 @@ export class GameEngine {
       const hasAll = syn.tags.every(tag => allTags.has(tag))
       if (hasAll) {
         this.state.activeSynergies.push({ def: syn, triggerCooldown: 0 })
+        this.state.runStats.synergiesTriggered.push(syn.id) // B1: 记录触发的协同
         this.state.synergyPopup = { name: syn.name, desc: syn.desc, color: syn.color, timer: 3000 }
         this.onEvent({ type: 'synergy', name: syn.name, desc: syn.desc, color: syn.color })
         this.triggerSynergy(syn)
@@ -1838,7 +1846,7 @@ export class GameEngine {
     // === 事件房间：每 2 层触发，跳过第 10 层 Boss ===
     if (this.state.floorLevel % 2 === 0 && this.state.floorLevel < 10) {
       this.state.isEventPending = true
-      this.state.currentEvent = generateEvent(this.state.floorLevel, this.state.crystals)
+      this.state.currentEvent = generateEvent(this.state.floorLevel, this.state.crystals, this.state.heroes.some(h => !h.isDead && h.items.some(it => it !== null)))
       // 回复一些生命
       for (const hero of this.state.heroes) {
         if (!hero.isDead) hero.hp = Math.min(hero.maxHp, hero.hp + hero.maxHp * 0.15)
