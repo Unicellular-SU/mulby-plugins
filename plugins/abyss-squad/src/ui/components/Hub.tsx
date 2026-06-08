@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import type { MetaProgress } from '../game/types'
 import { HEROES, HERO_UNLOCK_COST } from '../game/data/heroes'
+import { ABILITIES, DEFAULT_ABILITIES } from '../game/data/abilities'
+import { SYNERGIES, DEFAULT_SYNERGIES } from '../game/data/synergies'
 import { ACHIEVEMENTS } from '../game/data/achievements'
 
 interface Props {
@@ -8,17 +10,24 @@ interface Props {
   onBack: () => void
   onUpgrade: (key: string, cost: number) => void
   onUnlockHero: (heroId: string, cost: number) => void
+  onUnlockAbility: (abilityId: string, cost: number) => void
+  onUnlockSynergy: (synergyId: string, cost: number) => void
+  onStartRun: (heroIds: string[]) => void
 }
 
 type Tab = 'training' | 'smith' | 'library' | 'tavern' | 'shrine' | 'achievements'
 
-export default function Hub({ meta, onBack, onUpgrade, onUnlockHero }: Props) {
+export default function Hub({ meta, onBack, onUpgrade, onUnlockHero, onUnlockAbility, onUnlockSynergy, onStartRun }: Props) {
   const [tab, setTab] = useState<Tab>('training')
 
   const trainingCost = (level: number) => 10 + level * 5
   const smithCost = 20 + meta.weaponLevel * 15
-  const allHeroes = Object.values(HEROES)
   const unlockedSet = new Set(meta.unlockedHeroes)
+  const allHeroes = Object.values(HEROES)
+  const unlockedAbilitySet = new Set(meta.unlockedAbilities)
+  const freeAbilitySet = new Set(DEFAULT_ABILITIES)
+  const unlockedSynergySet = new Set(meta.unlockedSynergies)
+  const freeSynergySet = new Set(DEFAULT_SYNERGIES)
 
   return (
     <div className="hub">
@@ -80,7 +89,7 @@ export default function Hub({ meta, onBack, onUpgrade, onUnlockHero }: Props) {
           <div className="upgrade-grid">
             <UpgradeCard
               name="锻造武器"
-              desc={`提升初始武器品质 (当前 ${meta.weaponLevel} 级)`}
+              desc={`初始攻击力 +2/级 (当前 ${meta.weaponLevel} 级)`}
               level={meta.weaponLevel}
               cost={smithCost}
               crystals={meta.crystals}
@@ -123,18 +132,78 @@ export default function Hub({ meta, onBack, onUpgrade, onUnlockHero }: Props) {
         )}
 
         {tab === 'library' && (
-          <div className="info-panel">
-            <p>图书馆可以解锁新的能力进入局内随机池</p>
-            <p className="stat">已解锁额外能力: {meta.unlockedAbilities.length}</p>
-            <p className="stat hint">更多能力 = 更多意想不到的组合!</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{ color: '#888', fontSize: 12, margin: '0 0 8px' }}>消耗水晶解锁新能力，解锁后可在关卡升级时随机获得</p>
+            {ABILITIES.map(ab => {
+              const isFree = freeAbilitySet.has(ab.id)
+              const unlocked = unlockedAbilitySet.has(ab.id)
+              const available = isFree || unlocked
+              const cost = 30 // 统一价格
+              return (
+                <div key={ab.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                  borderRadius: 8, background: unlocked ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${unlocked ? '#2ecc71' : '#333'}`,
+                }}>
+                  <div style={{ width: 4, height: 24, borderRadius: 2, backgroundColor: ab.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <span style={{ color: ab.color, fontWeight: 'bold', fontSize: 13 }}>{ab.name}</span>
+                    <span style={{ color: '#888', fontSize: 11, marginLeft: 8 }}>{ab.desc}</span>
+                  </div>
+                  {isFree ? (
+                    <span style={{ color: '#ffd700', fontSize: 12 }}>✦ 免费</span>
+                  ) : available ? (
+                    <span style={{ color: '#2ecc71', fontSize: 12 }}>✓ 已解锁</span>
+                  ) : (
+                    <button
+                      className="btn btn-small"
+                      disabled={meta.crystals < cost}
+                      onClick={() => onUnlockAbility(ab.id, cost)}
+                    >
+                      ◆{cost} 解锁
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
         {tab === 'shrine' && (
-          <div className="info-panel">
-            <p>神龛可以解锁新的协同组合</p>
-            <p className="stat">已解锁额外协同: {meta.unlockedSynergies.length}</p>
-            <p className="stat hint">集齐特定能力+道具触发超强效果!</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <p style={{ color: '#888', fontSize: 12, margin: '0 0 8px' }}>消耗水晶解锁协同组合，游戏中集齐对应标签即可触发</p>
+            {SYNERGIES.map(syn => {
+              const isFree = freeSynergySet.has(syn.id)
+              const unlocked = unlockedSynergySet.has(syn.id)
+              const available = isFree || unlocked
+              const cost = 50
+              return (
+                <div key={syn.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+                  borderRadius: 8, background: available ? 'rgba(46,204,113,0.1)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${available ? '#2ecc71' : '#333'}`,
+                }}>
+                  <div style={{ width: 4, height: 24, borderRadius: 2, backgroundColor: syn.color, flexShrink: 0 }} />
+                  <div style={{ flex: 1 }}>
+                    <span style={{ color: syn.color, fontWeight: 'bold', fontSize: 13 }}>{syn.name}</span>
+                    <span style={{ color: '#888', fontSize: 11, marginLeft: 8 }}>{syn.desc}</span>
+                  </div>
+                  {isFree ? (
+                    <span style={{ color: '#ffd700', fontSize: 12 }}>✦ 免费</span>
+                  ) : available ? (
+                    <span style={{ color: '#2ecc71', fontSize: 12 }}>✓ 已解锁</span>
+                  ) : (
+                    <button
+                      className="btn btn-small"
+                      disabled={meta.crystals < cost}
+                      onClick={() => onUnlockSynergy(syn.id, cost)}
+                    >
+                      ◆{cost} 解锁
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

@@ -44,4 +44,11 @@ export const ABILITY_CATEGORY_COLORS: Record<string, string> = {
   mutant: '#9b59b6',
 }
 
+export const DEFAULT_ABILITIES: string[] = [
+  // 基础免费能力 (12个)
+  'multi_shot', 'fire_enchant', 'crit_mastery', 'pierce',
+  'thorns', 'iron_skin', 'dodge',
+  'lifesteal', 'speed_boost', 'time_slow', 'xp_magnet', 'gold_finder',
+]
+
 export const ABILITY_UNLOCK_COST = 30  // 每个新能力解锁费用

@@ -1,5 +1,5 @@
 // ========== 游戏屏幕状态 ==========
-export type GameScreen = 'menu' | 'hub' | 'game' | 'gameover'
+export type GameScreen = 'menu' | 'hub' | 'game' | 'gameover' | 'hero_pick'
 
 // ========== 基础向量 ==========
 export interface Vec2 {

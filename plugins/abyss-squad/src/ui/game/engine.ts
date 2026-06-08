@@ -3,6 +3,7 @@ import type { Vec2, InputState, Camera, HeroState, EnemyState, Projectile, LootD
 import { HEROES } from './data/heroes'
 import { ENEMIES, FLOOR_ENEMY_POOLS } from './data/enemies'
 import { ABILITIES } from './data/abilities'
+import { DEFAULT_ABILITIES } from './data/abilities'
 import { ITEMS } from './data/items'
 import { SYNERGIES } from './data/synergies'
 import { generateEvent } from './data/events'
@@ -46,7 +47,7 @@ export class GameEngine {
   private heroRevived: Record<number, boolean> = {}
   private levelUpHeroIndex = 0
 
-  constructor(meta: MetaProgress, onEvent: (e: GameEvent) => void) {
+  constructor(meta: MetaProgress, onEvent: (e: GameEvent) => void, heroIds?: string[]) {
     this.meta = meta
     this.onEvent = onEvent
     this.events = []
@@ -54,8 +55,8 @@ export class GameEngine {
     this.camera = { x: 0, y: 0, width: 800, height: 600 }
 
     // 初始化3人小队
-    const heroIds = meta.unlockedHeroes.slice(0, 3)
-    const heroes = heroIds.map((id, i) => this.createHero(id, 200 + i * 80, 300))
+    const ids = heroIds && heroIds.length > 0 ? heroIds : meta.unlockedHeroes.slice(0, 3)
+    const heroes = ids.map((id, i) => this.createHero(id, 200 + i * 80, 300))
     const floor = this.generateFloor(1)
 
     this.state = {
@@ -81,9 +82,9 @@ export class GameEngine {
       isEventPending: false,
       currentEvent: null,
       activeItem: null,
-      activeTeamSynergies: checkTeamSynergies(heroIds),
+      activeTeamSynergies: checkTeamSynergies(ids),
       runStats: {
-        heroesUsed: heroIds,
+        heroesUsed: ids,
         synergiesTriggered: [],
         maxFloor: 1,
         enemiesKilled: 0,
@@ -97,9 +98,16 @@ export class GameEngine {
   }
 
   private createHero(id: string, x: number, y: number): HeroState {
-    const def = HEROES[id] || HEROES['warrior']
+    const baseDef = HEROES[id] || HEROES['warrior']
     const atkMult = 1 + this.meta.attackLevel * 0.05
     const hpMult = 1 + this.meta.healthLevel * 0.05
+    const weaponBonus = this.meta.weaponLevel * 2 // 每级锻造+2攻击
+
+    const def = {
+      ...baseDef,
+      attack: Math.round(baseDef.attack * atkMult) + weaponBonus,
+    }
+
     return {
       def,
       x, y,
@@ -369,7 +377,7 @@ export class GameEngine {
         break
       }
       case 'safe_loot':
-        this.state.crystals += 10
+        this.state.crystals += 5
         for (const h of this.state.heroes) {
           if (!h.isDead) h.hp = Math.min(h.maxHp, h.hp + h.maxHp * 0.15)
         }
@@ -735,6 +743,8 @@ export class GameEngine {
 
   private getHeroSpeed(hero: HeroState): number {
     let speed = hero.def.speed
+    // 训练营速度强化
+    speed *= 1 + this.meta.speedLevel * 0.03
     const speedStacks = this.getAbilityStacks(hero, 'speed_boost')
     speed *= 1 + speedStacks * 0.2
     for (const item of hero.items) {
@@ -1665,7 +1675,9 @@ export class GameEngine {
   }
 
   private generateAbilityChoices(): AbilityDef[] {
-    const pool = [...ABILITIES]
+    // 可用能力：默认免费 + 图书馆已解锁
+    const availableIds = new Set([...DEFAULT_ABILITIES, ...this.meta.unlockedAbilities])
+    const pool = ABILITIES.filter(a => availableIds.has(a.id))
     const choices: AbilityDef[] = []
     // 确保至少有1个变异类(低概率)
     const mutantPool = pool.filter(a => a.category === 'mutant')
@@ -1694,7 +1706,10 @@ export class GameEngine {
       if (item) for (const tag of item.def.tags) allTags.add(tag)
     }
 
+    // 仅能触发已在神龛解锁的协同
+    const unlockedSet = new Set(this.meta.unlockedSynergies)
     for (const syn of SYNERGIES) {
+      if (!unlockedSet.has(syn.id)) continue
       if (this.state.activeSynergies.some(s => s.def.id === syn.id)) continue
       const hasAll = syn.tags.every(tag => allTags.has(tag))
       if (hasAll) {
@@ -1852,7 +1867,7 @@ export class GameEngine {
   }
 
   private endRun(victory: boolean) {
-    const crystals = this.state.crystals + (victory ? 50 : 0)
+    const crystals = this.state.crystals + (victory ? 25 : 0)
     this.state.runStats.victory = victory
     this.stop()
     this.onEvent({ type: 'run_end', crystals, floor: this.state.floorLevel, runStats: this.state.runStats })

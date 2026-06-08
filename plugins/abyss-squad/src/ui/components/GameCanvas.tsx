@@ -9,11 +9,12 @@ import EventRoom from './EventRoom'
 
 interface Props {
   meta: MetaProgress
+  heroIds?: string[]
   onRunEnd: (crystals: number, floor: number, runStats?: RunStats) => void
   onQuit: () => void
 }
 
-export default function GameCanvas({ meta, onRunEnd, onQuit }: Props) {
+export default function GameCanvas({ meta, heroIds, onRunEnd, onQuit }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const engineRef = useRef<GameEngine | null>(null)
   const rendererRef = useRef<GameRenderer | null>(null)
@@ -50,7 +51,7 @@ export default function GameCanvas({ meta, onRunEnd, onQuit }: Props) {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const engine = new GameEngine(meta, handleEvent)
+    const engine = new GameEngine(meta, handleEvent, heroIds)
     const renderer = new GameRenderer(ctx, 800, 600)
     engineRef.current = engine
     rendererRef.current = renderer

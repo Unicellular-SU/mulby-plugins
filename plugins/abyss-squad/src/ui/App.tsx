@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import MainMenu from './components/MainMenu'
 import Hub from './components/Hub'
+import HeroPick from './components/HeroPick'
 import GameCanvas from './components/GameCanvas'
 import GameOver from './components/GameOver'
 import type { GameScreen, MetaProgress, RunStats } from './game/types'
-import { checkNewAchievements } from './game/data/achievements'
-import { ACHIEVEMENTS } from './game/data/achievements'
+import { checkNewAchievements, ACHIEVEMENTS } from './game/data/achievements'
+import { DEFAULT_SYNERGIES } from './game/data/synergies'
 
 const DEFAULT_META: MetaProgress = {
   crystals: 0,
@@ -15,7 +16,7 @@ const DEFAULT_META: MetaProgress = {
   unlockedHeroes: ['warrior', 'mage', 'ranger'],
   unlockedAbilities: [],
   unlockedItems: [],
-  unlockedSynergies: [],
+  unlockedSynergies: [...DEFAULT_SYNERGIES],
   weaponLevel: 0,
   totalRuns: 0,
   bestFloor: 0,
@@ -55,6 +56,7 @@ export default function App() {
   const [meta, setMeta] = useState<MetaProgress>(DEFAULT_META)
   const [loaded, setLoaded] = useState(false)
   const [runResult, setRunResult] = useState<{ crystals: number; floor: number } | null>(null)
+  const [selectedHeroes, setSelectedHeroes] = useState<string[]>([])
 
   // 加载存档
   useEffect(() => {
@@ -73,7 +75,17 @@ export default function App() {
     })
   }, [])
 
-  const handleStartRun = () => setScreen('game')
+  const handleStartRun = () => {
+    // 弹出英雄选择
+    const available = meta.unlockedHeroes
+    if (available.length <= 3) {
+      setSelectedHeroes(available.slice(0, 3))
+      setScreen('game')
+    } else {
+      setSelectedHeroes([])
+      setScreen('hero_pick')
+    }
+  }
   const handleGoHub = () => setScreen('hub')
   const handleGoMenu = () => setScreen('menu')
 
@@ -126,6 +138,29 @@ export default function App() {
     }))
   }
 
+  const handleUnlockAbility = (abilityId: string, cost: number) => {
+    if (meta.crystals < cost) return
+    updateMeta(prev => ({
+      ...prev,
+      crystals: prev.crystals - cost,
+      unlockedAbilities: [...prev.unlockedAbilities, abilityId],
+    }))
+  }
+
+  const handleUnlockSynergy = (synergyId: string, cost: number) => {
+    if (meta.crystals < cost) return
+    updateMeta(prev => ({
+      ...prev,
+      crystals: prev.crystals - cost,
+      unlockedSynergies: [...prev.unlockedSynergies, synergyId],
+    }))
+  }
+
+  const handleConfirmHeroPick = (heroIds: string[]) => {
+    setSelectedHeroes(heroIds)
+    setScreen('game')
+  }
+
   if (!loaded) {
     return <div className="game-root" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#555' }}>加载中...</div>
   }
@@ -141,10 +176,20 @@ export default function App() {
           onBack={handleGoMenu}
           onUpgrade={handleUpgrade}
           onUnlockHero={handleUnlockHero}
+          onUnlockAbility={handleUnlockAbility}
+          onUnlockSynergy={handleUnlockSynergy}
+          onStartRun={handleStartRun}
+        />
+      )}
+      {screen === 'hero_pick' && (
+        <HeroPick
+          meta={meta}
+          onConfirm={handleConfirmHeroPick}
+          onBack={() => setScreen('menu')}
         />
       )}
       {screen === 'game' && (
-        <GameCanvas meta={meta} onRunEnd={handleRunEnd} onQuit={handleGoMenu} />
+        <GameCanvas meta={meta} heroIds={selectedHeroes} onRunEnd={handleRunEnd} onQuit={handleGoMenu} />
       )}
       {screen === 'gameover' && runResult && (
         <GameOver

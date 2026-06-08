@@ -125,3 +125,7 @@ export const SYNERGIES: SynergyDef[] = [
 ]
 
 export const SYNERGY_UNLOCK_COST = 60
+
+export const DEFAULT_SYNERGIES: string[] = [
+  'inferno_storm', 'time_stop', 'blood_fortress',
+]
