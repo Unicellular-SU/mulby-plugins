@@ -66,6 +66,7 @@ import {
   type ImageHistoryMap
 } from './services/imageHistory'
 import { type BubbleRect } from './services/bubble'
+import { isReasoningModel } from './services/ai'
 import { requestCompletion } from './services/completion'
 import { findMatches, replaceAll as replaceAllInText, replaceRange, type SearchMatch } from './services/search'
 import {
@@ -99,6 +100,9 @@ const STORAGE_DRAFT_KEY = 'draft:markdown-editor:v1'
 const STORAGE_SESSION_KEY = 'session:markdown-editor:v1'
 const STORAGE_CHROME_KEY = 'ui:markdown-editor:chrome-collapsed:v1'
 const STORAGE_AI_MODEL_KEY = 'ai:markdown-editor:model:v1'
+// Inline-completion model is kept separate from the main AI model so users can
+// point autocomplete at a fast, non-reasoning model (reasoning models are slow).
+const STORAGE_AI_COMPLETION_MODEL_KEY = 'ai:markdown-editor:completion-model:v1'
 const STORAGE_AI_IMAGE_MODEL_KEY = 'ai:markdown-editor:image-model:v1'
 const STORAGE_AI_IMAGE_HISTORY_KEY = 'ai:markdown-editor:image-history:v1'
 const STORAGE_LEFT_TAB_KEY = 'ui:markdown-editor:left-tab:v1'
@@ -372,6 +376,12 @@ export default function App() {
   // polish/translate stay coherent (pronouns / terminology / tone).
   const [aiContext, setAiContext] = useState('')
   const [aiModel, setAiModel] = useState('')
+  // '' means "follow the main AI model"; otherwise a dedicated inline-completion model.
+  const [completionModel, setCompletionModel] = useState('')
+  // modelId -> isReasoning, so inline completion can disable "thinking" on
+  // reasoning models (keeps autocomplete fast). Sourced from the host's
+  // models.dev-backed capabilities.
+  const [modelReasoningMap, setModelReasoningMap] = useState<Record<string, boolean>>({})
   const [imageGenOpen, setImageGenOpen] = useState(false)
   const [imageGenPrompt, setImageGenPrompt] = useState('')
   const [imageModel, setImageModel] = useState('')
@@ -958,7 +968,8 @@ export default function App() {
           savedImageModel,
           savedImageHistory,
           savedLeftTab,
-          savedCompletion
+          savedCompletion,
+          savedCompletionModel
         ] = await Promise.all([
           storage.get(STORAGE_SESSION_KEY),
           draftStorage.loadDraft(),
@@ -967,7 +978,8 @@ export default function App() {
           storage.get(STORAGE_AI_IMAGE_MODEL_KEY),
           storage.get(STORAGE_AI_IMAGE_HISTORY_KEY),
           storage.get(STORAGE_LEFT_TAB_KEY),
-          storage.get(STORAGE_COMPLETION_KEY)
+          storage.get(STORAGE_COMPLETION_KEY),
+          storage.get(STORAGE_AI_COMPLETION_MODEL_KEY)
         ])
 
         if (!cancelled) {
@@ -978,6 +990,9 @@ export default function App() {
           }
           if (typeof savedModel === 'string') {
             setAiModel(savedModel)
+          }
+          if (typeof savedCompletionModel === 'string') {
+            setCompletionModel(savedCompletionModel)
           }
           if (typeof savedImageModel === 'string') {
             setImageModel(savedImageModel)
@@ -1743,12 +1758,58 @@ export default function App() {
     void storage.set(STORAGE_AI_MODEL_KEY, model).catch(() => undefined)
   }, [storage])
 
+  const handleCompletionModelChange = useCallback((model: string) => {
+    setCompletionModel(model)
+    void storage.set(STORAGE_AI_COMPLETION_MODEL_KEY, model).catch(() => undefined)
+  }, [storage])
+
+  // Load model capabilities once so inline completion can detect reasoning models
+  // (to disable their "thinking" and keep autocomplete fast).
+  useEffect(() => {
+    if (!ai.allModels) {
+      return
+    }
+    let cancelled = false
+    void ai
+      .allModels()
+      .then((list) => {
+        if (cancelled || !Array.isArray(list)) {
+          return
+        }
+        const map: Record<string, boolean> = {}
+        for (const item of list) {
+          if (item?.id) {
+            map[item.id] = isReasoningModel(item)
+          }
+        }
+        setModelReasoningMap(map)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [ai])
+
   // Fetches an inline ghost-text completion using the current AI model. Forwards
   // streaming partials so the ghost text grows as it generates.
+  // Inline completion uses its own model when set, falling back to the main AI
+  // model — so users can point autocomplete at a fast, non-reasoning model. If a
+  // reasoning model is used anyway, disable its "thinking" so it stays responsive.
   const requestInlineCompletion = useCallback(
-    (prefix: string, suffix: string, signal: AbortSignal, onPartial?: (text: string) => void) =>
-      requestCompletion(ai, aiModel || undefined, prefix, suffix, signal, onPartial),
-    [ai, aiModel]
+    (prefix: string, suffix: string, signal: AbortSignal, onPartial?: (text: string) => void) => {
+      const model = completionModel || aiModel || undefined
+      const reasoning = model ? modelReasoningMap[model] === true : false
+      return requestCompletion(
+        ai,
+        model,
+        prefix,
+        suffix,
+        signal,
+        onPartial,
+        reasoning ? { thinking: 'disabled' } : undefined
+      )
+    },
+    [ai, completionModel, aiModel, modelReasoningMap]
   )
 
   const toggleInlineCompletion = useCallback(() => {
@@ -2806,6 +2867,10 @@ export default function App() {
         contextText={aiContext}
         model={aiModel}
         onModelChange={handleAiModelChange}
+        completionModel={completionModel}
+        onCompletionModelChange={handleCompletionModelChange}
+        completionEnabled={completionEnabled}
+        onToggleCompletion={toggleInlineCompletion}
         onReplaceSelection={handleAiReplaceSelection}
         onInsert={handleAiInsert}
         onCopy={handleAiCopy}

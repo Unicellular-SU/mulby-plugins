@@ -7,11 +7,22 @@ import {
   buildRefinePrompt,
   extractAiText,
   getAiAction,
+  isReasoningModel,
   runAiAction,
   stripCodeFence,
   type AiChunk,
   type AiClient
 } from './ai'
+
+// isReasoningModel: trust the host's (models.dev-backed) reasoning capability flag.
+{
+  assert.equal(isReasoningModel({ capabilities: [{ type: 'reasoning' }] }), true)
+  assert.equal(isReasoningModel({ capabilities: [{ type: 'text' }, { type: 'reasoning' }] }), true)
+  assert.equal(isReasoningModel({ capabilities: [{ type: 'text' }, { type: 'function_calling' }] }), false)
+  assert.equal(isReasoningModel({ capabilities: [] }), false)
+  assert.equal(isReasoningModel({}), false)
+  assert.equal(isReasoningModel(undefined), false)
+}
 
 // Action metadata is well-formed
 assert.ok(AI_ACTIONS.length >= 5)

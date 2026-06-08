@@ -264,12 +264,33 @@ export interface AiCallOption {
   [key: string]: unknown
 }
 
+export interface AiModelCapabilityInfo {
+  type?: string
+  isUserSelected?: boolean
+}
+
+export interface AiModelListItem {
+  id?: string
+  label?: string
+  capabilities?: AiModelCapabilityInfo[]
+}
+
 export interface AiClient {
   call: (
     option: AiCallOption,
     onChunk?: (chunk: unknown) => void
   ) => Promise<unknown> & { abort?: () => void }
-  allModels?: () => Promise<Array<{ id?: string; label?: string }>>
+  allModels?: () => Promise<AiModelListItem[]>
+}
+
+/**
+ * True when the host reports the model as reasoning-capable. The host sources
+ * this from models.dev (authoritative) + a name heuristic, so the flag is
+ * reliable (e.g. deepseek-chat is correctly NOT reasoning). Reasoning models
+ * "think" before answering and are too slow for inline autocomplete.
+ */
+export function isReasoningModel(model: { capabilities?: AiModelCapabilityInfo[] } | undefined): boolean {
+  return !!model?.capabilities?.some((cap) => cap?.type === 'reasoning')
 }
 
 export interface RunAiActionOptions {
@@ -280,6 +301,14 @@ export interface RunAiActionOptions {
   onDelta?: (text: string) => void
   /** Receives reasoning deltas (optional, e.g. for a thinking indicator). */
   onReasoning?: (text: string) => void
+  /**
+   * Turn the model's "thinking" on/off where supported (host forwards to the
+   * provider). Used by inline completion to disable thinking on reasoning models
+   * so autocomplete stays fast.
+   */
+  thinking?: 'enabled' | 'disabled'
+  /** Reasoning effort for reasoning-capable models (lower = faster). */
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'max'
 }
 
 export interface RunAiActionResult {
@@ -322,7 +351,11 @@ export function runAiAction(options: RunAiActionOptions): AiRequestHandle {
       mcp: { mode: 'off' },
       skills: { mode: 'off' },
       maxToolSteps: 1,
-      params: { temperature: 0.4 }
+      params: {
+        temperature: 0.4,
+        ...(options.reasoningEffort ? { reasoningEffort: options.reasoningEffort } : {}),
+        ...(options.thinking ? { thinking: options.thinking } : {})
+      }
     },
     (raw: unknown) => {
       if (aborted) {

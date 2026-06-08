@@ -1815,6 +1815,89 @@ button {
   gap: 12px;
 }
 
+/* AI panel header: gear (settings) + close grouped on the right. */
+.ai-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-close-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Inline-completion settings page (gear view). */
+.ai-settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0 6px;
+}
+
+.ai-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ai-settings-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ai-settings-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ai-settings-field {
+  flex: none;
+}
+
+/* On/off switch for the inline-completion toggle. */
+.ai-switch {
+  flex: none;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--border-strong);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.ai-switch.is-on {
+  background: var(--accent);
+}
+
+.ai-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s ease;
+}
+
+.ai-switch.is-on .ai-switch-knob {
+  transform: translateX(18px);
+}
+
 .ai-field {
   display: flex;
   flex-direction: column;

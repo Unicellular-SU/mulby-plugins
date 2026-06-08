@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Copy, CornerDownLeft, Loader2, Replace, Sparkles, Square, X } from 'lucide-react'
+import { Copy, CornerDownLeft, Loader2, Replace, Settings, Sparkles, Square, X } from 'lucide-react'
 import {
   AI_ACTIONS,
   REFINE_PRESETS,
@@ -7,6 +7,7 @@ import {
   buildPrompt,
   buildRefinePrompt,
   getAiAction,
+  isReasoningModel,
   runAiAction,
   stripCodeFence,
   type AiActionId,
@@ -18,6 +19,8 @@ import { diffTokens } from '../services/diff'
 export interface AiModelOption {
   id: string
   label: string
+  /** Model advertises the reasoning capability → slow for inline autocomplete. */
+  reasoning?: boolean
 }
 
 interface AiPanelProps {
@@ -32,6 +35,13 @@ interface AiPanelProps {
   /** Persisted model id; '' means "host default". */
   model: string
   onModelChange: (model: string) => void
+  /** Inline-completion model id; '' means "follow the main model". */
+  completionModel: string
+  onCompletionModelChange: (model: string) => void
+  /** Whether inline AI completion (ghost text) is currently on. */
+  completionEnabled: boolean
+  /** Toggle inline AI completion on/off (persisted by App). */
+  onToggleCompletion: () => void
   /** Replace the current editor selection with text (undoable in App). */
   onReplaceSelection: (text: string) => void
   /** Insert text after the current selection / cursor (undoable in App). */
@@ -51,12 +61,18 @@ export function AiPanel({
   contextText,
   model,
   onModelChange,
+  completionModel,
+  onCompletionModelChange,
+  completionEnabled,
+  onToggleCompletion,
   onReplaceSelection,
   onInsert,
   onCopy,
   onNotify,
   onClose
 }: AiPanelProps) {
+  // 'actions' = run AI on text; 'settings' = inline-completion toggle + model.
+  const [view, setView] = useState<'actions' | 'settings'>('actions')
   const [action, setAction] = useState<AiActionId>('polish')
   const [language, setLanguage] = useState<string>(TRANSLATE_LANGUAGES[1].value)
   const [instruction, setInstruction] = useState('')
@@ -88,7 +104,11 @@ export function AiPanel({
       const normalized = Array.isArray(list)
         ? list
             .filter((item) => item?.id)
-            .map((item) => ({ id: item.id as string, label: item.label || (item.id as string) }))
+            .map((item) => ({
+              id: item.id as string,
+              label: item.label || (item.id as string),
+              reasoning: isReasoningModel(item)
+            }))
         : []
       setModels(normalized)
     } catch (error) {
@@ -114,6 +134,7 @@ export function AiPanel({
       setRefineText('')
       setDiffView(false)
       setReasoning('')
+      setView('actions')
     }
   }, [open])
 
@@ -233,6 +254,13 @@ export function AiPanel({
 
   const trimmedOutput = output.trim()
   const canApply = !running && trimmedOutput.length > 0
+  const modelOptionLabel = (item: AiModelOption) =>
+    item.reasoning ? `${item.label}（推理 · 较慢）` : item.label
+  // The model inline completion actually uses (its own, else the main model).
+  const effectiveCompletionId = completionModel || model
+  const effectiveCompletionReasoning = effectiveCompletionId
+    ? !!models.find((item) => item.id === effectiveCompletionId)?.reasoning
+    : false
 
   return (
     <div className="confirm-overlay" role="presentation" onClick={onClose}>
@@ -246,19 +274,81 @@ export function AiPanel({
         <div className="confirm-dialog-header ai-dialog-header">
           <h2 id="ai-dialog-title" className="confirm-dialog-title ai-dialog-title">
             <Sparkles size={16} />
-            AI 助手
+            {view === 'settings' ? 'AI 设置' : 'AI 助手'}
           </h2>
-          <button
-            type="button"
-            className="ai-close-btn"
-            aria-label="关闭"
-            title="关闭"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={onClose}
-          >
-            <X size={16} />
-          </button>
+          <div className="ai-header-actions">
+            <button
+              type="button"
+              className={`ai-close-btn${view === 'settings' ? ' is-active' : ''}`}
+              aria-label="行内补全设置"
+              aria-pressed={view === 'settings'}
+              title="行内补全设置"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => setView((prev) => (prev === 'settings' ? 'actions' : 'settings'))}
+            >
+              <Settings size={16} />
+            </button>
+            <button
+              type="button"
+              className="ai-close-btn"
+              aria-label="关闭"
+              title="关闭"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={onClose}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
+
+        {view === 'settings' ? (
+          <div className="ai-settings-page">
+            <div className="ai-settings-row">
+              <div className="ai-settings-text">
+                <span className="ai-settings-title">行内 AI 补全（ghost text）</span>
+                <span className="ai-settings-desc">编辑时停顿，光标处给出灰色续写建议，Tab 接受</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={completionEnabled}
+                className={`ai-switch${completionEnabled ? ' is-on' : ''}`}
+                title={completionEnabled ? '点击关闭' : '点击开启'}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={onToggleCompletion}
+              >
+                <span className="ai-switch-knob" />
+              </button>
+            </div>
+            <label className="ai-field ai-field-model ai-settings-field">
+              <span className="ai-field-label">行内补全模型</span>
+              <select
+                className="ai-select"
+                value={completionModel}
+                onChange={(event) => onCompletionModelChange(event.target.value)}
+                disabled={loadingModels}
+              >
+                <option value={MODEL_DEFAULT_VALUE}>跟随主模型</option>
+                {models.map((item) => (
+                  <option key={item.id} value={item.id}>{modelOptionLabel(item)}</option>
+                ))}
+              </select>
+            </label>
+            <p className="ai-action-hint">
+              {effectiveCompletionReasoning ? (
+                <span className="ai-hint-warn">
+                  当前补全用的是推理模型，逐字补全会很慢——建议选一个普通（非推理）的快速模型。
+                </span>
+              ) : (
+                <span className="ai-hint-muted">
+                  行内（Tab）补全延迟敏感，建议用快速的普通模型；留空＝跟随主模型。
+                </span>
+              )}
+              {loadingModels && <span className="ai-hint-muted">（正在加载模型列表…）</span>}
+            </p>
+          </div>
+        ) : (
+        <>
 
         <div className="ai-actions-row" role="tablist" aria-label="AI 操作">
           {AI_ACTIONS.map((item) => (
@@ -307,7 +397,7 @@ export function AiPanel({
             >
               <option value={MODEL_DEFAULT_VALUE}>默认模型</option>
               {models.map((item) => (
-                <option key={item.id} value={item.id}>{item.label}</option>
+                <option key={item.id} value={item.id}>{modelOptionLabel(item)}</option>
               ))}
             </select>
           </label>
@@ -471,6 +561,8 @@ export function AiPanel({
                 ? '思考中，可随时停止'
                 : '生成中，可随时停止'}
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

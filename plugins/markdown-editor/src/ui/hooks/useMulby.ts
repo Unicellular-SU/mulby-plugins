@@ -25,11 +25,19 @@ interface AiCallOption {
 
 type AiCallResult = Promise<unknown> & { abort?: () => void }
 
+interface AiModelCapabilityInfo {
+  type?: string
+  isUserSelected?: boolean
+}
+
 interface AiModelInfo {
   id?: string
   label?: string
   endpointType?: string
   supportedEndpointTypes?: string[]
+  // Per-model capabilities (e.g. { type: 'reasoning' }) — used to flag slow
+  // reasoning models in the inline-completion picker. Populated by the host.
+  capabilities?: AiModelCapabilityInfo[]
 }
 
 interface AiImageGenInput {

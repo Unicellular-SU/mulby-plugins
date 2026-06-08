@@ -67,13 +67,20 @@ export function nextRevealLength(shown: number, targetLen: number): number {
  * cancels the underlying AI request. `onPartial` (optional) receives the growing
  * suggestion as it streams in, so the caller can show ghost text immediately.
  */
+export interface CompletionOptions {
+  /** Disable model "thinking" (for reasoning models) so completion stays fast. */
+  thinking?: 'enabled' | 'disabled'
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'max'
+}
+
 export async function requestCompletion(
   ai: AiClient,
   model: string | undefined,
   prefix: string,
   suffix: string,
   signal: AbortSignal,
-  onPartial?: (text: string) => void
+  onPartial?: (text: string) => void,
+  options?: CompletionOptions
 ): Promise<string> {
   if (signal.aborted) {
     return ''
@@ -83,6 +90,8 @@ export async function requestCompletion(
     ai,
     model,
     prompt: buildCompletionPrompt(prefix, suffix),
+    thinking: options?.thinking,
+    reasoningEffort: options?.reasoningEffort,
     onDelta: onPartial
       ? (delta) => {
           acc += delta
