@@ -782,7 +782,7 @@ export function VibePanel({
       const c = normalizeContract(parsed, desc)
       setContract(c)
       setStage(1)
-      if (sid) appendMessage(sid, mkMsg('assistant', `插件设定（契约）已就绪：${c.displayName}——${contractSummary(c)}。在下方对话点「确认并生成」我就开始写代码；想改设定可点顶部「详情」展开编辑。`))
+      if (sid) appendMessage(sid, mkMsg('assistant', `插件设定（契约）已就绪：${c.displayName}——${contractSummary(c)}。在对话里点「确认并生成」我就开始写代码；想改设定可点顶部「详情」展开编辑。`))
       addLog('success', `✔ [Vibe] 契约已生成：${contractSummary(c)}`)
     } catch (e) {
       const c = defaultContract(desc)
@@ -836,7 +836,7 @@ export function VibePanel({
       }
       setContract(c)
       setStage(1)
-      if (sid) appendMessage(sid, mkMsg('assistant', `已读取「${c.displayName}」的现状。改动设定：${c.editSummary || desc}。在下方对话点「确认并生成」我就开始改。`))
+      if (sid) appendMessage(sid, mkMsg('assistant', `已读取「${c.displayName}」的现状。改动设定：${c.editSummary || desc}。在对话里点「确认并生成」我就开始改。`))
       addLog('success', `✔ [Vibe] 改造契约已读入：${c.displayName}（${c.pluginId}）`)
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '分析失败')
@@ -2288,21 +2288,22 @@ export function VibePanel({
       </header>
 
       <div className="flex flex-1 min-h-0">
-        {/* 主区：项目设置(仅描述阶段) + 对话主线 */}
+        {/* 项目设置：描述阶段作为左侧栏，让对话主区始终保持全高、不被上下挤压 */}
+        {stage === 0 && !contract && (
+          <aside className="w-64 shrink-0 overflow-auto border-r border-slate-200 dark:border-slate-800 bg-white/40 dark:bg-slate-900/30 px-4 py-4 anim-in">
+            <DescribeStage
+              vibeMode={vibeMode} setVibeMode={setVibeMode}
+              targetDir={targetDir} setTargetDir={setTargetDir}
+              editPath={editPath} setEditPath={setEditPath}
+              knownPlugins={knownPlugins}
+              showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
+              genDepth={genDepth} setGenDepth={setGenDepth}
+              onPickDir={onPickDir} disabled={busy}
+            />
+          </aside>
+        )}
+        {/* 对话主线（全高，主交互）*/}
         <main className="flex-1 min-w-0 flex flex-col">
-          {stage === 0 && !contract && (
-            <div className="shrink-0 max-h-[45%] overflow-auto border-b border-slate-200 dark:border-slate-800 px-5 py-4 anim-in">
-              <DescribeStage
-                vibeMode={vibeMode} setVibeMode={setVibeMode}
-                targetDir={targetDir} setTargetDir={setTargetDir}
-                editPath={editPath} setEditPath={setEditPath}
-                knownPlugins={knownPlugins}
-                showAdvanced={showAdvanced} setShowAdvanced={setShowAdvanced}
-                genDepth={genDepth} setGenDepth={setGenDepth}
-                onPickDir={onPickDir} disabled={busy}
-              />
-            </div>
-          )}
           <div className="flex-1 min-h-0">
             <ChatPanel
               onSend={handleChatSend}
@@ -2435,7 +2436,7 @@ function DescribeStage({
           {isEdit ? <Pencil size={20} className="text-emerald-500" /> : <Lightbulb size={20} className="text-emerald-500" />}
         </div>
         <div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{isEdit ? '选一个插件，在下方对话说要改什么' : '设好目标，在下方对话描述你的插件'}</h2>
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{isEdit ? '选一个插件，在对话里说要改什么' : '设好目标，在对话里描述你的插件'}</h2>
           <p className="text-[11px] text-slate-400 dark:text-slate-500">{isEdit ? 'AI 会读懂现有代码，按需改写、构建并重新载入' : '先确认结构化「契约」，再由 AI 实现、构建、载入'}</p>
         </div>
       </div>
@@ -2469,7 +2470,7 @@ function DescribeStage({
         </Field>
       )}
 
-      <Field label="生成方式" hint={genDepth === 'full' ? '一次性生成尽量完整、开箱即用的版本（推荐）' : '先生成能跑通的最小骨架，之后在下方对话里说「继续完善」即可逐步补全（适合复杂/不确定需求）'}>
+      <Field label="生成方式" hint={genDepth === 'full' ? '一次性生成尽量完整、开箱即用的版本（推荐）' : '先生成能跑通的最小骨架，之后在对话里说「继续完善」即可逐步补全（适合复杂/不确定需求）'}>
         <div className="inline-flex p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/70">
           <ModeBtn active={genDepth === 'full'} disabled={disabled} onClick={() => setGenDepth('full')} icon={<Rocket size={14} />} label="完整实现" />
           <ModeBtn active={genDepth === 'minimal'} disabled={disabled} onClick={() => setGenDepth('minimal')} icon={<Lightbulb size={14} />} label="最小可跑" />
@@ -2480,8 +2481,8 @@ function DescribeStage({
         <Sparkles size={15} className="text-emerald-500 shrink-0 mt-0.5" />
         <span>
           {isEdit
-            ? '选好上面的插件后，在下方对话框直接说要改什么（例如「界面改成暗色，并加一个复制按钮」），我会读懂代码再改写。'
-            : '设好目标目录与生成方式后，在下方对话框用一句话描述你想要的插件，我会先帮你想几个方向，挑一个就开始生成。'}
+            ? '选好上面的插件后，在对话框直接说要改什么（例如「界面改成暗色，并加一个复制按钮」），我会读懂代码再改写。'
+            : '设好目标目录与生成方式后，在对话框用一句话描述你想要的插件，我会先帮你想几个方向，挑一个就开始生成。'}
         </span>
       </div>
 
@@ -2490,7 +2491,7 @@ function DescribeStage({
       </button>
       {showAdvanced && (
         <div className="text-[12px] text-slate-500 dark:text-slate-400 rounded-lg border border-slate-200 dark:border-slate-700 p-3 leading-relaxed">
-          下一步会生成一份可编辑的「契约」（功能/触发词/模式/权限），确认后由本工具确定性写出 manifest.json，再让 AI 实现代码并立即构建载入。生成方式为「完整实现」时一次性产出可用版本；「最小可跑」则先产出最小骨架，之后在下方对话里继续描述需求即可逐步完善（构建若没通过可一键「AI 修复」，也能「打开调试」）。
+          下一步会生成一份可编辑的「契约」（功能/触发词/模式/权限），确认后由本工具确定性写出 manifest.json，再让 AI 实现代码并立即构建载入。生成方式为「完整实现」时一次性产出可用版本；「最小可跑」则先产出最小骨架，之后在对话里继续描述需求即可逐步完善（构建若没通过可一键「AI 修复」，也能「打开调试」）。
         </div>
       )}
     </div>
