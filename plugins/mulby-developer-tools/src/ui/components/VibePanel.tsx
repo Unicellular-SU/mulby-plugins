@@ -1441,7 +1441,8 @@ export function VibePanel({
 
   /**
    * 生成/重新生成插件图标。
-   * - force=false（自动路径）：尊重 needIcon，已存在 icon.png 则跳过，避免每次构建都重画。
+   * - force=false（自动路径）：尊重 needIcon，已生成过 AI 图标（存在 assets/icon.svg）则跳过，避免每次构建都重画。
+   *   注意：不能用 icon.png 判断——脚手架模板自带默认 icon.png，否则会永远跳过、AI 图标从不生成。
    * - force=true（交付页按钮 / 对话「重做图标」）：忽略已存在的图标，按主题+功能（+风格补充）重画并覆盖。
    * - announce=true：把开始/结果回流到右侧对话，让用户在对话里看到这一步。
    */
@@ -1452,11 +1453,12 @@ export function VibePanel({
     const fs = fsApi()
     if (!force) {
       if (!contract.needIcon) return
-      // 自动路径：已存在则跳过（避免每次构建/交付都重新调 AI）
+      // 自动路径：以「是否已生成过 AI 图标」为准（assets/icon.svg 是 AI 生成时写下的来源标记），
+      // 而非 icon.png —— 脚手架模板自带默认 icon.png，若按它判断会导致永远跳过、AI 图标从不生成。
       try {
-        if (fs?.exists && await fs.exists(`${createdPath}/icon.png`)) {
+        if (fs?.exists && await fs.exists(`${createdPath}/assets/icon.svg`)) {
           setIconDone(true); void loadIconPreview()
-          pushEvent('icon', 'note', '已存在 icon.png，跳过重复生成')
+          pushEvent('icon', 'note', '已有 AI 生成的图标（assets/icon.svg），跳过重复生成')
           return
         }
       } catch { /* 探测失败则照常尝试生成 */ }
@@ -1492,9 +1494,13 @@ export function VibePanel({
       addLog('info', `⏱ [Vibe] 图标 SVG 生成 ${secs(svgMs)}${svg ? '' : '（未拿到可用 SVG）'}`)
       if (abortedRef.current) { pushEvent('icon', 'note', '已停止图标生成'); return }
       const sharp = sharpApi()
+      // 有可用 SVG 就先写下 assets/icon.svg —— 它既是图标来源，也是「已生成过 AI 图标」的判定标记。
+      // 不依赖 sharp：即使后续渲染失败/走图像模型回退，标记也已写入，自动路径下次能正确跳过、不再重复生成。
+      if (svg) {
+        try { await fs?.mkdir?.(`${createdPath}/assets`); await fs?.writeFile?.(`${createdPath}/assets/icon.svg`, svg) } catch { /* 可选：写源失败不影响 png 产出 */ }
+      }
       if (svg && typeof sharp === 'function') {
         try {
-          try { await fs?.writeFile?.(`${createdPath}/assets/icon.svg`, svg) } catch { /* 可选 */ }
           const bytes = new TextEncoder().encode(svg)
           const tRender = Date.now()
           await sharp(bytes).resize(512, 512, { fit: 'contain', background: { r: 0, g: 0, b: 0, alpha: 0 } }).png().toFile(`${createdPath}/icon.png`)
