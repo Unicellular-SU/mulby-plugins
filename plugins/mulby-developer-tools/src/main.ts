@@ -757,7 +757,10 @@ export const rpc = {
   publish_collect(input: { root?: string }) {
     const root = resolve(String(input?.root || sessionRoot || '').trim())
     if (!root || !existsSync(root)) throw new Error('插件目录不存在')
-    const IGNORE_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.vite', '.codegraph', 'ui', '.vibe-backup', '.turbo', 'coverage', '.idea', '.vscode', '.next', 'out'])
+    const IGNORE_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.vite', '.codegraph', '.vibe-backup', '.turbo', 'coverage', '.idea', '.vscode', '.next', 'out'])
+    // 仅在插件根目录排除的构建产物目录：根级 ui/（vite 产物，manifest.ui 指向它，CI 会重建）。
+    // 关键：不能放进 IGNORE_DIRS——那是按目录名在任意层级匹配，会把源码目录 src/ui/ 一并误删。
+    const IGNORE_ROOT_DIRS = new Set(['ui'])
     const IGNORE_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', '.DS_Store', 'Thumbs.db'])
     const isIgnoredFile = (n: string) => IGNORE_FILES.has(n) || /\.(inplugin|log|tsbuildinfo)$/i.test(n) || /^\.env(\..+)?$/i.test(n)
     const BINARY_RE = /\.(png|jpe?g|gif|webp|ico|icns|bmp|tiff?|ttf|otf|woff2?|eot|wasm|node|zip|gz|tgz|rar|7z|pdf|mp[34]|wav|mov|webm|m4a|svgz)$/i
@@ -774,7 +777,12 @@ export const rpc = {
         let st: ReturnType<typeof statSync>
         try { st = statSync(full) } catch { continue }
         const rel = relative(root, full).split(sep).join('/')
-        if (st.isDirectory()) { if (!IGNORE_DIRS.has(name)) walkCollect(full); continue }
+        if (st.isDirectory()) {
+          if (IGNORE_DIRS.has(name)) continue
+          if (dir === root && IGNORE_ROOT_DIRS.has(name)) continue // 根级构建产物 ui/ 排除，但保留 src/ui/ 源码
+          walkCollect(full)
+          continue
+        }
         if (isIgnoredFile(name)) continue
         if (st.size > MAX_FILE) { skipped.push({ path: rel, reason: `文件过大（${st.size} 字节）` }); continue }
         const isBin = BINARY_RE.test(name)
