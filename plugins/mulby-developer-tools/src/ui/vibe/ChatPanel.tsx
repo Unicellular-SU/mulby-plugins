@@ -313,8 +313,9 @@ export function ChatPanel({
                       <RefreshCw size={11} /> 重新规划
                     </button>
                   </div>
+                  <div className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">想调整？直接在下面说出想改的地方，我会按你的意见重新规划。</div>
                   {plan && plan.some((t) => t.status === 'done' || t.status === 'failed') && (
-                    <div className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">上次未跑完，点「继续执行」接着完成。</div>
+                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">上次未跑完，点「继续执行」接着完成。</div>
                   )}
                 </>
               )}

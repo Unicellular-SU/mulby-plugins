@@ -189,8 +189,8 @@ const VIBE_TOOLS = [
 const VIBE_READ_TOOLS = VIBE_TOOLS.filter((t) => ['list_dir', 'read_file', 'grep'].includes(t.function.name))
 
 export type VibeIntent = 'ask' | 'create' | 'modify' | 'run' | 'package' | 'rollback' | 'icon'
-// LLM 路由可选动作：在意图之外多一个「resume（继续未完成任务）」
-export type RouteAction = VibeIntent | 'resume'
+// LLM 路由可选动作：在意图之外多「resume（继续未完成任务）」与「replan（带意见重新规划计划）」
+export type RouteAction = VibeIntent | 'resume' | 'replan'
 
 /**
  * 规则优先的意图识别（零延迟、零成本）。模糊时降级为 'ask'（只读问答），杜绝擅自改代码。
@@ -1140,30 +1140,48 @@ export function VibePanel({
   }
 
   // 契约确认后 → 制定开发计划（不立即生成）。成功则进入 review 等用户「开始执行」；失败回退直接生成。
-  const generatePlan = async () => {
+  // opts.feedback：用户在「计划审阅」阶段用对话提出的调整意见 → 带着上一版计划与意见重新规划（而不是直接执行）。
+  const generatePlan = async (opts?: { feedback?: string }) => {
     if (!contract || aiActive) return
+    const feedback = opts?.feedback?.trim()
+    const prevPlan = feedback ? plan : [] // 重新规划：保留上一版计划作为上下文（也用于失败回滚）
     setBrainstorm(null)
-    recordMessage(mkMsg('user', '确认设定，先制定开发计划', { intent: 'create' }))
+    // 重新规划由用户的真实对话消息触发（已记录），不再补「确认设定」这条合成消息
+    if (!feedback) recordMessage(mkMsg('user', '确认设定，先制定开发计划', { intent: 'create' }))
     planPreparedRef.current = false
     setPlan([])
     setPlanPhase('planning')
     setPlanning(true)
     resetAbort()
     try {
-      addLog('info', '▶ [Vibe] AI 正在制定开发计划…')
+      addLog('info', feedback ? '▶ [Vibe] AI 正在按你的意见重新制定开发计划…' : '▶ [Vibe] AI 正在制定开发计划…')
       // planListPrompt 自带 Mulby 平台说明与能力提示，已足够；不再注入完整 API 清单（会撑大这次 JSON 抽取、易让模型跑偏）。
       // 改造模式仍注入 CodeGraph 现有结构，让计划基于真实代码而非盲拆。完整 API 清单在执行阶段(executePlan)注入。
       let planUser = planListPrompt(contract)
+      if (feedback) {
+        planUser += '\n\n———— 重新规划（用户对上一版计划提出了调整意见）————\n上一版开发计划：\n'
+          + (prevPlan.length ? prevPlan.map((t, i) => `${i + 1}. ${t.title}${t.detail ? `（${t.detail}）` : ''}`).join('\n') : '（无）')
+          + `\n用户的调整意见：${feedback}\n请在合理保留原计划的基础上，按用户意见调整后重新输出完整的开发计划（仍是 JSON；步骤数可增减）。`
+      }
       if (contract.isEdit) {
         const editRoot = contract.targetPath || editPath
         if (editRoot) planUser = await injectCgContext(editRoot, contract.editSummary || sentence, 'full', planUser)
       }
-      if (abortedRef.current) { setPlanPhase('idle'); addLog('info', '⏹ [Vibe] 已停止制定计划'); return }
+      if (abortedRef.current) { if (feedback) { setPlan(prevPlan); setPlanPhase('review') } else setPlanPhase('idle'); addLog('info', '⏹ [Vibe] 已停止制定计划'); return }
       let parsed: any = null
       try { parsed = await aiJson('你是严格的 JSON 生成器，只输出可解析的 JSON 对象。', planUser) } catch { /* fallback below */ }
-      if (abortedRef.current) { setPlanPhase('idle'); addLog('info', '⏹ [Vibe] 已停止制定计划'); return }
+      if (abortedRef.current) { if (feedback) { setPlan(prevPlan); setPlanPhase('review') } else setPlanPhase('idle'); addLog('info', '⏹ [Vibe] 已停止制定计划'); return }
       const todos = normalizePlan(parsed)
       if (!todos.length) {
+        if (feedback) {
+          // 重新规划失败：保留上一版计划，回到 review，让用户再说一次或直接执行（不擅自全量生成）
+          addLog('warn', '⚠ [Vibe] 重新规划未解析出步骤，沿用上一版计划')
+          setPlan(prevPlan)
+          setPlanPhase('review')
+          recordMessage(mkMsg('assistant', '抱歉，这次没能按你的意见重排出计划，先沿用上一版。你可以再说一次想怎么调整，或点「开始执行」。'))
+          setPlanning(false)
+          return
+        }
         addLog('warn', '⚠ [Vibe] 计划未解析出步骤，转为直接完整实现')
         setPlanPhase('idle')
         recordMessage(mkMsg('assistant', '没能拆出分步计划，我直接开始完整实现。'))
@@ -1173,9 +1191,17 @@ export function VibePanel({
       }
       setPlan(todos)
       setPlanPhase('review')
-      recordMessage(mkMsg('assistant', `我把开发拆成了 ${todos.length} 步：\n${todos.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}\n\n点「开始执行」我就按计划一步步实现，每完成一步都会勾选；也可以「重新规划」。`))
+      recordMessage(mkMsg('assistant', `${feedback ? '已按你的意见重新规划为' : '我把开发拆成了'} ${todos.length} 步：\n${todos.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}\n\n点「开始执行」我就按计划一步步实现，每完成一步都会勾选；要继续调整就直接告诉我。`))
       addLog('success', `✔ [Vibe] 开发计划已就绪：${todos.length} 步`)
     } catch (e) {
+      if (feedback) {
+        // 重新规划出错：保留上一版计划，回到 review（不擅自全量生成，避免丢掉用户正在审阅的计划）
+        setPlan(prevPlan)
+        setPlanPhase('review')
+        recordMessage(mkMsg('assistant', '重新规划时出错，先沿用上一版计划。你可以再说一次想怎么调整，或点「开始执行」。'))
+        setPlanning(false)
+        return
+      }
       setPlanPhase('idle')
       recordMessage(mkMsg('assistant', '制定计划时出错，我直接开始完整实现。'))
       setPlanning(false)
@@ -2112,23 +2138,24 @@ export function VibePanel({
     else parts.push('当前还没有插件项目')
     if (planPhase === 'planning') parts.push('正在制定开发计划')
     else if (planPhase === 'executing') parts.push('正在按计划执行')
-    else if (planPhase === 'review') parts.push('有一份开发计划待执行/可续跑（resume = 继续执行该计划）')
+    else if (planPhase === 'review') parts.push('有一份开发计划待用户确认后执行（resume = 用户认可、开始/继续执行该计划；replan = 用户对计划有修改意见、需带着意见重新规划，绝不直接执行）')
     else if (!generated && !!contract) parts.push('插件设定(契约)已就绪、尚未制定计划（resume = 开始制定计划）')
     parts.push(vibeMode === 'edit' ? '处于「改造现有插件」模式' : '处于「新建插件」模式')
     return parts.join('；')
   }
 
-  const ROUTE_ACTIONS = new Set<RouteAction>(['ask', 'create', 'modify', 'resume', 'run', 'package', 'rollback', 'icon'])
+  const ROUTE_ACTIONS = new Set<RouteAction>(['ask', 'create', 'modify', 'resume', 'replan', 'run', 'package', 'rollback', 'icon'])
 
   const routerSystemPrompt = (): string => [
     '你是 Mulby「对话式插件开发助手」的意图路由器。读懂用户最新消息（结合上面的历史对话与下面的当前状态），判断接下来应触发哪一个动作。',
-    '只输出 JSON：{"action":"ask|create|modify|resume|run|package|rollback|icon"}，不要解释、不要 Markdown。',
+    '只输出 JSON：{"action":"ask|create|modify|resume|replan|run|package|rollback|icon"}，不要解释、不要 Markdown。',
     '',
     '动作含义与选择规则：',
     '- ask：提问 / 咨询 / 要思路或方案 / 查看现状 / 排查「为什么…」。这是默认动作——只要意图不明、或更像在提问/讨论，一律选 ask（只读，绝不改代码）。带疑问语气（「…吗？」「为什么」「能不能」「怎么」）即使提到功能词也选 ask。',
     '- modify：明确要求改动「现有插件」的功能/样式/代码（祈使句，如「帮我加…」「把…改成…」「修复…」「优化某处」）。',
     '- create：明确想从零做一个「全新插件」，且当前没有正在进行的插件任务。',
-    '- resume：想继续 / 接着完成「当前未完成的任务」（如「继续」「接着做」「继续执行」「接着写」）。仅当下面【状态】标明有进行中的计划或待制定计划时才可选。',
+    '- resume：认可现状、想开始/继续执行「当前的开发计划或未完成任务」（如「继续」「接着做」「开始执行」「就这样」「可以了」）。仅当下面【状态】标明有进行中/待执行的计划或待制定计划时才可选；若用户是在对计划提意见，请改选 replan 而非 resume。',
+    '- replan：当下面【状态】标明"有一份开发计划待用户确认"时，用户对这份计划提出修改意见 / 表示不满意 / 想增删改步骤 / 调整顺序（如「第3步不对」「先做界面再写逻辑」「再加一步测试」「这计划太复杂了」「把xxx也加上」）→ 带着用户的意见重新制定计划，绝不直接开始执行。仅在该状态下可选。',
     '- run：想运行 / 打开 / 试用当前插件。',
     '- package：想打包 / 导出 / 发布插件。',
     '- rollback：想撤销 / 回滚 / 还原改动。',
@@ -2169,7 +2196,12 @@ export function VibePanel({
   // 规则兜底（AI 不可用/失败/超时）：保留原有正则作为安全网（含断点续传的「继续」识别）
   const fallbackAction = (text: string): RouteAction => {
     const reContinue = /^\s*(继续|接着|接上|往下|下一步|go ?on|continue|keep ?going|resume)/i
-    const canResume = planPhase === 'review' || (!generated && planPhase === 'idle' && !!contract)
+    // 计划审阅态：仅「纯认可/开始执行」短语 → 执行；带具体意见（任何额外内容）→ 重新规划（不执行），治"提意见却直接开跑"
+    if (planPhase === 'review') {
+      const reProceed = /^\s*(继续(执行)?|接着(做|跑|来)?|往下|下一步|开始(执行|吧|生成|做)?|执行(吧|计划)?|跑(起来|一下|吧)?|就这样|可以了?|没问题|没毛病|确认(执行)?|同意|认可|go ?on|continue|start|run( it)?|ok|okay|好的?(开始|执行)?)\s*[。.!！~、]*\s*$/i
+      return reProceed.test(text) ? 'resume' : 'replan'
+    }
+    const canResume = (!generated && planPhase === 'idle' && !!contract)
     if (canResume && reContinue.test(text)) return 'resume'
     return classifyIntent(text, { hasPlugin: !!createdPath }).intent
   }
@@ -2180,6 +2212,11 @@ export function VibePanel({
       case 'resume':
         if (!resumeInFlight()) void runAsk(t) // 无可续任务 → 退化为只读问答
         return
+      case 'replan':
+        // 计划审阅态：带着用户意见重新规划（不执行）；不在审阅态则退化（有契约待规划→制定计划，否则只读问答）
+        if (planPhase === 'review') { void generatePlan({ feedback: t }); return }
+        if (resumeInFlight()) return
+        void runAsk(t); return
       case 'ask':
         void runAsk(t); return
       case 'run':
@@ -2197,12 +2234,16 @@ export function VibePanel({
         else void runAsk(t)
         return
       case 'modify':
+        // 计划审阅态：用户的「修改」意图针对的是这份待执行计划 → 重新规划，绝不直接开跑（治"提意见却直接执行"）
+        if (planPhase === 'review') { void generatePlan({ feedback: t }); return }
         if (chatReady) { void runFollowup(t); return }
         // 任务进行中（契约/计划阶段、尚未交付）→ 接上当前阶段，避免重新规划丢失进度
         if (resumeInFlight()) return
         seedAsRequirement(t); return
       case 'create':
       default:
+        // 计划审阅态：同样当作对计划的调整 → 重新规划，绝不直接开跑
+        if (planPhase === 'review') { void generatePlan({ feedback: t }); return }
         if (chatReady) { void runFollowup(t); return }
         // 已有进行中的任务 → 接上，绝不新建项目（修复「忘记当前在做什么、又开了个新项目」）
         if (resumeInFlight()) return
@@ -2221,7 +2262,7 @@ export function VibePanel({
     if (!t || busy || aiActive || routing) return
     // 立即落消息：意图标签先用规则给个即时值（真正动作由 LLM 决定，避免等待路由才显示用户气泡）
     const provisional = fallbackAction(t)
-    recordMessage(mkMsg('user', t, { intent: provisional === 'resume' ? 'create' : provisional }))
+    recordMessage(mkMsg('user', t, { intent: provisional === 'resume' ? 'create' : provisional === 'replan' ? 'modify' : provisional }))
     let action: RouteAction = provisional
     if (ai()?.call) {
       resetAbort()
@@ -2323,11 +2364,11 @@ export function VibePanel({
               onDismissBrainstorm={() => setBrainstorm(null)}
               examples={vibeMode === 'edit' ? EDIT_EXAMPLES : EXAMPLES}
               contractPending={contractPending}
-              onConfirmGenerate={generatePlan}
+              onConfirmGenerate={() => generatePlan()}
               plan={plan}
               planPhase={planPhase}
               onStartPlan={executePlan}
-              onReplan={generatePlan}
+              onReplan={() => generatePlan()}
               pendingPrompt={pendingPrompt}
               onPromptDismiss={() => setPendingPrompt(null)}
               status={pluginStatus}
