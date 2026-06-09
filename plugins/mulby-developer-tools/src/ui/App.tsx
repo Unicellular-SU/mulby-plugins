@@ -62,6 +62,33 @@ export default function App() {
     setLogs((prev) => [...prev.slice(-199), { id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, ts: Date.now(), level, text }])
   }, [])
 
+  // F1：当前长任务（构建/打包/生成等）+ 每秒跳动的耗时，喂给底部日志栏做「实时脉冲」，消除长操作的"假死"感。
+  const [activity, setActivity] = useState<{ label: string; startedAt: number } | null>(null)
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    if (!activity) return
+    const t = setInterval(() => forceTick((n) => (n + 1) % 1_000_000), 1000)
+    return () => clearInterval(t)
+  }, [activity])
+  // 同标签不重置计时；传 null 清空（已为 null 则保持同一引用，避免无谓渲染）
+  const reportActivity = useCallback((label: string | null) => {
+    setActivity((cur) => {
+      if (!label) return cur === null ? cur : null
+      if (cur && cur.label === label) return cur
+      return { label, startedAt: Date.now() }
+    })
+  }, [])
+  const errorCount = useMemo(() => logs.filter((l) => l.level === 'error').length, [logs])
+  // F2：新增 error 日志且面板折叠时自动展开，让失败立即可见
+  const seenLogCountRef = useRef(0)
+  useEffect(() => {
+    const fresh = logs.slice(seenLogCountRef.current)
+    seenLogCountRef.current = logs.length
+    if (logCollapsed && fresh.some((l) => l.level === 'error')) setLogCollapsed(false)
+  }, [logs, logCollapsed])
+  // 切换页签时清空活动，避免上一上下文的状态滞留到另一页签
+  useEffect(() => { reportActivity(null) }, [tab, reportActivity])
+
   // 依赖恒定的 listPluginProjects（useDeveloper 内 useCallback 稳定），
   // 而非整个 dev 对象——否则 dev 在 loading 切换时变化会让 refresh 重新创建，
   // 触发下方 useEffect 反复执行，造成无限拉取与卡顿（刷新图标一直 loading）。
@@ -128,6 +155,7 @@ export default function App() {
     try {
       switch (action) {
         case 'build': {
+          reportActivity('构建并载入')
           addLog('info', `▶ 构建：${path}`)
           const r = await dev.buildPlugin(path)
           if (r.log) addLog(r.success ? 'success' : 'error', r.log)
@@ -148,6 +176,7 @@ export default function App() {
           break
         }
         case 'pack': {
+          reportActivity('打包插件')
           addLog('info', `▶ 打包：${path}`)
           const r = await dev.packPlugin(path)
           if (r.log) addLog(r.success ? 'success' : 'error', r.log)
@@ -158,6 +187,7 @@ export default function App() {
           const targetPlugin = plugin || selected.plugins[0]
           if (!targetPlugin) { pushToast('error', '该项目下无可重载插件'); break }
           const canReloadById = !!targetPlugin.loaded && !!targetPlugin.id
+          reportActivity('刷新载入')
           addLog('info', `▶ 刷新载入：${canReloadById ? targetPlugin.id : targetPlugin.path}`)
           const r = canReloadById
             ? await dev.reloadPlugin(targetPlugin.id)
@@ -223,11 +253,13 @@ export default function App() {
       pushToast('error', e instanceof Error ? e.message : '操作失败')
     } finally {
       setBusyAction(null)
+      reportActivity(null)
     }
-  }, [selected, dev, addLog, pushToast, refresh])
+  }, [selected, dev, addLog, pushToast, refresh, reportActivity])
 
   const handleCreate = useCallback(async (payload: CreatePayload) => {
     setCreating(true)
+    reportActivity('创建脚手架')
     try {
       addLog('info', `▶ 创建插件：${payload.name}（${payload.template}）→ ${payload.targetDir}`)
       const r = await dev.createPlugin(payload.targetDir, payload.name, payload.template)
@@ -243,8 +275,9 @@ export default function App() {
       pushToast('error', e instanceof Error ? e.message : '创建失败')
     } finally {
       setCreating(false)
+      reportActivity(null)
     }
-  }, [dev, addLog, pushToast, refresh])
+  }, [dev, addLog, pushToast, refresh, reportActivity])
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50 dark:bg-[#0b0d12] text-slate-800 dark:text-slate-200 overflow-hidden">
@@ -305,6 +338,8 @@ export default function App() {
               knownPlugins={knownPlugins}
               editTarget={vibeEditTarget}
               onConsumeEditTarget={() => setVibeEditTarget(null)}
+              setActivity={reportActivity}
+              active={tab === 'vibe'}
             />
           </SessionProvider>
         </div>
@@ -351,7 +386,18 @@ export default function App() {
           className="w-full h-9 px-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/50"
           onClick={() => setLogCollapsed((v) => !v)}
         >
-          <span>诊断日志（{logs.length}）</span>
+          {activity ? (
+            <span className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+              <Loader2 size={12} className="animate-spin" />
+              {activity.label} · {Math.max(0, Math.round((Date.now() - activity.startedAt) / 1000))}s
+            </span>
+          ) : errorCount > 0 ? (
+            <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+              <AlertCircle size={12} /> 诊断日志 · {errorCount} 个错误
+            </span>
+          ) : (
+            <span>诊断日志（{logs.length}）</span>
+          )}
           {logCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
         {!logCollapsed && (

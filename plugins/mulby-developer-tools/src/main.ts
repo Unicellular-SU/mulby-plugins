@@ -28,6 +28,7 @@ import { join, resolve, dirname, relative, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { validateManifestSchema } from './shared/manifestSchema'
 
 declare const __dirname: string
 
@@ -505,7 +506,10 @@ export const rpc = {
     return { truncated: false, matches }
   },
 
-  /** 在会话目录跑 `npm run build`，返回构建是否通过与日志尾部，供 AI 自检与自纠正 */
+  /**
+   * 在会话目录跑 `npm run build` + `tsc --noEmit` 类型检查，返回是否通过与日志尾部，供 AI 自检与自纠正。
+   * 关键：esbuild/vite 只转译不查类型，单靠 build 会「假绿灯」；附加的 tsc 关卡能抓出真正会导致运行时 bug 的类型错误。
+   */
   async build_check() {
     if (!sessionRoot) throw new Error('Vibe 会话未初始化：请先调用 vibe_begin({ root })')
     const cwd = sessionRoot
@@ -529,8 +533,30 @@ export const rpc = {
         child.on('close', (code) => { clearTimeout(timer); res({ code, log: out.slice(-6000) }) })
       })
 
+    // 类型检查关卡：esbuild/vite 只转译不查类型，「能 build ≠ 类型正确」。构建通过后再用 tsc 兜一道，
+    // 把会导致运行时 bug 的真实类型错误（错用 API、null/undefined、类型不匹配等）暴露给 AI 修复。
+    // 仅在有 tsconfig + 已装 typescript 时运行；放宽 unused 风格项，聚焦正确性、避免迭代中途因临时未用变量误报。
+    const typecheck = async (): Promise<{ ran: boolean; ok: boolean; log: string }> => {
+      if (!existsSync(join(cwd, 'tsconfig.json')) || !existsSync(join(cwd, 'node_modules', 'typescript'))) {
+        return { ran: false, ok: true, log: '' }
+      }
+      const r = await runCmd('npx --no-install tsc --noEmit --noUnusedLocals false --noUnusedParameters false', 120_000)
+      return { ran: true, ok: !r.timedOut && r.code === 0, log: r.log }
+    }
+    const withTypecheck = async (buildLog: string): Promise<{ success: boolean; code?: number; log: string }> => {
+      const tc = await typecheck()
+      if (tc.ran && !tc.ok) {
+        return {
+          success: false,
+          code: 2,
+          log: `${buildLog}\n\n[类型检查未通过] tsc --noEmit 发现类型错误（esbuild/vite 不会报这些，但会导致运行时 bug），请逐一修复后重新自检：\n${tc.log}`.slice(-6000)
+        }
+      }
+      return { success: true, code: 0, log: buildLog }
+    }
+
     const first = await runCmd('npm run build')
-    if (first.code === 0) return { success: true, code: 0, log: first.log }
+    if (first.code === 0) return await withTypecheck(first.log)
     // 兜底：新脚手架/未装依赖时 npm run build 会因 vite/esbuild 缺失而必失败。
     // 与宿主 buildPlugin 一致——命中依赖缺失特征则自动 npm install 后重试一次，避免 AI「自检构建」每次都失败。
     if (looksLikeMissingDeps(first.log) && !first.timedOut) {
@@ -540,7 +566,8 @@ export const rpc = {
         `${first.log}\n\n[auto-fix] 检测到依赖缺失，已自动 npm install 后重试构建\n` +
         `${install.log}\n\n[auto-fix] 重试构建结果\n${retry.log}`
       ).slice(-6000)
-      return { success: retry.code === 0, code: retry.code ?? undefined, log }
+      if (retry.code === 0) return await withTypecheck(log)
+      return { success: false, code: retry.code ?? undefined, log }
     }
     return { success: false, code: first.code ?? undefined, timedOut: first.timedOut, log: first.log }
   },
@@ -570,6 +597,12 @@ export const rpc = {
       mf = JSON.parse(readFileSync(mfPath, 'utf-8'))
     } catch {
       return { ok: false, ran: true, issues: [{ level: 'error', code: 'manifest-parse', message: 'manifest.json 无法解析（JSON 语法错误）' }] as Issue[] }
+    }
+
+    // —— Schema 校验（权威门禁）：按官方 manifest-schema.json 校验，捕获 enum/必填/多余字段/形态等不合规 ——
+    // AJV 不可用时返回空，由下方启发式检查兜底。
+    for (const si of validateManifestSchema(mf)) {
+      issues.push({ level: si.level, code: si.code, message: si.message, hint: si.hint })
     }
 
     // 收集源码文本（src/** 与根级脚本），用于「功能码被引用 / 工具已注册」的启发式检查

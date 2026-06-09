@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   Sparkles, Wand2, FolderSearch, Loader2, Check, ChevronRight, X,
   Hammer, ShieldCheck, FolderOpen, AlertTriangle,
@@ -82,6 +82,10 @@ interface Props {
   knownPlugins?: KnownPlugin[]
   editTarget?: VibeEditTarget | null
   onConsumeEditTarget?: () => void
+  /** 上报当前长任务（构建/生成等）给共享日志栏做实时耗时脉冲；传 null 表示空闲 */
+  setActivity?: (label: string | null) => void
+  /** 本面板是否为当前激活页签（仅激活时上报活动，避免隐藏页签清掉对方状态） */
+  active?: boolean
 }
 
 type Stage = 0 | 1 | 2 | 3
@@ -171,7 +175,7 @@ const VIBE_TOOLS = [
     type: 'function',
     function: {
       name: 'build_check',
-      description: '在插件目录运行 `npm run build` 自检，返回是否通过与日志尾部。写完关键改动后调用它，根据报错自行修复，直到构建通过。',
+      description: '在插件目录运行 `npm run build` + `tsc --noEmit` 类型检查自检，返回是否通过与日志尾部。注意：esbuild/vite 只转译不查类型，必须通过这里的 tsc 类型检查才算真正可用。写完关键改动后调用它，根据构建/类型报错自行修复，直到通过。',
       parameters: { type: 'object', properties: {}, additionalProperties: false }
     }
   },
@@ -288,7 +292,7 @@ const sharpApi = () => (window as any)?.mulby?.sharp
 
 export function VibePanel({
   dev, addLog, pushToast, onPickDir, onAfterCreate, onSyncWorkbench,
-  knownPlugins = [], editTarget, onConsumeEditTarget
+  knownPlugins = [], editTarget, onConsumeEditTarget, setActivity, active = true
 }: Props) {
   const [stage, setStage] = useState<Stage>(0)
   // 已抵达的最远阶段：用于左侧步骤条可点击跳转（只能跳到已抵达的步骤），且跳转纯导航不重跑动作
@@ -367,6 +371,26 @@ export function VibePanel({
   const planExecutingRef = useRef(false)
   // 正在用 LLM 判断这条对话该触发什么动作（C 方案：意图路由）
   const [routing, setRouting] = useState(false)
+
+  // F1/F2：把当前长任务上报给共享日志栏（实时耗时脉冲）。从既有 busy 状态派生单一标签，
+  // 仅在本页签激活时上报，避免隐藏页签把工作台的活动状态清掉。
+  const activityLabel = useMemo(() => {
+    if (routing) return 'AI 理解意图'
+    if (planning) return 'AI 规划契约'
+    if (brainstorm?.loading) return 'AI 头脑风暴'
+    if (generating) return 'AI 生成代码'
+    if (expanding) return 'AI 完善代码'
+    if (repairing) return 'AI 修复构建'
+    if (confRepairing) return 'AI 修复一致性'
+    if (iterating) return 'AI 按反馈修改'
+    if (building) return '构建并载入'
+    if (packing) return '打包插件'
+    if (iconBusy) return '生成图标'
+    return null
+  }, [routing, planning, brainstorm?.loading, generating, expanding, repairing, confRepairing, iterating, building, packing, iconBusy])
+  useEffect(() => {
+    if (active) setActivity?.(activityLabel)
+  }, [active, activityLabel, setActivity])
 
   // 对话内提示卡（S4）：危险操作二次确认 / 构建失败一键修复等
   const [pendingPrompt, setPendingPrompt] = useState<{ kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null>(null)
