@@ -392,6 +392,12 @@ export function VibePanel({
     if (active) setActivity?.(activityLabel)
   }, [active, activityLabel, setActivity])
 
+  // 插件详情抽屉分区 Tab：契约 / 进度 / 交付。随阶段自动切到最相关分区（用户仍可手动切换）。
+  const [drawerTab, setDrawerTab] = useState<'contract' | 'progress' | 'deliver'>('contract')
+  useEffect(() => {
+    setDrawerTab(stage >= 3 ? 'deliver' : stage === 2 ? 'progress' : 'contract')
+  }, [stage])
+
   // 对话内提示卡（S4）：危险操作二次确认 / 构建失败一键修复等
   const [pendingPrompt, setPendingPrompt] = useState<{ kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null>(null)
 
@@ -2430,46 +2436,73 @@ export function VibePanel({
 
         {/* 进阶详情抽屉（方案A：默认关，点顶部「详情」展开；进阶/质检功能在此按需出现）*/}
         {drawerOpen && (
-          <aside className="w-96 max-w-[44%] shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 flex flex-col anim-drawer">
-            <div className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><ListChecks size={15} className="text-emerald-500" /> 插件详情</span>
-              <button className="btn-ghost h-7 w-7 p-0 justify-center" onClick={() => setDrawerOpen(false)} title="关闭"><X size={15} /></button>
+          <aside className="w-[26rem] max-w-[48%] shrink-0 border-l border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/40 flex flex-col anim-drawer">
+            {/* 抽屉头：插件身份（一处）+ 关闭 */}
+            <div className="shrink-0 flex items-center justify-between gap-2 px-4 py-2.5 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2 min-w-0">
+                {contract ? (
+                  <>
+                    <span className="w-6 h-6 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 flex items-center justify-center shrink-0">
+                      {iconDataUrl ? <img src={iconDataUrl} alt="图标" className="w-full h-full object-contain" /> : <Rocket size={13} className="text-emerald-500" />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate leading-tight">{contract.displayName || '插件详情'}</span>
+                      {primaryTrigger(contract) && <span className="block text-[10px] text-slate-400 dark:text-slate-500 truncate leading-tight">触发：{primaryTrigger(contract)}</span>}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5"><ListChecks size={15} className="text-emerald-500" /> 插件详情</span>
+                )}
+              </div>
+              <button className="btn-ghost h-7 w-7 p-0 justify-center shrink-0" onClick={() => setDrawerOpen(false)} title="关闭"><X size={15} /></button>
             </div>
-            <div className="flex-1 overflow-auto px-4 py-4 space-y-6">
-              {!contract && planning && (
-                <div className="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400"><Loader2 size={14} className="animate-spin text-emerald-500" /> 正在生成插件设定（契约）…</div>
-              )}
-              {!contract && !planning && (
-                <div className="text-[12px] text-slate-400 dark:text-slate-500 leading-relaxed">还没有插件项目。在对话里描述需求、生成插件后，这里会显示契约设定、验收清单、版本历史等详情。</div>
-              )}
-              {contract && (
-                <ContractStage contract={contract} setContract={setContract} editable={!generating && !generated} />
-              )}
-              {stage >= 2 && (
-                <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
-              )}
-              {stage === 3 && contract && (
-                <DeliverStage
-                  contract={contract} createdPath={createdPath}
-                  building={building} built={built} buildLog={buildLog}
-                  loaded={loaded} loadedId={loadedId}
-                  repairing={repairing} expanding={expanding}
-                  iconBusy={iconBusy} iconDone={iconDone} iconDataUrl={iconDataUrl}
-                  devtoolsOn={devtoolsOn} devtoolsBusy={devtoolsBusy} opened={opened}
-                  events={events}
-                  changes={changes} rollingBack={rollingBack} onRollback={doRollback}
-                  coreVerified={coreVerified} onToggleCoreVerified={() => setCoreVerified((v) => !v)}
-                  conformance={conformance} confRepairing={confRepairing} onRepairConformance={repairConformance}
-                  smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
-                  versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
-                  onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
-                  onRebuild={runBuildAndLoad} onRepair={runRepair}
-                  onRegenIcon={() => void generateIcon({ force: true, announce: true })}
-                  onOpenDir={() => dev.openPluginDir(createdPath)}
-                  onEnableDevtools={enableDevtools}
-                />
-              )}
-            </div>
+
+            {!contract ? (
+              <div className="flex-1 overflow-auto px-4 py-4">
+                {planning ? (
+                  <div className="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400"><Loader2 size={14} className="animate-spin text-emerald-500" /> 正在生成插件设定（契约）…</div>
+                ) : (
+                  <div className="text-[12px] text-slate-400 dark:text-slate-500 leading-relaxed">还没有插件项目。在对话里描述需求、生成插件后，这里会显示契约设定、验收清单、版本历史等详情。</div>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* 分区 Tab：契约 / 进度 / 交付（随阶段自动选中，可手动切换）*/}
+                <div className="shrink-0 flex items-center gap-1 px-3 pt-2 border-b border-slate-200 dark:border-slate-800">
+                  <DrawerTab active={drawerTab === 'contract'} onClick={() => setDrawerTab('contract')} label="契约" />
+                  {stage >= 2 && <DrawerTab active={drawerTab === 'progress'} onClick={() => setDrawerTab('progress')} label="进度" />}
+                  {stage === 3 && <DrawerTab active={drawerTab === 'deliver'} onClick={() => setDrawerTab('deliver')} label="交付" />}
+                </div>
+                <div className="flex-1 overflow-auto px-4 py-4">
+                  {drawerTab === 'contract' && (
+                    <ContractStage contract={contract} setContract={setContract} editable={!generating && !generated} />
+                  )}
+                  {drawerTab === 'progress' && stage >= 2 && (
+                    <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
+                  )}
+                  {drawerTab === 'deliver' && stage === 3 && (
+                    <DeliverStage
+                      contract={contract} createdPath={createdPath}
+                      building={building} built={built} buildLog={buildLog}
+                      loaded={loaded} loadedId={loadedId}
+                      repairing={repairing} expanding={expanding}
+                      iconBusy={iconBusy} iconDone={iconDone} iconDataUrl={iconDataUrl}
+                      devtoolsOn={devtoolsOn} devtoolsBusy={devtoolsBusy} opened={opened}
+                      changes={changes} rollingBack={rollingBack} onRollback={doRollback}
+                      coreVerified={coreVerified} onToggleCoreVerified={() => setCoreVerified((v) => !v)}
+                      conformance={conformance} confRepairing={confRepairing} onRepairConformance={repairConformance}
+                      smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
+                      versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
+                      onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
+                      onRebuild={runBuildAndLoad} onRepair={runRepair}
+                      onRegenIcon={() => void generateIcon({ force: true, announce: true })}
+                      onOpenDir={() => dev.openPluginDir(createdPath)}
+                      onEnableDevtools={enableDevtools}
+                    />
+                  )}
+                </div>
+              </>
+            )}
           </aside>
         )}
       </div>
@@ -2478,6 +2511,22 @@ export function VibePanel({
 }
 
 // ============ 子组件 ============
+
+/** 插件详情抽屉的分区 Tab 按钮 */
+function DrawerTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors ${
+        active
+          ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400'
+          : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -2648,7 +2697,7 @@ function GenerateStage({ contract, events, toolCalls, narration, createdPath, bu
 function DeliverStage({
   contract, createdPath, building, built, buildLog, loaded, loadedId,
   repairing, expanding, iconBusy, iconDone, iconDataUrl,
-  devtoolsOn, devtoolsBusy, opened, events,
+  devtoolsOn, devtoolsBusy, opened,
   changes, rollingBack, onRollback, coreVerified, onToggleCoreVerified,
   conformance, confRepairing, onRepairConformance, smoke, smoking, onRunSmoke,
   versions, vcsAvailable, restoringHash, onRefreshVersions, onVersionDiff, onRestoreVersion,
@@ -2660,7 +2709,6 @@ function DeliverStage({
   repairing: boolean; expanding: boolean
   iconBusy: boolean; iconDone: boolean; iconDataUrl: string | null
   devtoolsOn: boolean | null; devtoolsBusy: boolean; opened: boolean
-  events: TimelineEvent[]
   changes: VibeChange[]; rollingBack: boolean; onRollback: () => void
   coreVerified: boolean; onToggleCoreVerified: () => void
   conformance: ConformanceResult | null; confRepairing: boolean; onRepairConformance: () => void
@@ -2698,18 +2746,22 @@ function DeliverStage({
           </h2>
           <p className="text-[11px] text-slate-400 dark:text-slate-500 mono truncate">{createdPath}</p>
         </div>
-        {createdPath && !building && (
-          <button
-            onClick={onRegenIcon}
-            disabled={iconBusy}
-            className="btn-ghost h-8 px-2.5 text-[11px] shrink-0"
-            title="让 AI 根据插件的主题与功能重新设计图标（覆盖当前图标）"
-          >
-            {iconBusy ? <Loader2 size={13} className="animate-spin" /> : <ImageIcon size={13} />}
-            {iconDataUrl ? '重做图标' : '生成图标'}
-          </button>
-        )}
       </div>
+
+      {/* 统一操作条：把原本散落在成功/失败/各卡里的按钮收敛到一处，按状态显隐，避免重复 */}
+      {!building && (
+        <div className="flex flex-wrap items-center gap-2">
+          {buildFailed && (
+            <button className="btn-primary" onClick={onRepair} disabled={repairing}>{repairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {repairing ? 'AI 修复中…' : 'AI 修复并重试'}</button>
+          )}
+          {loaded && !buildFailed && (
+            <button className="btn-secondary" onClick={onRunSmoke} disabled={smoking} title="用契约里的示例输入真实调用每个功能一次，验证「能执行」而不只是「能编译」">{smoking ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />} 运行验证</button>
+          )}
+          <button className="btn-secondary" onClick={onRebuild} disabled={building}><Hammer size={15} /> 重新构建</button>
+          <button className="btn-ghost" onClick={onRegenIcon} disabled={iconBusy} title="让 AI 按插件主题与功能重新设计图标（覆盖当前图标）">{iconBusy ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />} {iconDataUrl ? '重做图标' : '生成图标'}</button>
+          <button className="btn-ghost" onClick={onOpenDir}><FolderOpen size={15} /> 打开目录</button>
+        </div>
+      )}
 
       {/* 验收清单：构建/载入是「能编译能装载」，契约一致 + 运行验证才是「真的能跑」 */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2.5">
@@ -2744,14 +2796,7 @@ function DeliverStage({
       {loaded && (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
           <div className="text-sm text-slate-700 dark:text-slate-200">
-            在 Mulby 主输入框输入 <span className="mono badge badge-green">{trigger}</span> 即可打开{isEdit ? '改造后的' : '你的'}插件。
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary" onClick={onRunSmoke} disabled={smoking} title="用契约里的示例输入真实调用每个功能一次，验证「能执行」而不只是「能编译」">
-              {smoking ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />} 运行验证
-            </button>
-            <button className="btn-secondary" onClick={onOpenDir}><FolderOpen size={15} /> 打开目录</button>
-            <button className="btn-ghost" onClick={onRebuild} disabled={building}><Hammer size={15} /> 重新构建</button>
+            在 Mulby 主输入框输入 <span className="mono badge badge-green">{trigger}</span> 即可打开{isEdit ? '改造后的' : '你的'}插件。上方「运行验证」可用示例输入真实跑一遍。
           </div>
           {smoke.length > 0 && <SmokeList smoke={smoke} />}
         </div>
@@ -2775,28 +2820,16 @@ function DeliverStage({
       {/* 失败：AI 修复 */}
       {buildFailed && (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm text-rose-600 dark:text-rose-400"><AlertTriangle size={15} /> 构建未通过，可让 AI 读取报错并自动修复。</div>
-          <div className="flex flex-wrap gap-2">
-            <button className="btn-primary" onClick={onRepair} disabled={repairing}>{repairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {repairing ? 'AI 修复中…' : 'AI 修复并重试'}</button>
-            <button className="btn-secondary" onClick={onRebuild} disabled={building}><Hammer size={15} /> 仅重试构建</button>
-            <button className="btn-ghost" onClick={onOpenDir}><FolderOpen size={15} /> 打开目录</button>
-          </div>
+          <div className="flex items-center gap-2 text-sm text-rose-600 dark:text-rose-400"><AlertTriangle size={15} /> 构建未通过，点上方「AI 修复并重试」可让 AI 读取报错并自动修复。</div>
           {buildLog && <pre className="text-[11px] mono text-rose-600/90 dark:text-rose-300/80 bg-black/5 dark:bg-black/30 rounded-lg p-2.5 max-h-40 overflow-auto whitespace-pre-wrap">{buildLog.slice(-2000)}</pre>}
         </div>
       )}
 
       {built && !loaded && !building && (
         <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-[12px] text-amber-700 dark:text-amber-300 flex items-center gap-2">
-          <ShieldCheck size={14} /> 已构建但未自动载入，可点「重新构建」或在工作台手动刷新。
-          <button className="btn-ghost ml-auto" onClick={onOpenDir}><FolderOpen size={14} /> 打开目录</button>
+          <ShieldCheck size={14} /> 已构建但未自动载入，可点上方「重新构建」或在工作台手动刷新。
         </div>
       )}
-
-      {/* 最近活动 */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
-        <div className="text-[12px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5"><Terminal size={13} /> 最近活动</div>
-        <Timeline events={events} compact />
-      </div>
     </div>
   )
 }
