@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Sparkles, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle } from 'lucide-react'
+import { Send, Loader2, Bot, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle } from 'lucide-react'
 import { useSession } from './SessionProvider'
 import { Markdown } from './Markdown'
 import type { VibeMessage, VibeSessionState, BrainstormOption, VibePlanTodo, VibePlanPhase } from './types'
@@ -108,7 +108,7 @@ export function ChatPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-        <Sparkles size={12} className="text-emerald-500" /> 对话
+        对话
         <span className="flex-1" />
         {allMessages.length > 0 && (
           <>
@@ -166,7 +166,9 @@ export function ChatPanel({
               )}
             </div>
           ) : (
-            allMessages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+            allMessages.map((msg, i) => (
+              <MessageBubble key={msg.id} msg={msg} grouped={i > 0 && allMessages[i - 1].role === msg.role} />
+            ))
           )}
           {routing && !busy && (
             <div className="flex items-center gap-1.5 text-[11px] text-indigo-500 dark:text-indigo-400 anim-in">
@@ -175,9 +177,7 @@ export function ChatPanel({
           )}
           {busy && (streamingText && streamingText.trim() ? (
             <div className="flex flex-col items-start gap-1">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
-                <Sparkles size={10} className="text-emerald-500" /> AI
-              </div>
+              <AiLabel />
               <div className="max-w-[92%] rounded-xl rounded-tl-sm bg-slate-100 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 px-3 py-2 text-[12px] break-words">
                 <Markdown text={streamingText} />
                 <span className="inline-block w-1.5 h-3.5 align-middle bg-emerald-500/70 animate-pulse ml-0.5 rounded-sm" />
@@ -371,7 +371,19 @@ export function ChatPanel({
   )
 }
 
-function MessageBubble({ msg }: { msg: VibeMessage }) {
+/** AI 发言标识：低调的品牌头像（圆角方块 + Bot 图标）+ 文案；取代每条消息前重复的 ✨ 图标 */
+function AiLabel() {
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500">
+      <span className="w-[18px] h-[18px] rounded-md bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400 flex items-center justify-center shrink-0">
+        <Bot size={12} />
+      </span>
+      AI
+    </div>
+  )
+}
+
+function MessageBubble({ msg, grouped }: { msg: VibeMessage; grouped?: boolean }) {
   const isUser = msg.role === 'user'
   if (isUser) {
     return (
@@ -389,9 +401,8 @@ function MessageBubble({ msg }: { msg: VibeMessage }) {
   }
   return (
     <div className="flex flex-col items-start gap-1 anim-in">
-      <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
-        <Sparkles size={10} className="text-emerald-500" /> AI
-      </div>
+      {/* 连续的 AI 消息不再重复标识，避免页面上一堆相同图标 */}
+      {!grouped && <AiLabel />}
       <div className="max-w-[92%] rounded-xl rounded-tl-sm bg-slate-100 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 px-3 py-2 text-[12px] break-words">
         <Markdown text={msg.content} />
       </div>
