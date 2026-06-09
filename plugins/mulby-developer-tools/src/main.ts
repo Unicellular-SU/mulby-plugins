@@ -691,6 +691,105 @@ export const rpc = {
   },
 
   /**
+   * 发布前预检（镜像仓库 CI 的 scripts/validate-plugin.js）：必备文件、manifest 必填字段、
+   * semver、features.code、package.json 的 build/pack 脚本等。返回 errors（阻断）/warnings（提示）+ 元信息。
+   */
+  publish_precheck(input: { root?: string }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    const errors: string[] = []
+    const warnings: string[] = []
+    if (!root || !existsSync(root)) return { ok: false, errors: ['插件目录不存在'], warnings, manifest: null }
+
+    for (const f of ['manifest.json', 'package.json']) {
+      if (!existsSync(join(root, f))) errors.push(`缺少必备文件：${f}`)
+    }
+    for (const f of ['README.md', 'icon.png']) {
+      if (!existsSync(join(root, f))) warnings.push(`建议补充文件：${f}`)
+    }
+
+    let mf: any = null
+    const mfPath = join(root, 'manifest.json')
+    if (existsSync(mfPath)) {
+      try { mf = JSON.parse(readFileSync(mfPath, 'utf-8')) } catch (e) { errors.push(`manifest.json 解析失败：${e instanceof Error ? e.message : ''}`) }
+    }
+    if (mf) {
+      for (const field of ['name', 'displayName', 'version', 'author', 'description']) {
+        const v = mf[field]
+        if (!v || (typeof v === 'string' && !v.trim())) errors.push(`manifest.json 缺少或为空的必填字段「${field}」`)
+      }
+      if (mf.version && !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(String(mf.version))) errors.push(`manifest.json 版本号「${mf.version}」不是合法 semver（需 X.Y.Z）`)
+      if (!mf.main) warnings.push('manifest.json 未设置 main（后端入口）')
+      if (Array.isArray(mf.features)) {
+        for (const f of mf.features) if (!f || !String(f.code || '').trim()) errors.push('manifest.json 存在缺少 code 的 feature')
+      } else {
+        warnings.push('manifest.json 未定义 features 数组')
+      }
+    }
+
+    const pkgPath = join(root, 'package.json')
+    let pkg: any = null
+    if (existsSync(pkgPath)) {
+      try {
+        pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        const scripts = pkg.scripts || {}
+        if (!scripts.build) errors.push('package.json 缺少 build 脚本')
+        if (!scripts.pack) errors.push('package.json 缺少 pack 脚本')
+      } catch (e) { errors.push(`package.json 解析失败：${e instanceof Error ? e.message : ''}`) }
+    }
+    if (!existsSync(join(root, 'src', 'main.ts')) && !existsSync(join(root, 'src', 'main.js'))) {
+      warnings.push('未找到后端入口 src/main.ts')
+    }
+
+    const name = mf ? String(mf.name || '') : ''
+    const id = mf ? String(mf.id || mf.name || '') : ''
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      manifest: mf ? { name, id, version: String(mf.version || ''), displayName: String(mf.displayName || ''), author: String(mf.author || ''), description: String(mf.description || '') } : null
+    }
+  },
+
+  /**
+   * 收集插件待发布的源码文件（白名单遍历、排除产物/依赖/锁文件/敏感文件）。
+   * 文本文件以 utf-8、二进制（图标等）以 base64 返回，供前端经 GitHub Git Data API 推送。
+   */
+  publish_collect(input: { root?: string }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    if (!root || !existsSync(root)) throw new Error('插件目录不存在')
+    const IGNORE_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.vite', '.codegraph', 'ui', '.vibe-backup', '.turbo', 'coverage', '.idea', '.vscode', '.next', 'out'])
+    const IGNORE_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', '.DS_Store', 'Thumbs.db'])
+    const isIgnoredFile = (n: string) => IGNORE_FILES.has(n) || /\.(inplugin|log|tsbuildinfo)$/i.test(n) || /^\.env(\..+)?$/i.test(n)
+    const BINARY_RE = /\.(png|jpe?g|gif|webp|ico|icns|bmp|tiff?|ttf|otf|woff2?|eot|wasm|node|zip|gz|tgz|rar|7z|pdf|mp[34]|wav|mov|webm|m4a|svgz)$/i
+    const MAX_FILE = 3_000_000
+    const MAX_TOTAL = 15_000_000
+    const files: Array<{ path: string; content: string; encoding: 'utf-8' | 'base64'; size: number }> = []
+    const skipped: Array<{ path: string; reason: string }> = []
+    let totalBytes = 0
+    const walkCollect = (dir: string) => {
+      let entries: string[] = []
+      try { entries = readdirSync(dir) } catch { return }
+      for (const name of entries) {
+        const full = join(dir, name)
+        let st: ReturnType<typeof statSync>
+        try { st = statSync(full) } catch { continue }
+        const rel = relative(root, full).split(sep).join('/')
+        if (st.isDirectory()) { if (!IGNORE_DIRS.has(name)) walkCollect(full); continue }
+        if (isIgnoredFile(name)) continue
+        if (st.size > MAX_FILE) { skipped.push({ path: rel, reason: `文件过大（${st.size} 字节）` }); continue }
+        const isBin = BINARY_RE.test(name)
+        let content: string
+        try { content = readFileSync(full, isBin ? 'base64' : 'utf-8') } catch { skipped.push({ path: rel, reason: '读取失败' }); continue }
+        totalBytes += st.size
+        files.push({ path: rel, content, encoding: isBin ? 'base64' : 'utf-8', size: st.size })
+      }
+    }
+    walkCollect(root)
+    if (totalBytes > MAX_TOTAL) throw new Error(`待发布内容过大（${totalBytes} 字节），请检查是否误包含大文件`)
+    return { files, skipped, totalBytes, count: files.length }
+  },
+
+  /**
    * 列出本次会话相对开始时的改动（新增/修改），供交付页 diff 展示。
    * @param input.root 目标根目录（一般是 createdPath）
    */

@@ -10,6 +10,8 @@ interface Props {
   contract: VibeContract
   onChange: (c: VibeContract) => void
   editable: boolean
+  /** 锁定插件 id/name（项目已创建后目录名固定，不允许再改） */
+  lockName?: boolean
 }
 
 const MODES: Array<{ value: FeatureMode; label: string }> = [
@@ -18,7 +20,8 @@ const MODES: Array<{ value: FeatureMode; label: string }> = [
   { value: 'silent', label: '静默/无界面' }
 ]
 
-export function ContractEditor({ contract, onChange, editable }: Props) {
+export function ContractEditor({ contract, onChange, editable, lockName }: Props) {
+  const nameLocked = contract.isEdit || !!lockName
   const [showTools, setShowTools] = useState(contract.tools.length > 0)
   const [showSensitive, setShowSensitive] = useState(
     () => PERMISSION_OPTIONS.some((o) => o.sensitive && contract.permissions[o.key])
@@ -73,8 +76,8 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
       {/* 基础信息 */}
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <L label={contract.isEdit ? '插件名（不可改）' : '插件名 (id)'}>
-            <input className="input-base mono" value={contract.name} disabled={!editable || contract.isEdit}
+          <L label={nameLocked ? '插件名（id，不可改）' : '插件名 (id)'}>
+            <input className="input-base mono" value={contract.name} disabled={!editable || nameLocked}
               onChange={(e) => patch({ name: toKebab(e.target.value) })} />
           </L>
           <L label="展示名">
@@ -97,8 +100,8 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
             <input className="input-base mono" value={contract.version} disabled={!editable} placeholder="1.0.0"
               onChange={(e) => patch({ version: e.target.value })} />
           </L>
-          <L label="作者（可选）">
-            <input className="input-base" value={contract.author || ''} disabled={!editable} placeholder="留空即可"
+          <L label="作者">
+            <input className="input-base" value={contract.author || ''} disabled={!editable} placeholder="建议填写（发布到仓库时必填）"
               onChange={(e) => patch({ author: e.target.value })} />
           </L>
         </div>

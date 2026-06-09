@@ -4,11 +4,12 @@ import {
   Hammer, ShieldCheck, FolderOpen, AlertTriangle,
   RefreshCw, Image as ImageIcon, Rocket, FileText, Lightbulb,
   Pencil, Boxes, FileEdit, FileSearch, Terminal, Bug, Wrench, ListChecks,
-  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag
+  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag, UploadCloud
 } from 'lucide-react'
 import type { LogLevel } from '../types'
 import type { UseDeveloperResult } from '../hooks/useDeveloper'
 import { ContractEditor } from './ContractEditor'
+import { PublishDialog } from './PublishDialog'
 import {
   type VibeContract, defaultContract, normalizeContract, manifestToContract,
   manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel, validateContract
@@ -397,6 +398,9 @@ export function VibePanel({
   useEffect(() => {
     setDrawerTab(stage >= 3 ? 'deliver' : stage === 2 ? 'progress' : 'contract')
   }, [stage])
+
+  // 发布到插件仓库（GitHub PR）对话框
+  const [publishOpen, setPublishOpen] = useState(false)
 
   // 对话内提示卡（S4）：危险操作二次确认 / 构建失败一键修复等
   const [pendingPrompt, setPendingPrompt] = useState<{ kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null>(null)
@@ -1582,7 +1586,7 @@ export function VibePanel({
     } catch { return null }
   }
 
-  const runBuildAndLoad = async () => {
+  const runBuildAndLoad = async (opts?: { skipIcon?: boolean }) => {
     if (!createdPath) return
     setBuilding(true)
     setBuildLog('')
@@ -1624,13 +1628,46 @@ export function VibePanel({
       void runConformance()
       void autoCommit()
       void detectDevtools()
-      void tryGenerateIcon()
+      // 应用契约修改（manifest 级改动）等场景不重生成图标，避免无谓改动/覆盖
+      if (!opts?.skipIcon) void tryGenerateIcon()
     } catch (e) {
       pushEvent('build', 'error', e instanceof Error ? e.message : '构建失败')
       pushToast('error', e instanceof Error ? e.message : '构建失败')
     } finally {
       setBuilding(false)
     }
+  }
+
+  // 生成后允许修改契约：按契约重写 manifest.json（合并磁盘既有以保留 AI 的补充），再重建+重载（重跑一致性校验）。
+  // 解决「契约生成后只读 → 预检要求补 author/调整字段时无从修改」的死锁。
+  const applyContractEdits = async () => {
+    if (!contract || !createdPath || building) return
+    const problems = validateContract(contract)
+    if (problems.length) {
+      pushToast('error', `契约有 ${problems.length} 处需修正：${problems[0]}${problems.length > 1 ? ' 等' : ''}`)
+      addLog('warn', `⚠ [Vibe] 契约校验未通过：${problems.join('；')}`)
+      return
+    }
+    try {
+      // 复用会话写文件通道：vibe_begin(fresh:false) 仅锁定根目录并保留历史快照，便于改动入版本/可回滚
+      await dev.hostCall('vibe_begin', { root: createdPath, fresh: false })
+      let baseManifest: any = undefined
+      try {
+        const r = await dev.hostCall<{ content?: string }>('read_file', { path: 'manifest.json' })
+        if (r?.content) baseManifest = JSON.parse(r.content)
+      } catch { /* 无既有 manifest 则按契约新写 */ }
+      const mfText = manifestJson(contract, baseManifest)
+      await dev.hostCall('write_file', { path: 'manifest.json', content: mfText })
+      pushEvent('manifest', 'write', '已按契约更新 manifest.json')
+      addLog('success', '✔ [Vibe] 已按契约更新 manifest.json，开始重建')
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : '写入 manifest 失败')
+      return
+    } finally {
+      void dev.hostCall('vibe_end').catch(() => {})
+    }
+    pendingCommitMsgRef.current = '应用契约修改并重建'
+    await runBuildAndLoad({ skipIcon: true })
   }
 
   useEffect(() => {
@@ -2475,7 +2512,8 @@ export function VibePanel({
                 </div>
                 <div className="flex-1 overflow-auto px-4 py-4">
                   {drawerTab === 'contract' && (
-                    <ContractStage contract={contract} setContract={setContract} editable={!generating && !generated} />
+                    <ContractStage contract={contract} setContract={setContract} editable={!generating}
+                      created={!!createdPath} applying={building} onApply={applyContractEdits} />
                   )}
                   {drawerTab === 'progress' && stage >= 2 && (
                     <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
@@ -2498,6 +2536,7 @@ export function VibePanel({
                       onRegenIcon={() => void generateIcon({ force: true, announce: true })}
                       onOpenDir={() => dev.openPluginDir(createdPath)}
                       onEnableDevtools={enableDevtools}
+                      onPublish={() => setPublishOpen(true)}
                     />
                   )}
                 </div>
@@ -2506,6 +2545,19 @@ export function VibePanel({
           </aside>
         )}
       </div>
+
+      {contract && (
+        <PublishDialog
+          open={publishOpen}
+          onClose={() => setPublishOpen(false)}
+          createdPath={createdPath}
+          contract={contract}
+          dev={dev}
+          built={built}
+          conformance={conformance}
+          pushToast={pushToast}
+        />
+      )}
     </div>
   )
 }
@@ -2616,7 +2668,7 @@ function DescribeStage({
   )
 }
 
-function ContractStage({ contract, setContract, editable }: { contract: VibeContract; setContract: (c: VibeContract) => void; editable: boolean }) {
+function ContractStage({ contract, setContract, editable, created, applying, onApply }: { contract: VibeContract; setContract: (c: VibeContract) => void; editable: boolean; created?: boolean; applying?: boolean; onApply?: () => void }) {
   return (
     <div className="w-full space-y-4">
       <div className="flex items-center gap-3">
@@ -2624,8 +2676,8 @@ function ContractStage({ contract, setContract, editable }: { contract: VibeCont
           <FileEdit size={20} className="text-emerald-500" />
         </div>
         <div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{contract.isEdit ? '确认改造契约' : '确认插件契约'}</h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">manifest.json 将由这份契约确定性生成；AI 只负责实现代码</p>
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{contract.isEdit ? '确认改造契约' : created ? '插件契约（可修改）' : '确认插件契约'}</h2>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{created ? '改完点下方「应用修改并重建」，按契约重写 manifest.json' : 'manifest.json 将由这份契约确定性生成；AI 只负责实现代码'}</p>
         </div>
       </div>
 
@@ -2635,7 +2687,16 @@ function ContractStage({ contract, setContract, editable }: { contract: VibeCont
         </div>
       )}
 
-      <ContractEditor contract={contract} onChange={setContract} editable={editable} />
+      <ContractEditor contract={contract} onChange={setContract} editable={editable} lockName={created} />
+
+      {created && editable && onApply && (
+        <div className="sticky bottom-0 -mx-4 px-4 pt-3 pb-1 bg-gradient-to-t from-white via-white/95 to-transparent dark:from-slate-900 dark:via-slate-900/95">
+          <button className="btn-primary w-full justify-center" disabled={applying} onClick={onApply}>
+            {applying ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} 应用修改并重建
+          </button>
+          <p className="mt-1.5 text-[10px] text-center text-slate-400 dark:text-slate-500">按契约重写 manifest.json 并重新构建载入（插件 id 不可改）</p>
+        </div>
+      )}
     </div>
   )
 }
@@ -2701,7 +2762,7 @@ function DeliverStage({
   changes, rollingBack, onRollback, coreVerified, onToggleCoreVerified,
   conformance, confRepairing, onRepairConformance, smoke, smoking, onRunSmoke,
   versions, vcsAvailable, restoringHash, onRefreshVersions, onVersionDiff, onRestoreVersion,
-  onRebuild, onRepair, onRegenIcon, onOpenDir, onEnableDevtools
+  onRebuild, onRepair, onRegenIcon, onOpenDir, onEnableDevtools, onPublish
 }: {
   contract: VibeContract; createdPath: string
   building: boolean; built: boolean; buildLog: string
@@ -2718,6 +2779,7 @@ function DeliverStage({
   onRebuild: () => void; onRepair: () => void
   onRegenIcon: () => void
   onOpenDir: () => void; onEnableDevtools: () => void
+  onPublish: () => void
 }) {
   const buildFailed = !building && !built && !!buildLog
   const isEdit = !!contract.isEdit
@@ -2753,6 +2815,9 @@ function DeliverStage({
         <div className="flex flex-wrap items-center gap-2">
           {buildFailed && (
             <button className="btn-primary" onClick={onRepair} disabled={repairing}>{repairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {repairing ? 'AI 修复中…' : 'AI 修复并重试'}</button>
+          )}
+          {loaded && !buildFailed && (
+            <button className="btn-primary" onClick={onPublish} title="提交 PR 发布到插件仓库"><UploadCloud size={15} /> 发布</button>
           )}
           {loaded && !buildFailed && (
             <button className="btn-secondary" onClick={onRunSmoke} disabled={smoking} title="用契约里的示例输入真实调用每个功能一次，验证「能执行」而不只是「能编译」">{smoking ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />} 运行验证</button>
