@@ -44,6 +44,8 @@ interface AiPanelProps {
   onToggleCompletion: () => void
   /** Replace the current editor selection with text (undoable in App). */
   onReplaceSelection: (text: string) => void
+  /** Replace the whole document with text (undoable in App); used by 排版 on full doc. */
+  onReplaceAll: (text: string) => void
   /** Insert text after the current selection / cursor (undoable in App). */
   onInsert: (text: string) => void
   onCopy: (text: string) => void
@@ -66,6 +68,7 @@ export function AiPanel({
   completionEnabled,
   onToggleCompletion,
   onReplaceSelection,
+  onReplaceAll,
   onInsert,
   onCopy,
   onNotify,
@@ -539,16 +542,29 @@ export function AiPanel({
             >
               <CornerDownLeft size={14} /> 插入
             </button>
-            <button
-              type="button"
-              className="action-btn ai-apply-btn"
-              disabled={!canApply || !hasSelection}
-              title={hasSelection ? '替换选中文字' : '没有选区可替换'}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onReplaceSelection(trimmedOutput)}
-            >
-              <Replace size={14} /> 替换选区
-            </button>
+            {!hasSelection && action === 'format' ? (
+              <button
+                type="button"
+                className="action-btn ai-apply-btn"
+                disabled={!canApply}
+                title="用排版结果替换全文"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onReplaceAll(trimmedOutput)}
+              >
+                <Replace size={14} /> 替换全文
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="action-btn ai-apply-btn"
+                disabled={!canApply || !hasSelection}
+                title={hasSelection ? '替换选中文字' : '没有选区可替换'}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onReplaceSelection(trimmedOutput)}
+              >
+                <Replace size={14} /> 替换选区
+              </button>
+            )}
           </div>
         </div>
 

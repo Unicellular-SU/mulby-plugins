@@ -30,6 +30,11 @@ assert.equal(getAiAction('translate').id, 'translate')
 assert.equal(getAiAction('translate').needsLanguage, true)
 assert.equal(getAiAction('custom').needsInstruction, true)
 assert.equal(getAiAction('polish').needsSelection, true)
+// "排版" (format) restructures the whole doc (or selection) without needing a selection
+assert.equal(getAiAction('format').id, 'format')
+assert.equal(getAiAction('format').needsSelection, false)
+assert.equal(getAiAction('format').needsLanguage, false)
+assert.equal(getAiAction('format').needsInstruction, false)
 // "问一问" (ask) explains the selection and requires a selection
 assert.equal(getAiAction('ask').id, 'ask')
 assert.equal(getAiAction('ask').needsSelection, true)
@@ -85,6 +90,17 @@ assert.ok(TRANSLATE_LANGUAGES.some((lang) => lang.value === '英文'))
   const summarize = buildPrompt({ action: 'summarize', text: 'a long article' })
   assert.ok(summarize.user.includes('a long article'))
   assert.ok(summarize.system.includes('要点'))
+}
+
+{
+  // format wraps the source and instructs the model to only restructure markdown
+  const fmt = buildPrompt({ action: 'format', text: '一级标题\n正文段落\n要点一 要点二' })
+  assert.ok(fmt.user.includes('正文段落'))
+  assert.ok(fmt.user.includes('<<<SOURCE'))
+  assert.ok(fmt.user.includes('SOURCE>>>'))
+  assert.ok(fmt.system.includes('排版'))
+  // must forbid rewriting the text (format only touches structure)
+  assert.ok(fmt.system.includes('逐字保持原样'))
 }
 
 {

@@ -1853,6 +1853,19 @@ export default function App() {
     editor.focus()
   }, [notification, replaceMarkdownText])
 
+  // 排版「替换全文」：用结果覆盖整篇文档。setValue 不重置历史，因此可撤销。
+  const handleAiReplaceAll = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    editor.setValue(text)
+    setContent(text)
+    setAiOpen(false)
+    notification.show('已用排版结果替换全文', 'success')
+    editor.focus()
+  }, [notification])
+
   const handleAiInsert = useCallback((text: string) => {
     const editor = editorRef.current
     if (!editor) {
@@ -1916,6 +1929,20 @@ export default function App() {
     closeBubble()
     editor.focus()
   }, [closeBubble, notification, replaceMarkdownText])
+
+  // 排版「替换全文」（划词气泡，无选区时）：用结果覆盖整篇文档，可撤销。
+  const handleBubbleReplaceAll = useCallback((text: string) => {
+    const editor = editorRef.current
+    if (!editor) {
+      closeBubble()
+      return
+    }
+    editor.setValue(text)
+    setContent(text)
+    notification.show('已用排版结果替换全文', 'success')
+    closeBubble()
+    editor.focus()
+  }, [closeBubble, notification])
 
   const handleBubbleInsert = useCallback((text: string) => {
     const editor = editorRef.current
@@ -2872,6 +2899,7 @@ export default function App() {
         completionEnabled={completionEnabled}
         onToggleCompletion={toggleInlineCompletion}
         onReplaceSelection={handleAiReplaceSelection}
+        onReplaceAll={handleAiReplaceAll}
         onInsert={handleAiInsert}
         onCopy={handleAiCopy}
         onNotify={notification.show}
@@ -2889,6 +2917,7 @@ export default function App() {
           contextText={bubbleContext}
           onActivate={handleBubbleActivate}
           onReplace={handleBubbleReplace}
+          onReplaceAll={handleBubbleReplaceAll}
           onInsert={handleBubbleInsert}
           onCopy={handleAiCopy}
           onExpand={handleBubbleExpand}

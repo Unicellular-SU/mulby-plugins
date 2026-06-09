@@ -5,7 +5,7 @@
 // runner that accumulates deltas. The pure helpers (prompts / extraction) are
 // covered by unit tests; the runner is a thin adapter around `ai.call`.
 
-export type AiActionId = 'polish' | 'continue' | 'translate' | 'summarize' | 'ask' | 'custom'
+export type AiActionId = 'polish' | 'format' | 'continue' | 'translate' | 'summarize' | 'ask' | 'custom'
 
 export interface AiActionMeta {
   id: AiActionId
@@ -26,6 +26,14 @@ export const AI_ACTIONS: AiActionMeta[] = [
     label: '润色',
     hint: '在不改变原意的前提下让选中文字更通顺、更专业',
     needsSelection: true,
+    needsLanguage: false,
+    needsInstruction: false
+  },
+  {
+    id: 'format',
+    label: '排版',
+    hint: '按内容重新整理 Markdown 排版（标题/列表/表格/分段等），不改文字与原意（无选区则排版全文）',
+    needsSelection: false,
     needsLanguage: false,
     needsInstruction: false
   },
@@ -156,6 +164,16 @@ export function buildPrompt(input: PromptInput): AiPrompt {
       return {
         system: `${SHARED_SYSTEM_RULES}\n保持原文语言、格式与含义，只优化表达。`,
         user: `请润色下面的内容，保持原意与 Markdown 结构：${contextBlock(input.context, '改写')}\n${fenceText(text)}`
+      }
+    case 'format':
+      return {
+        system: [
+          SHARED_SYSTEM_RULES,
+          '你的唯一任务是「排版」：根据内容重新组织 Markdown 的结构与格式，使层次清晰、阅读舒适。',
+          '可做：补全或修正标题层级；把并列项整理成有序/无序列表；把表格数据整理成 Markdown 表格；为代码补上代码围栏并标注语言；恰当使用引用块与加粗/斜体强调；规范段落之间的空行与缩进；保留并规范链接与图片语法。',
+          '绝对不可：改写、润色、翻译或纠错任何文字；不增删、不合并、不拆分句子；不改变原意与信息；不补充新内容、不做总结或点评。只调整排版与结构，文字内容必须逐字保持原样。'
+        ].join('\n'),
+        user: `请对下面的内容进行 Markdown 排版整理，只调整结构与格式、文字与含义保持不变：\n${fenceText(text)}`
       }
     case 'translate': {
       const language = (input.language || '英文').trim()
