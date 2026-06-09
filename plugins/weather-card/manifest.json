@@ -1,0 +1,45 @@
+{
+  "id": "weather-card",
+  "name": "weather-card",
+  "version": "1.0.0",
+  "displayName": "天气卡片",
+  "description": "输入城市名生成当前天气与三日预报卡片，并支持复制为 Markdown 或纯文本。",
+  "main": "dist/main.js",
+  "icon": "icon.png",
+  "type": "network",
+  "ui": "ui/index.html",
+  "features": [
+    {
+      "code": "generate_weather_card",
+      "explain": "打开天气卡片工具，输入城市名后查询当前天气和三日预报，生成可复制的卡片内容。",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "天气"
+        }
+      ]
+    }
+  ],
+  "window": {
+    "width": 520,
+    "height": 640,
+    "minWidth": 420,
+    "minHeight": 520,
+    "type": "default",
+    "alwaysOnTop": false,
+    "transparent": false,
+    "resizable": true
+  },
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "defaultDetached": false,
+    "background": false,
+    "persistent": false
+  },
+  "author": "Mulby"
+}
