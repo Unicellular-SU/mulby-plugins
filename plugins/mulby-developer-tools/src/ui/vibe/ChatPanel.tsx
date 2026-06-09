@@ -130,36 +130,6 @@ export function ChatPanel({
         )}
       </div>
 
-      {status && (
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/40 shrink-0 anim-in">
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="relative w-5 h-5 rounded-md overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 flex items-center justify-center">
-              {status.icon ? <img src={status.icon} alt="图标" className="w-full h-full object-contain" /> : <span className={`w-2 h-2 rounded-full ${status.loaded ? 'bg-emerald-400' : 'bg-amber-400'}`} />}
-              {iconBusy && <span className="absolute inset-0 bg-slate-900/40 flex items-center justify-center"><Loader2 size={10} className="text-white animate-spin" /></span>}
-            </span>
-            <span className="font-medium text-slate-700 dark:text-slate-200 truncate flex-1">{status.name}</span>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">{status.loaded ? '已载入' : '已构建'}</span>
-          </div>
-          {status.trigger && <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">触发词：{status.trigger}</div>}
-          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-            {onUndoToBefore && (
-              <button
-                onClick={onUndoToBefore}
-                disabled={statusBusy || aiActive || undoing}
-                className="inline-flex items-center gap-1 h-6 px-2 text-[10px] font-medium rounded-md text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300/70 dark:border-amber-700/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50"
-                title="一键撤销到本次 AI 改动之前（可逆，丢弃的改动仍可在版本列表恢复）"
-              >
-                {undoing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} 撤销 AI 改动
-              </button>
-            )}
-            <button onClick={onOpenPlugin} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打开插件窗口"><Rocket size={11} /> 打开</button>
-            <button onClick={onTryIt} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="复制触发词去主输入框试用"><ExternalLink size={11} /> 试用</button>
-            <button onClick={onPack} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打包为 .inplugin"><Package size={11} /> {packed ? '已打包' : '打包'}</button>
-            {onRegenIcon && <button onClick={onRegenIcon} disabled={statusBusy || iconBusy} className="btn-ghost h-6 px-2 text-[10px]" title="让 AI 按插件主题与功能重新生成图标">{iconBusy ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />} 图标</button>}
-          </div>
-        </div>
-      )}
-
       {collapsed ? (
         <>
           <button
@@ -340,6 +310,26 @@ export function ChatPanel({
             </button>
             <span className="text-[10px] text-slate-400 dark:text-slate-500">想改设定可点顶部「详情」展开</span>
           </div>
+        </div>
+      )}
+
+      {/* 插件操作条：移到输入框正上方，方便操作（图标/名称/触发词已在上方显示，故不再重复） */}
+      {status && (
+        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-1.5 bg-white/40 dark:bg-slate-900/30 flex items-center gap-1.5 flex-wrap">
+          {onUndoToBefore && (
+            <button
+              onClick={onUndoToBefore}
+              disabled={statusBusy || aiActive || undoing}
+              className="inline-flex items-center gap-1 h-6 px-2 text-[10px] font-medium rounded-md text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300/70 dark:border-amber-700/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50"
+              title="一键撤销到本次 AI 改动之前（可逆，丢弃的改动仍可在版本列表恢复）"
+            >
+              {undoing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} 撤销 AI 改动
+            </button>
+          )}
+          <button onClick={onOpenPlugin} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打开插件窗口"><Rocket size={11} /> 打开</button>
+          <button onClick={onTryIt} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="复制触发词去主输入框试用"><ExternalLink size={11} /> 试用</button>
+          <button onClick={onPack} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打包为 .inplugin"><Package size={11} /> {packed ? '已打包' : '打包'}</button>
+          {onRegenIcon && <button onClick={onRegenIcon} disabled={statusBusy || iconBusy} className="btn-ghost h-6 px-2 text-[10px]" title="让 AI 按插件主题与功能重新生成图标">{iconBusy ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />} 图标</button>}
         </div>
       )}
 
