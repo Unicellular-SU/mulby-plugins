@@ -11,7 +11,7 @@ import type { UseDeveloperResult } from '../hooks/useDeveloper'
 import { ContractEditor } from './ContractEditor'
 import {
   type VibeContract, defaultContract, normalizeContract, manifestToContract,
-  manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel
+  manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel, validateContract
 } from '../lib/vibeContract'
 import { useSession, SessionSwitcher, ChatPanel } from '../vibe'
 import type { VibeSessionState, VibeAction, BrainstormOption, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
@@ -710,8 +710,9 @@ export function VibePanel({
     '- author: 作者（可选，默认留空）',
     '- platform: 平台限制数组，取值 darwin/win32/linux 的子集；全平台兼容则给空数组 []（不要臆造平台限制，除非需求明确依赖某系统能力）',
     '- template: "react"（需要可视化界面）或 "basic"（纯命令/无界面，例如对输入文本即时计算并返回结果）',
-    '- features: 数组，每项 { "code": 英文下划线功能码, "explain": 中文说明, "mode": "ui"|"silent"|"detached", "triggers": [...] }。通常 1 个功能。',
+    '- features: 数组，每项 { "code": 英文下划线功能码, "explain": 中文说明, "mode": "ui"|"silent"|"detached", "triggers": [...] }。通常 1 个功能。可选字段：mainPush(bool 命中时向搜索框推送动态结果)、mainHide(bool 触发后隐藏主窗口)、preCapture("region"|"fullscreen" 启动前自动截图作为输入)、route(string 仅 react 多路由插件的 UI 路由)。多个功能时 code 必须各不相同。',
     '- permissions: 仅在确实需要时把对应项设为 true（不需要的不要写）。可用布尔权限：clipboard(剪贴板) notification(系统通知) filesystem(文件读写) ai(调用AI) runCommand(执行命令) webview(内嵌网页) microphone(麦克风) camera(摄像头) screen(屏幕录制) geolocation(定位) accessibility(辅助功能) inputMonitor(输入监听) contacts(通讯录) calendar(日历)。',
+    '- commandExecution: 需要执行系统命令时优先用它（而非旧版 runCommand）。结构：{ "direct": { "enabled": true, "defaultProfile": "sandbox"|"workspace"|"trusted", "maxProfile": 同枚举 }, "ai": { 同结构 } }。direct=插件代码直接执行命令，ai=插件承载 AI 生成命令；不需要执行命令则整个省略。',
     '- window: 仅 react/独立窗口插件需要，{ "width","height","minWidth","minHeight","type":"default|borderless|fullscreen","transparent":bool,"alwaysOnTop":bool,"resizable":bool }。给一个贴合内容的默认尺寸（如工具类 480x600，仪表盘类更大）。',
     '- behavior: { "single":bool 单例(默认true), "defaultDetached":bool 默认独立窗口, "background":bool 允许后台常驻, "persistent":bool 重启恢复后台 }。后台常驻类（定时任务/监听）才设 background:true。',
     '- tools: 可选 AI 工具数组 [{ "name", "description" }]，一般为空数组',
@@ -1002,6 +1003,16 @@ export function VibePanel({
   //   避免 ①`mulby create` 遇到已存在目录直接报错导致「继续执行」失败 ②清掉已完成步骤的快照/manifest 改动。
   const prepareProject = async (resume = false): Promise<{ root: string; sid: string | null } | null> => {
     if (!contract) return null
+    // B1：生成前校验契约，拦截会写出畸形 manifest 的情况（空展示名/描述、空或重复功能码、触发全空等）。
+    // 续跑(resume)复用已有项目、不重写 manifest，故跳过校验。
+    if (!resume) {
+      const problems = validateContract(contract)
+      if (problems.length) {
+        pushToast('error', `契约有 ${problems.length} 处需修正：${problems[0]}${problems.length > 1 ? ' 等' : ''}（点顶部「详情」修改）`)
+        addLog('warn', `⚠ [Vibe] 契约校验未通过：${problems.join('；')}`)
+        return null
+      }
+    }
     let root = ''
     let sid = activeId
     if (contract.isEdit) {
