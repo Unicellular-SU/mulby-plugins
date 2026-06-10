@@ -997,8 +997,8 @@
       "version": "1.0.0",
       "author": "Mulby",
       "description": "上帝视角肉鸽小游戏 - 随机能力、意想不到的组合、永久升级",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.08-1404/abyss-squad-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-08T14:05:18.503Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.10-0153/abyss-squad-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-10T01:54:18.030Z",
       "type": "other",
       "details": "# 深渊小队 (Abyss Squad)\r\n\r\n上帝视角肉鸽小游戏 Mulby 插件。控制 3 人小队在程序生成的地下城中战斗，收集随机能力与道具，触发意想不到的协同组合，通过永久升级变得更强。\r\n\r\n## 游戏玩法\r\n\r\n### 操作\r\n- **WASD** - 移动活跃英雄\r\n- **空格** - 释放英雄技能（8秒冷却）\r\n- **1/2/3** - 切换控制的英雄\r\n- 其他英雄自动跟随并战斗\r\n\r\n### 核心循环\r\n1. 从营地选择 3 人小队出发\r\n2. 在 10 层地下城中战斗\r\n3. 击杀敌人获得经验和水晶\r\n4. 升级时从 3 个随机能力中选 1 个（最多 6 个能力）\r\n5. 拾取随机掉落的道具（武器/神器/饰品 3 个槽位）\r\n6. 特定能力+道具组合触发超强协同效果\r\n7. 每 3 层遭遇 Boss\r\n8. 全灭后回到营地，用水晶进行永久升级\r\n\r\n### 英雄（5个）\r\n| 英雄 | 特点 | 技能 |\r\n|------|------|------|\r\n| 战士 | 高血量近战 | 嘲讽：吸引敌人+护盾 |\r\n| 法师 | AOE魔法伤害 | 陨石术：大范围伤害 |\r\n| 游侠 | 远程高暴击 | 闪避射击：后翻+3箭 |\r\n| 牧师（解锁） | 治疗增益 | 治愈光环：全队回血 |\r\n| 刺客（解锁） | 高爆发 | 暗影步：瞬移+必暴击 |\r\n\r\n### 协同效果（核心卖点）\r\n集齐特定能力+道具触发超强组合：\r\n- 🔥 **烈焰风暴** = 火焰附魔 + 油瓶 → 全屏火焰伤害\r\n- ⚡ **弹幕风暴** = 多重射击 + 弹射匕首 → 无限弹射\r\n- 🛡️ **血之壁垒** = 吸血攻击 + 荆棘盾 → 攻防一体\r\n- ⚡ **雷神降临** = 连锁闪电 + 导电护符 → 闪电链不限目标\r\n- ⏱️ **时停领域** = 时间减速 + 迅捷之靴 → 敌人静止3秒\r\n- 💥 **核爆** = 分裂弹 + 爆炸宝石 → 分裂弹全部爆炸\r\n- 还有更多组合等你发现...\r\n\r\n### 营地（局外升级）\r\n- **训练营**：攻击/生命/移速永久强化\r\n- **铁匠铺**：提升初始武器品质\r\n- **酒馆**：解锁新英雄\r\n- **图书馆**：解锁新能力进入随机池\r\n- **神龛**：解锁新协同组合\r\n\r\n## 触发方式\r\n在 Mulby 中输入以下关键词启动：\r\n- `abyss`\r\n- `深渊小队`\r\n- `肉鸽`\r\n\r\n## 构建\r\n```bash\r\nnpm install\r\nnpm run build\r\n```\r\n\r\n## 打包\r\n```bash\r\nnpm run pack\r\n```",
       "icon": {
@@ -1011,7 +1011,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "61100b34ee9bacd30ac75dd7f089364e73410a0d344c41dc4c6fb684d2d93697",
+      "sha256": "8009a70e726c918cc093c1cfcdc6d6c29460fe337d41bdf9132b6d63115fb582",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/abyss-squad"
     }
