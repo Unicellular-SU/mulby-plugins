@@ -1,0 +1,57 @@
+{
+  "id": "git-report-generator",
+  "name": "git-report-generator",
+  "version": "1.0.0",
+  "displayName": "Git日报生成器",
+  "description": "输入Git项目路径，自动抓取提交日志，用AI生成总结日报/周报，支持自定义模板",
+  "main": "dist/main.js",
+  "icon": "icon.png",
+  "type": "productivity",
+  "ui": "ui/index.html",
+  "features": [
+    {
+      "code": "generate_report",
+      "explain": "通过Git仓库生成日报/周报",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "git日报"
+        },
+        {
+          "type": "keyword",
+          "value": "git报告"
+        },
+        {
+          "type": "files",
+          "label": "拖入Git项目文件夹",
+          "fileType": "directory"
+        }
+      ]
+    }
+  ],
+  "window": {
+    "width": 800,
+    "height": 600,
+    "minWidth": 600,
+    "minHeight": 400,
+    "type": "default",
+    "alwaysOnTop": false,
+    "transparent": false,
+    "resizable": true
+  },
+  "permissions": {
+    "clipboard": true,
+    "notification": true,
+    "filesystem": true,
+    "ai": true,
+    "runCommand": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "defaultDetached": false,
+    "background": false,
+    "persistent": false
+  },
+  "author": "Mulby"
+}
