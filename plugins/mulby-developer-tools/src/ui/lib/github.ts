@@ -200,18 +200,16 @@ function sanitizeBranch(s: string): string {
 export async function publishPluginPR(params: PublishParams, onProgress?: (msg: string) => void): Promise<{ prUrl: string; prNumber: number; branch: string; reused: boolean }> {
   const { token, login, pluginName, version, files, title, body } = params
   const fork = `${login}/${REPO_NAME}`
-  const upstream = `${REPO_OWNER}/${REPO_NAME}`
   const branch = sanitizeBranch(`publish/${pluginName}-v${version}`)
 
-  // 1. 基线：直接以「上游 main 的最新提交」为基（fork 与上游同属一个 fork network、共享对象存储，
-  //    可跨库引用其 commit/tree sha）。这样 PR 分支始终基于最新 main（含最新 CI workflow）——
-  //    PR 的 CI 跑的是「PR 分支里」的 workflow，陈旧 fork 切出的分支会跑旧 workflow 而失败。
-  //    且本提交只新增插件文件、workflow 原样继承自 base_tree（未改动），无需 workflow scope。
-  onProgress?.('读取上游基线…')
-  const ref = await ghApi('GET', `/repos/${upstream}/git/ref/heads/${BASE_BRANCH}`, token)
+  // 1. 基线：以「fork 自己 main 的最新提交」为基（Git Data API 不能跨库引用上游对象，会 404）。
+  //    新建的 fork 会从上游当前状态创建，因此天然带最新 CI workflow；
+  //    仅「发布前就已存在且陈旧的 fork」需要用户在 GitHub「Sync fork」一次（详见交付说明）。
+  onProgress?.('读取仓库基线…')
+  const ref = await ghApi('GET', `/repos/${fork}/git/ref/heads/${BASE_BRANCH}`, token)
   const baseSha: string = ref?.object?.sha
-  if (!baseSha) throw new Error('未取到上游基线分支')
-  const baseCommit = await ghApi('GET', `/repos/${upstream}/git/commits/${baseSha}`, token)
+  if (!baseSha) throw new Error('未取到 fork 的基线分支')
+  const baseCommit = await ghApi('GET', `/repos/${fork}/git/commits/${baseSha}`, token)
   const baseTreeSha: string = baseCommit?.tree?.sha
 
   // 2. 逐文件创建 blob

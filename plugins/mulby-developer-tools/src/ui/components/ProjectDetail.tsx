@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import {
   FolderOpen, Hammer, Package, RefreshCw, Trash2, FileText,
-  AlertTriangle, Loader2, ShieldAlert, Wrench, Sparkles, Play, Boxes
+  AlertTriangle, Loader2, ShieldAlert, Wrench, Sparkles, Play, Boxes, UploadCloud
 } from 'lucide-react'
 import type { PluginProjectPluginStatus, PluginProjectStatus } from '../types'
 import { PluginBadges, HealthDot } from './StatusBadge'
+import { PublishStatusCard } from './PublishStatus'
 
-export type DetailAction = 'open' | 'launch' | 'build' | 'pack' | 'reload' | 'readme' | 'remove' | 'vibe'
+export type DetailAction = 'open' | 'launch' | 'build' | 'pack' | 'reload' | 'readme' | 'remove' | 'vibe' | 'publish'
+
+type ToastFn = (kind: 'success' | 'error' | 'info', text: string) => void
 
 const fsApi = () => (window as any)?.mulby?.filesystem
 
@@ -39,9 +42,12 @@ interface Props {
   project: PluginProjectStatus
   busyAction: DetailAction | null
   onAction: (action: DetailAction, plugin?: PluginProjectPluginStatus) => void
+  pushToast?: ToastFn
+  /** 发布成功后 +1，驱动状态卡重新拉取 */
+  publishReloadToken?: number
 }
 
-export function ProjectDetail({ project, busyAction, onAction }: Props) {
+export function ProjectDetail({ project, busyAction, onAction, pushToast, publishReloadToken }: Props) {
   const isCollection = project.type === 'collection'
   const projectName = project.label || (isCollection ? (project.path.split('/').pop() || project.path) : project.plugins[0]?.displayName) || project.path
 
@@ -95,13 +101,13 @@ export function ProjectDetail({ project, busyAction, onAction }: Props) {
               </div>
             </aside>
             <main className="flex-1 min-w-0 overflow-auto p-5">
-              {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} showTitle />}
+              {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} showTitle />}
             </main>
           </div>
         ) : (
           // 单插件模式：直接展示该插件详情
           <div className="h-full overflow-auto p-5">
-            {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} showTitle={false} />}
+            {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} showTitle={false} />}
           </div>
         )}
       </div>
@@ -136,8 +142,9 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function PluginDetailPanel({ p, busy, onAction, showTitle }: {
-  p: PluginProjectPluginStatus; busy: DetailAction | null; onAction: (a: DetailAction, plugin?: PluginProjectPluginStatus) => void; showTitle: boolean
+function PluginDetailPanel({ p, busy, onAction, pushToast, publishReloadToken, showTitle }: {
+  p: PluginProjectPluginStatus; busy: DetailAction | null; onAction: (a: DetailAction, plugin?: PluginProjectPluginStatus) => void
+  pushToast?: ToastFn; publishReloadToken?: number; showTitle: boolean
 }) {
   const hasIssue = !p.manifestValid || !!p.idConflictWith || !p.built
   const [manifest, setManifest] = useState<PluginManifest | null>(null)
@@ -199,9 +206,15 @@ function PluginDetailPanel({ p, busy, onAction, showTitle }: {
         <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('pack', p)}>
           {busy === 'pack' ? <Loader2 size={15} className="animate-spin" /> : <Package size={15} />} 打包
         </button>
+        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('publish', p)} title="提交 PR 发布到插件仓库">
+          {busy === 'publish' ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />} 发布
+        </button>
         <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('open', p)}><FolderOpen size={15} /> 打开目录</button>
         <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('readme', p)}><FileText size={15} /> README</button>
       </div>
+
+      {/* 发布状态：已提交过 PR 时回显 PR 号 / 合并·CI 状态，可刷新 / 重跑 / 打开（无记录时自动隐藏） */}
+      <PublishStatusCard pluginPath={p.path} pluginName={p.id} pushToast={pushToast} reloadToken={publishReloadToken} />
 
       {/* 基础信息（读取 manifest.json） */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">

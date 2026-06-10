@@ -12,7 +12,15 @@ import { EmptyState } from './components/EmptyState'
 import { ToastHost, type ToastData } from './components/Toast'
 import { CreateDialog, type CreatePayload } from './components/CreateDialog'
 import { VibePanel, type VibeEditTarget, type KnownPlugin } from './components/VibePanel'
+import type { ConformanceResult } from './components/VibePanel'
+import { PublishDialog } from './components/PublishDialog'
+import { defaultContract, type VibeContract } from './lib/vibeContract'
 import { SessionProvider } from './vibe'
+
+interface PublishTarget {
+  path: string; pluginId: string; displayName?: string
+  built: boolean; contract: VibeContract; conformance: ConformanceResult | null
+}
 
 type Tab = 'workbench' | 'vibe'
 
@@ -30,6 +38,9 @@ export default function App() {
   const [creating, setCreating] = useState(false)
   const [logCollapsed, setLogCollapsed] = useState(true)
   const [vibeEditTarget, setVibeEditTarget] = useState<VibeEditTarget | null>(null)
+  // 工作台直接发布：打开 PublishDialog 的目标 + 发布成功后驱动状态卡刷新的 token
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
+  const [publishReloadToken, setPublishReloadToken] = useState(0)
 
   // 改造模式可选目标：已知插件（排除本工具自身，避免自改自）
   const knownPlugins = useMemo<KnownPlugin[]>(() => {
@@ -227,6 +238,24 @@ export default function App() {
           addLog('info', `▶ 转到 Vibe 改造：${target?.displayName || target?.id || tPath}`)
           break
         }
+        case 'publish': {
+          const target = plugin || selected.plugins[0]
+          if (!target) { pushToast('error', '该项目下无可发布插件'); break }
+          reportActivity('发布预检')
+          // 与 Vibe 发布同一门禁：先跑一次契约一致性校验
+          let conformance: ConformanceResult | null = null
+          try {
+            const r = await dev.hostCall<ConformanceResult>('check_conformance', { root: target.path })
+            conformance = { ok: !!r?.ok, ran: r?.ran !== false, issues: Array.isArray(r?.issues) ? r.issues : [], summary: r?.summary }
+          } catch { conformance = null }
+          setPublishTarget({
+            path: target.path, pluginId: target.id, displayName: target.displayName,
+            built: !!target.built,
+            contract: { ...defaultContract(target.displayName || target.id), name: target.id, displayName: target.displayName || target.id },
+            conformance
+          })
+          break
+        }
         case 'readme': {
           await dev.openPluginDir(path)
           pushToast('info', '已在目录中打开，请查看 README.md')
@@ -370,7 +399,7 @@ export default function App() {
               ) : selected ? (
                 <>
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} />
+                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} pushToast={pushToast} publishReloadToken={publishReloadToken} />
                   </div>
                 </>
               ) : (
@@ -413,6 +442,22 @@ export default function App() {
         onClose={() => setCreateOpen(false)}
         onPickDir={dev.selectDirectory}
         onSubmit={handleCreate}
+      />
+      {/* 工作台直接发布：复用 Vibe 的发布对话框（账号→预检→元信息→文件→提交 PR） */}
+      <PublishDialog
+        open={!!publishTarget}
+        onClose={() => setPublishTarget(null)}
+        createdPath={publishTarget?.path || ''}
+        contract={publishTarget?.contract || defaultContract('')}
+        dev={dev}
+        built={publishTarget?.built ?? false}
+        conformance={publishTarget?.conformance ?? null}
+        pushToast={pushToast}
+        onPublished={() => setPublishReloadToken((n) => n + 1)}
+        onVersionBumped={(v) => {
+          setPublishTarget((t) => (t ? { ...t, contract: { ...t.contract, version: v } } : t))
+          void refresh(true)
+        }}
       />
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
     </div>

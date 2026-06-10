@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Github, CheckCircle2, AlertTriangle, ExternalLink, Copy, Check, UploadCloud, LogOut, FileText } from 'lucide-react'
+import { X, Loader2, Github, CheckCircle2, AlertTriangle, ExternalLink, Copy, Check, UploadCloud, LogOut, FileText, ArrowUpCircle } from 'lucide-react'
 import type { UseDeveloperResult } from '../hooks/useDeveloper'
 import type { VibeContract } from '../lib/vibeContract'
 import type { ConformanceResult } from './VibePanel'
@@ -30,6 +30,8 @@ interface Props {
   pushToast: (kind: 'success' | 'error' | 'info', text: string) => void
   /** 提交成功后回传发布记录，供详情页回显「已提交 PR」状态 */
   onPublished?: (rec: PublishRecord) => void
+  /** 「一键升级版本号」成功后回传新版本，供父层同步契约/列表（避免后续操作用旧版本覆盖磁盘） */
+  onVersionBumped?: (version: string) => void
 }
 
 const storage = () => (window as any)?.mulby?.storage
@@ -41,7 +43,7 @@ const openExternal = (url: string) => {
   try { (window as any)?.mulby?.shell?.openExternal?.(url) } catch { /* ignore */ }
 }
 
-export function PublishDialog({ open, onClose, createdPath, contract, dev, built, conformance, pushToast, onPublished }: Props) {
+export function PublishDialog({ open, onClose, createdPath, contract, dev, built, conformance, pushToast, onPublished, onVersionBumped }: Props) {
   const [step, setStep] = useState<Step>('account')
   const [token, setToken] = useState<string>('')
   const [login, setLogin] = useState<string>('')
@@ -57,6 +59,7 @@ export function PublishDialog({ open, onClose, createdPath, contract, dev, built
   const [precheck, setPrecheck] = useState<PrecheckResult | null>(null)
   const [publishedVersion, setPublishedVersion] = useState<string | null>(null)
   const [versionError, setVersionError] = useState<string>('')
+  const [bumping, setBumping] = useState(false)
 
   // 元信息
   const [changeNote, setChangeNote] = useState('')
@@ -153,12 +156,30 @@ export function PublishDialog({ open, onClose, createdPath, contract, dev, built
       const pub = await fetchPublishedVersion(pid)
       setPublishedVersion(pub)
       if (pub && pc.manifest?.version && semverCmp(pc.manifest.version, pub) <= 0) {
-        setVersionError(`版本号需高于已发布的 v${pub}（当前 v${pc.manifest.version}），建议改为 v${nextPatchVersion(pub)}（在契约 Tab 修改版本后「应用修改并重建」）`)
+        setVersionError(`版本号需高于已发布的 v${pub}（当前 v${pc.manifest.version}），点右侧「升级版本号」自动改为 v${nextPatchVersion(pub)}`)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '预检失败')
     } finally {
       setChecking(false)
+    }
+  }
+
+  // 一键升级版本号：直接改 manifest.json（patch +1，连续点击会继续递增直到高于已发布版），
+  // 成功后回传新版本给父层同步契约状态，并重跑预检刷新门禁。
+  const handleBumpVersion = async () => {
+    if (bumping) return
+    setBumping(true); setError('')
+    try {
+      const r = await dev.hostCall<{ ok?: boolean; version?: string; err?: string }>('bump_version', { root: createdPath, level: 'patch' })
+      if (!r?.ok || !r.version) { setError(r?.err || '升级版本号失败'); return }
+      onVersionBumped?.(r.version)
+      pushToast('success', `版本号已升级为 v${r.version}`)
+      await runPrecheck()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '升级版本号失败')
+    } finally {
+      setBumping(false)
     }
   }
 
@@ -311,7 +332,14 @@ export function PublishDialog({ open, onClose, createdPath, contract, dev, built
                   <PreRow ok={!!conformance?.ok} label="契约一致性通过" />
                   <PreRow ok={!versionError} label={isUpdate ? `版本递增（已发布 v${publishedVersion}）` : '新插件（仓库中尚无同名）'} />
                   {(precheck?.errors ?? []).map((e, i) => <div key={i} className="text-[11px] text-rose-500 pl-6">• {e}</div>)}
-                  {versionError && <div className="text-[11px] text-rose-500 pl-6">• {versionError}</div>}
+                  {versionError && (
+                    <div className="flex items-start justify-between gap-2 pl-6">
+                      <div className="text-[11px] text-rose-500 min-w-0">• {versionError}</div>
+                      <button className="btn-secondary shrink-0 h-6 px-2 text-[11px]" onClick={handleBumpVersion} disabled={bumping || checking}>
+                        {bumping ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpCircle size={12} />} 升级版本号
+                      </button>
+                    </div>
+                  )}
                   {(precheck?.warnings ?? []).map((w, i) => <div key={i} className="text-[11px] text-amber-500 pl-6">• {w}</div>)}
                 </div>
               )}

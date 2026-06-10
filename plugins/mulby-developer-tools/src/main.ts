@@ -719,6 +719,10 @@ export const rpc = {
       }
       if (mf.version && !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(String(mf.version))) errors.push(`manifest.json 版本号「${mf.version}」不是合法 semver（需 X.Y.Z）`)
       if (!mf.main) warnings.push('manifest.json 未设置 main（后端入口）')
+      // id 与 name 不一致时，已发布版本按 id 查、PR 提交目录按 name 建，两端容易对不上——提前提醒
+      if (mf.id && mf.name && String(mf.id) !== String(mf.name)) {
+        warnings.push(`manifest.id（${mf.id}）与 name（${mf.name}）不一致：版本索引按 id 记录、发布目录按 name 命名，建议保持二者一致`)
+      }
       if (Array.isArray(mf.features)) {
         for (const f of mf.features) if (!f || !String(f.code || '').trim()) errors.push('manifest.json 存在缺少 code 的 feature')
       } else {
@@ -933,6 +937,17 @@ export const rpc = {
     } catch (e) {
       return { available: false, reason: e instanceof Error ? e.message : 'impact 失败' }
     }
+  },
+
+  /**
+   * 仅升级 manifest.json 的版本号（不依赖 git、不建快照）。
+   * 供「发布预检 → 版本号需高于已发布版」时一键升版；返回新版本号供前端同步契约状态。
+   */
+  bump_version(input: { root?: string; level?: 'patch' | 'minor' | 'major' }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    if (!root || !existsSync(root)) return { ok: false, err: '插件目录不存在' }
+    const level = input?.level === 'minor' || input?.level === 'major' ? input.level : 'patch'
+    return bumpManifestVersion(root, level)
   },
 
   /** 版本管理：探测 git 是否可用 + 该目录是否已有影子快照历史 */

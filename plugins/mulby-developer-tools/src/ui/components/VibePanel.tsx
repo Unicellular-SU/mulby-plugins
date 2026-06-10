@@ -4,13 +4,13 @@ import {
   Hammer, ShieldCheck, FolderOpen, AlertTriangle,
   RefreshCw, Image as ImageIcon, Rocket, FileText, Lightbulb,
   Pencil, Boxes, FileEdit, FileSearch, Terminal, Bug, Wrench, ListChecks,
-  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag, UploadCloud,
-  CheckCircle2, XCircle, Clock, GitMerge, ExternalLink, type LucideIcon
+  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag, UploadCloud
 } from 'lucide-react'
 import type { LogLevel } from '../types'
 import type { UseDeveloperResult } from '../hooks/useDeveloper'
 import { ContractEditor } from './ContractEditor'
 import { PublishDialog } from './PublishDialog'
+import { PublishStatusBadge } from './PublishStatus'
 import { loadPublishRecord, savePublishRecord, getStoredToken, getStoredLogin, fetchPublishLive, discoverPluginPR, rerunPR, type PublishRecord, type PublishLive } from '../lib/github'
 import {
   type VibeContract, defaultContract, normalizeContract, manifestToContract,
@@ -457,7 +457,7 @@ export function VibePanel({
   }, [refreshPublishStatus])
 
   // 对话内提示卡（S4）：危险操作二次确认 / 构建失败一键修复等
-  const [pendingPrompt, setPendingPrompt] = useState<{ kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null>(null)
+  const [pendingPrompt, setPendingPrompt] = useState<{ kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; files?: VibeChange[]; onAction: () => void } | null>(null)
 
   // 重新触发 CI：关闭再重开 PR（二次确认，复用 pendingPrompt 提示卡）
   const [rerunningCi, setRerunningCi] = useState(false)
@@ -1712,7 +1712,7 @@ export function VibePanel({
       void runConformance()
       void autoCommit()
       void detectDevtools()
-      // 应用契约修改（manifest 级改动）等场景不重生成图标，避免无谓改动/覆盖
+      // 应用契约修改 / 手动「重新构建」等场景不重生成图标，避免无谓改动/覆盖；图标只由「重做图标」按钮或对话指令触发
       if (!opts?.skipIcon) void tryGenerateIcon()
     } catch (e) {
       pushEvent('build', 'error', e instanceof Error ? e.message : '构建失败')
@@ -1762,13 +1762,15 @@ export function VibePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, createdPath])
 
-  // 读取本次会话改动（用于交付页 diff 展示与回滚）
-  const loadChanges = async () => {
-    if (!createdPath) { setChanges([]); return }
+  // 读取本次会话改动（用于交付页 diff 展示与回滚）。返回最新列表，便于撤销前即时取用（setChanges 异步，闭包内读不到新值）。
+  const loadChanges = async (): Promise<VibeChange[]> => {
+    if (!createdPath) { setChanges([]); return [] }
     try {
       const r = await dev.hostCall<{ changes?: VibeChange[] }>('vibe_changes', { root: createdPath })
-      setChanges(Array.isArray(r?.changes) ? r!.changes : [])
-    } catch { /* 忽略：改动卡片只是辅助 */ }
+      const list = Array.isArray(r?.changes) ? r!.changes : []
+      setChanges(list)
+      return list
+    } catch { /* 忽略：改动卡片只是辅助 */ return [] }
   }
 
   // 进入交付页或生成/扩展/修复后刷新改动列表与版本历史 + 图标预览
@@ -1828,7 +1830,8 @@ export function VibePanel({
       addLog('info', `↩ [Vibe] 回滚到版本 ${hash.slice(0, 7)}，正在重新构建载入`)
       pushToast('success', `已回滚到 ${hash.slice(0, 7)}，正在重新构建`)
       pendingCommitMsgRef.current = `回滚到版本 ${hash.slice(0, 7)}`
-      await runBuildAndLoad()
+      // 恢复历史版本：只重建载入，不重生图标（图标随被恢复的文件一起还原）
+      await runBuildAndLoad({ skipIcon: true })
       await loadChanges()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '回滚失败')
@@ -1855,13 +1858,31 @@ export function VibePanel({
       recordMessage(mkMsg('assistant', `已撤销到「${target.message}」(${target.short})${removedTip}。本次 AI 改动已丢弃；如需找回，可在交付页版本列表恢复「自动保存：回滚前的当前状态」。`))
       pushToast('success', '已撤销到 AI 改动前，正在重新构建')
       pendingCommitMsgRef.current = '撤销到 AI 改动前'
-      await runBuildAndLoad()
+      // 撤销恢复状态：只重建载入，不重生图标（否则撤销后又冒出一个新图标）
+      await runBuildAndLoad({ skipIcon: true })
       await loadVersions()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '撤销失败')
     } finally {
       setRestoringHash(null)
     }
+  }
+
+  // 「撤销 AI 改动」入口：先即时拉取本次改动文件，弹出列出待撤销文件的二次确认卡，确认后才真正撤销，防误操作。
+  const requestUndoToBeforeAI = async () => {
+    if (!createdPath || aiActive || busy || restoringHash) return
+    const list = await loadChanges()
+    setPendingPrompt({
+      kind: 'confirm',
+      title: '撤销本次 AI 改动？',
+      desc: list.length
+        ? `将丢弃以下 ${list.length} 个文件的本次改动，回到 AI 改动前的状态。此操作可逆——丢弃的改动仍可在交付页「版本」列表恢复。`
+        : '将回到本次 AI 改动之前的状态。此操作可逆——可在交付页「版本」列表恢复。',
+      files: list,
+      actionLabel: '确认撤销',
+      danger: true,
+      onAction: () => { setPendingPrompt(null); void undoToBeforeAI() }
+    })
   }
 
   // 一键回滚本次会话的全部改动，并重新构建载入使运行态与磁盘一致
@@ -1876,7 +1897,8 @@ export function VibePanel({
       addLog('info', `↩ [Vibe] 回滚改动：还原 ${restored} 个文件、删除 ${removed} 个新增文件`)
       pushToast(r?.ok ? 'success' : 'error', r?.ok ? `已回滚（还原 ${restored}，删除 ${removed}）` : `回滚部分失败：${(r?.errors || []).join('；').slice(0, 120)}`)
       await loadChanges()
-      await runBuildAndLoad()
+      // 回滚恢复状态：只重建载入，不重生图标
+      await runBuildAndLoad({ skipIcon: true })
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '回滚失败')
     } finally {
@@ -2099,7 +2121,14 @@ export function VibePanel({
           'vcs_commit', { root: createdPath, bump: 'patch', tag: true, message: '打包发布' }
         )
         if (v?.available === false) setVcsAvailable(false)
-        else if (v?.ok && v.version) { addLog('info', `▶ [Vibe] 版本升级为 v${v.version}`); pushEvent('pack', 'note', `版本升级 v${v.version}`); await loadVersions() }
+        else if (v?.ok && v.version) {
+          // 关键：契约状态同步磁盘新版本。否则之后「应用契约修改并重建」会用旧 version 把磁盘版本打回去
+          const bumped = v.version
+          setContract((c) => (c ? { ...c, version: bumped } : c))
+          addLog('info', `▶ [Vibe] 版本升级为 v${bumped}`)
+          pushEvent('pack', 'note', `版本升级 v${bumped}`)
+          await loadVersions()
+        }
       } catch { /* git 不可用则跳过升版 */ }
       pushEvent('pack', 'note', '打包 .inplugin…')
       const r = await dev.packPlugin(createdPath)
@@ -2548,7 +2577,7 @@ export function VibePanel({
               onTryIt={tryIt}
               onPack={doPack}
               onRegenIcon={() => void generateIcon({ force: true, announce: true })}
-              onUndoToBefore={undoToBeforeAI}
+              onUndoToBefore={() => void requestUndoToBeforeAI()}
               undoing={!!restoringHash}
               onClearMessages={() => { if (activeId) clearMessages(activeId) }}
             />
@@ -2616,7 +2645,7 @@ export function VibePanel({
                       smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
                       versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
                       onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
-                      onRebuild={runBuildAndLoad} onRepair={runRepair}
+                      onRebuild={() => void runBuildAndLoad({ skipIcon: true })} onRepair={runRepair}
                       onRegenIcon={() => void generateIcon({ force: true, announce: true })}
                       onOpenDir={() => dev.openPluginDir(createdPath)}
                       onEnableDevtools={enableDevtools}
@@ -2645,6 +2674,7 @@ export function VibePanel({
           conformance={conformance}
           pushToast={pushToast}
           onPublished={handlePublished}
+          onVersionBumped={(v) => setContract((c) => (c ? { ...c, version: v } : c))}
         />
       )}
     </div>
@@ -2842,72 +2872,6 @@ function GenerateStage({ contract, events, toolCalls, narration, createdPath, bu
       </div>
     </div>
   )
-}
-
-/** 发布状态徽标：交付页回显「已提交 PR #N（vX）」+ 合并/CI 状态 + 刷新/重跑/打开。
- *  竖向布局（状态行 / 详情行 / 操作行），避免窄抽屉里水平挤压导致信息看不全。 */
-function PublishStatusBadge({ record, live, loading, onRefresh, onRerunCi, rerunning }: {
-  record: PublishRecord; live: PublishLive | null; loading: boolean; onRefresh: () => void
-  onRerunCi: () => void; rerunning: boolean
-}) {
-  const meta = publishStatusMeta(live, loading)
-  const Icon = meta.Icon
-  const openExt = (url: string) => { try { (window as any)?.mulby?.shell?.openExternal?.(url) } catch { /* ignore */ } }
-  // PR 仍开着（未合并/未关闭）才给重跑 CI；状态未知时也允许（点了会提示登录）
-  const canRerun = !live || (live.state !== 'merged' && live.state !== 'closed')
-  return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2 text-[12px]">
-      {/* 状态行：状态徽章 + PR 链接 */}
-      <div className="flex items-center justify-between gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium ${meta.cls}`}>
-          <Icon size={13} className={meta.spin ? 'animate-spin' : ''} /> {meta.label}
-        </span>
-        <button className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline shrink-0" onClick={() => openExt(record.prUrl)} title="在浏览器打开 PR">
-          PR #{record.prNumber} <ExternalLink size={12} />
-        </button>
-      </div>
-      {/* 详情行：版本 / 类型 / 状态说明（可换行，不截断） */}
-      <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-        v{record.version} · {record.isUpdate ? '更新' : '新增'} · {publishStatusText(live, loading)}
-      </div>
-      {/* 操作行：等宽平铺 */}
-      <div className="flex items-center gap-2">
-        {canRerun && (
-          <button className="btn-ghost h-7 px-2 text-[11px] flex-1 justify-center" onClick={onRerunCi} disabled={rerunning} title="关闭再重开 PR 以重新触发 CI">
-            <RotateCcw size={13} className={rerunning ? 'animate-spin' : ''} /> 重新跑 CI
-          </button>
-        )}
-        <button className="btn-ghost h-7 px-2 text-[11px] flex-1 justify-center" onClick={onRefresh} disabled={loading} title="刷新 PR / CI 状态">
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> 刷新
-        </button>
-      </div>
-    </div>
-  )
-}
-
-/** 把综合状态映射为徽标文案 + 配色 + SVG 图标（不用 emoji） */
-function publishStatusMeta(live: PublishLive | null, loading: boolean): { label: string; cls: string; Icon: LucideIcon; spin?: boolean } {
-  if (loading && !live) return { label: '查询中', cls: 'bg-slate-400/15 text-slate-500', Icon: Loader2, spin: true }
-  if (!live) return { label: '待审核', cls: 'bg-slate-400/15 text-slate-500', Icon: Clock }
-  switch (live.state) {
-    case 'merged': return { label: '已合并', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', Icon: GitMerge }
-    case 'closed': return { label: '已关闭', cls: 'bg-slate-400/15 text-slate-500', Icon: XCircle }
-    case 'ci_failed': return { label: 'CI 未通过', cls: 'bg-rose-500/15 text-rose-500', Icon: XCircle }
-    case 'ci_running': return { label: 'CI 检查中', cls: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', Icon: Loader2, spin: true }
-    case 'ci_passed': return { label: '待合并', cls: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400', Icon: CheckCircle2 }
-    default: return { label: '待审核', cls: 'bg-slate-400/15 text-slate-500', Icon: Clock }
-  }
-}
-
-/** 徽标下方的辅助说明文案 */
-function publishStatusText(live: PublishLive | null, loading: boolean): string {
-  if (loading && !live) return '正在查询 PR 与 CI 状态…'
-  if (!live) return '登录 GitHub 后可查看合并 / CI 状态，或点开 PR 查看'
-  if (live.state === 'merged') return '已合并，CI 将自动构建并发布 Release'
-  if (live.state === 'closed') return 'PR 已关闭（未合并）'
-  const c = live.checks
-  if (c.total > 0) return `CI 检查 ${c.passed}/${c.total} 通过${c.failed ? `，${c.failed} 失败` : ''}`
-  return '等待维护者审核'
 }
 
 function DeliverStage({

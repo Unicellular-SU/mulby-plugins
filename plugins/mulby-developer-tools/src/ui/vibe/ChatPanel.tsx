@@ -28,6 +28,13 @@ const KIND_DOT: Record<string, string> = {
   write: 'bg-emerald-400', read: 'bg-sky-400', build: 'bg-amber-400',
   load: 'bg-violet-400', error: 'bg-rose-400', ai: 'bg-emerald-400', note: 'bg-slate-400'
 }
+// 撤销确认卡里列出待撤销文件时的状态标签/配色（与交付页 CHANGE_META 保持一致）
+const CHANGE_STATUS_LABEL: Record<'added' | 'modified' | 'deleted', string> = { added: '新增', modified: '修改', deleted: '删除' }
+const CHANGE_STATUS_CLS: Record<'added' | 'modified' | 'deleted', string> = {
+  added: 'text-emerald-600 dark:text-emerald-400',
+  modified: 'text-amber-600 dark:text-amber-400',
+  deleted: 'text-rose-600 dark:text-rose-400'
+}
 
 interface Props {
   onSend: (text: string) => void
@@ -53,7 +60,7 @@ interface Props {
   planPhase?: VibePlanPhase
   onStartPlan?: () => void
   onReplan?: () => void
-  pendingPrompt?: { kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null
+  pendingPrompt?: { kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; files?: { status: 'added' | 'modified' | 'deleted'; path: string }[]; onAction: () => void } | null
   onPromptDismiss?: () => void
   status?: { name: string; loaded: boolean; trigger: string; icon?: string | null } | null
   statusBusy?: boolean
@@ -234,6 +241,16 @@ export function ChatPanel({
             {pendingPrompt.danger ? <AlertTriangle size={12} /> : <Wrench size={12} />} {pendingPrompt.title}
           </div>
           <div className="text-[10px] text-slate-500 dark:text-slate-400 break-words">{pendingPrompt.desc}</div>
+          {pendingPrompt.files && pendingPrompt.files.length > 0 && (
+            <div className="mt-1.5 max-h-28 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 divide-y divide-slate-100 dark:divide-slate-800">
+              {pendingPrompt.files.map((f) => (
+                <div key={f.path} className="flex items-center gap-1.5 px-2 py-1 text-[10px] mono">
+                  <span className={CHANGE_STATUS_CLS[f.status]}>{CHANGE_STATUS_LABEL[f.status]}</span>
+                  <span className="truncate text-slate-600 dark:text-slate-300">{f.path}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mt-2 flex items-center gap-2">
             <button onClick={pendingPrompt.onAction} disabled={busy} className={`h-7 px-2.5 text-[11px] ${pendingPrompt.danger ? 'btn-danger' : 'btn-primary'}`}>
               {pendingPrompt.actionLabel}

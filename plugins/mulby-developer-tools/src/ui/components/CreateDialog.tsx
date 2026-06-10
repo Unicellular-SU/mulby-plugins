@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderSearch, Layout, Terminal, Loader2, Plus } from 'lucide-react'
 import { Modal } from './Modal'
 
@@ -21,6 +21,11 @@ export function CreateDialog({ open, busy, defaultName, onClose, onPickDir, onSu
   const [name, setName] = useState(defaultName || '')
   const [targetDir, setTargetDir] = useState('')
   const [template, setTemplate] = useState<'react' | 'basic'>('react')
+
+  // 每次打开重置插件名（目标目录保留——通常多个插件放同一目录），避免上次创建的名字残留误导
+  useEffect(() => {
+    if (open) setName(defaultName || '')
+  }, [open, defaultName])
 
   const valid = /^[a-z0-9][a-z0-9-]*$/.test(name) && targetDir.trim().length > 0
 
