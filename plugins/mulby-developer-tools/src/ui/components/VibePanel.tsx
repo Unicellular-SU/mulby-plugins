@@ -292,6 +292,7 @@ const clip = () => (window as any)?.mulby?.clipboard
 const settingsApi = () => (window as any)?.mulby?.settings
 const pluginApi = () => (window as any)?.mulby?.plugin
 const sharpApi = () => (window as any)?.mulby?.sharp
+const logApi = () => (window as any)?.mulby?.log
 
 export function VibePanel({
   dev, addLog, pushToast, onPickDir, onAfterCreate, onSyncWorkbench,
@@ -2062,6 +2063,77 @@ export function VibePanel({
     }
   }
 
+  // ---------------- 运行时错误回流（编译 → 装载 → 运行 三层自修复的最后一层） ----------------
+  // 宿主 console-capture 会把插件渲染进程的全部 console 输出（含未捕获异常）捕获进日志服务，
+  // 后端 host 进程的 stderr 同理。这里在「打开插件 / 运行验证」之后按 pluginId 拉取新增的 error
+  // 日志，在对话里提示并提供一键 AI 修复——用户不再需要自己开 DevTools 看报错再口头转述。
+  const runtimeCheckBaselineRef = useRef(0) // 只关心这个时刻之后新产生的错误
+  const markRuntimeBaseline = () => { runtimeCheckBaselineRef.current = Date.now() }
+  // 运行期忙碌跟踪（ref 形式供 setTimeout 回调读取最新值，避免闭包陈旧）
+  const engagedRef = useRef(false)
+
+  const fetchRuntimeErrors = async (): Promise<Array<{ timestamp: number; message: string }>> => {
+    const log = logApi()
+    const pid = loadedId || contract?.pluginId || contract?.name
+    if (!log?.getLogs || !pid) return []
+    try {
+      const list = await log.getLogs({ pluginId: pid, level: 'error', limit: 50 })
+      const since = runtimeCheckBaselineRef.current
+      return (Array.isArray(list) ? list : [])
+        .filter((e: any) => typeof e?.timestamp === 'number' && e.timestamp >= since && typeof e?.message === 'string' && e.message.trim())
+        .map((e: any) => ({ timestamp: e.timestamp, message: String(e.message).slice(0, 400) }))
+    } catch { return [] }
+  }
+
+  /** 错误消息去重（循环报错会刷出大量同文案日志），保留出现顺序 */
+  const uniqMessages = (errs: Array<{ message: string }>, max: number): string[] => {
+    const out: string[] = []
+    for (const e of errs) {
+      if (!out.includes(e.message)) out.push(e.message)
+      if (out.length >= max) break
+    }
+    return out
+  }
+
+  const runtimeRepairInstruction = (errs: Array<{ message: string }>): string => [
+    '插件能构建载入，但运行时控制台出现报错。请阅读相关源码，定位并修复下列运行时错误（注意空值防护、window.mulby API 误用、未捕获异常等），最小化改动、不要顺手重构：',
+    ...uniqMessages(errs, 10).map((m) => `- ${m}`)
+  ].join('\n')
+
+  /**
+   * 运行动作（打开插件 / 运行验证）后延迟检查运行时错误：给插件初始化与渲染留出时间。
+   * 发现新错误 → 事件/日志记录 + 对话提示卡（一键让 AI 修复）。检查前提示过的错误不再重复弹。
+   */
+  const scheduleRuntimeErrorCheck = (delayMs = 3500) => {
+    const sid = activeId
+    setTimeout(() => {
+      void (async () => {
+        // 会话已切换 / 项目已不在 → 放弃；AI 或构建忙 → 跳过本次（不打断在途任务）
+        if (!sid || liveSessionIdRef.current !== sid || !createdPath) return
+        if (engagedRef.current) return
+        const errs = await fetchRuntimeErrors()
+        if (!errs.length) return
+        markRuntimeBaseline() // 同一批错误只提示一次
+        const heads = uniqMessages(errs, 5)
+        const summary = heads.map((m) => `• ${m.length > 160 ? `${m.slice(0, 160)}…` : m}`).join('\n')
+        pushEvent('debug', 'error', `检测到 ${errs.length} 条运行时报错`, heads[0]?.slice(0, 80))
+        addLog('warn', `⚠ [Vibe] 运行时报错 ${errs.length} 条：${heads[0]?.slice(0, 120) || ''}`)
+        appendMessage(sid, mkMsg('assistant', `插件跑起来了，但控制台有 ${errs.length} 条报错 😕：\n${summary}\n\n要我读取日志定位并自动修复吗？`))
+        setPendingPrompt({
+          kind: 'action',
+          title: '检测到运行时报错',
+          desc: `共 ${errs.length} 条 error 日志。我会结合源码定位修复，完成后自动重新构建载入。`,
+          actionLabel: '让 AI 修复',
+          onAction: () => {
+            setPendingPrompt(null)
+            recordMessage(mkMsg('user', '修复运行时报错', { intent: 'modify' }))
+            void runFollowup(runtimeRepairInstruction(errs))
+          }
+        })
+      })()
+    }, delayMs)
+  }
+
   // 为某功能挑选一个可用于「运行验证」的示例输入
   const pickSmokeInput = (f: VibeContract['features'][number]): { input: string; skip?: string } => {
     const ts = f.triggers || []
@@ -2084,6 +2156,7 @@ export function VibePanel({
     const pid = loadedId || contract.pluginId || contract.name
     if (!p?.run || !pid) { pushToast('info', '当前环境无法自动运行验证，请用触发词手动打开'); return }
     setSmoking(true)
+    markRuntimeBaseline() // 只关心本轮验证产生的运行时错误
     try {
       const results: SmokeResult[] = []
       for (const f of contract.features) {
@@ -2106,6 +2179,8 @@ export function VibePanel({
       setCoreVerified(passed > 0 && failed === 0)
       if (failed) { pushToast('error', `运行验证：${passed} 通过 / ${failed} 失败`); addLog('warn', `⚠ [Vibe] 运行验证：${failed} 个功能执行失败`) }
       else { pushToast('success', `运行验证：${passed} 个功能均已执行`); addLog('success', `✔ [Vibe] 运行验证：${passed} 个功能均已执行`) }
+      // run 返回 success 不代表运行干净：UI 渲染/异步逻辑的报错只会出现在控制台日志里，稍后回查
+      scheduleRuntimeErrorCheck(1500)
     } finally {
       setSmoking(false)
     }
@@ -2178,9 +2253,15 @@ export function VibePanel({
     if (!p?.run || !pid) { pushToast('info', '请在 Mulby 主输入框用触发词打开'); return }
     try {
       pushEvent('debug', 'note', `打开插件 ${pid} · ${code}`)
+      markRuntimeBaseline() // 只关心本次打开之后产生的运行时错误
       const r = await p.run(pid, code, '')
-      if (r?.success) { setOpened(true); pushToast('success', '已打开插件窗口') }
-      else pushToast('error', r?.error || '打开失败，可用触发词手动打开')
+      if (r?.success) {
+        setOpened(true)
+        pushToast('success', '已打开插件窗口')
+        scheduleRuntimeErrorCheck() // 稍后回查运行时报错，有则提示一键 AI 修复
+      } else {
+        pushToast('error', r?.error || '打开失败，可用触发词手动打开')
+      }
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : '打开失败')
     }
@@ -2235,6 +2316,8 @@ export function VibePanel({
   const busy = planning || generating || expanding || building || repairing || iconBusy || confRepairing || smoking
   // 正在进行、可被「停止」中断的 AI 生成类任务（不含纯本地的 building / smoking）
   const aiActive = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || !!brainstorm?.loading
+  // 供运行时错误检查的 setTimeout 回调读取「当下」是否忙碌（闭包里的 busy/aiActive 是调度时的旧值）
+  useEffect(() => { engagedRef.current = aiActive || busy || routing }, [aiActive, busy, routing])
   // P1-3：对话变长且 AI 空闲时，后台把更早消息压成滚动摘要（fire-and-forget，失败不影响主流程）
   useEffect(() => {
     if (aiActive) return
