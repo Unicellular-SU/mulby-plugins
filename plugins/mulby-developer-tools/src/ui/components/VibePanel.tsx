@@ -23,6 +23,8 @@ export interface VibeEditTarget {
   path: string
   id?: string
   displayName?: string
+  /** 携带的修复指令（如 PR 审查意见回流）：会话就绪后自动交给 AI 执行 */
+  instruction?: string
   token: number
 }
 
@@ -599,6 +601,9 @@ export function VibePanel({
 
   useEffect(() => { syncToSession() }, [syncToSession])
 
+  // 携带指令的自动回流（审查意见等）：等会话水合就绪后自动交给 AI
+  const [pendingInstruction, setPendingInstruction] = useState<{ text: string; path: string; token: number } | null>(null)
+
   // 工作台「AI 改造」带入目标：优先恢复已有 session
   useEffect(() => {
     if (!editTarget) return
@@ -615,6 +620,18 @@ export function VibePanel({
       const sess = createSession({ pluginPath: editTarget.path, pluginName: name, vibeMode: 'edit', state: 'initial' })
       liveSessionIdRef.current = sess.id
       addLog('info', `▶ [Vibe] 进入改造模式：${editTarget.displayName || editTarget.id || editTarget.path}`)
+    }
+    // 携带修复指令（审查意见回流）：等会话水合就绪后由下方 effect 自动交给 AI；20s 未就绪则放弃
+    if (editTarget.instruction?.trim()) {
+      const token = Date.now()
+      setPendingInstruction({ text: editTarget.instruction.trim(), path: editTarget.path, token })
+      setTimeout(() => {
+        setPendingInstruction((cur) => {
+          if (cur?.token !== token) return cur
+          pushToast('info', '会话尚未就绪，未能自动发送修复指令，请回到发布状态卡重试')
+          return null
+        })
+      }, 20000)
     }
     onConsumeEditTarget?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2342,6 +2359,27 @@ export function VibePanel({
     else { setSentence(t); pushToast('info', vibeMode === 'edit' ? '请先在左侧选择要改造的插件' : '请先选择插件生成的目标目录') }
   }
 
+  // 携带指令的自动回流（审查意见等）：会话水合完成且空闲时，把指令作为用户消息发给迭代通道
+  useEffect(() => {
+    const p = pendingInstruction
+    if (!p) return
+    if (busy || aiActive || routing) return
+    // 已交付的会话：直接走 runFollowup（与运行时错误回流同通道）
+    if (chatReady && createdPath === p.path && contract) {
+      setPendingInstruction(null)
+      recordMessage(mkMsg('user', p.text, { intent: 'modify' }))
+      void runFollowup(p.text)
+      return
+    }
+    // 该插件从未进过 Vibe（新建 edit 会话、尚无契约）：作为需求种子走「理解现状→规划→修改」流程
+    if (!chatReady && !createdPath && vibeMode === 'edit' && editPath === p.path) {
+      setPendingInstruction(null)
+      recordMessage(mkMsg('user', p.text, { intent: 'modify' }))
+      seedAsRequirement(p.text)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingInstruction, busy, aiActive, routing, chatReady, createdPath, contract, vibeMode, editPath])
+
   // ---------------- 头脑风暴（S3） ----------------
   const brainstormPrompt = (seed: string) => [
     '你是 Mulby 插件创意助手。根据用户的初步想法，发散出 3-4 个具体、可落地、彼此差异明显的 Mulby 桌面插件方向。',
@@ -2737,6 +2775,11 @@ export function VibePanel({
                       publishStatusLoading={publishStatusLoading}
                       onRefreshPublishStatus={() => refreshPublishStatus(publishRecord)}
                       onRerunCi={handleRerunCi} rerunningCi={rerunningCi}
+                      onAiFixReview={(instruction) => {
+                        recordMessage(mkMsg('user', instruction, { intent: 'modify' }))
+                        void runFollowup(instruction)
+                      }}
+                      aiFixBusy={busy || aiActive || iterating}
                     />
                   )}
                 </div>
@@ -2965,7 +3008,8 @@ function DeliverStage({
   conformance, confRepairing, onRepairConformance, smoke, smoking, onRunSmoke,
   versions, vcsAvailable, restoringHash, onRefreshVersions, onVersionDiff, onRestoreVersion,
   onRebuild, onRepair, onRegenIcon, onOpenDir, onEnableDevtools, onPublish,
-  publishRecord, publishLive, publishStatusLoading, onRefreshPublishStatus, onRerunCi, rerunningCi
+  publishRecord, publishLive, publishStatusLoading, onRefreshPublishStatus, onRerunCi, rerunningCi,
+  onAiFixReview, aiFixBusy
 }: {
   contract: VibeContract; createdPath: string
   building: boolean; built: boolean; buildLog: string
@@ -2986,6 +3030,7 @@ function DeliverStage({
   publishRecord: PublishRecord | null; publishLive: PublishLive | null
   publishStatusLoading: boolean; onRefreshPublishStatus: () => void
   onRerunCi: () => void; rerunningCi: boolean
+  onAiFixReview: (instruction: string) => void; aiFixBusy: boolean
 }) {
   const buildFailed = !building && !built && !!buildLog
   const isEdit = !!contract.isEdit
@@ -3034,10 +3079,11 @@ function DeliverStage({
         </div>
       )}
 
-      {/* 发布状态回显：提交过 PR 后显示 PR 号 / 版本 / 合并·CI 状态，可刷新、重跑、打开 */}
+      {/* 发布状态回显：提交过 PR 后显示 PR 号 / 版本 / 合并·CI·审查状态，可刷新、重跑、查看意见并让 AI 按意见修改 */}
       {publishRecord && (
         <PublishStatusBadge record={publishRecord} live={publishLive} loading={publishStatusLoading}
-          onRefresh={onRefreshPublishStatus} onRerunCi={onRerunCi} rerunning={rerunningCi} />
+          onRefresh={onRefreshPublishStatus} onRerunCi={onRerunCi} rerunning={rerunningCi}
+          onAiFix={onAiFixReview} aiFixBusy={aiFixBusy} />
       )}
 
       {/* 验收清单：构建/载入是「能编译能装载」，契约一致 + 运行验证才是「真的能跑」 */}

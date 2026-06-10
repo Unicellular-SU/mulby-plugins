@@ -145,8 +145,18 @@ export async function ensureFork(token: string, login: string, onProgress?: (msg
 
 // ---------------- 已发布版本（判断新增/更新） ----------------
 
-/** 从上游 plugins.json 读取某插件的已发布版本；不存在返回 null */
-export async function fetchPublishedVersion(pluginId: string): Promise<string | null> {
+/** 商店索引内存缓存：批量维护检查时只拉一次 plugins.json，避免每个插件一个请求 */
+let publishedIndexCache: { at: number; map: Map<string, string> } | null = null
+const PUBLISHED_INDEX_TTL = 5 * 60_000
+
+/**
+ * 拉取上游 plugins.json 并按 id/name 建索引（id→version）。免 token（raw.githubusercontent.com）。
+ * forceFresh 跳过内存缓存；网络失败返回 null（区别于「索引里没有」的空 Map）。
+ */
+export async function fetchPublishedIndex(forceFresh = false): Promise<Map<string, string> | null> {
+  if (!forceFresh && publishedIndexCache && Date.now() - publishedIndexCache.at < PUBLISHED_INDEX_TTL) {
+    return publishedIndexCache.map
+  }
   try {
     const res = await rawRequest({
       url: `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BASE_BRANCH}/plugins.json`,
@@ -156,11 +166,25 @@ export async function fetchPublishedVersion(pluginId: string): Promise<string | 
     if (res.status !== 200) return null
     const idx = parseJson(res)
     const list: any[] = Array.isArray(idx?.plugins) ? idx.plugins : []
-    const hit = list.find((p) => (p?.id || p?.name) === pluginId)
-    return hit?.version ? String(hit.version) : null
+    const map = new Map<string, string>()
+    for (const p of list) {
+      const version = p?.version ? String(p.version) : ''
+      if (!version) continue
+      // id 与 name 都建索引：上游索引按 id、发布目录按 name，两边查询口径不一致时都能命中
+      if (p?.id) map.set(String(p.id), version)
+      if (p?.name) map.set(String(p.name), version)
+    }
+    publishedIndexCache = { at: Date.now(), map }
+    return map
   } catch {
     return null
   }
+}
+
+/** 从上游 plugins.json 读取某插件的已发布版本；不存在返回 null */
+export async function fetchPublishedVersion(pluginId: string): Promise<string | null> {
+  const map = await fetchPublishedIndex()
+  return map?.get(pluginId) ?? null
 }
 
 /** semver 比较：a > b 返回 1，a < b 返回 -1，相等 0（忽略 prerelease 细节，够发布门禁用） */
@@ -284,12 +308,23 @@ export function nextPatchVersion(version: string): string {
 
 // ---------------- PR / CI 状态查询 ----------------
 
-export interface PullStatus { state: 'open' | 'closed'; merged: boolean; headSha: string }
+export interface PullStatus {
+  state: 'open' | 'closed'
+  merged: boolean
+  headSha: string
+  /** 普通评论 + 代码行评论总数（审查意见入口的角标） */
+  commentCount: number
+}
 
 /** 查询 PR 的开关 / 合并状态与 head commit sha */
 export async function getPullStatus(token: string, prNumber: number): Promise<PullStatus> {
   const pr = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls/${prNumber}`, token)
-  return { state: pr?.state === 'closed' ? 'closed' : 'open', merged: !!pr?.merged, headSha: pr?.head?.sha || '' }
+  return {
+    state: pr?.state === 'closed' ? 'closed' : 'open',
+    merged: !!pr?.merged,
+    headSha: pr?.head?.sha || '',
+    commentCount: (Number(pr?.comments) || 0) + (Number(pr?.review_comments) || 0)
+  }
 }
 
 export type ChecksState = 'none' | 'in_progress' | 'success' | 'failure'
@@ -330,23 +365,128 @@ export async function getChecksStatus(token: string, sha: string): Promise<Check
 }
 
 export type PublishLiveState = 'merged' | 'closed' | 'ci_failed' | 'ci_running' | 'ci_passed' | 'open'
-export interface PublishLive { state: PublishLiveState; pull: PullStatus; checks: ChecksStatus }
+export type ReviewState = 'changes_requested' | 'approved' | 'commented' | 'none'
+export interface PublishLive { state: PublishLiveState; pull: PullStatus; checks: ChecksStatus; review: ReviewState }
 
-/** 综合查询：先看 PR 是否合并/关闭，未关闭再看 CI 检查，归一成一个状态供 UI 显示 */
+/**
+ * 聚合 PR 的人工审查结论（GitHub 的口径：每个 reviewer 以其最新一次 APPROVED/CHANGES_REQUESTED 为准）：
+ * 任一 reviewer 最新为「要求修改」→ changes_requested；否则有通过 → approved；只有评论 → commented。
+ */
+export async function getReviewState(token: string, prNumber: number): Promise<ReviewState> {
+  try {
+    const reviews = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls/${prNumber}/reviews?per_page=100`, token)
+    if (!Array.isArray(reviews) || reviews.length === 0) return 'none'
+    const latestByUser = new Map<string, string>()
+    let commented = false
+    for (const r of reviews) {
+      const user = r?.user?.login
+      const state = String(r?.state || '')
+      if (!user || r?.user?.type === 'Bot') continue
+      if (state === 'COMMENTED') { commented = true; continue }
+      if (state === 'APPROVED' || state === 'CHANGES_REQUESTED') latestByUser.set(user, state) // 按时间升序返回，后写覆盖
+    }
+    const states = [...latestByUser.values()]
+    if (states.includes('CHANGES_REQUESTED')) return 'changes_requested'
+    if (states.includes('APPROVED')) return 'approved'
+    return commented ? 'commented' : 'none'
+  } catch {
+    return 'none'
+  }
+}
+
+/** 综合查询：先看 PR 是否合并/关闭，未关闭再看 CI 检查与审查结论，归一成一个状态供 UI 显示 */
 export async function fetchPublishLive(token: string, prNumber: number): Promise<PublishLive> {
   const pull = await getPullStatus(token, prNumber)
   let checks: ChecksStatus = { state: 'none', total: 0, passed: 0, failed: 0 }
+  let review: ReviewState = 'none'
   let state: PublishLiveState
   if (pull.merged) state = 'merged'
   else if (pull.state === 'closed') state = 'closed'
   else {
-    checks = await getChecksStatus(token, pull.headSha)
+    ;[checks, review] = await Promise.all([getChecksStatus(token, pull.headSha), getReviewState(token, prNumber)])
     state = checks.state === 'failure' ? 'ci_failed'
       : checks.state === 'in_progress' ? 'ci_running'
       : checks.state === 'success' ? 'ci_passed'
       : 'open'
   }
-  return { state, pull, checks }
+  return { state, pull, checks, review }
+}
+
+// ---------------- 审查意见（评论回流） ----------------
+
+export interface PrFeedbackItem {
+  kind: 'review' | 'line' | 'comment'
+  author: string
+  /** review 专有：APPROVED / CHANGES_REQUESTED / COMMENTED */
+  state?: string
+  body: string
+  /** 代码行评论专有：文件路径与行号 */
+  path?: string
+  line?: number
+  createdAt: number
+}
+
+export interface PrFeedback { reviewState: ReviewState; items: PrFeedbackItem[] }
+
+const isBotUser = (u: any): boolean => u?.type === 'Bot' || /\[bot\]$/i.test(String(u?.login || ''))
+
+/**
+ * 拉取 PR 的全部「人话意见」：reviews 正文 + 代码行评论 + 普通评论，按时间排序。
+ * 过滤 bot（CI 机器人评论）与自己（selfLogin）的发言——只保留需要响应的审查意见。
+ */
+export async function fetchPrFeedback(token: string, prNumber: number, selfLogin?: string): Promise<PrFeedback> {
+  const base = `/repos/${REPO_OWNER}/${REPO_NAME}`
+  const [reviews, lineComments, issueComments] = await Promise.all([
+    ghApi('GET', `${base}/pulls/${prNumber}/reviews?per_page=100`, token).catch(() => []),
+    ghApi('GET', `${base}/pulls/${prNumber}/comments?per_page=100`, token).catch(() => []),
+    ghApi('GET', `${base}/issues/${prNumber}/comments?per_page=100`, token).catch(() => [])
+  ])
+  const items: PrFeedbackItem[] = []
+  const keep = (u: any) => !isBotUser(u) && (!selfLogin || u?.login !== selfLogin)
+
+  for (const r of Array.isArray(reviews) ? reviews : []) {
+    if (!keep(r?.user) || r?.state === 'PENDING') continue
+    const body = String(r?.body || '').trim()
+    if (!body && r?.state !== 'CHANGES_REQUESTED') continue // 纯 APPROVED 无正文不算「意见」
+    items.push({
+      kind: 'review', author: r?.user?.login || '', state: String(r?.state || ''),
+      body: body || '（要求修改，未附说明，详见代码行评论）',
+      createdAt: Date.parse(r?.submitted_at || '') || 0
+    })
+  }
+  for (const c of Array.isArray(lineComments) ? lineComments : []) {
+    if (!keep(c?.user)) continue
+    const body = String(c?.body || '').trim()
+    if (!body) continue
+    items.push({
+      kind: 'line', author: c?.user?.login || '', body,
+      path: c?.path ? String(c.path) : undefined,
+      line: typeof c?.line === 'number' ? c.line : (typeof c?.original_line === 'number' ? c.original_line : undefined),
+      createdAt: Date.parse(c?.created_at || '') || 0
+    })
+  }
+  for (const c of Array.isArray(issueComments) ? issueComments : []) {
+    if (!keep(c?.user)) continue
+    const body = String(c?.body || '').trim()
+    if (!body) continue
+    items.push({ kind: 'comment', author: c?.user?.login || '', body, createdAt: Date.parse(c?.created_at || '') || 0 })
+  }
+  items.sort((a, b) => a.createdAt - b.createdAt)
+
+  // reviewState 与 getReviewState 同口径（复用已拉到的 reviews，不再发请求）
+  const latestByUser = new Map<string, string>()
+  let commented = items.length > 0
+  for (const r of Array.isArray(reviews) ? reviews : []) {
+    const user = r?.user?.login
+    const state = String(r?.state || '')
+    if (!user || isBotUser(r?.user)) continue
+    if (state === 'APPROVED' || state === 'CHANGES_REQUESTED') latestByUser.set(user, state)
+  }
+  const states = [...latestByUser.values()]
+  const reviewState: ReviewState = states.includes('CHANGES_REQUESTED') ? 'changes_requested'
+    : states.includes('APPROVED') ? 'approved'
+    : commented ? 'commented' : 'none'
+  return { reviewState, items }
 }
 
 // ---------------- 本地登录态 / 发布记录持久化 ----------------
@@ -399,15 +539,23 @@ export async function getStoredLogin(): Promise<string> {
 
 // ---------------- 网络发现 / 重新触发 CI ----------------
 
-/**
- * 不依赖本地记录，直接从上游仓库按分支名（publish/<name>-v*，已 sanitize）发现
- * 当前用户为某插件提交过的最新 PR —— 本地 storage 被清空 / 换机器后仍能回显。
- */
-export async function discoverPluginPR(token: string, login: string, pluginName: string): Promise<PublishRecord | null> {
+/** 仓库 PR 列表内存缓存：批量维护检查时多个插件共享一次拉取 */
+let prListCache: { at: number; list: any[] } | null = null
+const PR_LIST_TTL = 60_000
+
+/** 拉取上游仓库最近 100 条 PR（带 60s 内存缓存）；失败抛错 */
+export async function listRepoPRs(token: string, forceFresh = false): Promise<any[]> {
+  if (!forceFresh && prListCache && Date.now() - prListCache.at < PR_LIST_TTL) return prListCache.list
+  const list = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls?state=all&per_page=100&sort=created&direction=desc`, token)
+  const arr = Array.isArray(list) ? list : []
+  prListCache = { at: Date.now(), list: arr }
+  return arr
+}
+
+/** 在 PR 列表中按分支名（publish/<name>-v*，已 sanitize）匹配当前用户为某插件提交的最新 PR */
+export function matchPluginPR(list: any[], login: string, pluginName: string): PublishRecord | null {
   if (!login || !pluginName) return null
   const prefix = sanitizeBranch(`publish/${pluginName}-v`)
-  const list = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls?state=all&per_page=100&sort=created&direction=desc`, token)
-  if (!Array.isArray(list)) return null
   const hit = list.find((pr: any) =>
     typeof pr?.head?.ref === 'string' && pr.head.ref.startsWith(prefix) &&
     (pr?.head?.repo?.owner?.login === login || pr?.user?.login === login)
@@ -422,6 +570,15 @@ export async function discoverPluginPR(token: string, login: string, pluginName:
     isUpdate: /^update\(/.test(String(hit.title || '')),
     submittedAt: hit.created_at ? Date.parse(hit.created_at) : Date.now()
   }
+}
+
+/**
+ * 不依赖本地记录，直接从上游仓库按分支名（publish/<name>-v*，已 sanitize）发现
+ * 当前用户为某插件提交过的最新 PR —— 本地 storage 被清空 / 换机器后仍能回显。
+ */
+export async function discoverPluginPR(token: string, login: string, pluginName: string): Promise<PublishRecord | null> {
+  if (!login || !pluginName) return null
+  return matchPluginPR(await listRepoPRs(token), login, pluginName)
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { FolderGit2, Folder, Layers, AlertTriangle } from 'lucide-react'
 import type { PluginProjectSource, PluginProjectStatus } from '../types'
+import type { MaintenanceStatus } from '../lib/maintenance'
 import { HealthDot } from './StatusBadge'
 
 const SOURCE_ORDER: PluginProjectSource[] = ['created', 'imported', 'added', 'migrated']
@@ -16,11 +17,13 @@ interface Props {
   selectedId: string | null
   loading: boolean
   onSelect: (id: string) => void
+  /** 维护状态（key = 插件目录路径），由 App 后台聚合；缺失时不显示徽标 */
+  maint?: Record<string, MaintenanceStatus>
 }
 
 type ListTab = 'single' | 'collection'
 
-export function ProjectList({ projects, selectedId, loading, onSelect }: Props) {
+export function ProjectList({ projects, selectedId, loading, onSelect, maint }: Props) {
   const [tab, setTab] = useState<ListTab>('single')
 
   // 仅在首次加载时确定默认 tab（按选中项类型，或哪个非空）；之后完全由用户手动切换，
@@ -80,6 +83,7 @@ export function ProjectList({ projects, selectedId, loading, onSelect }: Props) 
                     proj={proj}
                     active={proj.projectId === selectedId}
                     onSelect={onSelect}
+                    maint={maint}
                   />
                 ))}
               </div>
@@ -106,8 +110,8 @@ function ListTabBtn({ active, onClick, icon, label, count }: { active: boolean; 
 }
 
 function ProjectRow({
-  proj, active, onSelect
-}: { proj: PluginProjectStatus; active: boolean; onSelect: (id: string) => void }) {
+  proj, active, onSelect, maint
+}: { proj: PluginProjectStatus; active: boolean; onSelect: (id: string) => void; maint?: Record<string, MaintenanceStatus> }) {
   // 集合目录用"目录名"作为标题（而非第一个子插件名，避免误导）；单插件才回退到插件 displayName
   const dirName = proj.path.replace(/[/\\]+$/, '').split(/[/\\]/).pop() || proj.path
   const name = proj.label
@@ -115,6 +119,11 @@ function ProjectRow({
     || dirName
   const hasError = !proj.exists || proj.plugins.some((p) => !p.manifestValid || p.idConflictWith)
   const TypeIcon = proj.type === 'collection' ? Layers : (proj.source === 'migrated' ? FolderGit2 : Folder)
+
+  // 维护徽标：项目内任一插件需维护 → 红点；否则任一可发更新 → 蓝点
+  const maints = maint ? proj.plugins.map((p) => maint[p.path]).filter(Boolean) : []
+  const attention = maints.find((m) => m.needsAttention)
+  const updatable = !attention && maints.find((m) => m.canPublishUpdate)
 
   return (
     <button
@@ -128,6 +137,12 @@ function ProjectRow({
       <div className="flex items-center gap-2">
         <TypeIcon size={15} className={`shrink-0 ${active ? 'text-emerald-500' : 'text-slate-400 dark:text-slate-500'}`} />
         <span className="flex-1 min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-200">{name}</span>
+        {attention && (
+          <span className="shrink-0 w-2 h-2 rounded-full bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.6)]" title={`需维护：${attention.attentionReason}`} />
+        )}
+        {updatable && (
+          <span className="shrink-0 w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_6px_rgba(14,165,233,0.6)]" title={`可发布更新：本地 v${updatable.localVersion} > 商店 v${updatable.storeVersion}`} />
+        )}
         {proj.type === 'collection' && (
           <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200/70 dark:bg-slate-700/70 text-slate-500 dark:text-slate-400">{proj.plugins.length}</span>
         )}

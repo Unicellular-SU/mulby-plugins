@@ -15,6 +15,7 @@ import { VibePanel, type VibeEditTarget, type KnownPlugin } from './components/V
 import type { ConformanceResult } from './components/VibePanel'
 import { PublishDialog } from './components/PublishDialog'
 import { defaultContract, type VibeContract } from './lib/vibeContract'
+import { loadMaintenanceCache, refreshMaintenance, type MaintenanceStatus, type MaintenanceTarget } from './lib/maintenance'
 import { SessionProvider } from './vibe'
 
 interface PublishTarget {
@@ -41,6 +42,9 @@ export default function App() {
   // 工作台直接发布：打开 PublishDialog 的目标 + 发布成功后驱动状态卡刷新的 token
   const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
   const [publishReloadToken, setPublishReloadToken] = useState(0)
+  // 维护状态（key=插件目录路径）：后台聚合「本地 vs 商店版本 / PR / CI / 审查」，驱动列表徽标与详情维护行
+  const [maintMap, setMaintMap] = useState<Record<string, MaintenanceStatus>>({})
+  const maintNotifiedRef = useRef(false)
 
   // 改造模式可选目标：已知插件（排除本工具自身，避免自改自）
   const knownPlugins = useMemo<KnownPlugin[]>(() => {
@@ -139,6 +143,48 @@ export default function App() {
   useEffect(() => { void refresh() }, [refresh])
 
   const selected = projects.find((p) => p.projectId === selectedId) || null
+
+  // ---------------- 维护闭环：状态聚合与提醒 ----------------
+  const maintTargets = useMemo<MaintenanceTarget[]>(() => {
+    const acc: MaintenanceTarget[] = []
+    for (const proj of projects) for (const pl of proj.plugins) acc.push({ path: pl.path, id: pl.id })
+    return acc
+  }, [projects])
+
+  // 挂载先回显 storage 缓存（不等网络），让徽标/维护行秒显
+  useEffect(() => {
+    void loadMaintenanceCache().then((m) => setMaintMap((cur) => ({ ...m, ...cur })))
+  }, [])
+
+  // 项目列表就绪后后台聚合（TTL 10min + 共享索引/PR 列表防限流）；发布成功后强制刷新绕过缓存
+  const lastPublishTokenRef = useRef(0)
+  useEffect(() => {
+    if (maintTargets.length === 0) return
+    const force = publishReloadToken !== lastPublishTokenRef.current
+    lastPublishTokenRef.current = publishReloadToken
+    void refreshMaintenance(
+      maintTargets,
+      (st) => setMaintMap((cur) => ({ ...cur, [st.pluginPath]: st })),
+      { force }
+    )
+  }, [maintTargets, publishReloadToken])
+
+  // 汇总提醒：发现需维护的插件时弹一次（本次打开期间不重复）
+  useEffect(() => {
+    if (maintNotifiedRef.current) return
+    const attention = Object.values(maintMap).filter((m) => m.needsAttention)
+    if (attention.length === 0) return
+    maintNotifiedRef.current = true
+    const names = attention.slice(0, 3).map((m) => m.pluginId).join('、')
+    pushToast('info', `${attention.length} 个插件需要维护：${names}${attention.length > 3 ? ' 等' : ''}（详见列表红点与详情页）`)
+  }, [maintMap, pushToast])
+
+  // 审查意见回流：从工作台跳到 Vibe 改造，并把意见作为修复指令自动交给 AI
+  const handleMaintAiFix = useCallback((plugin: PluginProjectPluginStatus, instruction: string) => {
+    setVibeEditTarget({ path: plugin.path, id: plugin.id, displayName: plugin.displayName, token: Date.now(), instruction })
+    setTab('vibe')
+    addLog('info', `▶ 审查意见回流：转 Vibe 改造 ${plugin.displayName || plugin.id}`)
+  }, [addLog])
 
   const addByDir = useCallback(async (source: 'imported' | 'added') => {
     try {
@@ -381,6 +427,7 @@ export default function App() {
                 selectedId={selectedId}
                 loading={listLoading}
                 onSelect={setSelectedId}
+                maint={maintMap}
               />
             </aside>
 
@@ -399,7 +446,7 @@ export default function App() {
               ) : selected ? (
                 <>
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} pushToast={pushToast} publishReloadToken={publishReloadToken} />
+                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maintMap} onAiFix={handleMaintAiFix} />
                   </div>
                 </>
               ) : (
