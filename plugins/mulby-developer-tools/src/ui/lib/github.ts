@@ -195,19 +195,23 @@ function sanitizeBranch(s: string): string {
 
 /**
  * 在用户 fork 上建分支、用 Git Data API 一次提交推送整棵源码树，再向上游开 PR。
- * 返回 PR 的 html_url。
+ * 返回 PR 的 html_url、编号与是否复用既有 PR。
  */
-export async function publishPluginPR(params: PublishParams, onProgress?: (msg: string) => void): Promise<{ prUrl: string; reused: boolean }> {
+export async function publishPluginPR(params: PublishParams, onProgress?: (msg: string) => void): Promise<{ prUrl: string; prNumber: number; branch: string; reused: boolean }> {
   const { token, login, pluginName, version, files, title, body } = params
   const fork = `${login}/${REPO_NAME}`
+  const upstream = `${REPO_OWNER}/${REPO_NAME}`
   const branch = sanitizeBranch(`publish/${pluginName}-v${version}`)
 
-  // 1. 基线 commit/tree
-  onProgress?.('读取仓库基线…')
-  const ref = await ghApi('GET', `/repos/${fork}/git/ref/heads/${BASE_BRANCH}`, token)
+  // 1. 基线：直接以「上游 main 的最新提交」为基（fork 与上游同属一个 fork network、共享对象存储，
+  //    可跨库引用其 commit/tree sha）。这样 PR 分支始终基于最新 main（含最新 CI workflow）——
+  //    PR 的 CI 跑的是「PR 分支里」的 workflow，陈旧 fork 切出的分支会跑旧 workflow 而失败。
+  //    且本提交只新增插件文件、workflow 原样继承自 base_tree（未改动），无需 workflow scope。
+  onProgress?.('读取上游基线…')
+  const ref = await ghApi('GET', `/repos/${upstream}/git/ref/heads/${BASE_BRANCH}`, token)
   const baseSha: string = ref?.object?.sha
-  if (!baseSha) throw new Error('未取到 fork 的基线分支')
-  const baseCommit = await ghApi('GET', `/repos/${fork}/git/commits/${baseSha}`, token)
+  if (!baseSha) throw new Error('未取到上游基线分支')
+  const baseCommit = await ghApi('GET', `/repos/${upstream}/git/commits/${baseSha}`, token)
   const baseTreeSha: string = baseCommit?.tree?.sha
 
   // 2. 逐文件创建 blob
@@ -242,11 +246,11 @@ export async function publishPluginPR(params: PublishParams, onProgress?: (msg: 
     const pr = await ghApi('POST', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls`, token, {
       title, body, head: `${login}:${branch}`, base: BASE_BRANCH, maintainer_can_modify: true
     })
-    return { prUrl: pr.html_url, reused: false }
+    return { prUrl: pr.html_url, prNumber: pr.number, branch, reused: false }
   } catch (e) {
     if ((e as any)?.status === 422) {
       const existing = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls?head=${login}:${branch}&state=open`, token)
-      if (Array.isArray(existing) && existing[0]?.html_url) return { prUrl: existing[0].html_url, reused: true }
+      if (Array.isArray(existing) && existing[0]?.html_url) return { prUrl: existing[0].html_url, prNumber: existing[0].number, branch, reused: true }
     }
     throw e
   }
@@ -269,4 +273,165 @@ export function scanSecrets(files: PublishFile[]): Array<{ path: string; hint: s
     }
   }
   return hits
+}
+
+// ---------------- 版本建议 ----------------
+
+/** 给出建议的下一个版本号（patch + 1）；解析失败时原样返回 */
+export function nextPatchVersion(version: string): string {
+  const m = String(version || '').trim().match(/^(\d+)\.(\d+)\.(\d+)/)
+  if (!m) return version
+  return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`
+}
+
+// ---------------- PR / CI 状态查询 ----------------
+
+export interface PullStatus { state: 'open' | 'closed'; merged: boolean; headSha: string }
+
+/** 查询 PR 的开关 / 合并状态与 head commit sha */
+export async function getPullStatus(token: string, prNumber: number): Promise<PullStatus> {
+  const pr = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls/${prNumber}`, token)
+  return { state: pr?.state === 'closed' ? 'closed' : 'open', merged: !!pr?.merged, headSha: pr?.head?.sha || '' }
+}
+
+export type ChecksState = 'none' | 'in_progress' | 'success' | 'failure'
+export interface ChecksStatus { state: ChecksState; total: number; passed: number; failed: number }
+
+/** 比较两条 check-run 谁更新：先按 started_at，再按 id（单调递增）兜底 */
+function checkRunNewer(a: any, b: any): boolean {
+  const ta = Date.parse(a?.started_at || a?.completed_at || '') || 0
+  const tb = Date.parse(b?.started_at || b?.completed_at || '') || 0
+  if (ta !== tb) return ta > tb
+  return (Number(a?.id) || 0) > (Number(b?.id) || 0)
+}
+
+/** 聚合某 commit 的 check-runs：有失败→failure，有未完成→in_progress，全过→success，无→none */
+export async function getChecksStatus(token: string, sha: string): Promise<ChecksStatus> {
+  if (!sha) return { state: 'none', total: 0, passed: 0, failed: 0 }
+  const res = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/commits/${sha}/check-runs`, token)
+  const runs: any[] = Array.isArray(res?.check_runs) ? res.check_runs : []
+  if (runs.length === 0) return { state: 'none', total: 0, passed: 0, failed: 0 }
+  // 同一 commit 多次触发/重跑会留下多条同名 check-run（旧失败 + 新成功，分属不同 check_suite）。
+  // GitHub 只认每个名字「最新」那条，这里按 name 去重、保留最近一条（started_at→id）再聚合，
+  // 否则旧的失败记录会让状态长期误显示为「未通过」。
+  const latest = new Map<string, any>()
+  for (const r of runs) {
+    const key = String(r?.name ?? r?.id)
+    const prev = latest.get(key)
+    if (!prev || checkRunNewer(r, prev)) latest.set(key, r)
+  }
+  let passed = 0, failed = 0, running = 0
+  for (const r of latest.values()) {
+    if (r?.status !== 'completed') { running++; continue }
+    const c = r?.conclusion
+    if (c === 'success' || c === 'neutral' || c === 'skipped') passed++
+    else failed++ // failure / cancelled / timed_out / action_required / stale
+  }
+  const state: ChecksState = failed > 0 ? 'failure' : running > 0 ? 'in_progress' : 'success'
+  return { state, total: latest.size, passed, failed }
+}
+
+export type PublishLiveState = 'merged' | 'closed' | 'ci_failed' | 'ci_running' | 'ci_passed' | 'open'
+export interface PublishLive { state: PublishLiveState; pull: PullStatus; checks: ChecksStatus }
+
+/** 综合查询：先看 PR 是否合并/关闭，未关闭再看 CI 检查，归一成一个状态供 UI 显示 */
+export async function fetchPublishLive(token: string, prNumber: number): Promise<PublishLive> {
+  const pull = await getPullStatus(token, prNumber)
+  let checks: ChecksStatus = { state: 'none', total: 0, passed: 0, failed: 0 }
+  let state: PublishLiveState
+  if (pull.merged) state = 'merged'
+  else if (pull.state === 'closed') state = 'closed'
+  else {
+    checks = await getChecksStatus(token, pull.headSha)
+    state = checks.state === 'failure' ? 'ci_failed'
+      : checks.state === 'in_progress' ? 'ci_running'
+      : checks.state === 'success' ? 'ci_passed'
+      : 'open'
+  }
+  return { state, pull, checks }
+}
+
+// ---------------- 本地登录态 / 发布记录持久化 ----------------
+
+export const GH_TOKEN_KEY = 'gh-token'
+export const GH_LOGIN_KEY = 'gh-login'
+
+const storage = () => (window as any)?.mulby?.storage
+
+/** 读取本地保存的 GitHub token（未登录返回空串） */
+export async function getStoredToken(): Promise<string> {
+  try { return (await storage()?.get?.(GH_TOKEN_KEY)) || '' } catch { return '' }
+}
+
+export interface PublishRecord {
+  pluginId: string
+  displayName?: string
+  version: string
+  prNumber: number
+  prUrl: string
+  branch: string
+  isUpdate: boolean
+  submittedAt: number
+}
+
+/** 按插件目录路径作 key，避免插件 id/name 在不同环节取值不一致 */
+const recordKey = (root: string) => `publish-record:${root}`
+
+export async function savePublishRecord(root: string, rec: PublishRecord): Promise<void> {
+  try { await storage()?.set?.(recordKey(root), JSON.stringify(rec)) } catch { /* ignore */ }
+}
+
+export async function loadPublishRecord(root: string): Promise<PublishRecord | null> {
+  try {
+    const raw = await storage()?.get?.(recordKey(root))
+    if (!raw) return null
+    const r = typeof raw === 'string' ? JSON.parse(raw) : raw
+    return r && typeof r === 'object' && r.prNumber ? (r as PublishRecord) : null
+  } catch { return null }
+}
+
+export async function clearPublishRecord(root: string): Promise<void> {
+  try { await storage()?.remove?.(recordKey(root)) } catch { /* ignore */ }
+}
+
+/** 读取本地保存的 GitHub 登录名（未登录返回空串） */
+export async function getStoredLogin(): Promise<string> {
+  try { return (await storage()?.get?.(GH_LOGIN_KEY)) || '' } catch { return '' }
+}
+
+// ---------------- 网络发现 / 重新触发 CI ----------------
+
+/**
+ * 不依赖本地记录，直接从上游仓库按分支名（publish/<name>-v*，已 sanitize）发现
+ * 当前用户为某插件提交过的最新 PR —— 本地 storage 被清空 / 换机器后仍能回显。
+ */
+export async function discoverPluginPR(token: string, login: string, pluginName: string): Promise<PublishRecord | null> {
+  if (!login || !pluginName) return null
+  const prefix = sanitizeBranch(`publish/${pluginName}-v`)
+  const list = await ghApi('GET', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls?state=all&per_page=100&sort=created&direction=desc`, token)
+  if (!Array.isArray(list)) return null
+  const hit = list.find((pr: any) =>
+    typeof pr?.head?.ref === 'string' && pr.head.ref.startsWith(prefix) &&
+    (pr?.head?.repo?.owner?.login === login || pr?.user?.login === login)
+  )
+  if (!hit) return null
+  return {
+    pluginId: pluginName,
+    version: String(hit.head.ref.slice(prefix.length) || ''),
+    prNumber: hit.number,
+    prUrl: hit.html_url,
+    branch: hit.head.ref,
+    isUpdate: /^update\(/.test(String(hit.title || '')),
+    submittedAt: hit.created_at ? Date.parse(hit.created_at) : Date.now()
+  }
+}
+
+/**
+ * 关闭再重开 PR 以重新触发 CI：让 GitHub 用「当前 base」重算测试合并提交、跑最新 workflow。
+ * 单纯 re-run 会复用旧合并提交（旧 workflow），所以这里用 close + reopen。
+ */
+export async function rerunPR(token: string, prNumber: number): Promise<void> {
+  await ghApi('PATCH', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls/${prNumber}`, token, { state: 'closed' })
+  await sleep(1500)
+  await ghApi('PATCH', `/repos/${REPO_OWNER}/${REPO_NAME}/pulls/${prNumber}`, token, { state: 'open' })
 }

@@ -5,8 +5,9 @@ import type { VibeContract } from '../lib/vibeContract'
 import type { ConformanceResult } from './VibePanel'
 import {
   requestDeviceCode, pollForToken, getUser, ensureFork, fetchPublishedVersion,
-  semverCmp, publishPluginPR, scanSecrets, REPO_OWNER, REPO_NAME, BASE_BRANCH,
-  type DeviceCode, type PublishFile
+  semverCmp, publishPluginPR, scanSecrets, nextPatchVersion, savePublishRecord,
+  GH_TOKEN_KEY, GH_LOGIN_KEY, REPO_OWNER, REPO_NAME, BASE_BRANCH,
+  type DeviceCode, type PublishFile, type PublishRecord
 } from '../lib/github'
 
 type Step = 'account' | 'precheck' | 'meta' | 'confirm' | 'submitting' | 'done'
@@ -27,18 +28,20 @@ interface Props {
   built: boolean
   conformance: ConformanceResult | null
   pushToast: (kind: 'success' | 'error' | 'info', text: string) => void
+  /** 提交成功后回传发布记录，供详情页回显「已提交 PR」状态 */
+  onPublished?: (rec: PublishRecord) => void
 }
 
 const storage = () => (window as any)?.mulby?.storage
-const TOKEN_KEY = 'gh-token'
-const LOGIN_KEY = 'gh-login'
+const TOKEN_KEY = GH_TOKEN_KEY
+const LOGIN_KEY = GH_LOGIN_KEY
 
 /** 用系统默认浏览器打开（而非 Mulby 内置浏览器，便于复用已登录的 GitHub 账号） */
 const openExternal = (url: string) => {
   try { (window as any)?.mulby?.shell?.openExternal?.(url) } catch { /* ignore */ }
 }
 
-export function PublishDialog({ open, onClose, createdPath, contract, dev, built, conformance, pushToast }: Props) {
+export function PublishDialog({ open, onClose, createdPath, contract, dev, built, conformance, pushToast, onPublished }: Props) {
   const [step, setStep] = useState<Step>('account')
   const [token, setToken] = useState<string>('')
   const [login, setLogin] = useState<string>('')
@@ -150,7 +153,7 @@ export function PublishDialog({ open, onClose, createdPath, contract, dev, built
       const pub = await fetchPublishedVersion(pid)
       setPublishedVersion(pub)
       if (pub && pc.manifest?.version && semverCmp(pc.manifest.version, pub) <= 0) {
-        setVersionError(`版本号需高于已发布的 v${pub}（当前 v${pc.manifest.version}）`)
+        setVersionError(`版本号需高于已发布的 v${pub}（当前 v${pc.manifest.version}），建议改为 v${nextPatchVersion(pub)}（在契约 Tab 修改版本后「应用修改并重建」）`)
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : '预检失败')
@@ -214,11 +217,21 @@ export function PublishDialog({ open, onClose, createdPath, contract, dev, built
         ? `update(${m.name}): ${changeNote.trim() || '更新插件'}`.slice(0, 100)
         : `feat: add ${m.name} plugin`
       await ensureFork(token, login, setSubmitMsg)
-      const { prUrl: url, reused } = await publishPluginPR(
+      const { prUrl: url, prNumber, branch, reused } = await publishPluginPR(
         { token, login, pluginName: m.name, version: m.version, files, isUpdate, title, body: buildPrBody() },
         setSubmitMsg
       )
       setPrUrl(url); setStep('done')
+      // 持久化发布记录：详情页据此回显「已提交 PR #N（vX）」并可查询合并/CI 状态
+      const rec: PublishRecord = {
+        pluginId: m.id || m.name,
+        displayName: m.displayName,
+        version: m.version,
+        prNumber, prUrl: url, branch, isUpdate,
+        submittedAt: Date.now()
+      }
+      await savePublishRecord(createdPath, rec)
+      onPublished?.(rec)
       pushToast('success', reused ? 'PR 已更新' : 'PR 已创建')
     } catch (e) {
       const msg = e instanceof Error ? e.message : '提交失败'
