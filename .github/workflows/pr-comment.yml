@@ -1,0 +1,69 @@
+name: PR Plugin Comment
+
+# 配套 pr-check.yml：后者在 pull_request（fork PR 下 token 只读）里完成校验/构建并把报告
+# 上传为 artifact；本工作流由 workflow_run 触发，运行在 base 仓库上下文、拥有可写 token，
+# 仅下载报告并发表/更新评论，不检出也不执行 PR 代码 —— 既能给 fork PR 评论又不泄露权限。
+on:
+  workflow_run:
+    workflows: ["PR Plugin Check"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.event == 'pull_request'
+    steps:
+      - name: Download PR report
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: pr-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: pr-report
+
+      - name: Post or update PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body, prNumber;
+            try {
+              body = fs.readFileSync('pr-report/comment.md', 'utf8');
+              prNumber = parseInt(fs.readFileSync('pr-report/pr-number.txt', 'utf8').trim(), 10);
+            } catch {
+              core.info('未找到 pr-report artifact（pr-check 可能提前失败），跳过评论。');
+              return;
+            }
+            if (!prNumber) { core.info('缺少 PR 号，跳过评论。'); return; }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Mulby Plugin CI Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+            }

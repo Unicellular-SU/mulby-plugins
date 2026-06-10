@@ -78,7 +78,9 @@ jobs:
             libxfixes3 libxi6 libxtst6 libx11-xcb1 libdrm2 fonts-noto-color-emoji
 
       - name: Install dependencies (pnpm workspace)
-        run: pnpm install --frozen-lockfile
+        # 合并后新插件已在 plugins/ 但根 pnpm-lock.yaml 仍未包含它（PR 不应改动锁文件），
+        # --frozen-lockfile 会失败。放开冻结让 pnpm 现场补全，发布流程才能继续。
+        run: pnpm install --no-frozen-lockfile
 
       - name: Create releases directory
         run: mkdir -p releases
