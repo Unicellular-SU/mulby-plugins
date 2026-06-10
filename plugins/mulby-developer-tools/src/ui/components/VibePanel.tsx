@@ -1256,10 +1256,15 @@ export function VibePanel({
   }
 
   // 直接生成（不分步）：脚手架 → 一次性完整实现 → 交付。作为"计划模式"失败时的兜底路径。
-  const doGenerate = async () => {
+  // opts.retry：上次生成中途失败（AI 服务 503 等）后的重试——复用已有脚手架与快照基线（prepareProject(resume)），
+  //   不重写 manifest、不重复记「确认设定」消息，从当前磁盘进度继续。
+  const doGenerate = async (opts?: { retry?: boolean }) => {
     if (!contract) return
+    const retry = !!opts?.retry
     setBrainstorm(null)
-    recordMessage(mkMsg('user', contract.isEdit ? '确认设定，开始改造' : '确认设定，开始生成', { intent: 'create' }))
+    recordMessage(retry
+      ? mkMsg('user', '重试生成', { intent: 'create' })
+      : mkMsg('user', contract.isEdit ? '确认设定，开始改造' : '确认设定，开始生成', { intent: 'create' }))
     setGenerating(true)
     setEvents([])
     setToolCalls(0)
@@ -1268,8 +1273,9 @@ export function VibePanel({
     setExpanded(false)
     setStage(2)
     setDrawerOpen(true) // 展开详情抽屉，让生成过程(思考 + 工具调用时间线)可见
+    resetAbort()
     try {
-      const prep = await prepareProject()
+      const prep = await prepareProject(retry)
       if (!prep) return
       const { root, sid } = prep
       // 首轮生成：根据用户所选生成深度——full=一次性完整实现（默认）；minimal=先最小可跑
@@ -1300,7 +1306,19 @@ export function VibePanel({
     } catch (e) {
       const msg = e instanceof Error ? e.message : '生成失败'
       const isAbort = abortedRef.current || msg.toLowerCase().includes('abort')
-      if (!isAbort) { pushEvent('minimal', 'error', msg); pushToast('error', msg); addLog('error', `✘ [Vibe] 生成失败：${msg}`) }
+      if (!isAbort) {
+        pushEvent('minimal', 'error', msg); pushToast('error', msg); addLog('error', `✘ [Vibe] 生成失败：${msg}`)
+        // AI 服务抖动（503/超时等）导致中断 → 对话里给出错误说明 + 重试卡，已完成的进度保留在磁盘，重试从当前进度继续
+        const sid = liveSessionIdRef.current || activeId
+        if (sid) appendMessage(sid, mkMsg('assistant', `生成中断了：${msg}\n\n已完成的改动都保留着。点下方「重试生成」从当前进度继续（多为 AI 服务临时不可用，稍等片刻再试即可）。`, { actions: collectTurnActions() }))
+        setPendingPrompt({
+          kind: 'action',
+          title: '生成失败',
+          desc: `${msg.slice(0, 160)}${msg.length > 160 ? '…' : ''}`,
+          actionLabel: '重试生成',
+          onAction: () => { setPendingPrompt(null); void doGenerate({ retry: true }) }
+        })
+      }
     } finally {
       setGenerating(false)
       void dev.hostCall('vibe_end').catch(() => {})
@@ -1502,7 +1520,11 @@ export function VibePanel({
     } catch (e) {
       const msg = e instanceof Error ? e.message : '执行失败'
       const isAbort = abortedRef.current || msg.toLowerCase().includes('abort')
-      if (!isAbort) { pushEvent('full', 'error', msg); pushToast('error', msg); addLog('error', `✘ [Vibe] 执行计划失败：${msg}`); setPlanPhase('review') }
+      if (!isAbort) {
+        pushEvent('full', 'error', msg); pushToast('error', msg); addLog('error', `✘ [Vibe] 执行计划失败：${msg}`); setPlanPhase('review')
+        const sid = liveSessionIdRef.current || activeId
+        if (sid) appendMessage(sid, mkMsg('assistant', `执行计划时出错：${msg}\n\n已完成的步骤不受影响，点「继续执行」可从中断处接着跑。`))
+      }
     } finally {
       setGenerating(false)
       planExecutingRef.current = false
@@ -2018,7 +2040,20 @@ export function VibePanel({
       setStage(3)
       addLog('success', '✔ [Vibe] 已按反馈修改，准备重新构建载入')
     } catch (e) {
-      if (!abortedRef.current) { pushEvent('repair', 'error', e instanceof Error ? e.message : '修改失败'); pushToast('error', e instanceof Error ? e.message : '修改失败') }
+      if (!abortedRef.current) {
+        const msg = e instanceof Error ? e.message : '修改失败'
+        pushEvent('repair', 'error', msg); pushToast('error', msg)
+        addLog('error', `✘ [Vibe] 修改失败：${msg}`)
+        // 迭代指令（含运行时错误回流/审查意见回流自动构造的长指令）不让用户重新输入——重试卡原样重跑
+        if (activeId) appendMessage(activeId, mkMsg('assistant', `这次修改中断了：${msg}\n\n点下方「重试修改」我会按原指令重新来过（多为 AI 服务临时不可用）。`, { actions: collectTurnActions() }))
+        setPendingPrompt({
+          kind: 'action',
+          title: '修改失败',
+          desc: `${msg.slice(0, 120)}${msg.length > 120 ? '…' : ''}（指令：${text.slice(0, 60)}${text.length > 60 ? '…' : ''}）`,
+          actionLabel: '重试修改',
+          onAction: () => { setPendingPrompt(null); void runFollowup(text) }
+        })
+      }
     } finally {
       setIterating(false)
       setExpanding(false)
