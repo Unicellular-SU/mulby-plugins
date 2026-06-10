@@ -17,7 +17,7 @@ import {
   manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel, validateContract
 } from '../lib/vibeContract'
 import { useSession, SessionSwitcher, ChatPanel } from '../vibe'
-import type { VibeSessionState, VibeAction, BrainstormOption, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
+import type { VibeSession, VibeSessionState, VibeAction, BrainstormOption, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
 
 export interface VibeEditTarget {
   path: string
@@ -95,6 +95,19 @@ interface Props {
 
 type Stage = 0 | 1 | 2 | 3
 type VibeMode = 'create' | 'edit'
+
+// 面板阶段 → 会话持久化状态。delivered（代码已生成在磁盘）优先级最高：
+// 迭代（runFollowup）期间 stage 处于瞬态、generating 也为 false，旧版仅按 stage 映射
+// 会把已交付项目持久化成 'contract'——重启水合后丢失 createdPath/generated，
+// chatReady=false，下一条修改请求被意图路由误判成「新建」。已交付即 'ready'，治本。
+const stageToSessionState = (s: Stage, gen: boolean, delivered: boolean): VibeSessionState => {
+  if (delivered) return 'ready'
+  if (gen) return 'generating'
+  if (s === 0) return 'initial'
+  if (s === 1) return 'contract'
+  if (s >= 3) return 'ready'
+  return 'contract'
+}
 
 const STAGES = [
   { id: 0, title: '描述', sub: 'Describe', icon: Lightbulb },
@@ -522,18 +535,10 @@ export function VibePanel({
   useEffect(() => { setMaxStage((m) => (stage > m ? stage : m)) }, [stage])
 
   // -------- Session 集成 --------
-  const { activeId, activeSession, loaded: sessionLoaded, sessions, createSession, updateSession, appendMessage, deselect, clearMessages, findByPath, switchSession } = useSession()
+  const { activeId, activeSession, loaded: sessionLoaded, sessions, createSession, updateSession, flushSessionNow, appendMessage, deselect, clearMessages, findByPath, switchSession } = useSession()
   // 当前面板本地状态所「承载」的会话 id。仅当 activeId 切换到一个尚未承载的会话时才重新水合，
   // 且 syncToSession 只在 liveSessionIdRef === activeId 时回写，杜绝把旧状态写进新会话造成数据污染。
   const liveSessionIdRef = useRef<string | null>(null)
-
-  const stageToSessionState = (s: Stage, gen: boolean): VibeSessionState => {
-    if (gen) return 'generating'
-    if (s === 0) return 'initial'
-    if (s === 1) return 'contract'
-    if (s >= 3) return 'ready'
-    return 'contract'
-  }
 
   // 切换/载入会话时把会话状态水合进面板（首次挂载或下拉切换都会触发）
   useEffect(() => {
@@ -574,32 +579,78 @@ export function VibePanel({
     } else {
       setStage(0); setMaxStage(0)
     }
+    // 存量自愈：旧版本会把「已交付项目的迭代中」持久化成 'contract'（stageToSessionState 修复前的坏数据），
+    // 重启后 createdPath/generated 丢失 → chatReady=false → 下一条迭代请求被误判成「新建」。
+    // 特征校验：契约已存在 + pluginPath 下真实存在 manifest.json 且 id/name 与契约一致 → 升级回交付态。
+    if (s.state === 'contract' && s.contract && s.pluginPath) {
+      const sid = activeId
+      const sc = s.contract
+      const pPath = s.pluginPath
+      void (async () => {
+        try {
+          const raw = await fsApi()?.readFile?.(`${pPath}/manifest.json`, 'utf-8')
+          const text = typeof raw === 'string'
+            ? raw
+            : (raw ? new TextDecoder().decode(raw instanceof Uint8Array ? raw : new Uint8Array(raw)) : '')
+          if (!text) return
+          const m = JSON.parse(text)
+          const candidates = [sc.pluginId, sc.name].filter(Boolean)
+          if (!candidates.includes(m?.id) && !candidates.includes(m?.name)) return
+          if (liveSessionIdRef.current !== sid) return // 用户已切走，放弃升级
+          setCreatedPath(pPath)
+          setGenerated(true); setBuilt(true); setLoaded(true)
+          setLoadedId(m?.id || m?.name || undefined)
+          setStage(3); setMaxStage(3)
+          deliverStartedRef.current = true // 只恢复展示，不触发自动重建
+          addLog('info', `▶ [Vibe] 检测到该项目已生成在磁盘（${m?.name || pPath}），已恢复到交付状态`)
+        } catch { /* 探测失败保持原状（真实的契约阶段会话不受影响） */ }
+      })()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionLoaded, activeId, sessions])
 
   // 关键状态变化时同步到 session
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const buildSessionPatch = useCallback((): Partial<VibeSession> => ({
+    state: stageToSessionState(stage, generating, generated),
+    contract,
+    sentence,
+    vibeMode,
+    genDepth,
+    selectedModel,
+    plan,
+    planPhase,
+    pluginPath: createdPath || (vibeMode === 'edit' ? editPath : '') || ''
+  }), [stage, generating, generated, contract, sentence, vibeMode, genDepth, selectedModel, plan, planPhase, createdPath, editPath])
   const syncToSession = useCallback(() => {
     if (!activeId) return
     // 面板状态尚未水合到当前活跃会话时不回写，避免把旧会话状态覆盖到新会话
     if (liveSessionIdRef.current !== activeId) return
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
-    syncTimerRef.current = setTimeout(() => {
-      updateSession(activeId, {
-        state: stageToSessionState(stage, generating),
-        contract,
-        sentence,
-        vibeMode,
-        genDepth,
-        selectedModel,
-        plan,
-        planPhase,
-        pluginPath: createdPath || (vibeMode === 'edit' ? editPath : '') || ''
-      })
-    }, 800)
-  }, [activeId, stage, generating, contract, sentence, vibeMode, genDepth, selectedModel, plan, planPhase, createdPath, editPath, updateSession])
+    syncTimerRef.current = setTimeout(() => { updateSession(activeId, buildSessionPatch()) }, 800)
+  }, [activeId, buildSessionPatch, updateSession])
 
   useEffect(() => { syncToSession() }, [syncToSession])
+
+  // 插件关闭 / 窗口隐藏时立即把面板状态写进会话并落盘：
+  // 否则两层 debounce（本层 800ms + 存储层 500ms）内的最终状态会随渲染进程销毁丢失——
+  // 曾导致「修改完成」后快速关闭插件时，会话停留在迭代期间写入的过期状态。
+  const flushNowRef = useRef<() => void>(() => {})
+  flushNowRef.current = () => {
+    if (!activeId || liveSessionIdRef.current !== activeId) return
+    if (syncTimerRef.current) { clearTimeout(syncTimerRef.current); syncTimerRef.current = null }
+    flushSessionNow(activeId, buildSessionPatch())
+  }
+  useEffect(() => {
+    const flush = () => flushNowRef.current()
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
 
   // 携带指令的自动回流（审查意见等）：等会话水合就绪后自动交给 AI
   const [pendingInstruction, setPendingInstruction] = useState<{ text: string; path: string; token: number } | null>(null)

@@ -80,6 +80,13 @@ export function useVibeSession() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 待落盘的最新快照（debounce 期间）+ 当前状态镜像：供插件关闭/窗口隐藏时同步 flush，
+  // 不依赖 React 渲染周期（pagehide 后可能不再渲染）
+  const pendingRef = useRef<{ sessions: VibeSession[]; activeId: string | null } | null>(null)
+  const sessionsRef = useRef<VibeSession[]>([])
+  const activeIdRef = useRef<string | null>(null)
+  useEffect(() => { sessionsRef.current = sessions }, [sessions])
+  useEffect(() => { activeIdRef.current = activeId }, [activeId])
 
   const activeSession = sessions.find((s) => s.id === activeId) || null
 
@@ -96,12 +103,52 @@ export function useVibeSession() {
   }, [])
 
   const persist = useCallback((nextSessions: VibeSession[], nextActiveId: string | null) => {
+    pendingRef.current = { sessions: nextSessions, activeId: nextActiveId }
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      void saveSessions(nextSessions)
-      void saveActiveId(nextActiveId)
+      saveTimer.current = null
+      const p = pendingRef.current
+      pendingRef.current = null
+      if (p) { void saveSessions(p.sessions); void saveActiveId(p.activeId) }
     }, 500)
   }, [])
+
+  // 立即把 debounce 中未落盘的快照写入存储（尽力而为：pagehide 里发出的 IPC 通常仍会被宿主处理）
+  const flushPersist = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    const p = pendingRef.current
+    pendingRef.current = null
+    if (p) { void saveSessions(p.sessions); void saveActiveId(p.activeId) }
+  }, [])
+
+  /**
+   * 绕过 React 渲染周期，同步合并补丁并立即落盘。
+   * 供面板在插件关闭/窗口隐藏时写入最终状态——否则面板侧 debounce（~800ms）+ 本层 debounce（500ms）
+   * 内的状态会随渲染进程销毁而丢失（曾导致迭代中的会话被持久化成过期的 'contract' 态）。
+   */
+  const flushSessionNow = useCallback((id: string, patch: Partial<VibeSession>) => {
+    const pendingActive = pendingRef.current?.activeId
+    const base = pendingRef.current?.sessions || sessionsRef.current
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+    pendingRef.current = null
+    const next = base.map((s) => (s.id === id ? { ...s, ...patch, lastActiveAt: Date.now() } : s))
+    sessionsRef.current = next
+    void saveSessions(next)
+    void saveActiveId(pendingActive !== undefined ? pendingActive : activeIdRef.current)
+    setSessions(next)
+  }, [])
+
+  // 插件关闭（pagehide）/ 窗口隐藏（visibilitychange）时落盘 debounce 中的快照
+  useEffect(() => {
+    const flush = () => flushPersist()
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [flushPersist])
 
   // opts.allowDuplicatePath: 允许同一 pluginPath 存在多个会话（用于「同一项目下新建会话线程」）。
   // 默认仍按 pluginPath 去重，保持原有「一个项目一条会话」的创建语义不变。
@@ -213,6 +260,7 @@ export function useVibeSession() {
     loaded,
     createSession,
     updateSession,
+    flushSessionNow,
     appendMessage,
     deleteSession,
     switchSession,
