@@ -218,6 +218,26 @@ function sanitizeBranch(s: string): string {
 }
 
 /**
+ * 发布前把 fork 的基线分支快进同步到上游最新（等价于 GitHub 网页的「Sync fork」按钮）。
+ *
+ * 根除「更新发布 add/add 冲突」：publishPluginPR 以「fork 自己的 main」为基线开分支。首次发布的
+ * PR 合并进上游后，fork 的 main 不会自动更新——下次更新发布仍以那条过期 main 为基，GitHub 算
+ * 合并时发现上游与 PR 两侧都「新增」了 plugins/<name>/（内容还不同）→ add/add 冲突。发布前先同步即可避免。
+ *
+ * fork 的 main 全程只被本工具当基线读取、从不写入本地提交，所以这里必然是干净快进。
+ * 任何异常（409 分叉 / 端点不可用等）都降级为「不同步、按现有基线发布」（即旧行为），不阻断发布主流程。
+ */
+async function syncForkBaseBranch(token: string, fork: string, onProgress?: (msg: string) => void): Promise<void> {
+  try {
+    onProgress?.('同步 fork 到上游最新…')
+    await ghApi('POST', `/repos/${fork}/merge-upstream`, token, { branch: BASE_BRANCH })
+  } catch {
+    // 同步失败不阻断发布：极少数 fork main 被本地提交污染才会 409，提示用户必要时手动 Sync fork
+    onProgress?.('fork 自动同步未成功，按现有基线发布（如遇冲突请在 GitHub 手动 Sync fork 后重发）')
+  }
+}
+
+/**
  * 在用户 fork 上建分支、用 Git Data API 一次提交推送整棵源码树，再向上游开 PR。
  * 返回 PR 的 html_url、编号与是否复用既有 PR。
  */
@@ -226,9 +246,12 @@ export async function publishPluginPR(params: PublishParams, onProgress?: (msg: 
   const fork = `${login}/${REPO_NAME}`
   const branch = sanitizeBranch(`publish/${pluginName}-v${version}`)
 
+  // 0. 发布前把 fork 的基线分支快进同步到上游最新——否则「首次发布合并后 fork main 未更新」
+  //    会让下次更新发布以过期基线开 PR，触发 plugins/<name>/ 的 add/add 冲突（失败自动降级）。
+  await syncForkBaseBranch(token, fork, onProgress)
+
   // 1. 基线：以「fork 自己 main 的最新提交」为基（Git Data API 不能跨库引用上游对象，会 404）。
-  //    新建的 fork 会从上游当前状态创建，因此天然带最新 CI workflow；
-  //    仅「发布前就已存在且陈旧的 fork」需要用户在 GitHub「Sync fork」一次（详见交付说明）。
+  //    上一步已把 fork 同步到上游最新，因此基线天然含已发布版本与最新 CI workflow。
   onProgress?.('读取仓库基线…')
   const ref = await ghApi('GET', `/repos/${fork}/git/ref/heads/${BASE_BRANCH}`, token)
   const baseSha: string = ref?.object?.sha
