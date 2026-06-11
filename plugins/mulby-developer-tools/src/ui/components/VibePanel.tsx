@@ -2028,6 +2028,8 @@ export function VibePanel({
       void runConformance()
       void autoCommit()
       void detectDevtools()
+      // P2：自动运行验证（无副作用子集）——载入成功即跑，把「真的能执行」纳入默认交付门禁
+      if (res.success) void runFeatureSmoke({ auto: true })
       // 应用契约修改 / 手动「重新构建」等场景不重生成图标，避免无谓改动/覆盖；图标只由「重做图标」按钮或对话指令触发
       if (!opts?.skipIcon) void tryGenerateIcon()
     } catch (e) {
@@ -2481,18 +2483,43 @@ export function VibePanel({
     return { input: '' }
   }
 
-  // 运行验证（smoke）：用示例输入真实调用 plugin.run 跑一遍每个功能，验证「真的能执行」而不只是「能编译」。
-  // 有副作用（可能写剪贴板/弹通知/开窗口），所以由用户手动触发。
-  const runFeatureSmoke = async () => {
+  // 运行验证失败 → 交给 AI 修复的指令
+  const smokeRepairInstruction = (fails: SmokeResult[]): string => [
+    '插件能构建载入，但用契约示例输入真实调用 run() 时，下列功能执行失败。请阅读相关源码定位并修复（注意输入解析、返回值结构、未捕获异常），最小化改动、不要顺手重构：',
+    ...fails.map((r) => `- 功能 ${r.code}（输入：${r.input || '(空)'}）：${r.error || '执行失败'}`)
+  ].join('\n')
+
+  // 运行验证（smoke）：用示例输入真实调用 plugin.run 跑一遍功能，验证「真的能执行」而不只是「能编译」。
+  // 手动模式跑全部功能（可能写剪贴板/弹通知/开窗口）；
+  // P2 auto 模式（默认交付门禁）：构建载入成功后自动跑「silent + regex/over 带 sample」的无副作用子集——
+  // 不开窗口、不跑空输入，其余功能标记 skipped 保持交付页全貌；失败则对话提示 + 一键 AI 修复。
+  const runFeatureSmoke = async (opts?: { auto?: boolean }) => {
+    const auto = !!opts?.auto
     if (!contract || smoking) return
     const p = pluginApi()
     const pid = loadedId || contract.pluginId || contract.name
-    if (!p?.run || !pid) { pushToast('info', '当前环境无法自动运行验证，请用触发词手动打开'); return }
+    if (!p?.run || !pid) { if (!auto) pushToast('info', '当前环境无法自动运行验证，请用触发词手动打开'); return }
+    const autoRunnable = (f: VibeContract['features'][number]) =>
+      f.mode === 'silent' && (f.triggers || []).some((t) => (t.type === 'regex' || t.type === 'over') && t.sample?.trim())
+    const feats = auto ? contract.features.filter(autoRunnable) : contract.features
+    if (auto && !feats.length) return // 没有可安静验证的功能 → 静默跳过，不打扰
     setSmoking(true)
     markRuntimeBaseline() // 只关心本轮验证产生的运行时错误
     try {
       const results: SmokeResult[] = []
-      for (const f of contract.features) {
+      if (auto) {
+        // 未纳入自动验证的功能标记为 skipped（说明原因），交付页仍能看到全貌
+        for (const f of contract.features) {
+          if (autoRunnable(f)) continue
+          const label = f.explain || f.code
+          results.push({
+            code: f.code, label, input: '', status: 'skipped',
+            note: f.mode === 'ui' || f.mode === 'detached' ? '界面功能不自动运行（避免弹窗），可点「运行验证」手动跑' : '无示例输入，可点「运行验证」手动跑'
+          })
+        }
+        if (feats.length) { pushEvent('debug', 'load', `自动运行验证（${feats.length} 个功能）…`); addLog('info', `▶ [Vibe] 自动运行验证：${feats.length} 个功能`) }
+      }
+      for (const f of feats) {
         const label = f.explain || f.code
         const { input, skip } = pickSmokeInput(f)
         if (skip) { results.push({ code: f.code, label, input, status: 'skipped', note: skip }); continue }
@@ -2510,8 +2537,33 @@ export function VibePanel({
       const passed = results.filter((r) => r.status === 'pass').length
       const failed = results.filter((r) => r.status === 'fail').length
       setCoreVerified(passed > 0 && failed === 0)
-      if (failed) { pushToast('error', `运行验证：${passed} 通过 / ${failed} 失败`); addLog('warn', `⚠ [Vibe] 运行验证：${failed} 个功能执行失败`) }
-      else { pushToast('success', `运行验证：${passed} 个功能均已执行`); addLog('success', `✔ [Vibe] 运行验证：${passed} 个功能均已执行`) }
+      if (failed) {
+        addLog('warn', `⚠ [Vibe] 运行验证：${failed} 个功能执行失败`)
+        if (auto) {
+          // 门禁反馈：对话说明失败详情 + 一键 AI 修复（与构建失败/运行时报错同套路）
+          const fails = results.filter((r) => r.status === 'fail')
+          const lines = fails.slice(0, 5).map((r) => `• ${r.label || r.code}${r.input ? `（输入：${r.input.slice(0, 30)}）` : ''}：${(r.error || '执行失败').slice(0, 120)}`).join('\n')
+          if (activeId) appendMessage(activeId, mkMsg('assistant', `构建载入成功，但自动运行验证发现 ${fails.length} 个功能执行失败 😕：\n${lines}\n\n要我结合源码定位修复吗？`))
+          setPendingPrompt({
+            kind: 'action',
+            title: '运行验证未通过',
+            desc: `${fails.length} 个功能用示例输入执行失败。我会结合报错与源码修复，完成后重新构建载入。`,
+            actionLabel: '让 AI 修复',
+            onAction: () => {
+              setPendingPrompt(null)
+              recordMessage(mkMsg('user', '修复运行验证失败', { intent: 'modify' }))
+              void runFollowup(smokeRepairInstruction(fails))
+            }
+          })
+        } else {
+          pushToast('error', `运行验证：${passed} 通过 / ${failed} 失败`)
+        }
+      } else if (auto) {
+        if (passed) { pushEvent('debug', 'note', `自动运行验证通过（${passed} 个功能）`); addLog('success', `✔ [Vibe] 自动运行验证：${passed} 个功能均执行通过`) }
+      } else {
+        pushToast('success', `运行验证：${passed} 个功能均已执行`)
+        addLog('success', `✔ [Vibe] 运行验证：${passed} 个功能均已执行`)
+      }
       // run 返回 success 不代表运行干净：UI 渲染/异步逻辑的报错只会出现在控制台日志里，稍后回查
       scheduleRuntimeErrorCheck(1500)
     } finally {
@@ -3253,7 +3305,7 @@ export function VibePanel({
                       changes={changes} rollingBack={rollingBack} onRollback={doRollback}
                       coreVerified={coreVerified} onToggleCoreVerified={() => setCoreVerified((v) => !v)}
                       conformance={conformance} confRepairing={confRepairing} onRepairConformance={repairConformance}
-                      smoke={smoke} smoking={smoking} onRunSmoke={runFeatureSmoke}
+                      smoke={smoke} smoking={smoking} onRunSmoke={() => { void runFeatureSmoke() }}
                       versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash}
                       onRefreshVersions={loadVersions} onVersionDiff={loadVersionDiff} onRestoreVersion={doRestoreVersion}
                       onRebuild={() => void runBuildAndLoad({ skipIcon: true })} onRepair={runRepair}
