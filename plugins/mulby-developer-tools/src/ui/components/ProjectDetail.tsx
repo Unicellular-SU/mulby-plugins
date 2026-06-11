@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   FolderOpen, Hammer, Package, RefreshCw, Trash2, FileText,
   AlertTriangle, Loader2, ShieldAlert, Wrench, Sparkles, Play, Boxes, UploadCloud,
-  Store, ArrowUpCircle
+  Store, ArrowUpCircle, Copy, MoreHorizontal
 } from 'lucide-react'
 import type { PluginProjectPluginStatus, PluginProjectStatus } from '../types'
 import type { MaintenanceStatus } from '../lib/maintenance'
@@ -29,6 +29,50 @@ function cmdLabel(c: any): string {
     case 'window': return `活跃窗口 ${c.app || c.title || c.bundleId || ''}`
     default: return String(c.type || '')
   }
+}
+
+/** 复制文本到剪贴板（优先宿主 clipboard，回退浏览器 API） */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    const c = (window as any)?.mulby?.clipboard
+    if (c?.writeText) { await c.writeText(text); return true }
+  } catch { /* 落到浏览器 API */ }
+  try {
+    if (navigator?.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true }
+  } catch { /* ignore */ }
+  return false
+}
+
+/** 取首个「关键词」触发词（用于一键复制去主输入框试用）；没有则返回 null */
+function primaryKeyword(manifest: PluginManifest | null): string | null {
+  const feats = Array.isArray(manifest?.features) ? manifest!.features! : []
+  for (const f of feats) {
+    const cmds = Array.isArray(f?.cmds) ? f.cmds : []
+    for (const c of cmds) {
+      if (typeof c === 'string' && c.trim()) return c.trim()
+      if (c && typeof c === 'object' && c.type === 'keyword' && c.value) return String(c.value)
+    }
+  }
+  return null
+}
+
+type ReadyTone = 'rose' | 'amber' | 'sky' | 'emerald'
+const READY_DOT: Record<ReadyTone, string> = {
+  rose: 'bg-rose-500', amber: 'bg-amber-500', sky: 'bg-sky-500', emerald: 'bg-emerald-500'
+}
+const READY_TEXT: Record<ReadyTone, string> = {
+  rose: 'text-rose-600 dark:text-rose-400',
+  amber: 'text-amber-600 dark:text-amber-400',
+  sky: 'text-sky-600 dark:text-sky-400',
+  emerald: 'text-emerald-600 dark:text-emerald-400'
+}
+/** 把插件的运行/构建态汇成一句「就绪度」概览（替代分散的多枚徽标解读） */
+function readiness(p: PluginProjectPluginStatus): { tone: ReadyTone; text: string } {
+  if (!p.manifestValid) return { tone: 'rose', text: 'manifest 无效' }
+  if (p.idConflictWith) return { tone: 'rose', text: 'ID 冲突' }
+  if (!p.built) return { tone: 'amber', text: '待构建' }
+  if (!p.loaded) return { tone: 'sky', text: '已构建 · 未载入' }
+  return { tone: 'emerald', text: '可运行' }
 }
 
 interface PluginManifest {
@@ -66,58 +110,75 @@ export function ProjectDetail({ project, busyAction, onAction, pushToast, publis
 
   const activePlugin = project.plugins.find((p) => p.path === selectedPath) || project.plugins[0] || null
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* 头部：项目级信息与操作 */}
-      <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 truncate">{projectName}</h2>
-              <span className="badge badge-slate">{isCollection ? `集合 · ${project.plugins.length} 个插件` : '单插件'}</span>
-              {!project.exists && <span className="badge badge-red"><AlertTriangle size={11} /> 目录不存在</span>}
-            </div>
-            <div className="mt-1 text-[12px] text-slate-400 dark:text-slate-500 mono truncate">{project.path}</div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button className="btn-secondary" disabled={!project.exists || !!busyAction} onClick={() => onAction('open')}><FolderOpen size={15} /> 打开目录</button>
-            <button className="btn-danger" disabled={!!busyAction} onClick={() => onAction('remove')}>
-              {busyAction === 'remove' ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />} 从列表移除
-            </button>
-          </div>
+  // 项目级头部条：集合/空项目共用（单插件模式不渲染，由 Hero 头卡承载）
+  const projectHeader = (subtitle: React.ReactNode) => (
+    <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100 truncate">{projectName}</h2>
+          {subtitle}
+          {!project.exists && <span className="badge badge-red"><AlertTriangle size={11} /> 目录不存在</span>}
+        </div>
+        <div className="mt-1 text-[12px] text-slate-400 dark:text-slate-500 mono truncate">{project.path}</div>
+      </div>
+      <button className="btn-danger shrink-0" disabled={!!busyAction} onClick={() => onAction('remove')}>
+        {busyAction === 'remove' ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />} 从列表移除
+      </button>
+    </div>
+  )
+
+  // 空项目（目录下无可识别插件）：精简头部 + 提示，仍可移除
+  if (project.plugins.length === 0) {
+    return (
+      <div className="flex flex-col h-full">
+        {projectHeader(null)}
+        <div className="flex-1 flex items-center justify-center text-sm text-slate-400 dark:text-slate-500 italic px-6 text-center">
+          该目录下未发现可识别的插件（缺少 manifest.json）。
         </div>
       </div>
+    )
+  }
 
-      {/* 主体 */}
-      <div className="flex-1 min-h-0">
-        {project.plugins.length === 0 ? (
-          <div className="text-sm text-slate-400 dark:text-slate-500 italic py-10 text-center">
-            该目录下未发现可识别的插件（缺少 manifest.json）。
-          </div>
-        ) : isCollection ? (
-          // 集合模式：左侧子插件列表 + 右侧选中插件详情
-          <div className="flex h-full">
-            <aside className="w-60 shrink-0 border-r border-slate-200 dark:border-slate-800 overflow-auto bg-white/30 dark:bg-slate-900/20">
-              <div className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
-                <Boxes size={13} /> 集合内插件（{project.plugins.length}）
-              </div>
-              <div className="p-2 space-y-1">
-                {project.plugins.map((p) => (
-                  <PluginSubItem key={p.id + p.path} p={p} active={p.path === activePlugin?.path} onSelect={() => setSelectedPath(p.path)} />
-                ))}
-              </div>
-            </aside>
-            <main className="flex-1 min-w-0 overflow-auto p-5">
-              {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix} showTitle />}
-            </main>
-          </div>
-        ) : (
-          // 单插件模式：直接展示该插件详情
-          <div className="h-full overflow-auto p-5">
-            {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix} showTitle={false} />}
-          </div>
-        )}
+  // 集合模式：项目头部 + 左侧子插件列表 + 右侧选中插件详情
+  if (isCollection) {
+    return (
+      <div className="flex flex-col h-full">
+        {projectHeader(<span className="badge badge-slate">集合 · {project.plugins.length} 个插件</span>)}
+        <div className="flex-1 min-h-0 flex">
+          <aside className="w-60 shrink-0 border-r border-slate-200 dark:border-slate-800 overflow-auto bg-white/30 dark:bg-slate-900/20">
+            <div className="px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-1.5">
+              <Boxes size={13} /> 集合内插件（{project.plugins.length}）
+            </div>
+            <div className="p-2 space-y-1">
+              {project.plugins.map((p) => (
+                <PluginSubItem key={p.id + p.path} p={p} active={p.path === activePlugin?.path} onSelect={() => setSelectedPath(p.path)} />
+              ))}
+            </div>
+          </aside>
+          <main className="flex-1 min-w-0 overflow-auto p-5">
+            {activePlugin && (
+              <PluginDetailPanel
+                p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast}
+                publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix}
+                topLevel={false} exists={project.exists}
+              />
+            )}
+          </main>
+        </div>
       </div>
+    )
+  }
+
+  // 单插件模式：直接以 Hero 头卡承载，不再额外渲染重复的项目头部
+  return (
+    <div className="h-full overflow-auto p-5">
+      {activePlugin && (
+        <PluginDetailPanel
+          p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast}
+          publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix}
+          topLevel={true} exists={project.exists} onRemove={() => onAction('remove')}
+        />
+      )}
     </div>
   )
 }
@@ -136,6 +197,83 @@ function PluginSubItem({ p, active, onSelect }: { p: PluginProjectPluginStatus; 
         {hasError ? <AlertTriangle size={13} className="text-rose-500 shrink-0" /> : <HealthDot p={p} />}
       </div>
       <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-slate-500 mono">{p.id}</div>
+    </button>
+  )
+}
+
+/** 插件图标缩略图：读取 icon.png（base64），失败/缺失时回退首字母渐变方块 */
+function IconThumb({ path, name }: { path: string; name: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    setUrl(null)
+    const fs = fsApi()
+    if (!fs?.readFile) return
+    void (async () => {
+      try {
+        if (fs.exists && !(await fs.exists(`${path}/icon.png`))) return
+        const b64 = await fs.readFile(`${path}/icon.png`, 'base64')
+        if (alive && typeof b64 === 'string' && b64) {
+          setUrl(`data:image/png;base64,${b64.replace(/^data:image\/\w+;base64,/, '')}`)
+        }
+      } catch { /* 读取失败用占位 */ }
+    })()
+    return () => { alive = false }
+  }, [path])
+  const letter = ((name || '?').trim().charAt(0) || '?').toUpperCase()
+  return (
+    <div className="w-14 h-14 rounded-2xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-gradient-to-br from-emerald-500/15 to-teal-600/15 flex items-center justify-center">
+      {url
+        ? <img src={url} alt={name} className="w-full h-full object-cover" />
+        : <span className="text-2xl font-bold text-emerald-600/70 dark:text-emerald-400/70">{letter}</span>}
+    </div>
+  )
+}
+
+interface MoreItem { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean; disabled?: boolean }
+
+/** 次要操作的「⋯ 更多」溢出菜单（点击外部自动关闭） */
+function MoreMenu({ items, disabled }: { items: MoreItem[]; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  return (
+    <div className="relative" ref={ref}>
+      <button className="btn-ghost !px-2.5" disabled={disabled} onClick={() => setOpen((v) => !v)} title="更多操作">
+        <MoreHorizontal size={16} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[150px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 anim-pop">
+          {items.map((it, i) => (
+            <button
+              key={i}
+              disabled={it.disabled}
+              onClick={() => { setOpen(false); it.onClick() }}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-700/60 ${it.danger ? 'text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-300'}`}
+            >
+              {it.icon}{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 开发动作组里的单个紧凑按钮（构建 / 刷新载入 / 打包） */
+function DevBtn({ onClick, icon, label, spin, disabled }: { onClick: () => void; icon: React.ReactNode; label: string; spin?: boolean; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      {spin ? <Loader2 size={14} className="animate-spin" /> : icon} {label}
     </button>
   )
 }
@@ -179,10 +317,11 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function PluginDetailPanel({ p, busy, onAction, pushToast, publishReloadToken, maint, onAiFix, showTitle }: {
+function PluginDetailPanel({ p, busy, onAction, pushToast, publishReloadToken, maint, onAiFix, topLevel, exists, onRemove }: {
   p: PluginProjectPluginStatus; busy: DetailAction | null; onAction: (a: DetailAction, plugin?: PluginProjectPluginStatus) => void
   pushToast?: ToastFn; publishReloadToken?: number; maint?: MaintenanceStatus
-  onAiFix?: (plugin: PluginProjectPluginStatus, instruction: string) => void; showTitle: boolean
+  onAiFix?: (plugin: PluginProjectPluginStatus, instruction: string) => void
+  topLevel: boolean; exists?: boolean; onRemove?: () => void
 }) {
   const hasIssue = !p.manifestValid || !!p.idConflictWith || !p.built
   const [manifest, setManifest] = useState<PluginManifest | null>(null)
@@ -216,58 +355,88 @@ function PluginDetailPanel({ p, busy, onAction, pushToast, publishReloadToken, m
     ? Object.entries(manifest.permissions).filter(([, v]) => v && v !== false).map(([k]) => k)
     : []
 
+  const keyword = primaryKeyword(manifest)
+  const ready = readiness(p)
+
+  const moreItems: MoreItem[] = [
+    { icon: <FolderOpen size={14} />, label: '打开目录', onClick: () => onAction('open', p), disabled: exists === false },
+    { icon: <FileText size={14} />, label: 'README', onClick: () => onAction('readme', p) },
+    ...(topLevel && onRemove ? [{ icon: <Trash2 size={14} />, label: '从列表移除', onClick: onRemove, danger: true }] : [])
+  ]
+
   return (
     <div className="max-w-3xl space-y-4">
-      {/* 标题与状态（集合模式显示插件名；单插件模式头部已显示，避免重复） */}
-      {showTitle && (
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">{p.displayName || p.id}</h3>
-            <span className="text-[12px] mono text-slate-400 dark:text-slate-500">{p.id}</span>
+      {/* Hero 头卡：图标 + 名称/id/版本 + 就绪度/触发词 + 主操作 */}
+      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/30 p-4">
+        <div className="flex items-start gap-4">
+          <IconThumb path={p.path} name={p.displayName || p.id} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100 truncate">{p.displayName || p.id}</h3>
+              {manifest?.version && <span className="badge badge-slate mono">v{manifest.version}</span>}
+              {topLevel && exists === false && <span className="badge badge-red"><AlertTriangle size={11} /> 目录不存在</span>}
+            </div>
+            <div className="mt-0.5 text-[12px] text-slate-400 dark:text-slate-500 mono truncate">{p.id}</div>
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <span className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${READY_TEXT[ready.tone]}`}>
+                <span className={`w-2 h-2 rounded-full ${READY_DOT[ready.tone]}`} /> {ready.text}
+              </span>
+              {keyword && (
+                <button
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-emerald-400/60 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+                  onClick={async () => {
+                    const ok = await copyText(keyword)
+                    pushToast?.(ok ? 'success' : 'error', ok ? `已复制触发词「${keyword}」，去 Mulby 主输入框试用` : '复制失败')
+                  }}
+                  title="复制触发词，去 Mulby 主输入框试用"
+                >
+                  <Copy size={11} /> {keyword}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button className="btn-primary" disabled={!!busy} onClick={() => onAction('vibe', p)} title="用自然语言让 AI 改造这个插件"><Sparkles size={15} /> AI 改造</button>
+            <button className="btn-secondary" disabled={!!busy || !p.loaded} title={p.loaded ? '打开/运行此插件' : '请先构建并刷新载入'} onClick={() => onAction('launch', p)}>
+              {busy === 'launch' ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} 打开插件
+            </button>
+            <MoreMenu items={moreItems} disabled={!!busy} />
           </div>
         </div>
-      )}
-      <div><PluginBadges p={p} /></div>
 
-      {/* 操作 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button className="btn-primary" disabled={!!busy} onClick={() => onAction('vibe', p)}><Sparkles size={15} /> AI 改造</button>
-        <button className="btn-secondary" disabled={!!busy || !p.loaded} title={p.loaded ? '打开/运行此插件' : '请先构建并刷新载入'} onClick={() => onAction('launch', p)}>
-          {busy === 'launch' ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} 打开插件
-        </button>
-        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('build', p)}>
-          {busy === 'build' ? <Loader2 size={15} className="animate-spin" /> : <Hammer size={15} />} 构建
-        </button>
-        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('reload', p)}>
-          {busy === 'reload' ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} 刷新载入
-        </button>
-        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('pack', p)}>
-          {busy === 'pack' ? <Loader2 size={15} className="animate-spin" /> : <Package size={15} />} 打包
-        </button>
-        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('publish', p)} title="提交 PR 发布到插件仓库">
-          {busy === 'publish' ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />} 发布
-        </button>
-        <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('open', p)}><FolderOpen size={15} /> 打开目录</button>
-        <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('readme', p)}><FileText size={15} /> README</button>
+        {/* 健康徽标 + 开发动作组（构建 / 刷新载入 / 打包） */}
+        <div className="mt-3 pt-3 border-t border-slate-200/70 dark:border-slate-700/60 flex items-center justify-between gap-3 flex-wrap">
+          <PluginBadges p={p} />
+          <div className="inline-flex items-center rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <DevBtn onClick={() => onAction('build', p)} icon={<Hammer size={14} />} label="构建" spin={busy === 'build'} disabled={!!busy} />
+            <span className="w-px self-stretch bg-slate-200 dark:bg-slate-700" />
+            <DevBtn onClick={() => onAction('reload', p)} icon={<RefreshCw size={14} />} label="刷新载入" spin={busy === 'reload'} disabled={!!busy} />
+            <span className="w-px self-stretch bg-slate-200 dark:bg-slate-700" />
+            <DevBtn onClick={() => onAction('pack', p)} icon={<Package size={14} />} label="打包" spin={busy === 'pack'} disabled={!!busy} />
+          </div>
+        </div>
       </div>
 
-      {/* 维护状态：本地 vs 商店版本关系 + 需处理事项（数据未就绪 / unknown 时自动隐藏） */}
-      {maint && <MaintenanceRow st={maint} busy={!!busy} onPublish={() => onAction('publish', p)} />}
+      {/* 发布与维护：发布入口 + 本地/商店版本关系 + PR·CI 状态（就近聚合） */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-[12px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5"><UploadCloud size={13} /> 发布与维护</div>
+          <button className="btn-secondary h-7 px-2.5 text-[12px]" disabled={!!busy} onClick={() => onAction('publish', p)} title="提交 PR 发布到插件仓库">
+            {busy === 'publish' ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />} 发布
+          </button>
+        </div>
+        {maint && <MaintenanceRow st={maint} busy={!!busy} onPublish={() => onAction('publish', p)} />}
+        <PublishStatusCard
+          pluginPath={p.path} pluginName={p.id} pushToast={pushToast} reloadToken={publishReloadToken}
+          onAiFix={onAiFix ? (instruction) => onAiFix(p, instruction) : undefined}
+        />
+      </div>
 
-      {/* 发布状态：已提交过 PR 时回显 PR 号 / 合并·CI 状态，可刷新 / 重跑 / 查看审查意见 / AI 按意见修改 */}
-      <PublishStatusCard
-        pluginPath={p.path} pluginName={p.id} pushToast={pushToast} reloadToken={publishReloadToken}
-        onAiFix={onAiFix ? (instruction) => onAiFix(p, instruction) : undefined}
-      />
-
-      {/* 基础信息（读取 manifest.json） */}
+      {/* 基础信息（来自 manifest.json；ID/名称/版本已在头卡展示，此处补全其余档案信息） */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
         <div className="text-[12px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
           基础信息（来自 manifest.json）{mfLoading && <Loader2 size={12} className="animate-spin text-slate-400" />}
         </div>
-        <InfoRow label="ID" value={<span className="mono">{p.id}</span>} />
-        <InfoRow label="名称" value={p.displayName || '—'} />
-        {manifest?.version && <InfoRow label="版本" value={<span className="mono">v{manifest.version}</span>} />}
         {manifest?.description && <InfoRow label="描述" value={manifest.description} />}
         {manifest?.type && <InfoRow label="分类" value={manifest.type} />}
         {manifest?.author && <InfoRow label="作者" value={manifest.author} />}
