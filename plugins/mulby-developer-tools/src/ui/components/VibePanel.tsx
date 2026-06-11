@@ -967,6 +967,9 @@ export function VibePanel({
       try { parsed = await aiJson('你是严格的 JSON 生成器，只输出可解析的 JSON 对象。', planPrompt(desc)) } catch { /* fallback */ }
       if (abortedRef.current) { addLog('info', '⏹ [Vibe] 已停止规划'); return }
       const c = normalizeContract(parsed, desc)
+      // AI 规划极少返回 author（提示词标注"可选"）：重新规划/改造规划时继承既有契约的作者，
+      // 避免用户在编辑器里填过的 author 被新契约顶掉（发布预检要求 author 必填）。
+      if (!c.author && contract?.author) c.author = contract.author
       setContract(c)
       setStage(1)
       if (sid) appendMessage(sid, mkMsg('assistant', `插件设定（契约）已就绪：${c.displayName}——${contractSummary(c)}。在对话里点「确认并生成」我就开始写代码；想改设定可点顶部「详情」展开编辑。`))
@@ -1243,11 +1246,22 @@ export function VibePanel({
     // 由契约确定性写出 manifest.json（叠加既有，保留 window/pluginSetting 默认）。
     // 续跑时跳过：避免覆盖前面步骤里 AI 已对 manifest 的合理改动
     if (!resume) {
+      // 读 base 必须区分「文件不存在（exists:false，正常按契约新写）」与「读取调用失败（IPC 异常等）」：
+      // 后者若静默当作无 manifest，会把磁盘既有 manifest 中契约没有的字段（author/$schema 等）整体抹掉
+      // ——weather-card 的 author 正是这样丢的。读取失败时中止本次写入，让用户重试。
       let baseManifest: any = undefined
+      let baseRaw = ''
       try {
-        const r = await dev.hostCall<{ content?: string }>('read_file', { path: 'manifest.json' })
-        if (r?.content) baseManifest = JSON.parse(r.content)
-      } catch { /* 无既有 manifest 则按契约新写 */ }
+        const r = await dev.hostCall<{ exists?: boolean; content?: string }>('read_file', { path: 'manifest.json' })
+        baseRaw = r?.content || ''
+      } catch (e) {
+        pushToast('error', `读取既有 manifest.json 失败，已中止以免覆盖丢字段：${e instanceof Error ? e.message : ''}`)
+        addLog('error', '✗ [Vibe] read_file manifest.json 失败，中止写契约（避免抹掉 author 等既有字段）')
+        return null
+      }
+      if (baseRaw) {
+        try { baseManifest = JSON.parse(baseRaw) } catch { /* manifest 损坏 → 按契约重写自愈 */ }
+      }
       const mfText = manifestJson(contract, baseManifest)
       await dev.hostCall('write_file', { path: 'manifest.json', content: mfText })
       pushEvent('manifest', 'write', '写入 manifest.json（来自契约）', `${contract.features.length} 个功能`)
@@ -1826,11 +1840,13 @@ export function VibePanel({
     try {
       // 复用会话写文件通道：vibe_begin(fresh:false) 仅锁定根目录并保留历史快照，便于改动入版本/可回滚
       await dev.hostCall('vibe_begin', { root: createdPath, fresh: false })
+      // 生成后的项目磁盘必然已有 manifest：读不到（IPC 异常）就中止，决不能按"无 manifest"
+      // 让契约全新写出——那会抹掉 base 中契约没有的字段（author/$schema 等）。
+      const r = await dev.hostCall<{ exists?: boolean; content?: string }>('read_file', { path: 'manifest.json' })
       let baseManifest: any = undefined
-      try {
-        const r = await dev.hostCall<{ content?: string }>('read_file', { path: 'manifest.json' })
-        if (r?.content) baseManifest = JSON.parse(r.content)
-      } catch { /* 无既有 manifest 则按契约新写 */ }
+      if (r?.content) {
+        try { baseManifest = JSON.parse(r.content) } catch { /* manifest 损坏 → 按契约重写自愈 */ }
+      }
       const mfText = manifestJson(contract, baseManifest)
       await dev.hostCall('write_file', { path: 'manifest.json', content: mfText })
       pushEvent('manifest', 'write', '已按契约更新 manifest.json')
