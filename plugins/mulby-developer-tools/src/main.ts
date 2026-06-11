@@ -327,6 +327,8 @@ function recordSnapshot(root: string, rel: string, abs: string): void {
 
 /** 缓存：库构造器；'unavailable' 表示加载失败已确认 */
 let CodeGraphCtor: any = undefined
+/** 加载失败的具体原因（供 cg_* 接口透出，避免一律误报为「运行时不支持」） */
+let cgLoadError = ''
 /** root(绝对) -> CodeGraph 实例 */
 const cgByRoot = new Map<string, any>()
 
@@ -336,10 +338,18 @@ async function loadCodeGraph(): Promise<any | null> {
   if (CodeGraphCtor !== undefined) return CodeGraphCtor
   try {
     const mod: any = await import('@colbymchenry/codegraph')
-    CodeGraphCtor = mod?.default ?? mod?.CodeGraph ?? null
-    if (!CodeGraphCtor) CodeGraphCtor = 'unavailable'
-  } catch {
+    // 该包是 CJS（npm-sdk.js re-export 平台 bundle 的 tsc 产物）。经 Node 的 ESM interop 后
+    // mod.default 是「整个 exports 对象」而非 CodeGraph 类（类在 mod.CodeGraph / mod.default.CodeGraph / mod.default.default）。
+    // 此前直接取 mod.default 拿到命名空间——顶层恰好也导出了 directory 的 isInitialized 函数，
+    // 形似可用，实际没有 init/open 静态方法 → 运行到 CG.init 才报 "CG.init is not a function"。
+    // 改为按形态探测：候选里找同时具备 init/open/isInitialized 三个静态方法的类，任何打包/互操作形态都能命中。
+    const isCtor = (c: any) => typeof c?.init === 'function' && typeof c?.open === 'function' && typeof c?.isInitialized === 'function'
+    CodeGraphCtor = [mod?.default, mod?.CodeGraph, mod?.default?.CodeGraph, mod?.default?.default, mod].find(isCtor) ?? 'unavailable'
+    if (CodeGraphCtor === 'unavailable') cgLoadError = 'CodeGraph 库导出形态不符（未找到带 init/open 静态方法的类）'
+  } catch (e) {
     CodeGraphCtor = 'unavailable'
+    // 典型原因：对应平台的可选依赖 bundle 未安装（如 darwin-arm64 进程装了 darwin-x64 包）
+    cgLoadError = e instanceof Error ? (e.message.split('\n')[0] || 'CodeGraph 库加载失败') : 'CodeGraph 库加载失败'
   }
   return CodeGraphCtor === 'unavailable' ? null : CodeGraphCtor
 }
@@ -883,7 +893,7 @@ export const rpc = {
     if (!root || !query) return { available: false, reason: '缺少 root 或 query' }
     try {
       const inst = await ensureCodeGraph(root)
-      if (!inst) return { available: false, reason: '当前运行时不支持 CodeGraph（需 Node 22.5+ 的 node:sqlite）' }
+      if (!inst) return { available: false, reason: cgLoadError || '当前运行时不支持 CodeGraph（需 Node 22.5+ 的 node:sqlite）' }
       const md = await withTimeout(
         inst.buildContext(query, {
           format: 'markdown',
@@ -919,7 +929,7 @@ export const rpc = {
     if (!root || !symbol) return { available: false, reason: '缺少 root 或 symbol' }
     try {
       const inst = await ensureCodeGraph(root)
-      if (!inst) return { available: false }
+      if (!inst) return { available: false, reason: cgLoadError || '当前运行时不支持 CodeGraph' }
       const results = inst.searchNodes?.(symbol, { limit: 1 }) || []
       if (!results.length) return { available: true, found: false, symbol }
       const nodeId = results[0]?.node?.id
