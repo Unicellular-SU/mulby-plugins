@@ -26,6 +26,53 @@ export interface ConversionProgress {
 
 export type ProgressCallback = (progress: ConversionProgress) => void;
 
+export type WebToPdfSource =
+    | { kind: 'url'; url: string }
+    | { kind: 'html'; html: string }
+    | { kind: 'file'; path: string };
+
+export interface WebToPdfOptions {
+    source: WebToPdfSource;
+    /** Electron.PrintToPDFOptions（pageSize/landscape/margins/scale/printBackground/preferCSSPageSize 等） */
+    pdfOptions?: Record<string, unknown>;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    /** 固定等待毫秒数（与 waitSelector 二选一） */
+    waitMs?: number;
+    /** 等待某个选择器出现后再打印（应对动态/懒加载页面） */
+    waitSelector?: string;
+    /** 自动滚动到底触发懒加载资源 */
+    autoScroll?: boolean;
+    /** 导航超时（毫秒） */
+    timeout?: number;
+    outputDir: string;
+    fileName: string;
+}
+
+// 在页面上下文执行：分步滚动到底以触发懒加载，再回到顶部
+const AUTO_SCROLL_SCRIPT = () => {
+    return new Promise<void>((resolve) => {
+        try {
+            let scrolled = 0;
+            const distance = 600;
+            const start = Date.now();
+            const maxTime = 8000;
+            const timer = setInterval(() => {
+                const scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                scrolled += distance;
+                if (scrolled >= scrollHeight - window.innerHeight || Date.now() - start > maxTime) {
+                    clearInterval(timer);
+                    window.scrollTo(0, 0);
+                    setTimeout(() => resolve(), 300);
+                }
+            }, 120);
+        } catch {
+            resolve();
+        }
+    });
+};
+
 class PDFService {
     private static readonly MAX_DOCUMENT_CACHE = 4;
     private static readonly MAX_THUMBNAIL_CACHE = 120;
@@ -586,6 +633,101 @@ class PDFService {
         }
 
         return outputPath;
+    }
+
+    /**
+     * 网址 / HTML / 本地 HTML 文件 转 PDF
+     * 基于 Mulby inbrowser（底层 Electron printToPDF），渲染后输出 PDF。
+     */
+    async webToPdf(options: WebToPdfOptions): Promise<string> {
+        const api = getApi();
+        const mulby = (window as any).mulby;
+        const inbrowser = mulby?.inbrowser;
+        if (!inbrowser || typeof inbrowser.goto !== 'function') {
+            throw new Error('当前环境不支持网页转 PDF（inbrowser 不可用）');
+        }
+
+        // 1. 归一化为可加载 URL
+        let targetUrl: string;
+        const { source } = options;
+        if (source.kind === 'url') {
+            targetUrl = this.normalizeWebUrl(source.url);
+        } else if (source.kind === 'file') {
+            targetUrl = typeof api.pathToFileUrl === 'function'
+                ? api.pathToFileUrl(source.path)
+                : `file://${source.path}`;
+        } else {
+            const html = source.html?.trim();
+            if (!html) throw new Error('请输入 HTML 内容');
+            targetUrl = await api.saveTempHtml(source.html);
+        }
+
+        // 2. 构建链式渲染指令
+        const vw = options.viewportWidth ?? 1280;
+        const vh = options.viewportHeight ?? 1800;
+        const timeout = options.timeout ?? 30000;
+
+        let chain: any = inbrowser.goto(targetUrl, {}, timeout).viewport(vw, vh);
+        if (options.autoScroll) {
+            chain = chain.evaluate(AUTO_SCROLL_SCRIPT);
+        }
+        const selector = options.waitSelector?.trim();
+        if (selector) {
+            chain = chain.wait(selector);
+        } else if (options.waitMs && options.waitMs > 0) {
+            chain = chain.wait(options.waitMs);
+        }
+        chain = chain.pdf(options.pdfOptions ?? { printBackground: true, pageSize: 'A4' });
+
+        // 3. 执行（不传 savePath，拿回 PDF 字节）
+        const results: unknown[] = await chain.run({
+            show: false,
+            width: vw,
+            height: Math.min(vh, 2000),
+            backgroundColor: '#ffffff',
+        });
+
+        const bytes = this.pickPdfBytes(results);
+        if (!bytes || bytes.length === 0) {
+            throw new Error('生成 PDF 失败：未获取到 PDF 数据');
+        }
+
+        // 4. 写入下载目录（唯一命名 + 权限回退）
+        return api.savePdfBuffer(options.outputDir, options.fileName, bytes);
+    }
+
+    private normalizeWebUrl(raw: string): string {
+        const trimmed = (raw || '').trim();
+        if (!trimmed) throw new Error('请输入有效的网址');
+        if (/^(https?|file):\/\//i.test(trimmed)) return trimmed;
+        return `https://${trimmed}`;
+    }
+
+    private pickPdfBytes(results: unknown[]): Uint8Array | null {
+        if (Array.isArray(results)) {
+            for (let i = results.length - 1; i >= 0; i--) {
+                const u = this.toUint8(results[i]);
+                if (u && u.length > 0) return u;
+            }
+            return null;
+        }
+        return this.toUint8(results);
+    }
+
+    private toUint8(value: any): Uint8Array | null {
+        if (!value) return null;
+        if (value instanceof Uint8Array) return value;
+        if (value instanceof ArrayBuffer) return new Uint8Array(value);
+        if (ArrayBuffer.isView(value)) {
+            return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        }
+        if (Array.isArray(value)) {
+            return value.every((n) => typeof n === 'number') ? Uint8Array.from(value) : null;
+        }
+        if (typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+            return Uint8Array.from(value.data);
+        }
+        return null;
     }
 }
 

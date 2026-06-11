@@ -11,6 +11,7 @@ import PDFToImage from './pages/PDFToImage';
 import ConvertFormat from './pages/ConvertFormat';
 import CompressPDF from './pages/CompressPDF';
 import PageArranger from './pages/PageArranger.tsx';
+import WebToPDF from './pages/WebToPDF';
 
 const App: React.FC = () => {
   const [activePath, setActivePath] = useState('merge');
@@ -27,6 +28,7 @@ const App: React.FC = () => {
     'pdf-to-word': 'pdf-to-word',
     'pdf-to-ppt': 'pdf-to-ppt',
     'pdf-to-excel': 'pdf-to-excel',
+    'web-to-pdf': 'web-to-pdf',
   };
 
   useEffect(() => {
@@ -88,6 +90,8 @@ const App: React.FC = () => {
         return <ConvertFormat type="excel" />;
       case 'compress':
         return <CompressPDF />;
+      case 'web-to-pdf':
+        return <WebToPDF />;
       default:
         return <MergePDF />;
     }

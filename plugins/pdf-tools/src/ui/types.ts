@@ -86,6 +86,9 @@ declare global {
             readFile: (path: string) => Promise<Uint8Array>;
             saveFile: (path: string, data: Uint8Array) => Promise<string>;
             saveTempFileFromDrop: (fileName: string, data: Uint8Array) => Promise<string>;
+            saveTempHtml: (html: string) => Promise<string>;
+            savePdfBuffer: (outputDir: string, fileName: string, data: Uint8Array) => Promise<string>;
+            pathToFileUrl: (filePath: string) => string;
             ensureDir: (path: string) => Promise<void>;
             joinPath: (...parts: string[]) => string;
             openPath: (path: string) => Promise<void>;

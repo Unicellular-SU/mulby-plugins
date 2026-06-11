@@ -27,6 +27,7 @@ const FEATURE_ROUTE_MAP: Record<string, string> = {
   'pdf-to-word': 'pdf-to-word',
   'pdf-to-ppt': 'pdf-to-ppt',
   'pdf-to-excel': 'pdf-to-excel',
+  'web-to-pdf': 'web-to-pdf',
 }
 
 let pendingInit: PendingInitData | null = null;

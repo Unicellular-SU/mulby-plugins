@@ -219,6 +219,41 @@
           "maxLength": 20
         }
       ]
+    },
+    {
+      "code": "web-to-pdf",
+      "explain": "将网址或 HTML 转换为 PDF",
+      "route": "web-to-pdf",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "网页转pdf"
+        },
+        {
+          "type": "keyword",
+          "value": "网址转pdf"
+        },
+        {
+          "type": "keyword",
+          "value": "html转pdf"
+        },
+        {
+          "type": "regex",
+          "match": "^https?://\\S+$",
+          "label": "网址转 PDF",
+          "minLength": 8
+        },
+        {
+          "type": "files",
+          "exts": [
+            ".html",
+            ".htm"
+          ],
+          "minLength": 1,
+          "maxLength": 1
+        }
+      ]
     }
   ]
 }

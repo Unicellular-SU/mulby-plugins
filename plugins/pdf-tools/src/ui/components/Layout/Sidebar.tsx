@@ -9,7 +9,8 @@ import {
     Presentation,
     Sheet,
     Minimize2,
-    GalleryVerticalEnd
+    GalleryVerticalEnd,
+    Globe
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
     { id: 'pdf-to-word', icon: FileText, label: 'PDF 转 Word' },
     { id: 'pdf-to-ppt', icon: Presentation, label: 'PDF 转 PPT' },
     { id: 'pdf-to-excel', icon: Sheet, label: 'PDF 转 Excel' },
+    { id: 'web-to-pdf', icon: Globe, label: '网页转 PDF' },
 ];
 
 const Sidebar: React.FC<SidebarProps> = ({ activePath, onNavigate }) => {
