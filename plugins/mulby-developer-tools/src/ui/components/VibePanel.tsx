@@ -346,6 +346,9 @@ export function VibePanel({
   const [loaded, setLoaded] = useState(false)
   const [loadedId, setLoadedId] = useState<string | undefined>(undefined)
   const [repairing, setRepairing] = useState(false)
+  // 修复熔断（systematic-debugging）：连续 AI 修复轮次。构建成功/新一轮生成/回滚时清零；
+  // 达到 3 次仍失败 → 不再继续打补丁，引导用户回滚或调整方案。
+  const repairRoundsRef = useRef(0)
 
   const [iconBusy, setIconBusy] = useState(false)
   const [iconDone, setIconDone] = useState(false)
@@ -1091,15 +1094,23 @@ export function VibePanel({
       : `请在现有版本上完善与扩展：${sentence}\n补全功能与体验，保持可编译，完成后停止。`
   }
 
-  const repairUserPrompt = (log: string) => [
-    '上一次构建失败了。请阅读相关文件定位并修复，用 write_file 写回修正后的完整文件，修复后停止。',
-    '常见原因：TypeScript 类型错误、引用了不存在的 window.mulby API、或新增了未安装的依赖。',
+  // 系统化修复（先诊断根因，后最小修复）；attempt≥2 时明确告知"上次修复未奏效"，禁止重复同样修法
+  const repairUserPrompt = (log: string, attempt = 1) => [
+    attempt >= 2
+      ? `注意：这是第 ${attempt} 轮修复——此前的修复没有奏效。不要重复同样的修法：先重新诊断（解释上次的修复为什么没起作用），找到真正的根因再动手。`
+      : '',
+    '上一次构建失败了。请按以下纪律修复（先诊断，后动手）：',
+    '1. 完整阅读下方报错日志，定位报错的文件与行号，read_file 读相关文件；',
+    '2. 用一句话向自己明确根因（"X 因为 Y 所以报错"），不确定就继续读代码取证，禁止凭猜测开改；',
+    '3. 只做针对根因的最小修复（小改动用 edit_file，大改才 write_file 整文件），一次只验证一个假设，不要一次改多处碰运气、不要顺手重构；',
+    '4. 修完必须 build_check 自检：通过才算修复完成；仍失败则带着新报错回到第 1 步重新诊断。',
+    '常见原因参考：TypeScript 类型错误、引用了不存在的 window.mulby API、或新增了未安装的依赖。',
     'esbuild 打包注意：原生依赖（如 sharp、better-sqlite3）或使用 createRequire 的包（如 svgo）无法被打包；优先改用 window.mulby 提供的能力（例如图像处理用 window.mulby.sharp）而不是新增 npm 依赖；打包后不存在 node_modules，不要依赖它。',
     '构建错误日志（截断）：',
     '```',
     (log || '').slice(-4000),
     '```'
-  ].join('\n')
+  ].filter(Boolean).join('\n')
 
   // 运行时自省的 Mulby API 清单（挂载时取一次；window.mulby 是当前宿主真实对象，最准确）
   const apiSurfaceRef = useRef<string>('')
@@ -1279,6 +1290,7 @@ export function VibePanel({
   const doGenerate = async (opts?: { retry?: boolean }) => {
     if (!contract) return
     const retry = !!opts?.retry
+    repairRoundsRef.current = 0 // 新一轮生成：修复轮次清零
     setBrainstorm(null)
     setClarify(null)
     recordMessage(retry
@@ -1349,10 +1361,11 @@ export function VibePanel({
     '你是资深 Mulby 插件架构师。把"实现这个插件"拆解成一份清晰、可执行的开发计划（todo list）。',
     // 平台背景：让计划基于"Mulby 是什么 / 插件长什么样 / 有哪些真实能力"来排，而不是泛泛而谈
     '关于 Mulby（制定计划前必须了解）：Mulby 是桌面启动器 / 插件平台，用户通过关键词、正则匹配选中文本、拖入文件或图片、窗口等方式唤起插件。一个插件由三部分组成：① manifest.json（清单：id/name 与功能 features、触发方式——已由工具按契约写好，计划里不要再包含它）；② src/main.ts（后端：导出 onLoad/onUnload/onEnable/onDisable/run；无界面/静默功能在 run(context) 里用 context.input 拿到输入文本、用 context.featureCode 区分功能）；③ src/ui/（前端，仅"有界面"功能需要：React 入口 src/ui/main.tsx 挂载 src/ui/App.tsx）。前端通过全局 window.mulby.*（剪贴板/通知/文件/AI/图像处理等）调用宿主能力，不要臆造不存在的 API。',
-    '只输出 JSON：{ "todos": [ { "title": "简短步骤名(≤20字)", "detail": "这一步具体做什么(一句话)" } ] }，不要解释、不要 Markdown 代码块。',
+    '只输出 JSON：{ "todos": [ { "title": "简短步骤名(≤20字)", "detail": "这一步具体做什么(一句话)", "verify": "这一步怎么算完成(一句可验证的验收标准)" } ] }，不要解释、不要 Markdown 代码块。',
     '要求：3–6 步，按依赖与实现顺序排列；每步是一个独立、可验证的开发动作（如"实现核心处理逻辑""搭建主界面 UI""接入剪贴板/通知能力""完善错误处理与边界""自检构建并修复问题"）；计划要落到下方列出的功能/触发方式与 Mulby 真实能力（见上文 Mulby 平台说明）上，不要排出平台做不到的步骤。',
     '不要把"创建脚手架/写 manifest.json"列进去（已自动完成）；最后一步通常是"自检构建并修复问题"。',
     '步骤拆解原则：① 顺序≈ 后端核心(src/main.ts 的 run/onLoad 主逻辑) → 前端界面(仅 template=react 才有 src/ui) → 能力接入(剪贴板/通知/文件/AI…) → 边界与错误处理 → 自检构建；② 纯命令/无界面插件(basic) 不要排"搭建 UI"这类步骤；③ 每步只描述"做什么(可验证的产出)"，不写具体代码或文件全路径；④ detail 一句话点明该步落到哪个功能/触发/能力上。',
+    'verify 写法：必须是执行者自己能客观核对的标准，落到具体行为上（如"run() 对输入 1234.56 返回人民币大写金额且构建通过""界面能展示解析结果并处理空输入"），不要写"代码质量良好"这类无法核对的话。',
     '示例(仅供参考结构，按真实需求与上面契约调整步数和内容)：',
     '- 有界面(react)：实现核心处理逻辑 → 搭建主界面与交互 → 接入所需 Mulby 能力 → 完善边界与错误提示 → 自检构建并修复；',
     '- 无界面(basic，如"金额转大写")：在 run() 解析输入金额 → 实现转换核心算法 → 校验非法输入并返回友好结果 → 自检构建并修复。',
@@ -1368,10 +1381,47 @@ export function VibePanel({
       const title = String(it?.title ?? it?.name ?? '').trim()
       if (!title) continue
       const detail = String(it?.detail ?? it?.description ?? '').trim()
-      todos.push({ id: `t${todos.length + 1}`, title: title.slice(0, 40), detail: detail ? detail.slice(0, 200) : undefined, status: 'pending' })
+      const verify = String(it?.verify ?? it?.acceptance ?? '').trim()
+      todos.push({
+        id: `t${todos.length + 1}`,
+        title: title.slice(0, 40),
+        detail: detail ? detail.slice(0, 200) : undefined,
+        verify: verify ? verify.slice(0, 200) : undefined,
+        status: 'pending'
+      })
       if (todos.length >= 8) break
     }
     return todos
+  }
+
+  // 计划自审（writing-plans 的 Self-Review）：计划生成后先以挑刺视角自查一遍，缺口自动补齐再交给用户审阅。
+  // 五查：覆盖（契约功能都有对应步骤）/ 可行（平台做得到）/ 空洞（步骤可验证）/ 顺序（依赖合理）/ verify（标准可核对）。
+  const planReviewPrompt = (c: VibeContract, todos: VibePlanTodo[]) => [
+    '你是严苛的计划评审员。下面是一份 Mulby 插件开发计划（todo list），请用挑刺的眼光自查，发现问题就修正。',
+    '逐项检查：',
+    '1. 覆盖：契约的每个功能与触发方式都能对应到某一步吗？漏了就补一步。',
+    '2. 可行：有没有 Mulby 平台做不到、或与契约矛盾的步骤？有就改掉。',
+    '3. 空洞：有没有"优化代码质量"这类无具体产出、无法验证的步骤？改写为可验证动作或删除。',
+    '4. 顺序：步骤是否按依赖排列（核心逻辑 → 界面(仅 react) → 能力接入 → 边界处理 → 自检构建）？',
+    '5. verify：每步的 verify 是否客观可核对？含糊的改具体。',
+    '只输出 JSON：计划没有问题输出 { "ok": true }；有问题输出 { "ok": false, "issues": ["一句话说明的问题"], "todos": [修正后的完整计划，字段 title/detail/verify 同输入] }。todos 必须是修正后的全量列表（3-8 步），不要只输出改动项。',
+    `契约：${contractSummary(c)}`,
+    `功能与触发：${c.features.map((f) => `${f.code}(${f.mode}) ← ${f.triggers.map(triggerLabel).join('、') || '无触发'}`).join('；')}`,
+    c.isEdit ? `改造需求：${c.editSummary || sentence}` : `插件需求：${sentence}`,
+    '当前计划：',
+    JSON.stringify({ todos: todos.map((t) => ({ title: t.title, detail: t.detail || '', verify: t.verify || '' })) })
+  ].join('\n')
+
+  /** 自审一份计划：返回修正结果（null = 通过或自审不可用，沿用原计划） */
+  const reviewPlan = async (c: VibeContract, todos: VibePlanTodo[]): Promise<{ todos: VibePlanTodo[]; issues: string[] } | null> => {
+    try {
+      const parsed = await aiJson('你是严格的 JSON 生成器，只输出可解析的 JSON 对象。', planReviewPrompt(c, todos))
+      if (!parsed || parsed.ok === true) return null
+      const fixed = normalizePlan(parsed)
+      if (!fixed.length) return null
+      const issues = (Array.isArray(parsed.issues) ? parsed.issues : []).filter((x: any) => typeof x === 'string' && x.trim()).map((x: string) => x.trim())
+      return { todos: fixed, issues }
+    } catch { return null }
   }
 
   // 契约确认后 → 制定开发计划（不立即生成）。成功则进入 review 等用户「开始执行」；失败回退直接生成。
@@ -1425,10 +1475,25 @@ export function VibePanel({
         await doGenerate()
         return
       }
-      setPlan(todos)
+      // 计划自审（Self-Review）：覆盖/可行/空洞/顺序/verify 五查，发现缺口自动修正后再交用户审阅；自审失败不阻塞（沿用原计划）
+      let finalTodos = todos
+      let reviewNote = ''
+      addLog('info', '▶ [Vibe] 计划自审中…')
+      const reviewed = await reviewPlan(contract, todos)
+      if (abortedRef.current) { if (feedback) { setPlan(prevPlan); setPlanPhase('review') } else setPlanPhase('idle'); addLog('info', '⏹ [Vibe] 已停止制定计划'); return }
+      if (reviewed) {
+        finalTodos = reviewed.todos
+        reviewNote = reviewed.issues.length
+          ? `\n\n计划自审修正了 ${reviewed.issues.length} 处：${reviewed.issues.slice(0, 3).join('；')}${reviewed.issues.length > 3 ? ' 等' : ''}`
+          : ''
+        addLog('warn', `⚠ [Vibe] 计划自审修正${reviewed.issues.length ? ` ${reviewed.issues.length} 处：${reviewed.issues.join('；')}` : '了计划'}`)
+      } else {
+        addLog('success', '✔ [Vibe] 计划自审通过')
+      }
+      setPlan(finalTodos)
       setPlanPhase('review')
-      recordMessage(mkMsg('assistant', `${feedback ? '已按你的意见重新规划为' : '我把开发拆成了'} ${todos.length} 步：\n${todos.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}\n\n点「开始执行」我就按计划一步步实现，每完成一步都会勾选；要继续调整就直接告诉我。`))
-      addLog('success', `✔ [Vibe] 开发计划已就绪：${todos.length} 步`)
+      recordMessage(mkMsg('assistant', `${feedback ? '已按你的意见重新规划为' : '我把开发拆成了'} ${finalTodos.length} 步：\n${finalTodos.map((t, i) => `${i + 1}. ${t.title}`).join('\n')}${reviewNote}\n\n点「开始执行」我就按计划一步步实现，每完成一步都会勾选；要继续调整就直接告诉我。`))
+      addLog('success', `✔ [Vibe] 开发计划已就绪：${finalTodos.length} 步`)
     } catch (e) {
       if (feedback) {
         // 重新规划出错：保留上一版计划，回到 review（不擅自全量生成，避免丢掉用户正在审阅的计划）
@@ -1448,21 +1513,25 @@ export function VibePanel({
     }
   }
 
-  // 单步执行的 system/user prompt：复用整体规约（full），但强制"本轮只做当前这一步"
+  // 单步执行的 system/user prompt：复用整体规约（full），但强制"本轮只做当前这一步"。
+  // 完成门禁（verification-before-completion）：停止前必须 build_check 通过 + 对照本步验收标准自查，无新鲜验证证据不得声称完成。
   const planStepSystem = (c: VibeContract, root: string, todos: VibePlanTodo[], idx: number): string => {
     const base = c.isEdit ? editSystemPrompt(c, root, 'full') : createSystemPrompt(c, root, 'full')
+    const cur = todos[idx]
     return base + '\n\n' + [
       '———— 分步执行模式（本轮只做一步）————',
       '整个插件已制定下面的开发计划。请忽略上文"一次性完整实现"的说法：本轮只完成「当前步骤」，不要提前实现后续步骤；同时不要破坏前面已完成步骤的成果（先 read_file 看现有代码再改）。',
       '开发计划：',
       todos.map((t, i) => `${i + 1}. ${i < idx ? '✅ 已完成' : i === idx ? '▶ 进行中' : '⬜ 待办'} ${t.title}${t.detail ? `（${t.detail}）` : ''}`).join('\n'),
-      `当前步骤（第 ${idx + 1}/${todos.length} 步）：${todos[idx].title}${todos[idx].detail ? ` — ${todos[idx].detail}` : ''}`,
-      '只实现这一步，完成后用一句话说明本步改动并停止（不要继续做后面的步骤）。'
-    ].join('\n')
+      `当前步骤（第 ${idx + 1}/${todos.length} 步）：${cur.title}${cur.detail ? ` — ${cur.detail}` : ''}`,
+      cur.verify ? `本步验收标准：${cur.verify}` : '',
+      '完成门禁（全部满足才允许停止）：① 本步改动已写入文件；② 调用 build_check 且通过——失败就按报错修复后重新自检，直到通过；③ 对照验收标准逐条自查达成。没有本轮新鲜的 build_check 通过结果，不得声称本步完成。',
+      '满足门禁后，用一句话说明本步改动并停止（不要继续做后面的步骤）。'
+    ].filter(Boolean).join('\n')
   }
 
   const planStepUser = (todo: VibePlanTodo, idx: number, total: number): string =>
-    `请完成开发计划的第 ${idx + 1}/${total} 步：${todo.title}${todo.detail ? `\n（${todo.detail}）` : ''}\n先读懂当前代码现状，只实现这一步所需的改动，可用 build_check 自检，完成后用一句话说明本步改动并停止。`
+    `请完成开发计划的第 ${idx + 1}/${total} 步：${todo.title}${todo.detail ? `\n（${todo.detail}）` : ''}${todo.verify ? `\n本步验收标准：${todo.verify}` : ''}\n先读懂当前代码现状，只实现这一步所需的改动；停止前必须 build_check 通过（失败就修到通过）并对照验收标准自查，然后用一句话说明本步改动并停止。`
 
   // 按计划逐步执行：脚手架 → 逐个 todo（实时勾选）→ 全部完成后交付构建。已完成的 todo 跳过（支持中断/失败后续跑）。
   const executePlan = async () => {
@@ -1472,6 +1541,7 @@ export function VibePanel({
     // 续跑判定：项目已脚手架（本次会话已准备过，或重载后存在已完成/失败步骤）→ prepareProject 跳过重复脚手架与基线重置
     const resume = planPreparedRef.current || plan.some((t) => t.status === 'done' || t.status === 'failed')
     planExecutingRef.current = true
+    repairRoundsRef.current = 0 // 新一轮执行：修复轮次清零
     setBrainstorm(null)
     setClarify(null)
     recordMessage(mkMsg('user', resume ? '继续执行计划' : '开始执行计划', { intent: 'create' }))
@@ -1801,13 +1871,27 @@ export function VibePanel({
         setBuilt(false)
         pushEvent('build', 'error', r.error || '构建失败')
         pushToast('error', r.error || '构建失败')
-        // 小白引导：用人话说明 + 一键让 AI 修复
         const tail = (r.log || r.error || '').slice(-280)
+        // 修复熔断：连续修了 3 轮还不过，继续打补丁多半无效（systematic-debugging：3 次失败 = 方案问题）
+        // → 不再主推「让 AI 修复」，引导回滚到可用版本或调整需求。交付页的修复按钮仍在，专家用户可继续。
+        if (repairRoundsRef.current >= 3) {
+          if (activeId) appendMessage(activeId, mkMsg('assistant', `已经连续修复 ${repairRoundsRef.current} 次仍未通过构建 😟。继续打补丁多半没用，问题可能出在实现方案本身。建议：\n• 回滚到上一个可用版本（推荐——所有改动都还能在版本历史里找回）\n• 或换个说法描述需求/指出问题所在，我重新实现\n\n最新报错：\n${tail}`))
+          setPendingPrompt({
+            kind: 'action',
+            title: '连续修复未通过',
+            desc: `已尝试 ${repairRoundsRef.current} 轮修复仍失败，建议回滚到上个可用版本，或在对话里调整需求后重来。`,
+            actionLabel: '回滚到 AI 改动前',
+            onAction: () => { setPendingPrompt(null); repairRoundsRef.current = 0; void undoToBeforeAI() }
+          })
+          return
+        }
+        // 小白引导：用人话说明 + 一键让 AI 修复
         if (activeId) appendMessage(activeId, { id: `a-${Date.now()}`, role: 'assistant', content: `构建没通过 😕。报错大致是：\n${tail}\n\n要我自动定位并修复吗？`, timestamp: Date.now() })
         setPendingPrompt({ kind: 'action', title: '构建未通过', desc: '我可以读取报错自动修复，直到构建通过。', actionLabel: '让 AI 修复', onAction: () => { setPendingPrompt(null); void runRepair() } })
         return
       }
       setBuilt(true)
+      repairRoundsRef.current = 0 // 构建通过 → 修复轮次清零
       pushEvent('build', 'build', '构建成功')
       const res = await dev.ensureLoaded(createdPath)
       setLoaded(res.success)
@@ -2041,6 +2125,7 @@ export function VibePanel({
   const runFollowup = async (instruction: string) => {
     const text = instruction.trim()
     if (!contract || !createdPath || !text || iterating) return
+    repairRoundsRef.current = 0 // 用户提出新改动 = 新上下文：修复轮次清零
     setIterating(true)
     setExpanding(true) // 复用：让阶段2的「停止」按钮可用
     setStage(2)
@@ -2141,15 +2226,17 @@ export function VibePanel({
 
   const runRepair = async () => {
     if (!contract || !createdPath) return
+    repairRoundsRef.current += 1
+    const attempt = repairRoundsRef.current
     setRepairing(true)
     try {
-      pushEvent('repair', 'ai', 'AI 读取报错并修复…')
-      addLog('info', '▶ [Vibe] AI 修复构建错误…')
+      pushEvent('repair', 'ai', attempt > 1 ? `AI 读取报错并修复…（第 ${attempt} 轮）` : 'AI 读取报错并修复…')
+      addLog('info', `▶ [Vibe] AI 修复构建错误…${attempt > 1 ? `（第 ${attempt} 轮）` : ''}`)
       let sys = contract.isEdit ? editSystemPrompt(contract, createdPath, 'minimal') : createSystemPrompt(contract, createdPath, 'minimal')
       // 修复阶段：注入知识图谱上下文，帮助 AI 更快定位报错相关代码
       sys = await injectCgContext(createdPath, contract.editSummary || sentence, 'repair', sys)
       sys = withApiSurface(sys)
-      await runAgent(sys, repairUserPrompt(buildLog), createdPath, 'repair', buildHistoryMessages())
+      await runAgent(sys, repairUserPrompt(buildLog, attempt), createdPath, 'repair', buildHistoryMessages())
       if (abortedRef.current) return
       pendingCommitMsgRef.current = '修复构建错误'
       await runBuildAndLoad()
@@ -2405,7 +2492,7 @@ export function VibePanel({
     setGenerated(false); setExpanded(false); setExpanding(false)
     setCreatedPath(''); setBuilt(false); setBuildLog(''); setLoaded(false); setLoadedId(undefined)
     setIconDone(false); setIconDataUrl(null); setPacked(false); setDevtoolsOn(null); setOpened(false)
-    setGenerating(false); setBuilding(false); setRepairing(false)
+    setGenerating(false); setBuilding(false); setRepairing(false); repairRoundsRef.current = 0
     setChanges([]); setRollingBack(false); setCoreVerified(false)
     setConformance(null); setConfRepairing(false); setSmoke([]); setSmoking(false)
     setIterating(false)

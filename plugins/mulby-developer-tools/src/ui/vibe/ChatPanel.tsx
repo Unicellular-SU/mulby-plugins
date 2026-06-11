@@ -396,6 +396,7 @@ export function ChatPanel({
                       <div className="min-w-0">
                         <div className={t.status === 'done' ? 'text-slate-400 dark:text-slate-500 line-through' : active ? 'text-indigo-700 dark:text-indigo-300 font-medium' : 'text-slate-700 dark:text-slate-200'}>{i + 1}. {t.title}</div>
                         {t.detail && <div className="text-[10px] text-slate-400 dark:text-slate-500 break-words">{t.detail}</div>}
+                        {t.verify && <div className="text-[10px] text-emerald-600/80 dark:text-emerald-400/70 break-words">验收：{t.verify}</div>}
                       </div>
                     </div>
                   )

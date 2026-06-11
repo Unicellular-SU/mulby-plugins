@@ -31,6 +31,8 @@ export interface VibePlanTodo {
   title: string
   /** 这一步要做什么（一句话） */
   detail?: string
+  /** 这一步怎么算完成（可验证的验收标准，一句话）；执行时作为本步的完成门禁注入提示词 */
+  verify?: string
   status: VibePlanTodoStatus
 }
 
