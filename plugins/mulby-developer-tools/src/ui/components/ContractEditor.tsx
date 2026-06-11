@@ -2,14 +2,16 @@ import { Plus, Trash2, ChevronDown, Wrench, Boxes, SlidersHorizontal, AppWindow,
 import { useState } from 'react'
 import {
   type VibeContract, type VibeFeature, type FeatureMode, type VibeTrigger, type TriggerType,
-  type PluginCategory, type PlatformKey, type VibeWindow, type VibeBehavior,
-  PERMISSION_OPTIONS, TRIGGER_TYPES, CATEGORY_OPTIONS, PLATFORM_OPTIONS, toKebab
+  type PluginCategory, type PlatformKey, type VibeWindow, type VibeBehavior, type ExecProfile,
+  PERMISSION_OPTIONS, TRIGGER_TYPES, CATEGORY_OPTIONS, PLATFORM_OPTIONS, EXEC_PROFILES, toKebab, validateContract
 } from '../lib/vibeContract'
 
 interface Props {
   contract: VibeContract
   onChange: (c: VibeContract) => void
   editable: boolean
+  /** 锁定插件 id/name（项目已创建后目录名固定，不允许再改） */
+  lockName?: boolean
 }
 
 const MODES: Array<{ value: FeatureMode; label: string }> = [
@@ -18,7 +20,8 @@ const MODES: Array<{ value: FeatureMode; label: string }> = [
   { value: 'silent', label: '静默/无界面' }
 ]
 
-export function ContractEditor({ contract, onChange, editable }: Props) {
+export function ContractEditor({ contract, onChange, editable, lockName }: Props) {
+  const nameLocked = contract.isEdit || !!lockName
   const [showTools, setShowTools] = useState(contract.tools.length > 0)
   const [showSensitive, setShowSensitive] = useState(
     () => PERMISSION_OPTIONS.some((o) => o.sensitive && contract.permissions[o.key])
@@ -28,6 +31,11 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
   const patch = (p: Partial<VibeContract>) => onChange({ ...contract, ...p })
   const patchWindow = (p: Partial<VibeWindow>) => patch({ window: { ...(contract.window || {}), ...p } })
   const patchBehavior = (p: Partial<VibeBehavior>) => patch({ behavior: { ...(contract.behavior || {}), ...p } })
+  const patchCmdExec = (scope: 'direct' | 'ai', p: Partial<NonNullable<VibeContract['commandExecution']>['direct']>) => {
+    const ce = contract.commandExecution || {}
+    patch({ commandExecution: { ...ce, [scope]: { ...(ce[scope] || {}), ...p } } })
+  }
+  const errors = validateContract(contract)
   const togglePlatform = (k: PlatformKey) => {
     const cur = contract.platform || []
     patch({ platform: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] })
@@ -57,11 +65,19 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-200 dark:divide-slate-800">
+      {errors.length > 0 && (
+        <div className="p-3 bg-rose-50 dark:bg-rose-900/20">
+          <div className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mb-1">契约还有 {errors.length} 处需修正后才能生成：</div>
+          <ul className="text-[11px] text-rose-500 dark:text-rose-400 list-disc pl-4 space-y-0.5">
+            {errors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+        </div>
+      )}
       {/* 基础信息 */}
       <div className="p-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <L label={contract.isEdit ? '插件名（不可改）' : '插件名 (id)'}>
-            <input className="input-base mono" value={contract.name} disabled={!editable || contract.isEdit}
+          <L label={nameLocked ? '插件名（id，不可改）' : '插件名 (id)'}>
+            <input className="input-base mono" value={contract.name} disabled={!editable || nameLocked}
               onChange={(e) => patch({ name: toKebab(e.target.value) })} />
           </L>
           <L label="展示名">
@@ -73,15 +89,19 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
           <input className="input-base" value={contract.description} disabled={!editable}
             onChange={(e) => patch({ description: e.target.value })} />
         </L>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <L label="分类">
             <select className="input-base" value={contract.type || 'utility'} disabled={!editable}
               onChange={(e) => patch({ type: e.target.value as PluginCategory })}>
               {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </L>
-          <L label="作者（可选）">
-            <input className="input-base" value={contract.author || ''} disabled={!editable} placeholder="留空即可"
+          <L label="版本号">
+            <input className="input-base mono" value={contract.version} disabled={!editable} placeholder="1.0.0"
+              onChange={(e) => patch({ version: e.target.value })} />
+          </L>
+          <L label="作者">
+            <input className="input-base" value={contract.author || ''} disabled={!editable} placeholder="建议填写（发布到仓库时必填）"
               onChange={(e) => patch({ author: e.target.value })} />
           </L>
         </div>
@@ -154,6 +174,7 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
                   )}
                 </div>
               </div>
+              <FeatureExtras f={f} editable={editable} isReact={contract.template === 'react'} onChange={(p) => setFeature(idx, p)} />
             </div>
           ))}
           {contract.features.length === 0 && (
@@ -184,6 +205,28 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
             ))}
           </div>
         )}
+        {/* 命令执行（结构化，schema 推荐，优先于 legacy「执行命令」runCommand） */}
+        <div className="pt-1.5 mt-1 space-y-1.5 border-t border-dashed border-slate-200 dark:border-slate-700">
+          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">命令执行（需跑系统命令才开；推荐用它而非旧版「执行命令」）</span>
+          {(['direct', 'ai'] as const).map((scope) => {
+            const sc = contract.commandExecution?.[scope]
+            const lbl = scope === 'direct' ? '插件代码直接执行' : 'AI 生成命令执行'
+            return (
+              <div key={scope} className="flex flex-wrap items-center gap-2">
+                <MiniChk label={lbl} on={!!sc?.enabled} editable={editable} onToggle={() => patchCmdExec(scope, { enabled: !sc?.enabled })} />
+                {sc?.enabled && (['defaultProfile', 'maxProfile'] as const).map((pk) => (
+                  <label key={pk} className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                    {pk === 'defaultProfile' ? '默认' : '上限'}
+                    <select className="input-base !py-0.5 text-[10px] !w-auto" value={sc[pk] || (pk === 'defaultProfile' ? 'sandbox' : 'workspace')} disabled={!editable}
+                      onChange={(e) => patchCmdExec(scope, { [pk]: e.target.value as ExecProfile })}>
+                      {EXEC_PROFILES.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* 高级设置：窗口 / 行为 / 平台 */}
@@ -198,23 +241,24 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
             {showWindow && (
               <div className="space-y-1.5">
                 <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><AppWindow size={12} /> 窗口</span>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {([['width', '宽'], ['height', '高'], ['minWidth', '最小宽'], ['minHeight', '最小高']] as const).map(([key, lbl]) => (
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([['width', '宽'], ['height', '高'], ['minWidth', '最小宽'], ['minHeight', '最小高'], ['maxWidth', '最大宽'], ['maxHeight', '最大高']] as const).map(([key, lbl]) => (
                     <L key={key} label={lbl} mini>
                       <input className="input-base mono !py-1 text-xs" type="number" min={1} value={numField(contract.window?.[key])} disabled={!editable}
                         onChange={(e) => patchWindow({ [key]: parseNum(e.target.value) } as Partial<VibeWindow>)} />
                     </L>
                   ))}
                 </div>
-                <div className="grid grid-cols-[1fr_auto_auto_auto] gap-2 items-center pt-0.5">
-                  <L label="窗口类型" mini>
-                    <select className="input-base !py-1 text-xs" value={contract.window?.type || 'default'} disabled={!editable}
-                      onChange={(e) => patchWindow({ type: e.target.value as VibeWindow['type'] })}>
-                      <option value="default">默认（带标题栏）</option>
-                      <option value="borderless">无边框</option>
-                      <option value="fullscreen">全屏</option>
-                    </select>
-                  </L>
+                <L label="窗口类型" mini>
+                  <select className="input-base !py-1 text-xs" value={contract.window?.type || 'default'} disabled={!editable}
+                    onChange={(e) => patchWindow({ type: e.target.value as VibeWindow['type'] })}>
+                    <option value="default">默认（带标题栏）</option>
+                    <option value="borderless">无边框</option>
+                    <option value="fullscreen">全屏</option>
+                  </select>
+                </L>
+                <div className="flex flex-wrap gap-2 pt-0.5">
+                  <MiniChk label="标题栏" on={contract.window?.titleBar !== false} editable={editable} onToggle={() => patchWindow({ titleBar: contract.window?.titleBar === false ? true : false })} />
                   <MiniChk label="可缩放" on={contract.window?.resizable !== false} editable={editable} onToggle={() => patchWindow({ resizable: contract.window?.resizable === false ? true : false })} />
                   <MiniChk label="置顶" on={!!contract.window?.alwaysOnTop} editable={editable} onToggle={() => patchWindow({ alwaysOnTop: !contract.window?.alwaysOnTop })} />
                   <MiniChk label="透明" on={!!contract.window?.transparent} editable={editable} onToggle={() => patchWindow({ transparent: !contract.window?.transparent })} />
@@ -231,6 +275,13 @@ export function ContractEditor({ contract, onChange, editable }: Props) {
                   <MiniChk label="重启恢复后台" on={!!contract.behavior?.persistent} editable={editable} onToggle={() => patchBehavior({ persistent: !contract.behavior?.persistent })} />
                 )}
               </div>
+              {showWindow && (
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Super Panel 高度（可选）
+                  <input className="input-base mono !py-1 text-xs !w-24" type="number" min={1} value={numField(contract.behavior?.height)} disabled={!editable}
+                    onChange={(e) => patchBehavior({ height: parseNum(e.target.value) })} />
+                </label>
+              )}
             </div>
             <div className="space-y-1.5">
               <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><Globe size={12} /> 平台限制（不选 = 全平台）</span>
@@ -329,6 +380,34 @@ function MiniChk({ label, on, editable, onToggle }: { label: string; on: boolean
       </span>
       {label}
     </button>
+  )
+}
+
+/** feature 级高级开关：搜索框推送 / 隐藏主窗口 / 启动前截图 / UI 路由 */
+function FeatureExtras({ f, editable, isReact, onChange }: {
+  f: VibeFeature
+  editable: boolean
+  isReact: boolean
+  onChange: (p: Partial<VibeFeature>) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+      <MiniChk label="推送到搜索框" on={!!f.mainPush} editable={editable} onToggle={() => onChange({ mainPush: !f.mainPush })} />
+      <MiniChk label="触发后隐藏主窗口" on={!!f.mainHide} editable={editable} onToggle={() => onChange({ mainHide: !f.mainHide })} />
+      <label className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+        启动前截图
+        <select className="input-base !py-0.5 text-[10px] !w-auto" value={f.preCapture || ''} disabled={!editable}
+          onChange={(e) => onChange({ preCapture: (e.target.value || undefined) as VibeFeature['preCapture'] })}>
+          <option value="">无</option>
+          <option value="region">区域</option>
+          <option value="fullscreen">全屏</option>
+        </select>
+      </label>
+      {isReact && (
+        <input className="input-base mono !py-0.5 text-[10px] flex-1 min-w-[90px]" placeholder="UI 路由(可选) 如 /detail" value={f.route || ''} disabled={!editable}
+          onChange={(e) => onChange({ route: e.target.value })} />
+      )}
+    </div>
   )
 }
 

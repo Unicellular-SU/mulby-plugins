@@ -229,18 +229,18 @@ const SplitPDF: React.FC = () => {
             ) : (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     {/* Settings Area */}
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'rgba(255,255,255,0.6)', padding: '12px', borderRadius: '16px', backdropFilter: 'blur(10px)' }}>
+                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', background: 'var(--card-bg)', padding: '12px', borderRadius: '16px', backdropFilter: 'blur(10px)' }}>
 
                         {/* Mode Toggle */}
-                        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', borderRadius: '10px', padding: '4px' }}>
+                        <div style={{ display: 'flex', background: 'var(--track-bg)', borderRadius: '10px', padding: '4px' }}>
                             <button
                                 onClick={() => setMode('auto')}
                                 style={{
-                                    border: 'none', background: mode === 'auto' ? '#fff' : 'transparent',
+                                    border: 'none', background: mode === 'auto' ? 'var(--surface)' : 'transparent',
                                     borderRadius: '8px', padding: '6px 12px', cursor: 'pointer',
                                     fontWeight: mode === 'auto' ? '600' : '500',
                                     boxShadow: mode === 'auto' ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-                                    color: mode === 'auto' ? '#000' : 'var(--text-secondary)',
+                                    color: mode === 'auto' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                     display: 'flex', alignItems: 'center', gap: '6px'
                                 }}
                             >
@@ -249,11 +249,11 @@ const SplitPDF: React.FC = () => {
                             <button
                                 onClick={() => setMode('manual')}
                                 style={{
-                                    border: 'none', background: mode === 'manual' ? '#fff' : 'transparent',
+                                    border: 'none', background: mode === 'manual' ? 'var(--surface)' : 'transparent',
                                     borderRadius: '8px', padding: '6px 12px', cursor: 'pointer',
                                     fontWeight: mode === 'manual' ? '600' : '500',
                                     boxShadow: mode === 'manual' ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-                                    color: mode === 'manual' ? '#000' : 'var(--text-secondary)',
+                                    color: mode === 'manual' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                     display: 'flex', alignItems: 'center', gap: '6px'
                                 }}
                             >
@@ -266,11 +266,11 @@ const SplitPDF: React.FC = () => {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', flex: 1 }}>
                                 {ranges.map((range, index) => (
                                     <div key={index} style={{
-                                        display: 'flex', alignItems: 'center', background: '#fff',
-                                        padding: '4px 8px', borderRadius: '8px', border: '1px solid #eee',
+                                        display: 'flex', alignItems: 'center', background: 'var(--surface)',
+                                        padding: '4px 8px', borderRadius: '8px', border: '1px solid var(--border-subtle)',
                                         gap: '6px', minWidth: 'fit-content'
                                     }}>
-                                        <div style={{ fontSize: '12px', fontWeight: '500', width: '40px', color: '#666', borderRight: '1px solid #eee', paddingRight: '6px' }}>
+                                        <div style={{ fontSize: '12px', fontWeight: '500', width: '40px', color: 'var(--text-secondary)', borderRight: '1px solid var(--border-subtle)', paddingRight: '6px' }}>
                                             Part {index + 1}
                                         </div>
                                         <input
@@ -279,7 +279,7 @@ const SplitPDF: React.FC = () => {
                                             onChange={(e) => updateRange(index, 'start', parseInt(e.target.value) || 1)}
                                             style={{ width: '40px', border: 'none', background: 'transparent', textAlign: 'center', fontWeight: '600' }}
                                         />
-                                        <ArrowRight size={14} color="#999" />
+                                        <ArrowRight size={14} color="var(--text-tertiary)" />
                                         <input
                                             type="number" min={range.start} max={info?.pageCount || 1}
                                             value={range.end}
@@ -312,7 +312,7 @@ const SplitPDF: React.FC = () => {
                     </div>
 
                     {/* Preview Area */}
-                    <div style={{ flex: 1, overflowY: 'auto', background: 'rgba(0,0,0,0.02)', borderRadius: '16px', padding: '16px' }}>
+                    <div style={{ flex: 1, overflowY: 'auto', background: 'var(--subtle-bg)', borderRadius: '16px', padding: '16px' }}>
                         {pdfDoc ? (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '16px' }}>
                                 {Array.from({ length: info?.pageCount || 0 }).map((_, i) => {
@@ -326,7 +326,7 @@ const SplitPDF: React.FC = () => {
                                 })}
                             </div>
                         ) : (
-                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)' }}>
                                 加载预览中...
                             </div>
                         )}
@@ -340,7 +340,7 @@ const SplitPDF: React.FC = () => {
                             style={{
                                 width: '200px',
                                 padding: '14px',
-                                background: splitting || !file ? 'rgba(0,0,0,0.05)' : 'linear-gradient(135deg, #007AFF 0%, #0056b3 100%)',
+                                background: splitting || !file ? 'var(--hover-bg)' : 'linear-gradient(135deg, #007AFF 0%, #0056b3 100%)',
                                 color: splitting || !file ? 'var(--text-secondary)' : 'white',
                                 border: 'none',
                                 borderRadius: '12px',

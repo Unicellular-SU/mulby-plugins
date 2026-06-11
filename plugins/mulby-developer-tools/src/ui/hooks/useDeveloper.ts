@@ -276,7 +276,14 @@ export function useDeveloper(): UseDeveloperResult {
     if (!host?.call) {
       throw new Error('当前环境不支持 host.call（需在 Mulby 中运行）')
     }
-    return (await host.call(DEVELOPER_PLUGIN_ID, method, args)) as T
+    // 宿主 host.call 统一返回 { success, data } 信封（见 host-worker handleCallHostMethod），
+    // 这里解包到业务数据，使消费方可直接读取字段（r.ok / r.errors / r.issues / r.changes …）。
+    // 与其他插件约定一致（todo-focus 的 unwrapHostResult、video-subtitle-studio 的 unwrapHostData）。
+    const res = await host.call(DEVELOPER_PLUGIN_ID, method, args)
+    if (res !== null && typeof res === 'object' && 'data' in (res as Record<string, unknown>)) {
+      return (res as { data: T }).data
+    }
+    return res as T
   }), [wrap])
 
   const apiReady = isApiReady()

@@ -1,0 +1,735 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://mulby.app/schemas/manifest.json",
+  "title": "Mulby Plugin Manifest",
+  "description": "Mulby 插件清单配置文件（manifest.json）的 JSON Schema，用于校验插件基本信息、功能入口、权限声明、窗口配置等。",
+  "type": "object",
+  "required": ["name", "version", "displayName", "description", "main", "features"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema 引用路径，编辑器用于提供智能提示和校验。"
+    },
+    "id": {
+      "type": "string",
+      "description": "全局唯一标识符（推荐格式：@scope/name 或 com.example.name）。未提供时以 name 作为 ID。",
+      "pattern": "^[a-zA-Z0-9@._/-]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "插件内部名称/文件夹名，通常只包含小写字母和中划线。",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "version": {
+      "type": "string",
+      "description": "插件版本号，遵循 Semantic Versioning (x.y.z)。",
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-.].+)?$"
+    },
+    "type": {
+      "type": "string",
+      "description": "插件类别。",
+      "enum": ["utility", "productivity", "developer", "system", "media", "network", "ai", "entertainment", "other"]
+    },
+    "author": {
+      "type": "string",
+      "description": "插件作者信息。"
+    },
+    "homepage": {
+      "type": "string",
+      "description": "插件主页或代码仓库地址（URL）。"
+    },
+    "displayName": {
+      "type": "string",
+      "description": "插件在用户界面（如插件商城、搜索列表）中显示的名称。",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "插件的功能描述。",
+      "minLength": 1
+    },
+    "platform": {
+      "description": "平台限制。未设置表示全平台兼容。",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["darwin", "win32", "linux"]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["darwin", "win32", "linux"]
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        }
+      ]
+    },
+    "main": {
+      "type": "string",
+      "description": "后端主进程的入口文件路径（如 dist/main.js）。",
+      "minLength": 1
+    },
+    "ui": {
+      "type": "string",
+      "description": "前端渲染进程入口（UI 文件，如 ui/index.html）。不填则为纯后台类插件。"
+    },
+    "preload": {
+      "type": "string",
+      "description": "自定义 preload 脚本路径（必须是 CommonJS 的 .cjs 后缀）。",
+      "pattern": "\\.cjs$"
+    },
+    "assets": {
+      "type": "array",
+      "description": "打包时额外包含的文件或目录。多 HTML 辅助窗口、额外 preload、.node 原生模块、外部二进制等需要显式列入。",
+      "items": {
+        "type": "string"
+      }
+    },
+    "icon": {
+      "description": "插件图标。支持相对路径（icon.png）、URL（https://...）、SVG 代码、Emoji 或显式声明对象。",
+      "$ref": "#/$defs/PluginIcon"
+    },
+    "permissions": {
+      "$ref": "#/$defs/PluginPermissions",
+      "description": "插件向系统申请的特殊权限声明。"
+    },
+    "features": {
+      "type": "array",
+      "description": "插件提供的功能和触发入口数组。",
+      "items": {
+        "$ref": "#/$defs/PluginFeature"
+      },
+      "minItems": 1
+    },
+    "tools": {
+      "type": "array",
+      "description": "插件声明的 AI 工具（供 AI Agent 调用）。",
+      "items": {
+        "$ref": "#/$defs/PluginToolSchema"
+      }
+    },
+    "window": {
+      "$ref": "#/$defs/WindowOptions",
+      "description": "独立窗口配置。features 的 mode 设置为 detached 或插件自主新开窗口时使用。"
+    },
+    "pluginSetting": {
+      "$ref": "#/$defs/PluginSetting",
+      "description": "插件行为设置（单例模式、后台运行、资源限制等）。"
+    },
+    "license": {
+      "type": "string",
+      "description": "开源许可证标识（如 MIT、Apache-2.0）。"
+    },
+    "minAppVersion": {
+      "type": "string",
+      "description": "插件要求的最低 Mulby 版本号。低于此版本的宿主将提示用户升级。",
+      "pattern": "^\\d+\\.\\d+\\.\\d+([-.].+)?$"
+    }
+  },
+  "$defs": {
+    "PluginIcon": {
+      "description": "插件图标，支持简写字符串或显式声明对象。",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "简写：相对路径（icon.png）、URL（https://...）、SVG 代码（<svg>...</svg>）或 Emoji。"
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["file", "url", "svg", "emoji"]
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "PluginFeature": {
+      "type": "object",
+      "description": "插件功能入口。",
+      "required": ["code", "explain", "cmds"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "功能唯一代码。",
+          "minLength": 1
+        },
+        "explain": {
+          "type": "string",
+          "description": "该功能的含义说明。",
+          "minLength": 1
+        },
+        "cmds": {
+          "type": "array",
+          "description": "触发该功能的所有匹配指令。",
+          "items": {
+            "$ref": "#/$defs/PluginCmd"
+          },
+          "minItems": 1
+        },
+        "mode": {
+          "type": "string",
+          "description": "运行模式：ui 渲染到搜索框、silent 后台静默执行、detached 以独立窗口运行。",
+          "enum": ["ui", "silent", "detached"]
+        },
+        "route": {
+          "type": "string",
+          "description": "加载的 UI 路由路径（React 前端对应路由）。"
+        },
+        "icon": {
+          "$ref": "#/$defs/PluginIcon",
+          "description": "该功能独享的图标，覆盖全局 icon。"
+        },
+        "mainPush": {
+          "type": "boolean",
+          "description": "是否向搜索框推送内容：匹配时查询后端的 onMainPush 回调获取动态选项。",
+          "default": false
+        },
+        "mainHide": {
+          "type": "boolean",
+          "description": "触发该功能时是否隐藏主窗口。",
+          "default": false
+        },
+        "preCapture": {
+          "type": "string",
+          "description": "在启动插件前先执行截图，截图数据作为 attachment 传入。",
+          "enum": ["region", "fullscreen"]
+        }
+      }
+    },
+    "PluginCmd": {
+      "description": "触发指令配置。",
+      "oneOf": [
+        { "$ref": "#/$defs/CmdKeyword" },
+        { "$ref": "#/$defs/CmdRegex" },
+        { "$ref": "#/$defs/CmdFiles" },
+        { "$ref": "#/$defs/CmdImg" },
+        { "$ref": "#/$defs/CmdOver" },
+        { "$ref": "#/$defs/CmdWindow" }
+      ]
+    },
+    "CmdKeyword": {
+      "type": "object",
+      "description": "关键字匹配：用户在输入框输入此关键词即可匹配。",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "keyword" },
+        "value": {
+          "type": "string",
+          "description": "触发关键词。",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "description": "搜索结果中显示的指令名称。"
+        }
+      }
+    },
+    "CmdRegex": {
+      "type": "object",
+      "description": "正则表达式匹配：对用户输入内容进行正则校验。",
+      "required": ["type", "match"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "regex" },
+        "match": {
+          "type": "string",
+          "description": "正则表达式字符串。",
+          "minLength": 1
+        },
+        "explain": {
+          "type": "string",
+          "description": "正则的解释说明。"
+        },
+        "label": {
+          "type": "string",
+          "description": "指令名称（显示在搜索结果中）。"
+        },
+        "minLength": {
+          "type": "integer",
+          "description": "输入内容所需的最少字符数。",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "description": "输入内容的最多字符数。",
+          "minimum": 0
+        }
+      }
+    },
+    "CmdFiles": {
+      "type": "object",
+      "description": "文件匹配：拖拽或传递文件信息触发。",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "files" },
+        "label": {
+          "type": "string",
+          "description": "指令名称。"
+        },
+        "exts": {
+          "type": "array",
+          "description": "匹配文件扩展名数组（如 [\".json\", \".png\"]）。",
+          "items": { "type": "string" }
+        },
+        "fileType": {
+          "type": "string",
+          "description": "文件类型过滤。",
+          "enum": ["file", "directory", "any"],
+          "default": "any"
+        },
+        "match": {
+          "type": "string",
+          "description": "匹配文件（夹）名称的正则表达式（与 exts 二选一）。"
+        },
+        "minLength": {
+          "type": "integer",
+          "description": "最少文件数。",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "description": "最多文件数。",
+          "minimum": 0
+        }
+      }
+    },
+    "CmdImg": {
+      "type": "object",
+      "description": "图片匹配：拖拽或选中的图片格式触发。",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "img" },
+        "label": {
+          "type": "string",
+          "description": "指令名称。"
+        },
+        "exts": {
+          "type": "array",
+          "description": "限定的图片扩展后缀。",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "CmdOver": {
+      "type": "object",
+      "description": "全局选中文字匹配：选中文字后呼起 Mulby 时自动触发。",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "over" },
+        "label": {
+          "type": "string",
+          "description": "指令名称。"
+        },
+        "exclude": {
+          "type": "string",
+          "description": "排除的正则表达式，如果匹配则不响应此指令。"
+        },
+        "minLength": {
+          "type": "integer",
+          "description": "最少字符数。",
+          "minimum": 0
+        },
+        "maxLength": {
+          "type": "integer",
+          "description": "最多字符数（默认 10000）。",
+          "minimum": 0,
+          "default": 10000
+        }
+      }
+    },
+    "CmdWindow": {
+      "type": "object",
+      "description": "前台应用窗口匹配：通过当前前台窗口应用提供特定的快捷辅助能力。",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "const": "window" },
+        "app": {
+          "type": "string",
+          "description": "应用名称匹配（/正则/ 或精确匹配，忽略大小写）。"
+        },
+        "title": {
+          "type": "string",
+          "description": "窗口标题匹配（/正则/ 或精确匹配，忽略大小写）。"
+        },
+        "bundleId": {
+          "type": "string",
+          "description": "macOS Bundle ID 精确匹配（如 com.apple.Safari）。"
+        },
+        "label": {
+          "type": "string",
+          "description": "指令名称。"
+        }
+      }
+    },
+    "PluginPermissions": {
+      "type": "object",
+      "description": "插件权限声明。",
+      "additionalProperties": false,
+      "properties": {
+        "runCommand": {
+          "type": "boolean",
+          "description": "旧版命令执行权限。仅授权插件自身直接调用 shell.runCommand，新插件优先使用 commandExecution.direct。"
+        },
+        "commandExecution": {
+          "type": "object",
+          "description": "命令执行分场景授权。可分别声明 direct（插件代码直接调用）和 ai（插件承载 AI 生成命令）。",
+          "additionalProperties": false,
+          "properties": {
+            "direct": {
+              "$ref": "#/$defs/CommandExecutionConfig",
+              "description": "插件代码直接调用命令。"
+            },
+            "ai": {
+              "$ref": "#/$defs/CommandExecutionConfig",
+              "description": "插件承载 AI 生成命令。"
+            }
+          }
+        },
+        "webview": {
+          "type": "boolean",
+          "description": "允许插件 UI 使用 Electron <webview> 作为普通远程网页容器。"
+        },
+        "microphone": {
+          "type": "boolean",
+          "description": "允许插件访问麦克风。插件 UI 使用 getUserMedia({ audio: true }) 时必须声明。"
+        },
+        "camera": {
+          "type": "boolean",
+          "description": "允许插件访问摄像头。插件 UI 使用 getUserMedia({ video: true }) 时必须声明。"
+        },
+        "screen": {
+          "type": "boolean",
+          "description": "允许插件访问屏幕录制/截图能力。"
+        },
+        "clipboard": {
+          "type": "boolean",
+          "description": "允许插件读写系统剪贴板和剪贴板历史。"
+        },
+        "notification": {
+          "type": "boolean",
+          "description": "允许插件发送系统通知。"
+        },
+        "geolocation": {
+          "type": "boolean",
+          "description": "允许插件访问定位权限 API 和获取当前位置。"
+        },
+        "accessibility": {
+          "type": "boolean",
+          "description": "允许插件检查/请求系统辅助功能权限。"
+        },
+        "contacts": {
+          "type": "boolean",
+          "description": "允许插件检查/请求通讯录权限。"
+        },
+        "calendar": {
+          "type": "boolean",
+          "description": "允许插件检查/请求日历权限。"
+        },
+        "inputMonitor": {
+          "type": "boolean",
+          "description": "允许插件调用全局输入监听 API（鼠标点击轨迹、键盘按键监听）。macOS 需辅助功能权限。"
+        },
+        "filesystem": {
+          "type": "boolean",
+          "description": "允许插件访问文件系统读写 API。"
+        },
+        "ai": {
+          "type": "boolean",
+          "description": "允许插件调用 AI 相关能力（模型调用、Tool 注册等）。"
+        },
+        "envKeys": {
+          "description": "命令执行时允许继承的环境变量名列表。未声明/空数组：仅继承安全基线；'*'：继承全部环境变量（高风险）。",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            {
+              "type": "string",
+              "const": "*"
+            }
+          ]
+        }
+      }
+    },
+    "CommandExecutionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "是否启用此场景的命令执行能力。"
+        },
+        "defaultProfile": {
+          "type": "string",
+          "description": "未显式传 executionProfile 时使用的默认 profile。",
+          "enum": ["sandbox", "workspace", "trusted"]
+        },
+        "maxProfile": {
+          "type": "string",
+          "description": "允许请求的最高 profile。",
+          "enum": ["sandbox", "workspace", "trusted"]
+        }
+      }
+    },
+    "PluginToolSchema": {
+      "type": "object",
+      "description": "AI 工具声明，供 AI Agent 发现和调用。",
+      "required": ["name", "description", "inputSchema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "tool 名称（插件范围内唯一，仅允许 [a-zA-Z0-9_-]）。",
+          "pattern": "^[a-zA-Z0-9_-]+$"
+        },
+        "description": {
+          "type": "string",
+          "description": "tool 描述（AI 用来理解功能）。",
+          "minLength": 1
+        },
+        "inputSchema": {
+          "type": "object",
+          "description": "输入参数 JSON Schema。",
+          "required": ["type", "properties"],
+          "properties": {
+            "type": { "type": "string", "const": "object" },
+            "properties": { "type": "object" },
+            "required": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "additionalProperties": { "type": "boolean" }
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "description": "输出 JSON Schema（可选，提升 AI 理解）。",
+          "properties": {
+            "type": { "type": "string", "const": "object" },
+            "properties": { "type": "object" }
+          }
+        }
+      }
+    },
+    "WindowOptions": {
+      "type": "object",
+      "description": "独立窗口配置。",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "description": "默认宽度（像素）。",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "description": "默认高度（像素）。",
+          "minimum": 1
+        },
+        "minWidth": {
+          "type": "integer",
+          "description": "最小宽度。",
+          "minimum": 1
+        },
+        "minHeight": {
+          "type": "integer",
+          "description": "最小高度。",
+          "minimum": 1
+        },
+        "maxWidth": {
+          "type": "integer",
+          "description": "最大宽度。",
+          "minimum": 1
+        },
+        "maxHeight": {
+          "type": "integer",
+          "description": "最大高度。",
+          "minimum": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "窗口类型：default（带标题栏）、borderless（无边框）、fullscreen（全屏）。",
+          "enum": ["default", "borderless", "fullscreen"],
+          "default": "default"
+        },
+        "titleBar": {
+          "type": "boolean",
+          "description": "是否显示 Mulby 标题栏（default 类型默认 true，其他类型默认 false）。"
+        },
+        "alwaysOnTop": {
+          "type": "boolean",
+          "description": "detached 窗口初始置顶状态。"
+        },
+        "alwaysOnTopLevel": {
+          "type": "string",
+          "description": "Electron setAlwaysOnTop 的 level（如 screen-saver）。未设时 Windows 会补默认。"
+        },
+        "resizable": {
+          "type": "boolean",
+          "description": "是否可调整大小（默认 true）。"
+        },
+        "fullscreenable": {
+          "type": "boolean",
+          "description": "是否允许进入系统全屏/缩放（默认 true）。macOS 上也影响最大化能力。"
+        },
+        "focusable": {
+          "type": "boolean",
+          "description": "是否可获取焦点（默认 true）。设为 false 时窗口不会成为 key window。"
+        },
+        "opacity": {
+          "type": "number",
+          "description": "窗口透明度（0.0 完全透明 ~ 1.0 完全不透明）。",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "transparent": {
+          "type": "boolean",
+          "description": "窗口背景透明（配合 CSS background: transparent 实现穿透效果，仅创建时生效）。"
+        },
+        "visibleOnAllWorkspaces": {
+          "type": "boolean",
+          "description": "是否在所有桌面/工作区可见（macOS Mission Control / Windows 虚拟桌面）。"
+        },
+        "visibleOnFullScreen": {
+          "type": "boolean",
+          "description": "配合 visibleOnAllWorkspaces 使用，全屏应用上方可见（macOS）。"
+        },
+        "ignoreMouseEvents": {
+          "type": "boolean",
+          "description": "detached 窗口初始是否忽略鼠标事件，用于透明区域点击穿透。"
+        },
+        "forwardMouseEvents": {
+          "type": "boolean",
+          "description": "配合 ignoreMouseEvents，穿透时是否继续转发鼠标移动事件以支持 hover/mousemove 检测。"
+        },
+        "skipTaskbar": {
+          "type": "boolean",
+          "description": "请求从任务栏/Dock 隐藏该窗口。macOS 仍可能显示 Mulby 应用级 Dock 图标。"
+        },
+        "backgroundThrottling": {
+          "type": "boolean",
+          "description": "是否允许后台节流（默认 true）。false 可让后台/遮挡窗口继续刷新 timer/repaint。"
+        },
+        "position": {
+          "type": "string",
+          "description": "preCapture 区域截图后，按截图区域定位窗口。",
+          "enum": ["default", "capture-region"]
+        },
+        "fit": {
+          "type": "string",
+          "description": "preCapture 区域截图后，按截图区域调整窗口大小。capture-region-with-toolbar 会额外增加工具条高度。",
+          "enum": ["default", "capture-region", "capture-region-with-toolbar"]
+        },
+        "captureToolbarHeight": {
+          "type": "number",
+          "description": "fit 为 capture-region-with-toolbar 时追加的工具条高度（默认 56）。",
+          "minimum": 0,
+          "default": 56
+        }
+      }
+    },
+    "PluginSetting": {
+      "type": "object",
+      "description": "插件行为设置。",
+      "additionalProperties": false,
+      "properties": {
+        "single": {
+          "type": "boolean",
+          "description": "是否单例模式运行（默认 true）。",
+          "default": true
+        },
+        "height": {
+          "type": "number",
+          "description": "Super Panel 面板启动此 UI 插件时使用的预期高度。",
+          "minimum": 0
+        },
+        "defaultDetached": {
+          "type": "boolean",
+          "description": "是否默认以独立窗口运行（默认 false）。用户偏好优先于此默认值。",
+          "default": false
+        },
+        "background": {
+          "type": "boolean",
+          "description": "是否允许后台运行（默认 false）。仅表示能力，不会自动随 Mulby 启动。",
+          "default": false
+        },
+        "persistent": {
+          "type": "boolean",
+          "description": "是否在 Mulby 重启后恢复上次后台运行状态。仅在 background: true 时有效。",
+          "default": false
+        },
+        "maxRuntime": {
+          "type": "number",
+          "description": "最大运行时间（毫秒）。超时会自动终止。0 表示无限制。",
+          "minimum": 0,
+          "default": 0
+        },
+        "resourceLimits": {
+          "description": "资源限制配置。可使用预设字符串或详细对象配置。",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["low", "medium", "high", "unlimited"]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "maxMemoryMB": {
+                  "type": "number",
+                  "description": "最大内存使用（MB）。",
+                  "minimum": 0
+                },
+                "maxRequestsPerMinute": {
+                  "type": "number",
+                  "description": "每分钟最大请求数。",
+                  "minimum": 0
+                },
+                "maxErrorsPerMinute": {
+                  "type": "number",
+                  "description": "每分钟最大错误数。",
+                  "minimum": 0
+                },
+                "memoryLeakThresholdMBPerMinute": {
+                  "type": "number",
+                  "description": "内存泄漏阈值（MB/分钟）。",
+                  "minimum": 0
+                }
+              }
+            }
+          ]
+        },
+        "idleTimeoutMs": {
+          "description": "宿主进程空闲超时后自动销毁的等待时间（毫秒）。0 或 'never' 表示永不自动销毁。默认 5 分钟。",
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "string",
+              "const": "never"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

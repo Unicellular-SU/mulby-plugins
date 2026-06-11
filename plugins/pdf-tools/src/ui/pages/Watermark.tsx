@@ -197,13 +197,25 @@ const Watermark: React.FC = () => {
             const downloadsPath = await system.getPath('downloads');
             const outputDir = downloadsPath || '.';
 
-            let count = 0;
+            let success = 0;
+            const failed: string[] = [];
             for (const file of files) {
-                await window.pdfApi?.watermarkPDF(file, config, outputDir);
-                count++;
+                try {
+                    await window.pdfApi?.watermarkPDF(file, config, outputDir);
+                    success++;
+                } catch (e: any) {
+                    console.error(`水印失败: ${file}`, e);
+                    failed.push(file.split(/[/\\]/).pop() || file);
+                }
             }
 
-            notification.show(`成功为 ${count} 个文件添加水印！`, 'success');
+            if (success > 0 && failed.length === 0) {
+                notification.show(`成功为 ${success} 个文件添加水印！`, 'success');
+            } else if (success > 0) {
+                notification.show(`完成 ${success} 个，失败 ${failed.length} 个：${failed.join('、')}`, 'warning');
+            } else {
+                notification.show(`添加水印失败：${failed.join('、')}`, 'error');
+            }
         } catch (error: any) {
             console.error(error);
             notification.show(`添加水印失败: ${error.message}`, 'error');
@@ -229,16 +241,16 @@ const Watermark: React.FC = () => {
                 <div style={{ flex: 1, display: 'flex', gap: '16px', overflow: 'hidden' }}>
 
                     {/* Left Sidebar: Controls & Files */}
-                    <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '16px', border: '1px solid rgba(255,255,255,0.4)', overflow: 'hidden' }}>
+                    <div style={{ width: '320px', display: 'flex', flexDirection: 'column', gap: '12px', background: 'var(--card-bg)', backdropFilter: 'blur(10px)', borderRadius: '16px', padding: '16px', border: 'var(--glass-border)', overflow: 'hidden' }}>
 
                         {/* Tabs */}
-                        <div style={{ display: 'flex', padding: '4px', background: 'rgba(118, 118, 128, 0.12)', borderRadius: '10px' }}>
+                        <div style={{ display: 'flex', padding: '4px', background: 'var(--track-bg)', borderRadius: '10px' }}>
                             <button
                                 onClick={() => setActiveTab('settings')}
                                 style={{
                                     flex: 1, padding: '6px', border: 'none', borderRadius: '8px',
-                                    background: activeTab === 'settings' ? '#fff' : 'transparent',
-                                    color: activeTab === 'settings' ? '#000' : 'var(--text-secondary)',
+                                    background: activeTab === 'settings' ? 'var(--surface)' : 'transparent',
+                                    color: activeTab === 'settings' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                     fontWeight: activeTab === 'settings' ? '600' : '500',
                                     boxShadow: activeTab === 'settings' ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
                                     cursor: 'pointer', transition: 'all 0.2s', fontSize: '13px'
@@ -250,8 +262,8 @@ const Watermark: React.FC = () => {
                                 onClick={() => setActiveTab('files')}
                                 style={{
                                     flex: 1, padding: '6px', border: 'none', borderRadius: '8px',
-                                    background: activeTab === 'files' ? '#fff' : 'transparent',
-                                    color: activeTab === 'files' ? '#000' : 'var(--text-secondary)',
+                                    background: activeTab === 'files' ? 'var(--surface)' : 'transparent',
+                                    color: activeTab === 'files' ? 'var(--text-primary)' : 'var(--text-secondary)',
                                     fontWeight: activeTab === 'files' ? '600' : '500',
                                     boxShadow: activeTab === 'files' ? '0 2px 4px rgba(0,0,0,0.08)' : 'none',
                                     cursor: 'pointer', transition: 'all 0.2s', fontSize: '13px'
@@ -275,13 +287,13 @@ const Watermark: React.FC = () => {
                                                 style={{
                                                     flex: 1, cursor: 'pointer',
                                                     border: `2px solid ${config.type === m ? 'var(--primary-color)' : 'transparent'}`,
-                                                    background: config.type === m ? 'rgba(0,122,255,0.05)' : 'rgba(0,0,0,0.03)',
+                                                    background: config.type === m ? 'rgba(0,122,255,0.05)' : 'var(--subtle-bg)',
                                                     borderRadius: '10px', padding: '8px',
                                                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
                                                     transition: 'all 0.2s'
                                                 }}
                                             >
-                                                {m === 'text' ? <Type size={18} color={config.type === m ? 'var(--primary-color)' : '#999'} /> : <ImageIcon size={18} color={config.type === m ? 'var(--primary-color)' : '#999'} />}
+                                                {m === 'text' ? <Type size={18} color={config.type === m ? 'var(--primary-color)' : 'var(--text-tertiary)'} /> : <ImageIcon size={18} color={config.type === m ? 'var(--primary-color)' : 'var(--text-tertiary)'} />}
                                                 <span style={{ fontSize: '12px', fontWeight: '500', color: config.type === m ? 'var(--primary-color)' : '#666' }}>
                                                     {m === 'text' ? '文字' : '图片'}
                                                 </span>
@@ -292,25 +304,25 @@ const Watermark: React.FC = () => {
                                     {/* Main Input */}
                                     {config.type === 'text' ? (
                                         <div>
-                                            <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: '#555' }}>内容</label>
+                                            <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: 'var(--text-secondary)' }}>内容</label>
                                             <input
                                                 type="text" value={config.text}
                                                 onChange={e => setConfig({ ...config, text: e.target.value })}
                                                 style={{
-                                                    width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid #ddd',
-                                                    fontSize: '14px', outline: 'none', background: '#fff'
+                                                    width: '100%', padding: '10px', borderRadius: '10px', border: '1px solid var(--border-subtle)',
+                                                    fontSize: '14px', outline: 'none', background: 'var(--surface)'
                                                 }}
                                                 placeholder="输入水印文字"
                                             />
                                         </div>
                                     ) : (
                                         <div>
-                                            <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: '#555' }}>源文件</label>
+                                            <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: 'var(--text-secondary)' }}>源文件</label>
                                             <div
                                                 onClick={handleSelectImage}
                                                 style={{
-                                                    border: '1px dashed #ccc', borderRadius: '10px', padding: '10px',
-                                                    textAlign: 'center', cursor: 'pointer', background: '#fff',
+                                                    border: '1px dashed var(--border-subtle)', borderRadius: '10px', padding: '10px',
+                                                    textAlign: 'center', cursor: 'pointer', background: 'var(--surface)',
                                                     color: config.imagePath ? 'var(--primary-color)' : 'var(--text-secondary)',
                                                     fontSize: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
                                                 }}
@@ -325,13 +337,13 @@ const Watermark: React.FC = () => {
 
                                     {/* Layout Grid */}
                                     <div>
-                                        <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: '#555' }}>排列方式</label>
+                                        <label style={{ display: 'block', margin: '0 0 6px 4px', fontWeight: '600', fontSize: '12px', color: 'var(--text-secondary)' }}>排列方式</label>
                                         <div style={{ display: 'flex', gap: '8px' }}>
                                             <button
                                                 onClick={() => setConfig({ ...config, layout: 'center' })}
                                                 style={{
-                                                    flex: 1, padding: '8px', borderRadius: '10px', border: `1px solid ${config.layout === 'center' ? 'var(--primary-color)' : '#e0e0e0'}`,
-                                                    background: config.layout === 'center' ? '#fff' : 'rgba(255,255,255,0.5)',
+                                                    flex: 1, padding: '8px', borderRadius: '10px', border: `1px solid ${config.layout === 'center' ? 'var(--primary-color)' : 'var(--border-subtle)'}`,
+                                                    background: config.layout === 'center' ? 'var(--surface)' : 'var(--card-bg-soft)',
                                                     color: config.layout === 'center' ? 'var(--primary-color)' : '#666', cursor: 'pointer', fontSize: '12px',
                                                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
                                                 }}
@@ -341,8 +353,8 @@ const Watermark: React.FC = () => {
                                             <button
                                                 onClick={() => setConfig({ ...config, layout: 'tile' })}
                                                 style={{
-                                                    flex: 1, padding: '8px', borderRadius: '10px', border: `1px solid ${config.layout === 'tile' ? 'var(--primary-color)' : '#e0e0e0'}`,
-                                                    background: config.layout === 'tile' ? '#fff' : 'rgba(255,255,255,0.5)',
+                                                    flex: 1, padding: '8px', borderRadius: '10px', border: `1px solid ${config.layout === 'tile' ? 'var(--primary-color)' : 'var(--border-subtle)'}`,
+                                                    background: config.layout === 'tile' ? 'var(--surface)' : 'var(--card-bg-soft)',
                                                     color: config.layout === 'tile' ? 'var(--primary-color)' : '#666', cursor: 'pointer', fontSize: '12px',
                                                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px'
                                                 }}
@@ -353,19 +365,19 @@ const Watermark: React.FC = () => {
                                     </div>
 
                                     {/* Sliders Area */}
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', background: 'rgba(0,0,0,0.02)', padding: '12px', borderRadius: '12px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', background: 'var(--subtle-bg)', padding: '12px', borderRadius: '12px' }}>
                                         {/* Row 1 */}
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <span style={{ fontSize: '11px', color: '#666' }}>旋转</span>
+                                                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>旋转</span>
                                                     <span style={{ fontSize: '11px', fontWeight: '600' }}>{config.rotate}°</span>
                                                 </div>
                                                 <input type="range" min="0" max="360" value={config.rotate} onChange={e => setConfig({ ...config, rotate: parseInt(e.target.value) })} style={{ width: '100%', height: '4px', accentColor: 'var(--primary-color)' }} />
                                             </div>
                                             <div>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <span style={{ fontSize: '11px', color: '#666' }}>透明度</span>
+                                                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>透明度</span>
                                                     <span style={{ fontSize: '11px', fontWeight: '600' }}>{config.opacity}</span>
                                                 </div>
                                                 <input type="range" min="0" max="1" step="0.1" value={config.opacity} onChange={e => setConfig({ ...config, opacity: parseFloat(e.target.value) })} style={{ width: '100%', height: '4px', accentColor: 'var(--primary-color)' }} />
@@ -376,7 +388,7 @@ const Watermark: React.FC = () => {
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                                             <div>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                    <span style={{ fontSize: '11px', color: '#666' }}>{config.type === 'image' ? '缩放' : '字号'}</span>
+                                                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{config.type === 'image' ? '缩放' : '字号'}</span>
                                                     <span style={{ fontSize: '11px', fontWeight: '600' }}>{config.type === 'image' ? config.scale : config.fontSize}</span>
                                                 </div>
                                                 {config.type === 'image' ? (
@@ -388,7 +400,7 @@ const Watermark: React.FC = () => {
                                             {config.layout === 'tile' && (
                                                 <div>
                                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                                        <span style={{ fontSize: '11px', color: '#666' }}>间距</span>
+                                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>间距</span>
                                                         <span style={{ fontSize: '11px', fontWeight: '600' }}>{config.gap}</span>
                                                     </div>
                                                     <input type="range" min="50" max="500" value={config.gap || 200} onChange={e => setConfig({ ...config, gap: parseInt(e.target.value) })} style={{ width: '100%', height: '4px', accentColor: 'var(--primary-color)' }} />
@@ -398,8 +410,8 @@ const Watermark: React.FC = () => {
 
                                         {config.type === 'text' && (
                                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '4px' }}>
-                                                <span style={{ fontSize: '12px', color: '#666' }}>文字颜色</span>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#fff', padding: '4px 8px', borderRadius: '20px', border: '1px solid #eee' }}>
+                                                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>文字颜色</span>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--surface)', padding: '4px 8px', borderRadius: '20px', border: '1px solid var(--border-subtle)' }}>
                                                     <input type="color" value={config.color} onChange={e => setConfig({ ...config, color: e.target.value })} style={{ width: '16px', height: '16px', border: 'none', padding: 0, background: 'transparent', cursor: 'pointer' }} />
                                                     <span style={{ fontSize: '11px', fontFamily: 'monospace' }}>{config.color}</span>
                                                 </div>
@@ -413,8 +425,8 @@ const Watermark: React.FC = () => {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                     {files.map((f, i) => (
                                         <div key={i} style={{
-                                            display: 'flex', alignItems: 'center', padding: '10px', background: 'rgba(255,255,255,0.8)', borderRadius: '10px',
-                                            border: '1px solid rgba(0,0,0,0.05)', gap: '10px'
+                                            display: 'flex', alignItems: 'center', padding: '10px', background: 'var(--card-bg-strong)', borderRadius: '10px',
+                                            border: '1px solid var(--border-subtle)', gap: '10px'
                                         }}>
                                             <FileText size={18} color="var(--primary-color)" />
                                             <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -462,7 +474,7 @@ const Watermark: React.FC = () => {
                         ref={onContainerRefChange}
                         style={{
                             flex: 1,
-                            background: '#e0e0e0',
+                            background: 'var(--preview-bg)',
                             borderRadius: '16px',
                             overflow: 'hidden',
                             position: 'relative',

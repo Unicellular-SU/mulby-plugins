@@ -5,6 +5,7 @@ import { Document, Packer, Paragraph, TextRun, ImageRun } from 'docx';
 import { PDFDocument } from 'pdf-lib';
 import PptxGenJS from 'pptxgenjs';
 import * as XLSX from 'xlsx';
+import { throwIfAborted, yieldToMain } from '../utils/async';
 
 // Set up the worker for PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -25,6 +26,53 @@ export interface ConversionProgress {
 }
 
 export type ProgressCallback = (progress: ConversionProgress) => void;
+
+export type WebToPdfSource =
+    | { kind: 'url'; url: string }
+    | { kind: 'html'; html: string }
+    | { kind: 'file'; path: string };
+
+export interface WebToPdfOptions {
+    source: WebToPdfSource;
+    /** Electron.PrintToPDFOptions（pageSize/landscape/margins/scale/printBackground/preferCSSPageSize 等） */
+    pdfOptions?: Record<string, unknown>;
+    viewportWidth?: number;
+    viewportHeight?: number;
+    /** 固定等待毫秒数（与 waitSelector 二选一） */
+    waitMs?: number;
+    /** 等待某个选择器出现后再打印（应对动态/懒加载页面） */
+    waitSelector?: string;
+    /** 自动滚动到底触发懒加载资源 */
+    autoScroll?: boolean;
+    /** 导航超时（毫秒） */
+    timeout?: number;
+    outputDir: string;
+    fileName: string;
+}
+
+// 在页面上下文执行：分步滚动到底以触发懒加载，再回到顶部
+const AUTO_SCROLL_SCRIPT = () => {
+    return new Promise<void>((resolve) => {
+        try {
+            let scrolled = 0;
+            const distance = 600;
+            const start = Date.now();
+            const maxTime = 8000;
+            const timer = setInterval(() => {
+                const scrollHeight = document.body.scrollHeight;
+                window.scrollBy(0, distance);
+                scrolled += distance;
+                if (scrolled >= scrollHeight - window.innerHeight || Date.now() - start > maxTime) {
+                    clearInterval(timer);
+                    window.scrollTo(0, 0);
+                    setTimeout(() => resolve(), 300);
+                }
+            }, 120);
+        } catch {
+            resolve();
+        }
+    });
+};
 
 class PDFService {
     private static readonly MAX_DOCUMENT_CACHE = 4;
@@ -119,7 +167,7 @@ class PDFService {
     /**
      * 将 PDF 每一页渲染为图片 (PDF 转图片)
      */
-    async convertPDFToImages(pdfPath: string, outputDir: string, onProgress?: ProgressCallback): Promise<string[]> {
+    async convertPDFToImages(pdfPath: string, outputDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<string[]> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -130,6 +178,8 @@ class PDFService {
         console.log(`Starting PDF to Image conversion. Pages: ${totalPages}`);
 
         for (let i = 1; i <= totalPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             if (onProgress) {
                 onProgress({ current: i, total: totalPages, status: `正在转换第 ${i} 页...` });
             }
@@ -199,7 +249,7 @@ class PDFService {
         }
     }
 
-    async convertToWord(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToWord(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -207,18 +257,17 @@ class PDFService {
         const children = [];
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str).join(' ');
+            const rows = await this.extractStructuredRows(page);
 
             // Check if page has text content
-            if (strings.trim().length > 0) {
-                children.push(
-                    new Paragraph({
-                        children: [new TextRun(strings)],
-                    }),
-                    new Paragraph({ text: "", pageBreakBefore: true })
-                );
+            if (rows.length > 0) {
+                for (const row of rows) {
+                    children.push(new Paragraph({ children: [new TextRun(row.join('  '))] }));
+                }
+                children.push(new Paragraph({ text: "", pageBreakBefore: true }));
             } else {
                 // Fallback: Render page as image for scanned PDFs
                 console.log(`Page ${i} has no text, rendering as image...`);
@@ -268,7 +317,7 @@ class PDFService {
         return outputPath;
     }
 
-    async convertToPPT(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToPPT(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -276,15 +325,17 @@ class PDFService {
         const pptx = new PptxGenJS();
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str).join(' ');
+            const rows = await this.extractStructuredRows(page);
 
             const slide = pptx.addSlide();
 
             // Check if page has text content
-            if (strings.trim().length > 0) {
-                slide.addText(strings, { x: 0.5, y: 0.5, w: '90%', h: '90%', fontSize: 14 });
+            if (rows.length > 0) {
+                const text = rows.map((row) => row.join('  ')).join('\n');
+                slide.addText(text, { x: 0.5, y: 0.5, w: '90%', h: '90%', fontSize: 14, valign: 'top' });
             } else {
                 // Fallback: Render page as image for scanned PDFs
                 console.log(`Page ${i} has no text, rendering as image...`);
@@ -325,18 +376,21 @@ class PDFService {
         return outputPath;
     }
 
-    async convertToExcel(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToExcel(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
         const pdf = await this.getDocument(pdfPath);
-        const rows = [];
+        const rows: string[][] = [];
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str);
-            rows.push(strings);
+            const pageRows = await this.extractStructuredRows(page);
+            for (const row of pageRows) {
+                rows.push(row);
+            }
         }
 
         const wb = XLSX.utils.book_new();
@@ -436,7 +490,7 @@ class PDFService {
      * 3. 图片型 PDF：执行光栅化压缩
      * 4. 终极兜底：如果压缩后体积 >= 原体积，返回原文件
      */
-    async compressPDF(pdfPath: string, outputDir: string, quality: number = 0.6, onProgress?: ProgressCallback): Promise<string> {
+    async compressPDF(pdfPath: string, outputDir: string, quality: number = 0.6, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -480,6 +534,8 @@ class PDFService {
             const newDoc = await PDFDocument.create();
 
             for (let i = 1; i <= totalPages; i++) {
+                throwIfAborted(signal);
+                await yieldToMain();
                 if (onProgress) {
                     const progress = 10 + Math.floor((i / totalPages) * 80);
                     onProgress({ current: progress, total: 100, status: `正在压缩第 ${i}/${totalPages} 页...` });
@@ -586,6 +642,157 @@ class PDFService {
         }
 
         return outputPath;
+    }
+
+    /**
+     * 网址 / HTML / 本地 HTML 文件 转 PDF
+     * 基于 Mulby inbrowser（底层 Electron printToPDF），渲染后输出 PDF。
+     */
+    async webToPdf(options: WebToPdfOptions): Promise<string> {
+        const api = getApi();
+        const mulby = (window as any).mulby;
+        const inbrowser = mulby?.inbrowser;
+        if (!inbrowser || typeof inbrowser.goto !== 'function') {
+            throw new Error('当前环境不支持网页转 PDF（inbrowser 不可用）');
+        }
+
+        // 1. 归一化为可加载 URL
+        let targetUrl: string;
+        const { source } = options;
+        if (source.kind === 'url') {
+            targetUrl = this.normalizeWebUrl(source.url);
+        } else if (source.kind === 'file') {
+            targetUrl = typeof api.pathToFileUrl === 'function'
+                ? api.pathToFileUrl(source.path)
+                : `file://${source.path}`;
+        } else {
+            const html = source.html?.trim();
+            if (!html) throw new Error('请输入 HTML 内容');
+            targetUrl = await api.saveTempHtml(source.html);
+        }
+
+        // 2. 构建链式渲染指令
+        const vw = options.viewportWidth ?? 1280;
+        const vh = options.viewportHeight ?? 1800;
+        const timeout = options.timeout ?? 30000;
+
+        let chain: any = inbrowser.goto(targetUrl, {}, timeout).viewport(vw, vh);
+        if (options.autoScroll) {
+            chain = chain.evaluate(AUTO_SCROLL_SCRIPT);
+        }
+        const selector = options.waitSelector?.trim();
+        if (selector) {
+            chain = chain.wait(selector);
+        } else if (options.waitMs && options.waitMs > 0) {
+            chain = chain.wait(options.waitMs);
+        }
+        // 链尾 end() 在打印完成后销毁隐藏窗口，避免 InBrowser 实例驻留累积
+        chain = chain.pdf(options.pdfOptions ?? { printBackground: true, pageSize: 'A4' }).end();
+
+        // 3. 执行（不传 savePath，拿回 PDF 字节）
+        const results: unknown[] = await chain.run({
+            show: false,
+            width: vw,
+            height: Math.min(vh, 2000),
+            backgroundColor: '#ffffff',
+        });
+
+        const bytes = this.pickPdfBytes(results);
+        if (!bytes || bytes.length === 0) {
+            throw new Error('生成 PDF 失败：未获取到 PDF 数据');
+        }
+
+        // 4. 写入下载目录（唯一命名 + 权限回退）
+        return api.savePdfBuffer(options.outputDir, options.fileName, bytes);
+    }
+
+    private normalizeWebUrl(raw: string): string {
+        const trimmed = (raw || '').trim();
+        if (!trimmed) throw new Error('请输入有效的网址');
+        if (/^(https?|file):\/\//i.test(trimmed)) return trimmed;
+        return `https://${trimmed}`;
+    }
+
+    private pickPdfBytes(results: unknown[]): Uint8Array | null {
+        if (Array.isArray(results)) {
+            for (let i = results.length - 1; i >= 0; i--) {
+                const u = this.toUint8(results[i]);
+                if (u && u.length > 0) return u;
+            }
+            return null;
+        }
+        return this.toUint8(results);
+    }
+
+    private toUint8(value: any): Uint8Array | null {
+        if (!value) return null;
+        if (value instanceof Uint8Array) return value;
+        if (value instanceof ArrayBuffer) return new Uint8Array(value);
+        if (ArrayBuffer.isView(value)) {
+            return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        }
+        if (Array.isArray(value)) {
+            return value.every((n) => typeof n === 'number') ? Uint8Array.from(value) : null;
+        }
+        if (typeof value === 'object' && value.type === 'Buffer' && Array.isArray(value.data)) {
+            return Uint8Array.from(value.data);
+        }
+        return null;
+    }
+
+    /**
+     * 从 pdfjs 文本内容重建结构化行/列：
+     * 按 Y 坐标聚合成行（保留换行），行内按 X 排序，并依据列间距切分为多个单元格，
+     * 以尽量保留段落换行与表格列结构（纯算法、零外部依赖）。
+     */
+    private async extractStructuredRows(page: any): Promise<string[][]> {
+        const textContent = await page.getTextContent();
+        const items = (textContent.items as any[]).filter(
+            (it) => it && typeof it.str === 'string' && it.str.length > 0,
+        );
+        if (!items.length) return [];
+
+        const yTolerance = 3;
+        const lines: Array<{ y: number; items: any[] }> = [];
+        for (const it of items) {
+            const y = it.transform[5];
+            let line = lines.find((l) => Math.abs(l.y - y) <= yTolerance);
+            if (!line) {
+                line = { y, items: [] };
+                lines.push(line);
+            }
+            line.items.push(it);
+        }
+        lines.sort((a, b) => b.y - a.y);
+
+        return lines
+            .map((line) => {
+                const sorted = line.items.sort((a, b) => a.transform[4] - b.transform[4]);
+                const cells: string[] = [];
+                let current = '';
+                let prevEndX: number | null = null;
+                for (const it of sorted) {
+                    const x = it.transform[4];
+                    const width = typeof it.width === 'number' ? it.width : 0;
+                    const fontH = Math.abs(it.transform[3]) || it.height || 10;
+                    if (prevEndX !== null) {
+                        const gap = x - prevEndX;
+                        if (gap > fontH * 1.2) {
+                            // 大间隙：视为新的单元格/列
+                            if (current.trim()) cells.push(current.trim());
+                            current = '';
+                        } else if (gap > fontH * 0.2 && current && !current.endsWith(' ')) {
+                            // 词间间隙：补一个空格
+                            current += ' ';
+                        }
+                    }
+                    current += it.str;
+                    prevEndX = x + width;
+                }
+                if (current.trim()) cells.push(current.trim());
+                return cells;
+            })
+            .filter((cells) => cells.length > 0);
     }
 }
 

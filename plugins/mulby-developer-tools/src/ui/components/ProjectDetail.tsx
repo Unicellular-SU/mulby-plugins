@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
 import {
   FolderOpen, Hammer, Package, RefreshCw, Trash2, FileText,
-  AlertTriangle, Loader2, ShieldAlert, Wrench, Sparkles, Play, Boxes
+  AlertTriangle, Loader2, ShieldAlert, Wrench, Sparkles, Play, Boxes, UploadCloud,
+  Store, ArrowUpCircle
 } from 'lucide-react'
 import type { PluginProjectPluginStatus, PluginProjectStatus } from '../types'
+import type { MaintenanceStatus } from '../lib/maintenance'
+import { relationText } from '../lib/maintenance'
 import { PluginBadges, HealthDot } from './StatusBadge'
+import { PublishStatusCard } from './PublishStatus'
 
-export type DetailAction = 'open' | 'launch' | 'build' | 'pack' | 'reload' | 'readme' | 'remove' | 'vibe'
+export type DetailAction = 'open' | 'launch' | 'build' | 'pack' | 'reload' | 'readme' | 'remove' | 'vibe' | 'publish'
+
+type ToastFn = (kind: 'success' | 'error' | 'info', text: string) => void
 
 const fsApi = () => (window as any)?.mulby?.filesystem
 
@@ -39,9 +45,16 @@ interface Props {
   project: PluginProjectStatus
   busyAction: DetailAction | null
   onAction: (action: DetailAction, plugin?: PluginProjectPluginStatus) => void
+  pushToast?: ToastFn
+  /** 发布成功后 +1，驱动状态卡重新拉取 */
+  publishReloadToken?: number
+  /** 维护状态（key = 插件目录路径） */
+  maint?: Record<string, MaintenanceStatus>
+  /** 审查意见回流：跳转 Vibe 改造并把意见交给 AI 修复 */
+  onAiFix?: (plugin: PluginProjectPluginStatus, instruction: string) => void
 }
 
-export function ProjectDetail({ project, busyAction, onAction }: Props) {
+export function ProjectDetail({ project, busyAction, onAction, pushToast, publishReloadToken, maint, onAiFix }: Props) {
   const isCollection = project.type === 'collection'
   const projectName = project.label || (isCollection ? (project.path.split('/').pop() || project.path) : project.plugins[0]?.displayName) || project.path
 
@@ -95,13 +108,13 @@ export function ProjectDetail({ project, busyAction, onAction }: Props) {
               </div>
             </aside>
             <main className="flex-1 min-w-0 overflow-auto p-5">
-              {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} showTitle />}
+              {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix} showTitle />}
             </main>
           </div>
         ) : (
           // 单插件模式：直接展示该插件详情
           <div className="h-full overflow-auto p-5">
-            {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} showTitle={false} />}
+            {activePlugin && <PluginDetailPanel p={activePlugin} busy={busyAction} onAction={onAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maint?.[activePlugin.path]} onAiFix={onAiFix} showTitle={false} />}
           </div>
         )}
       </div>
@@ -127,6 +140,36 @@ function PluginSubItem({ p, active, onSelect }: { p: PluginProjectPluginStatus; 
   )
 }
 
+/**
+ * 维护状态行：一眼看到「本地 vs 商店」的版本关系。
+ * ahead（有未发布改动）→ 蓝色 + 「发布更新」快捷入口；behind/需维护 → 警示；synced → 安静的绿色。
+ */
+function MaintenanceRow({ st, busy, onPublish }: { st: MaintenanceStatus; busy: boolean; onPublish: () => void }) {
+  if (st.relation === 'unknown') return null
+  const text = relationText(st)
+  const tone = st.needsAttention && st.relation === 'behind' ? 'rose'
+    : st.relation === 'ahead' ? 'sky'
+    : st.relation === 'synced' ? 'emerald'
+    : 'slate'
+  const cls: Record<string, string> = {
+    rose: 'border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400',
+    sky: 'border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300',
+    emerald: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400',
+    slate: 'border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400'
+  }
+  return (
+    <div className={`rounded-xl border px-3 py-2 flex items-center gap-2 text-[12px] ${cls[tone]}`}>
+      <Store size={13} className="shrink-0" />
+      <span className="flex-1 min-w-0">{text}</span>
+      {st.relation === 'ahead' && (
+        <button className="btn-secondary shrink-0 h-6 px-2 text-[11px]" disabled={busy} onClick={onPublish} title="把本地改动发布为商店更新（提交 PR）">
+          <ArrowUpCircle size={12} /> 发布更新
+        </button>
+      )}
+    </div>
+  )
+}
+
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2 text-[12px]">
@@ -136,8 +179,10 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function PluginDetailPanel({ p, busy, onAction, showTitle }: {
-  p: PluginProjectPluginStatus; busy: DetailAction | null; onAction: (a: DetailAction, plugin?: PluginProjectPluginStatus) => void; showTitle: boolean
+function PluginDetailPanel({ p, busy, onAction, pushToast, publishReloadToken, maint, onAiFix, showTitle }: {
+  p: PluginProjectPluginStatus; busy: DetailAction | null; onAction: (a: DetailAction, plugin?: PluginProjectPluginStatus) => void
+  pushToast?: ToastFn; publishReloadToken?: number; maint?: MaintenanceStatus
+  onAiFix?: (plugin: PluginProjectPluginStatus, instruction: string) => void; showTitle: boolean
 }) {
   const hasIssue = !p.manifestValid || !!p.idConflictWith || !p.built
   const [manifest, setManifest] = useState<PluginManifest | null>(null)
@@ -199,9 +244,21 @@ function PluginDetailPanel({ p, busy, onAction, showTitle }: {
         <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('pack', p)}>
           {busy === 'pack' ? <Loader2 size={15} className="animate-spin" /> : <Package size={15} />} 打包
         </button>
+        <button className="btn-secondary" disabled={!!busy} onClick={() => onAction('publish', p)} title="提交 PR 发布到插件仓库">
+          {busy === 'publish' ? <Loader2 size={15} className="animate-spin" /> : <UploadCloud size={15} />} 发布
+        </button>
         <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('open', p)}><FolderOpen size={15} /> 打开目录</button>
         <button className="btn-ghost" disabled={!!busy} onClick={() => onAction('readme', p)}><FileText size={15} /> README</button>
       </div>
+
+      {/* 维护状态：本地 vs 商店版本关系 + 需处理事项（数据未就绪 / unknown 时自动隐藏） */}
+      {maint && <MaintenanceRow st={maint} busy={!!busy} onPublish={() => onAction('publish', p)} />}
+
+      {/* 发布状态：已提交过 PR 时回显 PR 号 / 合并·CI 状态，可刷新 / 重跑 / 查看审查意见 / AI 按意见修改 */}
+      <PublishStatusCard
+        pluginPath={p.path} pluginName={p.id} pushToast={pushToast} reloadToken={publishReloadToken}
+        onAiFix={onAiFix ? (instruction) => onAiFix(p, instruction) : undefined}
+      />
 
       {/* 基础信息（读取 manifest.json） */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">

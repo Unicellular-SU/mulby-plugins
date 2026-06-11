@@ -26,30 +26,30 @@ const FileItem: React.FC<{
             display: 'flex',
             alignItems: 'center',
             padding: '12px 16px',
-            background: 'rgba(255, 255, 255, 0.6)',
+            background: 'var(--card-bg)',
             backdropFilter: 'blur(10px)',
             marginBottom: '10px',
             borderRadius: '16px',
             gap: '16px',
-            border: '1px solid rgba(255,255,255,0.4)',
+            border: 'var(--glass-border)',
             transition: 'transform 0.2s ease, box-shadow 0.2s ease',
             cursor: 'grab'
         }}
             onMouseEnter={(e) => {
                 e.currentTarget.style.transform = 'translateY(-2px)';
                 e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.6)';
+                e.currentTarget.style.background = 'var(--card-bg-strong)';
             }}
             onMouseLeave={(e) => {
                 e.currentTarget.style.transform = 'none';
                 e.currentTarget.style.boxShadow = 'none';
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.4)';
+                e.currentTarget.style.background = 'var(--card-bg)';
             }}
         >
             <div style={{
                 width: '44px',
                 height: '56px',
-                background: '#fff',
+                background: 'var(--surface)',
                 borderRadius: '8px',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                 display: 'flex',
@@ -76,11 +76,11 @@ const FileItem: React.FC<{
 
             <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={(e) => { e.stopPropagation(); onMove(index, 'up'); }} disabled={index === 0} style={{
-                    border: 'none', background: 'rgba(0,0,0,0.05)', borderRadius: '8px', width: '32px', height: '32px', minWidth: '32px', padding: 0,
+                    border: 'none', background: 'var(--hover-bg)', borderRadius: '8px', width: '32px', height: '32px', minWidth: '32px', padding: 0,
                     cursor: index === 0 ? 'default' : 'pointer', opacity: index === 0 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
                 }}><ArrowUp size={16} color="var(--text-primary)" /></button>
                 <button onClick={(e) => { e.stopPropagation(); onMove(index, 'down'); }} disabled={index === total - 1} style={{
-                    border: 'none', background: 'rgba(0,0,0,0.05)', borderRadius: '8px', width: '32px', height: '32px', minWidth: '32px', padding: 0,
+                    border: 'none', background: 'var(--hover-bg)', borderRadius: '8px', width: '32px', height: '32px', minWidth: '32px', padding: 0,
                     cursor: index === total - 1 ? 'default' : 'pointer', opacity: index === total - 1 ? 0.3 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
                 }}><ArrowDown size={16} color="var(--text-primary)" /></button>
                 <button onClick={(e) => { e.stopPropagation(); onRemove(index); }} style={{

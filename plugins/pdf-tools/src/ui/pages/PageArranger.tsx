@@ -429,8 +429,8 @@ const PageArranger: React.FC = () => {
                 <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateRows: '1fr 170px', gap: '16px' }}>
                     <div style={{ minHeight: 0, display: 'grid', gridTemplateColumns: '1fr 320px', gap: '16px' }}>
                         <div style={{
-                            background: 'rgba(255,255,255,0.55)',
-                            border: '1px solid rgba(255,255,255,0.45)',
+                            background: 'var(--card-bg)',
+                            border: 'var(--glass-border)',
                             borderRadius: '16px',
                             padding: '12px',
                             position: 'relative',
@@ -518,8 +518,8 @@ const PageArranger: React.FC = () => {
                         </div>
 
                         <div style={{
-                            background: 'rgba(255,255,255,0.65)',
-                            border: '1px solid rgba(255,255,255,0.45)',
+                            background: 'var(--card-bg-strong)',
+                            border: 'var(--glass-border)',
                             borderRadius: '16px',
                             padding: '14px',
                             overflowY: 'auto',
@@ -538,7 +538,7 @@ const PageArranger: React.FC = () => {
                                 <button onClick={handleExtractSelected} disabled={processing} style={toolButtonStyle}><Scissors size={16} /> 提取页</button>
                             </div>
 
-                            <div style={{ borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '10px' }}>
+                            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
                                 <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <Crop size={15} /> 裁剪设置
                                 </div>
@@ -549,7 +549,7 @@ const PageArranger: React.FC = () => {
                                             onClick={() => updateActiveCropMode(mode)}
                                             style={{
                                                 ...chipStyle,
-                                                background: activePage?.crop.mode === mode ? 'var(--primary-color)' : 'rgba(0,0,0,0.04)',
+                                                background: activePage?.crop.mode === mode ? 'var(--primary-color)' : 'var(--track-bg)',
                                                 color: activePage?.crop.mode === mode ? '#fff' : 'var(--text-secondary)',
                                             }}
                                         >
@@ -571,11 +571,11 @@ const PageArranger: React.FC = () => {
                                                     value={Math.round(activePage.crop.margin[key] * 100)}
                                                     onChange={(e) => updateMargin(key, (Number(e.target.value) || 0) / 100)}
                                                     style={{
-                                                        border: '1px solid rgba(0,0,0,0.12)',
+                                                        border: '1px solid var(--border-subtle)',
                                                         borderRadius: '8px',
                                                         height: '30px',
                                                         padding: '0 8px',
-                                                        background: '#fff',
+                                                        background: 'var(--input-bg)',
                                                         color: 'var(--text-primary)',
                                                         fontSize: '12px',
                                                     }}
@@ -595,7 +595,7 @@ const PageArranger: React.FC = () => {
                                 </button>
                             </div>
 
-                            <div style={{ borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                                 <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                                     <input
                                         type="checkbox"
@@ -612,8 +612,8 @@ const PageArranger: React.FC = () => {
                     </div>
 
                     <div style={{
-                        background: 'rgba(255,255,255,0.55)',
-                        border: '1px solid rgba(255,255,255,0.45)',
+                        background: 'var(--card-bg)',
+                        border: 'var(--glass-border)',
                         borderRadius: '16px',
                         padding: '10px',
                         overflowX: 'auto',
@@ -637,10 +637,10 @@ const PageArranger: React.FC = () => {
                                         borderRadius: '10px',
                                         border: selectedSet.has(page.sourceIndex)
                                             ? '2px solid var(--primary-color)'
-                                            : '1px solid rgba(0,0,0,0.1)',
+                                            : '1px solid var(--border-subtle)',
                                         padding: '6px',
                                         cursor: 'pointer',
-                                        background: selectedSet.has(page.sourceIndex) ? 'rgba(0,122,255,0.08)' : '#fff',
+                                        background: selectedSet.has(page.sourceIndex) ? 'rgba(0,122,255,0.08)' : 'var(--surface)',
                                         userSelect: 'none',
                                     }}
                                 >
@@ -661,9 +661,9 @@ const PageArranger: React.FC = () => {
 };
 
 const toolButtonStyle: React.CSSProperties = {
-    border: '1px solid rgba(0,0,0,0.12)',
+    border: '1px solid var(--border-subtle)',
     borderRadius: '10px',
-    background: 'rgba(255,255,255,0.85)',
+    background: 'var(--card-bg-strong)',
     color: 'var(--text-secondary)',
     fontSize: '13px',
     height: '34px',
@@ -718,8 +718,8 @@ const loadingOverlayStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: 'rgba(255,255,255,0.55)',
-    color: '#666',
+    background: 'var(--card-bg)',
+    color: 'var(--text-secondary)',
     fontSize: '12px',
 };
 

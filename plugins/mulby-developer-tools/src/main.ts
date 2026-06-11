@@ -28,6 +28,7 @@ import { join, resolve, dirname, relative, sep } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { validateManifestSchema } from './shared/manifestSchema'
 
 declare const __dirname: string
 
@@ -326,6 +327,8 @@ function recordSnapshot(root: string, rel: string, abs: string): void {
 
 /** 缓存：库构造器；'unavailable' 表示加载失败已确认 */
 let CodeGraphCtor: any = undefined
+/** 加载失败的具体原因（供 cg_* 接口透出，避免一律误报为「运行时不支持」） */
+let cgLoadError = ''
 /** root(绝对) -> CodeGraph 实例 */
 const cgByRoot = new Map<string, any>()
 
@@ -335,10 +338,18 @@ async function loadCodeGraph(): Promise<any | null> {
   if (CodeGraphCtor !== undefined) return CodeGraphCtor
   try {
     const mod: any = await import('@colbymchenry/codegraph')
-    CodeGraphCtor = mod?.default ?? mod?.CodeGraph ?? null
-    if (!CodeGraphCtor) CodeGraphCtor = 'unavailable'
-  } catch {
+    // 该包是 CJS（npm-sdk.js re-export 平台 bundle 的 tsc 产物）。经 Node 的 ESM interop 后
+    // mod.default 是「整个 exports 对象」而非 CodeGraph 类（类在 mod.CodeGraph / mod.default.CodeGraph / mod.default.default）。
+    // 此前直接取 mod.default 拿到命名空间——顶层恰好也导出了 directory 的 isInitialized 函数，
+    // 形似可用，实际没有 init/open 静态方法 → 运行到 CG.init 才报 "CG.init is not a function"。
+    // 改为按形态探测：候选里找同时具备 init/open/isInitialized 三个静态方法的类，任何打包/互操作形态都能命中。
+    const isCtor = (c: any) => typeof c?.init === 'function' && typeof c?.open === 'function' && typeof c?.isInitialized === 'function'
+    CodeGraphCtor = [mod?.default, mod?.CodeGraph, mod?.default?.CodeGraph, mod?.default?.default, mod].find(isCtor) ?? 'unavailable'
+    if (CodeGraphCtor === 'unavailable') cgLoadError = 'CodeGraph 库导出形态不符（未找到带 init/open 静态方法的类）'
+  } catch (e) {
     CodeGraphCtor = 'unavailable'
+    // 典型原因：对应平台的可选依赖 bundle 未安装（如 darwin-arm64 进程装了 darwin-x64 包）
+    cgLoadError = e instanceof Error ? (e.message.split('\n')[0] || 'CodeGraph 库加载失败') : 'CodeGraph 库加载失败'
   }
   return CodeGraphCtor === 'unavailable' ? null : CodeGraphCtor
 }
@@ -505,7 +516,10 @@ export const rpc = {
     return { truncated: false, matches }
   },
 
-  /** 在会话目录跑 `npm run build`，返回构建是否通过与日志尾部，供 AI 自检与自纠正 */
+  /**
+   * 在会话目录跑 `npm run build` + `tsc --noEmit` 类型检查，返回是否通过与日志尾部，供 AI 自检与自纠正。
+   * 关键：esbuild/vite 只转译不查类型，单靠 build 会「假绿灯」；附加的 tsc 关卡能抓出真正会导致运行时 bug 的类型错误。
+   */
   async build_check() {
     if (!sessionRoot) throw new Error('Vibe 会话未初始化：请先调用 vibe_begin({ root })')
     const cwd = sessionRoot
@@ -529,8 +543,30 @@ export const rpc = {
         child.on('close', (code) => { clearTimeout(timer); res({ code, log: out.slice(-6000) }) })
       })
 
+    // 类型检查关卡：esbuild/vite 只转译不查类型，「能 build ≠ 类型正确」。构建通过后再用 tsc 兜一道，
+    // 把会导致运行时 bug 的真实类型错误（错用 API、null/undefined、类型不匹配等）暴露给 AI 修复。
+    // 仅在有 tsconfig + 已装 typescript 时运行；放宽 unused 风格项，聚焦正确性、避免迭代中途因临时未用变量误报。
+    const typecheck = async (): Promise<{ ran: boolean; ok: boolean; log: string }> => {
+      if (!existsSync(join(cwd, 'tsconfig.json')) || !existsSync(join(cwd, 'node_modules', 'typescript'))) {
+        return { ran: false, ok: true, log: '' }
+      }
+      const r = await runCmd('npx --no-install tsc --noEmit --noUnusedLocals false --noUnusedParameters false', 120_000)
+      return { ran: true, ok: !r.timedOut && r.code === 0, log: r.log }
+    }
+    const withTypecheck = async (buildLog: string): Promise<{ success: boolean; code?: number; log: string }> => {
+      const tc = await typecheck()
+      if (tc.ran && !tc.ok) {
+        return {
+          success: false,
+          code: 2,
+          log: `${buildLog}\n\n[类型检查未通过] tsc --noEmit 发现类型错误（esbuild/vite 不会报这些，但会导致运行时 bug），请逐一修复后重新自检：\n${tc.log}`.slice(-6000)
+        }
+      }
+      return { success: true, code: 0, log: buildLog }
+    }
+
     const first = await runCmd('npm run build')
-    if (first.code === 0) return { success: true, code: 0, log: first.log }
+    if (first.code === 0) return await withTypecheck(first.log)
     // 兜底：新脚手架/未装依赖时 npm run build 会因 vite/esbuild 缺失而必失败。
     // 与宿主 buildPlugin 一致——命中依赖缺失特征则自动 npm install 后重试一次，避免 AI「自检构建」每次都失败。
     if (looksLikeMissingDeps(first.log) && !first.timedOut) {
@@ -540,7 +576,8 @@ export const rpc = {
         `${first.log}\n\n[auto-fix] 检测到依赖缺失，已自动 npm install 后重试构建\n` +
         `${install.log}\n\n[auto-fix] 重试构建结果\n${retry.log}`
       ).slice(-6000)
-      return { success: retry.code === 0, code: retry.code ?? undefined, log }
+      if (retry.code === 0) return await withTypecheck(log)
+      return { success: false, code: retry.code ?? undefined, log }
     }
     return { success: false, code: first.code ?? undefined, timedOut: first.timedOut, log: first.log }
   },
@@ -570,6 +607,12 @@ export const rpc = {
       mf = JSON.parse(readFileSync(mfPath, 'utf-8'))
     } catch {
       return { ok: false, ran: true, issues: [{ level: 'error', code: 'manifest-parse', message: 'manifest.json 无法解析（JSON 语法错误）' }] as Issue[] }
+    }
+
+    // —— Schema 校验（权威门禁）：按官方 manifest-schema.json 校验，捕获 enum/必填/多余字段/形态等不合规 ——
+    // AJV 不可用时返回空，由下方启发式检查兜底。
+    for (const si of validateManifestSchema(mf)) {
+      issues.push({ level: si.level, code: si.code, message: si.message, hint: si.hint })
     }
 
     // 收集源码文本（src/** 与根级脚本），用于「功能码被引用 / 工具已注册」的启发式检查
@@ -658,6 +701,117 @@ export const rpc = {
   },
 
   /**
+   * 发布前预检（镜像仓库 CI 的 scripts/validate-plugin.js）：必备文件、manifest 必填字段、
+   * semver、features.code、package.json 的 build/pack 脚本等。返回 errors（阻断）/warnings（提示）+ 元信息。
+   */
+  publish_precheck(input: { root?: string }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    const errors: string[] = []
+    const warnings: string[] = []
+    if (!root || !existsSync(root)) return { ok: false, errors: ['插件目录不存在'], warnings, manifest: null }
+
+    for (const f of ['manifest.json', 'package.json']) {
+      if (!existsSync(join(root, f))) errors.push(`缺少必备文件：${f}`)
+    }
+    for (const f of ['README.md', 'icon.png']) {
+      if (!existsSync(join(root, f))) warnings.push(`建议补充文件：${f}`)
+    }
+
+    let mf: any = null
+    const mfPath = join(root, 'manifest.json')
+    if (existsSync(mfPath)) {
+      try { mf = JSON.parse(readFileSync(mfPath, 'utf-8')) } catch (e) { errors.push(`manifest.json 解析失败：${e instanceof Error ? e.message : ''}`) }
+    }
+    if (mf) {
+      for (const field of ['name', 'displayName', 'version', 'author', 'description']) {
+        const v = mf[field]
+        if (!v || (typeof v === 'string' && !v.trim())) errors.push(`manifest.json 缺少或为空的必填字段「${field}」`)
+      }
+      if (mf.version && !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(String(mf.version))) errors.push(`manifest.json 版本号「${mf.version}」不是合法 semver（需 X.Y.Z）`)
+      if (!mf.main) warnings.push('manifest.json 未设置 main（后端入口）')
+      // id 与 name 不一致时，已发布版本按 id 查、PR 提交目录按 name 建，两端容易对不上——提前提醒
+      if (mf.id && mf.name && String(mf.id) !== String(mf.name)) {
+        warnings.push(`manifest.id（${mf.id}）与 name（${mf.name}）不一致：版本索引按 id 记录、发布目录按 name 命名，建议保持二者一致`)
+      }
+      if (Array.isArray(mf.features)) {
+        for (const f of mf.features) if (!f || !String(f.code || '').trim()) errors.push('manifest.json 存在缺少 code 的 feature')
+      } else {
+        warnings.push('manifest.json 未定义 features 数组')
+      }
+    }
+
+    const pkgPath = join(root, 'package.json')
+    let pkg: any = null
+    if (existsSync(pkgPath)) {
+      try {
+        pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+        const scripts = pkg.scripts || {}
+        if (!scripts.build) errors.push('package.json 缺少 build 脚本')
+        if (!scripts.pack) errors.push('package.json 缺少 pack 脚本')
+      } catch (e) { errors.push(`package.json 解析失败：${e instanceof Error ? e.message : ''}`) }
+    }
+    if (!existsSync(join(root, 'src', 'main.ts')) && !existsSync(join(root, 'src', 'main.js'))) {
+      warnings.push('未找到后端入口 src/main.ts')
+    }
+
+    const name = mf ? String(mf.name || '') : ''
+    const id = mf ? String(mf.id || mf.name || '') : ''
+    return {
+      ok: errors.length === 0,
+      errors,
+      warnings,
+      manifest: mf ? { name, id, version: String(mf.version || ''), displayName: String(mf.displayName || ''), author: String(mf.author || ''), description: String(mf.description || '') } : null
+    }
+  },
+
+  /**
+   * 收集插件待发布的源码文件（白名单遍历、排除产物/依赖/锁文件/敏感文件）。
+   * 文本文件以 utf-8、二进制（图标等）以 base64 返回，供前端经 GitHub Git Data API 推送。
+   */
+  publish_collect(input: { root?: string }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    if (!root || !existsSync(root)) throw new Error('插件目录不存在')
+    const IGNORE_DIRS = new Set(['node_modules', 'dist', 'build', '.git', '.vite', '.codegraph', '.vibe-backup', '.turbo', 'coverage', '.idea', '.vscode', '.next', 'out'])
+    // 仅在插件根目录排除的构建产物目录：根级 ui/（vite 产物，manifest.ui 指向它，CI 会重建）。
+    // 关键：不能放进 IGNORE_DIRS——那是按目录名在任意层级匹配，会把源码目录 src/ui/ 一并误删。
+    const IGNORE_ROOT_DIRS = new Set(['ui'])
+    const IGNORE_FILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', '.DS_Store', 'Thumbs.db'])
+    const isIgnoredFile = (n: string) => IGNORE_FILES.has(n) || /\.(inplugin|log|tsbuildinfo)$/i.test(n) || /^\.env(\..+)?$/i.test(n)
+    const BINARY_RE = /\.(png|jpe?g|gif|webp|ico|icns|bmp|tiff?|ttf|otf|woff2?|eot|wasm|node|zip|gz|tgz|rar|7z|pdf|mp[34]|wav|mov|webm|m4a|svgz)$/i
+    const MAX_FILE = 3_000_000
+    const MAX_TOTAL = 15_000_000
+    const files: Array<{ path: string; content: string; encoding: 'utf-8' | 'base64'; size: number }> = []
+    const skipped: Array<{ path: string; reason: string }> = []
+    let totalBytes = 0
+    const walkCollect = (dir: string) => {
+      let entries: string[] = []
+      try { entries = readdirSync(dir) } catch { return }
+      for (const name of entries) {
+        const full = join(dir, name)
+        let st: ReturnType<typeof statSync>
+        try { st = statSync(full) } catch { continue }
+        const rel = relative(root, full).split(sep).join('/')
+        if (st.isDirectory()) {
+          if (IGNORE_DIRS.has(name)) continue
+          if (dir === root && IGNORE_ROOT_DIRS.has(name)) continue // 根级构建产物 ui/ 排除，但保留 src/ui/ 源码
+          walkCollect(full)
+          continue
+        }
+        if (isIgnoredFile(name)) continue
+        if (st.size > MAX_FILE) { skipped.push({ path: rel, reason: `文件过大（${st.size} 字节）` }); continue }
+        const isBin = BINARY_RE.test(name)
+        let content: string
+        try { content = readFileSync(full, isBin ? 'base64' : 'utf-8') } catch { skipped.push({ path: rel, reason: '读取失败' }); continue }
+        totalBytes += st.size
+        files.push({ path: rel, content, encoding: isBin ? 'base64' : 'utf-8', size: st.size })
+      }
+    }
+    walkCollect(root)
+    if (totalBytes > MAX_TOTAL) throw new Error(`待发布内容过大（${totalBytes} 字节），请检查是否误包含大文件`)
+    return { files, skipped, totalBytes, count: files.length }
+  },
+
+  /**
    * 列出本次会话相对开始时的改动（新增/修改），供交付页 diff 展示。
    * @param input.root 目标根目录（一般是 createdPath）
    */
@@ -739,7 +893,7 @@ export const rpc = {
     if (!root || !query) return { available: false, reason: '缺少 root 或 query' }
     try {
       const inst = await ensureCodeGraph(root)
-      if (!inst) return { available: false, reason: '当前运行时不支持 CodeGraph（需 Node 22.5+ 的 node:sqlite）' }
+      if (!inst) return { available: false, reason: cgLoadError || '当前运行时不支持 CodeGraph（需 Node 22.5+ 的 node:sqlite）' }
       const md = await withTimeout(
         inst.buildContext(query, {
           format: 'markdown',
@@ -775,7 +929,7 @@ export const rpc = {
     if (!root || !symbol) return { available: false, reason: '缺少 root 或 symbol' }
     try {
       const inst = await ensureCodeGraph(root)
-      if (!inst) return { available: false }
+      if (!inst) return { available: false, reason: cgLoadError || '当前运行时不支持 CodeGraph' }
       const results = inst.searchNodes?.(symbol, { limit: 1 }) || []
       if (!results.length) return { available: true, found: false, symbol }
       const nodeId = results[0]?.node?.id
@@ -793,6 +947,17 @@ export const rpc = {
     } catch (e) {
       return { available: false, reason: e instanceof Error ? e.message : 'impact 失败' }
     }
+  },
+
+  /**
+   * 仅升级 manifest.json 的版本号（不依赖 git、不建快照）。
+   * 供「发布预检 → 版本号需高于已发布版」时一键升版；返回新版本号供前端同步契约状态。
+   */
+  bump_version(input: { root?: string; level?: 'patch' | 'minor' | 'major' }) {
+    const root = resolve(String(input?.root || sessionRoot || '').trim())
+    if (!root || !existsSync(root)) return { ok: false, err: '插件目录不存在' }
+    const level = input?.level === 'minor' || input?.level === 'major' ? input.level : 'patch'
+    return bumpManifestVersion(root, level)
   },
 
   /** 版本管理：探测 git 是否可用 + 该目录是否已有影子快照历史 */

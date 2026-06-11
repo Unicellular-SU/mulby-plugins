@@ -9,6 +9,8 @@ interface SessionContextValue {
   loaded: boolean
   createSession: (partial: Partial<VibeSession> & { pluginPath: string; pluginName: string }, opts?: { allowDuplicatePath?: boolean }) => VibeSession
   updateSession: (id: string, patch: Partial<VibeSession>) => void
+  /** 绕过 debounce 与渲染周期，同步合并补丁并立即落盘（插件关闭/窗口隐藏时用） */
+  flushSessionNow: (id: string, patch: Partial<VibeSession>) => void
   appendMessage: (id: string, msg: VibeMessage) => void
   deleteSession: (id: string) => void
   switchSession: (id: string) => void

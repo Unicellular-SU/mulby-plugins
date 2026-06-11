@@ -25,6 +25,41 @@
     --radius-md: 14px;
     --radius-sm: 8px;
     --header-height: 60px;
+
+    /* Semantic surfaces (light) */
+    --surface: #ffffff;
+    --card-bg: rgba(255, 255, 255, 0.6);
+    --card-bg-strong: rgba(255, 255, 255, 0.85);
+    --card-bg-soft: rgba(255, 255, 255, 0.5);
+    --hover-bg: rgba(0, 0, 0, 0.05);
+    --subtle-bg: rgba(0, 0, 0, 0.03);
+    --border-subtle: rgba(0, 0, 0, 0.1);
+    --input-bg: #ffffff;
+    --preview-bg: #e0e0e0;
+    --track-bg: rgba(118, 118, 128, 0.12);
+}
+
+:root.dark {
+    --bg-gradient: radial-gradient(circle at 0% 0%, #1a1f2e 0%, #161a24 50%, #1e1a2e 100%),
+        radial-gradient(circle at 100% 100%, #1a1d2e 0%, #14181f 100%);
+    --glass-bg: rgba(30, 32, 40, 0.72);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+    --text-primary: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --text-tertiary: #6e6e73;
+
+    --surface: #2c2c2e;
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --card-bg-strong: rgba(255, 255, 255, 0.08);
+    --card-bg-soft: rgba(255, 255, 255, 0.04);
+    --hover-bg: rgba(255, 255, 255, 0.08);
+    --subtle-bg: rgba(255, 255, 255, 0.04);
+    --border-subtle: rgba(255, 255, 255, 0.12);
+    --input-bg: #1c1c1e;
+    --preview-bg: #2a2a2c;
+    --track-bg: rgba(255, 255, 255, 0.1);
 }
 
 

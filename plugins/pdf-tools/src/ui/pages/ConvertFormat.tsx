@@ -4,6 +4,8 @@ import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { PDFHeader, PDFUploadArea, PDFPageThumbnail } from '../components/SharedPDFComponents';
 import { getInitPdfPaths } from '../utils/initPayload';
+import { notifyOutput } from '../utils/output';
+import { isCancelled } from '../utils/async';
 import '../types';
 import { PDFInfo } from '../types';
 
@@ -12,12 +14,17 @@ interface ConvertFormatProps {
 }
 
 const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
-    const { dialog, shell, notification, system, clipboard } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [file, setFile] = useState<string | null>(null);
     const [info, setInfo] = useState<PDFInfo | null>(null);
     const [pdfDoc, setPdfDoc] = useState<any>(null); // pdfjs-dist document proxy
     const [processing, setProcessing] = useState(false);
     const appliedInitRef = useRef(false);
+    const abortRef = useRef<AbortController | null>(null);
+
+    const handleCancel = () => {
+        abortRef.current?.abort();
+    };
 
     const loadFile = async (filePath: string) => {
         setFile(filePath);
@@ -121,6 +128,8 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
     const handleConvert = async () => {
         if (!file) return;
 
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
             setProcessing(true);
             const downloadsPath = await system.getPath('downloads');
@@ -129,24 +138,28 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             let outputPath;
             switch (type) {
                 case 'word':
-                    outputPath = await pdfService.convertToWord(file, outputDir);
+                    outputPath = await pdfService.convertToWord(file, outputDir, controller.signal);
                     break;
                 case 'ppt':
-                    outputPath = await pdfService.convertToPPT(file, outputDir);
+                    outputPath = await pdfService.convertToPPT(file, outputDir, controller.signal);
                     break;
                 case 'excel':
-                    outputPath = await pdfService.convertToExcel(file, outputDir);
+                    outputPath = await pdfService.convertToExcel(file, outputDir, controller.signal);
                     break;
             }
 
             if (outputPath) {
-                notification.show('转换成功！', 'success');
-                shell.showItemInFolder(outputPath);
+                notifyOutput(notification, outputPath, '转换成功');
             }
         } catch (error: any) {
-            notification.show(`转换失败: ${error.message}`, 'error');
+            if (isCancelled(error)) {
+                notification.show('已取消转换', 'warning');
+            } else {
+                notification.show(`转换失败: ${error.message}`, 'error');
+            }
         } finally {
             setProcessing(false);
+            abortRef.current = null;
         }
     };
 
@@ -171,21 +184,21 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     {/* Settings / Info Area */}
                     <div style={{
-                        background: 'rgba(255, 255, 255, 0.6)',
+                        background: 'var(--card-bg)',
                         backdropFilter: 'blur(10px)',
                         padding: '16px',
                         borderRadius: '16px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '20px',
-                        border: '1px solid rgba(255,255,255,0.4)',
+                        border: 'var(--glass-border)',
                         boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
                         flexShrink: 0
                     }}>
                         <div style={{
                             width: '48px',
                             height: '48px',
-                            background: '#fff',
+                            background: 'var(--surface)',
                             borderRadius: '12px',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                             display: 'flex',
@@ -214,7 +227,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                         <div style={{
                             fontSize: '13px',
                             color: 'var(--text-secondary)',
-                            background: 'rgba(0,0,0,0.03)',
+                            background: 'var(--subtle-bg)',
                             padding: '8px 12px',
                             borderRadius: '8px',
                             maxWidth: '200px',
@@ -228,7 +241,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                     <div style={{
                         flex: 1,
                         overflowY: 'auto',
-                        background: 'rgba(0,0,0,0.02)',
+                        background: 'var(--subtle-bg)',
                         borderRadius: '16px',
                         padding: '16px'
                     }}>
@@ -253,19 +266,38 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                                 })}
                             </div>
                         ) : (
-                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)' }}>
                                 加载预览中...
                             </div>
                         )}
                     </div>
 
                     {/* Footer / Action */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '8px' }}>
+                        {processing && (
+                            <button
+                                onClick={handleCancel}
+                                style={{
+                                    padding: '16px 24px',
+                                    border: 'none',
+                                    borderRadius: '14px',
+                                    background: 'rgba(255, 59, 48, 0.1)',
+                                    color: '#FF3B30',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    flexShrink: 0
+                                }}
+                            >
+                                取消
+                            </button>
+                        )}
                         <button
                             onClick={handleConvert}
                             disabled={processing}
                             style={{
-                                width: '100%',
+                                flex: 1,
                                 padding: '16px',
                                 border: 'none',
                                 borderRadius: '14px',
@@ -277,7 +309,6 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                                 boxShadow: processing ? 'none' : '0 8px 20px rgba(0, 122, 255, 0.3)',
                                 transition: 'all 0.3s ease',
                                 letterSpacing: '-0.3px',
-                                flexShrink: 0
                             }}
                         >
                             {processing ? '转换中...' : '开始转换'}

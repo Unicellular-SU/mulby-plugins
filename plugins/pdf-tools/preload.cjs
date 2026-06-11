@@ -6,6 +6,7 @@ const fs = require('fs');
 const fsPromises = fs.promises;
 const path = require('path');
 const os = require('os');
+const { pathToFileURL } = require('url');
 
 // Sync File Logger
 const logPath = path.join(__dirname, 'debug.log');
@@ -230,6 +231,37 @@ window.pdfApi = {
 
     joinPath: (...parts) => {
         return path.join(...parts);
+    },
+
+    // === 网页/HTML 转 PDF 支持 ===
+    // 将 HTML 写入临时文件并返回 file:// URL（规避 data: URL 长度限制）
+    saveTempHtml: async (html) => {
+        try {
+            const dir = path.join(os.tmpdir(), 'mulby-pdf-tools-web');
+            await fsPromises.mkdir(dir, { recursive: true });
+            const fileName = `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.html`;
+            const filePath = path.join(dir, fileName);
+            await fsPromises.writeFile(filePath, String(html ?? ''), 'utf-8');
+            return pathToFileURL(filePath).href;
+        } catch (error) {
+            throw new Error(`保存临时HTML失败: ${error.message}`);
+        }
+    },
+
+    // 将 inbrowser 生成的 PDF 字节写入目标目录（唯一命名 + 权限回退）
+    savePdfBuffer: async (outputDir, fileName, data) => {
+        try {
+            const safeName = toSafePdfFileName(fileName, 'web.pdf');
+            const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+            return await writeWithFallback(outputDir, safeName, buffer);
+        } catch (error) {
+            throw new Error(`保存PDF失败: ${error.message}`);
+        }
+    },
+
+    // 本地文件路径转 file:// URL（处理空格/中文/反斜杠）
+    pathToFileUrl: (filePath) => {
+        return pathToFileURL(filePath).href;
     },
 
     // === 纯 Node.js PDF 操作 (pdf-lib) ===

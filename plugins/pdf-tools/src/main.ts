@@ -1,3 +1,5 @@
+import { FEATURE_ROUTE_MAP } from './featureRoutes'
+
 type Attachment = { path?: string; name?: string }
 type ClipboardFile = { path?: string; name?: string }
 type InputPayloadLike = { text?: unknown; input?: unknown; attachments?: unknown }
@@ -14,19 +16,6 @@ interface PendingInitData {
   route?: string
   input?: string
   attachments?: Attachment[]
-}
-
-const FEATURE_ROUTE_MAP: Record<string, string> = {
-  merge: 'merge',
-  split: 'split',
-  arrange: 'arrange',
-  compress: 'compress',
-  watermark: 'watermark',
-  'extract-img': 'extract-img',
-  'pdf-to-img': 'pdf-to-img',
-  'pdf-to-word': 'pdf-to-word',
-  'pdf-to-ppt': 'pdf-to-ppt',
-  'pdf-to-excel': 'pdf-to-excel',
 }
 
 let pendingInit: PendingInitData | null = null;

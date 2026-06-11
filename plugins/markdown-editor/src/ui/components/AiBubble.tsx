@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import {
+  AlignLeft,
   ArrowLeft,
   Copy,
   CornerDownLeft,
@@ -55,6 +56,8 @@ interface AiBubbleProps {
    *  bubble and capture the editor selection range for later applying. */
   onActivate: () => void
   onReplace: (text: string) => void
+  /** Replace the whole document with text (undoable); used by 排版 with no selection. */
+  onReplaceAll: (text: string) => void
   onInsert: (text: string) => void
   onCopy: (text: string) => void
   /** Opens the full AI panel with the current selection. */
@@ -82,6 +85,7 @@ interface MenuItem {
 
 const MENU_ITEMS: MenuItem[] = [
   { id: 'polish', label: '润色', icon: Wand2 },
+  { id: 'format', label: '排版', icon: AlignLeft },
   { id: 'translate', label: '翻译', icon: Languages },
   { id: 'ask', label: '问一问', icon: HelpCircle },
   { id: 'continue', label: '续写', icon: PenLine },
@@ -103,6 +107,7 @@ export function AiBubble({
   contextText,
   onActivate,
   onReplace,
+  onReplaceAll,
   onInsert,
   onCopy,
   onExpand,
@@ -697,6 +702,18 @@ export function AiBubble({
                       onClick={() => onReplace(trimmedOutput)}
                     >
                       <Replace size={13} /> 替换
+                    </button>
+                  )}
+                  {!hasSelection && action === 'format' && (
+                    <button
+                      type="button"
+                      className="ai-bubble-btn ai-bubble-btn-primary"
+                      disabled={!canApply}
+                      title="用排版结果替换全文"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => onReplaceAll(trimmedOutput)}
+                    >
+                      <Replace size={13} /> 替换全文
                     </button>
                   )}
                 </div>

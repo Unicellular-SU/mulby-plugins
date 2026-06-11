@@ -12,7 +12,16 @@ import { EmptyState } from './components/EmptyState'
 import { ToastHost, type ToastData } from './components/Toast'
 import { CreateDialog, type CreatePayload } from './components/CreateDialog'
 import { VibePanel, type VibeEditTarget, type KnownPlugin } from './components/VibePanel'
+import type { ConformanceResult } from './components/VibePanel'
+import { PublishDialog } from './components/PublishDialog'
+import { defaultContract, type VibeContract } from './lib/vibeContract'
+import { loadMaintenanceCache, refreshMaintenance, type MaintenanceStatus, type MaintenanceTarget } from './lib/maintenance'
 import { SessionProvider } from './vibe'
+
+interface PublishTarget {
+  path: string; pluginId: string; displayName?: string
+  built: boolean; contract: VibeContract; conformance: ConformanceResult | null
+}
 
 type Tab = 'workbench' | 'vibe'
 
@@ -30,6 +39,12 @@ export default function App() {
   const [creating, setCreating] = useState(false)
   const [logCollapsed, setLogCollapsed] = useState(true)
   const [vibeEditTarget, setVibeEditTarget] = useState<VibeEditTarget | null>(null)
+  // 工作台直接发布：打开 PublishDialog 的目标 + 发布成功后驱动状态卡刷新的 token
+  const [publishTarget, setPublishTarget] = useState<PublishTarget | null>(null)
+  const [publishReloadToken, setPublishReloadToken] = useState(0)
+  // 维护状态（key=插件目录路径）：后台聚合「本地 vs 商店版本 / PR / CI / 审查」，驱动列表徽标与详情维护行
+  const [maintMap, setMaintMap] = useState<Record<string, MaintenanceStatus>>({})
+  const maintNotifiedRef = useRef(false)
 
   // 改造模式可选目标：已知插件（排除本工具自身，避免自改自）
   const knownPlugins = useMemo<KnownPlugin[]>(() => {
@@ -61,6 +76,33 @@ export default function App() {
   const addLog = useCallback((level: LogLevel, text: string) => {
     setLogs((prev) => [...prev.slice(-199), { id: `l-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, ts: Date.now(), level, text }])
   }, [])
+
+  // F1：当前长任务（构建/打包/生成等）+ 每秒跳动的耗时，喂给底部日志栏做「实时脉冲」，消除长操作的"假死"感。
+  const [activity, setActivity] = useState<{ label: string; startedAt: number } | null>(null)
+  const [, forceTick] = useState(0)
+  useEffect(() => {
+    if (!activity) return
+    const t = setInterval(() => forceTick((n) => (n + 1) % 1_000_000), 1000)
+    return () => clearInterval(t)
+  }, [activity])
+  // 同标签不重置计时；传 null 清空（已为 null 则保持同一引用，避免无谓渲染）
+  const reportActivity = useCallback((label: string | null) => {
+    setActivity((cur) => {
+      if (!label) return cur === null ? cur : null
+      if (cur && cur.label === label) return cur
+      return { label, startedAt: Date.now() }
+    })
+  }, [])
+  const errorCount = useMemo(() => logs.filter((l) => l.level === 'error').length, [logs])
+  // F2：新增 error 日志且面板折叠时自动展开，让失败立即可见
+  const seenLogCountRef = useRef(0)
+  useEffect(() => {
+    const fresh = logs.slice(seenLogCountRef.current)
+    seenLogCountRef.current = logs.length
+    if (logCollapsed && fresh.some((l) => l.level === 'error')) setLogCollapsed(false)
+  }, [logs, logCollapsed])
+  // 切换页签时清空活动，避免上一上下文的状态滞留到另一页签
+  useEffect(() => { reportActivity(null) }, [tab, reportActivity])
 
   // 依赖恒定的 listPluginProjects（useDeveloper 内 useCallback 稳定），
   // 而非整个 dev 对象——否则 dev 在 loading 切换时变化会让 refresh 重新创建，
@@ -102,6 +144,50 @@ export default function App() {
 
   const selected = projects.find((p) => p.projectId === selectedId) || null
 
+  // ---------------- 维护闭环：状态聚合与提醒 ----------------
+  const maintTargets = useMemo<MaintenanceTarget[]>(() => {
+    const acc: MaintenanceTarget[] = []
+    for (const proj of projects) for (const pl of proj.plugins) acc.push({ path: pl.path, id: pl.id })
+    return acc
+  }, [projects])
+
+  // 挂载先回显 storage 缓存（不等网络），让徽标/维护行秒显
+  useEffect(() => {
+    void loadMaintenanceCache().then((m) => setMaintMap((cur) => ({ ...m, ...cur })))
+  }, [])
+
+  // 项目列表就绪后后台聚合（TTL 10min + 共享索引/PR 列表防限流）；发布成功后强制刷新绕过缓存。
+  // tab 依赖：从 Vibe 切回工作台时重跑一次——期间打包/迭代可能已改掉本地版本号，
+  // TTL 命中分支只重读本地 manifest（零网络），即可修正「本地 vX」过期展示。
+  const lastPublishTokenRef = useRef(0)
+  useEffect(() => {
+    if (tab !== 'workbench' || maintTargets.length === 0) return
+    const force = publishReloadToken !== lastPublishTokenRef.current
+    lastPublishTokenRef.current = publishReloadToken
+    void refreshMaintenance(
+      maintTargets,
+      (st) => setMaintMap((cur) => ({ ...cur, [st.pluginPath]: st })),
+      { force }
+    )
+  }, [maintTargets, publishReloadToken, tab])
+
+  // 汇总提醒：发现需维护的插件时弹一次（本次打开期间不重复）
+  useEffect(() => {
+    if (maintNotifiedRef.current) return
+    const attention = Object.values(maintMap).filter((m) => m.needsAttention)
+    if (attention.length === 0) return
+    maintNotifiedRef.current = true
+    const names = attention.slice(0, 3).map((m) => m.pluginId).join('、')
+    pushToast('info', `${attention.length} 个插件需要维护：${names}${attention.length > 3 ? ' 等' : ''}（详见列表红点与详情页）`)
+  }, [maintMap, pushToast])
+
+  // 审查意见回流：从工作台跳到 Vibe 改造，并把意见作为修复指令自动交给 AI
+  const handleMaintAiFix = useCallback((plugin: PluginProjectPluginStatus, instruction: string) => {
+    setVibeEditTarget({ path: plugin.path, id: plugin.id, displayName: plugin.displayName, token: Date.now(), instruction })
+    setTab('vibe')
+    addLog('info', `▶ 审查意见回流：转 Vibe 改造 ${plugin.displayName || plugin.id}`)
+  }, [addLog])
+
   const addByDir = useCallback(async (source: 'imported' | 'added') => {
     try {
       const dir = await dev.selectDirectory()
@@ -128,6 +214,7 @@ export default function App() {
     try {
       switch (action) {
         case 'build': {
+          reportActivity('构建并载入')
           addLog('info', `▶ 构建：${path}`)
           const r = await dev.buildPlugin(path)
           if (r.log) addLog(r.success ? 'success' : 'error', r.log)
@@ -148,6 +235,7 @@ export default function App() {
           break
         }
         case 'pack': {
+          reportActivity('打包插件')
           addLog('info', `▶ 打包：${path}`)
           const r = await dev.packPlugin(path)
           if (r.log) addLog(r.success ? 'success' : 'error', r.log)
@@ -158,6 +246,7 @@ export default function App() {
           const targetPlugin = plugin || selected.plugins[0]
           if (!targetPlugin) { pushToast('error', '该项目下无可重载插件'); break }
           const canReloadById = !!targetPlugin.loaded && !!targetPlugin.id
+          reportActivity('刷新载入')
           addLog('info', `▶ 刷新载入：${canReloadById ? targetPlugin.id : targetPlugin.path}`)
           const r = canReloadById
             ? await dev.reloadPlugin(targetPlugin.id)
@@ -197,6 +286,24 @@ export default function App() {
           addLog('info', `▶ 转到 Vibe 改造：${target?.displayName || target?.id || tPath}`)
           break
         }
+        case 'publish': {
+          const target = plugin || selected.plugins[0]
+          if (!target) { pushToast('error', '该项目下无可发布插件'); break }
+          reportActivity('发布预检')
+          // 与 Vibe 发布同一门禁：先跑一次契约一致性校验
+          let conformance: ConformanceResult | null = null
+          try {
+            const r = await dev.hostCall<ConformanceResult>('check_conformance', { root: target.path })
+            conformance = { ok: !!r?.ok, ran: r?.ran !== false, issues: Array.isArray(r?.issues) ? r.issues : [], summary: r?.summary }
+          } catch { conformance = null }
+          setPublishTarget({
+            path: target.path, pluginId: target.id, displayName: target.displayName,
+            built: !!target.built,
+            contract: { ...defaultContract(target.displayName || target.id), name: target.id, displayName: target.displayName || target.id },
+            conformance
+          })
+          break
+        }
         case 'readme': {
           await dev.openPluginDir(path)
           pushToast('info', '已在目录中打开，请查看 README.md')
@@ -223,11 +330,13 @@ export default function App() {
       pushToast('error', e instanceof Error ? e.message : '操作失败')
     } finally {
       setBusyAction(null)
+      reportActivity(null)
     }
-  }, [selected, dev, addLog, pushToast, refresh])
+  }, [selected, dev, addLog, pushToast, refresh, reportActivity])
 
   const handleCreate = useCallback(async (payload: CreatePayload) => {
     setCreating(true)
+    reportActivity('创建脚手架')
     try {
       addLog('info', `▶ 创建插件：${payload.name}（${payload.template}）→ ${payload.targetDir}`)
       const r = await dev.createPlugin(payload.targetDir, payload.name, payload.template)
@@ -243,8 +352,9 @@ export default function App() {
       pushToast('error', e instanceof Error ? e.message : '创建失败')
     } finally {
       setCreating(false)
+      reportActivity(null)
     }
-  }, [dev, addLog, pushToast, refresh])
+  }, [dev, addLog, pushToast, refresh, reportActivity])
 
   return (
     <div className="flex flex-col h-screen w-full bg-slate-50 dark:bg-[#0b0d12] text-slate-800 dark:text-slate-200 overflow-hidden">
@@ -305,6 +415,8 @@ export default function App() {
               knownPlugins={knownPlugins}
               editTarget={vibeEditTarget}
               onConsumeEditTarget={() => setVibeEditTarget(null)}
+              setActivity={reportActivity}
+              active={tab === 'vibe'}
             />
           </SessionProvider>
         </div>
@@ -317,6 +429,7 @@ export default function App() {
                 selectedId={selectedId}
                 loading={listLoading}
                 onSelect={setSelectedId}
+                maint={maintMap}
               />
             </aside>
 
@@ -335,7 +448,7 @@ export default function App() {
               ) : selected ? (
                 <>
                   <div className="flex-1 min-h-0 overflow-hidden">
-                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} />
+                    <ProjectDetail project={selected} busyAction={busyAction} onAction={handleAction} pushToast={pushToast} publishReloadToken={publishReloadToken} maint={maintMap} onAiFix={handleMaintAiFix} />
                   </div>
                 </>
               ) : (
@@ -351,7 +464,18 @@ export default function App() {
           className="w-full h-9 px-3 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/50"
           onClick={() => setLogCollapsed((v) => !v)}
         >
-          <span>诊断日志（{logs.length}）</span>
+          {activity ? (
+            <span className="flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+              <Loader2 size={12} className="animate-spin" />
+              {activity.label} · {Math.max(0, Math.round((Date.now() - activity.startedAt) / 1000))}s
+            </span>
+          ) : errorCount > 0 ? (
+            <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+              <AlertCircle size={12} /> 诊断日志 · {errorCount} 个错误
+            </span>
+          ) : (
+            <span>诊断日志（{logs.length}）</span>
+          )}
           {logCollapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
         {!logCollapsed && (
@@ -367,6 +491,22 @@ export default function App() {
         onClose={() => setCreateOpen(false)}
         onPickDir={dev.selectDirectory}
         onSubmit={handleCreate}
+      />
+      {/* 工作台直接发布：复用 Vibe 的发布对话框（账号→预检→元信息→文件→提交 PR） */}
+      <PublishDialog
+        open={!!publishTarget}
+        onClose={() => setPublishTarget(null)}
+        createdPath={publishTarget?.path || ''}
+        contract={publishTarget?.contract || defaultContract('')}
+        dev={dev}
+        built={publishTarget?.built ?? false}
+        conformance={publishTarget?.conformance ?? null}
+        pushToast={pushToast}
+        onPublished={() => setPublishReloadToken((n) => n + 1)}
+        onVersionBumped={(v) => {
+          setPublishTarget((t) => (t ? { ...t, contract: { ...t.contract, version: v } } : t))
+          void refresh(true)
+        }}
       />
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
     </div>

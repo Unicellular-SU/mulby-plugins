@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Sparkles, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, MessageSquarePlus, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle } from 'lucide-react'
+import { Send, Loader2, Bot, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle } from 'lucide-react'
 import { useSession } from './SessionProvider'
 import { Markdown } from './Markdown'
 import type { VibeMessage, VibeSessionState, BrainstormOption, VibePlanTodo, VibePlanPhase } from './types'
@@ -28,11 +28,20 @@ const KIND_DOT: Record<string, string> = {
   write: 'bg-emerald-400', read: 'bg-sky-400', build: 'bg-amber-400',
   load: 'bg-violet-400', error: 'bg-rose-400', ai: 'bg-emerald-400', note: 'bg-slate-400'
 }
+// 撤销确认卡里列出待撤销文件时的状态标签/配色（与交付页 CHANGE_META 保持一致）
+const CHANGE_STATUS_LABEL: Record<'added' | 'modified' | 'deleted', string> = { added: '新增', modified: '修改', deleted: '删除' }
+const CHANGE_STATUS_CLS: Record<'added' | 'modified' | 'deleted', string> = {
+  added: 'text-emerald-600 dark:text-emerald-400',
+  modified: 'text-amber-600 dark:text-amber-400',
+  deleted: 'text-rose-600 dark:text-rose-400'
+}
 
 interface Props {
   onSend: (text: string) => void
   disabled?: boolean
   busy?: boolean
+  /** busy 时指示器显示的文案（如「正在生成插件设定…」）；缺省回退到通用「AI 处理中…」 */
+  busyHint?: string
   aiActive?: boolean
   /** 正在用 LLM 判断这条消息该触发什么动作（意图路由），期间显示「理解中」并禁用发送 */
   routing?: boolean
@@ -51,7 +60,7 @@ interface Props {
   planPhase?: VibePlanPhase
   onStartPlan?: () => void
   onReplan?: () => void
-  pendingPrompt?: { kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; onAction: () => void } | null
+  pendingPrompt?: { kind: 'confirm' | 'action'; title: string; desc: string; actionLabel: string; danger?: boolean; files?: { status: 'added' | 'modified' | 'deleted'; path: string }[]; onAction: () => void } | null
   onPromptDismiss?: () => void
   status?: { name: string; loaded: boolean; trigger: string; icon?: string | null } | null
   statusBusy?: boolean
@@ -65,16 +74,15 @@ interface Props {
   onUndoToBefore?: () => void
   undoing?: boolean
   onClearMessages?: () => void
-  onNewConversation?: () => void
 }
 
 export function ChatPanel({
-  onSend, disabled, busy, routing, aiActive, onStop, streamingText, messages,
+  onSend, disabled, busy, busyHint, routing, aiActive, onStop, streamingText, messages,
   brainstorm, onPickIdea, onMoreIdeas, onUseSeed, onDismissBrainstorm, examples,
   contractPending, onConfirmGenerate,
   plan, planPhase, onStartPlan, onReplan,
   pendingPrompt, onPromptDismiss,
-  status, statusBusy, iconBusy, iconProgress, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onUndoToBefore, undoing, onClearMessages, onNewConversation
+  status, statusBusy, iconBusy, iconProgress, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onUndoToBefore, undoing, onClearMessages
 }: Props) {
   const { activeSession } = useSession()
   const [text, setText] = useState('')
@@ -107,18 +115,8 @@ export function ChatPanel({
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-        <Sparkles size={12} className="text-emerald-500" /> 对话
+        对话
         <span className="flex-1" />
-        {activeSession && onNewConversation && (
-          <button
-            onClick={onNewConversation}
-            disabled={disabled || busy}
-            className="text-slate-400 hover:text-sky-500 transition-colors disabled:opacity-40 disabled:hover:text-slate-400"
-            title="在当前项目下新建一段对话（保留项目与代码）"
-          >
-            <MessageSquarePlus size={13} />
-          </button>
-        )}
         {allMessages.length > 0 && (
           <>
             <button
@@ -139,36 +137,6 @@ export function ChatPanel({
         )}
       </div>
 
-      {status && (
-        <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-white/50 dark:bg-slate-900/40 shrink-0">
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className="relative w-5 h-5 rounded-md overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 flex items-center justify-center">
-              {status.icon ? <img src={status.icon} alt="图标" className="w-full h-full object-contain" /> : <span className={`w-2 h-2 rounded-full ${status.loaded ? 'bg-emerald-400' : 'bg-amber-400'}`} />}
-              {iconBusy && <span className="absolute inset-0 bg-slate-900/40 flex items-center justify-center"><Loader2 size={10} className="text-white animate-spin" /></span>}
-            </span>
-            <span className="font-medium text-slate-700 dark:text-slate-200 truncate flex-1">{status.name}</span>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500 shrink-0">{status.loaded ? '已载入' : '已构建'}</span>
-          </div>
-          {status.trigger && <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 truncate">触发词：{status.trigger}</div>}
-          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-            {onUndoToBefore && (
-              <button
-                onClick={onUndoToBefore}
-                disabled={statusBusy || aiActive || undoing}
-                className="inline-flex items-center gap-1 h-6 px-2 text-[10px] font-medium rounded-md text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300/70 dark:border-amber-700/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50"
-                title="一键撤销到本次 AI 改动之前（可逆，丢弃的改动仍可在版本列表恢复）"
-              >
-                {undoing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} 撤销 AI 改动
-              </button>
-            )}
-            <button onClick={onOpenPlugin} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打开插件窗口"><Rocket size={11} /> 打开</button>
-            <button onClick={onTryIt} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="复制触发词去主输入框试用"><ExternalLink size={11} /> 试用</button>
-            <button onClick={onPack} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打包为 .inplugin"><Package size={11} /> {packed ? '已打包' : '打包'}</button>
-            {onRegenIcon && <button onClick={onRegenIcon} disabled={statusBusy || iconBusy} className="btn-ghost h-6 px-2 text-[10px]" title="让 AI 按插件主题与功能重新生成图标">{iconBusy ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />} 图标</button>}
-          </div>
-        </div>
-      )}
-
       {collapsed ? (
         <>
           <button
@@ -184,12 +152,11 @@ export function ChatPanel({
           {allMessages.length === 0 ? (
             <div className="space-y-3">
               <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-                在这里用大白话和 AI 对话：可以<strong className="text-slate-500 dark:text-slate-300">提问</strong>（只看代码、不改动），
-                也可以说<strong className="text-slate-500 dark:text-slate-300">「帮我改…」</strong>让 AI 修改。
+                用大白话描述你想要的插件，或问我项目情况。
               </div>
               {examples && examples.length > 0 && (
                 <div className="space-y-1.5">
-                  <div className="text-[10px] text-slate-400 dark:text-slate-500">试试这些（点一下直接发）：</div>
+                  <div className="text-[10px] text-slate-400 dark:text-slate-500">试试：</div>
                   <div className="flex flex-wrap gap-1.5">
                     {examples.map((ex) => (
                       <button
@@ -206,26 +173,26 @@ export function ChatPanel({
               )}
             </div>
           ) : (
-            allMessages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+            allMessages.map((msg, i) => (
+              <MessageBubble key={msg.id} msg={msg} grouped={i > 0 && allMessages[i - 1].role === msg.role} />
+            ))
           )}
           {routing && !busy && (
-            <div className="flex items-center gap-1.5 text-[11px] text-indigo-500 dark:text-indigo-400">
-              <Loader2 size={11} className="animate-spin" /> 正在理解你的意图…
+            <div className="flex items-center gap-1.5 text-[11px] text-indigo-500 dark:text-indigo-400 anim-in">
+              <span className="thinking-dots"><span /><span /><span /></span> 正在理解你的意图…
             </div>
           )}
           {busy && (streamingText && streamingText.trim() ? (
             <div className="flex flex-col items-start gap-1">
-              <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
-                <Sparkles size={10} className="text-emerald-500" /> AI
-              </div>
+              <AiLabel />
               <div className="max-w-[92%] rounded-xl rounded-tl-sm bg-slate-100 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 px-3 py-2 text-[12px] break-words">
                 <Markdown text={streamingText} />
                 <span className="inline-block w-1.5 h-3.5 align-middle bg-emerald-500/70 animate-pulse ml-0.5 rounded-sm" />
               </div>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400">
-              <Loader2 size={11} className="animate-spin" /> {iconProgress || 'AI 处理中…'}
+            <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 anim-in">
+              <span className="thinking-dots"><span /><span /><span /></span> {busyHint || iconProgress || 'AI 处理中…'}
             </div>
           ))}
           <div ref={messagesEndRef} />
@@ -233,7 +200,7 @@ export function ChatPanel({
       )}
 
       {brainstorm && (
-        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-amber-50/60 dark:bg-amber-950/10 space-y-1.5 max-h-64 overflow-auto">
+        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-amber-50/60 dark:bg-amber-950/10 space-y-1.5 max-h-64 overflow-auto anim-in">
           <div className="flex items-center justify-between text-[11px] font-medium text-amber-700 dark:text-amber-300">
             <span className="flex items-center gap-1"><Lightbulb size={12} /> 选个方向开始</span>
             <button onClick={onDismissBrainstorm} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" title="关闭，自己描述"><X size={13} /></button>
@@ -269,11 +236,21 @@ export function ChatPanel({
       )}
 
       {pendingPrompt && (
-        <div className={`border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 ${pendingPrompt.danger ? 'bg-rose-50/60 dark:bg-rose-950/10' : 'bg-sky-50/60 dark:bg-sky-950/10'}`}>
+        <div className={`border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 anim-in ${pendingPrompt.danger ? 'bg-rose-50/60 dark:bg-rose-950/10' : 'bg-sky-50/60 dark:bg-sky-950/10'}`}>
           <div className={`flex items-center gap-1 text-[11px] font-medium mb-0.5 ${pendingPrompt.danger ? 'text-rose-700 dark:text-rose-300' : 'text-sky-700 dark:text-sky-300'}`}>
             {pendingPrompt.danger ? <AlertTriangle size={12} /> : <Wrench size={12} />} {pendingPrompt.title}
           </div>
           <div className="text-[10px] text-slate-500 dark:text-slate-400 break-words">{pendingPrompt.desc}</div>
+          {pendingPrompt.files && pendingPrompt.files.length > 0 && (
+            <div className="mt-1.5 max-h-28 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 divide-y divide-slate-100 dark:divide-slate-800">
+              {pendingPrompt.files.map((f) => (
+                <div key={f.path} className="flex items-center gap-1.5 px-2 py-1 text-[10px] mono">
+                  <span className={CHANGE_STATUS_CLS[f.status]}>{CHANGE_STATUS_LABEL[f.status]}</span>
+                  <span className="truncate text-slate-600 dark:text-slate-300">{f.path}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="mt-2 flex items-center gap-2">
             <button onClick={pendingPrompt.onAction} disabled={busy} className={`h-7 px-2.5 text-[11px] ${pendingPrompt.danger ? 'btn-danger' : 'btn-primary'}`}>
               {pendingPrompt.actionLabel}
@@ -284,7 +261,7 @@ export function ChatPanel({
       )}
 
       {!pendingPrompt && planPhase && planPhase !== 'idle' && planPhase !== 'done' && (
-        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-indigo-50/60 dark:bg-indigo-950/10">
+        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-indigo-50/60 dark:bg-indigo-950/10 anim-in">
           <div className="flex items-center justify-between text-[11px] font-medium text-indigo-700 dark:text-indigo-300 mb-1">
             <span className="flex items-center gap-1">
               <ListChecks size={12} /> 开发计划{plan && plan.length > 0 ? `（${plan.filter((t) => t.status === 'done').length}/${plan.length}）` : ''}
@@ -301,7 +278,7 @@ export function ChatPanel({
                 {(plan || []).map((t, i) => (
                   <div key={t.id} className="flex items-start gap-1.5 text-[11px]">
                     <span className="mt-0.5 shrink-0">
-                      {t.status === 'done' ? <CheckCircle2 size={13} className="text-emerald-500" />
+                      {t.status === 'done' ? <CheckCircle2 size={13} className="text-emerald-500 anim-check" />
                         : t.status === 'in_progress' ? <Loader2 size={13} className="text-indigo-500 animate-spin" />
                         : t.status === 'failed' ? <AlertTriangle size={13} className="text-rose-500" />
                         : <Circle size={13} className="text-slate-300 dark:text-slate-600" />}
@@ -323,8 +300,9 @@ export function ChatPanel({
                       <RefreshCw size={11} /> 重新规划
                     </button>
                   </div>
+                  <div className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">想调整？直接在下面说出想改的地方，我会按你的意见重新规划。</div>
                   {plan && plan.some((t) => t.status === 'done' || t.status === 'failed') && (
-                    <div className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">上次未跑完，点「继续执行」或在下方输入「继续」即可接着完成。</div>
+                    <div className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">上次未跑完，点「继续执行」接着完成。</div>
                   )}
                 </>
               )}
@@ -337,7 +315,7 @@ export function ChatPanel({
       )}
 
       {!brainstorm && !pendingPrompt && contractPending && (
-        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-emerald-50/60 dark:bg-emerald-950/10">
+        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-emerald-50/60 dark:bg-emerald-950/10 anim-in">
           <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 mb-1">
             <FileText size={12} /> 插件设定已就绪
           </div>
@@ -347,8 +325,28 @@ export function ChatPanel({
             <button onClick={onConfirmGenerate} disabled={disabled || busy} className="btn-primary h-7 px-2.5 text-[11px]">
               <Play size={12} /> 确认并制定计划
             </button>
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">想改设定可在中间面板编辑</span>
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">想改设定可点顶部「详情」展开</span>
           </div>
+        </div>
+      )}
+
+      {/* 插件操作条：移到输入框正上方，方便操作（图标/名称/触发词已在上方显示，故不再重复） */}
+      {status && (
+        <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-1.5 bg-white/40 dark:bg-slate-900/30 flex items-center gap-1.5 flex-wrap">
+          {onUndoToBefore && (
+            <button
+              onClick={onUndoToBefore}
+              disabled={statusBusy || aiActive || undoing}
+              className="inline-flex items-center gap-1 h-6 px-2 text-[10px] font-medium rounded-md text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-300/70 dark:border-amber-700/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 disabled:opacity-50"
+              title="一键撤销到本次 AI 改动之前（可逆，丢弃的改动仍可在版本列表恢复）"
+            >
+              {undoing ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} 撤销 AI 改动
+            </button>
+          )}
+          <button onClick={onOpenPlugin} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打开插件窗口"><Rocket size={11} /> 打开</button>
+          <button onClick={onTryIt} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="复制触发词去主输入框试用"><ExternalLink size={11} /> 试用</button>
+          <button onClick={onPack} disabled={statusBusy} className="btn-ghost h-6 px-2 text-[10px]" title="打包为 .inplugin"><Package size={11} /> {packed ? '已打包' : '打包'}</button>
+          {onRegenIcon && <button onClick={onRegenIcon} disabled={statusBusy || iconBusy} className="btn-ghost h-6 px-2 text-[10px]" title="让 AI 按插件主题与功能重新生成图标">{iconBusy ? <Loader2 size={11} className="animate-spin" /> : <ImageIcon size={11} />} 图标</button>}
         </div>
       )}
 
@@ -383,18 +381,30 @@ export function ChatPanel({
           )}
         </div>
         <div className="px-3 pb-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-          ⌘/Ctrl + Enter 发送 · 提问只读不改码，说「改/修复」才动手
+          ⌘/Ctrl + Enter 发送
         </div>
       </div>
     </div>
   )
 }
 
-function MessageBubble({ msg }: { msg: VibeMessage }) {
+/** AI 发言标识：低调的品牌头像（圆角方块 + Bot 图标）+ 文案；取代每条消息前重复的 ✨ 图标 */
+function AiLabel() {
+  return (
+    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-slate-500">
+      <span className="w-[18px] h-[18px] rounded-md bg-emerald-500/10 text-emerald-600 dark:bg-emerald-400/10 dark:text-emerald-400 flex items-center justify-center shrink-0">
+        <Bot size={12} />
+      </span>
+      AI
+    </div>
+  )
+}
+
+function MessageBubble({ msg, grouped }: { msg: VibeMessage; grouped?: boolean }) {
   const isUser = msg.role === 'user'
   if (isUser) {
     return (
-      <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-col items-end gap-1 anim-in">
         {msg.intent && INTENT_LABEL[msg.intent] && (
           <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${INTENT_CLASS[msg.intent] || 'bg-slate-200 text-slate-600'}`}>
             {INTENT_LABEL[msg.intent]}
@@ -407,10 +417,9 @@ function MessageBubble({ msg }: { msg: VibeMessage }) {
     )
   }
   return (
-    <div className="flex flex-col items-start gap-1">
-      <div className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
-        <Sparkles size={10} className="text-emerald-500" /> AI
-      </div>
+    <div className="flex flex-col items-start gap-1 anim-in">
+      {/* 连续的 AI 消息不再重复标识，避免页面上一堆相同图标 */}
+      {!grouped && <AiLabel />}
       <div className="max-w-[92%] rounded-xl rounded-tl-sm bg-slate-100 dark:bg-slate-800/70 text-slate-700 dark:text-slate-200 px-3 py-2 text-[12px] break-words">
         <Markdown text={msg.content} />
       </div>
