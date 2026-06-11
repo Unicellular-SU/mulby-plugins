@@ -52,6 +52,14 @@ export interface VibeChange {
   truncated?: boolean
 }
 
+/** 生成后 AI 自审（requesting-code-review）发现的单条问题 */
+interface ReviewIssue {
+  level: 'critical' | 'important' | 'minor'
+  file?: string
+  message: string
+  hint?: string
+}
+
 /** 契约一致性校验的单条问题（来自后端 check_conformance） */
 export interface ConformanceIssue {
   level: 'error' | 'warn' | 'info'
@@ -349,6 +357,8 @@ export function VibePanel({
   // 修复熔断（systematic-debugging）：连续 AI 修复轮次。构建成功/新一轮生成/回滚时清零；
   // 达到 3 次仍失败 → 不再继续打补丁，引导用户回滚或调整方案。
   const repairRoundsRef = useRef(0)
+  // P1：生成完成后的 AI 自审（requesting-code-review）进行中
+  const [reviewing, setReviewing] = useState(false)
 
   const [iconBusy, setIconBusy] = useState(false)
   const [iconDone, setIconDone] = useState(false)
@@ -404,6 +414,7 @@ export function VibePanel({
     if (planning) return 'AI 规划契约'
     if (brainstorm?.loading) return 'AI 头脑风暴'
     if (clarify?.loading) return 'AI 澄清需求'
+    if (reviewing) return 'AI 自审改动'
     if (generating) return 'AI 生成代码'
     if (expanding) return 'AI 完善代码'
     if (repairing) return 'AI 修复构建'
@@ -413,7 +424,7 @@ export function VibePanel({
     if (packing) return '打包插件'
     if (iconBusy) return '生成图标'
     return null
-  }, [routing, planning, brainstorm?.loading, clarify?.loading, generating, expanding, repairing, confRepairing, iterating, building, packing, iconBusy])
+  }, [routing, planning, brainstorm?.loading, clarify?.loading, generating, expanding, reviewing, repairing, confRepairing, iterating, building, packing, iconBusy])
   useEffect(() => {
     if (active) setActivity?.(activityLabel)
   }, [active, activityLabel, setActivity])
@@ -1178,7 +1189,7 @@ export function VibePanel({
     return baseSystem
   }
 
-  const runAgent = async (system: string, user: string, root: string, phase: EventPhase, history: ChatMsg[] = []) => {
+  const runAgent = async (system: string, user: string, root: string, phase: EventPhase, history: ChatMsg[] = [], opts?: { tools?: ReadonlyArray<(typeof VIBE_TOOLS)[number]>; maxToolSteps?: number }) => {
     const a = ai()
     if (!a?.call) throw new Error('当前环境未启用 AI API，无法生成代码')
     if (!root) throw new Error('插件根目录为空，无法开始')
@@ -1190,8 +1201,8 @@ export function VibePanel({
       {
         ...(selectedModel ? { model: selectedModel } : {}),
         messages: [{ role: 'system', content: withAnchorContext(system) }, ...history, { role: 'user', content: user }],
-        tools: VIBE_TOOLS,
-        maxToolSteps: 200,
+        tools: opts?.tools ?? VIBE_TOOLS,
+        maxToolSteps: opts?.maxToolSteps ?? 200,
         capabilities: ['fs.read'],
         // 跨轮上下文由本插件自管（锚点 + 滚动摘要 + 历史窗口），关掉宿主按消息条数的截断（默认仅留 8 条，会砍掉我们精心拼的历史）
         params: { contextWindow: 0 },
@@ -1284,6 +1295,105 @@ export function VibePanel({
     return { root, sid }
   }
 
+  // ---------------- P1：生成后 AI 自审（requesting-code-review） ----------------
+  // 生成完成后、交付构建前，以独立评审视角对照契约审查本次改动（只读工具，杜绝顺手改码）。
+  // 与 check_conformance 互补：conformance 查 manifest↔代码结构一致，自审查实现逻辑质量。
+  // critical 问题自动修一轮（带写工具）后再交付；审查失败/超时/中止一律放行，不阻塞交付。
+  const reviewSystemPrompt = (c: VibeContract, root: string): string => [
+    '你是严苛、独立的 Mulby 插件代码评审员。另一位工程师刚按契约实现/修改了这个插件，请你以挑刺的眼光审查改动质量。',
+    `插件根目录：${root}`,
+    '你只有只读工具（list_dir/read_file/grep）。先看改动文件清单，read_file 重点审查核心实现，必要时 grep 交叉验证；不要试图修改任何文件。',
+    `契约（权威规格）：${contractSummary(c)}`,
+    `功能与触发：${c.features.map((f) => `${f.code}(${f.mode}) ← ${f.triggers.map(triggerLabel).join('、') || '无触发'}`).join('；')}`,
+    c.isEdit ? `本次改造需求：${c.editSummary || sentence}` : `插件需求：${sentence}`,
+    '审查清单：',
+    '1. 契约符合：每个功能/触发方式是否真的实现？regex/over 触发是否正确处理 context.input？',
+    '2. 正确性：明显逻辑错误、空值/异常未防护、走不到的分支；',
+    '3. API 真实性：是否臆造了不存在的 window.mulby API、或引入了打包不了的 npm 依赖；',
+    '4. 边界：空输入/非法输入的行为是否友好；',
+    '5. 不审风格：命名、格式、注释等一概不提。',
+    '分级标准：critical=功能不符契约/无法运行/会崩溃；important=明显缺陷或关键边界缺失；minor=小改进。',
+    '审查完只输出 JSON（不要 Markdown 代码块）：{ "verdict": "pass" | "fix", "issues": [ { "level": "critical|important|minor", "file": "相对路径", "message": "一句话问题", "hint": "一句话修法" } ] }。没有问题输出 { "verdict": "pass", "issues": [] }；有 critical 必须 verdict="fix"。'
+  ].join('\n')
+
+  const reviewFixPrompt = (issues: ReviewIssue[]): string => [
+    '独立代码评审发现以下必须修复（critical）的问题。请逐条修复，保持最小改动，不要顺手重构：',
+    ...issues.map((i, idx) => `${idx + 1}. ${i.file ? `[${i.file}] ` : ''}${i.message}${i.hint ? `（建议：${i.hint}）` : ''}`),
+    '修完必须 build_check 自检通过，然后用一句话说明修复内容并停止。'
+  ].join('\n')
+
+  const parseReviewResult = (content: string): { verdict: 'pass' | 'fix'; issues: ReviewIssue[] } => {
+    const fallback = { verdict: 'pass' as const, issues: [] }
+    const json = extractJsonObject(content)
+    if (!json) return fallback
+    try {
+      const parsed = JSON.parse(json)
+      const issues: ReviewIssue[] = (Array.isArray(parsed?.issues) ? parsed.issues : [])
+        .filter((x: any) => x && typeof x.message === 'string' && x.message.trim())
+        .slice(0, 12)
+        .map((x: any) => ({
+          level: x.level === 'critical' ? 'critical' : x.level === 'important' ? 'important' : 'minor',
+          file: typeof x.file === 'string' && x.file.trim() ? x.file.trim() : undefined,
+          message: String(x.message).trim().slice(0, 200),
+          hint: typeof x.hint === 'string' && x.hint.trim() ? x.hint.trim().slice(0, 200) : undefined
+        }))
+      return { verdict: parsed?.verdict === 'fix' || issues.some((i) => i.level === 'critical') ? 'fix' : 'pass', issues }
+    } catch { return fallback }
+  }
+
+  const runSelfReview = async (root: string, sid: string | null): Promise<void> => {
+    if (!contract) return
+    setReviewing(true)
+    try {
+      pushEvent('full', 'ai', 'AI 自审本次改动…')
+      addLog('info', '▶ [Vibe] AI 自审本次改动…')
+      // 改动清单来自影子库 diff：给评审一个聚焦范围（拿不到就让它自己浏览）
+      let changedList = ''
+      try {
+        const r = await dev.hostCall<{ changes?: VibeChange[] }>('vibe_changes', { root })
+        changedList = (r?.changes || []).slice(0, 30).map((c) => `${c.status} ${c.path}`).join('\n')
+      } catch { /* 清单只是辅助 */ }
+      const user = changedList
+        ? `本次改动的文件：\n${changedList}\n\n请审查这些改动（read_file 重点文件），输出 JSON 结论。`
+        : '请浏览插件目录，审查最近实现的代码是否符合契约，输出 JSON 结论。'
+      const final = await runAgent(withApiSurface(reviewSystemPrompt(contract, root)), user, root, 'full', [], { tools: VIBE_READ_TOOLS, maxToolSteps: 40 })
+      if (abortedRef.current) return
+      const { issues } = parseReviewResult(typeof final?.content === 'string' ? final.content : '')
+      const criticals = issues.filter((i) => i.level === 'critical')
+      const others = issues.filter((i) => i.level !== 'critical')
+      if (!issues.length) {
+        pushEvent('full', 'note', 'AI 自审通过')
+        addLog('success', '✔ [Vibe] AI 自审通过：未发现问题')
+        return
+      }
+      pushEvent('full', criticals.length ? 'error' : 'note', `AI 自审发现 ${issues.length} 处问题`, criticals.length ? `${criticals.length} 处需修复` : '均为建议')
+      addLog(criticals.length ? 'warn' : 'info', `⚠ [Vibe] AI 自审：critical ${criticals.length} 处 / 建议 ${others.length} 处`)
+      // 非 critical：对话里告知即可，不自动改（避免无止境完善）
+      if (sid && others.length) {
+        const lines = others.slice(0, 5).map((i) => `• ${i.message}${i.hint ? `（建议：${i.hint}）` : ''}`).join('\n')
+        appendMessage(sid, mkMsg('assistant', `代码自审发现 ${others.length} 处可改进（不影响交付）：\n${lines}${others.length > 5 ? '\n…' : ''}\n\n需要我处理的话直接说。`))
+      }
+      if (!criticals.length) return
+      // critical：自动修一轮（带写工具），随后的构建 + 一致性校验做兜底验证；不二次审查，避免循环
+      if (sid) appendMessage(sid, mkMsg('assistant', `代码自审发现 ${criticals.length} 处必须修复的问题，我先修掉再交付：\n${criticals.map((i) => `• ${i.message}`).join('\n')}`))
+      pushEvent('full', 'ai', `AI 修复自审问题…（${criticals.length} 处）`)
+      addLog('info', `▶ [Vibe] 修复自审 critical 问题（${criticals.length} 处）…`)
+      turnEventsRef.current = [] // 让修复总结只内联修复期间的动作
+      let sys = contract.isEdit ? editSystemPrompt(contract, root, 'minimal') : createSystemPrompt(contract, root, 'minimal')
+      sys = withApiSurface(sys)
+      const fixFinal = await runAgent(sys, reviewFixPrompt(criticals), root, 'full', buildHistoryMessages())
+      if (abortedRef.current) return
+      const fixSummary = typeof fixFinal?.content === 'string' ? fixFinal.content : ''
+      if (sid && fixSummary) appendMessage(sid, mkMsg('assistant', fixSummary, { actions: collectTurnActions() }))
+      pushEvent('full', 'note', '自审问题修复完成')
+      addLog('success', '✔ [Vibe] 自审 critical 问题修复完成')
+    } catch (e) {
+      addLog('warn', `⚠ [Vibe] AI 自审未完成（已跳过，不影响交付）：${e instanceof Error ? e.message : ''}`)
+    } finally {
+      setReviewing(false)
+    }
+  }
+
   // 直接生成（不分步）：脚手架 → 一次性完整实现 → 交付。作为"计划模式"失败时的兜底路径。
   // opts.retry：上次生成中途失败（AI 服务 503 等）后的重试——复用已有脚手架与快照基线（prepareProject(resume)），
   //   不重写 manifest、不重复记「确认设定」消息，从当前磁盘进度继续。
@@ -1329,6 +1439,8 @@ export function VibePanel({
       setGenerated(true)
       pushEvent(firstPhase, 'note', `${phaseName}完成`)
       addLog('success', `✔ [Vibe] ${phaseName}完成`)
+      // P1：交付前 AI 自审（critical 自动修复；失败/中止不阻塞交付）
+      await runSelfReview(root, sid)
       pendingCommitMsgRef.current = contract.isEdit
         ? `改造：${(contract.editSummary || sentence).slice(0, 120)}`
         : `${firstPhase === 'minimal' ? '生成最小版本' : '生成'}：${sentence.slice(0, 120)}`
@@ -1589,6 +1701,11 @@ export function VibePanel({
         if (abortedRef.current) break
         setPlan((prev) => prev.map((t, j) => (j === i ? { ...t, status: 'done' } : t)))
         pushEvent('full', 'note', `第 ${i + 1} 步完成`)
+        // P1：步级快照——每完成一步就提交一个影子版本，支持按步回滚（失败不阻塞执行）
+        try {
+          const cr = await dev.hostCall<{ ok?: boolean; nochange?: boolean; hash?: string }>('vcs_commit', { root, message: `计划第 ${i + 1}/${todos.length} 步：${todos[i].title}` })
+          if (cr?.ok && !cr.nochange) pushEvent('full', 'note', '已记录步级版本', cr.hash || undefined)
+        } catch { /* 快照只是辅助 */ }
         if (sid) appendMessage(sid, mkMsg('assistant', `✅ 第 ${i + 1}/${todos.length} 步完成：${todos[i].title}${stepSummary ? `\n\n${stepSummary}` : ''}`, { actions: collectTurnActions() }))
       }
       if (abortedRef.current) {
@@ -1603,6 +1720,8 @@ export function VibePanel({
       setGenerated(true)
       setNarration('')
       addLog('success', `✔ [Vibe] 开发计划全部完成（${todos.length} 步）`)
+      // P1：交付前 AI 自审（critical 自动修复；失败/中止不阻塞交付）
+      await runSelfReview(root, sid)
       pendingCommitMsgRef.current = contract.isEdit
         ? `改造：${(contract.editSummary || sentence).slice(0, 120)}`
         : `生成：${sentence.slice(0, 120)}`
@@ -1626,11 +1745,11 @@ export function VibePanel({
   // 统一「停止 AI 生成」：标记中断 + 精确 abort 在途请求 + 复位所有 AI 忙碌态 + 释放宿主会话锁。
   // 覆盖所有 AI 流程（规划/头脑风暴/生成/迭代/问答/修复/一致性修复/图标），右侧对话与左侧面板共用。
   const stopAgent = () => {
-    const running = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || routing || !!brainstorm?.loading || !!clarify?.loading
+    const running = planning || generating || expanding || repairing || reviewing || iterating || iconBusy || confRepairing || routing || !!brainstorm?.loading || !!clarify?.loading
     if (!running) return
     abortedRef.current = true
     if (reqIdRef.current) { try { ai()?.abort?.(reqIdRef.current) } catch { /* 宿主未实现 abort 时忽略 */ } }
-    setGenerating(false); setExpanding(false); setRepairing(false)
+    setGenerating(false); setExpanding(false); setRepairing(false); setReviewing(false)
     setIterating(false); setPlanning(false); setConfRepairing(false); setIconBusy(false); setRouting(false)
     setBrainstorm((b) => (b && b.loading ? null : b))
     setClarify((c) => (c && c.loading ? null : c))
@@ -2492,7 +2611,7 @@ export function VibePanel({
     setGenerated(false); setExpanded(false); setExpanding(false)
     setCreatedPath(''); setBuilt(false); setBuildLog(''); setLoaded(false); setLoadedId(undefined)
     setIconDone(false); setIconDataUrl(null); setPacked(false); setDevtoolsOn(null); setOpened(false)
-    setGenerating(false); setBuilding(false); setRepairing(false); repairRoundsRef.current = 0
+    setGenerating(false); setBuilding(false); setRepairing(false); setReviewing(false); repairRoundsRef.current = 0
     setChanges([]); setRollingBack(false); setCoreVerified(false)
     setConformance(null); setConfRepairing(false); setSmoke([]); setSmoking(false)
     setIterating(false)
@@ -2528,9 +2647,9 @@ export function VibePanel({
     pushToast('info', '已在当前项目下新建一段对话')
   }
 
-  const busy = planning || generating || expanding || building || repairing || iconBusy || confRepairing || smoking
+  const busy = planning || generating || expanding || building || repairing || reviewing || iconBusy || confRepairing || smoking
   // 正在进行、可被「停止」中断的 AI 生成类任务（不含纯本地的 building / smoking）
-  const aiActive = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || !!brainstorm?.loading || !!clarify?.loading
+  const aiActive = planning || generating || expanding || repairing || reviewing || iterating || iconBusy || confRepairing || !!brainstorm?.loading || !!clarify?.loading
   // 供运行时错误检查的 setTimeout 回调读取「当下」是否忙碌（闭包里的 busy/aiActive 是调度时的旧值）
   useEffect(() => { engagedRef.current = aiActive || busy || routing }, [aiActive, busy, routing])
   // P1-3：对话变长且 AI 空闲时，后台把更早消息压成滚动摘要（fire-and-forget，失败不影响主流程）
