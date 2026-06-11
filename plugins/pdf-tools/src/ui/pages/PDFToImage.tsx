@@ -4,6 +4,7 @@ import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
 import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { getInitPdfPaths } from '../utils/initPayload';
+import { isCancelled } from '../utils/async';
 import '../types';
 
 const FileItem: React.FC<{
@@ -84,6 +85,11 @@ const PDFToImage: React.FC = () => {
     const [files, setFiles] = useState<string[]>([]);
     const [processing, setProcessing] = useState(false);
     const appliedInitRef = useRef(false);
+    const abortRef = useRef<AbortController | null>(null);
+
+    const handleCancel = () => {
+        abortRef.current?.abort();
+    };
 
     const mergeUniqueFiles = (incoming: string[]) => {
         if (!incoming.length) return;
@@ -167,25 +173,36 @@ const PDFToImage: React.FC = () => {
     const handleConvert = async () => {
         if (files.length === 0) return;
 
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
             setProcessing(true);
             const downloadsPath = await system.getPath('downloads');
             const baseOutputDir = downloadsPath || '.';
 
             let successCount = 0;
+            let cancelled = false;
 
             // Process files sequentially
             for (const file of files) {
+                if (controller.signal.aborted) { cancelled = true; break; }
                 const fileName = file.split(/[/\\]/).pop()?.replace('.pdf', '') || 'unknown';
                 const outputDir = `${baseOutputDir}/${fileName}_pages`;
 
-                const outputPaths = await pdfService.convertPDFToImages(file, outputDir);
-                if (outputPaths && outputPaths.length > 0) {
-                    successCount++;
+                try {
+                    const outputPaths = await pdfService.convertPDFToImages(file, outputDir, undefined, controller.signal);
+                    if (outputPaths && outputPaths.length > 0) {
+                        successCount++;
+                    }
+                } catch (e: any) {
+                    if (isCancelled(e)) { cancelled = true; break; }
+                    throw e;
                 }
             }
 
-            if (successCount > 0) {
+            if (cancelled) {
+                notification.show(`已取消，已完成 ${successCount} 个文件`, 'warning');
+            } else if (successCount > 0) {
                 notification.show(`转换成功！共 ${successCount} 个文件`, 'success');
                 setFiles([]);
             } else {
@@ -193,9 +210,12 @@ const PDFToImage: React.FC = () => {
             }
 
         } catch (error: any) {
-            notification.show(`转换失败: ${error.message}`, 'error');
+            if (!isCancelled(error)) {
+                notification.show(`转换失败: ${error.message}`, 'error');
+            }
         } finally {
             setProcessing(false);
+            abortRef.current = null;
         }
     };
 
@@ -228,7 +248,25 @@ const PDFToImage: React.FC = () => {
                         ))}
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '16px', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                        {processing && (
+                            <button
+                                onClick={handleCancel}
+                                style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 59, 48, 0.1)',
+                                    color: '#FF3B30',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                }}
+                            >
+                                取消
+                            </button>
+                        )}
                         <button
                             onClick={handleConvert}
                             disabled={processing}

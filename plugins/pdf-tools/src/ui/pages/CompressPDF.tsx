@@ -4,6 +4,7 @@ import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
 import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { getInitPdfPaths } from '../utils/initPayload';
+import { isCancelled } from '../utils/async';
 
 interface FileStatus {
     status: 'pending' | 'processing' | 'success' | 'error';
@@ -151,6 +152,11 @@ const CompressPDF: React.FC = () => {
     const [processing, setProcessing] = useState(false);
     const [qualityLevel, setQualityLevel] = useState<'high' | 'medium' | 'low'>('medium');
     const appliedInitRef = useRef(false);
+    const abortRef = useRef<AbortController | null>(null);
+
+    const handleCancel = () => {
+        abortRef.current?.abort();
+    };
 
     const addFiles = (incoming: string[]) => {
         const uniqueIncoming = incoming.filter(path => /\.pdf$/i.test(path));
@@ -277,6 +283,8 @@ const CompressPDF: React.FC = () => {
         // Actually usually we only process pending ones or all? 
         // Let's process all currently in list to allow re-compression with different settings.
 
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
             setProcessing(true);
             const downloadsPath = await system.getPath('downloads');
@@ -284,8 +292,10 @@ const CompressPDF: React.FC = () => {
             const quality = getQualityValue();
 
             let successCount = 0;
+            let cancelled = false;
 
             for (const file of files) {
+                if (controller.signal.aborted) { cancelled = true; break; }
                 try {
                     // Update status to processing
                     updateFileStatus(file, { status: 'processing', progress: 0, message: '' });
@@ -300,7 +310,7 @@ const CompressPDF: React.FC = () => {
                             status: 'processing',
                             progress: progress.current / progress.total
                         });
-                    });
+                    }, controller.signal);
 
                     // Get Compressed Size
                     const compressedSize = await pdfService.getFileSize(outputPath);
@@ -315,20 +325,30 @@ const CompressPDF: React.FC = () => {
                     successCount++;
 
                 } catch (e: any) {
+                    if (isCancelled(e)) {
+                        updateFileStatus(file, { status: 'pending', progress: 0, message: '' });
+                        cancelled = true;
+                        break;
+                    }
                     console.error(`Failed to compress ${file}`, e);
                     updateFileStatus(file, { status: 'error', message: e.message });
                 }
             }
 
-            if (successCount > 0) {
+            if (cancelled) {
+                notification.show(`已取消，已完成 ${successCount} 个文件`, 'warning');
+            } else if (successCount > 0) {
                 notification.show(`压缩完成！成功处理 ${successCount} 个文件`, 'success');
             } else {
                 notification.show('没有文件被成功压缩', 'warning');
             }
         } catch (error: any) {
-            notification.show(`压缩过程出错: ${error.message}`, 'error');
+            if (!isCancelled(error)) {
+                notification.show(`压缩过程出错: ${error.message}`, 'error');
+            }
         } finally {
             setProcessing(false);
+            abortRef.current = null;
         }
     };
 
@@ -411,7 +431,25 @@ const CompressPDF: React.FC = () => {
                         ))}
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '16px', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '16px', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
+                        {processing && (
+                            <button
+                                onClick={handleCancel}
+                                style={{
+                                    padding: '12px 24px',
+                                    background: 'rgba(255, 59, 48, 0.1)',
+                                    color: '#FF3B30',
+                                    border: 'none',
+                                    borderRadius: '12px',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                }}
+                            >
+                                取消
+                            </button>
+                        )}
                         <button
                             onClick={handleCompress}
                             disabled={processing}

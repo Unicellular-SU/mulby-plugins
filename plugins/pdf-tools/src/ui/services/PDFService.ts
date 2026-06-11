@@ -5,6 +5,7 @@ import { Document, Packer, Paragraph, TextRun, ImageRun } from 'docx';
 import { PDFDocument } from 'pdf-lib';
 import PptxGenJS from 'pptxgenjs';
 import * as XLSX from 'xlsx';
+import { throwIfAborted, yieldToMain } from '../utils/async';
 
 // Set up the worker for PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -166,7 +167,7 @@ class PDFService {
     /**
      * 将 PDF 每一页渲染为图片 (PDF 转图片)
      */
-    async convertPDFToImages(pdfPath: string, outputDir: string, onProgress?: ProgressCallback): Promise<string[]> {
+    async convertPDFToImages(pdfPath: string, outputDir: string, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<string[]> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -177,6 +178,8 @@ class PDFService {
         console.log(`Starting PDF to Image conversion. Pages: ${totalPages}`);
 
         for (let i = 1; i <= totalPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             if (onProgress) {
                 onProgress({ current: i, total: totalPages, status: `正在转换第 ${i} 页...` });
             }
@@ -246,7 +249,7 @@ class PDFService {
         }
     }
 
-    async convertToWord(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToWord(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -254,18 +257,17 @@ class PDFService {
         const children = [];
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str).join(' ');
+            const rows = await this.extractStructuredRows(page);
 
             // Check if page has text content
-            if (strings.trim().length > 0) {
-                children.push(
-                    new Paragraph({
-                        children: [new TextRun(strings)],
-                    }),
-                    new Paragraph({ text: "", pageBreakBefore: true })
-                );
+            if (rows.length > 0) {
+                for (const row of rows) {
+                    children.push(new Paragraph({ children: [new TextRun(row.join('  '))] }));
+                }
+                children.push(new Paragraph({ text: "", pageBreakBefore: true }));
             } else {
                 // Fallback: Render page as image for scanned PDFs
                 console.log(`Page ${i} has no text, rendering as image...`);
@@ -315,7 +317,7 @@ class PDFService {
         return outputPath;
     }
 
-    async convertToPPT(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToPPT(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -323,15 +325,17 @@ class PDFService {
         const pptx = new PptxGenJS();
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str).join(' ');
+            const rows = await this.extractStructuredRows(page);
 
             const slide = pptx.addSlide();
 
             // Check if page has text content
-            if (strings.trim().length > 0) {
-                slide.addText(strings, { x: 0.5, y: 0.5, w: '90%', h: '90%', fontSize: 14 });
+            if (rows.length > 0) {
+                const text = rows.map((row) => row.join('  ')).join('\n');
+                slide.addText(text, { x: 0.5, y: 0.5, w: '90%', h: '90%', fontSize: 14, valign: 'top' });
             } else {
                 // Fallback: Render page as image for scanned PDFs
                 console.log(`Page ${i} has no text, rendering as image...`);
@@ -372,18 +376,21 @@ class PDFService {
         return outputPath;
     }
 
-    async convertToExcel(pdfPath: string, outputDir: string): Promise<string> {
+    async convertToExcel(pdfPath: string, outputDir: string, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
         const pdf = await this.getDocument(pdfPath);
-        const rows = [];
+        const rows: string[][] = [];
 
         for (let i = 1; i <= pdf.numPages; i++) {
+            throwIfAborted(signal);
+            await yieldToMain();
             const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const strings = textContent.items.map((item: any) => item.str);
-            rows.push(strings);
+            const pageRows = await this.extractStructuredRows(page);
+            for (const row of pageRows) {
+                rows.push(row);
+            }
         }
 
         const wb = XLSX.utils.book_new();
@@ -483,7 +490,7 @@ class PDFService {
      * 3. 图片型 PDF：执行光栅化压缩
      * 4. 终极兜底：如果压缩后体积 >= 原体积，返回原文件
      */
-    async compressPDF(pdfPath: string, outputDir: string, quality: number = 0.6, onProgress?: ProgressCallback): Promise<string> {
+    async compressPDF(pdfPath: string, outputDir: string, quality: number = 0.6, onProgress?: ProgressCallback, signal?: AbortSignal): Promise<string> {
         const api = getApi();
         await api.ensureDir(outputDir);
 
@@ -527,6 +534,8 @@ class PDFService {
             const newDoc = await PDFDocument.create();
 
             for (let i = 1; i <= totalPages; i++) {
+                throwIfAborted(signal);
+                await yieldToMain();
                 if (onProgress) {
                     const progress = 10 + Math.floor((i / totalPages) * 80);
                     onProgress({ current: progress, total: 100, status: `正在压缩第 ${i}/${totalPages} 页...` });
@@ -677,7 +686,8 @@ class PDFService {
         } else if (options.waitMs && options.waitMs > 0) {
             chain = chain.wait(options.waitMs);
         }
-        chain = chain.pdf(options.pdfOptions ?? { printBackground: true, pageSize: 'A4' });
+        // 链尾 end() 在打印完成后销毁隐藏窗口，避免 InBrowser 实例驻留累积
+        chain = chain.pdf(options.pdfOptions ?? { printBackground: true, pageSize: 'A4' }).end();
 
         // 3. 执行（不传 savePath，拿回 PDF 字节）
         const results: unknown[] = await chain.run({
@@ -728,6 +738,61 @@ class PDFService {
             return Uint8Array.from(value.data);
         }
         return null;
+    }
+
+    /**
+     * 从 pdfjs 文本内容重建结构化行/列：
+     * 按 Y 坐标聚合成行（保留换行），行内按 X 排序，并依据列间距切分为多个单元格，
+     * 以尽量保留段落换行与表格列结构（纯算法、零外部依赖）。
+     */
+    private async extractStructuredRows(page: any): Promise<string[][]> {
+        const textContent = await page.getTextContent();
+        const items = (textContent.items as any[]).filter(
+            (it) => it && typeof it.str === 'string' && it.str.length > 0,
+        );
+        if (!items.length) return [];
+
+        const yTolerance = 3;
+        const lines: Array<{ y: number; items: any[] }> = [];
+        for (const it of items) {
+            const y = it.transform[5];
+            let line = lines.find((l) => Math.abs(l.y - y) <= yTolerance);
+            if (!line) {
+                line = { y, items: [] };
+                lines.push(line);
+            }
+            line.items.push(it);
+        }
+        lines.sort((a, b) => b.y - a.y);
+
+        return lines
+            .map((line) => {
+                const sorted = line.items.sort((a, b) => a.transform[4] - b.transform[4]);
+                const cells: string[] = [];
+                let current = '';
+                let prevEndX: number | null = null;
+                for (const it of sorted) {
+                    const x = it.transform[4];
+                    const width = typeof it.width === 'number' ? it.width : 0;
+                    const fontH = Math.abs(it.transform[3]) || it.height || 10;
+                    if (prevEndX !== null) {
+                        const gap = x - prevEndX;
+                        if (gap > fontH * 1.2) {
+                            // 大间隙：视为新的单元格/列
+                            if (current.trim()) cells.push(current.trim());
+                            current = '';
+                        } else if (gap > fontH * 0.2 && current && !current.endsWith(' ')) {
+                            // 词间间隙：补一个空格
+                            current += ' ';
+                        }
+                    }
+                    current += it.str;
+                    prevEndX = x + width;
+                }
+                if (current.trim()) cells.push(current.trim());
+                return cells;
+            })
+            .filter((cells) => cells.length > 0);
     }
 }
 

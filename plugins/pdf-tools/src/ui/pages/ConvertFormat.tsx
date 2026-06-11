@@ -5,6 +5,7 @@ import { pdfService } from '../services/PDFService';
 import { PDFHeader, PDFUploadArea, PDFPageThumbnail } from '../components/SharedPDFComponents';
 import { getInitPdfPaths } from '../utils/initPayload';
 import { notifyOutput } from '../utils/output';
+import { isCancelled } from '../utils/async';
 import '../types';
 import { PDFInfo } from '../types';
 
@@ -19,6 +20,11 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
     const [pdfDoc, setPdfDoc] = useState<any>(null); // pdfjs-dist document proxy
     const [processing, setProcessing] = useState(false);
     const appliedInitRef = useRef(false);
+    const abortRef = useRef<AbortController | null>(null);
+
+    const handleCancel = () => {
+        abortRef.current?.abort();
+    };
 
     const loadFile = async (filePath: string) => {
         setFile(filePath);
@@ -122,6 +128,8 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
     const handleConvert = async () => {
         if (!file) return;
 
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
             setProcessing(true);
             const downloadsPath = await system.getPath('downloads');
@@ -130,13 +138,13 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             let outputPath;
             switch (type) {
                 case 'word':
-                    outputPath = await pdfService.convertToWord(file, outputDir);
+                    outputPath = await pdfService.convertToWord(file, outputDir, controller.signal);
                     break;
                 case 'ppt':
-                    outputPath = await pdfService.convertToPPT(file, outputDir);
+                    outputPath = await pdfService.convertToPPT(file, outputDir, controller.signal);
                     break;
                 case 'excel':
-                    outputPath = await pdfService.convertToExcel(file, outputDir);
+                    outputPath = await pdfService.convertToExcel(file, outputDir, controller.signal);
                     break;
             }
 
@@ -144,9 +152,14 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                 notifyOutput(notification, outputPath, '转换成功');
             }
         } catch (error: any) {
-            notification.show(`转换失败: ${error.message}`, 'error');
+            if (isCancelled(error)) {
+                notification.show('已取消转换', 'warning');
+            } else {
+                notification.show(`转换失败: ${error.message}`, 'error');
+            }
         } finally {
             setProcessing(false);
+            abortRef.current = null;
         }
     };
 
@@ -260,12 +273,31 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                     </div>
 
                     {/* Footer / Action */}
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', paddingTop: '8px' }}>
+                        {processing && (
+                            <button
+                                onClick={handleCancel}
+                                style={{
+                                    padding: '16px 24px',
+                                    border: 'none',
+                                    borderRadius: '14px',
+                                    background: 'rgba(255, 59, 48, 0.1)',
+                                    color: '#FF3B30',
+                                    fontSize: '16px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.3s ease',
+                                    flexShrink: 0
+                                }}
+                            >
+                                取消
+                            </button>
+                        )}
                         <button
                             onClick={handleConvert}
                             disabled={processing}
                             style={{
-                                width: '100%',
+                                flex: 1,
                                 padding: '16px',
                                 border: 'none',
                                 borderRadius: '14px',
@@ -277,7 +309,6 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                                 boxShadow: processing ? 'none' : '0 8px 20px rgba(0, 122, 255, 0.3)',
                                 transition: 'all 0.3s ease',
                                 letterSpacing: '-0.3px',
-                                flexShrink: 0
                             }}
                         >
                             {processing ? '转换中...' : '开始转换'}
