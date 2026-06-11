@@ -17,7 +17,7 @@ import {
   manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel, validateContract
 } from '../lib/vibeContract'
 import { useSession, SessionSwitcher, ChatPanel } from '../vibe'
-import type { VibeSession, VibeSessionState, VibeAction, BrainstormOption, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
+import type { VibeSession, VibeSessionState, VibeAction, BrainstormOption, ClarifyQuestion, ClarifyApproach, ClarifyQA, ClarifyState, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
 
 export interface VibeEditTarget {
   path: string
@@ -378,8 +378,11 @@ export function VibePanel({
   // 改由「对话历史上下文工程」统一注入（见 convoRef / buildHistoryMessages）。
   const [iterating, setIterating] = useState(false)
 
-  // 头脑风暴（S3）：开局让 AI 发散候选方向供小白选择
+  // 头脑风暴（S3）：开局让 AI 发散候选方向供小白选择（仅模糊念头才走这里）
   const [brainstorm, setBrainstorm] = useState<{ loading: boolean; options: BrainstormOption[]; seed: string } | null>(null)
+
+  // 澄清式风暴（S3'）：明确需求不再发散点子，而是围绕原始需求先确认 1-2 个关键细节、再给同主题实现做法
+  const [clarify, setClarify] = useState<ClarifyState | null>(null)
 
   // Plan 模式（契约确认后→生成前）：AI 制定开发计划(todo list)，再逐步执行、实时勾选
   const [plan, setPlan] = useState<VibePlanTodo[]>([])
@@ -397,6 +400,7 @@ export function VibePanel({
     if (routing) return 'AI 理解意图'
     if (planning) return 'AI 规划契约'
     if (brainstorm?.loading) return 'AI 头脑风暴'
+    if (clarify?.loading) return 'AI 澄清需求'
     if (generating) return 'AI 生成代码'
     if (expanding) return 'AI 完善代码'
     if (repairing) return 'AI 修复构建'
@@ -406,7 +410,7 @@ export function VibePanel({
     if (packing) return '打包插件'
     if (iconBusy) return '生成图标'
     return null
-  }, [routing, planning, brainstorm?.loading, generating, expanding, repairing, confRepairing, iterating, building, packing, iconBusy])
+  }, [routing, planning, brainstorm?.loading, clarify?.loading, generating, expanding, repairing, confRepairing, iterating, building, packing, iconBusy])
   useEffect(() => {
     if (active) setActivity?.(activityLabel)
   }, [active, activityLabel, setActivity])
@@ -1276,6 +1280,7 @@ export function VibePanel({
     if (!contract) return
     const retry = !!opts?.retry
     setBrainstorm(null)
+    setClarify(null)
     recordMessage(retry
       ? mkMsg('user', '重试生成', { intent: 'create' })
       : mkMsg('user', contract.isEdit ? '确认设定，开始改造' : '确认设定，开始生成', { intent: 'create' }))
@@ -1376,6 +1381,7 @@ export function VibePanel({
     const feedback = opts?.feedback?.trim()
     const prevPlan = feedback ? plan : [] // 重新规划：保留上一版计划作为上下文（也用于失败回滚）
     setBrainstorm(null)
+    setClarify(null)
     // 重新规划由用户的真实对话消息触发（已记录），不再补「确认设定」这条合成消息
     if (!feedback) recordMessage(mkMsg('user', '确认设定，先制定开发计划', { intent: 'create' }))
     planPreparedRef.current = false
@@ -1467,6 +1473,7 @@ export function VibePanel({
     const resume = planPreparedRef.current || plan.some((t) => t.status === 'done' || t.status === 'failed')
     planExecutingRef.current = true
     setBrainstorm(null)
+    setClarify(null)
     recordMessage(mkMsg('user', resume ? '继续执行计划' : '开始执行计划', { intent: 'create' }))
     setPlanPhase('executing')
     setGenerating(true)
@@ -1549,13 +1556,14 @@ export function VibePanel({
   // 统一「停止 AI 生成」：标记中断 + 精确 abort 在途请求 + 复位所有 AI 忙碌态 + 释放宿主会话锁。
   // 覆盖所有 AI 流程（规划/头脑风暴/生成/迭代/问答/修复/一致性修复/图标），右侧对话与左侧面板共用。
   const stopAgent = () => {
-    const running = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || routing || !!brainstorm?.loading
+    const running = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || routing || !!brainstorm?.loading || !!clarify?.loading
     if (!running) return
     abortedRef.current = true
     if (reqIdRef.current) { try { ai()?.abort?.(reqIdRef.current) } catch { /* 宿主未实现 abort 时忽略 */ } }
     setGenerating(false); setExpanding(false); setRepairing(false)
     setIterating(false); setPlanning(false); setConfRepairing(false); setIconBusy(false); setRouting(false)
     setBrainstorm((b) => (b && b.loading ? null : b))
+    setClarify((c) => (c && c.loading ? null : c))
     setNarration('')
     void dev.hostCall('vibe_end').catch(() => {})
     pushEvent(currentPhaseRef.current, 'note', '用户已停止生成')
@@ -2403,6 +2411,7 @@ export function VibePanel({
     setIterating(false)
     setVersions([]); setRestoringHash(null); setVcsAvailable(true)
     setBrainstorm(null)
+    setClarify(null)
     setPlan([]); setPlanPhase('idle'); planPreparedRef.current = false
     setPendingPrompt(null)
     pendingCommitMsgRef.current = ''
@@ -2434,7 +2443,7 @@ export function VibePanel({
 
   const busy = planning || generating || expanding || building || repairing || iconBusy || confRepairing || smoking
   // 正在进行、可被「停止」中断的 AI 生成类任务（不含纯本地的 building / smoking）
-  const aiActive = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || !!brainstorm?.loading
+  const aiActive = planning || generating || expanding || repairing || iterating || iconBusy || confRepairing || !!brainstorm?.loading || !!clarify?.loading
   // 供运行时错误检查的 setTimeout 回调读取「当下」是否忙碌（闭包里的 busy/aiActive 是调度时的旧值）
   useEffect(() => { engagedRef.current = aiActive || busy || routing }, [aiActive, busy, routing])
   // P1-3：对话变长且 AI 空闲时，后台把更早消息压成滚动摘要（fire-and-forget，失败不影响主流程）
@@ -2482,13 +2491,16 @@ export function VibePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingInstruction, busy, aiActive, routing, chatReady, createdPath, contract, vibeMode, editPath])
 
-  // ---------------- 头脑风暴（S3） ----------------
+  // ---------------- 头脑风暴（S3，仅模糊念头） ----------------
+  const STRICT_JSON_SYS = '你是严格的 JSON 生成器，只输出一个可解析的 JSON 对象，不要任何解释、前后缀或 Markdown 代码块。'
+
   const brainstormPrompt = (seed: string) => [
-    '你是 Mulby 插件创意助手。根据用户的初步想法，发散出 3-4 个具体、可落地、彼此差异明显的 Mulby 桌面插件方向。',
+    '你是 Mulby 插件创意助手。用户目前只有一个初步念头，请帮他把这个念头具体化成 3-4 个可落地的 Mulby 桌面插件方向。',
+    '铁律：所有方向都必须围绕用户念头里的主题/领域展开，是它的具体化、延伸或不同切入点——绝不能丢开原主题另起炉灶；用户已提到的关键约束必须保留。',
     '只输出 JSON：{ "options": [ { "title": "简短中文方向名", "pitch": "一句话说明能做什么/卖点", "trigger": "触发方式（如：关键词唤起 / 处理选中文本 / 拖入图片 / 正则匹配金额）" } ] }。',
-    '要求：贴近桌面效率/开发工具场景、对新手友好、避免雷同、可被一个小插件实现。',
+    '要求：方向之间的差异体现在切入点/交互/深度上，而非更换主题；具体、对新手友好、可被一个小插件实现。',
     '每个方向都要能用 Mulby 常见桌面能力（剪贴板 / 通知 / 文件读写 / 调用 AI / 图像处理 / 窗口 / 网络请求等）实现，不要臆造平台做不到的功能。',
-    `用户的初步想法：${seed}`
+    `用户的初步念头：${seed}`
   ].join('\n')
 
   const normalizeBrainstorm = (obj: any): BrainstormOption[] => {
@@ -2503,11 +2515,12 @@ export function VibePanel({
   const runBrainstorm = async (seed: string) => {
     const a = ai()
     if (!a?.call) { seedAsRequirement(seed); return } // 无 AI 时直接进规划
+    setClarify(null)
     recordMessage(mkMsg('assistant', '我帮你想了几个方向，挑一个开始，或继续用自己的话描述：'))
     setBrainstorm({ loading: true, options: [], seed })
     resetAbort()
     try {
-      const obj = await aiJson('你是严格的 JSON 生成器，只输出一个可解析的 JSON 对象，不要任何解释、前后缀或 Markdown 代码块。', brainstormPrompt(seed))
+      const obj = await aiJson(STRICT_JSON_SYS, brainstormPrompt(seed))
       if (abortedRef.current) { setBrainstorm(null); addLog('info', '⏹ [Vibe] 已停止发散'); return }
       const options = normalizeBrainstorm(obj)
       if (!options.length) { addLog('warn', '⚠ [Vibe] 头脑风暴未解析出方向，转为直接规划'); setBrainstorm(null); seedAsRequirement(seed); return }
@@ -2540,6 +2553,134 @@ export function VibePanel({
     planFromSeed(brainstorm.seed)
   }
 
+  // ---------------- 澄清式风暴（S3'，明确需求） ----------------
+  // superpowers 式流程：不替用户另想点子，而是围绕他的原始需求「一次只问一个」关键澄清问题（至多 2 轮），
+  // 再给出 2-3 个同主题实现做法（差异在做法而非主题）供挑选；每一步都可跳过直奔契约规划。
+  const MAX_CLARIFY_ROUNDS = 2
+
+  const clarifyQuestionPrompt = (seed: string, qa: ClarifyQA[]) => [
+    '你是 Mulby 插件需求澄清助手。用户已给出一个明确的插件需求，你的任务不是替他另想点子，而是围绕这个需求，找出「对产品行为影响最大的一个」尚未明确的关键问题来问他。',
+    '只输出 JSON：{ "done": false, "question": "一句话问题（≤40字）", "options": ["候选答案1", "候选答案2"] }；若需求已足够清晰、没有值得问的关键问题，输出 { "done": true }。',
+    '要求：',
+    '- 问题必须紧扣用户需求本身（如：处理的维度/规则、确认交互的形式、触发方式、范围边界），绝不偏离主题，绝不推销别的功能',
+    '- options 给 2-4 个具体、可直接选用的候选答案，不要「其他/都可以」这类空选项（用户可自行输入）',
+    '- 不问纯技术选型（用什么库/框架），只问影响使用体验与产品行为的决策',
+    '- 不重复已澄清的内容',
+    `用户需求：${seed}`,
+    qa.length ? `已澄清：${qa.map((x) => `${x.q}→${x.a}`).join('；')}` : ''
+  ].filter(Boolean).join('\n')
+
+  const clarifyApproachPrompt = (seed: string, qa: ClarifyQA[]) => [
+    '你是 Mulby 插件方案设计助手。基于用户需求与已澄清细节，给出 2-3 个实现这个需求的候选做法，供用户挑选。',
+    '铁律：每个做法都必须是用户原始需求的直接实现，主题不可替换、不可漂移；用户提到的流程约束（如「先出方案、确认后再执行」）必须在每个做法中原样保留。',
+    '做法之间的差异只允许体现在：交互方式 / 自动化程度 / 处理深度 / 能力侧重，而不是更换主题。',
+    '只输出 JSON：{ "approaches": [ { "title": "≤12字做法名", "pitch": "一两句话说明做法与体验", "recommended": true, "reason": "推荐理由（仅推荐项填）" } ] }，恰好一项 recommended=true。',
+    '每个做法都要能用 Mulby 常见桌面能力（剪贴板/通知/文件读写/调用 AI/图像处理/窗口/网络请求等）实现，不要臆造平台做不到的功能。',
+    `用户需求：${seed}`,
+    qa.length ? `已澄清：${qa.map((x) => `${x.q}→${x.a}`).join('；')}` : ''
+  ].filter(Boolean).join('\n')
+
+  const normalizeClarifyQuestion = (obj: any): ClarifyQuestion | null => {
+    if (!obj || obj.done === true) return null
+    const question = String(obj.question || '').trim().slice(0, 80)
+    const options = (Array.isArray(obj.options) ? obj.options : [])
+      .map((o: any) => String(o ?? '').trim().slice(0, 60)).filter(Boolean).slice(0, 4)
+    if (!question || options.length < 2) return null
+    return { question, options }
+  }
+
+  const normalizeApproaches = (obj: any): ClarifyApproach[] => {
+    const arr = Array.isArray(obj?.approaches) ? obj.approaches : []
+    const list = arr.slice(0, 3).map((o: any) => ({
+      title: String(o?.title || '').trim().slice(0, 24),
+      pitch: String(o?.pitch || '').trim().slice(0, 120),
+      recommended: o?.recommended === true,
+      reason: o?.reason ? String(o.reason).trim().slice(0, 80) : undefined
+    })).filter((o: ClarifyApproach) => o.title)
+    let seen = false // 至多保留一个推荐项
+    for (const o of list) { if (o.recommended) { if (seen) o.recommended = false; seen = true } }
+    return list
+  }
+
+  // 把「原始需求 + 已确认细节 + 选定做法 + 补充说明」合成最终种子，交给契约规划
+  const composeClarifiedSeed = (seed: string, qa: ClarifyQA[], approach: ClarifyApproach | null, extra?: string): string => {
+    const parts = [seed]
+    if (qa.length) parts.push(`已确认细节：${qa.map((x) => `${x.q}→${x.a}`).join('；')}`)
+    if (approach) parts.push(`实现方式：${approach.title}（${approach.pitch}）`)
+    if (extra) parts.push(`补充说明：${extra}`)
+    return parts.join('\n')
+  }
+
+  const runClarify = async (seed: string) => {
+    const a = ai()
+    if (!a?.call) { seedAsRequirement(seed); return } // 无 AI 时直接进规划
+    setBrainstorm(null)
+    recordMessage(mkMsg('assistant', '需求收到。开工前我先跟你确认一两个关键细节，让方案更贴合你的想法（随时可跳过）：'))
+    setClarify({ loading: true, seed, round: 0, maxRounds: MAX_CLARIFY_ROUNDS, question: null, qa: [], approaches: null })
+    resetAbort()
+    await nextClarifyStep(seed, [])
+  }
+
+  // 取下一个澄清问题；问满轮数或 AI 认为已够清晰（含解析失败兜底）→ 进入做法选择
+  const nextClarifyStep = async (seed: string, qa: ClarifyQA[]) => {
+    if (qa.length >= MAX_CLARIFY_ROUNDS) { await runApproaches(seed, qa); return }
+    try {
+      const obj = await aiJson(STRICT_JSON_SYS, clarifyQuestionPrompt(seed, qa))
+      if (abortedRef.current) { setClarify(null); addLog('info', '⏹ [Vibe] 已停止澄清'); return }
+      const q = normalizeClarifyQuestion(obj)
+      if (!q) { await runApproaches(seed, qa); return }
+      setClarify({ loading: false, seed, round: qa.length + 1, maxRounds: MAX_CLARIFY_ROUNDS, question: q, qa, approaches: null })
+    } catch {
+      if (abortedRef.current) { setClarify(null); return }
+      await runApproaches(seed, qa)
+    }
+  }
+
+  // 用户回答当前澄清问题（点选项或在输入框直接作答）
+  const answerClarify = (answer: string) => {
+    if (!clarify?.question) return
+    const qa = [...clarify.qa, { q: clarify.question.question, a: answer }]
+    recordMessage(mkMsg('user', answer, { intent: 'create' }))
+    setClarify({ ...clarify, loading: true, question: null, qa })
+    resetAbort()
+    void nextClarifyStep(clarify.seed, qa)
+  }
+
+  const runApproaches = async (seed: string, qa: ClarifyQA[]) => {
+    setClarify({ loading: true, seed, round: qa.length, maxRounds: MAX_CLARIFY_ROUNDS, question: null, qa, approaches: null })
+    try {
+      const obj = await aiJson(STRICT_JSON_SYS, clarifyApproachPrompt(seed, qa))
+      if (abortedRef.current) { setClarify(null); return }
+      const approaches = normalizeApproaches(obj)
+      if (!approaches.length) {
+        addLog('warn', '⚠ [Vibe] 未解析出候选做法，转为直接规划')
+        setClarify(null); planFromSeed(composeClarifiedSeed(seed, qa, null)); return
+      }
+      recordMessage(mkMsg('assistant', `${qa.length ? '细节确认完毕' : '你的需求已经很清楚'}，我设计了几种实现做法（差异在做法、不在主题），选一个开始：`))
+      setClarify({ loading: false, seed, round: qa.length, maxRounds: MAX_CLARIFY_ROUNDS, question: null, qa, approaches })
+    } catch {
+      if (abortedRef.current) { setClarify(null); return }
+      setClarify(null); planFromSeed(composeClarifiedSeed(seed, qa, null))
+    }
+  }
+
+  const pickApproach = (ap: ClarifyApproach) => {
+    if (!clarify) return
+    recordMessage(mkMsg('user', `选择做法：${ap.title}`, { intent: 'create' }))
+    const { seed, qa } = clarify
+    setClarify(null)
+    planFromSeed(composeClarifiedSeed(seed, qa, ap))
+  }
+
+  // 跳过澄清（问题/做法任一阶段可点）：带着已确认的细节直接进契约规划
+  const skipClarify = () => {
+    if (!clarify) return
+    recordMessage(mkMsg('user', '跳过，直接按我的描述生成', { intent: 'create' }))
+    const { seed, qa } = clarify
+    setClarify(null)
+    planFromSeed(composeClarifiedSeed(seed, qa, null))
+  }
+
   // 断点续传：接上当前会话中「未完成的任务」而不是新建项目/重新规划。
   // 计划待执行(review)→继续执行；契约已就绪但还没制定计划(idle+contract)→制定计划。返回是否已处理。
   const resumeInFlight = (): boolean => {
@@ -2568,12 +2709,12 @@ export function VibePanel({
 
   const routerSystemPrompt = (): string => [
     '你是 Mulby「对话式插件开发助手」的意图路由器。读懂用户最新消息（结合上面的历史对话与下面的当前状态），判断接下来应触发哪一个动作。',
-    '只输出 JSON：{"action":"ask|create|modify|resume|replan|run|package|rollback|icon"}，不要解释、不要 Markdown。',
+    '只输出 JSON：{"action":"ask|create|modify|resume|replan|run|package|rollback|icon","clarity":"clear|vague"}（clarity 仅在 action=create 时必填，其余动作省略），不要解释、不要 Markdown。',
     '',
     '动作含义与选择规则：',
     '- ask：提问 / 咨询 / 要思路或方案 / 查看现状 / 排查「为什么…」。这是默认动作——只要意图不明、或更像在提问/讨论，一律选 ask（只读，绝不改代码）。带疑问语气（「…吗？」「为什么」「能不能」「怎么」）即使提到功能词也选 ask。',
     '- modify：明确要求改动「现有插件」的功能/样式/代码（祈使句，如「帮我加…」「把…改成…」「修复…」「优化某处」）。',
-    '- create：明确想从零做一个「全新插件」，且当前没有正在进行的插件任务。',
+    '- create：明确想从零做一个「全新插件」，且当前没有正在进行的插件任务。选 create 时必须同时判定 clarity：用户已说清要做什么（有具体功能对象/使用方式/流程要求，哪怕细节不全）→ "clear"；只有模糊念头、求点子、只给了大致领域（如「帮我想个好玩的插件」「做点效率工具」）→ "vague"。',
     '- resume：认可现状、想开始/继续执行「当前的开发计划或未完成任务」（如「继续」「接着做」「开始执行」「就这样」「可以了」）。仅当下面【状态】标明有进行中/待执行的计划或待制定计划时才可选；若用户是在对计划提意见，请改选 replan 而非 resume。',
     '- replan：当下面【状态】标明"有一份开发计划待用户确认"时，用户对这份计划提出修改意见 / 表示不满意 / 想增删改步骤 / 调整顺序（如「第3步不对」「先做界面再写逻辑」「再加一步测试」「这计划太复杂了」「把xxx也加上」）→ 带着用户的意见重新制定计划，绝不直接开始执行。仅在该状态下可选。',
     '- run：想运行 / 打开 / 试用当前插件。',
@@ -2585,8 +2726,11 @@ export function VibePanel({
     `【当前状态】${buildRouterState()}`
   ].join('\n')
 
-  // 调一次轻量 LLM 做路由（无工具、无技能、关历史截断），只输出动作；失败/无效返回 null（交给规则兜底）。
-  const routeIntent = async (text: string): Promise<RouteAction | null> => {
+  // 调一次轻量 LLM 做路由（无工具、无技能、关历史截断），输出动作 +（create 时）需求成熟度；失败/无效返回 null（交给规则兜底）。
+  type RouteClarity = 'clear' | 'vague'
+  type RouteResult = { action: RouteAction; clarity: RouteClarity | null }
+
+  const routeIntent = async (text: string): Promise<RouteResult | null> => {
     const a = ai()
     if (!a?.call) return null
     try {
@@ -2601,17 +2745,26 @@ export function VibePanel({
         : Array.isArray(res?.content) ? res.content.map((x: any) => x?.text ?? '').join('\n') : ''
       const json = extractJsonObject(content)
       if (!json) return null
-      const action = String(JSON.parse(json)?.action || '').trim() as RouteAction
-      return ROUTE_ACTIONS.has(action) ? action : null
+      const parsed = JSON.parse(json)
+      const action = String(parsed?.action || '').trim() as RouteAction
+      if (!ROUTE_ACTIONS.has(action)) return null
+      const c = String(parsed?.clarity || '').trim()
+      return { action, clarity: c === 'clear' || c === 'vague' ? c : null }
     } catch { return null }
   }
 
   // 路由带超时：给较慢的推理模型充足时间（100s）再回退到正则兜底；期间可随时点「停止」取消（见 stopAgent）。
-  const routeIntentWithTimeout = async (text: string): Promise<RouteAction | null> =>
+  const routeIntentWithTimeout = async (text: string): Promise<RouteResult | null> =>
     Promise.race([
       routeIntent(text),
-      new Promise<RouteAction | null>((resolve) => setTimeout(() => resolve(null), 100000))
+      new Promise<RouteResult | null>((resolve) => setTimeout(() => resolve(null), 100000))
     ])
+
+  // 规则兜底：路由器没给出 clarity 时，判断需求是「明确」还是「模糊求点子」。
+  // 明确求点子的措辞 / 过短的描述 → vague；其余默认 clear（澄清式风暴锚定原话，误判代价远小于无差别发散）。
+  const fallbackClarity = (text: string): RouteClarity =>
+    (/帮我想|想不出|没想法|没头绪|随便(来|做|搞)?|什么(好玩|有意思|有趣)|给点(灵感|想法|建议)|不知道(做|搞)什么|有(什么|啥)(好玩|可以做)/.test(text) || text.trim().length < 10)
+      ? 'vague' : 'clear'
 
   // 规则兜底（AI 不可用/失败/超时）：保留原有正则作为安全网（含断点续传的「继续」识别）
   const fallbackAction = (text: string): RouteAction => {
@@ -2627,7 +2780,7 @@ export function VibePanel({
   }
 
   // 把「动作」分发到既有工作流（LLM 路由与规则兜底都汇聚到这里）。默认不动代码，破坏性操作二次确认。
-  const dispatchAction = (action: RouteAction, t: string) => {
+  const dispatchAction = (action: RouteAction, t: string, clarity?: RouteClarity | null) => {
     switch (action) {
       case 'resume':
         if (!resumeInFlight()) void runAsk(t) // 无可续任务 → 退化为只读问答
@@ -2669,7 +2822,9 @@ export function VibePanel({
         if (resumeInFlight()) return
         if (vibeMode === 'create') {
           if (!targetDir.trim()) { pushToast('info', '请先在左侧选择插件生成的目标目录，再描述一次即可'); return }
-          void runBrainstorm(t); return
+          // 模糊念头才发散点子；明确需求走澄清式风暴（先确认细节、再选同主题做法），不再无差别脑暴跑题
+          if ((clarity ?? fallbackClarity(t)) === 'vague') { void runBrainstorm(t); return }
+          void runClarify(t); return
         }
         seedAsRequirement(t)
         return
@@ -2680,20 +2835,32 @@ export function VibePanel({
   const handleChatSend = async (text: string) => {
     const t = text.trim()
     if (!t || busy || aiActive || routing) return
+    // 澄清式风暴进行中：输入直接视为对当前问题的回答 / 对做法的补充说明，不走意图路由
+    if (clarify && !clarify.loading) {
+      if (clarify.question) { answerClarify(t); return }
+      if (clarify.approaches) {
+        recordMessage(mkMsg('user', t, { intent: 'create' }))
+        const { seed, qa } = clarify
+        setClarify(null)
+        planFromSeed(composeClarifiedSeed(seed, qa, null, t))
+        return
+      }
+    }
     // 立即落消息：意图标签先用规则给个即时值（真正动作由 LLM 决定，避免等待路由才显示用户气泡）
     const provisional = fallbackAction(t)
     recordMessage(mkMsg('user', t, { intent: provisional === 'resume' ? 'create' : provisional === 'replan' ? 'modify' : provisional }))
     let action: RouteAction = provisional
+    let clarity: RouteClarity | null = null
     if (ai()?.call) {
       resetAbort()
       setRouting(true)
       try {
         const routed = await routeIntentWithTimeout(t)
         if (abortedRef.current) return // 用户在「理解中」点了停止 → 取消本次分发
-        if (routed) action = routed
+        if (routed) { action = routed.action; clarity = routed.clarity }
       } finally { setRouting(false) }
     }
-    dispatchAction(action, t)
+    dispatchAction(action, t, clarity)
   }
 
   return (
@@ -2782,6 +2949,11 @@ export function VibePanel({
               onMoreIdeas={() => { if (brainstorm) void runBrainstorm(brainstorm.seed) }}
               onUseSeed={useBrainstormSeed}
               onDismissBrainstorm={() => setBrainstorm(null)}
+              clarify={clarify}
+              onAnswerClarify={answerClarify}
+              onPickApproach={pickApproach}
+              onSkipClarify={skipClarify}
+              onDismissClarify={() => setClarify(null)}
               examples={vibeMode === 'edit' ? EDIT_EXAMPLES : EXAMPLES}
               contractPending={contractPending}
               onConfirmGenerate={() => generatePlan()}

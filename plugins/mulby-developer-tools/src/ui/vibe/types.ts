@@ -70,6 +70,40 @@ export interface BrainstormOption {
   trigger?: string
 }
 
+/** 澄清式风暴：AI 围绕用户的明确需求提出的关键澄清问题（一次只问一个） */
+export interface ClarifyQuestion {
+  question: string
+  /** 2-4 个可直接点选的候选答案（用户也可在输入框自行作答） */
+  options: string[]
+}
+
+/** 澄清式风暴：同主题下的候选实现做法（差异在做法而非主题） */
+export interface ClarifyApproach {
+  title: string
+  pitch: string
+  recommended?: boolean
+  /** 推荐理由（仅推荐项） */
+  reason?: string
+}
+
+/** 澄清式风暴：已确认的一问一答 */
+export interface ClarifyQA {
+  q: string
+  a: string
+}
+
+/** 澄清式风暴进行中状态：question 非空=等用户回答；approaches 非空=等用户选做法；loading=AI 生成中 */
+export interface ClarifyState {
+  loading: boolean
+  seed: string
+  /** 当前问到第几轮（展示用，1 起） */
+  round: number
+  maxRounds: number
+  question: ClarifyQuestion | null
+  qa: ClarifyQA[]
+  approaches: ClarifyApproach[] | null
+}
+
 export interface SessionStorageStats {
   count: number
   totalBytes: number

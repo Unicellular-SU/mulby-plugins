@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, Bot, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle, MoreHorizontal, ArrowDown } from 'lucide-react'
+import { Send, Loader2, Bot, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle, MoreHorizontal, ArrowDown, HelpCircle, ThumbsUp } from 'lucide-react'
 import { useSession } from './SessionProvider'
 import { Markdown } from './Markdown'
-import type { VibeMessage, VibeSessionState, BrainstormOption, VibePlanTodo, VibePlanPhase } from './types'
+import type { VibeMessage, VibeSessionState, BrainstormOption, ClarifyApproach, ClarifyState, VibePlanTodo, VibePlanPhase } from './types'
 
 const PLACEHOLDER: Record<VibeSessionState, string> = {
   initial: '描述你想做的插件，或直接提问…',
@@ -53,6 +53,12 @@ interface Props {
   onMoreIdeas?: () => void
   onUseSeed?: () => void
   onDismissBrainstorm?: () => void
+  /** 澄清式风暴（明确需求）：确认细节 → 选实现做法 */
+  clarify?: ClarifyState | null
+  onAnswerClarify?: (answer: string) => void
+  onPickApproach?: (ap: ClarifyApproach) => void
+  onSkipClarify?: () => void
+  onDismissClarify?: () => void
   examples?: string[]
   contractPending?: { name: string; summary: string } | null
   onConfirmGenerate?: () => void
@@ -79,6 +85,7 @@ interface Props {
 export function ChatPanel({
   onSend, disabled, busy, busyHint, routing, aiActive, onStop, streamingText, messages,
   brainstorm, onPickIdea, onMoreIdeas, onUseSeed, onDismissBrainstorm, examples,
+  clarify, onAnswerClarify, onPickApproach, onSkipClarify, onDismissClarify,
   contractPending, onConfirmGenerate,
   plan, planPhase, onStartPlan, onReplan,
   pendingPrompt, onPromptDismiss,
@@ -261,6 +268,78 @@ export function ChatPanel({
         </PanelCard>
       )}
 
+      {/* 澄清式风暴（明确需求）：一次只问一个关键细节 → 选同主题实现做法；每一步都可跳过直接生成 */}
+      {clarify && (
+        <PanelCard
+          accent="sky"
+          icon={clarify.approaches ? <ListChecks size={12} /> : <HelpCircle size={12} />}
+          title={clarify.loading
+            ? (clarify.qa.length || clarify.round > 0 ? '正在梳理…' : '正在分析你的需求…')
+            : clarify.approaches ? '选个做法开始' : `确认细节 ${clarify.round}/${clarify.maxRounds}`}
+          onClose={onDismissClarify}
+        >
+          {clarify.loading ? (
+            <div className="space-y-1.5">
+              {[0, 1].map((i) => (
+                <div key={i} className="rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-2 animate-pulse">
+                  <div className="h-3 w-1/3 bg-slate-200 dark:bg-slate-700 rounded" />
+                  <div className="h-2 w-2/3 bg-slate-100 dark:bg-slate-800 rounded mt-1.5" />
+                </div>
+              ))}
+            </div>
+          ) : clarify.question ? (
+            <>
+              <div className="text-[12px] font-medium text-slate-700 dark:text-slate-200 break-words">{clarify.question.question}</div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {clarify.question.options.map((opt) => (
+                  <button
+                    key={opt}
+                    onClick={() => onAnswerClarify?.(opt)}
+                    className="text-[11px] px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 text-slate-600 dark:text-slate-300 hover:border-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/20 hover:text-sky-700 dark:hover:text-sky-300 transition-colors text-left"
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-2">
+                <span className="text-[10px] text-slate-400 dark:text-slate-500">不在其中？直接在下面输入你的答案</span>
+                <button onClick={onSkipClarify} className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 shrink-0">
+                  <Play size={10} /> 跳过提问，直接生成
+                </button>
+              </div>
+            </>
+          ) : clarify.approaches ? (
+            <div className="space-y-1.5 max-h-56 overflow-auto">
+              {clarify.approaches.map((ap, i) => (
+                <button
+                  key={i}
+                  onClick={() => onPickApproach?.(ap)}
+                  className={`w-full text-left rounded-lg border px-2.5 py-2 transition-colors ${ap.recommended
+                    ? 'border-sky-400/70 bg-sky-50/60 dark:bg-sky-950/20 hover:bg-sky-100/70 dark:hover:bg-sky-950/40'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 hover:border-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/20'}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[12px] font-medium text-slate-700 dark:text-slate-200">{ap.title}</span>
+                    {ap.recommended && (
+                      <span className="flex items-center gap-0.5 text-[9px] px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300 font-medium shrink-0">
+                        <ThumbsUp size={9} /> 推荐
+                      </span>
+                    )}
+                  </div>
+                  {ap.pitch && <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 break-words">{ap.pitch}</div>}
+                  {ap.recommended && ap.reason && <div className="text-[9px] text-sky-600 dark:text-sky-400 mt-1 break-words">{ap.reason}</div>}
+                </button>
+              ))}
+              <div className="flex items-center gap-2 pt-0.5">
+                <button onClick={onSkipClarify} className="flex-1 flex items-center justify-center gap-1 text-[10px] text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 py-1">
+                  <Play size={10} /> 不选了，直接用我的描述生成
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </PanelCard>
+      )}
+
       {pendingPrompt && (
         <PanelCard
           accent={pendingPrompt.danger ? 'rose' : 'sky'}
@@ -346,7 +425,7 @@ export function ChatPanel({
         </PanelCard>
       )}
 
-      {!brainstorm && !pendingPrompt && contractPending && (
+      {!brainstorm && !clarify && !pendingPrompt && contractPending && (
         <PanelCard accent="emerald" icon={<FileText size={12} />} title="插件设定已就绪">
           <div className="text-[11px] text-slate-700 dark:text-slate-200 font-medium truncate">{contractPending.name}</div>
           <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 line-clamp-2 break-words">{contractPending.summary}</div>
