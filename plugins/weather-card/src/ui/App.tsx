@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CalendarDays, ClipboardCheck, CloudSun, Copy, Droplets, Eye, FileText, Loader2, MapPin, Search, Wind } from 'lucide-react'
+import { AlertCircle, CalendarDays, ClipboardCheck, CloudSun, Copy, Droplets, Eye, FileText, Loader2, MapPin, Moon, Search, Sun, Wind } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
 
 interface PluginInitData {
@@ -180,6 +180,10 @@ function isWeatherCardData(value: unknown): value is WeatherCardData {
 }
 
 const SAVED_LOCATION_KEY = 'lastCurrentLocation'
+const SAVED_CITY_KEY = 'lastQueriedCity'
+const SAVED_THEME_MODE_KEY = 'themeMode'
+
+type ThemeMode = 'auto' | 'light' | 'dark'
 
 interface SavedCurrentLocation {
   latitude: number
@@ -210,6 +214,7 @@ export default function App() {
   const [weather, setWeather] = useState<WeatherCardData | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [copyingFormat, setCopyingFormat] = useState<'markdown' | 'text' | null>(null)
+  const [themeMode, setThemeMode] = useState<ThemeMode>('auto')
   const [message, setMessage] = useState('输入城市名，生成一张包含当前天气与未来三日预报的轻量卡片。')
   const [messageType, setMessageType] = useState<'info' | 'success' | 'warning' | 'error'>('info')
   const { host, storage } = useMulby('weather-card')
@@ -220,15 +225,56 @@ export default function App() {
     return 'day'
   }, [weather])
 
+  // 主题：auto 模式下跟随宿主，手动模式下持久化选择
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const initialTheme = (params.get('theme') as 'light' | 'dark') || 'light'
-    document.documentElement.classList.toggle('dark', initialTheme === 'dark')
+    let cancelled = false
+    let disposeThemeChange: (() => void) | undefined
 
-    window.mulby?.onThemeChange?.((newTheme: 'light' | 'dark') => {
-      document.documentElement.classList.toggle('dark', newTheme === 'dark')
-    })
+    async function initTheme() {
+      // 1) 读取保存的主题偏好
+      let savedMode: ThemeMode = 'auto'
+      try {
+        const raw = await storage.get(SAVED_THEME_MODE_KEY)
+        if (raw === 'auto' || raw === 'light' || raw === 'dark') savedMode = raw
+      } catch { /* 读取失败保持 auto */ }
 
+      if (cancelled) return
+      setThemeMode(savedMode)
+
+      // 2) 根据模式设置初始 class
+      if (savedMode === 'auto') {
+        try {
+          const actual = await window.mulby?.theme?.getActual()
+          if (!cancelled) {
+            document.documentElement.classList.toggle('dark', actual === 'dark')
+          }
+        } catch {
+          document.documentElement.classList.remove('dark')
+        }
+      } else {
+        document.documentElement.classList.toggle('dark', savedMode === 'dark')
+      }
+
+      // 3) 监听宿主主题变化（仅 auto 模式生效）
+      disposeThemeChange = window.mulby?.onThemeChange?.((hostTheme: 'light' | 'dark') => {
+        setThemeMode((prev) => {
+          if (prev === 'auto') {
+            document.documentElement.classList.toggle('dark', hostTheme === 'dark')
+          }
+          return prev
+        })
+      })
+    }
+
+    void initTheme()
+
+    return () => {
+      cancelled = true
+      disposeThemeChange?.()
+    }
+  }, [])
+
+  useEffect(() => {
     window.mulby?.onPluginInit?.((data: PluginInitData) => {
       const initialInput = data.input?.trim()
       if (initialInput) setCity(initialInput)
@@ -238,9 +284,23 @@ export default function App() {
   useEffect(() => {
     let cancelled = false
 
-    async function restoreSavedLocation() {
+    async function restoreSavedData() {
       if (restoredLocationRef.current) return
       restoredLocationRef.current = true
+
+      // 优先恢复上次手动查询的城市名
+      try {
+        const savedCity = await storage.get(SAVED_CITY_KEY)
+        if (typeof savedCity === 'string' && savedCity.trim() && !city.trim() && !weather && !isLoading) {
+          await queryWeatherFromSavedCity(savedCity.trim())
+          return
+        }
+      } catch {
+        // 读取上次城市名失败时继续尝试 GPS 定位恢复。
+      }
+
+      // 其次恢复上次 GPS 定位
+      if (cancelled) return
 
       try {
         const saved = await storage.get(SAVED_LOCATION_KEY)
@@ -252,7 +312,7 @@ export default function App() {
       }
     }
 
-    void restoreSavedLocation()
+    void restoreSavedData()
 
     return () => {
       cancelled = true
@@ -299,12 +359,46 @@ export default function App() {
       setWeather(result.data)
       setMessageType('success')
       setMessage('天气卡片已生成')
+      await storage.set(SAVED_CITY_KEY, normalizedCity)
     } catch (error) {
       const friendlyMessage = friendlyErrorMessage(error)
       setWeather(null)
       setMessageType('error')
       setMessage(friendlyMessage)
       await notifyUser(friendlyMessage, 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function queryWeatherFromSavedCity(savedCity: string) {
+    if (isLoading) return
+
+    setIsLoading(true)
+    setMessageType('info')
+    setMessage(`正在查询上次城市「${savedCity}」的天气…`)
+
+    try {
+      const result = await host.call('getWeatherCardData', savedCity)
+      const hostError = extractHostCallError(result)
+
+      if (!result?.success) {
+        throw new Error(hostError ?? '上次城市天气查询未成功，请稍后重试')
+      }
+
+      if (!isWeatherCardData(result.data)) {
+        throw new Error('天气服务没有返回完整的天气数据，请稍后重试或更换城市。')
+      }
+
+      setCity(savedCity)
+      setWeather(result.data)
+      setMessageType('success')
+      setMessage(`已自动查询上次城市：${savedCity}`)
+    } catch (error) {
+      const friendlyMessage = friendlyErrorMessage(error, '无法查询上次城市天气，可手动输入城市名。')
+      setWeather(null)
+      setMessageType('warning')
+      setMessage(friendlyMessage)
     } finally {
       setIsLoading(false)
     }
@@ -424,6 +518,18 @@ export default function App() {
     void queryWeather()
   }
 
+  function handleToggleTheme() {
+    setThemeMode((prev) => {
+      const next: ThemeMode = prev === 'auto' ? 'light' : prev === 'light' ? 'dark' : 'auto'
+      document.documentElement.classList.toggle('dark', next === 'dark' || (next === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches))
+      storage.set(SAVED_THEME_MODE_KEY, next).catch(() => {})
+      return next
+    })
+  }
+
+  const themeIcon = themeMode === 'auto' ? null : themeMode === 'dark' ? <Sun size={16} /> : <Moon size={16} />
+  const themeLabel = themeMode === 'auto' ? '自动' : themeMode === 'dark' ? '浅色' : '暗色'
+
   async function copyWeatherCard(format: 'markdown' | 'text') {
     if (!weather || copyingFormat) return
 
@@ -452,7 +558,13 @@ export default function App() {
           <p className="eyebrow">Weather Card</p>
           <h1 className="header-title">天气卡片</h1>
         </div>
-        <span className="header-icon" aria-hidden="true">☁️</span>
+        <div className="header-actions">
+          <button className="theme-toggle" type="button" onClick={handleToggleTheme} title={`当前：${themeLabel} · 点击切换`}>
+            {themeIcon ?? <CloudSun size={16} />}
+            <span>{themeLabel}</span>
+          </button>
+          <span className="header-icon" aria-hidden="true">☁️</span>
+        </div>
       </header>
 
       <main className="main">

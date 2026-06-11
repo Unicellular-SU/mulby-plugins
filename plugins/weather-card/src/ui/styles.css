@@ -84,6 +84,32 @@ button:hover:not(:disabled) { transform: translateY(-1px); }
   letter-spacing: -0.05em;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border) !important;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.theme-toggle:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .header-icon {
   display: grid;
   place-items: center;
