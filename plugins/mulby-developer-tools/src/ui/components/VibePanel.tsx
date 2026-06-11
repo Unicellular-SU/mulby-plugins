@@ -4,7 +4,7 @@ import {
   Hammer, ShieldCheck, FolderOpen, AlertTriangle,
   RefreshCw, Image as ImageIcon, Rocket, FileText, Lightbulb,
   Pencil, Boxes, FileEdit, FileSearch, Terminal, Bug, Wrench, ListChecks,
-  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag, UploadCloud
+  ChevronUp, ChevronDown, History, RotateCcw, GitCommit, Tag, UploadCloud, Copy, MoreHorizontal
 } from 'lucide-react'
 import type { LogLevel } from '../types'
 import type { UseDeveloperResult } from '../hooks/useDeveloper'
@@ -2815,12 +2815,22 @@ export function VibePanel({
               <div className="flex items-center gap-2 min-w-0">
                 {contract ? (
                   <>
-                    <span className="w-6 h-6 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 flex items-center justify-center shrink-0">
-                      {iconDataUrl ? <img src={iconDataUrl} alt="图标" className="w-full h-full object-contain" /> : <Rocket size={13} className="text-emerald-500" />}
+                    <span className="w-7 h-7 rounded-md overflow-hidden border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-800/60 flex items-center justify-center shrink-0">
+                      {iconDataUrl ? <img src={iconDataUrl} alt="图标" className="w-full h-full object-contain" /> : <Rocket size={14} className="text-emerald-500" />}
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate leading-tight">{contract.displayName || '插件详情'}</span>
-                      {primaryTrigger(contract) && <span className="block text-[10px] text-slate-400 dark:text-slate-500 truncate leading-tight">触发：{primaryTrigger(contract)}</span>}
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate leading-tight">{contract.displayName || '插件详情'}</span>
+                        {(() => {
+                          const st = deriveDrawerStatus({ generating, building, built, loaded, buildFailed: !building && !built && !!buildLog, createdPath })
+                          return (
+                            <span className={`shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-medium ${st.chipCls}`}>
+                              <span className={`w-1 h-1 rounded-full ${st.dotCls}`} />{st.text}
+                            </span>
+                          )
+                        })()}
+                      </span>
+                      {primaryTrigger(contract) && <TriggerCopy trigger={primaryTrigger(contract)} />}
                     </span>
                   </>
                 ) : (
@@ -2910,6 +2920,94 @@ export function VibePanel({
 }
 
 // ============ 子组件 ============
+
+/** best-effort 复制到剪贴板（触发词等） */
+function copyText(text: string) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text)
+    }
+  } catch {
+    /* best-effort copy */
+  }
+}
+
+function fmtDuration(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return `${m}m${String(s % 60).padStart(2, '0')}s`
+}
+
+/** 抽屉头的阶段状态徽标：随构建/载入进展三态着色 */
+function deriveDrawerStatus(o: {
+  generating: boolean; building: boolean; built: boolean; loaded: boolean; buildFailed: boolean; createdPath: string
+}): { text: string; chipCls: string; dotCls: string } {
+  if (o.building || o.generating) return { text: '进行中', chipCls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', dotCls: 'bg-amber-500 animate-pulse' }
+  if (o.buildFailed) return { text: '构建失败', chipCls: 'bg-rose-500/10 text-rose-600 dark:text-rose-400', dotCls: 'bg-rose-500' }
+  if (o.loaded) return { text: '已就绪', chipCls: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', dotCls: 'bg-emerald-500' }
+  if (o.built) return { text: '已构建', chipCls: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', dotCls: 'bg-amber-500' }
+  if (o.createdPath) return { text: '已生成', chipCls: 'bg-slate-400/15 text-slate-500 dark:text-slate-400', dotCls: 'bg-slate-400' }
+  return { text: '契约待确认', chipCls: 'bg-slate-400/15 text-slate-500 dark:text-slate-400', dotCls: 'bg-slate-400' }
+}
+
+/** 生成流水线阶段（进度页进度条） */
+const GEN_PIPELINE: Array<{ phase: EventPhase; label: string }> = [
+  { phase: 'plan', label: '规划' },
+  { phase: 'scaffold', label: '脚手架' },
+  { phase: 'manifest', label: '契约' },
+  { phase: 'minimal', label: '最小' },
+  { phase: 'full', label: '完整' }
+]
+
+/** 时间线左轨色条：按事件类型着色 */
+const KIND_BORDER: Record<EventKind, string> = {
+  read: 'border-sky-400/60', write: 'border-emerald-400/60', build: 'border-amber-400/60',
+  load: 'border-indigo-400/60', error: 'border-rose-400/70', note: 'border-slate-300/50 dark:border-slate-600/50', ai: 'border-emerald-400/60'
+}
+
+/** 触发词一键复制（带复制成功反馈） */
+function TriggerCopy({ trigger }: { trigger: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => { copyText(trigger); setCopied(true); setTimeout(() => setCopied(false), 1200) }}
+      className="flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors max-w-full leading-tight"
+      title="复制触发词到剪贴板"
+    >
+      <span className="truncate">触发：{trigger}</span>
+      {copied ? <Check size={10} className="shrink-0 text-emerald-500" /> : <Copy size={10} className="shrink-0 opacity-60" />}
+    </button>
+  )
+}
+
+/** 溢出操作菜单（交付页次要操作收纳） */
+function MoreMenu({ items }: { items: Array<{ icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean; disabled?: boolean }> }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+  if (!items.length) return null
+  return (
+    <div className="relative" ref={ref}>
+      <button className="btn-ghost !px-2" onClick={() => setOpen((v) => !v)} title="更多操作"><MoreHorizontal size={16} /></button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[10rem] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1">
+          {items.map((it, i) => (
+            <button key={i} disabled={it.disabled} onClick={() => { setOpen(false); it.onClick() }}
+              className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-40 ${it.danger ? 'text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-300'}`}>
+              <span className="shrink-0">{it.icon}</span>{it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /** 插件详情抽屉的分区 Tab 按钮 */
 function DrawerTab({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
@@ -3018,15 +3116,13 @@ function DescribeStage({
 function ContractStage({ contract, setContract, editable, created, applying, onApply }: { contract: VibeContract; setContract: (c: VibeContract) => void; editable: boolean; created?: boolean; applying?: boolean; onApply?: () => void }) {
   return (
     <div className="w-full space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/15 to-teal-500/10 border border-emerald-500/20 flex items-center justify-center">
-          <FileEdit size={20} className="text-emerald-500" />
-        </div>
-        <div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{contract.isEdit ? '确认改造契约' : created ? '插件契约（可修改）' : '确认插件契约'}</h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">{created ? '改完点下方「应用修改并重建」，按契约重写 manifest.json' : 'manifest.json 将由这份契约确定性生成；AI 只负责实现代码'}</p>
-        </div>
-      </div>
+      <p className="text-[12px] text-slate-500 dark:text-slate-400 leading-relaxed">
+        {contract.isEdit
+          ? '确认改造契约——manifest.json 将按这份契约确定性重写，AI 只负责实现代码。'
+          : created
+            ? '改完点下方「应用修改并重建」，按契约重写 manifest.json。'
+            : 'manifest.json 将由这份契约确定性生成；AI 只负责实现代码。'}
+      </p>
 
       {contract.isEdit && contract.editSummary && (
         <div className="rounded-lg bg-amber-500/5 border border-amber-500/30 p-3 text-[12px] text-amber-700 dark:text-amber-300">
@@ -3061,9 +3157,9 @@ const KIND_ICON: Record<EventKind, React.ReactNode> = {
 function Timeline({ events, compact }: { events: TimelineEvent[]; compact?: boolean }) {
   const list = compact ? events.slice(-8) : events
   return (
-    <ul className={`space-y-1.5 ${compact ? 'max-h-40' : 'max-h-[420px]'} overflow-auto`}>
+    <ul className={`space-y-1 ${compact ? 'max-h-40' : 'max-h-[420px]'} overflow-auto`}>
       {list.map((e) => (
-        <li key={e.id} className="flex items-start gap-2 text-[12px]">
+        <li key={e.id} className={`flex items-start gap-2 text-[12px] pl-2 py-0.5 border-l-2 ${KIND_BORDER[e.kind]}`}>
           <span className="mt-0.5 shrink-0">{KIND_ICON[e.kind]}</span>
           <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">{PHASE_LABEL[e.phase]}</span>
           <span className={`min-w-0 ${e.kind === 'error' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -3072,31 +3168,88 @@ function Timeline({ events, compact }: { events: TimelineEvent[]; compact?: bool
           </span>
         </li>
       ))}
-      {list.length === 0 && <li className="text-[12px] text-slate-400 dark:text-slate-500">等待开始…</li>}
+      {list.length === 0 && <li className="text-[12px] text-slate-400 dark:text-slate-500 pl-2">等待开始…</li>}
     </ul>
   )
 }
 
 function GenerateStage({ contract, events, toolCalls, narration, createdPath, busy }: { contract: VibeContract | null; events: TimelineEvent[]; toolCalls: number; narration: string; createdPath: string; busy: boolean }) {
+  const [now, setNow] = useState(Date.now())
+  const [narrOpen, setNarrOpen] = useState(false)
+  useEffect(() => {
+    if (!busy) return
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [busy])
+
+  const seen = new Set(events.map((e) => e.phase))
+  const lastPhase = events.length ? events[events.length - 1].phase : null
+  const current = events.length ? events[events.length - 1] : null
+  const writeCount = events.filter((e) => e.kind === 'write').length
+  const firstTs = events.length ? events[0].ts : null
+  const lastTs = events.length ? events[events.length - 1].ts : null
+  const elapsedMs = firstTs != null ? (busy ? now : (lastTs ?? now)) - firstTs : 0
+
   return (
-    <div className="w-full space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500/15 to-teal-500/10 border border-emerald-500/20 flex items-center justify-center">
-          {busy ? <Loader2 size={20} className="text-emerald-500 animate-spin" /> : <Wand2 size={20} className="text-emerald-500" />}
+    <div className="w-full space-y-4">
+      {contract && (
+        <p className="text-[12px] leading-relaxed">
+          <span className="font-medium text-slate-600 dark:text-slate-300">{busy ? 'AI 正在生成…' : '生成完成'}</span>
+          <span className="text-slate-400 dark:text-slate-500"> · {contractSummary(contract)}</span>
+        </p>
+      )}
+
+      {/* 阶段进度条：规划→脚手架→契约→最小→完整 */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2.5">
+        <div className="flex items-center">
+          {GEN_PIPELINE.map((st, i) => {
+            const isCurrent = busy && st.phase === lastPhase
+            const done = seen.has(st.phase) && !isCurrent
+            return (
+              <div key={st.phase} className={`flex items-center ${i < GEN_PIPELINE.length - 1 ? 'flex-1' : ''}`}>
+                <span className={`flex items-center gap-1 text-[10px] font-medium whitespace-nowrap ${isCurrent ? 'text-emerald-600 dark:text-emerald-400' : done ? 'text-slate-500 dark:text-slate-400' : 'text-slate-300 dark:text-slate-600'}`}>
+                  <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${isCurrent ? 'bg-emerald-500 text-white' : done ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-slate-200 dark:bg-slate-700'}`}>
+                    {isCurrent ? <Loader2 size={9} className="animate-spin" /> : done ? <Check size={9} /> : <span className="w-1 h-1 rounded-full bg-current opacity-50" />}
+                  </span>
+                  {st.label}
+                </span>
+                {i < GEN_PIPELINE.length - 1 && <span className={`flex-1 h-px mx-1 ${done ? 'bg-emerald-500/30' : 'bg-slate-200 dark:bg-slate-700'}`} />}
+              </div>
+            )
+          })}
         </div>
-        <div>
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{busy ? 'AI 正在生成…' : '生成完成'}</h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500">{contract ? contractSummary(contract) : ''}</p>
+        <div className="flex items-center gap-2 text-[10px] text-slate-400 dark:text-slate-500">
+          <span className="flex items-center gap-1"><Terminal size={11} /> {events.length} 事件</span>
+          <span>· {toolCalls} 次工具调用</span>
+          {writeCount > 0 && <span>· 写入 {writeCount} 文件</span>}
+          {elapsedMs > 0 && <span className="ml-auto mono">{fmtDuration(elapsedMs)}</span>}
         </div>
       </div>
 
+      {/* 当前活动：最新一条事件置顶高亮 */}
+      {busy && current && (
+        <div className="flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[12px]">
+          <Loader2 size={13} className="animate-spin text-emerald-500 shrink-0" />
+          <span className="shrink-0">{KIND_ICON[current.kind]}</span>
+          <span className="min-w-0 truncate text-slate-600 dark:text-slate-300">{current.text}{current.detail ? ` · ${current.detail}` : ''}</span>
+        </div>
+      )}
+
+      {/* 时间线 */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-2">
         <div className="flex items-center justify-between text-[12px] text-slate-500 dark:text-slate-400">
-          <span className="flex items-center gap-1.5"><Terminal size={13} /> 活动时间线（{events.length} 事件 · {toolCalls} 次工具调用）</span>
-          {createdPath && <span className="mono truncate max-w-[55%]">{createdPath}</span>}
+          <span className="flex items-center gap-1.5"><Terminal size={13} /> 活动时间线</span>
+          {createdPath && <span className="mono truncate max-w-[55%] text-[11px]">{createdPath}</span>}
         </div>
         <Timeline events={events} />
-        {narration && <p className="text-[11px] text-slate-400 dark:text-slate-500 border-t border-slate-200/70 dark:border-slate-800/70 pt-2 whitespace-pre-wrap line-clamp-5">{narration}</p>}
+        {narration && (
+          <div className="border-t border-slate-200/70 dark:border-slate-800/70 pt-2">
+            <p className={`text-[11px] text-slate-400 dark:text-slate-500 whitespace-pre-wrap ${narrOpen ? '' : 'line-clamp-5'}`}>{narration}</p>
+            <button onClick={() => setNarrOpen((v) => !v)} className="mt-1 text-[10px] text-emerald-600 dark:text-emerald-400 hover:underline">
+              {narrOpen ? '收起' : '展开全部'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -3138,46 +3291,68 @@ function DeliverStage({
   const isEdit = !!contract.isEdit
   const trigger = primaryTrigger(contract)
   const confErrors = (conformance?.issues || []).filter((i) => i.level === 'error')
+  const rebuildIsPrimary = !buildFailed && !loaded
+
+  // 状态横幅：把原本散落的「成功 / 失败 / 已构建未载入」三段提示合并为一条三态横幅
+  const banner = (() => {
+    if (building) return { tone: 'busy' as const, icon: <Loader2 size={16} className="animate-spin text-emerald-500" />, title: '构建并载入中…', desc: '' as React.ReactNode }
+    if (buildFailed) return { tone: 'error' as const, icon: <AlertTriangle size={16} className="text-rose-500" />, title: '构建未通过', desc: '点下方「AI 修复并重试」可让 AI 读取报错并自动修复。' as React.ReactNode }
+    if (loaded && confErrors.length) return { tone: 'warn' as const, icon: <ShieldCheck size={16} className="text-amber-500" />, title: '已载入，但契约校验未通过', desc: `契约与代码有 ${confErrors.length} 处不一致，见下方「契约一致性」。` as React.ReactNode }
+    if (loaded) return { tone: 'ok' as const, icon: <Check size={16} className="text-emerald-500" />, title: isEdit ? '改造已生效 🎉' : '插件已就绪 🎉', desc: (<>在 Mulby 主输入框输入 <span className="mono badge badge-green">{trigger}</span> 即可打开{isEdit ? '改造后的' : '你的'}插件。</>) as React.ReactNode }
+    if (built) return { tone: 'warn' as const, icon: <ShieldCheck size={16} className="text-amber-500" />, title: '已构建但未自动载入', desc: '可点下方「重新构建」或在工作台手动刷新。' as React.ReactNode }
+    return { tone: 'default' as const, icon: <Rocket size={16} className="text-emerald-500" />, title: '构建与交付', desc: '' as React.ReactNode }
+  })()
+  const bannerCls = banner.tone === 'error' ? 'border-rose-500/30 bg-rose-500/5'
+    : banner.tone === 'warn' ? 'border-amber-500/30 bg-amber-500/5'
+    : banner.tone === 'ok' ? 'border-emerald-500/30 bg-emerald-500/5'
+    : 'border-slate-200 dark:border-slate-700'
+
+  // 次要操作收进「⋯更多」：重新构建（非主操作时）/ 图标 / 打开目录
+  const moreItems = [
+    ...(!rebuildIsPrimary ? [{ icon: <Hammer size={14} />, label: '重新构建', onClick: onRebuild, disabled: building }] : []),
+    { icon: iconBusy ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />, label: iconDataUrl ? '重做图标' : '生成图标', onClick: onRegenIcon, disabled: iconBusy },
+    { icon: <FolderOpen size={14} />, label: '打开目录', onClick: onOpenDir }
+  ]
+
   return (
-    <div className="w-full space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/15 to-teal-500/10 border border-emerald-500/20 flex items-center justify-center overflow-hidden shrink-0">
-          {building ? <Loader2 size={24} className="text-emerald-500 animate-spin" />
-            : iconDataUrl ? <img src={iconDataUrl} alt="插件图标" className="w-full h-full object-contain" />
-            : <Rocket size={24} className="text-emerald-500" />}
-          {iconBusy && (
-            <div className="absolute inset-0 bg-slate-900/40 flex items-center justify-center">
-              <Loader2 size={18} className="text-white animate-spin" />
-            </div>
-          )}
-        </div>
+    <div className="w-full space-y-4">
+      {/* 状态横幅（替代图标大头，三态合一；带图标预览） */}
+      <div className={`rounded-xl border p-3 flex items-start gap-2.5 ${bannerCls}`}>
+        <span className="relative w-9 h-9 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 flex items-center justify-center overflow-hidden shrink-0">
+          {iconDataUrl ? <img src={iconDataUrl} alt="插件图标" className="w-full h-full object-contain" /> : banner.icon}
+          {iconBusy && <span className="absolute inset-0 bg-slate-900/40 flex items-center justify-center"><Loader2 size={14} className="text-white animate-spin" /></span>}
+        </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">
-            {building ? '构建并载入中…'
-              : buildFailed ? '构建失败'
-              : loaded && confErrors.length ? '已载入，但契约校验未通过'
-              : loaded ? (isEdit ? '改造已生效 🎉' : '插件已就绪 🎉')
-              : '构建与交付'}
-          </h2>
-          <p className="text-[11px] text-slate-400 dark:text-slate-500 mono truncate">{createdPath}</p>
+          <div className="flex items-center gap-1.5">
+            {iconDataUrl && <span className="shrink-0">{banner.icon}</span>}
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{banner.title}</span>
+          </div>
+          {banner.desc && <div className="text-[12px] text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">{banner.desc}</div>}
+          {createdPath && <div className="text-[10px] text-slate-400 dark:text-slate-500 mono truncate mt-0.5">{createdPath}</div>}
         </div>
       </div>
 
-      {/* 统一操作条：把原本散落在成功/失败/各卡里的按钮收敛到一处，按状态显隐，避免重复 */}
+      {/* 失败时的构建日志就近显示在横幅下 */}
+      {buildFailed && buildLog && (
+        <pre className="text-[11px] mono text-rose-600/90 dark:text-rose-300/80 bg-black/5 dark:bg-black/30 rounded-lg p-2.5 max-h-40 overflow-auto whitespace-pre-wrap">{buildLog.slice(-2000)}</pre>
+      )}
+
+      {/* 操作区：按状态只突出 1~2 个主操作，其余收进「⋯更多」 */}
       {!building && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           {buildFailed && (
-            <button className="btn-primary" onClick={onRepair} disabled={repairing}>{repairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {repairing ? 'AI 修复中…' : 'AI 修复并重试'}</button>
+            <button className="btn-primary flex-1 justify-center" onClick={onRepair} disabled={repairing}>{repairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {repairing ? 'AI 修复中…' : 'AI 修复并重试'}</button>
           )}
           {loaded && !buildFailed && (
-            <button className="btn-primary" onClick={onPublish} title="提交 PR 发布到插件仓库"><UploadCloud size={15} /> 发布</button>
+            <button className="btn-primary flex-1 justify-center" onClick={onPublish} title="提交 PR 发布到插件仓库"><UploadCloud size={15} /> 发布</button>
           )}
           {loaded && !buildFailed && (
             <button className="btn-secondary" onClick={onRunSmoke} disabled={smoking} title="用契约里的示例输入真实调用每个功能一次，验证「能执行」而不只是「能编译」">{smoking ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />} 运行验证</button>
           )}
-          <button className="btn-secondary" onClick={onRebuild} disabled={building}><Hammer size={15} /> 重新构建</button>
-          <button className="btn-ghost" onClick={onRegenIcon} disabled={iconBusy} title="让 AI 按插件主题与功能重新设计图标（覆盖当前图标）">{iconBusy ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />} {iconDataUrl ? '重做图标' : '生成图标'}</button>
-          <button className="btn-ghost" onClick={onOpenDir}><FolderOpen size={15} /> 打开目录</button>
+          {rebuildIsPrimary && (
+            <button className="btn-primary flex-1 justify-center" onClick={onRebuild} disabled={building}><Hammer size={15} /> 重新构建</button>
+          )}
+          <MoreMenu items={moreItems} />
         </div>
       )}
 
@@ -3204,9 +3379,10 @@ function DeliverStage({
           label={`运行验证：${smoke.length ? smokeSummary(smoke) : '用示例输入真实跑一遍主流程'}`}
           manual onClick={onToggleCoreVerified}
         />
+        {loaded && smoke.length > 0 && <SmokeList smoke={smoke} />}
       </div>
 
-      {/* 契约一致性问题：error 级会阻断「就绪」，可一键让 AI 修复 */}
+      {/* 契约一致性问题（折叠卡，error 默认展开）：error 级会阻断「就绪」，可一键让 AI 修复 */}
       {conformance && conformance.issues.length > 0 && (
         <ConformanceCard conformance={conformance} confRepairing={confRepairing} onRepair={onRepairConformance} disabled={building || expanding || repairing || rollingBack} />
       )}
@@ -3216,16 +3392,6 @@ function DeliverStage({
 
       {/* 版本历史：每次生成/迭代/打包自动记录，可查看 diff 与一键回滚 */}
       <VersionHistoryCard versions={versions} vcsAvailable={vcsAvailable} restoringHash={restoringHash} disabled={building || expanding || repairing} onRefresh={onRefreshVersions} onDiff={onVersionDiff} onRestore={onRestoreVersion} />
-
-      {/* 成功 */}
-      {loaded && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
-          <div className="text-sm text-slate-700 dark:text-slate-200">
-            在 Mulby 主输入框输入 <span className="mono badge badge-green">{trigger}</span> 即可打开{isEdit ? '改造后的' : '你的'}插件。上方「运行验证」可用示例输入真实跑一遍。
-          </div>
-          {smoke.length > 0 && <SmokeList smoke={smoke} />}
-        </div>
-      )}
 
       {/* 实时调试回路 */}
       {(built || loaded) && (
@@ -3239,20 +3405,6 @@ function DeliverStage({
               <button className="btn-secondary shrink-0" onClick={onEnableDevtools} disabled={devtoolsBusy}>{devtoolsBusy ? <Loader2 size={14} className="animate-spin" /> : <Bug size={14} />} 开启 DevTools</button>
             </div>
           )}
-        </div>
-      )}
-
-      {/* 失败：AI 修复 */}
-      {buildFailed && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm text-rose-600 dark:text-rose-400"><AlertTriangle size={15} /> 构建未通过，点上方「AI 修复并重试」可让 AI 读取报错并自动修复。</div>
-          {buildLog && <pre className="text-[11px] mono text-rose-600/90 dark:text-rose-300/80 bg-black/5 dark:bg-black/30 rounded-lg p-2.5 max-h-40 overflow-auto whitespace-pre-wrap">{buildLog.slice(-2000)}</pre>}
-        </div>
-      )}
-
-      {built && !loaded && !building && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-[12px] text-amber-700 dark:text-amber-300 flex items-center gap-2">
-          <ShieldCheck size={14} /> 已构建但未自动载入，可点上方「重新构建」或在工作台手动刷新。
         </div>
       )}
     </div>
@@ -3301,33 +3453,39 @@ function ConformanceCard({ conformance, confRepairing, onRepair, disabled }: {
   const errors = conformance.issues.filter((i) => i.level === 'error')
   const others = conformance.issues.filter((i) => i.level !== 'error')
   const hasError = errors.length > 0
+  const [open, setOpen] = useState(hasError)
   return (
-    <div className={`rounded-xl border p-4 space-y-3 ${hasError ? 'border-rose-500/30 bg-rose-500/5' : 'border-amber-500/25 bg-amber-500/5'}`}>
-      <div className="flex items-center gap-2 text-sm">
+    <div className={`rounded-xl border overflow-hidden ${hasError ? 'border-rose-500/30' : 'border-amber-500/25'}`}>
+      <button className={`w-full px-4 py-2.5 flex items-center gap-2 ${hasError ? 'hover:bg-rose-500/5' : 'hover:bg-amber-500/5'}`} onClick={() => setOpen((v) => !v)}>
         <ShieldCheck size={15} className={hasError ? 'text-rose-500' : 'text-amber-500'} />
-        <span className={hasError ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300'}>
-          {hasError ? `契约与代码有 ${errors.length} 处不一致，插件可能无法正确装载/运行` : '契约一致性提示'}
+        <span className={`text-[13px] ${hasError ? 'text-rose-600 dark:text-rose-400' : 'text-amber-600 dark:text-amber-300'}`}>
+          {hasError ? `契约一致性 · ${errors.length} 处需修复` : '契约一致性提示'}
         </span>
-      </div>
-      <ul className="space-y-1.5">
-        {[...errors, ...others].map((i, idx) => {
-          const meta = CONF_META[i.level]
-          return (
-            <li key={idx} className="flex items-start gap-2 text-[12px]">
-              <span className="mt-0.5 shrink-0">{meta.icon}</span>
-              <span className="min-w-0">
-                <span className={meta.cls}>{meta.label}</span>
-                <span className="text-slate-600 dark:text-slate-300"> · {i.message}</span>
-                {i.hint && <span className="block text-[11px] text-slate-400 dark:text-slate-500">建议：{i.hint}</span>}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-      {hasError && (
-        <button className="btn-primary" onClick={onRepair} disabled={disabled || confRepairing}>
-          {confRepairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {confRepairing ? 'AI 修复中…' : 'AI 修复一致性问题'}
-        </button>
+        {open ? <ChevronUp size={14} className="ml-auto text-slate-400" /> : <ChevronDown size={14} className="ml-auto text-slate-400" />}
+      </button>
+      {open && (
+        <div className={`px-4 pb-4 pt-1 space-y-3 border-t ${hasError ? 'border-rose-500/15' : 'border-amber-500/15'}`}>
+          <ul className="space-y-1.5">
+            {[...errors, ...others].map((i, idx) => {
+              const meta = CONF_META[i.level]
+              return (
+                <li key={idx} className="flex items-start gap-2 text-[12px]">
+                  <span className="mt-0.5 shrink-0">{meta.icon}</span>
+                  <span className="min-w-0">
+                    <span className={meta.cls}>{meta.label}</span>
+                    <span className="text-slate-600 dark:text-slate-300"> · {i.message}</span>
+                    {i.hint && <span className="block text-[11px] text-slate-400 dark:text-slate-500">建议：{i.hint}</span>}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          {hasError && (
+            <button className="btn-primary" onClick={onRepair} disabled={disabled || confRepairing}>
+              {confRepairing ? <Loader2 size={15} className="animate-spin" /> : <Wrench size={15} />} {confRepairing ? 'AI 修复中…' : 'AI 修复一致性问题'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

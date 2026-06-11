@@ -1,4 +1,4 @@
-import { Plus, Trash2, ChevronDown, Wrench, Boxes, SlidersHorizontal, AppWindow, Globe, Check } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, Wrench, Boxes, SlidersHorizontal, AppWindow, Globe, Check, FileText, ShieldCheck, Image as ImageIcon } from 'lucide-react'
 import { useState } from 'react'
 import {
   type VibeContract, type VibeFeature, type FeatureMode, type VibeTrigger, type TriggerType,
@@ -22,11 +22,9 @@ const MODES: Array<{ value: FeatureMode; label: string }> = [
 
 export function ContractEditor({ contract, onChange, editable, lockName }: Props) {
   const nameLocked = contract.isEdit || !!lockName
-  const [showTools, setShowTools] = useState(contract.tools.length > 0)
   const [showSensitive, setShowSensitive] = useState(
     () => PERMISSION_OPTIONS.some((o) => o.sensitive && contract.permissions[o.key])
   )
-  const [showAdv, setShowAdv] = useState(false)
 
   const patch = (p: Partial<VibeContract>) => onChange({ ...contract, ...p })
   const patchWindow = (p: Partial<VibeWindow>) => patch({ window: { ...(contract.window || {}), ...p } })
@@ -46,6 +44,7 @@ export function ContractEditor({ contract, onChange, editable, lockName }: Props
     return isFinite(n) && n > 0 ? n : undefined
   }
   const showWindow = contract.template === 'react' || contract.features.some((f) => f.mode === 'detached')
+  const permCount = PERMISSION_OPTIONS.filter((o) => contract.permissions[o.key]).length
 
   const setFeature = (idx: number, f: Partial<VibeFeature>) => {
     const features = contract.features.map((cur, i) => (i === idx ? { ...cur, ...f } : cur))
@@ -64,17 +63,18 @@ export function ContractEditor({ contract, onChange, editable, lockName }: Props
     setFeature(fi, { triggers: contract.features[fi].triggers.filter((_, i) => i !== ti) })
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-700 divide-y divide-slate-200 dark:divide-slate-800">
+    <div className="space-y-3">
       {errors.length > 0 && (
-        <div className="p-3 bg-rose-50 dark:bg-rose-900/20">
+        <div className="rounded-xl border border-rose-500/30 bg-rose-50 dark:bg-rose-900/20 p-3">
           <div className="text-[11px] font-medium text-rose-600 dark:text-rose-400 mb-1">契约还有 {errors.length} 处需修正后才能生成：</div>
           <ul className="text-[11px] text-rose-500 dark:text-rose-400 list-disc pl-4 space-y-0.5">
             {errors.map((e, i) => <li key={i}>{e}</li>)}
           </ul>
         </div>
       )}
+
       {/* 基础信息 */}
-      <div className="p-4 space-y-3">
+      <Section icon={<FileText size={14} />} title="基础信息">
         <div className="grid grid-cols-2 gap-3">
           <L label={nameLocked ? '插件名（id，不可改）' : '插件名 (id)'}>
             <input className="input-base mono" value={contract.name} disabled={!editable || nameLocked}
@@ -122,16 +122,11 @@ export function ContractEditor({ contract, onChange, editable, lockName }: Props
             </div>
           </L>
         )}
-      </div>
+      </Section>
 
       {/* 功能 features */}
-      <div className="p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400">功能与触发（features）</span>
-          {editable && (
-            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={addFeature}><Plus size={13} /> 加功能</button>
-          )}
-        </div>
+      <Section icon={<Boxes size={14} />} title="功能与触发" count={contract.features.length || undefined}
+        action={editable ? <button className="btn-ghost !px-2 !py-1 text-xs" onClick={addFeature}><Plus size={13} /> 加功能</button> : undefined}>
         <div className="space-y-2.5">
           {contract.features.map((f, idx) => (
             <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 space-y-2">
@@ -181,160 +176,148 @@ export function ContractEditor({ contract, onChange, editable, lockName }: Props
             <div className="text-[12px] text-slate-400 dark:text-slate-500 italic">至少需要一个功能入口</div>
           )}
         </div>
-      </div>
+      </Section>
 
       {/* 权限 */}
-      <div className="p-4 space-y-2">
-        <span className="text-xs font-medium text-slate-500 dark:text-slate-400">权限（仅勾选确实需要的）</span>
-        <div className="flex flex-wrap gap-2">
-          {PERMISSION_OPTIONS.filter((o) => !o.sensitive).map((opt) => (
-            <PermPill key={opt.key} label={opt.label} on={!!contract.permissions[opt.key]} editable={editable}
-              onToggle={() => patch({ permissions: { ...contract.permissions, [opt.key]: !contract.permissions[opt.key] } })} />
-          ))}
-        </div>
-        <button className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
-          onClick={() => setShowSensitive((v) => !v)}>
-          敏感权限（麦克风/摄像头/屏幕/定位/执行命令…）
-          <ChevronDown size={12} className={`transition-transform ${showSensitive ? 'rotate-180' : ''}`} />
-        </button>
-        {showSensitive && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {PERMISSION_OPTIONS.filter((o) => o.sensitive).map((opt) => (
-              <PermPill key={opt.key} label={opt.label} on={!!contract.permissions[opt.key]} editable={editable} sensitive
+      <Section icon={<ShieldCheck size={14} />} title="权限" count={permCount || undefined}>
+        <div className="space-y-2">
+          <span className="block text-[11px] text-slate-400 dark:text-slate-500">仅勾选确实需要的</span>
+          <div className="flex flex-wrap gap-2">
+            {PERMISSION_OPTIONS.filter((o) => !o.sensitive).map((opt) => (
+              <PermPill key={opt.key} label={opt.label} on={!!contract.permissions[opt.key]} editable={editable}
                 onToggle={() => patch({ permissions: { ...contract.permissions, [opt.key]: !contract.permissions[opt.key] } })} />
             ))}
           </div>
-        )}
-        {/* 命令执行（结构化，schema 推荐，优先于 legacy「执行命令」runCommand） */}
-        <div className="pt-1.5 mt-1 space-y-1.5 border-t border-dashed border-slate-200 dark:border-slate-700">
-          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">命令执行（需跑系统命令才开；推荐用它而非旧版「执行命令」）</span>
-          {(['direct', 'ai'] as const).map((scope) => {
-            const sc = contract.commandExecution?.[scope]
-            const lbl = scope === 'direct' ? '插件代码直接执行' : 'AI 生成命令执行'
-            return (
-              <div key={scope} className="flex flex-wrap items-center gap-2">
-                <MiniChk label={lbl} on={!!sc?.enabled} editable={editable} onToggle={() => patchCmdExec(scope, { enabled: !sc?.enabled })} />
-                {sc?.enabled && (['defaultProfile', 'maxProfile'] as const).map((pk) => (
-                  <label key={pk} className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
-                    {pk === 'defaultProfile' ? '默认' : '上限'}
-                    <select className="input-base !py-0.5 text-[10px] !w-auto" value={sc[pk] || (pk === 'defaultProfile' ? 'sandbox' : 'workspace')} disabled={!editable}
-                      onChange={(e) => patchCmdExec(scope, { [pk]: e.target.value as ExecProfile })}>
-                      {EXEC_PROFILES.map((p) => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* 高级设置：窗口 / 行为 / 平台 */}
-      <div className="p-4 space-y-3">
-        <button className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-          onClick={() => setShowAdv((v) => !v)}>
-          <SlidersHorizontal size={13} /> 高级设置（窗口尺寸 / 行为 / 平台）
-          <ChevronDown size={13} className={`transition-transform ${showAdv ? 'rotate-180' : ''}`} />
-        </button>
-        {showAdv && (
-          <div className="space-y-3.5">
-            {showWindow && (
-              <div className="space-y-1.5">
-                <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><AppWindow size={12} /> 窗口</span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {([['width', '宽'], ['height', '高'], ['minWidth', '最小宽'], ['minHeight', '最小高'], ['maxWidth', '最大宽'], ['maxHeight', '最大高']] as const).map(([key, lbl]) => (
-                    <L key={key} label={lbl} mini>
-                      <input className="input-base mono !py-1 text-xs" type="number" min={1} value={numField(contract.window?.[key])} disabled={!editable}
-                        onChange={(e) => patchWindow({ [key]: parseNum(e.target.value) } as Partial<VibeWindow>)} />
-                    </L>
+          <button className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
+            onClick={() => setShowSensitive((v) => !v)}>
+            敏感权限（麦克风/摄像头/屏幕/定位/执行命令…）
+            <ChevronDown size={12} className={`transition-transform ${showSensitive ? 'rotate-180' : ''}`} />
+          </button>
+          {showSensitive && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {PERMISSION_OPTIONS.filter((o) => o.sensitive).map((opt) => (
+                <PermPill key={opt.key} label={opt.label} on={!!contract.permissions[opt.key]} editable={editable} sensitive
+                  onToggle={() => patch({ permissions: { ...contract.permissions, [opt.key]: !contract.permissions[opt.key] } })} />
+              ))}
+            </div>
+          )}
+          {/* 命令执行（结构化，schema 推荐，优先于 legacy「执行命令」runCommand） */}
+          <div className="pt-1.5 mt-1 space-y-1.5 border-t border-dashed border-slate-200 dark:border-slate-700">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">命令执行（需跑系统命令才开；推荐用它而非旧版「执行命令」）</span>
+            {(['direct', 'ai'] as const).map((scope) => {
+              const sc = contract.commandExecution?.[scope]
+              const lbl = scope === 'direct' ? '插件代码直接执行' : 'AI 生成命令执行'
+              return (
+                <div key={scope} className="flex flex-wrap items-center gap-2">
+                  <MiniChk label={lbl} on={!!sc?.enabled} editable={editable} onToggle={() => patchCmdExec(scope, { enabled: !sc?.enabled })} />
+                  {sc?.enabled && (['defaultProfile', 'maxProfile'] as const).map((pk) => (
+                    <label key={pk} className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                      {pk === 'defaultProfile' ? '默认' : '上限'}
+                      <select className="input-base !py-0.5 text-[10px] !w-auto" value={sc[pk] || (pk === 'defaultProfile' ? 'sandbox' : 'workspace')} disabled={!editable}
+                        onChange={(e) => patchCmdExec(scope, { [pk]: e.target.value as ExecProfile })}>
+                        {EXEC_PROFILES.map((p) => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </label>
                   ))}
                 </div>
-                <L label="窗口类型" mini>
-                  <select className="input-base !py-1 text-xs" value={contract.window?.type || 'default'} disabled={!editable}
-                    onChange={(e) => patchWindow({ type: e.target.value as VibeWindow['type'] })}>
-                    <option value="default">默认（带标题栏）</option>
-                    <option value="borderless">无边框</option>
-                    <option value="fullscreen">全屏</option>
-                  </select>
-                </L>
-                <div className="flex flex-wrap gap-2 pt-0.5">
-                  <MiniChk label="标题栏" on={contract.window?.titleBar !== false} editable={editable} onToggle={() => patchWindow({ titleBar: contract.window?.titleBar === false ? true : false })} />
-                  <MiniChk label="可缩放" on={contract.window?.resizable !== false} editable={editable} onToggle={() => patchWindow({ resizable: contract.window?.resizable === false ? true : false })} />
-                  <MiniChk label="置顶" on={!!contract.window?.alwaysOnTop} editable={editable} onToggle={() => patchWindow({ alwaysOnTop: !contract.window?.alwaysOnTop })} />
-                  <MiniChk label="透明" on={!!contract.window?.transparent} editable={editable} onToggle={() => patchWindow({ transparent: !contract.window?.transparent })} />
-                </div>
-              </div>
-            )}
+              )
+            })}
+          </div>
+        </div>
+      </Section>
+
+      {/* 高级设置：窗口 / 行为 / 平台 */}
+      <Section icon={<SlidersHorizontal size={14} />} title="高级设置（窗口 / 行为 / 平台）" collapsible defaultOpen={false}>
+        <div className="space-y-3.5">
+          {showWindow && (
             <div className="space-y-1.5">
-              <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">行为</span>
-              <div className="flex flex-wrap gap-2">
-                <MiniChk label="单例运行" on={contract.behavior?.single !== false} editable={editable} onToggle={() => patchBehavior({ single: contract.behavior?.single === false ? true : false })} />
-                <MiniChk label="默认独立窗口" on={!!contract.behavior?.defaultDetached} editable={editable} onToggle={() => patchBehavior({ defaultDetached: !contract.behavior?.defaultDetached })} />
-                <MiniChk label="允许后台常驻" on={!!contract.behavior?.background} editable={editable} onToggle={() => patchBehavior({ background: !contract.behavior?.background })} />
-                {contract.behavior?.background && (
-                  <MiniChk label="重启恢复后台" on={!!contract.behavior?.persistent} editable={editable} onToggle={() => patchBehavior({ persistent: !contract.behavior?.persistent })} />
-                )}
-              </div>
-              {showWindow && (
-                <label className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Super Panel 高度（可选）
-                  <input className="input-base mono !py-1 text-xs !w-24" type="number" min={1} value={numField(contract.behavior?.height)} disabled={!editable}
-                    onChange={(e) => patchBehavior({ height: parseNum(e.target.value) })} />
-                </label>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><Globe size={12} /> 平台限制（不选 = 全平台）</span>
-              <div className="flex flex-wrap gap-2">
-                {PLATFORM_OPTIONS.map((p) => (
-                  <PermPill key={p.value} label={p.label} on={(contract.platform || []).includes(p.value)} editable={editable}
-                    onToggle={() => togglePlatform(p.value)} />
+              <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><AppWindow size={12} /> 窗口</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([['width', '宽'], ['height', '高'], ['minWidth', '最小宽'], ['minHeight', '最小高'], ['maxWidth', '最大宽'], ['maxHeight', '最大高']] as const).map(([key, lbl]) => (
+                  <L key={key} label={lbl} mini>
+                    <input className="input-base mono !py-1 text-xs" type="number" min={1} value={numField(contract.window?.[key])} disabled={!editable}
+                      onChange={(e) => patchWindow({ [key]: parseNum(e.target.value) } as Partial<VibeWindow>)} />
+                  </L>
                 ))}
               </div>
+              <L label="窗口类型" mini>
+                <select className="input-base !py-1 text-xs" value={contract.window?.type || 'default'} disabled={!editable}
+                  onChange={(e) => patchWindow({ type: e.target.value as VibeWindow['type'] })}>
+                  <option value="default">默认（带标题栏）</option>
+                  <option value="borderless">无边框</option>
+                  <option value="fullscreen">全屏</option>
+                </select>
+              </L>
+              <div className="flex flex-wrap gap-2 pt-0.5">
+                <MiniChk label="标题栏" on={contract.window?.titleBar !== false} editable={editable} onToggle={() => patchWindow({ titleBar: contract.window?.titleBar === false ? true : false })} />
+                <MiniChk label="可缩放" on={contract.window?.resizable !== false} editable={editable} onToggle={() => patchWindow({ resizable: contract.window?.resizable === false ? true : false })} />
+                <MiniChk label="置顶" on={!!contract.window?.alwaysOnTop} editable={editable} onToggle={() => patchWindow({ alwaysOnTop: !contract.window?.alwaysOnTop })} />
+                <MiniChk label="透明" on={!!contract.window?.transparent} editable={editable} onToggle={() => patchWindow({ transparent: !contract.window?.transparent })} />
+              </div>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">行为</span>
+            <div className="flex flex-wrap gap-2">
+              <MiniChk label="单例运行" on={contract.behavior?.single !== false} editable={editable} onToggle={() => patchBehavior({ single: contract.behavior?.single === false ? true : false })} />
+              <MiniChk label="默认独立窗口" on={!!contract.behavior?.defaultDetached} editable={editable} onToggle={() => patchBehavior({ defaultDetached: !contract.behavior?.defaultDetached })} />
+              <MiniChk label="允许后台常驻" on={!!contract.behavior?.background} editable={editable} onToggle={() => patchBehavior({ background: !contract.behavior?.background })} />
+              {contract.behavior?.background && (
+                <MiniChk label="重启恢复后台" on={!!contract.behavior?.persistent} editable={editable} onToggle={() => patchBehavior({ persistent: !contract.behavior?.persistent })} />
+              )}
+            </div>
+            {showWindow && (
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                Super Panel 高度（可选）
+                <input className="input-base mono !py-1 text-xs !w-24" type="number" min={1} value={numField(contract.behavior?.height)} disabled={!editable}
+                  onChange={(e) => patchBehavior({ height: parseNum(e.target.value) })} />
+              </label>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400"><Globe size={12} /> 平台限制（不选 = 全平台）</span>
+            <div className="flex flex-wrap gap-2">
+              {PLATFORM_OPTIONS.map((p) => (
+                <PermPill key={p.value} label={p.label} on={(contract.platform || []).includes(p.value)} editable={editable}
+                  onToggle={() => togglePlatform(p.value)} />
+              ))}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      </Section>
 
       {/* 高级：AI 工具 */}
-      <div className="p-4 space-y-2">
-        <button className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-          onClick={() => setShowTools((v) => !v)}>
-          <Wrench size={13} /> AI 工具（可选，把插件能力暴露给 AI Agent）
-          <ChevronDown size={13} className={`transition-transform ${showTools ? 'rotate-180' : ''}`} />
-        </button>
-        {showTools && (
-          <div className="space-y-2">
-            {contract.tools.map((t, idx) => (
-              <div key={idx} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
-                <input className="input-base mono !py-1 text-xs" placeholder="tool_name" value={t.name} disabled={!editable}
-                  onChange={(e) => patch({ tools: contract.tools.map((cur, i) => i === idx ? { ...cur, name: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '_') } : cur) })} />
-                <input className="input-base !py-1 text-xs" placeholder="工具说明" value={t.description} disabled={!editable}
-                  onChange={(e) => patch({ tools: contract.tools.map((cur, i) => i === idx ? { ...cur, description: e.target.value } : cur) })} />
-                {editable && (
-                  <button className="btn-ghost !px-2 !py-1 text-rose-500" onClick={() => patch({ tools: contract.tools.filter((_, i) => i !== idx) })}>
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-            ))}
-            {editable && (
-              <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => patch({ tools: [...contract.tools, { name: '', description: '' }] })}>
-                <Plus size={12} /> 加工具
-              </button>
-            )}
-            {contract.tools.length === 0 && !editable && (
-              <div className="text-[12px] text-slate-400 dark:text-slate-500">未声明 AI 工具</div>
-            )}
-          </div>
-        )}
-      </div>
+      <Section icon={<Wrench size={14} />} title="AI 工具（暴露给 Agent）" collapsible defaultOpen={contract.tools.length > 0} count={contract.tools.length || undefined}>
+        <div className="space-y-2">
+          {contract.tools.map((t, idx) => (
+            <div key={idx} className="grid grid-cols-[1fr_2fr_auto] gap-2 items-center">
+              <input className="input-base mono !py-1 text-xs" placeholder="tool_name" value={t.name} disabled={!editable}
+                onChange={(e) => patch({ tools: contract.tools.map((cur, i) => i === idx ? { ...cur, name: e.target.value.replace(/[^a-zA-Z0-9_-]/g, '_') } : cur) })} />
+              <input className="input-base !py-1 text-xs" placeholder="工具说明" value={t.description} disabled={!editable}
+                onChange={(e) => patch({ tools: contract.tools.map((cur, i) => i === idx ? { ...cur, description: e.target.value } : cur) })} />
+              {editable && (
+                <button className="btn-ghost !px-2 !py-1 text-rose-500" onClick={() => patch({ tools: contract.tools.filter((_, i) => i !== idx) })}>
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+          {editable && (
+            <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => patch({ tools: [...contract.tools, { name: '', description: '' }] })}>
+              <Plus size={12} /> 加工具
+            </button>
+          )}
+          {contract.tools.length === 0 && !editable && (
+            <div className="text-[12px] text-slate-400 dark:text-slate-500">未声明 AI 工具</div>
+          )}
+        </div>
+      </Section>
 
       {/* 图标开关 */}
       {!contract.isEdit && (
-        <div className="p-4 flex items-center justify-between">
-          <span className="text-xs font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-            <Boxes size={13} /> AI 生成图标（SVG → 512 PNG）
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-3.5 py-2.5 flex items-center justify-between">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+            <ImageIcon size={14} className="text-emerald-500" /> AI 生成图标（SVG → 512 PNG）
           </span>
           <button disabled={!editable} onClick={() => patch({ needIcon: !contract.needIcon })}
             className={`relative w-10 h-5 rounded-full transition-colors ${contract.needIcon ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
@@ -342,6 +325,44 @@ export function ContractEditor({ contract, onChange, editable, lockName }: Props
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/** 契约编辑器分区卡片：统一圆角+边框+小图标标题+右侧计数/操作；collapsible 时标题可点击折叠 */
+function Section({ icon, title, count, action, collapsible, defaultOpen = true, children }: {
+  icon: React.ReactNode
+  title: string
+  count?: number | string
+  action?: React.ReactNode
+  collapsible?: boolean
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const header = (
+    <>
+      <span className="text-emerald-500 shrink-0">{icon}</span>
+      <span className="text-[12px] font-medium text-slate-600 dark:text-slate-300">{title}</span>
+      {count != null && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 leading-none">{count}</span>
+      )}
+    </>
+  )
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+      <div className="flex items-center gap-2 px-3.5 py-2.5">
+        {collapsible ? (
+          <button type="button" onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+            {header}
+            <ChevronDown size={14} className={`ml-auto text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 flex-1 min-w-0">{header}</div>
+        )}
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      {open && <div className="px-3.5 pb-3.5 pt-3 space-y-3 border-t border-slate-100 dark:border-slate-800/70">{children}</div>}
     </div>
   )
 }
