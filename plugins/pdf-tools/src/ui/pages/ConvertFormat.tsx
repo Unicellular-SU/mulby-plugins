@@ -4,6 +4,7 @@ import { useMulby } from '../hooks/useMulby';
 import { pdfService } from '../services/PDFService';
 import { PDFHeader, PDFUploadArea, PDFPageThumbnail } from '../components/SharedPDFComponents';
 import { getInitPdfPaths } from '../utils/initPayload';
+import { notifyOutput } from '../utils/output';
 import '../types';
 import { PDFInfo } from '../types';
 
@@ -12,7 +13,7 @@ interface ConvertFormatProps {
 }
 
 const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
-    const { dialog, shell, notification, system, clipboard } = useMulby('pdf-tools');
+    const { dialog, notification, system, clipboard } = useMulby('pdf-tools');
     const [file, setFile] = useState<string | null>(null);
     const [info, setInfo] = useState<PDFInfo | null>(null);
     const [pdfDoc, setPdfDoc] = useState<any>(null); // pdfjs-dist document proxy
@@ -140,8 +141,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
             }
 
             if (outputPath) {
-                notification.show('转换成功！', 'success');
-                shell.showItemInFolder(outputPath);
+                notifyOutput(notification, outputPath, '转换成功');
             }
         } catch (error: any) {
             notification.show(`转换失败: ${error.message}`, 'error');

@@ -197,13 +197,25 @@ const Watermark: React.FC = () => {
             const downloadsPath = await system.getPath('downloads');
             const outputDir = downloadsPath || '.';
 
-            let count = 0;
+            let success = 0;
+            const failed: string[] = [];
             for (const file of files) {
-                await window.pdfApi?.watermarkPDF(file, config, outputDir);
-                count++;
+                try {
+                    await window.pdfApi?.watermarkPDF(file, config, outputDir);
+                    success++;
+                } catch (e: any) {
+                    console.error(`水印失败: ${file}`, e);
+                    failed.push(file.split(/[/\\]/).pop() || file);
+                }
             }
 
-            notification.show(`成功为 ${count} 个文件添加水印！`, 'success');
+            if (success > 0 && failed.length === 0) {
+                notification.show(`成功为 ${success} 个文件添加水印！`, 'success');
+            } else if (success > 0) {
+                notification.show(`完成 ${success} 个，失败 ${failed.length} 个：${failed.join('、')}`, 'warning');
+            } else {
+                notification.show(`添加水印失败：${failed.join('、')}`, 'error');
+            }
         } catch (error: any) {
             console.error(error);
             notification.show(`添加水印失败: ${error.message}`, 'error');

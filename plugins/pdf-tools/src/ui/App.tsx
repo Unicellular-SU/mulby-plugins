@@ -12,24 +12,11 @@ import ConvertFormat from './pages/ConvertFormat';
 import CompressPDF from './pages/CompressPDF';
 import PageArranger from './pages/PageArranger.tsx';
 import WebToPDF from './pages/WebToPDF';
+import { FEATURE_ROUTE_MAP as featureRouteMap } from '../featureRoutes';
 
 const App: React.FC = () => {
   const [activePath, setActivePath] = useState('merge');
   const appliedInitRef = useRef(false);
-
-  const featureRouteMap: Record<string, string> = {
-    merge: 'merge',
-    split: 'split',
-    arrange: 'arrange',
-    compress: 'compress',
-    watermark: 'watermark',
-    'extract-img': 'extract-img',
-    'pdf-to-img': 'pdf-to-img',
-    'pdf-to-word': 'pdf-to-word',
-    'pdf-to-ppt': 'pdf-to-ppt',
-    'pdf-to-excel': 'pdf-to-excel',
-    'web-to-pdf': 'web-to-pdf',
-  };
 
   useEffect(() => {
     const applyInitRoute = (payload?: { featureCode?: string; route?: string; input?: string; attachments?: Array<{ path?: string }> }) => {

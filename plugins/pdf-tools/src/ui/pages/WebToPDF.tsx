@@ -3,6 +3,7 @@ import { Globe, Link2, Code2, FileCode2, ChevronDown, FolderOpen, FileDown } fro
 import { useMulby } from '../hooks/useMulby';
 import { pdfService, WebToPdfSource } from '../services/PDFService';
 import { PDFHeader, PDFUploadArea } from '../components/SharedPDFComponents';
+import { notifyOutput } from '../utils/output';
 
 type Mode = 'url' | 'html' | 'file';
 type PageSize = 'A4' | 'A3' | 'Letter' | 'Legal';
@@ -39,7 +40,7 @@ const labelStyle: React.CSSProperties = {
 };
 
 const WebToPDF: React.FC = () => {
-    const { dialog, shell, notification, system } = useMulby('pdf-tools');
+    const { dialog, notification, system } = useMulby('pdf-tools');
 
     const [mode, setMode] = useState<Mode>('url');
     const [url, setUrl] = useState('');
@@ -206,8 +207,7 @@ const WebToPDF: React.FC = () => {
             });
 
             setStatusText('');
-            notification.show('PDF 生成成功！', 'success');
-            shell.showItemInFolder(outputPath);
+            notifyOutput(notification, outputPath, 'PDF 已生成');
         } catch (error: any) {
             setStatusText('');
             notification.show(`生成失败: ${error?.message || error}`, 'error');
