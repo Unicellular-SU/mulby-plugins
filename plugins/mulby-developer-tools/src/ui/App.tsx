@@ -156,10 +156,12 @@ export default function App() {
     void loadMaintenanceCache().then((m) => setMaintMap((cur) => ({ ...m, ...cur })))
   }, [])
 
-  // 项目列表就绪后后台聚合（TTL 10min + 共享索引/PR 列表防限流）；发布成功后强制刷新绕过缓存
+  // 项目列表就绪后后台聚合（TTL 10min + 共享索引/PR 列表防限流）；发布成功后强制刷新绕过缓存。
+  // tab 依赖：从 Vibe 切回工作台时重跑一次——期间打包/迭代可能已改掉本地版本号，
+  // TTL 命中分支只重读本地 manifest（零网络），即可修正「本地 vX」过期展示。
   const lastPublishTokenRef = useRef(0)
   useEffect(() => {
-    if (maintTargets.length === 0) return
+    if (tab !== 'workbench' || maintTargets.length === 0) return
     const force = publishReloadToken !== lastPublishTokenRef.current
     lastPublishTokenRef.current = publishReloadToken
     void refreshMaintenance(
@@ -167,7 +169,7 @@ export default function App() {
       (st) => setMaintMap((cur) => ({ ...cur, [st.pluginPath]: st })),
       { force }
     )
-  }, [maintTargets, publishReloadToken])
+  }, [maintTargets, publishReloadToken, tab])
 
   // 汇总提醒：发现需维护的插件时弹一次（本次打开期间不重复）
   useEffect(() => {

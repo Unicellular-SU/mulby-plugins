@@ -160,7 +160,36 @@ async function checkOne(
 let inflight = false
 
 /**
- * 批量检查维护状态：缓存未过期的直接回调旧值，过期/缺失的串行逐个查询并增量回调。
+ * 缓存命中时重新核对本地维度：TTL 的本意只是防 GitHub API 限流（商店索引/PR/CI），
+ * 而本地 manifest.json 读取零成本，且版本号随时可能被「打包自增 / 迭代修改」改掉——
+ * 不重读会出现「磁盘已是 v1.0.2，详情页仍显示本地 v1.0.1」的过期展示。
+ * 远端维度（storeVersion / pr）直接复用缓存值，仅重算依赖本地版本的衍生字段。
+ */
+async function reviseLocalVersion(hit: MaintenanceStatus, target: MaintenanceTarget): Promise<MaintenanceStatus> {
+  const manifest = await readLocalManifest(target.path)
+  if (!manifest) return hit
+  const localVersion = manifest.version || ''
+  const pluginId = manifest.id || hit.pluginId
+  if (localVersion === hit.localVersion && pluginId === hit.pluginId) return hit
+  let relation = hit.relation
+  if (hit.storeVersion && localVersion) {
+    const c = semverCmp(localVersion, hit.storeVersion)
+    relation = c > 0 ? 'ahead' : c < 0 ? 'behind' : 'synced'
+  }
+  const att = deriveAttention(relation, hit.pr)
+  return {
+    ...hit,
+    pluginId,
+    localVersion,
+    relation,
+    needsAttention: att.needs,
+    attentionReason: att.reason,
+    canPublishUpdate: relation === 'ahead'
+  }
+}
+
+/**
+ * 批量检查维护状态：缓存未过期的重核本地版本后回调，过期/缺失的串行逐个查询并增量回调。
  * 重复调用（进行中）直接忽略。未登录自动降级为仅版本对比。
  */
 export async function refreshMaintenance(
@@ -174,12 +203,20 @@ export async function refreshMaintenance(
     const cache = await loadMaintenanceCache()
     const now = Date.now()
     const stale: MaintenanceTarget[] = []
+    let revised = false
     for (const t of targets) {
       const hit = cache[t.path]
-      if (!opts?.force && hit && now - hit.checkedAt < CACHE_TTL) onUpdate(hit)
+      if (!opts?.force && hit && now - hit.checkedAt < CACHE_TTL) {
+        const fresh = await reviseLocalVersion(hit, t)
+        if (fresh !== hit) { cache[t.path] = fresh; revised = true }
+        onUpdate(fresh)
+      }
       else stale.push(t)
     }
-    if (stale.length === 0) return
+    if (stale.length === 0) {
+      if (revised) await saveMaintenanceCache(cache)
+      return
+    }
 
     // 共享状态源各拉一次；登录态缺失 → prList 为 null（降级仅版本对比）
     const [token, login] = await Promise.all([getStoredToken(), getStoredLogin()])
