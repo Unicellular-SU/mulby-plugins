@@ -17,6 +17,12 @@ import { buildSingleImagePdf } from './pdf-embed'
 import { parseColorToRgba } from './color-parse'
 import { fsLog, PLUGIN_LOG } from '../plugin-log'
 
+/** 会改变像素内容/尺寸的步骤；存在这些步骤时不做"变大回退原图"兜底 */
+const CONTENT_CHANGING_STEP_KINDS = new Set<BatchStep['kind']>([
+  'resize', 'cropAspect', 'rotate', 'flip', 'padding', 'rounded',
+  'watermarkText', 'watermarkImage', 'toPdf',
+])
+
 function sanitizeFileBaseName(s: string): string {
   const t = s.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim()
   return t.slice(0, 200) || 'output'
@@ -301,8 +307,18 @@ async function encodeSharpOutput(
     case 'jpeg':
       return img.jpeg({ quality: q, mozjpeg: true }).toBuffer()
     case 'png': {
-      const level = Math.min(9, Math.max(0, Math.round((100 - q) / 11)))
-      return img.png({ compressionLevel: level }).toBuffer()
+      // PNG 为无损格式：compressionLevel 只影响 zlib 强度，无法真正压缩照片型 PNG，
+      // 且原实现按质量反向映射 level（质量越高 level 越低）会让"高质量"产出更大的文件。
+      // 改为始终使用最高压缩；并在质量 < 100 时启用调色板量化（有损）以实质减小体积。
+      const usePalette = q < 100
+      return img
+        .png({
+          compressionLevel: 9,
+          effort: 7,
+          palette: usePalette,
+          quality: usePalette ? q : undefined,
+        })
+        .toBuffer()
     }
     case 'webp':
       return img.webp({ quality: q }).toBuffer()
@@ -522,7 +538,22 @@ async function processSingleFileToTemp(
     throw new Error('不支持输出为 SVG（请使用「SVG 优化」步骤处理矢量文件）')
   }
 
-  const outBuffer = await encodeSharpOutput(img, outFmt, state.compressQuality)
+  let outBuffer = await encodeSharpOutput(img, outFmt, state.compressQuality)
+
+  // 体积兜底：当本次未改变像素内容（无 resize/裁剪/旋转/水印等）、未按 EXIF 旋转，
+  // 且输出格式与源格式一致时，如果编码结果反而比原文件更大，则保留原始文件，
+  // 从根本上杜绝"越压缩越大"。
+  const inFmt = defaultFormatFromPath(filePath)
+  const hasContentChange = steps.some((s) => CONTENT_CHANGING_STEP_KINDS.has(s.kind))
+  if (!hasContentChange && !opts?.autoExifOrient && outFmt === inFmt && outBuffer.length >= work.length) {
+    console.log(PLUGIN_LOG, '[batch]', 'keep original (re-encode not smaller)', {
+      filePath,
+      outBytes: outBuffer.length,
+      srcBytes: work.length,
+    })
+    outBuffer = work
+  }
+
   const extOut =
     outFmt === 'jpeg'
       ? '.jpg'
