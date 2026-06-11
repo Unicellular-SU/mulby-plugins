@@ -4,6 +4,8 @@ export const STORAGE_KEYS = {
   lastDirs: 'v1:lastDirs',
   pipelinePresets: 'v1:pipelinePresets',
   pipelinePresetLastId: 'v1:pipelinePresetLastId',
+  aiModelId: 'v1:aiModelId',
+  aiLastPrompt: 'v1:aiLastPrompt',
 } as const
 
 export type LastDirs = {

@@ -908,6 +908,78 @@ html:has(.studio-root) body::-webkit-scrollbar {
   margin-bottom: 6px;
 }
 
+/* ===== AI 智能编排区 ===== */
+.batch-ai-bar {
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: var(--radius-glass-sm);
+  background: var(--glass-well-bg);
+  border: 1px solid var(--accent-soft);
+  box-shadow: var(--neu-pressed-tight);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batch-ai-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.batch-ai-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-hover);
+}
+
+.batch-ai-model {
+  max-width: 220px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.batch-ai-input {
+  width: 100%;
+  resize: vertical;
+  min-height: 52px;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.batch-ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.batch-ai-append {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.batch-ai-gen {
+  margin-left: auto;
+}
+
+.batch-ai-hint {
+  margin: 0;
+}
+
+.batch-ai-notes {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--text-1);
+}
+
 .batch-add-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
@@ -1160,6 +1232,17 @@ html:has(.studio-root) body::-webkit-scrollbar {
 
 .step-static-hint {
   margin: 0;
+}
+
+.batch-fields-grid .step-static-hint.full {
+  grid-column: 1 / -1;
+}
+
+.batch-ai-step-prompt {
+  resize: vertical;
+  min-height: 48px;
+  font: inherit;
+  line-height: 1.5;
 }
 
 .btn.sm {

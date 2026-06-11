@@ -15,12 +15,13 @@ import type {
 } from './types'
 import { buildSingleImagePdf } from './pdf-embed'
 import { parseColorToRgba } from './color-parse'
+import { removeBackgroundViaAi } from './ai-remove-bg'
 import { fsLog, PLUGIN_LOG } from '../plugin-log'
 
 /** 会改变像素内容/尺寸的步骤；存在这些步骤时不做"变大回退原图"兜底 */
 const CONTENT_CHANGING_STEP_KINDS = new Set<BatchStep['kind']>([
   'resize', 'cropAspect', 'rotate', 'flip', 'padding', 'rounded',
-  'watermarkText', 'watermarkImage', 'toPdf',
+  'watermarkText', 'watermarkImage', 'toPdf', 'aiRemoveBg',
 ])
 
 function sanitizeFileBaseName(s: string): string {
@@ -292,6 +293,12 @@ async function applyRasterStep(
       const { left, top } = positionToOffset(step.position, cw, ch, mw2, mh2, margin)
       return img.composite([{ input: wmBuf, left, top, blend: 'over' }])
     }
+    case 'aiRemoveBg': {
+      // 把当前链渲染成 PNG 交给宿主 AI 去背景，再用透明结果重启 sharp 链。
+      const curBuf = (await img.png().toBuffer()) as Buffer
+      const outBuf = await removeBackgroundViaAi(curBuf, { model: step.model, prompt: step.prompt })
+      return sharp(outBuf, { failOn: 'none', limitInputPixels: false })
+    }
     default:
       return img
   }
@@ -533,7 +540,12 @@ async function processSingleFileToTemp(
     return outPath
   }
 
-  const outFmt = state.outFormat || defaultFormatFromPath(filePath)
+  let outFmt = state.outFormat || defaultFormatFromPath(filePath)
+  // 去背景产出透明图：用户未显式转格式且默认格式不支持透明（jpeg/bmp）时，回退为 PNG。
+  const hasAiRemoveBg = steps.some((s) => s.kind === 'aiRemoveBg')
+  if (hasAiRemoveBg && !state.outFormat && (outFmt === 'jpeg' || outFmt === 'bmp')) {
+    outFmt = 'png'
+  }
   if (outFmt === 'svg') {
     throw new Error('不支持输出为 SVG（请使用「SVG 优化」步骤处理矢量文件）')
   }

@@ -54,6 +54,8 @@ export type BatchStep =
   | { kind: 'rotate'; angle: number; background?: string }
   | { kind: 'flip'; horizontal?: boolean; vertical?: boolean }
   | { kind: 'svgMinify' }
+  /** 调用宿主 AI 抠图去背景，输出带透明通道的位图 */
+  | { kind: 'aiRemoveBg'; model?: string; prompt?: string }
   /** 将当前光栅结果导出为单页 PDF（宜放在流水线末尾） */
   | {
       kind: 'toPdf'

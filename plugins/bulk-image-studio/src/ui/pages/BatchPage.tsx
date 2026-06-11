@@ -5,6 +5,7 @@ import {
   ChevronUp,
   CircleDot,
   Crop,
+  Eraser,
   Expand,
   FileCode2,
   FileText,
@@ -21,6 +22,7 @@ import {
   RotateCw,
   RotateCcw,
   Save,
+  Sparkles,
   Trash2,
   Type,
   Wrench,
@@ -44,6 +46,7 @@ import {
   STORAGE_KEYS,
   writeStorageJson,
 } from '../lib/plugin-storage'
+import { generatePipelineFromPrompt, type AiModelLite } from '../lib/ai-pipeline'
 
 const PLUGIN_ID = 'bulk-image-studio'
 
@@ -74,6 +77,7 @@ const STEP_KIND_OPTIONS: { kind: StepKind; label: string; hint?: string; Icon: L
   { kind: 'watermarkText', label: '文字水印', Icon: Type },
   { kind: 'watermarkImage', label: '图片水印', Icon: ImagePlus },
   { kind: 'rounded', label: '圆角', Icon: CircleDot },
+  { kind: 'aiRemoveBg', label: 'AI 去背景', hint: '需图像模型', Icon: Eraser },
   { kind: 'compress', label: '压缩质量', hint: '光栅图', Icon: Gauge },
   { kind: 'convert', label: '转换格式', Icon: FileType2 },
   { kind: 'toPdf', label: '转成 PDF', hint: '每图一页，须放最后', Icon: FileText },
@@ -124,6 +128,8 @@ function createDefaultStep(kind: StepKind): BatchStep {
       }
     case 'rounded':
       return { kind: 'rounded', percentOfMinSide: 8 }
+    case 'aiRemoveBg':
+      return { kind: 'aiRemoveBg', model: '', prompt: '' }
     case 'compress':
       return { kind: 'compress', quality: 82 }
     case 'convert':
@@ -152,6 +158,9 @@ function validatePipeline(items: { step: BatchStep }[]): { ok: true; steps: Batc
     if (s.kind === 'flip' && !s.horizontal && !s.vertical) {
       return { ok: false, message: `第 ${n} 步「翻转」请至少选择水平或垂直之一` }
     }
+    if (s.kind === 'aiRemoveBg' && !String(s.model ?? '').trim()) {
+      return { ok: false, message: `第 ${n} 步「AI 去背景」请先选择图像模型` }
+    }
   }
   const pdfIndices = steps.map((st, i) => (st.kind === 'toPdf' ? i : -1)).filter((i) => i >= 0)
   if (pdfIndices.length > 1) {
@@ -173,7 +182,7 @@ interface Props {
 }
 
 export default function BatchPage({ seedPaths }: Props) {
-  const { dialog, notification, host, storage, filesystem } = useMulby(PLUGIN_ID)
+  const { dialog, notification, host, storage, filesystem, ai } = useMulby(PLUGIN_ID)
   const [files, setFiles] = useState<string[]>([])
   const [pipeline, setPipeline] = useState<PipelineItem[]>([])
   const [nameSuffix, setNameSuffix] = useState('_out')
@@ -186,6 +195,15 @@ export default function BatchPage({ seedPaths }: Props) {
   const [committing, setCommitting] = useState(false)
   const batchOtherDirHintRef = useRef<string | undefined>(undefined)
   const presetsLoadedRef = useRef(false)
+
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiModels, setAiModels] = useState<AiModelLite[]>([])
+  const [aiModelId, setAiModelId] = useState('')
+  const [aiModelsLoaded, setAiModelsLoaded] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiAppend, setAiAppend] = useState(false)
+  const [aiNotes, setAiNotes] = useState<string | null>(null)
+  const [imageModels, setImageModels] = useState<AiModelLite[]>([])
 
   useEffect(() => {
     setFiles([...new Set(seedPaths)])
@@ -218,6 +236,50 @@ export default function BatchPage({ seedPaths }: Props) {
     if (!presetsLoadedRef.current) return
     void writeStorageJson(storage, STORAGE_KEYS.pipelinePresetLastId, presetSelectId || '')
   }, [presetSelectId, storage])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const savedPrompt = await readStorageJson<string>(storage, STORAGE_KEYS.aiLastPrompt)
+      if (!cancelled && typeof savedPrompt === 'string') setAiPrompt(savedPrompt)
+      const savedModel = await readStorageJson<string>(storage, STORAGE_KEYS.aiModelId)
+      let models: AiModelLite[] = []
+      try {
+        const list = (await ai.allModels?.()) as AiModelLite[] | undefined
+        if (Array.isArray(list)) {
+          models = list
+            .filter((m) => m && typeof m.id === 'string')
+            .map((m) => ({ id: m.id, label: m.label, providerLabel: m.providerLabel }))
+        }
+      } catch {
+        /* 宿主未实现 allModels 时静默：仍可用默认模型调用 */
+      }
+      if (cancelled) return
+      setAiModels(models)
+      setAiModelsLoaded(true)
+      const preferred =
+        (typeof savedModel === 'string' && models.some((m) => m.id === savedModel) && savedModel) ||
+        models[0]?.id ||
+        (typeof savedModel === 'string' ? savedModel : '')
+      if (preferred) setAiModelId(preferred)
+
+      try {
+        const imgList = (await ai.allModels?.({ endpointType: 'image-generation' })) as AiModelLite[] | undefined
+        if (!cancelled && Array.isArray(imgList)) {
+          setImageModels(
+            imgList
+              .filter((m) => m && typeof m.id === 'string')
+              .map((m) => ({ id: m.id, label: m.label, providerLabel: m.providerLabel }))
+          )
+        }
+      } catch {
+        /* 宿主不支持图像模型筛选时忽略 */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [ai, storage])
 
   const persistPresets = useCallback((next: BatchPipelinePreset[]) => {
     setPresets(next)
@@ -356,6 +418,34 @@ export default function BatchPage({ seedPaths }: Props) {
 
   const replaceStep = (id: string, step: BatchStep) => {
     setPipeline((p) => p.map((x) => (x.id === id ? { ...x, step } : x)))
+  }
+
+  const runAiGenerate = async () => {
+    const text = aiPrompt.trim()
+    if (!text) {
+      notification.show('请先描述你想做的处理', 'warning')
+      return
+    }
+    setAiBusy(true)
+    setAiNotes(null)
+    try {
+      const result = await generatePipelineFromPrompt(ai, { text, model: aiModelId || undefined })
+      const items: PipelineItem[] = result.steps.map((step) => ({ id: newId(), step }))
+      setPipeline((prev) => (aiAppend ? [...prev, ...items] : items))
+      if (result.nameSuffix) setNameSuffix(result.nameSuffix)
+      setAiNotes(result.notes ?? null)
+      void writeStorageJson(storage, STORAGE_KEYS.aiLastPrompt, text)
+      if (aiModelId) void writeStorageJson(storage, STORAGE_KEYS.aiModelId, aiModelId)
+      const needWatermarkFile = result.steps.some((s) => s.kind === 'watermarkImage' && !s.path)
+      notification.show(
+        `已${aiAppend ? '追加' : '生成'} ${items.length} 个步骤${needWatermarkFile ? '；图片水印需手动选择文件' : ''}`,
+        needWatermarkFile ? 'warning' : 'success'
+      )
+    } catch (e) {
+      notification.show(e instanceof Error ? e.message : 'AI 生成失败', 'error')
+    } finally {
+      setAiBusy(false)
+    }
   }
 
   const addFiles = async () => {
@@ -717,6 +807,63 @@ export default function BatchPage({ seedPaths }: Props) {
             </p>
           </div>
 
+          <div className="batch-ai-bar">
+            <div className="batch-ai-head">
+              <span className="batch-ai-title">
+                <Sparkles size={14} />
+                AI 智能编排
+              </span>
+              {aiModels.length > 0 && (
+                <select
+                  className="input batch-ai-model"
+                  value={aiModelId}
+                  onChange={(e) => setAiModelId(e.target.value)}
+                  aria-label="选择 AI 模型"
+                  disabled={aiBusy}
+                >
+                  {aiModels.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label || m.id}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <textarea
+              className="input batch-ai-input"
+              rows={2}
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  void runAiGenerate()
+                }
+              }}
+              placeholder="用一句话描述处理，例如：压缩到 80%、转成 WebP、右下角加文字水印 © 2026（Ctrl/⌘+Enter 生成）"
+              disabled={aiBusy}
+            />
+            <div className="batch-ai-actions">
+              <label className="batch-inline-check batch-ai-append">
+                <input type="checkbox" checked={aiAppend} onChange={(e) => setAiAppend(e.target.checked)} disabled={aiBusy} />
+                <span>追加到现有步骤</span>
+              </label>
+              <button
+                type="button"
+                className="btn primary sm batch-ai-gen"
+                disabled={aiBusy || !aiPrompt.trim()}
+                onClick={() => void runAiGenerate()}
+              >
+                <Sparkles size={14} />
+                {aiBusy ? '生成中…' : '生成步骤'}
+              </button>
+            </div>
+            {aiModelsLoaded && aiModels.length === 0 && (
+              <p className="hint batch-ai-hint">未检测到已配置的 AI 模型，将尝试默认模型；若失败请在 Mulby 设置中配置模型。</p>
+            )}
+            {aiNotes && <p className="hint batch-ai-notes">AI：{aiNotes}</p>}
+          </div>
+
           {pipeline.length === 0 ? (
             <div className="batch-pipeline-empty">
               <p>还没有任何步骤。</p>
@@ -754,7 +901,7 @@ export default function BatchPage({ seedPaths }: Props) {
                     </div>
                   </div>
                   <div className="batch-step-card-body">
-                    <StepFields item={item} onChange={(step) => replaceStep(item.id, step)} onPickWatermark={() => pickWmImgForStep(item.id, item.step)} />
+                    <StepFields item={item} imageModels={imageModels} onChange={(step) => replaceStep(item.id, step)} onPickWatermark={() => pickWmImgForStep(item.id, item.step)} />
                   </div>
                 </li>
               ))}
@@ -812,10 +959,12 @@ export default function BatchPage({ seedPaths }: Props) {
 
 function StepFields({
   item,
+  imageModels,
   onChange,
   onPickWatermark,
 }: {
   item: PipelineItem
+  imageModels: AiModelLite[]
   onChange: (s: BatchStep) => void
   onPickWatermark: () => void
 }) {
@@ -1046,6 +1195,37 @@ function StepFields({
             onChange={(e) => onChange({ ...s, percentOfMinSide: +e.target.value })}
           />
         </label>
+      )
+
+    case 'aiRemoveBg':
+      return (
+        <div className="batch-fields-grid">
+          <label className="batch-field full">
+            <span>图像模型</span>
+            <select className="input" value={s.model ?? ''} onChange={(e) => onChange({ ...s, model: e.target.value })}>
+              <option value="">{imageModels.length ? '请选择图像模型…' : '未检测到图像模型'}</option>
+              {imageModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label ?? m.id}
+                  {m.providerLabel ? `（${m.providerLabel}）` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="batch-field full">
+            <span>抠图提示词（可选）</span>
+            <textarea
+              className="input batch-ai-step-prompt"
+              rows={2}
+              placeholder="留空使用内置去背景提示词，可补充如「只保留人物，边缘干净」"
+              value={s.prompt ?? ''}
+              onChange={(e) => onChange({ ...s, prompt: e.target.value })}
+            />
+          </label>
+          <p className="hint step-static-hint full">
+            调用宿主图像模型逐张抠图，输出透明 PNG（若未显式转格式，JPEG/BMP 会自动回退为 PNG）。批量较多时会消耗模型额度。
+          </p>
+        </div>
       )
 
     case 'compress':

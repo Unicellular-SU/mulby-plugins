@@ -65,7 +65,8 @@ export function useMulby(pluginId?: string) {
       // - toolContext: 工具上下文（插件名与 MCP 作用域）
       // - maxToolSteps: 工具调用的最大步骤数（默认 20，最大 100）
       call: (option: any, onChunk?: (chunk: any) => void) => window.mulby?.ai?.call(option, onChunk),
-      allModels: () => window.mulby?.ai?.allModels?.(),
+      allModels: (opts?: { endpointType?: string }) =>
+        (window.mulby?.ai?.allModels as ((o?: unknown) => Promise<unknown>) | undefined)?.(opts),
       abort: (requestId: string) => window.mulby?.ai?.abort?.(requestId),
       skills: {
         list: () => window.mulby?.ai?.skills?.list?.(),
