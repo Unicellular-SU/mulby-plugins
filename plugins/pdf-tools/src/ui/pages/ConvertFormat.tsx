@@ -184,21 +184,21 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
                     {/* Settings / Info Area */}
                     <div style={{
-                        background: 'rgba(255, 255, 255, 0.6)',
+                        background: 'var(--card-bg)',
                         backdropFilter: 'blur(10px)',
                         padding: '16px',
                         borderRadius: '16px',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '20px',
-                        border: '1px solid rgba(255,255,255,0.4)',
+                        border: 'var(--glass-border)',
                         boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
                         flexShrink: 0
                     }}>
                         <div style={{
                             width: '48px',
                             height: '48px',
-                            background: '#fff',
+                            background: 'var(--surface)',
                             borderRadius: '12px',
                             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                             display: 'flex',
@@ -227,7 +227,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                         <div style={{
                             fontSize: '13px',
                             color: 'var(--text-secondary)',
-                            background: 'rgba(0,0,0,0.03)',
+                            background: 'var(--subtle-bg)',
                             padding: '8px 12px',
                             borderRadius: '8px',
                             maxWidth: '200px',
@@ -241,7 +241,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                     <div style={{
                         flex: 1,
                         overflowY: 'auto',
-                        background: 'rgba(0,0,0,0.02)',
+                        background: 'var(--subtle-bg)',
                         borderRadius: '16px',
                         padding: '16px'
                     }}>
@@ -266,7 +266,7 @@ const ConvertFormat: React.FC<ConvertFormatProps> = ({ type }) => {
                                 })}
                             </div>
                         ) : (
-                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>
+                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-tertiary)' }}>
                                 加载预览中...
                             </div>
                         )}

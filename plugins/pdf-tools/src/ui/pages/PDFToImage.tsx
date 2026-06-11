@@ -25,29 +25,29 @@ const FileItem: React.FC<{
             display: 'flex',
             alignItems: 'center',
             padding: '12px 16px',
-            background: 'rgba(255, 255, 255, 0.6)',
+            background: 'var(--card-bg)',
             backdropFilter: 'blur(10px)',
             marginBottom: '10px',
             borderRadius: '16px',
             gap: '16px',
-            border: '1px solid rgba(255,255,255,0.4)',
+            border: 'var(--glass-border)',
             transition: 'transform 0.2s ease, box-shadow 0.2s ease',
         }}
             onMouseEnter={(e) => {
                 e.currentTarget.style.transform = 'translateY(-2px)';
                 e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.85)';
+                e.currentTarget.style.background = 'var(--card-bg-strong)';
             }}
             onMouseLeave={(e) => {
                 e.currentTarget.style.transform = 'none';
                 e.currentTarget.style.boxShadow = 'none';
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.6)';
+                e.currentTarget.style.background = 'var(--card-bg)';
             }}
         >
             <div style={{
                 width: '44px',
                 height: '56px',
-                background: '#fff',
+                background: 'var(--surface)',
                 borderRadius: '8px',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                 display: 'flex',

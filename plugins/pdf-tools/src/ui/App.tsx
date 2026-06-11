@@ -19,6 +19,26 @@ const App: React.FC = () => {
   const appliedInitRef = useRef(false);
 
   useEffect(() => {
+    const applyTheme = (actual?: string) => {
+      document.documentElement.classList.toggle('dark', actual === 'dark');
+    };
+
+    void (async () => {
+      try {
+        const theme = await window.mulby?.theme?.get();
+        applyTheme(theme?.actual);
+      } catch {
+        // theme api unavailable, keep light
+      }
+    })();
+
+    const off = window.mulby?.onThemeChange?.((theme) => applyTheme(theme));
+    return () => {
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  useEffect(() => {
     const applyInitRoute = (payload?: { featureCode?: string; route?: string; input?: string; attachments?: Array<{ path?: string }> }) => {
       if (appliedInitRef.current) return;
       const hasPdf = Boolean(

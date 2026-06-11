@@ -39,7 +39,7 @@ export const PDFHeader: React.FC<PDFHeaderProps> = ({ title, icon, actionButton,
                         display: 'flex', alignItems: 'center', gap: '6px',
                         padding: '8px 16px', borderRadius: '12px',
                         border: '1px solid rgba(0,0,0,0.1)',
-                        background: 'rgba(255,255,255,0.8)',
+                        background: 'var(--card-bg-strong)',
                         color: 'var(--text-secondary)',
                         cursor: 'pointer', fontWeight: '500',
                         fontSize: '14px'
@@ -158,7 +158,7 @@ export const PDFUploadArea: React.FC<PDFUploadAreaProps> = ({
             onDrop={handleDrop}
             style={{
                 flex: 1,
-                background: isDragging ? 'rgba(0, 122, 255, 0.06)' : 'rgba(255,255,255,0.5)',
+                background: isDragging ? 'rgba(0, 122, 255, 0.06)' : 'var(--card-bg-soft)',
                 borderRadius: '24px',
                 border: `3px dashed ${isDragging ? 'var(--primary-color)' : 'rgba(0, 122, 255, 0.2)'}`,
                 display: 'flex',
@@ -175,7 +175,7 @@ export const PDFUploadArea: React.FC<PDFUploadAreaProps> = ({
                 e.currentTarget.style.transform = 'scale(0.99)';
             }}
             onMouseLeave={(e) => {
-                e.currentTarget.style.background = isDragging ? 'rgba(0, 122, 255, 0.06)' : 'rgba(255,255,255,0.5)';
+                e.currentTarget.style.background = isDragging ? 'rgba(0, 122, 255, 0.06)' : 'var(--card-bg-soft)';
                 e.currentTarget.style.borderColor = isDragging ? 'var(--primary-color)' : 'rgba(0, 122, 255, 0.2)';
                 e.currentTarget.style.transform = 'none';
             }}
@@ -243,7 +243,7 @@ export const PDFPageThumbnail: React.FC<{
             borderRadius: '8px',
             overflow: 'hidden',
             boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            background: '#fff',
+            background: 'var(--surface)',
             aspectRatio: '1/1.414',
             display: 'flex',
             alignItems: 'center',
@@ -263,7 +263,7 @@ export const PDFPageThumbnail: React.FC<{
                 {pageNum}
             </div>
             {loading && (
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f5f7' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--subtle-bg)' }}>
                     <div style={{ width: '16px', height: '16px', border: '2px solid rgba(0,0,0,0.1)', borderTopColor: 'var(--primary-color)', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
                 </div>
             )}

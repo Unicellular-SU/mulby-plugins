@@ -23,8 +23,8 @@ const inputBaseStyle: React.CSSProperties = {
     width: '100%',
     padding: '12px 14px',
     borderRadius: '12px',
-    border: '1px solid rgba(0,0,0,0.1)',
-    background: 'rgba(255,255,255,0.8)',
+    border: '1px solid var(--border-subtle)',
+    background: 'var(--input-bg)',
     fontSize: '14px',
     color: 'var(--text-primary)',
     outline: 'none',
@@ -262,7 +262,7 @@ const WebToPDF: React.FC = () => {
                     <div style={{
                         display: 'flex', alignItems: 'center', gap: '12px',
                         padding: '16px', borderRadius: '12px',
-                        background: 'rgba(255,255,255,0.7)', border: '1px solid rgba(0,0,0,0.06)',
+                        background: 'var(--card-bg-strong)', border: '1px solid var(--border-subtle)',
                     }}>
                         <FileCode2 size={24} color="var(--primary-color)" />
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -273,8 +273,8 @@ const WebToPDF: React.FC = () => {
                         </div>
                         <button onClick={handleSelectFile} style={{
                             display: 'flex', alignItems: 'center', gap: '6px',
-                            padding: '8px 14px', borderRadius: '10px', border: '1px solid rgba(0,0,0,0.1)',
-                            background: 'rgba(255,255,255,0.9)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px',
+                            padding: '8px 14px', borderRadius: '10px', border: '1px solid var(--border-subtle)',
+                            background: 'var(--card-bg-strong)', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '13px',
                         }}>
                             <FolderOpen size={16} /> 更换
                         </button>
@@ -301,7 +301,7 @@ const WebToPDF: React.FC = () => {
             {/* 输入模式切换 */}
             <div style={{
                 display: 'flex', gap: '4px', padding: '4px',
-                background: 'rgba(0,0,0,0.04)', borderRadius: '12px', alignSelf: 'flex-start',
+                background: 'var(--track-bg)', borderRadius: '12px', alignSelf: 'flex-start',
             }}>
                 {MODE_TABS.map((tab) => {
                     const active = mode === tab.id;
@@ -312,7 +312,7 @@ const WebToPDF: React.FC = () => {
                             style={{
                                 display: 'flex', alignItems: 'center', gap: '6px',
                                 padding: '8px 16px', borderRadius: '9px', border: 'none', cursor: 'pointer',
-                                background: active ? '#fff' : 'transparent',
+                                background: active ? 'var(--surface)' : 'transparent',
                                 color: active ? 'var(--primary-color)' : 'var(--text-secondary)',
                                 fontWeight: active ? 600 : 500, fontSize: '13px',
                                 boxShadow: active ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
@@ -327,8 +327,8 @@ const WebToPDF: React.FC = () => {
 
             {/* 输入区 */}
             <div style={{
-                background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(10px)',
-                padding: '16px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.4)',
+                background: 'var(--card-bg)', backdropFilter: 'blur(10px)',
+                padding: '16px', borderRadius: '16px', border: 'var(--glass-border)',
                 display: 'flex', flexDirection: 'column',
                 flex: mode === 'url' ? '0 0 auto' : 1, minHeight: 0,
             }}>
@@ -337,8 +337,8 @@ const WebToPDF: React.FC = () => {
 
             {/* 高级设置 */}
             <div style={{
-                background: 'rgba(255,255,255,0.6)', borderRadius: '16px',
-                border: '1px solid rgba(255,255,255,0.4)', flexShrink: 0,
+                background: 'var(--card-bg)', borderRadius: '16px',
+                border: 'var(--glass-border)', flexShrink: 0,
             }}>
                 <button
                     onClick={() => setShowAdvanced((v) => !v)}
