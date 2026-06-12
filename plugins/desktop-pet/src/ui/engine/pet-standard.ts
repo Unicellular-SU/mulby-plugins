@@ -121,3 +121,84 @@ export function emotionToExpression(emotion: string): PetExpression {
   const lower = emotion.toLowerCase().trim()
   return EXPRESSION_FROM_EMOTION[lower] || 'neutral'
 }
+
+// ---------------------------------------------------------------------------
+// 自定义形象持久化
+// ---------------------------------------------------------------------------
+
+export const PET_CUSTOM_SPRITES_STORAGE_KEY = 'pet-custom-sprite-set'
+
+/**
+ * 落盘用的紧凑格式:同一表情在 13 个姿态下共享同一张 SVG(姿态动画走 CSS),
+ * 直接存 195 份会膨胀 13 倍,因此按唯一字符串去重,key 只存下标。
+ */
+export interface CompactPetSpriteSet {
+  v: 1
+  id: string
+  name: string
+  description: string
+  createdAt: number
+  svgs: string[]
+  keys: Partial<Record<PetSpriteKey, number>>
+}
+
+const VALID_SPRITE_KEYS = new Set<string>(CORE_SPRITES)
+
+export function compactSpriteSet(set: PetSpriteSet): CompactPetSpriteSet {
+  const svgs: string[] = []
+  const indexBySvg = new Map<string, number>()
+  const keys: Partial<Record<PetSpriteKey, number>> = {}
+
+  for (const [key, svg] of Object.entries(set.sprites)) {
+    if (typeof svg !== 'string' || svg.length === 0) continue
+    let index = indexBySvg.get(svg)
+    if (index === undefined) {
+      index = svgs.length
+      svgs.push(svg)
+      indexBySvg.set(svg, index)
+    }
+    keys[key as PetSpriteKey] = index
+  }
+
+  return {
+    v: 1,
+    id: set.id,
+    name: set.name,
+    description: set.description,
+    createdAt: set.createdAt,
+    svgs,
+    keys,
+  }
+}
+
+/**
+ * 紧凑格式 → 完整 PetSpriteSet。对存储数据做防御性校验:
+ * 结构不对返回 null;非法 key / 越界下标逐项跳过。
+ * 注意:这里只恢复结构,SVG 内容安全由调用方再过 validateSpriteSet 把关。
+ */
+export function expandSpriteSet(raw: unknown): PetSpriteSet | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (o.v !== 1) return null
+  if (!Array.isArray(o.svgs) || !o.keys || typeof o.keys !== 'object') return null
+
+  const svgs = o.svgs as unknown[]
+  const sprites: Partial<Record<PetSpriteKey, string>> = {}
+  for (const [key, index] of Object.entries(o.keys as Record<string, unknown>)) {
+    if (!VALID_SPRITE_KEYS.has(key)) continue
+    if (typeof index !== 'number' || !Number.isInteger(index)) continue
+    const svg = svgs[index]
+    if (typeof svg !== 'string' || svg.length === 0) continue
+    sprites[key as PetSpriteKey] = svg
+  }
+
+  if (Object.keys(sprites).length === 0) return null
+
+  return {
+    id: typeof o.id === 'string' ? o.id : 'custom',
+    name: typeof o.name === 'string' ? o.name : '自定义外观',
+    description: typeof o.description === 'string' ? o.description : '',
+    sprites,
+    createdAt: typeof o.createdAt === 'number' && Number.isFinite(o.createdAt) ? o.createdAt : Date.now(),
+  }
+}

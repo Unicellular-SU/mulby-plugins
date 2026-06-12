@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ChangeEvent, type ReactNode } from 'react'
 import {
   DEFAULT_PERSONALITY,
   PET_CHAT_HISTORY_STORAGE_KEY,
@@ -14,7 +14,18 @@ import {
   stripPresentationMarkers,
   type PresentationIntent,
 } from '../engine/presentation'
-import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose } from '../engine/pet-standard'
+import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose, type PetSpriteKey, type PetSpriteSet } from '../engine/pet-standard'
+import {
+  buildPetImageEditPrompt,
+  buildPetImagePrompt,
+  decodeImageToRawImage,
+  filterImageGenModels,
+  generatePetSpriteSet,
+  parseImageDataUrl,
+  readFileAsDataUrl,
+  suggestSpriteMeta,
+  toImageDataUrl,
+} from '../engine/appearance-workshop'
 import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import {
@@ -215,7 +226,7 @@ export default function SettingsView() {
   const [personality, setPersonality] = useState<PetPersonality>(DEFAULT_PERSONALITY)
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([])
   const [toast, setToast] = useState('')
-  const [tab, setTab] = useState<'personality' | 'ecosystem' | 'reminders' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
+  const [tab, setTab] = useState<'personality' | 'appearance' | 'ecosystem' | 'reminders' | 'memory' | 'achievements' | 'diary' | 'dialogue' | 'playground'>('personality')
   const [stats, setStats] = useState<PetStats | null>(null)
   const [needs, setNeeds] = useState<PetNeedsSnapshot>(() => normalizeNeeds(null))
   const [quests, setQuests] = useState<PetQuestState>(() => normalizeQuestState(null))
@@ -237,6 +248,18 @@ export default function SettingsView() {
   const [newReminderLabel, setNewReminderLabel] = useState('')
   const [newReminderTime, setNewReminderTime] = useState('09:00')
   const [chatHistory, setChatHistory] = useState<PetChatHistoryItem[]>([])
+  const [imageModels, setImageModels] = useState<Array<{ id: string; label: string }>>([])
+  const [appearanceModel, setAppearanceModel] = useState('')
+  const [petDescription, setPetDescription] = useState('')
+  const [appearanceBusy, setAppearanceBusy] = useState(false)
+  const [appearanceStatus, setAppearanceStatus] = useState('')
+  const [appearanceError, setAppearanceError] = useState('')
+  const [rawPetImage, setRawPetImage] = useState('')
+  const [uploadedImage, setUploadedImage] = useState('')
+  const [pendingSpriteSet, setPendingSpriteSet] = useState<PetSpriteSet | null>(null)
+  const appearanceAbortRef = useRef<(() => void) | null>(null)
+  const appearanceCancelledRef = useRef(false)
+  const appearanceFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -281,6 +304,12 @@ export default function SettingsView() {
         setModels(textModels.map((m: any) => ({ id: m.id, label: m.label || m.id })))
         if (!personality.model && textModels.length > 0) {
           setPersonality(p => ({ ...p, model: textModels[0].id }))
+        }
+        const imgModels = filterImageGenModels(allModels as any)
+        setImageModels(imgModels.map((m: any) => ({ id: m.id, label: m.label || m.id })))
+        if (imgModels.length > 0 && imgModels[0].id) {
+          const firstId = imgModels[0].id
+          setAppearanceModel(prev => prev || firstId)
         }
       } catch (err) {
         console.error('Load AI models failed:', err)
@@ -1239,11 +1268,241 @@ export default function SettingsView() {
       </div>
     )
   }
+
+  /** 共用尾段:任意来源的图片 dataURL → 像素化 → 合成 → 进入预览 */
+  const pixelateIntoPreview = async (dataUrl: string, metaSource: string) => {
+    setRawPetImage(dataUrl)
+    setAppearanceStatus('正在像素化并合成表情…')
+    const rgba = await decodeImageToRawImage(dataUrl)
+    const { spriteSet } = generatePetSpriteSet(rgba, suggestSpriteMeta(metaSource))
+    setPendingSpriteSet(spriteSet)
+    setAppearanceStatus('')
+    showToast('形象已生成,点「应用到宠物」试穿')
+  }
+
+  /** 共用外壳:busy/error/取消语义统一处理 */
+  const runAppearanceTask = async (task: () => Promise<void>) => {
+    if (appearanceBusy) return
+    setAppearanceBusy(true)
+    setAppearanceError('')
+    setPendingSpriteSet(null)
+    appearanceCancelledRef.current = false
+    try {
+      await task()
+    } catch (err) {
+      if (!appearanceCancelledRef.current) {
+        setAppearanceError(err instanceof Error ? err.message : String(err))
+      }
+      setAppearanceStatus('')
+    } finally {
+      appearanceAbortRef.current = null
+      setAppearanceBusy(false)
+    }
+  }
+
+  const handleGenerateAppearance = () => {
+    const description = petDescription.trim()
+    if (!description || !appearanceModel) return
+    void runAppearanceTask(async () => {
+      setAppearanceStatus('正在生成立绘…')
+      const prompt = buildPetImagePrompt(description)
+      const ai = window.mulby.ai
+      let images: string[] = []
+      if (ai.images?.generateStream) {
+        const handle = ai.images.generateStream(
+          { model: appearanceModel, prompt, size: '1024x1024', count: 1 },
+          chunk => {
+            if (chunk.type === 'preview' && chunk.image) {
+              setRawPetImage(toImageDataUrl(chunk.image))
+              setAppearanceStatus('生成中(预览已更新)…')
+            } else if (chunk.message) {
+              setAppearanceStatus(chunk.message)
+            }
+          }
+        )
+        appearanceAbortRef.current = () => handle.abort()
+        const res = await handle
+        images = res?.images ?? []
+      } else {
+        const res = await ai.images.generate({ model: appearanceModel, prompt, size: '1024x1024', count: 1 })
+        images = res?.images ?? []
+      }
+      if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
+      await pixelateIntoPreview(toImageDataUrl(images[0]), description)
+    })
+  }
+
+  /** 上传图片 → ai.images.edit 重绘为宠物风格 → 像素化 */
+  const handleStylizeUploadedImage = () => {
+    if (!uploadedImage || !appearanceModel) return
+    void runAppearanceTask(async () => {
+      setAppearanceStatus('正在上传图片…')
+      const parsed = parseImageDataUrl(uploadedImage)
+      if (!parsed) throw new Error('图片格式不支持,请换一张 PNG/JPG')
+      const ref = await window.mulby.ai.attachments.upload({
+        buffer: parsed.buffer,
+        mimeType: parsed.mimeType,
+        purpose: 'image-edit',
+      })
+      setAppearanceStatus('AI 正在重绘为宠物风格…')
+      const res = await window.mulby.ai.images.edit({
+        model: appearanceModel,
+        imageAttachmentId: ref.attachmentId,
+        prompt: buildPetImageEditPrompt(petDescription),
+      })
+      const images = res?.images ?? []
+      if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
+      await pixelateIntoPreview(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物')
+    })
+  }
+
+  /** 上传图片 → 跳过 AI,直接进像素化管线(适合本身已是卡通/像素风的素材) */
+  const handleDirectPixelateUploadedImage = () => {
+    if (!uploadedImage) return
+    void runAppearanceTask(async () => {
+      await pixelateIntoPreview(uploadedImage, petDescription.trim() || '上传图片宠物')
+    })
+  }
+
+  const handleChooseAppearanceFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      if (!dataUrl.startsWith('data:image/')) throw new Error('请选择图片文件')
+      setUploadedImage(dataUrl)
+      setAppearanceError('')
+    } catch (err) {
+      setAppearanceError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const handleCancelAppearance = () => {
+    appearanceCancelledRef.current = true
+    appearanceAbortRef.current?.()
+    appearanceAbortRef.current = null
+    setAppearanceStatus('已取消')
+  }
+
+  const handleApplyAppearance = () => {
+    if (!pendingSpriteSet) return
+    window.mulby.window.sendToParent('sprites-updated', { spriteSet: pendingSpriteSet })
+    showToast('已应用新形象')
+  }
+
+  const handleResetAppearance = () => {
+    window.mulby.window.sendToParent('sprites-updated', { reset: true })
+    showToast('已恢复默认幽灵形象')
+  }
+
+  const renderAppearance = () => {
+    const previews: Array<{ key: PetSpriteKey; label: string }> = [
+      { key: 'stand_neutral', label: '平常' },
+      { key: 'stand_happy', label: '开心' },
+      { key: 'stand_sleepy', label: '困倦' },
+    ]
+    return (
+      <div className="panel-content">
+        <p className="field-hint">
+          用 AI 生成专属宠物形象:描述外观 → 生成像素立绘 → 预览 → 应用。15 种表情五官会自动合成到新形象上,姿态动画保持不变。
+        </p>
+
+        <div className="field">
+          <label className="field-label">形象描述</label>
+          <textarea
+            className="field-input appearance-desc"
+            rows={3}
+            placeholder="例如:一只圆滚滚的橘色小猫,白色肚皮,大大的绿眼睛"
+            value={petDescription}
+            onChange={e => setPetDescription(e.target.value)}
+          />
+        </div>
+
+        <div className="field">
+          <label className="field-label">生图模型</label>
+          {imageModels.length === 0 ? (
+            <p className="field-hint">没有可用的生图模型。请先在 Mulby 的 AI 设置中启用支持图像生成的模型(如 gpt-image-1、Gemini Flash Image)。</p>
+          ) : (
+            <select className="field-input" value={appearanceModel} onChange={e => setAppearanceModel(e.target.value)}>
+              {imageModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          )}
+        </div>
+
+        <div className="appearance-actions">
+          <button
+            className="gen-btn"
+            disabled={appearanceBusy || !appearanceModel || !petDescription.trim()}
+            onClick={handleGenerateAppearance}
+          >{appearanceBusy ? '生成中…' : '生成形象'}</button>
+          {appearanceBusy && <button className="freq-btn" onClick={handleCancelAppearance}>取消</button>}
+          {appearanceStatus && <span className="field-hint appearance-status">{appearanceStatus}</span>}
+        </div>
+
+        <div className="field">
+          <label className="field-label">或:用自己的图片</label>
+          <div className="appearance-actions">
+            <button className="freq-btn" disabled={appearanceBusy} onClick={() => appearanceFileInputRef.current?.click()}>选择图片</button>
+            {uploadedImage && <img className="appearance-upload-thumb" src={uploadedImage} alt="已选图片" />}
+            {uploadedImage && (
+              <>
+                <button
+                  className="gen-btn"
+                  disabled={appearanceBusy || !appearanceModel}
+                  onClick={handleStylizeUploadedImage}
+                >AI 转宠物风格</button>
+                <button
+                  className="gen-btn"
+                  disabled={appearanceBusy}
+                  onClick={handleDirectPixelateUploadedImage}
+                >直接像素化</button>
+              </>
+            )}
+            <input
+              ref={appearanceFileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={e => void handleChooseAppearanceFile(e)}
+            />
+          </div>
+          <p className="field-hint">「AI 转宠物风格」会用图生图把照片重绘成 Q 版立绘(上方描述可作风格提示,需要生图模型);「直接像素化」跳过 AI,适合本身就是简洁卡通或像素风的图片。</p>
+        </div>
+
+        {appearanceError && <p className="appearance-error">{appearanceError}</p>}
+
+        {(rawPetImage || pendingSpriteSet) && (
+          <div className="appearance-preview-row">
+            {rawPetImage && (
+              <div className="appearance-card">
+                <div className="appearance-card-title">AI 立绘</div>
+                <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成立绘" />
+              </div>
+            )}
+            {pendingSpriteSet && previews.map(p => (
+              <div className="appearance-card" key={p.key}>
+                <div className="appearance-card-title">{p.label}</div>
+                <div className="appearance-sprite" dangerouslySetInnerHTML={{ __html: pendingSpriteSet.sprites[p.key] ?? '' }} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="appearance-actions">
+          <button className="gen-btn" disabled={!pendingSpriteSet} onClick={handleApplyAppearance}>应用到宠物</button>
+          <button className="reset-colors-btn" onClick={handleResetAppearance}>恢复默认形象</button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="settings-root">
       <div className="settings-header">
         <div className="tab-bar">
           <button className={`tab ${tab === 'personality' ? 'active' : ''}`} onClick={() => setTab('personality')}>设置</button>
+          <button className={`tab ${tab === 'appearance' ? 'active' : ''}`} onClick={() => setTab('appearance')}>外观</button>
           <button className={`tab ${tab === 'ecosystem' ? 'active' : ''}`} onClick={() => setTab('ecosystem')}>生态</button>
           <button className={`tab ${tab === 'reminders' ? 'active' : ''}`} onClick={() => setTab('reminders')}>提醒</button>
           <button className={`tab ${tab === 'memory' ? 'active' : ''}`} onClick={() => setTab('memory')}>记忆</button>
@@ -1255,6 +1514,7 @@ export default function SettingsView() {
       </div>
 
       <div className="settings-body">
+        {tab === 'appearance' && renderAppearance()}
         {tab === 'ecosystem' && renderEcosystem()}
         {tab === 'reminders' && renderReminders()}
         {tab === 'memory' && renderMemory()}

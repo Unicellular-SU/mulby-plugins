@@ -14,7 +14,7 @@ import { checkFestival, checkBirthday } from './engine/festivals'
 import { AchievementController } from './engine/achievements'
 import { PetDiaryController } from './engine/pet-diary'
 import { startGame, checkAnswer, getGameAnswer, type GameType, type GameSession } from './engine/mini-games'
-import type { PetExpression, PetPose } from './engine/pet-standard'
+import { PET_CUSTOM_SPRITES_STORAGE_KEY, compactSpriteSet, expandSpriteSet, type PetExpression, type PetPose } from './engine/pet-standard'
 import type { PresentationIntent } from './engine/presentation'
 import { logPetPresentation } from './engine/presentation-debug'
 import { SLIME_SPRITE_SET } from './engine/slime-sprites'
@@ -1138,7 +1138,27 @@ export default function PetView() {
 
     setTimeout(() => checkAchievements(), signedIn ? 5000 : 2000)
 
-    const spriteSet = SLIME_SPRITE_SET
+    let spriteSet = SLIME_SPRITE_SET
+    try {
+      const savedCompact = await window.mulby.storage.get(PET_CUSTOM_SPRITES_STORAGE_KEY)
+      if (savedCompact) {
+        const expanded = expandSpriteSet(savedCompact)
+        const validated = expanded ? validateSpriteSet(expanded) : null
+        if (validated) {
+          spriteSet = validated
+          logPetPresentation('pet.custom-sprites.loaded', {
+            id: validated.id,
+            spriteCount: Object.keys(validated.sprites).length,
+          })
+        } else {
+          logPetPresentation('pet.custom-sprites.invalid', { reason: 'expand-or-validate-failed' })
+        }
+      }
+    } catch (err) {
+      logPetPresentation('pet.custom-sprites.load-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
     if (!spriteSet?.sprites['stand_neutral']) {
       console.error('[pet] built-in sprite set is missing stand_neutral')
       return
@@ -1524,6 +1544,11 @@ export default function PetView() {
           const p = payload as { spriteSet?: unknown; reset?: boolean }
           if (p.reset === true) {
             svgRendererRef.current?.loadSpriteSet(SLIME_SPRITE_SET)
+            window.mulby.storage.remove(PET_CUSTOM_SPRITES_STORAGE_KEY).catch((err: unknown) => {
+              logPetPresentation('pet.custom-sprites.remove-error', {
+                message: (err as Error)?.message ?? String(err),
+              })
+            })
             return
           }
           const validated = validateSpriteSet(p.spriteSet)
@@ -1535,6 +1560,11 @@ export default function PetView() {
             svgRendererRef.current = new SvgPetRenderer(container, PET_SIZE)
           }
           svgRendererRef.current.loadSpriteSet(validated)
+          window.mulby.storage.set(PET_CUSTOM_SPRITES_STORAGE_KEY, compactSpriteSet(validated)).catch((err: unknown) => {
+            logPetPresentation('pet.custom-sprites.save-error', {
+              message: (err as Error)?.message ?? String(err),
+            })
+          })
           return
         }
         default:

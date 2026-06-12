@@ -24,7 +24,7 @@ const BODY_SHADOW2 = ``
 
 // ====== Face components for expressions ======
 
-interface FaceParts {
+export interface FaceParts {
   eyes: string
   highlights: string
   blush: string
@@ -151,7 +151,8 @@ const DIZZY: FaceParts = {
   mouth: `<path fill="#1A1916" d="M31 32h2v1H31z"/>`,
 }
 
-const FACE_BY_EXPRESSION: Record<PetExpression, FaceParts> = {
+/** 供 sprite-composer 把同一套五官叠加到自定义身体上复用 */
+export const FACE_BY_EXPRESSION: Record<PetExpression, FaceParts> = {
   neutral: NEUTRAL,
   happy: HAPPY,
   sad: SAD,
