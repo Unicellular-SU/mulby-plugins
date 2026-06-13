@@ -13,12 +13,15 @@ import type { PetSpriteSet } from './pet-standard'
 // 生图 prompt 模板
 // ---------------------------------------------------------------------------
 
+/** 用户描述/风格提示拼进 prompt 前的长度上限,避免超长输入抬高费用或被模型截断 */
+const MAX_PROMPT_SUBJECT_LEN = 300
+
 /**
  * 锁定构图约束的 prompt 模板:像素化管线依赖「正面全身、纯色背景、大色块」
  * 才能稳定抠背景和量化,这些约束不交给用户输入。
  */
 export function buildPetImagePrompt(description: string): string {
-  const subject = description.trim().replace(/\s+/g, ' ')
+  const subject = description.trim().replace(/\s+/g, ' ').slice(0, MAX_PROMPT_SUBJECT_LEN)
   return [
     `A cute chibi pixel-art style desktop pet character: ${subject}.`,
     'Front facing, full body, standing pose, centered in frame.',
@@ -33,7 +36,7 @@ export function buildPetImagePrompt(description: string): string {
  * 符合像素化管线输入要求的宠物立绘。hint 为用户的可选风格补充。
  */
 export function buildPetImageEditPrompt(hint?: string): string {
-  const extra = hint?.trim().replace(/\s+/g, ' ')
+  const extra = hint?.trim().replace(/\s+/g, ' ').slice(0, MAX_PROMPT_SUBJECT_LEN)
   return [
     'Redraw the main subject of this image as a cute chibi pixel-art style desktop pet character.',
     extra ? `Style hints: ${extra}.` : '',
@@ -72,6 +75,26 @@ export function filterImageGenModels(models: ImageModelInfo[]): ImageModelInfo[]
   })
 }
 
+/** 对话模型不该出现的 id 特征:embedding / rerank */
+const NON_CHAT_MODEL_ID_HINT = /(^|[/:_-])(embed|embedding|rerank)/i
+
+/**
+ * 对话模型 = 全集减去「图像生成模型」(复用 filterImageGenModels 的统一判定),
+ * 再排除 embedding / rerank。
+ * 必须与 filterImageGenModels 互补:否则 dall-e / flux / seedream / cogview 等
+ * id 不含 "image" 子串的图像模型会被字符串启发式漏过、混进对话模型列表甚至被设为默认对话模型。
+ */
+export function filterChatModels(models: ImageModelInfo[]): ImageModelInfo[] {
+  if (!Array.isArray(models)) return []
+  const imageIds = new Set(filterImageGenModels(models).map(model => model.id))
+  return models.filter(model => {
+    if (!model?.id) return false
+    if (imageIds.has(model.id)) return false
+    if (model.endpointType === 'jina-rerank') return false
+    return !NON_CHAT_MODEL_ID_HINT.test(model.id)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // base64 / dataURL 处理
 // ---------------------------------------------------------------------------
@@ -85,11 +108,14 @@ export function normalizeBase64(input: string): string {
   return body.replace(/\s+/g, '')
 }
 
-/** 纯 base64(或已是 dataURL)→ dataURL */
+/** 纯 base64(或已是 dataURL / 远程 URL)→ 可直接喂给 <img>/canvas 的来源 */
 export function toImageDataUrl(base64: string, mime = 'image/png'): string {
   if (!base64) return ''
   const trimmed = base64.trim()
   if (trimmed.startsWith('data:')) return trimmed
+  // 部分生图后端直接返回可访问的图片 URL(而非 base64),原样透传,
+  // 否则会被当成 base64 包成非法 dataURL 导致后续解码必然失败
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
   const body = normalizeBase64(trimmed)
   return body ? `data:${mime};base64,${body}` : ''
 }

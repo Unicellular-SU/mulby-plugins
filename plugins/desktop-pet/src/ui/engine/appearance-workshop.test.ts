@@ -5,6 +5,7 @@ import { createRawImage } from './pixelate-pipeline'
 import {
   buildPetImageEditPrompt,
   buildPetImagePrompt,
+  filterChatModels,
   filterImageGenModels,
   generatePetSpriteSet,
   normalizeBase64,
@@ -42,6 +43,16 @@ function testEditPromptTemplate() {
   assert(buildPetImageEditPrompt('   ') === noHint, 'blank hint should behave like omitted hint')
 }
 
+function testPromptTruncatesLongInput() {
+  const long = 'x'.repeat(1000)
+  const prompt = buildPetImagePrompt(long)
+  assert(!prompt.includes('x'.repeat(301)), 'subject longer than 300 chars must be truncated')
+  assert(prompt.includes('x'.repeat(300)), 'first 300 chars of subject must survive')
+
+  const edit = buildPetImageEditPrompt(long)
+  assert(!edit.includes('x'.repeat(301)), 'edit hint longer than 300 chars must be truncated')
+}
+
 // ---------------------------------------------------------------------------
 // 模型筛选
 // ---------------------------------------------------------------------------
@@ -75,6 +86,35 @@ function testFilterImageGenModels() {
   assert(filterImageGenModels(undefined as any).length === 0, 'non-array input should yield empty list')
 }
 
+function testFilterChatModels() {
+  const models = [
+    { id: 'a', endpointType: 'image-generation' },
+    { id: 'openai:gpt-4o', endpointType: 'openai' },
+    { id: 'deepseek:DeepSeek-V3' },
+    { id: 'openai:dall-e-3' },
+    { id: 'replicate:flux-schnell' },
+    { id: 'bytedance:seedream-3' },
+    { id: 'zhipu:cogview-3' },
+    { id: 'openai:text-embedding-3-small' },
+    { id: 'jina:reranker-v2', endpointType: 'jina-rerank' },
+    { id: '' },
+    null as any,
+  ]
+  const kept = filterChatModels(models).map(m => m.id)
+  assert(kept.includes('openai:gpt-4o'), 'declared chat endpoint should be kept')
+  assert(kept.includes('deepseek:DeepSeek-V3'), 'plain chat model should be kept')
+  // 核心回归:这些图像模型 id 不含 "image" 子串,旧字符串过滤会漏判进对话列表
+  assert(!kept.includes('a'), 'declared image-generation model must be excluded from chat list')
+  assert(!kept.includes('openai:dall-e-3'), 'dall-e must be excluded from chat list')
+  assert(!kept.includes('replicate:flux-schnell'), 'flux must be excluded from chat list')
+  assert(!kept.includes('bytedance:seedream-3'), 'seedream must be excluded from chat list')
+  assert(!kept.includes('zhipu:cogview-3'), 'cogview must be excluded from chat list')
+  assert(!kept.includes('openai:text-embedding-3-small'), 'embedding model must be excluded')
+  assert(!kept.includes('jina:reranker-v2'), 'rerank model must be excluded')
+  assert(!kept.includes(''), 'empty id must be excluded')
+  assert(filterChatModels(undefined as any).length === 0, 'non-array input should yield empty list')
+}
+
 // ---------------------------------------------------------------------------
 // base64 / dataURL
 // ---------------------------------------------------------------------------
@@ -86,6 +126,8 @@ function testBase64Helpers() {
 
   assert(toImageDataUrl('AAAA') === 'data:image/png;base64,AAAA', 'raw base64 should be wrapped as png data url')
   assert(toImageDataUrl('data:image/jpeg;base64,BBBB') === 'data:image/jpeg;base64,BBBB', 'existing data url should pass through')
+  assert(toImageDataUrl('https://example.com/a.png') === 'https://example.com/a.png', 'http(s) url should pass through untouched')
+  assert(toImageDataUrl('  HTTPS://EX.com/a.png  ') === 'HTTPS://EX.com/a.png', 'url scheme check should be case-insensitive and trimmed')
   assert(toImageDataUrl('') === '', 'empty base64 should yield empty string')
 }
 
@@ -170,7 +212,9 @@ function testGeneratePetSpriteSetRejectsEmptySubject() {
 
 testPromptTemplateLocksConstraints()
 testEditPromptTemplate()
+testPromptTruncatesLongInput()
 testFilterImageGenModels()
+testFilterChatModels()
 testBase64Helpers()
 testParseImageDataUrl()
 testSuggestSpriteMeta()

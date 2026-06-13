@@ -19,6 +19,7 @@ import {
   buildPetImageEditPrompt,
   buildPetImagePrompt,
   decodeImageToRawImage,
+  filterChatModels,
   filterImageGenModels,
   generatePetSpriteSet,
   parseImageDataUrl,
@@ -258,7 +259,8 @@ export default function SettingsView() {
   const [uploadedImage, setUploadedImage] = useState('')
   const [pendingSpriteSet, setPendingSpriteSet] = useState<PetSpriteSet | null>(null)
   const appearanceAbortRef = useRef<(() => void) | null>(null)
-  const appearanceCancelledRef = useRef(false)
+  // 单调递增的「本次生成」令牌:取消或卸载时 +1,所有写入预览/状态的副作用以此判定是否已失效
+  const appearanceRunIdRef = useRef(0)
   const appearanceFileInputRef = useRef<HTMLInputElement | null>(null)
 
   const showToast = (msg: string) => {
@@ -298,12 +300,11 @@ export default function SettingsView() {
 
       try {
         const allModels = await window.mulby.ai.allModels()
-        const textModels = allModels.filter((m: any) =>
-          !m.id.includes('image') && !m.id.includes('embed') && !m.id.includes('rerank')
-        )
+        const textModels = filterChatModels(allModels as any)
         setModels(textModels.map((m: any) => ({ id: m.id, label: m.label || m.id })))
-        if (!personality.model && textModels.length > 0) {
-          setPersonality(p => ({ ...p, model: textModels[0].id }))
+        if (textModels.length > 0) {
+          // 用函数式更新读取最新 personality.model,避免 effect 闭包旧值覆盖已保存的模型
+          setPersonality(p => (p.model ? p : { ...p, model: String(textModels[0].id) }))
         }
         const imgModels = filterImageGenModels(allModels as any)
         setImageModels(imgModels.map((m: any) => ({ id: m.id, label: m.label || m.id })))
@@ -367,6 +368,13 @@ export default function SettingsView() {
     }
     load()
   }, [loadEcosystem])
+
+  // 卸载时让进行中的生成任务失效并中止网络请求,避免对已卸载组件 setState
+  useEffect(() => () => {
+    appearanceRunIdRef.current++
+    appearanceAbortRef.current?.()
+    appearanceAbortRef.current = null
+  }, [])
 
   const loadChatHistory = useCallback(async () => {
     try {
@@ -1269,41 +1277,52 @@ export default function SettingsView() {
     )
   }
 
-  /** 共用尾段:任意来源的图片 dataURL → 像素化 → 合成 → 进入预览 */
-  const pixelateIntoPreview = async (dataUrl: string, metaSource: string) => {
+  /** 一次生成任务的取消令牌:被取消或新任务接替、或组件卸载后 cancelled 变 true */
+  type AppearanceRunToken = { readonly cancelled: boolean }
+
+  /** 共用尾段:任意来源的图片 dataURL → 像素化 → 合成 → 进入预览。每个 await 前后都判取消,失效即丢弃结果 */
+  const pixelateIntoPreview = async (dataUrl: string, metaSource: string, token: AppearanceRunToken) => {
+    if (token.cancelled) return
     setRawPetImage(dataUrl)
     setAppearanceStatus('正在像素化并合成表情…')
     const rgba = await decodeImageToRawImage(dataUrl)
+    if (token.cancelled) return
     const { spriteSet } = generatePetSpriteSet(rgba, suggestSpriteMeta(metaSource))
+    if (token.cancelled) return
     setPendingSpriteSet(spriteSet)
     setAppearanceStatus('')
     showToast('形象已生成,点「应用到宠物」试穿')
   }
 
-  /** 共用外壳:busy/error/取消语义统一处理 */
-  const runAppearanceTask = async (task: () => Promise<void>) => {
+  /** 共用外壳:busy/error/取消语义统一处理。任务通过 token 感知取消,被取消的任务结果一律丢弃 */
+  const runAppearanceTask = async (task: (token: AppearanceRunToken) => Promise<void>) => {
     if (appearanceBusy) return
+    const runId = ++appearanceRunIdRef.current
+    const token: AppearanceRunToken = { get cancelled() { return appearanceRunIdRef.current !== runId } }
     setAppearanceBusy(true)
     setAppearanceError('')
     setPendingSpriteSet(null)
-    appearanceCancelledRef.current = false
     try {
-      await task()
+      await task(token)
     } catch (err) {
-      if (!appearanceCancelledRef.current) {
+      const aborted = err instanceof DOMException && err.name === 'AbortError'
+      if (!token.cancelled && !aborted) {
         setAppearanceError(err instanceof Error ? err.message : String(err))
+        setAppearanceStatus('')
       }
-      setAppearanceStatus('')
     } finally {
-      appearanceAbortRef.current = null
-      setAppearanceBusy(false)
+      // 仅当本次任务仍是最新一次时才复位共享状态,否则会把「已取消」覆盖回 idle 或打断后发起的新任务
+      if (!token.cancelled) {
+        appearanceAbortRef.current = null
+        setAppearanceBusy(false)
+      }
     }
   }
 
   const handleGenerateAppearance = () => {
     const description = petDescription.trim()
     if (!description || !appearanceModel) return
-    void runAppearanceTask(async () => {
+    void runAppearanceTask(async token => {
       setAppearanceStatus('正在生成立绘…')
       const prompt = buildPetImagePrompt(description)
       const ai = window.mulby.ai
@@ -1312,6 +1331,7 @@ export default function SettingsView() {
         const handle = ai.images.generateStream(
           { model: appearanceModel, prompt, size: '1024x1024', count: 1 },
           chunk => {
+            if (token.cancelled) return
             if (chunk.type === 'preview' && chunk.image) {
               setRawPetImage(toImageDataUrl(chunk.image))
               setAppearanceStatus('生成中(预览已更新)…')
@@ -1327,15 +1347,16 @@ export default function SettingsView() {
         const res = await ai.images.generate({ model: appearanceModel, prompt, size: '1024x1024', count: 1 })
         images = res?.images ?? []
       }
+      if (token.cancelled) return
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      await pixelateIntoPreview(toImageDataUrl(images[0]), description)
+      await pixelateIntoPreview(toImageDataUrl(images[0]), description, token)
     })
   }
 
   /** 上传图片 → ai.images.edit 重绘为宠物风格 → 像素化 */
   const handleStylizeUploadedImage = () => {
     if (!uploadedImage || !appearanceModel) return
-    void runAppearanceTask(async () => {
+    void runAppearanceTask(async token => {
       setAppearanceStatus('正在上传图片…')
       const parsed = parseImageDataUrl(uploadedImage)
       if (!parsed) throw new Error('图片格式不支持,请换一张 PNG/JPG')
@@ -1344,23 +1365,25 @@ export default function SettingsView() {
         mimeType: parsed.mimeType,
         purpose: 'image-edit',
       })
+      if (token.cancelled) return
       setAppearanceStatus('AI 正在重绘为宠物风格…')
       const res = await window.mulby.ai.images.edit({
         model: appearanceModel,
         imageAttachmentId: ref.attachmentId,
         prompt: buildPetImageEditPrompt(petDescription),
       })
+      if (token.cancelled) return
       const images = res?.images ?? []
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      await pixelateIntoPreview(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物')
+      await pixelateIntoPreview(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物', token)
     })
   }
 
   /** 上传图片 → 跳过 AI,直接进像素化管线(适合本身已是卡通/像素风的素材) */
   const handleDirectPixelateUploadedImage = () => {
     if (!uploadedImage) return
-    void runAppearanceTask(async () => {
-      await pixelateIntoPreview(uploadedImage, petDescription.trim() || '上传图片宠物')
+    void runAppearanceTask(async token => {
+      await pixelateIntoPreview(uploadedImage, petDescription.trim() || '上传图片宠物', token)
     })
   }
 
@@ -1379,9 +1402,10 @@ export default function SettingsView() {
   }
 
   const handleCancelAppearance = () => {
-    appearanceCancelledRef.current = true
+    appearanceRunIdRef.current++   // 令当前任务的 token.cancelled 立即变 true,其后续结果一律丢弃
     appearanceAbortRef.current?.()
     appearanceAbortRef.current = null
+    setAppearanceBusy(false)
     setAppearanceStatus('已取消')
   }
 
