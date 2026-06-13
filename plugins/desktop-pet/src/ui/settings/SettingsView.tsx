@@ -18,12 +18,17 @@ import {
   ALL_EXPRESSIONS,
   ALL_POSES,
   DEFAULT_PET_OPACITY,
+  DEFAULT_PET_SIZE,
   MAX_PET_OPACITY,
+  MAX_PET_SIZE,
   MIN_PET_OPACITY,
+  MIN_PET_SIZE,
   PET_APPEARANCE_HISTORY_LIMIT,
   PET_APPEARANCE_HISTORY_STORAGE_KEY,
   PET_OPACITY_STORAGE_KEY,
+  PET_SIZE_STORAGE_KEY,
   clampPetOpacity,
+  clampPetSize,
   compactSpriteSet,
   expandSpriteSet,
   type CompactPetSpriteSet,
@@ -286,6 +291,7 @@ export default function SettingsView() {
   const [uploadedImage, setUploadedImage] = useState('')
   const [pendingSpriteSet, setPendingSpriteSet] = useState<PetSpriteSet | null>(null)
   const [appearanceOpacity, setAppearanceOpacity] = useState(DEFAULT_PET_OPACITY)
+  const [appearanceSize, setAppearanceSize] = useState(DEFAULT_PET_SIZE)
   const [appearanceHistory, setAppearanceHistory] = useState<CompactPetSpriteSet[]>([])
   const appearanceAbortRef = useRef<(() => void) | null>(null)
   // 单调递增的「本次生成」令牌:取消或卸载时 +1,所有写入预览/状态的副作用以此判定是否已失效
@@ -346,12 +352,16 @@ export default function SettingsView() {
       }
 
       try {
-        const [savedOpacity, savedHistory] = await Promise.all([
+        const [savedOpacity, savedHistory, savedSize] = await Promise.all([
           window.mulby.storage.get(PET_OPACITY_STORAGE_KEY),
           window.mulby.storage.get(PET_APPEARANCE_HISTORY_STORAGE_KEY),
+          window.mulby.storage.get(PET_SIZE_STORAGE_KEY),
         ])
         if (savedOpacity !== undefined && savedOpacity !== null) {
           setAppearanceOpacity(clampPetOpacity(savedOpacity))
+        }
+        if (savedSize !== undefined && savedSize !== null) {
+          setAppearanceSize(clampPetSize(savedSize))
         }
         setAppearanceHistory(normalizeAppearanceHistory(savedHistory))
       } catch (err) {
@@ -1473,6 +1483,16 @@ export default function SettingsView() {
     })
   }
 
+  /** 大小滑块:实时下发宠物窗口并持久化 */
+  const handleSizeChange = (value: number) => {
+    const v = clampPetSize(value)
+    setAppearanceSize(v)
+    window.mulby.window.sendToParent('size-updated', { size: v })
+    window.mulby.storage.set(PET_SIZE_STORAGE_KEY, v).catch(err => {
+      console.error('Save size failed:', err)
+    })
+  }
+
   const persistAppearanceHistory = (list: CompactPetSpriteSet[]) => {
     window.mulby.storage.set(PET_APPEARANCE_HISTORY_STORAGE_KEY, list).catch(err => {
       console.error('Save appearance history failed:', err)
@@ -1539,6 +1559,20 @@ export default function SettingsView() {
             onChange={e => handleOpacityChange(Number(e.target.value))}
           />
           <p className="field-hint">调整桌宠整体不透明度,拖动即时生效。</p>
+        </div>
+
+        <div className="field">
+          <label className="field-label">宠物大小 · {appearanceSize}px</label>
+          <input
+            type="range"
+            className="appearance-opacity-range"
+            min={MIN_PET_SIZE}
+            max={MAX_PET_SIZE}
+            step={2}
+            value={appearanceSize}
+            onChange={e => handleSizeChange(Number(e.target.value))}
+          />
+          <p className="field-hint">调整桌宠显示大小,拖动即时生效。</p>
         </div>
 
         <div className="field">

@@ -146,6 +146,19 @@ export const PET_APPEARANCE_HISTORY_STORAGE_KEY = 'pet-appearance-history-v1'
 /** 历史记录条数上限,超出后丢弃最旧的 */
 export const PET_APPEARANCE_HISTORY_LIMIT = 12
 
+/** 用户可调的宠物显示尺寸(像素,视觉框边长)。DEFAULT 与 types.PET_SIZE 保持一致 */
+export const PET_SIZE_STORAGE_KEY = 'pet-size'
+export const DEFAULT_PET_SIZE = 90
+export const MIN_PET_SIZE = 60
+export const MAX_PET_SIZE = 140
+
+/** 把任意输入规整为合法的宠物尺寸(整数像素);非法时回退默认值 */
+export function clampPetSize(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_PET_SIZE
+  return Math.round(Math.min(MAX_PET_SIZE, Math.max(MIN_PET_SIZE, n)))
+}
+
 /**
  * 落盘用的紧凑格式:同一表情在 13 个姿态下共享同一张 SVG(姿态动画走 CSS),
  * 直接存 195 份会膨胀 13 倍,因此按唯一字符串去重,key 只存下标。

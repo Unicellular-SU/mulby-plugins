@@ -38,10 +38,10 @@
     }
   ],
   "window": {
-    "width": 180,
-    "height": 180,
-    "minWidth": 180,
-    "minHeight": 180,
+    "width": 150,
+    "height": 150,
+    "minWidth": 150,
+    "minHeight": 150,
     "type": "borderless",
     "titleBar": false,
     "transparent": true,

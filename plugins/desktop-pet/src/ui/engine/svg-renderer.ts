@@ -328,6 +328,12 @@ export class SvgPetRenderer {
     this.updateAnimation()
   }
 
+  /** 运行时调整宠物视觉框边长(用户在设置页拖动大小滑块时调用) */
+  setSize(size: number): void {
+    this.container.style.width = `${size}px`
+    this.container.style.height = `${size}px`
+  }
+
   loadSpriteSet(spriteSet: PetSpriteSet) {
     this.spriteSet = spriteSet
     this.availableKeys = new Set(
