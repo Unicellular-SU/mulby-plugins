@@ -75,6 +75,8 @@ export default function App() {
   const [engine, setEngine] = useState<OcrEngine>('native')
   const [showSettings, setShowSettings] = useState(false)
   const [models, setModels] = useState<AiModelOption[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [targetLang, setTargetLang] = useState<string>('zh')
   const settingsRef = useRef<HTMLDivElement>(null)
@@ -93,14 +95,34 @@ export default function App() {
   }, [mulby])
 
   useEffect(() => {
-    if (!showSettings || models.length > 0) return
+    if (!showSettings) return
+    let cancelled = false
+    setModelsLoading(true)
+    setModelsError(null)
     mulby.ai.allModels().then((allModels: any[]) => {
-      const opts = allModels
-        .filter((m: any) => m.capabilities?.some((c: any) => c.type === 'vision' || c.type === 'text'))
+      if (cancelled) return
+      const list = Array.isArray(allModels) ? allModels : []
+      // 宿主的 getEffectiveCapabilities 不会产出 'text' 能力类型，旧的
+      // `c.type === 'vision' || c.type === 'text'` 过滤会把纯文本模型全部剔除，
+      // 导致只配置了文本模型时列表为空、设置面板一直转圈。这里改为仅排除
+      // 纯 embedding/rerank 模型：视觉模型用于 AI OCR，文本模型用于翻译。
+      const opts = list
+        .filter((m: any) => {
+          const caps = Array.isArray(m?.capabilities) ? m.capabilities : []
+          if (caps.length === 0) return true
+          return caps.some((c: any) => c && c.type !== 'embedding' && c.type !== 'rerank')
+        })
         .map((m: any) => ({ id: m.id, label: m.label || m.id, providerLabel: m.providerLabel }))
       setModels(opts)
-    }).catch(() => {})
-  }, [showSettings, models.length, mulby])
+    }).catch((err: any) => {
+      if (cancelled) return
+      setModels([])
+      setModelsError(err?.message || '无法加载模型列表')
+    }).finally(() => {
+      if (!cancelled) setModelsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [showSettings, mulby])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -477,7 +499,11 @@ export default function App() {
                         {m.providerLabel && <span className="text-[10px] text-zinc-400 ml-1">({m.providerLabel})</span>}
                       </button>
                     ))}
-                    {models.length === 0 && <div className="px-2 py-3 text-center text-xs text-zinc-400"><Loader2 className="w-3 h-3 animate-spin mx-auto mb-1" />加载中...</div>}
+                    {modelsLoading && <div className="px-2 py-3 text-center text-xs text-zinc-400"><Loader2 className="w-3 h-3 animate-spin mx-auto mb-1" />加载中...</div>}
+                    {!modelsLoading && modelsError && <div className="px-2 py-2 text-center text-[11px] text-red-400 leading-relaxed">{modelsError}</div>}
+                    {!modelsLoading && !modelsError && models.length === 0 && (
+                      <div className="px-2 py-2 text-center text-[11px] text-zinc-400 leading-relaxed">未检测到可用模型<br />可使用“默认模型”，或先在设置中配置 AI 服务</div>
+                    )}
                   </div>
                 </div>
 
