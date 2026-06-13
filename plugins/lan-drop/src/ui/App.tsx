@@ -61,6 +61,17 @@ export default function App() {
     }
   }, [])
 
+  // 「刷新」按钮：主动重新发现（向局域网广播/单播 query），而非仅重读后端状态。
+  // 这样被误剔除的设备能立即重新出现，无需重启插件。
+  const handleRescan = useCallback(async () => {
+    try {
+      await api.rescan()
+    } catch {
+      /* 忽略，下方仍会重读一次状态 */
+    }
+    await refresh()
+  }, [refresh])
+
   // 事件驱动：长轮询订阅后端状态变更（rev 驱动）。
   // 活动时随 bump 近实时刷新，空闲时挂起在后端不再忙轮询；另加慢速兜底防卡死。
   useEffect(() => {
@@ -256,7 +267,7 @@ export default function App() {
             setManualError(undefined)
             setShowManual(true)
           }}
-          onRefresh={refresh}
+          onRefresh={handleRescan}
         />
 
         <main className="workspace">

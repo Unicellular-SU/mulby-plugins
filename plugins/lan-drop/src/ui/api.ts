@@ -43,4 +43,5 @@ export const api = {
   openDownloadDir: () => call<{ ok: boolean }>('openDownloadDir'),
   openPath: (p: string) => call<{ ok: boolean }>('openPath', { path: p }),
   restartServers: () => call<{ ok: boolean }>('restartServers'),
+  rescan: () => call<{ ok: boolean }>('rescan'),
 }

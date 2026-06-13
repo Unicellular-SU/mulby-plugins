@@ -199,15 +199,37 @@ class Store {
 
   pruneDevices(ttlMs: number): void {
     const now = Date.now()
+    // 正在传输（active/pending）的对端永不剔除：大文件传输会饱和链路，导致对端的 UDP 广播
+    // 信标丢包；若仍按 TTL 剔除，就会出现「传输进行中却看不到对端、但文件仍在传/已成功」。
+    const activePeers = this.activeTransferPeers()
     let changed = false
     for (const [id, d] of this.devices) {
-      // 手动添加的设备不因超时被剔除
-      if (!d.manual && now - d.lastSeen > ttlMs) {
+      // 手动添加 / 正在传输的设备不因超时被剔除
+      if (d.manual || activePeers.has(id)) continue
+      if (now - d.lastSeen > ttlMs) {
         this.devices.delete(id)
         changed = true
       }
     }
     if (changed) this.bump()
+  }
+
+  /** 当前正在收发（active/pending）的对端 id 集合。 */
+  private activeTransferPeers(): Set<string> {
+    const peers = new Set<string>()
+    for (const t of this.transfers) {
+      if (t.status === 'active' || t.status === 'pending') peers.add(t.peerId)
+    }
+    return peers
+  }
+
+  /** 已知设备去重后的 IP 列表（供发现服务向已知对端单播保活——单播比广播可靠）。 */
+  deviceAddresses(): string[] {
+    const ips = new Set<string>()
+    for (const d of this.devices.values()) {
+      if (d.ip) ips.add(d.ip)
+    }
+    return [...ips]
   }
 
   getDevice(id: string): RemoteDevice | undefined {
@@ -343,6 +365,10 @@ class Store {
     if (patch.status && terminal.includes(patch.status)) {
       if (t.endedAt === undefined) t.endedAt = Date.now()
       t.speed = 0
+      // 传输刚结束即刷新对端在线时间：避免长传输期间错过的信标，让对端在传输结束、
+      // 下一次保活心跳到达之前的窗口里被 TTL 误剔除。
+      const dev = this.devices.get(t.peerId)
+      if (dev) dev.lastSeen = Date.now()
       this.scheduleHistorySave()
     }
     this.bump()

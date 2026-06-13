@@ -15,6 +15,9 @@ import { store } from './store'
 
 type BeaconKind = 'announce' | 'query' | 'bye'
 
+// 每隔多少个心跳额外广播一次 query：主动重新发现「曾在线但广播丢失被剔除」的设备。
+const QUERY_EVERY_TICKS = 4
+
 interface Beacon {
   t: string
   v: number
@@ -33,6 +36,7 @@ export class DiscoveryService {
   private socket: dgram.Socket | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private starting = false
+  private tick = 0
 
   get online(): boolean {
     return store.discoveryOnline
@@ -82,7 +86,14 @@ export class DiscoveryService {
     this.socket = socket
 
     this.timer = setInterval(() => {
+      this.tick += 1
+      // 1) 广播宣告：供尚未发现本机的新设备看到本机。
       this.send('announce')
+      // 2) 向已知对端单播宣告（保活）：单播比广播可靠得多——WiFi 下广播帧常被 AP
+      //    限速/丢弃，传输饱和链路时更甚；单播能让已发现的对端持续刷新本机 lastSeen。
+      this.sendUnicastToKnown('announce')
+      // 3) 周期性广播查询：促使在线但被误剔除的对端立即单播应答，自动重新发现、无需重启。
+      if (this.tick % QUERY_EVERY_TICKS === 0) this.send('query')
       store.pruneDevices(DEVICE_TTL_MS)
     }, BEACON_INTERVAL_MS)
   }
@@ -100,6 +111,21 @@ export class DiscoveryService {
     } else {
       this.stop()
     }
+  }
+
+  /**
+   * 手动刷新（UI「刷新」按钮）：主动重新发现，而非仅重读状态。
+   * 广播 + 向已知对端单播 query（促使对端立即单播应答），并重新宣告本机。
+   */
+  rescan(): void {
+    if (!store.settings.discoveryEnabled) return
+    if (!this.socket) {
+      this.start()
+      return
+    }
+    this.send('announce')
+    this.send('query')
+    this.sendUnicastToKnown('query')
   }
 
   private cleanup(): void {
@@ -147,6 +173,14 @@ export class DiscoveryService {
         // 某些网卡可能无权广播，忽略单点失败
         if (err) logError('broadcast send failed', addr, err)
       })
+    }
+  }
+
+  /** 向所有已知对端单播一个信标（单播比广播可靠，用于保活/主动查询）。 */
+  private sendUnicastToKnown(kind: BeaconKind): void {
+    if (!this.socket) return
+    for (const ip of store.deviceAddresses()) {
+      this.send(kind, { address: ip, port: DISCOVERY_PORT })
     }
   }
 

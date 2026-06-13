@@ -257,6 +257,13 @@ export const rpc = {
     }
   },
 
+  /** 主动重新发现局域网设备（UI「刷新」按钮调用）。 */
+  async rescan() {
+    await ensureStarted()
+    discovery.rescan()
+    return { ok: true }
+  },
+
   async restartServers() {
     await ensureStarted()
     discovery.stop()
