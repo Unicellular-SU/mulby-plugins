@@ -1144,6 +1144,62 @@
   flex-wrap: wrap;
 }
 
+.appearance-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.appearance-base-card {
+  align-self: flex-start;
+}
+
+.appearance-expression-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.appearance-expr-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+}
+
+.appearance-expr-card .appearance-sprite {
+  width: 80px;
+  height: 80px;
+}
+
+.appearance-expr-regen {
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
+.appearance-expr-card.is-regenerating {
+  border-color: var(--accent);
+}
+
+.appearance-base-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--accent, var(--glass-border));
+  border-radius: var(--radius);
+  background: var(--glass);
+}
+
+.appearance-base-confirm > .appearance-card-title {
+  font-size: 13px;
+  color: var(--text, var(--text-sec));
+}
+
 .appearance-card {
   display: flex;
   flex-direction: column;

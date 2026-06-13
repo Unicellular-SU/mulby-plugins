@@ -40,6 +40,7 @@ import {
 import {
   BASE_EXPRESSION,
   DERIVED_EXPRESSIONS,
+  EXPRESSION_LABELS,
   buildExpressionEditPrompt,
   buildPetImageEditPrompt,
   buildPetImagePrompt,
@@ -54,6 +55,7 @@ import {
   toImageDataUrl,
   type ExpressionPixelation,
 } from '../engine/appearance-workshop'
+import type { ComposeMeta } from '../engine/sprite-composer'
 import { pixelateToSvg } from '../engine/pixelate-pipeline'
 import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
@@ -136,24 +138,6 @@ function readSettingsWindowId(): number | null {
 const MOOD_LABELS: Record<PetMood, string> = {
   ecstatic: '欣喜若狂', happy: '开心', content: '满足', neutral: '平静',
   bored: '无聊', lonely: '孤独', sad: '难过', grumpy: '暴躁', sleepy: '困倦',
-}
-
-const EXPRESSION_LABELS: Record<PetExpression, string> = {
-  neutral: '平静',
-  happy: '开心',
-  sad: '难过',
-  surprised: '惊讶',
-  sleepy: '困倦',
-  angry: '生气',
-  excited: '兴奋',
-  shy: '害羞',
-  love: '喜欢',
-  curious: '好奇',
-  confused: '困惑',
-  proud: '得意',
-  scared: '害怕',
-  focused: '专注',
-  dizzy: '晕乎',
 }
 
 const POSE_LABELS: Record<PetPose, string> = {
@@ -262,27 +246,8 @@ function normalizeAppearanceHistory(raw: unknown): CompactPetSpriteSet[] {
 /** 逐表情图生图的并发上限:平衡生图速度与服务端并发/限流压力 */
 const APPEARANCE_EDIT_CONCURRENCY = 3
 
-/**
- * 有上限的并发遍历:最多 limit 个 worker 同时跑,处理完一个立刻领下一个。
- * shouldStop 返回 true 时不再领取新任务(已在途的仍会跑完,由调用方按令牌丢弃结果)。
- */
-async function mapWithConcurrency<T>(
-  items: T[],
-  limit: number,
-  worker: (item: T, index: number) => Promise<void>,
-  shouldStop?: () => boolean,
-): Promise<void> {
-  let cursor = 0
-  const runnerCount = Math.max(1, Math.min(limit, items.length))
-  const runners = Array.from({ length: runnerCount }, async () => {
-    while (cursor < items.length) {
-      if (shouldStop?.()) return
-      const index = cursor++
-      await worker(items[index], index)
-    }
-  })
-  await Promise.all(runners)
-}
+/** 一次生成会话的取消令牌:被取消、被新会话接替、或组件卸载后 cancelled 变 true */
+type AppearanceRunToken = { readonly cancelled: boolean }
 
 export default function SettingsView() {
   const settingsWindowIdRef = useRef(readSettingsWindowId())
@@ -328,6 +293,25 @@ export default function SettingsView() {
   // 单调递增的「本次生成」令牌:取消或卸载时 +1,所有写入预览/状态的副作用以此判定是否已失效
   const appearanceRunIdRef = useRef(0)
   const appearanceFileInputRef = useRef<HTMLInputElement | null>(null)
+  // 「基准定妆照待确认」阶段:生成基准图后先让用户确认/修改,确认满意后再生成其余 14 个表情
+  const [appearanceAwaitingBaseConfirm, setAppearanceAwaitingBaseConfirm] = useState(false)
+  const [appearanceBaseSvg, setAppearanceBaseSvg] = useState('')
+  const appearanceBaseRef = useRef<
+    { dataUrl: string; neutralPix: ExpressionPixelation['pixelation']; metaSource: string; kind: 'generate' | 'stylize' } | null
+  >(null)
+  // 逐表情生成的上下文:基准底图 + 图生图附件 + 已生成的各表情像素化结果(可边生成边增量合成)
+  const appearanceComposeRef = useRef<
+    { baseDataUrl: string; attachmentId: string | null; meta: ComposeMeta; items: Map<PetExpression, ExpressionPixelation> } | null
+  >(null)
+  // 当前套装是否可逐表情重新生成(仅图生图管线产物可,合成降级 / 历史套装不可)
+  const [expressionsEditable, setExpressionsEditable] = useState(false)
+  // 表情生成队列(worker 池模型):支持「边生成边入队」——生成中也能对单个表情点重新生成并排进队列
+  const genQueueRef = useRef<PetExpression[]>([])      // 待生成(排队中)
+  const genActiveRef = useRef<Set<PetExpression>>(new Set()) // 正在生成(在途 worker)
+  const genWorkersRef = useRef(0)                      // 当前在途 worker 数
+  const genSessionTokenRef = useRef<AppearanceRunToken | null>(null) // 当前生成会话令牌(取消/卸载即失效)
+  const [genQueued, setGenQueued] = useState<PetExpression[]>([])    // 排队中(供卡片 UI)
+  const [genActive, setGenActive] = useState<PetExpression[]>([])    // 生成中(供卡片 UI)
 
   const showToast = (msg: string) => {
     setToast(msg)
@@ -1360,13 +1344,13 @@ export default function SettingsView() {
     )
   }
 
-  /** 一次生成任务的取消令牌:被取消或新任务接替、或组件卸载后 cancelled 变 true */
-  type AppearanceRunToken = { readonly cancelled: boolean }
-
-  /** 把生成好的套装写入预览并入库,复位状态 */
+  /** 把生成好的套装写入预览并入库,复位状态(并退出"基准图待确认"阶段) */
   const finalizeAppearance = (spriteSet: PetSpriteSet, toastMsg: string) => {
     setPendingSpriteSet(spriteSet)
     addAppearanceToHistory(spriteSet)
+    setAppearanceAwaitingBaseConfirm(false)
+    setAppearanceBaseSvg('')
+    appearanceBaseRef.current = null
     setAppearanceStatus('')
     showToast(toastMsg)
   }
@@ -1398,97 +1382,222 @@ export default function SettingsView() {
   }
 
   /**
-   * 以基准定妆照为底,逐表情图生图 → 合成全套 sprite(这是 #13/#14 的核心方案)。
-   * - neutral 直接取基准图;其余 14 个表情以基准图为参考并发派生(只改脸,角色保持一致)
-   * - 每个表情都是独立整图,五官由 AI 画在图上 → 根除「叠加矢量脸与 AI 脸打架」的双脸/错位
-   * - 任一表情失败仅留空(合成时回退 neutral);底图无法上传时降级为叠加合成方案
-   * - 全程以 token 感知取消:取消后在途请求结果一律丢弃
+   * 阶段一:基准定妆照已就绪 → 像素化出 neutral 预览,进入「待用户确认」阶段。
+   * 不立即生成其余表情,等用户确认满意(或改描述重生成)后再继续,避免一上来就跑 14 次生图。
    */
-  const buildExpressionSetFromBase = async (baseDataUrl: string, description: string, token: AppearanceRunToken) => {
+  const enterBaseConfirm = async (
+    baseDataUrl: string,
+    metaSource: string,
+    kind: 'generate' | 'stylize',
+    token: AppearanceRunToken,
+  ) => {
     if (token.cancelled) return
     setRawPetImage(baseDataUrl)
     setAppearanceStatus('正在像素化基准定妆照…')
-    const basePixelation = await pixelateExpression(baseDataUrl)
+    const neutralPix = await pixelateExpression(baseDataUrl)
     if (token.cancelled) return
 
-    setAppearanceStatus('正在准备底图…')
-    const attachmentId = await uploadBaseForEdit(baseDataUrl)
-    if (token.cancelled) return
-
-    const meta = suggestSpriteMeta(description)
-
-    // 降级:底图无法上传 → 退回「身体 + 叠加矢量五官」方案,至少产出可用形象
-    if (!attachmentId) {
-      setAppearanceStatus('无法逐表情生成(模型未返回可用底图),改用合成表情方案…')
-      const rgba = await decodeImageToRawImage(baseDataUrl)
-      if (token.cancelled) return
-      const { spriteSet } = generatePetSpriteSet(rgba, meta)
-      if (token.cancelled) return
-      finalizeAppearance(spriteSet, '形象已生成(合成表情),点「应用到宠物」试穿')
-      return
-    }
-
-    const collected: ExpressionPixelation[] = [{ expression: BASE_EXPRESSION, pixelation: basePixelation }]
-    const failed: PetExpression[] = []
-    const totalDerived = DERIVED_EXPRESSIONS.length
-    let done = 0
-    setAppearanceStatus(`正在生成表情 0/${totalDerived}…`)
-
-    await mapWithConcurrency(
-      DERIVED_EXPRESSIONS,
-      APPEARANCE_EDIT_CONCURRENCY,
-      async expression => {
-        if (token.cancelled) return
-        try {
-          const res = await window.mulby.ai.images.edit({
-            model: appearanceModel,
-            imageAttachmentId: attachmentId,
-            prompt: buildExpressionEditPrompt(expression),
-          })
-          if (token.cancelled) return
-          const img = res?.images?.[0]
-          if (!img) throw new Error('no image returned')
-          const pixelation = await pixelateExpression(toImageDataUrl(img))
-          if (token.cancelled) return
-          collected.push({ expression, pixelation })
-        } catch {
-          // 单个表情失败不影响整体:留空,合成时回退到 neutral
-          failed.push(expression)
-        } finally {
-          done++
-          if (!token.cancelled) setAppearanceStatus(`正在生成表情 ${done}/${totalDerived}…`)
-        }
-      },
-      () => token.cancelled,
+    // 单表情(全 neutral)临时套装,只为取像素化后的 neutral SVG 给用户预览
+    const previewSet = composeSpriteSetFromExpressions(
+      [{ expression: BASE_EXPRESSION, pixelation: neutralPix }],
+      suggestSpriteMeta(metaSource),
     )
-    if (token.cancelled) return
+    appearanceBaseRef.current = { dataUrl: baseDataUrl, neutralPix, metaSource, kind }
+    setAppearanceBaseSvg(previewSet.sprites['stand_neutral'] ?? '')
+    setAppearanceAwaitingBaseConfirm(true)
+    setAppearanceStatus('')
+    showToast('基准定妆照已生成,确认满意后再生成全部表情')
+  }
 
-    const spriteSet = composeSpriteSetFromExpressions(collected, meta)
-    let toastMsg: string
-    if (collected.length === 1) {
-      // 14 个表情全失败:多半是该模型不支持图生图(edit),给出明确指引
-      toastMsg = '该生图模型似乎不支持图生图改表情,已生成单表情形象;可换支持 edit 的模型重试'
-    } else if (failed.length) {
-      toastMsg = `形象已生成(${failed.length}/${totalDerived} 个表情未成功,已回退默认脸),点「应用到宠物」试穿`
-    } else {
-      toastMsg = '全套 15 个表情已生成,点「应用到宠物」试穿'
+  // -------------------------------------------------------------------------
+  // 表情生成:队列 + worker 池(边生成边展示、生成中可入队重生 —— 对应用户 #23 需求)
+  // -------------------------------------------------------------------------
+
+  /** 把当前已生成的 items 增量合成为完整套装并刷新预览(每生成一张就展示一张的核心) */
+  const recomposeFromItems = () => {
+    const ctx = appearanceComposeRef.current
+    if (!ctx) return
+    setPendingSpriteSet(composeSpriteSetFromExpressions([...ctx.items.values()], ctx.meta))
+  }
+
+  /** 把队列/在途集合同步到 UI 状态(供表情卡片显示「生成中 / 排队中」) */
+  const syncGenUI = () => {
+    setGenActive([...genActiveRef.current])
+    setGenQueued([...genQueueRef.current])
+  }
+
+  /** 顶部进度文案:正在生成 N 个、排队 M 个 */
+  const genStatusText = (): string => {
+    const active = genActiveRef.current.size
+    const queued = genQueueRef.current.length
+    if (active === 0 && queued === 0) return ''
+    const parts: string[] = []
+    if (active > 0) parts.push(`生成中 ${active}`)
+    if (queued > 0) parts.push(`排队 ${queued}`)
+    return `表情${parts.join(' · ')}…`
+  }
+
+  /** 复位整个生成会话的队列状态(取消 / 结束时调用) */
+  const resetGenSession = () => {
+    genSessionTokenRef.current = null
+    genQueueRef.current = []
+    genActiveRef.current.clear()
+    genWorkersRef.current = 0
+    appearanceAbortRef.current = null
+    syncGenUI()
+    setAppearanceBusy(false)
+  }
+
+  /** 单个表情图生图:以基准底图为参考只改这张脸,成功后并入 items 并增量刷新预览 */
+  const runOneExpressionEdit = async (expression: PetExpression, token: AppearanceRunToken) => {
+    const ctx = appearanceComposeRef.current
+    if (!ctx || token.cancelled) return
+    let attachmentId = ctx.attachmentId
+    if (!attachmentId) {
+      attachmentId = await uploadBaseForEdit(ctx.baseDataUrl)
+      if (token.cancelled) return
+      if (!attachmentId) throw new Error('底图无法作为图生图参考上传')
+      ctx.attachmentId = attachmentId
     }
-    finalizeAppearance(spriteSet, toastMsg)
+    const res = await window.mulby.ai.images.edit({
+      model: appearanceModel,
+      imageAttachmentId: attachmentId,
+      prompt: buildExpressionEditPrompt(expression),
+    })
+    if (token.cancelled) return
+    const img = res?.images?.[0]
+    if (!img) throw new Error('模型没有返回图片')
+    const pixelation = await pixelateExpression(toImageDataUrl(img))
+    if (token.cancelled) return
+    ctx.items.set(expression, { expression, pixelation })
+    recomposeFromItems()
   }
 
-  /** 共用尾段(仅「直接像素化」使用):图片 dataURL → 身体像素化 + 叠加矢量五官 → 进入预览 */
-  const pixelateIntoPreview = async (dataUrl: string, metaSource: string, token: AppearanceRunToken) => {
-    if (token.cancelled) return
-    setRawPetImage(dataUrl)
-    setAppearanceStatus('正在像素化并合成表情…')
-    const rgba = await decodeImageToRawImage(dataUrl)
-    if (token.cancelled) return
-    const { spriteSet } = generatePetSpriteSet(rgba, suggestSpriteMeta(metaSource))
-    if (token.cancelled) return
-    finalizeAppearance(spriteSet, '形象已生成,点「应用到宠物」试穿')
+  /** 生成会话收尾:用最终 items 合成全套、入库、复位状态并给出结果提示 */
+  const finishExpressionSession = (token: AppearanceRunToken) => {
+    if (genSessionTokenRef.current !== token || token.cancelled) return
+    const ctx = appearanceComposeRef.current
+    resetGenSession()
+    if (!ctx) return
+    const finalSet = composeSpriteSetFromExpressions([...ctx.items.values()], ctx.meta)
+    const total = ALL_EXPRESSIONS.length
+    const have = ctx.items.size
+    let toastMsg: string
+    if (have <= 1) {
+      toastMsg = '该生图模型似乎不支持图生图改表情,已生成单表情形象;可换支持 edit 的模型重试'
+    } else if (have < total) {
+      toastMsg = `形象已更新(${total - have} 个表情暂未成功,已回退默认脸),可对单张点「重新生成」重试`
+    } else {
+      toastMsg = '全套 15 个表情已就绪,点「应用到宠物」试穿'
+    }
+    finalizeAppearance(finalSet, toastMsg)
   }
 
-  /** 共用外壳:busy/error/取消语义统一处理。任务通过 token 感知取消,被取消的任务结果一律丢弃 */
+  /**
+   * 队列泵 + worker 池:最多 APPEARANCE_EDIT_CONCURRENCY 个表情同时生成,完成一个立刻领下一个。
+   * 生成过程中用户对单个表情点「重新生成」会把它 push 进队列,本泵自动接力处理(边生成边入队)。
+   * 所有共享状态变更都用 token 作用域保护,过期会话的在途 worker 不会污染新会话。
+   */
+  const pumpAppearanceQueue = (token: AppearanceRunToken) => {
+    if (token.cancelled || genSessionTokenRef.current !== token) return
+    while (genWorkersRef.current < APPEARANCE_EDIT_CONCURRENCY && genQueueRef.current.length > 0) {
+      const expression = genQueueRef.current.shift() as PetExpression
+      genWorkersRef.current++
+      genActiveRef.current.add(expression)
+      syncGenUI()
+      setAppearanceStatus(genStatusText())
+      void (async () => {
+        try {
+          await runOneExpressionEdit(expression, token)
+        } catch {
+          // 单个表情失败:不并入 items(合成时回退 neutral),用户可对该卡片再点「重新生成」重试
+        } finally {
+          if (genSessionTokenRef.current === token && !token.cancelled) {
+            genWorkersRef.current = Math.max(0, genWorkersRef.current - 1)
+            genActiveRef.current.delete(expression)
+            syncGenUI()
+            setAppearanceStatus(genStatusText())
+            pumpAppearanceQueue(token)
+          }
+        }
+      })()
+    }
+    // 队列清空且无在途 worker → 本会话结束
+    if (
+      genSessionTokenRef.current === token && !token.cancelled &&
+      genWorkersRef.current === 0 && genQueueRef.current.length === 0
+    ) {
+      finishExpressionSession(token)
+    }
+  }
+
+  /**
+   * 启动一次完整的表情生成会话(用户确认基准图后调用)。
+   * - 立即退出确认态、以 neutral 打底展示(其余先回退 neutral),随后逐张图生图、生成一张刷新一张
+   * - 底图无法上传则降级为「身体 + 叠加矢量五官」合成方案(不可逐表情重生成)
+   */
+  const beginExpressionSession = async (
+    baseDataUrl: string,
+    neutralPix: ExpressionPixelation['pixelation'],
+    metaSource: string,
+  ) => {
+    if (genSessionTokenRef.current) return
+    const runId = ++appearanceRunIdRef.current
+    const token: AppearanceRunToken = { get cancelled() { return appearanceRunIdRef.current !== runId } }
+    genSessionTokenRef.current = token
+    setAppearanceBusy(true)
+    setAppearanceError('')
+    // 退出确认态 → 进入实时网格,先把基准图与 neutral 打底显示出来
+    setAppearanceAwaitingBaseConfirm(false)
+    setAppearanceBaseSvg('')
+    appearanceBaseRef.current = null
+    setRawPetImage(baseDataUrl)
+
+    const meta = suggestSpriteMeta(metaSource)
+    const items = new Map<PetExpression, ExpressionPixelation>([
+      [BASE_EXPRESSION, { expression: BASE_EXPRESSION, pixelation: neutralPix }],
+    ])
+    appearanceComposeRef.current = { baseDataUrl, attachmentId: null, meta, items }
+    recomposeFromItems()
+
+    try {
+      setAppearanceStatus('正在准备底图…')
+      const attachmentId = await uploadBaseForEdit(baseDataUrl)
+      if (token.cancelled) return
+      if (appearanceComposeRef.current) appearanceComposeRef.current.attachmentId = attachmentId
+
+      // 降级:底图无法上传 → 退回叠加合成方案(不可逐表情重生成)
+      if (!attachmentId) {
+        setAppearanceStatus('该模型未返回可用底图,改用合成表情方案…')
+        const rgba = await decodeImageToRawImage(baseDataUrl)
+        if (token.cancelled) return
+        const { spriteSet } = generatePetSpriteSet(rgba, meta)
+        if (token.cancelled) return
+        appearanceComposeRef.current = null
+        setExpressionsEditable(false)
+        resetGenSession()
+        finalizeAppearance(spriteSet, '形象已生成(合成表情,该模型不支持图生图改表情),点「应用到宠物」试穿')
+        return
+      }
+
+      setExpressionsEditable(true)
+      genQueueRef.current.push(...DERIVED_EXPRESSIONS)
+      syncGenUI()
+      setAppearanceStatus(genStatusText())
+      pumpAppearanceQueue(token)
+    } catch (err) {
+      if (!token.cancelled) {
+        setAppearanceError(err instanceof Error ? err.message : String(err))
+        setAppearanceStatus('')
+        resetGenSession()
+      }
+    }
+  }
+
+  /**
+   * 共用外壳(仅用于「生成基准定妆照」阶段):busy/error/取消语义统一处理。
+   * 表情生成阶段不走这里,改用队列 + worker 池(beginExpressionSession / pumpAppearanceQueue)。
+   */
   const runAppearanceTask = async (task: (token: AppearanceRunToken) => Promise<void>) => {
     if (appearanceBusy) return
     const runId = ++appearanceRunIdRef.current
@@ -1496,6 +1605,7 @@ export default function SettingsView() {
     setAppearanceBusy(true)
     setAppearanceError('')
     setPendingSpriteSet(null)
+    setExpressionsEditable(false)
     try {
       await task(token)
     } catch (err) {
@@ -1543,13 +1653,13 @@ export default function SettingsView() {
       }
       if (token.cancelled) return
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      // 基准图已就绪;后续逐表情 edit 无 abort,改由 token 控制取消
+      // 基准图已就绪;进入"待确认"阶段,后续 edit 无 abort,改由 token 控制取消
       appearanceAbortRef.current = null
-      await buildExpressionSetFromBase(toImageDataUrl(images[0]), description, token)
+      await enterBaseConfirm(toImageDataUrl(images[0]), description, 'generate', token)
     })
   }
 
-  /** 上传图片 → 先重绘为基准定妆照 → 再逐表情图生图 → 合成 */
+  /** 上传图片 → 先重绘为基准定妆照(待用户确认后再逐表情生图) */
   const handleStylizeUploadedImage = () => {
     if (!uploadedImage || !appearanceModel) return
     void runAppearanceTask(async token => {
@@ -1571,16 +1681,62 @@ export default function SettingsView() {
       if (token.cancelled) return
       const images = res?.images ?? []
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      await buildExpressionSetFromBase(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物', token)
+      await enterBaseConfirm(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物', 'stylize', token)
     })
   }
 
-  /** 上传图片 → 跳过 AI,直接进像素化管线(适合本身已是卡通/像素风的素材) */
-  const handleDirectPixelateUploadedImage = () => {
-    if (!uploadedImage) return
-    void runAppearanceTask(async token => {
-      await pixelateIntoPreview(uploadedImage, petDescription.trim() || '上传图片宠物', token)
-    })
+  /** 用户确认基准定妆照满意 → 以它为底逐张生成其余 14 个表情(生成一张展示一张) */
+  const handleConfirmGenerateExpressions = () => {
+    const base = appearanceBaseRef.current
+    if (!base || genSessionTokenRef.current) return
+    void beginExpressionSession(base.dataUrl, base.neutralPix, base.metaSource)
+  }
+
+  /** 对基准图不满意 → 用当前描述/上传图重新生成基准定妆照(沿用首次的来源方式) */
+  const handleRegenerateBase = () => {
+    if (appearanceBaseRef.current?.kind === 'stylize') handleStylizeUploadedImage()
+    else handleGenerateAppearance()
+  }
+
+  /** 放弃当前基准图,退出"待确认"阶段回到空白 */
+  const handleDiscardBase = () => {
+    appearanceBaseRef.current = null
+    appearanceComposeRef.current = null
+    setExpressionsEditable(false)
+    setAppearanceAwaitingBaseConfirm(false)
+    setAppearanceBaseSvg('')
+    setRawPetImage('')
+    setAppearanceStatus('')
+  }
+
+  /**
+   * 单个表情重新生成:把该表情加入生成队列。
+   * - 若生成会话正在进行(批量生成中)→ 直接入队,worker 池会接力处理(边生成边入队)
+   * - 若当前空闲(整套已生成完)→ 新开一个会话只处理这一张
+   * 重复点击同一张(已在队列或在途)直接忽略,避免重复请求。
+   */
+  const handleRegenerateExpression = (expression: PetExpression) => {
+    const ctx = appearanceComposeRef.current
+    if (!ctx || !expressionsEditable) return
+    if (genActiveRef.current.has(expression) || genQueueRef.current.includes(expression)) return
+    genQueueRef.current.push(expression)
+    syncGenUI()
+
+    const current = genSessionTokenRef.current
+    if (current && !current.cancelled) {
+      // 复用进行中的会话:接力泵一次即可
+      setAppearanceStatus(genStatusText())
+      pumpAppearanceQueue(current)
+      return
+    }
+    // 空闲 → 新开会话只处理队列里的这张
+    const runId = ++appearanceRunIdRef.current
+    const token: AppearanceRunToken = { get cancelled() { return appearanceRunIdRef.current !== runId } }
+    genSessionTokenRef.current = token
+    setAppearanceBusy(true)
+    setAppearanceError('')
+    setAppearanceStatus(genStatusText())
+    pumpAppearanceQueue(token)
   }
 
   const handleChooseAppearanceFile = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -1598,10 +1754,10 @@ export default function SettingsView() {
   }
 
   const handleCancelAppearance = () => {
-    appearanceRunIdRef.current++   // 令当前任务的 token.cancelled 立即变 true,其后续结果一律丢弃
+    appearanceRunIdRef.current++   // 令当前任务/会话的 token.cancelled 立即变 true,其后续结果一律丢弃
     appearanceAbortRef.current?.()
     appearanceAbortRef.current = null
-    setAppearanceBusy(false)
+    resetGenSession()              // 清空表情生成队列 / 在途集合 / worker 计数,并复位 busy
     setAppearanceStatus('已取消')
   }
 
@@ -1658,6 +1814,12 @@ export default function SettingsView() {
       showToast('该历史形象已损坏,无法应用')
       return
     }
+    setAppearanceAwaitingBaseConfirm(false)
+    setAppearanceBaseSvg('')
+    appearanceBaseRef.current = null
+    // 历史套装没有逐表情整图上下文,无法单独重生成
+    appearanceComposeRef.current = null
+    setExpressionsEditable(false)
     setPendingSpriteSet(expanded)
     setRawPetImage('')
     window.mulby.window.sendToParent('sprites-updated', { spriteSet: expanded })
@@ -1679,18 +1841,18 @@ export default function SettingsView() {
   }
 
   const renderAppearance = () => {
-    const previews: Array<{ key: PetSpriteKey; label: string }> = [
-      { key: 'stand_neutral', label: '平常' },
-      { key: 'stand_happy', label: '开心' },
-      { key: 'stand_sad', label: '难过' },
-      { key: 'stand_angry', label: '生气' },
-      { key: 'stand_surprised', label: '惊讶' },
-    ]
+    // 展示全部 15 个表情(立姿),每张都是 AI 单独画的脸,可单独重新生成
+    const expressionPreviews: Array<{ key: PetSpriteKey; expression: PetExpression; label: string }> =
+      ALL_EXPRESSIONS.map(expression => ({
+        key: `stand_${expression}` as PetSpriteKey,
+        expression,
+        label: EXPRESSION_LABELS[expression] ?? expression,
+      }))
     return (
       <div className="panel-content">
         <p className="field-hint">
-          用 AI 生成专属宠物形象:描述外观 → AI 先画一张「基准定妆照」(带表情的脸),再以它为底图为全部 15 种表情逐张生图 → 预览 → 应用。
-          每个表情都是 AI 单独画的脸,不再叠加固定五官,因此不会出现重影/对不上。约需 15 次生图、耗时较长,可随时取消。
+          用 AI 生成专属宠物形象:描述外观 → AI 先画一张「基准定妆照」→ 你确认满意(不满意可改描述重画)→ 再以它为底图为其余 14 种表情逐张生图 → 应用。
+          每个表情都是 AI 单独画的脸,不再叠加固定五官,因此不会出现重影/对不上。表情会逐张生成、生成一张就展示一张(共约 14 次生图、可随时取消);生成过程中或完成后,对哪张不满意都可单独点「重新生成」,会自动排进生成队列。
         </p>
 
         <div className="field">
@@ -1759,18 +1921,11 @@ export default function SettingsView() {
             <button className="freq-btn" disabled={appearanceBusy} onClick={() => appearanceFileInputRef.current?.click()}>选择图片</button>
             {uploadedImage && <img className="appearance-upload-thumb" src={uploadedImage} alt="已选图片" />}
             {uploadedImage && (
-              <>
-                <button
-                  className="gen-btn"
-                  disabled={appearanceBusy || !appearanceModel}
-                  onClick={handleStylizeUploadedImage}
-                >AI 转宠物风格</button>
-                <button
-                  className="gen-btn"
-                  disabled={appearanceBusy}
-                  onClick={handleDirectPixelateUploadedImage}
-                >直接像素化</button>
-              </>
+              <button
+                className="gen-btn"
+                disabled={appearanceBusy || !appearanceModel}
+                onClick={handleStylizeUploadedImage}
+              >AI 转宠物风格</button>
             )}
             <input
               ref={appearanceFileInputRef}
@@ -1780,32 +1935,85 @@ export default function SettingsView() {
               onChange={e => void handleChooseAppearanceFile(e)}
             />
           </div>
-          <p className="field-hint">「AI 转宠物风格」会先把照片重绘成基准定妆照,再逐表情生图(同样约 15 次,上方描述可作风格提示,需要生图模型);「直接像素化」跳过 AI、只取这张图做身体并叠加固定五官,最快但表情是合成的,适合本身就是简洁卡通或像素风的图片。</p>
+          <p className="field-hint">「AI 转宠物风格」会先把照片重绘成基准定妆照,经你确认后再逐表情生图(约 15 次,上方描述可作风格提示,需要支持图生图的生图模型)。</p>
         </div>
 
         {appearanceError && <p className="appearance-error">{appearanceError}</p>}
 
-        {(rawPetImage || pendingSpriteSet) && (
-          <div className="appearance-preview-row">
-            {rawPetImage && (
-              <div className="appearance-card">
-                <div className="appearance-card-title">基准定妆照</div>
-                <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成基准定妆照" />
+        {appearanceAwaitingBaseConfirm ? (
+          <div className="appearance-base-confirm">
+            <div className="appearance-card-title">第一步 · 确认基准定妆照</div>
+            <div className="appearance-preview-row">
+              {rawPetImage && (
+                <div className="appearance-card">
+                  <div className="appearance-card-title">AI 立绘</div>
+                  <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成基准定妆照" />
+                </div>
+              )}
+              {appearanceBaseSvg && (
+                <div className="appearance-card">
+                  <div className="appearance-card-title">像素化效果</div>
+                  <div className="appearance-sprite" dangerouslySetInnerHTML={{ __html: appearanceBaseSvg }} />
+                </div>
+              )}
+            </div>
+            {appearanceBusy ? (
+              <div className="appearance-actions">
+                {appearanceStatus && <span className="field-hint appearance-status">{appearanceStatus}</span>}
+                <button className="freq-btn" onClick={handleCancelAppearance}>取消</button>
+              </div>
+            ) : (
+              <div className="appearance-actions">
+                <button className="gen-btn" disabled={!appearanceModel} onClick={handleConfirmGenerateExpressions}>满意,生成 14 个表情</button>
+                <button className="freq-btn" onClick={handleRegenerateBase}>重新生成基准图</button>
+                <button className="reset-colors-btn" onClick={handleDiscardBase}>放弃</button>
               </div>
             )}
-            {pendingSpriteSet && previews.map(p => (
-              <div className="appearance-card" key={p.key}>
-                <div className="appearance-card-title">{p.label}</div>
-                <div className="appearance-sprite" dangerouslySetInnerHTML={{ __html: pendingSpriteSet.sprites[p.key] ?? '' }} />
-              </div>
-            ))}
+            <p className="field-hint">先确认这张基准定妆照(及其像素化效果)。不满意可改上方「形象描述」后点「重新生成基准图」;满意后再点「生成 14 个表情」——会逐张生成、生成一张展示一张,过程中可对单张点「重新生成」入队,也可随时取消。</p>
           </div>
-        )}
+        ) : (
+          <>
+            {(rawPetImage || pendingSpriteSet) && (
+              <div className="appearance-result">
+                {rawPetImage && (
+                  <div className="appearance-card appearance-base-card">
+                    <div className="appearance-card-title">基准定妆照</div>
+                    <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成基准定妆照" />
+                  </div>
+                )}
+                {pendingSpriteSet && (
+                  <>
+                    <div className="appearance-card-title">全部表情(共 {expressionPreviews.length} 个)</div>
+                    <div className="appearance-expression-grid">
+                      {expressionPreviews.map(p => {
+                        const isActive = genActive.includes(p.expression)
+                        const isQueued = genQueued.includes(p.expression)
+                        return (
+                          <div className={`appearance-expr-card ${isActive ? 'is-regenerating' : ''}`} key={p.key}>
+                            <div className="appearance-card-title">{p.label}</div>
+                            <div className="appearance-sprite" dangerouslySetInnerHTML={{ __html: pendingSpriteSet.sprites[p.key] ?? '' }} />
+                            {expressionsEditable && (
+                              <button
+                                className="freq-btn appearance-expr-regen"
+                                disabled={isActive || isQueued}
+                                onClick={() => handleRegenerateExpression(p.expression)}
+                              >{isActive ? '生成中…' : isQueued ? '排队中…' : '重新生成'}</button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
-        <div className="appearance-actions">
-          <button className="gen-btn" disabled={!pendingSpriteSet} onClick={handleApplyAppearance}>应用到宠物</button>
-          <button className="reset-colors-btn" onClick={handleResetAppearance}>恢复默认形象</button>
-        </div>
+            <div className="appearance-actions">
+              <button className="gen-btn" disabled={!pendingSpriteSet} onClick={handleApplyAppearance}>应用到宠物</button>
+              <button className="reset-colors-btn" onClick={handleResetAppearance}>恢复默认形象</button>
+            </div>
+          </>
+        )}
 
         {appearanceHistory.length > 0 && (
           <div className="field appearance-history">

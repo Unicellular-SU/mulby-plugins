@@ -101,6 +101,28 @@ export const EXPRESSION_PORTRAIT_HINT: Record<PetExpression, string> = {
 }
 
 /**
+ * 各表情的中文标签,供设置页「外观」tab 渲染全量表情卡片标题。
+ * 与 PetExpression / ALL_EXPRESSIONS 一一对应,新增表情时务必同步补全。
+ */
+export const EXPRESSION_LABELS: Record<PetExpression, string> = {
+  neutral: '平静',
+  happy: '开心',
+  sad: '难过',
+  surprised: '惊讶',
+  sleepy: '困倦',
+  angry: '生气',
+  excited: '兴奋',
+  shy: '害羞',
+  love: '喜欢',
+  curious: '好奇',
+  confused: '困惑',
+  proud: '得意',
+  scared: '害怕',
+  focused: '专注',
+  dizzy: '晕乎',
+}
+
+/**
  * 逐表情图生图 prompt:在基准定妆照之上「只改脸」。
  * 强约束身体/配色/轮廓/姿态/构图/背景全部保持一致,只把五官换成目标表情,
  * 从根本上消除「AI 画的五官与叠加的矢量五官打架」(双脸/错位)问题。
