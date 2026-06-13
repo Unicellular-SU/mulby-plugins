@@ -14,7 +14,24 @@ import {
   stripPresentationMarkers,
   type PresentationIntent,
 } from '../engine/presentation'
-import { ALL_EXPRESSIONS, ALL_POSES, type PetExpression, type PetPose, type PetSpriteKey, type PetSpriteSet } from '../engine/pet-standard'
+import {
+  ALL_EXPRESSIONS,
+  ALL_POSES,
+  DEFAULT_PET_OPACITY,
+  MAX_PET_OPACITY,
+  MIN_PET_OPACITY,
+  PET_APPEARANCE_HISTORY_LIMIT,
+  PET_APPEARANCE_HISTORY_STORAGE_KEY,
+  PET_OPACITY_STORAGE_KEY,
+  clampPetOpacity,
+  compactSpriteSet,
+  expandSpriteSet,
+  type CompactPetSpriteSet,
+  type PetExpression,
+  type PetPose,
+  type PetSpriteKey,
+  type PetSpriteSet,
+} from '../engine/pet-standard'
 import {
   buildPetImageEditPrompt,
   buildPetImagePrompt,
@@ -221,6 +238,16 @@ function groupChatTurns(items: PetChatHistoryItem[]): Array<{ user: string; assi
   return out.reverse()
 }
 
+/** 校验并裁剪从存储读到的 AI 形象历史:用 expandSpriteSet 兜底过滤损坏/伪造项,并应用条数上限 */
+function normalizeAppearanceHistory(raw: unknown): CompactPetSpriteSet[] {
+  if (!Array.isArray(raw)) return []
+  const out: CompactPetSpriteSet[] = []
+  for (const item of raw) {
+    if (expandSpriteSet(item)) out.push(item as CompactPetSpriteSet)
+  }
+  return out.slice(0, PET_APPEARANCE_HISTORY_LIMIT)
+}
+
 export default function SettingsView() {
   const settingsWindowIdRef = useRef(readSettingsWindowId())
   const closedNotifiedRef = useRef(false)
@@ -258,6 +285,8 @@ export default function SettingsView() {
   const [rawPetImage, setRawPetImage] = useState('')
   const [uploadedImage, setUploadedImage] = useState('')
   const [pendingSpriteSet, setPendingSpriteSet] = useState<PetSpriteSet | null>(null)
+  const [appearanceOpacity, setAppearanceOpacity] = useState(DEFAULT_PET_OPACITY)
+  const [appearanceHistory, setAppearanceHistory] = useState<CompactPetSpriteSet[]>([])
   const appearanceAbortRef = useRef<(() => void) | null>(null)
   // 单调递增的「本次生成」令牌:取消或卸载时 +1,所有写入预览/状态的副作用以此判定是否已失效
   const appearanceRunIdRef = useRef(0)
@@ -314,6 +343,19 @@ export default function SettingsView() {
         }
       } catch (err) {
         console.error('Load AI models failed:', err)
+      }
+
+      try {
+        const [savedOpacity, savedHistory] = await Promise.all([
+          window.mulby.storage.get(PET_OPACITY_STORAGE_KEY),
+          window.mulby.storage.get(PET_APPEARANCE_HISTORY_STORAGE_KEY),
+        ])
+        if (savedOpacity !== undefined && savedOpacity !== null) {
+          setAppearanceOpacity(clampPetOpacity(savedOpacity))
+        }
+        setAppearanceHistory(normalizeAppearanceHistory(savedHistory))
+      } catch (err) {
+        console.error('Load appearance settings failed:', err)
       }
 
       try {
@@ -1290,6 +1332,7 @@ export default function SettingsView() {
     const { spriteSet } = generatePetSpriteSet(rgba, suggestSpriteMeta(metaSource))
     if (token.cancelled) return
     setPendingSpriteSet(spriteSet)
+    addAppearanceToHistory(spriteSet)
     setAppearanceStatus('')
     showToast('形象已生成,点「应用到宠物」试穿')
   }
@@ -1420,6 +1463,58 @@ export default function SettingsView() {
     showToast('已恢复默认幽灵形象')
   }
 
+  /** 透明度滑块:实时下发宠物窗口并持久化(宠物端收到后也会落盘,这里先存一份保证设置页重开即时回显) */
+  const handleOpacityChange = (value: number) => {
+    const v = clampPetOpacity(value)
+    setAppearanceOpacity(v)
+    window.mulby.window.sendToParent('opacity-updated', { opacity: v })
+    window.mulby.storage.set(PET_OPACITY_STORAGE_KEY, v).catch(err => {
+      console.error('Save opacity failed:', err)
+    })
+  }
+
+  const persistAppearanceHistory = (list: CompactPetSpriteSet[]) => {
+    window.mulby.storage.set(PET_APPEARANCE_HISTORY_STORAGE_KEY, list).catch(err => {
+      console.error('Save appearance history failed:', err)
+    })
+  }
+
+  /** 生成成功后把形象存入历史:按 id 去重、最新置顶、裁剪到上限并落盘 */
+  const addAppearanceToHistory = (spriteSet: PetSpriteSet) => {
+    const compact = compactSpriteSet(spriteSet)
+    setAppearanceHistory(prev => {
+      const next = [compact, ...prev.filter(item => item.id !== compact.id)].slice(0, PET_APPEARANCE_HISTORY_LIMIT)
+      persistAppearanceHistory(next)
+      return next
+    })
+  }
+
+  const handleApplyHistoryItem = (item: CompactPetSpriteSet) => {
+    const expanded = expandSpriteSet(item)
+    if (!expanded) {
+      showToast('该历史形象已损坏,无法应用')
+      return
+    }
+    setPendingSpriteSet(expanded)
+    setRawPetImage('')
+    window.mulby.window.sendToParent('sprites-updated', { spriteSet: expanded })
+    showToast('已应用历史形象')
+  }
+
+  const handleDeleteHistoryItem = (id: string) => {
+    setAppearanceHistory(prev => {
+      const next = prev.filter(item => item.id !== id)
+      persistAppearanceHistory(next)
+      return next
+    })
+  }
+
+  /** 历史卡片缩略图:取 stand_neutral 对应的 SVG(自产内容,预览安全) */
+  const historyThumbnail = (item: CompactPetSpriteSet): string => {
+    const idx = item.keys['stand_neutral']
+    return typeof idx === 'number' ? (item.svgs[idx] ?? '') : ''
+  }
+
   const renderAppearance = () => {
     const previews: Array<{ key: PetSpriteKey; label: string }> = [
       { key: 'stand_neutral', label: '平常' },
@@ -1431,6 +1526,20 @@ export default function SettingsView() {
         <p className="field-hint">
           用 AI 生成专属宠物形象:描述外观 → 生成像素立绘 → 预览 → 应用。15 种表情五官会自动合成到新形象上,姿态动画保持不变。
         </p>
+
+        <div className="field">
+          <label className="field-label">宠物透明度 · {Math.round(appearanceOpacity * 100)}%</label>
+          <input
+            type="range"
+            className="appearance-opacity-range"
+            min={MIN_PET_OPACITY}
+            max={MAX_PET_OPACITY}
+            step={0.05}
+            value={appearanceOpacity}
+            onChange={e => handleOpacityChange(Number(e.target.value))}
+          />
+          <p className="field-hint">调整桌宠整体不透明度,拖动即时生效。</p>
+        </div>
 
         <div className="field">
           <label className="field-label">形象描述</label>
@@ -1517,6 +1626,28 @@ export default function SettingsView() {
           <button className="gen-btn" disabled={!pendingSpriteSet} onClick={handleApplyAppearance}>应用到宠物</button>
           <button className="reset-colors-btn" onClick={handleResetAppearance}>恢复默认形象</button>
         </div>
+
+        {appearanceHistory.length > 0 && (
+          <div className="field appearance-history">
+            <label className="field-label">历史形象</label>
+            <div className="appearance-history-grid">
+              {appearanceHistory.map(item => (
+                <div className="appearance-history-card" key={item.id}>
+                  <div
+                    className="appearance-history-thumb"
+                    dangerouslySetInnerHTML={{ __html: historyThumbnail(item) }}
+                  />
+                  <div className="appearance-history-name" title={item.name}>{item.name || '自定义宠物'}</div>
+                  <div className="appearance-history-actions">
+                    <button className="freq-btn" disabled={appearanceBusy} onClick={() => handleApplyHistoryItem(item)}>应用</button>
+                    <button className="freq-btn" onClick={() => handleDeleteHistoryItem(item.id)}>删除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="field-hint">最多保留最近 {PET_APPEARANCE_HISTORY_LIMIT} 个生成的形象,点「应用」即可换装。</p>
+          </div>
+        )}
       </div>
     )
   }

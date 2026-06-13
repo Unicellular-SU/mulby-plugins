@@ -128,6 +128,24 @@ export function emotionToExpression(emotion: string): PetExpression {
 
 export const PET_CUSTOM_SPRITES_STORAGE_KEY = 'pet-custom-sprite-set'
 
+/** 用户可调的宠物整体不透明度(渲染层),默认 0.7 与内置幽灵观感一致;范围 [0.3, 1] */
+export const PET_OPACITY_STORAGE_KEY = 'pet-opacity'
+export const DEFAULT_PET_OPACITY = 0.7
+export const MIN_PET_OPACITY = 0.3
+export const MAX_PET_OPACITY = 1
+
+/** 把任意输入规整为合法的不透明度值;非法时回退默认值 */
+export function clampPetOpacity(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_PET_OPACITY
+  return Math.min(MAX_PET_OPACITY, Math.max(MIN_PET_OPACITY, n))
+}
+
+/** AI 形象历史记录(紧凑格式列表),供设置页回溯/复用历史版本 */
+export const PET_APPEARANCE_HISTORY_STORAGE_KEY = 'pet-appearance-history-v1'
+/** 历史记录条数上限,超出后丢弃最旧的 */
+export const PET_APPEARANCE_HISTORY_LIMIT = 12
+
 /**
  * 落盘用的紧凑格式:同一表情在 13 个姿态下共享同一张 SVG(姿态动画走 CSS),
  * 直接存 195 份会膨胀 13 倍,因此按唯一字符串去重,key 只存下标。

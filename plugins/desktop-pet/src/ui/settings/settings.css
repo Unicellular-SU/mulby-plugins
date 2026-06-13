@@ -1197,3 +1197,61 @@
     repeating-conic-gradient(rgba(155, 125, 212, 0.12) 0% 25%, transparent 0% 50%)
     0 0 / 10px 10px;
 }
+
+.appearance-opacity-range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.appearance-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 10px;
+}
+
+.appearance-history-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+}
+
+.appearance-history-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  background:
+    repeating-conic-gradient(rgba(155, 125, 212, 0.12) 0% 25%, transparent 0% 50%)
+    0 0 / 12px 12px;
+}
+
+.appearance-history-thumb svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+
+.appearance-history-name {
+  font-size: 10px;
+  color: var(--text-sec);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appearance-history-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.appearance-history-actions .freq-btn {
+  padding: 2px 8px;
+  font-size: 10px;
+}

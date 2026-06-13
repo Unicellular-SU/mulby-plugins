@@ -6,7 +6,7 @@ import {
   MOVE_SPEED,
   RUN_SPEED,
   WANDER_SPEED,
-  PET_SIZE,
+  WIN_SIZE,
 } from './types'
 
 function distance(a: Point, b: Point): number {
@@ -19,8 +19,8 @@ export function createInitialState(bounds: DisplayBounds): PetState {
   return {
     behavior: 'idle',
     position: {
-      x: bounds.x + bounds.width / 2 - PET_SIZE / 2,
-      y: bounds.y + bounds.height - PET_SIZE - 40,
+      x: bounds.x + bounds.width / 2 - WIN_SIZE / 2,
+      y: bounds.y + bounds.height - WIN_SIZE - 40,
     },
     velocity: { x: 0, y: 0 },
     facing: 'right',
@@ -62,7 +62,7 @@ export function decideBehavior(state: PetState, event: InputEvent | null): Behav
 
     switch (event.type) {
       case 'mouseMove': {
-        const petCenter = { x: position.x + PET_SIZE / 2, y: position.y + PET_SIZE / 2 }
+        const petCenter = { x: position.x + WIN_SIZE / 2, y: position.y + WIN_SIZE / 2 }
         const mouse = { x: event.x, y: event.y }
         const dist = distance(petCenter, mouse)
         if (dist > 300) return 'chase'
@@ -72,7 +72,7 @@ export function decideBehavior(state: PetState, event: InputEvent | null): Behav
       }
 
       case 'mouseDown': {
-        const petCenter = { x: position.x + PET_SIZE / 2, y: position.y + PET_SIZE / 2 }
+        const petCenter = { x: position.x + WIN_SIZE / 2, y: position.y + WIN_SIZE / 2 }
         const mouse = { x: event.x, y: event.y }
         const dist = distance(petCenter, mouse)
         if (dist < 120) {
@@ -124,8 +124,8 @@ const CHASE_STOP_DIST = 100
 export function getVelocity(state: PetState, bounds: DisplayBounds): Point {
   switch (state.behavior) {
     case 'chase': {
-      const petCx = state.position.x + PET_SIZE / 2
-      const petCy = state.position.y + PET_SIZE / 2
+      const petCx = state.position.x + WIN_SIZE / 2
+      const petCy = state.position.y + WIN_SIZE / 2
       const dx = state.lastMousePos.x - petCx
       const dy = state.lastMousePos.y - petCy
       const dist = Math.sqrt(dx * dx + dy * dy)
@@ -141,9 +141,9 @@ export function getVelocity(state: PetState, bounds: DisplayBounds): Point {
     }
 
     case 'wander': {
-      const dx = state.wanderTarget - (state.position.x + PET_SIZE / 2)
+      const dx = state.wanderTarget - (state.position.x + WIN_SIZE / 2)
       if (Math.abs(dx) < 10) {
-        state.wanderTarget = bounds.x + Math.random() * (bounds.width - PET_SIZE)
+        state.wanderTarget = bounds.x + Math.random() * (bounds.width - WIN_SIZE)
       }
       return { x: dx > 0 ? WANDER_SPEED : -WANDER_SPEED, y: 0 }
     }
@@ -160,9 +160,9 @@ export function updatePosition(state: PetState, bounds: DisplayBounds): void {
   state.position.x += vx
   state.position.y += vy
 
-  state.position.x = Math.max(bounds.x, Math.min(state.position.x, bounds.x + bounds.width - PET_SIZE))
+  state.position.x = Math.max(bounds.x, Math.min(state.position.x, bounds.x + bounds.width - WIN_SIZE))
   const minY = bounds.y + 80
-  state.position.y = Math.max(minY, Math.min(state.position.y, bounds.y + bounds.height - PET_SIZE))
+  state.position.y = Math.max(minY, Math.min(state.position.y, bounds.y + bounds.height - WIN_SIZE))
 
   if (state.velocity.x > 0.1) state.facing = 'right'
   if (state.velocity.x < -0.1) state.facing = 'left'

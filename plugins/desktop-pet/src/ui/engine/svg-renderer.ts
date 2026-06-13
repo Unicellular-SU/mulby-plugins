@@ -1,5 +1,5 @@
 import type { PetExpression, PetPose, PetSpriteKey, PetSpriteSet } from './pet-standard'
-import { resolveSpriteKey } from './pet-standard'
+import { DEFAULT_PET_OPACITY, resolveSpriteKey } from './pet-standard'
 import { logPetPresentation } from './presentation-debug'
 import { sanitizeSvgString } from './sprite-sanitize'
 
@@ -290,8 +290,10 @@ export class SvgPetRenderer {
   private walkFrame = 0
   private walkTimer = 0
   private blinkTimer = 0
-  private targetOpacity = 0.7
-  private currentOpacity = 0.7
+  private targetOpacity = DEFAULT_PET_OPACITY
+  private currentOpacity = DEFAULT_PET_OPACITY
+  // 用户在设置页可调的整体不透明度;各姿态的相对明暗差异(POSE_OPACITY)按此基准等比缩放
+  private userOpacity = DEFAULT_PET_OPACITY
   private isMoving = false
   private transientAnimationActive = false
   private transientAnimationToken = 0
@@ -435,7 +437,7 @@ export class SvgPetRenderer {
       expression: this.state.expression,
     })
     this.state.pose = pose
-    this.targetOpacity = POSE_OPACITY[pose] ?? 0.7
+    this.targetOpacity = this.scaledOpacity(pose)
     this.applySprite()
     this.updateAnimation()
 
@@ -468,6 +470,23 @@ export class SvgPetRenderer {
     if (this.state.flipped === flipped) return
     this.state.flipped = flipped
     this.updateAnimation()
+  }
+
+  /** 当前姿态目标不透明度:以 POSE_OPACITY(基准 0.7)的相对比例 × 用户系数,夹紧到 [0.08, 1] */
+  private scaledOpacity(pose: PetPose): number {
+    const base = POSE_OPACITY[pose] ?? DEFAULT_PET_OPACITY
+    const scaled = (base / DEFAULT_PET_OPACITY) * this.userOpacity
+    return Math.min(1, Math.max(0.08, scaled))
+  }
+
+  /** 设置用户可调的整体不透明度并立即生效(各姿态相对差异保持不变) */
+  setUserOpacity(opacity: number): void {
+    const next = Math.min(1, Math.max(0.08, opacity))
+    if (next === this.userOpacity) return
+    this.userOpacity = next
+    this.targetOpacity = this.scaledOpacity(this.state.pose)
+    this.currentOpacity = this.targetOpacity
+    this.svgWrap.style.opacity = String(this.targetOpacity)
   }
 
   update(deltaMs: number) {

@@ -8,13 +8,13 @@ import {
   updatePosition,
 } from './engine/behavior'
 import type { PetState, DisplayBounds, BehaviorType } from './engine/types'
-import { PET_SIZE } from './engine/types'
+import { PET_MARGIN, PET_SIZE, WIN_SIZE } from './engine/types'
 import { AIChatController, DEFAULT_PERSONALITY, type PetPersonality, type TriggerReason, type GeoContext, type PetReminder, type ActiveWindowContext } from './engine/ai-chat'
 import { checkFestival, checkBirthday } from './engine/festivals'
 import { AchievementController } from './engine/achievements'
 import { PetDiaryController } from './engine/pet-diary'
 import { startGame, checkAnswer, getGameAnswer, type GameType, type GameSession } from './engine/mini-games'
-import { PET_CUSTOM_SPRITES_STORAGE_KEY, compactSpriteSet, expandSpriteSet, type PetExpression, type PetPose } from './engine/pet-standard'
+import { PET_CUSTOM_SPRITES_STORAGE_KEY, PET_OPACITY_STORAGE_KEY, clampPetOpacity, compactSpriteSet, expandSpriteSet, type PetExpression, type PetPose } from './engine/pet-standard'
 import type { PresentationIntent } from './engine/presentation'
 import { logPetPresentation } from './engine/presentation-debug'
 import { SLIME_SPRITE_SET } from './engine/slime-sprites'
@@ -60,7 +60,6 @@ import {
   type BubbleStreamPayload,
 } from './engine/bubble-stream'
 
-const WIN_SIZE = 80
 const BUBBLE_DETAIL_WIDTH = 420
 const BUBBLE_DETAIL_HEIGHT = 520
 
@@ -227,7 +226,8 @@ export default function PetView() {
   const positionBubble = useCallback((pos: { x: number; y: number }, bubbleWidth: number, bubbleHeight: number) => {
     const winCenterX = pos.x + WIN_SIZE / 2
     const bx = Math.round(winCenterX - bubbleWidth / 2)
-    const by = Math.max(0, Math.round(pos.y - bubbleHeight - 4))
+    // 气泡贴在宠物视觉框顶部上方(视觉框比窗口内缩 PET_MARGIN)
+    const by = Math.max(0, Math.round(pos.y + PET_MARGIN - bubbleHeight - 4))
     return { x: bx, y: by }
   }, [])
 
@@ -306,10 +306,10 @@ export default function PetView() {
     const state = stateRef.current
     const fallbackBounds = state
       ? {
-        x: Math.round(state.position.x),
-        y: Math.round(state.position.y),
-        width: WIN_SIZE,
-        height: WIN_SIZE,
+        x: Math.round(state.position.x) + PET_MARGIN,
+        y: Math.round(state.position.y) + PET_MARGIN,
+        width: PET_SIZE,
+        height: PET_SIZE,
       }
       : null
 
@@ -341,11 +341,12 @@ export default function PetView() {
         && Number.isFinite(bounds.width)
         && Number.isFinite(bounds.height)
       ) {
+        // 穿透命中区只取宠物视觉框(窗口四周 PET_MARGIN 透明余量应让点击穿透)
         windowBoundsRef.current = {
-          x: Math.round(bounds.x),
-          y: Math.round(bounds.y),
-          width: Math.max(1, Math.round(bounds.width)),
-          height: Math.max(1, Math.round(bounds.height)),
+          x: Math.round(bounds.x) + PET_MARGIN,
+          y: Math.round(bounds.y) + PET_MARGIN,
+          width: Math.max(1, Math.round(bounds.width) - PET_MARGIN * 2),
+          height: Math.max(1, Math.round(bounds.height) - PET_MARGIN * 2),
         }
       }
     } catch (err) {
@@ -456,7 +457,7 @@ export default function PetView() {
     const displayBounds = boundsRef.current
     const centerX = pos.x + WIN_SIZE / 2
     const desiredX = Math.round(centerX - BUBBLE_DETAIL_WIDTH / 2)
-    const fallbackY = Math.max(0, pos.y - BUBBLE_DETAIL_HEIGHT - 12)
+    const fallbackY = Math.max(0, pos.y + PET_MARGIN - BUBBLE_DETAIL_HEIGHT - 12)
     const x = displayBounds
       ? Math.max(displayBounds.x, Math.min(desiredX, displayBounds.x + displayBounds.width - BUBBLE_DETAIL_WIDTH))
       : desiredX
@@ -581,9 +582,9 @@ export default function PetView() {
     }
 
     const minX = bounds.x
-    const maxX = bounds.x + bounds.width - PET_SIZE
+    const maxX = bounds.x + bounds.width - WIN_SIZE
     const minY = bounds.y + 80
-    const maxY = bounds.y + bounds.height - PET_SIZE
+    const maxY = bounds.y + bounds.height - WIN_SIZE
     const targetX = Math.max(minX, Math.min(maxX, state.position.x + movement.dx))
     const targetY = Math.max(minY, Math.min(maxY, state.position.y + movement.dy))
     logPetPresentation('pet.move.start', {
@@ -672,7 +673,7 @@ export default function PetView() {
     const pos = lastWinPosRef.current
     const petCenterX = pos.x + WIN_SIZE / 2
     const inputX = Math.round(petCenterX - CHAT_INPUT_WIDTH / 2)
-    const inputY = pos.y + WIN_SIZE + 4
+    const inputY = pos.y + WIN_SIZE - PET_MARGIN + 4
 
     try {
       const proxy = await window.mulby.window.create('?view=chat-input', {
@@ -1166,6 +1167,16 @@ export default function PetView() {
     const svgRenderer = new SvgPetRenderer(container, PET_SIZE)
     svgRenderer.loadSpriteSet(spriteSet)
     svgRendererRef.current = svgRenderer
+    try {
+      const savedOpacity = await window.mulby.storage.get(PET_OPACITY_STORAGE_KEY)
+      if (savedOpacity !== undefined && savedOpacity !== null) {
+        svgRenderer.setUserOpacity(clampPetOpacity(savedOpacity))
+      }
+    } catch (err) {
+      logPetPresentation('pet.opacity.load-error', {
+        message: (err as Error)?.message ?? String(err),
+      })
+    }
 
     chatRef.current = new AIChatController(personality)
     chatRef.current.setStatsController(statsRef.current)
@@ -1231,8 +1242,8 @@ export default function PetView() {
         const sy = typeof sp.y === 'number' ? sp.y : Number(sp.y)
         if (
           Number.isFinite(sx) && Number.isFinite(sy)
-          && sx >= bounds.x && sx <= bounds.x + bounds.width - PET_SIZE
-          && sy >= bounds.y + 80 && sy <= bounds.y + bounds.height - PET_SIZE
+          && sx >= bounds.x && sx <= bounds.x + bounds.width - WIN_SIZE
+          && sy >= bounds.y + 80 && sy <= bounds.y + bounds.height - WIN_SIZE
         ) {
           state.position = { x: sx, y: sy }
         }
@@ -1244,6 +1255,8 @@ export default function PetView() {
     }
     stateRef.current = state
 
+    // 窗口尺寸以代码为准(manifest 仅给初始值),确保能完整容纳宠物视觉框 + 动画余量
+    window.mulby.window.setSize(WIN_SIZE, WIN_SIZE)
     await window.mulby.window.setPosition(
       Math.round(state.position.x),
       Math.round(state.position.y)
@@ -1567,6 +1580,18 @@ export default function PetView() {
           })
           return
         }
+        case 'opacity-updated': {
+          const payload = args[0]
+          if (!payload || typeof payload !== 'object') return
+          const value = clampPetOpacity((payload as { opacity?: unknown }).opacity)
+          svgRendererRef.current?.setUserOpacity(value)
+          window.mulby.storage.set(PET_OPACITY_STORAGE_KEY, value).catch((err: unknown) => {
+            logPetPresentation('pet.opacity.save-error', {
+              message: (err as Error)?.message ?? String(err),
+            })
+          })
+          return
+        }
         default:
           return
       }
@@ -1840,7 +1865,7 @@ export default function PetView() {
     const newY = Math.round(state.position.y)
     if (newX !== lastWinPosRef.current.x || newY !== lastWinPosRef.current.y) {
       lastWinPosRef.current = { x: newX, y: newY }
-      windowBoundsRef.current = { x: newX, y: newY, width: WIN_SIZE, height: WIN_SIZE }
+      windowBoundsRef.current = { x: newX + PET_MARGIN, y: newY + PET_MARGIN, width: PET_SIZE, height: PET_SIZE }
       window.mulby.window.setPosition(newX, newY)
 
       if (bubbleVisibleRef.current && bubbleProxyRef.current) {
@@ -1852,7 +1877,7 @@ export default function PetView() {
       if (chatWindowOpenRef.current && chatInputProxyRef.current) {
         chatInputProxyRef.current.setPosition(
           Math.round(newX + WIN_SIZE / 2 - CHAT_INPUT_WIDTH / 2),
-          newY + WIN_SIZE + 4
+          newY + WIN_SIZE - PET_MARGIN + 4
         )
       }
     }
