@@ -29,8 +29,8 @@ export const api = {
     call<{ rev: number; state: AppState }>('waitState', { sinceRev }),
   resolveFiles: (paths: string[]) => call<{ files: FileMeta[] }>('resolveFiles', { paths }),
   pickFiles: () => call<{ files: FileMeta[] }>('pickFiles'),
-  sendFiles: (targetId: string, paths: string[]) =>
-    call<SendResult>('sendFiles', { targetId, paths }),
+  sendFiles: (targetId: string, items: Array<{ path: string; relPath?: string }>) =>
+    call<SendResult>('sendFiles', { targetId, items }),
   addManualDevice: (ip: string, port?: number) =>
     call<ManualResult>('addManualDevice', { ip, port }),
   setSettings: (patch: Partial<Settings>) =>

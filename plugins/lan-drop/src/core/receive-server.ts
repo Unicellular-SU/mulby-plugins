@@ -62,6 +62,21 @@ function hashExistingPart(filePath: string, hash: crypto.Hash): Promise<void> {
   })
 }
 
+/**
+ * 把对端声明的相对路径净化为安全、限定在下载目录内的相对路径：
+ * 拆段后剔除空 / '.' / '..'（防穿越），替换 Windows 非法字符与控制字符，
+ * 去掉段尾的「.」与空格（Windows 规则），最终以本机分隔符拼接。
+ */
+function safeRelPath(rel: string): string {
+  return rel
+    .split(/[\\/]+/)
+    .map((s) => s.trim())
+    .filter((s) => s && s !== '.' && s !== '..')
+    .map((s) => s.replace(/[<>:"|?*\u0000-\u001f]/g, '_').replace(/[ .]+$/g, ''))
+    .filter((s) => s.length > 0)
+    .join(path.sep)
+}
+
 /** 同名文件自动追加序号，避免覆盖。 */
 function dedupePath(target: string): string {
   if (!fs.existsSync(target)) return target
@@ -280,8 +295,10 @@ export class ReceiveServer {
     const peerName = decodeHeader(header(req, 'x-ld-device-name')) || '未知设备'
     const peerOs = header(req, 'x-ld-os') || 'unknown'
     const rawName = decodeHeader(header(req, 'x-ld-file-name'))
-    // basename 防目录穿越
+    // basename 防目录穿越（用于签名校验与兜底文件名）
     const name = path.basename(rawName).replace(/[\\/]/g, '') || `file-${Date.now()}`
+    // 文件夹层级：对端声明的相对路径，净化后用于在下载目录内重建子目录；非法/缺省回退 basename。
+    const relName = safeRelPath(decodeHeader(header(req, 'x-ld-rel-path'))) || name
     const size = parseInt(header(req, 'x-ld-file-size') || '0', 10) || 0
     const sha = (header(req, 'x-ld-file-sha256') || '').toLowerCase()
     const batchId = header(req, 'x-ld-batch-id') || undefined
@@ -443,7 +460,13 @@ export class ReceiveServer {
     this.activeReceives += 1
 
     const downloadDir = store.settings.downloadDir
-    const finalPath = dedupePath(path.join(downloadDir, name))
+    // 防御：净化后的相对路径解析结果必须仍在下载目录内，否则回退根目录 basename。
+    const resolvedRoot = path.resolve(downloadDir)
+    let candidate = path.resolve(downloadDir, relName)
+    if (candidate !== resolvedRoot && !candidate.startsWith(resolvedRoot + path.sep)) {
+      candidate = path.resolve(downloadDir, name)
+    }
+    const finalPath = dedupePath(candidate)
 
     // 断点续传决策：仅当 key 合法且当前未被占用时使用稳定 .part 名，否则用一次性临时名。
     let ownsKey = false
@@ -514,7 +537,8 @@ export class ReceiveServer {
     const transfer: Transfer = {
       id: transferId,
       dir: 'recv',
-      name,
+      // 展示相对路径（接收文件夹时让用户看清层级）；单文件即等于文件名。
+      name: relName,
       size,
       transferred: startOffset,
       status: 'active',
@@ -654,6 +678,12 @@ export class ReceiveServer {
         }
         fail('哈希校验失败，文件可能损坏')
         return
+      }
+      // 重建文件夹层级：落盘前确保目标子目录存在。
+      try {
+        fs.mkdirSync(path.dirname(finalPath), { recursive: true })
+      } catch {
+        /* 忽略：renameSync 会暴露真实错误并走回退 */
       }
       try {
         fs.renameSync(tmpPath, finalPath)

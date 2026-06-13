@@ -87,10 +87,18 @@ function statMeta(filePath: string): FileMeta | null {
   }
 }
 
-/** 展开路径：文件直接收录，目录递归收集（扁平化，按 basename）。 */
-function expandPaths(paths: string[]): FileMeta[] {
+/** 规范化相对路径分隔符为 POSIX '/'，并去掉前导斜杠。 */
+function normalizeRel(rel: string): string {
+  return rel.replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+/**
+ * 展开发送条目：文件直接收录；目录递归收集并保留「以目录名为根」的相对路径，
+ * 便于接收端重建文件夹结构（relPath 形如 "myfolder/sub/a.txt"，POSIX 分隔符）。
+ */
+function expandItems(items: Array<{ path: string; relPath?: string }>): FileMeta[] {
   const out: FileMeta[] = []
-  const visit = (p: string) => {
+  const visit = (p: string, rel: string) => {
     if (out.length >= MAX_EXPANDED_FILES) return
     let st: fs.Stats
     try {
@@ -99,23 +107,31 @@ function expandPaths(paths: string[]): FileMeta[] {
       return
     }
     if (st.isFile()) {
-      out.push({ path: p, name: path.basename(p), size: st.size })
+      out.push({ path: p, name: path.basename(p), relPath: normalizeRel(rel) || path.basename(p), size: st.size })
     } else if (st.isDirectory()) {
+      const base = normalizeRel(rel) || path.basename(p)
       let entries: string[] = []
       try {
         entries = fs.readdirSync(p)
       } catch {
         return
       }
-      for (const name of entries) {
-        if (name.startsWith('.')) continue
-        visit(path.join(p, name))
+      for (const entry of entries) {
+        if (entry.startsWith('.')) continue
+        visit(path.join(p, entry), `${base}/${entry}`)
         if (out.length >= MAX_EXPANDED_FILES) break
       }
     }
   }
-  for (const p of paths) visit(p)
+  for (const it of items) {
+    if (it?.path) visit(it.path, it.relPath ? normalizeRel(it.relPath) : '')
+  }
   return out
+}
+
+/** 兼容入口：仅有路径（无相对路径信息）时使用，relPath 退化为以目录名为根 / basename。 */
+function expandPaths(paths: string[]): FileMeta[] {
+  return expandItems(paths.map((p) => ({ path: p })))
 }
 
 function normalizePaths(input: unknown): string[] {
@@ -160,14 +176,22 @@ export const rpc = {
     }
   },
 
-  /** 发送文件到指定设备。 */
-  async sendFiles(input: { targetId: string; paths: string[] }) {
+  /** 发送文件到指定设备（items 携带相对路径以保留文件夹层级；paths 为兼容入口）。 */
+  async sendFiles(input: {
+    targetId: string
+    paths?: string[]
+    items?: Array<{ path: string; relPath?: string }>
+  }) {
     await ensureStarted()
     const targetId = input?.targetId
     if (!targetId || !store.getDevice(targetId)) {
       return { ok: false, error: '目标设备不存在', ids: [] as string[] }
     }
-    const files = expandPaths(normalizePaths(input?.paths))
+    const items =
+      Array.isArray(input?.items) && input.items.length > 0
+        ? input.items.filter((it) => it && typeof it.path === 'string')
+        : normalizePaths(input?.paths).map((p) => ({ path: p }))
+    const files = expandItems(items)
     if (files.length === 0) return { ok: false, error: '没有可发送的文件', ids: [] as string[] }
     const ids = sender.enqueue(targetId, files)
     return { ok: true, count: files.length, ids }

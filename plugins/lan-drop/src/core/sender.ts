@@ -54,7 +54,8 @@ class Sender {
       const t: Transfer = {
         id: transferId,
         dir: 'send',
-        name: file.name,
+        // 展示相对路径（发送文件夹时让用户看清层级）；单文件即等于文件名。
+        name: file.relPath || file.name,
         size: file.size,
         transferred: 0,
         status: 'pending',
@@ -163,7 +164,8 @@ class Sender {
     }
 
     // 断点续传：询问对端已收字节（失败/不可用则从 0 开始）。
-    const rkey = resumeKey(store.deviceId, file.name, size)
+    // 用相对路径而非 basename 计算，避免文件夹内不同子目录下的同名同大小文件 .part 冲突。
+    const rkey = resumeKey(store.deviceId, file.relPath || file.name, size)
     let offset = 0
     try {
       const got = await probeOffset(target.ip, target.port, rkey)
@@ -242,6 +244,8 @@ class Sender {
         'x-ld-device-name': encodeURIComponent(store.settings.deviceName),
         'x-ld-os': process.platform,
         'x-ld-file-name': encodeURIComponent(file.name),
+        // 相对路径（保留文件夹层级，供接收端重建子目录）；接收端会净化防穿越。
+        'x-ld-rel-path': encodeURIComponent(file.relPath || file.name),
         'x-ld-file-size': String(size),
         // 始终携带续传 key：即使本次从 0 开始，对端也用稳定 .part 名，便于后续中断重连续传。
         'x-ld-resume-key': rkey,

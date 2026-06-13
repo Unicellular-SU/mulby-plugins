@@ -101,5 +101,10 @@ export interface AppState {
 export interface FileMeta {
   path: string
   name: string
+  /**
+   * 相对路径（POSIX 分隔符）。发送文件夹时保留层级（如 "myfolder/sub/a.txt"），
+   * 供接收端重建目录结构；缺省时等同于 name（平铺到下载目录）。
+   */
+  relPath?: string
   size: number
 }

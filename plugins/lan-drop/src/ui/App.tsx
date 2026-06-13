@@ -181,9 +181,10 @@ export default function App() {
       notify('请先添加要发送的文件', 'warning')
       return
     }
-    const paths = staged.map((f) => f.path)
+    // 携带相对路径，发送文件夹时接收端可重建目录层级。
+    const items = staged.map((f) => ({ path: f.path, relPath: f.relPath }))
     try {
-      const res = await api.sendFiles(selectedDevice.id, paths)
+      const res = await api.sendFiles(selectedDevice.id, items)
       if (res?.ok) {
         notify(`已开始发送 ${res.count ?? staged.length} 个文件到 ${selectedDevice.name}`, 'success')
         setStaged([])
