@@ -183,8 +183,8 @@
       "version": "1.0.5",
       "author": "Mulby Team",
       "description": "一只活泼的桌面伴侣，能感知你的鼠标和键盘操作并做出有趣反应",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.26-1504/desktop-pet-1.0.5.inplugin",
-      "lastPackageTime": "2026-05-26T15:05:09.293Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.13-0538/desktop-pet-1.0.5.inplugin",
+      "lastPackageTime": "2026-06-13T05:38:57.977Z",
       "type": "entertainment",
       "details": "# 桌面宠物\n\n一只住在桌面上的像素小幽灵。它能根据鼠标、键盘、前台应用、番茄钟、提醒和对话上下文做出表情、姿势、气泡与 AI 回复。\n\n## 功能特性\n\n- **桌面陪伴**：透明置顶小幽灵，会闲逛、追逐、探头、睡觉、挥手、跳跃和摇摆。\n- **AI 对话**：长按宠物打开输入框；宠物会结合性格、心情、生活档案、天气和当前应用上下文回复。\n- **表现控制**：AI 可调用表情、姿势、动作、移动和心情工具，让回复过程同步变脸和运动。\n- **生活档案**：多轮对话后自动维护用户档案、偏好、习惯、关系线索和近期事件，可在设置页编辑或清空。\n- **生态系统**：记录精力、关注、好奇、专注、补水状态，识别工作模式，维护今日时间线和每日目标。\n- **日记时间线**：晚上自动根据今日事件、最近对话和统计数据生成宠物日记。\n- **番茄钟与节律提醒**：支持专注计时、喝水提醒、休息提醒和自定义定时提醒。\n- **小游戏**：支持猜谜语、成语接龙、冷知识问答，并记录积分、连续答对和今日游玩情况。\n- **成就与状态**：记录亲密度、心情、签到、互动、专注时长和成就解锁。\n\n## 使用方式\n\n在 Mulby 搜索栏输入以下任意关键词启动：\n\n- `宠物`\n- `pet`\n- `桌面宠物`\n\n## 操作\n\n- 左键点击：触发宠物互动与主动搭话。\n- 长按左键：打开聊天输入框。\n- 右键点击：打开菜单，可进入设置、开始番茄钟、启动小游戏、查看思考过程或退出。\n\n## 设置页\n\n右键宠物后选择「设置」：\n\n- **设置**：宠物名称、性格、AI 模型、说话频率、番茄钟时长、生日、位置信息、上下文隐私和触发行为。\n- **生态**：查看心情、亲密度、签到、番茄钟、专注时长、需求状态、当前工作模式、每日任务、小游戏积分和今日时间线。\n- **提醒**：配置喝水、休息眼睛和自定义定时提醒。\n- **记忆**：查看、编辑、删除或清空生活档案。\n- **成就**：查看已解锁成就。\n- **日记**：查看自动生成的宠物日记。\n- **对话**：查看用户上下文、模型思考和宠物发言历史。\n- **表现预览**：测试所有表情、姿势、情绪和动作组合。\n\n## 隐私说明\n\n- 默认只使用应用名识别工作模式，不把窗口标题写入长期存储。\n- 设置页可选择允许窗口标题参与短期 AI 上下文；标题仍不会进入今日时间线。\n- 剪贴板响应默认关闭，并沿用敏感内容过滤。\n\n## 技术实现\n\n- 透明置顶 detached 窗口，内容区为 `PET_SIZE` 120。\n- 内置 SVG 小幽灵精灵，由 `svg-renderer` 加载，姿势和表情通过状态机与 CSS 动画表现。\n- 输入监听使用 Mulby `inputMonitor`，前台窗口上下文通过主进程 RPC 读取。\n- 数据使用 Mulby storage 持久化，包括性格、位置、生活档案、对话历史、生态状态、时间线、每日任务、小游戏统计、日记和成就。\n\n## 权限\n\n- `inputMonitor`：监听鼠标和键盘行为。\n- `ai`：调用文本模型生成回复、日记和小游戏题目。\n- `accessibility`：在 macOS 上支持全局输入监听。\n- `clipboard`：可选剪贴板响应。\n- `screen`：读取屏幕与窗口位置。\n- `geolocation`：可选定位和天气上下文。\n\n## 系统要求\n\n- Mulby 桌面客户端。\n- macOS 需授予辅助功能权限。",
       "icon": {
@@ -197,7 +197,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "cbf136ffd86d86adddadb63a0a9382bd6ed40975685adfce061614a66845a672",
+      "sha256": "cf3be855b70e113af705a4de206178eb6f75b61c30720ca04f258420a5ba139b",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/desktop-pet"
     },
@@ -947,8 +947,8 @@
       "version": "1.0.0",
       "author": "Mulby",
       "description": "插件开发工作台：创建/导入/构建/打包/刷新/管理插件，并支持 AI Vibe Coding 一句话造插件",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.11-1353/mulby-developer-tools-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-11T13:55:02.860Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.13-0538/mulby-developer-tools-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-13T05:39:20.144Z",
       "type": "other",
       "details": "# Mulby 开发者工具（mulby-developer-tools）\n\n插件开发工作台：在一个可视化界面里**创建 / 导入 / 添加 / 构建 / 打包 / 刷新 / 移除**插件项目，并通过 **Vibe Coding** 用自然语言按固定流程创作新插件。\n\n> 形态：React + Vite + Tailwind + lucide-react 的 detached 窗口工作台；后台 `main` 极简，核心逻辑在 UI 内通过 `window.mulby.developer.*` 与宿主交互。\n\n---\n\n## 功能\n\n### 工作台（Workbench）\n- **多来源项目列表**：按来源分组（最近创建 / 最近导入 / 已添加目录 / 开发目录迁移），每项显示类型徽标（单插件 / 集合）与健康状态点。\n- **详情与状态徽标**：选中项目查看 manifest 摘要与每个插件的状态——`有效 / manifest 无效`、`已构建 / 未构建`、`已加载 / 未加载`、`ID 冲突`，错误可展开查看详情与修复建议。\n- **操作**（lucide 图标）：创建 `Plus`、导入 `FolderInput`、添加目录 `FolderPlus`、构建 `Hammer`、打包 `Package`、刷新 `RefreshCw`、打开目录 `FolderOpen`、移除 `Trash2`、README `FileText`。\n- **诊断日志区**：构建 / 打包 / 创建的流式输出与时间戳，支持清空。\n- **四态覆盖**：`loading`（骨架 + spinner）、`error`（全局错误条 + 行内错误详情）、`empty`（创建/导入/添加引导）、`success`（toast + 状态徽标转绿）。\n\n### Vibe Coding 面板\n**4 阶段分步向导**，可在已抵达的步骤间自由跳转：\n\n0. 描述（一句话需求 / 选插件改造）→ 1. 契约（结构化 manifest，可编辑）→ 2. 生成（AI agent 自主写码）→ 3. 交付（构建·载入·验证·迭代）\n\n**「能编译」≠「能跑」——两道真实验证门禁：**\n- **契约一致性校验（静态、自动）**：后端 `check_conformance` 比对 manifest 与真实文件/源码（UI 形态是否自洽、声明的功能码是否有处理分支、`manifest.tools` 是否都 `register()`、`preload` 路径是否存在…）。AI 在生成结束前必须自检并据 error 修复；交付页也会展示问题并提供「AI 修复一致性问题」。这把 `develop-mulby-plugin` 技能 Handoff Checklist 的关键项变成了可机械执行的门禁。\n- **运行验证（动态、手动）**：「运行验证」按钮用契约里的示例输入（regex/over 的 `sample`、或关键词的空输入）真实调用 `plugin.run` 跑一遍每个功能，验证「确实能执行」而非仅「能编译载入」。有副作用（可能写剪贴板/弹通知/开窗口），故由用户手动触发。\n\n**知识单一真相源**：生成阶段优先挂载宿主维护的 `develop-mulby-plugin` 技能（`ai.call({ skills })`），Mulby API 文档通过 `read_file({path:\"@skill/apis/<namespace>.md\"})` 从已安装技能目录按需读取，不再打包副本。探测不到则优雅回退。\n\n向导直接调用宿主：`createPlugin`（阶段 2）/ `validatePlugin` · `buildPlugin` · `check_conformance` · `plugin.run`（阶段 3）/ `packPlugin` / `addPluginProject`。\n\n---\n\n## 触发命令\n\n| 关键词 | 说明 |\n|---|---|\n| `开发者工具` / `dev` / `developer` | 打开开发者工作台（feature `code: workbench`，`mode: detached`） |\n\n---\n\n## 用法\n\n1. 在 Mulby 主输入框键入 `开发者工具` 打开工作台。\n2. **创建插件**：点击「创建」→ 填写名称（kebab-case）、选择目标目录与模板（React / Basic）→ 生成脚手架并自动加入列表。\n3. **导入 / 添加目录**：点击「导入」或「添加目录」选择目录，宿主自动判别单插件（含 `manifest.json`）或集合目录。\n4. **构建 / 打包 / 刷新**：在右侧详情中对选中项目执行对应操作，输出写入诊断日志区。\n5. **Vibe Coding**：切换到「Vibe Coding」页签，按向导逐阶段完成插件创作。\n\n---\n\n## 宿主接口依赖\n\nUI 通过 `window.mulby.developer.*` 调用宿主 Developer IPC（契约以 `docs/apis/developer.md` + `electron.d.ts` 为准）：\n\n`listPluginProjects` · `addPluginProject` · `removePluginProject` · `reloadPlugin` · `validatePlugin` · `createPlugin` · `buildPlugin` · `packPlugin` · `openPluginDir` · `selectDirectory`\n\n> **演示模式**：当宿主对应接口尚未就绪时，UI 自动降级为 Mock 数据（顶栏显示「演示模式（Mock）」徽标），接口落地后自动切换为真实调用，无需改动 UI。\n\n---\n\n## 开发与构建\n\n```bash\nnpm run build        # 构建后端 dist/main.js + 前端 ui/index.html\nnpm run build:backend\nnpm run build:ui\nnpm run pack         # 构建并打包为 .inplugin\n```\n\n依赖：`react` `react-dom` `lucide-react`（运行）；`vite` `@vitejs/plugin-react` `tailwindcss` `postcss` `autoprefixer` `esbuild` `typescript`（开发）。\n\n---\n\n## 配置项\n\n无需额外配置。窗口尺寸默认 1100×720（最小 880×560），可在 `manifest.json` 的 `window` 字段调整。",
       "icon": {
@@ -961,7 +961,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "a4e866c971987962791f8ff94055f18171a1bb9a371ff77005d31b83aa8a4993",
+      "sha256": "c97c98317c0874df763d773cb9111202a5e778f5bc5ea33971134d2ff1bee0e3",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-developer-tools"
     },
