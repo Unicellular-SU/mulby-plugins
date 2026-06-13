@@ -38,8 +38,12 @@ import {
   type PetSpriteSet,
 } from '../engine/pet-standard'
 import {
+  BASE_EXPRESSION,
+  DERIVED_EXPRESSIONS,
+  buildExpressionEditPrompt,
   buildPetImageEditPrompt,
   buildPetImagePrompt,
+  composeSpriteSetFromExpressions,
   decodeImageToRawImage,
   filterChatModels,
   filterImageGenModels,
@@ -48,7 +52,9 @@ import {
   readFileAsDataUrl,
   suggestSpriteMeta,
   toImageDataUrl,
+  type ExpressionPixelation,
 } from '../engine/appearance-workshop'
+import { pixelateToSvg } from '../engine/pixelate-pipeline'
 import { normalizePersonality } from '../engine/message-validator'
 import type { PetStats, PetMood } from '../engine/pet-stats'
 import {
@@ -251,6 +257,31 @@ function normalizeAppearanceHistory(raw: unknown): CompactPetSpriteSet[] {
     if (expandSpriteSet(item)) out.push(item as CompactPetSpriteSet)
   }
   return out.slice(0, PET_APPEARANCE_HISTORY_LIMIT)
+}
+
+/** 逐表情图生图的并发上限:平衡生图速度与服务端并发/限流压力 */
+const APPEARANCE_EDIT_CONCURRENCY = 3
+
+/**
+ * 有上限的并发遍历:最多 limit 个 worker 同时跑,处理完一个立刻领下一个。
+ * shouldStop 返回 true 时不再领取新任务(已在途的仍会跑完,由调用方按令牌丢弃结果)。
+ */
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<void>,
+  shouldStop?: () => boolean,
+): Promise<void> {
+  let cursor = 0
+  const runnerCount = Math.max(1, Math.min(limit, items.length))
+  const runners = Array.from({ length: runnerCount }, async () => {
+    while (cursor < items.length) {
+      if (shouldStop?.()) return
+      const index = cursor++
+      await worker(items[index], index)
+    }
+  })
+  await Promise.all(runners)
 }
 
 export default function SettingsView() {
@@ -1332,7 +1363,120 @@ export default function SettingsView() {
   /** 一次生成任务的取消令牌:被取消或新任务接替、或组件卸载后 cancelled 变 true */
   type AppearanceRunToken = { readonly cancelled: boolean }
 
-  /** 共用尾段:任意来源的图片 dataURL → 像素化 → 合成 → 进入预览。每个 await 前后都判取消,失效即丢弃结果 */
+  /** 把生成好的套装写入预览并入库,复位状态 */
+  const finalizeAppearance = (spriteSet: PetSpriteSet, toastMsg: string) => {
+    setPendingSpriteSet(spriteSet)
+    addAppearanceToHistory(spriteSet)
+    setAppearanceStatus('')
+    showToast(toastMsg)
+  }
+
+  /** 单张图片 dataURL → 解码 + 像素化为「单个表情」产物;空主体抛引导性错误 */
+  const pixelateExpression = async (dataUrl: string): Promise<ExpressionPixelation['pixelation']> => {
+    const rgba = await decodeImageToRawImage(dataUrl)
+    const pix = pixelateToSvg(rgba)
+    if (pix.opaquePixels === 0) {
+      throw new Error('像素化后没有可用主体:图片背景过于复杂或主体不清晰,请换个描述重新生成')
+    }
+    return { palette: pix.palette, grid: pix.grid, width: pix.width, height: pix.height }
+  }
+
+  /** 把基准图上传为图生图参考;无法解析为字节(如模型只回图片链接)时返回 null 以触发降级 */
+  const uploadBaseForEdit = async (dataUrl: string): Promise<string | null> => {
+    const parsed = parseImageDataUrl(dataUrl)
+    if (!parsed) return null
+    try {
+      const ref = await window.mulby.ai.attachments.upload({
+        buffer: parsed.buffer,
+        mimeType: parsed.mimeType,
+        purpose: 'image-edit',
+      })
+      return ref?.attachmentId ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 以基准定妆照为底,逐表情图生图 → 合成全套 sprite(这是 #13/#14 的核心方案)。
+   * - neutral 直接取基准图;其余 14 个表情以基准图为参考并发派生(只改脸,角色保持一致)
+   * - 每个表情都是独立整图,五官由 AI 画在图上 → 根除「叠加矢量脸与 AI 脸打架」的双脸/错位
+   * - 任一表情失败仅留空(合成时回退 neutral);底图无法上传时降级为叠加合成方案
+   * - 全程以 token 感知取消:取消后在途请求结果一律丢弃
+   */
+  const buildExpressionSetFromBase = async (baseDataUrl: string, description: string, token: AppearanceRunToken) => {
+    if (token.cancelled) return
+    setRawPetImage(baseDataUrl)
+    setAppearanceStatus('正在像素化基准定妆照…')
+    const basePixelation = await pixelateExpression(baseDataUrl)
+    if (token.cancelled) return
+
+    setAppearanceStatus('正在准备底图…')
+    const attachmentId = await uploadBaseForEdit(baseDataUrl)
+    if (token.cancelled) return
+
+    const meta = suggestSpriteMeta(description)
+
+    // 降级:底图无法上传 → 退回「身体 + 叠加矢量五官」方案,至少产出可用形象
+    if (!attachmentId) {
+      setAppearanceStatus('无法逐表情生成(模型未返回可用底图),改用合成表情方案…')
+      const rgba = await decodeImageToRawImage(baseDataUrl)
+      if (token.cancelled) return
+      const { spriteSet } = generatePetSpriteSet(rgba, meta)
+      if (token.cancelled) return
+      finalizeAppearance(spriteSet, '形象已生成(合成表情),点「应用到宠物」试穿')
+      return
+    }
+
+    const collected: ExpressionPixelation[] = [{ expression: BASE_EXPRESSION, pixelation: basePixelation }]
+    const failed: PetExpression[] = []
+    const totalDerived = DERIVED_EXPRESSIONS.length
+    let done = 0
+    setAppearanceStatus(`正在生成表情 0/${totalDerived}…`)
+
+    await mapWithConcurrency(
+      DERIVED_EXPRESSIONS,
+      APPEARANCE_EDIT_CONCURRENCY,
+      async expression => {
+        if (token.cancelled) return
+        try {
+          const res = await window.mulby.ai.images.edit({
+            model: appearanceModel,
+            imageAttachmentId: attachmentId,
+            prompt: buildExpressionEditPrompt(expression),
+          })
+          if (token.cancelled) return
+          const img = res?.images?.[0]
+          if (!img) throw new Error('no image returned')
+          const pixelation = await pixelateExpression(toImageDataUrl(img))
+          if (token.cancelled) return
+          collected.push({ expression, pixelation })
+        } catch {
+          // 单个表情失败不影响整体:留空,合成时回退到 neutral
+          failed.push(expression)
+        } finally {
+          done++
+          if (!token.cancelled) setAppearanceStatus(`正在生成表情 ${done}/${totalDerived}…`)
+        }
+      },
+      () => token.cancelled,
+    )
+    if (token.cancelled) return
+
+    const spriteSet = composeSpriteSetFromExpressions(collected, meta)
+    let toastMsg: string
+    if (collected.length === 1) {
+      // 14 个表情全失败:多半是该模型不支持图生图(edit),给出明确指引
+      toastMsg = '该生图模型似乎不支持图生图改表情,已生成单表情形象;可换支持 edit 的模型重试'
+    } else if (failed.length) {
+      toastMsg = `形象已生成(${failed.length}/${totalDerived} 个表情未成功,已回退默认脸),点「应用到宠物」试穿`
+    } else {
+      toastMsg = '全套 15 个表情已生成,点「应用到宠物」试穿'
+    }
+    finalizeAppearance(spriteSet, toastMsg)
+  }
+
+  /** 共用尾段(仅「直接像素化」使用):图片 dataURL → 身体像素化 + 叠加矢量五官 → 进入预览 */
   const pixelateIntoPreview = async (dataUrl: string, metaSource: string, token: AppearanceRunToken) => {
     if (token.cancelled) return
     setRawPetImage(dataUrl)
@@ -1341,10 +1485,7 @@ export default function SettingsView() {
     if (token.cancelled) return
     const { spriteSet } = generatePetSpriteSet(rgba, suggestSpriteMeta(metaSource))
     if (token.cancelled) return
-    setPendingSpriteSet(spriteSet)
-    addAppearanceToHistory(spriteSet)
-    setAppearanceStatus('')
-    showToast('形象已生成,点「应用到宠物」试穿')
+    finalizeAppearance(spriteSet, '形象已生成,点「应用到宠物」试穿')
   }
 
   /** 共用外壳:busy/error/取消语义统一处理。任务通过 token 感知取消,被取消的任务结果一律丢弃 */
@@ -1376,7 +1517,7 @@ export default function SettingsView() {
     const description = petDescription.trim()
     if (!description || !appearanceModel) return
     void runAppearanceTask(async token => {
-      setAppearanceStatus('正在生成立绘…')
+      setAppearanceStatus('正在生成基准定妆照…')
       const prompt = buildPetImagePrompt(description)
       const ai = window.mulby.ai
       let images: string[] = []
@@ -1387,7 +1528,7 @@ export default function SettingsView() {
             if (token.cancelled) return
             if (chunk.type === 'preview' && chunk.image) {
               setRawPetImage(toImageDataUrl(chunk.image))
-              setAppearanceStatus('生成中(预览已更新)…')
+              setAppearanceStatus('基准图生成中(预览已更新)…')
             } else if (chunk.message) {
               setAppearanceStatus(chunk.message)
             }
@@ -1402,11 +1543,13 @@ export default function SettingsView() {
       }
       if (token.cancelled) return
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      await pixelateIntoPreview(toImageDataUrl(images[0]), description, token)
+      // 基准图已就绪;后续逐表情 edit 无 abort,改由 token 控制取消
+      appearanceAbortRef.current = null
+      await buildExpressionSetFromBase(toImageDataUrl(images[0]), description, token)
     })
   }
 
-  /** 上传图片 → ai.images.edit 重绘为宠物风格 → 像素化 */
+  /** 上传图片 → 先重绘为基准定妆照 → 再逐表情图生图 → 合成 */
   const handleStylizeUploadedImage = () => {
     if (!uploadedImage || !appearanceModel) return
     void runAppearanceTask(async token => {
@@ -1419,7 +1562,7 @@ export default function SettingsView() {
         purpose: 'image-edit',
       })
       if (token.cancelled) return
-      setAppearanceStatus('AI 正在重绘为宠物风格…')
+      setAppearanceStatus('AI 正在重绘为基准定妆照…')
       const res = await window.mulby.ai.images.edit({
         model: appearanceModel,
         imageAttachmentId: ref.attachmentId,
@@ -1428,7 +1571,7 @@ export default function SettingsView() {
       if (token.cancelled) return
       const images = res?.images ?? []
       if (images.length === 0) throw new Error('模型没有返回图片,请重试或换个模型')
-      await pixelateIntoPreview(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物', token)
+      await buildExpressionSetFromBase(toImageDataUrl(images[0]), petDescription.trim() || '上传图片宠物', token)
     })
   }
 
@@ -1539,12 +1682,15 @@ export default function SettingsView() {
     const previews: Array<{ key: PetSpriteKey; label: string }> = [
       { key: 'stand_neutral', label: '平常' },
       { key: 'stand_happy', label: '开心' },
-      { key: 'stand_sleepy', label: '困倦' },
+      { key: 'stand_sad', label: '难过' },
+      { key: 'stand_angry', label: '生气' },
+      { key: 'stand_surprised', label: '惊讶' },
     ]
     return (
       <div className="panel-content">
         <p className="field-hint">
-          用 AI 生成专属宠物形象:描述外观 → 生成像素立绘 → 预览 → 应用。15 种表情五官会自动合成到新形象上,姿态动画保持不变。
+          用 AI 生成专属宠物形象:描述外观 → AI 先画一张「基准定妆照」(带表情的脸),再以它为底图为全部 15 种表情逐张生图 → 预览 → 应用。
+          每个表情都是 AI 单独画的脸,不再叠加固定五官,因此不会出现重影/对不上。约需 15 次生图、耗时较长,可随时取消。
         </p>
 
         <div className="field">
@@ -1634,7 +1780,7 @@ export default function SettingsView() {
               onChange={e => void handleChooseAppearanceFile(e)}
             />
           </div>
-          <p className="field-hint">「AI 转宠物风格」会用图生图把照片重绘成 Q 版立绘(上方描述可作风格提示,需要生图模型);「直接像素化」跳过 AI,适合本身就是简洁卡通或像素风的图片。</p>
+          <p className="field-hint">「AI 转宠物风格」会先把照片重绘成基准定妆照,再逐表情生图(同样约 15 次,上方描述可作风格提示,需要生图模型);「直接像素化」跳过 AI、只取这张图做身体并叠加固定五官,最快但表情是合成的,适合本身就是简洁卡通或像素风的图片。</p>
         </div>
 
         {appearanceError && <p className="appearance-error">{appearanceError}</p>}
@@ -1643,8 +1789,8 @@ export default function SettingsView() {
           <div className="appearance-preview-row">
             {rawPetImage && (
               <div className="appearance-card">
-                <div className="appearance-card-title">AI 立绘</div>
-                <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成立绘" />
+                <div className="appearance-card-title">基准定妆照</div>
+                <img className="appearance-raw-img" src={rawPetImage} alt="AI 生成基准定妆照" />
               </div>
             )}
             {pendingSpriteSet && previews.map(p => (

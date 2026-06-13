@@ -1,10 +1,15 @@
 // decodeImageToRawImage 依赖浏览器 canvas,无法在 node 中测试;
 // 其余纯函数(prompt 模板/模型筛选/base64/套装生成)在此全部覆盖。
 
-import { createRawImage } from './pixelate-pipeline'
+import { createRawImage, type PixelateResult } from './pixelate-pipeline'
 import {
+  BASE_EXPRESSION,
+  DERIVED_EXPRESSIONS,
+  EXPRESSION_PORTRAIT_HINT,
+  buildExpressionEditPrompt,
   buildPetImageEditPrompt,
   buildPetImagePrompt,
+  composeSpriteSetFromExpressions,
   filterChatModels,
   filterImageGenModels,
   generatePetSpriteSet,
@@ -12,6 +17,7 @@ import {
   parseImageDataUrl,
   suggestSpriteMeta,
   toImageDataUrl,
+  type ExpressionPixelation,
 } from './appearance-workshop'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -30,6 +36,9 @@ function testPromptTemplateLocksConstraints() {
   assert(prompt.includes('solid pure white background'), 'prompt must lock solid background for matting')
   assert(prompt.includes('no gradients'), 'prompt must forbid gradients for quantization')
   assert(prompt.includes('no text, no watermark'), 'prompt must forbid text/watermark')
+  // 基准定妆照需要带一张简洁中性表情脸(作为后续逐表情图生图的底图)
+  assert(prompt.includes('neutral expression'), 'base portrait prompt must request a clear neutral-expression face')
+  assert(prompt.includes('two big round eyes'), 'base portrait prompt must describe simple readable facial features')
 }
 
 function testEditPromptTemplate() {
@@ -37,10 +46,32 @@ function testEditPromptTemplate() {
   assert(withHint.includes('Redraw the main subject'), 'edit prompt must instruct redrawing the uploaded subject')
   assert(withHint.includes('Style hints: 赛博朋克 配色.'), 'hint should be embedded with collapsed whitespace')
   assert(withHint.includes('solid pure white background'), 'edit prompt must lock solid background')
+  assert(withHint.includes('neutral expression'), 'edit prompt must request a clear neutral-expression base face')
 
   const noHint = buildPetImageEditPrompt()
   assert(!noHint.includes('Style hints'), 'omitted hint should not leave an empty Style hints clause')
   assert(buildPetImageEditPrompt('   ') === noHint, 'blank hint should behave like omitted hint')
+}
+
+// ---------------------------------------------------------------------------
+// 逐表情图生图 prompt / 表情清单
+// ---------------------------------------------------------------------------
+
+function testExpressionEditPrompt() {
+  assert(BASE_EXPRESSION === 'neutral', 'base expression should be neutral')
+  assert(DERIVED_EXPRESSIONS.length === 14, `derived expressions should be 14 (全集15减基准1), got ${DERIVED_EXPRESSIONS.length}`)
+  assert(!DERIVED_EXPRESSIONS.includes(BASE_EXPRESSION), 'derived list must not contain the base expression')
+
+  const p = buildExpressionEditPrompt('happy')
+  assert(p.includes('EXACT same character'), 'expression edit prompt must lock the character identity')
+  assert(p.includes('Change ONLY the facial expression'), 'expression edit prompt must change only the face')
+  assert(p.includes(EXPRESSION_PORTRAIT_HINT.happy), 'expression edit prompt must embed the target expression hint')
+  assert(p.includes('solid pure white background'), 'expression edit prompt must keep the white background for matting')
+
+  for (const e of DERIVED_EXPRESSIONS) {
+    const hint = EXPRESSION_PORTRAIT_HINT[e]
+    assert(typeof hint === 'string' && hint.length > 0, `missing portrait hint for expression ${e}`)
+  }
 }
 
 function testPromptTruncatesLongInput() {
@@ -192,6 +223,48 @@ function testGeneratePetSpriteSetEndToEnd() {
   assert(Object.keys(spriteSet.sprites).length === 195, 'sprite set should cover all pose/expression keys')
 }
 
+// ---------------------------------------------------------------------------
+// 逐表情套装合成
+// ---------------------------------------------------------------------------
+
+function testComposeSpriteSetFromExpressions() {
+  const W = 4
+  const H = 4
+  const mk = (cells: Array<[number, number]>): Pick<PixelateResult, 'palette' | 'grid' | 'width' | 'height'> => {
+    const grid = new Int16Array(W * H).fill(-1)
+    for (const [x, y] of cells) grid[y * W + x] = 0
+    return { palette: ['#112233'], grid, width: W, height: H }
+  }
+
+  // neutral 主体在 (1,1);happy 主体在 (2,2)、(3,3) → 并集包围盒 minX1 minY1 maxX3 maxY3
+  const items: ExpressionPixelation[] = [
+    { expression: 'neutral', pixelation: mk([[1, 1]]) },
+    { expression: 'happy', pixelation: mk([[2, 2], [3, 3]]) },
+  ]
+  const set = composeSpriteSetFromExpressions(items, { id: 'x', name: 'n', description: 'd' })
+
+  assert(Object.keys(set.sprites).length === 195, `should cover all 195 pose/expression keys, got ${Object.keys(set.sprites).length}`)
+  assert(set.sprites['stand_neutral'] !== set.sprites['stand_happy'], 'each expression must keep its own independent sprite (no overlay)')
+  assert(set.sprites['stand_happy'] === set.sprites['walk_1_happy'], 'same expression should share one svg across all poses')
+  assert(set.sprites['stand_sad'] === set.sprites['stand_neutral'], 'a missing expression must fall back to neutral')
+
+  const viewBoxOf = (s: string | undefined) => /viewBox="([^"]+)"/.exec(s ?? '')?.[1]
+  assert(
+    viewBoxOf(set.sprites['stand_neutral']) === viewBoxOf(set.sprites['stand_happy']),
+    'all expressions must share one unified viewBox so switching does not jitter',
+  )
+  // tightViewBox(union{1,1,3,3}, 4, 4) = "0 0 4 4"(并集包围盒外扩 1px 再夹紧到网格)
+  assert(viewBoxOf(set.sprites['stand_neutral']) === '0 0 4 4', `unified viewBox should be the union bbox, got ${viewBoxOf(set.sprites['stand_neutral'])}`)
+
+  let threw = false
+  try {
+    composeSpriteSetFromExpressions([], { id: 'x', name: 'n', description: 'd' })
+  } catch {
+    threw = true
+  }
+  assert(threw, 'empty expression list must raise an error')
+}
+
 function testGeneratePetSpriteSetRejectsEmptySubject() {
   // 纯白图:抠背景后什么都不剩,应抛出引导性错误
   const src = createRawImage(128, 128)
@@ -212,11 +285,13 @@ function testGeneratePetSpriteSetRejectsEmptySubject() {
 
 testPromptTemplateLocksConstraints()
 testEditPromptTemplate()
+testExpressionEditPrompt()
 testPromptTruncatesLongInput()
 testFilterImageGenModels()
 testFilterChatModels()
 testBase64Helpers()
 testParseImageDataUrl()
 testSuggestSpriteMeta()
+testComposeSpriteSetFromExpressions()
 testGeneratePetSpriteSetEndToEnd()
 testGeneratePetSpriteSetRejectsEmptySubject()
