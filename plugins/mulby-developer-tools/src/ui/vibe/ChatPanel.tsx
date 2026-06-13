@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Send, Loader2, Bot, Wrench, Lightbulb, RefreshCw, X, Play, FileText, ExternalLink, Rocket, Package, AlertTriangle, Trash2, ChevronDown, ChevronUp, Image as ImageIcon, StopCircle, RotateCcw, ListChecks, CheckCircle2, Circle, MoreHorizontal, ArrowDown, HelpCircle, ThumbsUp } from 'lucide-react'
 import { useSession } from './SessionProvider'
 import { Markdown } from './Markdown'
+import { fmtTokens, type CtxUsage, type CtxBreakdown } from './contextUsage'
 import type { VibeMessage, VibeSessionState, BrainstormOption, ClarifyApproach, ClarifyState, VibePlanTodo, VibePlanPhase } from './types'
 
 const PLACEHOLDER: Record<VibeSessionState, string> = {
@@ -80,6 +81,8 @@ interface Props {
   onUndoToBefore?: () => void
   undoing?: boolean
   onClearMessages?: () => void
+  /** 上下文占用：AI 工作期间显示估算值/窗口百分比，回合结束显示宿主统计的真实消耗 */
+  ctxUsage?: CtxUsage | null
 }
 
 export function ChatPanel({
@@ -89,7 +92,8 @@ export function ChatPanel({
   contractPending, onConfirmGenerate,
   plan, planPhase, onStartPlan, onReplan,
   pendingPrompt, onPromptDismiss,
-  status, statusBusy, iconBusy, iconProgress, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onUndoToBefore, undoing, onClearMessages
+  status, statusBusy, iconBusy, iconProgress, packed, onOpenPlugin, onTryIt, onPack, onRegenIcon, onUndoToBefore, undoing, onClearMessages,
+  ctxUsage
 }: Props) {
   const { activeSession } = useSession()
   const [text, setText] = useState('')
@@ -485,8 +489,12 @@ export function ChatPanel({
             </button>
           )}
         </div>
-        <div className="px-3 pb-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-          {state === 'generating' ? 'AI 正在生成，暂不可输入…' : busy ? '处理中…可点停止中断' : routing ? '正在理解你的意图…' : '⌘/Ctrl + Enter 发送'}
+        <div className="px-3 pb-1.5 text-[10px] text-slate-400 dark:text-slate-500 flex items-center gap-2">
+          <span className="truncate">
+            {state === 'generating' ? 'AI 正在生成，暂不可输入…' : busy ? '处理中…可点停止中断' : routing ? '正在理解你的意图…' : '⌘/Ctrl + Enter 发送'}
+          </span>
+          <span className="flex-1" />
+          {ctxUsage && <CtxUsageBadge u={ctxUsage} />}
         </div>
       </div>
     </div>
@@ -557,6 +565,131 @@ function MoreMenu({ items }: { items: Array<{ icon: React.ReactNode; label: stri
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * 上下文占用指示（输入框下方，可点击展开明细面板）：
+ * - 生成期：估算的上下文 token（~ 前缀表近似，宿主内部还可能压缩）+ 窗口百分比进度条，>70% 转黄、>90% 转红；
+ * - 回合结束：宿主统计的真实消耗（↑输入 ↓输出，跨工具轮累计）；
+ * - 点击弹出 Claude Code 风格的「上下文窗口」拆解：各类内容占了多少 token / 百分比 + 剩余空间。
+ */
+function CtxUsageBadge({ u }: { u: CtxUsage }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const isFinal = u.phase === 'final'
+  if (isFinal && u.realInput == null && u.realOutput == null) return null
+  const pct = u.pct
+  const tone = isFinal || pct == null ? ''
+    : pct >= 0.9 ? 'text-rose-500'
+    : pct >= 0.7 ? 'text-amber-500'
+    : 'text-emerald-600 dark:text-emerald-400'
+  const bar = pct != null && pct >= 0.9 ? 'bg-rose-500' : pct != null && pct >= 0.7 ? 'bg-amber-500' : 'bg-emerald-500'
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-1.5 hover:opacity-75 transition-opacity ${tone}`}
+        title={isFinal
+          ? '上一回合真实消耗（↑输入 / ↓输出 tokens），点击查看上下文构成明细'
+          : u.anchored
+            ? '当前上下文占用（已锚定宿主每轮真实用量，轮间增量为估算），点击查看构成明细'
+            : '当前上下文占用（插件侧估算），点击查看构成明细'}
+      >
+        {isFinal ? (
+          <span className="mono">消耗 ↑{fmtTokens(u.realInput || 0)} ↓{fmtTokens(u.realOutput || 0)}</span>
+        ) : (
+          <>
+            <span className="mono">上下文 {u.anchored ? '' : '~'}{fmtTokens(u.liveTokens)}{u.windowTokens ? `/${fmtTokens(u.windowTokens)}` : ''}</span>
+            {pct != null && (
+              <>
+                <span className="w-10 h-1 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                  <span className={`block h-full ${bar} transition-all`} style={{ width: `${Math.min(100, Math.round(pct * 100))}%` }} />
+                </span>
+                <span className="mono">{Math.round(pct * 100)}%</span>
+              </>
+            )}
+          </>
+        )}
+        {open ? <ChevronDown size={11} /> : <ChevronUp size={11} />}
+      </button>
+      {open && <CtxBreakdownPanel u={u} />}
+    </div>
+  )
+}
+
+const CTX_CATS: Array<{ key: keyof CtxBreakdown; label: string; cls: string }> = [
+  { key: 'messages', label: '对话消息', cls: 'bg-blue-500' },
+  { key: 'system', label: '系统提示词', cls: 'bg-indigo-400' },
+  { key: 'tools', label: '工具定义', cls: 'bg-sky-400' },
+  { key: 'gen', label: '本回合生成', cls: 'bg-emerald-400' },
+  { key: 'toolResults', label: '工具结果', cls: 'bg-amber-400' }
+]
+
+/** 上下文窗口拆解面板：总占用 + 堆叠条 + 分类行（token/百分比）+ 剩余空间，生成期间随流式实时刷新 */
+function CtxBreakdownPanel({ u }: { u: CtxUsage }) {
+  const total = u.liveTokens
+  const win = u.windowTokens
+  const free = win > 0 ? Math.max(0, win - total) : 0
+  // 分母：窗口已知按窗口算（与 Claude Code 一致）；未知则按当前内容总量算占比
+  const denom = win > 0 ? win : total > 0 ? total : 1
+  const rows = CTX_CATS.map((c) => ({ ...c, tokens: u.breakdown[c.key] })).filter((r) => r.tokens > 0)
+  const fmtPct = (n: number) => {
+    const p = (n / denom) * 100
+    return p >= 10 ? `${Math.round(p)}%` : `${p.toFixed(1)}%`
+  }
+  return (
+    <div className="absolute right-0 bottom-full mb-1.5 z-30 w-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg p-3 space-y-2 text-left cursor-default">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">上下文窗口</span>
+        <span className="mono text-[11px] text-slate-600 dark:text-slate-300">
+          {u.anchored ? '' : '~'}{fmtTokens(total)}{win > 0 ? ` / ${fmtTokens(win)} (${Math.round((total / win) * 100)}%)` : ''}
+        </span>
+      </div>
+      <div className="flex h-1.5 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-700/60">
+        {rows.map((r) => (
+          <span key={r.key} className={`${r.cls} transition-all`} style={{ width: `${Math.min(100, (r.tokens / denom) * 100)}%` }} />
+        ))}
+      </div>
+      <div className="space-y-1">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-2 text-[11px]">
+            <span className={`w-2 h-2 rounded-[3px] shrink-0 ${r.cls}`} />
+            <span className="text-slate-600 dark:text-slate-300">{r.label}</span>
+            <span className="flex-1" />
+            <span className="mono text-slate-400 dark:text-slate-500">{fmtTokens(r.tokens)}</span>
+            <span className="mono w-11 text-right text-slate-600 dark:text-slate-300">{fmtPct(r.tokens)}</span>
+          </div>
+        ))}
+        {win > 0 && (
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="w-2 h-2 rounded-[3px] shrink-0 bg-slate-200 dark:bg-slate-600" />
+            <span className="text-slate-600 dark:text-slate-300">剩余空间</span>
+            <span className="flex-1" />
+            <span className="mono text-slate-400 dark:text-slate-500">{fmtTokens(free)}</span>
+            <span className="mono w-11 text-right text-slate-600 dark:text-slate-300">{fmtPct(free)}</span>
+          </div>
+        )}
+      </div>
+      {(u.realInput != null || u.realOutput != null) && (
+        <div className="flex items-center justify-between border-t border-slate-200/70 dark:border-slate-700/70 pt-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+          <span>{u.phase === 'final' ? '本回合真实消耗（宿主统计）' : '已消耗（宿主统计，实时累计）'}</span>
+          <span className="mono">↑{fmtTokens(u.realInput || 0)} ↓{fmtTokens(u.realOutput || 0)}</span>
+        </div>
+      )}
+      <p className="text-[10px] leading-snug text-slate-400 dark:text-slate-500">
+        {u.anchored
+          ? '总量锚定宿主每轮真实用量，轮间增量与分类拆解为估算；宿主长回合中还可能自动压缩上下文。'
+          : '除「真实消耗」外均为插件侧估算（~）；长回合中宿主还可能自动压缩上下文，实际占用可能更小。'}
+      </p>
     </div>
   )
 }

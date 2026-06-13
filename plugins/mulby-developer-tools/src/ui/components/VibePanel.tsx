@@ -16,8 +16,8 @@ import {
   type VibeContract, defaultContract, normalizeContract, manifestToContract,
   manifestJson, primaryTrigger, primaryFeatureCode, contractSummary, triggerLabel, validateContract
 } from '../lib/vibeContract'
-import { useSession, SessionSwitcher, ChatPanel } from '../vibe'
-import type { VibeSession, VibeSessionState, VibeAction, BrainstormOption, ClarifyQuestion, ClarifyApproach, ClarifyQA, ClarifyState, VibeMessage, VibePlanTodo, VibePlanPhase } from '../vibe'
+import { useSession, SessionSwitcher, ChatPanel, createCtxTracker, fmtTokens } from '../vibe'
+import type { VibeSession, VibeSessionState, VibeAction, BrainstormOption, ClarifyQuestion, ClarifyApproach, ClarifyQA, ClarifyState, VibeMessage, VibePlanTodo, VibePlanPhase, CtxUsage } from '../vibe'
 
 export interface VibeEditTarget {
   path: string
@@ -332,9 +332,15 @@ export function VibePanel({
   // 生成深度：full=一次性完整实现（默认）；minimal=先最小可跑再扩展（适合复杂/不确定需求）
   const [genDepth, setGenDepth] = useState<'full' | 'minimal'>('full')
 
-  const [modelOptions, setModelOptions] = useState<Array<{ id: string; label: string }>>([])
+  const [modelOptions, setModelOptions] = useState<Array<{ id: string; label: string; contextTokens?: number }>>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [modelLoading, setModelLoading] = useState(false)
+
+  // 上下文占用指示（方案A 纯插件侧）：生成期实时估算，回合结束用宿主真实 usage 校准
+  const [ctxUsage, setCtxUsage] = useState<CtxUsage | null>(null)
+  const ctxTrackerRef = useRef<ReturnType<typeof createCtxTracker> | null>(null)
+  if (!ctxTrackerRef.current) ctxTrackerRef.current = createCtxTracker(setCtxUsage)
+  const ctxTracker = ctxTrackerRef.current
 
   const [planning, setPlanning] = useState(false)
   const [contract, setContract] = useState<VibeContract | null>(null)
@@ -715,7 +721,13 @@ export function VibePanel({
     void (async () => {
       const normalize = (models: any[]) => (Array.isArray(models) ? models : [])
         .filter((m) => typeof m?.id === 'string' && m.id.trim())
-        .map((m) => ({ id: m.id as string, label: (m.label as string) || (m.id as string) }))
+        .map((m) => ({
+          id: m.id as string,
+          label: (m.label as string) || (m.id as string),
+          // 上下文窗口（占用百分比的分母）。宿主已按「用户显式填写 ＞ models.dev 快照/缓存」补全；
+          // 仍缺失（老版宿主/未收录模型）则视为未知，UI 只显示绝对量——不在插件侧按模型 id 猜
+          contextTokens: typeof m?.contextTokens === 'number' && m.contextTokens > 0 ? (m.contextTokens as number) : undefined
+        }))
       try {
         let options = normalize(await a.allModels())
         if (options.length === 0) {
@@ -753,6 +765,16 @@ export function VibePanel({
   // 让「按上面的方案 / 刚才说的」这类指代能被正确理解。
   const convoRef = useRef<VibeMessage[]>([])
   useEffect(() => { convoRef.current = activeSession?.messages || [] }, [activeSession?.messages, activeId])
+
+  // 切换会话时清掉上一个项目的占用指示；运行中（estimating/live）不清——
+  // 生成途中 prepareProject 可能新建会话改变 activeId，不能让指示在生成时消失
+  const ctxUsageRef = useRef<CtxUsage | null>(null)
+  useEffect(() => { ctxUsageRef.current = ctxUsage }, [ctxUsage])
+  useEffect(() => {
+    const u = ctxUsageRef.current
+    if (!u || u.phase === 'final') ctxTracker.reset()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
 
   const HISTORY_MAX_MSGS = 24      // 最多带入的历史消息条数
   const HISTORY_MAX_CHARS = 9000   // 历史总字符预算（控制 token）
@@ -835,9 +857,11 @@ export function VibePanel({
     try {
       const text = older.map((m) => `${m.role === 'user' ? '用户' : 'AI'}：${m.content.slice(0, 1500)}`).join('\n')
       const prev = (activeSession?.contextSummary || '').trim()
+      // track:false——后台静默压缩，不该让底部的上下文占用指示突然闪动
       const obj = await aiJson(
         '你是对话压缩器。把给定的早期对话压成结构化中文摘要，只输出 JSON：{ "summary": "..." }。摘要必须覆盖：目标/需求、关键决策与共识、已完成进展、涉及的文件或模块、未完成的下一步；务必逐字保留用户明确认可的方案要点。',
-        `${prev ? `已有前情提要（在此基础上合并更新，不要丢失旧要点）：\n${prev}\n\n` : ''}需要压缩的更早对话：\n${text}`
+        `${prev ? `已有前情提要（在此基础上合并更新，不要丢失旧要点）：\n${prev}\n\n` : ''}需要压缩的更早对话：\n${text}`,
+        { track: false }
       )
       const summary = obj && typeof obj.summary === 'string' ? obj.summary.trim() : ''
       if (summary && liveSessionIdRef.current === sid) updateSession(sid, { contextSummary: summary })
@@ -866,6 +890,7 @@ export function VibePanel({
   const onAgentChunk = (chunk: any) => {
     if (chunk?.__requestId) { reqIdRef.current = chunk.__requestId; return }
     if (abortedRef.current) return
+    ctxTracker.chunk(chunk)
     const ct = chunk?.chunkType
     if (ct === 'tool-call' && chunk.tool_call) {
       const name = chunk.tool_call.name
@@ -947,20 +972,33 @@ export function VibePanel({
     `修改需求：${text}`
   ].join('\n')
 
-  const aiJson = async (system: string, user: string): Promise<any | null> => {
+  /**
+   * 一次性 JSON 调用（契约规划 / 改造分析 / 计划制定与自审 / 头脑风暴 / 澄清等公共入口）。
+   * 默认接入上下文占用追踪；后台静默调用（如对话压缩）传 track:false，避免指示器无故闪动。
+   */
+  const aiJson = async (system: string, user: string, opts?: { track?: boolean }): Promise<any | null> => {
     const a = ai()
     if (!a?.call) return null
-    const res = await a.call({
-      ...(selectedModel ? { model: selectedModel } : {}),
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-      skills: { mode: 'off' }, mcp: { mode: 'off' }, toolingPolicy: { enableInternalTools: false }
-    }, captureReqId)
-    const content = typeof res?.content === 'string'
-      ? res.content
-      : Array.isArray(res?.content) ? res.content.map((x: any) => x?.text ?? '').join('\n') : ''
-    const json = extractJsonObject(content)
-    if (!json) return null
-    try { return JSON.parse(json) } catch { return null }
+    const track = opts?.track !== false
+    const messages = [{ role: 'system', content: system }, { role: 'user', content: user }]
+    if (track) beginCtxTracking(messages)
+    try {
+      const res = await a.call({
+        ...(selectedModel ? { model: selectedModel } : {}),
+        messages,
+        skills: { mode: 'off' }, mcp: { mode: 'off' }, toolingPolicy: { enableInternalTools: false }
+      }, track ? (c: any) => { captureReqId(c); ctxTracker.chunk(c) } : captureReqId)
+      if (track) ctxTracker.end((res as any)?.usage)
+      const content = typeof res?.content === 'string'
+        ? res.content
+        : Array.isArray(res?.content) ? res.content.map((x: any) => x?.text ?? '').join('\n') : ''
+      const json = extractJsonObject(content)
+      if (!json) return null
+      try { return JSON.parse(json) } catch { return null }
+    } catch (e) {
+      if (track) ctxTracker.end(undefined)
+      throw e
+    }
   }
 
   const planCreate = async (overrideText?: string) => {
@@ -1189,6 +1227,19 @@ export function VibePanel({
     return baseSystem
   }
 
+  /** 发起一次 AI 调用前开始追踪上下文占用（messages 须与实际发送一致；extraPayload 计入工具 schema 等额外负载） */
+  const beginCtxTracking = (messages: Array<{ role: string; content: string }>, extraPayload?: unknown) => {
+    const a = ai()
+    const modelId = selectedModel || modelOptions[0]?.id || ''
+    ctxTracker.begin({
+      messages,
+      extraPayload,
+      model: selectedModel || undefined,
+      windowTokens: modelOptions.find((m) => m.id === modelId)?.contextTokens ?? 0,
+      estimate: a?.tokens?.estimate ? (inp: { model?: string; messages: Array<{ role: string; content: string }> }) => a.tokens.estimate(inp) : undefined
+    })
+  }
+
   const runAgent = async (system: string, user: string, root: string, phase: EventPhase, history: ChatMsg[] = [], opts?: { tools?: ReadonlyArray<(typeof VIBE_TOOLS)[number]>; maxToolSteps?: number }) => {
     const a = ai()
     if (!a?.call) throw new Error('当前环境未启用 AI API，无法生成代码')
@@ -1197,11 +1248,14 @@ export function VibePanel({
     await dev.hostCall('vibe_begin', { root })
     abortedRef.current = false
     reqIdRef.current = null
+    const tools = opts?.tools ?? VIBE_TOOLS
+    const messages = [{ role: 'system', content: withAnchorContext(system) }, ...history, { role: 'user', content: user }]
+    beginCtxTracking(messages, tools)
     const req = a.call(
       {
         ...(selectedModel ? { model: selectedModel } : {}),
-        messages: [{ role: 'system', content: withAnchorContext(system) }, ...history, { role: 'user', content: user }],
-        tools: opts?.tools ?? VIBE_TOOLS,
+        messages,
+        tools,
         maxToolSteps: opts?.maxToolSteps ?? 200,
         capabilities: ['fs.read'],
         // 跨轮上下文由本插件自管（锚点 + 滚动摘要 + 历史窗口），关掉宿主按消息条数的截断（默认仅留 8 条，会砍掉我们精心拼的历史）
@@ -1210,7 +1264,15 @@ export function VibePanel({
       },
       onAgentChunk
     )
-    return await req
+    try {
+      const final = await req
+      // 回合结束：宿主返回跨工具轮累计的真实 usage，校准估算密度并展示精确消耗
+      ctxTracker.end((final as any)?.usage)
+      return final
+    } catch (e) {
+      ctxTracker.end(undefined)
+      throw e
+    }
   }
 
   // ---------------- 阶段 1 → 2：脚手架 + 写契约 manifest（"直接生成"与"按计划生成"共用） ----------------
@@ -1800,20 +1862,24 @@ export function VibePanel({
     if (!a?.call) return null
     const base = buildIconPrompt(c, styleHint)
     for (let attempt = 0; attempt < 2; attempt++) {
+      // 每次尝试都是独立的一次性调用，逐次追踪上下文占用
+      const messages = [
+        { role: 'system', content: '你是资深图标设计师，只输出一段完整 SVG 源码（必须以 <svg 开头、以 </svg> 结尾），不要解释、不要 Markdown 代码块、不要任何额外文字。' },
+        { role: 'user', content: attempt === 0 ? base : `${base}\n\n上次没有给出可用的 SVG。请严格只返回 SVG 源码本身。` }
+      ]
+      beginCtxTracking(messages)
       try {
         const res = await a.call({
           ...(selectedModel ? { model: selectedModel } : {}),
-          messages: [
-            { role: 'system', content: '你是资深图标设计师，只输出一段完整 SVG 源码（必须以 <svg 开头、以 </svg> 结尾），不要解释、不要 Markdown 代码块、不要任何额外文字。' },
-            { role: 'user', content: attempt === 0 ? base : `${base}\n\n上次没有给出可用的 SVG。请严格只返回 SVG 源码本身。` }
-          ],
+          messages,
           skills: { mode: 'off' }, mcp: { mode: 'off' }, toolingPolicy: { enableInternalTools: false }
-        }, onIconChunk)
+        }, (chunk: any) => { onIconChunk(chunk); ctxTracker.chunk(chunk) })
+        ctxTracker.end((res as any)?.usage)
         if (abortedRef.current) return null
         const content = typeof res?.content === 'string' ? res.content : Array.isArray(res?.content) ? res.content.map((x: any) => x?.text ?? '').join('\n') : ''
         const svg = extractSvg(content)
         if (svg) return svg
-      } catch { if (abortedRef.current) return null /* 否则重试 */ }
+      } catch { ctxTracker.end(undefined); if (abortedRef.current) return null /* 否则重试 */ }
     }
     return null
   }
@@ -2317,10 +2383,12 @@ export function VibePanel({
       setNarration('')
       currentPhaseRef.current = 'debug'
       const sys = withAnchorContext(withApiSurface(askSystemPrompt(contract, root)))
+      const askMessages = [{ role: 'system', content: sys }, ...buildHistoryMessages(question), { role: 'user', content: question }]
+      beginCtxTracking(askMessages, VIBE_READ_TOOLS)
       const final = await a.call(
         {
           ...(selectedModel ? { model: selectedModel } : {}),
-          messages: [{ role: 'system', content: sys }, ...buildHistoryMessages(question), { role: 'user', content: question }],
+          messages: askMessages,
           tools: VIBE_READ_TOOLS,
           maxToolSteps: 60,
           capabilities: ['fs.read'],
@@ -2330,6 +2398,7 @@ export function VibePanel({
         },
         onAgentChunk
       )
+      ctxTracker.end((final as any)?.usage)
       if (abortedRef.current) { pushEvent('debug', 'note', '已中止'); return }
       const answer = typeof final?.content === 'string'
         ? final.content
@@ -2338,6 +2407,7 @@ export function VibePanel({
       if (activeId) appendMessage(activeId, { id: `a-${Date.now()}`, role: 'assistant', content: text, timestamp: Date.now(), actions: collectTurnActions() })
       pushEvent('debug', 'note', '已回答')
     } catch (e) {
+      ctxTracker.end(undefined)
       if (!abortedRef.current) pushToast('error', e instanceof Error ? e.message : '回答失败')
     } finally {
       setIterating(false)
@@ -2674,6 +2744,7 @@ export function VibePanel({
     setPendingPrompt(null)
     pendingCommitMsgRef.current = ''
     deliverStartedRef.current = false
+    ctxTracker.reset()
   }
   const resetAll = () => { resetState(); setVibeMode('create'); setEditPath(''); setSentence('') }
   // 新建项目：清空面板 + 脱离当前会话（下次规划会创建全新会话，不污染当前项目）
@@ -3233,6 +3304,7 @@ export function VibePanel({
               onUndoToBefore={() => void requestUndoToBeforeAI()}
               undoing={!!restoringHash}
               onClearMessages={() => { if (activeId) clearMessages(activeId) }}
+              ctxUsage={ctxUsage}
             />
           </div>
         </main>
@@ -3292,7 +3364,7 @@ export function VibePanel({
                       created={!!createdPath} applying={building} onApply={applyContractEdits} />
                   )}
                   {drawerTab === 'progress' && stage >= 2 && (
-                    <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} />
+                    <GenerateStage contract={contract} events={events} toolCalls={toolCalls} narration={narration} createdPath={createdPath} busy={generating || expanding} ctxUsage={ctxUsage} />
                   )}
                   {drawerTab === 'deliver' && stage === 3 && (
                     <DeliverStage
@@ -3603,7 +3675,7 @@ function Timeline({ events, compact }: { events: TimelineEvent[]; compact?: bool
   )
 }
 
-function GenerateStage({ contract, events, toolCalls, narration, createdPath, busy }: { contract: VibeContract | null; events: TimelineEvent[]; toolCalls: number; narration: string; createdPath: string; busy: boolean }) {
+function GenerateStage({ contract, events, toolCalls, narration, createdPath, busy, ctxUsage }: { contract: VibeContract | null; events: TimelineEvent[]; toolCalls: number; narration: string; createdPath: string; busy: boolean; ctxUsage?: CtxUsage | null }) {
   const [now, setNow] = useState(Date.now())
   const [narrOpen, setNarrOpen] = useState(false)
   useEffect(() => {
@@ -3652,6 +3724,19 @@ function GenerateStage({ contract, events, toolCalls, narration, createdPath, bu
           <span className="flex items-center gap-1"><Terminal size={11} /> {events.length} 事件</span>
           <span>· {toolCalls} 次工具调用</span>
           {writeCount > 0 && <span>· 写入 {writeCount} 文件</span>}
+          {ctxUsage && ctxUsage.phase !== 'final' && (
+            <span
+              className={`mono ${ctxUsage.pct != null && ctxUsage.pct >= 0.9 ? 'text-rose-500' : ctxUsage.pct != null && ctxUsage.pct >= 0.7 ? 'text-amber-500' : ''}`}
+              title="当前上下文占用（插件侧估算，宿主可能再压缩）"
+            >
+              · 上下文 {ctxUsage.anchored ? '' : '~'}{fmtTokens(ctxUsage.liveTokens)}{ctxUsage.windowTokens ? `/${fmtTokens(ctxUsage.windowTokens)}` : ''}{ctxUsage.pct != null ? ` (${Math.round(ctxUsage.pct * 100)}%)` : ''}
+            </span>
+          )}
+          {ctxUsage?.phase === 'final' && (ctxUsage.realInput != null || ctxUsage.realOutput != null) && (
+            <span className="mono" title="上一回合真实消耗（宿主统计，跨工具轮累计）：↑输入 / ↓输出 tokens">
+              · 消耗 ↑{fmtTokens(ctxUsage.realInput || 0)} ↓{fmtTokens(ctxUsage.realOutput || 0)}
+            </span>
+          )}
           {elapsedMs > 0 && <span className="ml-auto mono">{fmtDuration(elapsedMs)}</span>}
         </div>
       </div>
