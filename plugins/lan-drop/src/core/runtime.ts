@@ -43,23 +43,18 @@ export async function notify(
   }
 }
 
-/** 统一日志（输出到 Mulby 日志面板 + 控制台）。 */
+// 后端插件 API 没有 `log` 命名空间（那是前端 API 才有的）。早期实现误调 host().log，
+// 由于后端 mulby 代理会把它变成一次异步 RPC 并被宿主以「Unknown API namespace: log」
+// 拒绝，且返回的 Promise 未被 await/catch，导致启动时刷 UnhandledPromiseRejection。
+// 宿主会把插件的 console 输出捕获为插件日志（即日志里的 `[lan-drop]` 前缀），故仅用 console。
+
+/** 统一日志（console 输出会被宿主捕获为插件日志）。 */
 export function log(...args: unknown[]): void {
-  try {
-    host()?.log?.info?.('[lan-drop]', ...(args as any))
-  } catch {
-    /* ignore */
-  }
   // eslint-disable-next-line no-console
   console.log('[lan-drop]', ...args)
 }
 
 export function logError(...args: unknown[]): void {
-  try {
-    host()?.log?.error?.('[lan-drop]', ...(args as any))
-  } catch {
-    /* ignore */
-  }
   // eslint-disable-next-line no-console
   console.error('[lan-drop]', ...args)
 }
