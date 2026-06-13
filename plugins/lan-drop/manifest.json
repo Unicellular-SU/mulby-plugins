@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/.mulby/manifest-schema.json",
+  "id": "lan-drop",
+  "name": "lan-drop",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "network",
+  "displayName": "闪传 LanDrop",
+  "description": "局域网内跨平台、零配置、拖拽即传的文件闪传工具，自动发现设备，大文件流式直传。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "background": true,
+    "persistent": true,
+    "defaultDetached": true,
+    "idleTimeoutMs": "never"
+  },
+  "window": {
+    "width": 960,
+    "height": 680,
+    "minWidth": 560,
+    "minHeight": 460,
+    "maxWidth": 1600,
+    "maxHeight": 1200,
+    "type": "default"
+  },
+  "features": [
+    {
+      "code": "main",
+      "explain": "局域网闪传 · 收发文件",
+      "cmds": [
+        { "type": "keyword", "value": "闪传" },
+        { "type": "keyword", "value": "landrop" },
+        { "type": "keyword", "value": "lan-drop" },
+        { "type": "keyword", "value": "传文件" },
+        { "type": "files", "fileType": "any", "minLength": 1, "label": "用闪传发送" }
+      ]
+    }
+  ]
+}

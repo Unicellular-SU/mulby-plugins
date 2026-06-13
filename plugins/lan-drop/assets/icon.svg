@@ -1,0 +1,40 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3B6CFF"/>
+      <stop offset="0.55" stop-color="#5562FF"/>
+      <stop offset="1" stop-color="#7B4DFF"/>
+    </linearGradient>
+    <linearGradient id="planeLight" x1="120" y1="120" x2="320" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EAF0FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#10153A" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- rounded square background -->
+  <rect x="32" y="32" width="448" height="448" rx="108" fill="url(#bg)"/>
+  <!-- top highlight -->
+  <rect x="32" y="32" width="448" height="224" rx="108" fill="#FFFFFF" opacity="0.07"/>
+
+  <!-- LAN broadcast arcs from lower-left -->
+  <g stroke="#FFFFFF" stroke-linecap="round" fill="none">
+    <path d="M104 332 A 92 92 0 0 1 196 424" stroke-width="11" opacity="0.20"/>
+    <path d="M104 286 A 138 138 0 0 1 242 424" stroke-width="11" opacity="0.13"/>
+    <path d="M104 240 A 184 184 0 0 1 288 424" stroke-width="11" opacity="0.08"/>
+  </g>
+
+  <!-- two-tone paper plane (send) -->
+  <g filter="url(#shadow)">
+    <path d="M436 76 L238 274 L96 214 Z" fill="url(#planeLight)"/>
+    <path d="M436 76 L300 430 L238 274 Z" fill="#C9D6FF"/>
+  </g>
+
+  <!-- flash spark -->
+  <g fill="#FFFFFF">
+    <path d="M404 150 L414 178 L442 188 L414 198 L404 226 L394 198 L366 188 L394 178 Z" opacity="0.95"/>
+    <circle cx="356" cy="120" r="7" opacity="0.7"/>
+  </g>
+</svg>
