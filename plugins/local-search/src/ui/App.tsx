@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import SearchBar from './components/SearchBar'
 import CategoryPanel from './components/CategoryPanel'
 import FileList from './components/FileList'
@@ -32,6 +33,13 @@ export default function App() {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [rightKeyCount, setRightKeyCount] = useState(0)
   const [isAttached, setIsAttached] = useState(false)
+  const [previewEnabled, setPreviewEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('local-search:preview') !== 'off'
+    } catch {
+      return true
+    }
+  })
   const rightKeyTimer = useRef<ReturnType<typeof setTimeout>>()
 
   const filteredFiles = filterByCategory(allFiles, category)
@@ -367,6 +375,27 @@ export default function App() {
     [isAttached, mulby]
   )
 
+  const togglePreview = useCallback(() => {
+    setPreviewEnabled((prev) => {
+      const next = !prev
+      try {
+        localStorage.setItem('local-search:preview', next ? 'on' : 'off')
+      } catch {}
+      return next
+    })
+  }, [])
+
+  const previewToggle = (
+    <button
+      className={`preview-switch${previewEnabled ? ' on' : ''}`}
+      onClick={togglePreview}
+      title={previewEnabled ? '关闭文件预览' : '开启文件预览'}
+    >
+      {previewEnabled ? <Eye size={13} /> : <EyeOff size={13} />}
+      预览
+    </button>
+  )
+
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--bg-primary)' }}>
       {!isAttached && (
@@ -385,6 +414,7 @@ export default function App() {
             <span className="shortcut-hint">Tab 切换类型</span>
             <span className="shortcut-hint">Shift+↑↓ 多选</span>
             <span className="shortcut-hint">拖拽文件</span>
+            <div className="ml-auto">{previewToggle}</div>
           </div>
         </div>
       )}
@@ -397,8 +427,11 @@ export default function App() {
           <span className="shortcut-hint">⌘C 复制</span>
           <span className="shortcut-hint">Tab 切换类型</span>
           <span className="shortcut-hint">Shift+↑↓ 多选</span>
-          {loading && <span className="ml-auto" style={{ color: 'var(--accent)' }}>搜索中…</span>}
-          {!loading && query && <span className="ml-auto">{filteredFiles.length} 个结果</span>}
+          <div className="ml-auto flex items-center gap-2">
+            {loading && <span style={{ color: 'var(--accent)' }}>搜索中…</span>}
+            {!loading && query && <span>{filteredFiles.length} 个结果</span>}
+            {previewToggle}
+          </div>
         </div>
       )}
 
@@ -408,12 +441,12 @@ export default function App() {
         <div
           ref={fileListContainerRef}
           tabIndex={-1}
-          className="flex flex-col outline-none"
-          style={{
-            width: 320,
-            minWidth: 260,
-            borderRight: '1px solid var(--border-color)',
-          }}
+          className={`flex flex-col outline-none${previewEnabled ? '' : ' flex-1'}`}
+          style={
+            previewEnabled
+              ? { width: 320, minWidth: 260, borderRight: '1px solid var(--border-color)' }
+              : { minWidth: 260 }
+          }
         >
           <FileList
             files={filteredFiles}
@@ -427,9 +460,11 @@ export default function App() {
           />
         </div>
 
-        <div className="flex-1 min-w-0 flex flex-col relative">
-          <FilePreview file={focusedFile} />
-        </div>
+        {previewEnabled && (
+          <div className="flex-1 min-w-0 flex flex-col relative">
+            <FilePreview file={focusedFile} />
+          </div>
+        )}
       </div>
     </div>
   )

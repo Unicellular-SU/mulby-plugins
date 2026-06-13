@@ -67,6 +67,20 @@ export function useMulby() {
     return mulby.filesystem.stat(path)
   }, [])
 
+  // 调用后端自定义 rpc：用 sharp 把 tiff/psd/heic 等解码为 PNG。
+  // host.call 返回 { success, data }，真正的返回值在 data 上。
+  const previewImageAsPng = useCallback(
+    async (
+      path: string
+    ): Promise<{ base64: string; meta?: { width?: number; height?: number; format?: string } } | null> => {
+      const host = (mulby as any)?.host
+      if (!host?.call) return null
+      const res = await host.call('local-search', 'previewImageAsPng', path)
+      return (res?.data ?? null) as { base64: string; meta?: { width?: number; height?: number; format?: string } } | null
+    },
+    []
+  )
+
   const startDrag = useCallback((paths: string | string[]) => {
     if (!mulby?.window?.startDrag) return
     mulby.window.startDrag(paths)
@@ -89,6 +103,7 @@ export function useMulby() {
     readFileAsText,
     readFileAsBase64,
     getFileStat,
+    previewImageAsPng,
     startDrag,
     showContextMenu,
   }

@@ -1,168 +1,170 @@
-import React, { useEffect, useState, useRef } from 'react'
-import { Eye, FileQuestion, Loader2, File, Image as ImageIcon, Music, Video, FileText, Archive } from 'lucide-react'
-import { FileItem, getPreviewType, PreviewType, formatFileSize } from '../utils'
+import React, { useEffect, useState, useRef, Suspense, lazy } from 'react'
+import { FileItem, getPreviewSpec, sizeLimitForRenderer, looksBinary } from '../utils'
 import { useMulby } from '../hooks/useMulby'
+import {
+  PreviewEmpty,
+  PreviewLoading,
+  PreviewError,
+  PreviewUnsupported,
+  PreviewOversize,
+  PreviewErrorBoundary,
+  FileInfo,
+} from './preview/PreviewChrome'
+import ImagePreview from './preview/ImagePreview'
+import MediaPreview from './preview/MediaPreview'
+import TextPreview from './preview/TextPreview'
+import PdfPreview from './preview/PdfPreview'
+
+// 重型渲染器懒加载：各自的第三方库（highlighter / xlsx / mammoth / fflate）从首屏 chunk 分离
+const CodePreview = lazy(() => import('./preview/CodePreview'))
+const MarkdownPreview = lazy(() => import('./preview/MarkdownPreview'))
+const JsonPreview = lazy(() => import('./preview/JsonPreview'))
+const SpreadsheetPreview = lazy(() => import('./preview/SpreadsheetPreview'))
+const DocxPreview = lazy(() => import('./preview/DocxPreview'))
+const ArchivePreview = lazy(() => import('./preview/ArchivePreview'))
 
 interface FilePreviewProps {
   file: FileItem | null
 }
 
-const MAX_TEXT_SIZE = 512 * 1024
+interface ImageMeta {
+  width?: number
+  height?: number
+  format?: string
+}
 
 export default function FilePreview({ file }: FilePreviewProps) {
-  const { readFileAsText, readFileAsBase64, getFileStat } = useMulby()
-  const [previewType, setPreviewType] = useState<PreviewType>('none')
-  const [content, setContent] = useState<string>('')
+  const { readFileAsText, readFileAsBase64, getFileStat, previewImageAsPng } = useMulby()
+  const [data, setData] = useState('')
+  const [imageMeta, setImageMeta] = useState<ImageMeta | null>(null)
   const [loading, setLoading] = useState(false)
-  const [fileInfo, setFileInfo] = useState<{ size: number; modifiedAt: number; createdAt: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [oversize, setOversize] = useState<number | null>(null)
+  const [binary, setBinary] = useState(false)
+  const [fileInfo, setFileInfo] = useState<FileInfo | null>(null)
+  // 记录「当前 state 对应哪个文件」。文件切换后、加载完成前，state 仍是旧文件的，
+  // 用它把内容渲染拦在加载态，避免新渲染器闪现旧数据。
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const abortRef = useRef(0)
 
   useEffect(() => {
     if (!file) {
-      setPreviewType('none')
-      setContent('')
+      setData('')
       setFileInfo(null)
+      setError(null)
+      setOversize(null)
       return
     }
 
     const id = ++abortRef.current
-    const type = getPreviewType(file.ext)
-    setPreviewType(type)
-    setContent('')
+    const spec = getPreviewSpec(file.ext)
+    setData('')
+    setImageMeta(null)
+    setError(null)
+    setOversize(null)
+    setBinary(false)
     setLoading(true)
 
     const load = async () => {
       try {
         const stat = await getFileStat(file.path)
         if (id !== abortRef.current) return
-        if (stat) setFileInfo({ size: stat.size, modifiedAt: stat.modifiedAt, createdAt: stat.createdAt })
+        setFileInfo(stat ? { size: stat.size, modifiedAt: stat.modifiedAt, createdAt: stat.createdAt } : null)
 
-        if (type === 'image') {
-          if (file.ext === '.svg') {
-            const text = await readFileAsText(file.path)
-            if (id !== abortRef.current) return
-            setContent(`data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(text)))}`)
-          } else {
-            const base64 = await readFileAsBase64(file.path)
-            if (id !== abortRef.current) return
-            const mimeMap: Record<string, string> = {
-              '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-              '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
-              '.ico': 'image/x-icon',
-            }
-            setContent(`data:${mimeMap[file.ext] || 'image/png'};base64,${base64}`)
-          }
-        } else if (type === 'text') {
-          if (stat && stat.size > MAX_TEXT_SIZE) {
-            setContent(`[文件过大，仅预览前 ${formatFileSize(MAX_TEXT_SIZE)}]`)
-          } else {
-            const text = await readFileAsText(file.path)
-            if (id !== abortRef.current) return
-            setContent(typeof text === 'string' ? text : '')
-          }
-        } else if (type === 'video' || type === 'audio') {
-          setContent(file.path)
+        if (spec.renderer === 'none') return
+
+        const limit = sizeLimitForRenderer(spec.renderer)
+        if (limit && stat && typeof stat.size === 'number' && stat.size > limit) {
+          setOversize(limit)
+          return
         }
-      } catch (err) {
+
+        if (spec.source === 'text') {
+          const t = await readFileAsText(file.path)
+          if (id !== abortRef.current) return
+          const str = typeof t === 'string' ? t : ''
+          // 扩展名是文本/代码/json，但内容实为二进制（如带 .json 后缀的 zstd 缓存）→ 不按文本渲染
+          if (looksBinary(str)) {
+            setBinary(true)
+            return
+          }
+          setData(str)
+        } else if (spec.source === 'base64') {
+          const b = await readFileAsBase64(file.path)
+          if (id !== abortRef.current) return
+          setData(typeof b === 'string' ? b : '')
+        } else if (spec.source === 'filepath') {
+          setData(file.path)
+        } else if (spec.source === 'backend') {
+          const res = await previewImageAsPng(file.path)
+          if (id !== abortRef.current) return
+          if (!res || !res.base64) throw new Error('后端未能解码该图片')
+          setData(res.base64)
+          setImageMeta(res.meta || null)
+        }
+      } catch (e) {
         if (id !== abortRef.current) return
-        setContent('')
-        setPreviewType('none')
+        setError(e instanceof Error ? e.message : '读取文件失败')
       } finally {
-        if (id === abortRef.current) setLoading(false)
+        if (id === abortRef.current) {
+          setLoading(false)
+          setLoadedFor(file.path)
+        }
       }
     }
     load()
   }, [file?.path])
 
-  if (!file) {
-    return (
-      <div className="preview-area flex-1 gap-2" style={{ color: 'var(--text-tertiary)' }}>
-        <Eye size={40} strokeWidth={1} />
-        <p className="text-sm mt-2">选择文件以预览</p>
-      </div>
-    )
-  }
+  if (!file) return <PreviewEmpty />
+  // state 尚未对应当前文件（切换后、加载完成前）→ 保持加载态
+  if (loading || loadedFor !== file.path) return <PreviewLoading />
+  if (error) return <PreviewError message={error} />
 
-  if (loading) {
-    return (
-      <div className="preview-area flex-1">
-        <Loader2 size={28} className="animate-spin" style={{ color: 'var(--text-tertiary)' }} />
-      </div>
-    )
-  }
+  const spec = getPreviewSpec(file.ext)
+  if (oversize != null) return <PreviewOversize file={file} fileInfo={fileInfo} limit={oversize} />
+  if (binary) return <PreviewUnsupported file={file} fileInfo={fileInfo} reason="二进制内容，无法作为文本预览" />
+  if (spec.renderer === 'none') return <PreviewUnsupported file={file} fileInfo={fileInfo} />
 
-  const renderMeta = () => (
-    <div className="absolute bottom-0 left-0 right-0 px-4 py-2 text-xs flex items-center gap-4"
-      style={{ background: 'var(--bg-tertiary)', color: 'var(--text-tertiary)', borderTop: '1px solid var(--border-color)' }}>
-      <span className="truncate flex-1">{file.name}</span>
-      {fileInfo && (
-        <>
-          <span>{formatFileSize(fileInfo.size)}</span>
-          <span>{new Date(fileInfo.modifiedAt).toLocaleDateString()}</span>
-        </>
-      )}
-    </div>
+  const lazyFallback = <PreviewLoading />
+  const lazyWrap = (node: React.ReactNode) => (
+    <PreviewErrorBoundary fileKey={file.path}>
+      <Suspense fallback={lazyFallback}>{node}</Suspense>
+    </PreviewErrorBoundary>
   )
 
-  const iconForType = (): React.ReactNode => {
-    const map: Record<string, React.ElementType> = {
-      image: ImageIcon, text: FileText, video: Video, audio: Music, pdf: FileText, none: File,
-    }
-    const Icon = map[previewType] || FileQuestion
-    return <Icon size={48} strokeWidth={1} style={{ color: 'var(--text-tertiary)' }} />
+  switch (spec.renderer) {
+    case 'image':
+    case 'image-native':
+      return (
+        <ImagePreview
+          file={file}
+          data={data}
+          source={spec.source}
+          renderer={spec.renderer}
+          meta={imageMeta}
+          fileInfo={fileInfo}
+        />
+      )
+    case 'audio':
+    case 'video':
+      return <MediaPreview file={file} path={data} kind={spec.renderer} fileInfo={fileInfo} />
+    case 'text':
+      return <TextPreview file={file} text={data} fileInfo={fileInfo} />
+    case 'pdf':
+      return <PdfPreview file={file} base64={data} />
+    case 'code':
+      return lazyWrap(<CodePreview file={file} text={data} fileInfo={fileInfo} />)
+    case 'markdown':
+      return lazyWrap(<MarkdownPreview file={file} text={data} fileInfo={fileInfo} />)
+    case 'json':
+      return lazyWrap(<JsonPreview file={file} text={data} fileInfo={fileInfo} />)
+    case 'spreadsheet':
+      return lazyWrap(<SpreadsheetPreview file={file} base64={data} fileInfo={fileInfo} />)
+    case 'docx':
+      return lazyWrap(<DocxPreview file={file} base64={data} fileInfo={fileInfo} />)
+    case 'archive':
+      return lazyWrap(<ArchivePreview file={file} base64={data} fileInfo={fileInfo} />)
+    default:
+      return <PreviewUnsupported file={file} fileInfo={fileInfo} />
   }
-
-  if (previewType === 'image' && content) {
-    return (
-      <div className="preview-area flex-1 relative p-4">
-        <img src={content} alt={file.name} className="preview-img" draggable={false} />
-        {renderMeta()}
-      </div>
-    )
-  }
-
-  if (previewType === 'text' && content) {
-    return (
-      <div className="preview-area flex-1 relative" style={{ alignItems: 'stretch', justifyContent: 'stretch' }}>
-        <pre className="text-preview">{content}</pre>
-        {renderMeta()}
-      </div>
-    )
-  }
-
-  if (previewType === 'audio' && content) {
-    return (
-      <div className="preview-area flex-1 relative gap-3 p-4">
-        <Music size={48} strokeWidth={1} style={{ color: 'var(--accent)' }} />
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{file.name}</p>
-        <audio controls src={`file://${content}`} className="w-4/5 max-w-md mt-2" />
-        {renderMeta()}
-      </div>
-    )
-  }
-
-  if (previewType === 'video' && content) {
-    return (
-      <div className="preview-area flex-1 relative p-4">
-        <video controls src={`file://${content}`} className="max-w-full max-h-full rounded" />
-        {renderMeta()}
-      </div>
-    )
-  }
-
-  return (
-    <div className="preview-area flex-1 relative gap-2 p-4">
-      {iconForType()}
-      <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{file.name}</p>
-      <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-        {file.ext ? `${file.ext.slice(1).toUpperCase()} 文件` : '未知类型'} · 不支持预览
-      </p>
-      {fileInfo && (
-        <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          {formatFileSize(fileInfo.size)} · {new Date(fileInfo.modifiedAt).toLocaleString()}
-        </p>
-      )}
-      {renderMeta()}
-    </div>
-  )
 }

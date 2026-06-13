@@ -1,3 +1,5 @@
+import { previewImageAsPng as decodeImageToPng } from './sharpPreview'
+
 declare const mulby: any
 
 interface PluginContext {
@@ -37,6 +39,10 @@ export const rpc = {
     const input = pendingInput
     pendingInput = null
     return input
+  },
+  // 用宿主 sharp 把 tiff/psd/heic 等浏览器无法解码的图片转成 PNG 供 UI 预览
+  async previewImageAsPng(path: string) {
+    return decodeImageToPng(path)
   },
 }
 

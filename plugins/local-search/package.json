@@ -9,10 +9,19 @@
     "build:ui": "vite build",
     "pack": "mulby pack"
   },
-  "dependencies": {},
+  "dependencies": {
+    "dompurify": "^3.1.6",
+    "fflate": "^0.8.2",
+    "mammoth": "^1.8.0",
+    "react-markdown": "^9.0.1",
+    "react-syntax-highlighter": "^15.6.1",
+    "remark-gfm": "^4.0.0",
+    "xlsx": "^0.18.5"
+  },
   "devDependencies": {
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "lucide-react": "^0.562.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
