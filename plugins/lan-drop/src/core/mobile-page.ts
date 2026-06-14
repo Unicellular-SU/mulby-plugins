@@ -415,11 +415,13 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
     dlHint.style.display = inApp ? 'flex' : 'none';
     for (var i=0;i<list.length;i++){
       (function(o){
+        var isZip = o.kind==='zip';
         var row=document.createElement('div'); row.className='offer';
-        var ic=document.createElement('div'); ic.className='fic'; ic.innerHTML=ICON.file;
+        var ic=document.createElement('div'); ic.className='fic'; ic.innerHTML=isZip?ICON.folder:ICON.file;
         var info=document.createElement('div'); info.className='ofinfo';
         var nm=document.createElement('div'); nm.className='ofname'; nm.textContent=o.relPath||o.name;
-        var sz=document.createElement('div'); sz.className='ofsize'; sz.textContent=fmt(o.size);
+        var sz=document.createElement('div'); sz.className='ofsize';
+        sz.textContent=isZip ? (fmt(o.size)+' · '+(o.count||0)+' 个文件 · ZIP') : fmt(o.size);
         info.appendChild(nm); info.appendChild(sz);
         var a=document.createElement('a'); a.className='dl'; a.innerHTML=ICON.down+'<span>下载</span>';
         a.href='/w/download?id='+encodeURIComponent(o.id); a.setAttribute('download', o.name);
