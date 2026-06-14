@@ -388,14 +388,28 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
     uploadOne(job, function(){ busy=false; pump(); });
   }
   function uploadOne(job, done){
+    // 断点续传：先问桌面已收字节，再从该偏移处续传（中断后重选同一文件即可继续）。
+    preflightOffset(job, function(offset){ doUpload(job, offset, done); });
+  }
+  function preflightOffset(job, cb){
+    if (!job.file.size){ cb(0); return; }
+    var xhr=new XMLHttpRequest();
+    xhr.open('GET','/w/offset?name='+encodeURIComponent(job.file.name)+'&rel='+encodeURIComponent(job.rel)+'&size='+job.file.size);
+    xhr.onload=function(){ var o=0; if(xhr.status===200){ try{ o=JSON.parse(xhr.responseText).offset||0; }catch(e){} } cb(o>0&&o<job.file.size?o:0); };
+    xhr.onerror=function(){ cb(0); };
+    xhr.send();
+  }
+  function doUpload(job, offset, done){
     var xhr=new XMLHttpRequest();
     xhr.open('POST','/w/upload');
     xhr.setRequestHeader('x-ld-file-name', encodeURIComponent(job.file.name));
     xhr.setRequestHeader('x-ld-rel-path', encodeURIComponent(job.rel));
     xhr.setRequestHeader('x-ld-file-size', String(job.file.size));
     xhr.setRequestHeader('x-ld-transfer-id', rid());
+    if (offset>0) xhr.setRequestHeader('x-ld-offset', String(offset));
     if (job.batch) xhr.setRequestHeader('x-ld-batch-id', job.batch);
-    xhr.upload.onprogress=function(e){ if(e.lengthComputable) setProgress(job.it, e.loaded, e.total); };
+    if (offset>0) setProgress(job.it, offset, job.file.size);
+    xhr.upload.onprogress=function(e){ if(e.lengthComputable) setProgress(job.it, offset+e.loaded, job.file.size); };
     xhr.onload=function(){
       if (xhr.status===200){ setDone(job.it); }
       else {
@@ -405,8 +419,8 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
       }
       done();
     };
-    xhr.onerror=function(){ setFail(job.it,'网络中断'); done(); };
-    xhr.send(job.file);
+    xhr.onerror=function(){ setFail(job.it,'网络中断 · 重选该文件可续传'); done(); };
+    xhr.send(offset>0 ? job.file.slice(offset) : job.file);
   }
   function makeUpItem(name,size){
     var row=document.createElement('div'); row.className='up';

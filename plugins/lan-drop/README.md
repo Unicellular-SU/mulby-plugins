@@ -84,7 +84,8 @@
   - `GET /m`：移动端网页（自包含单文件，桌面直接托管）。
   - `GET /w/info`：用扫码令牌（`Authorization: Bearer` 或 `?t=`）换取 HttpOnly 会话 Cookie `ld_sess`；之后 SSE 与下载请求自动携带 Cookie，令牌不再出现在 URL/日志。
   - `POST /w/pair`：以 6 位 PIN 配对（扫码不便时的兜底）。
-  - `POST /w/upload`：手机上传，元数据走 `x-ld-file-name` / `x-ld-rel-path` / `x-ld-file-size` 头，Body 为文件流，复用与设备协议同一套净化/容量/硬上限/文件夹重建逻辑。
+  - `POST /w/upload`：手机上传，元数据走 `x-ld-file-name` / `x-ld-rel-path` / `x-ld-file-size` 头，Body 为文件流，复用与设备协议同一套净化/容量/硬上限/文件夹重建逻辑。支持断点续传：带 `x-ld-offset` 时按 (会话设备, 相对路径, 大小) 稳定 `.part` 追加写入。
+  - `GET /w/offset?name=&rel=&size=`：手机上传前预检该文件已落盘字节数，据此用 `<input>`/`Blob.slice` 从断点续传；中断后重选同一文件即自动接续。
   - `POST /w/text`：手机→桌面发文本（JSON `{text}`）；桌面→手机文本经 `/w/events` 的 `text` 事件实时下发。
   - `GET /w/events`：SSE 推送桌面发来的待下载文件（offer）与文本（text）。
   - `GET /w/download?id=`：手机拉取桌面推送的文件；当 offer 为文件夹/多文件时，服务端流式打包 ZIP（store 模式，逐文件读盘不占内存，条目路径经净化防 zip-slip）返回。
@@ -156,4 +157,4 @@ lan-drop/
 - 已支持应用层端到端加密（AES-256-GCM）与断点续传；标准 TLS 仍可作为后续可选项。
 - 断点续传按 `(发送方id, 文件名, 大小)` 标识分片：同名同大小但内容不同的文件，建议保持「完整性校验」开启（默认），以便最终 SHA-256 校验拦截异常拼接。
 - 与旧版本（协议 v1，无身份密钥）互发时无法验证身份，将始终弹窗确认、不会自动接收。
-- **手机扫码互传已支持**（手机→桌面上传、桌面→手机下载；桌面→手机的文件夹/多文件已支持服务端 ZIP 流式打包，保留层级）。后续可硬化项：手机通道端到端加密（浏览器 http 无 WebCrypto，需打包 noble 纯 JS 密码学或启用 HTTPS 自签证书）；手机上传暂未做断点续传。
+- **手机扫码互传已支持**（手机→桌面上传含断点续传、桌面→手机下载；桌面→手机的文件夹/多文件已支持服务端 ZIP 流式打包，保留层级）。后续可硬化项：手机通道端到端加密（浏览器 http 无 WebCrypto，需打包 noble 纯 JS 密码学或启用 HTTPS 自签证书）。

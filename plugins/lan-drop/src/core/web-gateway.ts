@@ -34,6 +34,7 @@ import {
   notify,
 } from './runtime'
 import { localIPv4Addresses } from './netutil'
+import { isResumeKey, resumeKey } from './crypto'
 import {
   checkDiskSpace,
   decodeHeader,
@@ -178,6 +179,8 @@ export class WebGateway {
   private sessions = new Map<string, WebSession>()
   private activeUploads = 0
   private pendingConfirms = 0
+  // 正在写入的可续传上传分片 key，避免同一文件并发写入同一 .part。
+  private activeWebPartKeys = new Set<string>()
   private pruneTimer: ReturnType<typeof setInterval> | null = null
 
   /** 启动：注册状态提供者 + 周期清理离线会话。幂等。 */
@@ -235,6 +238,10 @@ export class WebGateway {
     }
     if (req.method === 'POST' && url === '/w/text') {
       void this.handleWebText(req, res, ip)
+      return true
+    }
+    if (req.method === 'GET' && url === '/w/offset') {
+      this.handleWebOffset(req, res)
       return true
     }
     if (req.method === 'GET' && url === '/w/events') {
@@ -500,6 +507,39 @@ export class WebGateway {
     })
   }
 
+  /** 上传续传分片落盘路径（按 (会话设备, 相对路径, 大小) 派生的稳定 key）。 */
+  private webPartPath(rkey: string): string {
+    return path.join(store.settings.downloadDir, `.web-${rkey}.part`)
+  }
+
+  /** 断点续传预检：返回手机该文件已落盘字节数（正在写入或无效则视为 0）。 */
+  private handleWebOffset(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const s = this.getSession(req)
+    if (!s) {
+      this.sendJson(res, 401, { ok: false, reason: 'unauthorized' })
+      return
+    }
+    const params = new URLSearchParams((req.url || '').split('?')[1] || '')
+    const rawName = params.get('name') || ''
+    const name = path.basename(rawName).replace(/[\\/]/g, '')
+    const relName = safeRelPath(params.get('rel') || '') || name
+    const size = parseInt(params.get('size') || '0', 10) || 0
+    let offset = 0
+    if (size > 0 && relName) {
+      const rkey = resumeKey(s.deviceId, relName, size)
+      if (isResumeKey(rkey)) {
+        try {
+          const p = this.webPartPath(rkey)
+          if (!this.activeWebPartKeys.has(rkey) && fs.existsSync(p)) offset = fs.statSync(p).size
+        } catch {
+          offset = 0
+        }
+        if (offset >= size) offset = 0
+      }
+    }
+    this.sendJson(res, 200, { ok: true, offset })
+  }
+
   // ── 上行：手机→桌面 上传 ─────────────────────────────────────
   private async handleUpload(
     req: http.IncomingMessage,
@@ -519,6 +559,7 @@ export class WebGateway {
     const relName = safeRelPath(decodeHeader(header(req, 'x-ld-rel-path'))) || name
     const size = parseInt(header(req, 'x-ld-file-size') || '0', 10) || 0
     const batchId = header(req, 'x-ld-batch-id') || undefined
+    const offsetReq = parseInt(header(req, 'x-ld-offset') || '0', 10) || 0
 
     s.ip = ip
     this.touchDevice(s)
@@ -577,11 +618,45 @@ export class WebGateway {
     this.activeUploads += 1
 
     const finalPath = dedupePath(resolveWithinDownloadDir(downloadDir, relName, name))
-    const tmpPath = path.join(downloadDir, `.web-${transferId}.part`)
-    try {
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-    } catch {
-      /* ignore */
+
+    // 断点续传：按 (会话设备, 相对路径, 大小) 稳定标识 .part；客户端先 GET /w/offset 取已收字节，
+    // 再带 x-ld-offset 续传。仅当该 key 当前未被占用且已落字节恰等于声明偏移时才追加，否则从头写。
+    const rkey = size > 0 ? resumeKey(s.deviceId, relName, size) : ''
+    let ownsKey = false
+    let resume = false
+    let startOffset = 0
+    let tmpPath: string
+    if (rkey && !this.activeWebPartKeys.has(rkey)) {
+      this.activeWebPartKeys.add(rkey)
+      ownsKey = true
+      tmpPath = this.webPartPath(rkey)
+      if (offsetReq > 0 && offsetReq < size) {
+        let existing = -1
+        try {
+          existing = fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : -1
+        } catch {
+          existing = -1
+        }
+        if (existing === offsetReq) {
+          resume = true
+          startOffset = offsetReq
+        }
+      }
+    } else {
+      tmpPath = path.join(downloadDir, `.web-${transferId}.part`)
+    }
+    const releaseKey = () => {
+      if (ownsKey) {
+        this.activeWebPartKeys.delete(rkey)
+        ownsKey = false
+      }
+    }
+    if (!resume) {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      } catch {
+        /* ignore */
+      }
     }
 
     const now = Date.now()
@@ -590,7 +665,7 @@ export class WebGateway {
       dir: 'recv',
       name: relName,
       size,
-      transferred: 0,
+      transferred: startOffset,
       status: 'active',
       speed: 0,
       peerId: s.deviceId,
@@ -601,9 +676,9 @@ export class WebGateway {
     }
     store.addTransfer(transfer)
 
-    const ws = fs.createWriteStream(tmpPath, { flags: 'w' })
-    let received = 0
-    let lastBytes = 0
+    const ws = fs.createWriteStream(tmpPath, resume ? { flags: 'a' } : { flags: 'w' })
+    let received = startOffset
+    let lastBytes = startOffset
     let lastTime = Date.now()
     let lastEmit = 0
     let settled = false
@@ -617,11 +692,15 @@ export class WebGateway {
       } catch {
         /* ignore */
       }
-      try {
-        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-      } catch {
-        /* ignore */
+      // 续传分片（ownsKey）失败时保留，便于下次从断点继续；一次性临时文件才清理。
+      if (!ownsKey) {
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+        } catch {
+          /* ignore */
+        }
       }
+      releaseKey()
       store.updateTransfer(transferId, { status: 'failed', error: msg, transferred: received })
       this.sendJson(res, 500, { ok: false, reason: msg })
       void notify(`接收失败：${name}（${msg}）`, 'error')
@@ -685,6 +764,7 @@ export class WebGateway {
       }
       settled = true
       this.activeUploads -= 1
+      releaseKey()
       store.updateTransfer(transferId, { status: 'done', transferred: received, savePath: finalPath })
       this.sendJson(res, 200, { ok: true, received, name })
       void notify(`已接收 ${name}（来自 ${s.name}）`, 'success')
