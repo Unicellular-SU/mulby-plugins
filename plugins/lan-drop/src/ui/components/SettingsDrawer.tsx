@@ -129,6 +129,30 @@ export function SettingsDrawer({
             />
           </label>
 
+          <label className="switch-row">
+            <span>
+              <span className="field-label">手机互传（扫码网关）</span>
+              <span className="field-hint">允许手机浏览器扫码与本机收发文件；关闭后手机网页与接口全部拒绝。</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.mobileGatewayEnabled}
+              onChange={(e) => onPatch({ mobileGatewayEnabled: e.target.checked })}
+            />
+          </label>
+
+          <label className="switch-row">
+            <span>
+              <span className="field-label">手机上传免确认</span>
+              <span className="field-hint">已扫码授权的手机上传文件时不再弹窗确认（扫码即视为授权）。</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={settings.mobileAutoAccept}
+              onChange={(e) => onPatch({ mobileAutoAccept: e.target.checked })}
+            />
+          </label>
+
           <div className="status-box">
             <div className="status-line">
               <span>接收服务</span>

@@ -4,6 +4,7 @@ import {
   Inbox,
   Send,
   Settings as SettingsIcon,
+  Smartphone,
   UploadCloud,
   Wifi,
   WifiOff,
@@ -16,6 +17,7 @@ import { useFileDrop } from './hooks/useFileDrop'
 import { DeviceList } from './components/DeviceList'
 import { TransferList } from './components/TransferList'
 import { SettingsDrawer } from './components/SettingsDrawer'
+import { MobileDrawer } from './components/MobileDrawer'
 import { ManualAddDialog } from './components/ManualAddDialog'
 
 function notify(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
@@ -33,6 +35,7 @@ export default function App() {
   const [staged, setStaged] = useState<FileMeta[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [showMobile, setShowMobile] = useState(false)
   const [showManual, setShowManual] = useState(false)
   const [manualBusy, setManualBusy] = useState(false)
   const [manualError, setManualError] = useState<string | undefined>()
@@ -251,6 +254,13 @@ export default function App() {
             {self?.receiveOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
             {self?.receiveOnline ? '在线' : '离线'}
           </div>
+          <button
+            className="btn-secondary"
+            title="手机互传（扫码收发）"
+            onClick={() => setShowMobile(true)}
+          >
+            <Smartphone size={15} /> 手机互传
+          </button>
           <button className="icon-btn" title="设置" onClick={() => setShowSettings(true)}>
             <SettingsIcon size={17} />
           </button>
@@ -370,6 +380,10 @@ export default function App() {
           }}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {showMobile && (
+        <MobileDrawer snapshot={state?.mobile} onClose={() => setShowMobile(false)} />
       )}
 
       {showManual && (

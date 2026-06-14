@@ -1,4 +1,4 @@
-import type { AppState, FileMeta, RemoteDevice, Settings } from '../core/types'
+import type { AppState, FileMeta, MobileGatewayInfo, RemoteDevice, Settings } from '../core/types'
 
 const PLUGIN_ID = 'lan-drop'
 
@@ -44,4 +44,9 @@ export const api = {
   openPath: (p: string) => call<{ ok: boolean }>('openPath', { path: p }),
   restartServers: () => call<{ ok: boolean }>('restartServers'),
   rescan: () => call<{ ok: boolean }>('rescan'),
+  getMobileGateway: () => call<MobileGatewayInfo>('getMobileGateway'),
+  setMobileGateway: (enabled: boolean) =>
+    call<{ ok: boolean; mobile: MobileGatewayInfo }>('setMobileGateway', { enabled }),
+  regenMobilePairing: () =>
+    call<{ ok: boolean; mobile: MobileGatewayInfo }>('regenMobilePairing'),
 }

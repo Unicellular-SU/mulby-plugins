@@ -7,8 +7,9 @@ import { store } from './core/store'
 import { discovery } from './core/discovery'
 import { receiveServer } from './core/receive-server'
 import { sender, probeDevice } from './core/sender'
+import { webGateway } from './core/web-gateway'
 import { isIPv4 } from './core/netutil'
-import { RECEIVE_PORT } from './core/runtime'
+import { RECEIVE_PORT, WEB_DEVICE_PREFIX } from './core/runtime'
 import type { FileMeta, Settings } from './core/types'
 
 // 运行时由 Mulby 宿主注入的全局 API 代理
@@ -23,6 +24,7 @@ function ensureStarted(): Promise<void> {
     startPromise = (async () => {
       await store.init()
       receiveServer.start()
+      webGateway.start()
       discovery.start()
       log('lan-drop services started')
     })().catch((err) => {
@@ -63,6 +65,11 @@ export async function run(_context: unknown): Promise<void> {
 function shutdown(): void {
   try {
     discovery.stop()
+  } catch {
+    /* ignore */
+  }
+  try {
+    webGateway.stop()
   } catch {
     /* ignore */
   }
@@ -193,8 +200,33 @@ export const rpc = {
         : normalizePaths(input?.paths).map((p) => ({ path: p }))
     const files = expandItems(items)
     if (files.length === 0) return { ok: false, error: '没有可发送的文件', ids: [] as string[] }
+    // 手机会话（web: 前缀）：没有接收服务，改为登记下行 offer + SSE 推送让手机来拉取。
+    if (targetId.startsWith(WEB_DEVICE_PREFIX)) {
+      const r = webGateway.offerToDevice(targetId, files)
+      return { ok: r.ok, error: r.error, count: r.ok ? files.length : 0, ids: r.ids }
+    }
     const ids = sender.enqueue(targetId, files)
     return { ok: true, count: files.length, ids }
+  },
+
+  /** 打开「手机互传」面板：确保配对令牌存在并返回二维码 URL / PIN / 已连手机数。 */
+  async getMobileGateway() {
+    await ensureStarted()
+    return webGateway.getInfoEnsured()
+  },
+
+  /** 切换手机网关总开关。 */
+  async setMobileGateway(input: { enabled: boolean }) {
+    await ensureStarted()
+    await store.setSettings({ mobileGatewayEnabled: !!input?.enabled })
+    return { ok: true, mobile: webGateway.getInfoEnsured() }
+  },
+
+  /** 轮换配对令牌 / PIN（旧二维码立即失效；已连手机不受影响）。 */
+  async regenMobilePairing() {
+    await ensureStarted()
+    webGateway.regenPairing()
+    return { ok: true, mobile: webGateway.getInfoEnsured() }
   },
 
   /** 手动输入 IP 直连添加设备（AP 隔离 / 跨网段兜底）。 */

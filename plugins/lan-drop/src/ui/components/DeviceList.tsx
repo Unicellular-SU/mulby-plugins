@@ -1,4 +1,4 @@
-import { Monitor, Plus, RefreshCw, Star, Wifi, Cable, ShieldCheck } from 'lucide-react'
+import { Monitor, Plus, RefreshCw, Star, Wifi, Cable, ShieldCheck, Smartphone } from 'lucide-react'
 import type { RemoteDevice, SelfInfo } from '../../core/types'
 import { formatFingerprint, osLabel } from '../format'
 
@@ -77,25 +77,34 @@ export function DeviceList({
               <div className="device-info">
                 <div className="device-name">
                   {d.name}
+                  {d.web && (
+                    <Smartphone size={12} className="manual-flag" aria-label="扫码接入的手机" />
+                  )}
                   {d.verified && (
                     <ShieldCheck size={12} className="verified-flag" aria-label="身份已验证" />
                   )}
-                  {d.manual && <Cable size={12} className="manual-flag" />}
+                  {d.manual && !d.web && <Cable size={12} className="manual-flag" />}
                 </div>
                 <div className="device-sub">
-                  {osLabel(d.os)} · {d.ip}
+                  {d.web ? '手机 · 扫码接入' : `${osLabel(d.os)} · ${d.ip}`}
                 </div>
               </div>
-              <span
-                className={`star ${d.trusted ? 'active' : ''}`}
-                title={d.trusted ? '已信任（身份验证通过后自动接收）' : '设为信任设备'}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggleTrust(d)
-                }}
-              >
-                <Star size={15} fill={d.trusted ? 'currentColor' : 'none'} />
-              </span>
+              {d.web ? (
+                <span className="web-flag" title="扫码接入的手机">
+                  <Smartphone size={15} />
+                </span>
+              ) : (
+                <span
+                  className={`star ${d.trusted ? 'active' : ''}`}
+                  title={d.trusted ? '已信任（身份验证通过后自动接收）' : '设为信任设备'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onToggleTrust(d)
+                  }}
+                >
+                  <Star size={15} fill={d.trusted ? 'currentColor' : 'none'} />
+                </span>
+              )}
             </button>
           )
         })}

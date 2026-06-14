@@ -29,6 +29,9 @@ export function osLabel(os: string): string {
   if (os === 'win32') return 'Windows'
   if (os === 'darwin') return 'macOS'
   if (os === 'linux') return 'Linux'
+  if (os === 'ios') return 'iPhone / iPad'
+  if (os === 'android') return 'Android'
+  if (os === 'web') return '手机浏览器'
   return os || '未知'
 }
 

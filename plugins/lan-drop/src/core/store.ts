@@ -23,6 +23,7 @@ import {
 import type {
   AppState,
   IncomingRequest,
+  MobileGatewayInfo,
   RemoteDevice,
   Settings,
   Transfer,
@@ -49,6 +50,8 @@ function defaultSettings(): Settings {
     verifyIntegrity: true,
     encrypt: true,
     trustedDevices: [],
+    mobileGatewayEnabled: true,
+    mobileAutoAccept: true,
   }
 }
 
@@ -102,6 +105,9 @@ class Store {
   // UI 推送：状态修订号 + 长轮询等待者集合
   private rev = 0
   private waiters = new Set<() => void>()
+
+  // 手机网关信息提供者（由 web-gateway 注册，避免 store ↔ gateway 循环依赖）。
+  private mobileInfoProvider: (() => MobileGatewayInfo | undefined) | null = null
 
   private historyTimer: ReturnType<typeof setTimeout> | null = null
   private inited = false
@@ -204,14 +210,25 @@ class Store {
     const activePeers = this.activeTransferPeers()
     let changed = false
     for (const [id, d] of this.devices) {
-      // 手动添加 / 正在传输的设备不因超时被剔除
-      if (d.manual || activePeers.has(id)) continue
+      // 手动添加 / 手机会话 / 正在传输的设备不因 UDP 超时被剔除
+      // （手机会话不参与 UDP 发现，其在线判定由 web-gateway 按 SSE/活动维护）。
+      if (d.manual || d.web || activePeers.has(id)) continue
       if (now - d.lastSeen > ttlMs) {
         this.devices.delete(id)
         changed = true
       }
     }
     if (changed) this.bump()
+  }
+
+  /** 移除设备（手机会话离线时由 web-gateway 调用）。 */
+  removeDevice(id: string): void {
+    if (this.devices.delete(id)) this.bump()
+  }
+
+  /** 注册手机网关信息提供者（web-gateway 启动时调用）。 */
+  setMobileInfoProvider(fn: (() => MobileGatewayInfo | undefined) | null): void {
+    this.mobileInfoProvider = fn
   }
 
   /** 当前正在收发（active/pending）的对端 id 集合。 */
@@ -429,6 +446,13 @@ class Store {
       }))
       .sort((a, b) => b.lastSeen - a.lastSeen)
 
+    let mobile: MobileGatewayInfo | undefined
+    try {
+      mobile = this.mobileInfoProvider?.()
+    } catch {
+      mobile = undefined
+    }
+
     return {
       self: {
         deviceId: this.deviceId,
@@ -446,6 +470,7 @@ class Store {
       transfers: this.transfers.slice(0, MAX_TRANSFERS),
       incoming: [...this.incoming.values()],
       settings: this.settings,
+      mobile,
     }
   }
 }

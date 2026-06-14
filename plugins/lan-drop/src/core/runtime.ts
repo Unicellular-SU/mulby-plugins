@@ -24,6 +24,13 @@ export const MAX_CONCURRENT_RECEIVES = 8 // 同时落盘的接收数上限（超
 export const MAX_PENDING_CONFIRMS = 5 // 同时等待用户确认的未验证请求上限（防弹窗刷屏 DoS）
 export const DISK_SPACE_MARGIN = 16 * 1024 * 1024 // 落盘前要求保留的额外空闲余量（16 MiB）
 
+// 手机网关（移动端网页直传，复用同一 RECEIVE_PORT）
+export const WEB_TOKEN_TTL_MS = 30 * 60 * 1000 // 扫码配对令牌有效期（30 分钟，手机活动时自动续期）
+export const WEB_SESSION_TTL_MS = 90 * 1000 // 手机会话在无 SSE/请求活动后多久判定离线并从设备列表移除
+export const MAX_WEB_UPLOAD_CONCURRENT = 6 // 手机端并发上传上限（超出 503）
+// 手机会话设备 id 前缀：以此与局域网设备区分，sendFiles 据此路由到下行 offer 而非 TCP 发送。
+export const WEB_DEVICE_PREFIX = 'web:'
+
 export type HostApi = any
 
 /** 惰性获取宿主注入的全局 mulby 代理（模块加载早于注入时也安全）。 */

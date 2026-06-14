@@ -31,6 +31,8 @@ export interface RemoteDevice {
   pubKey?: string
   /** 已掌握其公钥且公钥指纹与其自报 id 相符（身份可验证）。 */
   verified?: boolean
+  /** 通过扫码网关接入的手机会话（浏览器，无原生身份）。id 形如 web:xxxx。 */
+  web?: boolean
 }
 
 export type TransferDir = 'send' | 'recv'
@@ -86,6 +88,28 @@ export interface Settings {
   /** 对可验证身份的对端启用端到端加密（AES-256-GCM）。默认开启。 */
   encrypt: boolean
   trustedDevices: string[]
+  /** 手机网关（扫码直传）总开关。默认开启；关闭后 /m 与 /w/* 全部拒绝。 */
+  mobileGatewayEnabled: boolean
+  /** 已通过有效扫码令牌的手机上传是否免确认（扫码=物理授权）。默认开启。 */
+  mobileAutoAccept: boolean
+}
+
+/** 手机网关配对信息（供桌面 UI 渲染二维码 / PIN / 已连手机）。 */
+export interface MobileGatewayInfo {
+  enabled: boolean
+  /** 网页入口完整 URL（含令牌 fragment），二维码即编码此串。 */
+  url: string
+  /** 不含令牌的展示用基础地址（host:port）。 */
+  baseUrl: string
+  /** 本机用于该地址的局域网 IP。 */
+  ip: string
+  port: number
+  /** 6 位数字 PIN（不便扫码时手动输入配对）。 */
+  pin: string
+  /** 令牌过期时间戳（ms）。 */
+  expiresAt: number
+  /** 当前已连接的手机数量。 */
+  connectedCount: number
 }
 
 /** getState 返回的完整快照。 */
@@ -95,6 +119,8 @@ export interface AppState {
   transfers: Transfer[]
   incoming: IncomingRequest[]
   settings: Settings
+  /** 手机网关状态（用于桌面 UI 二维码面板）。 */
+  mobile?: MobileGatewayInfo
 }
 
 /** 待发送的文件描述。 */

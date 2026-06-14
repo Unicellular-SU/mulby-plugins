@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto'
 
 import {
   APP_TAG,
-  DISK_SPACE_MARGIN,
   MAX_CONCURRENT_RECEIVES,
   MAX_PENDING_CONFIRMS,
   PROGRESS_THROTTLE_MS,
@@ -20,37 +19,23 @@ import {
 import { isFreshTimestamp, isResumeKey, matchesFingerprint, verifyTransfer } from './crypto'
 import { FrameDecryptor } from './cipher'
 import { isLanAddress } from './netutil'
+import {
+  checkDiskSpace,
+  decodeHeader,
+  dedupePath,
+  formatSize,
+  header,
+  remoteIp,
+  resolveWithinDownloadDir,
+  safeRelPath,
+} from './receive-util'
 import { store } from './store'
+import { webGateway } from './web-gateway'
 import type { Transfer } from './types'
 
 const ROUTE_INFO = `/${APP_TAG}/info`
 const ROUTE_TRANSFER = `/${APP_TAG}/transfer`
 const ROUTE_OFFSET = `/${APP_TAG}/offset`
-
-function header(req: http.IncomingMessage, key: string): string | undefined {
-  const v = req.headers[key]
-  return Array.isArray(v) ? v[0] : v
-}
-
-function decodeHeader(value: string | undefined): string {
-  if (!value) return ''
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
-  }
-}
-
-function remoteIp(req: http.IncomingMessage): string {
-  return (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
-}
-
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`
-}
 
 /** 流式把已有分片喂入哈希（续传时保证全文哈希连续）。 */
 function hashExistingPart(filePath: string, hash: crypto.Hash): Promise<void> {
@@ -60,36 +45,6 @@ function hashExistingPart(filePath: string, hash: crypto.Hash): Promise<void> {
     rs.on('error', reject)
     rs.on('end', () => resolve())
   })
-}
-
-/**
- * 把对端声明的相对路径净化为安全、限定在下载目录内的相对路径：
- * 拆段后剔除空 / '.' / '..'（防穿越），替换 Windows 非法字符与控制字符，
- * 去掉段尾的「.」与空格（Windows 规则），最终以本机分隔符拼接。
- */
-function safeRelPath(rel: string): string {
-  return rel
-    .split(/[\\/]+/)
-    .map((s) => s.trim())
-    .filter((s) => s && s !== '.' && s !== '..')
-    .map((s) => s.replace(/[<>:"|?*\u0000-\u001f]/g, '_').replace(/[ .]+$/g, ''))
-    .filter((s) => s.length > 0)
-    .join(path.sep)
-}
-
-/** 同名文件自动追加序号，避免覆盖。 */
-function dedupePath(target: string): string {
-  if (!fs.existsSync(target)) return target
-  const dir = path.dirname(target)
-  const ext = path.extname(target)
-  const base = path.basename(target, ext)
-  let i = 1
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const candidate = path.join(dir, `${base} (${i})${ext}`)
-    if (!fs.existsSync(candidate)) return candidate
-    i += 1
-  }
 }
 
 export class ReceiveServer {
@@ -134,7 +89,8 @@ export class ReceiveServer {
 
   private onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     // P1：收敛暴露面 —— 只服务局域网/本机来源，拒绝公网请求。
-    if (!isLanAddress(remoteIp(req))) {
+    const ip = remoteIp(req)
+    if (!isLanAddress(ip)) {
       this.sendJson(res, 403, { ok: false, reason: 'forbidden: non-LAN source' })
       try {
         req.destroy()
@@ -143,6 +99,9 @@ export class ReceiveServer {
       }
       return
     }
+
+    // 手机网关：移动端网页 /m 与 /w/* 接口（同一端口、同一 LAN 边界）。
+    if (webGateway.handle(req, res, ip)) return
 
     const url = (req.url || '').split('?')[0]
 
@@ -264,25 +223,6 @@ export class ReceiveServer {
     } catch (err) {
       logError('confirm dialog failed, rejecting by default', err)
       return false
-    }
-  }
-
-  /** P2：落盘前预检目标分区可用空间（statfs 不可用时跳过，不阻断）。 */
-  private async checkDiskSpace(
-    dir: string,
-    size: number,
-  ): Promise<{ ok: boolean; reason?: string }> {
-    if (!size || size <= 0) return { ok: true }
-    try {
-      const st = await fs.promises.statfs(dir)
-      const free = Number(st.bavail) * Number(st.bsize)
-      if (free >= size + DISK_SPACE_MARGIN) return { ok: true }
-      return {
-        ok: false,
-        reason: `磁盘空间不足（需 ${formatSize(size)}，可用 ${formatSize(free)}）`,
-      }
-    } catch {
-      return { ok: true }
     }
   }
 
@@ -461,12 +401,7 @@ export class ReceiveServer {
 
     const downloadDir = store.settings.downloadDir
     // 防御：净化后的相对路径解析结果必须仍在下载目录内，否则回退根目录 basename。
-    const resolvedRoot = path.resolve(downloadDir)
-    let candidate = path.resolve(downloadDir, relName)
-    if (candidate !== resolvedRoot && !candidate.startsWith(resolvedRoot + path.sep)) {
-      candidate = path.resolve(downloadDir, name)
-    }
-    const finalPath = dedupePath(candidate)
+    const finalPath = dedupePath(resolveWithinDownloadDir(downloadDir, relName, name))
 
     // 断点续传决策：仅当 key 合法且当前未被占用时使用稳定 .part 名，否则用一次性临时名。
     let ownsKey = false
@@ -508,7 +443,7 @@ export class ReceiveServer {
     }
 
     // P2：落盘前磁盘空间预检（按本次实际写入的剩余字节）。
-    const space = await this.checkDiskSpace(downloadDir, size - startOffset)
+    const space = await checkDiskSpace(downloadDir, size - startOffset)
     if (!space.ok) {
       this.activeReceives -= 1
       releaseKey()
