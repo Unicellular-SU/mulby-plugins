@@ -1262,7 +1262,7 @@
 
 .appearance-history-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 10px;
 }
 
@@ -1275,6 +1275,13 @@
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+/* 当前正在「查看/编辑」的历史形象:高亮卡片,与上方表情网格呼应 */
+.appearance-history-card.is-viewing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 .appearance-history-thumb {
@@ -1284,6 +1291,20 @@
   background:
     repeating-conic-gradient(rgba(155, 125, 212, 0.12) 0% 25%, transparent 0% 50%)
     0 0 / 12px 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.appearance-history-thumb:hover {
+  transform: scale(1.06);
+  border-color: var(--accent);
+}
+
+.appearance-history-thumb:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .appearance-history-thumb svg {
@@ -1291,6 +1312,7 @@
   height: 100%;
   display: block;
   image-rendering: pixelated;
+  pointer-events: none;
 }
 
 .appearance-history-name {
@@ -1304,6 +1326,8 @@
 
 .appearance-history-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 4px;
 }
 

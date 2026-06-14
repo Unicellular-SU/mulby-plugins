@@ -249,6 +249,56 @@ const APPEARANCE_EDIT_CONCURRENCY = 3
 /** 一次生成会话的取消令牌:被取消、被新会话接替、或组件卸载后 cancelled 变 true */
 type AppearanceRunToken = { readonly cancelled: boolean }
 
+/** 像素化管线固定网格边长(pixelateToSvg 的 targetSize),路径坐标都在 0..64 的绝对网格里 */
+const PIXEL_GRID_SIZE = 64
+
+/**
+ * 把套装里的某张表情 SVG 改成「全网格取景」后再栅格化为位图。
+ * 套装 SVG 的 <path> 坐标本就是 0..64 的绝对网格,viewBox 只是取景窗 —— 把 viewBox 换成
+ * 完整网格、放大渲染再交回像素化管线,可近乎无损地还原原始像素网格(用于历史形象的再合成)。
+ */
+function decodeSpriteSvgToRawImage(svg: string, renderSize = 128) {
+  const full = svg
+    .replace(/viewBox="[^"]*"/, `viewBox="0 0 ${PIXEL_GRID_SIZE} ${PIXEL_GRID_SIZE}"`)
+    .replace(/\bwidth="[^"]*"/, `width="${renderSize}"`)
+    .replace(/\bheight="[^"]*"/, `height="${renderSize}"`)
+  return decodeImageToRawImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(full)}`, renderSize)
+}
+
+/**
+ * 把表情 SVG 渲染成白底 PNG dataURL(作为历史形象「图生图改表情」的参考底图)。
+ * 同样改用全网格取景,保证人物按原始网格位置铺满画面;白底契合像素化管线对纯白背景的预期。
+ */
+function rasterizeSpriteSvgToPng(svg: string, size = 512): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const full = svg
+      .replace(/viewBox="[^"]*"/, `viewBox="0 0 ${PIXEL_GRID_SIZE} ${PIXEL_GRID_SIZE}"`)
+      .replace(/\bwidth="[^"]*"/, `width="${size}"`)
+      .replace(/\bheight="[^"]*"/, `height="${size}"`)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          reject(new Error('无法创建 canvas 上下文'))
+          return
+        }
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, size, size)
+        ctx.drawImage(img, 0, 0, size, size)
+        resolve(canvas.toDataURL('image/png'))
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(String(err)))
+      }
+    }
+    img.onerror = () => reject(new Error('历史形象渲染失败'))
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(full)}`
+  })
+}
+
 export default function SettingsView() {
   const settingsWindowIdRef = useRef(readSettingsWindowId())
   const closedNotifiedRef = useRef(false)
@@ -303,8 +353,10 @@ export default function SettingsView() {
   const appearanceComposeRef = useRef<
     { baseDataUrl: string; attachmentId: string | null; meta: ComposeMeta; items: Map<PetExpression, ExpressionPixelation> } | null
   >(null)
-  // 当前套装是否可逐表情重新生成(仅图生图管线产物可,合成降级 / 历史套装不可)
+  // 当前套装是否可逐表情重新生成(仅图生图管线产物可,合成降级不可;历史套装载入后可)
   const [expressionsEditable, setExpressionsEditable] = useState(false)
+  // 正在「查看/编辑」的历史形象 id:点击历史缩略图后载入其全部表情进入可重生编辑态,null 表示当前不是历史查看态
+  const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null)
   // 表情生成队列(worker 池模型):支持「边生成边入队」——生成中也能对单个表情点重新生成并排进队列
   const genQueueRef = useRef<PetExpression[]>([])      // 待生成(排队中)
   const genActiveRef = useRef<Set<PetExpression>>(new Set()) // 正在生成(在途 worker)
@@ -1627,6 +1679,7 @@ export default function SettingsView() {
     const description = petDescription.trim()
     if (!description || !appearanceModel) return
     void runAppearanceTask(async token => {
+      setViewingHistoryId(null)
       setAppearanceStatus('正在生成基准定妆照…')
       const prompt = buildPetImagePrompt(description)
       const ai = window.mulby.ai
@@ -1663,6 +1716,7 @@ export default function SettingsView() {
   const handleStylizeUploadedImage = () => {
     if (!uploadedImage || !appearanceModel) return
     void runAppearanceTask(async token => {
+      setViewingHistoryId(null)
       setAppearanceStatus('正在上传图片…')
       const parsed = parseImageDataUrl(uploadedImage)
       if (!parsed) throw new Error('图片格式不支持,请换一张 PNG/JPG')
@@ -1703,6 +1757,7 @@ export default function SettingsView() {
     appearanceBaseRef.current = null
     appearanceComposeRef.current = null
     setExpressionsEditable(false)
+    setViewingHistoryId(null)
     setAppearanceAwaitingBaseConfirm(false)
     setAppearanceBaseSvg('')
     setRawPetImage('')
@@ -1768,6 +1823,7 @@ export default function SettingsView() {
   }
 
   const handleResetAppearance = () => {
+    setViewingHistoryId(null)
     window.mulby.window.sendToParent('sprites-updated', { reset: true })
     showToast('已恢复默认幽灵形象')
   }
@@ -1820,13 +1876,91 @@ export default function SettingsView() {
     // 历史套装没有逐表情整图上下文,无法单独重生成
     appearanceComposeRef.current = null
     setExpressionsEditable(false)
+    setViewingHistoryId(null)
     setPendingSpriteSet(expanded)
     setRawPetImage('')
     window.mulby.window.sendToParent('sprites-updated', { spriteSet: expanded })
     showToast('已应用历史形象')
   }
 
+  /**
+   * 查看历史形象的全部表情:把存档的紧凑套装还原成「可逐表情重生成」的编辑态。
+   *
+   * 历史只存最终 SVG(没有原始 AI 底图 / 像素化网格),因此这里:
+   * 1) 把每张表情 SVG 反解码并重新像素化,重建逐表情上下文(items);
+   * 2) 把 neutral 表情栅格化为白底 PNG,作为图生图的参考底图;
+   * 之后即可完全复用与「新生成」一致的单张重生队列(handleRegenerateExpression / 队列泵)。
+   */
+  const handleViewHistoryItem = (item: CompactPetSpriteSet) => {
+    if (appearanceBusy) return
+    const expanded = expandSpriteSet(item)
+    if (!expanded) {
+      showToast('该历史形象已损坏,无法查看')
+      return
+    }
+    void runAppearanceTask(async token => {
+      setAppearanceStatus('正在载入历史形象的全部表情…')
+      // 退出可能存在的「基准图待确认」态
+      setAppearanceAwaitingBaseConfirm(false)
+      setAppearanceBaseSvg('')
+      appearanceBaseRef.current = null
+      setRawPetImage('')
+
+      // 1) 逐表情把存档 SVG 反解码 + 重新像素化,重建逐表情上下文
+      const items = new Map<PetExpression, ExpressionPixelation>()
+      for (const expression of ALL_EXPRESSIONS) {
+        if (token.cancelled) return
+        const svg = expanded.sprites[`stand_${expression}` as PetSpriteKey]
+        if (!svg) continue
+        try {
+          const rgba = await decodeSpriteSvgToRawImage(svg)
+          if (token.cancelled) return
+          const pix = pixelateToSvg(rgba)
+          if (pix.opaquePixels === 0) continue
+          items.set(expression, {
+            expression,
+            pixelation: { palette: pix.palette, grid: pix.grid, width: pix.width, height: pix.height },
+          })
+        } catch {
+          // 单张损坏:跳过(合成时其它表情仍可用,缺失项回退 neutral)
+        }
+      }
+      if (token.cancelled) return
+      if (items.size === 0) throw new Error('历史形象无法解析为可编辑的表情,请重新生成一个形象')
+
+      // 2) 取 neutral(无则取任意一张已成功的)栅格化为白底 PNG,作为图生图参考底图
+      const baseSourceSvg =
+        expanded.sprites['stand_neutral' as PetSpriteKey] ??
+        expanded.sprites[`stand_${[...items.keys()][0]}` as PetSpriteKey] ??
+        ''
+      let baseDataUrl = ''
+      if (baseSourceSvg) {
+        try {
+          baseDataUrl = await rasterizeSpriteSvgToPng(baseSourceSvg)
+        } catch {
+          baseDataUrl = ''
+        }
+      }
+      if (token.cancelled) return
+
+      // 3) 重建逐表情上下文,复用与「新生成」一致的单张重生机制
+      const meta: ComposeMeta = { id: expanded.id, name: expanded.name, description: expanded.description }
+      appearanceComposeRef.current = { baseDataUrl, attachmentId: null, meta, items }
+      recomposeFromItems()
+      // 只有拿到可用底图才允许逐表情重生成(模型不支持图生图时单张重生会失败回退,属预期)
+      setExpressionsEditable(Boolean(baseDataUrl))
+      setViewingHistoryId(item.id)
+      setAppearanceStatus('')
+      showToast(
+        baseDataUrl
+          ? '已载入历史形象的全部表情,可对单张点「重新生成」'
+          : '已载入历史形象的全部表情(底图缺失,暂不支持重新生成)',
+      )
+    })
+  }
+
   const handleDeleteHistoryItem = (id: string) => {
+    if (id === viewingHistoryId) setViewingHistoryId(null)
     setAppearanceHistory(prev => {
       const next = prev.filter(item => item.id !== id)
       persistAppearanceHistory(next)
@@ -1848,6 +1982,10 @@ export default function SettingsView() {
         expression,
         label: EXPRESSION_LABELS[expression] ?? expression,
       }))
+    // 当前是否正在查看某个历史形象(用于网格标题与历史卡片高亮)
+    const viewingHistoryName = viewingHistoryId
+      ? (appearanceHistory.find(h => h.id === viewingHistoryId)?.name ?? '')
+      : ''
     return (
       <div className="panel-content">
         <p className="field-hint">
@@ -1983,7 +2121,11 @@ export default function SettingsView() {
                 )}
                 {pendingSpriteSet && (
                   <>
-                    <div className="appearance-card-title">全部表情(共 {expressionPreviews.length} 个)</div>
+                    <div className="appearance-card-title">
+                      {viewingHistoryId
+                        ? `历史形象${viewingHistoryName ? `「${viewingHistoryName}」` : ''} · 全部表情(共 ${expressionPreviews.length} 个)`
+                        : `全部表情(共 ${expressionPreviews.length} 个)`}
+                    </div>
                     <div className="appearance-expression-grid">
                       {expressionPreviews.map(p => {
                         const isActive = genActive.includes(p.expression)
@@ -2020,20 +2162,32 @@ export default function SettingsView() {
             <label className="field-label">历史形象</label>
             <div className="appearance-history-grid">
               {appearanceHistory.map(item => (
-                <div className="appearance-history-card" key={item.id}>
+                <div className={`appearance-history-card ${item.id === viewingHistoryId ? 'is-viewing' : ''}`} key={item.id}>
                   <div
                     className="appearance-history-thumb"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`查看「${item.name || '自定义宠物'}」的全部表情`}
+                    title="点击查看该形象的全部表情,可单独重新生成"
+                    onClick={() => { if (!appearanceBusy) handleViewHistoryItem(item) }}
+                    onKeyDown={e => {
+                      if ((e.key === 'Enter' || e.key === ' ') && !appearanceBusy) {
+                        e.preventDefault()
+                        handleViewHistoryItem(item)
+                      }
+                    }}
                     dangerouslySetInnerHTML={{ __html: historyThumbnail(item) }}
                   />
                   <div className="appearance-history-name" title={item.name}>{item.name || '自定义宠物'}</div>
                   <div className="appearance-history-actions">
+                    <button className="freq-btn" disabled={appearanceBusy} onClick={() => handleViewHistoryItem(item)}>查看</button>
                     <button className="freq-btn" disabled={appearanceBusy} onClick={() => handleApplyHistoryItem(item)}>应用</button>
-                    <button className="freq-btn" onClick={() => handleDeleteHistoryItem(item.id)}>删除</button>
+                    <button className="freq-btn" disabled={appearanceBusy} onClick={() => handleDeleteHistoryItem(item.id)}>删除</button>
                   </div>
                 </div>
               ))}
             </div>
-            <p className="field-hint">最多保留最近 {PET_APPEARANCE_HISTORY_LIMIT} 个生成的形象,点「应用」即可换装。</p>
+            <p className="field-hint">最多保留最近 {PET_APPEARANCE_HISTORY_LIMIT} 个生成的形象。点缩略图或「查看」可载入该形象的全部表情并单独重新生成;「应用」直接换装。</p>
           </div>
         )}
       </div>
