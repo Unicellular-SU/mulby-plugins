@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  ClipboardPaste,
   FilePlus2,
   Inbox,
+  MessageSquareText,
   Send,
   Settings as SettingsIcon,
   Smartphone,
@@ -16,6 +18,7 @@ import { formatSize } from './format'
 import { useFileDrop } from './hooks/useFileDrop'
 import { DeviceList } from './components/DeviceList'
 import { TransferList } from './components/TransferList'
+import { MessageList } from './components/MessageList'
 import { SettingsDrawer } from './components/SettingsDrawer'
 import { MobileDrawer } from './components/MobileDrawer'
 import { ManualAddDialog } from './components/ManualAddDialog'
@@ -33,6 +36,8 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 export default function App() {
   const [state, setState] = useState<AppState | null>(null)
   const [staged, setStaged] = useState<FileMeta[]>([])
+  const [textInput, setTextInput] = useState('')
+  const [sendingText, setSendingText] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showMobile, setShowMobile] = useState(false)
@@ -200,6 +205,53 @@ export default function App() {
     }
   }
 
+  const handleSendText = async () => {
+    const text = textInput.trim()
+    if (!selectedDevice) {
+      notify('请先选择一个目标设备', 'warning')
+      return
+    }
+    if (!text) return
+    setSendingText(true)
+    try {
+      const res = await api.sendText(selectedDevice.id, text)
+      if (res?.ok) {
+        setTextInput('')
+        refresh()
+      } else {
+        notify(res?.error || '发送文字失败', 'error')
+      }
+    } catch {
+      notify('发送文字失败', 'error')
+    } finally {
+      setSendingText(false)
+    }
+  }
+
+  const handlePasteClipboard = async () => {
+    try {
+      const t = await window.mulby?.clipboard?.readText()
+      if (t) setTextInput((prev) => (prev ? `${prev}\n${t}` : t))
+      else notify('剪贴板没有文字', 'info')
+    } catch {
+      notify('读取剪贴板失败', 'error')
+    }
+  }
+
+  const copyMessage = async (text: string) => {
+    try {
+      await window.mulby?.clipboard?.writeText(text)
+      notify('已复制到剪贴板', 'success')
+    } catch {
+      try {
+        await navigator.clipboard.writeText(text)
+        notify('已复制到剪贴板', 'success')
+      } catch {
+        notify('复制失败', 'error')
+      }
+    }
+  }
+
   const handleToggleTrust = async (device: RemoteDevice) => {
     await api.setTrusted(device.id, !device.trusted)
     refresh()
@@ -346,7 +398,47 @@ export default function App() {
                 <Send size={15} /> 发送
               </button>
             </div>
+
+            <div className="text-compose">
+              <textarea
+                className="text-input"
+                placeholder={
+                  selectedDevice
+                    ? `发送文字 / 链接到 ${selectedDevice.name}…（Ctrl+Enter 发送）`
+                    : '发送文字 / 链接…（先选择左侧设备）'
+                }
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault()
+                    void handleSendText()
+                  }
+                }}
+              />
+              <div className="text-compose-bar">
+                <button className="text-btn" onClick={handlePasteClipboard}>
+                  <ClipboardPaste size={13} /> 粘贴剪贴板
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={!selectedDevice || !textInput.trim() || sendingText}
+                  onClick={handleSendText}
+                >
+                  <MessageSquareText size={14} /> 发送文字
+                </button>
+              </div>
+            </div>
           </section>
+
+          <MessageList
+            messages={state?.messages || []}
+            onCopy={copyMessage}
+            onClear={() => {
+              api.clearMessages()
+              refresh()
+            }}
+          />
 
           <TransferList
             transfers={state?.transfers || []}

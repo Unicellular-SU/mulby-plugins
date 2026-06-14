@@ -31,6 +31,9 @@ export const api = {
   pickFiles: () => call<{ files: FileMeta[] }>('pickFiles'),
   sendFiles: (targetId: string, items: Array<{ path: string; relPath?: string }>) =>
     call<SendResult>('sendFiles', { targetId, items }),
+  sendText: (targetId: string, text: string) =>
+    call<{ ok: boolean; error?: string }>('sendText', { targetId, text }),
+  clearMessages: () => call<{ ok: boolean }>('clearMessages'),
   addManualDevice: (ip: string, port?: number) =>
     call<ManualResult>('addManualDevice', { ip, port }),
   setSettings: (patch: Partial<Settings>) =>

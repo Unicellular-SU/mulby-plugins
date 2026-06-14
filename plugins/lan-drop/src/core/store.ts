@@ -23,6 +23,7 @@ import {
 import type {
   AppState,
   IncomingRequest,
+  Message,
   MobileGatewayInfo,
   RemoteDevice,
   Settings,
@@ -34,6 +35,7 @@ const STORAGE_KEY_IDENTITY = 'identity'
 const STORAGE_KEY_HISTORY = 'history'
 
 const MAX_TRANSFERS = 200
+const MAX_MESSAGES = 100
 const HISTORY_LIMIT = 100
 
 function defaultDownloadDir(): string {
@@ -67,6 +69,7 @@ class Store {
   private devices = new Map<string, RemoteDevice>()
   private incoming = new Map<string, IncomingRequest>()
   private transfers: Transfer[] = []
+  private messages: Message[] = []
   private sharedKeyCache = new Map<string, Buffer>()
   private seenNonces = new Map<string, number>()
 
@@ -391,6 +394,19 @@ class Store {
     this.bump()
   }
 
+  // ── 文本消息（内存态，不落盘） ───────────────────────────────
+  addMessage(m: Message): void {
+    this.messages.unshift(m)
+    if (this.messages.length > MAX_MESSAGES) this.messages.length = MAX_MESSAGES
+    this.bump()
+  }
+
+  clearMessages(): void {
+    if (this.messages.length === 0) return
+    this.messages = []
+    this.bump()
+  }
+
   clearHistory(): void {
     this.transfers = this.transfers.filter(
       (t) => t.status === 'active' || t.status === 'pending',
@@ -469,6 +485,7 @@ class Store {
       devices,
       transfers: this.transfers.slice(0, MAX_TRANSFERS),
       incoming: [...this.incoming.values()],
+      messages: this.messages.slice(0, MAX_MESSAGES),
       settings: this.settings,
       mobile,
     }

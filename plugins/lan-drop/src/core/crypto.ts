@@ -116,6 +116,14 @@ export function deriveFileKey(
   return Buffer.from(crypto.hkdfSync('sha256', secret, salt, FILE_ENC_INFO, 32))
 }
 
+/**
+ * 文本消息的「签名名」：把正文哈希放进签名字段的 name，使 HMAC 签名覆盖正文内容，
+ * 从而即便明文传输（未加密）也能在身份已验证时检测正文篡改。收发双方按同一函数计算。
+ */
+export function textSignName(text: string): string {
+  return 'text:' + crypto.createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 32)
+}
+
 /** 把传输字段拼成规范化签名串（收发双方必须完全一致）。 */
 function canonical(f: TransferAuthFields): string {
   return [f.transferId, f.senderId, f.name, String(f.size), String(f.ts), f.nonce].join('\n')

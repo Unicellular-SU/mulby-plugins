@@ -138,6 +138,25 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
     font-size:13px; font-weight:640; cursor:pointer; white-space:nowrap; }
   .ghost:active{ transform:scale(.97); }
 
+  /* 文本收发 */
+  .txtarea{ width:100%; min-height:78px; resize:vertical; border:1px solid var(--brd); background:var(--glass2);
+    color:var(--fg); border-radius:13px; padding:11px 13px; font-size:14px; line-height:1.6; outline:none;
+    font-family:inherit; }
+  .txtarea:focus{ border-color:var(--brand); box-shadow:0 0 0 3px rgba(109,139,255,.18); }
+  .txtrow{ display:flex; justify-content:flex-end; margin-top:10px; }
+  .txtbtn{ width:auto; padding:10px 22px; font-size:14px; }
+  .msg{ display:flex; flex-direction:column; gap:8px; padding:11px 12px; border:1px solid var(--brd);
+    border-radius:13px; margin-top:9px; background:var(--glass2); }
+  .msgtext{ font-size:13.5px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+  .msgtext a{ color:var(--brand); }
+  .msgfoot{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .msgmeta{ font-size:11.5px; color:var(--sub); }
+  .copybtn{ display:inline-flex; align-items:center; gap:6px; background:transparent; border:1px solid var(--brd);
+    color:var(--fg); border-radius:9px; padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+  .copybtn svg{ width:13px; height:13px; }
+  .copybtn:active{ transform:scale(.96); }
+  .copybtn.ok{ color:var(--ok); border-color:rgba(43,212,125,.4); }
+
   .tip{ font-size:11.5px; color:var(--faint); text-align:center; margin-top:20px; line-height:1.8;
     display:flex; align-items:center; justify-content:center; gap:7px; flex-wrap:wrap; }
   .tip svg{ width:14px; height:14px; opacity:.8; }
@@ -215,6 +234,21 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
   </div>
 
   <div class="card">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>发送文字到桌面</h2>
+    <textarea id="txt" class="txtarea" placeholder="输入文字 / 粘贴链接，发送到桌面…" maxlength="20000"></textarea>
+    <div class="txtrow">
+      <button id="txtsend" class="btn txtbtn">发送文字</button>
+    </div>
+    <div id="senttxt" class="list"></div>
+  </div>
+
+  <div class="card">
+    <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>桌面发来的文字</h2>
+    <div id="rxtxt" class="list"></div>
+    <div id="rxempty" class="empty">暂无 · 桌面发来的文字会出现在这里</div>
+  </div>
+
+  <div class="card">
     <h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M12 19l-6-6M12 19l6-6"/></svg>桌面发来的文件</h2>
     <div id="dlhint" class="hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><span>当前在微信内置浏览器，<b>无法下载文件</b>。请点右上角「⋯」选「在浏览器打开」。</span></div>
     <div id="offers" class="list"></div>
@@ -278,6 +312,7 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
   var dotEl=el('dot'), statEl=el('stat'), deskEl=el('desk');
   var fInput=el('f'), dInput=el('d'), upList=el('uplist');
   var offersEl=el('offers'), oEmpty=el('oempty'), dlHint=el('dlhint');
+  var txtInput=el('txt'), txtSend=el('txtsend'), sentTxt=el('senttxt'), rxTxt=el('rxtxt'), rxEmpty=el('rxempty');
   var pinOverlay=el('pin'), pinInput=el('pinv'), pinBtn=el('pinbtn'), pinErr=el('pinerr');
   var guideOverlay=el('guide'), guideMsg=el('gmsg'), guideCont=el('gcont');
   var nmInput=el('nm'), nmSave=el('nmsave');
@@ -287,7 +322,8 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
     file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
     folder:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.4.6L11 7h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
     down:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M12 15l-4-4M12 15l4-4M5 21h14"/></svg>',
-    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+    check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'
   };
 
   function fmt(b){ if(!b) return '0 B'; var u=['B','KB','MB','GB','TB']; var i=Math.floor(Math.log(b)/Math.log(1024)); return (b/Math.pow(1024,i)).toFixed(i===0?0:1)+' '+u[i]; }
@@ -398,6 +434,7 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
     if (typeof EventSource==='undefined'){ pollOffers(); return; }
     try{ es=new EventSource('/w/events'); }catch(e){ pollOffers(); return; }
     es.addEventListener('offers', function(ev){ var l=[]; try{ l=JSON.parse(ev.data); }catch(e){} renderOffers(l); });
+    es.addEventListener('text', function(ev){ var o={}; try{ o=JSON.parse(ev.data); }catch(e){} if(o&&o.text) renderRxText(o); });
     es.addEventListener('hello', function(){ setStatus(true,'已连接'); });
     es.onerror=function(){ /* 浏览器自动重连 */ };
   }
@@ -429,6 +466,61 @@ export const MOBILE_PAGE_HTML = `<!doctype html>
         offersEl.appendChild(row);
       })(list[i]);
     }
+  }
+
+  // 文本收发：复制
+  function copyText(text, btn){
+    function ok(){ if(btn){ btn.classList.add('ok'); btn.innerHTML=ICON.check+'<span>已复制</span>'; setTimeout(function(){ btn.classList.remove('ok'); btn.innerHTML=ICON.copy+'<span>复制</span>'; }, 1400); } }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(ok).catch(function(){ legacyCopy(text); ok(); });
+    } else { legacyCopy(text); ok(); }
+  }
+  function legacyCopy(text){
+    try{ var ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }catch(e){}
+  }
+  // 安全渲染：纯文本 + 自动识别 http(s) 链接为可点击。
+  function linkify(container, text){
+    container.textContent='';
+    var re=/(https?:\\/\\/[^\\s]+)/g; var last=0; var m;
+    while ((m=re.exec(text))){
+      if (m.index>last) container.appendChild(document.createTextNode(text.slice(last,m.index)));
+      var a=document.createElement('a'); a.href=m[0]; a.textContent=m[0]; a.target='_blank'; a.rel='noopener';
+      container.appendChild(a); last=m.index+m[0].length;
+    }
+    if (last<text.length) container.appendChild(document.createTextNode(text.slice(last)));
+  }
+  function makeMsg(listEl, text, meta){
+    var row=document.createElement('div'); row.className='msg';
+    var body=document.createElement('div'); body.className='msgtext'; linkify(body, text);
+    var foot=document.createElement('div'); foot.className='msgfoot';
+    var mt=document.createElement('div'); mt.className='msgmeta'; mt.textContent=meta||'';
+    var cp=document.createElement('button'); cp.className='copybtn'; cp.innerHTML=ICON.copy+'<span>复制</span>';
+    cp.addEventListener('click', function(){ copyText(text, cp); });
+    foot.appendChild(mt); foot.appendChild(cp);
+    row.appendChild(body); row.appendChild(foot);
+    listEl.insertBefore(row, listEl.firstChild);
+  }
+
+  txtSend.addEventListener('click', function(){
+    var text=(txtInput.value||'').trim();
+    if (!text){ return; }
+    txtSend.disabled=true;
+    var xhr=new XMLHttpRequest(); xhr.open('POST','/w/text');
+    xhr.setRequestHeader('content-type','application/json');
+    xhr.onload=function(){
+      txtSend.disabled=false;
+      if (xhr.status===200){ makeMsg(sentTxt, text, '已发送 →'); txtInput.value=''; }
+      else if (xhr.status===401){ showPin(); }
+      else { var msg='发送失败'; try{ msg=JSON.parse(xhr.responseText).reason||msg; }catch(e){} alert(msg); }
+    };
+    xhr.onerror=function(){ txtSend.disabled=false; alert('网络错误'); };
+    xhr.send(JSON.stringify({ text:text }));
+  });
+
+  function renderRxText(o){
+    rxEmpty.style.display='none';
+    makeMsg(rxTxt, o.text||'', (o.from||'桌面')+' 发来');
   }
 
   // PIN 配对

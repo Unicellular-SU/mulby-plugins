@@ -6,17 +6,19 @@ import { randomUUID } from 'node:crypto'
 import {
   APP_TAG,
   MAX_HASH_BYTES,
+  MAX_TEXT_BYTES,
   PROGRESS_THROTTLE_MS,
   log,
   logError,
   notify,
 } from './runtime'
-import { newNonce, resumeKey, signTransfer } from './crypto'
+import { newNonce, resumeKey, signTransfer, textSignName } from './crypto'
 import { FrameEncryptor } from './cipher'
 import { store } from './store'
 import type { FileMeta, Transfer } from './types'
 
 const ROUTE_TRANSFER = `/${APP_TAG}/transfer`
+const ROUTE_TEXT = `/${APP_TAG}/text`
 const CONNECT_TIMEOUT_MS = 12000
 
 interface Job {
@@ -407,6 +409,135 @@ function hashFile(filePath: string): Promise<string> {
 }
 
 export const sender = new Sender()
+
+/**
+ * 发送一条文本给局域网设备（独立于文件队列，小数据一次性请求）。
+ * 复用设备协议的身份签名（绑定正文哈希）与可选 AES-256-GCM 加密；对端在应用内显示+复制，不落盘。
+ */
+export function sendText(
+  targetId: string,
+  text: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const target = store.getDevice(targetId)
+    if (!target) {
+      resolve({ ok: false, error: '目标设备不可用' })
+      return
+    }
+    const body = Buffer.from(text, 'utf8')
+    if (body.length === 0) {
+      resolve({ ok: false, error: '文本为空' })
+      return
+    }
+    if (body.length > MAX_TEXT_BYTES) {
+      resolve({ ok: false, error: '文本过长' })
+      return
+    }
+
+    const transferId = randomUUID()
+    const headers: Record<string, string> = {
+      'content-type': 'text/plain; charset=utf-8',
+      'x-ld-transfer-id': transferId,
+      'x-ld-device-id': store.deviceId,
+      'x-ld-device-name': encodeURIComponent(store.settings.deviceName),
+      'x-ld-os': process.platform,
+      'x-ld-text-size': String(body.length),
+    }
+
+    // 可选端到端加密：单帧 AES-256-GCM（与文件同一套密钥派生），否则明文。
+    let payload: Buffer = body
+    const encSalt = crypto.randomBytes(16)
+    const fileKey = store.settings.encrypt ? store.fileKeyForPeer(targetId, encSalt) : null
+    let encrypted = false
+    if (fileKey) {
+      const enc = new FrameEncryptor(fileKey, Buffer.from(transferId))
+      payload = enc.encrypt(body)
+      headers['x-ld-enc'] = 'aes-256-gcm'
+      headers['x-ld-enc-salt'] = encSalt.toString('hex')
+      encrypted = true
+    }
+    headers['content-length'] = String(payload.length)
+
+    // 身份签名（绑定正文哈希）：对端据此判定「受信任自动接收」并验证正文未被篡改。
+    const sharedKey = store.sharedKeyFor(targetId)
+    const verified = !!sharedKey
+    if (sharedKey) {
+      const ts = Date.now()
+      const nonce = newNonce()
+      headers['x-ld-pubkey'] = store.publicKey
+      headers['x-ld-ts'] = String(ts)
+      headers['x-ld-nonce'] = nonce
+      headers['x-ld-sig'] = signTransfer(sharedKey, {
+        transferId,
+        senderId: store.deviceId,
+        name: textSignName(text),
+        size: body.length,
+        ts,
+        nonce,
+      })
+    }
+
+    let settled = false
+    const finish = (ok: boolean, error?: string) => {
+      if (settled) return
+      settled = true
+      if (ok) {
+        store.addMessage({
+          id: transferId,
+          dir: 'send',
+          text,
+          peerId: targetId,
+          peerName: target.name,
+          peerIp: target.ip,
+          via: 'device',
+          verified,
+          encrypted,
+          createdAt: Date.now(),
+        })
+        void notify(`已发送文字 → ${target.name}`, 'success')
+      } else if (error === '对方已拒绝') {
+        void notify(`${target.name} 拒绝了文字消息`, 'warning')
+      } else {
+        void notify(`发送文字失败：${error || ''}`, 'error')
+      }
+      resolve({ ok, error })
+    }
+
+    const req = http.request(
+      { host: target.ip, port: target.port, path: ROUTE_TEXT, method: 'POST', headers, timeout: CONNECT_TIMEOUT_MS },
+      (res) => {
+        let resp = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => (resp += c))
+        res.on('end', () => {
+          const code = res.statusCode || 0
+          if (code === 200) finish(true)
+          else if (code === 403) finish(false, '对方已拒绝')
+          else {
+            let reason = `HTTP ${code}`
+            try {
+              const parsed = JSON.parse(resp)
+              if (parsed?.reason) reason = String(parsed.reason)
+            } catch {
+              /* ignore */
+            }
+            finish(false, reason)
+          }
+        })
+      },
+    )
+    req.on('timeout', () => {
+      try {
+        req.destroy()
+      } catch {
+        /* ignore */
+      }
+      finish(false, '连接超时，对方可能不在线')
+    })
+    req.on('error', (err) => finish(false, (err as Error).message))
+    req.end(payload)
+  })
+}
 
 /** 通过 GET /info 探测一个手动 IP，返回设备信息。 */
 export function probeDevice(

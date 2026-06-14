@@ -6,7 +6,7 @@ import { host, log, logError } from './core/runtime'
 import { store } from './core/store'
 import { discovery } from './core/discovery'
 import { receiveServer } from './core/receive-server'
-import { sender, probeDevice } from './core/sender'
+import { sender, probeDevice, sendText } from './core/sender'
 import { webGateway } from './core/web-gateway'
 import { isIPv4 } from './core/netutil'
 import { RECEIVE_PORT, WEB_DEVICE_PREFIX } from './core/runtime'
@@ -207,6 +207,27 @@ export const rpc = {
     }
     const ids = sender.enqueue(targetId, files)
     return { ok: true, count: files.length, ids }
+  },
+
+  /** 发送一段文本到指定设备（局域网设备走签名/加密协议；手机会话经 SSE 下发）。 */
+  async sendText(input: { targetId: string; text: string }) {
+    await ensureStarted()
+    const targetId = input?.targetId
+    const text = (input?.text || '').trim()
+    if (!targetId) return { ok: false, error: '请先选择目标设备' }
+    if (!text) return { ok: false, error: '文本为空' }
+    if (targetId.startsWith(WEB_DEVICE_PREFIX)) {
+      return webGateway.sendTextToDevice(targetId, text)
+    }
+    if (!store.getDevice(targetId)) return { ok: false, error: '目标设备不存在' }
+    return sendText(targetId, text)
+  },
+
+  /** 清空内存中的文本消息列表。 */
+  async clearMessages() {
+    await ensureStarted()
+    store.clearMessages()
+    return { ok: true }
   },
 
   /** 打开「手机互传」面板：确保配对令牌存在并返回二维码 URL / PIN / 已连手机数。 */

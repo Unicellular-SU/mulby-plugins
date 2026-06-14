@@ -36,6 +36,23 @@ export interface RemoteDevice {
 }
 
 export type TransferDir = 'send' | 'recv'
+
+/** 一条文本消息（文字/链接/剪贴板内容）。仅在内存中保留，不落盘。 */
+export interface Message {
+  id: string
+  dir: TransferDir
+  text: string
+  peerId: string
+  peerName: string
+  peerIp?: string
+  /** 通道：设备协议（device）或手机网关（web）。 */
+  via: 'device' | 'web'
+  /** device 通道：对端身份已验证。 */
+  verified?: boolean
+  /** device 通道：正文经端到端加密传输。 */
+  encrypted?: boolean
+  createdAt: number
+}
 export type TransferStatus =
   | 'pending'
   | 'active'
@@ -118,6 +135,8 @@ export interface AppState {
   devices: RemoteDevice[]
   transfers: Transfer[]
   incoming: IncomingRequest[]
+  /** 收发的文本消息（内存态，倒序）。 */
+  messages: Message[]
   settings: Settings
   /** 手机网关状态（用于桌面 UI 二维码面板）。 */
   mobile?: MobileGatewayInfo

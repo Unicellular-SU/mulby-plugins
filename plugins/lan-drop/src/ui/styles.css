@@ -364,4 +364,34 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
+/* ===== 文本发送 ===== */
+.text-compose { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.text-input {
+  width: 100%; min-height: 56px; max-height: 160px; resize: vertical;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-1);
+  border-radius: var(--radius); padding: 9px 11px; font: inherit; font-size: 13px; line-height: 1.5;
+  outline: none; box-sizing: border-box;
+}
+.text-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.text-compose-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+
+/* ===== 文本消息列表 ===== */
+.messages { display: flex; flex-direction: column; gap: 8px; max-height: 32%; margin-bottom: 12px; }
+.messages-head { display: flex; align-items: center; justify-content: space-between; }
+.messages-title { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.messages-empty { color: var(--text-3); font-size: 12.5px; padding: 8px 2px; }
+.messages-list { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+.msg-item {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px;
+  background: var(--surface); border-left: 3px solid var(--border-hover);
+}
+.msg-item.send { border-left-color: var(--accent); }
+.msg-item.recv { border-left-color: var(--ok); }
+.msg-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.msg-peer { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.msg-badges { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); }
+.msg-body { font-size: 13px; line-height: 1.55; color: var(--text-1); white-space: pre-wrap; word-break: break-word; }
+.msg-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
+.msg-time { font-size: 11px; color: var(--text-3); }
+
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

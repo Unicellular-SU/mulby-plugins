@@ -9,6 +9,7 @@
 - **零配置自动发现**：基于 UDP 广播，同一网段设备自动出现在列表中，无需输入 IP。
 - **手机扫码互传（无需装 App）**：点击「手机互传」显示二维码，手机浏览器扫码即可双向收发文件——上传保留文件夹层级，桌面也能把文件推送给手机下载。
 - **拖拽即传**：把文件/文件夹拖进窗口，或直接拖到 Mulby 搜索框选择「用闪传发送」。
+- **发送文本/链接/剪贴板**：在桌面或手机网页输入一段文字/链接即可发给对端，对端在应用内显示并一键复制（不落盘）；设备间走同一套签名 + AES 加密。
 - **大文件流式直传**：HTTP 之上点对点直连，边读边发边写，不把文件载入内存。
 - **后台常驻接收**：开启「跟随启动」后即使不打开窗口也能接收文件（系统弹窗确认）。
 - **可验证身份**：基于 x25519 身份密钥，`deviceId` 即公钥指纹（不可伪造）；仅「身份已验证 + 已信任」的设备自动接收，收发文件名/文件夹相对路径均经净化并限定在保存目录内，防目录穿越。
@@ -74,6 +75,7 @@
 - 握手：`GET /mulby-landrop/info` 返回设备信息（含 `publicKey`）。
 - 续传预检：`GET /mulby-landrop/offset?key=<分片标识>` 返回对端该文件已落盘字节数；发送方据此从断点续传。
 - 传输：`POST /mulby-landrop/transfer`，元数据走自定义请求头（`x-ld-*`），Body 为文件流。
+- 文本消息：`POST /mulby-landrop/text`，Body 为正文（可选单帧 AES-256-GCM 加密）；签名名绑定正文 SHA-256，使身份已验证时即便明文也能检测篡改。接收端仅在内存中展示+复制，不落盘。
 - 文件夹层级：发送文件夹时按文件逐个传输并附带 `x-ld-rel-path`（以文件夹名为根的相对路径），接收端净化后在保存目录内重建子目录（`x-ld-file-name` 仍为 basename，用于签名与兜底）。
 - 身份签名（协议 v2）：发送方附带 `x-ld-pubkey`（自证公钥）、`x-ld-ts`、`x-ld-nonce`、`x-ld-sig`（对 `transferId|deviceId|文件名|大小|ts|nonce` 的 HMAC，密钥由 ECDH 共享密钥派生）。接收方校验通过才允许「受信任自动接收」。
 - 端到端加密（协议 v2，可选）：发送方附带 `x-ld-enc: aes-256-gcm` + `x-ld-enc-salt`，Body 为分帧密文 `[4字节密文长度][密文][16字节 GCM tag]`（chunked 传输）；会话密钥 = ECDH 共享密钥 + salt 经 HKDF 派生，计数器 IV、AAD 绑定 `transferId`。元数据头（文件名/大小）与签名仍为明文（用于鉴权与展示）。
@@ -83,7 +85,8 @@
   - `GET /w/info`：用扫码令牌（`Authorization: Bearer` 或 `?t=`）换取 HttpOnly 会话 Cookie `ld_sess`；之后 SSE 与下载请求自动携带 Cookie，令牌不再出现在 URL/日志。
   - `POST /w/pair`：以 6 位 PIN 配对（扫码不便时的兜底）。
   - `POST /w/upload`：手机上传，元数据走 `x-ld-file-name` / `x-ld-rel-path` / `x-ld-file-size` 头，Body 为文件流，复用与设备协议同一套净化/容量/硬上限/文件夹重建逻辑。
-  - `GET /w/events`：SSE 推送桌面发来的待下载文件（offer）。
+  - `POST /w/text`：手机→桌面发文本（JSON `{text}`）；桌面→手机文本经 `/w/events` 的 `text` 事件实时下发。
+  - `GET /w/events`：SSE 推送桌面发来的待下载文件（offer）与文本（text）。
   - `GET /w/download?id=`：手机拉取桌面推送的文件；当 offer 为文件夹/多文件时，服务端流式打包 ZIP（store 模式，逐文件读盘不占内存，条目路径经净化防 zip-slip）返回。
 - 首次运行时 Windows 防火墙可能弹出放行提示，请允许「专用网络」访问。
 

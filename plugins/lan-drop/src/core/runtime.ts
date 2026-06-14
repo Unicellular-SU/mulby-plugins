@@ -18,6 +18,8 @@ export const DEVICE_TTL_MS = 12000
 export const PROGRESS_THROTTLE_MS = 350
 // 超过该大小则跳过 sha256 预计算，避免大文件二次读盘（仍以字节数校验完整性）
 export const MAX_HASH_BYTES = 1024 * 1024 * 1024 // 1 GiB
+// 单条文本消息上限（含加密分帧余量按此基准放宽）。
+export const MAX_TEXT_BYTES = 256 * 1024 // 256 KiB
 
 // 接收端抗滥用 / 容量保护（P1/P2）
 export const MAX_CONCURRENT_RECEIVES = 8 // 同时落盘的接收数上限（超出返回 503）

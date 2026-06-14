@@ -15,6 +15,7 @@ import {
   newNonce,
   resumeKey,
   isResumeKey,
+  textSignName,
   SIG_TTL_MS,
   type TransferAuthFields,
 } from './crypto'
@@ -209,6 +210,32 @@ describe('replay protection', () => {
       expect(seen.has(n)).toBe(false)
       seen.add(n)
     }
+  })
+})
+
+describe('text sign name', () => {
+  it('is deterministic and binds to the exact content', () => {
+    const a = textSignName('hello world')
+    expect(a).toMatch(/^text:[0-9a-f]{32}$/)
+    expect(textSignName('hello world')).toBe(a)
+    expect(textSignName('hello world!')).not.toBe(a)
+    expect(textSignName('')).not.toBe(a)
+  })
+
+  it('lets a verified text signature catch tampered plaintext', () => {
+    // 明文文本：签名名绑定正文哈希 → 篡改正文后签名不再匹配。
+    const sender = generateIdentity()
+    const receiver = generateIdentity()
+    const key = deriveSharedKey(sender.privateKeyB64, receiver.publicKeyB64)
+    const original = 'transfer 100 to alice'
+    const sig = signTransfer(key, {
+      transferId: 'tx', senderId: 'sid', name: textSignName(original), size: 21, ts: 1, nonce: 'n',
+    })
+    const rkey = deriveSharedKey(receiver.privateKeyB64, sender.publicKeyB64)
+    const tampered = 'transfer 100 to mallory'
+    expect(verifyTransfer(rkey, {
+      transferId: 'tx', senderId: 'sid', name: textSignName(tampered), size: 21, ts: 1, nonce: 'n',
+    }, sig)).toBe(false)
   })
 })
 

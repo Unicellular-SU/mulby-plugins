@@ -8,6 +8,7 @@ import {
   APP_TAG,
   MAX_CONCURRENT_RECEIVES,
   MAX_PENDING_CONFIRMS,
+  MAX_TEXT_BYTES,
   PROGRESS_THROTTLE_MS,
   PROTOCOL_VERSION,
   RECEIVE_PORT,
@@ -16,7 +17,7 @@ import {
   logError,
   notify,
 } from './runtime'
-import { isFreshTimestamp, isResumeKey, matchesFingerprint, verifyTransfer } from './crypto'
+import { isFreshTimestamp, isResumeKey, matchesFingerprint, textSignName, verifyTransfer } from './crypto'
 import { FrameDecryptor } from './cipher'
 import { isLanAddress } from './netutil'
 import {
@@ -36,6 +37,7 @@ import type { Transfer } from './types'
 const ROUTE_INFO = `/${APP_TAG}/info`
 const ROUTE_TRANSFER = `/${APP_TAG}/transfer`
 const ROUTE_OFFSET = `/${APP_TAG}/offset`
+const ROUTE_TEXT = `/${APP_TAG}/text`
 
 /** 流式把已有分片喂入哈希（续传时保证全文哈希连续）。 */
 function hashExistingPart(filePath: string, hash: crypto.Hash): Promise<void> {
@@ -126,6 +128,11 @@ export class ReceiveServer {
 
     if (req.method === 'POST' && url === ROUTE_TRANSFER) {
       void this.handleTransfer(req, res)
+      return
+    }
+
+    if (req.method === 'POST' && url === ROUTE_TEXT) {
+      void this.handleText(req, res)
       return
     }
 
@@ -646,6 +653,171 @@ export class ReceiveServer {
     })
 
     // 手动消费 req（见上方 data/end 处理），不再使用 req.pipe，以便插入解密与背压控制。
+  }
+
+  /**
+   * 接收一条文本消息（POST /text）。复用身份签名校验（绑定正文哈希）与可选 AES-256-GCM 解密；
+   * 接受后写入内存消息列表（不落盘），由 UI 显示并支持一键复制。
+   */
+  private async handleText(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const transferId = header(req, 'x-ld-transfer-id') || randomUUID()
+    const peerId = header(req, 'x-ld-device-id') || 'unknown'
+    const peerName = decodeHeader(header(req, 'x-ld-device-name')) || '未知设备'
+    const peerOs = header(req, 'x-ld-os') || 'unknown'
+    const peerIp = remoteIp(req)
+    const peerPubKey = header(req, 'x-ld-pubkey') || ''
+    const sig = header(req, 'x-ld-sig') || ''
+    const ts = parseInt(header(req, 'x-ld-ts') || '0', 10) || 0
+    const nonce = header(req, 'x-ld-nonce') || ''
+    const encRequested = (header(req, 'x-ld-enc') || '') === 'aes-256-gcm'
+    const encSaltHex = header(req, 'x-ld-enc-salt') || ''
+
+    store.upsertDevice({
+      id: peerId,
+      name: peerName,
+      os: peerOs,
+      ip: peerIp,
+      port: RECEIVE_PORT,
+      pubKey: peerPubKey || undefined,
+    })
+
+    // 读取整个请求体（小数据，含加密分帧余量上限）。
+    let raw: Buffer
+    try {
+      raw = await this.readBodyBuffer(req, MAX_TEXT_BYTES + 1024)
+    } catch (err) {
+      this.sendJson(res, 413, { ok: false, reason: (err as Error).message })
+      return
+    }
+
+    // 解密（声明加密时必须能用对端自证公钥派生密钥并完整解出）。
+    let text: string
+    let encrypted = false
+    if (encRequested) {
+      const fileKey =
+        peerPubKey && encSaltHex && matchesFingerprint(peerId, peerPubKey)
+          ? store.fileKeyForPub(peerPubKey, Buffer.from(encSaltHex, 'hex'))
+          : null
+      if (!fileKey) {
+        this.sendJson(res, 400, { ok: false, reason: 'encryption handshake failed' })
+        return
+      }
+      try {
+        const dec = new FrameDecryptor(fileKey, Buffer.from(transferId))
+        const plains = dec.push(raw)
+        if (dec.pending > 0) throw new Error('incomplete frame')
+        text = Buffer.concat(plains).toString('utf8')
+        encrypted = true
+      } catch {
+        this.sendJson(res, 400, { ok: false, reason: '解密失败，数据可能被篡改' })
+        return
+      }
+    } else {
+      text = raw.toString('utf8')
+    }
+
+    if (!text) {
+      this.sendJson(res, 400, { ok: false, reason: 'empty text' })
+      return
+    }
+
+    // 身份校验：签名名绑定正文哈希 → 验证通过即证明持有私钥且正文未被篡改。
+    const verified = this.verifyIdentity({
+      peerId,
+      peerPubKey,
+      transferId,
+      signedName: textSignName(text),
+      size: Buffer.byteLength(text, 'utf8'),
+      ts,
+      nonce,
+      sig,
+    })
+
+    const autoAccept =
+      (verified && store.isTrusted(peerId)) || store.settings.receiveMode === 'accept-all'
+
+    if (!autoAccept) {
+      if (this.pendingConfirms >= MAX_PENDING_CONFIRMS) {
+        this.sendJson(res, 429, { ok: false, reason: 'too many pending confirmations' })
+        return
+      }
+      this.pendingConfirms += 1
+      let accept = false
+      try {
+        accept = await this.confirmTextWithUser({ text, peerName, peerIp, verified })
+      } finally {
+        this.pendingConfirms -= 1
+      }
+      if (!accept) {
+        this.sendJson(res, 403, { ok: false, reason: 'rejected' })
+        return
+      }
+    }
+
+    store.addMessage({
+      id: transferId,
+      dir: 'recv',
+      text,
+      peerId,
+      peerName,
+      peerIp,
+      via: 'device',
+      verified,
+      encrypted,
+      createdAt: Date.now(),
+    })
+    this.sendJson(res, 200, { ok: true })
+    void notify(`收到 ${peerName} 的文字消息`, 'info')
+    log('text received from', peerName, `(${text.length} chars)`)
+  }
+
+  /** 文本消息确认弹窗（非自动接收路径）。 */
+  private async confirmTextWithUser(meta: {
+    text: string
+    peerName: string
+    peerIp: string
+    verified: boolean
+  }): Promise<boolean> {
+    const idLine = meta.verified ? '✅ 身份已验证' : '⚠️ 身份未验证'
+    const preview = meta.text.length > 200 ? `${meta.text.slice(0, 200)}…` : meta.text
+    try {
+      const result = await host()?.dialog?.showMessageBox({
+        type: 'question',
+        title: '闪传 LanDrop · 收到文字消息',
+        message: `${meta.peerName} 发来一段文字`,
+        detail: `${preview}\n\n来自 ${meta.peerIp}\n${idLine}`,
+        buttons: ['接收', '拒绝'],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      return (result?.response ?? 1) === 0
+    } catch (err) {
+      logError('text confirm dialog failed, rejecting', err)
+      return false
+    }
+  }
+
+  /** 读取整个请求体为 Buffer，超过上限即拒绝。 */
+  private readBodyBuffer(req: http.IncomingMessage, limit: number): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = []
+      let len = 0
+      req.on('data', (c: Buffer) => {
+        len += c.length
+        if (len > limit) {
+          try {
+            req.destroy()
+          } catch {
+            /* ignore */
+          }
+          reject(new Error('文本过长'))
+          return
+        }
+        chunks.push(c)
+      })
+      req.on('end', () => resolve(Buffer.concat(chunks)))
+      req.on('error', (e) => reject(e))
+    })
   }
 
   private recordTerminal(input: {
