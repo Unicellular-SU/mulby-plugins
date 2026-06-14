@@ -183,8 +183,8 @@
       "version": "1.0.5",
       "author": "Mulby Team",
       "description": "一只活泼的桌面伴侣，能感知你的鼠标和键盘操作并做出有趣反应",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.13-0538/desktop-pet-1.0.5.inplugin",
-      "lastPackageTime": "2026-06-13T05:38:57.977Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.14-1523/desktop-pet-1.0.5.inplugin",
+      "lastPackageTime": "2026-06-14T15:23:57.635Z",
       "type": "entertainment",
       "details": "# 桌面宠物\n\n一只住在桌面上的像素小幽灵。它能根据鼠标、键盘、前台应用、番茄钟、提醒和对话上下文做出表情、姿势、气泡与 AI 回复。\n\n## 功能特性\n\n- **桌面陪伴**：透明置顶小幽灵，会闲逛、追逐、探头、睡觉、挥手、跳跃和摇摆。\n- **AI 对话**：长按宠物打开输入框；宠物会结合性格、心情、生活档案、天气和当前应用上下文回复。\n- **表现控制**：AI 可调用表情、姿势、动作、移动和心情工具，让回复过程同步变脸和运动。\n- **生活档案**：多轮对话后自动维护用户档案、偏好、习惯、关系线索和近期事件，可在设置页编辑或清空。\n- **生态系统**：记录精力、关注、好奇、专注、补水状态，识别工作模式，维护今日时间线和每日目标。\n- **日记时间线**：晚上自动根据今日事件、最近对话和统计数据生成宠物日记。\n- **番茄钟与节律提醒**：支持专注计时、喝水提醒、休息提醒和自定义定时提醒。\n- **小游戏**：支持猜谜语、成语接龙、冷知识问答，并记录积分、连续答对和今日游玩情况。\n- **成就与状态**：记录亲密度、心情、签到、互动、专注时长和成就解锁。\n\n## 使用方式\n\n在 Mulby 搜索栏输入以下任意关键词启动：\n\n- `宠物`\n- `pet`\n- `桌面宠物`\n\n## 操作\n\n- 左键点击：触发宠物互动与主动搭话。\n- 长按左键：打开聊天输入框。\n- 右键点击：打开菜单，可进入设置、开始番茄钟、启动小游戏、查看思考过程或退出。\n\n## 设置页\n\n右键宠物后选择「设置」：\n\n- **设置**：宠物名称、性格、AI 模型、说话频率、番茄钟时长、生日、位置信息、上下文隐私和触发行为。\n- **生态**：查看心情、亲密度、签到、番茄钟、专注时长、需求状态、当前工作模式、每日任务、小游戏积分和今日时间线。\n- **提醒**：配置喝水、休息眼睛和自定义定时提醒。\n- **记忆**：查看、编辑、删除或清空生活档案。\n- **成就**：查看已解锁成就。\n- **日记**：查看自动生成的宠物日记。\n- **对话**：查看用户上下文、模型思考和宠物发言历史。\n- **表现预览**：测试所有表情、姿势、情绪和动作组合。\n\n## 隐私说明\n\n- 默认只使用应用名识别工作模式，不把窗口标题写入长期存储。\n- 设置页可选择允许窗口标题参与短期 AI 上下文；标题仍不会进入今日时间线。\n- 剪贴板响应默认关闭，并沿用敏感内容过滤。\n\n## 技术实现\n\n- 透明置顶 detached 窗口，内容区为 `PET_SIZE` 120。\n- 内置 SVG 小幽灵精灵，由 `svg-renderer` 加载，姿势和表情通过状态机与 CSS 动画表现。\n- 输入监听使用 Mulby `inputMonitor`，前台窗口上下文通过主进程 RPC 读取。\n- 数据使用 Mulby storage 持久化，包括性格、位置、生活档案、对话历史、生态状态、时间线、每日任务、小游戏统计、日记和成就。\n\n## 权限\n\n- `inputMonitor`：监听鼠标和键盘行为。\n- `ai`：调用文本模型生成回复、日记和小游戏题目。\n- `accessibility`：在 macOS 上支持全局输入监听。\n- `clipboard`：可选剪贴板响应。\n- `screen`：读取屏幕与窗口位置。\n- `geolocation`：可选定位和天气上下文。\n\n## 系统要求\n\n- Mulby 桌面客户端。\n- macOS 需授予辅助功能权限。",
       "icon": {
@@ -197,7 +197,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "cf3be855b70e113af705a4de206178eb6f75b61c30720ca04f258420a5ba139b",
+      "sha256": "e3e8e33797cc5bd515aa7a8570651e1c9e035a7dd7777edeb3e98549c88c07fa",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/desktop-pet"
     },
@@ -301,8 +301,8 @@
       "version": "1.0.1",
       "author": "Mulby",
       "description": "全平台系统文件快速搜索和预览，支持图片、文档、表格、视频、音频、压缩文件等多种格式",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-1436/local-search-1.0.1.inplugin",
-      "lastPackageTime": "2026-05-30T14:36:30.396Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.14-1523/local-search-1.0.1.inplugin",
+      "lastPackageTime": "2026-06-14T15:24:26.836Z",
       "type": "utility",
       "details": "# 本地搜索\n\n全平台系统文件快速搜索和预览工具。\n\n## 功能\n\n- 调用 Mulby Desktop API 实现跨平台文件搜索\n- 三栏布局：左侧文件类型筛选、中间文件列表、右侧文件预览\n- 支持多种文件格式预览\n\n### 支持预览的格式\n\n| 类型 | 格式 |\n|------|------|\n| 图片 | png, jpg, jpeg, bmp, gif, svg, ico, webp |\n| 文本 | txt, md, json, xml, yaml, js, ts, py, go 等 |\n| 音频 | mp3, wav, flac, m4a, ogg, opus, aac |\n| 视频 | mp4, webm, ogv |\n| 其他 | 显示文件基本信息 |\n\n### 文件类型分类\n\n全部、图片、表格、文档、音视频、压缩、文本、其他\n\n## 操作指南\n\n| 快捷键 | 操作 |\n|--------|------|\n| Enter | 打开选中的文件 |\n| → (右键) | 显示操作菜单 |\n| →→ (连续两次右键) | 直接打开文件所在文件夹 |\n| ⌘/Ctrl + C | 复制文件 |\n| Tab | 切换文件类型 |\n| ↑/↓ | 选择文件 |\n| Shift + ↑/↓ | 多选文件 |\n| 鼠标拖拽 | 拖拽文件到其他位置 |\n| 鼠标右键 | 显示操作菜单 |\n| 双击 | 打开文件 |\n\n## 触发关键词\n\n- `本地搜索`\n- `文件搜索`\n- `搜文件`",
       "icon": {
@@ -315,7 +315,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "0a62ba1359b8830b7c7a0ae4598d10497a9417830346e7ee21654911ffa82554",
+      "sha256": "634cb9f841a6f0c01190ecbf3230e9a5a1a1d2a0f03ec6da774193b14a984f14",
       "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/local-search"
     },
@@ -748,8 +748,8 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "极便捷的 OCR 识别工具，截图提取文字/表格/公式，支持翻译和一键复制。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-1436/ocr-text-1.0.0.inplugin",
-      "lastPackageTime": "2026-05-30T14:36:46.428Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.14-1523/ocr-text-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-14T15:24:34.684Z",
       "type": "productivity",
       "details": "# OCR 文字识别\n\n极便捷的 OCR 识别工具，支持提取文字、表格、公式。\n\n## 功能特性\n\n- **截图文字识别** - 一键截图提取文字内容\n- **截图文字识别+复制** - 识别文字并自动复制到剪贴板\n- **截图文字识别+翻译** - 识别文字并自动翻译\n- **截图表格识别** - 识别图片中的表格，输出 Markdown 表格格式\n- **截图公式识别** - 识别数学公式，输出 LaTeX 格式\n- **图片文字识别** - 拖入图片文件进行识别\n- **插件内截图/选图** - 打开插件后可直接点击“截图识别”或“选择图片”重新识别\n- **表格结果导出** - 支持复制 Markdown、复制可粘贴到 Excel 的 TSV，以及导出 `.xls`\n- **公式结果导出** - 支持复制 LaTeX，以及导出 SVG 公式图片\n\n## 触发方式\n\n| 功能 | 关键词 |\n|------|--------|\n| 文字识别 | `OCR` / `文字识别` / `ocr` |\n| 文字识别+复制 | `OCR复制` / `文字识别复制` |\n| 表格识别 | `表格识别` / `OCR表格` |\n| 公式识别 | `公式识别` / `OCR公式` |\n| 文字识别+翻译 | `OCR翻译` / `文字识别翻译` |\n| 图片识别 | 拖入 PNG/JPG/JPEG/BMP/GIF/WebP/TIFF 图片 |\n\n## 使用说明\n\n1. 在 Mulby 搜索框输入对应关键词\n2. 截取需要识别的屏幕区域\n3. 也可以在插件窗口内点击“截图识别”或“选择图片”重新选择输入\n4. 等待识别完成\n5. 点击复制按钮复制识别结果\n6. 切换到表格模式后，可复制 Markdown、复制 Excel 格式或导出 `.xls`\n7. 切换到公式模式后，可复制 LaTeX 或导出 SVG 公式图片\n8. 可切换文字/表格/公式模式重新识别\n\n## 快捷键\n\n可在 Mulby 设置中为各功能绑定全局快捷键，实现一键调用。\n\n## 依赖\n\n- 需要配置 AI 模型（支持视觉识别的模型，如 GPT-4o、Claude 等）",
       "icon": {
@@ -762,7 +762,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "7b39a1690341efab6aa40d6deb5bf2e88c01393491edb77ca861c89fd9063862",
+      "sha256": "4ce9dd070b46ca3b1c88671d1fd816feda4bf65601dd844269257d946676104c",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/ocr-text"
     },
@@ -1052,6 +1052,31 @@
       "sha256": "f269a935793ff513d1416a1082acb9690fadfaad9a4c66edb5be747c120d9299",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/weather-card"
+    },
+    {
+      "id": "lan-drop",
+      "name": "lan-drop",
+      "displayName": "闪传 LanDrop",
+      "version": "1.0.0",
+      "author": "mulby",
+      "description": "局域网内跨平台、零配置、拖拽即传的文件闪传工具，自动发现设备，大文件流式直传。",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.14-1523/lan-drop-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-14T15:24:18.264Z",
+      "type": "network",
+      "details": "# 闪传 LanDrop\n\n> 局域网内跨平台、零配置、拖拽即传的文件闪传工具。装进 Mulby 的「隔空投送」。\n\n同一局域网内的设备自动相互发现，拖拽文件即可秒传，大文件全程流式直传不占内存，支持 Windows / macOS / Linux。\n\n## ✨ 功能特性\n\n- **零配置自动发现**：基于 UDP 广播，同一网段设备自动出现在列表中，无需输入 IP。\n- **手机扫码互传（无需装 App）**：点击「手机互传」显示二维码，手机浏览器扫码即可双向收发文件——上传保留文件夹层级，桌面也能把文件推送给手机下载。\n- **拖拽即传**：把文件/文件夹拖进窗口，或直接拖到 Mulby 搜索框选择「用闪传发送」。\n- **大文件流式直传**：HTTP 之上点对点直连，边读边发边写，不把文件载入内存。\n- **后台常驻接收**：开启「跟随启动」后即使不打开窗口也能接收文件（系统弹窗确认）。\n- **可验证身份**：基于 x25519 身份密钥，`deviceId` 即公钥指纹（不可伪造）；仅「身份已验证 + 已信任」的设备自动接收，收发文件名/文件夹相对路径均经净化并限定在保存目录内，防目录穿越。\n- **端到端加密**：对身份可验证的对端启用 AES-256-GCM 分帧加密，会话密钥由 ECDH 协商、永不上线（可在设置中关闭）。\n- **断点续传**：传输中断后重发会自动从对端已收字节处续传（基于稳定分片标识），大文件无需从头再来。\n- **完整性校验**：可选 SHA-256 校验（大文件自动跳过），并按字节数核对大小。\n- **手动直连兜底**：当路由器开启 AP 隔离或跨网段时，可手动输入对端 IP 直连。\n- **传输队列与历史**：实时进度、速度、剩余时间，历史记录持久化。\n\n## 🚀 使用方式\n\n### 触发插件\n在 Mulby 搜索框输入以下任一关键字打开主界面：\n\n- `闪传`、`landrop`、`lan-drop`、`传文件`\n\n或直接把文件拖到 Mulby 搜索框，选择「用闪传发送」。\n\n### 发送文件\n1. 打开闪传窗口（默认独立窗口）。\n2. 把文件/文件夹拖进窗口，或点击拖拽区选择文件。\n3. 在左侧设备列表选择目标设备。\n4. 点击「发送」。对端确认后开始传输。\n\n### 接收文件\n- 保持插件运行（建议在搜索结果右键勾选「跟随 Mulby 启动」实现后台常驻）。\n- 有设备发来文件时：\n  - 若对方是**信任设备**或接收策略为「自动接收」→ 直接保存。\n  - 否则弹出系统确认框，可选择「接收 / 拒绝 / 信任并接收」。\n- 文件默认保存到 `下载目录/LanDrop`，可在设置中修改。\n\n### 📱 手机互传（扫码，无需装 App）\n1. 桌面点击顶部「手机互传」，弹出二维码与 6 位配对码 PIN。\n2. 手机与桌面连同一 WiFi，用相机/浏览器扫码（或手动打开 `http://<桌面IP>:52801/m` 后输入 PIN）。\n3. 连接成功后：\n   - **手机→桌面**：在手机网页选「文件」或「文件夹」即可上传（带进度，文件夹保留层级）。\n   - **桌面→手机**：手机会出现在桌面「设备」列表（📱 徽标），像普通设备一样选中并「发送」，手机网页会收到提示并下载。\n4. 二维码/PIN 有有效期，可在面板「刷新二维码 / 配对码」轮换；旧码立即失效，已连接的手机不受影响。\n\n> 说明：手机通道在局域网内直连、文件不经服务器；以「扫码令牌」作为授权凭证（详见安全说明）。\n\n## ⚙️ 设置项\n\n| 设置 | 说明 |\n| --- | --- |\n| 设备名称 | 本机在局域网中显示的名称（默认主机名）。 |\n| 文件保存目录 | 接收文件的落盘目录（默认 `Downloads/LanDrop`）。 |\n| 接收策略 | `询问确认`（默认）/ `自动接收`。信任设备始终自动接收。 |\n| 启用设备发现 | 关闭后不再广播与搜索设备。 |\n| 完整性校验 | 为传输计算 SHA-256（>1GiB 自动跳过）。 |\n| 端到端加密 | 对身份可验证的对端用 AES-256-GCM 加密传输（默认开启）。 |\n| 手机互传 | 手机扫码网关总开关（默认开启）；关闭后手机网页与接口全部拒绝。 |\n| 手机上传免确认 | 已扫码授权的手机上传时不再弹窗确认（默认开启，扫码即视为授权）。 |\n\n## 🔌 网络与协议\n\n| 用途 | 协议/端口 |\n| --- | --- |\n| 设备发现 | UDP 广播 `52800` |\n| 文件收发 / 握手 | TCP HTTP `52801` |\n| 手机网关（网页 + 接口） | 复用 TCP HTTP `52801`（路由 `/m` 与 `/w/*`） |\n\n- 握手：`GET /mulby-landrop/info` 返回设备信息（含 `publicKey`）。\n- 续传预检：`GET /mulby-landrop/offset?key=<分片标识>` 返回对端该文件已落盘字节数；发送方据此从断点续传。\n- 传输：`POST /mulby-landrop/transfer`，元数据走自定义请求头（`x-ld-*`），Body 为文件流。\n- 文件夹层级：发送文件夹时按文件逐个传输并附带 `x-ld-rel-path`（以文件夹名为根的相对路径），接收端净化后在保存目录内重建子目录（`x-ld-file-name` 仍为 basename，用于签名与兜底）。\n- 身份签名（协议 v2）：发送方附带 `x-ld-pubkey`（自证公钥）、`x-ld-ts`、`x-ld-nonce`、`x-ld-sig`（对 `transferId|deviceId|文件名|大小|ts|nonce` 的 HMAC，密钥由 ECDH 共享密钥派生）。接收方校验通过才允许「受信任自动接收」。\n- 端到端加密（协议 v2，可选）：发送方附带 `x-ld-enc: aes-256-gcm` + `x-ld-enc-salt`，Body 为分帧密文 `[4字节密文长度][密文][16字节 GCM tag]`（chunked 传输）；会话密钥 = ECDH 共享密钥 + salt 经 HKDF 派生，计数器 IV、AAD 绑定 `transferId`。元数据头（文件名/大小）与签名仍为明文（用于鉴权与展示）。\n- 断点续传（协议 v2）：发送方先 `GET /offset` 取对端已收字节，再用 `x-ld-resume-key`（`sha256(发送方id+文件名+大小)`）+ `x-ld-offset` 从断点发送；`content-length` 为剩余字节。接收端按偏移追加写入 `.part`，开启完整性校验时会预哈希已有分片以保证全文哈希连续。\n- 手机网关（与设备协议同端口、互不影响）：\n  - `GET /m`：移动端网页（自包含单文件，桌面直接托管）。\n  - `GET /w/info`：用扫码令牌（`Authorization: Bearer` 或 `?t=`）换取 HttpOnly 会话 Cookie `ld_sess`；之后 SSE 与下载请求自动携带 Cookie，令牌不再出现在 URL/日志。\n  - `POST /w/pair`：以 6 位 PIN 配对（扫码不便时的兜底）。\n  - `POST /w/upload`：手机上传，元数据走 `x-ld-file-name` / `x-ld-rel-path` / `x-ld-file-size` 头，Body 为文件流，复用与设备协议同一套净化/容量/硬上限/文件夹重建逻辑。\n  - `GET /w/events`：SSE 推送桌面发来的待下载文件（offer）。\n  - `GET /w/download?id=`：手机拉取桌面推送的文件。\n- 首次运行时 Windows 防火墙可能弹出放行提示，请允许「专用网络」访问。\n\n## 🔒 安全说明\n\n- 仅服务局域网 / 本机来源（私有网段 + 回环 + 链路本地 + CGNAT），拒绝公网来源请求；默认手动确认接收，未确认前不落盘。\n- 文件名与文件夹相对路径均经净化（剔除 `..` / 绝对路径 / 盘符与非法字符），并强制限定在保存目录内，防止目录穿越覆盖。\n- 抗滥用与容量保护：未验证请求的确认弹窗有并发上限（防刷屏 DoS）；同时接收数有上限；落盘前预检磁盘可用空间；传输一旦超出声明大小立即中止（防打满磁盘）。\n- **身份自证**：`deviceId = x25519 公钥指纹`，传输签名由 ECDH 派生的共享密钥（双方各自计算、密钥永不上线）做 HMAC，配合时间戳 + nonce 防重放。「受信任自动接收」必须签名校验通过 —— 攻击者即便嗅探到广播中的 `deviceId` 也无法伪造身份绕过确认。\n- 端到端加密：对身份可验证的对端，文件内容用 AES-256-GCM 分帧加密（会话密钥由 ECDH 协商、永不上线，逐帧 tag 防篡改）。被动嗅探既无法伪造身份、也无法读取内容。文件名/大小等元数据头仍为明文（用于鉴权与界面展示）。\n- 回退：当对端为旧版（无公钥）时无法加密，回退为明文 + 弹窗确认；可在设置中关闭加密。\n- **手机网关的信任模型**：手机无原生身份，改以「二维码令牌」作为授权凭证——能扫到码即代表物理看到了桌面屏幕（与 WhatsApp Web / LocalSend 同款）。令牌短时有效、可随时轮换吊销；换取的会话为 HttpOnly Cookie；所有 `/w/*` 仍受局域网来源拦截保护。\n- **手机通道为明文传输**：浏览器在 `http://<局域网IP>` 下没有 `crypto.subtle`（非安全上下文），无法照搬设备间的 ECDH/AES-GCM。当前手机通道安全边界 = 局域网 + 扫码令牌 + 确认（与「未配对设备→明文」同级）。如需对手机通道也加密，后续可打包纯 JS 密码学库（noble）或启用 HTTPS（自签证书），见后续计划。\n- 不支持跨网段 / VPN（设计为同一局域网直连）。\n\n## 🧪 手动验收清单（在 Mulby 内测试）\n\n1. 安装插件后无 manifest 报错，可在搜索框通过 `闪传` 关键字打开窗口。\n2. 在设置中确认「接收服务在线 · 端口 52801」「设备发现在线」。\n3. 两台同局域网设备互相能在「设备」列表看到对方（约 3 秒内）。\n4. A → B 发送一个小文件：B 弹出确认框，接收后文件出现在保存目录，A/B 历史均显示「已完成」。\n5. 发送一个较大文件（如 ≥200MB）：进度条、速度、剩余时间实时更新，完成后大小一致；传输中断后再次发送应从断点续传（进度不归零）。\n6. 把 B 标记为信任设备后再次发送：B 不再弹窗，自动接收。\n7. 关闭闪传窗口但保持插件后台运行时，仍能收到文件（系统通知 + 弹窗）。\n8. AP 隔离场景：用「手动添加 IP」输入对端地址，能成功添加并发送。\n\n## 🛠 开发\n\n```bash\n# 安装依赖\npnpm install        # 若 Windows 符号链接报错，可在本插件目录改用 npm install\n\n# 构建（后端 esbuild + 前端 vite）\npnpm run build\n\n# 打包为 .inplugin\npnpm run pack\n```\n\n### 目录结构\n\n```\nlan-drop/\n├── manifest.json            # 插件合约（background 常驻 / features）\n├── icon.png                 # 512x512 图标\n├── assets/icon.svg          # 可编辑图标源\n├── src/\n│   ├── main.ts              # 后端入口：生命周期 + rpc\n│   ├── core/\n│   │   ├── runtime.ts       # 常量 + 宿主 API 访问器\n│   │   ├── types.ts         # 共享类型\n│   │   ├── netutil.ts       # 网卡 / 广播地址工具\n│   │   ├── store.ts         # 状态 + 设置/历史持久化\n│   │   ├── discovery.ts     # UDP 设备发现\n│   │   ├── receive-server.ts# HTTP 接收服务（流式落盘 + 确认）\n│   │   ├── receive-util.ts  # 接收公共助手（路径净化/容量预检，设备与手机网关共用）\n│   │   ├── web-gateway.ts   # 手机网关（令牌/会话 + /m + /w/* 上传下载 + SSE）\n│   │   ├── mobile-page.ts   # 移动端网页（自包含单文件字符串）\n│   │   └── sender.ts        # HTTP 流式发送（队列 + 进度 + 取消）\n│   └── ui/                  # React 控制台（设备/发送/进度/设置 + 手机互传二维码）\n└── dist/main.js             # 构建产物\n```\n\n## ⚠️ 已知限制 / 后续计划\n\n- 文件夹发送会保留目录层级，接收端在保存目录内重建子目录（相对路径经净化防穿越）。\n- 已支持应用层端到端加密（AES-256-GCM）与断点续传；标准 TLS 仍可作为后续可选项。\n- 断点续传按 `(发送方id, 文件名, 大小)` 标识分片：同名同大小但内容不同的文件，建议保持「完整性校验」开启（默认），以便最终 SHA-256 校验拦截异常拼接。\n- 与旧版本（协议 v1，无身份密钥）互发时无法验证身份，将始终弹窗确认、不会自动接收。\n- **手机扫码互传已支持**（手机→桌面上传、桌面→手机下载）。后续可硬化项：手机通道端到端加密（浏览器 http 无 WebCrypto，需打包 noble 纯 JS 密码学或启用 HTTPS 自签证书）；桌面→手机的文件夹会因浏览器下载限制而平铺（可改为服务端打包 ZIP）；手机上传暂未做断点续传。",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/lan-drop/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/lan-drop/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "a888a68fead565395ffcca110fdf77a658a2f59ec8ae41d77eb39e1bcf846e4b",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/lan-drop"
     }
   ]
 }
