@@ -284,21 +284,50 @@ export class WebGateway {
     return null
   }
 
+  /**
+   * 设备 id 由「配对令牌（二维码）」派生，而非随机会话令牌：
+   * 同一张二维码（含 PIN，二者同属一个 pairing）无论在微信内置浏览器还是系统浏览器打开，
+   * 都解析到同一个 deviceId —— 桌面只会出现一台手机。二维码轮换后新连接得到新 id，
+   * 已连旧会话各自保留创建时的 id，互不影响。
+   */
+  private deviceIdForPairing(): string {
+    const seed = this.pairing ? this.pairing.token : 'no-pairing'
+    const h = crypto.createHash('sha256').update(seed).digest('hex')
+    return WEB_DEVICE_PREFIX + h.slice(0, 8)
+  }
+
   private createSession(req: http.IncomingMessage, ip: string): WebSession {
     const token = crypto.randomBytes(24).toString('hex')
     const os = osFromUA(header(req, 'user-agent') || '')
     const declared = decodeHeader(header(req, 'x-ld-name'))
     const name = declared.trim() || defaultPhoneName(os)
+    const deviceId = this.deviceIdForPairing()
+
+    // 同一二维码在另一浏览器重开（典型：微信扫码 → 再用系统浏览器打开）：旧会话被新会话接管，
+    // 继承其待下载队列，避免桌面短暂出现两台“同一手机”，且让能下载的浏览器接手 offer。
+    const inheritedOutbox = new Map<string, Offer>()
+    for (const [tok, old] of this.sessions) {
+      if (old.deviceId !== deviceId) continue
+      for (const [k, v] of old.outbox) inheritedOutbox.set(k, v)
+      try {
+        old.sse?.end()
+      } catch {
+        /* ignore */
+      }
+      this.sessions.delete(tok)
+      log('mobile session superseded by new browser', deviceId)
+    }
+
     const session: WebSession = {
       token,
-      deviceId: WEB_DEVICE_PREFIX + token.slice(0, 8),
+      deviceId,
       name,
       os,
       ip,
       connectedAt: Date.now(),
       lastSeen: Date.now(),
       sse: null,
-      outbox: new Map(),
+      outbox: inheritedOutbox,
     }
     this.sessions.set(token, session)
     this.touchDevice(session)
