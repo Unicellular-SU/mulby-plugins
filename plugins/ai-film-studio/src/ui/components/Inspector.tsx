@@ -348,6 +348,13 @@ export default function Inspector() {
 
         {node.data.error && <div className="afs-result afs-result--error">{node.data.error}</div>}
 
+        {node.data.error && node.data.stream && (
+          <div className="afs-result">
+            <div className="afs-result__title">模型原始输出（供排查）</div>
+            <pre className="afs-result__pre">{node.data.stream}</pre>
+          </div>
+        )}
+
         {running && node.data.previewUrl && (
           <div className="afs-result">
             <div className="afs-result__title">生成预览…</div>
