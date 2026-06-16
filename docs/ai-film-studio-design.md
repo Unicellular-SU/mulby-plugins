@@ -937,3 +937,9 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 
 #### 16.29 未完成（明确留待后续）
 - **批量 ForEach / Merge / Variable / Switch 控制流**：需要给执行引擎引入"子图/扇出"语义（一个节点对数组逐项跑下游、产出 N 份产物），是独立的架构级改造，不纳入本打磨包，留作后续里程碑。
+
+#### 16.30 人工验收修复（2026-06-16）
+首次在 Mulby 内实跑后发现并修复 3 个问题：
+1. **文本节点流式后"未能解析 JSON 输出"**（根因）：`runText` 用 `await ai.call(...)` 的 `result.content` 作为最终文本，但**流式调用下该值可能为空/不完整**（对照 `mulby-ai-chat` 一律手动累积 `accContent`）。修复：`textEngine` 自行累积 text 增量，`content = 累积值 || result.content`，确保 `extractJson` 拿到完整文本。
+2. **流式时节点忽长忽短/被撑宽**：`.afs-node` 仅有 `min-width` 无固定宽度，宽度随流式 tail 变化。修复：固定 `width:200px` + `.afs-node__summary` 三行钳制（`-webkit-line-clamp`）。
+3. **上游失败后下游仍盲跑连环报错**：`runAll` 不分上游成败。修复：级联阻断——某节点的全部上游均失败/跳过时跳过该节点并标注"已跳过：上游未成功产出"，结束时汇总出错/跳过数。

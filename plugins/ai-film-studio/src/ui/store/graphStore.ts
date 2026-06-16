@@ -849,32 +849,47 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const order = topoOrder(get().nodes, get().edges)
     set({ isRunning: true })
     const errored: string[] = []
+    const skipped: string[] = []
+    const failed = new Set<string>() // 出错或被跳过的节点，用于阻断下游
     try {
       for (const n of order) {
         if (!get().isRunning) break
         const def = getNodeDef(n.data.kind)
         if (!def) continue
-        if (
+        const eligible =
           def.category === 'input' ||
           def.category === 'text' ||
           def.category === 'image' ||
           def.category === 'video' ||
           def.category === 'audio' ||
           (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
-        ) {
-          await execNode(n.id)
-          const cur = get().nodes.find((x) => x.id === n.id)
-          if (cur?.data.status === 'error') errored.push(cur.data.title || def.label)
-        }
         // 注：export 节点会弹保存对话框，仅在单独运行时触发，不纳入「运行全部」
+        if (!eligible) continue
+        // 级联阻断：若该节点的全部上游都已失败/跳过，则不再盲跑（避免下游连环报错）
+        const ups = get().edges.filter((e) => e.target === n.id).map((e) => e.source)
+        if (ups.length > 0 && ups.every((s) => failed.has(s))) {
+          failed.add(n.id)
+          skipped.push(n.data.title || def.label)
+          patchNode(n.id, { status: 'error', error: '已跳过：上游节点未成功产出', stream: undefined })
+          continue
+        }
+        await execNode(n.id)
+        const cur = get().nodes.find((x) => x.id === n.id)
+        if (cur?.data.status === 'error') {
+          failed.add(n.id)
+          errored.push(cur.data.title || def.label)
+        }
       }
     } finally {
       set({ isRunning: false, runningNodeId: null })
       void get().saveProject()
-      if (errored.length > 0) {
+      if (errored.length > 0 || skipped.length > 0) {
+        const parts: string[] = []
+        if (errored.length) parts.push(`${errored.length} 个出错`)
+        if (skipped.length) parts.push(`${skipped.length} 个因上游失败跳过`)
         const names = errored.slice(0, 3).join('、')
         window.mulby?.notification?.show(
-          `运行完成，但 ${errored.length} 个节点出错：${names}${errored.length > 3 ? ' 等' : ''}（点节点查看详情）`,
+          `运行完成：${parts.join('，')}${names ? `（出错：${names}${errored.length > 3 ? ' 等' : ''}）` : ''}`,
           'warning'
         )
       }

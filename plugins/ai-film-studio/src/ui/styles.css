@@ -263,7 +263,7 @@ body {
 
 /* ============ 节点 ============ */
 .afs-node {
-  min-width: 186px;
+  width: 200px;
   background: var(--afs-node-bg);
   border: 1px solid var(--afs-border);
   border-radius: 8px;
@@ -335,6 +335,12 @@ body {
   color: var(--afs-muted);
   line-height: 1.4;
   word-break: break-word;
+  white-space: pre-wrap;
+  /* 钳制为最多 3 行，避免流式文本把节点撑高/撑宽 */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* ============ 属性面板 ============ */

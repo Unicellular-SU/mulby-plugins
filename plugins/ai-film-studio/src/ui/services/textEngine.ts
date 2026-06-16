@@ -40,16 +40,26 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
   ]
 
   let errorMessage = ''
+  // 自行累积流式增量：流式调用时 await 的 result.content 可能为空/不完整
+  // （对齐 mulby-ai-chat 的做法），最终文本以累积值为准。
+  let acc = ''
+  let accReasoning = ''
   const req = ai.call({ messages, model: opts.model || undefined }, (chunk: AiMessage) => {
     switch (chunk.chunkType) {
       case 'text': {
         const t = typeof chunk.content === 'string' ? chunk.content : ''
-        if (t) opts.onText?.(t)
+        if (t) {
+          acc += t
+          opts.onText?.(t)
+        }
         break
       }
       case 'reasoning': {
         const r = chunk.reasoning_content || ''
-        if (r) opts.onReasoning?.(r)
+        if (r) {
+          accReasoning += r
+          opts.onReasoning?.(r)
+        }
         break
       }
       case 'error': {
@@ -62,11 +72,13 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
   current = req
   try {
     const result = await req
-    const content = typeof result.content === 'string' ? result.content : ''
+    const resultContent = typeof result.content === 'string' ? result.content : ''
+    // 优先用累积的流式文本；非流式或未收到增量时回退 result.content
+    const content = acc || resultContent
     if (!content && (errorMessage || result.error?.message)) {
       throw new Error(errorMessage || result.error?.message || 'AI 调用失败')
     }
-    return { content, reasoning: result.reasoning_content }
+    return { content, reasoning: accReasoning || result.reasoning_content }
   } finally {
     current = null
   }
