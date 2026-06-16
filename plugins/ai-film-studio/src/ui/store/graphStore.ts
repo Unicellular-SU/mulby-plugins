@@ -7,7 +7,7 @@ import { listTextModels, listImageModels } from '../services/models'
 import { runText, abortText } from '../services/textEngine'
 import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
-import { buildPrompt, buildImagePrompt } from '../services/prompts'
+import { buildPrompt, buildImagePrompt, validateNodeJson, buildRepairPrompt } from '../services/prompts'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
@@ -218,7 +218,7 @@ async function execNode(id: string): Promise<void> {
     return
   }
 
-  // 文本 AI 节点：流式调用
+  // 文本 AI 节点：流式调用 + JSON 校验 + 有限次「带错误反馈」修复重试
   if (def.category === 'text') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
     const { system, user } = buildPrompt(node.data, inputs)
@@ -226,28 +226,42 @@ async function execNode(id: string): Promise<void> {
       patchNode(id, { status: 'error', error: '缺少输入内容（请连接上游或填写内容）' })
       return
     }
+    const outDef = def.outputs[0]
+    const wantJson = outDef?.type === 'json'
+    const maxAttempts = wantJson ? 2 : 1 // JSON 节点：失败后回灌错误重试一次
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', stream: '', error: undefined })
     try {
-      const modelOverride = (node.data.params?.modelOverride as string) || null
-      const { content } = await runText({
-        model: modelOverride || get().selectedModel,
-        system,
-        user,
-        onText: (t) => {
-          const cur = useGraphStore.getState().nodes.find((n) => n.id === id)
-          patchNode(id, { stream: (cur?.data.stream || '') + t })
-        },
-      })
-      const outDef = def.outputs[0]
-      if (outDef?.type === 'json') {
-        const json = extractJson(content)
-        if (json == null) {
-          patchNode(id, { status: 'error', error: '未能解析 JSON 输出', stream: content })
+      const model = (node.data.params?.modelOverride as string) || get().selectedModel
+      let content = ''
+      let parsed: unknown = null
+      let lastErr = ''
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const usr = attempt === 1 ? user : buildRepairPrompt(user, lastErr, content)
+        if (attempt > 1) patchNode(id, { stream: '解析未通过，自动修正重试…' })
+        let acc = ''
+        const r = await runText({
+          model,
+          system,
+          user: usr,
+          onText: (t) => {
+            acc += t
+            patchNode(id, { stream: acc })
+          },
+        })
+        content = r.content
+        if (!wantJson) break
+        parsed = extractJson(content)
+        lastErr = validateNodeJson(node.data.kind, parsed)
+        if (!lastErr) break
+      }
+      if (wantJson) {
+        if (lastErr) {
+          patchNode(id, { status: 'error', error: `未能解析 JSON 输出（${lastErr}）`, stream: content })
         } else {
           patchNode(id, {
             status: 'done',
-            outputs: { [outDef.id]: { type: 'json', json, text: content } },
+            outputs: { [outDef.id]: { type: 'json', json: parsed, text: content } },
             stream: content,
           })
         }

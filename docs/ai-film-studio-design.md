@@ -949,3 +949,22 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 1. **Prompt 改为强制纯 JSON**：剧本/分镜/角色设定 System Prompt 要求"只输出合法 JSON 对象本身，首字符 {、末字符 }，禁止前言/注释/围栏/尾随逗号/中文引号"。
 2. **`extractJson` 大幅增强容错**：支持多个 ```fenced``` 块、整体解析、扫描所有 `{`/`[` 起点的配平子串（**最长优先**，规避 prose 里的假括号）、**尾随逗号自动剔除**、未闭合围栏；并用一组 10 个真实场景单测验证全部通过。
 3. **报错时显示模型原始输出**：Inspector 在 error 状态新增"模型原始输出（供排查）"区，便于定位是模型未按格式还是解析问题。
+
+#### 16.32 结构化输出策略（调研结论 + 落地，2026-06-16）
+针对"纯 prompt 约束是否明智"的疑问，做了联网调研（约束解码 / provider 原生 / schema 校验修复 / XML 标签）+ 核查宿主能力，结论与取舍：
+
+**保证强度三档：**
+| 档位 | 方案 | 本插件可用性 |
+|---|---|---|
+| 硬保证（解码级 100%） | 受约束解码：llama.cpp GBNF / Outlines / XGrammar / Guidance（vLLM·SGLang 内置） | ❌ 需自托管、控制 logit；插件调抽象网关，用不了 |
+| 中等保证（API 级） | provider 原生：OpenAI `response_format:json_schema(strict)` / Anthropic `output_format` / Gemini `responseSchema` / 函数调用 | ⚠️ 经核宿主源码（`ai.ts` 参数白名单仅 temperature 等 + `provider-call-orchestration.ts`），`mulby.ai.call` **不暴露** response_format/json_schema；**仅 `tools` 可用**，但 Mulby 工具是 agentic 自动执行，强制/捕获参数需真机 spike，暂不盲做 |
+| 软/无保证（prompt 级） | 纯 JSON prompt / XML 信封标签 | ✅ 可用，但**无任何保证**，必须配校验 |
+
+**业界对"无硬保证"场景的共识（Instructor/BAML/LangChain/Vercel AI SDK + zod/ajv）**：`validate-then-repair-then-retry` 管道——schema 校验 → 程序化修复（jsonrepair：尾随逗号等）→ 有限次（1–2）带错误反馈的重试。XML 信封（`<output>…</output>`）在纯 prompt 下比裸 JSON 更易稳健截取（尤其 Claude），属可选增强。
+
+**本轮落地（app 层管道，对齐共识）：**
+1. **Prompt 纯 JSON 化**（§16.31）+ **健壮 `extractJson`**（多围栏/配平最长/尾随逗号/未闭合，10 单测过）。
+2. **新增 schema 校验** `validateNodeJson`：剧本/分镜/角色设定须含非空 `scenes/shots/characters`，捕获"合法 JSON 但结构不符"。
+3. **新增带错误反馈的修复重试** `buildRepairPrompt`：解析或校验失败时，把错误原因 + 上次原文回灌给模型，重试 1 次（共 2 次）；仍失败则报错并展示原文。
+
+**后续可选升级（需真机验证，非本轮）：** ① `tools` 函数调用作为强约束（Mulby 唯一强机制，待 spike tool_choice 强制 + 从 tool-call chunk 取 args）；② XML 信封增强；③ 直连第三方 SDK 拿 response_format（违背"零配置复用宿主 AI"设计，不推荐）。

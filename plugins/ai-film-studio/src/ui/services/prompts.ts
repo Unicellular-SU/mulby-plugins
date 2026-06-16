@@ -45,6 +45,33 @@ function globalsHint(inputs: Record<string, PortValue[]>): string {
   return ''
 }
 
+/** 校验文本节点的 JSON 产物是否具备期望结构；返回错误原因（空串=通过） */
+export function validateNodeJson(kind: string, json: unknown): string {
+  if (json == null || typeof json !== 'object') return '未能从输出中提取 JSON 对象'
+  const j = json as Record<string, unknown>
+  const nonEmptyArray = (v: unknown) => Array.isArray(v) && v.length > 0
+  switch (kind) {
+    case 'script-gen':
+      return nonEmptyArray(j.scenes) ? '' : 'JSON 缺少非空的 scenes 数组'
+    case 'storyboard':
+      return nonEmptyArray(j.shots) ? '' : 'JSON 缺少非空的 shots 数组'
+    case 'char-sheet':
+      return nonEmptyArray(j.characters) ? '' : 'JSON 缺少非空的 characters 数组'
+    default:
+      return ''
+  }
+}
+
+/** 构造"带错误反馈"的修复重试 user prompt（把校验错误与上次原文回灌给模型） */
+export function buildRepairPrompt(originalUser: string, error: string, lastOutput: string): string {
+  return (
+    `${originalUser}\n\n———\n【上一次输出无法使用】问题：${error}。\n` +
+    `请只输出一个合法的 JSON 对象本身：第一个字符必须是 {，最后一个字符必须是 }；` +
+    `不要任何前言、解释、思路、markdown 代码块围栏、注释或尾随逗号。\n` +
+    `（你上一次的输出，仅供定位并修正问题）：\n${String(lastOutput || '').slice(0, 3000)}`
+  )
+}
+
 const SCRIPT_SYSTEM = `你是资深编剧。根据用户提供的故事/灵感，创作一个结构完整的分场剧本。
 
 【输出要求·必须严格遵守】只输出一个合法的 JSON 对象本身：不要任何前言、说明、思路、注释，也不要 markdown 代码块围栏（不要 \`\`\`）。第一个字符必须是 {，最后一个字符必须是 }。所有键名与字符串值一律用英文双引号 "，禁止尾随逗号，禁止中文标点引号。
