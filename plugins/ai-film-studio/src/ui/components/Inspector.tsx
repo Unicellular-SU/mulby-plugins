@@ -1,9 +1,60 @@
-import { useRef } from 'react'
-import { Trash2, Play, Loader2, Upload, Download, FolderOpen } from 'lucide-react'
+import { useRef, useState, useEffect } from 'react'
+import { Trash2, Play, Loader2, Upload, Download, FolderOpen, KeyRound } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore, type PortValue } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { basename } from '../services/download'
+import { setKey, hasKey, removeKey } from '../services/keys'
+
+/** TTS API Key 输入：密钥走 storage.encrypted，不进工程参数 */
+function TtsKeyField({ nodeId }: { nodeId: string }) {
+  const [val, setVal] = useState('')
+  const [saved, setSaved] = useState(false)
+  const ref = `tts:${nodeId}`
+  useEffect(() => {
+    let on = true
+    hasKey(ref).then((h) => on && setSaved(h))
+    return () => {
+      on = false
+    }
+  }, [ref])
+  const save = async () => {
+    if (!val.trim()) return
+    await setKey(ref, val.trim())
+    setSaved(true)
+    setVal('')
+    window.mulby?.notification?.show('TTS Key 已加密保存')
+  }
+  const clear = async () => {
+    await removeKey(ref)
+    setSaved(false)
+  }
+  return (
+    <div className="afs-field">
+      <label className="afs-field__label">
+        <KeyRound size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+        API Key（加密存储）
+      </label>
+      <input
+        className="afs-field__input"
+        type="password"
+        value={val}
+        placeholder={saved ? '已配置（留空保持不变）' : 'sk-...'}
+        onChange={(e) => setVal(e.target.value)}
+      />
+      <div className="afs-result__actions">
+        <button className="afs-btn afs-btn--mini" onClick={save} disabled={!val.trim()}>
+          保存 Key
+        </button>
+        {saved && (
+          <button className="afs-btn afs-btn--mini" onClick={clear}>
+            清除
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function resultText(v: PortValue): string {
   if (v.type === 'json' && v.json !== undefined) {
@@ -66,8 +117,10 @@ export default function Inspector() {
     def.category === 'text' ||
     def.category === 'image' ||
     def.category === 'video' ||
+    def.category === 'audio' ||
     (def.category === 'input' && !isImageInput) ||
-    (def.category === 'output' && node.data.kind === 'preview')
+    (def.category === 'output' &&
+      (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
   const outputValues = node.data.outputs ? Object.values(node.data.outputs) : []
 
@@ -239,6 +292,8 @@ export default function Inspector() {
           </div>
         )}
 
+        {def.category === 'audio' && <TtsKeyField nodeId={node.id} />}
+
         {def.params.length === 0 &&
           def.category !== 'text' &&
           def.category !== 'image' &&
@@ -311,6 +366,8 @@ export default function Inspector() {
                     )}
                   </div>
                 </div>
+              ) : v.type === 'audio' && v.url ? (
+                <audio key={i} className="afs-result__audio" src={v.url} controls preload="metadata" />
               ) : v.type === 'image' && v.url ? (
                 <img key={i} className="afs-result__img" src={v.url} alt="result" />
               ) : (

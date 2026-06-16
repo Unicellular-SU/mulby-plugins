@@ -13,10 +13,15 @@ function pad(n: number, len = 2): string {
 }
 
 function fmtTime(sec: number): string {
-  const ms = Math.round((sec - Math.floor(sec)) * 1000)
-  const s = Math.floor(sec) % 60
-  const m = Math.floor(sec / 60) % 60
-  const h = Math.floor(sec / 3600)
+  let whole = Math.floor(sec)
+  let ms = Math.round((sec - whole) * 1000)
+  if (ms >= 1000) {
+    ms -= 1000
+    whole += 1
+  }
+  const s = whole % 60
+  const m = Math.floor(whole / 60) % 60
+  const h = Math.floor(whole / 3600)
   return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms, 3)}`
 }
 

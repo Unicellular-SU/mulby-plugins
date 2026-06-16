@@ -81,10 +81,15 @@ export async function ffmpegVersion(): Promise<string | null> {
   }
 }
 
-/** ffmpeg subtitles 滤镜路径转义（跨平台：盘符冒号、反斜杠、单引号） */
+/** ffmpeg subtitles 滤镜路径转义（跨平台：保留 Windows 盘符冒号、转义其余冒号/单引号） */
 function escapeSubPath(p: string): string {
   let s = p.replace(/\\/g, '/')
-  s = s.replace(/:/g, '\\:')
+  if (/^[A-Za-z]:\//.test(s)) {
+    // Windows：盘符冒号（C:）是路径语法，不能转义；仅转义其余冒号
+    s = s.slice(0, 2) + s.slice(2).replace(/:/g, '\\:')
+  } else {
+    s = s.replace(/:/g, '\\:')
+  }
   s = s.replace(/'/g, "\\'")
   return s
 }
@@ -117,10 +122,18 @@ export function buildConcatArgs(o: ComposeOptions): string[] {
     )
     labels.push(`[v${i}]`)
   }
-  let filter = `${parts.join(';')};${labels.join('')}concat=n=${clips.length}:v=1:a=0[vcat]`
-  let vmap = '[vcat]'
+  // 单片段不能用 concat（ffmpeg 要求 n>=2），仅做归一化；多片段才 concat
+  let filter: string
+  let vmap: string
+  if (clips.length === 1) {
+    filter = parts[0]
+    vmap = labels[0]
+  } else {
+    filter = `${parts.join(';')};${labels.join('')}concat=n=${clips.length}:v=1:a=0[vcat]`
+    vmap = '[vcat]'
+  }
   if (subtitleMode === 'burn' && srtPath) {
-    filter += `;[vcat]subtitles='${escapeSubPath(srtPath)}'[vout]`
+    filter += `;${vmap}subtitles='${escapeSubPath(srtPath)}'[vout]`
     vmap = '[vout]'
   }
   // 配音补静音到与视频等长（-shortest 截到视频结束）

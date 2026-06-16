@@ -4,10 +4,10 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.6（M0+M1+M2+M3+M4 已落地） |
+| 文档版本 | v0.7（M0+M1+M2+M3+M4+M5 已落地） |
 | 日期 | 2026-06-16 |
 | 作者 | 资深全栈架构师 |
-| 状态 | **M0 画布 + M1 文本 + M2 图像 + M3 视频 + M4 供应商增强已完成**（故事→剧本→分镜→图→视频片段可跑通；节点级覆盖/连通自测/视频落盘/img2img 就绪），M5 时间线合成与导出待开发 |
+| 状态 | **M0 画布 + M1 文本 + M2 图像 + M3 视频 + M4 供应商增强 + M5 合成导出已完成**（故事→剧本→分镜→图→视频片段→配音/字幕→ffmpeg 合成成片→导出全链路打通），M6 打磨待开发 |
 | 目标插件目录 | `mulby-plugins/plugins/ai-film-studio/` |
 
 ---
@@ -869,3 +869,44 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 - `assets.loadAsset` 保留旧版 KV 读兼容，迁移前已生成的图不丢；`deleteAsset` 一并清旧 KV 残留。
 - 附带修正：宿主对插件强制忽略自定义 namespace（`storage.ts:30-39`），原 `ai-film-studio-keys/-assets` 命名空间本就未生效；新方案各自独占 `_encrypted_:`/`_attachment_meta_:` 键空间。
 - 验收：`npx tsc --noEmit` 通过；`npm run build` 通过。
+
+---
+
+### M5 — 时间线合成 + 导出 ✅（2026-06-16）
+
+**目标**：把此前已写好但未接线的合成/配音/字幕/落盘服务真正接入执行引擎——配音(TTS)、多片段 ffmpeg 合成（归一化+拼接+字幕+配音）、成片导出，打通"片段 → 成片 → 落盘"。
+
+#### 16.22 已交付内容
+| 模块 | 文件 | 说明 |
+|---|---|---|
+| 配音节点 | `store/graphStore.ts`（execNode `audio` 分支） | 文本 → `services/tts.synthSpeech`（后端 OpenAI 兼容 `/audio/speech` 落盘）→ 音频产物；Key 走 `storage.encrypted`（键 `tts:{nodeId}`，不进工程参数） |
+| 合成节点 | `store/graphStore.ts`（execNode `compose` 分支） | 多片段 → `resolveLocalVideo` 统一落本地 → `ensureFfmpeg`（按需下载）→ `composeFilm`（scale/pad/setsar/fps 归一 + concat + 可选烧录/软字幕 + 配音 apad 混音）→ 成片 |
+| 导出节点 | `store/graphStore.ts`（execNode `export` 分支） | 上游视频 → `dialog.showSaveDialog` 选位置 → 读本地 base64 写入目标 |
+| 字幕 | `services/subtitles.buildSrt` | 由分镜 JSON + 各片段 `durationSec` 生成 SRT 时间轴 |
+| 落盘辅助 | `services/fsutil`、`services/ffmpeg`、`services/tts` | 此前孤立的 M5 服务全部接线（之前全仓零引用） |
+| UI | `components/Inspector.tsx` | audio/compose/export 纳入「运行此节点」；TTS API Key 加密输入框；结果区新增 `<audio>` 播放 |
+| 执行集成 | `store/graphStore.ts` | `runAll` 纳入 audio/compose（export 因弹保存框仅手动运行）；`cancelRun` 调 `abortFfmpeg`；视频产物写 `durationSec`；`serializeNodes` 剥离 audio data: URL |
+
+#### 16.23 执行与数据
+- **配音**：文本（上游或参数）+ 加密 Key → 后端合成落盘 `{userData}/ai-film-studio/audio/`，返回 base64 供会话内播放、`localPath` 供合成复用。
+- **合成**：每个 `clips` 端口产物（可连多个视频节点）解析为本地文件（本地优先 / 远程下载 / data 落盘）；`subs` 端口接分镜 JSON 生成字幕；`audio` 端口接配音；`ffmpeg` 首次自动下载；进度回推节点 `stream`。
+- **导出**：保存对话框选目标 → 复制成片。
+- **持久化**：成片/导出产物保存 `localPath`（随工程持久化），属性面板可「打开文件夹」。
+
+#### 16.24 审查与修复（对抗式 review 确认）
+- 🔴 单片段 `concat=n=1` 非法 → `buildConcatArgs` 单片段跳过 concat、仅归一化。
+- 🔴 `escapeSubPath` 误转义 Windows 盘符冒号 → 保留 `C:`，仅转义其余冒号。
+- 🟡 `export` 补 `runningNodeId` + `finally`；`resolveLocalAudio` 补远程 URL 下载；字幕模式改显式映射；`fmtTime` 修毫秒进位（避免非法 SRT）。
+- 误报已剔除：`apad`+`-shortest` 是补静音到视频等长的官方惯用法（正确）；`mov_text` 是 MP4 软字幕标准编码（正确）。
+
+#### 16.25 验收（已通过）
+- `npx tsc --noEmit` 通过；`npm run build` 通过（M5 服务已打包，bundle 398KB→409KB）。
+- 待人工在 Mulby 内验证：多个视频片段 + 分镜(字幕) + 配音 → 合成节点「运行」得到带字幕/配音的成片并播放/打开文件夹；导出节点另存到指定位置。
+
+> 说明与限制：
+> - 合成成片内联播放用 `file://`（取决于宿主 webSecurity），无论能否内联播放，`localPath` 的「打开文件夹」始终兜底可用。
+> - 字幕时长按各视频节点 `duration` 参数估算，与实际生成时长可能略有出入。
+> - `audio-input`（本地导入音频）节点尚未接线，配音目前由 TTS 节点产出。
+
+#### 16.26 下一步（M6 打磨）
+工作流模板、批量 ForEach、错误体验完善、图标定稿（已出 `assets/icon.svg`→`icon.png`）、README（已交付）、`mulby pack` 产出 `.inplugin`。

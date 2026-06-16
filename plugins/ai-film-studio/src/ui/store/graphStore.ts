@@ -12,6 +12,11 @@ import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
 import { downloadVideoToDisk } from '../services/download'
+import { ensureFfmpeg, composeFilm, abortFfmpeg, parseResolution, type SubtitleMode } from '../services/ffmpeg'
+import { buildSrt } from '../services/subtitles'
+import { synthSpeech } from '../services/tts'
+import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
+import { getKey } from '../services/keys'
 import { useProviderStore } from './providerStore'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -32,6 +37,8 @@ export interface PortValue {
   mime?: string
   // 视频落盘本地路径（M4，持久化）
   localPath?: string
+  // 片段时长（秒）：视频节点产出时写入，compose 用于字幕时间轴对齐（M5）
+  durationSec?: number
 }
 
 export interface FilmNodeData {
@@ -364,10 +371,11 @@ async function execNode(id: string): Promise<void> {
         },
       })
       const outId = def.outputs[0]?.id || 'out'
+      const durationSec = Number(node.data.params?.duration ?? 5) || 5
       patchNode(id, {
         status: 'done',
         stream: '下载到本地…',
-        outputs: { [outId]: { type: 'video', url, mime: 'video/mp4' } },
+        outputs: { [outId]: { type: 'video', url, mime: 'video/mp4', durationSec } },
       })
       // 远程 URL 可能有有效期：成功后尽力下载落盘（失败不影响 done 状态）
       try {
@@ -386,7 +394,153 @@ async function execNode(id: string): Promise<void> {
     return
   }
 
-  // 导出：后续里程碑实现
+  // 配音 TTS 节点（M5）：文本 → 后端 OpenAI 兼容 /audio/speech → 落盘音频
+  if (def.category === 'audio') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const p = node.data.params || {}
+    const text = (inputs['in']?.[0]?.text || String(p.text ?? '')).trim()
+    if (!text) {
+      patchNode(id, { status: 'error', error: '缺少配音文本（连接上游文本或在参数中填写）' })
+      return
+    }
+    const apiKey = await getKey(`tts:${id}`)
+    if (!apiKey) {
+      patchNode(id, { status: 'error', error: '未配置 TTS API Key（在属性面板填写后保存）' })
+      return
+    }
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', stream: '合成配音…', error: undefined })
+    try {
+      const { path, base64, mime } = await synthSpeech(text, {
+        baseURL: String(p.baseURL || 'https://api.openai.com/v1'),
+        apiKey,
+        model: String(p.model || 'tts-1'),
+        voice: String(p.voice || 'alloy'),
+        speed: Number(p.speed ?? 1) || 1,
+        format: 'mp3',
+      })
+      const outId = def.outputs[0]?.id || 'out'
+      const url = base64 ? `data:${mime};base64,${base64}` : toFileUrl(path)
+      patchNode(id, {
+        status: 'done',
+        stream: undefined,
+        outputs: { [outId]: { type: 'audio', url, localPath: path, mime } },
+      })
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
+
+  // 影片合成节点（M5）：多片段 → ffmpeg 归一+拼接，可选配音/字幕
+  if (def.category === 'output' && node.data.kind === 'compose') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const clipVals = inputs['clips'] || []
+    if (clipVals.length === 0) {
+      patchNode(id, { status: 'error', error: '缺少视频片段（连接「视频片段」端口，可连多个）' })
+      return
+    }
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', stream: '准备片段…', error: undefined })
+    try {
+      // 1) 每个片段解析为本地文件
+      const clipPaths: string[] = []
+      for (let i = 0; i < clipVals.length; i++) {
+        patchNode(id, { stream: `准备片段 ${i + 1}/${clipVals.length}…` })
+        const lp = await resolveLocalVideo(clipVals[i], `clip_${i}`)
+        if (lp) clipPaths.push(lp)
+      }
+      if (clipPaths.length === 0) throw new Error('无法获取任何片段的本地文件')
+      // 2) 配音（可选）
+      const audioVal = inputs['audio']?.[0]
+      const audioPath = audioVal ? await resolveLocalAudio(audioVal) : undefined
+      // 3) 字幕（可选）：从分镜 JSON 按片段时长生成 SRT
+      const subModeRaw = String(node.data.params?.subtitleMode ?? '关闭')
+      // 显式映射 nodeDefs 的字幕选项标签 → ffmpeg 模式；未知值降级为 off
+      const subtitleMode: SubtitleMode =
+        subModeRaw === '烧录字幕' ? 'burn' : subModeRaw === '软字幕' ? 'soft' : 'off'
+      let srtPath: string | undefined
+      const subsVal = inputs['subs']?.[0]
+      if (subtitleMode !== 'off' && subsVal?.json) {
+        const durations = clipVals.map((v) => ({ duration: v.durationSec ?? 5 }))
+        const srt = buildSrt(durations, subsVal.json)
+        if (srt) srtPath = await writeText('subtitles', `sub_${Date.now()}.srt`, srt)
+      }
+      // 4) 确保 ffmpeg 可用（首次按需下载）
+      patchNode(id, { stream: '检查 ffmpeg…' })
+      const ready = await ensureFfmpeg((info) => patchNode(id, { stream: info.text }))
+      if (!ready) throw new Error('ffmpeg 不可用（自动下载失败，请检查网络）')
+      // 5) 合成
+      const [w, h] = parseResolution(String(node.data.params?.resolution || '1280x720'))
+      const fps = Number(node.data.params?.fps ?? 24) || 24
+      const totalSec = clipVals.reduce((a, v) => a + (v.durationSec ?? 5), 0)
+      const outPath = await exportPath(`film_${Date.now()}.mp4`)
+      await composeFilm({
+        clips: clipPaths,
+        outPath,
+        width: w,
+        height: h,
+        fps,
+        audioPath,
+        srtPath,
+        subtitleMode,
+        totalSec,
+        onProgress: (info) => patchNode(id, { stream: info.text }),
+      })
+      const outId = def.outputs[0]?.id || 'out'
+      patchNode(id, {
+        status: 'done',
+        stream: undefined,
+        outputs: { [outId]: { type: 'video', url: toFileUrl(outPath), localPath: outPath, mime: 'video/mp4' } },
+      })
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
+
+  // 导出节点（M5）：把上游视频另存到用户选择的位置
+  if (def.category === 'output' && node.data.kind === 'export') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const v = inputs['in']?.[0]
+    if (!v) {
+      patchNode(id, { status: 'error', error: '缺少输入视频（连接成片/片段）' })
+      return
+    }
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', stream: '准备导出…', error: undefined })
+    try {
+      const local = await resolveLocalVideo(v, 'export')
+      if (!local) throw new Error('无法获取视频文件')
+      const save = await window.mulby?.dialog?.showSaveDialog?.({
+        title: '导出成片',
+        defaultPath: `film_${Date.now()}.mp4`,
+        filters: [{ name: '视频', extensions: ['mp4'] }],
+      })
+      if (!save) {
+        // 用户取消保存：未产出文件，复位为未运行
+        patchNode(id, { status: 'idle', stream: undefined })
+        return
+      }
+      const b64 = await window.mulby!.filesystem.readFile(local, 'base64')
+      await window.mulby!.filesystem.writeFile(save, typeof b64 === 'string' ? b64 : '', 'base64')
+      patchNode(id, {
+        status: 'done',
+        stream: undefined,
+        outputs: { in: { type: 'video', url: toFileUrl(save), localPath: save, mime: 'video/mp4' } },
+      })
+      window.mulby?.notification?.show('已导出成片', 'success')
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
 }
 
 // 解析端口图像为 data URL（供视频首帧使用）
@@ -418,6 +572,48 @@ async function resolveRefImage(
   return null
 }
 
+// 把视频端口产物解析为本机文件路径（compose/export 用）：本地优先，远程下载，data 落盘
+async function resolveLocalVideo(v: PortValue, name: string): Promise<string> {
+  if (v.localPath) return v.localPath
+  if (v.url && v.url.startsWith('data:')) {
+    const { base64 } = fromDataUrl(v.url)
+    return await writeBase64('videos', `${name}_${Date.now()}`, 'mp4', base64)
+  }
+  if (v.url) {
+    try {
+      return await downloadVideoToDisk(v.url, `${name}_${Date.now()}`)
+    } catch {
+      return ''
+    }
+  }
+  if (v.assetId) {
+    const a = await loadAsset(v.assetId)
+    if (a) return await writeBase64('videos', `${name}_${Date.now()}`, 'mp4', a.base64)
+  }
+  return ''
+}
+
+// 把音频端口产物解析为本机文件路径（compose 配音用）
+async function resolveLocalAudio(v: PortValue): Promise<string | undefined> {
+  if (v.localPath) return v.localPath
+  if (v.url && v.url.startsWith('data:')) {
+    const { base64 } = fromDataUrl(v.url)
+    return await writeBase64('audio', `audio_${Date.now()}`, 'mp3', base64)
+  }
+  if (v.url && /^https?:\/\//i.test(v.url)) {
+    try {
+      return await downloadVideoToDisk(v.url, `audio_${Date.now()}`)
+    } catch {
+      return undefined
+    }
+  }
+  if (v.assetId) {
+    const a = await loadAsset(v.assetId)
+    if (a) return await writeBase64('audio', `audio_${Date.now()}`, 'mp3', a.base64)
+  }
+  return undefined
+}
+
 // 序列化节点用于持久化：剥离大体积的 url/previewUrl/stream，仅保留 assetId 引用
 function serializeNodes(nodes: FilmNode[]): FilmNode[] {
   return nodes.map((n) => {
@@ -427,8 +623,8 @@ function serializeNodes(nodes: FilmNode[]): FilmNode[] {
     if (outputs) {
       outputs = Object.fromEntries(
         Object.entries(outputs).map(([k, v]) => {
-          // 仅剥离体积大的 data URL（base64 图像）；保留远程视频/图片 http 链接
-          if (v && (v.type === 'image' || v.type === 'video') && v.url && v.url.startsWith('data:')) {
+          // 仅剥离体积大的 data URL（base64 图像/音频）；保留远程/本地文件链接（含 file://、http、localPath）
+          if (v && (v.type === 'image' || v.type === 'video' || v.type === 'audio') && v.url && v.url.startsWith('data:')) {
             const { url: _url, ...rest } = v
             return [k, rest]
           }
@@ -600,10 +796,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!node) return
     const def = getNodeDef(node.data.kind)
     if (!def) return
-    if (def.category === 'output' && node.data.kind === 'export') {
-      window.mulby?.notification?.show('导出将在后续里程碑支持', 'info')
-      return
-    }
     set({ isRunning: true })
     try {
       await execNode(id)
@@ -627,10 +819,12 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           def.category === 'text' ||
           def.category === 'image' ||
           def.category === 'video' ||
-          (def.category === 'output' && n.data.kind === 'preview')
+          def.category === 'audio' ||
+          (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
         ) {
           await execNode(n.id)
         }
+        // 注：export 节点会弹保存对话框，仅在单独运行时触发，不纳入「运行全部」
       }
     } finally {
       set({ isRunning: false, runningNodeId: null })
@@ -642,6 +836,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     abortText()
     abortImage()
     abortVideo()
+    abortFfmpeg()
     const rid = get().runningNodeId
     if (rid) patchNode(rid, { status: 'idle', previewUrl: undefined, stream: undefined })
     set({ isRunning: false, runningNodeId: null })

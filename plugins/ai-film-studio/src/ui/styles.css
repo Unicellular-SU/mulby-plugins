@@ -597,6 +597,12 @@ body {
   margin-bottom: 8px;
 }
 
+.afs-result__audio {
+  display: block;
+  width: 100%;
+  margin: 4px 0 8px;
+}
+
 /* 节点缩略图（图像产物） */
 .afs-node__thumb {
   position: relative;
