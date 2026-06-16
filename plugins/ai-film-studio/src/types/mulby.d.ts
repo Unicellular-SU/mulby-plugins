@@ -982,6 +982,11 @@ type AiModelParameters = {
   frequencyPenalty?: number
   stopSequences?: string[]
   seed?: number
+  /** 结构化输出：'json_object'=合法 JSON；'json_schema'=按 jsonSchema 约束（宿主 v0.9+ 支持） */
+  responseFormat?: 'json_object' | 'json_schema'
+  jsonSchema?: Record<string, unknown>
+  jsonSchemaName?: string
+  strict?: boolean
 }
 type AiMcpSelection = { mode?: 'off' | 'manual' | 'auto'; serverIds?: string[]; allowedToolIds?: string[] }
 type AiSkillSelection = {

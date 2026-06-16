@@ -968,3 +968,22 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 3. **新增带错误反馈的修复重试** `buildRepairPrompt`：解析或校验失败时，把错误原因 + 上次原文回灌给模型，重试 1 次（共 2 次）；仍失败则报错并展示原文。
 
 **后续可选升级（需真机验证，非本轮）：** ① `tools` 函数调用作为强约束（Mulby 唯一强机制，待 spike tool_choice 强制 + 从 tool-call chunk 取 args）；② XML 信封增强；③ 直连第三方 SDK 拿 response_format（违背"零配置复用宿主 AI"设计，不推荐）。
+
+#### 16.33 宿主级结构化输出（升级 Mulby AI 网关，2026-06-16）
+经用户授权，直接增强 **Mulby 宿主**（`mulby/` 仓库），让 `ai.call` 支持 API 级结构化输出——把保证从"软（prompt）"提升到"API 级"。
+
+**宿主改动（`mulby/src/`）：**
+| 文件 | 改动 |
+|---|---|
+| `shared/types/ai.ts` | `AiModelParameters` 新增 `responseFormat: 'json_object'\|'json_schema'`、`jsonSchema`、`jsonSchemaName`、`strict` |
+| `main/ai/service/utils.ts` | `normalizeModelParams` 放行新字段；`stripReasoningParams` 一并剥离（避免误当顶层 SDK 参数）；新增 `openAiCompatJsonBody()`（直连 body 注入 `response_format`）与 `buildSdkStructuredOutput()`（AI SDK `Output.object`/`Output.json`） |
+| `main/ai/service/openai-compat-stream.ts` | 两处 chat body 注入 `response_format`（覆盖 OpenAI/兼容/ollama/deepseek/openrouter/azure 等直连路径） |
+| `main/ai/service/provider-{call,stream}-orchestration.ts` | `generateText`/`streamText` 注入 `output`（无工具时），覆盖走 AI SDK 的 provider（Google 等）；SDK 自动适配各家（OpenAI response_format / Anthropic structuredOutputMode / Gemini responseSchema） |
+
+- 复刻现有 reasoning 参数的成熟模式（`providerOptions` + 直连 body 双通道 + strip），**纯增量、零回归**（不设置时返回 {}）。
+- 验收：宿主 `pnpm run typecheck` 通过、`eslint`（改动文件）通过；Vercel AI SDK v6.0.67 的 `Output.object/json` API 经类型校验。
+- 限制：Anthropic **原生 fetch** 分支未注入（其原生 API 结构化字段支持不稳，避免 400），走 SDK 分支或 app 层兜底；真正的解码级约束仍需自托管模型，不在网关范围。
+
+**插件改动：** `textEngine` 新增 `jsonMode`，JSON 文本节点（剧本/分镜/角色）调用时传 `params.responseFormat='json_object'`，从源头约束合法 JSON；旧宿主忽略该参数自动回退到 prompt+校验+重试。
+
+> ⚠️ 宿主源码改动需**重新构建/重启 Mulby**（`pnpm dev` 或 `pnpm electron:build`）才生效；仅重装插件 `.inplugin` 不够。

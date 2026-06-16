@@ -7,6 +7,8 @@ export interface TextRunOptions {
   model?: string | null
   system: string
   user: string
+  /** 为 true 时请求宿主结构化输出（response_format: json_object），从源头约束为合法 JSON */
+  jsonMode?: boolean
   onText?: (chunk: string) => void
   onReasoning?: (chunk: string) => void
 }
@@ -44,7 +46,9 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
   // （对齐 mulby-ai-chat 的做法），最终文本以累积值为准。
   let acc = ''
   let accReasoning = ''
-  const req = ai.call({ messages, model: opts.model || undefined }, (chunk: AiMessage) => {
+  // 结构化输出（宿主 v0.9+）：让模型从源头只产出合法 JSON；旧宿主忽略该参数（不影响）
+  const params = opts.jsonMode ? { responseFormat: 'json_object' as const } : undefined
+  const req = ai.call({ messages, model: opts.model || undefined, params }, (chunk: AiMessage) => {
     switch (chunk.chunkType) {
       case 'text': {
         const t = typeof chunk.content === 'string' ? chunk.content : ''

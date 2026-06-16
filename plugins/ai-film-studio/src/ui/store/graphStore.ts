@@ -244,6 +244,7 @@ async function execNode(id: string): Promise<void> {
           model,
           system,
           user: usr,
+          jsonMode: wantJson, // 宿主结构化输出：从源头约束为合法 JSON（旧宿主忽略，回退 prompt+校验）
           onText: (t) => {
             acc += t
             patchNode(id, { stream: acc })
