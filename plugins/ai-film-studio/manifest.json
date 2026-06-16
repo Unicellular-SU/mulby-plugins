@@ -1,0 +1,39 @@
+{
+  "id": "ai-film-studio",
+  "name": "ai-film-studio",
+  "displayName": "AI 影视工坊",
+  "version": "0.1.0",
+  "author": "mulby",
+  "type": "ai",
+  "description": "无限画布 AI 影视工作流：故事→剧本→分镜→角色/场景图→关键帧→视频→成片",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true
+  },
+  "window": {
+    "type": "default",
+    "width": 1400,
+    "height": 900,
+    "minWidth": 1100,
+    "minHeight": 720
+  },
+  "features": [
+    {
+      "code": "open",
+      "explain": "打开 AI 影视工作流画布",
+      "mode": "detached",
+      "cmds": [
+        { "type": "keyword", "value": "故事画布" },
+        { "type": "keyword", "value": "AI视频" },
+        { "type": "keyword", "value": "分镜" },
+        { "type": "keyword", "value": "影视工坊" }
+      ]
+    }
+  ]
+}
