@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { useReactFlow } from '@xyflow/react'
 import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings } from 'lucide-react'
 import { useGraphStore, type ProjectData } from '../store/graphStore'
+import { TEMPLATES } from '../templates'
 
 interface ToolbarProps {
   onOpenProviders?: () => void
@@ -34,6 +35,7 @@ export default function Toolbar({ onOpenProviders }: ToolbarProps) {
   const setSelectedImageModel = useGraphStore((s) => s.setSelectedImageModel)
   const runAll = useGraphStore((s) => s.runAll)
   const cancelRun = useGraphStore((s) => s.cancelRun)
+  const loadTemplate = useGraphStore((s) => s.loadTemplate)
 
   const onExport = () => {
     const data = exportProject()
@@ -136,7 +138,24 @@ export default function Toolbar({ onOpenProviders }: ToolbarProps) {
         <button className="afs-btn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布">
           <Maximize2 size={15} />
         </button>
-        <button className="afs-btn" onClick={newProject} title="新建工程">
+        <select
+          className="afs-toolbar__select"
+          value=""
+          onChange={(e) => {
+            const id = e.target.value
+            e.target.value = ''
+            if (id) void loadTemplate(id)
+          }}
+          title="从模板新建工程"
+        >
+          <option value="">＋ 模板…</option>
+          {TEMPLATES.map((t) => (
+            <option key={t.id} value={t.id} title={t.desc}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+        <button className="afs-btn" onClick={newProject} title="新建空白工程">
           <Plus size={15} />
         </button>
         <button className="afs-btn afs-btn--save toolbar__btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">

@@ -78,6 +78,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 export default function Inspector() {
   const fileRef = useRef<HTMLInputElement>(null)
+  const audioRef = useRef<HTMLInputElement>(null)
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const node = useGraphStore((s) => s.nodes.find((n) => n.id === s.selectedNodeId) || null)
   const updateNodeParam = useGraphStore((s) => s.updateNodeParam)
@@ -85,6 +86,7 @@ export default function Inspector() {
   const removeNode = useGraphStore((s) => s.removeNode)
   const runNode = useGraphStore((s) => s.runNode)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
+  const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
   const downloadVideo = useGraphStore((s) => s.downloadVideo)
   const isRunning = useGraphStore((s) => s.isRunning)
   const runningNodeId = useGraphStore((s) => s.runningNodeId)
@@ -113,12 +115,13 @@ export default function Inspector() {
   }
   const meta = CATEGORY_META[def.category]
   const isImageInput = node.data.kind === 'image-input'
+  const isAudioInput = node.data.kind === 'audio-input'
   const runnable =
     def.category === 'text' ||
     def.category === 'image' ||
     def.category === 'video' ||
     def.category === 'audio' ||
-    (def.category === 'input' && !isImageInput) ||
+    (def.category === 'input' && !isImageInput && !isAudioInput) ||
     (def.category === 'output' &&
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
@@ -133,6 +136,18 @@ export default function Inspector() {
       await setNodeImage(node.id, dataUrl)
     } catch {
       window.mulby?.notification?.show('图片读取失败', 'error')
+    }
+  }
+
+  const onPickAudio = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+      await setNodeAudio(node.id, dataUrl)
+    } catch {
+      window.mulby?.notification?.show('音频读取失败', 'error')
     }
   }
 
@@ -201,6 +216,15 @@ export default function Inspector() {
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
           <button className="afs-inspector__run" onClick={() => fileRef.current?.click()} title="选择本地图片作为参考图">
             <Upload size={14} /> 上传参考图
+          </button>
+        </>
+      )}
+
+      {isAudioInput && (
+        <>
+          <input ref={audioRef} type="file" accept="audio/*" hidden onChange={onPickAudio} />
+          <button className="afs-inspector__run" onClick={() => audioRef.current?.click()} title="选择本地音频作为成片音轨">
+            <Upload size={14} /> 上传音频
           </button>
         </>
       )}

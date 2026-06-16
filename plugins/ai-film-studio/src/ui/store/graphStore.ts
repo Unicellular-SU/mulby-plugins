@@ -17,6 +17,7 @@ import { buildSrt } from '../services/subtitles'
 import { synthSpeech } from '../services/tts'
 import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
 import { getKey } from '../services/keys'
+import { TEMPLATES, instantiateTemplate } from '../templates'
 import { useProviderStore } from './providerStore'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -148,6 +149,8 @@ interface GraphState {
   runAll: () => Promise<void>
   cancelRun: () => void
   setNodeImage: (id: string, dataUrl: string) => Promise<void>
+  setNodeAudio: (id: string, dataUrl: string) => Promise<void>
+  loadTemplate: (templateId: string) => Promise<void>
   downloadVideo: (id: string) => Promise<void>
 
   // React Flow 回调
@@ -644,7 +647,7 @@ async function hydrateAssets() {
     const outs = n.data.outputs
     if (!outs) continue
     for (const [k, v] of Object.entries(outs)) {
-      if (v && (v.type === 'image' || v.type === 'video') && v.assetId && !v.url) {
+      if (v && (v.type === 'image' || v.type === 'video' || v.type === 'audio') && v.assetId && !v.url) {
         targets.push({ nodeId: n.id, port: k, assetId: v.assetId })
       }
     }
@@ -763,6 +766,42 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     void get().saveProject()
   },
 
+  setNodeAudio: async (id, dataUrl) => {
+    const { base64, mime } = fromDataUrl(dataUrl)
+    const assetId = await saveAsset(base64, mime || 'audio/mpeg')
+    patchNode(id, {
+      status: 'done',
+      error: undefined,
+      outputs: { out: { type: 'audio', assetId, url: toDataUrl(base64, mime || 'audio/mpeg'), mime: mime || 'audio/mpeg' } },
+    })
+    void get().saveProject()
+  },
+
+  loadTemplate: async (templateId) => {
+    const tpl = TEMPLATES.find((t) => t.id === templateId)
+    if (!tpl) return
+    if (get().dirty) await get().saveProject() // 切换前先保存当前工程，避免未保存编辑丢失
+    const { nodes, edges } = instantiateTemplate(tpl)
+    const proj = makeDefaultProject(tpl.name)
+    proj.nodes = nodes
+    proj.edges = edges
+    const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
+    all.push(proj)
+    await sset(KEY_PROJECTS, all)
+    await sset(KEY_CURRENT, proj.id)
+    set({
+      projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+      currentId: proj.id,
+      projectName: proj.name,
+      nodes,
+      edges,
+      selectedNodeId: null,
+      dirty: false,
+    })
+    void get().saveProject()
+    window.mulby?.notification?.show(`已从模板新建工程：${tpl.name}`, 'success')
+  },
+
   downloadVideo: async (id) => {
     const node = get().nodes.find((n) => n.id === id)
     if (!node) return
@@ -809,6 +848,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (get().isRunning) return
     const order = topoOrder(get().nodes, get().edges)
     set({ isRunning: true })
+    const errored: string[] = []
     try {
       for (const n of order) {
         if (!get().isRunning) break
@@ -823,12 +863,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
         ) {
           await execNode(n.id)
+          const cur = get().nodes.find((x) => x.id === n.id)
+          if (cur?.data.status === 'error') errored.push(cur.data.title || def.label)
         }
         // 注：export 节点会弹保存对话框，仅在单独运行时触发，不纳入「运行全部」
       }
     } finally {
       set({ isRunning: false, runningNodeId: null })
       void get().saveProject()
+      if (errored.length > 0) {
+        const names = errored.slice(0, 3).join('、')
+        window.mulby?.notification?.show(
+          `运行完成，但 ${errored.length} 个节点出错：${names}${errored.length > 3 ? ' 等' : ''}（点节点查看详情）`,
+          'warning'
+        )
+      }
     }
   },
 
@@ -933,6 +982,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   // ============ 工程管理 ============
   newProject: async () => {
+    if (get().dirty) await get().saveProject() // 切换前先保存当前工程，避免未保存编辑丢失
     const def = makeDefaultProject(`工程 ${get().projects.length + 1}`)
     const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
     all.push(def)

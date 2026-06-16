@@ -4,10 +4,10 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.7（M0+M1+M2+M3+M4+M5 已落地） |
+| 文档版本 | v0.8（M0–M5 + M6 主体已落地） |
 | 日期 | 2026-06-16 |
 | 作者 | 资深全栈架构师 |
-| 状态 | **M0 画布 + M1 文本 + M2 图像 + M3 视频 + M4 供应商增强 + M5 合成导出已完成**（故事→剧本→分镜→图→视频片段→配音/字幕→ffmpeg 合成成片→导出全链路打通），M6 打磨待开发 |
+| 状态 | **M0–M5 全链路 + M6 打磨主体已完成**（工作流模板、音频素材导入、错误汇总、图标/README、`mulby pack` 产出 `.inplugin`）；仅批量 ForEach 等控制流子系统留待后续 |
 | 目标插件目录 | `mulby-plugins/plugins/ai-film-studio/` |
 
 ---
@@ -910,3 +910,30 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 
 #### 16.26 下一步（M6 打磨）
 工作流模板、批量 ForEach、错误体验完善、图标定稿（已出 `assets/icon.svg`→`icon.png`）、README（已交付）、`mulby pack` 产出 `.inplugin`。
+
+---
+
+### M6 — 打磨（模板 / 音频导入 / 错误体验 / 打包）✅（2026-06-16）
+
+**目标**：把插件从"功能可跑"打磨到"可发布"——降低上手门槛（模板）、补齐 M5 遗留缺口（音频导入）、完善错误反馈，并产出可分发的 `.inplugin`。
+
+#### 16.27 已交付内容
+| 模块 | 文件 | 说明 |
+|---|---|---|
+| 工作流模板 | `ui/templates.ts`（新增） | 声明式定义 3 套流水线（故事→分镜 / 完整影视流水线 / 片段→成片配乐）+ `instantiateTemplate`（生成新 id 节点/边，默认参数取自 nodeDefs） |
+| 模板载入 | `store/graphStore.ts`（`loadTemplate`） | 从模板**新建工程**（不覆盖当前画布）；切换前先保存当前工程防丢失 |
+| 模板入口 | `components/Toolbar.tsx` | 顶栏「＋模板…」下拉，一键载入 |
+| 音频素材导入 | `store/graphStore.ts`（`setNodeAudio`）+ `Inspector.tsx` | `audio-input` 节点上传本地配乐 → 资产库 → 音频产物（接通 M5 遗留缺口）；`hydrateAssets`/`serializeNodes` 支持 audio 往返 |
+| 错误体验 | `store/graphStore.ts`（`runAll`） | 运行全部结束后汇总出错节点并通知（前 3 个节点名） |
+| 健壮性 | `store/graphStore.ts`（`loadTemplate`/`newProject`） | 切换/新建前 `if (dirty) saveProject()`，对齐 `switchProject`，避免未保存编辑丢失 |
+| 图标 | `assets/icon.svg` → `icon.png` | 512×512（M6 前已定稿） |
+| 文档 | `README.md` | 功能/用法/供应商/验收清单（M6 前已交付，本次补模板与音频说明） |
+| 打包 | — | `mulby pack` 产出 `ai-film-studio-0.1.0.inplugin`（`*.inplugin` 已加入 `.gitignore`） |
+
+#### 16.28 验收（已通过）
+- `npx tsc --noEmit` 通过；`mulby pack` 成功产出 `.inplugin`（@vercel/nft 分析后端依赖通过）。
+- 对抗式审查（单 agent）确认模板连线 handle 全部对齐 nodeDefs、对象形状一致、无循环依赖、音频资产往返正确；修复了「loadTemplate/newProject 切换前未保存当前工程」的数据丢失风险。
+- 待人工在 Mulby 内验证：顶栏选模板一键起步；audio-input 上传配乐接入 compose；runAll 出错有汇总提示；安装 `.inplugin` 到 Mulby。
+
+#### 16.29 未完成（明确留待后续）
+- **批量 ForEach / Merge / Variable / Switch 控制流**：需要给执行引擎引入"子图/扇出"语义（一个节点对数组逐项跑下游、产出 N 份产物），是独立的架构级改造，不纳入本打磨包，留作后续里程碑。
