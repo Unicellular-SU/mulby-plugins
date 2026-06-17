@@ -252,11 +252,10 @@ interface FilmEdge {
 | 文本片段 TextNode | — | text | 文本 |
 | 参考图 ImageInput | — | image | 上传（buffer→attachment） |
 | 音频素材 AudioInput | — | audio | 上传本地配乐/音效，作为成片音轨 |
-| **人物 Character** | — | json + image | 角色**资产**：文字生成三视图 **或** 上传图片；身份(JSON)+参考图，可直连关键帧的 `chars`/`ref` 口保持跨镜一致 |
-| **场景 Scene** | — | json + image | 场景**资产**：文字生成概念图 **或** 上传图片；设定(JSON)+参考图，直连关键帧 |
-| 全局设定 GlobalStyle | — | json | 画风、画幅(16:9/9:16/1:1)（顶栏 🎨 面板，注入所有生成节点并决定尺寸） |
+| **人物 Character** | — | json + image | 角色**资产**：「运行此节点」文字生成三视图 **或** 「上传图片」用本地图（二者并存）；身份(JSON)+参考图，直连关键帧 `chars`/`ref` 口保持跨镜一致 |
+| **场景 Scene** | — | json + image | 场景**资产**：「运行此节点」文字生成概念图 **或** 「上传图片」；设定(JSON)+参考图，直连关键帧 |
 
-> 人物/场景为可生成或上传的素材节点（M8）：`source` 参数切换「文字生成 / 上传图片」；图像带 `name`+`kind` 元信息供关键帧按名匹配。生成模式带缓存（全图重跑复用、「运行此节点」强制重画）。
+> 全局画风/画幅由**顶栏 🎨「全局设定」**（项目级 `get().globals`）统一注入所有生成节点并决定尺寸——M9 起移除了画布上的「全局设定」节点（半残：仅 char-image 有 style 口）。人物/场景图带 `name`+`kind` 元信息供关键帧按名匹配；已有参考图（上传或已生成）时全图重跑复用、不覆盖，「运行此节点」`force` 才按文字重画。
 
 **文本 AI 类**（统一：`ai.call` 流式 + 可编辑 System Prompt 模板 + 纯 JSON 输出；鲁棒解析（`jsonParse`）+ 宿主 `response_format`/JSON Schema 结构化输出 + 校验/「带错误反馈」修复重试）
 | 节点 | 输入 | 输出 | 说明 |
@@ -270,10 +269,11 @@ interface FilmEdge {
 **图像 AI 类**（`ai.images`；模型来自 `allModels({endpointType:'image-generation'})`）
 | 节点 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| 角色三视图 CharImage | json(role,可多角色)+globals | image（按角色扇出 N 张） | 前/侧/背三视图，统一画风；输出带 `kind:'character'` |
-| 场景概念图 SceneImage | json/text+globals | image（按场景扇出） | 场景设定图；输出带 `kind:'scene'` |
+| 角色三视图 CharImage | json(role,可多角色) | image（按角色扇出 N 张） | 多角色批量三视图，统一画风（取项目全局）；输出带 `kind:'character'` |
+| 场景概念图 SceneImage | json/text | image（按场景扇出） | 场景设定图；输出带 `kind:'scene'` |
 | 分镜关键帧 Keyframe | shot(any)+chars(json,可选)+ref(image) | image（按镜头扇出） | 单镜首帧；参考图选择 `selectRefs`：角色按出场名匹配、场景图全收作附加参考 |
-| 图生图/重绘 ImageEdit | image+text | image | `images.edit`（支持 `referenceAttachmentIds` 多参考图条件生成） |
+| 图生图/重绘 ImageEdit | image(原图)+ref(image,可选)+prompt(text) | image（按原图逐张扇出） | `images.edit` 重绘/风格迁移/局部改；多参考图条件生成 |
+| 高清重绘 Upscale | image | image | 按原内容重绘并增强细节（经图像模型 `images.edit`，非纯像素放大） |
 
 **视频 AI 类**（自管 VideoProvider）
 | 节点 | 输入 | 输出 | 说明 |
@@ -285,17 +285,16 @@ interface FilmEdge {
 **音频 / 后期类**（分期）
 | 节点 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| 配音 TTS | text | audio | `mulby.tts`；按对白/旁白 |
-| 字幕 Subtitle | text/json | json(srt) | 由剧本/对白生成时间轴字幕 |
-| 配乐 BGM | text | audio | 自管音乐生成 API（可选） |
+| 配音 TTS | text | audio | OpenAI 兼容 `/audio/speech`（Key 加密存储）；按对白/旁白 |
+| 配乐 BGM | text | audio | ✅ 已实现：复用异步供应商框架（需 custom-http 音乐端点 / fal 音乐模型）|
+| 字幕 Subtitle | text/json | json(srt) | （未实现）字幕目前由 compose 按分镜 JSON + 片段时长自动生成 |
 
-**控制类**
+**控制 / 工具类**
 | 节点 | 作用 |
 |---|---|
-| 批量 ForEach | 对数组（如每个分镜）逐项跑下游子图 |
-| 合并 Merge | 多输入聚合为列表（如多片段→时间线） |
-| 变量 Variable | 复用值（如风格 Token、角色名） |
-| 条件 Switch | 简单分支（可后置） |
+| 合并/收集 Merge | ✅ 已实现：把多路同类产物收集为一个多项输出，喂下游（compose 等） |
+| 批量 ForEach | （未实现）当前为**隐式自动扇出**（N 角色→N 图、N 镜→N 帧→N 视频），已覆盖主链路 |
+| 变量 Variable / 条件 Switch | （未实现，可后置） |
 
 **输出类**
 | 节点 | 作用 |
@@ -1070,3 +1069,28 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 **验收**：宿主 `tsc` 通过；插件 `tsc` + `build` 通过。强一致效果依赖所选图像模型支持多图参考（推荐 Gemini 图像模型 / nano-banana）。
 
 > 留待后续：参考图权重/IP-Adapter scale 等供应商专有参数透传、角色 LoRA、资产库版本管理、提示词模板的工程级（非全局）覆盖与导入导出。
+
+---
+
+### M10 — 节点库审查：新增 4 节点 + 移除半残节点 + 上传修复（2026-06-17）
+
+逐节点审查后，修了一个发现的 bug 并按取舍调整节点库：
+
+**Bug 修复**
+- **人物/场景无法上传**：上传按钮原被「参考图来源」下拉（默认=文字生成）挡住，看起来不能上传。改为**移除隐藏的来源开关**——节点同时常驻「上传图片」与「运行此节点」（文字生成）；已有图全图重跑复用、不覆盖，「运行此节点」才强制按文字重画。
+
+**新增节点**
+- **图生图/重绘 `image-edit`**（图像）：原图 + 可选参考图 + 指令 → 重绘/风格迁移/局部改；复用 `editImage` 的多参考图条件生成；原图多张则逐张扇出。补上设计文档早列但缺失的节点。
+- **高清重绘 `upscale`**（图像）：按原内容重绘并增强细节（经 `images.edit`，非纯像素放大）。
+- **配乐 BGM `bgm`**（音频）：复用异步供应商框架（`runVideo`）生成音乐 → 落盘音频，接入 compose 混音；需 music-capable 供应商（custom-http 音乐端点 / fal 音乐模型）。
+- **合并/收集 `merge`**（输出/工具）：把多路同类产物（视频/图/音频）按连入顺序收成一个多项输出，喂 compose 等下游。
+
+**移除 / 简化**
+- 移除画布上的**全局设定 `global-style` 节点**（半残：仅 char-image 有 style 输入口，其余生成节点连不上它）；全局画风/画幅统一走顶栏 🎨 项目级设定。
+- 去掉 `char-image` 的 `style` 输入口（统一用项目全局）。
+
+**关系澄清（保留两者）**：`人物/场景`=单个可生成或上传的资产，直连关键帧；`角色三视图/场景概念图`=从角色设定/剧本批量扇出。二者可连通混用（`人物.out → 角色三视图.role`）。
+
+**验收**：`tsc` 通过、`build` 通过。`refsFromValues` 抽出供 image-edit/merge/keyframe 共用；连线类型校验 `any` 兼容（merge.out → compose.clips 可用）。
+
+> 留待后续：BGM/Upscale 走专用音乐/超分供应商抽象（现 BGM 借用视频供应商配置）；提示词模板工程级覆盖（下一步）。

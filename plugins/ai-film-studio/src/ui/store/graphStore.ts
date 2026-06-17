@@ -283,6 +283,86 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     return
   }
 
+  // 合并/收集：把多路同类产物收集为一个多项输出（纯数据节点，无 AI 调用）
+  if (node.data.kind === 'merge') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const all: PortValue[] = []
+    for (const arr of Object.values(inputs)) for (const v of arr) all.push(...expandItems(v))
+    if (all.length === 0) {
+      patchNode(id, { status: 'idle', outputs: {}, error: undefined })
+      return
+    }
+    const head = all[0]
+    patchNode(id, {
+      status: 'done',
+      error: undefined,
+      outputs: {
+        out: { type: head.type, items: all, url: head.url, mime: head.mime, assetId: head.assetId, durationSec: head.durationSec },
+      },
+    })
+    return
+  }
+
+  // 图生图/重绘 + 高清重绘：对连入的每张原图调用 editImage（多张逐张扇出）
+  if (node.data.kind === 'image-edit' || node.data.kind === 'upscale') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const model = (node.data.params?.imageModelOverride as string) || get().selectedImageModel
+    if (!model) {
+      patchNode(id, { status: 'error', error: '未配置图像模型（请在顶栏或节点选择）' })
+      return
+    }
+    if (!window.mulby?.ai?.images?.edit) {
+      patchNode(id, { status: 'error', error: '当前宿主不支持图像编辑（ai.images.edit）' })
+      return
+    }
+    const mains = await refsFromValues(inputs['image'])
+    if (mains.length === 0) {
+      patchNode(id, { status: 'error', error: '请连接要处理的原图' })
+      return
+    }
+    const isUpscale = node.data.kind === 'upscale'
+    const extraInstr = String(node.data.params?.instruction || '').trim()
+    const prompt = isUpscale
+      ? `upscale and enhance this image: increase resolution, sharpen and add fine details, reduce artifacts, keep the original composition, content and style unchanged${extraInstr ? `. ${extraInstr}` : ''}`
+      : (inputs['prompt']?.[0]?.text || extraInstr).trim()
+    if (!prompt) {
+      patchNode(id, { status: 'error', error: '请填写编辑指令（或连接「指令」文本口）' })
+      return
+    }
+    const extras = isUpscale ? [] : (await refsFromValues(inputs['ref'])).map((x) => ({ base64: x.base64, mime: x.mime }))
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: mains.length > 1 ? `处理中 1/${mains.length}…` : '处理中…' })
+    try {
+      const items: PortValue[] = []
+      for (let i = 0; i < mains.length; i++) {
+        if (!get().isRunning) break
+        patchNode(id, { stream: mains.length > 1 ? `处理中 ${i + 1}/${mains.length}…` : '处理中…' })
+        const m = mains[i]
+        const r = await editImage({ model, prompt, refBase64: m.base64, refMime: m.mime, extraRefs: extras })
+        const assetId = await saveAsset(r.base64, r.mime)
+        const meta: Record<string, unknown> = {}
+        if (m.name) meta.name = m.name
+        if (m.kind) meta.kind = m.kind
+        items.push({ type: 'image', assetId, url: toDataUrl(r.base64, r.mime), mime: r.mime, ...(Object.keys(meta).length ? { meta } : {}) })
+        patchNode(id, {
+          outputs: { out: { type: 'image', items: [...items], assetId: items[0].assetId, url: items[0].url, mime: items[0].mime } },
+        })
+      }
+      if (items.length === 0) throw new Error('未生成任何图像')
+      const head = items[0]
+      patchNode(id, {
+        status: 'done',
+        stream: undefined,
+        outputs: { out: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
+      })
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
+
   // 输入节点：按参数即时派生输出
   if (def.category === 'input') {
     const outId = def.outputs[0]?.id
@@ -538,10 +618,59 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     return
   }
 
-  // 配音 TTS 节点（M5）：文本 → 后端 OpenAI 兼容 /audio/speech → 落盘音频
+  // 配音 TTS / 配乐 BGM 节点
   if (def.category === 'audio') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
     const p = node.data.params || {}
+
+    // 配乐 BGM：复用异步供应商框架（custom-http 音乐端点 / fal 音乐模型）生成音乐 → 落盘音频
+    if (node.data.kind === 'bgm') {
+      const ps = useProviderStore.getState()
+      const overrideId = (p.providerOverride as string) || ''
+      const provider = overrideId ? ps.providers.find((x) => x.id === overrideId) || null : ps.getActive()
+      if (!provider) {
+        patchNode(id, { status: 'error', error: '未配置供应商（顶栏「视频供应商」可添加 custom-http 音乐端点）' })
+        return
+      }
+      const desc = (inputs['in']?.[0]?.text || String(p.prompt ?? '')).trim()
+      if (!desc) {
+        patchNode(id, { status: 'error', error: '缺少配乐描述（连接上游文本或在参数中填写）' })
+        return
+      }
+      const apiKey = await ps.resolveKey(provider.id)
+      if (!apiKey && provider.kind === 'fal') {
+        patchNode(id, { status: 'error', error: '该供应商未配置 API Key' })
+        return
+      }
+      useGraphStore.setState({ runningNodeId: id })
+      patchNode(id, { status: 'running', stream: '生成配乐…', error: undefined })
+      try {
+        const durationSec = Number(p.duration ?? 15) || 15
+        const { url } = await runVideo({
+          cfg: provider,
+          apiKey,
+          req: { prompt: desc, duration: durationSec },
+          onProgress: (pr) => patchNode(id, { stream: `配乐：${pr.status}…` }),
+        })
+        let localPath: string | undefined
+        try {
+          localPath = await downloadVideoToDisk(url, `bgm_${Date.now()}`)
+        } catch {
+          // 下载失败仍可在线播放
+        }
+        patchNode(id, {
+          status: 'done',
+          stream: undefined,
+          outputs: { out: { type: 'audio', url, localPath, mime: 'audio/mpeg', durationSec } },
+        })
+      } catch (e) {
+        patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+      } finally {
+        useGraphStore.setState({ runningNodeId: null })
+      }
+      return
+    }
+
     const text = (inputs['in']?.[0]?.text || String(p.text ?? '')).trim()
     if (!text) {
       patchNode(id, { status: 'error', error: '缺少配音文本（连接上游文本或在参数中填写）' })
@@ -713,28 +842,33 @@ function expandItems(v: PortValue): PortValue[] {
   return v.items && v.items.length ? v.items : [v]
 }
 
-// 从上游所有 image 端口收集参考图（含扇出的多张），带角色名用于一致性匹配（img2img）
-async function resolveRefImages(inputs: Record<string, PortValue[]>): Promise<RefImage[]> {
+// 从一组端口产物里取出图片（含扇出的多张），带 name/kind 用于一致性匹配（img2img）
+async function refsFromValues(vals: PortValue[] | undefined): Promise<RefImage[]> {
   const out: RefImage[] = []
-  for (const arr of Object.values(inputs)) {
-    for (const v of arr) {
-      for (const it of expandItems(v)) {
-        if (it && it.type === 'image') {
-          const dataUrl = await portImageDataUrl(it)
-          if (dataUrl) {
-            const { base64, mime } = fromDataUrl(dataUrl)
-            if (base64)
-              out.push({
-                base64,
-                mime,
-                name: typeof it.meta?.name === 'string' ? it.meta.name : undefined,
-                kind: typeof it.meta?.kind === 'string' ? it.meta.kind : undefined,
-              })
-          }
+  for (const v of vals || []) {
+    for (const it of expandItems(v)) {
+      if (it && it.type === 'image') {
+        const dataUrl = await portImageDataUrl(it)
+        if (dataUrl) {
+          const { base64, mime } = fromDataUrl(dataUrl)
+          if (base64)
+            out.push({
+              base64,
+              mime,
+              name: typeof it.meta?.name === 'string' ? it.meta.name : undefined,
+              kind: typeof it.meta?.kind === 'string' ? it.meta.kind : undefined,
+            })
         }
       }
     }
   }
+  return out
+}
+
+// 从上游所有 image 端口收集参考图（含扇出的多张）
+async function resolveRefImages(inputs: Record<string, PortValue[]>): Promise<RefImage[]> {
+  const out: RefImage[] = []
+  for (const arr of Object.values(inputs)) out.push(...(await refsFromValues(arr)))
   return out
 }
 
@@ -919,7 +1053,7 @@ async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped
       def.category === 'image' ||
       def.category === 'video' ||
       def.category === 'audio' ||
-      (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
+      (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose' || n.data.kind === 'merge'))
     // export 节点会弹保存对话框，仅单独运行时触发，不纳入批量
     if (!eligible) continue
     const st = useGraphStore.getState()

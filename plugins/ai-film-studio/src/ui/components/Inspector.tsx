@@ -122,7 +122,7 @@ export default function Inspector() {
     def.category === 'audio' ||
     (def.category === 'input' && !isImageInput && !isAudioInput) ||
     (def.category === 'output' &&
-      (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
+      (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export' || node.data.kind === 'merge'))
   const running = runningNodeId === node.id
   const hasDownstream = edges.some((e) => e.source === node.id)
   const inputs = gatherInputs(node, allNodes, edges)

@@ -8,13 +8,16 @@ import {
   Eye,
   Download,
   Type,
-  Settings2,
   Frame,
   Clapperboard,
   Film,
   Music,
+  Music2,
   Mic,
   Layers,
+  Brush,
+  Combine,
+  ZoomIn,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -148,19 +151,7 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
     ],
   },
-  {
-    kind: 'global-style',
-    category: 'input',
-    label: '全局设定',
-    desc: '画风/画幅/风格，注入下游所有生成节点',
-    icon: Settings2,
-    inputs: [],
-    outputs: [{ id: 'out', label: '设定', type: 'json' }],
-    params: [
-      { key: 'aspectRatio', label: '画幅', control: 'select', options: ['16:9', '9:16', '1:1'], default: '16:9' },
-      { key: 'style', label: '画风', control: 'text', placeholder: '如：电影感、赛博朋克、水彩…' },
-    ],
-  },
+  // 全局画风/画幅统一由顶栏 🎨「全局设定」面板（项目级）注入所有生成节点，不再用画布节点。
 
   // —— 文本 AI ——
   {
@@ -209,12 +200,9 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'char-image',
     category: 'image',
     label: '角色三视图',
-    desc: '由角色设定生成统一画风的三视图',
+    desc: '由角色设定/人物批量生成统一画风的三视图（画风/画幅取顶栏全局设定）',
     icon: Users,
-    inputs: [
-      { id: 'role', label: '角色', type: 'json' },
-      { id: 'style', label: '设定', type: 'json' },
-    ],
+    inputs: [{ id: 'role', label: '角色', type: 'json' }],
     outputs: [{ id: 'out', label: '角色图', type: 'image' }],
     params: [{ key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' }],
   },
@@ -241,6 +229,30 @@ export const NODE_DEFS: NodeDef[] = [
     ],
     outputs: [{ id: 'out', label: '关键帧', type: 'image' }],
     params: [{ key: 'size', label: '尺寸', control: 'select', options: ['1280x720', '720x1280', '1024x1024'], default: '1280x720' }],
+  },
+  {
+    kind: 'image-edit',
+    category: 'image',
+    label: '图生图/重绘',
+    desc: '把连入的原图按文本指令重绘/风格迁移/局部修改；可连附加参考图（多图条件生成）。原图多张则逐张处理',
+    icon: Brush,
+    inputs: [
+      { id: 'image', label: '原图', type: 'image' },
+      { id: 'ref', label: '参考图(可选)', type: 'image' },
+      { id: 'prompt', label: '指令(可选)', type: 'text' },
+    ],
+    outputs: [{ id: 'out', label: '图片', type: 'image' }],
+    params: [{ key: 'instruction', label: '编辑指令', control: 'textarea', placeholder: '如：改成赛博朋克夜景 / 把外套改成红色（也可连「指令」文本口）' }],
+  },
+  {
+    kind: 'upscale',
+    category: 'image',
+    label: '高清重绘',
+    desc: '把连入的图按原内容/构图重绘并增强细节、提升清晰度（经图像模型重绘，非纯像素放大）。多张逐张处理',
+    icon: ZoomIn,
+    inputs: [{ id: 'image', label: '原图', type: 'image' }],
+    outputs: [{ id: 'out', label: '高清图', type: 'image' }],
+    params: [{ key: 'instruction', label: '增强提示(可选)', control: 'text', placeholder: '可留空；如：保留线条、提升材质细节' }],
   },
 
   // —— 视频 AI ——
@@ -289,6 +301,19 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'speed', label: '语速', control: 'number', default: 1 },
     ],
   },
+  {
+    kind: 'bgm',
+    category: 'audio',
+    label: '配乐 (BGM)',
+    desc: '按文本描述生成背景音乐，接入合成节点做配乐。复用异步供应商框架（需 music-capable 供应商，推荐 custom-http 音乐端点）',
+    icon: Music2,
+    inputs: [{ id: 'in', label: '描述/风格', type: 'text' }],
+    outputs: [{ id: 'out', label: '音乐', type: 'audio' }],
+    params: [
+      { key: 'prompt', label: '音乐描述', control: 'textarea', placeholder: '如：舒缓钢琴、紧张鼓点、史诗管弦…（也可连上游文本）' },
+      { key: 'duration', label: '时长(秒)', control: 'number', default: 15 },
+    ],
+  },
 
   // —— 输出 ——
   {
@@ -299,6 +324,16 @@ export const NODE_DEFS: NodeDef[] = [
     icon: Eye,
     inputs: [{ id: 'in', label: '内容', type: 'any' }],
     outputs: [],
+    params: [],
+  },
+  {
+    kind: 'merge',
+    category: 'output',
+    label: '合并/收集',
+    desc: '把多路同类产物（视频/图/音频）收集为一组，按连入顺序合并为一个多项输出，喂给合成等下游',
+    icon: Combine,
+    inputs: [{ id: 'in', label: '多路输入', type: 'any' }],
+    outputs: [{ id: 'out', label: '合集', type: 'any' }],
     params: [],
   },
   {
