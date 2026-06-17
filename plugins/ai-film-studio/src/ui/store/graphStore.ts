@@ -958,7 +958,6 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set({ isRunning: true })
     const errored: string[] = []
     const skipped: string[] = []
-    const failed = new Set<string>() // 出错或被跳过的节点，用于阻断下游
     try {
       for (const n of order) {
         if (!get().isRunning) break
@@ -973,18 +972,21 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
         // 注：export 节点会弹保存对话框，仅在单独运行时触发，不纳入「运行全部」
         if (!eligible) continue
-        // 级联阻断：若该节点的全部上游都已失败/跳过，则不再盲跑（避免下游连环报错）
-        const ups = get().edges.filter((e) => e.target === n.id).map((e) => e.source)
-        if (ups.length > 0 && ups.every((s) => failed.has(s))) {
-          failed.add(n.id)
-          skipped.push(n.data.title || def.label)
-          patchNode(n.id, { status: 'error', error: '已跳过：上游节点未成功产出', stream: undefined })
-          continue
+        // 级联阻断（数据驱动）：仅当该节点有上游连线、但所有上游都没产出可用数据时才跳过。
+        // 用实时 gatherInputs 判断，而非"失败集合"，避免上游其实已成功却被误判跳过。
+        const hasIncoming = get().edges.some((e) => e.target === n.id)
+        if (hasIncoming) {
+          const ins = gatherInputs(n, get().nodes, get().edges)
+          const hasData = Object.values(ins).some((arr) => arr && arr.length > 0)
+          if (!hasData) {
+            skipped.push(n.data.title || def.label)
+            patchNode(n.id, { status: 'error', error: '已跳过：上游未产出可用输入' })
+            continue
+          }
         }
         await execNode(n.id)
         const cur = get().nodes.find((x) => x.id === n.id)
         if (cur?.data.status === 'error') {
-          failed.add(n.id)
           errored.push(cur.data.title || def.label)
         }
       }
