@@ -1,61 +1,10 @@
-import { useRef, useState, useEffect } from 'react'
-import { Trash2, Play, Loader2, Upload, KeyRound, FastForward } from 'lucide-react'
+import { useRef } from 'react'
+import { Trash2, Play, Loader2, Upload, FastForward } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
-import { setKey, hasKey, removeKey } from '../services/keys'
-
-/** TTS API Key 输入：密钥走 storage.encrypted，不进工程参数 */
-function TtsKeyField({ nodeId }: { nodeId: string }) {
-  const [val, setVal] = useState('')
-  const [saved, setSaved] = useState(false)
-  const ref = `tts:${nodeId}`
-  useEffect(() => {
-    let on = true
-    hasKey(ref).then((h) => on && setSaved(h))
-    return () => {
-      on = false
-    }
-  }, [ref])
-  const save = async () => {
-    if (!val.trim()) return
-    await setKey(ref, val.trim())
-    setSaved(true)
-    setVal('')
-    window.mulby?.notification?.show('TTS Key 已加密保存')
-  }
-  const clear = async () => {
-    await removeKey(ref)
-    setSaved(false)
-  }
-  return (
-    <div className="afs-field">
-      <label className="afs-field__label">
-        <KeyRound size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-        API Key（加密存储）
-      </label>
-      <input
-        className="afs-field__input"
-        type="password"
-        value={val}
-        placeholder={saved ? '已配置（留空保持不变）' : 'sk-...'}
-        onChange={(e) => setVal(e.target.value)}
-      />
-      <div className="afs-result__actions">
-        <button className="afs-btn afs-btn--mini" onClick={save} disabled={!val.trim()}>
-          保存 Key
-        </button>
-        {saved && (
-          <button className="afs-btn afs-btn--mini" onClick={clear}>
-            清除
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -125,6 +74,11 @@ export default function Inspector() {
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export' || node.data.kind === 'merge'))
   const running = runningNodeId === node.id
   const hasDownstream = edges.some((e) => e.source === node.id)
+  // 该节点需要的媒体供应商能力（视频 / 配乐 / 语音）；用于属性面板的供应商选择器
+  const providerCap: 'video' | 'music' | 'tts' | null =
+    def.category === 'video' ? 'video' : node.data.kind === 'bgm' ? 'music' : node.data.kind === 'tts' ? 'tts' : null
+  const providerCapLabel = providerCap === 'video' ? '视频' : providerCap === 'music' ? '配乐' : '语音'
+  const capProviders = providerCap ? providers.filter((p) => (p.capabilities || ['video']).includes(providerCap)) : []
   const inputs = gatherInputs(node, allNodes, edges)
   const outputEntries = node.data.outputs ? Object.entries(node.data.outputs) : []
   const portLabel = (ports: { id: string; label: string }[], pid: string) => ports.find((p) => p.id === pid)?.label || pid
@@ -314,33 +268,31 @@ export default function Inspector() {
           </div>
         )}
 
-        {def.category === 'video' && (
+        {providerCap && (
           <div className="afs-field">
-            <label className="afs-field__label">视频供应商（覆盖默认）</label>
+            <label className="afs-field__label">{providerCapLabel}供应商（覆盖默认）</label>
             <select
               className="afs-field__input"
               value={(node.data.params.providerOverride as string) || ''}
               onChange={(e) => updateNodeParam(node.id, 'providerOverride', e.target.value)}
             >
               <option value="">跟随默认</option>
-              {providers.map((p) => (
+              {capProviders.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
               ))}
             </select>
-            {providers.length === 0 && (
-              <div className="afs-inspector__note">尚未添加供应商，先在顶栏「视频供应商」配置</div>
+            {capProviders.length === 0 && (
+              <div className="afs-inspector__note">尚无{providerCapLabel}供应商，先在顶栏「模型供应商」添加</div>
             )}
           </div>
         )}
 
-        {def.category === 'audio' && <TtsKeyField nodeId={node.id} />}
-
         {def.params.length === 0 &&
           def.category !== 'text' &&
           def.category !== 'image' &&
-          def.category !== 'video' && <div className="afs-inspector__note">该节点暂无可配置参数</div>}
+          !providerCap && <div className="afs-inspector__note">该节点暂无可配置参数</div>}
 
         {/* 输入区：每个输入端口的连接状态与上游产物摘要 */}
         {def.inputs.length > 0 && (

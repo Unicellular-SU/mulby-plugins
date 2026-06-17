@@ -1040,6 +1040,28 @@ body {
   background: rgba(99, 102, 241, 0.18);
   color: var(--afs-accent);
 }
+.afs-tag--cap {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--afs-muted);
+}
+.afs-capbox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.afs-capbox__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--afs-text);
+  cursor: pointer;
+}
 .afs-link-btn {
   background: transparent;
   border: none;

@@ -179,7 +179,7 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts 
         <button className="afs-btn" onClick={onOpenPrompts} title="提示词模板（可编辑各节点提示词，全局生效）">
           <MessageSquareText size={15} />
         </button>
-        <button className="afs-btn" onClick={onOpenProviders} title="视频供应商设置">
+        <button className="afs-btn" onClick={onOpenProviders} title="模型供应商（视频 / 配乐 / 语音）设置">
           <Settings size={15} />
         </button>
         {isRunning ? (

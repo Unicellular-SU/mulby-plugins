@@ -48,9 +48,14 @@ export const falAdapter: VideoProviderAdapter = {
         'output.video.url',
         'output.0.url',
         'output.url',
+        // 音乐/音频模型（配乐供应商复用同一队列接口）
+        'audio.url',
+        'audio_file.url',
+        'audio.0.url',
+        'audio',
         'url',
       ])
-      if (!videoUrl) return { status: 'failed', error: '已完成但未找到视频地址' }
+      if (!videoUrl) return { status: 'failed', error: '已完成但未找到结果地址（视频/音频）' }
       return { status: 'completed', videoUrl }
     }
     if (status === 'IN_PROGRESS') return { status: 'running' }

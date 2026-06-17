@@ -17,7 +17,6 @@ import { ensureFfmpeg, composeFilm, abortFfmpeg, parseResolution, type SubtitleM
 import { buildSrt } from '../services/subtitles'
 import { synthSpeech } from '../services/tts'
 import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
-import { getKey } from '../services/keys'
 import { TEMPLATES, instantiateTemplate } from '../templates'
 import { useProviderStore } from './providerStore'
 
@@ -528,7 +527,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
   if (def.category === 'video') {
     const ps = useProviderStore.getState()
     const overrideId = (node.data.params?.providerOverride as string) || ''
-    const provider = overrideId ? ps.providers.find((p) => p.id === overrideId) || null : ps.getActive()
+    const provider = overrideId ? ps.providers.find((p) => p.id === overrideId) || null : ps.getActiveFor('video')
     if (!provider) {
       patchNode(id, {
         status: 'error',
@@ -634,9 +633,9 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     if (node.data.kind === 'bgm') {
       const ps = useProviderStore.getState()
       const overrideId = (p.providerOverride as string) || ''
-      const provider = overrideId ? ps.providers.find((x) => x.id === overrideId) || null : ps.getActive()
+      const provider = overrideId ? ps.providers.find((x) => x.id === overrideId) || null : ps.getActiveFor('music')
       if (!provider) {
-        patchNode(id, { status: 'error', error: '未配置供应商（顶栏「视频供应商」可添加 custom-http 音乐端点）' })
+        patchNode(id, { status: 'error', error: '未配置配乐供应商（顶栏「模型供应商」添加 music 能力的供应商）' })
         return
       }
       const desc = (inputs['in']?.[0]?.text || String(p.prompt ?? '')).trim()
@@ -683,19 +682,27 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       patchNode(id, { status: 'error', error: '缺少配音文本（连接上游文本或在参数中填写）' })
       return
     }
-    const apiKey = await getKey(`tts:${id}`)
+    // 语音供应商（统一在「模型供应商」面板配置，能力=tts，模式=sync-binary）
+    const tps = useProviderStore.getState()
+    const ttsOverride = (p.providerOverride as string) || ''
+    const ttsProvider = ttsOverride ? tps.providers.find((x) => x.id === ttsOverride) || null : tps.getActiveFor('tts')
+    if (!ttsProvider) {
+      patchNode(id, { status: 'error', error: '未配置语音(TTS)供应商（顶栏「模型供应商」添加 OpenAI 兼容语音）' })
+      return
+    }
+    const apiKey = await tps.resolveKey(ttsProvider.id)
     if (!apiKey) {
-      patchNode(id, { status: 'error', error: '未配置 TTS API Key（在属性面板填写后保存）' })
+      patchNode(id, { status: 'error', error: '该语音供应商未配置 API Key' })
       return
     }
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', stream: '合成配音…', error: undefined })
     try {
       const { path, base64, mime } = await synthSpeech(text, {
-        baseURL: String(p.baseURL || 'https://api.openai.com/v1'),
+        baseURL: String(ttsProvider.baseURL || 'https://api.openai.com/v1'),
         apiKey,
-        model: String(p.model || 'tts-1'),
-        voice: String(p.voice || 'alloy'),
+        model: String(p.model || ttsProvider.model || 'tts-1'),
+        voice: String(p.voice || ttsProvider.voices?.[0] || 'alloy'),
         speed: Number(p.speed ?? 1) || 1,
         format: 'mp3',
       })

@@ -381,34 +381,30 @@ interface VideoGenRequest {
 - `MulbyImageEngine` → `window.mulby.ai.images.generate / edit`，模型取自 `ai.allModels({endpointType:'image-generation'})`。
 - 用户不配置任何供应商即可使用文本/图像节点（复用其在 Mulby 设置里的 Provider 与 Key）。
 
-### 6.4 视频供应商适配器（统一异步三段式）
+### 6.4 媒体供应商（视频 / 配乐 / 语音，M11 统一）
+一个 `MediaProviderConfig` 用 `capabilities: ('video'|'music'|'tts')[]` + `mode` 描述能力与调用方式：
 ```ts
-interface VideoProviderAdapter {
-  kind: ProviderKind;
-  submit(req: VideoGenRequest, cfg: ProviderConfig, apiKey: string): Promise<{ taskId: string }>;
-  poll(taskId: string, cfg: ProviderConfig, apiKey: string):
-    Promise<{ status: 'queued'|'running'|'completed'|'failed'; progress?: number; videoUrl?: string; error?: string }>;
-  fetchResult(taskId: string, cfg: ProviderConfig, apiKey: string): Promise<{ url?: string; base64?: string }>;
+interface MediaProviderConfig {
+  id; label; kind: 'fal' | 'custom-http'
+  capabilities: ('video' | 'music' | 'tts')[]   // 一个供应商可多能力
+  mode: 'async-poll' | 'sync-binary'             // 视频/音乐异步轮询；语音同步返回二进制
+  model?; baseURL?; headers?; submitUrl?; pollUrl?; taskIdPath?; statusPath?; videoUrlPath?; voices?; enabled
+}
+interface VideoProviderAdapter {            // async-poll：视频/音乐共用
+  submit(req, cfg, apiKey): Promise<VideoHandle>
+  poll(handle, cfg, apiKey): Promise<{ status; progress?; videoUrl?; error? }>  // videoUrl 也承载音频地址
 }
 ```
-执行约定：`submit` → 每 ~2s `poll`（指数退避上限，超时默认 300s 可配）→ `completed` 后 `fetchResult` → 下载落盘为资产。图片入参以 **base64 dataURL** 放入 `image_url` 字段。
+- **async-poll**（视频/音乐）：`submit` → 每 ~2s `poll`（退避上限，超时默认 300s）→ `completed` 取结果 URL → 下载落盘为资产。图片入参以 base64 dataURL 放 `image_url`。内置 `fal`（一个 Key 覆盖 Kling/Veo/Sora/Seedance；结果解析含 video.* 与 audio.* 路径）+ `custom-http`（填 submit/poll URL 与结果 JSON 路径，兜底任意供应商）。
+- **sync-binary**（语音 TTS）：经后端 `synthSpeech` 调 OpenAI 兼容 `/audio/speech`，直接返回音频字节落盘（规避 CORS/截断）。
+- **预设**（`providers/presets.ts`）：fal 视频 / fal 配乐 / OpenAI 语音 / 自定义视频 / 自定义音乐 —— 选预设 + 贴 Key 即用（声明式，对齐 Toonflow per-vendor 模块但不执行用户 TS）。
+- **每能力默认供应商**（`defaults`）：`getActiveFor(cap)`；节点可用 `providerOverride` 覆盖。
 
-**内置适配器（建议优先级）**
-| kind | 覆盖模型 | 形态 | 备注 |
-|---|---|---|---|
-| `fal` | Kling 3.0 / Veo 3.1 / Sora 2 / Seedance 2.0 / LTX 等 | 队列 submit/status/result | **首选**：一个 Key 覆盖最广 |
-| `replicate` | 多家开源/商用 | predictions 轮询 | 备选聚合 |
-| `kling` | 可灵 | 直连 | 国内直连 |
-| `minimax` | 海螺 | 直连 | 国内直连 |
-| `runway` | Gen 系列 | 直连 | 海外 |
-| `vidu` | Vidu | 直连 | 国内 |
-| `custom-http` | 任意 | 用户填 submit/poll/fetch 的 URL 模板与 JSON 路径 | 兜底，保证可扩展 |
-
-> MVP 仅实现 `fal` + `custom-http`；其余按需增量。
+> 逃生口（未做）：`kind:'custom-js'` 用户自写适配器（沙箱 `new Function`）。
 
 ### 6.5 Key 管理与安全
-- API Key 一律存 `storage.encrypted`（Keychain/DPAPI 加密），结构里只存 `apiKeyRef` 键名，不落明文。
-- 设置面板集中管理供应商：增删、填 baseURL/Key、拉取/手填模型列表、连通性自测（发一个最小任务）。
+- API Key 一律存 `storage.encrypted`（Keychain/DPAPI 加密），供应商结构里只存键名引用（`provider.id`），不落明文。
+- 「模型供应商」面板集中管理：预设填充、增删、能力勾选、填 baseURL/Key、连通性自测（async 供应商发最小任务）、设每能力默认。
 - 节点级可 `providerOverride` 覆盖默认供应商/模型；未覆盖则用该能力的"默认供应商"。
 
 ---
@@ -1095,4 +1091,22 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 
 **提示词模板工程级覆盖**：模板解析升级为两层 + 默认——**本工程覆盖 > 全局覆盖 > 内置默认**。工程级覆盖存在工程 JSON（`ProjectData.promptOverrides`，跟随导入导出/切换工程，由 `graphStore` 拥有并经 `promptStore.setProjectLayer` 推送快照供 `prompts.ts` 解析）；全局覆盖仍存明文 KV 作跨工程基线。「提示词模板」面板加「本工程 / 全局默认」作用域切换。
 
-> 留待后续：BGM/Upscale 走专用音乐/超分供应商抽象（现 BGM 借用视频供应商配置）；提示词模板的导出/导入分享。
+> 留待后续：Upscale 走专用超分供应商；提示词模板的导出/导入分享。
+
+---
+
+### M11 — 统一「媒体供应商」（视频 / 配乐 / 语音）+ 预设（2026-06-17）
+
+调研 Toonflow 的供应商体系后（每供应商一个 TS 适配器模块 `data/vendor/*.ts`，统一 `textRequest/imageRequest/videoRequest/ttsRequest` 接口，`vendor` 声明凭证字段 + 模型目录 + modes/约束，`vendor2json.ts` 编译成注册表；另有 `data/modelPrompt/video/*.md` 外化每模型调用模式、`data/skills/` 外化画风），把我们碎片化的供应商配置统一。
+
+**痛点**：视频走 `VideoProviderConfig`、TTS 逐节点配 baseURL/Key、BGM 借用视频供应商 —— 三套不一致。
+
+**改动**：务实裁剪 Toonflow（不在沙箱跑用户 TS，改**声明式预设 + 通用适配器**）：
+- `VideoProviderConfig → MediaProviderConfig`：新增 `capabilities: ('video'|'music'|'tts')[]` + `mode: 'async-poll'|'sync-binary'`（旧数据归一化为 video+async-poll，别名保留兼容）。一个供应商可多能力（对齐 Toonflow 一个 vendor 覆盖多类）。
+- `providerStore`：多能力 + **每能力默认供应商**（`defaults`，迁移旧 `selectedVideoProvider`）；`getActiveFor(cap)` / `providersFor(cap)` / `setDefault(cap,id)`。
+- 适配器：`async-poll`（fal/custom-http，视频/音乐共用 `runVideo`，fal 结果解析补 `audio.url` 等使音乐可用）；`sync-binary`（语音，复用后端 `synthSpeech`）。
+- **预设注册表** `providers/presets.ts`：fal 视频 / fal 配乐 / OpenAI 语音 / 自定义视频 / 自定义音乐 —— 选预设+贴 Key 即用（声明式 JSON，非可执行 TS，沙箱安全）。
+- 迁移：**TTS 不再逐节点配 Key**，改用 tts 能力供应商（节点仅留 voice/speed + 可选 model 覆盖）；**BGM** 用 music 能力供应商；视频用 video 能力。节点属性面板供应商选择器按能力过滤。
+- UI：顶栏「视频供应商」→「模型供应商」；面板加预设选择 + 能力勾选 + 语音同步字段 + 每能力默认。
+
+> 逃生口（未做）：`kind:'custom-js'` 用户自写适配器（沙箱 `new Function`），覆盖极端供应商 —— 声明式预设已覆盖约 90%，按需再加。
