@@ -231,6 +231,40 @@ function collectJsonArray(vals: PortValue[] | undefined, ...keys: string[]): Arr
   return out
 }
 
+/**
+ * 「人物 / 场景」资产节点的「文字生成」参考图任务：无上游，纯靠自身参数 + 项目全局设定。
+ * 人物 → 三视图参考表；场景 → 概念图。无可用文字内容时返回 null。
+ */
+export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals): ImageJob | null {
+  const p = data.params || {}
+  const name = String(p.name || '')
+  const style = resolveStyle({}, globals)
+  const withStyle = (s: string) => (style ? `${s}, ${style}` : s)
+  if (data.kind === 'character') {
+    const basis = String(p.refPrompt || p.appearance || name || '').trim()
+    if (!basis) return null
+    const size = (typeof p.size === 'string' && p.size) || '1024x1024'
+    return {
+      prompt: withStyle(
+        `${basis}, full-body character turnaround reference sheet, front view, side view and back view, T-pose, neutral background, consistent character design, highly detailed`
+      ),
+      size,
+      meta: { name },
+    }
+  }
+  if (data.kind === 'scene') {
+    const basis = String(p.refPrompt || p.description || name || '').trim()
+    if (!basis) return null
+    const size = sizeFromAspect(resolveAspect({}, globals)) || '1344x768'
+    return {
+      prompt: withStyle(`${basis}, establishing shot, environment concept art, cinematic lighting, highly detailed`),
+      size,
+      meta: { name },
+    }
+  }
+  return null
+}
+
 export function buildImagePrompts(
   data: FilmNodeData,
   inputs: Record<string, PortValue[]>,
@@ -256,7 +290,7 @@ export function buildImagePrompts(
         const prompt = withStyle(
           `character design three-view turnaround sheet, ${tripleHint}, ${ref}, full body, consistent character design, neutral pose, clean line art, soft studio lighting, white background, high detail`
         )
-        return { prompt, size, meta: { name: c.name ? String(c.name) : undefined } }
+        return { prompt, size, meta: { name: c.name ? String(c.name) : undefined, kind: 'character' } }
       })
     }
     case 'scene-image': {
@@ -272,7 +306,7 @@ export function buildImagePrompts(
         return {
           prompt: withStyle(`${desc}, cinematic concept art, environment design, dramatic lighting, highly detailed`),
           size,
-          meta: { name: s.slug ? String(s.slug) : `场景${i + 1}` },
+          meta: { name: s.slug ? String(s.slug) : `场景${i + 1}`, kind: 'scene' },
         }
       })
     }

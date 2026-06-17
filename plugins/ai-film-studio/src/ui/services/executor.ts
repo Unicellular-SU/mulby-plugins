@@ -19,12 +19,15 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
       return { type: 'json', json: { aspectRatio: p.aspectRatio ?? '16:9', style: p.style ?? '' } }
     }
     if (node.data.kind === 'character') {
+      // 'image' 口取已生成/上传的参考图；其余口给角色身份 JSON
+      if (handle === 'image') return node.data.outputs?.image ?? null
       return {
         type: 'json',
         json: { characters: [{ name: p.name ?? '', appearance: p.appearance ?? '', refPrompt: p.refPrompt ?? '' }] },
       }
     }
     if (node.data.kind === 'scene') {
+      if (handle === 'image') return node.data.outputs?.image ?? null
       return {
         type: 'json',
         json: { scenes: [{ slug: p.name ?? '', summary: p.description ?? '', prompt: p.refPrompt ?? '' }] },

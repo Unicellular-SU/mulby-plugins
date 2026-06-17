@@ -74,6 +74,25 @@ export const TEMPLATES: WorkflowTemplate[] = [
     ],
   },
   {
+    id: 'assets-to-keyframe',
+    name: '素材 → 关键帧（人物/场景）',
+    desc: '独立「人物/场景」素材节点（文字生成或上传图片）直连关键帧，按参考图保持一致性——适合手动搭素材库',
+    nodes: [
+      { kind: 'character', x: 60, y: 120, params: { name: '主角', appearance: '少年，黑色短发，深蓝色风衣' } },
+      { kind: 'scene', x: 60, y: 360, params: { name: '霓虹街道', description: '夜晚雨后的赛博朋克街道，霓虹倒影' } },
+      { kind: 'text', x: 60, y: 600, params: { text: '主角站在霓虹街道上回望，电影感中景' } },
+      { kind: 'keyframe', x: 460, y: 300 },
+      { kind: 'preview', x: 820, y: 300 },
+    ],
+    edges: [
+      { from: 2, to: 3, toHandle: 'shot' }, // 文本镜头描述 → keyframe.shot
+      { from: 0, fromHandle: 'out', to: 3, toHandle: 'chars' }, // 人物身份 → keyframe.chars（名称匹配+提示）
+      { from: 0, fromHandle: 'image', to: 3, toHandle: 'ref' }, // 人物参考图 → keyframe.ref（一致性）
+      { from: 1, fromHandle: 'image', to: 3, toHandle: 'ref' }, // 场景参考图 → keyframe.ref（多参考图）
+      { from: 3, to: 4, toHandle: 'in' }, // keyframe → preview
+    ],
+  },
+  {
     id: 'clips-to-film',
     name: '片段 → 成片（配乐）',
     desc: '参考图生视频 + 本地配乐，合成并导出成片',

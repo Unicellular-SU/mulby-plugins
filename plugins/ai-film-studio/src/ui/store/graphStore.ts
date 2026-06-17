@@ -7,7 +7,7 @@ import { listTextModels, listImageModels } from '../services/models'
 import { runText, abortText } from '../services/textEngine'
 import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
-import { buildPrompt, buildImagePrompts, validateNodeJson, buildRepairPrompt } from '../services/prompts'
+import { buildPrompt, buildImagePrompts, buildAssetImageJob, validateNodeJson, buildRepairPrompt } from '../services/prompts'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
@@ -176,7 +176,7 @@ interface GraphState {
   regenNodeImageItem: (nodeId: string, port: string, index: number) => Promise<void>
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
-  setNodeImage: (id: string, dataUrl: string) => Promise<void>
+  setNodeImage: (id: string, dataUrl: string, port?: string) => Promise<void>
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
   downloadVideo: (id: string) => Promise<void>
@@ -224,12 +224,65 @@ function patchNode(id: string, patch: Partial<FilmNodeData>) {
 }
 
 // 执行单个节点（不切换全局 isRunning，由 runNode/runAll 包裹）
-async function execNode(id: string): Promise<void> {
+// opts.force：强制重新生成（人物/场景资产节点用——「运行此节点」会重画，全图重跑则复用缓存以保一致性）
+async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
   const get = useGraphStore.getState
   const node = get().nodes.find((n) => n.id === id)
   if (!node) return
   const def = getNodeDef(node.data.kind)
   if (!def) return
+
+  // 人物 / 场景资产节点：身份(JSON) + 参考图（上传 或 文字生成），可直连关键帧保持一致性
+  if (node.data.kind === 'character' || node.data.kind === 'scene') {
+    const p = node.data.params || {}
+    const jsonOut = resolveOutput(node, 'out')
+    const existingImg = node.data.outputs?.image
+    const uploadMode = String(p.source || '').includes('上传')
+    const baseOut: Record<string, PortValue> = {}
+    if (jsonOut) baseOut.out = jsonOut
+    // 上传模式：保留已上传图；生成模式已有图且非强制：复用（全图重跑不重画，保跨镜一致性）
+    if (uploadMode || (!opts?.force && existingImg?.assetId)) {
+      if (existingImg) baseOut.image = existingImg
+      patchNode(id, { status: 'done', error: undefined, outputs: baseOut })
+      return
+    }
+    // 生成模式：文字生成参考图（无可用文字内容则只产出 JSON）
+    const job = buildAssetImageJob(node.data, get().globals)
+    if (!job) {
+      if (existingImg) baseOut.image = existingImg
+      patchNode(id, { status: jsonOut ? 'done' : 'idle', error: undefined, outputs: baseOut })
+      return
+    }
+    const model = (p.imageModelOverride as string) || get().selectedImageModel
+    if (!model) {
+      patchNode(id, { status: 'error', error: '未配置图像模型（请在顶栏或节点选择）' })
+      return
+    }
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: '生成中…' })
+    try {
+      const r = await generateImage({
+        model,
+        prompt: job.prompt,
+        size: job.size,
+        onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
+      })
+      const assetId = await saveAsset(r.base64, r.mime)
+      const img: PortValue = {
+        type: 'image',
+        assetId,
+        url: toDataUrl(r.base64, r.mime),
+        mime: r.mime,
+        meta: { ...job.meta, kind: node.data.kind },
+      }
+      patchNode(id, { status: 'done', previewUrl: undefined, stream: undefined, outputs: { ...baseOut, image: img } })
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
 
   // 输入节点：按参数即时派生输出
   if (def.category === 'input') {
@@ -336,7 +389,7 @@ async function execNode(id: string): Promise<void> {
         if (!get().isRunning) break
         const job = jobs[i]
         patchNode(id, { stream: jobs.length > 1 ? `生成中 ${i + 1}/${jobs.length}…` : '生成中…', previewUrl: undefined })
-        const matched = canEdit ? pickRefs(refs, job.refNames, job.refName) : []
+        const matched = canEdit ? selectRefs(refs, job.refNames, job.refName) : []
         let base64: string
         let mime: string
         if (matched.length) {
@@ -653,6 +706,7 @@ interface RefImage {
   base64: string
   mime: string
   name?: string
+  kind?: string // 'character' | 'scene'：用于关键帧参考图选择（角色按名匹配、场景全收）
 }
 
 // 展开端口产物：有 items（扇出）则返回全部子项，否则返回自身
@@ -670,7 +724,13 @@ async function resolveRefImages(inputs: Record<string, PortValue[]>): Promise<Re
           const dataUrl = await portImageDataUrl(it)
           if (dataUrl) {
             const { base64, mime } = fromDataUrl(dataUrl)
-            if (base64) out.push({ base64, mime, name: typeof it.meta?.name === 'string' ? it.meta.name : undefined })
+            if (base64)
+              out.push({
+                base64,
+                mime,
+                name: typeof it.meta?.name === 'string' ? it.meta.name : undefined,
+                kind: typeof it.meta?.kind === 'string' ? it.meta.kind : undefined,
+              })
           }
         }
       }
@@ -707,6 +767,20 @@ function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string): Re
     if (r && !picked.includes(r)) picked.push(r)
   }
   return picked.length ? picked : refs[0] ? [refs[0]] : []
+}
+
+// 关键帧参考图选择：角色图按出场角色名匹配（避免扇出时把所有角色都塞进来），场景图全收作附加参考。
+// 角色排在前（primary 主参考用于强一致性），场景在后。
+function selectRefs(refs: RefImage[], names?: string[], fallbackName?: string): RefImage[] {
+  const scenes = refs.filter((r) => r.kind === 'scene')
+  const chars = pickRefs(
+    refs.filter((r) => r.kind !== 'scene'),
+    names,
+    fallbackName
+  )
+  const out: RefImage[] = []
+  for (const r of [...chars, ...scenes]) if (!out.includes(r)) out.push(r)
+  return out
 }
 
 // 把视频端口产物解析为本机文件路径（compose/export 用）：本地优先，远程下载，data 落盘
@@ -952,14 +1026,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     void sset('selectedImageModel', id)
   },
 
-  setNodeImage: async (id, dataUrl) => {
+  setNodeImage: async (id, dataUrl, port = 'out') => {
     const { base64, mime } = fromDataUrl(dataUrl)
     const assetId = await saveAsset(base64, mime)
-    patchNode(id, {
-      status: 'done',
-      error: undefined,
-      outputs: { out: { type: 'image', assetId, url: toDataUrl(base64, mime), mime } },
-    })
+    const node = get().nodes.find((n) => n.id === id)
+    // 人物/场景上传的参考图带上角色/场景名 + kind，供关键帧按名匹配 / 场景全收（一致性）
+    const name = node?.data.params?.name ? String(node.data.params.name) : ''
+    const kind = node?.data.kind === 'character' || node?.data.kind === 'scene' ? node.data.kind : undefined
+    const meta = name || kind ? { ...(name ? { name } : {}), ...(kind ? { kind } : {}) } : undefined
+    const img: PortValue = { type: 'image', assetId, url: toDataUrl(base64, mime), mime, ...(meta ? { meta } : {}) }
+    const prev = node?.data.outputs || {}
+    patchNode(id, { status: 'done', error: undefined, outputs: { ...prev, [port]: img } })
     void get().saveProject()
   },
 
@@ -1059,7 +1136,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     useGraphStore.setState({ runningNodeId: nodeId })
     patchNode(nodeId, { status: 'running', stream: `重新生成第 ${index + 1} 张…`, error: undefined })
     try {
-      const matched = canEdit ? pickRefs(refs, job.refNames, job.refName) : []
+      const matched = canEdit ? selectRefs(refs, job.refNames, job.refName) : []
       let base64: string
       let mime: string
       if (matched.length) {
@@ -1181,7 +1258,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!def) return
     set({ isRunning: true })
     try {
-      await execNode(id)
+      await execNode(id, { force: true })
     } finally {
       set({ isRunning: false, runningNodeId: null })
       void get().saveProject()

@@ -111,12 +111,17 @@ export default function Inspector() {
   const meta = CATEGORY_META[def.category]
   const isImageInput = node.data.kind === 'image-input'
   const isAudioInput = node.data.kind === 'audio-input'
+  const isCharacter = node.data.kind === 'character'
+  const isScene = node.data.kind === 'scene'
+  const isAsset = isCharacter || isScene
+  // 人物/场景「上传图片」模式：只上传不生成；「文字生成」模式：可运行生成
+  const assetUpload = isAsset && String(node.data.params?.source || '').includes('上传')
   const runnable =
     def.category === 'text' ||
     def.category === 'image' ||
     def.category === 'video' ||
     def.category === 'audio' ||
-    (def.category === 'input' && !isImageInput && !isAudioInput) ||
+    (def.category === 'input' && !isImageInput && !isAudioInput && !assetUpload) ||
     (def.category === 'output' &&
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
@@ -131,7 +136,8 @@ export default function Inspector() {
     if (!file) return
     try {
       const dataUrl = await readFileAsDataUrl(file)
-      await setNodeImage(node.id, dataUrl)
+      // 人物/场景上传写入 'image' 口（保留 JSON 身份），参考图节点写默认 'out' 口
+      await setNodeImage(node.id, dataUrl, isAsset ? 'image' : 'out')
     } catch {
       window.mulby?.notification?.show('图片读取失败', 'error')
     }
@@ -209,11 +215,15 @@ export default function Inspector() {
         <span className="afs-inspector__kind">{def.label}</span>
       </div>
 
-      {isImageInput && (
+      {(isImageInput || assetUpload) && (
         <>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
-          <button className="afs-inspector__run" onClick={() => fileRef.current?.click()} title="选择本地图片作为参考图">
-            <Upload size={14} /> 上传参考图
+          <button
+            className="afs-inspector__run"
+            onClick={() => fileRef.current?.click()}
+            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图' : '选择本地图片作为参考图'}
+          >
+            <Upload size={14} /> {isScene ? '上传场景图' : isCharacter ? '上传角色图' : '上传参考图'}
           </button>
         </>
       )}
