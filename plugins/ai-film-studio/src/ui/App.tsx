@@ -18,7 +18,7 @@ export default function App() {
   const saveProject = useGraphStore((s) => s.saveProject)
   const deleteSelected = useGraphStore((s) => s.deleteSelected)
   const loadProviders = useProviderStore((s) => s.load)
-  const loadPrompts = usePromptStore((s) => s.load)
+  const loadPrompts = usePromptStore((s) => s.loadGlobal)
   const [providersOpen, setProvidersOpen] = useState(false)
   const [globalsOpen, setGlobalsOpen] = useState(false)
   const [promptsOpen, setPromptsOpen] = useState(false)

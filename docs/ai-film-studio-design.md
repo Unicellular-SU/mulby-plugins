@@ -1093,4 +1093,6 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 
 **验收**：`tsc` 通过、`build` 通过。`refsFromValues` 抽出供 image-edit/merge/keyframe 共用；连线类型校验 `any` 兼容（merge.out → compose.clips 可用）。
 
-> 留待后续：BGM/Upscale 走专用音乐/超分供应商抽象（现 BGM 借用视频供应商配置）；提示词模板工程级覆盖（下一步）。
+**提示词模板工程级覆盖**：模板解析升级为两层 + 默认——**本工程覆盖 > 全局覆盖 > 内置默认**。工程级覆盖存在工程 JSON（`ProjectData.promptOverrides`，跟随导入导出/切换工程，由 `graphStore` 拥有并经 `promptStore.setProjectLayer` 推送快照供 `prompts.ts` 解析）；全局覆盖仍存明文 KV 作跨工程基线。「提示词模板」面板加「本工程 / 全局默认」作用域切换。
+
+> 留待后续：BGM/Upscale 走专用音乐/超分供应商抽象（现 BGM 借用视频供应商配置）；提示词模板的导出/导入分享。

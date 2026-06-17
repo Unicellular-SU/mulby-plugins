@@ -12,6 +12,7 @@ import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
 import { downloadVideoToDisk } from '../services/download'
+import { usePromptStore } from './promptStore'
 import { ensureFfmpeg, composeFilm, abortFfmpeg, parseResolution, type SubtitleMode } from '../services/ffmpeg'
 import { buildSrt } from '../services/subtitles'
 import { synthSpeech } from '../services/tts'
@@ -88,6 +89,8 @@ export interface ProjectData extends ProjectMeta {
   edges: Edge[]
   viewport?: { x: number; y: number; zoom: number }
   globals?: ProjectGlobals
+  /** 工程级提示词覆盖（id → 模板文本）；优先级高于全局覆盖，详见 promptStore */
+  promptOverrides?: Record<string, string>
 }
 
 // ============ 存储辅助（store 在 React 之外，直接访问 window.mulby） ============
@@ -121,7 +124,7 @@ function makeDefaultProject(name = '未命名工程'): ProjectData {
     position: { x: 240, y: 200 },
     data: { kind: 'story', title: '故事输入', params: {}, status: 'idle' },
   }
-  return { id, name, createdAt: ts, updatedAt: ts, nodes: [storyNode], edges: [], globals: defaultGlobals() }
+  return { id, name, createdAt: ts, updatedAt: ts, nodes: [storyNode], edges: [], globals: defaultGlobals(), promptOverrides: {} }
 }
 
 // 连线类型校验：源端口类型与目标端口类型相同，或任一为 any
@@ -147,6 +150,7 @@ interface GraphState {
   currentId: string | null
   projectName: string
   globals: ProjectGlobals
+  promptOverrides: Record<string, string>
   nodes: FilmNode[]
   edges: Edge[]
   selectedNodeId: string | null
@@ -201,6 +205,9 @@ interface GraphState {
   deleteProject: (id: string) => Promise<void>
   renameProject: (name: string) => void
   setGlobals: (patch: Partial<ProjectGlobals>) => void
+  setPromptOverride: (id: string, value: string) => void
+  resetPromptOverride: (id: string) => void
+  resetAllPromptOverrides: () => void
   importProject: (data: Partial<ProjectData>) => Promise<void>
   exportProject: () => ProjectData
 }
@@ -1086,12 +1093,18 @@ function notifyRunResult(errored: string[], skipped: string[]) {
   )
 }
 
+// 把当前工程的提示词覆盖同步给 promptStore（供 prompts.ts 执行时按「工程 > 全局 > 默认」解析）
+function syncProjectPromptLayer(overrides?: Record<string, string>) {
+  usePromptStore.getState().setProjectLayer(overrides || {})
+}
+
 export const useGraphStore = create<GraphState>((set, get) => ({
   loaded: false,
   projects: [],
   currentId: null,
   projectName: '未命名工程',
   globals: defaultGlobals(),
+  promptOverrides: {},
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -1128,11 +1141,13 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       currentId,
       projectName: current.name,
       globals: normGlobals(current.globals),
+      promptOverrides: current.promptOverrides || {},
       nodes: current.nodes || [],
       edges: current.edges || [],
       selectedNodeId: null,
       dirty: false,
     })
+    syncProjectPromptLayer(current.promptOverrides)
     void hydrateAssets()
   },
 
@@ -1554,15 +1569,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       currentId: def.id,
       projectName: def.name,
       globals: normGlobals(def.globals),
+      promptOverrides: def.promptOverrides || {},
       nodes: def.nodes,
       edges: def.edges,
       selectedNodeId: null,
       dirty: false,
     })
+    syncProjectPromptLayer(def.promptOverrides)
   },
 
   saveProject: async () => {
-    const { currentId, projectName, nodes, edges, globals } = get()
+    const { currentId, projectName, nodes, edges, globals, promptOverrides } = get()
     if (!currentId) return
     set({ saving: true })
     const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
@@ -1576,6 +1593,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       nodes: serializeNodes(nodes),
       edges,
       globals,
+      promptOverrides,
     }
     if (idx >= 0) all[idx] = data
     else all.push(data)
@@ -1598,11 +1616,13 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       currentId: id,
       projectName: target.name,
       globals: normGlobals(target.globals),
+      promptOverrides: target.promptOverrides || {},
       nodes: target.nodes || [],
       edges: target.edges || [],
       selectedNodeId: null,
       dirty: false,
     })
+    syncProjectPromptLayer(target.promptOverrides)
     void hydrateAssets()
   },
 
@@ -1623,12 +1643,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       currentId: current.id,
       projectName: current.name,
       globals: wasCurrent ? normGlobals(current.globals) : get().globals,
+      promptOverrides: wasCurrent ? current.promptOverrides || {} : get().promptOverrides,
       nodes: wasCurrent ? current.nodes || [] : get().nodes,
       edges: wasCurrent ? current.edges || [] : get().edges,
       selectedNodeId: wasCurrent ? null : get().selectedNodeId,
       dirty: false,
     })
-    if (wasCurrent) void hydrateAssets()
+    if (wasCurrent) {
+      syncProjectPromptLayer(current.promptOverrides)
+      void hydrateAssets()
+    }
   },
 
   renameProject: (name) => {
@@ -1641,24 +1665,46 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     scheduleSave(() => get().saveProject())
   },
 
+  setPromptOverride: (id, value) => {
+    const next = { ...get().promptOverrides, [id]: value }
+    set({ promptOverrides: next, dirty: true })
+    syncProjectPromptLayer(next)
+    scheduleSave(() => get().saveProject())
+  },
+  resetPromptOverride: (id) => {
+    const next = { ...get().promptOverrides }
+    delete next[id]
+    set({ promptOverrides: next, dirty: true })
+    syncProjectPromptLayer(next)
+    scheduleSave(() => get().saveProject())
+  },
+  resetAllPromptOverrides: () => {
+    set({ promptOverrides: {}, dirty: true })
+    syncProjectPromptLayer({})
+    scheduleSave(() => get().saveProject())
+  },
+
   importProject: async (data) => {
+    const imported = (data.promptOverrides as Record<string, string>) || {}
     set({
       nodes: (data.nodes as FilmNode[]) || [],
       edges: (data.edges as Edge[]) || [],
       projectName: data.name || get().projectName,
       globals: normGlobals(data.globals as Partial<ProjectGlobals>),
+      promptOverrides: imported,
       selectedNodeId: null,
       dirty: true,
     })
+    syncProjectPromptLayer(imported)
     // 导入文件内嵌的图片（url）重新落资产库，确保刷新后不丢失
     await reimportAssets()
     await get().saveProject()
   },
 
   exportProject: () => {
-    const { currentId, projectName, nodes, edges, globals } = get()
+    const { currentId, projectName, nodes, edges, globals, promptOverrides } = get()
     const ts = now()
     // 导出内嵌图片 url，保证跨设备可移植
-    return { id: currentId || `proj_${nanoid(8)}`, name: projectName, createdAt: ts, updatedAt: ts, nodes, edges, globals }
+    return { id: currentId || `proj_${nanoid(8)}`, name: projectName, createdAt: ts, updatedAt: ts, nodes, edges, globals, promptOverrides }
   },
 }))

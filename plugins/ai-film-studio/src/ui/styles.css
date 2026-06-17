@@ -987,6 +987,26 @@ body {
 .afs-modal__panel--wide {
   width: 720px;
 }
+.afs-scope {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--afs-border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.afs-scope__tab {
+  background: var(--afs-panel-2);
+  border: none;
+  color: var(--afs-muted);
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.afs-scope__tab.is-active {
+  background: var(--afs-accent);
+  color: #fff;
+}
 .afs-modal__section {
   font-size: 12px;
   font-weight: 600;
