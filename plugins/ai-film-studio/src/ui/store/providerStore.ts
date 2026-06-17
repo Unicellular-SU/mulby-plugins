@@ -95,6 +95,9 @@ export const useProviderStore = create<ProviderState>((set, get) => ({
       taskIdPath: cfg.taskIdPath,
       statusPath: cfg.statusPath,
       videoUrlPath: cfg.videoUrlPath,
+      bodyTemplate: cfg.bodyTemplate,
+      uploadUrl: cfg.uploadUrl,
+      uploadUrlPath: cfg.uploadUrlPath,
       voices: cfg.voices,
       enabled: cfg.enabled ?? true,
     }
