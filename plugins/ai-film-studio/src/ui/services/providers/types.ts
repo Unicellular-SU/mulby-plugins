@@ -29,6 +29,8 @@ export interface MediaProviderConfig {
   taskIdPath?: string // submit 响应里 taskId 的 JSON 路径
   statusPath?: string // poll 响应里 status 的 JSON 路径
   videoUrlPath?: string // poll 响应里结果地址（视频/音乐）的 JSON 路径
+  // 图片上传地址（可选）：仅收公开图片 URL 的供应商填，图生视频会先把本地关键帧上传换公开 URL
+  uploadUrl?: string
   // 请求体模板（声明式，适配各家不同 body）：{prompt}{imageUrl}{lastImageUrl}{model}{duration}{size}
   // 支持条件块 {?imageUrl}…{/imageUrl}（变量非空才保留），留空则用通用默认 body
   bodyTemplate?: string

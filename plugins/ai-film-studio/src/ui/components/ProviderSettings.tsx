@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react'
-import { X, Plus, Trash2, Check, KeyRound, Plug, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Check, KeyRound, Plug, Loader2 } from 'lucide-react'
 import { useProviderStore } from '../store/providerStore'
 import type { MediaProviderConfig, VideoProviderKind, MediaCapability } from '../services/providers'
 import { PROVIDER_PRESETS } from '../services/providers/presets'
 import { testVideoProvider } from '../services/providers/test'
 import { getKey } from '../services/keys'
-
-interface Props {
-  open: boolean
-  onClose: () => void
-}
 
 type Draft = Partial<MediaProviderConfig> & { kind: VideoProviderKind }
 
@@ -27,7 +22,7 @@ function deriveMode(caps: MediaCapability[]): MediaProviderConfig['mode'] {
   return caps.length === 1 && caps[0] === 'tts' ? 'sync-binary' : 'async-poll'
 }
 
-export default function ProviderSettings({ open, onClose }: Props) {
+export default function ProviderSettings() {
   const providers = useProviderStore((s) => s.providers)
   const defaults = useProviderStore((s) => s.defaults)
   const keyPresence = useProviderStore((s) => s.keyPresence)
@@ -44,8 +39,8 @@ export default function ProviderSettings({ open, onClose }: Props) {
   const [tests, setTests] = useState<Record<string, { state: 'testing' | 'ok' | 'fail'; msg: string }>>({})
 
   useEffect(() => {
-    if (open) load()
-  }, [open, load])
+    load()
+  }, [load])
 
   const onTest = async (p: MediaProviderConfig) => {
     setTests((t) => ({ ...t, [p.id]: { state: 'testing', msg: '测试中…' } }))
@@ -53,8 +48,6 @@ export default function ProviderSettings({ open, onClose }: Props) {
     const r = await testVideoProvider(p, key)
     setTests((t) => ({ ...t, [p.id]: { state: r.ok ? 'ok' : 'fail', msg: r.message } }))
   }
-
-  if (!open) return null
 
   const resetForm = () => {
     setDraft(EMPTY)
@@ -101,16 +94,8 @@ export default function ProviderSettings({ open, onClose }: Props) {
   }
 
   return (
-    <div className="afs-modal" onClick={onClose}>
-      <div className="afs-modal__panel" onClick={(e) => e.stopPropagation()}>
-        <div className="afs-modal__head">
-          <span className="afs-modal__title">模型供应商</span>
-          <button className="afs-modal__close" onClick={onClose}>
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="afs-modal__body">
+    <div className="afs-settings-pane">
+      <div className="afs-modal__body">
           <div className="afs-modal__hint">
             Mulby 不内置视频 / 配乐 / 语音模型，需自管供应商。一个供应商可声明多种能力；节点按能力选用，可在节点上覆盖。Key 经系统密钥库加密存储，仅本机可解。
           </div>
@@ -137,7 +122,7 @@ export default function ProviderSettings({ open, onClose }: Props) {
                       </div>
                       <div className="afs-prov__sub">
                         {p.kind} · {p.mode === 'sync-binary' ? p.baseURL || '未设地址' : p.kind === 'fal' ? p.model || '未设模型' : p.submitUrl || '未设端点'}
-                        {keyPresence[p.id] ? <span className="afs-prov__key">· Key✓</span> : <span className="afs-prov__nokey">· 无Key</span>}
+                        {keyPresence[p.id] ? <span className="afs-prov__key">· 有 Key</span> : <span className="afs-prov__nokey">· 无 Key</span>}
                       </div>
                       {tests[p.id] && (
                         <div
@@ -266,7 +251,15 @@ export default function ProviderSettings({ open, onClose }: Props) {
                     onChange={(e) => set({ bodyTemplate: e.target.value })}
                   />
                 </label>
-                <div className="afs-form__note">留空则按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。预设已为火山方舟/通义万相填好模板。</div>
+                <label className="afs-form__row">
+                  <span>图片上传地址</span>
+                  <input
+                    value={draft.uploadUrl || ''}
+                    placeholder="可选；仅收公开图片URL的供应商填，如 https://toapis.com/v1/uploads/images"
+                    onChange={(e) => set({ uploadUrl: e.target.value })}
+                  />
+                </label>
+                <div className="afs-form__note">留空按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。填「图片上传地址」后，图生视频会先把本地关键帧上传换公开 URL。预设已为火山方舟/通义万相/toapis 填好。</div>
               </>
             )}
 
@@ -295,6 +288,5 @@ export default function ProviderSettings({ open, onClose }: Props) {
           </div>
         </div>
       </div>
-    </div>
   )
 }

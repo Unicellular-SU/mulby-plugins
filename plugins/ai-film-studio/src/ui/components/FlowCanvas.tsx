@@ -12,9 +12,11 @@ import {
   type NodeMouseHandler,
 } from '@xyflow/react'
 import FilmNode from './nodes/FilmNode'
-import { DND_MIME } from './NodeLibrary'
+import { DND_MIME, DND_ASSET, DND_ELEMENT, DND_SNIPPET } from './NodeLibrary'
 import { getNodeDef, CATEGORY_META } from '../nodes/nodeDefs'
 import { useGraphStore, isValidConnection, type FilmNode as FilmNodeType } from '../store/graphStore'
+import { useAssetStore } from '../store/assetStore'
+import { usePromptStore, resolveSnippet } from '../store/promptStore'
 
 const nodeTypes = { film: FilmNode }
 
@@ -42,10 +44,32 @@ export default function FlowCanvas() {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
-      const kind = e.dataTransfer.getData(DND_MIME)
-      if (!kind) return
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      addNode(kind, position)
+      const kind = e.dataTransfer.getData(DND_MIME)
+      if (kind) {
+        addNode(kind, position)
+        return
+      }
+      const assetId = e.dataTransfer.getData(DND_ASSET)
+      if (assetId) {
+        const rec = useAssetStore.getState().assets.find((a) => a.id === assetId)
+        if (rec) void useGraphStore.getState().insertAssetNode(rec, position)
+        return
+      }
+      const elId = e.dataTransfer.getData(DND_ELEMENT)
+      if (elId) {
+        const el = useAssetStore.getState().elements.find((x) => x.id === elId)
+        if (el) void useGraphStore.getState().insertElementNode(el, position)
+        return
+      }
+      const snipId = e.dataTransfer.getData(DND_SNIPPET)
+      if (snipId) {
+        const s = usePromptStore.getState().snippets.find((x) => x.id === snipId)
+        if (s) {
+          const ok = useGraphStore.getState().appendTextToSelected(resolveSnippet(s))
+          window.mulby?.notification?.show(ok ? '已插入片段到选中节点' : '请先选中一个含文本参数的节点', ok ? 'success' : 'warning')
+        }
+      }
     },
     [screenToFlowPosition, addNode]
   )
