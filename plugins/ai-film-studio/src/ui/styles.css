@@ -797,6 +797,90 @@ body {
   vertical-align: middle;
 }
 
+/* 运行按钮行：运行此节点 + 从此处继续 */
+.afs-inspector__runrow {
+  display: flex;
+  gap: 6px;
+  margin: 12px 12px 0;
+}
+.afs-inspector__runrow > .afs-inspector__run {
+  flex: 1;
+  margin: 0;
+}
+.afs-inspector__run--alt {
+  background: var(--afs-hover);
+  color: var(--afs-text);
+  border-color: var(--afs-border);
+}
+
+/* 大图灯箱 + 对话改图 */
+.afs-tile__media--click {
+  cursor: zoom-in;
+}
+.afs-lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.afs-lightbox__panel {
+  position: relative;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-border);
+  border-radius: 10px;
+  padding: 12px;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.afs-lightbox__img {
+  max-width: 82vw;
+  max-height: 74vh;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.afs-lightbox__edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.afs-lightbox__edit .afs-field__input {
+  flex: 1;
+}
+.afs-lightbox__close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--afs-border);
+  background: var(--afs-panel);
+  color: var(--afs-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 文本/JSON 二次编辑 */
+.afs-editbox {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.afs-editerr {
+  color: #f87171;
+  font-size: 11px;
+  margin: 4px 0;
+}
+
 /* 节点缩略图（图像产物） */
 .afs-node__thumb {
   position: relative;

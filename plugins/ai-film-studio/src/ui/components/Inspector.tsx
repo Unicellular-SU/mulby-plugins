@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { Trash2, Play, Loader2, Upload, KeyRound } from 'lucide-react'
+import { Trash2, Play, Loader2, Upload, KeyRound, FastForward } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -77,6 +77,9 @@ export default function Inspector() {
   const updateNodeTitle = useGraphStore((s) => s.updateNodeTitle)
   const removeNode = useGraphStore((s) => s.removeNode)
   const runNode = useGraphStore((s) => s.runNode)
+  const runFrom = useGraphStore((s) => s.runFrom)
+  const editNodeImageItem = useGraphStore((s) => s.editNodeImageItem)
+  const updateNodeOutputText = useGraphStore((s) => s.updateNodeOutputText)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
   const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
   const isRunning = useGraphStore((s) => s.isRunning)
@@ -116,6 +119,7 @@ export default function Inspector() {
     (def.category === 'output' &&
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
+  const hasDownstream = edges.some((e) => e.source === node.id)
   const inputs = gatherInputs(node, allNodes, edges)
   const outputEntries = node.data.outputs ? Object.entries(node.data.outputs) : []
   const portLabel = (ports: { id: string; label: string }[], pid: string) => ports.find((p) => p.id === pid)?.label || pid
@@ -223,15 +227,27 @@ export default function Inspector() {
       )}
 
       {runnable && (
-        <button
-          className="afs-inspector__run"
-          disabled={isRunning}
-          onClick={() => runNode(node.id)}
-          title="运行此节点（含上游派生输入）"
-        >
-          {running ? <Loader2 size={14} className="afs-spin" /> : <Play size={14} />}
-          {running ? '生成中…' : '运行此节点'}
-        </button>
+        <div className="afs-inspector__runrow">
+          <button
+            className="afs-inspector__run"
+            disabled={isRunning}
+            onClick={() => runNode(node.id)}
+            title="仅运行此节点（用上游已有产物作输入）"
+          >
+            {running ? <Loader2 size={14} className="afs-spin" /> : <Play size={14} />}
+            {running ? '生成中…' : '运行此节点'}
+          </button>
+          {hasDownstream && (
+            <button
+              className="afs-inspector__run afs-inspector__run--alt"
+              disabled={isRunning}
+              onClick={() => runFrom(node.id)}
+              title="从此节点开始，依次执行其所有下游节点"
+            >
+              <FastForward size={14} /> 从此处继续
+            </button>
+          )}
+        </div>
       )}
 
       <div className="afs-inspector__scroll">
@@ -360,14 +376,19 @@ export default function Inspector() {
           </div>
         )}
 
-        {/* 输出区：每个输出端口的富渲染（剧本/分镜/角色卡片 · 媒体画廊 · 文本） */}
-        {!running && outputEntries.length > 0 && (
+        {/* 输出区：每个输出端口的富渲染（剧本/分镜/角色卡片 · 媒体画廊 · 文本）。
+            生成中也展示，以便扇出时「输出一张展示一张」实时增长 */}
+        {outputEntries.length > 0 && (
           <div className="afs-section">
-            <div className="afs-section__title">输出</div>
+            <div className="afs-section__title">输出{running ? '（生成中…）' : ''}</div>
             {outputEntries.map(([k, v]) => (
               <div key={k} className="afs-outport">
                 {def.outputs.length > 1 ? <div className="afs-outport__label">{portLabel(def.outputs, k)}</div> : null}
-                <OutputView value={v} />
+                <OutputView
+                  value={v}
+                  onEditImage={(i, prompt) => editNodeImageItem(node.id, k, i, prompt)}
+                  onEditText={(text) => updateNodeOutputText(node.id, k, text)}
+                />
               </div>
             ))}
           </div>

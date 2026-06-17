@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FolderOpen, ChevronRight, ChevronDown } from 'lucide-react'
+import { FolderOpen, ChevronRight, ChevronDown, X, Pencil, Wand2, Loader2 } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
 import { basename } from '../services/download'
 
@@ -135,7 +135,7 @@ export function JsonView({ json }: { json: unknown }) {
 }
 
 // ============ 媒体画廊 ============
-function MediaTile({ v }: { v: PortValue }) {
+function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
   const name = typeof v.meta?.name === 'string' ? v.meta.name : typeof v.meta?.shot === 'string' ? v.meta.shot : ''
   return (
     <div className="afs-tile">
@@ -144,7 +144,13 @@ function MediaTile({ v }: { v: PortValue }) {
       ) : v.type === 'audio' ? (
         <audio className="afs-tile__audio" src={v.url} controls />
       ) : (
-        <img className="afs-tile__media" src={v.url} alt={name} />
+        <img
+          className={`afs-tile__media${onClick ? ' afs-tile__media--click' : ''}`}
+          src={v.url}
+          alt={name}
+          onClick={onClick}
+          title={onClick ? '点击查看大图 / 对话修改' : undefined}
+        />
       )}
       {(name || v.localPath) && (
         <div className="afs-tile__bar">
@@ -166,33 +172,163 @@ function MediaTile({ v }: { v: PortValue }) {
   )
 }
 
-// 单个输出端口产物的富渲染：扇出→画廊；JSON→卡片；媒体→播放；文本→pre
-export function OutputView({ value }: { value: PortValue }) {
-  const rawItems = value.items && value.items.length ? value.items : null
-  if (rawItems) {
-    const items = rawItems.filter((it) => !!it.url)
-    if (items.length === 0) return <div className="afs-inspector__note">（{rawItems.length} 项产物，暂无可显示内容）</div>
+// 大图灯箱 + 对话改图
+function Lightbox({
+  url,
+  onClose,
+  onEdit,
+}: {
+  url?: string
+  onClose: () => void
+  onEdit?: (prompt: string) => void
+}) {
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!url) return null
+  const submit = () => {
+    if (!prompt.trim() || !onEdit) return
+    setBusy(true)
+    onEdit(prompt.trim())
+    // 关闭后由上层重渲染展示结果；这里乐观关闭
+    onClose()
+  }
+  return (
+    <div className="afs-lightbox" onClick={onClose}>
+      <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>
+        <button className="afs-lightbox__close" onClick={onClose}>
+          <X size={18} />
+        </button>
+        <img className="afs-lightbox__img" src={url} alt="" />
+        {onEdit ? (
+          <div className="afs-lightbox__edit">
+            <Wand2 size={14} />
+            <input
+              className="afs-field__input"
+              placeholder="用一句话描述如何修改这张图（img2img）…"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit()
+              }}
+            />
+            <button className="afs-btn afs-btn--mini" disabled={!prompt.trim() || busy} onClick={submit}>
+              {busy ? <Loader2 size={13} className="afs-spin" /> : '修改'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+// 文本/JSON 二次编辑
+function EditableValue({
+  value,
+  onEditText,
+}: {
+  value: PortValue
+  onEditText?: (text: string) => string | null
+}) {
+  const isJson = value.type === 'json'
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [err, setErr] = useState('')
+  const startEdit = () => {
+    let t = ''
+    if (isJson) {
+      try {
+        t = JSON.stringify(value.json, null, 2)
+      } catch {
+        t = value.text || ''
+      }
+    } else {
+      t = value.text || ''
+    }
+    setDraft(t)
+    setErr('')
+    setEditing(true)
+  }
+  const save = () => {
+    const e = onEditText ? onEditText(draft) : '编辑不可用'
+    if (e) setErr(e)
+    else setEditing(false)
+  }
+  if (editing) {
     return (
       <div>
-        <div className="afs-gallery__count">{items.length} 项</div>
-        <div className="afs-gallery">
-          {items.map((it, i) => (
-            <MediaTile key={it.assetId || it.url || `item-${i}`} v={it} />
-          ))}
+        <textarea className="afs-field__input afs-editbox" rows={isJson ? 12 : 8} value={draft} onChange={(e) => setDraft(e.target.value)} />
+        {err ? <div className="afs-editerr">{err}</div> : null}
+        <div className="afs-result__actions">
+          <button className="afs-btn afs-btn--mini" onClick={save}>
+            保存
+          </button>
+          <button className="afs-btn afs-btn--mini" onClick={() => setEditing(false)}>
+            取消
+          </button>
         </div>
       </div>
     )
   }
-  if (value.type === 'json') return <JsonView json={value.json} />
-  if ((value.type === 'image' || value.type === 'video' || value.type === 'audio') && value.url) {
+  return (
+    <div>
+      {isJson ? <JsonView json={value.json} /> : <pre className="afs-result__pre">{value.text ?? ''}</pre>}
+      {onEditText ? (
+        <button className="afs-raw__toggle" onClick={startEdit}>
+          <Pencil size={12} /> 编辑{isJson ? ' JSON' : ''}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+// 单个输出端口产物的富渲染：扇出→画廊（图可点开大图/对话改图）；JSON/文本→可编辑；视频/音频→播放
+export function OutputView({
+  value,
+  onEditImage,
+  onEditText,
+}: {
+  value: PortValue
+  onEditImage?: (index: number, prompt: string) => void
+  onEditText?: (text: string) => string | null
+}) {
+  const [lightbox, setLightbox] = useState<number | null>(null)
+
+  if (value.type === 'json' || value.type === 'text' || (!value.items && value.text && !value.url)) {
+    return <EditableValue value={value} onEditText={onEditText} />
+  }
+
+  const rawItems = value.items && value.items.length ? value.items : null
+  const mediaList: PortValue[] | null = rawItems
+    ? rawItems.filter((it) => !!it.url)
+    : (value.type === 'image' || value.type === 'video' || value.type === 'audio') && value.url
+      ? [value]
+      : null
+
+  if (mediaList) {
+    if (mediaList.length === 0) return <div className="afs-inspector__note">（暂无可显示内容）</div>
+    const editable = mediaList[0].type === 'image' && !!onEditImage
     return (
-      <div className="afs-gallery">
-        <MediaTile v={value} />
+      <div>
+        {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
+        <div className="afs-gallery">
+          {mediaList.map((it, i) => (
+            <MediaTile
+              key={it.assetId || it.url || `item-${i}`}
+              v={it}
+              onClick={it.type === 'image' ? () => setLightbox(i) : undefined}
+            />
+          ))}
+        </div>
+        {lightbox != null && mediaList[lightbox] ? (
+          <Lightbox
+            url={mediaList[lightbox].url}
+            onClose={() => setLightbox(null)}
+            onEdit={editable ? (prompt) => onEditImage?.(lightbox, prompt) : undefined}
+          />
+        ) : null}
       </div>
     )
   }
-  const text = value.text ?? ''
-  if (text) return <pre className="afs-result__pre">{text}</pre>
   return <div className="afs-inspector__note">（无内容）</div>
 }
 

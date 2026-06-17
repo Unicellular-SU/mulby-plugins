@@ -167,8 +167,13 @@ interface GraphState {
   setSelectedModel: (id: string | null) => void
   setSelectedImageModel: (id: string | null) => void
   runNode: (id: string) => Promise<void>
+  runFrom: (id: string) => Promise<void>
   runAll: () => Promise<void>
   cancelRun: () => void
+  /** 对话修改某图像产物（img2img）；index 指向该端口产物的第 index 张（单值时为 0） */
+  editNodeImageItem: (nodeId: string, port: string, index: number, prompt: string) => Promise<void>
+  /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
+  updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
   setNodeImage: (id: string, dataUrl: string) => Promise<void>
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
@@ -323,6 +328,7 @@ async function execNode(id: string): Promise<void> {
       // 上游参考图（含扇出的多张），用于 img2img + 按角色名匹配保持一致性
       const refs = await resolveRefImages(inputs)
       const canEdit = refs.length > 0 && !!window.mulby?.ai?.images?.edit
+      const outId = def.outputs[0]?.id || 'out'
       const items: PortValue[] = []
       for (let i = 0; i < jobs.length; i++) {
         if (!get().isRunning) break
@@ -347,9 +353,13 @@ async function execNode(id: string): Promise<void> {
         }
         const assetId = await saveAsset(base64, mime)
         items.push({ type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta })
+        // 增量展示：每生成一张立即写回，属性面板画廊与节点缩略实时增长
+        patchNode(id, {
+          previewUrl: undefined,
+          outputs: { [outId]: { type: 'image', items: [...items], assetId: items[0].assetId, url: items[0].url, mime: items[0].mime } },
+        })
       }
       if (items.length === 0) throw new Error('未生成任何图像')
-      const outId = def.outputs[0]?.id || 'out'
       const head = items[0]
       patchNode(id, {
         status: 'done',
@@ -789,6 +799,53 @@ async function reimportAssets() {
   }
 }
 
+// 按拓扑序执行一批节点（runAll / runFrom 共用）。数据驱动级联阻断：上游无可用产出才跳过。
+async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped: string[] }> {
+  const errored: string[] = []
+  const skipped: string[] = []
+  for (const n of order) {
+    if (!useGraphStore.getState().isRunning) break
+    const def = getNodeDef(n.data.kind)
+    if (!def) continue
+    const eligible =
+      def.category === 'input' ||
+      def.category === 'text' ||
+      def.category === 'image' ||
+      def.category === 'video' ||
+      def.category === 'audio' ||
+      (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
+    // export 节点会弹保存对话框，仅单独运行时触发，不纳入批量
+    if (!eligible) continue
+    const st = useGraphStore.getState()
+    const hasIncoming = st.edges.some((e) => e.target === n.id)
+    if (hasIncoming) {
+      const ins = gatherInputs(n, st.nodes, st.edges)
+      const hasData = Object.values(ins).some((arr) => arr && arr.length > 0)
+      if (!hasData) {
+        skipped.push(n.data.title || def.label)
+        patchNode(n.id, { status: 'error', error: '已跳过：上游未产出可用输入' })
+        continue
+      }
+    }
+    await execNode(n.id)
+    const cur = useGraphStore.getState().nodes.find((x) => x.id === n.id)
+    if (cur?.data.status === 'error') errored.push(cur.data.title || def.label)
+  }
+  return { errored, skipped }
+}
+
+function notifyRunResult(errored: string[], skipped: string[]) {
+  if (errored.length === 0 && skipped.length === 0) return
+  const parts: string[] = []
+  if (errored.length) parts.push(`${errored.length} 个出错`)
+  if (skipped.length) parts.push(`${skipped.length} 个因上游失败跳过`)
+  const names = errored.slice(0, 3).join('、')
+  window.mulby?.notification?.show(
+    `运行完成：${parts.join('，')}${names ? `（出错：${names}${errored.length > 3 ? ' 等' : ''}）` : ''}`,
+    'warning'
+  )
+}
+
 export const useGraphStore = create<GraphState>((set, get) => ({
   loaded: false,
   projects: [],
@@ -884,6 +941,85 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     void get().saveProject()
   },
 
+  editNodeImageItem: async (nodeId, port, index, prompt) => {
+    if (get().isRunning || !prompt.trim()) return
+    const node = get().nodes.find((n) => n.id === nodeId)
+    const val = node?.data.outputs?.[port]
+    if (!node || !val) return
+    const hasItems = !!(val.items && val.items.length)
+    const target = (hasItems ? (val.items as PortValue[]) : [val])[index]
+    if (!target) return
+    // 取目标图的纯 base64（优先资产库，其次 data URL）
+    let base64 = ''
+    let mime = target.mime || 'image/png'
+    if (target.assetId) {
+      const a = await loadAsset(target.assetId)
+      if (a) {
+        base64 = a.base64
+        mime = a.mime
+      }
+    }
+    if (!base64 && target.url) {
+      const d = fromDataUrl(target.url)
+      base64 = d.base64
+      mime = d.mime || mime
+    }
+    if (!base64) {
+      window.mulby?.notification?.show('无法读取原图', 'error')
+      return
+    }
+    const model = (node.data.params?.imageModelOverride as string) || get().selectedImageModel
+    if (!model) {
+      window.mulby?.notification?.show('未配置图像模型（在顶栏选择）', 'error')
+      return
+    }
+    set({ isRunning: true })
+    useGraphStore.setState({ runningNodeId: nodeId })
+    patchNode(nodeId, { status: 'running', stream: '按描述修改图像…', error: undefined })
+    try {
+      const r = await editImage({ model, prompt, refBase64: base64, refMime: mime })
+      const newAssetId = await saveAsset(r.base64, r.mime)
+      const newItem: PortValue = { ...target, assetId: newAssetId, url: toDataUrl(r.base64, r.mime), mime: r.mime }
+      const cur = get().nodes.find((n) => n.id === nodeId)
+      const cval = cur?.data.outputs?.[port]
+      if (cur && cval) {
+        let nextVal: PortValue
+        if (hasItems && cval.items) {
+          const newItems = cval.items.map((it, i) => (i === index ? newItem : it))
+          const head = newItems[0]
+          nextVal = { ...cval, items: newItems, assetId: head.assetId, url: head.url, mime: head.mime }
+        } else {
+          nextVal = newItem
+        }
+        patchNode(nodeId, { status: 'done', stream: undefined, outputs: { ...cur.data.outputs, [port]: nextVal } })
+      }
+      window.mulby?.notification?.show('图像已按描述修改')
+    } catch (e) {
+      patchNode(nodeId, { status: 'done', stream: undefined })
+      window.mulby?.notification?.show(e instanceof Error ? e.message : '修改失败', 'error')
+    } finally {
+      set({ isRunning: false, runningNodeId: null })
+      void get().saveProject()
+    }
+  },
+
+  updateNodeOutputText: (nodeId, port, text) => {
+    const node = get().nodes.find((n) => n.id === nodeId)
+    const val = node?.data.outputs?.[port]
+    if (!node || !val) return '无可编辑的产物'
+    let nextVal: PortValue
+    if (val.type === 'json') {
+      const json = extractJson(text)
+      if (json == null) return 'JSON 解析失败，请检查格式（需为合法 JSON）'
+      nextVal = { ...val, json, text }
+    } else {
+      nextVal = { ...val, text }
+    }
+    patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: nextVal }, error: undefined })
+    void get().saveProject()
+    return null
+  },
+
   loadTemplate: async (templateId) => {
     const tpl = TEMPLATES.find((t) => t.id === templateId)
     if (!tpl) return
@@ -956,63 +1092,53 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (get().isRunning) return
     const order = topoOrder(get().nodes, get().edges)
     set({ isRunning: true })
-    const errored: string[] = []
-    const skipped: string[] = []
     try {
-      for (const n of order) {
-        if (!get().isRunning) break
-        const def = getNodeDef(n.data.kind)
-        if (!def) continue
-        const eligible =
-          def.category === 'input' ||
-          def.category === 'text' ||
-          def.category === 'image' ||
-          def.category === 'video' ||
-          def.category === 'audio' ||
-          (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose'))
-        // 注：export 节点会弹保存对话框，仅在单独运行时触发，不纳入「运行全部」
-        if (!eligible) continue
-        // 级联阻断（数据驱动）：仅当该节点有上游连线、但所有上游都没产出可用数据时才跳过。
-        // 用实时 gatherInputs 判断，而非"失败集合"，避免上游其实已成功却被误判跳过。
-        const hasIncoming = get().edges.some((e) => e.target === n.id)
-        if (hasIncoming) {
-          const ins = gatherInputs(n, get().nodes, get().edges)
-          const hasData = Object.values(ins).some((arr) => arr && arr.length > 0)
-          if (!hasData) {
-            skipped.push(n.data.title || def.label)
-            patchNode(n.id, { status: 'error', error: '已跳过：上游未产出可用输入' })
-            continue
-          }
-        }
-        await execNode(n.id)
-        const cur = get().nodes.find((x) => x.id === n.id)
-        if (cur?.data.status === 'error') {
-          errored.push(cur.data.title || def.label)
-        }
-      }
+      const r = await runOrder(order)
+      notifyRunResult(r.errored, r.skipped)
     } finally {
       set({ isRunning: false, runningNodeId: null })
       void get().saveProject()
-      if (errored.length > 0 || skipped.length > 0) {
-        const parts: string[] = []
-        if (errored.length) parts.push(`${errored.length} 个出错`)
-        if (skipped.length) parts.push(`${skipped.length} 个因上游失败跳过`)
-        const names = errored.slice(0, 3).join('、')
-        window.mulby?.notification?.show(
-          `运行完成：${parts.join('，')}${names ? `（出错：${names}${errored.length > 3 ? ' 等' : ''}）` : ''}`,
-          'warning'
-        )
+    }
+  },
+
+  runFrom: async (id) => {
+    if (get().isRunning) return
+    // 收集 id 及其所有下游后代，仅执行这部分；上游不重跑，其已有产物经 gatherInputs 注入
+    const edges = get().edges
+    const targets = new Set<string>([id])
+    let grew = true
+    while (grew) {
+      grew = false
+      for (const e of edges) {
+        if (targets.has(e.source) && !targets.has(e.target)) {
+          targets.add(e.target)
+          grew = true
+        }
       }
+    }
+    const order = topoOrder(get().nodes, get().edges).filter((n) => targets.has(n.id))
+    set({ isRunning: true })
+    try {
+      const r = await runOrder(order)
+      notifyRunResult(r.errored, r.skipped)
+    } finally {
+      set({ isRunning: false, runningNodeId: null })
+      void get().saveProject()
     }
   },
 
   cancelRun: () => {
+    // 中止所有引擎：文本 / 图像 / 视频 / ffmpeg 合成
     abortText()
     abortImage()
     abortVideo()
     abortFfmpeg()
-    const rid = get().runningNodeId
-    if (rid) patchNode(rid, { status: 'idle', previewUrl: undefined, stream: undefined })
+    // 复位所有正在执行/排队的节点（扇出/批量时可能不止一个），并停止 runAll/runFrom 循环
+    for (const n of get().nodes) {
+      if (n.data.status === 'running' || n.data.status === 'queued') {
+        patchNode(n.id, { status: 'idle', previewUrl: undefined, stream: undefined })
+      }
+    }
     set({ isRunning: false, runningNodeId: null })
   },
 
