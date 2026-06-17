@@ -164,78 +164,150 @@ function asObj(v?: PortValue): Record<string, unknown> | null {
   return null
 }
 
-function styleHint(inputs: Record<string, PortValue[]>): string {
-  const g = globalsHint(inputs)
-  return g ? g.replace('画风：', 'style: ').replace('画幅：', 'aspect ') : ''
+export interface ImageJob {
+  prompt: string
+  size?: string
+  refName?: string // 按角色名匹配上游参考图（跨镜一致性）
+  meta?: Record<string, unknown> // 写入产物 meta（角色名 / 镜头号）
 }
 
-export function buildImagePrompt(
+export interface PromptGlobals {
+  aspectRatio?: string
+  style?: string
+}
+
+/** 画幅 → 图像尺寸 */
+function sizeFromAspect(aspect?: string): string | undefined {
+  switch (aspect) {
+    case '16:9':
+      return '1280x720'
+    case '9:16':
+      return '720x1280'
+    case '1:1':
+      return '1024x1024'
+    default:
+      return undefined
+  }
+}
+
+/** 风格：优先连入的全局设定 json 的 style 字段，其次项目级全局设定。只取风格，不混入画幅 */
+function resolveStyle(inputs: Record<string, PortValue[]>, globals?: PromptGlobals): string {
+  for (const arr of Object.values(inputs)) {
+    for (const v of arr) {
+      const g = v.type === 'json' && v.json && typeof v.json === 'object' ? (v.json as Record<string, unknown>) : null
+      if (g?.style) return `style: ${String(g.style)}`
+    }
+  }
+  return globals?.style ? `style: ${globals.style}` : ''
+}
+
+/** 画幅：优先连入的全局设定 json，其次项目级全局设定 */
+function resolveAspect(inputs: Record<string, PortValue[]>, globals?: PromptGlobals): string | undefined {
+  for (const arr of Object.values(inputs)) {
+    for (const v of arr) {
+      const g = v.type === 'json' && v.json && typeof v.json === 'object' ? (v.json as Record<string, unknown>) : null
+      if (g?.aspectRatio) return String(g.aspectRatio)
+    }
+  }
+  return globals?.aspectRatio
+}
+
+/**
+ * 构建图像生成任务列表（扇出）：角色三视图按每个角色、关键帧按每个镜头、场景按每个场景各产一条，
+ * 全局风格/画幅注入所有任务，画幅决定尺寸。返回空数组表示无可用输入。
+ */
+export function buildImagePrompts(
   data: FilmNodeData,
-  inputs: Record<string, PortValue[]>
-): BuiltImagePrompt {
+  inputs: Record<string, PortValue[]>,
+  globals?: PromptGlobals
+): ImageJob[] {
   const p = data.params || {}
-  const size = typeof p.size === 'string' ? p.size : undefined
-  const style = styleHint(inputs)
+  const paramSize = typeof p.size === 'string' ? p.size : undefined
+  const style = resolveStyle(inputs, globals)
+  const size = sizeFromAspect(resolveAspect(inputs, globals)) || paramSize
+  const withStyle = (s: string) => [s, style && `, ${style}`].filter(Boolean).join(' ')
 
   switch (data.kind) {
     case 'char-image': {
       const roleJson = asObj(first(inputs, 'role'))
-      // char-sheet 输出 { characters: [...] }；取第一个角色
       const chars = roleJson?.characters as Array<Record<string, unknown>> | undefined
-      const c = (chars && chars[0]) || roleJson || {}
-      const ref = String(c.refPrompt || c.appearance || c.description || valToText(first(inputs, 'role')))
-      const triple = c.triple as Record<string, unknown> | undefined
-      const tripleHint = triple
-        ? `front/side/back consistent (${[triple.front, triple.side, triple.back].filter(Boolean).join('; ')})`
-        : 'front view, side view, back view'
-      const prompt = [
-        'character design three-view turnaround sheet,',
-        tripleHint + ',',
-        ref + ',',
-        'full body, consistent character design, neutral pose, clean line art, soft studio lighting, white background, high detail',
-        style && `, ${style}`,
-      ]
-        .filter(Boolean)
-        .join(' ')
-      return { prompt, size }
+      const list = chars && chars.length ? chars : roleJson ? [roleJson] : []
+      if (list.length === 0) return []
+      return list.map((c) => {
+        const ref = String(c.refPrompt || c.appearance || c.description || '')
+        const triple = c.triple as Record<string, unknown> | undefined
+        const tripleHint = triple
+          ? `front/side/back consistent (${[triple.front, triple.side, triple.back].filter(Boolean).join('; ')})`
+          : 'front view, side view, back view'
+        const prompt = withStyle(
+          `character design three-view turnaround sheet, ${tripleHint}, ${ref}, full body, consistent character design, neutral pose, clean line art, soft studio lighting, white background, high detail`
+        )
+        return { prompt, size, meta: { name: c.name ? String(c.name) : undefined } }
+      })
     }
     case 'scene-image': {
       const inJson = asObj(first(inputs, 'in'))
-      let desc = ''
-      if (inJson) {
-        const shots = inJson.shots as Array<Record<string, unknown>> | undefined
-        const scenes = inJson.scenes as Array<Record<string, unknown>> | undefined
-        if (shots && shots[0]) desc = String(shots[0].prompt || shots[0].description || '')
-        else if (scenes && scenes[0]) desc = String(scenes[0].summary || scenes[0].slug || '')
+      const scenes = inJson?.scenes as Array<Record<string, unknown>> | undefined
+      const shots = inJson?.shots as Array<Record<string, unknown>> | undefined
+      const list = scenes && scenes.length ? scenes : shots && shots.length ? shots : []
+      if (list.length === 0) {
+        const desc = valToText(first(inputs, 'in'))
+        if (!desc.trim()) return []
+        return [{ prompt: withStyle(`${desc}, cinematic concept art, environment design, dramatic lighting, highly detailed`), size }]
       }
-      if (!desc) desc = valToText(first(inputs, 'in'))
-      const prompt = [desc + ',', 'cinematic concept art, environment design, dramatic lighting, highly detailed', style && `, ${style}`]
-        .filter(Boolean)
-        .join(' ')
-      return { prompt, size }
+      return list.map((s, i) => {
+        const desc = String(s.prompt || s.summary || s.description || s.slug || '')
+        return {
+          prompt: withStyle(`${desc}, cinematic concept art, environment design, dramatic lighting, highly detailed`),
+          size,
+          meta: { name: s.slug ? String(s.slug) : `场景${i + 1}` },
+        }
+      })
     }
     case 'keyframe': {
       const shotJson = asObj(first(inputs, 'shot'))
       const shots = shotJson?.shots as Array<Record<string, unknown>> | undefined
-      const shot = (shots && shots[0]) || shotJson || {}
-      const desc = String(shot.prompt || shot.description || valToText(first(inputs, 'shot')))
-      const prompt = [desc + ',', 'cinematic film still, movie frame, dramatic composition, highly detailed', style && `, ${style}`]
-        .filter(Boolean)
-        .join(' ')
-      return { prompt, size }
+      const list = shots && shots.length ? shots : shotJson ? [shotJson] : []
+      if (list.length === 0) {
+        const desc = valToText(first(inputs, 'shot'))
+        if (!desc.trim()) return []
+        return [{ prompt: withStyle(`${desc}, cinematic film still, movie frame, dramatic composition, highly detailed`), size }]
+      }
+      return list.map((shot, i) => {
+        const desc = String(shot.prompt || shot.description || '')
+        const chars = shot.characters as unknown[] | undefined
+        const refName = Array.isArray(chars) && chars.length ? String(chars[0]) : undefined
+        return {
+          prompt: withStyle(`${desc}, cinematic film still, movie frame, dramatic composition, highly detailed`),
+          size,
+          refName,
+          meta: { shot: shot.id ? String(shot.id) : `镜头${i + 1}` },
+        }
+      })
     }
     default:
-      return { prompt: '', size }
+      return []
   }
 }
 
-export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue[]>): BuiltPrompt {
+/** 全局设定一行：优先连入节点，其次项目级全局设定 */
+function globalsLine(inputs: Record<string, PortValue[]>, globals?: PromptGlobals): string {
+  const wired = globalsHint(inputs)
+  if (wired) return wired
+  const parts: string[] = []
+  if (globals?.style) parts.push(`画风：${globals.style}`)
+  if (globals?.aspectRatio) parts.push(`画幅：${globals.aspectRatio}`)
+  return parts.join('，')
+}
+
+export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue[]>, globals?: PromptGlobals): BuiltPrompt {
   const p = data.params || {}
   switch (data.kind) {
     case 'script-gen': {
       const story = valToText(first(inputs, 'in'))
       const instruction = String(p.instruction ?? '').trim()
-      const user = [`故事/灵感：\n${story}`, instruction && `\n附加要求：${instruction}`]
+      const g = globalsLine(inputs, globals)
+      const user = [`故事/灵感：\n${story}`, instruction && `\n附加要求：${instruction}`, g && `\n全局设定：${g}`]
         .filter(Boolean)
         .join('')
       return { system: SCRIPT_SYSTEM, user }
@@ -243,11 +315,11 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
     case 'storyboard': {
       const script = valToText(first(inputs, 'in'))
       const shotCount = Number(p.shotCount ?? 8) || 8
-      const g = globalsHint(inputs)
+      const g = globalsLine(inputs, globals)
       const user = [
         `剧本：\n${script}`,
         `\n\n目标镜头数：约 ${shotCount} 个`,
-        g && `\n全局设定：${g}`,
+        g && `\n全局设定（请在每个镜头的英文 prompt 中体现该画风）：${g}`,
       ]
         .filter(Boolean)
         .join('')

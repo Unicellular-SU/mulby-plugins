@@ -5,6 +5,7 @@ import NodeLibrary from './components/NodeLibrary'
 import FlowCanvas from './components/FlowCanvas'
 import Inspector from './components/Inspector'
 import ProviderSettings from './components/ProviderSettings'
+import GlobalSettings from './components/GlobalSettings'
 import { useGraphStore } from './store/graphStore'
 import { useProviderStore } from './store/providerStore'
 
@@ -16,6 +17,7 @@ export default function App() {
   const deleteSelected = useGraphStore((s) => s.deleteSelected)
   const loadProviders = useProviderStore((s) => s.load)
   const [providersOpen, setProvidersOpen] = useState(false)
+  const [globalsOpen, setGlobalsOpen] = useState(false)
 
   useEffect(() => {
     init()
@@ -56,8 +58,9 @@ export default function App() {
   return (
     <ReactFlowProvider>
       <div className="afs-app">
-        <Toolbar onOpenProviders={() => setProvidersOpen(true)} />
+        <Toolbar onOpenProviders={() => setProvidersOpen(true)} onOpenGlobals={() => setGlobalsOpen(true)} />
         <ProviderSettings open={providersOpen} onClose={() => setProvidersOpen(false)} />
+        <GlobalSettings open={globalsOpen} onClose={() => setGlobalsOpen(false)} />
         <div className="afs-app__body">
           <aside className="afs-app__left">
             <NodeLibrary />

@@ -1,14 +1,15 @@
 import { useRef } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings } from 'lucide-react'
+import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings, Palette } from 'lucide-react'
 import { useGraphStore, type ProjectData } from '../store/graphStore'
 import { TEMPLATES } from '../templates'
 
 interface ToolbarProps {
   onOpenProviders?: () => void
+  onOpenGlobals?: () => void
 }
 
-export default function Toolbar({ onOpenProviders }: ToolbarProps) {
+export default function Toolbar({ onOpenProviders, onOpenGlobals }: ToolbarProps) {
   const { fitView } = useReactFlow()
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -170,6 +171,9 @@ export default function Toolbar({ onOpenProviders }: ToolbarProps) {
         </button>
         <button className="afs-btn afs-btn--danger" onClick={onDeleteProject} title="删除当前工程">
           <Trash2 size={15} />
+        </button>
+        <button className="afs-btn" onClick={onOpenGlobals} title="全局设定（画风 / 画幅，注入所有生成节点）">
+          <Palette size={15} />
         </button>
         <button className="afs-btn" onClick={onOpenProviders} title="视频供应商设置">
           <Settings size={15} />

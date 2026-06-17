@@ -7,7 +7,7 @@ import { listTextModels, listImageModels } from '../services/models'
 import { runText, abortText } from '../services/textEngine'
 import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
-import { buildPrompt, buildImagePrompt, validateNodeJson, buildRepairPrompt } from '../services/prompts'
+import { buildPrompt, buildImagePrompts, validateNodeJson, buildRepairPrompt } from '../services/prompts'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
@@ -40,6 +40,10 @@ export interface PortValue {
   localPath?: string
   // 片段时长（秒）：视频节点产出时写入，compose 用于字幕时间轴对齐（M5）
   durationSec?: number
+  // 扇出：一个端口承载多份产物（N 张图 / N 个视频）；flat 字段镜像 items[0] 兼容单值渲染（M7）
+  items?: PortValue[]
+  // 产物元信息（如角色名/镜头号），用于跨镜一致性匹配与展示
+  meta?: Record<string, unknown>
 }
 
 export interface FilmNodeData {
@@ -64,10 +68,26 @@ export interface ProjectMeta {
   updatedAt: number
 }
 
+// 项目级全局设定：注入所有生成节点，画幅决定图像/视频尺寸（M7，对齐设计 §8.1）
+export interface ProjectGlobals {
+  aspectRatio: '16:9' | '9:16' | '1:1' | string
+  style: string
+}
+
+export function defaultGlobals(): ProjectGlobals {
+  return { aspectRatio: '16:9', style: '' }
+}
+
+// 向后兼容：旧工程可能无 globals 或字段不全，统一补全为完整结构
+function normGlobals(g?: Partial<ProjectGlobals>): ProjectGlobals {
+  return { ...defaultGlobals(), ...(g || {}) }
+}
+
 export interface ProjectData extends ProjectMeta {
   nodes: FilmNode[]
   edges: Edge[]
   viewport?: { x: number; y: number; zoom: number }
+  globals?: ProjectGlobals
 }
 
 // ============ 存储辅助（store 在 React 之外，直接访问 window.mulby） ============
@@ -101,7 +121,7 @@ function makeDefaultProject(name = '未命名工程'): ProjectData {
     position: { x: 240, y: 200 },
     data: { kind: 'story', title: '故事输入', params: {}, status: 'idle' },
   }
-  return { id, name, createdAt: ts, updatedAt: ts, nodes: [storyNode], edges: [] }
+  return { id, name, createdAt: ts, updatedAt: ts, nodes: [storyNode], edges: [], globals: defaultGlobals() }
 }
 
 // 连线类型校验：源端口类型与目标端口类型相同，或任一为 any
@@ -126,6 +146,7 @@ interface GraphState {
   projects: ProjectMeta[]
   currentId: string | null
   projectName: string
+  globals: ProjectGlobals
   nodes: FilmNode[]
   edges: Edge[]
   selectedNodeId: string | null
@@ -172,6 +193,7 @@ interface GraphState {
   switchProject: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
   renameProject: (name: string) => void
+  setGlobals: (patch: Partial<ProjectGlobals>) => void
   importProject: (data: Partial<ProjectData>) => Promise<void>
   exportProject: () => ProjectData
 }
@@ -221,7 +243,7 @@ async function execNode(id: string): Promise<void> {
   // 文本 AI 节点：流式调用 + JSON 校验 + 有限次「带错误反馈」修复重试
   if (def.category === 'text') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
-    const { system, user } = buildPrompt(node.data, inputs)
+    const { system, user } = buildPrompt(node.data, inputs, get().globals)
     if (!user.trim()) {
       patchNode(id, { status: 'error', error: '缺少输入内容（请连接上游或填写内容）' })
       return
@@ -282,11 +304,11 @@ async function execNode(id: string): Promise<void> {
     return
   }
 
-  // 图像 AI 节点：生成图像 → 存资产库
+  // 图像 AI 节点：按输入数组扇出生成 N 张（N 角色/N 镜头/N 场景）→ 存资产库
   if (def.category === 'image') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
-    const { prompt, size } = buildImagePrompt(node.data, inputs)
-    if (!prompt.trim()) {
+    const jobs = buildImagePrompts(node.data, inputs, get().globals)
+    if (jobs.length === 0) {
       patchNode(id, { status: 'error', error: '缺少输入内容（请连接上游分镜/角色/场景）' })
       return
     }
@@ -298,34 +320,43 @@ async function execNode(id: string): Promise<void> {
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: undefined })
     try {
-      // 若上游连接了参考图（image 端口），走 img2img（ai.images.edit）保持一致性
-      const ref = await resolveRefImage(inputs)
-      const canEdit = !!ref && !!window.mulby?.ai?.images?.edit
-      let base64: string
-      let mime: string
-      if (canEdit && ref) {
-        patchNode(id, { stream: '参考图生成中（img2img）…' })
-        const r = await editImage({ model, prompt, refBase64: ref.base64, refMime: ref.mime })
-        base64 = r.base64
-        mime = r.mime
-      } else {
-        const r = await generateImage({
-          model,
-          prompt,
-          size,
-          onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
-        })
-        base64 = r.base64
-        mime = r.mime
+      // 上游参考图（含扇出的多张），用于 img2img + 按角色名匹配保持一致性
+      const refs = await resolveRefImages(inputs)
+      const canEdit = refs.length > 0 && !!window.mulby?.ai?.images?.edit
+      const items: PortValue[] = []
+      for (let i = 0; i < jobs.length; i++) {
+        if (!get().isRunning) break
+        const job = jobs[i]
+        patchNode(id, { stream: jobs.length > 1 ? `生成中 ${i + 1}/${jobs.length}…` : '生成中…', previewUrl: undefined })
+        const ref = canEdit ? pickRef(refs, job.refName) : null
+        let base64: string
+        let mime: string
+        if (ref) {
+          const r = await editImage({ model, prompt: job.prompt, refBase64: ref.base64, refMime: ref.mime })
+          base64 = r.base64
+          mime = r.mime
+        } else {
+          const r = await generateImage({
+            model,
+            prompt: job.prompt,
+            size: job.size,
+            onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
+          })
+          base64 = r.base64
+          mime = r.mime
+        }
+        const assetId = await saveAsset(base64, mime)
+        items.push({ type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta })
       }
-      const assetId = await saveAsset(base64, mime)
-      const outDef = def.outputs[0]
-      const outId = outDef?.id || 'out'
+      if (items.length === 0) throw new Error('未生成任何图像')
+      const outId = def.outputs[0]?.id || 'out'
+      const head = items[0]
       patchNode(id, {
         status: 'done',
         previewUrl: undefined,
         stream: undefined,
-        outputs: { [outId]: { type: 'image', assetId, url: toDataUrl(base64, mime), mime } },
+        // flat 字段镜像 items[0] 以兼容单值渲染；items 承载全部
+        outputs: { [outId]: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
       })
     } catch (e) {
       patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined })
@@ -348,17 +379,27 @@ async function execNode(id: string): Promise<void> {
       return
     }
     const inputs = gatherInputs(node, get().nodes, get().edges)
-    const frameUrl = await portImageDataUrl(inputs['frame']?.[0])
     const promptText =
       (inputs['prompt']?.[0]?.text || inputs['in']?.[0]?.text || '').trim() ||
       String(node.data.params?.motion ?? '').trim()
-    if (node.data.kind === 'i2v' && !frameUrl) {
-      patchNode(id, { status: 'error', error: '图生视频缺少首帧（请连接关键帧/图像）' })
-      return
-    }
-    if (!promptText && !frameUrl) {
-      patchNode(id, { status: 'error', error: '缺少输入（提示词或首帧）' })
-      return
+    // i2v：按上游关键帧（含扇出的多张）逐帧扇出生成 N 个视频；t2v：单个文本任务
+    const frameUrls: (string | undefined)[] = []
+    if (node.data.kind === 'i2v') {
+      const frameVals = (inputs['frame'] || []).flatMap(expandItems).filter((v) => v.type === 'image')
+      for (const fv of frameVals) {
+        const du = await portImageDataUrl(fv)
+        if (du) frameUrls.push(du)
+      }
+      if (frameUrls.length === 0) {
+        patchNode(id, { status: 'error', error: '图生视频缺少首帧（请连接关键帧/图像）' })
+        return
+      }
+    } else {
+      if (!promptText) {
+        patchNode(id, { status: 'error', error: '缺少输入（提示词）' })
+        return
+      }
+      frameUrls.push(undefined)
     }
     const apiKey = await useProviderStore.getState().resolveKey(provider.id)
     if (!apiKey && provider.kind === 'fal') {
@@ -368,42 +409,48 @@ async function execNode(id: string): Promise<void> {
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', error: undefined, stream: '提交任务…' })
     try {
-      const { url } = await runVideo({
-        cfg: provider,
-        apiKey,
-        req: {
-          prompt: promptText || '',
-          imageUrl: frameUrl || undefined,
-          duration: Number(node.data.params?.duration ?? 5) || undefined,
-        },
-        onProgress: (p) => {
-          const label =
-            p.status === 'queued'
-              ? '排队中…'
-              : p.status === 'running'
-                ? `生成中…${p.progress ? ` ${Math.round(p.progress * 100)}%` : ''}`
-                : p.status === 'submitting'
-                  ? '提交任务…'
-                  : p.status
-          patchNode(id, { stream: label })
-        },
-      })
-      const outId = def.outputs[0]?.id || 'out'
       const durationSec = Number(node.data.params?.duration ?? 5) || 5
+      const total = frameUrls.length
+      const items: PortValue[] = []
+      for (let i = 0; i < total; i++) {
+        if (!get().isRunning) break
+        const { url } = await runVideo({
+          cfg: provider,
+          apiKey,
+          req: {
+            prompt: promptText || '',
+            imageUrl: frameUrls[i] || undefined,
+            duration: Number(node.data.params?.duration ?? 5) || undefined,
+          },
+          onProgress: (p) => {
+            const base =
+              p.status === 'queued'
+                ? '排队中'
+                : p.status === 'running'
+                  ? `生成中${p.progress ? ` ${Math.round(p.progress * 100)}%` : ''}`
+                  : p.status === 'submitting'
+                    ? '提交任务'
+                    : p.status
+            patchNode(id, { stream: total > 1 ? `片段 ${i + 1}/${total} · ${base}…` : `${base}…` })
+          },
+        })
+        // 远程 URL 可能有有效期：尽力下载落盘（失败不影响在线播放）
+        let localPath: string | undefined
+        try {
+          localPath = await downloadVideoToDisk(url, `${(node.data.title || 'clip').replace(/\s+/g, '_')}_${i + 1}_${Date.now()}`)
+        } catch {
+          // 忽略
+        }
+        items.push({ type: 'video', url, mime: 'video/mp4', durationSec, localPath })
+      }
+      if (items.length === 0) throw new Error('未生成任何视频')
+      const outId = def.outputs[0]?.id || 'out'
+      const head = items[0]
       patchNode(id, {
         status: 'done',
-        stream: '下载到本地…',
-        outputs: { [outId]: { type: 'video', url, mime: 'video/mp4', durationSec } },
+        stream: undefined,
+        outputs: { [outId]: { type: 'video', items, url: head.url, mime: 'video/mp4', durationSec, localPath: head.localPath } },
       })
-      // 远程 URL 可能有有效期：成功后尽力下载落盘（失败不影响 done 状态）
-      try {
-        const localPath = await downloadVideoToDisk(url, `${(node.data.title || 'clip').replace(/\s+/g, '_')}_${Date.now()}`)
-        const cur = useGraphStore.getState().nodes.find((n) => n.id === id)
-        const cv = cur?.data.outputs?.[outId]
-        if (cur && cv) patchNode(id, { stream: undefined, outputs: { ...cur.data.outputs, [outId]: { ...cv, localPath } } })
-      } catch {
-        patchNode(id, { stream: undefined })
-      }
     } catch (e) {
       patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
     } finally {
@@ -455,7 +502,8 @@ async function execNode(id: string): Promise<void> {
   // 影片合成节点（M5）：多片段 → ffmpeg 归一+拼接，可选配音/字幕
   if (def.category === 'output' && node.data.kind === 'compose') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
-    const clipVals = inputs['clips'] || []
+    // 展开扇出：一个图生视频节点可能产出 N 个片段（items），全部纳入并按顺序拼接
+    const clipVals = (inputs['clips'] || []).flatMap(expandItems).filter((v) => v.type === 'video')
     if (clipVals.length === 0) {
       patchNode(id, { status: 'error', error: '缺少视频片段（连接「视频片段」端口，可连多个）' })
       return
@@ -466,6 +514,7 @@ async function execNode(id: string): Promise<void> {
       // 1) 每个片段解析为本地文件
       const clipPaths: string[] = []
       for (let i = 0; i < clipVals.length; i++) {
+        if (!get().isRunning) break
         patchNode(id, { stream: `准备片段 ${i + 1}/${clipVals.length}…` })
         const lp = await resolveLocalVideo(clipVals[i], `clip_${i}`)
         if (lp) clipPaths.push(lp)
@@ -495,6 +544,7 @@ async function execNode(id: string): Promise<void> {
       const fps = Number(node.data.params?.fps ?? 24) || 24
       const totalSec = clipVals.reduce((a, v) => a + (v.durationSec ?? 5), 0)
       const outPath = await exportPath(`film_${Date.now()}.mp4`)
+      if (!get().isRunning) throw new Error('已取消')
       await composeFilm({
         clips: clipPaths,
         outPath,
@@ -572,22 +622,48 @@ async function portImageDataUrl(v?: PortValue): Promise<string> {
   return ''
 }
 
-// 从上游输入里取第一张参考图（image 端口），用于 img2img（ai.images.edit）
-async function resolveRefImage(
-  inputs: Record<string, PortValue[]>
-): Promise<{ base64: string; mime: string } | null> {
+interface RefImage {
+  base64: string
+  mime: string
+  name?: string
+}
+
+// 展开端口产物：有 items（扇出）则返回全部子项，否则返回自身
+function expandItems(v: PortValue): PortValue[] {
+  return v.items && v.items.length ? v.items : [v]
+}
+
+// 从上游所有 image 端口收集参考图（含扇出的多张），带角色名用于一致性匹配（img2img）
+async function resolveRefImages(inputs: Record<string, PortValue[]>): Promise<RefImage[]> {
+  const out: RefImage[] = []
   for (const arr of Object.values(inputs)) {
     for (const v of arr) {
-      if (v && v.type === 'image') {
-        const dataUrl = await portImageDataUrl(v)
-        if (dataUrl) {
-          const { base64, mime } = fromDataUrl(dataUrl)
-          if (base64) return { base64, mime }
+      for (const it of expandItems(v)) {
+        if (it && it.type === 'image') {
+          const dataUrl = await portImageDataUrl(it)
+          if (dataUrl) {
+            const { base64, mime } = fromDataUrl(dataUrl)
+            if (base64) out.push({ base64, mime, name: typeof it.meta?.name === 'string' ? it.meta.name : undefined })
+          }
         }
       }
     }
   }
-  return null
+  return out
+}
+
+// 按名称匹配参考图（关键帧用出场角色名匹配角色图）：精确优先，其次 ≥2 字子串，最后回退第一张
+function pickRef(refs: RefImage[], name?: string): RefImage | null {
+  if (refs.length === 0) return null
+  if (name) {
+    const exact = refs.find((r) => r.name === name)
+    if (exact) return exact
+    if (name.length >= 2) {
+      const partial = refs.find((r) => r.name && r.name.length >= 2 && (r.name.includes(name) || name.includes(r.name)))
+      if (partial) return partial
+    }
+  }
+  return refs[0]
 }
 
 // 把视频端口产物解析为本机文件路径（compose/export 用）：本地优先，远程下载，data 落盘
@@ -632,51 +708,68 @@ async function resolveLocalAudio(v: PortValue): Promise<string | undefined> {
   return undefined
 }
 
+const MEDIA_TYPES: PortValue['type'][] = ['image', 'video', 'audio']
+
+// 递归剥离大体积 data URL（含扇出 items）；保留远程/本地文件链接与 assetId
+function stripValue(v: PortValue): PortValue {
+  let out: PortValue = v.items?.length ? { ...v, items: v.items.map(stripValue) } : v
+  if (MEDIA_TYPES.includes(out.type) && out.url && out.url.startsWith('data:')) {
+    const { url: _url, ...rest } = out
+    out = rest
+  }
+  return out
+}
+
 // 序列化节点用于持久化：剥离大体积的 url/previewUrl/stream，仅保留 assetId 引用
 function serializeNodes(nodes: FilmNode[]): FilmNode[] {
   return nodes.map((n) => {
     const d = n.data
     if (!d.outputs && !d.stream && !d.previewUrl) return n
-    let outputs = d.outputs
-    if (outputs) {
-      outputs = Object.fromEntries(
-        Object.entries(outputs).map(([k, v]) => {
-          // 仅剥离体积大的 data URL（base64 图像/音频）；保留远程/本地文件链接（含 file://、http、localPath）
-          if (v && (v.type === 'image' || v.type === 'video' || v.type === 'audio') && v.url && v.url.startsWith('data:')) {
-            const { url: _url, ...rest } = v
-            return [k, rest]
-          }
-          return [k, v]
-        })
-      )
-    }
+    const outputs = d.outputs
+      ? Object.fromEntries(Object.entries(d.outputs).map(([k, v]) => [k, stripValue(v)]))
+      : d.outputs
     return { ...n, data: { ...d, outputs, stream: undefined, previewUrl: undefined } }
   })
 }
 
-// 加载工程后补水：按 assetId 异步取回 base64，回填 url 用于显示
+// 递归补水：按 assetId 取回 base64 回填 url（含扇出 items）
+async function hydrateValue(v: PortValue): Promise<PortValue> {
+  let out: PortValue = v.items?.length ? { ...v, items: await Promise.all(v.items.map(hydrateValue)) } : v
+  if (MEDIA_TYPES.includes(out.type) && out.assetId && !out.url) {
+    const a = await loadAsset(out.assetId)
+    if (a) out = { ...out, url: toDataUrl(a.base64, a.mime), mime: a.mime }
+  }
+  return out
+}
+
+// 加载工程后补水：回填 url 用于显示
 async function hydrateAssets() {
   const get = useGraphStore.getState
-  const targets: Array<{ nodeId: string; port: string; assetId: string }> = []
   for (const n of get().nodes) {
     const outs = n.data.outputs
     if (!outs) continue
+    let changed = false
+    const next: Record<string, PortValue> = {}
     for (const [k, v] of Object.entries(outs)) {
-      if (v && (v.type === 'image' || v.type === 'video' || v.type === 'audio') && v.assetId && !v.url) {
-        targets.push({ nodeId: n.id, port: k, assetId: v.assetId })
-      }
+      const nv = await hydrateValue(v)
+      next[k] = nv
+      if (nv !== v) changed = true
+    }
+    if (changed) patchNode(n.id, { outputs: next })
+  }
+}
+
+// 递归回灌：把内嵌的 data URL 重新写入资产库，回填 assetId（含扇出 items）
+async function reimportValue(v: PortValue): Promise<PortValue> {
+  let out: PortValue = v.items?.length ? { ...v, items: await Promise.all(v.items.map(reimportValue)) } : v
+  if ((out.type === 'image' || out.type === 'video') && out.url && out.url.startsWith('data:')) {
+    const { base64, mime } = fromDataUrl(out.url)
+    if (base64) {
+      const assetId = await saveAsset(base64, mime)
+      out = { ...out, assetId, mime }
     }
   }
-  for (const t of targets) {
-    const a = await loadAsset(t.assetId)
-    if (!a) continue
-    const cur = get().nodes.find((x) => x.id === t.nodeId)
-    const cv = cur?.data.outputs?.[t.port]
-    if (cur && cv && !cv.url) {
-      const outputs = { ...cur.data.outputs, [t.port]: { ...cv, url: toDataUrl(a.base64, a.mime), mime: a.mime } }
-      patchNode(t.nodeId, { outputs })
-    }
-  }
+  return out
 }
 
 // 导入工程时把内嵌的图片 url 重新写入资产库，回填 assetId
@@ -686,14 +779,11 @@ async function reimportAssets() {
     const outs = n.data.outputs
     if (!outs) continue
     let changed = false
-    const next: Record<string, PortValue> = { ...outs }
+    const next: Record<string, PortValue> = {}
     for (const [k, v] of Object.entries(outs)) {
-      if (v && (v.type === 'image' || v.type === 'video') && v.url) {
-        const { base64, mime } = fromDataUrl(v.url)
-        const assetId = await saveAsset(base64, mime)
-        next[k] = { ...v, assetId, mime }
-        changed = true
-      }
+      const nv = await reimportValue(v)
+      next[k] = nv
+      if (nv !== v) changed = true
     }
     if (changed) patchNode(n.id, { outputs: next })
   }
@@ -704,6 +794,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   projects: [],
   currentId: null,
   projectName: '未命名工程',
+  globals: defaultGlobals(),
   nodes: [],
   edges: [],
   selectedNodeId: null,
@@ -739,6 +830,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       projects: stored.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
       currentId,
       projectName: current.name,
+      globals: normGlobals(current.globals),
       nodes: current.nodes || [],
       edges: current.edges || [],
       selectedNodeId: null,
@@ -808,6 +900,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
       currentId: proj.id,
       projectName: proj.name,
+      globals: normGlobals(proj.globals),
       nodes,
       edges,
       selectedNodeId: null,
@@ -1022,6 +1115,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
       currentId: def.id,
       projectName: def.name,
+      globals: normGlobals(def.globals),
       nodes: def.nodes,
       edges: def.edges,
       selectedNodeId: null,
@@ -1030,7 +1124,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   saveProject: async () => {
-    const { currentId, projectName, nodes, edges } = get()
+    const { currentId, projectName, nodes, edges, globals } = get()
     if (!currentId) return
     set({ saving: true })
     const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
@@ -1043,6 +1137,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       updatedAt: ts,
       nodes: serializeNodes(nodes),
       edges,
+      globals,
     }
     if (idx >= 0) all[idx] = data
     else all.push(data)
@@ -1064,6 +1159,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     set({
       currentId: id,
       projectName: target.name,
+      globals: normGlobals(target.globals),
       nodes: target.nodes || [],
       edges: target.edges || [],
       selectedNodeId: null,
@@ -1088,6 +1184,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       projects: all.map(({ id: pid, name, createdAt, updatedAt }) => ({ id: pid, name, createdAt, updatedAt })),
       currentId: current.id,
       projectName: current.name,
+      globals: wasCurrent ? normGlobals(current.globals) : get().globals,
       nodes: wasCurrent ? current.nodes || [] : get().nodes,
       edges: wasCurrent ? current.edges || [] : get().edges,
       selectedNodeId: wasCurrent ? null : get().selectedNodeId,
@@ -1101,11 +1198,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     scheduleSave(() => get().saveProject())
   },
 
+  setGlobals: (patch) => {
+    set({ globals: { ...get().globals, ...patch }, dirty: true })
+    scheduleSave(() => get().saveProject())
+  },
+
   importProject: async (data) => {
     set({
       nodes: (data.nodes as FilmNode[]) || [],
       edges: (data.edges as Edge[]) || [],
       projectName: data.name || get().projectName,
+      globals: normGlobals(data.globals as Partial<ProjectGlobals>),
       selectedNodeId: null,
       dirty: true,
     })
@@ -1115,9 +1218,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   exportProject: () => {
-    const { currentId, projectName, nodes, edges } = get()
+    const { currentId, projectName, nodes, edges, globals } = get()
     const ts = now()
     // 导出内嵌图片 url，保证跨设备可移植
-    return { id: currentId || `proj_${nanoid(8)}`, name: projectName, createdAt: ts, updatedAt: ts, nodes, edges }
+    return { id: currentId || `proj_${nanoid(8)}`, name: projectName, createdAt: ts, updatedAt: ts, nodes, edges, globals }
   },
 }))

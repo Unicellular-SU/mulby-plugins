@@ -48,9 +48,8 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'full-pipeline',
     name: '完整影视流水线',
-    desc: '故事→剧本→分镜→角色/关键帧→图生视频→合成→导出（含字幕）',
+    desc: '故事→剧本→分镜→角色/关键帧→图生视频→合成→导出（画风/画幅由顶栏「全局设定」统一注入）',
     nodes: [
-      { kind: 'global-style', x: 40, y: 40 },
       { kind: 'story', x: 40, y: 240 },
       { kind: 'script-gen', x: 340, y: 240 },
       { kind: 'storyboard', x: 640, y: 240 },
@@ -62,17 +61,16 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'export', x: 1840, y: 300 },
     ],
     edges: [
-      { from: 1, to: 2, toHandle: 'in' },
-      { from: 2, to: 3, toHandle: 'in' },
-      { from: 3, to: 6, toHandle: 'shot' },
-      { from: 3, to: 4, toHandle: 'in' },
-      { from: 0, to: 5, toHandle: 'style' },
-      { from: 4, to: 5, toHandle: 'role' },
-      { from: 5, to: 6, toHandle: 'ref' },
-      { from: 6, to: 7, toHandle: 'frame' },
-      { from: 7, to: 8, toHandle: 'clips' },
-      { from: 3, to: 8, toHandle: 'subs' },
-      { from: 8, to: 9, toHandle: 'in' },
+      { from: 0, to: 1, toHandle: 'in' }, // story → script-gen
+      { from: 1, to: 2, toHandle: 'in' }, // script-gen → storyboard
+      { from: 2, to: 5, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
+      { from: 2, to: 3, toHandle: 'in' }, // storyboard → char-sheet
+      { from: 3, to: 4, toHandle: 'role' }, // char-sheet → char-image（按角色扇出）
+      { from: 4, to: 5, toHandle: 'ref' }, // char-image → keyframe（按角色名匹配参考图）
+      { from: 5, to: 6, toHandle: 'frame' }, // keyframe → i2v（按关键帧扇出）
+      { from: 6, to: 7, toHandle: 'clips' }, // i2v → compose（扇出片段全部纳入）
+      { from: 2, to: 7, toHandle: 'subs' }, // storyboard → compose 字幕
+      { from: 7, to: 8, toHandle: 'in' }, // compose → export
     ],
   },
   {

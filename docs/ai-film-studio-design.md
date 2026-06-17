@@ -4,10 +4,10 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.8（M0–M5 + M6 主体已落地） |
-| 日期 | 2026-06-16 |
+| 文档版本 | v0.9（M0–M6 + M7 一致性与扇出已落地） |
+| 日期 | 2026-06-17 |
 | 作者 | 资深全栈架构师 |
-| 状态 | **M0–M5 全链路 + M6 打磨主体已完成**（工作流模板、音频素材导入、错误汇总、图标/README、`mulby pack` 产出 `.inplugin`）；仅批量 ForEach 等控制流子系统留待后续 |
+| 状态 | **M0–M6 全链路 + M7 一致性与扇出已完成**（自动 N→N 扇出：N 角色→N 三视图、N 镜头→N 关键帧→N 视频；项目级全局设定贯穿所有生成节点并决定尺寸；Inspector 重做为输入/输出结构化卡片+媒体画廊）；宿主侧已支持 API 级结构化输出 |
 | 目标插件目录 | `mulby-plugins/plugins/ai-film-studio/` |
 
 ---
@@ -987,3 +987,25 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 **插件改动：** `textEngine` 新增 `jsonMode`，JSON 文本节点（剧本/分镜/角色）调用时传 `params.responseFormat='json_object'`，从源头约束合法 JSON；旧宿主忽略该参数自动回退到 prompt+校验+重试。
 
 > ⚠️ 宿主源码改动需**重新构建/重启 Mulby**（`pnpm dev` 或 `pnpm electron:build`）才生效；仅重装插件 `.inplugin` 不够。
+
+---
+
+### M7 — 一致性与扇出（2026-06-17）
+
+人工验收发现三个问题，深挖为三个系统性缺陷并整体重构：
+
+**根因 → 修复**
+1. **数组坍缩（最致命）**：每个生成节点只取数组第 0 项——3 个角色只出 1 张图、8 个镜头只出 1 个关键帧，多镜头主链路从根上跑不通。
+   → **自动 N→N 扇出**：`PortValue` 增 `items?: PortValue[]` + `meta`；`buildImagePrompts` 返回 job 数组（角色/镜头/场景逐项）；execNode image 分支循环生成 N 张、video(i2v) 按上游关键帧 items 逐帧扇出 N 段、compose `flatMap(expandItems)` 收齐所有片段；serialize/hydrate/reimport 递归处理 items。
+2. **全局设定不贯穿**：仅角色三视图有 style 入口，关键帧/场景/视频拿不到画风、画幅被忽略。
+   → **项目级全局设定**（`ProjectGlobals` + 顶栏「全局设定」面板）：画风/画幅自动注入所有生成节点（execNode 传 `get().globals` 给 buildPrompt/buildImagePrompts），画幅经 `sizeFromAspect` 决定图像/视频尺寸；full-pipeline 模板移除 global-style 节点改用项目全局，避免割裂。
+3. **跨镜角色不一致**：关键帧不引用对应角色图。
+   → 角色图产物带 `meta.name`，关键帧按镜头 `characters[0]` 经 `pickRef`（精确优先、≥2 字子串）匹配对应角色图走 img2img。
+4. **Inspector 简陋**：只甩 JSON 源码 / 单图。
+   → 重做为 **输入区**（各端口连接状态 + 上游产物摘要 `InputSummary`）+ **输出区**（剧本/分镜/角色**卡片化**、媒体**画廊** `OutputView`、原始 JSON 折叠）；新增 `components/inspectorViews.tsx`；FilmNode 节点显示扇出数量角标。
+
+**对抗式审查修复（24 agent）**：resolveStyle 不再把画幅混进风格；compose 补 isRunning 中断检查；JsonView 改用 JSX 组件；卡片/画廊改稳定 key；OutputView 过滤无 url 项；pickRef 分级匹配；globals 向后兼容 `{...defaultGlobals(), ...g}`（旧工程不崩）。
+
+**验收**：`tsc` 通过、`build` 通过、`mulby pack` 出包。待人工验证：3 角色出 3 图、N 镜头出 N 关键帧/视频、全局画风/画幅贯穿、Inspector 卡片与画廊。
+
+> 留待后续：scene-image 的 scenes/shots 优先级提示、ForEach/Merge/Variable 等显式控制流（当前扇出为隐式自动，已覆盖主链路）。

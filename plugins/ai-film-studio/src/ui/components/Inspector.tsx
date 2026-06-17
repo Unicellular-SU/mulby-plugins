@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect } from 'react'
-import { Trash2, Play, Loader2, Upload, Download, FolderOpen, KeyRound } from 'lucide-react'
+import { Trash2, Play, Loader2, Upload, KeyRound } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
-import { useGraphStore, type PortValue } from '../store/graphStore'
+import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
-import { basename } from '../services/download'
+import { gatherInputs } from '../services/executor'
+import { OutputView, InputSummary } from './inspectorViews'
 import { setKey, hasKey, removeKey } from '../services/keys'
 
 /** TTS API Key 输入：密钥走 storage.encrypted，不进工程参数 */
@@ -56,17 +57,6 @@ function TtsKeyField({ nodeId }: { nodeId: string }) {
   )
 }
 
-function resultText(v: PortValue): string {
-  if (v.type === 'json' && v.json !== undefined) {
-    try {
-      return JSON.stringify(v.json, null, 2)
-    } catch {
-      return String(v.text ?? '')
-    }
-  }
-  return String(v.text ?? '')
-}
-
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -81,13 +71,14 @@ export default function Inspector() {
   const audioRef = useRef<HTMLInputElement>(null)
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const node = useGraphStore((s) => s.nodes.find((n) => n.id === s.selectedNodeId) || null)
+  const allNodes = useGraphStore((s) => s.nodes)
+  const edges = useGraphStore((s) => s.edges)
   const updateNodeParam = useGraphStore((s) => s.updateNodeParam)
   const updateNodeTitle = useGraphStore((s) => s.updateNodeTitle)
   const removeNode = useGraphStore((s) => s.removeNode)
   const runNode = useGraphStore((s) => s.runNode)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
   const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
-  const downloadVideo = useGraphStore((s) => s.downloadVideo)
   const isRunning = useGraphStore((s) => s.isRunning)
   const runningNodeId = useGraphStore((s) => s.runningNodeId)
   const models = useGraphStore((s) => s.models)
@@ -125,7 +116,9 @@ export default function Inspector() {
     (def.category === 'output' &&
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
-  const outputValues = node.data.outputs ? Object.values(node.data.outputs) : []
+  const inputs = gatherInputs(node, allNodes, edges)
+  const outputEntries = node.data.outputs ? Object.entries(node.data.outputs) : []
+  const portLabel = (ports: { id: string; label: string }[], pid: string) => ports.find((p) => p.id === pid)?.label || pid
 
   const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -323,28 +316,26 @@ export default function Inspector() {
           def.category !== 'image' &&
           def.category !== 'video' && <div className="afs-inspector__note">该节点暂无可配置参数</div>}
 
-        <div className="afs-inspector__ports">
-          {def.inputs.length > 0 && (
-            <div className="afs-portcol">
-              <div className="afs-portcol__title">输入</div>
-              {def.inputs.map((p) => (
-                <div key={p.id} className="afs-portcol__item">
-                  {p.label} <span className="afs-portcol__type">{p.type}</span>
+        {/* 输入区：每个输入端口的连接状态与上游产物摘要 */}
+        {def.inputs.length > 0 && (
+          <div className="afs-section">
+            <div className="afs-section__title">输入</div>
+            {def.inputs.map((p) => {
+              const v = inputs[p.id]?.[0]
+              return (
+                <div key={p.id} className="afs-io">
+                  <span className="afs-io__label">
+                    {p.label}
+                    <span className="afs-portcol__type">{p.type}</span>
+                  </span>
+                  <span className="afs-io__val">
+                    {v ? <InputSummary value={v} /> : <span className="afs-inspector__note">未连接</span>}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
-          {def.outputs.length > 0 && (
-            <div className="afs-portcol">
-              <div className="afs-portcol__title">输出</div>
-              {def.outputs.map((p) => (
-                <div key={p.id} className="afs-portcol__item">
-                  {p.label} <span className="afs-portcol__type">{p.type}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )
+            })}
+          </div>
+        )}
 
         {node.data.error && <div className="afs-result afs-result--error">{node.data.error}</div>}
 
@@ -369,44 +360,16 @@ export default function Inspector() {
           </div>
         )}
 
-        {!running && outputValues.length > 0 && (
-          <div className="afs-result">
-            <div className="afs-result__title">运行结果</div>
-            {outputValues.map((v, i) =>
-              v.type === 'video' && v.url ? (
-                <div key={i}>
-                  <video className="afs-result__img" src={v.url} controls preload="metadata" />
-                  <div className="afs-result__actions">
-                    {v.localPath ? (
-                      <>
-                        <span className="afs-result__path" title={v.localPath}>
-                          已存本地：{basename(v.localPath)}
-                        </span>
-                        <button
-                          className="afs-btn afs-btn--mini"
-                          onClick={() => window.mulby?.shell?.showItemInFolder?.(v.localPath as string)}
-                          title="在文件管理器中显示"
-                        >
-                          <FolderOpen size={13} /> 打开文件夹
-                        </button>
-                      </>
-                    ) : (
-                      <button className="afs-btn afs-btn--mini" onClick={() => downloadVideo(node.id)} title="下载视频到本机">
-                        <Download size={13} /> 下载到本地
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : v.type === 'audio' && v.url ? (
-                <audio key={i} className="afs-result__audio" src={v.url} controls preload="metadata" />
-              ) : v.type === 'image' && v.url ? (
-                <img key={i} className="afs-result__img" src={v.url} alt="result" />
-              ) : (
-                <pre key={i} className="afs-result__pre">
-                  {resultText(v)}
-                </pre>
-              )
-            )}
+        {/* 输出区：每个输出端口的富渲染（剧本/分镜/角色卡片 · 媒体画廊 · 文本） */}
+        {!running && outputEntries.length > 0 && (
+          <div className="afs-section">
+            <div className="afs-section__title">输出</div>
+            {outputEntries.map(([k, v]) => (
+              <div key={k} className="afs-outport">
+                {def.outputs.length > 1 ? <div className="afs-outport__label">{portLabel(def.outputs, k)}</div> : null}
+                <OutputView value={v} />
+              </div>
+            ))}
           </div>
         )}
       </div>

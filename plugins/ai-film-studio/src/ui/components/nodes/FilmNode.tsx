@@ -23,6 +23,12 @@ function outputSummary(data: FilmNodeData): string {
   if (!outs) return ''
   const v = Object.values(outs)[0] as PortValue | undefined
   if (!v) return ''
+  if (v.items && v.items.length) {
+    const t = v.items[0]?.type
+    if (t === 'video') return `视频 · ${v.items.length} 段`
+    if (t === 'audio') return `音频 · ${v.items.length}`
+    return `图像 · ${v.items.length} 张`
+  }
   if (v.type === 'json' && v.json && typeof v.json === 'object') {
     const j = v.json as Record<string, unknown>
     if (Array.isArray(j.scenes)) return `剧本 · ${j.scenes.length} 场`
@@ -31,15 +37,22 @@ function outputSummary(data: FilmNodeData): string {
     return 'JSON 已生成'
   }
   if (v.type === 'image') return '图像已生成'
+  if (v.type === 'video') return '视频已生成'
+  if (v.type === 'audio') return '音频已生成'
   if (v.text) return truncate(v.text, 64)
   return ''
 }
 
-function firstMedia(data: FilmNodeData): { type: 'image' | 'video'; url: string } | null {
+function firstMedia(data: FilmNodeData): { type: 'image' | 'video'; url: string; count: number } | null {
   const outs = data.outputs
   if (!outs) return null
   for (const v of Object.values(outs)) {
-    if (v && (v.type === 'image' || v.type === 'video') && v.url) return { type: v.type, url: v.url }
+    if (!v) continue
+    const list = v.items && v.items.length ? v.items : [v]
+    const head = list.find((x) => (x.type === 'image' || x.type === 'video') && x.url)
+    if (head && head.url && (head.type === 'image' || head.type === 'video')) {
+      return { type: head.type, url: head.url, count: list.filter((x) => x.url).length }
+    }
   }
   return null
 }
@@ -131,6 +144,7 @@ function FilmNodeComp({ data, selected }: NodeProps<FilmNodeType>) {
             ) : (
               <img src={media.url} alt="" draggable={false} />
             )}
+            {media.count > 1 ? <span className="afs-node__thumb-badge">×{media.count}</span> : null}
           </div>
         )
       )}
