@@ -68,7 +68,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
     id: 'toapis-sora2',
     label: 'toapis · Sora2（OpenAI 兼容聚合）',
-    hint: 'toapis 聚合（OpenAI 兼容）。model 如 sora-2 / sora-2-vvip；Key=toapis Key（Bearer）。文生视频开箱即用；图生视频需「公开图片 URL」（toapis 不支持 base64），本插件关键帧是本地图，i2v 暂不适用。',
+    hint: 'toapis 聚合（OpenAI 兼容）。model 如 sora-2 / sora-2-vvip；Key=toapis Key（Bearer）。文生视频开箱即用；图生视频会自动把关键帧经 toapis 图床上传换公开 URL，无需手动托管。',
     config: {
       kind: 'custom-http',
       capabilities: ['video'],
@@ -80,13 +80,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       taskIdPath: 'id',
       statusPath: 'status',
       videoUrlPath: 'result.data.0.url',
+      uploadUrl: 'https://toapis.com/v1/uploads/images',
+      uploadUrlPath: 'data.url',
       bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
     },
   },
   {
     id: 'toapis-veo3',
     label: 'toapis · Veo3 谷歌视频（OpenAI 兼容聚合）',
-    hint: 'toapis 聚合。model 如 veo3.1-fast / veo3；body 同 Sora2（image_urls）。图生视频需公开 URL。',
+    hint: 'toapis 聚合。model 如 veo3.1-fast / veo3；body 同 Sora2（image_urls）。图生视频自动上传关键帧换公开 URL。',
     config: {
       kind: 'custom-http',
       capabilities: ['video'],
@@ -98,13 +100,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       taskIdPath: 'id',
       statusPath: 'status',
       videoUrlPath: 'result.data.0.url',
+      uploadUrl: 'https://toapis.com/v1/uploads/images',
+      uploadUrlPath: 'data.url',
       bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
     },
   },
   {
     id: 'toapis-grok',
     label: 'toapis · Grok 视频（OpenAI 兼容聚合）',
-    hint: 'toapis 聚合。model=grok-video-3；图字段用 images（注意与 Sora2/Veo3 的 image_urls 不同）。图生视频需公开 URL。',
+    hint: 'toapis 聚合。model=grok-video-3；图字段用 images（注意与 Sora2/Veo3 的 image_urls 不同）。图生视频自动上传关键帧换公开 URL。',
     config: {
       kind: 'custom-http',
       capabilities: ['video'],
@@ -116,13 +120,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       taskIdPath: 'id',
       statusPath: 'status',
       videoUrlPath: 'result.data.0.url',
+      uploadUrl: 'https://toapis.com/v1/uploads/images',
+      uploadUrlPath: 'data.url',
       bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"]{/imageUrl}}',
     },
   },
   {
     id: 'openai-compat-video',
     label: 'OpenAI 兼容视频聚合 · 通用（自定义平台/模型）',
-    hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 baseURL/submitUrl 接同构平台，model 填任意（sora-2 / veo3.1-fast / grok-video-3 / kling-… / 含 Omni 等）。多数图生视频需公开 URL。请求体字段名按所选模型调整（image_urls vs images）。',
+    hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 baseURL/submitUrl 接同构平台，model 填任意（sora-2 / veo3.1-fast / grok-video-3 / kling-… / 含 Omni 等）。图生视频自动经「图片上传地址」换公开 URL（默认 toapis 图床，换平台请同步改）。请求体字段名按模型调整（image_urls vs images）。',
     config: {
       kind: 'custom-http',
       capabilities: ['video'],
@@ -134,6 +140,8 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       taskIdPath: 'id',
       statusPath: 'status',
       videoUrlPath: 'result.data.0.url',
+      uploadUrl: 'https://toapis.com/v1/uploads/images',
+      uploadUrlPath: 'data.url',
       bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
     },
   },

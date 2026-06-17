@@ -32,6 +32,10 @@ export interface MediaProviderConfig {
   // 请求体模板（声明式，适配各家不同 body）：{prompt}{imageUrl}{lastImageUrl}{model}{duration}{size}
   // 支持条件块 {?imageUrl}…{/imageUrl}（变量非空才保留），留空则用通用默认 body
   bodyTemplate?: string
+  // 图片上传端点（multipart/form-data，field=file）：用于「仅收公开图片 URL」的图生视频——
+  // 本地关键帧(data URL)先经此上传换公开 URL 再提交。结果 URL 默认取 data.url（可配 uploadUrlPath）
+  uploadUrl?: string
+  uploadUrlPath?: string
   // TTS（sync-binary）默认音色（节点可覆盖）
   voices?: string[]
   enabled: boolean

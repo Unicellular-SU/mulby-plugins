@@ -5,6 +5,34 @@
 import { httpJson, getPath, firstString } from './http'
 import type { VideoProviderAdapter, VideoGenRequest, VideoProviderConfig, VideoHandle, VideoPollResult } from './types'
 
+const PLUGIN_ID = 'ai-film-studio'
+
+function parseDataUrl(u: string): { base64: string; mime: string } | null {
+  const m = /^data:([^;]+);base64,(.*)$/.exec(u)
+  if (!m) return null
+  return { mime: m[1] || 'image/png', base64: m[2] || '' }
+}
+
+// 「仅收公开 URL」的图生视频：把本地帧(data URL)经供应商图床上传换公开 URL；已是 http(s) 则原样。
+async function ensurePublicUrl(url: string | undefined, cfg: VideoProviderConfig, apiKey: string): Promise<string | undefined> {
+  if (!url || /^https?:\/\//i.test(url)) return url
+  if (!cfg.uploadUrl) return url // 无上传端点：原样传（供应商若不支持 base64 会报错）
+  const parsed = parseDataUrl(url)
+  if (!parsed) return url
+  const host = window.mulby?.host
+  if (!host?.call) throw new Error('需要上传关键帧但后端 Host 不可用')
+  const res = (await host.call(PLUGIN_ID, 'uploadImage', {
+    uploadUrl: cfg.uploadUrl,
+    apiKey,
+    base64: parsed.base64,
+    mime: parsed.mime,
+    urlPath: cfg.uploadUrlPath,
+  })) as { data?: { ok?: boolean; url?: string; error?: string } } | undefined
+  const data = res?.data
+  if (!data?.ok || !data.url) throw new Error(data?.error || '关键帧上传失败')
+  return data.url
+}
+
 const DEFAULT_TASKID_PATHS = ['id', 'request_id', 'requestId', 'task_id', 'taskId', 'data.id', 'data.task_id']
 const DEFAULT_STATUS_PATHS = ['status', 'state', 'data.status', 'data.state']
 const DEFAULT_VIDEO_PATHS = [
@@ -59,13 +87,16 @@ function normStatus(raw: string): VideoPollResult['status'] {
 export const customHttpAdapter: VideoProviderAdapter = {
   async submit(req: VideoGenRequest, cfg, apiKey) {
     if (!cfg.submitUrl) throw new Error('custom-http 供应商缺少 submitUrl')
+    // 配了 uploadUrl 时，把本地帧先上传换公开 URL（仅收 URL 的供应商如 toapis 需要）
+    const imageUrl = await ensurePublicUrl(req.imageUrl, cfg, apiKey)
+    const lastImageUrl = await ensurePublicUrl(req.lastImageUrl, cfg, apiKey)
     let body: Record<string, unknown>
     if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
       // 声明式模板（各家 body 不同，如火山方舟 content[]、通义万相 input{}）
       body = renderBodyTemplate(cfg.bodyTemplate, {
         prompt: req.prompt,
-        imageUrl: req.imageUrl,
-        lastImageUrl: req.lastImageUrl,
+        imageUrl,
+        lastImageUrl,
         model: cfg.model,
         duration: req.duration,
         size: req.size,
@@ -73,8 +104,8 @@ export const customHttpAdapter: VideoProviderAdapter = {
     } else {
       // 通用默认 body（兜底）
       body = { prompt: req.prompt }
-      if (req.imageUrl) body.image_url = req.imageUrl
-      if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl // 尾帧（供应商不支持则忽略）
+      if (imageUrl) body.image_url = imageUrl
+      if (lastImageUrl) body.tail_image_url = lastImageUrl // 尾帧（供应商不支持则忽略）
       if (req.duration) body.duration = req.duration
       if (req.size) body.size = req.size
     }

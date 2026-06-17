@@ -266,7 +266,15 @@ export default function ProviderSettings({ open, onClose }: Props) {
                     onChange={(e) => set({ bodyTemplate: e.target.value })}
                   />
                 </label>
-                <div className="afs-form__note">留空则按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。预设已为火山方舟/通义万相填好模板。</div>
+                <label className="afs-form__row">
+                  <span>图片上传地址</span>
+                  <input
+                    value={draft.uploadUrl || ''}
+                    placeholder="可选；仅收公开图片URL的供应商填，如 https://toapis.com/v1/uploads/images"
+                    onChange={(e) => set({ uploadUrl: e.target.value })}
+                  />
+                </label>
+                <div className="afs-form__note">留空按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。填「图片上传地址」后，图生视频会先把本地关键帧上传换公开 URL。预设已为火山方舟/通义万相/toapis 填好。</div>
               </>
             )}
 

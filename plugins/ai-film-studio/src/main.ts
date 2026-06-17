@@ -43,8 +43,57 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
+// 取 JSON 路径（如 data.url / data.0.url）
+function getJsonPath(obj: any, path: string): unknown {
+  if (!obj || !path) return undefined
+  let cur: any = obj
+  for (const seg of path.split('.')) {
+    if (cur == null) return undefined
+    cur = Array.isArray(cur) ? cur[Number(seg)] : cur[seg]
+  }
+  return cur
+}
+
 // Host 方法（供前端 window.mulby.host.call('ai-film-studio', method, ...args) 调用）
 export const rpc = {
+  // 图片上传：把本地帧（base64）以 multipart/form-data 传到供应商图床，换取公开 URL（供仅收 URL 的图生视频用）。
+  // 走后端：渲染进程构造 multipart 不便、且规避 CORS。
+  async uploadImage(input: { uploadUrl: string; apiKey?: string; base64: string; mime?: string; field?: string; urlPath?: string }) {
+    try {
+      if (!input?.uploadUrl) return { ok: false, error: '缺少上传地址' }
+      if (!input?.base64) return { ok: false, error: '缺少图片数据' }
+      if (typeof fetch === 'undefined' || typeof FormData === 'undefined') return { ok: false, error: '后端环境不支持 fetch/FormData' }
+      const mime = input.mime || 'image/png'
+      const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg'
+      const buf = Buffer.from(input.base64, 'base64')
+      const form = new FormData()
+      form.append(input.field || 'file', new Blob([buf], { type: mime }), `frame.${ext}`)
+      const resp = await fetch(input.uploadUrl, {
+        method: 'POST',
+        headers: input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {},
+        body: form as any,
+      })
+      if (!resp.ok) {
+        let detail = ''
+        try {
+          detail = (await resp.text()).slice(0, 300)
+        } catch {
+          // 忽略
+        }
+        return { ok: false, error: `图片上传失败 HTTP ${resp.status}${detail ? ` ${detail}` : ''}` }
+      }
+      const json = await resp.json().catch(() => null)
+      const url =
+        getJsonPath(json, input.urlPath || 'data.url') ||
+        getJsonPath(json, 'url') ||
+        getJsonPath(json, 'data.0.url') ||
+        getJsonPath(json, 'data.image_url')
+      if (!url || typeof url !== 'string') return { ok: false, error: '上传成功但未解析到图片 URL（可配置 uploadUrlPath）' }
+      return { ok: true, url }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
   // M5 成片导出会用到：把文本/二进制写入指定文件
   async exportToFile(input: { filePath: string; data: string; encoding?: 'utf-8' | 'base64' }) {
     await mulby.filesystem.writeFile(input.filePath, input.data, input.encoding || 'utf-8')
