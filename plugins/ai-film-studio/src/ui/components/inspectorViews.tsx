@@ -172,48 +172,80 @@ function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
   )
 }
 
-// 大图灯箱 + 对话改图
+// 大图灯箱 + 对话改图 + 重新生成（操作期间保持打开并显示 loading，完成后大图自动刷新）
 function Lightbox({
   url,
   onClose,
   onEdit,
+  onRegen,
 }: {
   url?: string
   onClose: () => void
-  onEdit?: (prompt: string) => void
+  onEdit?: (prompt: string) => Promise<void>
+  onRegen?: () => Promise<void>
 }) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   if (!url) return null
-  const submit = () => {
-    if (!prompt.trim() || !onEdit) return
+  const doEdit = async () => {
+    if (!prompt.trim() || !onEdit || busy) return
     setBusy(true)
-    onEdit(prompt.trim())
-    // 关闭后由上层重渲染展示结果；这里乐观关闭
-    onClose()
+    try {
+      await onEdit(prompt.trim())
+      setPrompt('')
+    } finally {
+      setBusy(false)
+    }
+  }
+  const doRegen = async () => {
+    if (!onRegen || busy) return
+    setBusy(true)
+    try {
+      await onRegen()
+    } finally {
+      setBusy(false)
+    }
   }
   return (
-    <div className="afs-lightbox" onClick={onClose}>
+    <div className="afs-lightbox" onClick={busy ? undefined : onClose}>
       <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>
-        <button className="afs-lightbox__close" onClick={onClose}>
+        <button className="afs-lightbox__close" onClick={onClose} disabled={busy}>
           <X size={18} />
         </button>
-        <img className="afs-lightbox__img" src={url} alt="" />
-        {onEdit ? (
+        <div className="afs-lightbox__imgwrap">
+          <img className="afs-lightbox__img" src={url} alt="" />
+          {busy ? (
+            <div className="afs-lightbox__loading">
+              <Loader2 size={28} className="afs-spin" />
+              <span>生成中…</span>
+            </div>
+          ) : null}
+        </div>
+        {onEdit || onRegen ? (
           <div className="afs-lightbox__edit">
-            <Wand2 size={14} />
-            <input
-              className="afs-field__input"
-              placeholder="用一句话描述如何修改这张图（img2img）…"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit()
-              }}
-            />
-            <button className="afs-btn afs-btn--mini" disabled={!prompt.trim() || busy} onClick={submit}>
-              {busy ? <Loader2 size={13} className="afs-spin" /> : '修改'}
-            </button>
+            {onRegen ? (
+              <button className="afs-btn afs-btn--mini" disabled={busy} onClick={doRegen} title="按当前上游/参考图重新生成这一张">
+                重新生成
+              </button>
+            ) : null}
+            {onEdit ? (
+              <>
+                <Wand2 size={14} />
+                <input
+                  className="afs-field__input"
+                  placeholder="描述如何修改这张图（img2img）…"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') doEdit()
+                  }}
+                  disabled={busy}
+                />
+                <button className="afs-btn afs-btn--mini" disabled={!prompt.trim() || busy} onClick={doEdit}>
+                  {busy ? <Loader2 size={13} className="afs-spin" /> : '修改'}
+                </button>
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -285,10 +317,12 @@ function EditableValue({
 export function OutputView({
   value,
   onEditImage,
+  onRegenImage,
   onEditText,
 }: {
   value: PortValue
-  onEditImage?: (index: number, prompt: string) => void
+  onEditImage?: (index: number, prompt: string) => Promise<void>
+  onRegenImage?: (index: number) => Promise<void>
   onEditText?: (text: string) => string | null
 }) {
   const [lightbox, setLightbox] = useState<number | null>(null)
@@ -306,7 +340,7 @@ export function OutputView({
 
   if (mediaList) {
     if (mediaList.length === 0) return <div className="afs-inspector__note">（暂无可显示内容）</div>
-    const editable = mediaList[0].type === 'image' && !!onEditImage
+    const isImage = mediaList[0].type === 'image'
     return (
       <div>
         {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
@@ -323,7 +357,8 @@ export function OutputView({
           <Lightbox
             url={mediaList[lightbox].url}
             onClose={() => setLightbox(null)}
-            onEdit={editable ? (prompt) => onEditImage?.(lightbox, prompt) : undefined}
+            onEdit={isImage && onEditImage ? (prompt) => onEditImage(lightbox, prompt) : undefined}
+            onRegen={isImage && onRegenImage ? () => onRegenImage(lightbox) : undefined}
           />
         ) : null}
       </div>

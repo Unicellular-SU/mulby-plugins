@@ -172,6 +172,8 @@ interface GraphState {
   cancelRun: () => void
   /** 对话修改某图像产物（img2img）；index 指向该端口产物的第 index 张（单值时为 0） */
   editNodeImageItem: (nodeId: string, port: string, index: number, prompt: string) => Promise<void>
+  /** 重新生成某图像产物的第 index 张（用当前上游/参考图），不影响其余张 */
+  regenNodeImageItem: (nodeId: string, port: string, index: number) => Promise<void>
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
   setNodeImage: (id: string, dataUrl: string) => Promise<void>
@@ -997,6 +999,66 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     } catch (e) {
       patchNode(nodeId, { status: 'done', stream: undefined })
       window.mulby?.notification?.show(e instanceof Error ? e.message : '修改失败', 'error')
+    } finally {
+      set({ isRunning: false, runningNodeId: null })
+      void get().saveProject()
+    }
+  },
+
+  regenNodeImageItem: async (nodeId, port, index) => {
+    if (get().isRunning) return
+    const node = get().nodes.find((n) => n.id === nodeId)
+    const def = node ? getNodeDef(node.data.kind) : null
+    if (!node || !def || def.category !== 'image') return
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const jobs = buildImagePrompts(node.data, inputs, get().globals)
+    const job = jobs[index]
+    if (!job) {
+      window.mulby?.notification?.show('该位置无对应上游输入，无法重新生成', 'warning')
+      return
+    }
+    const model = (node.data.params?.imageModelOverride as string) || get().selectedImageModel
+    if (!model) {
+      window.mulby?.notification?.show('未配置图像模型（在顶栏选择）', 'error')
+      return
+    }
+    const refs = await resolveRefImages(inputs)
+    const canEdit = refs.length > 0 && !!window.mulby?.ai?.images?.edit
+    set({ isRunning: true })
+    useGraphStore.setState({ runningNodeId: nodeId })
+    patchNode(nodeId, { status: 'running', stream: `重新生成第 ${index + 1} 张…`, error: undefined })
+    try {
+      const ref = canEdit ? pickRef(refs, job.refName) : null
+      let base64: string
+      let mime: string
+      if (ref) {
+        const r = await editImage({ model, prompt: job.prompt, refBase64: ref.base64, refMime: ref.mime })
+        base64 = r.base64
+        mime = r.mime
+      } else {
+        const r = await generateImage({ model, prompt: job.prompt, size: job.size })
+        base64 = r.base64
+        mime = r.mime
+      }
+      const assetId = await saveAsset(base64, mime)
+      const newItem: PortValue = { type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta }
+      const cur = get().nodes.find((n) => n.id === nodeId)
+      const cval = cur?.data.outputs?.[port]
+      if (cur && cval) {
+        let nextVal: PortValue
+        if (cval.items && cval.items.length) {
+          const newItems = cval.items.map((it, i) => (i === index ? newItem : it))
+          const head = newItems[0]
+          nextVal = { ...cval, items: newItems, assetId: head.assetId, url: head.url, mime: head.mime }
+        } else {
+          nextVal = newItem
+        }
+        patchNode(nodeId, { status: 'done', stream: undefined, outputs: { ...cur.data.outputs, [port]: nextVal } })
+      }
+      window.mulby?.notification?.show('已重新生成该张')
+    } catch (e) {
+      patchNode(nodeId, { status: 'done', stream: undefined })
+      window.mulby?.notification?.show(e instanceof Error ? e.message : '重新生成失败', 'error')
     } finally {
       set({ isRunning: false, runningNodeId: null })
       void get().saveProject()
