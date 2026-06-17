@@ -2,6 +2,9 @@ import { CATEGORY_META, CATEGORY_ORDER, getDefsByCategory, type NodeDef } from '
 import { useGraphStore } from '../store/graphStore'
 
 export const DND_MIME = 'application/afs-node'
+export const DND_ASSET = 'application/afs-asset'
+export const DND_ELEMENT = 'application/afs-element'
+export const DND_SNIPPET = 'application/afs-snippet'
 
 export default function NodeLibrary() {
   const nodes = useGraphStore((s) => s.nodes)

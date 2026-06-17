@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings, Palette, MessageSquareText } from 'lucide-react'
+import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings, Palette, MessageSquareText, Camera } from 'lucide-react'
 import { useGraphStore, type ProjectData } from '../store/graphStore'
 import { TEMPLATES } from '../templates'
 
@@ -8,9 +8,10 @@ interface ToolbarProps {
   onOpenProviders?: () => void
   onOpenGlobals?: () => void
   onOpenPrompts?: () => void
+  onOpenSnapshots?: () => void
 }
 
-export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts }: ToolbarProps) {
+export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts, onOpenSnapshots }: ToolbarProps) {
   const { fitView } = useReactFlow()
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -150,7 +151,7 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts 
           }}
           title="从模板新建工程"
         >
-          <option value="">＋ 模板…</option>
+          <option value="">从模板新建…</option>
           {TEMPLATES.map((t) => (
             <option key={t.id} value={t.id} title={t.desc}>
               {t.name}
@@ -173,10 +174,13 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts 
         <button className="afs-btn afs-btn--danger" onClick={onDeleteProject} title="删除当前工程">
           <Trash2 size={15} />
         </button>
-        <button className="afs-btn" onClick={onOpenGlobals} title="全局设定（画风 / 画幅，注入所有生成节点）">
+        <button className="afs-btn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）">
+          <Camera size={15} />
+        </button>
+        <button className="afs-btn" onClick={onOpenGlobals} title="项目风格 · 画风 / 画幅（提示词库）">
           <Palette size={15} />
         </button>
-        <button className="afs-btn" onClick={onOpenPrompts} title="提示词模板（可编辑各节点提示词，全局生效）">
+        <button className="afs-btn" onClick={onOpenPrompts} title="提示词库（可复用片段 / 节点模板）">
           <MessageSquareText size={15} />
         </button>
         <button className="afs-btn" onClick={onOpenProviders} title="模型供应商（视频 / 配乐 / 语音）设置">

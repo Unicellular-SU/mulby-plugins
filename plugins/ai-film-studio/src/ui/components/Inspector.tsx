@@ -1,8 +1,10 @@
 import { useRef } from 'react'
-import { Trash2, Play, Loader2, Upload, FastForward } from 'lucide-react'
+import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
+import { useAssetStore } from '../store/assetStore'
+import { usePromptStore, resolveSnippet, SNIPPET_GROUPS } from '../store/promptStore'
 import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
 
@@ -32,6 +34,8 @@ export default function Inspector() {
   const updateNodeOutputText = useGraphStore((s) => s.updateNodeOutputText)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
   const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
+  const saveElement = useAssetStore((s) => s.saveElement)
+  const snippets = usePromptStore((s) => s.snippets)
   const isRunning = useGraphStore((s) => s.isRunning)
   const runningNodeId = useGraphStore((s) => s.runningNodeId)
   const models = useGraphStore((s) => s.models)
@@ -108,6 +112,34 @@ export default function Inspector() {
     }
   }
 
+  const onSaveToLibrary = async () => {
+    if (!isAsset) return
+    const p = node.data.params || {}
+    const name = String(p.name || '').trim()
+    if (!name) {
+      window.mulby?.notification?.show('请先填写名称', 'warning')
+      return
+    }
+    const kind = isCharacter ? 'character' : 'scene'
+    const description = String((isCharacter ? p.appearance : p.description) || '')
+    const prompt = String(p.refPrompt || '')
+    const imgAssetId = node.data.outputs?.image?.assetId
+    await saveElement({ kind, name, description, prompt, refAssetIds: imgAssetId ? [imgAssetId] : [] })
+    window.mulby?.notification?.show(`已保存到库：${name}`, 'success')
+  }
+
+  // 可插入片段的目标参数：节点第一个 textarea 参数（如 故事/指令/描述/运镜…）
+  const snippetTarget = def.params.find((p) => p.control === 'textarea')?.key
+  const snippetTargetLabel = def.params.find((p) => p.key === snippetTarget)?.label || ''
+  const insertSnippet = (snippetId: string) => {
+    if (!snippetTarget) return
+    const s = snippets.find((x) => x.id === snippetId)
+    if (!s) return
+    const resolved = resolveSnippet(s)
+    const cur = String(node.data.params[snippetTarget] ?? '')
+    updateNodeParam(node.id, snippetTarget, cur ? `${cur}\n${resolved}` : resolved)
+  }
+
   const renderControl = (p: ParamDef) => {
     const value = node.data.params[p.key]
     const common = {
@@ -181,6 +213,16 @@ export default function Inspector() {
         </>
       )}
 
+      {isAsset && (
+        <button
+          className="afs-inspector__run afs-inspector__run--alt"
+          onClick={onSaveToLibrary}
+          title="把该角色/场景（含参考图）保存到全局库，跨工程复用"
+        >
+          <BookmarkPlus size={14} /> 保存到库
+        </button>
+      )}
+
       {isAudioInput && (
         <>
           <input ref={audioRef} type="file" accept="audio/*" hidden onChange={onPickAudio} />
@@ -231,6 +273,34 @@ export default function Inspector() {
             {renderControl(p)}
           </div>
         ))}
+
+        {snippetTarget && snippets.length > 0 && (
+          <div className="afs-field">
+            <label className="afs-field__label">插入片段 → {snippetTargetLabel}</label>
+            <select
+              className="afs-field__input"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) insertSnippet(e.target.value)
+                e.target.value = ''
+              }}
+            >
+              <option value="">选择片段插入…</option>
+              {SNIPPET_GROUPS.map((g) => {
+                const items = snippets.filter((s) => s.group === g.id)
+                return items.length ? (
+                  <optgroup key={g.id} label={g.label}>
+                    {items.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null
+              })}
+            </select>
+          </div>
+        )}
 
         {def.category === 'text' && (
           <div className="afs-field">

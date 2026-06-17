@@ -7,6 +7,8 @@ import { listTextModels, listImageModels } from '../services/models'
 import { runText, abortText } from '../services/textEngine'
 import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
+import { resolveAssetUrl, type AssetRecord } from '../services/assetRegistry'
+import type { ElementRef } from './assetStore'
 import { buildPrompt, buildImagePrompts, buildAssetImageJob, validateNodeJson, buildRepairPrompt } from '../services/prompts'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
@@ -21,8 +23,11 @@ import { TEMPLATES, instantiateTemplate } from '../templates'
 import { useProviderStore } from './providerStore'
 
 const PLUGIN_ID = 'ai-film-studio'
-const KEY_PROJECTS = 'projects'
+const KEY_PROJECTS = 'projects' // 旧版单键（全量 ProjectData[]）；仅用于一次性迁移读取
+const KEY_INDEX = 'projects:index' // 新版：轻量索引（ProjectCard[]）
 const KEY_CURRENT = 'currentProjectId'
+const KEY_SNAPSHOTS = 'snapshots' // 工程命名快照（全部工程共用一个数组，按 projectId 过滤）
+const projectKey = (id: string) => `project:${id}` // 新版：每工程重型图单键
 
 // ============ 数据模型 ============
 export type NodeRunStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
@@ -68,6 +73,41 @@ export interface ProjectMeta {
   updatedAt: number
 }
 
+/** 工程主页卡片：在 ProjectMeta 基础上附带节点数与封面素材引用（用于网格展示） */
+export interface ProjectCard extends ProjectMeta {
+  nodeCount: number
+  coverAssetId?: string
+}
+
+/** 工程命名快照：某时刻整图的命名副本，可恢复 */
+export interface ProjectSnapshot {
+  id: string
+  projectId: string
+  name: string
+  createdAt: number
+  nodeCount: number
+  nodes: FilmNode[]
+  edges: Edge[]
+  globals: ProjectGlobals
+  promptOverrides: Record<string, string>
+}
+
+/** 取一个工程的封面素材：首个含图像产物（assetId）的节点输出 */
+function pickCoverAssetId(nodes: FilmNode[]): string | undefined {
+  for (const n of nodes) {
+    const outs = n.data.outputs
+    if (!outs) continue
+    for (const v of Object.values(outs)) {
+      if (v?.type === 'image') {
+        if (v.assetId) return v.assetId
+        const it = v.items?.find((x) => x.assetId)
+        if (it?.assetId) return it.assetId
+      }
+    }
+  }
+  return undefined
+}
+
 // 项目级全局设定：注入所有生成节点，画幅决定图像/视频尺寸（M7，对齐设计 §8.1）
 export interface ProjectGlobals {
   aspectRatio: '16:9' | '9:16' | '1:1' | string
@@ -108,6 +148,42 @@ async function sset(key: string, value: unknown): Promise<void> {
     // 忽略存储失败（如在浏览器里调试）
   }
 }
+async function srem(key: string): Promise<void> {
+  try {
+    await window.mulby?.storage?.remove(key, PLUGIN_ID)
+  } catch {
+    // 忽略
+  }
+}
+
+// ===== 工程拆分存储：projects:index（轻量索引，主页/切换器读它）+ project:<id>（重型图，懒加载）=====
+/** 由完整工程数据生成主页卡片（节点数 + 封面） */
+function toCard(p: ProjectData): ProjectCard {
+  const nodes = p.nodes || []
+  return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, nodeCount: nodes.length, coverAssetId: pickCoverAssetId(nodes) }
+}
+async function sgetIndex(): Promise<ProjectCard[]> {
+  const v = await sget<ProjectCard[]>(KEY_INDEX)
+  return Array.isArray(v) ? v : []
+}
+const ssetIndex = (index: ProjectCard[]) => sset(KEY_INDEX, index)
+const sgetProject = (id: string) => sget<ProjectData>(projectKey(id))
+const ssetProject = (p: ProjectData) => sset(projectKey(p.id), p)
+const sremProject = (id: string) => srem(projectKey(id))
+
+/**
+ * 一次性迁移：旧版单键 projects(ProjectData[]) → projects:index(ProjectCard[]) + project:<id>。
+ * 幂等：projects:index 已存在则跳过；迁移成功后删除旧的全量键，避免重型数据冗余。
+ */
+async function migrateIfNeeded(): Promise<void> {
+  const existing = await sget<ProjectCard[]>(KEY_INDEX)
+  if (Array.isArray(existing)) return // 已迁移
+  const old = await sget<ProjectData[]>(KEY_PROJECTS)
+  if (!Array.isArray(old) || old.length === 0) return // 无旧数据
+  for (const p of old) await ssetProject(p)
+  await ssetIndex(old.map(toCard))
+  await srem(KEY_PROJECTS)
+}
 
 function now() {
   return Date.now()
@@ -145,7 +221,7 @@ export function isValidConnection(connection: Connection | Edge, nodes: FilmNode
 // ============ Store ============
 interface GraphState {
   loaded: boolean
-  projects: ProjectMeta[]
+  projects: ProjectCard[]
   currentId: string | null
   projectName: string
   globals: ProjectGlobals
@@ -183,6 +259,18 @@ interface GraphState {
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
   downloadVideo: (id: string) => Promise<void>
+  /** 从素材库把一条素材插入画布（生成绑定的参考图/音频输入节点）；position 用于拖拽落点 */
+  insertAssetNode: (rec: AssetRecord, position?: { x: number; y: number }) => Promise<void>
+  /** 从 Elements 库把角色/场景插入画布（生成绑定参考图的人物/场景节点）；position 用于拖拽落点 */
+  insertElementNode: (el: ElementRef, position?: { x: number; y: number }) => Promise<void>
+  /** 把文本追加到当前选中节点的首个 textarea 参数；返回是否插入成功 */
+  appendTextToSelected: (text: string) => boolean
+  // 工程命名快照
+  createSnapshot: (name: string) => Promise<void>
+  listSnapshots: () => Promise<ProjectSnapshot[]>
+  restoreSnapshot: (id: string) => Promise<void>
+  deleteSnapshot: (id: string) => Promise<void>
+  renameSnapshot: (id: string, name: string) => Promise<void>
 
   // React Flow 回调
   onNodesChange: OnNodesChange<FilmNode>
@@ -202,7 +290,13 @@ interface GraphState {
   saveProject: () => Promise<void>
   switchProject: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
+  duplicateProject: (id: string) => Promise<string | null>
   renameProject: (name: string) => void
+  renameProjectById: (id: string, name: string) => Promise<void>
+  /** 工程主页用：返回所有工程的卡片元信息（节点数 + 封面），按更新时间倒序 */
+  loadProjectCards: () => Promise<ProjectCard[]>
+  /** 按 id 取整份工程数据用于导出（当前工程取内存最新，其余取存储快照） */
+  exportProjectById: (id: string) => Promise<ProjectData | null>
   setGlobals: (patch: Partial<ProjectGlobals>) => void
   setPromptOverride: (id: string, value: string) => void
   resetPromptOverride: (id: string) => void
@@ -219,6 +313,12 @@ function scheduleSave(save: () => void) {
     saveTimer = null
     save()
   }, 800)
+}
+
+// 新节点落点：按现有节点数错位排布，避免完全重叠
+function spawnPos(nodes: FilmNode[]): { x: number; y: number } {
+  const c = nodes.length
+  return { x: 200 + (c % 8) * 36, y: 140 + (c % 8) * 36 }
 }
 
 // 局部更新某节点 data（运行期使用，不触发结构性自动保存）
@@ -1128,23 +1228,35 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   // ============ 初始化：从存储加载工程 ============
   init: async () => {
     if (get().loaded) return
-    let stored = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    if (!Array.isArray(stored) || stored.length === 0) {
+    await migrateIfNeeded() // 旧版单键 → 拆分存储（幂等）
+    let index = await sgetIndex()
+    if (index.length === 0) {
       const def = makeDefaultProject()
-      stored = [def]
-      await sset(KEY_PROJECTS, stored)
+      await ssetProject(def)
+      index = [toCard(def)]
+      await ssetIndex(index)
       await sset(KEY_CURRENT, def.id)
     }
     let currentId = await sget<string>(KEY_CURRENT)
-    let current = stored.find((p) => p.id === currentId)
+    let current = currentId ? await sgetProject(currentId) : null
     if (!current) {
-      current = stored[0]
-      currentId = current.id
+      currentId = index[0].id
+      current = await sgetProject(currentId)
       await sset(KEY_CURRENT, currentId)
+    }
+    // 索引存在但对应工程数据缺失（极端：被外部清空）→ 兜底重建默认工程
+    if (!current) {
+      const def = makeDefaultProject()
+      await ssetProject(def)
+      index = [toCard(def)]
+      await ssetIndex(index)
+      currentId = def.id
+      await sset(KEY_CURRENT, currentId)
+      current = def
     }
     set({
       loaded: true,
-      projects: stored.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+      projects: index,
       currentId,
       projectName: current.name,
       globals: normGlobals(current.globals),
@@ -1360,21 +1472,23 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const proj = makeDefaultProject(tpl.name)
     proj.nodes = nodes
     proj.edges = edges
-    const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    all.push(proj)
-    await sset(KEY_PROJECTS, all)
+    await ssetProject(proj)
+    const index = await sgetIndex()
+    index.push(toCard(proj))
+    await ssetIndex(index)
     await sset(KEY_CURRENT, proj.id)
     set({
-      projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+      projects: index,
       currentId: proj.id,
       projectName: proj.name,
       globals: normGlobals(proj.globals),
+      promptOverrides: proj.promptOverrides || {},
       nodes,
       edges,
       selectedNodeId: null,
       dirty: false,
     })
-    void get().saveProject()
+    syncProjectPromptLayer(proj.promptOverrides)
     window.mulby?.notification?.show(`已从模板新建工程：${tpl.name}`, 'success')
   },
 
@@ -1403,6 +1517,117 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       patchNode(id, { stream: undefined })
       window.mulby?.notification?.show(e instanceof Error ? e.message : '下载失败', 'error')
     }
+  },
+
+  insertAssetNode: async (rec, position) => {
+    if (rec.type === 'video') {
+      window.mulby?.notification?.show('视频素材暂不支持插入画布（可在素材库预览/导出）', 'warning')
+      return
+    }
+    const kind = rec.type === 'audio' ? 'audio-input' : 'image-input'
+    const def = getNodeDef(kind)
+    if (!def) return
+    const url = await resolveAssetUrl(rec)
+    const out: PortValue =
+      rec.type === 'audio'
+        ? { type: 'audio', assetId: rec.assetId, url, localPath: rec.localPath, mime: rec.mime }
+        : { type: 'image', assetId: rec.assetId, url, mime: rec.mime }
+    const node: FilmNode = {
+      id: `n_${nanoid(6)}`,
+      type: 'film',
+      position: position ?? spawnPos(get().nodes),
+      data: { kind, title: rec.name || def.label, params: {}, status: 'done', outputs: { out } },
+    }
+    set({ nodes: [...get().nodes, node], selectedNodeId: node.id, dirty: true })
+    scheduleSave(() => get().saveProject())
+  },
+
+  insertElementNode: async (el, position) => {
+    const kind = el.kind // 'character' | 'scene'
+    const def = getNodeDef(kind)
+    if (!def) return
+    const params: Record<string, unknown> =
+      kind === 'character'
+        ? { name: el.name, appearance: el.description || '', refPrompt: el.prompt || '' }
+        : { name: el.name, description: el.description || '', refPrompt: el.prompt || '' }
+    const data: FilmNodeData = { kind, title: el.name || def.label, params, status: 'idle' }
+    const firstRef = el.refAssetIds?.[0]
+    if (firstRef) {
+      const a = await loadAsset(firstRef)
+      if (a) {
+        // 绑定参考图（带 name/kind meta，供关键帧按名匹配 / 场景全收，跨镜一致）
+        data.outputs = { image: { type: 'image', assetId: firstRef, url: toDataUrl(a.base64, a.mime), mime: a.mime, meta: { name: el.name, kind } } }
+        data.status = 'done'
+      }
+    }
+    const node: FilmNode = { id: `n_${nanoid(6)}`, type: 'film', position: position ?? spawnPos(get().nodes), data }
+    set({ nodes: [...get().nodes, node], selectedNodeId: node.id, dirty: true })
+    scheduleSave(() => get().saveProject())
+  },
+
+  appendTextToSelected: (text) => {
+    const id = get().selectedNodeId
+    if (!id) return false
+    const node = get().nodes.find((n) => n.id === id)
+    const def = node ? getNodeDef(node.data.kind) : null
+    if (!node || !def) return false
+    const target = def.params.find((p) => p.control === 'textarea')?.key
+    if (!target) return false
+    const cur = String(node.data.params[target] ?? '')
+    get().updateNodeParam(id, target, cur ? `${cur}\n${text}` : text)
+    return true
+  },
+
+  createSnapshot: async (name) => {
+    const { currentId, nodes, edges, globals, promptOverrides } = get()
+    if (!currentId) return
+    const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    all.push({
+      id: `snap_${nanoid(8)}`,
+      projectId: currentId,
+      name: name.trim() || new Date().toLocaleString(),
+      createdAt: now(),
+      nodeCount: nodes.length,
+      nodes: serializeNodes(nodes),
+      edges,
+      globals,
+      promptOverrides,
+    })
+    await sset(KEY_SNAPSHOTS, all)
+  },
+  listSnapshots: async () => {
+    const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    return all.filter((s) => s.projectId === get().currentId).sort((a, b) => b.createdAt - a.createdAt)
+  },
+  restoreSnapshot: async (id) => {
+    const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    const snap = all.find((s) => s.id === id)
+    if (!snap) return
+    set({
+      nodes: snap.nodes || [],
+      edges: snap.edges || [],
+      globals: normGlobals(snap.globals),
+      promptOverrides: snap.promptOverrides || {},
+      selectedNodeId: null,
+      dirty: true,
+    })
+    syncProjectPromptLayer(snap.promptOverrides)
+    await hydrateAssets()
+    await get().saveProject()
+  },
+  deleteSnapshot: async (id) => {
+    const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    await sset(
+      KEY_SNAPSHOTS,
+      all.filter((s) => s.id !== id)
+    )
+  },
+  renameSnapshot: async (id, name) => {
+    const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    const i = all.findIndex((s) => s.id === id)
+    if (i < 0) return
+    all[i] = { ...all[i], name: name.trim() || all[i].name }
+    await sset(KEY_SNAPSHOTS, all)
   },
 
   runNode: async (id) => {
@@ -1567,12 +1792,13 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   newProject: async () => {
     if (get().dirty) await get().saveProject() // 切换前先保存当前工程，避免未保存编辑丢失
     const def = makeDefaultProject(`工程 ${get().projects.length + 1}`)
-    const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    all.push(def)
-    await sset(KEY_PROJECTS, all)
+    await ssetProject(def)
+    const index = await sgetIndex()
+    index.push(toCard(def))
+    await ssetIndex(index)
     await sset(KEY_CURRENT, def.id)
     set({
-      projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
+      projects: index,
       currentId: def.id,
       projectName: def.name,
       globals: normGlobals(def.globals),
@@ -1589,34 +1815,33 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const { currentId, projectName, nodes, edges, globals, promptOverrides } = get()
     if (!currentId) return
     set({ saving: true })
-    const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    const idx = all.findIndex((p) => p.id === currentId)
+    const existing = await sgetProject(currentId)
     const ts = now()
     const data: ProjectData = {
       id: currentId,
       name: projectName,
-      createdAt: idx >= 0 ? all[idx].createdAt : ts,
+      createdAt: existing?.createdAt ?? ts,
       updatedAt: ts,
       nodes: serializeNodes(nodes),
       edges,
       globals,
       promptOverrides,
     }
-    if (idx >= 0) all[idx] = data
-    else all.push(data)
-    await sset(KEY_PROJECTS, all)
-    set({
-      projects: all.map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt })),
-      dirty: false,
-      saving: false,
-    })
+    await ssetProject(data) // 只写当前工程单键，根除旧版「整数组读改写」的并发覆盖
+    // 同步更新轻量索引项（节点数/封面/名称/时间）
+    const index = await sgetIndex()
+    const card = toCard(data)
+    const idx = index.findIndex((p) => p.id === currentId)
+    if (idx >= 0) index[idx] = card
+    else index.push(card)
+    await ssetIndex(index)
+    set({ projects: index, dirty: false, saving: false })
   },
 
   switchProject: async (id) => {
     if (id === get().currentId) return
     if (get().dirty) await get().saveProject()
-    const all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    const target = all.find((p) => p.id === id)
+    const target = await sgetProject(id)
     if (!target) return
     await sset(KEY_CURRENT, id)
     set({
@@ -1634,37 +1859,103 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   },
 
   deleteProject: async (id) => {
-    let all = (await sget<ProjectData[]>(KEY_PROJECTS)) || []
-    all = all.filter((p) => p.id !== id)
-    if (all.length === 0) all = [makeDefaultProject()]
-    await sset(KEY_PROJECTS, all)
+    let index = (await sgetIndex()).filter((p) => p.id !== id)
+    await sremProject(id) // 删除该工程的重型图键
+    // 清掉该工程的命名快照，避免快照长期 pin 住孤儿素材
+    const snaps = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
+    if (snaps.some((s) => s.projectId === id)) await sset(KEY_SNAPSHOTS, snaps.filter((s) => s.projectId !== id))
     const wasCurrent = get().currentId === id
     let currentId = get().currentId
-    if (wasCurrent) {
-      currentId = all[0].id
+    let current: ProjectData | null = null
+    if (index.length === 0) {
+      // 删光了：建一个默认工程兜底
+      const def = makeDefaultProject()
+      await ssetProject(def)
+      index = [toCard(def)]
+      current = def
+      currentId = def.id
       await sset(KEY_CURRENT, currentId)
     }
-    const current = all.find((p) => p.id === currentId) || all[0]
-    set({
-      projects: all.map(({ id: pid, name, createdAt, updatedAt }) => ({ id: pid, name, createdAt, updatedAt })),
-      currentId: current.id,
-      projectName: current.name,
-      globals: wasCurrent ? normGlobals(current.globals) : get().globals,
-      promptOverrides: wasCurrent ? current.promptOverrides || {} : get().promptOverrides,
-      nodes: wasCurrent ? current.nodes || [] : get().nodes,
-      edges: wasCurrent ? current.edges || [] : get().edges,
-      selectedNodeId: wasCurrent ? null : get().selectedNodeId,
-      dirty: false,
-    })
+    await ssetIndex(index)
+    if (wasCurrent && !current) {
+      currentId = index[0].id
+      await sset(KEY_CURRENT, currentId)
+      current = await sgetProject(currentId)
+    }
     if (wasCurrent) {
-      syncProjectPromptLayer(current.promptOverrides)
+      set({
+        projects: index,
+        currentId,
+        projectName: current?.name ?? '未命名工程',
+        globals: normGlobals(current?.globals),
+        promptOverrides: current?.promptOverrides || {},
+        nodes: current?.nodes || [],
+        edges: current?.edges || [],
+        selectedNodeId: null,
+        dirty: false,
+      })
+      syncProjectPromptLayer(current?.promptOverrides)
       void hydrateAssets()
+    } else {
+      set({ projects: index })
     }
   },
 
   renameProject: (name) => {
     set({ projectName: name, dirty: true })
     scheduleSave(() => get().saveProject())
+  },
+
+  renameProjectById: async (id, name) => {
+    if (id === get().currentId) {
+      get().renameProject(name)
+      return
+    }
+    const data = await sgetProject(id)
+    if (!data) return
+    const ts = now()
+    await ssetProject({ ...data, name, updatedAt: ts })
+    const index = await sgetIndex()
+    const idx = index.findIndex((p) => p.id === id)
+    if (idx >= 0) index[idx] = { ...index[idx], name, updatedAt: ts }
+    await ssetIndex(index)
+    set({ projects: index })
+  },
+
+  duplicateProject: async (id) => {
+    if (id === get().currentId && get().dirty) await get().saveProject()
+    const src = await sgetProject(id)
+    if (!src) return null
+    const ts = now()
+    // 复制共享同一批 assetId（附件按 id 共享，无需复制二进制）；新 id/名称/时间
+    const copy: ProjectData = { ...src, id: `proj_${nanoid(8)}`, name: `${src.name} 副本`, createdAt: ts, updatedAt: ts }
+    await ssetProject(copy)
+    const index = await sgetIndex()
+    index.push(toCard(copy))
+    await ssetIndex(index)
+    set({ projects: index })
+    return copy.id
+  },
+
+  loadProjectCards: async () => {
+    // 只读轻量索引，主页秒开（不再加载所有工程的重型图）
+    const index = await sgetIndex()
+    const curId = get().currentId
+    const curNodes = get().nodes
+    const curName = get().projectName
+    return index
+      .map((c) =>
+        // 当前工程的卡片用内存最新（节点数/封面/名称可能尚未落盘）覆盖
+        c.id === curId
+          ? { ...c, name: curName, nodeCount: curNodes.length, coverAssetId: pickCoverAssetId(curNodes) ?? c.coverAssetId }
+          : c
+      )
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  },
+
+  exportProjectById: async (id) => {
+    if (id === get().currentId) return get().exportProject()
+    return await sgetProject(id)
   },
 
   setGlobals: (patch) => {
