@@ -1229,7 +1229,13 @@ interface MulbyAi {
       input: { model: string; prompt: string; size?: string; count?: number },
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
-    edit(input: { model: string; imageAttachmentId: string; prompt: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    edit(input: {
+      model: string
+      imageAttachmentId: string
+      prompt: string
+      /** 额外参考图（多图一致性 / 按参考图条件生成，如 Gemini 多图）；附在主图之后 */
+      referenceAttachmentIds?: string[]
+    }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
   }
   models: {
     fetch(input: { providerId: string; baseURL?: string; apiKey?: string }): Promise<{ models: AiModel[]; message?: string }>

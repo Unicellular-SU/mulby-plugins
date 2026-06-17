@@ -68,13 +68,15 @@ function b64ToArrayBuffer(b64: string): ArrayBuffer {
 export interface ImageEditOptions {
   model?: string | null
   prompt: string
-  refBase64: string // 纯 base64（无 data: 前缀）
+  refBase64: string // 主参考图：纯 base64（无 data: 前缀）
   refMime?: string
+  // 额外参考图（多图一致性 / 按参考图条件生成，如同镜多角色、角色+场景）。宿主 v0.11+ 支持
+  extraRefs?: { base64: string; mime?: string }[]
 }
 
 /**
- * 参考图编辑（img2img）：先把参考图上传为附件，再调用 ai.images.edit。
- * 用于「带参考图的关键帧/场景」以保持跨镜角色/风格一致性。
+ * 参考图编辑（img2img / 按参考图条件生成）：把参考图上传为附件后调用 ai.images.edit。
+ * 支持多张参考图（主图 + extraRefs），在多图模型（如 Gemini）上做强角色/风格一致性。
  */
 export async function editImage(opts: ImageEditOptions): Promise<ImageRunResult> {
   const ai = window.mulby?.ai
@@ -82,13 +84,25 @@ export async function editImage(opts: ImageEditOptions): Promise<ImageRunResult>
   if (!ai?.attachments?.upload) throw new Error('附件上传能力不可用，无法使用参考图')
   if (!opts.model) throw new Error('未配置图像模型（请在顶栏或节点选择图像模型）')
   if (!opts.refBase64) throw new Error('参考图为空')
-  const mime = opts.refMime || 'image/png'
-  const att = await ai.attachments.upload({
-    buffer: b64ToArrayBuffer(opts.refBase64),
-    mimeType: mime,
-    purpose: 'image-edit',
+  const upload = (base64: string, mime?: string) =>
+    ai.attachments.upload({ buffer: b64ToArrayBuffer(base64), mimeType: mime || 'image/png', purpose: 'image-edit' })
+  const att = await upload(opts.refBase64, opts.refMime)
+  const referenceAttachmentIds: string[] = []
+  for (const r of opts.extraRefs || []) {
+    if (!r.base64) continue
+    try {
+      const a = await upload(r.base64, r.mime)
+      referenceAttachmentIds.push(a.attachmentId)
+    } catch {
+      // 单张额外参考图失败不影响主流程
+    }
+  }
+  const r = await ai.images.edit({
+    model: opts.model,
+    imageAttachmentId: att.attachmentId,
+    prompt: opts.prompt,
+    ...(referenceAttachmentIds.length ? { referenceAttachmentIds } : {}),
   })
-  const r = await ai.images.edit({ model: opts.model, imageAttachmentId: att.attachmentId, prompt: opts.prompt })
   const b = r.images?.[0]
   if (!b) throw new Error('未返回图像')
   return { base64: b, mime: 'image/png' }

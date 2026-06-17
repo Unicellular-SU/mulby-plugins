@@ -336,11 +336,18 @@ async function execNode(id: string): Promise<void> {
         if (!get().isRunning) break
         const job = jobs[i]
         patchNode(id, { stream: jobs.length > 1 ? `生成中 ${i + 1}/${jobs.length}…` : '生成中…', previewUrl: undefined })
-        const ref = canEdit ? pickRef(refs, job.refName) : null
+        const matched = canEdit ? pickRefs(refs, job.refNames, job.refName) : []
         let base64: string
         let mime: string
-        if (ref) {
-          const r = await editImage({ model, prompt: job.prompt, refBase64: ref.base64, refMime: ref.mime })
+        if (matched.length) {
+          const [primary, ...rest] = matched
+          const r = await editImage({
+            model,
+            prompt: job.prompt,
+            refBase64: primary.base64,
+            refMime: primary.mime,
+            extraRefs: rest.map((x) => ({ base64: x.base64, mime: x.mime })),
+          })
           base64 = r.base64
           mime = r.mime
         } else {
@@ -684,6 +691,22 @@ function pickRef(refs: RefImage[], name?: string): RefImage | null {
     }
   }
   return refs[0]
+}
+
+// 多参考图匹配（该镜全部出场角色 → 多张角色图，做多图一致性）：按名逐一匹配并去重
+function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string): RefImage[] {
+  if (refs.length === 0) return []
+  const wanted = (names && names.length ? names : fallbackName ? [fallbackName] : []).filter(Boolean)
+  if (!wanted.length) {
+    const r = pickRef(refs, fallbackName)
+    return r ? [r] : []
+  }
+  const picked: RefImage[] = []
+  for (const n of wanted) {
+    const r = pickRef(refs, n)
+    if (r && !picked.includes(r)) picked.push(r)
+  }
+  return picked.length ? picked : refs[0] ? [refs[0]] : []
 }
 
 // 把视频端口产物解析为本机文件路径（compose/export 用）：本地优先，远程下载，data 落盘
@@ -1036,11 +1059,18 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     useGraphStore.setState({ runningNodeId: nodeId })
     patchNode(nodeId, { status: 'running', stream: `重新生成第 ${index + 1} 张…`, error: undefined })
     try {
-      const ref = canEdit ? pickRef(refs, job.refName) : null
+      const matched = canEdit ? pickRefs(refs, job.refNames, job.refName) : []
       let base64: string
       let mime: string
-      if (ref) {
-        const r = await editImage({ model, prompt: job.prompt, refBase64: ref.base64, refMime: ref.mime })
+      if (matched.length) {
+        const [primary, ...rest] = matched
+        const r = await editImage({
+          model,
+          prompt: job.prompt,
+          refBase64: primary.base64,
+          refMime: primary.mime,
+          extraRefs: rest.map((x) => ({ base64: x.base64, mime: x.mime })),
+        })
         base64 = r.base64
         mime = r.mime
       } else {

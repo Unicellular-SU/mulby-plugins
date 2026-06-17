@@ -162,7 +162,8 @@ export interface BuiltImagePrompt {
 export interface ImageJob {
   prompt: string
   size?: string
-  refName?: string // 按角色名匹配上游参考图（跨镜一致性）
+  refName?: string // 主参考图：按角色名匹配上游参考图（跨镜一致性）
+  refNames?: string[] // 该镜全部出场角色（多角色一致性，附加参考图）
   meta?: Record<string, unknown> // 写入产物 meta（角色名 / 镜头号）
 }
 
@@ -293,12 +294,19 @@ export function buildImagePrompts(
       return list.map((shot, i) => {
         const desc = String(shot.prompt || shot.description || '')
         const shotChars = shot.characters as unknown[] | undefined
-        const refName = (Array.isArray(shotChars) && shotChars.length ? String(shotChars[0]) : '') || soleName || undefined
-        const hint = refName && charMap.get(refName) ? `, character: ${charMap.get(refName)}` : ''
+        // 该镜全部出场角色（去重）；单角色工程兜底到唯一角色
+        const names = (Array.isArray(shotChars) ? shotChars.map((c) => String(c)).filter(Boolean) : [])
+        const refNames = Array.from(new Set(names.length ? names : soleName ? [soleName] : []))
+        const refName = refNames[0]
+        const hint = refNames
+          .map((n) => (charMap.get(n) ? `${n}: ${charMap.get(n)}` : ''))
+          .filter(Boolean)
+          .join('; ')
         return {
-          prompt: withStyle(`${desc}${hint}, cinematic film still, movie frame, dramatic composition, highly detailed`),
+          prompt: withStyle(`${desc}${hint ? `, characters — ${hint}` : ''}, cinematic film still, movie frame, dramatic composition, highly detailed`),
           size,
           refName,
+          refNames,
           meta: { shot: shot.id ? String(shot.id) : `镜头${i + 1}` },
         }
       })
