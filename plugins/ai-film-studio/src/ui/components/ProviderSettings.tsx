@@ -240,6 +240,10 @@ export default function ProviderSettings({ open, onClose }: Props) {
             ) : (
               <>
                 <label className="afs-form__row">
+                  <span>模型</span>
+                  <input value={draft.model || ''} placeholder="模型 ID（用于请求体模板的 {model}）" onChange={(e) => set({ model: e.target.value })} />
+                </label>
+                <label className="afs-form__row">
                   <span>提交 URL</span>
                   <input value={draft.submitUrl || ''} placeholder="https://api.xxx/v1/video" onChange={(e) => set({ submitUrl: e.target.value })} />
                 </label>
@@ -252,7 +256,17 @@ export default function ProviderSettings({ open, onClose }: Props) {
                   <input value={draft.statusPath || ''} placeholder="status 路径 (status)" onChange={(e) => set({ statusPath: e.target.value })} />
                   <input value={draft.videoUrlPath || ''} placeholder="结果地址路径 (video.url / audio.url)" onChange={(e) => set({ videoUrlPath: e.target.value })} />
                 </div>
-                <div className="afs-form__note">留空则按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。</div>
+                <label className="afs-form__row afs-form__row--col">
+                  <span>请求体模板（可选）</span>
+                  <textarea
+                    className="afs-form__ta"
+                    rows={3}
+                    value={draft.bodyTemplate || ''}
+                    placeholder={'留空用通用 {prompt,image_url} body；占位符 {prompt}{imageUrl}{model}，条件块 {?imageUrl}…{/imageUrl}'}
+                    onChange={(e) => set({ bodyTemplate: e.target.value })}
+                  />
+                </label>
+                <div className="afs-form__note">留空则按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。预设已为火山方舟/通义万相填好模板。</div>
               </>
             )}
 

@@ -1110,3 +1110,18 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 - UI：顶栏「视频供应商」→「模型供应商」；面板加预设选择 + 能力勾选 + 语音同步字段 + 每能力默认。
 
 > 逃生口（未做）：`kind:'custom-js'` 用户自写适配器（沙箱 `new Function`），覆盖极端供应商 —— 声明式预设已覆盖约 90%，按需再加。
+
+---
+
+### M12 — 国内供应商预设 + 声明式请求体模板（2026-06-17）
+
+fal.ai 大陆无法充值。为接入国内供应商，给 `custom-http` 加**声明式请求体模板**，并补国内预设：
+- **`bodyTemplate`**：各家 body 结构不同（火山方舟 `content[]`、通义万相 `input{}`），加模板字段，占位符 `{prompt}{imageUrl}{lastImageUrl}{model}{duration}{size}` + 条件块 `{?imageUrl}…{/imageUrl}`（变量非空才保留），渲染后 `JSON.parse` 作 body；留空走通用默认 body（向后兼容）。
+- **预设**（国内优先）：
+  - **火山方舟 Seedance/豆包**（`ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`，Bearer，`content[]` body，结果 `content.video_url`）✅ 可直连/人民币
+  - **阿里百炼 通义万相**（`dashscope.../video-synthesis`，Bearer + `X-DashScope-Async`，`input{}` body，`output.task_id/task_status/video_url`）✅
+  - **聚合平台**（302.AI / 云雾 / 硅基流动）通用 custom-http 预设 —— 可拿可灵/海螺/Veo/Seedance 等（人民币、国内可用）
+  - **OpenAI 兼容语音**（含国内中转）、**fal 视频/配乐**（海外）
+- ProviderSettings 的 custom-http 增加「模型」与「请求体模板」字段（预设已填好火山方舟/通义万相模板）。
+
+> 未直连：**可灵 Kling**（开放平台需 JWT 自签名，当前 Bearer 适配器不签 JWT）、**海螺 MiniMax**（3 步：submit→query→retrieve file，当前 2 步轮询拿不到下载地址）—— 二者建议走聚合平台预设。后续可加 `kling-jwt` 鉴权与「结果取回步骤」直连支持。

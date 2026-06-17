@@ -1,6 +1,7 @@
 /**
  * 媒体供应商预设：选预设 + 贴 Key 即用（声明式，安全，免写代码）。
- * 对齐 Toonflow 的「每供应商一个适配器」，但用声明式配置而非可执行 TS（沙箱更安全）。
+ * 对齐 Toonflow 的「每供应商一个适配器」，但用声明式配置（含请求体模板）而非可执行 TS（沙箱更安全）。
+ * 国内可直连/人民币充值的供应商排在前。
  */
 import type { MediaProviderConfig } from './types'
 
@@ -13,27 +14,60 @@ export interface ProviderPreset {
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
-    id: 'fal-video',
-    label: 'fal · 视频（Kling / Veo / Sora / Seedance…）',
-    hint: '一个 fal Key 覆盖多模型；model 填 fal 模型路径，I2V 用 image-to-video、T2V 用 text-to-video。',
+    id: 'volcengine-ark',
+    label: '火山方舟 · Seedance / 豆包 视频（国内）',
+    hint: '火山引擎方舟 Ark（人民币）。model 填模型 ID（如 doubao-seedance-1-0-lite-i2v-250428），Key 为 Ark API Key（Bearer）。提示词里可带 --resolution 720p --duration 5。',
     config: {
-      kind: 'fal',
+      kind: 'custom-http',
       capabilities: ['video'],
       mode: 'async-poll',
-      label: 'fal 视频',
-      model: 'fal-ai/kling-video/v1/standard/image-to-video',
+      label: '火山方舟视频',
+      model: 'doubao-seedance-1-0-lite-i2v-250428',
+      submitUrl: 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks',
+      pollUrl: 'https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks/{taskId}',
+      taskIdPath: 'id',
+      statusPath: 'status',
+      videoUrlPath: 'content.video_url',
+      bodyTemplate:
+        '{"model":"{model}","content":[{"type":"text","text":"{prompt}"}{?imageUrl},{"type":"image_url","image_url":{"url":"{imageUrl}"}}{/imageUrl}]}',
     },
   },
   {
-    id: 'fal-music',
-    label: 'fal · 配乐/音乐',
-    hint: 'fal 音乐模型（返回音频地址，已适配音频 url 解析）；model 填 fal 音乐模型路径。',
-    config: { kind: 'fal', capabilities: ['music'], mode: 'async-poll', label: 'fal 配乐', model: '' },
+    id: 'dashscope-wan',
+    label: '阿里百炼 · 通义万相 视频（国内）',
+    hint: '阿里云百炼 DashScope（人民币）。model 填万相模型（图生视频如 wan2.2-i2v-flash；文生视频用对应 t2v 模型），Key 为 DASHSCOPE_API_KEY（Bearer）。',
+    config: {
+      kind: 'custom-http',
+      capabilities: ['video'],
+      mode: 'async-poll',
+      label: '通义万相视频',
+      model: 'wan2.2-i2v-flash',
+      submitUrl: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis',
+      pollUrl: 'https://dashscope.aliyuncs.com/api/v1/tasks/{taskId}',
+      headers: { 'X-DashScope-Async': 'enable' },
+      taskIdPath: 'output.task_id',
+      statusPath: 'output.task_status',
+      videoUrlPath: 'output.video_url',
+      bodyTemplate:
+        '{"model":"{model}","input":{"prompt":"{prompt}"{?imageUrl},"img_url":"{imageUrl}"{/imageUrl}},"parameters":{}}',
+    },
+  },
+  {
+    id: 'aggregator-video',
+    label: '聚合平台 · 视频（302.AI / 云雾 / 硅基流动…）',
+    hint: '聚合平台转发各家原生 API（人民币、国内可用，可拿到可灵/海螺/Seedance/Veo 等）。按平台文档填 submit/poll URL、请求体模板与结果 JSON 路径；Key=平台 Key（Bearer）。',
+    config: { kind: 'custom-http', capabilities: ['video'], mode: 'async-poll', label: '聚合视频' },
+  },
+  {
+    id: 'aggregator-music',
+    label: '聚合平台 · 音乐/配乐',
+    hint: '同上，结果路径指向音频地址（videoUrlPath 填 audio url 路径）。',
+    config: { kind: 'custom-http', capabilities: ['music'], mode: 'async-poll', label: '聚合配乐' },
   },
   {
     id: 'openai-tts',
-    label: 'OpenAI 兼容 · 语音 TTS（同步）',
-    hint: '同步 /audio/speech 返回音频字节（走后端，规避 CORS）；baseURL 如 https://api.openai.com/v1。',
+    label: '语音 TTS · OpenAI 兼容（含国内中转）',
+    hint: '同步 /audio/speech 返回音频字节（走后端规避 CORS）。baseURL 填 OpenAI 或国内中转地址（如 https://api.openai.com/v1）。',
     config: {
       kind: 'custom-http',
       capabilities: ['tts'],
@@ -45,15 +79,15 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     },
   },
   {
-    id: 'custom-video',
-    label: '自定义 HTTP · 视频（异步）',
-    hint: '填 submit/poll URL 与结果 JSON 路径，兜底任意异步视频供应商。',
-    config: { kind: 'custom-http', capabilities: ['video'], mode: 'async-poll', label: '自定义视频' },
+    id: 'fal-video',
+    label: 'fal · 视频（海外，需海外支付）',
+    hint: 'fal.ai 海外平台（大陆充值受限）；model 填 fal 模型路径。',
+    config: { kind: 'fal', capabilities: ['video'], mode: 'async-poll', label: 'fal 视频', model: 'fal-ai/kling-video/v1/standard/image-to-video' },
   },
   {
-    id: 'custom-music',
-    label: '自定义 HTTP · 音乐（异步）',
-    hint: '同自定义视频，结果路径指向音频地址（videoUrlPath 填音频 url 路径）。',
-    config: { kind: 'custom-http', capabilities: ['music'], mode: 'async-poll', label: '自定义配乐' },
+    id: 'fal-music',
+    label: 'fal · 配乐（海外）',
+    hint: 'fal 音乐模型（返回音频地址）；model 填 fal 音乐模型路径。',
+    config: { kind: 'fal', capabilities: ['music'], mode: 'async-poll', label: 'fal 配乐', model: '' },
   },
 ]

@@ -29,6 +29,9 @@ export interface MediaProviderConfig {
   taskIdPath?: string // submit 响应里 taskId 的 JSON 路径
   statusPath?: string // poll 响应里 status 的 JSON 路径
   videoUrlPath?: string // poll 响应里结果地址（视频/音乐）的 JSON 路径
+  // 请求体模板（声明式，适配各家不同 body）：{prompt}{imageUrl}{lastImageUrl}{model}{duration}{size}
+  // 支持条件块 {?imageUrl}…{/imageUrl}（变量非空才保留），留空则用通用默认 body
+  bodyTemplate?: string
   // TTS（sync-binary）默认音色（节点可覆盖）
   voices?: string[]
   enabled: boolean

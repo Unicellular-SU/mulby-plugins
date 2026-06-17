@@ -28,6 +28,26 @@ function headers(cfg: VideoProviderConfig, apiKey: string): Record<string, strin
   }
 }
 
+// 渲染请求体模板：先处理条件块 {?key}…{/key}（变量非空才保留），再替换 {key}。
+// 字符串变量做 JSON 内部转义（去外层引号），数字原样，便于嵌入任意 JSON 结构。
+function renderBodyTemplate(tpl: string, vars: Record<string, string | number | undefined>): Record<string, unknown> {
+  let s = tpl.replace(/\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g, (_, k: string, inner: string) => {
+    const v = vars[k]
+    return v !== undefined && v !== null && String(v) !== '' ? inner : ''
+  })
+  s = s.replace(/\{(\w+)\}/g, (_, k: string) => {
+    const v = vars[k]
+    if (v === undefined || v === null) return ''
+    if (typeof v === 'number') return String(v)
+    return JSON.stringify(String(v)).slice(1, -1)
+  })
+  try {
+    return JSON.parse(s) as Record<string, unknown>
+  } catch (e) {
+    throw new Error(`请求体模板渲染后不是合法 JSON：${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 function normStatus(raw: string): VideoPollResult['status'] {
   const s = raw.toLowerCase()
   if (['completed', 'complete', 'succeeded', 'success', 'done', 'finished'].includes(s)) return 'completed'
@@ -39,11 +59,25 @@ function normStatus(raw: string): VideoPollResult['status'] {
 export const customHttpAdapter: VideoProviderAdapter = {
   async submit(req: VideoGenRequest, cfg, apiKey) {
     if (!cfg.submitUrl) throw new Error('custom-http 供应商缺少 submitUrl')
-    const body: Record<string, unknown> = { prompt: req.prompt }
-    if (req.imageUrl) body.image_url = req.imageUrl
-    if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl // 尾帧（供应商不支持则忽略）
-    if (req.duration) body.duration = req.duration
-    if (req.size) body.size = req.size
+    let body: Record<string, unknown>
+    if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
+      // 声明式模板（各家 body 不同，如火山方舟 content[]、通义万相 input{}）
+      body = renderBodyTemplate(cfg.bodyTemplate, {
+        prompt: req.prompt,
+        imageUrl: req.imageUrl,
+        lastImageUrl: req.lastImageUrl,
+        model: cfg.model,
+        duration: req.duration,
+        size: req.size,
+      })
+    } else {
+      // 通用默认 body（兜底）
+      body = { prompt: req.prompt }
+      if (req.imageUrl) body.image_url = req.imageUrl
+      if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl // 尾帧（供应商不支持则忽略）
+      if (req.duration) body.duration = req.duration
+      if (req.size) body.size = req.size
+    }
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })
     const taskId = cfg.taskIdPath
       ? firstString(res, [cfg.taskIdPath])
