@@ -9,6 +9,7 @@
 | 作者 | 资深全栈架构师 |
 | 状态 | **M0–M6 全链路 + M7 一致性与扇出已完成**（自动 N→N 扇出：N 角色→N 三视图、N 镜头→N 关键帧→N 视频；项目级全局设定贯穿所有生成节点并决定尺寸；Inspector 重做为输入/输出结构化卡片+媒体画廊）；宿主侧已支持 API 级结构化输出 |
 | 目标插件目录 | `mulby-plugins/plugins/ai-film-studio/` |
+| 后续规划 | 📌 **能力补齐方案（M14–M20）见 [ai-film-studio-completion-plan.md](./ai-film-studio-completion-plan.md)** —— 基于 45-agent 代码审计，补齐复杂剧本/多人物/多场景/双轨音频/剪辑控制流等缺口；后续开发以该文档为准 |
 
 ---
 
