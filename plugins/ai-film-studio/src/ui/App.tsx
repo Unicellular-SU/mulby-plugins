@@ -9,6 +9,7 @@ import SettingsView from './components/views/SettingsView'
 import { useGraphStore } from './store/graphStore'
 import { useProviderStore } from './store/providerStore'
 import { usePromptStore } from './store/promptStore'
+import { useUiStore } from './store/uiStore'
 
 const PLUGIN_ID = 'ai-film-studio'
 const VIEWS: AppView[] = ['home', 'editor', 'assets', 'prompts', 'settings']
@@ -20,6 +21,8 @@ export default function App() {
   const deleteSelected = useGraphStore((s) => s.deleteSelected)
   const loadProviders = useProviderStore((s) => s.load)
   const loadPrompts = usePromptStore((s) => s.loadGlobal)
+  const loadTheme = useUiStore((s) => s.loadTheme)
+  const applyHostTheme = useUiStore((s) => s.applyHostTheme)
 
   const [view, setView] = useState<AppView>('home')
   const [promptsTab, setPromptsTab] = useState<PromptsTab>('snippets')
@@ -45,16 +48,12 @@ export default function App() {
     void window.mulby?.storage?.set('lastView', view, PLUGIN_ID)
   }, [view])
 
-  // 主题跟随宿主
+  // 主题：先按宿主/持久化初始化，再监听宿主变更（用户手动切换后不再被宿主覆盖）
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const initialTheme = (params.get('theme') as 'light' | 'dark') || 'dark'
-    document.documentElement.classList.toggle('light', initialTheme === 'light')
-    const dispose = window.mulby?.onThemeChange?.((t) => {
-      document.documentElement.classList.toggle('light', t === 'light')
-    })
+    void loadTheme()
+    const dispose = window.mulby?.onThemeChange?.((t) => applyHostTheme(t === 'light' ? 'light' : 'dark'))
     return () => dispose?.()
-  }, [])
+  }, [loadTheme, applyHostTheme])
 
   // 全局快捷键：Cmd/Ctrl+S 保存；Delete/Backspace 删除选中节点（仅画布界面、非输入框聚焦时）
   useEffect(() => {

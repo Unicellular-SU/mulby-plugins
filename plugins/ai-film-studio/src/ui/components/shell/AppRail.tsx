@@ -1,4 +1,5 @@
-import { Clapperboard, LayoutGrid, Workflow, Image as ImageIcon, MessageSquareText, Settings, type LucideIcon } from 'lucide-react'
+import { Clapperboard, LayoutGrid, Workflow, Image as ImageIcon, MessageSquareText, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
+import { useUiStore } from '../../store/uiStore'
 
 export type AppView = 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
 
@@ -11,6 +12,8 @@ const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
 
 /** 左侧一级界面导航栏（rail）：始终可见，切换工程主页 / 画布 / 素材库 / 提示词库 / 设置。 */
 export default function AppRail({ view, onChange }: { view: AppView; onChange: (v: AppView) => void }) {
+  const theme = useUiStore((s) => s.theme)
+  const toggleTheme = useUiStore((s) => s.toggleTheme)
   return (
     <nav className="afs-rail">
       <div className="afs-rail__brand" title="AI 影视工坊">
@@ -34,9 +37,17 @@ export default function AppRail({ view, onChange }: { view: AppView; onChange: (
       </div>
       <div className="afs-rail__spacer" />
       <button
+        className="afs-rail__item"
+        onClick={toggleTheme}
+        title={theme === 'light' ? '切换到暗色主题' : '切换到亮色主题'}
+      >
+        {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+        <span>{theme === 'light' ? '暗色' : '亮色'}</span>
+      </button>
+      <button
         className={`afs-rail__item${view === 'settings' ? ' is-active' : ''}`}
         onClick={() => onChange('settings')}
-        title="设置（供应商 / 全局 / 提示词）"
+        title="设置（模型供应商 / 外观 / 存储）"
       >
         <Settings size={18} />
         <span>设置</span>

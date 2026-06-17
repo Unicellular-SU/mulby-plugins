@@ -17,6 +17,7 @@ import { getNodeDef, CATEGORY_META } from '../nodes/nodeDefs'
 import { useGraphStore, isValidConnection, type FilmNode as FilmNodeType } from '../store/graphStore'
 import { useAssetStore } from '../store/assetStore'
 import { usePromptStore, resolveSnippet } from '../store/promptStore'
+import { useUiStore } from '../store/uiStore'
 
 const nodeTypes = { film: FilmNode }
 
@@ -28,6 +29,9 @@ function miniMapColor(node: Node): string {
 
 export default function FlowCanvas() {
   const { screenToFlowPosition } = useReactFlow()
+  const theme = useUiStore((s) => s.theme)
+  const dotColor = theme === 'light' ? '#cbd5e1' : '#2a3650'
+  const maskColor = theme === 'light' ? 'rgba(226,232,240,0.65)' : 'rgba(11,15,23,0.7)'
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const onNodesChange = useGraphStore((s) => s.onNodesChange)
@@ -99,9 +103,9 @@ export default function FlowCanvas() {
         defaultEdgeOptions={{ type: 'default' }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#2a3650" />
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color={dotColor} />
         <Controls showInteractive={false} />
-        <MiniMap nodeColor={miniMapColor} maskColor="rgba(11,15,23,0.7)" pannable zoomable />
+        <MiniMap nodeColor={miniMapColor} maskColor={maskColor} pannable zoomable />
       </ReactFlow>
     </div>
   )
