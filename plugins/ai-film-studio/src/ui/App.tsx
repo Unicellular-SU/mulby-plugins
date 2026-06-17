@@ -6,8 +6,10 @@ import FlowCanvas from './components/FlowCanvas'
 import Inspector from './components/Inspector'
 import ProviderSettings from './components/ProviderSettings'
 import GlobalSettings from './components/GlobalSettings'
+import PromptSettings from './components/PromptSettings'
 import { useGraphStore } from './store/graphStore'
 import { useProviderStore } from './store/providerStore'
+import { usePromptStore } from './store/promptStore'
 
 export default function App() {
   const loaded = useGraphStore((s) => s.loaded)
@@ -16,14 +18,17 @@ export default function App() {
   const saveProject = useGraphStore((s) => s.saveProject)
   const deleteSelected = useGraphStore((s) => s.deleteSelected)
   const loadProviders = useProviderStore((s) => s.load)
+  const loadPrompts = usePromptStore((s) => s.load)
   const [providersOpen, setProvidersOpen] = useState(false)
   const [globalsOpen, setGlobalsOpen] = useState(false)
+  const [promptsOpen, setPromptsOpen] = useState(false)
 
   useEffect(() => {
     init()
     loadModels()
     loadProviders()
-  }, [init, loadModels, loadProviders])
+    loadPrompts()
+  }, [init, loadModels, loadProviders, loadPrompts])
 
   // 主题跟随宿主
   useEffect(() => {
@@ -58,9 +63,14 @@ export default function App() {
   return (
     <ReactFlowProvider>
       <div className="afs-app">
-        <Toolbar onOpenProviders={() => setProvidersOpen(true)} onOpenGlobals={() => setGlobalsOpen(true)} />
+        <Toolbar
+          onOpenProviders={() => setProvidersOpen(true)}
+          onOpenGlobals={() => setGlobalsOpen(true)}
+          onOpenPrompts={() => setPromptsOpen(true)}
+        />
         <ProviderSettings open={providersOpen} onClose={() => setProvidersOpen(false)} />
         <GlobalSettings open={globalsOpen} onClose={() => setGlobalsOpen(false)} />
+        <PromptSettings open={promptsOpen} onClose={() => setPromptsOpen(false)} />
         <div className="afs-app__body">
           <aside className="afs-app__left">
             <NodeLibrary />

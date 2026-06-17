@@ -250,10 +250,15 @@ interface FilmEdge {
 |---|---|---|---|
 | 故事输入 StoryInput | — | text | 多行文本 |
 | 文本片段 TextNode | — | text | 文本 |
-| 参考图 ImageInput | — | image | 上传/拖拽（buffer→attachment） |
-| 全局设定 GlobalStyle | — | json | 画风、画幅(16:9/9:16/1:1)、色调、风格 Token、角色库引用 |
+| 参考图 ImageInput | — | image | 上传（buffer→attachment） |
+| 音频素材 AudioInput | — | audio | 上传本地配乐/音效，作为成片音轨 |
+| **人物 Character** | — | json + image | 角色**资产**：文字生成三视图 **或** 上传图片；身份(JSON)+参考图，可直连关键帧的 `chars`/`ref` 口保持跨镜一致 |
+| **场景 Scene** | — | json + image | 场景**资产**：文字生成概念图 **或** 上传图片；设定(JSON)+参考图，直连关键帧 |
+| 全局设定 GlobalStyle | — | json | 画风、画幅(16:9/9:16/1:1)（顶栏 🎨 面板，注入所有生成节点并决定尺寸） |
 
-**文本 AI 类**（统一：`ai.call` 流式 + 角色化 System Prompt + 结构化 JSON 输出，复用 `ai-flowchart` 的"自然语言 + \`\`\`json\`\`\`"解析法）
+> 人物/场景为可生成或上传的素材节点（M8）：`source` 参数切换「文字生成 / 上传图片」；图像带 `name`+`kind` 元信息供关键帧按名匹配。生成模式带缓存（全图重跑复用、「运行此节点」强制重画）。
+
+**文本 AI 类**（统一：`ai.call` 流式 + 可编辑 System Prompt 模板 + 纯 JSON 输出；鲁棒解析（`jsonParse`）+ 宿主 `response_format`/JSON Schema 结构化输出 + 校验/「带错误反馈」修复重试）
 | 节点 | 输入 | 输出 | 说明 |
 |---|---|---|---|
 | 故事梳理 StoryDev | text(+globals) | json{logline,theme,tone,beats} | 世界观/主题/节奏梳理 |
@@ -265,10 +270,10 @@ interface FilmEdge {
 **图像 AI 类**（`ai.images`；模型来自 `allModels({endpointType:'image-generation'})`）
 | 节点 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| 角色三视图 CharImage | json(char)+globals | image×3 | 前/侧/背三视图，统一画风+seed |
-| 场景概念图 SceneImage | json/text+globals | image | 场景设定图 |
-| 分镜关键帧 Keyframe | json(shot)+refs(角色图/场景图) | image | 单镜首帧（可再出尾帧） |
-| 图生图/重绘 ImageEdit | image+text | image | `images.edit` 局部重绘/风格迁移 |
+| 角色三视图 CharImage | json(role,可多角色)+globals | image（按角色扇出 N 张） | 前/侧/背三视图，统一画风；输出带 `kind:'character'` |
+| 场景概念图 SceneImage | json/text+globals | image（按场景扇出） | 场景设定图；输出带 `kind:'scene'` |
+| 分镜关键帧 Keyframe | shot(any)+chars(json,可选)+ref(image) | image（按镜头扇出） | 单镜首帧；参考图选择 `selectRefs`：角色按出场名匹配、场景图全收作附加参考 |
+| 图生图/重绘 ImageEdit | image+text | image | `images.edit`（支持 `referenceAttachmentIds` 多参考图条件生成） |
 
 **视频 AI 类**（自管 VideoProvider）
 | 节点 | 输入 | 输出 | 说明 |
@@ -493,12 +498,15 @@ interface AssetRef { id: string; kind: 'image'|'video'|'audio'; mime: string; si
 ## 9. Prompt 工程
 
 ### 9.1 文本节点
-每个文本节点一套角色化 System Prompt + 严格 JSON 输出契约（沿用 `ai-flowchart`：自然语言说明 + \`\`\`json\`\`\` 代码块，前端正则解析）。
-- **分镜脚本**关键字段：`shotSize`(远/全/中/近/特)、`camera`(推/拉/摇/移/固定)、`duration`(秒)、`chars`(出场角色)、`location`(场景)、`mood`、`prompt`(给图像/视频用的英文提示词)。
+每个文本节点一套角色化 System Prompt + 严格 JSON 输出。**纯 JSON 输出**（不再依赖自然语言+围栏），由 `jsonParse`（多重围栏/最大平衡块扫描/容尾逗号）鲁棒解析，并叠加三重保障：
+1. **可编辑模板**：角色 + 创作指导 + JSON 结构外置为「提示词模板」（`promptTemplates.ts` 默认值 + `promptStore` 全局覆盖，顶栏面板编辑、跨工程生效；类似 Toonflow 的可编辑技能文件）。
+2. **固定输出契约**：`JSON_CONTRACT`（只输出合法 JSON、不要围栏…）由引擎统一追加，用户改模板也不破坏解析。
+3. **宿主结构化输出**：可走 Mulby `ai.call` 的 `response_format` / JSON Schema（`feat/ai-structured-output`），失败再「带错误反馈」修复重试（`buildRepairPrompt`）。
+- **分镜脚本**关键字段：`shotSize`(远/全/中/近/特)、`camera`(推/拉/摇/移/固定)、`duration`(秒)、`characters`(出场角色)、`location`(场景)、`mood`、`prompt`(给图像/视频用的英文提示词)。
 - 强约束：每镜必须可独立生成图像与视频（自带完整画面描述）。
 
 ### 9.2 图像 prompt 组装
-`最终 prompt = 全局风格 + 角色描述/参考 + 镜头画面描述 + 画幅/质量后缀`；角色一致性靠参考图（`images.edit` 或带 ref 的 generate）+ 固定 seed。
+`最终 prompt = fillTemplate(可编辑图像模板, 动态变量) + 全局风格后缀`（风格来自项目全局设定，模板里不写死）。角色/场景一致性靠**参考图条件生成**：`images.edit` 的 `imageAttachmentId`(主参考) + `referenceAttachmentIds`(附加参考)，在多图模型（如 Gemini）上实现 IP-Adapter 式「按参考图生成」；关键帧用 `selectRefs` 选参考图（角色按出场名匹配、场景图全收）。图像模板同样可在「提示词模板」面板编辑。
 
 ### 9.3 视频 prompt
 `运镜描述 + 画面变化 + 时长 + 首/尾帧`；I2V 以关键帧为首帧，prompt 只描述"如何运动/变化"。
@@ -542,25 +550,28 @@ interface AssetRef { id: string; kind: 'image'|'video'|'audio'; mime: string; si
 
 > AI 文本/图像调用放前端（避免 IPC 超时、便于流式）。视频因长任务 + 可能的跨域，走后端。
 
-### 10.3 前端文件树
+### 10.3 前端文件树（实际）
 ```
 src/
-  main.ts                     # 后端：存储/视频代理/落盘/导出
-  types/mulby.d.ts
+  main.ts                  # 后端：视频下载落盘 / 配音合成 / 文件导出 RPC
+  types/mulby.d.ts         # 宿主 API 类型
   ui/
     index.html  main.tsx  App.tsx  styles.css
-    store/         # zustand: graphStore / runStore / providerStore
-    components/
-      FlowCanvas.tsx
-      nodes/       # 各类节点组件
-      panels/      # NodeLibrary / Inspector / Settings / AssetLibrary / Timeline
-      edges/
+    nodes/nodeDefs.ts      # 节点定义（端口/参数/图标）
+    store/
+      graphStore.ts        # 图 + 运行(execNode/runAll/runFrom/cancelRun) + 持久化 + 全局设定
+      providerStore.ts     # 视频供应商
+      promptStore.ts       # 提示词模板覆盖（全局明文 KV，跨工程）
+    components/            # FlowCanvas / Toolbar / NodeLibrary / Inspector / inspectorViews
+                           # ProviderSettings / GlobalSettings / PromptSettings / FilmNode
     services/
-      engines/     # textEngine / imageEngine / videoEngine
-      providers/   # falAdapter / customHttpAdapter / registry
-      prompts/     # 各文本节点 system prompt
-      executor/    # dag scheduler / runner / queue / cache
-    hooks/         # useMulby / useModels / useRunner
+      textEngine.ts        # ai.call 流式（可中断 + jsonMode→response_format）
+      imageEngine.ts       # ai.images.generate/edit（含 referenceAttachmentIds 多参考图）
+      prompts.ts           # prompt 组装（读 promptStore 模板）
+      promptTemplates.ts   # 可编辑模板默认值 + JSON_CONTRACT + fillTemplate
+      executor.ts          # 拓扑排序 + 输入收集 + 按口派生输出
+      models / jsonParse / keys(encrypted) / assets(attachment) / download / templates
+      providers/           # fal / customHttp / http / test / index(runVideo)
 ```
 
 ---
@@ -1028,4 +1039,34 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 
 **验收**：`tsc` 通过、`build` 通过、`mulby pack` 出包；专项审查确认字段映射/合并/配对/类型校验均正确。
 
-> 留待后续（调研发现、未实现）：多参考槽权重、IP-Adapter/角色 LoRA 一致性、角色/场景资产库与版本管理、App/参数暴露模式、Node Agent 自动规划、时间线关键帧动画、摄像机/灯光参数节点、跨镜尾帧→首帧自动衔接轨道。
+> 留待后续（调研发现、未实现）：多参考槽权重、角色 LoRA、角色/场景资产库的版本管理、App/参数暴露模式、Node Agent 自动规划、时间线关键帧动画、摄像机/灯光参数节点、跨镜尾帧→首帧自动衔接轨道。
+
+---
+
+### M9 — 强一致（参考图条件生成）+ 资产节点生成/上传 + 提示词外置（2026-06-17）
+
+承接 M8 的「角色/场景资产」，从宿主到插件打通**强一致性**，并把提示词做成可编辑。
+
+**① 宿主：`ai.images.edit` 支持多参考图（按参考图条件生成 / IP-Adapter 式）** — Mulby PR
+- 新增可选 `referenceAttachmentIds: string[]`，附加参考图拼到主图之后（`images:[主图, ...参考图]`），复用图像管道既有的多图通道（`{text, images[]}` → `files[]` → `model.doGenerate({files})`），零破坏。
+- 在支持多图输入的模型（如 Google Gemini 图像模型）上实现跨镜角色/场景强一致——真正的「按参考图生成」。
+- 同步：`docs/apis/ai.md`、mulby-cli react 模板类型（独立 PR）。
+
+**② 插件：关键帧多参考图一致性**
+- `imageEngine.editImage` 支持 `extraRefs[]`（上传为附件 → `referenceAttachmentIds`）。
+- 图像产物带 `kind`（`character`/`scene`）：关键帧用 `selectRefs` 选参考图——**角色按出场名匹配**（`ImageJob.refNames`，扇出时不混入无关角色）、**场景图全收**作附加参考。
+
+**③ 人物/场景：从「纯文本」升级为「可生成/可上传」资产节点**
+- 新增 `source` 开关：`文字生成`（人物三视图 / 场景概念图，`buildAssetImageJob`）或 `上传图片`。
+- 节点新增 `image` 输出口（角色图/场景图，带 `name`+`kind`），`out`(JSON 身份) 仍保留；`executor.resolveOutput` 按口派生（`image` 口取产物、其余取身份）。
+- 生成模式**带缓存**：全图重跑复用已生成素材图（保跨镜一致），「运行此节点」`force` 强制重画；上传模式只上传不生成。
+- 新增模板「素材 → 关键帧（人物/场景）」。
+
+**④ 提示词外置 / 可编辑（借鉴 Toonflow 的「技能文件」）**
+- `promptTemplates.ts`：所有文本节点 System Prompt（剧本/分镜/角色设定/提示词处理 4 模式）与图像模板（角色三视图/场景图/关键帧/人物·场景资产）抽为带默认值的模板；图像模板用 `{占位符}`（`fillTemplate`）注入动态内容。
+- `JSON_CONTRACT`（硬输出契约）由引擎统一追加，**不可编辑**——用户改模板也不破坏 JSON 解析。
+- `promptStore`：编辑保存为全局覆盖（plugin 隔离的明文 KV，跨工程生效）；顶栏新增「提示词模板」面板（`PromptSettings`，分组编辑 + 单条/全部恢复默认）。
+
+**验收**：宿主 `tsc` 通过；插件 `tsc` + `build` 通过。强一致效果依赖所选图像模型支持多图参考（推荐 Gemini 图像模型 / nano-banana）。
+
+> 留待后续：参考图权重/IP-Adapter scale 等供应商专有参数透传、角色 LoRA、资产库版本管理、提示词模板的工程级（非全局）覆盖与导入导出。

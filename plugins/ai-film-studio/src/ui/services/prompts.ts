@@ -3,6 +3,8 @@
  * 约定：自然语言简述 + ```json 代码块，前端用 jsonParse 解析。
  */
 import type { PortValue, FilmNodeData } from '../store/graphStore'
+import { getPrompt } from '../store/promptStore'
+import { JSON_CONTRACT, fillTemplate } from './promptTemplates'
 
 export interface BuiltPrompt {
   system: string
@@ -72,84 +74,19 @@ export function buildRepairPrompt(originalUser: string, error: string, lastOutpu
   )
 }
 
-const SCRIPT_SYSTEM = `你是资深编剧。根据用户提供的故事/灵感，创作一个结构完整的分场剧本。
-
-【输出要求·必须严格遵守】只输出一个合法的 JSON 对象本身：不要任何前言、说明、思路、注释，也不要 markdown 代码块围栏（不要 \`\`\`）。第一个字符必须是 {，最后一个字符必须是 }。所有键名与字符串值一律用英文双引号 "，禁止尾随逗号，禁止中文标点引号。
-
-JSON 结构：
-{
-  "title": "作品名",
-  "logline": "一句话故事梗概",
-  "theme": "主题",
-  "tone": "整体基调",
-  "characters": [{ "name": "角色名", "brief": "一句话简介" }],
-  "scenes": [
-    {
-      "id": "sc1",
-      "slug": "场景标题（如：INT. 咖啡馆 - 日）",
-      "location": "地点",
-      "time": "日/夜/黄昏 等",
-      "summary": "本场内容概述",
-      "characters": ["出场角色名"],
-      "actions": ["关键动作描述"],
-      "dialogues": [{ "character": "角色名", "line": "台词" }]
-    }
-  ]
+/** 文本 JSON 节点的最终 System：用户可编辑模板 + 引擎固定追加的硬输出契约（保证可解析） */
+function jsonSystem(id: string): string {
+  return `${getPrompt(id)}\n\n${JSON_CONTRACT}`
 }
-全程中文创作，台词自然，场景数量适中（建议 3-8 场）。`
 
-const STORYBOARD_SYSTEM = `你是专业分镜师。把给定剧本拆解为可执行的镜头表。每个镜头都要自带完整画面描述，能独立用于图像与视频生成。
-
-【输出要求·必须严格遵守】只输出一个合法的 JSON 对象本身：不要任何前言、说明、思路、注释，也不要 markdown 代码块围栏（不要 \`\`\`）。第一个字符必须是 {，最后一个字符必须是 }。所有键名与字符串值一律用英文双引号 "，禁止尾随逗号，禁止中文标点引号。
-
-JSON 结构：
-{
-  "shots": [
-    {
-      "id": "s1",
-      "scene": "对应场景标题",
-      "description": "中文画面描述（镜头内发生了什么）",
-      "shotSize": "远景|全景|中景|近景|特写",
-      "camera": "推|拉|摇|移|跟|固定",
-      "duration": 5,
-      "characters": ["出场角色"],
-      "location": "场景",
-      "mood": "氛围/情绪",
-      "prompt": "用于图像/视频生成的英文提示词（主体+动作+环境+光线+风格）"
-    }
-  ]
+const FX_MODE_TO_ID: Record<string, string> = {
+  中译英: 'text.fx.zh2en',
+  英译中: 'text.fx.en2zh',
+  风格化: 'text.fx.stylize',
+  扩写: 'text.fx.expand',
 }
-duration 为数字（秒）。按叙事顺序排列。`
-
-const CHARSHEET_SYSTEM = `你是角色设定师。从给定故事/剧本中提炼主要角色，为每个角色给出设定与三视图提示词。
-
-【输出要求·必须严格遵守】只输出一个合法的 JSON 对象本身：不要任何前言、说明、注释，也不要 markdown 代码块围栏（不要 \`\`\`）。第一个字符必须是 {，最后一个字符必须是 }。所有键名与字符串值一律用英文双引号 "，禁止尾随逗号，禁止中文标点引号。
-
-JSON 结构：
-{
-  "characters": [
-    {
-      "name": "角色名",
-      "description": "角色背景与性格（中文）",
-      "appearance": "外貌、服饰、特征（中文）",
-      "refPrompt": "用于生成角色形象的英文提示词",
-      "triple": { "front": "正面英文提示词", "side": "侧面英文提示词", "back": "背面英文提示词" }
-    }
-  ]
-}`
-
 function promptFxSystem(mode: string): string {
-  switch (mode) {
-    case '中译英':
-      return '你是专业翻译。把用户输入翻译成自然流畅的英文。直接输出译文，不要任何解释或引号。'
-    case '英译中':
-      return '你是专业翻译。把用户输入翻译成自然流畅的中文。直接输出译文，不要任何解释或引号。'
-    case '风格化':
-      return '你是提示词工程师。把用户输入改写为更具画面感与风格的版本，保留原意。直接输出结果，不要解释。'
-    case '扩写':
-    default:
-      return '你是提示词工程师。把用户输入扩写为更详细、更有画面感的提示词，保留原意。直接输出结果，不要解释。'
-  }
+  return getPrompt(FX_MODE_TO_ID[mode] || 'text.fx.expand')
 }
 
 // ============ 图像节点 Prompt ============
@@ -245,9 +182,7 @@ export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals):
     if (!basis) return null
     const size = (typeof p.size === 'string' && p.size) || '1024x1024'
     return {
-      prompt: withStyle(
-        `${basis}, full-body character turnaround reference sheet, front view, side view and back view, T-pose, neutral background, consistent character design, highly detailed`
-      ),
+      prompt: withStyle(fillTemplate(getPrompt('image.assetCharacter'), { basis })),
       size,
       meta: { name },
     }
@@ -257,7 +192,7 @@ export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals):
     if (!basis) return null
     const size = sizeFromAspect(resolveAspect({}, globals)) || '1344x768'
     return {
-      prompt: withStyle(`${basis}, establishing shot, environment concept art, cinematic lighting, highly detailed`),
+      prompt: withStyle(fillTemplate(getPrompt('image.assetScene'), { basis })),
       size,
       meta: { name },
     }
@@ -287,9 +222,7 @@ export function buildImagePrompts(
         const tripleHint = triple
           ? `front/side/back consistent (${[triple.front, triple.side, triple.back].filter(Boolean).join('; ')})`
           : 'front view, side view, back view'
-        const prompt = withStyle(
-          `character design three-view turnaround sheet, ${tripleHint}, ${ref}, full body, consistent character design, neutral pose, clean line art, soft studio lighting, white background, high detail`
-        )
+        const prompt = withStyle(fillTemplate(getPrompt('image.charImage'), { hint: tripleHint, ref }))
         return { prompt, size, meta: { name: c.name ? String(c.name) : undefined, kind: 'character' } }
       })
     }
@@ -299,12 +232,12 @@ export function buildImagePrompts(
       if (list.length === 0) {
         const desc = valToText(first(inputs, 'in'))
         if (!desc.trim()) return []
-        return [{ prompt: withStyle(`${desc}, cinematic concept art, environment design, dramatic lighting, highly detailed`), size }]
+        return [{ prompt: withStyle(fillTemplate(getPrompt('image.sceneImage'), { desc })), size }]
       }
       return list.map((s, i) => {
         const desc = String(s.prompt || s.summary || s.description || s.slug || '')
         return {
-          prompt: withStyle(`${desc}, cinematic concept art, environment design, dramatic lighting, highly detailed`),
+          prompt: withStyle(fillTemplate(getPrompt('image.sceneImage'), { desc })),
           size,
           meta: { name: s.slug ? String(s.slug) : `场景${i + 1}`, kind: 'scene' },
         }
@@ -337,7 +270,9 @@ export function buildImagePrompts(
           .filter(Boolean)
           .join('; ')
         return {
-          prompt: withStyle(`${desc}${hint ? `, characters — ${hint}` : ''}, cinematic film still, movie frame, dramatic composition, highly detailed`),
+          prompt: withStyle(
+            fillTemplate(getPrompt('image.keyframe'), { desc, chars: hint ? `, characters — ${hint}` : '' })
+          ),
           size,
           refName,
           refNames,
@@ -370,7 +305,7 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
       const user = [`故事/灵感：\n${story}`, instruction && `\n附加要求：${instruction}`, g && `\n全局设定：${g}`]
         .filter(Boolean)
         .join('')
-      return { system: SCRIPT_SYSTEM, user }
+      return { system: jsonSystem('text.script'), user }
     }
     case 'storyboard': {
       const script = valToText(first(inputs, 'in'))
@@ -383,11 +318,11 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
       ]
         .filter(Boolean)
         .join('')
-      return { system: STORYBOARD_SYSTEM, user }
+      return { system: jsonSystem('text.storyboard'), user }
     }
     case 'char-sheet': {
       const src = valToText(first(inputs, 'in'))
-      return { system: CHARSHEET_SYSTEM, user: `故事/剧本：\n${src}` }
+      return { system: jsonSystem('text.charsheet'), user: `故事/剧本：\n${src}` }
     }
     case 'prompt-fx': {
       const text = valToText(first(inputs, 'in'))

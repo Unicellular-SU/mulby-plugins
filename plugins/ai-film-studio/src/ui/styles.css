@@ -983,6 +983,78 @@ body {
   margin-bottom: 12px;
 }
 
+/* —— 提示词模板面板 —— */
+.afs-modal__panel--wide {
+  width: 720px;
+}
+.afs-modal__section {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--afs-text);
+  margin: 16px 0 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--afs-border);
+}
+.afs-field__desc {
+  font-size: 11px;
+  color: var(--afs-muted);
+  line-height: 1.45;
+  margin-bottom: 6px;
+}
+.afs-field__input--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+}
+.afs-field__label .afs-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  vertical-align: middle;
+}
+.afs-tag--edited {
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--afs-accent);
+}
+.afs-link-btn {
+  background: transparent;
+  border: none;
+  color: var(--afs-accent);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.afs-link-btn:hover {
+  text-decoration: underline;
+}
+.afs-modal__details {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--afs-muted);
+}
+.afs-modal__details summary {
+  cursor: pointer;
+}
+.afs-modal__pre {
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .afs-provlist {
   display: flex;
   flex-direction: column;
