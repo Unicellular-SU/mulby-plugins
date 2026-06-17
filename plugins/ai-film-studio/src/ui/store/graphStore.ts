@@ -237,16 +237,15 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     const p = node.data.params || {}
     const jsonOut = resolveOutput(node, 'out')
     const existingImg = node.data.outputs?.image
-    const uploadMode = String(p.source || '').includes('上传')
     const baseOut: Record<string, PortValue> = {}
     if (jsonOut) baseOut.out = jsonOut
-    // 上传模式：保留已上传图；生成模式已有图且非强制：复用（全图重跑不重画，保跨镜一致性）
-    if (uploadMode || (!opts?.force && existingImg?.assetId)) {
-      if (existingImg) baseOut.image = existingImg
+    // 已有参考图（上传 或 已生成）且非强制重画 → 复用：全图重跑不重画（保跨镜一致），上传的图也不会被覆盖
+    if (!opts?.force && existingImg?.assetId) {
+      baseOut.image = existingImg
       patchNode(id, { status: 'done', error: undefined, outputs: baseOut })
       return
     }
-    // 生成模式：文字生成参考图（无可用文字内容则只产出 JSON）
+    // 文字生成参考图（无可用文字内容则只产出 JSON 身份，保留已有图）
     const job = buildAssetImageJob(node.data, get().globals)
     if (!job) {
       if (existingImg) baseOut.image = existingImg

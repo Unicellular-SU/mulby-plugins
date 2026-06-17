@@ -114,14 +114,13 @@ export default function Inspector() {
   const isCharacter = node.data.kind === 'character'
   const isScene = node.data.kind === 'scene'
   const isAsset = isCharacter || isScene
-  // 人物/场景「上传图片」模式：只上传不生成；「文字生成」模式：可运行生成
-  const assetUpload = isAsset && String(node.data.params?.source || '').includes('上传')
+  // 人物/场景：既可「运行此节点」按文字生成参考图，也可随时「上传图片」用本地图（二者并存）
   const runnable =
     def.category === 'text' ||
     def.category === 'image' ||
     def.category === 'video' ||
     def.category === 'audio' ||
-    (def.category === 'input' && !isImageInput && !isAudioInput && !assetUpload) ||
+    (def.category === 'input' && !isImageInput && !isAudioInput) ||
     (def.category === 'output' &&
       (node.data.kind === 'preview' || node.data.kind === 'compose' || node.data.kind === 'export'))
   const running = runningNodeId === node.id
@@ -215,13 +214,13 @@ export default function Inspector() {
         <span className="afs-inspector__kind">{def.label}</span>
       </div>
 
-      {(isImageInput || assetUpload) && (
+      {(isImageInput || isAsset) && (
         <>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
           <button
-            className="afs-inspector__run"
+            className="afs-inspector__run afs-inspector__run--alt"
             onClick={() => fileRef.current?.click()}
-            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图' : '选择本地图片作为参考图'}
+            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图（覆盖文字生成的图）' : '选择本地图片作为参考图'}
           >
             <Upload size={14} /> {isScene ? '上传场景图' : isCharacter ? '上传角色图' : '上传参考图'}
           </button>

@@ -126,8 +126,7 @@ export const NODE_DEFS: NodeDef[] = [
     ],
     params: [
       { key: 'name', label: '角色名', control: 'text', placeholder: '如：小明' },
-      { key: 'source', label: '参考图来源', control: 'select', options: ['文字生成三视图', '上传图片'], default: '文字生成三视图' },
-      { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（文字生成用）' },
+      { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（用于「运行此节点」文字生成三视图）' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
       { key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' },
     ],
@@ -136,7 +135,7 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'scene',
     category: 'input',
     label: '场景',
-    desc: '场景资产：文字生成概念图或上传图片；输出场景设定(JSON)+参考图，直连关键帧',
+    desc: '场景资产：可「运行此节点」按文字生成概念图，或「上传图片」用本地图；输出场景设定(JSON)+参考图，直连关键帧',
     icon: Mountain,
     inputs: [],
     outputs: [
@@ -145,8 +144,7 @@ export const NODE_DEFS: NodeDef[] = [
     ],
     params: [
       { key: 'name', label: '场景名', control: 'text', placeholder: '如：咖啡馆' },
-      { key: 'source', label: '参考图来源', control: 'select', options: ['文字生成概念图', '上传图片'], default: '文字生成概念图' },
-      { key: 'description', label: '描述', control: 'textarea', placeholder: '环境、氛围、光线…（文字生成用）' },
+      { key: 'description', label: '描述', control: 'textarea', placeholder: '环境、氛围、光线…（用于「运行此节点」文字生成概念图）' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
     ],
   },
