@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import AppRail, { type AppView } from './components/shell/AppRail'
-import EditorView, { type EditorNav } from './components/shell/EditorView'
+import EditorView from './components/shell/EditorView'
 import ProjectHome from './components/views/ProjectHome'
 import AssetsView from './components/views/AssetsView'
 import PromptLibrary, { type PromptsTab } from './components/views/PromptLibrary'
@@ -75,23 +75,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [saveProject, deleteSelected, view])
 
-  // 编辑器顶栏跳转：供应商→设置；画风→提示词库(项目风格)；提示词→提示词库(片段)
-  const onEditorNav = (t: EditorNav) => {
-    if (t === 'providers') {
-      setView('settings')
-    } else {
-      setPromptsTab(t === 'style' ? 'style' : 'snippets')
-      setView('prompts')
-    }
-  }
-
   return (
     <ReactFlowProvider>
       <div className="afs-shell">
         <AppRail view={view} onChange={setView} />
         <div className="afs-main">
           {view === 'home' && <ProjectHome onOpen={() => setView('editor')} />}
-          {view === 'editor' && <EditorView onNavigate={onEditorNav} />}
+          {view === 'editor' && <EditorView />}
           {view === 'assets' && <AssetsView onInserted={() => setView('editor')} />}
           {view === 'prompts' && <PromptLibrary tab={promptsTab} onTab={setPromptsTab} />}
           {view === 'settings' && <SettingsView />}

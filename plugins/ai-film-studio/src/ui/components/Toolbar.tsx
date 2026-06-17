@@ -1,22 +1,19 @@
-import { useRef } from 'react'
+import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Clapperboard, Plus, Save, Download, Upload, Maximize2, Play, Square, Trash2, Settings, Palette, MessageSquareText, Camera } from 'lucide-react'
-import { useGraphStore, type ProjectData } from '../store/graphStore'
-import { TEMPLATES } from '../templates'
+import { Save, Maximize2, Play, Square, Camera } from 'lucide-react'
+import { useGraphStore } from '../store/graphStore'
 
 interface ToolbarProps {
-  onOpenProviders?: () => void
-  onOpenGlobals?: () => void
-  onOpenPrompts?: () => void
   onOpenSnapshots?: () => void
 }
 
-export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts, onOpenSnapshots }: ToolbarProps) {
+/**
+ * 画布编辑器顶栏：聚焦「正在编辑的工程」——工程名(双击改名) + 状态 + 生成模型 + 画布/保存/快照/运行。
+ * 工程的新建/切换/导入导出/删除统一走「工程主页」；画风/提示词/供应商走左侧 rail。
+ */
+export default function Toolbar({ onOpenSnapshots }: ToolbarProps) {
   const { fitView } = useReactFlow()
-  const fileRef = useRef<HTMLInputElement>(null)
 
-  const projects = useGraphStore((s) => s.projects)
-  const currentId = useGraphStore((s) => s.currentId)
   const projectName = useGraphStore((s) => s.projectName)
   const dirty = useGraphStore((s) => s.dirty)
   const saving = useGraphStore((s) => s.saving)
@@ -28,79 +25,47 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts,
   const isRunning = useGraphStore((s) => s.isRunning)
 
   const renameProject = useGraphStore((s) => s.renameProject)
-  const newProject = useGraphStore((s) => s.newProject)
   const saveProject = useGraphStore((s) => s.saveProject)
-  const switchProject = useGraphStore((s) => s.switchProject)
-  const deleteProject = useGraphStore((s) => s.deleteProject)
-  const exportProject = useGraphStore((s) => s.exportProject)
-  const importProject = useGraphStore((s) => s.importProject)
   const setSelectedModel = useGraphStore((s) => s.setSelectedModel)
   const setSelectedImageModel = useGraphStore((s) => s.setSelectedImageModel)
   const runAll = useGraphStore((s) => s.runAll)
   const cancelRun = useGraphStore((s) => s.cancelRun)
-  const loadTemplate = useGraphStore((s) => s.loadTemplate)
 
-  const onExport = () => {
-    const data = exportProject()
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${projectName || 'ai-film-project'}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+  const [editingName, setEditingName] = useState(false)
+  const [draftName, setDraftName] = useState('')
+  const startEdit = () => {
+    setDraftName(projectName)
+    setEditingName(true)
   }
-
-  const onImportClick = () => fileRef.current?.click()
-
-  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    try {
-      const text = await file.text()
-      const data = JSON.parse(text) as Partial<ProjectData>
-      importProject(data)
-    } catch {
-      window.mulby?.notification?.show('导入失败：文件格式不正确', 'error')
-    }
-    e.target.value = ''
-  }
-
-  const onDeleteProject = async () => {
-    if (!currentId) return
-    const ok = window.confirm(`确定删除工程「${projectName}」？此操作不可撤销。`)
-    if (ok) await deleteProject(currentId)
+  const commitEdit = () => {
+    const n = draftName.trim()
+    if (n) renameProject(n)
+    setEditingName(false)
   }
 
   return (
     <div className="afs-toolbar">
       <div className="afs-toolbar__group">
-        <span className="afs-toolbar__logo">
-          <Clapperboard size={18} />
+        {editingName ? (
+          <input
+            className="afs-toolbar__name"
+            autoFocus
+            value={draftName}
+            onChange={(e) => setDraftName(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitEdit()
+              else if (e.key === 'Escape') setEditingName(false)
+            }}
+          />
+        ) : (
+          <span className="afs-toolbar__nametag" title="双击重命名工程" onDoubleClick={startEdit}>
+            {projectName || '未命名工程'}
+          </span>
+        )}
+        <span className="afs-toolbar__meta">
+          {nodeCount} 节点 · {saving ? '保存中…' : dirty ? '未保存' : '已保存'}
         </span>
-        <span className="afs-toolbar__brand">AI 影视工坊</span>
-      </div>
-
-      <div className="afs-toolbar__group">
-        <select
-          className="afs-toolbar__select"
-          value={currentId || ''}
-          onChange={(e) => switchProject(e.target.value)}
-          title="切换工程"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-        <input
-          className="afs-toolbar__name"
-          value={projectName}
-          onChange={(e) => renameProject(e.target.value)}
-          placeholder="工程名称"
-          title="重命名当前工程"
-        />
       </div>
 
       <div className="afs-toolbar__spacer" />
@@ -132,59 +97,15 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts,
             </option>
           ))}
         </select>
-        <span className="afs-toolbar__meta">
-          {nodeCount} 节点 · {saving ? '保存中…' : dirty ? '未保存' : '已保存'}
-        </span>
-      </div>
-
-      <div className="afs-toolbar__group">
         <button className="afs-btn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布">
           <Maximize2 size={15} />
         </button>
-        <select
-          className="afs-toolbar__select"
-          value=""
-          onChange={(e) => {
-            const id = e.target.value
-            e.target.value = ''
-            if (id) void loadTemplate(id)
-          }}
-          title="从模板新建工程"
-        >
-          <option value="">从模板新建…</option>
-          {TEMPLATES.map((t) => (
-            <option key={t.id} value={t.id} title={t.desc}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-        <button className="afs-btn" onClick={newProject} title="新建空白工程">
-          <Plus size={15} />
-        </button>
-        <button className="afs-btn afs-btn--save toolbar__btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">
+        <button className="afs-btn afs-btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">
           <Save size={15} />
           <span>保存</span>
         </button>
-        <button className="afs-btn" onClick={onImportClick} title="导入工程 JSON">
-          <Upload size={15} />
-        </button>
-        <button className="afs-btn" onClick={onExport} title="导出工程 JSON">
-          <Download size={15} />
-        </button>
-        <button className="afs-btn afs-btn--danger" onClick={onDeleteProject} title="删除当前工程">
-          <Trash2 size={15} />
-        </button>
         <button className="afs-btn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）">
           <Camera size={15} />
-        </button>
-        <button className="afs-btn" onClick={onOpenGlobals} title="项目风格 · 画风 / 画幅（提示词库）">
-          <Palette size={15} />
-        </button>
-        <button className="afs-btn" onClick={onOpenPrompts} title="提示词库（可复用片段 / 节点模板）">
-          <MessageSquareText size={15} />
-        </button>
-        <button className="afs-btn" onClick={onOpenProviders} title="模型供应商（视频 / 配乐 / 语音）设置">
-          <Settings size={15} />
         </button>
         {isRunning ? (
           <button className="afs-btn afs-btn--stop" onClick={cancelRun} title="停止运行">
@@ -192,14 +113,12 @@ export default function Toolbar({ onOpenProviders, onOpenGlobals, onOpenPrompts,
             <span>停止</span>
           </button>
         ) : (
-          <button className="afs-btn afs-btn--save" onClick={() => runAll()} title="运行工作流（拓扑顺序执行文本链路）">
+          <button className="afs-btn afs-btn--save" onClick={() => runAll()} title="运行工作流（拓扑顺序执行）">
             <Play size={15} />
             <span>运行</span>
           </button>
         )}
       </div>
-
-      <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onImportFile} />
     </div>
   )
 }

@@ -133,6 +133,24 @@ body {
 .afs-toolbar__name:focus {
   border-color: var(--afs-accent);
 }
+.afs-toolbar__name {
+  width: 200px;
+}
+.afs-toolbar__nametag {
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: text;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+.afs-toolbar__nametag:hover {
+  background: var(--afs-hover);
+}
 .afs-toolbar__meta {
   font-size: 12px;
   color: var(--afs-muted);
