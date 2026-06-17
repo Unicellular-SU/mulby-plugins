@@ -1,17 +1,18 @@
 import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Save, Maximize2, Play, Square, Camera } from 'lucide-react'
+import { Save, Maximize2, Play, Square, Camera, Palette } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 
 interface ToolbarProps {
   onOpenSnapshots?: () => void
+  onOpenStyle?: () => void
 }
 
 /**
  * 画布编辑器顶栏：聚焦「正在编辑的工程」——工程名(双击改名) + 状态 + 生成模型 + 画布/保存/快照/运行。
  * 工程的新建/切换/导入导出/删除统一走「工程主页」；画风/提示词/供应商走左侧 rail。
  */
-export default function Toolbar({ onOpenSnapshots }: ToolbarProps) {
+export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) {
   const { fitView } = useReactFlow()
 
   const projectName = useGraphStore((s) => s.projectName)
@@ -103,6 +104,9 @@ export default function Toolbar({ onOpenSnapshots }: ToolbarProps) {
         <button className="afs-btn afs-btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">
           <Save size={15} />
           <span>保存</span>
+        </button>
+        <button className="afs-btn" onClick={onOpenStyle} title="项目风格（画风 / 画幅，注入本工程所有生成）">
+          <Palette size={15} />
         </button>
         <button className="afs-btn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）">
           <Camera size={15} />

@@ -153,6 +153,7 @@ export default function ProjectHome({ onOpen }: { onOpen: () => void }) {
                       <Clapperboard size={26} />
                     </div>
                   )}
+                  {c.aspectRatio && <span className="afs-pcard__ratio">{c.aspectRatio}</span>}
                   <span className="afs-pcard__count">{c.nodeCount} 节点</span>
                 </div>
                 <div className="afs-pcard__body">
@@ -161,6 +162,11 @@ export default function ProjectHome({ onOpen }: { onOpen: () => void }) {
                     {isCur && <span className="afs-tag">当前</span>}
                   </div>
                   <div className="afs-pcard__time">{relTime(c.updatedAt)}</div>
+                  {c.style && (
+                    <div className="afs-pcard__style" title={c.style}>
+                      风格：{c.style}
+                    </div>
+                  )}
                 </div>
                 <div className="afs-pcard__actions">
                   <button className="afs-pcard__open" onClick={() => open(c.id)}>

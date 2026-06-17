@@ -1,7 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
 import { Plus, X, Brush, Trash2, Download, Upload } from 'lucide-react'
-import GlobalSettings from '../GlobalSettings'
-import PromptSettings from '../PromptSettings'
 import {
   usePromptStore,
   detectVars,
@@ -11,29 +9,14 @@ import {
   type SnippetGroup,
 } from '../../store/promptStore'
 
-export type PromptsTab = 'style' | 'templates' | 'snippets'
-
-/** 提示词库一级界面：项目风格（画风/画幅）+ 节点模板 + 可复用片段。 */
-export default function PromptLibrary({ tab, onTab }: { tab: PromptsTab; onTab: (t: PromptsTab) => void }) {
+/** 提示词库：可复用的提示词片段（跨工程全局共享）。节点模板已移入「设置 · 高级」，项目风格回到项目上下文。 */
+export default function PromptLibrary() {
   return (
     <div className="afs-surface">
       <div className="afs-surface__head">
         <h2 className="afs-surface__title">提示词库</h2>
-        <div className="afs-subtabs">
-          <button className={`afs-subtab${tab === 'snippets' ? ' is-active' : ''}`} onClick={() => onTab('snippets')}>
-            可复用片段
-          </button>
-          <button className={`afs-subtab${tab === 'templates' ? ' is-active' : ''}`} onClick={() => onTab('templates')}>
-            节点模板
-          </button>
-          <button className={`afs-subtab${tab === 'style' ? ' is-active' : ''}`} onClick={() => onTab('style')}>
-            项目风格
-          </button>
-        </div>
       </div>
-      {tab === 'snippets' && <SnippetLibrary />}
-      {tab === 'templates' && <PromptSettings />}
-      {tab === 'style' && <GlobalSettings />}
+      <SnippetLibrary />
     </div>
   )
 }

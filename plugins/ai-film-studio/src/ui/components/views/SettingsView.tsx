@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
 import { Sun, Moon, Sparkles } from 'lucide-react'
 import ProviderSettings from '../ProviderSettings'
+import PromptSettings from '../PromptSettings'
 import { useUiStore, type Theme } from '../../store/uiStore'
 import { useAssetStore } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
 
-type SettingsTab = 'providers' | 'appearance' | 'storage'
+type SettingsTab = 'providers' | 'appearance' | 'storage' | 'advanced'
 
 const TABS: { id: SettingsTab; label: string; desc: string }[] = [
   { id: 'providers', label: '模型供应商', desc: '视频 / 配乐 / 语音 自管供应商与 API Key' },
   { id: 'appearance', label: '外观', desc: '亮色 / 暗色主题' },
   { id: 'storage', label: '存储', desc: '素材附件占用与清理' },
+  { id: 'advanced', label: '高级', desc: '节点提示词（引擎 system prompt）· 专家' },
 ]
 
 function fmtBytes(n?: number): string {
@@ -47,6 +49,7 @@ export default function SettingsView() {
             {tab === 'providers' && <ProviderSettings />}
             {tab === 'appearance' && <AppearanceSettings />}
             {tab === 'storage' && <StorageSettings />}
+            {tab === 'advanced' && <AdvancedSettings />}
           </div>
         </section>
       </div>
@@ -113,6 +116,19 @@ function StorageSettings() {
       <button className="afs-btn" disabled={busy} onClick={onGc}>
         <Sparkles size={15} /> 清理未引用素材
       </button>
+    </div>
+  )
+}
+
+function AdvancedSettings() {
+  return (
+    <div className="afs-setsec">
+      <div className="afs-setsec__title">高级 · 节点提示词</div>
+      <div className="afs-advbanner">
+        这是引擎级设置：每个节点背后发给 AI 的「系统提示词」。<b>普通使用完全无需修改</b>——默认值已经调好。
+        改动会直接影响生成质量；文本节点的 JSON 输出结构由引擎自动兜底，但仍请谨慎。生效优先级：本工程 &gt; 全局默认 &gt; 内置默认。
+      </div>
+      <PromptSettings />
     </div>
   )
 }

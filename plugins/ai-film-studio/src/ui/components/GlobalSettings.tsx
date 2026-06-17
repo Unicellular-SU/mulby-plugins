@@ -6,7 +6,7 @@ const ASPECTS: { value: string; label: string }[] = [
   { value: '1:1', label: '1:1（方形）' },
 ]
 
-/** 项目级全局设定：画风/画幅自动注入所有生成节点，画幅决定图像/视频尺寸（M7）。内嵌于「设置」一级界面。 */
+/** 项目风格：画风/画幅，属于当前工程；自动注入所有生成节点，画幅决定图像/视频尺寸。由编辑器顶栏「项目风格」打开。 */
 export default function GlobalSettings() {
   const globals = useGraphStore((s) => s.globals)
   const setGlobals = useGraphStore((s) => s.setGlobals)

@@ -77,6 +77,8 @@ export interface ProjectMeta {
 export interface ProjectCard extends ProjectMeta {
   nodeCount: number
   coverAssetId?: string
+  aspectRatio?: string
+  style?: string
 }
 
 /** 工程命名快照：某时刻整图的命名副本，可恢复 */
@@ -160,7 +162,17 @@ async function srem(key: string): Promise<void> {
 /** 由完整工程数据生成主页卡片（节点数 + 封面） */
 function toCard(p: ProjectData): ProjectCard {
   const nodes = p.nodes || []
-  return { id: p.id, name: p.name, createdAt: p.createdAt, updatedAt: p.updatedAt, nodeCount: nodes.length, coverAssetId: pickCoverAssetId(nodes) }
+  const g = normGlobals(p.globals)
+  return {
+    id: p.id,
+    name: p.name,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    nodeCount: nodes.length,
+    coverAssetId: pickCoverAssetId(nodes),
+    aspectRatio: g.aspectRatio,
+    style: g.style,
+  }
 }
 async function sgetIndex(): Promise<ProjectCard[]> {
   const v = await sget<ProjectCard[]>(KEY_INDEX)
@@ -1947,7 +1959,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       .map((c) =>
         // 当前工程的卡片用内存最新（节点数/封面/名称可能尚未落盘）覆盖
         c.id === curId
-          ? { ...c, name: curName, nodeCount: curNodes.length, coverAssetId: pickCoverAssetId(curNodes) ?? c.coverAssetId }
+          ? {
+              ...c,
+              name: curName,
+              nodeCount: curNodes.length,
+              coverAssetId: pickCoverAssetId(curNodes) ?? c.coverAssetId,
+              aspectRatio: get().globals.aspectRatio,
+              style: get().globals.style,
+            }
           : c
       )
       .sort((a, b) => b.updatedAt - a.updatedAt)

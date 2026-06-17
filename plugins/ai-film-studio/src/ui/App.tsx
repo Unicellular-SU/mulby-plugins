@@ -4,7 +4,7 @@ import AppRail, { type AppView } from './components/shell/AppRail'
 import EditorView from './components/shell/EditorView'
 import ProjectHome from './components/views/ProjectHome'
 import AssetsView from './components/views/AssetsView'
-import PromptLibrary, { type PromptsTab } from './components/views/PromptLibrary'
+import PromptLibrary from './components/views/PromptLibrary'
 import SettingsView from './components/views/SettingsView'
 import { useGraphStore } from './store/graphStore'
 import { useProviderStore } from './store/providerStore'
@@ -25,7 +25,6 @@ export default function App() {
   const applyHostTheme = useUiStore((s) => s.applyHostTheme)
 
   const [view, setView] = useState<AppView>('home')
-  const [promptsTab, setPromptsTab] = useState<PromptsTab>('snippets')
 
   useEffect(() => {
     init()
@@ -83,7 +82,7 @@ export default function App() {
           {view === 'home' && <ProjectHome onOpen={() => setView('editor')} />}
           {view === 'editor' && <EditorView />}
           {view === 'assets' && <AssetsView onInserted={() => setView('editor')} />}
-          {view === 'prompts' && <PromptLibrary tab={promptsTab} onTab={setPromptsTab} />}
+          {view === 'prompts' && <PromptLibrary />}
           {view === 'settings' && <SettingsView />}
         </div>
       </div>
