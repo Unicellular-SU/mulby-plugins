@@ -41,6 +41,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
     if (!cfg.submitUrl) throw new Error('custom-http 供应商缺少 submitUrl')
     const body: Record<string, unknown> = { prompt: req.prompt }
     if (req.imageUrl) body.image_url = req.imageUrl
+    if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl // 尾帧（供应商不支持则忽略）
     if (req.duration) body.duration = req.duration
     if (req.size) body.size = req.size
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })

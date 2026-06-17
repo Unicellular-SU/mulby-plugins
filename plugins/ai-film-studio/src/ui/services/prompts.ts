@@ -159,11 +159,6 @@ export interface BuiltImagePrompt {
   size?: string
 }
 
-function asObj(v?: PortValue): Record<string, unknown> | null {
-  if (v?.json && typeof v.json === 'object') return v.json as Record<string, unknown>
-  return null
-}
-
 export interface ImageJob {
   prompt: string
   size?: string
@@ -216,6 +211,25 @@ function resolveAspect(inputs: Record<string, PortValue[]>, globals?: PromptGlob
  * 构建图像生成任务列表（扇出）：角色三视图按每个角色、关键帧按每个镜头、场景按每个场景各产一条，
  * 全局风格/画幅注入所有任务，画幅决定尺寸。返回空数组表示无可用输入。
  */
+// 合并多个 json 端口产物里的数组（如多个「人物」节点 + 角色设定的 characters），裸对象也收
+function collectJsonArray(vals: PortValue[] | undefined, ...keys: string[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = []
+  for (const v of vals || []) {
+    const j = v.json && typeof v.json === 'object' ? (v.json as Record<string, unknown>) : null
+    if (!j) continue
+    let pushed = false
+    for (const k of keys) {
+      if (Array.isArray(j[k])) {
+        out.push(...(j[k] as Array<Record<string, unknown>>))
+        pushed = true
+        break
+      }
+    }
+    if (!pushed && Object.keys(j).length) out.push(j)
+  }
+  return out
+}
+
 export function buildImagePrompts(
   data: FilmNodeData,
   inputs: Record<string, PortValue[]>,
@@ -229,9 +243,8 @@ export function buildImagePrompts(
 
   switch (data.kind) {
     case 'char-image': {
-      const roleJson = asObj(first(inputs, 'role'))
-      const chars = roleJson?.characters as Array<Record<string, unknown>> | undefined
-      const list = chars && chars.length ? chars : roleJson ? [roleJson] : []
+      // 合并所有连入的角色来源（多个「人物」节点 + 角色设定），各角色逐一扇出三视图
+      const list = collectJsonArray(inputs['role'], 'characters')
       if (list.length === 0) return []
       return list.map((c) => {
         const ref = String(c.refPrompt || c.appearance || c.description || '')
@@ -246,10 +259,8 @@ export function buildImagePrompts(
       })
     }
     case 'scene-image': {
-      const inJson = asObj(first(inputs, 'in'))
-      const scenes = inJson?.scenes as Array<Record<string, unknown>> | undefined
-      const shots = inJson?.shots as Array<Record<string, unknown>> | undefined
-      const list = scenes && scenes.length ? scenes : shots && shots.length ? shots : []
+      // 合并所有连入的场景来源（多个「场景」节点 / 剧本 scenes / 分镜 shots）
+      const list = collectJsonArray(inputs['in'], 'scenes', 'shots')
       if (list.length === 0) {
         const desc = valToText(first(inputs, 'in'))
         if (!desc.trim()) return []
@@ -265,20 +276,27 @@ export function buildImagePrompts(
       })
     }
     case 'keyframe': {
-      const shotJson = asObj(first(inputs, 'shot'))
-      const shots = shotJson?.shots as Array<Record<string, unknown>> | undefined
-      const list = shots && shots.length ? shots : shotJson ? [shotJson] : []
+      // 分镜来源：storyboard 的 shots，或自由文本描述（shot 端口已放宽为 any）
+      let list = collectJsonArray(inputs['shot'], 'shots')
       if (list.length === 0) {
         const desc = valToText(first(inputs, 'shot'))
-        if (!desc.trim()) return []
-        return [{ prompt: withStyle(`${desc}, cinematic film still, movie frame, dramatic composition, highly detailed`), size }]
+        list = desc.trim() ? [{ description: desc }] : []
       }
+      if (list.length === 0) return []
+      // 人物上下文（独立「人物」节点 / 角色设定连入 chars 口）：名称 → 外貌，注入提示并用于参考图匹配
+      const charDefs = collectJsonArray(inputs['chars'], 'characters')
+      const charMap = new Map<string, string>()
+      for (const c of charDefs) {
+        if (c.name) charMap.set(String(c.name), String(c.appearance || c.refPrompt || c.description || ''))
+      }
+      const soleName = charDefs.length === 1 ? String(charDefs[0].name || '') : ''
       return list.map((shot, i) => {
         const desc = String(shot.prompt || shot.description || '')
-        const chars = shot.characters as unknown[] | undefined
-        const refName = Array.isArray(chars) && chars.length ? String(chars[0]) : undefined
+        const shotChars = shot.characters as unknown[] | undefined
+        const refName = (Array.isArray(shotChars) && shotChars.length ? String(shotChars[0]) : '') || soleName || undefined
+        const hint = refName && charMap.get(refName) ? `, character: ${charMap.get(refName)}` : ''
         return {
-          prompt: withStyle(`${desc}, cinematic film still, movie frame, dramatic composition, highly detailed`),
+          prompt: withStyle(`${desc}${hint}, cinematic film still, movie frame, dramatic composition, highly detailed`),
           size,
           refName,
           meta: { shot: shot.id ? String(shot.id) : `镜头${i + 1}` },

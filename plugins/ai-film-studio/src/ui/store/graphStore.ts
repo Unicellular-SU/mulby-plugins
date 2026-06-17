@@ -396,6 +396,7 @@ async function execNode(id: string): Promise<void> {
       String(node.data.params?.motion ?? '').trim()
     // i2v：按上游关键帧（含扇出的多张）逐帧扇出生成 N 个视频；t2v：单个文本任务
     const frameUrls: (string | undefined)[] = []
+    const tailUrls: string[] = []
     if (node.data.kind === 'i2v') {
       const frameVals = (inputs['frame'] || []).flatMap(expandItems).filter((v) => v.type === 'image')
       for (const fv of frameVals) {
@@ -405,6 +406,12 @@ async function execNode(id: string): Promise<void> {
       if (frameUrls.length === 0) {
         patchNode(id, { status: 'error', error: '图生视频缺少首帧（请连接关键帧/图像）' })
         return
+      }
+      // 可选尾帧（首尾帧约束）：与首帧按序配对，单张则对所有片段复用
+      const tailVals = (inputs['tail'] || []).flatMap(expandItems).filter((v) => v.type === 'image')
+      for (const tv of tailVals) {
+        const du = await portImageDataUrl(tv)
+        if (du) tailUrls.push(du)
       }
     } else {
       if (!promptText) {
@@ -432,6 +439,7 @@ async function execNode(id: string): Promise<void> {
           req: {
             prompt: promptText || '',
             imageUrl: frameUrls[i] || undefined,
+            lastImageUrl: tailUrls[i] || tailUrls[0] || undefined,
             duration: Number(node.data.params?.duration ?? 5) || undefined,
           },
           onProgress: (p) => {

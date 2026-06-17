@@ -18,6 +18,18 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
     if (node.data.kind === 'global-style') {
       return { type: 'json', json: { aspectRatio: p.aspectRatio ?? '16:9', style: p.style ?? '' } }
     }
+    if (node.data.kind === 'character') {
+      return {
+        type: 'json',
+        json: { characters: [{ name: p.name ?? '', appearance: p.appearance ?? '', refPrompt: p.refPrompt ?? '' }] },
+      }
+    }
+    if (node.data.kind === 'scene') {
+      return {
+        type: 'json',
+        json: { scenes: [{ slug: p.name ?? '', summary: p.description ?? '', prompt: p.refPrompt ?? '' }] },
+      }
+    }
   }
   return node.data.outputs?.[handle] ?? null
 }

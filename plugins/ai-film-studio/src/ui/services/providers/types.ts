@@ -26,6 +26,7 @@ export interface VideoProviderConfig {
 export interface VideoGenRequest {
   prompt: string
   imageUrl?: string // 首帧（data URL 或可访问 URL）
+  lastImageUrl?: string // 尾帧（first-last-frame，如 WAN FLF2V / Kling 起止帧）
   duration?: number
   size?: string
 }

@@ -4,7 +4,7 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.9（M0–M6 + M7 一致性与扇出已落地） |
+| 文档版本 | v0.10（M0–M7 + M8 素材解耦/首尾帧已落地） |
 | 日期 | 2026-06-17 |
 | 作者 | 资深全栈架构师 |
 | 状态 | **M0–M6 全链路 + M7 一致性与扇出已完成**（自动 N→N 扇出：N 角色→N 三视图、N 镜头→N 关键帧→N 视频；项目级全局设定贯穿所有生成节点并决定尺寸；Inspector 重做为输入/输出结构化卡片+媒体画廊）；宿主侧已支持 API 级结构化输出 |
@@ -1009,3 +1009,23 @@ I2V/T2V 节点 + `videoEngine`（自定义供应商，submit→poll→fetch）+ 
 **验收**：`tsc` 通过、`build` 通过、`mulby pack` 出包。待人工验证：3 角色出 3 图、N 镜头出 N 关键帧/视频、全局画风/画幅贯穿、Inspector 卡片与画廊。
 
 > 留待后续：scene-image 的 scenes/shots 优先级提示、ForEach/Merge/Variable 等显式控制流（当前扇出为隐式自动，已覆盖主链路）。
+
+---
+
+### M8 — 素材节点解耦 + 首尾帧（2026-06-17）
+
+调研了 ComfyUI（子图/IP-Adapter 素材节点）、TwitCanva（多参考槽 / Previous-Scene 衔接）、InvokeAI/Krea（参数暴露/App Mode）、Natron（时间线关键帧）、WAN FLF2V / Kling 起止帧等开源方案后，针对两个痛点重构：
+
+**痛点①「角色/场景只能走固定链路」** → **独立素材节点 + 放宽连接**
+- 新增 **「人物」「场景」输入节点**（`character`/`scene`）：可独立创建、填名称/外貌/描述/英文提示词，输出标准 json（`{characters:[...]}` / `{scenes:[...]}`），由 `executor.resolveOutput` 即时派生（无需运行）。
+- 可**直连**下游：人物 → 角色三视图 / 关键帧（chars 口）；场景 → 场景概念图。星型复用，不再依赖「分镜→角色设定」唯一链路。
+- `prompts.collectJsonArray`：char-image / scene-image **合并所有连入的同类素材**（多个人物节点 + 角色设定一起扇出）。
+- keyframe 的 `shot` 端口放宽为 `any`（接 storyboard JSON 或自由文本），新增可选 `chars` 输入注入人物外貌 + 按角色名匹配参考图。
+
+**痛点②「只生成首图、无尾帧」** → **i2v 首尾帧**
+- `VideoGenRequest` 新增 `lastImageUrl`；fal / custom-http 适配器透传 `tail_image_url`（对齐 WAN FLF2V / Kling 起止帧；不支持的模型忽略）。
+- i2v 节点新增可选 **「尾帧」输入**；按首帧逐帧 index 配对（单尾帧则对所有片段复用）。连尾帧即首尾帧约束补间，运镜/变化更可控。
+
+**验收**：`tsc` 通过、`build` 通过、`mulby pack` 出包；专项审查确认字段映射/合并/配对/类型校验均正确。
+
+> 留待后续（调研发现、未实现）：多参考槽权重、IP-Adapter/角色 LoRA 一致性、角色/场景资产库与版本管理、App/参数暴露模式、Node Agent 自动规划、时间线关键帧动画、摄像机/灯光参数节点、跨镜尾帧→首帧自动衔接轨道。

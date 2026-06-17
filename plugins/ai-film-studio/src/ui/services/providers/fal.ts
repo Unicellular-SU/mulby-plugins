@@ -23,6 +23,8 @@ export const falAdapter: VideoProviderAdapter = {
     if (!apiKey) throw new Error('未配置 fal API Key')
     const body: Record<string, unknown> = { prompt: req.prompt }
     if (req.imageUrl) body.image_url = req.imageUrl
+    // 尾帧（first-last-frame）：fal 上 Kling/WAN 等以 tail_image_url 接收；不支持的模型会忽略
+    if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl
     if (req.duration) body.duration = String(req.duration)
     const res = await httpJson({ url: submitUrl(cfg), method: 'POST', headers: authHeaders(apiKey), body })
     const taskId = firstString(res, ['request_id', 'requestId', 'id'])
