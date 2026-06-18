@@ -3,9 +3,39 @@ import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Lock, LockOpen, Loader2 } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue } from '../../store/graphStore'
+import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
 
 const ROW_H = 24
 const TOP_PAD = 8
+const TILE = 76
+
+/** 单缩略图：经 useMediaUrl 解析 ref→URL（附件 blob:/本地 file:///远程透传） */
+function MediaThumb({ refv, type }: { refv: MediaRef; type: 'image' | 'video' }) {
+  const url = useMediaUrl(refv)
+  if (!url) return null
+  return type === 'video' ? (
+    <video src={url} muted loop playsInline preload="metadata" />
+  ) : (
+    <img src={url} alt="" draggable={false} />
+  )
+}
+
+/** 网格 tile：useInView 惰性挂载（离屏不解析 blob、不挂 <img>/<video>） */
+function NodeTile({ refv, type }: { refv: MediaRef; type: 'image' | 'video' }) {
+  const [ref, inView] = useInView<HTMLDivElement>('300px')
+  const url = useMediaUrl(inView ? refv : null)
+  return (
+    <div className="afs-node__tile" ref={ref} style={{ width: TILE, height: TILE }}>
+      {url ? (
+        type === 'video' ? (
+          <video src={url} muted loop playsInline preload="metadata" />
+        ) : (
+          <img src={url} alt="" draggable={false} />
+        )
+      ) : null}
+    </div>
+  )
+}
 
 function truncate(s: string, n: number): string {
   const t = s.trim()
@@ -44,30 +74,30 @@ function outputSummary(data: FilmNodeData): string {
   return ''
 }
 
-function firstMedia(data: FilmNodeData): { type: 'image' | 'video'; url: string; count: number } | null {
+function firstMedia(data: FilmNodeData): { type: 'image' | 'video'; ref: PortValue; count: number } | null {
   const outs = data.outputs
   if (!outs) return null
   for (const v of Object.values(outs)) {
     if (!v) continue
     const list = v.items && v.items.length ? v.items : [v]
-    const head = list.find((x) => (x.type === 'image' || x.type === 'video') && x.url)
-    if (head && head.url && (head.type === 'image' || head.type === 'video')) {
-      return { type: head.type, url: head.url, count: list.filter((x) => x.url).length }
+    const head = list.find((x) => (x.type === 'image' || x.type === 'video') && hasMedia(x))
+    if (head && (head.type === 'image' || head.type === 'video')) {
+      return { type: head.type, ref: head, count: list.filter((x) => hasMedia(x)).length }
     }
   }
   return null
 }
 
 /** 全部图像/视频产物（用于在画布上铺成网格，生成一张展示一张） */
-function mediaTiles(data: FilmNodeData): { type: 'image' | 'video'; url: string }[] {
+function mediaTiles(data: FilmNodeData): { type: 'image' | 'video'; ref: PortValue }[] {
   const outs = data.outputs
   if (!outs) return []
   for (const v of Object.values(outs)) {
     if (!v) continue
     const list = v.items && v.items.length ? v.items : [v]
     const got = list
-      .filter((x) => (x.type === 'image' || x.type === 'video') && x.url)
-      .map((x) => ({ type: x.type as 'image' | 'video', url: x.url as string }))
+      .filter((x) => (x.type === 'image' || x.type === 'video') && hasMedia(x))
+      .map((x) => ({ type: x.type as 'image' | 'video', ref: x }))
     if (got.length) return got
   }
   return []
@@ -149,7 +179,6 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const showGrid = !previewImg && gridCount > 1
   const pending = Math.max(0, genTotal - tiles.length)
   const cols = Math.min(4, Math.max(1, gridCount))
-  const TILE = 76
   const gridWidth = cols * (TILE + 4) + 12
   // 文本节点：把剧本/分镜/角色/大纲格式化成画布卡片（实时增长）
   const card = useMemo(
@@ -262,13 +291,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
           style={{ gridTemplateColumns: `repeat(${cols}, ${TILE}px)` }}
         >
           {tiles.map((t, i) => (
-            <div className="afs-node__tile" key={`t${i}`} style={{ width: TILE, height: TILE }}>
-              {t.type === 'video' ? (
-                <video src={t.url} muted loop playsInline preload="metadata" />
-              ) : (
-                <img src={t.url} alt="" draggable={false} />
-              )}
-            </div>
+            <NodeTile key={`t${i}`} refv={t.ref} type={t.type} />
           ))}
           {Array.from({ length: pending }).map((_, i) => (
             <div className="afs-node__tile afs-node__tile--pending" key={`p${i}`} style={{ width: TILE, height: TILE }}>
@@ -301,11 +324,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
       ) : (
         media && (
           <div className="afs-node__thumb">
-            {media.type === 'video' ? (
-              <video src={media.url} muted loop playsInline preload="metadata" />
-            ) : (
-              <img src={media.url} alt="" draggable={false} />
-            )}
+            <MediaThumb refv={media.ref} type={media.type} />
             {media.count > 1 ? <span className="afs-node__thumb-badge">×{media.count}</span> : null}
           </div>
         )

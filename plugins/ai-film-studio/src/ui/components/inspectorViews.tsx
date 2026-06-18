@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FolderOpen, ChevronRight, ChevronDown, X, Pencil, Wand2, Loader2 } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
 import { basename } from '../services/download'
+import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../services/mediaUrl'
 
 function openFolder(p?: string) {
   if (p) window.mulby?.shell?.showItemInFolder?.(p)
@@ -137,16 +138,22 @@ export function JsonView({ json }: { json: unknown }) {
 // ============ 媒体画廊 ============
 function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
   const name = typeof v.meta?.name === 'string' ? v.meta.name : typeof v.meta?.shot === 'string' ? v.meta.shot : ''
+  const [inViewRef, inView] = useInView<HTMLDivElement>('400px')
+  // 视频惰性挂载（离屏不解析 blob/不挂 <video>）；图/音频随挂随解析
+  const lazy = v.type === 'video'
+  const url = useMediaUrl(!lazy || inView ? v : null)
   return (
-    <div className="afs-tile">
-      {v.type === 'video' ? (
-        <video className="afs-tile__media" src={v.url} controls preload="metadata" />
+    <div className="afs-tile" ref={inViewRef}>
+      {!url ? (
+        <div className="afs-tile__media" />
+      ) : v.type === 'video' ? (
+        <video className="afs-tile__media" src={url} controls preload="metadata" />
       ) : v.type === 'audio' ? (
-        <audio className="afs-tile__audio" src={v.url} controls />
+        <audio className="afs-tile__audio" src={url} controls />
       ) : (
         <img
           className={`afs-tile__media${onClick ? ' afs-tile__media--click' : ''}`}
-          src={v.url}
+          src={url}
           alt={name}
           onClick={onClick}
           title={onClick ? '点击查看大图 / 对话修改' : undefined}
@@ -174,18 +181,19 @@ function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
 
 // 大图灯箱 + 对话改图 + 重新生成（操作期间保持打开并显示 loading，完成后大图自动刷新）
 function Lightbox({
-  url,
+  refv,
   onClose,
   onEdit,
   onRegen,
 }: {
-  url?: string
+  refv?: MediaRef | null
   onClose: () => void
   onEdit?: (prompt: string) => Promise<void>
   onRegen?: () => Promise<void>
 }) {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const url = useMediaUrl(refv) // 大图经 useMediaUrl 解析（附件 blob:），preload 充分
   if (!url) return null
   const doEdit = async () => {
     if (!prompt.trim() || !onEdit || busy) return
@@ -333,8 +341,8 @@ export function OutputView({
 
   const rawItems = value.items && value.items.length ? value.items : null
   const mediaList: PortValue[] | null = rawItems
-    ? rawItems.filter((it) => !!it.url)
-    : (value.type === 'image' || value.type === 'video' || value.type === 'audio') && value.url
+    ? rawItems.filter((it) => hasMedia(it))
+    : (value.type === 'image' || value.type === 'video' || value.type === 'audio') && hasMedia(value)
       ? [value]
       : null
 
@@ -355,7 +363,7 @@ export function OutputView({
         </div>
         {lightbox != null && mediaList[lightbox] ? (
           <Lightbox
-            url={mediaList[lightbox].url}
+            refv={mediaList[lightbox]}
             onClose={() => setLightbox(null)}
             onEdit={isImage && onEditImage ? (prompt) => onEditImage(lightbox, prompt) : undefined}
             onRegen={isImage && onRegenImage ? () => onRegenImage(lightbox) : undefined}
@@ -367,14 +375,20 @@ export function OutputView({
   return <div className="afs-inspector__note">（无内容）</div>
 }
 
+/** 输入区缩略图：经 useMediaUrl 解析（去 hydration 后输入项可能只有 assetId） */
+function InThumb({ refv }: { refv: MediaRef }) {
+  const url = useMediaUrl(refv)
+  return url ? <img className="afs-inthumb" src={url} alt="" /> : <span className="afs-inthumb afs-inthumb--ph" />
+}
+
 // 输入端口的紧凑摘要（输入区用）
 export function InputSummary({ value }: { value: PortValue }) {
   if (value.items && value.items.length) {
     const first = value.items[0]
-    if (first?.type === 'image' && first.url) {
+    if (first?.type === 'image' && hasMedia(first)) {
       return (
         <span className="afs-inmini">
-          <img className="afs-inthumb" src={first.url} alt="" /> ×{value.items.length}
+          <InThumb refv={first} /> ×{value.items.length}
         </span>
       )
     }
@@ -387,7 +401,7 @@ export function InputSummary({ value }: { value: PortValue }) {
     if (Array.isArray(j.characters)) return <span className="afs-inmini">角色 · {j.characters.length} 个</span>
     return <span className="afs-inmini">JSON</span>
   }
-  if (value.type === 'image' && value.url) return <img className="afs-inthumb" src={value.url} alt="" />
+  if (value.type === 'image' && hasMedia(value)) return <InThumb refv={value} />
   if (value.type === 'video') return <span className="afs-inmini">视频</span>
   if (value.type === 'audio') return <span className="afs-inmini">音频</span>
   if (value.text) return <span className="afs-inmini">{value.text.slice(0, 40)}</span>

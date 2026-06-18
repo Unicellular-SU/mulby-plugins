@@ -17,6 +17,14 @@ export interface MediaRef {
   url?: string
 }
 
+/**
+ * 是否有可显示媒体：url(含瞬时 data:/blob:) / assetId / localPath 任一即可。
+ * 去 hydration 后渲染门不能只看 url（已存工程只有 assetId），否则空白——全站统一用此谓词。
+ */
+export function hasMedia(x: { url?: string; assetId?: string; localPath?: string }): boolean {
+  return !!(x.url || x.assetId || x.localPath)
+}
+
 function initialUrl(ref?: MediaRef | null): string {
   if (!ref) return ''
   if (ref.localPath) return toFileUrl(ref.localPath)
