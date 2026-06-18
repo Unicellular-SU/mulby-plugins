@@ -44,6 +44,24 @@ export default function GlobalSettings() {
             onChange={(e) => setGlobals({ style: e.target.value })}
           />
         </div>
+
+        <div className="afs-field">
+          <label className="afs-field__label">并发上限</label>
+          <select
+            className="afs-field__input"
+            value={String(globals.concurrency ?? 3)}
+            onChange={(e) => setGlobals({ concurrency: Number(e.target.value) })}
+          >
+            {[1, 2, 3, 4, 6, 8].map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? '1（顺序执行）' : `${n} 路并发`}
+              </option>
+            ))}
+          </select>
+          <div className="afs-modal__hint" style={{ marginTop: 4 }}>
+            单节点扇出时（N 个关键帧 / 角色图 / 视频片段）同时生成的最大数量。视频/图像越多越快，但过大可能触发供应商限流，按 API 额度调整。
+          </div>
+        </div>
       </div>
     </div>
   )

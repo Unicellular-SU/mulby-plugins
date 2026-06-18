@@ -1,5 +1,7 @@
 import {
   Image as ImageIcon,
+  ListTree,
+  Box,
   Video,
   PenLine,
   Users,
@@ -131,6 +133,13 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'name', label: '角色名', control: 'text', placeholder: '如：小明' },
       { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（用于「运行此节点」文字生成三视图）' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
+      {
+        key: 'voiceId',
+        label: '音色(配音)',
+        control: 'select',
+        options: ['', 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+        default: '',
+      },
       { key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' },
     ],
   },
@@ -151,18 +160,53 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
     ],
   },
+  {
+    kind: 'prop',
+    category: 'input',
+    label: '物品',
+    desc: '道具/物品资产：「运行此节点」按文字生成干净物品图，或上传图片；输出物品身份(JSON)+参考图，按名匹配进关键帧保持跨镜一致',
+    icon: Box,
+    inputs: [],
+    outputs: [
+      { id: 'out', label: '物品', type: 'json' },
+      { id: 'image', label: '物品图', type: 'image' },
+    ],
+    params: [
+      { key: 'name', label: '物品名', control: 'text', placeholder: '如：发光的剑' },
+      { key: 'description', label: '外观/描述', control: 'textarea', placeholder: '材质、形状、颜色、特征…（用于「运行此节点」文字生成物品图）' },
+      { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
+      { key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' },
+    ],
+  },
   // 全局画风/画幅统一由顶栏 🎨「全局设定」面板（项目级）注入所有生成节点，不再用画布节点。
 
   // —— 文本 AI ——
+  {
+    kind: 'outline',
+    category: 'text',
+    label: '故事大纲',
+    desc: '把故事梳理为幕/节拍/角色弧线（Save-the-Cat / Story-Circle）',
+    icon: ListTree,
+    inputs: [{ id: 'in', label: '故事', type: 'text' }],
+    outputs: [{ id: 'out', label: '大纲', type: 'json' }],
+    params: [
+      { key: 'structure', label: '结构模板', control: 'select', options: ['Save-the-Cat', 'Story-Circle'], default: 'Save-the-Cat' },
+      { key: 'instruction', label: '附加要求', control: 'textarea', placeholder: '可选：主题/篇幅/视角…' },
+    ],
+  },
   {
     kind: 'script-gen',
     category: 'text',
     label: '剧本生成',
     desc: '把故事扩展为分场剧本（场次/对白/动作）',
     icon: PenLine,
-    inputs: [{ id: 'in', label: '故事', type: 'text' }],
+    inputs: [{ id: 'in', label: '故事/大纲', type: 'any' }],
     outputs: [{ id: 'out', label: '剧本', type: 'json' }],
-    params: [{ key: 'instruction', label: '附加要求', control: 'textarea', placeholder: '可选：风格/篇幅/视角…' }],
+    params: [
+      { key: 'targetLength', label: '成片体量', control: 'select', options: ['短片', '单集', '长片'], default: '短片' },
+      { key: 'sceneCount', label: '目标场数(0=按体量)', control: 'number', default: 0 },
+      { key: 'instruction', label: '附加要求', control: 'textarea', placeholder: '可选：风格/篇幅/视角…' },
+    ],
   },
   {
     kind: 'storyboard',
@@ -172,7 +216,10 @@ export const NODE_DEFS: NodeDef[] = [
     icon: Film,
     inputs: [{ id: 'in', label: '剧本', type: 'json' }],
     outputs: [{ id: 'out', label: '分镜', type: 'json' }],
-    params: [{ key: 'shotCount', label: '目标镜头数', control: 'number', default: 8 }],
+    params: [
+      { key: 'shotMode', label: '拆解粒度', control: 'select', options: ['每场N镜', '总量自适应'], default: '每场N镜' },
+      { key: 'shotsPerScene', label: '每场镜头数', control: 'number', default: 3 },
+    ],
   },
   {
     kind: 'char-sheet',
@@ -200,9 +247,12 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'char-image',
     category: 'image',
     label: '角色三视图',
-    desc: '由角色设定/人物批量生成统一画风的三视图（画风/画幅取顶栏全局设定）',
+    desc: '由角色设定/人物生成三视图：front 先出图（连「参考图」则按上传人物图 img2img），side/back 以 front 为参考自洽一致',
     icon: Users,
-    inputs: [{ id: 'role', label: '角色', type: 'json' }],
+    inputs: [
+      { id: 'role', label: '角色', type: 'json' },
+      { id: 'ref', label: '参考图(可选)', type: 'image' },
+    ],
     outputs: [{ id: 'out', label: '角色图', type: 'image' }],
     params: [{ key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' }],
   },
@@ -225,6 +275,7 @@ export const NODE_DEFS: NodeDef[] = [
     inputs: [
       { id: 'shot', label: '分镜/描述', type: 'any' },
       { id: 'chars', label: '人物(可选)', type: 'json' },
+      { id: 'props', label: '物品(可选)', type: 'json' },
       { id: 'ref', label: '参考图', type: 'image' },
     ],
     outputs: [{ id: 'out', label: '关键帧', type: 'image' }],
@@ -266,11 +317,19 @@ export const NODE_DEFS: NodeDef[] = [
       { id: 'frame', label: '首帧', type: 'image' },
       { id: 'tail', label: '尾帧(可选)', type: 'image' },
       { id: 'prompt', label: '提示', type: 'text' },
+      { id: 'shot', label: '分镜(可选)', type: 'json' },
     ],
     outputs: [{ id: 'out', label: '视频', type: 'video' }],
     params: [
       { key: 'duration', label: '时长(秒)', control: 'number', default: 5 },
       { key: 'motion', label: '运镜/动作', control: 'textarea', placeholder: '描述画面如何运动…' },
+      {
+        key: 'audioMode',
+        label: '音频',
+        control: 'select',
+        options: ['无声', '模型自带声', '外置合成'],
+        default: '无声',
+      },
     ],
   },
   {
@@ -279,9 +338,34 @@ export const NODE_DEFS: NodeDef[] = [
     label: '文生视频',
     desc: '由文本直接生成视频片段',
     icon: Video,
-    inputs: [{ id: 'in', label: '提示', type: 'text' }],
+    inputs: [
+      { id: 'in', label: '提示', type: 'text' },
+      { id: 'shot', label: '分镜(可选)', type: 'json' },
+    ],
     outputs: [{ id: 'out', label: '视频', type: 'video' }],
-    params: [{ key: 'duration', label: '时长(秒)', control: 'number', default: 5 }],
+    params: [
+      { key: 'duration', label: '时长(秒)', control: 'number', default: 5 },
+      {
+        key: 'audioMode',
+        label: '音频',
+        control: 'select',
+        options: ['无声', '模型自带声', '外置合成'],
+        default: '无声',
+      },
+    ],
+  },
+  {
+    kind: 'lipsync',
+    category: 'video',
+    label: '口型同步',
+    desc: '把对白音频驱动到无声视频/静帧的口型（Sync.so / Wav2Lip / Runway Act-Two；需 lipsync 能力供应商）',
+    icon: Mic,
+    inputs: [
+      { id: 'video', label: '视频/静帧', type: 'video' },
+      { id: 'audio', label: '对白音频', type: 'audio' },
+    ],
+    outputs: [{ id: 'out', label: '口型视频', type: 'video' }],
+    params: [{ key: 'providerOverride', label: '供应商(可选)', control: 'text', placeholder: '留空用默认 lipsync 供应商' }],
   },
 
   // —— 音频 ——
@@ -291,7 +375,11 @@ export const NODE_DEFS: NodeDef[] = [
     label: '配音 (TTS)',
     desc: '由文本合成旁白/配音（语音供应商在「模型供应商」面板统一配置）',
     icon: Mic,
-    inputs: [{ id: 'in', label: '文本', type: 'text' }],
+    inputs: [
+      { id: 'in', label: '文本', type: 'text' },
+      { id: 'dialogues', label: '对白(分场)', type: 'json' },
+      { id: 'chars', label: '角色(voiceId)', type: 'json' },
+    ],
     outputs: [{ id: 'out', label: '音频', type: 'audio' }],
     params: [
       { key: 'text', label: '配音文本', control: 'textarea', placeholder: '可留空，改为连接上游文本' },
@@ -313,6 +401,16 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'duration', label: '时长(秒)', control: 'number', default: 15 },
     ],
   },
+  {
+    kind: 'sfx',
+    category: 'audio',
+    label: '音效 (SFX)',
+    desc: '由分镜的 sfx/ambient 字段按镜头扇出生成音效片段，接入合成节点（复用 music-capable 供应商）',
+    icon: Music,
+    inputs: [{ id: 'shots', label: '分镜', type: 'json' }],
+    outputs: [{ id: 'out', label: '音效', type: 'audio' }],
+    params: [{ key: 'duration', label: '时长(秒)', control: 'number', default: 3 }],
+  },
 
   // —— 输出 ——
   {
@@ -329,10 +427,34 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'merge',
     category: 'output',
     label: '合并/收集',
-    desc: '把多路同类产物（视频/图/音频）收集为一组，按连入顺序合并为一个多项输出，喂给合成等下游',
+    desc: '把多路同类产物（视频/图/音频）收集为一组：顺序拼接 / 按下标配对(zip) / 按 charId·name·key 对齐(by-key)',
     icon: Combine,
     inputs: [{ id: 'in', label: '多路输入', type: 'any' }],
     outputs: [{ id: 'out', label: '合集', type: 'any' }],
+    params: [{ key: 'mode', label: '合并方式', control: 'select', options: ['concat', 'zip', 'by-key'], default: 'concat' }],
+  },
+  {
+    kind: 'foreach',
+    category: 'output',
+    label: '逐项展开',
+    desc: '把 json 数组（如 shots/scenes）或合集物化成多项 items[]，逐项喂给下游（显式扇出，不引入循环边）',
+    icon: ListTree,
+    inputs: [{ id: 'in', label: '数组/合集', type: 'any' }],
+    outputs: [{ id: 'item', label: '每项', type: 'any' }],
+    params: [{ key: 'arrayKey', label: '数组字段', control: 'text', placeholder: 'json 数组字段名，如 shots/scenes（留空=用 items[]）' }],
+  },
+  {
+    kind: 'timeline',
+    category: 'output',
+    label: '时间线',
+    desc: '把片段+分镜排成可编辑 EDL（顺序/时长/分镜关联）；直连合成节点即按此拼接（音频轨为元数据，仍走合成的音频口）',
+    icon: Layers,
+    inputs: [
+      { id: 'clips', label: '视频片段', type: 'video' },
+      { id: 'shots', label: '分镜', type: 'json' },
+      { id: 'audio', label: '配音/音乐', type: 'audio' },
+    ],
+    outputs: [{ id: 'out', label: 'EDL', type: 'any' }],
     params: [],
   },
   {
@@ -357,6 +479,7 @@ export const NODE_DEFS: NodeDef[] = [
       },
       { key: 'fps', label: '帧率', control: 'number', default: 24 },
       { key: 'subtitleMode', label: '字幕', control: 'select', options: ['关闭', '烧录字幕', '软字幕'], default: '关闭' },
+      { key: 'transition', label: '转场', control: 'select', options: ['无转场', '交叉淡化', '淡入淡出'], default: '无转场' },
     ],
   },
   {

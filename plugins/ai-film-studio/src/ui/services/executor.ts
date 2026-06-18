@@ -20,7 +20,17 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
       if (handle === 'image') return node.data.outputs?.image ?? null
       return {
         type: 'json',
-        json: { characters: [{ name: p.name ?? '', appearance: p.appearance ?? '', refPrompt: p.refPrompt ?? '' }] },
+        // P1-5(部分)：身份 JSON 带 voiceId，供 tts 逐角色配音的 voiceMap（空则下游回退 narrator）
+        json: {
+          characters: [
+            {
+              name: p.name ?? '',
+              appearance: p.appearance ?? '',
+              refPrompt: p.refPrompt ?? '',
+              ...(p.voiceId ? { voiceId: p.voiceId } : {}),
+            },
+          ],
+        },
       }
     }
     if (node.data.kind === 'scene') {
@@ -28,6 +38,14 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
       return {
         type: 'json',
         json: { scenes: [{ slug: p.name ?? '', summary: p.description ?? '', prompt: p.refPrompt ?? '' }] },
+      }
+    }
+    if (node.data.kind === 'prop') {
+      // 'image' 口取已生成/上传的物品参考图；其余口给物品身份 JSON（供 keyframe 按名匹配 + 提示注入）
+      if (handle === 'image') return node.data.outputs?.image ?? null
+      return {
+        type: 'json',
+        json: { props: [{ name: p.name ?? '', appearance: p.description ?? '', refPrompt: p.refPrompt ?? '' }] },
       }
     }
   }
@@ -51,6 +69,56 @@ export function gatherInputs(
     ;(result[handle] ||= []).push(val)
   }
   return result
+}
+
+// ============ 产物缓存：inputHash（P1-6）============
+
+/** 稳定序列化：对象键排序，保证同一逻辑输入得到同一字符串（数组保持顺序） */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null'
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`
+  const keys = Object.keys(v as Record<string, unknown>).sort()
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify((v as Record<string, unknown>)[k])}`).join(',')}}`
+}
+
+/** 非加密字符串哈希（FNV-1a 32bit，十六进制）；仅作缓存键，无需抗碰撞 */
+function hashString(s: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0).toString(16)
+}
+
+/**
+ * 上游产物指纹：只取稳定标识（assetId/localPath/非 data url、text、json、meta），
+ * 绝不哈希 base64/data url —— 它们 hydrate 后会变、stripValue 又剥离，会导致缓存永远 miss。
+ */
+function fingerprintInputs(inputs: Record<string, PortValue[]>): unknown {
+  const pick = (v: PortValue): unknown => ({
+    type: v.type,
+    id: v.assetId ?? v.localPath ?? (v.url && !v.url.startsWith('data:') ? v.url : undefined),
+    text: v.type === 'text' ? v.text : undefined,
+    json: v.type === 'json' ? v.json : undefined,
+    meta: v.meta,
+    items: v.items?.map(pick),
+  })
+  return Object.fromEntries(Object.entries(inputs).map(([k, a]) => [k, a.map(pick)]))
+}
+
+/**
+ * 计算节点的输入指纹哈希：kind + params + salt（由调用方注入全局画风/画幅 + 提示词层版本）+ 上游产物指纹。
+ * 命中（== node.data.cache.inputHash 且已有 outputs）即可跳过重跑。纯函数，不调 AI。
+ */
+export function computeInputHash(node: FilmNode, nodes: FilmNode[], edges: Edge[], salt: string): string {
+  const payload = {
+    kind: node.data.kind,
+    params: node.data.params,
+    salt,
+    upstream: fingerprintInputs(gatherInputs(node, nodes, edges)),
+  }
+  return hashString(stableStringify(payload))
 }
 
 /** Kahn 拓扑排序；存在环时把剩余节点追加到末尾，保证全部出现 */

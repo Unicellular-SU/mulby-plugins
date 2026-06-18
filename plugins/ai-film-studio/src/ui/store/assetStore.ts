@@ -24,7 +24,7 @@ import {
 const PLUGIN_ID = 'ai-film-studio'
 const KEY_ELEMENTS = 'elements:library'
 
-export type ElementKind = 'character' | 'scene'
+export type ElementKind = 'character' | 'scene' | 'prop'
 
 export interface ElementRef {
   id: string
@@ -37,6 +37,13 @@ export interface ElementRef {
   tags?: string[]
   createdAt: number
   updatedAt: number
+  // —— P1-5 身份资产（全部可选，向后兼容；charId 缺省=id，复用同一主键命名空间） ——
+  charId?: string
+  /** 多角度视图：存 assetId（非 url/base64），缺省回退 refAssetIds */
+  views?: { front?: string; side?: string; back?: string }
+  voiceId?: string
+  variants?: { id: string; label: string; assetId: string; tags?: string[] }[]
+  lora?: { provider?: string; ref: string; weight?: number }
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {

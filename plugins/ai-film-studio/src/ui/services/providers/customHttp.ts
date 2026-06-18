@@ -90,24 +90,36 @@ export const customHttpAdapter: VideoProviderAdapter = {
     // 配了 uploadUrl 时，把本地帧先上传换公开 URL（仅收 URL 的供应商如 toapis 需要）
     const imageUrl = await ensurePublicUrl(req.imageUrl, cfg, apiKey)
     const lastImageUrl = await ensurePublicUrl(req.lastImageUrl, cfg, apiKey)
+    // M18-B/P2-8：原生音频 driving / lipsync 的视频与音频，按需换公开 URL
+    const videoUrl = await ensurePublicUrl(req.videoUrl, cfg, apiKey)
+    const drivingAudioUrl = await ensurePublicUrl(req.drivingAudioUrl, cfg, apiKey)
+    // 原生音频（prompt-only 家族）：对白/SFX 拼进 prompt
+    const effPrompt = req.audioMode === 'native' && req.audioPrompt ? `${req.prompt}\n${req.audioPrompt}` : req.prompt
     let body: Record<string, unknown>
     if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
       // 声明式模板（各家 body 不同，如火山方舟 content[]、通义万相 input{}）
       body = renderBodyTemplate(cfg.bodyTemplate, {
-        prompt: req.prompt,
+        prompt: effPrompt,
         imageUrl,
         lastImageUrl,
         model: cfg.model,
         duration: req.duration,
         size: req.size,
+        videoUrl,
+        drivingAudioUrl,
+        audioMode: req.audioMode,
       })
     } else {
       // 通用默认 body（兜底）
-      body = { prompt: req.prompt }
+      body = { prompt: effPrompt }
       if (imageUrl) body.image_url = imageUrl
       if (lastImageUrl) body.tail_image_url = lastImageUrl // 尾帧（供应商不支持则忽略）
       if (req.duration) body.duration = req.duration
       if (req.size) body.size = req.size
+      if (videoUrl) body.video_url = videoUrl // P2-8 口型同步：被驱动视频
+      if (drivingAudioUrl) body.audio_url = drivingAudioUrl // driving / lipsync 音频
+      if (req.audioMode === 'native' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = true
+      else if (req.audioMode === 'external' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = false
     }
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })
     const taskId = cfg.taskIdPath

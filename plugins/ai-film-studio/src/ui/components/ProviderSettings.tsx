@@ -14,8 +14,16 @@ const CAPS: { value: MediaCapability; label: string }[] = [
   { value: 'video', label: '视频' },
   { value: 'music', label: '配乐' },
   { value: 'tts', label: '语音' },
+  { value: 'nativeAudio', label: '原生音频' },
+  { value: 'lipsync', label: '口型同步' },
 ]
-const CAP_LABEL: Record<MediaCapability, string> = { video: '视频', music: '配乐', tts: '语音' }
+const CAP_LABEL: Record<MediaCapability, string> = {
+  video: '视频',
+  music: '配乐',
+  tts: '语音',
+  nativeAudio: '原生音频',
+  lipsync: '口型同步',
+}
 
 // 模式由能力推导：仅语音 → 同步二进制；其余（视频/音乐）→ 异步轮询
 function deriveMode(caps: MediaCapability[]): MediaProviderConfig['mode'] {

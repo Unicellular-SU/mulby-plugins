@@ -12,16 +12,30 @@
 
 export type SubtitleMode = 'off' | 'soft' | 'burn'
 
+// M18-D：成片音轨。dialogue 为 key（不被压），music/sfx 被对白侧链 duck。
+export interface AudioTrack {
+  path: string
+  role: 'dialogue' | 'music' | 'sfx'
+}
+
+export type FilmTransition = 'none' | 'xfade' | 'fade'
+
 export interface ComposeOptions {
   clips: string[] // 本地片段路径（按时间线顺序）
   outPath: string
   width: number
   height: number
   fps: number
-  audioPath?: string // 可选：配音/音乐
+  audioPath?: string // 兼容：单条配音/音乐（等价 audioTracks=[{path,role:'music'}]）
+  audioTracks?: AudioTrack[] // M18-D：多轨（对白 + BGM + SFX）
+  ducking?: boolean // M18-D：对白存在时用 sidechaincompress 压低 BGM/SFX（默认 true）
   srtPath?: string // 可选：字幕文件
   subtitleMode: SubtitleMode
   totalSec?: number // 可选：预计成片总时长（用于进度估算）
+  // P2-10 转场：none=硬切（默认）；xfade=镜间交叉淡化（需各片段时长 clipDurations）；fade=整片淡入淡出
+  transition?: FilmTransition
+  transitionDur?: number // 转场时长（秒），默认 0.5；会被钳制到小于最短片段
+  clipDurations?: number[] // 与 clips 对齐的时长（xfade 计算 offset 必需）
   onProgress?: (info: { percent?: number; text: string }) => void
 }
 
@@ -94,25 +108,32 @@ function escapeSubPath(p: string): string {
   return s
 }
 
+/** P2-10：把转场时长钳制到合理范围（0.2s ~ 最短片段的 40%），避免 xfade offset 为负 */
+export function clampTransitionDur(transitionDur: number | undefined, clipDurations?: number[] | null): number {
+  const minDur = clipDurations && clipDurations.length ? Math.min(...clipDurations) : 5
+  return Math.max(0.2, Math.min(transitionDur ?? 0.5, minDur * 0.4))
+}
+
 /** 构造拼接命令参数 */
 export function buildConcatArgs(o: ComposeOptions): string[] {
-  const { clips, outPath, width, height, fps, audioPath, srtPath, subtitleMode } = o
+  const { clips, outPath, width, height, fps, srtPath, subtitleMode } = o
+  // 归一音轨来源：优先多轨 audioTracks，否则兼容单条 audioPath（视为 music）
+  const tracks: AudioTrack[] =
+    o.audioTracks && o.audioTracks.length ? o.audioTracks : o.audioPath ? [{ path: o.audioPath, role: 'music' }] : []
+  const ducking = o.ducking !== false // 默认开启
+
   const args: string[] = []
   for (const c of clips) args.push('-i', c)
-
-  let audioIdx = -1
-  let srtIdx = -1
-  if (audioPath) {
-    args.push('-i', audioPath)
-    audioIdx = clips.length
-  }
+  // 音轨各占一个输入；下标 = clips.length + 轨序
+  for (const t of tracks) args.push('-i', t.path)
   const softSub = subtitleMode === 'soft' && !!srtPath
+  let srtIdx = -1
   if (softSub) {
     args.push('-i', srtPath as string)
-    srtIdx = clips.length + (audioPath ? 1 : 0)
+    srtIdx = clips.length + tracks.length
   }
 
-  // 视频归一化 + 拼接
+  // 视频归一化 + 拼接（音频另行分层混音，故 concat a=0）
   const parts: string[] = []
   const labels: string[] = []
   for (let i = 0; i < clips.length; i++) {
@@ -122,31 +143,91 @@ export function buildConcatArgs(o: ComposeOptions): string[] {
     )
     labels.push(`[v${i}]`)
   }
-  // 单片段不能用 concat（ffmpeg 要求 n>=2），仅做归一化；多片段才 concat
+  // P2-10 转场：none=concat 硬切；xfade=镜间交叉淡化级联；fade=整片淡入淡出
+  const transition: FilmTransition = o.transition ?? 'none'
+  const durs = o.clipDurations && o.clipDurations.length === clips.length ? o.clipDurations : null
+  const d = clampTransitionDur(o.transitionDur, durs)
   let filter: string
   let vmap: string
   if (clips.length === 1) {
     filter = parts[0]
     vmap = labels[0]
+  } else if (transition === 'xfade' && durs) {
+    // xfade 级联：offset = 前序交叠后净长 - d；总长 = Σdur - (N-1)*d
+    const xparts: string[] = []
+    let prev = labels[0]
+    let cum = durs[0]
+    for (let i = 1; i < clips.length; i++) {
+      const off = Math.max(0, cum - d)
+      const out = i === clips.length - 1 ? '[vx]' : `[xf${i}]`
+      xparts.push(`${prev}${labels[i]}xfade=transition=fade:duration=${d.toFixed(3)}:offset=${off.toFixed(3)}${out}`)
+      cum = cum + durs[i] - d
+      prev = out
+    }
+    filter = `${parts.join(';')};${xparts.join(';')}`
+    vmap = '[vx]'
   } else {
     filter = `${parts.join(';')};${labels.join('')}concat=n=${clips.length}:v=1:a=0[vcat]`
     vmap = '[vcat]'
+  }
+  // 整片淡入淡出（fade 模式）：在拼好的视频上淡入/淡出黑场
+  if (transition === 'fade') {
+    const total = durs ? durs.reduce((a, b) => a + b, 0) : o.totalSec || 0
+    if (total > 2 * d) {
+      filter += `;${vmap}fade=t=in:st=0:d=${d.toFixed(3)},fade=t=out:st=${(total - d).toFixed(3)}:d=${d.toFixed(3)}[vfade]`
+      vmap = '[vfade]'
+    }
   }
   if (subtitleMode === 'burn' && srtPath) {
     filter += `;${vmap}subtitles='${escapeSubPath(srtPath)}'[vout]`
     vmap = '[vout]'
   }
-  // 配音补静音到与视频等长（-shortest 截到视频结束）
-  if (audioIdx >= 0) {
-    filter += `;[${audioIdx}:a]apad[aout]`
+
+  // M18-D：多轨音频 —— 对白(dialogue)顺序拼成总线(key)，music/sfx 混成被压总线，
+  // 二者并存时用 sidechaincompress 以对白侧链压低 BGM；最后 apad 到视频长（配 -shortest）。
+  const dlgIdxs: number[] = []
+  const musIdxs: number[] = []
+  tracks.forEach((t, i) => {
+    const idx = clips.length + i
+    if (t.role === 'dialogue') dlgIdxs.push(idx)
+    else musIdxs.push(idx)
+  })
+  const aFilters: string[] = []
+  if (dlgIdxs.length) {
+    // 对白逐行按序拼接（无重叠），形成连续对白轨
+    if (dlgIdxs.length === 1) aFilters.push(`[${dlgIdxs[0]}:a]aresample=async=1[dlg]`)
+    else aFilters.push(`${dlgIdxs.map((i) => `[${i}:a]`).join('')}concat=n=${dlgIdxs.length}:v=0:a=1[dlg]`)
   }
+  if (musIdxs.length) {
+    if (musIdxs.length === 1) aFilters.push(`[${musIdxs[0]}:a]aresample=async=1[mus]`)
+    else aFilters.push(`${musIdxs.map((i) => `[${i}:a]`).join('')}amix=inputs=${musIdxs.length}:duration=longest[mus]`)
+  }
+  let amap = ''
+  if (dlgIdxs.length && musIdxs.length) {
+    if (ducking) {
+      aFilters.push(`[dlg]asplit=2[dlgkey][dlgsc]`)
+      aFilters.push(`[mus][dlgsc]sidechaincompress=threshold=0.03:ratio=4:attack=200:release=1000[musd]`)
+      aFilters.push(`[dlgkey][musd]amix=inputs=2:duration=first:dropout_transition=0[amix]`)
+    } else {
+      aFilters.push(`[dlg][mus]amix=inputs=2:duration=first:dropout_transition=0[amix]`)
+    }
+    aFilters.push(`[amix]apad[aout]`)
+    amap = '[aout]'
+  } else if (dlgIdxs.length) {
+    aFilters.push(`[dlg]apad[aout]`)
+    amap = '[aout]'
+  } else if (musIdxs.length) {
+    aFilters.push(`[mus]apad[aout]`)
+    amap = '[aout]'
+  }
+  if (aFilters.length) filter += `;${aFilters.join(';')}`
 
   args.push('-filter_complex', filter, '-map', vmap)
-  if (audioIdx >= 0) args.push('-map', '[aout]')
+  if (amap) args.push('-map', amap)
   if (softSub) args.push('-map', `${srtIdx}:0`, '-c:s', 'mov_text')
 
   args.push('-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-r', String(fps))
-  if (audioIdx >= 0) args.push('-c:a', 'aac', '-b:a', '192k', '-shortest')
+  if (amap) args.push('-c:a', 'aac', '-b:a', '192k', '-shortest')
   args.push('-movflags', '+faststart', '-y', outPath)
   return args
 }
@@ -193,6 +274,27 @@ function parseTime(t: string): number | null {
   const m = /(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(t)
   if (!m) return null
   return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+}
+
+/**
+ * 读取本地视频的真实时长（秒）。宿主只暴露 ffmpeg.run（无独立 ffprobe），
+ * 故用 `-f null -` 解码一遍，取进度回调里最后一次 time≈总时长。失败返回 undefined。
+ * 调用方需自行保证 ffmpeg 已就绪（compose 路径已 ensureFfmpeg；其余处先 ffmpegAvailable 再调）。
+ */
+export async function probeDuration(localPath: string): Promise<number | undefined> {
+  try {
+    let dur: number | undefined
+    const task = ff().run(['-i', localPath, '-f', 'null', '-'], (p) => {
+      if (p.time) {
+        const s = parseTime(p.time)
+        if (s != null) dur = s
+      }
+    }) as FfmpegTaskLike
+    await task.promise.catch(() => {})
+    return dur
+  } catch {
+    return undefined
+  }
 }
 
 /** 解析 "1280x720" → [w,h] */

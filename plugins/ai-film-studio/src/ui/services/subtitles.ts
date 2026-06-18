@@ -6,6 +6,7 @@
 
 export interface SrtClip {
   duration: number
+  shotId?: string // P1-2：clip 对应的分镜 id（来自 i2v 产物 meta.shot）；用于按键匹配字幕，缺失回退下标
 }
 
 function pad(n: number, len = 2): string {
@@ -53,6 +54,12 @@ function extractShots(subsJson: unknown): Array<Record<string, unknown>> {
 export function buildSrt(clips: SrtClip[], subsJson: unknown): string {
   const shots = extractShots(subsJson)
   if (shots.length === 0) return ''
+  // P1-2：按 shot.id 建索引，clip 带 shotId 时键匹配（任一镜失败/重排都不错位），否则回退下标
+  const byId = new Map<string, Record<string, unknown>>()
+  for (const s of shots) {
+    const sid = s.id != null ? String(s.id) : ''
+    if (sid) byId.set(sid, s)
+  }
   let t = 0
   let idx = 1
   const lines: string[] = []
@@ -61,7 +68,9 @@ export function buildSrt(clips: SrtClip[], subsJson: unknown): string {
     const start = t
     const end = t + dur
     t = end
-    const text = shotText(shots[i])
+    const sid = clips[i].shotId
+    const shot = (sid != null && byId.get(String(sid))) || shots[i]
+    const text = shotText(shot)
     if (!text) continue
     lines.push(String(idx++))
     lines.push(`${fmtTime(start)} --> ${fmtTime(end)}`)

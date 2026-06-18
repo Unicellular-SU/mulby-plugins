@@ -24,6 +24,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 let aborted = false
+let activeRuns = 0 // 并发运行中的 runVideo 数量；用于让"首个任务才重置中断标志"，并发取消才正确
 export function abortVideo() {
   aborted = true
 }
@@ -37,29 +38,34 @@ export interface VideoEngineOptions {
 }
 
 export async function runVideo(opts: VideoEngineOptions): Promise<{ url: string }> {
-  aborted = false
+  // 并发安全：只有"首个"进行中的任务才把中断标志复位，避免后续并发任务清掉别人的取消请求
+  if (activeRuns === 0) aborted = false
+  activeRuns++
   const adapter = getAdapter(opts.cfg.kind)
   const timeout = opts.timeoutMs ?? 300000
+  try {
+    opts.onProgress?.({ status: 'submitting' })
+    const handle = await adapter.submit(opts.req, opts.cfg, opts.apiKey)
 
-  opts.onProgress?.({ status: 'submitting' })
-  const handle = await adapter.submit(opts.req, opts.cfg, opts.apiKey)
+    const start = Date.now()
+    let delay = 2000
+    for (;;) {
+      if (aborted) throw new Error('已取消')
+      await sleep(delay)
+      if (aborted) throw new Error('已取消')
 
-  const start = Date.now()
-  let delay = 2000
-  for (;;) {
-    if (aborted) throw new Error('已取消')
-    await sleep(delay)
-    if (aborted) throw new Error('已取消')
+      const r = await adapter.poll(handle, opts.cfg, opts.apiKey)
+      opts.onProgress?.({ status: r.status, progress: r.progress })
 
-    const r = await adapter.poll(handle, opts.cfg, opts.apiKey)
-    opts.onProgress?.({ status: r.status, progress: r.progress })
-
-    if (r.status === 'completed') {
-      if (!r.videoUrl) throw new Error('未返回视频地址')
-      return { url: r.videoUrl }
+      if (r.status === 'completed') {
+        if (!r.videoUrl) throw new Error('未返回视频地址')
+        return { url: r.videoUrl }
+      }
+      if (r.status === 'failed') throw new Error(r.error || '视频生成失败')
+      if (Date.now() - start > timeout) throw new Error('视频生成超时')
+      delay = Math.min(Math.round(delay * 1.2), 5000)
     }
-    if (r.status === 'failed') throw new Error(r.error || '视频生成失败')
-    if (Date.now() - start > timeout) throw new Error('视频生成超时')
-    delay = Math.min(Math.round(delay * 1.2), 5000)
+  } finally {
+    activeRuns--
   }
 }

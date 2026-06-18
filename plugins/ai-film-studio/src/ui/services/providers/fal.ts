@@ -26,6 +26,22 @@ export const falAdapter: VideoProviderAdapter = {
     // 尾帧（first-last-frame）：fal 上 Kling/WAN 等以 tail_image_url 接收；不支持的模型会忽略
     if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl
     if (req.duration) body.duration = String(req.duration)
+    // M18-B 双轨音频：native=对白/SFX 拼进 prompt + 置开关字段 true；external=显式关原生音频省成本
+    if (req.audioMode === 'native') {
+      if (req.audioPrompt) body.prompt = `${req.prompt}\n${req.audioPrompt}`
+      const tf = cfg.audio?.toggleField
+      if (tf) body[tf] = true
+      if (cfg.audio?.acceptsDrivingAudio && cfg.audio.drivingAudioField && req.drivingAudioUrl) {
+        body[cfg.audio.drivingAudioField] = req.drivingAudioUrl
+      }
+    } else if (req.audioMode === 'external' && cfg.audio?.toggleField) {
+      body[cfg.audio.toggleField] = false
+    }
+    // P2-8 口型同步：被驱动视频 + 对白音频
+    if (req.videoUrl) {
+      body.video_url = req.videoUrl
+      if (req.drivingAudioUrl) body.audio_url = req.drivingAudioUrl
+    }
     const res = await httpJson({ url: submitUrl(cfg), method: 'POST', headers: authHeaders(apiKey), body })
     const taskId = firstString(res, ['request_id', 'requestId', 'id'])
     const statusUrl = firstString(res, ['status_url', 'statusUrl'])

@@ -7,8 +7,25 @@
  */
 
 export type VideoProviderKind = 'fal' | 'custom-http'
-export type MediaCapability = 'video' | 'music' | 'tts'
+export type MediaCapability =
+  | 'video'
+  | 'music'
+  | 'tts'
+  | 'nativeAudio' // 视频生成同一前向产出对白/SFX/ambient（Veo3 / Sora2 / Kling Omni / …）
+  | 'lipsync' // 把外置音频驱动到既有视频（Sync.so / Wav2Lip / Runway Act-Two）
 export type MediaMode = 'async-poll' | 'sync-binary'
+
+// 供应商音频能力描述符（全部可选；旧数据缺省=纯无声视频，安全）
+export interface ProviderAudioControl {
+  // 开关字段名：'generate_audio'(fal veo) / 'audio'(kling) / '' 表示 prompt-only（官方 Veo/Sora 无开关）
+  toggleField?: string
+  drivingAudioField?: string // driving-audio 家族：把外置音频 URL 喂入的字段（Wan input.audio_url 等）
+  acceptsDrivingAudio?: boolean
+  supportsMultiSpeaker?: boolean // 是否支持多角色对白（prompt 内 speaker 标注）
+  supportedLangs?: string[] // 口型同步语种
+  maxDurationSec?: number // 原生音频段上限（Veo 8s / Kling 15s）
+  costMultiplier?: number // 带声相对无声的费用倍率
+}
 
 export interface MediaProviderConfig {
   id: string
@@ -38,6 +55,8 @@ export interface MediaProviderConfig {
   uploadUrlPath?: string
   // TTS（sync-binary）默认音色（节点可覆盖）
   voices?: string[]
+  // 音频能力描述符（nativeAudio/lipsync 供应商用；缺省=纯无声视频）
+  audio?: ProviderAudioControl
   enabled: boolean
 }
 
@@ -50,6 +69,12 @@ export interface VideoGenRequest {
   lastImageUrl?: string // 尾帧（first-last-frame，如 WAN FLF2V / Kling 起止帧）
   duration?: number
   size?: string
+  // 双轨音频（M18-B，全可选）
+  audioMode?: 'native' | 'external' | 'silent' // native=模型自带声；external=无声生成留待外置合成；silent=纯无声
+  audioPrompt?: string // 拼好的对白/SFX/ambient 文本（prompt-only 家族用）
+  dialogue?: { speaker: string; line: string; emotion?: string }[] // 结构化对白（带 speaker 标注的家族用）
+  drivingAudioUrl?: string // driving-audio 家族（Wan/Seedance）/ lipsync：把音频 URL 喂入
+  videoUrl?: string // P2-8 lipsync：被驱动的视频/静帧 URL
 }
 
 export type VideoStatus = 'queued' | 'running' | 'completed' | 'failed'

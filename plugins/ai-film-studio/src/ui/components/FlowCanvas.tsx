@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import {
   ReactFlow,
   Background,
@@ -10,6 +10,7 @@ import {
   type Edge,
   type Node,
   type NodeMouseHandler,
+  type Viewport,
 } from '@xyflow/react'
 import FilmNode from './nodes/FilmNode'
 import { DND_MIME, DND_ASSET, DND_ELEMENT, DND_SNIPPET } from './NodeLibrary'
@@ -34,6 +35,25 @@ export default function FlowCanvas() {
   const maskColor = theme === 'light' ? 'rgba(226,232,240,0.65)' : 'rgba(11,15,23,0.7)'
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
+  const viewport = useGraphStore((s) => s.viewport)
+  // P2-13：视口变更持久化（防抖落盘在 store.setViewport 内）
+  const onMoveEnd = useCallback((_: unknown, vp: Viewport) => {
+    useGraphStore.getState().setViewport(vp)
+  }, [])
+  // P2-13：Cmd/Ctrl+D 复制选中节点（在输入框内不拦截）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'd' || e.key === 'D')) {
+        const el = document.activeElement
+        const tag = el?.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || (el as HTMLElement | null)?.isContentEditable) return
+        e.preventDefault()
+        useGraphStore.getState().duplicateSelected()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const onNodesChange = useGraphStore((s) => s.onNodesChange)
   const onEdgesChange = useGraphStore((s) => s.onEdgesChange)
   const onConnect = useGraphStore((s) => s.onConnect)
@@ -96,8 +116,12 @@ export default function FlowCanvas() {
         onConnect={onConnect}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onMoveEnd={onMoveEnd}
         isValidConnection={validate}
-        fitView
+        fitView={!viewport}
+        defaultViewport={viewport ?? undefined}
+        snapToGrid
+        snapGrid={[16, 16]}
         minZoom={0.2}
         maxZoom={2}
         defaultEdgeOptions={{ type: 'default' }}

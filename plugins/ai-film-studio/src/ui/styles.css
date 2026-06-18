@@ -943,6 +943,120 @@ body {
   color: #93c5fd;
 }
 
+/* ============ 扇出实时网格（生成一张铺一张，在画布上展开） ============ */
+.afs-node__grid {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-top: 1px solid var(--afs-border);
+  justify-content: center;
+}
+.afs-node__tile {
+  position: relative;
+  overflow: hidden;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.afs-node__tile img,
+.afs-node__tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.afs-node__tile--pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--afs-border);
+  color: #93c5fd;
+  animation: afs-pulse 1.3s ease-in-out infinite;
+}
+.afs-spin {
+  animation: afs-spin 0.9s linear infinite;
+  opacity: 0.8;
+}
+@keyframes afs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes afs-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* ============ 文本数据卡片（剧本/分镜/角色/大纲 在画布上格式化展开） ============ */
+.afs-node__data {
+  border-top: 1px solid var(--afs-border);
+}
+.afs-node__data-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #93c5fd;
+  background: rgba(96, 165, 250, 0.08);
+}
+.afs-node__data-list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 6px 6px;
+}
+.afs-node__data-list::-webkit-scrollbar {
+  width: 6px;
+}
+.afs-node__data-list::-webkit-scrollbar-thumb {
+  background: var(--afs-border);
+  border-radius: 3px;
+}
+.afs-data-row {
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.afs-data-row:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+.afs-data-row + .afs-data-row {
+  margin-top: 3px;
+}
+.afs-data-row__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.afs-data-row__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--afs-text);
+  margin-right: 2px;
+}
+.afs-data-row__sub {
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--afs-text-dim, #94a3b8);
+}
+.afs-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  line-height: 1.5;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+  white-space: nowrap;
+}
+
 /* ============ 供应商设置弹窗 ============ */
 .afs-modal {
   position: fixed;

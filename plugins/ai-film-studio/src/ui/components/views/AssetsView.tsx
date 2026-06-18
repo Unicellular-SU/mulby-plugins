@@ -11,6 +11,7 @@ import {
   PlusSquare,
   Users,
   Mountain,
+  Box,
   Brush,
   FolderPlus,
 } from 'lucide-react'
@@ -349,9 +350,9 @@ function Lightbox({ rec, onClose }: { rec: AssetRecord; onClose: () => void }) {
   )
 }
 
-// ===================== 角色 / 场景 Elements 库 =====================
-const KIND_ICON: Record<ElementKind, typeof Users> = { character: Users, scene: Mountain }
-const KIND_LABEL: Record<ElementKind, string> = { character: '角色', scene: '场景' }
+// ===================== 角色 / 场景 / 物品 Elements 库 =====================
+const KIND_ICON: Record<ElementKind, typeof Users> = { character: Users, scene: Mountain, prop: Box }
+const KIND_LABEL: Record<ElementKind, string> = { character: '角色', scene: '场景', prop: '物品' }
 
 function ElementLibrary({ onInserted }: { onInserted: () => void }) {
   const elements = useAssetStore((s) => s.elements)
@@ -386,13 +387,16 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
   return (
     <>
       <div className="afs-lib__bar">
-        <div className="afs-lib__hint">角色 / 场景定义一次、跨工程复用（一致性底座）。「插入画布」生成绑定参考图的人物 / 场景节点。</div>
+        <div className="afs-lib__hint">角色 / 场景 / 物品定义一次、跨工程复用（一致性底座）。「插入画布」生成绑定参考图的资产节点。</div>
         <div className="afs-lib__actions">
           <button className="afs-btn" onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
             <Users size={15} /> 新建角色
           </button>
           <button className="afs-btn" onClick={() => setEditing({ kind: 'scene', name: '', refAssetIds: [] })}>
             <Mountain size={15} /> 新建场景
+          </button>
+          <button className="afs-btn" onClick={() => setEditing({ kind: 'prop', name: '', refAssetIds: [] })}>
+            <Box size={15} /> 新建物品
           </button>
         </div>
       </div>
@@ -445,10 +449,10 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
             </div>
             <div className="afs-field">
               <label className="afs-field__label">名称</label>
-              <input className="afs-field__input" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder={editing.kind === 'character' ? '如：小明' : '如：咖啡馆'} />
+              <input className="afs-field__input" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder={editing.kind === 'character' ? '如：小明' : editing.kind === 'prop' ? '如：发光的剑' : '如：咖啡馆'} />
             </div>
             <div className="afs-field">
-              <label className="afs-field__label">{editing.kind === 'character' ? '外貌 / 设定' : '环境 / 氛围'}</label>
+              <label className="afs-field__label">{editing.kind === 'character' ? '外貌 / 设定' : editing.kind === 'prop' ? '外观 / 描述' : '环境 / 氛围'}</label>
               <textarea className="afs-field__input" rows={3} value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
             </div>
             <div className="afs-field">

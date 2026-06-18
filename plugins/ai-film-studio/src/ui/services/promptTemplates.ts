@@ -28,10 +28,49 @@ export interface PromptTemplateDef {
 
 export const PROMPT_TEMPLATES: PromptTemplateDef[] = [
   {
+    id: 'text.outline.savecat',
+    group: 'text',
+    label: '故事大纲 · Save-the-Cat',
+    desc: 'Blake Snyder 15 节拍三幕结构的 JSON 大纲。输出契约由引擎自动追加。',
+    jsonContract: true,
+    default: `你是资深故事结构师，用 Blake Snyder「救猫咪」三幕 15 节拍法搭建故事骨架。
+acts 为 3 个幕（建置/对抗/解决）。
+beats 覆盖 15 个经典节拍（Opening Image, Theme Stated, Set-Up, Catalyst, Debate, Break into Two, B Story, Fun and Games, Midpoint, Bad Guys Close In, All Is Lost, Dark Night of the Soul, Break into Three, Finale, Final Image），每个 beat 通过 actId 归属到幕。arcs 给出主要角色逐节拍的状态（want/state/turn）。
+
+JSON 结构：
+{
+  "title": "作品名", "logline": "一句话梗概",
+  "acts":  [{ "id": "act1", "index": 1, "title": "建置", "summary": "…" }],
+  "beats": [{ "id": "b1", "actId": "act1", "index": 1, "type": "setup", "summary": "…", "characters": ["角色名"], "emotion": "…" }],
+  "arcs":  [{ "character": "角色名", "states": [{ "beatId": "b1", "want": "…", "state": "…", "turn": "…" }] }]
+}
+全程中文。beats[].actId 与 arcs[].states[].beatId 只能引用上文已出现的 id，禁止编造。`,
+  },
+  {
+    id: 'text.outline.storycircle',
+    group: 'text',
+    label: '故事大纲 · Story-Circle',
+    desc: 'Dan Harmon 故事圈 8 步的 JSON 大纲。输出契约由引擎自动追加。',
+    jsonContract: true,
+    default: `你是资深故事结构师，用 Dan Harmon「故事圈」8 步法搭建故事。
+acts 为 4 个阶段（舒适区/欲望/适应/回归）。
+beats 覆盖 8 步（You/Need/Go/Search/Find/Take/Return/Change），通过 actId 归属到阶段。arcs 给出主角逐步的内在状态变化（want/state/turn）。
+
+JSON 结构与 Save-the-Cat 一致（acts/beats/arcs 三数组，beats[].actId 外键，arcs[].states[].beatId 外键）：
+{
+  "title": "作品名", "logline": "一句话梗概",
+  "acts":  [{ "id": "act1", "index": 1, "title": "舒适区", "summary": "…" }],
+  "beats": [{ "id": "b1", "actId": "act1", "index": 1, "type": "you", "summary": "…", "characters": ["角色名"], "emotion": "…" }],
+  "arcs":  [{ "character": "角色名", "states": [{ "beatId": "b1", "want": "…", "state": "…", "turn": "…" }] }]
+}
+全程中文。只能引用上文已出现的 id，禁止编造。`,
+  },
+  {
     id: 'text.script',
     group: 'text',
     label: '剧本生成',
-    desc: '编剧角色 + 分场剧本的 JSON 结构。输出契约由引擎自动追加。',
+    desc: '编剧角色 + 分场剧本的 JSON 结构。输出契约由引擎自动追加。{sceneHint} 由「目标场数」参数注入。',
+    placeholders: ['{sceneHint}'],
     jsonContract: true,
     default: `你是资深编剧。根据用户提供的故事/灵感，创作一个结构完整的分场剧本。
 
@@ -51,11 +90,13 @@ JSON 结构：
       "summary": "本场内容概述",
       "characters": ["出场角色名"],
       "actions": ["关键动作描述"],
-      "dialogues": [{ "character": "角色名", "line": "台词" }]
+      "dialogues": [{ "character": "角色名", "line": "台词" }],
+      "actId": "（有大纲时填，引用大纲真实 act id，否则省略）",
+      "beatId": "（有大纲时填，引用大纲真实 beat id，否则省略）"
     }
   ]
 }
-全程中文创作，台词自然，场景数量适中（建议 3-8 场）。`,
+全程中文创作，台词自然。场景数量遵循：{sceneHint}。`,
   },
   {
     id: 'text.storyboard',
@@ -71,6 +112,9 @@ JSON 结构：
     {
       "id": "s1",
       "scene": "对应场景标题",
+      "sceneId": "（有结构化剧本时填，引用 scene.id）",
+      "actId": "（从对应 scene 继承，有则填）",
+      "beatId": "（从对应 scene 继承，有则填）",
       "description": "中文画面描述（镜头内发生了什么）",
       "shotSize": "远景|全景|中景|近景|特写",
       "camera": "推|拉|摇|移|跟|固定",
@@ -78,11 +122,17 @@ JSON 结构：
       "characters": ["出场角色"],
       "location": "场景",
       "mood": "氛围/情绪",
-      "prompt": "用于图像/视频生成的英文提示词（主体+动作+环境+光线+风格）"
+      "props": ["本镜出场的关键道具/物品名（如：发光的剑；无则省略）"],
+      "screenDirection": "L2R|R2L|toward|away|static（主体运动/视线方向）",
+      "reverseOf": "（正反打时填，指向被反打的 shotId，仅引用上文已出现的 id）",
+      "sfx": ["关键音效（可选，如 脚步声、关门声）"],
+      "ambient": "环境声（可选，如 雨声、街道嘈杂）",
+      "prompt": "用于图像/视频生成的英文提示词（主体+动作+环境+风格；光线由场景参考图继承，勿在此堆光线词）"
     }
   ]
 }
-duration 为数字（秒）。按叙事顺序排列。`,
+duration 为数字（秒）。按叙事顺序排列。有结构化剧本（含 scene.id）时，shots 必须覆盖全部场景、不得截断后半段。
+轴线规则：同一对话/动作场景中保持轴线一致，相邻镜头 screenDirection 不应无理由翻转（跳轴）；正反打用 reverseOf 指向被反打 shotId，且二者方向相反（toward↔away / L2R↔R2L）。`,
   },
   {
     id: 'text.charsheet',
@@ -100,10 +150,13 @@ JSON 结构：
       "description": "角色背景与性格（中文）",
       "appearance": "外貌、服饰、特征（中文）",
       "refPrompt": "用于生成角色形象的英文提示词",
-      "triple": { "front": "正面英文提示词", "side": "侧面英文提示词", "back": "背面英文提示词" }
+      "triple": { "front": "正面英文提示词", "side": "侧面英文提示词", "back": "背面英文提示词" },
+      "motivation": "角色核心动机（一句话，贯穿全片）",
+      "arc": [{ "stage": "对应节拍/阶段（如 setup/midpoint/climax）", "state": "此阶段角色处境", "emotion": "此刻情绪" }]
     }
   ]
-}`,
+}
+若上游提供大纲节拍，arc[].stage 尽量对齐节拍类型，给出角色在各关键节拍的状态。`,
   },
   {
     id: 'text.fx.expand',
@@ -137,26 +190,37 @@ JSON 结构：
     id: 'image.charImage',
     group: 'image',
     label: '角色三视图（由角色设定）',
-    desc: '“角色三视图”节点的英文提示词模板。画风由全局设定自动追加。',
+    desc: '“角色三视图”节点的英文提示词模板（合并三视图版，保留兼容）。画风由全局设定自动追加。',
     placeholders: ['{hint}', '{ref}'],
     default:
       'character design three-view turnaround sheet, {hint}, {ref}, full body, consistent character design, neutral pose, clean line art, soft studio lighting, white background, high detail',
   },
   {
+    id: 'image.charImageView',
+    group: 'image',
+    label: '角色单视图（front/side/back 各一张）',
+    desc: '“角色三视图”节点 P1-5 单视图扇出模板：每角色按 {view}（front/side/back）各产一张独立资产。',
+    placeholders: ['{view}', '{ref}'],
+    default:
+      'character design reference, {view}, {ref}, full body, consistent character design, neutral pose, clean line art, soft studio lighting, plain white background, high detail',
+  },
+  {
     id: 'image.sceneImage',
     group: 'image',
     label: '场景概念图',
-    desc: '“场景概念图”节点的英文提示词模板。',
+    desc: '“场景概念图”节点的英文提示词模板。只画环境空镜，不含人物（establishing plate）。',
     placeholders: ['{desc}'],
-    default: '{desc}, cinematic concept art, environment design, dramatic lighting, highly detailed',
+    default:
+      'empty {desc}, establishing shot, environment concept art, no people, no characters, unoccupied location, cinematic lighting, highly detailed',
   },
   {
     id: 'image.keyframe',
     group: 'image',
     label: '分镜关键帧',
-    desc: '“分镜关键帧”节点的英文提示词模板。{chars} 为出场角色提示（可能为空）。',
-    placeholders: ['{desc}', '{chars}'],
-    default: '{desc}{chars}, cinematic film still, movie frame, dramatic composition, highly detailed',
+    desc: '“分镜关键帧”节点的英文提示词模板。{shotGrammar} 为景别/运镜短语、{chars} 为出场角色提示（均可能为空）。',
+    placeholders: ['{shotGrammar}', '{desc}', '{chars}'],
+    default:
+      '{shotGrammar}{desc}{chars}, inherit lighting and color palette from the scene reference, cinematic film still, movie frame, dramatic composition, highly detailed',
   },
   {
     id: 'image.assetCharacter',
@@ -171,9 +235,19 @@ JSON 结构：
     id: 'image.assetScene',
     group: 'image',
     label: '场景节点 · 文字生成概念图',
-    desc: '“场景”资产节点在「文字生成」模式下的英文提示词模板。',
+    desc: '“场景”资产节点在「文字生成」模式下的英文提示词模板。只画环境空镜，不含人物。',
     placeholders: ['{basis}'],
-    default: '{basis}, establishing shot, environment concept art, cinematic lighting, highly detailed',
+    default:
+      '{basis}, establishing shot, environment concept art, no people, no characters, unoccupied location, cinematic lighting, highly detailed',
+  },
+  {
+    id: 'image.assetProp',
+    group: 'image',
+    label: '物品节点 · 文字生成物品图',
+    desc: '“物品”资产节点在「文字生成」模式下的英文提示词模板。干净的单个物品参考图（无人物/无背景）。',
+    placeholders: ['{basis}'],
+    default:
+      '{basis}, product reference shot, single isolated object, centered, plain neutral background, no people, no characters, studio lighting, high detail, sharp focus',
   },
 ]
 

@@ -9,13 +9,13 @@ import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
 import { resolveAssetUrl, type AssetRecord } from '../services/assetRegistry'
 import type { ElementRef } from './assetStore'
-import { buildPrompt, buildImagePrompts, buildAssetImageJob, validateNodeJson, buildRepairPrompt } from '../services/prompts'
+import { buildPrompt, buildImagePrompts, buildAssetImageJob, buildCharViewSets, validateNodeJson, buildRepairPrompt, shotCameraMotion, buildAudioPrompt, checkAxisContinuity } from '../services/prompts'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
-import { topoOrder, resolveOutput, gatherInputs } from '../services/executor'
+import { topoOrder, resolveOutput, gatherInputs, computeInputHash } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
 import { downloadVideoToDisk } from '../services/download'
-import { usePromptStore } from './promptStore'
-import { ensureFfmpeg, composeFilm, abortFfmpeg, parseResolution, type SubtitleMode } from '../services/ffmpeg'
+import { usePromptStore, getPrompt } from './promptStore'
+import { ensureFfmpeg, ffmpegAvailable, probeDuration, composeFilm, abortFfmpeg, parseResolution, clampTransitionDur, type SubtitleMode, type AudioTrack, type FilmTransition } from '../services/ffmpeg'
 import { buildSrt } from '../services/subtitles'
 import { synthSpeech } from '../services/tts'
 import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
@@ -60,6 +60,9 @@ export interface FilmNodeData {
   previewUrl?: string // 图像生成中的预览（不持久化）
   outputs?: Record<string, PortValue> // 运行产物（按 port.id）
   error?: string
+  locked?: boolean // P1-6：锁定节点 runAll/runFrom 不重跑，只读旧 outputs（满意的镜头不被覆盖）
+  cache?: { inputHash: string; at: number } // P1-6：上次成功运行的输入指纹，命中即跳过（不重复烧）
+  gen?: { total: number } // 扇出实时进度：本次将产出的总数（画布上预占 N 个格子，生成一张填一张）。不持久化
   // React Flow 要求 data 满足 Record<string, unknown>
   [key: string]: unknown
 }
@@ -114,15 +117,53 @@ function pickCoverAssetId(nodes: FilmNode[]): string | undefined {
 export interface ProjectGlobals {
   aspectRatio: '16:9' | '9:16' | '1:1' | string
   style: string
+  concurrency?: number // 单节点扇出（关键帧/角色图/视频…）的并发上限，默认 3；过大易触发供应商限流
 }
 
 export function defaultGlobals(): ProjectGlobals {
-  return { aspectRatio: '16:9', style: '' }
+  return { aspectRatio: '16:9', style: '', concurrency: 3 }
 }
 
 // 向后兼容：旧工程可能无 globals 或字段不全，统一补全为完整结构
 function normGlobals(g?: Partial<ProjectGlobals>): ProjectGlobals {
   return { ...defaultGlobals(), ...(g || {}) }
+}
+
+/** 扇出并发上限：取全局设定（1~8），缺省 3 */
+function fanoutConcurrency(): number {
+  const c = Number(useGraphStore.getState().globals.concurrency ?? 3)
+  return Math.max(1, Math.min(8, Number.isFinite(c) && c > 0 ? Math.floor(c) : 3))
+}
+
+/**
+ * 有界并发 map：对 items 用至多 limit 个并发执行 fn，结果按 index 保序回填（失败项为 undefined，
+ * 不打断其余——部分成功）。shouldStop 返回 true 时不再启动新任务（用于取消）。
+ */
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+  opts?: { onSettled?: (index: number, result: R) => void; onError?: (index: number, err: unknown) => void; shouldStop?: () => boolean }
+): Promise<(R | undefined)[]> {
+  const results = new Array<R | undefined>(items.length)
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      if (opts?.shouldStop?.()) return
+      const i = next++
+      if (i >= items.length) return
+      try {
+        const r = await fn(items[i], i)
+        results[i] = r
+        opts?.onSettled?.(i, r)
+      } catch (e) {
+        opts?.onError?.(i, e)
+      }
+    }
+  }
+  const w = Math.max(1, Math.min(limit, items.length))
+  await Promise.all(Array.from({ length: w }, () => worker()))
+  return results
 }
 
 export interface ProjectData extends ProjectMeta {
@@ -240,6 +281,7 @@ interface GraphState {
   promptOverrides: Record<string, string>
   nodes: FilmNode[]
   edges: Edge[]
+  viewport?: { x: number; y: number; zoom: number } // P2-13：画布视口（持久化，大图不再每次 fitView 迷路）
   selectedNodeId: string | null
   dirty: boolean
   saving: boolean
@@ -293,8 +335,11 @@ interface GraphState {
   addNode: (kind: string, position: { x: number; y: number }) => void
   removeNode: (id: string) => void
   deleteSelected: () => void
+  duplicateSelected: () => void
   updateNodeParam: (id: string, key: string, value: unknown) => void
   updateNodeTitle: (id: string, title: string) => void
+  toggleNodeLock: (id: string) => void
+  setViewport: (vp: { x: number; y: number; zoom: number }) => void
   setSelected: (id: string | null) => void
 
   // 工程管理
@@ -350,8 +395,8 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
   const def = getNodeDef(node.data.kind)
   if (!def) return
 
-  // 人物 / 场景资产节点：身份(JSON) + 参考图（上传 或 文字生成），可直连关键帧保持一致性
-  if (node.data.kind === 'character' || node.data.kind === 'scene') {
+  // 人物 / 场景 / 物品资产节点：身份(JSON) + 参考图（上传 或 文字生成），可直连关键帧保持一致性
+  if (node.data.kind === 'character' || node.data.kind === 'scene' || node.data.kind === 'prop') {
     const p = node.data.params || {}
     const jsonOut = resolveOutput(node, 'out')
     const existingImg = node.data.outputs?.image
@@ -401,14 +446,76 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     return
   }
 
-  // 合并/收集：把多路同类产物收集为一个多项输出（纯数据节点，无 AI 调用）
+  // 逐项展开 ForEach（P2-12）：把 json 数组 / 合集物化成 items[]，逐项喂下游（显式扇出，不引入循环边）
+  if (node.data.kind === 'foreach') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const arrayKey = String(node.data.params?.arrayKey ?? '').trim()
+    const src = inputs['in']?.[0]
+    const items: PortValue[] = []
+    if (src?.items?.length) items.push(...src.items)
+    else if (src?.json && arrayKey) {
+      const arr = (src.json as Record<string, unknown>)[arrayKey]
+      if (Array.isArray(arr))
+        for (const el of arr) {
+          const key = el && typeof el === 'object' ? (el as Record<string, unknown>).id : undefined
+          items.push({ type: 'json', json: el as unknown, meta: key != null ? { key: String(key) } : undefined })
+        }
+    } else if (src) items.push(src)
+    if (items.length === 0) {
+      patchNode(id, { status: 'error', error: '无可展开的项（连接含 items 的合集或带数组字段的 json）' })
+      return
+    }
+    const outId = def.outputs[0]?.id || 'item'
+    const head = items[0]
+    patchNode(id, {
+      status: 'done',
+      error: undefined,
+      stream: undefined,
+      outputs: { [outId]: { ...head, type: head.type, items } },
+    })
+    return
+  }
+
+  // 合并/收集：把多路同类产物收集为一个多项输出（纯数据节点，无 AI 调用）。P2-12：concat / zip / by-key
   if (node.data.kind === 'merge') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
-    const all: PortValue[] = []
-    for (const arr of Object.values(inputs)) for (const v of arr) all.push(...expandItems(v))
-    if (all.length === 0) {
+    const mode = String(node.data.params?.mode ?? 'concat')
+    // 各上游分别展开为一路（保持路内顺序），用于 zip/by-key 跨路对齐
+    const lanes: PortValue[][] = []
+    for (const arr of Object.values(inputs)) for (const v of arr) lanes.push(expandItems(v))
+    const flat: PortValue[] = lanes.flat()
+    if (flat.length === 0) {
       patchNode(id, { status: 'idle', outputs: {}, error: undefined })
       return
+    }
+    let all: PortValue[]
+    if (mode === 'zip' && lanes.length > 1) {
+      // 按下标配对：items[i] = 嵌套组（仅认 lanes 的 compose/timeline 取用，其余取 flat=items[0]）
+      const n = Math.max(...lanes.map((l) => l.length))
+      all = []
+      for (let i = 0; i < n; i++) {
+        const group = lanes.map((l) => l[i]).filter(Boolean) as PortValue[]
+        const g0 = group[0]
+        all.push({ ...g0, type: 'any', items: group, meta: { ...(g0?.meta || {}), lanes: group.length } })
+      }
+    } else if (mode === 'by-key' && lanes.length > 1) {
+      // 按 charId/name/key 对齐：第一路为主，其余路按键并入该项的嵌套组
+      const keyOf = (v: PortValue) =>
+        String(v.meta?.charId ?? v.meta?.name ?? v.meta?.key ?? v.meta?.shot ?? '')
+      const index = new Map<string, PortValue[]>()
+      for (let li = 1; li < lanes.length; li++)
+        for (const v of lanes[li]) {
+          const k = keyOf(v)
+          if (!k) continue
+          ;(index.get(k) || index.set(k, []).get(k)!).push(v)
+        }
+      all = lanes[0].map((v) => {
+        const k = keyOf(v)
+        const group = [v, ...(k ? index.get(k) || [] : [])]
+        return group.length > 1 ? { ...v, type: 'any', items: group, meta: { ...(v.meta || {}), lanes: group.length } } : v
+      })
+    } else {
+      all = flat // concat（现状）
     }
     const head = all[0]
     patchNode(id, {
@@ -417,6 +524,42 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       outputs: {
         out: { type: head.type, items: all, url: head.url, mime: head.mime, assetId: head.assetId, durationSec: head.durationSec },
       },
+    })
+    return
+  }
+
+  // 时间线 / EDL（P2-11）：把片段排成可编辑 EDL（json）+ items[] 透传（直连 compose.clips 即按此顺序拼接）。纯数据节点
+  if (node.data.kind === 'timeline') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const clipVals = (inputs['clips'] || []).flatMap(expandItems).filter((v) => v.type === 'video')
+    if (clipVals.length === 0) {
+      patchNode(id, { status: 'error', error: '缺少视频片段（连接图生视频等到「视频片段」口）' })
+      return
+    }
+    let acc = 0
+    const clips = clipVals.map((v, i) => {
+      const dur = Number(v.durationSec ?? 5) || 5
+      const startSec = acc
+      acc += dur
+      const sid = v.meta?.shot
+      return {
+        clipId: `c${i + 1}`,
+        shotId: sid != null ? String(sid) : undefined,
+        assetRef: { assetId: v.assetId, localPath: v.localPath, url: v.url },
+        inSec: 0,
+        outSec: dur,
+        startSec,
+        lane: 0,
+      }
+    })
+    const edl = { fps: 24, clips }
+    const outId = def.outputs[0]?.id || 'out'
+    patchNode(id, {
+      status: 'done',
+      error: undefined,
+      stream: undefined,
+      // 双写：EDL 放 json 供检视/未来编辑；items[] 透传保证直连 compose 仍能拼
+      outputs: { [outId]: { type: 'any', json: edl, items: clipVals, meta: { kind: 'edl', clipCount: clips.length } } },
     })
     return
   }
@@ -500,7 +643,92 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
   // 文本 AI 节点：流式调用 + JSON 校验 + 有限次「带错误反馈」修复重试
   if (def.category === 'text') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
+    // P2-12 联动：上游 ForEach 把数组物化成 items[]（>1）时，json 文本节点逐项扇出后合并——
+    // 长剧本按场拆解，每场独立一次调用，根治"丢后半段"。普通单输入（无 items）零回归。
+    const primaryItems = inputs['in']?.[0]?.items
+    const fanKey = TEXT_ARRAY_KEY[node.data.kind]
+    if (def.outputs[0]?.type === 'json' && fanKey && Array.isArray(primaryItems) && primaryItems.length > 1) {
+      const model = (node.data.params?.modelOverride as string) || get().selectedModel
+      useGraphStore.setState({ runningNodeId: id })
+      patchNode(id, { status: 'running', stream: '', error: undefined })
+      try {
+        // 并发逐项生成（每场独立调用），结果按 index 保序后合并
+        const total = primaryItems.length
+        let done = 0
+        const acc = new Array<unknown[] | undefined>(total)
+        const outId0 = def.outputs[0].id
+        const perArrays = await mapPool(
+          primaryItems,
+          fanoutConcurrency(),
+          async (itemVal): Promise<unknown[]> => {
+            const perInputs: Record<string, PortValue[]> = { ...inputs, in: [itemVal] }
+            const built = buildPrompt(node.data, perInputs, get().globals)
+            if (!built.user.trim()) return []
+            let ctx: { sceneIds?: string[] } | undefined
+            if (node.data.kind === 'storyboard') {
+              const sid = (itemVal.json as Record<string, unknown> | undefined)?.id
+              if (sid != null) ctx = { sceneIds: [String(sid)] }
+            }
+            let parsedK: unknown = null
+            let errK = ''
+            let contentK = ''
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              const usr = attempt === 1 ? built.user : buildRepairPrompt(built.user, errK, contentK)
+              const r = await runText({ model, system: built.system, user: usr, jsonMode: true })
+              contentK = r.content
+              parsedK = extractJson(contentK)
+              errK = validateNodeJson(node.data.kind, parsedK, ctx)
+              if (!errK) break
+            }
+            const arr = parsedK && typeof parsedK === 'object' ? (parsedK as Record<string, unknown>)[fanKey] : undefined
+            return Array.isArray(arr) ? arr : []
+          },
+          {
+            shouldStop: () => !get().isRunning,
+            onSettled: (k, arr) => {
+              done++
+              // 实时增量回写：每场生成完即并入部分产物，节点上「分镜·N 镜」实时增长
+              acc[k] = arr
+              const partial = acc.flatMap((a) => a || [])
+              patchNode(id, {
+                stream: `逐项生成 ${done}/${total}…`,
+                outputs: { [outId0]: { type: 'json', json: { [fanKey]: partial }, text: '' } },
+              })
+            },
+          }
+        )
+        const merged: unknown[] = perArrays.flatMap((a) => a || [])
+        const lastText = JSON.stringify({ [fanKey]: merged })
+        if (merged.length === 0) throw new Error('逐项扇出未得到任何结果')
+        patchNode(id, {
+          status: 'done',
+          stream: undefined,
+          outputs: { [outId0]: { type: 'json', json: { [fanKey]: merged }, text: lastText } },
+        })
+        if (node.data.kind === 'storyboard') {
+          const w = checkAxisContinuity(merged as Array<Record<string, unknown>>)
+          if (w.length)
+            window.mulby?.notification?.show(
+              `分镜连续性提示：${w.slice(0, 2).join('；')}${w.length > 2 ? ` 等 ${w.length} 项` : ''}`,
+              'warning'
+            )
+        }
+      } catch (e) {
+        patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+      } finally {
+        useGraphStore.setState({ runningNodeId: null })
+      }
+      return
+    }
     const { system, user } = buildPrompt(node.data, inputs, get().globals)
+    // §4.3：storyboard 覆盖校验——收集上游 scene id，校验分镜是否覆盖全部场景（未覆盖触发修复重试）
+    let validateCtx: { sceneIds?: string[] } | undefined
+    if (node.data.kind === 'storyboard') {
+      const sj = inputs['in']?.[0]?.json as Record<string, unknown> | undefined
+      const sc = Array.isArray(sj?.scenes) ? (sj!.scenes as Array<Record<string, unknown>>) : []
+      const ids = sc.map((s) => String(s.id ?? '')).filter(Boolean)
+      if (ids.length) validateCtx = { sceneIds: ids }
+    }
     if (!user.trim()) {
       patchNode(id, { status: 'error', error: '缺少输入内容（请连接上游或填写内容）' })
       return
@@ -532,7 +760,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         content = r.content
         if (!wantJson) break
         parsed = extractJson(content)
-        lastErr = validateNodeJson(node.data.kind, parsed)
+        lastErr = validateNodeJson(node.data.kind, parsed, validateCtx)
         if (!lastErr) break
       }
       if (wantJson) {
@@ -544,6 +772,18 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
             outputs: { [outDef.id]: { type: 'json', json: parsed, text: content } },
             stream: content,
           })
+          // P2-6：分镜跳轴软告警（不阻断生成）
+          if (node.data.kind === 'storyboard') {
+            const shots = (parsed as Record<string, unknown> | null)?.shots
+            if (Array.isArray(shots)) {
+              const w = checkAxisContinuity(shots as Array<Record<string, unknown>>)
+              if (w.length)
+                window.mulby?.notification?.show(
+                  `分镜连续性提示：${w.slice(0, 2).join('；')}${w.length > 2 ? ` 等 ${w.length} 项` : ''}`,
+                  'warning'
+                )
+            }
+          }
         }
       } else {
         const outId = outDef?.id || 'out'
@@ -555,6 +795,115 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       }
     } catch (e) {
       patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e) })
+    } finally {
+      useGraphStore.setState({ runningNodeId: null })
+    }
+    return
+  }
+
+  // 角色三视图：每角色 front→side/back 自洽链（front 先出图，side/back 以 front 为参考保持一致）；
+  // 连「参考图」口（如人物素材图）则 front 走 img2img，三视图都锚定到该人物。角色间并发、视图内有依赖。
+  if (def.category === 'image' && node.data.kind === 'char-image') {
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const sets = buildCharViewSets(node.data, inputs, get().globals)
+    if (sets.length === 0) {
+      patchNode(id, { status: 'error', error: '缺少角色（连接「角色设定」/「人物」到角色口）' })
+      return
+    }
+    const model = (node.data.params?.imageModelOverride as string) || get().selectedImageModel
+    if (!model) {
+      patchNode(id, { status: 'error', error: '未配置图像模型（请在顶栏或节点选择）' })
+      return
+    }
+    const canEdit = !!window.mulby?.ai?.images?.edit
+    const extRefs = await refsFromValues(inputs['ref']) // 可选：上传/上游人物参考图，做 img2img
+    const outId = def.outputs[0]?.id || 'out'
+    useGraphStore.setState({ runningNodeId: id })
+    patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: undefined })
+    const totalViews = sets.length * 3
+    if (totalViews > 1) patchNode(id, { gen: { total: totalViews } })
+    const results = new Array<PortValue | undefined>(totalViews)
+    let done = 0
+    let failed = 0
+    const writeBack = () => {
+      const partial = results.filter(Boolean) as PortValue[]
+      patchNode(id, {
+        previewUrl: undefined,
+        stream: `生成中 ${done}/${totalViews}…`,
+        outputs: partial.length
+          ? { [outId]: { type: 'image', items: partial, assetId: partial[0].assetId, url: partial[0].url, mime: partial[0].mime } }
+          : undefined,
+      })
+    }
+    try {
+      await mapPool(
+        sets,
+        fanoutConcurrency(),
+        async (set, si): Promise<void> => {
+          const base = si * 3
+          const metaOf = (view: string) => ({ name: set.name, kind: 'character', charId: set.charId, view })
+          const extRef = canEdit ? pickRef(extRefs, set.refName) : null
+          // 1) front：有参考图则 img2img 锚定上传人物，否则文生图
+          let frontB64: string | null = null
+          let frontMime = 'image/png'
+          try {
+            if (extRef) {
+              const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: extRef.base64, refMime: extRef.mime })
+              frontB64 = r.base64
+              frontMime = r.mime
+            } else {
+              const r = await generateImage({ model, prompt: set.views[0].prompt, size: set.size })
+              frontB64 = r.base64
+              frontMime = r.mime
+            }
+            results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), url: toDataUrl(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
+            done++
+            writeBack()
+          } catch {
+            failed++
+            return // front 失败则跳过该角色的 side/back
+          }
+          // 2) side/back：以 front 为参考保持自洽（有 edit 能力时），并附带外部参考图；否则退回文生图
+          await Promise.all(
+            ([1, 2] as const).map(async (vi) => {
+              if (!get().isRunning) return
+              try {
+                let b64: string
+                let mime: string
+                if (canEdit && frontB64) {
+                  const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
+                  const r = await editImage({ model, prompt: set.views[vi].prompt, refBase64: frontB64, refMime: frontMime, extraRefs: extra })
+                  b64 = r.base64
+                  mime = r.mime
+                } else {
+                  const r = await generateImage({ model, prompt: set.views[vi].prompt, size: set.size })
+                  b64 = r.base64
+                  mime = r.mime
+                }
+                results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), url: toDataUrl(b64, mime), mime, meta: metaOf(set.views[vi].view) }
+                done++
+                writeBack()
+              } catch {
+                failed++
+              }
+            })
+          )
+        },
+        { shouldStop: () => !get().isRunning }
+      )
+      const items = results.filter(Boolean) as PortValue[]
+      if (items.length === 0) throw new Error('未生成任何角色图')
+      if (failed > 0) window.mulby?.notification?.show(`${failed} 张角色图生成失败，已保留其余 ${items.length} 张`, 'warning')
+      const head = items[0]
+      patchNode(id, {
+        status: 'done',
+        previewUrl: undefined,
+        stream: undefined,
+        gen: undefined,
+        outputs: { [outId]: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
+      })
+    } catch (e) {
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined, gen: undefined })
     } finally {
       useGraphStore.setState({ runningNodeId: null })
     }
@@ -581,54 +930,91 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       const refs = await resolveRefImages(inputs)
       const canEdit = refs.length > 0 && !!window.mulby?.ai?.images?.edit
       const outId = def.outputs[0]?.id || 'out'
-      const items: PortValue[] = []
-      for (let i = 0; i < jobs.length; i++) {
-        if (!get().isRunning) break
-        const job = jobs[i]
-        patchNode(id, { stream: jobs.length > 1 ? `生成中 ${i + 1}/${jobs.length}…` : '生成中…', previewUrl: undefined })
-        const matched = canEdit ? selectRefs(refs, job.refNames, job.refName) : []
-        let base64: string
-        let mime: string
-        if (matched.length) {
-          const [primary, ...rest] = matched
-          const r = await editImage({
-            model,
-            prompt: job.prompt,
-            refBase64: primary.base64,
-            refMime: primary.mime,
-            extraRefs: rest.map((x) => ({ base64: x.base64, mime: x.mime })),
-          })
-          base64 = r.base64
-          mime = r.mime
-        } else {
-          const r = await generateImage({
-            model,
-            prompt: job.prompt,
-            size: job.size,
-            onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
-          })
-          base64 = r.base64
-          mime = r.mime
-        }
-        const assetId = await saveAsset(base64, mime)
-        items.push({ type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta })
-        // 增量展示：每生成一张立即写回，属性面板画廊与节点缩略实时增长
+      // 并发扇出生成（关键帧/角色图/场景图）：有界并发池，保序，部分成功；单张时不并发
+      const total = jobs.length
+      // 实时铺开：预占 total 个格子，生成一张填一张（FilmNode 渲染网格 + 占位旋转）
+      if (total > 1) patchNode(id, { gen: { total } })
+      const results = new Array<PortValue | undefined>(total)
+      let done = 0
+      let failed = 0
+      const writeBack = () => {
+        const partial = results.filter(Boolean) as PortValue[]
         patchNode(id, {
           previewUrl: undefined,
-          outputs: { [outId]: { type: 'image', items: [...items], assetId: items[0].assetId, url: items[0].url, mime: items[0].mime } },
+          stream: total > 1 ? `生成中 ${done}/${total}…` : '生成中…',
+          outputs: partial.length
+            ? { [outId]: { type: 'image', items: partial, assetId: partial[0].assetId, url: partial[0].url, mime: partial[0].mime } }
+            : undefined,
         })
       }
+      await mapPool(
+        jobs,
+        fanoutConcurrency(),
+        async (job): Promise<PortValue> => {
+          const matched = canEdit
+            ? selectRefs(
+                refs,
+                job.refNames,
+                job.refName,
+                job.refCharIds,
+                job.meta?.sceneName as string | undefined,
+                job.meta?.locationKey as string | undefined,
+                job.refPropNames
+              )
+            : []
+          let base64: string
+          let mime: string
+          if (matched.length) {
+            const [primary, ...rest] = matched
+            const r = await editImage({
+              model,
+              prompt: job.prompt,
+              refBase64: primary.base64,
+              refMime: primary.mime,
+              extraRefs: rest.map((x) => ({ base64: x.base64, mime: x.mime })),
+            })
+            base64 = r.base64
+            mime = r.mime
+          } else {
+            const r = await generateImage({
+              model,
+              prompt: job.prompt,
+              size: job.size,
+              // 并发时多张预览会互相覆盖，单张才显示流式预览
+              onPreview: total === 1 ? (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }) : undefined,
+            })
+            base64 = r.base64
+            mime = r.mime
+          }
+          const assetId = await saveAsset(base64, mime)
+          return { type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta }
+        },
+        {
+          shouldStop: () => !get().isRunning,
+          onSettled: (i, item) => {
+            results[i] = item
+            done++
+            writeBack()
+          },
+          onError: () => {
+            failed++
+          },
+        }
+      )
+      const items = results.filter(Boolean) as PortValue[]
       if (items.length === 0) throw new Error('未生成任何图像')
+      if (failed > 0) window.mulby?.notification?.show(`${failed} 张图像生成失败，已保留其余 ${items.length} 张`, 'warning')
       const head = items[0]
       patchNode(id, {
         status: 'done',
         previewUrl: undefined,
         stream: undefined,
+        gen: undefined,
         // flat 字段镜像 items[0] 以兼容单值渲染；items 承载全部
         outputs: { [outId]: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
       })
     } catch (e) {
-      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined })
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined, gen: undefined })
     } finally {
       useGraphStore.setState({ runningNodeId: null })
     }
@@ -637,6 +1023,61 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
 
   // 视频 AI 节点：自管供应商 submit→poll→fetch
   if (def.category === 'video') {
+    // P2-8：口型同步——video+audio→video，用 lipsync 能力供应商，复用 runVideo 三段式
+    if (node.data.kind === 'lipsync') {
+      const ps = useProviderStore.getState()
+      const overrideId = (node.data.params?.providerOverride as string) || ''
+      const provider = overrideId ? ps.providers.find((x) => x.id === overrideId) || null : ps.getActiveFor('lipsync')
+      if (!provider) {
+        patchNode(id, { status: 'error', error: '未配置口型同步(lipsync)供应商（顶栏「模型供应商」添加 lipsync 能力）' })
+        return
+      }
+      const inputs = gatherInputs(node, get().nodes, get().edges)
+      const videoVal = (inputs['video'] || []).flatMap(expandItems).find((v) => v.type === 'video')
+      const audioVal = (inputs['audio'] || []).flatMap(expandItems).find((v) => v.type === 'audio')
+      const videoUrl = videoVal?.url || (videoVal?.localPath ? toFileUrl(videoVal.localPath) : undefined)
+      const audioUrl = audioVal?.url || (audioVal?.localPath ? toFileUrl(audioVal.localPath) : undefined)
+      if (!videoUrl) {
+        patchNode(id, { status: 'error', error: '缺少输入视频（连接图生视频/文生视频）' })
+        return
+      }
+      if (!audioUrl) {
+        patchNode(id, { status: 'error', error: '缺少对白音频（连接配音 TTS）' })
+        return
+      }
+      const apiKey = await ps.resolveKey(provider.id)
+      if (!apiKey && provider.kind === 'fal') {
+        patchNode(id, { status: 'error', error: '该供应商未配置 API Key' })
+        return
+      }
+      useGraphStore.setState({ runningNodeId: id })
+      patchNode(id, { status: 'running', stream: '口型同步…', error: undefined })
+      try {
+        const { url } = await runVideo({
+          cfg: provider,
+          apiKey,
+          req: { prompt: '', videoUrl, drivingAudioUrl: audioUrl },
+          onProgress: (pr) => patchNode(id, { stream: `口型同步：${pr.status}…` }),
+        })
+        let localPath: string | undefined
+        try {
+          localPath = await downloadVideoToDisk(url, `lipsync_${Date.now()}`)
+        } catch {
+          // 忽略
+        }
+        const outId = def.outputs[0]?.id || 'out'
+        patchNode(id, {
+          status: 'done',
+          stream: undefined,
+          outputs: { [outId]: { type: 'video', url, localPath, mime: 'video/mp4', meta: videoVal?.meta } },
+        })
+      } catch (e) {
+        patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+      } finally {
+        useGraphStore.setState({ runningNodeId: null })
+      }
+      return
+    }
     const ps = useProviderStore.getState()
     const overrideId = (node.data.params?.providerOverride as string) || ''
     const provider = overrideId ? ps.providers.find((p) => p.id === overrideId) || null : ps.getActiveFor('video')
@@ -651,14 +1092,26 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     const promptText =
       (inputs['prompt']?.[0]?.text || inputs['in']?.[0]?.text || '').trim() ||
       String(node.data.params?.motion ?? '').trim()
+    // P2-5：可选「分镜」json 输入端口——逐帧取景别/运镜/动作（与 frame 扇出同序），补充/兜底 keyframe meta
+    const shotJson = inputs['shot']?.[0]?.json as Record<string, unknown> | undefined
+    const shotList: Array<Record<string, unknown>> = Array.isArray(shotJson?.shots)
+      ? (shotJson!.shots as Array<Record<string, unknown>>)
+      : shotJson
+        ? [shotJson]
+        : []
     // i2v：按上游关键帧（含扇出的多张）逐帧扇出生成 N 个视频；t2v：单个文本任务
     const frameUrls: (string | undefined)[] = []
     const tailUrls: string[] = []
+    // P0-1：与 frameUrls 对齐的逐帧元信息（shot/prompt/camera/mood/motion/duration），供循环内逐帧消费
+    const frameMetas: Array<Record<string, unknown>> = []
     if (node.data.kind === 'i2v') {
       const frameVals = (inputs['frame'] || []).flatMap(expandItems).filter((v) => v.type === 'image')
       for (const fv of frameVals) {
         const du = await portImageDataUrl(fv)
-        if (du) frameUrls.push(du)
+        if (du) {
+          frameUrls.push(du)
+          frameMetas.push((fv.meta as Record<string, unknown> | undefined) || {})
+        }
       }
       if (frameUrls.length === 0) {
         patchNode(id, { status: 'error', error: '图生视频缺少首帧（请连接关键帧/图像）' })
@@ -685,61 +1138,204 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', error: undefined, stream: '提交任务…' })
     try {
-      const durationSec = Number(node.data.params?.duration ?? 5) || 5
       const total = frameUrls.length
-      const items: PortValue[] = []
-      for (let i = 0; i < total; i++) {
-        if (!get().isRunning) break
-        const { url } = await runVideo({
-          cfg: provider,
-          apiKey,
-          req: {
-            prompt: promptText || '',
-            imageUrl: frameUrls[i] || undefined,
-            lastImageUrl: tailUrls[i] || tailUrls[0] || undefined,
-            duration: Number(node.data.params?.duration ?? 5) || undefined,
-          },
-          onProgress: (p) => {
-            const base =
-              p.status === 'queued'
-                ? '排队中'
-                : p.status === 'running'
-                  ? `生成中${p.progress ? ` ${Math.round(p.progress * 100)}%` : ''}`
-                  : p.status === 'submitting'
-                    ? '提交任务'
-                    : p.status
-            patchNode(id, { stream: total > 1 ? `片段 ${i + 1}/${total} · ${base}…` : `${base}…` })
-          },
-        })
-        // 远程 URL 可能有有效期：尽力下载落盘（失败不影响在线播放）
-        let localPath: string | undefined
-        try {
-          localPath = await downloadVideoToDisk(url, `${(node.data.title || 'clip').replace(/\s+/g, '_')}_${i + 1}_${Date.now()}`)
-        } catch {
-          // 忽略
-        }
-        items.push({ type: 'video', url, mime: 'video/mp4', durationSec, localPath })
-      }
-      if (items.length === 0) throw new Error('未生成任何视频')
       const outId = def.outputs[0]?.id || 'out'
+      // 仅在 ffmpeg 已就绪时于 i2v 阶段做实测（best-effort）；最终时长由 compose 统一再测兜底
+      const canProbe = await ffmpegAvailable()
+      // M18-B：音频模式（节点级三态）。native=把对白/SFX/ambient 喂入视频请求并标 hasAudio；external=无声生成留待外置合成
+      const audioModeLabel = String(node.data.params?.audioMode ?? '无声')
+      const audioMode: 'native' | 'external' | 'silent' =
+        audioModeLabel === '模型自带声' ? 'native' : audioModeLabel === '外置合成' ? 'external' : 'silent'
+      // 并发扇出：N 个片段最多 fanoutConcurrency 个同时 submit→poll（异步视频并行收益最大），保序、部分成功
+      // 实时铺开：预占 total 个格子，生成一段填一段
+      if (total > 1) patchNode(id, { gen: { total } })
+      const results = new Array<PortValue | undefined>(total)
+      let done = 0
+      let failed = 0
+      await mapPool(
+        Array.from({ length: total }, (_, i) => i),
+        fanoutConcurrency(),
+        async (i): Promise<PortValue> => {
+          const fm = frameMetas[i] || {}
+          const sshot = shotList[i] || shotList[0] || {}
+          const cameraMotion = shotCameraMotion({ camera: fm.camera ?? sshot.camera, shotSize: fm.shotSize ?? sshot.shotSize })
+          const shotPrompt =
+            [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
+          const framePrompt = [shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText
+          const frameDuration = Number(fm.duration ?? sshot.duration ?? node.data.params?.duration ?? 5) || 5
+          let audioPrompt = ''
+          let dialogue: { speaker: string; line: string; emotion?: string }[] | undefined
+          if (audioMode === 'native') {
+            const dialsRaw = (
+              Array.isArray(fm.dialogues) ? fm.dialogues : Array.isArray(sshot.dialogues) ? sshot.dialogues : []
+            ) as Array<Record<string, unknown>>
+            dialogue = dialsRaw
+              .map((d) => ({ speaker: String(d.character ?? d.speaker ?? ''), line: String(d.line ?? ''), emotion: d.emotion ? String(d.emotion) : undefined }))
+              .filter((d) => d.line)
+            const sfxRaw = fm.sfx ?? sshot.sfx
+            const sfx = Array.isArray(sfxRaw) ? sfxRaw.map(String).join(', ') : String(sfxRaw ?? '')
+            const ambient = String(fm.ambient ?? sshot.ambient ?? '')
+            audioPrompt = buildAudioPrompt(dialogue, sfx, ambient)
+          }
+          const { url } = await runVideo({
+            cfg: provider,
+            apiKey,
+            req: {
+              prompt: framePrompt || '',
+              imageUrl: frameUrls[i] || undefined,
+              lastImageUrl: tailUrls[i] || tailUrls[0] || undefined,
+              duration: frameDuration || undefined,
+              audioMode,
+              audioPrompt: audioMode === 'native' && audioPrompt ? audioPrompt : undefined,
+              dialogue: audioMode === 'native' && dialogue && dialogue.length ? dialogue : undefined,
+            },
+            onProgress: (p) => {
+              const base =
+                p.status === 'queued'
+                  ? '排队中'
+                  : p.status === 'running'
+                    ? `生成中${p.progress ? ` ${Math.round(p.progress * 100)}%` : ''}`
+                    : p.status === 'submitting'
+                      ? '提交任务'
+                      : p.status
+              patchNode(id, { stream: total > 1 ? `片段 ${i + 1}/${total} · ${base}…（已完成 ${done}/${total}）` : `${base}…` })
+            },
+          })
+          let localPath: string | undefined
+          try {
+            localPath = await downloadVideoToDisk(url, `${(node.data.title || 'clip').replace(/\s+/g, '_')}_${i + 1}_${Date.now()}`)
+          } catch {
+            // 忽略
+          }
+          let measured: number | undefined
+          if (localPath && canProbe) measured = await probeDuration(localPath).catch(() => undefined)
+          return {
+            type: 'video',
+            url,
+            mime: 'video/mp4',
+            durationSec: measured && measured > 0 ? measured : frameDuration,
+            localPath,
+            meta: { shot: fm.shot, hasAudio: audioMode === 'native', audioSource: audioMode },
+          }
+        },
+        {
+          shouldStop: () => !get().isRunning,
+          onSettled: (i, item) => {
+            results[i] = item
+            done++
+            const partial = results.filter(Boolean) as PortValue[]
+            patchNode(id, {
+              stream: `已完成 ${done}/${total}…`,
+              outputs: partial.length
+                ? { [outId]: { type: 'video', items: partial, url: partial[0].url, mime: 'video/mp4', durationSec: partial[0].durationSec, localPath: partial[0].localPath } }
+                : undefined,
+            })
+          },
+          onError: () => {
+            failed++
+          },
+        }
+      )
+      const items = results.filter(Boolean) as PortValue[]
+      if (items.length === 0) throw new Error('未生成任何视频')
+      if (failed > 0) window.mulby?.notification?.show(`${failed} 个视频生成失败，已保留其余 ${items.length} 个`, 'warning')
       const head = items[0]
       patchNode(id, {
         status: 'done',
         stream: undefined,
-        outputs: { [outId]: { type: 'video', items, url: head.url, mime: 'video/mp4', durationSec, localPath: head.localPath } },
+        gen: undefined,
+        outputs: { [outId]: { type: 'video', items, url: head.url, mime: 'video/mp4', durationSec: head.durationSec, localPath: head.localPath } },
       })
     } catch (e) {
-      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+      patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined, gen: undefined })
     } finally {
       useGraphStore.setState({ runningNodeId: null })
     }
     return
   }
 
-  // 配音 TTS / 配乐 BGM 节点
+  // 配音 TTS / 配乐 BGM / 音效 SFX 节点
   if (def.category === 'audio') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
     const p = node.data.params || {}
+
+    // 音效 SFX（P2-9）：按分镜 shots[].sfx/ambient 逐镜扇出生成音效，meta:{shot,kind:'sfx'} 供 compose 分轨混音
+    if (node.data.kind === 'sfx') {
+      const ps = useProviderStore.getState()
+      const overrideId = (p.providerOverride as string) || ''
+      const provider = overrideId ? ps.providers.find((x) => x.id === overrideId) || null : ps.getActiveFor('music')
+      if (!provider) {
+        patchNode(id, { status: 'error', error: '未配置音效供应商（顶栏「模型供应商」添加 music 能力的供应商）' })
+        return
+      }
+      const sj = inputs['shots']?.[0]?.json as Record<string, unknown> | undefined
+      const shots = Array.isArray(sj?.shots) ? (sj!.shots as Array<Record<string, unknown>>) : []
+      const jobs = shots
+        .map((s) => {
+          const sfxArr = Array.isArray(s.sfx) ? (s.sfx as unknown[]).map(String) : s.sfx ? [String(s.sfx)] : []
+          const ambient = s.ambient ? String(s.ambient) : ''
+          const desc = [sfxArr.join(', '), ambient].filter(Boolean).join('; ')
+          return { shot: s.id ? String(s.id) : undefined, desc }
+        })
+        .filter((j) => j.desc.trim())
+      if (jobs.length === 0) {
+        patchNode(id, { status: 'error', error: '分镜中无 sfx/ambient（需升级分镜节点或在分镜里填写）' })
+        return
+      }
+      const apiKey = await ps.resolveKey(provider.id)
+      if (!apiKey && provider.kind === 'fal') {
+        patchNode(id, { status: 'error', error: '该供应商未配置 API Key' })
+        return
+      }
+      useGraphStore.setState({ runningNodeId: id })
+      patchNode(id, { status: 'running', stream: '生成音效…', error: undefined })
+      try {
+        const durationSec = Number(p.duration ?? 3) || 3
+        const total = jobs.length
+        const results = new Array<PortValue | undefined>(total)
+        let done = 0
+        await mapPool(
+          jobs,
+          fanoutConcurrency(),
+          async (job): Promise<PortValue> => {
+            const { url } = await runVideo({
+              cfg: provider,
+              apiKey,
+              req: { prompt: job.desc, duration: durationSec },
+              onProgress: (pr) => patchNode(id, { stream: `音效 ${done}/${total} · ${pr.status}…` }),
+            })
+            let localPath: string | undefined
+            try {
+              localPath = await downloadVideoToDisk(url, `sfx_${Date.now()}_${Math.round(durationSec)}`)
+            } catch {
+              // 下载失败仍可在线播放
+            }
+            return { type: 'audio', url, localPath, mime: 'audio/mpeg', durationSec, meta: { shot: job.shot, kind: 'sfx' } }
+          },
+          {
+            shouldStop: () => !get().isRunning,
+            onSettled: (i, item) => {
+              results[i] = item
+              done++
+              patchNode(id, { stream: `音效 ${done}/${total}…` })
+            },
+          }
+        )
+        const items = results.filter(Boolean) as PortValue[]
+        if (items.length === 0) throw new Error('未生成任何音效')
+        const head = items[0]
+        patchNode(id, {
+          status: 'done',
+          stream: undefined,
+          outputs: { out: { type: 'audio', items, url: head.url, localPath: head.localPath, mime: head.mime, durationSec } },
+        })
+      } catch (e) {
+        patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), stream: undefined })
+      } finally {
+        useGraphStore.setState({ runningNodeId: null })
+      }
+      return
+    }
 
     // 配乐 BGM：复用异步供应商框架（custom-http 音乐端点 / fal 音乐模型）生成音乐 → 落盘音频
     if (node.data.kind === 'bgm') {
@@ -789,11 +1385,6 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       return
     }
 
-    const text = (inputs['in']?.[0]?.text || String(p.text ?? '')).trim()
-    if (!text) {
-      patchNode(id, { status: 'error', error: '缺少配音文本（连接上游文本或在参数中填写）' })
-      return
-    }
     // 语音供应商（统一在「模型供应商」面板配置，能力=tts，模式=sync-binary）
     const tps = useProviderStore.getState()
     const ttsOverride = (p.providerOverride as string) || ''
@@ -802,23 +1393,105 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       patchNode(id, { status: 'error', error: '未配置语音(TTS)供应商（顶栏「模型供应商」添加 OpenAI 兼容语音）' })
       return
     }
+    // M18-C：对白来源（逐角色配音）——script-gen 的 scenes[].dialogues / storyboard 的 shots[].dialogues
+    const dialJson = inputs['dialogues']?.[0]?.json as Record<string, unknown> | undefined
+    const dialScenes: Array<Record<string, unknown>> = Array.isArray(dialJson?.scenes)
+      ? (dialJson!.scenes as Array<Record<string, unknown>>)
+      : Array.isArray(dialJson?.shots)
+        ? (dialJson!.shots as Array<Record<string, unknown>>)
+        : []
+    const text = (inputs['in']?.[0]?.text || String(p.text ?? '')).trim()
+    if (!dialScenes.length && !text) {
+      patchNode(id, { status: 'error', error: '缺少配音文本/对白（连接上游文本或分场对白，或在参数中填写）' })
+      return
+    }
     const apiKey = await tps.resolveKey(ttsProvider.id)
     if (!apiKey) {
       patchNode(id, { status: 'error', error: '该语音供应商未配置 API Key' })
       return
     }
+    const outId = def.outputs[0]?.id || 'out'
+    const narrator = String(p.voice || ttsProvider.voices?.[0] || 'alloy')
+    const ttsBase = {
+      baseURL: String(ttsProvider.baseURL || 'https://api.openai.com/v1'),
+      apiKey,
+      model: String(p.model || ttsProvider.model || 'tts-1'),
+      speed: Number(p.speed ?? 1) || 1,
+      format: 'mp3',
+    }
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', stream: '合成配音…', error: undefined })
     try {
-      const { path, base64, mime } = await synthSpeech(text, {
-        baseURL: String(ttsProvider.baseURL || 'https://api.openai.com/v1'),
-        apiKey,
-        model: String(p.model || ttsProvider.model || 'tts-1'),
-        voice: String(p.voice || ttsProvider.voices?.[0] || 'alloy'),
-        speed: Number(p.speed ?? 1) || 1,
-        format: 'mp3',
-      })
-      const outId = def.outputs[0]?.id || 'out'
+      // M18-C：逐角色对白 TTS——有 dialogues 输入时按行扇出，按 character 查 voiceMap，缺省回退 narrator
+      if (dialScenes.length) {
+        const voiceMap = new Map<string, string>()
+        for (const v of inputs['chars'] || []) {
+          const arr = (v.json as Record<string, unknown> | undefined)?.characters
+          if (Array.isArray(arr))
+            for (const c of arr as Array<Record<string, unknown>>)
+              if (c?.name && c?.voiceId) voiceMap.set(String(c.name), String(c.voiceId))
+        }
+        // 扁平化所有对白行，再并发逐行合成（保序）
+        const dlgJobs: { line: string; character: string; voice: string; sceneIndex: number; lineIndex: number }[] = []
+        dialScenes.forEach((sc, si) => {
+          const dials = sc.dialogues
+          if (!Array.isArray(dials)) return
+          ;(dials as Array<Record<string, unknown>>).forEach((d, li) => {
+            const line = String(d.line ?? '').trim()
+            if (!line) return
+            const character = String(d.character ?? '')
+            dlgJobs.push({ line, character, voice: voiceMap.get(character) || narrator, sceneIndex: si, lineIndex: li })
+          })
+        })
+        if (dlgJobs.length) {
+          const results = new Array<PortValue | undefined>(dlgJobs.length)
+          let done = 0
+          let failed = 0
+          await mapPool(
+            dlgJobs,
+            fanoutConcurrency(),
+            async (j): Promise<PortValue> => {
+              const r = await synthSpeech(j.line, { ...ttsBase, voice: j.voice })
+              const u = r.base64 ? `data:${r.mime};base64,${r.base64}` : toFileUrl(r.path)
+              return {
+                type: 'audio',
+                url: u,
+                localPath: r.path,
+                mime: r.mime,
+                meta: { character: j.character, sceneIndex: j.sceneIndex, lineIndex: j.lineIndex, voiceId: j.voice, kind: 'dialogue' },
+              }
+            },
+            {
+              shouldStop: () => !get().isRunning,
+              onSettled: () => {
+                done++
+                patchNode(id, { stream: `配音 ${done}/${dlgJobs.length}…` })
+              },
+              onError: () => {
+                failed++
+              },
+            }
+          )
+          const items = results.filter(Boolean) as PortValue[]
+          if (items.length) {
+            if (failed > 0) window.mulby?.notification?.show(`${failed} 句配音失败，已保留其余 ${items.length} 句`, 'warning')
+            const head = items[0]
+            patchNode(id, {
+              status: 'done',
+              stream: undefined,
+              outputs: { [outId]: { type: 'audio', items, url: head.url, localPath: head.localPath, mime: head.mime } },
+            })
+            return
+          }
+        }
+        if (!text) {
+          patchNode(id, { status: 'error', error: '分场对白为空，无可合成内容' })
+          return
+        }
+        // dialogues 无可用行但有 text → 回退单段旁白
+      }
+      // 单段文本配音（旁白）
+      const { path, base64, mime } = await synthSpeech(text, { ...ttsBase, voice: narrator })
       const url = base64 ? `data:${mime};base64,${base64}` : toFileUrl(path)
       patchNode(id, {
         status: 'done',
@@ -845,38 +1518,73 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', stream: '准备片段…', error: undefined })
     try {
-      // 1) 每个片段解析为本地文件
+      // 1) 每个片段解析为本地文件（记录与 clipPaths 对齐的回退时长 + 分镜 id）
       const clipPaths: string[] = []
+      const clipSrcDur: number[] = []
+      const clipShotId: (string | undefined)[] = []
       for (let i = 0; i < clipVals.length; i++) {
         if (!get().isRunning) break
         patchNode(id, { stream: `准备片段 ${i + 1}/${clipVals.length}…` })
         const lp = await resolveLocalVideo(clipVals[i], `clip_${i}`)
-        if (lp) clipPaths.push(lp)
+        if (lp) {
+          clipPaths.push(lp)
+          clipSrcDur.push(Number(clipVals[i].durationSec ?? 5) || 5)
+          const sid = clipVals[i].meta?.shot
+          clipShotId.push(sid != null ? String(sid) : undefined)
+        }
       }
       if (clipPaths.length === 0) throw new Error('无法获取任何片段的本地文件')
-      // 2) 配音（可选）
-      const audioVal = inputs['audio']?.[0]
-      const audioPath = audioVal ? await resolveLocalAudio(audioVal) : undefined
-      // 3) 字幕（可选）：从分镜 JSON 按片段时长生成 SRT
+      // 2) 音轨（可选，多轨）；M18-D：展开扇出后按 meta 分类——对白(dialogue) vs 配乐/音效(music/sfx)，
+      //    供 ffmpeg 分层混音 + 对白侧链 ducking。P0-2：未连音轨是合法的（无声片），仅提示不中断。
+      const audioVals = (inputs['audio'] || []).flatMap(expandItems).filter((v) => v.type === 'audio')
+      const audioTracks: AudioTrack[] = []
+      for (const av of audioVals) {
+        if (!get().isRunning) break
+        const ap = await resolveLocalAudio(av).catch(() => undefined)
+        if (!ap) continue
+        const k = av.meta?.kind
+        const role: AudioTrack['role'] =
+          av.meta?.character || k === 'dialogue' ? 'dialogue' : k === 'sfx' ? 'sfx' : 'music'
+        audioTracks.push({ path: ap, role })
+      }
+      if (audioTracks.length === 0) {
+        patchNode(id, { stream: '注意：未连接音轨，成片将无声（可连 TTS/配乐到「配音/音乐」口）' })
+      }
+      // 3) 确保 ffmpeg 可用（首次按需下载）——提前到字幕之前，以便用实测时长对齐字幕
+      patchNode(id, { stream: '检查 ffmpeg…' })
+      const ready = await ensureFfmpeg((info) => patchNode(id, { stream: info.text }))
+      if (!ready) throw new Error('ffmpeg 不可用（自动下载失败，请检查网络）')
+      // 4) P0-3：实测每个片段真实时长（ffmpeg 已就绪），覆盖请求值，保证字幕与画面对齐
+      const clipDurations: number[] = []
+      for (let i = 0; i < clipPaths.length; i++) {
+        if (!get().isRunning) break
+        const measured = await probeDuration(clipPaths[i]).catch(() => undefined)
+        clipDurations[i] = measured && measured > 0 ? measured : clipSrcDur[i]
+      }
+      // 5) 字幕（可选）：从分镜 JSON 按实测片段时长生成 SRT
       const subModeRaw = String(node.data.params?.subtitleMode ?? '关闭')
       // 显式映射 nodeDefs 的字幕选项标签 → ffmpeg 模式；未知值降级为 off
       const subtitleMode: SubtitleMode =
         subModeRaw === '烧录字幕' ? 'burn' : subModeRaw === '软字幕' ? 'soft' : 'off'
+      // P2-10：转场（默认硬切）。xfade 会让总时长缩短 (N-1)*d，字幕时长须相应扣减以保持对齐
+      const transRaw = String(node.data.params?.transition ?? '无转场')
+      const transition: FilmTransition = transRaw === '交叉淡化' ? 'xfade' : transRaw === '淡入淡出' ? 'fade' : 'none'
+      const xfadeD = transition === 'xfade' ? clampTransitionDur(undefined, clipDurations) : 0
       let srtPath: string | undefined
       const subsVal = inputs['subs']?.[0]
       if (subtitleMode !== 'off' && subsVal?.json) {
-        const durations = clipVals.map((v) => ({ duration: v.durationSec ?? 5 }))
+        // P1-2：带 shotId 让 buildSrt 按分镜 id 键匹配字幕；P2-10：xfade 时非首镜时长各扣 d，使字幕跟随交叠后画面
+        const durations = clipDurations.map((d, i) => ({
+          duration: Math.max(0.5, d - (xfadeD && i > 0 ? xfadeD : 0)),
+          shotId: clipShotId[i],
+        }))
         const srt = buildSrt(durations, subsVal.json)
         if (srt) srtPath = await writeText('subtitles', `sub_${Date.now()}.srt`, srt)
       }
-      // 4) 确保 ffmpeg 可用（首次按需下载）
-      patchNode(id, { stream: '检查 ffmpeg…' })
-      const ready = await ensureFfmpeg((info) => patchNode(id, { stream: info.text }))
-      if (!ready) throw new Error('ffmpeg 不可用（自动下载失败，请检查网络）')
-      // 5) 合成
+      // 6) 合成
       const [w, h] = parseResolution(String(node.data.params?.resolution || '1280x720'))
       const fps = Number(node.data.params?.fps ?? 24) || 24
-      const totalSec = clipVals.reduce((a, v) => a + (v.durationSec ?? 5), 0)
+      const totalSec = clipDurations.reduce((a, d) => a + d, 0)
       const outPath = await exportPath(`film_${Date.now()}.mp4`)
       if (!get().isRunning) throw new Error('已取消')
       await composeFilm({
@@ -885,10 +1593,13 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         width: w,
         height: h,
         fps,
-        audioPath,
+        audioTracks,
+        ducking: true,
         srtPath,
         subtitleMode,
         totalSec,
+        transition,
+        clipDurations,
         onProgress: (info) => patchNode(id, { stream: info.text }),
       })
       const outId = def.outputs[0]?.id || 'out'
@@ -960,7 +1671,11 @@ interface RefImage {
   base64: string
   mime: string
   name?: string
-  kind?: string // 'character' | 'scene'：用于关键帧参考图选择（角色按名匹配、场景全收）
+  kind?: string // 'character' | 'scene'：用于关键帧参考图选择（角色按名匹配、场景按场过滤）
+  locationKey?: string // P2-3：场景图的地点绑定键（同地点 master plate）
+  isMasterPlate?: boolean // P2-3：该场景图是否为主场景板
+  charId?: string // P1-5：角色稳定主键（优于 name 匹配）
+  view?: string // P1-5：'front' | 'side' | 'back'（供按角度条件取图）
 }
 
 // 展开端口产物：有 items（扇出）则返回全部子项，否则返回自身
@@ -983,6 +1698,10 @@ async function refsFromValues(vals: PortValue[] | undefined): Promise<RefImage[]
               mime,
               name: typeof it.meta?.name === 'string' ? it.meta.name : undefined,
               kind: typeof it.meta?.kind === 'string' ? it.meta.kind : undefined,
+              locationKey: typeof it.meta?.locationKey === 'string' ? it.meta.locationKey : undefined,
+              isMasterPlate: it.meta?.isMasterPlate === true,
+              charId: typeof it.meta?.charId === 'string' ? it.meta.charId : undefined,
+              view: typeof it.meta?.view === 'string' ? it.meta.view : undefined,
             })
         }
       }
@@ -998,47 +1717,105 @@ async function resolveRefImages(inputs: Record<string, PortValue[]>): Promise<Re
   return out
 }
 
-// 按名称匹配参考图（关键帧用出场角色名匹配角色图）：精确优先，其次 ≥2 字子串，最后回退第一张
-function pickRef(refs: RefImage[], name?: string): RefImage | null {
+// 本轮运行里"角色名未匹配到参考图"的告警（runAll/runFrom 开头清空，notifyRunResult 汇总）
+const refWarnings: string[] = []
+
+// 匹配参考图（§5.2）：charId 精确（稳定主键）> name 精确 > 唯一命中的子串 > 唯一角色兜底；
+// 否则告警 + 返回 null（不再静默回退第一张，避免错脸；多义命中也告警不猜）。
+function pickRef(refs: RefImage[], name?: string, charId?: string): RefImage | null {
   if (refs.length === 0) return null
+  // 1) charId 精确（最高优先）
+  if (charId) {
+    const byId = refs.find((r) => r.charId === charId)
+    if (byId) return byId
+  }
+  // 2) name 精确
   if (name) {
     const exact = refs.find((r) => r.name === name)
     if (exact) return exact
+    // 3) 收紧子串：仅当全局唯一命中才接受（避免「张三」误中「张三丰」）
     if (name.length >= 2) {
-      const partial = refs.find((r) => r.name && r.name.length >= 2 && (r.name.includes(name) || name.includes(r.name)))
-      if (partial) return partial
+      const hits = refs.filter(
+        (r) => r.name && r.name.length >= 2 && (r.name.includes(name) || name.includes(r.name))
+      )
+      if (hits.length === 1) return hits[0]
+      if (hits.length > 1) {
+        refWarnings.push(`角色「${name}」匹配到多张参考图（${hits.map((h) => h.name).join('/')}），未自动选择`)
+        return null
+      }
     }
   }
-  return refs[0]
+  // 4) 唯一角色合法兜底（soleName）；否则未匹配 → 告警 + null
+  const chars = refs.filter((r) => r.kind !== 'scene')
+  if (chars.length === 1) return chars[0]
+  if (name || charId) refWarnings.push(`角色「${name ?? charId}」未匹配到参考图，已跳过（避免错脸）`)
+  return null
 }
 
-// 多参考图匹配（该镜全部出场角色 → 多张角色图，做多图一致性）：按名逐一匹配并去重
-function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string): RefImage[] {
-  if (refs.length === 0) return []
-  const wanted = (names && names.length ? names : fallbackName ? [fallbackName] : []).filter(Boolean)
-  if (!wanted.length) {
-    const r = pickRef(refs, fallbackName)
-    return r ? [r] : []
-  }
+// 多参考图匹配（该镜全部出场角色 → 多张角色图）：names 与 charIds 同序逐项匹配（charId 优先）并去重
+function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string, charIds?: string[]): RefImage[] {
+  const charRefs = refs.filter((r) => r.kind !== 'scene')
+  if (charRefs.length === 0) return []
+  const N = Math.max(names?.length ?? 0, charIds?.length ?? 0)
   const picked: RefImage[] = []
-  for (const n of wanted) {
-    const r = pickRef(refs, n)
+  for (let i = 0; i < N; i++) {
+    const r = pickRef(charRefs, names?.[i], charIds?.[i])
     if (r && !picked.includes(r)) picked.push(r)
   }
-  return picked.length ? picked : refs[0] ? [refs[0]] : []
+  if (!N && fallbackName) {
+    const r = pickRef(charRefs, fallbackName)
+    if (r) picked.push(r)
+  }
+  // 无任何指定且无 fallback：唯一角色兜底（保留 soleName 行为）
+  if (!N && !fallbackName && charRefs.length === 1) return [charRefs[0]]
+  // P0-4：不再 `[refs[0]]` 兜底——全部未匹配时返回空，该镜走纯生成而非用错脸 img2img
+  return picked
 }
 
-// 关键帧参考图选择：角色图按出场角色名匹配（避免扇出时把所有角色都塞进来），场景图全收作附加参考。
+// 关键帧参考图选择：角色图按出场角色名匹配；场景图 P2-3 改为按本场过滤（只取本地点 master plate），
+// 根治"场景图全收→跨场污染"。无 sceneName/locationKey（旧工程）时回退全收，保证不破坏现有产出。
 // 角色排在前（primary 主参考用于强一致性），场景在后。
-function selectRefs(refs: RefImage[], names?: string[], fallbackName?: string): RefImage[] {
-  const scenes = refs.filter((r) => r.kind === 'scene')
+function selectRefs(
+  refs: RefImage[],
+  names?: string[],
+  fallbackName?: string,
+  charIds?: string[],
+  sceneName?: string,
+  locationKey?: string,
+  propNames?: string[]
+): RefImage[] {
+  // 角色：非 scene/prop 的图按角色名匹配
   const chars = pickRefs(
-    refs.filter((r) => r.kind !== 'scene'),
+    refs.filter((r) => r.kind !== 'scene' && r.kind !== 'prop'),
     names,
-    fallbackName
+    fallbackName,
+    charIds
   )
+  // 物品：kind==='prop' 的图按物品名匹配（无名指定且唯一物品时兜底，由 pickRefs 处理）
+  const props = pickRefs(
+    refs.filter((r) => r.kind === 'prop'),
+    propNames
+  )
+  const sceneRefs = refs.filter((r) => r.kind === 'scene')
+  let scenes: RefImage[]
+  if (locationKey || sceneName) {
+    const match = sceneRefs.filter(
+      (r) =>
+        (locationKey && r.locationKey === locationKey) ||
+        (sceneName && (r.name === sceneName || (r.name?.includes(sceneName) ?? false) || (sceneName.includes(r.name ?? ' '))))
+    )
+    if (match.length) {
+      // 命中本场：优先 master plate，否则取首个；只取一张避免污染
+      scenes = [match.find((r) => r.isMasterPlate) || match[0]]
+    } else {
+      // 指定了场但无对应场景图：宁缺毋滥（不拿别场的图），返回空
+      scenes = []
+    }
+  } else {
+    scenes = sceneRefs // 旧工程：无场名参数 → 维持全收回退
+  }
   const out: RefImage[] = []
-  for (const r of [...chars, ...scenes]) if (!out.includes(r)) out.push(r)
+  for (const r of [...chars, ...props, ...scenes]) if (r && !out.includes(r)) out.push(r)
   return out
 }
 
@@ -1104,7 +1881,7 @@ function serializeNodes(nodes: FilmNode[]): FilmNode[] {
     const outputs = d.outputs
       ? Object.fromEntries(Object.entries(d.outputs).map(([k, v]) => [k, stripValue(v)]))
       : d.outputs
-    return { ...n, data: { ...d, outputs, stream: undefined, previewUrl: undefined } }
+    return { ...n, data: { ...d, outputs, stream: undefined, previewUrl: undefined, gen: undefined } }
   })
 }
 
@@ -1165,6 +1942,45 @@ async function reimportAssets() {
   }
 }
 
+// P2-12 联动：文本 json 节点逐项扇出时，各 kind 要合并的数组字段（outline 多数组，不参与扇出）
+const TEXT_ARRAY_KEY: Record<string, string> = {
+  storyboard: 'shots',
+  'script-gen': 'scenes',
+  'char-sheet': 'characters',
+}
+
+// P1-6：各 kind 的提示词模板 id（变更需让缓存失效）。prompt-fx 按 mode 另算。
+const KIND_PROMPT_IDS: Record<string, string[]> = {
+  'script-gen': ['text.script'],
+  storyboard: ['text.storyboard'],
+  'char-sheet': ['text.charsheet'],
+  'char-image': ['image.charImage'],
+  'scene-image': ['image.sceneImage'],
+  keyframe: ['image.keyframe'],
+  character: ['image.assetCharacter'],
+  scene: ['image.assetScene'],
+}
+const FX_MODE_PROMPT_ID: Record<string, string> = {
+  中译英: 'text.fx.zh2en',
+  英译中: 'text.fx.en2zh',
+  风格化: 'text.fx.stylize',
+  扩写: 'text.fx.expand',
+}
+
+// inputHash 的 salt：全局画风/画幅 + 该节点用到的提示词模板（覆盖变更应使缓存失效）
+function nodeCacheSalt(node: FilmNode): string {
+  const g = useGraphStore.getState().globals
+  const ids = [...(KIND_PROMPT_IDS[node.data.kind] || [])]
+  if (node.data.kind === 'prompt-fx') {
+    ids.push(FX_MODE_PROMPT_ID[String(node.data.params?.mode ?? '扩写')] || 'text.fx.expand')
+  }
+  if (node.data.kind === 'outline') {
+    ids.push(String(node.data.params?.structure ?? '') === 'Story-Circle' ? 'text.outline.storycircle' : 'text.outline.savecat')
+  }
+  const prompts = ids.map((id) => getPrompt(id)).join('')
+  return `${g.style || ''}${g.aspectRatio || ''}${prompts}`
+}
+
 // 按拓扑序执行一批节点（runAll / runFrom 共用）。数据驱动级联阻断：上游无可用产出才跳过。
 async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped: string[] }> {
   const errored: string[] = []
@@ -1179,9 +1995,23 @@ async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped
       def.category === 'image' ||
       def.category === 'video' ||
       def.category === 'audio' ||
-      (def.category === 'output' && (n.data.kind === 'preview' || n.data.kind === 'compose' || n.data.kind === 'merge'))
+      (def.category === 'output' &&
+        (n.data.kind === 'preview' ||
+          n.data.kind === 'compose' ||
+          n.data.kind === 'merge' ||
+          n.data.kind === 'timeline' ||
+          n.data.kind === 'foreach'))
     // export 节点会弹保存对话框，仅单独运行时触发，不纳入批量
     if (!eligible) continue
+    // P1-6：锁定节点不重跑——只读其旧 outputs 作为下游有效上游产出（gatherInputs 读 outputs，天然满足）
+    if (n.data.locked === true) {
+      const hasOutputs = !!n.data.outputs && Object.keys(n.data.outputs).length > 0
+      if (!hasOutputs) {
+        // 锁了却无产物：提示而非静默跳过，避免下游被误判断链
+        patchNode(n.id, { status: 'error', error: '已锁定但无产物，请先解锁并运行' })
+      }
+      continue
+    }
     const st = useGraphStore.getState()
     const hasIncoming = st.edges.some((e) => e.target === n.id)
     if (hasIncoming) {
@@ -1193,14 +2023,31 @@ async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped
         continue
       }
     }
+    // P1-6：输入指纹缓存——命中（hash 相同且已有产物）则跳过重跑，不重复烧。从 live 状态算（上游已更新）
+    const live = useGraphStore.getState()
+    const liveNode = live.nodes.find((x) => x.id === n.id) || n
+    const inputHash = computeInputHash(liveNode, live.nodes, live.edges, nodeCacheSalt(liveNode))
+    const hasOutputs = !!liveNode.data.outputs && Object.keys(liveNode.data.outputs).length > 0
+    if (liveNode.data.cache?.inputHash === inputHash && hasOutputs) {
+      continue // 命中缓存：保留 outputs 与 status
+    }
     await execNode(n.id)
     const cur = useGraphStore.getState().nodes.find((x) => x.id === n.id)
     if (cur?.data.status === 'error') errored.push(cur.data.title || def.label)
+    else patchNode(n.id, { cache: { inputHash, at: Date.now() } })
   }
   return { errored, skipped }
 }
 
 function notifyRunResult(errored: string[], skipped: string[]) {
+  // P0-4：参考图未匹配告警（去重后汇总），即使无 errored/skipped 也提示，避免静默错脸被忽略
+  if (refWarnings.length) {
+    const uniq = Array.from(new Set(refWarnings))
+    window.mulby?.notification?.show(
+      `参考图提示：${uniq.slice(0, 2).join('；')}${uniq.length > 2 ? ` 等 ${uniq.length} 项` : ''}`,
+      'warning'
+    )
+  }
   if (errored.length === 0 && skipped.length === 0) return
   const parts: string[] = []
   if (errored.length) parts.push(`${errored.length} 个出错`)
@@ -1415,7 +2262,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     useGraphStore.setState({ runningNodeId: nodeId })
     patchNode(nodeId, { status: 'running', stream: `重新生成第 ${index + 1} 张…`, error: undefined })
     try {
-      const matched = canEdit ? selectRefs(refs, job.refNames, job.refName) : []
+      const matched = canEdit
+        ? selectRefs(
+            refs,
+            job.refNames,
+            job.refName,
+            job.refCharIds,
+            job.meta?.sceneName as string | undefined,
+            job.meta?.locationKey as string | undefined,
+            job.refPropNames
+          )
+        : []
       let base64: string
       let mime: string
       if (matched.length) {
@@ -1497,6 +2354,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       promptOverrides: proj.promptOverrides || {},
       nodes,
       edges,
+      viewport: proj.viewport,
       selectedNodeId: null,
       dirty: false,
     })
@@ -1563,14 +2421,35 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         ? { name: el.name, appearance: el.description || '', refPrompt: el.prompt || '' }
         : { name: el.name, description: el.description || '', refPrompt: el.prompt || '' }
     const data: FilmNodeData = { kind, title: el.name || def.label, params, status: 'idle' }
-    const firstRef = el.refAssetIds?.[0]
-    if (firstRef) {
-      const a = await loadAsset(firstRef)
-      if (a) {
-        // 绑定参考图（带 name/kind meta，供关键帧按名匹配 / 场景全收，跨镜一致）
-        data.outputs = { image: { type: 'image', assetId: firstRef, url: toDataUrl(a.base64, a.mime), mime: a.mime, meta: { name: el.name, kind } } }
-        data.status = 'done'
+    // P1-5：绑定全部视图/参考图（不再只取第一张），charId/voiceId/view 经 meta 下沉供 keyframe/tts 解析。
+    // charId 缺省回退到 el.id（复用同一主键命名空间）；views 缺省回退 refAssetIds。
+    const charId = el.charId ?? el.id
+    const viewPairs: Array<[string | undefined, string | undefined]> = el.views
+      ? [['front', el.views.front], ['side', el.views.side], ['back', el.views.back]]
+      : []
+    const bound = viewPairs.filter(([, a]) => a) as Array<[string, string]>
+    const refList: Array<[string | undefined, string]> = bound.length
+      ? bound
+      : (el.refAssetIds || []).map((a) => [undefined, a])
+    const items: PortValue[] = []
+    for (const [view, assetId] of refList) {
+      if (!assetId) continue
+      const a = await loadAsset(assetId)
+      if (!a) continue
+      items.push({
+        type: 'image',
+        assetId,
+        url: toDataUrl(a.base64, a.mime),
+        mime: a.mime,
+        meta: { name: el.name, charId, kind, ...(el.voiceId ? { voiceId: el.voiceId } : {}), ...(view ? { view } : {}) },
+      })
+    }
+    if (items.length) {
+      const head = items[0]
+      data.outputs = {
+        image: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime, meta: head.meta },
       }
+      data.status = 'done'
     }
     const node: FilmNode = { id: `n_${nanoid(6)}`, type: 'film', position: position ?? spawnPos(get().nodes), data }
     set({ nodes: [...get().nodes, node], selectedNodeId: node.id, dirty: true })
@@ -1659,6 +2538,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   runAll: async () => {
     if (get().isRunning) return
+    refWarnings.length = 0
     const order = topoOrder(get().nodes, get().edges)
     set({ isRunning: true })
     try {
@@ -1672,6 +2552,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   runFrom: async (id) => {
     if (get().isRunning) return
+    refWarnings.length = 0
     // 收集 id 及其所有下游后代，仅执行这部分；上游不重跑，其已有产物经 gatherInputs 注入
     const edges = get().edges
     const targets = new Set<string>([id])
@@ -1780,6 +2661,44 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     scheduleSave(() => get().saveProject())
   },
 
+  // P2-13：复制选中节点（含内部连线）——新 id + 偏移，剥离产物/状态/缓存/锁定（粘贴出的副本为 idle）
+  duplicateSelected: () => {
+    const ids = new Set(get().nodes.filter((n) => n.selected).map((n) => n.id))
+    const sel = get().selectedNodeId
+    if (sel) ids.add(sel)
+    if (ids.size === 0) return
+    const idMap = new Map<string, string>()
+    for (const oid of ids) idMap.set(oid, `n_${nanoid(6)}`)
+    const newNodes: FilmNode[] = get()
+      .nodes.filter((n) => ids.has(n.id))
+      .map((n) => ({
+        ...n,
+        id: idMap.get(n.id) as string,
+        position: { x: n.position.x + 32, y: n.position.y + 32 },
+        selected: true,
+        data: {
+          ...n.data,
+          outputs: undefined,
+          status: 'idle',
+          stream: undefined,
+          previewUrl: undefined,
+          error: undefined,
+          cache: undefined,
+          locked: undefined,
+        },
+      }))
+    const newEdges: Edge[] = get()
+      .edges.filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e) => ({ ...e, id: `e_${nanoid(6)}`, source: idMap.get(e.source) as string, target: idMap.get(e.target) as string }))
+    set({
+      nodes: [...get().nodes.map((n) => (n.selected ? { ...n, selected: false } : n)), ...newNodes],
+      edges: [...get().edges, ...newEdges],
+      selectedNodeId: newNodes.length === 1 ? newNodes[0].id : null,
+      dirty: true,
+    })
+    scheduleSave(() => get().saveProject())
+  },
+
   updateNodeParam: (id, key, value) => {
     set({
       nodes: get().nodes.map((n) =>
@@ -1795,6 +2714,20 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       nodes: get().nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, title } } : n)),
       dirty: true,
     })
+    scheduleSave(() => get().saveProject())
+  },
+
+  toggleNodeLock: (id) => {
+    set({
+      nodes: get().nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, locked: !n.data.locked } } : n)),
+      dirty: true,
+    })
+    scheduleSave(() => get().saveProject())
+  },
+
+  setViewport: (vp) => {
+    // P2-13：视口变更防抖落盘（不置 dirty 触发整图保存提示，仅随项目持久化）
+    set({ viewport: vp })
     scheduleSave(() => get().saveProject())
   },
 
@@ -1838,6 +2771,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       edges,
       globals,
       promptOverrides,
+      viewport: get().viewport, // P2-13：视口落盘
     }
     await ssetProject(data) // 只写当前工程单键，根除旧版「整数组读改写」的并发覆盖
     // 同步更新轻量索引项（节点数/封面/名称/时间）
@@ -1863,6 +2797,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       promptOverrides: target.promptOverrides || {},
       nodes: target.nodes || [],
       edges: target.edges || [],
+      viewport: target.viewport,
       selectedNodeId: null,
       dirty: false,
     })
