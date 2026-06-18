@@ -6,7 +6,7 @@ import { getNodeDef, type PortType } from '../nodes/nodeDefs'
 import { listTextModels, listImageModels } from '../services/models'
 import { runText, abortText } from '../services/textEngine'
 import { generateImage, editImage, abortImage } from '../services/imageEngine'
-import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
+import { saveAsset, loadAsset, loadAssetUrl, toDataUrl, fromDataUrl, isEphemeralUrl } from '../services/assets'
 import { resolveAssetUrl, type AssetRecord } from '../services/assetRegistry'
 import type { ElementRef } from './assetStore'
 import { buildPrompt, buildImagePrompts, buildAssetImageJob, buildCharViewSets, validateNodeJson, buildRepairPrompt, shotCameraMotion, buildAudioPrompt, checkAxisContinuity, scaleSpec } from '../services/prompts'
@@ -2240,10 +2240,12 @@ async function resolveLocalAudio(v: PortValue): Promise<string | undefined> {
 
 const MEDIA_TYPES: PortValue['type'][] = ['image', 'video', 'audio']
 
-// 递归剥离大体积 data URL（含扇出 items）；保留远程/本地文件链接与 assetId
+// 递归剥离大体积/临时 URL（data: 与 blob: 含扇出 items）；保留远程/本地文件链接与 assetId。
+// 关键：必须同时剥离 blob:——否则 hydrate 出的 blob: 会被写进工程 JSON，二次打开时
+// `assetId && !url` 守卫看到死 blob: 而跳过 hydration → 永久坏图。
 function stripValue(v: PortValue): PortValue {
   let out: PortValue = v.items?.length ? { ...v, items: v.items.map(stripValue) } : v
-  if (MEDIA_TYPES.includes(out.type) && out.url && out.url.startsWith('data:')) {
+  if (MEDIA_TYPES.includes(out.type) && isEphemeralUrl(out.url)) {
     const { url: _url, ...rest } = out
     out = rest
   }
@@ -2262,22 +2264,57 @@ function serializeNodes(nodes: FilmNode[]): FilmNode[] {
   })
 }
 
-// 递归补水：按 assetId 取回 base64 回填 url（含扇出 items）
+// 递归补水：按 assetId 回填 blob: url（含扇出 items）。用 blob: 替代 data:——消除主线程 base64 解码
 async function hydrateValue(v: PortValue): Promise<PortValue> {
   let out: PortValue = v.items?.length ? { ...v, items: await Promise.all(v.items.map(hydrateValue)) } : v
   if (MEDIA_TYPES.includes(out.type) && out.assetId && !out.url) {
-    const a = await loadAsset(out.assetId)
-    if (a) out = { ...out, url: toDataUrl(a.base64, a.mime), mime: a.mime }
+    const url = await loadAssetUrl(out.assetId)
+    if (url) out = { ...out, url }
   }
   return out
 }
 
-// 加载工程后补水：回填 url 用于显示
-async function hydrateAssets() {
+// hydration epoch：整组替换 nodes（切/删/恢复工程）时自增，让在途 hydrate 的延迟 writeback 失效
+let hydrateEpoch = 0
+function bumpHydrateEpoch() {
+  hydrateEpoch++
+}
+const HYDRATE_CONCURRENCY = 6
+
+function collectAssetIds(v: PortValue, acc: string[]): void {
+  if (v.assetId) acc.push(v.assetId)
+  if (v.items) for (const it of v.items) collectAssetIds(it, acc)
+}
+/** 两组 outputs 的 assetId 序列是否一致——用于 writeback 前逐节点复核，防跨工程/跨重生串改 */
+function sameAssetShape(a: Record<string, PortValue>, b: Record<string, PortValue>): boolean {
+  const ka = Object.keys(a)
+  if (ka.length !== Object.keys(b).length) return false
+  for (const k of ka) {
+    if (!(k in b)) return false
+    const ida: string[] = []
+    const idb: string[] = []
+    collectAssetIds(a[k], ida)
+    collectAssetIds(b[k], idb)
+    if (ida.length !== idb.length) return false
+    for (let i = 0; i < ida.length; i++) if (ida[i] !== idb[i]) return false
+  }
+  return true
+}
+
+// 加载工程后补水：有界并发取 blob: url，最后**单次** setState 写回（消除逐节点 patchNode 重渲染风暴）。
+// epoch + 逐节点 assetId 形状复核：期间若整组替换了 nodes 或当前工程已变，则丢弃本批 writeback，
+// 关闭 duplicateProject 复制源节点 id 造成的跨工程串改窗口。
+async function hydrateAssets(opts?: { onlyNodeIds?: Set<string> }) {
   const get = useGraphStore.getState
-  for (const n of get().nodes) {
+  const startEpoch = hydrateEpoch
+  const startProject = get().currentId
+  const targets = get().nodes.filter(
+    (n) => n.data.outputs && (!opts?.onlyNodeIds || opts.onlyNodeIds.has(n.id))
+  )
+  const patches = new Map<string, Record<string, PortValue>>()
+  await mapPool(targets, HYDRATE_CONCURRENCY, async (n) => {
     const outs = n.data.outputs
-    if (!outs) continue
+    if (!outs) return
     let changed = false
     const next: Record<string, PortValue> = {}
     for (const [k, v] of Object.entries(outs)) {
@@ -2285,8 +2322,20 @@ async function hydrateAssets() {
       next[k] = nv
       if (nv !== v) changed = true
     }
-    if (changed) patchNode(n.id, { outputs: next })
-  }
+    if (changed) patches.set(n.id, next)
+  })
+  if (patches.size === 0) return
+  // bail：期间发生整组替换或切了工程 → 丢弃，避免把 A 工程的 url 写进 B
+  if (hydrateEpoch !== startEpoch || get().currentId !== startProject) return
+  useGraphStore.setState((s) => ({
+    nodes: s.nodes.map((n) => {
+      const next = patches.get(n.id)
+      if (!next) return n
+      // 逐节点复核：当前 outputs 的 assetId 形状须与 hydrate 时一致，否则跳过该节点
+      if (!n.data.outputs || !sameAssetShape(n.data.outputs, next)) return n
+      return { ...n, data: { ...n.data, outputs: next } }
+    }),
+  }))
 }
 
 // 递归回灌：把内嵌的 data URL 重新写入资产库，回填 assetId（含扇出 items）
@@ -2957,6 +3006,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const all = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
     const snap = all.find((s) => s.id === id)
     if (!snap) return
+    bumpHydrateEpoch() // 同工程内整组替换：让在途 hydrate 的延迟 writeback 失效
     set({
       nodes: snap.nodes || [],
       edges: snap.edges || [],
@@ -3252,6 +3302,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const target = await sgetProject(id)
     if (!target) return
     await sset(KEY_CURRENT, id)
+    bumpHydrateEpoch() // 切工程：让上一工程在途 hydrate 的 writeback 失效（防串改）
     set({
       currentId: id,
       projectName: target.name,
@@ -3292,6 +3343,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       current = await sgetProject(currentId)
     }
     if (wasCurrent) {
+      bumpHydrateEpoch() // 删当前工程后切到另一工程：让在途 hydrate 失效
       set({
         projects: index,
         currentId,
@@ -3395,6 +3447,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   importProject: async (data) => {
     const imported = (data.promptOverrides as Record<string, string>) || {}
+    bumpHydrateEpoch() // 原地替换当前工程内容：让在途 hydrate 失效
     set({
       nodes: (data.nodes as FilmNode[]) || [],
       edges: (data.edges as Edge[]) || [],

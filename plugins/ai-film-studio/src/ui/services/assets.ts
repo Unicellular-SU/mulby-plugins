@@ -37,6 +37,124 @@ function toU8(data: Uint8Array | ArrayBuffer): Uint8Array {
   return data instanceof Uint8Array ? data : new Uint8Array(data)
 }
 
+// ===== M3：附件字节缓存 + blob: URL =====
+// 用 blob: URL 直接从字节构造来替代多 MB 的 data: base64（消除主线程同步编码——打开工程最大单项成本，
+// 且 state/DOM 只存 ~50 字节的 blob: 串而非整段 base64）。id→字节缓存 + in-flight 去重 + 懒建 blob +
+// 引用计数式集中回收 + LRU 上界。blob 字节钉在 blob store 直到 revoke，缓存跨工程切换存活 →
+// 工作集 = 已开工程的并集，故必须有 LRU 上界。
+interface AssetEntry {
+  bytes: Uint8Array
+  mime: string
+  blobUrl?: string
+  lastAccess: number
+}
+const assetCache = new Map<string, AssetEntry>()
+const inflight = new Map<string, Promise<AssetEntry | null>>()
+let cacheBytes = 0
+let accessTick = 0
+const MAX_CACHED_ASSETS = 256
+const MAX_CACHE_BYTES = 256 * 1024 * 1024 // 256MB 字节预算
+
+/** data:/blob: 都是「会话内临时 URL」——永不持久化/去重/指纹化（单一谓词防不变量漂移） */
+export function isEphemeralUrl(u?: string): boolean {
+  return !!u && (u.startsWith('data:') || u.startsWith('blob:'))
+}
+
+function dropEntry(id: string): void {
+  const e = assetCache.get(id)
+  if (!e) return
+  if (e.blobUrl) {
+    try {
+      URL.revokeObjectURL(e.blobUrl)
+    } catch {
+      // 忽略
+    }
+  }
+  cacheBytes -= e.bytes.length
+  assetCache.delete(id)
+}
+
+function evictIfNeeded(): void {
+  while (assetCache.size > MAX_CACHED_ASSETS || cacheBytes > MAX_CACHE_BYTES) {
+    let oldestId: string | null = null
+    let oldest = Infinity
+    for (const [id, e] of assetCache) {
+      if (e.lastAccess < oldest) {
+        oldest = e.lastAccess
+        oldestId = id
+      }
+    }
+    if (oldestId === null) break
+    dropEntry(oldestId) // 驱逐仅意味下次 mount 重取（廉价、无 base64）
+  }
+}
+
+function cacheEntry(id: string, bytes: Uint8Array, mime: string): AssetEntry {
+  const e: AssetEntry = { bytes, mime, lastAccess: ++accessTick }
+  assetCache.set(id, e)
+  cacheBytes += bytes.length
+  evictIfNeeded()
+  return e
+}
+
+/** 取字节+mime（缓存 + in-flight 去重）。缺失/瞬时错误**不缓存**，允许后续重试 */
+function fetchEntry(id: string): Promise<AssetEntry | null> {
+  const cached = assetCache.get(id)
+  if (cached) {
+    cached.lastAccess = ++accessTick
+    return Promise.resolve(cached)
+  }
+  const pending = inflight.get(id)
+  if (pending) return pending
+  const p = (async (): Promise<AssetEntry | null> => {
+    try {
+      const att = window.mulby?.storage?.attachment
+      if (att) {
+        const data = await att.get(id)
+        if (data) {
+          const bytes = toU8(data)
+          const mime = (await att.getType(id)) || 'image/png'
+          return cacheEntry(id, bytes, mime)
+        }
+      }
+      // 兼容旧版（base64 存普通 KV）：迁移前已生成/导入的资产仍可读出
+      const legacy = await window.mulby?.storage?.get(id)
+      if (legacy && typeof legacy === 'object' && 'base64' in (legacy as Record<string, unknown>)) {
+        const ld = legacy as AssetData
+        const raw = ld.base64.startsWith('data:') ? fromDataUrl(ld.base64).base64 : ld.base64
+        return cacheEntry(id, base64ToBytes(raw), ld.mime || 'image/png')
+      }
+      return null
+    } catch {
+      return null
+    } finally {
+      inflight.delete(id)
+    }
+  })()
+  inflight.set(id, p)
+  return p
+}
+
+/** 取（懒建）该资产的 blob: URL，供 <img>/<video> 直接用；缓存拥有其生命周期，调用方不可 revoke */
+export async function loadAssetUrl(id: string): Promise<string> {
+  const e = await fetchEntry(id)
+  if (!e) return ''
+  if (!e.blobUrl) e.blobUrl = URL.createObjectURL(new Blob([e.bytes as BlobPart], { type: e.mime }))
+  e.lastAccess = ++accessTick
+  return e.blobUrl
+}
+
+/** 释放单个资产（revoke blob + 从缓存丢弃）：deleteAsset / GC 孤儿用。UI 挂载期间绝不整体 clear */
+export function releaseAsset(id: string): void {
+  dropEntry(id)
+}
+
+/** 清空整个资产缓存（仅页面卸载/beforeunload 用，绝不在 UI 挂载期调用，否则会 blank 在屏媒体） */
+export function clearAssetCache(): void {
+  for (const id of [...assetCache.keys()]) dropEntry(id)
+  cacheBytes = 0
+}
+
 export async function saveAsset(base64: string, mime = 'image/png'): Promise<string> {
   const id = `a_${nanoid(10)}`
   try {
@@ -48,28 +166,15 @@ export async function saveAsset(base64: string, mime = 'image/png'): Promise<str
   return id
 }
 
+/** 仍以 base64 进出（兼容既有调用者，如 downloadVideoToDisk）；底层走统一字节缓存 */
 export async function loadAsset(id: string): Promise<AssetData | null> {
-  try {
-    const att = window.mulby?.storage?.attachment
-    if (att) {
-      const data = await att.get(id)
-      if (data) {
-        const mime = (await att.getType(id)) || 'image/png'
-        return { base64: bytesToBase64(toU8(data)), mime }
-      }
-    }
-    // 兼容旧版（base64 存普通 KV）：迁移前已生成/导入的资产仍可读出
-    const legacy = await window.mulby?.storage?.get(id)
-    if (legacy && typeof legacy === 'object' && 'base64' in (legacy as Record<string, unknown>)) {
-      return legacy as AssetData
-    }
-    return null
-  } catch {
-    return null
-  }
+  const e = await fetchEntry(id)
+  if (!e) return null
+  return { base64: bytesToBase64(e.bytes), mime: e.mime }
 }
 
 export async function deleteAsset(id: string): Promise<void> {
+  releaseAsset(id) // 先释放缓存/blob，避免悬挂引用
   try {
     await window.mulby?.storage?.attachment?.remove(id)
     await window.mulby?.storage?.remove(id) // 一并清掉可能存在的旧版 KV 残留
