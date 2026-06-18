@@ -18,7 +18,7 @@ import {
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
-import { loadAsset, toDataUrl } from '../../services/assets'
+import { loadAssetUrl } from '../../services/assets'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -71,7 +71,8 @@ export function RefThumb({ assetId }: { assetId?: string }) {
   useEffect(() => {
     let on = true
     if (!assetId) return
-    void loadAsset(assetId).then((a) => a && on && setUrl(toDataUrl(a.base64, a.mime)))
+    // blob: URL 生命周期由 assets.ts 字节缓存拥有，组件仅用 mounted 守卫，绝不在此 revoke
+    void loadAssetUrl(assetId).then((u) => u && on && setUrl(u))
     return () => {
       on = false
     }

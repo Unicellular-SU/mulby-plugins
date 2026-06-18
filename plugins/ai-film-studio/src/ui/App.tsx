@@ -7,6 +7,7 @@ import AssetsView from './components/views/AssetsView'
 import PromptLibrary from './components/views/PromptLibrary'
 import SettingsView from './components/views/SettingsView'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
+import { clearAssetCache } from './services/assets'
 import { useProviderStore } from './store/providerStore'
 import { usePromptStore } from './store/promptStore'
 import { useUiStore } from './store/uiStore'
@@ -61,7 +62,10 @@ export default function App() {
     const onHide = () => {
       if (document.visibilityState === 'hidden') void flushSave()
     }
-    const onPageHide = () => void flushSave()
+    const onPageHide = () => {
+      void flushSave()
+      clearAssetCache() // 卸载时释放所有 blob/字节缓存（best-effort，非内存上界的唯一来源）
+    }
     document.addEventListener('visibilitychange', onHide)
     window.addEventListener('pagehide', onPageHide)
     return () => {

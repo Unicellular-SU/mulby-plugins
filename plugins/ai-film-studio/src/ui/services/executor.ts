@@ -5,6 +5,7 @@
 import type { Edge } from '@xyflow/react'
 import { getNodeDef } from '../nodes/nodeDefs'
 import type { FilmNode, PortValue } from '../store/graphStore'
+import { isEphemeralUrl } from './assets'
 
 /** 解析某节点某输出端口的产物：输入节点按参数即时派生，其余取已运行的 outputs */
 export function resolveOutput(node: FilmNode, handle: string): PortValue | null {
@@ -105,13 +106,13 @@ function hashString(s: string): string {
 }
 
 /**
- * 上游产物指纹：只取稳定标识（assetId/localPath/非 data url、text、json、meta），
- * 绝不哈希 base64/data url —— 它们 hydrate 后会变、stripValue 又剥离，会导致缓存永远 miss。
+ * 上游产物指纹：只取稳定标识（assetId/localPath/非临时 url、text、json、meta），
+ * 绝不哈希 data:/blob: 等临时 url —— 它们 hydrate 后会变、stripValue 又剥离，会导致缓存永远 miss。
  */
 function fingerprintInputs(inputs: Record<string, PortValue[]>): unknown {
   const pick = (v: PortValue): unknown => ({
     type: v.type,
-    id: v.assetId ?? v.localPath ?? (v.url && !v.url.startsWith('data:') ? v.url : undefined),
+    id: v.assetId ?? v.localPath ?? (v.url && !isEphemeralUrl(v.url) ? v.url : undefined),
     text: v.type === 'text' ? v.text : undefined,
     json: v.type === 'json' ? v.json : undefined,
     meta: v.meta,

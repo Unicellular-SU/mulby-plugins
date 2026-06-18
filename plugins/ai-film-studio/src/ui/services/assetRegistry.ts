@@ -13,7 +13,7 @@
  * 仅读 KV/attachment/filesystem 这些已确认存在的宿主 API；不改 PortValue/executor 语义。
  */
 import { nanoid } from 'nanoid'
-import { loadAsset, deleteAsset, saveAsset, toDataUrl } from './assets'
+import { loadAssetUrl, deleteAsset, saveAsset, isEphemeralUrl } from './assets'
 import { writeBase64, toFileUrl } from './fsutil'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -131,14 +131,18 @@ export async function setAssetBoard(assetRecordId: string, boardId?: string): Pr
 
 /** 去重键：附件 id / 本地路径 / 远程 url */
 function refKey(r: { assetId?: string; localPath?: string; url?: string }): string {
-  return r.assetId || r.localPath || (r.url && !r.url.startsWith('data:') ? r.url : '') || ''
+  return r.assetId || r.localPath || (r.url && !isEphemeralUrl(r.url) ? r.url : '') || ''
 }
 
-/** 解析素材为可显示 URL（附件→dataURL；文件→file://；远程→原样） */
+/**
+ * 解析素材为可显示 URL（附件→blob:；文件→file://；远程→原样）。
+ * 注意：附件分支经 assets.ts 字节缓存返回 blob:，其生命周期由该缓存拥有，调用方不可 revoke。
+ * React 组件请用 useMediaUrl（M6）而非直接调本函数。
+ */
 export async function resolveAssetUrl(rec: Pick<AssetRecord, 'assetId' | 'localPath' | 'url'>): Promise<string> {
   if (rec.assetId) {
-    const a = await loadAsset(rec.assetId)
-    if (a) return toDataUrl(a.base64, a.mime)
+    const url = await loadAssetUrl(rec.assetId)
+    if (url) return url
   }
   if (rec.localPath) return toFileUrl(rec.localPath)
   if (rec.url) return rec.url
@@ -202,7 +206,7 @@ export async function backfillFromProjects(): Promise<AssetRecord[]> {
         role: 'generated',
         assetId: pv.assetId,
         localPath: pv.localPath,
-        url: pv.url && !pv.url.startsWith('data:') ? pv.url : undefined,
+        url: pv.url && !isEphemeralUrl(pv.url) ? pv.url : undefined,
         durationSec: pv.durationSec,
         name: typeof pv.meta?.name === 'string' ? (pv.meta.name as string) : undefined,
         projectId: proj.id,
@@ -286,9 +290,9 @@ async function collectReferenced(): Promise<Set<string>> {
 }
 
 /** 清理未引用素材（标记-清除）：删除附件库里不再被任何工程/Elements/上传引用的孤儿，修复历史泄漏 */
-export async function gcOrphans(): Promise<{ removed: number; freedBytes: number }> {
+export async function gcOrphans(): Promise<{ removed: number; freedBytes: number; removedIds: string[] }> {
   const att = window.mulby?.storage?.attachment
-  if (!att?.list) return { removed: 0, freedBytes: 0 }
+  if (!att?.list) return { removed: 0, freedBytes: 0, removedIds: [] }
   const all = await att.list()
   const referenced = await collectReferenced()
   let removed = 0
@@ -309,5 +313,6 @@ export async function gcOrphans(): Promise<{ removed: number; freedBytes: number
     const registry = await loadRegistry()
     await saveRegistry(registry.filter((r) => !(r.assetId && removedIds.has(r.assetId))))
   }
-  return { removed, freedBytes }
+  // 返回 removedIds：调用方（assetStore.runGc）据此 releaseAsset，revoke 这些孤儿的 blob/字节缓存
+  return { removed, freedBytes, removedIds: [...removedIds] }
 }

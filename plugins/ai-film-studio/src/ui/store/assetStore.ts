@@ -5,6 +5,7 @@
  */
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
+import { releaseAsset } from '../services/assets'
 import {
   loadRegistry,
   loadBoards,
@@ -162,6 +163,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     set({ busy: true })
     try {
       const r = await gcOrphans()
+      // 精准 revoke：只释放被 GC 掉的孤儿在内存缓存里的 blob/字节（绝不整体 clearAssetCache，否则会 blank 在屏媒体）
+      for (const id of r.removedIds) releaseAsset(id)
       set({ assets: await loadRegistry(), usage: await storageUsage() })
       return r
     } finally {
