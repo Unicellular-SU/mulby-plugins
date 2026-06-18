@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { Lock, LockOpen, Loader2 } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
@@ -139,10 +139,11 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const rows = Math.max(def.inputs.length, def.outputs.length, 1)
   const bodyH = rows * ROW_H + TOP_PAD
 
-  const media = firstMedia(data)
+  // 派生值 memo 化（次要收益）：当本节点 data 引用未变时不重算 O(n) 扫描
+  const media = useMemo(() => firstMedia(data), [data])
   const previewImg = data.status === 'running' ? data.previewUrl : ''
   // 实时铺开：扇出（多张）时在画布上铺成网格，已生成的填图、未生成的占位旋转
-  const tiles = mediaTiles(data)
+  const tiles = useMemo(() => mediaTiles(data), [data])
   const genTotal = data.status === 'running' ? Number(data.gen?.total ?? 0) : 0
   const gridCount = Math.max(genTotal, tiles.length)
   const showGrid = !previewImg && gridCount > 1
@@ -151,7 +152,10 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const TILE = 76
   const gridWidth = cols * (TILE + 4) + 12
   // 文本节点：把剧本/分镜/角色/大纲格式化成画布卡片（实时增长）
-  const card = def.category === 'text' && !showGrid ? dataCard(data.kind, jsonOutput(data)) : null
+  const card = useMemo(
+    () => (def.category === 'text' && !showGrid ? dataCard(data.kind, jsonOutput(data)) : null),
+    [def.category, showGrid, data]
+  )
   const showData = !!card && card.rows.length > 0
 
   let footer: { cls: string; text: string } | null = null

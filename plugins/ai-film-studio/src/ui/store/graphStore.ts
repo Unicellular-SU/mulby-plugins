@@ -2338,6 +2338,43 @@ async function hydrateAssets(opts?: { onlyNodeIds?: Set<string> }) {
   }))
 }
 
+/** 估算当前视口内的节点 id（用窗口尺寸 + ReactFlow viewport 变换，宽裕 margin 防临界闪烁） */
+function visibleNodeIds(): Set<string> | null {
+  const { nodes, viewport } = useGraphStore.getState()
+  if (!viewport || !viewport.zoom || typeof window === 'undefined') return null
+  const { x, y, zoom } = viewport
+  const w = window.innerWidth || 1280
+  const h = window.innerHeight || 800
+  const margin = 600
+  const minX = -x / zoom - margin
+  const maxX = (w - x) / zoom + margin
+  const minY = -y / zoom - margin
+  const maxY = (h - y) / zoom + margin
+  const ids = new Set<string>()
+  for (const n of nodes) {
+    const px = n.position?.x ?? 0
+    const py = n.position?.y ?? 0
+    if (px >= minX && px <= maxX && py >= minY && py <= maxY) ids.add(n.id)
+  }
+  return ids
+}
+
+/** 可视优先补水：先 hydrate 视口内节点（缩短首屏可见缩略图时间），其余排到空闲回调 */
+function hydrateVisibleFirst() {
+  const visible = visibleNodeIds()
+  if (!visible || visible.size === 0) {
+    void hydrateAssets().catch(() => {}) // 无视口信息：全量 hydrate
+    return
+  }
+  void hydrateAssets({ onlyNodeIds: visible })
+    .catch(() => {})
+    .finally(() => {
+      const idle = (cb: () => void) =>
+        typeof window.requestIdleCallback === 'function' ? window.requestIdleCallback(() => cb()) : setTimeout(cb, 0)
+      idle(() => void hydrateAssets().catch(() => {})) // 其余（离屏）节点空闲补水；已 hydrate 的会被跳过
+    })
+}
+
 // 递归回灌：把内嵌的 data URL 重新写入资产库，回填 assetId（含扇出 items）
 async function reimportValue(v: PortValue): Promise<PortValue> {
   let out: PortValue = v.items?.length ? { ...v, items: await Promise.all(v.items.map(reimportValue)) } : v
@@ -2613,7 +2650,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       dirty: false,
     })
     syncProjectPromptLayer(current.promptOverrides)
-    void hydrateAssets().catch(() => {})
+    hydrateVisibleFirst()
   },
 
   // ============ 模型 / 运行 ============
@@ -3315,7 +3352,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       dirty: false,
     })
     syncProjectPromptLayer(target.promptOverrides)
-    void hydrateAssets().catch(() => {})
+    hydrateVisibleFirst()
   },
 
   deleteProject: async (id) => {
@@ -3356,7 +3393,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         dirty: false,
       })
       syncProjectPromptLayer(current?.promptOverrides)
-      void hydrateAssets().catch(() => {})
+      hydrateVisibleFirst()
     } else {
       set({ projects: index })
     }
