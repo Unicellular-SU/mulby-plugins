@@ -7,6 +7,8 @@ import { useAssetStore } from '../store/assetStore'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS } from '../store/promptStore'
 import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
+import { OptimizableField } from './OptimizableField'
+import { getFieldOptimizer } from '../services/fieldOptimize'
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -146,8 +148,20 @@ export default function Inspector() {
       className: 'afs-field__input',
       value: (value ?? '') as string | number,
     }
+    const optGuide = getFieldOptimizer(node.data.kind, p.key)
     switch (p.control) {
       case 'textarea':
+        if (optGuide)
+          return (
+            <OptimizableField
+              nodeId={node.id}
+              paramKey={p.key}
+              value={(value ?? '') as string}
+              control="textarea"
+              placeholder={p.placeholder}
+              guide={optGuide}
+            />
+          )
         return (
           <textarea
             {...common}
@@ -180,6 +194,17 @@ export default function Inspector() {
           </select>
         )
       default:
+        if (optGuide)
+          return (
+            <OptimizableField
+              nodeId={node.id}
+              paramKey={p.key}
+              value={(value ?? '') as string}
+              control="text"
+              placeholder={p.placeholder}
+              guide={optGuide}
+            />
+          )
         return (
           <input
             {...common}

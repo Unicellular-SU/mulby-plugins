@@ -1057,6 +1057,58 @@ body {
   white-space: nowrap;
 }
 
+/* ============ 可 AI 优化的输入框（右下角按钮） ============ */
+.afs-optfield {
+  position: relative;
+}
+.afs-optfield__input {
+  display: block;
+  width: 100%;
+}
+.afs-optfield--textarea .afs-optfield__input {
+  padding-bottom: 28px;
+}
+.afs-optfield--text .afs-optfield__input {
+  padding-right: 58px;
+}
+.afs-optfield__actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  gap: 4px;
+}
+.afs-optfield__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: rgba(15, 22, 38, 0.92);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.afs-optfield__btn:hover {
+  color: #fff;
+  border-color: #64748b;
+}
+.afs-optfield__btn--ai {
+  color: #c084fc;
+}
+.afs-optfield__btn--ai:hover {
+  color: #d8b4fe;
+  border-color: #a855f7;
+}
+.afs-optfield__btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  color: #cbd5e1;
+}
+
 /* ============ 供应商设置弹窗 ============ */
 .afs-modal {
   position: fixed;
