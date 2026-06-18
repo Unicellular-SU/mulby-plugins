@@ -2069,6 +2069,20 @@ body {
   object-fit: cover;
   display: block;
 }
+/* M6：AssetThumb 媒体覆盖在稳定 ph 容器（承载 useInView ref）之上 */
+.afs-thumb__overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* M6 窗口化：离屏素材卡引擎级跳过布局/绘制，大画廊滚动不卡（contain-intrinsic-size 为离屏占位高） */
+.afs-acard {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 232px;
+}
 .afs-lib__ph {
   width: 100%;
   height: 100%;

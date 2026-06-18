@@ -17,8 +17,9 @@ import {
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
-import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
+import { type AssetRecord, type AssetType } from '../../services/assetRegistry'
 import { loadAssetUrl } from '../../services/assets'
+import { useMediaUrl, useInView } from '../../services/mediaUrl'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -46,21 +47,20 @@ const TYPE_LABEL: Record<AssetType, string> = { image: '图片', video: '视频'
 
 /** 素材缩略：图片/视频出缩略，音频出图标 */
 export function AssetThumb({ rec }: { rec: AssetRecord }) {
-  const [url, setUrl] = useState('')
-  useEffect(() => {
-    let on = true
-    if (rec.type === 'audio') return
-    void resolveAssetUrl(rec).then((u) => on && setUrl(u))
-    return () => {
-      on = false
-    }
-  }, [rec.id, rec.type])
+  // 窗口化：稳定的 ph 容器承载 useInView ref；离屏不解析 blob（避免大画廊一次性几百次 attachment.get）
+  const [ref, inView] = useInView<HTMLDivElement>('400px')
+  const url = useMediaUrl(rec.type !== 'audio' && inView ? rec : null)
   const Icon = TYPE_ICON[rec.type]
-  if (rec.type === 'image') return url ? <img src={url} alt="" /> : <div className="afs-lib__ph"><Icon size={24} /></div>
-  if (rec.type === 'video') return url ? <video src={url} muted preload="metadata" /> : <div className="afs-lib__ph"><Icon size={24} /></div>
+  const phClass = `afs-lib__ph${rec.type === 'audio' ? ' afs-lib__ph--audio' : ''}`
   return (
-    <div className="afs-lib__ph afs-lib__ph--audio">
-      <Icon size={24} />
+    <div className={phClass} ref={ref}>
+      {rec.type === 'image' && url ? (
+        <img className="afs-thumb__overlay" src={url} alt="" />
+      ) : rec.type === 'video' && url ? (
+        <video className="afs-thumb__overlay" src={url} muted preload="metadata" />
+      ) : (
+        <Icon size={24} />
+      )}
     </div>
   )
 }
@@ -316,14 +316,7 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
 }
 
 function Lightbox({ rec, onClose }: { rec: AssetRecord; onClose: () => void }) {
-  const [url, setUrl] = useState('')
-  useEffect(() => {
-    let on = true
-    void resolveAssetUrl(rec).then((u) => on && setUrl(u))
-    return () => {
-      on = false
-    }
-  }, [rec])
+  const url = useMediaUrl(rec)
   return (
     <div className="afs-lightbox" onClick={onClose}>
       <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus, Copy, Download, Upload, Trash2, Pencil, Clapperboard } from 'lucide-react'
 import { useGraphStore, type ProjectCard, type ProjectData } from '../../store/graphStore'
 import { TEMPLATES } from '../../templates'
-import { loadAsset, toDataUrl } from '../../services/assets'
+import { useMediaUrl } from '../../services/mediaUrl'
 
 function relTime(ts: number): string {
   const d = Date.now() - ts
@@ -17,6 +17,18 @@ function relTime(ts: number): string {
 }
 
 /** 工程主页：工程封面卡片网格 + 新建 / 从模板新建 / 导入；卡片支持打开 / 重命名 / 复制 / 导出 / 删除。 */
+/** 工程封面：按 coverAssetId 经 useMediaUrl 解析 blob:（替代旧的 base64 covers map） */
+function Cover({ assetId }: { assetId?: string }) {
+  const url = useMediaUrl(assetId ? { assetId } : null)
+  return url ? (
+    <img src={url} alt="" />
+  ) : (
+    <div className="afs-pcard__ph">
+      <Clapperboard size={26} />
+    </div>
+  )
+}
+
 export default function ProjectHome({ onOpen }: { onOpen: () => void }) {
   const currentId = useGraphStore((s) => s.currentId)
   const projects = useGraphStore((s) => s.projects) // 列表变化时触发刷新
@@ -32,32 +44,11 @@ export default function ProjectHome({ onOpen }: { onOpen: () => void }) {
 
   const fileRef = useRef<HTMLInputElement>(null)
   const [cards, setCards] = useState<ProjectCard[]>([])
-  const [covers, setCovers] = useState<Record<string, string>>({})
-
   const refresh = async () => setCards(await loadProjectCards())
   useEffect(() => {
     void refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects.length, currentId])
-
-  // 懒加载封面缩略图
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      const next: Record<string, string> = {}
-      for (const c of cards) {
-        if (c.coverAssetId && !covers[c.coverAssetId]) {
-          const a = await loadAsset(c.coverAssetId)
-          if (a) next[c.coverAssetId] = toDataUrl(a.base64, a.mime)
-        }
-      }
-      if (alive && Object.keys(next).length) setCovers((p) => ({ ...p, ...next }))
-    })()
-    return () => {
-      alive = false
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cards])
 
   const open = async (id: string) => {
     await switchProject(id)
@@ -141,18 +132,11 @@ export default function ProjectHome({ onOpen }: { onOpen: () => void }) {
       <div className="afs-home__scroll">
         <div className="afs-home__grid">
           {cards.map((c) => {
-            const cover = c.coverAssetId ? covers[c.coverAssetId] : undefined
             const isCur = c.id === currentId
             return (
               <div key={c.id} className={`afs-pcard${isCur ? ' is-current' : ''}`}>
                 <div className="afs-pcard__cover" onClick={() => open(c.id)} title="打开工程">
-                  {cover ? (
-                    <img src={cover} alt="" />
-                  ) : (
-                    <div className="afs-pcard__ph">
-                      <Clapperboard size={26} />
-                    </div>
-                  )}
+                  <Cover assetId={c.coverAssetId} />
                   {c.aspectRatio && <span className="afs-pcard__ratio">{c.aspectRatio}</span>}
                   <span className="afs-pcard__count">{c.nodeCount} 节点</span>
                 </div>
