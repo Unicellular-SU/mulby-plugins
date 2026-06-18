@@ -691,7 +691,8 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       const img: PortValue = {
         type: 'image',
         assetId,
-        url: toDataUrl(r.base64, r.mime),
+        // 去生成时持久 data: url：显示走 useMediaUrl(assetId)→blob(saveAsset 已灌缓存，即时)；
+        // 下游 portImageDataUrl 按 assetId 取字节。免整段 base64 常驻会话内存。
         mime: r.mime,
         meta: { ...job.meta, kind: node.data.kind },
       }
@@ -869,7 +870,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         if (m.view) meta.view = m.view
         if (m.locationKey) meta.locationKey = m.locationKey
         if (m.isMasterPlate) meta.isMasterPlate = m.isMasterPlate
-        items.push({ type: 'image', assetId, url: toDataUrl(r.base64, r.mime), mime: r.mime, ...(Object.keys(meta).length ? { meta } : {}) })
+        items.push({ type: 'image', assetId, mime: r.mime, ...(Object.keys(meta).length ? { meta } : {}) })
         patchNode(id, {
           outputs: { out: { type: 'image', items: [...items], assetId: items[0].assetId, url: items[0].url, mime: items[0].mime } },
         })
@@ -1137,7 +1138,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
           frontB64 = r.base64
           frontMime = r.mime
         }
-        results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), url: toDataUrl(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
+        results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
         done++
         writeBack()
       } catch {
@@ -1162,7 +1163,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
               b64 = r.base64
               mime = r.mime
             }
-            results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), url: toDataUrl(b64, mime), mime, meta: metaOf(set.views[vi].view) }
+            results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), mime, meta: metaOf(set.views[vi].view) }
             done++
             writeBack()
           } catch {
@@ -1294,7 +1295,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
             mime = r.mime
           }
           const assetId = await saveAsset(base64, mime)
-          return { type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta }
+          return { type: 'image', assetId, mime, meta: job.meta }
         },
         {
           retries: 2, // 失败重试 2 次（扛限流），减少静默丢帧
@@ -2684,7 +2685,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const name = node?.data.params?.name ? String(node.data.params.name) : ''
     const kind = node?.data.kind === 'character' || node?.data.kind === 'scene' ? node.data.kind : undefined
     const meta = name || kind ? { ...(name ? { name } : {}), ...(kind ? { kind } : {}) } : undefined
-    const img: PortValue = { type: 'image', assetId, url: toDataUrl(base64, mime), mime, ...(meta ? { meta } : {}) }
+    const img: PortValue = { type: 'image', assetId, mime, ...(meta ? { meta } : {}) }
     const prev = node?.data.outputs || {}
     patchNode(id, { status: 'done', error: undefined, outputs: { ...prev, [port]: img } })
     void safeSave()
@@ -2696,7 +2697,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     patchNode(id, {
       status: 'done',
       error: undefined,
-      outputs: { out: { type: 'audio', assetId, url: toDataUrl(base64, mime || 'audio/mpeg'), mime: mime || 'audio/mpeg' } },
+      outputs: { out: { type: 'audio', assetId, mime: mime || 'audio/mpeg' } },
     })
     void safeSave()
   },
@@ -2739,7 +2740,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     try {
       const r = await editImage({ model, prompt, refBase64: base64, refMime: mime })
       const newAssetId = await saveAsset(r.base64, r.mime)
-      const newItem: PortValue = { ...target, assetId: newAssetId, url: toDataUrl(r.base64, r.mime), mime: r.mime }
+      // 去生成时 data: url；显式清掉 ...target 带来的旧 url，避免显示编辑前的旧图（useMediaUrl 按新 assetId 解析）
+      const newItem: PortValue = { ...target, assetId: newAssetId, url: undefined, mime: r.mime }
       const cur = get().nodes.find((n) => n.id === nodeId)
       const cval = cur?.data.outputs?.[port]
       if (cur && cval) {
@@ -2819,7 +2821,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         mime = r.mime
       }
       const assetId = await saveAsset(base64, mime)
-      const newItem: PortValue = { type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta }
+      const newItem: PortValue = { type: 'image', assetId, mime, meta: job.meta }
       const cur = get().nodes.find((n) => n.id === nodeId)
       const cval = cur?.data.outputs?.[port]
       if (cur && cval) {

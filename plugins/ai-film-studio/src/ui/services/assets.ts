@@ -155,14 +155,34 @@ export function clearAssetCache(): void {
   cacheBytes = 0
 }
 
+/** 把已知字节灌入缓存（生成后调用）：随后 useMediaUrl(assetId) 即时出 blob:，无需再读附件 */
+export function primeAsset(id: string, base64: string, mime: string): void {
+  if (!base64 || assetCache.has(id)) return
+  try {
+    const raw = base64.startsWith('data:') ? fromDataUrl(base64).base64 : base64
+    cacheEntry(id, base64ToBytes(raw), mime)
+  } catch {
+    // 忽略
+  }
+}
+
 export async function saveAsset(base64: string, mime = 'image/png'): Promise<string> {
   const id = `a_${nanoid(10)}`
+  let ok = true
   try {
     const att = window.mulby?.storage?.attachment
-    if (att) await att.put(id, base64ToBytes(base64), mime)
+    if (att) {
+      const raw = base64.startsWith('data:') ? fromDataUrl(base64).base64 : base64
+      // 宿主类型声明为 boolean，运行时实为 {ok,error}；两种都判
+      const res = (await att.put(id, base64ToBytes(raw), mime)) as unknown as boolean | { ok?: boolean }
+      ok = res !== false && !(typeof res === 'object' && res?.ok === false)
+    }
   } catch {
-    // 存储失败时仍返回 id（内存中的 url 仍可用，仅刷新后丢失）
+    ok = false
   }
+  // 无论成败都灌缓存：生成后即时显示（失败则本会话可见、刷新后丢失，并告警）
+  primeAsset(id, base64, mime)
+  if (!ok) window.mulby?.storage && window.mulby?.notification?.show('素材保存失败：本次会话可见，刷新后可能丢失', 'warning')
   return id
 }
 
