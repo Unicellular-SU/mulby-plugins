@@ -33,6 +33,32 @@ export interface WorkflowTemplate {
 
 export const TEMPLATES: WorkflowTemplate[] = [
   {
+    id: 'quick-micro',
+    name: '微短片速测（≈4 镜 · 最快出片）',
+    desc: '一句话故事 → 剧本(微短片·1-2场) → 分镜(约3-5镜) → 角色三视图 → 关键帧 → 图生视频(原生台词+顺接) → 预览。跳过大纲，最省最快，用于快速验证效果（也可在「全局设定」把成片体量设为微短片，让任意流水线都出小片）。',
+    nodes: [
+      { kind: 'story', x: 60, y: 220 },
+      { kind: 'script-gen', x: 320, y: 220, params: { targetLength: '微短片' } },
+      { kind: 'storyboard', x: 580, y: 120 },
+      { kind: 'char-sheet', x: 580, y: 380 },
+      { kind: 'char-image', x: 820, y: 380 },
+      { kind: 'keyframe', x: 840, y: 120 },
+      { kind: 'i2v', x: 1080, y: 120, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
+      { kind: 'preview', x: 1320, y: 120 },
+    ],
+    edges: [
+      { from: 0, to: 1, toHandle: 'in' }, // story → script-gen（微短片，无需大纲）
+      { from: 1, to: 2, toHandle: 'in' }, // script → storyboard
+      { from: 1, to: 3, toHandle: 'in' }, // script → char-sheet
+      { from: 3, to: 4, toHandle: 'role' }, // char-sheet → char-image
+      { from: 3, to: 5, toHandle: 'chars' }, // char-sheet → keyframe.chars
+      { from: 4, to: 5, toHandle: 'ref' }, // char-image → keyframe.ref
+      { from: 2, to: 5, toHandle: 'shot' }, // storyboard → keyframe
+      { from: 5, to: 6, toHandle: 'frame' }, // keyframe → i2v
+      { from: 6, to: 7, toHandle: 'in' }, // i2v → preview
+    ],
+  },
+  {
     id: 'text-to-storyboard',
     name: '故事 → 分镜（文本预览）',
     desc: '一句话故事 → 大纲(节拍) → 剧本 → 分镜镜头表，纯文本快速预览结构（不出图，最省）',
@@ -53,7 +79,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'full-pipeline',
     name: '完整影视流水线（结构化 + 一致性 + 配音 + 字幕）',
-    desc: '故事→大纲→剧本→分镜→角色设定/三视图+场景概念图→关键帧(人物/场景参考保持一致)→图生视频→逐角色配音→合成→导出',
+    desc: '故事→大纲→剧本→分镜(可产段落 segments)→角色设定(自动按时期拆变体)/逐变体三视图+场景概念图→关键帧(按 charId+时期变体精确取图，跨镜一致)→图生视频→逐角色配音→合成→导出',
     nodes: [
       { kind: 'story', x: 40, y: 320 },
       { kind: 'outline', x: 260, y: 320 },
@@ -63,7 +89,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'char-image', x: 960, y: 440 },
       { kind: 'scene-image', x: 960, y: 620 },
       { kind: 'keyframe', x: 1000, y: 140 },
-      { kind: 'i2v', x: 1240, y: 140 },
+      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
       { kind: 'tts', x: 1240, y: 440 },
       { kind: 'compose', x: 1480, y: 320, params: { subtitleMode: '烧录字幕', transition: '淡入淡出' } },
       { kind: 'export', x: 1720, y: 320 },
@@ -91,7 +117,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'complex-script',
     name: '复杂剧本 · 按场扇出（长片不丢后半段 + 一致性）',
-    desc: '故事→大纲→长片剧本→ForEach 按场拆分镜(每场独立生成再合并)；角色三视图+场景概念图全局生成一次，关键帧据此跨镜保持人物/场景一致',
+    desc: '故事→大纲→长片剧本→ForEach 按场拆分镜(每场独立生成再合并，storyboard 可设镜头总数上限防爆炸)；角色(按时期拆变体)三视图+场景概念图全局生成一次，关键帧据此跨镜保持人物(对期)/场景一致',
     nodes: [
       { kind: 'story', x: 40, y: 300 },
       { kind: 'outline', x: 260, y: 300 },
@@ -122,6 +148,34 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 9, to: 10, toHandle: 'clips' }, // i2v → compose
       { from: 4, to: 10, toHandle: 'subs' }, // storyboard → compose 字幕
       { from: 10, to: 11, toHandle: 'in' }, // compose → export
+    ],
+  },
+  {
+    id: 'character-variants',
+    name: '角色跨时期一致性（少年→盛年→暮年）',
+    desc: '故事跨越人物多个时期→角色设定自动按时期拆形态变体(variants)→角色三视图逐变体生成→分镜按段落/节拍选对应时期的角色图，杜绝"不同时期合到一张图/取错期"。需选「全局设定」风格包效果更佳。',
+    nodes: [
+      { kind: 'story', x: 40, y: 300, params: { text: '一个剑客的一生：少年时清瘦、布衣，拜师学艺；盛年时蓄须、玄铁战甲，成为征战的将军；暮年时白发、素袍，归隐山林。' } },
+      { kind: 'outline', x: 260, y: 300 },
+      { kind: 'script-gen', x: 480, y: 300 },
+      { kind: 'storyboard', x: 720, y: 140 },
+      { kind: 'char-sheet', x: 720, y: 460 },
+      { kind: 'char-image', x: 980, y: 460 },
+      { kind: 'keyframe', x: 1000, y: 140 },
+      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
+      { kind: 'preview', x: 1480, y: 140 },
+    ],
+    edges: [
+      { from: 0, to: 1, toHandle: 'in' }, // story → outline（节拍，供变体 appliesTo 对齐）
+      { from: 1, to: 2, toHandle: 'in' }, // outline → script-gen
+      { from: 2, to: 3, toHandle: 'in' }, // script-gen → storyboard（可产 segments + 各段 activeVariants）
+      { from: 2, to: 4, toHandle: 'in' }, // script-gen → char-sheet（自动按时期拆 variants）
+      { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每 角色×变体 一组三视图）
+      { from: 4, to: 6, toHandle: 'chars' }, // char-sheet → keyframe.chars（解析本镜该用哪个时期变体）
+      { from: 5, to: 6, toHandle: 'ref' }, // char-image → keyframe.ref（按 charId+variantId 精确取该期图）
+      { from: 3, to: 6, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
+      { from: 6, to: 7, toHandle: 'frame' }, // keyframe → i2v
+      { from: 7, to: 8, toHandle: 'in' }, // i2v → preview
     ],
   },
   {

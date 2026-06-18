@@ -108,9 +108,20 @@ JSON 结构：
 
 JSON 结构：
 {
+  "segments": [
+    {
+      "id": "seg1",
+      "label": "段落名（如：初遇/决裂/高潮）",
+      "mood": "本段情绪基调（如：温柔甜蜜/紧张肃杀）",
+      "lighting": "本段光影方向（如：柔光暖调/冷调硬光）",
+      "activeVariants": [{ "name": "角色名", "variantId": "本段该角色所用时期/形态变体 id（对齐角色设定 variants[].id）" }],
+      "shotBudget": 4
+    }
+  ],
   "shots": [
     {
       "id": "s1",
+      "segmentId": "（所属段落 id，引用 segments[].id；用了 segments 时填）",
       "scene": "对应场景标题",
       "sceneId": "（有结构化剧本时填，引用 scene.id）",
       "actId": "（从对应 scene 继承，有则填）",
@@ -125,13 +136,17 @@ JSON 结构：
       "props": ["本镜出场的关键道具/物品名（如：发光的剑；无则省略）"],
       "screenDirection": "L2R|R2L|toward|away|static（主体运动/视线方向）",
       "reverseOf": "（正反打时填，指向被反打的 shotId，仅引用上文已出现的 id）",
+      "continuousFromPrev": "true/false：本镜是否紧接上一镜的同一连贯动作（无硬切，画面自然延续）。开启「镜头顺接」时，标 true 的镜头会用上一镜尾帧作首帧补间，消除割裂；硬切/转场镜头填 false",
       "sfx": ["关键音效（可选，如 脚步声、关门声）"],
       "ambient": "环境声（可选，如 雨声、街道嘈杂）",
+      "dialogues": [{ "character": "说话角色名", "line": "这一镜的台词（用项目对白语言，继承自剧本，逐字保留）", "emotion": "情绪(可选)" }],
       "prompt": "用于图像/视频生成的英文提示词（主体+动作+环境+风格；光线由场景参考图继承，勿在此堆光线词）"
     }
   ]
 }
-duration 为数字（秒）。按叙事顺序排列。有结构化剧本（含 scene.id）时，shots 必须覆盖全部场景、不得截断后半段。
+duration 为数字（秒，建议 4-15）。按叙事顺序排列。有结构化剧本（含 scene.id）时，shots 必须覆盖全部场景、不得截断后半段。
+台词：把该镜对应的对白放进该 shot 的 dialogues（从剧本 scene.dialogues 继承到对应镜头，**用项目设定的对白语言、逐字保留不要翻译**；这一镜没有人说话才省略）。dialogues 同时供原生音频视频与配音(TTS)使用。
+段落规划（可选但推荐）：先按情绪把剧本分成若干 segments，每段绑定 mood/光影/本段各角色所用变体（activeVariants，引用角色设定里该角色的 variants[].id）与镜头预算（shotBudget）；再产出 shots，每个 shot 标注 segmentId 并继承该段基调与角色形态。简单短片可省略 segments 直接给 shots。
 轴线规则：同一对话/动作场景中保持轴线一致，相邻镜头 screenDirection 不应无理由翻转（跳轴）；正反打用 reverseOf 指向被反打 shotId，且二者方向相反（toward↔away / L2R↔R2L）。`,
   },
   {
@@ -140,7 +155,7 @@ duration 为数字（秒）。按叙事顺序排列。有结构化剧本（含 s
     label: '角色设定',
     desc: '角色设定师角色 + 角色卡（含三视图英文提示词）的 JSON 结构。',
     jsonContract: true,
-    default: `你是角色设定师。从给定故事/剧本中提炼主要角色，为每个角色给出设定与三视图提示词。
+    default: `你是角色设定师。从给定故事/剧本中提炼主要角色，为每个角色给出设定、三视图提示词，并按时期拆分形态变体。
 
 JSON 结构：
 {
@@ -148,15 +163,31 @@ JSON 结构：
     {
       "name": "角色名",
       "description": "角色背景与性格（中文）",
-      "appearance": "外貌、服饰、特征（中文）",
+      "identity": "**不随时间改变**的身份特征：脸型/五官/体型/标志特征（疤、痣、瞳色等）。务必 age-neutral，不要写少年/老年/某岁等时期词",
+      "appearance": "外貌、服饰、特征（中文，单一时期角色可只写此项）",
       "refPrompt": "用于生成角色形象的英文提示词",
       "triple": { "front": "正面英文提示词", "side": "侧面英文提示词", "back": "背面英文提示词" },
+      "variants": [
+        {
+          "id": "youth",
+          "label": "少年期",
+          "stageKey": "对应阶段键（对齐节拍 type 或 act/mood，便于按镜头取对应期）",
+          "appliesTo": ["该形态适用的节拍 type/act/mood 关键字，如 setup、catalyst"],
+          "appearance": "**该时期**的外貌/年龄/服饰（中文）",
+          "triple": { "front": "正面英文提示词", "side": "侧面英文提示词", "back": "背面英文提示词" }
+        }
+      ],
       "motivation": "角色核心动机（一句话，贯穿全片）",
       "arc": [{ "stage": "对应节拍/阶段（如 setup/midpoint/climax）", "state": "此阶段角色处境", "emotion": "此刻情绪" }]
     }
   ]
 }
-若上游提供大纲节拍，arc[].stage 尽量对齐节拍类型，给出角色在各关键节拍的状态。`,
+
+**硬性要求（违反会被打回重做）**：
+- 凡角色在故事中跨越明显**时期/年龄/重大造型变化**（如少年→盛年→暮年），**必须**拆成多个 variants（每期一项，各自独立 appearance + triple），且 identity 里**只写不变特征**、不得出现时期/年龄词。
+- 同一时期内不要拆分；单一时期角色 variants 可省略（只用 appearance）。
+- 每个 variant 的 id 在该角色内唯一。
+- 若上游提供大纲节拍，variants[].appliesTo / arc[].stage 尽量对齐节拍 type，给出角色在各关键节拍的形态与状态。`,
   },
   {
     id: 'text.fx.expand',

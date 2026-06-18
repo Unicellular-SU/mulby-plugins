@@ -9,7 +9,9 @@ import { generateImage, editImage, abortImage } from '../services/imageEngine'
 import { saveAsset, loadAsset, toDataUrl, fromDataUrl } from '../services/assets'
 import { resolveAssetUrl, type AssetRecord } from '../services/assetRegistry'
 import type { ElementRef } from './assetStore'
-import { buildPrompt, buildImagePrompts, buildAssetImageJob, buildCharViewSets, validateNodeJson, buildRepairPrompt, shotCameraMotion, buildAudioPrompt, checkAxisContinuity } from '../services/prompts'
+import { buildPrompt, buildImagePrompts, buildAssetImageJob, buildCharViewSets, validateNodeJson, buildRepairPrompt, shotCameraMotion, buildAudioPrompt, checkAxisContinuity, scaleSpec } from '../services/prompts'
+import { videoStyleTag } from '../services/stylePacks'
+import { useAssetStore } from './assetStore'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs, computeInputHash } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
@@ -117,11 +119,14 @@ function pickCoverAssetId(nodes: FilmNode[]): string | undefined {
 export interface ProjectGlobals {
   aspectRatio: '16:9' | '9:16' | '1:1' | string
   style: string
+  stylePackId?: string // M21：结构化风格包 id（注入色盘/光影/锚定/负向词）；自由 style 可叠加其后
   concurrency?: number // 单节点扇出（关键帧/角色图/视频…）的并发上限，默认 3；过大易触发供应商限流
+  dialogueLang?: string // 对白语言：剧本/分镜台词 + 原生音频/配音都按此语言（默认中文），杜绝默认说英文
+  filmScale?: string // 成片体量：微短片/短片/单集/长片——一处设定，协调大纲节拍数+剧本场数+分镜镜头数（默认短片）
 }
 
 export function defaultGlobals(): ProjectGlobals {
-  return { aspectRatio: '16:9', style: '', concurrency: 3 }
+  return { aspectRatio: '16:9', style: '', concurrency: 3, dialogueLang: '中文', filmScale: '短片' }
 }
 
 // 向后兼容：旧工程可能无 globals 或字段不全，统一补全为完整结构
@@ -143,22 +148,39 @@ async function mapPool<T, R>(
   items: T[],
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
-  opts?: { onSettled?: (index: number, result: R) => void; onError?: (index: number, err: unknown) => void; shouldStop?: () => boolean }
+  opts?: {
+    onSettled?: (index: number, result: R) => void
+    onError?: (index: number, err: unknown) => void
+    shouldStop?: () => boolean
+    retries?: number // 失败后重试次数（默认 0）；用于扛供应商限流/瞬时错误，杜绝静默丢帧/丢片
+    retryDelayMs?: number // 重试基础退避（线性递增），默认 1500ms
+  }
 ): Promise<(R | undefined)[]> {
   const results = new Array<R | undefined>(items.length)
+  const retries = Math.max(0, opts?.retries ?? 0)
+  const retryDelay = opts?.retryDelayMs ?? 1500
   let next = 0
   const worker = async () => {
     for (;;) {
       if (opts?.shouldStop?.()) return
       const i = next++
       if (i >= items.length) return
-      try {
-        const r = await fn(items[i], i)
-        results[i] = r
-        opts?.onSettled?.(i, r)
-      } catch (e) {
-        opts?.onError?.(i, e)
+      let lastErr: unknown
+      let ok = false
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        if (opts?.shouldStop?.()) return
+        try {
+          const r = await fn(items[i], i)
+          results[i] = r
+          opts?.onSettled?.(i, r)
+          ok = true
+          break
+        } catch (e) {
+          lastErr = e
+          if (attempt < retries) await new Promise((res) => setTimeout(res, retryDelay * (attempt + 1))) // 线性退避
+        }
       }
+      if (!ok) opts?.onError?.(i, lastErr)
     }
   }
   const w = Math.max(1, Math.min(limit, items.length))
@@ -501,7 +523,8 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
     } else if (mode === 'by-key' && lanes.length > 1) {
       // 按 charId/name/key 对齐：第一路为主，其余路按键并入该项的嵌套组
       const keyOf = (v: PortValue) =>
-        String(v.meta?.charId ?? v.meta?.name ?? v.meta?.key ?? v.meta?.shot ?? '')
+        String(v.meta?.charId ?? v.meta?.name ?? v.meta?.key ?? v.meta?.shot ?? '') +
+        (v.meta?.variantId ? '@' + String(v.meta.variantId) : '') // M-compat：同角色不同形态分桶，避免变体被合并对齐
       const index = new Map<string, PortValue[]>()
       for (let li = 1; li < lanes.length; li++)
         for (const v of lanes[li]) {
@@ -601,9 +624,15 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         const m = mains[i]
         const r = await editImage({ model, prompt, refBase64: m.base64, refMime: m.mime, extraRefs: extras })
         const assetId = await saveAsset(r.base64, r.mime)
+        // M-compat：透传一致性键，避免图生图/高清重绘后丢失角色/形态/场景身份导致下游取图断链
         const meta: Record<string, unknown> = {}
         if (m.name) meta.name = m.name
         if (m.kind) meta.kind = m.kind
+        if (m.charId) meta.charId = m.charId
+        if (m.variantId) meta.variantId = m.variantId
+        if (m.view) meta.view = m.view
+        if (m.locationKey) meta.locationKey = m.locationKey
+        if (m.isMasterPlate) meta.isMasterPlate = m.isMasterPlate
         items.push({ type: 'image', assetId, url: toDataUrl(r.base64, r.mime), mime: r.mime, ...(Object.keys(meta).length ? { meta } : {}) })
         patchNode(id, {
           outputs: { out: { type: 'image', items: [...items], assetId: items[0].assetId, url: items[0].url, mime: items[0].mime } },
@@ -697,9 +726,11 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
             },
           }
         )
-        const merged: unknown[] = perArrays.flatMap((a) => a || [])
-        const lastText = JSON.stringify({ [fanKey]: merged })
+        let merged: unknown[] = perArrays.flatMap((a) => a || [])
         if (merged.length === 0) throw new Error('逐项扇出未得到任何结果')
+        if (node.data.kind === 'storyboard')
+          merged = capStoryboardShots(merged, (Number(node.data.params?.maxShots ?? 0) || 0) || scaleSpec(get().globals.filmScale).maxShots)
+        const lastText = JSON.stringify({ [fanKey]: merged })
         patchNode(id, {
           status: 'done',
           stream: undefined,
@@ -767,6 +798,12 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         if (lastErr) {
           patchNode(id, { status: 'error', error: `未能解析 JSON 输出（${lastErr}）`, stream: content })
         } else {
+          // M-quick：单次成镜路径同样应用镜头总数上限
+          if (node.data.kind === 'storyboard') {
+            const pj = parsed as Record<string, unknown> | null
+            if (pj && Array.isArray(pj.shots))
+              pj.shots = capStoryboardShots(pj.shots as unknown[], (Number(node.data.params?.maxShots ?? 0) || 0) || scaleSpec(get().globals.filmScale).maxShots)
+          }
           patchNode(id, {
             status: 'done',
             outputs: { [outDef.id]: { type: 'json', json: parsed, text: content } },
@@ -815,7 +852,9 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       patchNode(id, { status: 'error', error: '未配置图像模型（请在顶栏或节点选择）' })
       return
     }
-    const canEdit = !!window.mulby?.ai?.images?.edit
+    // 修复 M22b-4：editImage 还需 attachments.upload，否则会抛错——缺上传能力时一律走文生图（变体提示词已含身份，仍保一致）
+    const canEdit =
+      typeof window.mulby?.ai?.images?.edit === 'function' && typeof window.mulby?.ai?.attachments?.upload === 'function'
     const extRefs = await refsFromValues(inputs['ref']) // 可选：上传/上游人物参考图，做 img2img
     const outId = def.outputs[0]?.id || 'out'
     useGraphStore.setState({ runningNodeId: id })
@@ -835,61 +874,82 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
           : undefined,
       })
     }
-    try {
-      await mapPool(
-        sets,
-        fanoutConcurrency(),
-        async (set, si): Promise<void> => {
-          const base = si * 3
-          const metaOf = (view: string) => ({ name: set.name, kind: 'character', charId: set.charId, view })
-          const extRef = canEdit ? pickRef(extRefs, set.refName) : null
-          // 1) front：有参考图则 img2img 锚定上传人物，否则文生图
-          let frontB64: string | null = null
-          let frontMime = 'image/png'
+    type CharSet = (typeof sets)[number]
+    const idxOf = new Map<CharSet, number>(sets.map((s, i) => [s, i]))
+    const baseFronts = new Map<string, { b64: string; mime: string }>() // M22b：组键 → 底模 front，供变体派生锁脸
+    const grpKey = (s: CharSet) => s.baseGroup || '' // 修复 ORD-1：唯一组键配对底模/变体，杜绝同名/无名串脸
+    const genSet = async (set: CharSet, anchor?: { b64: string; mime: string }): Promise<void> => {
+      const si = idxOf.get(set) ?? 0
+      const base = si * 3
+      const metaOf = (view: string) => ({ name: set.name, kind: 'character', charId: set.charId, variantId: set.variantId, view })
+      const extRef = canEdit ? pickRef(extRefs, set.refName) : null
+      // 1) front：M22b 变体→以底模 front 为参考派生（锁脸换龄/换装）；否则上传参考 img2img / 文生图
+      let frontB64: string | null = null
+      let frontMime = 'image/png'
+      try {
+        if (anchor && canEdit) {
+          const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
+          const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: anchor.b64, refMime: anchor.mime, extraRefs: extra })
+          frontB64 = r.base64
+          frontMime = r.mime
+        } else if (extRef) {
+          const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: extRef.base64, refMime: extRef.mime })
+          frontB64 = r.base64
+          frontMime = r.mime
+        } else {
+          const r = await generateImage({ model, prompt: set.views[0].prompt, size: set.size })
+          frontB64 = r.base64
+          frontMime = r.mime
+        }
+        results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), url: toDataUrl(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
+        done++
+        writeBack()
+      } catch {
+        failed++
+        return // front 失败则跳过该组 side/back（变体派生失败时会回退独立生成）
+      }
+      if (set.isBase && frontB64 && grpKey(set)) baseFronts.set(grpKey(set), { b64: frontB64, mime: frontMime }) // 捕获底模 front（空组键不入）
+      // 2) side/back：以本组 front 为参考保持自洽（有 edit 能力时），并附带外部参考图；否则退回文生图
+      await Promise.all(
+        ([1, 2] as const).map(async (vi) => {
+          if (!get().isRunning) return
           try {
-            if (extRef) {
-              const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: extRef.base64, refMime: extRef.mime })
-              frontB64 = r.base64
-              frontMime = r.mime
+            let b64: string
+            let mime: string
+            if (canEdit && frontB64) {
+              const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
+              const r = await editImage({ model, prompt: set.views[vi].prompt, refBase64: frontB64, refMime: frontMime, extraRefs: extra })
+              b64 = r.base64
+              mime = r.mime
             } else {
-              const r = await generateImage({ model, prompt: set.views[0].prompt, size: set.size })
-              frontB64 = r.base64
-              frontMime = r.mime
+              const r = await generateImage({ model, prompt: set.views[vi].prompt, size: set.size })
+              b64 = r.base64
+              mime = r.mime
             }
-            results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), url: toDataUrl(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
+            results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), url: toDataUrl(b64, mime), mime, meta: metaOf(set.views[vi].view) }
             done++
             writeBack()
           } catch {
             failed++
-            return // front 失败则跳过该角色的 side/back
           }
-          // 2) side/back：以 front 为参考保持自洽（有 edit 能力时），并附带外部参考图；否则退回文生图
-          await Promise.all(
-            ([1, 2] as const).map(async (vi) => {
-              if (!get().isRunning) return
-              try {
-                let b64: string
-                let mime: string
-                if (canEdit && frontB64) {
-                  const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
-                  const r = await editImage({ model, prompt: set.views[vi].prompt, refBase64: frontB64, refMime: frontMime, extraRefs: extra })
-                  b64 = r.base64
-                  mime = r.mime
-                } else {
-                  const r = await generateImage({ model, prompt: set.views[vi].prompt, size: set.size })
-                  b64 = r.base64
-                  mime = r.mime
-                }
-                results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), url: toDataUrl(b64, mime), mime, meta: metaOf(set.views[vi].view) }
-                done++
-                writeBack()
-              } catch {
-                failed++
-              }
-            })
-          )
-        },
-        { shouldStop: () => !get().isRunning }
+        })
+      )
+    }
+    try {
+      // M22b 两段式（inter-set 屏障）：先并发出底模/无变体组（捕获底模 front），再并发派生各变体组（front 锁脸到底模）
+      const conc = fanoutConcurrency()
+      const stop = { shouldStop: () => !get().isRunning }
+      await mapPool(
+        sets.filter((s) => !s.derives),
+        conc,
+        (set) => genSet(set),
+        stop
+      )
+      await mapPool(
+        sets.filter((s) => s.derives),
+        conc,
+        (set) => genSet(set, grpKey(set) ? baseFronts.get(grpKey(set)) : undefined),
+        stop
       )
       const items = results.filter(Boolean) as PortValue[]
       if (items.length === 0) throw new Error('未生成任何角色图')
@@ -902,6 +962,14 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
         gen: undefined,
         outputs: { [outId]: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
       })
+      // M27：把生成的三视图写回「已存在」的库角色（按 charId/name 匹配，幂等、不自动新建）
+      void useAssetStore
+        .getState()
+        .promoteCharViews(items.map((it) => ({ assetId: it.assetId, meta: it.meta })))
+        .then((n) => {
+          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张三视图写回素材库对应角色`, 'info')
+        })
+        .catch(() => {})
     } catch (e) {
       patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined, gen: undefined })
     } finally {
@@ -959,7 +1027,10 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
                 job.refCharIds,
                 job.meta?.sceneName as string | undefined,
                 job.meta?.locationKey as string | undefined,
-                job.refPropNames
+                job.refPropNames,
+                job.refVariantIds,
+                job.refPropVariantIds,
+                job.sceneVariantId
               )
             : []
           let base64: string
@@ -990,6 +1061,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
           return { type: 'image', assetId, url: toDataUrl(base64, mime), mime, meta: job.meta }
         },
         {
+          retries: 2, // 失败重试 2 次（扛限流），减少静默丢帧
           shouldStop: () => !get().isRunning,
           onSettled: (i, item) => {
             results[i] = item
@@ -1003,7 +1075,11 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       )
       const items = results.filter(Boolean) as PortValue[]
       if (items.length === 0) throw new Error('未生成任何图像')
-      if (failed > 0) window.mulby?.notification?.show(`${failed} 张图像生成失败，已保留其余 ${items.length} 张`, 'warning')
+      if (failed > 0)
+        window.mulby?.notification?.show(
+          `${total} 张里 ${failed} 张生成失败（重试后仍失败），已出 ${items.length} 张。可对该节点「重新运行」补齐缺失帧（已成功的命中缓存不重烧）。`,
+          'warning'
+        )
       const head = items[0]
       patchNode(id, {
         status: 'done',
@@ -1130,6 +1206,12 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       }
       frameUrls.push(undefined)
     }
+    // 多模态参考输入（Seedance-2 等支持）：参考视频→构图/运镜参考，参考音频→背景音乐/节奏参考。
+    // 全片段共享一份；供应商不支持则按模板/适配器忽略。
+    const refVideoVal = (inputs['refVideo'] || []).flatMap(expandItems).find((v) => v.type === 'video')
+    const refVideoUrl = refVideoVal?.url || (refVideoVal?.localPath ? toFileUrl(refVideoVal.localPath) : undefined)
+    const refAudioVal = (inputs['refAudio'] || []).flatMap(expandItems).find((v) => v.type === 'audio')
+    const refAudioUrl = refAudioVal?.url || (refAudioVal?.localPath ? toFileUrl(refAudioVal.localPath) : undefined)
     const apiKey = await useProviderStore.getState().resolveKey(provider.id)
     if (!apiKey && provider.kind === 'fal') {
       patchNode(id, { status: 'error', error: '该供应商未配置 API Key' })
@@ -1146,6 +1228,8 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       const audioModeLabel = String(node.data.params?.audioMode ?? '无声')
       const audioMode: 'native' | 'external' | 'silent' =
         audioModeLabel === '模型自带声' ? 'native' : audioModeLabel === '外置合成' ? 'external' : 'silent'
+      // fix #5 镜头顺接：开启后，连贯镜头用「下一镜首帧」作本镜尾帧（首尾帧补间），消除割裂；硬切处不接
+      const continuityOn = String(node.data.params?.continuity ?? '关闭') === '连贯镜头尾接首'
       // 并发扇出：N 个片段最多 fanoutConcurrency 个同时 submit→poll（异步视频并行收益最大），保序、部分成功
       // 实时铺开：预占 total 个格子，生成一段填一段
       if (total > 1) patchNode(id, { gen: { total } })
@@ -1161,8 +1245,22 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
           const cameraMotion = shotCameraMotion({ camera: fm.camera ?? sshot.camera, shotSize: fm.shotSize ?? sshot.shotSize })
           const shotPrompt =
             [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
-          const framePrompt = [shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText
-          const frameDuration = Number(fm.duration ?? sshot.duration ?? node.data.params?.duration ?? 5) || 5
+          const vstyle = videoStyleTag(get().globals.stylePackId, get().globals.style) // M21：视频风格标签（i2v 由关键帧继承，t2v 直接受益）
+          const framePrompt = [[shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText, vstyle].filter(Boolean).join(', ')
+          // M-quick：钳制到视频模型支持区间 [4,15]s，防 LLM/手填异常时长被原样发出导致供应商报错
+          const frameDuration = Math.min(Math.max(Number(fm.duration ?? sshot.duration ?? node.data.params?.duration ?? 5) || 5, 4), 15)
+          // fix #5：本镜是否顺接到下一镜首帧——下一镜显式 continuousFromPrev 为准，缺省回退「同场景」启发式
+          let contLast: string | undefined
+          if (continuityOn && frameUrls[i + 1]) {
+            const nm = frameMetas[i + 1] || {}
+            const chain =
+              nm.continuousFromPrev === true
+                ? true
+                : nm.continuousFromPrev === false
+                  ? false
+                  : !!fm.sceneId && String(fm.sceneId) === String(nm.sceneId ?? '')
+            if (chain) contLast = frameUrls[i + 1]
+          }
           let audioPrompt = ''
           let dialogue: { speaker: string; line: string; emotion?: string }[] | undefined
           if (audioMode === 'native') {
@@ -1175,7 +1273,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
             const sfxRaw = fm.sfx ?? sshot.sfx
             const sfx = Array.isArray(sfxRaw) ? sfxRaw.map(String).join(', ') : String(sfxRaw ?? '')
             const ambient = String(fm.ambient ?? sshot.ambient ?? '')
-            audioPrompt = buildAudioPrompt(dialogue, sfx, ambient)
+            audioPrompt = buildAudioPrompt(dialogue, sfx, ambient, get().globals.dialogueLang || '中文') // 显式对白语言，防默认英文
           }
           const { url } = await runVideo({
             cfg: provider,
@@ -1183,11 +1281,14 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
             req: {
               prompt: framePrompt || '',
               imageUrl: frameUrls[i] || undefined,
-              lastImageUrl: tailUrls[i] || tailUrls[0] || undefined,
+              lastImageUrl: tailUrls[i] || tailUrls[0] || contLast, // 显式尾帧优先，否则顺接到下一镜首帧
+
               duration: frameDuration || undefined,
               audioMode,
               audioPrompt: audioMode === 'native' && audioPrompt ? audioPrompt : undefined,
               dialogue: audioMode === 'native' && dialogue && dialogue.length ? dialogue : undefined,
+              videoUrl: refVideoUrl,
+              drivingAudioUrl: refAudioUrl,
             },
             onProgress: (p) => {
               const base =
@@ -1219,6 +1320,7 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
           }
         },
         {
+          retries: 2, // 失败重试 2 次（扛供应商限流/瞬时错误），减少静默丢片
           shouldStop: () => !get().isRunning,
           onSettled: (i, item) => {
             results[i] = item
@@ -1238,7 +1340,11 @@ async function execNode(id: string, opts?: { force?: boolean }): Promise<void> {
       )
       const items = results.filter(Boolean) as PortValue[]
       if (items.length === 0) throw new Error('未生成任何视频')
-      if (failed > 0) window.mulby?.notification?.show(`${failed} 个视频生成失败，已保留其余 ${items.length} 个`, 'warning')
+      if (failed > 0)
+        window.mulby?.notification?.show(
+          `${total} 段里 ${failed} 段生成失败（重试后仍失败），已出 ${items.length} 段。可对该节点「重新运行」补齐（已成功的命中缓存不重烧）。`,
+          'warning'
+        )
       const head = items[0]
       patchNode(id, {
         status: 'done',
@@ -1675,12 +1781,23 @@ interface RefImage {
   locationKey?: string // P2-3：场景图的地点绑定键（同地点 master plate）
   isMasterPlate?: boolean // P2-3：该场景图是否为主场景板
   charId?: string // P1-5：角色稳定主键（优于 name 匹配）
+  variantId?: string // M22a：形态键（时期/年龄）。与 charId 配合精确取「该期」参考图
   view?: string // P1-5：'front' | 'side' | 'back'（供按角度条件取图）
 }
 
 // 展开端口产物：有 items（扇出）则返回全部子项，否则返回自身
 function expandItems(v: PortValue): PortValue[] {
   return v.items && v.items.length ? v.items : [v]
+}
+
+// M-quick：分镜总数上限——超过 maxShots（>0 才生效）则截断前 N 并显著告警，杜绝长剧本一次扇出几百镜
+function capStoryboardShots(arr: unknown[], maxShots: number): unknown[] {
+  if (!(maxShots > 0) || arr.length <= maxShots) return arr
+  window.mulby?.notification?.show(
+    `分镜数 ${arr.length} 超过上限 ${maxShots}，已截断保留前 ${maxShots} 个（丢弃 ${arr.length - maxShots} 个；节点参数「镜头总数上限」可调，0=不限）`,
+    'warning'
+  )
+  return arr.slice(0, maxShots)
 }
 
 // 从一组端口产物里取出图片（含扇出的多张），带 name/kind 用于一致性匹配（img2img）
@@ -1701,6 +1818,7 @@ async function refsFromValues(vals: PortValue[] | undefined): Promise<RefImage[]
               locationKey: typeof it.meta?.locationKey === 'string' ? it.meta.locationKey : undefined,
               isMasterPlate: it.meta?.isMasterPlate === true,
               charId: typeof it.meta?.charId === 'string' ? it.meta.charId : undefined,
+              variantId: typeof it.meta?.variantId === 'string' ? it.meta.variantId : undefined,
               view: typeof it.meta?.view === 'string' ? it.meta.view : undefined,
             })
         }
@@ -1722,12 +1840,22 @@ const refWarnings: string[] = []
 
 // 匹配参考图（§5.2）：charId 精确（稳定主键）> name 精确 > 唯一命中的子串 > 唯一角色兜底；
 // 否则告警 + 返回 null（不再静默回退第一张，避免错脸；多义命中也告警不猜）。
-function pickRef(refs: RefImage[], name?: string, charId?: string): RefImage | null {
+function pickRef(refs: RefImage[], name?: string, charId?: string, variantId?: string): RefImage | null {
   if (refs.length === 0) return null
-  // 1) charId 精确（最高优先）
+  // 0) M22a：charId + variantId 精确（取「该时期」的图，最高优先）
+  if (charId && variantId) {
+    const exact = refs.find((r) => r.charId === charId && r.variantId === variantId)
+    if (exact) return exact
+  }
+  // 1) charId 精确（变体未命中时回退该角色任一图=base 兜底；旧工程无 variantId 直接走这里，行为不变）
   if (charId) {
     const byId = refs.find((r) => r.charId === charId)
     if (byId) return byId
+  }
+  // 1.5) M-scene/prop：name + variantId 精确（物品状态/无 charId 的命名资产按变体取该状态图）
+  if (name && variantId) {
+    const nv = refs.find((r) => r.name === name && r.variantId === variantId)
+    if (nv) return nv
   }
   // 2) name 精确
   if (name) {
@@ -1753,13 +1881,13 @@ function pickRef(refs: RefImage[], name?: string, charId?: string): RefImage | n
 }
 
 // 多参考图匹配（该镜全部出场角色 → 多张角色图）：names 与 charIds 同序逐项匹配（charId 优先）并去重
-function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string, charIds?: string[]): RefImage[] {
+function pickRefs(refs: RefImage[], names?: string[], fallbackName?: string, charIds?: string[], variantIds?: string[]): RefImage[] {
   const charRefs = refs.filter((r) => r.kind !== 'scene')
   if (charRefs.length === 0) return []
-  const N = Math.max(names?.length ?? 0, charIds?.length ?? 0)
+  const N = Math.max(names?.length ?? 0, charIds?.length ?? 0, variantIds?.length ?? 0)
   const picked: RefImage[] = []
   for (let i = 0; i < N; i++) {
-    const r = pickRef(charRefs, names?.[i], charIds?.[i])
+    const r = pickRef(charRefs, names?.[i], charIds?.[i], variantIds?.[i] || undefined)
     if (r && !picked.includes(r)) picked.push(r)
   }
   if (!N && fallbackName) {
@@ -1782,21 +1910,34 @@ function selectRefs(
   charIds?: string[],
   sceneName?: string,
   locationKey?: string,
-  propNames?: string[]
+  propNames?: string[],
+  variantIds?: string[],
+  propVariantIds?: string[],
+  sceneVariantId?: string
 ): RefImage[] {
-  // 角色：非 scene/prop 的图按角色名匹配
+  // 角色：非 scene/prop 的图按角色名匹配（M22a：同序 variantIds 精确取该时期图）
   const chars = pickRefs(
     refs.filter((r) => r.kind !== 'scene' && r.kind !== 'prop'),
     names,
     fallbackName,
-    charIds
+    charIds,
+    variantIds
   )
   // 物品：kind==='prop' 的图按物品名匹配（无名指定且唯一物品时兜底，由 pickRefs 处理）
   const props = pickRefs(
     refs.filter((r) => r.kind === 'prop'),
-    propNames
+    propNames,
+    undefined,
+    undefined,
+    propVariantIds
   )
   const sceneRefs = refs.filter((r) => r.kind === 'scene')
+  // M-scene/prop：场景时段/天气变体——归一化匹配（变体键/标签 对 sceneVariantId，大小写/子串）
+  const svNorm = String(sceneVariantId ?? '').toLowerCase().trim()
+  const sceneVariantHit = (r: RefImage) => {
+    const vid = String(r.variantId ?? '').toLowerCase().trim()
+    return !!svNorm && !!vid && (vid === svNorm || vid.includes(svNorm) || svNorm.includes(vid))
+  }
   let scenes: RefImage[]
   if (locationKey || sceneName) {
     const match = sceneRefs.filter(
@@ -1805,8 +1946,8 @@ function selectRefs(
         (sceneName && (r.name === sceneName || (r.name?.includes(sceneName) ?? false) || (sceneName.includes(r.name ?? ' '))))
     )
     if (match.length) {
-      // 命中本场：优先 master plate，否则取首个；只取一张避免污染
-      scenes = [match.find((r) => r.isMasterPlate) || match[0]]
+      // 命中本场：优先该时段变体，其次 master plate，否则取首个；只取一张避免污染
+      scenes = [match.find(sceneVariantHit) || match.find((r) => r.isMasterPlate) || match[0]]
     } else {
       // 指定了场但无对应场景图：宁缺毋滥（不拿别场的图），返回空
       scenes = []
@@ -1978,39 +2119,49 @@ function nodeCacheSalt(node: FilmNode): string {
     ids.push(String(node.data.params?.structure ?? '') === 'Story-Circle' ? 'text.outline.storycircle' : 'text.outline.savecat')
   }
   const prompts = ids.map((id) => getPrompt(id)).join('')
-  return `${g.style || ''}${g.aspectRatio || ''}${prompts}`
+  return `${g.stylePackId || ''}${g.style || ''}${g.aspectRatio || ''}${prompts}`
 }
 
-// 按拓扑序执行一批节点（runAll / runFrom 共用）。数据驱动级联阻断：上游无可用产出才跳过。
+// 依赖驱动的并发执行（runAll / runFrom 共用）：节点的全部上游（限本批内）完成后即可启动，
+// 互不依赖的节点并发跑（如 分镜 ∥ 角色设定、角色图 ∥ 场景图）。并发上限取「并发设置」。
+// 数据驱动级联阻断：上游无可用产出才跳过。P1-6 锁定/输入指纹缓存语义不变。
+function isBatchEligible(n: FilmNode): boolean {
+  const def = getNodeDef(n.data.kind)
+  if (!def) return false
+  return (
+    def.category === 'input' ||
+    def.category === 'text' ||
+    def.category === 'image' ||
+    def.category === 'video' ||
+    def.category === 'audio' ||
+    // export 节点会弹保存对话框，仅单独运行时触发，不纳入批量
+    (def.category === 'output' &&
+      (n.data.kind === 'preview' || n.data.kind === 'compose' || n.data.kind === 'merge' || n.data.kind === 'timeline' || n.data.kind === 'foreach'))
+  )
+}
+
 async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped: string[] }> {
   const errored: string[] = []
   const skipped: string[] = []
-  for (const n of order) {
-    if (!useGraphStore.getState().isRunning) break
+  const runSet = order.filter(isBatchEligible) // 保留拓扑序，就绪时同序优先，保证确定性
+  const runIds = new Set(runSet.map((n) => n.id))
+  // 依赖：本批内指向该节点的上游边
+  const st0 = useGraphStore.getState()
+  const depsOf = new Map<string, Set<string>>()
+  for (const n of runSet) {
+    const deps = new Set<string>()
+    for (const e of st0.edges) if (e.target === n.id && runIds.has(e.source)) deps.add(e.source)
+    depsOf.set(n.id, deps)
+  }
+  // 单节点处理（锁定/跳过/缓存/执行）——与原顺序版逐节点逻辑一致；从 live 状态读（上游已完成→产物可用）
+  const processNode = async (n: FilmNode): Promise<void> => {
     const def = getNodeDef(n.data.kind)
-    if (!def) continue
-    const eligible =
-      def.category === 'input' ||
-      def.category === 'text' ||
-      def.category === 'image' ||
-      def.category === 'video' ||
-      def.category === 'audio' ||
-      (def.category === 'output' &&
-        (n.data.kind === 'preview' ||
-          n.data.kind === 'compose' ||
-          n.data.kind === 'merge' ||
-          n.data.kind === 'timeline' ||
-          n.data.kind === 'foreach'))
-    // export 节点会弹保存对话框，仅单独运行时触发，不纳入批量
-    if (!eligible) continue
-    // P1-6：锁定节点不重跑——只读其旧 outputs 作为下游有效上游产出（gatherInputs 读 outputs，天然满足）
-    if (n.data.locked === true) {
-      const hasOutputs = !!n.data.outputs && Object.keys(n.data.outputs).length > 0
-      if (!hasOutputs) {
-        // 锁了却无产物：提示而非静默跳过，避免下游被误判断链
-        patchNode(n.id, { status: 'error', error: '已锁定但无产物，请先解锁并运行' })
-      }
-      continue
+    if (!def) return
+    const cur0 = useGraphStore.getState().nodes.find((x) => x.id === n.id) || n
+    if (cur0.data.locked === true) {
+      const hasOutputs = !!cur0.data.outputs && Object.keys(cur0.data.outputs).length > 0
+      if (!hasOutputs) patchNode(n.id, { status: 'error', error: '已锁定但无产物，请先解锁并运行' })
+      return
     }
     const st = useGraphStore.getState()
     const hasIncoming = st.edges.some((e) => e.target === n.id)
@@ -2020,22 +2171,50 @@ async function runOrder(order: FilmNode[]): Promise<{ errored: string[]; skipped
       if (!hasData) {
         skipped.push(n.data.title || def.label)
         patchNode(n.id, { status: 'error', error: '已跳过：上游未产出可用输入' })
-        continue
+        return
       }
     }
-    // P1-6：输入指纹缓存——命中（hash 相同且已有产物）则跳过重跑，不重复烧。从 live 状态算（上游已更新）
     const live = useGraphStore.getState()
     const liveNode = live.nodes.find((x) => x.id === n.id) || n
     const inputHash = computeInputHash(liveNode, live.nodes, live.edges, nodeCacheSalt(liveNode))
     const hasOutputs = !!liveNode.data.outputs && Object.keys(liveNode.data.outputs).length > 0
-    if (liveNode.data.cache?.inputHash === inputHash && hasOutputs) {
-      continue // 命中缓存：保留 outputs 与 status
-    }
+    if (liveNode.data.cache?.inputHash === inputHash && hasOutputs) return // 命中缓存：保留 outputs 与 status
     await execNode(n.id)
-    const cur = useGraphStore.getState().nodes.find((x) => x.id === n.id)
-    if (cur?.data.status === 'error') errored.push(cur.data.title || def.label)
+    const c = useGraphStore.getState().nodes.find((x) => x.id === n.id)
+    if (c?.data.status === 'error') errored.push(c.data.title || def.label)
     else patchNode(n.id, { cache: { inputHash, at: Date.now() } })
   }
+  // 调度：deps 全 done 即就绪，并发上限 cap（取并发设置；设为 1 即退化为全顺序）
+  const cap = Math.max(1, fanoutConcurrency())
+  const doneIds = new Set<string>()
+  const remaining = new Set(runSet.map((n) => n.id))
+  let running = 0
+  await new Promise<void>((resolve) => {
+    const pump = () => {
+      if (useGraphStore.getState().isRunning) {
+        for (const n of runSet) {
+          if (running >= cap) break
+          if (!remaining.has(n.id)) continue
+          let ready = true
+          for (const d of depsOf.get(n.id)!) if (!doneIds.has(d)) { ready = false; break }
+          if (!ready) continue
+          remaining.delete(n.id)
+          running++
+          processNode(n)
+            .catch(() => {})
+            .finally(() => {
+              doneIds.add(n.id) // 无论成功/失败/跳过都算「完成」，解锁下游（下游会因无数据自行跳过）
+              running--
+              pump()
+            })
+        }
+      } else {
+        remaining.clear() // 已取消：不再调度新节点（在飞节点内部 shouldStop 自行收尾）
+      }
+      if (remaining.size === 0 && running === 0) resolve()
+    }
+    pump()
+  })
   return { errored, skipped }
 }
 
@@ -2270,7 +2449,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
             job.refCharIds,
             job.meta?.sceneName as string | undefined,
             job.meta?.locationKey as string | undefined,
-            job.refPropNames
+            job.refPropNames,
+            job.refVariantIds,
+            job.refPropVariantIds,
+            job.sceneVariantId
           )
         : []
       let base64: string
@@ -2418,7 +2600,13 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!def) return
     const params: Record<string, unknown> =
       kind === 'character'
-        ? { name: el.name, appearance: el.description || '', refPrompt: el.prompt || '' }
+        ? {
+            name: el.name,
+            appearance: el.description || '',
+            ...(el.identity ? { identity: el.identity } : {}), // M27：身份回填
+            refPrompt: el.prompt || '',
+            ...(el.appearanceVariants?.length ? { variantsJson: JSON.stringify(el.appearanceVariants) } : {}), // M27：时期变体回填
+          }
         : { name: el.name, description: el.description || '', refPrompt: el.prompt || '' }
     const data: FilmNodeData = { kind, title: el.name || def.label, params, status: 'idle' }
     // P1-5：绑定全部视图/参考图（不再只取第一张），charId/voiceId/view 经 meta 下沉供 keyframe/tts 解析。
@@ -2443,6 +2631,24 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         mime: a.mime,
         meta: { name: el.name, charId, kind, ...(el.voiceId ? { voiceId: el.voiceId } : {}), ...(view ? { view } : {}) },
       })
+    }
+    // M27：库角色各时期变体的已生成视图也下沉为图像项（带 variantId），供 keyframe 按 (charId,variantId) 取该期图
+    for (const v of el.appearanceVariants || []) {
+      const vv: Array<[string, string | undefined]> = v.views
+        ? [['front', v.views.front], ['side', v.views.side], ['back', v.views.back]]
+        : []
+      for (const [view, assetId] of vv) {
+        if (!assetId) continue
+        const a = await loadAsset(assetId)
+        if (!a) continue
+        items.push({
+          type: 'image',
+          assetId,
+          url: toDataUrl(a.base64, a.mime),
+          mime: a.mime,
+          meta: { name: el.name, charId, kind, variantId: v.id, view },
+        })
+      }
     }
     if (items.length) {
       const head = items[0]

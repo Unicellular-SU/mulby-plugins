@@ -132,7 +132,14 @@ export const NODE_DEFS: NodeDef[] = [
     params: [
       { key: 'name', label: '角色名', control: 'text', placeholder: '如：小明' },
       { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（用于「运行此节点」文字生成三视图）' },
+      { key: 'identity', label: '身份特征(跨期不变·可选)', control: 'textarea', placeholder: '脸型/五官/体型/标志特征(疤·痣·瞳色)，age-neutral；多时期角色填这里，各期外观放下方「时期变体」' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
+      {
+        key: 'variantsJson',
+        label: '时期变体(JSON·高级·可选)',
+        control: 'textarea',
+        placeholder: '多时期角色：[{"id":"youth","label":"少年","appearance":"16岁清瘦布衣","triple":{"front":"...","side":"...","back":"..."}}]（连入「角色三视图」会逐变体出图）',
+      },
       {
         key: 'voiceId',
         label: '音色(配音)',
@@ -158,6 +165,7 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'name', label: '场景名', control: 'text', placeholder: '如：咖啡馆' },
       { key: 'description', label: '描述', control: 'textarea', placeholder: '环境、氛围、光线…（用于「运行此节点」文字生成概念图）' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
+      { key: 'variant', label: '变体(时段/天气，可选)', control: 'text', placeholder: '如：黄昏 / 雨夜（留空=基础场景板）' },
     ],
   },
   {
@@ -175,6 +183,7 @@ export const NODE_DEFS: NodeDef[] = [
       { key: 'name', label: '物品名', control: 'text', placeholder: '如：发光的剑' },
       { key: 'description', label: '外观/描述', control: 'textarea', placeholder: '材质、形状、颜色、特征…（用于「运行此节点」文字生成物品图）' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
+      { key: 'variant', label: '变体(状态，可选)', control: 'text', placeholder: '如：破损 / 发光 / 完好（留空=基础）' },
       { key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' },
     ],
   },
@@ -203,7 +212,7 @@ export const NODE_DEFS: NodeDef[] = [
     inputs: [{ id: 'in', label: '故事/大纲', type: 'any' }],
     outputs: [{ id: 'out', label: '剧本', type: 'json' }],
     params: [
-      { key: 'targetLength', label: '成片体量', control: 'select', options: ['短片', '单集', '长片'], default: '短片' },
+      { key: 'targetLength', label: '成片体量', control: 'select', options: ['跟随全局', '微短片', '短片', '单集', '长片'], default: '跟随全局' },
       { key: 'sceneCount', label: '目标场数(0=按体量)', control: 'number', default: 0 },
       { key: 'instruction', label: '附加要求', control: 'textarea', placeholder: '可选：风格/篇幅/视角…' },
     ],
@@ -219,6 +228,7 @@ export const NODE_DEFS: NodeDef[] = [
     params: [
       { key: 'shotMode', label: '拆解粒度', control: 'select', options: ['每场N镜', '总量自适应'], default: '每场N镜' },
       { key: 'shotsPerScene', label: '每场镜头数', control: 'number', default: 3 },
+      { key: 'maxShots', label: '镜头总数上限(0=不限)', control: 'number', default: 0 },
     ],
   },
   {
@@ -318,6 +328,8 @@ export const NODE_DEFS: NodeDef[] = [
       { id: 'tail', label: '尾帧(可选)', type: 'image' },
       { id: 'prompt', label: '提示', type: 'text' },
       { id: 'shot', label: '分镜(可选)', type: 'json' },
+      { id: 'refVideo', label: '参考视频(可选)', type: 'video' },
+      { id: 'refAudio', label: '参考音频/配乐(可选)', type: 'audio' },
     ],
     outputs: [{ id: 'out', label: '视频', type: 'video' }],
     params: [
@@ -329,6 +341,14 @@ export const NODE_DEFS: NodeDef[] = [
         control: 'select',
         options: ['无声', '模型自带声', '外置合成'],
         default: '无声',
+      },
+      {
+        key: 'continuity',
+        label: '镜头顺接',
+        control: 'select',
+        // 顺接：让上一镜的尾帧=下一镜的首帧（首尾帧补间），消除割裂感。仅在「连贯动作」处接，硬切处不接。
+        options: ['关闭', '连贯镜头尾接首'],
+        default: '关闭',
       },
     ],
   },

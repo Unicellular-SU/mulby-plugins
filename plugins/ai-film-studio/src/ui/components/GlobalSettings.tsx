@@ -1,4 +1,5 @@
 import { useGraphStore } from '../store/graphStore'
+import { STYLE_PACKS, getStylePack } from '../services/stylePacks'
 
 const ASPECTS: { value: string; label: string }[] = [
   { value: '16:9', label: '16:9（横屏）' },
@@ -20,6 +21,24 @@ export default function GlobalSettings() {
         </div>
 
         <div className="afs-field">
+          <label className="afs-field__label">成片体量</label>
+          <select
+            className="afs-field__input"
+            value={globals.filmScale ?? '短片'}
+            onChange={(e) => setGlobals({ filmScale: e.target.value })}
+          >
+            {['微短片', '短片', '单集', '长片'].map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <div className="afs-modal__hint" style={{ marginTop: 4 }}>
+            一处设定，协调大纲节拍数 + 剧本场数 + 分镜镜头数。想快速测试一小段（≈4 镜、不到 1 分钟）选「微短片」：大纲约 3 拍、剧本 1-2 场、分镜约 3-5 镜。剧本节点的「成片体量」默认跟随此处，可单独覆盖。
+          </div>
+        </div>
+
+        <div className="afs-field">
           <label className="afs-field__label">画幅</label>
           <select
             className="afs-field__input"
@@ -35,7 +54,46 @@ export default function GlobalSettings() {
         </div>
 
         <div className="afs-field">
-          <label className="afs-field__label">全局画风</label>
+          <label className="afs-field__label">对白语言</label>
+          <select
+            className="afs-field__input"
+            value={globals.dialogueLang ?? '中文'}
+            onChange={(e) => setGlobals({ dialogueLang: e.target.value })}
+          >
+            {['中文', 'English', '日本語', '한국어', 'Español', 'Français'].map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          <div className="afs-modal__hint" style={{ marginTop: 4 }}>
+            剧本/分镜台词与原生音频/配音都按此语言生成。不设置时模型常默认讲英文——选好这里，台词才说中文。
+          </div>
+        </div>
+
+        <div className="afs-field">
+          <label className="afs-field__label">风格包</label>
+          <select
+            className="afs-field__input"
+            value={globals.stylePackId ?? ''}
+            onChange={(e) => setGlobals({ stylePackId: e.target.value || undefined })}
+          >
+            <option value="">（不使用 · 仅用下方自由画风）</option>
+            {STYLE_PACKS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          {getStylePack(globals.stylePackId) && (
+            <div className="afs-modal__hint" style={{ marginTop: 4 }}>
+              {getStylePack(globals.stylePackId)!.hint} 风格包会向所有图像/视频生成注入统一的色盘 / 光影 / 锚定 / 负向词，根治跨镜画风漂移。下方「自由画风」会叠加其后作为补充。
+            </div>
+          )}
+        </div>
+
+        <div className="afs-field">
+          <label className="afs-field__label">{globals.stylePackId ? '自由画风（补充，叠加在风格包之后）' : '全局画风'}</label>
           <textarea
             className="afs-field__input"
             rows={3}

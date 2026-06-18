@@ -5,6 +5,7 @@
 import type { PortValue, FilmNodeData } from '../store/graphStore'
 import { getPrompt } from '../store/promptStore'
 import { JSON_CONTRACT, fillTemplate } from './promptTemplates'
+import { getStylePack, applyStylePack, type StyleRole } from './stylePacks'
 
 export interface BuiltPrompt {
   system: string
@@ -65,16 +66,19 @@ export function shotCameraMotion(shot: Record<string, unknown>): string {
 }
 
 // ============ 原生音频提示拼装（M18-B）============
-// 把对白/SFX/环境声拼成喂给原生音频视频模型（Veo3/Sora2/Kling Omni…）的英文音频指令。
+// 把对白/SFX/环境声拼成喂给原生音频视频模型（Veo3/Sora2/Kling Omni…）的音频指令。
+// 关键：显式声明对白语言，否则模型默认讲英文——即使台词本身是中文。
 export function buildAudioPrompt(
   dialogue: { speaker: string; line: string; emotion?: string }[],
   sfx: string,
-  ambient: string
+  ambient: string,
+  lang?: string
 ): string {
   const parts: string[] = []
   if (dialogue.length) {
+    const langTag = lang ? ` (spoken in ${lang}, keep the exact ${lang} wording, do not translate)` : ''
     parts.push(
-      'Dialogue — ' +
+      `Dialogue${langTag} — ` +
         dialogue
           .map((d) => `${d.speaker}${d.emotion ? ` (${d.emotion})` : ''}: "${d.line}"`)
           .join(' ')
@@ -122,7 +126,7 @@ function globalsHint(inputs: Record<string, PortValue[]>): string {
 }
 
 /** 校验文本节点的 JSON 产物是否具备期望结构；返回错误原因（空串=通过） */
-export function validateNodeJson(kind: string, json: unknown, ctx?: { sceneIds?: string[] }): string {
+export function validateNodeJson(kind: string, json: unknown, ctx?: { sceneIds?: string[]; beatIds?: string[] }): string {
   if (json == null || typeof json !== 'object') return '未能从输出中提取 JSON 对象'
   const j = json as Record<string, unknown>
   const nonEmptyArray = (v: unknown) => Array.isArray(v) && v.length > 0
@@ -146,8 +150,33 @@ export function validateNodeJson(kind: string, json: unknown, ctx?: { sceneIds?:
       }
       return ''
     }
-    case 'char-sheet':
-      return nonEmptyArray(j.characters) ? '' : 'JSON 缺少非空的 characters 数组'
+    case 'char-sheet': {
+      if (!nonEmptyArray(j.characters)) return 'JSON 缺少非空的 characters 数组'
+      // M22a：变体契约阻塞校验——把「同一人物跨时期被合并/未拆分」从静默退化变可自愈错误（§3.2）。
+      const chars = j.characters as Array<Record<string, unknown>>
+      for (const c of chars) {
+        const nm = String(c.name ?? '角色')
+        const variants = Array.isArray(c.variants) ? (c.variants as Array<Record<string, unknown>>) : []
+        // 外观跨越多个时期（≥2 时代词或"多年后"等时间流逝）却未拆分为 ≥2 变体 → 报错回灌重试
+        const idText = `${String(c.identity ?? '')} ${String(c.appearance ?? '')}`
+        if (spansMultiplePeriods(idText) && variants.length < 2) {
+          return `角色「${nm}」外观跨越多个时期，必须拆分为 variants[]（每个时期一项，含 id/label/appearance/triple；identity 只写不随时间变的特征）`
+        }
+        // identity 不应同时混入多个时期（应是 age-neutral 身份不变量）
+        if (c.identity && spansMultiplePeriods(String(c.identity))) {
+          return `角色「${nm}」的 identity 不应混入多个时期（少年/老年/多年后等），各时期外观请放进对应 variant 的 appearance`
+        }
+        // 变体 id 唯一 + 必备字段
+        const seen = new Set<string>()
+        for (const v of variants) {
+          const vid = String(v.id ?? v.stageKey ?? v.label ?? '')
+          if (!vid) return `角色「${nm}」存在缺少 id/label 的变体`
+          if (seen.has(vid)) return `角色「${nm}」变体 id 重复：${vid}`
+          seen.add(vid)
+        }
+      }
+      return ''
+    }
     default:
       return ''
   }
@@ -210,13 +239,19 @@ export interface ImageJob {
   refName?: string // 主参考图：按角色名匹配上游参考图（跨镜一致性）
   refNames?: string[] // 该镜全部出场角色（多角色一致性，附加参考图）
   refCharIds?: string[] // §5.2：与 refNames 同序的稳定 charId（优先于 name 匹配，杜绝同名错脸）
+  refVariantIds?: string[] // M22a：与 refNames 同序的形态键（时期/年龄），(charId,variantId) 精确取该期参考图
   refPropNames?: string[] // 该镜出场物品名（按名匹配物品参考图）
+  refPropVariantIds?: string[] // M-scene/prop：与 refPropNames 同序的物品状态键
+  sceneVariantId?: string // M-scene/prop：本镜场景的时段/天气变体键（选对应场景板）
   meta?: Record<string, unknown> // 写入产物 meta（角色名 / 镜头号）
 }
 
 export interface PromptGlobals {
   aspectRatio?: string
   style?: string
+  stylePackId?: string // M21：选中的结构化风格包 id（优先于自由 style 字符串注入锚定/负向词）
+  dialogueLang?: string // 对白语言（剧本/分镜台词 + 原生音频/配音），默认中文
+  filmScale?: string // 成片体量（微短片/短片/单集/长片）——协调大纲节拍/剧本场数/分镜镜头数
 }
 
 /** 画幅 → 图像尺寸 */
@@ -233,13 +268,21 @@ function sizeFromAspect(aspect?: string): string | undefined {
   }
 }
 
-/** 风格：优先连入的全局设定 json 的 style 字段，其次项目级全局设定。只取风格，不混入画幅 */
-function resolveStyle(inputs: Record<string, PortValue[]>, globals?: PromptGlobals): string {
+/**
+ * 风格统一出口（M21 单一 seam）：优先级 连入 json.style（显式覆盖）> 项目风格包 stylePackId（结构化锚定+负向）
+ * > 项目自由画风字符串。role 决定注入哪组锚定（角色/场景/物品/关键帧）。只取风格，不混入画幅。
+ */
+function resolveStyle(inputs: Record<string, PortValue[]>, globals?: PromptGlobals, role: StyleRole = 'keyframe'): string {
   for (const arr of Object.values(inputs)) {
     for (const v of arr) {
       const g = v.type === 'json' && v.json && typeof v.json === 'object' ? (v.json as Record<string, unknown>) : null
       if (g?.style) return `style: ${String(g.style)}`
     }
+  }
+  const pack = getStylePack(globals?.stylePackId)
+  if (pack) {
+    const affix = applyStylePack(pack, role)
+    return globals?.style ? `${affix}, ${globals.style}` : affix // 自由画风可叠加在风格包之后
   }
   return globals?.style ? `style: ${globals.style}` : ''
 }
@@ -285,7 +328,8 @@ function collectJsonArray(vals: PortValue[] | undefined, ...keys: string[]): Arr
 export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals): ImageJob | null {
   const p = data.params || {}
   const name = String(p.name || '')
-  const style = resolveStyle({}, globals)
+  // M21：资产节点按自身类型注入对应角色锚定（character/scene/prop）
+  const style = resolveStyle({}, globals, data.kind as StyleRole)
   const withStyle = (s: string) => (style ? `${s}, ${style}` : s)
   if (data.kind === 'character') {
     const basis = String(p.refPrompt || p.appearance || name || '').trim()
@@ -298,23 +342,25 @@ export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals):
     }
   }
   if (data.kind === 'scene') {
-    const basis = String(p.refPrompt || p.description || name || '').trim()
+    const variant = String(p.variant || '').trim() // M-scene/prop：时段/天气变体（黄昏/雨夜…）
+    const basis = [String(p.refPrompt || p.description || name || '').trim(), variant].filter(Boolean).join('，')
     if (!basis) return null
     const size = sizeFromAspect(resolveAspect({}, globals)) || '1344x768'
     return {
       prompt: withStyle(fillTemplate(getPrompt('image.assetScene'), { basis })),
       size,
-      meta: { name },
+      meta: variant ? { name, variantId: variant, variantLabel: variant } : { name },
     }
   }
   if (data.kind === 'prop') {
-    const basis = String(p.refPrompt || p.description || name || '').trim()
+    const variant = String(p.variant || '').trim() // M-scene/prop：状态变体（破损/发光…）
+    const basis = [String(p.refPrompt || p.description || name || '').trim(), variant].filter(Boolean).join('，')
     if (!basis) return null
     const size = (typeof p.size === 'string' && p.size) || '1024x1024'
     return {
       prompt: withStyle(fillTemplate(getPrompt('image.assetProp'), { basis })),
       size,
-      meta: { name },
+      meta: variant ? { name, variantId: variant, variantLabel: variant } : { name },
     }
   }
   return null
@@ -324,14 +370,65 @@ export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals):
 export interface CharViewSet {
   name?: string
   charId?: string
+  variantId?: string // M22a：形态键（时期/年龄）。缺省=身份兜底像（base）
+  variantLabel?: string
+  stageKey?: string
   refName?: string // 用于在「参考图」端口里按角色名匹配上传的人物图
   size?: string
   views: { view: 'front' | 'side' | 'back'; prompt: string }[]
+  isBase?: boolean // M22b：age-neutral 底模锚（其 front 作为各变体派生的锁脸参考）
+  derives?: boolean // M22b：该变体 front 需从同组底模 front 派生（换龄不换脸）
+  baseGroup?: string // 修复 ORD-1：底模与其变体配对的唯一组键（不用 charId/name，避免同名/无名串脸）
+}
+
+// M22a：从角色变体对象算稳定形态键（buildCharViewSets 打标与 keyframe 取图必须用同一函数，保证两端一致）
+export function variantKey(v: Record<string, unknown>): string {
+  return String(v.id ?? v.stageKey ?? v.label ?? '')
+}
+
+// M22b：底模锚提示——age-neutral 标准成人正脸，作为跨期锁脸的身份基准
+function ageNeutral(s: string): string {
+  return [s, 'age-neutral, single canonical adult appearance, neutral expression'].filter(Boolean).join(', ')
+}
+
+// M22a：判断一段外观是否"跨越多个时期"（需拆分为 variants）。仅当出现 ≥2 个不同时代词、
+// 或显式时间流逝短语时判真——单个「青年男子」不算，避免误伤正常单期角色（§3.2/§3.4）。
+const ERA_WORDS = ['少年', '青年', '盛年', '中年', '暮年', '老年', '童年', '幼年']
+const TIME_PASSAGE = /多年[后後]|\d+\s*年[后後]|长大[后後]|年老|老去|垂暮|变老/
+export function spansMultiplePeriods(text: string): boolean {
+  if (!text) return false
+  if (TIME_PASSAGE.test(text)) return true
+  return ERA_WORDS.filter((w) => text.includes(w)).length >= 2
+}
+
+// M22a：为某镜解析角色应使用的形态键。优先 shot.associateAssetIds 显式绑定（在 keyframe 分支处理）；
+// 否则归一化关键词匹配（appliesTo ∪ {stageKey,label} 对 shot 的 {beatId,beatType,actId,mood}）；
+// 最后按叙事顺序比例兜底（变体设为按时序），保证永远落到某个时期而非糊成一张身份像（§3.3 防 dead-code）。
+export function resolveVariantForShot(
+  variants: Array<Record<string, unknown>> | undefined,
+  shot: Record<string, unknown>,
+  i: number,
+  total: number
+): string | undefined {
+  if (!variants || !variants.length) return undefined
+  const keys = [shot.beatId, shot.beatType, shot.actId, shot.mood]
+    .map((x) => String(x ?? '').toLowerCase().trim())
+    .filter(Boolean)
+  const hit = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a)))
+  for (const v of variants) {
+    const tags = [...(Array.isArray(v.appliesTo) ? (v.appliesTo as unknown[]) : []), v.stageKey, v.label]
+      .map((x) => String(x ?? '').toLowerCase().trim())
+      .filter(Boolean)
+    if (tags.some((t) => keys.some((k) => hit(t, k)))) return variantKey(v)
+  }
+  const idx = total > 1 ? Math.min(variants.length - 1, Math.floor((i / total) * variants.length)) : 0
+  return variantKey(variants[idx])
 }
 
 /**
- * 把角色设定/人物 拆成「每角色一组三视图」：front 先生成（有参考图则 img2img），
- * side/back 再以 front 为参考保持自洽。返回 prompt + 视图标签，执行在 graphStore（需链式依赖）。
+ * 把角色设定/人物 拆成「每 (角色 × 变体) 一组三视图」。M22b：有变体时先出 age-neutral 底模(isBase)，
+ * 各变体(derives)的 front 由执行层用底模 front 经 editImage 派生（换龄/换装不换脸）；无变体=单组身份像。
+ * 各组打 variantId，下游按 (charId,variantId) 精确取图；底模(variantId 缺省)兼作 base 兜底。
  */
 export function buildCharViewSets(
   data: FilmNodeData,
@@ -340,20 +437,54 @@ export function buildCharViewSets(
 ): CharViewSet[] {
   const p = data.params || {}
   const paramSize = typeof p.size === 'string' ? p.size : undefined
-  const style = resolveStyle(inputs, globals)
+  const style = resolveStyle(inputs, globals, 'character') // M21：角色三视图注入角色锚定
   const size = sizeFromAspect(resolveAspect(inputs, globals)) || paramSize
   const withStyle = (s: string) => [s, style && `, ${style}`].filter(Boolean).join(' ')
   const list = collectJsonArray(inputs['role'], 'characters')
-  return list.map((c) => {
-    const ref = String(c.refPrompt || c.appearance || c.description || '')
-    const charId = c.charId ? String(c.charId) : c.name ? String(c.name) : undefined
-    const name = c.name ? String(c.name) : undefined
-    const triple = c.triple as Record<string, unknown> | undefined
-    const views = (['front', 'side', 'back'] as const).map((view) => {
+  const mkViews = (ref: string, triple: Record<string, unknown> | undefined) =>
+    (['front', 'side', 'back'] as const).map((view) => {
       const viewHint = triple && triple[view] ? String(triple[view]) : `${view} view`
       return { view, prompt: withStyle(fillTemplate(getPrompt('image.charImageView'), { view: viewHint, ref })) }
     })
-    return { name, charId, refName: name, size, views }
+  return list.flatMap((c, gi): CharViewSet[] => {
+    const charId = c.charId ? String(c.charId) : c.name ? String(c.name) : undefined
+    const name = c.name ? String(c.name) : undefined
+    const identity = String(c.identity || c.refPrompt || c.appearance || c.description || '')
+    // 修复 INT-4：变体数硬上限，防失控的角色卡把图量扇成巨大开销
+    const variants = (Array.isArray(c.variants) ? (c.variants as Array<Record<string, unknown>>) : []).slice(0, 8)
+    if (!variants.length) {
+      // 无变体：单组身份像（校验已保证此处只剩单期角色，直接用 appearance/identity，不做有损净化）
+      return [{ name, charId, refName: name, size, views: mkViews(identity, c.triple as Record<string, unknown> | undefined) }]
+    }
+    // 修复 ORD-1：每角色一个唯一组键（取自合并列表下标），底模/变体经它配对，杜绝同名/无名角色 baseFronts 串脸
+    const group = `g${gi}`
+    // M22b：底模锚（age-neutral，variantId 缺省→兼作 base 兜底）+ 逐变体派生组（front 锁脸到底模）
+    const baseSet: CharViewSet = {
+      name,
+      charId,
+      isBase: true,
+      baseGroup: group,
+      refName: name,
+      size,
+      views: mkViews(ageNeutral(identity || name || ''), c.triple as Record<string, unknown> | undefined),
+    }
+    const variantSets: CharViewSet[] = variants.map((v) => {
+      // 修复 M22b-1/2：身份文本也注入变体提示词，使无 img2img / 底模失败时仍保身份（底模 front 再叠加图像级锁脸）
+      const appearance = [identity, String(v.appearance || v.prompt || v.label || '')].filter(Boolean).join(', ')
+      return {
+        name,
+        charId,
+        variantId: variantKey(v),
+        variantLabel: v.label ? String(v.label) : undefined,
+        stageKey: v.stageKey ? String(v.stageKey) : undefined,
+        derives: true,
+        baseGroup: group,
+        refName: name,
+        size,
+        views: mkViews(appearance, v.triple as Record<string, unknown> | undefined),
+      }
+    })
+    return [baseSet, ...variantSets]
   })
 }
 
@@ -364,7 +495,9 @@ export function buildImagePrompts(
 ): ImageJob[] {
   const p = data.params || {}
   const paramSize = typeof p.size === 'string' ? p.size : undefined
-  const style = resolveStyle(inputs, globals)
+  // M21：按生成对象注入对应锚定——场景概念图用 scene，关键帧用 keyframe
+  const imgRole: StyleRole = data.kind === 'scene-image' ? 'scene' : data.kind === 'char-image' ? 'character' : 'keyframe'
+  const style = resolveStyle(inputs, globals, imgRole)
   const size = sizeFromAspect(resolveAspect(inputs, globals)) || paramSize
   const withStyle = (s: string) => [s, style && `, ${style}`].filter(Boolean).join(' ')
 
@@ -438,7 +571,7 @@ export function buildImagePrompts(
       // 人物上下文（独立「人物」节点 / 角色设定连入 chars 口）：名称 → 外貌，注入提示并用于参考图匹配
       const charDefs = collectJsonArray(inputs['chars'], 'characters')
       // P2-7：charMap 改存结构化角色档案（外貌恒定 + 动机/弧线随节拍变）
-      const charMap = new Map<string, { appearance: string; motivation?: string; arc?: Array<Record<string, unknown>> }>()
+      const charMap = new Map<string, { appearance: string; motivation?: string; arc?: Array<Record<string, unknown>>; variants?: Array<Record<string, unknown>> }>()
       const charIdMap = new Map<string, string>() // §5.2：name → charId 反查（稳定主键优先匹配）
       for (const c of charDefs) {
         if (!c.name) continue
@@ -446,10 +579,24 @@ export function buildImagePrompts(
           appearance: String(c.appearance || c.refPrompt || c.description || ''),
           motivation: c.motivation ? String(c.motivation) : undefined,
           arc: Array.isArray(c.arc) ? (c.arc as Array<Record<string, unknown>>) : undefined,
+          variants: Array.isArray(c.variants) ? (c.variants as Array<Record<string, unknown>>) : undefined, // M22a
         })
         if (c.charId) charIdMap.set(String(c.name), String(c.charId))
       }
       const soleName = charDefs.length === 1 ? String(charDefs[0].name || '') : ''
+      // M24-lite：段落规划——storyboard 可在同一次输出里产 segments[]，shots 经 segmentId 继承段落情绪/光影/各角色当前形态变体
+      const sbJson = inputs['shot']?.[0]?.json as Record<string, unknown> | undefined
+      const segs = Array.isArray(sbJson?.segments) ? (sbJson!.segments as Array<Record<string, unknown>>) : []
+      const segMap = new Map<string, { mood?: string; lighting?: string; activeVariants: Map<string, string> }>()
+      for (const sg of segs) {
+        const av = new Map<string, string>()
+        for (const a of Array.isArray(sg.activeVariants) ? (sg.activeVariants as Array<Record<string, unknown>>) : []) {
+          const key = String(a.name ?? a.charId ?? '')
+          if (key && a.variantId) av.set(key, String(a.variantId))
+        }
+        const sid = String(sg.id ?? '')
+        if (sid) segMap.set(sid, { mood: sg.mood ? String(sg.mood) : undefined, lighting: sg.lighting ? String(sg.lighting) : undefined, activeVariants: av })
+      }
       // 物品上下文（「物品」节点连入 props 口）：名称 → 外观，注入提示 + 用于参考图按名匹配
       const propDefs = collectJsonArray(inputs['props'], 'props')
       const propMap = new Map<string, string>()
@@ -465,6 +612,18 @@ export function buildImagePrompts(
         const refName = refNames[0]
         // §5.2：与 refNames 同序的 charId（缺失项留空串占位，pickRef 会回退 name）
         const refCharIds = refNames.map((n) => charIdMap.get(n) || '')
+        // M22a：与 refNames 同序的形态键。优先 shot.associateAssetIds 显式绑定，否则按变体 appliesTo/时序解析
+        const assoc = Array.isArray(shot.associateAssetIds) ? (shot.associateAssetIds as Array<Record<string, unknown>>) : []
+        const seg = segMap.get(String(shot.segmentId ?? ''))
+        const refVariantIds = refNames.map((n, k) => {
+          const cid = refCharIds[k]
+          // 优先级：shot 显式绑定 > 段落 activeVariants（M24-lite 权威源）> appliesTo/叙事比例解析
+          const explicit = assoc.find((a) => a && (String(a.charId ?? '') === cid || String(a.name ?? '') === n) && a.variantId)
+          if (explicit) return String(explicit.variantId)
+          const fromSeg = seg?.activeVariants.get(n) ?? (cid ? seg?.activeVariants.get(cid) : undefined)
+          if (fromSeg) return fromSeg
+          return resolveVariantForShot(charMap.get(n)?.variants, shot, i, list.length) || ''
+        })
         // P2-7：本镜所处阶段（优先 beatId，其次 actId/mood），取该角色此刻状态注入；外貌恒定靠参考图保证
         const stageKey = String(shot.beatId || shot.actId || shot.mood || '')
         const stateAt = (rec: { appearance: string; arc?: Array<Record<string, unknown>> }): string => {
@@ -494,8 +653,20 @@ export function buildImagePrompts(
           )
         )
         const propHint = refPropNames.map((n) => (propMap.get(n) ? `${n}: ${propMap.get(n)}` : n)).join('; ')
-        // 角色 + 物品 提示合并注入 {chars} 槽
-        const subjects = [hint && `characters — ${hint}`, propHint && `key props — ${propHint}`].filter(Boolean).join('; ')
+        // M-scene/prop：物品状态键（与 refPropNames 同序）——优先 shot.associateAssetIds 显式绑定
+        const refPropVariantIds = refPropNames.map((n) =>
+          String(assoc.find((a) => a && (String(a.propId ?? '') === n || String(a.name ?? '') === n) && a.variantId)?.variantId ?? '')
+        )
+        // M-scene/prop：本镜场景时段/天气变体——显式绑定 > shot.sceneVariant/timeOfDay > 退回 mood（用关键词匹配场景板）
+        const sceneVariantId = String(
+          assoc.find((a) => a && (a.sceneId != null || a.kind === 'scene') && a.variantId)?.variantId ??
+            shot.sceneVariant ??
+            shot.timeOfDay ??
+            ''
+        )
+        // 角色 + 物品 + 段落氛围 合并注入 {chars} 槽（M24-lite：段落 mood/光影继承）
+        const segAtmo = seg && (seg.mood || seg.lighting) ? `atmosphere — ${[seg.mood, seg.lighting].filter(Boolean).join(', ')}` : ''
+        const subjects = [hint && `characters — ${hint}`, propHint && `key props — ${propHint}`, segAtmo].filter(Boolean).join('; ')
         // P2-5：景别/运镜规范化为英文短语注入 prompt（不再算出即丢）
         const grammar = shotGrammarPhrase(shot)
         return {
@@ -510,7 +681,10 @@ export function buildImagePrompts(
           refName,
           refNames,
           refCharIds,
+          refVariantIds,
           refPropNames,
+          refPropVariantIds,
+          sceneVariantId,
           // P0-1：把镜头级生成信息全量带上，供 i2v 逐帧消费（运镜/动作/时长不再在节点边界丢失）
           // M18-B：对白/SFX/环境声也透传，供 i2v 原生音频模式拼 audioPrompt（storyboard 暂无则为 undefined）
           meta: {
@@ -527,6 +701,9 @@ export function buildImagePrompts(
             // P2-3：本镜地点，供 execNode 调 selectRefs 只取本场 master plate（根治场景图全收污染）
             sceneName: shot.location ? String(shot.location) : undefined,
             locationKey: shot.locationKey ? String(shot.locationKey) : undefined,
+            // 镜头顺接（fix #5）：sceneId 判断是否同场，continuousFromPrev 由分镜标注是否紧接上一镜连贯动作
+            sceneId: shot.sceneId != null ? String(shot.sceneId) : undefined,
+            continuousFromPrev: shot.continuousFromPrev === true || String(shot.continuousFromPrev ?? '') === 'true',
           },
         }
       })
@@ -541,23 +718,48 @@ function globalsLine(inputs: Record<string, PortValue[]>, globals?: PromptGlobal
   const wired = globalsHint(inputs)
   if (wired) return wired
   const parts: string[] = []
-  if (globals?.style) parts.push(`画风：${globals.style}`)
+  // M21：选了风格包则把其锚定作为画风注入文本节点（storyboard 据此写 style-aware 英文 prompt）
+  const pack = getStylePack(globals?.stylePackId)
+  if (pack) parts.push(`画风：${[pack.anchors.all, globals?.style].filter(Boolean).join('，')}`)
+  else if (globals?.style) parts.push(`画风：${globals.style}`)
   if (globals?.aspectRatio) parts.push(`画幅：${globals.aspectRatio}`)
   return parts.join('，')
 }
 
-/** P2-2：剧本篇幅提示——sceneCount 显式优先，否则按成片体量档位给场景区间 */
-function resolveSceneHint(p: Record<string, unknown>): string {
+/**
+ * 成片体量规格：协调大纲节拍/剧本场数/分镜镜头数。仅「微短片」给出压缩指令与镜头硬上限，
+ * 其余档位返回与历史一致的区间（beats/shotBudget 为空=不覆盖结构默认），保证存量工程零回归。
+ */
+export function scaleSpec(scale?: string): { beats: string; scenes: string; shotBudget: string; maxShots: number } {
+  switch (String(scale || '短片')) {
+    case '微短片':
+      return {
+        beats: '约 3 个核心节拍（开场 → 转折 → 结局），1 幕即可，切勿铺成完整 15 拍',
+        scenes: '共 1-2 场',
+        shotBudget: '全片总共约 3-5 个镜头（少而精，不要每场都铺满）',
+        maxShots: 6,
+      }
+    case '单集':
+      return { beats: '', scenes: '共约 12-24 场', shotBudget: '', maxShots: 0 }
+    case '长片':
+      return { beats: '', scenes: '共约 30-60 场（含完整三幕）', shotBudget: '', maxShots: 0 }
+    default: // 短片
+      return { beats: '', scenes: '场景数量适中（建议 3-8 场）', shotBudget: '', maxShots: 0 }
+  }
+}
+
+/** 当前生效体量：script-gen 的 targetLength 显式覆盖优先（非「跟随全局」），否则跟随项目全局 filmScale */
+export function effectiveScale(p: Record<string, unknown>, globals?: PromptGlobals): string {
+  const t = String(p.targetLength ?? '跟随全局')
+  if (t && t !== '跟随全局') return t
+  return String(globals?.filmScale || '短片')
+}
+
+/** P2-2：剧本篇幅提示——sceneCount 显式优先，否则按生效体量给场景区间 */
+function resolveSceneHint(p: Record<string, unknown>, globals?: PromptGlobals): string {
   const n = Number(p.sceneCount)
   if (Number.isFinite(n) && n > 0) return `共约 ${n} 场（可按叙事需要 ±1）`
-  switch (String(p.targetLength ?? '短片')) {
-    case '长片':
-      return '共约 30-60 场（含完整三幕）'
-    case '单集':
-      return '共约 12-24 场'
-    default:
-      return '场景数量适中（建议 3-8 场）'
-  }
+  return scaleSpec(effectiveScale(p, globals)).scenes
 }
 
 export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue[]>, globals?: PromptGlobals): BuiltPrompt {
@@ -568,7 +770,15 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
       const structure = String(p.structure ?? 'Save-the-Cat')
       const id = structure === 'Story-Circle' ? 'text.outline.storycircle' : 'text.outline.savecat'
       const instruction = String(p.instruction ?? '').trim()
-      const user = [`故事/灵感：\n${story}`, instruction && `\n附加要求：${instruction}`].filter(Boolean).join('')
+      // 成片体量压缩节拍：微短片不要铺满 15 拍（根治"想要 4 镜小故事却给 15 拍宏大叙事"）
+      const beats = scaleSpec(globals?.filmScale).beats
+      const user = [
+        `故事/灵感：\n${story}`,
+        beats && `\n本片体量：${globals?.filmScale} → 节拍预算：${beats}（请据此精简，覆盖核心起承转合即可）`,
+        instruction && `\n附加要求：${instruction}`,
+      ]
+        .filter(Boolean)
+        .join('')
       return { system: jsonSystem(id), user }
     }
     case 'script-gen': {
@@ -581,8 +791,8 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
       const hasOutline = !!j && Array.isArray(j.beats) && (j.beats as unknown[]).length > 0
       const story = valToText(inVal)
       const instruction = String(p.instruction ?? '').trim()
-      // P2-2：篇幅控制——sceneCount 显式优先，否则按 targetLength 档位给区间
-      const sceneHint = resolveSceneHint(p)
+      // P2-2：篇幅控制——sceneCount 显式优先，否则按生效体量（targetLength 覆盖 > 全局 filmScale）给区间
+      const sceneHint = resolveSceneHint(p, globals)
       const g = globalsLine(inputs, globals)
       const system = `${fillTemplate(getPrompt('text.script'), { sceneHint })}\n\n${JSON_CONTRACT}`
       const user = [
@@ -590,6 +800,7 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
         hasOutline &&
           `\n要求：按 beats 顺序逐节拍铺设场景，每个 scene 标注其 actId/beatId（只引用大纲中真实出现的 id），确保覆盖全部 beats（尤其结尾节拍，不得省略后半段）。`,
         `\n篇幅：${sceneHint}`,
+        `\n对白语言：所有台词(dialogues[].line)一律用「${globals?.dialogueLang || '中文'}」创作，自然口语、逐字保留不要翻译。`,
         instruction && `\n附加要求：${instruction}`,
         g && `\n全局设定：${g}`,
       ]
@@ -606,8 +817,11 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
       const mode = String(p.shotMode ?? '每场N镜')
       const isSingleScene = scenes.length <= 1
       const g = globalsLine(inputs, globals)
-      const guide =
-        scenes.length === 0
+      // 成片体量总镜头预算（仅微短片给出，覆盖每场 N 镜，直接控总量）
+      const budget = scaleSpec(globals?.filmScale).shotBudget
+      const guide = budget
+        ? `${budget}。覆盖核心情节即可，不必每场都铺满，按叙事顺序排列。`
+        : scenes.length === 0
           ? `把剧本拆为镜头表，按叙事顺序覆盖全部内容、不得截断后半段（约 ${Math.max(perScene * 2, 6)} 个镜头）。`
           : mode === '总量自适应'
             ? `按叙事密度自适应分配镜头，每个 scene 至少 1 镜，必须覆盖全部 ${scenes.length} 个场景，不得遗漏后半段。`
@@ -618,6 +832,7 @@ export function buildPrompt(data: FilmNodeData, inputs: Record<string, PortValue
         `剧本${isSingleScene && scenes.length ? '（单场）' : ''}：\n${script}`,
         `\n\n${guide}`,
         scenes.length > 0 && `\n每个 shot 标注 sceneId（引用 scene.id），并继承该 scene 的 actId/beatId。`,
+        `\n台词：把剧本里该镜对应的对白填入该 shot 的 dialogues（用「${globals?.dialogueLang || '中文'}」、逐字保留不要翻译；这一镜没人说话才省略）。`,
         g && `\n全局设定（请在每个镜头的英文 prompt 中体现该画风）：${g}`,
       ]
         .filter(Boolean)

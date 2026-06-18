@@ -126,6 +126,29 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     },
   },
   {
+    id: 'toapis-seedance',
+    label: 'toapis · Seedance 2（原生音频 / 首尾帧）',
+    hint: 'toapis Seedance（豆包即梦，自带原生音频）。model=seedance-2 或 seedance-2-fast（fast 不支持 1080p）；Key=toapis Key（Bearer）。用 image_with_roles 提交首/尾帧：关键帧→first_frame，下一关键帧→last_frame，自动经 toapis 图床换公开 URL。generate_audio=true 时模型直接生成同步音频；分辨率默认 720p，可在请求体改 480p/1080p。',
+    config: {
+      kind: 'custom-http',
+      capabilities: ['video', 'nativeAudio'],
+      mode: 'async-poll',
+      label: 'toapis Seedance 2',
+      model: 'seedance-2',
+      submitUrl: 'https://toapis.com/v1/videos/generations',
+      pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
+      taskIdPath: 'id',
+      statusPath: 'status',
+      videoUrlPath: 'result.data.0.url',
+      uploadUrl: 'https://toapis.com/v1/uploads/images',
+      uploadUrlPath: 'data.url',
+      audio: { toggleField: 'generate_audio' },
+      // 多模态：image_with_roles(首/尾帧) + video_with_roles(参考视频) + audio_with_roles(参考音频/配乐)，按需出现
+      bodyTemplate:
+        '{"model":"{model}","prompt":"{prompt}","resolution":"720p","generate_audio":true{?duration},"duration":{duration}{/duration}{?imageUrl},"image_with_roles":[{"url":"{imageUrl}","role":"first_frame"}{?lastImageUrl},{"url":"{lastImageUrl}","role":"last_frame"}{/lastImageUrl}]{/imageUrl}{?videoUrl},"video_with_roles":[{"url":"{videoUrl}","role":"reference_video"}]{/videoUrl}{?drivingAudioUrl},"audio_with_roles":[{"url":"{drivingAudioUrl}","role":"reference_audio"}]{/drivingAudioUrl}}',
+    },
+  },
+  {
     id: 'openai-compat-video',
     label: 'OpenAI 兼容视频聚合 · 通用（自定义平台/模型）',
     hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 baseURL/submitUrl 接同构平台，model 填任意（sora-2 / veo3.1-fast / grok-video-3 / kling-… / 含 Omni 等）。图生视频自动经「图片上传地址」换公开 URL（默认 toapis 图床，换平台请同步改）。请求体字段名按模型调整（image_urls vs images）。',

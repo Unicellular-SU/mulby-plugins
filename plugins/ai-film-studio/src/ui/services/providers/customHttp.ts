@@ -59,10 +59,14 @@ function headers(cfg: VideoProviderConfig, apiKey: string): Record<string, strin
 // 渲染请求体模板：先处理条件块 {?key}…{/key}（变量非空才保留），再替换 {key}。
 // 字符串变量做 JSON 内部转义（去外层引号），数字原样，便于嵌入任意 JSON 结构。
 function renderBodyTemplate(tpl: string, vars: Record<string, string | number | undefined>): Record<string, unknown> {
-  let s = tpl.replace(/\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g, (_, k: string, inner: string) => {
-    const v = vars[k]
-    return v !== undefined && v !== null && String(v) !== '' ? inner : ''
-  })
+  let s = tpl
+  // 多趟剥离条件块 {?var}…{/var}，支持嵌套（如 image_with_roles 里嵌 lastImageUrl）；最多 6 趟防御不平衡标记
+  for (let pass = 0; pass < 6 && /\{\?\w+\}/.test(s); pass++) {
+    s = s.replace(/\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g, (_, k: string, inner: string) => {
+      const v = vars[k]
+      return v !== undefined && v !== null && String(v) !== '' ? inner : ''
+    })
+  }
   s = s.replace(/\{(\w+)\}/g, (_, k: string) => {
     const v = vars[k]
     if (v === undefined || v === null) return ''

@@ -18,6 +18,17 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
     if (node.data.kind === 'character') {
       // 'image' 口取已生成/上传的参考图；其余口给角色身份 JSON
       if (handle === 'image') return node.data.outputs?.image ?? null
+      // M27：手工授权多时期变体——variantsJson 安全解析为 variants[]（非法 JSON 忽略，不影响单期角色）
+      let variants: unknown[] | undefined
+      const vj = String(p.variantsJson ?? '').trim()
+      if (vj) {
+        try {
+          const parsed = JSON.parse(vj)
+          if (Array.isArray(parsed) && parsed.length) variants = parsed
+        } catch {
+          // 忽略非法 JSON
+        }
+      }
       return {
         type: 'json',
         // P1-5(部分)：身份 JSON 带 voiceId，供 tts 逐角色配音的 voiceMap（空则下游回退 narrator）
@@ -26,7 +37,9 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
             {
               name: p.name ?? '',
               appearance: p.appearance ?? '',
+              ...(p.identity ? { identity: p.identity } : {}), // M27：跨期不变身份
               refPrompt: p.refPrompt ?? '',
+              ...(variants ? { variants } : {}), // M27：时期变体 → char-image 逐变体出图、keyframe 按期取图
               ...(p.voiceId ? { voiceId: p.voiceId } : {}),
             },
           ],

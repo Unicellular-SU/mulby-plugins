@@ -26,6 +26,19 @@ const KEY_ELEMENTS = 'elements:library'
 
 export type ElementKind = 'character' | 'scene' | 'prop'
 
+/** M27：时期/形态变体（角色少年/暮年、场景时段、物品状态）。views 存各角度 assetId。 */
+export interface ElementVariant {
+  id: string
+  label: string
+  stageKey?: string
+  appliesTo?: string[]
+  appearance?: string
+  prompt?: string
+  views?: { front?: string; side?: string; back?: string }
+  refAssetIds?: string[]
+  voiceId?: string
+}
+
 export interface ElementRef {
   id: string
   kind: ElementKind
@@ -44,6 +57,9 @@ export interface ElementRef {
   voiceId?: string
   variants?: { id: string; label: string; assetId: string; tags?: string[] }[]
   lora?: { provider?: string; ref: string; weight?: number }
+  // —— M27（新增独立字段，不复用上面扁平 variants，避免破坏旧持久化记录） ——
+  identity?: string // 跨期不变身份（age-neutral）
+  appearanceVariants?: ElementVariant[] // 时期/形态变体（富结构）
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
@@ -83,6 +99,8 @@ interface AssetState {
 
   saveElement: (el: Partial<ElementRef> & { kind: ElementKind; name: string }) => Promise<ElementRef>
   removeElement: (id: string) => Promise<void>
+  /** M27：把画布生成的角色三视图（meta 带 charId/variantId/view）写回已存在的库角色，幂等、不自动新建 */
+  promoteCharViews: (items: { assetId?: string; meta?: Record<string, unknown> }[]) => Promise<number>
 }
 
 export const useAssetStore = create<AssetState>((set, get) => ({
@@ -160,17 +178,14 @@ export const useAssetStore = create<AssetState>((set, get) => ({
       saved = { ...list[idx], ...el, updatedAt: ts } as ElementRef
       list[idx] = saved
     } else {
+      // M22a/M27：新建分支改为整体展开，杜绝丢字段（旧版只拷贝子集，丢 charId/views/voiceId/lora/identity/appearanceVariants）
       saved = {
+        ...el,
         id: `el_${nanoid(8)}`,
-        kind: el.kind,
-        name: el.name,
-        description: el.description,
-        prompt: el.prompt,
         refAssetIds: el.refAssetIds || [],
-        tags: el.tags,
         createdAt: ts,
         updatedAt: ts,
-      }
+      } as ElementRef
       list.push(saved)
     }
     set({ elements: list })
@@ -182,5 +197,44 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     const list = get().elements.filter((e) => e.id !== id)
     set({ elements: list })
     await kvSet(KEY_ELEMENTS, list)
+  },
+
+  promoteCharViews: async (items) => {
+    const list = get().elements.slice()
+    let changed = 0
+    for (const it of items) {
+      const m = (it.meta || {}) as Record<string, unknown>
+      const assetId = it.assetId
+      const view = typeof m.view === 'string' ? m.view : ''
+      if (!assetId || !view) continue
+      const charId = typeof m.charId === 'string' ? m.charId : ''
+      const name = typeof m.name === 'string' ? m.name : ''
+      const variantId = typeof m.variantId === 'string' ? m.variantId : ''
+      // 仅写回已存在的库角色（按 charId/name 匹配），不自动新建，避免污染素材库
+      const idx = list.findIndex(
+        (e) => e.kind === 'character' && ((charId && (e.charId === charId || e.name === charId)) || (name && e.name === name))
+      )
+      if (idx < 0) continue
+      const el: ElementRef = { ...list[idx], updatedAt: Date.now() }
+      if (!variantId) {
+        el.views = { ...(el.views || {}), [view]: assetId }
+      } else {
+        const vs = (el.appearanceVariants || []).slice()
+        let vi = vs.findIndex((v) => v.id === variantId)
+        if (vi < 0) {
+          vs.push({ id: variantId, label: variantId, views: {} })
+          vi = vs.length - 1
+        }
+        vs[vi] = { ...vs[vi], views: { ...(vs[vi].views || {}), [view]: assetId } }
+        el.appearanceVariants = vs
+      }
+      list[idx] = el
+      changed++
+    }
+    if (changed) {
+      set({ elements: list })
+      await kvSet(KEY_ELEMENTS, list)
+    }
+    return changed
   },
 }))

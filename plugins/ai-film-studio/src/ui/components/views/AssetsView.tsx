@@ -459,6 +459,62 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
               <label className="afs-field__label">英文提示词（可选）</label>
               <textarea className="afs-field__input" rows={2} value={editing.prompt || ''} onChange={(e) => setEditing({ ...editing, prompt: e.target.value })} />
             </div>
+            {editing.kind === 'character' && (
+              <>
+                <div className="afs-field">
+                  <label className="afs-field__label">身份特征（跨期不变 · 可选）</label>
+                  <textarea
+                    className="afs-field__input"
+                    rows={2}
+                    value={editing.identity || ''}
+                    onChange={(e) => setEditing({ ...editing, identity: e.target.value })}
+                    placeholder="脸型/五官/体型/标志记号(疤·痣·瞳色)，age-neutral；多时期角色填这里，各期外观放下方变体"
+                  />
+                </div>
+                <div className="afs-field">
+                  <label className="afs-field__label">时期 / 形态变体（少年→暮年 · 可选）</label>
+                  {(editing.appearanceVariants || []).map((v, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'center' }}>
+                      <input
+                        className="afs-field__input"
+                        style={{ flex: '0 0 120px' }}
+                        placeholder="时期标签(如:少年)"
+                        value={v.label || ''}
+                        onChange={(e) => {
+                          const vs = [...(editing.appearanceVariants || [])]
+                          vs[i] = { ...vs[i], label: e.target.value, id: vs[i].id || e.target.value }
+                          setEditing({ ...editing, appearanceVariants: vs })
+                        }}
+                      />
+                      <input
+                        className="afs-field__input"
+                        style={{ flex: 1 }}
+                        placeholder="该期外观（年龄/服饰/特征）"
+                        value={v.appearance || ''}
+                        onChange={(e) => {
+                          const vs = [...(editing.appearanceVariants || [])]
+                          vs[i] = { ...vs[i], appearance: e.target.value }
+                          setEditing({ ...editing, appearanceVariants: vs })
+                        }}
+                      />
+                      <button
+                        className="afs-btn"
+                        title="删除该变体"
+                        onClick={() => setEditing({ ...editing, appearanceVariants: (editing.appearanceVariants || []).filter((_, j) => j !== i) })}
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    className="afs-btn"
+                    onClick={() => setEditing({ ...editing, appearanceVariants: [...(editing.appearanceVariants || []), { id: '', label: '' }] })}
+                  >
+                    <Plus size={13} /> 添加时期变体
+                  </button>
+                </div>
+              </>
+            )}
             <div className="afs-field">
               <label className="afs-field__label">参考图（从图片素材选，可选）</label>
               {imageAssets.length === 0 ? (
