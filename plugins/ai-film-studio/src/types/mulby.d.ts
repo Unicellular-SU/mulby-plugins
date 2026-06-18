@@ -654,10 +654,65 @@ interface MulbyTTS {
   isSpeaking(): boolean
 }
 
+/** V2 KV：读值 + 版本元数据（乐观并发 / CAS） */
+interface MulbyStorageMetaResult {
+  found: boolean
+  value?: unknown
+  version?: number
+  updatedAt?: number
+}
+/** V2 KV：CAS 写入结果 */
+interface MulbyStorageSetVersionResult {
+  ok: boolean
+  /** 写入成功后的新版本号 */
+  version?: number
+  /** 冲突时返回当前版本号 */
+  conflict?: { currentVersion: number }
+  error?: string
+}
+/** V2 KV：按前缀分页遍历的单项（不含 value） */
+interface MulbyStorageListItem {
+  key: string
+  size: number
+  updatedAt: number
+  version: number
+}
+interface MulbyStorageListResult {
+  items: MulbyStorageListItem[]
+  nextCursor?: string
+}
+/** V2 KV：批量读值单项 */
+interface MulbyStorageGetManyItem {
+  key: string
+  found: boolean
+  value?: unknown
+  version?: number
+  updatedAt?: number
+}
+
 interface MulbyStorage {
   get(key: string, namespace?: string): Promise<unknown>
   set(key: string, value: unknown, namespace?: string): Promise<boolean>
   remove(key: string, namespace?: string): Promise<boolean>
+  /**
+   * V2 扩展（宿主已实现；插件命名空间由宿主强制为 plugin:<id>，故不传 namespace）。
+   * 旧宿主可能缺失 → 全部 optional，调用前须 feature-detect。
+   */
+  getMeta?(key: string, options?: { namespace?: string }): Promise<MulbyStorageMetaResult>
+  /** CAS：expectedVersion 为 number=版本匹配才写；null=仅当 key 不存在才写；undefined=无条件写 */
+  setWithVersion?(
+    key: string,
+    value: unknown,
+    options?: { namespace?: string; expectedVersion?: number | null }
+  ): Promise<MulbyStorageSetVersionResult>
+  list?(options?: {
+    prefix?: string
+    startsAfter?: string
+    limit?: number
+    order?: 'asc' | 'desc'
+    namespace?: string
+  }): Promise<MulbyStorageListResult>
+  getMany?(keys: string[], options?: { namespace?: string }): Promise<MulbyStorageGetManyItem[]>
   /** 加密 KV（系统 Keychain/DPAPI，仅渲染进程）：适合 API Key / token，自动按插件隔离 */
   encrypted: {
     set(key: string, value: unknown): Promise<boolean>

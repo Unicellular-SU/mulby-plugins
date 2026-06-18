@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import AppRail, { type AppView } from './components/shell/AppRail'
 import EditorView from './components/shell/EditorView'
@@ -6,7 +6,7 @@ import ProjectHome from './components/views/ProjectHome'
 import AssetsView from './components/views/AssetsView'
 import PromptLibrary from './components/views/PromptLibrary'
 import SettingsView from './components/views/SettingsView'
-import { useGraphStore } from './store/graphStore'
+import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { useProviderStore } from './store/providerStore'
 import { usePromptStore } from './store/promptStore'
 import { useUiStore } from './store/uiStore'
@@ -17,7 +17,6 @@ const VIEWS: AppView[] = ['home', 'editor', 'assets', 'prompts', 'settings']
 export default function App() {
   const init = useGraphStore((s) => s.init)
   const loadModels = useGraphStore((s) => s.loadModels)
-  const saveProject = useGraphStore((s) => s.saveProject)
   const deleteSelected = useGraphStore((s) => s.deleteSelected)
   const loadProviders = useProviderStore((s) => s.load)
   const loadPrompts = usePromptStore((s) => s.loadGlobal)
@@ -25,6 +24,16 @@ export default function App() {
   const applyHostTheme = useUiStore((s) => s.applyHostTheme)
 
   const [view, setView] = useState<AppView>('home')
+
+  // 切视图边界：离开画布前先 flush 落盘（修「加载中切页 → 工程丢失」），
+  // 但**始终** setView——即便保存被拒也绝不困住用户。
+  const go = useCallback(
+    (v: AppView) => {
+      if (view === 'editor' && v !== 'editor') void flushSave()
+      setView(v)
+    },
+    [view]
+  )
 
   useEffect(() => {
     init()
@@ -47,6 +56,20 @@ export default function App() {
     void window.mulby?.storage?.set('lastView', view, PLUGIN_ID)
   }, [view])
 
+  // 窗口隐藏/卸载边界：best-effort flush 落盘（宿主无「即将关闭」钩子；beforeunload 无法 await 异步 IPC）
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') void flushSave()
+    }
+    const onPageHide = () => void flushSave()
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+  }, [])
+
   // 主题：先按宿主/持久化初始化，再监听宿主变更（用户手动切换后不再被宿主覆盖）
   useEffect(() => {
     void loadTheme()
@@ -60,7 +83,7 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 's') {
         e.preventDefault()
-        saveProject()
+        void requestSave()
         return
       }
       if (view !== 'editor') return
@@ -72,16 +95,16 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [saveProject, deleteSelected, view])
+  }, [deleteSelected, view])
 
   return (
     <ReactFlowProvider>
       <div className="afs-shell">
-        <AppRail view={view} onChange={setView} />
+        <AppRail view={view} onChange={go} />
         <div className="afs-main">
-          {view === 'home' && <ProjectHome onOpen={() => setView('editor')} />}
+          {view === 'home' && <ProjectHome onOpen={() => go('editor')} />}
           {view === 'editor' && <EditorView />}
-          {view === 'assets' && <AssetsView onInserted={() => setView('editor')} />}
+          {view === 'assets' && <AssetsView onInserted={() => go('editor')} />}
           {view === 'prompts' && <PromptLibrary />}
           {view === 'settings' && <SettingsView />}
         </div>

@@ -243,7 +243,15 @@ async function sgetIndex(): Promise<ProjectCard[]> {
 }
 const ssetIndex = (index: ProjectCard[]) => sset(KEY_INDEX, index)
 const sgetProject = (id: string) => sget<ProjectData>(projectKey(id))
-const ssetProject = (p: ProjectData) => sset(projectKey(p.id), p)
+/** 写工程重型键：返回是否成功（供 saveProject 据此判断成败，不再静默吞失败） */
+async function ssetProject(p: ProjectData): Promise<boolean> {
+  try {
+    const ok = await window.mulby?.storage?.set(projectKey(p.id), p, PLUGIN_ID)
+    return ok !== false
+  } catch {
+    return false
+  }
+}
 const sremProject = (id: string) => srem(projectKey(id))
 
 /**
@@ -258,6 +266,195 @@ async function migrateIfNeeded(): Promise<void> {
   for (const p of old) await ssetProject(p)
   await ssetIndex(old.map(toCard))
   await srem(KEY_PROJECTS)
+}
+
+// ===== 索引并发安全（主线 A）=====
+// 根因：projects:index 是多处未串行化的「读-改-写」，且任何一次瞬时读失败被折叠成 []，
+// 紧接着的写就清空整张索引、孤立所有 project:<id>。下面用「渲染器内 FIFO 互斥锁 + 索引读
+// fail-fast + shrink-guard + 从存活工程重建自愈 + CAS 二次防御」根治之。
+// 正确性建立在单渲染器现实上（manifest pluginSetting.single=true）；CAS 仅是对罕见外部写者
+// （主程序 Plugin Storage Explorer）的廉价二次防御，不 gate 正确性。
+
+/** 索引值损坏（存在但非数组）：触发从存活工程重建，绝不当成空数组 */
+class IndexCorruptError extends Error {}
+/** 索引写入在多次 CAS 重试后仍失败：绝不用陈旧/空数据覆盖内存 projects */
+class IndexWriteError extends Error {}
+
+const MAX_CAS_RETRIES = 5
+// 缓存的版本/快照「永不跨读信任」：仅用于 shrink-guard 基线与首次 CAS 的 expectedVersion 种子。
+// mutateIndex 总是在锁内经 readIndexMeta 重读后再应用 mutator——禁止加「跳过锁内重读的快路径」。
+let indexVersion: number | null = null
+let lastGoodIndex: ProjectCard[] | null = null
+let indexChain: Promise<unknown> = Promise.resolve()
+let hasCasCache: boolean | null = null
+
+function hasCas(): boolean {
+  if (hasCasCache === null) {
+    const s = window.mulby?.storage
+    hasCasCache = typeof s?.setWithVersion === 'function' && typeof s?.getMeta === 'function'
+  }
+  return hasCasCache
+}
+
+/** FIFO 异步互斥锁：无论前一个成功/失败都执行下一个；链用吞错 then 保活，一次失败不毒化队列 */
+function withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = indexChain.then(fn, fn)
+  indexChain = run.then(
+    () => {},
+    () => {}
+  )
+  return run as Promise<T>
+}
+
+/**
+ * 读索引 + 版本（fail-fast）：传输错误**抛异常**（调用方自愈/重试）；不存在→{[],null}（全新安装）；
+ * 存在但非数组→抛 IndexCorruptError（去重建，**绝不**当成 []）。这与容错的 sgetIndex 不同——
+ * 把「瞬时错误→[]→破坏性覆盖」这一根因在源头掐断。
+ */
+async function readIndexMeta(): Promise<{ index: ProjectCard[]; version: number | null }> {
+  const s = window.mulby?.storage
+  if (s?.getMeta) {
+    const meta = await s.getMeta(KEY_INDEX)
+    if (!meta || meta.found === false) return { index: [], version: null }
+    if (!Array.isArray(meta.value)) throw new IndexCorruptError('projects:index value is not an array')
+    return { index: meta.value as ProjectCard[], version: typeof meta.version === 'number' ? meta.version : null }
+  }
+  // 旧宿主无 V2：退回普通 get，但仍 fail-fast（不 try/catch 吞错；非数组也抛）
+  const v = await s?.get(KEY_INDEX, PLUGIN_ID)
+  if (v == null) return { index: [], version: null }
+  if (!Array.isArray(v)) throw new IndexCorruptError('projects:index value is not an array')
+  return { index: v as ProjectCard[], version: null }
+}
+
+/** 提交索引：有 CAS 用 setWithVersion（冲突返回 ok:false）；无则锁内无条件 set（mutex 已串行化） */
+async function commitIndex(
+  index: ProjectCard[],
+  expectedVersion: number | null
+): Promise<{ ok: boolean; version: number | null; conflict: boolean }> {
+  const s = window.mulby?.storage
+  if (hasCas() && s?.setWithVersion) {
+    // expectedVersion：number→CAS；null→仅当 key 不存在；这正是我们要的（不存在则创建，存在则按版本）
+    const res = await s.setWithVersion(KEY_INDEX, index, { expectedVersion })
+    if (res?.ok) return { ok: true, version: res.version ?? null, conflict: false }
+    return { ok: false, version: null, conflict: !!res?.conflict }
+  }
+  await s?.set(KEY_INDEX, index, PLUGIN_ID) // 传输错误→抛，由 mutateIndex 重试
+  return { ok: true, version: null, conflict: false }
+}
+
+// 纯卡片变换（让 CAS 重试天然正确：在新鲜数据上重放即可）
+function upsertCard(index: ProjectCard[], card: ProjectCard): ProjectCard[] {
+  const i = index.findIndex((p) => p.id === card.id)
+  if (i >= 0) {
+    const next = index.slice()
+    next[i] = card
+    return next
+  }
+  return [...index, card]
+}
+function removeCardById(index: ProjectCard[], id: string): ProjectCard[] {
+  return index.filter((p) => p.id !== id)
+}
+function renameCard(index: ProjectCard[], id: string, name: string, ts: number): ProjectCard[] {
+  return index.map((p) => (p.id === id ? { ...p, name, updatedAt: ts } : p))
+}
+/** 按 id 取并集（shrink-guard 用）：同 id 偏好 updatedAt 更新者 */
+function mergeCards(a: ProjectCard[], b: ProjectCard[]): ProjectCard[] {
+  const byId = new Map<string, ProjectCard>()
+  for (const c of a) byId.set(c.id, c)
+  for (const c of b) {
+    const ex = byId.get(c.id)
+    if (!ex || (c.updatedAt ?? 0) >= (ex.updatedAt ?? 0)) byId.set(c.id, c)
+  }
+  return [...byId.values()]
+}
+
+/**
+ * 从存活的 project:<id> 重建索引（自愈历史竞态留下的空/损坏索引）。
+ * 已核验 'projects:index'.startsWith('project:') === false，索引键不会被扫入。
+ * 旧宿主缺 list/getMany → 退回已知最优（不劣于现状）。
+ */
+async function rebuildIndexFromProjects(): Promise<ProjectCard[]> {
+  const s = window.mulby?.storage
+  if (!s?.list || !s?.getMany) return lastGoodIndex ? lastGoodIndex.slice() : []
+  const PREFIX = 'project:'
+  const keys: string[] = []
+  let cursor: string | undefined
+  for (let page = 0; page < 100; page++) {
+    const res = await s.list({ prefix: PREFIX, limit: 500, startsAfter: cursor })
+    for (const it of res.items) if (it.key.startsWith(PREFIX)) keys.push(it.key)
+    if (!res.nextCursor) break
+    cursor = res.nextCursor
+  }
+  const cards: ProjectCard[] = []
+  for (let i = 0; i < keys.length; i += 200) {
+    const items = await s.getMany(keys.slice(i, i + 200))
+    for (const it of items) {
+      if (it.found && it.value && typeof it.value === 'object') {
+        const p = it.value as ProjectData
+        if (p && p.id) cards.push(toCard(p))
+      }
+    }
+  }
+  cards.sort((a, b) => b.updatedAt - a.updatedAt)
+  return cards
+}
+
+/**
+ * 索引变更的唯一收口：锁内重读 → 应用纯 mutator → shrink-guard（非删除路径若结果比已知最优更短，
+ * 则从存活工程重建并取并集）→ commit（CAS/无条件）→ 冲突用新鲜数据重放。
+ * 重试耗尽**抛异常**，绝不用陈旧/空数组覆盖内存 projects（调用方仅在 resolve 时 set projects）。
+ */
+async function mutateIndex(
+  mutate: (cur: ProjectCard[]) => ProjectCard[],
+  opts: { allowShrink?: boolean } = {}
+): Promise<ProjectCard[]> {
+  return withIndexLock(async () => {
+    let lastErr: unknown = null
+    for (let attempt = 0; attempt < MAX_CAS_RETRIES; attempt++) {
+      let cur: ProjectCard[]
+      let ver: number | null
+      try {
+        const meta = await readIndexMeta()
+        cur = meta.index
+        ver = meta.version
+      } catch (e) {
+        if (e instanceof IndexCorruptError) {
+          cur = await rebuildIndexFromProjects()
+          ver = null
+          try {
+            const m2 = await readIndexMeta()
+            ver = m2.version
+          } catch {
+            /* 仍损坏：用 ver=null（CAS create-only 或无条件） */
+          }
+        } else {
+          lastErr = e // 瞬时传输错误：重试
+          continue
+        }
+      }
+      let next = mutate(cur)
+      if (!opts.allowShrink) {
+        const baseline = Math.max(cur.length, lastGoodIndex?.length ?? 0)
+        if (next.length < baseline) {
+          const rebuilt = await rebuildIndexFromProjects()
+          next = mergeCards(mutate(rebuilt), rebuilt) // 在完整集上重放 mutator + 并集
+        }
+      }
+      try {
+        const res = await commitIndex(next, ver)
+        if (res.ok) {
+          indexVersion = res.version
+          lastGoodIndex = next
+          return next
+        }
+        lastErr = new Error('projects:index CAS conflict') // 冲突：循环用新鲜数据重放
+      } catch (e) {
+        lastErr = e
+      }
+    }
+    throw new IndexWriteError(`mutateIndex failed after ${MAX_CAS_RETRIES} retries: ${String(lastErr)}`)
+  })
 }
 
 function now() {
@@ -386,12 +583,51 @@ interface GraphState {
 
 // 防抖自动保存
 let saveTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleSave(save: () => void) {
+let safeSaveRetryArmed = false
+
+/**
+ * 安全保存：包住会抛错的 saveProject（saveProject 失败时已自行重置 dirty）。
+ * 失败 → 提示用户 + 排一次性自重试（不静默吞失败，这正是「保存悄悄失败」根因的对症处理）。
+ */
+async function safeSave(): Promise<void> {
+  try {
+    await useGraphStore.getState().saveProject()
+    safeSaveRetryArmed = false
+  } catch (e) {
+    window.mulby?.notification?.show(`工程保存失败，将自动重试（${String((e as Error)?.message ?? e)}）`, 'warning')
+    if (!safeSaveRetryArmed) {
+      safeSaveRetryArmed = true
+      scheduleSave() // 一次性自重试（防抖窗口后再试）
+    }
+  }
+}
+
+/**
+ * 防抖自动保存：内部总走 safeSave（忽略历史回调参数）——一处改动即修好全部 18 个
+ * `scheduleSave(() => get().saveProject())` 调用点（其中部分位于 grep 不可见的 NUL 文件中）。
+ */
+function scheduleSave(_legacyCb?: () => void) {
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = null
-    save()
+    void safeSave()
   }, 800)
+}
+
+/** 立即落盘并等待在途保存 settle：视图切换/隐藏/卸载边界用，确保不丢未保存编辑 */
+export async function flushSave(): Promise<void> {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  if (useGraphStore.getState().dirty) await safeSave()
+  // 等队列中在途的 mutateIndex/save 全部 settle（真静默）
+  await withIndexLock(() => Promise.resolve())
+}
+
+/** 用户显式保存（Cmd/Ctrl+S）：走 safeSave，失败提示+重试而非静默 */
+export async function requestSave(): Promise<void> {
+  await safeSave()
 }
 
 // 新节点落点：按现有节点数错位排布，避免完全重叠
@@ -2267,14 +2503,36 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   init: async () => {
     if (get().loaded) return
     await migrateIfNeeded() // 旧版单键 → 拆分存储（幂等）
-    let index = await sgetIndex()
+    // 读索引（fail-fast）：空/缺/损坏 → 从存活工程自愈重建（修复历史竞态留下的空索引/重复）。
+    // 正常路径（索引存在且非空）跳过 list+getMany 扫描，仅 seed 基线、不写——避免每次启动 O(N) 开销。
+    let index: ProjectCard[] = []
+    let version: number | null = null
+    try {
+      const meta = await readIndexMeta()
+      index = meta.index
+      version = meta.version
+      if (index.length === 0) {
+        const rebuilt = await rebuildIndexFromProjects()
+        if (rebuilt.length > 0) {
+          index = rebuilt
+          version = (await commitIndex(index, version)).version
+        }
+      }
+    } catch {
+      index = await rebuildIndexFromProjects() // 索引损坏：从存活工程重建
+      version = index.length > 0 ? (await commitIndex(index, null)).version : null
+    }
     if (index.length === 0) {
+      // 真的空（全新安装/无任何工程）→ 建默认工程
       const def = makeDefaultProject()
       await ssetProject(def)
       index = [toCard(def)]
-      await ssetIndex(index)
+      version = (await commitIndex(index, version)).version
       await sset(KEY_CURRENT, def.id)
     }
+    // 顺序不变量：在 loaded:true 之前 seed 锁基线，保证首次 save 见到非空基线
+    lastGoodIndex = index
+    indexVersion = version
     let currentId = await sget<string>(KEY_CURRENT)
     let current = currentId ? await sgetProject(currentId) : null
     if (!current) {
@@ -2286,8 +2544,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!current) {
       const def = makeDefaultProject()
       await ssetProject(def)
-      index = [toCard(def)]
-      await ssetIndex(index)
+      index = mergeCards(index, [toCard(def)])
+      indexVersion = (await commitIndex(index, indexVersion)).version
+      lastGoodIndex = index
       currentId = def.id
       await sset(KEY_CURRENT, currentId)
       current = def
@@ -2305,7 +2564,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       dirty: false,
     })
     syncProjectPromptLayer(current.promptOverrides)
-    void hydrateAssets()
+    void hydrateAssets().catch(() => {})
   },
 
   // ============ 模型 / 运行 ============
@@ -2342,7 +2601,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const img: PortValue = { type: 'image', assetId, url: toDataUrl(base64, mime), mime, ...(meta ? { meta } : {}) }
     const prev = node?.data.outputs || {}
     patchNode(id, { status: 'done', error: undefined, outputs: { ...prev, [port]: img } })
-    void get().saveProject()
+    void safeSave()
   },
 
   setNodeAudio: async (id, dataUrl) => {
@@ -2353,7 +2612,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       error: undefined,
       outputs: { out: { type: 'audio', assetId, url: toDataUrl(base64, mime || 'audio/mpeg'), mime: mime || 'audio/mpeg' } },
     })
-    void get().saveProject()
+    void safeSave()
   },
 
   editNodeImageItem: async (nodeId, port, index, prompt) => {
@@ -2414,7 +2673,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       window.mulby?.notification?.show(e instanceof Error ? e.message : '修改失败', 'error')
     } finally {
       set({ isRunning: false, runningNodeId: null })
-      void get().saveProject()
+      void safeSave()
     }
   },
 
@@ -2494,7 +2753,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       window.mulby?.notification?.show(e instanceof Error ? e.message : '重新生成失败', 'error')
     } finally {
       set({ isRunning: false, runningNodeId: null })
-      void get().saveProject()
+      void safeSave()
     }
   },
 
@@ -2511,22 +2770,20 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       nextVal = { ...val, text }
     }
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: nextVal }, error: undefined })
-    void get().saveProject()
+    void safeSave()
     return null
   },
 
   loadTemplate: async (templateId) => {
     const tpl = TEMPLATES.find((t) => t.id === templateId)
     if (!tpl) return
-    if (get().dirty) await get().saveProject() // 切换前先保存当前工程，避免未保存编辑丢失
+    if (get().dirty) await safeSave() // 切换前先保存（失败不阻断切换，由 safeSave 提示+重试）
     const { nodes, edges } = instantiateTemplate(tpl)
     const proj = makeDefaultProject(tpl.name)
     proj.nodes = nodes
     proj.edges = edges
     await ssetProject(proj)
-    const index = await sgetIndex()
-    index.push(toCard(proj))
-    await ssetIndex(index)
+    const index = await mutateIndex((cur) => upsertCard(cur, toCard(proj)))
     await sset(KEY_CURRENT, proj.id)
     set({
       projects: index,
@@ -2564,7 +2821,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       const cv = cur?.data.outputs?.[port]
       if (cur && cv) patchNode(id, { stream: undefined, outputs: { ...cur.data.outputs, [port]: { ...cv, localPath } } })
       window.mulby?.notification?.show('视频已保存到本地', 'success')
-      void get().saveProject()
+      void safeSave()
     } catch (e) {
       patchNode(id, { stream: undefined })
       window.mulby?.notification?.show(e instanceof Error ? e.message : '下载失败', 'error')
@@ -2738,7 +2995,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       await execNode(id, { force: true })
     } finally {
       set({ isRunning: false, runningNodeId: null })
-      void get().saveProject()
+      void safeSave()
     }
   },
 
@@ -2752,7 +3009,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       notifyRunResult(r.errored, r.skipped)
     } finally {
       set({ isRunning: false, runningNodeId: null })
-      void get().saveProject()
+      void safeSave()
     }
   },
 
@@ -2779,7 +3036,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       notifyRunResult(r.errored, r.skipped)
     } finally {
       set({ isRunning: false, runningNodeId: null })
-      void get().saveProject()
+      void safeSave()
     }
   },
 
@@ -2941,12 +3198,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   // ============ 工程管理 ============
   newProject: async () => {
-    if (get().dirty) await get().saveProject() // 切换前先保存当前工程，避免未保存编辑丢失
+    if (get().dirty) await safeSave() // 切换前先保存（失败不阻断新建）
     const def = makeDefaultProject(`工程 ${get().projects.length + 1}`)
     await ssetProject(def)
-    const index = await sgetIndex()
-    index.push(toCard(def))
-    await ssetIndex(index)
+    const index = await mutateIndex((cur) => upsertCard(cur, toCard(def)))
     await sset(KEY_CURRENT, def.id)
     set({
       projects: index,
@@ -2966,33 +3221,34 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const { currentId, projectName, nodes, edges, globals, promptOverrides } = get()
     if (!currentId) return
     set({ saving: true })
-    const existing = await sgetProject(currentId)
-    const ts = now()
-    const data: ProjectData = {
-      id: currentId,
-      name: projectName,
-      createdAt: existing?.createdAt ?? ts,
-      updatedAt: ts,
-      nodes: serializeNodes(nodes),
-      edges,
-      globals,
-      promptOverrides,
-      viewport: get().viewport, // P2-13：视口落盘
+    try {
+      const existing = await sgetProject(currentId) // 容错：单个工程键不可读不阻断保存
+      const ts = now()
+      const data: ProjectData = {
+        id: currentId,
+        name: projectName,
+        createdAt: existing?.createdAt ?? ts,
+        updatedAt: ts,
+        nodes: serializeNodes(nodes),
+        edges,
+        globals,
+        promptOverrides,
+        viewport: get().viewport, // P2-13：视口落盘
+      }
+      // 先写当前工程重型键（失败抛错，不动索引）
+      if (!(await ssetProject(data))) throw new IndexWriteError('write project data failed')
+      // 索引项更新经唯一收口 mutateIndex（锁内重读 + shrink-guard + CAS），根除并发覆盖
+      const index = await mutateIndex((cur) => upsertCard(cur, toCard(data)))
+      set({ projects: index, dirty: false, saving: false })
+    } catch (e) {
+      set({ dirty: true, saving: false }) // 失败：保持 dirty 以待重试，绝不清 dirty/覆盖列表
+      throw e
     }
-    await ssetProject(data) // 只写当前工程单键，根除旧版「整数组读改写」的并发覆盖
-    // 同步更新轻量索引项（节点数/封面/名称/时间）
-    const index = await sgetIndex()
-    const card = toCard(data)
-    const idx = index.findIndex((p) => p.id === currentId)
-    if (idx >= 0) index[idx] = card
-    else index.push(card)
-    await ssetIndex(index)
-    set({ projects: index, dirty: false, saving: false })
   },
 
   switchProject: async (id) => {
     if (id === get().currentId) return
-    if (get().dirty) await get().saveProject()
+    if (get().dirty) await safeSave() // 切换前先保存（失败不阻断切换）
     const target = await sgetProject(id)
     if (!target) return
     await sset(KEY_CURRENT, id)
@@ -3008,15 +3264,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       dirty: false,
     })
     syncProjectPromptLayer(target.promptOverrides)
-    void hydrateAssets()
+    void hydrateAssets().catch(() => {})
   },
 
   deleteProject: async (id) => {
-    let index = (await sgetIndex()).filter((p) => p.id !== id)
-    await sremProject(id) // 删除该工程的重型图键
+    await sremProject(id) // 先删重型图键，再改索引——关闭「索引已删但数据还在 → 复活」窗口
     // 清掉该工程的命名快照，避免快照长期 pin 住孤儿素材
     const snaps = (await sget<ProjectSnapshot[]>(KEY_SNAPSHOTS)) || []
     if (snaps.some((s) => s.projectId === id)) await sset(KEY_SNAPSHOTS, snaps.filter((s) => s.projectId !== id))
+    // 删除是显式收缩 → allowShrink，跳过 shrink-guard
+    let index = await mutateIndex((cur) => removeCardById(cur, id), { allowShrink: true })
     const wasCurrent = get().currentId === id
     let currentId = get().currentId
     let current: ProjectData | null = null
@@ -3024,12 +3281,11 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       // 删光了：建一个默认工程兜底
       const def = makeDefaultProject()
       await ssetProject(def)
-      index = [toCard(def)]
+      index = await mutateIndex((cur) => upsertCard(cur, toCard(def)))
       current = def
       currentId = def.id
       await sset(KEY_CURRENT, currentId)
     }
-    await ssetIndex(index)
     if (wasCurrent && !current) {
       currentId = index[0].id
       await sset(KEY_CURRENT, currentId)
@@ -3048,7 +3304,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         dirty: false,
       })
       syncProjectPromptLayer(current?.promptOverrides)
-      void hydrateAssets()
+      void hydrateAssets().catch(() => {})
     } else {
       set({ projects: index })
     }
@@ -3068,24 +3324,19 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!data) return
     const ts = now()
     await ssetProject({ ...data, name, updatedAt: ts })
-    const index = await sgetIndex()
-    const idx = index.findIndex((p) => p.id === id)
-    if (idx >= 0) index[idx] = { ...index[idx], name, updatedAt: ts }
-    await ssetIndex(index)
+    const index = await mutateIndex((cur) => renameCard(cur, id, name, ts))
     set({ projects: index })
   },
 
   duplicateProject: async (id) => {
-    if (id === get().currentId && get().dirty) await get().saveProject()
+    if (id === get().currentId && get().dirty) await safeSave()
     const src = await sgetProject(id)
     if (!src) return null
     const ts = now()
     // 复制共享同一批 assetId（附件按 id 共享，无需复制二进制）；新 id/名称/时间
     const copy: ProjectData = { ...src, id: `proj_${nanoid(8)}`, name: `${src.name} 副本`, createdAt: ts, updatedAt: ts }
     await ssetProject(copy)
-    const index = await sgetIndex()
-    index.push(toCard(copy))
-    await ssetIndex(index)
+    const index = await mutateIndex((cur) => upsertCard(cur, toCard(copy)))
     set({ projects: index })
     return copy.id
   },
