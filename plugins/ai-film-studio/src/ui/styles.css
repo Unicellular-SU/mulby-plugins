@@ -383,7 +383,10 @@ body {
   overflow: hidden;
   background: var(--afs-node-bg);
   border: 1px solid var(--afs-border);
-  cursor: zoom-in;
+  cursor: grab; /* 媒体区可拖动节点；看大图用右上展开按钮或双击 */
+}
+.afs-node__frame:active {
+  cursor: grabbing;
 }
 .afs-node__frame img,
 .afs-node__frame video {
@@ -433,10 +436,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
   color: #fff;
   font-size: 15px;
-  pointer-events: none;
+  cursor: pointer; /* 单击播放：小目标，不与拖动媒体冲突 */
+}
+.afs-node__frame-play:hover {
+  background: rgba(0, 0, 0, 0.7);
 }
 /* 媒体上的端口标签：半透明胶囊，叠在媒体边缘可读 */
 .afs-port--onmedia {

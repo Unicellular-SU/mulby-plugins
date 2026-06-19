@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Lock, LockOpen, Loader2, RotateCcw, type LucideIcon } from 'lucide-react'
+import { Lock, LockOpen, Loader2, RotateCcw, Maximize2, type LucideIcon } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
@@ -253,7 +253,16 @@ function MediaFrameNode({
         ...(selected ? { boxShadow: `0 0 0 2px ${catColor}` } : data.locked ? { boxShadow: '0 0 0 1.5px #f59e0b' } : null),
       }}
     >
-      <div className="afs-node__frame nodrag" style={{ height: h }} title="点击看大图" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+      {/* 媒体区可拖动节点（无 nodrag）；看大图改用「右上展开按钮」或「双击」，避免与拖拽/选中冲突 */}
+      <div
+        className="afs-node__frame"
+        style={{ height: h }}
+        title="拖动移动 · 双击看大图"
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          onOpen()
+        }}
+      >
         {url ? (
           type === 'video' ? (
             <video
@@ -282,10 +291,46 @@ function MediaFrameNode({
             <Loader2 size={20} className="afs-spin" />
           </div>
         )}
-        {type === 'video' && <span className="afs-node__frame-play" aria-hidden>▶</span>}
+        {type === 'video' && (
+          <button
+            type="button"
+            className="afs-node__frame-play nodrag"
+            title="播放（全屏 Lightbox）"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpen()
+            }}
+          >
+            ▶
+          </button>
+        )}
         <div className="afs-node__frame-head">
           <Icon size={12} strokeWidth={2.2} style={{ color: catColor }} />
           <span className="afs-node__frame-title">{data.title || def.label}</span>
+          <button
+            type="button"
+            className="afs-node__lock nodrag"
+            title="看大图（也可双击媒体）"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpen()
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 16,
+              height: 16,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: '#fff',
+              cursor: 'pointer',
+              opacity: 0.8,
+            }}
+          >
+            <Maximize2 size={10} strokeWidth={2.2} />
+          </button>
           <button
             type="button"
             className="afs-node__lock nodrag"
