@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, ListVideo, Wand2, Loader2, RotateCcw, Send } from 'lucide-react'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
 import { useGraphStore } from '../store/graphStore'
@@ -7,8 +7,9 @@ import { useMediaUrl, type MediaRef } from '../services/mediaUrl'
 /**
  * 应用级 Lightbox（统一窗口）：节点预览 / Inspector / 素材库 / 结果查看器 都开这一个。
  * - 看大图、带控件播视频、左右切换 + 键盘导航；多视频「连看」自动顺播。
- * - 带节点上下文(nodeId+port+index)的图片：展示标题/提示词/元信息 + 可「对话改图 / 重新生成」，
- *   并实时读取该节点产物（改完即时更新，无需重开）。
+ * - 带节点上下文(nodeId+port+index)的图片：展示标题/提示词/元信息 + 可「对话改图 / 重新生成」，实时反映改图结果。
+ * 性能：① 只窄订阅该产物的 live 引用（生成期改 status/stream 不触发重渲染）；
+ *       ② 改图输入框下沉为独立子组件（打字只重渲染输入条，不动大图/订阅）；③ 大图组件 memo 化。
  */
 export default function LightboxHost() {
   const lb = useUiStore((s) => s.lightbox)
@@ -16,13 +17,18 @@ export default function LightboxHost() {
   const nav = useUiStore((s) => s.lightboxNav)
   const editItem = useGraphStore((s) => s.editNodeImageItem)
   const regenItem = useGraphStore((s) => s.regenNodeImageItem)
-  const [autoplay, setAutoplay] = useState(true) // 连看：视频播完自动切下一个
-  const [editPrompt, setEditPrompt] = useState('')
+  const [autoplay, setAutoplay] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const ctx: LightboxItem | undefined = lb ? lb.items[lb.index] : undefined
-  // 实时读取该产物（改图/重生成后即时反映）；无节点上下文则用打开时的快照 ref
-  const node = useGraphStore((s) => (ctx?.nodeId ? s.nodes.find((n) => n.id === ctx.nodeId) : undefined))
+  // 窄订阅：只取该产物 live 引用。patchNode 改 status/stream 时 outputs 引用不变 → Object.is 命中 → 不重渲染大图。
+  const liveRef = useGraphStore((s) => {
+    if (!ctx?.nodeId || !ctx.port || ctx.index == null) return undefined
+    const n = s.nodes.find((nn) => nn.id === ctx.nodeId)
+    const out = n?.data.outputs?.[ctx.port]
+    if (!out) return undefined
+    return (out.items && out.items[ctx.index]) || (ctx.index === 0 ? out : undefined)
+  })
 
   useEffect(() => {
     if (!lb) return
@@ -36,35 +42,31 @@ export default function LightboxHost() {
     return () => window.removeEventListener('keydown', onKey)
   }, [lb, close, nav, busy])
 
-  // 切换图片时清空改图输入框
-  useEffect(() => {
-    setEditPrompt('')
-  }, [lb?.index])
+  const multi = !!lb && lb.items.length > 1
+  const lbIndex = lb?.index ?? 0
+  const total = lb?.items.length ?? 0
+  const onVideoEnded = useCallback(() => {
+    if (autoplay && multi && lbIndex < total - 1) nav(1)
+  }, [autoplay, multi, lbIndex, total, nav])
 
   if (!lb || !ctx) return null
-  const multi = lb.items.length > 1
   const hasVideo = lb.items.some((it) => it.type === 'video')
-
-  // live 产物（节点上下文存在时）→ ref/meta 取最新；否则用快照
-  const out = node && ctx.port ? node.data.outputs?.[ctx.port] : undefined
-  const live = out ? (out.items && ctx.index != null ? out.items[ctx.index] : ctx.index === 0 ? out : undefined) : undefined
-  const ref = (live as MediaRef | undefined) || ctx.ref
-  const meta = (live?.meta as Record<string, unknown> | undefined) || ctx.meta
-  const title = ctx.title || node?.data.title
+  const ref = (liveRef as MediaRef | undefined) || ctx.ref
+  const meta = (liveRef?.meta as Record<string, unknown> | undefined) || ctx.meta
+  const title = ctx.title
   const promptText = ctx.prompt || str(meta?.prompt) || str(meta?.description)
   const chips = metaChips(meta)
   const canEdit = ctx.type === 'image' && !!ctx.nodeId && !!ctx.port && ctx.index != null
   const showInfo = !!title || chips.length > 0 || !!promptText || canEdit
 
-  const onVideoEnded = () => {
-    if (autoplay && multi && lb.index < lb.items.length - 1) nav(1)
-  }
-  const doEdit = async () => {
-    if (!canEdit || !editPrompt.trim() || busy) return
+  const doEdit = async (p: string): Promise<boolean> => {
+    if (!canEdit || !p.trim() || busy) return false
     setBusy(true)
     try {
-      await editItem(ctx.nodeId!, ctx.port!, ctx.index!, editPrompt.trim())
-      setEditPrompt('')
+      await editItem(ctx.nodeId!, ctx.port!, ctx.index!, p.trim())
+      return true
+    } catch {
+      return false
     } finally {
       setBusy(false)
     }
@@ -134,28 +136,7 @@ export default function LightboxHost() {
                 {promptText}
               </div>
             )}
-            {canEdit && (
-              <div className="afs-lbhost__edit">
-                <button className="afs-lbhost__regen" disabled={busy} onClick={doRegen} title="按当前上游/参考图重新生成这一张">
-                  <RotateCcw size={13} /> 重新生成
-                </button>
-                <div className="afs-lbhost__chatbar">
-                  <Wand2 size={14} className="afs-lbhost__chatbar-icon" />
-                  <input
-                    placeholder="对话修改这张图，如「换成夜晚」「加件红外套」…"
-                    value={editPrompt}
-                    onChange={(e) => setEditPrompt(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') doEdit()
-                    }}
-                    disabled={busy}
-                  />
-                  <button className="afs-lbhost__send" disabled={!editPrompt.trim() || busy} onClick={doEdit} title="发送修改 (Enter)">
-                    {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
-                  </button>
-                </div>
-              </div>
-            )}
+            {canEdit && <LightboxEditBar busy={busy} onSend={doEdit} onRegen={doRegen} />}
           </div>
         )}
       </div>
@@ -168,7 +149,51 @@ export default function LightboxHost() {
   )
 }
 
-function LightboxMedia({ refv, type, autoplay, onEnded }: { refv: MediaRef; type: 'image' | 'video'; autoplay: boolean; onEnded: () => void }) {
+/** 改图输入条（独立子组件，prompt 局部 state）：打字只重渲染本组件，不波及大图/订阅，杜绝输入卡顿。 */
+function LightboxEditBar({ busy, onSend, onRegen }: { busy: boolean; onSend: (p: string) => Promise<boolean>; onRegen: () => void }) {
+  const [prompt, setPrompt] = useState('')
+  const send = async () => {
+    const p = prompt.trim()
+    if (!p || busy) return
+    const ok = await onSend(p)
+    if (ok) setPrompt('')
+  }
+  return (
+    <div className="afs-lbhost__edit">
+      <button className="afs-lbhost__regen" disabled={busy} onClick={onRegen} title="按当前上游/参考图重新生成这一张">
+        <RotateCcw size={13} /> 重新生成
+      </button>
+      <div className="afs-lbhost__chatbar">
+        <Wand2 size={14} className="afs-lbhost__chatbar-icon" />
+        <input
+          placeholder="对话修改这张图，如「换成夜晚」「加件红外套」…"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void send()
+          }}
+          disabled={busy}
+        />
+        <button className="afs-lbhost__send" disabled={!prompt.trim() || busy} onClick={() => void send()} title="发送修改 (Enter)">
+          {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** 大图/视频，memo 化：父组件因 busy/nav 重渲染时，引用未变则不重渲染、不重新解码。 */
+const LightboxMedia = memo(function LightboxMedia({
+  refv,
+  type,
+  autoplay,
+  onEnded,
+}: {
+  refv: MediaRef
+  type: 'image' | 'video'
+  autoplay: boolean
+  onEnded: () => void
+}) {
   const url = useMediaUrl(refv)
   if (!url) return <div className="afs-lbhost__loading">加载中…</div>
   return type === 'video' ? (
@@ -176,7 +201,7 @@ function LightboxMedia({ refv, type, autoplay, onEnded }: { refv: MediaRef; type
   ) : (
     <img className="afs-lbhost__media" src={url} alt="" />
   )
-}
+})
 
 const str = (x: unknown): string => (typeof x === 'string' ? x : '')
 
