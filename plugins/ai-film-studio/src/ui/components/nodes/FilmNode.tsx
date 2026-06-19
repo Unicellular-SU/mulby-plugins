@@ -1,9 +1,10 @@
 import { memo, useMemo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Lock, LockOpen, Loader2 } from 'lucide-react'
+import { Lock, LockOpen, Loader2, RotateCcw } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
-import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue } from '../../store/graphStore'
+import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
+import { useUiStore, type LightboxItem } from '../../store/uiStore'
 
 const ROW_H = 24
 const TOP_PAD = 8
@@ -20,12 +21,49 @@ function MediaThumb({ refv, type }: { refv: MediaRef; type: 'image' | 'video' })
   )
 }
 
+/** M30 逐项瓦片：done→媒体缩略，failed→红框✗(hover 看错误)，pending/running→旋转；角标标镜头/变体 */
+function GenItemTile({ item, onOpen }: { item: GenItem; onOpen?: () => void }) {
+  const [ref, inView] = useInView<HTMLDivElement>('300px')
+  const isDone = item.status === 'done' && !!item.ref
+  const url = useMediaUrl(isDone && inView ? (item.ref as MediaRef) : null)
+  return (
+    <div
+      ref={ref}
+      className={`afs-node__tile${item.status === 'failed' ? ' afs-node__tile--failed' : ''}${isDone && onOpen ? ' afs-node__tile--click nodrag' : ''}`}
+      style={{ width: TILE, height: TILE }}
+      title={item.status === 'failed' ? `${item.key || ''} 失败：${item.error || ''}` : isDone && onOpen ? `${item.key || ''}（点击看大图）` : item.key}
+      onClick={isDone && onOpen ? (e) => { e.stopPropagation(); onOpen() } : undefined}
+    >
+      {isDone ? (
+        url ? (
+          item.mediaType === 'video' ? (
+            <video src={url} muted loop playsInline preload="metadata" />
+          ) : (
+            <img src={url} alt="" draggable={false} />
+          )
+        ) : null
+      ) : item.status === 'failed' ? (
+        <span className="afs-node__tile-x">✗</span>
+      ) : (
+        <Loader2 size={18} className="afs-spin" />
+      )}
+      {item.key ? <span className="afs-node__tile-cap">{item.key}</span> : null}
+    </div>
+  )
+}
+
 /** 网格 tile：useInView 惰性挂载（离屏不解析 blob、不挂 <img>/<video>） */
-function NodeTile({ refv, type }: { refv: MediaRef; type: 'image' | 'video' }) {
+function NodeTile({ refv, type, onOpen }: { refv: MediaRef; type: 'image' | 'video'; onOpen?: () => void }) {
   const [ref, inView] = useInView<HTMLDivElement>('300px')
   const url = useMediaUrl(inView ? refv : null)
   return (
-    <div className="afs-node__tile" ref={ref} style={{ width: TILE, height: TILE }}>
+    <div
+      className={`afs-node__tile${onOpen ? ' afs-node__tile--click nodrag' : ''}`}
+      ref={ref}
+      style={{ width: TILE, height: TILE }}
+      title={onOpen ? '点击看大图' : undefined}
+      onClick={onOpen ? (e) => { e.stopPropagation(); onOpen() } : undefined}
+    >
       {url ? (
         type === 'video' ? (
           <video src={url} muted loop playsInline preload="metadata" />
@@ -174,11 +212,31 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const previewImg = data.status === 'running' ? data.previewUrl : ''
   // 实时铺开：扇出（多张）时在画布上铺成网格，已生成的填图、未生成的占位旋转
   const tiles = useMemo(() => mediaTiles(data), [data])
-  const genTotal = data.status === 'running' ? Number(data.gen?.total ?? 0) : 0
-  const gridCount = Math.max(genTotal, tiles.length)
+  // M30：有逐项状态(运行中 或 收尾保留的失败)时按 items 渲染（含失败红框）；否则回退到产物瓦片+占位
+  const genItems = data.gen?.items
+  const hasItems = !!genItems && genItems.length > 0
+  const runningTotal = data.status === 'running' ? Number(data.gen?.total ?? 0) : 0
+  const gridCount = Math.max(hasItems ? genItems!.length : runningTotal, tiles.length)
   const showGrid = !previewImg && gridCount > 1
-  const pending = Math.max(0, genTotal - tiles.length)
+  const pending = Math.max(0, runningTotal - tiles.length)
   const cols = Math.min(4, Math.max(1, gridCount))
+  const failedCount = hasItems ? genItems!.filter((it) => it.status === 'failed').length : 0
+  // M32：点瓦片→应用级 Lightbox 看大图/播视频。灯箱项 = 已成功项(有 items 时) 或 全部产物瓦片
+  const openLightbox = useUiStore((s) => s.openLightbox)
+  const openResultViewer = useUiStore((s) => s.openResultViewer)
+  const doneItems = hasItems ? genItems!.filter((it) => it.status === 'done' && it.ref) : []
+  const lbItems: LightboxItem[] = hasItems
+    ? doneItems.map((it) => ({ ref: it.ref as MediaRef, type: (it.mediaType || 'image') as 'image' | 'video' }))
+    : tiles.map((t) => ({ ref: t.ref as MediaRef, type: t.type }))
+  const lbIndexByIdx = useMemo(() => {
+    const m = new Map<number, number>()
+    doneItems.forEach((it, k) => m.set(it.idx, k))
+    return m
+  }, [doneItems])
+  // M32：运行时进度条 N/总 · X失败
+  const progTotal = hasItems ? genItems!.length : runningTotal
+  const doneCount = hasItems ? genItems!.filter((it) => it.status === 'done').length : tiles.length
+  const showProgress = data.status === 'running' && progTotal > 1
   const gridWidth = cols * (TILE + 4) + 12
   // 文本节点：把剧本/分镜/角色/大纲格式化成画布卡片（实时增长）
   const card = useMemo(
@@ -290,19 +348,39 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
           className="afs-node__grid"
           style={{ gridTemplateColumns: `repeat(${cols}, ${TILE}px)` }}
         >
-          {tiles.map((t, i) => (
-            <NodeTile key={`t${i}`} refv={t.ref} type={t.type} />
-          ))}
-          {Array.from({ length: pending }).map((_, i) => (
-            <div className="afs-node__tile afs-node__tile--pending" key={`p${i}`} style={{ width: TILE, height: TILE }}>
-              <Loader2 size={18} className="afs-spin" />
-            </div>
-          ))}
+          {hasItems ? (
+            genItems!.map((it) => (
+              <GenItemTile
+                key={`g${it.idx}`}
+                item={it}
+                onOpen={it.status === 'done' ? () => openLightbox(lbItems, lbIndexByIdx.get(it.idx) ?? 0) : undefined}
+              />
+            ))
+          ) : (
+            <>
+              {tiles.map((t, i) => (
+                <NodeTile key={`t${i}`} refv={t.ref} type={t.type} onOpen={() => openLightbox(lbItems, i)} />
+              ))}
+              {Array.from({ length: pending }).map((_, i) => (
+                <div className="afs-node__tile afs-node__tile--pending" key={`p${i}`} style={{ width: TILE, height: TILE }}>
+                  <Loader2 size={18} className="afs-spin" />
+                </div>
+              ))}
+            </>
+          )}
         </div>
       ) : showData && card ? (
         <div className="afs-node__data">
-          <div className="afs-node__data-head">
+          <div
+            className="afs-node__data-head afs-node__data-head--click nodrag"
+            title="查看全文（剧本/分镜/角色完整内容）"
+            onClick={(e) => {
+              e.stopPropagation()
+              openResultViewer(id)
+            }}
+          >
             <span>{card.label}</span>
+            <span className="afs-node__data-more">查看全文</span>
             {data.status === 'running' && <Loader2 size={11} className="afs-spin" />}
           </div>
           <div className="afs-node__data-list nowheel">
@@ -323,11 +401,39 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
         </div>
       ) : (
         media && (
-          <div className="afs-node__thumb">
+          <div
+            className={`afs-node__thumb${lbItems.length ? ' afs-node__tile--click nodrag' : ''}`}
+            title={lbItems.length ? '点击看大图' : undefined}
+            onClick={lbItems.length ? (e) => { e.stopPropagation(); openLightbox(lbItems, 0) } : undefined}
+          >
             <MediaThumb refv={media.ref} type={media.type} />
             {media.count > 1 ? <span className="afs-node__thumb-badge">×{media.count}</span> : null}
           </div>
         )
+      )}
+
+      {showProgress && (
+        <div className="afs-node__progress" title={`已完成 ${doneCount}/${progTotal}${failedCount ? `，${failedCount} 失败` : ''}`}>
+          <div className="afs-node__progress-bar" style={{ width: `${progTotal ? Math.round((doneCount / progTotal) * 100) : 0}%` }} />
+          <span className="afs-node__progress-txt">
+            {doneCount}/{progTotal}
+            {failedCount ? ` · ${failedCount}失败` : ''}
+          </span>
+        </div>
+      )}
+
+      {failedCount > 0 && data.status !== 'running' && (
+        <button
+          type="button"
+          className="afs-node__retry nodrag"
+          title="只重新生成失败的那几项，已成功的不重烧"
+          onClick={(e) => {
+            e.stopPropagation()
+            void useGraphStore.getState().retryFailedItems(id)
+          }}
+        >
+          <RotateCcw size={11} /> 重试失败项 ({failedCount})
+        </button>
       )}
 
       {footer && !media && !previewImg && !showGrid && !showData && (

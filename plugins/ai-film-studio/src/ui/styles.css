@@ -972,6 +972,336 @@ body {
   color: #93c5fd;
   animation: afs-pulse 1.3s ease-in-out infinite;
 }
+/* M30：失败瓦片——红框 + 红 ✗，hover 看错误；角标标镜头/变体身份 */
+.afs-node__tile--failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+.afs-node__tile-x {
+  color: #ef4444;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+}
+.afs-node__tile-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 3px;
+  font-size: 9px;
+  line-height: 1.3;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+/* M30：重试失败项按钮——仅在有失败项时出现 */
+.afs-node__retry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: calc(100% - 12px);
+  margin: 4px 6px 6px;
+  padding: 3px 6px;
+  font-size: 11px;
+  color: #fff;
+  background: #ef4444;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.afs-node__retry:hover {
+  background: #dc2626;
+}
+.afs-node__tile--click {
+  cursor: zoom-in;
+}
+/* M32：节点运行进度条 */
+.afs-node__progress {
+  position: relative;
+  height: 16px;
+  margin: 4px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.afs-node__progress-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  transition: width 0.25s ease;
+}
+.afs-node__progress-txt {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+/* M33：Lightbox 连看开关 */
+.afs-lbhost__toggle {
+  position: fixed;
+  top: 16px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.afs-lbhost__toggle.is-on {
+  background: #3b82f6;
+}
+.afs-lbhost__toggle:hover {
+  filter: brightness(1.1);
+}
+
+/* M32：应用级 Lightbox */
+.afs-lbhost {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(2px);
+}
+.afs-lbhost__stage {
+  max-width: 92vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.afs-lbhost__media {
+  max-width: 92vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+.afs-lbhost__loading {
+  color: #cbd5e1;
+  font-size: 14px;
+}
+.afs-lbhost__close {
+  position: fixed;
+  top: 16px;
+  right: 18px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.afs-lbhost__close:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.afs-lbhost__nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.afs-lbhost__nav:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.afs-lbhost__nav--prev {
+  left: 16px;
+}
+.afs-lbhost__nav--next {
+  right: 16px;
+}
+.afs-lbhost__count {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  color: #fff;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+}
+
+/* M33：统一结果查看器 */
+.afs-node__data-head--click {
+  cursor: pointer;
+}
+.afs-node__data-more {
+  margin-left: auto;
+  font-size: 10px;
+  color: #60a5fa;
+}
+.afs-rv {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+.afs-rv__panel {
+  width: min(760px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--afs-node-bg);
+  border: 1px solid var(--afs-border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+.afs-rv__head {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--afs-border);
+}
+.afs-rv__title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.afs-rv__close {
+  margin-left: auto;
+  display: flex;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.afs-rv__close:hover {
+  opacity: 1;
+}
+.afs-rv__body {
+  padding: 12px 16px;
+  overflow-y: auto;
+}
+.afs-rv__empty {
+  padding: 24px;
+  text-align: center;
+  opacity: 0.6;
+}
+.afs-rv__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.afs-rv__seg {
+  font-size: 12px;
+  opacity: 0.75;
+  padding-bottom: 4px;
+}
+.afs-rv__row {
+  padding: 8px 10px;
+  border: 1px solid var(--afs-border);
+  border-radius: 8px;
+}
+.afs-rv__row-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.afs-rv__row-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.afs-rv__row-prompt {
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.afs-rv__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.afs-rv__dlg {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+.afs-rv__dlg i {
+  opacity: 0.6;
+  font-size: 11px;
+}
+.afs-rv__pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.afs-rv__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.afs-rv__tile {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: zoom-in;
+}
+.afs-rv__tile img,
+.afs-rv__tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.afs-rv__tile-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: #fff;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .afs-spin {
   animation: afs-spin 0.9s linear infinite;
   opacity: 0.8;

@@ -6,6 +6,8 @@ import ProjectHome from './components/views/ProjectHome'
 import AssetsView from './components/views/AssetsView'
 import PromptLibrary from './components/views/PromptLibrary'
 import SettingsView from './components/views/SettingsView'
+import LightboxHost from './components/LightboxHost'
+import ResultViewer from './components/ResultViewer'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { clearAssetCache } from './services/assets'
 import { useProviderStore } from './store/providerStore'
@@ -113,6 +115,8 @@ export default function App() {
           {view === 'settings' && <SettingsView />}
         </div>
       </div>
+      <LightboxHost />
+      <ResultViewer />
     </ReactFlowProvider>
   )
 }
