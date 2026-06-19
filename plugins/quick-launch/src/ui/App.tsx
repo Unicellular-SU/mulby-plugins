@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Plus, Search, Layers, Play, Pencil, Trash2, FolderOpen, FileText,
-  Link2, Terminal, Download, Upload, X, AlertTriangle, Rocket
+  Link2, Terminal, Download, Upload, X, AlertTriangle, Rocket, RotateCcw, Sparkles
 } from 'lucide-react'
 import { useMulby } from './hooks/useMulby'
 import { ICONS, ICON_MAP } from '../shared/icons'
@@ -41,6 +41,8 @@ interface WorkspaceAction {
   kind: ActionKind
   value: string
   args?: string[]
+  cwd?: string
+  shell?: boolean
 }
 
 interface LaunchItem {
@@ -73,6 +75,56 @@ const ACTION_META: Record<ActionKind, { label: string; icon: typeof Link2; place
   file: { label: '文件', icon: FileText, placeholder: 'D:\\docs\\note.md' },
   command: { label: '命令', icon: Terminal, placeholder: 'code（参数另填）' }
 }
+
+const ACTION_KINDS: ActionKind[] = ['url', 'folder', 'file', 'command']
+
+// 从 AI 返回文本中稳健地解析出 JSON 对象（容忍 markdown 围栏 / 前后赘述）
+function parseLooseJson(text: string): any {
+  if (!text) return null
+  let t = text.trim()
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) t = fence[1].trim()
+  const s = t.indexOf('{')
+  const e = t.lastIndexOf('}')
+  if (s >= 0 && e > s) t = t.slice(s, e + 1)
+  try {
+    return JSON.parse(t)
+  } catch {
+    return null
+  }
+}
+
+function messageText(msg: any): string {
+  const c = msg?.content
+  if (typeof c === 'string') return c
+  if (Array.isArray(c)) return c.map((p: any) => (p?.type === 'text' ? p.text : '')).join('')
+  return ''
+}
+
+// 校验并归一化 AI 给出的动作
+function coerceActions(raw: any): WorkspaceAction[] {
+  if (!Array.isArray(raw)) return []
+  const out: WorkspaceAction[] = []
+  for (const a of raw) {
+    if (!a || typeof a !== 'object') continue
+    const kind: ActionKind = ACTION_KINDS.includes(a.kind) ? a.kind : 'url'
+    const value = typeof a.value === 'string' ? a.value : ''
+    const action: WorkspaceAction = { kind, value }
+    if (Array.isArray(a.args)) action.args = a.args.map((x: unknown) => String(x)).filter(Boolean)
+    if (typeof a.cwd === 'string' && a.cwd) action.cwd = a.cwd
+    out.push(action)
+  }
+  return out
+}
+
+const AI_SYSTEM_PROMPT = `你是 Mulby「启动器」插件的工作区配置助手。用户用自然语言描述他想一键打开或执行的一组东西，你要拆解成「工作区动作」列表。
+每个动作有 kind 与 value：
+- url：网址，value 为完整的 https 链接。用户只说网站名时，给出常见官方网址（例：钉钉网页版→https://im.dingtalk.com，企业微信→https://work.weixin.qq.com，QQ邮箱→https://mail.qq.com，飞书→https://www.feishu.cn）。
+- folder：本地文件夹路径；file：本地文件路径；command：可执行命令/程序名，value 为命令本身，args 为参数数组。
+规则：
+- 能用网址实现的优先用 url。
+- folder/file/command 只在用户给出了明确路径或命令时使用；用户提到本地路径但没写全时，把已知部分放进 value，由用户补全，不要凭空编造盘符路径。
+- 只输出一个 JSON 对象，形如：{"title": "简短工作区名(可选)", "actions": [{"kind": "url", "value": "https://..."}]}。不要输出任何多余文字或 markdown。`
 
 export default function App() {
   const { notification } = useMulby(PLUGIN_ID)
@@ -239,6 +291,16 @@ export default function App() {
     window.mulby?.systemPage?.open?.({ page: 'settings', settingsSection: 'superPanel' })
   }
 
+  const handleRestoreDefaults = async () => {
+    try {
+      const res = await callBackend<{ added: number }>('restoreDefaults')
+      await load()
+      notification.show(res?.added ? `已恢复 ${res.added} 个默认搜索引擎` : '默认条目均已存在', 'success')
+    } catch (e: any) {
+      notification.show(`恢复失败：${e?.message || e}`, 'error')
+    }
+  }
+
   return (
     <div className="ql-root">
       <header className="ql-header">
@@ -252,6 +314,9 @@ export default function App() {
           </button>
           <button className="btn-ghost" onClick={() => fileInputRef.current?.click()} title="导入 JSON">
             <Upload size={14} /> 导入
+          </button>
+          <button className="btn-ghost" onClick={handleRestoreDefaults} title="恢复内置默认搜索引擎（仅补回缺失项）">
+            <RotateCcw size={14} /> 恢复默认
           </button>
           <input
             ref={fileInputRef}
@@ -327,6 +392,7 @@ export default function App() {
       {editing && (
         <Editor
           initial={editing}
+          allItems={items}
           onCancel={() => setEditing(null)}
           onSave={handleSave}
           onTest={handleTest}
@@ -403,17 +469,81 @@ function ItemCard({
 // ─── 编辑器 ─────────────────────────────────────────────────────────
 function Editor({
   initial,
+  allItems,
   onCancel,
   onSave,
   onTest
 }: {
   initial: LaunchItem
+  allItems: LaunchItem[]
   onCancel: () => void
   onSave: (item: LaunchItem) => void
   onTest: (item: LaunchItem, query?: string) => void
 }) {
   const [item, setItem] = useState<LaunchItem>({ ...initial })
   const [kwText, setKwText] = useState((initial.keywords || []).join(' '))
+  const [aiText, setAiText] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+
+  // 白话描述 → AI 拆解为工作区动作，填入表单（不自动执行，需用户确认后保存）
+  const generateActions = async () => {
+    const desc = aiText.trim()
+    if (!desc || aiLoading) return
+    const ai = window.mulby?.ai
+    if (!ai?.call) {
+      window.mulby?.notification?.show?.('当前环境不支持 AI 调用', 'error')
+      return
+    }
+    setAiLoading(true)
+    try {
+      // 不指定 model，使用 Mulby 系统默认模型。
+      // 用 any：本地 d.ts 的 AiModelParameters 尚未包含 responseFormat（结构化输出），运行时支持。
+      const option: any = {
+        messages: [
+          { role: 'system', content: AI_SYSTEM_PROMPT },
+          { role: 'user', content: desc }
+        ],
+        params: { responseFormat: 'json_object', temperature: 0.2 },
+        capabilities: [],
+        toolingPolicy: { enableInternalTools: false },
+        mcp: { mode: 'off' },
+        skills: { mode: 'off' }
+      }
+      const msg = await ai.call(option)
+      const parsed = parseLooseJson(messageText(msg))
+      const aiActions = coerceActions(parsed?.actions)
+      if (aiActions.length === 0) {
+        throw new Error('AI 未能解析出可用动作，换个说法再试试')
+      }
+      setItem((prev) => {
+        const existing = (prev.actions || []).filter((x) => (x.value || '').trim())
+        const nextTitle =
+          prev.title?.trim() || (typeof parsed?.title === 'string' ? parsed.title : '')
+        return { ...prev, title: nextTitle, actions: [...existing, ...aiActions] }
+      })
+      setAiText('')
+      window.mulby?.notification?.show?.(`已生成 ${aiActions.length} 个动作，请检查后保存`, 'success')
+    } catch (e: any) {
+      window.mulby?.notification?.show?.(`生成失败：${e?.message || e}`, 'error')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  // 触发词冲突：与其它条目的关键词重复时提示（不阻断保存）
+  const conflicts = useMemo(() => {
+    const mine = new Set(
+      kwText.split(/[\s,，]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+    )
+    const out: string[] = []
+    for (const kw of mine) {
+      const owner = allItems.find(
+        (it) => it.id !== item.id && (it.keywords || []).some((k) => k.toLowerCase() === kw)
+      )
+      if (owner) out.push(`${kw} → ${owner.title}`)
+    }
+    return out
+  }, [kwText, allItems, item.id])
 
   const setType = (type: ItemType) => {
     if (type === item.type) return
@@ -446,12 +576,18 @@ function Editor({
   const removeAction = (idx: number) =>
     setItem((prev) => ({ ...prev, actions: (prev.actions || []).filter((_, i) => i !== idx) }))
 
-  const pickPath = async (idx: number, kind: ActionKind) => {
+  const pickPath = async (
+    idx: number,
+    mode: 'file' | 'directory',
+    field: 'value' | 'cwd'
+  ) => {
     try {
       const paths = await window.mulby?.dialog?.showOpenDialog?.({
-        properties: [kind === 'folder' ? 'openDirectory' : 'openFile']
+        properties: [mode === 'directory' ? 'openDirectory' : 'openFile']
       })
-      if (Array.isArray(paths) && paths[0]) updateAction(idx, { value: paths[0] })
+      if (Array.isArray(paths) && paths[0]) {
+        updateAction(idx, field === 'cwd' ? { cwd: paths[0] } : { value: paths[0] })
+      }
     } catch {
       /* ignore */
     }
@@ -514,6 +650,12 @@ function Editor({
             />
           </div>
 
+          {conflicts.length > 0 && (
+            <p className="ql-warn">
+              <AlertTriangle size={13} /> 触发词已被占用：{conflicts.join('；')}（仍可保存，匹配时会同时出现）
+            </p>
+          )}
+
           {item.type === 'search' ? (
             <div className="ql-row">
               <label>URL</label>
@@ -526,6 +668,28 @@ function Editor({
             </div>
           ) : (
             <div className="ql-actions-edit">
+              <div className="ql-ai-box">
+                <div className="ql-ai-head">
+                  <Sparkles size={14} /> AI 生成动作
+                  <span className="ql-ai-sub">用大白话描述，自动拆成动作</span>
+                </div>
+                <textarea
+                  className="ql-ai-input"
+                  value={aiText}
+                  onChange={(e) => setAiText(e.target.value)}
+                  placeholder="例如：上班时打开公司邮箱和钉钉网页版，再打开我的项目文件夹 D:\work\acme"
+                  rows={2}
+                  disabled={aiLoading}
+                />
+                <button
+                  className="btn-secondary ql-ai-btn"
+                  onClick={generateActions}
+                  disabled={aiLoading || !aiText.trim()}
+                >
+                  <Sparkles size={13} /> {aiLoading ? '生成中…' : '生成动作'}
+                </button>
+              </div>
+
               <div className="ql-actions-head">
                 <span>动作（按顺序执行）</span>
                 <button className="btn-ghost" onClick={addAction}>
@@ -535,33 +699,74 @@ function Editor({
               {(item.actions || []).map((action, idx) => {
                 const Icon = ACTION_META[action.kind].icon
                 return (
-                  <div className="ql-action-row" key={idx}>
-                    <select
-                      value={action.kind}
-                      onChange={(e) => updateAction(idx, { kind: e.target.value as ActionKind })}
-                    >
-                      {(Object.keys(ACTION_META) as ActionKind[]).map((k) => (
-                        <option key={k} value={k}>
-                          {ACTION_META[k].label}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="ql-action-icon">
-                      <Icon size={14} />
-                    </span>
-                    <input
-                      value={action.value}
-                      placeholder={ACTION_META[action.kind].placeholder}
-                      onChange={(e) => updateAction(idx, { value: e.target.value })}
-                    />
-                    {(action.kind === 'folder' || action.kind === 'file') && (
-                      <button className="btn-ghost" onClick={() => pickPath(idx, action.kind)}>
-                        浏览
+                  <div className="ql-action-block" key={idx}>
+                    <div className="ql-action-row">
+                      <select
+                        value={action.kind}
+                        onChange={(e) => updateAction(idx, { kind: e.target.value as ActionKind })}
+                      >
+                        {(Object.keys(ACTION_META) as ActionKind[]).map((k) => (
+                          <option key={k} value={k}>
+                            {ACTION_META[k].label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="ql-action-icon">
+                        <Icon size={14} />
+                      </span>
+                      <input
+                        value={action.value}
+                        placeholder={ACTION_META[action.kind].placeholder}
+                        onChange={(e) => updateAction(idx, { value: e.target.value })}
+                      />
+                      {(action.kind === 'folder' || action.kind === 'file') && (
+                        <button
+                          className="btn-ghost"
+                          onClick={() => pickPath(idx, action.kind === 'folder' ? 'directory' : 'file', 'value')}
+                        >
+                          浏览
+                        </button>
+                      )}
+                      <button className="btn-icon danger" onClick={() => removeAction(idx)}>
+                        <Trash2 size={13} />
                       </button>
+                    </div>
+
+                    {action.kind === 'command' && (
+                      <div className="ql-cmd-extra">
+                        <div className="ql-action-row">
+                          <span className="ql-sub-label">参数</span>
+                          <input
+                            value={(action.args || []).join(' ')}
+                            placeholder="空格分隔，例如：status --short"
+                            onChange={(e) =>
+                              updateAction(idx, {
+                                args: e.target.value.split(/\s+/).filter(Boolean)
+                              })
+                            }
+                          />
+                        </div>
+                        <div className="ql-action-row">
+                          <span className="ql-sub-label">目录</span>
+                          <input
+                            value={action.cwd || ''}
+                            placeholder="工作目录（可选）"
+                            onChange={(e) => updateAction(idx, { cwd: e.target.value })}
+                          />
+                          <button className="btn-ghost" onClick={() => pickPath(idx, 'directory', 'cwd')}>
+                            浏览
+                          </button>
+                        </div>
+                        <label className="ql-shell-toggle">
+                          <input
+                            type="checkbox"
+                            checked={!!action.shell}
+                            onChange={(e) => updateAction(idx, { shell: e.target.checked })}
+                          />
+                          通过 shell 执行（需要管道/内置命令时勾选；可能触发命令确认）
+                        </label>
+                      </div>
                     )}
-                    <button className="btn-icon danger" onClick={() => removeAction(idx)}>
-                      <Trash2 size={13} />
-                    </button>
                   </div>
                 )
               })}
@@ -571,9 +776,13 @@ function Editor({
             </div>
           )}
 
-          {item.type === 'search' && (
+          {item.type === 'search' ? (
             <p className="ql-hint">
               URL 中的 <code>{'{query}'}</code> 会被替换为搜索词；不含占位符则直接打开该网址。
+            </p>
+          ) : (
+            <p className="ql-hint">
+              动作的网址 / 路径 / 命令参数中也可用 <code>{'{query}'}</code>，会替换为「工作区触发词后输入的内容」。
             </p>
           )}
         </div>

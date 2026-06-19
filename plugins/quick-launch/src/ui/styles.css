@@ -373,6 +373,84 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .ql-action-row input { flex: 1; min-width: 0; }
 .ql-action-icon { color: var(--text-3); display: inline-flex; flex-shrink: 0; }
 
+/* AI 生成动作 */
+.ql-ai-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 9px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+.ql-ai-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.ql-ai-sub { font-weight: 400; color: var(--text-3); font-size: 11px; }
+.ql-ai-input {
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-1);
+}
+.ql-ai-input:focus { outline: none; border-color: var(--accent); }
+.ql-ai-btn { align-self: flex-start; }
+
+/* 命令动作的附加字段 */
+.ql-action-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--bg);
+}
+.ql-cmd-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 6px;
+  border-left: 2px solid var(--border);
+  margin-left: 4px;
+}
+.ql-sub-label {
+  font-size: 12px;
+  color: var(--text-3);
+  width: 36px;
+  flex-shrink: 0;
+}
+.ql-shell-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.ql-shell-toggle input { width: auto; }
+
+.ql-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 7px;
+  padding: 6px 10px;
+}
+
 .ql-hint { font-size: 11.5px; color: var(--text-3); line-height: 1.6; }
 .ql-hint code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

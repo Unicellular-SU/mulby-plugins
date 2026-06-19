@@ -13,6 +13,8 @@ interface WorkspaceAction {
   kind: ActionKind
   value: string
   args?: string[]
+  cwd?: string
+  shell?: boolean
 }
 
 interface LaunchItem {
@@ -198,10 +200,30 @@ function describeItem(m: Match): { title: string; text: string } {
     }
   }
   const count = m.item.actions?.length || 0
+  if (m.query && workspaceUsesQuery(m.item)) {
+    return { title: m.item.title, text: `工作区 · ${count} 个动作 · ${m.query}` }
+  }
   return {
     title: m.item.title,
     text: `工作区 · ${count} 个动作`
   }
+}
+
+// 工作区是否含 {query} 占位符（任一动作的 value/args/cwd）
+function workspaceUsesQuery(item: LaunchItem): boolean {
+  return (item.actions || []).some(
+    (a) =>
+      (a.value || '').includes('{query}') ||
+      (a.cwd || '').includes('{query}') ||
+      (a.args || []).some((x) => x.includes('{query}'))
+  )
+}
+
+// 替换 {query} 占位符；encode=true 时按 URL 组件编码（用于网址）
+function subst(str: string, query: string, encode: boolean): string {
+  if (!str || !str.includes('{query}')) return str
+  const q = encode ? encodeURIComponent(query || '') : query || ''
+  return str.replace(/\{query\}/g, q)
 }
 
 // ─── 执行 ───────────────────────────────────────────────────────────
@@ -210,42 +232,55 @@ async function executeItem(item: LaunchItem, query: string): Promise<void> {
   if (!a?.shell) throw new Error('shell API 不可用')
 
   if (item.type === 'search') {
-    let url = item.url || ''
+    const url = item.url || ''
     if (!url) throw new Error('搜索引擎未配置 URL')
-    if (url.includes('{query}')) {
-      url = url.replace(/\{query\}/g, encodeURIComponent(query || ''))
-    }
-    await a.shell.openExternal(url)
+    await a.shell.openExternal(subst(url, query, true))
     return
   }
 
-  // workspace：顺序执行所有动作，单个失败不阻断其余
+  // workspace：顺序执行所有动作，单个失败不阻断其余；收集真实失败原因
   const errors: string[] = []
   for (const action of item.actions || []) {
     const value = (action.value || '').trim()
     if (!value) continue
     try {
       if (action.kind === 'url') {
-        await a.shell.openExternal(value)
+        await a.shell.openExternal(subst(value, query, true))
       } else if (action.kind === 'folder') {
-        await a.shell.openFolder(value)
+        // openFolder 返回错误字符串（成功为空），不抛异常
+        const err = await a.shell.openFolder(subst(value, query, false))
+        if (err) errors.push(`打开文件夹「${value}」失败：${err}`)
       } else if (action.kind === 'file') {
-        await a.shell.openPath(value)
+        const err = await a.shell.openPath(subst(value, query, false))
+        if (err) errors.push(`打开文件「${value}」失败：${err}`)
       } else if (action.kind === 'command') {
-        await a.shell.runCommand({
-          command: value,
-          args: Array.isArray(action.args) ? action.args : [],
-          shell: false,
-          executionProfile: 'workspace',
+        // runCommand 失败时返回 success:false（含 stderr/exitCode），不抛异常
+        const r = await a.shell.runCommand({
+          command: subst(value, query, false),
+          args: (Array.isArray(action.args) ? action.args : []).map((x) => subst(x, query, false)),
+          cwd: action.cwd ? subst(action.cwd, query, false) : undefined,
+          shell: !!action.shell,
+          // 启动器跑的是用户自己配置的命令，用 trusted（无 root/cwd 沙箱限制），
+          // 安全由宿主的首次命令确认（requireConsent）保证。
+          executionProfile: 'trusted',
           timeoutMs: 15000
         })
+        if (r && r.success === false) {
+          const detail =
+            (r.stderr || '').trim() ||
+            (r.timedOut ? '执行超时（GUI 程序可能长驻，建议改用 shell 执行或直接指向可执行文件）' : '') ||
+            (typeof r.exitCode === 'number' ? `退出码 ${r.exitCode}` : '') ||
+            (r.signal ? `信号 ${r.signal}` : '') ||
+            '未知原因（可能被命令策略拦截或找不到可执行文件）'
+          errors.push(`命令「${value}」失败：${detail}`)
+        }
       }
-    } catch (e) {
-      errors.push(`${action.kind}: ${value}`)
+    } catch (e: any) {
+      errors.push(`${action.kind}「${value}」失败：${e?.message || e}`)
     }
   }
   if (errors.length) {
-    throw new Error(`${errors.length} 个动作执行失败`)
+    throw new Error(errors.join('；'))
   }
 }
 
@@ -340,6 +375,20 @@ export const rpc = {
     items = next
     await persistItems()
     return { success: true, count: items.length }
+  },
+
+  // 恢复内置默认搜索引擎：仅补回触发词未被占用的项，不覆盖已有条目
+  async restoreDefaults() {
+    await ensureLoaded()
+    const used = new Set(items.flatMap((i) => (i.keywords || []).map((k) => k.toLowerCase())))
+    const toAdd = defaultItems().filter(
+      (d) => !d.keywords.some((k) => used.has(k.toLowerCase()))
+    )
+    if (toAdd.length) {
+      items = [...items, ...toAdd]
+      await persistItems()
+    }
+    return { added: toAdd.length, items }
   },
 
   async runItem(payload: { id?: string; item?: LaunchItem; query?: string }) {
