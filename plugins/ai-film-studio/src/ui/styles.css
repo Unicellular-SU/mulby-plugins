@@ -1191,8 +1191,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.82);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.86);
+  /* 不用 backdrop-filter：覆盖画布时，若背后有运行中节点的 spinner 在转，blur 会被迫每帧重算
+     整屏模糊 → GPU 饱和、转圈变慢、全系统卡顿。已是高不透明遮罩，去模糊几乎无视觉差。 */
 }
 .afs-lbhost__stage {
   display: flex;
@@ -1446,8 +1447,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.72);
+  /* 去 backdrop-filter：避免运行中节点 spinner 在背后转时每帧重算整屏模糊（性能） */
 }
 .afs-rv__panel {
   width: min(760px, 92vw);
@@ -1723,8 +1724,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 11, 18, 0.6);
-  backdrop-filter: blur(2px);
+  background: rgba(8, 11, 18, 0.74);
+  /* 去 backdrop-filter：避免运行中节点 spinner 在背后转时每帧重算整屏模糊（性能） */
 }
 .afs-modal__panel {
   width: 520px;
@@ -2781,8 +2782,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(8, 11, 18, 0.72);
-  backdrop-filter: blur(2px);
+  background: rgba(8, 11, 18, 0.8);
+  /* 去 backdrop-filter：避免运行中节点 spinner 在背后转时每帧重算整屏模糊（性能） */
 }
 .afs-lightbox__panel {
   position: relative;
