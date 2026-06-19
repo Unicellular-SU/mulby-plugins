@@ -1,4 +1,5 @@
 import {
+  Bot,
   Circle,
   Clipboard,
   Crop,
@@ -3317,6 +3318,56 @@ export default function App() {
     persistCurrentHistoryQuietly
   ])
 
+  // ── 问 AI ───────────────────────────────────────────────────
+  // 在独立窗口里打开「问 AI」：把当前截图快照（带标注 + 原图）写入交接键，
+  // 再创建一个普通窗口加载 AI 视图。截图标注窗口尺寸/比例完全不受影响。
+  const handleOpenAi = useCallback(async () => {
+    const current = imageRef.current
+    if (!current) {
+      return
+    }
+    flushInlineEditorsForPersistence()
+    const annotated = exportPng(current, annotationsRef.current)
+    const original = current.dataUrl
+    const handoffId = createId('ai')
+
+    // 把 AI 窗口定位到截图窗口旁边（右侧优先，放不下则左侧）。
+    const aiWidth = 380
+    const aiHeight = 440
+    let position: { x: number; y: number } | null = null
+    try {
+      const bounds = await mulby.window.getBounds()
+      if (bounds) {
+        const gap = 10
+        const screenW = window.screen.availWidth || 1920
+        const rightX = bounds.x + bounds.width + gap
+        const x = rightX + aiWidth <= screenW ? rightX : Math.max(0, bounds.x - aiWidth - gap)
+        position = { x: Math.round(x), y: Math.round(bounds.y) }
+      }
+    } catch {
+      /* 取不到就用默认位置 */
+    }
+
+    try {
+      await mulby.storage.set(`ai-handoff-${handoffId}`, { annotated, original, createdAt: Date.now() })
+      await mulby.window.create(`/index.html?mode=ai&aiHandoff=${handoffId}`, {
+        width: aiWidth,
+        height: aiHeight,
+        minWidth: 300,
+        minHeight: 200,
+        title: '问 AI',
+        resizable: true,
+        alwaysOnTop: true,
+        transparent: false,
+        type: 'borderless',
+        titleBar: false,
+        ...(position ?? {})
+      })
+    } catch (error) {
+      mulby.notification.show(error instanceof Error ? error.message : '打开 AI 窗口失败', 'error')
+    }
+  }, [flushInlineEditorsForPersistence, mulby.notification, mulby.storage, mulby.window])
+
   const runSharpTransform = useCallback(
     async (
       busyLabel: string,
@@ -3872,6 +3923,16 @@ export default function App() {
             </div>
 
             <div className="tool-group command-group">
+              <button
+                className="command-button ai-ask-button"
+                type="button"
+                title="在独立窗口里把这张截图发给 AI 解释 / 解题 / 提取文字 / 翻译 / 修图"
+                onClick={() => void handleOpenAi()}
+                disabled={!image}
+              >
+                <Bot size={17} />
+                问 AI
+              </button>
               <button className="command-button" type="button" onClick={() => void handleCopy()} disabled={!image || Boolean(busy)}>
                 <Clipboard size={17} />
                 复制

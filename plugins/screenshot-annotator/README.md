@@ -12,6 +12,21 @@
 - 历史操作：支持撤销、重做和清空全部标注。
 - 导出操作：复制最终 PNG 到剪贴板，或选择路径保存 PNG 文件。
 - 快捷关闭：按 Esc 或点击关闭按钮退出窗口。
+- **问 AI**：工具栏「问 AI」按钮会在截图旁边弹出一个**无边框浮窗**（置顶、可拖动标题区、可拖边缩放、高度随内容自适应、自带关闭按钮），把当前截图（带标注或原图可切换）发给系统多模态模型；截图标注窗口尺寸/比例完全不受影响：
+  - **解释这是什么** / **解题·回答** / **提取文字（OCR）** / **翻译图中文字**：流式返回文字，按 Markdown 渲染，可一键复制。
+  - **AI 修图**：按指令做图生图，结果可复制到剪贴板或下载保存。
+  - 标注会引导模型注意力——先用箭头/方框圈出重点再提问，回答更聚焦。
+  - 文字动作自动选用支持视觉的模型，修图选用 image-generation 模型；模型选择会被记住。
+
+## 问 AI 的实现要点
+
+- 独立浮窗：点击「问 AI」时把当前截图快照（带标注 = `exportPng(image, annotations)`，原图 = `image.dataUrl`）写入 `ai-handoff-{id}` 存储键，再用 `mulby.window.create('/index.html?mode=ai&aiHandoff={id}', { type:'borderless', titleBar:false, alwaysOnTop:true, x,y 定位到截图旁 })` 打开浮窗；`main.tsx` 按 `mode=ai` 渲染 `AiView`，读取并清理交接键。
+- 浮窗交互：无边框窗口的拖动/缩放由 `useFloatingWindow`（`mulby.window.setBounds` / `resizeDrag`，与截图窗同款）实现；`AiPanel` 通过 `onContentHeight` 上报内容自然高度，`AiView` 据此调用 `setBounds` 让窗口高度随内容自适应（用户手动缩放后停止自适应）。
+- 经 `mulby.ai.attachments.upload({ purpose: 'vision' | 'image-edit' })` 上传为附件，拿到 `attachmentId`。
+- 文字动作走 `mulby.ai.call`，消息 `content` 携带 `{ type: 'image', attachmentId }`，流式累积增量。
+- 修图走 `mulby.ai.images.edit({ model, imageAttachmentId, prompt })`。
+- Markdown 渲染使用 `react-markdown` + `remark-gfm`（`src/ui/components/MdRenderer.tsx`），不解析原始 HTML，天然免 XSS。
+- 服务层位于 `src/ui/services/aiVision.ts`（动作预设、提示词、模型过滤、运行器均为可单测的纯函数 + 薄封装）。
 
 ## 触发方式
 
@@ -51,5 +66,10 @@ plugins/screenshot-annotator/
 ├── src/main.ts
 ├── src/ui/App.tsx
 ├── src/ui/styles.css
+├── src/ui/AiView.tsx                  # 独立「问 AI」浮窗视图
+├── src/ui/hooks/useFloatingWindow.ts  # 无边框浮窗拖动/缩放
+├── src/ui/components/AiPanel.tsx      # 问 AI 主体（动作/提问/结果）
+├── src/ui/components/MdRenderer.tsx   # react-markdown 渲染器
+├── src/ui/services/aiVision.ts        # 视觉问答 / 修图服务层
 └── src/types/mulby.d.ts
 ```

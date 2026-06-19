@@ -816,3 +816,611 @@ textarea {
     flex-wrap: wrap;
   }
 }
+
+/* ── 问 AI 独立窗口 ───────────────────────────────────────── */
+html.ai-window,
+html.ai-window body {
+  background: #0b1220;
+}
+
+.ai-window-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #0b1220;
+  color: var(--text);
+}
+
+.ai-window-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ai-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  color: var(--text);
+}
+
+.ai-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  height: 46px;
+  border-bottom: 1px solid var(--toolbar-border);
+  flex: 0 0 auto;
+  cursor: move;
+  user-select: none;
+}
+
+.ai-panel-head button {
+  cursor: pointer;
+}
+
+/* ── 浮窗缩放手柄 ─────────────────────────────────────────── */
+.ai-resize-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.ai-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.ai-resize-top,
+.ai-resize-bottom {
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.ai-resize-top {
+  top: 0;
+}
+
+.ai-resize-bottom {
+  bottom: 0;
+}
+
+.ai-resize-left,
+.ai-resize-right {
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.ai-resize-left {
+  left: 0;
+}
+
+.ai-resize-right {
+  right: 0;
+}
+
+.ai-resize-top-left,
+.ai-resize-top-right,
+.ai-resize-bottom-right,
+.ai-resize-bottom-left {
+  width: 12px;
+  height: 12px;
+}
+
+.ai-resize-top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.ai-resize-top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.ai-resize-bottom-right {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.ai-resize-bottom-left {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+
+.ai-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ai-panel-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ai-panel-close:hover {
+  background: var(--button-hover);
+  color: var(--text);
+}
+
+/* 标题栏右侧操作图标（停止 / 复制 / 重新回答 / 下载等） */
+.ai-panel-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.ai-head-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ai-head-btn:hover {
+  background: var(--button-hover);
+  color: var(--text);
+}
+
+.ai-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* 隐藏滚动条但保留滚动能力 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ai-panel-body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* 内容包裹层：自然高度，供独立窗口测量并自适应窗口高度 */
+.ai-panel-measure {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 16px;
+}
+
+.ai-panel-measure.ai-result-view {
+  gap: 12px;
+}
+
+.ai-panel-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 2px;
+  border: none;
+  border-radius: 7px;
+  background: var(--button-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ai-panel-back:hover {
+  background: var(--button-hover);
+}
+
+.ai-view-result {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ai-view-result:hover {
+  background: var(--button-hover);
+}
+
+.ai-muted {
+  color: var(--muted);
+}
+
+.ai-action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-chip {
+  padding: 5px 10px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 999px;
+  background: var(--button-bg);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.ai-chip:hover:not(:disabled) {
+  background: var(--button-hover);
+}
+
+.ai-chip.is-active {
+  background: var(--button-active);
+  border-color: var(--button-active);
+}
+
+.ai-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-panel-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.ai-panel-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ai-panel-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+/* 原生下拉弹层在系统白底上渲染，需让选项文字用深色，避免白字白底看不清 */
+.ai-panel-select option {
+  color: #1e293b;
+  background: #ffffff;
+}
+
+.ai-panel-instruction {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+  padding: 8px 10px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-panel-instruction:focus {
+  outline: none;
+  border-color: var(--button-active);
+}
+
+.ai-panel-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ai-seg-btn {
+  padding: 6px 11px;
+  border: none;
+  background: var(--button-bg);
+  color: var(--muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.ai-seg-btn.is-active {
+  background: var(--button-active);
+  color: #fff;
+}
+
+.ai-model-select {
+  flex: 1 1 auto;
+}
+
+.ai-panel-warn {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #fca5a5;
+}
+
+.ai-panel-run {
+  display: flex;
+}
+
+.ai-run-btn {
+  flex: 1 1 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--button-active);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-run-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ai-run-btn.is-stop {
+  background: #b91c1c;
+}
+
+.ai-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.ai-reasoning {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ai-reasoning summary {
+  cursor: pointer;
+}
+
+.ai-reasoning-body {
+  margin-top: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+.ai-answer {
+  flex: 1 1 auto;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+  min-height: 20px;
+}
+
+.ai-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--button-active);
+  animation: ai-blink 1s steps(2) infinite;
+}
+
+@keyframes ai-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.ai-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 4px;
+}
+
+.ai-result-view .ai-result-image + .ai-result-actions,
+.ai-result-view .ai-result-actions {
+  margin-top: auto;
+}
+
+.ai-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--toolbar-border);
+  border-radius: 8px;
+  background: var(--button-bg);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-mini-btn:hover {
+  background: var(--button-hover);
+}
+
+.ai-mini-primary {
+  background: var(--button-active);
+  border-color: var(--button-active);
+  color: #fff;
+}
+
+.ai-mini-stop {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+.ai-result-image {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.ai-image-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.ai-spin {
+  animation: ai-rotate 0.9s linear infinite;
+}
+
+@keyframes ai-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-panel-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+/* ── 面板内 Markdown 渲染 ──────────────────────────────────── */
+.md-content {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.md-content .md-p {
+  margin: 0 0 8px;
+}
+
+.md-content .md-p:last-child {
+  margin-bottom: 0;
+}
+
+.md-content .md-heading {
+  margin: 12px 0 6px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.md-content h2.md-heading {
+  font-size: 16px;
+}
+
+.md-content h3.md-heading {
+  font-size: 15px;
+}
+
+.md-content h4.md-heading,
+.md-content h5.md-heading,
+.md-content h6.md-heading {
+  font-size: 13.5px;
+}
+
+.md-content .md-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.md-content .md-list li {
+  margin: 2px 0;
+}
+
+.md-content .md-quote {
+  margin: 0 0 8px;
+  padding: 4px 10px;
+  border-left: 3px solid var(--button-active);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+}
+
+.md-content .md-hr {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid var(--toolbar-border);
+}
+
+.md-content .md-inline-code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.md-content .md-codeblock {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.md-content .md-codeblock code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.md-content a {
+  color: #7dd3fc;
+  text-decoration: underline;
+}
