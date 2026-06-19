@@ -367,6 +367,89 @@ body {
 .afs-port--out {
   right: 12px;
 }
+
+/* ===== 媒体框节点：单图/单视频时媒体即节点，连线从媒体边引出 ===== */
+.afs-node--media {
+  position: relative; /* 句柄/端口标签(absolute)的定位锚 */
+  width: auto; /* 宽度由内联 frameSize 决定 */
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.afs-node__frame {
+  position: relative;
+  width: 100%;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--afs-node-bg);
+  border: 1px solid var(--afs-border);
+  cursor: zoom-in;
+}
+.afs-node__frame img,
+.afs-node__frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* 框已按媒体比例定尺，cover 即「看全貌」不裁切 */
+}
+.afs-node__frame-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--afs-muted);
+}
+.afs-node__frame-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0));
+  color: #fff;
+}
+.afs-node__frame-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.afs-node__frame-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 15px;
+  pointer-events: none;
+}
+/* 媒体上的端口标签：半透明胶囊，叠在媒体边缘可读 */
+.afs-port--onmedia {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  text-shadow: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .afs-node__summary {
   border-top: 1px solid var(--afs-border);
   padding: 6px 10px;

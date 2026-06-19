@@ -1,6 +1,6 @@
-import { memo, useMemo } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Lock, LockOpen, Loader2, RotateCcw } from 'lucide-react'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
+import { Lock, LockOpen, Loader2, RotateCcw, type LucideIcon } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
@@ -197,6 +197,148 @@ function dataCard(kind: string, json: Record<string, unknown> | null): { label: 
   return null
 }
 
+// 单图/单视频「媒体即节点」：长边钳到 [FRAME_SHORT_MIN, FRAME_LONG]，按真实比例出框
+const FRAME_LONG = 280
+const FRAME_SHORT_MIN = 120
+function frameSize(ar: number | null): { w: number; h: number } {
+  if (!ar || !Number.isFinite(ar) || ar <= 0) return { w: 220, h: 168 } // 测量前的中性默认(≈4:3)
+  if (ar >= 1) {
+    const w = FRAME_LONG
+    return { w, h: Math.max(FRAME_SHORT_MIN, Math.round(w / ar)) } // 横图：宽=长边
+  }
+  const h = FRAME_LONG
+  return { w: Math.max(FRAME_SHORT_MIN, Math.round(h * ar)), h } // 竖图：高=长边
+}
+
+/**
+ * 媒体框节点：单张图/单个视频时，媒体本身即节点（按比例铺满），连接点直接从媒体左右边引出。
+ * 比例在 onLoad/onLoadedMetadata 实测后定，再调 useUpdateNodeInternals 让连线锚点跟随重算。
+ */
+function MediaFrameNode({
+  id,
+  data,
+  def,
+  catColor,
+  Icon,
+  selected,
+  refv,
+  type,
+  onOpen,
+}: {
+  id: string
+  data: FilmNodeData
+  def: NonNullable<ReturnType<typeof getNodeDef>>
+  catColor: string
+  Icon: LucideIcon
+  selected: boolean
+  refv: MediaRef
+  type: 'image' | 'video'
+  onOpen: () => void
+}) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  const url = useMediaUrl(refv)
+  const [ar, setAr] = useState<number | null>(null)
+  const { w, h } = frameSize(ar)
+  // 尺寸定下/变化后通知 React Flow 重算句柄位置，否则连线指向旧锚点
+  useEffect(() => {
+    updateNodeInternals(id)
+  }, [id, w, h, updateNodeInternals])
+  const ins = def.inputs
+  const outs = def.outputs
+  return (
+    <div
+      className={`afs-node afs-node--media${selected ? ' afs-node--selected' : ''}${data.locked ? ' afs-node--locked' : ''}`}
+      style={{
+        width: w,
+        ...(selected ? { boxShadow: `0 0 0 2px ${catColor}` } : data.locked ? { boxShadow: '0 0 0 1.5px #f59e0b' } : null),
+      }}
+    >
+      <div className="afs-node__frame nodrag" style={{ height: h }} title="点击看大图" onClick={(e) => { e.stopPropagation(); onOpen() }}>
+        {url ? (
+          type === 'video' ? (
+            <video
+              src={url}
+              muted
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(e) => {
+                const t = e.currentTarget
+                if (t.videoWidth && t.videoHeight) setAr(t.videoWidth / t.videoHeight)
+              }}
+            />
+          ) : (
+            <img
+              src={url}
+              alt=""
+              draggable={false}
+              onLoad={(e) => {
+                const t = e.currentTarget
+                if (t.naturalWidth && t.naturalHeight) setAr(t.naturalWidth / t.naturalHeight)
+              }}
+            />
+          )
+        ) : (
+          <div className="afs-node__frame-ph">
+            <Loader2 size={20} className="afs-spin" />
+          </div>
+        )}
+        {type === 'video' && <span className="afs-node__frame-play" aria-hidden>▶</span>}
+        <div className="afs-node__frame-head">
+          <Icon size={12} strokeWidth={2.2} style={{ color: catColor }} />
+          <span className="afs-node__frame-title">{data.title || def.label}</span>
+          <button
+            type="button"
+            className="afs-node__lock nodrag"
+            title={data.locked ? '已锁定：重跑跳过、保留结果（点击解锁）' : '锁定此节点：重跑不覆盖产物'}
+            onClick={(e) => {
+              e.stopPropagation()
+              useGraphStore.getState().toggleNodeLock(id)
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 16,
+              height: 16,
+              padding: 0,
+              border: 'none',
+              background: 'transparent',
+              color: '#fff',
+              cursor: 'pointer',
+              opacity: data.locked ? 1 : 0.75,
+            }}
+          >
+            {data.locked ? <Lock size={10} strokeWidth={2.4} /> : <LockOpen size={10} strokeWidth={2.2} />}
+          </button>
+          <span className={`afs-node__status afs-node__status--${data.status}`} title={data.status} />
+        </div>
+      </div>
+      {ins.map((p, i) => {
+        const top = (h * (i + 1)) / (ins.length + 1)
+        return (
+          <div key={`in-${p.id}`}>
+            <Handle id={p.id} type="target" position={Position.Left} style={{ top, background: PORT_COLORS[p.type] }} />
+            <span className="afs-port afs-port--in afs-port--onmedia" style={{ top }}>
+              {p.label}
+            </span>
+          </div>
+        )
+      })}
+      {outs.map((p, i) => {
+        const top = (h * (i + 1)) / (outs.length + 1)
+        return (
+          <div key={`out-${p.id}`}>
+            <Handle id={p.id} type="source" position={Position.Right} style={{ top, background: PORT_COLORS[p.type] }} />
+            <span className="afs-port afs-port--out afs-port--onmedia" style={{ top }}>
+              {p.label}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const def = getNodeDef(data.kind)
   if (!def) {
@@ -258,6 +400,24 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   if (!footer) {
     const ps = paramSummary(data)
     if (ps) footer = { cls: '', text: ps }
+  }
+
+  // 单张图/单个视频：媒体即节点，按真实比例展示、连线从媒体边引出（所有展示单媒体的节点都适用）
+  const singleMedia = !!media && media.count === 1 && !showGrid && !showData && !previewImg && data.status !== 'running'
+  if (singleMedia && media) {
+    return (
+      <MediaFrameNode
+        id={id}
+        data={data}
+        def={def}
+        catColor={cat.color}
+        Icon={Icon}
+        selected={selected}
+        refv={media.ref}
+        type={media.type}
+        onOpen={() => openLightbox(lbItems, 0)}
+      />
+    )
   }
 
   return (
