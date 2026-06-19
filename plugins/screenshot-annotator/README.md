@@ -14,7 +14,7 @@
 - 快捷关闭：按 Esc 或点击关闭按钮退出窗口。
 - **问 AI**：工具栏「问 AI」按钮会在截图旁边弹出一个**无边框浮窗**（置顶、可拖动标题区、可拖边缩放、高度随内容自适应、自带关闭按钮），把当前截图（带标注或原图可切换）发给系统多模态模型；截图标注窗口尺寸/比例完全不受影响：
   - **解释这是什么** / **解题·回答** / **提取文字（OCR）** / **翻译图中文字**：流式返回文字，按 Markdown 渲染，可一键复制。
-  - **AI 修图**：按指令做图生图，结果可复制到剪贴板或下载保存。
+  - **AI 修图**：按指令做图生图，结果可**替换截图**（回传到截图窗口作为新底图继续标注）、复制到剪贴板或下载保存。
   - 标注会引导模型注意力——先用箭头/方框圈出重点再提问，回答更聚焦。
   - 文字动作自动选用支持视觉的模型，修图选用 image-generation 模型；模型选择会被记住。
 
@@ -25,6 +25,7 @@
 - 经 `mulby.ai.attachments.upload({ purpose: 'vision' | 'image-edit' })` 上传为附件，拿到 `attachmentId`。
 - 文字动作走 `mulby.ai.call`，消息 `content` 携带 `{ type: 'image', attachmentId }`，流式累积增量。
 - 修图走 `mulby.ai.images.edit({ model, imageAttachmentId, prompt })`。
+- 替换截图：AI 浮窗经 `window.mulby.window.sendToParent('apply-edited-image', dataUrl)` 把结果回传父窗口，截图窗口用 `onChildMessage` 接收后调用 `loadTransformedImage` 作为新底图载入。
 - Markdown 渲染使用 `react-markdown` + `remark-gfm`（`src/ui/components/MdRenderer.tsx`），不解析原始 HTML，天然免 XSS。
 - 服务层位于 `src/ui/services/aiVision.ts`（动作预设、提示词、模型过滤、运行器均为可单测的纯函数 + 薄封装）。
 

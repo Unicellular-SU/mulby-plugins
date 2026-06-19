@@ -204,6 +204,18 @@ export default function AiView() {
     [mulby.dialog, mulby.filesystem, notify]
   )
 
+  const replaceScreenshot = useCallback(
+    (dataUrl: string) => {
+      try {
+        window.mulby?.window?.sendToParent?.('apply-edited-image', dataUrl)
+        notify('已替换到截图窗口，可切回继续标注', 'success')
+      } catch (error) {
+        notify(error instanceof Error ? error.message : '替换失败', 'error')
+      }
+    },
+    [notify]
+  )
+
   const handleTextModelChange = useCallback(
     (id: string) => {
       setTextModel(id)
@@ -235,6 +247,7 @@ export default function AiView() {
           getImageDataUrl={getImageDataUrl}
           copyText={copyText}
           copyImage={copyImage}
+          onReplaceScreenshot={replaceScreenshot}
           saveImage={saveImage}
           onClose={() => window.mulby?.window?.close?.()}
           textModel={textModel}

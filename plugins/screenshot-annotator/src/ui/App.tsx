@@ -2120,6 +2120,35 @@ export default function App() {
     imageRef.current = image
   }, [image])
 
+  // 接收来自「问 AI」子窗口的「替换截图」消息：把 AI 修图结果作为新底图载入画布。
+  useEffect(() => {
+    if (mode !== 'annotate') {
+      return
+    }
+    const win = window.mulby?.window
+    if (!win?.onChildMessage) {
+      return
+    }
+    const off = win.onChildMessage((channel: string, ...args: unknown[]) => {
+      if (channel !== 'apply-edited-image') {
+        return
+      }
+      const dataUrl = args[0]
+      const base = imageRef.current
+      if (typeof dataUrl === 'string' && dataUrl && base) {
+        void loadTransformedImage(dataUrl, base, '已替换为 AI 修图结果')
+      }
+    }) as unknown as (() => void) | { dispose?: () => void } | undefined
+    return () => {
+      try {
+        if (typeof off === 'function') off()
+        else off?.dispose?.()
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [mode, loadTransformedImage])
+
   useEffect(() => {
     const shell = canvasShellRef.current
     if (!shell) {
@@ -3358,7 +3387,7 @@ export default function App() {
         title: '问 AI',
         resizable: true,
         alwaysOnTop: true,
-        transparent: false,
+        transparent: true,
         type: 'borderless',
         titleBar: false,
         ...(position ?? {})

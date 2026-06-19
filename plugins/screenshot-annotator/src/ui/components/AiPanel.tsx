@@ -9,6 +9,7 @@ import {
   History,
   Loader2,
   RefreshCw,
+  Replace,
   Sparkles,
   Square,
   X
@@ -41,6 +42,8 @@ export interface AiPanelProps {
   copyText: (text: string) => void | Promise<void>
   /** 把 AI 修图结果回填到画布（仅同窗口场景提供；独立窗口省略）。 */
   onApplyEditedImage?: (dataUrl: string) => void | Promise<void>
+  /** 把 AI 修图结果替换到截图标注窗口（独立窗口跨窗口回传）。 */
+  onReplaceScreenshot?: (dataUrl: string) => void | Promise<void>
   /** 复制图片到剪贴板（独立窗口场景提供）。 */
   copyImage?: (dataUrl: string) => void | Promise<void>
   /** 下载/保存图片到磁盘。 */
@@ -70,6 +73,7 @@ export function AiPanel({
   getImageDataUrl,
   copyText,
   onApplyEditedImage,
+  onReplaceScreenshot,
   copyImage,
   saveImage,
   onClose,
@@ -331,6 +335,16 @@ export function AiPanel({
           )}
           {view === 'result' && !running && isEdit && resultImage && (
             <>
+              {onReplaceScreenshot && (
+                <button
+                  type="button"
+                  className="ai-head-btn ai-head-btn-accent"
+                  title="替换截图（回到截图窗口继续标注）"
+                  onClick={() => void onReplaceScreenshot(resultImage)}
+                >
+                  <Replace size={15} />
+                </button>
+              )}
               {onApplyEditedImage && (
                 <button
                   type="button"

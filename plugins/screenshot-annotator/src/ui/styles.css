@@ -818,9 +818,11 @@ textarea {
 }
 
 /* ── 问 AI 独立窗口 ───────────────────────────────────────── */
+/* 透明窗口：窗口本身透明（缩放不白闪），由 .ai-window-root 自绘深色圆角卡片 */
 html.ai-window,
-html.ai-window body {
-  background: #0b1220;
+html.ai-window body,
+html.ai-window #root {
+  background: transparent;
 }
 
 .ai-window-root {
@@ -830,6 +832,9 @@ html.ai-window body {
   flex-direction: column;
   background: #0b1220;
   color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .ai-window-empty {
@@ -996,6 +1001,15 @@ html.ai-window body {
 .ai-head-btn:hover {
   background: var(--button-hover);
   color: var(--text);
+}
+
+.ai-head-btn-accent {
+  color: #93c5fd;
+}
+
+.ai-head-btn-accent:hover {
+  background: var(--button-active);
+  color: #fff;
 }
 
 .ai-panel-body {
