@@ -2062,14 +2062,38 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
 }
 
 // 解析端口图像为 data URL（供视频首帧使用）
+// 端口图像产物 → data: URL（供 fromDataUrl 抽出纯 base64 下发模型）。
+// 注意：v.url 现为会话级 blob:/http URL（非 data: URL）——绝不能当 base64 直接返回，
+// 否则下游 fromDataUrl 把整串 URL 当 base64、atob 报「not correctly encoded」（高清重绘/图生图崩）。
 async function portImageDataUrl(v?: PortValue): Promise<string> {
   if (!v) return ''
-  if (v.url) return v.url
+  // 1) 内联 data: URL（旧工程/上传）直接用
+  if (v.url && v.url.startsWith('data:')) return v.url
+  // 2) 优先持久字节：assetId → data URL（最可靠，人物/场景素材走这里）
   if (v.assetId) {
     const a = await loadAsset(v.assetId)
     if (a) return toDataUrl(a.base64, a.mime)
   }
+  // 3) 仅剩 blob:/http(s) 会话 URL：取回字节再转 data URL
+  if (v.url) {
+    try {
+      const blob = await (await fetch(v.url)).blob()
+      return await blobToDataUrl(blob)
+    } catch {
+      return ''
+    }
+  }
   return ''
+}
+
+/** Blob → data: URL（FileReader 出标准 data:<mime>;base64,<...>，供 fromDataUrl 解析） */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result || ''))
+    r.onerror = () => reject(new Error('blob 读取失败'))
+    r.readAsDataURL(blob)
+  })
 }
 
 interface RefImage {
