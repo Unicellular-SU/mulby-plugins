@@ -1,0 +1,64 @@
+{
+  "$schema": "./node_modules/.mulby/manifest-schema.json",
+  "id": "quick-launch",
+  "name": "quick-launch",
+  "version": "0.1.0",
+  "author": "mulby",
+  "displayName": "启动器",
+  "description": "可编程快捷动作：自定义搜索引擎与工作区。在 Mulby 搜索框输入关键词即可转发搜索或一键打开一组网址/文件夹/文件，补充原生搜索做不到的能力。",
+  "type": "productivity",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true,
+    "commandExecution": {
+      "direct": {
+        "enabled": true,
+        "defaultProfile": "workspace",
+        "maxProfile": "workspace"
+      }
+    }
+  },
+  "pluginSetting": {
+    "single": true,
+    "background": true,
+    "persistent": true,
+    "idleTimeoutMs": "never",
+    "height": 640
+  },
+  "window": {
+    "width": 880,
+    "height": 640,
+    "minWidth": 560,
+    "minHeight": 420,
+    "type": "default"
+  },
+  "features": [
+    {
+      "code": "launch",
+      "explain": "快速启动：搜索引擎 / 工作区",
+      "mode": "silent",
+      "mainPush": true,
+      "cmds": [
+        {
+          "type": "over",
+          "label": "快速启动",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      ]
+    },
+    {
+      "code": "manage",
+      "explain": "管理启动器条目",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "启动器" },
+        { "type": "keyword", "value": "launch" },
+        { "type": "keyword", "value": "ql" }
+      ]
+    }
+  ]
+}
