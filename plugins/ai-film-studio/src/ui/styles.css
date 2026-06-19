@@ -55,6 +55,7 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
+  position: relative; /* 作为右侧悬浮属性抽屉(absolute)的定位锚 */
 }
 .afs-app__left {
   width: 240px;
@@ -74,6 +75,26 @@ body {
   border-left: 1px solid var(--afs-border);
   background: var(--afs-panel);
   overflow: hidden;
+}
+/* 悬浮属性抽屉：绝对定位于画布右侧之上，不挤压无限画布；仅选中节点时挂载 */
+.afs-app__right--float {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50; /* 高于 React Flow 内部(控件/选中节点)，低于全屏模态 Lightbox(9999) */
+  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.3);
+  animation: afs-drawer-in 0.16s ease-out;
+}
+@keyframes afs-drawer-in {
+  from {
+    transform: translateX(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 .afs-loading {
   position: absolute;
@@ -2414,6 +2435,7 @@ body {
   contain-intrinsic-size: auto 232px;
 }
 .afs-lib__ph {
+  position: relative; /* 关键：含住内部 .afs-thumb__overlay(position:absolute) 缩略图。否则在 Dock 素材标签里无定位祖先，绝对定位图溢出占满整个视口，表现为「整个插件背景变成图片、只剩画布节点」 */
   width: 100%;
   height: 100%;
   display: flex;
@@ -2421,6 +2443,7 @@ body {
   justify-content: center;
   color: var(--afs-dot);
   background: linear-gradient(135deg, var(--afs-node-bg), var(--afs-panel-2));
+  overflow: hidden;
 }
 .afs-lib__ph--audio {
   color: #34d399;
