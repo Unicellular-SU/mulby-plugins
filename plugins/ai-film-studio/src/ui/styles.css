@@ -1162,6 +1162,7 @@ body {
 /* M33：Lightbox 连看开关 */
 .afs-lbhost__toggle {
   position: fixed;
+  z-index: 3;
   top: 16px;
   left: 18px;
   display: flex;
@@ -1197,21 +1198,22 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   max-width: 92vw;
-  max-height: 92vh;
+  max-height: 94vh; /* 整组(图+信息)内容尺寸，居中；图与信息面板各自用 vh 封顶，不靠百分比 */
 }
 .afs-lbhost__frame {
   position: relative;
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .afs-lbhost__media {
-  max-width: 92vw;
-  max-height: 100%;
+  /* 关键：用视口单位封顶（百分比相对 flex 父元素的非定高会失效→图原始尺寸溢出遮挡按钮） */
+  max-width: 90vw;
+  max-height: 72vh;
   object-fit: contain;
   border-radius: 6px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
@@ -1231,7 +1233,7 @@ body {
 /* 元信息 + 改图面板 */
 .afs-lbhost__info {
   width: min(640px, 92vw);
-  max-height: 28vh;
+  max-height: 20vh;
   overflow-y: auto;
   flex-shrink: 0;
   padding: 10px 12px;
@@ -1274,6 +1276,7 @@ body {
 }
 .afs-lbhost__close {
   position: fixed;
+  z-index: 3; /* 始终在媒体之上，避免大图遮挡控件 */
   top: 16px;
   right: 18px;
   width: 36px;
@@ -1292,6 +1295,7 @@ body {
 }
 .afs-lbhost__nav {
   position: fixed;
+  z-index: 3;
   top: 50%;
   transform: translateY(-50%);
   width: 44px;
@@ -1316,6 +1320,7 @@ body {
 }
 .afs-lbhost__count {
   position: fixed;
+  z-index: 3;
   bottom: 18px;
   left: 50%;
   transform: translateX(-50%);
