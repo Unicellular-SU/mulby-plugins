@@ -1077,6 +1077,31 @@
       "sha256": "726c7dc8bb14263473d5907a769ef7d997871a774f6b340531a729217da98fc5",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/lan-drop"
+    },
+    {
+      "id": "quick-launch",
+      "name": "quick-launch",
+      "displayName": "启动器",
+      "version": "0.2.0",
+      "author": "mulby",
+      "description": "可编程快捷动作：自定义搜索引擎与工作区。在 Mulby 搜索框输入关键词即可转发搜索或一键打开一组网址/文件夹/文件，补充原生搜索做不到的能力。",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.19-1055/quick-launch-0.2.0.inplugin",
+      "lastPackageTime": "2026-06-19T10:56:29.898Z",
+      "type": "productivity",
+      "details": "# 启动器 (quick-launch)\n\n可编程的快捷动作工具，**补充** Mulby 原生搜索做不到的能力。\n\nMulby 原生搜索负责「找到本机已有的应用和文件」；启动器负责「执行原生搜索做不到的自定义动作」——把输入转发到任意搜索引擎，或用一个关键词一键打开一整组网址 / 文件夹 / 文件。\n\n> 类比 Alfred 的 *Web Searches + Workflows*、Raycast 的 *Quicklinks*，但不重复做应用启动（那块交给 Mulby 原生搜索）。\n\n## 核心机制：接管搜索框（MainPush）\n\n插件后端常驻运行，通过 Mulby 的 **MainPush（搜索框推送）** 能力，在你于主搜索框输入时直接把匹配的条目推送进原生搜索结果，选中即执行，**不会弹出任何窗口**。\n\n## 功能特性\n\n- 🔎 **自定义搜索引擎** — URL 含 `{query}` 占位符，输入「关键词 + 空格 + 搜索词」即可把内容转发到对应网站搜索。\n- 🗂️ **工作区** — 一个条目绑定一组动作（网址 / 文件夹 / 文件 / 命令），一键按顺序全部打开，适合「上班模式」「写作模式」等场景切换。\n- ✨ **AI 一句话建工作区** — 编辑工作区时用大白话描述（如「上班打开公司邮箱和钉钉网页版，再开项目文件夹」），AI 自动拆解成动作填入表单，确认后保存。需在 Mulby 设置 → AI 配好模型。\n- ⌨️ **触发词与别名** — 每个条目可设多个关键词（如 `gh` `github`），模糊匹配并按使用频率排序；编辑时会提示触发词冲突。\n- ⚡ **命令动作** — 工作区可执行命令，支持参数、工作目录（cwd）与可选 shell 执行。\n- 🔣 **全局 `{query}` 参数化** — 不止搜索引擎，工作区动作的网址 / 路径 / 命令参数也能用 `{query}`，替换为触发词后输入的内容。\n- 🧪 **测试运行** — 在管理界面直接试跑条目，无需切到搜索框。\n- 📤 **导入 / 导出 / 恢复默认** — 条目以 JSON 备份迁移；误删内置搜索引擎可一键补回。\n- 🌗 **明暗主题** — 自动跟随 Mulby 主题。\n- 🚦 **MainPush 状态检测** — 若全局「搜索框推送」被关闭，界面顶部会提示并可一键跳转设置。\n\n## 触发方式\n\n- `启动器` / `launch` / `ql` — 打开管理界面。\n- 在主搜索框直接输入：\n  - `gh react hooks` → 在 GitHub 搜索 “react hooks”\n  - `g 天气` → 用 Google 搜索 “天气”\n  - `上班` → 启动名为「上班」的工作区\n\n> 内置了 Google / 百度 / GitHub / Bilibili / MDN 五个示例搜索引擎，首次使用即可体验，可随意修改或删除。\n\n## 内置条目类型\n\n| 类型 | 说明 | 执行方式 |\n|------|------|---------|\n| 搜索引擎 | 含 `{query}` 的 URL | `shell.openExternal`（`{query}` 替换为编码后的搜索词；无占位符则直接打开） |\n| 工作区 | 一组动作按顺序执行 | 网址→`openExternal`、文件夹→`openFolder`、文件→`openPath`、命令→`runCommand`（args / cwd / shell 可配）；各动作均支持 `{query}`（网址做 URL 编码，其余原样） |\n\n## 使用前提\n\n1. **保持后台常驻**：MainPush 需要插件后端运行。请在插件搜索结果右键菜单 / 窗口菜单中勾选「跟随 Mulby 启动」（manifest 已声明 `background` + `persistent`）。\n2. **开启搜索框推送**：Mulby「设置 → 超级面板」中的「搜索框是否展示插件推送结果」需为开启状态，且本插件不在禁用推送列表内。界面顶部横幅会在被关闭时提醒。\n3. **命令类动作的安全确认**：工作区中的「命令」动作走 `trusted` 执行 profile（启动器跑的是用户自己配置的命令，需要能打开任意路径/程序，故不施加 root 沙箱限制）。安全由 Mulby 的**首次命令确认弹窗**保证——首次执行某命令时会要求确认，可选择「信任」以后免确认。\n   - Windows 上若命令是 PATH 里的 `.cmd`/`.bat` 垫片（如 `qoder`、`code`），需勾选动作的「通过 shell 执行」，否则 `shell:false` 无法解析 PATHEXT；或直接把命令指向可执行文件全路径。\n\n## 权限说明\n\n| 权限 | 用途 |\n|------|------|\n| `clipboard` | 预留（条目复制等） |\n| `notification` | 执行结果提示 |\n| `commandExecution.direct`（`workspace`） | 工作区中的「命令」动作 |\n\n## 数据存储\n\n所有条目通过 `storage` 持久化在插件自己的命名空间下，由后端作为唯一数据源持有；管理界面通过 `host.invoke` 读写，避免跨进程命名空间问题。\n\n## 开发\n\n```bash\npnpm install      # 安装依赖（仓库为 pnpm workspace，可在根目录安装）\npnpm run build    # 构建后端 dist/main.js 与前端 ui/\npnpm run pack     # 打包为 .inplugin\n```\n\n## 项目结构\n\n```\nquick-launch/\n├── manifest.json          # 插件契约（两个 feature：launch[mainPush] / manage[ui]）\n├── src/\n│   ├── main.ts            # 后端：MainPush 匹配/执行、条目持久化、供 UI 调用的 rpc\n│   ├── ui/\n│   │   ├── App.tsx        # 管理界面（增删改、测试、导入导出、MainPush 检测）\n│   │   └── styles.css\n│   └── types/mulby.d.ts\n├── dist/                  # 后端构建输出\n├── ui/                    # 前端构建输出\n├── assets/icon.svg        # 图标源文件\n└── icon.png               # 512×512 图标\n```\n\n## 许可证\n\nMIT License",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/quick-launch/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/quick-launch/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "a76cb0eab07d3146f4613bd360062f32c7368e55f1cbd73d10385bc97b24b1e8",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/quick-launch"
     }
   ]
 }
