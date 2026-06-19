@@ -10,6 +10,8 @@ const ROW_H = 24
 const TOP_PAD = 8
 const TILE = 76
 
+const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
+
 /** 单缩略图：经 useMediaUrl 解析 ref→URL（附件 blob:/本地 file:///远程透传） */
 function MediaThumb({ refv, type }: { refv: MediaRef; type: 'image' | 'video' }) {
   const url = useMediaUrl(refv)
@@ -412,9 +414,29 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   const openLightbox = useUiStore((s) => s.openLightbox)
   const openResultViewer = useUiStore((s) => s.openResultViewer)
   const doneItems = hasItems ? genItems!.filter((it) => it.status === 'done' && it.ref) : []
+  // 统一灯箱：每张图带节点上下文(nodeId/port/index)+元信息，支持灯箱内对话改图/重生成 + 展示标题/提示词
+  const outKey =
+    (data.outputs &&
+      Object.keys(data.outputs).find((k) => {
+        const o = data.outputs![k]
+        return !!o && (!!o.items?.length || !!o.assetId || !!o.url)
+      })) ||
+    def.outputs[0]?.id
+  const nodeTitle = data.title || def.label
+  const nodePrompt = asStr(data.params?.prompt)
+  const toLb = (refv: PortValue, idx: number, type: 'image' | 'video'): LightboxItem => ({
+    ref: refv as MediaRef,
+    type,
+    nodeId: id,
+    port: outKey,
+    index: idx, // lbItems 顺序 = 该输出 items 的密集下标，正是 edit/regen 所需 index
+    title: nodeTitle,
+    meta: refv.meta,
+    prompt: asStr(refv.meta?.prompt) || asStr(refv.meta?.description) || nodePrompt,
+  })
   const lbItems: LightboxItem[] = hasItems
-    ? doneItems.map((it) => ({ ref: it.ref as MediaRef, type: (it.mediaType || 'image') as 'image' | 'video' }))
-    : tiles.map((t) => ({ ref: t.ref as MediaRef, type: t.type }))
+    ? doneItems.map((it, k) => toLb(it.ref as PortValue, k, (it.mediaType || 'image') as 'image' | 'video'))
+    : tiles.map((t, k) => toLb(t.ref, k, t.type))
   const lbIndexByIdx = useMemo(() => {
     const m = new Map<number, number>()
     doneItems.forEach((it, k) => m.set(it.idx, k))

@@ -1194,18 +1194,79 @@ body {
   backdrop-filter: blur(2px);
 }
 .afs-lbhost__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   max-width: 92vw;
-  max-height: 90vh;
+  max-height: 92vh;
+}
+.afs-lbhost__frame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 .afs-lbhost__media {
   max-width: 92vw;
-  max-height: 90vh;
+  max-height: 100%;
   object-fit: contain;
   border-radius: 6px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+.afs-lbhost__busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+}
+/* 元信息 + 改图面板 */
+.afs-lbhost__info {
+  width: min(640px, 92vw);
+  max-height: 28vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  background: rgba(20, 24, 32, 0.94);
+  border: 1px solid var(--afs-border);
+  border-radius: 10px;
+  color: var(--afs-text);
+}
+.afs-lbhost__info-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.afs-lbhost__info-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.afs-lbhost__info-prompt {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--afs-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 8px;
+}
+.afs-lbhost__edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.afs-lbhost__edit .afs-field__input {
+  flex: 1;
+  min-width: 0;
 }
 .afs-lbhost__loading {
   color: #cbd5e1;

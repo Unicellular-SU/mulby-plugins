@@ -16,9 +16,18 @@ function apply(theme: Theme) {
 }
 
 // M32：应用级 Lightbox——节点瓦片 / Inspector / 素材库 打开同一个，看大图 / 带控件播视频 + 左右切换
+// 带节点上下文(nodeId+port+index)时支持「对话改图 / 重新生成」并展示标题/提示词等元信息
 export interface LightboxItem {
   ref: MediaRef
   type: 'image' | 'video'
+  // 编辑上下文：来自某节点产物时带上，灯箱据此调 editNodeImageItem / regenNodeImageItem 并读 live 产物
+  nodeId?: string
+  port?: string
+  index?: number
+  // 元信息展示
+  title?: string
+  prompt?: string
+  meta?: Record<string, unknown>
 }
 
 interface UiState {

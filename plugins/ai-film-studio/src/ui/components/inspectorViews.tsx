@@ -1,8 +1,11 @@
 import { useState } from 'react'
-import { FolderOpen, ChevronRight, ChevronDown, X, Pencil, Wand2, Loader2 } from 'lucide-react'
+import { FolderOpen, ChevronRight, ChevronDown, Pencil } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
 import { basename } from '../services/download'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../services/mediaUrl'
+import { useUiStore, type LightboxItem } from '../store/uiStore'
+
+const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
 
 function openFolder(p?: string) {
   if (p) window.mulby?.shell?.showItemInFolder?.(p)
@@ -180,87 +183,6 @@ function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
 }
 
 // 大图灯箱 + 对话改图 + 重新生成（操作期间保持打开并显示 loading，完成后大图自动刷新）
-function Lightbox({
-  refv,
-  onClose,
-  onEdit,
-  onRegen,
-}: {
-  refv?: MediaRef | null
-  onClose: () => void
-  onEdit?: (prompt: string) => Promise<void>
-  onRegen?: () => Promise<void>
-}) {
-  const [prompt, setPrompt] = useState('')
-  const [busy, setBusy] = useState(false)
-  const url = useMediaUrl(refv) // 大图经 useMediaUrl 解析（附件 blob:），preload 充分
-  if (!url) return null
-  const doEdit = async () => {
-    if (!prompt.trim() || !onEdit || busy) return
-    setBusy(true)
-    try {
-      await onEdit(prompt.trim())
-      setPrompt('')
-    } finally {
-      setBusy(false)
-    }
-  }
-  const doRegen = async () => {
-    if (!onRegen || busy) return
-    setBusy(true)
-    try {
-      await onRegen()
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div className="afs-lightbox" onClick={busy ? undefined : onClose}>
-      <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>
-        <button className="afs-lightbox__close" onClick={onClose} disabled={busy}>
-          <X size={18} />
-        </button>
-        <div className="afs-lightbox__imgwrap">
-          <img className="afs-lightbox__img" src={url} alt="" />
-          {busy ? (
-            <div className="afs-lightbox__loading">
-              <Loader2 size={28} className="afs-spin" />
-              <span>生成中…</span>
-            </div>
-          ) : null}
-        </div>
-        {onEdit || onRegen ? (
-          <div className="afs-lightbox__edit">
-            {onRegen ? (
-              <button className="afs-btn afs-btn--mini" disabled={busy} onClick={doRegen} title="按当前上游/参考图重新生成这一张">
-                重新生成
-              </button>
-            ) : null}
-            {onEdit ? (
-              <>
-                <Wand2 size={14} />
-                <input
-                  className="afs-field__input"
-                  placeholder="描述如何修改这张图（img2img）…"
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') doEdit()
-                  }}
-                  disabled={busy}
-                />
-                <button className="afs-btn afs-btn--mini" disabled={!prompt.trim() || busy} onClick={doEdit}>
-                  {busy ? <Loader2 size={13} className="afs-spin" /> : '修改'}
-                </button>
-              </>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 // 文本/JSON 二次编辑
 function EditableValue({
   value,
@@ -324,16 +246,20 @@ function EditableValue({
 // 单个输出端口产物的富渲染：扇出→画廊（图可点开大图/对话改图）；JSON/文本→可编辑；视频/音频→播放
 export function OutputView({
   value,
-  onEditImage,
-  onRegenImage,
+  nodeId,
+  port,
+  title,
+  nodePrompt,
   onEditText,
 }: {
   value: PortValue
-  onEditImage?: (index: number, prompt: string) => Promise<void>
-  onRegenImage?: (index: number) => Promise<void>
+  nodeId?: string
+  port?: string
+  title?: string
+  nodePrompt?: string
   onEditText?: (text: string) => string | null
 }) {
-  const [lightbox, setLightbox] = useState<number | null>(null)
+  const openLightbox = useUiStore((s) => s.openLightbox)
 
   if (value.type === 'json' || value.type === 'text' || (!value.items && value.text && !value.url)) {
     return <EditableValue value={value} onEditText={onEditText} />
@@ -348,7 +274,23 @@ export function OutputView({
 
   if (mediaList) {
     if (mediaList.length === 0) return <div className="afs-inspector__note">（暂无可显示内容）</div>
-    const isImage = mediaList[0].type === 'image'
+    // 统一灯箱：图/视频点开即与节点预览同一窗口（看大图 / 对话改图 / 重新生成 / 标题·提示词等元信息）
+    const lbItems: LightboxItem[] = mediaList
+      .filter((it) => it.type === 'image' || it.type === 'video')
+      .map((it) => ({
+        ref: it as MediaRef,
+        type: it.type as 'image' | 'video',
+        nodeId,
+        port,
+        index: rawItems ? rawItems.indexOf(it) : 0, // 全量 items 下标，正是 edit/regen 所需
+        title,
+        meta: it.meta,
+        prompt: asStr(it.meta?.prompt) || asStr(it.meta?.description) || nodePrompt,
+      }))
+    const openAt = (it: PortValue) => {
+      const i = lbItems.findIndex((x) => x.ref === (it as MediaRef))
+      if (i >= 0) openLightbox(lbItems, i)
+    }
     return (
       <div>
         {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
@@ -357,18 +299,10 @@ export function OutputView({
             <MediaTile
               key={it.assetId || it.url || `item-${i}`}
               v={it}
-              onClick={it.type === 'image' ? () => setLightbox(i) : undefined}
+              onClick={it.type === 'image' || it.type === 'video' ? () => openAt(it) : undefined}
             />
           ))}
         </div>
-        {lightbox != null && mediaList[lightbox] ? (
-          <Lightbox
-            refv={mediaList[lightbox]}
-            onClose={() => setLightbox(null)}
-            onEdit={isImage && onEditImage ? (prompt) => onEditImage(lightbox, prompt) : undefined}
-            onRegen={isImage && onRegenImage ? () => onRegenImage(lightbox) : undefined}
-          />
-        ) : null}
       </div>
     )
   }

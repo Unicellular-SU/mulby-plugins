@@ -31,8 +31,6 @@ export default function Inspector() {
   const removeNode = useGraphStore((s) => s.removeNode)
   const runNode = useGraphStore((s) => s.runNode)
   const runFrom = useGraphStore((s) => s.runFrom)
-  const editNodeImageItem = useGraphStore((s) => s.editNodeImageItem)
-  const regenNodeImageItem = useGraphStore((s) => s.regenNodeImageItem)
   const updateNodeOutputText = useGraphStore((s) => s.updateNodeOutputText)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
   const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
@@ -443,8 +441,10 @@ export default function Inspector() {
                 {def.outputs.length > 1 ? <div className="afs-outport__label">{portLabel(def.outputs, k)}</div> : null}
                 <OutputView
                   value={v}
-                  onEditImage={(i, prompt) => editNodeImageItem(node.id, k, i, prompt)}
-                  onRegenImage={(i) => regenNodeImageItem(node.id, k, i)}
+                  nodeId={node.id}
+                  port={k}
+                  title={node.data.title || def.label}
+                  nodePrompt={typeof node.data.params?.prompt === 'string' ? node.data.params.prompt : undefined}
                   onEditText={(text) => updateNodeOutputText(node.id, k, text)}
                 />
               </div>
