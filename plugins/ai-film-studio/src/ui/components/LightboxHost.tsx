@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, ListVideo, Wand2, Loader2 } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ListVideo, Wand2, Loader2, RotateCcw, Send } from 'lucide-react'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
 import { useGraphStore } from '../store/graphStore'
 import { useMediaUrl, type MediaRef } from '../services/mediaUrl'
@@ -118,36 +118,42 @@ export default function LightboxHost() {
         </div>
         {showInfo && (
           <div className="afs-lbhost__info">
-            {title && <div className="afs-lbhost__info-title">{title}</div>}
-            {chips.length > 0 && (
-              <div className="afs-lbhost__info-chips">
+            {(title || chips.length > 0) && (
+              <div className="afs-lbhost__info-head">
+                {title && <span className="afs-lbhost__info-title">{title}</span>}
                 {chips.map((c, i) => (
-                  <span className="afs-chip" key={i}>
+                  <span className="afs-lbhost__metachip" key={i}>
                     {c}
                   </span>
                 ))}
               </div>
             )}
-            {promptText && <div className="afs-lbhost__info-prompt">提示词：{promptText}</div>}
+            {promptText && (
+              <div className="afs-lbhost__info-prompt">
+                <span className="afs-lbhost__info-label">提示词</span>
+                {promptText}
+              </div>
+            )}
             {canEdit && (
               <div className="afs-lbhost__edit">
-                <button className="afs-btn afs-btn--mini" disabled={busy} onClick={doRegen} title="按当前上游/参考图重新生成这一张">
-                  重新生成
+                <button className="afs-lbhost__regen" disabled={busy} onClick={doRegen} title="按当前上游/参考图重新生成这一张">
+                  <RotateCcw size={13} /> 重新生成
                 </button>
-                <Wand2 size={14} />
-                <input
-                  className="afs-field__input"
-                  placeholder="描述如何修改这张图（img2img）…"
-                  value={editPrompt}
-                  onChange={(e) => setEditPrompt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') doEdit()
-                  }}
-                  disabled={busy}
-                />
-                <button className="afs-btn afs-btn--mini" disabled={!editPrompt.trim() || busy} onClick={doEdit}>
-                  {busy ? <Loader2 size={13} className="afs-spin" /> : '修改'}
-                </button>
+                <div className="afs-lbhost__chatbar">
+                  <Wand2 size={14} className="afs-lbhost__chatbar-icon" />
+                  <input
+                    placeholder="对话修改这张图，如「换成夜晚」「加件红外套」…"
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') doEdit()
+                    }}
+                    disabled={busy}
+                  />
+                  <button className="afs-lbhost__send" disabled={!editPrompt.trim() || busy} onClick={doEdit} title="发送修改 (Enter)">
+                    {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
+                  </button>
+                </div>
               </div>
             )}
           </div>

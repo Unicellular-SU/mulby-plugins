@@ -272,6 +272,7 @@ function MediaFrameNode({
               muted
               playsInline
               preload="metadata"
+              onClick={(e) => e.stopPropagation()}
               onLoadedMetadata={(e) => {
                 const t = e.currentTarget
                 if (t.videoWidth && t.videoHeight) setAr(t.videoWidth / t.videoHeight)
@@ -282,6 +283,8 @@ function MediaFrameNode({
               src={url}
               alt=""
               draggable={false}
+              // 单击媒体不冒泡到 React Flow 的 onNodeClick → 双击预览时不会顺带选中节点弹出右侧抽屉
+              onClick={(e) => e.stopPropagation()}
               onLoad={(e) => {
                 const t = e.currentTarget
                 if (t.naturalWidth && t.naturalHeight) setAr(t.naturalWidth / t.naturalHeight)

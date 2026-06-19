@@ -1213,7 +1213,7 @@ body {
 .afs-lbhost__media {
   /* 关键：用视口单位封顶（百分比相对 flex 父元素的非定高会失效→图原始尺寸溢出遮挡按钮） */
   max-width: 90vw;
-  max-height: 72vh;
+  max-height: 68vh;
   object-fit: contain;
   border-radius: 6px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
@@ -1230,45 +1230,144 @@ body {
   background: rgba(0, 0, 0, 0.45);
   border-radius: 6px;
 }
-/* 元信息 + 改图面板 */
+/* 元信息 + 改图面板（贴合整体样式：面板卡 + chat 输入条 + accent 发送） */
 .afs-lbhost__info {
-  width: min(640px, 92vw);
-  max-height: 20vh;
+  width: min(680px, 92vw);
+  max-height: 24vh;
   overflow-y: auto;
   flex-shrink: 0;
-  padding: 10px 12px;
-  background: rgba(20, 24, 32, 0.94);
+  padding: 12px 14px;
+  background: var(--afs-panel);
   border: 1px solid var(--afs-border);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--afs-text);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+}
+.afs-lbhost__info-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
 }
 .afs-lbhost__info-title {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  margin-bottom: 6px;
+  color: var(--afs-text);
 }
-.afs-lbhost__info-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 6px;
+.afs-lbhost__metachip {
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--afs-muted);
+  background: var(--afs-hover);
+  border: 1px solid var(--afs-border);
+  border-radius: 999px;
+  padding: 0 8px;
 }
 .afs-lbhost__info-prompt {
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--afs-muted);
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 10px;
+  max-height: 7em;
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  margin-bottom: 8px;
+}
+.afs-lbhost__info-label {
+  display: inline-block;
+  margin-right: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--afs-muted);
+  opacity: 0.75;
 }
 .afs-lbhost__edit {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
-.afs-lbhost__edit .afs-field__input {
+.afs-lbhost__regen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 11px;
+  font-size: 12px;
+  color: var(--afs-text);
+  background: var(--afs-hover);
+  border: 1px solid var(--afs-border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.afs-lbhost__regen:hover:not(:disabled) {
+  border-color: var(--afs-accent);
+}
+.afs-lbhost__regen:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.afs-lbhost__chatbar {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 5px 0 10px;
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  border-radius: 9px;
+  transition: border-color 0.15s;
+}
+.afs-lbhost__chatbar:focus-within {
+  border-color: var(--afs-accent);
+}
+.afs-lbhost__chatbar-icon {
+  flex-shrink: 0;
+  color: var(--afs-muted);
+}
+.afs-lbhost__chatbar input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--afs-text);
+  font-size: 12.5px;
+  font-family: inherit;
+}
+.afs-lbhost__chatbar input::placeholder {
+  color: var(--afs-muted);
+}
+.afs-lbhost__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 7px;
+  background: var(--afs-accent);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s, filter 0.15s;
+}
+.afs-lbhost__send:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+.afs-lbhost__send:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .afs-lbhost__loading {
   color: #cbd5e1;
