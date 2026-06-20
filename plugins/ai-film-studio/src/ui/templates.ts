@@ -4,7 +4,11 @@
  * instantiateTemplate 据此生成带新 id 的 FilmNode/Edge（默认参数取自 nodeDefs）。
  *
  * 模板覆盖当前节点体系：大纲(outline)、逐角色配音(tts dialogues/chars)、按场扇出(foreach)、
- * 角色三视图一致性、字幕、转场等。画风/画幅由顶栏「全局设定」统一注入所有生成节点。
+ * 角色设定图(5视图)一致性、字幕、转场等。画风/画幅由顶栏「全局设定」统一注入所有生成节点。
+ *
+ * 连接模型（最新）：资产节点(人物/场景/物品)各为「单一输出」，身份+参考图打包同行，一根线直连下游；
+ * 「角色设定图」(char-image)是增强器——吃「角色」、产「角色(身份+设定板)」，直连 keyframe.chars（不再单独连图）；
+ * keyframe 入口 = 分镜/角色/场景/物品/参考图；「场景概念图」(scene-image)产的是图，走 keyframe.ref（按地点匹配）。
  */
 import { nanoid } from 'nanoid'
 import type { Edge } from '@xyflow/react'
@@ -35,7 +39,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'quick-micro',
     name: '微短片速测（≈4 镜 · 最快出片）',
-    desc: '一句话故事 → 剧本(微短片·1-2场) → 分镜(约3-5镜) → 角色三视图 → 关键帧 → 图生视频(原生台词+顺接) → 预览。跳过大纲，最省最快，用于快速验证效果（也可在「全局设定」把成片体量设为微短片，让任意流水线都出小片）。',
+    desc: '一句话故事 → 剧本(微短片·1-2场) → 分镜(约3-5镜) → 角色设定图(5视图) → 关键帧(承接镜头链式生成) → 图生视频(原生台词+顺接) → 预览。跳过大纲，最省最快，用于快速验证效果（也可在「全局设定」把成片体量设为微短片）。',
     nodes: [
       { kind: 'story', x: 60, y: 220 },
       { kind: 'script-gen', x: 320, y: 220, params: { targetLength: '微短片' } },
@@ -43,18 +47,17 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'char-sheet', x: 580, y: 380 },
       { kind: 'char-image', x: 820, y: 380 },
       { kind: 'keyframe', x: 840, y: 120 },
-      { kind: 'i2v', x: 1080, y: 120, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
+      { kind: 'i2v', x: 1080, y: 120, params: { audioMode: '模型自带声' } },
       { kind: 'preview', x: 1320, y: 120 },
     ],
     edges: [
       { from: 0, to: 1, toHandle: 'in' }, // story → script-gen（微短片，无需大纲）
       { from: 1, to: 2, toHandle: 'in' }, // script → storyboard
       { from: 1, to: 3, toHandle: 'in' }, // script → char-sheet
-      { from: 3, to: 4, toHandle: 'role' }, // char-sheet → char-image
-      { from: 3, to: 5, toHandle: 'chars' }, // char-sheet → keyframe.chars
-      { from: 4, to: 5, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars
+      { from: 3, to: 4, toHandle: 'role' }, // char-sheet → char-image（出 5 视图设定板）
+      { from: 4, to: 5, toHandle: 'chars' }, // char-image（角色身份+设定板，一根线）→ keyframe.chars
       { from: 2, to: 5, toHandle: 'shot' }, // storyboard → keyframe
-      { from: 5, to: 6, toHandle: 'frame' }, // keyframe → i2v
+      { from: 5, to: 6, toHandle: 'frame' }, // keyframe → i2v（顺接默认开）
       { from: 6, to: 7, toHandle: 'in' }, // i2v → preview
     ],
   },
@@ -79,7 +82,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'full-pipeline',
     name: '完整影视流水线（结构化 + 一致性 + 配音 + 字幕）',
-    desc: '故事→大纲→剧本→分镜(可产段落 segments)→角色设定(自动按时期拆变体)/逐变体三视图+场景概念图→关键帧(按 charId+时期变体精确取图，跨镜一致)→图生视频→逐角色配音→合成→导出',
+    desc: '故事→大纲→剧本→分镜(可产段落 segments)→角色设定(自动按时期拆变体)·角色设定图(逐变体)+场景概念图→关键帧(承接镜头链式生成·按 charId+时期变体精确取图，跨镜一致)→图生视频→逐角色配音→合成→导出',
     nodes: [
       { kind: 'story', x: 40, y: 320 },
       { kind: 'outline', x: 260, y: 320 },
@@ -89,9 +92,9 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'char-image', x: 960, y: 440 },
       { kind: 'scene-image', x: 960, y: 620 },
       { kind: 'keyframe', x: 1000, y: 140 },
-      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
+      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声' } },
       { kind: 'tts', x: 1240, y: 440 },
-      { kind: 'compose', x: 1480, y: 320, params: { subtitleMode: '烧录字幕', transition: '淡入淡出' } },
+      { kind: 'compose', x: 1480, y: 320, params: { subtitleMode: '烧录字幕' } },
       { kind: 'export', x: 1720, y: 320 },
     ],
     edges: [
@@ -101,11 +104,10 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 2, to: 4, toHandle: 'in' }, // script-gen → char-sheet（提炼角色 + 弧线）
       { from: 2, to: 6, toHandle: 'in' }, // script-gen → scene-image（按地点出场景概念图/master plate）
       { from: 3, to: 7, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
-      { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每角色三视图）
-      { from: 4, to: 7, toHandle: 'chars' }, // char-sheet → keyframe.chars（名称匹配 + 此刻状态注入）
-      { from: 5, to: 7, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars（跨镜一致）
+      { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每角色出设定板）
+      { from: 5, to: 7, toHandle: 'chars' }, // char-image（角色身份+设定板，一根线）→ keyframe.chars（跨镜一致）
       { from: 6, to: 7, toHandle: 'ref' }, // scene-image → keyframe.ref（场景参考图，按地点一致）
-      { from: 7, to: 8, toHandle: 'frame' }, // keyframe → i2v（按关键帧扇出）
+      { from: 7, to: 8, toHandle: 'frame' }, // keyframe → i2v（按关键帧扇出，顺接默认开）
       { from: 8, to: 10, toHandle: 'clips' }, // i2v → compose
       { from: 2, to: 9, toHandle: 'dialogues' }, // script-gen → tts.dialogues（逐角色对白配音）
       { from: 4, to: 9, toHandle: 'chars' }, // char-sheet → tts.chars（音色映射）
@@ -117,7 +119,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'complex-script',
     name: '复杂剧本 · 按场扇出（长片不丢后半段 + 一致性）',
-    desc: '故事→大纲→长片剧本→ForEach 按场拆分镜(每场独立生成再合并，storyboard 可设镜头总数上限防爆炸)；角色(按时期拆变体)三视图+场景概念图全局生成一次，关键帧据此跨镜保持人物(对期)/场景一致',
+    desc: '故事→大纲→长片剧本→ForEach 按场拆分镜(每场独立生成再合并，storyboard 可设镜头总数上限防爆炸)；角色(按时期拆变体)设定图+场景概念图全局生成一次，关键帧据此跨镜保持人物(对期)/场景一致',
     nodes: [
       { kind: 'story', x: 40, y: 300 },
       { kind: 'outline', x: 260, y: 300 },
@@ -128,7 +130,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'char-image', x: 960, y: 460 },
       { kind: 'scene-image', x: 960, y: 620 },
       { kind: 'keyframe', x: 1200, y: 160 },
-      { kind: 'i2v', x: 1440, y: 160 },
+      { kind: 'i2v', x: 1440, y: 160, params: { audioMode: '模型自带声' } },
       { kind: 'compose', x: 1680, y: 300, params: { subtitleMode: '烧录字幕' } },
       { kind: 'export', x: 1920, y: 300 },
     ],
@@ -138,10 +140,9 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 2, to: 3, toHandle: 'in' }, // script-gen → foreach（把 scenes[] 物化成逐场 items）
       { from: 3, fromHandle: 'item', to: 4, toHandle: 'in' }, // foreach.item → storyboard（每场独立调用，合并 shots，不丢后半段）
       { from: 2, to: 5, toHandle: 'in' }, // script-gen(整剧本) → char-sheet（一次性提炼全部角色）
-      { from: 5, to: 6, toHandle: 'role' }, // char-sheet → char-image（每角色三视图）
+      { from: 5, to: 6, toHandle: 'role' }, // char-sheet → char-image（每角色出设定板）
       { from: 2, to: 7, toHandle: 'in' }, // script-gen(整剧本) → scene-image（按地点出场景概念图）
-      { from: 5, to: 8, toHandle: 'chars' }, // char-sheet → keyframe.chars（名称匹配 + 弧线状态）
-      { from: 6, to: 8, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars（跨镜一致）
+      { from: 6, to: 8, toHandle: 'chars' }, // char-image（角色身份+设定板，一根线）→ keyframe.chars（跨镜一致）
       { from: 7, to: 8, toHandle: 'ref' }, // scene-image → keyframe.ref（场景参考，按地点一致）
       { from: 4, to: 8, toHandle: 'shot' }, // storyboard(合并后) → keyframe（按镜头扇出）
       { from: 8, to: 9, toHandle: 'frame' }, // keyframe → i2v
@@ -153,7 +154,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'character-variants',
     name: '角色跨时期一致性（少年→盛年→暮年）',
-    desc: '故事跨越人物多个时期→角色设定自动按时期拆形态变体(variants)→角色三视图逐变体生成→分镜按段落/节拍选对应时期的角色图，杜绝"不同时期合到一张图/取错期"。需选「全局设定」风格包效果更佳。',
+    desc: '故事跨越人物多个时期→角色设定自动按时期拆形态变体(variants)→角色设定图逐变体各出一张设定板→分镜按段落/节拍选对应时期的角色图，杜绝"不同时期合到一张图/取错期"。需选「全局设定」风格包效果更佳。',
     nodes: [
       { kind: 'story', x: 40, y: 300, params: { text: '一个剑客的一生：少年时清瘦、布衣，拜师学艺；盛年时蓄须、玄铁战甲，成为征战的将军；暮年时白发、素袍，归隐山林。' } },
       { kind: 'outline', x: 260, y: 300 },
@@ -162,7 +163,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'char-sheet', x: 720, y: 460 },
       { kind: 'char-image', x: 980, y: 460 },
       { kind: 'keyframe', x: 1000, y: 140 },
-      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声', continuity: '连贯镜头尾接首' } },
+      { kind: 'i2v', x: 1240, y: 140, params: { audioMode: '模型自带声' } },
       { kind: 'preview', x: 1480, y: 140 },
     ],
     edges: [
@@ -170,9 +171,8 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 1, to: 2, toHandle: 'in' }, // outline → script-gen
       { from: 2, to: 3, toHandle: 'in' }, // script-gen → storyboard（可产 segments + 各段 activeVariants）
       { from: 2, to: 4, toHandle: 'in' }, // script-gen → char-sheet（自动按时期拆 variants）
-      { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每 角色×变体 一组三视图）
-      { from: 4, to: 6, toHandle: 'chars' }, // char-sheet → keyframe.chars（解析本镜该用哪个时期变体）
-      { from: 5, to: 6, toHandle: 'chars' }, // char-image（角色+各期设定板）→ keyframe.chars（按 charId+variantId 精确取该期图）
+      { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每 角色×变体 一张设定板）
+      { from: 5, to: 6, toHandle: 'chars' }, // char-image（角色身份+各期设定板，一根线）→ keyframe.chars（按 charId+variantId 精确取该期图）
       { from: 3, to: 6, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
       { from: 6, to: 7, toHandle: 'frame' }, // keyframe → i2v
       { from: 7, to: 8, toHandle: 'in' }, // i2v → preview
@@ -181,7 +181,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'assets-to-keyframe',
     name: '素材 → 角色设定图 → 关键帧（人物/场景/物品一致性）',
-    desc: '「人物」出 16:9 设定板 + 「场景」概念图 + 「物品」参考图，各用一根线喂关键帧，按名/地点匹配，跨镜保持人物·场景·道具一致',
+    desc: '手搭素材：「人物」出 5 视图设定板 +「场景」概念 +「物品」参考，各用一根线喂关键帧，按名/地点匹配，跨镜保持人物·场景·道具一致（人物/场景/物品节点也可连入素材图，按图生成）',
     nodes: [
       { kind: 'character', x: 60, y: 100, params: { name: '主角', appearance: '少年，黑色短发，深蓝色风衣', voiceId: 'onyx' } },
       { kind: 'scene', x: 60, y: 360, params: { name: '霓虹街道', description: '夜晚雨后的赛博朋克街道，霓虹倒影' } },
@@ -193,9 +193,9 @@ export const TEMPLATES: WorkflowTemplate[] = [
     ],
     edges: [
       // 每个素材节点只用「一根线」连到关键帧：身份+参考图已打包在单一输出里，按名/地点自动匹配做一致性
-      { from: 0, to: 4, toHandle: 'role' }, // 人物（身份+参考图）→ char-image.role（出 16:9 设定板）
-      { from: 4, to: 5, toHandle: 'chars' }, // 角色设定图（角色+设定板）→ keyframe.chars（跨镜一致）
-      { from: 1, to: 5, toHandle: 'scene' }, // 场景（设定+参考图）→ keyframe.scene（按地点一致）
+      { from: 0, to: 4, toHandle: 'role' }, // 人物（身份+参考图）→ char-image.role（出 5 视图设定板）
+      { from: 4, to: 5, toHandle: 'chars' }, // 角色设定图（角色身份+设定板）→ keyframe.chars（跨镜一致）
+      { from: 1, to: 5, toHandle: 'scene' }, // 场景（设定+参考图）→ keyframe.scene（按地点一致 + 描述注入）
       { from: 2, to: 5, toHandle: 'props' }, // 物品（身份+参考图）→ keyframe.props（按物品名一致）
       { from: 3, to: 5, toHandle: 'shot' }, // 文本镜头描述 → keyframe.shot
       { from: 5, to: 6, toHandle: 'in' }, // keyframe → preview
@@ -204,12 +204,12 @@ export const TEMPLATES: WorkflowTemplate[] = [
   {
     id: 'clips-to-film',
     name: '片段 → 成片（配乐 + 转场）',
-    desc: '参考图生视频 + 本地配乐，淡入淡出转场合成并导出成片',
+    desc: '参考图生视频 + 本地配乐，整片淡入淡出合成并导出成片',
     nodes: [
       { kind: 'image-input', x: 60, y: 120 },
       { kind: 'i2v', x: 360, y: 120 },
       { kind: 'audio-input', x: 60, y: 360 },
-      { kind: 'compose', x: 660, y: 220, params: { transition: '淡入淡出' } },
+      { kind: 'compose', x: 660, y: 220 },
       { kind: 'export', x: 960, y: 220 },
     ],
     edges: [
