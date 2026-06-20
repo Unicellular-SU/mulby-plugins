@@ -189,7 +189,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [ ] **1c 供应商强类型 model 定义**（可后置/并入阶段3 视频生成时做）：type/mode(视频模式)/durationResolutionMap/associationSkills。
 - [x] **2 数据模型 + 持久化**：`domain/types.ts`（ProjectDoc: meta/novel/events/scripts/assets/storyboards/clips/track/memory）；`domain/persistence.ts`（host storage KV，命名空间 `studio:*`：index/project:<id>/current；loadIndex/loadProject/saveProject/deleteProject/emptyProjectDoc）。独立命名空间，不碰老节点图数据。tsc+build 通过。
 - [x] **2b projectStore**：zustand `store/projectStore.ts`（cards/doc/init/create/open/delete/flush + 防抖落盘 mutate；实体增删改 upsertScript/Asset/Storyboard/Clip + reorder）。tsc+build 通过。
-- [ ] **2c 工作台 UI 骨架**：项目主页（卡片列表/新建）+ 编辑器分阶段 Tab（剧本/资产/分镜/时间线）+ Agent 对话面板占位；接 projectStore（与节点图并存，逐步替换为入口）。
+- [x] **2c 工作台 UI 骨架**：新增 `studio/`（StudioApp/StudioHome/StudioEditor）；AppRail 加「工作台」一级入口并设为默认视图（节点图仍在「画布」）；项目主页（卡片+新建/删除）+ 编辑器顶栏（名称/画风/画幅）+ 阶段 Tab（剧本/资产/分镜可编辑落盘，时间线占位）+ Agent 面板占位；styles.css 加工作台样式。tsc+build 通过。
+- [ ] **2d 生成接入工作台**：资产/分镜「生成」按钮接现有 imageEngine/关键帧引擎（注入项目画风 Skill）；分镜→片段接 runVideo；与现有 providers/ffmpeg 打通。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
 - [ ] **4 高阶**：小说导入+事件图谱、时间线/轨道选优剪辑、轻量记忆。
 

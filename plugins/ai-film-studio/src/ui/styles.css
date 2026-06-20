@@ -3389,3 +3389,75 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ============ Toonflow 式工作台（阶段2c 骨架） ============ */
+.afs-studio { height: 100%; overflow: hidden; color: var(--afs-text); display: flex; flex-direction: column; }
+.afs-studio--center { align-items: center; justify-content: center; color: var(--afs-muted); }
+.afs-studio__hint { color: var(--afs-muted); font-size: 13px; }
+
+.afs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px;
+  border: 1px solid var(--afs-border); background: var(--afs-panel); color: var(--afs-text); cursor: pointer; font-size: 13px; }
+.afs-btn:hover { background: var(--afs-hover); }
+.afs-btn--primary { background: var(--afs-accent); border-color: var(--afs-accent); color: #fff; }
+.afs-btn--ghost { border-color: transparent; background: transparent; }
+.afs-btn--sm { padding: 4px 9px; font-size: 12px; }
+
+/* 主页 */
+.afs-studio__home { padding: 24px 28px; overflow: auto; }
+.afs-studio__home-head { display: flex; align-items: center; justify-content: space-between; }
+.afs-studio__home-head h2 { margin: 0; font-size: 20px; }
+.afs-studio__empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 60px 0; color: var(--afs-muted); }
+.afs-studio__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin-top: 18px; }
+.afs-studio__card { position: relative; border: 1px solid var(--afs-border); border-radius: 12px; background: var(--afs-panel);
+  overflow: hidden; cursor: pointer; transition: border-color .15s; }
+.afs-studio__card:hover { border-color: var(--afs-accent); }
+.afs-studio__card-cover { height: 110px; display: flex; align-items: center; justify-content: center; background: var(--afs-panel-2); }
+.afs-studio__card-body { padding: 10px 12px; }
+.afs-studio__card-name { font-weight: 600; font-size: 14px; }
+.afs-studio__card-meta { color: var(--afs-muted); font-size: 12px; margin-top: 4px; }
+.afs-studio__card-del { position: absolute; top: 8px; right: 8px; border: none; background: rgba(0,0,0,.35); color: #fff;
+  border-radius: 6px; padding: 4px; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.afs-studio__card:hover .afs-studio__card-del { opacity: 1; }
+
+/* 编辑器 */
+.afs-studio__editor { display: flex; flex-direction: column; height: 100%; }
+.afs-studio__topbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--afs-border); }
+.afs-studio__title { flex: 0 0 auto; min-width: 160px; background: transparent; border: 1px solid transparent; color: var(--afs-text);
+  font-size: 15px; font-weight: 600; padding: 5px 8px; border-radius: 6px; }
+.afs-studio__title:hover, .afs-studio__title:focus { border-color: var(--afs-border); outline: none; }
+.afs-studio__sel { width: auto; min-width: 120px; }
+.afs-studio__tabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--afs-border); }
+.afs-studio__tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; background: transparent;
+  color: var(--afs-muted); cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; }
+.afs-studio__tab.is-active { color: var(--afs-text); border-bottom-color: var(--afs-accent); }
+.afs-studio__work { flex: 1; display: flex; min-height: 0; }
+.afs-studio__stage { flex: 1; overflow: auto; padding: 16px; min-width: 0; }
+.afs-studio__agent { width: 320px; border-left: 1px solid var(--afs-border); display: flex; flex-direction: column; background: var(--afs-panel-2); }
+.afs-studio__agent-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--afs-border); font-weight: 600; }
+.afs-studio__agent-body { padding: 14px; }
+
+/* 剧本 Tab */
+.afs-studio__split { display: flex; gap: 14px; height: 100%; }
+.afs-studio__list { width: 180px; display: flex; flex-direction: column; gap: 6px; }
+.afs-studio__listitem { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 7px;
+  border: 1px solid var(--afs-border); cursor: pointer; font-size: 13px; }
+.afs-studio__listitem.is-active { border-color: var(--afs-accent); }
+.afs-studio__listitem button { border: none; background: transparent; color: var(--afs-muted); cursor: pointer; }
+.afs-studio__detail { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.afs-studio__editor-text { flex: 1; resize: none; font-family: inherit; line-height: 1.6; }
+
+/* 资产 Tab */
+.afs-studio__assets { display: flex; flex-direction: column; gap: 18px; }
+.afs-studio__assetgroup-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.afs-studio__assetlist { display: flex; flex-wrap: wrap; gap: 8px; }
+.afs-studio__chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--afs-border); border-radius: 8px; padding: 2px 4px 2px 8px; }
+.afs-studio__chip input { background: transparent; border: none; color: var(--afs-text); width: 90px; }
+.afs-studio__chip button { border: none; background: transparent; color: var(--afs-muted); cursor: pointer; }
+
+/* 分镜 Tab */
+.afs-studio__sblist { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.afs-studio__sbitem { display: flex; align-items: flex-start; gap: 8px; }
+.afs-studio__sbidx { flex: 0 0 24px; height: 24px; border-radius: 50%; background: var(--afs-panel); border: 1px solid var(--afs-border);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: var(--afs-muted); }
+.afs-studio__sbitem textarea { flex: 1; resize: vertical; }
+.afs-studio__sbitem > button { border: none; background: transparent; color: var(--afs-muted); cursor: pointer; }

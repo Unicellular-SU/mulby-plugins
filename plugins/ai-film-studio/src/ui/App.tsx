@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import AppRail, { type AppView } from './components/shell/AppRail'
+import StudioApp from './studio/StudioApp'
 import EditorView from './components/shell/EditorView'
 import ProjectHome from './components/views/ProjectHome'
 import AssetsView from './components/views/AssetsView'
@@ -15,7 +16,7 @@ import { usePromptStore } from './store/promptStore'
 import { useUiStore } from './store/uiStore'
 
 const PLUGIN_ID = 'ai-film-studio'
-const VIEWS: AppView[] = ['home', 'editor', 'assets', 'prompts', 'settings']
+const VIEWS: AppView[] = ['studio', 'home', 'editor', 'assets', 'prompts', 'settings']
 
 export default function App() {
   const init = useGraphStore((s) => s.init)
@@ -26,7 +27,7 @@ export default function App() {
   const loadTheme = useUiStore((s) => s.loadTheme)
   const applyHostTheme = useUiStore((s) => s.applyHostTheme)
 
-  const [view, setView] = useState<AppView>('home')
+  const [view, setView] = useState<AppView>('studio')
 
   // 切视图边界：离开画布前先 flush 落盘（修「加载中切页 → 工程丢失」），
   // 但**始终** setView——即便保存被拒也绝不困住用户。
@@ -108,6 +109,7 @@ export default function App() {
       <div className="afs-shell">
         <AppRail view={view} onChange={go} />
         <div className="afs-main">
+          {view === 'studio' && <StudioApp />}
           {view === 'home' && <ProjectHome onOpen={() => go('editor')} />}
           {view === 'editor' && <EditorView />}
           {view === 'assets' && <AssetsView onInserted={() => go('editor')} />}

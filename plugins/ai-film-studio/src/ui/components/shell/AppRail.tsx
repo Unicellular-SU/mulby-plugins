@@ -1,9 +1,10 @@
-import { Clapperboard, LayoutGrid, Workflow, Image as ImageIcon, MessageSquareText, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
+import { Clapperboard, LayoutGrid, Workflow, Film, Image as ImageIcon, MessageSquareText, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
 import { useUiStore } from '../../store/uiStore'
 
-export type AppView = 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
+export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
 
 const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
+  { view: 'studio', icon: Film, label: '工作台' }, // Toonflow 式结构化流水线（新，逐步成为主入口）
   { view: 'home', icon: LayoutGrid, label: '工程' },
   { view: 'editor', icon: Workflow, label: '画布' },
   { view: 'assets', icon: ImageIcon, label: '素材' },
