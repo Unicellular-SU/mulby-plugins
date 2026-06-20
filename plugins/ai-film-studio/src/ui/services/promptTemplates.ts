@@ -147,7 +147,8 @@ JSON 结构：
 duration 为数字（秒，建议 4-15）。按叙事顺序排列。有结构化剧本（含 scene.id）时，shots 必须覆盖全部场景、不得截断后半段。
 台词：把该镜对应的对白放进该 shot 的 dialogues（从剧本 scene.dialogues 继承到对应镜头，**用项目设定的对白语言、逐字保留不要翻译**；这一镜没有人说话才省略）。dialogues 同时供原生音频视频与配音(TTS)使用。
 段落规划（可选但推荐）：先按情绪把剧本分成若干 segments，每段绑定 mood/光影/本段各角色所用变体（activeVariants，引用角色设定里该角色的 variants[].id）与镜头预算（shotBudget）；再产出 shots，每个 shot 标注 segmentId 并继承该段基调与角色形态。简单短片可省略 segments 直接给 shots。
-轴线规则：同一对话/动作场景中保持轴线一致，相邻镜头 screenDirection 不应无理由翻转（跳轴）；正反打用 reverseOf 指向被反打 shotId，且二者方向相反（toward↔away / L2R↔R2L）。`,
+轴线规则：同一对话/动作场景中保持轴线一致，相邻镜头 screenDirection 不应无理由翻转（跳轴）；正反打用 reverseOf 指向被反打 shotId，且二者方向相反（toward↔away / L2R↔R2L）。
+故事板连贯（关键帧=分镜画格，必须接得上，这是成片不割裂的关键）：① 同一连贯动作/同一场景内，相邻画格要顺接——人物站位、关键道具位置、空间关系在画格之间一致延续（上一镜主体从画面左侧离场，下一镜应从右侧进入，遵守 screenDirection）；② 紧接上一镜同一连贯动作（无硬切、画面自然延续）的镜头标 continuousFromPrev=true，真正的硬切/转场/换场标 false——尽量按"连贯段落"组织，减少无谓硬切；③ 同一 segment 内 mood、光影方向、色温保持一致，换段才变；④ 每个 shot 的 prompt 写清主体+动作+所在环境，动作要可被"从上一画格自然延续"。`,
   },
   {
     id: 'text.charsheet',
@@ -256,11 +257,20 @@ JSON 结构：
   {
     id: 'image.assetCharacter',
     group: 'image',
-    label: '人物节点 · 文字生成三视图',
-    desc: '“人物”资产节点在「文字生成」模式下的英文提示词模板。',
+    label: '人物节点 · 文字生成人物图',
+    desc: '“人物”资产节点在「文字生成」模式下的英文提示词模板。一张干净的人物形象图，不强制三视图。',
     placeholders: ['{basis}'],
     default:
-      '{basis}, full-body character turnaround reference sheet, front view, side view and back view, T-pose, neutral background, consistent character design, highly detailed',
+      '{basis}, single character portrait, full body, clear face, neutral pose, plain background, consistent character design, highly detailed',
+  },
+  {
+    id: 'image.charImageBoard',
+    group: 'image',
+    label: '角色设定图 · 单张 16:9 合成板',
+    desc: '“角色设定图”节点的英文提示词模板：一张 16:9，左半正面+侧面两个面部特写、右半正/侧/背全身（共 5 视图），纯白背景。一次出图省钱。',
+    placeholders: ['{ref}'],
+    default:
+      'character model sheet of {ref}, single 16:9 wide image on pure white background, left side: two facial close-ups of the character — a front-facing facial close-up and a side-profile facial close-up, right side: full-body front view, side view and back view of the same character standing in a neutral T-pose, identical consistent character across all five views, clean studio lighting, highly detailed',
   },
   {
     id: 'image.assetScene',

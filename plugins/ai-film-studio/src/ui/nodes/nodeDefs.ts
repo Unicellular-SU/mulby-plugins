@@ -122,23 +122,22 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'character',
     category: 'input',
     label: '人物',
-    desc: '角色资产：文字生成三视图或上传图片；输出角色身份(JSON)+参考图，直连关键帧保持一致性',
+    desc: '角色资产：按描述生成单张人物图 / 上传图片 / 连「参考图」用素材图生成。输出「角色」(身份+参考图打包成一条)，一根线直连关键帧保持一致性',
     icon: Users,
-    inputs: [],
-    outputs: [
-      { id: 'out', label: '角色', type: 'json' },
-      { id: 'image', label: '角色图', type: 'image' },
-    ],
+    // 「参考图」入口：连入素材图即按图生成该角色（img2img），不连则按文字描述生成
+    inputs: [{ id: 'ref', label: '参考图', type: 'image' }],
+    // 单一输出「角色」：身份(JSON) 与参考图打包同行，下游一根线即可，无需再分别连身份/图
+    outputs: [{ id: 'out', label: '角色', type: 'json' }],
     params: [
       { key: 'name', label: '角色名', control: 'text', placeholder: '如：小明' },
-      { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（用于「运行此节点」文字生成三视图）' },
+      { key: 'appearance', label: '外貌/服饰', control: 'textarea', placeholder: '外貌、服饰、特征…（用于「运行此节点」按描述生成人物图）' },
       { key: 'identity', label: '身份特征(跨期不变·可选)', control: 'textarea', placeholder: '脸型/五官/体型/标志特征(疤·痣·瞳色)，age-neutral；多时期角色填这里，各期外观放下方「时期变体」' },
       { key: 'refPrompt', label: '英文提示词(可选)', control: 'textarea', placeholder: '用于生成的英文 prompt，可留空' },
       {
         key: 'variantsJson',
         label: '时期变体(JSON·高级·可选)',
         control: 'textarea',
-        placeholder: '多时期角色：[{"id":"youth","label":"少年","appearance":"16岁清瘦布衣","triple":{"front":"...","side":"...","back":"..."}}]（连入「角色三视图」会逐变体出图）',
+        placeholder: '多时期角色：[{"id":"youth","label":"少年","appearance":"16岁清瘦布衣"}]（连入「角色设定图」会逐变体各出一张设定板）',
       },
       {
         key: 'voiceId',
@@ -154,13 +153,10 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'scene',
     category: 'input',
     label: '场景',
-    desc: '场景资产：可「运行此节点」按文字生成概念图，或「上传图片」用本地图；输出场景设定(JSON)+参考图，直连关键帧',
+    desc: '场景资产：按文字生成概念图 / 上传图片 / 连「参考图」用素材图生成。输出「场景」(设定+参考图打包)，一根线直连关键帧',
     icon: Mountain,
-    inputs: [],
-    outputs: [
-      { id: 'out', label: '场景', type: 'json' },
-      { id: 'image', label: '场景图', type: 'image' },
-    ],
+    inputs: [{ id: 'ref', label: '参考图', type: 'image' }],
+    outputs: [{ id: 'out', label: '场景', type: 'json' }],
     params: [
       { key: 'name', label: '场景名', control: 'text', placeholder: '如：咖啡馆' },
       { key: 'description', label: '描述', control: 'textarea', placeholder: '环境、氛围、光线…（用于「运行此节点」文字生成概念图）' },
@@ -172,13 +168,10 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'prop',
     category: 'input',
     label: '物品',
-    desc: '道具/物品资产：「运行此节点」按文字生成干净物品图，或上传图片；输出物品身份(JSON)+参考图，按名匹配进关键帧保持跨镜一致',
+    desc: '道具/物品资产：按文字生成干净物品图 / 上传图片 / 连「参考图」用素材图生成。输出「物品」(身份+参考图打包)，一根线直连关键帧，按名跨镜一致',
     icon: Box,
-    inputs: [],
-    outputs: [
-      { id: 'out', label: '物品', type: 'json' },
-      { id: 'image', label: '物品图', type: 'image' },
-    ],
+    inputs: [{ id: 'ref', label: '参考图', type: 'image' }],
+    outputs: [{ id: 'out', label: '物品', type: 'json' }],
     params: [
       { key: 'name', label: '物品名', control: 'text', placeholder: '如：发光的剑' },
       { key: 'description', label: '外观/描述', control: 'textarea', placeholder: '材质、形状、颜色、特征…（用于「运行此节点」文字生成物品图）' },
@@ -256,15 +249,12 @@ export const NODE_DEFS: NodeDef[] = [
   {
     kind: 'char-image',
     category: 'image',
-    label: '角色三视图',
-    desc: '由角色设定/人物生成三视图：front 先出图（连「参考图」则按上传人物图 img2img），side/back 以 front 为参考自洽一致',
+    label: '角色设定图',
+    desc: '由「角色」生成单张 16:9 设定图：左半正面+侧面两个面部特写，右半正/侧/背全身（共 5 视图），纯白背景（一次出图，省钱）。输出仍是「角色」(身份+设定图打包)，直连关键帧',
     icon: Users,
-    inputs: [
-      { id: 'role', label: '角色', type: 'json' },
-      { id: 'ref', label: '参考图(可选)', type: 'image' },
-    ],
-    outputs: [{ id: 'out', label: '角色图', type: 'image' }],
-    params: [{ key: 'size', label: '尺寸', control: 'select', options: ['1024x1024', '768x1024', '1024x768'], default: '1024x1024' }],
+    inputs: [{ id: 'role', label: '角色', type: 'json' }],
+    outputs: [{ id: 'out', label: '角色', type: 'json' }],
+    params: [{ key: 'size', label: '尺寸', control: 'select', options: ['1344x768', '1280x720', '1024x1024'], default: '1344x768' }],
   },
   {
     kind: 'scene-image',
@@ -280,12 +270,13 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'keyframe',
     category: 'image',
     label: '分镜关键帧',
-    desc: '由分镜+参考图生成镜头首帧',
+    desc: '由分镜生成镜头首帧；连入的「角色/场景/物品」按名匹配进画做一致性，「参考图」端口的散图直接作为视觉参考',
     icon: Frame,
     inputs: [
       { id: 'shot', label: '分镜/描述', type: 'any' },
-      { id: 'chars', label: '人物(可选)', type: 'json' },
-      { id: 'props', label: '物品(可选)', type: 'json' },
+      { id: 'chars', label: '角色', type: 'json' },
+      { id: 'scene', label: '场景', type: 'json' },
+      { id: 'props', label: '物品', type: 'json' },
       { id: 'ref', label: '参考图', type: 'image' },
     ],
     outputs: [{ id: 'out', label: '关键帧', type: 'image' }],
@@ -347,8 +338,9 @@ export const NODE_DEFS: NodeDef[] = [
         label: '镜头顺接',
         control: 'select',
         // 顺接：让上一镜的尾帧=下一镜的首帧（首尾帧补间），消除割裂感。仅在「连贯动作」处接，硬切处不接。
+        // 默认开：配合关键帧链式生成（承接镜头由上一帧派生），同段相邻片段无缝衔接、不再诡异扭曲。
         options: ['关闭', '连贯镜头尾接首'],
-        default: '关闭',
+        default: '连贯镜头尾接首',
       },
     ],
   },
@@ -499,7 +491,9 @@ export const NODE_DEFS: NodeDef[] = [
       },
       { key: 'fps', label: '帧率', control: 'number', default: 24 },
       { key: 'subtitleMode', label: '字幕', control: 'select', options: ['关闭', '烧录字幕', '软字幕'], default: '关闭' },
-      { key: 'transition', label: '转场', control: 'select', options: ['无转场', '交叉淡化', '淡入淡出'], default: '无转场' },
+      // 默认「淡入淡出」=整片首尾淡黑场（不在每个镜间加溶解），片间仍是干净硬切，不破坏顺接的无缝衔接，又有成片的开合感。
+      // 想每镜都溶解可选「交叉淡化」（注意会软化连贯片段的无缝接点）。
+      { key: 'transition', label: '转场', control: 'select', options: ['无转场', '交叉淡化', '淡入淡出'], default: '淡入淡出' },
     ],
   },
   {

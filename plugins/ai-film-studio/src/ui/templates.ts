@@ -52,7 +52,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 1, to: 3, toHandle: 'in' }, // script → char-sheet
       { from: 3, to: 4, toHandle: 'role' }, // char-sheet → char-image
       { from: 3, to: 5, toHandle: 'chars' }, // char-sheet → keyframe.chars
-      { from: 4, to: 5, toHandle: 'ref' }, // char-image → keyframe.ref
+      { from: 4, to: 5, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars
       { from: 2, to: 5, toHandle: 'shot' }, // storyboard → keyframe
       { from: 5, to: 6, toHandle: 'frame' }, // keyframe → i2v
       { from: 6, to: 7, toHandle: 'in' }, // i2v → preview
@@ -103,7 +103,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 3, to: 7, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
       { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每角色三视图）
       { from: 4, to: 7, toHandle: 'chars' }, // char-sheet → keyframe.chars（名称匹配 + 此刻状态注入）
-      { from: 5, to: 7, toHandle: 'ref' }, // char-image → keyframe.ref（人物参考图，跨镜一致）
+      { from: 5, to: 7, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars（跨镜一致）
       { from: 6, to: 7, toHandle: 'ref' }, // scene-image → keyframe.ref（场景参考图，按地点一致）
       { from: 7, to: 8, toHandle: 'frame' }, // keyframe → i2v（按关键帧扇出）
       { from: 8, to: 10, toHandle: 'clips' }, // i2v → compose
@@ -141,7 +141,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 5, to: 6, toHandle: 'role' }, // char-sheet → char-image（每角色三视图）
       { from: 2, to: 7, toHandle: 'in' }, // script-gen(整剧本) → scene-image（按地点出场景概念图）
       { from: 5, to: 8, toHandle: 'chars' }, // char-sheet → keyframe.chars（名称匹配 + 弧线状态）
-      { from: 6, to: 8, toHandle: 'ref' }, // char-image → keyframe.ref（人物参考，跨镜一致）
+      { from: 6, to: 8, toHandle: 'chars' }, // char-image（角色+设定板）→ keyframe.chars（跨镜一致）
       { from: 7, to: 8, toHandle: 'ref' }, // scene-image → keyframe.ref（场景参考，按地点一致）
       { from: 4, to: 8, toHandle: 'shot' }, // storyboard(合并后) → keyframe（按镜头扇出）
       { from: 8, to: 9, toHandle: 'frame' }, // keyframe → i2v
@@ -172,7 +172,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { from: 2, to: 4, toHandle: 'in' }, // script-gen → char-sheet（自动按时期拆 variants）
       { from: 4, to: 5, toHandle: 'role' }, // char-sheet → char-image（每 角色×变体 一组三视图）
       { from: 4, to: 6, toHandle: 'chars' }, // char-sheet → keyframe.chars（解析本镜该用哪个时期变体）
-      { from: 5, to: 6, toHandle: 'ref' }, // char-image → keyframe.ref（按 charId+variantId 精确取该期图）
+      { from: 5, to: 6, toHandle: 'chars' }, // char-image（角色+各期设定板）→ keyframe.chars（按 charId+variantId 精确取该期图）
       { from: 3, to: 6, toHandle: 'shot' }, // storyboard → keyframe（按镜头扇出）
       { from: 6, to: 7, toHandle: 'frame' }, // keyframe → i2v
       { from: 7, to: 8, toHandle: 'in' }, // i2v → preview
@@ -180,8 +180,8 @@ export const TEMPLATES: WorkflowTemplate[] = [
   },
   {
     id: 'assets-to-keyframe',
-    name: '素材 → 三视图 → 关键帧（人物/场景/物品一致性）',
-    desc: '「人物」三视图(img2img 自洽) + 「场景」概念图 + 「物品」参考图，按名/地点匹配喂关键帧，跨镜保持人物·场景·道具一致',
+    name: '素材 → 角色设定图 → 关键帧（人物/场景/物品一致性）',
+    desc: '「人物」出 16:9 设定板 + 「场景」概念图 + 「物品」参考图，各用一根线喂关键帧，按名/地点匹配，跨镜保持人物·场景·道具一致',
     nodes: [
       { kind: 'character', x: 60, y: 100, params: { name: '主角', appearance: '少年，黑色短发，深蓝色风衣', voiceId: 'onyx' } },
       { kind: 'scene', x: 60, y: 360, params: { name: '霓虹街道', description: '夜晚雨后的赛博朋克街道，霓虹倒影' } },
@@ -192,13 +192,11 @@ export const TEMPLATES: WorkflowTemplate[] = [
       { kind: 'preview', x: 1020, y: 380 },
     ],
     edges: [
-      { from: 0, fromHandle: 'out', to: 4, toHandle: 'role' }, // 人物身份 → char-image.role
-      { from: 0, fromHandle: 'image', to: 4, toHandle: 'ref' }, // 人物参考图 → char-image.ref（img2img 锚定，三视图自洽）
-      { from: 4, to: 5, toHandle: 'ref' }, // 三视图 → keyframe.ref（跨镜一致）
-      { from: 0, fromHandle: 'out', to: 5, toHandle: 'chars' }, // 人物身份(含 charId/voiceId) → keyframe.chars
-      { from: 1, fromHandle: 'image', to: 5, toHandle: 'ref' }, // 场景参考图 → keyframe.ref（按地点匹配）
-      { from: 2, fromHandle: 'out', to: 5, toHandle: 'props' }, // 物品身份 → keyframe.props（名称匹配 + 提示）
-      { from: 2, fromHandle: 'image', to: 5, toHandle: 'ref' }, // 物品参考图 → keyframe.ref（按物品名匹配）
+      // 每个素材节点只用「一根线」连到关键帧：身份+参考图已打包在单一输出里，按名/地点自动匹配做一致性
+      { from: 0, to: 4, toHandle: 'role' }, // 人物（身份+参考图）→ char-image.role（出 16:9 设定板）
+      { from: 4, to: 5, toHandle: 'chars' }, // 角色设定图（角色+设定板）→ keyframe.chars（跨镜一致）
+      { from: 1, to: 5, toHandle: 'scene' }, // 场景（设定+参考图）→ keyframe.scene（按地点一致）
+      { from: 2, to: 5, toHandle: 'props' }, // 物品（身份+参考图）→ keyframe.props（按物品名一致）
       { from: 3, to: 5, toHandle: 'shot' }, // 文本镜头描述 → keyframe.shot
       { from: 5, to: 6, toHandle: 'in' }, // keyframe → preview
     ],

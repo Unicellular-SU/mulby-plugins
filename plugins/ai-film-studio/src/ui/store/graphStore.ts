@@ -665,22 +665,37 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
   const def = getNodeDef(node.data.kind)
   if (!def) return
 
-  // 人物 / 场景 / 物品资产节点：身份(JSON) + 参考图（上传 或 文字生成），可直连关键帧保持一致性
+  // 人物 / 场景 / 物品资产节点：身份(JSON) + 参考图（上传 / 文字生成 / 连「参考图」口用素材图生成），可直连关键帧保持一致性
   if (node.data.kind === 'character' || node.data.kind === 'scene' || node.data.kind === 'prop') {
     const p = node.data.params || {}
     const jsonOut = resolveOutput(node, 'out')
     const existingImg = node.data.outputs?.image
     const baseOut: Record<string, PortValue> = {}
-    if (jsonOut) baseOut.out = jsonOut
+    // 存「身份-only」json（剥掉打包的图）：节点预览靠 outputs.image 显示当前最新图，避免存进旧图导致预览过时；
+    // 下游始终经 resolveOutput 重新派生（输入类节点即时派生），会拿到当前图打包，互不影响。
+    if (jsonOut) baseOut.out = { ...jsonOut, items: undefined }
+    // 「参考图」入口：连入的素材图，用作 img2img 锚定（有编辑能力时）或直接作为该资产参考图
+    const inputs = gatherInputs(node, get().nodes, get().edges)
+    const refImgs = await refsFromValues(inputs['ref'])
+    const canEdit =
+      typeof window.mulby?.ai?.images?.edit === 'function' && typeof window.mulby?.ai?.attachments?.upload === 'function'
     // 已有参考图（上传 或 已生成）且非强制重画 → 复用：全图重跑不重画（保跨镜一致），上传的图也不会被覆盖
     if (!opts?.force && existingImg?.assetId) {
       baseOut.image = existingImg
       patchNode(id, { status: 'done', error: undefined, outputs: baseOut })
       return
     }
-    // 文字生成参考图（无可用文字内容则只产出 JSON 身份，保留已有图）
+    // 文字生成参考图（无可用文字内容时：有连入素材图就直接当参考图，否则只产出 JSON 身份）
     const job = buildAssetImageJob(node.data, get().globals)
     if (!job) {
+      if (!existingImg && refImgs.length) {
+        // 只连了素材图、没写描述：直接把素材图作为该资产的参考图（无需「生成」）
+        const r0 = refImgs[0]
+        const assetId = await saveAsset(r0.base64, r0.mime)
+        baseOut.image = { type: 'image', assetId, mime: r0.mime, meta: { ...(p.name ? { name: String(p.name) } : {}), kind: node.data.kind } }
+        patchNode(id, { status: 'done', error: undefined, outputs: baseOut })
+        return
+      }
       if (existingImg) baseOut.image = existingImg
       patchNode(id, { status: jsonOut ? 'done' : 'idle', error: undefined, outputs: baseOut })
       return
@@ -693,12 +708,17 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: '生成中…' })
     try {
-      const r = await generateImage({
-        model,
-        prompt: job.prompt,
-        size: job.size,
-        onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
-      })
+      // 连了素材图且有编辑能力 → 按素材图 img2img 生成该资产；否则纯文生图
+      const refImg = refImgs[0]
+      const r =
+        refImg && canEdit
+          ? await editImage({ model, prompt: job.prompt, refBase64: refImg.base64, refMime: refImg.mime })
+          : await generateImage({
+              model,
+              prompt: job.prompt,
+              size: job.size,
+              onPreview: (b64) => patchNode(id, { previewUrl: toDataUrl(b64, 'image/png') }),
+            })
       const assetId = await saveAsset(r.base64, r.mime)
       const img: PortValue = {
         type: 'image',
@@ -1087,8 +1107,9 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
     return
   }
 
-  // 角色三视图：每角色 front→side/back 自洽链（front 先出图，side/back 以 front 为参考保持一致）；
-  // 连「参考图」口（如人物素材图）则 front 走 img2img，三视图都锚定到该人物。角色间并发、视图内有依赖。
+  // 角色设定图：每 (角色×变体) 出一张 16:9 设定板（左面部特写 + 右正/侧/背，白底；一次出图省钱）。
+  // M22b：先并发出底模/无变体板（捕获底模板），再并发派生各变体板（锁脸到底模）。
+  // 输出「角色」(json 身份 + 设定板打包进 items)，一根线直连关键帧——下游按名/charId 取该设定板做一致性。
   if (def.category === 'image' && node.data.kind === 'char-image') {
     const inputs = gatherInputs(node, get().nodes, get().edges)
     const sets = buildCharViewSets(node.data, inputs, get().globals)
@@ -1104,88 +1125,75 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
     // 修复 M22b-4：editImage 还需 attachments.upload，否则会抛错——缺上传能力时一律走文生图（变体提示词已含身份，仍保一致）
     const canEdit =
       typeof window.mulby?.ai?.images?.edit === 'function' && typeof window.mulby?.ai?.attachments?.upload === 'function'
-    const extRefs = await refsFromValues(inputs['ref']) // 可选：上传/上游人物参考图，做 img2img
+    // 「角色」口里打包的人物素材图（上游人物节点上传/生成的图），用作 img2img 锚定到该人物
+    const extRefs = await refsFromValues(inputs['role'])
+    // 身份透传：连同设定板一起打包输出，使 keyframe 一根线即可拿到身份+图
+    const idents = (inputs['role'] || []).flatMap((v) => {
+      const j = v.json && typeof v.json === 'object' ? (v.json as Record<string, unknown>) : null
+      return j && Array.isArray(j.characters) ? (j.characters as unknown[]) : []
+    })
     const outId = def.outputs[0]?.id || 'out'
     useGraphStore.setState({ runningNodeId: id })
     patchNode(id, { status: 'running', error: undefined, previewUrl: undefined, stream: undefined })
-    const totalViews = sets.length * 3
-    if (totalViews > 1) patchNode(id, { gen: { total: totalViews } })
-    const results = new Array<PortValue | undefined>(totalViews)
+    const total = sets.length
+    if (total > 1) patchNode(id, { gen: { total } })
+    const results = new Array<PortValue | undefined>(total)
     let done = 0
     let failed = 0
+    const bundle = (items: PortValue[]): PortValue => ({
+      type: 'json',
+      json: { characters: idents },
+      items,
+      assetId: items[0]?.assetId,
+      url: items[0]?.url,
+      mime: items[0]?.mime,
+    })
     const writeBack = () => {
       const partial = results.filter(Boolean) as PortValue[]
       patchNode(id, {
         previewUrl: undefined,
-        stream: `生成中 ${done}/${totalViews}…`,
-        outputs: partial.length
-          ? { [outId]: { type: 'image', items: partial, assetId: partial[0].assetId, url: partial[0].url, mime: partial[0].mime } }
-          : undefined,
+        stream: total > 1 ? `生成中 ${done}/${total}…` : '生成中…',
+        outputs: partial.length ? { [outId]: bundle(partial) } : undefined,
       })
     }
     type CharSet = (typeof sets)[number]
     const idxOf = new Map<CharSet, number>(sets.map((s, i) => [s, i]))
-    const baseFronts = new Map<string, { b64: string; mime: string }>() // M22b：组键 → 底模 front，供变体派生锁脸
+    const baseBoards = new Map<string, { b64: string; mime: string }>() // M22b：组键 → 底模板，供变体派生锁脸
     const grpKey = (s: CharSet) => s.baseGroup || '' // 修复 ORD-1：唯一组键配对底模/变体，杜绝同名/无名串脸
+    // view:'board' 标记单张设定板（promoteCharViews 据此写回库角色的 views.board）
+    const metaOf = (set: CharSet) => ({ name: set.name, kind: 'character', charId: set.charId, variantId: set.variantId, view: 'board' })
     const genSet = async (set: CharSet, anchor?: { b64: string; mime: string }): Promise<void> => {
       const si = idxOf.get(set) ?? 0
-      const base = si * 3
-      const metaOf = (view: string) => ({ name: set.name, kind: 'character', charId: set.charId, variantId: set.variantId, view })
       const extRef = canEdit ? pickRef(extRefs, set.refName) : null
-      // 1) front：M22b 变体→以底模 front 为参考派生（锁脸换龄/换装）；否则上传参考 img2img / 文生图
-      let frontB64: string | null = null
-      let frontMime = 'image/png'
       try {
+        let b64: string
+        let mime: string
         if (anchor && canEdit) {
+          // 变体：以底模板为参考派生（锁脸换龄/换装），并附带外部素材参考
           const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
-          const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: anchor.b64, refMime: anchor.mime, extraRefs: extra })
-          frontB64 = r.base64
-          frontMime = r.mime
+          const r = await editImage({ model, prompt: set.prompt, refBase64: anchor.b64, refMime: anchor.mime, extraRefs: extra })
+          b64 = r.base64
+          mime = r.mime
         } else if (extRef) {
-          const r = await editImage({ model, prompt: set.views[0].prompt, refBase64: extRef.base64, refMime: extRef.mime })
-          frontB64 = r.base64
-          frontMime = r.mime
+          // 上游人物素材图 → img2img 锚定到该人物
+          const r = await editImage({ model, prompt: set.prompt, refBase64: extRef.base64, refMime: extRef.mime })
+          b64 = r.base64
+          mime = r.mime
         } else {
-          const r = await generateImage({ model, prompt: set.views[0].prompt, size: set.size })
-          frontB64 = r.base64
-          frontMime = r.mime
+          const r = await generateImage({ model, prompt: set.prompt, size: set.size })
+          b64 = r.base64
+          mime = r.mime
         }
-        results[base] = { type: 'image', assetId: await saveAsset(frontB64, frontMime), mime: frontMime, meta: metaOf('front') }
+        results[si] = { type: 'image', assetId: await saveAsset(b64, mime), mime, meta: metaOf(set) }
+        if (set.isBase && grpKey(set)) baseBoards.set(grpKey(set), { b64, mime }) // 捕获底模板（空组键不入）
         done++
         writeBack()
       } catch {
         failed++
-        return // front 失败则跳过该组 side/back（变体派生失败时会回退独立生成）
       }
-      if (set.isBase && frontB64 && grpKey(set)) baseFronts.set(grpKey(set), { b64: frontB64, mime: frontMime }) // 捕获底模 front（空组键不入）
-      // 2) side/back：以本组 front 为参考保持自洽（有 edit 能力时），并附带外部参考图；否则退回文生图
-      await Promise.all(
-        ([1, 2] as const).map(async (vi) => {
-          if (!get().isRunning) return
-          try {
-            let b64: string
-            let mime: string
-            if (canEdit && frontB64) {
-              const extra = extRef ? [{ base64: extRef.base64, mime: extRef.mime }] : []
-              const r = await editImage({ model, prompt: set.views[vi].prompt, refBase64: frontB64, refMime: frontMime, extraRefs: extra })
-              b64 = r.base64
-              mime = r.mime
-            } else {
-              const r = await generateImage({ model, prompt: set.views[vi].prompt, size: set.size })
-              b64 = r.base64
-              mime = r.mime
-            }
-            results[base + vi] = { type: 'image', assetId: await saveAsset(b64, mime), mime, meta: metaOf(set.views[vi].view) }
-            done++
-            writeBack()
-          } catch {
-            failed++
-          }
-        })
-      )
     }
     try {
-      // M22b 两段式（inter-set 屏障）：先并发出底模/无变体组（捕获底模 front），再并发派生各变体组（front 锁脸到底模）
+      // M22b 两段式（inter-set 屏障）：先并发出底模/无变体板（捕获底模板），再并发派生各变体板（锁脸到底模）
       const conc = fanoutConcurrency()
       const stop = { shouldStop: () => !get().isRunning }
       await mapPool(
@@ -1197,26 +1205,25 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
       await mapPool(
         sets.filter((s) => s.derives),
         conc,
-        (set) => genSet(set, grpKey(set) ? baseFronts.get(grpKey(set)) : undefined),
+        (set) => genSet(set, grpKey(set) ? baseBoards.get(grpKey(set)) : undefined),
         stop
       )
       const items = results.filter(Boolean) as PortValue[]
-      if (items.length === 0) throw new Error('未生成任何角色图')
-      if (failed > 0) window.mulby?.notification?.show(`${failed} 张角色图生成失败，已保留其余 ${items.length} 张`, 'warning')
-      const head = items[0]
+      if (items.length === 0) throw new Error('未生成任何角色设定图')
+      if (failed > 0) window.mulby?.notification?.show(`${failed} 张角色设定图生成失败，已保留其余 ${items.length} 张`, 'warning')
       patchNode(id, {
         status: 'done',
         previewUrl: undefined,
         stream: undefined,
         gen: undefined,
-        outputs: { [outId]: { type: 'image', items, assetId: head.assetId, url: head.url, mime: head.mime } },
+        outputs: { [outId]: bundle(items) },
       })
-      // M27：把生成的三视图写回「已存在」的库角色（按 charId/name 匹配，幂等、不自动新建）
+      // M27：把生成的设定板写回「已存在」的库角色（按 charId/name 匹配，幂等、不自动新建）
       void useAssetStore
         .getState()
         .promoteCharViews(items.map((it) => ({ assetId: it.assetId, meta: it.meta })))
         .then((n) => {
-          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张三视图写回素材库对应角色`, 'info')
+          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张角色设定图写回素材库对应角色`, 'info')
         })
         .catch(() => {})
     } catch (e) {
@@ -1246,6 +1253,12 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
       // 上游参考图（含扇出的多张），用于 img2img + 按角色名匹配保持一致性
       const refs = await resolveRefImages(inputs)
       const canEdit = refs.length > 0 && !!window.mulby?.ai?.images?.edit
+      // 不再静默：连了参考图但当前供应商无图像编辑能力 → 只能文生图、用不上参考图，明确提示用户换供应商
+      if (refs.length > 0 && !window.mulby?.ai?.images?.edit)
+        window.mulby?.notification?.show(
+          '当前图像供应商不支持「图像编辑」，连入的参考图无法生效（只按文字生成）。请在「模型供应商」配置支持图像编辑(img2img)的供应商。',
+          'warning'
+        )
       const outId = def.outputs[0]?.id || 'out'
       // 并发扇出生成（关键帧/角色图/场景图）：有界并发池，保序，部分成功；单张时不并发
       const total = jobs.length
@@ -1272,6 +1285,14 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
       for (const it of genItems) if (it.status === 'done' && it.ref) results[it.idx] = it.ref // 种子：已成功项就位
       let done = 0
       let failed = 0
+      // fix 1 关键帧链式生成：承接镜头（meta.chainFromPrev）由「上一镜关键帧」img2img 派生，
+      // 让同一连贯段的相邻画格构图/光线/站位一致——i2v 顺接补间时就不会在两张不相干的图之间诡异扭曲。
+      // 每帧把自己的 {base64,mime} 通过 chainReady[i] 解给下一帧；缺图像编辑能力则退回各自独立生成。
+      const chainReady: Array<(v: { base64: string; mime: string } | null) => void> = []
+      const chainImg: Array<Promise<{ base64: string; mime: string } | null>> = jobs.map(
+        (_, i) => new Promise((res) => (chainReady[i] = res))
+      )
+      const settleChain = (i: number, v: { base64: string; mime: string } | null) => chainReady[i]?.(v)
       const writeBack = () => {
         const partial = results.filter(Boolean) as PortValue[]
         patchNode(id, {
@@ -1286,7 +1307,10 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         jobs,
         fanoutConcurrency(),
         async (job, i): Promise<PortValue> => {
-          if (results[i]) return results[i] as PortValue // M30 重试：已成功项直接返回，不重烧
+          if (results[i]) {
+            settleChain(i, null) // M30 重试：已成功项直接返回，不重烧；解开链避免阻塞后续承接镜头
+            return results[i] as PortValue
+          }
           if (total > 1) {
             genItems[i] = { ...genItems[i], status: 'running' }
             patchGen()
@@ -1305,9 +1329,22 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
                 job.sceneVariantId
               )
             : []
+          // fix 1：承接镜头取「上一镜关键帧」作 img2img 主参考（承载构图/光线/站位），角色/场景参考图退为附加参考
+          const chainBase = canEdit && job.meta?.chainFromPrev === true && i > 0 ? await chainImg[i - 1] : null
           let base64: string
           let mime: string
-          if (matched.length) {
+          // 抛错不在此解链：交给 mapPool 重试；只有最终失败(onError)才解 null。重试成功仍能把真图传给后续承接镜头。
+          if (chainBase) {
+            const r = await editImage({
+              model,
+              prompt: job.prompt,
+              refBase64: chainBase.base64,
+              refMime: chainBase.mime,
+              extraRefs: matched.map((x) => ({ base64: x.base64, mime: x.mime })),
+            })
+            base64 = r.base64
+            mime = r.mime
+          } else if (matched.length) {
             const [primary, ...rest] = matched
             const r = await editImage({
               model,
@@ -1329,6 +1366,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             base64 = r.base64
             mime = r.mime
           }
+          settleChain(i, { base64, mime }) // 本帧就绪 → 解开下一承接镜头的 img2img 派生
           const assetId = await saveAsset(base64, mime)
           return { type: 'image', assetId, mime, meta: job.meta }
         },
@@ -1343,6 +1381,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             if (total > 1) patchGen()
           },
           onError: (i, err) => {
+            settleChain(i, null) // 最终失败解链：后续承接镜头退回独立生成，不会永久等待
             genItems[i] = { ...genItems[i], status: 'failed', error: err instanceof Error ? err.message : String(err) }
             failed++
             if (total > 1) patchGen()
@@ -1537,10 +1576,28 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
           const fm = frameMetas[i] || {}
           const sshot = shotList[i] || shotList[0] || {}
           const cameraMotion = shotCameraMotion({ camera: fm.camera ?? sshot.camera, shotSize: fm.shotSize ?? sshot.shotSize })
-          const shotPrompt =
-            [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
           const vstyle = videoStyleTag(get().globals.stylePackId, get().globals.style) // M21：视频风格标签（i2v 由关键帧继承，t2v 直接受益）
-          const framePrompt = [[shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText, vstyle].filter(Boolean).join(', ')
+          // fix 2 图生视频=运动优先：首帧已含画面，提示词聚焦「主体动作 + 摄影机运动(分开写) + 落点」，
+          // 并强锚定首帧（保持构图/角色/光线/场景不变），避免重描整段场景导致模型漂移、偏离关键帧。
+          // 文生视频无首帧，仍需完整场景描述。
+          let framePrompt: string
+          if (node.data.kind === 'i2v') {
+            const action = [fm.motion, node.data.params?.motion].filter(Boolean).map(String).join(', ').trim()
+            const subjectAction = action || String(fm.prompt || sshot.prompt || sshot.description || '')
+            framePrompt = [
+              subjectAction && `subject motion: ${subjectAction}`,
+              cameraMotion && `camera ${cameraMotion}`,
+              'animate the first frame only — keep its composition, characters, lighting, color and setting unchanged',
+              'smooth, natural motion that settles at the end; no scene change, no hard cut, no morphing',
+              vstyle,
+            ]
+              .filter(Boolean)
+              .join(', ')
+          } else {
+            const shotPrompt =
+              [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
+            framePrompt = [[shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText, vstyle].filter(Boolean).join(', ')
+          }
           // M-quick：钳制到视频模型支持区间 [4,15]s，防 LLM/手填异常时长被原样发出导致供应商报错
           const frameDuration = Math.min(Math.max(Number(fm.duration ?? sshot.duration ?? node.data.params?.duration ?? 5) || 5, 4), 15)
           // fix #5：本镜是否顺接到下一镜首帧——下一镜显式 continuousFromPrev 为准，缺省回退「同场景」启发式
@@ -2280,6 +2337,10 @@ function selectRefs(
   }
   const out: RefImage[] = []
   for (const r of [...chars, ...props, ...scenes]) if (r && !out.includes(r)) out.push(r)
+  // 散参考图（用户手动连入「参考图」口的素材图：无名、非场景/物品/角色）→ 一律作为视觉参考喂入，
+  // 不再因「匹配不到命名角色」而被静默丢弃（修复：拖 N 张素材进关键帧却不按参考图生成）。
+  const generics = refs.filter((r) => !r.name && r.kind !== 'scene' && r.kind !== 'prop')
+  for (const r of generics) if (!out.includes(r)) out.push(r)
   return out
 }
 
@@ -2767,9 +2828,10 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const { base64, mime } = fromDataUrl(dataUrl)
     const assetId = await saveAsset(base64, mime)
     const node = get().nodes.find((n) => n.id === id)
-    // 人物/场景上传的参考图带上角色/场景名 + kind，供关键帧按名匹配 / 场景全收（一致性）
+    // 人物/场景/物品上传的参考图带上名字 + kind，供关键帧按名匹配 / 场景按地点（一致性）
     const name = node?.data.params?.name ? String(node.data.params.name) : ''
-    const kind = node?.data.kind === 'character' || node?.data.kind === 'scene' ? node.data.kind : undefined
+    const kind =
+      node?.data.kind === 'character' || node?.data.kind === 'scene' || node?.data.kind === 'prop' ? node.data.kind : undefined
     const meta = name || kind ? { ...(name ? { name } : {}), ...(kind ? { kind } : {}) } : undefined
     const img: PortValue = { type: 'image', assetId, mime, ...(meta ? { meta } : {}) }
     const prev = node?.data.outputs || {}
