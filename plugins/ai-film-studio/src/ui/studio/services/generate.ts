@@ -4,8 +4,11 @@
  */
 import { generateImage, editImage } from '../../services/imageEngine'
 import { saveAsset, loadAsset } from '../../services/assets'
-import { getStylePack, applyStylePack, type StyleRole } from '../../services/stylePacks'
+import { getStylePack, applyStylePack, videoStyleTag, type StyleRole } from '../../services/stylePacks'
+import { runVideo } from '../../services/providers'
+import { downloadVideoToDisk } from '../../services/download'
 import { useGraphStore } from '../../store/graphStore'
+import { useProviderStore } from '../../store/providerStore'
 import type { Asset, ProjectMeta, Storyboard } from '../../domain/types'
 
 /** 图像模型：项目级优先，否则用全局选中的图像模型 */
@@ -67,4 +70,41 @@ export async function generateKeyframeImage(sb: Storyboard, assets: Asset[], met
   }
   const r = await generateImage({ model, prompt, size })
   return saveAsset(r.base64, r.mime)
+}
+
+export interface ClipResult {
+  url: string
+  localPath?: string
+  durationSec: number
+}
+
+/**
+ * 由分镜关键帧生成视频片段：关键帧作首帧 → runVideo（图生视频），注入运动描述 + 画风视频标签。
+ * 复用现有 providers（fal/custom-http 异步轮询）。下载落盘供后续 ffmpeg 合成。
+ */
+export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, onProgress?: (s: string) => void): Promise<ClipResult> {
+  const ps = useProviderStore.getState()
+  const provider = ps.getActiveFor('video')
+  if (!provider) throw new Error('未配置视频供应商（请在「设置」添加并设为默认）')
+  const apiKey = await ps.resolveKey(provider.id)
+  const a = sb.keyframeImageId ? await loadAsset(sb.keyframeImageId) : null
+  if (!a) throw new Error('请先生成该分镜的关键帧')
+  const imageUrl = `data:${a.mime};base64,${a.base64}`
+  const vtag = videoStyleTag(meta.artStyle)
+  const motion = [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut']
+    .filter(Boolean)
+    .join(', ')
+  const { url } = await runVideo({
+    cfg: provider,
+    apiKey,
+    req: { prompt: motion, imageUrl, duration: sb.duration || 5 },
+    onProgress: (p) => onProgress?.(p.status),
+  })
+  let localPath: string | undefined
+  try {
+    localPath = await downloadVideoToDisk(url, `clip_${sb.id}`)
+  } catch {
+    // 忽略下载失败：仍保留远程 url
+  }
+  return { url, localPath, durationSec: sb.duration || 5 }
 }

@@ -226,10 +226,13 @@ function StoryboardTab() {
 }
 
 function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
+  const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const removeStoryboard = useProjectStore((s) => s.removeStoryboard)
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
+  const generateClip = useProjectStore((s) => s.generateClip)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
+  const clip = doc.clips.find((c) => c.storyboardId === sb.id)
   return (
     <div className="afs-studio__sbitem">
       <span className="afs-studio__sbidx">{index + 1}</span>
@@ -252,6 +255,15 @@ function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
         <button className="afs-btn afs-btn--sm" disabled={sb.state === 'generating'} onClick={() => void generateKeyframe(sb.id)}>
           <Wand2 size={13} /> 关键帧
         </button>
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={!sb.keyframeImageId || clip?.state === 'generating'}
+          title={!sb.keyframeImageId ? '先生成关键帧' : '由关键帧生成视频片段'}
+          onClick={() => void generateClip(sb.id)}
+        >
+          {clip?.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} 视频
+          {clip?.state === 'done' && ' ✓'}
+        </button>
         <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeStoryboard(sb.id)}>
           <Trash2 size={13} />
         </button>
@@ -261,9 +273,28 @@ function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
 }
 
 function TimelineTab() {
+  const doc = useProjectStore((s) => s.doc)!
+  const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
+  const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardId === s.id)?.selectClipId)).filter(Boolean)
+  if (!clips.length) return <div className="afs-studio__timeline"><p className="afs-studio__hint">还没有视频片段。去「分镜」给每个镜头生成关键帧 → 视频。合成导出将在后续接入 ffmpeg。</p></div>
   return (
     <div className="afs-studio__timeline">
-      <p className="afs-studio__hint">时间线/轨道剪辑（多镜选优、拖拽排序、合成导出）将在阶段4 接入。</p>
+      <p className="afs-studio__hint">{clips.length} 个片段（按分镜顺序）。多镜选优 + ffmpeg 合成导出将在后续阶段接入。</p>
+      <div className="afs-studio__track">
+        {clips.map((c, i) => (
+          <TrackClip key={c!.id} localPath={c!.videoFilePath} url={c!.videoUrl} index={i} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TrackClip({ localPath, url, index }: { localPath?: string; url?: string; index: number }) {
+  const src = useMediaUrl({ localPath, url })
+  return (
+    <div className="afs-studio__trackclip">
+      <video src={src} muted playsInline preload="metadata" />
+      <span className="afs-studio__trackidx">{index + 1}</span>
     </div>
   )
 }

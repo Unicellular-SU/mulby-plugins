@@ -191,7 +191,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **2b projectStore**：zustand `store/projectStore.ts`（cards/doc/init/create/open/delete/flush + 防抖落盘 mutate；实体增删改 upsertScript/Asset/Storyboard/Clip + reorder）。tsc+build 通过。
 - [x] **2c 工作台 UI 骨架**：新增 `studio/`（StudioApp/StudioHome/StudioEditor）；AppRail 加「工作台」一级入口并设为默认视图（节点图仍在「画布」）；项目主页（卡片+新建/删除）+ 编辑器顶栏（名称/画风/画幅）+ 阶段 Tab（剧本/资产/分镜可编辑落盘，时间线占位）+ Agent 面板占位；styles.css 加工作台样式。tsc+build 通过。
 - [x] **2d 生成接入工作台（图像）**：`studio/services/generate.ts`（generateAssetImage 文生图+画风锚定；generateKeyframeImage：出场资产参考图 img2img 一致性，否则文生图）；projectStore 加 generateAsset/generateKeyframe（state/error 回写）；资产卡/分镜项加「生成」按钮 + 缩略图 + loading/失败态。tsc+build 通过。
-- [ ] **2e 分镜→视频片段**：分镜关键帧接 runVideo（复用 providers/seed/顺接/尾帧接龙），片段进 clips；时间线 compose 导出。
+- [x] **2e 分镜→视频片段**：`generateClipVideo`（关键帧→runVideo 图生视频 + 画风视频标签 + 下载落盘）；projectStore.generateClip（建 Clip + 同步时间线 track）；分镜项加「视频」按钮；时间线 Tab 列片段视频预览。tsc+build 通过。（compose/导出 + 多镜选优待后续）
+- [ ] **2f compose 导出**：时间线 → ffmpeg composeFilm（复用现有）导出成片。
 - [ ] **3 Agent runtime（Toonflow 头牌）**：host ai.text tool-calling 封装（流式+工具循环+思考块）+ 工具集（写剧本/加资产/加分镜/触发生成）+ agent skills；工作台右侧对话面板接通。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
 - [ ] **4 高阶**：小说导入+事件图谱、时间线/轨道选优剪辑、轻量记忆。
