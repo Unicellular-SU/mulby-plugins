@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2 } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
@@ -69,16 +69,64 @@ export default function StudioEditor() {
           {tab === 'storyboard' && <StoryboardTab />}
           {tab === 'timeline' && <TimelineTab />}
         </div>
-        <aside className="afs-studio__agent">
-          <div className="afs-studio__agent-head">
-            <Bot size={16} /> AI 制片
-          </div>
-          <div className="afs-studio__agent-body">
-            <p className="afs-studio__hint">Agent 对话编排（剧本/资产/分镜/视频自动化）将在阶段3 接入。</p>
-          </div>
-        </aside>
+        <AgentPanel />
       </div>
     </div>
+  )
+}
+
+function AgentPanel() {
+  const doc = useProjectStore((s) => s.doc)!
+  const runAgent = useProjectStore((s) => s.runAgent)
+  const busy = useProjectStore((s) => s.agentBusy)
+  const [text, setText] = useState('')
+  const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
+  const send = () => {
+    if (!text.trim() || busy) return
+    const t = text
+    setText('')
+    void runAgent(t)
+  }
+  return (
+    <aside className="afs-studio__agent">
+      <div className="afs-studio__agent-head">
+        <Bot size={16} /> AI 制片
+      </div>
+      <div className="afs-studio__agent-msgs">
+        {msgs.length === 0 && (
+          <p className="afs-studio__hint">
+            描述你的短剧（一句话/故事/指令），我来拆成剧本、资产和分镜。例如：「把这个故事改成 5 个镜头的悬疑短片，列出人物和场景」。
+          </p>
+        )}
+        {msgs.map((m) => (
+          <div key={m.id} className={`afs-studio__msg afs-studio__msg--${m.role}`}>
+            {m.content}
+          </div>
+        ))}
+        {busy && (
+          <div className="afs-studio__msg afs-studio__msg--assistant">
+            <Loader2 size={14} className="afs-spin" /> 思考中…
+          </div>
+        )}
+      </div>
+      <div className="afs-studio__agent-input">
+        <textarea
+          value={text}
+          placeholder="描述你的短剧或下一步…（Ctrl/Cmd+Enter 发送）"
+          rows={2}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              send()
+            }
+          }}
+        />
+        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={busy || !text.trim()} onClick={send}>
+          {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
+        </button>
+      </div>
+    </aside>
   )
 }
 

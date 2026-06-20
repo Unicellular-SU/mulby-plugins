@@ -9,6 +9,7 @@ import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateKeyframeImage, generateClipVideo } from '../studio/services/generate'
+import { runAgentPlan } from '../studio/agent/agent'
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -17,6 +18,7 @@ interface ProjectState {
   doc: ProjectDoc | null
   loading: boolean
   dirty: boolean
+  agentBusy: boolean
 
   init: () => Promise<void>
   refreshCards: () => Promise<void>
@@ -44,6 +46,9 @@ interface ProjectState {
   generateAsset: (id: string) => Promise<void>
   generateKeyframe: (storyboardId: string) => Promise<void>
   generateClip: (storyboardId: string) => Promise<void>
+
+  // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
+  runAgent: (userText: string) => Promise<void>
 }
 
 /** 改某资产/分镜的 state+error（异步生成进度回写，按 id 查最新避免覆盖并发编辑） */
@@ -73,6 +78,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   doc: null,
   loading: false,
   dirty: false,
+  agentBusy: false,
 
   init: async () => {
     set({ loading: true })
@@ -262,6 +268,63 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
     } catch (e) {
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+
+  runAgent: async (userText) => {
+    const doc0 = get().doc
+    if (!doc0 || !userText.trim() || get().agentBusy) return
+    const now = Date.now()
+    get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
+    set({ agentBusy: true })
+    try {
+      const plan = await runAgentPlan(get().doc!, userText)
+      get().mutate((d) => {
+        // 剧本：覆盖首个或新建
+        if (plan.script?.content) {
+          const name = plan.script.name || `剧本 ${d.scripts.length + 1}`
+          if (d.scripts.length) d.scripts[0] = { ...d.scripts[0], name, content: plan.script.content, updatedAt: Date.now() }
+          else d.scripts.push({ id: P.newId('s_'), name, content: plan.script.content, createdAt: Date.now(), updatedAt: Date.now() })
+        }
+        // 资产：按 名+类型 去重（已存在则补描述）
+        const nameToId = new Map(d.assets.map((a) => [a.name, a.id]))
+        for (const a of plan.assets ?? []) {
+          if (!a?.name || !a.type) continue
+          const ex = d.assets.find((x) => x.name === a.name && x.type === a.type)
+          if (ex) {
+            ex.desc = a.desc ?? ex.desc
+            ex.prompt = a.prompt ?? ex.prompt
+          } else {
+            const id = P.newId('a_')
+            d.assets.push({ id, type: a.type, name: a.name, desc: a.desc, prompt: a.prompt, state: 'idle' })
+            nameToId.set(a.name, id)
+          }
+        }
+        // 分镜：追加（cast 名 → 资产 id）
+        for (const sb of plan.storyboards ?? []) {
+          if (!sb?.videoDesc) continue
+          const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
+          d.storyboards.push({
+            id: P.newId('sb_'),
+            index: d.storyboards.length,
+            track: '默认',
+            videoDesc: sb.videoDesc,
+            prompt: sb.prompt,
+            duration: typeof sb.duration === 'number' ? sb.duration : 5,
+            associateAssetIds: cast,
+            shouldGenerateImage: true,
+            state: 'idle',
+          })
+        }
+        d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now() })
+      })
+    } catch (e) {
+      get().mutate((d) =>
+        d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: '出错：' + (e instanceof Error ? e.message : String(e)), createTime: Date.now() })
+      )
+    } finally {
+      set({ agentBusy: false })
+      await get().flush()
     }
   },
 }))

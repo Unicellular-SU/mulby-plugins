@@ -193,7 +193,9 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **2d 生成接入工作台（图像）**：`studio/services/generate.ts`（generateAssetImage 文生图+画风锚定；generateKeyframeImage：出场资产参考图 img2img 一致性，否则文生图）；projectStore 加 generateAsset/generateKeyframe（state/error 回写）；资产卡/分镜项加「生成」按钮 + 缩略图 + loading/失败态。tsc+build 通过。
 - [x] **2e 分镜→视频片段**：`generateClipVideo`（关键帧→runVideo 图生视频 + 画风视频标签 + 下载落盘）；projectStore.generateClip（建 Clip + 同步时间线 track）；分镜项加「视频」按钮；时间线 Tab 列片段视频预览。tsc+build 通过。（compose/导出 + 多镜选优待后续）
 - [ ] **2f compose 导出**：时间线 → ffmpeg composeFilm（复用现有）导出成片。
-- [ ] **3 Agent runtime（Toonflow 头牌）**：host ai.text tool-calling 封装（流式+工具循环+思考块）+ 工具集（写剧本/加资产/加分镜/触发生成）+ agent skills；工作台右侧对话面板接通。
+- [x] **3a Agent（结构化方案版）**：`studio/agent/agent.ts`（runAgentPlan：host runText json 模式，注入 production_agent_decision skill + 项目画风/上下文 → JSON 方案 reply/script/assets/storyboards）；projectStore.runAgent（应用方案：覆盖剧本 + 去重资产 + 追加分镜，cast 名→资产 id；对话存 memory）；工作台右侧对话面板接通（消息流 + 输入 + 思考态）。一句话/故事 → 自动拆剧本+资产+分镜。tsc+build 通过。
+- [ ] **3b Agent 升级**：让 Agent 可触发生成（资产/关键帧/视频）；分阶段子 Agent（编剧/分镜/制片）+ 监督；可选升级为原生流式 tool-calling（需 Mulby 实测 tool 协议）。
+- [ ] **2f compose 导出**：时间线 → ffmpeg composeFilm 导出成片。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
 - [ ] **4 高阶**：小说导入+事件图谱、时间线/轨道选优剪辑、轻量记忆。
 
