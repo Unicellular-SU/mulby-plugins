@@ -2,7 +2,6 @@ import { useEffect } from 'react'
 import { CanvasStage } from './canvas/CanvasStage'
 import { TopBar } from './components/TopBar'
 import { LeftDock } from './components/LeftDock'
-import { Inspector } from './components/Inspector'
 import { useGraph } from './store/graphStore'
 import { useUi } from './store/uiStore'
 import { useProviders } from './store/providerStore'
@@ -87,7 +86,6 @@ export default function App() {
         <div className="flex-1 relative min-w-0">
           <CanvasStage />
         </div>
-        <Inspector />
       </div>
       {showProviderSettings && <ProviderSettings />}
     </div>

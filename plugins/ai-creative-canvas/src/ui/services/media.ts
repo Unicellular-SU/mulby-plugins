@@ -89,4 +89,15 @@ export async function readAsArrayBuffer(path: string): Promise<ArrayBuffer> {
   return base64ToArrayBuffer(b64)
 }
 
+// 把生成输入（本地路径优先，否则 URL）读成 ArrayBuffer
+export async function loadImageInput(i: { url?: string; localPath?: string }): Promise<ArrayBuffer | null> {
+  try {
+    if (i.localPath) return await readAsArrayBuffer(i.localPath)
+    if (i.url) return await (await fetch(i.url)).arrayBuffer()
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
 export { mimeToExt }

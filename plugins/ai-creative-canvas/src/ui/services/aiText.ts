@@ -1,19 +1,9 @@
 import type { Board, Card } from '../types'
-import { resolveRefs } from './references'
-import { readAsArrayBuffer } from './media'
+import { resolveGenInputs } from './references'
+import { loadImageInput } from './media'
 
 function ai(): any {
   return (window as any).mulby.ai
-}
-
-async function cardToArrayBuffer(c: Card): Promise<ArrayBuffer | null> {
-  try {
-    if (c.assetLocalPath) return await readAsArrayBuffer(c.assetLocalPath)
-    if (c.assetUrl) return await (await fetch(c.assetUrl)).arrayBuffer()
-  } catch {
-    /* ignore */
-  }
-  return null
 }
 
 export async function generateText(
@@ -22,22 +12,22 @@ export async function generateText(
   onChunk: (text: string) => void,
   onRequestId: (id: string) => void
 ): Promise<string> {
-  const refs = resolveRefs(card, board)
+  const inputs = resolveGenInputs(card, board)
 
   // 参考图片 → vision 附件
   const imageContents: any[] = []
-  for (const ic of refs.imageCards) {
-    const buf = await cardToArrayBuffer(ic)
+  for (const img of inputs.images) {
+    const buf = await loadImageInput(img)
     if (!buf) continue
     try {
-      const att = await ai().attachments.upload({ buffer: buf, mimeType: ic.mime || 'image/png', purpose: 'vision' })
-      imageContents.push({ type: 'image', attachmentId: att.attachmentId, mimeType: ic.mime || 'image/png' })
+      const att = await ai().attachments.upload({ buffer: buf, mimeType: img.mime || 'image/png', purpose: 'vision' })
+      imageContents.push({ type: 'image', attachmentId: att.attachmentId, mimeType: img.mime || 'image/png' })
     } catch {
       /* skip */
     }
   }
 
-  const refText = refs.texts.map((t) => `【${t.title}】\n${t.text}`).join('\n\n')
+  const refText = inputs.texts.map((t) => `【${t.label}】\n${t.text}`).join('\n\n')
   const userText = [card.prompt, refText && `\n\n参考资料：\n${refText}`].filter(Boolean).join('')
   const content = imageContents.length ? [{ type: 'text', text: userText }, ...imageContents] : userText
 

@@ -1,23 +1,21 @@
 import type { Board, Card } from '../types'
-import { resolveRefs } from './references'
-import { readAsArrayBuffer } from './media'
+import { resolveGenInputs } from './references'
+import { loadImageInput } from './media'
 
 function ai(): any {
   return (window as any).mulby.ai
 }
 
-async function uploadCardImage(c: Card): Promise<string | null> {
-  try {
-    const buf = c.assetLocalPath ? await readAsArrayBuffer(c.assetLocalPath) : await (await fetch(c.assetUrl!)).arrayBuffer()
-    const att = await ai().attachments.upload({ buffer: buf, mimeType: c.mime || 'image/png', purpose: 'image' })
-    return att.attachmentId
-  } catch {
-    return null
-  }
+const ASPECT_SIZE: Record<string, string> = {
+  '1:1': '1024x1024',
+  '4:3': '1152x896',
+  '3:4': '896x1152',
+  '16:9': '1344x768',
+  '9:16': '768x1344'
 }
 
 export interface ImageGenResult {
-  base64: string
+  images: string[] // base64
   mime: string
 }
 
@@ -28,21 +26,28 @@ export async function generateImage(
   onRequestId: (id: string) => void
 ): Promise<ImageGenResult> {
   const model = card.modelId
-  if (!model) throw new Error('请先选择图像模型（右侧模型下拉）')
+  if (!model) throw new Error('请先选择图像模型（面板内"模型"下拉）')
 
-  const refs = resolveRefs(card, board)
+  const inputs = resolveGenInputs(card, board)
   const params = card.params || {}
-  const size = (params.size as string) || '1024x1024'
+  const size = ASPECT_SIZE[String(params.aspect || '')] || (params.size as string) || '1024x1024'
+  const count = Math.max(1, Math.min(4, Number(params.count) || 1))
 
+  // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []
-  for (const ic of refs.imageCards) {
-    const id = await uploadCardImage(ic)
-    if (id) attIds.push(id)
+  for (const img of inputs.images) {
+    const buf = await loadImageInput(img)
+    if (!buf) continue
+    try {
+      const att = await ai().attachments.upload({ buffer: buf, mimeType: img.mime || 'image/png', purpose: 'image' })
+      attIds.push(att.attachmentId)
+    } catch {
+      /* skip */
+    }
   }
 
   let images: string[] | undefined
   if (attIds.length > 0) {
-    // 图生图 / 多图参考一致性：首图为主图，其余为参考
     onProgress(0.3)
     const res = await ai().images.edit({
       model,
@@ -53,9 +58,8 @@ export async function generateImage(
     images = res.images
     onProgress(1)
   } else {
-    // 文生图（流式进度 + 预览）
     const req = ai().images.generateStream(
-      { model, prompt: card.prompt, size, count: 1 },
+      { model, prompt: card.prompt, size, count },
       (chunk: any) => {
         if (chunk.__requestId) {
           onRequestId(chunk.__requestId)
@@ -75,5 +79,5 @@ export async function generateImage(
   }
 
   if (!images || images.length === 0) throw new Error('模型未返回图像')
-  return { base64: images[0], mime: 'image/png' }
+  return { images, mime: 'image/png' }
 }

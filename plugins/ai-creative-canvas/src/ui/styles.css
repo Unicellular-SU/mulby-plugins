@@ -96,6 +96,17 @@ body {
   background: transparent;
 }
 
+/* 隐藏滚动条但保留滚动 */
+.ace-noscroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ace-noscroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 .line-clamp-4 {
   display: -webkit-box;
   -webkit-line-clamp: 4;

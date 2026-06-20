@@ -1,4 +1,94 @@
-import type { Board, Card } from '../types'
+import type { Board, Card, Material, MaterialKind } from '../types'
+
+const KIND_LABEL: Record<MaterialKind, string> = { image: '图片', video: '视频', audio: '音频', text: '文本' }
+
+function matKindOfCard(c: Card): MaterialKind {
+  if (c.kind === 'video') return 'video'
+  if (c.kind === 'audio') return 'audio'
+  if (c.kind === 'text') return 'text'
+  return 'image' // image | source 都视作图片素材
+}
+
+// 汇总一个节点的素材：上游连线 + 显式引用 + 本节点上传，按 kind 自动编号
+export function buildMaterials(card: Card, board: Board): Material[] {
+  const mats: Material[] = []
+  const counters: Record<MaterialKind, number> = { image: 0, video: 0, audio: 0, text: 0 }
+  const labelFor = (k: MaterialKind) => `${KIND_LABEL[k]}${++counters[k]}`
+  const seen = new Set<string>()
+
+  const edgeSources = Object.values(board.edges)
+    .filter((e) => e.target === card.id)
+    .map((e) => e.source)
+  const edgeSet = new Set(edgeSources)
+  const explicit = card.refIds.filter((id) => !edgeSet.has(id))
+
+  for (const id of [...edgeSources, ...explicit]) {
+    if (id === card.id || seen.has('card:' + id)) continue
+    const c = board.cards[id]
+    if (!c) continue
+    seen.add('card:' + id)
+    const k = matKindOfCard(c)
+    mats.push({
+      matId: 'card:' + id,
+      origin: edgeSet.has(id) ? 'edge' : 'card',
+      kind: k,
+      label: labelFor(k),
+      thumbUrl: c.assetUrl || undefined,
+      text: c.text || undefined,
+      cardId: id,
+      assetUrl: c.assetUrl || undefined,
+      assetLocalPath: c.assetLocalPath || undefined,
+      mime: c.mime || undefined
+    })
+  }
+
+  for (const a of card.assets || []) {
+    mats.push({
+      matId: 'upload:' + a.id,
+      origin: 'upload',
+      kind: a.kind,
+      label: labelFor(a.kind),
+      thumbUrl: a.kind === 'image' ? a.url : undefined,
+      assetUrl: a.url,
+      assetLocalPath: a.localPath,
+      mime: a.mime
+    })
+  }
+
+  return mats
+}
+
+export interface GenImageInput {
+  url?: string
+  localPath?: string
+  mime?: string
+}
+export interface GenInputs {
+  texts: { label: string; text: string }[]
+  images: GenImageInput[]
+}
+
+// 生成时的有效输入：若提示词含 @标记 则只取被引用的素材（保持顺序），否则取全部素材
+export function resolveGenInputs(card: Card, board: Board): GenInputs {
+  const mats = buildMaterials(card, board)
+  const tokens = card.prompt.match(/@(?:图片|视频|音频|文本)\d+/g) || []
+  let selected = mats
+  if (tokens.length) {
+    const set = new Set(tokens.map((t) => t.slice(1)))
+    const picked = mats.filter((m) => set.has(m.label))
+    if (picked.length) selected = picked
+  }
+  const texts: { label: string; text: string }[] = []
+  const images: GenImageInput[] = []
+  for (const m of selected) {
+    if (m.kind === 'text' && m.text) texts.push({ label: m.label, text: m.text })
+    else if (m.kind === 'image') {
+      const url = m.assetUrl || m.thumbUrl
+      if (url || m.assetLocalPath) images.push({ url: url || undefined, localPath: m.assetLocalPath, mime: m.mime })
+    }
+  }
+  return { texts, images }
+}
 
 // 收集一张卡片的引用来源：@ 引用(refIds) + 指向它的连线起点
 export function collectRefCards(card: Card, board: Board): Card[] {

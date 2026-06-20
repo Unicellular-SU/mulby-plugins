@@ -205,6 +205,7 @@ export const useGraph = create<GraphState>((set, get) => ({
       mime: null,
       text: null,
       refIds: [],
+      assets: [],
       meta: {},
       ...partial
     }

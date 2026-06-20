@@ -24,7 +24,8 @@ export interface Card {
   attachmentId: string | null // storage.attachment 缩略图 id
   mime: string | null
   text: string | null // 文本卡产物
-  refIds: string[] // @ 引用的卡片 id
+  refIds: string[] // 显式引用的卡片 id
+  assets: NodeAsset[] // 节点内上传的素材
   meta: Record<string, unknown>
 }
 
@@ -33,6 +34,32 @@ export interface Edge {
   source: string
   target: string
   kind: 'ref' | 'flow'
+}
+
+export type MaterialKind = 'image' | 'video' | 'audio' | 'text'
+
+// 节点内上传的素材
+export interface NodeAsset {
+  id: string
+  kind: MaterialKind
+  url: string
+  localPath?: string
+  mime?: string
+  name?: string
+}
+
+// 统一"素材"：来自上游连线 / 显式引用 / 本节点上传
+export interface Material {
+  matId: string // 'card:<id>' | 'upload:<assetId>'
+  origin: 'edge' | 'card' | 'upload'
+  kind: MaterialKind
+  label: string // 自动编号：图片1 / 文本2 ...
+  thumbUrl?: string
+  text?: string
+  cardId?: string
+  assetUrl?: string
+  assetLocalPath?: string
+  mime?: string
 }
 
 export interface Viewport {

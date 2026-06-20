@@ -41,6 +41,7 @@ function setPath(obj: any, path: string, val: any): void {
 export interface VideoReq {
   prompt: string
   imageDataUrl?: string
+  params?: Record<string, unknown>
 }
 
 // 提交 + 轮询，返回结果媒体 URL
@@ -58,6 +59,7 @@ export async function runVideoJob(
       throw new Error('额外请求体不是合法 JSON')
     }
   }
+  if (req.params) Object.assign(body, req.params) // 节点参数（时长/比例等）合并入请求体
   setPath(body, cfg.promptField || 'prompt', req.prompt)
 
   if (req.imageDataUrl && cfg.imageField && cfg.imageMode && cfg.imageMode !== 'none') {
@@ -123,14 +125,20 @@ export async function runVideoJob(
   return { url }
 }
 
-export async function runTts(cfg: ProviderConfig, key: string, text: string): Promise<{ path: string; url: string; mime: string }> {
+export async function runTts(
+  cfg: ProviderConfig,
+  key: string,
+  text: string,
+  opts?: { voice?: string; speed?: number; format?: string }
+): Promise<{ path: string; url: string; mime: string }> {
   const r = await host().call(PLUGIN_ID, 'synthSpeech', {
     baseURL: cfg.baseURL,
     apiKey: key,
     model: cfg.ttsModel || 'tts-1',
-    voice: cfg.ttsVoice || 'alloy',
+    voice: opts?.voice || cfg.ttsVoice || 'alloy',
     input: text,
-    format: cfg.ttsFormat || 'mp3'
+    speed: opts?.speed,
+    format: opts?.format || cfg.ttsFormat || 'mp3'
   })
   const d = r?.data
   if (!d?.ok) throw new Error(d?.error || '配音失败')

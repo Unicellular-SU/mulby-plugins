@@ -3,8 +3,8 @@ import { useTask } from '../store/taskStore'
 import { createLimiter, arrayBufferToBase64 } from '../util'
 import { generateText } from './aiText'
 import { generateImage } from './aiImage'
-import { saveBase64, mimeToExt, toFileUrl, readAsArrayBuffer } from './media'
-import { resolveRefs } from './references'
+import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
+import { resolveGenInputs } from './references'
 import { useProviders } from '../store/providerStore'
 import { runVideoJob, runTts } from './providers/engine'
 import { PLUGIN_ID } from './persistence'
@@ -63,7 +63,8 @@ export async function generateCard(cardId: string): Promise<void> {
           (rid) => aborters.set(cardId, rid)
         )
         const projectId = useGraph.getState().project.id
-        const saved = await saveBase64(projectId, cardId, res.base64, mimeToExt(res.mime))
+        const ext = mimeToExt(res.mime)
+        const saved = await saveBase64(projectId, cardId, res.images[0], ext)
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,
@@ -71,20 +72,30 @@ export async function generateCard(cardId: string): Promise<void> {
           assetLocalPath: saved.path,
           mime: res.mime
         })
+        // 多图：其余结果在旁边新建卡片
+        const baseCard = useGraph.getState().getActiveBoard().cards[cardId]
+        for (let i = 1; i < res.images.length && baseCard; i++) {
+          const nid = useGraph.getState().addCard(
+            'image',
+            { x: baseCard.x + baseCard.w + 80, y: baseCard.y + (i - 1) * (baseCard.h + 24) + baseCard.h / 2 },
+            { title: `${baseCard.title} (${i + 1})`, status: 'done', modelId: baseCard.modelId, refIds: [...baseCard.refIds] }
+          )
+          const s2 = await saveBase64(projectId, nid, res.images[i], ext)
+          useGraph.getState().updateCard(nid, { assetUrl: s2.url, assetLocalPath: s2.path, mime: res.mime })
+        }
+        if (res.images.length > 1) useGraph.getState().setSelection([cardId])
       } else if (card.kind === 'video') {
         const cfg = useProviders.getState().activeFor('video')
         if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
         const key = await useProviders.getState().getKey(cfg.id)
-        const refs = resolveRefs(card, board)
+        const inputs = resolveGenInputs(card, board)
         let imageDataUrl: string | undefined
-        const ic = refs.imageCards[0]
-        if (ic) {
-          const bytes = ic.assetLocalPath
-            ? await readAsArrayBuffer(ic.assetLocalPath)
-            : await (await fetch(ic.assetUrl!)).arrayBuffer()
-          imageDataUrl = `data:${ic.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}`
+        const img = inputs.images[0]
+        if (img) {
+          const bytes = await loadImageInput(img)
+          if (bytes) imageDataUrl = `data:${img.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}`
         }
-        const { url } = await runVideoJob(cfg, key, { prompt: card.prompt, imageDataUrl }, (p) =>
+        const { url } = await runVideoJob(cfg, key, { prompt: card.prompt, imageDataUrl, params: card.params }, (p) =>
           useGraph.getState().updateCard(cardId, { progress: p })
         )
         const projectId = useGraph.getState().project.id
@@ -106,11 +117,16 @@ export async function generateCard(cardId: string): Promise<void> {
         const cfg = useProviders.getState().activeFor('audio')
         if (!cfg) throw new Error('未配置音频/TTS Provider（右上角“设置”）')
         const key = await useProviders.getState().getKey(cfg.id)
-        const refs = resolveRefs(card, board)
-        const text = (card.prompt && card.prompt.trim()) || refs.texts.map((t) => t.text).join('\n')
+        const inputs = resolveGenInputs(card, board)
+        const text = (card.prompt && card.prompt.trim()) || inputs.texts.map((t) => t.text).join('\n')
         if (!text) throw new Error('请填写配音文本（或引用一张文本卡）')
         useGraph.getState().updateCard(cardId, { progress: 0.4 })
-        const res = await runTts(cfg, key, text)
+        const pp = card.params || {}
+        const res = await runTts(cfg, key, text, {
+          voice: typeof pp.voice === 'string' ? pp.voice : undefined,
+          speed: typeof pp.speed === 'number' ? pp.speed : undefined,
+          format: typeof pp.format === 'string' ? pp.format : undefined
+        })
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,

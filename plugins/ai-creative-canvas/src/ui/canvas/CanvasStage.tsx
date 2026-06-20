@@ -8,6 +8,7 @@ import { CanvasControls } from './CanvasControls'
 import { Minimap } from './Minimap'
 import { SelectionBox, type ScreenRect } from './SelectionBox'
 import { ConnectMenu } from './ConnectMenu'
+import { NodeEditor } from './NodeEditor'
 import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
@@ -192,6 +193,7 @@ export function CanvasStage() {
     const el = stageRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('[data-interactive]')) return // 让面板/工具条内部滚动，不缩放画布
       e.preventDefault()
       const rect = el.getBoundingClientRect()
       const sx = e.clientX - rect.left
@@ -336,6 +338,7 @@ export function CanvasStage() {
       {showMinimap && <Minimap />}
       <CanvasControls onFit={doFit} />
       <ConnectMenu />
+      <NodeEditor />
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
           <div className="text-center opacity-40 text-sm">
