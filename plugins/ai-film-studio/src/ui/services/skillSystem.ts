@@ -18,10 +18,14 @@ const RAW = import.meta.glob('../skills/**/*.md', { query: '?raw', import: 'defa
 export type ArtAssetKind = 'character' | 'scene' | 'prop' | 'storyboard_video'
 export type DirectorKind = 'planning_style' | 'storyboard' | 'storyboard_table_style'
 
+import type { StylePack } from './stylePacks'
+
 export interface SkillDoc {
   name: string
   description: string
   metaData?: string
+  /** 全部 frontmatter 键值（含 anchor/videoTag/negative 等扩展字段） */
+  fm: Record<string, string>
   body: string
   /** 规范化后的相对路径，如 art_skills/cinematic_realistic/prefix.md */
   rel: string
@@ -35,9 +39,7 @@ export interface ArtStyle {
 
 /** 解析 frontmatter（--- ... ---）+ 正文 */
 function parseSkill(raw: string, rel: string): SkillDoc {
-  let name = rel
-  let description = ''
-  let metaData: string | undefined
+  const fm: Record<string, string> = {}
   let body = raw
   const m = /^﻿?---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(raw)
   if (m) {
@@ -45,14 +47,10 @@ function parseSkill(raw: string, rel: string): SkillDoc {
     for (const line of m[1].split('\n')) {
       const kv = /^\s*([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line)
       if (!kv) continue
-      const key = kv[1]
-      const val = kv[2].trim().replace(/^["']|["']$/g, '')
-      if (key === 'name') name = val
-      else if (key === 'description') description = val
-      else if (key === 'metaData') metaData = val
+      fm[kv[1]] = kv[2].trim().replace(/^["']|["']$/g, '')
     }
   }
-  return { name, description, metaData, body: body.trim(), rel }
+  return { name: fm.name || rel, description: fm.description || '', metaData: fm.metaData, fm, body: body.trim(), rel }
 }
 
 /** path → SkillDoc 注册表（key 为规范化相对路径） */
@@ -110,6 +108,35 @@ export function composeDirectorPrompt(styleId: string, kind: DirectorKind): stri
 /** 取 Agent 系统提示词（agent/<name>.md，后续阶段 Agent runtime 用） */
 export function getAgentSkill(name: string): string {
   return get(`agent/${name}.md`)?.body ?? ''
+}
+
+/**
+ * 把画风 Skill 桥接成现有的结构化 StylePack（阶段1b）：
+ * 从 prefix.md frontmatter 的 anchor/anchorCharacter/anchorScene/anchorProp/videoTag/negative 抽取可直接追加的锚定词，
+ * 喂给现有 resolveStyle/applyStylePack 确定性管线——画风即刻生效；完整 skill 正文留给阶段3 的 Agent。
+ */
+export function skillStylePacks(): StylePack[] {
+  const out: StylePack[] = []
+  for (const s of listArtStyles()) {
+    const fm = get(`art_skills/${s.id}/prefix.md`)?.fm ?? {}
+    const all = fm.anchor || ''
+    if (!all) continue // 没声明 anchor 的画风不进确定性管线（仍可被 Agent 用完整正文）
+    out.push({
+      id: s.id,
+      label: s.label,
+      hint: s.description,
+      anchors: {
+        all,
+        character: fm.anchorCharacter || undefined,
+        scene: fm.anchorScene || undefined,
+        prop: fm.anchorProp || undefined,
+        consistency: fm.anchorConsistency || undefined,
+      },
+      negative: fm.negative || undefined,
+      videoTag: fm.videoTag || undefined,
+    })
+  }
+  return out
 }
 
 /** 调试/设置面板用：列出全部已加载技能 */

@@ -2,6 +2,13 @@
 name: 写实电影感
 description: 真人电影质感 · 自然光影 · 浅景深 · 胶片调色
 metaData: art_skills
+anchor: photorealistic, cinematic film still, natural lighting, shallow depth of field, filmic color grade, 35mm, highly detailed
+anchorCharacter: realistic skin texture, natural facial features, detailed wardrobe and fabric
+anchorScene: realistic environment, atmospheric volumetric lighting, depth and scale
+anchorProp: realistic material, product photography, studio lighting, single object
+anchorConsistency: consistent with the reference image, unified color grade and light direction
+videoTag: cinematic photoreal, natural motion, filmic color grade
+negative: no cartoon, no anime, no illustration, no 3d render, no plastic skin, no oversaturation, no watermark, no text overlay
 ---
 
 # 全局美学基础 · 写实电影感

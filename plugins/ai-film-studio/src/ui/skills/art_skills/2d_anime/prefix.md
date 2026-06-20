@@ -2,6 +2,13 @@
 name: 日系动画
 description: 2D 日式动画 · 赛璐璐平涂 · 清透色彩 · 动漫渲染
 metaData: art_skills
+anchor: anime style, cel shading, clean lineart, soft cinematic lighting, vibrant harmonious colors, key visual
+anchorCharacter: consistent anime character design, clean cel-shaded face, expressive eyes
+anchorScene: anime background art, layered depth, soft ambient light, painterly sky
+anchorProp: anime prop, clean cel shading, single object, neat lineart
+anchorConsistency: consistent with the reference image, same character design and color palette
+videoTag: anime style, cel shading, smooth animation, soft cinematic lighting
+negative: no photorealistic, no 3d render, no messy lineart, no extra fingers, no oversaturation, no watermark
 ---
 
 # 全局美学基础 · 日系动画

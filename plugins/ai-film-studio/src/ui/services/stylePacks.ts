@@ -4,6 +4,8 @@
  * 统一经 resolveStyle 注入所有图像/视频提示词，根治"同一片跨镜画风/色调漂移（图片漏洞百出）"。
  * 借鉴 Toonflow 的 art_skills 技能包，但内置少而精、可由「全局画风」自由字符串叠加。
  */
+import { skillStylePacks } from './skillSystem'
+
 export interface StylePack {
   id: string
   label: string
@@ -243,9 +245,19 @@ export const STYLE_PACKS: StylePack[] = [
   },
 ]
 
+/**
+ * 可选画风列表（阶段1b）：画风 Skill 包（art_skills/*）在前作为新规范来源，内置 STYLE_PACKS 在后作为遗留兜底。
+ * 同 id 以 Skill 包优先（内置将逐步迁移为 Skill）。
+ */
+export function listStylePacks(): StylePack[] {
+  const skillPacks = skillStylePacks()
+  const ids = new Set(skillPacks.map((p) => p.id))
+  return [...skillPacks, ...STYLE_PACKS.filter((p) => !ids.has(p.id))]
+}
+
 export function getStylePack(id?: string | null): StylePack | null {
   if (!id) return null
-  return STYLE_PACKS.find((p) => p.id === id) ?? null
+  return listStylePacks().find((p) => p.id === id) ?? null
 }
 
 /** 把风格包组合成可追加到生成 prompt 的后缀：全局锚定 + 角色锚定 + 一致性锚 + 软避免。 */

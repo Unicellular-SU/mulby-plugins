@@ -1,5 +1,5 @@
 import { useGraphStore } from '../store/graphStore'
-import { STYLE_PACKS, getStylePack } from '../services/stylePacks'
+import { listStylePacks, getStylePack } from '../services/stylePacks'
 
 const ASPECTS: { value: string; label: string }[] = [
   { value: '16:9', label: '16:9（横屏）' },
@@ -79,7 +79,7 @@ export default function GlobalSettings() {
             onChange={(e) => setGlobals({ stylePackId: e.target.value || undefined })}
           >
             <option value="">（不使用 · 仅用下方自由画风）</option>
-            {STYLE_PACKS.map((p) => (
+            {listStylePacks().map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
               </option>

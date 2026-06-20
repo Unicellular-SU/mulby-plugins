@@ -185,8 +185,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 > 全量重构进行中（不考虑老数据兼容）。每个 loop 迭代产出一个**可编译、可验收**的增量。
 
 - [x] **1a Skill 系统**：`services/skillSystem.ts`（import.meta.glob 打包 .md + frontmatter 解析 + composeArtPrompt/composeDirectorPrompt/getAgentSkill）；`skills/art_skills/cinematic_realistic/` 完整包（prefix + director_storyboard + art_{character,scene,prop,storyboard_video}）；`skills/art_skills/2d_anime/prefix.md`；`skills/agent/{script,production}_agent_decision.md` 占位。`vite-env.d.ts` 加 vite/client 类型。tsc+build 通过。
-- [ ] **1b Skill 接入生成**：把 skillSystem 接入现有图像提示词构建（替换 `stylePacks`/`resolveStyle` 的画风注入）；GlobalSettings 增加「画风(Skill)」选择器，写入 globals。
-- [ ] **1c 供应商强类型 model 定义**：type/mode(视频模式)/durationResolutionMap/associationSkills。
+- [x] **1b Skill 接入生成**：`skillStylePacks()` 从画风 prefix.md frontmatter（anchor/anchorXxx/videoTag/negative）桥接成 `StylePack`；`stylePacks.listStylePacks()` = 画风 Skill 包(优先) + 内置(兜底)，`getStylePack` 查两者；GlobalSettings 改用 `listStylePacks()`。画风 Skill 即刻经现有 resolveStyle 注入生成；完整 skill 正文留给阶段3 Agent。tsc+build 通过。
+- [ ] **1c 供应商强类型 model 定义**（可后置/并入阶段3 视频生成时做）：type/mode(视频模式)/durationResolutionMap/associationSkills。
 - [ ] **2 数据模型 + 持久化**：`domain/types.ts`（Project/Script/Asset/Storyboard/Clip/VideoTrack/MemoryItem）+ JSON 持久化（filesystem/kvStore）+ `projectStore`。
 - [ ] **2 工作台 UI 骨架**：项目/剧本/资产/分镜/时间线 Tab + Agent 对话面板占位（与节点图并存，逐步替换）。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
