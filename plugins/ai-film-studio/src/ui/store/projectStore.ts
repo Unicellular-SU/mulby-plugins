@@ -8,6 +8,7 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import { generateAssetImage, generateKeyframeImage } from '../studio/services/generate'
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -38,6 +39,24 @@ interface ProjectState {
   removeStoryboard: (id: string) => void
   reorderStoryboards: (orderedIds: string[]) => void
   upsertClip: (c: Partial<Clip> & { storyboardId: string }) => string
+
+  // 生成（接现有图像引擎 + 项目画风 Skill）
+  generateAsset: (id: string) => Promise<void>
+  generateKeyframe: (storyboardId: string) => Promise<void>
+}
+
+/** 改某资产/分镜的 state+error（异步生成进度回写，按 id 查最新避免覆盖并发编辑） */
+function setAssetState(get: () => ProjectState, id: string, patch: Partial<Asset>) {
+  get().mutate((d) => {
+    const a = d.assets.find((x) => x.id === id)
+    if (a) Object.assign(a, patch)
+  })
+}
+function setStoryboardState(get: () => ProjectState, id: string, patch: Partial<Storyboard>) {
+  get().mutate((d) => {
+    const s = d.storyboards.find((x) => x.id === id)
+    if (s) Object.assign(s, patch)
+  })
 }
 
 function scheduleSave(get: () => ProjectState) {
@@ -190,5 +209,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       else d.clips.push(merged)
     })
     return id
+  },
+
+  generateAsset: async (id) => {
+    const doc = get().doc
+    const asset = doc?.assets.find((a) => a.id === id)
+    if (!doc || !asset) return
+    setAssetState(get, id, { state: 'generating', error: undefined })
+    try {
+      const refImageId = await generateAssetImage(asset, doc.meta)
+      setAssetState(get, id, { refImageId, state: 'done' })
+    } catch (e) {
+      setAssetState(get, id, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+
+  generateKeyframe: async (storyboardId) => {
+    const doc = get().doc
+    const sb = doc?.storyboards.find((s) => s.id === storyboardId)
+    if (!doc || !sb) return
+    setStoryboardState(get, storyboardId, { state: 'generating', error: undefined })
+    try {
+      const keyframeImageId = await generateKeyframeImage(sb, doc.assets, doc.meta)
+      setStoryboardState(get, storyboardId, { keyframeImageId, state: 'done' })
+    } catch (e) {
+      setStoryboardState(get, storyboardId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
   },
 }))

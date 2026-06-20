@@ -3,10 +3,11 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2 } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { listStylePacks } from '../services/stylePacks'
-import type { AssetType } from '../domain/types'
+import { useMediaUrl } from '../services/mediaUrl'
+import type { Asset, AssetType, Storyboard } from '../domain/types'
 
 type Tab = 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -135,7 +136,6 @@ function ScriptTab() {
 function AssetsTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
-  const removeAsset = useProjectStore((s) => s.removeAsset)
   const groups: { type: AssetType; label: string }[] = [
     { type: 'role', label: '人物' },
     { type: 'scene', label: '场景' },
@@ -153,13 +153,10 @@ function AssetsTab() {
                 <Plus size={14} /> 新增
               </button>
             </div>
-            <div className="afs-studio__assetlist">
+            <div className="afs-studio__cardgrid">
               {items.length === 0 && <span className="afs-studio__hint">暂无</span>}
               {items.map((a) => (
-                <div key={a.id} className="afs-studio__chip">
-                  <input value={a.name} onChange={(e) => upsertAsset({ id: a.id, type: a.type, name: e.target.value })} />
-                  <button onClick={() => removeAsset(a.id)}>×</button>
-                </div>
+                <AssetCard key={a.id} asset={a} />
               ))}
             </div>
           </div>
@@ -169,10 +166,50 @@ function AssetsTab() {
   )
 }
 
+function AssetCard({ asset }: { asset: Asset }) {
+  const upsertAsset = useProjectStore((s) => s.upsertAsset)
+  const removeAsset = useProjectStore((s) => s.removeAsset)
+  const generateAsset = useProjectStore((s) => s.generateAsset)
+  const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  return (
+    <div className="afs-studio__assetcard">
+      <div className="afs-studio__thumb">
+        {asset.state === 'generating' ? (
+          <Loader2 size={20} className="afs-spin" />
+        ) : url ? (
+          <img src={url} alt={asset.name} />
+        ) : (
+          <Users size={20} opacity={0.3} />
+        )}
+        {asset.state === 'failed' && (
+          <span className="afs-studio__err" title={asset.error}>
+            <AlertCircle size={14} />
+          </span>
+        )}
+      </div>
+      <input className="afs-studio__cardname" value={asset.name} onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: e.target.value })} />
+      <textarea
+        className="afs-field__input afs-studio__carddesc"
+        rows={2}
+        placeholder="外貌/特征描述…"
+        value={asset.desc ?? ''}
+        onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, desc: e.target.value })}
+      />
+      <div className="afs-studio__cardactions">
+        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} onClick={() => void generateAsset(asset.id)}>
+          <Wand2 size={13} /> 生成
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function StoryboardTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
-  const removeStoryboard = useProjectStore((s) => s.removeStoryboard)
   return (
     <div className="afs-studio__storyboard">
       <button className="afs-btn afs-btn--sm" onClick={() => upsertStoryboard({ videoDesc: '' })}>
@@ -181,18 +218,43 @@ function StoryboardTab() {
       <div className="afs-studio__sblist">
         {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（阶段3 由分镜 Agent 自动拆解生成）。</p>}
         {doc.storyboards.map((s, i) => (
-          <div key={s.id} className="afs-studio__sbitem">
-            <span className="afs-studio__sbidx">{i + 1}</span>
-            <textarea
-              className="afs-field__input"
-              rows={2}
-              value={s.videoDesc}
-              placeholder="画面描述…"
-              onChange={(e) => upsertStoryboard({ id: s.id, videoDesc: e.target.value })}
-            />
-            <button onClick={() => removeStoryboard(s.id)}>×</button>
-          </div>
+          <StoryboardItem key={s.id} sb={s} index={i} />
         ))}
+      </div>
+    </div>
+  )
+}
+
+function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
+  const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
+  const removeStoryboard = useProjectStore((s) => s.removeStoryboard)
+  const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
+  const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
+  return (
+    <div className="afs-studio__sbitem">
+      <span className="afs-studio__sbidx">{index + 1}</span>
+      <div className="afs-studio__sbthumb">
+        {sb.state === 'generating' ? <Loader2 size={18} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={18} opacity={0.3} />}
+        {sb.state === 'failed' && (
+          <span className="afs-studio__err" title={sb.error}>
+            <AlertCircle size={13} />
+          </span>
+        )}
+      </div>
+      <textarea
+        className="afs-field__input"
+        rows={3}
+        value={sb.videoDesc}
+        placeholder="画面描述（主体+动作+环境+情绪+光影）…"
+        onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: e.target.value })}
+      />
+      <div className="afs-studio__sbactions">
+        <button className="afs-btn afs-btn--sm" disabled={sb.state === 'generating'} onClick={() => void generateKeyframe(sb.id)}>
+          <Wand2 size={13} /> 关键帧
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeStoryboard(sb.id)}>
+          <Trash2 size={13} />
+        </button>
       </div>
     </div>
   )
