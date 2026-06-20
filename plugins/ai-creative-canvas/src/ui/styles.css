@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ace-border: #e5e7eb;
+  --ace-dot: #d4d4d8;
+  --ace-edge: #94a3b8;
+  --ace-bg: #f6f7f9;
+}
+
+.dark {
+  --ace-border: #2a2a2e;
+  --ace-dot: #34343a;
+  --ace-edge: #565660;
+  --ace-bg: #0b0b0d;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ace-bg);
+  overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+.ace-stage {
+  background: var(--ace-bg);
+}
+
+/* 连线 */
+.ace-edge {
+  stroke: var(--ace-edge);
+  stroke-width: 2;
+}
+.ace-edge-temp {
+  stroke-dasharray: 6 4;
+  opacity: 0.85;
+}
+.ace-edge-hover {
+  stroke: #6366f1;
+  stroke-width: 2.5;
+}
+.ace-edge-del-bg {
+  fill: #ef4444;
+}
+.ace-edge-del-x {
+  stroke: #ffffff;
+  stroke-width: 1.6;
+}
+
+/* 小地图 */
+.ace-mini-card {
+  fill: var(--ace-edge);
+  opacity: 0.55;
+}
+.ace-mini-view {
+  fill: rgba(99, 102, 241, 0.12);
+  stroke: #6366f1;
+  stroke-width: 1.5;
+}
+
+/* Inspector 输入 */
+.ace-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  outline: none;
+  border: 1px solid transparent;
+}
+.dark .ace-input {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ace-input:focus {
+  border-color: #818cf8;
+  background: transparent;
+}
+
+/* 滚动条 */
+.ace-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.ace-scroll::-webkit-scrollbar-thumb {
+  background: rgba(130, 130, 140, 0.4);
+  border-radius: 4px;
+}
+.ace-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
