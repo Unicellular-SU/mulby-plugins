@@ -256,11 +256,20 @@ JSON 结构：
   {
     id: 'image.assetCharacter',
     group: 'image',
-    label: '人物节点 · 文字生成三视图',
-    desc: '“人物”资产节点在「文字生成」模式下的英文提示词模板。',
+    label: '人物节点 · 文字生成人物图',
+    desc: '“人物”资产节点在「文字生成」模式下的英文提示词模板。一张干净的人物形象图，不强制三视图。',
     placeholders: ['{basis}'],
     default:
-      '{basis}, full-body character turnaround reference sheet, front view, side view and back view, T-pose, neutral background, consistent character design, highly detailed',
+      '{basis}, single character portrait, full body, clear face, neutral pose, plain background, consistent character design, highly detailed',
+  },
+  {
+    id: 'image.charImageBoard',
+    group: 'image',
+    label: '角色设定图 · 单张 16:9 合成板',
+    desc: '“角色设定图”节点的英文提示词模板：一张 16:9，左半面部特写、右半正/侧/背全身，纯白背景。一次出图省钱。',
+    placeholders: ['{ref}'],
+    default:
+      'character model sheet of {ref}, single 16:9 wide image on pure white background, left half: a large close-up of the character\'s face, right half: full-body front view, side view and back view of the same character standing in a neutral T-pose, identical consistent character across all views, clean studio lighting, highly detailed',
   },
   {
     id: 'image.assetScene',

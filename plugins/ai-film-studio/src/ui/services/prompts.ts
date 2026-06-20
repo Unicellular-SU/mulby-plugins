@@ -366,7 +366,7 @@ export function buildAssetImageJob(data: FilmNodeData, globals?: PromptGlobals):
   return null
 }
 
-// ============ 角色三视图（自洽链 + 可选参考图）============
+// ============ 角色设定图（单张 16:9 合成板：面部特写 + 正/侧/背）============
 export interface CharViewSet {
   name?: string
   charId?: string
@@ -375,9 +375,10 @@ export interface CharViewSet {
   stageKey?: string
   refName?: string // 用于在「参考图」端口里按角色名匹配上传的人物图
   size?: string
-  views: { view: 'front' | 'side' | 'back'; prompt: string }[]
-  isBase?: boolean // M22b：age-neutral 底模锚（其 front 作为各变体派生的锁脸参考）
-  derives?: boolean // M22b：该变体 front 需从同组底模 front 派生（换龄不换脸）
+  prompt: string // 单张设定板提示词（左面部特写 + 右正/侧/背，白底；替代旧 views[]）
+  identity?: string // 身份文本，供下游打包/keyframe 注入
+  isBase?: boolean // M22b：age-neutral 底模锚（作为各变体派生的锁脸参考）
+  derives?: boolean // M22b：该变体设定板需从同组底模板派生（换龄不换脸）
   baseGroup?: string // 修复 ORD-1：底模与其变体配对的唯一组键（不用 charId/name，避免同名/无名串脸）
 }
 
@@ -426,9 +427,9 @@ export function resolveVariantForShot(
 }
 
 /**
- * 把角色设定/人物 拆成「每 (角色 × 变体) 一组三视图」。M22b：有变体时先出 age-neutral 底模(isBase)，
- * 各变体(derives)的 front 由执行层用底模 front 经 editImage 派生（换龄/换装不换脸）；无变体=单组身份像。
- * 各组打 variantId，下游按 (charId,variantId) 精确取图；底模(variantId 缺省)兼作 base 兜底。
+ * 把角色设定/人物 拆成「每 (角色 × 变体) 一张设定板」（左面部特写 + 右正/侧/背，白底）。
+ * M22b：有变体时先出 age-neutral 底模(isBase)，各变体(derives)的设定板由执行层用底模板经 editImage 派生
+ * （换龄/换装不换脸）；无变体=单张身份板。各组打 variantId，下游按 (charId,variantId) 精确取图。
  */
 export function buildCharViewSets(
   data: FilmNodeData,
@@ -437,15 +438,11 @@ export function buildCharViewSets(
 ): CharViewSet[] {
   const p = data.params || {}
   const paramSize = typeof p.size === 'string' ? p.size : undefined
-  const style = resolveStyle(inputs, globals, 'character') // M21：角色三视图注入角色锚定
+  const style = resolveStyle(inputs, globals, 'character') // M21：角色设定图注入角色锚定
   const size = sizeFromAspect(resolveAspect(inputs, globals)) || paramSize
   const withStyle = (s: string) => [s, style && `, ${style}`].filter(Boolean).join(' ')
   const list = collectJsonArray(inputs['role'], 'characters')
-  const mkViews = (ref: string, triple: Record<string, unknown> | undefined) =>
-    (['front', 'side', 'back'] as const).map((view) => {
-      const viewHint = triple && triple[view] ? String(triple[view]) : `${view} view`
-      return { view, prompt: withStyle(fillTemplate(getPrompt('image.charImageView'), { view: viewHint, ref })) }
-    })
+  const mkPrompt = (ref: string) => withStyle(fillTemplate(getPrompt('image.charImageBoard'), { ref }))
   return list.flatMap((c, gi): CharViewSet[] => {
     const charId = c.charId ? String(c.charId) : c.name ? String(c.name) : undefined
     const name = c.name ? String(c.name) : undefined
@@ -453,12 +450,12 @@ export function buildCharViewSets(
     // 修复 INT-4：变体数硬上限，防失控的角色卡把图量扇成巨大开销
     const variants = (Array.isArray(c.variants) ? (c.variants as Array<Record<string, unknown>>) : []).slice(0, 8)
     if (!variants.length) {
-      // 无变体：单组身份像（校验已保证此处只剩单期角色，直接用 appearance/identity，不做有损净化）
-      return [{ name, charId, refName: name, size, views: mkViews(identity, c.triple as Record<string, unknown> | undefined) }]
+      // 无变体：单张身份板（校验已保证此处只剩单期角色，直接用 appearance/identity，不做有损净化）
+      return [{ name, charId, refName: name, size, identity, prompt: mkPrompt(identity || name || '') }]
     }
-    // 修复 ORD-1：每角色一个唯一组键（取自合并列表下标），底模/变体经它配对，杜绝同名/无名角色 baseFronts 串脸
+    // 修复 ORD-1：每角色一个唯一组键（取自合并列表下标），底模/变体经它配对，杜绝同名/无名角色串脸
     const group = `g${gi}`
-    // M22b：底模锚（age-neutral，variantId 缺省→兼作 base 兜底）+ 逐变体派生组（front 锁脸到底模）
+    // M22b：底模锚（age-neutral，variantId 缺省→兼作 base 兜底）+ 逐变体派生组（锁脸到底模）
     const baseSet: CharViewSet = {
       name,
       charId,
@@ -466,10 +463,11 @@ export function buildCharViewSets(
       baseGroup: group,
       refName: name,
       size,
-      views: mkViews(ageNeutral(identity || name || ''), c.triple as Record<string, unknown> | undefined),
+      identity,
+      prompt: mkPrompt(ageNeutral(identity || name || '')),
     }
     const variantSets: CharViewSet[] = variants.map((v) => {
-      // 修复 M22b-1/2：身份文本也注入变体提示词，使无 img2img / 底模失败时仍保身份（底模 front 再叠加图像级锁脸）
+      // 修复 M22b-1/2：身份文本也注入变体提示词，使无 img2img / 底模失败时仍保身份（底模板再叠加图像级锁脸）
       const appearance = [identity, String(v.appearance || v.prompt || v.label || '')].filter(Boolean).join(', ')
       return {
         name,
@@ -481,7 +479,8 @@ export function buildCharViewSets(
         baseGroup: group,
         refName: name,
         size,
-        views: mkViews(appearance, v.triple as Record<string, unknown> | undefined),
+        identity: appearance,
+        prompt: mkPrompt(appearance),
       }
     })
     return [baseSet, ...variantSets]
@@ -603,6 +602,16 @@ export function buildImagePrompts(
       for (const pd of propDefs)
         if (pd.name) propMap.set(String(pd.name), String(pd.appearance || pd.refPrompt || pd.description || ''))
       const solePropName = propDefs.length === 1 ? String(propDefs[0].name || '') : ''
+      // 场景上下文（「场景」节点连入 scene 口）：归一化 location/slug → 描述，供逐镜按地点注入提示词
+      const sceneDefs = collectJsonArray(inputs['scene'], 'scenes')
+      const sceneText = (s: Record<string, unknown>) => String(s.summary || s.description || s.prompt || s.location || s.slug || '').trim()
+      const sceneByKey = new Map<string, string>()
+      for (const s of sceneDefs) {
+        const key = String(s.locationKey || s.location || s.slug || s.name || '').toLowerCase().trim()
+        const txt = sceneText(s)
+        if (key && txt) sceneByKey.set(key, txt)
+      }
+      const soleSceneText = sceneDefs.length === 1 ? sceneText(sceneDefs[0]) : ''
       return list.map((shot, i) => {
         const desc = String(shot.prompt || shot.description || '')
         const shotChars = shot.characters as unknown[] | undefined
@@ -653,6 +662,19 @@ export function buildImagePrompts(
           )
         )
         const propHint = refPropNames.map((n) => (propMap.get(n) ? `${n}: ${propMap.get(n)}` : n)).join('; ')
+        // 场景上下文（「场景」节点连入 scene 口）：按本镜地点取该场描述注入提示（参考图仍按地点匹配做一致性）
+        const shotLoc = String(shot.location || shot.locationKey || shot.sceneName || shot.slug || '').toLowerCase().trim()
+        let sceneHint = ''
+        if (shotLoc) {
+          sceneHint = sceneByKey.get(shotLoc) || ''
+          if (!sceneHint)
+            for (const [k, v] of sceneByKey)
+              if (k && (k.includes(shotLoc) || shotLoc.includes(k))) {
+                sceneHint = v
+                break
+              }
+        }
+        if (!sceneHint) sceneHint = soleSceneText // 无法定位本镜地点 → 唯一场景兜底
         // M-scene/prop：物品状态键（与 refPropNames 同序）——优先 shot.associateAssetIds 显式绑定
         const refPropVariantIds = refPropNames.map((n) =>
           String(assoc.find((a) => a && (String(a.propId ?? '') === n || String(a.name ?? '') === n) && a.variantId)?.variantId ?? '')
@@ -664,9 +686,16 @@ export function buildImagePrompts(
             shot.timeOfDay ??
             ''
         )
-        // 角色 + 物品 + 段落氛围 合并注入 {chars} 槽（M24-lite：段落 mood/光影继承）
+        // 角色 + 物品 + 场景 + 段落氛围 合并注入 {chars} 槽（M24-lite：段落 mood/光影继承）
         const segAtmo = seg && (seg.mood || seg.lighting) ? `atmosphere — ${[seg.mood, seg.lighting].filter(Boolean).join(', ')}` : ''
-        const subjects = [hint && `characters — ${hint}`, propHint && `key props — ${propHint}`, segAtmo].filter(Boolean).join('; ')
+        const subjects = [
+          hint && `characters — ${hint}`,
+          propHint && `key props — ${propHint}`,
+          sceneHint && `setting — ${sceneHint}`,
+          segAtmo,
+        ]
+          .filter(Boolean)
+          .join('; ')
         // P2-5：景别/运镜规范化为英文短语注入 prompt（不再算出即丢）
         const grammar = shotGrammarPhrase(shot)
         return {

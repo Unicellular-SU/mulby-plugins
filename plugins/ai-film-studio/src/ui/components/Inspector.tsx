@@ -66,7 +66,8 @@ export default function Inspector() {
   const isAudioInput = node.data.kind === 'audio-input'
   const isCharacter = node.data.kind === 'character'
   const isScene = node.data.kind === 'scene'
-  const isAsset = isCharacter || isScene
+  const isProp = node.data.kind === 'prop'
+  const isAsset = isCharacter || isScene || isProp
   // 人物/场景：既可「运行此节点」按文字生成参考图，也可随时「上传图片」用本地图（二者并存）
   const runnable =
     def.category === 'text' ||
@@ -120,7 +121,7 @@ export default function Inspector() {
       window.mulby?.notification?.show('请先填写名称', 'warning')
       return
     }
-    const kind = isCharacter ? 'character' : 'scene'
+    const kind = isCharacter ? 'character' : isScene ? 'scene' : 'prop'
     const description = String((isCharacter ? p.appearance : p.description) || '')
     const prompt = String(p.refPrompt || '')
     const imgAssetId = node.data.outputs?.image?.assetId
@@ -229,9 +230,9 @@ export default function Inspector() {
           <button
             className="afs-inspector__run afs-inspector__run--alt"
             onClick={() => fileRef.current?.click()}
-            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图（覆盖文字生成的图）' : '选择本地图片作为参考图'}
+            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图（覆盖文字生成的图）' : isProp ? '选择本地图片作为物品参考图（覆盖文字生成的图）' : '选择本地图片作为参考图'}
           >
-            <Upload size={14} /> {isScene ? '上传场景图' : isCharacter ? '上传角色图' : '上传参考图'}
+            <Upload size={14} /> {isScene ? '上传场景图' : isCharacter ? '上传角色图' : isProp ? '上传物品图' : '上传参考图'}
           </button>
         </>
       )}

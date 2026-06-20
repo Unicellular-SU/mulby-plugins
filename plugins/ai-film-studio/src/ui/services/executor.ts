@@ -16,8 +16,16 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
     if (node.data.kind === 'story' || node.data.kind === 'text') {
       return { type: 'text', text: String(p.text ?? '') }
     }
+    // 资产节点参考图打包：把节点已生成/上传的参考图，带上「名字+kind(+变体)」作为 json 输出的 items 同行下发，
+    // 这样下游一根「角色/场景/物品」线即可拿到身份+图（refsFromValues 会从 items 提取图，按名匹配）。
+    const bundleImage = (kind: string, variantId?: string): PortValue[] | undefined => {
+      const img = node.data.outputs?.image
+      if (!img) return undefined
+      const name = p.name ? String(p.name) : undefined
+      return [{ ...img, type: 'image', meta: { ...(img.meta || {}), ...(name ? { name } : {}), kind, ...(variantId ? { variantId } : {}) } }]
+    }
     if (node.data.kind === 'character') {
-      // 'image' 口取已生成/上传的参考图；其余口给角色身份 JSON
+      // 'image' 口取已生成/上传的参考图（旧工程边兼容）；其余口给角色身份 JSON（参考图打包进 items）
       if (handle === 'image') return node.data.outputs?.image ?? null
       // M27：手工授权多时期变体——variantsJson 安全解析为 variants[]（非法 JSON 忽略，不影响单期角色）
       let variants: unknown[] | undefined
@@ -45,21 +53,26 @@ export function resolveOutput(node: FilmNode, handle: string): PortValue | null 
             },
           ],
         },
+        items: bundleImage('character'),
       }
     }
     if (node.data.kind === 'scene') {
       if (handle === 'image') return node.data.outputs?.image ?? null
+      const variant = String(p.variant ?? '').trim()
       return {
         type: 'json',
         json: { scenes: [{ slug: p.name ?? '', summary: p.description ?? '', prompt: p.refPrompt ?? '' }] },
+        items: bundleImage('scene', variant || undefined),
       }
     }
     if (node.data.kind === 'prop') {
-      // 'image' 口取已生成/上传的物品参考图；其余口给物品身份 JSON（供 keyframe 按名匹配 + 提示注入）
+      // 'image' 口取已生成/上传的物品参考图（旧工程边兼容）；其余口给物品身份 JSON（参考图打包进 items）
       if (handle === 'image') return node.data.outputs?.image ?? null
+      const variant = String(p.variant ?? '').trim()
       return {
         type: 'json',
         json: { props: [{ name: p.name ?? '', appearance: p.description ?? '', refPrompt: p.refPrompt ?? '' }] },
+        items: bundleImage('prop', variant || undefined),
       }
     }
   }
