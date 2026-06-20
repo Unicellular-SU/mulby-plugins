@@ -17,7 +17,7 @@ import { topoOrder, resolveOutput, gatherInputs, computeInputHash } from '../ser
 import { runVideo, abortVideo } from '../services/providers'
 import { downloadVideoToDisk } from '../services/download'
 import { usePromptStore, getPrompt } from './promptStore'
-import { ensureFfmpeg, ffmpegAvailable, probeDuration, composeFilm, abortFfmpeg, parseResolution, clampTransitionDur, type SubtitleMode, type AudioTrack, type FilmTransition } from '../services/ffmpeg'
+import { ensureFfmpeg, ffmpegAvailable, probeDuration, composeFilm, abortFfmpeg, extractLastFrame, parseResolution, clampTransitionDur, type SubtitleMode, type AudioTrack, type FilmTransition } from '../services/ffmpeg'
 import { buildSrt } from '../services/subtitles'
 import { synthSpeech } from '../services/tts'
 import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
@@ -197,6 +197,39 @@ async function mapPool<T, R>(
   const w = Math.max(1, Math.min(limit, items.length))
   await Promise.all(Array.from({ length: w }, () => worker()))
   return results
+}
+
+/**
+ * 边等 promise 边监测停止：promise 先就绪则取其值；运行被停止（stopped()）则解析为 null。
+ * 用于链式生成（关键帧/片段接龙）里「等上一项产物」的等待——避免上一项因停止而未解链时，
+ * 后续项的 await 永久挂起，拖死整跑。promise 与停止任一先到都会清掉轮询定时器。
+ */
+function awaitOrStop<T>(p: Promise<T>, stopped: () => boolean): Promise<T | null> {
+  return new Promise((resolve) => {
+    let done = false
+    const t = setInterval(() => {
+      if (done) return
+      if (stopped()) {
+        done = true
+        clearInterval(t)
+        resolve(null)
+      }
+    }, 200)
+    p.then(
+      (v) => {
+        if (done) return
+        done = true
+        clearInterval(t)
+        resolve(v)
+      },
+      () => {
+        if (done) return
+        done = true
+        clearInterval(t)
+        resolve(null)
+      }
+    )
+  })
 }
 
 export interface ProjectData extends ProjectMeta {
@@ -1330,7 +1363,8 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
               )
             : []
           // fix 1：承接镜头取「上一镜关键帧」作 img2img 主参考（承载构图/光线/站位），角色/场景参考图退为附加参考
-          const chainBase = canEdit && job.meta?.chainFromPrev === true && i > 0 ? await chainImg[i - 1] : null
+          const chainBase =
+            canEdit && job.meta?.chainFromPrev === true && i > 0 ? await awaitOrStop(chainImg[i - 1], () => !get().isRunning) : null
           let base64: string
           let mime: string
           // 抛错不在此解链：交给 mapPool 重试；只有最终失败(onError)才解 null。重试成功仍能把真图传给后续承接镜头。
@@ -1546,6 +1580,8 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         audioModeLabel === '模型自带声' ? 'native' : audioModeLabel === '外置合成' ? 'external' : 'silent'
       // fix #5 镜头顺接：开启后，连贯镜头用「下一镜首帧」作本镜尾帧（首尾帧补间），消除割裂；硬切处不接
       const continuityOn = String(node.data.params?.continuity ?? '关闭') === '连贯镜头尾接首'
+      // seed 锁定：>0 时整段所有片段共用同一 seed → 跨片段风格/运动更一致（供应商不支持则忽略）
+      const videoSeed = Number(node.data.params?.seed ?? 0) > 0 ? Number(node.data.params?.seed) : undefined
       // 并发扇出：N 个片段最多 fanoutConcurrency 个同时 submit→poll（异步视频并行收益最大），保序、部分成功
       // M30：逐项状态——预占 total 格，失败片段画布上红框可见可重试
       // M30 重试失败项：上次 gen.items 作种子，已 done 的片段不重生成
@@ -1564,11 +1600,21 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
       for (const it of genItems) if (it.status === 'done' && it.ref) results[it.idx] = it.ref // 种子：已成功片段就位
       let done = 0
       let failed = 0
+      // fix 4 真·尾帧接龙：承接片段（meta.chainFromPrev，与关键帧链式同源）用「上一片段真实最后一帧」作首帧，
+      // 保证无缝衔接——即便供应商不支持首尾帧约束也接得上。需 ffmpeg 就绪 + 顺接开启；best-effort，抽帧失败回退用本镜关键帧。
+      const lfReady: Array<(v: string | null) => void> = []
+      const lfChain: Array<Promise<string | null>> = Array.from({ length: total }, (_, i) => new Promise((res) => (lfReady[i] = res)))
+      const settleLF = (i: number, v: string | null) => lfReady[i]?.(v)
+      const lfChainsFromPrev = (i: number) => continuityOn && canProbe && i > 0 && frameMetas[i]?.chainFromPrev === true
+      const lfNeededAfter = (i: number) => continuityOn && canProbe && i + 1 < total && frameMetas[i + 1]?.chainFromPrev === true
       await mapPool(
         Array.from({ length: total }, (_, i) => i),
         fanoutConcurrency(),
         async (i): Promise<PortValue> => {
-          if (results[i]) return results[i] as PortValue // M30 重试：已成功片段直接返回，不重生成
+          if (results[i]) {
+            settleLF(i, null) // M30 重试：已成功片段直接返回；解链避免阻塞后续承接片段
+            return results[i] as PortValue
+          }
           if (total > 1) {
             genItems[i] = { ...genItems[i], status: 'running' }
             patchGen()
@@ -1626,14 +1672,16 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             const ambient = String(fm.ambient ?? sshot.ambient ?? '')
             audioPrompt = buildAudioPrompt(dialogue, sfx, ambient, get().globals.dialogueLang || '中文') // 显式对白语言，防默认英文
           }
+          // fix 4：承接片段取「上一片段真实尾帧」作首帧（抽帧失败/未就绪则回退本镜关键帧；停止则放弃接龙不挂起）
+          const chainFirst = lfChainsFromPrev(i) ? await awaitOrStop(lfChain[i - 1], () => !get().isRunning) : null
           const { url } = await runVideo({
             cfg: provider,
             apiKey,
             req: {
               prompt: framePrompt || '',
-              imageUrl: frameUrls[i] || undefined,
+              imageUrl: chainFirst || frameUrls[i] || undefined,
               lastImageUrl: tailUrls[i] || tailUrls[0] || contLast, // 显式尾帧优先，否则顺接到下一镜首帧
-
+              seed: videoSeed, // seed 锁定：整段共用，跨片段更一致
               duration: frameDuration || undefined,
               audioMode,
               audioPrompt: audioMode === 'native' && audioPrompt ? audioPrompt : undefined,
@@ -1659,6 +1707,9 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
           } catch {
             // 忽略
           }
+          // fix 4：下一片段要承接本片段 → 从已下载的本片段抽取真实尾帧供其作首帧（best-effort，不阻塞产出）
+          if (lfNeededAfter(i)) settleLF(i, (localPath ? await extractLastFrame(localPath, String(i)) : undefined) || null)
+          else settleLF(i, null)
           let measured: number | undefined
           if (localPath && canProbe) measured = await probeDuration(localPath).catch(() => undefined)
           return {
@@ -1687,6 +1738,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             })
           },
           onError: (i, err) => {
+            settleLF(i, null) // 最终失败解链：后续承接片段回退用本镜关键帧，不会永久等待
             genItems[i] = { ...genItems[i], status: 'failed', error: err instanceof Error ? err.message : String(err) }
             failed++
             if (total > 1) patchGen()

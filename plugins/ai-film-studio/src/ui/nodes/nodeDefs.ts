@@ -342,6 +342,8 @@ export const NODE_DEFS: NodeDef[] = [
         options: ['关闭', '连贯镜头尾接首'],
         default: '连贯镜头尾接首',
       },
+      // seed 锁定：>0 时整段片段共用同一 seed，跨片段风格/运动更一致（0=随机，供应商不支持则忽略）
+      { key: 'seed', label: '随机种子(0=随机)', control: 'number', default: 0 },
     ],
   },
   {
@@ -364,6 +366,7 @@ export const NODE_DEFS: NodeDef[] = [
         options: ['无声', '模型自带声', '外置合成'],
         default: '无声',
       },
+      { key: 'seed', label: '随机种子(0=随机)', control: 'number', default: 0 },
     ],
   },
   {

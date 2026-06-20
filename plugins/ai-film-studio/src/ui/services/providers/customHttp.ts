@@ -109,6 +109,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
         model: cfg.model,
         duration: req.duration,
         size: req.size,
+        seed: req.seed, // 模板可用 {seed} / {?seed}…{/seed} 注入
         videoUrl,
         drivingAudioUrl,
         audioMode: req.audioMode,
@@ -120,6 +121,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
       if (lastImageUrl) body.tail_image_url = lastImageUrl // 尾帧（供应商不支持则忽略）
       if (req.duration) body.duration = req.duration
       if (req.size) body.size = req.size
+      if (req.seed != null) body.seed = req.seed // seed 锁定（供应商不支持则忽略）
       if (videoUrl) body.video_url = videoUrl // P2-8 口型同步：被驱动视频
       if (drivingAudioUrl) body.audio_url = drivingAudioUrl // driving / lipsync 音频
       if (req.audioMode === 'native' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = true

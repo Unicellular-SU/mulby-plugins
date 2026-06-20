@@ -69,6 +69,7 @@ export interface VideoGenRequest {
   lastImageUrl?: string // 尾帧（first-last-frame，如 WAN FLF2V / Kling 起止帧）
   duration?: number
   size?: string
+  seed?: number // seed 锁定：整段片段共用同一 seed，跨片段风格/运动更一致（供应商不支持则忽略）
   // 双轨音频（M18-B，全可选）
   audioMode?: 'native' | 'external' | 'silent' // native=模型自带声；external=无声生成留待外置合成；silent=纯无声
   audioPrompt?: string // 拼好的对白/SFX/ambient 文本（prompt-only 家族用）

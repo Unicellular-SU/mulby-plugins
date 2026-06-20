@@ -26,6 +26,7 @@ export const falAdapter: VideoProviderAdapter = {
     // 尾帧（first-last-frame）：fal 上 Kling/WAN 等以 tail_image_url 接收；不支持的模型会忽略
     if (req.lastImageUrl) body.tail_image_url = req.lastImageUrl
     if (req.duration) body.duration = String(req.duration)
+    if (req.seed != null) body.seed = req.seed // seed 锁定（fal 多数视频模型支持；不支持的忽略）
     // M18-B 双轨音频：native=对白/SFX 拼进 prompt + 置开关字段 true；external=显式关原生音频省成本
     if (req.audioMode === 'native') {
       if (req.audioPrompt) body.prompt = `${req.prompt}\n${req.audioPrompt}`

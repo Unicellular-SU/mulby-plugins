@@ -9,6 +9,7 @@
  * 片段分辨率/帧率可能各异，统一用 filter_complex 做 scale+pad+setsar+fps 归一，
  * 再 concat（视频流），避免「不同参数无法拼接」。
  */
+import { ensureSubdir, readAsDataUrl } from './fsutil'
 
 export type SubtitleMode = 'off' | 'soft' | 'burn'
 
@@ -292,6 +293,25 @@ export async function probeDuration(localPath: string): Promise<number | undefin
     }) as FfmpegTaskLike
     await task.promise.catch(() => {})
     return dur
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 抽取本地视频的最后一帧为 dataURL（片段接龙：上一片段真实尾帧 → 下一片段首帧，保证无缝衔接，
+ * 即便供应商不支持首尾帧约束也能接得上）。走宿主 ffmpeg：-sseof -1 定位到末尾约 1s，
+ * -update 1 逐帧覆写同一文件 → 最终留下的就是最后一帧。best-effort，失败返回 undefined。
+ * 调用方需先确保 ffmpeg 就绪（ffmpegAvailable）。
+ */
+export async function extractLastFrame(videoLocalPath: string, tag = ''): Promise<string | undefined> {
+  try {
+    if (!videoLocalPath) return undefined
+    const dir = await ensureSubdir('frames')
+    const out = `${dir}/last_${tag}_${Date.now()}.jpg`.replace(/\\/g, '/')
+    const task = ff().run(['-y', '-sseof', '-1', '-i', videoLocalPath, '-update', '1', '-q:v', '2', out], () => {}) as FfmpegTaskLike
+    await task.promise
+    return await readAsDataUrl(out, 'image/jpeg')
   } catch {
     return undefined
   }
