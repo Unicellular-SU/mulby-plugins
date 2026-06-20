@@ -33,9 +33,14 @@ export function LeftDock() {
         return (
           <button
             key={it.kind}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/x-ace-kind', it.kind)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
             onClick={() => addAtViewCenter(it.kind)}
-            title={`添加${it.label}卡片`}
-            className="w-11 h-11 grid place-items-center gap-0.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 group"
+            title={`点击或拖到画布添加${it.label}卡片`}
+            className="w-11 h-11 grid place-items-center gap-0.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 group cursor-grab active:cursor-grabbing"
           >
             <Icon size={18} style={{ color: it.accent }} className="group-hover:scale-110 transition-transform" />
             <span className="text-[10px] opacity-70">{it.label}</span>

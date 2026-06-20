@@ -83,6 +83,12 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         height: card.h,
         ['--tw-ring-color' as any]: meta.accent
       }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        if (card.assetUrl && (card.kind === 'image' || card.kind === 'source' || card.kind === 'video')) {
+          useUi.getState().setPreview({ url: card.assetUrl, kind: card.kind === 'video' ? 'video' : 'image' })
+        }
+      }}
     >
       {/* 内容层：承载边框、圆角与裁剪；无标题栏 */}
       <div
@@ -118,7 +124,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
           <div className="w-full h-full grid place-items-center p-3 text-center">
             <div className="flex flex-col items-center gap-2 opacity-60">
               <Icon size={24} style={{ color: meta.accent }} />
-              <span className="text-xs line-clamp-3">{card.prompt || '双击编辑 / 在右侧填写并生成'}</span>
+              {card.prompt && <span className="text-xs line-clamp-3">{card.prompt}</span>}
             </div>
           </div>
         )}

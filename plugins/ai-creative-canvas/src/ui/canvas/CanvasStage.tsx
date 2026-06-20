@@ -9,6 +9,8 @@ import { Minimap } from './Minimap'
 import { SelectionBox, type ScreenRect } from './SelectionBox'
 import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
+import { Lightbox } from './Lightbox'
+import type { CardKind } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
@@ -51,11 +53,16 @@ export function CanvasStage() {
 
   const onDrop = (e: RDragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    const files = e.dataTransfer?.files
-    if (!files || files.length === 0) return
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)
-    void importFiles(files, world)
+    // 从左侧拖组件 → 新建对应卡片
+    const kind = e.dataTransfer?.getData('application/x-ace-kind')
+    if (kind) {
+      useGraph.getState().addCard(kind as CardKind, world)
+      return
+    }
+    const files = e.dataTransfer?.files
+    if (files && files.length) void importFiles(files, world)
   }
 
   const flush = () => {
@@ -181,8 +188,20 @@ export function CanvasStage() {
   }
 
   const onDoubleClick = (e: RPointerEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement
-    if (target.closest('[data-card-id]')) return
+    // 注意：拖动用了 setPointerCapture(stage)，会把 click/dblclick 的 target 重定向到舞台，
+    // 故不能用 e.target 判断；改用 elementFromPoint 取光标下真正的元素。
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+    if (el?.closest('[data-interactive]')) return
+    const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
+    if (cardEl) {
+      // 双击有内容的节点 → 放大预览
+      const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
+      if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source' || c.kind === 'video')) {
+        useUi.getState().setPreview({ url: c.assetUrl, kind: c.kind === 'video' ? 'video' : 'image' })
+      }
+      return
+    }
+    // 双击空白 → 新建文本卡
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)
     useGraph.getState().addCard('text', world)
@@ -339,6 +358,7 @@ export function CanvasStage() {
       <CanvasControls onFit={doFit} />
       <ConnectMenu />
       <NodeEditor />
+      <Lightbox />
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
           <div className="text-center opacity-40 text-sm">

@@ -17,6 +17,8 @@ interface UiState {
   setConnectTemp: (t: { x1: number; y1: number; x2: number; y2: number } | null) => void
   connectMenu: { sx: number; sy: number; wx: number; wy: number; sourceId: string } | null
   setConnectMenu: (m: { sx: number; sy: number; wx: number; wy: number; sourceId: string } | null) => void
+  preview: { url: string; kind: 'image' | 'video' } | null
+  setPreview: (p: { url: string; kind: 'image' | 'video' } | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -35,5 +37,7 @@ export const useUi = create<UiState>((set) => ({
   connectTemp: null,
   setConnectTemp: (connectTemp) => set({ connectTemp }),
   connectMenu: null,
-  setConnectMenu: (connectMenu) => set({ connectMenu })
+  setConnectMenu: (connectMenu) => set({ connectMenu }),
+  preview: null,
+  setPreview: (preview) => set({ preview })
 }))

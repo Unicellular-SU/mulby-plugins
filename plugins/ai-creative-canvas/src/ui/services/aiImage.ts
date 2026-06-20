@@ -6,16 +6,32 @@ function ai(): any {
   return (window as any).mulby.ai
 }
 
-const ASPECT_SIZE: Record<string, string> = {
-  '1:1': '1024x1024',
-  '4:3': '1152x896',
-  '3:4': '896x1152',
-  '16:9': '1344x768',
-  '9:16': '768x1344'
+// 参考 ai-film-studio：比例 → 尺寸（短边 ≥720，宿主原样转发给 provider）
+const BASE_SIZE: Record<string, [number, number]> = {
+  '1:1': [1024, 1024],
+  '16:9': [1280, 720],
+  '9:16': [720, 1280],
+  '4:3': [1024, 768],
+  '3:4': [768, 1024]
+}
+function computeSize(aspect: string, resolution: string): string {
+  const [w, h] = BASE_SIZE[aspect] || [1024, 1024]
+  const scale = resolution === '4K' ? 3 : resolution === '2K' ? 2 : 1
+  const r64 = (n: number) => Math.max(64, Math.round((n * scale) / 64) * 64)
+  return `${r64(w)}x${r64(h)}`
+}
+// 关键：把画幅写进提示词——很多图像模型忽略 size、只认提示词里的比例（ai-film-studio 同款做法）
+function aspectHint(aspect: string): string {
+  const m = /^(\d+):(\d+)$/.exec(aspect)
+  if (!m) return ''
+  const aw = Number(m[1])
+  const ah = Number(m[2])
+  const ori = aw > ah ? '横向 landscape' : aw < ah ? '竖向 portrait' : '方形 square'
+  return `\n\n【画幅比例 ${aspect}，${ori}】`
 }
 
 export interface ImageGenResult {
-  images: string[] // base64
+  images: string[]
   mime: string
 }
 
@@ -30,8 +46,10 @@ export async function generateImage(
 
   const inputs = resolveGenInputs(card, board)
   const params = card.params || {}
-  const size = ASPECT_SIZE[String(params.aspect || '')] || (params.size as string) || '1024x1024'
+  const aspect = String(params.aspect || '1:1')
+  const size = computeSize(aspect, String(params.resolution || '1K'))
   const count = Math.max(1, Math.min(4, Number(params.count) || 1))
+  const prompt = (card.prompt || '') + aspectHint(aspect) // 尺寸 + 提示词双保险
 
   // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []
@@ -53,13 +71,13 @@ export async function generateImage(
       model,
       imageAttachmentId: attIds[0],
       referenceAttachmentIds: attIds.slice(1),
-      prompt: card.prompt
+      prompt
     })
     images = res.images
     onProgress(1)
   } else {
     const req = ai().images.generateStream(
-      { model, prompt: card.prompt, size, count },
+      { model, prompt, size, count },
       (chunk: any) => {
         if (chunk.__requestId) {
           onRequestId(chunk.__requestId)

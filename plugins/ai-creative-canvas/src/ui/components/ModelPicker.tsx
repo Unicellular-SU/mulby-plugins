@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listImageModels, listTextModels, type ModelOption } from '../services/models'
+import { Select, type SelectOption } from './Select'
 
 export function ModelPicker({
   kind,
@@ -22,7 +23,6 @@ export function ModelPicker({
       if (!alive) return
       setModels(m)
       setLoading(false)
-      // 图像必须有模型：自动选第一个，开箱即用
       if (kind === 'image' && !value && !autoPicked.current && m.length > 0) {
         autoPicked.current = true
         onChange(m[0].id)
@@ -34,17 +34,14 @@ export function ModelPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind])
 
+  const opts: SelectOption[] = [
+    { value: '', label: loading ? '加载模型…' : kind === 'image' ? '（选择图像模型）' : '默认文本模型' },
+    ...models.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))
+  ]
+
   return (
     <div className="flex flex-col gap-1">
-      <select className="ace-input" value={value || ''} onChange={(e) => onChange(e.target.value || null)}>
-        <option value="">{loading ? '加载模型…' : kind === 'image' ? '（选择图像模型）' : '默认文本模型'}</option>
-        {models.map((m) => (
-          <option key={m.id} value={m.id}>
-            {m.label}
-            {m.provider ? ` · ${m.provider}` : ''}
-          </option>
-        ))}
-      </select>
+      <Select value={value || ''} options={opts} onChange={(v) => onChange(v || null)} />
       {!loading && kind === 'image' && models.length === 0 && (
         <span className="text-[11px] text-amber-500">未检测到图像模型，请在 Mulby「AI 设置 → 模型管理」配置 image-generation 模型。</span>
       )}

@@ -1,42 +1,16 @@
 import { useGraph } from '../store/graphStore'
+import { Select, type SelectOption } from './Select'
 import type { Card } from '../types'
 
-const ASPECTS: [string, string][] = [
-  ['1:1', '1:1'],
-  ['4:3', '4:3'],
-  ['3:4', '3:4'],
-  ['16:9', '16:9'],
-  ['9:16', '9:16']
+const ASPECTS: SelectOption[] = [
+  { value: '1:1', label: '1:1' },
+  { value: '4:3', label: '4:3' },
+  { value: '3:4', label: '3:4' },
+  { value: '16:9', label: '16:9' },
+  { value: '9:16', label: '9:16' }
 ]
 
-function Sel({
-  value,
-  onChange,
-  title,
-  options
-}: {
-  value: string
-  onChange: (v: string) => void
-  title: string
-  options: [string, string][]
-}) {
-  return (
-    <select
-      title={title}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="shrink-0 text-xs rounded-md px-1.5 py-1 bg-black/5 dark:bg-white/10 outline-none focus:ring-1 focus:ring-indigo-400"
-    >
-      {options.map(([v, l]) => (
-        <option key={v} value={v}>
-          {l}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-// 不同节点类型的生成参数（参考 AI-CanvasPro：图像有比例/数量，视频有比例/时长，音频有音色/语速/格式）
+// 不同节点类型的生成参数（参考 AI-CanvasPro：图像比例/数量，视频比例/时长，音频音色/语速/格式）
 export function ParamControls({ card }: { card: Card }) {
   const updateCard = useGraph((s) => s.updateCard)
   const p = card.params || {}
@@ -45,31 +19,32 @@ export function ParamControls({ card }: { card: Card }) {
   if (card.kind === 'image') {
     return (
       <>
-        <Sel title="比例" value={String(p.aspect || '1:1')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
-        <Sel title="数量" value={String(p.count || 1)} onChange={(v) => set('count', Number(v))} options={[['1', '×1'], ['2', '×2'], ['3', '×3'], ['4', '×4']]} />
+        <Select className="w-[78px] shrink-0" value={String(p.aspect || '1:1')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
+        <Select className="w-[68px] shrink-0" value={String(p.resolution || '1K')} onChange={(v) => set('resolution', v)} options={[{ value: '1K', label: '1K' }, { value: '2K', label: '2K' }, { value: '4K', label: '4K' }]} />
+        <Select className="w-[62px] shrink-0" value={String(p.count || 1)} onChange={(v) => set('count', Number(v))} options={[{ value: '1', label: '×1' }, { value: '2', label: '×2' }, { value: '3', label: '×3' }, { value: '4', label: '×4' }]} />
       </>
     )
   }
   if (card.kind === 'video') {
     return (
       <>
-        <Sel title="比例" value={String(p.aspect || '16:9')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
-        <Sel title="时长" value={String(p.duration || 5)} onChange={(v) => set('duration', Number(v))} options={[['3', '3s'], ['5', '5s'], ['8', '8s'], ['10', '10s']]} />
+        <Select className="w-[78px] shrink-0" value={String(p.aspect || '16:9')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
+        <Select className="w-[72px] shrink-0" value={String(p.duration || 5)} onChange={(v) => set('duration', Number(v))} options={[{ value: '3', label: '3s' }, { value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }]} />
       </>
     )
   }
   if (card.kind === 'audio') {
     return (
       <>
-        <Sel title="音色" value={String(p.voice || 'alloy')} onChange={(v) => set('voice', v)} options={[['alloy', 'alloy'], ['echo', 'echo'], ['fable', 'fable'], ['onyx', 'onyx'], ['nova', 'nova'], ['shimmer', 'shimmer']]} />
-        <Sel title="语速" value={String(p.speed || 1)} onChange={(v) => set('speed', Number(v))} options={[['0.75', '0.75×'], ['1', '1×'], ['1.25', '1.25×'], ['1.5', '1.5×']]} />
-        <Sel title="格式" value={String(p.format || 'mp3')} onChange={(v) => set('format', v)} options={[['mp3', 'mp3'], ['wav', 'wav'], ['opus', 'opus']]} />
+        <Select className="w-[92px] shrink-0" value={String(p.voice || 'alloy')} onChange={(v) => set('voice', v)} options={['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => ({ value: v, label: v }))} />
+        <Select className="w-[76px] shrink-0" value={String(p.speed || 1)} onChange={(v) => set('speed', Number(v))} options={[{ value: '0.75', label: '0.75×' }, { value: '1', label: '1×' }, { value: '1.25', label: '1.25×' }, { value: '1.5', label: '1.5×' }]} />
+        <Select className="w-[76px] shrink-0" value={String(p.format || 'mp3')} onChange={(v) => set('format', v)} options={[{ value: 'mp3', label: 'mp3' }, { value: 'wav', label: 'wav' }, { value: 'opus', label: 'opus' }]} />
       </>
     )
   }
   if (card.kind === 'text') {
     return (
-      <Sel title="创意度" value={String(p.temperature ?? 0.7)} onChange={(v) => set('temperature', Number(v))} options={[['0.3', '严谨'], ['0.7', '均衡'], ['1', '发散']]} />
+      <Select className="w-[92px] shrink-0" value={String(p.temperature ?? 0.7)} onChange={(v) => set('temperature', Number(v))} options={[{ value: '0.3', label: '严谨' }, { value: '0.7', label: '均衡' }, { value: '1', label: '发散' }]} />
     )
   }
   return null
