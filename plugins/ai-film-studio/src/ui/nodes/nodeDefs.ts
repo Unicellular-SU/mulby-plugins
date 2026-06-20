@@ -338,8 +338,9 @@ export const NODE_DEFS: NodeDef[] = [
         label: '镜头顺接',
         control: 'select',
         // 顺接：让上一镜的尾帧=下一镜的首帧（首尾帧补间），消除割裂感。仅在「连贯动作」处接，硬切处不接。
+        // 默认开：配合关键帧链式生成（承接镜头由上一帧派生），同段相邻片段无缝衔接、不再诡异扭曲。
         options: ['关闭', '连贯镜头尾接首'],
-        default: '关闭',
+        default: '连贯镜头尾接首',
       },
     ],
   },
@@ -490,7 +491,9 @@ export const NODE_DEFS: NodeDef[] = [
       },
       { key: 'fps', label: '帧率', control: 'number', default: 24 },
       { key: 'subtitleMode', label: '字幕', control: 'select', options: ['关闭', '烧录字幕', '软字幕'], default: '关闭' },
-      { key: 'transition', label: '转场', control: 'select', options: ['无转场', '交叉淡化', '淡入淡出'], default: '无转场' },
+      // 默认「淡入淡出」=整片首尾淡黑场（不在每个镜间加溶解），片间仍是干净硬切，不破坏顺接的无缝衔接，又有成片的开合感。
+      // 想每镜都溶解可选「交叉淡化」（注意会软化连贯片段的无缝接点）。
+      { key: 'transition', label: '转场', control: 'select', options: ['无转场', '交叉淡化', '淡入淡出'], default: '淡入淡出' },
     ],
   },
   {

@@ -1285,6 +1285,14 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
       for (const it of genItems) if (it.status === 'done' && it.ref) results[it.idx] = it.ref // 种子：已成功项就位
       let done = 0
       let failed = 0
+      // fix 1 关键帧链式生成：承接镜头（meta.chainFromPrev）由「上一镜关键帧」img2img 派生，
+      // 让同一连贯段的相邻画格构图/光线/站位一致——i2v 顺接补间时就不会在两张不相干的图之间诡异扭曲。
+      // 每帧把自己的 {base64,mime} 通过 chainReady[i] 解给下一帧；缺图像编辑能力则退回各自独立生成。
+      const chainReady: Array<(v: { base64: string; mime: string } | null) => void> = []
+      const chainImg: Array<Promise<{ base64: string; mime: string } | null>> = jobs.map(
+        (_, i) => new Promise((res) => (chainReady[i] = res))
+      )
+      const settleChain = (i: number, v: { base64: string; mime: string } | null) => chainReady[i]?.(v)
       const writeBack = () => {
         const partial = results.filter(Boolean) as PortValue[]
         patchNode(id, {
@@ -1299,7 +1307,10 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         jobs,
         fanoutConcurrency(),
         async (job, i): Promise<PortValue> => {
-          if (results[i]) return results[i] as PortValue // M30 重试：已成功项直接返回，不重烧
+          if (results[i]) {
+            settleChain(i, null) // M30 重试：已成功项直接返回，不重烧；解开链避免阻塞后续承接镜头
+            return results[i] as PortValue
+          }
           if (total > 1) {
             genItems[i] = { ...genItems[i], status: 'running' }
             patchGen()
@@ -1318,9 +1329,22 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
                 job.sceneVariantId
               )
             : []
+          // fix 1：承接镜头取「上一镜关键帧」作 img2img 主参考（承载构图/光线/站位），角色/场景参考图退为附加参考
+          const chainBase = canEdit && job.meta?.chainFromPrev === true && i > 0 ? await chainImg[i - 1] : null
           let base64: string
           let mime: string
-          if (matched.length) {
+          // 抛错不在此解链：交给 mapPool 重试；只有最终失败(onError)才解 null。重试成功仍能把真图传给后续承接镜头。
+          if (chainBase) {
+            const r = await editImage({
+              model,
+              prompt: job.prompt,
+              refBase64: chainBase.base64,
+              refMime: chainBase.mime,
+              extraRefs: matched.map((x) => ({ base64: x.base64, mime: x.mime })),
+            })
+            base64 = r.base64
+            mime = r.mime
+          } else if (matched.length) {
             const [primary, ...rest] = matched
             const r = await editImage({
               model,
@@ -1342,6 +1366,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             base64 = r.base64
             mime = r.mime
           }
+          settleChain(i, { base64, mime }) // 本帧就绪 → 解开下一承接镜头的 img2img 派生
           const assetId = await saveAsset(base64, mime)
           return { type: 'image', assetId, mime, meta: job.meta }
         },
@@ -1356,6 +1381,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
             if (total > 1) patchGen()
           },
           onError: (i, err) => {
+            settleChain(i, null) // 最终失败解链：后续承接镜头退回独立生成，不会永久等待
             genItems[i] = { ...genItems[i], status: 'failed', error: err instanceof Error ? err.message : String(err) }
             failed++
             if (total > 1) patchGen()
@@ -1550,10 +1576,28 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
           const fm = frameMetas[i] || {}
           const sshot = shotList[i] || shotList[0] || {}
           const cameraMotion = shotCameraMotion({ camera: fm.camera ?? sshot.camera, shotSize: fm.shotSize ?? sshot.shotSize })
-          const shotPrompt =
-            [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
           const vstyle = videoStyleTag(get().globals.stylePackId, get().globals.style) // M21：视频风格标签（i2v 由关键帧继承，t2v 直接受益）
-          const framePrompt = [[shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText, vstyle].filter(Boolean).join(', ')
+          // fix 2 图生视频=运动优先：首帧已含画面，提示词聚焦「主体动作 + 摄影机运动(分开写) + 落点」，
+          // 并强锚定首帧（保持构图/角色/光线/场景不变），避免重描整段场景导致模型漂移、偏离关键帧。
+          // 文生视频无首帧，仍需完整场景描述。
+          let framePrompt: string
+          if (node.data.kind === 'i2v') {
+            const action = [fm.motion, node.data.params?.motion].filter(Boolean).map(String).join(', ').trim()
+            const subjectAction = action || String(fm.prompt || sshot.prompt || sshot.description || '')
+            framePrompt = [
+              subjectAction && `subject motion: ${subjectAction}`,
+              cameraMotion && `camera ${cameraMotion}`,
+              'animate the first frame only — keep its composition, characters, lighting, color and setting unchanged',
+              'smooth, natural motion that settles at the end; no scene change, no hard cut, no morphing',
+              vstyle,
+            ]
+              .filter(Boolean)
+              .join(', ')
+          } else {
+            const shotPrompt =
+              [fm.prompt, fm.motion].filter(Boolean).map(String).join(', ') || String(sshot.prompt || sshot.description || '')
+            framePrompt = [[shotPrompt, cameraMotion].filter(Boolean).join(', ') || promptText, vstyle].filter(Boolean).join(', ')
+          }
           // M-quick：钳制到视频模型支持区间 [4,15]s，防 LLM/手填异常时长被原样发出导致供应商报错
           const frameDuration = Math.min(Math.max(Number(fm.duration ?? sshot.duration ?? node.data.params?.duration ?? 5) || 5, 4), 15)
           // fix #5：本镜是否顺接到下一镜首帧——下一镜显式 continuousFromPrev 为准，缺省回退「同场景」启发式

@@ -686,13 +686,30 @@ export function buildImagePrompts(
             shot.timeOfDay ??
             ''
         )
-        // 角色 + 物品 + 场景 + 段落氛围 合并注入 {chars} 槽（M24-lite：段落 mood/光影继承）
-        const segAtmo = seg && (seg.mood || seg.lighting) ? `atmosphere — ${[seg.mood, seg.lighting].filter(Boolean).join(', ')}` : ''
+        // 连贯性（故事板原则：关键帧=分镜画格，相邻画格要接得上）：本镜是否紧接上一镜——
+        // 显式 continuousFromPrev 为准，否则同 sceneId 视为同一连贯动作。run 据 meta.chainFromPrev 让本帧由上一帧改图派生。
+        const prevShot = i > 0 ? list[i - 1] : undefined
+        const cfp = shot.continuousFromPrev === true || String(shot.continuousFromPrev ?? '') === 'true'
+        const cfpFalse = shot.continuousFromPrev === false || String(shot.continuousFromPrev ?? '') === 'false'
+        const sameScene = !!shot.sceneId && String(shot.sceneId) === String(prevShot?.sceneId ?? '')
+        const chains = i > 0 && (cfp || (!cfpFalse && sameScene))
+        // 光线/色温显式钉死（fix 3）：每镜带上光影方向并要求跨镜一致；mood 单列，不再和光影混成一团
+        const moodHint = String(seg?.mood ?? shot.mood ?? '').trim()
+        const lightHint = String(seg?.lighting ?? '').trim()
+        const lightClause = lightHint ? `lighting — ${lightHint}, consistent light direction and color temperature across shots` : ''
+        const moodClause = moodHint ? `mood — ${moodHint}` : ''
+        // 连贯镜头：提示模型「直接承接上一画格」（同景同光、人物外观与画面站位一致）
+        const contClause = chains
+          ? 'continuity — continue directly from the previous shot: same location, same lighting and color grade, keep characters consistent in appearance and screen position'
+          : ''
+        // 角色 + 物品 + 场景 + 光线 + 情绪（+ 连贯承接）合并注入 {chars} 槽
         const subjects = [
+          contClause,
           hint && `characters — ${hint}`,
           propHint && `key props — ${propHint}`,
           sceneHint && `setting — ${sceneHint}`,
-          segAtmo,
+          lightClause,
+          moodClause,
         ]
           .filter(Boolean)
           .join('; ')
@@ -733,6 +750,8 @@ export function buildImagePrompts(
             // 镜头顺接（fix #5）：sceneId 判断是否同场，continuousFromPrev 由分镜标注是否紧接上一镜连贯动作
             sceneId: shot.sceneId != null ? String(shot.sceneId) : undefined,
             continuousFromPrev: shot.continuousFromPrev === true || String(shot.continuousFromPrev ?? '') === 'true',
+            // 关键帧链式生成（fix 1）：本镜是否承接上一镜——run 据此让本帧由上一帧 img2img 派生，保证相邻画格连贯
+            chainFromPrev: chains,
           },
         }
       })
