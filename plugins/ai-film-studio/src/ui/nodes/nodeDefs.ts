@@ -250,7 +250,7 @@ export const NODE_DEFS: NodeDef[] = [
     kind: 'char-image',
     category: 'image',
     label: '角色设定图',
-    desc: '由「角色」生成单张 16:9 设定图：左半人物面部特写，右半正/侧/背全身，纯白背景（一次出图，省钱）。输出仍是「角色」(身份+设定图打包)，直连关键帧',
+    desc: '由「角色」生成单张 16:9 设定图：左半正面+侧面两个面部特写，右半正/侧/背全身（共 5 视图），纯白背景（一次出图，省钱）。输出仍是「角色」(身份+设定图打包)，直连关键帧',
     icon: Users,
     inputs: [{ id: 'role', label: '角色', type: 'json' }],
     outputs: [{ id: 'out', label: '角色', type: 'json' }],
