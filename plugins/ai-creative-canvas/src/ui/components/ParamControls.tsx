@@ -44,7 +44,10 @@ export function ParamControls({ card }: { card: Card }) {
   }
   if (card.kind === 'text') {
     return (
-      <Select className="w-[92px] shrink-0" value={String(p.temperature ?? 0.7)} onChange={(v) => set('temperature', Number(v))} options={[{ value: '0.3', label: '严谨' }, { value: '0.7', label: '均衡' }, { value: '1', label: '发散' }]} />
+      <>
+        <Select className="w-[92px] shrink-0" value={String(p.temperature ?? 0.7)} onChange={(v) => set('temperature', Number(v))} options={[{ value: '0.3', label: '严谨' }, { value: '0.7', label: '均衡' }, { value: '1', label: '发散' }]} />
+        <Select className="w-[96px] shrink-0" value={String(p.shotCount || 0)} onChange={(v) => set('shotCount', Number(v))} options={[{ value: '0', label: '镜数·自动' }, { value: '4', label: '镜数·4' }, { value: '6', label: '镜数·6' }, { value: '8', label: '镜数·8' }, { value: '12', label: '镜数·12' }]} />
+      </>
     )
   }
   return null

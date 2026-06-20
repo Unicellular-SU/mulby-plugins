@@ -2,6 +2,9 @@ import { Plus, Sparkles, Check, Loader2, Settings } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useTask } from '../store/taskStore'
+import { Select } from './Select'
+import { STYLE_PACKS } from '../services/stylePacks'
+import { ProjectSettings } from './ProjectSettings'
 
 export function TopBar() {
   const name = useGraph((s) => s.project.name)
@@ -10,6 +13,8 @@ export function TopBar() {
   const renameProject = useGraph((s) => s.renameProject)
   const addBoard = useGraph((s) => s.addBoard)
   const setActiveBoard = useGraph((s) => s.setActiveBoard)
+  const stylePackId = useGraph((s) => s.project.stylePackId || '')
+  const setStylePack = useGraph((s) => s.setStylePack)
   const saving = useUi((s) => s.saving)
   const active = useTask((s) => s.active)
 
@@ -27,6 +32,13 @@ export function TopBar() {
         onChange={(e) => renameProject(e.target.value)}
         className="px-2 py-1 rounded-md bg-black/5 dark:bg-white/10 text-sm w-44 outline-none focus:ring-1 focus:ring-indigo-400"
         placeholder="工程名称"
+      />
+      <Select
+        className="w-44"
+        value={stylePackId}
+        onChange={(v) => setStylePack(v || undefined)}
+        placeholder="风格包"
+        options={[{ value: '', label: '风格包 · 无' }, ...STYLE_PACKS.map((p) => ({ value: p.id, label: p.label }))]}
       />
       <div className="flex items-center gap-1 overflow-x-auto ace-scroll flex-1">
         {boards.map((b) => (
@@ -56,6 +68,7 @@ export function TopBar() {
           {active} 生成中
         </span>
       )}
+      <ProjectSettings />
       <button
         onClick={() => useUi.getState().setShowProviderSettings(true)}
         title="Provider 设置（视频/音频生成）"

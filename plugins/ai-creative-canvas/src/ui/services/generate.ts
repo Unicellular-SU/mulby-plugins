@@ -7,9 +7,11 @@ import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
 import { resolveGenInputs } from './references'
 import { useProviders } from '../store/providerStore'
 import { runVideoJob, runTts } from './providers/engine'
+import { videoStyleTag } from './stylePacks'
+import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
 
-const limiter = createLimiter(3)
+const limiter = createLimiter(() => useGraph.getState().project.concurrency || 4)
 const aborters = new Map<string, string>() // cardId -> requestId
 
 function ai(): any {
@@ -18,6 +20,18 @@ function ai(): any {
 
 export function canGenerate(kind: string): boolean {
   return kind === 'text' || kind === 'image' || kind === 'video' || kind === 'audio'
+}
+
+// 批量生成所有选中的可生成卡片（分镜扇出 → 一键出图）
+export function generateSelected(): void {
+  const g = useGraph.getState()
+  const board = g.getActiveBoard()
+  for (const id of [...g.selectedIds]) {
+    const c = board.cards[id]
+    if (c && canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued') {
+      void generateCard(id)
+    }
+  }
 }
 
 export async function generateCard(cardId: string): Promise<void> {
@@ -31,6 +45,13 @@ export async function generateCard(cardId: string): Promise<void> {
   if ((card0.kind === 'text' || card0.kind === 'image') && !card0.prompt?.trim()) {
     g0.updateCard(cardId, { status: 'error', error: '请先填写提示词' })
     return
+  }
+
+  // 默认模型回填：卡片未选 → 工程默认 → 可用列表第一个（让批量/分镜卡无需逐个选模型）
+  if ((card0.kind === 'image' || card0.kind === 'text') && !card0.modelId) {
+    const def = card0.kind === 'image' ? g0.project.defaultImageModel : g0.project.defaultTextModel
+    const resolved = await resolveModelId(card0.kind, null, def ?? null)
+    if (resolved) g0.updateCard(cardId, { modelId: resolved })
   }
 
   g0.updateCard(cardId, { status: 'queued', error: null, progress: 0 })
@@ -95,7 +116,10 @@ export async function generateCard(cardId: string): Promise<void> {
           const bytes = await loadImageInput(img)
           if (bytes) imageDataUrl = `data:${img.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}`
         }
-        const { url } = await runVideoJob(cfg, key, { prompt: card.prompt, imageDataUrl, params: card.params }, (p) =>
+        const proj = useGraph.getState().project
+        const vtag = videoStyleTag(proj.stylePackId, proj.style)
+        const vprompt = card.prompt + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
+        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, params: card.params }, (p) =>
           useGraph.getState().updateCard(cardId, { progress: p })
         )
         const projectId = useGraph.getState().project.id

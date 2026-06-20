@@ -6,6 +6,7 @@ import { useGraph } from './store/graphStore'
 import { useUi } from './store/uiStore'
 import { useProviders } from './store/providerStore'
 import { ProviderSettings } from './components/ProviderSettings'
+import { ComposeModal } from './components/ComposeModal'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
@@ -88,6 +89,7 @@ export default function App() {
         </div>
       </div>
       {showProviderSettings && <ProviderSettings />}
+      <ComposeModal />
     </div>
   )
 }

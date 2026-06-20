@@ -34,6 +34,10 @@ export function createDefaultProject(name = '未命名工程'): ProjectDoc {
     boards: [board],
     activeBoardId: board.id,
     globalModelId: null,
+    style: '',
+    defaultImageModel: null,
+    defaultTextModel: null,
+    concurrency: 4,
     createdAt: now,
     updatedAt: now,
     schemaVersion: SCHEMA_VERSION
@@ -69,6 +73,10 @@ interface GraphState {
   replaceProject: (p: ProjectDoc) => void
   renameProject: (name: string) => void
   setGlobalModel: (modelId: string | null) => void
+  setStyle: (style: string) => void
+  setStylePack: (id: string | undefined) => void
+  setDefaultModel: (kind: 'image' | 'text', id: string | null) => void
+  setConcurrency: (n: number) => void
 
   // 画布(board)
   addBoard: () => void
@@ -155,6 +163,11 @@ export const useGraph = create<GraphState>((set, get) => ({
   replaceProject: (p) => set({ project: p, selectedIds: [], past: [], future: [] }),
   renameProject: (name) => set((s) => ({ project: { ...s.project, name, updatedAt: Date.now() } })),
   setGlobalModel: (modelId) => set((s) => ({ project: { ...s.project, globalModelId: modelId, updatedAt: Date.now() } })),
+  setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
+  setStylePack: (stylePackId) => set((s) => ({ project: { ...s.project, stylePackId, updatedAt: Date.now() } })),
+  setDefaultModel: (kind, id) =>
+    set((s) => ({ project: { ...s.project, [kind === 'image' ? 'defaultImageModel' : 'defaultTextModel']: id, updatedAt: Date.now() } })),
+  setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),
 
   addBoard: () => {
     const board = createDefaultBoard(`画布 ${get().project.boards.length + 1}`)

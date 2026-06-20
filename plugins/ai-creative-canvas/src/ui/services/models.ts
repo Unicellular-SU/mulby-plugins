@@ -37,3 +37,15 @@ export async function listTextModels(): Promise<ModelOption[]> {
     return []
   }
 }
+
+// 默认模型解析：卡片显式 > 工程默认（须在该类型可用列表内）> 列表第一个
+export async function resolveModelId(
+  kind: 'image' | 'text',
+  explicit: string | null,
+  globalDefault: string | null
+): Promise<string | null> {
+  if (explicit) return explicit
+  const models = kind === 'image' ? await listImageModels() : await listTextModels()
+  if (globalDefault && models.some((m) => m.id === globalDefault)) return globalDefault
+  return models[0]?.id ?? null
+}

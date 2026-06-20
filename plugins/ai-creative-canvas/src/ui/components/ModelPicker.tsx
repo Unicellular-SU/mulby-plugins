@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { listImageModels, listTextModels, type ModelOption } from '../services/models'
 import { Select, type SelectOption } from './Select'
+import { useGraph } from '../store/graphStore'
 
 export function ModelPicker({
   kind,
@@ -25,7 +26,8 @@ export function ModelPicker({
       setLoading(false)
       if (kind === 'image' && !value && !autoPicked.current && m.length > 0) {
         autoPicked.current = true
-        onChange(m[0].id)
+        const def = useGraph.getState().project.defaultImageModel
+        onChange(def && m.some((x) => x.id === def) ? def : m[0].id)
       }
     })
     return () => {

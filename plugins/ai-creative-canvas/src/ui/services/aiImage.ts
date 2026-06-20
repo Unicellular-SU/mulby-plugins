@@ -1,6 +1,8 @@
 import type { Board, Card } from '../types'
 import { resolveGenInputs } from './references'
 import { loadImageInput } from './media'
+import { useGraph } from '../store/graphStore'
+import { getStylePack, applyStylePack } from './stylePacks'
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -29,6 +31,15 @@ function aspectHint(aspect: string): string {
   const ori = aw > ah ? '横向 landscape' : aw < ah ? '竖向 portrait' : '方形 square'
   return `\n\n【画幅比例 ${aspect}，${ori}】`
 }
+// 风格包（项目级）注入所有图像提示词；自由画风作为补充叠加
+function styleHint(): string {
+  const proj = useGraph.getState().project
+  const pack = getStylePack(proj.stylePackId)
+  const parts: string[] = []
+  if (pack) parts.push(applyStylePack(pack, 'keyframe'))
+  if (proj.style && proj.style.trim()) parts.push(proj.style.trim())
+  return parts.length ? `\n\n风格：${parts.join(', ')}` : ''
+}
 
 export interface ImageGenResult {
   images: string[]
@@ -49,7 +60,7 @@ export async function generateImage(
   const aspect = String(params.aspect || '1:1')
   const size = computeSize(aspect, String(params.resolution || '1K'))
   const count = Math.max(1, Math.min(4, Number(params.count) || 1))
-  const prompt = (card.prompt || '') + aspectHint(aspect) // 尺寸 + 提示词双保险
+  const prompt = (card.prompt || '') + aspectHint(aspect) + styleHint() // 尺寸 + 比例/风格提示词
 
   // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []

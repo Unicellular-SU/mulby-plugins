@@ -82,9 +82,22 @@ export interface ProjectDoc {
   boards: Board[]
   activeBoardId: string
   globalModelId: string | null
+  style?: string
+  stylePackId?: string
+  defaultImageModel?: string | null
+  defaultTextModel?: string | null
+  concurrency?: number
   createdAt: number
   updatedAt: number
   schemaVersion: number
+}
+
+export interface Shot {
+  desc: string
+  shotSize?: string
+  camera?: string
+  duration?: number
+  dialogue?: string
 }
 
 export const SCHEMA_VERSION = 1

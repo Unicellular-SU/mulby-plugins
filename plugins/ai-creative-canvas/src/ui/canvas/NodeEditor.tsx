@@ -1,10 +1,11 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
 import { buildMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
+import { runStoryboard, shotToVideo } from '../services/storyboard'
 import { saveBase64 } from '../services/media'
 import { arrayBufferToBase64, uid } from '../util'
 import { worldToScreen } from './viewport'
@@ -47,6 +48,7 @@ export function NodeEditor() {
   const removeEdge = useGraph((s) => s.removeEdge)
   const fileRef = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<MentionState | null>(null)
+  const [sbBusy, setSbBusy] = useState(false)
 
   if (selectedIds.length !== 1) return null
   const card = board.cards[selectedIds[0]]
@@ -244,7 +246,35 @@ export function NodeEditor() {
             </div>
           )}
 
-          {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
+          {card.kind === 'text' && (
+          <button
+            disabled={sbBusy}
+            onClick={async () => {
+              setSbBusy(true)
+              try {
+                await runStoryboard(card.id)
+              } finally {
+                setSbBusy(false)
+              }
+            }}
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+            style={{ borderColor: 'var(--ace-border)' }}
+          >
+            <Clapperboard size={14} /> {sbBusy ? '分镜生成中…' : '生成分镜（扇出镜头卡）'}
+          </button>
+        )}
+
+        {card.kind === 'image' && hasMedia && (
+          <button
+            onClick={() => shotToVideo(card.id)}
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
+            style={{ borderColor: 'var(--ace-border)' }}
+          >
+            <Film size={14} /> 转视频（以此为首帧）
+          </button>
+        )}
+
+        {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
 
           {hasMedia && <MediaToolbox card={card} />}
         </div>

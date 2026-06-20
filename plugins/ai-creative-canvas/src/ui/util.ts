@@ -27,15 +27,16 @@ export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number):
 }
 
 // 简单并发限流（替代 p-limit）
-export function createLimiter(concurrency: number) {
+export function createLimiter(concurrency: number | (() => number)) {
+  const getMax = typeof concurrency === 'function' ? concurrency : () => concurrency
   let active = 0
   const queue: Array<() => void> = []
-  const next = () => {
-    if (active >= concurrency) return
-    const job = queue.shift()
-    if (!job) return
-    active++
-    job()
+  const pump = () => {
+    while (active < getMax() && queue.length > 0) {
+      const job = queue.shift()!
+      active++
+      job()
+    }
   }
   return function run<T>(task: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -44,10 +45,10 @@ export function createLimiter(concurrency: number) {
           .then(resolve, reject)
           .finally(() => {
             active--
-            next()
+            pump()
           })
       })
-      next()
+      pump()
     })
   }
 }

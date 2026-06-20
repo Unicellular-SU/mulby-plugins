@@ -19,6 +19,8 @@ interface UiState {
   setConnectMenu: (m: { sx: number; sy: number; wx: number; wy: number; sourceId: string } | null) => void
   preview: { url: string; kind: 'image' | 'video' } | null
   setPreview: (p: { url: string; kind: 'image' | 'video' } | null) => void
+  showCompose: boolean
+  setShowCompose: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -39,5 +41,7 @@ export const useUi = create<UiState>((set) => ({
   connectMenu: null,
   setConnectMenu: (connectMenu) => set({ connectMenu }),
   preview: null,
-  setPreview: (preview) => set({ preview })
+  setPreview: (preview) => set({ preview }),
+  showCompose: false,
+  setShowCompose: (showCompose) => set({ showCompose })
 }))

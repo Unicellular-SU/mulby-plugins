@@ -10,6 +10,7 @@ import { SelectionBox, type ScreenRect } from './SelectionBox'
 import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
 import { Lightbox } from './Lightbox'
+import { BatchActions } from './BatchActions'
 import type { CardKind } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
@@ -358,6 +359,7 @@ export function CanvasStage() {
       <CanvasControls onFit={doFit} />
       <ConnectMenu />
       <NodeEditor />
+      <BatchActions />
       <Lightbox />
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
