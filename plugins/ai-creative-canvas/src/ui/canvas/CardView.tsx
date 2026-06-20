@@ -12,7 +12,8 @@ const KIND_META: Record<CardKind, { icon: typeof ImageIcon; accent: string }> = 
   text: { icon: Type, accent: '#10b981' },
   audio: { icon: Music, accent: '#f59e0b' }
   ,
-  source: { icon: Package, accent: '#64748b' }
+  source: { icon: Package, accent: '#64748b' },
+  group: { icon: Package, accent: '#64748b' }
 }
 
 export function CardView({ card, selected }: { card: Card; selected: boolean }) {
@@ -90,6 +91,12 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         }
       }}
     >
+      {(card.meta as any)?.shot && (
+        <div className="absolute top-1 left-1 z-20 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] leading-none pointer-events-none">
+          {card.title}
+          {(card.meta as any).shot.duration ? ` · ${(card.meta as any).shot.duration}s` : ''}
+        </div>
+      )}
       {/* 内容层：承载边框、圆角与裁剪；无标题栏 */}
       <div
         className="absolute inset-0 rounded-xl overflow-hidden border bg-white dark:bg-neutral-900"

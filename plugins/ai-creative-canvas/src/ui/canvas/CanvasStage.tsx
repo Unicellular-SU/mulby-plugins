@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { CardView } from './CardView'
+import { GroupView } from './GroupView'
 import { EdgeLayer } from './EdgeLayer'
 import { GridLayer } from './GridLayer'
 import { CanvasControls } from './CanvasControls'
@@ -11,6 +12,7 @@ import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
 import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
+import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
@@ -42,6 +44,10 @@ export function CanvasStage() {
   const connectTemp = useUi((s) => s.connectTemp)
   const vp = board.viewport
   const selSet = new Set(selectedIds)
+  const hiddenMembers = new Set<string>()
+  for (const c of Object.values(board.cards)) {
+    if (c.kind === 'group' && c.params?.collapsed) for (const m of (c.params?.members as string[]) || []) hiddenMembers.add(m)
+  }
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
 
@@ -110,9 +116,23 @@ export function CanvasStage() {
         return
       }
       const sel = g.selectedIds
-      const ids = sel.includes(id) ? sel : [id]
+      const baseIds = sel.includes(id) ? sel : [id]
       if (!sel.includes(id)) g.setSelection([id])
-      inter.current = { mode: 'drag', ids, lastX: e.clientX, lastY: e.clientY, moved: false }
+      // 拖动分组时带上组内成员
+      const board0 = g.getActiveBoard()
+      const idSet = new Set(baseIds)
+      for (const gid of baseIds) {
+        const gc = board0.cards[gid]
+        if (gc?.kind !== 'group') continue
+        for (const m of (gc.params?.members as string[]) || []) idSet.add(m)
+        for (const o of Object.values(board0.cards)) {
+          if (o.kind === 'group' || idSet.has(o.id)) continue
+          const cx = o.x + o.w / 2
+          const cy = o.y + o.h / 2
+          if (cx >= gc.x && cx <= gc.x + gc.w && cy >= gc.y && cy <= gc.y + gc.h) idSet.add(o.id)
+        }
+      }
+      inter.current = { mode: 'drag', ids: [...idSet], lastX: e.clientX, lastY: e.clientY, moved: false }
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
     } else {
       if (!e.shiftKey) g.clearSelection()
@@ -206,6 +226,19 @@ export function CanvasStage() {
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)
     useGraph.getState().addCard('text', world)
+  }
+
+  const onContextMenu = (e: RMouseEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null
+    if (el?.closest('[data-interactive]')) {
+      useUi.getState().setCtxMenu(null)
+      return
+    }
+    const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
+    const cardId = cardEl?.dataset.cardId || null
+    if (cardId && !useGraph.getState().selectedIds.includes(cardId)) useGraph.getState().setSelection([cardId])
+    useUi.getState().setCtxMenu({ x: e.clientX, y: e.clientY, cardId })
   }
 
   // 原生 wheel（非 passive，便于 preventDefault）→ 朝光标缩放
@@ -340,7 +373,7 @@ export function CanvasStage() {
       onPointerUp={endInteraction}
       onPointerCancel={endInteraction}
       onDoubleClick={onDoubleClick}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={onContextMenu}
       onDrop={onDrop}
       onDragOver={(e) => e.preventDefault()}
     >
@@ -350,9 +383,16 @@ export function CanvasStage() {
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0' }}
       >
-        {Object.values(board.cards).map((c) => (
-          <CardView key={c.id} card={c} selected={selSet.has(c.id)} />
-        ))}
+        {Object.values(board.cards)
+          .filter((c) => c.kind === 'group')
+          .map((c) => (
+            <GroupView key={c.id} card={c} selected={selSet.has(c.id)} />
+          ))}
+        {Object.values(board.cards)
+          .filter((c) => c.kind !== 'group' && !hiddenMembers.has(c.id))
+          .map((c) => (
+            <CardView key={c.id} card={c} selected={selSet.has(c.id)} />
+          ))}
       </div>
       <SelectionBox rect={marquee} />
       {showMinimap && <Minimap />}
@@ -361,6 +401,7 @@ export function CanvasStage() {
       <NodeEditor />
       <BatchActions />
       <Lightbox />
+      <ContextMenu />
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
           <div className="text-center opacity-40 text-sm">

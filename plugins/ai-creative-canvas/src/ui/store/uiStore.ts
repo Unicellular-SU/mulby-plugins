@@ -21,6 +21,10 @@ interface UiState {
   setPreview: (p: { url: string; kind: 'image' | 'video' } | null) => void
   showCompose: boolean
   setShowCompose: (v: boolean) => void
+  ctxMenu: { x: number; y: number; cardId: string | null } | null
+  setCtxMenu: (m: { x: number; y: number; cardId: string | null } | null) => void
+  storyboardCardId: string | null
+  setStoryboardCardId: (id: string | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -43,5 +47,9 @@ export const useUi = create<UiState>((set) => ({
   preview: null,
   setPreview: (preview) => set({ preview }),
   showCompose: false,
-  setShowCompose: (showCompose) => set({ showCompose })
+  setShowCompose: (showCompose) => set({ showCompose }),
+  ctxMenu: null,
+  setCtxMenu: (ctxMenu) => set({ ctxMenu }),
+  storyboardCardId: null,
+  setStoryboardCardId: (storyboardCardId) => set({ storyboardCardId })
 }))

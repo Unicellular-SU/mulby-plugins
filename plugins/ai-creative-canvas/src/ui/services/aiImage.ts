@@ -87,23 +87,28 @@ export async function generateImage(
     images = res.images
     onProgress(1)
   } else {
-    const req = ai().images.generateStream(
-      { model, prompt, size, count },
-      (chunk: any) => {
-        if (chunk.__requestId) {
-          onRequestId(chunk.__requestId)
-          return
+    // 多图：逐张以 count=1 调用，避免向不支持 n>1 的模型（如 gpt-image-2）传 n 而报错
+    const collected: string[] = []
+    for (let k = 0; k < count; k++) {
+      const req = ai().images.generateStream(
+        { model, prompt, size, count: 1 },
+        (chunk: any) => {
+          if (chunk.__requestId) {
+            onRequestId(chunk.__requestId)
+            return
+          }
+          if (chunk.type === 'preview' && chunk.image) {
+            onProgress((k + 0.6) / count, `data:image/png;base64,${chunk.image}`)
+          } else if (chunk.type === 'status') {
+            const map: Record<string, number> = { start: 0.1, partial: 0.5, finalizing: 0.85, completed: 1 }
+            onProgress((k + (map[chunk.stage as string] ?? 0.3)) / count)
+          }
         }
-        if (chunk.type === 'preview' && chunk.image) {
-          onProgress(0.6, `data:image/png;base64,${chunk.image}`)
-        } else if (chunk.type === 'status') {
-          const map: Record<string, number> = { start: 0.1, partial: 0.5, finalizing: 0.85, completed: 1 }
-          onProgress(map[chunk.stage as string] ?? 0.3)
-        }
-      }
-    )
-    const res = await req
-    images = res.images
+      )
+      const res = await req
+      if (res.images?.length) collected.push(res.images[0])
+    }
+    images = collected
     onProgress(1)
   }
 

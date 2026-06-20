@@ -1,6 +1,6 @@
 // 领域模型：卡片 / 连线 / 视口 / 画布(board) / 工程(project)
 
-export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source'
+export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source' | 'group'
 export type CardStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
 
 export interface Card {
@@ -98,6 +98,8 @@ export interface Shot {
   camera?: string
   duration?: number
   dialogue?: string
+  imagePrompt?: string
+  videoPrompt?: string
 }
 
 export const SCHEMA_VERSION = 1
@@ -107,5 +109,6 @@ export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   video: { w: 320, h: 280 },
   text: { w: 300, h: 220 },
   audio: { w: 300, h: 140 },
-  source: { w: 260, h: 240 }
+  source: { w: 260, h: 240 },
+  group: { w: 400, h: 300 }
 }

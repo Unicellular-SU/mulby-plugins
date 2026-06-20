@@ -1,11 +1,13 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
 import { buildMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
-import { runStoryboard, shotToVideo } from '../services/storyboard'
+import { shotToVideo } from '../services/storyboard'
+import { enhancePrompt, describeImage } from '../services/promptTools'
+import { PROMPT_PRESETS } from '../services/presets'
 import { saveBase64 } from '../services/media'
 import { arrayBufferToBase64, uid } from '../util'
 import { worldToScreen } from './viewport'
@@ -20,6 +22,7 @@ const MAT_ICON: Record<MaterialKind, typeof ImageIcon> = { image: ImageIcon, vid
 const PANEL_W = 480
 
 interface MentionState {
+  mode: 'ref' | 'preset'
   query: string
   start: number
   end: number
@@ -48,11 +51,12 @@ export function NodeEditor() {
   const removeEdge = useGraph((s) => s.removeEdge)
   const fileRef = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<MentionState | null>(null)
-  const [sbBusy, setSbBusy] = useState(false)
+  const [toolBusy, setToolBusy] = useState(false)
 
   if (selectedIds.length !== 1) return null
   const card = board.cards[selectedIds[0]]
   if (!card) return null
+  if (card.kind === 'group') return null
 
   const vp = board.viewport
   const accent = KIND_ACCENT[card.kind]
@@ -102,18 +106,38 @@ export function NodeEditor() {
     updateCard(card.id, { prompt: val.slice(0, start) + '@' + label + ' ' + val.slice(end) })
     setMention(null)
   }
+  const insertPreset = (text: string, start: number, end: number) => {
+    const val = card.prompt
+    const sep = start > 0 && !/\s$/.test(val.slice(0, start)) ? ' ' : ''
+    updateCard(card.id, { prompt: val.slice(0, start) + sep + text + ' ' + val.slice(end) })
+    setMention(null)
+  }
+  const runTool = async (fn: (id: string) => Promise<void>) => {
+    setToolBusy(true)
+    try {
+      await fn(card.id)
+    } catch (e: any) {
+      ;(window as any).mulby?.notification?.show?.(e?.message || '操作失败', 'error')
+    } finally {
+      setToolBusy(false)
+    }
+  }
   const onPrompt = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const ta = e.currentTarget
     const val = ta.value
     const pos = ta.selectionStart ?? val.length
     updateCard(card.id, { prompt: val })
-    const at = val.slice(0, pos).lastIndexOf('@')
-    if (at >= 0) {
-      const q = val.slice(at + 1, pos)
+    const before = val.slice(0, pos)
+    const at = before.lastIndexOf('@')
+    const slash = before.lastIndexOf('/')
+    const trig = Math.max(at, slash)
+    if (trig >= 0) {
+      const q = before.slice(trig + 1)
       if (!/\s/.test(q)) {
+        const mode: 'ref' | 'preset' = before[trig] === '/' ? 'preset' : 'ref'
         const r = ta.getBoundingClientRect()
         const sr = stageEl.current?.getBoundingClientRect()
-        setMention({ query: q, start: at, end: pos, ax: r.left - (sr?.left || 0), ayB: r.bottom - (sr?.top || 0), ayT: r.top - (sr?.top || 0), aw: r.width })
+        setMention({ mode, query: q, start: trig, end: pos, ax: r.left - (sr?.left || 0), ayB: r.bottom - (sr?.top || 0), ayT: r.top - (sr?.top || 0), aw: r.width })
         return
       }
     }
@@ -140,8 +164,11 @@ export function NodeEditor() {
     }
   }
 
-  const mentionList = mention ? materials.filter((m) => !mention.query || m.label.includes(mention.query)) : []
-  const menuW = mention ? Math.max(180, mention.aw) : 180
+  const hasImageInput = materials.some((m) => m.kind === 'image')
+  const refList = mention && mention.mode === 'ref' ? materials.filter((m) => !mention.query || m.label.includes(mention.query)) : []
+  const presetList = mention && mention.mode === 'preset' ? PROMPT_PRESETS.filter((p) => !mention.query || p.label.includes(mention.query) || p.text.includes(mention.query)) : []
+  const listLen = mention?.mode === 'preset' ? presetList.length : refList.length
+  const menuW = mention ? Math.max(200, mention.aw) : 200
   const menuLeft = mention ? Math.max(8, Math.min(mention.ax, ss.w - menuW - 8)) : 0
   const menuBelow = mention ? mention.ayB + 210 <= ss.h : true
   const menuStyle: CSSProperties = mention
@@ -211,16 +238,36 @@ export function NodeEditor() {
             </button>
           </div>
 
-          {/* 提示词 */}
+          {/* 提示词工具 + 输入 */}
           {card.kind !== 'source' && (
-            <textarea
-              value={card.prompt}
-              onChange={onPrompt}
-              onBlur={() => setTimeout(() => setMention(null), 150)}
-              rows={2}
-              placeholder={card.kind === 'text' ? '让 AI 写点什么…' : '描述画面，输入 @ 引用素材'}
-              className="ace-input ace-noscroll resize-none w-full"
-            />
+            <>
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <button onClick={() => runTool(enhancePrompt)} disabled={toolBusy} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100 disabled:opacity-40" title="LLM 改写优化提示词">
+                  <Wand2 size={12} /> 增强
+                </button>
+                {hasImageInput && (
+                  <button onClick={() => runTool(describeImage)} disabled={toolBusy} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100 disabled:opacity-40" title="用视觉模型把图片反推成提示词">
+                    <ScanText size={12} /> 描述图片
+                  </button>
+                )}
+                {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
+                <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
+              </div>
+              <textarea
+                value={card.prompt}
+                onChange={onPrompt}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && generatable && !busy) {
+                    e.preventDefault()
+                    generateCard(card.id)
+                  }
+                }}
+                onBlur={() => setTimeout(() => setMention(null), 150)}
+                rows={2}
+                placeholder={card.kind === 'text' ? '让 AI 写点什么…（/ 预设，@ 素材）' : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'}
+                className="ace-input ace-noscroll resize-y w-full"
+              />
+            </>
           )}
 
           {/* 底行：模型/Provider + 参数 + 生成 */}
@@ -247,22 +294,14 @@ export function NodeEditor() {
           )}
 
           {card.kind === 'text' && (
-          <button
-            disabled={sbBusy}
-            onClick={async () => {
-              setSbBusy(true)
-              try {
-                await runStoryboard(card.id)
-              } finally {
-                setSbBusy(false)
-              }
-            }}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
-            style={{ borderColor: 'var(--ace-border)' }}
-          >
-            <Clapperboard size={14} /> {sbBusy ? '分镜生成中…' : '生成分镜（扇出镜头卡）'}
-          </button>
-        )}
+            <button
+              onClick={() => useUi.getState().setStoryboardCardId(card.id)}
+              className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
+              style={{ borderColor: 'var(--ace-border)' }}
+            >
+              <Clapperboard size={14} /> 分镜脚本（镜头表）
+            </button>
+          )}
 
         {card.kind === 'image' && hasMedia && (
           <button
@@ -280,18 +319,26 @@ export function NodeEditor() {
         </div>
       </div>
 
-      {/* @ 菜单：屏幕坐标浮层，不受面板裁剪 */}
-      {mention && mentionList.length > 0 && (
+      {/* @素材 / /预设 菜单：屏幕坐标浮层，不受面板裁剪 */}
+      {mention && listLen > 0 && (
         <div data-interactive onWheel={(e) => e.stopPropagation()} className="absolute z-50 rounded-md border bg-white dark:bg-neutral-900 shadow-xl overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200" style={{ ...menuStyle, borderColor: 'var(--ace-border)' }}>
-          {mentionList.map((m) => {
-            const Icon = MAT_ICON[m.kind]
-            return (
-              <button key={m.matId} onMouseDown={(e) => { e.preventDefault(); insertToken(m.label, mention.start, mention.end) }} className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10 text-left">
-                {m.thumbUrl ? <img src={m.thumbUrl} className="w-6 h-6 rounded object-cover" alt="" /> : <span className="w-6 h-6 rounded grid place-items-center bg-black/5 dark:bg-white/10"><Icon size={13} style={{ color: KIND_ACCENT[m.kind] }} /></span>}
-                <span className="truncate">{m.label}</span>
-              </button>
-            )
-          })}
+          {mention.mode === 'preset'
+            ? presetList.map((p) => (
+                <button key={p.label} onMouseDown={(e) => { e.preventDefault(); insertPreset(p.text, mention.start, mention.end) }} className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10 text-left">
+                  <Sparkles size={12} className="shrink-0 text-indigo-400" />
+                  <span className="shrink-0 font-medium">{p.label}</span>
+                  <span className="truncate opacity-50 text-xs">{p.text}</span>
+                </button>
+              ))
+            : refList.map((m) => {
+                const Icon = MAT_ICON[m.kind]
+                return (
+                  <button key={m.matId} onMouseDown={(e) => { e.preventDefault(); insertToken(m.label, mention.start, mention.end) }} className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10 text-left">
+                    {m.thumbUrl ? <img src={m.thumbUrl} className="w-6 h-6 rounded object-cover" alt="" /> : <span className="w-6 h-6 rounded grid place-items-center bg-black/5 dark:bg-white/10"><Icon size={13} style={{ color: KIND_ACCENT[m.kind] }} /></span>}
+                    <span className="truncate">{m.label}</span>
+                  </button>
+                )
+              })}
         </div>
       )}
     </>

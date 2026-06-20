@@ -18,6 +18,7 @@ function defaultTitle(kind: CardKind): string {
     case 'text': return 'AI 文本'
     case 'audio': return 'AI 音频'
     case 'source': return '素材'
+    case 'group': return '分组'
   }
 }
 
@@ -92,6 +93,7 @@ interface GraphState {
   updateCard: (id: string, patch: Partial<Card>) => void
   removeCards: (ids: string[]) => void
   moveCardsBy: (ids: string[], dx: number, dy: number) => void
+  groupSelection: () => void
 
   // 连线
   addEdgeBetween: (source: string, target: string) => void
@@ -227,6 +229,28 @@ export const useGraph = create<GraphState>((set, get) => ({
       selectedIds: [card.id]
     }))
     return card.id
+  },
+
+  groupSelection: () => {
+    const s = get()
+    const board = activeBoardOf(s.project)
+    const ids = s.selectedIds.filter((id) => board.cards[id] && board.cards[id].kind !== 'group')
+    if (ids.length === 0) return
+    const cs = ids.map((id) => board.cards[id])
+    const PAD = 28
+    const HEAD = 36
+    const minX = Math.min(...cs.map((c) => c.x)) - PAD
+    const minY = Math.min(...cs.map((c) => c.y)) - PAD - HEAD
+    const maxX = Math.max(...cs.map((c) => c.x + c.w)) + PAD
+    const maxY = Math.max(...cs.map((c) => c.y + c.h)) + PAD
+    get().addCard('group', { x: 0, y: 0 }, {
+      x: minX,
+      y: minY,
+      w: maxX - minX,
+      h: maxY - minY,
+      title: '分组',
+      params: { color: '#6366f1', collapsed: false, members: ids }
+    })
   },
 
   updateCard: (id, patch) =>

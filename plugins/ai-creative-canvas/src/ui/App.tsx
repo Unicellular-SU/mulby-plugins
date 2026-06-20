@@ -7,6 +7,7 @@ import { useUi } from './store/uiStore'
 import { useProviders } from './store/providerStore'
 import { ProviderSettings } from './components/ProviderSettings'
 import { ComposeModal } from './components/ComposeModal'
+import { StoryboardModal } from './components/StoryboardModal'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
@@ -90,6 +91,7 @@ export default function App() {
       </div>
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />
+      <StoryboardModal />
     </div>
   )
 }
