@@ -75,7 +75,7 @@ export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<A
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
     doc.novel.length
       ? `## 原著（${doc.novel.length} 章，按此改编剧本，可分集/分段，不丢关键信息）\n${doc.novel
-          .map((c) => `【${c.title}】\n${c.text}`)
+          .map((c) => (c.event ? `【${c.title}】事件：${c.event}` : `【${c.title}】\n${c.text}`))
           .join('\n\n')
           .slice(0, 8000)}`
       : '',

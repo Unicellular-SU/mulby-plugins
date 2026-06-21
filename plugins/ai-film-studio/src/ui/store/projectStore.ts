@@ -10,7 +10,7 @@ import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { runAgentPlan } from '../studio/agent/agent'
-import { splitNovelChapters } from '../studio/services/novel'
+import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 
 export interface FilmState {
@@ -67,6 +67,8 @@ interface ProjectState {
   // 小说导入（长文 → 章节，供 Agent 改编）
   importNovel: (text: string) => void
   clearNovel: () => void
+  extractChapterEvents: (chapterId: string) => Promise<void>
+  extractAllEvents: () => Promise<void>
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
@@ -324,6 +326,44 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       d.novel = splitNovelChapters(text).map((c, i) => ({ id: P.newId('ch_'), index: i, title: c.title, text: c.text }))
     }),
   clearNovel: () => get().mutate((d) => (d.novel = [])),
+
+  extractChapterEvents: async (chapterId) => {
+    const ch = get().doc?.novel.find((c) => c.id === chapterId)
+    if (!ch) return
+    get().mutate((d) => {
+      const c = d.novel.find((x) => x.id === chapterId)
+      if (c) c.eventState = 'generating'
+    })
+    try {
+      const event = await extractEvents(ch.text)
+      get().mutate((d) => {
+        const c = d.novel.find((x) => x.id === chapterId)
+        if (c) {
+          c.event = event
+          c.eventState = 'done'
+        }
+      })
+    } catch {
+      get().mutate((d) => {
+        const c = d.novel.find((x) => x.id === chapterId)
+        if (c) c.eventState = 'failed'
+      })
+    }
+  },
+
+  extractAllEvents: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = get().doc!.novel.filter((c) => !c.event).map((c) => c.id)
+    set({ batch: { running: true, label: `提取事件 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `提取事件 ${i + 1}/${ids.length}` } })
+        await get().extractChapterEvents(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
+    }
+  },
 
   runAgent: async (userText) => {
     const doc0 = get().doc

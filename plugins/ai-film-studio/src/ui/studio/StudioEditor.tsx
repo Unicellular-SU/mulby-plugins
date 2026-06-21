@@ -167,6 +167,9 @@ function NovelTab() {
   const doc = useProjectStore((s) => s.doc)!
   const importNovel = useProjectStore((s) => s.importNovel)
   const clearNovel = useProjectStore((s) => s.clearNovel)
+  const extractChapterEvents = useProjectStore((s) => s.extractChapterEvents)
+  const extractAllEvents = useProjectStore((s) => s.extractAllEvents)
+  const batch = useProjectStore((s) => s.batch)
   const [text, setText] = useState('')
   return (
     <div className="afs-studio__novel">
@@ -194,15 +197,30 @@ function NovelTab() {
         <>
           <div className="afs-studio__tabbar">
             <b>{doc.novel.length} 章</b>
-            <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => clearNovel()}>
+            <button className="afs-btn afs-btn--sm" disabled={batch.running} onClick={() => void extractAllEvents()}>
+              <Wand2 size={13} /> 提取全部事件
+            </button>
+            <span className="afs-studio__hint">提取后改编更省 token、长篇也装得下</span>
+            <button className="afs-btn afs-btn--sm afs-btn--ghost" style={{ marginLeft: 'auto' }} onClick={() => clearNovel()}>
               <Trash2 size={13} /> 清空
             </button>
           </div>
           <div className="afs-studio__chapters">
             {doc.novel.map((c) => (
-              <div key={c.id} className="afs-studio__chapter">
-                <span className="afs-studio__chaptertitle">{c.title}</span>
-                <span className="afs-studio__chapterlen">{c.text.length} 字</span>
+              <div key={c.id} className="afs-studio__chapter afs-studio__chapter--col">
+                <div className="afs-studio__chapterhead">
+                  <span className="afs-studio__chaptertitle">{c.title}</span>
+                  <span className="afs-studio__chapterlen">{c.text.length} 字</span>
+                  <button
+                    className="afs-btn afs-btn--sm afs-btn--ghost"
+                    disabled={c.eventState === 'generating'}
+                    onClick={() => void extractChapterEvents(c.id)}
+                  >
+                    {c.eventState === 'generating' ? <Loader2 size={12} className="afs-spin" /> : <Wand2 size={12} />}
+                    {c.event ? ' 重提事件' : ' 提取事件'}
+                  </button>
+                </div>
+                {c.event && <div className="afs-studio__chapterevent">{c.event}</div>}
               </div>
             ))}
           </div>

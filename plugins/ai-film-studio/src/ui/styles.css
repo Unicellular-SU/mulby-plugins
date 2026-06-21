@@ -3525,3 +3525,9 @@ body {
 .afs-studio__chapter { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border: 1px solid var(--afs-border); border-radius: 8px; }
 .afs-studio__chaptertitle { font-size: 13px; }
 .afs-studio__chapterlen { color: var(--afs-muted); font-size: 12px; }
+
+/* 工作台 · 章节事件（阶段4c） */
+.afs-studio__chapter--col { flex-direction: column; align-items: stretch; gap: 6px; }
+.afs-studio__chapterhead { display: flex; align-items: center; gap: 10px; }
+.afs-studio__chapterhead .afs-studio__chaptertitle { flex: 1; }
+.afs-studio__chapterevent { font-size: 12px; color: var(--afs-muted); line-height: 1.5; white-space: pre-wrap; padding-left: 2px; }

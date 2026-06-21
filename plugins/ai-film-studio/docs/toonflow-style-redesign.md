@@ -205,7 +205,10 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
 - [x] **4a Agent 质量**：runAgentPlan 注入近期对话（最多6条 user/assistant，记住上下文如「再加3镜」）+ 导演手册；StudioEditor AgentPanel 加可折叠 🎬 导演手册编辑（updateMeta directorManual）。tsc+build 通过。
 - [x] **4b 小说导入 + 改编**：`studio/services/novel.ts`（splitNovelChapters 按 第N章/回/卷 或长度分段）；projectStore.importNovel/clearNovel；原著 Tab（粘贴→分章→章节列表）；agent 上下文注入原著（capped 8000 字），可「按原著改编」。tsc+build 通过。
-- [ ] **4c 进阶**：事件图谱、时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义。
+- [x] **4c 章节事件提取**：novel.ts extractEvents（LLM 把每章压成关键事件要点）；projectStore.extractChapterEvents/extractAllEvents（单章+批量）；原著 Tab 显示事件 + 提取按钮；agent 上下文优先用事件（省 token、长篇装得下）。tsc+build 通过。
+- [ ] **4d 进阶（剩余可选）**：时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义（type/mode/durationResolutionMap）。
+
+> **状态**：Toonflow 式核心重构 + 长文改编（小说导入+事件）已完成，全链路可用。剩余为锦上添花，建议先在 Mulby 实测。
 
 ---
 
