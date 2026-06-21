@@ -91,12 +91,18 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         }
       }}
     >
-      {(card.meta as any)?.shot && (
-        <div className="absolute top-1 left-1 z-20 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] leading-none pointer-events-none">
-          {card.title}
-          {(card.meta as any).shot.duration ? ` · ${(card.meta as any).shot.duration}s` : ''}
-        </div>
-      )}
+      {(() => {
+        const shot = (card.meta as any)?.shot
+        const t = (card.title || '').trim()
+        const custom = !!t && !['AI 图片', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'].includes(t)
+        if (!shot && !custom) return null
+        return (
+          <div className="absolute top-1 left-1 z-20 max-w-[88%] truncate px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] leading-none pointer-events-none">
+            {t}
+            {shot?.duration ? ` · ${shot.duration}s` : ''}
+          </div>
+        )
+      })()}
       {/* 内容层：承载边框、圆角与裁剪；无标题栏 */}
       <div
         className="absolute inset-0 rounded-xl overflow-hidden border bg-white dark:bg-neutral-900"

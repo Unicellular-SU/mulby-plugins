@@ -186,6 +186,12 @@ export function NodeEditor() {
         style={{ left, top: posTop, bottom: posBottom, width: PANEL_W, borderColor: accent + '55' }}
       >
         <div className="flex flex-col gap-1.5 p-2 overflow-y-auto ace-noscroll" style={{ maxHeight: maxH }}>
+          <input
+            value={card.title}
+            onChange={(e) => updateCard(card.id, { title: e.target.value })}
+            placeholder="节点名称（@ 引用时显示此名）"
+            className="w-full bg-transparent text-sm font-semibold outline-none placeholder:opacity-40 px-0.5"
+          />
           {/* 顶行：素材条 + 操作 */}
           <div className="flex items-center gap-1.5">
             <div className="flex-1 flex items-center gap-1 overflow-x-auto ace-noscroll min-w-0">
