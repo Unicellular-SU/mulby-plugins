@@ -48,6 +48,21 @@ async function httpReq(url: string, method: 'GET' | 'POST', headers: any, body: 
   return method === 'POST' ? await h.post(url, body, headers) : await h.get(url, headers)
 }
 
+// 上游聚合网关常因拉取超时瞬时失败（cURL error 28 / fail_to_fetch_task / 5xx）
+function transient(r: { status: number; data: any }): boolean {
+  if ([408, 429, 500, 502, 503, 504].includes(r.status)) return true
+  return /timed out|timeout|fail_to_fetch|bad gateway|gateway timeout/i.test(String(r.data ?? ''))
+}
+// 提交带退避重试：这类瞬时上游超时重试几次往往能过
+async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: number): Promise<{ status: number; data: any }> {
+  let resp = await httpReq(url, 'POST', headers, body, timeoutMs)
+  for (let i = 0; i < 2 && resp.status >= 400 && transient(resp); i++) {
+    await sleep(3000)
+    resp = await httpReq(url, 'POST', headers, body, timeoutMs)
+  }
+  return resp
+}
+
 export interface VideoReq {
   prompt: string
   imageDataUrl?: string
@@ -115,7 +130,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
   const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
   if (key) headers['Authorization'] = `Bearer ${key}`
   onProgress?.(0.1)
-  const resp = await httpReq(cfg.submitUrl as string, 'POST', headers, body, cfg.timeoutMs || 600000)
+  const resp = await submitWithRetry(cfg.submitUrl as string, headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
   let url = jget(data, cfg.videoUrlPath)
@@ -187,7 +202,7 @@ export async function runVideoJob(
   const base = cfg.baseURL.replace(/\/$/, '')
   const submitUrl = base + (cfg.submitPath || '')
   onProgress?.(0.1)
-  const resp = await httpReq(submitUrl, 'POST', headers, body, cfg.timeoutMs || 600000)
+  const resp = await submitWithRetry(submitUrl, headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
 
