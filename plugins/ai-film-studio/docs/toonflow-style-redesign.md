@@ -196,7 +196,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **3a Agent（结构化方案版）**：`studio/agent/agent.ts`（runAgentPlan：host runText json 模式，注入 production_agent_decision skill + 项目画风/上下文 → JSON 方案 reply/script/assets/storyboards）；projectStore.runAgent（应用方案：覆盖剧本 + 去重资产 + 追加分镜，cast 名→资产 id；对话存 memory）；工作台右侧对话面板接通（消息流 + 输入 + 思考态）。一句话/故事 → 自动拆剧本+资产+分镜。tsc+build 通过。
 - [x] **3b 批量「一键生成」**：projectStore.batch + generateAllAssets/generateAllKeyframes/generateAllClips（顺序执行、跳过已完成、batch.label 进度）；资产/分镜 Tab 加批量按钮（全部生成/全部关键帧/全部视频）+ 顶栏批量进度。tsc+build 通过。
 - [x] **3c 一键成片 + Agent 触发生成**：projectStore.autoProduce（资产→关键帧→视频→合成 一条龙，子步骤自管标志、守卫防重入）；顶栏「一键成片」按钮 + busy 进度；Agent 方案加 autoGenerate（用户要求出图/成片时 true → runAgent 应用后台触发 autoProduce）。tsc+build 通过。
-- [ ] **3d 工作台连贯性**：把关键帧链式生成（chainFromPrev img2img 承接上一帧）+ i2v 顺接/尾帧接龙接入 studio 生成（storyboard.chainFromPrev 已有字段，Agent 标注 + 生成按序）。
+- [x] **3d 工作台连贯性（关键帧）**：generateKeyframeImage 加 chainBase——承接镜头(chainFromPrev)由上一镜关键帧 img2img 派生 + 连贯指令；generateKeyframe 按 index 取上一镜关键帧 base64；generateAllKeyframes 按 index 顺序生成；Agent 方案标注 chainFromPrev；分镜项加手动「承接」切换。tsc+build 通过。
+- [ ] **3d-2 片段顺接**：studio generateClipVideo 接入 i2v 顺接/尾帧接龙（承接片段用上一片段真实尾帧作首帧，复用 extractLastFrame；按序生成）。
 - [ ] **3e 分阶段子 Agent**：编剧/分镜/制片分工 + 监督（可选升级原生流式 tool-calling）。
 - [x] **2f compose 导出**：`studio/services/compose.ts`（按分镜顺序取选用片段，无本地路径则下载→ensureFfmpeg→composeFilm 整片淡入淡出→导出 exports/）；projectStore.compose + film 瞬态（composing/done/failed + 进度）；时间线 Tab 加「合成成片」按钮 + 进度 + 成片预览。**全链路打通：对话→剧本/资产/分镜→出图→出视频→合成成片→导出**。tsc+build 通过。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。

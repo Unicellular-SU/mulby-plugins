@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2 } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
@@ -323,7 +323,18 @@ function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
   const clip = doc.clips.find((c) => c.storyboardId === sb.id)
   return (
     <div className="afs-studio__sbitem">
-      <span className="afs-studio__sbidx">{index + 1}</span>
+      <div className="afs-studio__sbleft">
+        <span className="afs-studio__sbidx">{index + 1}</span>
+        {index > 0 && (
+          <button
+            className={`afs-studio__chain${sb.chainFromPrev ? ' is-on' : ''}`}
+            title={sb.chainFromPrev ? '承接上一镜（关键帧由上一帧派生，保持连贯）— 点击关闭' : '与上一镜硬切 — 点击设为承接（连贯）'}
+            onClick={() => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, chainFromPrev: !sb.chainFromPrev })}
+          >
+            <Link2 size={12} />
+          </button>
+        )}
+      </div>
       <div className="afs-studio__sbthumb">
         {sb.state === 'generating' ? <Loader2 size={18} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={18} opacity={0.3} />}
         {sb.state === 'failed' && (

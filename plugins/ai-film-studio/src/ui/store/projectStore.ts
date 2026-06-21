@@ -8,7 +8,7 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
-import { generateAssetImage, generateKeyframeImage, generateClipVideo } from '../studio/services/generate'
+import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64 } from '../studio/services/generate'
 import { runAgentPlan } from '../studio/agent/agent'
 import { composeProject } from '../studio/services/compose'
 
@@ -258,7 +258,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc || !sb) return
     setStoryboardState(get, storyboardId, { state: 'generating', error: undefined })
     try {
-      const keyframeImageId = await generateKeyframeImage(sb, doc.assets, doc.meta)
+      // 连贯性：承接镜头取「上一镜（按 index）关键帧」作 img2img 主参考
+      let chainBase: { base64: string; mime: string } | null = null
+      if (sb.chainFromPrev) {
+        const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
+        const i = ordered.findIndex((s) => s.id === storyboardId)
+        const prev = i > 0 ? ordered[i - 1] : undefined
+        if (prev?.keyframeImageId) chainBase = await loadImageBase64(prev.keyframeImageId)
+      }
+      const keyframeImageId = await generateKeyframeImage(sb, doc.assets, doc.meta, chainBase)
       setStoryboardState(get, storyboardId, { keyframeImageId, state: 'done' })
     } catch (e) {
       setStoryboardState(get, storyboardId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
@@ -334,6 +342,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             duration: typeof sb.duration === 'number' ? sb.duration : 5,
             associateAssetIds: cast,
             shouldGenerateImage: true,
+            chainFromPrev: sb.chainFromPrev === true,
             state: 'idle',
           })
         }
@@ -367,7 +376,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllKeyframes: async () => {
     if (get().batch.running || !get().doc) return
-    const ids = get().doc!.storyboards.filter((s) => !s.keyframeImageId).map((s) => s.id)
+    // 按 index 顺序生成：承接镜头能拿到刚生成的上一镜关键帧（链式连贯）
+    const ids = [...get().doc!.storyboards]
+      .sort((a, b) => a.index - b.index)
+      .filter((s) => !s.keyframeImageId)
+      .map((s) => s.id)
     set({ batch: { running: true, label: `生成关键帧 0/${ids.length}` } })
     try {
       for (let i = 0; i < ids.length; i++) {

@@ -15,7 +15,7 @@ export interface AgentPlan {
   reply: string
   script?: { name?: string; content: string }
   assets?: { type: 'role' | 'scene' | 'prop'; name: string; desc?: string; prompt?: string }[]
-  storyboards?: { videoDesc: string; prompt?: string; duration?: number; cast?: string[] }[]
+  storyboards?: { videoDesc: string; prompt?: string; duration?: number; cast?: string[]; chainFromPrev?: boolean }[]
   /** 用户明确要求「出图/生成/成片」时为 true：应用方案后自动一键成片 */
   autoGenerate?: boolean
 }
@@ -26,13 +26,13 @@ const CONTRACT = `
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
   "assets": [ { "type": "role|scene|prop", "name": "名称", "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
-  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"] } ],
+  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"], "chainFromPrev": false } ],
   "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
 - assets 的 name 要与 storyboards 的 cast 名字一致，便于关联。
-- 分镜按叙事顺序排列；同一连贯动作的相邻镜头在 videoDesc 里写明承接。
+- 分镜按叙事顺序排列；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - 全程使用项目设定的画风与对白语言。`
 
 function parsePlan(raw: string): AgentPlan {

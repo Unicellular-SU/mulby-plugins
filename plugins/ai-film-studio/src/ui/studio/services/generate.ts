@@ -44,25 +44,39 @@ async function refBase64(assetId?: string): Promise<{ base64: string; mime: stri
   return a ? { base64: a.base64, mime: a.mime } : null
 }
 
+const CONTINUITY_CLAUSE =
+  'continue directly from the previous shot, same location, same lighting and color, keep characters consistent in appearance and screen position'
+
 /**
  * 生成分镜关键帧：分镜画面描述 + 出场资产（作参考图做一致性）+ 画风锚定。
- * 有出场资产参考图且宿主支持图像编辑 → img2img（强一致）；否则文生图。
+ * 连贯性（fix 1 同源）：承接镜头（sb.chainFromPrev + 给了上一镜关键帧 chainBase）→ 由上一帧 img2img 派生，
+ * 承载构图/光线/站位，角色/场景参考图退为附加参考；否则有出场资产参考图就 img2img，再否则文生图。
  */
-export async function generateKeyframeImage(sb: Storyboard, assets: Asset[], meta: ProjectMeta): Promise<string> {
+export async function generateKeyframeImage(
+  sb: Storyboard,
+  assets: Asset[],
+  meta: ProjectMeta,
+  chainBase?: { base64: string; mime: string } | null
+): Promise<string> {
   const model = imageModel(meta)
   if (!model) throw new Error('未配置图像模型（请在「设置」里选择图像模型）')
   const basis = (sb.prompt || sb.videoDesc || '').trim()
   if (!basis) throw new Error('请先填写分镜画面描述')
   const pack = getStylePack(meta.artStyle)
   const anchor = pack ? applyStylePack(pack, 'keyframe') : ''
-  // 出场资产名注入提示，便于模型对齐
   const cast = assets.filter((a) => sb.associateAssetIds.includes(a.id))
   const castHint = cast.length ? `, 出场：${cast.map((a) => a.name).join('、')}` : ''
-  const prompt = [basis + castHint, anchor].filter(Boolean).join(', ')
+  const chaining = sb.chainFromPrev && chainBase
+  const prompt = [basis + castHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
   const size = sizeForRatio(meta.videoRatio)
 
   const canEdit = !!window.mulby?.ai?.images?.edit && !!window.mulby?.ai?.attachments?.upload
-  const refs = canEdit ? (await Promise.all(cast.map((a) => refBase64(a.refImageId)))).filter(Boolean) as { base64: string; mime: string }[] : []
+  const refs = canEdit ? ((await Promise.all(cast.map((a) => refBase64(a.refImageId)))).filter(Boolean) as { base64: string; mime: string }[]) : []
+  if (chaining && canEdit) {
+    // 承接镜头：上一镜关键帧作主参考，角色/场景参考图作附加 → 同段相邻画格构图/光线/站位一致
+    const r = await editImage({ model, prompt, refBase64: chainBase!.base64, refMime: chainBase!.mime, extraRefs: refs })
+    return saveAsset(r.base64, r.mime)
+  }
   if (refs.length) {
     const [primary, ...rest] = refs
     const r = await editImage({ model, prompt, refBase64: primary.base64, refMime: primary.mime, extraRefs: rest })
@@ -70,6 +84,11 @@ export async function generateKeyframeImage(sb: Storyboard, assets: Asset[], met
   }
   const r = await generateImage({ model, prompt, size })
   return saveAsset(r.base64, r.mime)
+}
+
+/** 取某资产库图片的纯 base64（供承接镜头把上一镜关键帧作参考） */
+export async function loadImageBase64(assetId?: string): Promise<{ base64: string; mime: string } | null> {
+  return refBase64(assetId)
 }
 
 export interface ClipResult {
