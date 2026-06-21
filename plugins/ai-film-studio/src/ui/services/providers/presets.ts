@@ -82,7 +82,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       videoUrlPath: 'result.data.0.url',
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
-      bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
+      // body 由 toapis 模型注册表按 model 自动拼（画幅/时长/图像字段全部映射正确）；无需手写模板
     },
   },
   {
@@ -102,7 +102,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       videoUrlPath: 'result.data.0.url',
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
-      bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
+      // body 由 toapis 模型注册表按 model 自动拼；无需手写模板
     },
   },
   {
@@ -122,9 +122,7 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       videoUrlPath: 'result.data.0.url',
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
-      // grok-video-3：aspect_ratio(16:9/9:16/3:2/2:3/1:1) + seconds(6/10/15 字符串) + images（与 Sora2/Veo3 的 image_urls 不同）
-      bodyTemplate:
-        '{"model":"{model}","prompt":"{prompt}"{?aspectRatio},"aspect_ratio":"{aspectRatio}"{/aspectRatio}{?seconds},"seconds":"{seconds}"{/seconds}{?imageUrl},"images":["{imageUrl}"]{/imageUrl}}',
+      // grok-video-3：注册表自动拼 aspect_ratio(画幅) + seconds(6/10/15) + images 字段
     },
   },
   {
@@ -145,21 +143,21 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
       audio: { toggleField: 'generate_audio' },
-      // 多模态：image_with_roles(首/尾帧) + video_with_roles(参考视频) + audio_with_roles(参考音频/配乐)，按需出现
-      bodyTemplate:
-        '{"model":"{model}","prompt":"{prompt}","resolution":"720p","generate_audio":true{?duration},"duration":{duration}{/duration}{?imageUrl},"image_with_roles":[{"url":"{imageUrl}","role":"first_frame"}{?lastImageUrl},{"url":"{lastImageUrl}","role":"last_frame"}{/lastImageUrl}]{/imageUrl}{?videoUrl},"video_with_roles":[{"url":"{videoUrl}","role":"reference_video"}]{/videoUrl}{?drivingAudioUrl},"audio_with_roles":[{"url":"{drivingAudioUrl}","role":"reference_audio"}]{/drivingAudioUrl}}',
+      // 注册表自动拼 aspect_ratio + duration + image_with_roles(首/尾帧) + generate_audio + resolution
     },
   },
   {
-    id: 'openai-compat-video',
-    label: 'OpenAI 兼容视频聚合 · 通用（自定义平台/模型）',
-    hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 baseURL/submitUrl 接同构平台，model 填任意（sora-2 / veo3.1-fast / grok-video-3 / kling-… / 含 Omni 等）。图生视频自动经「图片上传地址」换公开 URL（默认 toapis 图床，换平台请同步改）。请求体字段名按模型调整（image_urls vs images）。',
+    id: 'toapis-video',
+    label: 'toapis · 视频（任意模型，自动适配画幅/时长/字段）',
+    hint:
+      'toapis 聚合（OpenAI 兼容）。model 填任意已收录模型，请求体由内置注册表按模型自动拼正确字段（画幅 aspect_ratio/size、时长 duration/seconds、图像 image_urls/images/reference_images/image_with_roles、原生音频、分辨率），无需手写模板。' +
+      '已收录：grok-video-3、grok-video-1.5-preview、sora-2、sora-2-vvip、veo3.1-fast/quality、Veo3.1-*-official、doubao-seedance-1-5-pro、doubao-seedance-1-0-pro-fast/quality、seedance-2、seedance-2-fast、gemini_omni_flash、kling-v3、kling-v3-omni、kling-3.0-turbo、kling-v2-6、kling-video-o1、MiniMax-Hailuo-2.3(-Fast)、MiniMax-Hailuo-02、viduq3(-pro/-turbo)、wan2.6、wan2.6-flash、happyhorse-1.0。图生视频自动经 toapis 图床换公开 URL。',
     config: {
       kind: 'custom-http',
       capabilities: ['video'],
       mode: 'async-poll',
-      label: 'OpenAI兼容视频',
-      model: 'sora-2',
+      label: 'toapis 视频',
+      model: 'grok-video-3',
       submitUrl: 'https://toapis.com/v1/videos/generations',
       pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
       taskIdPath: 'id',
@@ -167,7 +165,6 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       videoUrlPath: 'result.data.0.url',
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
-      bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}',
     },
   },
   {

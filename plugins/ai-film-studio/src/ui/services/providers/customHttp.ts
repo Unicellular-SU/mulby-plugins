@@ -3,6 +3,7 @@
  * 默认路径覆盖常见命名，最小配置（仅 submitUrl + pollUrl + Key）即可工作。
  */
 import { httpJson, getPath, firstString } from './http'
+import { toapisVideoModel, buildToapisVideoBody } from './toapisModels'
 import type { VideoProviderAdapter, VideoGenRequest, VideoProviderConfig, VideoHandle, VideoPollResult } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -107,7 +108,10 @@ export const customHttpAdapter: VideoProviderAdapter = {
     // 原生音频（prompt-only 家族）：对白/SFX 拼进 prompt
     const effPrompt = req.audioMode === 'native' && req.audioPrompt ? `${req.prompt}\n${req.audioPrompt}` : req.prompt
     let body: Record<string, unknown>
-    if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
+    if (!cfg.bodyTemplate?.trim() && toapisVideoModel(cfg.model)) {
+      // 已知 toapis 模型：按模型定义自动拼正确 body（画幅/时长/图像字段/音频/分辨率），免手写模板
+      body = buildToapisVideoBody(cfg.model as string, { ...req, prompt: effPrompt, imageUrl, lastImageUrl })
+    } else if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
       // 声明式模板（各家 body 不同，如火山方舟 content[]、通义万相 input{}）
       body = renderBodyTemplate(cfg.bodyTemplate, {
         prompt: effPrompt,
