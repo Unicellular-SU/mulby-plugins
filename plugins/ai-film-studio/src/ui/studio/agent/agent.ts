@@ -60,13 +60,20 @@ export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<A
   if (!model) throw new Error('未配置文本模型（请在「设置」选择）')
   const base = getAgentSkill('production_agent_decision')
   const pack = getStylePack(doc.meta.artStyle)
+  // 近期对话（最多 6 条 user/assistant），让 Agent 记住上下文（如「再加 3 个镜头」）
+  const recent = doc.memory
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .slice(-6)
+    .map((m) => `${m.role === 'user' ? '用户' : '你'}：${m.content}`)
+    .join('\n')
   const ctx = [
     '## 当前项目',
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
-    doc.meta.directorManual ? `导演手册：${doc.meta.directorManual}` : '',
+    doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
     `已有资产：${doc.assets.map((a) => `${a.name}(${a.type})`).join('、') || '无'}`,
     `已有分镜：${doc.storyboards.length} 个`,
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
+    recent ? `## 近期对话\n${recent}` : '',
   ]
     .filter(Boolean)
     .join('\n')

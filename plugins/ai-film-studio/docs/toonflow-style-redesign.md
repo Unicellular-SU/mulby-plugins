@@ -203,7 +203,9 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [ ] **3e 分阶段子 Agent**：编剧/分镜/制片分工 + 监督（可选升级原生流式 tool-calling）。
 - [x] **2f compose 导出**：`studio/services/compose.ts`（按分镜顺序取选用片段，无本地路径则下载→ensureFfmpeg→composeFilm 整片淡入淡出→导出 exports/）；projectStore.compose + film 瞬态（composing/done/failed + 进度）；时间线 Tab 加「合成成片」按钮 + 进度 + 成片预览。**全链路打通：对话→剧本/资产/分镜→出图→出视频→合成成片→导出**。tsc+build 通过。
 - [ ] **3 Agent runtime**：host ai.text tool-calling 封装 + 三层编排 + 工具集（剧本/资产/分镜/时间线/记忆）+ agent skills 全量。
-- [ ] **4 高阶**：小说导入+事件图谱、时间线/轨道选优剪辑、轻量记忆。
+- [x] **4a Agent 质量**：runAgentPlan 注入近期对话（最多6条 user/assistant，记住上下文如「再加3镜」）+ 导演手册；StudioEditor AgentPanel 加可折叠 🎬 导演手册编辑（updateMeta directorManual）。tsc+build 通过。
+- [ ] **4b 小说导入 + 改编**：原著 Tab（粘贴长文 → 分章 → 存 doc.novel）+ Agent 按章改编剧本（长文不丢信息）。
+- [ ] **4c 进阶**：事件图谱、时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义。
 
 ---
 

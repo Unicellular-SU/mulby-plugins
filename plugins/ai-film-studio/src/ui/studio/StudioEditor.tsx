@@ -95,8 +95,10 @@ export default function StudioEditor() {
 function AgentPanel() {
   const doc = useProjectStore((s) => s.doc)!
   const runAgent = useProjectStore((s) => s.runAgent)
+  const updateMeta = useProjectStore((s) => s.updateMeta)
   const busy = useProjectStore((s) => s.agentBusy)
   const [text, setText] = useState('')
+  const [showManual, setShowManual] = useState(false)
   const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
   const send = () => {
     if (!text.trim() || busy) return
@@ -108,7 +110,19 @@ function AgentPanel() {
     <aside className="afs-studio__agent">
       <div className="afs-studio__agent-head">
         <Bot size={16} /> AI 制片
+        <button className="afs-studio__manualtoggle" title="导演手册（全局风格/节奏意图，注入 Agent）" onClick={() => setShowManual((v) => !v)}>
+          🎬
+        </button>
       </div>
+      {showManual && (
+        <textarea
+          className="afs-field__input afs-studio__manual"
+          rows={2}
+          placeholder="导演手册：全局风格/节奏/调性意图（注入每次 Agent 生成）…"
+          value={doc.meta.directorManual ?? ''}
+          onChange={(e) => updateMeta({ directorManual: e.target.value })}
+        />
+      )}
       <div className="afs-studio__agent-msgs">
         {msgs.length === 0 && (
           <p className="afs-studio__hint">
