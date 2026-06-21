@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport } from '../types'
+import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate } from '../types'
 import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
 
@@ -54,6 +54,27 @@ function withActiveBoard(p: ProjectDoc, fn: (b: Board) => Board): ProjectDoc {
   return { ...p, boards, updatedAt: Date.now() }
 }
 
+// 递归收集某组的所有后代（含嵌套组的后代）
+function getDescendants(groupId: string, cards: Record<string, Card>): string[] {
+  const out: string[] = []
+  for (const c of Object.values(cards)) {
+    if (c.parentId === groupId) {
+      out.push(c.id)
+      if (c.kind === 'group') out.push(...getDescendants(c.id, cards))
+    }
+  }
+  return out
+}
+// 把 nodeId 设为 target 的子是否会成环（target 在 nodeId 的子树内）
+function wouldCycle(nodeId: string, target: string | null, cards: Record<string, Card>): boolean {
+  let cur = target
+  while (cur) {
+    if (cur === nodeId) return true
+    cur = cards[cur]?.parentId ?? null
+  }
+  return false
+}
+
 interface GraphState {
   project: ProjectDoc
   selectedIds: string[]
@@ -94,6 +115,8 @@ interface GraphState {
   removeCards: (ids: string[]) => void
   moveCardsBy: (ids: string[], dx: number, dy: number) => void
   groupSelection: () => void
+  setParent: (ids: string[], parentId: string | null) => void
+  insertTemplate: (tpl: GroupTemplate, world: { x: number; y: number }) => void
 
   // 连线
   addEdgeBetween: (source: string, target: string) => void
@@ -222,6 +245,7 @@ export const useGraph = create<GraphState>((set, get) => ({
       refIds: [],
       assets: [],
       meta: {},
+      parentId: null,
       ...partial
     }
     set((s) => ({
@@ -232,9 +256,8 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   groupSelection: () => {
-    const s = get()
-    const board = activeBoardOf(s.project)
-    const ids = s.selectedIds.filter((id) => board.cards[id] && board.cards[id].kind !== 'group')
+    const board = activeBoardOf(get().project)
+    const ids = get().selectedIds.filter((id) => board.cards[id] && board.cards[id].kind !== 'group')
     if (ids.length === 0) return
     const cs = ids.map((id) => board.cards[id])
     const PAD = 28
@@ -243,14 +266,82 @@ export const useGraph = create<GraphState>((set, get) => ({
     const minY = Math.min(...cs.map((c) => c.y)) - PAD - HEAD
     const maxX = Math.max(...cs.map((c) => c.x + c.w)) + PAD
     const maxY = Math.max(...cs.map((c) => c.y + c.h)) + PAD
-    get().addCard('group', { x: 0, y: 0 }, {
-      x: minX,
-      y: minY,
-      w: maxX - minX,
-      h: maxY - minY,
-      title: '分组',
-      params: { color: '#6366f1', collapsed: false, members: ids }
-    })
+    const groupId = uid('card')
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        cards[groupId] = {
+          id: groupId, kind: 'group', x: minX, y: minY, w: maxX - minX, h: maxY - minY,
+          title: '分组', prompt: '', modelId: null, providerId: null,
+          params: { color: '#6366f1', collapsed: false }, status: 'idle', progress: 0, error: null,
+          assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null,
+          refIds: [], assets: [], meta: {}, parentId: null
+        }
+        for (const id of ids) cards[id] = { ...cards[id], parentId: groupId }
+        return { ...b, cards }
+      }),
+      selectedIds: [groupId]
+    }))
+  },
+
+  setParent: (ids, parentId) => {
+    if (ids.length === 0) return
+    const cards0 = activeBoardOf(get().project).cards
+    const valid = ids.filter((id) => cards0[id] && !wouldCycle(id, parentId, cards0))
+    if (valid.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        for (const id of valid) if (cards[id]) cards[id] = { ...cards[id], parentId }
+        return { ...b, cards }
+      })
+    }))
+  },
+
+  insertTemplate: (tpl, world) => {
+    get().pushHistory()
+    const idMap = new Map<string, string>()
+    const groupId = uid('card')
+    for (const m of tpl.members) idMap.set(m.localId, uid('card'))
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        cards[groupId] = {
+          id: groupId, kind: 'group', x: Math.round(world.x), y: Math.round(world.y), w: tpl.group.w, h: tpl.group.h,
+          title: tpl.group.title, prompt: '', modelId: null, providerId: null,
+          params: { ...tpl.group.params, collapsed: false }, status: 'idle', progress: 0, error: null,
+          assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null,
+          refIds: [], assets: [], meta: {}, parentId: null
+        }
+        for (const m of tpl.members) {
+          const nid = idMap.get(m.localId) as string
+          const pid = m.parentLocalId ? (idMap.get(m.parentLocalId) ?? groupId) : groupId
+          cards[nid] = {
+            ...m.card,
+            id: nid,
+            parentId: pid,
+            x: Math.round(world.x + m.card.x),
+            y: Math.round(world.y + m.card.y),
+            assetUrl: null, assetLocalPath: null, attachmentId: null,
+            status: 'idle', progress: 0, error: null
+          }
+        }
+        const edges = { ...b.edges }
+        for (const e of tpl.edges) {
+          const sid = idMap.get(e.source)
+          const tid = idMap.get(e.target)
+          if (sid && tid) {
+            let eid = uid('edge')
+            while (edges[eid]) eid = uid('edge')
+            edges[eid] = { id: eid, source: sid, target: tid, kind: e.kind }
+          }
+        }
+        return { ...b, cards, edges }
+      }),
+      selectedIds: [groupId]
+    }))
   },
 
   updateCard: (id, patch) =>
@@ -269,7 +360,22 @@ export const useGraph = create<GraphState>((set, get) => ({
     set((s) => ({
       project: withActiveBoard(s.project, (b) => {
         const cards = { ...b.cards }
-        for (const id of ids) delete cards[id]
+        // 记录被删卡的父，删除后把其直接子上提到（仍存在的）祖先，保留嵌套层级
+        const parentOf = new Map<string, string | null>()
+        for (const id of ids) {
+          const c = cards[id]
+          if (c) parentOf.set(id, c.parentId)
+          delete cards[id]
+        }
+        const resolveParent = (p: string | null): string | null => {
+          let cur = p
+          while (cur && parentOf.has(cur)) cur = parentOf.get(cur) ?? null
+          return cur
+        }
+        for (const k of Object.keys(cards)) {
+          const p = cards[k].parentId
+          if (p && parentOf.has(p)) cards[k] = { ...cards[k], parentId: resolveParent(p) }
+        }
         const edges: Record<string, Edge> = {}
         for (const [eid, e] of Object.entries(b.edges)) {
           if (!idSet.has(e.source) && !idSet.has(e.target)) edges[eid] = e
@@ -282,15 +388,15 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   moveCardsBy: (ids, dx, dy) => {
     if (ids.length === 0 || (dx === 0 && dy === 0)) return
-    const idSet = new Set(ids)
     set((s) => ({
       project: withActiveBoard(s.project, (b) => {
         const cards = { ...b.cards }
-        for (const id of ids) {
+        const toMove = new Set(ids)
+        for (const id of ids) for (const d of getDescendants(id, b.cards)) toMove.add(d)
+        for (const id of toMove) {
           const c = cards[id]
-          if (c) cards[id] = { ...c, x: c.x + dx, y: c.y + dy }
+          if (c) cards[id] = { ...c, x: Math.round(c.x + dx), y: Math.round(c.y + dy) }
         }
-        void idSet
         return { ...b, cards }
       })
     }))
@@ -342,11 +448,14 @@ export const useGraph = create<GraphState>((set, get) => ({
     const clip = get().clipboard
     if (clip.length === 0) return
     get().pushHistory()
+    const idMap = new Map<string, string>()
+    for (const c of clip) idMap.set(c.id, uid('card'))
     const added: Record<string, Card> = {}
     const newIds: string[] = []
     for (const c of clip) {
-      const id = uid('card')
-      added[id] = { ...c, id, x: c.x + dx, y: c.y + dy }
+      const id = idMap.get(c.id) as string
+      const pid = c.parentId ? (idMap.get(c.parentId) ?? null) : null // 保留剪贴板内的父子关系，外部父置空
+      added[id] = { ...c, id, x: c.x + dx, y: c.y + dy, parentId: pid }
       newIds.push(id)
     }
     set((s) => ({

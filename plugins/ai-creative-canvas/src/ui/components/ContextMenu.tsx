@@ -4,6 +4,7 @@ import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { generateCard, generateSelected, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
+import { saveGroupAsTemplate } from '../services/templates'
 import { screenToWorld } from '../canvas/viewport'
 import { stageEl } from '../canvas/stageEl'
 import type { Card, CardKind } from '../types'
@@ -105,6 +106,15 @@ export function ContextMenu() {
     if (cards.length === 1 && cards[0].kind === 'image' && cards[0].assetLocalPath) items.push({ label: '转视频（以此为首帧）', onClick: () => run(() => shotToVideo(cards[0].id)) })
     if (clips.length >= 2) items.push({ label: `合成成片（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowCompose(true)) })
     if (nonGroup.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
+    if (cards.length === 1 && cards[0].kind === 'group')
+      items.push({
+        label: '保存为模板',
+        onClick: () =>
+          run(() => {
+            const n = prompt('模板名称:', cards[0].title)
+            if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => (window as any).mulby?.notification?.show?.(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
+          })
+      })
     if (cards.length >= 2) {
       items.push({ sep: true })
       items.push({ label: '左对齐', onClick: () => run(() => align('left')) })

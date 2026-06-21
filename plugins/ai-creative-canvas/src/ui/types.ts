@@ -27,6 +27,7 @@ export interface Card {
   refIds: string[] // 显式引用的卡片 id
   assets: NodeAsset[] // 节点内上传的素材
   meta: Record<string, unknown>
+  parentId: string | null // 直接父组 id；null = 顶级
 }
 
 export interface Edge {
@@ -111,4 +112,25 @@ export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   audio: { w: 300, h: 140 },
   source: { w: 260, h: 240 },
   group: { w: 400, h: 300 }
+}
+
+// 卡片是否整体落在组框内（用于拖入归属 / resize 弹出判定）
+export function isCardInsideGroup(node: Card, group: Card): boolean {
+  if (group.kind !== 'group') return false
+  return node.x >= group.x && node.y >= group.y && node.x + node.w <= group.x + group.w && node.y + node.h <= group.y + group.h
+}
+
+// 组模板（可复用的组子树，归一化到 (0,0)；不含产物）
+export interface GroupTemplate {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  group: { w: number; h: number; title: string; params: Record<string, unknown> }
+  members: Array<{
+    localId: string
+    parentLocalId: string | null
+    card: Omit<Card, 'id' | 'assetUrl' | 'assetLocalPath' | 'attachmentId' | 'parentId'>
+  }>
+  edges: Array<{ source: string; target: string; kind: 'ref' | 'flow' }>
 }

@@ -22,7 +22,11 @@ export default function App() {
 
     ;(async () => {
       const p = await loadProject()
-      if (!disposed && p) useGraph.getState().replaceProject(p)
+      if (!disposed && p) {
+        // 旧工程兼容：补 parentId 默认 null
+        for (const b of p.boards) for (const c of Object.values(b.cards)) if ((c as any).parentId === undefined) (c as any).parentId = null
+        useGraph.getState().replaceProject(p)
+      }
     })()
 
     void useProviders.getState().load()

@@ -14,6 +14,7 @@ import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
 import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
+import { isCardInsideGroup } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
@@ -45,9 +46,10 @@ export function CanvasStage() {
   const vp = board.viewport
   const selSet = new Set(selectedIds)
   const hiddenMembers = new Set<string>()
-  for (const c of Object.values(board.cards)) {
-    if (c.kind === 'group' && c.params?.collapsed) for (const m of (c.params?.members as string[]) || []) hiddenMembers.add(m)
+  const hideDesc = (gid: string) => {
+    for (const c of Object.values(board.cards)) if (c.parentId === gid) { hiddenMembers.add(c.id); if (c.kind === 'group') hideDesc(c.id) }
   }
+  for (const c of Object.values(board.cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
 
@@ -118,20 +120,13 @@ export function CanvasStage() {
       const sel = g.selectedIds
       const baseIds = sel.includes(id) ? sel : [id]
       if (!sel.includes(id)) g.setSelection([id])
-      // 拖动分组时带上组内成员
+      // 拖动时带上后代（含嵌套组），按 parentId 递归
       const board0 = g.getActiveBoard()
       const idSet = new Set(baseIds)
-      for (const gid of baseIds) {
-        const gc = board0.cards[gid]
-        if (gc?.kind !== 'group') continue
-        for (const m of (gc.params?.members as string[]) || []) idSet.add(m)
-        for (const o of Object.values(board0.cards)) {
-          if (o.kind === 'group' || idSet.has(o.id)) continue
-          const cx = o.x + o.w / 2
-          const cy = o.y + o.h / 2
-          if (cx >= gc.x && cx <= gc.x + gc.w && cy >= gc.y && cy <= gc.y + gc.h) idSet.add(o.id)
-        }
+      const addDesc = (nodeId: string) => {
+        for (const c of Object.values(board0.cards)) if (c.parentId === nodeId) { idSet.add(c.id); addDesc(c.id) }
       }
+      for (const bid of baseIds) addDesc(bid)
       inter.current = { mode: 'drag', ids: [...idSet], lastX: e.clientX, lastY: e.clientY, moved: false }
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
     } else {
@@ -188,6 +183,11 @@ export function CanvasStage() {
 
   const endInteraction = (e: RPointerEvent<HTMLDivElement>) => {
     const it = inter.current
+    // 强制结算挂起的拖动位移（rAF flush 可能晚于松手），再算归属
+    if (rafId.current != null) {
+      cancelAnimationFrame(rafId.current)
+      flush()
+    }
     if (it.mode === 'marquee') {
       const g = useGraph.getState()
       const board2 = g.getActiveBoard()
@@ -197,11 +197,43 @@ export function CanvasStage() {
       const r = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) }
       if (r.w >= 2 || r.h >= 2) {
         const hit = Object.values(board2.cards)
-          .filter((c) => rectsIntersect(r, { x: c.x, y: c.y, w: c.w, h: c.h }))
+          .filter((c) => !hiddenMembers.has(c.id) && rectsIntersect(r, { x: c.x, y: c.y, w: c.w, h: c.h }))
           .map((c) => c.id)
         g.setSelection(it.additive ? Array.from(new Set([...it.baseSel, ...hit])) : hit)
       }
       setMarquee(null)
+    } else if (it.mode === 'drag' && it.moved) {
+      // 拖动结束：重算被拖卡片/组的归属（整体落入最深的组→入组；都不在→离组）。折进本次移动的历史。
+      const g = useGraph.getState()
+      const board2 = g.getActiveBoard()
+      const groups = Object.values(board2.cards).filter((c) => c.kind === 'group')
+      const dragged = new Set(it.ids)
+      const ops: Array<[string, string | null]> = []
+      for (const id of it.ids) {
+        const card = board2.cards[id]
+        if (!card) continue
+        // 父也被一起拖动 → 随父移动，保持原归属，不被外层组"抢走"
+        if (card.parentId && dragged.has(card.parentId)) continue
+        const cand = groups
+          .filter((gp) => gp.id !== id && !dragged.has(gp.id) && isCardInsideGroup(card, gp))
+          .sort((a, b) => a.w * a.h - b.w * b.h)
+        const newParent = cand.length ? cand[0].id : null
+        if (card.parentId !== newParent) ops.push([id, newParent])
+      }
+      if (ops.length) {
+        useGraph.setState((s) => ({
+          project: {
+            ...s.project,
+            updatedAt: Date.now(),
+            boards: s.project.boards.map((b) => {
+              if (b.id !== s.project.activeBoardId) return b
+              const cards = { ...b.cards }
+              for (const [id, p] of ops) if (cards[id]) cards[id] = { ...cards[id], parentId: p }
+              return { ...b, cards }
+            })
+          }
+        }))
+      }
     }
     inter.current = { mode: 'idle' }
     setCursor(spaceRef.current ? 'grab' : 'default')
@@ -384,7 +416,7 @@ export function CanvasStage() {
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0' }}
       >
         {Object.values(board.cards)
-          .filter((c) => c.kind === 'group')
+          .filter((c) => c.kind === 'group' && !hiddenMembers.has(c.id))
           .map((c) => (
             <GroupView key={c.id} card={c} selected={selSet.has(c.id)} />
           ))}
