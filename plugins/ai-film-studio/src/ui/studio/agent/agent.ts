@@ -79,7 +79,12 @@ export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<A
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
     doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
     `已有资产：${doc.assets.map((a) => `${a.name}(${a.type})`).join('、') || '无'}`,
-    `已有分镜：${doc.storyboards.length} 个`,
+    doc.storyboards.length
+      ? `已有分镜（${doc.storyboards.length} 个，新增的分镜要承接这些、不要重复）：\n${[...doc.storyboards]
+          .sort((a, b) => a.index - b.index)
+          .map((s, i) => `${i + 1}. ${s.videoDesc.slice(0, 60)}`)
+          .join('\n')}`
+      : '尚无分镜',
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
     doc.novel.length
       ? `## 原著（${doc.novel.length} 章，按此改编剧本，可分集/分段，不丢关键信息）\n${doc.novel
