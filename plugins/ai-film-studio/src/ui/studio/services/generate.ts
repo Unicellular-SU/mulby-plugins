@@ -106,6 +106,13 @@ export interface ClipResult {
   durationSec: number
 }
 
+/** 片段生成选项（§5.4 扩参）：首帧顺接 + 段时长覆盖 + 进度。 */
+export interface ClipGenOptions {
+  firstFrameUrl?: string // 承接片段：上一片段真实尾帧作首帧
+  durationSec?: number // 段时长覆盖（优先于 sb.duration，钳 [4,15]）
+  onProgress?: (s: string) => void
+}
+
 /** 由项目 id 派生稳定 seed：整片所有片段共用，跨片段风格/运动更一致（供应商不支持则忽略） */
 function projectSeed(id: string): number {
   let h = 0x811c9dc5
@@ -121,12 +128,8 @@ function projectSeed(id: string): number {
  * 顺接（fix4 同源）：承接片段传 firstFrameUrl（上一片段真实尾帧）作首帧，无缝衔接。
  * 复用现有 providers（fal/custom-http 异步轮询）。下载落盘供后续 ffmpeg 合成。
  */
-export async function generateClipVideo(
-  sb: Storyboard,
-  meta: ProjectMeta,
-  firstFrameUrl?: string,
-  onProgress?: (s: string) => void
-): Promise<ClipResult> {
+export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts: ClipGenOptions = {}): Promise<ClipResult> {
+  const { firstFrameUrl, durationSec, onProgress } = opts
   const ps = useProviderStore.getState()
   const provider = ps.getActiveFor('video')
   if (!provider) throw new Error('未配置视频供应商（请在「设置」添加并设为默认）')
@@ -138,8 +141,8 @@ export async function generateClipVideo(
   const motion = [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut']
     .filter(Boolean)
     .join(', ')
-  // 时长钳到视频模型通用区间 [4,15]s（防 LLM/手填异常值被原样发出致供应商报错）；seed 整片共用提一致性
-  const duration = Math.min(Math.max(Number(sb.duration) || 5, 4), 15)
+  // 时长：段时长(durationSec)优先于分镜 duration；钳到视频模型通用区间 [4,15]s；seed 整片共用提一致性
+  const duration = Math.min(Math.max(Number(durationSec ?? sb.duration) || 5, 4), 15)
   const { url } = await runVideo({
     cfg: provider,
     apiKey,

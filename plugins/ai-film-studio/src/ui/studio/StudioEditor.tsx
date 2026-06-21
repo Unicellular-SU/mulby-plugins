@@ -9,7 +9,7 @@ import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import type { Asset, AssetType, Storyboard } from '../domain/types'
+import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
 import EditorView from '../components/shell/EditorView'
 import SettingsView from '../components/views/SettingsView'
@@ -23,6 +23,14 @@ const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'timeline', label: '时间线', icon: Film },
   { id: 'canvas', label: '精修', icon: Workflow }, // 节点画布降级为工作台内高级编辑入口
+]
+
+// 视频模式（对标 Toonflow 4 模式，§5.3；具体提示词模板在 phase4 接入）
+const VIDEO_MODE_OPTIONS: { id: string; label: string }[] = [
+  { id: 'firstFrame', label: '首帧驱动（图生视频）' },
+  { id: 'startEndFrame', label: '首尾帧' },
+  { id: 'multiRef', label: '多参考（seedance 类）' },
+  { id: 'singleImageFirst', label: '单图首帧（wan2.6 类）' },
 ]
 
 export default function StudioEditor() {
@@ -153,11 +161,13 @@ function StudioModelBar() {
   const selectedImageModel = useGraphStore((s) => s.selectedImageModel)
   const setSelectedModel = useGraphStore((s) => s.setSelectedModel)
   const setSelectedImageModel = useGraphStore((s) => s.setSelectedImageModel)
-  const videoProvider = useProviderStore((s) => {
-    const id = s.defaults.video
-    const byDefault = id ? s.providers.find((p) => p.id === id) : undefined
-    return byDefault ?? s.providers.find((p) => p.enabled && (p.capabilities || ['video']).includes('video')) ?? null
-  })
+  const meta = useProjectStore((s) => s.doc?.meta)
+  const updateMeta = useProjectStore((s) => s.updateMeta)
+  const providers = useProviderStore((s) => s.providers)
+  const videoDefault = useProviderStore((s) => s.defaults.video)
+  const setDefault = useProviderStore((s) => s.setDefault)
+  const videoProviders = providers.filter((p) => (p.capabilities || ['video']).includes('video'))
+  const videoProvider = videoProviders.find((p) => p.id === videoDefault) ?? videoProviders.find((p) => p.enabled) ?? null
   const [open, setOpen] = useState(false)
   const ok = !!selectedModel && !!selectedImageModel && !!videoProvider
   return (
@@ -186,9 +196,35 @@ function StudioModelBar() {
             ))}
           </select>
           <label>视频供应商（片段）</label>
-          <div className={`afs-studio__modelstat${videoProvider ? '' : ' is-missing'}`}>
-            {videoProvider ? videoProvider.label : '未配置 — 去左侧「设置」添加视频供应商并设为默认'}
-          </div>
+          {videoProviders.length ? (
+            <select className="afs-field__input" value={videoDefault ?? ''} onChange={(e) => setDefault('video', e.target.value || null)}>
+              <option value="">（自动选第一个）</option>
+              {videoProviders.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                  {p.model ? ` · ${p.model}` : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="afs-studio__modelstat is-missing">未配置 — 在设置抽屉添加视频供应商</div>
+          )}
+          <label>视频模式</label>
+          <select className="afs-field__input" value={meta?.videoMode ?? 'firstFrame'} onChange={(e) => updateMeta({ videoMode: e.target.value })}>
+            {VIDEO_MODE_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <label>分辨率</label>
+          <select className="afs-field__input" value={meta?.videoResolution ?? '720p'} onChange={(e) => updateMeta({ videoResolution: e.target.value })}>
+            {['480p', '720p', '1080p'].map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
           {(models.length === 0 || imageModels.length === 0) && (
             <div className="afs-studio__hint">没有可选模型？先去「设置」配置宿主文本/图像模型供应商。</div>
           )}
@@ -512,7 +548,10 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
-  const clip = doc.clips.find((c) => c.storyboardId === sb.id)
+  // 取该分镜所属段的「选用/最新」候选片段，反映状态（一镜多生后不再是唯一片段）
+  const track = doc.track.find((t) => t.storyboardIds.includes(sb.id))
+  const clipId = track ? track.selectClipId || track.clipIds[track.clipIds.length - 1] : undefined
+  const clip = clipId ? doc.clips.find((c) => c.id === clipId) : undefined
   return (
     <div className="afs-studio__sbitem">
       <div className="afs-studio__sbleft">
@@ -579,37 +618,117 @@ function TimelineTab() {
   const compose = useProjectStore((s) => s.compose)
   const film = useProjectStore((s) => s.film)
   const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
-  const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
-  const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardIds.includes(s.id))?.selectClipId)).filter(Boolean)
-  if (!clips.length)
+  const tracks = [...doc.track].sort((a, b) => a.order - b.order)
+  const anyDone = doc.clips.some((c) => c.state === 'done')
+  if (tracks.length === 0)
     return (
       <div className="afs-studio__timeline">
-        <p className="afs-studio__hint">还没有视频片段。去「分镜」给每个镜头生成关键帧 → 视频，回到这里即可合成成片。</p>
+        <p className="afs-studio__hint">还没有分镜。去「分镜」新增镜头并生成关键帧 → 视频，每段可多生候选、选优后合成。</p>
       </div>
     )
   return (
     <div className="afs-studio__timeline">
       <div className="afs-studio__timeline-head">
-        <p className="afs-studio__hint">{clips.length} 个片段（按分镜顺序）。</p>
-        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing'} onClick={() => void compose()}>
+        <p className="afs-studio__hint">{tracks.length} 段 · 每段可多生候选、选优后合成</p>
+        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>
       </div>
       {film.state === 'composing' && <p className="afs-studio__hint">{film.text}</p>}
       {film.state === 'failed' && <p className="afs-studio__err-text">合成失败：{film.error}</p>}
-      <div className="afs-studio__track">
-        {clips.map((c, i) => (
-          <TrackClip
-            key={c!.id}
-            localPath={c!.videoFilePath}
-            url={c!.videoUrl}
-            index={i}
-            onOpen={() => setPreview({ localPath: c!.videoFilePath, url: c!.videoUrl })}
-          />
+      <div className="afs-studio__tracklist">
+        {tracks.map((t, i) => (
+          <TrackCard key={t.id} track={t} order={i} onPreview={(c) => setPreview({ localPath: c.videoFilePath, url: c.videoUrl })} />
         ))}
       </div>
       {film.state === 'done' && film.path && <FilmDone path={film.path} name={doc.meta.name} />}
       {preview && <ClipPreview localPath={preview.localPath} url={preview.url} onClose={() => setPreview(null)} />}
+    </div>
+  )
+}
+
+function TrackCard({ track, order, onPreview }: { track: VideoTrack; order: number; onPreview: (c: Clip) => void }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const selectClip = useProjectStore((s) => s.selectClip)
+  const deleteClip = useProjectStore((s) => s.deleteClip)
+  const updateTrackDuration = useProjectStore((s) => s.updateTrackDuration)
+  const generateClip = useProjectStore((s) => s.generateClip)
+  const sb = track.storyboardIds.length ? doc.storyboards.find((s) => s.id === track.storyboardIds[0]) : undefined
+  const kf = useMediaUrl(sb?.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
+  const cands = track.clipIds.map((id) => doc.clips.find((c) => c.id === id)).filter(Boolean) as Clip[]
+  const selId = track.selectClipId || track.clipIds[0]
+  const generating = cands.some((c) => c.state === 'generating')
+  return (
+    <div className="afs-studio__trackcard">
+      <div className="afs-studio__trackcard-head">
+        <span className="afs-studio__sbidx">{order + 1}</span>
+        {kf ? <img className="afs-studio__trackkf" src={kf} alt="" /> : <Clapperboard size={16} opacity={0.3} />}
+        <span className="afs-studio__trackdesc" title={sb?.videoDesc}>{sb?.videoDesc || '（无分镜）'}</span>
+        <label className="afs-studio__trackdur" title="段时长（秒），留空用分镜推荐时长">
+          <input
+            type="number"
+            min={1}
+            max={15}
+            value={track.duration ?? ''}
+            placeholder={String(sb?.duration ?? 5)}
+            onChange={(e) => updateTrackDuration(track.id, e.target.value ? Number(e.target.value) : undefined)}
+          />
+          s
+        </label>
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={!sb?.keyframeImageId || generating}
+          title={!sb?.keyframeImageId ? '先生成关键帧' : cands.length ? '再生成一个候选（一镜多生选优）' : '由关键帧生成视频'}
+          onClick={() => sb && void generateClip(sb.id)}
+        >
+          {generating ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} {cands.length ? '再生一版' : '生成视频'}
+        </button>
+      </div>
+      {cands.length > 0 && (
+        <div className="afs-studio__candrow">
+          {cands.map((c) => (
+            <CandidateClip
+              key={c.id}
+              clip={c}
+              selected={c.id === selId}
+              onSelect={() => selectClip(track.id, c.id)}
+              onPreview={() => onPreview(c)}
+              onDelete={() => deleteClip(track.id, c.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CandidateClip({ clip, selected, onSelect, onPreview, onDelete }: { clip: Clip; selected: boolean; onSelect: () => void; onPreview: () => void; onDelete: () => void }) {
+  const src = useMediaUrl({ localPath: clip.videoFilePath, url: clip.videoUrl })
+  return (
+    <div className={`afs-studio__cand${selected ? ' is-sel' : ''}`}>
+      {clip.state === 'generating' ? (
+        <div className="afs-studio__cand-load">
+          <Loader2 size={16} className="afs-spin" />
+        </div>
+      ) : clip.state === 'failed' ? (
+        <div className="afs-studio__cand-load" title={clip.error || '生成失败'}>
+          <AlertCircle size={16} />
+        </div>
+      ) : (
+        <video src={src} muted playsInline preload="metadata" onClick={onSelect} title="点击设为当选" />
+      )}
+      {selected && <span className="afs-studio__cand-badge">当选</span>}
+      <div className="afs-studio__cand-actions">
+        <button title="设为当选" onClick={onSelect}>
+          ✓
+        </button>
+        <button title="预览（有声）" onClick={onPreview}>
+          <Film size={11} />
+        </button>
+        <button title="删除候选" onClick={onDelete}>
+          <Trash2 size={11} />
+        </button>
+      </div>
     </div>
   )
 }
@@ -664,15 +783,5 @@ function FilmDone({ path, name }: { path: string; name: string }) {
       </div>
       <p className="afs-studio__hint">成片已导出：{path}</p>
     </div>
-  )
-}
-
-function TrackClip({ localPath, url, index, onOpen }: { localPath?: string; url?: string; index: number; onOpen: () => void }) {
-  const src = useMediaUrl({ localPath, url })
-  return (
-    <button className="afs-studio__trackclip" onClick={onOpen} title="点击预览该片段（有声）">
-      <video src={src} muted playsInline preload="metadata" />
-      <span className="afs-studio__trackidx">{index + 1}</span>
-    </button>
   )
 }

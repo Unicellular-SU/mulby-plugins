@@ -720,3 +720,11 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **迁移（§2.1.1）**：`loadProject` 内新增 `normalizeDoc`——旧 `VideoTrackItem{storyboardId}` → `VideoTrack{storyboardIds:[..],order}`（幂等）+ 必填数组兜底；旧 doc 残留 events 字段无害忽略。**同步改对全部受影响调用点**：`generate.ts` ASSET_ROLE 改 `Partial<Record>` + `?? 'character'` 兜底、audio/clip 提前 return；`projectStore`（removeStoryboard 段内去分镜+空段删除、generateClip 段定位/新建改 storyboardIds+order）；`compose.ts:21`、`StudioEditor` TimelineTab 轨道定位改 `storyboardIds.includes`。
   - **独立 KV store 骨架**（§2.2）：新增 `domain/studioKv.ts`——`STUDIO_KV` 键表 + 强类型读写 + `AgentDeployDoc`/`TaskRecord`/`MemoryConfig`(默认值)/`ModelPromptMap` 类型，供 phase6/9/10 接入。
   - 旧项目向后兼容（normalizeDoc 迁移）。tsc + vite build 通过。
+
+- [x] **阶段 3 时间线重构**（commit 待提交）
+  - **段同步服务**（§5.1）：新增 `studio/services/track.ts`——`syncTracksFromStoryboards`（1 分镜=1 段惰性补齐：去删除分镜引用、空段删除、保留素材段、按分镜 index 排 order，幂等）+ `trackOfStoryboard`/`selectedClipId`。在 init/openProject/分镜增删改/Agent 应用方案后调用。
+  - **projectStore 时间线动作**：`syncTracks`/`selectClip`/`deleteClip`/`updateTrackDuration`；`generateClip` 重构为**一镜多生选优**（§5.2）——每次生成新建候选并自动选中，重试「失败」候选则就地覆盖（不堆孤儿），防重入；承接首帧改用段选用片段尾帧。
+  - **段时长 + 扩参**（§5.4）：`generateClipVideo` 签名改为 `(sb, meta, opts:{firstFrameUrl?,durationSec?,onProgress?})`；`generateClip` 传 `track.duration`，时长钳 [4,15] 不变。（lastImageUrl 尾帧顺接因 runVideo req 暂无该字段，留待 provider 能力核实后接入。）
+  - **时间线 UI 重构**：`TimelineTab` 从扁平片段列表 → **段卡片序列**（`TrackCard`）：每段显关键帧缩略 + 画面描述 + 段时长输入 + 候选片段横排（`CandidateClip`：当选高亮/选优/预览/删除/再生一版）；`StoryboardItem` 视频态改取段选用候选；删除旧 `TrackClip`。
+  - **项目级视频参数**（§5.8）：`StudioModelBar` 模型弹层加视频供应商下拉（`setDefault('video')`）+ 视频模式（4 模式）+ 分辨率，写入 `meta.videoMode/videoResolution`。
+  - tsc + vite build 通过。运行态待 Mulby 实测（含旧项目段迁移、候选选优、段时长生效）。

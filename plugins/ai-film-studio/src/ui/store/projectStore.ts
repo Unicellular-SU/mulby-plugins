@@ -12,6 +12,7 @@ import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImage
 import { runAgentPipeline } from '../studio/agent/agent'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
+import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -53,6 +54,12 @@ interface ProjectState {
   reorderStoryboards: (orderedIds: string[]) => void
   moveStoryboard: (id: string, delta: number) => void
   upsertClip: (c: Partial<Clip> & { storyboardId: string }) => string
+
+  // 时间线 · 视频段/轨道（§5.1/§5.2/§5.4）
+  syncTracks: () => void
+  selectClip: (trackId: string, clipId: string) => void
+  deleteClip: (trackId: string, clipId: string) => void
+  updateTrackDuration: (trackId: string, sec: number | undefined) => void
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
   generateAsset: (id: string) => Promise<void>
@@ -117,6 +124,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let doc: ProjectDoc | null = null
     if (currentId) doc = await P.loadProject(currentId)
     set({ cards, doc, loading: false })
+    if (doc) get().syncTracks() // 旧项目惰性补齐视频段
   },
 
   refreshCards: async () => set({ cards: await P.loadIndex() }),
@@ -137,6 +145,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc) return
     await P.setCurrentId(id)
     set({ doc, dirty: false })
+    get().syncTracks() // 惰性补齐视频段
   },
 
   closeProject: async () => {
@@ -222,6 +231,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const merged: Storyboard = { ...base, ...s, id }
       if (i >= 0) d.storyboards[i] = merged
       else d.storyboards.push(merged)
+      syncTracksFromStoryboards(d) // 新分镜惰性补一个段
     })
     return id
   },
@@ -229,18 +239,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       d.storyboards = d.storyboards.filter((x) => x.id !== id)
       d.clips = d.clips.filter((c) => c.storyboardId !== id)
-      // 从各段移除该分镜；变空的段删除（VideoTrack 可聚合多分镜）
-      d.track = d.track
-        .map((t) => ({ ...t, storyboardIds: t.storyboardIds.filter((sid) => sid !== id) }))
-        .filter((t) => t.storyboardIds.length > 0)
       // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
       d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
+      syncTracksFromStoryboards(d) // 段内去该分镜 + 空段删除 + order 重排
     }),
   reorderStoryboards: (orderedIds) =>
     get().mutate((d) => {
       const pos = new Map(orderedIds.map((id, i) => [id, i]))
       d.storyboards.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0))
       d.storyboards.forEach((s, i) => (s.index = i))
+      syncTracksFromStoryboards(d) // 段顺序跟随分镜 index
     }),
   moveStoryboard: (id, delta) =>
     get().mutate((d) => {
@@ -251,6 +259,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ;[ordered[i], ordered[j]] = [ordered[j], ordered[i]]
       ordered.forEach((s, k) => (s.index = k))
       d.storyboards = ordered
+      syncTracksFromStoryboards(d)
+    }),
+
+  syncTracks: () => get().mutate((d) => syncTracksFromStoryboards(d)),
+  selectClip: (trackId, clipId) =>
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === trackId)
+      if (t && t.clipIds.includes(clipId)) t.selectClipId = clipId
+    }),
+  deleteClip: (trackId, clipId) =>
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === trackId)
+      if (t) {
+        t.clipIds = t.clipIds.filter((c) => c !== clipId)
+        if (t.selectClipId === clipId) t.selectClipId = t.clipIds[0]
+      }
+      d.clips = d.clips.filter((c) => c.id !== clipId)
+    }),
+  updateTrackDuration: (trackId, sec) =>
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === trackId)
+      if (t) t.duration = sec && sec > 0 ? sec : undefined
     }),
 
   upsertClip: (c) => {
@@ -300,12 +330,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   generateClip: async (storyboardId) => {
-    const doc = get().doc
-    const sb = doc?.storyboards.find((s) => s.id === storyboardId)
-    if (!doc || !sb) return
-    // 复用该分镜已有片段（每分镜一条，重试就地覆盖，避免堆积孤儿片段 + UI 取到旧片段）
-    const existing = doc.clips.find((c) => c.storyboardId === storyboardId)
-    const clipId = get().upsertClip({ id: existing?.id, storyboardId, state: 'generating', error: undefined, durationSec: sb.duration || 5 })
+    const doc0 = get().doc
+    const sb = doc0?.storyboards.find((s) => s.id === storyboardId)
+    if (!doc0 || !sb) return
+    // 确保该分镜有段（1 分镜=1 段惰性补齐），再取段
+    get().syncTracks()
+    const doc = get().doc!
+    const track = doc.track.find((t) => t.storyboardIds.includes(storyboardId))
+    if (!track) return
+    // 一镜多生选优（§5.2）：重试「失败」候选则就地覆盖（不堆孤儿），否则新建候选并自动选中
+    const last = track.clipIds.length ? doc.clips.find((c) => c.id === track.clipIds[track.clipIds.length - 1]) : undefined
+    if (last?.state === 'generating') return // 防重入
+    const reuse = last?.state === 'failed' ? last : undefined
+    const clipId = get().upsertClip({
+      id: reuse?.id,
+      storyboardId,
+      trackId: track.id,
+      state: 'generating',
+      error: undefined,
+      durationSec: track.duration ?? sb.duration ?? 5,
+      createdAt: Date.now(),
+    })
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === track.id)
+      if (t) {
+        if (!t.clipIds.includes(clipId)) t.clipIds.push(clipId)
+        t.selectClipId = clipId
+      }
+    })
     const setClip = (patch: Partial<Clip>) =>
       get().mutate((d) => {
         const c = d.clips.find((x) => x.id === clipId)
@@ -319,23 +371,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const i = ordered.findIndex((s) => s.id === storyboardId)
         const prev = i > 0 ? ordered[i - 1] : undefined
         const pt = prev ? doc.track.find((t) => t.storyboardIds.includes(prev.id)) : undefined
-        const prevClip = pt
-          ? doc.clips.find((c) => c.id === (pt.selectClipId || pt.clipIds[0]))
+        const selId = pt ? selectedClipId(pt) : undefined
+        const prevClip = selId
+          ? doc.clips.find((c) => c.id === selId)
           : prev
             ? doc.clips.find((c) => c.storyboardId === prev.id && c.state === 'done')
             : undefined
         firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
       }
-      const r = await generateClipVideo(sb, doc.meta, firstFrameUrl)
+      const r = await generateClipVideo(sb, doc.meta, { firstFrameUrl, durationSec: track.duration })
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
-      // 同步进时间线（每分镜一条片段，clipIds 直接置为该片段）
-      get().mutate((d) => {
-        const t = d.track.find((x) => x.storyboardIds.includes(storyboardId))
-        if (t) {
-          t.clipIds = [clipId]
-          t.selectClipId = clipId
-        } else d.track.push({ id: P.newId('t_'), storyboardIds: [storyboardId], clipIds: [clipId], selectClipId: clipId, order: d.track.length })
-      })
     } catch (e) {
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
@@ -444,6 +489,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             state: 'idle',
           })
         }
+        syncTracksFromStoryboards(d) // Agent 新增分镜 → 惰性补齐视频段
         d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now() })
       })
       // 用户明确要求出图/成片 → 应用方案后自动一键成片（后台执行，不阻塞对话）

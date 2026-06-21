@@ -3441,6 +3441,23 @@ body {
 .afs-studio__drawer { width: min(580px, 92vw); height: 100%; background: var(--afs-panel); border-left: 1px solid var(--afs-border); display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3); }
 .afs-studio__drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--afs-border); font-weight: 600; }
 .afs-studio__drawer-body { flex: 1; overflow: auto; }
+/* 阶段3：时间线段卡片 + 一镜多生候选 */
+.afs-studio__tracklist { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.afs-studio__trackcard { border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); padding: 10px; }
+.afs-studio__trackcard-head { display: flex; align-items: center; gap: 10px; }
+.afs-studio__trackkf { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.afs-studio__trackdesc { flex: 1; min-width: 0; font-size: 12px; color: var(--afs-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio__trackdur { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--afs-text-dim); }
+.afs-studio__trackdur input { width: 48px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 6px; padding: 3px 5px; }
+.afs-studio__candrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.afs-studio__cand { position: relative; width: 120px; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: #000; }
+.afs-studio__cand.is-sel { border-color: var(--afs-accent, #5b8cff); }
+.afs-studio__cand video { width: 100%; height: 68px; object-fit: cover; display: block; cursor: pointer; }
+.afs-studio__cand-load { width: 100%; height: 68px; display: flex; align-items: center; justify-content: center; color: var(--afs-text-dim); }
+.afs-studio__cand-badge { position: absolute; top: 3px; left: 3px; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--afs-accent, #5b8cff); color: #fff; }
+.afs-studio__cand-actions { position: absolute; bottom: 3px; right: 3px; display: flex; gap: 3px; }
+.afs-studio__cand-actions button { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer; font-size: 11px; }
+.afs-studio__cand-actions button:hover { background: rgba(0, 0, 0, 0.8); }
 .afs-studio__agent { width: 320px; border-left: 1px solid var(--afs-border); display: flex; flex-direction: column; background: var(--afs-panel-2); }
 .afs-studio__agent-head { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--afs-border); font-weight: 600; }
 .afs-studio__agent-body { padding: 14px; }
