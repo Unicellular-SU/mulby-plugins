@@ -55,6 +55,11 @@ interface ProjectState {
   generateAsset: (id: string) => Promise<void>
   generateKeyframe: (storyboardId: string) => Promise<void>
   generateClip: (storyboardId: string) => Promise<void>
+  // 批量「一键生成」（顺序执行，跳过已完成；batch 显示当前进度标签）
+  batch: { running: boolean; label?: string }
+  generateAllAssets: () => Promise<void>
+  generateAllKeyframes: () => Promise<void>
+  generateAllClips: () => Promise<void>
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
@@ -92,6 +97,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   dirty: false,
   agentBusy: false,
   film: { state: 'idle' },
+  batch: { running: false },
 
   init: async () => {
     set({ loading: true })
@@ -338,6 +344,50 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } finally {
       set({ agentBusy: false })
       await get().flush()
+    }
+  },
+
+  generateAllAssets: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = get().doc!.assets.filter((a) => !a.refImageId).map((a) => a.id)
+    set({ batch: { running: true, label: `生成资产 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `生成资产 ${i + 1}/${ids.length}` } })
+        await get().generateAsset(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
+    }
+  },
+
+  generateAllKeyframes: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = get().doc!.storyboards.filter((s) => !s.keyframeImageId).map((s) => s.id)
+    set({ batch: { running: true, label: `生成关键帧 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `生成关键帧 ${i + 1}/${ids.length}` } })
+        await get().generateKeyframe(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
+    }
+  },
+
+  generateAllClips: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = get()
+      .doc!.storyboards.filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
+      .map((s) => s.id)
+    set({ batch: { running: true, label: `生成视频 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `生成视频 ${i + 1}/${ids.length}` } })
+        await get().generateClip(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
     }
   },
 

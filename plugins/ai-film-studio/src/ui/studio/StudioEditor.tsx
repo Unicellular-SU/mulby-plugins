@@ -21,6 +21,7 @@ export default function StudioEditor() {
   const doc = useProjectStore((s) => s.doc)!
   const closeProject = useProjectStore((s) => s.closeProject)
   const updateMeta = useProjectStore((s) => s.updateMeta)
+  const batch = useProjectStore((s) => s.batch)
   const [tab, setTab] = useState<Tab>('script')
 
   return (
@@ -49,6 +50,11 @@ export default function StudioEditor() {
             </option>
           ))}
         </select>
+        {batch.running && (
+          <span className="afs-studio__batchstat">
+            <Loader2 size={14} className="afs-spin" /> {batch.label}
+          </span>
+        )}
       </header>
 
       <nav className="afs-studio__tabs">
@@ -184,6 +190,8 @@ function ScriptTab() {
 function AssetsTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
+  const generateAllAssets = useProjectStore((s) => s.generateAllAssets)
+  const batch = useProjectStore((s) => s.batch)
   const groups: { type: AssetType; label: string }[] = [
     { type: 'role', label: '人物' },
     { type: 'scene', label: '场景' },
@@ -191,6 +199,11 @@ function AssetsTab() {
   ]
   return (
     <div className="afs-studio__assets">
+      <div className="afs-studio__tabbar">
+        <button className="afs-btn afs-btn--sm" disabled={batch.running || doc.assets.length === 0} onClick={() => void generateAllAssets()}>
+          {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 全部生成
+        </button>
+      </div>
       {groups.map((g) => {
         const items = doc.assets.filter((a) => a.type === g.type)
         return (
@@ -258,11 +271,27 @@ function AssetCard({ asset }: { asset: Asset }) {
 function StoryboardTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
+  const generateAllKeyframes = useProjectStore((s) => s.generateAllKeyframes)
+  const generateAllClips = useProjectStore((s) => s.generateAllClips)
+  const batch = useProjectStore((s) => s.batch)
+  const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
   return (
     <div className="afs-studio__storyboard">
-      <button className="afs-btn afs-btn--sm" onClick={() => upsertStoryboard({ videoDesc: '' })}>
-        <Plus size={14} /> 新增分镜
-      </button>
+      <div className="afs-studio__tabbar">
+        <button className="afs-btn afs-btn--sm" onClick={() => upsertStoryboard({ videoDesc: '' })}>
+          <Plus size={14} /> 新增分镜
+        </button>
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={batch.running || doc.storyboards.length === 0}
+          onClick={() => void generateAllKeyframes()}
+        >
+          <Wand2 size={14} /> 全部关键帧
+        </button>
+        <button className="afs-btn afs-btn--sm" disabled={batch.running || !hasKeyframes} onClick={() => void generateAllClips()}>
+          <Film size={14} /> 全部视频
+        </button>
+      </div>
       <div className="afs-studio__sblist">
         {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（阶段3 由分镜 Agent 自动拆解生成）。</p>}
         {doc.storyboards.map((s, i) => (
