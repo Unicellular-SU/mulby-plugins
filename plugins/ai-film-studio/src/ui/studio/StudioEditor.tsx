@@ -154,6 +154,7 @@ function AgentPanel() {
   const runAgent = useProjectStore((s) => s.runAgent)
   const updateMeta = useProjectStore((s) => s.updateMeta)
   const busy = useProjectStore((s) => s.agentBusy)
+  const stage = useProjectStore((s) => s.agentStage)
   const [text, setText] = useState('')
   const [showManual, setShowManual] = useState(false)
   const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -193,7 +194,7 @@ function AgentPanel() {
         ))}
         {busy && (
           <div className="afs-studio__msg afs-studio__msg--assistant">
-            <Loader2 size={14} className="afs-spin" /> 思考中…
+            <Loader2 size={14} className="afs-spin" /> {stage || '思考中…'}
           </div>
         )}
       </div>

@@ -9,7 +9,7 @@ import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
-import { runAgentPlan } from '../studio/agent/agent'
+import { runAgentPipeline } from '../studio/agent/agent'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 
@@ -28,6 +28,7 @@ interface ProjectState {
   loading: boolean
   dirty: boolean
   agentBusy: boolean
+  agentStage?: string
   film: FilmState
 
   init: () => Promise<void>
@@ -386,9 +387,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const now = Date.now()
     get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
-    set({ agentBusy: true })
+    set({ agentBusy: true, agentStage: undefined })
     try {
-      const plan = await runAgentPlan(get().doc!, userText)
+      const plan = await runAgentPipeline(get().doc!, userText, (label) => set({ agentStage: label }))
       get().mutate((d) => {
         // 剧本：覆盖首个或新建
         if (plan.script?.content) {
@@ -449,7 +450,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: '出错：' + (e instanceof Error ? e.message : String(e)), createTime: Date.now() })
       )
     } finally {
-      set({ agentBusy: false })
+      set({ agentBusy: false, agentStage: undefined })
       await get().flush()
     }
   },

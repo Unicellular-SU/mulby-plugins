@@ -211,7 +211,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **4f 成片打开/另存**：FilmDone——「打开所在文件夹」(shell.showItemInFolder) +「另存为…」(dialog.showSaveDialog → filesystem 读写复制)。tsc+build 通过。
 - [x] **4g 视频生成加固**：generateClipVideo 时长钳到 [4,15]s（防越界报错）+ 整片共用 projectSeed（由项目 id 派生，跨片段一致）+ durationSec 返回钳后值。tsc+build 通过。
 - [x] **Agent 续写/改写**：上下文列出已有分镜（编号，避免重复）；storyboard.replaceIndex 就地改某镜（关键帧失效待重生）。聚焦自检确认 replaceIndex/去重/append index 连续性均正确（资产 nameToId 仅按名、同名异类极端边界除外）。
-- [ ] **4h 进阶（剩余可选）**：分阶段子 Agent（编剧/分镜/制片决策→执行）、时间线多镜选优剪辑、持久向量记忆、供应商强类型 model 定义。
+- [x] **4h 分阶段子 Agent**：Toonflow 3 层——agent.ts 重构出 buildContext/ensureModel/callJson；runAgentPipeline（决策层 parseDecision 决定 tasks[script/assets/storyboard]，再依次跑聚焦执行子 Agent 编剧/美术/导演，上下文渐进传递 script→assets→storyboard）；projectStore.runAgent 改用 pipeline + agentStage 进度；AgentPanel 显示阶段（制片决策…/编剧…/美术…/导演…）。runAgentPlan 单次版保留为兜底。tsc+build 通过。
+- [ ] **4i 进阶（剩余可选）**：时间线多镜选优剪辑、持久向量记忆、供应商强类型 model 定义。
 
 - [x] **自检/加固（多 Agent 评审）**：对新 studio 代码跑 16-agent 评审（state/async、services、react/ui、persistence 四维 + 对抗复核），修 6 个确认 bug：① novel 章节正则 `\b` 致中文标题全不匹配（高）② generateClip 每次新建片段→重试堆积孤儿片段（高）③ StoryboardItem 取到最旧片段→状态显示错（高，随②修复）④ parsePlan 空/非JSON 抛裸 SyntaxError→改纯文本兜底 ⑤ ScriptTab 选中不回退→Agent 新建剧本不显示 ⑥ composeArtPrompt 路径缺 art_ 前缀（潜在）。tsc+build 通过 + 正则实测。
 

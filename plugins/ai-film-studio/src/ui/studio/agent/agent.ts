@@ -61,21 +61,15 @@ function parsePlan(raw: string): AgentPlan {
   }
 }
 
-/** 让 Agent 基于当前项目 + 用户输入产出结构化方案 */
-export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<AgentPlan> {
-  const ai = window.mulby?.ai
-  if (!ai?.call) throw new Error('宿主 AI 不可用（请在宿主配置文本模型）')
-  const model = useGraphStore.getState().selectedModel
-  if (!model) throw new Error('未配置文本模型（请在「设置」选择）')
-  const base = getAgentSkill('production_agent_decision')
+/** 当前项目上下文（决策层 + 各执行子 Agent 共用） */
+function buildContext(doc: ProjectDoc): string {
   const pack = getStylePack(doc.meta.artStyle)
-  // 近期对话（最多 6 条 user/assistant），让 Agent 记住上下文（如「再加 3 个镜头」）
   const recent = doc.memory
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .slice(-6)
     .map((m) => `${m.role === 'user' ? '用户' : '你'}：${m.content}`)
     .join('\n')
-  const ctx = [
+  return [
     '## 当前项目',
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
     doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
@@ -97,7 +91,105 @@ export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<A
   ]
     .filter(Boolean)
     .join('\n')
-  const system = [base, ctx, CONTRACT].filter(Boolean).join('\n\n')
+}
+
+function ensureModel(): string {
+  if (!window.mulby?.ai?.call) throw new Error('宿主 AI 不可用（请在宿主配置文本模型）')
+  const model = useGraphStore.getState().selectedModel
+  if (!model) throw new Error('未配置文本模型（请在「设置」选择）')
+  return model
+}
+
+async function callJson(model: string, skill: string, ctx: string, contract: string, userText: string): Promise<AgentPlan> {
+  const system = [skill, ctx, contract].filter(Boolean).join('\n\n')
   const r = await runText({ model, system, user: userText, jsonMode: true })
   return parsePlan(r.content)
+}
+
+/** 单次结构化方案（兜底/简单场景）：一通调用产出剧本+资产+分镜 */
+export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<AgentPlan> {
+  const model = ensureModel()
+  return callJson(model, getAgentSkill('production_agent_decision'), buildContext(doc), CONTRACT, userText)
+}
+
+// ============ 分阶段子 Agent（Toonflow 3 层：决策 → 执行 剧本/资产/分镜）============
+
+type StageTask = 'script' | 'assets' | 'storyboard'
+
+const DECIDE_CONTRACT = `
+只输出一个 JSON 对象（无额外文字/围栏）：{"reply":"给用户的简短中文说明","tasks":["script"|"assets"|"storyboard"...],"autoGenerate":false}
+- tasks：本轮要做的环节（用户只想改剧本就只列 ["script"]；要从头出片列 ["script","assets","storyboard"]；只想加镜头列 ["storyboard"]）。
+- autoGenerate：用户明确要求「出图/直接成片」时 true。`
+
+const SCRIPT_SKILL =
+  '你是「编剧」。把用户的素材（一句话/故事/小说/指令）改编成结构化短剧剧本：分场、对白、动作。遵循项目画风与对白语言。' +
+  '已有剧本则在其基础上修改/续写。只输出 JSON：{"script":{"name":"剧本名","content":"剧本正文"}}'
+const ASSETS_SKILL =
+  '你是「美术设定」。从本轮剧本提炼需要的资产：人物(role)/场景(scene)/物品(prop)。每个给中文描述 desc + 英文生成提示词 prompt。' +
+  '已存在的资产（见上下文）不要重复。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","desc":"","prompt":""}]}'
+const STORYBOARD_SKILL =
+  '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
+  '出场资产名 cast（与资产名一致）。紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
+  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"chainFromPrev":false}]}'
+
+function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGenerate: boolean } {
+  const fallback = { reply: '已处理。', tasks: ['script', 'assets', 'storyboard'] as StageTask[], autoGenerate: false }
+  try {
+    let s = (raw || '').trim()
+    const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(s)
+    if (fence) s = fence[1].trim()
+    const a = s.indexOf('{')
+    const b = s.lastIndexOf('}')
+    if (a < 0 || b <= a) return fallback
+    const obj = JSON.parse(s.slice(a, b + 1)) as Record<string, unknown>
+    const tasks = Array.isArray(obj.tasks)
+      ? (obj.tasks.filter((t) => t === 'script' || t === 'assets' || t === 'storyboard') as StageTask[])
+      : fallback.tasks
+    return {
+      reply: typeof obj.reply === 'string' ? obj.reply : '已处理。',
+      tasks: tasks.length ? tasks : fallback.tasks,
+      autoGenerate: obj.autoGenerate === true,
+    }
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * 分阶段管线：决策层决定要做哪些环节，再由各执行子 Agent（聚焦提示词）依次产出剧本/资产/分镜。
+ * 比单次 mega-prompt 质量更高（每个子 Agent 只干一件事），并通过 onStage 暴露进度。
+ */
+export async function runAgentPipeline(doc: ProjectDoc, userText: string, onStage?: (label: string) => void): Promise<AgentPlan> {
+  const model = ensureModel()
+  const ctx = buildContext(doc)
+
+  onStage?.('制片决策…')
+  const decisionRaw = await runText({
+    model,
+    system: [getAgentSkill('production_agent_decision'), ctx, DECIDE_CONTRACT].filter(Boolean).join('\n\n'),
+    user: userText,
+    jsonMode: true,
+  })
+  const decision = parseDecision(decisionRaw.content)
+  const plan: AgentPlan = { reply: decision.reply, autoGenerate: decision.autoGenerate }
+
+  if (decision.tasks.includes('script')) {
+    onStage?.('编剧：写剧本…')
+    plan.script = (await callJson(model, SCRIPT_SKILL, ctx, '', userText)).script
+  }
+  if (decision.tasks.includes('assets')) {
+    onStage?.('美术：设计资产…')
+    const aCtx = plan.script ? `${ctx}\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : ctx
+    plan.assets = (await callJson(model, ASSETS_SKILL, aCtx, '', userText)).assets
+  }
+  if (decision.tasks.includes('storyboard')) {
+    onStage?.('导演：拆分镜…')
+    const aList = (plan.assets ?? []).map((a) => `${a.name}(${a.type})`).join('、')
+    const sCtx =
+      ctx +
+      (plan.script ? `\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : '') +
+      (aList ? `\n## 本轮新增资产\n${aList}` : '')
+    plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText)).storyboards
+  }
+  return plan
 }
