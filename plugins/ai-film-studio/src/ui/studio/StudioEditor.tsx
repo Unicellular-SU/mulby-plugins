@@ -580,7 +580,7 @@ function TimelineTab() {
   const film = useProjectStore((s) => s.film)
   const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
   const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
-  const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardId === s.id)?.selectClipId)).filter(Boolean)
+  const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardIds.includes(s.id))?.selectClipId)).filter(Boolean)
   if (!clips.length)
     return (
       <div className="afs-studio__timeline">

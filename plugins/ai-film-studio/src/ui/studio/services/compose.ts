@@ -18,7 +18,7 @@ export async function composeProject(doc: ProjectDoc, onProgress?: (text: string
   const clipPaths: string[] = []
   const fallbackDurs: number[] = []
   for (const sb of ordered) {
-    const t = doc.track.find((x) => x.storyboardId === sb.id)
+    const t = doc.track.find((x) => x.storyboardIds.includes(sb.id))
     const clip = t
       ? doc.clips.find((c) => c.id === (t.selectClipId || t.clipIds[0]))
       : doc.clips.find((c) => c.storyboardId === sb.id && c.state === 'done')

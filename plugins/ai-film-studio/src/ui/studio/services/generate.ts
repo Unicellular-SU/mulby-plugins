@@ -23,16 +23,18 @@ function sizeForRatio(ratio: string): string {
   return '1344x768'
 }
 
-const ASSET_ROLE: Record<Asset['type'], StyleRole> = { role: 'character', scene: 'scene', prop: 'prop' }
+// 仅出图类资产有画风角色映射；audio(音色)/clip(素材) 不出图（见 §2.1.1）
+const ASSET_ROLE: Partial<Record<Asset['type'], StyleRole>> = { role: 'character', scene: 'scene', prop: 'prop' }
 
 /** 生成资产参考图：资产描述 + 画风锚定 → 文生图 → 存资产库，返回 assetId */
 export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promise<string> {
+  if (asset.type === 'audio' || asset.type === 'clip') throw new Error('该类型资产（音色/片段）不支持文生图')
   const model = imageModel(meta)
   if (!model) throw new Error('未配置图像模型（请在「设置」里选择图像模型）')
   const basis = (asset.prompt || asset.desc || asset.name || '').trim()
   if (!basis) throw new Error('请先填写资产名称或描述')
   const pack = getStylePack(meta.artStyle)
-  const anchor = pack ? applyStylePack(pack, ASSET_ROLE[asset.type]) : ''
+  const anchor = pack ? applyStylePack(pack, ASSET_ROLE[asset.type] ?? 'character') : ''
   const prompt = [basis, anchor].filter(Boolean).join(', ')
   const r = await generateImage({ model, prompt, size: sizeForRatio(meta.videoRatio) })
   return saveAsset(r.base64, r.mime)

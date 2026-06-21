@@ -7,7 +7,7 @@
  *
  * 不考虑老节点图数据兼容（独立命名空间）。资产二进制仍走现有资产库（assetStore/saveAsset）。
  */
-import type { ProjectCard, ProjectDoc, ProjectMeta } from './types'
+import type { ProjectCard, ProjectDoc, ProjectMeta, VideoTrack } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
 const INDEX_KEY = 'studio:index'
@@ -75,7 +75,6 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
       updatedAt: now,
     },
     novel: [],
-    events: [],
     scripts: [],
     assets: [],
     storyboards: [],
@@ -83,6 +82,43 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
     track: [],
     memory: [],
   }
+}
+
+/**
+ * 阶段2 迁移：把旧 doc 规范化到当前模型——
+ * - track: 旧 VideoTrackItem{storyboardId} → VideoTrack{storyboardIds:[..], order}（一次性、幂等）。
+ * - 必填数组字段兜底（旧 doc 可能缺新增字段）。旧 doc 残留的 events 字段无害，忽略即可。
+ */
+function normalizeDoc(raw: ProjectDoc): ProjectDoc {
+  const doc = raw as ProjectDoc & { track?: unknown[] }
+  const rawTrack = Array.isArray(doc.track) ? (doc.track as Array<Record<string, unknown>>) : []
+  doc.track = rawTrack.map((t, i): VideoTrack => {
+    if (Array.isArray(t.storyboardIds)) {
+      return {
+        id: String(t.id ?? newId('t_')),
+        storyboardIds: t.storyboardIds as string[],
+        clipIds: Array.isArray(t.clipIds) ? (t.clipIds as string[]) : [],
+        selectClipId: t.selectClipId as string | undefined,
+        order: typeof t.order === 'number' ? t.order : i,
+        ...t,
+      } as VideoTrack
+    }
+    // 旧 VideoTrackItem 形状（单数 storyboardId）
+    return {
+      id: String(t.id ?? newId('t_')),
+      storyboardIds: t.storyboardId ? [t.storyboardId as string] : [],
+      clipIds: Array.isArray(t.clipIds) ? (t.clipIds as string[]) : [],
+      selectClipId: t.selectClipId as string | undefined,
+      order: i,
+    }
+  })
+  doc.novel ??= []
+  doc.scripts ??= []
+  doc.assets ??= []
+  doc.storyboards ??= []
+  doc.clips ??= []
+  doc.memory ??= []
+  return doc
 }
 
 export async function loadIndex(): Promise<ProjectCard[]> {
@@ -94,7 +130,8 @@ async function saveIndex(cards: ProjectCard[]): Promise<void> {
 }
 
 export async function loadProject(id: string): Promise<ProjectDoc | null> {
-  return kvGet<ProjectDoc>(projectKey(id))
+  const raw = await kvGet<ProjectDoc>(projectKey(id))
+  return raw ? normalizeDoc(raw) : null
 }
 
 /** 保存项目（更新 updatedAt + index 卡片，原子性靠 KV 自身） */

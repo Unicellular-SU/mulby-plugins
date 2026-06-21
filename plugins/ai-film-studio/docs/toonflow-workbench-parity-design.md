@@ -713,3 +713,10 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **设置抽屉**（§7.1/§8）：顶栏齿轮按钮打开右侧抽屉内嵌 `SettingsView`（供应商/提示词/外观/存储），无需离开工作台。
   - **布局态持久化**：`studio:ui` KV 记录 `{stageTab, dockOpen}`，重开工作台恢复。
   - tsc + vite build 通过。运行态布局/视觉待 Mulby 实测。
+
+- [x] **阶段 2 数据模型演进**（commit 待提交）
+  - **types.ts 全量增量**（§2.1）：`AssetType` 增 `audio`/`clip`；新增 `PromptState`/`VideoMode`/`AssetImage`/`FlowNode`/`ImageEditFlow`/`VideoTrack`/`StoryboardTableRow|Segment|Scene`；`Asset` 补 images/currentImageId/promptState/derivedFromImageId/elementId/flowId/音色字段(audioFilePath/sex/voiceAssetId/audioBindState)；`AssetVariant` 补 state/error；`Storyboard` 补 flowId；`Clip` 补 trackId/prompt/createdAt/posterImageId；`MemoryItem` 补 embedding/relatedIds；`ProjectMeta` 补 videoResolution/audioReferenceCount/concurrency/transition；`ProjectDoc` 改 `track: VideoTrack[]` + 增 storyboardTable/imageFlows。
+  - **R5 裁决落地**：删除 `EventNode` 与 `ProjectDoc.events`（章节事件用 `NovelChapter.event` 文本承载）；同步清 `emptyProjectDoc` 的 `events:[]`。
+  - **迁移（§2.1.1）**：`loadProject` 内新增 `normalizeDoc`——旧 `VideoTrackItem{storyboardId}` → `VideoTrack{storyboardIds:[..],order}`（幂等）+ 必填数组兜底；旧 doc 残留 events 字段无害忽略。**同步改对全部受影响调用点**：`generate.ts` ASSET_ROLE 改 `Partial<Record>` + `?? 'character'` 兜底、audio/clip 提前 return；`projectStore`（removeStoryboard 段内去分镜+空段删除、generateClip 段定位/新建改 storyboardIds+order）；`compose.ts:21`、`StudioEditor` TimelineTab 轨道定位改 `storyboardIds.includes`。
+  - **独立 KV store 骨架**（§2.2）：新增 `domain/studioKv.ts`——`STUDIO_KV` 键表 + 强类型读写 + `AgentDeployDoc`/`TaskRecord`/`MemoryConfig`(默认值)/`ModelPromptMap` 类型，供 phase6/9/10 接入。
+  - 旧项目向后兼容（normalizeDoc 迁移）。tsc + vite build 通过。

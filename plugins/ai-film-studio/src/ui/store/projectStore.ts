@@ -229,7 +229,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       d.storyboards = d.storyboards.filter((x) => x.id !== id)
       d.clips = d.clips.filter((c) => c.storyboardId !== id)
-      d.track = d.track.filter((t) => t.storyboardId !== id)
+      // 从各段移除该分镜；变空的段删除（VideoTrack 可聚合多分镜）
+      d.track = d.track
+        .map((t) => ({ ...t, storyboardIds: t.storyboardIds.filter((sid) => sid !== id) }))
+        .filter((t) => t.storyboardIds.length > 0)
       // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
       d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
     }),
@@ -315,7 +318,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
         const i = ordered.findIndex((s) => s.id === storyboardId)
         const prev = i > 0 ? ordered[i - 1] : undefined
-        const pt = prev ? doc.track.find((t) => t.storyboardId === prev.id) : undefined
+        const pt = prev ? doc.track.find((t) => t.storyboardIds.includes(prev.id)) : undefined
         const prevClip = pt
           ? doc.clips.find((c) => c.id === (pt.selectClipId || pt.clipIds[0]))
           : prev
@@ -327,11 +330,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
       // 同步进时间线（每分镜一条片段，clipIds 直接置为该片段）
       get().mutate((d) => {
-        const t = d.track.find((x) => x.storyboardId === storyboardId)
+        const t = d.track.find((x) => x.storyboardIds.includes(storyboardId))
         if (t) {
           t.clipIds = [clipId]
           t.selectClipId = clipId
-        } else d.track.push({ id: P.newId('t_'), storyboardId, clipIds: [clipId], selectClipId: clipId })
+        } else d.track.push({ id: P.newId('t_'), storyboardIds: [storyboardId], clipIds: [clipId], selectClipId: clipId, order: d.track.length })
       })
     } catch (e) {
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
