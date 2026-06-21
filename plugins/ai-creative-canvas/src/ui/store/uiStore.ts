@@ -31,6 +31,8 @@ interface UiState {
   toggleSnapGrid: () => void
   guides: { vx: number[]; hy: number[] } | null
   setGuides: (g: { vx: number[]; hy: number[] } | null) => void
+  paramClipboard: Record<string, unknown> | null
+  setParamClipboard: (p: Record<string, unknown> | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -63,5 +65,7 @@ export const useUi = create<UiState>((set) => ({
   snapGrid: false,
   toggleSnapGrid: () => set((s) => ({ snapGrid: !s.snapGrid })),
   guides: null,
-  setGuides: (guides) => set({ guides })
+  setGuides: (guides) => set({ guides }),
+  paramClipboard: null,
+  setParamClipboard: (paramClipboard) => set({ paramClipboard })
 }))

@@ -90,8 +90,10 @@ export async function generateImage(
     // 多图：逐张以 count=1 调用，避免向不支持 n>1 的模型（如 gpt-image-2）传 n 而报错
     const collected: string[] = []
     for (let k = 0; k < count; k++) {
+      const genReq: Record<string, unknown> = { model, prompt, size, count: 1 }
+      if (params.seed) genReq.seed = Number(params.seed) + k // 多张时按 k 偏移，既可复现又不重复
       const req = ai().images.generateStream(
-        { model, prompt, size, count: 1 },
+        genReq,
         (chunk: any) => {
           if (chunk.__requestId) {
             onRequestId(chunk.__requestId)

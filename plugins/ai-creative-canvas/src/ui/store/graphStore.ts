@@ -115,6 +115,7 @@ interface GraphState {
   removeCards: (ids: string[]) => void
   moveCardsBy: (ids: string[], dx: number, dy: number) => void
   groupSelection: () => void
+  applyParamsTo: (ids: string[], params: Record<string, unknown>) => void
   setParent: (ids: string[], parentId: string | null) => void
   insertTemplate: (tpl: GroupTemplate, world: { x: number; y: number }) => void
 
@@ -364,6 +365,21 @@ export const useGraph = create<GraphState>((set, get) => ({
         return { ...b, cards: { ...b.cards, [id]: { ...cur, ...patch } } }
       })
     })),
+
+  applyParamsTo: (ids, params) => {
+    if (ids.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        for (const id of ids) {
+          const c = cards[id]
+          if (c) cards[id] = { ...c, params: { ...c.params, ...params } }
+        }
+        return { ...b, cards }
+      })
+    }))
+  },
 
   removeCards: (ids) => {
     if (ids.length === 0) return

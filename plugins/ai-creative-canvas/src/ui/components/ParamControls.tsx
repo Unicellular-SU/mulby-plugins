@@ -10,6 +10,23 @@ const ASPECTS: SelectOption[] = [
   { value: '9:16', label: '9:16' }
 ]
 
+function SeedControl({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
+  return (
+    <div className="flex items-center gap-0.5 shrink-0">
+      <input
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+        placeholder="seed"
+        title="随机种子（若模型支持，便于复现）"
+        className="w-[60px] text-xs rounded-md px-1.5 py-1 bg-black/5 dark:bg-white/10 outline-none focus:ring-1 focus:ring-indigo-400"
+      />
+      <button onClick={() => onChange(Math.floor(Math.random() * 1e9))} title="随机种子" className="px-1 py-1 rounded hover:bg-black/10 dark:hover:bg-white/15 text-xs leading-none">
+        🎲
+      </button>
+    </div>
+  )
+}
+
 // 不同节点类型的生成参数（参考 AI-CanvasPro：图像比例/数量，视频比例/时长，音频音色/语速/格式）
 export function ParamControls({ card }: { card: Card }) {
   const updateCard = useGraph((s) => s.updateCard)
@@ -22,6 +39,7 @@ export function ParamControls({ card }: { card: Card }) {
         <Select className="w-[78px] shrink-0" value={String(p.aspect || '1:1')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
         <Select className="w-[68px] shrink-0" value={String(p.resolution || '1K')} onChange={(v) => set('resolution', v)} options={[{ value: '1K', label: '1K' }, { value: '2K', label: '2K' }, { value: '4K', label: '4K' }]} />
         <Select className="w-[62px] shrink-0" value={String(p.count || 1)} onChange={(v) => set('count', Number(v))} options={[{ value: '1', label: '×1' }, { value: '2', label: '×2' }, { value: '3', label: '×3' }, { value: '4', label: '×4' }]} />
+        <SeedControl value={p.seed as number | undefined} onChange={(v) => set('seed', v)} />
       </>
     )
   }
@@ -30,6 +48,7 @@ export function ParamControls({ card }: { card: Card }) {
       <>
         <Select className="w-[78px] shrink-0" value={String(p.aspect || '16:9')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
         <Select className="w-[72px] shrink-0" value={String(p.duration || 5)} onChange={(v) => set('duration', Number(v))} options={[{ value: '3', label: '3s' }, { value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }]} />
+        <SeedControl value={p.seed as number | undefined} onChange={(v) => set('seed', v)} />
       </>
     )
   }

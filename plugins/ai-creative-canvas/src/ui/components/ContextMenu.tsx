@@ -152,6 +152,10 @@ export function ContextMenu() {
         items.push({ label: '纵向分布', onClick: () => run(() => distribute('v')) })
       }
     }
+    const genSel = cards.filter((c) => canGenerate(c.kind))
+    if (genSel.length === 1) items.push({ label: '复制参数', onClick: () => run(() => useUi.getState().setParamClipboard({ ...(genSel[0].params || {}) })) })
+    const pclip = useUi.getState().paramClipboard
+    if (pclip && genSel.length >= 1) items.push({ label: `粘贴参数（${genSel.length}）`, onClick: () => run(() => g.applyParamsTo(genSel.map((c) => c.id), pclip)) })
     items.push({ sep: true })
     items.push({ label: '复制副本', onClick: () => run(() => { g.copySelection(); g.paste(40, 40) }) })
     if (cards.length === 1 && cards[0].assetLocalPath) items.push({ label: '导出', onClick: () => run(() => void exportCard(cards[0])) })
