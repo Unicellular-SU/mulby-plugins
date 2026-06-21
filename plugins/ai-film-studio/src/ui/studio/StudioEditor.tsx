@@ -2,22 +2,27 @@
  * 工作台 · 分阶段编辑器：顶栏（项目设置）+ 阶段 Tab（剧本/资产/分镜/时间线）+ Agent 对话面板占位。
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
-import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, Workflow, PanelLeft, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard } from '../domain/types'
+import StudioDock from './StudioDock'
+import EditorView from '../components/shell/EditorView'
+import SettingsView from '../components/views/SettingsView'
+import { installFocusTracker } from './services/focusInsert'
 
-type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
+type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline' | 'canvas'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'novel', label: '原著', icon: BookOpen },
   { id: 'script', label: '剧本', icon: FileText },
   { id: 'assets', label: '资产', icon: Users },
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'timeline', label: '时间线', icon: Film },
+  { id: 'canvas', label: '精修', icon: Workflow }, // 节点画布降级为工作台内高级编辑入口
 ]
 
 export default function StudioEditor() {
@@ -29,6 +34,23 @@ export default function StudioEditor() {
   const autoProduce = useProjectStore((s) => s.autoProduce)
   const busy = batch.running || film.state === 'composing'
   const [tab, setTab] = useState<Tab>('script')
+  const [dockOpen, setDockOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+
+  // 工作台输入焦点跟踪：左侧资源 Dock 的片段/资产名插入「最后聚焦的输入框」
+  useEffect(() => installFocusTracker(), [])
+
+  // 恢复/持久化工作台布局态（studio:ui）
+  useEffect(() => {
+    void (async () => {
+      const ui = (await window.mulby?.storage?.get('studio:ui', 'ai-film-studio')) as { stageTab?: Tab; dockOpen?: boolean } | null
+      if (ui?.stageTab && TABS.some((t) => t.id === ui.stageTab)) setTab(ui.stageTab)
+      if (typeof ui?.dockOpen === 'boolean') setDockOpen(ui.dockOpen)
+    })()
+  }, [])
+  useEffect(() => {
+    void window.mulby?.storage?.set('studio:ui', { stageTab: tab, dockOpen }, 'ai-film-studio')
+  }, [tab, dockOpen])
 
   return (
     <div className="afs-studio__editor">
@@ -62,6 +84,9 @@ export default function StudioEditor() {
             <Loader2 size={14} className="afs-spin" /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
           </span>
         )}
+        <button className="afs-btn afs-btn--ghost afs-btn--sm" title="设置（模型供应商 / 提示词 / 外观 / 存储）" onClick={() => setSettingsOpen(true)}>
+          <Settings size={15} />
+        </button>
         <button
           className="afs-btn afs-btn--primary afs-btn--sm afs-studio__produce"
           disabled={busy || doc.storyboards.length === 0}
@@ -73,6 +98,13 @@ export default function StudioEditor() {
       </header>
 
       <nav className="afs-studio__tabs">
+        <button
+          className={`afs-studio__tab afs-studio__docktoggle${dockOpen ? ' is-active' : ''}`}
+          title={dockOpen ? '收起资源面板' : '展开资源面板（素材/提示词）'}
+          onClick={() => setDockOpen((v) => !v)}
+        >
+          <PanelLeft size={15} />
+        </button>
         {TABS.map((t) => {
           const Icon = t.icon
           return (
@@ -84,15 +116,32 @@ export default function StudioEditor() {
       </nav>
 
       <div className="afs-studio__work">
-        <div className="afs-studio__stage">
+        {dockOpen && tab !== 'canvas' && <StudioDock />}
+        <div className={`afs-studio__stage${tab === 'canvas' ? ' is-canvas' : ''}`}>
           {tab === 'novel' && <NovelTab />}
           {tab === 'script' && <ScriptTab />}
           {tab === 'assets' && <AssetsTab />}
           {tab === 'storyboard' && <StoryboardTab />}
           {tab === 'timeline' && <TimelineTab />}
+          {tab === 'canvas' && <EditorView />}
         </div>
         <AgentPanel />
       </div>
+      {settingsOpen && (
+        <div className="afs-studio__drawer-scrim" onClick={() => setSettingsOpen(false)}>
+          <div className="afs-studio__drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="afs-studio__drawer-head">
+              <span>设置</span>
+              <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={() => setSettingsOpen(false)} title="关闭">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="afs-studio__drawer-body">
+              <SettingsView />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -704,3 +704,12 @@ projectStore mutate（改 ProjectDoc 内存态）
   - ② **tool-calling 探针**：新增 `studio/agent/toolCallingProbe.ts`（`runToolCallingProbe`/`registerToolCallingProbe`），`StudioApp` 挂载时注册 `window.__filmStudioProbe`。发一个 echo 自定义 function 工具、强制模型调用、观察 chunk（`tool_call`/`tool_result`/chunkType），`inference` 字段直接给结论「手动 tool-loop / 宿主自动执行 / 不支持」。
   - **运行态待验收（Mulby）**：① 跑 `gcOrphans` 后工作台资产图仍在（GC 不误删）；② 控制台执行 `await window.__filmStudioProbe()` 确认 R1（宿主对自定义 function 工具的语义），据此定 phase6 的 tool-loop 策略。
   - tsc + vite build 通过。
+
+- [x] **阶段 1 信息架构收敛 StudioShell**（commit 待提交）
+  - **一级导航收敛**：`AppRail` 只保留「项目 / 工作台」两项；素材/提示词/画布不再作平级顶层视图（旧画布工程仍可从项目页打开，`editor` 视图保留作兼容入口）。
+  - **左侧资源 Dock**（§7.1）：新增 `studio/StudioDock.tsx`（素材 | 提示词 两标签），复用 `AssetsView` 缩略图组件 + `assetStore` + `promptStore` 片段，**全部复用画布 Dock 的 CSS 类（afs-dock\*）**。`StudioEditor` 工作区现为 `Dock | 阶段区 | Agent` 三栏，Dock 可经 tabs 栏 `PanelLeft` 按钮收起/展开。
+  - **片段/资产名插入聚焦输入框**（§7.3）：新增 `studio/services/focusInsert.ts`（`installFocusTracker`/`insertAtFocused`）——跟踪最后聚焦的 input/textarea，用「原生 value setter + dispatch input 事件」让受控组件的 onChange 接管并写回 store；Dock 内点击素材→插名、点击片段→插正文。
+  - **节点画布降级为「精修」Tab**（§7.4）：阶段区新增 `canvas` Tab 内嵌 `EditorView`（节点画布作高级编辑入口，imageFlow 的承载留 phase7）；该 Tab 下隐藏 studio Dock（避免与画布自带 Dock 重复）。
+  - **设置抽屉**（§7.1/§8）：顶栏齿轮按钮打开右侧抽屉内嵌 `SettingsView`（供应商/提示词/外观/存储），无需离开工作台。
+  - **布局态持久化**：`studio:ui` KV 记录 `{stageTab, dockOpen}`，重开工作台恢复。
+  - tsc + vite build 通过。运行态布局/视觉待 Mulby 实测。
