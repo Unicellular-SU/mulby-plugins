@@ -37,6 +37,7 @@ export interface ComposeOptions {
   transition?: FilmTransition
   transitionDur?: number // 转场时长（秒），默认 0.5；会被钳制到小于最短片段
   clipDurations?: number[] // 与 clips 对齐的时长（xfade 计算 offset 必需）
+  keepClipAudio?: boolean // 工作流成片：无外部音轨时保留各片段自带音频（按序拼成成片音轨）
   onProgress?: (info: { percent?: number; text: string }) => void
 }
 
@@ -219,6 +220,13 @@ export function buildConcatArgs(o: ComposeOptions): string[] {
     amap = '[aout]'
   } else if (musIdxs.length) {
     aFilters.push(`[mus]apad[aout]`)
+    amap = '[aout]'
+  }
+  // 片段自带音频（工作流成片）：无外部音轨且开启 keepClipAudio 时，把各片段音频按序拼成成片音轨
+  if (!amap && o.keepClipAudio && clips.length) {
+    if (clips.length === 1) aFilters.push(`[0:a]aresample=async=1[acat]`)
+    else aFilters.push(`${clips.map((_, i) => `[${i}:a]`).join('')}concat=n=${clips.length}:v=0:a=1[acat]`)
+    aFilters.push(`[acat]apad[aout]`) // 补静音到视频长，配 -shortest 截到视频结尾，避免音轨略短致提前截断
     amap = '[aout]'
   }
   if (aFilters.length) filter += `;${aFilters.join(';')}`

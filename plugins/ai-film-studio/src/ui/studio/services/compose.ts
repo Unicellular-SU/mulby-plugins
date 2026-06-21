@@ -2,7 +2,7 @@
  * Toonflow 式重构 · 阶段2f：时间线 → ffmpeg 合成成片（复用现有 ffmpeg 服务）。
  * 按分镜顺序取每镜选用片段（无本地路径则下载落盘）→ composeFilm 拼接 → 输出到 exports/。
  */
-import { ensureFfmpeg, composeFilm } from '../../services/ffmpeg'
+import { ensureFfmpeg, composeFilm, probeDuration } from '../../services/ffmpeg'
 import { exportPath } from '../../services/fsutil'
 import { downloadVideoToDisk } from '../../services/download'
 import type { ProjectDoc } from '../../domain/types'
@@ -16,7 +16,7 @@ function ratioWH(ratio: string): [number, number] {
 export async function composeProject(doc: ProjectDoc, onProgress?: (text: string, percent?: number) => void): Promise<string> {
   const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
   const clipPaths: string[] = []
-  const durations: number[] = []
+  const fallbackDurs: number[] = []
   for (const sb of ordered) {
     const t = doc.track.find((x) => x.storyboardId === sb.id)
     const clip = t
@@ -33,7 +33,7 @@ export async function composeProject(doc: ProjectDoc, onProgress?: (text: string
     }
     if (path) {
       clipPaths.push(path)
-      durations.push(clip.durationSec || sb.duration || 5)
+      fallbackDurs.push(clip.durationSec || sb.duration || 5)
     }
   }
   if (clipPaths.length === 0) throw new Error('没有可合成的视频片段（请先给分镜生成视频）')
@@ -42,19 +42,34 @@ export async function composeProject(doc: ProjectDoc, onProgress?: (text: string
   const ok = await ensureFfmpeg((p) => onProgress?.(p.text, p.percent))
   if (!ok) throw new Error('ffmpeg 不可用（首次需下载）')
 
+  // 用片段真实时长（而非请求时长）——否则成片整片淡出会按请求时长提前淡黑，导致结尾黑屏 + 音画不齐
+  onProgress?.('读取片段时长…')
+  const durations: number[] = []
+  for (let i = 0; i < clipPaths.length; i++) {
+    const real = await probeDuration(clipPaths[i])
+    durations.push(real && real > 0.1 ? real : fallbackDurs[i])
+  }
+
   const [width, height] = ratioWH(doc.meta.videoRatio)
   const outPath = await exportPath(`${(doc.meta.name || 'film').replace(/\s+/g, '_')}_${Date.now()}.mp4`)
-  await composeFilm({
+  const base = {
     clips: clipPaths,
     outPath,
     width,
     height,
     fps: 24,
-    subtitleMode: 'off',
-    transition: 'fade', // 整片淡入淡出，片间干净硬切（与连贯性策略一致）
+    subtitleMode: 'off' as const,
+    transition: 'fade' as const, // 整片淡入淡出，片间干净硬切（与连贯性策略一致）
     clipDurations: durations,
     totalSec: durations.reduce((a, b) => a + b, 0),
-    onProgress: (p) => onProgress?.(p.text, p.percent),
-  })
+    onProgress: (p: { percent?: number; text: string }) => onProgress?.(p.text, p.percent),
+  }
+  // 优先保留片段自带音频；若某片段无音轨致拼接失败，回退为无声成片（至少出片）
+  try {
+    await composeFilm({ ...base, keepClipAudio: true })
+  } catch {
+    onProgress?.('保留音轨失败，改为无声合成…')
+    await composeFilm({ ...base, keepClipAudio: false })
+  }
   return outPath
 }

@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, ChevronUp, ChevronDown } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -512,6 +512,11 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
           {clip?.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} 视频
           {clip?.state === 'done' && ' ✓'}
         </button>
+        {clip?.state === 'failed' && (
+          <span className="afs-studio__sberr" title={clip.error || '视频生成失败'}>
+            <AlertCircle size={13} /> 失败
+          </span>
+        )}
         <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeStoryboard(sb.id)}>
           <Trash2 size={13} />
         </button>
@@ -524,6 +529,7 @@ function TimelineTab() {
   const doc = useProjectStore((s) => s.doc)!
   const compose = useProjectStore((s) => s.compose)
   const film = useProjectStore((s) => s.film)
+  const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
   const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
   const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardId === s.id)?.selectClipId)).filter(Boolean)
   if (!clips.length)
@@ -544,10 +550,32 @@ function TimelineTab() {
       {film.state === 'failed' && <p className="afs-studio__err-text">合成失败：{film.error}</p>}
       <div className="afs-studio__track">
         {clips.map((c, i) => (
-          <TrackClip key={c!.id} localPath={c!.videoFilePath} url={c!.videoUrl} index={i} />
+          <TrackClip
+            key={c!.id}
+            localPath={c!.videoFilePath}
+            url={c!.videoUrl}
+            index={i}
+            onOpen={() => setPreview({ localPath: c!.videoFilePath, url: c!.videoUrl })}
+          />
         ))}
       </div>
       {film.state === 'done' && film.path && <FilmDone path={film.path} name={doc.meta.name} />}
+      {preview && <ClipPreview localPath={preview.localPath} url={preview.url} onClose={() => setPreview(null)} />}
+    </div>
+  )
+}
+
+function ClipPreview({ localPath, url, onClose }: { localPath?: string; url?: string; onClose: () => void }) {
+  const src = useMediaUrl({ localPath, url })
+  return (
+    <div className="afs-studio__lightbox" onClick={onClose}>
+      <div className="afs-studio__lightbox-body" onClick={(e) => e.stopPropagation()}>
+        <button className="afs-studio__lightbox-close" onClick={onClose} title="关闭">
+          <X size={18} />
+        </button>
+        {/* controls + 有声（不静音）→ 单独预览该片段 */}
+        <video src={src} controls autoPlay playsInline className="afs-studio__lightbox-video" />
+      </div>
     </div>
   )
 }
@@ -590,12 +618,12 @@ function FilmDone({ path, name }: { path: string; name: string }) {
   )
 }
 
-function TrackClip({ localPath, url, index }: { localPath?: string; url?: string; index: number }) {
+function TrackClip({ localPath, url, index, onOpen }: { localPath?: string; url?: string; index: number; onOpen: () => void }) {
   const src = useMediaUrl({ localPath, url })
   return (
-    <div className="afs-studio__trackclip">
+    <button className="afs-studio__trackclip" onClick={onOpen} title="点击预览该片段（有声）">
       <video src={src} muted playsInline preload="metadata" />
       <span className="afs-studio__trackidx">{index + 1}</span>
-    </div>
+    </button>
   )
 }
