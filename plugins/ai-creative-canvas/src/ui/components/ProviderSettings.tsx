@@ -142,13 +142,34 @@ export function ProviderSettings() {
               {draft.type === 'custom-video' && draft.bodyTemplate != null && (
                 <>
                   <div className="grid grid-cols-2 gap-2">
-                    <Row label="模型 model"><input className="ace-input" value={draft.model || ''} onChange={(e) => upd({ model: e.target.value })} /></Row>
+                    <Row label={draft.models && draft.models.length ? '默认模型（节点可单独选）' : '模型 model'}>
+                      {draft.models && draft.models.length ? (
+                        <select className="ace-input" value={draft.model || draft.models[0]} onChange={(e) => upd({ model: e.target.value })}>
+                          {draft.models.map((m) => (
+                            <option key={m} value={m}>
+                              {m}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input className="ace-input" value={draft.model || ''} onChange={(e) => upd({ model: e.target.value })} />
+                      )}
+                    </Row>
                     <Row label="提交 URL submitUrl"><input className="ace-input" value={draft.submitUrl || ''} onChange={(e) => upd({ submitUrl: e.target.value })} /></Row>
                     <Row label="轮询 URL pollUrl（含 {taskId}）"><input className="ace-input" value={draft.pollUrl || ''} onChange={(e) => upd({ pollUrl: e.target.value })} /></Row>
                     <Row label="任务 id 路径 taskIdPath"><input className="ace-input" value={draft.taskIdPath || ''} onChange={(e) => upd({ taskIdPath: e.target.value })} /></Row>
                     <Row label="状态字段 statusField"><input className="ace-input" value={draft.statusField || ''} onChange={(e) => upd({ statusField: e.target.value })} /></Row>
                     <Row label="结果 URL 路径 videoUrlPath"><input className="ace-input" value={draft.videoUrlPath || ''} onChange={(e) => upd({ videoUrlPath: e.target.value })} /></Row>
                   </div>
+                  <Row label="模型清单 models（每行一个；多模型时节点可下拉选择，留空=单一模型）">
+                    <textarea
+                      className="ace-input resize-none ace-noscroll text-[11px]"
+                      rows={2}
+                      value={(draft.models || []).join('\n')}
+                      onChange={(e) => upd({ models: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
+                      placeholder={'veo3.1-fast\nsora-2\nkling-v3'}
+                    />
+                  </Row>
                   <Row label="请求体模板 bodyTemplate（{prompt} {imageUrl} {model}；{?imageUrl}…{/imageUrl} 表示有图才出现）">
                     <textarea className="ace-input resize-none font-mono text-[10px]" rows={4} value={draft.bodyTemplate || ''} onChange={(e) => upd({ bodyTemplate: e.target.value })} />
                   </Row>

@@ -30,7 +30,8 @@ export interface ProviderConfig {
   uploadUrlPath?: string
 
   // ---- 声明式模板路径（bodyTemplate 存在时优先；适配火山/阿里/toapis 等真实 API） ----
-  model?: string
+  model?: string // 默认模型（节点未选时用）
+  models?: string[] // 可选模型清单（设置页/节点下拉，如 toapis 视频全系列）
   bodyTemplate?: string // 占位 {prompt}/{imageUrl}/{model}/{duration}… + 条件 {?x}…{/x}
   submitUrl?: string // 完整提交 URL
   pollUrl?: string // 完整轮询 URL（含 {taskId}）

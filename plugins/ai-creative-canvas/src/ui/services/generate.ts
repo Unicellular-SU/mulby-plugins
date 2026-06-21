@@ -121,7 +121,7 @@ export async function generateCard(cardId: string): Promise<void> {
         const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
         const vprompt =
           card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
-        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, lastImageDataUrl, params: card.params }, (p) =>
+        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: card.params }, (p) =>
           useGraph.getState().updateCard(cardId, { progress: p })
         )
         const projectId = useGraph.getState().project.id

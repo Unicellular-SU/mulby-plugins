@@ -39,7 +39,39 @@ export function presetCustomVideo(): ProviderConfig {
   }
 }
 
-// 内置供应商模板（选模板 + 贴 Key 即用，声明式 bodyTemplate）。借鉴 ai-film-studio，国内可直连的排前。
+// toapis 视频全系列（统一 /v1/videos/generations，OpenAI 兼容；选 model 即可切换）
+export const TOAPIS_VIDEO_MODELS = [
+  'veo3.1-fast',
+  'veo3.1-quality',
+  'veo3.1-lite',
+  'sora-2',
+  'sora-2-vvip',
+  'seedance-2',
+  'seedance-2-fast',
+  'seedance-2-mini',
+  'doubao-seedance-1-5',
+  'doubao-seedance',
+  'kling-v3',
+  'kling-v3-omni',
+  'kling-3.0-turbo',
+  'kling-2-6',
+  'kling-video-o1',
+  'minimax-hailuo-2.3',
+  'minimax-hailuo',
+  'wan2.6',
+  'wan2.6-flash',
+  'grok-video',
+  'grok-video-1.5-preview',
+  'viduq3',
+  'gemini-omni-flash',
+  'happyhorse'
+]
+
+// 通用请求体：model/prompt + 可选 aspect_ratio/duration + image_urls(首/尾帧)
+const TOAPIS_BODY =
+  '{"model":"{model}","prompt":"{prompt}"{?aspect},"aspect_ratio":"{aspect}"{/aspect}{?duration},"duration":{duration}{/duration}{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
+
+// 内置供应商模板（选模板 + 贴 Key 即用）。借鉴 ai-film-studio + 按 toapis 文档接入视频全系列。
 export interface ProviderTemplate {
   id: string
   label: string
@@ -61,6 +93,26 @@ const base = (over: Partial<ProviderConfig>): ProviderConfig => ({
 
 export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
+    id: 'toapis-video',
+    label: 'toapis · 视频全系列（Sora/Veo/Kling/Seedance/海螺/万相…）',
+    hint: 'toapis 聚合（OpenAI 兼容，人民币）。Key=toapis Key（Bearer）。统一 /v1/videos/generations，选 model 即切换模型；图生视频自动经 toapis 图床上传换公开 URL；首帧/尾帧用 image_urls=[首,尾]。',
+    make: () =>
+      base({
+        label: 'toapis 视频',
+        model: 'veo3.1-fast',
+        models: TOAPIS_VIDEO_MODELS,
+        submitUrl: 'https://toapis.com/v1/videos/generations',
+        pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
+        taskIdPath: 'id',
+        statusField: 'status',
+        videoUrlPath: 'result.data.0.url',
+        uploadUrl: 'https://toapis.com/v1/uploads/images',
+        uploadField: 'file',
+        uploadUrlPath: 'data.url',
+        bodyTemplate: TOAPIS_BODY
+      })
+  },
+  {
     id: 'volcengine-ark',
     label: '火山方舟 · Seedance/豆包 视频（国内）',
     hint: '火山引擎方舟 Ark（人民币）。model 填模型 ID（如 doubao-seedance-1-0-lite-i2v-250428），Key 为 Ark API Key（Bearer）。图生视频 image_url 用 data URL 直传。',
@@ -79,7 +131,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
     id: 'dashscope-wan',
     label: '阿里百炼 · 通义万相 视频（国内）',
-    hint: '阿里云百炼 DashScope（人民币）。model 如 wan2.2-i2v-flash（图生）/对应 t2v 模型。Key 为 DASHSCOPE_API_KEY（Bearer）。图生视频的 img_url 需公网可访问（在「图床上传」里配上传接口）。',
+    hint: '阿里云百炼 DashScope（人民币）。model 如 wan2.2-i2v-flash。Key 为 DASHSCOPE_API_KEY（Bearer）。图生视频的 img_url 需公网可访问（在「图床上传」里配上传接口）。',
     make: () =>
       base({
         label: '通义万相视频',
@@ -94,64 +146,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
       })
   },
   {
-    id: 'toapis-sora2',
-    label: 'toapis · Sora2（OpenAI 兼容聚合）',
-    hint: 'toapis 聚合（OpenAI 兼容，人民币）。model 如 sora-2 / sora-2-vvip。图生视频自动经 toapis 图床上传换公开 URL。',
-    make: () =>
-      base({
-        label: 'toapis Sora2',
-        model: 'sora-2',
-        submitUrl: 'https://toapis.com/v1/videos/generations',
-        pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
-        taskIdPath: 'id',
-        statusField: 'status',
-        videoUrlPath: 'result.data.0.url',
-        uploadUrl: 'https://toapis.com/v1/uploads/images',
-        uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
-      })
-  },
-  {
-    id: 'toapis-veo3',
-    label: 'toapis · Veo3 谷歌视频（OpenAI 兼容聚合）',
-    hint: 'toapis 聚合。model 如 veo3.1-fast / veo3；图字段 image_urls。图生视频自动上传换公开 URL。',
-    make: () =>
-      base({
-        label: 'toapis Veo3',
-        model: 'veo3.1-fast',
-        submitUrl: 'https://toapis.com/v1/videos/generations',
-        pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
-        taskIdPath: 'id',
-        statusField: 'status',
-        videoUrlPath: 'result.data.0.url',
-        uploadUrl: 'https://toapis.com/v1/uploads/images',
-        uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
-      })
-  },
-  {
-    id: 'toapis-seedance2',
-    label: 'toapis · Seedance 2（自带原生音频）',
-    hint: 'toapis Seedance（即梦，自带同步音频）。model=seedance-2 或 seedance-2-fast；首帧→first_frame。分辨率默认 720p，可在请求体改。',
-    make: () =>
-      base({
-        label: 'toapis Seedance2',
-        model: 'seedance-2',
-        submitUrl: 'https://toapis.com/v1/videos/generations',
-        pollUrl: 'https://toapis.com/v1/videos/generations/{taskId}',
-        taskIdPath: 'id',
-        statusField: 'status',
-        videoUrlPath: 'result.data.0.url',
-        uploadUrl: 'https://toapis.com/v1/uploads/images',
-        uploadUrlPath: 'data.url',
-        bodyTemplate:
-          '{"model":"{model}","prompt":"{prompt}","resolution":"720p","generate_audio":true{?imageUrl},"image_with_roles":[{"url":"{imageUrl}","role":"first_frame"}{?lastImageUrl},{"url":"{lastImageUrl}","role":"last_frame"}{/lastImageUrl}]{/imageUrl}}'
-      })
-  },
-  {
     id: 'openai-compat-video',
-    label: 'OpenAI 兼容视频聚合 · 通用',
-    hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 submitUrl/pollUrl/model 接同构平台；图字段按模型可能是 image_urls 或 images。',
+    label: 'OpenAI 兼容视频聚合 · 通用（自定义平台）',
+    hint: '通用：POST /v1/videos/generations → 轮询 GET .../{id} → result.data[0].url。改 submitUrl/pollUrl/model 接同构平台。',
     make: () =>
       base({
         label: 'OpenAI兼容视频',
@@ -162,8 +159,9 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         statusField: 'status',
         videoUrlPath: 'result.data.0.url',
         uploadUrl: 'https://toapis.com/v1/uploads/images',
+        uploadField: 'file',
         uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
+        bodyTemplate: TOAPIS_BODY
       })
   },
   {

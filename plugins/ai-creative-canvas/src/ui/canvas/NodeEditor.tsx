@@ -15,6 +15,7 @@ import { stageEl } from './stageEl'
 import { ModelPicker } from '../components/ModelPicker'
 import { MediaToolbox } from '../components/MediaToolbox'
 import { ParamControls } from '../components/ParamControls'
+import { Select } from '../components/Select'
 import type { Material, MaterialKind, NodeAsset } from '../types'
 
 const KIND_ACCENT: Record<string, string> = { image: '#6366f1', video: '#ec4899', text: '#10b981', audio: '#f59e0b', source: '#64748b' }
@@ -32,12 +33,30 @@ interface MentionState {
   aw: number
 }
 
-function ProviderHintInline({ kind }: { kind: 'video' | 'audio' }) {
+function ProviderHintInline({ kind, modelId, onModel }: { kind: 'video' | 'audio'; modelId?: string | null; onModel?: (id: string) => void }) {
   const active = useProviders((s) => s.activeFor(kind))
+  const models = active?.models
   return (
-    <div className="flex-1 min-w-[130px] text-[11px] rounded-md bg-black/5 dark:bg-white/5 px-2 py-1.5 flex items-center justify-between gap-2">
-      <span className="opacity-70 truncate">{active ? `Provider：${active.label}` : `未配置 Provider`}</span>
-      <button onClick={() => useUi.getState().setShowProviderSettings(true)} className="text-indigo-500 hover:underline shrink-0">设置</button>
+    <div className="flex-1 min-w-[130px] flex items-center gap-1.5">
+      {models && models.length && onModel ? (
+        <Select
+          className="flex-1 min-w-[120px]"
+          value={modelId || active?.model || models[0]}
+          onChange={onModel}
+          options={models.map((m) => ({ value: m, label: m }))}
+        />
+      ) : (
+        <div className="flex-1 text-[11px] rounded-md bg-black/5 dark:bg-white/5 px-2 py-1.5 flex items-center gap-2">
+          <span className="opacity-70 truncate">{active ? `Provider：${active.label}` : `未配置 Provider`}</span>
+        </div>
+      )}
+      <button
+        onClick={() => useUi.getState().setShowProviderSettings(true)}
+        title={active ? `Provider：${active.label}` : '未配置 Provider'}
+        className="text-indigo-500 hover:underline shrink-0 text-[11px]"
+      >
+        设置
+      </button>
     </div>
   )
 }
@@ -316,7 +335,7 @@ export function NodeEditor() {
                   <ModelPicker kind={card.kind as 'text' | 'image'} value={card.modelId} onChange={(id) => updateCard(card.id, { modelId: id })} />
                 </div>
               ) : (
-                <ProviderHintInline kind={card.kind as 'video' | 'audio'} />
+                <ProviderHintInline kind={card.kind as 'video' | 'audio'} modelId={card.modelId} onModel={(id) => updateCard(card.id, { modelId: id })} />
               )}
               <ParamControls card={card} />
               {busy ? (

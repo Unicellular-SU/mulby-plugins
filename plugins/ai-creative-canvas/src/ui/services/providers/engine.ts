@@ -42,6 +42,7 @@ export interface VideoReq {
   prompt: string
   imageDataUrl?: string
   lastImageDataUrl?: string // 首帧/尾帧模式的尾帧
+  model?: string // 节点级模型覆盖（优先于 cfg.model）
   params?: Record<string, unknown>
 }
 
@@ -81,7 +82,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
       lastImageUrl = req.lastImageDataUrl
     }
   }
-  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: cfg.model, imageUrl, lastImageUrl }
+  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: req.model || cfg.model, imageUrl, lastImageUrl }
   if (req.params) for (const [k, v] of Object.entries(req.params)) if (v != null) vars[k] = String(v)
   const bodyStr = renderTemplate(cfg.bodyTemplate as string, vars)
   let body: any
