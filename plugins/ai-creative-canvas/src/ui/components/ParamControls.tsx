@@ -48,6 +48,8 @@ export function ParamControls({ card }: { card: Card }) {
       <>
         <Select className="w-[78px] shrink-0" value={String(p.aspect || '16:9')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
         <Select className="w-[72px] shrink-0" value={String(p.duration || 5)} onChange={(v) => set('duration', Number(v))} options={[{ value: '3', label: '3s' }, { value: '5', label: '5s' }, { value: '8', label: '8s' }, { value: '10', label: '10s' }]} />
+        <Select className="w-[84px] shrink-0" value={String(p.camera || '')} onChange={(v) => set('camera', v)} options={[{ value: '', label: '运镜·无' }, { value: '缓慢推近', label: '推近' }, { value: '缓慢拉远', label: '拉远' }, { value: '向左平移', label: '左移' }, { value: '向右平移', label: '右移' }, { value: '环绕运镜', label: '环绕' }, { value: '手持轻微晃动', label: '手持' }]} />
+        <Select className="w-[88px] shrink-0" value={String(p.motion || '适中')} onChange={(v) => set('motion', v)} options={[{ value: '轻微', label: '运动·轻微' }, { value: '适中', label: '运动·适中' }, { value: '强烈', label: '运动·强烈' }]} />
         <SeedControl value={p.seed as number | undefined} onChange={(v) => set('seed', v)} />
       </>
     )
