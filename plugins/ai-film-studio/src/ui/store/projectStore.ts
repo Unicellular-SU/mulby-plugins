@@ -121,6 +121,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   refreshCards: async () => set({ cards: await P.loadIndex() }),
 
   createProject: async (meta) => {
+    await get().flush() // 先落盘当前 dirty 项目 + 清掉待触发的 saveTimer，避免替换 doc 后丢失/存错
     const doc = P.emptyProjectDoc(meta)
     await P.saveProject(doc)
     await P.setCurrentId(doc.meta.id)
@@ -144,6 +145,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   deleteProject: async (id) => {
+    await get().flush() // 先落盘 + 清 saveTimer，避免 stale timer 把当前 doc 存错
     await P.deleteProject(id)
     const cur = get().doc
     if (cur?.meta.id === id) set({ doc: null })
@@ -227,6 +229,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       d.storyboards = d.storyboards.filter((x) => x.id !== id)
       d.clips = d.clips.filter((c) => c.storyboardId !== id)
       d.track = d.track.filter((t) => t.storyboardId !== id)
+      // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
+      d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
     }),
   reorderStoryboards: (orderedIds) =>
     get().mutate((d) => {
@@ -493,7 +497,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await get().generateAllAssets()
     await get().generateAllKeyframes()
     await get().generateAllClips()
-    if (get().doc!.storyboards.some((s) => get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))) {
+    // 重新取 doc 并守卫：generation 期间用户若关/删项目，doc 可能已为 null（避免 null.storyboards 崩溃）
+    const d = get().doc
+    if (d && d.storyboards.some((s) => d.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))) {
       await get().compose()
     }
   },
