@@ -3449,6 +3449,8 @@ body {
 .afs-studio__trackdesc { flex: 1; min-width: 0; font-size: 12px; color: var(--afs-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__trackdur { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--afs-text-dim); }
 .afs-studio__trackdur input { width: 48px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 6px; padding: 3px 5px; }
+/* 阶段6：Agent 原生工具调用开关激活态 */
+.afs-studio__manualtoggle.is-on { background: var(--afs-accent, #5b8cff); border-radius: 5px; }
 /* 阶段5：资产润色提示词 + 衍生变体 */
 .afs-studio__cardprompt { margin-top: 6px; resize: vertical; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--afs-text-dim); }
 .afs-studio__derivrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--afs-border); }

@@ -10,7 +10,11 @@ import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
-import { runAgentPipeline } from '../studio/agent/agent'
+import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
+import { runToolLoop } from '../studio/agent/runtime'
+import { makeAgentTools } from '../studio/agent/agentTools'
+import { abortText } from '../services/textEngine'
+import { useGraphStore } from './graphStore'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
@@ -24,8 +28,9 @@ export interface FilmState {
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let agentAbort: AbortController | null = null // 工具循环 Agent 的中断句柄（§6.1.1 per-run）
 
-interface ProjectState {
+export interface ProjectState {
   cards: ProjectCard[]
   doc: ProjectDoc | null
   loading: boolean
@@ -92,6 +97,10 @@ interface ProjectState {
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
+  /** 实验：原生工具循环 Agent（§6.1，依赖 R1；jsonMode 管线仍为默认兜底） */
+  runAgentToolLoop: (userText: string) => Promise<void>
+  /** 中断进行中的 Agent（管线 runText 与工具循环均尽力中断） */
+  abortAgent: () => void
 
   // 时间线 → ffmpeg 合成成片
   compose: () => Promise<void>
@@ -609,6 +618,46 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ agentBusy: false, agentStage: undefined })
       await get().flush()
     }
+  },
+
+  runAgentToolLoop: async (userText) => {
+    const doc0 = get().doc
+    if (!doc0 || !userText.trim() || get().agentBusy) return
+    const model = useGraphStore.getState().selectedModel
+    const push = (role: string, content: string) => get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role, content, createTime: Date.now() }))
+    if (!model) {
+      push('assistant', '未配置文本模型（请在「模型」里选择）')
+      return
+    }
+    push('user', userText)
+    const controller = new AbortController()
+    agentAbort = controller
+    set({ agentBusy: true, agentStage: '工具调用…' })
+    try {
+      const reply = await runToolLoop({
+        model,
+        system: buildToolLoopSystem(get().doc!),
+        user: userText,
+        tools: makeAgentTools(get),
+        signal: controller.signal,
+        onToolCall: (name) => set({ agentStage: `调用 ${name}…` }),
+        onToolResult: (name) => set({ agentStage: `${name} 完成` }),
+      })
+      push('assistant', reply)
+    } catch (e) {
+      push('assistant', '出错：' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      agentAbort = null
+      set({ agentBusy: false, agentStage: undefined })
+      await get().flush()
+    }
+  },
+
+  abortAgent: () => {
+    abortText() // 兜底中断管线进行中的 runText
+    agentAbort?.abort()
+    agentAbort = null
+    set({ agentBusy: false, agentStage: undefined })
   },
 
   generateAllAssets: async () => {

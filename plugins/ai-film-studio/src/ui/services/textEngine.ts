@@ -9,6 +9,10 @@ export interface TextRunOptions {
   user: string
   /** 为 true 时请求宿主结构化输出（response_format: json_object），从源头约束为合法 JSON */
   jsonMode?: boolean
+  /** 模型参数（§6.3 agentDeploy：按 Agent 配温度/最大 token，透传给 ai.call params） */
+  params?: { temperature?: number; maxOutputTokens?: number }
+  /** 调用方自带中断信号（§6.1.1：嵌套/并发调用各自持有独立 AbortController，不复用全局单例） */
+  abortSignal?: AbortSignal
   onText?: (chunk: string) => void
   onReasoning?: (chunk: string) => void
 }
@@ -46,9 +50,13 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
   // （对齐 mulby-ai-chat 的做法），最终文本以累积值为准。
   let acc = ''
   let accReasoning = ''
-  // 结构化输出（宿主 v0.9+）：让模型从源头只产出合法 JSON；旧宿主忽略该参数（不影响）
-  const params = opts.jsonMode ? { responseFormat: 'json_object' as const } : undefined
-  const req = ai.call({ messages, model: opts.model || undefined, params }, (chunk: AiMessage) => {
+  // 结构化输出（宿主 v0.9+）+ 模型参数（温度/最大 token）；旧宿主忽略未知参数（不影响）
+  const params: AiModelParameters = {
+    ...(opts.jsonMode ? { responseFormat: 'json_object' as const } : {}),
+    ...(opts.params ?? {}),
+  }
+  const callParams = Object.keys(params).length ? params : undefined
+  const req = ai.call({ messages, model: opts.model || undefined, params: callParams }, (chunk: AiMessage) => {
     switch (chunk.chunkType) {
       case 'text': {
         const t = typeof chunk.content === 'string' ? chunk.content : ''
@@ -74,6 +82,15 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
   })
 
   current = req
+  // 调用方自带 signal：中断时直接 abort 本次 req（不依赖全局单例，支持嵌套/并发）
+  const onAbort = () => {
+    try {
+      req.abort()
+    } catch {
+      // 忽略
+    }
+  }
+  opts.abortSignal?.addEventListener('abort', onAbort, { once: true })
   try {
     const result = await req
     const resultContent = typeof result.content === 'string' ? result.content : ''
@@ -85,5 +102,6 @@ export async function runText(opts: TextRunOptions): Promise<TextRunResult> {
     return { content, reasoning: accReasoning || result.reasoning_content }
   } finally {
     current = null
+    opts.abortSignal?.removeEventListener('abort', onAbort)
   }
 }

@@ -743,3 +743,12 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **UI**：AssetCard 加英文提示词 textarea（可手改）+「润色」「生成」两步 + promptState + 可展开「衍生」横排（DerivativeCard）；AssetsTab 加「全部润色」批量、网格过滤掉衍生子项（衍生嵌在父卡片下）。
   - 注：§4.7 director_* 导演技能注入留待 phase6 Agent；本阶段先把 art_prompt 手册经润色接上。
   - tsc + vite build 通过。运行态待 Mulby 实测。
+
+- [x] **阶段 6 真 tool-loop Agent（实验路径 + 兜底双轨）**（commit 待提交）
+  - **§6.1.1 / §6.3 groundwork**（可验证）：`textEngine.runText` 加 `abortSignal`（中断时 abort 本次 req，不复用全局单例，支持嵌套/并发）+ `params`（temperature/maxOutputTokens 透传 ai.call，为 agentDeploy 铺路）。
+  - **工具循环运行时**（§6.1）：新增 `studio/agent/runtime.ts`——`AgentTool` 接口 + `runToolLoop`（每次 ai.call 用传入 signal 独立中断；**格式无关回灌**：工具结果作 role+string 消息喂回，不依赖未知的结构化 tool-result 消息格式，故支持 function-calling 的模型可用、不支持则降级为只回文本）。
+  - **工具集**：新增 `studio/agent/agentTools.ts`——`makeAgentTools(get)` 暴露 get_workspace/upsert_script/add_asset/add_storyboard/generate_asset/generate_keyframe/generate_clip，同进程直调 projectStore（替代 socket.emit）。
+  - **store**：`runAgentToolLoop`（实验路径，独立 AbortController）+ `abortAgent`（abortText 兜底 + controller.abort）；`agent.ts` 加 `buildToolLoopSystem`；导出 `ProjectState`。
+  - **UI**：AgentPanel 加 🛠 原生工具调用开关（默认关→走 jsonMode 管线）+ 生成中「停止」按钮（abortAgent）。
+  - **⚠ R1 仍待 Mulby 实测**：原生工具循环依赖宿主对自定义 function 工具的行为；未生效则继续用默认 jsonMode 确定性管线（常驻兜底，不影响现有流程）。建议先用 phase0 探针 `window.__filmStudioProbe()` 确认。
+  - tsc + vite build 通过。

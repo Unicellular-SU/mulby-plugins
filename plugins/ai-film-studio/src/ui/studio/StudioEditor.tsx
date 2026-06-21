@@ -237,22 +237,32 @@ function StudioModelBar() {
 function AgentPanel() {
   const doc = useProjectStore((s) => s.doc)!
   const runAgent = useProjectStore((s) => s.runAgent)
+  const runAgentToolLoop = useProjectStore((s) => s.runAgentToolLoop)
+  const abortAgent = useProjectStore((s) => s.abortAgent)
   const updateMeta = useProjectStore((s) => s.updateMeta)
   const busy = useProjectStore((s) => s.agentBusy)
   const stage = useProjectStore((s) => s.agentStage)
   const [text, setText] = useState('')
   const [showManual, setShowManual] = useState(false)
+  const [toolLoop, setToolLoop] = useState(false)
   const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
   const send = () => {
     if (!text.trim() || busy) return
     const t = text
     setText('')
-    void runAgent(t)
+    void (toolLoop ? runAgentToolLoop(t) : runAgent(t))
   }
   return (
     <aside className="afs-studio__agent">
       <div className="afs-studio__agent-head">
         <Bot size={16} /> AI 制片
+        <button
+          className={`afs-studio__manualtoggle${toolLoop ? ' is-on' : ''}`}
+          title="实验：原生工具调用（Agent 自主调用工具读写工作区；依赖宿主 function-calling，未生效则用默认结构化管线）"
+          onClick={() => setToolLoop((v) => !v)}
+        >
+          🛠
+        </button>
         <button className="afs-studio__manualtoggle" title="导演手册（全局风格/节奏意图，注入 Agent）" onClick={() => setShowManual((v) => !v)}>
           🎬
         </button>
@@ -296,9 +306,15 @@ function AgentPanel() {
             }
           }}
         />
-        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={busy || !text.trim()} onClick={send}>
-          {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
-        </button>
+        {busy ? (
+          <button className="afs-btn afs-btn--sm" title="停止" onClick={() => abortAgent()}>
+            <X size={14} />
+          </button>
+        ) : (
+          <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={!text.trim()} onClick={send}>
+            <Send size={14} />
+          </button>
+        )}
       </div>
     </aside>
   )

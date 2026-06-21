@@ -106,6 +106,15 @@ async function callJson(model: string, skill: string, ctx: string, contract: str
   return parsePlan(r.content)
 }
 
+/** 工具循环（§6.1 实验路径）的 system 提示词：决策 skill + 项目上下文 + 工具使用说明 */
+export function buildToolLoopSystem(doc: ProjectDoc): string {
+  const TOOL_GUIDE =
+    '你是 AI 制片。可调用工具读写工作区：get_workspace（看现状）/upsert_script（写剧本）/add_asset（加资产）/' +
+    'add_storyboard（加分镜）/generate_asset、generate_keyframe、generate_clip（生成）。先规划，再按需调用工具完成用户需求；' +
+    '资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
+  return [getAgentSkill('production_agent_decision'), buildContext(doc), TOOL_GUIDE].filter(Boolean).join('\n\n')
+}
+
 /** 单次结构化方案（兜底/简单场景）：一通调用产出剧本+资产+分镜 */
 export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<AgentPlan> {
   const model = ensureModel()
