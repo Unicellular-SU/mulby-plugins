@@ -7,6 +7,7 @@ import { useEffect } from 'react'
 import { Film, ArrowLeft, Plus } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import StudioEditor from './StudioEditor'
+import { registerToolCallingProbe } from './agent/toolCallingProbe'
 
 export default function StudioApp({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)
@@ -16,6 +17,7 @@ export default function StudioApp({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     void init()
+    registerToolCallingProbe() // 阶段0：暴露宿主 tool-calling 探针到控制台（dev 便利，无 UI）
   }, [init])
 
   if (loading && !doc) return <div className="afs-studio afs-studio--center">加载中…</div>

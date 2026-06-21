@@ -23,6 +23,9 @@ const KEY_INDEX = 'projects:index'
 const KEY_ELEMENTS = 'elements:library'
 const KEY_SNAPSHOTS = 'snapshots'
 const projectKey = (id: string) => `project:${id}`
+// 工作台（studio:*）命名空间——GC 必须把这里引用的附件视为「在用」，否则会误删工作台资产图/关键帧。
+const KEY_STUDIO_INDEX = 'studio:index'
+const studioProjectKey = (id: string) => `studio:project:${id}`
 
 export type AssetType = 'image' | 'video' | 'audio'
 export type AssetRole = 'generated' | 'uploaded'
@@ -273,7 +276,40 @@ export async function storageUsage(): Promise<{ count: number; bytes: number }> 
   }
 }
 
-/** 收集仍被引用的附件 assetId（工程节点 ∪ Elements 参考图 ∪ 上传素材根） */
+/**
+ * 工作台（studio:*）文档引用的附件 assetId 收集。
+ * GC 只认 assetRegistry 这套引用图，studio 文档不在其中 → 若不扫描，工作台生成的资产主图/变体图/
+ * 关键帧图（均经 saveAsset 落 attachment）会被 gcOrphans 当孤儿删除。这里以「studio 文档实际引用」为准
+ * 收集所有 assetId（含 phase7 多图历史 images[] 与 imageFlow 节点，向前兼容、字段不存在时静默跳过）。
+ */
+interface StudioDocShape {
+  assets?: Array<{
+    refImageId?: string
+    images?: Array<{ refImageId?: string }>
+    variants?: Array<{ refImageId?: string }>
+    voiceAssetId?: string
+  }>
+  storyboards?: Array<{ keyframeImageId?: string }>
+  imageFlows?: Record<string, { nodes?: Array<{ assetId?: string }> }>
+}
+async function collectStudioReferenced(referenced: Set<string>): Promise<void> {
+  const cards = (await kvGet<{ id: string }[]>(KEY_STUDIO_INDEX)) || []
+  for (const card of cards) {
+    if (!card?.id) continue
+    const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
+    if (!doc) continue
+    for (const a of doc.assets || []) {
+      if (a.refImageId) referenced.add(a.refImageId)
+      for (const img of a.images || []) if (img.refImageId) referenced.add(img.refImageId)
+      for (const v of a.variants || []) if (v.refImageId) referenced.add(v.refImageId)
+    }
+    for (const s of doc.storyboards || []) if (s.keyframeImageId) referenced.add(s.keyframeImageId)
+    for (const flow of Object.values(doc.imageFlows || {}))
+      for (const n of flow?.nodes || []) if (n?.assetId) referenced.add(n.assetId)
+  }
+}
+
+/** 收集仍被引用的附件 assetId（工程节点 ∪ Elements 参考图 ∪ 工程快照 ∪ 上传素材根 ∪ 工作台 studio:*） */
 async function collectReferenced(): Promise<Set<string>> {
   const referenced = new Set<string>()
   for (const proj of await listProjects()) {
@@ -286,6 +322,8 @@ async function collectReferenced(): Promise<Set<string>> {
   for (const snap of snapshots) for (const { pv } of eachPortValue(snap.nodes || [])) if (pv.assetId) referenced.add(pv.assetId)
   // 上传到库的素材即使尚未上画布，也由注册表「根引用」保护
   for (const r of await loadRegistry()) if (r.role === 'uploaded' && r.assetId) referenced.add(r.assetId)
+  // 工作台文档引用的资产图/关键帧（防 GC 误删 studio 资产）
+  await collectStudioReferenced(referenced)
   return referenced
 }
 
