@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
@@ -6,7 +5,6 @@ import { useTask } from '../store/taskStore'
 import { Select } from './Select'
 import { STYLE_PACKS } from '../services/stylePacks'
 import { ProjectSettings } from './ProjectSettings'
-import { TemplatePanel } from './TemplatePanel'
 
 export function TopBar() {
   const name = useGraph((s) => s.project.name)
@@ -19,7 +17,6 @@ export function TopBar() {
   const setStylePack = useGraph((s) => s.setStylePack)
   const saving = useUi((s) => s.saving)
   const active = useTask((s) => s.active)
-  const [showTpl, setShowTpl] = useState(false)
 
   return (
     <div
@@ -71,7 +68,7 @@ export function TopBar() {
           {active} 生成中
         </span>
       )}
-      <button onClick={() => setShowTpl(true)} title="模板" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+      <button onClick={() => useUi.getState().setShowTemplates(true)} title="模板" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <LayoutTemplate size={15} />
       </button>
       <ProjectSettings />
@@ -93,7 +90,6 @@ export function TopBar() {
           </>
         )}
       </div>
-      <TemplatePanel show={showTpl} onClose={() => setShowTpl(false)} />
     </div>
   )
 }

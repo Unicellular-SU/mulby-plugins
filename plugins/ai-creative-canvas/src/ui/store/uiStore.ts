@@ -25,6 +25,8 @@ interface UiState {
   setCtxMenu: (m: { x: number; y: number; cardId: string | null } | null) => void
   storyboardCardId: string | null
   setStoryboardCardId: (id: string | null) => void
+  showTemplates: boolean
+  setShowTemplates: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -51,5 +53,7 @@ export const useUi = create<UiState>((set) => ({
   ctxMenu: null,
   setCtxMenu: (ctxMenu) => set({ ctxMenu }),
   storyboardCardId: null,
-  setStoryboardCardId: (storyboardCardId) => set({ storyboardCardId })
+  setStoryboardCardId: (storyboardCardId) => set({ storyboardCardId }),
+  showTemplates: false,
+  setShowTemplates: (showTemplates) => set({ showTemplates })
 }))

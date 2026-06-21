@@ -8,6 +8,7 @@ import { useProviders } from './store/providerStore'
 import { ProviderSettings } from './components/ProviderSettings'
 import { ComposeModal } from './components/ComposeModal'
 import { StoryboardModal } from './components/StoryboardModal'
+import { TemplatePanel } from './components/TemplatePanel'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
@@ -83,6 +84,7 @@ export default function App() {
   }, [])
 
   const showProviderSettings = useUi((s) => s.showProviderSettings)
+  const showTemplates = useUi((s) => s.showTemplates)
 
   return (
     <div className="h-full w-full flex flex-col text-neutral-800 dark:text-neutral-200">
@@ -96,6 +98,7 @@ export default function App() {
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />
       <StoryboardModal />
+      <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
     </div>
   )
 }

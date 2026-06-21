@@ -257,7 +257,7 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   groupSelection: () => {
     const board = activeBoardOf(get().project)
-    const ids = get().selectedIds.filter((id) => board.cards[id] && board.cards[id].kind !== 'group')
+    const ids = get().selectedIds.filter((id) => !!board.cards[id]) // 允许把已有组也编入（嵌套）
     if (ids.length === 0) return
     const cs = ids.map((id) => board.cards[id])
     const PAD = 28
@@ -266,6 +266,16 @@ export const useGraph = create<GraphState>((set, get) => ({
     const minY = Math.min(...cs.map((c) => c.y)) - PAD - HEAD
     const maxX = Math.max(...cs.map((c) => c.x + c.w)) + PAD
     const maxY = Math.max(...cs.map((c) => c.y + c.h)) + PAD
+    // 若新组完全落在某个已存在组内 → 自动嵌套（取最深的）
+    let nestParent: string | null = null
+    let bestArea = Infinity
+    for (const c of Object.values(board.cards)) {
+      if (c.kind !== 'group' || ids.includes(c.id)) continue
+      if (minX >= c.x && minY >= c.y && maxX <= c.x + c.w && maxY <= c.y + c.h && c.w * c.h < bestArea) {
+        bestArea = c.w * c.h
+        nestParent = c.id
+      }
+    }
     const groupId = uid('card')
     get().pushHistory()
     set((s) => ({
@@ -276,7 +286,7 @@ export const useGraph = create<GraphState>((set, get) => ({
           title: '分组', prompt: '', modelId: null, providerId: null,
           params: { color: '#6366f1', collapsed: false }, status: 'idle', progress: 0, error: null,
           assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null,
-          refIds: [], assets: [], meta: {}, parentId: null
+          refIds: [], assets: [], meta: {}, parentId: nestParent
         }
         for (const id of ids) cards[id] = { ...cards[id], parentId: groupId }
         return { ...b, cards }

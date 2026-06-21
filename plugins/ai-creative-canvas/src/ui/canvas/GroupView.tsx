@@ -1,4 +1,4 @@
-import { type PointerEvent as RPointerEvent } from 'react'
+import { useState, type PointerEvent as RPointerEvent } from 'react'
 import { Play, ChevronDown, ChevronRight, Ungroup, Music, Save } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { generateCard, canGenerate } from '../services/generate'
@@ -20,6 +20,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   const removeCards = useGraph((s) => s.removeCards)
   const color = (card.params?.color as string) || '#6366f1'
   const collapsed = !!card.params?.collapsed
+  const [editing, setEditing] = useState(false)
 
   const allDescendants = (): string[] => {
     const cards = useGraph.getState().getActiveBoard().cards
@@ -99,7 +100,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   return (
     <div
       data-card-id={card.id}
-      className={`absolute rounded-xl ${selected ? 'ring-2' : ''}`}
+      className={`absolute rounded-xl pointer-events-none ${selected ? 'ring-2' : ''}`}
       style={{
         left: card.x,
         top: card.y,
@@ -110,15 +111,30 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
         ['--tw-ring-color' as any]: color
       }}
     >
-      <div className="absolute top-0 inset-x-0 h-9 flex items-center gap-1.5 px-2 rounded-t-xl" style={{ background: color + '22' }}>
+      <div className="absolute top-0 inset-x-0 h-9 flex items-center gap-1.5 px-2 rounded-t-xl pointer-events-auto" style={{ background: color + '22' }}>
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
-        <input
-          data-interactive
-          onPointerDown={(e) => e.stopPropagation()}
-          value={card.title}
-          onChange={(e) => updateCard(card.id, { title: e.target.value })}
-          className="bg-transparent text-sm font-medium outline-none flex-1 min-w-0 text-neutral-800 dark:text-neutral-100"
-        />
+        {editing ? (
+          <input
+            data-interactive
+            autoFocus
+            onPointerDown={(e) => e.stopPropagation()}
+            value={card.title}
+            onChange={(e) => updateCard(card.id, { title: e.target.value })}
+            onBlur={() => setEditing(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === 'Escape') setEditing(false)
+            }}
+            className="bg-transparent text-sm font-medium outline-none flex-1 min-w-0 text-neutral-800 dark:text-neutral-100"
+          />
+        ) : (
+          <span
+            onDoubleClick={() => setEditing(true)}
+            title="双击重命名；按住标题拖动分组"
+            className="flex-1 min-w-0 truncate text-sm font-medium select-none cursor-grab text-neutral-800 dark:text-neutral-100"
+          >
+            {card.title || '分组'}
+          </span>
+        )}
         {collapsed && <span className="text-xs opacity-60 shrink-0">{allDescendants().length} 项</span>}
         <div data-interactive onPointerDown={(e) => e.stopPropagation()} className="flex items-center gap-0.5 shrink-0">
           <button onClick={genGroup} title="生成组内全部" className={btn}>
@@ -142,7 +158,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
       </div>
 
       {selected && !collapsed && (
-        <div data-interactive onPointerDown={(e) => e.stopPropagation()} className="absolute top-10 left-2 flex gap-1">
+        <div data-interactive onPointerDown={(e) => e.stopPropagation()} className="absolute top-10 left-2 flex gap-1 pointer-events-auto">
           {COLORS.map((c) => (
             <button key={c} onClick={() => updateCard(card.id, { params: { ...card.params, color: c } })} className="w-3.5 h-3.5 rounded-full border border-white/60" style={{ background: c }} />
           ))}
@@ -153,7 +169,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
         <div
           data-interactive
           onPointerDown={startResize}
-          className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize pointer-events-auto"
           style={{ borderRight: `2px solid ${color}99`, borderBottom: `2px solid ${color}99`, borderBottomRightRadius: 10 }}
         />
       )}

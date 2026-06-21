@@ -95,6 +95,18 @@ export function ContextMenu() {
     }
   }
 
+  // 选中若干卡 → 新建一个下游节点并把它们全部连进去
+  const connectToNew = (kind: CardKind) => {
+    const src = cards.filter((c) => c.kind !== 'group')
+    if (!src.length) return
+    const maxX = Math.max(...src.map((c) => c.x + c.w))
+    const minY = Math.min(...src.map((c) => c.y))
+    const maxY = Math.max(...src.map((c) => c.y + c.h))
+    const nid = g.addCard(kind, { x: maxX + 220, y: (minY + maxY) / 2 })
+    for (const c of src) g.addEdgeBetween(c.id, nid)
+    g.setSelection([nid])
+  }
+
   const items: Item[] = []
   const genTargets = cards.filter((c) => canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued')
   const clips = cards.filter((c) => c.kind === 'video' && c.assetLocalPath)
@@ -105,7 +117,7 @@ export function ContextMenu() {
     else if (genTargets.length === 1) items.push({ label: '生成', onClick: () => run(() => void generateCard(genTargets[0].id)) })
     if (cards.length === 1 && cards[0].kind === 'image' && cards[0].assetLocalPath) items.push({ label: '转视频（以此为首帧）', onClick: () => run(() => shotToVideo(cards[0].id)) })
     if (clips.length >= 2) items.push({ label: `合成成片（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowCompose(true)) })
-    if (nonGroup.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
+    if (cards.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
     if (cards.length === 1 && cards[0].kind === 'group')
       items.push({
         label: '保存为模板',
@@ -115,6 +127,12 @@ export function ContextMenu() {
             if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => (window as any).mulby?.notification?.show?.(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
           })
       })
+    if (nonGroup.length >= 1) {
+      items.push({ sep: true })
+      items.push({ label: '↳ 连到新文本节点', onClick: () => run(() => connectToNew('text')) })
+      items.push({ label: '↳ 连到新图片节点', onClick: () => run(() => connectToNew('image')) })
+      items.push({ label: '↳ 连到新视频节点', onClick: () => run(() => connectToNew('video')) })
+    }
     if (cards.length >= 2) {
       items.push({ sep: true })
       items.push({ label: '左对齐', onClick: () => run(() => align('left')) })

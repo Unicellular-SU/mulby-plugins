@@ -16,7 +16,7 @@ function bezier(x1: number, y1: number, x2: number, y2: number) {
 }
 
 // 屏幕坐标 SVG（铺满舞台，随视口换算）。放在卡片层之下。
-export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | null }) {
+export function EdgeLayer({ board, temp, hidden }: { board: Board; temp?: TempEdge | null; hidden?: Set<string> }) {
   const removeEdge = useGraph((s) => s.removeEdge)
   const [hover, setHover] = useState<string | null>(null)
   const cards = board.cards
@@ -28,6 +28,7 @@ export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | nul
         const s = cards[e.source]
         const t = cards[e.target]
         if (!s || !t) return null
+        if (hidden && (hidden.has(e.source) || hidden.has(e.target))) return null // 折叠组内的连线随之隐藏
         const a = worldToScreen(s.x + s.w, s.y + s.h / 2, vp)
         const b = worldToScreen(t.x, t.y + t.h / 2, vp)
         const d = bezier(a.x, a.y, b.x, b.y)

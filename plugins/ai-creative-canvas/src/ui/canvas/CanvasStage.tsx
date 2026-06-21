@@ -108,11 +108,12 @@ export function CanvasStage() {
       return
     }
     if (e.button !== 0) return
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey // shift / ctrl / cmd 多选
 
     const cardEl = target.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
       const id = cardEl.dataset.cardId as string
-      if (e.shiftKey) {
+      if (additive) {
         g.toggleSelect(id, true)
         inter.current = { mode: 'idle' }
         return
@@ -130,15 +131,15 @@ export function CanvasStage() {
       inter.current = { mode: 'drag', ids: [...idSet], lastX: e.clientX, lastY: e.clientY, moved: false }
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
     } else {
-      if (!e.shiftKey) g.clearSelection()
+      if (!additive) g.clearSelection()
       inter.current = {
         mode: 'marquee',
         startSX: sx,
         startSY: sy,
         curSX: sx,
         curSY: sy,
-        additive: e.shiftKey,
-        baseSel: e.shiftKey ? [...g.selectedIds] : []
+        additive,
+        baseSel: additive ? [...g.selectedIds] : []
       }
       setMarquee({ x: sx, y: sy, w: 0, h: 0 })
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
@@ -410,7 +411,7 @@ export function CanvasStage() {
       onDragOver={(e) => e.preventDefault()}
     >
       {showGrid && <GridLayer viewport={vp} />}
-      <EdgeLayer board={board} temp={connectTemp} />
+      <EdgeLayer board={board} temp={connectTemp} hidden={hiddenMembers} />
       <div
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0' }}
