@@ -38,6 +38,16 @@ function setPath(obj: any, path: string, val: any): void {
   cur[segs[segs.length - 1]] = val
 }
 
+// 经 mulby.http.request 发请求并显式给足超时（视频提交/轮询都很慢，.post/.get 快捷方法默认超时太短会报 Request timeout）
+async function httpReq(url: string, method: 'GET' | 'POST', headers: any, body: any, timeoutMs: number): Promise<{ status: number; data: any }> {
+  const h = http()
+  if (h?.request) {
+    const r = await h.request({ url, method, headers, body, timeout: timeoutMs })
+    return { status: r.status, data: r.data }
+  }
+  return method === 'POST' ? await h.post(url, body, headers) : await h.get(url, headers)
+}
+
 export interface VideoReq {
   prompt: string
   imageDataUrl?: string
@@ -105,7 +115,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
   const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
   if (key) headers['Authorization'] = `Bearer ${key}`
   onProgress?.(0.1)
-  const resp = await http().post(cfg.submitUrl, body, headers)
+  const resp = await httpReq(cfg.submitUrl as string, 'POST', headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
   let url = jget(data, cfg.videoUrlPath)
@@ -119,7 +129,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
     while (true) {
       if (Date.now() - startedAt > timeout) throw new Error('生成超时')
       await sleep(interval)
-      const sr = await http().get(cfg.pollUrl.replace('{taskId}', String(taskId)), headers)
+      const sr = await httpReq(cfg.pollUrl.replace('{taskId}', String(taskId)), 'GET', headers, undefined, 60000)
       const sd = parse(sr.data)
       url = jget(sd, cfg.videoUrlPath)
       if (url) break
@@ -177,7 +187,7 @@ export async function runVideoJob(
   const base = cfg.baseURL.replace(/\/$/, '')
   const submitUrl = base + (cfg.submitPath || '')
   onProgress?.(0.1)
-  const resp = await http().post(submitUrl, body, headers)
+  const resp = await httpReq(submitUrl, 'POST', headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
 
@@ -195,7 +205,7 @@ export async function runVideoJob(
       if (Date.now() - startedAt > timeout) throw new Error('生成超时')
       await sleep(interval)
       const statusUrl = base + (cfg.statusPath || '').replace('{id}', String(taskId))
-      const sr = await http().get(statusUrl, headers)
+      const sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000)
       const sd = parse(sr.data)
       url = jget(sd, cfg.resultPath)
       if (url) break
