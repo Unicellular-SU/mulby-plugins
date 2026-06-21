@@ -759,3 +759,10 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **分镜面板字段完整编辑**（§4.5）：StoryboardItem「详情」折叠区——时长/轨道/出场资产（chips 多选自资产库）/关键帧提示词/对白（角色+台词+情绪 增删行），全走现有 `upsertStoryboard`。
   - 注：分镜表设计层（§4.1）作 P1 留到阶段 10 收尾接入（需 Agent 配合）。
   - tsc + vite build 通过。运行态待 Mulby 实测。
+
+- [x] **阶段 8 音频配音（音色库 + 绑定 + AI 匹配）**（commit 待提交）
+  - **音色库**（§3.4）：audio 成为一等资产；新增 `studio/services/audio.ts`——`synthVoiceSample`（复用 `tts.synthSpeech` + 默认 tts 供应商 baseURL/key/model/voice 落盘试听）、`listProviderVoices`、`matchRoleVoices`（LLM jsonMode 角色↔音色匹配，替代 Toonflow resultTool）。`Asset` 加 `voice` 字段（供应商音色 id）。
+  - **store**：`addVoice`/`synthVoice`（落盘试听写 audioFilePath/audioUrl）/`bindRoleVoice`/`autoBindVoices`（AI 匹配批量绑定 + audioBindState）。
+  - **UI**：AssetsTab 加「音色」库（VoiceCard：名/供应商音色下拉/描述/试听 audio 播放器/删除）+「AI 配音匹配」按钮；角色 AssetCard 加音色绑定下拉（voiceAssetId）。
+  - **⚠ 合成注入（§5.5）留到阶段 10**：现 ffmpeg `AudioTrack` 仅 `{path, role}` 无时间偏移，按段精确对白需给 AudioTrack 加 start 或按段拼接对齐——作阶段 10 收尾项（含 provider 原生音频路径 A 能力门控 + ffmpeg 后期路径 B）。本阶段先打通音色管理与绑定。
+  - tsc + vite build 通过。运行态待 Mulby 实测（需配 tts 供应商）。

@@ -14,6 +14,7 @@ import StudioDock from './StudioDock'
 import EditorView from '../components/shell/EditorView'
 import SettingsView from '../components/views/SettingsView'
 import { installFocusTracker } from './services/focusInsert'
+import { listProviderVoices } from './services/audio'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline' | 'canvas'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -444,6 +445,7 @@ function AssetsTab() {
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
   const generateAllAssets = useProjectStore((s) => s.generateAllAssets)
   const polishAllAssets = useProjectStore((s) => s.polishAllAssets)
+  const autoBindVoices = useProjectStore((s) => s.autoBindVoices)
   const batch = useProjectStore((s) => s.batch)
   const groups: { type: AssetType; label: string }[] = [
     { type: 'role', label: '人物' },
@@ -458,6 +460,14 @@ function AssetsTab() {
         </button>
         <button className="afs-btn afs-btn--sm" disabled={batch.running || doc.assets.length === 0} onClick={() => void generateAllAssets()}>
           {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 全部生成
+        </button>
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={batch.running || !doc.assets.some((a) => a.type === 'role') || !doc.assets.some((a) => a.type === 'audio')}
+          title="为各角色 AI 匹配最契合的音色"
+          onClick={() => void autoBindVoices()}
+        >
+          {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Bot size={13} />} AI 配音匹配
         </button>
       </div>
       {groups.map((g) => {
@@ -479,6 +489,70 @@ function AssetsTab() {
           </div>
         )
       })}
+      <VoiceLibrary />
+    </div>
+  )
+}
+
+function VoiceLibrary() {
+  const doc = useProjectStore((s) => s.doc)!
+  const addVoice = useProjectStore((s) => s.addVoice)
+  const voices = doc.assets.filter((a) => a.type === 'audio')
+  return (
+    <div className="afs-studio__assetgroup">
+      <div className="afs-studio__assetgroup-head">
+        <b>音色</b>
+        <button className="afs-btn afs-btn--sm" onClick={() => addVoice({ name: `音色${voices.length + 1}` })}>
+          <Plus size={14} /> 新增音色
+        </button>
+      </div>
+      <div className="afs-studio__cardgrid">
+        {voices.length === 0 && <span className="afs-studio__hint">暂无音色（先在设置抽屉配置 tts 供应商，再新增音色试听）</span>}
+        {voices.map((v) => (
+          <VoiceCard key={v.id} asset={v} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function VoiceCard({ asset }: { asset: Asset }) {
+  const upsertAsset = useProjectStore((s) => s.upsertAsset)
+  const removeAsset = useProjectStore((s) => s.removeAsset)
+  const synthVoice = useProjectStore((s) => s.synthVoice)
+  const url = useMediaUrl(asset.audioUrl ? { url: asset.audioUrl } : asset.audioFilePath ? { localPath: asset.audioFilePath } : null)
+  const providerVoices = listProviderVoices()
+  return (
+    <div className="afs-studio__voicecard">
+      <input className="afs-studio__cardname" value={asset.name} onChange={(e) => upsertAsset({ id: asset.id, type: 'audio', name: e.target.value })} />
+      <select
+        className="afs-field__input"
+        value={asset.voice ?? ''}
+        onChange={(e) => upsertAsset({ id: asset.id, type: 'audio', name: asset.name, voice: e.target.value })}
+      >
+        <option value="">（默认音色）</option>
+        {providerVoices.map((v) => (
+          <option key={v} value={v}>
+            {v}
+          </option>
+        ))}
+      </select>
+      <input
+        className="afs-studio__derivdesc"
+        placeholder="音色描述（性别/音质/适配角色，供 AI 匹配）"
+        value={asset.desc ?? ''}
+        onChange={(e) => upsertAsset({ id: asset.id, type: 'audio', name: asset.name, desc: e.target.value })}
+      />
+      {url && <audio src={url} controls className="afs-studio__voiceaudio" />}
+      <div className="afs-studio__cardactions">
+        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} title="合成试听" onClick={() => void synthVoice(asset.id)}>
+          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 试听
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {asset.state === 'failed' && <p className="afs-studio__sberr">{asset.error}</p>}
     </div>
   )
 }
@@ -490,9 +564,11 @@ function AssetCard({ asset }: { asset: Asset }) {
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const polishAsset = useProjectStore((s) => s.polishAsset)
   const addDerivative = useProjectStore((s) => s.addDerivative)
+  const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
   const [showDeriv, setShowDeriv] = useState(false)
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
+  const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
   return (
     <div className="afs-studio__assetcard">
       <div className="afs-studio__thumb">
@@ -525,6 +601,21 @@ function AssetCard({ asset }: { asset: Asset }) {
         onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, prompt: e.target.value })}
       />
       <AssetImageStrip asset={asset} />
+      {asset.type === 'role' && voiceAssets.length > 0 && (
+        <select
+          className="afs-field__input afs-studio__voicesel"
+          title="为该角色绑定音色"
+          value={asset.voiceAssetId ?? ''}
+          onChange={(e) => bindRoleVoice(asset.id, e.target.value || undefined)}
+        >
+          <option value="">（未配音）</option>
+          {voiceAssets.map((v) => (
+            <option key={v.id} value={v.id}>
+              🎙 {v.name}
+            </option>
+          ))}
+        </select>
+      )}
       <div className="afs-studio__cardactions">
         <button
           className="afs-btn afs-btn--sm"

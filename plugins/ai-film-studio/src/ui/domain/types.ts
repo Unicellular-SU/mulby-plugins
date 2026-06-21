@@ -95,6 +95,7 @@ export interface Asset {
   elementId?: string // 桥接全局 assetStore.ElementRef.id（§3.6）
   flowId?: string // 资产精修画布引用（指向 doc.imageFlows，§4.4）
   // —— 音色子资产(type:audio) 专用 ——
+  voice?: string // 供应商音色 id（用于合成）
   audioFilePath?: string // 试听音频本地路径（tts 落盘）
   audioUrl?: string
   sex?: string // audio 父资产性别标签

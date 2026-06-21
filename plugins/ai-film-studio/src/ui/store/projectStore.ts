@@ -11,6 +11,7 @@ import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storybo
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
+import { synthVoiceSample, matchRoleVoices } from '../studio/services/audio'
 import { deleteAsset } from '../services/assets'
 import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
@@ -83,6 +84,11 @@ export interface ProjectState {
   deleteAssetImage: (assetId: string, imageId: string) => Promise<void>
   // 关键帧多参考图精修（§4.4 imageFlow）
   refineKeyframe: (storyboardId: string, refAssetIds: string[], prompt: string) => Promise<void>
+  // 音色库 + 角色↔音色（§3.4）
+  addVoice: (init?: { name?: string; voice?: string; desc?: string }) => string
+  synthVoice: (audioAssetId: string, text?: string) => Promise<void>
+  bindRoleVoice: (roleId: string, voiceAssetId: string | undefined) => void
+  autoBindVoices: () => Promise<void>
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
   generateAsset: (id: string) => Promise<void>
@@ -471,6 +477,52 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       setStoryboardState(get, storyboardId, { keyframeImageId, state: 'done' })
     } catch (e) {
       setStoryboardState(get, storyboardId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+
+  addVoice: (init) => get().upsertAsset({ type: 'audio', name: init?.name || '音色', voice: init?.voice, desc: init?.desc }),
+  synthVoice: async (audioAssetId, text) => {
+    const a = get().doc?.assets.find((x) => x.id === audioAssetId)
+    if (!a) return
+    setAssetState(get, audioAssetId, { state: 'generating', error: undefined })
+    try {
+      const r = await synthVoiceSample(text || `你好，我是${a.name}。`, a.voice || '')
+      setAssetState(get, audioAssetId, { audioFilePath: r.path, audioUrl: r.base64 ? `data:${r.mime};base64,${r.base64}` : undefined, state: 'done' })
+    } catch (e) {
+      setAssetState(get, audioAssetId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+  bindRoleVoice: (roleId, voiceAssetId) =>
+    get().mutate((d) => {
+      const r = d.assets.find((a) => a.id === roleId)
+      if (r) {
+        r.voiceAssetId = voiceAssetId
+        r.audioBindState = voiceAssetId ? 'done' : 'idle'
+      }
+    }),
+  autoBindVoices: async () => {
+    const doc = get().doc
+    if (!doc) return
+    const roles = doc.assets.filter((a) => a.type === 'role')
+    const voices = doc.assets.filter((a) => a.type === 'audio')
+    if (!roles.length || !voices.length) return
+    set({ batch: { running: true, label: 'AI 配音匹配…' } })
+    try {
+      const map = await matchRoleVoices(
+        roles.map((r) => ({ id: r.id, name: r.name, desc: r.desc })),
+        voices.map((v) => ({ id: v.id, name: v.name, desc: v.desc }))
+      )
+      get().mutate((d) => {
+        for (const m of map) {
+          const r = d.assets.find((a) => a.id === m.roleId && a.type === 'role')
+          if (r && d.assets.some((a) => a.id === m.voiceAssetId && a.type === 'audio')) {
+            r.voiceAssetId = m.voiceAssetId
+            r.audioBindState = 'done'
+          }
+        }
+      })
+    } finally {
+      set({ batch: { running: false } })
     }
   },
 
