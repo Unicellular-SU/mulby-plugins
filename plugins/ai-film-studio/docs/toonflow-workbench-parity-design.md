@@ -752,3 +752,10 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **UI**：AgentPanel 加 🛠 原生工具调用开关（默认关→走 jsonMode 管线）+ 生成中「停止」按钮（abortAgent）。
   - **⚠ R1 仍待 Mulby 实测**：原生工具循环依赖宿主对自定义 function 工具的行为；未生效则继续用默认 jsonMode 确定性管线（常驻兜底，不影响现有流程）。建议先用 phase0 探针 `window.__filmStudioProbe()` 确认。
   - tsc + vite build 通过。
+
+- [x] **阶段 7 多图 + imageFlow + 分镜字段编辑**（commit 待提交）
+  - **一资产多图历史**（§3.3）：`generateAsset`/`generateDerivative` 改为追加 `AssetImage` 候选（`pushAssetImage`，不再覆盖）+ 设当前 `currentImageId`/`refImageId`；store `selectAssetImage`/`deleteAssetImage`（删图同步 `deleteAsset` 回收附件，防泄漏）。AssetCard 多于 1 张时显历史候选条（点选/删除）。
+  - **关键帧精修 imageFlow**（§4.4）：新增 `studio/services/imageFlow.ts`（`runFlowImage`：多参考图 `editImage` 融合 + 画风锚定，= Toonflow generateFlowImage 核心）；store `refineKeyframe`；`ImageFlowEditor` 灯箱（参考图勾选栅格【复用资产库已出图】+ 当前关键帧 + 精修提示词 → 生成并设为关键帧）。StoryboardItem 加「精修」入口。**这是「把画布/资产库融入工作台」的落地之一**（不引入 React Flow，用勾选列表覆盖核心多图融合；节点图 edges 作 P2）。
+  - **分镜面板字段完整编辑**（§4.5）：StoryboardItem「详情」折叠区——时长/轨道/出场资产（chips 多选自资产库）/关键帧提示词/对白（角色+台词+情绪 增删行），全走现有 `upsertStoryboard`。
+  - 注：分镜表设计层（§4.1）作 P1 留到阶段 10 收尾接入（需 Agent 配合）。
+  - tsc + vite build 通过。运行态待 Mulby 实测。

@@ -10,6 +10,8 @@ import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
+import { runFlowImage } from '../studio/services/imageFlow'
+import { deleteAsset } from '../services/assets'
 import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
@@ -76,6 +78,11 @@ export interface ProjectState {
   polishAllAssets: () => Promise<void>
   addDerivative: (parentId: string, init?: { name?: string; desc?: string }) => string
   generateDerivative: (childId: string) => Promise<void>
+  // 一资产多图历史（§3.3）
+  selectAssetImage: (assetId: string, imageId: string) => void
+  deleteAssetImage: (assetId: string, imageId: string) => Promise<void>
+  // 关键帧多参考图精修（§4.4 imageFlow）
+  refineKeyframe: (storyboardId: string, refAssetIds: string[], prompt: string) => Promise<void>
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
   generateAsset: (id: string) => Promise<void>
@@ -117,6 +124,20 @@ function setStoryboardState(get: () => ProjectState, id: string, patch: Partial<
   get().mutate((d) => {
     const s = d.storyboards.find((x) => x.id === id)
     if (s) Object.assign(s, patch)
+  })
+}
+/** 资产生成成功：把新图作为一条历史候选追加（§3.3），并设为当前选定图（refImageId 同步） */
+function pushAssetImage(get: () => ProjectState, id: string, refImageId: string, extra?: Partial<Asset>) {
+  get().mutate((d) => {
+    const a = d.assets.find((x) => x.id === id)
+    if (!a) return
+    const img = { id: P.newId('ai_'), refImageId, createdAt: Date.now(), state: 'done' as const }
+    a.images = [...(a.images ?? []), img]
+    a.currentImageId = img.id
+    a.refImageId = refImageId
+    a.state = 'done'
+    a.error = undefined
+    if (extra) Object.assign(a, extra)
   })
 }
 
@@ -405,9 +426,51 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     setAssetState(get, childId, { state: 'generating', error: undefined })
     try {
       const refImageId = await generateDerivativeImage(child, parent, doc.meta)
-      setAssetState(get, childId, { refImageId, derivedFromImageId: parent.refImageId, state: 'done' })
+      pushAssetImage(get, childId, refImageId, { derivedFromImageId: parent.refImageId })
     } catch (e) {
       setAssetState(get, childId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+  selectAssetImage: (assetId, imageId) =>
+    get().mutate((d) => {
+      const a = d.assets.find((x) => x.id === assetId)
+      const img = a?.images?.find((i) => i.id === imageId)
+      if (a && img) {
+        a.currentImageId = imageId
+        a.refImageId = img.refImageId
+      }
+    }),
+  deleteAssetImage: async (assetId, imageId) => {
+    const a = get().doc?.assets.find((x) => x.id === assetId)
+    const img = a?.images?.find((i) => i.id === imageId)
+    if (img) {
+      try {
+        await deleteAsset(img.refImageId)
+      } catch {
+        // 附件可能已不存在，忽略
+      }
+    }
+    get().mutate((d) => {
+      const x = d.assets.find((y) => y.id === assetId)
+      if (!x?.images) return
+      x.images = x.images.filter((i) => i.id !== imageId)
+      if (x.currentImageId === imageId) {
+        const last = x.images[x.images.length - 1]
+        x.currentImageId = last?.id
+        x.refImageId = last?.refImageId
+      }
+    })
+  },
+  refineKeyframe: async (storyboardId, refAssetIds, prompt) => {
+    const doc = get().doc
+    const sb = doc?.storyboards.find((s) => s.id === storyboardId)
+    if (!doc || !sb) return
+    setStoryboardState(get, storyboardId, { state: 'generating', error: undefined })
+    try {
+      const keyframeImageId = await runFlowImage(refAssetIds, prompt, doc.meta)
+      setStoryboardState(get, storyboardId, { keyframeImageId, state: 'done' })
+    } catch (e) {
+      setStoryboardState(get, storyboardId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
   },
 
@@ -418,7 +481,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     setAssetState(get, id, { state: 'generating', error: undefined })
     try {
       const refImageId = await generateAssetImage(asset, doc.meta)
-      setAssetState(get, id, { refImageId, state: 'done' })
+      pushAssetImage(get, id, refImageId)
     } catch (e) {
       setAssetState(get, id, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }

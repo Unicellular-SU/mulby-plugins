@@ -524,6 +524,7 @@ function AssetCard({ asset }: { asset: Asset }) {
         value={asset.prompt ?? ''}
         onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, prompt: e.target.value })}
       />
+      <AssetImageStrip asset={asset} />
       <div className="afs-studio__cardactions">
         <button
           className="afs-btn afs-btn--sm"
@@ -592,6 +593,38 @@ function DerivativeCard({ asset }: { asset: Asset }) {
   )
 }
 
+function AssetImageStrip({ asset }: { asset: Asset }) {
+  const selectAssetImage = useProjectStore((s) => s.selectAssetImage)
+  const deleteAssetImage = useProjectStore((s) => s.deleteAssetImage)
+  const imgs = asset.images ?? []
+  if (imgs.length < 2) return null
+  return (
+    <div className="afs-studio__imgstrip" title="历史候选图：点击设为当前，× 删除">
+      {imgs.map((im) => (
+        <ImageStripThumb
+          key={im.id}
+          refImageId={im.refImageId}
+          selected={im.id === asset.currentImageId}
+          onSelect={() => selectAssetImage(asset.id, im.id)}
+          onDelete={() => void deleteAssetImage(asset.id, im.id)}
+        />
+      ))}
+    </div>
+  )
+}
+
+function ImageStripThumb({ refImageId, selected, onSelect, onDelete }: { refImageId: string; selected: boolean; onSelect: () => void; onDelete: () => void }) {
+  const url = useMediaUrl({ assetId: refImageId })
+  return (
+    <div className={`afs-studio__imgthumb${selected ? ' is-sel' : ''}`}>
+      {url ? <img src={url} alt="" onClick={onSelect} /> : <span className="afs-studio__imgph" onClick={onSelect} />}
+      <button title="删除此图" onClick={onDelete}>
+        <X size={10} />
+      </button>
+    </div>
+  )
+}
+
 function StoryboardTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
@@ -635,6 +668,8 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const moveStoryboard = useProjectStore((s) => s.moveStoryboard)
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
+  const [showDetail, setShowDetail] = useState(false)
+  const [showFlow, setShowFlow] = useState(false)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
   // 取该分镜所属段的「选用/最新」候选片段，反映状态（一镜多生后不再是唯一片段）
   const track = doc.track.find((t) => t.storyboardIds.includes(sb.id))
@@ -693,10 +728,123 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
             <AlertCircle size={13} /> 失败
           </span>
         )}
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="精修关键帧（多参考图融合）" onClick={() => setShowFlow(true)}>
+          <Settings2 size={13} /> 精修
+        </button>
+        <button className={`afs-btn afs-btn--sm afs-btn--ghost${showDetail ? ' is-active' : ''}`} title="详情（时长/轨道/出场资产/提示词/对白）" onClick={() => setShowDetail((v) => !v)}>
+          <ChevronDown size={13} /> 详情
+        </button>
         <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeStoryboard(sb.id)}>
           <Trash2 size={13} />
         </button>
       </div>
+      {showDetail && <StoryboardDetail sb={sb} />}
+      {showFlow && <ImageFlowEditor sb={sb} onClose={() => setShowFlow(false)} />}
+    </div>
+  )
+}
+
+function StoryboardDetail({ sb }: { sb: Storyboard }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
+  const roleAssets = doc.assets.filter((a) => !a.parentAssetId)
+  const dialogues = sb.dialogues ?? []
+  const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, dialogues: dlgs })
+  const toggleCast = (id: string) => {
+    const has = sb.associateAssetIds.includes(id)
+    upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, associateAssetIds: has ? sb.associateAssetIds.filter((x) => x !== id) : [...sb.associateAssetIds, id] })
+  }
+  return (
+    <div className="afs-studio__sbdetail">
+      <div className="afs-studio__sbfield">
+        <label>时长(秒)</label>
+        <input type="number" min={1} max={15} value={sb.duration} onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, duration: Number(e.target.value) || 5 })} />
+        <label>轨道</label>
+        <input value={sb.track} onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, track: e.target.value })} />
+      </div>
+      <label className="afs-studio__sbfieldlbl">出场资产</label>
+      <div className="afs-studio__castchips">
+        {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产</span>}
+        {roleAssets.map((a) => (
+          <button key={a.id} className={`afs-studio__chipbtn${sb.associateAssetIds.includes(a.id) ? ' is-on' : ''}`} onClick={() => toggleCast(a.id)}>
+            {a.name}
+          </button>
+        ))}
+      </div>
+      <label className="afs-studio__sbfieldlbl">关键帧提示词</label>
+      <textarea
+        className="afs-field__input afs-studio__cardprompt"
+        rows={2}
+        value={sb.prompt ?? ''}
+        placeholder="英文关键帧提示词…"
+        onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, prompt: e.target.value })}
+      />
+      <label className="afs-studio__sbfieldlbl">对白</label>
+      {dialogues.map((d, i) => (
+        <div key={i} className="afs-studio__dlgrow">
+          <input placeholder="角色" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))} />
+          <input placeholder="台词" value={d.line} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} />
+          <input placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, emotion: e.target.value } : x)))} />
+          <button title="删除" onClick={() => setDlg(dialogues.filter((_, j) => j !== i))}>
+            <X size={12} />
+          </button>
+        </div>
+      ))}
+      <button className="afs-btn afs-btn--sm" onClick={() => setDlg([...dialogues, { character: '', line: '' }])}>
+        <Plus size={12} /> 台词
+      </button>
+    </div>
+  )
+}
+
+function ImageFlowEditor({ sb, onClose }: { sb: Storyboard; onClose: () => void }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const refineKeyframe = useProjectStore((s) => s.refineKeyframe)
+  const assets = doc.assets.filter((a) => a.refImageId)
+  const [sel, setSel] = useState<string[]>(() =>
+    sb.associateAssetIds.map((id) => doc.assets.find((a) => a.id === id)?.refImageId).filter((x): x is string => !!x)
+  )
+  const [prompt, setPrompt] = useState(sb.prompt || sb.videoDesc || '')
+  const kfUrl = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
+  const toggle = (refImageId: string) => setSel((s) => (s.includes(refImageId) ? s.filter((x) => x !== refImageId) : [...s, refImageId]))
+  return (
+    <div className="afs-studio__lightbox" onClick={onClose}>
+      <div className="afs-studio__flowedit" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-studio__drawer-head">
+          <span>关键帧精修 · 多参考图融合</span>
+          <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={onClose} title="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="afs-studio__flowbody">
+          <div className="afs-studio__flowrefs">
+            <div className="afs-studio__sbfieldlbl">参考图（勾选要融合的资产/已出图）</div>
+            <div className="afs-studio__flowgrid">
+              {assets.length === 0 && <span className="afs-studio__hint">暂无已出图资产</span>}
+              {assets.map((a) => (
+                <FlowRef key={a.id} asset={a} selected={!!a.refImageId && sel.includes(a.refImageId)} onToggle={() => a.refImageId && toggle(a.refImageId)} />
+              ))}
+            </div>
+          </div>
+          <div className="afs-studio__flowmain">
+            {kfUrl && <img className="afs-studio__flowkf" src={kfUrl} alt="当前关键帧" />}
+            <textarea className="afs-field__input" rows={4} value={prompt} placeholder="精修指令（保留参考图主体，改 xxx）…" onChange={(e) => setPrompt(e.target.value)} />
+            <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={sb.state === 'generating' || !prompt.trim()} onClick={() => void refineKeyframe(sb.id, sel, prompt)}>
+              {sb.state === 'generating' ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 生成并设为关键帧
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FlowRef({ asset, selected, onToggle }: { asset: Asset; selected: boolean; onToggle: () => void }) {
+  const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  return (
+    <div className={`afs-studio__flowref${selected ? ' is-sel' : ''}`} onClick={onToggle} title={asset.name}>
+      {url ? <img src={url} alt={asset.name} /> : <Users size={16} opacity={0.3} />}
+      <span>{asset.name}</span>
     </div>
   )
 }
