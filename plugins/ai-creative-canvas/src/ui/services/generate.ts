@@ -122,7 +122,12 @@ export async function generateCard(cardId: string): Promise<void> {
         const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
         const vprompt =
           card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
-        const sentParams = { ...card.params, duration: snapDuration(card.modelId, Number(card.params?.duration) || 5) }
+        // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
+        const sentParams = {
+          ...card.params,
+          aspect: (card.params?.aspect as string) || '16:9',
+          duration: snapDuration(card.modelId, Number(card.params?.duration) || 5)
+        }
         const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams }, (p) =>
           useGraph.getState().updateCard(cardId, { progress: p })
         )
