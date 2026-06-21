@@ -46,7 +46,12 @@ export interface VideoReq {
   params?: Record<string, unknown>
 }
 
-// 模板渲染：{?x}…{/x} 条件（可嵌套）+ {x} 替换
+// 把值转义为 JSON 字符串内容（去外层引号）；纯数字串无特殊字符故原样，"duration":{duration} 仍是裸数字
+function jsonEsc(s: string): string {
+  return JSON.stringify(s).slice(1, -1)
+}
+
+// 模板渲染：{?x}…{/x} 条件（可嵌套）+ {x} 替换（值做 JSON 转义，避免提示词换行/引号破坏 JSON）
 function renderTemplate(tpl: string, vars: Record<string, string | undefined>): string {
   let out = tpl
   let prev: string
@@ -55,7 +60,7 @@ function renderTemplate(tpl: string, vars: Record<string, string | undefined>): 
     prev = out
     out = out.replace(cond, (_m, k, inner) => (vars[k] ? inner : ''))
   } while (out !== prev)
-  return out.replace(/\{(\w+)\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ''))
+  return out.replace(/\{(\w+)\}/g, (_m, k) => (vars[k] != null ? jsonEsc(String(vars[k])) : ''))
 }
 
 // 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath
