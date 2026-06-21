@@ -33,6 +33,8 @@ interface UiState {
   setGuides: (g: { vx: number[]; hy: number[] } | null) => void
   paramClipboard: Record<string, unknown> | null
   setParamClipboard: (p: Record<string, unknown> | null) => void
+  maskCardId: string | null
+  setMaskCardId: (id: string | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -67,5 +69,7 @@ export const useUi = create<UiState>((set) => ({
   guides: null,
   setGuides: (guides) => set({ guides }),
   paramClipboard: null,
-  setParamClipboard: (paramClipboard) => set({ paramClipboard })
+  setParamClipboard: (paramClipboard) => set({ paramClipboard }),
+  maskCardId: null,
+  setMaskCardId: (maskCardId) => set({ maskCardId })
 }))

@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2 } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Brush } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
@@ -316,6 +316,16 @@ export function NodeEditor() {
             style={{ borderColor: 'var(--ace-border)' }}
           >
             <Film size={14} /> 转视频（以此为首帧）
+          </button>
+        )}
+
+        {card.kind === 'image' && hasMedia && (
+          <button
+            onClick={() => useUi.getState().setMaskCardId(card.id)}
+            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
+            style={{ borderColor: 'var(--ace-border)' }}
+          >
+            <Brush size={14} /> 局部重绘
           </button>
         )}
 

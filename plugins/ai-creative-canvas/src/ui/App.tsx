@@ -9,6 +9,7 @@ import { ProviderSettings } from './components/ProviderSettings'
 import { ComposeModal } from './components/ComposeModal'
 import { StoryboardModal } from './components/StoryboardModal'
 import { TemplatePanel } from './components/TemplatePanel'
+import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
@@ -99,6 +100,7 @@ export default function App() {
       <ComposeModal />
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
+      <MaskInpaintModal />
     </div>
   )
 }
