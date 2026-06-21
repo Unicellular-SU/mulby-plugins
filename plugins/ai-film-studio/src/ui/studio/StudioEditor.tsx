@@ -3,8 +3,10 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2 } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
+import { useGraphStore } from '../store/graphStore'
+import { useProviderStore } from '../store/providerStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard } from '../domain/types'
@@ -54,6 +56,7 @@ export default function StudioEditor() {
             </option>
           ))}
         </select>
+        <StudioModelBar />
         {busy && (
           <span className="afs-studio__batchstat">
             <Loader2 size={14} className="afs-spin" /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
@@ -90,6 +93,58 @@ export default function StudioEditor() {
         </div>
         <AgentPanel />
       </div>
+    </div>
+  )
+}
+
+function StudioModelBar() {
+  const models = useGraphStore((s) => s.models)
+  const imageModels = useGraphStore((s) => s.imageModels)
+  const selectedModel = useGraphStore((s) => s.selectedModel)
+  const selectedImageModel = useGraphStore((s) => s.selectedImageModel)
+  const setSelectedModel = useGraphStore((s) => s.setSelectedModel)
+  const setSelectedImageModel = useGraphStore((s) => s.setSelectedImageModel)
+  const videoProvider = useProviderStore((s) => {
+    const id = s.defaults.video
+    const byDefault = id ? s.providers.find((p) => p.id === id) : undefined
+    return byDefault ?? s.providers.find((p) => p.enabled && (p.capabilities || ['video']).includes('video')) ?? null
+  })
+  const [open, setOpen] = useState(false)
+  const ok = !!selectedModel && !!selectedImageModel && !!videoProvider
+  return (
+    <div className="afs-studio__modelbar">
+      <button className="afs-btn afs-btn--sm" onClick={() => setOpen((v) => !v)} title="文本/图像/视频 模型设置（工作台复用全局选择）">
+        <Settings2 size={14} /> 模型{ok ? '' : ' ⚠'}
+      </button>
+      {open && (
+        <div className="afs-studio__modelpop">
+          <label>文本模型（剧本/对话/事件）</label>
+          <select className="afs-field__input" value={selectedModel ?? ''} onChange={(e) => setSelectedModel(e.target.value || null)}>
+            <option value="">（未选）</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label || m.id}
+              </option>
+            ))}
+          </select>
+          <label>图像模型（资产/关键帧）</label>
+          <select className="afs-field__input" value={selectedImageModel ?? ''} onChange={(e) => setSelectedImageModel(e.target.value || null)}>
+            <option value="">（未选）</option>
+            {imageModels.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label || m.id}
+              </option>
+            ))}
+          </select>
+          <label>视频供应商（片段）</label>
+          <div className={`afs-studio__modelstat${videoProvider ? '' : ' is-missing'}`}>
+            {videoProvider ? videoProvider.label : '未配置 — 去左侧「设置」添加视频供应商并设为默认'}
+          </div>
+          {(models.length === 0 || imageModels.length === 0) && (
+            <div className="afs-studio__hint">没有可选模型？先去「设置」配置宿主文本/图像模型供应商。</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -3531,3 +3531,11 @@ body {
 .afs-studio__chapterhead { display: flex; align-items: center; gap: 10px; }
 .afs-studio__chapterhead .afs-studio__chaptertitle { flex: 1; }
 .afs-studio__chapterevent { font-size: 12px; color: var(--afs-muted); line-height: 1.5; white-space: pre-wrap; padding-left: 2px; }
+
+/* 工作台 · 模型设置弹层（阶段4d UX） */
+.afs-studio__modelbar { position: relative; }
+.afs-studio__modelpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 280px; background: var(--afs-panel);
+  border: 1px solid var(--afs-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+.afs-studio__modelpop label { font-size: 12px; color: var(--afs-muted); margin-top: 4px; }
+.afs-studio__modelstat { font-size: 12px; padding: 6px 9px; border-radius: 7px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); }
+.afs-studio__modelstat.is-missing { color: #f59e0b; }

@@ -206,7 +206,8 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **4a Agent 质量**：runAgentPlan 注入近期对话（最多6条 user/assistant，记住上下文如「再加3镜」）+ 导演手册；StudioEditor AgentPanel 加可折叠 🎬 导演手册编辑（updateMeta directorManual）。tsc+build 通过。
 - [x] **4b 小说导入 + 改编**：`studio/services/novel.ts`（splitNovelChapters 按 第N章/回/卷 或长度分段）；projectStore.importNovel/clearNovel；原著 Tab（粘贴→分章→章节列表）；agent 上下文注入原著（capped 8000 字），可「按原著改编」。tsc+build 通过。
 - [x] **4c 章节事件提取**：novel.ts extractEvents（LLM 把每章压成关键事件要点）；projectStore.extractChapterEvents/extractAllEvents（单章+批量）；原著 Tab 显示事件 + 提取按钮；agent 上下文优先用事件（省 token、长篇装得下）。tsc+build 通过。
-- [ ] **4d 进阶（剩余可选）**：时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义（type/mode/durationResolutionMap）。
+- [x] **4d UX 模型设置**：工作台顶栏「模型」弹层——文本/图像模型选择器（复用 graphStore.selectedModel/Image）+ 视频供应商状态 + 未配齐 ⚠ 提示。修复「工作台无模型选择器、需去画布配」的 UX gap。tsc+build 通过。
+- [ ] **4e 进阶（剩余可选）**：时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义（type/mode/durationResolutionMap）。
 
 - [x] **自检/加固（多 Agent 评审）**：对新 studio 代码跑 16-agent 评审（state/async、services、react/ui、persistence 四维 + 对抗复核），修 6 个确认 bug：① novel 章节正则 `\b` 致中文标题全不匹配（高）② generateClip 每次新建片段→重试堆积孤儿片段（高）③ StoryboardItem 取到最旧片段→状态显示错（高，随②修复）④ parsePlan 空/非JSON 抛裸 SyntaxError→改纯文本兜底 ⑤ ScriptTab 选中不回退→Agent 新建剧本不显示 ⑥ composeArtPrompt 路径缺 art_ 前缀（潜在）。tsc+build 通过 + 正则实测。
 
