@@ -3517,3 +3517,11 @@ body {
 /* 工作台 · 导演手册（阶段4a） */
 .afs-studio__manualtoggle { margin-left: auto; border: none; background: transparent; cursor: pointer; font-size: 15px; opacity: .8; }
 .afs-studio__manual { margin: 0 12px 8px; resize: vertical; font-size: 12px; }
+
+/* 工作台 · 原著导入（阶段4b） */
+.afs-studio__novel { display: flex; flex-direction: column; gap: 10px; height: 100%; }
+.afs-studio__novelpaste { flex: 1; min-height: 240px; resize: none; font-family: inherit; line-height: 1.6; }
+.afs-studio__chapters { display: flex; flex-direction: column; gap: 6px; overflow: auto; }
+.afs-studio__chapter { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border: 1px solid var(--afs-border); border-radius: 8px; }
+.afs-studio__chaptertitle { font-size: 13px; }
+.afs-studio__chapterlen { color: var(--afs-muted); font-size: 12px; }

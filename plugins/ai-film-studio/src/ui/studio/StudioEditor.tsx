@@ -3,14 +3,15 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2 } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard } from '../domain/types'
 
-type Tab = 'script' | 'assets' | 'storyboard' | 'timeline'
+type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
+  { id: 'novel', label: '原著', icon: BookOpen },
   { id: 'script', label: '剧本', icon: FileText },
   { id: 'assets', label: '资产', icon: Users },
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
@@ -81,6 +82,7 @@ export default function StudioEditor() {
 
       <div className="afs-studio__work">
         <div className="afs-studio__stage">
+          {tab === 'novel' && <NovelTab />}
           {tab === 'script' && <ScriptTab />}
           {tab === 'assets' && <AssetsTab />}
           {tab === 'storyboard' && <StoryboardTab />}
@@ -158,6 +160,55 @@ function AgentPanel() {
         </button>
       </div>
     </aside>
+  )
+}
+
+function NovelTab() {
+  const doc = useProjectStore((s) => s.doc)!
+  const importNovel = useProjectStore((s) => s.importNovel)
+  const clearNovel = useProjectStore((s) => s.clearNovel)
+  const [text, setText] = useState('')
+  return (
+    <div className="afs-studio__novel">
+      {doc.novel.length === 0 ? (
+        <>
+          <p className="afs-studio__hint">粘贴小说原文，自动按「第N章/回/卷」切分（无标题则按长度分段）。导入后让右侧 AI 制片「按原著改编成短剧」。</p>
+          <textarea
+            className="afs-field__input afs-studio__novelpaste"
+            placeholder="在此粘贴小说全文…"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <button
+            className="afs-btn afs-btn--primary afs-btn--sm"
+            disabled={!text.trim()}
+            onClick={() => {
+              importNovel(text)
+              setText('')
+            }}
+          >
+            <BookOpen size={14} /> 导入并分章
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="afs-studio__tabbar">
+            <b>{doc.novel.length} 章</b>
+            <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => clearNovel()}>
+              <Trash2 size={13} /> 清空
+            </button>
+          </div>
+          <div className="afs-studio__chapters">
+            {doc.novel.map((c) => (
+              <div key={c.id} className="afs-studio__chapter">
+                <span className="afs-studio__chaptertitle">{c.title}</span>
+                <span className="afs-studio__chapterlen">{c.text.length} 字</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 

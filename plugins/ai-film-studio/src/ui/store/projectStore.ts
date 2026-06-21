@@ -10,6 +10,7 @@ import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { runAgentPlan } from '../studio/agent/agent'
+import { splitNovelChapters } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 
 export interface FilmState {
@@ -62,6 +63,10 @@ interface ProjectState {
   generateAllClips: () => Promise<void>
   /** 一键成片：资产 → 关键帧 → 视频 → 合成 一条龙 */
   autoProduce: () => Promise<void>
+
+  // 小说导入（长文 → 章节，供 Agent 改编）
+  importNovel: (text: string) => void
+  clearNovel: () => void
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
@@ -313,6 +318,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
   },
+
+  importNovel: (text) =>
+    get().mutate((d) => {
+      d.novel = splitNovelChapters(text).map((c, i) => ({ id: P.newId('ch_'), index: i, title: c.title, text: c.text }))
+    }),
+  clearNovel: () => get().mutate((d) => (d.novel = [])),
 
   runAgent: async (userText) => {
     const doc0 = get().doc

@@ -73,6 +73,12 @@ export async function runAgentPlan(doc: ProjectDoc, userText: string): Promise<A
     `已有资产：${doc.assets.map((a) => `${a.name}(${a.type})`).join('、') || '无'}`,
     `已有分镜：${doc.storyboards.length} 个`,
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
+    doc.novel.length
+      ? `## 原著（${doc.novel.length} 章，按此改编剧本，可分集/分段，不丢关键信息）\n${doc.novel
+          .map((c) => `【${c.title}】\n${c.text}`)
+          .join('\n\n')
+          .slice(0, 8000)}`
+      : '',
     recent ? `## 近期对话\n${recent}` : '',
   ]
     .filter(Boolean)
