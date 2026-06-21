@@ -20,9 +20,7 @@ export function ConnectMenu() {
 
   const close = () => useUi.getState().setConnectMenu(null)
   const create = (kind: CardKind) => {
-    const g = useGraph.getState()
-    const id = g.addCard(kind, { x: menu.wx, y: menu.wy })
-    g.addEdgeBetween(menu.sourceId, id)
+    useGraph.getState().createConnectedNode(kind, { x: menu.wx, y: menu.wy }, menu.sourceIds)
     close()
   }
 
@@ -37,7 +35,7 @@ export function ConnectMenu() {
         className="absolute z-50 rounded-lg border bg-white dark:bg-neutral-900 shadow-xl py-1"
         style={{ left, top, width: MENU_W, borderColor: 'var(--ace-border)' }}
       >
-        <div className="px-3 py-1 text-[11px] opacity-50">在此新建并连接</div>
+        <div className="px-3 py-1 text-[11px] opacity-50">{menu.sourceIds.length > 1 ? `新建并连接（${menu.sourceIds.length} 个）` : '在此新建并连接'}</div>
         {OPTIONS.map((o) => {
           const Icon = o.icon
           return (

@@ -60,7 +60,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
           const sy = ev.clientY - rect.top
           const b = useGraph.getState().getActiveBoard()
           const w = screenToWorld(sx, sy, b.viewport)
-          useUi.getState().setConnectMenu({ sx, sy, wx: w.x, wy: w.y, sourceId })
+          useUi.getState().setConnectMenu({ sx, sy, wx: w.x, wy: w.y, sourceIds: [sourceId] })
         }
       }
     }

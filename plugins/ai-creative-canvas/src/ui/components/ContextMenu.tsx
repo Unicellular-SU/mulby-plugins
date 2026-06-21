@@ -102,9 +102,7 @@ export function ContextMenu() {
     const maxX = Math.max(...src.map((c) => c.x + c.w))
     const minY = Math.min(...src.map((c) => c.y))
     const maxY = Math.max(...src.map((c) => c.y + c.h))
-    const nid = g.addCard(kind, { x: maxX + 220, y: (minY + maxY) / 2 })
-    for (const c of src) g.addEdgeBetween(c.id, nid)
-    g.setSelection([nid])
+    g.createConnectedNode(kind, { x: maxX + 220, y: (minY + maxY) / 2 }, src.map((c) => c.id))
   }
 
   const items: Item[] = []

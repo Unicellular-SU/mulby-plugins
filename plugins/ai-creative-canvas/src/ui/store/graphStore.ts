@@ -120,6 +120,8 @@ interface GraphState {
 
   // 连线
   addEdgeBetween: (source: string, target: string) => void
+  connectAll: (sourceIds: string[], target: string) => void
+  createConnectedNode: (kind: CardKind, world: { x: number; y: number }, sourceIds: string[]) => string
   removeEdge: (id: string) => void
 
   // 选择
@@ -433,6 +435,52 @@ export const useGraph = create<GraphState>((set, get) => ({
         return { ...b, edges }
       })
     }))
+  },
+
+  connectAll: (sourceIds, target) => {
+    const b = activeBoardOf(get().project)
+    if (!b.cards[target]) return
+    const toAdd = sourceIds.filter(
+      (sid) => sid !== target && b.cards[sid] && !Object.values(b.edges).some((e) => e.source === sid && e.target === target)
+    )
+    if (toAdd.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (bd) => {
+        const edges = { ...bd.edges }
+        for (const sid of toAdd) {
+          const id = uid('edge')
+          edges[id] = { id, source: sid, target, kind: 'ref' }
+        }
+        return { ...bd, edges }
+      })
+    }))
+  },
+
+  createConnectedNode: (kind, world, sourceIds) => {
+    const size = CARD_DEFAULT_SIZE[kind]
+    const id = uid('card')
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const card: Card = {
+          id, kind, x: Math.round(world.x - size.w / 2), y: Math.round(world.y - size.h / 2), w: size.w, h: size.h,
+          title: defaultTitle(kind), prompt: '', modelId: null, providerId: null, params: {}, status: 'idle', progress: 0,
+          error: null, assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null, refIds: [], assets: [], meta: {}, parentId: null
+        }
+        const cards = { ...b.cards, [id]: card }
+        const edges = { ...b.edges }
+        for (const sid of sourceIds) {
+          if (sid === id || !cards[sid]) continue
+          if (Object.values(edges).some((e) => e.source === sid && e.target === id)) continue
+          const eid = uid('edge')
+          edges[eid] = { id: eid, source: sid, target: id, kind: 'ref' }
+        }
+        return { ...b, cards, edges }
+      }),
+      selectedIds: [id]
+    }))
+    return id
   },
 
   setSelection: (ids) => set({ selectedIds: ids }),

@@ -15,8 +15,8 @@ interface UiState {
   setShowProviderSettings: (v: boolean) => void
   connectTemp: { x1: number; y1: number; x2: number; y2: number } | null
   setConnectTemp: (t: { x1: number; y1: number; x2: number; y2: number } | null) => void
-  connectMenu: { sx: number; sy: number; wx: number; wy: number; sourceId: string } | null
-  setConnectMenu: (m: { sx: number; sy: number; wx: number; wy: number; sourceId: string } | null) => void
+  connectMenu: { sx: number; sy: number; wx: number; wy: number; sourceIds: string[] } | null
+  setConnectMenu: (m: { sx: number; sy: number; wx: number; wy: number; sourceIds: string[] } | null) => void
   preview: { url: string; kind: 'image' | 'video' } | null
   setPreview: (p: { url: string; kind: 'image' | 'video' } | null) => void
   showCompose: boolean

@@ -12,6 +12,7 @@ import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
 import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
+import { MultiConnectHandle } from './MultiConnectHandle'
 import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
@@ -433,6 +434,7 @@ export function CanvasStage() {
       <ConnectMenu />
       <NodeEditor />
       <BatchActions />
+      <MultiConnectHandle />
       <Lightbox />
       <ContextMenu />
       {Object.keys(board.cards).length === 0 && (
