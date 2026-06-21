@@ -104,6 +104,16 @@ export interface ClipResult {
   durationSec: number
 }
 
+/** 由项目 id 派生稳定 seed：整片所有片段共用，跨片段风格/运动更一致（供应商不支持则忽略） */
+function projectSeed(id: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return (h >>> 0) % 2147483647
+}
+
 /**
  * 由分镜关键帧生成视频片段：关键帧作首帧 → runVideo（图生视频），注入运动描述 + 画风视频标签。
  * 顺接（fix4 同源）：承接片段传 firstFrameUrl（上一片段真实尾帧）作首帧，无缝衔接。
@@ -126,10 +136,12 @@ export async function generateClipVideo(
   const motion = [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut']
     .filter(Boolean)
     .join(', ')
+  // 时长钳到视频模型通用区间 [4,15]s（防 LLM/手填异常值被原样发出致供应商报错）；seed 整片共用提一致性
+  const duration = Math.min(Math.max(Number(sb.duration) || 5, 4), 15)
   const { url } = await runVideo({
     cfg: provider,
     apiKey,
-    req: { prompt: motion, imageUrl, duration: sb.duration || 5 },
+    req: { prompt: motion, imageUrl, duration, seed: projectSeed(meta.id) },
     onProgress: (p) => onProgress?.(p.status),
   })
   let localPath: string | undefined
@@ -138,5 +150,5 @@ export async function generateClipVideo(
   } catch {
     // 忽略下载失败：仍保留远程 url
   }
-  return { url, localPath, durationSec: sb.duration || 5 }
+  return { url, localPath, durationSec: duration }
 }
