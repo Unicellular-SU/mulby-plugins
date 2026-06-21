@@ -13,6 +13,7 @@ import { runAgentPipeline } from '../studio/agent/agent'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
+import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -60,6 +61,9 @@ interface ProjectState {
   selectClip: (trackId: string, clipId: string) => void
   deleteClip: (trackId: string, clipId: string) => void
   updateTrackDuration: (trackId: string, sec: number | undefined) => void
+  updateTrackPrompt: (trackId: string, prompt: string) => void
+  generateTrackPrompt: (trackId: string) => Promise<void>
+  generateAllTrackPrompts: () => Promise<void>
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
   generateAsset: (id: string) => Promise<void>
@@ -282,6 +286,57 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const t = d.track.find((x) => x.id === trackId)
       if (t) t.duration = sec && sec > 0 ? sec : undefined
     }),
+  updateTrackPrompt: (trackId, prompt) =>
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === trackId)
+      if (t) {
+        t.prompt = prompt
+        t.promptState = 'done'
+      }
+    }),
+  generateTrackPrompt: async (trackId) => {
+    const doc = get().doc
+    const track = doc?.track.find((t) => t.id === trackId)
+    if (!doc || !track) return
+    get().mutate((d) => {
+      const t = d.track.find((x) => x.id === trackId)
+      if (t) {
+        t.promptState = 'generating'
+        t.promptError = undefined
+      }
+    })
+    try {
+      const prompt = await generateTrackVideoPrompt(track, doc)
+      get().mutate((d) => {
+        const t = d.track.find((x) => x.id === trackId)
+        if (t) {
+          t.prompt = prompt
+          t.promptState = 'done'
+        }
+      })
+    } catch (e) {
+      get().mutate((d) => {
+        const t = d.track.find((x) => x.id === trackId)
+        if (t) {
+          t.promptState = 'failed'
+          t.promptError = e instanceof Error ? e.message : String(e)
+        }
+      })
+    }
+  },
+  generateAllTrackPrompts: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = [...get().doc!.track].sort((a, b) => a.order - b.order).filter((t) => t.storyboardIds.length && !t.prompt).map((t) => t.id)
+    set({ batch: { running: true, label: `生成段提示词 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `生成段提示词 ${i + 1}/${ids.length}` } })
+        await get().generateTrackPrompt(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
+    }
+  },
 
   upsertClip: (c) => {
     const id = c.id ?? P.newId('c_')
@@ -379,7 +434,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             : undefined
         firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
       }
-      const r = await generateClipVideo(sb, doc.meta, { firstFrameUrl, durationSec: track.duration })
+      const r = await generateClipVideo(sb, doc.meta, { firstFrameUrl, durationSec: track.duration, promptOverride: track.prompt })
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
     } catch (e) {
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })

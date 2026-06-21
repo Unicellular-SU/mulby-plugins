@@ -106,10 +106,11 @@ export interface ClipResult {
   durationSec: number
 }
 
-/** 片段生成选项（§5.4 扩参）：首帧顺接 + 段时长覆盖 + 进度。 */
+/** 片段生成选项（§5.4 扩参）：首帧顺接 + 段时长覆盖 + 段提示词覆盖 + 进度。 */
 export interface ClipGenOptions {
   firstFrameUrl?: string // 承接片段：上一片段真实尾帧作首帧
   durationSec?: number // 段时长覆盖（优先于 sb.duration，钳 [4,15]）
+  promptOverride?: string // 段视频提示词（§5.3 生成，优先于硬拼 motion）
   onProgress?: (s: string) => void
 }
 
@@ -129,7 +130,7 @@ function projectSeed(id: string): number {
  * 复用现有 providers（fal/custom-http 异步轮询）。下载落盘供后续 ffmpeg 合成。
  */
 export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts: ClipGenOptions = {}): Promise<ClipResult> {
-  const { firstFrameUrl, durationSec, onProgress } = opts
+  const { firstFrameUrl, durationSec, promptOverride, onProgress } = opts
   const ps = useProviderStore.getState()
   const provider = ps.getActiveFor('video')
   if (!provider) throw new Error('未配置视频供应商（请在「设置」添加并设为默认）')
@@ -138,9 +139,10 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   if (!a && !firstFrameUrl) throw new Error('请先生成该分镜的关键帧')
   const imageUrl = firstFrameUrl || `data:${a!.mime};base64,${a!.base64}`
   const vtag = videoStyleTag(meta.artStyle)
-  const motion = [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut']
-    .filter(Boolean)
-    .join(', ')
+  // 优先用段视频提示词（§5.3 生成/手改）；无则回退硬拼 motion
+  const motion = promptOverride?.trim()
+    ? [promptOverride.trim(), vtag].filter(Boolean).join(', ')
+    : [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut'].filter(Boolean).join(', ')
   // 时长：段时长(durationSec)优先于分镜 duration；钳到视频模型通用区间 [4,15]s；seed 整片共用提一致性
   const duration = Math.min(Math.max(Number(durationSec ?? sb.duration) || 5, 4), 15)
   const { url } = await runVideo({

@@ -617,6 +617,8 @@ function TimelineTab() {
   const doc = useProjectStore((s) => s.doc)!
   const compose = useProjectStore((s) => s.compose)
   const film = useProjectStore((s) => s.film)
+  const batch = useProjectStore((s) => s.batch)
+  const generateAllTrackPrompts = useProjectStore((s) => s.generateAllTrackPrompts)
   const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
   const tracks = [...doc.track].sort((a, b) => a.order - b.order)
   const anyDone = doc.clips.some((c) => c.state === 'done')
@@ -630,6 +632,9 @@ function TimelineTab() {
     <div className="afs-studio__timeline">
       <div className="afs-studio__timeline-head">
         <p className="afs-studio__hint">{tracks.length} 段 · 每段可多生候选、选优后合成</p>
+        <button className="afs-btn afs-btn--sm" disabled={batch.running || !tracks.some((t) => t.storyboardIds.length)} title="按模型+模式批量生成各段视频提示词" onClick={() => void generateAllTrackPrompts()}>
+          {batch.running ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 全部段提示词
+        </button>
         <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>
@@ -652,6 +657,8 @@ function TrackCard({ track, order, onPreview }: { track: VideoTrack; order: numb
   const selectClip = useProjectStore((s) => s.selectClip)
   const deleteClip = useProjectStore((s) => s.deleteClip)
   const updateTrackDuration = useProjectStore((s) => s.updateTrackDuration)
+  const updateTrackPrompt = useProjectStore((s) => s.updateTrackPrompt)
+  const generateTrackPrompt = useProjectStore((s) => s.generateTrackPrompt)
   const generateClip = useProjectStore((s) => s.generateClip)
   const sb = track.storyboardIds.length ? doc.storyboards.find((s) => s.id === track.storyboardIds[0]) : undefined
   const kf = useMediaUrl(sb?.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
@@ -684,6 +691,24 @@ function TrackCard({ track, order, onPreview }: { track: VideoTrack; order: numb
           {generating ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} {cands.length ? '再生一版' : '生成视频'}
         </button>
       </div>
+      <div className="afs-studio__trackprompt">
+        <textarea
+          className="afs-field__input"
+          rows={2}
+          value={track.prompt ?? ''}
+          placeholder="段视频提示词（按模型+模式生成，可手改；留空则用画面描述）…"
+          onChange={(e) => updateTrackPrompt(track.id, e.target.value)}
+        />
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={track.promptState === 'generating' || !sb}
+          title="按视频模型 + 模式生成段视频提示词（12 字段拆解 / 台词标注 / @图N）"
+          onClick={() => void generateTrackPrompt(track.id)}
+        >
+          {track.promptState === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 提示词
+        </button>
+      </div>
+      {track.promptState === 'failed' && <p className="afs-studio__sberr">提示词生成失败：{track.promptError}</p>}
       {cands.length > 0 && (
         <div className="afs-studio__candrow">
           {cands.map((c) => (

@@ -111,6 +111,11 @@ export function getAgentSkill(name: string): string {
   return get(`agent/${name}.md`)?.body ?? ''
 }
 
+/** 取视频模式提示词模板（video_modes/<mode>.md，§5.3 段视频提示词生成） */
+export function getVideoModeSkill(mode: string): string {
+  return get(`video_modes/${mode}.md`)?.body ?? ''
+}
+
 /**
  * 把画风 Skill 桥接成现有的结构化 StylePack（阶段1b）：
  * 从 prefix.md frontmatter 的 anchor/anchorCharacter/anchorScene/anchorProp/videoTag/negative 抽取可直接追加的锚定词，

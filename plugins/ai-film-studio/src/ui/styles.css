@@ -3449,6 +3449,8 @@ body {
 .afs-studio__trackdesc { flex: 1; min-width: 0; font-size: 12px; color: var(--afs-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__trackdur { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--afs-text-dim); }
 .afs-studio__trackdur input { width: 48px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 6px; padding: 3px 5px; }
+.afs-studio__trackprompt { display: flex; gap: 8px; margin-top: 8px; align-items: flex-end; }
+.afs-studio__trackprompt textarea { flex: 1; resize: vertical; font-family: inherit; font-size: 12px; line-height: 1.5; }
 .afs-studio__candrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .afs-studio__cand { position: relative; width: 120px; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: #000; }
 .afs-studio__cand.is-sel { border-color: var(--afs-accent, #5b8cff); }

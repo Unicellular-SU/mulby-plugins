@@ -728,3 +728,10 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **时间线 UI 重构**：`TimelineTab` 从扁平片段列表 → **段卡片序列**（`TrackCard`）：每段显关键帧缩略 + 画面描述 + 段时长输入 + 候选片段横排（`CandidateClip`：当选高亮/选优/预览/删除/再生一版）；`StoryboardItem` 视频态改取段选用候选；删除旧 `TrackClip`。
   - **项目级视频参数**（§5.8）：`StudioModelBar` 模型弹层加视频供应商下拉（`setDefault('video')`）+ 视频模式（4 模式）+ 分辨率，写入 `meta.videoMode/videoResolution`。
   - tsc + vite build 通过。运行态待 Mulby 实测（含旧项目段迁移、候选选优、段时长生效）。
+
+- [x] **阶段 4 视频提示词 4 模式**（commit 待提交）
+  - **模式模板**（§5.3）：新增 `src/ui/skills/video_modes/{firstFrame,startEndFrame,multiRef,singleImageFirst}.md`（原创撰写，非照搬）——含 12 字段拆解（画面/场景/资产名/时长/景别/运镜/动作/情绪/光影/台词/音效/资产ID）、台词标注 `dialogue/OS/VO`、@图N 编号锁定、时间分段 ≥1s，各模式补首帧/首尾帧/多参/单图首帧差异；frontmatter 标 modeKey。`skillSystem.getVideoModeSkill(mode)` 经现有 `import.meta.glob` 自动打包。
+  - **videoPrompt 服务**：新增 `studio/services/videoPrompt.ts`——`routeVideoMode(model, videoMode)`（段级 videoMode 优先；否则模型名子串 wan2.6→singleImageFirst / seedance→multiRef / 默认 firstFrame）；`generateTrackVideoPrompt(track, doc)`（system=模式模板+`composeArtPrompt(artStyle,'storyboard_video')` 视觉手册，user=段内分镜画面/台词/出场资产@图N顺序/时长，走 host `runText`）。
+  - **store**：`updateTrackPrompt`/`generateTrackPrompt`/`generateAllTrackPrompts`（写 `track.prompt`/`promptState`）；`generateClipVideo` 扩 `promptOverride`，`generateClip` 传 `track.prompt`（无则回退硬拼 motion）。
+  - **UI**：TrackCard 加段提示词 textarea（可生成/手改）+「提示词」按钮 + promptState；TimelineTab 顶部「全部段提示词」批量按钮。
+  - tsc + vite build 通过。运行态待 Mulby 实测。
