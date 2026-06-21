@@ -27,6 +27,10 @@ interface UiState {
   setStoryboardCardId: (id: string | null) => void
   showTemplates: boolean
   setShowTemplates: (v: boolean) => void
+  snapGrid: boolean
+  toggleSnapGrid: () => void
+  guides: { vx: number[]; hy: number[] } | null
+  setGuides: (g: { vx: number[]; hy: number[] } | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -55,5 +59,9 @@ export const useUi = create<UiState>((set) => ({
   storyboardCardId: null,
   setStoryboardCardId: (storyboardCardId) => set({ storyboardCardId }),
   showTemplates: false,
-  setShowTemplates: (showTemplates) => set({ showTemplates })
+  setShowTemplates: (showTemplates) => set({ showTemplates }),
+  snapGrid: false,
+  toggleSnapGrid: () => set((s) => ({ snapGrid: !s.snapGrid })),
+  guides: null,
+  setGuides: (guides) => set({ guides })
 }))

@@ -1,4 +1,4 @@
-import { ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Grid3x3, Map as MapIcon } from 'lucide-react'
+import { ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Grid3x3, Map as MapIcon, Magnet } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { clampZoom } from './viewport'
@@ -14,6 +14,8 @@ export function CanvasControls({ onFit }: { onFit: () => void }) {
   const toggleGrid = useUi((s) => s.toggleGrid)
   const showMinimap = useUi((s) => s.showMinimap)
   const toggleMinimap = useUi((s) => s.toggleMinimap)
+  const snapGrid = useUi((s) => s.snapGrid)
+  const toggleSnapGrid = useUi((s) => s.toggleSnapGrid)
   const vp = board.viewport
 
   const zoomBy = (factor: number) => {
@@ -40,6 +42,7 @@ export function CanvasControls({ onFit }: { onFit: () => void }) {
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
       <button className={`${btn} ${showGrid ? 'text-indigo-500' : ''}`} title="网格" onClick={toggleGrid}><Grid3x3 size={16} /></button>
       <button className={`${btn} ${showMinimap ? 'text-indigo-500' : ''}`} title="小地图 (M)" onClick={toggleMinimap}><MapIcon size={16} /></button>
+      <button className={`${btn} ${snapGrid ? 'text-indigo-500' : ''}`} title="网格吸附" onClick={toggleSnapGrid}><Magnet size={16} /></button>
     </div>
   )
 }

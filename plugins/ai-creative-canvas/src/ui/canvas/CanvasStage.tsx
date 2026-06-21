@@ -13,6 +13,8 @@ import { NodeEditor } from './NodeEditor'
 import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
 import { MultiConnectHandle } from './MultiConnectHandle'
+import { GuideLayer } from './GuideLayer'
+import { computeSnap } from './snapping'
 import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
@@ -96,7 +98,17 @@ export function CanvasStage() {
       panAcc.current = { dx: 0, dy: 0 }
     }
     if ((dragAcc.current.dx || dragAcc.current.dy) && inter.current.mode === 'drag') {
-      g.moveCardsBy(inter.current.ids, dragAcc.current.dx / cur.zoom, dragAcc.current.dy / cur.zoom)
+      let wdx = dragAcc.current.dx / cur.zoom
+      let wdy = dragAcc.current.dy / cur.zoom
+      const b = g.getActiveBoard()
+      const primary = b.cards[inter.current.ids[0]]
+      if (primary) {
+        const snap = computeSnap(primary, wdx, wdy, b.cards, new Set(inter.current.ids), cur.zoom, useUi.getState().snapGrid)
+        wdx = snap.dx
+        wdy = snap.dy
+        useUi.getState().setGuides(snap.vx.length || snap.hy.length ? { vx: snap.vx, hy: snap.hy } : null)
+      }
+      g.moveCardsBy(inter.current.ids, wdx, wdy)
       dragAcc.current = { dx: 0, dy: 0 }
     }
   }
@@ -249,6 +261,7 @@ export function CanvasStage() {
         }))
       }
     }
+    useUi.getState().setGuides(null)
     inter.current = { mode: 'idle' }
     setCursor(spaceRef.current ? 'grab' : 'default')
     try { stageRef.current?.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
@@ -386,6 +399,9 @@ export function CanvasStage() {
         e.preventDefault()
         g.copySelection()
         g.paste(28, 28)
+      } else if (mod && e.key.toLowerCase() === 'g') {
+        e.preventDefault()
+        g.groupSelection()
       } else if (e.key.toLowerCase() === 'f') {
         doFit()
       } else if (e.key.toLowerCase() === 'm') {
@@ -441,6 +457,7 @@ export function CanvasStage() {
           ))}
       </div>
       <SelectionBox rect={marquee} />
+      <GuideLayer />
       {showMinimap && <Minimap />}
       <CanvasControls onFit={doFit} />
       <ConnectMenu />

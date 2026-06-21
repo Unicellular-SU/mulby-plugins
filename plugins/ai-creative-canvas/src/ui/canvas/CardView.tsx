@@ -68,6 +68,29 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
     window.addEventListener('pointerup', up)
   }
 
+  // 手动缩放卡片（右下角手柄）；标记 fittedFor 避免媒体加载后又被自动比例覆盖
+  const startCardResize = (e: ReactPointerEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    const move = (ev: PointerEvent) => {
+      const rect = stageEl.current?.getBoundingClientRect()
+      if (!rect) return
+      const b = useGraph.getState().getActiveBoard()
+      const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
+      updateCard(card.id, {
+        w: Math.max(120, Math.round(w.x - card.x)),
+        h: Math.max(80, Math.round(w.y - card.y)),
+        meta: { ...card.meta, fittedFor: card.assetUrl }
+      })
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   const isImg = (card.kind === 'image' || card.kind === 'source') && !!card.assetUrl
   const isVid = card.kind === 'video' && !!card.assetUrl
   const isAud = card.kind === 'audio' && !!card.assetUrl
@@ -224,6 +247,17 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
           selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}
         style={{ background: meta.accent }}
+      />
+
+      {/* 缩放手柄：右下角，悬停/选中显示 */}
+      <div
+        data-interactive
+        onPointerDown={startCardResize}
+        title="拖拽缩放卡片"
+        className={`absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize z-30 transition-opacity ${
+          selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        }`}
+        style={{ borderRight: `2px solid ${meta.accent}`, borderBottom: `2px solid ${meta.accent}`, borderBottomRightRadius: 10 }}
       />
     </div>
   )
