@@ -546,12 +546,7 @@ function TimelineTab() {
           <TrackClip key={c!.id} localPath={c!.videoFilePath} url={c!.videoUrl} index={i} />
         ))}
       </div>
-      {film.state === 'done' && film.path && (
-        <div className="afs-studio__film">
-          <FilmPreview path={film.path} />
-          <p className="afs-studio__hint">成片已导出：{film.path}</p>
-        </div>
-      )}
+      {film.state === 'done' && film.path && <FilmDone path={film.path} name={doc.meta.name} />}
     </div>
   )
 }
@@ -559,6 +554,39 @@ function TimelineTab() {
 function FilmPreview({ path }: { path: string }) {
   const src = useMediaUrl({ localPath: path })
   return <video className="afs-studio__filmvideo" src={src} controls preload="metadata" />
+}
+
+function FilmDone({ path, name }: { path: string; name: string }) {
+  const openFolder = () => void window.mulby?.shell?.showItemInFolder(path)
+  const saveAs = async () => {
+    try {
+      const dest = await window.mulby?.dialog?.showSaveDialog({
+        title: '另存成片',
+        defaultPath: `${(name || 'film').replace(/\s+/g, '_')}.mp4`,
+        filters: [{ name: '视频', extensions: ['mp4'] }],
+      })
+      if (!dest) return
+      const data = await window.mulby?.filesystem?.readFile(path, 'base64')
+      if (typeof data === 'string') await window.mulby?.filesystem?.writeFile(dest, data, 'base64')
+      window.mulby?.notification?.show('已另存成片', 'success')
+    } catch (e) {
+      window.mulby?.notification?.show('另存失败：' + (e instanceof Error ? e.message : String(e)), 'error')
+    }
+  }
+  return (
+    <div className="afs-studio__film">
+      <FilmPreview path={path} />
+      <div className="afs-studio__tabbar">
+        <button className="afs-btn afs-btn--sm" onClick={openFolder}>
+          <Film size={13} /> 打开所在文件夹
+        </button>
+        <button className="afs-btn afs-btn--sm" onClick={() => void saveAs()}>
+          <BookOpen size={13} /> 另存为…
+        </button>
+      </div>
+      <p className="afs-studio__hint">成片已导出：{path}</p>
+    </div>
+  )
 }
 
 function TrackClip({ localPath, url, index }: { localPath?: string; url?: string; index: number }) {
