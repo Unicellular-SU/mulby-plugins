@@ -3539,3 +3539,8 @@ body {
 .afs-studio__modelpop label { font-size: 12px; color: var(--afs-muted); margin-top: 4px; }
 .afs-studio__modelstat { font-size: 12px; padding: 6px 9px; border-radius: 7px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); }
 .afs-studio__modelstat.is-missing { color: #f59e0b; }
+
+/* 工作台 · 分镜上下移（阶段4e） */
+.afs-studio__move { width: 18px; height: 16px; border: none; background: transparent; color: var(--afs-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+.afs-studio__move:hover:not(:disabled) { background: var(--afs-hover); color: var(--afs-text); }
+.afs-studio__move:disabled { opacity: .3; cursor: default; }

@@ -50,6 +50,7 @@ interface ProjectState {
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
   removeStoryboard: (id: string) => void
   reorderStoryboards: (orderedIds: string[]) => void
+  moveStoryboard: (id: string, delta: number) => void
   upsertClip: (c: Partial<Clip> & { storyboardId: string }) => string
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
@@ -232,6 +233,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const pos = new Map(orderedIds.map((id, i) => [id, i]))
       d.storyboards.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0))
       d.storyboards.forEach((s, i) => (s.index = i))
+    }),
+  moveStoryboard: (id, delta) =>
+    get().mutate((d) => {
+      const ordered = [...d.storyboards].sort((a, b) => a.index - b.index)
+      const i = ordered.findIndex((s) => s.id === id)
+      const j = i + delta
+      if (i < 0 || j < 0 || j >= ordered.length) return
+      ;[ordered[i], ordered[j]] = [ordered[j], ordered[i]]
+      ordered.forEach((s, k) => (s.index = k))
+      d.storyboards = ordered
     }),
 
   upsertClip: (c) => {

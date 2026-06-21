@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2 } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, ChevronUp, ChevronDown } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -443,19 +443,22 @@ function StoryboardTab() {
         </button>
       </div>
       <div className="afs-studio__sblist">
-        {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（阶段3 由分镜 Agent 自动拆解生成）。</p>}
-        {doc.storyboards.map((s, i) => (
-          <StoryboardItem key={s.id} sb={s} index={i} />
-        ))}
+        {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（让右侧 AI 制片自动拆解，或手动新增）。</p>}
+        {[...doc.storyboards]
+          .sort((a, b) => a.index - b.index)
+          .map((s, i, arr) => (
+            <StoryboardItem key={s.id} sb={s} index={i} total={arr.length} />
+          ))}
       </div>
     </div>
   )
 }
 
-function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
+function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; total: number }) {
   const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const removeStoryboard = useProjectStore((s) => s.removeStoryboard)
+  const moveStoryboard = useProjectStore((s) => s.moveStoryboard)
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
@@ -463,7 +466,13 @@ function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
   return (
     <div className="afs-studio__sbitem">
       <div className="afs-studio__sbleft">
+        <button className="afs-studio__move" disabled={index === 0} title="上移" onClick={() => moveStoryboard(sb.id, -1)}>
+          <ChevronUp size={13} />
+        </button>
         <span className="afs-studio__sbidx">{index + 1}</span>
+        <button className="afs-studio__move" disabled={index === total - 1} title="下移" onClick={() => moveStoryboard(sb.id, 1)}>
+          <ChevronDown size={13} />
+        </button>
         {index > 0 && (
           <button
             className={`afs-studio__chain${sb.chainFromPrev ? ' is-on' : ''}`}
