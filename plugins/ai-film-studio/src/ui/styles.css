@@ -3449,6 +3449,11 @@ body {
 .afs-studio__trackdesc { flex: 1; min-width: 0; font-size: 12px; color: var(--afs-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__trackdur { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--afs-text-dim); }
 .afs-studio__trackdur input { width: 48px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 6px; padding: 3px 5px; }
+/* 阶段10：分镜墙预览 */
+.afs-studio__wall { width: min(1100px, 95vw); max-height: 90vh; background: var(--afs-panel); border: 1px solid var(--afs-border); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+.afs-studio__wall .afs-studio__drawer-head > div { display: flex; gap: 8px; align-items: center; }
+.afs-studio__wallbody { overflow: auto; padding: 12px; }
+.afs-studio__wallcanvas { max-width: 100%; height: auto; display: block; }
 /* 阶段9：工作台设置抽屉（Agent 部署 + 记忆） */
 .afs-studio__settings { padding: 14px; border-bottom: 1px solid var(--afs-border); display: flex; flex-direction: column; gap: 16px; }
 .afs-studio__setsec h4 { margin: 0 0 8px; font-size: 13px; }

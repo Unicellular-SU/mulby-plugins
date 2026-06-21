@@ -2,7 +2,7 @@
  * 工作台 · 分阶段编辑器：顶栏（项目设置）+ 阶段 Tab（剧本/资产/分镜/时间线）+ Agent 对话面板占位。
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, Workflow, PanelLeft, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
@@ -16,6 +16,7 @@ import SettingsView from '../components/views/SettingsView'
 import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
+import { loadAssetUrl } from '../services/assets'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline' | 'canvas'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -718,6 +719,94 @@ function ImageStripThumb({ refImageId, selected, onSelect, onDelete }: { refImag
   )
 }
 
+function loadImageEl(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const im = new Image()
+    im.onload = () => resolve(im)
+    im.onerror = reject
+    im.src = src
+  })
+}
+
+/** 分镜墙（§4.6）：把关键帧拼成 S## 编号网格，纯前端 Canvas 2D 合成 + 导出 PNG（零新依赖）。 */
+function StoryboardWall({ onClose }: { onClose: () => void }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [busy, setBusy] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const items = [...doc.storyboards].sort((a, b) => a.index - b.index).filter((s) => s.keyframeImageId)
+      const COLS = 5,
+        CW = 320,
+        CH = 180,
+        PAD = 8,
+        LBL = 22
+      const rows = Math.max(1, Math.ceil(items.length / COLS))
+      const canvas = canvasRef.current
+      if (!canvas) return
+      canvas.width = COLS * (CW + PAD) + PAD
+      canvas.height = rows * (CH + LBL + PAD) + PAD
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.fillStyle = '#111'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      for (let i = 0; i < items.length; i++) {
+        if (cancelled) return
+        const col = i % COLS
+        const row = Math.floor(i / COLS)
+        const x = PAD + col * (CW + PAD)
+        const y = PAD + row * (CH + LBL + PAD)
+        try {
+          const url = await loadAssetUrl(items[i].keyframeImageId!)
+          if (url) {
+            const img = await loadImageEl(url)
+            if (cancelled) return
+            ctx.drawImage(img, x, y, CW, CH)
+          }
+        } catch {
+          // 单张失败留空
+        }
+        ctx.fillStyle = '#fff'
+        ctx.font = '14px sans-serif'
+        ctx.fillText(`S${String(i + 1).padStart(2, '0')}`, x + 4, y + CH + 16)
+      }
+      if (!cancelled) setBusy(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [doc.storyboards])
+  const download = () => {
+    const c = canvasRef.current
+    if (!c) return
+    const a = document.createElement('a')
+    a.href = c.toDataURL('image/png')
+    a.download = `${(doc.meta.name || 'storyboard').replace(/\s+/g, '_')}_wall.png`
+    a.click()
+  }
+  return (
+    <div className="afs-studio__lightbox" onClick={onClose}>
+      <div className="afs-studio__wall" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-studio__drawer-head">
+          <span>故事板{busy ? ' · 合成中…' : ''}</span>
+          <div>
+            <button className="afs-btn afs-btn--sm" disabled={busy} onClick={download}>
+              导出 PNG
+            </button>
+            <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={onClose} title="关闭">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+        <div className="afs-studio__wallbody">
+          <canvas ref={canvasRef} className="afs-studio__wallcanvas" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StoryboardTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
@@ -725,6 +814,7 @@ function StoryboardTab() {
   const generateAllClips = useProjectStore((s) => s.generateAllClips)
   const batch = useProjectStore((s) => s.batch)
   const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
+  const [showWall, setShowWall] = useState(false)
   return (
     <div className="afs-studio__storyboard">
       <div className="afs-studio__tabbar">
@@ -741,7 +831,11 @@ function StoryboardTab() {
         <button className="afs-btn afs-btn--sm" disabled={batch.running || !hasKeyframes} onClick={() => void generateAllClips()}>
           <Film size={14} /> 全部视频
         </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" disabled={!hasKeyframes} title="把关键帧拼成故事板网格，可导出 PNG" onClick={() => setShowWall(true)}>
+          <Clapperboard size={14} /> 预览故事板
+        </button>
       </div>
+      {showWall && <StoryboardWall onClose={() => setShowWall(false)} />}
       <div className="afs-studio__sblist">
         {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（让右侧 AI 制片自动拆解，或手动新增）。</p>}
         {[...doc.storyboards]
@@ -948,6 +1042,7 @@ function TimelineTab() {
   const film = useProjectStore((s) => s.film)
   const batch = useProjectStore((s) => s.batch)
   const generateAllTrackPrompts = useProjectStore((s) => s.generateAllTrackPrompts)
+  const updateMeta = useProjectStore((s) => s.updateMeta)
   const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
   const tracks = [...doc.track].sort((a, b) => a.order - b.order)
   const anyDone = doc.clips.some((c) => c.state === 'done')
@@ -964,6 +1059,11 @@ function TimelineTab() {
         <button className="afs-btn afs-btn--sm" disabled={batch.running || !tracks.some((t) => t.storyboardIds.length)} title="按模型+模式批量生成各段视频提示词" onClick={() => void generateAllTrackPrompts()}>
           {batch.running ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 全部段提示词
         </button>
+        <select className="afs-field__input afs-studio__sel" title="整片转场" value={doc.meta.transition ?? 'fade'} onChange={(e) => updateMeta({ transition: e.target.value as 'none' | 'fade' | 'xfade' })}>
+          <option value="fade">淡入淡出</option>
+          <option value="xfade">交叉溶解</option>
+          <option value="none">硬切</option>
+        </select>
         <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>

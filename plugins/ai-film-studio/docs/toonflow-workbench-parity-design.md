@@ -773,3 +773,23 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **设置抽屉面板**（§8）：新增 `studio/StudioSettings.tsx`（Agent 部署表格 + 记忆配置），与画布 `SettingsView`（供应商/外观/存储）并列进设置抽屉。
   - 注：pipeline 各执行子 Agent 的逐层 model/params 透传作增量（本期 toolloop 路径已用 agentDeploy；pipeline 仍用全局 model）。
   - tsc + vite build 通过。运行态待 Mulby 实测。
+
+- [x] **阶段 10 收尾**（commit 待提交）
+  - **整片转场选择**（§5.7）：时间线顶栏转场下拉（淡入淡出/交叉溶解/硬切）→ `meta.transition`；`compose.ts` 改用 `meta.transition`（不再硬编码 fade）。ffmpeg 转场能力既有。
+  - **分镜墙预览/导出**（§4.6）：分镜 Tab「预览故事板」→ `StoryboardWall` 纯前端 Canvas 2D 把关键帧拼 S## 编号网格 + 导出 PNG（零新依赖，替代 Toonflow sharp）。
+  - tsc + vite build 通过。运行态待 Mulby 实测。
+
+---
+
+### 收尾说明：已完成 vs 进阶可选
+
+**已完成（阶段 0-10，全部 tsc + vite build 绿）**：前置加固(GC/探针) → 信息架构收敛(资源 Dock/设置抽屉/精修画布) → 数据模型演进 → 时间线重构(段/一镜多生选优/段时长) → 视频提示词 4 模式 → 资产衍生+两段式润色 → tool-loop Agent(实验)+记忆/agentDeploy → 多图历史+imageFlow 精修+分镜字段 → 音色库+绑定+AI匹配 → 转场+分镜墙。**工作台相对 Toonflow 的资产/分镜/时间线三大块核心差距已补齐**，画布/素材库/提示词已融入工作台。
+
+**进阶可选（未做，按需再立项；多为 P2 或依赖运行态验证）**：
+- **R1 原生 tool-loop 落地**：依赖 Mulby 实测宿主自定义工具行为（探针已就绪）；当前 jsonMode 管线为常驻默认，不阻塞使用。
+- **§5.5 配音合成注入**：音色已可绑定，但「成片听到对白」需 ffmpeg `AudioTrack` 加时间偏移或按段拼接对齐（+ provider 原生音频路径 A 能力门控）。
+- **§4.1 分镜表设计层**：分镜表 markdown 中间产物 + Agent 分镜表→面板两段式（需 Agent 配合）。
+- **§3.6 双轨桥接「存入素材库/从库选用」**：studio 资产 ↔ 全局 ElementRef 双向（GC 防误删已在阶段0 完成）。
+- **§6.7 任务队列**、**批量并发/取消(mapPool)**、**§5.7 拖拽重排/裁剪**、**§6.5 供应商强类型 VideoModel**、**pipeline 逐层 agentDeploy**、**imageFlow 节点图 edges**、**story_skills/production_skills 全量技能库**、**更多画风/题材 .md**。
+
+> **强烈建议**：在 Mulby 中实跑工作台（配文本+图像模型 + 视频/tts 供应商），用 `window.__filmStudioProbe()` 确认 R1，再决定是否推进原生 tool-loop 与配音合成注入。所有阶段均独立可用、向后兼容旧项目。

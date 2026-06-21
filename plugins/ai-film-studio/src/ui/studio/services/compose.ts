@@ -59,7 +59,7 @@ export async function composeProject(doc: ProjectDoc, onProgress?: (text: string
     height,
     fps: 24,
     subtitleMode: 'off' as const,
-    transition: 'fade' as const, // 整片淡入淡出，片间干净硬切（与连贯性策略一致）
+    transition: doc.meta.transition ?? 'fade', // 整片转场（meta 可选 none/fade/xfade）
     clipDurations: durations,
     totalSec: durations.reduce((a, b) => a + b, 0),
     onProgress: (p: { percent?: number; text: string }) => onProgress?.(p.text, p.percent),
