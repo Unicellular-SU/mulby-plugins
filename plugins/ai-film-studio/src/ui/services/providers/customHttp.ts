@@ -7,6 +7,13 @@ import type { VideoProviderAdapter, VideoGenRequest, VideoProviderConfig, VideoH
 
 const PLUGIN_ID = 'ai-film-studio'
 
+// grok-video 时长只接受 "6"/"10"/"15"（字符串）；把任意时长就近吸附到合法枚举
+function grokSeconds(d: number): string {
+  if (d <= 8) return '6'
+  if (d <= 12) return '10'
+  return '15'
+}
+
 function parseDataUrl(u: string): { base64: string; mime: string } | null {
   const m = /^data:([^;]+);base64,(.*)$/.exec(u)
   if (!m) return null
@@ -109,6 +116,8 @@ export const customHttpAdapter: VideoProviderAdapter = {
         model: cfg.model,
         duration: req.duration,
         size: req.size,
+        aspectRatio: req.aspectRatio, // {aspectRatio}：画幅，如 grok aspect_ratio
+        seconds: req.duration != null ? grokSeconds(req.duration) : undefined, // {seconds}：grok 时长枚举 6/10/15
         seed: req.seed, // 模板可用 {seed} / {?seed}…{/seed} 注入
         videoUrl,
         drivingAudioUrl,
@@ -121,6 +130,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
       if (lastImageUrl) body.tail_image_url = lastImageUrl // 尾帧（供应商不支持则忽略）
       if (req.duration) body.duration = req.duration
       if (req.size) body.size = req.size
+      if (req.aspectRatio) body.aspect_ratio = req.aspectRatio // 画幅（供应商不支持则忽略）
       if (req.seed != null) body.seed = req.seed // seed 锁定（供应商不支持则忽略）
       if (videoUrl) body.video_url = videoUrl // P2-8 口型同步：被驱动视频
       if (drivingAudioUrl) body.audio_url = drivingAudioUrl // driving / lipsync 音频

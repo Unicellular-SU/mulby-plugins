@@ -141,7 +141,8 @@ export async function generateClipVideo(
   const { url } = await runVideo({
     cfg: provider,
     apiKey,
-    req: { prompt: motion, imageUrl, duration, seed: projectSeed(meta.id) },
+    // aspectRatio：跟随项目画幅（16:9/9:16/1:1）——否则 grok 等供应商默认竖屏 9:16
+    req: { prompt: motion, imageUrl, duration, aspectRatio: meta.videoRatio, seed: projectSeed(meta.id) },
     onProgress: (p) => onProgress?.(p.status),
   })
   let localPath: string | undefined

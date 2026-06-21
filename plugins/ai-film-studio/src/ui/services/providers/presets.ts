@@ -122,7 +122,9 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       videoUrlPath: 'result.data.0.url',
       uploadUrl: 'https://toapis.com/v1/uploads/images',
       uploadUrlPath: 'data.url',
-      bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"]{/imageUrl}}',
+      // grok-video-3：aspect_ratio(16:9/9:16/3:2/2:3/1:1) + seconds(6/10/15 字符串) + images（与 Sora2/Veo3 的 image_urls 不同）
+      bodyTemplate:
+        '{"model":"{model}","prompt":"{prompt}"{?aspectRatio},"aspect_ratio":"{aspectRatio}"{/aspectRatio}{?seconds},"seconds":"{seconds}"{/seconds}{?imageUrl},"images":["{imageUrl}"]{/imageUrl}}',
     },
   },
   {

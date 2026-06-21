@@ -69,6 +69,7 @@ export interface VideoGenRequest {
   lastImageUrl?: string // 尾帧（first-last-frame，如 WAN FLF2V / Kling 起止帧）
   duration?: number
   size?: string
+  aspectRatio?: string // 画幅 16:9 / 9:16 / 1:1（toapis grok 等用 aspect_ratio；不传时供应商常默认竖屏 9:16）
   seed?: number // seed 锁定：整段片段共用同一 seed，跨片段风格/运动更一致（供应商不支持则忽略）
   // 双轨音频（M18-B，全可选）
   audioMode?: 'native' | 'external' | 'silent' // native=模型自带声；external=无声生成留待外置合成；silent=纯无声
