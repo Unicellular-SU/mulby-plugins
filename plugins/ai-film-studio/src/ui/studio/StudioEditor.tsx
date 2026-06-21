@@ -22,6 +22,9 @@ export default function StudioEditor() {
   const closeProject = useProjectStore((s) => s.closeProject)
   const updateMeta = useProjectStore((s) => s.updateMeta)
   const batch = useProjectStore((s) => s.batch)
+  const film = useProjectStore((s) => s.film)
+  const autoProduce = useProjectStore((s) => s.autoProduce)
+  const busy = batch.running || film.state === 'composing'
   const [tab, setTab] = useState<Tab>('script')
 
   return (
@@ -50,11 +53,19 @@ export default function StudioEditor() {
             </option>
           ))}
         </select>
-        {batch.running && (
+        {busy && (
           <span className="afs-studio__batchstat">
-            <Loader2 size={14} className="afs-spin" /> {batch.label}
+            <Loader2 size={14} className="afs-spin" /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
           </span>
         )}
+        <button
+          className="afs-btn afs-btn--primary afs-btn--sm afs-studio__produce"
+          disabled={busy || doc.storyboards.length === 0}
+          title="资产 → 关键帧 → 视频 → 合成 一条龙"
+          onClick={() => void autoProduce()}
+        >
+          {busy ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 一键成片
+        </button>
       </header>
 
       <nav className="afs-studio__tabs">

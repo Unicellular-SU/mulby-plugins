@@ -16,6 +16,8 @@ export interface AgentPlan {
   script?: { name?: string; content: string }
   assets?: { type: 'role' | 'scene' | 'prop'; name: string; desc?: string; prompt?: string }[]
   storyboards?: { videoDesc: string; prompt?: string; duration?: number; cast?: string[] }[]
+  /** 用户明确要求「出图/生成/成片」时为 true：应用方案后自动一键成片 */
+  autoGenerate?: boolean
 }
 
 const CONTRACT = `
@@ -24,7 +26,8 @@ const CONTRACT = `
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
   "assets": [ { "type": "role|scene|prop", "name": "名称", "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
-  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"] } ]
+  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"] } ],
+  "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
@@ -45,6 +48,7 @@ function parsePlan(raw: string): AgentPlan {
     script: obj.script && typeof obj.script === 'object' ? (obj.script as AgentPlan['script']) : undefined,
     assets: Array.isArray(obj.assets) ? (obj.assets as AgentPlan['assets']) : undefined,
     storyboards: Array.isArray(obj.storyboards) ? (obj.storyboards as AgentPlan['storyboards']) : undefined,
+    autoGenerate: obj.autoGenerate === true,
   }
 }
 

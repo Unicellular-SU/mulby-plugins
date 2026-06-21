@@ -3505,3 +3505,5 @@ body {
 /* 工作台 · 批量工具条 + 批量状态（阶段3b） */
 .afs-studio__tabbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .afs-studio__batchstat { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--afs-muted); font-size: 12px; }
+.afs-studio__produce { margin-left: auto; }
+.afs-studio__batchstat + .afs-studio__produce { margin-left: 8px; }

@@ -60,6 +60,8 @@ interface ProjectState {
   generateAllAssets: () => Promise<void>
   generateAllKeyframes: () => Promise<void>
   generateAllClips: () => Promise<void>
+  /** 一键成片：资产 → 关键帧 → 视频 → 合成 一条龙 */
+  autoProduce: () => Promise<void>
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
@@ -337,6 +339,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
         d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now() })
       })
+      // 用户明确要求出图/成片 → 应用方案后自动一键成片（后台执行，不阻塞对话）
+      if (plan.autoGenerate) void get().autoProduce()
     } catch (e) {
       get().mutate((d) =>
         d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: '出错：' + (e instanceof Error ? e.message : String(e)), createTime: Date.now() })
@@ -388,6 +392,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     } finally {
       set({ batch: { running: false } })
+    }
+  },
+
+  autoProduce: async () => {
+    // 各子步骤自管 batch/film 标志；这里只做顺序编排（守卫避免重入）
+    if (get().batch.running || get().film.state === 'composing' || !get().doc) return
+    await get().generateAllAssets()
+    await get().generateAllKeyframes()
+    await get().generateAllClips()
+    if (get().doc!.storyboards.some((s) => get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))) {
+      await get().compose()
     }
   },
 
