@@ -108,7 +108,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         videoUrlPath: 'result.data.0.url',
         uploadUrl: 'https://toapis.com/v1/uploads/images',
         uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}'
+        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
       })
   },
   {
@@ -126,7 +126,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         videoUrlPath: 'result.data.0.url',
         uploadUrl: 'https://toapis.com/v1/uploads/images',
         uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}'
+        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
       })
   },
   {
@@ -145,7 +145,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         uploadUrl: 'https://toapis.com/v1/uploads/images',
         uploadUrlPath: 'data.url',
         bodyTemplate:
-          '{"model":"{model}","prompt":"{prompt}","resolution":"720p","generate_audio":true{?imageUrl},"image_with_roles":[{"url":"{imageUrl}","role":"first_frame"}]{/imageUrl}}'
+          '{"model":"{model}","prompt":"{prompt}","resolution":"720p","generate_audio":true{?imageUrl},"image_with_roles":[{"url":"{imageUrl}","role":"first_frame"}{?lastImageUrl},{"url":"{lastImageUrl}","role":"last_frame"}{/lastImageUrl}]{/imageUrl}}'
       })
   },
   {
@@ -163,7 +163,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         videoUrlPath: 'result.data.0.url',
         uploadUrl: 'https://toapis.com/v1/uploads/images',
         uploadUrlPath: 'data.url',
-        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"]{/imageUrl}}'
+        bodyTemplate: '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"image_urls":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl}}'
       })
   },
   {

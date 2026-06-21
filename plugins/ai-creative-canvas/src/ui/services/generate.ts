@@ -105,12 +105,15 @@ export async function generateCard(cardId: string): Promise<void> {
         if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
         const key = await useProviders.getState().getKey(cfg.id)
         const inputs = resolveGenInputs(card, board)
-        let imageDataUrl: string | undefined
-        const img = inputs.images[0]
-        if (img) {
-          const bytes = await loadImageInput(img)
-          if (bytes) imageDataUrl = `data:${img.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}`
+        const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
+          const bytes = await loadImageInput(im)
+          return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
         }
+        const refMode = (card.params?.refMode as string) || 'omni'
+        let imageDataUrl: string | undefined
+        let lastImageDataUrl: string | undefined
+        if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
+        if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
         const proj = useGraph.getState().project
         const vtag = videoStyleTag(proj.stylePackId, proj.style)
         const cam = (card.params?.camera as string) || ''
@@ -118,7 +121,7 @@ export async function generateCard(cardId: string): Promise<void> {
         const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
         const vprompt =
           card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
-        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, params: card.params }, (p) =>
+        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, lastImageDataUrl, params: card.params }, (p) =>
           useGraph.getState().updateCard(cardId, { progress: p })
         )
         const projectId = useGraph.getState().project.id

@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Brush } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Brush, Maximize2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
@@ -52,6 +52,7 @@ export function NodeEditor() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [mention, setMention] = useState<MentionState | null>(null)
   const [toolBusy, setToolBusy] = useState(false)
+  const [expand, setExpand] = useState(false)
 
   if (selectedIds.length !== 1) return null
   const card = board.cards[selectedIds[0]]
@@ -244,6 +245,25 @@ export function NodeEditor() {
             </button>
           </div>
 
+          {/* 视频参考形式 */}
+          {card.kind === 'video' && (
+            <div className="flex items-center gap-1 text-[11px]">
+              {(['keyframe', 'omni'] as const).map((m) => {
+                const cur = (card.params?.refMode as string) || 'omni'
+                return (
+                  <button
+                    key={m}
+                    onClick={() => updateCard(card.id, { params: { ...card.params, refMode: m } })}
+                    className={`px-2 py-0.5 rounded ${cur === m ? 'bg-indigo-500 text-white' : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20'}`}
+                  >
+                    {m === 'keyframe' ? '首帧/尾帧' : '全能参考'}
+                  </button>
+                )
+              })}
+              <span className="opacity-50 ml-1 truncate">{(card.params?.refMode as string) === 'keyframe' ? '连入第1张=首帧，第2张=尾帧' : '连入图作为参考'}</span>
+            </div>
+          )}
+
           {/* 提示词工具 + 输入 */}
           {card.kind !== 'source' && (
             <>
@@ -259,20 +279,32 @@ export function NodeEditor() {
                 {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
                 <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
               </div>
-              <textarea
-                value={card.prompt}
-                onChange={onPrompt}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && generatable && !busy) {
-                    e.preventDefault()
-                    generateCard(card.id)
-                  }
-                }}
-                onBlur={() => setTimeout(() => setMention(null), 150)}
-                rows={2}
-                placeholder={card.kind === 'text' ? '让 AI 写点什么…（/ 预设，@ 素材）' : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'}
-                className="ace-input ace-noscroll resize-y w-full"
-              />
+              <div className="relative">
+                <textarea
+                  ref={(el) => {
+                    if (el) {
+                      el.style.height = 'auto'
+                      el.style.height = Math.min(220, el.scrollHeight) + 'px'
+                    }
+                  }}
+                  value={card.prompt}
+                  onChange={onPrompt}
+                  onKeyDown={(e) => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && generatable && !busy) {
+                      e.preventDefault()
+                      generateCard(card.id)
+                    }
+                  }}
+                  onBlur={() => setTimeout(() => setMention(null), 150)}
+                  rows={2}
+                  placeholder={card.kind === 'text' ? '让 AI 写点什么…（/ 预设，@ 素材）' : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'}
+                  className="ace-input ace-noscroll resize-none w-full block"
+                  style={{ maxHeight: 220 }}
+                />
+                <button onClick={() => setExpand(true)} title="放大编辑长文" className="absolute bottom-1 right-1 w-5 h-5 grid place-items-center rounded bg-black/40 text-white opacity-70 hover:opacity-100">
+                  <Maximize2 size={12} />
+                </button>
+              </div>
             </>
           )}
 
@@ -355,6 +387,28 @@ export function NodeEditor() {
                   </button>
                 )
               })}
+        </div>
+      )}
+
+      {/* 放大编辑长提示词 */}
+      {expand && card.kind !== 'source' && (
+        <div data-interactive className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-6" onClick={() => setExpand(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-[680px] max-w-full max-h-[80vh] flex flex-col rounded-xl border bg-white dark:bg-neutral-900 shadow-2xl text-neutral-800 dark:text-neutral-200" style={{ borderColor: 'var(--ace-border)' }}>
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--ace-border)' }}>
+              <span className="font-semibold text-sm">编辑提示词</span>
+              <button onClick={() => setExpand(false)} className="opacity-60 hover:opacity-100">
+                <X size={18} />
+              </button>
+            </div>
+            <textarea
+              autoFocus
+              value={card.prompt}
+              onChange={(e) => updateCard(card.id, { prompt: e.target.value })}
+              placeholder="输入提示词…"
+              className="flex-1 m-3 rounded-lg border bg-transparent p-3 text-sm outline-none resize-none ace-scroll"
+              style={{ minHeight: '42vh', borderColor: 'var(--ace-border)' }}
+            />
+          </div>
         </div>
       )}
     </>

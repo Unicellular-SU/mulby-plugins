@@ -41,6 +41,7 @@ function setPath(obj: any, path: string, val: any): void {
 export interface VideoReq {
   prompt: string
   imageDataUrl?: string
+  lastImageDataUrl?: string // 首帧/尾帧模式的尾帧
   params?: Record<string, unknown>
 }
 
@@ -70,7 +71,17 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
       imageUrl = req.imageDataUrl
     }
   }
-  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: cfg.model, imageUrl }
+  let lastImageUrl: string | undefined
+  if (req.lastImageDataUrl) {
+    if (cfg.uploadUrl) {
+      const b64 = req.lastImageDataUrl.includes(',') ? req.lastImageDataUrl.split(',')[1] : req.lastImageDataUrl
+      const r = await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })
+      lastImageUrl = r?.data?.url || undefined
+    } else {
+      lastImageUrl = req.lastImageDataUrl
+    }
+  }
+  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: cfg.model, imageUrl, lastImageUrl }
   if (req.params) for (const [k, v] of Object.entries(req.params)) if (v != null) vars[k] = String(v)
   const bodyStr = renderTemplate(cfg.bodyTemplate as string, vars)
   let body: any
