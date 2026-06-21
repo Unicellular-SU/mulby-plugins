@@ -32,7 +32,7 @@ const KLING_DUR = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 const SEEDANCE_AR = ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']
 
 export const TOAPIS_VIDEO_MODELS: ToapisVideoModel[] = [
-  // —— Grok（图字段 images；时长是 seconds 字符串枚举）——
+  // —— Grok（图字段 images；时长是 seconds 字符串枚举；实测默认输出原生音频，无需开关，声音在片段文件里）——
   { id: 'grok-video-3', label: 'Grok Video 3', aspectParam: 'aspect_ratio', aspectValues: ['16:9', '9:16', '3:2', '2:3', '1:1'], durationParam: 'seconds', durationType: 'string', durationValues: [6, 10, 15], imageField: 'images' },
   { id: 'grok-video-1.5-preview', label: 'Grok Video 1.5 Preview', aspectParam: 'aspect_ratio', aspectValues: ['16:9', '9:16'], durationParam: 'seconds', durationType: 'string', durationValues: [10, 15], imageField: 'images' },
   // —— Sora2（默认 9:16！必须显式传 aspect_ratio 才横屏）——
