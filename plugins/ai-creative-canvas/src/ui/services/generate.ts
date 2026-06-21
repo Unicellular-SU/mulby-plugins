@@ -85,26 +85,21 @@ export async function generateCard(cardId: string): Promise<void> {
         )
         const projectId = useGraph.getState().project.id
         const ext = mimeToExt(res.mime)
-        const saved = await saveBase64(projectId, cardId, res.images[0], ext)
+        // 多图：全部存进本卡的 meta.results（堆叠展示），主图 = 第一张
+        const results: Array<{ url: string; localPath: string; mime: string }> = []
+        for (let i = 0; i < res.images.length; i++) {
+          const s = await saveBase64(projectId, `${cardId}_${i}`, res.images[i], ext)
+          results.push({ url: s.url, localPath: s.path, mime: res.mime })
+        }
+        const base0 = useGraph.getState().getActiveBoard().cards[cardId]
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,
-          assetUrl: saved.url,
-          assetLocalPath: saved.path,
-          mime: res.mime
+          assetUrl: results[0].url,
+          assetLocalPath: results[0].localPath,
+          mime: res.mime,
+          meta: { ...(base0?.meta || {}), results }
         })
-        // 多图：其余结果在旁边新建卡片
-        const baseCard = useGraph.getState().getActiveBoard().cards[cardId]
-        for (let i = 1; i < res.images.length && baseCard; i++) {
-          const nid = useGraph.getState().addCard(
-            'image',
-            { x: baseCard.x + baseCard.w + 80, y: baseCard.y + (i - 1) * (baseCard.h + 24) + baseCard.h / 2 },
-            { title: `${baseCard.title} (${i + 1})`, status: 'done', modelId: baseCard.modelId, refIds: [...baseCard.refIds] }
-          )
-          const s2 = await saveBase64(projectId, nid, res.images[i], ext)
-          useGraph.getState().updateCard(nid, { assetUrl: s2.url, assetLocalPath: s2.path, mime: res.mime })
-        }
-        if (res.images.length > 1) useGraph.getState().setSelection([cardId])
       } else if (card.kind === 'video') {
         const cfg = useProviders.getState().activeFor('video')
         if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')

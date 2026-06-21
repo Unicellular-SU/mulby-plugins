@@ -114,6 +114,16 @@ export function ContextMenu() {
     if (genTargets.length >= 2) items.push({ label: `生成选中（${genTargets.length}）`, onClick: () => run(() => generateSelected()) })
     else if (genTargets.length === 1) items.push({ label: '生成', onClick: () => run(() => void generateCard(genTargets[0].id)) })
     if (cards.length === 1 && cards[0].kind === 'image' && cards[0].assetLocalPath) items.push({ label: '转视频（以此为首帧）', onClick: () => run(() => shotToVideo(cards[0].id)) })
+    if (cards.length === 1 && (cards[0].kind === 'image' || cards[0].kind === 'source' || cards[0].kind === 'video') && cards[0].assetUrl)
+      items.push({
+        label: '提取为素材卡',
+        onClick: () =>
+          run(() => {
+            const c = cards[0]
+            const newKind = c.kind === 'video' ? 'video' : 'source'
+            g.addCard(newKind, { x: c.x + c.w + 160, y: c.y + c.h / 2 }, { title: c.title || '素材', status: 'done', assetUrl: c.assetUrl, assetLocalPath: c.assetLocalPath, mime: c.mime })
+          })
+      })
     if (clips.length >= 2) items.push({ label: `合成成片（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowCompose(true)) })
     if (cards.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
     if (cards.length === 1 && cards[0].kind === 'group')

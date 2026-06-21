@@ -65,6 +65,18 @@ export function CanvasStage() {
     e.preventDefault()
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)
+    // 从卡片拖出的产物 → 新建素材/视频源卡
+    const assetJson = e.dataTransfer?.getData('application/x-ace-asset')
+    if (assetJson) {
+      try {
+        const a = JSON.parse(assetJson)
+        const newKind: CardKind = a.kind === 'video' ? 'video' : 'source'
+        useGraph.getState().addCard(newKind, world, { title: a.title || '素材', status: 'done', assetUrl: a.url, assetLocalPath: a.localPath, mime: a.mime })
+      } catch {
+        /* ignore */
+      }
+      return
+    }
     // 从左侧拖组件 → 新建对应卡片
     const kind = e.dataTransfer?.getData('application/x-ace-kind')
     if (kind) {

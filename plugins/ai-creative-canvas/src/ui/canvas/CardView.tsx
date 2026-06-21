@@ -1,5 +1,5 @@
 import { type PointerEvent as ReactPointerEvent } from 'react'
-import { Image as ImageIcon, Video, Type, Music, Package, Loader2, AlertCircle } from 'lucide-react'
+import { Image as ImageIcon, Video, Type, Music, Package, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from './viewport'
@@ -73,6 +73,16 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
   const isAud = card.kind === 'audio' && !!card.assetUrl
   const isTxt = card.kind === 'text' && !!card.text
 
+  // 本次多结果（meta.results）：卡上堆叠展示 + 角标切换主图
+  const results = ((card.meta as any)?.results as Array<{ url: string; localPath: string; mime: string }>) || []
+  const multi = results.length > 1
+  const curIdx = multi ? Math.max(0, results.findIndex((r) => r.url === card.assetUrl)) : 0
+  const cycleResult = () => {
+    if (!multi) return
+    const n = results[(curIdx + 1) % results.length]
+    updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: { ...card.meta, fittedFor: undefined } })
+  }
+
   return (
     <div
       data-card-id={card.id}
@@ -103,6 +113,13 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
           </div>
         )
       })()}
+      {/* 多结果堆叠背板（露出右下角，暗示有多张） */}
+      {isImg && multi && (
+        <>
+          <div className="absolute inset-0 rounded-xl border bg-white dark:bg-neutral-900 translate-x-1.5 translate-y-1.5" style={{ borderColor: 'var(--ace-border)' }} />
+          <div className="absolute inset-0 rounded-xl border bg-white dark:bg-neutral-900 translate-x-3 translate-y-3" style={{ borderColor: 'var(--ace-border)' }} />
+        </>
+      )}
       {/* 内容层：承载边框、圆角与裁剪；无标题栏 */}
       <div
         className="absolute inset-0 rounded-xl overflow-hidden border bg-white dark:bg-neutral-900"
@@ -150,6 +167,18 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         </div>
       )}
 
+      {/* 多结果切换角标 */}
+      {multi && card.status !== 'running' && card.status !== 'queued' && (
+        <button
+          data-interactive
+          onClick={cycleResult}
+          title="切换本次生成的其它结果"
+          className="absolute top-1.5 right-1.5 z-20 px-1.5 h-5 grid place-items-center rounded-md bg-black/60 text-white text-[10px] leading-none hover:bg-black/80"
+        >
+          {curIdx + 1}/{results.length}
+        </button>
+      )}
+
       {/* 状态覆盖 */}
       {(card.status === 'running' || card.status === 'queued') && (
         <div className="absolute top-1.5 right-1.5 w-6 h-6 grid place-items-center rounded-full bg-black/55 text-white z-20">
@@ -166,6 +195,24 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         <div className="absolute bottom-0 inset-x-0 px-2 py-1 text-[11px] bg-red-500/90 text-white flex items-center gap-1 rounded-b-xl z-20">
           <AlertCircle size={12} className="shrink-0" />
           <span className="truncate">{card.error || '生成失败'}</span>
+        </div>
+      )}
+
+      {/* 拖出产物为素材卡：左侧中央，悬停/选中显示 */}
+      {(isImg || isVid) && (
+        <div
+          data-interactive
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('application/x-ace-asset', JSON.stringify({ url: card.assetUrl, localPath: card.assetLocalPath, mime: card.mime, title: card.title, kind: card.kind }))
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
+          title="拖出为素材卡（可作其它节点的输入）"
+          className={`absolute -left-2.5 top-1/2 -translate-y-1/2 w-5 h-5 grid place-items-center rounded-full border-2 border-white dark:border-neutral-900 bg-neutral-500 text-white cursor-grab z-30 shadow transition-opacity ${
+            selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          <ArrowUpRight size={11} />
         </div>
       )}
 
