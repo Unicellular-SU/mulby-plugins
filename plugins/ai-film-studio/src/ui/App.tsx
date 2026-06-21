@@ -27,7 +27,7 @@ export default function App() {
   const loadTheme = useUiStore((s) => s.loadTheme)
   const applyHostTheme = useUiStore((s) => s.applyHostTheme)
 
-  const [view, setView] = useState<AppView>('studio')
+  const [view, setView] = useState<AppView>('home')
 
   // 切视图边界：离开画布前先 flush 落盘（修「加载中切页 → 工程丢失」），
   // 但**始终** setView——即便保存被拒也绝不困住用户。
@@ -109,8 +109,8 @@ export default function App() {
       <div className="afs-shell">
         <AppRail view={view} onChange={go} />
         <div className="afs-main">
-          {view === 'studio' && <StudioApp />}
-          {view === 'home' && <ProjectHome onOpen={() => go('editor')} />}
+          {view === 'studio' && <StudioApp onHome={() => go('home')} />}
+          {view === 'home' && <ProjectHome onOpenCanvas={() => go('editor')} onOpenStudio={() => go('studio')} />}
           {view === 'editor' && <EditorView />}
           {view === 'assets' && <AssetsView onInserted={() => go('editor')} />}
           {view === 'prompts' && <PromptLibrary />}

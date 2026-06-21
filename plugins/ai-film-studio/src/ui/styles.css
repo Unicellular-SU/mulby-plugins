@@ -3544,3 +3544,9 @@ body {
 .afs-studio__move { width: 18px; height: 16px; border: none; background: transparent; color: var(--afs-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
 .afs-studio__move:hover:not(:disabled) { background: var(--afs-hover); color: var(--afs-text); }
 .afs-studio__move:disabled { opacity: .3; cursor: default; }
+
+/* 统一项目主页 · 类型徽标（画布/工作流）+ 工作台空状态操作 */
+.afs-pcard__kind { position: absolute; top: 6px; left: 6px; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 6px; color: #fff; font-weight: 600; letter-spacing: .03em; }
+.afs-pcard__kind--canvas { background: rgba(59,130,246,.92); }
+.afs-pcard__kind--studio { background: rgba(168,85,247,.92); }
+.afs-studio__emptyactions { display: flex; gap: 10px; margin-top: 14px; }

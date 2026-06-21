@@ -4,9 +4,9 @@ import { useUiStore } from '../../store/uiStore'
 export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
 
 const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
-  { view: 'studio', icon: Film, label: '工作台' }, // Toonflow 式结构化流水线（新，逐步成为主入口）
-  { view: 'home', icon: LayoutGrid, label: '工程' },
-  { view: 'editor', icon: Workflow, label: '画布' },
+  { view: 'home', icon: LayoutGrid, label: '项目' }, // 统一项目主页：画布工程 + 工作流项目
+  { view: 'studio', icon: Film, label: '工作台' }, // Toonflow 式结构化流水线编辑器
+  { view: 'editor', icon: Workflow, label: '画布' }, // 节点图编辑器
   { view: 'assets', icon: ImageIcon, label: '素材' },
   { view: 'prompts', icon: MessageSquareText, label: '提示词' },
 ]
