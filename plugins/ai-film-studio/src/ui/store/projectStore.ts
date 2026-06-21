@@ -8,7 +8,7 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
-import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64 } from '../studio/services/generate'
+import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { runAgentPlan } from '../studio/agent/agent'
 import { composeProject } from '../studio/services/compose'
 
@@ -285,7 +285,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (c) Object.assign(c, patch)
       })
     try {
-      const r = await generateClipVideo(sb, doc.meta)
+      // 顺接：承接片段取「上一镜选用片段的真实尾帧」作首帧，无缝衔接
+      let firstFrameUrl: string | undefined
+      if (sb.chainFromPrev) {
+        const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
+        const i = ordered.findIndex((s) => s.id === storyboardId)
+        const prev = i > 0 ? ordered[i - 1] : undefined
+        const pt = prev ? doc.track.find((t) => t.storyboardId === prev.id) : undefined
+        const prevClip = pt
+          ? doc.clips.find((c) => c.id === (pt.selectClipId || pt.clipIds[0]))
+          : prev
+            ? doc.clips.find((c) => c.storyboardId === prev.id && c.state === 'done')
+            : undefined
+        firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
+      }
+      const r = await generateClipVideo(sb, doc.meta, firstFrameUrl)
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
       // 同步进时间线
       get().mutate((d) => {
@@ -394,8 +408,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllClips: async () => {
     if (get().batch.running || !get().doc) return
-    const ids = get()
-      .doc!.storyboards.filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
+    // 按 index 顺序：承接片段能拿到刚生成的上一片段尾帧（顺接无缝）
+    const ids = [...get().doc!.storyboards]
+      .sort((a, b) => a.index - b.index)
+      .filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
       .map((s) => s.id)
     set({ batch: { running: true, label: `生成视频 0/${ids.length}` } })
     try {

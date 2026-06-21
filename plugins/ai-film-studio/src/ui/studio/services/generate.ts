@@ -7,6 +7,7 @@ import { saveAsset, loadAsset } from '../../services/assets'
 import { getStylePack, applyStylePack, videoStyleTag, type StyleRole } from '../../services/stylePacks'
 import { runVideo } from '../../services/providers'
 import { downloadVideoToDisk } from '../../services/download'
+import { ffmpegAvailable, extractLastFrame } from '../../services/ffmpeg'
 import { useGraphStore } from '../../store/graphStore'
 import { useProviderStore } from '../../store/providerStore'
 import type { Asset, ProjectMeta, Storyboard } from '../../domain/types'
@@ -91,6 +92,12 @@ export async function loadImageBase64(assetId?: string): Promise<{ base64: strin
   return refBase64(assetId)
 }
 
+/** 抽取某本地视频片段的真实尾帧 dataURL（best-effort，供顺接片段作首帧；ffmpeg 不可用则返回 undefined） */
+export async function clipLastFrameDataUrl(localPath?: string): Promise<string | undefined> {
+  if (!localPath || !(await ffmpegAvailable())) return undefined
+  return extractLastFrame(localPath)
+}
+
 export interface ClipResult {
   url: string
   localPath?: string
@@ -99,16 +106,22 @@ export interface ClipResult {
 
 /**
  * 由分镜关键帧生成视频片段：关键帧作首帧 → runVideo（图生视频），注入运动描述 + 画风视频标签。
+ * 顺接（fix4 同源）：承接片段传 firstFrameUrl（上一片段真实尾帧）作首帧，无缝衔接。
  * 复用现有 providers（fal/custom-http 异步轮询）。下载落盘供后续 ffmpeg 合成。
  */
-export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, onProgress?: (s: string) => void): Promise<ClipResult> {
+export async function generateClipVideo(
+  sb: Storyboard,
+  meta: ProjectMeta,
+  firstFrameUrl?: string,
+  onProgress?: (s: string) => void
+): Promise<ClipResult> {
   const ps = useProviderStore.getState()
   const provider = ps.getActiveFor('video')
   if (!provider) throw new Error('未配置视频供应商（请在「设置」添加并设为默认）')
   const apiKey = await ps.resolveKey(provider.id)
   const a = sb.keyframeImageId ? await loadAsset(sb.keyframeImageId) : null
-  if (!a) throw new Error('请先生成该分镜的关键帧')
-  const imageUrl = `data:${a.mime};base64,${a.base64}`
+  if (!a && !firstFrameUrl) throw new Error('请先生成该分镜的关键帧')
+  const imageUrl = firstFrameUrl || `data:${a!.mime};base64,${a!.base64}`
   const vtag = videoStyleTag(meta.artStyle)
   const motion = [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut']
     .filter(Boolean)
