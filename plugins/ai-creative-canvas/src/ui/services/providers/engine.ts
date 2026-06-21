@@ -82,7 +82,13 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
       lastImageUrl = req.lastImageDataUrl
     }
   }
-  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: req.model || cfg.model, imageUrl, lastImageUrl }
+  const vars: Record<string, string | undefined> = {
+    prompt: req.prompt,
+    model: req.model || cfg.model,
+    imageUrl,
+    lastImageUrl,
+    noImage: imageUrl ? undefined : '1' // 用于「仅文生视频才出现」的字段，如 {?noImage}"aspect_ratio":…{/noImage}
+  }
   if (req.params) for (const [k, v] of Object.entries(req.params)) if (v != null) vars[k] = String(v)
   const bodyStr = renderTemplate(cfg.bodyTemplate as string, vars)
   let body: any
