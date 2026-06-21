@@ -3,7 +3,7 @@ import { X, Plus, Trash2 } from 'lucide-react'
 import { useProviders } from '../store/providerStore'
 import { useUi } from '../store/uiStore'
 import type { ProviderConfig } from '../services/providers/types'
-import { presetOpenAiTts, presetCustomVideo } from '../services/providers/presets'
+import { presetOpenAiTts, presetCustomVideo, PROVIDER_TEMPLATES } from '../services/providers/presets'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -28,12 +28,14 @@ export function ProviderSettings() {
   const [sel, setSel] = useState<string | null>(providers[0]?.id ?? null)
   const [draft, setDraft] = useState<ProviderConfig | null>(null)
   const [keyVal, setKeyVal] = useState('')
+  const [headersStr, setHeadersStr] = useState('')
 
   useEffect(() => {
     const p = providers.find((x) => x.id === sel) || null
     setDraft(p ? { ...p } : null)
     if (p) getKey(p.id).then(setKeyVal)
     else setKeyVal('')
+    setHeadersStr(p?.headers ? JSON.stringify(p.headers) : '')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, providers.length])
 
@@ -86,6 +88,25 @@ export function ProviderSettings() {
               <Plus size={11} />TTS
             </button>
           </div>
+          <select
+            className="ace-input text-[11px] mt-1"
+            value=""
+            onChange={(e) => {
+              const t = PROVIDER_TEMPLATES.find((x) => x.id === e.target.value)
+              if (t) {
+                const p = t.make()
+                upsert(p)
+                setSel(p.id)
+              }
+            }}
+          >
+            <option value="">＋ 从模板新建…</option>
+            {PROVIDER_TEMPLATES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="flex-1 p-3 overflow-auto ace-scroll flex flex-col gap-2">
@@ -118,7 +139,43 @@ export function ProviderSettings() {
                 </div>
               )}
 
-              {draft.type === 'custom-video' && (
+              {draft.type === 'custom-video' && draft.bodyTemplate != null && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Row label="模型 model"><input className="ace-input" value={draft.model || ''} onChange={(e) => upd({ model: e.target.value })} /></Row>
+                    <Row label="提交 URL submitUrl"><input className="ace-input" value={draft.submitUrl || ''} onChange={(e) => upd({ submitUrl: e.target.value })} /></Row>
+                    <Row label="轮询 URL pollUrl（含 {taskId}）"><input className="ace-input" value={draft.pollUrl || ''} onChange={(e) => upd({ pollUrl: e.target.value })} /></Row>
+                    <Row label="任务 id 路径 taskIdPath"><input className="ace-input" value={draft.taskIdPath || ''} onChange={(e) => upd({ taskIdPath: e.target.value })} /></Row>
+                    <Row label="状态字段 statusField"><input className="ace-input" value={draft.statusField || ''} onChange={(e) => upd({ statusField: e.target.value })} /></Row>
+                    <Row label="结果 URL 路径 videoUrlPath"><input className="ace-input" value={draft.videoUrlPath || ''} onChange={(e) => upd({ videoUrlPath: e.target.value })} /></Row>
+                  </div>
+                  <Row label="请求体模板 bodyTemplate（{prompt} {imageUrl} {model}；{?imageUrl}…{/imageUrl} 表示有图才出现）">
+                    <textarea className="ace-input resize-none font-mono text-[10px]" rows={4} value={draft.bodyTemplate || ''} onChange={(e) => upd({ bodyTemplate: e.target.value })} />
+                  </Row>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Row label="图床上传 URL（图生视频需公网图）"><input className="ace-input" value={draft.uploadUrl || ''} onChange={(e) => upd({ uploadUrl: e.target.value })} /></Row>
+                    <Row label="返回 URL 路径"><input className="ace-input" value={draft.uploadUrlPath || ''} onChange={(e) => upd({ uploadUrlPath: e.target.value })} /></Row>
+                    <Row label="轮询间隔 ms"><input className="ace-input" type="number" value={draft.pollIntervalMs || 3000} onChange={(e) => upd({ pollIntervalMs: Number(e.target.value) || 3000 })} /></Row>
+                  </div>
+                  <Row label="额外请求头 headers（JSON，可选）">
+                    <input
+                      className="ace-input"
+                      value={headersStr}
+                      onChange={(e) => {
+                        setHeadersStr(e.target.value)
+                        try {
+                          upd({ headers: e.target.value.trim() ? JSON.parse(e.target.value) : undefined })
+                        } catch {
+                          /* 待输入完整 JSON */
+                        }
+                      }}
+                      placeholder='{"X-DashScope-Async":"enable"}'
+                    />
+                  </Row>
+                </>
+              )}
+
+              {draft.type === 'custom-video' && draft.bodyTemplate == null && (
                 <>
                   <div className="grid grid-cols-2 gap-2">
                     <Row label="提交路径 submitPath"><input className="ace-input" value={draft.submitPath || ''} onChange={(e) => upd({ submitPath: e.target.value })} /></Row>

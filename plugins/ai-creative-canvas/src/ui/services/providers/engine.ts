@@ -44,6 +44,72 @@ export interface VideoReq {
   params?: Record<string, unknown>
 }
 
+// 模板渲染：{?x}…{/x} 条件（可嵌套）+ {x} 替换
+function renderTemplate(tpl: string, vars: Record<string, string | undefined>): string {
+  let out = tpl
+  let prev: string
+  const cond = /\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g
+  do {
+    prev = out
+    out = out.replace(cond, (_m, k, inner) => (vars[k] ? inner : ''))
+  } while (out !== prev)
+  return out.replace(/\{(\w+)\}/g, (_m, k) => (vars[k] != null ? String(vars[k]) : ''))
+}
+
+// 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath
+async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void): Promise<{ url: string }> {
+  let imageUrl: string | undefined
+  if (req.imageDataUrl) {
+    if (cfg.uploadUrl) {
+      const b64 = req.imageDataUrl.includes(',') ? req.imageDataUrl.split(',')[1] : req.imageDataUrl
+      const r = await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })
+      const u = r?.data?.url
+      if (!u) throw new Error('图片上传失败：' + (r?.data?.error || '检查 uploadUrl'))
+      imageUrl = u
+    } else {
+      imageUrl = req.imageDataUrl
+    }
+  }
+  const vars: Record<string, string | undefined> = { prompt: req.prompt, model: cfg.model, imageUrl }
+  if (req.params) for (const [k, v] of Object.entries(req.params)) if (v != null) vars[k] = String(v)
+  const bodyStr = renderTemplate(cfg.bodyTemplate as string, vars)
+  let body: any
+  try {
+    body = JSON.parse(bodyStr)
+  } catch {
+    throw new Error('请求体模板渲染后不是合法 JSON：' + bodyStr.slice(0, 200))
+  }
+  const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
+  if (key) headers['Authorization'] = `Bearer ${key}`
+  onProgress?.(0.1)
+  const resp = await http().post(cfg.submitUrl, body, headers)
+  if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
+  const data = parse(resp.data)
+  let url = jget(data, cfg.videoUrlPath)
+  const taskId = jget(data, cfg.taskIdPath)
+  if (!url && taskId && cfg.pollUrl) {
+    const interval = cfg.pollIntervalMs || 3000
+    const timeout = cfg.timeoutMs || 600000
+    const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
+    const startedAt = Date.now()
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (Date.now() - startedAt > timeout) throw new Error('生成超时')
+      await sleep(interval)
+      const sr = await http().get(cfg.pollUrl.replace('{taskId}', String(taskId)), headers)
+      const sd = parse(sr.data)
+      url = jget(sd, cfg.videoUrlPath)
+      if (url) break
+      const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
+      onProgress?.(0.5)
+      if (st && fail.includes(st)) throw new Error('生成失败：' + st)
+    }
+  }
+  if (!url || typeof url !== 'string') throw new Error('未获取到结果 URL（检查 taskIdPath/videoUrlPath）')
+  onProgress?.(0.95)
+  return { url }
+}
+
 // 提交 + 轮询，返回结果媒体 URL
 export async function runVideoJob(
   cfg: ProviderConfig,
@@ -51,6 +117,7 @@ export async function runVideoJob(
   req: VideoReq,
   onProgress?: (p: number) => void
 ): Promise<{ url: string }> {
+  if (cfg.bodyTemplate && cfg.submitUrl) return runViaTemplate(cfg, key, req, onProgress)
   const body: any = {}
   if (cfg.extraBody && cfg.extraBody.trim()) {
     try {

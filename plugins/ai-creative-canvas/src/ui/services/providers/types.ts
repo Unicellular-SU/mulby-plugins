@@ -29,6 +29,15 @@ export interface ProviderConfig {
   uploadField?: string
   uploadUrlPath?: string
 
+  // ---- 声明式模板路径（bodyTemplate 存在时优先；适配火山/阿里/toapis 等真实 API） ----
+  model?: string
+  bodyTemplate?: string // 占位 {prompt}/{imageUrl}/{model}/{duration}… + 条件 {?x}…{/x}
+  submitUrl?: string // 完整提交 URL
+  pollUrl?: string // 完整轮询 URL（含 {taskId}）
+  taskIdPath?: string // 提交响应里任务 id 路径
+  videoUrlPath?: string // 结果媒体 URL 路径
+  headers?: Record<string, string> // 额外请求头
+
   // ---- openai-tts ----
   ttsModel?: string
   ttsVoice?: string
