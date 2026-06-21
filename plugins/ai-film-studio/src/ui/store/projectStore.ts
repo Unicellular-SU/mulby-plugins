@@ -12,12 +12,14 @@ import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, gen
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
 import { synthVoiceSample, matchRoleVoices } from '../studio/services/audio'
+import { maybeSummarize, getMemoryConfig, recallContext } from '../studio/agent/memory'
 import { deleteAsset } from '../services/assets'
 import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
 import { abortText } from '../services/textEngine'
 import { useGraphStore } from './graphStore'
+import { useAgentDeployStore } from './agentDeployStore'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
@@ -731,6 +733,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       )
     } finally {
       set({ agentBusy: false, agentStage: undefined })
+      const d = get().doc
+      if (d) await maybeSummarize(d, get().mutate, await getMemoryConfig()) // §6.6 长会话压缩
       await get().flush()
     }
   },
@@ -738,7 +742,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   runAgentToolLoop: async (userText) => {
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
-    const model = useGraphStore.getState().selectedModel
+    const deploy = useAgentDeployStore.getState().resolve('decision') // §6.3 按 Agent 选模型/温度
+    const model = deploy.model || useGraphStore.getState().selectedModel
     const push = (role: string, content: string) => get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role, content, createTime: Date.now() }))
     if (!model) {
       push('assistant', '未配置文本模型（请在「模型」里选择）')
@@ -749,16 +754,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     agentAbort = controller
     set({ agentBusy: true, agentStage: '工具调用…' })
     try {
+      const cfg = await getMemoryConfig()
       const reply = await runToolLoop({
         model,
-        system: buildToolLoopSystem(get().doc!),
+        system: buildToolLoopSystem(get().doc!, recallContext(get().doc!, userText, cfg)),
         user: userText,
         tools: makeAgentTools(get),
+        params: deploy.params,
         signal: controller.signal,
         onToolCall: (name) => set({ agentStage: `调用 ${name}…` }),
         onToolResult: (name) => set({ agentStage: `${name} 完成` }),
       })
       push('assistant', reply)
+      const d = get().doc
+      if (d) await maybeSummarize(d, get().mutate, cfg)
     } catch (e) {
       push('assistant', '出错：' + (e instanceof Error ? e.message : String(e)))
     } finally {

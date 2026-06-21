@@ -766,3 +766,10 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **UI**：AssetsTab 加「音色」库（VoiceCard：名/供应商音色下拉/描述/试听 audio 播放器/删除）+「AI 配音匹配」按钮；角色 AssetCard 加音色绑定下拉（voiceAssetId）。
   - **⚠ 合成注入（§5.5）留到阶段 10**：现 ffmpeg `AudioTrack` 仅 `{path, role}` 无时间偏移，按段精确对白需给 AudioTrack 加 start 或按段拼接对齐——作阶段 10 收尾项（含 provider 原生音频路径 A 能力门控 + ffmpeg 后期路径 B）。本阶段先打通音色管理与绑定。
   - tsc + vite build 通过。运行态待 Mulby 实测（需配 tts 供应商）。
+
+- [x] **阶段 9 设置面 + agentDeploy + 记忆**（commit 待提交）
+  - **轻量记忆/RAG**（§6.6）：新增 `studio/agent/memory.ts`——`recallContext`（历史摘要 + 关键词召回相关历史 + 近期对话）+ `maybeSummarize`（累积超阈值 LLM 压缩较早对话成 summary，标 summarized）+ `getMemoryConfig`。`agent.buildContext(doc, memoryText?)` 接入召回；`runAgentPipeline`/`buildToolLoopSystem` 用 `recallContext`；`runAgent`/`runAgentToolLoop` 结束后 `maybeSummarize`（长会话不丢主线、省 token）。
+  - **agentDeploy**（§6.3）：新增 `store/agentDeployStore.ts`（简易/高级、按 Agent 模型/温度、`setAllModel`、`resolve(key)`）；`runAgentToolLoop` 用 `resolve('decision')` 的模型 + params（经 phase6 已扩参的 runText/runToolLoop 透传温度）。StudioApp 挂载即 load。
+  - **设置抽屉面板**（§8）：新增 `studio/StudioSettings.tsx`（Agent 部署表格 + 记忆配置），与画布 `SettingsView`（供应商/外观/存储）并列进设置抽屉。
+  - 注：pipeline 各执行子 Agent 的逐层 model/params 透传作增量（本期 toolloop 路径已用 agentDeploy；pipeline 仍用全局 model）。
+  - tsc + vite build 通过。运行态待 Mulby 实测。

@@ -13,6 +13,7 @@ import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/t
 import StudioDock from './StudioDock'
 import EditorView from '../components/shell/EditorView'
 import SettingsView from '../components/views/SettingsView'
+import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 
@@ -146,6 +147,7 @@ export default function StudioEditor() {
               </button>
             </div>
             <div className="afs-studio__drawer-body">
+              <StudioSettings />
               <SettingsView />
             </div>
           </div>

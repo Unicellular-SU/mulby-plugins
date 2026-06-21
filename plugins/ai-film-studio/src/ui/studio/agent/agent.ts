@@ -9,6 +9,7 @@ import { runText } from '../../services/textEngine'
 import { getAgentSkill } from '../../services/skillSystem'
 import { getStylePack } from '../../services/stylePacks'
 import { useGraphStore } from '../../store/graphStore'
+import { recallContext, getMemoryConfig } from './memory'
 import type { ProjectDoc } from '../../domain/types'
 
 export interface AgentPlan {
@@ -61,14 +62,16 @@ function parsePlan(raw: string): AgentPlan {
   }
 }
 
-/** 当前项目上下文（决策层 + 各执行子 Agent 共用） */
-function buildContext(doc: ProjectDoc): string {
+/** 当前项目上下文（决策层 + 各执行子 Agent 共用）。memoryText 给定时替代默认近期对话（§6.6 召回） */
+function buildContext(doc: ProjectDoc, memoryText?: string): string {
   const pack = getStylePack(doc.meta.artStyle)
-  const recent = doc.memory
+  const naive = doc.memory
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .slice(-6)
     .map((m) => `${m.role === 'user' ? '用户' : '你'}：${m.content}`)
     .join('\n')
+  // memoryText（recallContext）已自带分节标题；naive 兜底再加「近期对话」标题
+  const recent = memoryText ?? (naive ? `## 近期对话\n${naive}` : '')
   return [
     '## 当前项目',
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
@@ -87,7 +90,7 @@ function buildContext(doc: ProjectDoc): string {
           .join('\n\n')
           .slice(0, 8000)}`
       : '',
-    recent ? `## 近期对话\n${recent}` : '',
+    recent,
   ]
     .filter(Boolean)
     .join('\n')
@@ -107,12 +110,12 @@ async function callJson(model: string, skill: string, ctx: string, contract: str
 }
 
 /** 工具循环（§6.1 实验路径）的 system 提示词：决策 skill + 项目上下文 + 工具使用说明 */
-export function buildToolLoopSystem(doc: ProjectDoc): string {
+export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): string {
   const TOOL_GUIDE =
     '你是 AI 制片。可调用工具读写工作区：get_workspace（看现状）/upsert_script（写剧本）/add_asset（加资产）/' +
     'add_storyboard（加分镜）/generate_asset、generate_keyframe、generate_clip（生成）。先规划，再按需调用工具完成用户需求；' +
     '资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
-  return [getAgentSkill('production_agent_decision'), buildContext(doc), TOOL_GUIDE].filter(Boolean).join('\n\n')
+  return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
 
 /** 单次结构化方案（兜底/简单场景）：一通调用产出剧本+资产+分镜 */
@@ -170,7 +173,8 @@ function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGe
  */
 export async function runAgentPipeline(doc: ProjectDoc, userText: string, onStage?: (label: string) => void): Promise<AgentPlan> {
   const model = ensureModel()
-  const ctx = buildContext(doc)
+  const cfg = await getMemoryConfig()
+  const ctx = buildContext(doc, recallContext(doc, userText, cfg))
 
   onStage?.('制片决策…')
   const decisionRaw = await runText({

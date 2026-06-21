@@ -6,6 +6,7 @@
 import { useEffect } from 'react'
 import { Film, ArrowLeft, Plus } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
+import { useAgentDeployStore } from '../store/agentDeployStore'
 import StudioEditor from './StudioEditor'
 import { registerToolCallingProbe } from './agent/toolCallingProbe'
 
@@ -17,6 +18,7 @@ export default function StudioApp({ onHome }: { onHome: () => void }) {
 
   useEffect(() => {
     void init()
+    void useAgentDeployStore.getState().load() // §6.3 载入按 Agent 部署配置
     registerToolCallingProbe() // 阶段0：暴露宿主 tool-calling 探针到控制台（dev 便利，无 UI）
   }, [init])
 
