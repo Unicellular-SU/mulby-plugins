@@ -92,8 +92,9 @@ export function getPrefix(styleId: string): string {
  */
 export function composeArtPrompt(styleId: string, kind: ArtAssetKind, opts?: { derivative?: boolean }): string {
   const prefix = getPrefix(styleId)
-  const base = `art_skills/${styleId}/art_prompt/${kind}.md`
-  const deriv = `art_skills/${styleId}/art_prompt/${kind}_derivative.md`
+  // 文件名带 art_ 前缀（art_character.md…），key 必须匹配
+  const base = `art_skills/${styleId}/art_prompt/art_${kind}.md`
+  const deriv = `art_skills/${styleId}/art_prompt/art_${kind}_derivative.md`
   const skill = (opts?.derivative ? get(deriv) : undefined)?.body ?? get(base)?.body ?? ''
   return [prefix, skill].filter(Boolean).join('\n\n---\n\n')
 }

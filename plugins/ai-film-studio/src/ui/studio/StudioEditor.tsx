@@ -235,7 +235,8 @@ function ScriptTab() {
   const upsertScript = useProjectStore((s) => s.upsertScript)
   const removeScript = useProjectStore((s) => s.removeScript)
   const [sel, setSel] = useState<string | null>(doc.scripts[0]?.id ?? null)
-  const current = doc.scripts.find((s) => s.id === sel) ?? null
+  // sel 未初始化/失效时回退到首个剧本：Agent/autoProduce 新建剧本后能立刻显示，不必手动点
+  const current = doc.scripts.find((s) => s.id === sel) ?? doc.scripts[0] ?? null
 
   return (
     <div className="afs-studio__split">

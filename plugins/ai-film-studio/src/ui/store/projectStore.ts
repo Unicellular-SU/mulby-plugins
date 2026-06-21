@@ -284,8 +284,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const doc = get().doc
     const sb = doc?.storyboards.find((s) => s.id === storyboardId)
     if (!doc || !sb) return
-    // 为该分镜建/取片段，置生成中
-    const clipId = get().upsertClip({ storyboardId, state: 'generating', error: undefined, durationSec: sb.duration || 5 })
+    // 复用该分镜已有片段（每分镜一条，重试就地覆盖，避免堆积孤儿片段 + UI 取到旧片段）
+    const existing = doc.clips.find((c) => c.storyboardId === storyboardId)
+    const clipId = get().upsertClip({ id: existing?.id, storyboardId, state: 'generating', error: undefined, durationSec: sb.duration || 5 })
     const setClip = (patch: Partial<Clip>) =>
       get().mutate((d) => {
         const c = d.clips.find((x) => x.id === clipId)
@@ -308,11 +309,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       const r = await generateClipVideo(sb, doc.meta, firstFrameUrl)
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
-      // 同步进时间线
+      // 同步进时间线（每分镜一条片段，clipIds 直接置为该片段）
       get().mutate((d) => {
         const t = d.track.find((x) => x.storyboardId === storyboardId)
         if (t) {
-          if (!t.clipIds.includes(clipId)) t.clipIds.push(clipId)
+          t.clipIds = [clipId]
           t.selectClipId = clipId
         } else d.track.push({ id: P.newId('t_'), storyboardId, clipIds: [clipId], selectClipId: clipId })
       })

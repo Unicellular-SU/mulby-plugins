@@ -8,7 +8,8 @@ import { useGraphStore } from '../../store/graphStore'
 export function splitNovelChapters(text: string): { title: string; text: string }[] {
   const t = text.replace(/\r\n/g, '\n').trim()
   if (!t) return []
-  const re = /^[ \t]*(第[0-9一二三四五六七八九十百千零两]+[章回节卷篇]|Chapter\s+\d+|卷[0-9一二三四五六七八九十]+)\b.*$/gim
+  // 注意：不能用 \b 结尾——CJK 字符不是 \w，章/回/卷 后无词边界，会导致中文标题全部匹配失败
+  const re = /^[ \t]*(第[0-9一二三四五六七八九十百千零两]+[章回节卷篇]|Chapter\s+\d+|卷[0-9一二三四五六七八九十]+).*$/gim
   const heads: { idx: number; title: string }[] = []
   let m: RegExpExecArray | null
   while ((m = re.exec(t)) !== null) {

@@ -36,13 +36,21 @@ const CONTRACT = `
 - 全程使用项目设定的画风与对白语言。`
 
 function parsePlan(raw: string): AgentPlan {
-  let s = (raw || '').trim()
+  const trimmed = (raw || '').trim()
+  let s = trimmed
   const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(s)
   if (fence) s = fence[1].trim()
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
   if (start >= 0 && end > start) s = s.slice(start, end + 1)
-  const obj = JSON.parse(s) as Record<string, unknown>
+  // 无 JSON 对象（空/纯文本）：当作纯文字回复，不抛裸 SyntaxError
+  if (!s || s[0] !== '{') return { reply: trimmed || '（模型未返回内容，请重试）' }
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(s) as Record<string, unknown>
+  } catch {
+    return { reply: trimmed || '（模型输出无法解析，请重试或换个说法）' }
+  }
   return {
     reply: typeof obj.reply === 'string' ? obj.reply : '已处理。',
     script: obj.script && typeof obj.script === 'object' ? (obj.script as AgentPlan['script']) : undefined,

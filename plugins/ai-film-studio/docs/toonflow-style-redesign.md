@@ -208,7 +208,9 @@ src/ui/skills/                      # 打包进插件；用户覆盖存 kvStore/
 - [x] **4c 章节事件提取**：novel.ts extractEvents（LLM 把每章压成关键事件要点）；projectStore.extractChapterEvents/extractAllEvents（单章+批量）；原著 Tab 显示事件 + 提取按钮；agent 上下文优先用事件（省 token、长篇装得下）。tsc+build 通过。
 - [ ] **4d 进阶（剩余可选）**：时间线多镜选优剪辑、持久向量记忆、分阶段子 Agent、供应商强类型 model 定义（type/mode/durationResolutionMap）。
 
-> **状态**：Toonflow 式核心重构 + 长文改编（小说导入+事件）已完成，全链路可用。剩余为锦上添花，建议先在 Mulby 实测。
+- [x] **自检/加固（多 Agent 评审）**：对新 studio 代码跑 16-agent 评审（state/async、services、react/ui、persistence 四维 + 对抗复核），修 6 个确认 bug：① novel 章节正则 `\b` 致中文标题全不匹配（高）② generateClip 每次新建片段→重试堆积孤儿片段（高）③ StoryboardItem 取到最旧片段→状态显示错（高，随②修复）④ parsePlan 空/非JSON 抛裸 SyntaxError→改纯文本兜底 ⑤ ScriptTab 选中不回退→Agent 新建剧本不显示 ⑥ composeArtPrompt 路径缺 art_ 前缀（潜在）。tsc+build 通过 + 正则实测。
+
+> **状态**：Toonflow 式核心重构 + 长文改编（小说导入+事件）+ 自检加固 已完成，全链路可用。剩余为锦上添花，**建议在 Mulby 实测**。
 
 ---
 
