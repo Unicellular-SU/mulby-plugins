@@ -322,19 +322,44 @@ function StoryboardItem({ sb, index }: { sb: Storyboard; index: number }) {
 
 function TimelineTab() {
   const doc = useProjectStore((s) => s.doc)!
+  const compose = useProjectStore((s) => s.compose)
+  const film = useProjectStore((s) => s.film)
   const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
   const clips = ordered.map((s) => doc.clips.find((c) => c.id === doc.track.find((t) => t.storyboardId === s.id)?.selectClipId)).filter(Boolean)
-  if (!clips.length) return <div className="afs-studio__timeline"><p className="afs-studio__hint">还没有视频片段。去「分镜」给每个镜头生成关键帧 → 视频。合成导出将在后续接入 ffmpeg。</p></div>
+  if (!clips.length)
+    return (
+      <div className="afs-studio__timeline">
+        <p className="afs-studio__hint">还没有视频片段。去「分镜」给每个镜头生成关键帧 → 视频，回到这里即可合成成片。</p>
+      </div>
+    )
   return (
     <div className="afs-studio__timeline">
-      <p className="afs-studio__hint">{clips.length} 个片段（按分镜顺序）。多镜选优 + ffmpeg 合成导出将在后续阶段接入。</p>
+      <div className="afs-studio__timeline-head">
+        <p className="afs-studio__hint">{clips.length} 个片段（按分镜顺序）。</p>
+        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing'} onClick={() => void compose()}>
+          {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
+        </button>
+      </div>
+      {film.state === 'composing' && <p className="afs-studio__hint">{film.text}</p>}
+      {film.state === 'failed' && <p className="afs-studio__err-text">合成失败：{film.error}</p>}
       <div className="afs-studio__track">
         {clips.map((c, i) => (
           <TrackClip key={c!.id} localPath={c!.videoFilePath} url={c!.videoUrl} index={i} />
         ))}
       </div>
+      {film.state === 'done' && film.path && (
+        <div className="afs-studio__film">
+          <FilmPreview path={film.path} />
+          <p className="afs-studio__hint">成片已导出：{film.path}</p>
+        </div>
+      )}
     </div>
   )
+}
+
+function FilmPreview({ path }: { path: string }) {
+  const src = useMediaUrl({ localPath: path })
+  return <video className="afs-studio__filmvideo" src={src} controls preload="metadata" />
 }
 
 function TrackClip({ localPath, url, index }: { localPath?: string; url?: string; index: number }) {

@@ -3495,3 +3495,9 @@ body {
 .afs-studio__agent-input { border-top: 1px solid var(--afs-border); padding: 10px; display: flex; gap: 8px; align-items: flex-end; }
 .afs-studio__agent-input textarea { flex: 1; resize: none; background: var(--afs-panel); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 8px; padding: 7px 9px; font-family: inherit; font-size: 13px; }
 .afs-studio__agent-input .afs-btn { height: 36px; }
+
+/* 工作台 · 成片合成（阶段2f） */
+.afs-studio__timeline-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.afs-studio__err-text { color: #ef4444; font-size: 13px; }
+.afs-studio__film { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.afs-studio__filmvideo { width: 100%; max-width: 640px; border-radius: 10px; background: #000; border: 1px solid var(--afs-border); }

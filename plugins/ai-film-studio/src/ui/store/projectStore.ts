@@ -10,6 +10,14 @@ import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateKeyframeImage, generateClipVideo } from '../studio/services/generate'
 import { runAgentPlan } from '../studio/agent/agent'
+import { composeProject } from '../studio/services/compose'
+
+export interface FilmState {
+  state: 'idle' | 'composing' | 'done' | 'failed'
+  path?: string
+  text?: string
+  error?: string
+}
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -19,6 +27,7 @@ interface ProjectState {
   loading: boolean
   dirty: boolean
   agentBusy: boolean
+  film: FilmState
 
   init: () => Promise<void>
   refreshCards: () => Promise<void>
@@ -49,6 +58,9 @@ interface ProjectState {
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
+
+  // 时间线 → ffmpeg 合成成片
+  compose: () => Promise<void>
 }
 
 /** 改某资产/分镜的 state+error（异步生成进度回写，按 id 查最新避免覆盖并发编辑） */
@@ -79,6 +91,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loading: false,
   dirty: false,
   agentBusy: false,
+  film: { state: 'idle' },
 
   init: async () => {
     set({ loading: true })
@@ -325,6 +338,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } finally {
       set({ agentBusy: false })
       await get().flush()
+    }
+  },
+
+  compose: async () => {
+    const doc = get().doc
+    if (!doc || get().film.state === 'composing') return
+    set({ film: { state: 'composing', text: '开始合成…' } })
+    try {
+      const path = await composeProject(doc, (text, percent) => set({ film: { state: 'composing', text: percent != null ? `${text} ${percent}%` : text } }))
+      set({ film: { state: 'done', path } })
+    } catch (e) {
+      set({ film: { state: 'failed', error: e instanceof Error ? e.message : String(e) } })
     }
   },
 }))
