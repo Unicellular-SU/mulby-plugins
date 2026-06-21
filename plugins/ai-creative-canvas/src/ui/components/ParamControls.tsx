@@ -1,3 +1,4 @@
+import { useRef, type PointerEvent as RPointerEvent } from 'react'
 import { useGraph } from '../store/graphStore'
 import { Select, type SelectOption } from './Select'
 import type { Card } from '../types'
@@ -27,11 +28,50 @@ function SeedControl({ value, onChange }: { value: number | undefined; onChange:
   )
 }
 
+// 自定义时长滑块：整行、每秒一个刻度、拖动吸附到整秒
 function DurationSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const MIN = 1
+  const MAX = 15
+  const setFromX = (clientX: number) => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const t = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    onChange(Math.round(MIN + t * (MAX - MIN))) // 吸附到整秒
+  }
+  const down = (e: RPointerEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    setFromX(e.clientX)
+    const move = (ev: PointerEvent) => setFromX(ev.clientX)
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  const pct = ((value - MIN) / (MAX - MIN)) * 100
   return (
-    <div className="flex items-center gap-1.5 shrink-0" title="时长（秒）">
-      <input type="range" min={1} max={15} value={value} onChange={(e) => onChange(Number(e.target.value))} className="w-24 accent-indigo-500" />
-      <span className="text-xs tabular-nums w-8">{value}s</span>
+    <div data-interactive className="basis-full w-full flex items-center gap-2 py-1">
+      <span className="text-[11px] opacity-60 shrink-0">时长</span>
+      <div ref={ref} onPointerDown={down} className="relative flex-1 h-6 flex items-center cursor-pointer select-none">
+        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-black/10 dark:bg-white/15" />
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-indigo-500" style={{ width: `${pct}%` }} />
+        {Array.from({ length: MAX - MIN + 1 }, (_, i) => MIN + i).map((s) => {
+          const p = ((s - MIN) / (MAX - MIN)) * 100
+          return (
+            <div
+              key={s}
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full"
+              style={{ left: `${p}%`, width: 4, height: 4, background: s <= value ? '#6366f1' : 'var(--ace-border)' }}
+            />
+          )
+        })}
+        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white border-2 border-indigo-500 shadow" style={{ left: `${pct}%` }} />
+      </div>
+      <span className="text-xs tabular-nums w-7 shrink-0 text-right">{value}s</span>
     </div>
   )
 }
@@ -56,10 +96,10 @@ export function ParamControls({ card }: { card: Card }) {
     return (
       <>
         <Select className="w-[78px] shrink-0" value={String(p.aspect || '16:9')} onChange={(v) => set('aspect', v)} options={ASPECTS} />
-        <DurationSlider value={Number(p.duration) || 5} onChange={(v) => set('duration', v)} />
         <Select className="w-[84px] shrink-0" value={String(p.camera || '')} onChange={(v) => set('camera', v)} options={[{ value: '', label: '运镜·无' }, { value: '缓慢推近', label: '推近' }, { value: '缓慢拉远', label: '拉远' }, { value: '向左平移', label: '左移' }, { value: '向右平移', label: '右移' }, { value: '环绕运镜', label: '环绕' }, { value: '手持轻微晃动', label: '手持' }]} />
         <Select className="w-[88px] shrink-0" value={String(p.motion || '适中')} onChange={(v) => set('motion', v)} options={[{ value: '轻微', label: '运动·轻微' }, { value: '适中', label: '运动·适中' }, { value: '强烈', label: '运动·强烈' }]} />
         <SeedControl value={p.seed as number | undefined} onChange={(v) => set('seed', v)} />
+        <DurationSlider value={Number(p.duration) || 5} onChange={(v) => set('duration', v)} />
       </>
     )
   }
