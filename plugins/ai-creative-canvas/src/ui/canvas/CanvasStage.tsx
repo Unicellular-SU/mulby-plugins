@@ -411,7 +411,7 @@ export function CanvasStage() {
       onDragOver={(e) => e.preventDefault()}
     >
       {showGrid && <GridLayer viewport={vp} />}
-      <EdgeLayer board={board} temp={connectTemp} hidden={hiddenMembers} />
+      <EdgeLayer board={board} temp={connectTemp} />
       <div
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0' }}

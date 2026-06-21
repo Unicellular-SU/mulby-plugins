@@ -16,22 +16,50 @@ function bezier(x1: number, y1: number, x2: number, y2: number) {
 }
 
 // 屏幕坐标 SVG（铺满舞台，随视口换算）。放在卡片层之下。
-export function EdgeLayer({ board, temp, hidden }: { board: Board; temp?: TempEdge | null; hidden?: Set<string> }) {
+export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | null }) {
   const removeEdge = useGraph((s) => s.removeEdge)
   const [hover, setHover] = useState<string | null>(null)
   const cards = board.cards
   const vp = board.viewport
 
+  // 折叠组：把落在折叠子树内的端点改接到「最外层折叠组」的边框，
+  // 于是跨界的进/出连线各保留一根（同向去重），组内连线隐藏。
+  const anchorOf = (id: string): string => {
+    let p = cards[id]?.parentId ?? null
+    let top: string | null = null
+    while (p) {
+      const pc = cards[p]
+      if (!pc) break
+      if (pc.kind === 'group' && (pc.params as Record<string, unknown>)?.collapsed) top = p
+      p = pc.parentId
+    }
+    return top ?? id
+  }
+
+  const seen = new Set<string>()
+
   return (
     <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none', overflow: 'visible' }}>
       {Object.values(board.edges).map((e) => {
-        const s = cards[e.source]
-        const t = cards[e.target]
+        const sa = anchorOf(e.source)
+        const ta = anchorOf(e.target)
+        if (sa === ta) return null // 组内连线，折叠后隐藏
+        const key = sa + '>' + ta
+        if (seen.has(key)) return null // 跨界线同向去重为一根
+        seen.add(key)
+        const s = cards[sa]
+        const t = cards[ta]
         if (!s || !t) return null
-        if (hidden && (hidden.has(e.source) || hidden.has(e.target))) return null // 折叠组内的连线随之隐藏
+        const rerouted = sa !== e.source || ta !== e.target
         const a = worldToScreen(s.x + s.w, s.y + s.h / 2, vp)
         const b = worldToScreen(t.x, t.y + t.h / 2, vp)
         const d = bezier(a.x, a.y, b.x, b.y)
+
+        // 跨界聚合线：接到折叠组边框，不可删（删除请展开组）
+        if (rerouted) {
+          return <path key={key} d={d} className="ace-edge" fill="none" style={{ pointerEvents: 'none', opacity: 0.75 }} />
+        }
+
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
         const hovered = hover === e.id
         const onDel = (ev: RPointerEvent<SVGElement>) => {
@@ -53,11 +81,12 @@ export function EdgeLayer({ board, temp, hidden }: { board: Board; temp?: TempEd
           </g>
         )
       })}
-      {temp && (() => {
-        const a = worldToScreen(temp.x1, temp.y1, vp)
-        const b = worldToScreen(temp.x2, temp.y2, vp)
-        return <path d={bezier(a.x, a.y, b.x, b.y)} className="ace-edge ace-edge-temp" fill="none" />
-      })()}
+      {temp &&
+        (() => {
+          const a = worldToScreen(temp.x1, temp.y1, vp)
+          const b = worldToScreen(temp.x2, temp.y2, vp)
+          return <path d={bezier(a.x, a.y, b.x, b.y)} className="ace-edge ace-edge-temp" fill="none" />
+        })()}
     </svg>
   )
 }
