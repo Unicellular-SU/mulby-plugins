@@ -140,6 +140,12 @@ export function ContextMenu() {
   return createPortal(
     <div
       ref={ref}
+      data-interactive
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
       className="fixed z-[90] rounded-lg border bg-white dark:bg-neutral-900 shadow-xl py-1 text-sm text-neutral-800 dark:text-neutral-200"
       style={{ left, top, width: W, borderColor: 'var(--ace-border)' }}
     >
