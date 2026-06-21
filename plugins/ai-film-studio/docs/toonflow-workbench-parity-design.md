@@ -735,3 +735,11 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **store**：`updateTrackPrompt`/`generateTrackPrompt`/`generateAllTrackPrompts`（写 `track.prompt`/`promptState`）；`generateClipVideo` 扩 `promptOverride`，`generateClip` 传 `track.prompt`（无则回退硬拼 motion）。
   - **UI**：TrackCard 加段提示词 textarea（可生成/手改）+「提示词」按钮 + promptState；TimelineTab 顶部「全部段提示词」批量按钮。
   - tsc + vite build 通过。运行态待 Mulby 实测。
+
+- [x] **阶段 5 资产衍生 + 润色**（commit 待提交）
+  - **两段式润色**（§3.2）：新增 `studio/services/polish.ts`——`polishAssetPrompt`（system=`composeArtPrompt(artStyle, kind, {derivative})` 美术手册，缺手册回退兜底；user=名称+描述+画风→英文提示词，走 `runText`）。store `polishAsset`/`polishAllAssets` 写 `asset.prompt`/`promptState`。**美术手册（art_prompt）至此真正进入生成路径**。
+  - **衍生资产 img2img**（§3.1）：`generate.ts` 新增 `generateDerivativeImage(child, parent, meta)`——父图作 img2img 主参考 + `DERIVATIVE_CLAUSE`（恒附身份保持兜底）+ 画风锚定。store `addDerivative`/`generateDerivative`（删子复用 `removeAsset`）。
+  - **缺失 .md 交付**（§4.9）：新增 `cinematic_realistic/art_prompt/art_{character,scene,prop}_derivative.md`（原创：锁身份/形制/空间，只改外层），令 `composeArtPrompt({derivative:true})` 不再静默回退。
+  - **UI**：AssetCard 加英文提示词 textarea（可手改）+「润色」「生成」两步 + promptState + 可展开「衍生」横排（DerivativeCard）；AssetsTab 加「全部润色」批量、网格过滤掉衍生子项（衍生嵌在父卡片下）。
+  - 注：§4.7 director_* 导演技能注入留待 phase6 Agent；本阶段先把 art_prompt 手册经润色接上。
+  - tsc + vite build 通过。运行态待 Mulby 实测。

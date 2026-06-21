@@ -427,6 +427,7 @@ function AssetsTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
   const generateAllAssets = useProjectStore((s) => s.generateAllAssets)
+  const polishAllAssets = useProjectStore((s) => s.polishAllAssets)
   const batch = useProjectStore((s) => s.batch)
   const groups: { type: AssetType; label: string }[] = [
     { type: 'role', label: '人物' },
@@ -436,12 +437,15 @@ function AssetsTab() {
   return (
     <div className="afs-studio__assets">
       <div className="afs-studio__tabbar">
+        <button className="afs-btn afs-btn--sm" disabled={batch.running || doc.assets.length === 0} onClick={() => void polishAllAssets()}>
+          {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 全部润色
+        </button>
         <button className="afs-btn afs-btn--sm" disabled={batch.running || doc.assets.length === 0} onClick={() => void generateAllAssets()}>
           {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 全部生成
         </button>
       </div>
       {groups.map((g) => {
-        const items = doc.assets.filter((a) => a.type === g.type)
+        const items = doc.assets.filter((a) => a.type === g.type && !a.parentAssetId)
         return (
           <div key={g.type} className="afs-studio__assetgroup">
             <div className="afs-studio__assetgroup-head">
@@ -464,10 +468,15 @@ function AssetsTab() {
 }
 
 function AssetCard({ asset }: { asset: Asset }) {
+  const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
   const removeAsset = useProjectStore((s) => s.removeAsset)
   const generateAsset = useProjectStore((s) => s.generateAsset)
+  const polishAsset = useProjectStore((s) => s.polishAsset)
+  const addDerivative = useProjectStore((s) => s.addDerivative)
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  const [showDeriv, setShowDeriv] = useState(false)
+  const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
   return (
     <div className="afs-studio__assetcard">
       <div className="afs-studio__thumb">
@@ -488,16 +497,79 @@ function AssetCard({ asset }: { asset: Asset }) {
       <textarea
         className="afs-field__input afs-studio__carddesc"
         rows={2}
-        placeholder="外貌/特征描述…"
+        placeholder="外貌/特征描述（中文）…"
         value={asset.desc ?? ''}
         onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, desc: e.target.value })}
       />
+      <textarea
+        className="afs-field__input afs-studio__cardprompt"
+        rows={2}
+        placeholder="英文生成提示词（点「润色」自动生成，可手改）…"
+        value={asset.prompt ?? ''}
+        onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, prompt: e.target.value })}
+      />
       <div className="afs-studio__cardactions">
+        <button
+          className="afs-btn afs-btn--sm"
+          disabled={asset.promptState === 'polishing'}
+          title="按画风美术手册把描述润色成英文提示词"
+          onClick={() => void polishAsset(asset.id)}
+        >
+          {asset.promptState === 'polishing' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 润色
+        </button>
         <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} onClick={() => void generateAsset(asset.id)}>
-          <Wand2 size={13} /> 生成
+          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 生成
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="衍生变体（换装/状态/场景）" onClick={() => setShowDeriv((v) => !v)}>
+          <Users size={13} /> 衍生{children.length ? `(${children.length})` : ''}
         </button>
         <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
           <Trash2 size={13} />
+        </button>
+      </div>
+      {asset.promptState === 'failed' && <p className="afs-studio__sberr">润色失败：{asset.promptError}</p>}
+      {showDeriv && (
+        <div className="afs-studio__derivrow">
+          {children.map((c) => (
+            <DerivativeCard key={c.id} asset={c} />
+          ))}
+          <button className="afs-btn afs-btn--sm afs-studio__derivadd" disabled={!asset.refImageId} title={asset.refImageId ? '新增衍生变体' : '先生成父资产图片'} onClick={() => addDerivative(asset.id)}>
+            <Plus size={13} /> 变体
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DerivativeCard({ asset }: { asset: Asset }) {
+  const upsertAsset = useProjectStore((s) => s.upsertAsset)
+  const removeAsset = useProjectStore((s) => s.removeAsset)
+  const generateDerivative = useProjectStore((s) => s.generateDerivative)
+  const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  return (
+    <div className="afs-studio__deriv">
+      <div className="afs-studio__derivthumb">
+        {asset.state === 'generating' ? <Loader2 size={16} className="afs-spin" /> : url ? <img src={url} alt={asset.name} /> : <Users size={16} opacity={0.3} />}
+        {asset.state === 'failed' && (
+          <span className="afs-studio__err" title={asset.error}>
+            <AlertCircle size={12} />
+          </span>
+        )}
+      </div>
+      <input className="afs-studio__derivname" value={asset.name} onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: e.target.value })} />
+      <input
+        className="afs-studio__derivdesc"
+        placeholder="变体描述（如：红色礼服 / 受伤狼狈）"
+        value={asset.desc ?? ''}
+        onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, desc: e.target.value })}
+      />
+      <div className="afs-studio__derivactions">
+        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} title="由父图 img2img 生成变体" onClick={() => void generateDerivative(asset.id)}>
+          {asset.state === 'generating' ? <Loader2 size={12} className="afs-spin" /> : <Wand2 size={12} />}
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
+          <Trash2 size={12} />
         </button>
       </div>
     </div>

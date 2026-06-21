@@ -40,6 +40,28 @@ export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promi
   return saveAsset(r.base64, r.mime)
 }
 
+// 衍生约束兜底子句（即使无 _derivative 手册也保证最低身份保持，见 §3.1）
+const DERIVATIVE_CLAUSE =
+  'keep the exact same face, identity and body proportions as the reference image; only change outfit / state / scene as described, do not alter the character identity'
+
+/**
+ * 生成衍生资产图（§3.1）：以父资产成图作 img2img 主参考 → 叠加服化/状态/场景变体，保持身份一致。
+ * prompt 优先用 child 已润色的 prompt（衍生润色取 _derivative 手册），否则用描述；恒附 DERIVATIVE_CLAUSE 兜底。
+ */
+export async function generateDerivativeImage(child: Asset, parent: Asset, meta: ProjectMeta): Promise<string> {
+  if (child.type === 'audio' || child.type === 'clip') throw new Error('该类型资产（音色/片段）不支持衍生出图')
+  const model = imageModel(meta)
+  if (!model) throw new Error('未配置图像模型（请在「设置」里选择图像模型）')
+  const base = await refBase64(parent.refImageId)
+  if (!base) throw new Error('请先生成父资产的图片（衍生需以父图为基）')
+  const pack = getStylePack(meta.artStyle)
+  const anchor = pack ? applyStylePack(pack, ASSET_ROLE[child.type] ?? 'character') : ''
+  const basis = (child.prompt || child.desc || child.name || '').trim()
+  const prompt = [basis, DERIVATIVE_CLAUSE, anchor].filter(Boolean).join(', ')
+  const r = await editImage({ model, prompt, refBase64: base.base64, refMime: base.mime })
+  return saveAsset(r.base64, r.mime)
+}
+
 /** 取资产库图片纯 base64（供关键帧 img2img 参考） */
 async function refBase64(assetId?: string): Promise<{ base64: string; mime: string } | null> {
   if (!assetId) return null

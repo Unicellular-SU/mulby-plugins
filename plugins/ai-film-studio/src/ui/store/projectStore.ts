@@ -8,7 +8,8 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
-import { generateAssetImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
+import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
+import { polishAssetPrompt } from '../studio/services/polish'
 import { runAgentPipeline } from '../studio/agent/agent'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
@@ -64,6 +65,12 @@ interface ProjectState {
   updateTrackPrompt: (trackId: string, prompt: string) => void
   generateTrackPrompt: (trackId: string) => Promise<void>
   generateAllTrackPrompts: () => Promise<void>
+
+  // 资产润色（两段式）+ 衍生（§3.1/§3.2）
+  polishAsset: (id: string) => Promise<void>
+  polishAllAssets: () => Promise<void>
+  addDerivative: (parentId: string, init?: { name?: string; desc?: string }) => string
+  generateDerivative: (childId: string) => Promise<void>
 
   // 生成（接现有图像引擎 + 项目画风 Skill）
   generateAsset: (id: string) => Promise<void>
@@ -348,6 +355,51 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       else d.clips.push(merged)
     })
     return id
+  },
+
+  polishAsset: async (id) => {
+    const doc = get().doc
+    const asset = doc?.assets.find((a) => a.id === id)
+    if (!doc || !asset || asset.type === 'audio' || asset.type === 'clip') return
+    setAssetState(get, id, { promptState: 'polishing', promptError: undefined })
+    try {
+      const prompt = await polishAssetPrompt(asset, doc.meta)
+      setAssetState(get, id, { prompt, promptState: 'done' })
+    } catch (e) {
+      setAssetState(get, id, { promptState: 'failed', promptError: e instanceof Error ? e.message : String(e) })
+    }
+  },
+  polishAllAssets: async () => {
+    if (get().batch.running || !get().doc) return
+    const ids = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.prompt).map((a) => a.id)
+    set({ batch: { running: true, label: `润色提示词 0/${ids.length}` } })
+    try {
+      for (let i = 0; i < ids.length; i++) {
+        set({ batch: { running: true, label: `润色提示词 ${i + 1}/${ids.length}` } })
+        await get().polishAsset(ids[i])
+      }
+    } finally {
+      set({ batch: { running: false } })
+    }
+  },
+  addDerivative: (parentId, init) => {
+    const parent = get().doc?.assets.find((a) => a.id === parentId)
+    if (!parent) return ''
+    const n = (get().doc?.assets.filter((a) => a.parentAssetId === parentId).length ?? 0) + 1
+    return get().upsertAsset({ type: parent.type, name: init?.name || `${parent.name}·变体${n}`, desc: init?.desc, parentAssetId: parentId })
+  },
+  generateDerivative: async (childId) => {
+    const doc = get().doc
+    const child = doc?.assets.find((a) => a.id === childId)
+    const parent = child?.parentAssetId ? doc?.assets.find((a) => a.id === child.parentAssetId) : undefined
+    if (!doc || !child || !parent) return
+    setAssetState(get, childId, { state: 'generating', error: undefined })
+    try {
+      const refImageId = await generateDerivativeImage(child, parent, doc.meta)
+      setAssetState(get, childId, { refImageId, derivedFromImageId: parent.refImageId, state: 'done' })
+    } catch (e) {
+      setAssetState(get, childId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
   },
 
   generateAsset: async (id) => {
