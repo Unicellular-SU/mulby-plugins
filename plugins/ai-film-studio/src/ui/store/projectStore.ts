@@ -410,10 +410,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             nameToId.set(a.name, id)
           }
         }
-        // 分镜：追加（cast 名 → 资产 id）
+        // 分镜：replaceIndex(1-based) 命中则就地替换（关键帧失效），否则追加（cast 名 → 资产 id）
         for (const sb of plan.storyboards ?? []) {
           if (!sb?.videoDesc) continue
           const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
+          const ri = typeof sb.replaceIndex === 'number' && sb.replaceIndex > 0 ? sb.replaceIndex - 1 : -1
+          const target = ri >= 0 ? d.storyboards.find((s) => s.index === ri) : undefined
+          if (target) {
+            target.videoDesc = sb.videoDesc
+            if (sb.prompt != null) target.prompt = sb.prompt
+            if (typeof sb.duration === 'number') target.duration = sb.duration
+            if (sb.cast) target.associateAssetIds = cast
+            if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
+            target.keyframeImageId = undefined // 内容变了 → 关键帧失效，待重生
+            target.state = 'idle'
+            target.error = undefined
+            continue
+          }
           d.storyboards.push({
             id: P.newId('sb_'),
             index: d.storyboards.length,
