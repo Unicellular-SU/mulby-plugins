@@ -17,7 +17,26 @@ const BASE_SIZE: Record<string, [number, number]> = {
   '3:4': [768, 1024]
 }
 function computeSize(aspect: string, resolution: string): string {
-  const [w, h] = BASE_SIZE[aspect] || [1024, 1024]
+  let w = 1024
+  let h = 1024
+  if (BASE_SIZE[aspect]) {
+    ;[w, h] = BASE_SIZE[aspect]
+  } else {
+    // 任意 W:H 通用解析：短边基准 720，长边按比例
+    const m = /^(\d+):(\d+)$/.exec(aspect)
+    if (m) {
+      const aw = Number(m[1])
+      const ah = Number(m[2])
+      const S = 720
+      if (aw >= ah) {
+        h = S
+        w = Math.round((S * aw) / ah)
+      } else {
+        w = S
+        h = Math.round((S * ah) / aw)
+      }
+    }
+  }
   const scale = resolution === '4K' ? 3 : resolution === '2K' ? 2 : 1
   const r64 = (n: number) => Math.max(64, Math.round((n * scale) / 64) * 64)
   return `${r64(w)}x${r64(h)}`

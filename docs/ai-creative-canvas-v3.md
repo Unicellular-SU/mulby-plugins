@@ -905,3 +905,4 @@
 ### ⏳ P1 — 创作工具化（进行中）
 
 - **P1a 连接校验 + 拖线置灰 + 多选包围盒吸附**（2026-06-22，已提交）：新增 `services/connectionPolicy.ts`（`canConnect`/`invalidTargetIds`，软引用模型——拦截自连/分组/便签/非可生成目标，带可读原因）；`graphStore.addEdgeBetween`/`connectAll` 落地校验，非法连接弹 toast；拖线时 `CardView` 计算不可连目标集合写 `uiStore.connInvalidIds`，目标卡置灰（松手清空）；`snapping.ts` 抽 `snapBox` + 新增 `computeSnapBox`，`CanvasStage.flush` 多选时按整体包围盒吸附（单选仍走 `computeSnap`）。
+- **P1b 声明式参数 schema + 比例策略**（2026-06-22，已提交）：新增 `services/paramSchema.ts`（`ParamField` 联合类型 + `getParamSchema(card)`，把 image/video/audio/text 参数声明为数据）；`ParamControls` 重构为单一渲染器（select/seed/duration 三类字段分发，宽度按字段），消除四处重复 JSX；比例策略：统一 `ASPECTS` 档位扩到 8 档（加 3:2/2:3/21:9），`aiImage.computeSize` 改为可解析任意 `W:H`（已知 5 档保持原尺寸，新比例按短边 720 通用计算）。**延后**：扩图比例参数化（最小项，待浮条加比例子菜单后做）。
