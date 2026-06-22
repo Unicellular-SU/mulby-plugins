@@ -43,6 +43,8 @@ interface UiState {
   setConnInvalid: (s: Set<string> | null) => void
   notifyDone: boolean
   toggleNotifyDone: () => void
+  showGallery: boolean
+  setShowGallery: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -102,5 +104,7 @@ export const useUi = create<UiState>((set) => ({
         /* ignore */
       }
       return { notifyDone: v }
-    })
+    }),
+  showGallery: false,
+  setShowGallery: (showGallery) => set({ showGallery })
 }))

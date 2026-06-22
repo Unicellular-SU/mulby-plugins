@@ -12,6 +12,7 @@ import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { VideoTrimModal } from './components/VideoTrimModal'
 import { TaskCenter } from './components/TaskCenter'
+import { Gallery } from './components/Gallery'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
 import { loadProject, saveProject, loadRecovery, saveRecovery, clearRecovery } from './services/persistence'
@@ -151,6 +152,7 @@ export default function App() {
       <MaskInpaintModal />
       <VideoTrimModal />
       <TaskCenter />
+      <Gallery />
       <DialogHost />
       <ToastHost />
     </div>
