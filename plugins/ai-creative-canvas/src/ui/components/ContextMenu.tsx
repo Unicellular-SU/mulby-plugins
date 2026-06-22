@@ -10,6 +10,7 @@ import { stageEl } from '../canvas/stageEl'
 import type { Card, CardKind } from '../types'
 import { toast } from '../store/toastStore'
 import { promptDialog } from '../store/dialogStore'
+import { runCollage } from '../services/mediaOps'
 
 type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true }
 
@@ -127,6 +128,8 @@ export function ContextMenu() {
           })
       })
     if (clips.length >= 2) items.push({ label: `合成成片（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowCompose(true)) })
+    const imgCards = cards.filter((c) => (c.kind === 'image' || c.kind === 'source') && c.assetUrl)
+    if (imgCards.length >= 2) items.push({ label: `拼贴合成（${imgCards.length}）`, onClick: () => run(() => void runCollage(imgCards.map((c) => c.id))) })
     if (cards.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
     if (cards.length === 1 && cards[0].kind === 'group')
       items.push({

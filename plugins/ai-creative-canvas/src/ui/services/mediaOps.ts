@@ -1,8 +1,9 @@
 import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
 import { createLimiter } from '../util'
-import { saveBase64, toFileUrl } from './media'
+import { saveBase64, toFileUrl, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
+import type { Card } from '../types'
 import * as MI from './mediaImage'
 import * as MV from './mediaVideo'
 
@@ -103,6 +104,54 @@ export async function runGridSlice(cardId: string, rows: number, cols: number): 
       useTask.getState().dec()
     }
   })
+}
+
+// 拼贴：多张图片卡 → 自动网格合成一张（canvas，bytes→ImageBitmap 规避 file:// taint）→ 落新卡
+export async function runCollage(cardIds: string[]): Promise<void> {
+  const g = useGraph.getState()
+  const board = g.getActiveBoard()
+  const cards = cardIds.map((id) => board.cards[id]).filter((c): c is Card => !!c && !!c.assetUrl && (c.kind === 'image' || c.kind === 'source'))
+  if (cards.length < 2) {
+    toast('请选择至少 2 张图片卡', 'error')
+    return
+  }
+  useTask.getState().inc()
+  try {
+    const CELL = 512
+    const n = cards.length
+    const cols = Math.ceil(Math.sqrt(n))
+    const rows = Math.ceil(n / cols)
+    const canvas = document.createElement('canvas')
+    canvas.width = cols * CELL
+    canvas.height = rows * CELL
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas 不可用')
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    for (let i = 0; i < n; i++) {
+      const c = cards[i]
+      const buf = await loadImageInput({ url: c.assetUrl!, localPath: c.assetLocalPath || undefined })
+      if (!buf) continue
+      const bmp = await createImageBitmap(new Blob([buf], { type: c.mime || 'image/png' }))
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      const scale = Math.max(CELL / bmp.width, CELL / bmp.height) // cover-fit
+      const dw = bmp.width * scale
+      const dh = bmp.height * scale
+      ctx.drawImage(bmp, col * CELL + (CELL - dw) / 2, row * CELL + (CELL - dh) / 2, dw, dh)
+      bmp.close?.()
+    }
+    const base64 = canvas.toDataURL('image/png').split(',')[1]
+    const last = cards[cards.length - 1]
+    const id = g.addCard('image', { x: last.x + last.w + 220, y: last.y + last.h / 2 }, { title: `拼贴（${n}）`, status: 'done', refIds: cardIds })
+    const saved = await saveBase64(useGraph.getState().project.id, id, base64, 'png')
+    useGraph.getState().updateCard(id, { assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' })
+    useGraph.getState().setSelection([id])
+  } catch (e: any) {
+    toast('拼贴失败：' + (e?.message || String(e)), 'error')
+  } finally {
+    useTask.getState().dec()
+  }
 }
 
 // 截帧：把视频当前时刻抽成一张图片卡（ffmpeg，规避 canvas taint）
