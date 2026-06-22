@@ -13,7 +13,7 @@ export function TopBar() {
   const renameProject = useGraph((s) => s.renameProject)
   const addBoard = useGraph((s) => s.addBoard)
   const setActiveBoard = useGraph((s) => s.setActiveBoard)
-  const stylePackId = useGraph((s) => s.project.stylePackId || '')
+  const stylePackId = useGraph((s) => s.getActiveBoard().stylePackId || '')
   const setStylePack = useGraph((s) => s.setStylePack)
   const saving = useUi((s) => s.saving)
   const active = useTask((s) => s.active)

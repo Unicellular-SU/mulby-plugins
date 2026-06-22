@@ -161,7 +161,8 @@ export async function generateCard(cardId: string): Promise<void> {
         if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
         if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
         const proj = useGraph.getState().project
-        const vtag = videoStyleTag(proj.stylePackId, proj.style)
+        const vboard = useGraph.getState().getActiveBoard()
+        const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
         const cam = (card.params?.camera as string) || ''
         const mot = (card.params?.motion as string) || ''
         const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')

@@ -15,6 +15,10 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
   const v = typeof d.schemaVersion === 'number' ? d.schemaVersion : 0
   // 示例占位：if (v < 2) { d = { ...d, /* 升级字段 */ } }
   if (v !== SCHEMA_VERSION) d = { ...d, schemaVersion: SCHEMA_VERSION }
+  // 风格包：工程级 → 画布级迁移（旧工程把全局值复制到各画布，使其各自独立可改）
+  if ((d.stylePackId || d.style) && Array.isArray(d.boards) && d.boards.some((b) => b.stylePackId === undefined && b.style === undefined)) {
+    d = { ...d, boards: d.boards.map((b) => ({ ...b, stylePackId: b.stylePackId ?? d.stylePackId, style: b.style ?? d.style })) }
+  }
   return d
 }
 

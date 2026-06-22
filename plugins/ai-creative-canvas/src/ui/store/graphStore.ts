@@ -200,7 +200,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   renameProject: (name) => set((s) => ({ project: { ...s.project, name, updatedAt: Date.now() } })),
   setGlobalModel: (modelId) => set((s) => ({ project: { ...s.project, globalModelId: modelId, updatedAt: Date.now() } })),
   setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
-  setStylePack: (stylePackId) => set((s) => ({ project: { ...s.project, stylePackId, updatedAt: Date.now() } })),
+  setStylePack: (stylePackId) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, stylePackId })) })),
   setDefaultModel: (kind, id) =>
     set((s) => ({ project: { ...s.project, [kind === 'image' ? 'defaultImageModel' : 'defaultTextModel']: id, updatedAt: Date.now() } })),
   setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),

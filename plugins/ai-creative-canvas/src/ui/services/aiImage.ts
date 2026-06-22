@@ -52,11 +52,14 @@ function aspectHint(aspect: string): string {
 }
 // 风格包（项目级）注入所有图像提示词；自由画风作为补充叠加
 function styleHint(): string {
-  const proj = useGraph.getState().project
-  const pack = getStylePack(proj.stylePackId)
+  const g = useGraph.getState()
+  const proj = g.project
+  const b = g.getActiveBoard()
+  const pack = getStylePack(b.stylePackId ?? proj.stylePackId) // 画布级优先
+  const freeStyle = b.style ?? proj.style
   const parts: string[] = []
   if (pack) parts.push(applyStylePack(pack, 'keyframe'))
-  if (proj.style && proj.style.trim()) parts.push(proj.style.trim())
+  if (freeStyle && freeStyle.trim()) parts.push(freeStyle.trim())
   return parts.length ? `\n\n风格：${parts.join(', ')}` : ''
 }
 

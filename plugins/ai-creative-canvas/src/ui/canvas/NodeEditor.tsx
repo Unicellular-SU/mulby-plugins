@@ -314,6 +314,25 @@ export function NodeEditor() {
                 {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
                 <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
               </div>
+              {(card.kind === 'text' || (card.kind === 'image' && hasMedia)) && (
+                <div className="flex flex-wrap items-center gap-1">
+                  {card.kind === 'text' && (
+                    <button onClick={() => useUi.getState().setStoryboardCardId(card.id)} title="生成分镜镜头表" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
+                      <Clapperboard size={12} /> 分镜
+                    </button>
+                  )}
+                  {card.kind === 'image' && hasMedia && (
+                    <button onClick={() => shotToVideo(card.id)} title="以此图为首帧转视频" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
+                      <Film size={12} /> 转视频
+                    </button>
+                  )}
+                  {card.kind === 'image' && hasMedia && (
+                    <button onClick={() => useUi.getState().setMaskCardId(card.id)} title="局部重绘 / 擦除" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
+                      <Brush size={12} /> 局部编辑
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="relative">
                 <textarea
                   ref={(el) => {
@@ -365,36 +384,6 @@ export function NodeEditor() {
               )}
             </div>
           )}
-
-          {card.kind === 'text' && (
-            <button
-              onClick={() => useUi.getState().setStoryboardCardId(card.id)}
-              className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
-              style={{ borderColor: 'var(--ace-border)' }}
-            >
-              <Clapperboard size={14} /> 分镜脚本（镜头表）
-            </button>
-          )}
-
-        {card.kind === 'image' && hasMedia && (
-          <button
-            onClick={() => shotToVideo(card.id)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
-            style={{ borderColor: 'var(--ace-border)' }}
-          >
-            <Film size={14} /> 转视频（以此为首帧）
-          </button>
-        )}
-
-        {card.kind === 'image' && hasMedia && (
-          <button
-            onClick={() => useUi.getState().setMaskCardId(card.id)}
-            className="flex items-center justify-center gap-1.5 w-full py-1.5 rounded-lg border border-dashed text-sm hover:bg-black/5 dark:hover:bg-white/10"
-            style={{ borderColor: 'var(--ace-border)' }}
-          >
-            <Brush size={14} /> 局部重绘
-          </button>
-        )}
 
         {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
         </div>

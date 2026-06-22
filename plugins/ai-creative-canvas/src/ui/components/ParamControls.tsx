@@ -1,4 +1,5 @@
 import { useRef, type PointerEvent as RPointerEvent } from 'react'
+import { Dices } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { Select } from './Select'
 import type { Card } from '../types'
@@ -15,8 +16,8 @@ function SeedControl({ value, onChange }: { value: number | undefined; onChange:
         title="随机种子（若模型支持，便于复现）"
         className="w-[60px] text-xs rounded-md px-1.5 py-1 bg-black/5 dark:bg-white/10 outline-none focus:ring-1 focus:ring-indigo-400"
       />
-      <button onClick={() => onChange(Math.floor(Math.random() * 1e9))} title="随机种子" className="px-1 py-1 rounded hover:bg-black/10 dark:hover:bg-white/15 text-xs leading-none">
-        🎲
+      <button onClick={() => onChange(Math.floor(Math.random() * 1e9))} title="随机种子" className="px-1 py-1 rounded hover:bg-black/10 dark:hover:bg-white/15 grid place-items-center opacity-70 hover:opacity-100">
+        <Dices size={13} />
       </button>
     </div>
   )

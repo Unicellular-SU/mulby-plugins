@@ -921,4 +921,12 @@
 - **P2d 拼贴/宫格合成**（2026-06-22，已提交）：`mediaOps.runCollage`——多张图片卡按 `ceil(sqrt(n))` 自动网格、canvas cover-fit 合成一张（bytes→ImageBitmap 规避 file:// taint），落新图片卡（连引用源）；ContextMenu 选中 ≥2 图片卡时出「拼贴合成（N）」。**延后**：场景检测时间码（需解析 ffmpeg showinfo/pts_time 日志，宿主 ffmpeg.run 日志暴露不确定，待真机确认 API 后做；现有 sceneFrames 代表帧仍可用）。
 - **P2b 自由绘制标注层**（2026-06-22，已提交）：`types.Annotation`（pen/arrow/rect/text，世界坐标）+ `Board.annotations`；`graphStore.addAnnotation/removeAnnotation/clearAnnotations`（不入撤销栈）；`uiStore.annotTool/annotColor`；`canvas/AnnotationLayer.tsx`（世界层渲染已提交标注，non-scaling-stroke）+ `AnnotationDrawOverlay.tsx`（仅选中工具时挂载捕获指针、草稿屏幕预览、提交存世界坐标——**不改 CanvasStage 指针状态机**）+ `AnnotationToolbar.tsx`（底部居中浮岛：4 工具 + 7 色 + 清空）；随工程持久化。
 
+### 🐞 用户反馈 Bug 修复（2026-06-22，已提交）
+1. **风格包按画布独立**：`stylePackId/style` 从工程级移到 `Board`；`setStylePack`/TopBar/aiImage.styleHint/generate 读写活动画布；`migrateProject` 把旧工程全局值迁到各画布。
+2/3. **局部编辑坐标**：模态图片改为 `flex justify-center` + shrink-to-fit 容器（画布与图精确重叠、居中）；`paint` 改分轴 `scaleX/scaleY`——修复笔迹偏上、重绘结果偏左。
+4. **标注可退出**：AnnotationToolbar 加「选择/退出」按钮 + `Esc` 退出绘制模式。
+5. **浮动工具条居中**：FloatingToolbar 锚卡片中心 + `translateX(-50%)`（不再按固定宽度算偏移）。
+6. **节点动作精简上移**：分镜/转视频/局部编辑改为输入框上方紧凑 chip（图标+2-4字），生成按钮保持整行。
+7. **随机种子图标**：🎲 emoji → lucide `Dices`。
+
 > **P2 低风险项完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴）。**剩余 P2 全为高风险盲改项**（千级虚拟化改渲染热路径、持久化分片改存储布局、多轨时间线、视频抠像绿幕、360/3D、多工程）——**强烈建议先在 Mulby 实测当前基线**（P0+P1+P2-light 全程 build 绿但未实跑）再逐项立项，避免盲改破坏渲染/存储。

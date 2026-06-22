@@ -86,6 +86,8 @@ export interface Board {
   edges: Record<string, Edge>
   viewport: Viewport
   annotations?: Annotation[]
+  style?: string // 画布级自由风格（独立于其它画布）
+  stylePackId?: string // 画布级风格包
 }
 
 export interface ProjectDoc {

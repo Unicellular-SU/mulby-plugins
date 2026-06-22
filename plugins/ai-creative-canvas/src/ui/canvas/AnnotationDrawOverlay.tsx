@@ -1,4 +1,4 @@
-import { useState, type PointerEvent as RPointerEvent } from 'react'
+import { useEffect, useState, type PointerEvent as RPointerEvent } from 'react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
 import { promptDialog } from '../store/dialogStore'
@@ -14,6 +14,14 @@ export function AnnotationDrawOverlay() {
   const color = useUi((s) => s.annotColor)
   const board = useGraph((s) => s.getActiveBoard())
   const [draft, setDraft] = useState<Annotation | null>(null)
+  useEffect(() => {
+    if (!tool) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') useUi.getState().setAnnotTool(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tool])
   if (!tool) return null
   const vp = board.viewport
 

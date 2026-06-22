@@ -1,4 +1,4 @@
-import { Pencil, ArrowUpRight, Square, Type, Eraser } from 'lucide-react'
+import { Pencil, ArrowUpRight, Square, Type, Eraser, MousePointer2 } from 'lucide-react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
 
@@ -16,6 +16,14 @@ export function AnnotationToolbar() {
   const color = useUi((s) => s.annotColor)
   return (
     <div data-interactive className="ace-glass absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 px-1.5 py-1">
+      <button
+        onClick={() => useUi.getState().setAnnotTool(null)}
+        title="选择 / 退出标注（Esc）"
+        className={`w-7 h-7 grid place-items-center rounded-md ${tool === null ? 'bg-indigo-500 text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'}`}
+      >
+        <MousePointer2 size={15} />
+      </button>
+      <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
       {TOOLS.map(({ k, icon: Icon, title }) => (
         <button
           key={k}

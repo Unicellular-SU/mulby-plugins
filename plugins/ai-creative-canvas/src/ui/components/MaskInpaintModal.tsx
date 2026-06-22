@@ -49,13 +49,15 @@ function Inner({ cardId }: { cardId: string }) {
     const ctx = cv.getContext('2d')
     if (!ctx) return
     const r = cv.getBoundingClientRect()
-    const scale = cv.width / r.width
-    const x = (e.clientX - r.left) * scale
-    const y = (e.clientY - r.top) * scale
+    // 分轴换算：画布内部为原图分辨率，显示尺寸为图片实际尺寸，x/y 各自缩放（避免单一比例导致偏移）
+    const sx = cv.width / r.width
+    const sy = cv.height / r.height
+    const x = (e.clientX - r.left) * sx
+    const y = (e.clientY - r.top) * sy
     ctx.globalCompositeOperation = erase ? 'destination-out' : 'source-over'
     ctx.fillStyle = 'rgba(236,72,153,1)'
     ctx.beginPath()
-    ctx.arc(x, y, (brush * scale) / 2, 0, Math.PI * 2)
+    ctx.arc(x, y, (brush * sx) / 2, 0, Math.PI * 2)
     ctx.fill()
     if (!erase) painted.current = true
   }
@@ -150,17 +152,19 @@ function Inner({ cardId }: { cardId: string }) {
         </div>
 
         <div className="p-3 flex flex-col gap-3 overflow-auto ace-noscroll">
-          <div className="relative inline-block max-w-full" style={{ touchAction: 'none' }}>
-            <img ref={imgRef} src={card.assetUrl} onLoad={onImgLoad} draggable={false} className="block max-w-full max-h-[58vh] rounded" alt="" />
-            <canvas
-              ref={canvasRef}
-              onPointerDown={down}
-              onPointerMove={(e) => drawing.current && paint(e)}
-              onPointerUp={() => (drawing.current = false)}
-              onPointerLeave={() => (drawing.current = false)}
-              className="absolute inset-0 w-full h-full cursor-crosshair rounded"
-              style={{ opacity: 0.5 }}
-            />
+          <div className="flex justify-center">
+            <div className="relative" style={{ touchAction: 'none' }}>
+              <img ref={imgRef} src={card.assetUrl} onLoad={onImgLoad} draggable={false} className="block max-w-full max-h-[58vh] rounded" alt="" />
+              <canvas
+                ref={canvasRef}
+                onPointerDown={down}
+                onPointerMove={(e) => drawing.current && paint(e)}
+                onPointerUp={() => (drawing.current = false)}
+                onPointerLeave={() => (drawing.current = false)}
+                className="absolute inset-0 w-full h-full cursor-crosshair rounded"
+                style={{ opacity: 0.5 }}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5 text-xs">
