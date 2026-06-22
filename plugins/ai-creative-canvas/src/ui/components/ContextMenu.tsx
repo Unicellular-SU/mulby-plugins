@@ -9,6 +9,7 @@ import { screenToWorld } from '../canvas/viewport'
 import { stageEl } from '../canvas/stageEl'
 import type { Card, CardKind } from '../types'
 import { toast } from '../store/toastStore'
+import { promptDialog } from '../store/dialogStore'
 
 type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true }
 
@@ -132,8 +133,9 @@ export function ContextMenu() {
         label: '保存为模板',
         onClick: () =>
           run(() => {
-            const n = prompt('模板名称:', cards[0].title)
-            if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => toast(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
+            void promptDialog({ title: '保存为模板', message: '模板名称', defaultValue: cards[0].title }).then((n) => {
+              if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => toast(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
+            })
           })
       })
     if (nonGroup.length >= 1) {

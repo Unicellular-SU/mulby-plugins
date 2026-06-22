@@ -12,6 +12,7 @@ import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { VideoTrimModal } from './components/VideoTrimModal'
 import { TaskCenter } from './components/TaskCenter'
+import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
@@ -113,6 +114,7 @@ export default function App() {
       <MaskInpaintModal />
       <VideoTrimModal />
       <TaskCenter />
+      <DialogHost />
       <ToastHost />
     </div>
   )

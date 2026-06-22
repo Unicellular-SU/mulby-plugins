@@ -59,8 +59,8 @@ export function ProjectSettings() {
           <div
             ref={panelRef}
             data-interactive
-            className="fixed z-[60] w-64 rounded-lg border bg-white dark:bg-neutral-900 shadow-xl p-3 flex flex-col gap-3 text-sm text-neutral-800 dark:text-neutral-200"
-            style={{ top: pos.top, right: pos.right, borderColor: 'var(--ace-border)' }}
+            className="ace-menu ace-anim-pop fixed z-[60] w-64 p-3 flex flex-col gap-3 text-sm text-neutral-800 dark:text-neutral-200"
+            style={{ top: pos.top, right: pos.right }}
           >
             <div className="flex flex-col gap-1">
               <label className="text-xs opacity-60">默认图像模型</label>

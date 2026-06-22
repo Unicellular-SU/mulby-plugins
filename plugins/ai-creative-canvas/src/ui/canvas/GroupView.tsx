@@ -11,6 +11,7 @@ import { isCardInsideGroup, type Card } from '../types'
 const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ef4444', '#64748b']
 
 import { toast, type ToastType } from '../store/toastStore'
+import { promptDialog } from '../store/dialogStore'
 function notify(m: string, t?: string) {
   toast(m, (t as ToastType) || 'info')
 }
@@ -46,10 +47,11 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   }
 
   const saveTemplate = () => {
-    const name = prompt('模板名称:', card.title || '分组')
-    if (!name) return
-    const b = useGraph.getState().getActiveBoard()
-    void saveGroupAsTemplate(card.id, name, b).then((t) => notify(t ? `已保存模板：${name}` : '保存失败', t ? 'success' : 'error'))
+    void promptDialog({ title: '保存为模板', message: '模板名称', defaultValue: card.title || '分组' }).then((name) => {
+      if (!name) return
+      const b = useGraph.getState().getActiveBoard()
+      void saveGroupAsTemplate(card.id, name, b).then((t) => notify(t ? `已保存模板：${name}` : '保存失败', t ? 'success' : 'error'))
+    })
   }
 
   const startResize = (e: RPointerEvent) => {
