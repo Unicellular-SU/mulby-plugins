@@ -7,7 +7,7 @@ import { buildMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
 import { enhancePrompt, describeImage } from '../services/promptTools'
-import { PROMPT_PRESETS } from '../services/presets'
+import { PROMPT_PRESETS, PRESET_GROUPS, type Preset } from '../services/presets'
 import { saveBase64 } from '../services/media'
 import { arrayBufferToBase64, uid } from '../util'
 import { worldToScreen } from './viewport'
@@ -131,6 +131,23 @@ export function NodeEditor() {
     updateCard(card.id, { prompt: val.slice(0, start) + sep + text + ' ' + val.slice(end) })
     setMention(null)
   }
+  const renderPreset = (p: Preset) => (
+    <button
+      key={p.label}
+      onMouseDown={(e) => {
+        e.preventDefault()
+        if (!mention) return
+        insertPreset(p.text, mention.start, mention.end)
+        if (p.mode === 'direct') void generateCard(card.id)
+      }}
+      className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10 text-left"
+    >
+      <Sparkles size={12} className="shrink-0 text-indigo-400" />
+      <span className="shrink-0 font-medium">{p.label}</span>
+      <span className="truncate opacity-50 text-xs">{p.text}</span>
+      {p.mode === 'direct' && <span className="ml-auto shrink-0 text-[9px] px-1 rounded bg-indigo-500/15 text-indigo-500">生成</span>}
+    </button>
+  )
   const runTool = async (fn: (id: string) => Promise<void>) => {
     setToolBusy(true)
     try {
@@ -387,13 +404,14 @@ export function NodeEditor() {
       {mention && listLen > 0 && (
         <div data-interactive onWheel={(e) => e.stopPropagation()} className="absolute z-50 rounded-md border bg-white dark:bg-neutral-900 shadow-xl overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200" style={{ ...menuStyle, borderColor: 'var(--ace-border)' }}>
           {mention.mode === 'preset'
-            ? presetList.map((p) => (
-                <button key={p.label} onMouseDown={(e) => { e.preventDefault(); insertPreset(p.text, mention.start, mention.end) }} className="w-full flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-black/5 dark:hover:bg-white/10 text-left">
-                  <Sparkles size={12} className="shrink-0 text-indigo-400" />
-                  <span className="shrink-0 font-medium">{p.label}</span>
-                  <span className="truncate opacity-50 text-xs">{p.text}</span>
-                </button>
-              ))
+            ? mention.query
+              ? presetList.map((p) => renderPreset(p))
+              : PRESET_GROUPS.map((g) => (
+                  <div key={g.label}>
+                    <div className="px-2 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide opacity-40">{g.label}</div>
+                    {g.items.map((p) => renderPreset(p))}
+                  </div>
+                ))
             : refList.map((m) => {
                 const Icon = MAT_ICON[m.kind]
                 return (
