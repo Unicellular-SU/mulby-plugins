@@ -852,131 +852,137 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const moveStoryboard = useProjectStore((s) => s.moveStoryboard)
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
-  const [showDetail, setShowDetail] = useState(false)
   const [showFlow, setShowFlow] = useState(false)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
   // 取该分镜所属段的「选用/最新」候选片段，反映状态（一镜多生后不再是唯一片段）
   const track = doc.track.find((t) => t.storyboardIds.includes(sb.id))
   const clipId = track ? track.selectClipId || track.clipIds[track.clipIds.length - 1] : undefined
   const clip = clipId ? doc.clips.find((c) => c.id === clipId) : undefined
+  const candCount = track?.clipIds.length ?? 0
+  const roleAssets = doc.assets.filter((a) => !a.parentAssetId && a.type !== 'audio')
+  const dialogues = sb.dialogues ?? []
+  // 统一改字段：保留 videoDesc 必填，合并其余 Partial
+  const patch = (p: Partial<Storyboard>) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, ...p })
+  const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => patch({ dialogues: dlgs })
+  const toggleCast = (id: string) => {
+    const has = sb.associateAssetIds.includes(id)
+    patch({ associateAssetIds: has ? sb.associateAssetIds.filter((x) => x !== id) : [...sb.associateAssetIds, id] })
+  }
   return (
-    <div className="afs-studio__sbitem">
-      <div className="afs-studio__sbleft">
-        <button className="afs-studio__move" disabled={index === 0} title="上移" onClick={() => moveStoryboard(sb.id, -1)}>
-          <ChevronUp size={13} />
-        </button>
-        <span className="afs-studio__sbidx">{index + 1}</span>
-        <button className="afs-studio__move" disabled={index === total - 1} title="下移" onClick={() => moveStoryboard(sb.id, 1)}>
-          <ChevronDown size={13} />
-        </button>
-        {index > 0 && (
-          <button
-            className={`afs-studio__chain${sb.chainFromPrev ? ' is-on' : ''}`}
-            title={sb.chainFromPrev ? '承接上一镜（关键帧由上一帧派生，保持连贯）— 点击关闭' : '与上一镜硬切 — 点击设为承接（连贯）'}
-            onClick={() => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, chainFromPrev: !sb.chainFromPrev })}
-          >
-            <Link2 size={12} />
+    <div className="afs-studio__sbcard">
+      <div className="afs-studio__sbmain">
+        {/* 左：大缩略图 + 导航 */}
+        <div className="afs-studio__sbcol">
+          <div className="afs-studio__sbthumb">
+            {sb.state === 'generating' ? <Loader2 size={22} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={24} opacity={0.3} />}
+            <span className="afs-studio__sbnum">{index + 1}</span>
+            {sb.state === 'failed' && (
+              <span className="afs-studio__err" title={sb.error}>
+                <AlertCircle size={13} />
+              </span>
+            )}
+          </div>
+          <div className="afs-studio__sbnav">
+            <button className="afs-studio__move" disabled={index === 0} title="上移" onClick={() => moveStoryboard(sb.id, -1)}>
+              <ChevronUp size={15} />
+            </button>
+            <button className="afs-studio__move" disabled={index === total - 1} title="下移" onClick={() => moveStoryboard(sb.id, 1)}>
+              <ChevronDown size={15} />
+            </button>
+            {index > 0 && (
+              <button
+                className={`afs-studio__chain${sb.chainFromPrev ? ' is-on' : ''}`}
+                title={sb.chainFromPrev ? '承接上一镜（关键帧由上一帧派生，连贯）— 点击关闭' : '与上一镜硬切 — 点击设为承接'}
+                onClick={() => patch({ chainFromPrev: !sb.chainFromPrev })}
+              >
+                <Link2 size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+        {/* 右：字段（默认全部展开） */}
+        <div className="afs-studio__sbfields">
+          <div className="afs-studio__sbhead">
+            <label className="afs-studio__sbinline">
+              时长
+              <input type="number" min={1} max={15} value={sb.duration} onChange={(e) => patch({ duration: Number(e.target.value) || 5 })} />秒
+            </label>
+            <label className="afs-studio__sbinline">
+              轨道
+              <input value={sb.track} onChange={(e) => patch({ track: e.target.value })} />
+            </label>
+            <span style={{ flex: 1 }} />
+            <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除分镜" onClick={() => removeStoryboard(sb.id)}>
+              <Trash2 size={13} />
+            </button>
+          </div>
+          <label className="afs-studio__sbfieldlbl">画面描述</label>
+          <textarea
+            className="afs-field__input"
+            rows={2}
+            value={sb.videoDesc}
+            placeholder="主体 + 动作 + 环境 + 情绪 + 光影…"
+            onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: e.target.value })}
+          />
+          <label className="afs-studio__sbfieldlbl">关键帧提示词（英文，可空；由「精修」/Agent 生成）</label>
+          <textarea
+            className="afs-field__input afs-studio__cardprompt"
+            rows={2}
+            value={sb.prompt ?? ''}
+            placeholder="english keyframe prompt…"
+            onChange={(e) => patch({ prompt: e.target.value })}
+          />
+          <label className="afs-studio__sbfieldlbl">出场资产</label>
+          <div className="afs-studio__castchips">
+            {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产</span>}
+            {roleAssets.map((a) => (
+              <button key={a.id} className={`afs-studio__chipbtn${sb.associateAssetIds.includes(a.id) ? ' is-on' : ''}`} onClick={() => toggleCast(a.id)}>
+                {a.name}
+              </button>
+            ))}
+          </div>
+          <label className="afs-studio__sbfieldlbl">对白</label>
+          {dialogues.length === 0 && <span className="afs-studio__hint">暂无对白</span>}
+          {dialogues.map((d, i) => (
+            <div key={i} className="afs-studio__dlgrow">
+              <input placeholder="角色" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))} />
+              <input placeholder="台词" value={d.line} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} />
+              <input placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, emotion: e.target.value } : x)))} />
+              <button title="删除" onClick={() => setDlg(dialogues.filter((_, j) => j !== i))}>
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <button className="afs-btn afs-btn--sm afs-studio__dlgadd" onClick={() => setDlg([...dialogues, { character: '', line: '' }])}>
+            <Plus size={12} /> 加台词
           </button>
-        )}
+        </div>
       </div>
-      <div className="afs-studio__sbthumb">
-        {sb.state === 'generating' ? <Loader2 size={18} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={18} opacity={0.3} />}
-        {sb.state === 'failed' && (
-          <span className="afs-studio__err" title={sb.error}>
-            <AlertCircle size={13} />
-          </span>
-        )}
-      </div>
-      <textarea
-        className="afs-field__input"
-        rows={3}
-        value={sb.videoDesc}
-        placeholder="画面描述（主体+动作+环境+情绪+光影）…"
-        onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: e.target.value })}
-      />
-      <div className="afs-studio__sbactions">
+      {/* 底部：生成操作 */}
+      <div className="afs-studio__sbbar">
         <button className="afs-btn afs-btn--sm" disabled={sb.state === 'generating'} onClick={() => void generateKeyframe(sb.id)}>
-          <Wand2 size={13} /> 关键帧
+          {sb.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 关键帧
         </button>
         <button
           className="afs-btn afs-btn--sm"
           disabled={!sb.keyframeImageId || clip?.state === 'generating'}
-          title={!sb.keyframeImageId ? '先生成关键帧' : '由关键帧生成视频片段'}
+          title={!sb.keyframeImageId ? '先生成关键帧' : '由关键帧生成视频片段（可多生选优）'}
           onClick={() => void generateClip(sb.id)}
         >
           {clip?.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} 视频
-          {clip?.state === 'done' && ' ✓'}
+          {candCount > 1 ? `(${candCount})` : ''}
+          {clip?.state === 'done' ? ' ✓' : ''}
         </button>
-        {clip?.state === 'failed' && (
-          <span className="afs-studio__sberr" title={clip.error || '视频生成失败'}>
-            <AlertCircle size={13} /> 失败
-          </span>
-        )}
         <button className="afs-btn afs-btn--sm afs-btn--ghost" title="精修关键帧（多参考图融合）" onClick={() => setShowFlow(true)}>
           <Settings2 size={13} /> 精修
         </button>
-        <button className={`afs-btn afs-btn--sm afs-btn--ghost${showDetail ? ' is-active' : ''}`} title="详情（时长/轨道/出场资产/提示词/对白）" onClick={() => setShowDetail((v) => !v)}>
-          <ChevronDown size={13} /> 详情
-        </button>
-        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeStoryboard(sb.id)}>
-          <Trash2 size={13} />
-        </button>
+        {clip?.state === 'failed' && (
+          <span className="afs-studio__sberr" title={clip.error || '视频生成失败'}>
+            <AlertCircle size={13} /> 视频失败
+          </span>
+        )}
       </div>
-      {showDetail && <StoryboardDetail sb={sb} />}
       {showFlow && <ImageFlowEditor sb={sb} onClose={() => setShowFlow(false)} />}
-    </div>
-  )
-}
-
-function StoryboardDetail({ sb }: { sb: Storyboard }) {
-  const doc = useProjectStore((s) => s.doc)!
-  const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
-  const roleAssets = doc.assets.filter((a) => !a.parentAssetId)
-  const dialogues = sb.dialogues ?? []
-  const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, dialogues: dlgs })
-  const toggleCast = (id: string) => {
-    const has = sb.associateAssetIds.includes(id)
-    upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, associateAssetIds: has ? sb.associateAssetIds.filter((x) => x !== id) : [...sb.associateAssetIds, id] })
-  }
-  return (
-    <div className="afs-studio__sbdetail">
-      <div className="afs-studio__sbfield">
-        <label>时长(秒)</label>
-        <input type="number" min={1} max={15} value={sb.duration} onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, duration: Number(e.target.value) || 5 })} />
-        <label>轨道</label>
-        <input value={sb.track} onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, track: e.target.value })} />
-      </div>
-      <label className="afs-studio__sbfieldlbl">出场资产</label>
-      <div className="afs-studio__castchips">
-        {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产</span>}
-        {roleAssets.map((a) => (
-          <button key={a.id} className={`afs-studio__chipbtn${sb.associateAssetIds.includes(a.id) ? ' is-on' : ''}`} onClick={() => toggleCast(a.id)}>
-            {a.name}
-          </button>
-        ))}
-      </div>
-      <label className="afs-studio__sbfieldlbl">关键帧提示词</label>
-      <textarea
-        className="afs-field__input afs-studio__cardprompt"
-        rows={2}
-        value={sb.prompt ?? ''}
-        placeholder="英文关键帧提示词…"
-        onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, prompt: e.target.value })}
-      />
-      <label className="afs-studio__sbfieldlbl">对白</label>
-      {dialogues.map((d, i) => (
-        <div key={i} className="afs-studio__dlgrow">
-          <input placeholder="角色" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))} />
-          <input placeholder="台词" value={d.line} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} />
-          <input placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, emotion: e.target.value } : x)))} />
-          <button title="删除" onClick={() => setDlg(dialogues.filter((_, j) => j !== i))}>
-            <X size={12} />
-          </button>
-        </div>
-      ))}
-      <button className="afs-btn afs-btn--sm" onClick={() => setDlg([...dialogues, { character: '', line: '' }])}>
-        <Plus size={12} /> 台词
-      </button>
     </div>
   )
 }
