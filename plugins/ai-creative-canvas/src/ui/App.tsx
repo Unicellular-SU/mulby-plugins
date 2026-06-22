@@ -14,7 +14,8 @@ import { VideoTrimModal } from './components/VideoTrimModal'
 import { TaskCenter } from './components/TaskCenter'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
-import { loadProject, saveProject } from './services/persistence'
+import { loadProject, saveProject, loadRecovery, saveRecovery, clearRecovery } from './services/persistence'
+import { confirmDialog } from './store/dialogStore'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
 import { debounce } from './util'
@@ -26,19 +27,36 @@ export default function App() {
     let disposed = false
     const mulby = (window as any).mulby
 
-    ;(async () => {
-      const p = await loadProject()
-      if (!disposed && p) {
-        // 旧工程兼容：补 parentId 默认 null；重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）
-        for (const b of p.boards)
-          for (const c of Object.values(b.cards)) {
-            if ((c as any).parentId === undefined) (c as any).parentId = null
-            if (c.status === 'running' || c.status === 'queued') {
-              c.status = 'idle'
-              c.progress = 0
-            }
+    const sanitize = (doc: ProjectDoc) => {
+      // 旧工程兼容：补 parentId 默认 null；重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）
+      for (const b of doc.boards)
+        for (const c of Object.values(b.cards)) {
+          if ((c as any).parentId === undefined) (c as any).parentId = null
+          if (c.status === 'running' || c.status === 'queued') {
+            c.status = 'idle'
+            c.progress = 0
           }
-        useGraph.getState().replaceProject(p)
+        }
+    }
+    ;(async () => {
+      const [p, rec] = await Promise.all([loadProject(), loadRecovery()])
+      if (disposed) return
+      let doc = p
+      // 存在恢复快照 = 上次有改动未提交主存（异常关闭）→ 询问是否恢复
+      if (rec?.doc) {
+        const useRec = await confirmDialog({
+          title: '恢复未保存的改动',
+          message: '检测到上次可能未正常保存的编辑，是否恢复到最近状态？',
+          confirmLabel: '恢复',
+          cancelLabel: '用已保存版本'
+        })
+        if (disposed) return
+        if (useRec) doc = rec.doc
+        await clearRecovery()
+      }
+      if (doc) {
+        sanitize(doc)
+        useGraph.getState().replaceProject(doc)
       }
     })()
 
@@ -76,22 +94,41 @@ export default function App() {
     }
   }, [])
 
-  // 自动保存（防抖）
+  // 自动保存（防抖）+ 崩溃恢复快照（独立键，更短防抖；主存成功后清除）
   useEffect(() => {
-    const save = debounce((p: ProjectDoc) => {
+    const saveMain = debounce((p: ProjectDoc) => {
       useUi.getState().setSaving(true)
-      saveProject(p).finally(() => useUi.getState().setSaving(false))
+      saveProject(p)
+        .then((ok) => {
+          if (ok) void clearRecovery()
+        })
+        .finally(() => useUi.getState().setSaving(false))
     }, 800)
+    const saveRec = debounce((p: ProjectDoc) => void saveRecovery(p, Date.now()), 400)
     let last = useGraph.getState().project
     const unsub = useGraph.subscribe((state) => {
       if (state.project !== last) {
         last = state.project
-        save(state.project)
+        saveRec(state.project)
+        saveMain(state.project)
       }
     })
+    // 关窗/隐藏前尽力抢救一次恢复快照
+    const flush = () => {
+      try {
+        void saveRecovery(useGraph.getState().project, Date.now())
+      } catch {
+        /* ignore */
+      }
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
     return () => {
       unsub()
-      save.cancel()
+      saveRec.cancel()
+      saveMain.cancel()
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
     }
   }, [])
 
