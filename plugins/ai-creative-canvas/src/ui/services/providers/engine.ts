@@ -89,7 +89,7 @@ function renderTemplate(tpl: string, vars: Record<string, string | undefined>): 
 }
 
 // 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath
-async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void): Promise<{ url: string }> {
+async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, signal?: AbortSignal, onTask?: (taskId: string) => void): Promise<{ url: string }> {
   let imageUrl: string | undefined
   if (req.imageDataUrl) {
     if (cfg.uploadUrl) {
@@ -135,6 +135,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
   const data = parse(resp.data)
   let url = jget(data, cfg.videoUrlPath)
   const taskId = jget(data, cfg.taskIdPath)
+  if (taskId) onTask?.(String(taskId))
   if (!url && taskId && cfg.pollUrl) {
     const interval = cfg.pollIntervalMs || 3000
     const timeout = cfg.timeoutMs || 600000
@@ -142,8 +143,10 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
     const startedAt = Date.now()
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      if (signal?.aborted) throw new Error('已取消(aborted)')
       if (Date.now() - startedAt > timeout) throw new Error('生成超时')
       await sleep(interval)
+      if (signal?.aborted) throw new Error('已取消(aborted)')
       const sr = await httpReq(cfg.pollUrl.replace('{taskId}', String(taskId)), 'GET', headers, undefined, 60000)
       const sd = parse(sr.data)
       url = jget(sd, cfg.videoUrlPath)
@@ -163,9 +166,11 @@ export async function runVideoJob(
   cfg: ProviderConfig,
   key: string,
   req: VideoReq,
-  onProgress?: (p: number) => void
+  onProgress?: (p: number) => void,
+  signal?: AbortSignal,
+  onTask?: (taskId: string) => void
 ): Promise<{ url: string }> {
-  if (cfg.bodyTemplate && cfg.submitUrl) return runViaTemplate(cfg, key, req, onProgress)
+  if (cfg.bodyTemplate && cfg.submitUrl) return runViaTemplate(cfg, key, req, onProgress, signal, onTask)
   const body: any = {}
   if (cfg.extraBody && cfg.extraBody.trim()) {
     try {
@@ -208,6 +213,7 @@ export async function runVideoJob(
 
   let url = jget(data, cfg.resultPath)
   const taskId = jget(data, cfg.idPath)
+  if (taskId) onTask?.(String(taskId))
 
   if (!url && taskId && cfg.statusPath) {
     const interval = cfg.pollIntervalMs || 2000
@@ -217,8 +223,10 @@ export async function runVideoJob(
     const startedAt = Date.now()
     // eslint-disable-next-line no-constant-condition
     while (true) {
+      if (signal?.aborted) throw new Error('已取消(aborted)')
       if (Date.now() - startedAt > timeout) throw new Error('生成超时')
       await sleep(interval)
+      if (signal?.aborted) throw new Error('已取消(aborted)')
       const statusUrl = base + (cfg.statusPath || '').replace('{id}', String(taskId))
       const sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000)
       const sd = parse(sr.data)

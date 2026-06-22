@@ -19,6 +19,7 @@ function defaultTitle(kind: CardKind): string {
     case 'audio': return 'AI 音频'
     case 'source': return '素材'
     case 'group': return '分组'
+    case 'note': return '便签'
   }
 }
 

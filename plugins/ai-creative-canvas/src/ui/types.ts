@@ -1,6 +1,6 @@
 // 领域模型：卡片 / 连线 / 视口 / 画布(board) / 工程(project)
 
-export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source' | 'group'
+export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source' | 'group' | 'note'
 export type CardStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
 
 export interface Card {
@@ -93,17 +93,47 @@ export interface ProjectDoc {
   schemaVersion: number
 }
 
+// 导演级镜头表（~15 列）；除 desc 外均可空，老工程/渲染处按 `?? ''` 兜底
 export interface Shot {
-  desc: string
-  shotSize?: string
-  camera?: string
-  duration?: number
-  dialogue?: string
-  imagePrompt?: string
-  videoPrompt?: string
+  shotNumber?: number // 镜号
+  desc: string // 画面描述
+  scene?: string // 场景/地点
+  character?: string // 出场角色
+  characterDesc?: string // 角色外观/服装要点
+  action?: string // 主体动作
+  emotion?: string // 情绪基调
+  shotSize?: string // 景别
+  camera?: string // 机位与运镜
+  duration?: number // 时长(秒)
+  dialogue?: string // 对白
+  sfx?: string // 音效/环境声
+  imagePrompt?: string // 静帧图片提示词
+  videoPrompt?: string // 动态视频提示词
+  roleImageRefs?: string[] // 角色一致性参考图 id
 }
 
 export const SCHEMA_VERSION = 1
+
+// 类型色 —— 单一真相：JS 侧用此处，CSS 侧 styles.css 的 --kind-* 须与之同源
+export const KIND_ACCENT: Record<CardKind, string> = {
+  image: '#6366f1',
+  video: '#ec4899',
+  text: '#10b981',
+  audio: '#f59e0b',
+  source: '#64748b',
+  group: '#64748b',
+  note: '#eab308'
+}
+
+export const KIND_LABEL: Record<CardKind, string> = {
+  image: '图片',
+  video: '视频',
+  text: '文本',
+  audio: '音频',
+  source: '素材',
+  group: '分组',
+  note: '便签'
+}
 
 export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   image: { w: 280, h: 320 },
@@ -111,7 +141,8 @@ export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   text: { w: 300, h: 220 },
   audio: { w: 300, h: 140 },
   source: { w: 260, h: 240 },
-  group: { w: 400, h: 300 }
+  group: { w: 400, h: 300 },
+  note: { w: 220, h: 160 }
 }
 
 // 卡片是否整体落在组框内（用于拖入归属 / resize 弹出判定）

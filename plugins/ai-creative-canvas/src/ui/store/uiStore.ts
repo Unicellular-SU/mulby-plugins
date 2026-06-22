@@ -35,6 +35,10 @@ interface UiState {
   setParamClipboard: (p: Record<string, unknown> | null) => void
   maskCardId: string | null
   setMaskCardId: (id: string | null) => void
+  trimCardId: string | null
+  setTrimCardId: (id: string | null) => void
+  showTaskCenter: boolean
+  setShowTaskCenter: (v: boolean) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -71,5 +75,9 @@ export const useUi = create<UiState>((set) => ({
   paramClipboard: null,
   setParamClipboard: (paramClipboard) => set({ paramClipboard }),
   maskCardId: null,
-  setMaskCardId: (maskCardId) => set({ maskCardId })
+  setMaskCardId: (maskCardId) => set({ maskCardId }),
+  trimCardId: null,
+  setTrimCardId: (trimCardId) => set({ trimCardId }),
+  showTaskCenter: false,
+  setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter })
 }))

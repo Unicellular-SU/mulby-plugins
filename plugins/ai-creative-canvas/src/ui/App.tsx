@@ -10,6 +10,9 @@ import { ComposeModal } from './components/ComposeModal'
 import { StoryboardModal } from './components/StoryboardModal'
 import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
+import { VideoTrimModal } from './components/VideoTrimModal'
+import { TaskCenter } from './components/TaskCenter'
+import { ToastHost } from './components/ToastHost'
 import { loadProject, saveProject } from './services/persistence'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
@@ -25,8 +28,15 @@ export default function App() {
     ;(async () => {
       const p = await loadProject()
       if (!disposed && p) {
-        // 旧工程兼容：补 parentId 默认 null
-        for (const b of p.boards) for (const c of Object.values(b.cards)) if ((c as any).parentId === undefined) (c as any).parentId = null
+        // 旧工程兼容：补 parentId 默认 null；重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）
+        for (const b of p.boards)
+          for (const c of Object.values(b.cards)) {
+            if ((c as any).parentId === undefined) (c as any).parentId = null
+            if (c.status === 'running' || c.status === 'queued') {
+              c.status = 'idle'
+              c.progress = 0
+            }
+          }
         useGraph.getState().replaceProject(p)
       }
     })()
@@ -101,6 +111,9 @@ export default function App() {
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />
+      <VideoTrimModal />
+      <TaskCenter />
+      <ToastHost />
     </div>
   )
 }

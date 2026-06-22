@@ -77,13 +77,12 @@ export function Select({
           <div
             ref={popRef}
             data-interactive
-            className="fixed z-[70] rounded-lg border bg-white dark:bg-neutral-900 shadow-xl py-1 overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200"
+            className="ace-menu ace-anim-pop fixed z-[70] py-1 overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200"
             style={{
               left: pos.left,
               width: Math.max(pos.width, 132),
               maxHeight: 232,
-              ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 }),
-              borderColor: 'var(--ace-border)'
+              ...(pos.up ? { bottom: window.innerHeight - pos.top + 4 } : { top: pos.top + 4 })
             }}
           >
             {options.map((o) => (

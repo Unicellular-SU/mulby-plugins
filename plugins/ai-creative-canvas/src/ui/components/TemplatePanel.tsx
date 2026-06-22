@@ -5,6 +5,7 @@ import { useUi } from '../store/uiStore'
 import { listTemplates, deleteTemplate } from '../services/templates'
 import { screenToWorld } from '../canvas/viewport'
 import type { GroupTemplate } from '../types'
+import { toast } from '../store/toastStore'
 
 export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () => void }) {
   const [tpls, setTpls] = useState<GroupTemplate[]>([])
@@ -18,12 +19,12 @@ export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () =>
     const vp = useGraph.getState().getActiveBoard().viewport
     const world = screenToWorld(ss.w / 2, ss.h / 2, vp)
     useGraph.getState().insertTemplate(t, { x: world.x - t.group.w / 2, y: world.y - t.group.h / 2 })
-    ;(window as any).mulby?.notification?.show?.(`已插入模板：${t.name}`, 'success')
+    toast(`已插入模板：${t.name}`, 'success')
     onClose()
   }
   const del = async (id: string) => {
     if (await deleteTemplate(id)) setTpls(await listTemplates())
-    else (window as any).mulby?.notification?.show?.('删除失败', 'error')
+    else toast('删除失败', 'error')
   }
 
   return (
@@ -31,8 +32,7 @@ export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () =>
       <div
         data-interactive
         onClick={(e) => e.stopPropagation()}
-        className="w-[420px] max-w-full max-h-[70vh] flex flex-col rounded-xl border bg-white dark:bg-neutral-900 shadow-2xl text-neutral-800 dark:text-neutral-200"
-        style={{ borderColor: 'var(--ace-border)' }}
+        className="ace-dialog ace-anim-scale w-[420px] max-w-full max-h-[70vh] flex flex-col text-neutral-800 dark:text-neutral-200"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--ace-border)' }}>
           <div className="flex items-center gap-2 font-semibold">

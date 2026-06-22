@@ -8,10 +8,11 @@ import { saveGroupAsTemplate } from '../services/templates'
 import { screenToWorld } from '../canvas/viewport'
 import { stageEl } from '../canvas/stageEl'
 import type { Card, CardKind } from '../types'
+import { toast } from '../store/toastStore'
 
 type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true }
 
-const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', video: '视频', audio: '音频', source: '素材' }
+const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', video: '视频', audio: '音频', source: '素材', note: '便签' }
 
 export function ContextMenu() {
   const ctx = useUi((s) => s.ctxMenu)
@@ -88,10 +89,10 @@ export function ContextMenu() {
       const dest = await m.dialog.showSaveDialog({ defaultPath: `${c.title}.${ext}`, filters: [{ name: '文件', extensions: [ext] }] })
       if (dest) {
         await m.filesystem.copy(c.assetLocalPath, dest)
-        m.notification?.show?.('已导出：' + dest, 'success')
+        toast('已导出：' + dest, 'success')
       }
     } catch {
-      m.notification?.show?.('导出失败', 'error')
+      toast('导出失败', 'error')
     }
   }
 
@@ -132,7 +133,7 @@ export function ContextMenu() {
         onClick: () =>
           run(() => {
             const n = prompt('模板名称:', cards[0].title)
-            if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => (window as any).mulby?.notification?.show?.(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
+            if (n) void saveGroupAsTemplate(cards[0].id, n, board).then((t) => toast(t ? '已保存模板' : '保存失败', t ? 'success' : 'error'))
           })
       })
     if (nonGroup.length >= 1) {
@@ -163,7 +164,7 @@ export function ContextMenu() {
   } else {
     const rect = stageEl.current?.getBoundingClientRect()
     const world = screenToWorld(ctx.x - (rect?.left || 0), ctx.y - (rect?.top || 0), board.viewport)
-    ;(['text', 'image', 'video', 'audio', 'source'] as CardKind[]).forEach((k) => {
+    ;(['text', 'image', 'video', 'audio', 'source', 'note'] as CardKind[]).forEach((k) => {
       items.push({ label: '新建' + NEW_LABEL[k], onClick: () => run(() => g.addCard(k, world)) })
     })
     if (g.clipboard && g.clipboard.length) {
@@ -186,8 +187,8 @@ export function ContextMenu() {
         e.preventDefault()
         e.stopPropagation()
       }}
-      className="fixed z-[90] rounded-lg border bg-white dark:bg-neutral-900 shadow-xl py-1 text-sm text-neutral-800 dark:text-neutral-200"
-      style={{ left, top, width: W, borderColor: 'var(--ace-border)' }}
+      className="ace-menu ace-anim-pop fixed z-[90] py-1 text-sm text-neutral-800 dark:text-neutral-200"
+      style={{ left, top, width: W }}
     >
       {items.map((it, i) =>
         'sep' in it ? (

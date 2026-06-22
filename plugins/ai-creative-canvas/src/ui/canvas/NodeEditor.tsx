@@ -13,12 +13,11 @@ import { arrayBufferToBase64, uid } from '../util'
 import { worldToScreen } from './viewport'
 import { stageEl } from './stageEl'
 import { ModelPicker } from '../components/ModelPicker'
-import { MediaToolbox } from '../components/MediaToolbox'
 import { ParamControls } from '../components/ParamControls'
 import { Select } from '../components/Select'
-import type { Material, MaterialKind, NodeAsset } from '../types'
+import { KIND_ACCENT, type Material, type MaterialKind, type NodeAsset } from '../types'
+import { toast } from '../store/toastStore'
 
-const KIND_ACCENT: Record<string, string> = { image: '#6366f1', video: '#ec4899', text: '#10b981', audio: '#f59e0b', source: '#64748b' }
 const MAT_ICON: Record<MaterialKind, typeof ImageIcon> = { image: ImageIcon, video: Video, audio: Music, text: TypeIcon }
 const PANEL_W = 480
 
@@ -76,7 +75,7 @@ export function NodeEditor() {
   if (selectedIds.length !== 1) return null
   const card = board.cards[selectedIds[0]]
   if (!card) return null
-  if (card.kind === 'group') return null
+  if (card.kind === 'group' || card.kind === 'note') return null
 
   const vp = board.viewport
   const accent = KIND_ACCENT[card.kind]
@@ -137,7 +136,7 @@ export function NodeEditor() {
     try {
       await fn(card.id)
     } catch (e: any) {
-      ;(window as any).mulby?.notification?.show?.(e?.message || '操作失败', 'error')
+      toast(e?.message || '操作失败', 'error')
     } finally {
       setToolBusy(false)
     }
@@ -177,10 +176,10 @@ export function NodeEditor() {
       const dest = await m.dialog.showSaveDialog({ defaultPath: `${card.title}.${ext}`, filters: [{ name: '文件', extensions: [ext] }] })
       if (dest) {
         await m.filesystem.copy(card.assetLocalPath, dest)
-        m.notification?.show?.('已导出：' + dest, 'success')
+        toast('已导出：' + dest, 'success')
       }
     } catch {
-      m.notification?.show?.('导出失败', 'error')
+      toast('导出失败', 'error')
     }
   }
 
@@ -381,8 +380,6 @@ export function NodeEditor() {
         )}
 
         {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
-
-          {hasMedia && <MediaToolbox card={card} />}
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate } from 'lucide-react'
+import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useTask } from '../store/taskStore'
@@ -20,7 +20,7 @@ export function TopBar() {
 
   return (
     <div
-      className="h-11 shrink-0 flex items-center gap-3 px-3 border-b bg-white/80 dark:bg-neutral-900/80 backdrop-blur"
+      className="ace-bar h-11 shrink-0 flex items-center gap-3 px-3 border-b"
       style={{ borderColor: 'var(--ace-border)' }}
     >
       <div className="flex items-center gap-1.5 font-semibold text-[15px] pr-2">
@@ -62,12 +62,20 @@ export function TopBar() {
           <Plus size={15} />
         </button>
       </div>
-      {active > 0 && (
-        <span className="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-500 flex items-center gap-1 whitespace-nowrap">
-          <Loader2 size={11} className="animate-spin" />
-          {active} 生成中
-        </span>
-      )}
+      <button
+        onClick={() => useUi.getState().setShowTaskCenter(true)}
+        title="任务中心"
+        className="text-[11px] px-2 py-0.5 rounded-full flex items-center gap-1 whitespace-nowrap hover:bg-black/5 dark:hover:bg-white/10"
+      >
+        {active > 0 ? (
+          <>
+            <Loader2 size={11} className="animate-spin text-indigo-500" />
+            <span className="text-indigo-500">{active} 生成中</span>
+          </>
+        ) : (
+          <ListChecks size={14} className="opacity-70" />
+        )}
+      </button>
       <button onClick={() => useUi.getState().setShowTemplates(true)} title="模板" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <LayoutTemplate size={15} />
       </button>

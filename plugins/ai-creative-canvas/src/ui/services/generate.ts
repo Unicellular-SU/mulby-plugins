@@ -13,7 +13,8 @@ import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
 
 const limiter = createLimiter(() => useGraph.getState().project.concurrency || 4)
-const aborters = new Map<string, string>() // cardId -> requestId
+const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
+const videoAborts = new Map<string, AbortController>() // cardId -> 视频任务取消器（轮询循环）
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -128,8 +129,18 @@ export async function generateCard(cardId: string): Promise<void> {
           aspect: (card.params?.aspect as string) || '16:9',
           duration: snapDuration(card.modelId, Number(card.params?.duration) || 5)
         }
-        const { url } = await runVideoJob(cfg, key, { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams }, (p) =>
-          useGraph.getState().updateCard(cardId, { progress: p })
+        const vctrl = new AbortController()
+        videoAborts.set(cardId, vctrl)
+        const { url } = await runVideoJob(
+          cfg,
+          key,
+          { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams },
+          (p) => useGraph.getState().updateCard(cardId, { progress: p }),
+          vctrl.signal,
+          (taskId) => {
+            const m = useGraph.getState().getActiveBoard().cards[cardId]?.meta || {}
+            useGraph.getState().updateCard(cardId, { meta: { ...m, task: { taskId, provider: cfg.id } } })
+          }
         )
         const projectId = useGraph.getState().project.id
         const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', {
@@ -139,12 +150,14 @@ export async function generateCard(cardId: string): Promise<void> {
         })
         const path = r?.data?.path
         if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
+        const mDone = useGraph.getState().getActiveBoard().cards[cardId]?.meta || {}
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,
           assetUrl: toFileUrl(path),
           assetLocalPath: path,
-          mime: 'video/mp4'
+          mime: 'video/mp4',
+          meta: { ...mDone, task: undefined }
         })
       } else if (card.kind === 'audio') {
         const cfg = useProviders.getState().activeFor('audio')
@@ -178,6 +191,7 @@ export async function generateCard(cardId: string): Promise<void> {
       })
     } finally {
       aborters.delete(cardId)
+      videoAborts.delete(cardId)
       useTask.getState().dec()
     }
   })
@@ -193,5 +207,10 @@ export async function stopCard(cardId: string): Promise<void> {
     }
   }
   aborters.delete(cardId)
+  const vc = videoAborts.get(cardId)
+  if (vc) {
+    vc.abort()
+    videoAborts.delete(cardId)
+  }
   useGraph.getState().updateCard(cardId, { status: 'idle', progress: 0 })
 }

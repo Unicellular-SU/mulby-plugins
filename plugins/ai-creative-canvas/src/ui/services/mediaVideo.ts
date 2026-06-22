@@ -3,8 +3,9 @@ import { mediaPath, ensureSubDir, toFileUrl } from './media'
 function ff(): any {
   return (window as any).mulby.ffmpeg
 }
+import { toast, type ToastType } from '../store/toastStore'
 function notify(msg: string, type?: string) {
-  ;(window as any).mulby?.notification?.show?.(msg, type)
+  toast(msg, (type as ToastType) || 'info')
 }
 function readdir(dir: string): Promise<string[]> {
   return (window as any).mulby.filesystem.readdir(dir) as Promise<string[]>
@@ -68,6 +69,23 @@ export async function extractFrames(projectId: string, inPath: string, fps = 1, 
   await runFf(['-i', inPath, '-vf', `fps=${fps}`, '-frames:v', String(max), `${dir}/frame_%04d.png`])
   const files = await readdir(dir)
   return files.filter((f) => f.endsWith('.png')).sort().map((f) => `${dir}/${f}`)
+}
+
+// 截取某一时刻的单帧 → PNG（用于卡内「截帧」）
+export async function frameAt(projectId: string, inPath: string, atSec: number): Promise<string> {
+  const out = await mediaPath(projectId, 'frame', 'png')
+  await runFf(['-ss', String(Math.max(0, atSec)), '-i', inPath, '-frames:v', '1', '-q:v', '2', out])
+  return out
+}
+
+// 时间轴缩略图：沿全片均匀抽 count 张小图（裁剪时间轴用）
+export async function timelineThumbs(projectId: string, inPath: string, count = 12): Promise<{ thumbs: string[]; duration: number }> {
+  const duration = (await probeDuration(inPath)) || 0
+  const dir = await ensureSubDir(projectId, `tl_${Date.now()}`)
+  const fpsExpr = duration > 0 ? `${count}/${duration}` : '1'
+  await runFf(['-i', inPath, '-vf', `fps=${fpsExpr},scale=160:-1:flags=fast_bilinear`, '-frames:v', String(count), `${dir}/tl_%03d.png`])
+  const files = await readdir(dir)
+  return { thumbs: files.filter((f) => f.endsWith('.png')).sort().map((f) => `${dir}/${f}`), duration }
 }
 
 // 场景检测：输出每个镜头切点的代表帧（无需解析 stderr）

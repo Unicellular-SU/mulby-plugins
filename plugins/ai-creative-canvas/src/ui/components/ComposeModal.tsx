@@ -5,6 +5,7 @@ import { useUi } from '../store/uiStore'
 import { Select } from './Select'
 import { composeFilm, ensureFfmpeg, toFileUrl, type FilmTransition } from '../services/mediaVideo'
 import type { Card } from '../types'
+import { toast } from '../store/toastStore'
 
 const ASPECT_WH: Record<string, [number, number]> = {
   '16:9': [1280, 720],
@@ -86,10 +87,10 @@ function Inner() {
         mime: 'video/mp4'
       })
       useGraph.getState().setSelection([id])
-      ;(window as any).mulby?.notification?.show?.('成片已合成', 'success')
+      toast('成片已合成', 'success')
       useUi.getState().setShowCompose(false)
     } catch (e: any) {
-      ;(window as any).mulby?.notification?.show?.('合成失败：' + (e?.message || String(e)), 'error')
+      toast('合成失败：' + (e?.message || String(e)), 'error')
     } finally {
       setBusy(false)
     }
@@ -100,8 +101,7 @@ function Inner() {
       <div
         data-interactive
         onClick={(e) => e.stopPropagation()}
-        className="w-[420px] max-w-full rounded-xl border bg-white dark:bg-neutral-900 shadow-2xl text-neutral-800 dark:text-neutral-200"
-        style={{ borderColor: 'var(--ace-border)' }}
+        className="ace-dialog ace-anim-scale w-[420px] max-w-full text-neutral-800 dark:text-neutral-200"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--ace-border)' }}>
           <div className="flex items-center gap-2 font-semibold">

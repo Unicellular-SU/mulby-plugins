@@ -26,8 +26,10 @@ export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number):
   return wrapped
 }
 
-// 简单并发限流（替代 p-limit）
-export function createLimiter(concurrency: number | (() => number)) {
+// 简单并发限流（替代 p-limit）；额外暴露 pending()/active() 供任务中心读取排队信息
+export type Limiter = (<T>(task: () => Promise<T>) => Promise<T>) & { pending: () => number; active: () => number }
+
+export function createLimiter(concurrency: number | (() => number)): Limiter {
   const getMax = typeof concurrency === 'function' ? concurrency : () => concurrency
   let active = 0
   const queue: Array<() => void> = []
@@ -38,7 +40,7 @@ export function createLimiter(concurrency: number | (() => number)) {
       job()
     }
   }
-  return function run<T>(task: () => Promise<T>): Promise<T> {
+  const run = function <T>(task: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       queue.push(() => {
         task()
@@ -50,7 +52,10 @@ export function createLimiter(concurrency: number | (() => number)) {
       })
       pump()
     })
-  }
+  } as Limiter
+  run.pending = () => queue.length
+  run.active = () => active
+  return run
 }
 
 export async function blobUrlToArrayBuffer(url: string): Promise<ArrayBuffer> {

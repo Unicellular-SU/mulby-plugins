@@ -10,8 +10,9 @@ import { isCardInsideGroup, type Card } from '../types'
 
 const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ef4444', '#64748b']
 
+import { toast, type ToastType } from '../store/toastStore'
 function notify(m: string, t?: string) {
-  ;(window as any).mulby?.notification?.show?.(m, t)
+  toast(m, (t as ToastType) || 'info')
 }
 
 // 分组框：命名/换色/折叠/生成组/同步播放/存为模板/取消编组；成员归属用 parentId（CanvasStage 拖动带动后代）

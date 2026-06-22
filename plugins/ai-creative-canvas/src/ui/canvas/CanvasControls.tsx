@@ -27,8 +27,7 @@ export function CanvasControls({ onFit }: { onFit: () => void }) {
   const btn = 'h-8 w-8 grid place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed'
 
   return (
-    <div data-interactive className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg border bg-white/90 dark:bg-neutral-900/90 backdrop-blur px-1.5 py-1 shadow-md"
-      style={{ borderColor: 'var(--ace-border)' }}>
+    <div data-interactive className="ace-glass absolute bottom-3 left-3 flex items-center gap-1 px-1.5 py-1">
       <button className={btn} title="撤销 (Ctrl+Z)" onClick={undo} disabled={!canUndo}><Undo2 size={16} /></button>
       <button className={btn} title="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}><Redo2 size={16} /></button>
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />

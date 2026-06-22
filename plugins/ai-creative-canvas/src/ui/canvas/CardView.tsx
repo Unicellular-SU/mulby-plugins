@@ -1,25 +1,118 @@
-import { type PointerEvent as ReactPointerEvent } from 'react'
-import { Image as ImageIcon, Video, Type, Music, Package, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
+import { captureFrame } from '../services/mediaOps'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from './viewport'
 import { stageEl } from './stageEl'
-import type { Card, CardKind } from '../types'
+import { KIND_ACCENT, type Card, type CardKind } from '../types'
 
-const KIND_META: Record<CardKind, { icon: typeof ImageIcon; accent: string }> = {
-  image: { icon: ImageIcon, accent: '#6366f1' },
-  video: { icon: Video, accent: '#ec4899' },
-  text: { icon: Type, accent: '#10b981' },
-  audio: { icon: Music, accent: '#f59e0b' }
-  ,
-  source: { icon: Package, accent: '#64748b' },
-  group: { icon: Package, accent: '#64748b' }
+const KIND_ICON: Record<CardKind, typeof ImageIcon> = {
+  image: ImageIcon,
+  video: Video,
+  text: Type,
+  audio: Music,
+  source: Package,
+  group: Package,
+  note: StickyNote
+}
+
+const NOTE_COLORS = ['#fef9c3', '#fde68a', '#fecaca', '#bbf7d0', '#bfdbfe', '#e9d5ff', '#ffffff']
+
+const fmtTime = (s: number) => {
+  if (!s || !isFinite(s)) return '0:00'
+  const m = Math.floor(s / 60)
+  const sec = Math.floor(s % 60)
+  return `${m}:${sec.toString().padStart(2, '0')}`
+}
+
+// 卡内视频播放器：中央播放钮 + 悬停底部控制条（播放/静音/可拖拽进度/时间）
+function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: number) => void }) {
+  const vref = useRef<HTMLVideoElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [muted, setMuted] = useState(true)
+  const [prog, setProg] = useState(0)
+  const [dur, setDur] = useState(0)
+
+  const toggle = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    const v = vref.current
+    if (!v) return
+    if (v.paused) {
+      void v.play()
+      setPlaying(true)
+    } else {
+      v.pause()
+      setPlaying(false)
+    }
+  }
+  const seek = (clientX: number, el: HTMLElement) => {
+    const v = vref.current
+    if (!v || !v.duration) return
+    const r = el.getBoundingClientRect()
+    const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width))
+    v.currentTime = p * v.duration
+    setProg(p)
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      <video
+        ref={vref}
+        src={card.assetUrl as string}
+        muted={muted}
+        playsInline
+        loop
+        onLoadedMetadata={(e) => {
+          onFit(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
+          setDur(e.currentTarget.duration)
+        }}
+        onTimeUpdate={(e) => {
+          const v = e.currentTarget
+          if (v.duration) setProg(v.currentTime / v.duration)
+        }}
+        onEnded={() => setPlaying(false)}
+        className="w-full h-full object-cover"
+      />
+      {!playing && (
+        <button
+          data-interactive
+          onClick={toggle}
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 grid place-items-center rounded-full bg-black/55 text-white hover:bg-black/75"
+          title="播放"
+        >
+          <Play size={18} />
+        </button>
+      )}
+      <div
+        data-interactive
+        className="absolute bottom-0 inset-x-0 px-2 py-1 flex items-center gap-2 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <button onClick={toggle} className="text-white shrink-0" title={playing ? '暂停' : '播放'}>
+          {playing ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <div className="flex-1 h-1.5 rounded-full bg-white/30 cursor-pointer relative" onPointerDown={(e) => { e.stopPropagation(); seek(e.clientX, e.currentTarget) }}>
+          <div className="absolute inset-y-0 left-0 rounded-full bg-white" style={{ width: `${Math.round(prog * 100)}%` }} />
+        </div>
+        <span className="text-[10px] text-white tabular-nums shrink-0">
+          {fmtTime(prog * dur)}/{fmtTime(dur)}
+        </span>
+        <button onClick={(e) => { e.stopPropagation(); void captureFrame(card.id, vref.current?.currentTime || 0) }} className="text-white shrink-0" title="截取当前帧为图片">
+          <Camera size={14} />
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); setMuted((m) => !m) }} className="text-white shrink-0" title={muted ? '取消静音' : '静音'}>
+          {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+        </button>
+      </div>
+    </div>
+  )
 }
 
 export function CardView({ card, selected }: { card: Card; selected: boolean }) {
   const updateCard = useGraph((s) => s.updateCard)
-  const meta = KIND_META[card.kind]
+  const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
+  const [editing, setEditing] = useState(false)
 
   // 媒体加载后把卡片高度调整为媒体真实比例（按当前宽度），每个 assetUrl 只调一次
   const fitAspect = (w: number, h: number) => {
@@ -106,6 +199,66 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
     updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: { ...card.meta, fittedFor: undefined } })
   }
 
+  // 便签卡：彩色便利贴，双击就地编辑，悬停/选中显示换色
+  if (card.kind === 'note') {
+    const noteColor = ((card.params as any)?.noteColor as string) || '#fef9c3'
+    return (
+      <div
+        data-card-id={card.id}
+        className={`ace-card group absolute rounded-xl ${selected ? 'ring-2 z-10' : ''}`}
+        style={{ left: card.x, top: card.y, width: card.w, height: card.h, ['--tw-ring-color' as any]: meta.accent }}
+      >
+        <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ background: noteColor, color: '#1f2937', boxShadow: 'var(--shadow-card)' }}>
+          {editing ? (
+            <textarea
+              data-interactive
+              autoFocus
+              defaultValue={card.text || ''}
+              onPointerDown={(e) => e.stopPropagation()}
+              onBlur={(e) => {
+                updateCard(card.id, { text: e.target.value })
+                setEditing(false)
+              }}
+              className="w-full h-full p-2.5 bg-transparent outline-none resize-none text-[13px] leading-relaxed"
+              placeholder="输入便签内容…"
+            />
+          ) : (
+            <div
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                setEditing(true)
+              }}
+              className="w-full h-full p-2.5 text-[13px] leading-relaxed whitespace-pre-wrap overflow-auto ace-scroll"
+            >
+              {card.text || <span className="opacity-40">双击编辑便签</span>}
+            </div>
+          )}
+        </div>
+        <div data-interactive className={`absolute -top-2.5 left-2 flex items-center gap-1 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          {NOTE_COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={(e) => {
+                e.stopPropagation()
+                updateCard(card.id, { params: { ...card.params, noteColor: c } })
+              }}
+              className="w-3.5 h-3.5 rounded-full border border-black/10 shadow"
+              style={{ background: c }}
+              title="便签颜色"
+            />
+          ))}
+        </div>
+        <div
+          data-interactive
+          onPointerDown={startCardResize}
+          title="拖拽缩放"
+          className={`absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize z-30 transition-opacity ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+          style={{ borderRight: `2px solid ${meta.accent}`, borderBottom: `2px solid ${meta.accent}`, borderBottomRightRadius: 10 }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div
       data-card-id={card.id}
@@ -157,13 +310,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
             alt=""
           />
         ) : isVid ? (
-          <video
-            src={card.assetUrl as string}
-            muted
-            playsInline
-            onLoadedMetadata={(e) => fitAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)}
-            className="w-full h-full object-cover"
-          />
+          <VideoCardPlayer card={card} onFit={fitAspect} />
         ) : isAud ? (
           <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-3">
             <Music size={22} style={{ color: meta.accent }} />

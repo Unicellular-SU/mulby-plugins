@@ -10,6 +10,7 @@ import { Minimap } from './Minimap'
 import { SelectionBox, type ScreenRect } from './SelectionBox'
 import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
+import { FloatingToolbar } from './FloatingToolbar'
 import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
 import { MultiConnectHandle } from './MultiConnectHandle'
@@ -37,6 +38,7 @@ export function CanvasStage() {
   const panAcc = useRef({ dx: 0, dy: 0 })
   const dragAcc = useRef({ dx: 0, dy: 0 })
   const rafId = useRef<number | null>(null)
+  const zoomTimer = useRef<number | null>(null)
 
   const [cursor, setCursor] = useState<'default' | 'grab' | 'grabbing'>('default')
   const [marquee, setMarquee] = useState<ScreenRect | null>(null)
@@ -55,6 +57,14 @@ export function CanvasStage() {
   for (const c of Object.values(board.cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
+
+  // 交互期降级：直接写 DOM data 属性（不触发 React 重渲），CSS 据此关阴影/过渡/卡片指针事件
+  const setInteracting = (mode: string | null) => {
+    const el = stageRef.current
+    if (!el) return
+    if (mode) el.dataset.interacting = mode
+    else delete el.dataset.interacting
+  }
 
   const doFit = () => {
     const rect = getRect()
@@ -128,6 +138,7 @@ export function CanvasStage() {
     if (e.button === 1 || spaceRef.current) {
       inter.current = { mode: 'pan', lastX: e.clientX, lastY: e.clientY }
       setCursor('grabbing')
+      setInteracting('pan')
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
       e.preventDefault()
       return
@@ -167,6 +178,7 @@ export function CanvasStage() {
         baseSel: additive ? [...g.selectedIds] : []
       }
       setMarquee({ x: sx, y: sy, w: 0, h: 0 })
+      setInteracting('marquee')
       try { stageRef.current?.setPointerCapture(e.pointerId) } catch { /* ignore */ }
     }
   }
@@ -188,6 +200,7 @@ export function CanvasStage() {
       if (!it.moved && Math.hypot(ddx, ddy) >= DRAG_THRESHOLD) {
         useGraph.getState().pushHistory()
         it.moved = true
+        setInteracting('drag')
       }
       if (it.moved) {
         dragAcc.current.dx += ddx
@@ -262,6 +275,7 @@ export function CanvasStage() {
       }
     }
     useUi.getState().setGuides(null)
+    setInteracting(null)
     inter.current = { mode: 'idle' }
     setCursor(spaceRef.current ? 'grab' : 'default')
     try { stageRef.current?.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
@@ -313,6 +327,12 @@ export function CanvasStage() {
       const factor = Math.exp(-e.deltaY * 0.0015)
       const g = useGraph.getState()
       g.setViewport(zoomAt(g.getActiveBoard().viewport, sx, sy, factor))
+      el.dataset.interacting = 'zoom'
+      if (zoomTimer.current != null) clearTimeout(zoomTimer.current)
+      zoomTimer.current = window.setTimeout(() => {
+        if (inter.current.mode === 'idle' && stageRef.current) delete stageRef.current.dataset.interacting
+        zoomTimer.current = null
+      }, 220)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -429,6 +449,7 @@ export function CanvasStage() {
     <div
       ref={stageRef}
       className="ace-stage relative w-full h-full overflow-hidden"
+      data-zoom-low={vp.zoom < 0.5 ? 'true' : undefined}
       style={{ cursor, touchAction: 'none', userSelect: 'none' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -443,7 +464,7 @@ export function CanvasStage() {
       <EdgeLayer board={board} temp={connectTemp} />
       <div
         className="absolute top-0 left-0"
-        style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0' }}
+        style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0', willChange: 'transform' }}
       >
         {Object.values(board.cards)
           .filter((c) => c.kind === 'group' && !hiddenMembers.has(c.id))
@@ -462,6 +483,7 @@ export function CanvasStage() {
       <CanvasControls onFit={doFit} />
       <ConnectMenu />
       <NodeEditor />
+      <FloatingToolbar />
       <BatchActions />
       <MultiConnectHandle />
       <Lightbox />

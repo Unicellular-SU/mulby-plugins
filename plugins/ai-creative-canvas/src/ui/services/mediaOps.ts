@@ -2,6 +2,7 @@ import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
 import { createLimiter } from '../util'
 import { saveBase64, toFileUrl } from './media'
+import { toast } from '../store/toastStore'
 import * as MI from './mediaImage'
 import * as MV from './mediaVideo'
 
@@ -97,12 +98,32 @@ export async function runGridSlice(cardId: string, rows: number, cols: number): 
         }
       }
     } catch (e: any) {
-      const n = (window as any).mulby?.notification
-      n?.show?.('宫格切分失败：' + (e?.message || String(e)), 'error')
+      toast('宫格切分失败：' + (e?.message || String(e)), 'error')
     } finally {
       useTask.getState().dec()
     }
   })
+}
+
+// 截帧：把视频当前时刻抽成一张图片卡（ffmpeg，规避 canvas taint）
+export async function captureFrame(cardId: string, atSec: number): Promise<void> {
+  const g = useGraph.getState()
+  const src = g.getActiveBoard().cards[cardId]
+  if (!src?.assetLocalPath) {
+    toast('请对本地视频文件使用', 'error')
+    return
+  }
+  const ok = await MV.ensureFfmpeg()
+  if (!ok) return
+  useTask.getState().inc()
+  try {
+    const out = await MV.frameAt(useGraph.getState().project.id, src.assetLocalPath, atSec)
+    newMediaCard(src, 'image', `${src.title} · 截帧`, out, 'image/png')
+  } catch (e: any) {
+    toast('截帧失败：' + (e?.message || String(e)), 'error')
+  } finally {
+    useTask.getState().dec()
+  }
 }
 
 // ---- 视频工具 ----
@@ -190,8 +211,7 @@ export async function runVideoTool(
       newMediaCard(src, kind, `${src.title} · ${VTOOL_LABEL[tool]}`, out, tool === 'gif' ? 'image/gif' : 'video/mp4')
     }
   } catch (e: any) {
-    const n = (window as any).mulby?.notification
-    n?.show?.('视频处理失败：' + (e?.message || String(e)), 'error')
+    toast('视频处理失败：' + (e?.message || String(e)), 'error')
   } finally {
     useTask.getState().dec()
   }

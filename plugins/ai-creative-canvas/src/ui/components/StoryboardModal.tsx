@@ -5,8 +5,9 @@ import { useUi } from '../store/uiStore'
 import { generateShots, materializeShots } from '../services/storyboard'
 import type { Shot } from '../types'
 
+import { toast, type ToastType } from '../store/toastStore'
 function notify(m: string, t?: string) {
-  ;(window as any).mulby?.notification?.show?.(m, t)
+  toast(m, (t as ToastType) || 'info')
 }
 
 export function StoryboardModal() {

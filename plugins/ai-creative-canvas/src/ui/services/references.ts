@@ -35,7 +35,7 @@ export function buildMaterials(card: Card, board: Board): Material[] {
   for (const id of [...edgeSources, ...explicit]) {
     if (id === card.id || seen.has('card:' + id)) continue
     const c = board.cards[id]
-    if (!c || c.kind === 'group') continue
+    if (!c || c.kind === 'group' || c.kind === 'note') continue
     seen.add('card:' + id)
     const k = matKindOfCard(c)
     counters[k]++
