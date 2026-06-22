@@ -45,6 +45,10 @@ interface UiState {
   toggleNotifyDone: () => void
   showGallery: boolean
   setShowGallery: (v: boolean) => void
+  annotTool: 'pen' | 'arrow' | 'rect' | 'text' | null
+  setAnnotTool: (t: 'pen' | 'arrow' | 'rect' | 'text' | null) => void
+  annotColor: string
+  setAnnotColor: (c: string) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -106,5 +110,9 @@ export const useUi = create<UiState>((set) => ({
       return { notifyDone: v }
     }),
   showGallery: false,
-  setShowGallery: (showGallery) => set({ showGallery })
+  setShowGallery: (showGallery) => set({ showGallery }),
+  annotTool: null,
+  setAnnotTool: (annotTool) => set({ annotTool }),
+  annotColor: '#ef4444',
+  setAnnotColor: (annotColor) => set({ annotColor })
 }))

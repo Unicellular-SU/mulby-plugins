@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate } from '../types'
+import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate, Annotation } from '../types'
 import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
 import { canConnect } from '../services/connectionPolicy'
@@ -127,6 +127,11 @@ interface GraphState {
   connectAll: (sourceIds: string[], target: string) => void
   createConnectedNode: (kind: CardKind, world: { x: number; y: number }, sourceIds: string[]) => string
   removeEdge: (id: string) => void
+
+  // 标注
+  addAnnotation: (a: Annotation) => void
+  removeAnnotation: (id: string) => void
+  clearAnnotations: () => void
 
   // 选择
   setSelection: (ids: string[]) => void
@@ -463,6 +468,11 @@ export const useGraph = create<GraphState>((set, get) => ({
       })
     }))
   },
+
+  // 标注（不入撤销栈——BoardSnap 不含 annotations；删除/清空即可逆操作）
+  addAnnotation: (a) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [...(b.annotations || []), a] })) })),
+  removeAnnotation: (id) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: (b.annotations || []).filter((x) => x.id !== id) })) })),
+  clearAnnotations: () => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [] })) })),
 
   connectAll: (sourceIds, target) => {
     const b = activeBoardOf(get().project)

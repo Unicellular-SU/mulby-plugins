@@ -919,3 +919,6 @@
 - **P2a 作品库面板**（2026-06-22，已提交）：新增 `components/Gallery.tsx`（复用 `Modal`），扫描全工程卡片产物成 4 列网格；单击回画布（切板 + 选中 + 居中视口）、双击预览；TopBar 加「作品库」入口（Images），`uiStore.showGallery`。
 - **P2c Provider 导入导出 + 连通测试**（2026-06-22，已提交）：`providerStore.exportJson/importJson`（不含密钥——密钥单独存 encrypted，导入后需重填）；`engine.testProvider`（对 submitUrl/baseURL 的 origin 发 GET 探测可达性，不真正提交任务）；ProviderSettings 左栏加「导出/导入」、动作行加「测试连通」、模态外壳玻璃化（ace-dialog）、`notification.show`→`toast`。
 - **P2d 拼贴/宫格合成**（2026-06-22，已提交）：`mediaOps.runCollage`——多张图片卡按 `ceil(sqrt(n))` 自动网格、canvas cover-fit 合成一张（bytes→ImageBitmap 规避 file:// taint），落新图片卡（连引用源）；ContextMenu 选中 ≥2 图片卡时出「拼贴合成（N）」。**延后**：场景检测时间码（需解析 ffmpeg showinfo/pts_time 日志，宿主 ffmpeg.run 日志暴露不确定，待真机确认 API 后做；现有 sceneFrames 代表帧仍可用）。
+- **P2b 自由绘制标注层**（2026-06-22，已提交）：`types.Annotation`（pen/arrow/rect/text，世界坐标）+ `Board.annotations`；`graphStore.addAnnotation/removeAnnotation/clearAnnotations`（不入撤销栈）；`uiStore.annotTool/annotColor`；`canvas/AnnotationLayer.tsx`（世界层渲染已提交标注，non-scaling-stroke）+ `AnnotationDrawOverlay.tsx`（仅选中工具时挂载捕获指针、草稿屏幕预览、提交存世界坐标——**不改 CanvasStage 指针状态机**）+ `AnnotationToolbar.tsx`（底部居中浮岛：4 工具 + 7 色 + 清空）；随工程持久化。
+
+> **P2 低风险项完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴）。**剩余 P2 全为高风险盲改项**（千级虚拟化改渲染热路径、持久化分片改存储布局、多轨时间线、视频抠像绿幕、360/3D、多工程）——**强烈建议先在 Mulby 实测当前基线**（P0+P1+P2-light 全程 build 绿但未实跑）再逐项立项，避免盲改破坏渲染/存储。

@@ -11,6 +11,9 @@ import { SelectionBox, type ScreenRect } from './SelectionBox'
 import { ConnectMenu } from './ConnectMenu'
 import { NodeEditor } from './NodeEditor'
 import { FloatingToolbar } from './FloatingToolbar'
+import { AnnotationLayer } from './AnnotationLayer'
+import { AnnotationDrawOverlay } from './AnnotationDrawOverlay'
+import { AnnotationToolbar } from './AnnotationToolbar'
 import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
 import { MultiConnectHandle } from './MultiConnectHandle'
@@ -492,11 +495,14 @@ export function CanvasStage() {
           .map((c) => (
             <CardView key={c.id} card={c} selected={selSet.has(c.id)} />
           ))}
+        <AnnotationLayer annotations={board.annotations || []} />
       </div>
+      <AnnotationDrawOverlay />
       <SelectionBox rect={marquee} />
       <GuideLayer />
       {showMinimap && <Minimap />}
       <CanvasControls onFit={doFit} />
+      <AnnotationToolbar />
       <ConnectMenu />
       <NodeEditor />
       <FloatingToolbar />

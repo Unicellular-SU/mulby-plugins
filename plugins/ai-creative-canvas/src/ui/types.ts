@@ -69,12 +69,23 @@ export interface Viewport {
   zoom: number
 }
 
+// 自由绘制标注（世界坐标，随视口变换）
+export type AnnotKind = 'pen' | 'arrow' | 'rect' | 'text'
+export interface Annotation {
+  id: string
+  kind: AnnotKind
+  color: string
+  points: { x: number; y: number }[] // pen: 多点路径；arrow/rect: [起, 止]；text: [位置]
+  text?: string
+}
+
 export interface Board {
   id: string
   name: string
   cards: Record<string, Card>
   edges: Record<string, Edge>
   viewport: Viewport
+  annotations?: Annotation[]
 }
 
 export interface ProjectDoc {
