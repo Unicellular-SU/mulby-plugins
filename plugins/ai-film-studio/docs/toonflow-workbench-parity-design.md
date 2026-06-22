@@ -709,7 +709,7 @@ projectStore mutate（改 ProjectDoc 内存态）
   - **一级导航收敛**：`AppRail` 只保留「项目 / 工作台」两项；素材/提示词/画布不再作平级顶层视图（旧画布工程仍可从项目页打开，`editor` 视图保留作兼容入口）。
   - **左侧资源 Dock**（§7.1）：新增 `studio/StudioDock.tsx`（素材 | 提示词 两标签），复用 `AssetsView` 缩略图组件 + `assetStore` + `promptStore` 片段，**全部复用画布 Dock 的 CSS 类（afs-dock\*）**。`StudioEditor` 工作区现为 `Dock | 阶段区 | Agent` 三栏，Dock 可经 tabs 栏 `PanelLeft` 按钮收起/展开。
   - **片段/资产名插入聚焦输入框**（§7.3）：新增 `studio/services/focusInsert.ts`（`installFocusTracker`/`insertAtFocused`）——跟踪最后聚焦的 input/textarea，用「原生 value setter + dispatch input 事件」让受控组件的 onChange 接管并写回 store；Dock 内点击素材→插名、点击片段→插正文。
-  - **节点画布降级为「精修」Tab**（§7.4）：阶段区新增 `canvas` Tab 内嵌 `EditorView`（节点画布作高级编辑入口，imageFlow 的承载留 phase7）；该 Tab 下隐藏 studio Dock（避免与画布自带 Dock 重复）。
+  - **节点画布作高级编辑入口**（§7.4）：节点画布(`EditorView`)作为独立子系统（自带工程，与工作台项目互不相通）。〔修订〕初版曾嵌为工作台「精修」Tab，但与分镜关键帧精修重名且显示无关工程 → 现移回**左侧一级导航「画布」**（AppRail），不混入工作台阶段标签。关键帧精修走「分镜」每镜的「精修」按钮（ImageFlowEditor）。
   - **设置抽屉**（§7.1/§8）：顶栏齿轮按钮打开右侧抽屉内嵌 `SettingsView`（供应商/提示词/外观/存储），无需离开工作台。
   - **布局态持久化**：`studio:ui` KV 记录 `{stageTab, dockOpen}`，重开工作台恢复。
   - tsc + vite build 通过。运行态布局/视觉待 Mulby 实测。

@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, Workflow, PanelLeft, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -11,21 +11,19 @@ import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
-import EditorView from '../components/shell/EditorView'
 import SettingsView from '../components/views/SettingsView'
 import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 
-type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline' | 'canvas'
+type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'novel', label: '原著', icon: BookOpen },
   { id: 'script', label: '剧本', icon: FileText },
   { id: 'assets', label: '资产', icon: Users },
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'timeline', label: '时间线', icon: Film },
-  { id: 'canvas', label: '画布', icon: Workflow }, // 独立节点画布（高级编辑入口）；关键帧精修在「分镜」每镜的「精修」按钮
 ]
 
 // 视频模式（对标 Toonflow 4 模式，§5.3；具体提示词模板在 phase4 接入）
@@ -127,22 +125,13 @@ export default function StudioEditor() {
       </nav>
 
       <div className="afs-studio__work">
-        {dockOpen && tab !== 'canvas' && <StudioDock />}
-        <div className={`afs-studio__stage${tab === 'canvas' ? ' is-canvas' : ''}`}>
+        {dockOpen && <StudioDock />}
+        <div className="afs-studio__stage">
           {tab === 'novel' && <NovelTab />}
           {tab === 'script' && <ScriptTab />}
           {tab === 'assets' && <AssetsTab />}
           {tab === 'storyboard' && <StoryboardTab />}
           {tab === 'timeline' && <TimelineTab />}
-          {tab === 'canvas' && (
-            <div className="afs-studio__canvaswrap">
-              <div className="afs-studio__canvasnote">
-                这是独立的「节点画布」（高级编辑），有自己的工程，与当前工作台项目<b>相互独立</b>。
-                关键帧精修请用「分镜」里每个分镜卡片上的「精修」按钮。
-              </div>
-              <EditorView />
-            </div>
-          )}
         </div>
         <AgentPanel />
       </div>

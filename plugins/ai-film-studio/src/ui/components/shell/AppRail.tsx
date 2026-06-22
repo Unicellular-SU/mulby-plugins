@@ -1,13 +1,14 @@
-import { Clapperboard, LayoutGrid, Film, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
+import { Clapperboard, LayoutGrid, Film, Workflow, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
 import { useUiStore } from '../../store/uiStore'
 
 export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
 
-// 阶段1 信息架构收敛：一级导航只保留「项目 / 工作台」。素材/提示词/画布已并入工作台
-// （左侧资源 Dock + 「精修」Tab），不再作平级顶层视图；旧画布工程仍可从项目页打开（editor 视图保留）。
+// 一级导航：项目 / 工作台 / 画布。素材/提示词已并入工作台（左侧资源 Dock）；节点画布是独立子系统
+// （自带工程，与工作台项目互不相通），作一级入口而非工作台内标签。
 const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
   { view: 'home', icon: LayoutGrid, label: '项目' }, // 统一项目主页：画布工程 + 工作流项目
   { view: 'studio', icon: Film, label: '工作台' }, // Toonflow 式结构化流水线编辑器
+  { view: 'editor', icon: Workflow, label: '画布' }, // 独立节点画布（高级编辑）
 ]
 
 /** 左侧一级界面导航栏（rail）：始终可见，切换工程主页 / 画布 / 素材库 / 提示词库 / 设置。 */
