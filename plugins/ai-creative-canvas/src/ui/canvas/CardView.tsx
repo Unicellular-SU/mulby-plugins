@@ -1,6 +1,7 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { captureFrame } from '../services/mediaOps'
+import { invalidTargetIds } from '../services/connectionPolicy'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from './viewport'
@@ -113,6 +114,8 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
   const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
   const [editing, setEditing] = useState(false)
+  const connInvalid = useUi((s) => s.connInvalidIds)
+  const dimmed = !!connInvalid && connInvalid.has(card.id)
 
   // 媒体加载后把卡片高度调整为媒体真实比例（按当前宽度），每个 assetUrl 只调一次
   const fitAspect = (w: number, h: number) => {
@@ -127,6 +130,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
     e.stopPropagation()
     e.preventDefault()
     const sourceId = card.id
+    useUi.getState().setConnInvalid(invalidTargetIds(sourceId, useGraph.getState().getActiveBoard().cards))
     const move = (ev: PointerEvent) => {
       const rect = stageEl.current?.getBoundingClientRect()
       if (!rect) return
@@ -140,6 +144,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       useUi.getState().setConnectTemp(null)
+      useUi.getState().setConnInvalid(null)
       const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
       const tc = el?.closest('[data-card-id]') as HTMLElement | null
       const targetId = tc?.dataset.cardId
@@ -205,7 +210,7 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
     return (
       <div
         data-card-id={card.id}
-        className={`ace-card group absolute rounded-xl ${selected ? 'ring-2 z-10' : ''}`}
+        className={`ace-card group absolute rounded-xl ${selected ? 'ring-2 z-10' : ''} ${dimmed ? 'opacity-30 saturate-50' : ''}`}
         style={{ left: card.x, top: card.y, width: card.w, height: card.h, ['--tw-ring-color' as any]: meta.accent }}
       >
         <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ background: noteColor, color: '#1f2937', boxShadow: 'var(--shadow-card)' }}>

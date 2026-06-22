@@ -903,4 +903,5 @@
 **P0 延后项**（待真机实测后再做）：① 完整预览解耦（拖动/平移期只写 DOM transform、松手才 commit store）—— 只落了降级 CSS 子集；② `taskId` poll-only 断点续跑（需把 engine 轮询从提交拆出）。
 
 ### ⏳ P1 — 创作工具化（进行中）
-（按阶段推进，完成项追加于此。）
+
+- **P1a 连接校验 + 拖线置灰 + 多选包围盒吸附**（2026-06-22，已提交）：新增 `services/connectionPolicy.ts`（`canConnect`/`invalidTargetIds`，软引用模型——拦截自连/分组/便签/非可生成目标，带可读原因）；`graphStore.addEdgeBetween`/`connectAll` 落地校验，非法连接弹 toast；拖线时 `CardView` 计算不可连目标集合写 `uiStore.connInvalidIds`，目标卡置灰（松手清空）；`snapping.ts` 抽 `snapBox` + 新增 `computeSnapBox`，`CanvasStage.flush` 多选时按整体包围盒吸附（单选仍走 `computeSnap`）。

@@ -15,7 +15,7 @@ import { Lightbox } from './Lightbox'
 import { BatchActions } from './BatchActions'
 import { MultiConnectHandle } from './MultiConnectHandle'
 import { GuideLayer } from './GuideLayer'
-import { computeSnap } from './snapping'
+import { computeSnap, computeSnapBox } from './snapping'
 import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
@@ -111,14 +111,30 @@ export function CanvasStage() {
       let wdx = dragAcc.current.dx / cur.zoom
       let wdy = dragAcc.current.dy / cur.zoom
       const b = g.getActiveBoard()
-      const primary = b.cards[inter.current.ids[0]]
-      if (primary) {
-        const snap = computeSnap(primary, wdx, wdy, b.cards, new Set(inter.current.ids), cur.zoom, useUi.getState().snapGrid)
+      const ids = inter.current.ids
+      const dragged = new Set(ids)
+      const snapGrid = useUi.getState().snapGrid
+      let snap: ReturnType<typeof computeSnap> | null = null
+      if (ids.length > 1) {
+        // 多选：用整体包围盒吸附（拖动前的盒）
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const id of ids) {
+          const c = b.cards[id]
+          if (!c) continue
+          minX = Math.min(minX, c.x); minY = Math.min(minY, c.y)
+          maxX = Math.max(maxX, c.x + c.w); maxY = Math.max(maxY, c.y + c.h)
+        }
+        if (isFinite(minX)) snap = computeSnapBox({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, wdx, wdy, b.cards, dragged, cur.zoom, snapGrid)
+      } else {
+        const primary = b.cards[ids[0]]
+        if (primary) snap = computeSnap(primary, wdx, wdy, b.cards, dragged, cur.zoom, snapGrid)
+      }
+      if (snap) {
         wdx = snap.dx
         wdy = snap.dy
         useUi.getState().setGuides(snap.vx.length || snap.hy.length ? { vx: snap.vx, hy: snap.hy } : null)
       }
-      g.moveCardsBy(inter.current.ids, wdx, wdy)
+      g.moveCardsBy(ids, wdx, wdy)
       dragAcc.current = { dx: 0, dy: 0 }
     }
   }

@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate } from '../types'
 import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
+import { canConnect } from '../services/connectionPolicy'
+import { toast } from './toastStore'
 
 const HISTORY_LIMIT = 100
 
@@ -434,6 +436,14 @@ export const useGraph = create<GraphState>((set, get) => ({
   addEdgeBetween: (source, target) => {
     if (source === target) return
     const b = activeBoardOf(get().project)
+    const s = b.cards[source]
+    const t = b.cards[target]
+    if (!s || !t) return
+    const v = canConnect(s, t)
+    if (!v.ok) {
+      toast(v.reason || '无法连接', 'warning')
+      return
+    }
     const dup = Object.values(b.edges).some((e) => e.source === source && e.target === target)
     if (dup) return
     get().pushHistory()
@@ -458,7 +468,11 @@ export const useGraph = create<GraphState>((set, get) => ({
     const b = activeBoardOf(get().project)
     if (!b.cards[target]) return
     const toAdd = sourceIds.filter(
-      (sid) => sid !== target && b.cards[sid] && !Object.values(b.edges).some((e) => e.source === sid && e.target === target)
+      (sid) =>
+        sid !== target &&
+        b.cards[sid] &&
+        canConnect(b.cards[sid], b.cards[target]).ok &&
+        !Object.values(b.edges).some((e) => e.source === sid && e.target === target)
     )
     if (toAdd.length === 0) return
     get().pushHistory()

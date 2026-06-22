@@ -39,6 +39,8 @@ interface UiState {
   setTrimCardId: (id: string | null) => void
   showTaskCenter: boolean
   setShowTaskCenter: (v: boolean) => void
+  connInvalidIds: Set<string> | null
+  setConnInvalid: (s: Set<string> | null) => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -79,5 +81,7 @@ export const useUi = create<UiState>((set) => ({
   trimCardId: null,
   setTrimCardId: (trimCardId) => set({ trimCardId }),
   showTaskCenter: false,
-  setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter })
+  setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter }),
+  connInvalidIds: null,
+  setConnInvalid: (connInvalidIds) => set({ connInvalidIds })
 }))
