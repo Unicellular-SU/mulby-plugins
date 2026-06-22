@@ -26,6 +26,34 @@ function sizeForRatio(ratio: string): string {
 // 仅出图类资产有画风角色映射；audio(音色)/clip(素材) 不出图（见 §2.1.1）
 const ASSET_ROLE: Partial<Record<Asset['type'], StyleRole>> = { role: 'character', scene: 'scene', prop: 'prop' }
 
+// 景别中文→英文（注入关键帧/视频提示词，提升画面构图准确度）
+const SHOT_EN: Record<string, string> = {
+  大远景: 'extreme wide shot',
+  远景: 'wide shot',
+  全景: 'full shot',
+  中景: 'medium shot',
+  近景: 'medium close-up',
+  特写: 'close-up',
+  大特写: 'extreme close-up',
+}
+const MOVE_EN: Record<string, string> = {
+  固定: 'static camera',
+  推: 'dolly in / push in',
+  拉: 'dolly out / pull back',
+  摇: 'pan',
+  移: 'tracking shot',
+  跟: 'follow shot',
+  升降: 'crane shot',
+  环绕: 'orbit shot',
+  手持: 'handheld camera',
+}
+export function shotSizeEn(s?: string): string {
+  return s ? SHOT_EN[s] ?? s : ''
+}
+export function cameraMoveEn(m?: string): string {
+  return m ? MOVE_EN[m] ?? m : ''
+}
+
 /** 生成资产参考图：资产描述 + 画风锚定 → 文生图 → 存资产库，返回 assetId */
 export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promise<string> {
   if (asset.type === 'audio' || asset.type === 'clip') throw new Error('该类型资产（音色/片段）不支持文生图')
@@ -92,7 +120,8 @@ export async function generateKeyframeImage(
   const cast = assets.filter((a) => sb.associateAssetIds.includes(a.id))
   const castHint = cast.length ? `, 出场：${cast.map((a) => a.name).join('、')}` : ''
   const chaining = sb.chainFromPrev && chainBase
-  const prompt = [basis + castHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
+  const shotHint = shotSizeEn(sb.shotSize) // 景别影响静帧构图（运镜只对视频有意义，关键帧不注入）
+  const prompt = [basis + castHint, shotHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
   const size = sizeForRatio(meta.videoRatio)
 
   const canEdit = !!window.mulby?.ai?.images?.edit && !!window.mulby?.ai?.attachments?.upload

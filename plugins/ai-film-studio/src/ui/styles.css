@@ -3627,21 +3627,26 @@ body {
 .afs-studio__move:hover:not(:disabled) { background: var(--afs-hover); color: var(--afs-text); }
 .afs-studio__move:disabled { opacity: .3; cursor: default; }
 
-/* 分镜卡片重设计：左大图 + 右字段（详情默认展开）+ 底部生成栏 */
-.afs-studio__sbcard { border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); padding: 10px; }
-.afs-studio__sbmain { display: flex; gap: 12px; align-items: flex-start; }
-.afs-studio__sbcol { flex: 0 0 190px; display: flex; flex-direction: column; gap: 6px; }
-.afs-studio__sbcard .afs-studio__sbthumb { position: relative; width: 100%; aspect-ratio: 16 / 9; height: auto; flex: none; border-radius: 6px; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+/* 分镜卡片重设计：左大图(整行垂直居中) + 右字段(详情默认展开) + 底部生成栏 */
+.afs-studio__sbcard { border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); padding: 12px; transition: border-color .15s; }
+.afs-studio__sbcard:hover { border-color: color-mix(in srgb, var(--afs-accent) 40%, var(--afs-border)); }
+.afs-studio__sbmain { display: flex; gap: 14px; align-items: center; }
+.afs-studio__sbcol { flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px; }
+.afs-studio__sbcard .afs-studio__sbthumb { position: relative; width: 100%; aspect-ratio: 16 / 9; height: auto; flex: none; border-radius: 8px; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .afs-studio__sbcard .afs-studio__sbthumb img { width: 100%; height: 100%; object-fit: cover; }
-.afs-studio__sbnum { position: absolute; top: 4px; left: 4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
-.afs-studio__sbnav { display: flex; align-items: center; justify-content: center; gap: 6px; }
-.afs-studio__sbfields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.afs-studio__sbnum { position: absolute; top: 5px; left: 5px; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: rgba(0, 0, 0, 0.62); color: #fff; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+.afs-studio__sbnav { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.afs-studio__sbfields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .afs-studio__sbfields textarea { resize: vertical; }
-.afs-studio__sbhead { display: flex; align-items: center; gap: 10px; }
-.afs-studio__sbinline { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--afs-text-dim); }
-.afs-studio__sbinline input { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 6px; }
+.afs-studio__sbfields .afs-studio__sbfieldlbl { margin-top: 2px; font-size: 11px; letter-spacing: .02em; opacity: .8; }
+.afs-studio__sbhead { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.afs-studio__sbspacer { flex: 1; }
+.afs-studio__sbinline { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--afs-text-dim); }
+.afs-studio__sbinline input, .afs-studio__sbinline select { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 6px; font-size: 12px; }
 .afs-studio__sbinline input[type='number'] { width: 50px; }
-.afs-studio__sbbar { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--afs-border); }
+.afs-studio__sbinline input:not([type='number']) { width: 72px; }
+.afs-studio__dlgspeaker { flex: 0 0 92px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 5px; font-size: 12px; }
+.afs-studio__sbbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--afs-border); }
 .afs-studio__dlgadd { align-self: flex-start; }
 
 /* 统一项目主页 · 类型徽标（画布/工作流）+ 工作台空状态操作 */

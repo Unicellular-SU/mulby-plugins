@@ -50,7 +50,8 @@ export async function generateTrackVideoPrompt(track: VideoTrack, doc: ProjectDo
   const shots = sbs
     .map((s, i) => {
       const dlg = (s.dialogues ?? []).map((d) => `${d.character}: ${d.line}${d.emotion ? `（${d.emotion}）` : ''}`).join('；')
-      return `${i + 1}. ${s.videoDesc}${dlg ? `\n   台词：${dlg}` : ''}`
+      const cam = [s.shotSize ? `景别:${s.shotSize}` : '', s.cameraMove ? `运镜:${s.cameraMove}` : ''].filter(Boolean).join(' ')
+      return `${i + 1}. ${s.videoDesc}${cam ? `\n   镜头：${cam}` : ''}${dlg ? `\n   台词：${dlg}` : ''}`
     })
     .join('\n')
   const user = [

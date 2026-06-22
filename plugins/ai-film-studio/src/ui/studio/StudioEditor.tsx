@@ -26,6 +26,10 @@ const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'timeline', label: '时间线', icon: Film },
 ]
 
+// 镜头：景别 + 运镜预设（注入关键帧/视频提示词）
+const SHOT_SIZES = ['大远景', '远景', '全景', '中景', '近景', '特写', '大特写']
+const CAMERA_MOVES = ['固定', '推', '拉', '摇', '移', '跟', '升降', '环绕', '手持']
+
 // 视频模式（对标 Toonflow 4 模式，§5.3；具体提示词模板在 phase4 接入）
 const VIDEO_MODE_OPTIONS: { id: string; label: string }[] = [
   { id: 'firstFrame', label: '首帧驱动（图生视频）' },
@@ -860,6 +864,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const clip = clipId ? doc.clips.find((c) => c.id === clipId) : undefined
   const candCount = track?.clipIds.length ?? 0
   const roleAssets = doc.assets.filter((a) => !a.parentAssetId && a.type !== 'audio')
+  const speakerOpts = [...roleAssets.map((a) => a.name), '旁白', '画外音']
   const dialogues = sb.dialogues ?? []
   // 统一改字段：保留 videoDesc 必填，合并其余 Partial
   const patch = (p: Partial<Storyboard>) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, ...p })
@@ -908,10 +913,32 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
               <input type="number" min={1} max={15} value={sb.duration} onChange={(e) => patch({ duration: Number(e.target.value) || 5 })} />秒
             </label>
             <label className="afs-studio__sbinline">
+              景别
+              <select value={sb.shotSize ?? ''} onChange={(e) => patch({ shotSize: e.target.value || undefined })}>
+                <option value="">—</option>
+                {SHOT_SIZES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="afs-studio__sbinline">
+              运镜
+              <select value={sb.cameraMove ?? ''} onChange={(e) => patch({ cameraMove: e.target.value || undefined })}>
+                <option value="">—</option>
+                {CAMERA_MOVES.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="afs-studio__sbinline">
               轨道
               <input value={sb.track} onChange={(e) => patch({ track: e.target.value })} />
             </label>
-            <span style={{ flex: 1 }} />
+            <span className="afs-studio__sbspacer" />
             <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除分镜" onClick={() => removeStoryboard(sb.id)}>
               <Trash2 size={13} />
             </button>
@@ -945,7 +972,15 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
           {dialogues.length === 0 && <span className="afs-studio__hint">暂无对白</span>}
           {dialogues.map((d, i) => (
             <div key={i} className="afs-studio__dlgrow">
-              <input placeholder="角色" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))} />
+              <select className="afs-studio__dlgspeaker" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))}>
+                <option value="">角色…</option>
+                {speakerOpts.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+                {d.character && !speakerOpts.includes(d.character) && <option value={d.character}>{d.character}</option>}
+              </select>
               <input placeholder="台词" value={d.line} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} />
               <input placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, emotion: e.target.value } : x)))} />
               <button title="删除" onClick={() => setDlg(dialogues.filter((_, j) => j !== i))}>

@@ -111,6 +111,8 @@ export interface Storyboard {
   track: string // 轨道名标签（分组/段落）——注意与 ProjectDoc.track(视频段数组) 同名不同义
   videoDesc: string // 画面描述（中文，给关键帧/视频）
   prompt?: string // 英文关键帧提示词
+  shotSize?: string // 景别（远景/全景/中景/近景/特写…）—注入关键帧+视频提示词
+  cameraMove?: string // 运镜（固定/推/拉/摇/移/跟…）—注入视频提示词
   duration: number // 推荐视频时长(秒)
   associateAssetIds: string[] // 出场资产
   shouldGenerateImage: boolean
