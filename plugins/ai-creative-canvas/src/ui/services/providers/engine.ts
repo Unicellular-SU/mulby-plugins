@@ -267,3 +267,22 @@ export async function runTts(
   if (!d?.ok) throw new Error(d?.error || '配音失败')
   return { path: d.path, url: toFileUrl(d.path), mime: d.mime || 'audio/mpeg' }
 }
+
+// 连通性探测：对 submitUrl/baseURL 的 origin 发一次 GET（不真正提交任务），报告可达性
+export async function testProvider(cfg: ProviderConfig, key: string): Promise<{ ok: boolean; status?: number; error?: string }> {
+  try {
+    let url = cfg.submitUrl || (cfg.baseURL ? cfg.baseURL.replace(/\/$/, '') + (cfg.submitPath || '') : '')
+    if (!url) return { ok: false, error: '未配置 URL' }
+    try {
+      url = new URL(url).origin
+    } catch {
+      /* 非法 URL 直接用原串 */
+    }
+    const headers: Record<string, string> = {}
+    if (key) headers['Authorization'] = `Bearer ${key}`
+    const r = await httpReq(url, 'GET', headers, undefined, 15000)
+    return { ok: r.status > 0 && r.status < 500, status: r.status }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || String(e) }
+  }
+}

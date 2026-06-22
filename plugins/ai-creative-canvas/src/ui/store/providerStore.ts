@@ -19,6 +19,8 @@ interface ProviderState {
   setKey: (id: string, key: string) => Promise<void>
   getKey: (id: string) => Promise<string>
   activeFor: (kind: ProviderKind) => ProviderConfig | null
+  exportJson: () => string
+  importJson: (text: string) => boolean
 }
 
 export const useProviders = create<ProviderState>((set, get) => ({
@@ -106,5 +108,23 @@ export const useProviders = create<ProviderState>((set, get) => ({
     const { providers, activeVideoId, activeAudioId } = get()
     const id = kind === 'video' ? activeVideoId : activeAudioId
     return providers.find((p) => p.id === id) || providers.find((p) => p.kind === kind) || null
+  },
+
+  // 导出/导入（不含密钥——密钥单独存 storage.encrypted，导入后需重新填写）
+  exportJson: () => {
+    const { providers, activeVideoId, activeAudioId } = get()
+    return JSON.stringify({ providers, activeVideoId, activeAudioId }, null, 2)
+  },
+
+  importJson: (text) => {
+    try {
+      const data = JSON.parse(text)
+      if (!data || !Array.isArray(data.providers)) return false
+      set({ providers: data.providers, activeVideoId: data.activeVideoId || null, activeAudioId: data.activeAudioId || null })
+      get().persist()
+      return true
+    } catch {
+      return false
+    }
   }
 }))

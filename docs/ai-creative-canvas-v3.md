@@ -917,3 +917,4 @@
 建议先做低风险高可见项：生成历史/作品库面板、网页参考卡、自由绘制标注层、Provider 导入导出/连通测试、拼贴宫格合成、场景检测时间码；高风险项（千级节点虚拟化、持久化分片、多轨时间线剪辑、视频抠像绿幕、360/3D）置后，最好在真机验证基线后再做。
 
 - **P2a 作品库面板**（2026-06-22，已提交）：新增 `components/Gallery.tsx`（复用 `Modal`），扫描全工程卡片产物成 4 列网格；单击回画布（切板 + 选中 + 居中视口）、双击预览；TopBar 加「作品库」入口（Images），`uiStore.showGallery`。
+- **P2c Provider 导入导出 + 连通测试**（2026-06-22，已提交）：`providerStore.exportJson/importJson`（不含密钥——密钥单独存 encrypted，导入后需重填）；`engine.testProvider`（对 submitUrl/baseURL 的 origin 发 GET 探测可达性，不真正提交任务）；ProviderSettings 左栏加「导出/导入」、动作行加「测试连通」、模态外壳玻璃化（ace-dialog）、`notification.show`→`toast`。

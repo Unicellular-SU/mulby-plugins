@@ -1,9 +1,11 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react'
 import { X, Plus, Trash2 } from 'lucide-react'
 import { useProviders } from '../store/providerStore'
 import { useUi } from '../store/uiStore'
+import { toast } from '../store/toastStore'
 import type { ProviderConfig } from '../services/providers/types'
 import { presetOpenAiTts, presetCustomVideo, PROVIDER_TEMPLATES } from '../services/providers/presets'
+import { testProvider } from '../services/providers/engine'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -29,6 +31,35 @@ export function ProviderSettings() {
   const [draft, setDraft] = useState<ProviderConfig | null>(null)
   const [keyVal, setKeyVal] = useState('')
   const [headersStr, setHeadersStr] = useState('')
+  const [testing, setTesting] = useState(false)
+
+  const doExport = () => {
+    const json = useProviders.getState().exportJson()
+    const blob = new Blob([json], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'ai-canvas-providers.json'
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const doImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    const text = await f.text()
+    const ok = useProviders.getState().importJson(text)
+    toast(ok ? 'Provider 已导入（密钥需重新填写）' : '导入失败：JSON 无效', ok ? 'success' : 'error')
+    e.target.value = ''
+  }
+  const doTest = async (d: ProviderConfig) => {
+    setTesting(true)
+    try {
+      const r = await testProvider(d, keyVal)
+      toast(r.ok ? `连通正常（HTTP ${r.status}）` : `连通失败：${r.error || 'HTTP ' + r.status}`, r.ok ? 'success' : 'error')
+    } finally {
+      setTesting(false)
+    }
+  }
 
   useEffect(() => {
     const p = providers.find((x) => x.id === sel) || null
@@ -50,8 +81,7 @@ export function ProviderSettings() {
     upsert(draft)
     void setKey(draft.id, keyVal)
     useUi.getState().setSaving(false)
-    const n = (window as any).mulby?.notification
-    n?.show?.('Provider 已保存', 'success')
+    toast('Provider 已保存', 'success')
   }
 
   const isActive = draft ? (draft.kind === 'video' ? activeVideoId : activeAudioId) === draft.id : false
@@ -63,10 +93,7 @@ export function ProviderSettings() {
         if (e.target === e.currentTarget) close()
       }}
     >
-      <div
-        className="w-[780px] max-h-[82vh] rounded-xl bg-white dark:bg-neutral-900 border flex overflow-hidden text-neutral-800 dark:text-neutral-200"
-        style={{ borderColor: 'var(--ace-border)' }}
-      >
+      <div className="ace-dialog ace-anim-scale w-[780px] max-h-[82vh] flex overflow-hidden text-neutral-800 dark:text-neutral-200">
         <div className="w-56 border-r p-2 flex flex-col gap-1 overflow-auto ace-scroll" style={{ borderColor: 'var(--ace-border)' }}>
           <div className="text-xs font-semibold px-1 py-1">Provider 设置</div>
           {providers.length === 0 && <div className="text-[11px] opacity-50 px-1 py-2">尚无 Provider，下方新建。</div>}
@@ -107,6 +134,15 @@ export function ProviderSettings() {
               </option>
             ))}
           </select>
+          <div className="flex gap-1 mt-1">
+            <button onClick={doExport} className="flex-1 text-[11px] py-1 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20">
+              导出
+            </button>
+            <label className="flex-1 text-[11px] py-1 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20 text-center cursor-pointer">
+              导入
+              <input type="file" accept="application/json,.json" className="hidden" onChange={doImport} />
+            </label>
+          </div>
         </div>
 
         <div className="flex-1 p-3 overflow-auto ace-scroll flex flex-col gap-2">
@@ -247,6 +283,9 @@ export function ProviderSettings() {
                   className="px-3 py-1.5 rounded-md text-red-500 hover:bg-red-500/10 text-sm flex items-center gap-1"
                 >
                   <Trash2 size={13} />删除
+                </button>
+                <button onClick={() => void doTest(draft)} disabled={testing} className="px-3 py-1.5 rounded-md bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-sm disabled:opacity-50">
+                  {testing ? '测试中…' : '测试连通'}
                 </button>
                 <div className="flex-1" />
                 <button onClick={close} className="px-4 py-1.5 rounded-md bg-black/5 dark:bg-white/10 text-sm">关闭</button>
