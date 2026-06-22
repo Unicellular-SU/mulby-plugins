@@ -25,7 +25,7 @@ const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'assets', label: '资产', icon: Users },
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'timeline', label: '时间线', icon: Film },
-  { id: 'canvas', label: '精修', icon: Workflow }, // 节点画布降级为工作台内高级编辑入口
+  { id: 'canvas', label: '画布', icon: Workflow }, // 独立节点画布（高级编辑入口）；关键帧精修在「分镜」每镜的「精修」按钮
 ]
 
 // 视频模式（对标 Toonflow 4 模式，§5.3；具体提示词模板在 phase4 接入）
@@ -134,7 +134,15 @@ export default function StudioEditor() {
           {tab === 'assets' && <AssetsTab />}
           {tab === 'storyboard' && <StoryboardTab />}
           {tab === 'timeline' && <TimelineTab />}
-          {tab === 'canvas' && <EditorView />}
+          {tab === 'canvas' && (
+            <div className="afs-studio__canvaswrap">
+              <div className="afs-studio__canvasnote">
+                这是独立的「节点画布」（高级编辑），有自己的工程，与当前工作台项目<b>相互独立</b>。
+                关键帧精修请用「分镜」里每个分镜卡片上的「精修」按钮。
+              </div>
+              <EditorView />
+            </div>
+          )}
         </div>
         <AgentPanel />
       </div>
