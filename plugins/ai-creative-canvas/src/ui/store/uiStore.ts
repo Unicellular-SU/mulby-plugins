@@ -41,6 +41,8 @@ interface UiState {
   setShowTaskCenter: (v: boolean) => void
   connInvalidIds: Set<string> | null
   setConnInvalid: (s: Set<string> | null) => void
+  notifyDone: boolean
+  toggleNotifyDone: () => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -83,5 +85,22 @@ export const useUi = create<UiState>((set) => ({
   showTaskCenter: false,
   setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter }),
   connInvalidIds: null,
-  setConnInvalid: (connInvalidIds) => set({ connInvalidIds })
+  setConnInvalid: (connInvalidIds) => set({ connInvalidIds }),
+  notifyDone: (() => {
+    try {
+      return localStorage.getItem('ace:notifyDone') !== '0'
+    } catch {
+      return true
+    }
+  })(),
+  toggleNotifyDone: () =>
+    set((s) => {
+      const v = !s.notifyDone
+      try {
+        localStorage.setItem('ace:notifyDone', v ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      return { notifyDone: v }
+    })
 }))

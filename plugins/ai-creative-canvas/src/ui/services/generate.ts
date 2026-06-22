@@ -1,5 +1,6 @@
 import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
+import { useUi } from '../store/uiStore'
 import { createLimiter, arrayBufferToBase64 } from '../util'
 import { generateText } from './aiText'
 import { generateImage } from './aiImage'
@@ -18,6 +19,49 @@ const videoAborts = new Map<string, AbortController>() // cardId -> 视频任务
 
 function ai(): any {
   return (window as any).mulby.ai
+}
+
+// 完成提示音（WebAudio 短促双衰减 blip，无需打包音频文件）
+function playDoneSound() {
+  try {
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext
+    if (!AC) return
+    const ctx = new AC()
+    const o = ctx.createOscillator()
+    const g = ctx.createGain()
+    o.connect(g)
+    g.connect(ctx.destination)
+    o.type = 'sine'
+    o.frequency.setValueAtTime(660, ctx.currentTime)
+    o.frequency.setValueAtTime(990, ctx.currentTime + 0.09)
+    g.gain.setValueAtTime(0.0001, ctx.currentTime)
+    g.gain.exponentialRampToValueAtTime(0.14, ctx.currentTime + 0.02)
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.28)
+    o.start()
+    o.stop(ctx.currentTime + 0.3)
+    setTimeout(() => {
+      try {
+        void ctx.close()
+      } catch {
+        /* ignore */
+      }
+    }, 500)
+  } catch {
+    /* ignore */
+  }
+}
+
+// 生成成功提示：可在任务中心开关，仅成功终态一次；窗口失焦时额外发系统通知
+function notifyDone(_cardId: string) {
+  if (!useUi.getState().notifyDone) return
+  playDoneSound()
+  if (typeof document !== 'undefined' && document.hidden) {
+    try {
+      ;(window as any).mulby?.notification?.show?.('生成完成', 'success')
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function canGenerate(kind: string): boolean {
@@ -181,6 +225,7 @@ export async function generateCard(cardId: string): Promise<void> {
           mime: res.mime
         })
       }
+      notifyDone(cardId)
     } catch (e: any) {
       const msg = e?.message || String(e)
       const aborted = /abort/i.test(msg)

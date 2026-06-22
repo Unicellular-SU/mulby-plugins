@@ -57,16 +57,23 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
   }
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full bg-neutral-900">
       <video
         ref={vref}
         src={card.assetUrl as string}
         muted={muted}
         playsInline
         loop
+        preload="metadata"
         onLoadedMetadata={(e) => {
           onFit(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
           setDur(e.currentTarget.duration)
+          // 轻微 seek 强制首帧解码渲染，避免加载完成前的黑屏 poster
+          try {
+            e.currentTarget.currentTime = Math.min(0.1, (e.currentTarget.duration || 1) / 100)
+          } catch {
+            /* ignore */
+          }
         }}
         onTimeUpdate={(e) => {
           const v = e.currentTarget

@@ -42,6 +42,7 @@ export function getParamSchema(card: Card): ParamField[] {
         { type: 'select', key: 'aspect', width: 78, default: '16:9', options: ASPECTS },
         { type: 'select', key: 'camera', width: 84, default: '', options: CAMERA },
         { type: 'select', key: 'motion', width: 88, default: '适中', options: [{ value: '轻微', label: '运动·轻微' }, { value: '适中', label: '运动·适中' }, { value: '强烈', label: '运动·强烈' }] },
+        { type: 'select', key: 'refMode', width: 100, default: 'omni', options: [{ value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }] },
         { type: 'seed', key: 'seed' },
         { type: 'duration', key: 'duration' }
       ]

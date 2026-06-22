@@ -1,4 +1,4 @@
-import { X, Loader2, Ban, RotateCw, Clock } from 'lucide-react'
+import { X, Loader2, Ban, RotateCw, Clock, Volume2, VolumeX } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { KIND_ACCENT, KIND_LABEL, type Card } from '../types'
@@ -46,6 +46,7 @@ function Row({ card, queueIdx }: { card: Card; queueIdx: number }) {
 export function TaskCenter() {
   const show = useUi((s) => s.showTaskCenter)
   const board = useGraph((s) => s.getActiveBoard())
+  const notifyDone = useUi((s) => s.notifyDone)
   if (!show) return null
 
   const cards = Object.values(board.cards)
@@ -61,9 +62,18 @@ export function TaskCenter() {
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Clock size={14} className="text-indigo-500" /> 任务中心
         </div>
-        <button onClick={close} className="opacity-60 hover:opacity-100">
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => useUi.getState().toggleNotifyDone()}
+            title={notifyDone ? '完成提示音：开（点击关闭）' : '完成提示音：关（点击开启）'}
+            className="opacity-60 hover:opacity-100"
+          >
+            {notifyDone ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          </button>
+          <button onClick={close} className="opacity-60 hover:opacity-100">
+            <X size={16} />
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-auto ace-scroll p-1.5">
         {empty && <div className="py-8 text-center text-xs opacity-50">暂无进行中或失败的任务</div>}
