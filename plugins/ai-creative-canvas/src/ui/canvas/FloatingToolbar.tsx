@@ -34,7 +34,7 @@ export function FloatingToolbar() {
   return (
     <div
       data-interactive
-      className="ace-glass ace-anim-scale absolute z-30 px-1.5 py-1"
+      className="ace-glass absolute z-30 px-1.5 py-1"
       style={style}
       onPointerDown={(e) => e.stopPropagation()}
     >

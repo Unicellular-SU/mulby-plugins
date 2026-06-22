@@ -302,7 +302,7 @@ export function NodeEditor() {
           {/* 提示词工具 + 输入 */}
           {card.kind !== 'source' && (
             <>
-              <div className="flex items-center gap-1.5 text-[11px]">
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                 <button onClick={() => runTool(enhancePrompt)} disabled={toolBusy} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100 disabled:opacity-40" title="LLM 改写优化提示词">
                   <Wand2 size={12} /> 增强
                 </button>
@@ -311,28 +311,24 @@ export function NodeEditor() {
                     <ScanText size={12} /> 描述图片
                   </button>
                 )}
+                {card.kind === 'text' && (
+                  <button onClick={() => useUi.getState().setStoryboardCardId(card.id)} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100" title="生成分镜镜头表">
+                    <Clapperboard size={12} /> 分镜
+                  </button>
+                )}
+                {card.kind === 'image' && hasMedia && (
+                  <button onClick={() => shotToVideo(card.id)} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100" title="以此图为首帧转视频">
+                    <Film size={12} /> 转视频
+                  </button>
+                )}
+                {card.kind === 'image' && hasMedia && (
+                  <button onClick={() => useUi.getState().setMaskCardId(card.id)} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100" title="局部重绘 / 擦除">
+                    <Brush size={12} /> 局部编辑
+                  </button>
+                )}
                 {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
                 <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
               </div>
-              {(card.kind === 'text' || (card.kind === 'image' && hasMedia)) && (
-                <div className="flex flex-wrap items-center gap-1">
-                  {card.kind === 'text' && (
-                    <button onClick={() => useUi.getState().setStoryboardCardId(card.id)} title="生成分镜镜头表" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
-                      <Clapperboard size={12} /> 分镜
-                    </button>
-                  )}
-                  {card.kind === 'image' && hasMedia && (
-                    <button onClick={() => shotToVideo(card.id)} title="以此图为首帧转视频" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
-                      <Film size={12} /> 转视频
-                    </button>
-                  )}
-                  {card.kind === 'image' && hasMedia && (
-                    <button onClick={() => useUi.getState().setMaskCardId(card.id)} title="局部重绘 / 擦除" className="flex items-center gap-1 px-2 py-1 rounded-md text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
-                      <Brush size={12} /> 局部编辑
-                    </button>
-                  )}
-                </div>
-              )}
               <div className="relative">
                 <textarea
                   ref={(el) => {
@@ -362,7 +358,7 @@ export function NodeEditor() {
             </>
           )}
 
-          {/* 底行：模型/Provider + 参数 + 生成 */}
+          {/* 模型/Provider + 参数 */}
           {generatable && (
             <div className="flex flex-wrap items-center gap-1.5">
               {card.kind === 'text' || card.kind === 'image' ? (
@@ -373,17 +369,19 @@ export function NodeEditor() {
                 <ProviderHintInline kind={card.kind as 'video' | 'audio'} modelId={card.modelId} onModel={(id) => updateCard(card.id, { modelId: id })} />
               )}
               <ParamControls card={card} />
-              {busy ? (
-                <button onClick={() => stopCard(card.id)} className="shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/90 hover:bg-red-500 text-white text-sm font-medium">
-                  <Square size={13} /> {card.progress ? `${Math.round(card.progress * 100)}%` : '停止'}
-                </button>
-              ) : (
-                <button onClick={() => generateCard(card.id)} className="shrink-0 flex items-center gap-1 px-4 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium">
-                  <Sparkles size={13} /> 生成
-                </button>
-              )}
             </div>
           )}
+          {/* 生成：独占一整行、文字居中 */}
+          {generatable &&
+            (busy ? (
+              <button onClick={() => stopCard(card.id)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-red-500/90 hover:bg-red-500 text-white text-sm font-medium">
+                <Square size={13} /> {card.progress ? `停止（${Math.round(card.progress * 100)}%）` : '停止'}
+              </button>
+            ) : (
+              <button onClick={() => generateCard(card.id)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-sm font-medium">
+                <Sparkles size={14} /> 生成
+              </button>
+            ))}
 
         {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
         </div>
