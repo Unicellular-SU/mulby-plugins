@@ -218,8 +218,8 @@ export function NodeEditor() {
       <div
         data-interactive
         onWheel={(e) => e.stopPropagation()}
-        className="absolute z-30 rounded-xl border bg-white/95 dark:bg-neutral-900/95 backdrop-blur shadow-2xl overflow-hidden text-neutral-800 dark:text-neutral-200"
-        style={{ left, top: posTop, bottom: posBottom, width: PANEL_W, borderColor: accent + '55' }}
+        className="absolute z-30 rounded-xl border overflow-hidden text-neutral-800 dark:text-neutral-200"
+        style={{ left, top: posTop, bottom: posBottom, width: PANEL_W, borderColor: accent + '55', background: 'var(--surface-glass)', backdropFilter: 'var(--blur-glass)', WebkitBackdropFilter: 'var(--blur-glass)', boxShadow: 'var(--shadow-menu)' }}
       >
         <div className="flex flex-col gap-1.5 p-2 overflow-y-auto ace-noscroll" style={{ maxHeight: maxH }}>
           <input
@@ -389,7 +389,7 @@ export function NodeEditor() {
 
       {/* @素材 / /预设 菜单：屏幕坐标浮层，不受面板裁剪 */}
       {mention && listLen > 0 && (
-        <div data-interactive onWheel={(e) => e.stopPropagation()} className="absolute z-50 rounded-md border bg-white dark:bg-neutral-900 shadow-xl overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200" style={{ ...menuStyle, borderColor: 'var(--ace-border)' }}>
+        <div data-interactive onWheel={(e) => e.stopPropagation()} className="ace-menu ace-anim-pop absolute z-50 overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200" style={menuStyle}>
           {mention.mode === 'preset'
             ? mention.query
               ? presetList.map((p) => renderPreset(p))
@@ -414,7 +414,7 @@ export function NodeEditor() {
       {/* 放大编辑长提示词 */}
       {expand && card.kind !== 'source' && (
         <div data-interactive className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-6" onClick={() => setExpand(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-[680px] max-w-full max-h-[80vh] flex flex-col rounded-xl border bg-white dark:bg-neutral-900 shadow-2xl text-neutral-800 dark:text-neutral-200" style={{ borderColor: 'var(--ace-border)' }}>
+          <div onClick={(e) => e.stopPropagation()} className="ace-dialog ace-anim-scale w-[680px] max-w-full max-h-[80vh] flex flex-col text-neutral-800 dark:text-neutral-200">
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--ace-border)' }}>
               <span className="font-semibold text-sm">编辑提示词</span>
               <button onClick={() => setExpand(false)} className="opacity-60 hover:opacity-100">

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
+import { Sparkles } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { CardView } from './CardView'
@@ -513,9 +514,26 @@ export function CanvasStage() {
       <ContextMenu />
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
-          <div className="text-center opacity-40 text-sm">
+          <div className="ace-glass ace-anim-fade pointer-events-auto px-6 py-5 text-center max-w-xs">
+            <Sparkles size={26} className="mx-auto text-indigo-400 mb-2" />
             <div className="text-base font-medium mb-1">空白画布</div>
-            双击空白处新建文本卡 · 左侧添加卡片 · 滚轮缩放 · 空格拖拽平移
+            <div className="text-xs opacity-60 mb-3">从这里开始创作</div>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => {
+                  const sz = useUi.getState().stageSize
+                  const v = useGraph.getState().getActiveBoard().viewport
+                  useGraph.getState().addCard('text', screenToWorld(sz.w / 2, sz.h / 2, v))
+                }}
+                className="px-3 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-600 text-white text-xs"
+              >
+                新建文本卡
+              </button>
+              <button onClick={() => useUi.getState().setShowTemplates(true)} className="px-3 py-1.5 rounded-lg bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-xs">
+                打开模板
+              </button>
+            </div>
+            <div className="text-[11px] opacity-40 mt-3">双击空白新建 · 拖图片进来导入 · 滚轮缩放 · 空格拖拽平移</div>
           </div>
         </div>
       )}

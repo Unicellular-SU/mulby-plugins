@@ -29,6 +29,7 @@
   --kind-audio: #f59e0b;
   --kind-source: #64748b;
   --kind-group: #64748b;
+  --kind-note: #eab308;
   /* 圆角 / 间距 */
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -66,6 +67,7 @@
   --kind-audio: #fbbf24;
   --kind-source: #94a3b8;
   --kind-group: #94a3b8;
+  --kind-note: #fbbf24;
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-menu: 0 8px 28px rgba(0, 0, 0, 0.5);
   --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
