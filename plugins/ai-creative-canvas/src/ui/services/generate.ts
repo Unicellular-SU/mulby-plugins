@@ -191,7 +191,8 @@ export async function generateCard(cardId: string): Promise<void> {
         const projectId = useGraph.getState().project.id
         const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', {
           url,
-          name: card.title || 'video',
+          // 文件名必须含全局唯一 cardId——否则后端按标题落盘，多个默认标题（如"AI 视频"）会写到同一文件互相覆盖
+          name: `${card.title || 'video'}-${cardId}`,
           projectId
         })
         const path = r?.data?.path

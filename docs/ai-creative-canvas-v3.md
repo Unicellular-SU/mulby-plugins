@@ -957,3 +957,6 @@
 - `mediaOps.ts`：各工具在同步起点捕获 `boardId = boardIdOfCard(cardId)`，结果卡/宫格/拼贴/抽帧/视频派生卡全部落源画布（`newMediaCard`/`placeImagesGrid` 加 `boardId`）。
 - `inpaint.ts`/`ComposeModal`/`TimelineModal`：同样传入源画布 id（模态期本不可切板，防御性补齐）。
 - `persistence.migrateProject`：加 `sanitizeBoards` 净化——加载时剔除缺 `kind`/非有限几何的畸形卡并清理悬空连线，**自动修复历史残留**，被顶掉的原卡恢复显示（合法卡必有 kind 与有限 x/y/w/h，零误伤）。
+
+### 🐞 视频文件名碰撞 Bug 修复（2026-06-25，已提交）
+**现象**（与上者独立）：多个视频卡显示成同一个（最后生成的那个），同画布或跨画布皆可触发。**根因**：`generate.ts` 视频落盘调 `downloadMedia({ name: card.title })`，后端 `sanitizeName` 的 `\w` 不含中文 → 默认标题"AI 视频"全被替换成 `AI_.mp4`，**每个默认标题视频写到同一文件互相覆盖**，于是多张卡的 `assetLocalPath` 指向同一被覆盖文件，全显示最后那个。**修复**：下载文件名带上全局唯一 `cardId`（`${title}-${cardId}`）→ 每张卡独立文件；重新生成同卡仍用同名覆盖自身（不产生孤儿文件）。音频 `synthSpeech` 用 `tts_${Date.now()}` 本就唯一、无碍。**注意**：已被覆盖的旧视频文件在磁盘上不可恢复，需重新生成。
