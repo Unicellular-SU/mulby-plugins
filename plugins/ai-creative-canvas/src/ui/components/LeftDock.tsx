@@ -26,8 +26,8 @@ function addAtViewCenter(kind: CardKind) {
 export function LeftDock() {
   return (
     <div
-      className="ace-bar w-14 shrink-0 flex flex-col items-center gap-1 py-2 border-r"
-      style={{ borderColor: 'var(--ace-border)' }}
+      data-interactive
+      className="ace-glass absolute left-3 top-1/2 -translate-y-1/2 z-20 flex flex-col items-center gap-1 p-1.5"
     >
       {ITEMS.map((it) => {
         const Icon = it.icon

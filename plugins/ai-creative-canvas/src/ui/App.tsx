@@ -139,11 +139,9 @@ export default function App() {
   return (
     <div className="h-full w-full flex flex-col text-neutral-800 dark:text-neutral-200">
       <TopBar />
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 relative min-h-0 min-w-0">
+        <CanvasStage />
         <LeftDock />
-        <div className="flex-1 relative min-w-0">
-          <CanvasStage />
-        </div>
       </div>
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />

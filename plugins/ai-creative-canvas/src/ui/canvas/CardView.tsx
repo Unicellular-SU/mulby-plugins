@@ -123,10 +123,13 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
   const [editing, setEditing] = useState(false)
   const connInvalid = useUi((s) => s.connInvalidIds)
   const dimmed = !!connInvalid && connInvalid.has(card.id)
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
+  const [resizeBubble, setResizeBubble] = useState<{ w: number; h: number } | null>(null)
 
   // 媒体加载后把卡片高度调整为媒体真实比例（按当前宽度），每个 assetUrl 只调一次
   const fitAspect = (w: number, h: number) => {
     if (!w || !h) return
+    setDims({ w, h })
     if (card.meta && (card.meta as any).fittedFor === card.assetUrl) return
     const newH = Math.max(90, Math.min(620, Math.round(card.w * (h / w))))
     updateCard(card.id, { h: newH, meta: { ...card.meta, fittedFor: card.assetUrl } })
@@ -182,15 +185,15 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
       if (!rect) return
       const b = useGraph.getState().getActiveBoard()
       const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
-      updateCard(card.id, {
-        w: Math.max(120, Math.round(w.x - card.x)),
-        h: Math.max(80, Math.round(w.y - card.y)),
-        meta: { ...card.meta, fittedFor: card.assetUrl }
-      })
+      const nw = Math.max(120, Math.round(w.x - card.x))
+      const nh = Math.max(80, Math.round(w.y - card.y))
+      updateCard(card.id, { w: nw, h: nh, meta: { ...card.meta, fittedFor: card.assetUrl } })
+      setResizeBubble({ w: nw, h: nh })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      setResizeBubble(null)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
@@ -410,16 +413,27 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         style={{ background: meta.accent }}
       />
 
-      {/* 缩放手柄：右下角，悬停/选中显示 */}
+      {/* 媒体尺寸（图片，悬停显示） */}
+      {dims && isImg && (
+        <div className="absolute bottom-1.5 left-1.5 z-20 px-1.5 py-0.5 rounded bg-black/55 text-white text-[9px] leading-none tabular-nums opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          {dims.w}×{dims.h}
+        </div>
+      )}
+      {/* 缩放手柄：右下角圆点，悬停/选中显示；拖动时显尺寸气泡 */}
       <div
         data-interactive
         onPointerDown={startCardResize}
         title="拖拽缩放卡片"
-        className={`absolute bottom-0 right-0 w-3.5 h-3.5 cursor-nwse-resize z-30 transition-opacity ${
+        className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white dark:border-neutral-900 cursor-nwse-resize z-30 shadow transition-opacity ${
           selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
         }`}
-        style={{ borderRight: `2px solid ${meta.accent}`, borderBottom: `2px solid ${meta.accent}`, borderBottomRightRadius: 10 }}
+        style={{ background: meta.accent }}
       />
+      {resizeBubble && (
+        <div className="absolute -top-6 right-0 z-40 px-1.5 py-0.5 rounded bg-black/70 text-white text-[10px] leading-none tabular-nums pointer-events-none">
+          {resizeBubble.w}×{resizeBubble.h}
+        </div>
+      )}
     </div>
   )
 }
