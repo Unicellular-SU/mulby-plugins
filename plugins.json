@@ -83,9 +83,9 @@
       "version": "1.0.2",
       "author": "mulby",
       "description": "批量压缩/转格式/改尺寸/水印/圆角/补边/裁剪/旋转/翻转；合并 PDF、长图与 GIF；手动连续裁剪。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.11-1353/bulk-image-studio-1.0.2.inplugin",
-      "lastPackageTime": "2026-06-11T13:54:39.351Z",
-      "type": "productivity",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/bulk-image-studio-1.0.2.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:14.067Z",
+      "type": "media",
       "details": "# 图片批量工坊（bulk-image-studio）\n\nMulby 插件：在独立窗口中完成**批量图片处理**、**多图合并**（PDF / 横向或纵向长图 / GIF）以及**手动连续裁剪**（应用后自动切换下一张）。\n\n## 依赖与安装说明\n\n- 图片处理通过 Mulby 主应用提供的 **sharp API** 执行，插件包本身不携带 `sharp` 原生二进制。\n- 后端仍使用 **pdf-lib**、**svgo**、**gif-encoder-2**、**to-ico** 等纯插件依赖，均已在 `package.json` 的 `dependencies` 中声明。\n- 部分格式（TIFF、AVIF、ICO、GIF 等）是否可用取决于当前平台 Mulby 主应用内置的 **libvips / sharp** 构建；若单张失败，批量结果里会记录该文件错误信息。\n\n## 功能概览\n\n### 批量处理\n\n- **压缩**：光栅格式质量；**SVG** 使用 **SVGO** 做结构优化（与像素压缩不同，界面中已说明）。\n- **格式转换**：PNG、JPG/JPEG、WebP、TIFF、AVIF、BMP、GIF、ICO、SVG（输出 SVG 仅支持「SVG 优化」路径；其他格式由 sharp 输出）。\n- **尺寸**：固定宽高（可选）、百分比缩放，`inside` / `cover` / `fill`。\n- **水印**：文字（字号、颜色、不透明度、旋转、角点/居中、平铺）；图片（缩放、不透明度、旋转、位置、平铺）。\n- **圆角**：按短边百分比计算半径；内部使用圆角遮罩合成。\n- **补边**：上/右/下/左像素、颜色与不透明度。\n- **裁剪**：按宽高比居中裁剪，可选 `center` / `north` / `south` / `east` / `west` 重力。\n- **旋转**：任意角度 + 背景色。\n- **翻转**：水平（左右）、垂直（上下），可组合。\n\n**保存流程（两阶段）**：先点「开始处理」将结果写入系统**临时目录**并暂存；完成后在界面选择 **覆盖原图**、**原目录带后缀**（`原名{后缀}.扩展名`）或 **其他目录…**；也可 **放弃暂存**。覆盖时若输出扩展名与源文件不同，会写入新扩展名并删除原文件。\n\n### 合并\n\n- **PDF**：多页，每页一张图（非常规格式会先转 JPEG 再嵌入）。\n- **长图**：横向或纵向拼接，可设间距与背景色；输出扩展名选 PNG/JPEG/WebP 等。\n- **GIF**：统一画布、帧间隔、是否循环、最长边上限。\n\n### 手动裁剪\n\n- 队列多图，`react-easy-crop` 画布：**比例预设**（含自由随视口、自定义宽高比）、**滚轮缩放**、**三分格**开关、**重置视图**；**应用并下一张**写入 `原文件名_crop.扩展名`。\n- **相对选区复用**：勾选「每次导出后用本次相对选区打开下一张」或 **从当前视图捕获模板**，便于同构图批量裁同一区域；侧栏显示已导出数量与 **跳到未导出**。\n- 快捷键：**Enter** 应用并下一张、**Esc** 跳过、**Alt+←/→** 切换图片、**Ctrl±** 缩放、**Ctrl+0** 复位平移与缩放；在裁剪选框上可用 **方向键** 微调（**Shift** 更细）。\n\n## Mulby 内触发方式\n\n| 说明 | 触发示例 |\n|------|----------|\n| 批量 | 关键词：`图片批量`、`批量处理图片`、`图片批量处理` |\n| 合并 | 关键词：`图片合并`、`合并 PDF`、`合并长图` |\n| 手动裁剪 | 关键词：`手动裁剪`、`连续裁剪` |\n| 带附件 | `files` / `img` 类型命令会附带路径，打开后进入批量页并预填队列 |\n\n窗口为 **detached**，默认较大尺寸；`pluginSetting.single: true` 建议单实例使用。\n\n## 调试日志\n\n后端统一前缀 **`[bulk-image-studio]`**。在 Mulby 主进程控制台或插件宿主日志中搜索该字符串可过滤：\n\n- **`[host]`**：`run`、`getPendingInit`、`batchProcess:incoming`、`batchCommit:incoming`、`mergePdf:incoming` 等，含 `fileSummary` / `stepsSummary`（逐项 `path` 与 `ok` 标记）。\n- **`[fs]`**：每次 `readFile` / `writeFile` 前的路径；若路径非法会额外输出 **`[fs] INVALID_PATH`**（`pathType` 为 `undefined` 等）。\n\n便于定位「`filename` Received undefined」类错误来自哪一次读写、哪张路径。\n\n## 开发\n\n```bash\ncd bulk-image-studio\npnpm install\npnpm run build    # esbuild 后端 + Vite UI\npnpm run pack     # 生成 bulk-image-studio-1.0.0.inplugin\n```\n\n- 后端入口：`src/main.ts` → `dist/main.js`（图片处理走宿主 `mulby.sharp.execute`，插件不打包 `sharp`）。\n- UI：`src/ui/` → 构建到 `ui/`。\n- 可编辑图标源：`assets/icon.svg`；发布前可将导出的 **512×512** PNG 覆盖根目录 `icon.png`。\n\n## Mulby 内验收建议\n\n1. 分别用三条关键词打开插件，确认进入 **批量 / 合并 / 裁剪** 对应页签。\n2. 选 3～5 张混合格式图片做批量压缩并转 WebP，检查输出目录与失败列表。\n3. 各做一次：合并 PDF、纵向长图、GIF（帧间隔与循环）。\n4. 手动裁剪连续处理 3 张，确认保存后自动切换下一张。\n5. 断网环境下仍能使用（无额外联网依赖）。\n\n## 许可证\n\nMIT License",
       "icon": {
         "type": "url",
@@ -97,7 +97,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "51ec182818cded4045cd1d2c29c8d20e5af3e4a68b7ecc8d1f8b5fc10d5e8609",
+      "sha256": "80f0a03ac5c1dae20d0476c2d2e5276a0a3d285a65fc763a9702c34ceb2118d3",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/bulk-image-studio"
     },
@@ -226,9 +226,9 @@
       "version": "1.3.0",
       "author": "Unknown",
       "description": "有温度的中国风日历 - 融合24节气主题、农历黄历、节日倒数的多功能日历插件",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.25-1441/he-calendar-1.3.0.inplugin",
-      "lastPackageTime": "2026-05-25T14:44:34.224Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/he-calendar-1.3.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:29.002Z",
+      "type": "productivity",
       "details": "# 合社日历\n\n> 有温度的中国风日历🍵 - 支持网页与 Mulby 插件\n>\n> [开源地址](https://github.com/scutken/he-calendar) | [在线示例](https://cal.heshe.tech)\n\n## 应用介绍\n\n合社日历是一款融合中国传统文化元素的精美日历插件，专为 Mulby 用户设计。它不仅是一个简单的日历工具，更是一个能让你感受中国传统文化魅力的数字艺术品。\n\n### ✨ 核心特色\n\n- **🎨 24节气智能主题**：根据当前节气自动切换配色，每个节气都有独特的中国传统色彩\n- **📅 农历与黄历**：完整的农历信息、节气、传统节日和黄历宜忌\n- **🌈 多样主题风格**：提供素雅、水墨、朱红、鎏金、黛蓝等多种主题，满足不同审美需求\n- **⚡ 流畅交互体验**：支持滚轮切换月份、快速选择年月、一键回到今天\n- **📆 详细日历信息**：显示节假日、调休信息、干支纪年、五行、冲煞、彭祖百忌等\n- **🎯 精准定位**：快速查看任意日期与今天的时间距离\n\n### 🎨 24节气主题\n\n合社日历根据中国传统24节气，为每个节气精心挑选了对应的中国传统色彩：\n\n- 春季：立春（春黄）、雨水（雨绿）、惊蛰（桃红）、春分（春蓝）、清明（桐绿）、谷雨（羽紫）\n- 夏季：立夏（夏黄）、小满（满红）、芒种（麦黄）、夏至（星云）、小暑（晨紫）、大暑（萤黑）\n- 秋季：立秋（蝉绿）、处暑（谷蓝）、白露（鹟黄）、秋分（秋紫）、寒露（菊红）、霜降（柿红）\n- 冬季：立冬（冬黄）、小雪（雪青）、大雪（雪白）、冬至（冬蓝）、小寒（寒青）、大寒（寒紫）\n\n### 📖 黄历功能\n\n选择任意日期，右侧面板会显示详细的黄历信息：\n\n- **基本信息**：公历日期、农历日期、生肖年、干支纪年\n- **宜忌事项**：当日适宜和忌讳的事项\n- **其他信息**：五行纳音、冲煞、彭祖百忌、胎神方位等传统信息\n\n### 🚀 快速使用\n\n**Mulby 插件**：在 Mulby 中通过以下关键词唤起插件：\n\n- `日历`\n- `万年历`\n- `黄历`\n- `calendar`\n\n**Mulby AI 工具**：插件还为 AI 助手提供了 5 个工具接口：\n\n- `get_date_info` — 查询日历信息（公历、农历、节气、节日等）\n- `get_almanac` — 查询黄历宜忌\n- `get_festivals` — 查询日期范围内的节日\n- `search_next_festival` — 查找下一个指定节日\n- `get_shichen` — 查询十二时辰吉凶\n\n### 🚀 部署\n\n**Mulby 插件打包**：\n\n```bash\nnpm install\nnpm run build       # 构建 dist/main.js + ui/index.html\nnpm run pack        # 生成 he-calendar-{version}.inplugin\n```\n\n**静态站点部署**：推荐部署到腾讯云 EdgeOne Pages：\n\n1. 在 [EdgeOne Pages 控制台](https://console.cloud.tencent.com/edgeone/pages) 新建项目并关联 GitHub 仓库\n2. 构建命令：`npm run build:ui`\n3. 输出目录：`ui`\n4. Node 版本：`20`\n5. 推送到默认分支即自动构建并全球分发\n\n也可以使用任何静态托管平台（GitHub Pages、Cloudflare Pages、Netlify 等），只需把 `ui` 目录作为产物即可。\n\n### 💡 操作指南\n\n- **切换月份**：使用鼠标滚轮上下滚动，或点击左右箭头按钮\n- **选择年份**：点击顶部年份，在下拉面板中选择或滚轮切换\n- **选择月份**：点击顶部月份，在下拉面板中快速选择\n- **回到今天**：点击\"今天\"按钮\n- **切换主题**：点击调色板图标，选择喜欢的主题\n- **查看详情**：点击任意日期，在右侧查看详细信息\n\n## 技术栈\n\n- **Vue 3**：现代化的渐进式 JavaScript 框架\n- **Vite**：下一代前端构建工具\n- **EdgeOne Pages**：腾讯云边缘静态站点托管\n- **Day.js**：轻量级日期处理库\n- **tyme4ts**：强大的农历、节气、黄历计算库（6tail）\n- **Lucide Vue Next**：精美的图标库\n\n## 版本说明\n\n详细版本说明请查看 [版本说明.txt](版本说明.txt)\n\n---\n\n## 开源协议\n\n本项目基于 MIT 协议开源。\n\n## 致谢\n\n感谢以下开源项目：\n\n- [Vue.js](https://vuejs.org/)\n- [Vite](https://vitejs.dev/)\n- [tyme4ts](https://github.com/6tail/tyme4ts)\n- [Day.js](https://day.js.org/)\n- [Lucide Icons](https://lucide.dev/)\n\n---\n\n**用心感受时间的温度，让传统文化融入日常 🌸**\n\n## Mulby 迁移说明\n\n本插件已从 uTools 迁移至 Mulby。以下为 API 变更摘要：\n\n| uTools API | Mulby 替代 | 说明 |\n|---|---|---|\n| `window.utools.onPluginEnter` | `window.mulby.onPluginInit` | 事件数据结构略有不同 |\n| `window.utools.dbStorage.getItem/setItem` | `window.mulby.storage.get/set` | Mulby 存储为异步接口 |\n| `window.utools.shellOpenExternal` | `window.mulby.shell.openExternal` | 功能等价 |\n| `utools.registerTool` | `context.api.tools.register` (backend) | 工具注册移至 backend `src/main.ts` |\n\n### 已知差异\n\n- 原 uTools `dbStorage` 为同步接口，Mulby `storage` 为异步接口，已调整所有调用点\n- 插件 icon 沿用原 `logo.png`，后续可替换为更适配 Mulby 风格的版本\n\n### Mulby 手动验收清单\n\n1. 在 Mulby 中输入 \"日历\" / \"万年历\" / \"黄历\" / \"calendar\" 能正常唤起插件\n2. 日历界面完整显示，滚轮切换月份正常\n3. 主题切换、周起始日、节日显示等设置可正常保存并在重启后保持\n4. 深浅色模式切换正常\n5. 外部链接（GitHub、网页版、百度百科）可正常在系统浏览器中打开\n6. AI 工具（get_date_info、get_almanac、get_festivals、search_next_festival、get_shichen）返回正确数据\n7. Icon 在 Mulby 插件列表中显示正确",
       "icon": {
         "type": "url",
@@ -240,7 +240,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "e8b2b332f97fd8f3883c217efae64d193c706350dc284cc88e2e7612e8adc709",
+      "sha256": "ffa3befecd0d98c5ee26692352d17fb3566e11168286285a402dd2ba2dc8e095",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/he-calendar"
     },
@@ -401,9 +401,9 @@
       "version": "1.0.2",
       "author": "Mulby",
       "description": "综合展示 Mulby 所有 API 能力的示例插件，涵盖系统信息、剪贴板、文件管理、网络、屏幕捕获、媒体、高级设置和安全存储等功能",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.30-1428/mulby-showcase-1.0.2.inplugin",
-      "lastPackageTime": "2026-05-30T14:29:46.551Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/mulby-showcase-1.0.2.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:21.919Z",
+      "type": "developer",
       "details": "# Mulby Showcase\n\n**综合展示 Mulby 所有 API 能力的示例插件**\n\n![Mulby Showcase](./icon.png)\n\n## 功能特性\n\n这个插件是 Mulby 平台的完整功能展示，涵盖了所有 20+ 个 API 模块：\n\n| 模块 | 涵盖的 API | 功能描述 |\n|------|-----------|---------|\n| **系统信息** | system, power, geolocation, network | 系统/应用信息、电源状态、位置信息、网络状态 |\n| **剪贴板** | clipboard, notification | 剪贴板读写、格式检测、图片和文件支持 |\n| **输入控制** | input | 隐藏主窗口后粘贴文本/图片/文件或模拟键入 |\n| **文件管理** | filesystem, dialog, shell | 文件操作、对话框、系统打开、Finder 定位 |\n| **网络与HTTP** | http, network | HTTP 请求测试、网络状态监控 |\n| **屏幕与捕获** | screen, media, window | 显示器信息、区域截图、多窗口协作、媒体权限 |\n| **媒体与音频** | tts, shell | 语音合成、系统提示音 |\n| **高级设置** | theme, window, shortcut, tray, menu | 主题切换、窗口控制、快捷键、托盘、菜单 |\n| **安全与存储** | security, storage | 加密存储、数据持久化 |\n\n## 触发方式\n\n插件支持多种触发关键词：\n\n- `showcase` / `demo` / `示例` - 打开功能展示面板\n- `sysinfo` / `系统信息` - 直接进入系统信息模块\n- `cb` / `剪贴板` - 直接进入剪贴板管理\n- `input` / `输入` - 直接进入输入控制\n- `files` / `文件` - 直接进入文件管理\n- `http` / `网络` - 直接进入网络测试\n- `screenshot` / `截图` / `screen` - 直接进入截图功能\n- `tts` / `语音` / `朗读` - 直接进入语音合成\n- `settings` / `设置` - 直接进入高级设置\n\n## 开发\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建\n\n```bash\npnpm run build\n```\n\n### 打包\n\n```bash\npnpm run pack\n```\n\n## 项目结构\n\n```\nmulby-showcase/\n├── manifest.json              # 插件配置\n├── package.json\n├── src/\n│   ├── main.ts                # 后端入口\n│   └── ui/\n│       ├── App.tsx            # 主应用\n│       ├── styles.css         # 全局样式\n│       ├── components/        # 通用组件\n│       │   ├── Sidebar.tsx\n│       │   ├── PageHeader.tsx\n│       │   ├── Card.tsx\n│       │   ├── Button.tsx\n│       │   ├── StatusBadge.tsx\n│       │   └── CodeBlock.tsx\n│       ├── hooks/             # 自定义 Hooks\n│       │   ├── useTheme.ts\n│       │   ├── useNotification.ts\n│       │   └── useMulby.ts\n│       └── modules/           # 功能模块\n│           ├── SystemInfo/\n│           ├── Clipboard/\n│           ├── Input/\n│           ├── FileManager/\n│           ├── Network/\n│           ├── Screen/\n│           ├── Media/\n│           ├── Settings/\n│           └── Security/\n├── dist/                      # 后端构建输出\n└── ui/                        # UI 构建输出\n```\n\n## API 覆盖\n\n此插件完整展示了 Mulby 的以下 API：\n\n### 基础 API\n- `[已覆盖]` `clipboard` - 剪贴板操作\n- `[已覆盖]` `input` - 输入与粘贴模拟\n- `[已覆盖]` `notification` - 系统通知\n- `[已覆盖]` `storage` - 数据存储\n- `[已覆盖]` `window` - 窗口控制\n- `[已覆盖]` `http` - HTTP 请求\n- `[已覆盖]` `filesystem` - 文件系统\n\n### 系统 API\n- `[已覆盖]` `theme` - 主题管理\n- `[已覆盖]` `screen` - 屏幕信息与截图\n- `[已覆盖]` `shell` - 系统操作\n- `[已覆盖]` `dialog` - 对话框\n- `[已覆盖]` `system` - 系统信息\n- `[已覆盖]` `power` - 电源状态\n\n### 高级 API\n- `[已覆盖]` `shortcut` - 全局快捷键\n- `[已覆盖]` `security` - 加密存储\n- `[已覆盖]` `media` - 媒体权限\n- `[已覆盖]` `tray` - 系统托盘\n- `[已覆盖]` `network` - 网络状态\n- `[已覆盖]` `menu` - 右键菜单\n- `[已覆盖]` `geolocation` - 地理位置\n- `[已覆盖]` `tts` - 语音合成\n- `[已覆盖]` `window` - 多窗口管理 (create/show/close)\n\n## 典型案例：区域截图与编辑流程\n\n本项目实现了一个经典的\"区域截图 -> 独立窗口编辑 -> 回传主窗口\"的工作流，展示了多窗口协作与数据传递的最佳实践。\n\n```mermaid\nsequenceDiagram\n    participant U as 用户\n    participant Main as 主窗口(Screen模块)\n    participant IPC as 主进程\n    participant Overlay as 截图覆盖层\n    participant Editor as 图片编辑器\n\n    U->>Main: 点击\"区域截图\"\n    Main->>IPC: 调用 screen.screenCapture()\n    Note over Main: 主窗口自动隐藏(失焦)\n    \n    IPC->>Overlay: 创建全屏透明窗口\n    U->>Overlay: 拖拽选择区域\n    Overlay->>IPC: 完成选择\n    IPC->>Overlay: 关闭覆盖层\n    IPC->>Main: 返回截图数据(Base64)\n    \n    Main->>Editor: window.create('/image-editor')\n    Note right of Main: 使用 BroadcastChannel 建立连接\n    \n    Editor-->>Main: 发送 READY 消息\n    Main->>Editor: 发送 INIT_IMAGE (原图)\n    \n    U->>Editor: 绘制/编辑图片\n    U->>Editor: 点击\"确认使用\"\n    \n    Editor->>Main: 发送 SAVE_IMAGE (编辑后图片)\n    Editor->>Editor: 关闭窗口\n    \n    Main->>Main: 更新预览区域\n    Main->>Main: window.show() 恢复显示\n```\n\n### 关键技术点\n\n1.  **多窗口管理**：使用 `window.mulby.window.create` 创建独立的编辑器窗口，互不干扰。\n2.  **窗口通信**：使用 Web 标准 `BroadcastChannel` 实现主窗口与编辑器窗口的直接通信，无需经过主进程中转，高效且低延迟。\n3.  **可见性控制**：利用 `window.show()` 确保截图流程结束后主窗口能正确恢复显示。\n\n## 许可证\n\nMIT License",
       "icon": {
         "type": "url",
@@ -415,7 +415,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "7af61776adeb6d7d3c0599360033dd54be1e3d28fafa83b317dc2fcee8931728",
+      "sha256": "776eb26c36f1d0e8466c29082ba2152d5720e02b49443108435bd17e1b59ffdb",
       "homepage": "https://github.com/Unicellular-SU/mulby_plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-showcase"
     },
@@ -596,13 +596,13 @@
       "id": "screenshot-annotator",
       "name": "screenshot-annotator",
       "displayName": "截图标注",
-      "version": "1.0.2",
+      "version": "1.2.0",
       "author": "mulby",
-      "description": "区域截图后在透明独立窗口中快速添加矩形、箭头和画笔标注，并复制或保存为 PNG。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.25-1441/screenshot-annotator-1.0.2.inplugin",
-      "lastPackageTime": "2026-05-25T14:45:54.604Z",
+      "description": "区域截图后在透明独立窗口中快速添加矩形、箭头和画笔标注，并复制或保存为 PNG；内置「问 AI」可对截图解释、解题、提取文字、翻译或 AI 修图。",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/screenshot-annotator-1.2.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:40.760Z",
       "type": "productivity",
-      "details": "# 截图标注\n\n区域截图后打开一个透明、无边框的独立窗口，用画布直接标注截图并导出结果。\n\n## 功能\n\n- 区域截图：触发 `annotate` 功能前由 Mulby 执行 `preCapture: \"region\"`。\n- 贴合截图区域：窗口使用 `position: \"capture-region\"` 和 `fit: \"capture-region-with-toolbar\"`，工具条使用 96px 双排布局；小截图会保留截图原尺寸画布，但窗口宽度至少为 1080px 以完整显示增强工具条。\n- 透明窗口缩放：插件自绘边缘拖拽热区并调用宿主 `window.resizeDrag`，保证透明无边框窗口仍可调整尺寸。\n- 图片尺寸回退：如果截图区域元数据缺失，插件会按图片自然尺寸和屏幕缩放比例计算窗口高度，避免画布和工具条之间留白或图片比例被挤压。\n- 标注工具：直线、矩形、圆形、箭头、画笔、高亮、文字、编号、马赛克、模糊和橡皮擦，支持颜色和线宽调整。\n- 历史操作：支持撤销、重做和清空全部标注。\n- 导出操作：复制最终 PNG 到剪贴板，或选择路径保存 PNG 文件。\n- 快捷关闭：按 Esc 或点击关闭按钮退出窗口。\n\n## 触发方式\n\n- `截图标注`\n- `screenshot`\n- `annotate`\n\n## 使用示例\n\n1. 在 Mulby 输入 `截图标注`。\n2. 框选屏幕区域。\n3. 在弹出的标注窗口中选择箭头、矩形或画笔。\n4. 点击复制或保存导出标注后的截图。\n\n## 依赖与前提\n\n- 需要 Mulby 宿主支持 `preCapture: \"region\"`、detached 窗口和截图 attachment 注入。\n- UI 依赖 React、Vite 和 lucide-react。\n- 不引入 `sharp` npm 包。需要高性能图片处理时应使用宿主提供的 `window.mulby.sharp` API。\n- 当前版本的标注导出由浏览器 canvas 合成 PNG，不依赖宿主 sharp。\n\n## 开发\n\n```bash\npnpm install\npnpm run build\npnpm run pack\n```\n\n## 项目结构\n\n```text\nplugins/screenshot-annotator/\n├── assets/icon.svg\n├── icon.png\n├── manifest.json\n├── src/main.ts\n├── src/ui/App.tsx\n├── src/ui/styles.css\n└── src/types/mulby.d.ts\n```",
+      "details": "# 截图标注\n\n区域截图后打开一个透明、无边框的独立窗口，用画布直接标注截图并导出结果。\n\n## 功能\n\n- 区域截图：触发 `annotate` 功能前由 Mulby 执行 `preCapture: \"region\"`。\n- 贴合截图区域：窗口使用 `position: \"capture-region\"` 和 `fit: \"capture-region-with-toolbar\"`，工具条使用 96px 双排布局；小截图会保留截图原尺寸画布，但窗口宽度至少为 1080px 以完整显示增强工具条。\n- 透明窗口缩放：插件自绘边缘拖拽热区并调用宿主 `window.resizeDrag`，保证透明无边框窗口仍可调整尺寸。\n- 图片尺寸回退：如果截图区域元数据缺失，插件会按图片自然尺寸和屏幕缩放比例计算窗口高度，避免画布和工具条之间留白或图片比例被挤压。\n- 标注工具：直线、矩形、圆形、箭头、画笔、高亮、文字、编号、马赛克、模糊和橡皮擦，支持颜色和线宽调整。\n- 历史操作：支持撤销、重做和清空全部标注。\n- 导出操作：复制最终 PNG 到剪贴板，或选择路径保存 PNG 文件。\n- 快捷关闭：按 Esc 或点击关闭按钮退出窗口。\n- **问 AI**：工具栏「问 AI」按钮会在截图旁边弹出一个**无边框浮窗**（置顶、可拖动标题区、可拖边缩放、高度随内容自适应、自带关闭按钮），把当前截图（带标注或原图可切换）发给系统多模态模型；截图标注窗口尺寸/比例完全不受影响：\n  - **解释这是什么** / **解题·回答** / **提取文字（OCR）** / **翻译图中文字**：流式返回文字，按 Markdown 渲染，可一键复制。\n  - **AI 修图**：按指令做图生图，结果可**替换截图**（回传到截图窗口作为新底图继续标注）、复制到剪贴板或下载保存。\n  - 标注会引导模型注意力——先用箭头/方框圈出重点再提问，回答更聚焦。\n  - 文字动作自动选用支持视觉的模型，修图选用 image-generation 模型；模型选择会被记住。\n\n## 问 AI 的实现要点\n\n- 独立浮窗：点击「问 AI」时把当前截图快照（带标注 = `exportPng(image, annotations)`，原图 = `image.dataUrl`）写入 `ai-handoff-{id}` 存储键，再用 `mulby.window.create('/index.html?mode=ai&aiHandoff={id}', { type:'borderless', titleBar:false, alwaysOnTop:true, x,y 定位到截图旁 })` 打开浮窗；`main.tsx` 按 `mode=ai` 渲染 `AiView`，读取并清理交接键。\n- 浮窗交互：无边框窗口的拖动/缩放由 `useFloatingWindow`（`mulby.window.setBounds` / `resizeDrag`，与截图窗同款）实现；`AiPanel` 通过 `onContentHeight` 上报内容自然高度，`AiView` 据此调用 `setBounds` 让窗口高度随内容自适应（用户手动缩放后停止自适应）。\n- 经 `mulby.ai.attachments.upload({ purpose: 'vision' | 'image-edit' })` 上传为附件，拿到 `attachmentId`。\n- 文字动作走 `mulby.ai.call`，消息 `content` 携带 `{ type: 'image', attachmentId }`，流式累积增量。\n- 修图走 `mulby.ai.images.edit({ model, imageAttachmentId, prompt })`。\n- 替换截图：AI 浮窗经 `window.mulby.window.sendToParent('apply-edited-image', dataUrl)` 把结果回传父窗口，截图窗口用 `onChildMessage` 接收后调用 `loadTransformedImage` 作为新底图载入。\n- Markdown 渲染使用 `react-markdown` + `remark-gfm`（`src/ui/components/MdRenderer.tsx`），不解析原始 HTML，天然免 XSS。\n- 服务层位于 `src/ui/services/aiVision.ts`（动作预设、提示词、模型过滤、运行器均为可单测的纯函数 + 薄封装）。\n\n## 触发方式\n\n- `截图标注`\n- `screenshot`\n- `annotate`\n\n## 使用示例\n\n1. 在 Mulby 输入 `截图标注`。\n2. 框选屏幕区域。\n3. 在弹出的标注窗口中选择箭头、矩形或画笔。\n4. 点击复制或保存导出标注后的截图。\n\n## 依赖与前提\n\n- 需要 Mulby 宿主支持 `preCapture: \"region\"`、detached 窗口和截图 attachment 注入。\n- UI 依赖 React、Vite 和 lucide-react。\n- 不引入 `sharp` npm 包。需要高性能图片处理时应使用宿主提供的 `window.mulby.sharp` API。\n- 当前版本的标注导出由浏览器 canvas 合成 PNG，不依赖宿主 sharp。\n\n## 开发\n\n```bash\npnpm install\npnpm run build\npnpm run pack\n```\n\n## 项目结构\n\n```text\nplugins/screenshot-annotator/\n├── assets/icon.svg\n├── icon.png\n├── manifest.json\n├── src/main.ts\n├── src/ui/App.tsx\n├── src/ui/styles.css\n├── src/ui/AiView.tsx                  # 独立「问 AI」浮窗视图\n├── src/ui/hooks/useFloatingWindow.ts  # 无边框浮窗拖动/缩放\n├── src/ui/components/AiPanel.tsx      # 问 AI 主体（动作/提问/结果）\n├── src/ui/components/MdRenderer.tsx   # react-markdown 渲染器\n├── src/ui/services/aiVision.ts        # 视觉问答 / 修图服务层\n└── src/types/mulby.d.ts\n```",
       "icon": {
         "type": "url",
         "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/screenshot-annotator/icon.png"
@@ -613,7 +613,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "6fa4d8d4047134b8baf21059e34a6103e99140f44f64268d101aab7e30d94eda",
+      "sha256": "a5b059aa36637f83457a89535fc0ff4372972be9410f3bcfaca68f5465d37d1b",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/screenshot-annotator"
     },
@@ -649,9 +649,9 @@
       "version": "1.0.2",
       "author": "mulby",
       "description": "支持 10 类单位与货币的实时转换工具",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.25-1441/unit-converter-1.0.2.inplugin",
-      "lastPackageTime": "2026-05-25T14:46:03.038Z",
-      "type": "productivity",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/unit-converter-1.0.2.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:44.300Z",
+      "type": "utility",
       "details": "# 单位转换插件\n\n一个 Mulby 核心版数值转换插件，提供 10 类单位换算、在线汇率、历史记录与导出能力，界面采用深蓝玻璃拟态风格。\n\n## 功能说明\n\n- 支持转换类别：\n  - 长度、重量、温度、货币、数据、时间、面积、体积、速度、进制\n- 实时转换：\n  - 输入即算，支持科学计数法（如 `1.2e6`）\n  - 智能识别输入中的单位后缀（如 `100km`）\n- 货币转换：\n  - 在线汇率更新（每小时自动更新）\n  - 自动加载汇率接口支持的全部币种（由 API 返回决定）\n  - 手动刷新按钮\n  - 离线或刷新失败时自动回退缓存并提示\n- 历史记录：\n  - 最近 10 条\n  - 一键重做\n  - 清空历史\n  - 导出 JSON / CSV（复制到剪贴板）\n- 批量模式：\n  - 每行输入一个值并批量生成结果\n\n## 触发方式\n\n- 关键词：\n  - `单位换算`\n  - `单位转换`\n  - `数值转换`\n  - `converter`\n- 划词菜单：\n  - `转换数值`\n\n## 使用示例\n\n- `100km` -> 选择目标单位 `mile`\n- `32f` -> 目标单位 `C`\n- 进制模式中输入 `FF`（from = HEX）-> 目标单位 `DEC`\n\n## 构建与打包\n\n```bash\npnpm install\npnpm run build\npnpm run pack\n```\n\n## 依赖与前置条件\n\n- 依赖 Mulby 插件运行环境（`mulby dev` / `mulby pack`）\n- 货币汇率依赖在线接口：`https://api.frankfurter.dev/v1`",
       "icon": {
         "type": "url",
@@ -663,7 +663,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "575bbb2baf7350a1ac5d3e24e1f5ae3715e4bb2673d3740f41aa8c3ee34bffe2",
+      "sha256": "caf60632b786a20fcba3fbbc9506c541e51235a9b6a70b430ab3aaf2538d573f",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/unit-converter"
     },
@@ -798,9 +798,9 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "工业级文件重命名工具，支持复杂逻辑的批量处理",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.31-1647/batch-rename-1.0.0.inplugin",
-      "lastPackageTime": "2026-05-31T16:47:46.990Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/batch-rename-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:04.865Z",
+      "type": "utility",
       "details": "# batch-rename\n\n插件描述\n\n## 功能特性\n\n- 功能 1\n- 功能 2\n- 功能 3\n\n## 触发方式\n\n- `batch-rename` - 主功能\n\n## 命令执行权限\n\n默认模板不会开启命令执行权限。只有插件后端确实需要调用 `context.api.shell.runCommand` 或全局 `mulby.shell.runCommand` 时，才在 `manifest.json` 中声明 `commandExecution.direct`：\n\n```json\n{\n  \"permissions\": {\n    \"commandExecution\": {\n      \"direct\": {\n        \"enabled\": true,\n        \"defaultProfile\": \"workspace\",\n        \"maxProfile\": \"workspace\"\n      }\n    }\n  }\n}\n```\n\n调用时可用 `executionProfile` 请求 `sandbox`、`workspace` 或 `trusted`，但不能超过 manifest 允许的 `maxProfile`。如果插件承载自己的 AI，并希望这个 AI 使用 Mulby 内置命令型能力，需要单独声明 `commandExecution.ai`；旧版 `runCommand: true` 只兼容插件自身直接调命令，不授权 AI 生成命令。\n\n## 目录授权\n\n插件可以在运行时申请用户确认的目录访问权限，不需要在 manifest 中预声明。获得 `readwrite` 授权后，该目录会扩展当前插件的命令 workspace root；但命令执行本身仍需要 `commandExecution.direct` 或 `commandExecution.ai`。\n\n```ts\nconst grant = await context.api.directoryAccess.request({\n  mode: 'readwrite',\n  reason: '在用户选择的项目目录中运行命令'\n})\n\nif (grant) {\n  await context.api.shell.runCommand({\n    command: 'git',\n    args: ['status'],\n    cwd: grant.path,\n    executionProfile: 'workspace'\n  })\n}\n```\n\n## 插件通信\n\n后端可以使用 `context.api.messaging` 或全局 `mulby.messaging` 与其他插件通信。需要长期接收消息时，把订阅注册在后端，并让 UI 通过 `window.mulby.host.call(...)` 读取后端缓存；不要把消息缓存只放在前端。\n\n```ts\nlet messageHandler: ((message: PluginMessage) => void | Promise<void>) | null = null\nconst recentMessages: PluginMessage[] = []\n\nfunction registerMessaging(api: BackendPluginAPI) {\n  if (messageHandler) api.messaging.off(messageHandler)\n  messageHandler = (message) => {\n    recentMessages.unshift(message)\n    recentMessages.splice(50)\n  }\n  api.messaging.on(messageHandler)\n}\n\nexport function onLoad(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport function onBackground(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport const rpc = {\n  getRecentMessages() {\n    return recentMessages\n  }\n}\n```\n\n如果插件没有打开 UI 时也要接收消息，在 `manifest.json` 中启用后台运行。是否跟随 Mulby 启动由用户在插件窗口菜单或搜索结果右键菜单中勾选：\n\n```json\n{\n  \"pluginSetting\": {\n    \"background\": true,\n    \"persistent\": true,\n    \"idleTimeoutMs\": \"never\"\n  }\n}\n```\n\n## 窗口与截图\n\nReact 模板适合可视化插件。需要独立窗口时，将功能配置为 `mode: \"detached\"`；需要截图后打开标注界面时，可组合 `preCapture: \"region\"` 和窗口配置 `type: \"borderless\"`、`transparent: true`、`position: \"capture-region\"`、`fit: \"capture-region-with-toolbar\"`。\n\nmacOS 上，独立插件窗口会使用 Mulby 的应用级 Dock 图标表示。Dock 图标会优先显示“宿主图标 + 最近聚焦插件图标”的组合样式，多窗口时显示数量徽标。Dock 右键菜单可用于切换或关闭插件窗口；系统 Dock 的“退出”仍然退出宿主应用。\n\n`skipTaskbar` 只表示请求隐藏具体窗口的任务栏/Dock 呈现，不能作为隐藏 Mulby 应用级 Dock 图标的开关。\n\n## 旧插件兼容窗口\n\n新插件优先使用单入口 UI + 前端路由。迁移 zTools/uTools 风格插件时，如果必须打开不同 HTML 文件并为窗口指定独立 preload，可以使用 `window.mulby.window.create(path, { loadMode: \"file\" })`。\n\n```ts\nconst regionWindow = await window.mulby.window.create('region/index.html?key=abc', {\n  loadMode: 'file',\n  preload: 'region/preload.cjs',\n  width: 640,\n  height: 480\n})\n```\n\n文件模式只允许加载插件目录内的相对 HTML 文件，`preload` 只允许插件目录内的 `.js` / `.cjs` 文件。额外 HTML、窗口专属 preload、`.node` 原生模块和外部二进制不会自动进入包内，需要写入 `manifest.assets`：\n\n```json\n{\n  \"assets\": [\n    \"region\",\n    \"effect\",\n    \"countdown.html\",\n    \"region/preload.cjs\",\n    \"addon-darwin-arm64.node\",\n    \"bin/aperture\"\n  ]\n}\n```\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。若插件放置于基于 pnpm workspace 的父仓库（如 `plugins/<name>/` 目录），通常建议直接在**仓库根目录**执行一次 `pnpm install`。也可以在当前插件目录单独执行。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建\n\n```bash\npnpm run build\n```\n\n### 打包\n\n```bash\npnpm run pack\n```\n\n## 项目结构\n\n```\nbatch-rename/\n├── manifest.json              # 插件配置\n├── package.json\n├── src/\n│   ├── main.ts                # 后端入口\n│   ├── types/\n│   │   └── mulby.d.ts         # 类型定义（含 BackendPluginContext）\n│   ├── ui/\n│   │   ├── App.tsx            # 主应用\n│   │   ├── main.tsx           # UI 入口\n│   │   ├── index.html         # HTML 模板\n│   │   ├── styles.css         # 全局样式\n│   │   ├── hooks/\n│   │   │   └── useMulby.ts    # Mulby API Hook\n│   ├── legacy/                # 可选：旧插件兼容 HTML/preload 源文件\n├── dist/                      # 后端构建输出\n├── ui/                        # UI 构建输出\n├── assets/                    # 可选：manifest.assets 打包资源\n└── icon.png                   # 插件图标\n```\n\n## 许可证\n\nMIT License",
       "icon": {
         "type": "url",
@@ -812,7 +812,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "563a645a6f510867dbe3d736b579bd6f41ec39d9cd80a320755f6ce161a87068",
+      "sha256": "c570e6c64b686af90d3d9513e10048903d4c3a4b2382984468436fba46754697",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/batch-rename"
     },
@@ -823,9 +823,9 @@
       "version": "1.0.0",
       "author": "Unknown",
       "description": "高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.05.31-1647/calc-pad-1.0.0.inplugin",
-      "lastPackageTime": "2026-05-31T16:47:54.862Z",
-      "type": "productivity",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/calc-pad-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:22.053Z",
+      "type": "utility",
       "details": "# 计算稿纸 (Calc Pad)\n\n高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。\n\n## 特性\n\n- **实时计算**：输入算式即刻获得结果。\n- **自动保存**：所有稿纸自动持久化，无需手动保存。\n- **行间备注**：可以为任意计算行添加说明备注。\n- **多稿纸管理**：随时新建、切换、删除多个稿纸。\n- **丰富运算支持**：支持 `+`、`-`、`*`、`/`、`^`、`%` 和括号嵌套，提供千分位格式化显示。\n- **键盘驱动**：\n  - `Enter`：完成当前输入，如无输入则将上一行结果带入新行\n  - `↑` / `↓`：在各计算行间切换焦点，支持随时修改历史算式\n  - `Cmd/Ctrl + B`：为当前行添加/编辑备注\n  - `Cmd/Ctrl + C`：快速复制当前所有算式和结果\n  - `Cmd/Ctrl + N`：新建空白稿纸\n  - `Cmd/Ctrl + R`：清空当前稿纸\n\n## 唤起方式\n\n在 Mulby 中输入关键字：`计算稿纸`、`calc`、`计算器`\n\n## 示例\n\n```\n55+88+7689*543\n                       = 4,175,270\n                       \n2^5+888+99*878.467\n                       = 87,888.233\n```",
       "icon": {
         "type": "url",
@@ -837,7 +837,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "fe57f780671251701324125a72ad445c6d3fbb5c9b062a5c23ed8826333e802e",
+      "sha256": "bde23bb9bb742e3c01a0052b1e83e9366443a35572c0b0259ee7d849dbd3c18b",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/calc-pad"
     },
@@ -848,9 +848,9 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "AI 驱动的一站式图像处理工具：文字生图、智能去背景、无损放大、AI 修图",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.05-0354/mulby-ai-image-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-05T03:55:18.652Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/mulby-ai-image-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:45.515Z",
+      "type": "ai",
       "details": "# mulby-ai-image\n\n插件描述\n\n## 功能特性\n\n- 功能 1\n- 功能 2\n- 功能 3\n\n## 触发方式\n\n- `mulby-ai-image` - 主功能\n\n## 命令执行权限\n\n默认模板不会开启命令执行权限。只有插件后端确实需要调用 `context.api.shell.runCommand` 或全局 `mulby.shell.runCommand` 时，才在 `manifest.json` 中声明 `commandExecution.direct`：\n\n```json\n{\n  \"permissions\": {\n    \"commandExecution\": {\n      \"direct\": {\n        \"enabled\": true,\n        \"defaultProfile\": \"workspace\",\n        \"maxProfile\": \"workspace\"\n      }\n    }\n  }\n}\n```\n\n调用时可用 `executionProfile` 请求 `sandbox`、`workspace` 或 `trusted`，但不能超过 manifest 允许的 `maxProfile`。如果插件承载自己的 AI，并希望这个 AI 使用 Mulby 内置命令型能力，需要单独声明 `commandExecution.ai`；旧版 `runCommand: true` 只兼容插件自身直接调命令，不授权 AI 生成命令。\n\n## 目录授权\n\n插件可以在运行时申请用户确认的目录访问权限，不需要在 manifest 中预声明。获得 `readwrite` 授权后，该目录会扩展当前插件的命令 workspace root；但命令执行本身仍需要 `commandExecution.direct` 或 `commandExecution.ai`。\n\n```ts\nconst grant = await context.api.directoryAccess.request({\n  mode: 'readwrite',\n  reason: '在用户选择的项目目录中运行命令'\n})\n\nif (grant) {\n  await context.api.shell.runCommand({\n    command: 'git',\n    args: ['status'],\n    cwd: grant.path,\n    executionProfile: 'workspace'\n  })\n}\n```\n\n## 插件通信\n\n后端可以使用 `context.api.messaging` 或全局 `mulby.messaging` 与其他插件通信。需要长期接收消息时，把订阅注册在后端，并让 UI 通过 `window.mulby.host.call(...)` 读取后端缓存；不要把消息缓存只放在前端。\n\n```ts\nlet messageHandler: ((message: PluginMessage) => void | Promise<void>) | null = null\nconst recentMessages: PluginMessage[] = []\n\nfunction registerMessaging(api: BackendPluginAPI) {\n  if (messageHandler) api.messaging.off(messageHandler)\n  messageHandler = (message) => {\n    recentMessages.unshift(message)\n    recentMessages.splice(50)\n  }\n  api.messaging.on(messageHandler)\n}\n\nexport function onLoad(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport function onBackground(context?: BackendPluginContext) {\n  if (context) registerMessaging(context.api)\n}\n\nexport const rpc = {\n  getRecentMessages() {\n    return recentMessages\n  }\n}\n```\n\n如果插件没有打开 UI 时也要接收消息，在 `manifest.json` 中启用后台运行。是否跟随 Mulby 启动由用户在插件窗口菜单或搜索结果右键菜单中勾选：\n\n```json\n{\n  \"pluginSetting\": {\n    \"background\": true,\n    \"persistent\": true,\n    \"idleTimeoutMs\": \"never\"\n  }\n}\n```\n\n## 窗口与截图\n\nReact 模板适合可视化插件。需要独立窗口时，将功能配置为 `mode: \"detached\"`；需要截图后打开标注界面时，可组合 `preCapture: \"region\"` 和窗口配置 `type: \"borderless\"`、`transparent: true`、`position: \"capture-region\"`、`fit: \"capture-region-with-toolbar\"`。\n\nmacOS 上，独立插件窗口会使用 Mulby 的应用级 Dock 图标表示。Dock 图标会优先显示“宿主图标 + 最近聚焦插件图标”的组合样式，多窗口时显示数量徽标。Dock 右键菜单可用于切换或关闭插件窗口；系统 Dock 的“退出”仍然退出宿主应用。\n\n`skipTaskbar` 只表示请求隐藏具体窗口的任务栏/Dock 呈现，不能作为隐藏 Mulby 应用级 Dock 图标的开关。\n\n## 旧插件兼容窗口\n\n新插件优先使用单入口 UI + 前端路由。迁移 zTools/uTools 风格插件时，如果必须打开不同 HTML 文件并为窗口指定独立 preload，可以使用 `window.mulby.window.create(path, { loadMode: \"file\" })`。\n\n```ts\nconst regionWindow = await window.mulby.window.create('region/index.html?key=abc', {\n  loadMode: 'file',\n  preload: 'region/preload.cjs',\n  width: 640,\n  height: 480\n})\n```\n\n文件模式只允许加载插件目录内的相对 HTML 文件，`preload` 只允许插件目录内的 `.js` / `.cjs` 文件。额外 HTML、窗口专属 preload、`.node` 原生模块和外部二进制不会自动进入包内，需要写入 `manifest.assets`：\n\n```json\n{\n  \"assets\": [\n    \"region\",\n    \"effect\",\n    \"countdown.html\",\n    \"region/preload.cjs\",\n    \"addon-darwin-arm64.node\",\n    \"bin/aperture\"\n  ]\n}\n```\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。若插件放置于基于 pnpm workspace 的父仓库（如 `plugins/<name>/` 目录），通常建议直接在**仓库根目录**执行一次 `pnpm install`。也可以在当前插件目录单独执行。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建\n\n```bash\npnpm run build\n```\n\n### 打包\n\n```bash\npnpm run pack\n```\n\n## 项目结构\n\n```\nmulby-ai-image/\n├── manifest.json              # 插件配置\n├── package.json\n├── src/\n│   ├── main.ts                # 后端入口\n│   ├── types/\n│   │   └── mulby.d.ts         # 类型定义（含 BackendPluginContext）\n│   ├── ui/\n│   │   ├── App.tsx            # 主应用\n│   │   ├── main.tsx           # UI 入口\n│   │   ├── index.html         # HTML 模板\n│   │   ├── styles.css         # 全局样式\n│   │   ├── hooks/\n│   │   │   └── useMulby.ts    # Mulby API Hook\n│   ├── legacy/                # 可选：旧插件兼容 HTML/preload 源文件\n├── dist/                      # 后端构建输出\n├── ui/                        # UI 构建输出\n├── assets/                    # 可选：manifest.assets 打包资源\n└── icon.png                   # 插件图标\n```\n\n## 许可证\n\nMIT License",
       "icon": {
         "type": "url",
@@ -862,7 +862,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "fd5f8e59ad02ae140dd74f382b1860a07a78ed7ba1a2ba6b0e8c22071f4690a1",
+      "sha256": "cec511343c094a728c071ff214441bd5b3cfe1567e443da3122239e2d7be834e",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-ai-image"
     },
@@ -873,9 +873,9 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "收藏常用文本、代码和图片，一键快速粘贴",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.05-0354/mulby-memo-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-05T03:55:26.350Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/mulby-memo-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:17.766Z",
+      "type": "productivity",
       "details": "# mulby-memo (备忘快贴)\n\n一款为 Mulby 设计的剪贴板与片段管理插件，支持快速收藏文本、代码和图片，并能一键快速粘贴。\n\n## 功能特性\n\n- **一键收藏**：支持通过快捷键或关键字，将剪贴板内容（纯文本、代码、图片）默默保存。\n- **分类管理**：支持将备忘分为「文本」、「代码」和「图片」三类。\n- **快速粘贴**：在界面中点击任意备忘录，即可自动将其粘贴到之前活跃的应用程序中。\n- **精美界面**：适配明暗主题，采用 Tailwind 构建的现代化卡片式交互。\n\n## 触发方式\n\n- `备忘快贴` 或 `mulby-memo`：打开插件主界面查看与管理备忘录。\n- `默默记录到备忘快贴` 或 `保存为备忘`：不打开主界面，直接在后台将输入框的内容或剪贴板图片保存到数据库。\n\n## 使用方法\n\n1. **收藏文本**：在 Mulby 输入框输入文本后，选择「保存为备忘」。\n2. **收藏图片**：在其他应用复制图片后，唤出 Mulby，选择「保存图片为备忘」。\n3. **快速调用**：唤出 Mulby 输入「备忘快贴」，在列表中点击需要的片段，即可完成一键自动粘贴。\n\n## 开发\n\n> **💡 提示**: 推荐使用 [pnpm](https://pnpm.io/) 进行依赖管理。\n\n### 安装依赖\n\n```bash\npnpm install\n```\n\n### 开发模式\n\n```bash\npnpm run dev\n```\n\n### 构建与打包\n\n```bash\npnpm run build\npnpm run pack\n```\n\n打包产物为 `.inplugin` 格式，可在 Mulby 插件中心进行离线安装。",
       "icon": {
         "type": "url",
@@ -887,7 +887,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "2b3b517270fa6e81a32d8ef18151386f2aefe4a17ac79f0eb6ad177182ef70e0",
+      "sha256": "831cc0777a701500611a88c69167118b68ff95f61209c7a050393a35e78f2bad",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-memo"
     },
@@ -922,9 +922,9 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "聚合多平台热搜榜，快捷键驱动，工作之余方便吃瓜",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.08-1404/hot-trending-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-08T14:05:26.059Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/hot-trending-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:34:37.209Z",
+      "type": "entertainment",
       "details": "# 热搜排行榜\n\n聚合多平台热搜榜，快捷键驱动，工作之余方便吃瓜。\n\n## 功能\n\n- 聚合 6 大分类、22 个平台的热搜数据\n- 全键盘驱动交互，高效浏览\n- 插件内阅读模式，一键浏览器打开原文\n- 搜索框过滤热搜内容\n- 5 分钟自动缓存，减少请求\n\n## 支持平台\n\n| 分类 | 平台 |\n|------|------|\n| 热搜 | 微博、百度、抖音、今日头条 |\n| 社区 | 知乎、V2EX、虎扑、贴吧 |\n| 科技 | 36氪、少数派、IT之家、掘金 |\n| 视频 | B站、快手、AcFun |\n| 资讯 | 澎湃、腾讯、网易、新浪 |\n| 生活 | 微信读书、豆瓣、酷安 |\n\n## 快捷键\n\n| 快捷键 | 功能 |\n|--------|------|\n| `←` / `→` / `Tab` | 切换一级分类 |\n| `Ctrl+←` / `Ctrl+→` / `Ctrl+Tab` | 切换二级平台 |\n| `↑` / `↓` | 选择列表项 |\n| `Enter` | 查看详情 / 返回列表 |\n| `ESC` | 关闭阅读页 / 退出插件 |\n| `Ctrl+R` | 刷新当前榜单 |\n| `Ctrl+O` | 在浏览器中打开原文 |\n| `Ctrl+W` | 关闭插件窗口 |\n\n## 触发方式\n\n在 Mulby 搜索框中输入：`热搜`、`hot`、`resou`\n\n## 数据源\n\n使用开源项目 [DailyHotApi](https://github.com/imsyy/DailyHotApi) 作为数据源，默认 API 地址 `https://api-hot.imsyy.top`。",
       "icon": {
         "type": "url",
@@ -936,7 +936,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "04158c84c330afdfe8dbfdd78bd6425a6c19561a58a252b41a71877da57588af",
+      "sha256": "f71db2429864e19b4e16c74d26e8d80ca65385eac69dd26413c792bdcd49a4a8",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/hot-trending"
     },
@@ -947,9 +947,9 @@
       "version": "1.0.0",
       "author": "Mulby",
       "description": "插件开发工作台：创建/导入/构建/打包/刷新/管理插件，并支持 AI Vibe Coding 一句话造插件",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.13-0538/mulby-developer-tools-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-13T05:39:20.144Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/mulby-developer-tools-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:09.351Z",
+      "type": "developer",
       "details": "# Mulby 开发者工具（mulby-developer-tools）\n\n插件开发工作台：在一个可视化界面里**创建 / 导入 / 添加 / 构建 / 打包 / 刷新 / 移除**插件项目，并通过 **Vibe Coding** 用自然语言按固定流程创作新插件。\n\n> 形态：React + Vite + Tailwind + lucide-react 的 detached 窗口工作台；后台 `main` 极简，核心逻辑在 UI 内通过 `window.mulby.developer.*` 与宿主交互。\n\n---\n\n## 功能\n\n### 工作台（Workbench）\n- **多来源项目列表**：按来源分组（最近创建 / 最近导入 / 已添加目录 / 开发目录迁移），每项显示类型徽标（单插件 / 集合）与健康状态点。\n- **详情与状态徽标**：选中项目查看 manifest 摘要与每个插件的状态——`有效 / manifest 无效`、`已构建 / 未构建`、`已加载 / 未加载`、`ID 冲突`，错误可展开查看详情与修复建议。\n- **操作**（lucide 图标）：创建 `Plus`、导入 `FolderInput`、添加目录 `FolderPlus`、构建 `Hammer`、打包 `Package`、刷新 `RefreshCw`、打开目录 `FolderOpen`、移除 `Trash2`、README `FileText`。\n- **诊断日志区**：构建 / 打包 / 创建的流式输出与时间戳，支持清空。\n- **四态覆盖**：`loading`（骨架 + spinner）、`error`（全局错误条 + 行内错误详情）、`empty`（创建/导入/添加引导）、`success`（toast + 状态徽标转绿）。\n\n### Vibe Coding 面板\n**4 阶段分步向导**，可在已抵达的步骤间自由跳转：\n\n0. 描述（一句话需求 / 选插件改造）→ 1. 契约（结构化 manifest，可编辑）→ 2. 生成（AI agent 自主写码）→ 3. 交付（构建·载入·验证·迭代）\n\n**「能编译」≠「能跑」——两道真实验证门禁：**\n- **契约一致性校验（静态、自动）**：后端 `check_conformance` 比对 manifest 与真实文件/源码（UI 形态是否自洽、声明的功能码是否有处理分支、`manifest.tools` 是否都 `register()`、`preload` 路径是否存在…）。AI 在生成结束前必须自检并据 error 修复；交付页也会展示问题并提供「AI 修复一致性问题」。这把 `develop-mulby-plugin` 技能 Handoff Checklist 的关键项变成了可机械执行的门禁。\n- **运行验证（动态、手动）**：「运行验证」按钮用契约里的示例输入（regex/over 的 `sample`、或关键词的空输入）真实调用 `plugin.run` 跑一遍每个功能，验证「确实能执行」而非仅「能编译载入」。有副作用（可能写剪贴板/弹通知/开窗口），故由用户手动触发。\n\n**知识单一真相源**：生成阶段优先挂载宿主维护的 `develop-mulby-plugin` 技能（`ai.call({ skills })`），Mulby API 文档通过 `read_file({path:\"@skill/apis/<namespace>.md\"})` 从已安装技能目录按需读取，不再打包副本。探测不到则优雅回退。\n\n向导直接调用宿主：`createPlugin`（阶段 2）/ `validatePlugin` · `buildPlugin` · `check_conformance` · `plugin.run`（阶段 3）/ `packPlugin` / `addPluginProject`。\n\n---\n\n## 触发命令\n\n| 关键词 | 说明 |\n|---|---|\n| `开发者工具` / `dev` / `developer` | 打开开发者工作台（feature `code: workbench`，`mode: detached`） |\n\n---\n\n## 用法\n\n1. 在 Mulby 主输入框键入 `开发者工具` 打开工作台。\n2. **创建插件**：点击「创建」→ 填写名称（kebab-case）、选择目标目录与模板（React / Basic）→ 生成脚手架并自动加入列表。\n3. **导入 / 添加目录**：点击「导入」或「添加目录」选择目录，宿主自动判别单插件（含 `manifest.json`）或集合目录。\n4. **构建 / 打包 / 刷新**：在右侧详情中对选中项目执行对应操作，输出写入诊断日志区。\n5. **Vibe Coding**：切换到「Vibe Coding」页签，按向导逐阶段完成插件创作。\n\n---\n\n## 宿主接口依赖\n\nUI 通过 `window.mulby.developer.*` 调用宿主 Developer IPC（契约以 `docs/apis/developer.md` + `electron.d.ts` 为准）：\n\n`listPluginProjects` · `addPluginProject` · `removePluginProject` · `reloadPlugin` · `validatePlugin` · `createPlugin` · `buildPlugin` · `packPlugin` · `openPluginDir` · `selectDirectory`\n\n> **演示模式**：当宿主对应接口尚未就绪时，UI 自动降级为 Mock 数据（顶栏显示「演示模式（Mock）」徽标），接口落地后自动切换为真实调用，无需改动 UI。\n\n---\n\n## 开发与构建\n\n```bash\nnpm run build        # 构建后端 dist/main.js + 前端 ui/index.html\nnpm run build:backend\nnpm run build:ui\nnpm run pack         # 构建并打包为 .inplugin\n```\n\n依赖：`react` `react-dom` `lucide-react`（运行）；`vite` `@vitejs/plugin-react` `tailwindcss` `postcss` `autoprefixer` `esbuild` `typescript`（开发）。\n\n---\n\n## 配置项\n\n无需额外配置。窗口尺寸默认 1100×720（最小 880×560），可在 `manifest.json` 的 `window` 字段调整。",
       "icon": {
         "type": "url",
@@ -961,7 +961,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "c97c98317c0874df763d773cb9111202a5e778f5bc5ea33971134d2ff1bee0e3",
+      "sha256": "0a5bf53d419a0f4887a49419bb5edd26005266b5e333da06694641d17ae0e0b5",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/mulby-developer-tools"
     },
@@ -997,9 +997,9 @@
       "version": "1.0.0",
       "author": "Mulby",
       "description": "上帝视角肉鸽小游戏 - 随机能力、意想不到的组合、永久升级",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.10-0153/abyss-squad-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-10T01:54:18.030Z",
-      "type": "other",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/abyss-squad-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:33:56.590Z",
+      "type": "entertainment",
       "details": "# 深渊小队 (Abyss Squad)\r\n\r\n上帝视角肉鸽小游戏 Mulby 插件。控制 3 人小队在程序生成的地下城中战斗，收集随机能力与道具，触发意想不到的协同组合，通过永久升级变得更强。\r\n\r\n## 游戏玩法\r\n\r\n### 操作\r\n- **WASD** - 移动活跃英雄\r\n- **空格** - 释放英雄技能（8秒冷却）\r\n- **1/2/3** - 切换控制的英雄\r\n- 其他英雄自动跟随并战斗\r\n\r\n### 核心循环\r\n1. 从营地选择 3 人小队出发\r\n2. 在 10 层地下城中战斗\r\n3. 击杀敌人获得经验和水晶\r\n4. 升级时从 3 个随机能力中选 1 个（最多 6 个能力）\r\n5. 拾取随机掉落的道具（武器/神器/饰品 3 个槽位）\r\n6. 特定能力+道具组合触发超强协同效果\r\n7. 每 3 层遭遇 Boss\r\n8. 全灭后回到营地，用水晶进行永久升级\r\n\r\n### 英雄（5个）\r\n| 英雄 | 特点 | 技能 |\r\n|------|------|------|\r\n| 战士 | 高血量近战 | 嘲讽：吸引敌人+护盾 |\r\n| 法师 | AOE魔法伤害 | 陨石术：大范围伤害 |\r\n| 游侠 | 远程高暴击 | 闪避射击：后翻+3箭 |\r\n| 牧师（解锁） | 治疗增益 | 治愈光环：全队回血 |\r\n| 刺客（解锁） | 高爆发 | 暗影步：瞬移+必暴击 |\r\n\r\n### 协同效果（核心卖点）\r\n集齐特定能力+道具触发超强组合：\r\n- 🔥 **烈焰风暴** = 火焰附魔 + 油瓶 → 全屏火焰伤害\r\n- ⚡ **弹幕风暴** = 多重射击 + 弹射匕首 → 无限弹射\r\n- 🛡️ **血之壁垒** = 吸血攻击 + 荆棘盾 → 攻防一体\r\n- ⚡ **雷神降临** = 连锁闪电 + 导电护符 → 闪电链不限目标\r\n- ⏱️ **时停领域** = 时间减速 + 迅捷之靴 → 敌人静止3秒\r\n- 💥 **核爆** = 分裂弹 + 爆炸宝石 → 分裂弹全部爆炸\r\n- 还有更多组合等你发现...\r\n\r\n### 营地（局外升级）\r\n- **训练营**：攻击/生命/移速永久强化\r\n- **铁匠铺**：提升初始武器品质\r\n- **酒馆**：解锁新英雄\r\n- **图书馆**：解锁新能力进入随机池\r\n- **神龛**：解锁新协同组合\r\n\r\n## 触发方式\r\n在 Mulby 中输入以下关键词启动：\r\n- `abyss`\r\n- `深渊小队`\r\n- `肉鸽`\r\n\r\n## 构建\r\n```bash\r\nnpm install\r\nnpm run build\r\n```\r\n\r\n## 打包\r\n```bash\r\nnpm run pack\r\n```",
       "icon": {
         "type": "url",
@@ -1011,7 +1011,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "8009a70e726c918cc093c1cfcdc6d6c29460fe337d41bdf9132b6d63115fb582",
+      "sha256": "d741293fc7fea3e61dda3f2ff1a1b5f8202aea79102e421c4970b87b738f707a",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/abyss-squad"
     },
@@ -1085,8 +1085,8 @@
       "version": "0.2.0",
       "author": "mulby",
       "description": "可编程快捷动作：自定义搜索引擎与工作区。在 Mulby 搜索框输入关键词即可转发搜索或一键打开一组网址/文件夹/文件，补充原生搜索做不到的能力。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.19-1055/quick-launch-0.2.0.inplugin",
-      "lastPackageTime": "2026-06-19T10:56:29.898Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.24-1333/quick-launch-0.2.0.inplugin",
+      "lastPackageTime": "2026-06-24T13:35:31.006Z",
       "type": "productivity",
       "details": "# 启动器 (quick-launch)\n\n可编程的快捷动作工具，**补充** Mulby 原生搜索做不到的能力。\n\nMulby 原生搜索负责「找到本机已有的应用和文件」；启动器负责「执行原生搜索做不到的自定义动作」——把输入转发到任意搜索引擎，或用一个关键词一键打开一整组网址 / 文件夹 / 文件。\n\n> 类比 Alfred 的 *Web Searches + Workflows*、Raycast 的 *Quicklinks*，但不重复做应用启动（那块交给 Mulby 原生搜索）。\n\n## 核心机制：接管搜索框（MainPush）\n\n插件后端常驻运行，通过 Mulby 的 **MainPush（搜索框推送）** 能力，在你于主搜索框输入时直接把匹配的条目推送进原生搜索结果，选中即执行，**不会弹出任何窗口**。\n\n## 功能特性\n\n- 🔎 **自定义搜索引擎** — URL 含 `{query}` 占位符，输入「关键词 + 空格 + 搜索词」即可把内容转发到对应网站搜索。\n- 🗂️ **工作区** — 一个条目绑定一组动作（网址 / 文件夹 / 文件 / 命令），一键按顺序全部打开，适合「上班模式」「写作模式」等场景切换。\n- ✨ **AI 一句话建工作区** — 编辑工作区时用大白话描述（如「上班打开公司邮箱和钉钉网页版，再开项目文件夹」），AI 自动拆解成动作填入表单，确认后保存。需在 Mulby 设置 → AI 配好模型。\n- ⌨️ **触发词与别名** — 每个条目可设多个关键词（如 `gh` `github`），模糊匹配并按使用频率排序；编辑时会提示触发词冲突。\n- ⚡ **命令动作** — 工作区可执行命令，支持参数、工作目录（cwd）与可选 shell 执行。\n- 🔣 **全局 `{query}` 参数化** — 不止搜索引擎，工作区动作的网址 / 路径 / 命令参数也能用 `{query}`，替换为触发词后输入的内容。\n- 🧪 **测试运行** — 在管理界面直接试跑条目，无需切到搜索框。\n- 📤 **导入 / 导出 / 恢复默认** — 条目以 JSON 备份迁移；误删内置搜索引擎可一键补回。\n- 🌗 **明暗主题** — 自动跟随 Mulby 主题。\n- 🚦 **MainPush 状态检测** — 若全局「搜索框推送」被关闭，界面顶部会提示并可一键跳转设置。\n\n## 触发方式\n\n- `启动器` / `launch` / `ql` — 打开管理界面。\n- 在主搜索框直接输入：\n  - `gh react hooks` → 在 GitHub 搜索 “react hooks”\n  - `g 天气` → 用 Google 搜索 “天气”\n  - `上班` → 启动名为「上班」的工作区\n\n> 内置了 Google / 百度 / GitHub / Bilibili / MDN 五个示例搜索引擎，首次使用即可体验，可随意修改或删除。\n\n## 内置条目类型\n\n| 类型 | 说明 | 执行方式 |\n|------|------|---------|\n| 搜索引擎 | 含 `{query}` 的 URL | `shell.openExternal`（`{query}` 替换为编码后的搜索词；无占位符则直接打开） |\n| 工作区 | 一组动作按顺序执行 | 网址→`openExternal`、文件夹→`openFolder`、文件→`openPath`、命令→`runCommand`（args / cwd / shell 可配）；各动作均支持 `{query}`（网址做 URL 编码，其余原样） |\n\n## 使用前提\n\n1. **保持后台常驻**：MainPush 需要插件后端运行。请在插件搜索结果右键菜单 / 窗口菜单中勾选「跟随 Mulby 启动」（manifest 已声明 `background` + `persistent`）。\n2. **开启搜索框推送**：Mulby「设置 → 超级面板」中的「搜索框是否展示插件推送结果」需为开启状态，且本插件不在禁用推送列表内。界面顶部横幅会在被关闭时提醒。\n3. **命令类动作的安全确认**：工作区中的「命令」动作走 `trusted` 执行 profile（启动器跑的是用户自己配置的命令，需要能打开任意路径/程序，故不施加 root 沙箱限制）。安全由 Mulby 的**首次命令确认弹窗**保证——首次执行某命令时会要求确认，可选择「信任」以后免确认。\n   - Windows 上若命令是 PATH 里的 `.cmd`/`.bat` 垫片（如 `qoder`、`code`），需勾选动作的「通过 shell 执行」，否则 `shell:false` 无法解析 PATHEXT；或直接把命令指向可执行文件全路径。\n\n## 权限说明\n\n| 权限 | 用途 |\n|------|------|\n| `clipboard` | 预留（条目复制等） |\n| `notification` | 执行结果提示 |\n| `commandExecution.direct`（`workspace`） | 工作区中的「命令」动作 |\n\n## 数据存储\n\n所有条目通过 `storage` 持久化在插件自己的命名空间下，由后端作为唯一数据源持有；管理界面通过 `host.invoke` 读写，避免跨进程命名空间问题。\n\n## 开发\n\n```bash\npnpm install      # 安装依赖（仓库为 pnpm workspace，可在根目录安装）\npnpm run build    # 构建后端 dist/main.js 与前端 ui/\npnpm run pack     # 打包为 .inplugin\n```\n\n## 项目结构\n\n```\nquick-launch/\n├── manifest.json          # 插件契约（两个 feature：launch[mainPush] / manage[ui]）\n├── src/\n│   ├── main.ts            # 后端：MainPush 匹配/执行、条目持久化、供 UI 调用的 rpc\n│   ├── ui/\n│   │   ├── App.tsx        # 管理界面（增删改、测试、导入导出、MainPush 检测）\n│   │   └── styles.css\n│   └── types/mulby.d.ts\n├── dist/                  # 后端构建输出\n├── ui/                    # 前端构建输出\n├── assets/icon.svg        # 图标源文件\n└── icon.png               # 512×512 图标\n```\n\n## 许可证\n\nMIT License",
       "icon": {
@@ -1099,7 +1099,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "a76cb0eab07d3146f4613bd360062f32c7368e55f1cbd73d10385bc97b24b1e8",
+      "sha256": "375c6ca99fcff5b7ac3ebd507e694b2ed6bb124ec41f72025cc983e302f493df",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/quick-launch"
     }
