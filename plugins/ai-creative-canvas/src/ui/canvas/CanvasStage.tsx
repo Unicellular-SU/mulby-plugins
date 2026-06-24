@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
 import { Sparkles } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { CardView } from './CardView'
+import { CardPlaceholder } from './CardPlaceholder'
 import { GroupView } from './GroupView'
 import { EdgeLayer } from './EdgeLayer'
 import { GridLayer } from './GridLayer'
@@ -24,6 +25,7 @@ import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
+import { buildGridIndex, type RectItem } from './spatialIndex'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
 
@@ -55,29 +57,71 @@ export function CanvasStage() {
   const connectTemp = useUi((s) => s.connectTemp)
   const vp = board.viewport
   const selSet = new Set(selectedIds)
-  const hiddenMembers = new Set<string>()
-  const hideDesc = (gid: string) => {
-    for (const c of Object.values(board.cards)) if (c.parentId === gid) { hiddenMembers.add(c.id); if (c.kind === 'group') hideDesc(c.id) }
-  }
-  for (const c of Object.values(board.cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
-  // 选中卡的关联集合（上下游端卡），用于关联高亮
-  const relatedIds = new Set<string>()
-  if (selectedIds.length) {
-    for (const e of Object.values(board.edges)) {
-      if (selSet.has(e.source)) relatedIds.add(e.target)
-      if (selSet.has(e.target)) relatedIds.add(e.source)
-    }
-  }
+  const cards = board.cards
+  const edges = board.edges
 
-  // 千级节点虚拟化：节点数超阈值时按可见区(外扩 600px 预渲染)剔除界外卡片/组/连线。
-  // 阈值以下保持原行为（零风险）；选中卡恒渲染（保证浮条/编辑器/手柄不失锚）。
+  // 折叠组隐藏成员集合：仅卡片变化时重算（平移因 cards 引用稳定而命中缓存，不触发）
+  const hiddenMembers = useMemo(() => {
+    const hidden = new Set<string>()
+    const hideDesc = (gid: string) => {
+      for (const c of Object.values(cards)) if (c.parentId === gid) { hidden.add(c.id); if (c.kind === 'group') hideDesc(c.id) }
+    }
+    for (const c of Object.values(cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
+    return hidden
+  }, [cards])
+
+  // 关联高亮集合（上下游端卡）：仅连线或选择变化时重算
+  const relatedIds = useMemo(() => {
+    const r = new Set<string>()
+    if (selectedIds.length) {
+      const sel = new Set(selectedIds)
+      for (const e of Object.values(edges)) {
+        if (sel.has(e.source)) r.add(e.target)
+        if (sel.has(e.target)) r.add(e.source)
+      }
+    }
+    return r
+  }, [edges, selectedIds])
+
+  // 空间索引：卡片/连线网格，仅在卡片/连线变化时重建（平移命中缓存）。查询为 O(可见格)。
+  const cardIndex = useMemo(() => buildGridIndex(Object.values(cards).map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }))), [cards])
+  const edgeIndex = useMemo(() => {
+    const items: RectItem[] = []
+    for (const e of Object.values(edges)) {
+      const s = cards[e.source]
+      const t = cards[e.target]
+      if (!s || !t) continue
+      const ax = s.x + s.w, ay = s.y + s.h / 2, bx = t.x, by = t.y + t.h / 2
+      items.push({ id: e.id, x: Math.min(ax, bx) - 2, y: Math.min(ay, by) - 2, w: Math.abs(bx - ax) + 4, h: Math.abs(by - ay) + 4 })
+    }
+    return buildGridIndex(items)
+  }, [cards, edges])
+
+  // 万级虚拟化：超阈值时用空间索引取可见卡片/连线（选中卡恒含，保浮条/编辑器/手柄锚点）；
+  // 极低缩放走 LOD 占位块（轻量色块，省 img/video/事件富层）。阈值以下保持原行为（零风险）。
   // marquee/全选/连接均遍历 store 而非 DOM，剔除不影响选择与命中。
   const VIRTUALIZE_THRESHOLD = 200
-  const cardCount = Object.keys(board.cards).length
-  const virtualize = cardCount > VIRTUALIZE_THRESHOLD && stageSize.w > 0 && stageSize.h > 0
+  const LOD_ZOOM = 0.4
+  const virtualize = cardIndex.count > VIRTUALIZE_THRESHOLD && stageSize.w > 0 && stageSize.h > 0
   const viewRect = virtualize ? worldViewRect(vp, stageSize.w, stageSize.h, 600) : null
-  const inView = (c: { id: string; x: number; y: number; w: number; h: number }) =>
-    !viewRect || selSet.has(c.id) || rectsIntersect(viewRect, { x: c.x, y: c.y, w: c.w, h: c.h })
+  const lod = virtualize && vp.zoom < LOD_ZOOM
+
+  // 少量选择时强制渲染选中卡（即便滚出视野，保浮条/编辑器/手柄锚点稳妥）；
+  // 但全选(海量选择)时不强制，否则会把全量都渲染出来——浮条/编辑器本就用世界坐标而非 DOM，无碍。
+  const forceSelected = selectedIds.length > 0 && selectedIds.length <= 64
+  let visibleCardIds: string[]
+  if (viewRect) {
+    const set = new Set<string>()
+    for (const id of cardIndex.query(viewRect)) {
+      const c = cards[id]
+      if (c && rectsIntersect(viewRect, { x: c.x, y: c.y, w: c.w, h: c.h })) set.add(id)
+    }
+    if (forceSelected) for (const id of selectedIds) if (cards[id]) set.add(id)
+    visibleCardIds = [...set]
+  } else {
+    visibleCardIds = Object.keys(cards)
+  }
+  const visibleEdgeIds = viewRect ? edgeIndex.query(viewRect) : null
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
 
@@ -501,21 +545,24 @@ export function CanvasStage() {
       onDragOver={(e) => e.preventDefault()}
     >
       {showGrid && <GridLayer viewport={vp} />}
-      <EdgeLayer board={board} temp={connectTemp} selected={selSet} cull={viewRect} />
+      <EdgeLayer board={board} temp={connectTemp} selected={selSet} cull={viewRect} edgeIds={visibleEdgeIds} />
       <div
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0', willChange: 'transform' }}
       >
-        {Object.values(board.cards)
-          .filter((c) => c.kind === 'group' && !hiddenMembers.has(c.id) && inView(c))
-          .map((c) => (
-            <GroupView key={c.id} card={c} selected={selSet.has(c.id)} />
-          ))}
-        {Object.values(board.cards)
-          .filter((c) => c.kind !== 'group' && !hiddenMembers.has(c.id) && inView(c))
-          .map((c) => (
-            <CardView key={c.id} card={c} selected={selSet.has(c.id)} related={relatedIds.has(c.id) && !selSet.has(c.id)} />
-          ))}
+        {/* 组层（在卡片层之下）：仅可见集中的组 */}
+        {visibleCardIds.map((id) => {
+          const c = cards[id]
+          if (!c || c.kind !== 'group' || hiddenMembers.has(id)) return null
+          return <GroupView key={c.id} card={c} selected={selSet.has(c.id)} />
+        })}
+        {/* 卡片层：低缩放走 LOD 占位块；选中卡始终完整渲染以保编辑能力 */}
+        {visibleCardIds.map((id) => {
+          const c = cards[id]
+          if (!c || c.kind === 'group' || hiddenMembers.has(id)) return null
+          if (lod && !selSet.has(id)) return <CardPlaceholder key={c.id} card={c} selected={false} />
+          return <CardView key={c.id} card={c} selected={selSet.has(c.id)} related={relatedIds.has(c.id) && !selSet.has(c.id)} />
+        })}
         <AnnotationLayer annotations={board.annotations || []} />
       </div>
       <AnnotationDrawOverlay />

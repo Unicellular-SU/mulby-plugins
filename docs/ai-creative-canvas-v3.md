@@ -938,4 +938,13 @@
 
 - **P2g 千级节点虚拟化（视口剔除 + memo）**（2026-06-24，已提交）：`viewport.worldViewRect(vp, vw, vh, marginPx)` 算出当前可见世界矩形（外扩 600px 屏幕像素预渲染）；`CanvasStage` 节点数 **> 200** 时启用 `inView` 剔除——仅渲染与可见区相交的卡片/组，**选中卡恒渲染**（保浮条/编辑器/手柄锚点）；阈值以下保持原行为（零风险）。`EdgeLayer` 加 `cull` prop：按两端锚点包围盒（略外扩防水平/垂直线零尺寸漏判）相交测试跳过界外连线。`CardView` 包 `React.memo`——平移时父级每帧重渲，但本卡 props（card 引用/selected/related）不变即可整卡跳过（CardView 仅订阅稳定 action `updateCard` 与连线期才变的 `connInvalidIds`，均不随视口变化）。**安全性**：marquee 框选/全选/连线命中均遍历 store 而非 DOM，剔除不影响选择与交互；Minimap 独立遍历全量不受影响；卡片根无入场动画，平移入场不弹跳。**延后**：O(N) 每帧重算可见集的增量空间索引（千级足够，万级再做网格/四叉树）、按 board 持久化分片。
 
-> **P2 低/中风险项 + 千级虚拟化完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴 / e 绿幕抠像 / f 多轨时间线 v1 / g 千级虚拟化）。**剩余 P2 为较大/高风险项**（多工程、持久化分片改存储布局、360/3D）——建议先在 Mulby 实测基线再做，避免盲改破坏存储。
+- **P2h 万级节点承载（空间索引 + memo化 + LOD + 画布缩略图）**（2026-06-24，已提交）：在 P2g 视口剔除基础上把"每帧 O(N)"全面降为"O(可见)"，目标承载万级节点。
+  - **均匀网格空间索引** `canvas/spatialIndex.ts`：`buildGridIndex(items, cell=600)` 把卡片/连线按矩形桶入网格，`query(rect)` 只命中相交格 → 可见集查询 O(可见格) 而非 O(N)。`CanvasStage` 用 `useMemo` 按 `board.cards`/`board.edges` 缓存 cardIndex/edgeIndex——因 `setViewport` 保留 cards/edges 引用，**平移期命中缓存不重建**，仅卡片/连线变化才重建。
+  - **派生集合 memo 化**：`hiddenMembers`（折叠组隐藏成员）按 `cards` 缓存、`relatedIds`（关联高亮）按 `edges`+`selectedIds` 缓存——平移期都不再每帧重算。
+  - **连线索引**：`EdgeLayer` 加 `edgeIds` prop，虚拟化时只遍历索引查到的可见连线子集（叠加既有 `cull` 精确测试），连线渲染 O(可见)。
+  - **LOD 占位** `canvas/CardPlaceholder.tsx`：缩放 < 0.4 时非选中卡渲染为轻量 `kind` 着色块（省 img/video/文本/事件富层），保留 `data-card-id` 故仍可框选/拖动/右键/双击；解决"缩放到底全量可见"的极端开销。选中卡始终完整渲染以保编辑能力。
+  - **画布缩略图** `Minimap` 从「每卡一个 SVG `<rect>` 且每帧重渲」改为 **`<canvas>` 绘制**：卡片层 `useEffect` 仅在卡片/布局(min/scale)变化时重绘（平移期布局稳定即跳过），视口框改为廉价 DOM 叠层每帧更新；按 `KIND_ACCENT` 着色更直观。
+  - **全选保护**：选中卡恒渲染仅在选择 ≤64 时生效，避免 Ctrl+A 把全量拉成完整 CardView（浮条/编辑器本用世界坐标，不依赖被剔除 DOM）。
+  - **延后**：drag 移动海量卡时索引每帧 O(N) 重建（移动少量无碍，万级整体拖动属极端操作）；万级以上再上四叉树/增量更新；按 board 持久化分片。
+
+> **P2 低/中风险项 + 千/万级虚拟化完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴 / e 绿幕抠像 / f 多轨时间线 v1 / g 视口剔除 / h 万级承载）。**剩余 P2 为较大/高风险项**（多工程、持久化分片改存储布局、360/3D）——建议先在 Mulby 实测基线再做，避免盲改破坏存储。

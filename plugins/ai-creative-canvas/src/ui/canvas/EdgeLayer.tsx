@@ -16,11 +16,13 @@ function bezier(x1: number, y1: number, x2: number, y2: number) {
 }
 
 // 屏幕坐标 SVG（铺满舞台，随视口换算）。放在卡片层之下。
-export function EdgeLayer({ board, temp, selected, cull }: { board: Board; temp?: TempEdge | null; selected?: Set<string>; cull?: { x: number; y: number; w: number; h: number } | null }) {
+export function EdgeLayer({ board, temp, selected, cull, edgeIds }: { board: Board; temp?: TempEdge | null; selected?: Set<string>; cull?: { x: number; y: number; w: number; h: number } | null; edgeIds?: string[] | null }) {
   const removeEdge = useGraph((s) => s.removeEdge)
   const [hover, setHover] = useState<string | null>(null)
   const cards = board.cards
   const vp = board.viewport
+  // 虚拟化时 edgeIds 为空间索引查到的可见连线子集（O(可见)）；否则遍历全量
+  const edgeList = edgeIds ? edgeIds.map((id) => board.edges[id]).filter(Boolean) : Object.values(board.edges)
 
   // 折叠组：把落在折叠子树内的端点改接到「最外层折叠组」的边框，
   // 于是跨界的进/出连线各保留一根（同向去重），组内连线隐藏。
@@ -40,7 +42,7 @@ export function EdgeLayer({ board, temp, selected, cull }: { board: Board; temp?
 
   return (
     <svg className="absolute inset-0 w-full h-full" style={{ pointerEvents: 'none', overflow: 'visible' }}>
-      {Object.values(board.edges).map((e) => {
+      {edgeList.map((e) => {
         const sa = anchorOf(e.source)
         const ta = anchorOf(e.target)
         if (sa === ta) return null // 组内连线，折叠后隐藏
