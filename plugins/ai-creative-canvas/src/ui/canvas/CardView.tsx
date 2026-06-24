@@ -284,8 +284,10 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()
-        if (card.assetUrl && (card.kind === 'image' || card.kind === 'source' || card.kind === 'video')) {
-          useUi.getState().setPreview({ url: card.assetUrl, kind: card.kind === 'video' ? 'video' : 'image' })
+        if ((card.kind === 'image' || card.kind === 'source') && card.assetUrl) {
+          useUi.getState().setMaskCardId(card.id) // 双击图片节点 → 进入局部编辑页面
+        } else if (card.kind === 'video' && card.assetUrl) {
+          useUi.getState().setPreview({ url: card.assetUrl, kind: 'video' })
         }
       }}
     >

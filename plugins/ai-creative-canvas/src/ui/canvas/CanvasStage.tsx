@@ -307,10 +307,11 @@ export function CanvasStage() {
     if (el?.closest('[data-interactive]')) return
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
-      // 双击有内容的节点 → 放大预览
       const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
-      if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source' || c.kind === 'video')) {
-        useUi.getState().setPreview({ url: c.assetUrl, kind: c.kind === 'video' ? 'video' : 'image' })
+      if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
+        useUi.getState().setMaskCardId(c.id) // 双击图片节点 → 局部编辑页面
+      } else if (c?.assetUrl && c.kind === 'video') {
+        useUi.getState().setPreview({ url: c.assetUrl, kind: 'video' }) // 视频仍为放大预览
       }
       return
     }
