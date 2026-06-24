@@ -3,7 +3,7 @@
   "name": "bulk-image-studio",
   "version": "1.0.2",
   "author": "mulby",
-  "type": "productivity",
+  "type": "media",
   "displayName": "图片批量工坊",
   "description": "批量压缩/转格式/改尺寸/水印/圆角/补边/裁剪/旋转/翻转；合并 PDF、长图与 GIF；手动连续裁剪。",
   "main": "dist/main.js",

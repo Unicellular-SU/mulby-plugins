@@ -4,6 +4,7 @@
   "name": "batch-rename",
   "version": "1.0.0",
   "author": "mulby",
+  "type": "utility",
   "displayName": "批量重命名",
   "description": "工业级文件重命名工具，支持复杂逻辑的批量处理",
   "main": "dist/main.js",

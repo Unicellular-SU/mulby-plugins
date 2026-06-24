@@ -3,7 +3,7 @@
   "name": "unit-converter",
   "version": "1.0.2",
   "author": "mulby",
-  "type": "productivity",
+  "type": "utility",
   "displayName": "单位转换",
   "description": "支持 10 类单位与货币的实时转换工具",
   "main": "dist/main.js",

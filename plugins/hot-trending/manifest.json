@@ -4,6 +4,7 @@
   "name": "hot-trending",
   "version": "1.0.0",
   "author": "mulby",
+  "type": "entertainment",
   "displayName": "热搜排行榜",
   "description": "聚合多平台热搜榜，快捷键驱动，工作之余方便吃瓜",
   "main": "dist/main.js",

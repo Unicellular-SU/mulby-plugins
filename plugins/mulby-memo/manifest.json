@@ -4,6 +4,7 @@
   "name": "mulby-memo",
   "version": "1.0.0",
   "author": "mulby",
+  "type": "productivity",
   "displayName": "mulby-memo",
   "description": "收藏常用文本、代码和图片，一键快速粘贴",
   "main": "dist/main.js",

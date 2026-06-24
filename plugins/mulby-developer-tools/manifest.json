@@ -2,6 +2,7 @@
   "id": "mulby-developer-tools",
   "name": "mulby-developer-tools",
   "version": "1.0.0",
+  "type": "developer",
   "displayName": "Mulby 开发者工具",
   "description": "插件开发工作台：创建/导入/构建/打包/刷新/管理插件，并支持 AI Vibe Coding 一句话造插件",
   "author": "Mulby",

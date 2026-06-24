@@ -2,7 +2,7 @@
   "id": "calc-pad",
   "name": "calc-pad",
   "version": "1.0.0",
-  "type": "productivity",
+  "type": "utility",
   "displayName": "计算稿纸",
   "description": "高效简洁的计算工具，实时计算、自动保存，像稿纸一样记录每一步过程。",
   "main": "dist/main.js",

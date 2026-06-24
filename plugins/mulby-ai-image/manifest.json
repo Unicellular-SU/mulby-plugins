@@ -4,6 +4,7 @@
   "name": "mulby-ai-image",
   "version": "1.0.0",
   "author": "mulby",
+  "type": "ai",
   "displayName": "AI 图像处理",
   "description": "AI 驱动的一站式图像处理工具：文字生图、智能去背景、无损放大、AI 修图",
   "main": "dist/main.js",
