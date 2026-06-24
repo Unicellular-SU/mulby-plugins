@@ -21,6 +21,7 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
   const g = useGraph.getState()
   const card = g.getActiveBoard().cards[cardId]
   if (!card || !card.assetUrl) throw new Error('没有底图')
+  const boardId = g.boardIdOfCard(cardId)
   const model = card.modelId
   if (!model) throw new Error('请先在节点里选择图像模型')
 
@@ -52,7 +53,8 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
       assetUrl: saved.url,
       assetLocalPath: saved.path,
       mime: 'image/png'
-    }
+    },
+    boardId
   )
   useGraph.getState().addEdgeBetween(cardId, newId)
   useGraph.getState().setSelection([newId])

@@ -57,6 +57,15 @@ function withActiveBoard(p: ProjectDoc, fn: (b: Board) => Board): ProjectDoc {
   return { ...p, boards, updatedAt: Date.now() }
 }
 
+// 卡片 id 全局唯一：异步写入（生成/媒体处理完成时）按 id 定位「真正拥有该卡的画布」，
+// 而非当前活动画布——否则在生成途中切换画布会把结果写到错的画布上（跨板串卡 bug）。
+function withBoardOfCard(p: ProjectDoc, cardId: string, fn: (b: Board) => Board): ProjectDoc {
+  const owner = p.boards.find((b) => b.cards[cardId])
+  if (!owner) return p
+  const boards = p.boards.map((b) => (b.id === owner.id ? fn(b) : b))
+  return { ...p, boards, updatedAt: Date.now() }
+}
+
 // 递归收集某组的所有后代（含嵌套组的后代）
 function getDescendants(groupId: string, cards: Record<string, Card>): string[] {
   const out: string[] = []
@@ -86,6 +95,8 @@ interface GraphState {
 
   // 选择器（便捷）
   getActiveBoard: () => Board
+  getCard: (id: string) => Card | undefined
+  boardIdOfCard: (id: string) => string | undefined
 
   // 历史
   pushHistory: () => void
@@ -113,7 +124,7 @@ interface GraphState {
   setViewport: (vp: Viewport) => void
 
   // 卡片
-  addCard: (kind: CardKind, world: { x: number; y: number }, partial?: Partial<Card>) => string
+  addCard: (kind: CardKind, world: { x: number; y: number }, partial?: Partial<Card>, boardId?: string) => string
   updateCard: (id: string, patch: Partial<Card>) => void
   removeCards: (ids: string[]) => void
   moveCardsBy: (ids: string[], dx: number, dy: number) => void
@@ -152,6 +163,14 @@ export const useGraph = create<GraphState>((set, get) => ({
   clipboard: [],
 
   getActiveBoard: () => activeBoardOf(get().project),
+  getCard: (id) => {
+    for (const b of get().project.boards) {
+      const c = b.cards[id]
+      if (c) return c
+    }
+    return undefined
+  },
+  boardIdOfCard: (id) => get().project.boards.find((b) => b.cards[id])?.id,
 
   pushHistory: () => {
     const b = activeBoardOf(get().project)
@@ -230,8 +249,13 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   setViewport: (vp) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, viewport: vp })) })),
 
-  addCard: (kind, world, partial) => {
-    get().pushHistory()
+  addCard: (kind, world, partial, boardId) => {
+    const proj = get().project
+    const targetId = boardId ?? proj.activeBoardId
+    const target = proj.boards.find((b) => b.id === targetId) ?? activeBoardOf(proj)
+    const isActive = target.id === proj.activeBoardId
+    // 历史快照取「目标画布」（异步媒体处理完成可能写非活动画布）
+    set((s) => ({ past: [...s.past, { boardId: target.id, cards: target.cards, edges: target.edges }].slice(-HISTORY_LIMIT), future: [] }))
     const size = CARD_DEFAULT_SIZE[kind]
     const card: Card = {
       id: uid('card'),
@@ -260,8 +284,13 @@ export const useGraph = create<GraphState>((set, get) => ({
       ...partial
     }
     set((s) => ({
-      project: withActiveBoard(s.project, (b) => ({ ...b, cards: { ...b.cards, [card.id]: card } })),
-      selectedIds: [card.id]
+      project: {
+        ...s.project,
+        updatedAt: Date.now(),
+        boards: s.project.boards.map((b) => (b.id === target.id ? { ...b, cards: { ...b.cards, [card.id]: card } } : b))
+      },
+      // 仅当写入活动画布时才改选中（避免选中一张当前看不见的卡）
+      selectedIds: isActive ? [card.id] : s.selectedIds
     }))
     return card.id
   },
@@ -367,7 +396,8 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   updateCard: (id, patch) =>
     set((s) => ({
-      project: withActiveBoard(s.project, (b) => {
+      // 按 id 定位拥有该卡的画布（异步生成途中切换画布也写对地方）
+      project: withBoardOfCard(s.project, id, (b) => {
         const cur = b.cards[id]
         if (!cur) return b
         return { ...b, cards: { ...b.cards, [id]: { ...cur, ...patch } } }

@@ -948,3 +948,12 @@
   - **延后**：drag 移动海量卡时索引每帧 O(N) 重建（移动少量无碍，万级整体拖动属极端操作）；万级以上再上四叉树/增量更新；按 board 持久化分片。
 
 > **P2 低/中风险项 + 千/万级虚拟化完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴 / e 绿幕抠像 / f 多轨时间线 v1 / g 视口剔除 / h 万级承载）。**剩余 P2 为较大/高风险项**（多工程、持久化分片改存储布局、360/3D）——建议先在 Mulby 实测基线再做，避免盲改破坏存储。
+
+### 🐞 跨板串卡 Bug 修复（2026-06-25，已提交）
+**现象**：画布 1 的视频/图片出现在画布 2，且画布 2 原有视频"消失"。**根因**：异步写入路径以「当前活动画布」为目标——`generate.ts` 全程用 `updateCard(cardId, …)`、`mediaOps` 处理完用 `addCard` 落卡，而 `updateCard`→`withActiveBoard`、`addCard` 默认活动画布。生成途中切到画布 2，画布 1 的任务完成时把结果（以 `{...undefined, ...patch}`）写到画布 2，既造出缺 `kind`/几何的畸形卡顶替显示，也把结果落错画布。
+**修复**：
+- `graphStore`：卡片 id 全局唯一 → 新增 `withBoardOfCard`/`getCard`/`boardIdOfCard`；`updateCard` 改为**按 id 定位拥有该卡的画布**写入；`addCard` 增加可选 `boardId` 参数（含目标画布的历史快照与"非活动画布不改选中"）。
+- `generate.ts`：限流出队后按 id 取**拥有该卡的画布**（任务排队期间可能已切板），所有 await 后的读取改 `getCard(cardId)`（含视频风格取源画布）。
+- `mediaOps.ts`：各工具在同步起点捕获 `boardId = boardIdOfCard(cardId)`，结果卡/宫格/拼贴/抽帧/视频派生卡全部落源画布（`newMediaCard`/`placeImagesGrid` 加 `boardId`）。
+- `inpaint.ts`/`ComposeModal`/`TimelineModal`：同样传入源画布 id（模态期本不可切板，防御性补齐）。
+- `persistence.migrateProject`：加 `sanitizeBoards` 净化——加载时剔除缺 `kind`/非有限几何的畸形卡并清理悬空连线，**自动修复历史残留**，被顶掉的原卡恢复显示（合法卡必有 kind 与有限 x/y/w/h，零误伤）。

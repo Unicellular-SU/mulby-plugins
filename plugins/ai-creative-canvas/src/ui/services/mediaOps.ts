@@ -26,6 +26,7 @@ export async function runImageTool(
   const g = useGraph.getState()
   const src = g.getActiveBoard().cards[cardId]
   if (!src) return
+  const boardId = g.boardIdOfCard(cardId) // 结果卡落在源卡所在画布（处理途中切换画布也不串板）
   if (!src.assetLocalPath && !src.assetUrl) {
     g.updateCard(cardId, { status: 'error', error: '该卡片没有图片' })
     return
@@ -33,7 +34,8 @@ export async function runImageTool(
   const resultId = g.addCard(
     'image',
     { x: src.x + src.w + 200, y: src.y + src.h / 2 },
-    { title: `${src.title} · ${TOOL_LABEL[tool]}`, status: 'running', progress: 0.2, modelId: src.modelId, refIds: [src.id] }
+    { title: `${src.title} · ${TOOL_LABEL[tool]}`, status: 'running', progress: 0.2, modelId: src.modelId, refIds: [src.id] },
+    boardId
   )
   useTask.getState().inc()
   await limiter(async () => {
@@ -69,6 +71,7 @@ export async function runGridSlice(cardId: string, rows: number, cols: number): 
   const g = useGraph.getState()
   const src = g.getActiveBoard().cards[cardId]
   if (!src) return
+  const boardId = g.boardIdOfCard(cardId)
   if (!src.assetLocalPath && !src.assetUrl) {
     g.updateCard(cardId, { status: 'error', error: '该卡片没有图片' })
     return
@@ -93,7 +96,7 @@ export async function runGridSlice(cardId: string, rows: number, cols: number): 
             refIds: [src.id],
             w: cellW,
             h: cellH
-          })
+          }, boardId)
           const saved = await saveBase64(useGraph.getState().project.id, id, cell.base64, 'png')
           useGraph.getState().updateCard(id, { assetUrl: saved.url, assetLocalPath: saved.path, mime: cell.mime })
         }
@@ -110,6 +113,7 @@ export async function runGridSlice(cardId: string, rows: number, cols: number): 
 export async function runCollage(cardIds: string[]): Promise<void> {
   const g = useGraph.getState()
   const board = g.getActiveBoard()
+  const boardId = board.id
   const cards = cardIds.map((id) => board.cards[id]).filter((c): c is Card => !!c && !!c.assetUrl && (c.kind === 'image' || c.kind === 'source'))
   if (cards.length < 2) {
     toast('请选择至少 2 张图片卡', 'error')
@@ -143,7 +147,7 @@ export async function runCollage(cardIds: string[]): Promise<void> {
     }
     const base64 = canvas.toDataURL('image/png').split(',')[1]
     const last = cards[cards.length - 1]
-    const id = g.addCard('image', { x: last.x + last.w + 220, y: last.y + last.h / 2 }, { title: `拼贴（${n}）`, status: 'done', refIds: cardIds })
+    const id = g.addCard('image', { x: last.x + last.w + 220, y: last.y + last.h / 2 }, { title: `拼贴（${n}）`, status: 'done', refIds: cardIds }, boardId)
     const saved = await saveBase64(useGraph.getState().project.id, id, base64, 'png')
     useGraph.getState().updateCard(id, { assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' })
     useGraph.getState().setSelection([id])
@@ -162,12 +166,13 @@ export async function captureFrame(cardId: string, atSec: number): Promise<void>
     toast('请对本地视频文件使用', 'error')
     return
   }
+  const boardId = g.boardIdOfCard(cardId)
   const ok = await MV.ensureFfmpeg()
   if (!ok) return
   useTask.getState().inc()
   try {
     const out = await MV.frameAt(useGraph.getState().project.id, src.assetLocalPath, atSec)
-    newMediaCard(src, 'image', `${src.title} · 截帧`, out, 'image/png')
+    newMediaCard(src, 'image', `${src.title} · 截帧`, out, 'image/png', boardId)
   } catch (e: any) {
     toast('截帧失败：' + (e?.message || String(e)), 'error')
   } finally {
@@ -191,13 +196,13 @@ const VTOOL_LABEL: Record<VideoTool, string> = {
   chromakey: '绿幕抠像'
 }
 
-function newMediaCard(src: any, kind: any, title: string, path: string, mime: string): void {
+function newMediaCard(src: any, kind: any, title: string, path: string, mime: string, boardId?: string): void {
   const g = useGraph.getState()
-  const id = g.addCard(kind, { x: src.x + src.w + 200, y: src.y + src.h / 2 }, { title, status: 'done', refIds: [src.id] })
+  const id = g.addCard(kind, { x: src.x + src.w + 200, y: src.y + src.h / 2 }, { title, status: 'done', refIds: [src.id] }, boardId)
   g.updateCard(id, { assetUrl: toFileUrl(path), assetLocalPath: path, mime })
 }
 
-function placeImagesGrid(src: any, files: string[], label: string): void {
+function placeImagesGrid(src: any, files: string[], label: string, boardId?: string): void {
   const g = useGraph.getState()
   const cellW = 150
   const cellH = 130
@@ -214,7 +219,7 @@ function placeImagesGrid(src: any, files: string[], label: string): void {
       refIds: [src.id],
       w: cellW,
       h: cellH
-    })
+    }, boardId)
     g.updateCard(id, { assetUrl: toFileUrl(p), assetLocalPath: p, mime: 'image/png' })
   })
 }
@@ -227,6 +232,7 @@ export async function runVideoTool(
   const g = useGraph.getState()
   const src = g.getActiveBoard().cards[cardId]
   if (!src) return
+  const boardId = g.boardIdOfCard(cardId)
   const inPath = src.assetLocalPath
   if (!inPath) {
     g.updateCard(cardId, { status: 'error', error: '请对本地视频文件使用（拖入 mp4 / mov / webm）' })
@@ -246,13 +252,13 @@ export async function runVideoTool(
           ? await MV.extractFrames(projectId, inPath, opts?.fps ?? 1)
           : await MV.sceneFrames(projectId, inPath)
       if (files.length === 0) throw new Error('未生成帧')
-      placeImagesGrid(src, files, VTOOL_LABEL[tool])
+      placeImagesGrid(src, files, VTOOL_LABEL[tool], boardId)
     } else if (tool === 'splitAudio') {
       const out = await MV.splitAudio(projectId, inPath)
-      newMediaCard(src, 'audio', `${src.title} · 音轨`, out, 'audio/mp3')
+      newMediaCard(src, 'audio', `${src.title} · 音轨`, out, 'audio/mp3', boardId)
     } else if (tool === 'chromakey') {
       const r = await MV.chromakey(projectId, inPath)
-      newMediaCard(src, 'video', `${src.title} · 绿幕抠像`, r.path, r.mime)
+      newMediaCard(src, 'video', `${src.title} · 绿幕抠像`, r.path, r.mime, boardId)
     } else {
       let out: string
       if (tool === 'clip') out = await MV.clip(projectId, inPath, opts?.start ?? 0, opts?.end ?? (opts?.start ?? 0) + 5)
@@ -261,7 +267,7 @@ export async function runVideoTool(
       else if (tool === 'reverse') out = await MV.reverse(projectId, inPath)
       else out = await MV.compress(projectId, inPath)
       const kind = tool === 'gif' ? 'source' : 'video'
-      newMediaCard(src, kind, `${src.title} · ${VTOOL_LABEL[tool]}`, out, tool === 'gif' ? 'image/gif' : 'video/mp4')
+      newMediaCard(src, kind, `${src.title} · ${VTOOL_LABEL[tool]}`, out, tool === 'gif' ? 'image/gif' : 'video/mp4', boardId)
     }
   } catch (e: any) {
     toast('视频处理失败：' + (e?.message || String(e)), 'error')

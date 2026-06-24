@@ -133,7 +133,7 @@ function Inner() {
         assetUrl: toFileUrl(outp),
         assetLocalPath: outp,
         mime: 'video/mp4'
-      })
+      }, board.id)
       useGraph.getState().setSelection([id])
       toast('时间线已导出', 'success')
       useUi.getState().setShowTimeline(false)

@@ -85,7 +85,7 @@ function Inner() {
         assetUrl: toFileUrl(out),
         assetLocalPath: out,
         mime: 'video/mp4'
-      })
+      }, board.id)
       useGraph.getState().setSelection([id])
       toast('成片已合成', 'success')
       useUi.getState().setShowCompose(false)

@@ -105,7 +105,8 @@ export async function generateCard(cardId: string): Promise<void> {
 
   await limiter(async () => {
     const g = useGraph.getState()
-    const board = g.getActiveBoard()
+    // 按 id 取拥有该卡的画布（任务可能排队，出队时活动画布已被切换）——避免读/写到错的画布
+    const board = g.project.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
     const card = board.cards[cardId]
     if (!card) {
       useTask.getState().dec()
@@ -137,7 +138,7 @@ export async function generateCard(cardId: string): Promise<void> {
           const s = await saveBase64(projectId, `${cardId}_${i}`, res.images[i], ext)
           results.push({ url: s.url, localPath: s.path, mime: res.mime })
         }
-        const base0 = useGraph.getState().getActiveBoard().cards[cardId]
+        const base0 = useGraph.getState().getCard(cardId)
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,
@@ -161,7 +162,7 @@ export async function generateCard(cardId: string): Promise<void> {
         if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
         if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
         const proj = useGraph.getState().project
-        const vboard = useGraph.getState().getActiveBoard()
+        const vboard = proj.boards.find((b) => b.cards[cardId]) ?? useGraph.getState().getActiveBoard()
         const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
         const cam = (card.params?.camera as string) || ''
         const mot = (card.params?.motion as string) || ''
@@ -183,7 +184,7 @@ export async function generateCard(cardId: string): Promise<void> {
           (p) => useGraph.getState().updateCard(cardId, { progress: p }),
           vctrl.signal,
           (taskId) => {
-            const m = useGraph.getState().getActiveBoard().cards[cardId]?.meta || {}
+            const m = useGraph.getState().getCard(cardId)?.meta || {}
             useGraph.getState().updateCard(cardId, { meta: { ...m, task: { taskId, provider: cfg.id } } })
           }
         )
@@ -195,7 +196,7 @@ export async function generateCard(cardId: string): Promise<void> {
         })
         const path = r?.data?.path
         if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
-        const mDone = useGraph.getState().getActiveBoard().cards[cardId]?.meta || {}
+        const mDone = useGraph.getState().getCard(cardId)?.meta || {}
         useGraph.getState().updateCard(cardId, {
           status: 'done',
           progress: 1,
