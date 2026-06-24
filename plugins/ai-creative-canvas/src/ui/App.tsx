@@ -7,6 +7,7 @@ import { useUi } from './store/uiStore'
 import { useProviders } from './store/providerStore'
 import { ProviderSettings } from './components/ProviderSettings'
 import { ComposeModal } from './components/ComposeModal'
+import { TimelineModal } from './components/TimelineModal'
 import { StoryboardModal } from './components/StoryboardModal'
 import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
@@ -146,6 +147,7 @@ export default function App() {
       </div>
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />
+      <TimelineModal />
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />

@@ -131,6 +131,39 @@ export async function compress(projectId: string, inPath: string): Promise<strin
   return out
 }
 
+// 多轨时间线导出：先按 in/out 预剪每段（复用 clip），再走 composeFilm 拼接/转场/混音
+export async function composeTimeline(
+  projectId: string,
+  o: {
+    clips: { path: string; inSec: number; outSec: number; dur: number }[]
+    audioPath?: string
+    width: number
+    height: number
+    fps: number
+    transition: FilmTransition
+    useClipAudio: boolean
+    onProgress?: (p: number) => void
+  }
+): Promise<string> {
+  const trimmed: string[] = []
+  for (let i = 0; i < o.clips.length; i++) {
+    const c = o.clips[i]
+    const needTrim = c.inSec > 0.05 || c.outSec < c.dur - 0.05
+    trimmed.push(needTrim ? await clip(projectId, c.path, c.inSec, c.outSec) : c.path)
+    o.onProgress?.((i / Math.max(1, o.clips.length)) * 0.5) // 前半进度=预剪
+  }
+  return composeFilm(projectId, {
+    clips: trimmed,
+    audioPath: o.audioPath,
+    width: o.width,
+    height: o.height,
+    fps: o.fps,
+    transition: o.transition,
+    useClipAudio: o.useClipAudio,
+    onProgress: (p) => o.onProgress?.(0.5 + p * 0.5) // 后半=合成
+  })
+}
+
 // 绿幕抠像：去掉 color 色键。优先输出带透明通道的 webm(vp9)；无 vp9/alpha 支持则退化为合成到背景色 mp4。
 export async function chromakey(
   projectId: string,

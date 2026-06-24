@@ -934,5 +934,6 @@
 11. **中等样式批次**：① **关联高亮**——选中卡时其上下游连线 `ace-edge-active`（accent 色加粗）+ 端卡 accent 描边 glow（CanvasStage 算 relatedIds 传 EdgeLayer/CardView）；② **portal tooltip**——委托式 `TooltipHost`（监听 `data-tip` hover、portal 玻璃浮层、不被画布 overflow 裁剪），CanvasControls/LeftDock/AnnotationToolbar 的 `title` 改 `data-tip`；③ **右键菜单升级**——菜单项按关键词配 lucide 图标（`iconFor`）+「连接到新节点 / 对齐分布」分组小标题 + 已有 pop 回弹动效。
 
 - **P2e 视频抠像 / 绿幕去背**（2026-06-22，已提交）：`mediaVideo.chromakey`——ffmpeg `chromakey` 去绿键，优先输出带透明通道的 vp9 webm，失败（无 vp9/alpha 支持）经 try/catch 退化为合成到背景色 mp4（免依赖编码器探测 API）；`mediaOps` 加 `chromakey` 工具；MediaToolbox 视频区加「绿幕抠像」按钮。
+- **P2f 多轨时间线剪辑 v1**（2026-06-24，已提交）：`mediaVideo.composeTimeline`——按各段 in/out **预剪**（复用既有 `clip`，无裁剪则原样直通）后交 `composeFilm` 拼接/转场/混音，进度前半预剪、后半合成；新建 `components/TimelineModal.tsx`（`uiStore.showTimeline`）：打开时 `probeDuration` 探测每段时长 → **可视化视频轨**（按裁剪后时长 `flex-grow` 比例分块、点击选段）+ 选中段 **起/终点滑杆裁剪**（互相约束 ≥0.1s）+ **◀▶ 排序**；底部音频轨（选中音频卡）+ 转场/帧率/分辨率（跟随首段比例）/保留原声；导出落「时间线成片」新视频卡并选中。ContextMenu 选中 ≥1 视频卡时出「时间线编辑（N）」（单段也可纯裁剪）。复用 `clip`/`composeFilm`/`probeDuration`，无新增宿主依赖。**v2 延后**：轨道上拖拽裁剪手柄、多音轨混音（adelay/volume per-track）、缩略图条铺底、片段间独立转场时长。
 
-> **P2 低/中风险项完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴 / e 绿幕抠像）。**剩余 P2 为较大/高风险项**（多轨时间线、多工程、千级虚拟化改渲染热路径、持久化分片改存储布局、360/3D）——后三项强烈建议先在 Mulby 实测基线再做，避免盲改破坏渲染/存储。
+> **P2 低/中风险项完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴 / e 绿幕抠像 / f 多轨时间线 v1）。**剩余 P2 为较大/高风险项**（多工程、千级虚拟化改渲染热路径、持久化分片改存储布局、360/3D）——强烈建议先在 Mulby 实测基线再做，避免盲改破坏渲染/存储。
