@@ -38,12 +38,12 @@ export function CanvasControls({ onFit }: { onFit: () => void }) {
 
   return (
     <div data-interactive className="ace-glass absolute bottom-3 left-3 flex items-center gap-1 px-1.5 py-1">
-      <button className={btn} title="撤销 (Ctrl+Z)" onClick={undo} disabled={!canUndo}><Undo2 size={16} /></button>
-      <button className={btn} title="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}><Redo2 size={16} /></button>
+      <button className={btn} data-tip="撤销 (Ctrl+Z)" onClick={undo} disabled={!canUndo}><Undo2 size={16} /></button>
+      <button className={btn} data-tip="重做 (Ctrl+Shift+Z)" onClick={redo} disabled={!canRedo}><Redo2 size={16} /></button>
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
-      <button className={btn} title="缩小" onClick={() => zoomBy(1 / 1.2)}><ZoomOut size={16} /></button>
+      <button className={btn} data-tip="缩小" onClick={() => zoomBy(1 / 1.2)}><ZoomOut size={16} /></button>
       <div className="relative">
-        <button className="px-1.5 text-xs tabular-nums min-w-[3rem] text-center hover:bg-black/5 dark:hover:bg-white/10 rounded-md h-8" title="缩放档位" onClick={() => setZoomMenu((v) => !v)}>
+        <button className="px-1.5 text-xs tabular-nums min-w-[3rem] text-center hover:bg-black/5 dark:hover:bg-white/10 rounded-md h-8" data-tip="缩放档位" onClick={() => setZoomMenu((v) => !v)}>
           {Math.round(vp.zoom * 100)}%
         </button>
         {zoomMenu && (
@@ -66,12 +66,12 @@ export function CanvasControls({ onFit }: { onFit: () => void }) {
           </>
         )}
       </div>
-      <button className={btn} title="放大" onClick={() => zoomBy(1.2)}><ZoomIn size={16} /></button>
-      <button className={btn} title="适配内容 (F)" onClick={onFit}><Maximize size={16} /></button>
+      <button className={btn} data-tip="放大" onClick={() => zoomBy(1.2)}><ZoomIn size={16} /></button>
+      <button className={btn} data-tip="适配内容 (F)" onClick={onFit}><Maximize size={16} /></button>
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
-      <button className={`${btn} ${showGrid ? 'text-indigo-500' : ''}`} title="网格" onClick={toggleGrid}><Grid3x3 size={16} /></button>
-      <button className={`${btn} ${showMinimap ? 'text-indigo-500' : ''}`} title="小地图 (M)" onClick={toggleMinimap}><MapIcon size={16} /></button>
-      <button className={`${btn} ${snapGrid ? 'text-indigo-500' : ''}`} title="网格吸附" onClick={toggleSnapGrid}><Magnet size={16} /></button>
+      <button className={`${btn} ${showGrid ? 'text-indigo-500' : ''}`} data-tip="网格" onClick={toggleGrid}><Grid3x3 size={16} /></button>
+      <button className={`${btn} ${showMinimap ? 'text-indigo-500' : ''}`} data-tip="小地图 (M)" onClick={toggleMinimap}><MapIcon size={16} /></button>
+      <button className={`${btn} ${snapGrid ? 'text-indigo-500' : ''}`} data-tip="网格吸附" onClick={toggleSnapGrid}><Magnet size={16} /></button>
     </div>
   )
 }

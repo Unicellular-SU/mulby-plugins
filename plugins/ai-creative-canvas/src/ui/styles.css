@@ -104,6 +104,10 @@ body {
   stroke: #6366f1;
   stroke-width: 2.5;
 }
+.ace-edge-active {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
 .ace-edge-del-bg {
   fill: #ef4444;
 }

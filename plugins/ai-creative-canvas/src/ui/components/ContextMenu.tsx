@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Sparkles, Film, Grid2x2, Boxes, LayoutTemplate, Link2, Copy, ClipboardPaste, AlignCenter, Download, Trash2, Plus } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { generateCard, generateSelected, canGenerate } from '../services/generate'
@@ -12,7 +13,24 @@ import { toast } from '../store/toastStore'
 import { promptDialog } from '../store/dialogStore'
 import { runCollage } from '../services/mediaOps'
 
-type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true }
+type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true } | { header: string }
+
+// 按关键词给菜单项配 lucide 图标（无需逐项声明）
+function iconFor(label: string): typeof Sparkles | null {
+  if (label.includes('生成')) return Sparkles
+  if (label.includes('转视频') || label.includes('合成') || label.includes('视频')) return Film
+  if (label.includes('拼贴')) return Grid2x2
+  if (label.includes('编组')) return Boxes
+  if (label.includes('模板')) return LayoutTemplate
+  if (label.includes('连到')) return Link2
+  if (label.includes('粘贴')) return ClipboardPaste
+  if (label.includes('提取') || label.includes('副本') || label.includes('复制')) return Copy
+  if (label.includes('对齐') || label.includes('分布') || label.includes('居中')) return AlignCenter
+  if (label.includes('导出')) return Download
+  if (label.includes('删除')) return Trash2
+  if (label.includes('新建')) return Plus
+  return null
+}
 
 const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', video: '视频', audio: '音频', source: '素材', note: '便签' }
 
@@ -142,13 +160,13 @@ export function ContextMenu() {
           })
       })
     if (nonGroup.length >= 1) {
-      items.push({ sep: true })
+      items.push({ header: '连接到新节点' })
       items.push({ label: '↳ 连到新文本节点', onClick: () => run(() => connectToNew('text')) })
       items.push({ label: '↳ 连到新图片节点', onClick: () => run(() => connectToNew('image')) })
       items.push({ label: '↳ 连到新视频节点', onClick: () => run(() => connectToNew('video')) })
     }
     if (cards.length >= 2) {
-      items.push({ sep: true })
+      items.push({ header: '对齐 / 分布' })
       items.push({ label: '左对齐', onClick: () => run(() => align('left')) })
       items.push({ label: '顶对齐', onClick: () => run(() => align('top')) })
       items.push({ label: '水平居中', onClick: () => run(() => align('centerH')) })
@@ -195,19 +213,21 @@ export function ContextMenu() {
       className="ace-menu ace-anim-pop fixed z-[90] py-1 text-sm text-neutral-800 dark:text-neutral-200"
       style={{ left, top, width: W }}
     >
-      {items.map((it, i) =>
-        'sep' in it ? (
-          <div key={i} className="my-1 h-px bg-black/10 dark:bg-white/10" />
-        ) : (
+      {items.map((it, i) => {
+        if ('sep' in it) return <div key={i} className="my-1 h-px bg-black/10 dark:bg-white/10" />
+        if ('header' in it) return <div key={i} className="px-3 pt-2 pb-0.5 text-[10px] uppercase tracking-wide opacity-40">{it.header}</div>
+        const Icon = iconFor(it.label)
+        return (
           <button
             key={i}
             onClick={it.onClick}
-            className={`w-full text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10 ${it.danger ? 'text-red-500' : ''}`}
+            className={`w-full flex items-center gap-2 text-left px-3 py-1.5 hover:bg-black/5 dark:hover:bg-white/10 ${it.danger ? 'text-red-500' : ''}`}
           >
-            {it.label}
+            {Icon && <Icon size={14} className="opacity-60 shrink-0" />}
+            <span className="flex-1">{it.label}</span>
           </button>
         )
-      )}
+      })}
     </div>,
     document.body
   )

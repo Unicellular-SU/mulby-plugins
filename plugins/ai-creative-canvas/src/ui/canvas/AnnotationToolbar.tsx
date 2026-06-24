@@ -18,7 +18,7 @@ export function AnnotationToolbar() {
     <div data-interactive className="ace-glass absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 px-1.5 py-1">
       <button
         onClick={() => useUi.getState().setAnnotTool(null)}
-        title="选择 / 退出标注（Esc）"
+        data-tip="选择 / 退出标注（Esc）"
         className={`w-7 h-7 grid place-items-center rounded-md ${tool === null ? 'bg-indigo-500 text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'}`}
       >
         <MousePointer2 size={15} />
@@ -28,7 +28,7 @@ export function AnnotationToolbar() {
         <button
           key={k}
           onClick={() => useUi.getState().setAnnotTool(tool === k ? null : k)}
-          title={title}
+          data-tip={title}
           className={`w-7 h-7 grid place-items-center rounded-md ${tool === k ? 'bg-indigo-500 text-white' : 'hover:bg-black/5 dark:hover:bg-white/10'}`}
         >
           <Icon size={15} />
@@ -39,7 +39,7 @@ export function AnnotationToolbar() {
         <button
           key={c}
           onClick={() => useUi.getState().setAnnotColor(c)}
-          title="颜色"
+          data-tip="颜色"
           className={`w-4 h-4 rounded-full border ${color === c ? 'ring-2 ring-indigo-400' : ''}`}
           style={{ background: c, borderColor: 'var(--ace-border)' }}
         />
@@ -47,7 +47,7 @@ export function AnnotationToolbar() {
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
       <button
         onClick={() => useGraph.getState().clearAnnotations()}
-        title="清空本画布标注"
+        data-tip="清空本画布标注"
         className="w-7 h-7 grid place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-red-500"
       >
         <Eraser size={15} />

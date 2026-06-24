@@ -116,7 +116,7 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
   )
 }
 
-export function CardView({ card, selected }: { card: Card; selected: boolean }) {
+export function CardView({ card, selected, related }: { card: Card; selected: boolean; related?: boolean }) {
   const updateCard = useGraph((s) => s.updateCard)
   const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
@@ -283,7 +283,8 @@ export function CardView({ card, selected }: { card: Card; selected: boolean }) 
         top: card.y,
         width: card.w,
         height: card.h,
-        ['--tw-ring-color' as any]: meta.accent
+        ['--tw-ring-color' as any]: meta.accent,
+        boxShadow: related ? `0 0 0 2px ${meta.accent}66, 0 0 14px ${meta.accent}33` : undefined
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()

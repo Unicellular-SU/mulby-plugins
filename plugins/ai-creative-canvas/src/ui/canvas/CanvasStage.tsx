@@ -59,6 +59,14 @@ export function CanvasStage() {
     for (const c of Object.values(board.cards)) if (c.parentId === gid) { hiddenMembers.add(c.id); if (c.kind === 'group') hideDesc(c.id) }
   }
   for (const c of Object.values(board.cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
+  // 选中卡的关联集合（上下游端卡），用于关联高亮
+  const relatedIds = new Set<string>()
+  if (selectedIds.length) {
+    for (const e of Object.values(board.edges)) {
+      if (selSet.has(e.source)) relatedIds.add(e.target)
+      if (selSet.has(e.target)) relatedIds.add(e.source)
+    }
+  }
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
 
@@ -482,7 +490,7 @@ export function CanvasStage() {
       onDragOver={(e) => e.preventDefault()}
     >
       {showGrid && <GridLayer viewport={vp} />}
-      <EdgeLayer board={board} temp={connectTemp} />
+      <EdgeLayer board={board} temp={connectTemp} selected={selSet} />
       <div
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0', willChange: 'transform' }}
@@ -495,7 +503,7 @@ export function CanvasStage() {
         {Object.values(board.cards)
           .filter((c) => c.kind !== 'group' && !hiddenMembers.has(c.id))
           .map((c) => (
-            <CardView key={c.id} card={c} selected={selSet.has(c.id)} />
+            <CardView key={c.id} card={c} selected={selSet.has(c.id)} related={relatedIds.has(c.id) && !selSet.has(c.id)} />
           ))}
         <AnnotationLayer annotations={board.annotations || []} />
       </div>

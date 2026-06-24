@@ -16,7 +16,7 @@ function bezier(x1: number, y1: number, x2: number, y2: number) {
 }
 
 // 屏幕坐标 SVG（铺满舞台，随视口换算）。放在卡片层之下。
-export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | null }) {
+export function EdgeLayer({ board, temp, selected }: { board: Board; temp?: TempEdge | null; selected?: Set<string> }) {
   const removeEdge = useGraph((s) => s.removeEdge)
   const [hover, setHover] = useState<string | null>(null)
   const cards = board.cards
@@ -50,6 +50,7 @@ export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | nul
         const s = cards[sa]
         const t = cards[ta]
         if (!s || !t) return null
+        const active = !!selected && (selected.has(e.source) || selected.has(e.target)) // 端点被选中 → 关联高亮
         const rerouted = sa !== e.source || ta !== e.target
         const a = worldToScreen(s.x + s.w, s.y + s.h / 2, vp)
         const b = worldToScreen(t.x, t.y + t.h / 2, vp)
@@ -57,7 +58,7 @@ export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | nul
 
         // 跨界聚合线：接到折叠组边框，不可删（删除请展开组）
         if (rerouted) {
-          return <path key={key} d={d} className="ace-edge" fill="none" style={{ pointerEvents: 'none', opacity: 0.75 }} />
+          return <path key={key} d={d} className={`ace-edge ${active ? 'ace-edge-active' : ''}`} fill="none" style={{ pointerEvents: 'none', opacity: 0.75 }} />
         }
 
         const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
@@ -70,7 +71,7 @@ export function EdgeLayer({ board, temp }: { board: Board; temp?: TempEdge | nul
         return (
           <g key={e.id} onMouseEnter={() => setHover(e.id)} onMouseLeave={() => setHover((h) => (h === e.id ? null : h))}>
             <path d={d} fill="none" stroke="transparent" strokeWidth={16} style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={onDel} />
-            <path d={d} className={`ace-edge ${hovered ? 'ace-edge-hover' : ''}`} fill="none" />
+            <path d={d} className={`ace-edge ${hovered ? 'ace-edge-hover' : active ? 'ace-edge-active' : ''}`} fill="none" />
             {hovered && (
               <g style={{ pointerEvents: 'all', cursor: 'pointer' }} onPointerDown={onDel}>
                 <circle cx={mid.x} cy={mid.y} r={8} className="ace-edge-del-bg" />

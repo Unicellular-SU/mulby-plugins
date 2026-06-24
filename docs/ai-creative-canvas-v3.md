@@ -931,5 +931,6 @@
 8. **双击图片节点 → 局部编辑页面**（视频仍预览；单击仍展开内联面板）。
 9. **样式一致性优化**：节点内联面板 + slash/@菜单 + 放大编辑模态从旧白底迁到玻璃 token（与全局统一）；补 `--kind-note` CSS 变量；空画布引导升级为玻璃卡（图标 + 新建文本卡/打开模板按钮 + 提示）。
 10. **快赢样式批次**：① LeftDock 从贴边竖条改为**左侧悬浮圆角玻璃 dock**（App 布局调整，浮于画布上，data-interactive）；② CanvasControls 百分比改为**缩放档位下拉**（25/50/100/200%，居中保点击外关闭），保留三组分隔线；③ 卡片**缩放手柄**放大为右下角圆点（选中/悬停显著）+ 拖动时显**尺寸气泡**；④ 图片卡悬停显示 **W×H 尺寸徽标**（fitAspect 捕获）。
+11. **中等样式批次**：① **关联高亮**——选中卡时其上下游连线 `ace-edge-active`（accent 色加粗）+ 端卡 accent 描边 glow（CanvasStage 算 relatedIds 传 EdgeLayer/CardView）；② **portal tooltip**——委托式 `TooltipHost`（监听 `data-tip` hover、portal 玻璃浮层、不被画布 overflow 裁剪），CanvasControls/LeftDock/AnnotationToolbar 的 `title` 改 `data-tip`；③ **右键菜单升级**——菜单项按关键词配 lucide 图标（`iconFor`）+「连接到新节点 / 对齐分布」分组小标题 + 已有 pop 回弹动效。
 
 > **P2 低风险项完成**（a 作品库 / b 标注层 / c Provider IO / d 拼贴）。**剩余 P2 全为高风险盲改项**（千级虚拟化改渲染热路径、持久化分片改存储布局、多轨时间线、视频抠像绿幕、360/3D、多工程）——**强烈建议先在 Mulby 实测当前基线**（P0+P1+P2-light 全程 build 绿但未实跑）再逐项立项，避免盲改破坏渲染/存储。

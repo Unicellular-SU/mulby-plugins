@@ -15,6 +15,7 @@ import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
+import { TooltipHost } from './components/TooltipHost'
 import { loadProject, saveProject, loadRecovery, saveRecovery, clearRecovery } from './services/persistence'
 import { confirmDialog } from './store/dialogStore'
 import { importAttachments } from './services/importMedia'
@@ -153,6 +154,7 @@ export default function App() {
       <Gallery />
       <DialogHost />
       <ToastHost />
+      <TooltipHost />
     </div>
   )
 }
