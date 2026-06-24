@@ -43,6 +43,16 @@ export function fitToCards(cards: Card[], vw: number, vh: number, padding = 80):
   return { zoom, x: vw / 2 - cx * zoom, y: vh / 2 - cy * zoom }
 }
 
+// 当前可见的世界矩形（视口剔除用）。marginPx 为屏幕像素外扩量，用于平移时预渲染、减少入场弹跳。
+export function worldViewRect(v: Viewport, vw: number, vh: number, marginPx = 0) {
+  return {
+    x: (-v.x - marginPx) / v.zoom,
+    y: (-v.y - marginPx) / v.zoom,
+    w: (vw + marginPx * 2) / v.zoom,
+    h: (vh + marginPx * 2) / v.zoom
+  }
+}
+
 // 矩形相交（世界坐标）
 export function rectsIntersect(
   a: { x: number; y: number; w: number; h: number },

@@ -23,7 +23,7 @@ import { computeSnap, computeSnapBox } from './snapping'
 import { ContextMenu } from '../components/ContextMenu'
 import type { CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
-import { fitToCards, rectsIntersect, screenToWorld, zoomAt } from './viewport'
+import { fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
 
@@ -49,6 +49,7 @@ export function CanvasStage() {
 
   const board = useGraph((s) => s.getActiveBoard())
   const selectedIds = useGraph((s) => s.selectedIds)
+  const stageSize = useUi((s) => s.stageSize)
   const showGrid = useUi((s) => s.showGrid)
   const showMinimap = useUi((s) => s.showMinimap)
   const connectTemp = useUi((s) => s.connectTemp)
@@ -67,6 +68,16 @@ export function CanvasStage() {
       if (selSet.has(e.target)) relatedIds.add(e.source)
     }
   }
+
+  // 千级节点虚拟化：节点数超阈值时按可见区(外扩 600px 预渲染)剔除界外卡片/组/连线。
+  // 阈值以下保持原行为（零风险）；选中卡恒渲染（保证浮条/编辑器/手柄不失锚）。
+  // marquee/全选/连接均遍历 store 而非 DOM，剔除不影响选择与命中。
+  const VIRTUALIZE_THRESHOLD = 200
+  const cardCount = Object.keys(board.cards).length
+  const virtualize = cardCount > VIRTUALIZE_THRESHOLD && stageSize.w > 0 && stageSize.h > 0
+  const viewRect = virtualize ? worldViewRect(vp, stageSize.w, stageSize.h, 600) : null
+  const inView = (c: { id: string; x: number; y: number; w: number; h: number }) =>
+    !viewRect || selSet.has(c.id) || rectsIntersect(viewRect, { x: c.x, y: c.y, w: c.w, h: c.h })
 
   const getRect = () => stageRef.current?.getBoundingClientRect() ?? new DOMRect()
 
@@ -490,18 +501,18 @@ export function CanvasStage() {
       onDragOver={(e) => e.preventDefault()}
     >
       {showGrid && <GridLayer viewport={vp} />}
-      <EdgeLayer board={board} temp={connectTemp} selected={selSet} />
+      <EdgeLayer board={board} temp={connectTemp} selected={selSet} cull={viewRect} />
       <div
         className="absolute top-0 left-0"
         style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})`, transformOrigin: '0 0', willChange: 'transform' }}
       >
         {Object.values(board.cards)
-          .filter((c) => c.kind === 'group' && !hiddenMembers.has(c.id))
+          .filter((c) => c.kind === 'group' && !hiddenMembers.has(c.id) && inView(c))
           .map((c) => (
             <GroupView key={c.id} card={c} selected={selSet.has(c.id)} />
           ))}
         {Object.values(board.cards)
-          .filter((c) => c.kind !== 'group' && !hiddenMembers.has(c.id))
+          .filter((c) => c.kind !== 'group' && !hiddenMembers.has(c.id) && inView(c))
           .map((c) => (
             <CardView key={c.id} card={c} selected={selSet.has(c.id)} related={relatedIds.has(c.id) && !selSet.has(c.id)} />
           ))}

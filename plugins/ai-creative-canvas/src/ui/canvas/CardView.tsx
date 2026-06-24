@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { captureFrame } from '../services/mediaOps'
 import { invalidTargetIds } from '../services/connectionPolicy'
@@ -116,7 +116,9 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
   )
 }
 
-export function CardView({ card, selected, related }: { card: Card; selected: boolean; related?: boolean }) {
+// memo：平移时父级每帧重渲，但本卡 props（card 引用/selected/related）不变即可跳过。
+// CardView 仅订阅 updateCard（稳定 action）与 connInvalidIds（连线拖拽期才变），均不随视口变化。
+function CardViewImpl({ card, selected, related }: { card: Card; selected: boolean; related?: boolean }) {
   const updateCard = useGraph((s) => s.updateCard)
   const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
@@ -438,3 +440,5 @@ export function CardView({ card, selected, related }: { card: Card; selected: bo
     </div>
   )
 }
+
+export const CardView = memo(CardViewImpl)

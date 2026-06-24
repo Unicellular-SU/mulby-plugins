@@ -1,7 +1,7 @@
 import { useState, type PointerEvent as RPointerEvent } from 'react'
 import type { Board } from '../types'
 import { useGraph } from '../store/graphStore'
-import { worldToScreen } from './viewport'
+import { worldToScreen, rectsIntersect } from './viewport'
 
 interface TempEdge {
   x1: number
@@ -16,7 +16,7 @@ function bezier(x1: number, y1: number, x2: number, y2: number) {
 }
 
 // 屏幕坐标 SVG（铺满舞台，随视口换算）。放在卡片层之下。
-export function EdgeLayer({ board, temp, selected }: { board: Board; temp?: TempEdge | null; selected?: Set<string> }) {
+export function EdgeLayer({ board, temp, selected, cull }: { board: Board; temp?: TempEdge | null; selected?: Set<string>; cull?: { x: number; y: number; w: number; h: number } | null }) {
   const removeEdge = useGraph((s) => s.removeEdge)
   const [hover, setHover] = useState<string | null>(null)
   const cards = board.cards
@@ -50,6 +50,15 @@ export function EdgeLayer({ board, temp, selected }: { board: Board; temp?: Temp
         const s = cards[sa]
         const t = cards[ta]
         if (!s || !t) return null
+        // 视口剔除：两端锚点的包围盒（略外扩，避免水平/垂直线零尺寸漏判）不相交可见区则跳过
+        if (cull) {
+          const ax = s.x + s.w
+          const ay = s.y + s.h / 2
+          const bx = t.x
+          const by = t.y + t.h / 2
+          const ebox = { x: Math.min(ax, bx) - 2, y: Math.min(ay, by) - 2, w: Math.abs(bx - ax) + 4, h: Math.abs(by - ay) + 4 }
+          if (!rectsIntersect(cull, ebox)) return null
+        }
         const active = !!selected && (selected.has(e.source) || selected.has(e.target)) // 端点被选中 → 关联高亮
         const rerouted = sa !== e.source || ta !== e.target
         const a = worldToScreen(s.x + s.w, s.y + s.h / 2, vp)
