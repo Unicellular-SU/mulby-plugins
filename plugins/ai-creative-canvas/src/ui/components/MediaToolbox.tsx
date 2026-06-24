@@ -71,6 +71,7 @@ export function MediaToolbox({ card }: { card: Card }) {
           <IconBtn icon={VolumeX} title="去音轨" onClick={() => runVideoTool(card.id, 'mute')} />
           <IconBtn icon={Rewind} title="倒放" onClick={() => runVideoTool(card.id, 'reverse')} />
           <IconBtn icon={Minimize2} title="压制" onClick={() => runVideoTool(card.id, 'compress')} />
+          <IconBtn icon={Wand2} title="绿幕抠像（去绿背景）" onClick={() => runVideoTool(card.id, 'chromakey')} />
           <IconBtn icon={Download} title="下载" onClick={() => void download()} />
         </>
       )}

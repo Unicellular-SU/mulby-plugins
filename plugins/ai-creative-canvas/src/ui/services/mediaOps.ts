@@ -177,7 +177,7 @@ export async function captureFrame(cardId: string, atSec: number): Promise<void>
 
 // ---- 视频工具 ----
 
-export type VideoTool = 'clip' | 'gif' | 'frames' | 'scenes' | 'splitAudio' | 'mute' | 'reverse' | 'compress'
+export type VideoTool = 'clip' | 'gif' | 'frames' | 'scenes' | 'splitAudio' | 'mute' | 'reverse' | 'compress' | 'chromakey'
 
 const VTOOL_LABEL: Record<VideoTool, string> = {
   clip: '裁剪',
@@ -187,7 +187,8 @@ const VTOOL_LABEL: Record<VideoTool, string> = {
   splitAudio: '音轨',
   mute: '去音轨',
   reverse: '倒放',
-  compress: '压制'
+  compress: '压制',
+  chromakey: '绿幕抠像'
 }
 
 function newMediaCard(src: any, kind: any, title: string, path: string, mime: string): void {
@@ -249,6 +250,9 @@ export async function runVideoTool(
     } else if (tool === 'splitAudio') {
       const out = await MV.splitAudio(projectId, inPath)
       newMediaCard(src, 'audio', `${src.title} · 音轨`, out, 'audio/mp3')
+    } else if (tool === 'chromakey') {
+      const r = await MV.chromakey(projectId, inPath)
+      newMediaCard(src, 'video', `${src.title} · 绿幕抠像`, r.path, r.mime)
     } else {
       let out: string
       if (tool === 'clip') out = await MV.clip(projectId, inPath, opts?.start ?? 0, opts?.end ?? (opts?.start ?? 0) + 5)

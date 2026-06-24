@@ -131,6 +131,35 @@ export async function compress(projectId: string, inPath: string): Promise<strin
   return out
 }
 
+// 绿幕抠像：去掉 color 色键。优先输出带透明通道的 webm(vp9)；无 vp9/alpha 支持则退化为合成到背景色 mp4。
+export async function chromakey(
+  projectId: string,
+  inPath: string,
+  opts?: { color?: string; similarity?: number; blend?: number; bgColor?: string }
+): Promise<{ path: string; mime: string }> {
+  const color = opts?.color || '0x00FF00'
+  const sim = opts?.similarity ?? 0.1
+  const blend = opts?.blend ?? 0.12
+  try {
+    const out = await mediaPath(projectId, 'chromakey', 'webm')
+    await runFf(['-i', inPath, '-vf', `chromakey=${color}:${sim}:${blend},format=yuva420p`, '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-auto-alt-ref', '0', out])
+    return { path: out, mime: 'video/webm' }
+  } catch {
+    notify('当前 FFmpeg 不支持透明 webm，已退化为合成到背景色', 'warning')
+    const bg = opts?.bgColor || '0x000000'
+    const out2 = await mediaPath(projectId, 'chromakey', 'mp4')
+    await runFf([
+      '-i', inPath,
+      '-filter_complex',
+      `[0:v]chromakey=${color}:${sim}:${blend}[ck];color=c=${bg}:s=2x2[bgc];[bgc][ck]scale2ref[bg][ck2];[bg][ck2]overlay=shortest=1,format=yuv420p[v]`,
+      '-map', '[v]',
+      '-c:v', 'libx264', '-crf', '20', '-preset', 'fast', '-movflags', '+faststart',
+      out2
+    ])
+    return { path: out2, mime: 'video/mp4' }
+  }
+}
+
 // ============ 成片合成（多视频片段 → 一条成片） ============
 
 export type FilmTransition = 'none' | 'xfade' | 'fade'
