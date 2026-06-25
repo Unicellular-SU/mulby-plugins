@@ -748,8 +748,8 @@
       "version": "1.0.0",
       "author": "mulby",
       "description": "极便捷的 OCR 识别工具，截图提取文字/表格/公式，支持翻译和一键复制。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.14-1523/ocr-text-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-14T15:24:34.684Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.25-1659/ocr-text-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-25T17:00:35.393Z",
       "type": "productivity",
       "details": "# OCR 文字识别\n\n极便捷的 OCR 识别工具，支持提取文字、表格、公式。\n\n## 功能特性\n\n- **截图文字识别** - 一键截图提取文字内容\n- **截图文字识别+复制** - 识别文字并自动复制到剪贴板\n- **截图文字识别+翻译** - 识别文字并自动翻译\n- **截图表格识别** - 识别图片中的表格，输出 Markdown 表格格式\n- **截图公式识别** - 识别数学公式，输出 LaTeX 格式\n- **图片文字识别** - 拖入图片文件进行识别\n- **插件内截图/选图** - 打开插件后可直接点击“截图识别”或“选择图片”重新识别\n- **表格结果导出** - 支持复制 Markdown、复制可粘贴到 Excel 的 TSV，以及导出 `.xls`\n- **公式结果导出** - 支持复制 LaTeX，以及导出 SVG 公式图片\n\n## 触发方式\n\n| 功能 | 关键词 |\n|------|--------|\n| 文字识别 | `OCR` / `文字识别` / `ocr` |\n| 文字识别+复制 | `OCR复制` / `文字识别复制` |\n| 表格识别 | `表格识别` / `OCR表格` |\n| 公式识别 | `公式识别` / `OCR公式` |\n| 文字识别+翻译 | `OCR翻译` / `文字识别翻译` |\n| 图片识别 | 拖入 PNG/JPG/JPEG/BMP/GIF/WebP/TIFF 图片 |\n\n## 使用说明\n\n1. 在 Mulby 搜索框输入对应关键词\n2. 截取需要识别的屏幕区域\n3. 也可以在插件窗口内点击“截图识别”或“选择图片”重新选择输入\n4. 等待识别完成\n5. 点击复制按钮复制识别结果\n6. 切换到表格模式后，可复制 Markdown、复制 Excel 格式或导出 `.xls`\n7. 切换到公式模式后，可复制 LaTeX 或导出 SVG 公式图片\n8. 可切换文字/表格/公式模式重新识别\n\n## 快捷键\n\n可在 Mulby 设置中为各功能绑定全局快捷键，实现一键调用。\n\n## 依赖\n\n- 需要配置 AI 模型（支持视觉识别的模型，如 GPT-4o、Claude 等）",
       "icon": {
@@ -762,7 +762,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "4ce9dd070b46ca3b1c88671d1fd816feda4bf65601dd844269257d946676104c",
+      "sha256": "8230d7fa479ac10fe86b4934fa3eb191d6e2ee00771e2c44383a8d186850a350",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/ocr-text"
     },
@@ -1102,6 +1102,31 @@
       "sha256": "375c6ca99fcff5b7ac3ebd507e694b2ed6bb124ec41f72025cc983e302f493df",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/quick-launch"
+    },
+    {
+      "id": "batch-image-compress",
+      "name": "batch-image-compress",
+      "displayName": "批量图片压缩",
+      "version": "1.0.0",
+      "author": "mulby",
+      "description": "批量压缩图片，支持 JPEG/PNG/WebP 格式转换、质量调节、尺寸缩放、并排预览与进度追踪",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.25-1659/batch-image-compress-1.0.0.inplugin",
+      "lastPackageTime": "2026-06-25T17:00:27.217Z",
+      "type": "media",
+      "details": "# 批量图片压缩 (batch-image-compress)\n\n本地批量图片压缩工具，基于 Mulby 内置 Sharp 引擎，无需联网。\n\n## 功能特性\n\n- 🖼️ **批量处理** — 拖放或选择多张图片，一键压缩\n- 🎚️ **质量调节** — 1-100% 滑块，实时调节压缩强度\n- 🔄 **格式转换** — 保持原格式 / 转为 JPEG / PNG / WebP\n- 📐 **智能缩放** — 可选最大宽高限制，不放大原图\n- 👁️ **并排预览** — 原图与压缩后效果对比\n- 📊 **压缩统计** — 前后体积对比、节省百分比\n- 🔒 **变大保护** — 如果压缩后更大且无缩放，自动保留原图\n- 💾 **灵活输出** — 覆盖原文件 / 同目录加后缀 / 自定义目录\n\n## 触发方式\n\n| 触发 | 说明 |\n|------|------|\n| `图片压缩` / `compress` / `批量压缩` / `压缩图片` | 打开主界面 |\n| 在启动器中选中图片 → 搜索上述关键词 | 带文件进入 |\n| 图片右键 / 文件触发 | 带文件进入 |\n\n## 使用说明\n\n1. 输入关键词打开插件\n2. 拖放图片到窗口，或点击选择图片\n3. 调整压缩参数（质量、格式、尺寸、输出位置）\n4. 点击 **压缩** 预览效果\n5. 满意后点击 **应用** 保存\n\n## 支持的格式\n\n- 输入：JPEG, PNG, WebP, GIF, AVIF, TIFF, BMP, SVG, ICO\n- 输出：JPEG, PNG, WebP（或保持原格式）\n\n## 开发\n\n```bash\npnpm install\npnpm run build\npnpm run pack\n```\n\n## 图标\n\n```bash\n# 修改 assets/icon.svg 后重新生成 icon.png\nnode ../../scripts/finalize_plugin_icon.mjs --project-root .\n```",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/batch-image-compress/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/batch-image-compress/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "4fe46559cb94690428fe014a6242233690ae60d974bc524039e6643adda76f5b",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/batch-image-compress"
     }
   ]
 }
