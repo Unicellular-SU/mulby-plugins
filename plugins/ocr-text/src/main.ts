@@ -30,6 +30,51 @@ for observation in observations {
 `
 
 let cachedBinaryPath: string | null = null
+let rapidOcrPythonPath: string | null = null
+let rapidOcrVenvPath: string | null = null
+
+async function getRapidOcrVenvPython(): Promise<string> {
+  if (rapidOcrVenvPath) return rapidOcrVenvPath
+  const home = (typeof process !== 'undefined' && process.env?.HOME) || '/tmp'
+  rapidOcrVenvPath = `${home}/.mulby/rapidocr-venv/bin/python`
+  return rapidOcrVenvPath
+}
+
+async function findRapidOcrPython(): Promise<string | null> {
+  if (rapidOcrPythonPath !== null) return rapidOcrPythonPath
+
+  // Try python3 first (user's global/system python)
+  try {
+    const result = await mulby.shell.runCommand({
+      command: 'python3',
+      args: ['-c', 'from rapidocr import RapidOCR; print("OK")'],
+      timeoutMs: 5000,
+    })
+    if (result.exitCode === 0 && result.stdout?.includes('OK')) {
+      console.log('[ocr-text] Found RapidOCR via system python3')
+      rapidOcrPythonPath = 'python3'
+      return rapidOcrPythonPath
+    }
+  } catch { /* fall through */ }
+
+  // Try uv-managed venv at ~/.mulby/rapidocr-venv/bin/python
+  try {
+    const venvPython = await getRapidOcrVenvPython()
+    const result = await mulby.shell.runCommand({
+      command: venvPython,
+      args: ['-c', 'from rapidocr import RapidOCR; print("OK")'],
+      timeoutMs: 5000,
+    })
+    if (result.exitCode === 0 && result.stdout?.includes('OK')) {
+      console.log('[ocr-text] Found RapidOCR via', venvPython)
+      rapidOcrPythonPath = venvPython
+      return rapidOcrPythonPath
+    }
+  } catch { /* fall through */ }
+
+  rapidOcrPythonPath = ''
+  return null
+}
 
 function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64)
@@ -81,6 +126,71 @@ export const rpc = {
   async getPlatformInfo() {
     const platform = await getPlatform()
     return { platform }
+  },
+
+  async checkRapidOcr() {
+    try {
+      const pythonPath = await findRapidOcrPython()
+      if (pythonPath) {
+        return { available: true, error: '' }
+      }
+      return {
+        available: false,
+        error: `RapidOCR 未安装。请执行:\n\n  uv venv --python 3.12 ~/.mulby/rapidocr-venv\n  uv pip install -p ~/.mulby/rapidocr-venv/bin/python rapidocr onnxruntime`,
+      }
+    } catch (err: any) {
+      return { available: false, error: err?.message || '无法检测 Python/RapidOCR 环境' }
+    }
+  },
+
+  async rapidOcr(imageBase64: string, mimeType: string) {
+    try {
+      const pythonPath = await findRapidOcrPython()
+      if (!pythonPath) {
+        return { success: false, text: '', error: 'RapidOCR 未安装', platform: 'python-rapidocr' }
+      }
+
+      const tmpDir = await mulby.system.getPath('temp')
+      const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png'
+      const imagePath = `${tmpDir}/mulby_ocr_rapid_${Date.now()}.${ext}`
+
+      const raw = base64ToUint8Array(imageBase64)
+      await mulby.filesystem.writeFile(imagePath, raw)
+      console.log('[ocr-text] rapidOcr: image saved to', imagePath, 'size:', raw.length)
+
+      try {
+        // Escape backslashes for the Python string literal
+        const pyImagePath = imagePath.replace(/\\/g, '\\\\')
+        const pyScript = `
+from rapidocr import RapidOCR
+engine = RapidOCR()
+result = engine(r'${pyImagePath}')
+txts = getattr(result, 'txts', None) or []
+for txt in txts:
+    print(txt)
+`.trim()
+
+        const result = await mulby.shell.runCommand({
+          command: pythonPath,
+          args: ['-c', pyScript],
+          timeoutMs: 30000,
+        })
+        console.log('[ocr-text] rapidOcr result:', JSON.stringify({ exitCode: result.exitCode, stdout: result.stdout?.slice(0, 200), stderr: result.stderr?.slice(0, 200) }))
+
+        if (result.exitCode !== 0) {
+          const stderr = (result.stderr || '').trim()
+          throw new Error(stderr || 'RapidOCR 识别失败')
+        }
+
+        const text = (result.stdout || '').trim()
+        return { success: true, text, platform: 'python-rapidocr' }
+      } finally {
+        await cleanup(imagePath)
+      }
+    } catch (error: any) {
+      console.error('[ocr-text] rapidOcr error:', error)
+      return { success: false, text: '', error: error?.message || 'RapidOCR 识别失败', platform: 'python-rapidocr' }
+    }
   },
 }
 

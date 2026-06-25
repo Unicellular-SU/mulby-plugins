@@ -8,11 +8,11 @@ export default defineConfig({
   base: './',
   build: {
     outDir: '../../ui',
-    emptyOutDir: true,
+    emptyOutDir: true
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
-    },
-  },
+      '@': path.resolve(__dirname, 'src')
+    }
+  }
 })

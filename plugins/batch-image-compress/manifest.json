@@ -1,0 +1,49 @@
+{
+  "id": "batch-image-compress",
+  "name": "batch-image-compress",
+  "displayName": "批量图片压缩",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "media",
+  "description": "批量压缩图片，支持 JPEG/PNG/WebP 格式转换、质量调节、尺寸缩放、并排预览与进度追踪",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true
+  },
+  "window": {
+    "width": 1100,
+    "height": 750,
+    "minWidth": 800,
+    "minHeight": 600,
+    "maxWidth": 1920,
+    "maxHeight": 1200,
+    "type": "default"
+  },
+  "features": [
+    {
+      "code": "compress",
+      "explain": "打开批量图片压缩",
+      "mode": "ui",
+      "cmds": [
+        { "type": "keyword", "value": "图片压缩" },
+        { "type": "keyword", "value": "compress" },
+        { "type": "keyword", "value": "批量压缩" },
+        { "type": "keyword", "value": "压缩图片" }
+      ]
+    },
+    {
+      "code": "process-files",
+      "explain": "压缩选中的图片",
+      "mode": "ui",
+      "cmds": [
+        { "type": "img" },
+        { "type": "files", "fileType": "file", "exts": [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp", ".svg"] }
+      ]
+    }
+  ]
+}

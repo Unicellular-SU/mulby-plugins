@@ -3,20 +3,28 @@ import { useMulby } from './hooks/useMulby'
 import {
   Copy, Check, Languages, Loader2, Type, Table2, FunctionSquare,
   ImageIcon, Download, RotateCcw, Sparkles, Cpu, Settings, X,
-  Camera, FolderOpen, FileSpreadsheet, FileImage,
+  Camera, FolderOpen, FileSpreadsheet, FileImage, ScanEye,
 } from 'lucide-react'
 import { latexToSvg, markdownTableToExcelHtml, markdownTableToTsv, normalizeLatex } from './exportUtils'
 import { shouldProcessPluginInit } from './pluginInitSession'
 import { requestCaptureRecognition } from './captureRecognition'
+import {
+  checkRapidOcrAvailable,
+  processRapidOcrImage,
+  isRapidOcrReady,
+} from './rapidocr/engine'
+import { RapidOcrProgressBar } from './rapidocr/RapidOcrProgress'
+import type { RapidOcrEngineStatus } from './rapidocr/types'
 
 type OcrMode = 'text' | 'table' | 'formula'
-type OcrEngine = 'native' | 'ai'
+type OcrEngine = 'native' | 'ai' | 'rapidocr'
 
 interface OcrResult { text: string; mode: OcrMode; engine: OcrEngine }
 interface AiModelOption { id: string; label: string; providerLabel?: string }
 
 const STORAGE_KEY_MODEL = 'ocr_ai_model'
 const STORAGE_KEY_LANG = 'ocr_translate_lang'
+const STORAGE_KEY_ENGINE = 'ocr_engine'
 
 const LANGUAGES = [
   { id: 'zh', label: '中文' },
@@ -73,12 +81,23 @@ export default function App() {
   const lastInitNonceRef = useRef<number | string | null>(null)
   const [mode, setMode] = useState<OcrMode>('text')
   const [engine, setEngine] = useState<OcrEngine>('native')
+  const engineRef = useRef<OcrEngine>('native')
+  const wrapSetEngine = (next: OcrEngine) => {
+    engineRef.current = next
+    setEngine(next)
+  }
   const [showSettings, setShowSettings] = useState(false)
   const [models, setModels] = useState<AiModelOption[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [targetLang, setTargetLang] = useState<string>('zh')
+  // RapidOCR state
+  const [rapidocrStatus, setRapidocrStatus] = useState<RapidOcrEngineStatus>('uninitialized')
+  const [rapidocrDownloadPercent, setRapidocrDownloadPercent] = useState(0)
+  const [rapidocrMessage, setRapidocrMessage] = useState('')
+  const rapidocrMessageRef = useRef('')
+  const rapidocrInitPromise = useRef<Promise<void> | null>(null)
   const settingsRef = useRef<HTMLDivElement>(null)
   const streamTextRef = useRef<string>('')
   const abortedRef = useRef(false)
@@ -88,11 +107,21 @@ export default function App() {
     Promise.all([
       mulby.storage.get(STORAGE_KEY_MODEL).catch(() => null),
       mulby.storage.get(STORAGE_KEY_LANG).catch(() => null),
-    ]).then(([model, lang]) => {
+      mulby.storage.get(STORAGE_KEY_ENGINE).catch(() => null),
+    ]).then(([model, lang, savedEngine]) => {
       if (model && typeof model === 'string') setSelectedModel(model)
       if (lang && typeof lang === 'string') setTargetLang(lang)
+      if (savedEngine && typeof savedEngine === 'string' && ['native', 'rapidocr', 'ai'].includes(savedEngine)) {
+        engineRef.current = savedEngine as OcrEngine
+        setEngine(savedEngine as OcrEngine)
+      }
     })
   }, [mulby])
+
+  // Persist engine selection to storage
+  useEffect(() => {
+    mulby.storage.set(STORAGE_KEY_ENGINE, engine).catch(() => {})
+  }, [engine, mulby])
 
   useEffect(() => {
     if (!showSettings) return
@@ -134,6 +163,8 @@ export default function App() {
     }
   }, [showSettings])
 
+  // Backend-based RapidOCR doesn't need cleanup — no in-browser engine to dispose
+
   const handleSelectModel = async (modelId: string) => {
     setSelectedModel(modelId)
     try { await mulby.storage.set(STORAGE_KEY_MODEL, modelId) } catch {}
@@ -151,6 +182,63 @@ export default function App() {
       return (res as any)?.data || { success: false, text: '', error: '调用失败' }
     } catch (err: any) {
       return { success: false, text: '', error: err?.message || '原生 OCR 调用失败' }
+    }
+  }, [mulby])
+
+  const initRapidOcr = useCallback(async () => {
+    if (isRapidOcrReady()) return
+    // If an init is already in flight, wait for it
+    if (rapidocrInitPromise.current) {
+      await rapidocrInitPromise.current
+      return
+    }
+
+    let resolveInit: () => void
+    rapidocrInitPromise.current = new Promise<void>((resolve) => { resolveInit = resolve })
+
+    setRapidocrStatus('initializing')
+    setRapidocrDownloadPercent(0)
+
+    try {
+      setRapidocrMessage('正在检测 Python RapidOCR 环境...')
+      console.log('[rapidocr] Starting checkRapidOcrAvailable...')
+      const { available, error } = await checkRapidOcrAvailable(mulby)
+      console.log('[rapidocr] check result — available:', available, 'error:', error)
+      if (available) {
+        setRapidocrStatus('ready')
+        setRapidocrDownloadPercent(100)
+        setRapidocrMessage('RapidOCR 就绪')
+        rapidocrMessageRef.current = ''
+      } else {
+        setRapidocrStatus('error')
+        setRapidocrMessage(error || 'RapidOCR 不可用')
+        rapidocrMessageRef.current = error || 'RapidOCR 不可用'
+        console.error('[rapidocr] Not available:', error)
+      }
+    } catch (err: any) {
+      console.error('[rapidocr] init exception:', err)
+      setRapidocrStatus('error')
+      setRapidocrMessage(err?.message || '检测失败')
+      rapidocrMessageRef.current = err?.message || '检测失败'
+    } finally {
+      resolveInit!()
+      rapidocrInitPromise.current = null
+    }
+  }, [mulby])
+
+  // Pre-check RapidOCR when engine is rapidocr (e.g. restored from storage)
+  useEffect(() => {
+    if (engine === 'rapidocr' && !isRapidOcrReady()) {
+      initRapidOcr()
+    }
+  }, [engine, initRapidOcr])
+
+  const doRapidOcr = useCallback(async (dataUrl: string): Promise<{ success: boolean; text: string; error?: string }> => {
+    try {
+      const result = await processRapidOcrImage(mulby, dataUrl)
+      return { success: true, text: result.text }
+    } catch (err: any) {
+      return { success: false, text: '', error: err?.message || 'RapidOCR 识别失败' }
     }
   }, [mulby])
 
@@ -202,7 +290,23 @@ export default function App() {
     setTranslation(null)
 
     try {
-      if (ocrEngine === 'ai' || ocrMode === 'table' || ocrMode === 'formula') {
+      if (ocrEngine === 'rapidocr') {
+        // Ensure engine is initialized
+        if (!isRapidOcrReady()) {
+          await initRapidOcr()
+          if (!isRapidOcrReady()) {
+            const detail = rapidocrMessageRef.current || rapidocrMessage
+            setError(detail || 'RapidOCR 引擎未就绪，请检查错误信息后重试')
+            return
+          }
+        }
+        const response = await doRapidOcr(dataUrl)
+        if (response.success && response.text) {
+          setResult({ text: response.text, mode: ocrMode, engine: 'rapidocr' })
+        } else {
+          setError(response.error || '未识别到内容')
+        }
+      } else if (ocrEngine === 'ai' || ocrMode === 'table' || ocrMode === 'formula') {
         await doAiOcrStream(dataUrl, ocrMode)
       } else {
         const response = await doNativeOcr(dataUrl)
@@ -217,7 +321,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [doNativeOcr, doAiOcrStream])
+  }, [doNativeOcr, doAiOcrStream, doRapidOcr, initRapidOcr])
 
   useEffect(() => {
     const dispose = mulby.onPluginInit((data: any) => {
@@ -225,7 +329,7 @@ export default function App() {
       if (data.attachments?.[0]?.dataUrl) {
         const dataUrl = data.attachments[0].dataUrl
         setImageDataUrl(dataUrl)
-        doRecognize(dataUrl, 'text', 'native')
+        doRecognize(dataUrl, 'text', engineRef.current)
       } else if (data.attachments?.[0]?.path) {
         loadImageFromPath(data.attachments[0].path)
       }
@@ -240,7 +344,7 @@ export default function App() {
       const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp' }
       const dataUrl = `data:${mimeMap[ext] || 'image/png'};base64,${buffer}`
       setImageDataUrl(dataUrl)
-      doRecognize(dataUrl, 'text', 'native')
+      doRecognize(dataUrl, 'text', engineRef.current)
     } catch { setError('无法读取图片文件') }
   }
 
@@ -380,16 +484,22 @@ export default function App() {
     }
   }
 
-  const handleRetry = () => { if (imageDataUrl) doRecognize(imageDataUrl, mode, engine) }
+  const handleRetry = () => { if (imageDataUrl) doRecognize(imageDataUrl, mode, engineRef.current) }
 
   const handleModeChange = (newMode: OcrMode) => {
     setMode(newMode)
-    if (imageDataUrl) doRecognize(imageDataUrl, newMode, newMode === 'text' ? engine : 'ai')
+    if (imageDataUrl) doRecognize(imageDataUrl, newMode, newMode === 'text' ? engineRef.current : 'ai')
   }
 
   const handleEngineToggle = () => {
-    const newEngine = engine === 'native' ? 'ai' : 'native'
-    setEngine(newEngine)
+    const engines: OcrEngine[] = ['native', 'rapidocr', 'ai']
+    const currentIdx = engines.indexOf(engineRef.current)
+    const newEngine = engines[(currentIdx + 1) % engines.length]
+    wrapSetEngine(newEngine)
+    // Start RapidOCR availability check immediately on switch
+    if (newEngine === 'rapidocr' && !isRapidOcrReady()) {
+      initRapidOcr()
+    }
     if (imageDataUrl && mode === 'text') doRecognize(imageDataUrl, mode, newEngine)
   }
 
@@ -468,9 +578,15 @@ export default function App() {
           </div>
           {mode === 'text' && (
             <button onClick={handleEngineToggle}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-all ${engine === 'ai' ? 'border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400' : 'border-emerald-300 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'}`}>
-              {engine === 'native' ? <Cpu className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
-              {engine === 'native' ? '本地' : 'AI'}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-all ${
+                engine === 'rapidocr'
+                  ? 'border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
+                  : engine === 'ai'
+                  ? 'border-purple-300 dark:border-purple-600 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
+                  : 'border-emerald-300 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+              }`}>
+              {engine === 'rapidocr' ? <ScanEye className="w-3 h-3" /> : engine === 'native' ? <Cpu className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
+              {engine === 'rapidocr' ? 'Rapid' : engine === 'native' ? '本地' : 'AI'}
             </button>
           )}
           <div className="relative" ref={settingsRef}>
@@ -558,11 +674,18 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-auto p-3">
-            {loading && !result?.text ? (
+            {loading && !result?.text && activeEngine === 'rapidocr' && rapidocrStatus !== 'ready' ? (
+              <RapidOcrProgressBar
+                status={rapidocrStatus}
+                percent={rapidocrDownloadPercent}
+                message={rapidocrMessage}
+                onRetry={() => initRapidOcr()}
+              />
+            ) : loading && !result?.text ? (
               <div className="flex flex-col items-center justify-center h-full gap-3">
                 <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                  {activeEngine === 'native' ? '本地识别中...' : mode === 'table' ? 'AI 识别表格...' : mode === 'formula' ? 'AI 识别公式...' : 'AI 识别文字...'}
+                  {activeEngine === 'rapidocr' ? 'RapidOCR 识别中...' : activeEngine === 'native' ? '本地识别中...' : mode === 'table' ? 'AI 识别表格...' : mode === 'formula' ? 'AI 识别公式...' : 'AI 识别文字...'}
                 </span>
               </div>
             ) : error && !result?.text ? (
@@ -610,9 +733,15 @@ export default function App() {
         <div className="flex items-center gap-2">
           <span>{result?.text ? `${result.text.length} 字` : '截图识别'}</span>
           {result?.engine && (
-            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${result.engine === 'native' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'}`}>
-              {result.engine === 'native' ? <Cpu className="w-2.5 h-2.5" /> : <Sparkles className="w-2.5 h-2.5" />}
-              {result.engine === 'native' ? '本地' : 'AI'}
+            <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] ${
+              result.engine === 'rapidocr'
+                ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400'
+                : result.engine === 'native'
+                ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
+                : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
+            }`}>
+              {result.engine === 'rapidocr' ? <ScanEye className="w-2.5 h-2.5" /> : result.engine === 'native' ? <Cpu className="w-2.5 h-2.5" /> : <Sparkles className="w-2.5 h-2.5" />}
+              {result.engine === 'rapidocr' ? 'Rapid' : result.engine === 'native' ? '本地' : 'AI'}
             </span>
           )}
         </div>
