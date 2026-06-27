@@ -34,7 +34,7 @@ void main(){
   dir = vec3(dir.x * cy + dir.z * sy, dir.y, -dir.x * sy + dir.z * cy);
   float lon = atan(dir.x, -dir.z);
   float lat = asin(clamp(dir.y, -1.0, 1.0));
-  vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 - lat / PI);
+  vec2 uv = vec2(lon / (2.0 * PI) + 0.5, 0.5 + lat / PI); // 配合 UNPACK_FLIP_Y：抬头(lat+)→v=1=图顶=天空
   gl_FragColor = texture2D(tex, uv);
 }
 `
