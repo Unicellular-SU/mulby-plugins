@@ -23,6 +23,7 @@ import { useAgentDeployStore } from './agentDeployStore'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
+import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 
 export interface FilmState {
@@ -372,12 +373,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   generateAllTrackPrompts: async () => {
     if (get().batch.running || !get().doc) return
     const ids = [...get().doc!.track].sort((a, b) => a.order - b.order).filter((t) => t.storyboardIds.length && !t.prompt).map((t) => t.id)
+    if (!ids.length) return
+    const c = get().doc!.meta.concurrency ?? 3 // 段提示词相互独立 → 并发
     set({ batch: { running: true, label: `生成段提示词 0/${ids.length}` } })
     try {
-      for (let i = 0; i < ids.length; i++) {
-        set({ batch: { running: true, label: `生成段提示词 ${i + 1}/${ids.length}` } })
-        await get().generateTrackPrompt(ids[i])
-      }
+      await mapPool(ids, c, (id) => get().generateTrackPrompt(id), (done, total) => set({ batch: { running: true, label: `生成段提示词 ${done}/${total}` } }))
     } finally {
       set({ batch: { running: false } })
     }
@@ -410,12 +410,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   polishAllAssets: async () => {
     if (get().batch.running || !get().doc) return
     const ids = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.prompt).map((a) => a.id)
+    if (!ids.length) return
+    const c = get().doc!.meta.concurrency ?? 3 // 润色相互独立 → 并发
     set({ batch: { running: true, label: `润色提示词 0/${ids.length}` } })
     try {
-      for (let i = 0; i < ids.length; i++) {
-        set({ batch: { running: true, label: `润色提示词 ${i + 1}/${ids.length}` } })
-        await get().polishAsset(ids[i])
-      }
+      await mapPool(ids, c, (id) => get().polishAsset(id), (done, total) => set({ batch: { running: true, label: `润色提示词 ${done}/${total}` } }))
     } finally {
       set({ batch: { running: false } })
     }
@@ -794,13 +793,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllAssets: async () => {
     if (get().batch.running || !get().doc) return
-    const ids = get().doc!.assets.filter((a) => !a.refImageId).map((a) => a.id)
+    // 只批量出图类资产（角色/场景/物品），跳过 audio/clip + 已出图的
+    const ids = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.refImageId).map((a) => a.id)
+    if (!ids.length) return
+    const c = get().doc!.meta.concurrency ?? 3 // 资产相互独立 → 并发
     set({ batch: { running: true, label: `生成资产 0/${ids.length}` } })
     try {
-      for (let i = 0; i < ids.length; i++) {
-        set({ batch: { running: true, label: `生成资产 ${i + 1}/${ids.length}` } })
-        await get().generateAsset(ids[i])
-      }
+      await mapPool(ids, c, (id) => get().generateAsset(id), (done, total) => set({ batch: { running: true, label: `生成资产 ${done}/${total}` } }))
     } finally {
       set({ batch: { running: false } })
     }
@@ -808,17 +807,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllKeyframes: async () => {
     if (get().batch.running || !get().doc) return
-    // 按 index 顺序生成：承接镜头能拿到刚生成的上一镜关键帧（链式连贯）
     const ids = [...get().doc!.storyboards]
       .sort((a, b) => a.index - b.index)
       .filter((s) => !s.keyframeImageId)
       .map((s) => s.id)
+    if (!ids.length) return
+    // 有承接镜头 → 串行(concurrency=1)保连贯(承接需上一镜关键帧)；全无承接 → 并发提速
+    const chained = get().doc!.storyboards.some((s) => s.chainFromPrev)
+    const c = chained ? 1 : (get().doc!.meta.concurrency ?? 3)
     set({ batch: { running: true, label: `生成关键帧 0/${ids.length}` } })
     try {
-      for (let i = 0; i < ids.length; i++) {
-        set({ batch: { running: true, label: `生成关键帧 ${i + 1}/${ids.length}` } })
-        await get().generateKeyframe(ids[i])
-      }
+      await mapPool(ids, c, (id) => get().generateKeyframe(id), (done, total) => set({ batch: { running: true, label: `生成关键帧 ${done}/${total}` } }))
     } finally {
       set({ batch: { running: false } })
     }
@@ -826,17 +825,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllClips: async () => {
     if (get().batch.running || !get().doc) return
-    // 按 index 顺序：承接片段能拿到刚生成的上一片段尾帧（顺接无缝）
     const ids = [...get().doc!.storyboards]
       .sort((a, b) => a.index - b.index)
       .filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
       .map((s) => s.id)
+    if (!ids.length) return
+    // 有承接镜头 → 串行保顺接(承接片段需上一片段尾帧)；全无承接 → 并发提速
+    const chained = get().doc!.storyboards.some((s) => s.chainFromPrev)
+    const c = chained ? 1 : (get().doc!.meta.concurrency ?? 3)
     set({ batch: { running: true, label: `生成视频 0/${ids.length}` } })
     try {
-      for (let i = 0; i < ids.length; i++) {
-        set({ batch: { running: true, label: `生成视频 ${i + 1}/${ids.length}` } })
-        await get().generateClip(ids[i])
-      }
+      await mapPool(ids, c, (id) => get().generateClip(id), (done, total) => set({ batch: { running: true, label: `生成视频 ${done}/${total}` } }))
     } finally {
       set({ batch: { running: false } })
     }
