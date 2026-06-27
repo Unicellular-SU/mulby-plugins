@@ -58,3 +58,10 @@
   - 生成：`panoHint` 加英文触发词 `equirectangular 360 view, 360 panorama, seamless`；`seamBlendEquirect` 成图后循环羽化左右接缝(poor-man's circular blend)，全景生成自动执行；强制 2:1 + ≥2K(此前已做)。
   - 局限(已如实记录)：循环羽化只缓解拼缝、治不了"假等距柱状"的投影错误；真等距柱状仍需专用模型或真实 360 相机图。
 - **阶段二（待启动）**：3D 导演台——复用 three 基座(360 环境球 + GLTF 人台 + 摄影机位 → 结构化镜头/截图参考 → 生成)。
+
+## 五、生成质量增强 A+B+C（2026-06-28，已提交）
+调研 GPT Image 2 社区方案后（提示词模板、偏移+生成式重绘、CubeDiff 立方体合并；羽化被确认效果差已弃用）：
+- **A 提示词优化**：`panoHint` 换成 GPT Image 2 模板（equirectangular/cylindrical equidistant、2:1、左右无缝、光照一致、地平线居中、禁鱼眼·小行星）；**删除自动羽化**。
+- **B 偏移+生成式重绘修缝** `mediaPano.repairEquirectSeam`：水平平移半幅→接缝移到画面中央→中缝挖透明带→图生图(`ai.images.edit`)按周边重绘接好→再平移半幅复位→落新全景卡。MediaToolbox 全景图加「修复接缝」(GitMerge)。替代羽化，质量高得多。
+- **C 立方体 6 面合成** `mediaPano.generateCubemapPano` + `cubemapToEquirect`：用源卡提示词+模型生成 6 个 90° 透视面（同 seed/同风格利于一致）→ WebGL 显式 R/U 向量做 cubemap→equirect（readPixels 翻行）→ 落全景卡。MediaToolbox 图像卡加「6 面合成 360」(Boxes)。**实验性**：面间一致性靠尽力，可能有接面差异；天/地朝向若不对，调 `CUBE_FRAG` 对应面的 R/U 向量即可（已集中）。
+- 模型前提：用户确认 provider 支持 gpt-image-2 / 图生图（B/C 依赖图生图）。
