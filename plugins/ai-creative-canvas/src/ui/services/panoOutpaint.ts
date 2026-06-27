@@ -155,6 +155,43 @@ function b64(cv: HTMLCanvasElement): string {
   return cv.toDataURL('image/png').split(',')[1]
 }
 
+function ai(): any {
+  return (window as any).mulby.ai
+}
+
+// equirect 经度半幅滚动（wrap）：对齐"我的经度原点"与 three 查看器的正前（实测差 180°）
+function rollHalf(src: HTMLCanvasElement): HTMLCanvasElement {
+  const w = src.width
+  const h = src.height
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')!
+  const dx = Math.round(w / 2)
+  ctx.drawImage(src, dx, 0)
+  ctx.drawImage(src, dx - w, 0)
+  return c
+}
+
+function dataUrlToBuffer(d: string): ArrayBuffer {
+  const s = d.split(',')[1] || ''
+  const bin = atob(s)
+  const a = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i)
+  return a.buffer
+}
+async function bmpFromB64(s: string): Promise<ImageBitmap> {
+  return createImageBitmap(await (await fetch(`data:image/png;base64,${s}`)).blob())
+}
+async function toSquare(s: string, size: number): Promise<HTMLCanvasElement> {
+  const bmp = await bmpFromB64(s)
+  const c = document.createElement('canvas')
+  c.width = size
+  c.height = size
+  c.getContext('2d')!.drawImage(bmp, 0, 0, size, size)
+  return c
+}
+
 // 自检：取现有全景 → eq→persp 正前 → persp→eq 贴回空画布 → 落两张卡（透视图 + 回贴全景）。
 // 360 里看回贴全景：正前 90° 应与原图正前一致、不畸变/不翻转，其余透明 → 证明两个投影方向都对。
 export async function selfCheckProjection(cardId: string): Promise<void> {
@@ -180,7 +217,7 @@ export async function selfCheckProjection(cardId: string): Promise<void> {
     const empty = document.createElement('canvas')
     empty.width = EQ_W
     empty.height = EQ_H // 透明
-    const pasted = perspToEqPaste(empty, persp, 0, 0, 90)
+    const pasted = rollHalf(perspToEqPaste(empty, persp, 0, 0, 90)) // 半幅对齐查看器正前
 
     const pid = useGraph.getState().project.id
     const sp = await saveBase64(pid, `${cardId}_persp`, b64(persp), 'png')
@@ -190,6 +227,91 @@ export async function selfCheckProjection(cardId: string): Promise<void> {
     toast('已生成自检：正前透视 + 投影回贴全景', 'success')
   } catch (e: any) {
     toast('投影自检失败：' + (e?.message || String(e)), 'error')
+  } finally {
+    useTask.getState().dec()
+  }
+}
+
+// ─────────── ③ 第 2 步：equirect 渐进式 outpaint 主循环 ───────────
+async function genFace(model: string, prompt: string, size: number): Promise<HTMLCanvasElement> {
+  const req = ai().images.generateStream({ model, prompt, size: `${size}x${size}`, count: 1 }, () => {})
+  const res = await req
+  const img = res?.images?.[0]
+  if (!img) throw new Error('某步生成失败')
+  return toSquare(img, size)
+}
+// 图生图 outpaint：透视图带透明洞 → 模型按周边补全（仅填透明、其余保持）
+async function outpaintFace(model: string, persp: HTMLCanvasElement, prompt: string, size: number): Promise<HTMLCanvasElement> {
+  const att = await ai().attachments.upload({ buffer: dataUrlToBuffer(persp.toDataURL('image/png')), mimeType: 'image/png', purpose: 'image' })
+  const res = await ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt })
+  const out = res?.images?.[0]
+  if (!out) throw new Error('outpaint 失败')
+  return toSquare(out, size)
+}
+
+// 在球面上"旋转 + 逐块 outpaint"：每块从已填邻块续画 → 全局一致；最后补天/地 + 半幅对齐。
+export async function progressiveEquirect(cardId: string): Promise<void> {
+  const g = useGraph.getState()
+  const src = g.getCard(cardId)
+  if (!src) return
+  const scene = (src.prompt || '').trim()
+  if (!scene) {
+    toast('请先在该卡片写场景提示词（渐进式合成据此生成）', 'error')
+    return
+  }
+  if (!src.modelId) {
+    toast('请先选择图像模型（需支持图生图）', 'error')
+    return
+  }
+  const model = src.modelId
+  const boardId = g.boardIdOfCard(cardId)
+  const S = 1024
+  const FOV = 90
+  const persPrompt = (where: string) =>
+    `${scene}\n\nA normal rectilinear perspective photo (NOT equirectangular, no fisheye), 90° field of view, ${where}. Part of one continuous 360° environment, consistent style/lighting/weather.`
+  const fillPrompt =
+    `${scene}\n\n无缝补全画面中透明的区域，严格延续周边已有内容的结构、纹理、光照与地平线，使衔接处完全连续、看不出拼接；其余非透明区域保持不变。Seamlessly outpaint only the transparent areas to continue this 360° panorama; match the existing surroundings; no visible seam.`
+
+  const id = useGraph.getState().addCard(
+    'image',
+    { x: src.x + src.w + 240, y: src.y + src.h / 2 },
+    { title: (src.title || '场景') + ' · 渐进式360', status: 'running', progress: 0.02, modelId: model, refIds: [src.id], meta: { pano: true } },
+    boardId
+  )
+  useTask.getState().inc()
+  try {
+    let eq = document.createElement('canvas')
+    eq.width = 2048
+    eq.height = 1024 // 透明起始
+    // 1) 正前 init（文生图）→ 贴入
+    const front = await genFace(model, persPrompt('looking straight ahead (front view)'), S)
+    eq = perspToEqPaste(eq, front, 0, 0, FOV)
+    useGraph.getState().updateCard(id, { progress: 0.12 })
+    // 2) 绕水平一圈（每 60°，与前一块重叠 30°）→ outpaint
+    const ring = [60, 120, 180, 240, 300]
+    for (let i = 0; i < ring.length; i++) {
+      const lon = ring[i]
+      const view = eqToPersp(eq, lon, 0, FOV, S) // 左侧已填、右侧透明
+      const filled = await outpaintFace(model, view, fillPrompt, S)
+      eq = perspToEqPaste(eq, filled, lon, 0, FOV)
+      useGraph.getState().updateCard(id, { progress: 0.12 + ((i + 1) / ring.length) * 0.6 })
+    }
+    // 3) 补天顶/地面（中心透明、边缘已从水平带填好）
+    for (let j = 0; j < 2; j++) {
+      const lat = j === 0 ? 88 : -88
+      const view = eqToPersp(eq, 0, lat, FOV, S)
+      const filled = await outpaintFace(model, view, fillPrompt, S)
+      eq = perspToEqPaste(eq, filled, 0, lat, FOV)
+      useGraph.getState().updateCard(id, { progress: 0.72 + (j + 1) * 0.1 })
+    }
+    // 4) 半幅对齐查看器正前 → 保存
+    const out = rollHalf(eq)
+    const saved = await saveBase64(useGraph.getState().project.id, `${id}_prog`, b64(out), 'png')
+    useGraph.getState().updateCard(id, { status: 'done', progress: 1, assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' })
+    toast('渐进式 360 合成完成', 'success')
+  } catch (e: any) {
+    useGraph.getState().updateCard(id, { status: 'error', progress: 0, error: e?.message || String(e) })
+    toast('渐进式合成失败：' + (e?.message || String(e)), 'error')
   } finally {
     useTask.getState().dec()
   }

@@ -65,3 +65,10 @@
 - **B 偏移+生成式重绘修缝** `mediaPano.repairEquirectSeam`：水平平移半幅→接缝移到画面中央→中缝挖透明带→图生图(`ai.images.edit`)按周边重绘接好→再平移半幅复位→落新全景卡。MediaToolbox 全景图加「修复接缝」(GitMerge)。替代羽化，质量高得多。
 - **C 立方体 6 面合成** `mediaPano.generateCubemapPano` + `cubemapToEquirect`：用源卡提示词+模型生成 6 个 90° 透视面（同 seed/同风格利于一致）→ WebGL 显式 R/U 向量做 cubemap→equirect（readPixels 翻行）→ 落全景卡。MediaToolbox 图像卡加「6 面合成 360」(Boxes)。**实验性**：面间一致性靠尽力，可能有接面差异；天/地朝向若不对，调 `CUBE_FRAG` 对应面的 R/U 向量即可（已集中）。
 - 模型前提：用户确认 provider 支持 gpt-image-2 / 图生图（B/C 依赖图生图）。
+
+## 六、③ equirect 渐进式 outpaint（2026-06-28，已提交）
+独立 6 面无法无缝（无共享上下文），改 Skybox 式渐进 outpaint。分步交付：
+- **第 1 步 投影核心 + 自检**：`panoOutpaint.eqToPersp`/`perspToEqPaste` 两个 WebGL 投影 + `selfCheckProjection`（零 API，肉眼校几何）。实测：几何正确（不畸变/不翻转），仅默认朝向差 180°→ 用 `rollHalf`（半幅经度滚动）对齐查看器正前。
+- **第 2 步 主循环** `progressiveEquirect`：正前 init(文生图)→ 水平绕圈(每 60°、重叠 30°)每块 `eqToPersp`(左已填/右透明)→图生图 outpaint 续画→`perspToEqPaste` 贴回 → 补天/地(lat±88) → `rollHalf` 对齐 → 落全景卡。约 8 次调用，边跑边更新进度。
+- MediaToolbox：图像卡「渐进式合成 360」(Boxes，replaces cube)；全景图「投影自检」(Crosshair)。cube 旧实现保留未用。
+- 待真机验证：outpaint 对透明洞的遵循度、绕圈接缝、天/地补全质量；不行再调 FOV/步长/overlap/提示词。
