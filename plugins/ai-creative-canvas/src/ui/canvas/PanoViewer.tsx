@@ -167,7 +167,8 @@ function Inner({ url }: { url: string }) {
     drag.current.x = e.clientX
     drag.current.y = e.clientY
     const k = view.current.fov / canvasRef.current!.clientHeight // 拖动灵敏度随 fov
-    view.current.yaw -= dx * k
+    // 抓取式(grab)导航：拖动等于"抓住画面拖走"，左右与上下一致（与 Street View/手机全景同款）
+    view.current.yaw += dx * k
     view.current.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, view.current.pitch + dy * k))
     draw.current()
   }
