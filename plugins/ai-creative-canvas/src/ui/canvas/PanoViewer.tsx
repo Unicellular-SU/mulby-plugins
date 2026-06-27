@@ -54,9 +54,16 @@ export function PanoViewer() {
   return <Inner url={url} />
 }
 
+// FOV 收紧到摄影级（对齐 AI-CanvasPro：默认 60°、35°~85°）——大广角是眩晕主因
+const D2R = Math.PI / 180
+const FOV_DEFAULT = 60 * D2R
+const FOV_MIN = 35 * D2R
+const FOV_MAX = 85 * D2R
+const PITCH_LIMIT = 85 * D2R
+
 function Inner({ url }: { url: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const view = useRef({ yaw: 0, pitch: 0, fov: Math.PI / 2.2 })
+  const view = useRef({ yaw: 0, pitch: 0, fov: FOV_DEFAULT })
   const drag = useRef<{ on: boolean; x: number; y: number }>({ on: false, x: 0, y: 0 })
   const draw = useRef<() => void>(() => {})
   const close = () => useUi.getState().setPanoCardId(null)
@@ -169,7 +176,7 @@ function Inner({ url }: { url: string }) {
     const k = view.current.fov / canvasRef.current!.clientHeight // 拖动灵敏度随 fov
     // 抓取式(grab)导航：拖动等于"抓住画面拖走"，左右与上下一致（与 Street View/手机全景同款）
     view.current.yaw += dx * k
-    view.current.pitch = Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, view.current.pitch + dy * k))
+    view.current.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, view.current.pitch + dy * k))
     draw.current()
   }
   const onUp = (e: RPointerEvent<HTMLCanvasElement>) => {
@@ -177,11 +184,11 @@ function Inner({ url }: { url: string }) {
     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
   }
   const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    view.current.fov = Math.max(0.5, Math.min(2.4, view.current.fov * Math.exp(e.deltaY * 0.001)))
+    view.current.fov = Math.max(FOV_MIN, Math.min(FOV_MAX, view.current.fov * Math.exp(e.deltaY * 0.001)))
     draw.current()
   }
   const reset = () => {
-    view.current = { yaw: 0, pitch: 0, fov: Math.PI / 2.2 }
+    view.current = { yaw: 0, pitch: 0, fov: FOV_DEFAULT }
     draw.current()
   }
 

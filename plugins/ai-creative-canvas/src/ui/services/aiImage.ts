@@ -87,7 +87,9 @@ export async function generateImage(
   const params = card.params || {}
   const pano = !!params.pano
   const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
-  const size = computeSize(aspect, String(params.resolution || '1K'))
+  // 全景看的是 ~60° 一小片（约占贴图宽 1/6），分辨率要够才不糊：至少 2K
+  const resolution = pano && String(params.resolution || '1K') === '1K' ? '2K' : String(params.resolution || '1K')
+  const size = computeSize(aspect, resolution)
   const count = pano ? 1 : Math.max(1, Math.min(4, Number(params.count) || 1)) // 全景单张
   const prompt = (card.prompt || '') + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint()
 
