@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images } from 'lucide-react'
+import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images, FolderOpen } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useTask } from '../store/taskStore'
@@ -27,6 +27,13 @@ export function TopBar() {
         <Sparkles size={17} className="text-indigo-500" />
         <span>创意画布</span>
       </div>
+      <button
+        onClick={() => useUi.getState().setShowProjectLibrary(true)}
+        title="工程库（多工程管理）"
+        className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20 shrink-0"
+      >
+        <FolderOpen size={15} />
+      </button>
       <input
         value={name}
         onChange={(e) => renameProject(e.target.value)}

@@ -968,3 +968,12 @@
 
 ### 🐞 视频文件名碰撞 Bug 修复（2026-06-25，已提交）
 **现象**（与上者独立）：多个视频卡显示成同一个（最后生成的那个），同画布或跨画布皆可触发。**根因**：`generate.ts` 视频落盘调 `downloadMedia({ name: card.title })`，后端 `sanitizeName` 的 `\w` 不含中文 → 默认标题"AI 视频"全被替换成 `AI_.mp4`，**每个默认标题视频写到同一文件互相覆盖**，于是多张卡的 `assetLocalPath` 指向同一被覆盖文件，全显示最后那个。**修复**：下载文件名带上全局唯一 `cardId`（`${title}-${cardId}`）→ 每张卡独立文件；重新生成同卡仍用同名覆盖自身（不产生孤儿文件）。音频 `synthSpeech` 用 `tts_${Date.now()}` 本就唯一、无碍。**注意**：已被覆盖的旧视频文件在磁盘上不可恢复，需重新生成。
+
+### P2j 多工程管理（2026-06-27，已提交）
+参考 Excalidraw/tldraw（本地优先 + JSON 导入导出）、Figma/Miro（缩略图 dashboard）、Obsidian/VS Code（切换器）。取**工程库网格 modal + 内存只驻留活动工程**（契合万级：切换=存当前→载目标）。
+- **存储**：在 P2i 分片基础上加**工程注册表** `projects:index = { activeId, items: ProjectMeta[] }`（轻量：名/时间/卡数/封面=首图卡 assetUrl），每工程命名空间分片 `proj:<id>:current` / `proj:<id>:board:<bid>` / 恢复同构；`writeSharded/readSharded` 参数化 projectId 前缀，baseline 按工程区分。
+- **迁移**：`migrateLegacyIfNeeded` 无注册表但存在旧 `project:current` 时，把旧单工程作为首个/活动工程按命名空间另存并建注册表（旧键留孤儿、无害），零手动迁移。
+- **`projectStore`**：`init/newProject/switchProject/renameProject/duplicateProject/deleteProject/exportProject/importProject/flushSave/syncActiveMeta`；编排 persistence + `graphStore.replaceProject`；**切换前先 flushSave 当前**；删除活动工程先切到另一个（唯一工程则清空为新工程）；工程名以注册表为权威源（载入时覆盖）。
+- **UI**：`ProjectLibrary` 网格 modal（封面/名/卡数/更新时间/当前高亮，新建·打开·重命名·复制·导出 JSON·删除）；TopBar 加工程库入口（FolderOpen）。导入用隐藏 `<input type=file>` 读 JSON、导出用 Blob 下载（不含本地媒体文件）。
+- **正确性**：① 载入/切换引发的 store 变更经 `isLoadedRef` 守卫跳过自动保存，避免切换后又全量重写；② 自动保存在「调度时」连同 activeId 一起捕获（防跨工程切换时挂起的保存把旧 doc 写到新工程 id）；③ `seedMainBaseline` 载入后播种基线，首存只写 manifest。
+- **延后**：分片读回仍一次性拼装整工程（超大工程再做画布懒加载 / LRU 卸载）；工程封面缩略图懒生成/缓存；文件夹分组。

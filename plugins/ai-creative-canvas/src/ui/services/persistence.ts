@@ -2,10 +2,15 @@ import type { Board, ProjectDoc } from '../types'
 import { SCHEMA_VERSION } from '../types'
 
 export const PLUGIN_ID = 'ai-creative-canvas'
-const KEY_CURRENT = 'project:current' // 主存 manifest（去重 heavy 字段）
-const KEY_BOARD_PREFIX = 'project:board:' // 主存每画布分片
-const KEY_RECOVERY = 'project:recovery' // 恢复 manifest
-const KEY_REC_BOARD_PREFIX = 'project:rec:board:' // 恢复每画布分片
+// 旧版单工程键（仅用于一次性迁移到多工程命名空间）
+const LEGACY_CURRENT = 'project:current'
+const LEGACY_BOARD_PREFIX = 'project:board:'
+// 多工程：注册表 + 每工程命名空间分片
+const KEY_REGISTRY = 'projects:index'
+const kCurrent = (pid: string) => `proj:${pid}:current`
+const kBoard = (pid: string) => `proj:${pid}:board:`
+const kRecovery = (pid: string) => `proj:${pid}:recovery`
+const kRecBoard = (pid: string) => `proj:${pid}:rec:board:`
 
 function storage() {
   return (window as any).mulby?.storage
@@ -116,13 +121,90 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
   return d
 }
 
-// 上次落盘的画布引用基线（增量判定）。空 = 本会话首存写全量（顺便把迁移/净化结果持久化）。
+// 上次落盘的画布引用基线（增量判定）；按工程区分——切换工程时重置。
+let baselineProjectId: string | null = null
 let mainBaseline = new Map<string, Board>()
 let recBaseline = new Map<string, Board>()
+function ensureBaselineFor(pid: string) {
+  if (baselineProjectId !== pid) {
+    baselineProjectId = pid
+    mainBaseline = new Map()
+    recBaseline = new Map()
+  }
+}
 
-export async function loadProject(): Promise<ProjectDoc | null> {
+// 刚载入某工程后用其画布引用播种主存基线：随后的首次自动保存只重写 manifest（不重复全量写分片）。
+export function seedMainBaseline(pid: string, doc: ProjectDoc) {
+  baselineProjectId = pid
+  mainBaseline = new Map(doc.boards.map((b) => [b.id, b]))
+  recBaseline = new Map()
+}
+
+// ── 工程注册表（轻量元信息）──
+export interface ProjectMeta {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+  cardCount: number
+  cover?: string | null // 首张图片卡的 assetUrl（封面，best-effort）
+}
+export interface Registry {
+  activeId: string | null
+  items: ProjectMeta[]
+}
+
+export function metaOf(doc: ProjectDoc): ProjectMeta {
+  let cardCount = 0
+  let cover: string | null = null
+  for (const b of doc.boards || []) {
+    for (const c of Object.values(b.cards || {})) {
+      cardCount++
+      if (!cover && (c.kind === 'image' || c.kind === 'source') && c.assetUrl) cover = c.assetUrl
+    }
+  }
+  return { id: doc.id, name: doc.name, createdAt: doc.createdAt, updatedAt: doc.updatedAt, cardCount, cover }
+}
+
+export async function loadRegistry(): Promise<Registry | null> {
   try {
-    const r = await readSharded(KEY_CURRENT, KEY_BOARD_PREFIX)
+    const v = await storage()?.get(KEY_REGISTRY, PLUGIN_ID)
+    if (v && typeof v === 'object' && Array.isArray((v as Registry).items)) return v as Registry
+    return null
+  } catch {
+    return null
+  }
+}
+
+export async function saveRegistry(r: Registry): Promise<void> {
+  try {
+    await storage()?.set(KEY_REGISTRY, r, PLUGIN_ID)
+  } catch {
+    /* ignore */
+  }
+}
+
+// 旧版单工程 → 多工程命名空间一次性迁移：无注册表但存在 project:current 时，
+// 把旧工程作为首个/活动工程按命名空间另存（旧键留作孤儿、无害），并建注册表。
+export async function migrateLegacyIfNeeded(): Promise<Registry | null> {
+  const existing = await loadRegistry()
+  if (existing) return existing
+  try {
+    const legacy = await readSharded(LEGACY_CURRENT, LEGACY_BOARD_PREFIX)
+    if (!legacy) return null
+    const doc = migrateProject(legacy.doc)
+    await saveProject(doc.id, doc)
+    const reg: Registry = { activeId: doc.id, items: [metaOf(doc)] }
+    await saveRegistry(reg)
+    return reg
+  } catch {
+    return null
+  }
+}
+
+export async function loadProject(pid: string): Promise<ProjectDoc | null> {
+  try {
+    const r = await readSharded(kCurrent(pid), kBoard(pid))
     if (!r) return null
     return migrateProject(r.doc)
   } catch {
@@ -130,32 +212,54 @@ export async function loadProject(): Promise<ProjectDoc | null> {
   }
 }
 
-export async function saveProject(p: ProjectDoc): Promise<boolean> {
+export async function saveProject(pid: string, p: ProjectDoc): Promise<boolean> {
   try {
-    mainBaseline = await writeSharded(p, KEY_CURRENT, KEY_BOARD_PREFIX, mainBaseline)
+    ensureBaselineFor(pid)
+    mainBaseline = await writeSharded(p, kCurrent(pid), kBoard(pid), mainBaseline)
     return true
   } catch {
     return false
   }
 }
 
-// ── 崩溃恢复快照（独立键；写的是"未提交主存的改动缓冲"，主存成功后清除）──
-export interface RecoverySnap {
-  doc: ProjectDoc
-  savedAt: number
-}
-
-export async function saveRecovery(p: ProjectDoc, savedAt: number): Promise<void> {
+// 删除某工程的全部存储（manifest + 各分片 + 恢复）
+export async function deleteProjectStorage(pid: string): Promise<void> {
   try {
-    recBaseline = await writeSharded(p, KEY_RECOVERY, KEY_REC_BOARD_PREFIX, recBaseline, { _savedAt: savedAt })
+    const s = storage()
+    if (!s) return
+    const del = async (k: string) => {
+      if (s.delete) await s.delete(k, PLUGIN_ID)
+      else await s.set(k, null, PLUGIN_ID)
+    }
+    for (const [key, prefix] of [[kCurrent(pid), kBoard(pid)], [kRecovery(pid), kRecBoard(pid)]] as const) {
+      const m: any = await s.get(key, PLUGIN_ID)
+      if (m && Array.isArray(m.boards)) for (const b of m.boards) await del(prefix + b.id)
+      await del(key)
+    }
+    if (baselineProjectId === pid) baselineProjectId = null
   } catch {
     /* ignore */
   }
 }
 
-export async function loadRecovery(): Promise<RecoverySnap | null> {
+// ── 崩溃恢复快照（每工程独立；写的是"未提交主存的改动缓冲"，主存成功后清除）──
+export interface RecoverySnap {
+  doc: ProjectDoc
+  savedAt: number
+}
+
+export async function saveRecovery(pid: string, p: ProjectDoc, savedAt: number): Promise<void> {
   try {
-    const r = await readSharded(KEY_RECOVERY, KEY_REC_BOARD_PREFIX)
+    ensureBaselineFor(pid)
+    recBaseline = await writeSharded(p, kRecovery(pid), kRecBoard(pid), recBaseline, { _savedAt: savedAt })
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function loadRecovery(pid: string): Promise<RecoverySnap | null> {
+  try {
+    const r = await readSharded(kRecovery(pid), kRecBoard(pid))
     if (!r) return null
     return { doc: migrateProject(r.doc), savedAt: r.savedAt ?? 0 }
   } catch {
@@ -163,13 +267,13 @@ export async function loadRecovery(): Promise<RecoverySnap | null> {
   }
 }
 
-// 仅删 manifest（分片与 recBaseline 保留）：主存成功后据此使「恢复」不再被提供，
+// 仅删 manifest（分片与 recBaseline 保留）：主存成功后使「恢复」不再被提供，
 // 而后续编辑仍按引用增量重写恢复分片，避免每次清空后又全量重写。
-export async function clearRecovery(): Promise<void> {
+export async function clearRecovery(pid: string): Promise<void> {
   try {
     const s = storage()
-    if (s?.delete) await s.delete(KEY_RECOVERY, PLUGIN_ID)
-    else await s?.set(KEY_RECOVERY, null, PLUGIN_ID)
+    if (s?.delete) await s.delete(kRecovery(pid), PLUGIN_ID)
+    else await s?.set(kRecovery(pid), null, PLUGIN_ID)
   } catch {
     /* ignore */
   }

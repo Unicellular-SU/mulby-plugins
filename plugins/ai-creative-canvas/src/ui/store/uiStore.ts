@@ -47,6 +47,8 @@ interface UiState {
   toggleNotifyDone: () => void
   showGallery: boolean
   setShowGallery: (v: boolean) => void
+  showProjectLibrary: boolean
+  setShowProjectLibrary: (v: boolean) => void
   annotTool: 'pen' | 'arrow' | 'rect' | 'text' | null
   setAnnotTool: (t: 'pen' | 'arrow' | 'rect' | 'text' | null) => void
   annotColor: string
@@ -115,6 +117,8 @@ export const useUi = create<UiState>((set) => ({
     }),
   showGallery: false,
   setShowGallery: (showGallery) => set({ showGallery }),
+  showProjectLibrary: false,
+  setShowProjectLibrary: (showProjectLibrary) => set({ showProjectLibrary }),
   annotTool: null,
   setAnnotTool: (annotTool) => set({ annotTool }),
   annotColor: '#ef4444',

@@ -14,55 +14,23 @@ import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { VideoTrimModal } from './components/VideoTrimModal'
 import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
+import { ProjectLibrary } from './components/ProjectLibrary'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
 import { TooltipHost } from './components/TooltipHost'
-import { loadProject, saveProject, loadRecovery, saveRecovery, clearRecovery } from './services/persistence'
-import { confirmDialog } from './store/dialogStore'
+import { saveProject, saveRecovery, clearRecovery } from './services/persistence'
+import { useProject, isLoadedRef } from './store/projectStore'
 import { importAttachments } from './services/importMedia'
 import { screenToWorld } from './canvas/viewport'
 import { debounce } from './util'
 import type { ProjectDoc } from './types'
 
 export default function App() {
-  // 加载工程 + 主题
+  // 加载工程（多工程注册表 + 旧单工程自动迁移 + 恢复快照询问）+ 主题
   useEffect(() => {
-    let disposed = false
     const mulby = (window as any).mulby
 
-    const sanitize = (doc: ProjectDoc) => {
-      // 旧工程兼容：补 parentId 默认 null；重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）
-      for (const b of doc.boards)
-        for (const c of Object.values(b.cards)) {
-          if ((c as any).parentId === undefined) (c as any).parentId = null
-          if (c.status === 'running' || c.status === 'queued') {
-            c.status = 'idle'
-            c.progress = 0
-          }
-        }
-    }
-    ;(async () => {
-      const [p, rec] = await Promise.all([loadProject(), loadRecovery()])
-      if (disposed) return
-      let doc = p
-      // 存在恢复快照 = 上次有改动未提交主存（异常关闭）→ 询问是否恢复
-      if (rec?.doc) {
-        const useRec = await confirmDialog({
-          title: '恢复未保存的改动',
-          message: '检测到上次可能未正常保存的编辑，是否恢复到最近状态？',
-          confirmLabel: '恢复',
-          cancelLabel: '用已保存版本'
-        })
-        if (disposed) return
-        if (useRec) doc = rec.doc
-        await clearRecovery()
-      }
-      if (doc) {
-        sanitize(doc)
-        useGraph.getState().replaceProject(doc)
-      }
-    })()
-
+    void useProject.getState().init()
     void useProviders.getState().load()
 
     const applyTheme = (t: 'light' | 'dark') => {
@@ -91,7 +59,6 @@ export default function App() {
     })
 
     return () => {
-      disposed = true
       try { off?.() } catch { /* ignore */ }
       try { offInit?.() } catch { /* ignore */ }
     }
@@ -99,27 +66,36 @@ export default function App() {
 
   // 自动保存（防抖）+ 崩溃恢复快照（独立键，更短防抖；主存成功后清除）
   useEffect(() => {
-    const saveMain = debounce((p: ProjectDoc) => {
+    // 注意：id 必须在「调度时」随 p 一起捕获——若在「触发时」才读 activeId，
+    // 跨工程切换/删除时挂起的保存会把旧 doc 写到新工程 id 上（串工程）。
+    const saveMain = debounce((id: string, p: ProjectDoc) => {
       useUi.getState().setSaving(true)
-      saveProject(p)
+      saveProject(id, p)
         .then((ok) => {
-          if (ok) void clearRecovery()
+          if (ok) {
+            if (useProject.getState().activeId === id) useProject.getState().syncActiveMeta(p)
+            void clearRecovery(id)
+          }
         })
         .finally(() => useUi.getState().setSaving(false))
     }, 800)
-    const saveRec = debounce((p: ProjectDoc) => void saveRecovery(p, Date.now()), 400)
+    const saveRec = debounce((id: string, p: ProjectDoc) => void saveRecovery(id, p, Date.now()), 400)
     let last = useGraph.getState().project
     const unsub = useGraph.subscribe((state) => {
       if (state.project !== last) {
         last = state.project
-        saveRec(state.project)
-        saveMain(state.project)
+        if (isLoadedRef(state.project)) return // 载入/切换工程引发的变更，非用户编辑 → 不保存
+        const id = useProject.getState().activeId
+        if (!id) return
+        saveRec(id, state.project)
+        saveMain(id, state.project)
       }
     })
     // 关窗/隐藏前尽力抢救一次恢复快照
     const flush = () => {
       try {
-        void saveRecovery(useGraph.getState().project, Date.now())
+        const id = useProject.getState().activeId
+        if (id) void saveRecovery(id, useGraph.getState().project, Date.now())
       } catch {
         /* ignore */
       }
@@ -148,6 +124,7 @@ export default function App() {
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />
       <TimelineModal />
+      <ProjectLibrary />
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />
