@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass } from 'lucide-react'
+import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge } from 'lucide-react'
 import type { Card } from '../types'
 import { runImageTool, runGridSlice, runVideoTool } from '../services/mediaOps'
+import { repairEquirectSeam } from '../services/mediaPano'
 import { generateCard, canGenerate } from '../services/generate'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -52,6 +53,7 @@ export function MediaToolbox({ card }: { card: Card }) {
         <>
           {canGenerate(card.kind) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
           {(card.meta as any)?.pano && <IconBtn icon={Compass} title="360 环视" onClick={() => useUi.getState().setPanoCardId(card.id)} />}
+          {(card.meta as any)?.pano && <IconBtn icon={GitMerge} title="修复接缝（偏移+重绘）" onClick={() => void repairEquirectSeam(card.id)} />}
           <IconBtn icon={Crop} title="裁剪" onClick={() => setCropping(true)} />
           <IconBtn icon={Brush} title="局部编辑（重绘/擦除）" onClick={() => useUi.getState().setMaskCardId(card.id)} />
           <IconBtn icon={Maximize2} title="扩图" onClick={() => runImageTool(card.id, 'outpaint')} />
