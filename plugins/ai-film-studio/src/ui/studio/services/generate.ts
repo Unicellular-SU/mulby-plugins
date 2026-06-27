@@ -34,32 +34,69 @@ const STD_ASPECTS: Array<[string, number]> = [
   ['21:9', 21 / 9],
 ]
 
-/**
- * 读出图片真实像素比，吸附到最接近的标准画幅（如 16:9 / 9:16）。
- * 让视频画幅跟随关键帧首帧——不硬编码，永不与画面错向（供应商注册表会再 snap 到该模型支持的画幅）。
- */
-function imageAspect(src: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    img.onload = () => {
-      const w = img.naturalWidth
-      const h = img.naturalHeight
-      if (!w || !h) return resolve(undefined)
-      const r = w / h
-      let best = STD_ASPECTS[0][0]
-      let bd = Infinity
-      for (const [name, ratio] of STD_ASPECTS) {
-        const diff = Math.abs(Math.log(r / ratio))
-        if (diff < bd) {
-          bd = diff
-          best = name
-        }
-      }
-      resolve(best)
+/** 比例吸附到最接近的标准画幅（如 16:9 / 9:16）；供应商注册表会再 snap 到该模型支持的画幅 */
+function aspectFromSize(w: number, h: number): string {
+  const r = w / h
+  let best = STD_ASPECTS[0][0]
+  let bd = Infinity
+  for (const [name, ratio] of STD_ASPECTS) {
+    const diff = Math.abs(Math.log(r / ratio))
+    if (diff < bd) {
+      bd = diff
+      best = name
     }
-    img.onerror = () => resolve(undefined)
-    img.src = src
-  })
+  }
+  return best
+}
+
+/**
+ * 从 base64 图片头部确定性解码宽高（PNG/JPEG/GIF），不经过 DOM Image——规避渲染层 CSP 拦 data: 图导致读不到尺寸。
+ * 用来让视频画幅跟随关键帧首帧的真实比例（不硬编码）。
+ */
+function decodeImageSize(base64: string): { w: number; h: number } | null {
+  try {
+    const bin = atob(base64)
+    const n = bin.length
+    const at = (i: number) => bin.charCodeAt(i) & 0xff
+    // PNG：签名 89 50 4E 47 + IHDR，宽@16 高@20（大端）
+    if (n > 24 && at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4e && at(3) === 0x47) {
+      const w = (at(16) << 24) | (at(17) << 16) | (at(18) << 8) | at(19)
+      const h = (at(20) << 24) | (at(21) << 16) | (at(22) << 8) | at(23)
+      if (w > 0 && h > 0) return { w, h }
+    }
+    // GIF：宽/高小端 @6/@8
+    if (n > 10 && at(0) === 0x47 && at(1) === 0x49 && at(2) === 0x46) {
+      const w = at(6) | (at(7) << 8)
+      const h = at(8) | (at(9) << 8)
+      if (w > 0 && h > 0) return { w, h }
+    }
+    // JPEG：FF D8 后扫 SOF 标记，高@+5 宽@+7（大端）
+    if (n > 4 && at(0) === 0xff && at(1) === 0xd8) {
+      let i = 2
+      while (i + 9 < n) {
+        if (at(i) !== 0xff) {
+          i++
+          continue
+        }
+        const marker = at(i + 1)
+        if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+          i += 2
+          continue
+        }
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          const h = (at(i + 5) << 8) | at(i + 6)
+          const w = (at(i + 7) << 8) | at(i + 8)
+          return w > 0 && h > 0 ? { w, h } : null
+        }
+        const len = (at(i + 2) << 8) | at(i + 3)
+        if (len < 2) break
+        i += 2 + len
+      }
+    }
+  } catch {
+    // 忽略，回退到项目画幅
+  }
+  return null
 }
 
 // 仅出图类资产有画风角色映射；audio(音色)/clip(素材) 不出图（见 §2.1.1）
@@ -244,8 +281,11 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   const motion = base + speechCue
   // 时长：段时长(durationSec)优先于分镜 duration；钳到视频模型通用区间 [4,15]s；seed 整片共用提一致性
   const duration = Math.min(Math.max(Number(durationSec ?? sb.duration) || 5, 4), 15)
-  // 画幅：跟随关键帧首帧的真实比例（不硬编码 16:9）；测不出再退项目画幅。否则不传画幅时 grok 默认竖屏 9:16
-  const aspectRatio = (await imageAspect(imageUrl)) || meta.videoRatio || undefined
+  // 画幅：从关键帧/首帧真实尺寸确定性推断（字节解码，绕开 Image/CSP）；测不出退项目画幅，再不行 16:9（与默认横图一致）
+  const ffB64 = !a && firstFrameUrl?.startsWith('data:') ? firstFrameUrl.split(',')[1] : undefined
+  const sz = a ? decodeImageSize(a.base64) : ffB64 ? decodeImageSize(ffB64) : null
+  const aspectRatio = sz ? aspectFromSize(sz.w, sz.h) : meta.videoRatio || '16:9'
+  console.info('[ai-film-studio] 片段画幅 →', aspectRatio, sz ? `(${sz.w}×${sz.h})` : '(图未解出，用项目画幅/16:9)')
   const { url } = await runVideo({
     cfg: provider,
     apiKey,

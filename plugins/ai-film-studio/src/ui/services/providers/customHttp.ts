@@ -141,6 +141,9 @@ export const customHttpAdapter: VideoProviderAdapter = {
       if (req.audioMode === 'native' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = true
       else if (req.audioMode === 'external' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = false
     }
+    // 诊断：确认画幅是否真进了请求体（aspect_ratio/size 缺失 → 供应商默认竖屏）。bodyTemplate 非空时走的是模板渲染路径
+    const b = body as Record<string, unknown>
+    console.info('[ai-film-studio] 视频请求', { model: cfg.model, aspect_ratio: b.aspect_ratio, size: b.size, hasBodyTemplate: !!cfg.bodyTemplate?.trim() })
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })
     const taskId = cfg.taskIdPath
       ? firstString(res, [cfg.taskIdPath])
