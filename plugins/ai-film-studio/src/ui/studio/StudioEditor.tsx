@@ -230,6 +230,15 @@ function StudioModelBar() {
               </option>
             ))}
           </select>
+          <label title="「全部生成」等批量同时跑的数量（资产/润色/段提示词并发；含承接的关键帧/视频仍按需串行）">批量并发数</label>
+          <input
+            className="afs-field__input"
+            type="number"
+            min={1}
+            max={8}
+            value={meta?.concurrency ?? 3}
+            onChange={(e) => updateMeta({ concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 3)) })}
+          />
           {(models.length === 0 || imageModels.length === 0) && (
             <div className="afs-studio__hint">没有可选模型？先去「设置」配置宿主文本/图像模型供应商。</div>
           )}
