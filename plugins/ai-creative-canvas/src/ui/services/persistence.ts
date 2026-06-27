@@ -1,12 +1,70 @@
-import type { ProjectDoc } from '../types'
+import type { Board, ProjectDoc } from '../types'
 import { SCHEMA_VERSION } from '../types'
 
 export const PLUGIN_ID = 'ai-creative-canvas'
-const KEY_CURRENT = 'project:current'
-const KEY_RECOVERY = 'project:recovery'
+const KEY_CURRENT = 'project:current' // 主存 manifest（去重 heavy 字段）
+const KEY_BOARD_PREFIX = 'project:board:' // 主存每画布分片
+const KEY_RECOVERY = 'project:recovery' // 恢复 manifest
+const KEY_REC_BOARD_PREFIX = 'project:rec:board:' // 恢复每画布分片
 
 function storage() {
   return (window as any).mulby?.storage
+}
+
+// ── 分片持久化：manifest(去重 cards/edges/annotations) + 每画布一个分片 ──
+// 增量：仅重写「引用变化」的画布分片（依赖 store 不可变更新——未改画布保持同引用）。
+// 顺序：先写分片、后写 manifest——manifest 只指向已落盘的分片，崩溃时不至于指向半截数据。
+type HeavyShard = { cards: Board['cards']; edges: Board['edges']; annotations: Board['annotations'] }
+function lightBoard(b: Board): Board {
+  return { ...b, cards: {}, edges: {}, annotations: [] }
+}
+
+async function writeSharded(
+  p: ProjectDoc,
+  manifestKey: string,
+  prefix: string,
+  baseline: Map<string, Board>,
+  extra?: Record<string, unknown>
+): Promise<Map<string, Board>> {
+  const s = storage()
+  if (!s) return baseline
+  const next = new Map<string, Board>()
+  // 写改动画布的分片
+  for (const b of p.boards) {
+    next.set(b.id, b)
+    if (baseline.get(b.id) !== b) {
+      const shard: HeavyShard = { cards: b.cards, edges: b.edges, annotations: b.annotations ?? [] }
+      await s.set(prefix + b.id, shard, PLUGIN_ID)
+    }
+  }
+  // 删除已移除画布的孤儿分片
+  for (const id of baseline.keys()) {
+    if (!next.has(id)) {
+      if (s.delete) await s.delete(prefix + id, PLUGIN_ID)
+      else await s.set(prefix + id, null, PLUGIN_ID)
+    }
+  }
+  // 最后写 manifest（去重 heavy 字段 + 标记 _sharded）
+  const manifest = { ...p, boards: p.boards.map(lightBoard), _sharded: true, ...extra }
+  await s.set(manifestKey, manifest, PLUGIN_ID)
+  return next
+}
+
+// 读回：拼装 manifest + 各分片。无 _sharded 视为旧版全量 blob，原样返回（下次保存自动转分片）。
+async function readSharded(manifestKey: string, prefix: string): Promise<{ doc: ProjectDoc; savedAt?: number } | null> {
+  const s = storage()
+  if (!s) return null
+  const m: any = await s.get(manifestKey, PLUGIN_ID)
+  if (!m || typeof m !== 'object' || !Array.isArray(m.boards)) return null
+  if (!m._sharded) return { doc: m as ProjectDoc } // 旧版全量
+  const { _sharded, _savedAt, ...rest } = m
+  void _sharded
+  const boards: Board[] = []
+  for (const b of m.boards as Board[]) {
+    const shard: any = await s.get(prefix + b.id, PLUGIN_ID)
+    boards.push({ ...b, cards: shard?.cards ?? {}, edges: shard?.edges ?? {}, annotations: shard?.annotations ?? [] })
+  }
+  return { doc: { ...(rest as ProjectDoc), boards }, savedAt: typeof _savedAt === 'number' ? _savedAt : undefined }
 }
 
 const VALID_KINDS = new Set(['image', 'video', 'text', 'audio', 'source', 'group', 'note'])
@@ -58,11 +116,15 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
   return d
 }
 
+// 上次落盘的画布引用基线（增量判定）。空 = 本会话首存写全量（顺便把迁移/净化结果持久化）。
+let mainBaseline = new Map<string, Board>()
+let recBaseline = new Map<string, Board>()
+
 export async function loadProject(): Promise<ProjectDoc | null> {
   try {
-    const v = await storage()?.get(KEY_CURRENT, PLUGIN_ID)
-    if (v && typeof v === 'object' && Array.isArray((v as ProjectDoc).boards)) return migrateProject(v as ProjectDoc)
-    return null
+    const r = await readSharded(KEY_CURRENT, KEY_BOARD_PREFIX)
+    if (!r) return null
+    return migrateProject(r.doc)
   } catch {
     return null
   }
@@ -70,7 +132,7 @@ export async function loadProject(): Promise<ProjectDoc | null> {
 
 export async function saveProject(p: ProjectDoc): Promise<boolean> {
   try {
-    await storage()?.set(KEY_CURRENT, p, PLUGIN_ID)
+    mainBaseline = await writeSharded(p, KEY_CURRENT, KEY_BOARD_PREFIX, mainBaseline)
     return true
   } catch {
     return false
@@ -85,7 +147,7 @@ export interface RecoverySnap {
 
 export async function saveRecovery(p: ProjectDoc, savedAt: number): Promise<void> {
   try {
-    await storage()?.set(KEY_RECOVERY, { doc: p, savedAt }, PLUGIN_ID)
+    recBaseline = await writeSharded(p, KEY_RECOVERY, KEY_REC_BOARD_PREFIX, recBaseline, { _savedAt: savedAt })
   } catch {
     /* ignore */
   }
@@ -93,18 +155,16 @@ export async function saveRecovery(p: ProjectDoc, savedAt: number): Promise<void
 
 export async function loadRecovery(): Promise<RecoverySnap | null> {
   try {
-    const v = await storage()?.get(KEY_RECOVERY, PLUGIN_ID)
-    if (v && typeof v === 'object' && (v as RecoverySnap).doc && Array.isArray((v as RecoverySnap).doc.boards)) return migrateRecovery(v as RecoverySnap)
-    return null
+    const r = await readSharded(KEY_RECOVERY, KEY_REC_BOARD_PREFIX)
+    if (!r) return null
+    return { doc: migrateProject(r.doc), savedAt: r.savedAt ?? 0 }
   } catch {
     return null
   }
 }
 
-function migrateRecovery(r: RecoverySnap): RecoverySnap {
-  return { ...r, doc: migrateProject(r.doc) }
-}
-
+// 仅删 manifest（分片与 recBaseline 保留）：主存成功后据此使「恢复」不再被提供，
+// 而后续编辑仍按引用增量重写恢复分片，避免每次清空后又全量重写。
 export async function clearRecovery(): Promise<void> {
   try {
     const s = storage()
