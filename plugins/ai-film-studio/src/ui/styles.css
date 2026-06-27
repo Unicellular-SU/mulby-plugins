@@ -3628,8 +3628,8 @@ body {
 .afs-studio__move:disabled { opacity: .3; cursor: default; }
 
 /* 分镜卡片重设计：左大图(整行垂直居中) + 右字段(详情默认展开) + 底部生成栏 */
-.afs-studio__sbcard { border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); padding: 12px; transition: border-color .15s; }
-.afs-studio__sbcard:hover { border-color: color-mix(in srgb, var(--afs-accent) 40%, var(--afs-border)); }
+.afs-studio__sbcard { border: 1px solid var(--afs-border); border-radius: 12px; background: var(--afs-panel); padding: 14px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); transition: border-color .15s, box-shadow .15s; }
+.afs-studio__sbcard:hover { border-color: color-mix(in srgb, var(--afs-accent) 45%, var(--afs-border)); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18); }
 .afs-studio__sbmain { display: flex; gap: 14px; align-items: center; }
 .afs-studio__sbcol { flex: 0 0 200px; display: flex; flex-direction: column; gap: 8px; }
 .afs-studio__sbcard .afs-studio__sbthumb { position: relative; width: 100%; aspect-ratio: 16 / 9; height: auto; flex: none; border-radius: 8px; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -3648,6 +3648,29 @@ body {
 .afs-studio__dlgspeaker { flex: 0 0 92px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 5px; font-size: 12px; }
 .afs-studio__sbbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--afs-border); }
 .afs-studio__dlgadd { align-self: flex-start; }
+.afs-studio__lblhint { font-size: 10px; font-weight: 400; opacity: .55; }
+/* 出场资产头像 chip */
+.afs-studio__castchip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 16px; border: 1px solid var(--afs-border); background: var(--afs-panel-2); color: var(--afs-text-dim); cursor: pointer; font-size: 12px; line-height: 1; transition: all .12s; }
+.afs-studio__castchip:hover { color: var(--afs-text); }
+.afs-studio__castchip.is-on { border-color: var(--afs-accent); color: var(--afs-text); background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2)); }
+.afs-studio__castav { width: 22px; height: 22px; border-radius: 50%; overflow: hidden; flex-shrink: 0; background: var(--afs-panel); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--afs-muted); }
+.afs-studio__castav img { width: 100%; height: 100%; object-fit: cover; }
+.afs-studio__castnm { white-space: nowrap; }
+/* 对白行：说话人头像药丸单选 + 台词/情绪 */
+.afs-studio__dlg { border: 1px solid var(--afs-border); border-radius: 8px; padding: 7px 8px; background: var(--afs-panel-2); display: flex; flex-direction: column; gap: 6px; }
+.afs-studio__dlgtop { display: flex; align-items: center; gap: 8px; }
+.afs-studio__dlgspk { display: flex; flex-wrap: wrap; gap: 5px; flex: 1; min-width: 0; }
+.afs-studio__spk { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 2px; border-radius: 14px; border: 1px solid var(--afs-border); background: var(--afs-panel); color: var(--afs-text-dim); cursor: pointer; font-size: 12px; line-height: 1; transition: all .12s; }
+.afs-studio__spk:hover { color: var(--afs-text); }
+.afs-studio__spk.is-on { border-color: var(--afs-accent); color: var(--afs-text); background: color-mix(in srgb, var(--afs-accent) 16%, var(--afs-panel)); }
+.afs-studio__spk > .afs-studio__spknm:only-child { padding: 0 4px; }
+.afs-studio__spknm { white-space: nowrap; }
+.afs-studio__dlgdel { border: none; background: transparent; color: var(--afs-muted); cursor: pointer; flex-shrink: 0; display: inline-flex; }
+.afs-studio__dlgdel:hover { color: var(--afs-text); }
+.afs-studio__dlgbody { display: flex; gap: 6px; }
+.afs-studio__dlglinein { flex: 1; min-width: 0; }
+.afs-studio__dlglinein, .afs-studio__dlgemo { background: var(--afs-panel); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 4px 8px; font-size: 13px; }
+.afs-studio__dlgemo { flex: 0 0 72px; }
 
 /* 统一项目主页 · 类型徽标（画布/工作流）+ 工作台空状态操作 */
 .afs-pcard__kind { position: absolute; top: 6px; left: 6px; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 6px; color: #fff; font-weight: 600; letter-spacing: .03em; }

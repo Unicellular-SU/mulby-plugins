@@ -863,8 +863,8 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const clipId = track ? track.selectClipId || track.clipIds[track.clipIds.length - 1] : undefined
   const clip = clipId ? doc.clips.find((c) => c.id === clipId) : undefined
   const candCount = track?.clipIds.length ?? 0
-  const roleAssets = doc.assets.filter((a) => !a.parentAssetId && a.type !== 'audio')
-  const speakerOpts = [...roleAssets.map((a) => a.name), '旁白', '画外音']
+  const roleAssets = doc.assets.filter((a) => !a.parentAssetId && a.type !== 'audio') // 出场资产候选：角色/场景/物品
+  const charAssets = doc.assets.filter((a) => a.type === 'role' && !a.parentAssetId) // 说话人候选：仅角色（+旁白）
   const dialogues = sb.dialogues ?? []
   // 统一改字段：保留 videoDesc 必填，合并其余 Partial
   const patch = (p: Partial<Storyboard>) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, ...p })
@@ -951,7 +951,9 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
             placeholder="主体 + 动作 + 环境 + 情绪 + 光影…"
             onChange={(e) => upsertStoryboard({ id: sb.id, videoDesc: e.target.value })}
           />
-          <label className="afs-studio__sbfieldlbl">关键帧提示词（英文，可空；由「精修」/Agent 生成）</label>
+          <label className="afs-studio__sbfieldlbl" title="英文关键帧提示词，可空；点「精修」或让 AI 制片生成">
+            关键帧提示词 <span className="afs-studio__lblhint">英文 · 可空</span>
+          </label>
           <textarea
             className="afs-field__input afs-studio__cardprompt"
             rows={2}
@@ -961,32 +963,21 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
           />
           <label className="afs-studio__sbfieldlbl">出场资产</label>
           <div className="afs-studio__castchips">
-            {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产</span>}
+            {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产（去「资产」新增）</span>}
             {roleAssets.map((a) => (
-              <button key={a.id} className={`afs-studio__chipbtn${sb.associateAssetIds.includes(a.id) ? ' is-on' : ''}`} onClick={() => toggleCast(a.id)}>
-                {a.name}
-              </button>
+              <CastChip key={a.id} asset={a} on={sb.associateAssetIds.includes(a.id)} onToggle={() => toggleCast(a.id)} />
             ))}
           </div>
           <label className="afs-studio__sbfieldlbl">对白</label>
           {dialogues.length === 0 && <span className="afs-studio__hint">暂无对白</span>}
           {dialogues.map((d, i) => (
-            <div key={i} className="afs-studio__dlgrow">
-              <select className="afs-studio__dlgspeaker" value={d.character} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, character: e.target.value } : x)))}>
-                <option value="">角色…</option>
-                {speakerOpts.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-                {d.character && !speakerOpts.includes(d.character) && <option value={d.character}>{d.character}</option>}
-              </select>
-              <input placeholder="台词" value={d.line} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, line: e.target.value } : x)))} />
-              <input placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => setDlg(dialogues.map((x, j) => (j === i ? { ...x, emotion: e.target.value } : x)))} />
-              <button title="删除" onClick={() => setDlg(dialogues.filter((_, j) => j !== i))}>
-                <X size={12} />
-              </button>
-            </div>
+            <DialogueLine
+              key={i}
+              d={d}
+              charAssets={charAssets}
+              onChange={(nd) => setDlg(dialogues.map((x, j) => (j === i ? nd : x)))}
+              onRemove={() => setDlg(dialogues.filter((_, j) => j !== i))}
+            />
           ))}
           <button className="afs-btn afs-btn--sm afs-studio__dlgadd" onClick={() => setDlg([...dialogues, { character: '', line: '' }])}>
             <Plus size={12} /> 加台词
@@ -1018,6 +1009,56 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
         )}
       </div>
       {showFlow && <ImageFlowEditor sb={sb} onClose={() => setShowFlow(false)} />}
+    </div>
+  )
+}
+
+function CastChip({ asset, on, onToggle }: { asset: Asset; on: boolean; onToggle: () => void }) {
+  const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  const TYPE_TXT: Record<string, string> = { role: '角', scene: '景', prop: '物' }
+  return (
+    <button className={`afs-studio__castchip${on ? ' is-on' : ''}`} onClick={onToggle} title={`${asset.name}（${on ? '出场，点击移除' : '点击加入出场'}）`}>
+      <span className="afs-studio__castav">{url ? <img src={url} alt="" /> : <span>{TYPE_TXT[asset.type] ?? asset.name.slice(0, 1)}</span>}</span>
+      <span className="afs-studio__castnm">{asset.name}</span>
+    </button>
+  )
+}
+
+type Dlg = { character: string; line: string; emotion?: string }
+
+function SpeakerAv({ asset }: { asset: Asset }) {
+  const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
+  return <span className="afs-studio__castav">{url ? <img src={url} alt="" /> : <span>{asset.name.slice(0, 1)}</span>}</span>
+}
+
+/** 对白行：说话人 = 角色头像药丸 + 旁白（单选，非下拉）；下面是台词 + 情绪。 */
+function DialogueLine({ d, charAssets, onChange, onRemove }: { d: Dlg; charAssets: Asset[]; onChange: (d: Dlg) => void; onRemove: () => void }) {
+  const opts: { name: string; asset?: Asset }[] = [...charAssets.map((a) => ({ name: a.name, asset: a })), { name: '旁白' }]
+  const extra = d.character && !opts.some((o) => o.name === d.character) ? d.character : '' // 保留已有的非列表说话人（如 Agent 写入/已删角色）
+  return (
+    <div className="afs-studio__dlg">
+      <div className="afs-studio__dlgtop">
+        <div className="afs-studio__dlgspk">
+          {opts.map((o) => (
+            <button key={o.name} className={`afs-studio__spk${d.character === o.name ? ' is-on' : ''}`} title={o.name} onClick={() => onChange({ ...d, character: o.name })}>
+              {o.asset && <SpeakerAv asset={o.asset} />}
+              <span className="afs-studio__spknm">{o.name}</span>
+            </button>
+          ))}
+          {extra && (
+            <button className="afs-studio__spk is-on" title={extra} onClick={() => onChange({ ...d, character: extra })}>
+              <span className="afs-studio__spknm">{extra}</span>
+            </button>
+          )}
+        </div>
+        <button className="afs-studio__dlgdel" title="删除台词" onClick={onRemove}>
+          <X size={13} />
+        </button>
+      </div>
+      <div className="afs-studio__dlgbody">
+        <input className="afs-studio__dlglinein" placeholder="台词…" value={d.line} onChange={(e) => onChange({ ...d, line: e.target.value })} />
+        <input className="afs-studio__dlgemo" placeholder="情绪" value={d.emotion ?? ''} onChange={(e) => onChange({ ...d, emotion: e.target.value })} />
+      </div>
     </div>
   )
 }
