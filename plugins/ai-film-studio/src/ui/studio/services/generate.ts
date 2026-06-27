@@ -23,6 +23,45 @@ function sizeForRatio(ratio: string): string {
   return '1344x768'
 }
 
+const STD_ASPECTS: Array<[string, number]> = [
+  ['16:9', 16 / 9],
+  ['9:16', 9 / 16],
+  ['1:1', 1],
+  ['4:3', 4 / 3],
+  ['3:4', 3 / 4],
+  ['3:2', 3 / 2],
+  ['2:3', 2 / 3],
+  ['21:9', 21 / 9],
+]
+
+/**
+ * 读出图片真实像素比，吸附到最接近的标准画幅（如 16:9 / 9:16）。
+ * 让视频画幅跟随关键帧首帧——不硬编码，永不与画面错向（供应商注册表会再 snap 到该模型支持的画幅）。
+ */
+function imageAspect(src: string): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const w = img.naturalWidth
+      const h = img.naturalHeight
+      if (!w || !h) return resolve(undefined)
+      const r = w / h
+      let best = STD_ASPECTS[0][0]
+      let bd = Infinity
+      for (const [name, ratio] of STD_ASPECTS) {
+        const diff = Math.abs(Math.log(r / ratio))
+        if (diff < bd) {
+          bd = diff
+          best = name
+        }
+      }
+      resolve(best)
+    }
+    img.onerror = () => resolve(undefined)
+    img.src = src
+  })
+}
+
 // 仅出图类资产有画风角色映射；audio(音色)/clip(素材) 不出图（见 §2.1.1）
 const ASSET_ROLE: Partial<Record<Asset['type'], StyleRole>> = { role: 'character', scene: 'scene', prop: 'prop' }
 
@@ -205,11 +244,12 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   const motion = base + speechCue
   // 时长：段时长(durationSec)优先于分镜 duration；钳到视频模型通用区间 [4,15]s；seed 整片共用提一致性
   const duration = Math.min(Math.max(Number(durationSec ?? sb.duration) || 5, 4), 15)
+  // 画幅：跟随关键帧首帧的真实比例（不硬编码 16:9）；测不出再退项目画幅。否则不传画幅时 grok 默认竖屏 9:16
+  const aspectRatio = (await imageAspect(imageUrl)) || meta.videoRatio || undefined
   const { url } = await runVideo({
     cfg: provider,
     apiKey,
-    // aspectRatio：跟随项目画幅，缺省兜底 16:9——否则不传画幅，grok 等供应商默认出竖屏 9:16
-    req: { prompt: motion, imageUrl, duration, aspectRatio: meta.videoRatio || '16:9', seed: projectSeed(meta.id) },
+    req: { prompt: motion, imageUrl, duration, aspectRatio, seed: projectSeed(meta.id) },
     onProgress: (p) => onProgress?.(p.status),
   })
   let localPath: string | undefined
