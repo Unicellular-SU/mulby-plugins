@@ -271,6 +271,11 @@ export async function progressiveEquirect(cardId: string): Promise<void> {
     `${scene}\n\nA normal rectilinear perspective photo (NOT equirectangular, no fisheye), 90° field of view, ${where}. Part of one continuous 360° environment, consistent style/lighting/weather.`
   const fillPrompt =
     `${scene}\n\n无缝补全画面中透明的区域，严格延续周边已有内容的结构、纹理、光照与地平线，使衔接处完全连续、看不出拼接；其余非透明区域保持不变。Seamlessly outpaint only the transparent areas to continue this 360° panorama; match the existing surroundings; no visible seam.`
+  // 天/地是「语义转换」而非「延续墙面」：必须明确告知抬头看顶/低头看地，并禁止画家具立面
+  const polePrompt = (up: boolean) =>
+    up
+      ? `${scene}\n\n镜头正抬头垂直看向【正上方】。请只在透明区域绘制与本场景一致的【天花板/顶部】——室内则是天花板（如中式吊顶、藻井、横梁、吊灯等），室外则是天空；要与四周墙体/景物的【顶沿】自然衔接成一个俯视的圆顶。【不要画沙发、桌椅、家具立面或墙面正立面】；其余非透明区域保持不变。You are looking straight UP at the ceiling (interior) or sky (exterior) directly overhead; fill only the transparent center with a plausible ceiling/sky that meets the tops of the surrounding walls; NO furniture, NO wall fronts.`
+      : `${scene}\n\n镜头正低头垂直看向【正下方】。请只在透明区域绘制与本场景一致的【地面/地板】——室内则是地板/地砖/地毯，室外则是地面；要与四周墙体/景物的【底沿】自然衔接成一个仰视的圆形地面。【不要画沙发、桌椅、家具立面或天花板】；其余非透明区域保持不变。You are looking straight DOWN at the floor/ground directly below; fill only the transparent center with a plausible floor/ground that meets the bottoms of the surrounding walls; NO furniture fronts, NO ceiling.`
 
   const id = useGraph.getState().addCard(
     'image',
@@ -296,11 +301,12 @@ export async function progressiveEquirect(cardId: string): Promise<void> {
       eq = perspToEqPaste(eq, filled, lon, 0, FOV)
       useGraph.getState().updateCard(id, { progress: 0.12 + ((i + 1) / ring.length) * 0.6 })
     }
-    // 3) 补天顶/地面（中心透明、边缘已从水平带填好）
+    // 3) 补天顶/地面：正天顶/正地(±90，居中)，用方向专属强约束提示（语义转换为天花板/地板）
     for (let j = 0; j < 2; j++) {
-      const lat = j === 0 ? 88 : -88
+      const up = j === 0
+      const lat = up ? 90 : -90
       const view = eqToPersp(eq, 0, lat, FOV, S)
-      const filled = await outpaintFace(model, view, fillPrompt, S)
+      const filled = await outpaintFace(model, view, polePrompt(up), S)
       eq = perspToEqPaste(eq, filled, 0, lat, FOV)
       useGraph.getState().updateCard(id, { progress: 0.72 + (j + 1) * 0.1 })
     }
