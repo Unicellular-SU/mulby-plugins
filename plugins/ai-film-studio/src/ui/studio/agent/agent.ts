@@ -16,7 +16,15 @@ export interface AgentPlan {
   reply: string
   script?: { name?: string; content: string }
   assets?: { type: 'role' | 'scene' | 'prop'; name: string; desc?: string; prompt?: string }[]
-  storyboards?: { videoDesc: string; prompt?: string; duration?: number; cast?: string[]; chainFromPrev?: boolean; replaceIndex?: number }[]
+  storyboards?: {
+    videoDesc: string
+    prompt?: string
+    duration?: number
+    cast?: string[]
+    dialogues?: { character: string; line: string; emotion?: string }[]
+    chainFromPrev?: boolean
+    replaceIndex?: number
+  }[]
   /** 用户明确要求「出图/生成/成片」时为 true：应用方案后自动一键成片 */
   autoGenerate?: boolean
 }
@@ -27,12 +35,13 @@ const CONTRACT = `
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
   "assets": [ { "type": "role|scene|prop", "name": "名称", "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
-  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"], "chainFromPrev": false, "replaceIndex": 0 } ],
+  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
   "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
 - assets 的 name 要与 storyboards 的 cast 名字一致，便于关联。
+- **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
 - 分镜按叙事顺序排列；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
 - 全程使用项目设定的画风与对白语言。`
@@ -141,8 +150,9 @@ const ASSETS_SKILL =
   '已存在的资产（见上下文）不要重复。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","desc":"","prompt":""}]}'
 const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
-  '出场资产名 cast（与资产名一致）。紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
-  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"chainFromPrev":false}]}'
+  '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
+  '紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
+  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
 
 function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGenerate: boolean } {
   const fallback = { reply: '已处理。', tasks: ['script', 'assets', 'storyboard'] as StageTask[], autoGenerate: false }

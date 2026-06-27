@@ -696,6 +696,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         for (const sb of plan.storyboards ?? []) {
           if (!sb?.videoDesc) continue
           const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
+          // 对白：规范化 LLM 输出，剔除空台词；character 存名字（与角色/旁白名匹配 UI 药丸）
+          const dlgs = Array.isArray(sb.dialogues)
+            ? sb.dialogues
+                .filter((x) => x && typeof x.line === 'string' && x.line.trim())
+                .map((x) => ({ character: String(x.character ?? ''), line: String(x.line).trim(), emotion: x.emotion ? String(x.emotion) : undefined }))
+            : undefined
           const ri = typeof sb.replaceIndex === 'number' && sb.replaceIndex > 0 ? sb.replaceIndex - 1 : -1
           const target = ri >= 0 ? d.storyboards.find((s) => s.index === ri) : undefined
           if (target) {
@@ -703,6 +709,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             if (sb.prompt != null) target.prompt = sb.prompt
             if (typeof sb.duration === 'number') target.duration = sb.duration
             if (sb.cast) target.associateAssetIds = cast
+            if (dlgs) target.dialogues = dlgs
             if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
             target.keyframeImageId = undefined // 内容变了 → 关键帧失效，待重生
             target.state = 'idle'
@@ -717,6 +724,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             prompt: sb.prompt,
             duration: typeof sb.duration === 'number' ? sb.duration : 5,
             associateAssetIds: cast,
+            dialogues: dlgs ?? [],
             shouldGenerateImage: true,
             chainFromPrev: sb.chainFromPrev === true,
             state: 'idle',

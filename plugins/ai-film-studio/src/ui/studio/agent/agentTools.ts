@@ -45,7 +45,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'add_storyboard',
-      description: '新增分镜面板（cast 用资产名，会自动关联 id）',
+      description: '新增分镜面板（cast 用资产名，会自动关联 id；dialogues 逐句对白）',
       parameters: {
         type: 'object',
         properties: {
@@ -53,6 +53,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           prompt: { type: 'string' },
           duration: { type: 'number' },
           cast: { type: 'array', items: { type: 'string' } },
+          dialogues: {
+            type: 'array',
+            items: { type: 'object', properties: { character: { type: 'string' }, line: { type: 'string' }, emotion: { type: 'string' } } },
+          },
           chainFromPrev: { type: 'boolean' },
         },
         required: ['videoDesc'],
@@ -62,11 +66,17 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!d) return '无项目'
         const names = Array.isArray(a.cast) ? (a.cast as unknown[]).map(String) : []
         const ids = names.map((n) => d.assets.find((x) => x.name === n)?.id).filter((x): x is string => !!x)
+        const dialogues = Array.isArray(a.dialogues)
+          ? (a.dialogues as Array<Record<string, unknown>>)
+              .filter((x) => x && typeof x.line === 'string' && (x.line as string).trim())
+              .map((x) => ({ character: String(x.character ?? ''), line: String(x.line).trim(), emotion: x.emotion ? String(x.emotion) : undefined }))
+          : undefined
         get().upsertStoryboard({
           videoDesc: String(a.videoDesc ?? ''),
           prompt: a.prompt as string | undefined,
           duration: typeof a.duration === 'number' ? a.duration : undefined,
           associateAssetIds: ids,
+          dialogues,
           chainFromPrev: a.chainFromPrev === true,
         })
         return '已新增分镜'
