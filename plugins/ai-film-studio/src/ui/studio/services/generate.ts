@@ -190,17 +190,26 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   if (!a && !firstFrameUrl) throw new Error('请先生成该分镜的关键帧')
   const imageUrl = firstFrameUrl || `data:${a!.mime};base64,${a!.base64}`
   const vtag = videoStyleTag(meta.artStyle)
-  // 优先用段视频提示词（§5.3 生成/手改）；无则回退硬拼 motion
-  const motion = promptOverride?.trim()
+  // 对白：把台词原文喂进视频提示词，让原生音频模型（如 grok-video-3）真正把每句对白说出来（否则只有画面没声音）
+  const dlg = (sb.dialogues ?? [])
+    .filter((d) => d.line?.trim())
+    .map((d) => `${d.character || '旁白'}：「${d.line.trim()}」`)
+    .join('  ')
+  const speechCue = dlg ? `\n对白（让出场角色按顺序自然说出，口型与台词同步）：${dlg}` : ''
+  // 优先用段视频提示词（§5.3 生成/手改）；无则回退硬拼 motion。有对白时放宽"只动首帧"约束，让角色能开口说话
+  const base = promptOverride?.trim()
     ? [promptOverride.trim(), vtag].filter(Boolean).join(', ')
-    : [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut'].filter(Boolean).join(', ')
+    : dlg
+      ? [sb.videoDesc, vtag, 'keep the same scene, no scene change, no hard cut'].filter(Boolean).join(', ')
+      : [sb.videoDesc, vtag, 'animate the first frame only, natural motion that settles at the end, no scene change, no hard cut'].filter(Boolean).join(', ')
+  const motion = base + speechCue
   // 时长：段时长(durationSec)优先于分镜 duration；钳到视频模型通用区间 [4,15]s；seed 整片共用提一致性
   const duration = Math.min(Math.max(Number(durationSec ?? sb.duration) || 5, 4), 15)
   const { url } = await runVideo({
     cfg: provider,
     apiKey,
-    // aspectRatio：跟随项目画幅（16:9/9:16/1:1）——否则 grok 等供应商默认竖屏 9:16
-    req: { prompt: motion, imageUrl, duration, aspectRatio: meta.videoRatio, seed: projectSeed(meta.id) },
+    // aspectRatio：跟随项目画幅，缺省兜底 16:9——否则不传画幅，grok 等供应商默认出竖屏 9:16
+    req: { prompt: motion, imageUrl, duration, aspectRatio: meta.videoRatio || '16:9', seed: projectSeed(meta.id) },
     onProgress: (p) => onProgress?.(p.status),
   })
   let localPath: string | undefined

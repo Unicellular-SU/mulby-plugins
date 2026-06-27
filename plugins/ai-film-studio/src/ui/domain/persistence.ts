@@ -65,7 +65,7 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
       intro: meta.intro,
       genre: meta.genre,
       artStyle: meta.artStyle ?? 'cinematic_realistic',
-      videoRatio: meta.videoRatio ?? '16:9',
+      videoRatio: meta.videoRatio || '16:9', // 用 || 兜空串：空画幅会导致视频不传 aspect_ratio → grok 默认竖屏
       imageModel: meta.imageModel,
       videoModel: meta.videoModel,
       videoMode: meta.videoMode,
@@ -118,6 +118,7 @@ function normalizeDoc(raw: ProjectDoc): ProjectDoc {
   doc.storyboards ??= []
   doc.clips ??= []
   doc.memory ??= []
+  if (doc.meta && !doc.meta.videoRatio) doc.meta.videoRatio = '16:9' // 旧/空画幅 doc 兜底，避免视频出竖屏
   return doc
 }
 
