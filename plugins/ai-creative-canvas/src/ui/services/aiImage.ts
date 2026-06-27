@@ -18,9 +18,59 @@ const BASE_SIZE: Record<string, [number, number]> = {
   '2:1': [1440, 720] // 360 全景（等距柱状）基准
 }
 
-// 360 全景提示词：强约束等距柱状投影 + 水平无缝，避免鱼眼/小行星
+// 360 全景提示词：英文触发词（360 LoRA/模型通用）+ 中文强约束，避免鱼眼/小行星
 function panoHint(): string {
-  return '\n\n【360° 全景图：equirectangular 等距柱状投影，单张完整 360×180 全景，水平方向环绕连续、左右边缘可无缝拼接，地平线水平居中；不要鱼眼、不要 tiny planet 小行星效果、不要画面拼接缝】'
+  return '\n\nequirectangular 360 view, 360 panorama, seamless equirectangular projection, full 360x180, horizon centered.【360° 全景图：等距柱状投影，单张完整 360×180 全景，水平环绕连续、左右边缘可无缝拼接，地平线居中；不要鱼眼、不要 tiny planet 小行星、不要拼接缝】'
+}
+
+// 成图后循环羽化：让最左列与最右列趋向二者平均 → 水平接缝连续（poor-man's circular blend）。
+// 治不了"假等距柱状"的投影错误，只缓解左右拼缝。输入/输出均为不含前缀的 base64。
+async function seamBlendEquirect(base64: string): Promise<string> {
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image()
+      i.onload = () => res(i)
+      i.onerror = rej
+      i.src = `data:image/png;base64,${base64}`
+    })
+    const w = img.naturalWidth
+    const h = img.naturalHeight
+    if (!w || !h) return base64
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d')
+    if (!ctx) return base64
+    ctx.drawImage(img, 0, 0)
+    const band = Math.max(2, Math.round(w * 0.05))
+    const col0 = ctx.getImageData(0, 0, 1, h).data
+    const colW = ctx.getImageData(w - 1, 0, 1, h).data
+    const left = ctx.getImageData(0, 0, band, h)
+    const right = ctx.getImageData(w - band, 0, band, h)
+    const L = left.data
+    const R = right.data
+    for (let y = 0; y < h; y++) {
+      const avg0 = (col0[y * 4] + colW[y * 4]) / 2
+      const avg1 = (col0[y * 4 + 1] + colW[y * 4 + 1]) / 2
+      const avg2 = (col0[y * 4 + 2] + colW[y * 4 + 2]) / 2
+      for (let x = 0; x < band; x++) {
+        const i = (y * band + x) * 4
+        const tl = 1 - x / band // 左带：列0 最接缝 → 取平均
+        L[i] = Math.round(L[i] * (1 - tl) + avg0 * tl)
+        L[i + 1] = Math.round(L[i + 1] * (1 - tl) + avg1 * tl)
+        L[i + 2] = Math.round(L[i + 2] * (1 - tl) + avg2 * tl)
+        const tr = x / (band - 1) // 右带：列 w-1 最接缝 → 取平均
+        R[i] = Math.round(R[i] * (1 - tr) + avg0 * tr)
+        R[i + 1] = Math.round(R[i + 1] * (1 - tr) + avg1 * tr)
+        R[i + 2] = Math.round(R[i + 2] * (1 - tr) + avg2 * tr)
+      }
+    }
+    ctx.putImageData(left, 0, 0)
+    ctx.putImageData(right, w - band, 0)
+    return c.toDataURL('image/png').split(',')[1] || base64
+  } catch {
+    return base64
+  }
 }
 function computeSize(aspect: string, resolution: string): string {
   let w = 1024
@@ -146,5 +196,6 @@ export async function generateImage(
   }
 
   if (!images || images.length === 0) throw new Error('模型未返回图像')
+  if (pano) images = await Promise.all(images.map(seamBlendEquirect)) // 全景成图后循环羽化接缝
   return { images, mime: 'image/png' }
 }
