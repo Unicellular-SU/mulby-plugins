@@ -49,6 +49,8 @@ interface UiState {
   setShowGallery: (v: boolean) => void
   showProjectLibrary: boolean
   setShowProjectLibrary: (v: boolean) => void
+  panoCardId: string | null
+  setPanoCardId: (id: string | null) => void
   annotTool: 'pen' | 'arrow' | 'rect' | 'text' | null
   setAnnotTool: (t: 'pen' | 'arrow' | 'rect' | 'text' | null) => void
   annotColor: string
@@ -119,6 +121,8 @@ export const useUi = create<UiState>((set) => ({
   setShowGallery: (showGallery) => set({ showGallery }),
   showProjectLibrary: false,
   setShowProjectLibrary: (showProjectLibrary) => set({ showProjectLibrary }),
+  panoCardId: null,
+  setPanoCardId: (panoCardId) => set({ panoCardId }),
   annotTool: null,
   setAnnotTool: (annotTool) => set({ annotTool }),
   annotColor: '#ef4444',

@@ -977,3 +977,12 @@
 - **UI**：`ProjectLibrary` 网格 modal（封面/名/卡数/更新时间/当前高亮，新建·打开·重命名·复制·导出 JSON·删除）；TopBar 加工程库入口（FolderOpen）。导入用隐藏 `<input type=file>` 读 JSON、导出用 Blob 下载（不含本地媒体文件）。
 - **正确性**：① 载入/切换引发的 store 变更经 `isLoadedRef` 守卫跳过自动保存，避免切换后又全量重写；② 自动保存在「调度时」连同 activeId 一起捕获（防跨工程切换时挂起的保存把旧 doc 写到新工程 id）；③ `seedMainBaseline` 载入后播种基线，首存只写 manifest。
 - **延后**：分片读回仍一次性拼装整工程（超大工程再做画布懒加载 / LRU 卸载）；工程封面缩略图懒生成/缓存；文件夹分组。
+
+### P2k 360 全景图生成 + 环视查看器（2026-06-27，已提交）
+范围：360 先做、零依赖自写（用户选定）；3D 导演台作为更大的后续一期。
+- **生成端**：`paramSchema` 图像加「全景·开/关」开关 + `ASPECTS` 增 `2:1`；`aiImage.generateImage` 检测 `params.pano` → 强制等距柱状 `2:1`、单张、注入 `panoHint`（equirectangular、水平无缝、禁鱼眼/小行星）；`BASE_SIZE` 加 `2:1=[1440,720]`；`generate.ts` 给结果卡打 `meta.pano=true`。
+- **查看端**：`canvas/PanoViewer.tsx` **零依赖 WebGL**——全屏 quad + fragment shader 按 yaw/pitch/fov 做等距柱状→透视采样；贴图缩放到 POT `2048×1024` 以便经度方向 `REPEAT` 无缝环绕，`UNPACK_FLIP_Y` 对齐；拖动转视角、滚轮调 FOV、复位、Esc 关；按需 rAF 重绘（静态图不空转）。仅显示不回读像素，`file://` 贴图 taint 不影响。**bundle 仅 +~7KB（无 three.js）**。
+- **接入**：`uiStore.panoCardId`；MediaToolbox 全景图加「360 环视」(Compass)；CardView 全景卡显「360°」徽标 + 双击进环视；CanvasStage 双击同理；App 挂载 `PanoViewer`。
+- **延后/已知**：是否真无缝取决于模型出图（prompt 尽力）；陀螺仪/VR/小地图热点、把全景当视频卡背景；**3D 导演台**（镜头语言结构化→驱动生成）整体留作后续一期。
+
+> **P2 收尾**：低/中风险 + 千/万级虚拟化 + 持久化分片 + 多工程 + 360 全景均完成。**唯一明确延后**：3D 导演台（previs→生成，单独立项）。

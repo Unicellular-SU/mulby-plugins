@@ -290,7 +290,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()
-        if ((card.kind === 'image' || card.kind === 'source') && card.assetUrl) {
+        if ((card.meta as any)?.pano && card.assetUrl) {
+          useUi.getState().setPanoCardId(card.id) // 全景卡 → 360 环视
+        } else if ((card.kind === 'image' || card.kind === 'source') && card.assetUrl) {
           useUi.getState().setMaskCardId(card.id) // 双击图片节点 → 进入局部编辑页面
         } else if (card.kind === 'video' && card.assetUrl) {
           useUi.getState().setPreview({ url: card.assetUrl, kind: 'video' })
@@ -309,6 +311,11 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
           </div>
         )
       })()}
+      {(card.meta as any)?.pano && (
+        <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-600/85 text-white text-[10px] leading-none pointer-events-none">
+          360°
+        </div>
+      )}
       {/* 多结果堆叠背板（露出右下角，暗示有多张） */}
       {isImg && multi && (
         <>

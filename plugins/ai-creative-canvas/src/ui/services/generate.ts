@@ -145,7 +145,7 @@ export async function generateCard(cardId: string): Promise<void> {
           assetUrl: results[0].url,
           assetLocalPath: results[0].localPath,
           mime: res.mime,
-          meta: { ...(base0?.meta || {}), results }
+          meta: { ...(base0?.meta || {}), results, ...(card.params?.pano ? { pano: true } : {}) }
         })
       } else if (card.kind === 'video') {
         const cfg = useProviders.getState().activeFor('video')

@@ -15,7 +15,8 @@ export const ASPECTS = [
   { value: '2:3', label: '2:3' },
   { value: '16:9', label: '16:9' },
   { value: '9:16', label: '9:16' },
-  { value: '21:9', label: '21:9' }
+  { value: '21:9', label: '21:9' },
+  { value: '2:1', label: '2:1' }
 ]
 
 const CAMERA = [
@@ -35,6 +36,7 @@ export function getParamSchema(card: Card): ParamField[] {
         { type: 'select', key: 'aspect', width: 78, default: '1:1', options: ASPECTS },
         { type: 'select', key: 'resolution', width: 68, default: '1K', options: [{ value: '1K', label: '1K' }, { value: '2K', label: '2K' }, { value: '4K', label: '4K' }] },
         { type: 'select', key: 'count', width: 62, default: '1', numeric: true, options: [{ value: '1', label: '×1' }, { value: '2', label: '×2' }, { value: '3', label: '×3' }, { value: '4', label: '×4' }] },
+        { type: 'select', key: 'pano', width: 86, default: '', options: [{ value: '', label: '全景·关' }, { value: '1', label: '全景·开 360°' }] },
         { type: 'seed', key: 'seed' }
       ]
     case 'video':

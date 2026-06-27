@@ -14,7 +14,13 @@ const BASE_SIZE: Record<string, [number, number]> = {
   '16:9': [1280, 720],
   '9:16': [720, 1280],
   '4:3': [1024, 768],
-  '3:4': [768, 1024]
+  '3:4': [768, 1024],
+  '2:1': [1440, 720] // 360 全景（等距柱状）基准
+}
+
+// 360 全景提示词：强约束等距柱状投影 + 水平无缝，避免鱼眼/小行星
+function panoHint(): string {
+  return '\n\n【360° 全景图：equirectangular 等距柱状投影，单张完整 360×180 全景，水平方向环绕连续、左右边缘可无缝拼接，地平线水平居中；不要鱼眼、不要 tiny planet 小行星效果、不要画面拼接缝】'
 }
 function computeSize(aspect: string, resolution: string): string {
   let w = 1024
@@ -79,10 +85,11 @@ export async function generateImage(
 
   const inputs = resolveGenInputs(card, board)
   const params = card.params || {}
-  const aspect = String(params.aspect || '1:1')
+  const pano = !!params.pano
+  const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
   const size = computeSize(aspect, String(params.resolution || '1K'))
-  const count = Math.max(1, Math.min(4, Number(params.count) || 1))
-  const prompt = (card.prompt || '') + aspectHint(aspect) + styleHint() // 尺寸 + 比例/风格提示词
+  const count = pano ? 1 : Math.max(1, Math.min(4, Number(params.count) || 1)) // 全景单张
+  const prompt = (card.prompt || '') + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint()
 
   // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []

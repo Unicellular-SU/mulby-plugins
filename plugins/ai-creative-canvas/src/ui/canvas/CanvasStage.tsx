@@ -372,7 +372,9 @@ export function CanvasStage() {
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
       const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
-      if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
+      if (c?.assetUrl && (c.meta as any)?.pano) {
+        useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视
+      } else if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
         useUi.getState().setMaskCardId(c.id) // 双击图片节点 → 局部编辑页面
       } else if (c?.assetUrl && c.kind === 'video') {
         useUi.getState().setPreview({ url: c.assetUrl, kind: 'video' }) // 视频仍为放大预览
