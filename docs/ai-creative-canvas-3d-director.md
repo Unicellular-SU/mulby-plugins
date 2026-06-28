@@ -61,3 +61,12 @@
 - **整体朝向**（面向/背向/朝左/朝右）：`setFacing` 设 root.rotation.y（精确）。
 - **姿势名写进生成提示**：`shotFragment` 输出「角色1居左(招手)」，即使灰模粗略，AI 也据姿势名渲染。
 - 手动逐关节（旋转/摆姿点关节）保留作微调。预设欧拉角为粗摆估值，可按真机反馈微调正负号。
+
+## 十、v4 重做（2026-06-28，已提交）：Outliner/Inspector + 模型导入 + 缩放 + 拖拽摆姿
+参考 three.js editor(Outliner/Inspector/gizmo) + open-pose-editor/Magic Poser(拖拽摆姿) + GLTFLoader。
+- **UI 重构**：左 Outliner（场景对象树：人台/道具/导入模型，选中/显隐/复制/删除 + 顶部 人台/道具/导入）；右 Inspector（选中项 复制/看向/删除 + 人台姿势库/朝向 + 镜头焦段/镜别/角度 + 机位列表/批量）；顶栏变换四态；底栏场景描述+生成。
+- **模型导入**：GLB/GLTF 文件选择 + 拖拽到画面；GLTFLoader.parse(ArrayBuffer)；导入后 Box3 归一化（缩放约 2 单位、落地、居中）。
+- **缩放**：变换加 scale 档。
+- **拖拽摆姿**：顶栏「摆姿」模式 → 点人台关节 + 拖动鼠标，按相机右/上轴做世界增量旋转→关节父空间共轭，替代繁琐 gizmo；一键姿势库仍为主路径。
+- **默认角色**：无法内置二进制 glb → 默认仍是程序化骨架人形（有关节/可摆姿/缩放）；导入 rigged GLB 可换真人。导入模型本会话可用、暂不随工程持久化（二进制无法序列化）。
+- **对抗式审查后修复**（6-agent workflow）：① cleanup 增加 scene.traverse 释放 geometry/material/texture + depthMat.dispose + forceContextLoss（修 GPU 泄漏）；② busy 期间全屏遮罩拦截交互（修批量逐机位抓帧被改动场景污染）；③ GLTF 回调加 disposed 守卫 + 早返回 disposeTree（修卸载后 use-after-dispose/泄漏）；④ 空盒/无网格模型归一化 NaN 防御；⑤ .gltf 外部资源/Draco 局限写进错误提示；⑥ jnt.parent 空值防御。

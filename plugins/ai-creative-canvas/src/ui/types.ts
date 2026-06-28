@@ -102,6 +102,7 @@ export interface DirectorSubject {
   rot: [number, number, number]
   scale: number
   joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台摆姿）
+  poseName?: string // 一键姿势名（供生成提示）
 }
 export interface DirectorShot {
   id: string
