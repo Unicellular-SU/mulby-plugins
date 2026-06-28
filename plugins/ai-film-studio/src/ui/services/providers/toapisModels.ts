@@ -78,16 +78,32 @@ export function toapisVideoModel(id?: string): ToapisVideoModel | undefined {
   return id ? BY_ID[id] : undefined
 }
 
+/** 取（可能带 metadata. 前缀的）字段当前值，用于判断模板是否已显式给过 */
+function getField(body: Record<string, unknown>, path: string): unknown {
+  if (path.startsWith('metadata.')) return (body.metadata as Record<string, unknown> | undefined)?.[path.slice('metadata.'.length)]
+  return body[path]
+}
+
 /**
- * 给已知 toapis 模型的请求体补上「缺失」的画幅字段——修复旧/不完整 bodyTemplate 漏画幅导致供应商默认竖屏。
- * 仅当该字段当前为空时才填，不覆盖模板里已显式给的值。
+ * 给已知 toapis 模型的请求体补上「缺失」的画幅 + 时长字段——修复旧/不完整 bodyTemplate 漏字段导致
+ * 供应商用默认（如 grok 默认竖屏 9:16、默认 10s）。仅当字段当前为空时才填，不覆盖模板已显式给的值。
  */
-export function fillToapisAspect(body: Record<string, unknown>, modelId: string | undefined, wantAspect?: string): void {
+export function fillToapisMissing(body: Record<string, unknown>, modelId: string | undefined, req: { aspectRatio?: string; duration?: number }): void {
   const m = modelId ? BY_ID[modelId] : undefined
-  if (!m || !m.aspectParam || !wantAspect) return
-  const key = m.aspectParam.startsWith('metadata.') ? m.aspectParam.slice('metadata.'.length) : m.aspectParam
-  const container = m.aspectParam.startsWith('metadata.') ? ((body.metadata as Record<string, unknown>) ?? {}) : body
-  if (container[key] == null || container[key] === '') setField(body, m.aspectParam, snapAspect(m.aspectValues, wantAspect))
+  if (!m) return
+  // 画幅
+  if (m.aspectParam && req.aspectRatio) {
+    const cur = getField(body, m.aspectParam)
+    if (cur == null || cur === '') setField(body, m.aspectParam, snapAspect(m.aspectValues, req.aspectRatio))
+  }
+  // 时长（吸附到该模型允许值；string/number 按 durationType）
+  if (req.duration != null && m.durationValues.length) {
+    const cur = getField(body, m.durationParam)
+    if (cur == null || cur === '') {
+      const d = snapDuration(m.durationValues, req.duration)
+      setField(body, m.durationParam, m.durationType === 'string' ? String(d) : d)
+    }
+  }
 }
 
 function orient(r: string): 'land' | 'port' | 'sq' {
