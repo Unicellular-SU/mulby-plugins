@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Trash2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
+import { toast } from '../store/toastStore'
 
 // 3D 导演台 v1：three 场景里摆人台/道具 + 摆机位（焦段/镜别/角度）→ 视口截图当 img2img 参考 +
 // 结构化镜头提示词 → 生成图像卡。three 动态分割，主包不增。人台=程序化人形(胶囊/球，零资源)。
@@ -253,12 +254,12 @@ function Inner() {
 
   const run = async () => {
     if (!prompt.trim()) {
-      ;(window as any).showToast?.('请先填写场景/角色描述', 'error')
+      toast('请先填写场景/角色描述', 'error')
       return
     }
     const model = useGraph.getState().project.defaultImageModel
     if (!model) {
-      ;(window as any).showToast?.('请先在工程设置选默认图像模型', 'error')
+      toast('请先在工程设置（顶栏 ⚙）选「默认图像模型」', 'error')
       return
     }
     setBusy(true)
@@ -282,10 +283,10 @@ function Inner() {
       const wx = (-vp.x + 400) / vp.zoom
       const wy = (-vp.y + 300) / vp.zoom
       g.addCard('image', { x: wx, y: wy }, { title: '导演台成片', status: 'done', modelId: model, prompt: prompt.trim(), assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
-      ;(window as any).showToast?.('已生成（导演台）', 'success')
+      toast('已生成（导演台）', 'success')
       useUi.getState().setShowDirector(false)
     } catch (e: any) {
-      ;(window as any).showToast?.('生成失败：' + (e?.message || String(e)), 'error')
+      toast('生成失败：' + (e?.message || String(e)), 'error')
     } finally {
       setBusy(false)
     }
