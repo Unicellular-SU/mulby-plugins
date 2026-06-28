@@ -9,6 +9,24 @@ import { toast } from '../store/toastStore'
 
 const FILM_GAUGE = 36 // 35mm 全画幅
 
+// 一键姿势预设（关节名→欧拉角；粗摆即可，AI 据深度/截图 + 姿势名渲染）
+const POSES: { k: string; m: Record<string, [number, number, number]> }[] = [
+  { k: '站立', m: {} },
+  { k: 'T姿', m: { 左肩: [0, 0, -1.45], 右肩: [0, 0, 1.45] } },
+  { k: '叉腰', m: { 左肩: [0, 0, -0.5], 左肘: [0, 0, -1.6], 右肩: [0, 0, 0.5], 右肘: [0, 0, 1.6] } },
+  { k: '举双手', m: { 左肩: [0, 0, -2.9], 右肩: [0, 0, 2.9] } },
+  { k: '招手', m: { 右肩: [0, 0, 2.5], 右肘: [0, 0, 0.6] } },
+  { k: '行走', m: { 左髋: [0.5, 0, 0], 右髋: [-0.5, 0, 0], 左肩: [-0.4, 0, 0], 右肩: [0.4, 0, 0], 左膝: [-0.3, 0, 0] } },
+  { k: '坐', m: { 左髋: [1.5, 0, 0], 右髋: [1.5, 0, 0], 左膝: [-1.5, 0, 0], 右膝: [-1.5, 0, 0] } },
+  { k: '指向前', m: { 右肩: [-1.4, 0, 0] } }
+]
+const FACINGS: { k: string; r: number }[] = [
+  { k: '面向', r: 0 },
+  { k: '背向', r: Math.PI },
+  { k: '朝左', r: Math.PI / 2 },
+  { k: '朝右', r: -Math.PI / 2 }
+]
+
 export function DirectorStage() {
   const show = useUi((s) => s.showDirector)
   if (!show) return null
@@ -27,6 +45,7 @@ function Inner() {
   const [focal, setFocal] = useState(35)
   const [mode, setMode] = useState<'translate' | 'rotate'>('translate')
   const [hasSel, setHasSel] = useState(false)
+  const [selKind, setSelKind] = useState<string | null>(null)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [shots, setShots] = useState<{ id: string; name: string; cam: any }[]>([])
@@ -140,7 +159,7 @@ function Inner() {
         curRoot = root
         curJoint = jnt
         attachByMode()
-        if (!disposed) setHasSel(!!root)
+        if (!disposed) { setHasSel(!!root); setSelKind(root ? root.userData.kind || '' : null) }
       }
       const addMannequin = () => {
         const g = makeMannequin(0xc7ccd6)
@@ -309,7 +328,8 @@ function Inner() {
             v.project(cam)
             if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
             const where = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
-            return `角色${i + 1}${where}`
+            const pose = (s.obj as any).userData?.poseName
+            return `角色${i + 1}${where}${pose ? `(${pose})` : ''}`
           })
           .filter(Boolean)
           .join('，')
@@ -337,6 +357,14 @@ function Inner() {
           const y = kind === 'low' ? 0.4 : kind === 'eye' ? orbit.target.y : orbit.target.y + horiz * 0.9
           cam.position.set(orbit.target.x + flat.x, y, orbit.target.z + flat.z)
         },
+        // 一键姿势：先清零所有关节，再套用预设 euler；记录姿势名供生成提示用
+        applyPose: (name: string, map: Record<string, [number, number, number]>) => {
+          if (!curRoot || curRoot.userData.kind !== '人台') return
+          curRoot.traverse((c: any) => { if (c.userData && c.userData.joint) c.rotation.set(0, 0, 0) })
+          curRoot.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && map[j]) c.rotation.set(map[j][0], map[j][1], map[j][2]) })
+          curRoot.userData.poseName = name === '站立' ? '' : name
+        },
+        setFacing: (rad: number) => { if (curRoot) curRoot.rotation.y = rad },
         capture: (): string => {
           tcontrol.detach()
           renderer.render(scene, cam)
@@ -515,7 +543,22 @@ function Inner() {
           <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
           <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
         </div>
-        <div className="opacity-50 leading-snug">拖拽空白=转相机 · 滚轮推拉 · 点人台=选中 · 移动=挪整体 · 旋转/摆姿模式下点关节(肩/肘/髋/膝/头)可掰姿势</div>
+        {selKind === '人台' && (
+          <>
+            <div className="flex items-start gap-1">
+              <span className="opacity-60 w-10 mt-1">姿势</span>
+              <div className="flex-1 flex flex-wrap gap-1">
+                {POSES.map((p) => <Btn key={p.k} onClick={() => api.current.applyPose?.(p.k, p.m)} title={`一键姿势：${p.k}`}>{p.k}</Btn>)}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="opacity-60 w-10">朝向</span>
+              {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`整体朝向：${f.k}`}>{f.k}</Btn>)}
+            </div>
+            <div className="opacity-50 leading-snug">选中人台 → 点一键姿势/朝向最省事；要微调再用「旋转/摆姿」点关节。</div>
+          </>
+        )}
+        {selKind !== '人台' && <div className="opacity-50 leading-snug">拖拽空白=转相机 · 滚轮推拉 · 点人台=选中后出现「姿势/朝向」一键预设</div>}
       </div>
 
       {/* 多机位 shot list */}

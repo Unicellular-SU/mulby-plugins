@@ -54,3 +54,10 @@
 - **场景持久化**：`ProjectDoc.director`（subjects 含 kind/pos/rot/scale/关节欧拉角 + camera + shots + prompt）；`setDirectorScene`；打开恢复、关闭/Esc 保存（随分片 manifest 持久化）。
 - **多机位 shot list**：右侧面板「+记录」当前机位为 shot、点 shot 切换机位、删除；「批量生成 N 机位」逐个 applyCam → 生成 → 成片在画布排成一行。生成不再自动关闭（便于多机位迭代）。
 - 控制精度仍取决于 provider 是否真支持控制模型；未配则为构图参考级（已如实标注）。
+
+## 九、摆姿优化（2026-06-28，已提交）
+逐关节 gizmo 摆姿太繁琐 → 参考 Magic Poser/JustSketchMe/3D OpenPose Editor，加**一键预设**：
+- **姿势预设**（站立/T姿/叉腰/举双手/招手/行走/坐/指向前）：`applyPose` 先清零关节再套预设欧拉角；选中人台时左面板出现。
+- **整体朝向**（面向/背向/朝左/朝右）：`setFacing` 设 root.rotation.y（精确）。
+- **姿势名写进生成提示**：`shotFragment` 输出「角色1居左(招手)」，即使灰模粗略，AI 也据姿势名渲染。
+- 手动逐关节（旋转/摆姿点关节）保留作微调。预设欧拉角为粗摆估值，可按真机反馈微调正负号。
