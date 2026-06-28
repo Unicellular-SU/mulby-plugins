@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Trash2 } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Trash2, Copy, Crosshair } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -89,53 +89,83 @@ function Inner() {
       const raycaster = new THREE.Raycaster()
       const ndc = new THREE.Vector2()
 
+      // 可摆姿人台：root=整体；各 joint 组绕关节旋转摆姿（旋转模式点关节即可）
       const makeMannequin = (color: number) => {
-        const g = new THREE.Group()
-        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.65 })
-        const part = (geo: any, x: number, y: number, z: number, rz = 0) => {
-          const m = new THREE.Mesh(geo, mat)
-          m.position.set(x, y, z)
-          m.rotation.z = rz
-          g.add(m)
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
+        const mesh = (geo: any, y = 0) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; return m }
+        const joint = (name: string, x: number, y: number, z: number) => { const g = new THREE.Group(); g.position.set(x, y, z); g.userData.joint = name; return g }
+        const root = new THREE.Group()
+        root.userData.kind = '人台'
+        const hips = new THREE.Group(); hips.position.set(0, 0.9, 0); root.add(hips) // 结构组
+        const chest = new THREE.Group(); chest.position.set(0, 0.02, 0); hips.add(chest)
+        chest.add(mesh(new THREE.CapsuleGeometry(0.17, 0.4, 4, 10), 0.22))
+        const head = joint('头', 0, 0.5, 0); chest.add(head)
+        head.add(mesh(new THREE.SphereGeometry(0.13, 18, 16), 0.13))
+        const arm = (side: 'L' | 'R') => {
+          const sh = joint(side === 'L' ? '左肩' : '右肩', side === 'L' ? -0.22 : 0.22, 0.42, 0); chest.add(sh)
+          sh.add(mesh(new THREE.CapsuleGeometry(0.055, 0.26, 4, 8), -0.17))
+          const el = joint(side === 'L' ? '左肘' : '右肘', 0, -0.34, 0); sh.add(el)
+          el.add(mesh(new THREE.CapsuleGeometry(0.05, 0.24, 4, 8), -0.16))
         }
-        part(new THREE.CapsuleGeometry(0.18, 0.5, 4, 10), 0, 1.15, 0)
-        part(new THREE.SphereGeometry(0.13, 18, 16), 0, 1.55, 0)
-        part(new THREE.CapsuleGeometry(0.06, 0.5, 4, 8), -0.27, 1.12, 0, 0.25)
-        part(new THREE.CapsuleGeometry(0.06, 0.5, 4, 8), 0.27, 1.12, 0, -0.25)
-        part(new THREE.CapsuleGeometry(0.08, 0.62, 4, 8), -0.1, 0.42, 0)
-        part(new THREE.CapsuleGeometry(0.08, 0.62, 4, 8), 0.1, 0.42, 0)
-        g.userData.kind = '人台'
-        return g
+        arm('L'); arm('R')
+        const leg = (side: 'L' | 'R') => {
+          const hp = joint(side === 'L' ? '左髋' : '右髋', side === 'L' ? -0.1 : 0.1, 0, 0); hips.add(hp)
+          hp.add(mesh(new THREE.CapsuleGeometry(0.075, 0.32, 4, 8), -0.22))
+          const kn = joint(side === 'L' ? '左膝' : '右膝', 0, -0.44, 0); hp.add(kn)
+          kn.add(mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), -0.2))
+        }
+        leg('L'); leg('R')
+        return root
+      }
+      let curRoot: any = null
+      let curJoint: any = null // 当前点选的关节（旋转用）；null=操作整体
+      let curMode: 'translate' | 'rotate' = 'translate'
+      const attachByMode = () => {
+        if (!curRoot) { tcontrol.detach(); return }
+        tcontrol.attach(curMode === 'rotate' && curJoint ? curJoint : curRoot)
+      }
+      const select = (root: any | null, jnt: any | null) => {
+        curRoot = root
+        curJoint = jnt
+        attachByMode()
+        if (!disposed) setHasSel(!!root)
       }
       const addMannequin = () => {
         const g = makeMannequin(0xc7ccd6)
-        g.position.set((subjects.length % 3) * 0.8 - 0.8, 0, 0)
+        g.position.set((subjects.length % 3) * 0.9 - 0.9, 0, 0)
         scene.add(g)
         subjects.push({ obj: g, kind: '人台' })
-        select(g)
+        select(g, null)
       }
       const addProp = () => {
         const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-        m.position.set(0.6, 0.25, 0.6)
+        m.position.set(0.7, 0.25, 0.6)
         m.userData.kind = '道具'
         scene.add(m)
         subjects.push({ obj: m, kind: '道具' })
-        select(m)
-      }
-      let selected: any = null
-      const select = (o: any | null) => {
-        selected = o
-        if (o) tcontrol.attach(o)
-        else tcontrol.detach()
-        if (!disposed) setHasSel(!!o)
+        select(m, null)
       }
       const removeSelected = () => {
-        if (!selected) return
+        if (!curRoot) return
         tcontrol.detach()
-        scene.remove(selected)
-        const i = subjects.findIndex((s) => s.obj === selected)
+        scene.remove(curRoot)
+        const i = subjects.findIndex((s) => s.obj === curRoot)
         if (i >= 0) subjects.splice(i, 1)
-        select(null)
+        select(null, null)
+      }
+      const duplicateSelected = () => {
+        if (!curRoot) return
+        const clone = curRoot.clone(true)
+        clone.position.x += 0.7
+        scene.add(clone)
+        subjects.push({ obj: clone, kind: curRoot.userData.kind || '人台' })
+        select(clone, null)
+      }
+      const lookAtSelected = () => {
+        if (!curRoot) return
+        const p = new THREE.Vector3()
+        curRoot.getWorldPosition(p)
+        orbit.target.set(p.x, p.y + 0.9, p.z)
       }
 
       const onPointerDown = (e: PointerEvent) => {
@@ -144,11 +174,16 @@ function Inner() {
         ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
         raycaster.setFromCamera(ndc, cam)
         const hits = raycaster.intersectObjects(subjects.map((s) => s.obj), true)
-        if (hits.length) {
-          let o = hits[0].object
-          while (o.parent && !subjects.some((s) => s.obj === o)) o = o.parent
-          select(o)
+        if (!hits.length) return
+        let o: any = hits[0].object
+        let jnt: any = null
+        let root: any = null
+        while (o) {
+          if (!jnt && o.userData && o.userData.joint) jnt = o
+          if (subjects.some((s) => s.obj === o)) { root = o; break }
+          o = o.parent
         }
+        if (root) select(root, jnt)
       }
       renderer.domElement.addEventListener('pointerdown', onPointerDown)
 
@@ -170,7 +205,7 @@ function Inner() {
 
       addMannequin()
 
-      // 由相机几何推导结构化镜头提示词
+      // 由相机几何 + 主体布局推导结构化镜头提示词
       const shotFragment = (): string => {
         const target = orbit.target
         const d = cam.position.distanceTo(target)
@@ -180,14 +215,29 @@ function Inner() {
         const lens = f < 28 ? '广角镜头(wide-angle)' : f <= 50 ? '标准镜头(normal)' : f <= 85 ? '中长焦(short telephoto)' : '长焦(telephoto)'
         const angle = ang > 18 ? '俯拍(high angle)' : ang < -12 ? '仰拍(low angle)' : '平视(eye level)'
         const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
-        return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。`
+        const people = subjects.filter((s) => s.kind === '人台')
+        const v = new THREE.Vector3()
+        const layout = people
+          .map((s, i) => {
+            s.obj.getWorldPosition(v)
+            v.project(cam)
+            if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
+            const where = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+            return `角色${i + 1}${where}`
+          })
+          .filter(Boolean)
+          .join('，')
+        const count = people.length ? `画面中有 ${people.length} 个角色（${layout || '居中'}）。` : ''
+        return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${count}`
       }
 
       api.current = {
         addMannequin,
         addProp,
         removeSelected,
-        setMode: (m: 'translate' | 'rotate') => tcontrol.setMode(m),
+        duplicateSelected,
+        lookAtSelected,
+        setMode: (m: 'translate' | 'rotate') => { curMode = m; tcontrol.setMode(m); attachByMode() },
         setFocal: (mm: number) => cam.setFocalLength(mm),
         // 镜别预设：沿当前视线方向调整相机到 target 的距离
         shotSize: (kind: 'cu' | 'ms' | 'fs') => {
@@ -205,7 +255,7 @@ function Inner() {
           tcontrol.detach()
           renderer.render(scene, cam)
           const url = renderer.domElement.toDataURL('image/png')
-          if (selected) tcontrol.attach(selected)
+          attachByMode()
           return url
         },
         shotFragment
@@ -311,8 +361,10 @@ function Inner() {
         </div>
         <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={13} /> 人台</Btn>
         <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={13} /> 道具</Btn>
-        <Btn on={mode === 'translate'} onClick={() => onMode('translate')} title="移动选中"><Move size={13} /> 移动</Btn>
-        <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转选中"><Rotate3d size={13} /> 旋转</Btn>
+        <Btn on={mode === 'translate'} onClick={() => onMode('translate')} title="移动整体"><Move size={13} /> 移动</Btn>
+        <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转（旋转模式下点关节可摆姿）"><Rotate3d size={13} /> 旋转/摆姿</Btn>
+        {hasSel && <Btn onClick={() => api.current.duplicateSelected?.()} title="复制选中"><Copy size={13} /> 复制</Btn>}
+        {hasSel && <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向选中"><Crosshair size={13} /> 看向</Btn>}
         {hasSel && <Btn onClick={() => api.current.removeSelected?.()} title="删除选中"><Trash2 size={13} /> 删除</Btn>}
         <div className="ml-auto" />
         <button onClick={close} className="w-8 h-8 grid place-items-center rounded-lg bg-black/55 hover:bg-black/70 text-white"><X size={16} /></button>
@@ -326,6 +378,10 @@ function Inner() {
           <span className="w-10 text-right tabular-nums">{focal}mm</span>
         </div>
         <div className="flex items-center gap-1">
+          <span className="opacity-60 w-10">预设</span>
+          {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}</Btn>)}
+        </div>
+        <div className="flex items-center gap-1">
           <span className="opacity-60 w-10">镜别</span>
           <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
           <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
@@ -337,7 +393,7 @@ function Inner() {
           <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
           <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
         </div>
-        <div className="opacity-50 leading-snug">拖拽=转相机 · 点选人台后用移动/旋转摆位 · 滚轮推拉</div>
+        <div className="opacity-50 leading-snug">拖拽空白=转相机 · 滚轮推拉 · 点人台=选中 · 移动=挪整体 · 旋转/摆姿模式下点关节(肩/肘/髋/膝/头)可掰姿势</div>
       </div>
 
       {/* 生成 */}
