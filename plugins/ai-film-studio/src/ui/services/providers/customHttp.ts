@@ -3,7 +3,7 @@
  * 默认路径覆盖常见命名，最小配置（仅 submitUrl + pollUrl + Key）即可工作。
  */
 import { httpJson, getPath, firstString } from './http'
-import { toapisVideoModel, buildToapisVideoBody } from './toapisModels'
+import { toapisVideoModel, buildToapisVideoBody, fillToapisAspect } from './toapisModels'
 import type { VideoProviderAdapter, VideoGenRequest, VideoProviderConfig, VideoHandle, VideoPollResult } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -141,6 +141,8 @@ export const customHttpAdapter: VideoProviderAdapter = {
       if (req.audioMode === 'native' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = true
       else if (req.audioMode === 'external' && cfg.audio?.toggleField) body[cfg.audio.toggleField] = false
     }
+    // 已知 toapis 模型：模板/默认体若漏了画幅，用注册表补上（修复旧/不完整 bodyTemplate 出竖屏）
+    fillToapisAspect(body, cfg.model, req.aspectRatio)
     // 诊断：确认画幅是否真进了请求体（aspect_ratio/size 缺失 → 供应商默认竖屏）。bodyTemplate 非空时走的是模板渲染路径
     const b = body as Record<string, unknown>
     console.info('[ai-film-studio] 视频请求', { model: cfg.model, aspect_ratio: b.aspect_ratio, size: b.size, hasBodyTemplate: !!cfg.bodyTemplate?.trim() })

@@ -885,9 +885,9 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   return (
     <div className="afs-studio__sbcard">
       <div className="afs-studio__sbmain">
-        {/* 左：大缩略图 + 导航 */}
+        {/* 左：大缩略图（按项目画幅显示真实方向）+ 导航 */}
         <div className="afs-studio__sbcol">
-          <div className="afs-studio__sbthumb">
+          <div className="afs-studio__sbthumb" style={{ aspectRatio: (doc.meta.videoRatio || '16:9').replace(':', ' / ') }}>
             {sb.state === 'generating' ? <Loader2 size={22} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={24} opacity={0.3} />}
             <span className="afs-studio__sbnum">{index + 1}</span>
             {sb.state === 'failed' && (

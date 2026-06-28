@@ -78,6 +78,18 @@ export function toapisVideoModel(id?: string): ToapisVideoModel | undefined {
   return id ? BY_ID[id] : undefined
 }
 
+/**
+ * 给已知 toapis 模型的请求体补上「缺失」的画幅字段——修复旧/不完整 bodyTemplate 漏画幅导致供应商默认竖屏。
+ * 仅当该字段当前为空时才填，不覆盖模板里已显式给的值。
+ */
+export function fillToapisAspect(body: Record<string, unknown>, modelId: string | undefined, wantAspect?: string): void {
+  const m = modelId ? BY_ID[modelId] : undefined
+  if (!m || !m.aspectParam || !wantAspect) return
+  const key = m.aspectParam.startsWith('metadata.') ? m.aspectParam.slice('metadata.'.length) : m.aspectParam
+  const container = m.aspectParam.startsWith('metadata.') ? ((body.metadata as Record<string, unknown>) ?? {}) : body
+  if (container[key] == null || container[key] === '') setField(body, m.aspectParam, snapAspect(m.aspectValues, wantAspect))
+}
+
 function orient(r: string): 'land' | 'port' | 'sq' {
   const [a, b] = r.split(':').map(Number)
   if (!a || !b) return 'land'
