@@ -28,6 +28,24 @@ const FACINGS: { k: string; r: number }[] = [
   { k: '朝右', r: -Math.PI / 2 }
 ]
 
+// COCO-18 OpenPose：关键点顺序、连接、配色（controlnet_aux 同款）
+const KP_ORDER = ['鼻', '颈', '右肩', '右肘', '右腕', '左肩', '左肘', '左腕', '右髋', '右膝', '右踝', '左髋', '左膝', '左踝', '右眼', '左眼', '右耳', '左耳']
+const OP_LIMBS: [number, number][] = [
+  [1, 2], [1, 5], [2, 3], [3, 4], [5, 6], [6, 7], [1, 8], [8, 9], [9, 10], [1, 11], [11, 12], [12, 13], [1, 0], [0, 14], [14, 16], [0, 15], [15, 17]
+]
+const OP_COLORS = [
+  [255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], [85, 255, 0], [0, 255, 0], [0, 255, 85], [0, 255, 170],
+  [0, 255, 255], [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255], [170, 0, 255], [255, 0, 255], [255, 0, 170], [255, 0, 85]
+]
+// Mixamo 骨骼名（小写后缀）→ 我们的标准关节名（用于导入 rigged 人物的摆姿/骨架导出）
+const MIXAMO_MAP: { suf: string; joint: string }[] = [
+  { suf: 'head', joint: '头' }, { suf: 'neck', joint: '颈' },
+  { suf: 'leftarm', joint: '左肩' }, { suf: 'leftforearm', joint: '左肘' }, { suf: 'lefthand', joint: '左腕' },
+  { suf: 'rightarm', joint: '右肩' }, { suf: 'rightforearm', joint: '右肘' }, { suf: 'righthand', joint: '右腕' },
+  { suf: 'leftupleg', joint: '左髋' }, { suf: 'leftleg', joint: '左膝' }, { suf: 'leftfoot', joint: '左踝' },
+  { suf: 'rightupleg', joint: '右髋' }, { suf: 'rightleg', joint: '右膝' }, { suf: 'rightfoot', joint: '右踝' }
+]
+
 type TMode = 'translate' | 'rotate' | 'scale' | 'pose'
 
 export function DirectorStage() {
@@ -56,6 +74,8 @@ function Inner() {
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [shots, setShots] = useState<{ id: string; name: string; cam: any }[]>([])
+  const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
+  const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
 
   const saveScene = () => {
     try {
@@ -218,6 +238,14 @@ function Inner() {
               const obj = gltf.scene || gltf.scenes?.[0]
               if (!obj) { toast('模型为空', 'error'); return }
               if (disposed) { disposeTree(obj); return } // 卸载后回调：清理，勿挂到孤立场景
+              // 识别 Mixamo 人形骨骼 → 标记标准关节名（用于摆姿/OpenPose 导出）
+              let bones = 0
+              obj.traverse((c: any) => {
+                const nl = String(c.name || '').toLowerCase()
+                const hit = MIXAMO_MAP.find((mm) => nl.endsWith(mm.suf))
+                if (hit && !c.userData.joint) { c.userData.joint = hit.joint; bones++ }
+              })
+              obj.userData.rigged = bones >= 6
               // 归一化：缩放到约 2 单位高，脚落地面、水平居中（无可见网格则跳过）
               const box = new THREE.Box3().setFromObject(obj)
               if (!box.isEmpty()) {
@@ -296,6 +324,19 @@ function Inner() {
           }
           if (!root) return
           select(root)
+          // 导入 rigged 模型：蒙皮网格命中点找不到关节祖先 → 取最近的已标记骨骼
+          if (curMode === 'pose' && !jnt && root.userData.rigged && hits[0].point) {
+            let best: any = null
+            let bd = Infinity
+            const wp = new THREE.Vector3()
+            root.traverse((c: any) => {
+              if (!c.userData || !c.userData.joint) return
+              c.getWorldPosition(wp)
+              const d = wp.distanceTo(hits[0].point)
+              if (d < bd) { bd = d; best = c }
+            })
+            jnt = best
+          }
           if (curMode === 'pose' && jnt && jnt.parent) {
             const parentWorld = jnt.parent.getWorldQuaternion(new THREE.Quaternion())
             posing = { joint: jnt, sx: e.clientX, sy: e.clientY, startQ: jnt.quaternion.clone(), parentInv: parentWorld.clone().invert() }
@@ -389,6 +430,78 @@ function Inner() {
             }),
           cam: getCam()
         })
+        // 采集一个主体的 OpenPose 关键点（世界坐标）。人台从关节组推导；rigged 模型读已标记骨骼。
+        const collectKeypoints = (obj: any): Record<string, any> => {
+          const by: Record<string, any> = {}
+          obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && !by[j]) by[j] = c })
+          const wp = (o: any) => (o ? o.getWorldPosition(new THREE.Vector3()) : undefined)
+          const lt = (o: any, x: number, y: number, z: number) => (o ? o.localToWorld(new THREE.Vector3(x, y, z)) : undefined)
+          const k: Record<string, any> = {}
+          for (const n of ['右肩', '左肩', '右肘', '左肘', '右髋', '左髋', '右膝', '左膝']) k[n] = wp(by[n])
+          k['头'] = wp(by['头'])
+          if (obj.userData.rigged) {
+            k['右腕'] = wp(by['右腕']); k['左腕'] = wp(by['左腕'])
+            k['右踝'] = wp(by['右踝']); k['左踝'] = wp(by['左踝'])
+            k['颈'] = wp(by['颈']) || (k['左肩'] && k['右肩'] ? k['左肩'].clone().add(k['右肩']).multiplyScalar(0.5) : k['头'])
+            k['鼻'] = k['头']
+          } else {
+            k['右腕'] = lt(by['右肘'], 0, -0.33, 0); k['左腕'] = lt(by['左肘'], 0, -0.33, 0)
+            k['右踝'] = lt(by['右膝'], 0, -0.4, 0); k['左踝'] = lt(by['左膝'], 0, -0.4, 0)
+            k['颈'] = k['左肩'] && k['右肩'] ? k['左肩'].clone().add(k['右肩']).multiplyScalar(0.5) : k['头']
+            k['鼻'] = lt(by['头'], 0, 0.13, 0.12)
+            k['右眼'] = lt(by['头'], 0.05, 0.18, 0.1); k['左眼'] = lt(by['头'], -0.05, 0.18, 0.1)
+            k['右耳'] = lt(by['头'], 0.12, 0.13, 0); k['左耳'] = lt(by['头'], -0.12, 0.13, 0)
+          }
+          return k
+        }
+        // OpenPose 控制图：黑底 + 标准配色骨架（投影所有人台/rigged 模型的关键点）
+        const captureOpenPose = (): string => {
+          const cw = renderer.domElement.width
+          const ch = renderer.domElement.height
+          const c = document.createElement('canvas')
+          c.width = cw
+          c.height = ch
+          const ctx = c.getContext('2d')!
+          ctx.fillStyle = '#000'
+          ctx.fillRect(0, 0, cw, ch)
+          ctx.lineCap = 'round'
+          const project = (p: any): [number, number] | null => {
+            if (!p) return null
+            const cs = p.clone().applyMatrix4(cam.matrixWorldInverse)
+            if (cs.z > -0.02) return null // 在相机后方
+            const v = p.clone().project(cam)
+            return [(v.x * 0.5 + 0.5) * cw, (1 - (v.y * 0.5 + 0.5)) * ch]
+          }
+          const lineW = Math.max(2, Math.round(ch * 0.012))
+          const dotR = Math.max(2, Math.round(ch * 0.009))
+          const targets = subjects.filter((s) => s.kind === '人台' || (s.kind === '模型' && s.obj.userData.rigged))
+          for (const s of targets) {
+            const k = collectKeypoints(s.obj)
+            const pts = KP_ORDER.map((n) => project(k[n]))
+            OP_LIMBS.forEach((pair, li) => {
+              const a = pts[pair[0]]
+              const b = pts[pair[1]]
+              if (a && b) {
+                const col = OP_COLORS[li % OP_COLORS.length]
+                ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`
+                ctx.lineWidth = lineW
+                ctx.beginPath()
+                ctx.moveTo(a[0], a[1])
+                ctx.lineTo(b[0], b[1])
+                ctx.stroke()
+              }
+            })
+            pts.forEach((p, i) => {
+              if (!p) return
+              const col = OP_COLORS[i % OP_COLORS.length]
+              ctx.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`
+              ctx.beginPath()
+              ctx.arc(p[0], p[1], dotR, 0, Math.PI * 2)
+              ctx.fill()
+            })
+          }
+          return c.toDataURL('image/png')
+        }
         const captureDepth = (): string => {
           tcontrol.detach()
           const pf = cam.far
@@ -396,9 +509,15 @@ function Inner() {
           cam.updateProjectionMatrix()
           const pbg = scene.background
           scene.background = new THREE.Color(0x000000)
+          const gv = grid.visible
+          const gdv = ground.visible
+          grid.visible = false
+          ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
           scene.overrideMaterial = depthMat
           renderer.render(scene, cam)
           scene.overrideMaterial = null as any
+          grid.visible = gv
+          ground.visible = gdv
           scene.background = pbg
           cam.far = pf
           cam.updateProjectionMatrix()
@@ -496,6 +615,8 @@ function Inner() {
             return url
           },
           captureDepth,
+          captureOpenPose,
+          poseTargetCount: () => subjects.filter((s) => s.kind === '人台' || (s.kind === '模型' && s.obj.userData.rigged)).length,
           getCam,
           applyCam,
           serializeSceneOnly,
@@ -559,15 +680,22 @@ function Inner() {
     try {
       const ai = (window as any).mulby.ai
       const useControl = !!controlModel
-      const dataUrl = (useControl ? api.current.captureDepth() : api.current.capture()) as string
+      const usePose = useControl && ctrlType === 'pose'
+      if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
+        toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
+        return false
+      }
+      const dataUrl = (usePose ? api.current.captureOpenPose() : useControl ? api.current.captureDepth() : api.current.capture()) as string
       const b64 = dataUrl.split(',')[1]
       const bin = atob(b64)
       const buf = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
-      const note = useControl
-        ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
-        : '【以上为 3D 导演台的机位/构图参考（灰色人台=角色站位/姿态），请据此构图与镜头渲染成片，忽略灰模材质。】'
+      const note = usePose
+        ? '【输入为 OpenPose 骨架控制图：请严格按骨架表达的人物姿态与站位渲染为成片画面。】'
+        : useControl
+          ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
+          : '【以上为 3D 导演台的机位/构图参考（灰色人台=角色站位/姿态），请据此构图与镜头渲染成片，忽略灰模材质。】'
       const full = `${prompt.trim()}\n\n${api.current.shotFragment()}${note}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
@@ -716,6 +844,13 @@ function Inner() {
             <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
             <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
           </div>
+          {hasControlModel && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="opacity-60 w-8">控制</span>
+              <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
+              <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
+            </div>
+          )}
         </div>
         {/* 机位 */}
         <div className="flex flex-col gap-1.5">

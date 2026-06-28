@@ -70,3 +70,9 @@
 - **拖拽摆姿**：顶栏「摆姿」模式 → 点人台关节 + 拖动鼠标，按相机右/上轴做世界增量旋转→关节父空间共轭，替代繁琐 gizmo；一键姿势库仍为主路径。
 - **默认角色**：无法内置二进制 glb → 默认仍是程序化骨架人形（有关节/可摆姿/缩放）；导入 rigged GLB 可换真人。导入模型本会话可用、暂不随工程持久化（二进制无法序列化）。
 - **对抗式审查后修复**（6-agent workflow）：① cleanup 增加 scene.traverse 释放 geometry/material/texture + depthMat.dispose + forceContextLoss（修 GPU 泄漏）；② busy 期间全屏遮罩拦截交互（修批量逐机位抓帧被改动场景污染）；③ GLTF 回调加 disposed 守卫 + 早返回 disposeTree（修卸载后 use-after-dispose/泄漏）；④ 空盒/无网格模型归一化 NaN 防御；⑤ .gltf 外部资源/Draco 局限写进错误提示；⑥ jnt.parent 空值防御。
+
+## 十一、v4.3（2026-06-28，已提交）：OpenPose 控制图导出 + Mixamo 骨骼重定向
+- **OpenPose 控制图**：`collectKeypoints`（人台从关节组推导腕/踝/颈/鼻眼耳；rigged 模型读骨骼）+ `captureOpenPose`（COCO-18 标准 KP_ORDER/OP_LIMBS/OP_COLORS，世界坐标→相机投影→黑底画 stick+dot，相机后方剔除）。
+- **控制图类型**：工程配了 ControlNet 控制模型时，Inspector 出「控制：深度/骨架」开关；`doGenerate` 据此用 captureDepth / captureOpenPose + 对应提示。
+- **Mixamo 重定向**：导入 GLB 按 `MIXAMO_MAP`(LeftArm/LeftForeArm/LeftHand/LeftUpLeg/LeftLeg/LeftFoot/Head/Neck…后缀)自动标记标准关节名，骨骼≥6 标 `rigged`；rigged 模型可拖拽摆姿（蒙皮命中点就近选骨）+ 导出 OpenPose。姿势库预设仅对自有 rig（局部轴相关）。VRM 需 @pixiv/three-vrm（未引入）。
+- **审查后修复**（3-agent workflow）：① 深度图渲染前隐藏 grid/ground（避免地面强梯度+网格线污染深度控制图）；② 骨架控制无人台/rigged 目标时拦截并提示（避免上传全黑骨架图静默生成）。
