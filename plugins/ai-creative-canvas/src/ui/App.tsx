@@ -16,6 +16,7 @@ import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
 import { ProjectLibrary } from './components/ProjectLibrary'
 import { PanoViewer } from './canvas/PanoViewer'
+import { DirectorStage } from './canvas/DirectorStage'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
 import { TooltipHost } from './components/TooltipHost'
@@ -127,6 +128,7 @@ export default function App() {
       <TimelineModal />
       <ProjectLibrary />
       <PanoViewer />
+      <DirectorStage />
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />

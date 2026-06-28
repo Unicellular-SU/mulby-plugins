@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images, FolderOpen } from 'lucide-react'
+import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images, FolderOpen, Clapperboard } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useTask } from '../store/taskStore'
@@ -82,6 +82,9 @@ export function TopBar() {
         ) : (
           <ListChecks size={14} className="opacity-70" />
         )}
+      </button>
+      <button onClick={() => useUi.getState().setShowDirector(true)} title="3D 导演台（摆机位/人台 → 生成）" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+        <Clapperboard size={15} />
       </button>
       <button onClick={() => useUi.getState().setShowGallery(true)} title="作品库" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <Images size={15} />
