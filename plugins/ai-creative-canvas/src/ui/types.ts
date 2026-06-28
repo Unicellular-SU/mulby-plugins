@@ -100,6 +100,7 @@ export interface ProjectDoc {
   stylePackId?: string
   defaultImageModel?: string | null
   defaultTextModel?: string | null
+  defaultPanoModel?: string | null // 360 全景专用模型（出真等距柱状）
   concurrency?: number
   createdAt: number
   updatedAt: number

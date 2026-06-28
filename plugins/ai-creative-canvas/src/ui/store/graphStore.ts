@@ -111,7 +111,7 @@ interface GraphState {
   setGlobalModel: (modelId: string | null) => void
   setStyle: (style: string) => void
   setStylePack: (id: string | undefined) => void
-  setDefaultModel: (kind: 'image' | 'text', id: string | null) => void
+  setDefaultModel: (kind: 'image' | 'text' | 'pano', id: string | null) => void
   setConcurrency: (n: number) => void
 
   // 画布(board)
@@ -221,7 +221,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
   setStylePack: (stylePackId) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, stylePackId })) })),
   setDefaultModel: (kind, id) =>
-    set((s) => ({ project: { ...s.project, [kind === 'image' ? 'defaultImageModel' : 'defaultTextModel']: id, updatedAt: Date.now() } })),
+    set((s) => ({ project: { ...s.project, [kind === 'image' ? 'defaultImageModel' : kind === 'pano' ? 'defaultPanoModel' : 'defaultTextModel']: id, updatedAt: Date.now() } })),
   setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),
 
   addBoard: () => {

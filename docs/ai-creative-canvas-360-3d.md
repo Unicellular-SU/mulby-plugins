@@ -95,3 +95,9 @@
 - 移除 `progressiveEquirect` + 工具条「渐进式合成 360」按钮；连带清理死代码：cubemap 6 面合成（`generateCubemapPano`/CUBE 着色器/转换器）、`selfCheckProjection`、`genFace`/`rollHalf`/`cardinalDesc`。
 - 保留：360 查看器、直接生成全景(A)、接缝修复(B)、天/地锚定修复（对任意全景图仍有用）。
 - **下一步**：接专用 360 生成（Skybox API / RunningHub image-panorama-360 工作流 / 360 equirect LoRA 模型）——一次出图即真无缝 equirect。待用户提供 endpoint/model 形态再设计接入。
+
+## 十、接专用 360 模型（Provider model id 形态）（2026-06-28，已提交）
+用户确认走"Provider 里的 360/equirect 专用模型 id"路线（最简形态）：
+- `ProjectDoc.defaultPanoModel`；`graphStore.setDefaultModel` 扩展 'pano'；`ProjectSettings` 加「360 全景专用模型」下拉（选能直接出 equirect 的模型/LoRA）。
+- `aiImage.generateImage`：`pano` 开启时优先用 `project.defaultPanoModel`（否则沿用卡片模型）；仍保留 2:1 + ≥2K + equirect 触发词提示（对专用模型多为有益的 trigger）。
+- 用法：工程设置选 360 专用模型 → 卡片「全景·开」→ 生成即走该模型出真等距柱状；缝/天地若仍有小瑕疵可用既有「修复接缝」「天/地修复」收尾。

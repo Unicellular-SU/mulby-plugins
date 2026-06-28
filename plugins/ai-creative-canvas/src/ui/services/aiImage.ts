@@ -86,12 +86,14 @@ export async function generateImage(
   onProgress: (p: number, previewDataUrl?: string) => void,
   onRequestId: (id: string) => void
 ): Promise<ImageGenResult> {
-  const model = card.modelId
-  if (!model) throw new Error('请先选择图像模型（面板内"模型"下拉）')
-
-  const inputs = resolveGenInputs(card, board)
   const params = card.params || {}
   const pano = !!params.pano
+  // 全景优先用工程配置的「360 专用模型」（出真等距柱状）；否则用卡片所选模型
+  const panoModel = useGraph.getState().project.defaultPanoModel || null
+  const model = (pano && panoModel) || card.modelId
+  if (!model) throw new Error('请先选择图像模型（面板内"模型"下拉；或在工程设置里配 360 专用模型）')
+
+  const inputs = resolveGenInputs(card, board)
   const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
   // 全景看的是 ~60° 一小片（约占贴图宽 1/6），分辨率要够才不糊：至少 2K
   const resolution = pano && String(params.resolution || '1K') === '1K' ? '2K' : String(params.resolution || '1K')
