@@ -249,6 +249,76 @@ async function outpaintFace(model: string, persp: HTMLCanvasElement, prompt: str
   return toSquare(out, size)
 }
 
+// 天/地修复用的方向专属强约束提示（语义转换为天花板/地板，禁画家具立面）
+function polePromptFor(scene: string, up: boolean): string {
+  const s = scene ? scene + '\n\n' : ''
+  return up
+    ? `${s}镜头正抬头垂直看向【正上方】。请只在中心透明圆区绘制与本场景一致的【天花板/顶部】（室内：中式吊顶、藻井、横梁、吊灯等；室外：天空），与四周已有的墙体/景物【顶沿】自然衔接成俯视圆顶。【不要画沙发、桌椅、家具立面或墙面正立面】；非透明区域保持不变。You look straight UP at the ceiling/sky overhead; fill only the transparent center with a ceiling/sky meeting the tops of the existing surroundings; NO furniture, NO wall fronts.`
+    : `${s}镜头正低头垂直看向【正下方】。请只在中心透明圆区绘制与本场景一致的【地面/地板】（室内：木地板、地砖、地毯；室外：地面），与四周已有的墙体/景物【底沿】自然衔接成仰视圆地。【不要画沙发、桌椅、家具立面或天花板】；非透明区域保持不变。You look straight DOWN at the floor/ground below; fill only the transparent center with a floor/ground meeting the bottoms of the existing surroundings; NO furniture fronts, NO ceiling.`
+}
+
+// 中心挖透明圆（destination-out）：只把畸变最重的极点中心交给模型重绘
+function punchCircleCenter(cv: HTMLCanvasElement, radius: number) {
+  const ctx = cv.getContext('2d')!
+  ctx.save()
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.beginPath()
+  ctx.arc(cv.width / 2, cv.height / 2, radius, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+// 锚定式天/地修复（推荐）：在【已全局连贯的底图】上，把天顶/地心投影成透视(大 FOV 带一大圈真实周边)，
+// 只挖中心圆重绘 → 四周真实环带锁住语义，模型不会瞎画家具；贴回原底图（同约定读写，列对齐，不需 rollHalf）。
+export async function repairEquirectPoles(cardId: string): Promise<void> {
+  const g = useGraph.getState()
+  const src = g.getCard(cardId)
+  if (!src?.assetUrl) {
+    toast('该卡片没有图片', 'error')
+    return
+  }
+  if (!src.modelId) {
+    toast('请先选择图像模型（需支持图生图）', 'error')
+    return
+  }
+  const model = src.modelId
+  const scene = (src.prompt || '').trim()
+  const boardId = g.boardIdOfCard(cardId)
+  const S = 1024
+  const FOV = 120 // 带一大圈真实周边当锚
+  useTask.getState().inc()
+  try {
+    const buf = await loadImageInput({ url: src.assetUrl, localPath: src.assetLocalPath || undefined })
+    if (!buf) throw new Error('读取图片失败')
+    const bmp = await createImageBitmap(new Blob([buf], { type: src.mime || 'image/png' }))
+    let eq = document.createElement('canvas')
+    eq.width = EQ_W
+    eq.height = EQ_H
+    eq.getContext('2d')!.drawImage(bmp, 0, 0, EQ_W, EQ_H)
+    for (let j = 0; j < 2; j++) {
+      const up = j === 0
+      const lat = up ? 90 : -90
+      const view = eqToPersp(eq, 0, lat, FOV, S)
+      punchCircleCenter(view, Math.round(S * 0.42)) // 只重绘中心畸变区，外圈真实周边当锚
+      const filled = await outpaintFace(model, view, polePromptFor(scene, up), S)
+      eq = perspToEqPaste(eq, filled, 0, lat, FOV)
+    }
+    const saved = await saveBase64(useGraph.getState().project.id, `${cardId}_poles`, b64(eq), 'png')
+    const id = useGraph.getState().addCard(
+      'image',
+      { x: src.x + src.w + 220, y: src.y + src.h / 2 },
+      { title: (src.title || '全景') + ' · 天地修复', status: 'done', modelId: model, refIds: [src.id], assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png', meta: { pano: true } },
+      boardId
+    )
+    if (g.boardIdOfCard(cardId) === useGraph.getState().project.activeBoardId) useGraph.getState().setSelection([id])
+    toast('天/地已修复', 'success')
+  } catch (e: any) {
+    toast('天/地修复失败：' + (e?.message || String(e)), 'error')
+  } finally {
+    useTask.getState().dec()
+  }
+}
+
 // 在球面上"旋转 + 逐块 outpaint"：每块从已填邻块续画 → 全局一致；最后补天/地 + 半幅对齐。
 export async function progressiveEquirect(cardId: string): Promise<void> {
   const g = useGraph.getState()

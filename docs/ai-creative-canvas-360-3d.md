@@ -72,3 +72,11 @@
 - **第 2 步 主循环** `progressiveEquirect`：正前 init(文生图)→ 水平绕圈(每 60°、重叠 30°)每块 `eqToPersp`(左已填/右透明)→图生图 outpaint 续画→`perspToEqPaste` 贴回 → 补天/地(lat±88) → `rollHalf` 对齐 → 落全景卡。约 8 次调用，边跑边更新进度。
 - MediaToolbox：图像卡「渐进式合成 360」(Boxes，replaces cube)；全景图「投影自检」(Crosshair)。cube 旧实现保留未用。
 - 待真机验证：outpaint 对透明洞的遵循度、绕圈接缝、天/地补全质量；不行再调 FOV/步长/overlap/提示词。
+
+## 七、方案修正：放弃"从零渐进"，改"全局底图 + 锚定修复"（2026-06-28，已提交）
+调研结论：从零链式 outpaint 是公认会"语义漂移 + 闭环失败"的（PanoDiffusion 等），复杂场景必错乱；
+真正解决环形一致性要把 circular padding/旋转做进扩散采样循环（需模型/latent，通用 API 做不到）。
+优秀 DIY 方案（DreamScene360 / L-MAGIC / PanoDreamer / Blockade Skybox）共性：**先一张全局连贯底图，再局部精修**，不是从零拼。
+- **新默认工作流**：A 直接生成 equirect 底图（全局锚，不漂移）→ B 修接缝（偏移+重绘）→ **🆕 天/地锚定修复**。
+- `panoOutpaint.repairEquirectPoles`：在已连贯底图上，把天顶/地心投影成透视（FOV 120 带一大圈真实周边当锚）→ 中心挖透明圆（`punchCircleCenter` r≈0.42S，只重绘畸变最重的极点）→ 方向专属强约束重绘（天花板/地板、禁家具立面）→ 贴回（同约定读写、列对齐、不需 rollHalf）。四周真实环带锁住语义 → 不再瞎画家具、不漂移。
+- MediaToolbox 全景图加「天/地修复」(ArrowUpDown)。`progressiveEquirect`(从零渐进)保留为实验项，不推荐复杂场景用。
