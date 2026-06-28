@@ -4,7 +4,7 @@ import { useUi } from '../store/uiStore'
 import { MediaToolbox } from '../components/MediaToolbox'
 import { worldToScreen } from './viewport'
 
-const BAR_W = 360
+const BAR_W = 420
 
 // 选中单张媒体卡时，在卡上方居中浮出媒体工具条（裁剪/局部编辑/放大/去背/下载…）。
 // 屏幕坐标浮层，跟随视口；空间不足翻到卡下方；左右夹取到舞台范围内。
