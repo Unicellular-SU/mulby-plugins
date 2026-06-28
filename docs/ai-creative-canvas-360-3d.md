@@ -89,3 +89,9 @@
 - `progressiveEquirect`：init 用 plan.front；绕圈每步用 `cardinalDesc(plan,lon)`(就近方向描述)；天/地用 plan.up/down。
 - `repairEquirectPoles`：天/地用 plan.up/down 的具体描述（如"中式吊顶藻井""木地板"）。
 - 仍受 ② 的天花板限制，不会质变。真正一步到位仍建议接专用 360 模型/工作流(Skybox/RunningHub image-panorama-360/360 LoRA)。
+
+## 九、删除渐进式合成，转专用 360 模型路线（2026-06-28）
+渐进式 outpaint 效果差（受 gpt-image-2 edit 非严格 mask inpaint 的根本限制，复杂场景必漂移），按用户决定删除：
+- 移除 `progressiveEquirect` + 工具条「渐进式合成 360」按钮；连带清理死代码：cubemap 6 面合成（`generateCubemapPano`/CUBE 着色器/转换器）、`selfCheckProjection`、`genFace`/`rollHalf`/`cardinalDesc`。
+- 保留：360 查看器、直接生成全景(A)、接缝修复(B)、天/地锚定修复（对任意全景图仍有用）。
+- **下一步**：接专用 360 生成（Skybox API / RunningHub image-panorama-360 工作流 / 360 equirect LoRA 模型）——一次出图即真无缝 equirect。待用户提供 endpoint/model 形态再设计接入。

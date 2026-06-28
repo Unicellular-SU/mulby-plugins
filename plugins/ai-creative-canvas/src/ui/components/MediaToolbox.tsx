@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, Boxes, ArrowUpDown } from 'lucide-react'
+import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, ArrowUpDown } from 'lucide-react'
 import type { Card } from '../types'
 import { runImageTool, runGridSlice, runVideoTool } from '../services/mediaOps'
 import { repairEquirectSeam } from '../services/mediaPano'
-import { progressiveEquirect, repairEquirectPoles } from '../services/panoOutpaint'
+import { repairEquirectPoles } from '../services/panoOutpaint'
 import { generateCard, canGenerate } from '../services/generate'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -63,7 +63,6 @@ export function MediaToolbox({ card }: { card: Card }) {
           <IconBtn icon={Scissors} title="抠像/去背景" onClick={() => runImageTool(card.id, 'removebg')} />
           <IconBtn icon={Grid2x2} title="宫格 2×2" onClick={() => runGridSlice(card.id, 2, 2)} />
           <IconBtn icon={Grid2x2} title="宫格 3×3" onClick={() => runGridSlice(card.id, 3, 3)} />
-          <IconBtn icon={Boxes} title="渐进式合成 360 全景（按本卡提示词，绕圈 outpaint）" onClick={() => void progressiveEquirect(card.id)} />
           <IconBtn icon={Download} title="下载" onClick={() => void download()} />
         </>
       )}
