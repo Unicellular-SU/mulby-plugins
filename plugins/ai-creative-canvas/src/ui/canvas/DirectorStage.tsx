@@ -48,6 +48,7 @@ function Inner() {
       }
       const mount = mountRef.current
       if (disposed || !mount) return
+      try {
       const W = mount.clientWidth || 1
       const H = mount.clientHeight || 1
 
@@ -79,7 +80,9 @@ function Inner() {
       orbit.target.set(0, 1, 0)
       const tcontrol = new TransformControls(cam, renderer.domElement)
       tcontrol.addEventListener('dragging-changed', (e: any) => { orbit.enabled = !e.value })
-      scene.add(tcontrol)
+      // three r0.169：TransformControls 不再是 Object3D，需把它的 helper 加进场景
+      const tHelper = typeof tcontrol.getHelper === 'function' ? tcontrol.getHelper() : tcontrol
+      scene.add(tHelper)
 
       const subjects: Subject[] = []
       const raycaster = new THREE.Raycaster()
@@ -209,13 +212,20 @@ function Inner() {
       if (!disposed) setReady(true)
 
       cleanup = () => {
-        cancelAnimationFrame(raf)
-        ro.disconnect()
-        renderer.domElement.removeEventListener('pointerdown', onPointerDown)
-        tcontrol.dispose()
-        orbit.dispose()
-        renderer.dispose()
-        if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement)
+        // 逐步兜底：r169 的 tcontrol.dispose() 在此会抛 this.traverse，不能让它中断卸载
+        const safe = (fn: () => void) => { try { fn() } catch { /* ignore */ } }
+        safe(() => cancelAnimationFrame(raf))
+        safe(() => ro.disconnect())
+        safe(() => renderer.domElement.removeEventListener('pointerdown', onPointerDown))
+        safe(() => tcontrol.detach())
+        safe(() => scene.remove(tHelper))
+        safe(() => tcontrol.dispose())
+        safe(() => orbit.dispose())
+        safe(() => renderer.dispose())
+        safe(() => { if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement) })
+      }
+      } catch (err) {
+        console.error('[DirectorStage] setup failed', err)
       }
     })()
     return () => {
