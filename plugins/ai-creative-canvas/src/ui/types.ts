@@ -90,6 +90,31 @@ export interface Board {
   stylePackId?: string // 画布级风格包
 }
 
+// 3D 导演台场景（持久化）
+export interface DirectorCam {
+  pos: [number, number, number]
+  target: [number, number, number]
+  focal: number
+}
+export interface DirectorSubject {
+  kind: string // 人台 / 道具
+  pos: [number, number, number]
+  rot: [number, number, number]
+  scale: number
+  joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台摆姿）
+}
+export interface DirectorShot {
+  id: string
+  name: string
+  cam: DirectorCam
+}
+export interface DirectorScene {
+  subjects: DirectorSubject[]
+  cam: DirectorCam
+  shots: DirectorShot[]
+  prompt?: string
+}
+
 export interface ProjectDoc {
   id: string
   name: string
@@ -101,6 +126,8 @@ export interface ProjectDoc {
   defaultImageModel?: string | null
   defaultTextModel?: string | null
   defaultPanoModel?: string | null // 360 全景专用模型（出真等距柱状）
+  defaultControlModel?: string | null // ControlNet 控制模型（深度/姿态 → 强控制）
+  director?: DirectorScene | null // 3D 导演台场景（持久化）
   concurrency?: number
   createdAt: number
   updatedAt: number

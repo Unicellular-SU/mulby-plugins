@@ -48,3 +48,9 @@
 - **焦段预设** 24/35/50/85 一键；保留焦段滑杆 + 镜别(特写/中景/全景) + 角度(仰/平/俯)。
 - **布局感知镜头提示词**：`shotFragment` 把各人台投影到相机 NDC → 居左/中/右 + 角色数量，连同 镜头/焦段/角度/镜别 一起写进生成提示，机位语义更准。
 - 仍为弱控制（gpt-image-2 img2img 参考）；v3 再上深度/OpenPose ControlNet（需控制模型）、场景持久化、多机位 shot list、接分镜/时间线。
+
+## 八、v3（2026-06-28，已提交）：ControlNet 强控制 + 场景持久化 + 多机位 shot list
+- **ControlNet 强控制**：`ProjectDoc.defaultControlModel` + `setDefaultModel('control')` + ProjectSettings「ControlNet 控制模型」下拉。导出**深度控制图**（`MeshDepthMaterial` BasicDepthPacking + 临时 far=14 + 反相使近=亮，符合 controlnet-depth 约定）；配了控制模型时生成走「控制模型 + 深度图 + 严格据此构图/姿态」提示，否则回落「默认图像模型 + 截图参考」。
+- **场景持久化**：`ProjectDoc.director`（subjects 含 kind/pos/rot/scale/关节欧拉角 + camera + shots + prompt）；`setDirectorScene`；打开恢复、关闭/Esc 保存（随分片 manifest 持久化）。
+- **多机位 shot list**：右侧面板「+记录」当前机位为 shot、点 shot 切换机位、删除；「批量生成 N 机位」逐个 applyCam → 生成 → 成片在画布排成一行。生成不再自动关闭（便于多机位迭代）。
+- 控制精度仍取决于 provider 是否真支持控制模型；未配则为构图参考级（已如实标注）。

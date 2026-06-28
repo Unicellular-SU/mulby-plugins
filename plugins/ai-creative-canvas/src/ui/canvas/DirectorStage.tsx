@@ -29,9 +29,20 @@ function Inner() {
   const [hasSel, setHasSel] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
-  const close = () => {
-    if (!busy) useUi.getState().setShowDirector(false)
+  const [shots, setShots] = useState<{ id: string; name: string; cam: any }[]>([])
+  const saveScene = () => {
+    try {
+      const only = api.current.serializeSceneOnly?.()
+      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt })
+    } catch { /* ignore */ }
   }
+  const close = () => {
+    if (busy) return
+    saveScene()
+    useUi.getState().setShowDirector(false)
+  }
+  const closeRef = useRef(close)
+  closeRef.current = close
 
   useEffect(() => {
     let disposed = false
@@ -75,6 +86,7 @@ function Inner() {
       ground.rotation.x = -Math.PI / 2
       ground.position.y = -0.001
       scene.add(ground)
+      const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking }) // 深度控制图
 
       const orbit = new OrbitControls(cam, renderer.domElement)
       orbit.enableDamping = true
@@ -203,7 +215,81 @@ function Inner() {
       })
       ro.observe(mount)
 
-      addMannequin()
+      // ── v3：序列化/恢复、机位读写、深度控制图 ──
+      const getCam = () => ({
+        pos: [cam.position.x, cam.position.y, cam.position.z] as [number, number, number],
+        target: [orbit.target.x, orbit.target.y, orbit.target.z] as [number, number, number],
+        focal: cam.getFocalLength()
+      })
+      const applyCam = (c: any) => {
+        cam.position.set(c.pos[0], c.pos[1], c.pos[2])
+        orbit.target.set(c.target[0], c.target[1], c.target[2])
+        cam.setFocalLength(c.focal)
+        cam.updateProjectionMatrix()
+      }
+      const buildFromState = (st: any) => {
+        const obj: any = st.kind === '道具'
+          ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
+          : makeMannequin(0xc7ccd6)
+        obj.position.set(st.pos[0], st.pos[1], st.pos[2])
+        obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
+        obj.scale.setScalar(st.scale || 1)
+        obj.userData.kind = st.kind
+        if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
+        scene.add(obj)
+        subjects.push({ obj, kind: st.kind })
+      }
+      const serializeSceneOnly = () => ({
+        subjects: subjects.map((s) => {
+          const o: any = s.obj
+          const joints: Record<string, [number, number, number]> = {}
+          if (s.kind === '人台') o.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j) joints[j] = [c.rotation.x, c.rotation.y, c.rotation.z] })
+          return { kind: s.kind, pos: [o.position.x, o.position.y, o.position.z] as [number, number, number], rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number], scale: o.scale.x, joints: s.kind === '人台' ? joints : undefined }
+        }),
+        cam: getCam()
+      })
+      const captureDepth = (): string => {
+        tcontrol.detach()
+        const pf = cam.far
+        cam.far = 14
+        cam.updateProjectionMatrix()
+        const pbg = scene.background
+        scene.background = new THREE.Color(0x000000)
+        scene.overrideMaterial = depthMat
+        renderer.render(scene, cam)
+        scene.overrideMaterial = null as any
+        scene.background = pbg
+        cam.far = pf
+        cam.updateProjectionMatrix()
+        const cw = renderer.domElement.width
+        const ch = renderer.domElement.height
+        const c = document.createElement('canvas')
+        c.width = cw
+        c.height = ch
+        const cx = c.getContext('2d')!
+        cx.drawImage(renderer.domElement, 0, 0)
+        const idata = cx.getImageData(0, 0, cw, ch)
+        const dd = idata.data
+        for (let i = 0; i < dd.length; i += 4) { const v = 255 - dd[i]; dd[i] = v; dd[i + 1] = v; dd[i + 2] = v; dd[i + 3] = 255 } // 反相：近=亮（controlnet-depth 约定）
+        cx.putImageData(idata, 0, 0)
+        attachByMode()
+        return c.toDataURL('image/png')
+      }
+
+      // 恢复持久化场景，否则放一个默认人台
+      const saved0 = useGraph.getState().project.director
+      if (saved0 && Array.isArray(saved0.subjects) && saved0.subjects.length) {
+        saved0.subjects.forEach(buildFromState)
+        if (saved0.cam) applyCam(saved0.cam)
+        select(null, null)
+        if (!disposed) {
+          setShots(saved0.shots || [])
+          if (saved0.prompt) setPrompt(saved0.prompt)
+          setFocal(Math.round((saved0.cam && saved0.cam.focal) || 35))
+        }
+      } else {
+        addMannequin()
+      }
 
       // 由相机几何 + 主体布局推导结构化镜头提示词
       const shotFragment = (): string => {
@@ -258,6 +344,10 @@ function Inner() {
           attachByMode()
           return url
         },
+        captureDepth,
+        getCam,
+        applyCam,
+        serializeSceneOnly,
         shotFragment
       }
       if (!disposed) setReady(true)
@@ -287,11 +377,11 @@ function Inner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) useUi.getState().setShowDirector(false)
+      if (e.key === 'Escape') closeRef.current()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [busy])
+  }, [])
 
   const onFocal = (mm: number) => {
     setFocal(mm)
@@ -302,45 +392,77 @@ function Inner() {
     api.current.setMode?.(m)
   }
 
-  const run = async () => {
-    if (!prompt.trim()) {
-      toast('请先填写场景/角色描述', 'error')
-      return
-    }
-    const model = useGraph.getState().project.defaultImageModel
+  // 单次生成（placeIndex 用于批量时把成片排成一行）。返回是否成功。
+  const doGenerate = async (placeIndex: number): Promise<boolean> => {
+    const proj = useGraph.getState().project
+    const controlModel = proj.defaultControlModel
+    const model = controlModel || proj.defaultImageModel
     if (!model) {
-      toast('请先在工程设置（顶栏 ⚙）选「默认图像模型」', 'error')
-      return
+      toast('请在工程设置（顶栏 ⚙）选「默认图像模型」或「ControlNet 控制模型」', 'error')
+      return false
     }
-    setBusy(true)
     try {
       const ai = (window as any).mulby.ai
-      const dataUrl = api.current.capture() as string
+      const useControl = !!controlModel
+      const dataUrl = (useControl ? api.current.captureDepth() : api.current.capture()) as string
       const b64 = dataUrl.split(',')[1]
       const bin = atob(b64)
       const buf = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
-      const full = `${prompt.trim()}\n\n${api.current.shotFragment()}以上为 3D 导演台的机位/构图参考（灰色人台代表角色站位），请据此构图与镜头，渲染为成片画面；忽略灰模本身的材质。`
+      const note = useControl
+        ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
+        : '【以上为 3D 导演台的机位/构图参考（灰色人台=角色站位/姿态），请据此构图与镜头渲染成片，忽略灰模材质。】'
+      const full = `${prompt.trim()}\n\n${api.current.shotFragment()}${note}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
       const { saveBase64 } = await import('../services/media')
       const g = useGraph.getState()
       const boardId = g.project.activeBoardId
-      const saved = await saveBase64(g.project.id, `director_${Date.now()}`, out, 'png')
+      const saved = await saveBase64(g.project.id, `director_${Date.now()}_${placeIndex}`, out, 'png')
       const vp = g.getActiveBoard().viewport
-      const wx = (-vp.x + 400) / vp.zoom
-      const wy = (-vp.y + 300) / vp.zoom
+      const wx = (-vp.x + 360) / vp.zoom + placeIndex * 340
+      const wy = (-vp.y + 320) / vp.zoom
       g.addCard('image', { x: wx, y: wy }, { title: '导演台成片', status: 'done', modelId: model, prompt: prompt.trim(), assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
-      toast('已生成（导演台）', 'success')
-      useUi.getState().setShowDirector(false)
+      return true
     } catch (e: any) {
       toast('生成失败：' + (e?.message || String(e)), 'error')
-    } finally {
-      setBusy(false)
+      return false
     }
   }
+
+  const run = async () => {
+    if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
+    setBusy(true)
+    const ok = await doGenerate(0)
+    setBusy(false)
+    if (ok) toast('已生成（导演台）', 'success')
+  }
+
+  const batchGenerate = async () => {
+    if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
+    if (!shots.length) { toast('请先「记录机位」添加 shot', 'error'); return }
+    setBusy(true)
+    let ok = 0
+    for (let i = 0; i < shots.length; i++) {
+      api.current.applyCam?.(shots[i].cam)
+      if (await doGenerate(i)) ok++
+    }
+    setBusy(false)
+    toast(`已生成 ${ok}/${shots.length} 个机位`, ok ? 'success' : 'error')
+  }
+
+  const addShot = () => {
+    const cam = api.current.getCam?.()
+    if (!cam) return
+    setShots((s) => [...s, { id: 'shot_' + Date.now().toString(36), name: `机位${s.length + 1}`, cam }])
+  }
+  const applyShot = (sh: { cam: any }) => {
+    api.current.applyCam?.(sh.cam)
+    setFocal(Math.round(sh.cam?.focal || 35))
+  }
+  const delShot = (id: string) => setShots((s) => s.filter((x) => x.id !== id))
 
   const Btn = ({ on, onClick, children, title }: { on?: boolean; onClick: () => void; children: any; title: string }) => (
     <button onClick={onClick} title={title} className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 ${on ? 'bg-indigo-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
@@ -394,6 +516,28 @@ function Inner() {
           <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
         </div>
         <div className="opacity-50 leading-snug">拖拽空白=转相机 · 滚轮推拉 · 点人台=选中 · 移动=挪整体 · 旋转/摆姿模式下点关节(肩/肘/髋/膝/头)可掰姿势</div>
+      </div>
+
+      {/* 多机位 shot list */}
+      <div className="absolute top-14 right-3 flex flex-col gap-1.5 w-44 p-2.5 rounded-lg bg-black/55 text-white text-xs">
+        <div className="flex items-center justify-between">
+          <span className="opacity-70 font-medium">机位列表（{shots.length}）</span>
+          <Btn onClick={addShot} title="把当前机位记为一个 shot">+记录</Btn>
+        </div>
+        <div className="flex flex-col gap-1 max-h-40 overflow-auto ace-scroll">
+          {shots.map((s) => (
+            <div key={s.id} className="flex items-center gap-1">
+              <button onClick={() => applyShot(s)} className="flex-1 text-left px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 truncate" title="切到此机位">{s.name}</button>
+              <button onClick={() => delShot(s.id)} className="px-1 opacity-60 hover:opacity-100" title="删除"><Trash2 size={12} /></button>
+            </div>
+          ))}
+          {!shots.length && <span className="opacity-40">摆好机位后点「+记录」</span>}
+        </div>
+        {shots.length > 0 && (
+          <button onClick={() => void batchGenerate()} disabled={busy} className="mt-1 px-2 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white text-xs flex items-center justify-center gap-1 disabled:opacity-60">
+            <Film size={13} /> 批量生成 {shots.length} 机位
+          </button>
+        )}
       </div>
 
       {/* 生成 */}

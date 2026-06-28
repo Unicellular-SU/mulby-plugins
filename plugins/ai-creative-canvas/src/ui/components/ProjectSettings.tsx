@@ -88,6 +88,15 @@ export function ProjectSettings() {
               <span className="text-[11px] opacity-50">开启「全景」生成时优先用它（应选能直接出等距柱状 equirect 的模型/LoRA）。</span>
             </div>
             <div className="flex flex-col gap-1">
+              <label className="text-xs opacity-60">ControlNet 控制模型</label>
+              <Select
+                value={project.defaultControlModel || ''}
+                onChange={(v) => setDefaultModel('control', v || null)}
+                options={[{ value: '', label: '不用（导演台走截图参考）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label }))]}
+              />
+              <span className="text-[11px] opacity-50">3D 导演台「强控制」用：选支持深度/姿态控制图的模型，按控制图严格构图。</span>
+            </div>
+            <div className="flex flex-col gap-1">
               <label className="text-xs opacity-60">批量并发上限</label>
               <Select
                 value={String(project.concurrency || 4)}

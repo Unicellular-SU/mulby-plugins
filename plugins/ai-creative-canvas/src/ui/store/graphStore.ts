@@ -111,7 +111,8 @@ interface GraphState {
   setGlobalModel: (modelId: string | null) => void
   setStyle: (style: string) => void
   setStylePack: (id: string | undefined) => void
-  setDefaultModel: (kind: 'image' | 'text' | 'pano', id: string | null) => void
+  setDefaultModel: (kind: 'image' | 'text' | 'pano' | 'control', id: string | null) => void
+  setDirectorScene: (s: import('../types').DirectorScene | null) => void
   setConcurrency: (n: number) => void
 
   // 画布(board)
@@ -221,7 +222,14 @@ export const useGraph = create<GraphState>((set, get) => ({
   setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
   setStylePack: (stylePackId) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, stylePackId })) })),
   setDefaultModel: (kind, id) =>
-    set((s) => ({ project: { ...s.project, [kind === 'image' ? 'defaultImageModel' : kind === 'pano' ? 'defaultPanoModel' : 'defaultTextModel']: id, updatedAt: Date.now() } })),
+    set((s) => ({
+      project: {
+        ...s.project,
+        [kind === 'image' ? 'defaultImageModel' : kind === 'pano' ? 'defaultPanoModel' : kind === 'control' ? 'defaultControlModel' : 'defaultTextModel']: id,
+        updatedAt: Date.now()
+      }
+    })),
+  setDirectorScene: (s2) => set((s) => ({ project: { ...s.project, director: s2, updatedAt: Date.now() } })),
   setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),
 
   addBoard: () => {
