@@ -249,12 +249,67 @@ async function outpaintFace(model: string, persp: HTMLCanvasElement, prompt: str
   return toSquare(out, size)
 }
 
-// 天/地修复用的方向专属强约束提示（语义转换为天花板/地板，禁画家具立面）
-function polePromptFor(scene: string, up: boolean): string {
-  const s = scene ? scene + '\n\n' : ''
+// ── LLM 全局规划（PanoDreamer 思路）：先把场景拆成前后左右上下都连贯一致的方向描述 ──
+export interface PanoPlan {
+  global: string
+  front: string
+  right: string
+  back: string
+  left: string
+  up: string
+  down: string
+}
+async function chat(messages: any[], model?: string): Promise<string> {
+  let acc = ''
+  const req = ai().call({ messages, ...(model ? { model } : {}) }, (c: any) => {
+    const p = typeof c.content === 'string' ? c.content : ''
+    if (p && (c.chunkType === 'text' || c.chunkType === undefined)) acc += p
+  })
+  const final = await req
+  if (!acc && final && typeof final.content === 'string') acc = final.content
+  return acc
+}
+export async function planPanoViews(scene: string): Promise<PanoPlan> {
+  const fb: PanoPlan = { global: scene, front: scene, right: scene, back: scene, left: scene, up: '天花板或天空', down: '地面或地板' }
+  if (!scene.trim()) return fb
+  try {
+    const model = useGraph.getState().project.defaultTextModel || undefined
+    const sys = '你是 360° 全景场景规划助手。给定场景，规划一个前后左右上下都连贯一致、彼此自然衔接、风格与光照统一的 360 环境。只输出 JSON，不要解释。'
+    const user =
+      `场景：${scene}\n\n请输出 JSON（中文，各 1-2 句、具体可画，相邻方向要能接上）：\n` +
+      `{"global":"整体风格/光照/氛围","front":"正前方所见","right":"向右转90°所见","back":"正后方所见","left":"向左转90°所见",` +
+      `"up":"正上方——室内为天花板(如中式吊顶/藻井/横梁/吊灯)，室外为天空","down":"正下方——室内为地板(木地板/地砖/地毯)，室外为地面"}`
+    const raw = await chat([{ role: 'system', content: sys }, { role: 'user', content: user }], model)
+    const m = raw.match(/\{[\s\S]*\}/)
+    if (!m) return fb
+    const p = JSON.parse(m[0])
+    return {
+      global: p.global || scene,
+      front: p.front || scene,
+      right: p.right || scene,
+      back: p.back || scene,
+      left: p.left || scene,
+      up: p.up || fb.up,
+      down: p.down || fb.down
+    }
+  } catch {
+    return fb
+  }
+}
+function cardinalDesc(plan: PanoPlan, lonDeg: number): string {
+  const a = ((lonDeg % 360) + 360) % 360
+  if (a < 45 || a >= 315) return plan.front
+  if (a < 135) return plan.right
+  if (a < 225) return plan.back
+  return plan.left
+}
+
+// 天/地方向专属强约束提示：desc=LLM 规划出的天花板/地板具体描述
+function polePromptFor(global: string, desc: string, up: boolean): string {
+  const s = global ? global + '\n\n' : ''
   return up
-    ? `${s}镜头正抬头垂直看向【正上方】。请只在中心透明圆区绘制与本场景一致的【天花板/顶部】（室内：中式吊顶、藻井、横梁、吊灯等；室外：天空），与四周已有的墙体/景物【顶沿】自然衔接成俯视圆顶。【不要画沙发、桌椅、家具立面或墙面正立面】；非透明区域保持不变。You look straight UP at the ceiling/sky overhead; fill only the transparent center with a ceiling/sky meeting the tops of the existing surroundings; NO furniture, NO wall fronts.`
-    : `${s}镜头正低头垂直看向【正下方】。请只在中心透明圆区绘制与本场景一致的【地面/地板】（室内：木地板、地砖、地毯；室外：地面），与四周已有的墙体/景物【底沿】自然衔接成仰视圆地。【不要画沙发、桌椅、家具立面或天花板】；非透明区域保持不变。You look straight DOWN at the floor/ground below; fill only the transparent center with a floor/ground meeting the bottoms of the existing surroundings; NO furniture fronts, NO ceiling.`
+    ? `${s}镜头正抬头垂直看向【正上方】。请只在中心透明圆区绘制：${desc}。要与四周已有的墙体/景物【顶沿】自然衔接成俯视圆顶。【不要画沙发、桌椅、家具立面或墙面正立面】；非透明区域保持不变。Fill only the transparent center with the overhead (ceiling/sky); no furniture, no wall fronts.`
+    : `${s}镜头正低头垂直看向【正下方】。请只在中心透明圆区绘制：${desc}。要与四周已有的墙体/景物【底沿】自然衔接成仰视圆地。【不要画沙发、桌椅、家具立面或天花板】；非透明区域保持不变。Fill only the transparent center with the floor/ground; no furniture fronts, no ceiling.`
 }
 
 // 中心挖透明圆（destination-out）：只把畸变最重的极点中心交给模型重绘
@@ -295,12 +350,13 @@ export async function repairEquirectPoles(cardId: string): Promise<void> {
     eq.width = EQ_W
     eq.height = EQ_H
     eq.getContext('2d')!.drawImage(bmp, 0, 0, EQ_W, EQ_H)
+    const plan = await planPanoViews(scene) // LLM 规划出具体的天花板/地板描述
     for (let j = 0; j < 2; j++) {
       const up = j === 0
       const lat = up ? 90 : -90
       const view = eqToPersp(eq, 0, lat, FOV, S)
       punchCircleCenter(view, Math.round(S * 0.42)) // 只重绘中心畸变区，外圈真实周边当锚
-      const filled = await outpaintFace(model, view, polePromptFor(scene, up), S)
+      const filled = await outpaintFace(model, view, polePromptFor(plan.global, up ? plan.up : plan.down, up), S)
       eq = perspToEqPaste(eq, filled, 0, lat, FOV)
     }
     const saved = await saveBase64(useGraph.getState().project.id, `${cardId}_poles`, b64(eq), 'png')
@@ -337,15 +393,10 @@ export async function progressiveEquirect(cardId: string): Promise<void> {
   const boardId = g.boardIdOfCard(cardId)
   const S = 1024
   const FOV = 90
-  const persPrompt = (where: string) =>
-    `${scene}\n\nA normal rectilinear perspective photo (NOT equirectangular, no fisheye), 90° field of view, ${where}. Part of one continuous 360° environment, consistent style/lighting/weather.`
-  const fillPrompt =
-    `${scene}\n\n无缝补全画面中透明的区域，严格延续周边已有内容的结构、纹理、光照与地平线，使衔接处完全连续、看不出拼接；其余非透明区域保持不变。Seamlessly outpaint only the transparent areas to continue this 360° panorama; match the existing surroundings; no visible seam.`
-  // 天/地是「语义转换」而非「延续墙面」：必须明确告知抬头看顶/低头看地，并禁止画家具立面
-  const polePrompt = (up: boolean) =>
-    up
-      ? `${scene}\n\n镜头正抬头垂直看向【正上方】。请只在透明区域绘制与本场景一致的【天花板/顶部】——室内则是天花板（如中式吊顶、藻井、横梁、吊灯等），室外则是天空；要与四周墙体/景物的【顶沿】自然衔接成一个俯视的圆顶。【不要画沙发、桌椅、家具立面或墙面正立面】；其余非透明区域保持不变。You are looking straight UP at the ceiling (interior) or sky (exterior) directly overhead; fill only the transparent center with a plausible ceiling/sky that meets the tops of the surrounding walls; NO furniture, NO wall fronts.`
-      : `${scene}\n\n镜头正低头垂直看向【正下方】。请只在透明区域绘制与本场景一致的【地面/地板】——室内则是地板/地砖/地毯，室外则是地面；要与四周墙体/景物的【底沿】自然衔接成一个仰视的圆形地面。【不要画沙发、桌椅、家具立面或天花板】；其余非透明区域保持不变。You are looking straight DOWN at the floor/ground directly below; fill only the transparent center with a plausible floor/ground that meets the bottoms of the surrounding walls; NO furniture fronts, NO ceiling.`
+  const persPrompt = (g0: string, where: string) =>
+    `${g0}\n\nA normal rectilinear perspective photo (NOT equirectangular, no fisheye), 90° field of view, ${where}. Part of one continuous 360° environment, consistent style/lighting/weather.`
+  const fillPrompt = (g0: string, dir: string) =>
+    `整体场景：${g0}\n本视角朝向：${dir}\n\n无缝补全画面中透明的区域，按"本视角朝向"的内容、并严格延续周边已有内容的结构/纹理/光照/地平线，使衔接处完全连续、看不出拼接；其余非透明区域保持不变。Seamlessly outpaint only the transparent areas; match the existing surroundings; no visible seam.`
 
   const id = useGraph.getState().addCard(
     'image',
@@ -355,28 +406,30 @@ export async function progressiveEquirect(cardId: string): Promise<void> {
   )
   useTask.getState().inc()
   try {
+    const plan = await planPanoViews(scene) // LLM 全局规划：各方向连贯描述
+    useGraph.getState().updateCard(id, { progress: 0.06 })
     let eq = document.createElement('canvas')
     eq.width = 2048
     eq.height = 1024 // 透明起始
-    // 1) 正前 init（文生图）→ 贴入
-    const front = await genFace(model, persPrompt('looking straight ahead (front view)'), S)
+    // 1) 正前 init（文生图，用规划的 front）→ 贴入
+    const front = await genFace(model, persPrompt(plan.global, `looking straight ahead. ${plan.front}`), S)
     eq = perspToEqPaste(eq, front, 0, 0, FOV)
-    useGraph.getState().updateCard(id, { progress: 0.12 })
-    // 2) 绕水平一圈（每 60°，与前一块重叠 30°）→ outpaint
+    useGraph.getState().updateCard(id, { progress: 0.14 })
+    // 2) 绕水平一圈（每 60°，与前一块重叠 30°）→ outpaint，用规划的方向描述
     const ring = [60, 120, 180, 240, 300]
     for (let i = 0; i < ring.length; i++) {
       const lon = ring[i]
       const view = eqToPersp(eq, lon, 0, FOV, S) // 左侧已填、右侧透明
-      const filled = await outpaintFace(model, view, fillPrompt, S)
+      const filled = await outpaintFace(model, view, fillPrompt(plan.global, cardinalDesc(plan, lon)), S)
       eq = perspToEqPaste(eq, filled, lon, 0, FOV)
-      useGraph.getState().updateCard(id, { progress: 0.12 + ((i + 1) / ring.length) * 0.6 })
+      useGraph.getState().updateCard(id, { progress: 0.14 + ((i + 1) / ring.length) * 0.58 })
     }
-    // 3) 补天顶/地面：正天顶/正地(±90，居中)，用方向专属强约束提示（语义转换为天花板/地板）
+    // 3) 补天顶/地面：正天顶/正地(±90，居中)，用规划的天花板/地板描述
     for (let j = 0; j < 2; j++) {
       const up = j === 0
       const lat = up ? 90 : -90
       const view = eqToPersp(eq, 0, lat, FOV, S)
-      const filled = await outpaintFace(model, view, polePrompt(up), S)
+      const filled = await outpaintFace(model, view, polePromptFor(plan.global, up ? plan.up : plan.down, up), S)
       eq = perspToEqPaste(eq, filled, 0, lat, FOV)
       useGraph.getState().updateCard(id, { progress: 0.72 + (j + 1) * 0.1 })
     }

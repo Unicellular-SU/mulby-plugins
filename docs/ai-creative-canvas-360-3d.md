@@ -80,3 +80,12 @@
 - **新默认工作流**：A 直接生成 equirect 底图（全局锚，不漂移）→ B 修接缝（偏移+重绘）→ **🆕 天/地锚定修复**。
 - `panoOutpaint.repairEquirectPoles`：在已连贯底图上，把天顶/地心投影成透视（FOV 120 带一大圈真实周边当锚）→ 中心挖透明圆（`punchCircleCenter` r≈0.42S，只重绘畸变最重的极点）→ 方向专属强约束重绘（天花板/地板、禁家具立面）→ 贴回（同约定读写、列对齐、不需 rollHalf）。四周真实环带锁住语义 → 不再瞎画家具、不漂移。
 - MediaToolbox 全景图加「天/地修复」(ArrowUpDown)。`progressiveEquirect`(从零渐进)保留为实验项，不推荐复杂场景用。
+
+## 八、采纳 PanoDreamer 的 LLM 全局规划（2026-06-28，已提交）
+读 PanoDreamer(2504.05152)：它强在 ① LLM 先把场景拆成各方向连贯描述；② warp+**严格 mask inpaint(SD2，mask 外逐像素不变)**保住锚 + GPT-4o 去重复物体；③ 360 专用极点 inpaint + 超分。
+诊断：**我们 DIY 的真正天花板是 gpt-image-2 的 edit 不是严格 mask inpaint（它倾向重画整图），所以链式/warp 拼接必漂移**——非参数可救。
+本次采纳成本最低、收益较确定的一点 ①：
+- `planPanoViews(scene)`：文本模型(`ai.call`，用 project.defaultTextModel)把场景拆成 `{global,front,right,back,left,up,down}` 连贯 JSON。
+- `progressiveEquirect`：init 用 plan.front；绕圈每步用 `cardinalDesc(plan,lon)`(就近方向描述)；天/地用 plan.up/down。
+- `repairEquirectPoles`：天/地用 plan.up/down 的具体描述（如"中式吊顶藻井""木地板"）。
+- 仍受 ② 的天花板限制，不会质变。真正一步到位仍建议接专用 360 模型/工作流(Skybox/RunningHub image-panorama-360/360 LoRA)。
