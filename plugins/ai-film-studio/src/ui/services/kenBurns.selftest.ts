@@ -3,7 +3,7 @@
  *   npx esbuild src/ui/services/kenBurns.selftest.ts --bundle --platform=node --format=esm --outfile=dist/_selftest.mjs && node dist/_selftest.mjs
  * 注：仅验证运动数学与 zoompan 串结构；视觉正确性需在 Mulby 内跑真实 ffmpeg。
  */
-import { cameraMotion, kenBurnsZoompan, kenBurnsCss, KEN_BURNS_OPTIONS, isKenBurnsPreset } from './kenBurns'
+import { cameraMotion, kenBurnsZoompan, kenBurnsCss, KEN_BURNS_OPTIONS, isKenBurnsPreset, buildKenBurnsArgs, cameraMoveToKenBurns } from './kenBurns'
 
 let failures = 0
 function check(name: string, cond: boolean, detail: string) {
@@ -42,6 +42,21 @@ check('极短 1 帧不崩(prog=0)', zp1.includes('d=1') && !zp1.includes('/0'), 
 // 选项 / 类型守卫
 check('KEN_BURNS_OPTIONS 9 项带中文', KEN_BURNS_OPTIONS.length === 9 && KEN_BURNS_OPTIONS.every((o) => o.label.length > 0), `${KEN_BURNS_OPTIONS.length}`)
 check('isKenBurnsPreset 守卫', isKenBurnsPreset('ken-burns') && !isKenBurnsPreset('nope'), 'guard')
+
+// buildKenBurnsArgs（完整 ffmpeg 参数）
+const kbArgs = buildKenBurnsArgs('C:/img/key.png', 'zoom-in', { durationSec: 3, fps: 24, width: 1280, height: 720, outPath: 'C:/out/kb.mp4' })
+console.log(`buildKenBurnsArgs → ${kbArgs.join(' ')}`)
+check('args 含 -loop 1', kbArgs.includes('-loop') && kbArgs[kbArgs.indexOf('-loop') + 1] === '1', kbArgs.join(' '))
+check('args 含输入图', kbArgs.includes('C:/img/key.png'), 'no input')
+check('args 含 -t 3', kbArgs.includes('-t') && kbArgs[kbArgs.indexOf('-t') + 1] === '3', 'no -t')
+check('args vf 含 zoompan + 上采样裁切', kbArgs.some((a) => a.includes('zoompan=') && a.includes('scale=2560:1440') && a.includes('crop=2560:1440')), 'vf wrong')
+check('args 含 libx264 与输出', kbArgs.includes('libx264') && kbArgs[kbArgs.length - 1] === 'C:/out/kb.mp4', 'codec/out')
+
+// cameraMoveToKenBurns 映射（中英）
+check('运镜 推→zoom-in', cameraMoveToKenBurns('推') === 'zoom-in', cameraMoveToKenBurns('推'))
+check('运镜 dolly-out→zoom-out', cameraMoveToKenBurns('dolly-out') === 'zoom-out', cameraMoveToKenBurns('dolly-out'))
+check('运镜 固定→static', cameraMoveToKenBurns('固定') === 'static', cameraMoveToKenBurns('固定'))
+check('运镜 未知→ken-burns', cameraMoveToKenBurns('随便') === 'ken-burns' && cameraMoveToKenBurns(undefined) === 'ken-burns', 'fallback')
 
 if (failures) { console.error(`\nkenBurns selftest: ${failures} FAILED`); process.exit(1) }
 else console.log('\nkenBurns selftest: ALL PASSED')

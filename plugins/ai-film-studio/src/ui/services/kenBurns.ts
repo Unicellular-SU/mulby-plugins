@@ -97,3 +97,44 @@ export function kenBurnsZoompan(preset: KenBurnsPreset, opts: ZoompanOpts): stri
   const y = `(ih-ih/zoom)/2+ih*(${tyExpr})`
   return `zoompan=z='${z}':x='${x}':y='${y}':d=${frames}:s=${opts.width}x${opts.height}:fps=${fps}`
 }
+
+export interface KenBurnsClipOpts {
+  durationSec: number
+  fps?: number
+  width: number
+  height: number
+  outPath: string
+}
+
+/**
+ * 构造「静图 → Ken-Burns 运动视频」的完整 ffmpeg 参数（纯函数，便于单测）。
+ * 先 2× 上采样 + 居中裁切（给 zoompan 留分辨率头寸、减少抖动），再 zoompan 到目标尺寸。
+ * 用法：`ff().run(buildKenBurnsArgs(img, preset, {...}))`。
+ */
+export function buildKenBurnsArgs(imagePath: string, preset: KenBurnsPreset, opts: KenBurnsClipOpts): string[] {
+  const fps = opts.fps ?? 24
+  const { width, height, durationSec, outPath } = opts
+  const w2 = width * 2
+  const h2 = height * 2
+  const zp = kenBurnsZoompan(preset, { durationSec, fps, width, height })
+  const vf = `scale=${w2}:${h2}:force_original_aspect_ratio=increase,crop=${w2}:${h2},${zp},format=yuv420p`
+  return [
+    '-y', '-framerate', String(fps), '-loop', '1', '-i', imagePath, '-t', String(durationSec),
+    '-vf', vf, '-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-r', String(fps), outPath,
+  ]
+}
+
+// 运镜 → Ken-Burns 预设映射（让静图兜底片段尊重分镜计划的运镜；中英皆可）。
+const CAMERA_TO_KB: Record<string, KenBurnsPreset> = {
+  'dolly-in': 'zoom-in', 推: 'zoom-in', 'dolly-out': 'zoom-out', 拉: 'zoom-out',
+  pan: 'pan-right', 摇: 'pan-right', tracking: 'pan-left', 移: 'pan-left', 跟: 'pan-left',
+  crane: 'drift-up', 升降: 'drift-up', tilt: 'drift-up', 俯仰: 'drift-up',
+  handheld: 'parallax', 手持: 'parallax', zoom: 'zoom-in', 变焦: 'zoom-in',
+  static: 'static', 固定: 'static',
+}
+
+/** 由分镜运镜（中文/英文枚举）选 Ken-Burns 预设；未知回退 ken-burns。 */
+export function cameraMoveToKenBurns(raw?: string): KenBurnsPreset {
+  const s = (raw ?? '').trim()
+  return CAMERA_TO_KB[s] ?? 'ken-burns'
+}

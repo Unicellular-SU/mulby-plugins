@@ -10,6 +10,7 @@
  * 再 concat（视频流），避免「不同参数无法拼接」。
  */
 import { ensureSubdir, readAsDataUrl } from './fsutil'
+import { buildKenBurnsArgs, type KenBurnsPreset } from './kenBurns'
 
 export type SubtitleMode = 'off' | 'soft' | 'burn'
 
@@ -323,6 +324,34 @@ export async function extractLastFrame(videoLocalPath: string, tag = ''): Promis
   } catch {
     return undefined
   }
+}
+
+/**
+ * 把一张静图按 Ken-Burns 预设生成一段运动视频片段（落盘 mp4，返回路径）。
+ * 给「有关键帧无视频」的分镜做运动兜底——替代直接丢弃。调用方需先确保 ffmpeg 就绪。
+ * ⚠ zoompan 视觉效果需在 Mulby 内实跑校验。
+ */
+export async function imageToMotionClip(
+  imagePath: string,
+  preset: KenBurnsPreset,
+  opts: { durationSec: number; fps?: number; width: number; height: number; onProgress?: (i: FfmpegProgressInfo) => void }
+): Promise<string> {
+  const dir = await ensureSubdir('kenburns')
+  const outPath = `${dir}/kb_${preset}_${Date.now()}.mp4`.replace(/\\/g, '/')
+  const args = buildKenBurnsArgs(imagePath, preset, {
+    durationSec: opts.durationSec, fps: opts.fps, width: opts.width, height: opts.height, outPath,
+  })
+  const task = ff().run(args, (p) => {
+    const percent = typeof p.percent === 'number' ? Math.round(p.percent) : undefined
+    opts.onProgress?.({ percent, text: 'Ken-Burns 运动生成中…' })
+  }) as FfmpegTaskLike
+  currentTask = task
+  try {
+    await task.promise
+  } finally {
+    if (currentTask === task) currentTask = null
+  }
+  return outPath
 }
 
 /** 解析 "1280x720" → [w,h] */

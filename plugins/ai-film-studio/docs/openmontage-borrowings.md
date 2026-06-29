@@ -19,7 +19,7 @@
 | 3 | 交付承诺契约 | ✅ | `src/ui/services/quality/deliveryPromise.ts` | tsc 通过 + selftest 20 断言（分类/运动占比/致命阻断/承诺播种） |
 | 4 | 渲染前阻断 + 渲染后审计 | ✅（已接 compose.ts） | `src/ui/services/quality/composeGate.ts` | tsc + selftest 13 断言 + vite build 通过 |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
-| 7 | Ken-Burns/pan/zoom | 🚧 核心✅/接线待 | `src/ui/services/kenBurns.ts`（核心）；ffmpeg 接线下一轮 | tsc + selftest 19 断言（运动数学+zoompan 串结构） |
+| 7 | Ken-Burns/pan/zoom | ✅（接 ffmpeg+compose；视觉待 Mulby 校验） | `kenBurns.ts` + `ffmpeg.ts` `imageToMotionClip` + `compose.ts` 静图兜底 | tsc + selftest 28 断言 + vite build；⚠ zoompan 视觉待实跑 |
 | 9 | 词级高亮字幕 | ⬜ | 扩 `subtitles.ts` | — |
 
 ### 已落地详记
@@ -76,7 +76,14 @@
 - **分辨率无关**：平移以**画幅比例**表示（非 px），同一份数学驱动两路——`kenBurnsCss(preset,p)` 出 CSS `translate(%)+scale`（预览 rAF）；`kenBurnsZoompan(preset,opts)` 出 ffmpeg `zoompan`（用 iw/ih 把比例换算成像素，居中 + 平移）。
 - `cameraMotion(preset, p)` 经 `motion.interpolate` 线性插值，p 越界自动夹断。`KEN_BURNS_OPTIONS`(9 项中文)供 UI 下拉，`isKenBurnsPreset` 类型守卫。
 - selftest 19 断言（端点 scale/平移、夹断、中点、zoompan 串结构 d/s/fps/居中表达式、1 帧不除零）。**对照**：`zoompan=z='1+(0.15)*(on/47)':x='(iw-iw/zoom)/2+iw*(0+(0)*(on/47))':…:d=48:s=1280x720:fps=24`。
-- ⚠ **zoompan 视觉正确性需在 Mulby 内跑真实 ffmpeg 校验**；下一轮接 `ffmpeg.ts` 的 `imageToMotionClip` 助手 + `compose.ts` 把「有关键帧无视频」的分镜降级为 Ken-Burns 片段（替代直接丢弃，呼应 #4 静默降级）。
+- ⚠ **zoompan 视觉正确性需在 Mulby 内跑真实 ffmpeg 校验**。
+
+**#7 Ken-Burns ffmpeg/compose 接线（2026-06-29）** —— 补齐 #7：
+- `kenBurns.ts` 加 `buildKenBurnsArgs`（纯，完整 ffmpeg 参数：`-framerate -loop 1 -i img -t dur -vf "scale 2× + crop 居中 + zoompan + format" -c:v libx264 …`，2× 上采样减抖动）+ `cameraMoveToKenBurns`（运镜→预设映射，中英）。
+- `ffmpeg.ts` 加 `imageToMotionClip(imagePath, preset, opts)`：落盘 `kenburns/kb_*.mp4` 并返回路径，复用 `ff().run` + `currentTask`。
+- `compose.ts` 接线：`ComposeOpts` 加 `kenBurnsForStills` + `resolveImagePath`（依赖反转——资产 assetId→本地路径由调用方注入，compose 不耦合资产层）。收集阶段对「有关键帧无视频」的分镜按其**计划运镜**生成 Ken-Burns 片段替代丢弃；ffmpeg 提前就绪以支撑收集期调用。默认关闭，零行为变更。
+- selftest +9 断言（buildKenBurnsArgs 结构、运镜映射）；vite build 通过。**对照命令**：`… -loop 1 -i key.png -t 3 -vf scale=2560:1440…,zoompan=z='1+(0.15)*(on/71)':…:d=72:s=1280x720:fps=24,format=yuv420p … kb.mp4`。
+- **待整合/校验**：① 真实 ffmpeg 跑一遍看运动是否平滑（zoompan 抖动）；② UI 侧给「静图兜底」开关 + 接 `resolveImagePath`（StudioEditor 已有资产→路径能力）；③ 可选：分镜加 `kbPreset` 字段让用户覆盖自动映射。
 
 ---
 
