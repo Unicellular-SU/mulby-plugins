@@ -12,6 +12,7 @@ import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
 import SettingsView from '../components/views/SettingsView'
+import Select from '../components/ui/Select'
 import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
@@ -183,53 +184,49 @@ function StudioModelBar() {
       {open && (
         <div className="afs-studio__modelpop">
           <label>文本模型（剧本/对话/事件）</label>
-          <select className="afs-field__input" value={selectedModel ?? ''} onChange={(e) => setSelectedModel(e.target.value || null)}>
-            <option value="">（未选）</option>
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label || m.id}
-              </option>
-            ))}
-          </select>
+          <Select
+            block
+            value={selectedModel ?? ''}
+            onChange={(v) => setSelectedModel(v || null)}
+            options={[{ value: '', label: '（未选）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+            ariaLabel="文本模型"
+          />
           <label>图像模型（资产/关键帧）</label>
-          <select className="afs-field__input" value={selectedImageModel ?? ''} onChange={(e) => setSelectedImageModel(e.target.value || null)}>
-            <option value="">（未选）</option>
-            {imageModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label || m.id}
-              </option>
-            ))}
-          </select>
+          <Select
+            block
+            value={selectedImageModel ?? ''}
+            onChange={(v) => setSelectedImageModel(v || null)}
+            options={[{ value: '', label: '（未选）' }, ...imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+            ariaLabel="图像模型"
+          />
           <label>视频供应商（片段）</label>
           {videoProviders.length ? (
-            <select className="afs-field__input" value={videoDefault ?? ''} onChange={(e) => setDefault('video', e.target.value || null)}>
-              <option value="">（自动选第一个）</option>
-              {videoProviders.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                  {p.model ? ` · ${p.model}` : ''}
-                </option>
-              ))}
-            </select>
+            <Select
+              block
+              value={videoDefault ?? ''}
+              onChange={(v) => setDefault('video', v || null)}
+              options={[{ value: '', label: '（自动选第一个）' }, ...videoProviders.map((p) => ({ value: p.id, label: `${p.label}${p.model ? ` · ${p.model}` : ''}` }))]}
+              ariaLabel="视频供应商"
+            />
           ) : (
             <div className="afs-studio__modelstat is-missing">未配置 — 在设置抽屉添加视频供应商</div>
           )}
           <label>视频模式</label>
-          <select className="afs-field__input" value={meta?.videoMode ?? 'firstFrame'} onChange={(e) => updateMeta({ videoMode: e.target.value })}>
-            {VIDEO_MODE_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <Select
+            block
+            value={meta?.videoMode ?? 'firstFrame'}
+            onChange={(v) => updateMeta({ videoMode: v })}
+            options={VIDEO_MODE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+            ariaLabel="视频模式"
+          />
           <label>分辨率</label>
-          <select className="afs-field__input" value={meta?.videoResolution ?? '720p'} onChange={(e) => updateMeta({ videoResolution: e.target.value })}>
-            {['480p', '720p', '1080p'].map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          <Select
+            block
+            value={meta?.videoResolution ?? '720p'}
+            onChange={(v) => updateMeta({ videoResolution: v })}
+            options={['480p', '720p', '1080p'].map((r) => ({ value: r, label: r }))}
+            ariaLabel="分辨率"
+          />
           <label title="「全部生成」等批量同时跑的数量（资产/润色/段提示词并发；含承接的关键帧/视频仍按需串行）">批量并发数</label>
           <input
             className="afs-field__input"
