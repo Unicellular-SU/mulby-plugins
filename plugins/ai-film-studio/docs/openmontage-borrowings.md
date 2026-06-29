@@ -16,7 +16,7 @@
 | 2 | 结构变化 lint | ✅ | `src/ui/services/quality/variationChecker.ts` | tsc 通过 + selftest（健康 0 违规、同质 11 违规/fail、短分镜仅词法触发） |
 | 5 | 5 层镜头提示词构建器 | ✅（核心；UI 接线待整合批） | `src/ui/services/shotPromptBuilder.ts` | tsc 通过 + selftest 15 断言（5 层顺序/中文归一/static 省略/词表导出） |
 | 8 | interpolate/spring 运动原语 | ✅ | `src/ui/services/motion.ts` | tsc 通过 + selftest（19 断言：分段/外推/弹簧三阻尼分支/过冲夹断/烘焙） |
-| 3 | 交付承诺契约 | ⬜ | `src/ui/services/quality/deliveryPromise.ts` | — |
+| 3 | 交付承诺契约 | ✅ | `src/ui/services/quality/deliveryPromise.ts` | tsc 通过 + selftest 20 断言（分类/运动占比/致命阻断/承诺播种） |
 | 4 | 渲染前阻断 + 渲染后审计 | ⬜ | `src/ui/services/quality/composeGate.ts` | — |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
 | 7 | Ken-Burns/pan/zoom | ⬜ | timeline `motion` + `ffmpeg.ts` | — |
@@ -55,6 +55,13 @@
 - **待整合批**：把 `prompts.ts` keyframe 路径（L696–725 的散落拼接）改为调用 `buildShotPrompt`，并把 `*_OPTIONS` 接进 `nodeDefs.ts` 分镜/关键帧节点下拉、`Storyboard` 加 lens/dof/lighting/colorTemp 字段。
 
 > **阶段小结**：报告「纯函数批 1」（#1 反幻灯片 / #2 变化 lint / #8 运动原语 / #5 镜头提示词）已全部落地，零 runtime 依赖、各带 selftest。下一步进入**整合批**：#4 合成闸门 → #3 交付承诺 → #7 Ken-Burns(接 ffmpeg) → #9 词级字幕 → #6 风格机器约束。
+
+**#3 交付承诺契约（2026-06-29）** —— `src/ui/services/quality/deliveryPromise.ts`（纯函数、零依赖）。
+- 6 种承诺类型 `PROMISE_RULES`：motion_led(需视频/运动≥70%/不许静帧兜底) / source_led(≥30%) / hybrid(≥20%) / data_explainer / teacher_explainer / still_led（后三类允许静帧）。
+- `classifyCut(cut)` → motion/slide/still：有视频产物或视频扩展名或 kind∈{video,animation,avatar,clip}=motion；kind∈{text/chart/kpi/comparison/…}=**slide（不计运动）**；其余=still。**关键洞见照搬**：动画图文卡不算运动。
+- `validateCuts(cuts, kind)`：算 motionRatio，产 violations——`no_motion_at_all`(high) / `motion_ratio_low`(占比<承诺，缺口过半则 high) / `still_fallback_overflow`(不许静帧却>50% 静帧/图文，high)。`ok = 无 high 违规`（供 #4 合成闸门硬阻断）。
+- `classifyFromBrief({intent,hasVideoModel})` 由项目意图播种承诺（数据→data_explainer、口播→teacher_explainer、默认有视频模型→motion_led）。
+- `CutLike` 投影刻意贴合本插件 `VideoTrack/Clip`（hasVideo/source/kind），便于 #4 接线时从时间线产出。**对照**：motion_led 全静帧 → 3 条违规/fail/ok=false；still_led 全静帧 → 达成。
 
 ---
 
