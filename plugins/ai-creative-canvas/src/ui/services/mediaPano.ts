@@ -2,6 +2,7 @@ import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
 import { saveBase64, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
+import { aiLimiter } from './limiter'
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -62,17 +63,15 @@ export async function repairEquirectSeam(cardId: string): Promise<void> {
     const band = Math.max(8, Math.round(w * 0.14))
     sctx.clearRect(Math.round(w / 2 - band / 2), 0, band, h) // 透明洞 = 待重绘区
 
-    // 3) 上传 + 图生图重绘中缝
-    const att = await ai().attachments.upload({
-      buffer: dataUrlToBuffer(shifted.toDataURL('image/png')),
-      mimeType: 'image/png',
-      purpose: 'image'
-    })
+    // 3) 上传 + 图生图重绘中缝（走共享并发池，避免叠加批量生成打满配额）
     const prompt =
       '这是一张等距柱状 360 全景图，中央有一条透明竖带。请只在透明带内无缝补全画面，' +
       '严格延续两侧的纹理、结构、光照与地平线，使中缝完全连续、不留痕迹；其余区域保持不变。' +
       'Seamlessly inpaint only the transparent vertical strip to continue the equirectangular panorama; no visible seam.'
-    const res = await ai().images.edit({ model: src.modelId, imageAttachmentId: att.attachmentId, prompt })
+    const res = await aiLimiter(async () => {
+      const att = await ai().attachments.upload({ buffer: dataUrlToBuffer(shifted.toDataURL('image/png')), mimeType: 'image/png', purpose: 'image' })
+      return ai().images.edit({ model: src.modelId, imageAttachmentId: att.attachmentId, prompt })
+    })
     const out = res?.images?.[0]
     if (!out) throw new Error('模型未返回结果')
 

@@ -999,3 +999,12 @@
 - **全部手写模态补 ESC 关闭**：`hooks.ts` 的 `useEscClose`（ref 化，置于早返回之前，hooks 顺序安全）接入 9 个模态（Compose/Storyboard/Timeline/MaskInpaint/VideoTrim/ProjectLibrary/ProviderSettings/TemplatePanel/CropModal）——与共享 Modal 行为一致。
 - **MediaToolbox 工具条溢出**：`flex-wrap` 多排 → 单行 `overflow-x-auto`（`max-w-[92vw]` + 隐藏滚动条），窄卡不再被挤压成多排。
 - **暂缓（需真机视觉迭代）**：tooltip 统一（原生 title vs 玻璃 TooltipHost 二选一，60+ 处）、`<Button variant>` / `<Empty>` / `<Loading>` 原子化与各处替换。
+
+### 🧹 中等杂项批（2026-06-29，已提交）
+- **对齐辅助线改色**：拖动对齐参考线 红 `#ec4899` → 浅灰 `#cbd5e1`（opacity 0.85）。
+- **导入工程边界校验**：`sanitizeBoards` 兜底每画布 viewport/cards/edges/annotations/id/name + 画布 id 去重 + 空 boards 兜底 + 校正 `activeBoardId`（对合法工程零改动、保住增量 baseline 同引用——经审查确认）。
+- **切换工程保存竞态**：`serializeIo` 串行化 `saveProject`/`saveRecovery`/`deleteProjectStorage`，消除共享 baseline 并发交错漏写分片。
+- **多图轮询重试**：engine `pollTaskTemplate`/`pollTaskDefault` 对 httpReq 异常与 `transient(sr)` `continue` 重试（受 timeout 上限约束、保留 aborted 检查、不回拨进度）；`aiImage` 多图单张失败不拖垮其余、部分成功返回并 toast 告警、全失败抛 lastErr。
+- **并发限流统一**：`limiter.ts` 共享 `aiLimiter`（按工程 concurrency）；`generate` + `inpaint` + `mediaPano`(接缝) + `panoOutpaint`(天地/outpaintFace) 共用一个池——避免叠加打满配额(429)。经审查确认无嵌套死锁。
+- **连线删除可达性**：点击连线=「选中」（显示×、`Delete`/`Backspace` 键删、触屏可用），不再整条点击即删；onArm 清卡片选择、Delete 时有卡片选中则让位画布删卡、跳过 contentEditable——消除与画布删卡的双删冲突。
+- 审查(3-agent)：核心机制(串行/校验/限流/轮询)全部 none；修掉 5 处 minor（双删让位、contentEditable、部分失败告警、轮询不回拨进度、画布 id 去重+命名统一）。

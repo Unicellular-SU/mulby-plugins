@@ -3,6 +3,7 @@ import { resolveGenInputs } from './references'
 import { loadImageInput } from './media'
 import { useGraph } from '../store/graphStore'
 import { getStylePack, applyStylePack } from './stylePacks'
+import { toast } from '../store/toastStore'
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -128,27 +129,34 @@ export async function generateImage(
   } else {
     // 多图：逐张以 count=1 调用，避免向不支持 n>1 的模型（如 gpt-image-2）传 n 而报错
     const collected: string[] = []
+    let lastErr: any = null
     for (let k = 0; k < count; k++) {
-      const genReq: Record<string, unknown> = { model, prompt, size, count: 1 }
-      if (params.seed) genReq.seed = Number(params.seed) + k // 多张时按 k 偏移，既可复现又不重复
-      const req = ai().images.generateStream(
-        genReq,
-        (chunk: any) => {
-          if (chunk.__requestId) {
-            onRequestId(chunk.__requestId)
-            return
+      try {
+        const genReq: Record<string, unknown> = { model, prompt, size, count: 1 }
+        if (params.seed) genReq.seed = Number(params.seed) + k // 多张时按 k 偏移，既可复现又不重复
+        const req = ai().images.generateStream(
+          genReq,
+          (chunk: any) => {
+            if (chunk.__requestId) {
+              onRequestId(chunk.__requestId)
+              return
+            }
+            if (chunk.type === 'preview' && chunk.image) {
+              onProgress((k + 0.6) / count, `data:image/png;base64,${chunk.image}`)
+            } else if (chunk.type === 'status') {
+              const map: Record<string, number> = { start: 0.1, partial: 0.5, finalizing: 0.85, completed: 1 }
+              onProgress((k + (map[chunk.stage as string] ?? 0.3)) / count)
+            }
           }
-          if (chunk.type === 'preview' && chunk.image) {
-            onProgress((k + 0.6) / count, `data:image/png;base64,${chunk.image}`)
-          } else if (chunk.type === 'status') {
-            const map: Record<string, number> = { start: 0.1, partial: 0.5, finalizing: 0.85, completed: 1 }
-            onProgress((k + (map[chunk.stage as string] ?? 0.3)) / count)
-          }
-        }
-      )
-      const res = await req
-      if (res.images?.length) collected.push(res.images[0])
+        )
+        const res = await req
+        if (res.images?.length) collected.push(res.images[0])
+      } catch (e) {
+        lastErr = e // 多图：单张失败不拖垮其余，已得结果照常返回；全失败才抛
+      }
     }
+    if (!collected.length && lastErr) throw lastErr
+    if (lastErr && collected.length < count) toast(`部分图片生成失败（成功 ${collected.length}/${count}）`, 'warning') // 部分成功不再静默
     images = collected
     onProgress(1)
   }

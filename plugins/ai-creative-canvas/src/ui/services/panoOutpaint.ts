@@ -2,6 +2,7 @@ import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
 import { saveBase64, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
+import { aiLimiter } from './limiter'
 
 // ─────────── ③ equirect 渐进式 outpaint —— 第 1 步：投影核心(eq↔persp) + 自检 ───────────
 // 约定(与查看器一致，用户未抱怨朝向)：world +X=front(lon0)、+Z=right(lon+90)、+Y=up(lat+90)。
@@ -180,8 +181,10 @@ async function toSquare(s: string, size: number): Promise<HTMLCanvasElement> {
 
 // 图生图 outpaint：透视图带透明洞 → 模型按周边补全（仅填透明、其余保持）。供天/地修复复用。
 async function outpaintFace(model: string, persp: HTMLCanvasElement, prompt: string, size: number): Promise<HTMLCanvasElement> {
-  const att = await ai().attachments.upload({ buffer: dataUrlToBuffer(persp.toDataURL('image/png')), mimeType: 'image/png', purpose: 'image' })
-  const res = await ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt })
+  const res = await aiLimiter(async () => {
+    const att = await ai().attachments.upload({ buffer: dataUrlToBuffer(persp.toDataURL('image/png')), mimeType: 'image/png', purpose: 'image' })
+    return ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt })
+  })
   const out = res?.images?.[0]
   if (!out) throw new Error('outpaint 失败')
   return toSquare(out, size)

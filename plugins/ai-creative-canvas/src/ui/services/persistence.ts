@@ -1,7 +1,17 @@
 import type { Board, ProjectDoc } from '../types'
 import { SCHEMA_VERSION } from '../types'
+import { uid } from '../util'
 
 export const PLUGIN_ID = 'ai-creative-canvas'
+
+// 串行化所有写盘（saveProject/saveRecovery/deleteProjectStorage 共享模块级 baseline，
+// 并发会交错读改写导致漏写分片）。saves 已防抖、频率低，串行成本可忽略、安全性最大。
+let ioChain: Promise<unknown> = Promise.resolve()
+function serializeIo<T>(fn: () => Promise<T>): Promise<T> {
+  const run = ioChain.then(fn, fn)
+  ioChain = run.then(() => undefined, () => undefined)
+  return run
+}
 // 旧版单工程键（仅用于一次性迁移到多工程命名空间）
 const LEGACY_CURRENT = 'project:current'
 const LEGACY_BOARD_PREFIX = 'project:board:'
@@ -84,8 +94,17 @@ const VALID_KINDS = new Set(['image', 'video', 'text', 'audio', 'source', 'group
 function sanitizeBoards(d: ProjectDoc): ProjectDoc {
   if (!Array.isArray(d.boards)) return d
   let changed = false
-  const boards = d.boards.map((b) => {
-    if (!b || !b.cards) return b
+  const boards = d.boards.map((b0) => {
+    // 导入容错：兜底每个画布的必备字段（viewport/cards/edges/annotations/id/name），
+    // 避免畸形 JSON 导致渲染 NaN 或 Object.values 抛错（原仅剔畸形卡，不修缺失字段）。
+    let b: any = b0 && typeof b0 === 'object' ? b0 : {}
+    const vp = b.viewport
+    if (!vp || !Number.isFinite(vp.x) || !Number.isFinite(vp.y) || !Number.isFinite(vp.zoom) || vp.zoom <= 0) { b = { ...b, viewport: { x: 0, y: 0, zoom: 1 } }; changed = true }
+    if (!b.cards || typeof b.cards !== 'object') { b = { ...b, cards: {} }; changed = true }
+    if (!b.edges || typeof b.edges !== 'object') { b = { ...b, edges: {} }; changed = true }
+    if (b.annotations !== undefined && !Array.isArray(b.annotations)) { b = { ...b, annotations: [] }; changed = true }
+    if (typeof b.id !== 'string' || !b.id) { b = { ...b, id: uid('board') }; changed = true }
+    if (typeof b.name !== 'string' || !b.name) { b = { ...b, name: '画布' }; changed = true }
     const cards: Record<string, (typeof b.cards)[string]> = {}
     let dropped = false
     for (const [id, c] of Object.entries(b.cards)) {
@@ -102,13 +121,28 @@ function sanitizeBoards(d: ProjectDoc): ProjectDoc {
     }
     if (!dropped) return b
     changed = true
-    const edges: Record<string, (typeof b.edges)[string]> = {}
-    for (const [eid, e] of Object.entries(b.edges || {})) {
+    const edges: Record<string, unknown> = {}
+    for (const [eid, e] of Object.entries((b.edges || {}) as Record<string, { source: string; target: string }>)) {
       if (cards[e.source] && cards[e.target]) edges[eid] = e
     }
     return { ...b, cards, edges }
   })
-  return changed ? { ...d, boards } : d
+  // 画布 id 去重：畸形导入可能含重复 id，会让分片/baseline 的 Map 覆盖、丢画布
+  const seenIds = new Set<string>()
+  for (let i = 0; i < boards.length; i++) {
+    const b = boards[i] as Board
+    if (!b) continue
+    if (seenIds.has(b.id)) { boards[i] = { ...b, id: uid('board') }; changed = true }
+    seenIds.add((boards[i] as Board).id)
+  }
+  // 至少保留一个画布；校正 activeBoardId 指向存在的画布
+  if (!boards.length) {
+    boards.push({ id: uid('board'), name: '画布', cards: {}, edges: {}, viewport: { x: 0, y: 0, zoom: 1 }, annotations: [] } as Board)
+    changed = true
+  }
+  let activeBoardId = d.activeBoardId
+  if (!boards.some((b) => b && b.id === activeBoardId)) { activeBoardId = boards[0].id; changed = true }
+  return changed ? { ...d, boards, activeBoardId } : d
 }
 
 // schemaVersion 迁移脚手架：按版本累进升级（当前 v1，暂无迁移；未来在此追加 if (v < N) {…}）
@@ -221,21 +255,24 @@ export async function loadProject(pid: string): Promise<ProjectDoc | null> {
   }
 }
 
-export async function saveProject(pid: string, p: ProjectDoc): Promise<boolean> {
-  try {
-    ensureBaselineFor(pid)
-    mainBaseline = await writeSharded(p, kCurrent(pid), kBoard(pid), mainBaseline)
-    return true
-  } catch {
-    return false
-  }
+export function saveProject(pid: string, p: ProjectDoc): Promise<boolean> {
+  return serializeIo(async () => {
+    try {
+      ensureBaselineFor(pid)
+      mainBaseline = await writeSharded(p, kCurrent(pid), kBoard(pid), mainBaseline)
+      return true
+    } catch {
+      return false
+    }
+  })
 }
 
 // 删除某工程的全部存储（manifest + 主分片 + 恢复分片）
-export async function deleteProjectStorage(pid: string): Promise<void> {
-  try {
-    const s = storage()
-    if (!s) return
+export function deleteProjectStorage(pid: string): Promise<void> {
+  return serializeIo(async () => {
+    try {
+      const s = storage()
+      if (!s) return
     // 关键：恢复分片(kRecBoard)用与主分片相同的画布 id。clearRecovery 在每次主存成功后只删
     // 恢复 manifest、保留恢复分片，故不能仅靠恢复 manifest 枚举——否则恢复分片永久成孤儿。
     // 改为：取主 manifest 的画布 id ∪ 恢复 manifest（若还在）的画布 id，对每个 id 删主+恢复两份分片。
@@ -271,9 +308,10 @@ export async function deleteProjectStorage(pid: string): Promise<void> {
       }
     }
     if (baselineProjectId === pid) baselineProjectId = null
-  } catch {
-    /* ignore */
-  }
+    } catch {
+      /* ignore */
+    }
+  })
 }
 
 // ── 崩溃恢复快照（每工程独立；写的是"未提交主存的改动缓冲"，主存成功后清除）──
@@ -282,13 +320,15 @@ export interface RecoverySnap {
   savedAt: number
 }
 
-export async function saveRecovery(pid: string, p: ProjectDoc, savedAt: number): Promise<void> {
-  try {
-    ensureBaselineFor(pid)
-    recBaseline = await writeSharded(p, kRecovery(pid), kRecBoard(pid), recBaseline, { _savedAt: savedAt })
-  } catch {
-    /* ignore */
-  }
+export function saveRecovery(pid: string, p: ProjectDoc, savedAt: number): Promise<void> {
+  return serializeIo(async () => {
+    try {
+      ensureBaselineFor(pid)
+      recBaseline = await writeSharded(p, kRecovery(pid), kRecBoard(pid), recBaseline, { _savedAt: savedAt })
+    } catch {
+      /* ignore */
+    }
+  })
 }
 
 export async function loadRecovery(pid: string): Promise<RecoverySnap | null> {

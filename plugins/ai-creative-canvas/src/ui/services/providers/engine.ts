@@ -100,7 +100,9 @@ async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: strin
     if (Date.now() - startedAt > timeout) throw new Error('生成超时')
     await sleep(interval)
     if (signal?.aborted) throw new Error('已取消(aborted)')
-    const sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000)
+    let sr: { status: number; data: any }
+    try { sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
     const url = jget(sd, cfg.videoUrlPath)
     if (url) return url
@@ -124,7 +126,9 @@ async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, 
     await sleep(interval)
     if (signal?.aborted) throw new Error('已取消(aborted)')
     const statusUrl = base + (cfg.statusPath || '').replace('{id}', taskId)
-    const sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000)
+    let sr: { status: number; data: any }
+    try { sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
     let url = jget(sd, cfg.resultPath)
     if (url) return url

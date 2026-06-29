@@ -1,7 +1,8 @@
 import { useGraph } from '../store/graphStore'
 import { useTask } from '../store/taskStore'
 import { useUi } from '../store/uiStore'
-import { createLimiter, arrayBufferToBase64 } from '../util'
+import { arrayBufferToBase64 } from '../util'
+import { aiLimiter } from './limiter'
 import { generateText } from './aiText'
 import { generateImage } from './aiImage'
 import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
@@ -13,7 +14,7 @@ import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
 
-const limiter = createLimiter(() => useGraph.getState().project.concurrency || 4)
+const limiter = aiLimiter // 共享并发池（card 生成 + 360/局部修复 共用，统一限流）
 const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
 const videoAborts = new Map<string, AbortController>() // cardId -> 视频任务取消器（轮询循环）
 const canceledCards = new Set<string>() // 排队中被用户「停止」的卡：出队时早退，不真正起跑

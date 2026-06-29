@@ -1,5 +1,6 @@
 import { useGraph } from '../store/graphStore'
 import { saveBase64, mimeToExt } from './media'
+import { aiLimiter } from './limiter'
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -25,17 +26,15 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
   const model = card.modelId
   if (!model) throw new Error('请先在节点里选择图像模型')
 
-  const att = await ai().attachments.upload({
-    buffer: dataUrlToArrayBuffer(compositePngDataUrl),
-    mimeType: 'image/png',
-    purpose: 'image'
-  })
   const instruction =
     op === 'remove'
       ? `移除画面中绿色覆盖区域内的物体，用与周围一致、自然连贯的背景无缝填补该区域；其余区域严格保持与原图一致。${prompt ? '补充要求：' + prompt : ''}`
       : `图中透明（被挖空）的区域请按以下描述重绘，并与周围光影、风格、边缘无缝衔接；其余区域严格保持与原图一致：${prompt}`
 
-  const res = await ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt: instruction })
+  const res = await aiLimiter(async () => {
+    const att = await ai().attachments.upload({ buffer: dataUrlToArrayBuffer(compositePngDataUrl), mimeType: 'image/png', purpose: 'image' })
+    return ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt: instruction })
+  })
   const img = res.images?.[0]
   if (!img) throw new Error('模型未返回结果')
 
