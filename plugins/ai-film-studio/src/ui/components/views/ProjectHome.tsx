@@ -5,6 +5,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { listStylePacks } from '../../services/stylePacks'
 import { TEMPLATES } from '../../templates'
 import { useMediaUrl } from '../../services/mediaUrl'
+import Select from '../ui/Select'
 
 function relTime(ts: number): string {
   const d = Date.now() - ts
@@ -150,14 +151,14 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
       <div className="afs-surface__head">
         <h2 className="afs-surface__title">项目</h2>
         <div className="afs-surface__actions">
-          <select className="afs-toolbar__select" value="" onChange={(e) => onTemplate(e.target.value)} title="从模板新建画布工程">
-            <option value="">从模板新建…</option>
-            {TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id} title={t.desc}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            value=""
+            onChange={(v) => onTemplate(v)}
+            options={TEMPLATES.map((t) => ({ value: t.id, label: t.name, title: t.desc }))}
+            placeholder="从模板新建…"
+            title="从模板新建画布工程"
+            ariaLabel="从模板新建画布工程"
+          />
           <button className="afs-btn" onClick={() => fileRef.current?.click()} title="导入画布工程 JSON">
             <Upload size={15} /> 导入
           </button>

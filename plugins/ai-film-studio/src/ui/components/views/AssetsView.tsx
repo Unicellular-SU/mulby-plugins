@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Select from '../ui/Select'
 import {
   Upload,
   Trash2,
@@ -270,19 +271,15 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                         {a.projectName ? a.projectName : a.role === 'uploaded' ? '本地上传' : '生成'} · {fmtBytes(a.bytes)}
                       </div>
                       {boards.length > 0 && (
-                        <select
+                        <Select
+                          size="sm"
                           className="afs-acard__board"
                           value={a.boardId || ''}
-                          onChange={(e) => moveAsset(a.id, e.target.value || undefined)}
+                          onChange={(v) => moveAsset(a.id, v || undefined)}
+                          options={[{ value: '', label: '未分组' }, ...boards.map((b) => ({ value: b.id, label: b.name }))]}
                           title="移动到合集"
-                        >
-                          <option value="">未分组</option>
-                          {boards.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                        </select>
+                          ariaLabel="移动到合集"
+                        />
                       )}
                       <div className="afs-acard__actions">
                         {canInsert && (
