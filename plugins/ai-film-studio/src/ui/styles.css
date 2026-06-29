@@ -2147,25 +2147,33 @@ select.afs-toolbar__select,
 .afs-modal__panel--wide {
   width: 720px;
 }
+/* 分段控件 Segmented（互斥切换，如 本工程/全局默认）：内陷轨 + 招牌渐变激活胶囊（见 docs §5.1） */
 .afs-scope {
   display: inline-flex;
   gap: 0;
+  padding: 3px;
   border: 1px solid var(--afs-border);
-  border-radius: 8px;
-  overflow: hidden;
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-surface-sunken);
   margin-bottom: 12px;
 }
 .afs-scope__tab {
-  background: var(--afs-panel-2);
+  background: transparent;
   border: none;
+  border-radius: var(--afs-r-pill);
   color: var(--afs-muted);
-  font-size: 12px;
+  font: 600 12px/1 var(--afs-font-ui);
   padding: 6px 14px;
   cursor: pointer;
+  transition: color var(--afs-dur-micro) var(--afs-ease-standard),
+    background var(--afs-dur-ui) var(--afs-ease-move);
+}
+.afs-scope__tab:hover {
+  color: var(--afs-text);
 }
 .afs-scope__tab.is-active {
-  background: var(--afs-accent);
-  color: #fff;
+  background: var(--afs-grad-accent);
+  color: var(--afs-on-accent);
 }
 .afs-modal__section {
   font-size: 12px;
@@ -3805,7 +3813,9 @@ select.afs-toolbar__select,
 .afs-studio__sel { width: auto; min-width: 120px; }
 .afs-studio__tabs { display: flex; gap: 4px; padding: 8px 16px 0; border-bottom: 1px solid var(--afs-border); }
 .afs-studio__tab { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border: none; background: transparent;
-  color: var(--afs-muted); cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; }
+  color: var(--afs-muted); cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px;
+  transition: color var(--afs-dur-micro) var(--afs-ease-standard), border-color var(--afs-dur-ui) var(--afs-ease-standard); }
+.afs-studio__tab:hover { color: var(--afs-text); }
 .afs-studio__tab.is-active { color: var(--afs-text); border-bottom-color: var(--afs-accent); }
 .afs-studio__work { flex: 1; display: flex; min-height: 0; }
 .afs-studio__stage { flex: 1; overflow: auto; padding: 16px; min-width: 0; }
