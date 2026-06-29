@@ -17,7 +17,7 @@
 | 5 | 5 层镜头提示词构建器 | ✅（核心；UI 接线待整合批） | `src/ui/services/shotPromptBuilder.ts` | tsc 通过 + selftest 15 断言（5 层顺序/中文归一/static 省略/词表导出） |
 | 8 | interpolate/spring 运动原语 | ✅ | `src/ui/services/motion.ts` | tsc 通过 + selftest（19 断言：分段/外推/弹簧三阻尼分支/过冲夹断/烘焙） |
 | 3 | 交付承诺契约 | ✅ | `src/ui/services/quality/deliveryPromise.ts` | tsc 通过 + selftest 20 断言（分类/运动占比/致命阻断/承诺播种） |
-| 4 | 渲染前阻断 + 渲染后审计 | ⬜ | `src/ui/services/quality/composeGate.ts` | — |
+| 4 | 渲染前阻断 + 渲染后审计 | ✅（已接 compose.ts） | `src/ui/services/quality/composeGate.ts` | tsc + selftest 13 断言 + vite build 通过 |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
 | 7 | Ken-Burns/pan/zoom | ⬜ | timeline `motion` + `ffmpeg.ts` | — |
 | 9 | 词级高亮字幕 | ⬜ | 扩 `subtitles.ts` | — |
@@ -62,6 +62,14 @@
 - `validateCuts(cuts, kind)`：算 motionRatio，产 violations——`no_motion_at_all`(high) / `motion_ratio_low`(占比<承诺，缺口过半则 high) / `still_fallback_overflow`(不许静帧却>50% 静帧/图文，high)。`ok = 无 high 违规`（供 #4 合成闸门硬阻断）。
 - `classifyFromBrief({intent,hasVideoModel})` 由项目意图播种承诺（数据→data_explainer、口播→teacher_explainer、默认有视频模型→motion_led）。
 - `CutLike` 投影刻意贴合本插件 `VideoTrack/Clip`（hasVideo/source/kind），便于 #4 接线时从时间线产出。**对照**：motion_led 全静帧 → 3 条违规/fail/ok=false；still_led 全静帧 → 达成。
+
+**#4 合成闸门（2026-06-29，首个 runtime 接线）** —— `src/ui/services/quality/composeGate.ts` + 接入 `studio/services/compose.ts`。
+- **两段式**（照搬 OpenMontage `_pre_compose_validation` 思路）：
+  - `evaluateComposeGate(doc)` 渲染前：对**计划全部分镜**跑 #1+#2+#3，聚合 `blocks`(应阻断)/`warnings`(仅提醒)。阻断口径：交付承诺 high 违规 / 幻灯片 fail → block；幻灯片 revise + 结构 lint → warn（结构 lint 不硬阻断）。承诺类型由 `classifyFromBrief(genre+intro+directorManual, hasVideoModel)` 推断。
+  - `auditComposed(doc, composedClipCount, kind)` 渲染后：对比计划镜数 vs 实际合成镜数。**关键适配**：本插件 `composeProject` 会跳过无视频的分镜（`if(!clip)continue`）——这正是「成片偷偷变短/变静」的来源；审计据此识别 `silentDowngrade`。
+- **接线**（`compose.ts`）：`composeProject(doc, onProgress, opts?)` 新增可选第 3 参 `{enforceQualityGate?, promiseKind?}`。默认**仅经 onProgress 提醒**（零行为变更，存量工程不受影响）；`enforceQualityGate:true` 时 blocked 抛错中止。渲染后追加审计行。
+- `projectToShots/projectToCuts` 导出供未来 QualityPanel 复用。selftest 13 断言（健康不阻断 / 同质无视频阻断含交付+幻灯片项 / 计划10实际4=静默降级）。**对照**：bad → `合成闸门：4 项需修正、1 项提醒`；audit → `计划 10 镜，实际合成 4 镜，6 镜因无视频被丢弃（运动占比 40%）⚠ 疑似静默降级`。
+- **待整合**：UI 侧加「严格模式」开关把 `enforceQualityGate` 传进来 + QualityPanel 展示三护栏明细；目前 blocked 仅提醒不阻断（除非调用方显式开启）。
 
 ---
 

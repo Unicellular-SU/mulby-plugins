@@ -6,6 +6,15 @@ import { ensureFfmpeg, composeFilm, probeDuration } from '../../services/ffmpeg'
 import { exportPath } from '../../services/fsutil'
 import { downloadVideoToDisk } from '../../services/download'
 import type { ProjectDoc } from '../../domain/types'
+import { evaluateComposeGate, auditComposed } from '../../services/quality/composeGate'
+import type { DeliveryPromiseKind } from '../../services/quality'
+
+export interface ComposeOpts {
+  /** 严格模式：质量闸门有应阻断项时中止合成（默认 false，仅经 onProgress 提醒） */
+  enforceQualityGate?: boolean
+  /** 显式交付承诺类型（缺省由项目意图推断） */
+  promiseKind?: DeliveryPromiseKind
+}
 
 function ratioWH(ratio: string): [number, number] {
   if (ratio === '9:16') return [720, 1280]
@@ -13,7 +22,20 @@ function ratioWH(ratio: string): [number, number] {
   return [1280, 720]
 }
 
-export async function composeProject(doc: ProjectDoc, onProgress?: (text: string, percent?: number) => void): Promise<string> {
+export async function composeProject(
+  doc: ProjectDoc,
+  onProgress?: (text: string, percent?: number) => void,
+  opts?: ComposeOpts
+): Promise<string> {
+  // —— 质量闸门（渲染前）：对计划分镜评估幻灯片风险/结构同质/交付承诺，提醒或（严格模式）阻断 ——
+  const gate = evaluateComposeGate(doc, { promiseKind: opts?.promiseKind })
+  onProgress?.(gate.summary)
+  for (const w of gate.warnings) onProgress?.(`提醒：${w}`)
+  for (const b of gate.blocks) onProgress?.(`需修正：${b}`)
+  if (opts?.enforceQualityGate && gate.blocked) {
+    throw new Error(`质量闸门拦截合成（共 ${gate.blocks.length} 项）：\n- ${gate.blocks.join('\n- ')}`)
+  }
+
   const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
   const clipPaths: string[] = []
   const fallbackDurs: number[] = []
@@ -71,5 +93,8 @@ export async function composeProject(doc: ProjectDoc, onProgress?: (text: string
     onProgress?.('保留音轨失败，改为无声合成…')
     await composeFilm({ ...base, keepClipAudio: false })
   }
+
+  // —— 渲染后审计：实际合成镜数 vs 计划镜数，识别静默降级 ——
+  onProgress?.(auditComposed(doc, clipPaths.length, gate.promiseKind).message)
   return outPath
 }
