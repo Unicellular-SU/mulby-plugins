@@ -19,7 +19,7 @@
 | 3 | 交付承诺契约 | ✅ | `src/ui/services/quality/deliveryPromise.ts` | tsc 通过 + selftest 20 断言（分类/运动占比/致命阻断/承诺播种） |
 | 4 | 渲染前阻断 + 渲染后审计 | ✅（已接 compose.ts） | `src/ui/services/quality/composeGate.ts` | tsc + selftest 13 断言 + vite build 通过 |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
-| 7 | Ken-Burns/pan/zoom | ⬜ | timeline `motion` + `ffmpeg.ts` | — |
+| 7 | Ken-Burns/pan/zoom | 🚧 核心✅/接线待 | `src/ui/services/kenBurns.ts`（核心）；ffmpeg 接线下一轮 | tsc + selftest 19 断言（运动数学+zoompan 串结构） |
 | 9 | 词级高亮字幕 | ⬜ | 扩 `subtitles.ts` | — |
 
 ### 已落地详记
@@ -70,6 +70,13 @@
 - **接线**（`compose.ts`）：`composeProject(doc, onProgress, opts?)` 新增可选第 3 参 `{enforceQualityGate?, promiseKind?}`。默认**仅经 onProgress 提醒**（零行为变更，存量工程不受影响）；`enforceQualityGate:true` 时 blocked 抛错中止。渲染后追加审计行。
 - `projectToShots/projectToCuts` 导出供未来 QualityPanel 复用。selftest 13 断言（健康不阻断 / 同质无视频阻断含交付+幻灯片项 / 计划10实际4=静默降级）。**对照**：bad → `合成闸门：4 项需修正、1 项提醒`；audit → `计划 10 镜，实际合成 4 镜，6 镜因无视频被丢弃（运动占比 40%）⚠ 疑似静默降级`。
 - **待整合**：UI 侧加「严格模式」开关把 `enforceQualityGate` 传进来 + QualityPanel 展示三护栏明细；目前 blocked 仅提醒不阻断（除非调用方显式开启）。
+
+**#7 Ken-Burns 运动核心（2026-06-29，纯核心）** —— `src/ui/services/kenBurns.ts`（建在 `motion.ts` 上，纯函数）。
+- **9 预设**：static(微遮边) / zoom-in(1→1.15) / zoom-out(1.15→1) / pan-left / pan-right(平移±10%) / ken-burns(1→1.18 + 对角 -6%/-4%) / drift-up / drift-down / parallax(1.08→1.14)。
+- **分辨率无关**：平移以**画幅比例**表示（非 px），同一份数学驱动两路——`kenBurnsCss(preset,p)` 出 CSS `translate(%)+scale`（预览 rAF）；`kenBurnsZoompan(preset,opts)` 出 ffmpeg `zoompan`（用 iw/ih 把比例换算成像素，居中 + 平移）。
+- `cameraMotion(preset, p)` 经 `motion.interpolate` 线性插值，p 越界自动夹断。`KEN_BURNS_OPTIONS`(9 项中文)供 UI 下拉，`isKenBurnsPreset` 类型守卫。
+- selftest 19 断言（端点 scale/平移、夹断、中点、zoompan 串结构 d/s/fps/居中表达式、1 帧不除零）。**对照**：`zoompan=z='1+(0.15)*(on/47)':x='(iw-iw/zoom)/2+iw*(0+(0)*(on/47))':…:d=48:s=1280x720:fps=24`。
+- ⚠ **zoompan 视觉正确性需在 Mulby 内跑真实 ffmpeg 校验**；下一轮接 `ffmpeg.ts` 的 `imageToMotionClip` 助手 + `compose.ts` 把「有关键帧无视频」的分镜降级为 Ken-Burns 片段（替代直接丢弃，呼应 #4 静默降级）。
 
 ---
 
