@@ -4218,6 +4218,12 @@ select.afs-toolbar__select,
   display: inline-flex;
   color: var(--afs-accent);
 }
+.afs-select__group-label {
+  padding: 8px 8px 3px;
+  font: 600 11px/1 var(--afs-font-ui);
+  letter-spacing: 0.03em;
+  color: var(--afs-muted);
+}
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;

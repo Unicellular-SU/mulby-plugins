@@ -17,10 +17,16 @@ export interface SelectOption {
   title?: string
 }
 
+export interface SelectGroup {
+  label: string
+  options: SelectOption[]
+}
+
 export interface SelectProps {
   value: string
   onChange: (value: string) => void
-  options: SelectOption[]
+  options?: SelectOption[]
+  groups?: SelectGroup[]
   placeholder?: string
   disabled?: boolean
   title?: string
@@ -38,7 +44,8 @@ const fromRadix = (v: string) => (v === EMPTY ? '' : v)
 export default function Select({
   value,
   onChange,
-  options,
+  options = [],
+  groups,
   placeholder,
   disabled,
   title,
@@ -48,6 +55,18 @@ export default function Select({
   className,
   leadingIcon: Leading,
 }: SelectProps) {
+  const renderItem = (opt: SelectOption) => {
+    const Icon = opt.icon
+    return (
+      <RS.Item key={opt.value} value={toRadix(opt.value)} disabled={opt.disabled} title={opt.title} className="afs-select__option">
+        {Icon ? <Icon size={14} className="afs-select__opt-icon" /> : null}
+        <RS.ItemText>{opt.label}</RS.ItemText>
+        <RS.ItemIndicator className="afs-select__check">
+          <Check size={14} />
+        </RS.ItemIndicator>
+      </RS.Item>
+    )
+  }
   return (
     <RS.Root value={toRadix(value)} onValueChange={(v) => onChange(fromRadix(v))} disabled={disabled}>
       <RS.Trigger
@@ -66,19 +85,14 @@ export default function Select({
       <RS.Portal>
         <RS.Content className="afs-select__popover" position="popper" sideOffset={6}>
           <RS.Viewport className="afs-select__viewport">
-            {options.map((opt) => {
-              const Icon = opt.icon
-              return (
-                <RS.Item key={opt.value} value={toRadix(opt.value)} disabled={opt.disabled} title={opt.title} className="afs-select__option">
-                  {Icon ? <Icon size={14} className="afs-select__opt-icon" /> : null}
-                  <RS.ItemText>{opt.label}</RS.ItemText>
-                  <RS.ItemIndicator className="afs-select__check">
-                    <Check size={14} />
-                  </RS.ItemIndicator>
-                </RS.Item>
-              )
-            })}
-            {options.length === 0 ? <div className="afs-select__empty">无可选项</div> : null}
+            {options.map(renderItem)}
+            {groups?.map((g) => (
+              <RS.Group key={g.label}>
+                <RS.Label className="afs-select__group-label">{g.label}</RS.Label>
+                {g.options.map(renderItem)}
+              </RS.Group>
+            ))}
+            {options.length === 0 && !groups?.length ? <div className="afs-select__empty">无可选项</div> : null}
           </RS.Viewport>
         </RS.Content>
       </RS.Portal>

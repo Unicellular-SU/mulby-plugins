@@ -9,6 +9,7 @@ import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
 import { OptimizableField } from './OptimizableField'
 import { getFieldOptimizer } from '../services/fieldOptimize'
+import Select from './ui/Select'
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -180,17 +181,13 @@ export default function Inspector() {
         )
       case 'select':
         return (
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={(value ?? p.default ?? '') as string}
-            onChange={(e) => updateNodeParam(node.id, p.key, e.target.value)}
-          >
-            {(p.options || []).map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => updateNodeParam(node.id, p.key, v)}
+            options={(p.options || []).map((opt) => ({ value: opt, label: opt }))}
+            ariaLabel={p.label}
+          />
         )
       default:
         if (optGuide)
@@ -301,82 +298,56 @@ export default function Inspector() {
         {snippetTarget && snippets.length > 0 && (
           <div className="afs-field">
             <label className="afs-field__label">插入片段 → {snippetTargetLabel}</label>
-            <select
-              className="afs-field__input"
+            <Select
+              block
               value=""
-              onChange={(e) => {
-                if (e.target.value) insertSnippet(e.target.value)
-                e.target.value = ''
-              }}
-            >
-              <option value="">选择片段插入…</option>
-              {SNIPPET_GROUPS.map((g) => {
-                const items = snippets.filter((s) => s.group === g.id)
-                return items.length ? (
-                  <optgroup key={g.id} label={g.label}>
-                    {items.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ) : null
-              })}
-            </select>
+              onChange={(v) => v && insertSnippet(v)}
+              placeholder="选择片段插入…"
+              groups={SNIPPET_GROUPS.map((g) => ({
+                label: g.label,
+                options: snippets.filter((s) => s.group === g.id).map((s) => ({ value: s.id, label: s.name })),
+              })).filter((grp) => grp.options.length > 0)}
+              ariaLabel="插入片段"
+            />
           </div>
         )}
 
         {def.category === 'text' && (
           <div className="afs-field">
             <label className="afs-field__label">文本模型（覆盖顶栏）</label>
-            <select
-              className="afs-field__input"
+            <Select
+              block
               value={(node.data.params.modelOverride as string) || ''}
-              onChange={(e) => updateNodeParam(node.id, 'modelOverride', e.target.value)}
-            >
-              <option value="">跟随顶栏（默认）</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label || m.id}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => updateNodeParam(node.id, 'modelOverride', v)}
+              options={[{ value: '', label: '跟随顶栏（默认）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+              ariaLabel="文本模型（覆盖顶栏）"
+            />
           </div>
         )}
 
         {def.category === 'image' && (
           <div className="afs-field">
             <label className="afs-field__label">图像模型（覆盖顶栏）</label>
-            <select
-              className="afs-field__input"
+            <Select
+              block
               value={(node.data.params.imageModelOverride as string) || ''}
-              onChange={(e) => updateNodeParam(node.id, 'imageModelOverride', e.target.value)}
-            >
-              <option value="">跟随顶栏（默认）</option>
-              {imageModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label || m.id}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => updateNodeParam(node.id, 'imageModelOverride', v)}
+              options={[{ value: '', label: '跟随顶栏（默认）' }, ...imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+              ariaLabel="图像模型（覆盖顶栏）"
+            />
           </div>
         )}
 
         {providerCap && (
           <div className="afs-field">
             <label className="afs-field__label">{providerCapLabel}供应商（覆盖默认）</label>
-            <select
-              className="afs-field__input"
+            <Select
+              block
               value={(node.data.params.providerOverride as string) || ''}
-              onChange={(e) => updateNodeParam(node.id, 'providerOverride', e.target.value)}
-            >
-              <option value="">跟随默认</option>
-              {capProviders.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => updateNodeParam(node.id, 'providerOverride', v)}
+              options={[{ value: '', label: '跟随默认' }, ...capProviders.map((p) => ({ value: p.id, label: p.label }))]}
+              ariaLabel={`${providerCapLabel}供应商（覆盖默认）`}
+            />
             {capProviders.length === 0 && (
               <div className="afs-inspector__note">尚无{providerCapLabel}供应商，先在顶栏「模型供应商」添加</div>
             )}
