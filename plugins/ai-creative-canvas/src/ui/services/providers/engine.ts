@@ -88,6 +88,72 @@ function renderTemplate(tpl: string, vars: Record<string, string | undefined>): 
   return out.replace(/\{(\w+)\}/g, (_m, k) => (vars[k] != null ? jsonEsc(String(vars[k])) : ''))
 }
 
+// 仅轮询模板型(pollUrl/{taskId})任务（不提交）——供首次提交后轮询 + 断点续跑复用；返回结果 URL
+async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
+  const interval = cfg.pollIntervalMs || 3000
+  const timeout = cfg.timeoutMs || 600000
+  const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
+  const startedAt = Date.now()
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (signal?.aborted) throw new Error('已取消(aborted)')
+    if (Date.now() - startedAt > timeout) throw new Error('生成超时')
+    await sleep(interval)
+    if (signal?.aborted) throw new Error('已取消(aborted)')
+    const sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000)
+    const sd = parse(sr.data)
+    const url = jget(sd, cfg.videoUrlPath)
+    if (url) return url
+    const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
+    onProgress?.(0.5)
+    if (st && fail.includes(st)) throw new Error('生成失败：' + st)
+  }
+}
+
+// 仅轮询默认(idPath/statusPath/{id})任务（不提交）——供首次提交后轮询 + 断点续跑复用；返回结果 URL
+async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
+  const interval = cfg.pollIntervalMs || 2000
+  const timeout = cfg.timeoutMs || 600000
+  const done = (cfg.doneValues || 'completed,succeeded,success').split(',').map((s) => s.trim().toLowerCase())
+  const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
+  const startedAt = Date.now()
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (signal?.aborted) throw new Error('已取消(aborted)')
+    if (Date.now() - startedAt > timeout) throw new Error('生成超时')
+    await sleep(interval)
+    if (signal?.aborted) throw new Error('已取消(aborted)')
+    const statusUrl = base + (cfg.statusPath || '').replace('{id}', taskId)
+    const sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000)
+    const sd = parse(sr.data)
+    let url = jget(sd, cfg.resultPath)
+    if (url) return url
+    const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
+    onProgress?.(0.5)
+    if (st && fail.includes(st)) throw new Error('生成失败：' + st)
+    if (st && done.includes(st)) {
+      url = jget(sd, cfg.resultPath)
+      if (url) return url
+      throw new Error('已完成但未找到结果 URL（检查 resultPath）')
+    }
+  }
+}
+
+// 断点续跑：仅凭已持久化的 taskId 重新轮询在途视频任务（不重新提交），返回结果 URL
+export async function resumeVideoJob(cfg: ProviderConfig, key: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<{ url: string }> {
+  if (cfg.bodyTemplate && cfg.submitUrl) {
+    if (!cfg.pollUrl) throw new Error('该视频 Provider 未配置 pollUrl，无法断点续跑')
+    const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
+    if (key) headers['Authorization'] = `Bearer ${key}`
+    return { url: await pollTaskTemplate(cfg, headers, taskId, onProgress, signal) }
+  }
+  if (!cfg.statusPath) throw new Error('该视频 Provider 未配置 statusPath，无法断点续跑')
+  const headers: any = { 'Content-Type': 'application/json' }
+  if (key) headers['Authorization'] = `Bearer ${key}`
+  const base = cfg.baseURL.replace(/\/$/, '')
+  return { url: await pollTaskDefault(cfg, headers, base, taskId, onProgress, signal) }
+}
+
 // 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath
 async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, signal?: AbortSignal, onTask?: (taskId: string) => void): Promise<{ url: string }> {
   let imageUrl: string | undefined
@@ -137,24 +203,7 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
   const taskId = jget(data, cfg.taskIdPath)
   if (taskId) onTask?.(String(taskId))
   if (!url && taskId && cfg.pollUrl) {
-    const interval = cfg.pollIntervalMs || 3000
-    const timeout = cfg.timeoutMs || 600000
-    const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
-    const startedAt = Date.now()
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (signal?.aborted) throw new Error('已取消(aborted)')
-      if (Date.now() - startedAt > timeout) throw new Error('生成超时')
-      await sleep(interval)
-      if (signal?.aborted) throw new Error('已取消(aborted)')
-      const sr = await httpReq(cfg.pollUrl.replace('{taskId}', String(taskId)), 'GET', headers, undefined, 60000)
-      const sd = parse(sr.data)
-      url = jget(sd, cfg.videoUrlPath)
-      if (url) break
-      const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
-      onProgress?.(0.5)
-      if (st && fail.includes(st)) throw new Error('生成失败：' + st)
-    }
+    url = await pollTaskTemplate(cfg, headers, String(taskId), onProgress, signal)
   }
   if (!url || typeof url !== 'string') throw new Error('未获取到结果 URL（检查 taskIdPath/videoUrlPath）')
   onProgress?.(0.95)
@@ -216,31 +265,7 @@ export async function runVideoJob(
   if (taskId) onTask?.(String(taskId))
 
   if (!url && taskId && cfg.statusPath) {
-    const interval = cfg.pollIntervalMs || 2000
-    const timeout = cfg.timeoutMs || 600000
-    const done = (cfg.doneValues || 'completed,succeeded,success').split(',').map((s) => s.trim().toLowerCase())
-    const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
-    const startedAt = Date.now()
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (signal?.aborted) throw new Error('已取消(aborted)')
-      if (Date.now() - startedAt > timeout) throw new Error('生成超时')
-      await sleep(interval)
-      if (signal?.aborted) throw new Error('已取消(aborted)')
-      const statusUrl = base + (cfg.statusPath || '').replace('{id}', String(taskId))
-      const sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000)
-      const sd = parse(sr.data)
-      url = jget(sd, cfg.resultPath)
-      if (url) break
-      const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
-      onProgress?.(0.5)
-      if (st && fail.includes(st)) throw new Error('生成失败：' + st)
-      if (st && done.includes(st)) {
-        url = jget(sd, cfg.resultPath)
-        if (url) break
-        throw new Error('已完成但未找到结果 URL（检查 resultPath）')
-      }
-    }
+    url = await pollTaskDefault(cfg, headers, base, String(taskId), onProgress, signal)
   }
 
   if (!url || typeof url !== 'string') throw new Error('未获取到结果 URL（检查 idPath/statusPath/resultPath 配置）')

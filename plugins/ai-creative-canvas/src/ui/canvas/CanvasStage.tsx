@@ -61,17 +61,31 @@ export function CanvasStage() {
   const cards = board.cards
   const edges = board.edges
 
-  // 折叠组隐藏成员集合：仅卡片变化时重算（平移因 cards 引用稳定而命中缓存，不触发）
+  // 虚拟化阈值用卡片数判定（避免与空间索引互相依赖）。
+  const VIRTUALIZE_THRESHOLD = 200
+  const LOD_ZOOM = 0.4
+  const cardCount = Object.keys(cards).length
+  const virtualize = cardCount > VIRTUALIZE_THRESHOLD && stageSize.w > 0 && stageSize.h > 0
+  // 拖动期冻结派生集合：moveCardsBy 每帧换 cards 引用，否则大画布上每帧 O(N) 重建索引/隐藏集。
+  // 拖的是选中卡(force 渲染)，冻结的略旧裁剪框不影响其显示；松手 commitTick++ 触发一次按最终位置重建。
+  // 仅在虚拟化(大画布)时冻结——小画布保持原行为，零风险。
+  const [commitTick, setCommitTick] = useState(0)
+  const frozen = virtualize && inter.current.mode === 'drag'
+
+  // 折叠组隐藏成员集合：仅卡片变化时重算（平移因 cards 引用稳定而命中缓存；拖动期冻结）
+  const hiddenRef = useRef<Set<string>>(new Set())
   const hiddenMembers = useMemo(() => {
+    if (frozen) return hiddenRef.current
     const hidden = new Set<string>()
     const hideDesc = (gid: string) => {
       for (const c of Object.values(cards)) if (c.parentId === gid) { hidden.add(c.id); if (c.kind === 'group') hideDesc(c.id) }
     }
     for (const c of Object.values(cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
+    hiddenRef.current = hidden
     return hidden
-  }, [cards])
+  }, [cards, commitTick, frozen])
 
-  // 关联高亮集合（上下游端卡）：仅连线或选择变化时重算
+  // 关联高亮集合（上下游端卡）：仅连线或选择变化时重算（拖动期 edges/selectedIds 稳定，天然不重算）
   const relatedIds = useMemo(() => {
     const r = new Set<string>()
     if (selectedIds.length) {
@@ -84,9 +98,16 @@ export function CanvasStage() {
     return r
   }, [edges, selectedIds])
 
-  // 空间索引：卡片/连线网格，仅在卡片/连线变化时重建（平移命中缓存）。查询为 O(可见格)。
-  const cardIndex = useMemo(() => buildGridIndex(Object.values(cards).map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }))), [cards])
+  // 空间索引：卡片/连线网格，仅在卡片/连线变化时重建（平移命中缓存；拖动期冻结）。查询为 O(可见格)。
+  const cardIndexRef = useRef<ReturnType<typeof buildGridIndex> | null>(null)
+  const cardIndex = useMemo(() => {
+    if (frozen && cardIndexRef.current) return cardIndexRef.current
+    cardIndexRef.current = buildGridIndex(Object.values(cards).map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })))
+    return cardIndexRef.current
+  }, [cards, commitTick, frozen])
+  const edgeIndexRef = useRef<ReturnType<typeof buildGridIndex> | null>(null)
   const edgeIndex = useMemo(() => {
+    if (frozen && edgeIndexRef.current) return edgeIndexRef.current
     const items: RectItem[] = []
     for (const e of Object.values(edges)) {
       const s = cards[e.source]
@@ -95,15 +116,13 @@ export function CanvasStage() {
       const ax = s.x + s.w, ay = s.y + s.h / 2, bx = t.x, by = t.y + t.h / 2
       items.push({ id: e.id, x: Math.min(ax, bx) - 2, y: Math.min(ay, by) - 2, w: Math.abs(bx - ax) + 4, h: Math.abs(by - ay) + 4 })
     }
-    return buildGridIndex(items)
-  }, [cards, edges])
+    edgeIndexRef.current = buildGridIndex(items)
+    return edgeIndexRef.current
+  }, [cards, edges, commitTick, frozen])
 
   // 万级虚拟化：超阈值时用空间索引取可见卡片/连线（选中卡恒含，保浮条/编辑器/手柄锚点）；
   // 极低缩放走 LOD 占位块（轻量色块，省 img/video/事件富层）。阈值以下保持原行为（零风险）。
   // marquee/全选/连接均遍历 store 而非 DOM，剔除不影响选择与命中。
-  const VIRTUALIZE_THRESHOLD = 200
-  const LOD_ZOOM = 0.4
-  const virtualize = cardIndex.count > VIRTUALIZE_THRESHOLD && stageSize.w > 0 && stageSize.h > 0
   const viewRect = virtualize ? worldViewRect(vp, stageSize.w, stageSize.h, 600) : null
   const lod = virtualize && vp.zoom < LOD_ZOOM
 
@@ -118,6 +137,9 @@ export function CanvasStage() {
       if (c && rectsIntersect(viewRect, { x: c.x, y: c.y, w: c.w, h: c.h })) set.add(id)
     }
     if (forceSelected) for (const id of selectedIds) if (cards[id]) set.add(id)
+    // 拖动期把被拖卡补入：冻结索引按拖动前位置分桶，>64 选择(forceSelected=false)时移入视口的卡会漏渲
+    const itNow = inter.current
+    if (itNow.mode === 'drag') for (const id of itNow.ids) if (cards[id]) set.add(id)
     visibleCardIds = [...set]
   } else {
     visibleCardIds = Object.keys(cards)
@@ -359,6 +381,7 @@ export function CanvasStage() {
         }))
       }
     }
+    if (it.mode === 'drag' && it.moved) setCommitTick((t) => t + 1) // 解冻派生集合，按最终位置重建一次
     useUi.getState().setGuides(null)
     setInteracting(null)
     inter.current = { mode: 'idle' }

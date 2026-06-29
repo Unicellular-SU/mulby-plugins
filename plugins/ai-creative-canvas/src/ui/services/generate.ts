@@ -7,7 +7,7 @@ import { generateImage } from './aiImage'
 import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
 import { resolveGenInputs } from './references'
 import { useProviders } from '../store/providerStore'
-import { runVideoJob, runTts } from './providers/engine'
+import { runVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { snapDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
@@ -255,6 +255,74 @@ export async function generateCard(cardId: string): Promise<void> {
   })
 }
 
+// 断点续跑单个视频卡：仅凭持久化的 taskId 重新轮询（不重新提交），完成后下载落盘
+async function resumeVideoCard(cardId: string, taskId: string, providerId: string): Promise<void> {
+  if (videoAborts.has(cardId)) return // 已在续跑
+  const vctrl = new AbortController()
+  videoAborts.set(cardId, vctrl) // 早注册，使「停止」立即可取消
+  useTask.getState().inc()
+  try {
+    const cfg = useProviders.getState().providers.find((p) => p.id === providerId)
+    if (!cfg) {
+      const m = useGraph.getState().getCard(cardId)?.meta || {}
+      useGraph.getState().updateCard(cardId, { status: 'error', error: '续跑失败：原视频 Provider 已不存在', progress: 0, meta: { ...m, task: undefined } })
+      return
+    }
+    const key = await useProviders.getState().getKey(providerId)
+    useGraph.getState().updateCard(cardId, { status: 'running', error: null, progress: 0.5 })
+    const { url } = await resumeVideoJob(cfg, key, taskId, (p) => useGraph.getState().updateCard(cardId, { progress: p }), vctrl.signal)
+    const projectId = useGraph.getState().project.id
+    const title = useGraph.getState().getCard(cardId)?.title || 'video'
+    const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })
+    const path = r?.data?.path
+    if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
+    const mDone = useGraph.getState().getCard(cardId)?.meta || {}
+    useGraph.getState().updateCard(cardId, {
+      status: 'done', progress: 1, assetUrl: toFileUrl(path), assetLocalPath: path, mime: 'video/mp4', meta: { ...mDone, task: undefined }
+    })
+    notifyDone(cardId)
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    const aborted = canceledCards.has(cardId) || e?.name === 'AbortError' || /\babort(ed)?\b/i.test(msg)
+    useGraph.getState().updateCard(cardId, { status: aborted ? 'idle' : 'error', error: aborted ? null : msg, progress: 0 })
+  } finally {
+    videoAborts.delete(cardId)
+    useTask.getState().dec()
+  }
+}
+
+// 重开/切换工程后，扫描所有画布里仍标记为 running 且带持久化 taskId 的视频卡，断点续跑其轮询。
+// sanitizeDoc 已对「视频卡 + meta.task」保留 running 状态（其余 running/queued 置 idle）。
+export async function resumeInflightVideos(): Promise<void> {
+  try {
+    await useProviders.getState().load()
+  } catch {
+    /* ignore */
+  }
+  const g = useGraph.getState()
+  for (const board of g.project.boards) {
+    for (const card of Object.values(board.cards)) {
+      const task = (card.meta as any)?.task
+      if (card.kind === 'video' && card.status === 'running' && task?.taskId && task?.provider && !videoAborts.has(card.id)) {
+        void resumeVideoCard(card.id, String(task.taskId), String(task.provider))
+      }
+    }
+  }
+}
+
+// 切换/删除工程前调用：中止全部在途视频轮询（含续跑）——否则旧工程的 poll 完成回调会落到
+// 新活动工程被静默丢弃。中止后持久化仍是 running+taskId，切回时由 resumeInflightVideos 重新接管。
+export function abortAllInflightVideos(): void {
+  for (const vc of videoAborts.values()) {
+    try {
+      vc.abort()
+    } catch {
+      /* ignore */
+    }
+  }
+  videoAborts.clear()
+}
+
 export async function stopCard(cardId: string): Promise<void> {
   const rid = aborters.get(cardId)
   const vc = videoAborts.get(cardId)
@@ -274,5 +342,9 @@ export async function stopCard(cardId: string): Promise<void> {
     vc.abort()
     videoAborts.delete(cardId)
   }
-  useGraph.getState().updateCard(cardId, { status: 'idle', progress: 0 })
+  // 视频卡置闲时一并清除残留 taskId，避免后续 loadIntoGraph 误触续跑（尤其「已 sanitize 为
+  // running 但续跑尚未起跑」的窗口期——此时 rid/vc 都没有，仅落到这里置 idle）
+  const cNow = useGraph.getState().getCard(cardId)
+  const clearTask = cNow?.kind === 'video' && (cNow.meta as any)?.task ? { meta: { ...cNow.meta, task: undefined } } : {}
+  useGraph.getState().updateCard(cardId, { status: 'idle', progress: 0, ...clearTask })
 }

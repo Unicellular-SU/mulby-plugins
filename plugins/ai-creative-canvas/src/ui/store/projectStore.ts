@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ProjectDoc } from '../types'
 import { useGraph, createDefaultProject } from './graphStore'
+import { resumeInflightVideos, abortAllInflightVideos } from '../services/generate'
 import { uid } from '../util'
 import {
   type ProjectMeta,
@@ -31,14 +32,21 @@ function applyLoaded(pid: string, doc: ProjectDoc) {
   seedMainBaseline(pid, doc)
 }
 
-// 重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）；补 parentId 默认
+// 重开时把上次遗留的"进行中/排队"重置为闲置（任务已不在内存，避免卡死转圈）；补 parentId 默认。
+// 例外：带持久化 taskId 的视频卡保留 running，由 resumeInflightVideos 断点续跑其轮询。
 function sanitizeDoc(doc: ProjectDoc): ProjectDoc {
   for (const b of doc.boards)
     for (const c of Object.values(b.cards)) {
       if ((c as { parentId?: unknown }).parentId === undefined) (c as { parentId: string | null }).parentId = null
       if (c.status === 'running' || c.status === 'queued') {
-        c.status = 'idle'
-        c.progress = 0
+        const task = (c.meta as { task?: { taskId?: unknown; provider?: unknown } })?.task
+        if (c.kind === 'video' && task?.taskId && task?.provider) {
+          c.status = 'running'
+          if (!c.progress) c.progress = 0.5
+        } else {
+          c.status = 'idle'
+          c.progress = 0
+        }
       }
     }
   return doc
@@ -46,6 +54,7 @@ function sanitizeDoc(doc: ProjectDoc): ProjectDoc {
 
 // 载入指定工程到 graphStore（含恢复快照询问）。name 用注册表元信息（注册表为工程名权威源）。
 async function loadIntoGraph(pid: string, name?: string): Promise<void> {
+  abortAllInflightVideos() // 切走前中止上一个工程的在途视频续跑，避免其完成回调落到新工程被丢弃
   let doc = (await loadProject(pid)) || (() => {
     const d = createDefaultProject(name || '未命名工程')
     d.id = pid
@@ -65,6 +74,7 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
   }
   sanitizeDoc(doc)
   applyLoaded(pid, doc)
+  void resumeInflightVideos() // 断点续跑：重开/切换后继续在途视频任务的轮询
 }
 
 interface ProjectState {

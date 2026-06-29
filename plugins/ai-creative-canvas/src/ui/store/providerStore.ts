@@ -30,6 +30,7 @@ export const useProviders = create<ProviderState>((set, get) => ({
   loaded: false,
 
   load: async () => {
+    if (get().loaded) return // 已加载则短路，避免重复 IO/订阅者重渲（续跑每次 loadIntoGraph 都会调用）
     try {
       const data = await storage()?.get('providers', PLUGIN_ID)
       if (data && typeof data === 'object') {

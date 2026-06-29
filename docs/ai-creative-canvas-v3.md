@@ -986,3 +986,9 @@
 - **延后/已知**：是否真无缝取决于模型出图（prompt 尽力）；陀螺仪/VR/小地图热点、把全景当视频卡背景；**3D 导演台**（镜头语言结构化→驱动生成）整体留作后续一期。
 
 > **P2 收尾**：低/中风险 + 千/万级虚拟化 + 持久化分片 + 多工程 + 360 全景均完成。**唯一明确延后**：3D 导演台（previs→生成，单独立项）。
+
+### ⚡ P0 性能·运行时（2026-06-29，已提交）
+两条 P0 延后项落地（其一为务实子集）：
+- **P0-2 视频 taskId 断点续跑**（完整）：`engine.ts` 把提交内联的轮询循环抽成 `pollTaskTemplate`/`pollTaskDefault`（行为保持型重构，经验证逐行等价），新增 `resumeVideoJob`（仅轮询、不重新提交）。`projectStore.sanitizeDoc` 重开时**保留**带 `meta.task(taskId+provider)` 的视频卡为 running（其余在途仍置 idle 避免卡死）；`loadIntoGraph`（init/switch 都走）末尾 `resumeInflightVideos()` 扫描在途视频卡 → 凭持久化 taskId 重新轮询 → 完成下载落盘。可被「停止」取消、provider 缺失报错、inc/dec 配平、done 后清 `meta.task`。
+- **P0-1 交互期降级（务实子集：拖动期索引冻结）**：审计要的「全量 DOM transform / 松手 commit」重写回归面过大（连线/参考线/小地图/平移期虚拟化），而平移本就已是 O(可见)。真正的 O(N)/帧热点是**拖动时每帧重建空间索引**（P2h 明确延后那条）。改为：虚拟化大画布拖动期**冻结** `cardIndex`/`edgeIndex`/`hiddenMembers`（返回 ref 缓存），松手 `commitTick++` 按最终位置重建一次；被拖卡在拖动期无条件补入可见集（覆盖 >64 选择）。小画布零改动。**仍延后**：完整 DOM-transform 解耦（需真机 profile 佐证收益再做）。
+- **审查后修复**（3-agent 验证工作流）：① 切换/删除工程前 `abortAllInflightVideos()` 中止旧工程在途续跑（否则完成回调落到新工程被丢弃 → 丢结果）；② stopCard 对视频卡置闲时清 `meta.task`；③ providerStore.load 加 `loaded` 短路；④ 拖动期被拖卡补入可见集；⑤ 三个 memo 的 `frozen` 显式入 deps（消除隐式契约）。engine 轮询重构经核实与原内联逐行等价。
