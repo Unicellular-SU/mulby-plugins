@@ -1,6 +1,7 @@
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Modal } from './Modal'
+import { Empty } from './ui'
 
 interface Item {
   boardId: string
@@ -45,7 +46,7 @@ export function Gallery() {
   return (
     <Modal title={`作品库（${items.length}）`} width={760} onClose={close}>
       {items.length === 0 ? (
-        <div className="p-10 text-center text-sm opacity-50">还没有生成或导入的媒体</div>
+        <Empty text="还没有生成或导入的媒体" />
       ) : (
         <div className="p-3 grid grid-cols-4 gap-2 max-h-[64vh] overflow-auto ace-scroll">
           {items.map((it) => (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, LayoutTemplate, Trash2, Plus } from 'lucide-react'
+import { Empty } from './ui'
 import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
@@ -46,7 +47,7 @@ export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () =>
         </div>
         <div className="flex-1 overflow-auto ace-noscroll p-2">
           {tpls.length === 0 ? (
-            <div className="py-10 text-center text-sm opacity-60">还没有模板。选中一个分组 → 工具条「保存为模板」。</div>
+            <Empty icon={<LayoutTemplate size={22} className="opacity-50" />} text="还没有模板。选中一个分组 → 工具条「保存为模板」。" />
           ) : (
             tpls.map((t) => (
               <div key={t.id} className="flex items-center gap-2 px-2 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10">

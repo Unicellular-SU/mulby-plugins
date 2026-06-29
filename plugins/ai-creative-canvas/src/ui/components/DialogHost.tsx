@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '../store/dialogStore'
 import { Modal } from './Modal'
+import { Button } from './ui'
 
 // 全局 prompt/confirm 对话框宿主：渲染 dialogStore.current（挂在 App 根）
 export function DialogHost() {
@@ -31,15 +32,8 @@ export function DialogHost() {
       onClose={cancel}
       footer={
         <>
-          <button onClick={cancel} className="px-3 py-1.5 rounded-md text-sm bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15">
-            {current.cancelLabel || '取消'}
-          </button>
-          <button
-            onClick={() => close(isPrompt ? val : true)}
-            className={`px-3 py-1.5 rounded-md text-sm text-white ${current.danger ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}
-          >
-            {current.confirmLabel || '确定'}
-          </button>
+          <Button variant="secondary" onClick={cancel}>{current.cancelLabel || '取消'}</Button>
+          <Button variant={current.danger ? 'danger' : 'primary'} onClick={() => close(isPrompt ? val : true)}>{current.confirmLabel || '确定'}</Button>
         </>
       }
     >

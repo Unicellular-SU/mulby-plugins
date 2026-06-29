@@ -1008,3 +1008,8 @@
 - **并发限流统一**：`limiter.ts` 共享 `aiLimiter`（按工程 concurrency）；`generate` + `inpaint` + `mediaPano`(接缝) + `panoOutpaint`(天地/outpaintFace) 共用一个池——避免叠加打满配额(429)。经审查确认无嵌套死锁。
 - **连线删除可达性**：点击连线=「选中」（显示×、`Delete`/`Backspace` 键删、触屏可用），不再整条点击即删；onArm 清卡片选择、Delete 时有卡片选中则让位画布删卡、跳过 contentEditable——消除与画布删卡的双删冲突。
 - 审查(3-agent)：核心机制(串行/校验/限流/轮询)全部 none；修掉 5 处 minor（双删让位、contentEditable、部分失败告警、轮询不回拨进度、画布 id 去重+命名统一）。
+
+### 🎨 tooltip 统一 + 原子组件（2026-06-29，已提交）
+- **tooltip 统一（零调用点改动）**：`TooltipHost` 在原 `[data-tip]` 基础上**自动接管原生 `[title]`**——hover 时摘除 title（抑制系统气泡、存 `data-ace-title`）、显示玻璃 tooltip、离开/滚轮/按下/卸载时还原。全站 60+ 处 `title=` 自动获得统一玻璃样式，无需逐一改为 data-tip。委托式 mouseover/mouseout 行为与原 data-tip 一致。
+- **原子组件** `components/ui.tsx`：`<Button variant=primary|secondary|danger|ghost loading>`（统一 indigo-500/600 主色 + `disabled:opacity-50 cursor-not-allowed`）、`<Empty icon text>`、`<Loading text>`。已采用：DialogHost 按钮（canonical，零视觉变化）、Gallery/TemplatePanel 空态。
+- **诚实说明**：纯视觉改动、需在 Mulby 内确认观感；其余 button/空态调用点可后续渐进迁移到原子组件（组件已就位，样式集中）。tooltip 摘 title 期间该元素 a11y 暂失 title（离开即还原，影响很小）。
