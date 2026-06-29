@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -178,7 +178,7 @@ function StudioModelBar() {
   return (
     <div className="afs-studio__modelbar">
       <button className="afs-btn afs-btn--sm" onClick={() => setOpen((v) => !v)} title="文本/图像/视频 模型设置（工作台复用全局选择）">
-        <Settings2 size={14} /> 模型{ok ? '' : ' ⚠'}
+        <Settings2 size={14} /> 模型{!ok && <AlertCircle size={12} style={{ color: 'var(--afs-warning)' }} />}
       </button>
       {open && (
         <div className="afs-studio__modelpop">
@@ -273,12 +273,20 @@ function AgentPanel() {
         <button
           className={`afs-studio__manualtoggle${toolLoop ? ' is-on' : ''}`}
           title="实验：原生工具调用（Agent 自主调用工具读写工作区；依赖宿主 function-calling，未生效则用默认结构化管线）"
+          aria-pressed={toolLoop}
+          aria-label="原生工具调用"
           onClick={() => setToolLoop((v) => !v)}
         >
-          🛠
+          <Wrench size={14} />
         </button>
-        <button className="afs-studio__manualtoggle" title="导演手册（全局风格/节奏意图，注入 Agent）" onClick={() => setShowManual((v) => !v)}>
-          🎬
+        <button
+          className={`afs-studio__manualtoggle${showManual ? ' is-on' : ''}`}
+          title="导演手册（全局风格/节奏意图，注入 Agent）"
+          aria-pressed={showManual}
+          aria-label="导演手册"
+          onClick={() => setShowManual((v) => !v)}
+        >
+          <Clapperboard size={14} />
         </button>
       </div>
       {showManual && (
@@ -624,7 +632,7 @@ function AssetCard({ asset }: { asset: Asset }) {
           <option value="">（未配音）</option>
           {voiceAssets.map((v) => (
             <option key={v.id} value={v.id}>
-              🎙 {v.name}
+              {v.name}
             </option>
           ))}
         </select>
@@ -1006,7 +1014,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
         >
           {clip?.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Film size={13} />} 视频
           {candCount > 1 ? `(${candCount})` : ''}
-          {clip?.state === 'done' ? ' ✓' : ''}
+          {clip?.state === 'done' && <Check size={13} style={{ color: 'var(--afs-success)' }} />}
         </button>
         <button className="afs-btn afs-btn--sm afs-btn--ghost" title="精修关键帧（多参考图融合）" onClick={() => setShowFlow(true)}>
           <Settings2 size={13} /> 精修
@@ -1261,8 +1269,8 @@ function CandidateClip({ clip, selected, onSelect, onPreview, onDelete }: { clip
       )}
       {selected && <span className="afs-studio__cand-badge">当选</span>}
       <div className="afs-studio__cand-actions">
-        <button title="设为当选" onClick={onSelect}>
-          ✓
+        <button title="设为当选" onClick={onSelect} aria-label="设为当选">
+          <Check size={14} />
         </button>
         <button title="预览（有声）" onClick={onPreview}>
           <Film size={11} />

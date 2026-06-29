@@ -24,7 +24,8 @@
 | 3 | 内联注入色 → `--cat`/`data-*` 桥接（FilmNode / FlowCanvas / nodeDefs 的分类·端口·点阵·小地图色令牌化） | ↪ 顺延至阶段 3 | 与节点头视觉/文字对比强耦合（裸换 `--afs-cat-video` 会让 `#fff` 头文字低对比），且 React Flow MiniMap/Background 以 **SVG `fill` 属性**消费颜色（不解析 `var()`，需 `getComputedStyle` 桥接）——并入画布阶段统一处理。 |
 | — | 遗留对比债跟踪 | ⏳ 待办 | `styles.css` 仍有 ~5 处 accent 背景配 `#fff` 文字（inspector run、studio 用户气泡等，行≈901/1585/2022/2413/3799），随各自组件/屏阶段改 `--afs-on-accent`。 |
 | 2 | 高频原生控件屏 · **Studio 表单控件令牌化** | ✅ 已完成 | 文件末尾追加 `.afs-studio select`（去 OS 箭头 + 自绘 chevron + 焦点环）与 `.afs-studio input/textarea::placeholder`（`--afs-text-dim`），一次性覆盖 StudioEditor 全部 12+ 原生 select 的触发器外观（源序置末以胜过各 `.afs-studio__* select` 的 `background` 简写）；刻意不动无缝标题与 chip 内联输入。纯 CSS、零依赖。`build:ui` 通过。 |
-| 2 | 高频原生控件屏 · 余下：设置（ProviderSettings 14 字段 / checkbox / radio）→ Inspector → emoji 替换 | ⏳ 待办 | ProviderSettings 原生 checkbox/radio 与 emoji（🎙🛠🎬）需 markup 层改造（Checkbox/Radio 组件 + Lucide 图标）。 |
+| 2 | 高频原生控件屏 · **Studio emoji → Lucide** | ✅ 已完成 | StudioEditor 的图标 emoji 全部替换：🛠→`Wrench`、🎬→`Clapperboard`（两个 toggle 补 `aria-pressed`+`aria-label`+激活态）、⚠→`AlertCircle`(warning 色)、✓(完成/当选)→`Check`(success 色)；🎙 在原生 `<option>` 内无法放图标，按设计去除前缀。`tsc --noEmit` + `build:ui` 均通过（markup 改动用 tsc 校验导入）。 |
+| 2 | 高频原生控件屏 · 余下：设置（ProviderSettings 14 字段 / checkbox / radio）→ Inspector → FilmNode/Lightbox 余下 emoji | ⏳ 待办 | ProviderSettings 原生 checkbox/radio 需 Checkbox/Radio 组件；FilmNode/LightboxHost 仍有 emoji（▶✓✗×→）待替换。 |
 | 3 | 画布与节点视觉：节点头 / 状态 / 运行态 / 灯箱 chrome 令牌化 | ⏳ 待办 | — |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |
 
