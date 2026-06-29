@@ -16,6 +16,13 @@ function storage() {
   return (window as any).mulby?.storage
 }
 
+// 物理删除一个键：优先 remove（真正删键），回落旧 delete，再回落 set(null)（逻辑删除，键残留）
+async function delKey(s: any, k: string): Promise<void> {
+  if (s?.remove) await s.remove(k, PLUGIN_ID)
+  else if (s?.delete) await s.delete(k, PLUGIN_ID)
+  else await s?.set(k, null, PLUGIN_ID)
+}
+
 // ── 分片持久化：manifest(去重 cards/edges/annotations) + 每画布一个分片 ──
 // 增量：仅重写「引用变化」的画布分片（依赖 store 不可变更新——未改画布保持同引用）。
 // 顺序：先写分片、后写 manifest——manifest 只指向已落盘的分片，崩溃时不至于指向半截数据。
@@ -44,10 +51,7 @@ async function writeSharded(
   }
   // 删除已移除画布的孤儿分片
   for (const id of baseline.keys()) {
-    if (!next.has(id)) {
-      if (s.delete) await s.delete(prefix + id, PLUGIN_ID)
-      else await s.set(prefix + id, null, PLUGIN_ID)
-    }
+    if (!next.has(id)) await delKey(s, prefix + id)
   }
   // 最后写 manifest（去重 heavy 字段 + 标记 _sharded）
   const manifest = { ...p, boards: p.boards.map(lightBoard), _sharded: true, ...extra }
@@ -227,19 +231,38 @@ export async function saveProject(pid: string, p: ProjectDoc): Promise<boolean> 
   }
 }
 
-// 删除某工程的全部存储（manifest + 各分片 + 恢复）
+// 删除某工程的全部存储（manifest + 主分片 + 恢复分片）
 export async function deleteProjectStorage(pid: string): Promise<void> {
   try {
     const s = storage()
     if (!s) return
-    const del = async (k: string) => {
-      if (s.delete) await s.delete(k, PLUGIN_ID)
-      else await s.set(k, null, PLUGIN_ID)
+    // 关键：恢复分片(kRecBoard)用与主分片相同的画布 id。clearRecovery 在每次主存成功后只删
+    // 恢复 manifest、保留恢复分片，故不能仅靠恢复 manifest 枚举——否则恢复分片永久成孤儿。
+    // 改为：取主 manifest 的画布 id ∪ 恢复 manifest（若还在）的画布 id，对每个 id 删主+恢复两份分片。
+    const idSet = new Set<string>()
+    const main: any = await s.get(kCurrent(pid), PLUGIN_ID)
+    if (main && Array.isArray(main.boards)) for (const b of main.boards) if (b?.id) idSet.add(b.id)
+    const rec: any = await s.get(kRecovery(pid), PLUGIN_ID)
+    if (rec && Array.isArray(rec.boards)) for (const b of rec.boards) if (b?.id) idSet.add(b.id)
+    for (const id of idSet) {
+      await delKey(s, kBoard(pid) + id)
+      await delKey(s, kRecBoard(pid) + id)
     }
-    for (const [key, prefix] of [[kCurrent(pid), kBoard(pid)], [kRecovery(pid), kRecBoard(pid)]] as const) {
-      const m: any = await s.get(key, PLUGIN_ID)
-      if (m && Array.isArray(m.boards)) for (const b of m.boards) await del(prefix + b.id)
-      await del(key)
+    await delKey(s, kCurrent(pid))
+    await delKey(s, kRecovery(pid))
+    // 兜底：宿主支持 V2 前缀列举时，按 proj:<pid>: 清掉一切残留（含已脱离 manifest 引用的历史孤儿）。
+    // best-effort：旧宿主无 list 或命名空间不匹配 → 静默跳过，常见路径已由上面的并集删除覆盖。
+    if (typeof s.list === 'function') {
+      try {
+        let cursor: string | undefined
+        do {
+          const r = await s.list({ prefix: `proj:${pid}:`, limit: 1000, startsAfter: cursor, namespace: PLUGIN_ID })
+          for (const it of r?.items || []) await delKey(s, it.key)
+          cursor = r?.nextCursor
+        } while (cursor)
+      } catch {
+        /* 列举不可用：忽略 */
+      }
     }
     if (baselineProjectId === pid) baselineProjectId = null
   } catch {
@@ -276,9 +299,7 @@ export async function loadRecovery(pid: string): Promise<RecoverySnap | null> {
 // 而后续编辑仍按引用增量重写恢复分片，避免每次清空后又全量重写。
 export async function clearRecovery(pid: string): Promise<void> {
   try {
-    const s = storage()
-    if (s?.delete) await s.delete(kRecovery(pid), PLUGIN_ID)
-    else await s?.set(kRecovery(pid), null, PLUGIN_ID)
+    await delKey(storage(), kRecovery(pid))
   } catch {
     /* ignore */
   }

@@ -141,6 +141,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   const startConnect = (e: ReactPointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    const handle = e.currentTarget as HTMLElement
+    const pid = e.pointerId
+    try { handle.setPointerCapture(pid) } catch { /* ignore */ }
     const sourceId = card.id
     useUi.getState().setConnInvalid(invalidTargetIds(sourceId, useGraph.getState().getActiveBoard().cards))
     const move = (ev: PointerEvent) => {
@@ -152,11 +155,24 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
       useUi.getState().setConnectTemp({ x1: src.x + src.w, y1: src.y + src.h / 2, x2: w.x, y2: w.y })
     }
-    const up = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
+    const cleanup = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', up)
+      handle.removeEventListener('pointercancel', cancel)
+      handle.removeEventListener('lostpointercapture', cancel)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('contextmenu', onCtx)
+      try { handle.releasePointerCapture(pid) } catch { /* ignore */ }
       useUi.getState().setConnectTemp(null)
       useUi.getState().setConnInvalid(null)
+    }
+    // 指针捕获：拖出窗口仍收事件；lostpointercapture(真正丢指针)/Esc/右键 都收尾，
+    // 避免「线粘住鼠标」。不用 window blur 兜底——它会在切窗/输入法夺焦等正常场景误取消拖拽。
+    const cancel = () => cleanup()
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') cleanup() }
+    const onCtx = (ev: Event) => { ev.preventDefault(); cleanup() }
+    const up = (ev: PointerEvent) => {
+      cleanup()
       const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
       const tc = el?.closest('[data-card-id]') as HTMLElement | null
       const targetId = tc?.dataset.cardId
@@ -174,14 +190,21 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         }
       }
     }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', up)
+    handle.addEventListener('pointercancel', cancel)
+    handle.addEventListener('lostpointercapture', cancel)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('contextmenu', onCtx)
   }
 
   // 手动缩放卡片（右下角手柄）；标记 fittedFor 避免媒体加载后又被自动比例覆盖
   const startCardResize = (e: ReactPointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    const handle = e.currentTarget as HTMLElement
+    const pid = e.pointerId
+    try { handle.setPointerCapture(pid) } catch { /* ignore */ }
     const move = (ev: PointerEvent) => {
       const rect = stageEl.current?.getBoundingClientRect()
       if (!rect) return
@@ -192,13 +215,25 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       updateCard(card.id, { w: nw, h: nh, meta: { ...card.meta, fittedFor: card.assetUrl } })
       setResizeBubble({ w: nw, h: nh })
     }
-    const up = () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
+    // 松手 / 指针被打断(lostpointercapture) / Esc / 右键 都收尾——避免缩放卡死跟随鼠标
+    const cleanup = () => {
+      handle.removeEventListener('pointermove', move)
+      handle.removeEventListener('pointerup', cleanup)
+      handle.removeEventListener('pointercancel', cleanup)
+      handle.removeEventListener('lostpointercapture', cleanup)
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('contextmenu', onCtx)
+      try { handle.releasePointerCapture(pid) } catch { /* ignore */ }
       setResizeBubble(null)
     }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') cleanup() }
+    const onCtx = (ev: Event) => { ev.preventDefault(); cleanup() }
+    handle.addEventListener('pointermove', move)
+    handle.addEventListener('pointerup', cleanup)
+    handle.addEventListener('pointercancel', cleanup)
+    handle.addEventListener('lostpointercapture', cleanup)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('contextmenu', onCtx)
   }
 
   const isImg = (card.kind === 'image' || card.kind === 'source') && !!card.assetUrl
