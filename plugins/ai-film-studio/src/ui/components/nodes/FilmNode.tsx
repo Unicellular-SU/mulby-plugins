@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
-import { Lock, LockOpen, Loader2, RotateCcw, Maximize2, type LucideIcon } from 'lucide-react'
+import { Lock, LockOpen, Loader2, RotateCcw, Maximize2, X, Play, type LucideIcon } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
@@ -45,7 +45,7 @@ function GenItemTile({ item, onOpen }: { item: GenItem; onOpen?: () => void }) {
           )
         ) : null
       ) : item.status === 'failed' ? (
-        <span className="afs-node__tile-x">✗</span>
+        <X size={20} className="afs-node__tile-x" aria-label="生成失败" />
       ) : (
         <Loader2 size={18} className="afs-spin" />
       )}
@@ -306,7 +306,7 @@ function MediaFrameNode({
               onOpen()
             }}
           >
-            ▶
+            <Play size={16} fill="currentColor" />
           </button>
         )}
         <div className="afs-node__frame-head">
