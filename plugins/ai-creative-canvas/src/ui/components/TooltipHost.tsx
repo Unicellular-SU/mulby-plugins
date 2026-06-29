@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Z } from '../zlayers'
 
 // 委托式玻璃 tooltip：监听带 data-tip 的元素 hover，portal 到 body（不被画布 overflow 裁剪、风格统一）
 export function TooltipHost() {
@@ -43,7 +44,7 @@ export function TooltipHost() {
   if (!tip) return null
   return createPortal(
     <div
-      className="ace-glass fixed z-[300] -translate-x-1/2 -translate-y-full pointer-events-none px-2 py-1 text-[11px] whitespace-nowrap"
+      className={`ace-glass fixed ${Z.tooltip} -translate-x-1/2 -translate-y-full pointer-events-none px-2 py-1 text-[11px] whitespace-nowrap`}
       style={{ left: tip.x, top: tip.y - 6 }}
     >
       {tip.text}

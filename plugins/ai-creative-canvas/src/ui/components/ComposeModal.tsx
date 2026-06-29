@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Film, Loader2 } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Select } from './Select'
@@ -25,6 +26,7 @@ function collectClips(ids: string[], cards: Record<string, Card>): Card[] {
 
 export function ComposeModal() {
   const show = useUi((s) => s.showCompose)
+  useEscClose(() => useUi.getState().setShowCompose(false))
   if (!show) return null
   return <Inner />
 }

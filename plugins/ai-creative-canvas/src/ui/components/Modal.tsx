@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
+import { Z } from '../zlayers'
 
 // 统一模态外壳：玻璃对话框 + 遮罩模糊 + ESC/点遮罩关闭 + 进场动画
 export function Modal({
@@ -25,7 +26,7 @@ export function Modal({
   }, [onClose])
 
   return createPortal(
-    <div className="fixed inset-0 z-[120] bg-black/50 backdrop-blur-sm flex items-center justify-center p-6" onClick={onClose}>
+    <div className={`fixed inset-0 ${Z.dialog} bg-black/50 backdrop-blur-sm flex items-center justify-center p-6`} onClick={onClose}>
       <div
         data-interactive
         onClick={(e) => e.stopPropagation()}

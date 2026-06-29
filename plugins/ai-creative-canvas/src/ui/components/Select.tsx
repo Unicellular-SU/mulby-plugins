@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
+import { Z } from '../zlayers'
 
 export interface SelectOption {
   value: string
@@ -77,7 +78,7 @@ export function Select({
           <div
             ref={popRef}
             data-interactive
-            className="ace-menu ace-anim-pop fixed z-[70] py-1 overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200"
+            className={`ace-menu ace-anim-pop fixed ${Z.dropdown} py-1 overflow-auto ace-noscroll text-neutral-800 dark:text-neutral-200`}
             style={{
               left: pos.left,
               width: Math.max(pos.width, 132),

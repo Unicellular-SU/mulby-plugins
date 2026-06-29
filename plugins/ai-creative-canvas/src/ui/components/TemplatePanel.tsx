@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, LayoutTemplate, Trash2, Plus } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { listTemplates, deleteTemplate } from '../services/templates'
@@ -8,6 +9,7 @@ import type { GroupTemplate } from '../types'
 import { toast } from '../store/toastStore'
 
 export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () => void }) {
+  useEscClose(onClose)
   const [tpls, setTpls] = useState<GroupTemplate[]>([])
   useEffect(() => {
     if (show) void listTemplates().then(setTpls)

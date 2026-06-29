@@ -992,3 +992,10 @@
 - **P0-2 视频 taskId 断点续跑**（完整）：`engine.ts` 把提交内联的轮询循环抽成 `pollTaskTemplate`/`pollTaskDefault`（行为保持型重构，经验证逐行等价），新增 `resumeVideoJob`（仅轮询、不重新提交）。`projectStore.sanitizeDoc` 重开时**保留**带 `meta.task(taskId+provider)` 的视频卡为 running（其余在途仍置 idle 避免卡死）；`loadIntoGraph`（init/switch 都走）末尾 `resumeInflightVideos()` 扫描在途视频卡 → 凭持久化 taskId 重新轮询 → 完成下载落盘。可被「停止」取消、provider 缺失报错、inc/dec 配平、done 后清 `meta.task`。
 - **P0-1 交互期降级（务实子集：拖动期索引冻结）**：审计要的「全量 DOM transform / 松手 commit」重写回归面过大（连线/参考线/小地图/平移期虚拟化），而平移本就已是 O(可见)。真正的 O(N)/帧热点是**拖动时每帧重建空间索引**（P2h 明确延后那条）。改为：虚拟化大画布拖动期**冻结** `cardIndex`/`edgeIndex`/`hiddenMembers`（返回 ref 缓存），松手 `commitTick++` 按最终位置重建一次；被拖卡在拖动期无条件补入可见集（覆盖 >64 选择）。小画布零改动。**仍延后**：完整 DOM-transform 解耦（需真机 profile 佐证收益再做）。
 - **审查后修复**（3-agent 验证工作流）：① 切换/删除工程前 `abortAllInflightVideos()` 中止旧工程在途续跑（否则完成回调落到新工程被丢弃 → 丢结果）；② stopCard 对视频卡置闲时清 `meta.task`；③ providerStore.load 加 `loaded` 短路；④ 拖动期被拖卡补入可见集；⑤ 三个 memo 的 `frozen` 显式入 deps（消除隐式契约）。engine 轮询重构经核实与原内联逐行等价。
+
+### 🎛️ UX 一致性批（2026-06-29，已提交）
+聚焦「功能性一致」（可构建验证、低视觉回归风险）；纯样式原子化（tooltip/Button/Empty/Loading）因属大面积视觉改动、需真机逐一比对，**本批暂缓**。
+- **z 层级量表 + 修复真 bug**：新增 `zlayers.ts`（语义层级 panel/modal/fullscreen/contextMenu/dialog/dropdown/toast/tooltip，Tailwind 类字符串集中管理）。**真 bug**：Select 下拉原 `z-[70]` 低于模态 `z-[80]`——模态内打开的 Select 被遮挡；提到 `z-[150]`（dropdown，高于模态与对话框）修复。Select/ContextMenu/Toast/Tooltip/Modal/ProjectSettings/Lightbox 改用 `Z.*`；ProviderSettings/CropModal 的 `z-50` 归一到 `z-[80]`（modal）。构建后核验 `z-index:150`/`95` 已生成。
+- **全部手写模态补 ESC 关闭**：`hooks.ts` 的 `useEscClose`（ref 化，置于早返回之前，hooks 顺序安全）接入 9 个模态（Compose/Storyboard/Timeline/MaskInpaint/VideoTrim/ProjectLibrary/ProviderSettings/TemplatePanel/CropModal）——与共享 Modal 行为一致。
+- **MediaToolbox 工具条溢出**：`flex-wrap` 多排 → 单行 `overflow-x-auto`（`max-w-[92vw]` + 隐藏滚动条），窄卡不再被挤压成多排。
+- **暂缓（需真机视觉迭代）**：tooltip 统一（原生 title vs 玻璃 TooltipHost 二选一，60+ 处）、`<Button variant>` / `<Empty>` / `<Loading>` 原子化与各处替换。

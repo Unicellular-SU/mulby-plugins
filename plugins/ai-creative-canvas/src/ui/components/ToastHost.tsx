@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react'
+import { Z } from '../zlayers'
 import { useToasts, type ToastType } from '../store/toastStore'
 
 const META: Record<ToastType, { icon: typeof Info; color: string }> = {
@@ -15,7 +16,7 @@ export function ToastHost() {
   const dismiss = useToasts((s) => s.dismiss)
   if (!toasts.length) return null
   return createPortal(
-    <div className="fixed z-[200] bottom-4 left-1/2 -translate-x-1/2 flex flex-col-reverse gap-2 pointer-events-none">
+    <div className={`fixed ${Z.toast} bottom-4 left-1/2 -translate-x-1/2 flex flex-col-reverse gap-2 pointer-events-none`}>
       {toasts.map((t) => {
         const m = META[t.type]
         const Icon = m.icon

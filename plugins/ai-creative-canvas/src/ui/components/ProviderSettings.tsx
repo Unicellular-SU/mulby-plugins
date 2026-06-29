@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react'
 import { X, Plus, Trash2 } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useProviders } from '../store/providerStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -26,6 +27,7 @@ export function ProviderSettings() {
   const getKey = useProviders((s) => s.getKey)
   const setKey = useProviders((s) => s.setKey)
   const close = () => useUi.getState().setShowProviderSettings(false)
+  useEscClose(close)
 
   const [sel, setSel] = useState<string | null>(providers[0]?.id ?? null)
   const [draft, setDraft] = useState<ProviderConfig | null>(null)
@@ -88,7 +90,7 @@ export function ProviderSettings() {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-6"
+      className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-6"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) close()
       }}

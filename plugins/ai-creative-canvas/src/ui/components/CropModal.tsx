@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import type { Card } from '../types'
+import { useEscClose } from '../hooks'
 
 interface BoxRect {
   x: number
@@ -17,6 +18,7 @@ export function CropModal({
   onCancel: () => void
   onConfirm: (rect: { left: number; top: number; width: number; height: number }) => void
 }) {
+  useEscClose(onCancel)
   const imgRef = useRef<HTMLImageElement>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
   const [rect, setRect] = useState<BoxRect | null>(null)
@@ -62,7 +64,7 @@ export function CropModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 flex flex-col items-center justify-center gap-3 p-6"
+      className="fixed inset-0 z-[80] bg-black/70 flex flex-col items-center justify-center gap-3 p-6"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onCancel()
       }}

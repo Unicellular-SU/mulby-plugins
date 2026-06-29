@@ -1,5 +1,6 @@
 import { useRef, type ChangeEvent } from 'react'
 import { FolderOpen, Plus, Upload, Download, Copy, Pencil, Trash2, Check, X, Layers } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useUi } from '../store/uiStore'
 import { useProject } from '../store/projectStore'
 import { promptDialog } from '../store/dialogStore'
@@ -14,6 +15,7 @@ const fmtTime = (ts: number) => {
 
 export function ProjectLibrary() {
   const show = useUi((s) => s.showProjectLibrary)
+  useEscClose(() => useUi.getState().setShowProjectLibrary(false))
   if (!show) return null
   return <Inner />
 }

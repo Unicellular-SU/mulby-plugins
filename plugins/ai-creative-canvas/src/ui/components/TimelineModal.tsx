@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X, Film, Loader2, ChevronLeft, ChevronRight, Scissors } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Select } from './Select'
@@ -26,6 +27,7 @@ interface Clip {
 
 export function TimelineModal() {
   const show = useUi((s) => s.showTimeline)
+  useEscClose(() => useUi.getState().setShowTimeline(false))
   if (!show) return null
   return <Inner />
 }

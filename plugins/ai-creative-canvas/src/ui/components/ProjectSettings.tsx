@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { SlidersHorizontal } from 'lucide-react'
+import { Z } from '../zlayers'
 import { useGraph } from '../store/graphStore'
 import { listImageModels, listTextModels, type ModelOption } from '../services/models'
 import { Select } from './Select'
@@ -59,7 +60,7 @@ export function ProjectSettings() {
           <div
             ref={panelRef}
             data-interactive
-            className="ace-menu ace-anim-pop fixed z-[60] w-64 p-3 flex flex-col gap-3 text-sm text-neutral-800 dark:text-neutral-200"
+            className={`ace-menu ace-anim-pop fixed ${Z.panel} w-64 p-3 flex flex-col gap-3 text-sm text-neutral-800 dark:text-neutral-200`}
             style={{ top: pos.top, right: pos.right }}
           >
             <div className="flex flex-col gap-1">

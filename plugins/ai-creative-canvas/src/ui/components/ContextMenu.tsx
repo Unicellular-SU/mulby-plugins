@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { Z } from '../zlayers'
 import { Sparkles, Film, Grid2x2, Boxes, LayoutTemplate, Link2, Copy, ClipboardPaste, AlignCenter, Download, Trash2, Plus } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
@@ -211,7 +212,7 @@ export function ContextMenu() {
         e.preventDefault()
         e.stopPropagation()
       }}
-      className="ace-menu ace-anim-pop fixed z-[90] py-1 text-sm text-neutral-800 dark:text-neutral-200"
+      className={`ace-menu ace-anim-pop fixed ${Z.contextMenu} py-1 text-sm text-neutral-800 dark:text-neutral-200`}
       style={{ left, top, width: W }}
     >
       {items.map((it, i) => {

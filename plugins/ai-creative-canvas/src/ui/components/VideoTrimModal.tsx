@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { X, Scissors, Loader2 } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
 import { ensureFfmpeg, timelineThumbs } from '../services/mediaVideo'
@@ -15,6 +16,7 @@ function fmt(s: number): string {
 
 export function VideoTrimModal() {
   const id = useUi((s) => s.trimCardId)
+  useEscClose(() => useUi.getState().setTrimCardId(null))
   if (!id) return null
   return <Inner cardId={id} />
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X, Clapperboard, Loader2, Plus, Trash2, ChevronUp, ChevronDown, Download } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { generateShots, materializeShots, getRowsTotalDurationSeconds } from '../services/storyboard'
@@ -12,6 +13,7 @@ function notify(m: string, t?: string) {
 
 export function StoryboardModal() {
   const cardId = useUi((s) => s.storyboardCardId)
+  useEscClose(() => useUi.getState().setStoryboardCardId(null))
   if (!cardId) return null
   return <Inner cardId={cardId} />
 }

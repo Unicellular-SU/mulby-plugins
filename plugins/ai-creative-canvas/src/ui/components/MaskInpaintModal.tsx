@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { X, Loader2, Eraser, Brush, RotateCcw } from 'lucide-react'
+import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { inpaint, type InpaintOp } from '../services/inpaint'
@@ -12,6 +13,7 @@ function notify(m: string, t?: string) {
 
 export function MaskInpaintModal() {
   const cardId = useUi((s) => s.maskCardId)
+  useEscClose(() => useUi.getState().setMaskCardId(null))
   if (!cardId) return null
   return <Inner cardId={cardId} />
 }
