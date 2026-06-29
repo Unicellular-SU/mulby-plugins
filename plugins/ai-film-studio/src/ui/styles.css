@@ -4074,3 +4074,28 @@ select.afs-toolbar__select,
 .afs-studio__lightbox-body { position: relative; max-width: 86vw; max-height: 86vh; }
 .afs-studio__lightbox-video { max-width: 86vw; max-height: 86vh; border-radius: 10px; background: #000; }
 .afs-studio__lightbox-close { position: absolute; top: -14px; right: -14px; width: 32px; height: 32px; border-radius: 50%; border: none; background: var(--afs-panel); color: var(--afs-text); cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+
+/* ============ Studio 工作台原生表单控件统一（令牌化；见 docs §6.10） ============
+   置于文件末尾，以源序覆盖上方各 .afs-studio__* select 的 background 简写（保证自绘 chevron 不被重置）。
+   仅作用于 <select> 与占位符：去 OS 箭头 + 焦点环 + 三级占位符色；
+   不动无缝标题(.afs-studio__title / .afs-studio__cardname)与 chip 内联输入。
+   注：select 选项弹层仍为系统级，待后续自定义 Select（headless）接管。 */
+.afs-studio select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 22px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 13px;
+}
+.afs-studio select:focus {
+  outline: none;
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-studio input::placeholder,
+.afs-studio textarea::placeholder {
+  color: var(--afs-text-dim);
+}
