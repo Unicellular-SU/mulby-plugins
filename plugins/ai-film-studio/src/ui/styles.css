@@ -348,15 +348,8 @@ body {
 .afs-toolbar__spacer {
   flex: 1;
 }
-.afs-toolbar__logo {
-  color: #f59e0b;
-  display: flex;
-}
-.afs-toolbar__brand {
-  font-weight: 700;
-  font-size: 14px;
-  white-space: nowrap;
-}
+/* .afs-toolbar__logo / .afs-toolbar__brand 已移除（孤儿样式：Toolbar 不再渲染文字 logo；
+   品牌标记统一为 AppRail 的 --afs-grad-brand 渐变芯片）。 */
 .afs-toolbar__select,
 .afs-toolbar__name {
   height: 30px;
@@ -2323,7 +2316,7 @@ select.afs-toolbar__select,
   margin-left: 2px;
 }
 .afs-prov__nokey {
-  color: #f59e0b;
+  color: var(--afs-warning);
   margin-left: 2px;
 }
 .afs-prov__del {
@@ -3746,8 +3739,8 @@ select.afs-toolbar__select,
   font-size: 12.5px;
   line-height: 1.65;
   color: var(--afs-text);
-  background: color-mix(in srgb, #f59e0b 12%, transparent);
-  border: 1px solid color-mix(in srgb, #f59e0b 40%, var(--afs-border));
+  background: color-mix(in srgb, var(--afs-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--afs-warning) 40%, var(--afs-border));
   border-radius: 9px;
 }
 
@@ -4007,7 +4000,7 @@ select.afs-toolbar__select,
   border: 1px solid var(--afs-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
 .afs-studio__modelpop label { font-size: 12px; color: var(--afs-muted); margin-top: 4px; }
 .afs-studio__modelstat { font-size: 12px; padding: 6px 9px; border-radius: 7px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); }
-.afs-studio__modelstat.is-missing { color: #f59e0b; }
+.afs-studio__modelstat.is-missing { color: var(--afs-warning); }
 
 /* 工作台 · 分镜上下移（阶段4e） */
 .afs-studio__move { width: 18px; height: 16px; border: none; background: transparent; color: var(--afs-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
@@ -4066,7 +4059,7 @@ select.afs-toolbar__select,
 .afs-studio__emptyactions { display: flex; gap: 10px; margin-top: 14px; }
 
 /* 工作流 · 片段失败提示 + 时间线片段可点预览 + 片段灯箱 */
-.afs-studio__sberr { display: inline-flex; align-items: center; gap: 4px; color: #f59e0b; font-size: 12px; }
+.afs-studio__sberr { display: inline-flex; align-items: center; gap: 4px; color: var(--afs-warning); font-size: 12px; }
 .afs-studio__trackclip { position: relative; border: 1px solid var(--afs-border); background: #000; padding: 0; border-radius: 8px; overflow: hidden; cursor: pointer; flex: 0 0 auto; }
 .afs-studio__trackclip:hover { border-color: var(--afs-accent, #a855f7); }
 .afs-studio__trackclip video { display: block; width: 160px; height: 90px; object-fit: cover; }
