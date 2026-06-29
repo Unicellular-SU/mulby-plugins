@@ -360,13 +360,15 @@ body {
 .afs-toolbar__select,
 .afs-toolbar__name {
   height: 30px;
-  background: var(--afs-panel-2);
+  background: var(--afs-surface-sunken);
   border: 1px solid var(--afs-border);
-  border-radius: 6px;
+  border-radius: var(--afs-r-sm);
   color: var(--afs-text);
   padding: 0 8px;
   font-size: 12px;
   outline: none;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
 }
 .afs-toolbar__select {
   max-width: 150px;
@@ -374,9 +376,14 @@ body {
 .afs-toolbar__name {
   width: 150px;
 }
+.afs-toolbar__select:hover,
+.afs-toolbar__name:hover {
+  border-color: var(--afs-border-strong);
+}
 .afs-toolbar__select:focus,
 .afs-toolbar__name:focus {
   border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
 }
 .afs-toolbar__name {
   width: 200px;
@@ -811,21 +818,50 @@ body {
   color: var(--afs-muted);
   margin-bottom: 4px;
 }
+/* ============ 表单控件 Inputs / Textarea / Select（令牌化；见 docs §5.1） ============
+   统一内陷面 + 悬停强边 + 聚焦 accent 边框与焦点环 + 占位符 --afs-text-dim；
+   原生 <select> 去 OS 箭头并贴自绘 chevron（选项弹层仍为系统级，待后续自定义 Select 接管）。 */
 .afs-field__input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--afs-panel-2);
+  background: var(--afs-surface-sunken);
   border: 1px solid var(--afs-border);
-  border-radius: 6px;
+  border-radius: var(--afs-r-sm);
   color: var(--afs-text);
   padding: 7px 8px;
   font-size: 12px;
   outline: none;
   font-family: inherit;
   resize: vertical;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-field__input:hover {
+  border-color: var(--afs-border-strong);
 }
 .afs-field__input:focus {
   border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+/* 原生 select：去 OS chevron + 自绘下拉箭头（三处 select 类共用） */
+select.afs-field__input,
+select.afs-toolbar__select,
+.afs-form__row select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+/* 占位符统一为三级文本色（修复此前亮色下不可读） */
+.afs-field__input::placeholder,
+.afs-form__row input::placeholder,
+.afs-form__ta::placeholder,
+.afs-toolbar__name::placeholder {
+  color: var(--afs-text-dim);
 }
 .afs-inspector__note {
   font-size: 11px;
@@ -2272,12 +2308,24 @@ body {
 .afs-form__row select {
   flex: 1;
   min-width: 0;
-  background: var(--afs-panel-2);
+  background: var(--afs-surface-sunken);
   border: 1px solid var(--afs-border);
-  border-radius: 6px;
+  border-radius: var(--afs-r-sm);
   color: var(--afs-text);
   padding: 6px 8px;
   font-size: 12px;
+  outline: none;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-form__row input:hover,
+.afs-form__row select:hover {
+  border-color: var(--afs-border-strong);
+}
+.afs-form__row input:focus,
+.afs-form__row select:focus {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
 }
 .afs-form__row--col {
   flex-direction: column;
