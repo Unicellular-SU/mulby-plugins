@@ -83,6 +83,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent palette and line weight with the reference',
     },
     negative: 'no photorealistic, no 3D, no gradient mesh, no heavy shadow, no watermark, no text',
+    consistencyAnchors: ['consistent flat color palette and uniform line weight across shots, same simplified character shapes and proportions', 'identical minimal-shading method (single flat tone, no gradients) and matching geometric scene construction'],
+    qualityRules: ['keep shapes flat and bold with crisp vector edges; avoid 3D rendering, photorealism, painterly textures, or volumetric gradients', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: 'coral', hex: '#FF6B6B' },
       { name: 'teal', hex: '#4ECDC4' },
@@ -103,6 +105,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent cel shading and faded palette with the reference',
     },
     negative: 'no modern digital gloss, no 3D, no photorealistic, no neon oversaturation, no watermark',
+    consistencyAnchors: ['consistent hard-edged 2-tone cel shading with crisp ink lines, same uniform line weight on every character', 'stable faded warm analog palette, identical character color fills and skin tone across shots, uniform light film grain'],
+    qualityRules: ['keep flat hand-painted cel look with hard shadow boundaries; avoid 3D render, soft digital gradients, glossy modern anime sheen', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: 'faded amber', hex: '#C8A27A' },
       { name: 'dusty teal', hex: '#7A9EA3' },
@@ -123,6 +127,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent model design and shading with the reference',
     },
     negative: 'no flat 2D, no anime cel lines, no photorealistic humans, no rough low-poly, no watermark',
+    consistencyAnchors: ['consistent stylized 3D character model proportions and sculpted face topology, same subsurface-scattering skin shader and material set across shots', 'soft global-illumination key with consistent palette, polished CGI render, no visible polygon edges'],
+    qualityRules: ['emphasize clean 3D-rendered surfaces with subsurface skin and soft GI; avoid flat 2D cel-shading, hand-drawn linework, or photoreal live-action look', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: 'sun', hex: '#F2C879' },
       { name: 'sky', hex: '#5FA8D3' },
@@ -143,6 +149,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent clay material and craft style with the reference',
     },
     negative: 'no smooth CGI, no 2D, no photorealistic, no plastic-perfect surfaces, no watermark',
+    consistencyAnchors: ['consistent plasticine material sheen and matte clay finish, same sculpted facial proportions and seam lines per character, identical fingerprint-textured surfaces', 'soft directional softbox key light with gentle shadows on miniature set, warm tactile palette, shallow tabletop-diorama depth of field'],
+    qualityRules: ['preserve handmade clay imperfections, visible thumbprints and tool marks, sculpted dimensional forms; never smooth CGI plastic or flat 2D cartoon', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: 'terracotta', hex: '#C76B4A' },
       { name: 'moss', hex: '#7C9A6E' },
@@ -163,6 +171,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent oriental material and design language with the reference',
     },
     negative: 'no western fantasy, no photorealistic, no flat 2D, no neon, no watermark',
+    consistencyAnchors: ['consistent jade/lacquer material PBR response and silk shader sheen, same subsurface translucency and lacquer specular roll-off across shots', 'locked oriental color palette (jade green, vermillion lacquer, gold accents) and soft warm key-light render, same ornate render fidelity and character costume detailing'],
+    qualityRules: ['keep stylized 3D Chinese ornate render with crisp jade/lacquer materials and flowing silk simulation; avoid plasticky generic CGI, photoreal skin, or western fantasy look', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: '朱', hex: '#9B2D30' },
       { name: '金', hex: '#D4AF37' },
@@ -183,6 +193,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent neon palette and tech-oriental fusion with the reference',
     },
     negative: 'no plain historical, no soft pastel, no flat illustration, no flat daylight, no watermark',
+    consistencyAnchors: ['consistent teal-magenta neon key light over cool desaturated shadows, wet-reflective surfaces, persistent holographic hanzi glow', 'same crisp high-contrast cyberpunk rendering: ink-line oriental motifs fused with chrome/neon materials, rim-lit subjects against rainy haze'],
+    qualityRules: ['keep neon-on-dark high contrast with saturated magenta/cyan accents; avoid flat daylight, muted pastels, or low-contrast washout', 'no exact hanzi text baked into the image; render signage as glowing abstract glyphs and add real captions as overlay'],
     palette: [
       { name: 'neon rose', hex: '#FF2E63' },
       { name: 'cyan', hex: '#08D9D6' },
@@ -203,6 +215,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent rendering and lighting mood with the reference',
     },
     negative: 'no chibi, no flat cartoon, no 3D, no harsh thick outlines, no watermark',
+    consistencyAnchors: ['consistent semi-realistic facial proportions and skin shading with soft airbrushed gradients, warm cinematic key light from one side', 'stable modern-fashion wardrobe, fabric material rendering and warm muted urban palette across shots'],
+    qualityRules: ['preserve soft semi-realistic manhua rendering with warm cinematic lighting; avoid flat cel-shading, harsh ink lineart or cartoonish chibi proportions', 'no exact text baked into the image; add captions as overlay'],
     palette: [
       { name: 'blush', hex: '#E8A6A1' },
       { name: 'caramel', hex: '#C98A6B' },
@@ -223,6 +237,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent period authenticity, color grade and lighting with the reference',
     },
     negative: 'no anime, no cartoon, no 3D render, no modern objects, no watermark, no text overlay',
+    consistencyAnchors: ['consistent skin tone and facial features under warm tungsten/lantern key light, soft falloff shadows, shallow-depth cinematic bokeh', 'same hanfu garment colors, layered silk/brocade weave and embroidery patterns, identical hairstyle and headpiece across shots'],
+    qualityRules: ['preserve photoreal skin pores and authentic woven textile detail; avoid plastic CGI smoothness, anime/painterly rendering, or cartoon outlines', 'avoid anachronistic fabrics, modern makeup, or fantasy armor; keep historically grounded hanfu and period architecture'],
     palette: [
       { name: 'vermilion', hex: '#7A2E2E' },
       { name: 'gold silk', hex: '#C7A86A' },

@@ -97,6 +97,7 @@
 - `StylePack` 加 `consistencyAnchors?: string[]`（结构化跨镜一致性锚，补单行 `anchors.consistency`）+ `qualityRules?: string[]`（风格专属机器约束作 guidance）。`applyStylePack` 图像路径追加二者（视频路径不加）。示例填充 `cinematic-real`/`guofeng-2d`/`ink-wash` 三包（如 ink-wash「保留留白」、写实「文字勿烧进生成图」）。
 - `quality/styleLint.ts`：**通用、风格无关**固定启发式——`text_baking`（中/英「画面内出现精确文字」请求：写着/字样/text saying/引号+字样）、`watermark_logo`（logo/水印/台标）。纯函数，由 `composeGate` 汇入 warnings（建议性，不阻断）；`ComposeGateResult` 加 `style` 字段。
 - selftest 7 断言（中英文字烧录/引号字样/logo水印命中、正常零误报、index 回退）+ composeGate 回归 + vite build 通过。
+- **补全（2026-06-29）**：`consistencyAnchors`/`qualityRules` 已从 3 个示例包**填满全部 11 个内置风格包**（每包风格专属，如 clay-stop「保留指纹/工具痕、忌光滑 CGI」、guofeng-cyber「霓虹高对比、hanzi 招牌用抽象辉光勿烧字」、ancient-real「真实皮肤毛孔+织物纹理、忌穿帮现代妆造」）。8 个待填包的措辞由 8 个并行 drafter 子代生成、逐一应用。tsc + vite build 通过。**至此 #6 完全落地。**
 
 > **🎉 全部 9 项高优先级借鉴落地完成**（#1 反幻灯片 / #2 变化 lint / #3 交付承诺 / #4 合成闸门 / #5 镜头提示词 / #6 风格约束 / #7 Ken-Burns / #8 运动原语 / #9 词级字幕）。纯函数核心各带 selftest，runtime 接线（#4 compose 闸门、#7 静图兜底）已接入 `compose.ts` 并 vite build 通过。**剩余均为 UI/视觉接线**（QualityPanel、严格模式开关、静图兜底开关、CaptionOverlay 预览、ASS 烧录路径、节点下拉接 shotPromptBuilder/kenBurns 词表），需在 Mulby 内目视迭代。
 
