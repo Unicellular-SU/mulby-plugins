@@ -14,7 +14,7 @@
 |---|--------|------|------|------|
 | 1 | 反幻灯片评分器 | ✅ | `src/ui/services/quality/{util,types,slideshowRisk,index}.ts` | tsc 通过 + selftest（健康 0.1/strong、幻灯片 3.6/fail） |
 | 2 | 结构变化 lint | ✅ | `src/ui/services/quality/variationChecker.ts` | tsc 通过 + selftest（健康 0 违规、同质 11 违规/fail、短分镜仅词法触发） |
-| 5 | 5 层镜头提示词构建器 | ⬜ | `src/ui/services/shotPromptBuilder.ts` | — |
+| 5 | 5 层镜头提示词构建器 | ✅（核心；UI 接线待整合批） | `src/ui/services/shotPromptBuilder.ts` | tsc 通过 + selftest 15 断言（5 层顺序/中文归一/static 省略/词表导出） |
 | 8 | interpolate/spring 运动原语 | ✅ | `src/ui/services/motion.ts` | tsc 通过 + selftest（19 断言：分段/外推/弹簧三阻尼分支/过冲夹断/烘焙） |
 | 3 | 交付承诺契约 | ⬜ | `src/ui/services/quality/deliveryPromise.ts` | — |
 | 4 | 渲染前阻断 + 渲染后审计 | ⬜ | `src/ui/services/quality/composeGate.ts` | — |
@@ -46,6 +46,15 @@
 - `spring({frame, fps, config:{damping,mass,stiffness,overshootClamping}, from, to, velocity})`：阻尼谐振子**解析解**（非数值积分，与帧率无关），按阻尼比 ζ 自动选 欠/临界/过 阻尼分支；默认 m1/k100/c10（ζ=0.5 欠阻尼，会过冲）；`overshootClamping` 夹断过冲。
 - `sampleFrames(n, fn)`：把逐帧运动烘成定长数组——给 ffmpeg 导出生成 zoompan/sendcmd 数据用（预览/导出共用同一数学）。`lerp` 为二点特例小工具。
 - 算法为标准教科书内容，API 对齐 Remotion 习惯以便复用，自研实现、未拷贝第三方源代码。
+
+**#5 5 层镜头提示词构建器（2026-06-29）** —— `src/ui/services/shotPromptBuilder.ts`（纯函数、零依赖）。
+- `buildShotPrompt(input)` 按固定 5 层编译英文提示词：Camera(焦段+景深) → Movement(景别+运镜，static 省略运镜短语) → Subject(描述+材质+连贯+角色/道具/场景) → Lighting(布光+色温+情绪) → Style(**短 hint**)。空层自动省略。
+- **关键纪律**：Style 层只放短 hint，**绝不整段风格前缀粘贴**（重型风格注入仍由 `stylePacks.applyStylePack` 在生成处负责）——这正是替代「每镜同一前缀致全片同质」的要点。
+- 新增可复用电影摄影词表：`LENS/DOF/LIGHTING/COLOR_TEMP_PHRASE`（英文短语）+ `*_OPTIONS`（value+中文 label），**同时充当 storyboard/keyframe 节点的下拉枚举**。
+- 景别/运镜中英归一内置（镜像 prompts.ts，保持零依赖）。**对照样本**：full 输入 → `85mm portrait lens, shallow depth of field…, close-up, slow dolly in, 少年站在悬崖边眺望远方; …; mood — hopeful, cinematic anime`。
+- **待整合批**：把 `prompts.ts` keyframe 路径（L696–725 的散落拼接）改为调用 `buildShotPrompt`，并把 `*_OPTIONS` 接进 `nodeDefs.ts` 分镜/关键帧节点下拉、`Storyboard` 加 lens/dof/lighting/colorTemp 字段。
+
+> **阶段小结**：报告「纯函数批 1」（#1 反幻灯片 / #2 变化 lint / #8 运动原语 / #5 镜头提示词）已全部落地，零 runtime 依赖、各带 selftest。下一步进入**整合批**：#4 合成闸门 → #3 交付承诺 → #7 Ken-Burns(接 ffmpeg) → #9 词级字幕 → #6 风格机器约束。
 
 ---
 
