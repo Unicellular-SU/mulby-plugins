@@ -402,44 +402,108 @@ body {
   white-space: nowrap;
 }
 
-/* ============ 按钮 ============ */
+/* ============ 按钮 Button（统一系统；见 docs/ai-film-studio-uiux-redesign.md §5.1）
+   合并了此前散落/冲突的两套 .afs-btn 定义 + --stop + --mini；全部走令牌。
+   变体：secondary(默认) / primary / gradient(+glow=招牌AI操作) / ghost / danger / stop。
+   accent 上的文字统一用 --afs-on-accent（暗色为深墨，因暗色 accent 偏亮），修复 #fff 低对比。 */
 .afs-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 9px;
-  border-radius: 6px;
-  background: var(--afs-hover);
+  justify-content: center;
+  gap: var(--afs-sp-3);
+  height: var(--afs-control-h);
+  padding: 0 14px;
   border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-md);
+  background: var(--afs-panel);
   color: var(--afs-text);
-  font-size: 12px;
+  font: 600 13px/1 var(--afs-font-ui);
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+  transition: background var(--afs-dur-micro) var(--afs-ease-standard),
+    border-color var(--afs-dur-micro) var(--afs-ease-standard),
+    filter var(--afs-dur-micro) var(--afs-ease-standard),
+    transform var(--afs-dur-micro) var(--afs-ease-standard);
 }
 .afs-btn:hover {
-  background: var(--afs-border);
+  background: var(--afs-hover);
 }
-.afs-btn--save {
-  background: var(--afs-accent);
-  border-color: var(--afs-accent);
-  color: #fff;
+.afs-btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
-.afs-btn--save:hover {
-  filter: brightness(1.08);
-  background: var(--afs-accent);
-}
-.afs-btn--run {
-  background: transparent;
-}
-.afs-btn--danger:hover {
-  background: #7f1d1d;
-  border-color: #b91c1c;
-  color: #fff;
+.afs-btn:focus-visible {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
 }
 .afs-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-btn:active {
+    transform: none;
+  }
+}
+
+/* —— 尺寸 —— */
+.afs-btn--sm,
+.afs-btn--mini {
+  height: var(--afs-control-h-sm);
+  padding: 0 10px;
+  font-size: 12px;
+}
+.afs-btn--lg {
+  height: 40px;
+  padding: 0 20px;
+}
+
+/* —— 变体 —— */
+.afs-btn--secondary {
+  background: var(--afs-panel);
+  border-color: var(--afs-border);
+  color: var(--afs-text);
+}
+.afs-btn--primary,
+.afs-btn--save {
+  background: var(--afs-accent);
+  border-color: var(--afs-accent);
+  color: var(--afs-on-accent);
+}
+.afs-btn--primary:hover,
+.afs-btn--save:hover {
+  filter: brightness(1.06);
+  background: var(--afs-accent);
+}
+.afs-btn--gradient {
+  background: var(--afs-grad-accent);
+  border-color: transparent;
+  color: var(--afs-on-accent);
+}
+.afs-btn--gradient:hover {
+  filter: brightness(1.04);
+}
+.afs-btn--ghost,
+.afs-btn--run {
+  background: transparent;
+  border-color: transparent;
+}
+.afs-btn--ghost:hover,
+.afs-btn--run:hover {
+  background: var(--afs-hover);
+}
+.afs-btn--danger:hover {
+  background: var(--afs-danger);
+  border-color: var(--afs-danger);
+  color: var(--afs-on-accent);
+}
+.afs-btn--stop {
+  background: var(--afs-danger);
+  border-color: var(--afs-danger);
+  color: var(--afs-on-accent);
+}
+.afs-btn--stop:hover {
+  filter: brightness(1.06);
+  background: var(--afs-danger);
 }
 
 /* ============ 节点库 ============ */
@@ -858,15 +922,7 @@ body {
 .afs-toolbar__model {
   max-width: 200px;
 }
-.afs-btn--stop {
-  background: #b91c1c;
-  border-color: #b91c1c;
-  color: #fff;
-}
-.afs-btn--stop:hover {
-  filter: brightness(1.08);
-  background: #b91c1c;
-}
+/* .afs-btn--stop 已并入统一按钮系统（见上方「按钮 Button」区块，走 --afs-danger 令牌） */
 
 .afs-spin {
   animation: afs-spin 0.9s linear infinite;
@@ -2315,11 +2371,7 @@ body {
   gap: 8px;
   margin: -2px 0 8px;
 }
-.afs-btn--mini {
-  height: 26px;
-  padding: 0 8px;
-  font-size: 11.5px;
-}
+/* .afs-btn--mini 已并入统一按钮系统（= .afs-btn--sm，见「按钮 Button」区块） */
 .afs-result__path {
   flex: 1;
   min-width: 0;
@@ -3619,12 +3671,7 @@ body {
 .afs-studio--center { align-items: center; justify-content: center; color: var(--afs-muted); }
 .afs-studio__hint { color: var(--afs-muted); font-size: 13px; }
 
-.afs-btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px;
-  border: 1px solid var(--afs-border); background: var(--afs-panel); color: var(--afs-text); cursor: pointer; font-size: 13px; }
-.afs-btn:hover { background: var(--afs-hover); }
-.afs-btn--primary { background: var(--afs-accent); border-color: var(--afs-accent); color: #fff; }
-.afs-btn--ghost { border-color: transparent; background: transparent; }
-.afs-btn--sm { padding: 4px 9px; font-size: 12px; }
+/* 旧的第二套 .afs-btn / --primary / --ghost / --sm 定义已删除，统一并入文件上方「按钮 Button」区块。 */
 
 /* 主页 */
 .afs-studio__home { padding: 24px 28px; overflow: auto; }

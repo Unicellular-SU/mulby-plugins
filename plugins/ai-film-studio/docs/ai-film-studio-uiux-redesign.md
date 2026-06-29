@@ -15,8 +15,10 @@
 | 阶段 | 改造 | 状态 | 说明 |
 | --- | --- | --- | --- |
 | 0 | CSS 令牌底座（Aurora Glass tokens + `.afs-glass`/`.afs-glow` 工具类 + 可访问性降级 + aurora sRGB 兜底） | ✅ 已完成 | `styles.css` 头部整块替换；旧令牌名全部保留并重指向；**反回归**：`--afs-panel-2`=内陷面、`--afs-dot`=可见滚动条色、新增 `--afs-surface-3`/`--afs-grid-dot`；补齐此前未定义的 `--afs-text-dim`（修复亮色）。`build:ui` 通过。 |
-| 0 | 内联注入色 → `--cat`/`data-*` 桥接（FilmNode / FlowCanvas / nodeDefs 的分类·端口·点阵·小地图色令牌化） | ⏳ 待办 | — |
-| 1 | 组件库 P0：Button / IconButton / Input / Textarea / Select / Combobox / Switch / Segmented / Tabs / Field | ⏳ 待办 | — |
+| 1 | 组件库 P0 · **Button** | ✅ 已完成 | 合并此前两套冲突的 `.afs-btn` 基定义 + 散落的 `--stop`/`--mini`；变体 `secondary/primary/gradient(招牌AI)/ghost/danger/stop` 全走令牌；accent 上文字由 `#fff` 改 `--afs-on-accent`（修复暗色 accent 偏亮导致的低对比）；Toolbar **运行→gradient**、**保存→solid** 区分主操作，停止→danger。`build:ui` 通过。 |
+| 1 | 组件库 P0 · 余下：IconButton / Input / Textarea / Select / Combobox / Switch / Segmented / Tabs / Field | ⏳ 待办 | — |
+| 3 | 内联注入色 → `--cat`/`data-*` 桥接（FilmNode / FlowCanvas / nodeDefs 的分类·端口·点阵·小地图色令牌化） | ↪ 顺延至阶段 3 | 与节点头视觉/文字对比强耦合（裸换 `--afs-cat-video` 会让 `#fff` 头文字低对比），且 React Flow MiniMap/Background 以 **SVG `fill` 属性**消费颜色（不解析 `var()`，需 `getComputedStyle` 桥接）——并入画布阶段统一处理。 |
+| — | 遗留对比债跟踪 | ⏳ 待办 | `styles.css` 仍有 ~5 处 accent 背景配 `#fff` 文字（inspector run、studio 用户气泡等，行≈901/1585/2022/2413/3799），随各自组件/屏阶段改 `--afs-on-accent`。 |
 | 2 | 高频原生控件屏：Studio → 设置 → Inspector → Toolbar（替换原生 select/input + emoji） | ⏳ 待办 | — |
 | 3 | 画布与节点视觉：节点头 / 状态 / 运行态 / 灯箱 chrome 令牌化 | ⏳ 待办 | — |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |

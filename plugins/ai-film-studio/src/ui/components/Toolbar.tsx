@@ -117,7 +117,7 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
             <span>停止</span>
           </button>
         ) : (
-          <button className="afs-btn afs-btn--save" onClick={() => runAll()} title="运行工作流（拓扑顺序执行）">
+          <button className="afs-btn afs-btn--gradient" onClick={() => runAll()} title="运行工作流（拓扑顺序执行）">
             <Play size={15} />
             <span>运行</span>
           </button>
