@@ -513,6 +513,59 @@ body {
   background: var(--afs-danger);
 }
 
+/* ============ 图标按钮 IconButton（统一图标专用按钮；见 docs §5.1） ============
+   方形热区 + 居中字形（继承文本色）；中性/激活(aria-pressed)/危险变体；用于工具栏/卡片操作/浮层控件。 */
+.afs-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: var(--afs-r-md);
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+  transition: background var(--afs-dur-micro) var(--afs-ease-standard),
+    color var(--afs-dur-micro) var(--afs-ease-standard),
+    transform var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-iconbtn--sm {
+  width: 28px;
+  height: 28px;
+}
+.afs-iconbtn--lg {
+  width: 44px;
+  height: 44px;
+}
+.afs-iconbtn:hover {
+  background: var(--afs-hover);
+  color: var(--afs-text);
+}
+.afs-iconbtn:active {
+  transform: scale(0.94);
+}
+.afs-iconbtn:focus-visible {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
+}
+.afs-iconbtn[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--afs-accent) 16%, transparent);
+  color: var(--afs-accent);
+}
+.afs-iconbtn--danger:hover {
+  background: color-mix(in srgb, var(--afs-danger) 14%, transparent);
+  color: var(--afs-danger);
+}
+.afs-iconbtn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-iconbtn:active {
+    transform: none;
+  }
+}
+
 /* ============ 节点库 ============ */
 .afs-library {
   display: flex;
@@ -2453,16 +2506,21 @@ select.afs-toolbar__select,
   align-items: center;
   gap: 2px;
   padding: 8px 0;
-  background: var(--afs-panel-2);
+  background: var(--afs-panel);
   border-right: 1px solid var(--afs-border);
 }
+/* 品牌标记：招牌渐变圆角芯片（取代旧硬编码琥珀 #f59e0b，统一为单一品牌色） */
 .afs-rail__brand {
-  color: #f59e0b;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 40px;
-  margin-bottom: 6px;
+  width: 34px;
+  height: 34px;
+  margin: 2px 0 8px;
+  border-radius: var(--afs-r-md);
+  background: var(--afs-grad-brand);
+  color: #fff;
+  box-shadow: var(--afs-elev-1);
 }
 .afs-rail__items {
   display: flex;

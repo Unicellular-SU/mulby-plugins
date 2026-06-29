@@ -98,18 +98,18 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
             </option>
           ))}
         </select>
-        <button className="afs-btn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布">
-          <Maximize2 size={15} />
+        <button className="afs-iconbtn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布" aria-label="适应画布">
+          <Maximize2 size={16} />
         </button>
         <button className="afs-btn afs-btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">
           <Save size={15} />
           <span>保存</span>
         </button>
-        <button className="afs-btn" onClick={onOpenStyle} title="项目风格（画风 / 画幅，注入本工程所有生成）">
-          <Palette size={15} />
+        <button className="afs-iconbtn" onClick={onOpenStyle} title="项目风格（画风 / 画幅，注入本工程所有生成）" aria-label="项目风格">
+          <Palette size={16} />
         </button>
-        <button className="afs-btn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）">
-          <Camera size={15} />
+        <button className="afs-iconbtn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）" aria-label="工程快照">
+          <Camera size={16} />
         </button>
         {isRunning ? (
           <button className="afs-btn afs-btn--stop" onClick={cancelRun} title="停止运行">
