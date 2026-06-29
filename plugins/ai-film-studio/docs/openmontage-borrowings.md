@@ -20,7 +20,7 @@
 | 4 | 渲染前阻断 + 渲染后审计 | ✅（已接 compose.ts） | `src/ui/services/quality/composeGate.ts` | tsc + selftest 13 断言 + vite build 通过 |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
 | 7 | Ken-Burns/pan/zoom | ✅（接 ffmpeg+compose；视觉待 Mulby 校验） | `kenBurns.ts` + `ffmpeg.ts` `imageToMotionClip` + `compose.ts` 静图兜底 | tsc + selftest 28 断言 + vite build；⚠ zoompan 视觉待实跑 |
-| 9 | 词级高亮字幕 | ⬜ | 扩 `subtitles.ts` | — |
+| 9 | 词级高亮字幕 | ✅（核心；预览+烧录接线待） | 扩 `src/ui/services/subtitles.ts` | tsc + selftest 19 断言（估时/纠错/分条/SRT·VTT·ASS 渲染） |
 
 ### 已落地详记
 
@@ -84,6 +84,13 @@
 - `compose.ts` 接线：`ComposeOpts` 加 `kenBurnsForStills` + `resolveImagePath`（依赖反转——资产 assetId→本地路径由调用方注入，compose 不耦合资产层）。收集阶段对「有关键帧无视频」的分镜按其**计划运镜**生成 Ken-Burns 片段替代丢弃；ffmpeg 提前就绪以支撑收集期调用。默认关闭，零行为变更。
 - selftest +9 断言（buildKenBurnsArgs 结构、运镜映射）；vite build 通过。**对照命令**：`… -loop 1 -i key.png -t 3 -vf scale=2560:1440…,zoompan=z='1+(0.15)*(on/71)':…:d=72:s=1280x720:fps=24,format=yuv420p … kb.mp4`。
 - **待整合/校验**：① 真实 ffmpeg 跑一遍看运动是否平滑（zoompan 抖动）；② UI 侧给「静图兜底」开关 + 接 `resolveImagePath`（StudioEditor 已有资产→路径能力）；③ 可选：分镜加 `kbPreset` 字段让用户覆盖自动映射。
+
+**#9 词级 / 卡拉OK 字幕（2026-06-29，纯核心）** —— 扩 `src/ui/services/subtitles.ts`（原仅 clip 级 SRT，此处补词级增量；纯函数）。
+- **生成**：`estimateWordTimings(text,start,end)` 按词长加权估算逐词时序（CJK 逐字、latin 按词、标点附着；无真实 TTS 时间戳时兜底）；`applyCorrections(words,dict)` 大小写无关纠错 + 保留尾标点；`buildCues(words,{maxWords/maxChars/maxGapMs/maxDurMs})` 分条。
+- **渲染**：`renderSrt`(none=按条 / word_by_word=逐词弹出) · `renderVtt`(karaoke 用 VTT 内联时间戳标签) · `renderAss`(卡拉OK `{\kf}` 逐词扫色填充，含 [Script Info]/[V4+ Styles]，颜色转 ASS BGR `&H00BBGGRR`)——ASS 供 ffmpeg `ass` 滤镜烧录。
+- `buildCaptionsFromClips(clips, subsJson, opts)`：复用 buildSrt 的 shotId 键匹配/下标兜底，**按 clip 分别成条**（避免一条字幕跨两镜混入不同说话人台词），只取对白行（去 speaker 前缀，不回退 description）。
+- selftest 19 断言（CJK 逐字/单调/英文标点附着/纠错/maxWords·大间隔断条/SRT·VTT·ASS 结构/逐 clip 起始时间）。
+- **待整合**：① `ProjectDoc` 加 captions 轨 + 词时序来源（TTS provider 时间戳或转写节点，缺则用估算）；② `ffmpeg.ts/compose.ts` 加 ASS 烧录路径（现有仅 SRT soft/burn）；③ 预览 `<CaptionOverlay>` 组件（rAF 时钟 + 活动词高亮，UI 批）。
 
 ---
 
