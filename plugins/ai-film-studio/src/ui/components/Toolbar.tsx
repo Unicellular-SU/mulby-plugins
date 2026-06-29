@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Save, Maximize2, Play, Square, Camera, Palette } from 'lucide-react'
+import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
+import Select from './ui/Select'
 
 interface ToolbarProps {
   onOpenSnapshots?: () => void
@@ -72,32 +73,26 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
       <div className="afs-toolbar__spacer" />
 
       <div className="afs-toolbar__group">
-        <select
-          className="afs-toolbar__select afs-toolbar__model"
+        <Select
+          className="afs-toolbar__model"
+          leadingIcon={Type}
           value={selectedModel || ''}
-          onChange={(e) => setSelectedModel(e.target.value || null)}
+          onChange={(v) => setSelectedModel(v || null)}
+          options={models.map((m) => ({ value: m.id, label: `文本：${m.label || m.id}` }))}
+          placeholder="默认文本模型"
           title="文本模型（复用 Mulby 已配置模型）"
-        >
-          {models.length === 0 && <option value="">默认文本模型</option>}
-          {models.map((m) => (
-            <option key={m.id} value={m.id}>
-              文本：{m.label || m.id}
-            </option>
-          ))}
-        </select>
-        <select
-          className="afs-toolbar__select afs-toolbar__model"
+          ariaLabel="文本模型"
+        />
+        <Select
+          className="afs-toolbar__model"
+          leadingIcon={ImageIcon}
           value={selectedImageModel || ''}
-          onChange={(e) => setSelectedImageModel(e.target.value || null)}
+          onChange={(v) => setSelectedImageModel(v || null)}
+          options={imageModels.map((m) => ({ value: m.id, label: `图像：${m.label || m.id}` }))}
+          placeholder="无图像模型"
           title="图像模型（endpointType=image-generation）"
-        >
-          {imageModels.length === 0 && <option value="">无图像模型</option>}
-          {imageModels.map((m) => (
-            <option key={m.id} value={m.id}>
-              图像：{m.label || m.id}
-            </option>
-          ))}
-        </select>
+          ariaLabel="图像模型"
+        />
         <button className="afs-iconbtn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布" aria-label="适应画布">
           <Maximize2 size={16} />
         </button>
