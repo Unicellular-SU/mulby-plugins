@@ -2,32 +2,256 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============ 主题变量 ============ */
+/* ============================================================
+   Aurora Glass — 设计系统令牌底座（阶段 0 / 见 docs/ai-film-studio-uiux-redesign.md）
+   取代旧 --afs-* 调色板；机制不变：:root = 暗色(默认)，html.light = 亮色覆盖。
+   全部旧令牌名保留并重指向，让 JS 注入的节点/端口/徽标色继续工作。
+   反回归说明：为避免「组件尚未改造」期间破相，--afs-panel-2 暂作「内陷面」(=surface-sunken)
+   以保留既有输入框观感，--afs-dot 暂保持可见(滚动条/图标用)；
+   新增「凸起/弹层」用 --afs-surface-3，画布点阵用 --afs-grid-dot（后续画布阶段接入）。
+   ============================================================ */
 :root {
-  --afs-bg: #0b0f17;
+  /* — 表面 surfaces (dark) — */
+  --afs-bg: #0a0e16;
+  --afs-surface-sunken: #0d121a;
   --afs-panel: #11161f;
-  --afs-panel-2: #0b0f17;
-  --afs-border: #1f2a3d;
-  --afs-text: #e5e7eb;
-  --afs-muted: #94a3b8;
-  --afs-hover: #1a2233;
-  --afs-node-bg: #161c28;
-  --afs-accent: #6366f1;
-  --afs-dot: #2a3650;
+  --afs-panel-2: #0d121a;        /* legacy=内陷面（输入框/卡底），非凸起，避免回归 */
+  --afs-surface-3: #1e2533;      /* 弹层/菜单/下拉 的不透明底（玻璃之下） */
+  --afs-node-bg: #11161f;
+
+  /* — 边框 borders (dark) — */
+  --afs-border: #252d3d;
+  --afs-border-strong: #37415a;
+
+  /* — 文本梯度 text (dark) — */
+  --afs-text: #e8eaf0;        /* high ~87% */
+  --afs-muted: #9aa3b5;       /* med ~60%  */
+  --afs-text-dim: #6b7383;    /* low ~38%（此前未定义，破亮色，现已补齐） */
+
+  /* — 交互 interaction (dark) — */
+  --afs-hover: #1c2433;
+  --afs-dot: #37415a;            /* legacy=滚动条/图标可见色（画布点阵改用 --afs-grid-dot） */
+  --afs-grid-dot: rgba(255,255,255,0.07);
+
+  /* — 强调 accent (dark：更亮+去饱和，避免在暗面上振动) — */
+  --afs-accent: #8b9bff;
+  --afs-accent-strong: #6d7cff;
+  --afs-on-accent: #0a0e16;
+  --afs-ring: #9db2ff;
+
+  /* — 语义状态 status (dark) — */
+  --afs-success: #34d399;
+  --afs-warning: #fbbf24;
+  --afs-danger: #f87171;
+  --afs-info: #60a5fa;
+
+  /* — 端口/数据类型色 (dark) — */
+  --afs-type-text: #34d399;
+  --afs-type-json: #facc15;
+  --afs-type-image: #a78bfa;
+  --afs-type-video: #22d3ee;
+  --afs-type-audio: #fbbf24;
+  --afs-type-any: #9aa3b5;
+
+  /* — 节点分类色 (dark)，内联以 --cat 消费 — */
+  --afs-cat-input: #94a3b8;
+  --afs-cat-text: #60a5fa;
+  --afs-cat-image: #a78bfa;
+  --afs-cat-video: #22d3ee;
+  --afs-cat-audio: #2dd4bf;
+  --afs-cat-output: #34d399;
+
+  /* — 招牌渐变 gradients (dark) — */
+  --afs-grad-brand: linear-gradient(135deg, #6d7cff 0%, #9d6bff 50%, #4fd0e0 100%);
+  --afs-grad-accent: linear-gradient(135deg, var(--afs-accent-strong), var(--afs-accent));
+  --afs-grad-progress: linear-gradient(90deg, #6d7cff, #4fd0e0);
+  --afs-grad-edge-spec: linear-gradient(135deg, rgba(255,255,255,0.5), rgba(255,255,255,0.12) 40%, rgba(255,255,255,0) 70%);
+  /* 极光背景：sRGB 兜底（旧引擎），下方 @supports 覆盖为 oklch */
+  --afs-aurora:
+    radial-gradient(40% 40% at 20% 20%, rgba(109,124,255,0.22) 0, transparent 60%),
+    radial-gradient(38% 38% at 80% 25%, rgba(79,208,224,0.18) 0, transparent 60%),
+    radial-gradient(45% 45% at 65% 85%, rgba(157,107,255,0.18) 0, transparent 60%);
+
+  /* — 玻璃 glass (dark) — */
+  --afs-glass-fill: rgba(20,24,38,0.60);
+  --afs-glass-fill-strong: rgba(17,22,34,0.80);
+  --afs-glass-border: 1px solid rgba(255,255,255,0.10);
+  --afs-glass-blur: blur(16px) saturate(160%);
+  --afs-glass-highlight: inset 0 1px 0 rgba(255,255,255,0.10);
+  --afs-glass-fallback: rgba(17,22,34,0.95);
+  --afs-scrim: rgba(0,0,0,0.42);
+
+  /* — 层级 elevation (dark) — */
+  --afs-elev-1: 0 1px 2px rgba(0,0,0,0.40);
+  --afs-elev-2: 0 4px 14px rgba(0,0,0,0.45);
+  --afs-elev-3: 0 8px 24px rgba(0,0,0,0.50);
+  --afs-elev-4: 0 16px 48px rgba(0,0,0,0.60);
+  --afs-glow-opacity: 0.65;
+
+  /* — 圆角 radii — */
+  --afs-r-xs: 4px;  --afs-r-sm: 6px;  --afs-r-md: 8px;
+  --afs-r-lg: 12px; --afs-r-xl: 16px; --afs-r-pill: 999px;
+
+  /* — 间距 spacing（8px 栅格） — */
+  --afs-sp-1: 2px;  --afs-sp-2: 4px;  --afs-sp-3: 6px;  --afs-sp-4: 8px;
+  --afs-sp-5: 12px; --afs-sp-6: 16px; --afs-sp-7: 20px; --afs-sp-8: 24px;
+  --afs-sp-9: 32px; --afs-sp-10: 48px; --afs-sp-11: 64px;
+
+  /* — 控件几何 — */
+  --afs-control-h: 32px;
+  --afs-control-h-sm: 26px;
+
+  /* — 字体 typography — */
+  --afs-font-ui: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --afs-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* — 动效 motion — */
+  --afs-dur-micro: 120ms;
+  --afs-dur-ui: 180ms;
+  --afs-dur-overlay: 260ms;
+  --afs-dur-exit: 140ms;
+  --afs-dur-shimmer: 2000ms;
+  --afs-dur-breathe: 1800ms;
+  --afs-ease-standard: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --afs-ease-emphasized: cubic-bezier(0.23, 1, 0.32, 1);
+  --afs-ease-move: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --afs-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 }
 
 html.light {
-  --afs-bg: #eef2f7;
+  /* — 表面 surfaces (light) — */
+  --afs-bg: #eef1f6;
+  --afs-surface-sunken: #e6eaf1;
   --afs-panel: #ffffff;
-  --afs-panel-2: #f8fafc;
-  --afs-border: #e2e8f0;
-  --afs-text: #0f172a;
-  --afs-muted: #64748b;
-  --afs-hover: #f1f5f9;
+  --afs-panel-2: #e6eaf1;        /* legacy=内陷面 */
+  --afs-surface-3: #ffffff;
   --afs-node-bg: #ffffff;
-  --afs-accent: #6366f1;
+
+  /* — 边框 borders (light) — */
+  --afs-border: #e2e8f0;
+  --afs-border-strong: #cbd2dd;
+
+  /* — 文本 text (light) — */
+  --afs-text: #16203a;
+  --afs-muted: #5b6678;
+  --afs-text-dim: #8a93a4;
+
+  /* — 交互 interaction (light) — */
+  --afs-hover: #eef1f7;
   --afs-dot: #cbd5e1;
+  --afs-grid-dot: rgba(71,85,105,0.32);
+
+  /* — 强调 accent (light：满饱和靛蓝) — */
+  --afs-accent: #4f46e5;
+  --afs-accent-strong: #4338ca;
+  --afs-on-accent: #ffffff;
+  --afs-ring: #4f46e5;
+
+  /* — 语义状态 status (light，压暗以达 ≥4.5:1) — */
+  --afs-success: #059669;
+  --afs-warning: #b45309;
+  --afs-danger: #dc2626;
+  --afs-info: #2563eb;
+
+  /* — 端口/数据类型色 (light) — */
+  --afs-type-text: #059669;
+  --afs-type-json: #ca8a04;
+  --afs-type-image: #7c3aed;
+  --afs-type-video: #0891b2;
+  --afs-type-audio: #b45309;
+  --afs-type-any: #64748b;
+
+  /* — 节点分类色 (light) — */
+  --afs-cat-input: #64748b;
+  --afs-cat-text: #2563eb;
+  --afs-cat-image: #7c3aed;
+  --afs-cat-video: #0891b2;
+  --afs-cat-audio: #0d9488;
+  --afs-cat-output: #059669;
+
+  /* — 招牌渐变 gradients (light：满饱和) — */
+  --afs-grad-brand: linear-gradient(135deg, #5b54ff 0%, #8b3dff 50%, #06b6d4 100%);
+  --afs-grad-accent: linear-gradient(135deg, var(--afs-accent-strong), var(--afs-accent));
+  --afs-grad-progress: linear-gradient(90deg, #5b54ff, #06b6d4);
+  --afs-grad-edge-spec: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(255,255,255,0.15) 40%, rgba(255,255,255,0) 70%);
+  --afs-aurora:
+    radial-gradient(40% 40% at 20% 20%, rgba(91,84,255,0.16) 0, transparent 60%),
+    radial-gradient(38% 38% at 80% 25%, rgba(6,182,212,0.14) 0, transparent 60%),
+    radial-gradient(45% 45% at 65% 85%, rgba(139,61,255,0.13) 0, transparent 60%);
+
+  /* — 玻璃 glass (light) — */
+  --afs-glass-fill: rgba(255,255,255,0.62);
+  --afs-glass-fill-strong: rgba(255,255,255,0.86);
+  --afs-glass-border: 1px solid rgba(255,255,255,0.55);
+  --afs-glass-blur: blur(16px) saturate(180%);
+  --afs-glass-highlight: inset 0 1px 0 rgba(255,255,255,0.65);
+  --afs-glass-fallback: rgba(255,255,255,0.95);
+  --afs-scrim: rgba(0,0,0,0.30);
+
+  /* — 层级 elevation (light：靠阴影传达深度) — */
+  --afs-elev-1: 0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.10);
+  --afs-elev-2: 0 4px 12px rgba(16,24,40,0.10);
+  --afs-elev-3: 0 8px 24px rgba(16,24,40,0.14);
+  --afs-elev-4: 0 16px 48px rgba(16,24,40,0.22);
+  --afs-glow-opacity: 0.45;
 }
+
+/* 极光背景增强：支持 oklch 的引擎用更鲜活的色域（不支持者沿用上方 sRGB 兜底） */
+@supports (color: oklch(0 0 0)) {
+  :root {
+    --afs-aurora:
+      radial-gradient(40% 40% at 20% 20%, oklch(0.55 0.20 286 / .40) 0, transparent 60%),
+      radial-gradient(38% 38% at 80% 25%, oklch(0.55 0.19 230 / .34) 0, transparent 60%),
+      radial-gradient(45% 45% at 65% 85%, oklch(0.50 0.22 330 / .30) 0, transparent 60%);
+  }
+  html.light {
+    --afs-aurora:
+      radial-gradient(40% 40% at 20% 20%, oklch(0.86 0.11 286 / .55) 0, transparent 60%),
+      radial-gradient(38% 38% at 80% 25%, oklch(0.88 0.10 230 / .50) 0, transparent 60%),
+      radial-gradient(45% 45% at 65% 85%, oklch(0.90 0.09 330 / .45) 0, transparent 60%);
+  }
+}
+
+/* ============ 共享玻璃工具（消费上方主题令牌） ============ */
+.afs-glass {
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-xl);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+}
+.afs-glass--text { background: var(--afs-glass-fill-strong); } /* 承载正文时用更高不透明度 */
+
+/* AI 操作发光（只动 opacity） */
+.afs-glow { position: relative; isolation: isolate; }
+.afs-glow::after {
+  content: ""; position: absolute; inset: -6px; z-index: -1;
+  border-radius: inherit; background: var(--afs-grad-accent);
+  filter: blur(28px); opacity: var(--afs-glow-opacity);
+  transition: opacity var(--afs-dur-ui) var(--afs-ease-standard);
+}
+
+/* ============ 可访问性降级（全局随底座一起发布） ============ */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-glass { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-glass {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    background: var(--afs-surface-3);
+  }
+  .afs-glow::after { display: none; }
+}
+@media (forced-colors: active) {
+  .afs-glass { border: 1px solid CanvasText; background: Canvas;
+    -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-glow::after { transition: none; }
+}
+:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: 2px; }
+@media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } }
 
 html,
 body,
