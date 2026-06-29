@@ -18,7 +18,7 @@
 | 8 | interpolate/spring 运动原语 | ✅ | `src/ui/services/motion.ts` | tsc 通过 + selftest（19 断言：分段/外推/弹簧三阻尼分支/过冲夹断/烘焙） |
 | 3 | 交付承诺契约 | ✅ | `src/ui/services/quality/deliveryPromise.ts` | tsc 通过 + selftest 20 断言（分类/运动占比/致命阻断/承诺播种） |
 | 4 | 渲染前阻断 + 渲染后审计 | ✅（已接 compose.ts） | `src/ui/services/quality/composeGate.ts` | tsc + selftest 13 断言 + vite build 通过 |
-| 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
+| 6 | consistency/negative/quality 约束 | ✅ | 扩 `stylePacks.ts`（注入）+ `quality/styleLint.ts`（接 composeGate） | tsc + selftest 7 断言 + composeGate 回归 + vite build |
 | 7 | Ken-Burns/pan/zoom | ✅（接 ffmpeg+compose；视觉待 Mulby 校验） | `kenBurns.ts` + `ffmpeg.ts` `imageToMotionClip` + `compose.ts` 静图兜底 | tsc + selftest 28 断言 + vite build；⚠ zoompan 视觉待实跑 |
 | 9 | 词级高亮字幕 | ✅（核心；预览+烧录接线待） | 扩 `src/ui/services/subtitles.ts` | tsc + selftest 19 断言（估时/纠错/分条/SRT·VTT·ASS 渲染） |
 
@@ -91,6 +91,14 @@
 - `buildCaptionsFromClips(clips, subsJson, opts)`：复用 buildSrt 的 shotId 键匹配/下标兜底，**按 clip 分别成条**（避免一条字幕跨两镜混入不同说话人台词），只取对白行（去 speaker 前缀，不回退 description）。
 - selftest 19 断言（CJK 逐字/单调/英文标点附着/纠错/maxWords·大间隔断条/SRT·VTT·ASS 结构/逐 clip 起始时间）。
 - **待整合**：① `ProjectDoc` 加 captions 轨 + 词时序来源（TTS provider 时间戳或转写节点，缺则用估算）；② `ffmpeg.ts/compose.ts` 加 ASS 烧录路径（现有仅 SRT soft/burn）；③ 预览 `<CaptionOverlay>` 组件（rAF 时钟 + 活动词高亮，UI 批）。
+
+**#6 风格机器约束（2026-06-29）** —— 扩 `stylePacks.ts` + 新 `quality/styleLint.ts`。
+- **字段适配**：报告说接 `imageEngine.ts`，但该文件只是 `mulby.ai.images` 薄封装、不注入风格——真实注入 seam 是 `applyStylePack`（经 `prompts.ts` 的 `withStyle`）。故在 `applyStylePack` 注入。
+- `StylePack` 加 `consistencyAnchors?: string[]`（结构化跨镜一致性锚，补单行 `anchors.consistency`）+ `qualityRules?: string[]`（风格专属机器约束作 guidance）。`applyStylePack` 图像路径追加二者（视频路径不加）。示例填充 `cinematic-real`/`guofeng-2d`/`ink-wash` 三包（如 ink-wash「保留留白」、写实「文字勿烧进生成图」）。
+- `quality/styleLint.ts`：**通用、风格无关**固定启发式——`text_baking`（中/英「画面内出现精确文字」请求：写着/字样/text saying/引号+字样）、`watermark_logo`（logo/水印/台标）。纯函数，由 `composeGate` 汇入 warnings（建议性，不阻断）；`ComposeGateResult` 加 `style` 字段。
+- selftest 7 断言（中英文字烧录/引号字样/logo水印命中、正常零误报、index 回退）+ composeGate 回归 + vite build 通过。
+
+> **🎉 全部 9 项高优先级借鉴落地完成**（#1 反幻灯片 / #2 变化 lint / #3 交付承诺 / #4 合成闸门 / #5 镜头提示词 / #6 风格约束 / #7 Ken-Burns / #8 运动原语 / #9 词级字幕）。纯函数核心各带 selftest，runtime 接线（#4 compose 闸门、#7 静图兜底）已接入 `compose.ts` 并 vite build 通过。**剩余均为 UI/视觉接线**（QualityPanel、严格模式开关、静图兜底开关、CaptionOverlay 预览、ASS 烧录路径、节点下拉接 shotPromptBuilder/kenBurns 词表），需在 Mulby 内目视迭代。
 
 ---
 

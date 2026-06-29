@@ -15,6 +15,7 @@ import { storyboardToShotLike } from './types'
 import { round1, pct } from './util'
 import { scoreSlideshowRisk } from './slideshowRisk'
 import { checkVariation, type VariationResult } from './variationChecker'
+import { styleLint, type StyleLintResult } from './styleLint'
 import {
   validateCuts, classifyFromBrief, PROMISE_RULES,
   type CutLike, type DeliveryResult, type DeliveryPromiseKind,
@@ -46,6 +47,7 @@ export interface ComposeGateResult {
   slideshow: QualityResult
   variation: VariationResult
   delivery: DeliveryResult
+  style: StyleLintResult
   /** 解析出的交付承诺类型 */
   promiseKind: DeliveryPromiseKind
   /** 应阻断的问题（人读） */
@@ -75,6 +77,7 @@ export function evaluateComposeGate(
   const slideshow = scoreSlideshowRisk(shots)
   const variation = checkVariation(shots)
   const delivery = validateCuts(cuts, promiseKind)
+  const style = styleLint(shots)
 
   const blocks: string[] = []
   const warnings: string[] = []
@@ -87,6 +90,7 @@ export function evaluateComposeGate(
   if (slideshow.verdict === 'fail') blocks.push(`幻灯片风险·${slideshow.summary}`)
   else if (slideshow.verdict === 'revise') warnings.push(`幻灯片风险·${slideshow.summary}`)
   if (variation.verdict === 'fail' || variation.verdict === 'revise') warnings.push(`结构同质·${variation.summary}`)
+  for (const v of style.violations) warnings.push(`风格·${v.message}（${v.suggestion}）`)
 
   const blocked = blocks.length > 0
   const summary = blocked
@@ -94,7 +98,7 @@ export function evaluateComposeGate(
     : warnings.length
       ? `合成闸门：${warnings.length} 项提醒，可继续`
       : '合成闸门：质量检查通过'
-  return { blocked, slideshow, variation, delivery, promiseKind, blocks, warnings, summary }
+  return { blocked, slideshow, variation, delivery, style, promiseKind, blocks, warnings, summary }
 }
 
 export interface ComposeAudit {

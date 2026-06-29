@@ -14,6 +14,10 @@ export interface StylePack {
   anchors: { all: string; character?: string; scene?: string; prop?: string; consistency?: string }
   /** 软避免：以 "no X" 形式追加到正向 prompt（本插件图像 API 仅单 prompt，无独立负向口） */
   negative?: string
+  /** 结构化跨镜一致性锚（补充单行 anchors.consistency；图像生成时追加） */
+  consistencyAnchors?: string[]
+  /** 质量规则：风格专属机器约束，作为 guidance 注入图像生成（如「保留留白」「文字勿烧进生成图」） */
+  qualityRules?: string[]
   /** 核心调色板（展示/参考用，主色已并入 anchors） */
   palette?: { name: string; hex: string }[]
   /** 视频提示词风格标签（i2v/t2v 用） */
@@ -35,6 +39,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: '保持造型与参考图一致，光影色彩基调统一',
     },
     negative: 'no photorealistic, no 3D render, no plastic texture, no western fantasy, no subtitles, no watermark',
+    consistencyAnchors: ['保持线条粗细与赛璐璐上色风格跨镜一致', '统一光影色彩基调'],
+    qualityRules: ['画面内不要烧录精确文字，改用字幕叠加'],
     palette: [
       { name: '月白', hex: '#E8EAF5' },
       { name: '青绿', hex: '#4A9B8A' },
@@ -56,6 +62,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent with the reference image, unified color grade and lighting',
     },
     negative: 'no cartoon, no anime, no illustration, no cgi look, no oversaturation, no watermark, no text overlay',
+    consistencyAnchors: ['keep the same color grade and key light direction across shots', 'consistent lens character and film grain'],
+    qualityRules: ['no on-screen text baked into the image; add captions as overlay in post'],
     palette: [
       { name: 'teal', hex: '#2B4C5A' },
       { name: 'amber', hex: '#C8853E' },
@@ -235,6 +243,8 @@ export const STYLE_PACKS: StylePack[] = [
       consistency: 'consistent brush language and ink tonality with the reference',
     },
     negative: 'no photorealistic, no 3D, no bright saturated colors, no hard digital outlines, no watermark',
+    consistencyAnchors: ['consistent brush language and ink tonality across shots'],
+    qualityRules: ['preserve generous negative space, do not fill the whole frame'],
     palette: [
       { name: '焦墨', hex: '#1A1A1A' },
       { name: '淡墨', hex: '#5C5C5C' },
@@ -260,14 +270,19 @@ export function getStylePack(id?: string | null): StylePack | null {
   return listStylePacks().find((p) => p.id === id) ?? null
 }
 
-/** 把风格包组合成可追加到生成 prompt 的后缀：全局锚定 + 角色锚定 + 一致性锚 + 软避免。 */
+/** 把风格包组合成可追加到生成 prompt 的后缀：全局锚定 + 角色锚定 + 一致性锚 + 质量规则 + 软避免。 */
 export function applyStylePack(pack: StylePack, role: StyleRole): string {
   const roleAnchor =
     role === 'character' ? pack.anchors.character : role === 'scene' ? pack.anchors.scene : role === 'prop' ? pack.anchors.prop : undefined
   const parts = [pack.anchors.all, roleAnchor, pack.anchors.consistency].filter(Boolean) as string[]
+  // 图像路径：追加结构化一致性锚 + 质量规则（视频路径不加，多数视频模型不解析）
+  if (role !== 'video') {
+    if (pack.consistencyAnchors?.length) parts.push(...pack.consistencyAnchors)
+    if (pack.qualityRules?.length) parts.push(...pack.qualityRules)
+  }
   if (role === 'video' && pack.videoTag) parts.push(pack.videoTag)
   let s = parts.join(', ')
-  if (pack.negative && role !== 'video') s += `, ${pack.negative}` // 视频路径不追加负向词（多数视频模型不解析）
+  if (pack.negative && role !== 'video') s += `, ${pack.negative}`
   return s
 }
 
