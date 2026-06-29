@@ -8,6 +8,7 @@ import { useGraphStore } from '../store/graphStore'
 import { getMemoryConfig } from './agent/memory'
 import { kvSet, STUDIO_KV, DEFAULT_MEMORY_CONFIG, type AgentKey, type MemoryConfig } from '../domain/studioKv'
 import Select from '../components/ui/Select'
+import Checkbox from '../components/ui/Checkbox'
 
 const AGENT_LABEL: Record<AgentKey, string> = {
   decision: '统筹/决策',
@@ -45,9 +46,11 @@ function AgentDeployPanel() {
     <section className="afs-studio__setsec">
       <h4>Agent 部署</h4>
       <div className="afs-studio__setrow">
-        <label>
-          <input type="checkbox" checked={advanced} onChange={(e) => setMode(e.target.checked ? 'advanced' : 'simple')} /> 高级（各子 Agent 独立配置）
-        </label>
+        <Checkbox
+          checked={advanced}
+          onChange={(c) => setMode(c ? 'advanced' : 'simple')}
+          label="高级（各子 Agent 独立配置）"
+        />
         {selectedModel && (
           <button className="afs-btn afs-btn--sm" onClick={() => setAllModel(selectedModel)} title="把全部 Agent 设为当前文本模型">
             全部设为当前模型

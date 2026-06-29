@@ -6,6 +6,7 @@ import { PROVIDER_PRESETS } from '../services/providers/presets'
 import { testVideoProvider } from '../services/providers/test'
 import { getKey } from '../services/keys'
 import Select from './ui/Select'
+import Checkbox from './ui/Checkbox'
 
 type Draft = Partial<MediaProviderConfig> & { kind: VideoProviderKind }
 
@@ -181,10 +182,12 @@ export default function ProviderSettings() {
               <span>能力</span>
               <span className="afs-capbox">
                 {CAPS.map((c) => (
-                  <label key={c.value} className="afs-capbox__item">
-                    <input type="checkbox" checked={draftCaps.includes(c.value)} onChange={() => toggleCap(c.value)} />
-                    {c.label}
-                  </label>
+                  <Checkbox
+                    key={c.value}
+                    checked={draftCaps.includes(c.value)}
+                    onChange={() => toggleCap(c.value)}
+                    label={c.label}
+                  />
                 ))}
                 <span className="afs-form__note">模式：{draftMode === 'sync-binary' ? '同步（语音）' : '异步轮询（视频/音乐）'}</span>
               </span>

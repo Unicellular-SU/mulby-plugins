@@ -4224,6 +4224,65 @@ select.afs-toolbar__select,
   letter-spacing: 0.03em;
   color: var(--afs-muted);
 }
+
+/* ============ 自定义复选框 Checkbox（视觉隐藏原生 input + 自绘方框 + 渐变勾） ============ */
+.afs-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: var(--afs-text);
+}
+.afs-checkbox-row.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.afs-checkbox-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  margin: 0;
+}
+.afs-checkbox-box {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border: 1px solid var(--afs-border-strong);
+  border-radius: var(--afs-r-xs);
+  background: var(--afs-surface-sunken);
+  transition: background var(--afs-dur-micro) var(--afs-ease-standard),
+    border-color var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-checkbox-row:hover .afs-checkbox-box {
+  border-color: var(--afs-accent);
+}
+.afs-checkbox-input:checked + .afs-checkbox-box {
+  background: var(--afs-grad-accent);
+  border-color: transparent;
+}
+.afs-checkbox-input:focus-visible + .afs-checkbox-box {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
+}
+.afs-checkbox-check {
+  color: var(--afs-on-accent);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--afs-dur-micro) var(--afs-ease-standard),
+    transform var(--afs-dur-micro) var(--afs-ease-spring);
+}
+.afs-checkbox-input:checked + .afs-checkbox-box .afs-checkbox-check {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-checkbox-check { transition: none; }
+}
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;
