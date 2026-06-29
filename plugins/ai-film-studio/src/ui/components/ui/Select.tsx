@@ -25,6 +25,7 @@ export interface SelectProps {
   title?: string
   ariaLabel?: string
   size?: 'sm' | 'md'
+  block?: boolean
   className?: string
   leadingIcon?: LucideIcon
 }
@@ -42,13 +43,14 @@ export default function Select({
   title,
   ariaLabel,
   size = 'md',
+  block,
   className,
   leadingIcon: Leading,
 }: SelectProps) {
   return (
     <RS.Root value={toRadix(value)} onValueChange={(v) => onChange(fromRadix(v))} disabled={disabled}>
       <RS.Trigger
-        className={`afs-select__trigger${size === 'sm' ? ' afs-select__trigger--sm' : ''}${className ? ' ' + className : ''}`}
+        className={`afs-select__trigger${size === 'sm' ? ' afs-select__trigger--sm' : ''}${block ? ' afs-select__trigger--block' : ''}${className ? ' ' + className : ''}`}
         title={title}
         aria-label={ariaLabel}
       >

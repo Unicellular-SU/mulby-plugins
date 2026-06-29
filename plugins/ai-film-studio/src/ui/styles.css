@@ -4117,6 +4117,11 @@ select.afs-toolbar__select,
   height: var(--afs-control-h-sm);
   font-size: 12px;
 }
+.afs-select__trigger--block {
+  display: flex;
+  width: 100%;
+  max-width: none;
+}
 .afs-select__trigger:hover {
   border-color: var(--afs-border-strong);
 }

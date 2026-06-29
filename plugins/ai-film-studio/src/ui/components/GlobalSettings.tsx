@@ -1,5 +1,6 @@
 import { useGraphStore } from '../store/graphStore'
 import { listStylePacks, getStylePack } from '../services/stylePacks'
+import Select from './ui/Select'
 
 const ASPECTS: { value: string; label: string }[] = [
   { value: '16:9', label: '16:9（横屏）' },
@@ -22,17 +23,13 @@ export default function GlobalSettings() {
 
         <div className="afs-field">
           <label className="afs-field__label">成片体量</label>
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={globals.filmScale ?? '短片'}
-            onChange={(e) => setGlobals({ filmScale: e.target.value })}
-          >
-            {['微短片', '短片', '单集', '长片'].map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setGlobals({ filmScale: v })}
+            options={['微短片', '短片', '单集', '长片'].map((s) => ({ value: s, label: s }))}
+            ariaLabel="成片体量"
+          />
           <div className="afs-modal__hint" style={{ marginTop: 4 }}>
             一处设定，协调大纲节拍数 + 剧本场数 + 分镜镜头数。想快速测试一小段（≈4 镜、不到 1 分钟）选「微短片」：大纲约 3 拍、剧本 1-2 场、分镜约 3-5 镜。剧本节点的「成片体量」默认跟随此处，可单独覆盖。
           </div>
@@ -40,32 +37,24 @@ export default function GlobalSettings() {
 
         <div className="afs-field">
           <label className="afs-field__label">画幅</label>
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={globals.aspectRatio}
-            onChange={(e) => setGlobals({ aspectRatio: e.target.value })}
-          >
-            {ASPECTS.map((a) => (
-              <option key={a.value} value={a.value}>
-                {a.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setGlobals({ aspectRatio: v })}
+            options={ASPECTS.map((a) => ({ value: a.value, label: a.label }))}
+            ariaLabel="画幅"
+          />
         </div>
 
         <div className="afs-field">
           <label className="afs-field__label">对白语言</label>
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={globals.dialogueLang ?? '中文'}
-            onChange={(e) => setGlobals({ dialogueLang: e.target.value })}
-          >
-            {['中文', 'English', '日本語', '한국어', 'Español', 'Français'].map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setGlobals({ dialogueLang: v })}
+            options={['中文', 'English', '日本語', '한국어', 'Español', 'Français'].map((l) => ({ value: l, label: l }))}
+            ariaLabel="对白语言"
+          />
           <div className="afs-modal__hint" style={{ marginTop: 4 }}>
             剧本/分镜台词与原生音频/配音都按此语言生成。不设置时模型常默认讲英文——选好这里，台词才说中文。
           </div>
@@ -73,18 +62,13 @@ export default function GlobalSettings() {
 
         <div className="afs-field">
           <label className="afs-field__label">风格包</label>
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={globals.stylePackId ?? ''}
-            onChange={(e) => setGlobals({ stylePackId: e.target.value || undefined })}
-          >
-            <option value="">（不使用 · 仅用下方自由画风）</option>
-            {listStylePacks().map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setGlobals({ stylePackId: v || undefined })}
+            options={[{ value: '', label: '（不使用 · 仅用下方自由画风）' }, ...listStylePacks().map((p) => ({ value: p.id, label: p.label }))]}
+            ariaLabel="风格包"
+          />
           {getStylePack(globals.stylePackId) && (
             <div className="afs-modal__hint" style={{ marginTop: 4 }}>
               {getStylePack(globals.stylePackId)!.hint} 风格包会向所有图像/视频生成注入统一的色盘 / 光影 / 锚定 / 负向词，根治跨镜画风漂移。下方「自由画风」会叠加其后作为补充。
@@ -105,17 +89,13 @@ export default function GlobalSettings() {
 
         <div className="afs-field">
           <label className="afs-field__label">并发上限</label>
-          <select
-            className="afs-field__input"
+          <Select
+            block
             value={String(globals.concurrency ?? 3)}
-            onChange={(e) => setGlobals({ concurrency: Number(e.target.value) })}
-          >
-            {[1, 2, 3, 4, 6, 8].map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? '1（顺序执行）' : `${n} 路并发`}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setGlobals({ concurrency: Number(v) })}
+            options={[1, 2, 3, 4, 6, 8].map((n) => ({ value: String(n), label: n === 1 ? '1（顺序执行）' : `${n} 路并发` }))}
+            ariaLabel="并发上限"
+          />
           <div className="afs-modal__hint" style={{ marginTop: 4 }}>
             单节点扇出时（N 个关键帧 / 角色图 / 视频片段）同时生成的最大数量。视频/图像越多越快，但过大可能触发供应商限流，按 API 额度调整。
           </div>
