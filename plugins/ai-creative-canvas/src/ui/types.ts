@@ -97,12 +97,14 @@ export interface DirectorCam {
   focal: number
 }
 export interface DirectorSubject {
-  kind: string // 人台 / 道具
+  kind: string // 人台 / 道具 / 模型
   pos: [number, number, number]
   rot: [number, number, number]
-  scale: number
-  joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台摆姿）
+  scale: number | [number, number, number] // 旧数据=均匀(number)；新数据=三轴(非均匀缩放)
+  joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台/rigged 模型摆姿）
   poseName?: string // 一键姿势名（供生成提示）
+  assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
+  name?: string // 对象显示名（Outliner 改名后持久化）
 }
 export interface DirectorShot {
   id: string

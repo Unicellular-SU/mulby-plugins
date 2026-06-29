@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Camera, Undo2, Redo2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -64,11 +64,15 @@ interface ObjRow {
 
 function Inner() {
   const mountRef = useRef<HTMLDivElement>(null)
+  const pipRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const api = useRef<any>({})
   const [ready, setReady] = useState(false)
   const [focal, setFocal] = useState(35)
   const [mode, setMode] = useState<TMode>('translate')
+  const [locked, setLocked] = useState(false) // 取景锁定（出图相机冻结）
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
   const [objs, setObjs] = useState<ObjRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [selKind, setSelKind] = useState<string | null>(null)
@@ -144,9 +148,33 @@ function Inner() {
         orbit.enableDamping = true
         orbit.target.set(0, 1, 0)
         const tcontrol = new TransformControls(cam, renderer.domElement)
-        tcontrol.addEventListener('dragging-changed', (e: any) => { orbit.enabled = !e.value })
+        tcontrol.addEventListener('dragging-changed', (e: any) => { orbit.enabled = !e.value; if (!e.value) commit() })
         const tHelper = typeof tcontrol.getHelper === 'function' ? tcontrol.getHelper() : tcontrol
         scene.add(tHelper)
+
+        // 取景双相机：cam=视图(轨道自由查看)；shotCam=出图相机(PiP/取景框/生成都用它)。
+        // 默认 shotLocked=false → shotCam 每帧跟随 cam（与单相机行为一致，零回归）；锁定后冻结，
+        // 可绕到侧面查看/摆姿而出图构图不变；CameraHelper 在主视图显示出图机位的取景框。
+        const shotCam = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
+        shotCam.filmGauge = FILM_GAUGE
+        shotCam.position.set(0, 1.5, 4)
+        shotCam.setFocalLength(35)
+        const shotTarget = new THREE.Vector3(0, 1, 0)
+        let shotLocked = false
+        const camHelper = new THREE.CameraHelper(shotCam)
+        camHelper.visible = false
+        scene.add(camHelper)
+        const outCam = () => (shotLocked ? shotCam : cam)
+        const outTarget = () => (shotLocked ? shotTarget : orbit.target)
+        // PiP：角落小渲染器，实时显示 shotCam 取景（出图构图预览）
+        let pip: any = null
+        const pipMount = pipRef.current
+        if (pipMount) {
+          pip = new THREE.WebGLRenderer({ antialias: true })
+          pip.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
+          pip.setSize(240, Math.round(240 / (W / H)))
+          pipMount.appendChild(pip.domElement)
+        }
 
         interface Subj { obj: any; kind: string; id: string; name: string }
         const subjects: Subj[] = []
@@ -157,6 +185,51 @@ function Inner() {
         const nextName = (kind: string) => { counters[kind] = (counters[kind] || 0) + 1; return `${kind}${counters[kind]}` }
 
         const sync = () => { if (!disposed) setObjs(subjects.map((s) => ({ id: s.id, name: s.name, kind: s.kind, visible: s.obj.visible !== false }))) }
+
+        // ── 撤销/重做：栈顶=当前态，快照 serializeSceneOnly()（含导入模型 assetId/姿势）──
+        const history: any[] = []
+        const redoStack: any[] = []
+        let restoring = false
+        let sceneGen = 0 // 场景代次：整体重建(undo/redo/恢复)时自增，丢弃过期的异步模型重建结果
+        const syncHistoryUi = () => { if (!disposed) { setCanUndo(history.length > 1); setCanRedo(redoStack.length > 0) } }
+        const commit = () => {
+          if (restoring || disposed) return // 重建（含异步模型加载）期间不快照，避免漏掉未到达的模型
+          let snap: any
+          try { snap = serializeSceneOnly() } catch { return }
+          history.push(snap)
+          if (history.length > 60) history.shift()
+          redoStack.length = 0
+          syncHistoryUi()
+        }
+        const applyState = (state: any) => {
+          if (!state) return
+          restoring = true
+          sceneGen++
+          tcontrol.detach(); curRoot = null
+          for (const s of subjects) { scene.remove(s.obj); disposeTree(s.obj) }
+          subjects.length = 0
+          const ps: Promise<void>[] = []
+          for (const st of state.subjects || []) { if (st.kind === '模型') ps.push(buildModelFromState(st)); else buildFromState(st) }
+          if (state.cam) applyCam(state.cam)
+          sync()
+          if (!disposed) { setSelId(null); setSelKind(null); if (state.cam) setFocal(Math.round(state.cam.focal || 35)) }
+          // 异步模型到齐后才解除 restoring（期间抑制 commit，避免快照漏模型 / 与现场脱节）
+          void Promise.all(ps).then(() => { restoring = false; if (!disposed) sync() })
+        }
+        const undo = () => {
+          if (restoring || history.length <= 1) return
+          redoStack.push(history.pop())
+          applyState(history[history.length - 1])
+          syncHistoryUi()
+        }
+        const redoFn = () => {
+          if (restoring) return
+          const s = redoStack.pop()
+          if (!s) return
+          history.push(s)
+          applyState(s)
+          syncHistoryUi()
+        }
 
         const makeMannequin = (color: number) => {
           const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
@@ -209,6 +282,7 @@ function Inner() {
           subjects.push({ obj, kind, id, name })
           sync()
           select(obj)
+          commit()
           return id
         }
         const addMannequin = () => {
@@ -232,23 +306,33 @@ function Inner() {
             })
           })
         }
-        const importGLTF = (arrayBuffer: ArrayBuffer, fname: string) => {
+        // 还原缩放：兼容旧数据(number=均匀)与新数据([x,y,z]=非均匀)
+        const applyScale = (o: any, s: any) => { if (Array.isArray(s)) o.scale.set(s[0], s[1], s[2]); else o.scale.setScalar(s || 1) }
+        // 解析 GLB/GLTF → 标记 Mixamo 骨骼 + rigged + kind=模型（不归一化/不落场景，由调用方决定）
+        const parseGLB = (ab: ArrayBuffer, onOk: (obj: any) => void, onErr?: (e: any) => void) => {
           const loader = new GLTFLoader()
-          loader.parse(
+          loader.parse(ab, '', (gltf: any) => {
+            const obj = gltf.scene || gltf.scenes?.[0]
+            if (!obj) { onErr?.(new Error('模型为空')); return }
+            let bones = 0
+            obj.traverse((c: any) => {
+              const nl = String(c.name || '').toLowerCase()
+              const hit = MIXAMO_MAP.find((mm) => nl.endsWith(mm.suf))
+              if (hit && !c.userData.joint) { c.userData.joint = hit.joint; bones++ }
+            })
+            obj.userData.rigged = bones >= 6
+            obj.userData.kind = '模型'
+            onOk(obj)
+          }, (err: any) => onErr?.(err))
+        }
+        const attachStore = () => (window as any).mulby?.storage?.attachment
+        // 用户导入：解析 → 归一化 → GLB 字节存 attachment（据此随工程持久化）→ 落场景
+        const importGLTF = (arrayBuffer: ArrayBuffer, fname: string) => {
+          const gen = sceneGen // 导入异步期间若发生整体重建(undo)则丢弃本次结果
+          parseGLB(
             arrayBuffer,
-            '',
-            (gltf: any) => {
-              const obj = gltf.scene || gltf.scenes?.[0]
-              if (!obj) { toast('模型为空', 'error'); return }
-              if (disposed) { disposeTree(obj); return } // 卸载后回调：清理，勿挂到孤立场景
-              // 识别 Mixamo 人形骨骼 → 标记标准关节名（用于摆姿/OpenPose 导出）
-              let bones = 0
-              obj.traverse((c: any) => {
-                const nl = String(c.name || '').toLowerCase()
-                const hit = MIXAMO_MAP.find((mm) => nl.endsWith(mm.suf))
-                if (hit && !c.userData.joint) { c.userData.joint = hit.joint; bones++ }
-              })
-              obj.userData.rigged = bones >= 6
+            async (obj: any) => {
+              if (disposed || gen !== sceneGen) { disposeTree(obj); return }
               // 归一化：缩放到约 2 单位高，脚落地面、水平居中（无可见网格则跳过）
               const box = new THREE.Box3().setFromObject(obj)
               if (!box.isEmpty()) {
@@ -264,16 +348,59 @@ function Inner() {
                 obj.position.y -= box2.min.y
               }
               const k = (fname.replace(/\.(glb|gltf)$/i, '') || '模型').slice(0, 16)
+              const assetId = uid('glb')
+              obj.userData.assetId = assetId
+              // 存字节用于持久化；失败（如 >50MB / 存储不可用）则本会话仍可用但不随工程保存
+              const mime = /\.gltf$/i.test(fname) ? 'model/gltf+json' : 'model/gltf-binary'
+              let stored = false
+              // put 返回 { ok, error }（旧宿主可能返回 boolean）——对象恒 !== false，必须取 .ok
+              try { const r = await attachStore()?.put?.(assetId, arrayBuffer, mime); stored = r === true || !!(r && (r as any).ok) } catch { stored = false }
+              if (disposed || gen !== sceneGen) { disposeTree(obj); return }
+              if (!stored) { obj.userData.assetId = undefined; toast('模型较大或存储不可用：本次可用，但不会随工程保存', 'warning') }
               const id = uid('obj')
-              obj.userData.kind = '模型'
               scene.add(obj)
               subjects.push({ obj, kind: '模型', id, name: k })
               sync()
               select(obj)
+              commit()
               toast('已导入模型：' + k, 'success')
             },
             (err: any) => { if (!disposed) toast('模型导入失败（.gltf 仅支持全内嵌；Draco 压缩暂不支持）：' + (err?.message || String(err)), 'error') }
           )
+        }
+        // 重开/撤销时按持久化状态重建导入模型：取 attachment 字节 → parse → 应用变换/姿势（不归一化）
+        const buildModelFromState = (st: any): Promise<void> => {
+          const store = attachStore()
+          if (!st.assetId || !store?.get) return Promise.resolve()
+          const gen = sceneGen // 本次重建的代次：解析完成时若已过期(又一次 undo)则丢弃
+          return Promise.resolve(store.get(st.assetId))
+            .then(
+              (bytes: any) =>
+                new Promise<void>((resolve) => {
+                  if (disposed || gen !== sceneGen) { resolve(); return }
+                  if (!bytes) { toast('导入模型数据缺失，无法恢复：' + (st.name || ''), 'warning'); resolve(); return }
+                  const ab: ArrayBuffer = bytes.buffer ? bytes.buffer.slice(bytes.byteOffset || 0, (bytes.byteOffset || 0) + bytes.byteLength) : bytes
+                  parseGLB(
+                    ab,
+                    (obj: any) => {
+                      if (disposed || gen !== sceneGen) { disposeTree(obj); resolve(); return }
+                      obj.userData.assetId = st.assetId
+                      obj.position.set(st.pos[0], st.pos[1], st.pos[2])
+                      obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
+                      applyScale(obj, st.scale)
+                      if (st.poseName) obj.userData.poseName = st.poseName
+                      if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
+                      const id = uid('obj')
+                      scene.add(obj)
+                      subjects.push({ obj, kind: '模型', id, name: st.name || '模型' })
+                      sync()
+                      resolve()
+                    },
+                    (err: any) => { if (!disposed) toast('恢复导入模型失败：' + (err?.message || String(err)), 'warning'); resolve() }
+                  )
+                })
+            )
+            .catch(() => {})
         }
 
         const findById = (id: string) => subjects.find((s) => s.id === id)
@@ -282,9 +409,11 @@ function Inner() {
           if (!sub) return
           if (curRoot === sub.obj) { tcontrol.detach(); curRoot = null }
           scene.remove(sub.obj)
+          disposeTree(sub.obj)
           subjects.splice(subjects.indexOf(sub), 1)
           sync()
           if (curRoot === null && !disposed) { setSelId(null); setSelKind(null) }
+          commit()
         }
         const duplicateById = (id: string) => {
           const sub = findById(id)
@@ -364,6 +493,7 @@ function Inner() {
           posing = null
           orbit.enabled = true
           try { renderer.domElement.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+          commit()
         }
         renderer.domElement.addEventListener('pointerdown', onPointerDown)
         window.addEventListener('pointermove', onPointerMove)
@@ -383,7 +513,12 @@ function Inner() {
         const animate = () => {
           raf = requestAnimationFrame(animate)
           orbit.update()
+          if (!shotLocked) { shotCam.copy(cam); shotTarget.copy(orbit.target) } // 未锁定：出图相机跟随视图
+          shotCam.updateMatrixWorld(true)
+          camHelper.update()
+          camHelper.visible = shotLocked // 锁定时主视图显示出图取景框
           renderer.render(scene, cam)
+          if (pip && shotLocked) { camHelper.visible = false; pip.render(scene, shotCam) } // PiP 出图预览（不含取景框线）
         }
         animate()
         const ro = new ResizeObserver(() => {
@@ -392,21 +527,36 @@ function Inner() {
           renderer.setSize(w, h)
           cam.aspect = w / h
           cam.updateProjectionMatrix()
+          shotCam.aspect = w / h
+          shotCam.updateProjectionMatrix()
+          if (pip) pip.setSize(240, Math.round(240 / (w / h)))
         })
         ro.observe(mount)
 
-        const getCam = () => ({
-          pos: [cam.position.x, cam.position.y, cam.position.z] as [number, number, number],
-          target: [orbit.target.x, orbit.target.y, orbit.target.z] as [number, number, number],
-          focal: cam.getFocalLength()
-        })
-        const applyCam = (c: any) => {
-          cam.position.set(c.pos[0], c.pos[1], c.pos[2])
-          orbit.target.set(c.target[0], c.target[1], c.target[2])
-          cam.setFocalLength(c.focal)
-          cam.updateProjectionMatrix()
+        const getCam = () => {
+          const C = outCam()
+          const T = outTarget()
+          return {
+            pos: [C.position.x, C.position.y, C.position.z] as [number, number, number],
+            target: [T.x, T.y, T.z] as [number, number, number],
+            focal: C.getFocalLength()
+          }
         }
-        // 持久化只存程序生成的人台/道具（导入模型为二进制，无法序列化）
+        const applyCam = (c: any) => {
+          if (shotLocked) {
+            shotCam.position.set(c.pos[0], c.pos[1], c.pos[2])
+            shotTarget.set(c.target[0], c.target[1], c.target[2])
+            shotCam.setFocalLength(c.focal)
+            shotCam.lookAt(shotTarget)
+            shotCam.updateProjectionMatrix()
+          } else {
+            cam.position.set(c.pos[0], c.pos[1], c.pos[2])
+            orbit.target.set(c.target[0], c.target[1], c.target[2])
+            cam.setFocalLength(c.focal)
+            cam.updateProjectionMatrix()
+          }
+        }
+        // 重建程序生成的人台/道具（导入模型走 buildModelFromState）
         const buildFromState = (st: any) => {
           if (st.kind !== '人台' && st.kind !== '道具') return
           const obj: any = st.kind === '道具'
@@ -414,22 +564,33 @@ function Inner() {
             : makeMannequin(0xc7ccd6)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
-          obj.scale.setScalar(st.scale || 1)
+          applyScale(obj, st.scale)
           obj.userData.kind = st.kind
           if (st.poseName) obj.userData.poseName = st.poseName
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
           scene.add(obj)
-          subjects.push({ obj, kind: st.kind, id, name: nextName(st.kind) })
+          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind) })
         }
         const serializeSceneOnly = () => ({
+          // 人台/道具 + 已存字节的导入模型；导入模型为空 assetId（存储失败）则不持久化
           subjects: subjects
-            .filter((s) => s.kind === '人台' || s.kind === '道具')
+            .filter((s) => s.kind === '人台' || s.kind === '道具' || (s.kind === '模型' && s.obj.userData.assetId))
             .map((s) => {
               const o: any = s.obj
+              const posed = s.kind === '人台' || (s.kind === '模型' && o.userData.rigged)
               const joints: Record<string, [number, number, number]> = {}
-              if (s.kind === '人台') o.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j) joints[j] = [c.rotation.x, c.rotation.y, c.rotation.z] })
-              return { kind: s.kind, pos: [o.position.x, o.position.y, o.position.z] as [number, number, number], rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number], scale: o.scale.x, joints: s.kind === '人台' ? joints : undefined, poseName: o.userData.poseName }
+              if (posed) o.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j) joints[j] = [c.rotation.x, c.rotation.y, c.rotation.z] })
+              return {
+                kind: s.kind,
+                assetId: s.kind === '模型' ? o.userData.assetId : undefined,
+                name: s.name,
+                pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
+                rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number],
+                scale: [o.scale.x, o.scale.y, o.scale.z] as [number, number, number],
+                joints: posed ? joints : undefined,
+                poseName: o.userData.poseName
+              }
             }),
           cam: getCam()
         })
@@ -468,11 +629,12 @@ function Inner() {
           ctx.fillStyle = '#000'
           ctx.fillRect(0, 0, cw, ch)
           ctx.lineCap = 'round'
+          const C = outCam() // 出图相机（锁定取景时为 shotCam）
           const project = (p: any): [number, number] | null => {
             if (!p) return null
-            const cs = p.clone().applyMatrix4(cam.matrixWorldInverse)
+            const cs = p.clone().applyMatrix4(C.matrixWorldInverse)
             if (cs.z > -0.02) return null // 在相机后方
-            const v = p.clone().project(cam)
+            const v = p.clone().project(C)
             return [(v.x * 0.5 + 0.5) * cw, (1 - (v.y * 0.5 + 0.5)) * ch]
           }
           const lineW = Math.max(2, Math.round(ch * 0.012))
@@ -507,23 +669,27 @@ function Inner() {
         }
         const captureDepth = (): string => {
           tcontrol.detach()
-          const pf = cam.far
-          cam.far = 14
-          cam.updateProjectionMatrix()
+          const C = outCam() // 出图相机
+          const pf = C.far
+          C.far = 14
+          C.updateProjectionMatrix()
           const pbg = scene.background
           scene.background = new THREE.Color(0x000000)
           const gv = grid.visible
           const gdv = ground.visible
+          const chv = camHelper.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
+          camHelper.visible = false // 取景框不进深度图
           scene.overrideMaterial = depthMat
-          renderer.render(scene, cam)
+          renderer.render(scene, C)
           scene.overrideMaterial = null as any
           grid.visible = gv
           ground.visible = gdv
+          camHelper.visible = chv
           scene.background = pbg
-          cam.far = pf
-          cam.updateProjectionMatrix()
+          C.far = pf
+          C.updateProjectionMatrix()
           const cw = renderer.domElement.width
           const ch = renderer.domElement.height
           const c = document.createElement('canvas')
@@ -542,7 +708,10 @@ function Inner() {
         // 恢复持久化场景，否则默认一个人台
         const saved0 = useGraph.getState().project.director
         if (saved0 && Array.isArray(saved0.subjects) && saved0.subjects.length) {
-          saved0.subjects.forEach(buildFromState)
+          restoring = true
+          sceneGen++
+          const ps: Promise<void>[] = []
+          saved0.subjects.forEach((st: any) => { if (st.kind === '模型') ps.push(buildModelFromState(st)); else buildFromState(st) })
           sync()
           if (saved0.cam) applyCam(saved0.cam)
           select(null)
@@ -551,16 +720,19 @@ function Inner() {
             if (saved0.prompt) setPrompt(saved0.prompt)
             setFocal(Math.round((saved0.cam && saved0.cam.focal) || 35))
           }
+          // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
+          void Promise.all(ps).then(() => { restoring = false; if (!disposed) { sync(); commit() } })
         } else {
-          addMannequin()
+          addMannequin() // addSubject 内已 commit 种子
         }
 
         const shotFragment = (): string => {
-          const target = orbit.target
-          const d = cam.position.distanceTo(target)
-          const dy = cam.position.y - target.y
+          const C = outCam()
+          const target = outTarget()
+          const d = C.position.distanceTo(target)
+          const dy = C.position.y - target.y
           const ang = (Math.asin(Math.max(-1, Math.min(1, dy / Math.max(0.001, d)))) * 180) / Math.PI
-          const f = cam.getFocalLength()
+          const f = C.getFocalLength()
           const lens = f < 28 ? '广角镜头(wide-angle)' : f <= 50 ? '标准镜头(normal)' : f <= 85 ? '中长焦(short telephoto)' : '长焦(telephoto)'
           const angle = ang > 18 ? '俯拍(high angle)' : ang < -12 ? '仰拍(low angle)' : '平视(eye level)'
           const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
@@ -569,7 +741,7 @@ function Inner() {
           const layout = people
             .map((s, i) => {
               s.obj.getWorldPosition(v)
-              v.project(cam)
+              v.project(C)
               if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
               const where = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
               const pose = (s.obj as any).userData?.poseName
@@ -594,29 +766,48 @@ function Inner() {
           toggleVisById,
           lookAtSelected,
           setMode: (m: TMode) => { curMode = m; attachByMode() },
-          setFocal: (mm: number) => cam.setFocalLength(mm),
+          setFocal: (mm: number) => { const C = outCam(); C.setFocalLength(mm); C.updateProjectionMatrix() },
           shotSize: (kind: 'cu' | 'ms' | 'fs') => {
+            const C = outCam(); const T = outTarget()
             const dist = kind === 'cu' ? 1.3 : kind === 'ms' ? 2.6 : 5
-            const v = cam.position.clone().sub(orbit.target).normalize().multiplyScalar(dist)
-            cam.position.copy(orbit.target).add(v)
+            const v = C.position.clone().sub(T).normalize().multiplyScalar(dist)
+            C.position.copy(T).add(v)
+            if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
           angle: (kind: 'low' | 'eye' | 'high') => {
-            const flat = new THREE.Vector3(cam.position.x - orbit.target.x, 0, cam.position.z - orbit.target.z)
+            const C = outCam(); const T = outTarget()
+            const flat = new THREE.Vector3(C.position.x - T.x, 0, C.position.z - T.z)
             const horiz = flat.length() || 2.6
-            const y = kind === 'low' ? 0.4 : kind === 'eye' ? orbit.target.y : orbit.target.y + horiz * 0.9
-            cam.position.set(orbit.target.x + flat.x, y, orbit.target.z + flat.z)
+            const y = kind === 'low' ? 0.4 : kind === 'eye' ? T.y : T.y + horiz * 0.9
+            C.position.set(T.x + flat.x, y, T.z + flat.z)
+            if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
+          // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
+          setLock: (v: boolean) => {
+            if (v && !shotLocked) { shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true) }
+            shotLocked = v
+          },
+          // 把出图机位设为当前视图（锁定状态下重新取景）
+          setShotFromView: () => {
+            shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true)
+          },
+          undo,
+          redo: redoFn,
           applyPose: (name: string, map: Record<string, [number, number, number]>) => {
             if (!curRoot || curRoot.userData.kind !== '人台') return
             curRoot.traverse((c: any) => { if (c.userData && c.userData.joint) c.rotation.set(0, 0, 0) })
             curRoot.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && map[j]) c.rotation.set(map[j][0], map[j][1], map[j][2]) })
             curRoot.userData.poseName = name === '站立' ? '' : name
+            commit()
           },
-          setFacing: (rad: number) => { if (curRoot) curRoot.rotation.y = rad },
+          setFacing: (rad: number) => { if (curRoot) { curRoot.rotation.y = rad; commit() } },
           capture: (): string => {
             tcontrol.detach()
-            renderer.render(scene, cam)
+            const chv = camHelper.visible
+            camHelper.visible = false // 取景框不进成片参考图
+            renderer.render(scene, outCam())
             const url = renderer.domElement.toDataURL('image/png')
+            camHelper.visible = chv
             attachByMode()
             return url
           },
@@ -641,6 +832,7 @@ function Inner() {
           safe(() => renderer.domElement.removeEventListener('drop', onDrop))
           safe(() => tcontrol.detach())
           safe(() => scene.remove(tHelper))
+          safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
           safe(() => tcontrol.dispose())
           safe(() => orbit.dispose())
           safe(() => scene.traverse((o: any) => disposeTree(o))) // 释放各 mesh 的 geometry/material/texture
@@ -648,6 +840,7 @@ function Inner() {
           safe(() => renderer.dispose())
           safe(() => renderer.forceContextLoss())
           safe(() => { if (renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement) })
+          safe(() => { if (pip) { pip.dispose(); pip.forceContextLoss(); if (pip.domElement.parentNode) pip.domElement.parentNode.removeChild(pip.domElement) } })
         }
       } catch (err) {
         console.error('[DirectorStage] setup failed', err)
@@ -660,7 +853,14 @@ function Inner() {
   }, [])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeRef.current() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closeRef.current(); return }
+      const t = e.target as HTMLElement
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return // 输入框内交给原生
+      const meta = e.ctrlKey || e.metaKey
+      if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) api.current.redo?.(); else api.current.undo?.() }
+      else if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.current.redo?.() }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
@@ -771,8 +971,20 @@ function Inner() {
         <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转整体"><Rotate3d size={13} /> 旋转</Btn>
         <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体"><Maximize size={13} /> 缩放</Btn>
         <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿：点人台关节后拖动鼠标摆姿"><Hand size={13} /> 摆姿</Btn>
+        <div className="w-px h-5 bg-white/20" />
+        <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景：冻结出图机位，主视图可自由查看/摆姿；PiP 实时显示出图构图"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
+        {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
+        <div className="w-px h-5 bg-white/20" />
+        <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="px-2 py-1 rounded-md text-xs bg-white/10 hover:bg-white/20 disabled:opacity-30"><Undo2 size={13} /></button>
+        <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="px-2 py-1 rounded-md text-xs bg-white/10 hover:bg-white/20 disabled:opacity-30"><Redo2 size={13} /></button>
         <div className="ml-auto" />
         <button onClick={close} className="w-8 h-8 grid place-items-center rounded-lg bg-black/55 hover:bg-black/70"><X size={16} /></button>
+      </div>
+
+      {/* PiP：出图取景预览（仅锁定取景时显示） */}
+      <div className={`absolute top-14 right-64 z-[2] rounded-lg overflow-hidden ring-1 ring-indigo-400/60 shadow-lg ${locked ? '' : 'hidden'}`}>
+        <div ref={pipRef} />
+        <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-black/60 rounded-br">出图取景</div>
       </div>
 
       {/* 左：Outliner */}

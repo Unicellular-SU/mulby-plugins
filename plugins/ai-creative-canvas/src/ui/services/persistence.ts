@@ -244,6 +244,12 @@ export async function deleteProjectStorage(pid: string): Promise<void> {
     if (main && Array.isArray(main.boards)) for (const b of main.boards) if (b?.id) idSet.add(b.id)
     const rec: any = await s.get(kRecovery(pid), PLUGIN_ID)
     if (rec && Array.isArray(rec.boards)) for (const b of rec.boards) if (b?.id) idSet.add(b.id)
+    // 删除导演台导入模型的 attachment（assetId 在 director.subjects，随 manifest 持久化）
+    if (s.attachment?.remove) {
+      for (const d of [main?.director, rec?.director]) {
+        if (d && Array.isArray(d.subjects)) for (const sub of d.subjects) if (sub?.assetId) { try { await s.attachment.remove(sub.assetId) } catch { /* ignore */ } }
+      }
+    }
     for (const id of idSet) {
       await delKey(s, kBoard(pid) + id)
       await delKey(s, kRecBoard(pid) + id)

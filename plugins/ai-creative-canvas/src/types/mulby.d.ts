@@ -722,7 +722,7 @@ interface MulbyStorage {
   }
   /** 二进制附件（单文件 ≤50MB，存 userData/plugin-attachments，仅渲染进程）：适合图片/音视频 */
   attachment: {
-    put(id: string, data: ArrayBuffer | Uint8Array, mimeType: string): Promise<boolean>
+    put(id: string, data: ArrayBuffer | Uint8Array, mimeType: string): Promise<{ ok: boolean; error?: string } | boolean>
     get(id: string): Promise<Uint8Array | null>
     getType(id: string): Promise<string | null>
     remove(id: string): Promise<boolean>

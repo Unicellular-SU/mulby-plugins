@@ -76,3 +76,10 @@
 - **控制图类型**：工程配了 ControlNet 控制模型时，Inspector 出「控制：深度/骨架」开关；`doGenerate` 据此用 captureDepth / captureOpenPose + 对应提示。
 - **Mixamo 重定向**：导入 GLB 按 `MIXAMO_MAP`(LeftArm/LeftForeArm/LeftHand/LeftUpLeg/LeftLeg/LeftFoot/Head/Neck…后缀)自动标记标准关节名，骨骼≥6 标 `rigged`；rigged 模型可拖拽摆姿（蒙皮命中点就近选骨）+ 导出 OpenPose。姿势库预设仅对自有 rig（局部轴相关）。VRM 需 @pixiv/three-vrm（未引入）。
 - **审查后修复**（3-agent workflow）：① 深度图渲染前隐藏 grid/ground（避免地面强梯度+网格线污染深度控制图）；② 骨架控制无人台/rigged 目标时拦截并提示（避免上传全黑骨架图静默生成）。
+
+## 十二、三大件（2026-06-29，已提交）：导入模型持久化 + 取景 PiP 双相机 + 撤销重做
+- **导入模型持久化**（数据丢失级修复）：导入 GLB → 字节存 `storage.attachment`（assetId），`DirectorSubject` 加 `assetId`/`name`/三轴 `scale`；`serializeSceneOnly` 纳入模型（含 rigged 骨骼姿势 joints），重开/撤销时 `buildModelFromState` 异步取字节 `parseGLB` 重建（不归一化、套用保存的变换/姿势）；删工程时 `deleteProjectStorage` 清理 director 模型 attachment。存储失败（>50MB/不可用）按 `put` 返回的 `{ok}` 降级为「本次可用、不随工程保存」并提示。
+- **取景 PiP 双相机**：`cam`=视图（轨道自由查看）、`shotCam`=出图相机；默认 `shotLocked=false` 时 shotCam 每帧 `copy(cam)`（与旧单相机零回归）。「锁定取景」冻结出图机位 → 主视图可绕到侧面摆姿，角落 **PiP**（第二 renderer）实时显示出图构图 + 主视图 `CameraHelper` 取景框；`capture`/`captureDepth`/`captureOpenPose`/`shotFragment`/`getCam`/`applyCam`/`shotSize`/`angle`/`setFocal` 全部走 `outCam()`/`outTarget()`，捕获时隐藏取景框线。
+- **撤销重做**：`commit()` 快照 `serializeSceneOnly()`（栈顶=当前态），提交点覆盖 增删/复制/导入/摆姿/姿势库/朝向/TransformControls 拖拽结束/拖拽摆姿；`applyState` 整体重建（人台/道具同步 + 模型异步）；Ctrl+Z / Ctrl+Shift+Z(/Y) + 顶栏按钮（输入框内不拦截）。
+- **审查后修复**（3-agent 工作流）：① **blocker** `attachment.put` 返回 `{ok,error}` 对象（非 boolean）—— 原 `!==false` 判定恒真使 >50MB 失败路径失效、重开必丢；改为取 `.ok` + 修正本地 d.ts 类型。② **major** 异步模型重建竞态 —— 引入 `sceneGen` 代次令牌（过期重建丢弃）+ `restoring` 持有到模型到齐（期间抑制 commit，避免快照漏模型）+ 种子/applyState 等 `Promise.all` 后再快照；importGLTF 也加代次守卫。③ undo 后 `setFocal` 同步滑块；④ 三轴缩放持久化（非均匀缩放不再被压平）；⑤ `setLock/setShotFromView` 加 `updateMatrixWorld`。
+- **仍延后/已知**：锁定取景后改窗口尺寸会按新视口比例重取景（shotCam.aspect 跟随主视口，保证 capture 不变形；真机少见）；IK / VRM / 姿势缩略图（独立增强）。**需真机实测**：attachment put/get、第二 WebGL context、CameraHelper/PiP 表现。
