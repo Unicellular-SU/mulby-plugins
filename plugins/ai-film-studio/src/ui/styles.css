@@ -1037,7 +1037,7 @@ select.afs-toolbar__select,
   border-radius: 6px;
   border: 1px solid var(--afs-accent);
   background: var(--afs-accent);
-  color: #fff;
+  color: var(--afs-on-accent);
   cursor: pointer;
   font-size: 12.5px;
   font-weight: 500;
@@ -1721,7 +1721,7 @@ select.afs-toolbar__select,
   border: none;
   border-radius: 7px;
   background: var(--afs-accent);
-  color: #fff;
+  color: var(--afs-on-accent);
   cursor: pointer;
   transition: opacity 0.15s, filter 0.15s;
 }
@@ -3952,7 +3952,7 @@ select.afs-toolbar__select,
 /* 工作台 · 制片 Agent 对话面板（阶段3a） */
 .afs-studio__agent-msgs { flex: 1; overflow: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .afs-studio__msg { padding: 8px 11px; border-radius: 10px; font-size: 13px; line-height: 1.55; white-space: pre-wrap; max-width: 92%; }
-.afs-studio__msg--user { align-self: flex-end; background: var(--afs-accent); color: #fff; border-bottom-right-radius: 3px; }
+.afs-studio__msg--user { align-self: flex-end; background: var(--afs-accent); color: var(--afs-on-accent); border-bottom-right-radius: 3px; }
 .afs-studio__msg--assistant { align-self: flex-start; background: var(--afs-panel); border: 1px solid var(--afs-border); border-bottom-left-radius: 3px; }
 .afs-studio__agent-input { border-top: 1px solid var(--afs-border); padding: 10px; display: flex; gap: 8px; align-items: flex-end; }
 .afs-studio__agent-input textarea { flex: 1; resize: none; background: var(--afs-panel); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 8px; padding: 7px 9px; font-family: inherit; font-size: 13px; }
