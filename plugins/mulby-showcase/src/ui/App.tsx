@@ -24,12 +24,13 @@ import {
   HostRPCModule,
   PluginOrchestrationModule,
   DynamicFeaturesModule,
-  LogModule
+  LogModule,
+  DevtoolsModule
 } from './modules'
 
 console.log('[App] Module imports loaded')
 
-type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc' | 'plugin' | 'features' | 'log'
+type ModuleId = 'sysinfo' | 'clipboard' | 'input' | 'filemanager' | 'network' | 'screen' | 'media' | 'settings' | 'security' | 'image-editor' | 'window-api' | 'child-window' | 'inbrowser' | 'sharp' | 'ffmpeg' | 'attachments' | 'ai' | 'scheduler' | 'messaging' | 'host-rpc' | 'plugin' | 'features' | 'log' | 'devtools'
 type ScreenAutoAction = 'region-capture' | null
 
 interface ShowcaseAttachment {
@@ -76,7 +77,8 @@ const featureToModule: Record<string, ModuleId> = {
   'host-rpc': 'host-rpc',
   plugin: 'plugin',
   features: 'features',
-  log: 'log'
+  log: 'log',
+  devtools: 'devtools'
 }
 
 function handleDynamicCommand(featureCode: string, input?: string) {
@@ -140,7 +142,8 @@ const moduleComponents: Record<ModuleId, React.ComponentType<any>> = {
   'host-rpc': HostRPCModule,
   plugin: PluginOrchestrationModule,
   features: DynamicFeaturesModule,
-  log: LogModule
+  log: LogModule,
+  devtools: DevtoolsModule
 }
 
 // 从 URL 参数或插件初始化数据获取默认模块
