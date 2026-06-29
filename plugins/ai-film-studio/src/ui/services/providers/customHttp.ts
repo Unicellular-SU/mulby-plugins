@@ -145,12 +145,16 @@ export const customHttpAdapter: VideoProviderAdapter = {
     fillToapisMissing(body, cfg.model, { aspectRatio: req.aspectRatio, duration: req.duration })
     // 诊断：确认画幅/时长是否真进了请求体（缺失 → 供应商用默认）。bodyTemplate 非空时走的是模板渲染路径
     const b = body as Record<string, unknown>
-    console.info('[ai-film-studio] 视频请求', { model: cfg.model, aspect_ratio: b.aspect_ratio, size: b.size, seconds: b.seconds, duration: b.duration, hasBodyTemplate: !!cfg.bodyTemplate?.trim() })
+    // keyLen=0 → 没带 Authorization（key 没存进本项目）→ toapis 常报"余额不足/未授权"
+    console.info('[ai-film-studio] 视频请求', { model: cfg.model, submitUrl: cfg.submitUrl, aspect_ratio: b.aspect_ratio, seconds: b.seconds, duration: b.duration, hasBodyTemplate: !!cfg.bodyTemplate?.trim(), keyLen: apiKey ? apiKey.length : 0 })
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })
     const taskId = cfg.taskIdPath
       ? firstString(res, [cfg.taskIdPath])
       : firstString(res, DEFAULT_TASKID_PATHS)
-    if (!taskId) throw new Error('custom-http 提交失败：未解析到 taskId（可配置 taskIdPath）')
+    if (!taskId) {
+      console.warn('[ai-film-studio] 提交未拿到 taskId · toapis 原始返回：', res)
+      throw new Error('提交失败：' + JSON.stringify(res).slice(0, 400))
+    }
     const statusUrl = (cfg.pollUrl || cfg.submitUrl).replace('{taskId}', encodeURIComponent(taskId))
     return { taskId, statusUrl }
   },
@@ -170,6 +174,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
       return { status: 'completed', videoUrl }
     }
     if (status === 'failed') {
+      console.warn('[ai-film-studio] 视频任务失败 · toapis 原始返回：', res)
       return { status: 'failed', error: firstString(res, ['error', 'message', 'detail']) || '生成失败' }
     }
     // 有些供应商不返回明确 status，但已带 videoUrl
