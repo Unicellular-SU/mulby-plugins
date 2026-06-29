@@ -7,6 +7,7 @@ import { useAgentDeployStore, AGENT_KEYS } from '../store/agentDeployStore'
 import { useGraphStore } from '../store/graphStore'
 import { getMemoryConfig } from './agent/memory'
 import { kvSet, STUDIO_KV, DEFAULT_MEMORY_CONFIG, type AgentKey, type MemoryConfig } from '../domain/studioKv'
+import Select from '../components/ui/Select'
 
 const AGENT_LABEL: Record<AgentKey, string> = {
   decision: '统筹/决策',
@@ -59,14 +60,13 @@ function AgentDeployPanel() {
         return (
           <div key={k} className="afs-studio__deployrow">
             <span className="afs-studio__deploylbl">{AGENT_LABEL[k]}</span>
-            <select className="afs-field__input" value={e.model ?? ''} onChange={(ev) => setEntry(k, { model: ev.target.value || undefined })}>
-              <option value="">（用全局）</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label || m.id}
-                </option>
-              ))}
-            </select>
+            <Select
+              block
+              value={e.model ?? ''}
+              onChange={(val) => setEntry(k, { model: val || undefined })}
+              options={[{ value: '', label: '（用全局）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+              ariaLabel={`${AGENT_LABEL[k]} 模型`}
+            />
             <input
               className="afs-field__input afs-studio__deploytemp"
               type="number"

@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Plus, X, Brush, Trash2, Download, Upload } from 'lucide-react'
+import Select from '../ui/Select'
 import {
   usePromptStore,
   detectVars,
@@ -159,17 +160,13 @@ function SnippetLibrary() {
             </div>
             <div className="afs-field">
               <label className="afs-field__label">分组</label>
-              <select
-                className="afs-field__input"
+              <Select
+                block
                 value={editing.group}
-                onChange={(e) => setEditing({ ...editing, group: e.target.value as SnippetGroup })}
-              >
-                {SNIPPET_GROUPS.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.label}
-                  </option>
-                ))}
-              </select>
+                onChange={(v) => setEditing({ ...editing, group: v as SnippetGroup })}
+                options={SNIPPET_GROUPS.map((g) => ({ value: g.id, label: g.label }))}
+                ariaLabel="分组"
+              />
             </div>
             <div className="afs-field">
               <label className="afs-field__label">片段内容（可用 {'{变量}'} 占位符）</label>
