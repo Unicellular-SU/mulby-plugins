@@ -3,6 +3,7 @@ import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand,
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
+import { saveBase64 } from '../services/media'
 import { uid } from '../util'
 
 // 3D 导演台 v4：Outliner + Inspector + 模型导入 + 缩放 + 拖拽摆姿 + 镜头/机位/生成。
@@ -71,6 +72,8 @@ function Inner() {
   const [objs, setObjs] = useState<ObjRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [selKind, setSelKind] = useState<string | null>(null)
+  const [editId, setEditId] = useState<string | null>(null) // Outliner 行内改名中的对象 id
+  const [editName, setEditName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [shots, setShots] = useState<{ id: string; name: string; cam: any }[]>([])
@@ -570,7 +573,9 @@ function Inner() {
               if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
               const where = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
               const pose = (s.obj as any).userData?.poseName
-              return `角色${i + 1}${where}${pose ? `(${pose})` : ''}`
+              // 用户改过名就用真实角色名（更利于成片语义），否则回落「角色N」
+              const nm = s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`
+              return `${nm}${where}${pose ? `(${pose})` : ''}`
             })
             .filter(Boolean)
             .join('，')
@@ -583,6 +588,7 @@ function Inner() {
           addProp,
           importFile: (ab: ArrayBuffer, name: string) => importGLTF(ab, name),
           selectById: (id: string) => { const s = findById(id); if (s) select(s.obj) },
+          renameById: (id: string, name: string) => { const s = findById(id); if (s) { s.name = name; sync() } },
           removeById,
           duplicateById,
           toggleVisById,
@@ -700,7 +706,6 @@ function Inner() {
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
-      const { saveBase64 } = await import('../services/media')
       const g = useGraph.getState()
       const boardId = g.project.activeBoardId
       const saved = await saveBase64(g.project.id, `director_${Date.now()}_${placeIndex}`, out, 'png')
@@ -783,9 +788,28 @@ function Inner() {
         <div className="flex flex-col gap-1 overflow-auto ace-scroll flex-1">
           {objs.map((o) => (
             <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded ${selId === o.id ? 'bg-indigo-600' : 'bg-white/5 hover:bg-white/10'}`}>
-              <button onClick={() => api.current.selectById?.(o.id)} className="flex-1 flex items-center gap-1.5 text-left truncate">
-                {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
-              </button>
+              {editId === o.id ? (
+                <input
+                  autoFocus
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
+                    else if (e.key === 'Escape') setEditId(null)
+                  }}
+                  className="flex-1 min-w-0 bg-black/40 rounded px-1 outline-none ring-1 ring-indigo-400"
+                />
+              ) : (
+                <button
+                  onClick={() => api.current.selectById?.(o.id)}
+                  onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
+                  title="双击改名"
+                  className="flex-1 flex items-center gap-1.5 text-left truncate"
+                >
+                  {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
+                </button>
+              )}
               <button onClick={() => api.current.toggleVisById?.(o.id)} className="opacity-60 hover:opacity-100" title="显隐">{o.visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
               <button onClick={() => api.current.duplicateById?.(o.id)} className="opacity-60 hover:opacity-100" title="复制"><Copy size={12} /></button>
               <button onClick={() => api.current.removeById?.(o.id)} className="opacity-60 hover:opacity-100" title="删除"><Trash2 size={12} /></button>

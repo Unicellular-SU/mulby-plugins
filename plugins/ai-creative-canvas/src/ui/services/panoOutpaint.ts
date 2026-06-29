@@ -4,7 +4,7 @@ import { saveBase64, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
 
 // ─────────── ③ equirect 渐进式 outpaint —— 第 1 步：投影核心(eq↔persp) + 自检 ───────────
-// 约定(与 cube/查看器一致，用户未抱怨朝向)：world +X=front(lon0)、+Z=right(lon+90)、+Y=up(lat+90)。
+// 约定(与查看器一致，用户未抱怨朝向)：world +X=front(lon0)、+Z=right(lon+90)、+Y=up(lat+90)。
 // equirect 画布顶行 = lat+90(天)。统一规则：贴图上传 UNPACK_FLIP_Y=true；渲染后 readPixels 翻行使
 // 输出画布顶行=GL 顶；采样一律用"v 向上"的自然坐标。2048×1024 是 2 的幂 → 经度可 REPEAT 无缝。
 

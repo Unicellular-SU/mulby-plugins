@@ -45,6 +45,7 @@ export function CanvasStage() {
   const dragAcc = useRef({ dx: 0, dy: 0 })
   const rafId = useRef<number | null>(null)
   const zoomTimer = useRef<number | null>(null)
+  const lastInteractEnd = useRef(0) // 最近一次平移/框选/拖动结束的事件时间戳——抑制其后误触双击建卡
 
   const [cursor, setCursor] = useState<'default' | 'grab' | 'grabbing'>('default')
   const [marquee, setMarquee] = useState<ScreenRect | null>(null)
@@ -305,6 +306,7 @@ export function CanvasStage() {
 
   const endInteraction = (e: RPointerEvent<HTMLDivElement>) => {
     const it = inter.current
+    if (it.mode !== 'idle') lastInteractEnd.current = e.timeStamp // 记录真实交互结束时刻
     // 强制结算挂起的拖动位移（rAF flush 可能晚于松手），再算归属
     if (rafId.current != null) {
       cancelAnimationFrame(rafId.current)
@@ -381,6 +383,8 @@ export function CanvasStage() {
       }
       return
     }
+    // 空格/中键平移中，或刚结束平移/框选/拖动（松手后的误触双击）→ 不在空白处新建文本卡
+    if (spaceRef.current || e.timeStamp - lastInteractEnd.current < 300) return
     // 双击空白 → 新建文本卡
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)

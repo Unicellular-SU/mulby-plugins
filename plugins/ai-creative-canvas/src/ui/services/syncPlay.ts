@@ -65,13 +65,3 @@ export async function syncPlayGroup(groupId: string): Promise<{ played: number; 
   const r = await Promise.all(ready.map((v) => v.play().then(() => true).catch(() => false)))
   return { played: r.filter(Boolean).length, total: vids.length }
 }
-
-export function pauseGroup(groupId: string): void {
-  collectGroupVideos(groupId).forEach(({ el }) => {
-    try {
-      el.pause()
-    } catch {
-      /* ignore */
-    }
-  })
-}

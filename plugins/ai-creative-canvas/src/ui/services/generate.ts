@@ -16,6 +16,7 @@ import { PLUGIN_ID } from './persistence'
 const limiter = createLimiter(() => useGraph.getState().project.concurrency || 4)
 const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
 const videoAborts = new Map<string, AbortController>() // cardId -> 视频任务取消器（轮询循环）
+const canceledCards = new Set<string>() // 排队中被用户「停止」的卡：出队时早退，不真正起跑
 
 function ai(): any {
   return (window as any).mulby.ai
@@ -84,8 +85,9 @@ export async function generateCard(cardId: string): Promise<void> {
   const g0 = useGraph.getState()
   const card0 = g0.getActiveBoard().cards[cardId]
   if (!card0) return
+  canceledCards.delete(cardId) // 清理上一轮可能残留的取消标记，避免本轮被误早退
   if (!canGenerate(card0.kind)) {
-    g0.updateCard(cardId, { status: 'error', error: '该卡片类型暂不支持生成（视频/音频生成见 M7）' })
+    g0.updateCard(cardId, { status: 'error', error: '该类型卡片不支持生成（素材/分组/便签卡仅用于组织与引用）' })
     return
   }
   if ((card0.kind === 'text' || card0.kind === 'image') && !card0.prompt?.trim()) {
@@ -104,6 +106,13 @@ export async function generateCard(cardId: string): Promise<void> {
   useTask.getState().inc()
 
   await limiter(async () => {
+    // 排队期间被「停止」：出队时直接早退，不消耗额度（修复排队态点停止无效）
+    if (canceledCards.has(cardId)) {
+      canceledCards.delete(cardId)
+      useTask.getState().dec()
+      useGraph.getState().updateCard(cardId, { status: 'idle', progress: 0 })
+      return
+    }
     const g = useGraph.getState()
     // 按 id 取拥有该卡的画布（任务可能排队，出队时活动画布已被切换）——避免读/写到错的画布
     const board = g.project.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
@@ -231,7 +240,8 @@ export async function generateCard(cardId: string): Promise<void> {
       notifyDone(cardId)
     } catch (e: any) {
       const msg = e?.message || String(e)
-      const aborted = /abort/i.test(msg)
+      // 显式取消信号优先（用户停止）；字符串嗅探仅作兜底，用词边界收紧避免误吞真实报错
+      const aborted = canceledCards.has(cardId) || e?.name === 'AbortError' || /\babort(ed)?\b/i.test(msg)
       useGraph.getState().updateCard(cardId, {
         status: aborted ? 'idle' : 'error',
         error: aborted ? null : msg,
@@ -247,15 +257,19 @@ export async function generateCard(cardId: string): Promise<void> {
 
 export async function stopCard(cardId: string): Promise<void> {
   const rid = aborters.get(cardId)
+  const vc = videoAborts.get(cardId)
+  // 还在排队（既无文/图 requestId 也无视频取消器）→ 标记取消，limiter 出队时早退
+  if (!rid && !vc && useGraph.getState().getCard(cardId)?.status === 'queued') {
+    canceledCards.add(cardId)
+  }
   if (rid) {
     try {
       await ai().abort(rid)
     } catch {
       /* ignore */
     }
+    aborters.delete(cardId)
   }
-  aborters.delete(cardId)
-  const vc = videoAborts.get(cardId)
   if (vc) {
     vc.abort()
     videoAborts.delete(cardId)

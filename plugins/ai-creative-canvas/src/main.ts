@@ -3,7 +3,8 @@
 // 职责：生命周期；以及渲染进程不便/易截断的活：远程媒体落盘、图床 multipart 上传、TTS 二进制合成、导出落盘。
 // 画布/工程状态由前端通过 storage 持久化；生成请求与轮询走前端 mulby.http（无 CORS、密钥不进页面）。
 
-declare const mulby: any
+// 后端宿主 API（types/mulby.d.ts 已含完整定义）：让 filesystem/system/notification 等 RPC 获得类型检查
+declare const mulby: BackendPluginAPIDirect
 
 type PluginContext = BackendPluginContext
 

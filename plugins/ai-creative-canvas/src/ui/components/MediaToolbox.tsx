@@ -54,8 +54,8 @@ export function MediaToolbox({ card }: { card: Card }) {
         <>
           {canGenerate(card.kind) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
           {(card.meta as any)?.pano && <IconBtn icon={Compass} title="360 环视" onClick={() => useUi.getState().setPanoCardId(card.id)} />}
-          {(card.meta as any)?.pano && <IconBtn icon={GitMerge} title="修复接缝（偏移+重绘）" onClick={() => void repairEquirectSeam(card.id)} />}
-          {(card.meta as any)?.pano && <IconBtn icon={ArrowUpDown} title="天/地修复（锚定式，修天花板/地板）" onClick={() => void repairEquirectPoles(card.id)} />}
+          {(card.meta as any)?.pano && <IconBtn icon={GitMerge} title="修复接缝（实验·偏移+重绘，效果依赖模型，可能需多次）" onClick={() => void repairEquirectSeam(card.id)} />}
+          {(card.meta as any)?.pano && <IconBtn icon={ArrowUpDown} title="天/地修复（实验·锚定重绘天花板/地板，效果依赖模型，可能需多次）" onClick={() => void repairEquirectPoles(card.id)} />}
           <IconBtn icon={Crop} title="裁剪" onClick={() => setCropping(true)} />
           <IconBtn icon={Brush} title="局部编辑（重绘/擦除）" onClick={() => useUi.getState().setMaskCardId(card.id)} />
           <IconBtn icon={Maximize2} title="扩图" onClick={() => runImageTool(card.id, 'outpaint')} />

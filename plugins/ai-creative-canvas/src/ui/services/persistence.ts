@@ -112,7 +112,12 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
   let d = doc
   const v = typeof d.schemaVersion === 'number' ? d.schemaVersion : 0
   // 示例占位：if (v < 2) { d = { ...d, /* 升级字段 */ } }
-  if (v !== SCHEMA_VERSION) d = { ...d, schemaVersion: SCHEMA_VERSION }
+  if (v > SCHEMA_VERSION) {
+    // 来自更高版本（如他人较新插件导出）：不要降级 schemaVersion，避免静默丢未知字段；仅告警后按现状清理
+    console.warn(`[ai-creative-canvas] 工程 schemaVersion ${v} 高于当前 ${SCHEMA_VERSION}，可能有无法识别的新字段（已保留原数据）`)
+  } else if (v < SCHEMA_VERSION) {
+    d = { ...d, schemaVersion: SCHEMA_VERSION }
+  }
   d = sanitizeBoards(d) // 清理跨板串卡 bug 残留的畸形卡
   // 风格包：工程级 → 画布级迁移（旧工程把全局值复制到各画布，使其各自独立可改）
   if ((d.stylePackId || d.style) && Array.isArray(d.boards) && d.boards.some((b) => b.stylePackId === undefined && b.style === undefined)) {

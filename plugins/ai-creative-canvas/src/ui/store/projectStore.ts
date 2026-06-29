@@ -161,7 +161,16 @@ export const useProject = create<ProjectState>((set, get) => ({
       return
     }
     const now = Date.now()
-    const copy: ProjectDoc = { ...src, id: uid('proj'), name: src.name + ' 副本', createdAt: now, updatedAt: now }
+    // 深拷贝 boards（含 cards/edges/annotations）——浅展开会让副本与原工程共享 board 对象引用，
+    // 触发增量保存 baseline 误判（同引用=未改）。结构化克隆一次性切断共享。
+    const copy: ProjectDoc = {
+      ...src,
+      id: uid('proj'),
+      name: src.name + ' 副本',
+      createdAt: now,
+      updatedAt: now,
+      boards: src.boards.map((b) => structuredClone(b))
+    }
     await saveProject(copy.id, copy)
     const items = [...get().items, metaOf(copy)]
     set({ items })
