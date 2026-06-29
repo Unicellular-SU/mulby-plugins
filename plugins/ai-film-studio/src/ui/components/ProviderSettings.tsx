@@ -5,6 +5,7 @@ import type { MediaProviderConfig, VideoProviderKind, MediaCapability } from '..
 import { PROVIDER_PRESETS } from '../services/providers/presets'
 import { testVideoProvider } from '../services/providers/test'
 import { getKey } from '../services/keys'
+import Select from './ui/Select'
 
 type Draft = Partial<MediaProviderConfig> & { kind: VideoProviderKind }
 
@@ -165,14 +166,14 @@ export default function ProviderSettings() {
             {!editingId && (
               <label className="afs-form__row">
                 <span>预设</span>
-                <select defaultValue="" onChange={(e) => e.target.value && applyPreset(e.target.value)}>
-                  <option value="">从预设快速填充…</option>
-                  {PROVIDER_PRESETS.map((p) => (
-                    <option key={p.id} value={p.id} title={p.hint}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                <Select
+                  block
+                  value=""
+                  onChange={(v) => v && applyPreset(v)}
+                  options={PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label, title: p.hint }))}
+                  placeholder="从预设快速填充…"
+                  ariaLabel="从预设快速填充"
+                />
               </label>
             )}
 
@@ -191,10 +192,16 @@ export default function ProviderSettings() {
 
             <label className="afs-form__row">
               <span>类型</span>
-              <select value={draft.kind} onChange={(e) => set({ kind: e.target.value as VideoProviderKind })}>
-                <option value="fal">fal.ai（聚合）</option>
-                <option value="custom-http">custom-http（自定义端点）</option>
-              </select>
+              <Select
+                block
+                value={draft.kind}
+                onChange={(v) => set({ kind: v as VideoProviderKind })}
+                options={[
+                  { value: 'fal', label: 'fal.ai（聚合）' },
+                  { value: 'custom-http', label: 'custom-http（自定义端点）' },
+                ]}
+                ariaLabel="供应商类型"
+              />
             </label>
 
             <label className="afs-form__row">

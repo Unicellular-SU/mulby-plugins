@@ -14,6 +14,7 @@ export interface SelectOption {
   label: string
   icon?: LucideIcon
   disabled?: boolean
+  title?: string
 }
 
 export interface SelectProps {
@@ -68,7 +69,7 @@ export default function Select({
             {options.map((opt) => {
               const Icon = opt.icon
               return (
-                <RS.Item key={opt.value} value={toRadix(opt.value)} disabled={opt.disabled} className="afs-select__option">
+                <RS.Item key={opt.value} value={toRadix(opt.value)} disabled={opt.disabled} title={opt.title} className="afs-select__option">
                   {Icon ? <Icon size={14} className="afs-select__opt-icon" /> : null}
                   <RS.ItemText>{opt.label}</RS.ItemText>
                   <RS.ItemIndicator className="afs-select__check">

@@ -4121,6 +4121,8 @@ select.afs-toolbar__select,
   display: flex;
   width: 100%;
   max-width: none;
+  flex: 1; /* 在 .afs-form__row 等 flex 容器中撑满；在块级 .afs-field 中 flex 惰性，width:100% 生效 */
+  min-width: 0;
 }
 .afs-select__trigger:hover {
   border-color: var(--afs-border-strong);
