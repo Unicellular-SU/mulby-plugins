@@ -15,7 +15,7 @@
 | 1 | 反幻灯片评分器 | ✅ | `src/ui/services/quality/{util,types,slideshowRisk,index}.ts` | tsc 通过 + selftest（健康 0.1/strong、幻灯片 3.6/fail） |
 | 2 | 结构变化 lint | ✅ | `src/ui/services/quality/variationChecker.ts` | tsc 通过 + selftest（健康 0 违规、同质 11 违规/fail、短分镜仅词法触发） |
 | 5 | 5 层镜头提示词构建器 | ⬜ | `src/ui/services/shotPromptBuilder.ts` | — |
-| 8 | interpolate/spring 运动原语 | ⬜ | `src/ui/services/motion.ts` | — |
+| 8 | interpolate/spring 运动原语 | ✅ | `src/ui/services/motion.ts` | tsc 通过 + selftest（19 断言：分段/外推/弹簧三阻尼分支/过冲夹断/烘焙） |
 | 3 | 交付承诺契约 | ⬜ | `src/ui/services/quality/deliveryPromise.ts` | — |
 | 4 | 渲染前阻断 + 渲染后审计 | ⬜ | `src/ui/services/quality/composeGate.ts` | — |
 | 6 | consistency/negative/quality 约束 | ⬜ | 扩 `stylePacks.ts` + `imageEngine.ts` | — |
@@ -40,6 +40,12 @@
 - **字段适配**：报告原规则里 lightingKey/hero_moment/texture_keywords/shotIntent 本插件无 → 换为 missing_grammar（景别+运镜双缺）、scene_run（连续同场景）等等价检查。
 - **输出**：每条 violation 带 `severity`(low/med/high)、`shotIndices`（定位镜号，供 storyboard 行内 lint 标记）、`message`、`suggestion`（quick-fix chip 文案）。score = Σ严重度权重(0.6/1.0/1.5) 截顶 5，阈值复用 `verdictFromAvg`。
 - ShotLike 增 `index?` 字段承载展示镜号（`storyboardToShotLike` 写入 `sb.index`）。
+
+**#8 运动原语（2026-06-29）** —— `src/ui/services/motion.ts`（纯函数、零依赖），#7 Ken-Burns 与 #9 字幕的共用时序内核。
+- `interpolate(input, inputRange, outputRange, {extrapolate})`：分段线性重映射；外推 clamp（默认）/extend/identity；支持多段（如 `[0,1,2]→[0,10,0]`）与左右独立外推；长度非法抛错。
+- `spring({frame, fps, config:{damping,mass,stiffness,overshootClamping}, from, to, velocity})`：阻尼谐振子**解析解**（非数值积分，与帧率无关），按阻尼比 ζ 自动选 欠/临界/过 阻尼分支；默认 m1/k100/c10（ζ=0.5 欠阻尼，会过冲）；`overshootClamping` 夹断过冲。
+- `sampleFrames(n, fn)`：把逐帧运动烘成定长数组——给 ffmpeg 导出生成 zoompan/sendcmd 数据用（预览/导出共用同一数学）。`lerp` 为二点特例小工具。
+- 算法为标准教科书内容，API 对齐 Remotion 习惯以便复用，自研实现、未拷贝第三方源代码。
 
 ---
 
