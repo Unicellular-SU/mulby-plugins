@@ -78,20 +78,20 @@ export default function StudioEditor() {
           onChange={(e) => updateMeta({ name: e.target.value })}
           placeholder="项目名称"
         />
-        <select className="afs-field__input afs-studio__sel" value={doc.meta.artStyle} onChange={(e) => updateMeta({ artStyle: e.target.value })}>
-          {listStylePacks().map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <select className="afs-field__input afs-studio__sel" value={doc.meta.videoRatio} onChange={(e) => updateMeta({ videoRatio: e.target.value })}>
-          {['16:9', '9:16', '1:1'].map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-        </select>
+        <Select
+          className="afs-studio__sel"
+          value={doc.meta.artStyle}
+          onChange={(v) => updateMeta({ artStyle: v })}
+          options={listStylePacks().map((p) => ({ value: p.id, label: p.label }))}
+          ariaLabel="画风风格包"
+        />
+        <Select
+          className="afs-studio__sel"
+          value={doc.meta.videoRatio}
+          onChange={(v) => updateMeta({ videoRatio: v })}
+          options={['16:9', '9:16', '1:1'].map((r) => ({ value: r, label: r }))}
+          ariaLabel="视频画幅"
+        />
         <StudioModelBar />
         {busy && (
           <span className="afs-studio__batchstat">
@@ -543,18 +543,13 @@ function VoiceCard({ asset }: { asset: Asset }) {
   return (
     <div className="afs-studio__voicecard">
       <input className="afs-studio__cardname" value={asset.name} onChange={(e) => upsertAsset({ id: asset.id, type: 'audio', name: e.target.value })} />
-      <select
-        className="afs-field__input"
+      <Select
+        block
         value={asset.voice ?? ''}
-        onChange={(e) => upsertAsset({ id: asset.id, type: 'audio', name: asset.name, voice: e.target.value })}
-      >
-        <option value="">（默认音色）</option>
-        {providerVoices.map((v) => (
-          <option key={v} value={v}>
-            {v}
-          </option>
-        ))}
-      </select>
+        onChange={(val) => upsertAsset({ id: asset.id, type: 'audio', name: asset.name, voice: val })}
+        options={[{ value: '', label: '（默认音色）' }, ...providerVoices.map((v) => ({ value: v, label: v }))]}
+        ariaLabel="音色"
+      />
       <input
         className="afs-studio__derivdesc"
         placeholder="音色描述（性别/音质/适配角色，供 AI 匹配）"
@@ -620,19 +615,15 @@ function AssetCard({ asset }: { asset: Asset }) {
       />
       <AssetImageStrip asset={asset} />
       {asset.type === 'role' && voiceAssets.length > 0 && (
-        <select
-          className="afs-field__input afs-studio__voicesel"
+        <Select
+          block
+          className="afs-studio__voicesel"
           title="为该角色绑定音色"
           value={asset.voiceAssetId ?? ''}
-          onChange={(e) => bindRoleVoice(asset.id, e.target.value || undefined)}
-        >
-          <option value="">（未配音）</option>
-          {voiceAssets.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-            </option>
-          ))}
-        </select>
+          onChange={(val) => bindRoleVoice(asset.id, val || undefined)}
+          options={[{ value: '', label: '（未配音）' }, ...voiceAssets.map((v) => ({ value: v.id, label: v.name }))]}
+          ariaLabel="为该角色绑定音色"
+        />
       )}
       <div className="afs-studio__cardactions">
         <button
@@ -928,25 +919,23 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
             </label>
             <label className="afs-studio__sbinline">
               景别
-              <select value={sb.shotSize ?? ''} onChange={(e) => patch({ shotSize: e.target.value || undefined })}>
-                <option value="">—</option>
-                {SHOT_SIZES.map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <Select
+                size="sm"
+                value={sb.shotSize ?? ''}
+                onChange={(val) => patch({ shotSize: val || undefined })}
+                options={[{ value: '', label: '—' }, ...SHOT_SIZES.map((s) => ({ value: s, label: s }))]}
+                ariaLabel="景别"
+              />
             </label>
             <label className="afs-studio__sbinline">
               运镜
-              <select value={sb.cameraMove ?? ''} onChange={(e) => patch({ cameraMove: e.target.value || undefined })}>
-                <option value="">—</option>
-                {CAMERA_MOVES.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+              <Select
+                size="sm"
+                value={sb.cameraMove ?? ''}
+                onChange={(val) => patch({ cameraMove: val || undefined })}
+                options={[{ value: '', label: '—' }, ...CAMERA_MOVES.map((m) => ({ value: m, label: m }))]}
+                ariaLabel="运镜"
+              />
             </label>
             <label className="afs-studio__sbinline">
               轨道
@@ -1152,11 +1141,18 @@ function TimelineTab() {
         <button className="afs-btn afs-btn--sm" disabled={batch.running || !tracks.some((t) => t.storyboardIds.length)} title="按模型+模式批量生成各段视频提示词" onClick={() => void generateAllTrackPrompts()}>
           {batch.running ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 全部段提示词
         </button>
-        <select className="afs-field__input afs-studio__sel" title="整片转场" value={doc.meta.transition ?? 'fade'} onChange={(e) => updateMeta({ transition: e.target.value as 'none' | 'fade' | 'xfade' })}>
-          <option value="fade">淡入淡出</option>
-          <option value="xfade">交叉溶解</option>
-          <option value="none">硬切</option>
-        </select>
+        <Select
+          className="afs-studio__sel"
+          title="整片转场"
+          value={doc.meta.transition ?? 'fade'}
+          onChange={(v) => updateMeta({ transition: v as 'none' | 'fade' | 'xfade' })}
+          options={[
+            { value: 'fade', label: '淡入淡出' },
+            { value: 'xfade', label: '交叉溶解' },
+            { value: 'none', label: '硬切' },
+          ]}
+          ariaLabel="整片转场"
+        />
         <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>
