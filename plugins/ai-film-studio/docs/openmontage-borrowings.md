@@ -13,7 +13,7 @@
 | # | 借鉴点 | 状态 | 文件 | 验证 |
 |---|--------|------|------|------|
 | 1 | 反幻灯片评分器 | ✅ | `src/ui/services/quality/{util,types,slideshowRisk,index}.ts` | tsc 通过 + selftest（健康 0.1/strong、幻灯片 3.6/fail） |
-| 2 | 结构变化 lint | ⬜ | `src/ui/services/quality/variationChecker.ts` | — |
+| 2 | 结构变化 lint | ✅ | `src/ui/services/quality/variationChecker.ts` | tsc 通过 + selftest（健康 0 违规、同质 11 违规/fail、短分镜仅词法触发） |
 | 5 | 5 层镜头提示词构建器 | ⬜ | `src/ui/services/shotPromptBuilder.ts` | — |
 | 8 | interpolate/spring 运动原语 | ⬜ | `src/ui/services/motion.ts` | — |
 | 3 | 交付承诺契约 | ⬜ | `src/ui/services/quality/deliveryPromise.ts` | — |
@@ -34,6 +34,12 @@
 - **applicable 机制**：数据不足的维度标 `applicable:false`，**不计入均分**（避免补 0 稀释），均分阈值 `<1.2 strong / <2.2 acceptable / <3.2 revise / ≥3.2 fail`。
 - 景别/运镜中英混输经 `storyboardToShotLike` 归一化（词表镜像 `prompts.ts`，本模块自带一份以保持零依赖）。
 - 单测走 esbuild 打包到 node（无需引入 vitest）：`npx esbuild src/ui/services/quality/slideshowRisk.selftest.ts --bundle --platform=node --format=esm --outfile=dist/_selftest.mjs && node dist/_selftest.mjs`。
+
+**#2 结构变化 lint（2026-06-29）** —— `checkVariation(shots: ShotLike[]): VariationResult`，与 #1 互补：#1 看**全局比例**，#2 抓**相邻性 + 词法**。
+- **8 条规则**（结构类需 ≥4 镜；词法/相邻重复任意镜数都跑）：① 单一景别占比>50%（>0.7 high）② 连续 ≥3 镜同景别 ③ 固定/无运镜>60% ④ 连续 ≥4 镜等长 ⑤ >50% 镜头景别+运镜双缺（镜头语法缺失）⑥ 连续 ≥4 镜同场景（场景标注足够时）⑦ ≥30% 画面描述含**笼统套话**（自研 GENERIC_PHRASES 中英黑名单：一个人/美丽的/科技感/futuristic/stunning…）⑧ 相邻镜头画面描述高度重复。
+- **字段适配**：报告原规则里 lightingKey/hero_moment/texture_keywords/shotIntent 本插件无 → 换为 missing_grammar（景别+运镜双缺）、scene_run（连续同场景）等等价检查。
+- **输出**：每条 violation 带 `severity`(low/med/high)、`shotIndices`（定位镜号，供 storyboard 行内 lint 标记）、`message`、`suggestion`（quick-fix chip 文案）。score = Σ严重度权重(0.6/1.0/1.5) 截顶 5，阈值复用 `verdictFromAvg`。
+- ShotLike 增 `index?` 字段承载展示镜号（`storyboardToShotLike` 写入 `sb.index`）。
 
 ---
 

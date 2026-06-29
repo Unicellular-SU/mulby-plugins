@@ -17,6 +17,8 @@ export interface ShotLike {
   sceneId?: string
   dialogueCount: number
   chainFromPrev?: boolean
+  /** 展示用镜号（缺省取数组下标+1）；用于 variationChecker 的「第 X 镜」定位。 */
+  index?: number
 }
 
 export type QualityVerdict = 'strong' | 'acceptable' | 'revise' | 'fail'
@@ -81,6 +83,7 @@ export function storyboardToShotLike(sb: Storyboard): ShotLike {
     sceneId: sb.sceneId,
     dialogueCount: sb.dialogues?.length ?? 0,
     chainFromPrev: sb.chainFromPrev,
+    index: sb.index,
   }
 }
 
