@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check, Image as ImageIcon, RotateCcw } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -600,10 +600,10 @@ function VoiceCard({ asset }: { asset: Asset }) {
       />
       {url && <audio src={url} controls className="afs-studio__voiceaudio" />}
       <div className="afs-studio__cardactions">
-        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} title="合成试听" onClick={() => void synthVoice(asset.id)}>
-          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 试听
+        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} title="合成试听" aria-label="合成试听" onClick={() => void synthVoice(asset.id)}>
+          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />}
         </button>
-        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除音色" aria-label="删除音色" onClick={() => removeAsset(asset.id)}>
           <Trash2 size={13} />
         </button>
       </div>
@@ -622,11 +622,26 @@ function AssetCard({ asset }: { asset: Asset }) {
   const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
   const [showDeriv, setShowDeriv] = useState(false)
+  const [viewer, setViewer] = useState(false)
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
   return (
     <div className="afs-studio__assetcard">
-      <div className="afs-studio__thumb">
+      {viewer && asset.refImageId && (
+        <StudioImageViewer
+          assetId={asset.refImageId}
+          prompt={asset.prompt ?? ''}
+          onPromptChange={(v) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, prompt: v })}
+          onRegenerate={() => void generateAsset(asset.id)}
+          generating={asset.state === 'generating'}
+          onClose={() => setViewer(false)}
+        />
+      )}
+      <div
+        className={`afs-studio__thumb${asset.refImageId ? ' afs-studio__thumb--zoom' : ''}`}
+        title={asset.refImageId ? '双击放大查看 · 改提示词重新生成' : undefined}
+        onDoubleClick={asset.refImageId ? () => setViewer(true) : undefined}
+      >
         {asset.state === 'generating' ? (
           <Loader2 size={20} className="afs-spin" />
         ) : url ? (
@@ -671,18 +686,24 @@ function AssetCard({ asset }: { asset: Asset }) {
         <button
           className="afs-btn afs-btn--sm"
           disabled={asset.promptState === 'polishing'}
-          title="按画风美术手册把描述润色成英文提示词"
+          title="润色：按画风美术手册把描述生成英文提示词"
+          aria-label="润色提示词"
           onClick={() => void polishAsset(asset.id)}
         >
-          {asset.promptState === 'polishing' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 润色
+          {asset.promptState === 'polishing' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />}
         </button>
-        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} onClick={() => void generateAsset(asset.id)}>
-          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <Wand2 size={13} />} 生成
+        <button className="afs-btn afs-btn--sm" disabled={asset.state === 'generating'} title="生成图片" aria-label="生成图片" onClick={() => void generateAsset(asset.id)}>
+          {asset.state === 'generating' ? <Loader2 size={13} className="afs-spin" /> : <ImageIcon size={13} />}
         </button>
-        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="衍生变体（换装/状态/场景）" onClick={() => setShowDeriv((v) => !v)}>
-          <Users size={13} /> 衍生{children.length ? `(${children.length})` : ''}
+        <button
+          className="afs-btn afs-btn--sm afs-btn--ghost"
+          title={`衍生变体（换装/状态/场景）${children.length ? ` · ${children.length}` : ''}`}
+          aria-label="衍生变体"
+          onClick={() => setShowDeriv((v) => !v)}
+        >
+          <Users size={13} />
         </button>
-        <button className="afs-btn afs-btn--sm afs-btn--ghost" onClick={() => removeAsset(asset.id)}>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除资产" aria-label="删除资产" onClick={() => removeAsset(asset.id)}>
           <Trash2 size={13} />
         </button>
       </div>
@@ -904,6 +925,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
   const [showFlow, setShowFlow] = useState(false)
+  const [viewer, setViewer] = useState(false)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
   // 取该分镜所属段的「选用/最新」候选片段，反映状态（一镜多生后不再是唯一片段）
   const track = doc.track.find((t) => t.storyboardIds.includes(sb.id))
@@ -922,10 +944,25 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   }
   return (
     <div className="afs-studio__sbcard">
+      {viewer && sb.keyframeImageId && (
+        <StudioImageViewer
+          assetId={sb.keyframeImageId}
+          prompt={sb.prompt ?? ''}
+          onPromptChange={(v) => patch({ prompt: v })}
+          onRegenerate={() => void generateKeyframe(sb.id)}
+          generating={sb.state === 'generating'}
+          onClose={() => setViewer(false)}
+        />
+      )}
       <div className="afs-studio__sbmain">
         {/* 左：大缩略图（按项目画幅显示真实方向）+ 导航 */}
         <div className="afs-studio__sbcol">
-          <div className="afs-studio__sbthumb" style={{ aspectRatio: (doc.meta.videoRatio || '16:9').replace(':', ' / ') }}>
+          <div
+            className="afs-studio__sbthumb"
+            style={{ aspectRatio: (doc.meta.videoRatio || '16:9').replace(':', ' / ') }}
+            title={sb.keyframeImageId ? '双击放大查看 · 改提示词重新生成' : undefined}
+            onDoubleClick={sb.keyframeImageId ? () => setViewer(true) : undefined}
+          >
             {sb.state === 'generating' ? <Loader2 size={22} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={24} opacity={0.3} />}
             <span className="afs-studio__sbnum">{index + 1}</span>
             {sb.state === 'failed' && (
@@ -1313,6 +1350,47 @@ function CandidateClip({ clip, selected, onSelect, onPreview, onDelete }: { clip
         <button title="删除候选" onClick={onDelete}>
           <Trash2 size={11} />
         </button>
+      </div>
+    </div>
+  )
+}
+
+/** 图片放大查看：大图 + 原始提示词（可改）+ 重新生成。资产图 / 分镜关键帧双击进入。 */
+function StudioImageViewer({
+  assetId,
+  prompt,
+  onPromptChange,
+  onRegenerate,
+  generating,
+  onClose,
+}: {
+  assetId: string
+  prompt: string
+  onPromptChange: (v: string) => void
+  onRegenerate: () => void
+  generating: boolean
+  onClose: () => void
+}) {
+  const url = useMediaUrl({ assetId })
+  return (
+    <div className="afs-studio__lightbox" onClick={onClose}>
+      <div className="afs-studio__imgviewer" onClick={(e) => e.stopPropagation()}>
+        <button className="afs-studio__lightbox-close" onClick={onClose} title="关闭">
+          <X size={16} />
+        </button>
+        <div className="afs-studio__imgviewer-media">{url ? <img src={url} alt="" /> : <Loader2 size={24} className="afs-spin" />}</div>
+        <div className="afs-studio__imgviewer-panel">
+          <label className="afs-studio__sbfieldlbl">提示词（可修改后重新生成）</label>
+          <textarea
+            className="afs-field__input"
+            value={prompt}
+            placeholder="生成提示词…"
+            onChange={(e) => onPromptChange(e.target.value)}
+          />
+          <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={generating} onClick={onRegenerate}>
+            {generating ? <Loader2 size={13} className="afs-spin" /> : <RotateCcw size={13} />} 重新生成
+          </button>
+        </div>
       </div>
     </div>
   )

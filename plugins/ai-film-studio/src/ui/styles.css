@@ -6789,3 +6789,42 @@ html.light { --afs-lb-scrim: rgba(0, 0, 0, 0.86); } /* deliberately dark in ligh
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
 }
+
+/* ============ Studio 图片放大查看器（资产/分镜关键帧双击进入：大图 + 提示词 + 重新生成） ============ */
+.afs-studio__thumb--zoom { cursor: zoom-in; }
+.afs-studio__imgviewer {
+  position: relative;
+  display: flex;
+  gap: var(--afs-sp-5);
+  max-width: 92vw;
+  max-height: 88vh;
+  padding: var(--afs-sp-5);
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-xl);
+  box-shadow: var(--afs-elev-4), var(--afs-glass-highlight);
+}
+.afs-studio__imgviewer-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  background: #000;
+  border-radius: var(--afs-r-lg);
+  overflow: hidden;
+}
+.afs-studio__imgviewer-media img { max-width: min(64vw, 900px); max-height: 80vh; object-fit: contain; display: block; }
+.afs-studio__imgviewer-panel { width: 300px; flex: none; display: flex; flex-direction: column; gap: var(--afs-sp-4); }
+.afs-studio__imgviewer-panel textarea { flex: 1; min-height: 140px; resize: none; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-studio__imgviewer { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-studio__imgviewer { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (max-width: 720px) {
+  .afs-studio__imgviewer { flex-direction: column; max-height: 92vh; overflow-y: auto; }
+  .afs-studio__imgviewer-panel { width: auto; }
+}
