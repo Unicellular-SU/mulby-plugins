@@ -314,7 +314,7 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
   }
 }
 
-function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number): void {
+function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, outDur: number): void {
   for (const op of ops) {
     if (op.kind !== 'overlay') continue
     const p = op.params as OverlayParams
@@ -350,6 +350,15 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number):
       continue
     }
     if (!resolved.path) continue
+    if (p.sub === 'progress') {
+      // 满幅进度条从左滑入：x 由 -w 推进到 0（输出尺寸恒定，避免变宽绿边）
+      const idx = g.addInput(resolved.path)
+      const out = g.freshLabel('v')
+      const dur = outDur > 0 ? outDur : 1
+      g.raw(`[${g.v}][${idx}:v]overlay=x='-w+w*t/${dur.toFixed(3)}':y='${yExpr}'[${out}]`)
+      g.setV(out)
+      continue
+    }
     const idx = g.addInput(resolved.path)
     if (p.sub === 'pip') {
       // 子画面宽 = 基准宽×rect.w（数值偶数化；位置仍用 overlay 的 main_w 表达式自适应）
@@ -432,7 +441,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   if (speed?.motionTrail && speed.motionTrail >= 2) applyMotionTrail(g, speed.motionTrail, fb)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams, fb)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
-  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW)
+  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW, outDuration)
   // export 画幅（若未在 transform 指定）
   if (exp.outW && exp.outH) applyFit(g, exp.outW, exp.outH, exp.fit || 'contain')
 

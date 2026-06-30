@@ -105,6 +105,19 @@ function renderFramePng(p: OverlayParams, baseW: number, baseH: number): string 
   return canvas.toDataURL('image/png').split(',')[1]
 }
 
+// 进度条：满幅纯色条 PNG（由编译器用滑动 overlay 表达式从左推进）
+function renderProgressBarPng(p: OverlayParams, baseW: number, baseH: number): string {
+  const style = (p.style || {}) as { color?: string; heightPct?: number }
+  const h = Math.max(3, Math.round((style.heightPct ?? 0.014) * baseH))
+  const canvas = document.createElement('canvas')
+  canvas.width = baseW
+  canvas.height = h
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = style.color || '#ff2d55'
+  ctx.fillRect(0, 0, baseW, h)
+  return canvas.toDataURL('image/png').split(',')[1]
+}
+
 // 备好整条栈所有需要 PNG 输入的叠加 op（事务性返回 cleanup 列表，调用方在导出后 unlink）。
 // 单个 overlay 渲染失败 → 跳过该层（best-effort），不阻断整条导出。
 export async function prepareOverlays(
@@ -133,7 +146,7 @@ export async function prepareOverlays(
         overlayResolved[op.id] = { kind: 'subtitle', cues: out }
         continue
       }
-      const b64 = p.sub === 'frame' ? renderFramePng(p, bw, bh) : renderTextPng(p, bw, bh)
+      const b64 = p.sub === 'frame' ? renderFramePng(p, bw, bh) : p.sub === 'progress' ? renderProgressBarPng(p, bw, bh) : renderTextPng(p, bw, bh)
       const { path } = await saveBase64(projectId, 'ov', b64, 'png')
       overlayResolved[op.id] = { kind: 'png', path }
       cleanup.push(path)

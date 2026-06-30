@@ -729,6 +729,7 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 
 - **[P0 地基·已完成]** 可取消执行：`mediaVideo.ts:runFf` / `probeDuration` 加可选 `signal?: AbortSignal`，`abort → task.kill()`，旧调用方传 undefined 完全兼容。`runFf` 导出供工作台/编译器复用。
 - **[P0 地基·已完成]** 编辑栈类型系统：新增 `src/ui/services/videoEdit/types.ts` —— `OpKind`/`EditOp`(按 kind 判别联合，7 大类参数类型)/`EditStack`/`EditRecipe`、大类编译顺序 `OP_KIND_ORDER`、`createOp` 工厂、`stackIsNoop`。纯类型骨架，typecheck green。
+- **[P1 进度条·已完成]** overlay 加 `progress` 播放进度条：`renderProgressBarPng` 满幅纯色条，编译器用滑动表达式 `overlay=x='-w+w*t/dur'` 从左推进（输出尺寸恒定）；`applyOverlays` 加 `outDur` 参。OverlayPanel 颜色/粗细/垂直位置；预览 CSS 进度条按播放头填充。typecheck + vite build green。
 - **[P2 去抖/平滑慢动作·已完成]** transform 加 `deshake`（单遍 `deshake=edge=mirror`）；speed 加 `smoothSlowmo`（仅 rate<1 时 `minterpolate=fps=60:mi_mode=mci`，退化跳过为复帧慢动作）。退化集加 `minterpolate`。UI：transform 去抖 toggle，speed 倍率<1 时显示平滑慢动作 toggle。typecheck + vite build green。
 - **[P2 动感特效·已完成]** transform 加 `shake`（过扫描 1.08x + 余量内 sin/cos 振荡裁剪，偏移表达式约束不越界）与 `glitch`（`rgbashift`，退化 `chromashift`）；speed 加 `motionTrail` 运动残影（`tmix=frames`，退化 `tblend=average`）。退化集加 `rgbashift/tmix`。preview 全标近似。transform/speed 面板加滑块。typecheck + vite build green。
 - **[P1 镜像/相框·已完成]** transform 加 `mirror`（h 左右万花筒 / v 上下：`crop 一半→split→flip→hstack/vstack`，输出尺寸不变，偶数化）；overlay 加 `frame` 相框（新增 `renderFramePng` canvas 画透明中心边框 PNG，整帧 overlay；OverlayPanel 颜色/粗细/圆角，预览 CSS border）。preview：mirror→近似，frame→CSS border。typecheck + vite build green。

@@ -239,7 +239,8 @@ function Inner({ cardId }: { cardId: string }) {
       mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
       pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } },
       subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } },
-      frame: { sub: 'frame', rect: { x: 0, y: 0, w: 1, h: 1 }, style: { color: '#ffffff', widthPct: 0.03, radiusPct: 0 } }
+      frame: { sub: 'frame', rect: { x: 0, y: 0, w: 1, h: 1 }, style: { color: '#ffffff', widthPct: 0.03, radiusPct: 0 } },
+      progress: { sub: 'progress', rect: { x: 0, y: 0.97, w: 1, h: 0.02 }, style: { color: '#ff2d55', heightPct: 0.014 } }
     }
     useStudio.getState().addOp('overlay', presets[sub] as never)
   }
@@ -280,6 +281,12 @@ function Inner({ cardId }: { cardId: string }) {
                 if (o.sub === 'frame') {
                   const fs = (o.style || {}) as Record<string, unknown>
                   return <div key={o.id} className="absolute inset-0 pointer-events-none" style={{ border: `${Math.max(2, (Number(fs.widthPct) || 0.03) * 60)}px solid ${String(fs.color || '#fff')}`, borderRadius: `${(Number(fs.radiusPct) || 0) * 200}px` }} />
+                }
+                if (o.sub === 'progress') {
+                  const ps = (o.style || {}) as Record<string, unknown>
+                  return <div key={o.id} className="absolute left-0 right-0 pointer-events-none" style={{ top: `${o.top * 100}%`, height: `${Math.max(2, (Number(ps.heightPct) || 0.014) * 200)}px`, background: 'rgba(255,255,255,0.2)' }}>
+                    <div style={{ width: `${dur ? (playhead / dur) * 100 : 0}%`, height: '100%', background: String(ps.color || '#ff2d55') }} />
+                  </div>
                 }
                 if (o.sub === 'subtitle') {
                   const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
@@ -343,7 +350,7 @@ function Inner({ cardId }: { cardId: string }) {
                   <Plus size={11} /> {a.label}
                 </button>
               ))}
-              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'pip', l: '画中画' }].map((o) => (
+              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'progress', l: '进度条' }, { s: 'pip', l: '画中画' }].map((o) => (
                 <button key={o.s} onClick={() => addOverlay(o.s)}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
                   <Plus size={11} /> {o.l}
@@ -811,6 +818,17 @@ function OverlayPanel({ op, params, dur, playhead }: { op: EditOp; params: Overl
   const selfId = useUi((s) => s.studioCardId)
   const videoCards = Object.values(board.cards).filter((c) => c.kind === 'video' && !!c.assetLocalPath && c.id !== selfId)
 
+  if (p.sub === 'progress') {
+    const ps = (p.style || {}) as Record<string, unknown>
+    return (
+      <div className="flex flex-col gap-2.5">
+        <div className="text-[11px] font-medium opacity-70">播放进度条</div>
+        <Row label="颜色"><input type="color" value={String(ps.color || '#ff2d55')} onChange={(e) => set({ style: { ...ps, color: e.target.value } })} className="w-8 h-6 rounded" /></Row>
+        <SliderRow label="粗细" value={Number(ps.heightPct) || 0.014} min={0.004} max={0.05} step={0.002} onLive={(v) => live({ style: { ...ps, heightPct: v } })} onCommit={commit} />
+        <SliderRow label="垂直位置" value={p.rect.y} min={0} max={0.98} step={0.01} onLive={(v) => live({ rect: { ...p.rect, y: v } })} onCommit={commit} />
+      </div>
+    )
+  }
   if (p.sub === 'frame') {
     const fs = (p.style || {}) as Record<string, unknown>
     const setFs = (patch: Record<string, unknown>) => set({ style: { ...fs, ...patch } })
