@@ -46,6 +46,7 @@
 | B | **玻璃落地 · 浮动 Inspector 抽屉** | ✅ 已完成（仅构建验证） | `.afs-app__right--float`（已浮于画布上）改玻璃强配方：`--afs-glass-fill-strong` + `backdrop-filter` 模糊背后画布 + `--afs-glass-border` + `--afs-elev-4`/`--afs-glass-highlight` + `--afs-dur-overlay`/`emphasized` 入场；带 `@supports not(backdrop-filter)` 与 `prefers-reduced-transparency` 降级。**这是第一处真正的玻璃 chrome**（此前仅 Select 弹层）。`build` 通过。 |
 | B | 玻璃落地 · Studio 设置抽屉 + Studio 模型弹层 + 灯箱信息面板 | ✅ 已完成（仅构建验证） | 三个已浮于内容之上的浮层改玻璃强配方（`--afs-glass-fill-strong` + 模糊 + `--afs-glass-border` + `--afs-elev-3/4`/highlight），Studio 抽屉遮罩 `rgba(0,0,0,.45)`→`--afs-scrim`；共用一段 `@supports`/`reduced-transparency` 降级。`build` 通过。 |
 | B/3 | **画布 Toolbar chrome 升级**（玻璃条 + 品牌芯片 + 状态点 + 保存 spinner） | ✅ 已完成（仅构建验证） | `.afs-toolbar` 改玻璃强配方（半透明 + `backdrop-filter` + `--afs-glass-border` + `--afs-glass-highlight` + 降级）；新增 `.afs-toolbar__brandmark`（`--afs-grad-brand` 渐变芯片，Clapperboard）补回左组品牌；状态文字加 `.afs-toolbar__statusdot`（saved=success/dirty=warning/saving=info）+ 保存中 `Loader2` 旋转。注：工具栏未重叠画布，磨砂效果较弱（真磨砂需画布延伸至栏下的布局改动，仍留作结构步骤）。`tsc`+`build` 通过。 |
+| B/3 | **Studio re-skin 批**：顶栏玻璃 + 阶段 Tabs 渐变下划线 + cand-badge 对比 | ✅ 已完成（仅构建验证） | `.afs-studio__topbar` 玻璃强配方 + 降级（第 7 处玻璃 chrome）；`.afs-studio__tab.is-active` 由实色边框下划线改 `::after` 的 `--afs-grad-brand` 渐变下划线（内缩 8px）；`.afs-studio__cand-badge` `#fff`→`--afs-on-accent`。**On-media 暗 pill（sbnum/imgthumb 等）刻意保留固定深色**——白字叠媒体需恒定深底，不应随主题变浅。`build` 通过。 |
 | 4 | 余下：运行态玻璃+辉光、扇出网格瓦片可按钮化、骨架/微光动效 | ⏳ 待办（视觉） | 需可视验证的打磨。 |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |
 
