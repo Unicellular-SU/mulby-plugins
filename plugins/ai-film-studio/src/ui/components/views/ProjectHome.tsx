@@ -182,7 +182,19 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
             {rows.map((r) =>
               r.kind === 'canvas' ? (
                 <div key={`c:${r.id}`} className={`afs-pcard${r.id === currentId ? ' is-current' : ''}`}>
-                  <div className="afs-pcard__cover" onClick={() => openCanvas(r.id)} title="打开工程">
+                  <div
+                    className="afs-pcard__cover"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openCanvas(r.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        void openCanvas(r.id)
+                      }
+                    }}
+                    title="打开工程"
+                  >
                     <Cover assetId={r.card.coverAssetId} />
                     <span className="afs-pcard__kind afs-pcard__kind--canvas">画布</span>
                     {r.card.aspectRatio && <span className="afs-pcard__ratio">{r.card.aspectRatio}</span>}
@@ -221,7 +233,19 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
                 </div>
               ) : (
                 <div key={`s:${r.id}`} className="afs-pcard">
-                  <div className="afs-pcard__cover" onClick={() => openStudioCard(r.id)} title="打开工作流项目">
+                  <div
+                    className="afs-pcard__cover"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openStudioCard(r.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        void openStudioCard(r.id)
+                      }
+                    }}
+                    title="打开工作流项目"
+                  >
                     <Cover assetId={r.cover} studio />
                     <span className="afs-pcard__kind afs-pcard__kind--studio">工作流</span>
                   </div>

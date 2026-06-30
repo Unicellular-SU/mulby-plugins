@@ -41,9 +41,17 @@ export default function NodeLibrary() {
                   <div
                     key={def.kind}
                     className="afs-libitem"
+                    role="button"
+                    tabIndex={0}
                     draggable
                     onDragStart={(e) => onDragStart(e, def)}
                     onClick={() => onClickAdd(def)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onClickAdd(def)
+                      }
+                    }}
                     title={def.desc}
                   >
                     <span className="afs-libitem__icon" style={{ color: `var(--afs-cat-${cat})` }}>
