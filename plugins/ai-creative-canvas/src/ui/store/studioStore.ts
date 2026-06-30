@@ -6,6 +6,7 @@ import { useGraph } from './graphStore'
 import { useTask } from './taskStore'
 import { toast } from './toastStore'
 import { toFileUrl } from '../services/media'
+import { saveToLocal } from '../services/saveLocal'
 import { exportStudio } from '../services/videoEdit/run'
 import { createOp, type EditOp, type EditStack, type OpKind, type ExportParams, type EditRecipe } from '../services/videoEdit/types'
 
@@ -66,7 +67,7 @@ interface StudioState {
   undo: () => void
   redo: () => void
 
-  exportStack: () => Promise<void>
+  exportStack: (saveLocal?: boolean) => Promise<void>
   cancel: () => void
 }
 
@@ -182,7 +183,7 @@ export const useStudio = create<StudioState>((set, get) => {
       set({ cursor: c, stack: clone(history[c]) })
     },
 
-    exportStack: async () => {
+    exportStack: async (saveLocal?: boolean) => {
       const { cardId, stack, busy } = get()
       if (!cardId || !stack || busy) return
       const g = useGraph.getState()
@@ -220,6 +221,7 @@ export const useStudio = create<StudioState>((set, get) => {
         })
         g.setSelection([id])
         toast('已导出剪辑成片', 'success')
+        if (saveLocal) await saveToLocal(finalOut, `${src.title}·剪辑`)
         set({ busy: false, abort: null })
         get().close()
       } catch (e: any) {

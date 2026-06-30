@@ -11,6 +11,7 @@ import { Select } from './Select'
 import { ensureFfmpeg, probeDuration, timelineThumbs } from '../services/mediaVideo'
 import { toFileUrl } from '../services/media'
 import { stackToPreview } from '../services/videoEdit/preview'
+import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
 import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams } from '../services/videoEdit/types'
 import { Z } from '../zlayers'
 
@@ -92,6 +93,7 @@ function Inner({ cardId }: { cardId: string }) {
   const [ready, setReady] = useState(false)
   const [thumbs, setThumbs] = useState<string[]>([])
   const [playhead, setPlayhead] = useState(0)
+  const [saveLocal, setSaveLocal] = useState(false)
 
   const card = useGraph((s) => s.getActiveBoard().cards[cardId])
   const close = () => {
@@ -329,8 +331,13 @@ function Inner({ cardId }: { cardId: string }) {
           )}
           {!busy && <span className="text-[11px] opacity-50">{ready ? '编辑就绪 · 导出生成新卡片' : '正在读取视频…'}</span>}
           <div className="ml-auto flex items-center gap-2">
+            {!busy && (
+              <label className="flex items-center gap-1 text-[11px] opacity-70 cursor-pointer select-none">
+                <input type="checkbox" checked={saveLocal} onChange={(e) => setSaveLocal(e.target.checked)} /> 并保存到本地
+              </label>
+            )}
             {busy && <button onClick={() => useStudio.getState().cancel()} className="px-3 py-1.5 rounded-lg text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10">取消</button>}
-            <button onClick={() => void useStudio.getState().exportStack()} disabled={!ready || busy}
+            <button onClick={() => void useStudio.getState().exportStack(saveLocal)} disabled={!ready || busy}
               className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-700 text-white text-sm font-medium disabled:opacity-50">
               {busy ? <><Loader2 size={15} className="animate-spin" /> 导出中 {Math.round(progress * 100)}%</> : <><Download size={15} /> 导出新卡</>}
             </button>
@@ -453,6 +460,13 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
     const resVal = p.outW && p.outH ? `${p.outW}x${p.outH}` : 'follow'
     return (
       <div className="flex flex-col gap-2.5">
+        <Row label="平台预设">
+          <Select className="flex-1" value={p.platform || 'none'} onChange={(v) => {
+            if (v === 'none') return set({ platform: undefined })
+            const pr = PLATFORM_PRESETS.find((x) => x.id === v)
+            if (pr) set({ platform: pr.id, outW: pr.w, outH: pr.h, fps: pr.fps, crf: pr.crf, fit: pr.fit })
+          }} options={[{ value: 'none', label: '自定义' }, ...PLATFORM_PRESETS.map((pr) => ({ value: pr.id, label: pr.label, hint: pr.ratio }))]} />
+        </Row>
         <Row label="格式">
           <Select className="flex-1" value={p.format} onChange={(v) => set({ format: v })} options={[
             { value: 'mp4', label: 'MP4 (H.264)' }, { value: 'webm', label: 'WebM (VP9)' }, { value: 'gif', label: 'GIF 动图' }, { value: 'webp', label: 'WebP 动图' }
@@ -460,9 +474,9 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         </Row>
         <Row label="分辨率">
           <Select className="flex-1" value={resVal} onChange={(v) => {
-            if (v === 'follow') return set({ outW: undefined, outH: undefined })
+            if (v === 'follow') return set({ outW: undefined, outH: undefined, platform: undefined })
             const [w, h] = v.split('x').map(Number)
-            set({ outW: w, outH: h })
+            set({ outW: w, outH: h, platform: undefined })
           }} options={RES_OPTIONS.map((r) => ({ value: r.value, label: r.label }))} />
         </Row>
         {(p.format === 'mp4' || p.format === 'webm') && (

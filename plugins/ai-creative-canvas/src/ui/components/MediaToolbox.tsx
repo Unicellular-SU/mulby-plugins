@@ -6,7 +6,7 @@ import { repairEquirectSeam } from '../services/mediaPano'
 import { repairEquirectPoles } from '../services/panoOutpaint'
 import { generateCard, canGenerate } from '../services/generate'
 import { useUi } from '../store/uiStore'
-import { toast } from '../store/toastStore'
+import { saveToLocal } from '../services/saveLocal'
 import { CropModal } from './CropModal'
 
 function IconBtn({ onClick, icon: Icon, title }: { onClick: () => void; icon: typeof Crop; title: string }) {
@@ -29,24 +29,7 @@ export function MediaToolbox({ card }: { card: Card }) {
   const isVid = card.kind === 'video' && !!card.assetLocalPath
   if (!isImg && !isVid) return null
 
-  const download = async () => {
-    const m = (window as any).mulby
-    const path = card.assetLocalPath
-    if (!m?.dialog || !path) {
-      toast('无可下载文件', 'error')
-      return
-    }
-    const ext = path.split('.').pop() || 'png'
-    try {
-      const dest = await m.dialog.showSaveDialog({ defaultPath: `${card.title}.${ext}`, filters: [{ name: '文件', extensions: [ext] }] })
-      if (dest) {
-        await m.filesystem.copy(path, dest)
-        toast('已导出：' + dest, 'success')
-      }
-    } catch {
-      toast('导出失败', 'error')
-    }
-  }
+  const download = () => saveToLocal(card.assetLocalPath, card.title)
 
   return (
     <div className="flex items-center gap-0.5 max-w-[92vw] overflow-x-auto ace-noscroll">{/* 单行横向滚动，不再 wrap 成多排挤压卡片 */}
