@@ -323,6 +323,30 @@ function applyAudio(g: Graph, p: AudioParams, outDur: number, fb: Set<string>): 
     const pr = Math.pow(2, p.pitchSemitones / 12)
     g.af(`asetrate=44100*${pr.toFixed(4)},aresample=44100,atempo=${(1 / pr).toFixed(4)}`)
   }
+  // 配乐 / 旁白：第二音频输入 → 混音 / 替换 / 闪避
+  if (p.bgm?.path) {
+    const idx = g.addInput(p.bgm.path)
+    const ms = Math.max(0, Math.round((p.bgm.offset || 0) * 1000))
+    const vol = p.bgm.volume ?? 1
+    const bg = g.freshLabel('bg')
+    g.raw(`[${idx}:a]aresample=44100,adelay=${ms}|${ms},volume=${vol.toFixed(2)}[${bg}]`)
+    if (p.bgm.mode === 'replace' || !g.a) {
+      g.a = bg // 替换原声（或本无原声）
+    } else if (p.bgm.mode === 'duck' && !fb.has('sidechain')) {
+      const main = g.freshLabel('am')
+      const sc = g.freshLabel('asc')
+      const duck = g.freshLabel('dk')
+      const mix = g.freshLabel('mx')
+      g.raw(`[${g.a}]asplit=2[${main}][${sc}]`)
+      g.raw(`[${bg}][${sc}]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=300[${duck}]`)
+      g.raw(`[${main}][${duck}]amix=inputs=2:duration=longest:dropout_transition=0[${mix}]`)
+      g.a = mix
+    } else {
+      const mix = g.freshLabel('mx')
+      g.raw(`[${g.a}][${bg}]amix=inputs=2:duration=longest:dropout_transition=0[${mix}]`)
+      g.a = mix
+    }
+  }
 }
 
 // ---- 主编译 ----
@@ -382,6 +406,10 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
     args.push('-c:v', 'libx264', '-crf', String(exp.crf ?? 23), '-preset', 'fast', '-pix_fmt', 'yuv420p')
     if (g.a) args.push('-c:a', 'aac', '-b:a', '192k')
     args.push('-movflags', '+faststart')
+  }
+  // 含配乐/旁白时把成片时长钉到视频长（amix=longest 不会让音频拖长成片）
+  if ((single.audio?.params as AudioParams | undefined)?.bgm?.path && outDuration > 0) {
+    args.push('-t', outDuration.toFixed(3))
   }
   args.push('-y', pass1Out)
 

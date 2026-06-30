@@ -13,6 +13,9 @@ import { toFileUrl } from '../services/media'
 import { stackToPreview } from '../services/videoEdit/preview'
 import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
 import { loadWaveform } from '../services/audioWaveform'
+import { useProviders } from '../store/providerStore'
+import { runTts } from '../services/providers/engine'
+import { toast } from '../store/toastStore'
 import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams } from '../services/videoEdit/types'
 import { Z } from '../zlayers'
 
@@ -530,6 +533,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
               onLive={(v) => live({ muteRanges: ranges.map((x, k) => (k === i ? { start: x.start, end: Math.max(v, x.start + 0.1) } : x)) })} onCommit={commit} />
           </div>
         ))}
+        <AudioBgmEditor op={op} p={p} />
       </div>
     )
   }
@@ -615,6 +619,72 @@ function TrimPanel({ op, params, dur, playhead }: { op: EditOp; params: TrimPara
         </div>
       ))}
       <div className="text-[10px] opacity-50">保留段按顺序拼接为成片；删除段被剔除。</div>
+    </div>
+  )
+}
+
+// ---- 配乐 / AI 旁白 ----
+function AudioBgmEditor({ op, p }: { op: EditOp; p: AudioParams }) {
+  const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
+  const board = useGraph((s) => s.getActiveBoard())
+  const selfId = useUi((s) => s.studioCardId)
+  const audioCards = Object.values(board.cards).filter((c) => c.kind === 'audio' && !!c.assetLocalPath && c.id !== selfId)
+  const [ttsText, setTtsText] = useState('')
+  const [ttsBusy, setTtsBusy] = useState(false)
+  const bgm = p.bgm
+
+  const pickCard = (id: string) => {
+    const c = board.cards[id]
+    if (c?.assetLocalPath) set({ bgm: { path: c.assetLocalPath, source: 'card', cardId: id, volume: 0.6, offset: 0, mode: 'mix' } })
+  }
+  const genTts = async () => {
+    if (!ttsText.trim()) return
+    const cfg = useProviders.getState().activeFor('audio')
+    if (!cfg) { toast('请先在 Provider 设置里配置音频 / TTS 服务', 'error'); return }
+    setTtsBusy(true)
+    try {
+      const key = await useProviders.getState().getKey(cfg.id)
+      const r = await runTts(cfg, key, ttsText.trim())
+      set({ bgm: { path: r.path, source: 'tts', text: ttsText.trim(), volume: 1, offset: 0, mode: 'mix' } })
+      toast('配音已生成', 'success')
+    } catch (e: any) {
+      toast('配音失败：' + (e?.message || String(e)), 'error')
+    } finally {
+      setTtsBusy(false)
+    }
+  }
+
+  return (
+    <div className="rounded-md border p-2 flex flex-col gap-2 mt-1" style={{ borderColor: 'var(--ace-border)' }}>
+      <span className="text-[11px] font-medium opacity-70 flex items-center gap-1"><Music size={12} /> 配乐 / 旁白</span>
+      {bgm ? (
+        <>
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="truncate flex-1">{bgm.source === 'tts' ? '🎙 ' + (bgm.text || 'AI 配音') : '🎵 ' + (board.cards[bgm.cardId || '']?.title || '音频卡')}</span>
+            <button onClick={() => set({ bgm: undefined })} className="opacity-50 hover:opacity-100"><Trash2 size={12} /></button>
+          </div>
+          <Row label="关系">
+            <Select className="flex-1" value={bgm.mode} onChange={(v) => set({ bgm: { ...bgm, mode: v as 'mix' | 'replace' | 'duck' } })}
+              options={[{ value: 'mix', label: '混音（叠在原声上）' }, { value: 'replace', label: '替换原声' }, { value: 'duck', label: '闪避（说话时压低）' }]} />
+          </Row>
+          <SliderRow label="音量" value={bgm.volume ?? 1} min={0} max={2} step={0.05} onLive={(v) => useStudio.getState().updateOpLive(op.id, { bgm: { ...bgm, volume: v } })} onCommit={() => useStudio.getState().commitLive()} />
+          <SliderRow label="延迟" value={bgm.offset ?? 0} min={0} max={10} step={0.1} suffix="s" onLive={(v) => useStudio.getState().updateOpLive(op.id, { bgm: { ...bgm, offset: v } })} onCommit={() => useStudio.getState().commitLive()} />
+        </>
+      ) : (
+        <>
+          {audioCards.length > 0 && (
+            <Row label="选音频卡">
+              <Select className="flex-1" value="" placeholder="画布上的音频卡" onChange={pickCard} options={audioCards.map((c) => ({ value: c.id, label: c.title || '音频' }))} />
+            </Row>
+          )}
+          <div className="flex flex-col gap-1">
+            <textarea value={ttsText} onChange={(e) => setTtsText(e.target.value)} rows={2} placeholder="AI 配音文案…" className="rounded px-2 py-1 text-xs bg-black/5 dark:bg-white/10 outline-none resize-none" />
+            <button onClick={genTts} disabled={ttsBusy || !ttsText.trim()} className="self-start flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 disabled:opacity-40">
+              {ttsBusy ? <Loader2 size={11} className="animate-spin" /> : <Music size={11} />} 生成 AI 配音
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }

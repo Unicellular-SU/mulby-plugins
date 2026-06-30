@@ -108,15 +108,24 @@ export interface OverlayParams {
 }
 
 // ---- audio：单卡音频精修 ----
+export interface AudioBgm {
+  path: string // 本地音频路径（来自音频卡 / AI TTS 生成）
+  source: 'card' | 'tts'
+  cardId?: string // 来源音频卡 id（source==='card'）
+  text?: string // TTS 文案（source==='tts'，记录用）
+  volume?: number // 增益 0..2
+  offset?: number // 入点延迟秒
+  mode: 'mix' | 'replace' | 'duck' // 与原声关系：混音 / 替换 / 闪避
+}
 export interface AudioParams {
   gainDb?: number // 音量增益 dB
   fadeIn?: number // 秒
   fadeOut?: number
-  muteRanges?: OverlayRange[] // 区间静音（源时间基）
+  muteRanges?: OverlayRange[] // 区间静音（输出时间基）
   loudnorm?: boolean
   denoise?: boolean
-  duck?: boolean // BGM 闪避（需 bgm op 提供旁链，留接口）
   pitchSemitones?: number // 变调 ±12
+  bgm?: AudioBgm // 配乐 / 旁白
 }
 
 // ---- export：栈尾单例 ----
