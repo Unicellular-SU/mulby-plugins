@@ -430,6 +430,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         <Toggle label="保持音调（变速不变调）" checked={p.pitchCompensate !== false} onChange={(v) => set({ pitchCompensate: v })} />
         <Toggle label="回旋 Boomerang（正放→倒放，去音轨）" checked={!!p.boomerang} onChange={(v) => set({ boomerang: v })} />
         <SliderRow label="片尾冻结" value={p.freezeEnd ?? 0} min={0} max={5} step={0.1} suffix="s" onLive={(v) => live({ freezeEnd: v })} onCommit={commit} />
+        <SliderRow label="运动残影" value={p.motionTrail ?? 0} min={0} max={6} step={1} onLive={(v) => live({ motionTrail: v })} onCommit={commit} />
       </div>
     )
   }
@@ -481,6 +482,8 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
           <Select className="flex-1" value={p.mirror || 'none'} onChange={(v) => set({ mirror: v as TransformParams['mirror'] })}
             options={[{ value: 'none', label: '无' }, { value: 'h', label: '左右镜像（万花筒）' }, { value: 'v', label: '上下镜像' }]} />
         </Row>
+        <SliderRow label="镜头抖动" value={p.shake ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ shake: v })} onCommit={commit} />
+        <SliderRow label="故障 Glitch" value={p.glitch ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ glitch: v })} onCommit={commit} />
       </div>
     )
   }

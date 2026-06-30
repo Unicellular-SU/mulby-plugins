@@ -57,13 +57,13 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
       // inset(top right bottom left)，归一→百分比
       clipPath = `inset(${(c.y * 100).toFixed(2)}% ${((1 - c.x - c.w) * 100).toFixed(2)}% ${((1 - c.y - c.h) * 100).toFixed(2)}% ${(c.x * 100).toFixed(2)}%)`
     }
-    if (tf.kenBurns || tf.fit === 'blur-pad' || (tf.pixelate && tf.pixelate > 1) || (tf.mirror && tf.mirror !== 'none')) exact = false
+    if (tf.kenBurns || tf.fit === 'blur-pad' || (tf.pixelate && tf.pixelate > 1) || (tf.mirror && tf.mirror !== 'none') || (tf.shake && tf.shake > 0) || (tf.glitch && tf.glitch > 0)) exact = false
   }
 
   // 变速 → playbackRate
   const sp = enabled.find((o) => o.kind === 'speed')?.params as SpeedParams | undefined
   const rate = sp?.rate && sp.rate > 0 ? sp.rate : 1
-  if (sp?.reverse || sp?.boomerang || (sp?.freezeEnd && sp.freezeEnd > 0)) exact = false
+  if (sp?.reverse || sp?.boomerang || (sp?.freezeEnd && sp.freezeEnd > 0) || (sp?.motionTrail && sp.motionTrail >= 2)) exact = false
 
   // 叠加 → DOM
   const overlays: PreviewOverlay[] = enabled

@@ -186,7 +186,14 @@ function applyTimeEffects(g: Graph, p: SpeedParams): void {
   }
 }
 
-function applyTransform(g: Graph, p: TransformParams): void {
+// 运动残影（多帧混合）：在时间链处理，含退化
+function applyMotionTrail(g: Graph, frames: number, fb: Set<string>): void {
+  const n = Math.max(2, Math.min(6, Math.round(frames)))
+  if (fb.has('tmix')) g.vf('tblend=all_mode=average')
+  else g.vf(`tmix=frames=${n}:weights='${Array(n).fill(1).join(' ')}'`)
+}
+
+function applyTransform(g: Graph, p: TransformParams, fb: Set<string>): void {
   if (p.crop) {
     const { x, y, w, h } = p.crop
     g.vf(
@@ -232,6 +239,21 @@ function applyTransform(g: Graph, p: TransformParams): void {
   if (p.pixelate && p.pixelate > 1) {
     const n = Math.round(p.pixelate)
     g.vf(`scale=round(iw/${n}):round(ih/${n}):flags=neighbor,scale=trunc(iw*${n}/2)*2:trunc(ih*${n}/2)*2:flags=neighbor,setsar=1`)
+  }
+  // 镜头抖动：过扫描后在余量内按 sin/cos 振荡裁剪（偏移用表达式约束在 [0,余量]，不越界）
+  if (p.shake && p.shake > 0) {
+    const k = Math.min(1, p.shake).toFixed(3)
+    const F = (3 + p.shake * 9).toFixed(2)
+    g.vf(
+      `scale=trunc(iw*1.08/2)*2:trunc(ih*1.08/2)*2,crop=trunc(iw/1.08/2)*2:trunc(ih/1.08/2)*2:` +
+        `'(iw-ow)/2*(1+${k}*sin(2*PI*t*${F}))':'(ih-oh)/2*(1+${k}*cos(2*PI*t*${(Number(F) * 1.3).toFixed(2)}))',setsar=1`
+    )
+  }
+  // RGB 故障位移
+  if (p.glitch && p.glitch > 0) {
+    const s = Math.round(p.glitch * 14)
+    if (fb.has('rgbashift')) g.vf(`chromashift=crh=${s}:cbh=${-s}`)
+    else g.vf(`rgbashift=rh=${s}:bh=${-s}`)
   }
 }
 
@@ -401,7 +423,8 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   if (trim) applyTrim(g, trim, ctx.hasAudio)
   if (speed) applySpeed(g, speed)
   if (speed) applyTimeEffects(g, speed)
-  if (single.transform) applyTransform(g, single.transform.params as TransformParams)
+  if (speed?.motionTrail && speed.motionTrail >= 2) applyMotionTrail(g, speed.motionTrail, fb)
+  if (single.transform) applyTransform(g, single.transform.params as TransformParams, fb)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
   if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW)
   // export 画幅（若未在 transform 指定）

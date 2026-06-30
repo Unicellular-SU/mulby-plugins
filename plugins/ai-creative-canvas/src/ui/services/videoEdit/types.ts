@@ -37,6 +37,7 @@ export interface SpeedParams {
   pitchCompensate: boolean // 变速是否补偿音高（false=随速变调）
   boomerang?: boolean // 回旋：正放→倒放接合（去音轨）
   freezeEnd?: number // 片尾冻结秒数（末帧保持）
+  motionTrail?: number // 运动残影：混合帧数 0=关 / 2..6（tmix，含退化）
 }
 
 // ---- transform：裁画面 / 旋转翻转 / 改画幅 / Ken-Burns ----
@@ -67,6 +68,8 @@ export interface TransformParams {
   kenBurns?: KenBurns
   pixelate?: number // 全画面像素化块大小（>1 生效，neighbor 缩放）
   mirror?: 'none' | 'h' | 'v' // 镜像万花筒：左右/上下对称
+  shake?: number // 镜头抖动强度 0..1（过扫描 + 振荡裁剪）
+  glitch?: number // RGB 故障位移 0..1（rgbashift，含退化）
 }
 
 // ---- color：调色面板 + 风格预设 ----
