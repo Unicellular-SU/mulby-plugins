@@ -317,7 +317,7 @@ function Lightbox({ rec, onClose }: { rec: AssetRecord; onClose: () => void }) {
   return (
     <div className="afs-lightbox" onClick={onClose}>
       <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>
-        <button className="afs-lightbox__close" onClick={onClose}>
+        <button className="afs-lightbox__close" onClick={onClose} aria-label="关闭" title="关闭">
           <X size={18} />
         </button>
         <div className="afs-lightbox__media">
@@ -434,7 +434,7 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
           <div className="afs-elform" onClick={(e) => e.stopPropagation()}>
             <div className="afs-elform__head">
               <span>{editing.id ? '编辑' : '新建'}{KIND_LABEL[editing.kind]}</span>
-              <button className="afs-lightbox__close" onClick={() => setEditing(null)}>
+              <button className="afs-lightbox__close" onClick={() => setEditing(null)} aria-label="关闭" title="关闭">
                 <X size={16} />
               </button>
             </div>

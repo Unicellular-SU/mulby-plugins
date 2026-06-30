@@ -3668,6 +3668,7 @@ select.afs-toolbar__select,
   color: var(--afs-text);
 }
 .afs-boards__row {
+  position: relative;
   flex-shrink: 0;
   width: 100%;
   display: flex;
@@ -3695,6 +3696,19 @@ select.afs-toolbar__select,
 .afs-boards__row.is-active,
 .afs-boards__item.is-active .afs-boards__row {
   background: color-mix(in srgb, var(--afs-accent) 18%, transparent);
+}
+/* 选中合集行左侧渐变指示条（与设置竖向 Tabs 一致） */
+.afs-boards__row.is-active::before,
+.afs-boards__item.is-active .afs-boards__row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 0 var(--afs-r-xs) var(--afs-r-xs) 0;
+  background: var(--afs-grad-brand);
 }
 .afs-boards__n {
   font-size: 10.5px;
