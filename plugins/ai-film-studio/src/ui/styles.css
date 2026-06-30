@@ -1560,7 +1560,7 @@ select.afs-toolbar__select,
   cursor: pointer;
 }
 .afs-node__retry:hover {
-  background: #dc2626;
+  filter: brightness(1.08);
 }
 .afs-node__tile--click {
   cursor: zoom-in;
@@ -2106,8 +2106,8 @@ select.afs-toolbar__select,
   font-size: 9.5px;
   line-height: 1.5;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.16);
-  color: #cbd5e1;
+  background: color-mix(in srgb, var(--afs-muted) 16%, transparent);
+  color: var(--afs-muted);
   white-space: nowrap;
 }
 
@@ -2141,26 +2141,26 @@ select.afs-toolbar__select,
   padding: 0;
   border: 1px solid var(--afs-border);
   border-radius: 5px;
-  background: rgba(15, 22, 38, 0.92);
-  color: #cbd5e1;
+  background: var(--afs-surface-sunken);
+  color: var(--afs-muted);
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s;
 }
 .afs-optfield__btn:hover {
-  color: #fff;
-  border-color: #64748b;
+  color: var(--afs-text);
+  border-color: var(--afs-border-strong);
 }
 .afs-optfield__btn--ai {
-  color: #c084fc;
+  color: var(--afs-type-image);
 }
 .afs-optfield__btn--ai:hover {
-  color: #d8b4fe;
-  border-color: #a855f7;
+  color: var(--afs-type-image);
+  border-color: color-mix(in srgb, var(--afs-type-image) 50%, var(--afs-border));
 }
 .afs-optfield__btn:disabled {
   opacity: 0.4;
   cursor: default;
-  color: #cbd5e1;
+  color: var(--afs-text-dim);
 }
 
 /* ============ 供应商设置弹窗 ============ */
@@ -2558,7 +2558,7 @@ select.afs-toolbar__select,
   word-break: break-word;
 }
 .afs-prov__testmsg--ok {
-  color: #4ade80;
+  color: var(--afs-success);
 }
 .afs-prov__testmsg--fail {
   color: var(--afs-danger);
@@ -3184,7 +3184,7 @@ select.afs-toolbar__select,
   overflow: hidden;
 }
 .afs-lib__ph--audio {
-  color: #34d399;
+  color: var(--afs-cat-audio);
 }
 .afs-acard__type {
   position: absolute;

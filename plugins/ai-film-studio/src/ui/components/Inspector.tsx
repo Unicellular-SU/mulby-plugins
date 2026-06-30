@@ -63,6 +63,7 @@ export default function Inspector() {
     )
   }
   const meta = CATEGORY_META[def.category]
+  const catVar = `var(--afs-cat-${def.category})`
   const isImageInput = node.data.kind === 'image-input'
   const isAudioInput = node.data.kind === 'audio-input'
   const isCharacter = node.data.kind === 'character'
@@ -214,8 +215,8 @@ export default function Inspector() {
 
   return (
     <div className="afs-inspector">
-      <div className="afs-inspector__head" style={{ borderColor: meta.color }}>
-        <span className="afs-inspector__badge" style={{ background: meta.color }}>
+      <div className="afs-inspector__head" style={{ borderColor: catVar }}>
+        <span className="afs-inspector__badge" style={{ background: catVar }}>
           {meta.label}
         </span>
         <span className="afs-inspector__kind">{def.label}</span>
