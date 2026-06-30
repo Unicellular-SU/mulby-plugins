@@ -4594,6 +4594,33 @@ select.afs-toolbar__select,
 @media (prefers-reduced-motion: reduce) {
   .afs-menu { animation: none; }
 }
+
+/* ============ 浮层 Popover（Radix + 玻璃面板） ============ */
+.afs-popover {
+  z-index: 10000;
+  min-width: 200px;
+  max-width: min(360px, 92vw);
+  padding: var(--afs-sp-5);
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-lg);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  color: var(--afs-text);
+  animation: afs-select-pop var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-popover__arrow { fill: var(--afs-glass-fill-strong); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-popover { background: var(--afs-glass-fallback); }
+  .afs-popover__arrow { fill: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-popover { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-popover { animation: none; }
+}
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;
