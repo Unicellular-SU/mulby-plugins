@@ -102,7 +102,7 @@ export default function StudioEditor() {
           <Settings size={15} />
         </button>
         <button
-          className="afs-btn afs-btn--primary afs-btn--sm afs-studio__produce"
+          className="afs-btn afs-btn--gradient afs-btn--sm afs-studio__produce"
           disabled={busy || doc.storyboards.length === 0}
           title="资产 → 关键帧 → 视频 → 合成 一条龙"
           onClick={() => void autoProduce()}
@@ -330,7 +330,7 @@ function AgentPanel() {
             <X size={14} />
           </button>
         ) : (
-          <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={!text.trim()} onClick={send}>
+          <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={!text.trim()} onClick={send}>
             <Send size={14} />
           </button>
         )}
@@ -1098,7 +1098,7 @@ function ImageFlowEditor({ sb, onClose }: { sb: Storyboard; onClose: () => void 
           <div className="afs-studio__flowmain">
             {kfUrl && <img className="afs-studio__flowkf" src={kfUrl} alt="当前关键帧" />}
             <textarea className="afs-field__input" rows={4} value={prompt} placeholder="精修指令（保留参考图主体，改 xxx）…" onChange={(e) => setPrompt(e.target.value)} />
-            <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={sb.state === 'generating' || !prompt.trim()} onClick={() => void refineKeyframe(sb.id, sel, prompt)}>
+            <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={sb.state === 'generating' || !prompt.trim()} onClick={() => void refineKeyframe(sb.id, sel, prompt)}>
               {sb.state === 'generating' ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 生成并设为关键帧
             </button>
           </div>
@@ -1153,7 +1153,7 @@ function TimelineTab() {
           ]}
           ariaLabel="整片转场"
         />
-        <button className="afs-btn afs-btn--primary afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
+        <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>
       </div>
