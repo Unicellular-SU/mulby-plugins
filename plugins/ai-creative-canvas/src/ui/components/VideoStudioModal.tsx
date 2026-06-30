@@ -426,6 +426,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
     return (
       <div className="flex flex-col gap-2.5">
         <SliderRow label="倍率" value={p.rate} min={0.25} max={4} step={0.05} suffix="×" onLive={(v) => live({ rate: v })} onCommit={commit} />
+        {p.rate < 1 && <Toggle label="平滑慢动作（补帧，较慢）" checked={!!p.smoothSlowmo} onChange={(v) => set({ smoothSlowmo: v })} />}
         <Toggle label="倒放" checked={p.reverse} onChange={(v) => set({ reverse: v })} />
         <Toggle label="保持音调（变速不变调）" checked={p.pitchCompensate !== false} onChange={(v) => set({ pitchCompensate: v })} />
         <Toggle label="回旋 Boomerang（正放→倒放，去音轨）" checked={!!p.boomerang} onChange={(v) => set({ boomerang: v })} />
@@ -484,6 +485,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         </Row>
         <SliderRow label="镜头抖动" value={p.shake ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ shake: v })} onCommit={commit} />
         <SliderRow label="故障 Glitch" value={p.glitch ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ glitch: v })} onCommit={commit} />
+        <Toggle label="画面去抖稳定" checked={!!p.deshake} onChange={(v) => set({ deshake: v })} />
       </div>
     )
   }

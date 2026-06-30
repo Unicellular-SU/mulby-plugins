@@ -157,7 +157,7 @@ function applyTrim(g: Graph, p: TrimParams, hasAudio: boolean): void {
   }
 }
 
-function applySpeed(g: Graph, p: SpeedParams): void {
+function applySpeed(g: Graph, p: SpeedParams, fb: Set<string>): void {
   if (p.reverse) {
     g.vf('reverse')
     g.af('areverse')
@@ -166,6 +166,10 @@ function applySpeed(g: Graph, p: SpeedParams): void {
     g.vf(`setpts=PTS/${p.rate.toFixed(4)}`)
     if (p.pitchCompensate !== false) g.af(buildAtempoChain(p.rate))
     else g.af(`asetrate=44100*${p.rate.toFixed(4)},aresample=44100`)
+  }
+  // 平滑慢动作：仅减速时补帧（minterpolate 慢，含退化跳过）
+  if (p.smoothSlowmo && p.rate && p.rate < 1 && !fb.has('minterpolate')) {
+    g.vf('minterpolate=fps=60:mi_mode=mci:mc_mode=obmc')
   }
 }
 
@@ -255,6 +259,8 @@ function applyTransform(g: Graph, p: TransformParams, fb: Set<string>): void {
     if (fb.has('rgbashift')) g.vf(`chromashift=crh=${s}:cbh=${-s}`)
     else g.vf(`rgbashift=rh=${s}:bh=${-s}`)
   }
+  // 画面去抖（单遍 deshake）
+  if (p.deshake) g.vf('deshake=edge=mirror')
 }
 
 // 画幅适配，复用于 transform 与 export
@@ -421,7 +427,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
 
   // 视频链固定顺序
   if (trim) applyTrim(g, trim, ctx.hasAudio)
-  if (speed) applySpeed(g, speed)
+  if (speed) applySpeed(g, speed, fb)
   if (speed) applyTimeEffects(g, speed)
   if (speed?.motionTrail && speed.motionTrail >= 2) applyMotionTrail(g, speed.motionTrail, fb)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams, fb)
