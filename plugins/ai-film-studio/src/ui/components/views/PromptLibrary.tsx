@@ -3,6 +3,7 @@ import { Plus, Brush, Trash2, Download, Upload } from 'lucide-react'
 import Select from '../ui/Select'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'
+import SearchField from '../ui/SearchField'
 import { Field, Input, Textarea } from '../ui/Field'
 import { useConfirm } from '../ui/ConfirmDialog'
 import {
@@ -101,13 +102,7 @@ function SnippetLibrary() {
         <div className="afs-lib__hint">
           可复用的画风 / 运镜 / 打光 / 负面 / 自定义提示词块，支持 <code>{'{变量}'}</code> 占位符。在画布节点的属性面板「插入片段」即可填入。
         </div>
-        <input
-          className="afs-lib__search"
-          placeholder="搜索片段…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="搜索片段"
-        />
+        <SearchField value={query} onChange={setQuery} placeholder="搜索片段…" ariaLabel="搜索片段" size="sm" />
         <div className="afs-lib__actions">
           <Button leadingIcon={Upload} onClick={() => fileRef.current?.click()} title="导入提示词包（片段 + 全局模板）">
             导入

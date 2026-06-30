@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Search, X } from 'lucide-react'
 import { CATEGORY_META, CATEGORY_ORDER, getDefsByCategory, type NodeDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
+import SearchField from './ui/SearchField'
 
 export const DND_MIME = 'application/afs-node'
 export const DND_ASSET = 'application/afs-asset'
@@ -36,20 +36,7 @@ export default function NodeLibrary() {
       <div className="afs-library__title">节点库</div>
       <div className="afs-library__hint">拖拽到画布，或点击添加</div>
       <div className="afs-library__search">
-        <Search size={14} className="afs-library__search-icon" aria-hidden />
-        <input
-          type="text"
-          className="afs-library__search-input"
-          placeholder="搜索节点…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="搜索节点"
-        />
-        {query && (
-          <button type="button" className="afs-library__search-clear" aria-label="清除搜索" onClick={() => setQuery('')}>
-            <X size={14} />
-          </button>
-        )}
+        <SearchField value={query} onChange={setQuery} placeholder="搜索节点…" ariaLabel="搜索节点" size="sm" block />
       </div>
       <div className="afs-library__scroll">
         {groups.length === 0 && <div className="afs-library__empty">无匹配节点</div>}
