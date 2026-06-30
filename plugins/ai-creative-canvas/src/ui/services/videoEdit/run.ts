@@ -2,6 +2,7 @@
 // 设计依据：docs/ai-creative-canvas-video-editor.md §3.2「多 pass 状态机」/ §8.6 取消模型
 
 import { runFf } from '../mediaVideo'
+import { prepareOverlays } from '../mediaOverlay'
 import { compileStack, type CompileCtx, type CompileOpts } from './compile'
 import type { EditStack } from './types'
 
@@ -62,6 +63,9 @@ export async function exportStudio(
   ctxBase: { inPath: string; projectId: string; overlayResolved?: CompileCtx['overlayResolved'] },
   o: { signal?: AbortSignal; onProgress?: (p: number) => void }
 ): Promise<RunResult> {
+  // 备好叠加 PNG（canvas→PNG）；与调用方传入的已解析项（如 PiP 视频路径）合并
+  const { overlayResolved: ovPng, cleanup: ovCleanup } = await prepareOverlays(stack, ctxBase.projectId)
+  const overlayResolved = { ...ovPng, ...(ctxBase.overlayResolved || {}) }
   const broadFallback = new Set(['denoise', 'colortemperature', 'lut3d'])
   const variants: { hasAudio: boolean; fallbacks?: Set<string> }[] = [
     { hasAudio: true },
@@ -69,15 +73,20 @@ export async function exportStudio(
     { hasAudio: false, fallbacks: broadFallback }
   ]
   let lastErr: any
-  for (const v of variants) {
-    if (o.signal?.aborted) throw new DOMException('已取消', 'AbortError')
-    try {
-      const ctx: CompileCtx = { ...ctxBase, hasAudio: v.hasAudio }
-      return await runVariant(stack, ctx, { fallbacks: v.fallbacks }, o.signal, o.onProgress)
-    } catch (e: any) {
-      if (isAbort(e)) throw e // 用户取消不再退化重试
-      lastErr = e
+  try {
+    for (const v of variants) {
+      if (o.signal?.aborted) throw new DOMException('已取消', 'AbortError')
+      try {
+        const ctx: CompileCtx = { inPath: ctxBase.inPath, projectId: ctxBase.projectId, hasAudio: v.hasAudio, overlayResolved }
+        return await runVariant(stack, ctx, { fallbacks: v.fallbacks }, o.signal, o.onProgress)
+      } catch (e: any) {
+        if (isAbort(e)) throw e // 用户取消不再退化重试
+        lastErr = e
+      }
     }
+    throw lastErr || new Error('导出失败')
+  } finally {
+    // 叠加 PNG 是临时输入，无论成败都清（已烧进成片）
+    for (const c of ovCleanup) await unlinkQuiet(c)
   }
-  throw lastErr || new Error('导出失败')
 }

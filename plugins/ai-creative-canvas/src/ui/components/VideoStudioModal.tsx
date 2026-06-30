@@ -11,7 +11,7 @@ import { Select } from './Select'
 import { ensureFfmpeg, probeDuration, timelineThumbs } from '../services/mediaVideo'
 import { toFileUrl } from '../services/media'
 import { stackToPreview } from '../services/videoEdit/preview'
-import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams } from '../services/videoEdit/types'
+import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams } from '../services/videoEdit/types'
 import { Z } from '../zlayers'
 
 function fmt(s: number): string {
@@ -131,6 +131,20 @@ function Inner({ cardId }: { cardId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardId])
 
+  // Ctrl+Z / Ctrl+Y（Shift+Z 也作重做）撤销重做
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return
+      const k = e.key.toLowerCase()
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); useStudio.getState().undo() }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); useStudio.getState().redo() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const pv = stackToPreview(stack)
 
   // 同步 playbackRate
@@ -181,6 +195,15 @@ function Inner({ cardId }: { cardId: string }) {
     if (kind === 'trim') useStudio.getState().addOp('trim', { segments: [{ in: 0, out: dur || 1, keep: true }] } as never)
     else useStudio.getState().addOp(kind)
   }
+  const addOverlay = (sub: string) => {
+    const presets: Record<string, Record<string, unknown>> = {
+      text: { sub: 'text', rect: { x: 0.1, y: 0.78, w: 0.8, h: 0.12 }, text: '在此输入文字', style: { align: 'center' } },
+      watermark: { sub: 'watermark', rect: { x: 0.66, y: 0.05, w: 0.3, h: 0.08 }, text: '水印', style: { align: 'left' } },
+      sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
+      mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 }
+    }
+    useStudio.getState().addOp('overlay', presets[sub] as never)
+  }
 
   return (
     <div className={`fixed inset-0 ${Z.modal} bg-black/60 flex items-center justify-center p-4`} onClick={close}>
@@ -205,11 +228,19 @@ function Inner({ cardId }: { cardId: string }) {
                 <video ref={vref} src={srcUrl} onLoadedMetadata={onMeta} controls className="max-h-[52vh] max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform }} />
               </div>
               {/* 叠加 DOM 近似 */}
-              {pv.overlays.map((o) => (
-                <div key={o.id} className="absolute pointer-events-none px-1.5 py-0.5 rounded text-white text-sm bg-black/40" style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, maxWidth: `${o.width * 100}%` }}>
-                  {o.sub === 'text' ? o.text : o.sub}
-                </div>
-              ))}
+              {pv.overlays.map((o) => {
+                const st = (o.style || {}) as Record<string, unknown>
+                if (o.sub === 'mosaic') {
+                  return <div key={o.id} className="absolute pointer-events-none rounded-sm border-2 border-dashed border-amber-300/80 bg-black/30 backdrop-blur-sm grid place-items-center text-[9px] text-amber-200"
+                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: '20%' }}>打码区</div>
+                }
+                return (
+                  <div key={o.id} className="absolute pointer-events-none leading-tight"
+                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, textAlign: st.align === 'center' ? 'center' : 'left', color: String(st.color || '#fff'), fontWeight: st.bold ? 700 : 500, fontSize: 'clamp(8px, 2.4vw, 22px)', textShadow: st.stroke === false ? 'none' : '0 1px 2px rgba(0,0,0,.9)', opacity: o.sub === 'watermark' ? 0.7 : 1 }}>
+                    {o.text || (o.sub === 'sticker' ? '⭐' : '文字')}
+                  </div>
+                )
+              })}
               {!pv.exact && (
                 <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/90 text-white text-[10px]">近似预览 · 导出更准</div>
               )}
@@ -251,6 +282,12 @@ function Inner({ cardId }: { cardId: string }) {
                 <button key={a.kind} disabled={present.has(a.kind)} onClick={() => addOp(a.kind)}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 disabled:opacity-30 disabled:cursor-not-allowed">
                   <Plus size={11} /> {a.label}
+                </button>
+              ))}
+              {[{ s: 'text', l: '文字' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }].map((o) => (
+                <button key={o.s} onClick={() => addOverlay(o.s)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
+                  <Plus size={11} /> {o.l}
                 </button>
               ))}
             </div>
@@ -319,6 +356,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
   const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
 
   if (op.kind === 'trim') return <TrimPanel op={op} params={op.params as TrimParams} dur={dur} playhead={playhead} />
+  if (op.kind === 'overlay') return <OverlayPanel op={op} params={op.params as OverlayParams} dur={dur} />
   if (op.kind === 'speed') {
     const p = op.params as SpeedParams
     return (
@@ -483,6 +521,64 @@ function TrimPanel({ op, params, dur, playhead }: { op: EditOp; params: TrimPara
         </div>
       ))}
       <div className="text-[10px] opacity-50">保留段按顺序拼接为成片；删除段被剔除。</div>
+    </div>
+  )
+}
+
+// ---- overlay 叠加编辑（文字/水印/贴纸/打码）----
+function OverlayPanel({ op, params, dur }: { op: EditOp; params: OverlayParams; dur: number }) {
+  const p = params
+  const live = (patch: Record<string, unknown>) => useStudio.getState().updateOpLive(op.id, patch)
+  const commit = () => useStudio.getState().commitLive()
+  const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
+  const setRect = (patch: Partial<OverlayParams['rect']>) => live({ rect: { ...p.rect, ...patch } })
+  const setStyle = (patch: Record<string, unknown>) => set({ style: { ...(p.style || {}), ...patch } })
+  const style = (p.style || {}) as Record<string, unknown>
+  const isText = p.sub === 'text' || p.sub === 'watermark' || p.sub === 'sticker'
+  const rangeOn = !!p.range
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      <div className="text-[11px] font-medium opacity-70">{p.sub === 'mosaic' ? '局部打码' : p.sub === 'watermark' ? '水印' : p.sub === 'sticker' ? '贴纸/Emoji' : '文字'}</div>
+      {isText && (
+        <>
+          <Row label="内容">
+            <input value={p.text || ''} onChange={(e) => set({ text: e.target.value })} className="flex-1 rounded px-2 py-1 text-xs bg-black/5 dark:bg-white/10 outline-none" placeholder="文字…" />
+          </Row>
+          <Row label="字号">
+            <input type="range" min={12} max={160} step={2} value={Number(style.fontSize) || 48} onChange={(e) => setStyle({ fontSize: Number(e.target.value) })} className="flex-1" />
+            <span className="w-10 text-right tabular-nums opacity-70">{Number(style.fontSize) || 48}</span>
+          </Row>
+          <Row label="颜色">
+            <input type="color" value={String(style.color || '#ffffff')} onChange={(e) => setStyle({ color: e.target.value })} className="w-8 h-6 rounded" />
+            <Toggle label="居中" checked={style.align === 'center'} onChange={(v) => setStyle({ align: v ? 'center' : 'left' })} />
+            <Toggle label="描边" checked={style.stroke !== false} onChange={(v) => setStyle({ stroke: v })} />
+          </Row>
+        </>
+      )}
+      {p.sub === 'mosaic' && (
+        <>
+          <Row label="方式">
+            <div className="flex gap-1">
+              <button onClick={() => set({ blurKind: 'mosaic' })} className={`px-2 py-0.5 rounded text-[10px] ${p.blurKind !== 'blur' ? 'bg-pink-500 text-white' : 'bg-black/5 dark:bg-white/10'}`}>马赛克</button>
+              <button onClick={() => set({ blurKind: 'blur' })} className={`px-2 py-0.5 rounded text-[10px] ${p.blurKind === 'blur' ? 'bg-pink-500 text-white' : 'bg-black/5 dark:bg-white/10'}`}>模糊</button>
+            </div>
+          </Row>
+          <SliderRow label="强度" value={p.pixelSize || 14} min={4} max={40} step={1} onLive={(v) => live({ pixelSize: v })} onCommit={commit} />
+          <SliderRow label="宽" value={p.rect.w} min={0.05} max={1} step={0.01} onLive={(v) => setRect({ w: Math.min(v, 1 - p.rect.x) })} onCommit={commit} />
+          <SliderRow label="高" value={p.rect.h} min={0.05} max={1} step={0.01} onLive={(v) => setRect({ h: Math.min(v, 1 - p.rect.y) })} onCommit={commit} />
+        </>
+      )}
+      <SliderRow label="位置 X" value={p.rect.x} min={0} max={1} step={0.01} onLive={(v) => setRect({ x: Math.min(v, 1 - p.rect.w) })} onCommit={commit} />
+      <SliderRow label="位置 Y" value={p.rect.y} min={0} max={1} step={0.01} onLive={(v) => setRect({ y: Math.min(v, 1 - p.rect.h) })} onCommit={commit} />
+      {isText && <SliderRow label="盒宽" value={p.rect.w} min={0.1} max={1} step={0.01} onLive={(v) => setRect({ w: Math.min(v, 1 - p.rect.x) })} onCommit={commit} />}
+      <Toggle label="限定时间段（默认全程）" checked={rangeOn} onChange={(v) => set({ range: v ? { start: 0, end: Math.min(3, dur || 3) } : undefined })} />
+      {rangeOn && p.range && (
+        <>
+          <SliderRow label="起" value={p.range.start} min={0} max={dur} step={0.1} suffix="s" onLive={(v) => live({ range: { start: Math.min(v, p.range!.end - 0.1), end: p.range!.end } })} onCommit={commit} />
+          <SliderRow label="止" value={p.range.end} min={0} max={dur} step={0.1} suffix="s" onLive={(v) => live({ range: { start: p.range!.start, end: Math.max(v, p.range!.start + 0.1) } })} onCommit={commit} />
+        </>
+      )}
     </div>
   )
 }
