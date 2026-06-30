@@ -1,16 +1,17 @@
-import { Clapperboard, LayoutGrid, Workflow, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
+import { Clapperboard, LayoutGrid, Server, HardDrive, SlidersHorizontal, Sun, Moon, type LucideIcon } from 'lucide-react'
 import { useUiStore } from '../../store/uiStore'
 
-export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
+export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'models' | 'storage' | 'advanced'
 
-// 一级导航：项目 / 画布。工作台不再作一级入口——只在从「项目」页打开工作流项目时进入
-// （独立空工作台页已删除）；节点画布是独立子系统（自带工程），仍作一级入口。
+// 一级导航：项目 + 设置子项（模型 / 存储 / 高级）。画布与工作台不作一级入口——只能从「项目」页进入。
 const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
   { view: 'home', icon: LayoutGrid, label: '项目' }, // 统一项目主页：画布工程 + 工作流项目
-  { view: 'editor', icon: Workflow, label: '画布' }, // 独立节点画布（高级编辑）
+  { view: 'models', icon: Server, label: '模型' }, // 模型供应商 / API Key
+  { view: 'storage', icon: HardDrive, label: '存储' }, // 素材附件占用与清理
+  { view: 'advanced', icon: SlidersHorizontal, label: '高级' }, // 节点提示词（引擎 system prompt）
 ]
 
-/** 左侧一级界面导航栏（rail）：始终可见，切换工程主页 / 画布 / 素材库 / 提示词库 / 设置。 */
+/** 左侧一级界面导航栏（rail）：始终可见——项目 / 模型 / 存储 / 高级；底部主题切换。 */
 export default function AppRail({ view, onChange }: { view: AppView; onChange: (v: AppView) => void }) {
   const theme = useUiStore((s) => s.theme)
   const toggleTheme = useUiStore((s) => s.toggleTheme)
@@ -43,14 +44,6 @@ export default function AppRail({ view, onChange }: { view: AppView; onChange: (
       >
         {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
         <span>{theme === 'light' ? '暗色' : '亮色'}</span>
-      </button>
-      <button
-        className={`afs-rail__item${view === 'settings' ? ' is-active' : ''}`}
-        onClick={() => onChange('settings')}
-        title="设置（模型供应商 / 外观 / 存储）"
-      >
-        <Settings size={18} />
-        <span>设置</span>
       </button>
     </nav>
   )

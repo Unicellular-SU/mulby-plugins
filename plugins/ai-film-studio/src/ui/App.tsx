@@ -20,7 +20,7 @@ import { usePromptStore } from './store/promptStore'
 import { useUiStore } from './store/uiStore'
 
 const PLUGIN_ID = 'ai-film-studio'
-const VIEWS: AppView[] = ['studio', 'home', 'editor', 'assets', 'prompts', 'settings']
+const VIEWS: AppView[] = ['studio', 'home', 'editor', 'assets', 'prompts', 'models', 'storage', 'advanced']
 
 export default function App() {
   const init = useGraphStore((s) => s.init)
@@ -121,7 +121,9 @@ export default function App() {
           {view === 'editor' && <EditorView />}
           {view === 'assets' && <AssetsView onInserted={() => go('editor')} />}
           {view === 'prompts' && <PromptLibrary />}
-          {view === 'settings' && <SettingsView />}
+          {view === 'models' && <SettingsView section="models" />}
+          {view === 'storage' && <SettingsView section="storage" />}
+          {view === 'advanced' && <SettingsView section="advanced" />}
         </div>
       </div>
       <LightboxHost />
