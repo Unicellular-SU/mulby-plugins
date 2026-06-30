@@ -1,13 +1,12 @@
-import { Clapperboard, LayoutGrid, Film, Workflow, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
+import { Clapperboard, LayoutGrid, Workflow, Settings, Sun, Moon, type LucideIcon } from 'lucide-react'
 import { useUiStore } from '../../store/uiStore'
 
 export type AppView = 'studio' | 'home' | 'editor' | 'assets' | 'prompts' | 'settings'
 
-// 一级导航：项目 / 工作台 / 画布。素材/提示词已并入工作台（左侧资源 Dock）；节点画布是独立子系统
-// （自带工程，与工作台项目互不相通），作一级入口而非工作台内标签。
+// 一级导航：项目 / 画布。工作台不再作一级入口——只在从「项目」页打开工作流项目时进入
+// （独立空工作台页已删除）；节点画布是独立子系统（自带工程），仍作一级入口。
 const ITEMS: { view: AppView; icon: LucideIcon; label: string }[] = [
   { view: 'home', icon: LayoutGrid, label: '项目' }, // 统一项目主页：画布工程 + 工作流项目
-  { view: 'studio', icon: Film, label: '工作台' }, // Toonflow 式结构化流水线编辑器
   { view: 'editor', icon: Workflow, label: '画布' }, // 独立节点画布（高级编辑）
 ]
 

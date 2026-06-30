@@ -223,9 +223,6 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
     <div className="afs-surface afs-lp">
       {/* —— 玻璃工具栏 —— */}
       <div className={`afs-lp-bar${scrolled ? ' is-scrolled' : ''}`} role="toolbar" aria-label="项目工具栏">
-        <div className="afs-lp-bar__brand" aria-hidden>
-          <Clapperboard size={16} />
-        </div>
         <h2 className="afs-lp-bar__title">项目</h2>
         <div className="afs-lp-bar__spacer" />
         <div className="afs-lp-bar__group">
