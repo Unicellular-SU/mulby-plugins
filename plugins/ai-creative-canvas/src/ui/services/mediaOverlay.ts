@@ -118,11 +118,46 @@ function renderProgressBarPng(p: OverlayParams, baseW: number, baseH: number): s
   return canvas.toDataURL('image/png').split(',')[1]
 }
 
+function tcLabel(s: number): string {
+  const m = Math.floor(s / 60)
+  const x = Math.floor(s % 60)
+  return `${m}:${x.toString().padStart(2, '0')}`
+}
+// 时间码精灵图：横排每格一个时间标签，编译器按时间裁出当前格
+function renderTimecodePng(p: OverlayParams, outDur: number, baseH: number): { b64: string; cellW: number; cellH: number; step: number } {
+  const style = (p.style || {}) as { color?: string; fontSize?: number }
+  const fontSize = Number(style.fontSize) || Math.round(baseH * 0.05)
+  const cellH = Math.round(fontSize * 1.5)
+  const cellW = Math.round(fontSize * 3.2)
+  const dur = Math.max(1, outDur)
+  const step = Math.max(1, Math.ceil(dur / 120)) // 限格数 ≤~120，避免超宽画布
+  const cells = Math.max(1, Math.ceil(dur / step))
+  const canvas = document.createElement('canvas')
+  canvas.width = cells * cellW
+  canvas.height = cellH
+  const ctx = canvas.getContext('2d')!
+  ctx.font = `bold ${fontSize}px sans-serif`
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  for (let i = 0; i < cells; i++) {
+    const cx = i * cellW + cellW / 2
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'
+    ctx.fillRect(i * cellW + 4, cellH * 0.12, cellW - 8, cellH * 0.76)
+    ctx.lineWidth = Math.max(2, fontSize * 0.08)
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+    ctx.strokeText(tcLabel(i * step), cx, cellH / 2)
+    ctx.fillStyle = style.color || '#ffffff'
+    ctx.fillText(tcLabel(i * step), cx, cellH / 2)
+  }
+  return { b64: canvas.toDataURL('image/png').split(',')[1], cellW, cellH, step }
+}
+
 // 备好整条栈所有需要 PNG 输入的叠加 op（事务性返回 cleanup 列表，调用方在导出后 unlink）。
 // 单个 overlay 渲染失败 → 跳过该层（best-effort），不阻断整条导出。
 export async function prepareOverlays(
   stack: EditStack,
-  projectId: string
+  projectId: string,
+  outDur = 0
 ): Promise<{ overlayResolved: Record<string, OverlayInput>; cleanup: string[] }> {
   const overlayResolved: Record<string, OverlayInput> = {}
   const cleanup: string[] = []
@@ -133,6 +168,13 @@ export async function prepareOverlays(
     const p = op.params as OverlayParams
     if (p.sub === 'mosaic' || p.sub === 'pip') continue // mosaic 用源、pip 由调用方解析视频路径
     try {
+      if (p.sub === 'timecode') {
+        const tc = renderTimecodePng(p, outDur || stack.baseDuration || 1, bh)
+        const { path } = await saveBase64(projectId, 'ov', tc.b64, 'png')
+        overlayResolved[op.id] = { kind: 'timecode', path, cellW: tc.cellW, cellH: tc.cellH, step: tc.step }
+        cleanup.push(path)
+        continue
+      }
       if (p.sub === 'subtitle') {
         // 每条 cue 渲一张 PNG（最多 80 条，超出截断防输入爆炸）
         const cues = (p.cues || []).filter((c) => c.text.trim() && c.end > c.start).slice(0, 80)

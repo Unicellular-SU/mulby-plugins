@@ -729,6 +729,7 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 
 - **[P0 地基·已完成]** 可取消执行：`mediaVideo.ts:runFf` / `probeDuration` 加可选 `signal?: AbortSignal`，`abort → task.kill()`，旧调用方传 undefined 完全兼容。`runFf` 导出供工作台/编译器复用。
 - **[P0 地基·已完成]** 编辑栈类型系统：新增 `src/ui/services/videoEdit/types.ts` —— `OpKind`/`EditOp`(按 kind 判别联合，7 大类参数类型)/`EditStack`/`EditRecipe`、大类编译顺序 `OP_KIND_ORDER`、`createOp` 工厂、`stackIsNoop`。纯类型骨架，typecheck green。
+- **[P1 时间码·已完成]** overlay 加 `timecode`：`renderTimecodePng` 横排精灵图（每格一个 M:SS 标签，`step=ceil(dur/120)` 限格数防超宽画布），编译器 `crop=cellW:cellH:'floor(t/step)*cellW':0` 逐帧裁出当前格（单输入单次）。`OverlayInput` 扩 cellW/cellH/step；`compile.ts` 导出 `stackOutDuration` 供 `prepareOverlays` 算格数；`run.ts` 传入。OverlayPanel 颜色/位置；预览显示 M:SS。typecheck + vite build green。
 - **[P1 进度条·已完成]** overlay 加 `progress` 播放进度条：`renderProgressBarPng` 满幅纯色条，编译器用滑动表达式 `overlay=x='-w+w*t/dur'` 从左推进（输出尺寸恒定）；`applyOverlays` 加 `outDur` 参。OverlayPanel 颜色/粗细/垂直位置；预览 CSS 进度条按播放头填充。typecheck + vite build green。
 - **[P2 去抖/平滑慢动作·已完成]** transform 加 `deshake`（单遍 `deshake=edge=mirror`）；speed 加 `smoothSlowmo`（仅 rate<1 时 `minterpolate=fps=60:mi_mode=mci`，退化跳过为复帧慢动作）。退化集加 `minterpolate`。UI：transform 去抖 toggle，speed 倍率<1 时显示平滑慢动作 toggle。typecheck + vite build green。
 - **[P2 动感特效·已完成]** transform 加 `shake`（过扫描 1.08x + 余量内 sin/cos 振荡裁剪，偏移表达式约束不越界）与 `glitch`（`rgbashift`，退化 `chromashift`）；speed 加 `motionTrail` 运动残影（`tmix=frames`，退化 `tblend=average`）。退化集加 `rgbashift/tmix`。preview 全标近似。transform/speed 面板加滑块。typecheck + vite build green。

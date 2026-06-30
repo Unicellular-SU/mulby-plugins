@@ -3,7 +3,7 @@
 
 import { runFf } from '../mediaVideo'
 import { prepareOverlays } from '../mediaOverlay'
-import { compileStack, type CompileCtx, type CompileOpts } from './compile'
+import { compileStack, stackOutDuration, type CompileCtx, type CompileOpts } from './compile'
 import type { EditStack } from './types'
 
 function fs(): any {
@@ -64,7 +64,7 @@ export async function exportStudio(
   o: { signal?: AbortSignal; onProgress?: (p: number) => void }
 ): Promise<RunResult> {
   // 备好叠加 PNG（canvas→PNG）；与调用方传入的已解析项（如 PiP 视频路径）合并
-  const { overlayResolved: ovPng, cleanup: ovCleanup } = await prepareOverlays(stack, ctxBase.projectId)
+  const { overlayResolved: ovPng, cleanup: ovCleanup } = await prepareOverlays(stack, ctxBase.projectId, stackOutDuration(stack))
   const overlayResolved = { ...ovPng, ...(ctxBase.overlayResolved || {}) }
   const broadFallback = new Set(['denoise', 'colortemperature', 'lut3d', 'sidechain', 'rgbashift', 'tmix', 'minterpolate'])
   const variants: { hasAudio: boolean; fallbacks?: Set<string> }[] = [

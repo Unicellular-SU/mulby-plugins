@@ -15,9 +15,12 @@ import { mediaPath } from '../media'
 import type { EditOp, EditStack, OpKind, OverlayParams, TransformParams, ColorParams, AudioParams, ExportParams, SpeedParams, TrimParams } from './types'
 
 export interface OverlayInput {
-  kind: 'png' | 'video' | 'subtitle'
-  path?: string // png/video
+  kind: 'png' | 'video' | 'subtitle' | 'timecode'
+  path?: string // png/video/timecode（timecode 为横排精灵图）
   cues?: { start: number; end: number; path: string }[] // subtitle：每条 cue 一张 PNG
+  cellW?: number // timecode：每格宽
+  cellH?: number // timecode：每格高
+  step?: number // timecode：每格秒数
 }
 export interface CompileCtx {
   inPath: string
@@ -70,6 +73,14 @@ function reduceStack(stack: EditStack): { single: Partial<Record<OpKind, EditOp>
     else single[op.kind] = op
   }
   return { single, overlays }
+}
+
+// 对外：从栈算输出时长（供 prepareOverlays 等编译外计算）
+export function stackOutDuration(stack: EditStack): number {
+  const enabled = stack.ops.filter((o) => o.enabled)
+  const trim = enabled.find((o) => o.kind === 'trim')?.params as TrimParams | undefined
+  const speed = enabled.find((o) => o.kind === 'speed')?.params as SpeedParams | undefined
+  return computeOutDuration(stack, trim, speed)
 }
 
 // 输出时长：trim 取保留段之和，除以变速倍率，再计回旋(×2)与片尾冻结(+freeze)
@@ -347,6 +358,19 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, 
         g.raw(`[${g.v}][${cidx}:v]overlay=${xExpr}:${yExpr}:enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'[${out}]`)
         g.setV(out)
       }
+      continue
+    }
+    if (p.sub === 'timecode' && resolved.path && resolved.cellW) {
+      // 精灵图按时间裁出当前格（单输入单次；crop 的 x 逐帧求值）
+      const idx = g.addInput(resolved.path)
+      const cw = resolved.cellW
+      const ch = resolved.cellH || cw
+      const step = resolved.step || 1
+      const tcc = g.freshLabel('tc')
+      const out = g.freshLabel('v')
+      g.raw(`[${idx}:v]crop=${cw}:${ch}:'floor(t/${step})*${cw}':0[${tcc}]`)
+      g.raw(`[${g.v}][${tcc}]overlay=${xExpr}:${yExpr}${en}[${out}]`)
+      g.setV(out)
       continue
     }
     if (!resolved.path) continue
