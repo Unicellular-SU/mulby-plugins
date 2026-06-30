@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import {
-  X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown,
-  Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2
+  X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
+  Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2,
+  Play, Pause, SkipBack, SkipForward, Maximize, PanelBottomClose, PanelBottomOpen, Type
 } from 'lucide-react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
@@ -9,13 +10,13 @@ import { useStudio } from '../store/studioStore'
 import { Select } from './Select'
 import { ensureFfmpeg, probeDuration, timelineThumbs } from '../services/mediaVideo'
 import { toFileUrl } from '../services/media'
-import { stackToPreview } from '../services/videoEdit/preview'
+import { stackToPreview, type PreviewOverlay } from '../services/videoEdit/preview'
 import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
 import { loadWaveform } from '../services/audioWaveform'
 import { useProviders } from '../store/providerStore'
 import { runTts } from '../services/providers/engine'
 import { toast } from '../store/toastStore'
-import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams, type SubtitleCue } from '../services/videoEdit/types'
+import { OP_KIND_LABEL, type EditOp, type EditStack, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams, type SubtitleCue } from '../services/videoEdit/types'
 import { base64ToArrayBuffer } from '../util'
 import { Z } from '../zlayers'
 
@@ -84,30 +85,6 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   )
 }
 
-// 音频波形条（峰值 bar 用 useMemo 缓存，playhead/静音区为轻量浮层）+ 点击定位
-function WaveStrip({ peaks, dur, playhead, muteRanges, onSeek }: {
-  peaks: number[]; dur: number; playhead: number; muteRanges: { start: number; end: number }[]; onSeek: (t: number) => void
-}) {
-  const bars = useMemo(() => (
-    <div className="absolute inset-0 flex items-center gap-px px-px">
-      {peaks.map((p, i) => <div key={i} className="flex-1 bg-emerald-500/70 rounded-sm" style={{ height: `${Math.max(3, p * 100)}%` }} />)}
-    </div>
-  ), [peaks])
-  return (
-    <div className="relative h-9 rounded-md overflow-hidden border bg-black/20 cursor-pointer" style={{ borderColor: 'var(--ace-border)' }}
-      onPointerDown={(e) => {
-        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-        onSeek(Math.min(dur, Math.max(0, ((e.clientX - r.left) / r.width) * dur)))
-      }}>
-      {bars}
-      {dur > 0 && muteRanges.map((m, i) => (
-        <div key={i} className="absolute inset-y-0 bg-rose-500/35 border-x border-rose-400/60 pointer-events-none" style={{ left: `${(m.start / dur) * 100}%`, width: `${((m.end - m.start) / dur) * 100}%` }} />
-      ))}
-      <div className="absolute inset-y-0 w-0.5 bg-pink-500 pointer-events-none" style={{ left: `${dur ? (playhead / dur) * 100 : 0}%` }} />
-    </div>
-  )
-}
-
 export function VideoStudioModal() {
   const id = useUi((s) => s.studioCardId)
   if (!id) return null
@@ -127,6 +104,19 @@ function Inner({ cardId }: { cardId: string }) {
   const [playhead, setPlayhead] = useState(0)
   const [saveLocal, setSaveLocal] = useState(false)
   const [waveform, setWaveform] = useState<number[] | null>(null)
+  const [playing, setPlaying] = useState(false)
+  const [tlOpen, setTlOpen] = useState(true)
+
+  // 播放状态跟随 <video> 的 play/pause 事件（驱动 TransportBar 图标）
+  useEffect(() => {
+    const v = vref.current
+    if (!v) return
+    const on = () => setPlaying(!v.paused)
+    v.addEventListener('play', on)
+    v.addEventListener('pause', on)
+    return () => { v.removeEventListener('play', on); v.removeEventListener('pause', on) }
+  }, [])
+  const fullscreen = () => { const s = stageRef.current; if (s) { if (document.fullscreenElement) void document.exitFullscreen(); else void s.requestFullscreen?.() } }
 
   const card = useGraph((s) => s.getActiveBoard().cards[cardId])
   const close = () => {
@@ -184,8 +174,20 @@ function Inner({ cardId }: { cardId: string }) {
       if (typing) return
       const mod = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
+      const v = vref.current
       if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); useStudio.getState().undo() }
       else if ((mod && k === 'y') || (mod && k === 'z' && e.shiftKey)) { e.preventDefault(); e.stopImmediatePropagation(); useStudio.getState().redo() }
+      else if (e.code === 'Space') { e.preventDefault(); e.stopImmediatePropagation(); if (v) { v.paused ? void v.play() : v.pause() } }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopImmediatePropagation(); if (v) v.currentTime = Math.max(0, v.currentTime - 1 / 30) }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopImmediatePropagation(); if (v) v.currentTime = v.currentTime + 1 / 30 }
+      else if (e.key === 'Home') { e.preventDefault(); e.stopImmediatePropagation(); if (v) v.currentTime = 0 }
+      else if (e.key === 'End') { e.preventDefault(); e.stopImmediatePropagation(); if (v) v.currentTime = v.duration || 0 }
+      else if (k === 'f') { e.stopImmediatePropagation(); fullscreen() }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && useStudio.getState().selectedOpId) {
+        const id = useStudio.getState().selectedOpId!
+        const op = useStudio.getState().stack?.ops.find((o) => o.id === id)
+        if (op && op.kind !== 'export') { e.stopImmediatePropagation(); useStudio.getState().removeOp(id) }
+      }
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return () => window.removeEventListener('keydown', onKey, { capture: true })
@@ -281,116 +283,53 @@ function Inner({ cardId }: { cardId: string }) {
     useStudio.getState().addOp('overlay', presets[sub] as never)
   }
 
+  const startAt = pv.keeps?.[0]?.in ?? 0
+  const OVERLAY_ADD = [{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'progress', l: '进度条' }, { s: 'timecode', l: '时间码' }, { s: 'pip', l: '画中画' }]
+  const splitAtPlayhead = () => {
+    const g = useStudio.getState()
+    const st = g.stack
+    if (!st) return
+    let trim = st.ops.find((o) => o.kind === 'trim')
+    if (!trim) { g.addOp('trim', { segments: [{ in: 0, out: dur || 1, keep: true }] } as never); trim = useStudio.getState().stack?.ops.find((o) => o.kind === 'trim') }
+    if (!trim) return
+    const segs = (trim.params as TrimParams).segments || []
+    const idx = segs.findIndex((s) => playhead > s.in + 0.05 && playhead < s.out - 0.05)
+    if (idx < 0) return
+    const s = segs[idx]
+    const next = [...segs]
+    next.splice(idx, 1, { in: s.in, out: playhead, keep: s.keep }, { in: playhead, out: s.out, keep: s.keep })
+    g.updateOp(trim.id, { segments: next })
+  }
+
   return (
     <div className={`fixed inset-0 ${Z.modal} bg-black/60 flex items-center justify-center p-4`} onClick={close}>
-      <div data-interactive onClick={(e) => e.stopPropagation()} className="ace-dialog ace-anim-scale w-[1080px] max-w-full h-[88vh] flex flex-col text-neutral-800 dark:text-neutral-200">
-        {/* 头部 */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b" style={{ borderColor: 'var(--ace-border)' }}>
+      <div data-interactive onClick={(e) => e.stopPropagation()} className="ace-dialog ace-anim-scale flex flex-col text-neutral-800 dark:text-neutral-200" style={{ width: 'min(1320px, 95vw)', height: '90vh' }}>
+        {/* TopToolbar */}
+        <div className="flex items-center gap-2 px-4 py-2 border-b" style={{ borderColor: 'var(--ace-border)' }}>
           <Film size={16} className="text-pink-500" />
           <span className="font-semibold text-sm">剪辑工作台</span>
-          <span className="text-[11px] opacity-50 truncate">· {card.title}</span>
+          <span className="text-[11px] opacity-50 truncate max-w-[40%]">· {card.title}</span>
           <div className="ml-auto flex items-center gap-1">
             <IconBtn icon={Undo2} title="撤销 (Ctrl+Z)" disabled={!useStudio.getState().canUndo()} onClick={() => useStudio.getState().undo()} />
             <IconBtn icon={Redo2} title="重做 (Ctrl+Y)" disabled={!useStudio.getState().canRedo()} onClick={() => useStudio.getState().redo()} />
+            <IconBtn icon={tlOpen ? PanelBottomClose : PanelBottomOpen} title="折叠/展开时间轴" onClick={() => setTlOpen((v) => !v)} />
             <IconBtn icon={X} title="关闭 (Esc)" onClick={close} />
           </div>
         </div>
 
+        {/* 中部：预览(含 Transport) + 检查器 */}
         <div className="flex-1 min-h-0 flex">
-          {/* 左：预览 + 时间轴 */}
           <div className="flex-1 min-w-0 flex flex-col p-3 gap-2 border-r" style={{ borderColor: 'var(--ace-border)' }}>
             <div ref={stageRef} className="relative flex-1 min-h-0 grid place-items-center bg-black rounded-lg overflow-hidden">
-              <video ref={vref} src={srcUrl} onLoadedMetadata={() => { onMeta(); measure() }} controls className="max-h-[52vh] max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform, clipPath: pv.clipPath }} />
-              {/* 叠加层：精确覆盖视频帧矩形（坐标系与导出 main_w/main_h 一致） */}
-              <div className="absolute pointer-events-none" style={vrect ? { left: vrect.left, top: vrect.top, width: vrect.width, height: vrect.height } : { inset: 0 }}>
-              {pv.overlays.map((o) => {
-                const st = (o.style || {}) as Record<string, unknown>
-                if (o.sub === 'mosaic') {
-                  return <div key={o.id} className="absolute pointer-events-none rounded-sm border-2 border-dashed border-amber-300/80 bg-black/30 backdrop-blur-sm grid place-items-center text-[9px] text-amber-200"
-                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: '20%' }}>打码区</div>
-                }
-                if (o.sub === 'pip') {
-                  return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
-                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, aspectRatio: '16/9' }}>画中画</div>
-                }
-                if (o.sub === 'frame') {
-                  const fs = (o.style || {}) as Record<string, unknown>
-                  return <div key={o.id} className="absolute inset-0 pointer-events-none" style={{ border: `${Math.max(2, (Number(fs.widthPct) || 0.03) * 60)}px solid ${String(fs.color || '#fff')}`, borderRadius: `${(Number(fs.radiusPct) || 0) * 200}px` }} />
-                }
-                if (o.sub === 'timecode') {
-                  const ts = (o.style || {}) as Record<string, unknown>
-                  return <div key={o.id} className="absolute pointer-events-none px-1.5 py-0.5 rounded bg-black/45 tabular-nums" style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, color: String(ts.color || '#fff'), fontSize: 'clamp(8px, 2vw, 18px)' }}>{fmt(playhead)}</div>
-                }
-                if (o.sub === 'progress') {
-                  const ps = (o.style || {}) as Record<string, unknown>
-                  return <div key={o.id} className="absolute left-0 right-0 pointer-events-none" style={{ top: `${o.top * 100}%`, height: `${Math.max(2, (Number(ps.heightPct) || 0.014) * 200)}px`, background: 'rgba(255,255,255,0.2)' }}>
-                    <div style={{ width: `${dur ? (playhead / dur) * 100 : 0}%`, height: '100%', background: String(ps.color || '#ff2d55') }} />
-                  </div>
-                }
-                if (o.sub === 'subtitle') {
-                  const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
-                  if (!cue) return null
-                  const bH = stack?.baseH || 720
-                  const exFont = Number(st.fontSize) || bH * 0.06
-                  const pxFont = vrect ? exFont * (vrect.height / bH) : 16
-                  return <div key={o.id} className="absolute pointer-events-none text-center"
-                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, color: String(st.color || '#fff'), fontSize: pxFont, textShadow: '0 1px 3px rgba(0,0,0,.95)', whiteSpace: 'pre-wrap' }}>{cue.text}</div>
-                }
-                {
-                  const bH = stack?.baseH || 720
-                  const exFont = Number(st.fontSize) || bH * (o.sub === 'sticker' ? 0.16 : 0.06)
-                  const pxFont = vrect ? exFont * (vrect.height / bH) : 16
-                  return (
-                    <div key={o.id} className="absolute pointer-events-none"
-                      style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, textAlign: st.align === 'center' ? 'center' : 'left', color: String(st.color || '#fff'), fontWeight: st.bold ? 700 : 500, fontSize: pxFont, textShadow: st.stroke === false ? 'none' : '0 1px 2px rgba(0,0,0,.9)', opacity: o.sub === 'watermark' ? 0.7 : 1, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}>
-                      {o.text || (o.sub === 'sticker' ? '⭐' : '文字')}
-                    </div>
-                  )
-                }
-              })}
-              </div>
-              {!pv.exact && (
-                <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/90 text-white text-[10px]">近似预览 · 导出更准</div>
-              )}
+              <video ref={vref} src={srcUrl} onLoadedMetadata={() => { onMeta(); measure() }} className="max-h-full max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform, clipPath: pv.clipPath }} />
+              <OverlayLayer overlays={pv.overlays} playhead={playhead} dur={dur} baseH={stack?.baseH || 720} vrect={vrect} />
+              {!pv.exact && <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/90 text-white text-[10px] pointer-events-none">近似预览 · 导出更准</div>}
             </div>
-            {/* 缩略图时间轴 */}
-            <div className="relative h-12 rounded-md overflow-hidden border flex select-none" style={{ borderColor: 'var(--ace-border)' }}
-              onPointerDown={(e) => {
-                const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                const t = Math.min(dur, Math.max(0, ((e.clientX - r.left) / r.width) * dur))
-                if (vref.current) vref.current.currentTime = t
-                setPlayhead(t)
-              }}>
-              {thumbs.length ? thumbs.map((t, i) => <img key={i} src={toFileUrl(t)} draggable={false} className="h-full flex-1 object-cover pointer-events-none" alt="" />)
-                : <div className="flex-1 grid place-items-center text-[10px] opacity-40">{ready ? '无缩略图' : '读取中…'}</div>}
-              {/* 删除段灰罩 */}
-              {pv.keeps && dur > 0 && (() => {
-                const segs: ReactNode[] = []
-                let prev = 0
-                for (const k of pv.keeps) {
-                  if (k.in > prev) segs.push(<div key={`g${prev}`} className="absolute inset-y-0 bg-black/55 pointer-events-none" style={{ left: `${(prev / dur) * 100}%`, width: `${((k.in - prev) / dur) * 100}%` }} />)
-                  prev = k.out
-                }
-                if (prev < dur) segs.push(<div key="gend" className="absolute inset-y-0 bg-black/55 pointer-events-none" style={{ left: `${(prev / dur) * 100}%`, right: 0 }} />)
-                return segs
-              })()}
-              <div className="absolute inset-y-0 w-0.5 bg-pink-500 pointer-events-none" style={{ left: `${dur ? (playhead / dur) * 100 : 0}%` }} />
-            </div>
-            {/* 音频波形（解码成功才显示；红区=区间静音） */}
-            {waveform && waveform.length > 0 && (
-              <WaveStrip peaks={waveform} dur={dur} playhead={playhead}
-                muteRanges={((stack?.ops.find((o) => o.kind === 'audio' && o.enabled)?.params as AudioParams | undefined)?.muteRanges) || []}
-                onSeek={(t) => { if (vref.current) vref.current.currentTime = t; setPlayhead(t) }} />
-            )}
-            <div className="flex items-center justify-between text-[11px] tabular-nums opacity-60">
-              <span>{fmt(playhead)} / {fmt(dur)}</span>
-              <span>原始 {stack?.baseW}×{stack?.baseH}</span>
-            </div>
+            <TransportBar vref={vref} dur={dur} playhead={playhead} playing={playing} startAt={startAt} onFullscreen={fullscreen} />
           </div>
 
-          {/* 右：操作栈 + 参数面板 */}
-          <div className="w-[340px] shrink-0 flex flex-col">
-            {/* 添加大类 */}
+          {/* 检查器 Inspector */}
+          <div className="w-[320px] shrink-0 flex flex-col">
             <div className="flex flex-wrap gap-1 p-2 border-b" style={{ borderColor: 'var(--ace-border)' }}>
               {ADDABLE.map((a) => (
                 <button key={a.kind} disabled={present.has(a.kind)} onClick={() => addOp(a.kind)}
@@ -398,15 +337,13 @@ function Inner({ cardId }: { cardId: string }) {
                   <Plus size={11} /> {a.label}
                 </button>
               ))}
-              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'progress', l: '进度条' }, { s: 'timecode', l: '时间码' }, { s: 'pip', l: '画中画' }].map((o) => (
-                <button key={o.s} onClick={() => addOverlay(o.s)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
+              {OVERLAY_ADD.map((o) => (
+                <button key={o.s} onClick={() => addOverlay(o.s)} className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
                   <Plus size={11} /> {o.l}
                 </button>
               ))}
             </div>
-            {/* 操作栈 */}
-            <div className="max-h-[26%] overflow-auto ace-scroll p-2 flex flex-col gap-1 border-b" style={{ borderColor: 'var(--ace-border)' }}>
+            <div className="max-h-[24%] overflow-auto ace-scroll p-2 flex flex-col gap-1 border-b" style={{ borderColor: 'var(--ace-border)' }}>
               {stack?.ops.map((op, i) => {
                 const Icon = KIND_ICON[op.kind]
                 const sel = op.id === selectedOpId
@@ -427,21 +364,28 @@ function Inner({ cardId }: { cardId: string }) {
                 )
               })}
             </div>
-            {/* 参数面板 */}
             <div className="flex-1 min-h-0 overflow-auto ace-scroll p-3">
-              {selectedOp ? <ParamPanel op={selectedOp} dur={dur} playhead={playhead} /> : <div className="text-[11px] opacity-40 text-center py-8">从上方选择或添加一个操作</div>}
+              {selectedOp ? <ParamPanel op={selectedOp} dur={dur} playhead={playhead} /> : <div className="text-[11px] opacity-40 text-center py-8">从上方添加或选择一个操作<br />也可点时间轴上的块编辑</div>}
             </div>
           </div>
         </div>
 
-        {/* 底部：导出 */}
-        <div className="flex items-center gap-3 px-4 py-2.5 border-t" style={{ borderColor: 'var(--ace-border)' }}>
+        {/* 底部：时间轴（可折叠）*/}
+        {tlOpen && (
+          <StudioTimeline stack={stack} thumbs={thumbs} waveform={waveform} dur={dur} playhead={playhead} ready={ready}
+            selectedOpId={selectedOpId} onSeek={(t) => { if (vref.current) vref.current.currentTime = t; setPlayhead(t) }}
+            onSelect={(id) => useStudio.getState().selectOp(id)} onSplit={splitAtPlayhead} />
+        )}
+
+        {/* BottomBar：导出 */}
+        <div className="flex items-center gap-3 px-4 py-2 border-t" style={{ borderColor: 'var(--ace-border)' }}>
           {busy && (
             <div className="flex-1 h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
               <div className="h-full bg-pink-500 transition-all" style={{ width: `${Math.round(progress * 100)}%` }} />
             </div>
           )}
           {!busy && <span className="text-[11px] opacity-50">{ready ? '编辑就绪 · 导出生成新卡片' : '正在读取视频…'}</span>}
+          {!busy && !tlOpen && <button onClick={() => setTlOpen(true)} className="text-[11px] flex items-center gap-1 opacity-70 hover:opacity-100"><PanelBottomOpen size={13} /> 展开时间轴</button>}
           <div className="ml-auto flex items-center gap-2">
             {!busy && (
               <label className="flex items-center gap-1 text-[11px] opacity-70 cursor-pointer select-none">
@@ -455,6 +399,182 @@ function Inner({ cardId }: { cardId: string }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------- 叠加层（精确贴合视频帧；非字幕 overlay 受 range 时间窗门控）----------
+function OverlayLayer({ overlays, playhead, dur, baseH, vrect }: {
+  overlays: PreviewOverlay[]; playhead: number; dur: number; baseH: number
+  vrect: { left: number; top: number; width: number; height: number } | null
+}) {
+  return (
+    <div className="absolute pointer-events-none" style={vrect ? { left: vrect.left, top: vrect.top, width: vrect.width, height: vrect.height } : { inset: 0 }}>
+      {overlays.map((o) => {
+        const st = (o.style || {}) as Record<string, unknown>
+        // 非字幕 overlay 若设了时间窗，移播放头出窗即不显示（range/playhead 同为源时间基，直接比较）
+        if (o.sub !== 'subtitle' && o.range && (playhead < o.range.start || playhead > o.range.end)) return null
+        if (o.sub === 'mosaic') {
+          return <div key={o.id} className="absolute pointer-events-none rounded-sm border-2 border-dashed border-amber-300/80 bg-black/30 backdrop-blur-sm grid place-items-center text-[9px] text-amber-200"
+            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: '20%' }}>打码区</div>
+        }
+        if (o.sub === 'pip') {
+          return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
+            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, aspectRatio: '16/9' }}>画中画</div>
+        }
+        if (o.sub === 'frame') {
+          const fs = st
+          return <div key={o.id} className="absolute inset-0 pointer-events-none" style={{ border: `${Math.max(2, (Number(fs.widthPct) || 0.03) * 60)}px solid ${String(fs.color || '#fff')}`, borderRadius: `${(Number(fs.radiusPct) || 0) * 200}px` }} />
+        }
+        if (o.sub === 'timecode') {
+          return <div key={o.id} className="absolute pointer-events-none px-1.5 py-0.5 rounded bg-black/45 tabular-nums" style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, color: String(st.color || '#fff'), fontSize: 'clamp(8px, 2vw, 18px)' }}>{fmt(playhead)}</div>
+        }
+        if (o.sub === 'progress') {
+          return <div key={o.id} className="absolute left-0 right-0 pointer-events-none" style={{ top: `${o.top * 100}%`, height: `${Math.max(2, (Number(st.heightPct) || 0.014) * 200)}px`, background: 'rgba(255,255,255,0.2)' }}>
+            <div style={{ width: `${dur ? (playhead / dur) * 100 : 0}%`, height: '100%', background: String(st.color || '#ff2d55') }} />
+          </div>
+        }
+        if (o.sub === 'subtitle') {
+          const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
+          if (!cue) return null
+          const exFont = Number(st.fontSize) || baseH * 0.06
+          const pxFont = vrect ? exFont * (vrect.height / baseH) : 16
+          return <div key={o.id} className="absolute pointer-events-none text-center"
+            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, color: String(st.color || '#fff'), fontSize: pxFont, textShadow: '0 1px 3px rgba(0,0,0,.95)', whiteSpace: 'pre-wrap' }}>{cue.text}</div>
+        }
+        const exFont = Number(st.fontSize) || baseH * (o.sub === 'sticker' ? 0.16 : 0.06)
+        const pxFont = vrect ? exFont * (vrect.height / baseH) : 16
+        return (
+          <div key={o.id} className="absolute pointer-events-none"
+            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, textAlign: st.align === 'center' ? 'center' : 'left', color: String(st.color || '#fff'), fontWeight: st.bold ? 700 : 500, fontSize: pxFont, textShadow: st.stroke === false ? 'none' : '0 1px 2px rgba(0,0,0,.9)', opacity: o.sub === 'watermark' ? 0.7 : 1, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}>
+            {o.text || (o.sub === 'sticker' ? '⭐' : '文字')}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------- 自定义播放控制条 ----------
+function TBtn({ icon: Icon, title, onClick }: { icon: typeof Play; title: string; onClick: () => void }) {
+  return <button onClick={onClick} title={title} className="w-7 h-7 grid place-items-center rounded hover:bg-white/15 text-white/85"><Icon size={15} /></button>
+}
+function TransportBar({ vref, dur, playhead, playing, startAt, onFullscreen }: {
+  vref: RefObject<HTMLVideoElement>; dur: number; playhead: number; playing: boolean; startAt: number; onFullscreen: () => void
+}) {
+  const seek = (t: number) => { const el = vref.current; if (el) el.currentTime = Math.max(0, Math.min(dur || el.duration || 0, t)) }
+  const toggle = () => { const el = vref.current; if (el) { el.paused ? void el.play() : el.pause() } }
+  return (
+    <div className="flex items-center gap-0.5 px-3 h-10 rounded-lg bg-neutral-900/90 text-white shrink-0">
+      <TBtn icon={SkipBack} title="回起点 (Home)" onClick={() => seek(startAt)} />
+      <TBtn icon={ChevronLeft} title="上一帧 (←)" onClick={() => seek(playhead - 1 / 30)} />
+      <button onClick={toggle} title="播放/暂停 (空格)" className="w-9 h-9 grid place-items-center rounded-full bg-white text-neutral-900 hover:bg-white/90 mx-0.5">
+        {playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
+      </button>
+      <TBtn icon={ChevronRight} title="下一帧 (→)" onClick={() => seek(playhead + 1 / 30)} />
+      <TBtn icon={SkipForward} title="到结尾 (End)" onClick={() => seek(dur)} />
+      <span className="ml-2 text-xs tabular-nums text-white/75">{fmt(playhead)} <span className="text-white/40">/ {fmt(dur)}</span></span>
+      <div className="ml-auto"><TBtn icon={Maximize} title="全屏 (F)" onClick={onFullscreen} /></div>
+    </div>
+  )
+}
+
+// ---------- 底部多轨时间轴 ----------
+const TL_KIND_LABEL: Record<string, string> = { text: '文字', watermark: '水印', sticker: '贴纸', mosaic: '打码', pip: '画中画', progress: '进度条', timecode: '时间码', frame: '边框' }
+function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selectedOpId, onSeek, onSelect, onSplit }: {
+  stack: EditStack | null; thumbs: string[]; waveform: number[] | null; dur: number; playhead: number; ready: boolean
+  selectedOpId: string | null; onSeek: (t: number) => void; onSelect: (id: string) => void; onSplit: () => void
+}) {
+  const pct = (t: number) => (dur ? (t / dur) * 100 : 0)
+  // 以「被点击的内容区」自身矩形换算时间（内容区在 96px 轨道头之后，不能用整行宽度）
+  const seekFromContent = (clientX: number, el: HTMLElement) => {
+    if (!dur) return
+    const r = el.getBoundingClientRect()
+    onSeek(Math.min(dur, Math.max(0, ((clientX - r.left) / r.width) * dur)))
+  }
+  const ops = stack?.ops.filter((o) => o.enabled) || []
+  const keeps = ((ops.find((o) => o.kind === 'trim')?.params as TrimParams | undefined)?.segments || []).filter((s) => s.keep !== false && s.out > s.in)
+  const overlayBlocks = ops.filter((o) => o.kind === 'overlay' && (o.params as OverlayParams).sub !== 'subtitle' && (o.params as OverlayParams).range)
+    .map((o) => ({ id: o.id, p: o.params as OverlayParams }))
+  const subtitleOp = ops.find((o) => o.kind === 'overlay' && (o.params as OverlayParams).sub === 'subtitle')
+  const cues = (subtitleOp?.params as OverlayParams | undefined)?.cues || []
+  const muteRanges = (ops.find((o) => o.kind === 'audio')?.params as AudioParams | undefined)?.muteRanges || []
+  // 时间标尺刻度（约每 60px 一个）
+  const ticks: number[] = []
+  if (dur > 0) { const step = dur <= 12 ? 1 : dur <= 40 ? 5 : dur <= 120 ? 10 : 30; for (let t = 0; t <= dur + 0.01; t += step) ticks.push(t) }
+
+  const Lane = ({ icon: Icon, label, children, onClick }: { icon: typeof Film; label: string; children: ReactNode; onClick?: () => void }) => (
+    <div className="flex h-10 border-t" style={{ borderColor: 'var(--ace-border)' }}>
+      <div className="w-24 shrink-0 flex items-center gap-1 px-2 text-[10px] opacity-70 border-r" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }}><Icon size={11} /> {label}</div>
+      <div className="relative flex-1 min-w-0 cursor-pointer" onPointerDown={(e) => { onClick?.(); seekFromContent(e.clientX, e.currentTarget) }}>{children}</div>
+    </div>
+  )
+
+  return (
+    <div className="flex flex-col" style={{ background: 'var(--ace-surface)' }}>
+      {/* 工具栏 */}
+      <div className="flex items-center gap-2 px-2 h-8 border-t" style={{ borderColor: 'var(--ace-border)' }}>
+        <button onClick={onSplit} className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-pink-500/15 text-pink-600 dark:text-pink-300 hover:bg-pink-500/25"><Scissors size={11} /> 播放头切分</button>
+        <span className="text-[10px] opacity-40 ml-auto tabular-nums">源时间基 · {fmt(playhead)} / {fmt(dur)}</span>
+      </div>
+      {/* 标尺 */}
+      <div className="flex border-t" style={{ borderColor: 'var(--ace-border)' }}>
+        <div className="w-24 shrink-0 border-r" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }} />
+        <div className="relative flex-1 min-w-0 h-5 cursor-pointer" onPointerDown={(e) => seekFromContent(e.clientX, e.currentTarget)}>
+          {ticks.map((t, i) => (
+            <div key={i} className="absolute top-0 bottom-0 border-l border-black/10 dark:border-white/10" style={{ left: `${pct(t)}%` }}>
+              <span className="absolute top-0 left-0.5 text-[9px] opacity-50 tabular-nums">{fmt(t)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* 轨道区（统一播放头覆盖） */}
+      <div className="relative">
+        {/* 主视频轨 */}
+        <Lane icon={Film} label="主视频">
+          <div className="absolute inset-0 flex overflow-hidden">
+            {thumbs.length ? thumbs.map((t, i) => <img key={i} src={toFileUrl(t)} draggable={false} className="h-full flex-1 object-cover pointer-events-none opacity-90" alt="" />)
+              : <div className="flex-1 grid place-items-center text-[9px] opacity-30">{ready ? '' : '读取中…'}</div>}
+          </div>
+          {keeps.length > 0 && dur > 0 && (() => {
+            const segs: ReactNode[] = []
+            let prev = 0
+            for (const k of keeps) { if (k.in > prev) segs.push(<div key={`g${prev}`} className="absolute inset-y-0 bg-black/55 pointer-events-none" style={{ left: `${pct(prev)}%`, width: `${pct(k.in - prev)}%` }} />); prev = k.out }
+            if (prev < dur) segs.push(<div key="ge" className="absolute inset-y-0 bg-black/55 pointer-events-none" style={{ left: `${pct(prev)}%`, right: 0 }} />)
+            return segs
+          })()}
+        </Lane>
+        {/* 叠加轨 */}
+        {overlayBlocks.length > 0 && (
+          <Lane icon={Type} label="叠加">
+            {overlayBlocks.map((b) => {
+              const r = b.p.range!
+              return <div key={b.id} onPointerDown={(e) => { e.stopPropagation(); onSelect(b.id) }}
+                className={`absolute top-1 bottom-1 rounded px-1 flex items-center text-[9px] text-white truncate cursor-pointer ${selectedOpId === b.id ? 'ring-2 ring-white' : ''}`}
+                style={{ left: `${pct(r.start)}%`, width: `${Math.max(2, pct(r.end - r.start))}%`, background: 'rgba(236,72,153,0.85)' }}>
+                {b.p.sub === 'text' ? (b.p.text || '文字') : TL_KIND_LABEL[b.p.sub] || b.p.sub}
+              </div>
+            })}
+          </Lane>
+        )}
+        {/* 字幕轨 */}
+        {subtitleOp && (
+          <Lane icon={Type} label="字幕" onClick={() => onSelect(subtitleOp.id)}>
+            {cues.map((c, i) => <div key={i} className="absolute top-1.5 bottom-1.5 rounded-sm bg-indigo-500/80 pointer-events-none" style={{ left: `${pct(c.start)}%`, width: `${Math.max(1.5, pct(c.end - c.start))}%` }} title={c.text} />)}
+          </Lane>
+        )}
+        {/* 音频轨 */}
+        <Lane icon={Music} label="音频">
+          {waveform && waveform.length > 0 ? (
+            <div className="absolute inset-0 flex items-center gap-px px-px">
+              {waveform.map((p, i) => <div key={i} className="flex-1 bg-emerald-500/60 rounded-sm" style={{ height: `${Math.max(3, p * 90)}%` }} />)}
+            </div>
+          ) : <div className="absolute inset-0 grid place-items-center text-[9px] opacity-30">无音频波形</div>}
+          {muteRanges.map((m, i) => <div key={i} className="absolute inset-y-0 bg-rose-500/35 border-x border-rose-400/60 pointer-events-none" style={{ left: `${pct(m.start)}%`, width: `${pct(m.end - m.start)}%` }} />)}
+        </Lane>
+        {/* 贯穿播放头 */}
+        <div className="absolute top-0 bottom-0 w-0.5 bg-pink-500 pointer-events-none z-10" style={{ left: `calc(6rem + (100% - 6rem) * ${dur ? playhead / dur : 0})` }} />
       </div>
     </div>
   )

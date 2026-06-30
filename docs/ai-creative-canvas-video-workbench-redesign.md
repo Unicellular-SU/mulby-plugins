@@ -274,3 +274,11 @@ close(); e.stopImmediatePropagation()
 - store `...\src\ui\store\studioStore.ts`（live/commit 134-143；moveOp 锁 export 158-168；exportStack 187-245）
 
 不触碰 `compile.ts`/`run.ts` 导出管线、不改数据模型、不新增 store 字段（全局徽章复用 `selectOp`），契合"单卡操作栈"，可在一个 React 模态内分步增量落地。
+
+---
+
+## ⑩ 实现进度
+
+- **[Step −1 守卫·已完成]** CanvasStage 全局 keydown 加 `studioCardId` 守卫（修数据破坏级 bug）；模态键盘 capture+stopImmediatePropagation；Esc 分层(退全屏→取消选中→关闭)，绕过 useEscClose。
+- **[Step 0/1/2 + 部分 4/5·已完成]** 模态改 `min(1320px,95vw)×90vh` 五区：TopToolbar(标题/撤销重做/折叠时间轴/关闭) · 中部 [大预览(去原生 controls)+自定义 `<TransportBar>`(回起点/逐帧/播停/到尾/时码/全屏)] | 检查器(320，添加按钮+操作栈+参数面板) · 底部全宽 `<StudioTimeline>`(可折叠：工具栏[播放头切分] + 时间标尺 + 主视频轨(缩略图+删除段灰罩)/叠加轨(带 range 的 overlay 块)/字幕轨(cue 块)/音频轨(波形+静音红区) + 贯穿播放头，点块选中/点轨 seek) · BottomBar(保存本地+导出)。叠加渲染抽 `<OverlayLayer>` 并加**非字幕 overlay 的 range 时间窗门控**(移播放头出窗即消失)。键盘补 空格/←→/Home/End/F/Del。修时间轴 seek 用内容区矩形(非含轨道头的整行宽)。typecheck + vite build green。
+- **[延后]** Step 3 块拖拽(改时间窗) + timebase.ts(trim/speed 启用时输出基块只读) · Step 5 预览可视化手柄(裁剪框/锚点) · Step 6/7 双档/复位列/缩放档。
