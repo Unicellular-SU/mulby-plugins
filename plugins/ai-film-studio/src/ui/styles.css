@@ -3467,7 +3467,6 @@ select.afs-toolbar__select,
   gap: 6px;
 }
 .afs-dockitem {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -3479,35 +3478,6 @@ select.afs-toolbar__select,
 .afs-dockitem:hover {
   background: var(--afs-hover);
   border-color: var(--afs-border);
-}
-/* 右上「＋加入项目素材」：默认隐藏，hover/聚焦时浮现 */
-.afs-dockitem__add {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  color: #fff;
-  background: var(--afs-grad-accent, var(--afs-accent));
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-  cursor: pointer;
-  opacity: 0;
-  transform: scale(0.85);
-  transition: opacity 0.12s, transform 0.12s;
-}
-.afs-dockitem:hover .afs-dockitem__add,
-.afs-dockitem__add:focus-visible {
-  opacity: 1;
-  transform: scale(1);
-}
-.afs-dockitem__add:hover {
-  filter: brightness(1.08);
 }
 .afs-dockitem:active {
   cursor: grabbing;
@@ -3793,6 +3763,9 @@ select.afs-toolbar__select,
 
 /* 资产 Tab */
 .afs-studio__assets { display: flex; flex-direction: column; gap: 18px; }
+/* 资产分组：可作为「从 Dock 拖入」的放置区，拖悬时高亮（落入该组即按该组类别加入） */
+.afs-studio__assetgroup { border: 1.5px dashed transparent; border-radius: 12px; transition: border-color .12s, background .12s; }
+.afs-studio__assetgroup.is-dragover { border-color: var(--afs-accent); background: var(--afs-hover); }
 .afs-studio__assetgroup-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .afs-studio__assetlist { display: flex; flex-wrap: wrap; gap: 8px; }
 .afs-studio__chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--afs-border); border-radius: 8px; padding: 2px 4px 2px 8px; }
@@ -3816,9 +3789,9 @@ select.afs-toolbar__select,
 .afs-studio__cardname { background: transparent; border: 1px solid transparent; color: var(--afs-text); font-size: 13px; font-weight: 600; padding: 3px 5px; border-radius: 5px; }
 .afs-studio__cardname:hover, .afs-studio__cardname:focus { border-color: var(--afs-border); outline: none; }
 .afs-studio__carddesc { resize: none; font-size: 12px; }
-.afs-studio__cardactions { display: flex; gap: 6px; }
-.afs-studio__cardactions .afs-btn { flex: 1; justify-content: center; }
-.afs-studio__cardactions .afs-btn--ghost { flex: 0 0 auto; }
+.afs-studio__cardactions { display: flex; flex-wrap: wrap; gap: 6px; }
+.afs-studio__cardactions .afs-btn { flex: 1 1 0; justify-content: center; min-width: 34px; }
+.afs-studio__cardactions .afs-btn--ghost { flex: 1 1 0; }
 
 .afs-studio__sbitem { display: flex; align-items: flex-start; gap: 10px; padding: 10px; border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); }
 .afs-studio__sbthumb { position: relative; flex: 0 0 120px; height: 68px; border-radius: 6px; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }

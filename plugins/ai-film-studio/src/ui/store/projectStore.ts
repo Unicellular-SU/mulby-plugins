@@ -66,8 +66,8 @@ export interface ProjectState {
   removeAsset: (id: string) => void
   /** 从全局素材库把一张图片绑成项目资产（角色/场景/物品的参考图）。projectId 为当前打开项目时走 mutate，否则直接读写目标 doc。返回新资产 id；非图片/无 assetId 返回 ''。 */
   importImageToProject: (projectId: string, rec: Pick<AssetRecord, 'assetId' | 'name' | 'type'>, kind: 'role' | 'scene' | 'prop') => Promise<string>
-  /** 从全局角色/场景库把元素绑成项目资产（带 refImageId + 桥接 elementId）。 */
-  importElementToProject: (projectId: string, el: ElementRef) => Promise<string>
+  /** 从全局角色/场景库把元素绑成项目资产（带 refImageId + 桥接 elementId）。kind 显式指定时优先（拖入「资产」某分组时按该组类别），否则按 el.kind 映射。 */
+  importElementToProject: (projectId: string, el: ElementRef, kind?: 'role' | 'scene' | 'prop') => Promise<string>
   /** 把项目里的角色/场景资产保存（回流）到全局角色场景库（复用 elementId，幂等更新）。 */
   promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
@@ -313,14 +313,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return writeAssetToProject(get, projectId, buildLibraryAsset({ kind, name: rec.name || '素材', assetId: rec.assetId }))
   },
 
-  importElementToProject: async (projectId, el) => {
-    const kind: Asset['type'] = el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role'
+  importElementToProject: async (projectId, el, kind) => {
+    const k: Asset['type'] = kind ?? (el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role')
     // 元素参考图优先取正视图，回退首张参考图（与画布 insertElementNode 取图口径一致）
     const assetId = el.views?.front ?? el.refAssetIds?.[0]
     return writeAssetToProject(
       get,
       projectId,
-      buildLibraryAsset({ kind, name: el.name, assetId, prompt: el.prompt, desc: el.description, elementId: el.id })
+      buildLibraryAsset({ kind: k, name: el.name, assetId, prompt: el.prompt, desc: el.description, elementId: el.id })
     )
   },
 

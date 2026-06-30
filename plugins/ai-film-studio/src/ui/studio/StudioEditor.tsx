@@ -7,9 +7,11 @@ import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loade
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
+import { useAssetStore } from '../store/assetStore'
+import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/types'
+import type { Asset, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
 import Select from '../components/ui/Select'
 import NumberStepper from '../components/ui/NumberStepper'
@@ -503,15 +505,41 @@ function ScriptTab() {
 function AssetsTab() {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
+  const importImageToProject = useProjectStore((s) => s.importImageToProject)
+  const importElementToProject = useProjectStore((s) => s.importElementToProject)
   const generateAllAssets = useProjectStore((s) => s.generateAllAssets)
   const polishAllAssets = useProjectStore((s) => s.polishAllAssets)
   const autoBindVoices = useProjectStore((s) => s.autoBindVoices)
   const batch = useProjectStore((s) => s.batch)
-  const groups: { type: AssetType; label: string }[] = [
+  const [dropKind, setDropKind] = useState<'role' | 'scene' | 'prop' | null>(null)
+  const groups: { type: 'role' | 'scene' | 'prop'; label: string }[] = [
     { type: 'role', label: '人物' },
     { type: 'scene', label: '场景' },
     { type: 'prop', label: '物品' },
   ]
+
+  // 从 Dock 拖入素材/角色：落到哪个分组就按该分组类别（人物/场景/物品）加入项目
+  const canAcceptDrag = (e: React.DragEvent) => {
+    const t = Array.from(e.dataTransfer.types)
+    return t.includes(DND_ELEMENT) || t.includes(DND_ASSET)
+  }
+  const onDrop = async (e: React.DragEvent, kind: 'role' | 'scene' | 'prop', label: string) => {
+    if (!canAcceptDrag(e)) return
+    e.preventDefault()
+    setDropKind(null)
+    const elId = e.dataTransfer.getData(DND_ELEMENT)
+    const asId = e.dataTransfer.getData(DND_ASSET)
+    if (elId) {
+      const el = useAssetStore.getState().elements.find((x) => x.id === elId)
+      if (el && (await importElementToProject(doc.meta.id, el, kind)))
+        window.mulby?.notification?.show(`已把「${el.name}」加入${label}`, 'success')
+    } else if (asId) {
+      const rec = useAssetStore.getState().assets.find((x) => x.id === asId)
+      if (rec && (await importImageToProject(doc.meta.id, rec, kind)))
+        window.mulby?.notification?.show(`已把「${rec.name || '素材'}」加入${label}`, 'success')
+    }
+  }
+
   return (
     <div className="afs-studio__assets">
       <div className="afs-studio__tabbar">
@@ -533,7 +561,20 @@ function AssetsTab() {
       {groups.map((g) => {
         const items = doc.assets.filter((a) => a.type === g.type && !a.parentAssetId)
         return (
-          <div key={g.type} className="afs-studio__assetgroup">
+          <div
+            key={g.type}
+            className={`afs-studio__assetgroup${dropKind === g.type ? ' is-dragover' : ''}`}
+            onDragOver={(e) => {
+              if (!canAcceptDrag(e)) return
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'copy'
+              if (dropKind !== g.type) setDropKind(g.type)
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropKind((k) => (k === g.type ? null : k))
+            }}
+            onDrop={(e) => void onDrop(e, g.type, g.label)}
+          >
             <div className="afs-studio__assetgroup-head">
               <b>{g.label}</b>
               <button className="afs-btn afs-btn--sm" onClick={() => upsertAsset({ type: g.type, name: `${g.label}${items.length + 1}` })}>
@@ -541,7 +582,7 @@ function AssetsTab() {
               </button>
             </div>
             <div className="afs-studio__cardgrid">
-              {items.length === 0 && <span className="afs-studio__hint">暂无</span>}
+              {items.length === 0 && <span className="afs-studio__hint">暂无（可从左侧 Dock 拖图片 / 角色到这里）</span>}
               {items.map((a) => (
                 <AssetCard key={a.id} asset={a} />
               ))}

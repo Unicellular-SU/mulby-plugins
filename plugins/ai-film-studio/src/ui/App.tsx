@@ -119,7 +119,7 @@ export default function App() {
           {view === 'studio' && <StudioApp onHome={() => go('home')} />}
           {view === 'home' && <ProjectHome onOpenCanvas={() => go('editor')} onOpenStudio={() => go('studio')} />}
           {view === 'editor' && <EditorView />}
-          {view === 'assets' && <AssetsView onInserted={() => go('editor')} />}
+          {view === 'assets' && <AssetsView />}
           {view === 'prompts' && <PromptLibrary />}
           {view === 'models' && <SettingsView section="models" />}
           {view === 'storage' && <SettingsView section="storage" />}
