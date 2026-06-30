@@ -1621,11 +1621,30 @@ select.afs-toolbar__select,
   overflow-y: auto;
   flex-shrink: 0;
   padding: 12px 14px;
-  background: var(--afs-panel);
-  border: 1px solid var(--afs-border);
-  border-radius: 12px;
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-xl);
   color: var(--afs-text);
-  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--afs-elev-4), var(--afs-glass-highlight);
+}
+/* 浮层玻璃降级（Studio 抽屉 / 模型弹层 / 灯箱信息面板 共用） */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-studio__drawer,
+  .afs-studio__modelpop,
+  .afs-lbhost__info {
+    background: var(--afs-glass-fallback);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-studio__drawer,
+  .afs-studio__modelpop,
+  .afs-lbhost__info {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-surface-3);
+  }
 }
 .afs-lbhost__info-head {
   display: flex;
@@ -3832,8 +3851,8 @@ select.afs-toolbar__select,
 /* 阶段1：左侧资源 Dock + 「精修」画布 Tab + 设置抽屉 */
 .afs-studio__dock { width: 240px; flex-shrink: 0; border-right: 1px solid var(--afs-border); background: var(--afs-panel); }
 .afs-studio__docktoggle { display: inline-flex; align-items: center; }
-.afs-studio__drawer-scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 60; display: flex; justify-content: flex-end; }
-.afs-studio__drawer { width: min(580px, 92vw); height: 100%; background: var(--afs-panel); border-left: 1px solid var(--afs-border); display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0, 0, 0, 0.3); }
+.afs-studio__drawer-scrim { position: fixed; inset: 0; background: var(--afs-scrim); z-index: 60; display: flex; justify-content: flex-end; }
+.afs-studio__drawer { width: min(580px, 92vw); height: 100%; background: var(--afs-glass-fill-strong); -webkit-backdrop-filter: var(--afs-glass-blur); backdrop-filter: var(--afs-glass-blur); border-left: var(--afs-glass-border); display: flex; flex-direction: column; box-shadow: var(--afs-elev-4), var(--afs-glass-highlight); }
 .afs-studio__drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--afs-border); font-weight: 600; }
 .afs-studio__drawer-body { flex: 1; overflow: auto; }
 /* 阶段3：时间线段卡片 + 一镜多生候选 */
@@ -4013,8 +4032,9 @@ select.afs-toolbar__select,
 
 /* 工作台 · 模型设置弹层（阶段4d UX） */
 .afs-studio__modelbar { position: relative; }
-.afs-studio__modelpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 280px; background: var(--afs-panel);
-  border: 1px solid var(--afs-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.35); }
+.afs-studio__modelpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 280px; background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur); backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border); border-radius: var(--afs-r-lg); padding: 12px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--afs-elev-3), var(--afs-glass-highlight); }
 .afs-studio__modelpop label { font-size: 12px; color: var(--afs-muted); margin-top: 4px; }
 .afs-studio__modelstat { font-size: 12px; padding: 6px 9px; border-radius: 7px; background: var(--afs-panel-2); border: 1px solid var(--afs-border); }
 .afs-studio__modelstat.is-missing { color: var(--afs-warning); }
