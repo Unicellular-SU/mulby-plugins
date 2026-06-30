@@ -282,6 +282,15 @@ JSON 结构：
       '{basis}, establishing shot, environment concept art, no people, no characters, unoccupied location, cinematic lighting, highly detailed',
   },
   {
+    id: 'image.assetSceneCrowd',
+    group: 'image',
+    label: '场景资产 · 含人群（群演/NPC）',
+    desc: '工作流场景资产在描述含人群/群演关键词时使用：允许匿名背景群众与 NPC（属于环境的一部分），但不含具名主角与面部特写。',
+    placeholders: ['{basis}'],
+    default:
+      '{basis}, establishing shot, populated environment with anonymous background crowd and extras as part of the setting, no named main characters, no close-up faces, wide environmental view, cinematic lighting, highly detailed',
+  },
+  {
     id: 'image.assetProp',
     group: 'image',
     label: '物品节点 · 文字生成物品图',

@@ -113,6 +113,11 @@ const ASSET_LAYOUT_TPL: Partial<Record<Asset['type'], string>> = {
   prop: 'image.assetPropBoard',
 }
 
+// 场景"可以有人"识别（§需求）：描述含人群/群演/集会等关键词时，改用允许匿名背景群众的场景模板，
+// 而非默认的"无人空镜"。仅放宽群演，不引入具名主角（主角仍走人物资产）。中英关键词都覆盖（兼容润色后英文 basis）。
+const SCENE_CROWD_RE =
+  /人群|群演|群众|路人|人潮|人海|熙攘|拥挤|集市|市集|庙会|广场|宴会|聚会|观众|看台|战场|军队|士兵|游行|示威|舞会|派对|闹市|街市|crowd|crowded|bustling|extras|marketplace|festival|rally|parade|audience|battlefield/i
+
 // 资产参考图尺寸：人物五视图板恒用 16:9 横图（否则被项目竖屏画幅压扁版面）；物品用方图便于居中展示；
 // 场景跟随成片画幅（场景图天然要与分镜/视频同比例）。
 function assetImageSize(type: Asset['type'], meta: ProjectMeta): string {
@@ -159,7 +164,10 @@ export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promi
   const pack = getStylePack(meta.artStyle)
   const anchor = pack ? applyStylePack(pack, ASSET_ROLE[asset.type] ?? 'character') : ''
   // 构图层：basis 包进按类型的版面模板（charImageBoard 用 {ref}、场景/物品用 {basis}），再叠画风锚定。
-  const tplId = ASSET_LAYOUT_TPL[asset.type]
+  // 场景特例：描述含人群/群演关键词时改用"允许匿名背景群众"的场景模板。
+  const isCrowdScene =
+    asset.type === 'scene' && SCENE_CROWD_RE.test([asset.name, asset.desc, asset.prompt].filter(Boolean).join(' '))
+  const tplId = isCrowdScene ? 'image.assetSceneCrowd' : ASSET_LAYOUT_TPL[asset.type]
   const body = tplId ? fillTemplate(getPrompt(tplId), { ref: basis, basis }) : basis
   const prompt = [body, anchor].filter(Boolean).join(', ')
   const r = await generateImage({ model, prompt, size: assetImageSize(asset.type, meta) })
