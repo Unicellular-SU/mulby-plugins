@@ -718,3 +718,12 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 -map 0:v -map "[mix]" -c:v copy -c:a aac -t {videoDur} out.mp4
 # sidechaincompress 缺失：退化为固定低音量 BGM（addBgm）
 ```
+
+---
+
+## ⑪ 实现进度
+
+> 边实现边记录。每完成一段：更新本节 + tsc/build green + 提交。未在 Mulby 运行时验证（沿用本插件惯例：tsc + vite build + pack 通过，用户手动在 Mulby 测）。落地前必跑 §8.10 三项实测。
+
+- **[P0 地基·已完成]** 可取消执行：`mediaVideo.ts:runFf` / `probeDuration` 加可选 `signal?: AbortSignal`，`abort → task.kill()`，旧调用方传 undefined 完全兼容。`runFf` 导出供工作台/编译器复用。
+- **[P0 地基·已完成]** 编辑栈类型系统：新增 `src/ui/services/videoEdit/types.ts` —— `OpKind`/`EditOp`(按 kind 判别联合，7 大类参数类型)/`EditStack`/`EditRecipe`、大类编译顺序 `OP_KIND_ORDER`、`createOp` 工厂、`stackIsNoop`。纯类型骨架，typecheck green。

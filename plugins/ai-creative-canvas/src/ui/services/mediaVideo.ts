@@ -31,12 +31,27 @@ export async function ensureFfmpeg(): Promise<boolean> {
   }
 }
 
-async function runFf(args: string[], onProgress?: (p: number) => void): Promise<void> {
+async function runFf(args: string[], onProgress?: (p: number) => void, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
   const task = ff().run(args, (pr: any) => {
     if (onProgress && typeof pr?.percent === 'number') onProgress(Math.min(1, pr.percent / 100))
   })
-  await task.promise
+  const onAbort = () => {
+    try {
+      task.kill()
+    } catch {
+      /* already done */
+    }
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    await task.promise
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+  }
 }
+
+export { runFf }
 
 export async function clip(projectId: string, inPath: string, start: number, end: number): Promise<string> {
   const dur = Math.max(0.1, end - start)
@@ -225,8 +240,9 @@ function parseTime(t: string): number | null {
 }
 
 // 宿主仅暴露 ffmpeg.run（无 ffprobe）：用 -f null 解码一遍取末次 time≈时长
-export async function probeDuration(localPath: string): Promise<number | undefined> {
+export async function probeDuration(localPath: string, signal?: AbortSignal): Promise<number | undefined> {
   try {
+    if (signal?.aborted) return undefined
     let dur: number | undefined
     const task = ff().run(['-i', localPath, '-f', 'null', '-'], (p: any) => {
       if (p?.time) {
@@ -234,7 +250,19 @@ export async function probeDuration(localPath: string): Promise<number | undefin
         if (s != null) dur = s
       }
     })
-    await task.promise
+    const onAbort = () => {
+      try {
+        task.kill()
+      } catch {
+        /* already done */
+      }
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    try {
+      await task.promise
+    } finally {
+      signal?.removeEventListener('abort', onAbort)
+    }
     return dur
   } catch {
     return undefined
