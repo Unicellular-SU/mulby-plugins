@@ -3,7 +3,7 @@
  * 仅用于带可见文字的动作按钮；图标-only 按钮请用 IconButton。规格 docs §5.1。
  * 对外行为与原生 button 一致（onClick / disabled / aria-* / title 经 ...rest 透传），type 恒为 button（不提交表单）。
  */
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Loader2, type LucideIcon } from 'lucide-react'
 
 export type ButtonVariant = 'secondary' | 'primary' | 'gradient' | 'ghost' | 'danger' | 'danger-solid'
@@ -31,20 +31,10 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   children: ReactNode
 }
 
-export default function Button({
-  variant = 'secondary',
-  size = 'md',
-  leadingIcon: Leading,
-  trailingIcon: Trailing,
-  loading,
-  block,
-  glow,
-  pressed,
-  className,
-  children,
-  disabled,
-  ...rest
-}: ButtonProps) {
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'secondary', size = 'md', leadingIcon: Leading, trailingIcon: Trailing, loading, block, glow, pressed, className, children, disabled, ...rest },
+  ref,
+) {
   const sz = ICON_SIZE[size]
   const cls =
     'afs-btn' +
@@ -54,10 +44,12 @@ export default function Button({
     (glow ? ' afs-glow' : '') +
     (className ? ' ' + className : '')
   return (
-    <button type="button" className={cls} disabled={disabled || loading} aria-busy={loading || undefined} aria-pressed={pressed} {...rest}>
+    <button ref={ref} type="button" className={cls} disabled={disabled || loading} aria-busy={loading || undefined} aria-pressed={pressed} {...rest}>
       {loading ? <Loader2 size={sz} className="afs-spin" aria-hidden /> : Leading ? <Leading size={sz} aria-hidden /> : null}
       <span>{children}</span>
       {Trailing ? <Trailing size={sz} aria-hidden /> : null}
     </button>
   )
-}
+})
+
+export default Button
