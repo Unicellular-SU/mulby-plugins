@@ -39,6 +39,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
     if (color.contrast != null && color.contrast !== 1) fParts.push(`contrast(${color.contrast})`)
     if (color.saturation != null && color.saturation !== 1) fParts.push(`saturate(${color.saturation})`)
     if (color.hue) fParts.push(`hue-rotate(${color.hue}deg)`)
+    if (color.invert) fParts.push('invert(1)')
     if (color.gamma || color.temp || color.tint || color.sharpen || color.vignette || color.grain || color.lutPath || color.preset) exact = false
   }
 
@@ -55,7 +56,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
       // inset(top right bottom left)，归一→百分比
       clipPath = `inset(${(c.y * 100).toFixed(2)}% ${((1 - c.x - c.w) * 100).toFixed(2)}% ${((1 - c.y - c.h) * 100).toFixed(2)}% ${(c.x * 100).toFixed(2)}%)`
     }
-    if (tf.kenBurns || tf.fit === 'blur-pad') exact = false
+    if (tf.kenBurns || tf.fit === 'blur-pad' || (tf.pixelate && tf.pixelate > 1)) exact = false
   }
 
   // 变速 → playbackRate

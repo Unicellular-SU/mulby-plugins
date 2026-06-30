@@ -41,6 +41,8 @@ const COLOR_PRESETS: { id: string; label: string; params: Partial<ColorParams> }
   { id: 'cool', label: '冷调', params: { temp: -35, saturation: 1.05, contrast: 1.02 } },
   { id: 'cine', label: '电影', params: { contrast: 1.15, saturation: 0.9, vignette: 0.4 } },
   { id: 'vintage', label: '复古', params: { saturation: 0.75, temp: 20, grain: 12, vignette: 0.5 } },
+  { id: 'film', label: '老电影', params: { saturation: 0.6, contrast: 1.1, temp: 15, grain: 18, vignette: 0.5 } },
+  { id: 'cyber', label: '赛博', params: { saturation: 1.4, contrast: 1.15, temp: -30, hue: 10 } },
   { id: 'bw', label: '黑白', params: { saturation: 0 } }
 ]
 
@@ -453,6 +455,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
               { value: '1080x1080:cover', label: '方屏 1:1 · 裁满' }
             ]} />
         </Row>
+        <SliderRow label="像素化" value={p.pixelate ?? 1} min={1} max={30} step={1} onLive={(v) => live({ pixelate: v })} onCommit={commit} />
       </div>
     )
   }
@@ -476,6 +479,19 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         <SliderRow label="降噪" value={p.denoise ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ denoise: v })} onCommit={commit} />
         <SliderRow label="暗角" value={p.vignette ?? 0} min={0} max={1} step={0.05} onLive={(v) => live({ vignette: v })} onCommit={commit} />
         <SliderRow label="颗粒" value={p.grain ?? 0} min={0} max={40} step={1} onLive={(v) => live({ grain: v })} onCommit={commit} />
+        <Toggle label="反相 negate" checked={!!p.invert} onChange={(v) => set({ invert: v })} />
+        <Row label="LUT">
+          <button onClick={async () => {
+            const m = (window as any).mulby
+            try {
+              const paths = await m?.dialog?.showOpenDialog({ title: '选择 3D LUT', filters: [{ name: 'LUT', extensions: ['cube', '3dl'] }], properties: ['openFile'] })
+              if (paths?.[0]) set({ lutPath: paths[0] })
+            } catch { /* ignore */ }
+          }} className="px-2 py-1 rounded text-[11px] bg-black/5 dark:bg-white/10 hover:bg-black/10 truncate flex-1 text-left">
+            {p.lutPath ? '已选：' + p.lutPath.split(/[\\/]/).pop() : '选择 .cube…'}
+          </button>
+          {p.lutPath && <button onClick={() => set({ lutPath: undefined })} className="px-1.5 py-1 rounded text-[10px] bg-black/5 dark:bg-white/10">清除</button>}
+        </Row>
       </div>
     )
   }

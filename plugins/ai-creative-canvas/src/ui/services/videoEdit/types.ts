@@ -65,6 +65,7 @@ export interface TransformParams {
   outH?: number
   fit?: FitMode
   kenBurns?: KenBurns
+  pixelate?: number // 全画面像素化块大小（>1 生效，neighbor 缩放）
 }
 
 // ---- color：调色面板 + 风格预设 ----
@@ -80,6 +81,7 @@ export interface ColorParams {
   denoise?: number // 0..1（hqdn3d 强度）
   vignette?: number // 0..1
   grain?: number // 0..40（noise）
+  invert?: boolean // 反相（negate）
   lutPath?: string // .cube 绝对路径
   preset?: string // 风格预设 id
   presetStrength?: number // 0..1

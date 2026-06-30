@@ -203,6 +203,11 @@ function applyTransform(g: Graph, p: TransformParams): void {
   }
   // 画幅适配（contain/cover/blur-pad）
   if (p.outW && p.outH) applyFit(g, p.outW, p.outH, p.fit || 'contain')
+  // 全画面像素化：缩小再放大（neighbor），放大目标偶数化避免 libx264 奇数尺寸报错
+  if (p.pixelate && p.pixelate > 1) {
+    const n = Math.round(p.pixelate)
+    g.vf(`scale=round(iw/${n}):round(ih/${n}):flags=neighbor,scale=trunc(iw*${n}/2)*2:trunc(ih*${n}/2)*2:flags=neighbor,setsar=1`)
+  }
 }
 
 // 画幅适配，复用于 transform 与 export
@@ -249,6 +254,7 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
   if (p.sharpen && p.sharpen > 0) g.vf(`unsharp=5:5:${p.sharpen.toFixed(2)}:5:5:0`)
   if (p.vignette && p.vignette > 0) g.vf(`vignette=PI/${(5 - p.vignette * 3).toFixed(2)}`)
   if (p.grain && p.grain > 0) g.vf(`noise=alls=${Math.round(p.grain)}:allf=t`)
+  if (p.invert) g.vf('negate')
   if (p.lutPath && !fb.has('lut3d')) {
     const esc = p.lutPath.replace(/\\/g, '/').replace(/:/g, '\\:')
     g.vf(`lut3d=file='${esc}'`)
