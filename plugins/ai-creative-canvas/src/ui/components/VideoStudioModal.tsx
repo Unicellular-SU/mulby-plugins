@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2,
-  Play, Pause, SkipBack, SkipForward, Maximize, PanelBottomClose, PanelBottomOpen, Type
+  Play, Pause, SkipBack, SkipForward, Maximize, PanelBottomClose, PanelBottomOpen, Type,
+  Captions, Stamp, Sticker, Grid2x2, Square, RectangleHorizontal, Timer, PictureInPicture2, Settings2, type LucideIcon
 } from 'lucide-react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
@@ -29,6 +30,37 @@ function fmt(s: number): string {
 
 const KIND_ICON: Record<OpKind, typeof Scissors> = {
   trim: Scissors, speed: Gauge, transform: Crop, color: Palette, overlay: Plus, audio: Music, export: Download
+}
+
+// 左侧工具条（PS 风）：全局工具（单例）+ 叠加工具（多实例）+ 导出
+const GLOBAL_TOOLS: { kind: OpKind; label: string; icon: LucideIcon }[] = [
+  { kind: 'trim', label: '裁切', icon: Scissors },
+  { kind: 'speed', label: '变速', icon: Gauge },
+  { kind: 'transform', label: '几何', icon: Crop },
+  { kind: 'color', label: '调色', icon: Palette },
+  { kind: 'audio', label: '音频', icon: Music }
+]
+const OVERLAY_TOOLS: { sub: string; label: string; icon: LucideIcon }[] = [
+  { sub: 'text', label: '文字', icon: Type },
+  { sub: 'subtitle', label: '字幕', icon: Captions },
+  { sub: 'watermark', label: '水印', icon: Stamp },
+  { sub: 'sticker', label: '贴纸', icon: Sticker },
+  { sub: 'mosaic', label: '打码', icon: Grid2x2 },
+  { sub: 'frame', label: '边框', icon: Square },
+  { sub: 'progress', label: '进度条', icon: RectangleHorizontal },
+  { sub: 'timecode', label: '时间码', icon: Timer },
+  { sub: 'pip', label: '画中画', icon: PictureInPicture2 }
+]
+const OVERLAY_PRESETS: Record<string, Record<string, unknown>> = {
+  text: { sub: 'text', rect: { x: 0.1, y: 0.78, w: 0.8, h: 0.12 }, text: '在此输入文字', style: { align: 'center' } },
+  watermark: { sub: 'watermark', rect: { x: 0.66, y: 0.05, w: 0.3, h: 0.08 }, text: '水印', style: { align: 'left' } },
+  sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
+  mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
+  pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } },
+  subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } },
+  frame: { sub: 'frame', rect: { x: 0, y: 0, w: 1, h: 1 }, style: { color: '#ffffff', widthPct: 0.03, radiusPct: 0 } },
+  progress: { sub: 'progress', rect: { x: 0, y: 0.97, w: 1, h: 0.02 }, style: { color: '#ff2d55', heightPct: 0.014 } },
+  timecode: { sub: 'timecode', rect: { x: 0.82, y: 0.04, w: 0.15, h: 0.07 }, style: { color: '#ffffff' } }
 }
 
 const RES_OPTIONS = [
@@ -255,36 +287,7 @@ function Inner({ cardId }: { cardId: string }) {
     if (v?.videoWidth) useStudio.getState().setBase({ baseW: v.videoWidth, baseH: v.videoHeight })
   }
 
-  // 可添加的大类（singleton：已存在则禁用；export 恒在，不在此）
-  const present = new Set((stack?.ops || []).map((o) => o.kind))
-  const ADDABLE: { kind: OpKind; label: string }[] = [
-    { kind: 'trim', label: '裁切' },
-    { kind: 'speed', label: '变速' },
-    { kind: 'transform', label: '几何' },
-    { kind: 'color', label: '调色' },
-    { kind: 'audio', label: '音频' }
-  ]
-  const addOp = (kind: OpKind) => {
-    if (kind === 'trim') useStudio.getState().addOp('trim', { segments: [{ in: 0, out: dur || 1, keep: true }] } as never)
-    else useStudio.getState().addOp(kind)
-  }
-  const addOverlay = (sub: string) => {
-    const presets: Record<string, Record<string, unknown>> = {
-      text: { sub: 'text', rect: { x: 0.1, y: 0.78, w: 0.8, h: 0.12 }, text: '在此输入文字', style: { align: 'center' } },
-      watermark: { sub: 'watermark', rect: { x: 0.66, y: 0.05, w: 0.3, h: 0.08 }, text: '水印', style: { align: 'left' } },
-      sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
-      mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
-      pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } },
-      subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } },
-      frame: { sub: 'frame', rect: { x: 0, y: 0, w: 1, h: 1 }, style: { color: '#ffffff', widthPct: 0.03, radiusPct: 0 } },
-      progress: { sub: 'progress', rect: { x: 0, y: 0.97, w: 1, h: 0.02 }, style: { color: '#ff2d55', heightPct: 0.014 } },
-      timecode: { sub: 'timecode', rect: { x: 0.82, y: 0.04, w: 0.15, h: 0.07 }, style: { color: '#ffffff' } }
-    }
-    useStudio.getState().addOp('overlay', presets[sub] as never)
-  }
-
   const startAt = pv.keeps?.[0]?.in ?? 0
-  const OVERLAY_ADD = [{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'progress', l: '进度条' }, { s: 'timecode', l: '时间码' }, { s: 'pip', l: '画中画' }]
   const splitAtPlayhead = () => {
     const g = useStudio.getState()
     const st = g.stack
@@ -317,8 +320,9 @@ function Inner({ cardId }: { cardId: string }) {
           </div>
         </div>
 
-        {/* 中部：预览(含 Transport) + 检查器 */}
+        {/* 中部：工具条 + 预览(含 Transport) + 检查器 */}
         <div className="flex-1 min-h-0 flex">
+          <ToolRail stack={stack} selectedOp={selectedOp} />
           <div className="flex-1 min-w-0 flex flex-col p-3 gap-2 border-r" style={{ borderColor: 'var(--ace-border)' }}>
             <div ref={stageRef} className="relative flex-1 min-h-0 grid place-items-center bg-black rounded-lg overflow-hidden">
               <video ref={vref} src={srcUrl} onLoadedMetadata={() => { onMeta(); measure() }} className="max-h-full max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform, clipPath: pv.clipPath }} />
@@ -328,22 +332,13 @@ function Inner({ cardId }: { cardId: string }) {
             <TransportBar vref={vref} dur={dur} playhead={playhead} playing={playing} startAt={startAt} onFullscreen={fullscreen} />
           </div>
 
-          {/* 检查器 Inspector */}
+          {/* 检查器 Inspector：图层(操作栈) + 参数面板 */}
           <div className="w-[320px] shrink-0 flex flex-col">
-            <div className="flex flex-wrap gap-1 p-2 border-b" style={{ borderColor: 'var(--ace-border)' }}>
-              {ADDABLE.map((a) => (
-                <button key={a.kind} disabled={present.has(a.kind)} onClick={() => addOp(a.kind)}
-                  className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 disabled:opacity-30 disabled:cursor-not-allowed">
-                  <Plus size={11} /> {a.label}
-                </button>
-              ))}
-              {OVERLAY_ADD.map((o) => (
-                <button key={o.s} onClick={() => addOverlay(o.s)} className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
-                  <Plus size={11} /> {o.l}
-                </button>
-              ))}
+            <div className="px-3 py-1.5 text-[10px] font-medium opacity-50 border-b flex items-center gap-1" style={{ borderColor: 'var(--ace-border)' }}>
+              图层 <span className="opacity-60">· 左侧工具条添加</span>
             </div>
-            <div className="max-h-[24%] overflow-auto ace-scroll p-2 flex flex-col gap-1 border-b" style={{ borderColor: 'var(--ace-border)' }}>
+            <div className="max-h-[26%] overflow-auto ace-scroll p-2 flex flex-col gap-1 border-b" style={{ borderColor: 'var(--ace-border)' }}>
+              {!stack?.ops.length && <div className="text-[11px] opacity-40 text-center py-3">从左侧工具条添加操作</div>}
               {stack?.ops.map((op, i) => {
                 const Icon = KIND_ICON[op.kind]
                 const sel = op.id === selectedOpId
@@ -365,7 +360,7 @@ function Inner({ cardId }: { cardId: string }) {
               })}
             </div>
             <div className="flex-1 min-h-0 overflow-auto ace-scroll p-3">
-              {selectedOp ? <ParamPanel op={selectedOp} dur={dur} playhead={playhead} /> : <div className="text-[11px] opacity-40 text-center py-8">从上方添加或选择一个操作<br />也可点时间轴上的块编辑</div>}
+              {selectedOp ? <ParamPanel op={selectedOp} dur={dur} playhead={playhead} /> : <div className="text-[11px] opacity-40 text-center py-8">从左侧工具条添加操作<br />或点图层 / 时间轴上的块编辑</div>}
             </div>
           </div>
         </div>
@@ -575,6 +570,37 @@ function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selecte
         </Lane>
         {/* 贯穿播放头 */}
         <div className="absolute top-0 bottom-0 w-0.5 bg-pink-500 pointer-events-none z-10" style={{ left: `calc(6rem + (100% - 6rem) * ${dur ? playhead / dur : 0})` }} />
+      </div>
+    </div>
+  )
+}
+
+// ---------- 左侧工具条（PS 风竖排）----------
+function RailBtn({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} title={label}
+      className={`relative w-11 h-11 grid place-items-center rounded-lg transition-colors group ${active ? 'bg-pink-500 text-white shadow-sm' : 'text-neutral-500 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+      <Icon size={18} />
+      {active && <span className="absolute left-0 inset-y-1.5 w-0.5 rounded-full bg-white" />}
+    </button>
+  )
+}
+function ToolRail({ stack, selectedOp }: { stack: EditStack | null; selectedOp: EditOp | null }) {
+  const addGlobal = (kind: OpKind) => {
+    const ex = stack?.ops.find((o) => o.kind === kind)
+    if (ex) useStudio.getState().selectOp(ex.id)
+    else if (kind === 'trim') useStudio.getState().addOp('trim', { segments: [{ in: 0, out: stack?.baseDuration || 1, keep: true }] } as never)
+    else useStudio.getState().addOp(kind)
+  }
+  const addOverlay = (sub: string) => useStudio.getState().addOp('overlay', OVERLAY_PRESETS[sub] as never)
+  const selSub = selectedOp?.kind === 'overlay' ? (selectedOp.params as OverlayParams).sub : null
+  return (
+    <div className="w-14 shrink-0 border-r flex flex-col items-center gap-1 py-2 overflow-y-auto ace-noscroll" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }}>
+      {GLOBAL_TOOLS.map((t) => <RailBtn key={t.kind} icon={t.icon} label={t.label} active={selectedOp?.kind === t.kind} onClick={() => addGlobal(t.kind)} />)}
+      <div className="w-7 h-px my-1.5 bg-black/10 dark:bg-white/15" />
+      {OVERLAY_TOOLS.map((t) => <RailBtn key={t.sub} icon={t.icon} label={t.label} active={selSub === t.sub} onClick={() => addOverlay(t.sub)} />)}
+      <div className="mt-auto pt-1.5 border-t w-full flex justify-center" style={{ borderColor: 'var(--ace-border)' }}>
+        <RailBtn icon={Settings2} label="导出设置" active={selectedOp?.kind === 'export'} onClick={() => addGlobal('export')} />
       </div>
     </div>
   )
