@@ -136,7 +136,8 @@ export async function composeTimeline(
   projectId: string,
   o: {
     clips: { path: string; inSec: number; outSec: number; dur: number }[]
-    audioPath?: string
+    audioTracks?: AudioTrack[]
+    transitionDurs?: number[]
     width: number
     height: number
     fps: number
@@ -154,7 +155,8 @@ export async function composeTimeline(
   }
   return composeFilm(projectId, {
     clips: trimmed,
-    audioPath: o.audioPath,
+    audioTracks: o.audioTracks,
+    transitionDurs: o.transitionDurs,
     width: o.width,
     height: o.height,
     fps: o.fps,
@@ -197,15 +199,23 @@ export async function chromakey(
 
 export type FilmTransition = 'none' | 'xfade' | 'fade'
 
+export interface AudioTrack {
+  path: string
+  volume?: number // 增益（1=原始）
+  offset?: number // 入点延迟（秒）
+}
+
 export interface ComposeOptions {
   clips: string[] // 本地片段路径（按时间线顺序）
-  audioPath?: string // 可选：背景音（混在原声之上）
+  audioPath?: string // 兼容旧用法：单条背景音（混在原声之上）
+  audioTracks?: AudioTrack[] // v2：多音轨（各带 volume/offset），与 audioPath 二选一
   useClipAudio?: boolean // 是否保留各片段原声（默认 true）
   width: number
   height: number
   fps: number
   transition: FilmTransition
-  transitionDur?: number
+  transitionDur?: number // 全局默认转场时长
+  transitionDurs?: number[] // v2：每个相邻间隔的转场时长（长度 = clips.length-1，xfade 时生效）
   onProgress?: (p: number) => void
 }
 
@@ -232,10 +242,12 @@ export async function probeDuration(localPath: string): Promise<number | undefin
 }
 
 function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalSec?: number; outPath: string }): string[] {
-  const { clips, audioPath, width, height, fps, outPath } = o
+  const { clips, width, height, fps, outPath } = o
+  // 多音轨：优先 audioTracks；否则兼容旧 audioPath（单条）
+  const tracks: AudioTrack[] = o.audioTracks?.length ? o.audioTracks : o.audioPath ? [{ path: o.audioPath, volume: 1, offset: 0 }] : []
   const args: string[] = []
   for (const c of clips) args.push('-i', c)
-  if (audioPath) args.push('-i', audioPath)
+  for (const t of tracks) args.push('-i', t.path)
 
   // 视频归一化：scale+pad+setsar+fps（不同分辨率/帧率也能拼）
   const parts: string[] = []
@@ -250,7 +262,13 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
 
   const transition = o.transition ?? 'none'
   const durs = o.clipDurations && o.clipDurations.length === clips.length ? o.clipDurations : null
-  const d = Math.max(0.2, Math.min(o.transitionDur ?? 0.5, (durs ? Math.min(...durs) : 5) * 0.4))
+  const defD = o.transitionDur ?? 0.5
+  // 每个相邻间隔的转场时长（gap i 在 clip i 与 i+1 之间；i 从 1 计 = clip i-1↔i）
+  const gapD = (i: number) => {
+    const base = o.transitionDurs?.[i - 1] ?? defD
+    const cap = durs ? Math.min(durs[i - 1], durs[i]) * 0.4 : 2
+    return Math.max(0.2, Math.min(base, cap))
+  }
   let filter: string
   let vmap: string
   if (clips.length === 1) {
@@ -261,6 +279,7 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
     let prev = labels[0]
     let cum = durs[0]
     for (let i = 1; i < clips.length; i++) {
+      const d = gapD(i)
       const off = Math.max(0, cum - d)
       const out = i === clips.length - 1 ? '[vx]' : `[xf${i}]`
       xparts.push(`${prev}${labels[i]}xfade=transition=fade:duration=${d.toFixed(3)}:offset=${off.toFixed(3)}${out}`)
@@ -274,16 +293,19 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
     vmap = '[vcat]'
   }
   if (transition === 'fade') {
+    // 整片淡入淡出与 xfade 互斥（fade 仅在 concat 路径，视频长=Σdurs，故 total 正确）
     const total = durs ? durs.reduce((a, b) => a + b, 0) : o.totalSec || 0
+    const d = Math.max(0.2, Math.min(defD, total * 0.4))
     if (total > 2 * d) {
       filter += `;${vmap}fade=t=in:st=0:d=${d.toFixed(3)},fade=t=out:st=${(total - d).toFixed(3)}:d=${d.toFixed(3)}[vf]`
       vmap = '[vf]'
     }
   }
-  // 音频：默认保留各片段原声（归一化后 concat / 交叉淡化），可叠加背景音
+
+  // 音频：clip 原声(可选，concat/交叉淡化) + 多背景轨(各 adelay/volume) → amix
   const useClip = o.useClipAudio !== false
   const aParts: string[] = []
-  let amap = ''
+  const sources: string[] = []
   if (useClip) {
     for (let i = 0; i < clips.length; i++) {
       aParts.push(`[${i}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo[a${i}]`)
@@ -295,7 +317,7 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
       let prev = '[a0]'
       for (let i = 1; i < clips.length; i++) {
         const out = i === clips.length - 1 ? '[aclips]' : `[acf${i}]`
-        aParts.push(`${prev}[a${i}]acrossfade=d=${d.toFixed(3)}${out}`)
+        aParts.push(`${prev}[a${i}]acrossfade=d=${gapD(i).toFixed(3)}${out}`)
         prev = out
       }
       aclips = '[aclips]'
@@ -303,15 +325,30 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
       aParts.push(`${clips.map((_, i) => `[a${i}]`).join('')}concat=n=${clips.length}:v=0:a=1[aclips]`)
       aclips = '[aclips]'
     }
-    if (audioPath) {
-      aParts.push(`[${clips.length}:a]apad[bgmp]`)
-      aParts.push(`${aclips}[bgmp]amix=inputs=2:duration=first:dropout_transition=0[aout]`)
+    sources.push(aclips)
+  }
+  tracks.forEach((t, j) => {
+    const idx = clips.length + j
+    const ms = Math.max(0, Math.round((t.offset || 0) * 1000))
+    const vol = t.volume ?? 1
+    aParts.push(`[${idx}:a]adelay=${ms}|${ms},volume=${vol.toFixed(2)}[bg${j}]`)
+    sources.push(`[bg${j}]`)
+  })
+  const hasBg = tracks.length > 0
+  let amap = ''
+  if (sources.length === 1) {
+    // 单一音源：背景轨需 apad，配合 -shortest 收到视频长（clip 原声本身=视频长，无需 apad）
+    if (hasBg && !useClip) {
+      aParts.push(`${sources[0]}apad[aout]`)
       amap = '[aout]'
     } else {
-      amap = aclips
+      amap = sources[0]
     }
-  } else if (audioPath) {
-    aParts.push(`[${clips.length}:a]apad[aout]`)
+  } else if (sources.length > 1) {
+    // amix 默认按输入数归一化(每路 ×1/N) 防多源叠加削波；各轨增益已在上游 volume 调过。
+    // 不做 ×N 预乘(会抵消归一化→响亮素材爆音)，也不依赖 normalize=0(旧版 ffmpeg 不支持)——与 v1 一致。
+    aParts.push(`${sources.join('')}amix=inputs=${sources.length}:duration=longest:dropout_transition=0[amx]`)
+    aParts.push(`[amx]apad[aout]`)
     amap = '[aout]'
   }
   if (aParts.length) filter += ';' + aParts.join(';')
@@ -321,7 +358,7 @@ function buildComposeArgs(o: ComposeOptions & { clipDurations?: number[]; totalS
   args.push('-c:v', 'libx264', '-preset', 'medium', '-pix_fmt', 'yuv420p', '-r', String(fps))
   if (amap) {
     args.push('-c:a', 'aac', '-b:a', '192k')
-    if (audioPath) args.push('-shortest') // 背景音已 apad 到无限长，按视频收尾
+    if (hasBg) args.push('-shortest') // 背景音已 apad 到无限长，按视频收尾
   }
   args.push('-movflags', '+faststart', '-y', outPath)
   return args

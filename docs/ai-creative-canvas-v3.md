@@ -1013,3 +1013,11 @@
 - **tooltip 统一（零调用点改动）**：`TooltipHost` 在原 `[data-tip]` 基础上**自动接管原生 `[title]`**——hover 时摘除 title（抑制系统气泡、存 `data-ace-title`）、显示玻璃 tooltip、离开/滚轮/按下/卸载时还原。全站 60+ 处 `title=` 自动获得统一玻璃样式，无需逐一改为 data-tip。委托式 mouseover/mouseout 行为与原 data-tip 一致。
 - **原子组件** `components/ui.tsx`：`<Button variant=primary|secondary|danger|ghost loading>`（统一 indigo-500/600 主色 + `disabled:opacity-50 cursor-not-allowed`）、`<Empty icon text>`、`<Loading text>`。已采用：DialogHost 按钮（canonical，零视觉变化）、Gallery/TemplatePanel 空态。
 - **诚实说明**：纯视觉改动、需在 Mulby 内确认观感；其余 button/空态调用点可后续渐进迁移到原子组件（组件已就位，样式集中）。tooltip 摘 title 期间该元素 a11y 暂失 title（离开即还原，影响很小）。
+
+### 🎬 时间线 v2（2026-06-30，已提交）：拖拽裁剪 + 缩略图 + 多音轨 + 逐段转场
+补齐 P2f 的 v2 延后项：
+- **轨道拖拽裁剪**：拖片段左/右边缘改 in/out（像素↔秒按拖拽起点快照换算；window 监听 + pointercancel/blur/卸载 清理；拖边缘同时选中该段）。精调滑杆保留。
+- **缩略图条**：`timelineThumbs` 逐段惰性生成（按 id 回填、alive 守卫）铺在片段背景。
+- **逐段转场时长**：`gaps:number[]`（**位置语义**，长度=段数-1；重排不错位）；xfade 时选中段可调「与上一段」时长。服务端 `gapD(i)` 取 `transitionDurs[i-1]`，xfade offset 累积与音频 acrossfade 同步。
+- **多音轨混音**：从选中音频卡建多条音轨，各有音量(0-200%)/起始偏移；`ComposeOptions.audioTracks[{path,volume,offset}]`（保留 `audioPath` 兼容 ComposeModal）；`buildComposeArgs` 每轨 `adelay`+`volume` → `amix`（默认归一化防削波，**不**做 ×N 预乘、不依赖 `normalize=0`，与 v1 等价）+ `apad`+`-shortest`。
+- **审查后修复**（3-agent）：① 撤回 ×N 预乘（会抵消 amix 归一化→响亮素材爆音）；② 逐段转场改位置语义 `gaps[]`（原绑在 clip 上重排会错位）；③ 拖边缘补 setSel；④ 卸载清拖拽监听；⑤ offset 钳到总时长；⑥ key 用 c.id（重排不重挂）。**需真机实测** ffmpeg 滤镜与拖拽手感。
