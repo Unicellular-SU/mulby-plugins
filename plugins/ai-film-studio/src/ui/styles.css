@@ -7025,3 +7025,58 @@ html.light { --afs-lb-scrim: rgba(0, 0, 0, 0.86); } /* deliberately dark in ligh
   border-radius: var(--afs-r-xs);
 }
 .afs-search__clear:hover { background: var(--afs-hover); color: var(--afs-text); }
+
+/* ============ TagsInput 标签输入（可移除 pill + 行内输入） ============ */
+.afs-tagsinput {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: var(--afs-control-h);
+  padding: 3px 6px;
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  cursor: text;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard), box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-tagsinput:focus-within {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-tagsinput__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  background: color-mix(in srgb, var(--afs-accent) 14%, transparent);
+  color: var(--afs-text);
+  border-radius: var(--afs-r-pill);
+  font-size: 12px;
+}
+.afs-tagsinput__rm {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+  border-radius: var(--afs-r-pill);
+}
+.afs-tagsinput__rm:hover { background: var(--afs-hover); color: var(--afs-text); }
+.afs-tagsinput__input {
+  flex: 1;
+  min-width: 80px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--afs-text);
+  font: 400 13px/1 var(--afs-font-ui);
+  outline: none;
+}
+.afs-tagsinput__input::placeholder { color: var(--afs-text-dim); }

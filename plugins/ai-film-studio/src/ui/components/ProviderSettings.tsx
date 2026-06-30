@@ -10,6 +10,7 @@ import Checkbox from './ui/Checkbox'
 import { Field, Input, Textarea } from './ui/Field'
 import Button from './ui/Button'
 import IconButton from './ui/IconButton'
+import TagsInput from './ui/TagsInput'
 
 type Draft = Partial<MediaProviderConfig> & { kind: VideoProviderKind }
 
@@ -246,12 +247,12 @@ export default function ProviderSettings() {
                   <Field label="模型" className="afs-field--inline" htmlFor="afs-pvs-model">
                     <Input id="afs-pvs-model" value={draft.model || ''} placeholder="tts-1" onChange={(e) => set({ model: e.target.value })} />
                   </Field>
-                  <Field label="音色" className="afs-field--inline" htmlFor="afs-pvs-voices">
-                    <Input
-                      id="afs-pvs-voices"
-                      value={(draft.voices || []).join(', ')}
-                      placeholder="alloy, echo, nova…（逗号分隔，节点里可选）"
-                      onChange={(e) => set({ voices: e.target.value.split(',').map((v) => v.trim()).filter(Boolean) })}
+                  <Field label="音色" className="afs-field--inline">
+                    <TagsInput
+                      value={draft.voices || []}
+                      onChange={(voices) => set({ voices })}
+                      placeholder="alloy, echo, nova…（回车或逗号添加，节点里可选）"
+                      ariaLabel="音色"
                     />
                   </Field>
                   <p className="afs-pvs-note">同步语音：POST {'{接口地址}'}/audio/speech，直接返回音频（走后端，规避 CORS）。</p>
