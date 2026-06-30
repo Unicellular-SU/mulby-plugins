@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon } from 'lucide-react'
+import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon, Clapperboard, Loader2 } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import Select from './ui/Select'
 
@@ -48,6 +48,9 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
   return (
     <div className="afs-toolbar">
       <div className="afs-toolbar__group">
+        <div className="afs-toolbar__brandmark" title="AI 影视工坊" aria-hidden="true">
+          <Clapperboard size={16} />
+        </div>
         {editingName ? (
           <input
             className="afs-toolbar__name"
@@ -66,7 +69,19 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
           </span>
         )}
         <span className="afs-toolbar__meta">
-          {nodeCount} 节点 · {saving ? '保存中…' : dirty ? '未保存' : '已保存'}
+          <span
+            className={`afs-toolbar__statusdot afs-toolbar__statusdot--${saving ? 'saving' : dirty ? 'dirty' : 'saved'}`}
+          />
+          {nodeCount} 节点 ·{' '}
+          {saving ? (
+            <>
+              <Loader2 size={11} className="afs-spin" /> 保存中…
+            </>
+          ) : dirty ? (
+            '未保存'
+          ) : (
+            '已保存'
+          )}
         </span>
       </div>
 

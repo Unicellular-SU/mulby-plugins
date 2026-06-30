@@ -349,14 +349,31 @@ body {
 
 /* ============ 顶部工具栏 ============ */
 .afs-toolbar {
+  position: relative;
+  z-index: 2;
   height: 48px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  background: var(--afs-panel);
-  border-bottom: 1px solid var(--afs-border);
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border-bottom: var(--afs-glass-border);
+  box-shadow: var(--afs-glass-highlight);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-toolbar {
+    background: var(--afs-glass-fallback);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-toolbar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-panel);
+  }
 }
 .afs-toolbar__group {
   display: flex;
@@ -365,6 +382,35 @@ body {
 }
 .afs-toolbar__spacer {
   flex: 1;
+}
+/* 品牌渐变芯片 + 状态点（编辑器顶栏左组） */
+.afs-toolbar__brandmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--afs-r-sm);
+  background: var(--afs-grad-brand);
+  color: #fff;
+  box-shadow: var(--afs-elev-1);
+}
+.afs-toolbar__statusdot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--afs-text-dim);
+}
+.afs-toolbar__statusdot--saved {
+  background: var(--afs-success);
+}
+.afs-toolbar__statusdot--dirty {
+  background: var(--afs-warning);
+}
+.afs-toolbar__statusdot--saving {
+  background: var(--afs-info);
 }
 /* .afs-toolbar__logo / .afs-toolbar__brand 已移除（孤儿样式：Toolbar 不再渲染文字 logo；
    品牌标记统一为 AppRail 的 --afs-grad-brand 渐变芯片）。 */
@@ -415,6 +461,9 @@ body {
   background: var(--afs-hover);
 }
 .afs-toolbar__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12px;
   color: var(--afs-muted);
   white-space: nowrap;
