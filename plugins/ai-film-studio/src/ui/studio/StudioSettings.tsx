@@ -8,7 +8,7 @@ import { useGraphStore } from '../store/graphStore'
 import { getMemoryConfig } from './agent/memory'
 import { kvSet, STUDIO_KV, DEFAULT_MEMORY_CONFIG, type AgentKey, type MemoryConfig } from '../domain/studioKv'
 import Select from '../components/ui/Select'
-import Checkbox from '../components/ui/Checkbox'
+import Switch from '../components/ui/Switch'
 
 const AGENT_LABEL: Record<AgentKey, string> = {
   decision: '统筹/决策',
@@ -46,7 +46,7 @@ function AgentDeployPanel() {
     <section className="afs-studio__setsec">
       <h4>Agent 部署</h4>
       <div className="afs-studio__setrow">
-        <Checkbox
+        <Switch
           checked={advanced}
           onChange={(c) => setMode(c ? 'advanced' : 'simple')}
           label="高级（各子 Agent 独立配置）"
