@@ -206,6 +206,12 @@ async function refBase64(assetId?: string): Promise<{ base64: string; mime: stri
 const CONTINUITY_CLAUSE =
   'continue directly from the previous shot, same location, same lighting and color, keep characters consistent in appearance and screen position'
 
+// 防"拼版泄漏"：人物五视图设定板 / 物品多角度展示板作 img2img 参考时，模型易把"白底多视图版面"
+// 也复制进关键帧（产出设定板而非场景画面）。有参考图时显式声明：参考图仅供身份/外观锚定，
+// 输出单一连贯电影画面，而非设定板/多视图拼版/纯白底。
+const REF_ANTILEAK_CLAUSE =
+  'use the reference images only for character and object identity and appearance; compose a single cohesive cinematic scene, NOT a character model sheet or turnaround, no multi-view grid layout, no plain white reference background'
+
 /**
  * 生成分镜关键帧：分镜画面描述 + 出场资产（作参考图做一致性）+ 画风锚定。
  * 连贯性（fix 1 同源）：承接镜头（sb.chainFromPrev + 给了上一镜关键帧 chainBase）→ 由上一帧 img2img 派生，
@@ -232,14 +238,16 @@ export async function generateKeyframeImage(
 
   const canEdit = !!window.mulby?.ai?.images?.edit && !!window.mulby?.ai?.attachments?.upload
   const refs = canEdit ? ((await Promise.all(cast.map((a) => refBase64(a.refImageId)))).filter(Boolean) as { base64: string; mime: string }[]) : []
+  // 有出场资产参考图（多为五视图/多角度板）时，追加防拼版泄漏子句，避免设定板版面被复制进画面
+  const editPrompt = refs.length ? [prompt, REF_ANTILEAK_CLAUSE].join(', ') : prompt
   if (chaining && canEdit) {
     // 承接镜头：上一镜关键帧作主参考，角色/场景参考图作附加 → 同段相邻画格构图/光线/站位一致
-    const r = await editImage({ model, prompt, refBase64: chainBase!.base64, refMime: chainBase!.mime, extraRefs: refs })
+    const r = await editImage({ model, prompt: editPrompt, refBase64: chainBase!.base64, refMime: chainBase!.mime, extraRefs: refs })
     return saveAsset(r.base64, r.mime)
   }
   if (refs.length) {
     const [primary, ...rest] = refs
-    const r = await editImage({ model, prompt, refBase64: primary.base64, refMime: primary.mime, extraRefs: rest })
+    const r = await editImage({ model, prompt: editPrompt, refBase64: primary.base64, refMime: primary.mime, extraRefs: rest })
     return saveAsset(r.base64, r.mime)
   }
   const r = await generateImage({ model, prompt, size })
