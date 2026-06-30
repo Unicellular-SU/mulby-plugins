@@ -1482,7 +1482,7 @@ select.afs-toolbar__select,
   font-size: 10px;
   border-radius: 4px;
   background: rgba(11, 15, 23, 0.72);
-  color: #93c5fd;
+  color: var(--afs-info);
 }
 
 /* ============ 扇出实时网格（生成一张铺一张，在画布上展开） ============ */
@@ -1497,7 +1497,7 @@ select.afs-toolbar__select,
   position: relative;
   overflow: hidden;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--afs-text) 6%, transparent);
 }
 .afs-node__tile img,
 .afs-node__tile video {
@@ -1511,7 +1511,7 @@ select.afs-toolbar__select,
   align-items: center;
   justify-content: center;
   border: 1px dashed var(--afs-border);
-  color: #93c5fd;
+  color: var(--afs-info);
   animation: afs-pulse 1.3s ease-in-out infinite;
 }
 /* M30：失败瓦片——红框 + 红 ✗，hover 看错误；角标标镜头/变体身份 */
@@ -1889,7 +1889,7 @@ select.afs-toolbar__select,
 .afs-node__data-more {
   margin-left: auto;
   font-size: 10px;
-  color: #60a5fa;
+  color: var(--afs-info);
 }
 .afs-rv {
   position: fixed;
@@ -1985,7 +1985,7 @@ select.afs-toolbar__select,
   padding: 6px 8px;
   font-size: 13px;
   line-height: 1.6;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--afs-text) 5%, transparent);
   border-radius: 6px;
 }
 .afs-rv__dlg i {
@@ -2008,7 +2008,7 @@ select.afs-toolbar__select,
   aspect-ratio: 1;
   border-radius: 6px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--afs-text) 6%, transparent);
   cursor: zoom-in;
 }
 .afs-rv__tile img,
@@ -2057,8 +2057,8 @@ select.afs-toolbar__select,
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: #93c5fd;
-  background: rgba(96, 165, 250, 0.08);
+  color: var(--afs-info);
+  background: color-mix(in srgb, var(--afs-info) 8%, transparent);
 }
 .afs-node__data-list {
   max-height: 260px;
@@ -2077,7 +2077,7 @@ select.afs-toolbar__select,
   border-radius: 6px;
 }
 .afs-data-row:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--afs-text) 4%, transparent);
 }
 .afs-data-row + .afs-data-row {
   margin-top: 3px;
@@ -2952,7 +2952,7 @@ select.afs-toolbar__select,
 }
 .afs-themecard__sw--dark {
   background: #0b0f17;
-  color: #93c5fd;
+  color: var(--afs-info);
 }
 
 /* —— 占位界面 —— */
