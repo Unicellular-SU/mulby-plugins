@@ -5,6 +5,7 @@ import PromptSettings from '../PromptSettings'
 import { useUiStore, type Theme } from '../../store/uiStore'
 import { useAssetStore } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
+import { useConfirm } from '../ui/ConfirmDialog'
 
 type SettingsTab = 'providers' | 'appearance' | 'storage' | 'advanced'
 
@@ -153,13 +154,14 @@ function StorageSettings() {
   const load = useAssetStore((s) => s.load)
   const runGc = useAssetStore((s) => s.runGc)
   const saveProject = useGraphStore((s) => s.saveProject)
+  const confirm = useConfirm()
 
   useEffect(() => {
     if (!loaded) void load()
   }, [loaded, load])
 
   const onGc = async () => {
-    if (!window.confirm('清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。')) return
+    if (!(await confirm({ title: '清理未引用素材', message: '清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。', danger: true, confirmLabel: '清理' }))) return
     await saveProject()
     const r = await runGc()
     window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用素材，释放 ${fmtBytes(r.freedBytes)}`, 'success')

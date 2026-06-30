@@ -11,6 +11,8 @@ import LightboxHost from './components/LightboxHost'
 import ResultViewer from './components/ResultViewer'
 import { TooltipProvider } from './components/ui/Tooltip'
 import { ToastViewport } from './components/ui/Toast'
+import { ConfirmProvider } from './components/ui/ConfirmDialog'
+import { PromptProvider } from './components/ui/PromptDialog'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { clearAssetCache } from './services/assets'
 import { useProviderStore } from './store/providerStore'
@@ -109,6 +111,8 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={400} skipDelayDuration={300}>
       <ReactFlowProvider>
+      <ConfirmProvider>
+      <PromptProvider>
       <div className="afs-shell">
         <AppRail view={view} onChange={go} />
         <div className="afs-main">
@@ -123,6 +127,8 @@ export default function App() {
       <LightboxHost />
       <ResultViewer />
       <ToastViewport />
+      </PromptProvider>
+      </ConfirmProvider>
       </ReactFlowProvider>
     </TooltipProvider>
   )

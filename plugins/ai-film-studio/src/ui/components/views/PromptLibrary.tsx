@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Plus, X, Brush, Trash2, Download, Upload } from 'lucide-react'
 import Select from '../ui/Select'
+import { useConfirm } from '../ui/ConfirmDialog'
 import {
   usePromptStore,
   detectVars,
@@ -32,6 +33,11 @@ function SnippetLibrary() {
   const importPack = usePromptStore((s) => s.importPack)
   const fileRef = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState<Draft | null>(null)
+  const confirm = useConfirm()
+
+  const onDeleteSnippet = async (s: PromptSnippet) => {
+    if (await confirm({ title: '删除片段', message: `删除片段「${s.name}」？`, danger: true, confirmLabel: '删除' })) removeSnippet(s.id)
+  }
 
   const grouped = useMemo(() => {
     const m: Record<string, PromptSnippet[]> = {}
@@ -125,7 +131,7 @@ function SnippetLibrary() {
                         </button>
                         <button
                           className="afs-snip__del"
-                          onClick={() => window.confirm(`删除片段「${s.name}」？`) && removeSnippet(s.id)}
+                          onClick={() => onDeleteSnippet(s)}
                           title="删除"
                         >
                           <Trash2 size={13} />

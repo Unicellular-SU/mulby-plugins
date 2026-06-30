@@ -5226,3 +5226,13 @@ select.afs-toolbar__select,
 @media (forced-colors: active) {
   .afs-empty::before { display: none; }
 }
+
+/* ============ Prompt Dialog（usePrompt/PromptDialog · 文本输入变体，复用 .afs-dialog 玻璃外壳） ============
+   afs-pdlg* 为本特性新增（grep 确认零碰撞）；玻璃/动效/遮罩/a11y 回退全部由 Modal 的 .afs-dialog 体系提供。 */
+.afs-pdlg__body { display: flex; flex-direction: column; gap: var(--afs-sp-4); }
+.afs-pdlg__message { margin: 0; color: var(--afs-text); font-size: 14px; line-height: 1.5; }
+.afs-pdlg__hint { margin: 0; color: var(--afs-text-dim); font-size: 12px; line-height: 1.45; }
+.afs-pdlg__field .afs-field__input { width: 100%; box-sizing: border-box; }
+@media (forced-colors: active) {
+  .afs-pdlg__hint { color: GrayText; }
+}

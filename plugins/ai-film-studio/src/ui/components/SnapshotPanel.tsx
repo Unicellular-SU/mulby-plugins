@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { X, Camera, RotateCcw, Trash2, Brush } from 'lucide-react'
 import { useGraphStore, type ProjectSnapshot } from '../store/graphStore'
+import { useConfirm } from './ui/ConfirmDialog'
+import { usePrompt } from './ui/PromptDialog'
 
 function relTime(ts: number): string {
   const d = Date.now() - ts
@@ -24,6 +26,9 @@ export default function SnapshotPanel({ onClose }: { onClose: () => void }) {
   const projectName = useGraphStore((s) => s.projectName)
   const nodeCount = useGraphStore((s) => s.nodes.length)
 
+  const confirm = useConfirm()
+  const prompt = usePrompt()
+
   const [list, setList] = useState<ProjectSnapshot[]>([])
   const [name, setName] = useState('')
 
@@ -39,21 +44,21 @@ export default function SnapshotPanel({ onClose }: { onClose: () => void }) {
     void refresh()
   }
   const onRestore = async (s: ProjectSnapshot) => {
-    if (window.confirm(`恢复到快照「${s.name}」？当前画布会被覆盖（建议先存为快照）。`)) {
+    if (await confirm({ title: '恢复快照', message: `恢复到快照「${s.name}」？当前画布会被覆盖（建议先存为快照）。`, confirmLabel: '恢复' })) {
       await restoreSnapshot(s.id)
       window.mulby?.notification?.show(`已恢复到快照：${s.name}`, 'success')
       onClose()
     }
   }
   const onRename = async (s: ProjectSnapshot) => {
-    const n = window.prompt('重命名快照', s.name)
+    const n = await prompt({ title: '重命名快照', defaultValue: s.name })
     if (n && n.trim()) {
       await renameSnapshot(s.id, n.trim())
       void refresh()
     }
   }
   const onDelete = async (s: ProjectSnapshot) => {
-    if (window.confirm(`删除快照「${s.name}」？`)) {
+    if (await confirm({ title: '删除快照', message: `删除快照「${s.name}」？`, danger: true, confirmLabel: '删除' })) {
       await deleteSnapshot(s.id)
       void refresh()
     }
