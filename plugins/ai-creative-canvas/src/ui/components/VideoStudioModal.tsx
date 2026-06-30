@@ -238,7 +238,8 @@ function Inner({ cardId }: { cardId: string }) {
       sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
       mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
       pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } },
-      subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } }
+      subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } },
+      frame: { sub: 'frame', rect: { x: 0, y: 0, w: 1, h: 1 }, style: { color: '#ffffff', widthPct: 0.03, radiusPct: 0 } }
     }
     useStudio.getState().addOp('overlay', presets[sub] as never)
   }
@@ -275,6 +276,10 @@ function Inner({ cardId }: { cardId: string }) {
                 if (o.sub === 'pip') {
                   return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
                     style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, aspectRatio: '16/9' }}>画中画</div>
+                }
+                if (o.sub === 'frame') {
+                  const fs = (o.style || {}) as Record<string, unknown>
+                  return <div key={o.id} className="absolute inset-0 pointer-events-none" style={{ border: `${Math.max(2, (Number(fs.widthPct) || 0.03) * 60)}px solid ${String(fs.color || '#fff')}`, borderRadius: `${(Number(fs.radiusPct) || 0) * 200}px` }} />
                 }
                 if (o.sub === 'subtitle') {
                   const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
@@ -338,7 +343,7 @@ function Inner({ cardId }: { cardId: string }) {
                   <Plus size={11} /> {a.label}
                 </button>
               ))}
-              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'pip', l: '画中画' }].map((o) => (
+              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'frame', l: '边框' }, { s: 'pip', l: '画中画' }].map((o) => (
                 <button key={o.s} onClick={() => addOverlay(o.s)}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
                   <Plus size={11} /> {o.l}
@@ -472,6 +477,10 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
             ]} />
         </Row>
         <SliderRow label="像素化" value={p.pixelate ?? 1} min={1} max={30} step={1} onLive={(v) => live({ pixelate: v })} onCommit={commit} />
+        <Row label="镜像">
+          <Select className="flex-1" value={p.mirror || 'none'} onChange={(v) => set({ mirror: v as TransformParams['mirror'] })}
+            options={[{ value: 'none', label: '无' }, { value: 'h', label: '左右镜像（万花筒）' }, { value: 'v', label: '上下镜像' }]} />
+        </Row>
       </div>
     )
   }
@@ -796,6 +805,21 @@ function OverlayPanel({ op, params, dur, playhead }: { op: EditOp; params: Overl
   const board = useGraph((s) => s.getActiveBoard())
   const selfId = useUi((s) => s.studioCardId)
   const videoCards = Object.values(board.cards).filter((c) => c.kind === 'video' && !!c.assetLocalPath && c.id !== selfId)
+
+  if (p.sub === 'frame') {
+    const fs = (p.style || {}) as Record<string, unknown>
+    const setFs = (patch: Record<string, unknown>) => set({ style: { ...fs, ...patch } })
+    return (
+      <div className="flex flex-col gap-2.5">
+        <div className="text-[11px] font-medium opacity-70">相框 / 边框</div>
+        <Row label="颜色">
+          <input type="color" value={String(fs.color || '#ffffff')} onChange={(e) => setFs({ color: e.target.value })} className="w-8 h-6 rounded" />
+        </Row>
+        <SliderRow label="粗细" value={Number(fs.widthPct) || 0.03} min={0.005} max={0.12} step={0.005} onLive={(v) => live({ style: { ...fs, widthPct: v } })} onCommit={commit} />
+        <SliderRow label="圆角" value={Number(fs.radiusPct) || 0} min={0} max={0.2} step={0.01} onLive={(v) => live({ style: { ...fs, radiusPct: v } })} onCommit={commit} />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-2.5">

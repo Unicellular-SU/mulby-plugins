@@ -66,6 +66,7 @@ export interface TransformParams {
   fit?: FitMode
   kenBurns?: KenBurns
   pixelate?: number // 全画面像素化块大小（>1 生效，neighbor 缩放）
+  mirror?: 'none' | 'h' | 'v' // 镜像万花筒：左右/上下对称
 }
 
 // ---- color：调色面板 + 风格预设 ----
@@ -88,7 +89,7 @@ export interface ColorParams {
 }
 
 // ---- overlay：一切文字/图形（canvas→PNG→overlay）----
-export type OverlaySub = 'text' | 'watermark' | 'progress' | 'timecode' | 'sticker' | 'pip' | 'mosaic' | 'subtitle'
+export type OverlaySub = 'text' | 'watermark' | 'progress' | 'timecode' | 'sticker' | 'pip' | 'mosaic' | 'subtitle' | 'frame'
 export interface SubtitleCue {
   start: number // 输出时间基秒
   end: number

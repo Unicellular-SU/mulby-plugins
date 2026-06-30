@@ -57,7 +57,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
       // inset(top right bottom left)，归一→百分比
       clipPath = `inset(${(c.y * 100).toFixed(2)}% ${((1 - c.x - c.w) * 100).toFixed(2)}% ${((1 - c.y - c.h) * 100).toFixed(2)}% ${(c.x * 100).toFixed(2)}%)`
     }
-    if (tf.kenBurns || tf.fit === 'blur-pad' || (tf.pixelate && tf.pixelate > 1)) exact = false
+    if (tf.kenBurns || tf.fit === 'blur-pad' || (tf.pixelate && tf.pixelate > 1) || (tf.mirror && tf.mirror !== 'none')) exact = false
   }
 
   // 变速 → playbackRate

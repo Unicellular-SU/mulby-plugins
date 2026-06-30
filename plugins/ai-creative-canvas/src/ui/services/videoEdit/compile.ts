@@ -202,6 +202,30 @@ function applyTransform(g: Graph, p: TransformParams): void {
     else if (deg === 180) g.vf('transpose=1,transpose=1')
     else if (deg !== 0) g.vf(`rotate=${deg}*PI/180:fillcolor=black,setsar=1`)
   }
+  // 镜像万花筒：取一半 → 翻转拼回（输出尺寸不变）
+  if (p.mirror === 'h') {
+    const half = g.freshLabel('mh')
+    const a = g.freshLabel('ma')
+    const b = g.freshLabel('mb')
+    const rb = g.freshLabel('mr')
+    const out = g.freshLabel('v')
+    g.raw(`[${g.v}]crop=trunc(iw/2/2)*2:ih:0:0[${half}]`)
+    g.raw(`[${half}]split=2[${a}][${b}]`)
+    g.raw(`[${b}]hflip[${rb}]`)
+    g.raw(`[${a}][${rb}]hstack[${out}]`)
+    g.setV(out)
+  } else if (p.mirror === 'v') {
+    const half = g.freshLabel('mh')
+    const a = g.freshLabel('ma')
+    const b = g.freshLabel('mb')
+    const rb = g.freshLabel('mr')
+    const out = g.freshLabel('v')
+    g.raw(`[${g.v}]crop=iw:trunc(ih/2/2)*2:0:0[${half}]`)
+    g.raw(`[${half}]split=2[${a}][${b}]`)
+    g.raw(`[${b}]vflip[${rb}]`)
+    g.raw(`[${a}][${rb}]vstack[${out}]`)
+    g.setV(out)
+  }
   // 画幅适配（contain/cover/blur-pad）
   if (p.outW && p.outH) applyFit(g, p.outW, p.outH, p.fit || 'contain')
   // 全画面像素化：缩小再放大（neighbor），放大目标偶数化避免 libx264 奇数尺寸报错
