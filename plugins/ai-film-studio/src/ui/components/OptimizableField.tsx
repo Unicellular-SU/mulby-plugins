@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Sparkles, Loader2, RotateCcw } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import { optimizeFieldText } from '../services/fieldOptimize'
+import IconButton from './ui/IconButton'
 
 /** 可 AI 优化的文本输入：右下角「AI 优化」按钮按节点特点优化输入、替换原文，可撤回 */
 export function OptimizableField({
@@ -75,21 +76,26 @@ export function OptimizableField({
           onChange={(e) => onChange(e.target.value)}
         />
       )}
-      <div className="afs-optfield__actions">
+      <div className="afs-optfield__actions afs-insp4__optaffix">
         {undoVal != null && (
-          <button type="button" className="afs-optfield__btn" title="撤回上一次优化" onClick={onUndo}>
-            <RotateCcw size={12} />
-          </button>
+          <IconButton
+            size="sm"
+            variant="ghost"
+            aria-label="撤回上一次优化"
+            title="撤回上一次优化"
+            icon={<RotateCcw size={14} />}
+            onClick={onUndo}
+          />
         )}
-        <button
-          type="button"
-          className="afs-optfield__btn afs-optfield__btn--ai"
+        <IconButton
+          size="sm"
+          className="afs-insp4__optai"
+          aria-label="AI 优化此输入"
           title="AI 优化此输入（按该节点的特点）"
           disabled={busy || !cur.trim()}
           onClick={onOptimize}
-        >
-          {busy ? <Loader2 size={12} className="afs-spin" /> : <Sparkles size={12} />}
-        </button>
+          icon={busy ? <Loader2 size={14} className="afs-spin" /> : <Sparkles size={14} />}
+        />
       </div>
     </div>
   )

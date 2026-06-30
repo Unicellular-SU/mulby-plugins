@@ -3,6 +3,8 @@ import { X, ChevronLeft, ChevronRight, ListVideo, Wand2, Loader2, RotateCcw, Sen
 import { useUiStore, type LightboxItem } from '../store/uiStore'
 import { useGraphStore } from '../store/graphStore'
 import { useMediaUrl, type MediaRef } from '../services/mediaUrl'
+import IconButton from './ui/IconButton'
+import Button from './ui/Button'
 
 /**
  * 应用级 Lightbox（统一窗口）：节点预览 / Inspector / 素材库 / 结果查看器 都开这一个。
@@ -82,57 +84,78 @@ export default function LightboxHost() {
   }
 
   return (
-    <div className="afs-lbhost" onClick={busy ? undefined : close}>
-      <button className="afs-lbhost__close" onClick={close} disabled={busy} title="关闭 (Esc)">
-        <X size={20} />
-      </button>
+    <div className="afs-lbx" onClick={busy ? undefined : close}>
+      <IconButton
+        className="afs-lbx__close"
+        variant="onmedia"
+        size="md"
+        icon={<X size={20} />}
+        aria-label="关闭 (Esc)"
+        title="关闭 (Esc)"
+        onClick={close}
+        disabled={busy}
+      />
       {multi && hasVideo && (
         <button
-          className={`afs-lbhost__toggle${autoplay ? ' is-on' : ''}`}
+          type="button"
+          className={`afs-lbx__toggle${autoplay ? ' is-on' : ''}`}
+          aria-pressed={autoplay}
           onClick={(e) => {
             e.stopPropagation()
             setAutoplay((v) => !v)
           }}
           title={autoplay ? '连看中：视频播完自动放下一段（点击关闭）' : '开启连看：按顺序连续播放所有片段'}
         >
-          <ListVideo size={15} /> {autoplay ? '连看中' : '连看'}
+          <ListVideo size={15} aria-hidden /> {autoplay ? '连看中' : '连看'}
         </button>
       )}
       {multi && (
         <>
-          <button className="afs-lbhost__nav afs-lbhost__nav--prev" onClick={(e) => { e.stopPropagation(); nav(-1) }} title="上一个 (←)">
-            <ChevronLeft size={30} />
-          </button>
-          <button className="afs-lbhost__nav afs-lbhost__nav--next" onClick={(e) => { e.stopPropagation(); nav(1) }} title="下一个 (→)">
-            <ChevronRight size={30} />
-          </button>
+          <IconButton
+            className="afs-lbx__nav afs-lbx__nav--prev"
+            variant="onmedia"
+            size="md"
+            icon={<ChevronLeft size={28} />}
+            aria-label="上一个 (←)"
+            title="上一个 (←)"
+            onClick={(e) => { e.stopPropagation(); nav(-1) }}
+          />
+          <IconButton
+            className="afs-lbx__nav afs-lbx__nav--next"
+            variant="onmedia"
+            size="md"
+            icon={<ChevronRight size={28} />}
+            aria-label="下一个 (→)"
+            title="下一个 (→)"
+            onClick={(e) => { e.stopPropagation(); nav(1) }}
+          />
         </>
       )}
-      <div className="afs-lbhost__stage" onClick={(e) => e.stopPropagation()}>
-        <div className="afs-lbhost__frame">
+      <div className="afs-lbx__stage" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-lbx__frame">
           <LightboxMedia key={`${lb.index}-${ref.assetId || ref.url || ''}`} refv={ref} type={ctx.type} autoplay={autoplay} onEnded={onVideoEnded} />
           {busy && (
-            <div className="afs-lbhost__busy">
-              <Loader2 size={30} className="afs-spin" />
+            <div className="afs-lbx__busy" role="status" aria-live="polite">
+              <Loader2 size={30} className="afs-spin" aria-hidden />
               <span>生成中…</span>
             </div>
           )}
         </div>
         {showInfo && (
-          <div className="afs-lbhost__info">
+          <div className="afs-lbx__info">
             {(title || chips.length > 0) && (
-              <div className="afs-lbhost__info-head">
-                {title && <span className="afs-lbhost__info-title">{title}</span>}
+              <div className="afs-lbx__info-head">
+                {title && <span className="afs-lbx__info-title">{title}</span>}
                 {chips.map((c, i) => (
-                  <span className="afs-lbhost__metachip" key={i}>
+                  <span className="afs-lbx__chip" key={i}>
                     {c}
                   </span>
                 ))}
               </div>
             )}
             {promptText && (
-              <div className="afs-lbhost__info-prompt">
-                <span className="afs-lbhost__info-label">提示词</span>
+              <div className="afs-lbx__prompt">
+                <span className="afs-lbx__prompt-label">提示词</span>
                 {promptText}
               </div>
             )}
@@ -141,7 +164,7 @@ export default function LightboxHost() {
         )}
       </div>
       {multi && (
-        <div className="afs-lbhost__count">
+        <div className="afs-lbx__count" aria-live="polite">
           {lb.index + 1} / {lb.items.length}
         </div>
       )}
@@ -159,12 +182,19 @@ function LightboxEditBar({ busy, onSend, onRegen }: { busy: boolean; onSend: (p:
     if (ok) setPrompt('')
   }
   return (
-    <div className="afs-lbhost__edit">
-      <button className="afs-lbhost__regen" disabled={busy} onClick={onRegen} title="按当前上游/参考图重新生成这一张">
-        <RotateCcw size={13} /> 重新生成
-      </button>
-      <div className="afs-lbhost__chatbar">
-        <Wand2 size={14} className="afs-lbhost__chatbar-icon" />
+    <div className="afs-lbx__edit">
+      <Button
+        variant="secondary"
+        size="sm"
+        leadingIcon={RotateCcw}
+        disabled={busy}
+        onClick={onRegen}
+        title="按当前上游/参考图重新生成这一张"
+      >
+        重新生成
+      </Button>
+      <div className="afs-lbx__chatbar">
+        <Wand2 size={14} aria-hidden className="afs-lbx__chatbar-icon" />
         <input
           placeholder="对话修改这张图，如「换成夜晚」「加件红外套」…"
           value={prompt}
@@ -173,10 +203,17 @@ function LightboxEditBar({ busy, onSend, onRegen }: { busy: boolean; onSend: (p:
             if (e.key === 'Enter') void send()
           }}
           disabled={busy}
+          aria-label="对话修改这张图"
         />
-        <button className="afs-lbhost__send" disabled={!prompt.trim() || busy} onClick={() => void send()} title="发送修改 (Enter)">
-          {busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
-        </button>
+        <IconButton
+          className="afs-glow afs-lbx__send"
+          size="sm"
+          icon={busy ? <Loader2 size={14} className="afs-spin" /> : <Send size={14} />}
+          aria-label="发送修改 (Enter)"
+          title="发送修改 (Enter)"
+          disabled={!prompt.trim() || busy}
+          onClick={() => void send()}
+        />
       </div>
     </div>
   )
@@ -195,11 +232,11 @@ const LightboxMedia = memo(function LightboxMedia({
   onEnded: () => void
 }) {
   const url = useMediaUrl(refv)
-  if (!url) return <div className="afs-lbhost__loading">加载中…</div>
+  if (!url) return <div className="afs-lbx__loading">加载中…</div>
   return type === 'video' ? (
-    <video className="afs-lbhost__media" src={url} controls autoPlay playsInline loop={!autoplay} onEnded={autoplay ? onEnded : undefined} />
+    <video className="afs-lbx__media" src={url} controls autoPlay playsInline loop={!autoplay} onEnded={autoplay ? onEnded : undefined} />
   ) : (
-    <img className="afs-lbhost__media" src={url} alt="" />
+    <img className="afs-lbx__media" src={url} alt="" />
   )
 })
 

@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus, ArrowRight, MousePointerClick, AlertTriangle } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
@@ -9,6 +9,7 @@ import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
 import { OptimizableField } from './OptimizableField'
 import { getFieldOptimizer } from '../services/fieldOptimize'
+import Button from './ui/Button'
 import Select from './ui/Select'
 import { Field, Input, Textarea } from './ui/Field'
 import EmptyState from './ui/EmptyState'
@@ -25,6 +26,7 @@ function readFileAsDataUrl(file: File): Promise<string> {
 export default function Inspector() {
   const fileRef = useRef<HTMLInputElement>(null)
   const audioRef = useRef<HTMLInputElement>(null)
+  const [isScrolled, setIsScrolled] = useState(false)
   const selectedNodeId = useGraphStore((s) => s.selectedNodeId)
   const node = useGraphStore((s) => s.nodes.find((n) => n.id === s.selectedNodeId) || null)
   const allNodes = useGraphStore((s) => s.nodes)
@@ -214,70 +216,89 @@ export default function Inspector() {
 
   return (
     <div className="afs-inspector">
-      <div className="afs-inspector__head" style={{ borderColor: catVar }}>
-        <span className="afs-inspector__badge" style={{ background: catVar }}>
-          {meta.label}
-        </span>
-        <span className="afs-inspector__kind">{def.label}</span>
+      <div className={`afs-insp4__head${isScrolled ? ' is-scrolled' : ''}`} style={{ ['--cat' as any]: catVar }}>
+        <span className="afs-insp4__catbadge">{meta.label}</span>
+        <span className="afs-insp4__title">{def.label}</span>
       </div>
 
-      {(isImageInput || isAsset) && (
-        <>
-          <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
-          <button
-            className="afs-inspector__run afs-inspector__run--alt"
-            onClick={() => fileRef.current?.click()}
-            title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图（覆盖文字生成的图）' : isProp ? '选择本地图片作为物品参考图（覆盖文字生成的图）' : '选择本地图片作为参考图'}
-          >
-            <Upload size={14} /> {isScene ? '上传场景图' : isCharacter ? '上传角色图' : isProp ? '上传物品图' : '上传参考图'}
-          </button>
-        </>
-      )}
-
-      {isAsset && (
-        <button
-          className="afs-inspector__run afs-inspector__run--alt"
-          onClick={onSaveToLibrary}
-          title="把该角色/场景（含参考图）保存到全局库，跨工程复用"
-        >
-          <BookmarkPlus size={14} /> 保存到库
-        </button>
-      )}
-
-      {isAudioInput && (
-        <>
-          <input ref={audioRef} type="file" accept="audio/*" hidden onChange={onPickAudio} />
-          <button className="afs-inspector__run" onClick={() => audioRef.current?.click()} title="选择本地音频作为成片音轨">
-            <Upload size={14} /> 上传音频
-          </button>
-        </>
-      )}
-
-      {runnable && (
-        <div className="afs-inspector__runrow">
-          <button
-            className="afs-inspector__run"
-            disabled={isRunning}
-            onClick={() => runNode(node.id)}
-            title="仅运行此节点（用上游已有产物作输入）"
-          >
-            {running ? <Loader2 size={14} className="afs-spin" /> : <Play size={14} />}
-            {running ? '生成中…' : '运行此节点'}
-          </button>
-          {hasDownstream && (
-            <button
-              className="afs-inspector__run afs-inspector__run--alt"
-              disabled={isRunning}
-              onClick={() => runFrom(node.id)}
-              title="从此节点开始，依次执行其所有下游节点"
+      <div className="afs-insp4__actions">
+        {(isImageInput || isAsset) && (
+          <>
+            <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickFile} />
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={Upload}
+              block
+              onClick={() => fileRef.current?.click()}
+              title={isScene ? '选择本地图片作为场景参考图' : isCharacter ? '选择本地图片作为角色参考图（覆盖文字生成的图）' : isProp ? '选择本地图片作为物品参考图（覆盖文字生成的图）' : '选择本地图片作为参考图'}
             >
-              <FastForward size={14} /> 从此处继续
-            </button>
-          )}
-        </div>
-      )}
+              {isScene ? '上传场景图' : isCharacter ? '上传角色图' : isProp ? '上传物品图' : '上传参考图'}
+            </Button>
+          </>
+        )}
 
-      <div className="afs-inspector__scroll">
+        {isAsset && (
+          <Button
+            variant="secondary"
+            size="md"
+            leadingIcon={BookmarkPlus}
+            block
+            onClick={onSaveToLibrary}
+            title="把该角色/场景（含参考图）保存到全局库，跨工程复用"
+          >
+            保存到库
+          </Button>
+        )}
+
+        {isAudioInput && (
+          <>
+            <input ref={audioRef} type="file" accept="audio/*" hidden onChange={onPickAudio} />
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={Upload}
+              block
+              onClick={() => audioRef.current?.click()}
+              title="选择本地音频作为成片音轨"
+            >
+              上传音频
+            </Button>
+          </>
+        )}
+
+        {runnable && (
+          <div className="afs-insp4__runrow">
+            <Button
+              className="afs-insp4__runcta"
+              variant="gradient"
+              glow
+              size="md"
+              loading={running}
+              disabled={isRunning}
+              onClick={() => runNode(node.id)}
+              leadingIcon={Play}
+              title="仅运行此节点（用上游已有产物作输入）"
+            >
+              {running ? '生成中…' : '运行此节点'}
+            </Button>
+            {hasDownstream && (
+              <Button
+                variant="secondary"
+                size="md"
+                leadingIcon={FastForward}
+                disabled={isRunning}
+                onClick={() => runFrom(node.id)}
+                title="从此节点开始，依次执行其所有下游节点"
+              >
+                从此处继续
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="afs-insp4__body" onScroll={(e) => setIsScrolled(e.currentTarget.scrollTop > 0)}>
         <Field label="节点标题">
           <Input type="text" value={node.data.title} onChange={(e) => updateNodeTitle(node.id, e.target.value)} />
         </Field>
@@ -292,7 +313,7 @@ export default function Inspector() {
           <Field
             label={
               <>
-                插入片段 <ArrowRight size={12} aria-hidden /> {snippetTargetLabel}
+                插入片段 <ArrowRight size={12} aria-hidden className="afs-insp4__flowsep" /> {snippetTargetLabel}
               </>
             }
           >
@@ -335,7 +356,10 @@ export default function Inspector() {
         )}
 
         {providerCap && (
-          <Field label={`${providerCapLabel}供应商（覆盖默认）`}>
+          <Field
+            label={`${providerCapLabel}供应商（覆盖默认）`}
+            help={capProviders.length === 0 ? `尚无${providerCapLabel}供应商，先在顶栏「模型供应商」添加` : undefined}
+          >
             <Select
               block
               value={(node.data.params.providerOverride as string) || ''}
@@ -343,16 +367,13 @@ export default function Inspector() {
               options={[{ value: '', label: '跟随默认' }, ...capProviders.map((p) => ({ value: p.id, label: p.label }))]}
               ariaLabel={`${providerCapLabel}供应商（覆盖默认）`}
             />
-            {capProviders.length === 0 && (
-              <div className="afs-inspector__note">尚无{providerCapLabel}供应商，先在顶栏「模型供应商」添加</div>
-            )}
           </Field>
         )}
 
         {def.params.length === 0 &&
           def.category !== 'text' &&
           def.category !== 'image' &&
-          !providerCap && <div className="afs-inspector__note">该节点暂无可配置参数</div>}
+          !providerCap && <div className="afs-field__help">该节点暂无可配置参数</div>}
 
         {/* 输入区：每个输入端口的连接状态与上游产物摘要 */}
         {def.inputs.length > 0 && (
@@ -361,13 +382,15 @@ export default function Inspector() {
             {def.inputs.map((p) => {
               const v = inputs[p.id]?.[0]
               return (
-                <div key={p.id} className="afs-io">
-                  <span className="afs-io__label">
+                <div key={p.id} className="afs-insp4__iorow">
+                  <span className="afs-insp4__iolabel">
                     {p.label}
-                    <span className="afs-portcol__type">{p.type}</span>
+                    <span className="afs-insp4__typebadge" style={{ ['--ptype' as any]: `var(--afs-type-${p.type})` }}>
+                      {p.type}
+                    </span>
                   </span>
-                  <span className="afs-io__val">
-                    {v ? <InputSummary value={v} /> : <span className="afs-inspector__note">未连接</span>}
+                  <span className="afs-insp4__ioval">
+                    {v ? <InputSummary value={v} /> : <span className="afs-field__help">未连接</span>}
                   </span>
                 </div>
               )
@@ -375,26 +398,40 @@ export default function Inspector() {
           </div>
         )}
 
-        {node.data.error && <div className="afs-result afs-result--error">{node.data.error}</div>}
+        {node.data.error && (
+          <div className="afs-rescard afs-rescard--error">
+            <div className="afs-rescard__title">
+              <AlertTriangle size={14} />
+              生成失败
+            </div>
+            <div className="afs-rescard__msg">{node.data.error}</div>
+          </div>
+        )}
 
         {node.data.error && node.data.stream && (
-          <div className="afs-result">
-            <div className="afs-result__title">模型原始输出（供排查）</div>
-            <pre className="afs-result__pre">{node.data.stream}</pre>
+          <div className="afs-rescard">
+            <div className="afs-rescard__title">模型原始输出（供排查）</div>
+            <pre className="afs-rescard__pre">{node.data.stream}</pre>
           </div>
         )}
 
         {running && node.data.previewUrl && (
-          <div className="afs-result">
-            <div className="afs-result__title">生成预览…</div>
-            <img className="afs-result__img" src={node.data.previewUrl} alt="preview" />
+          <div className="afs-genprev">
+            <div className="afs-genprev__title">
+              <Loader2 size={14} className="afs-spin" />
+              生成预览…
+            </div>
+            <img className="afs-genprev__img" src={node.data.previewUrl} alt="preview" />
           </div>
         )}
 
         {running && !node.data.previewUrl && node.data.stream && (
-          <div className="afs-result">
-            <div className="afs-result__title">生成中…</div>
-            <pre className="afs-result__pre">{node.data.stream}</pre>
+          <div className="afs-rescard">
+            <div className="afs-rescard__title">
+              <Loader2 size={14} className="afs-spin" />
+              生成中…
+            </div>
+            <pre className="afs-streamcard__pre">{node.data.stream}</pre>
           </div>
         )}
 
@@ -420,9 +457,11 @@ export default function Inspector() {
         )}
       </div>
 
-      <button className="afs-inspector__delete" onClick={() => removeNode(node.id)}>
-        <Trash2 size={14} /> 删除节点
-      </button>
+      <div className="afs-insp4__footer">
+        <Button variant="danger" size="md" block leadingIcon={Trash2} onClick={() => removeNode(node.id)}>
+          删除节点
+        </Button>
+      </div>
     </div>
   )
 }

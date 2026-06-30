@@ -2,6 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Select from '../ui/Select'
 import Segmented from '../ui/Segmented'
 import EmptyState from '../ui/EmptyState'
+import Tabs from '../ui/Tabs'
+import Button from '../ui/Button'
+import IconButton from '../ui/IconButton'
+import Modal from '../ui/Modal'
+import Tooltip from '../ui/Tooltip'
+import { Field, Input, Textarea } from '../ui/Field'
+import { useConfirm } from '../ui/ConfirmDialog'
+import { usePrompt } from '../ui/PromptDialog'
 import {
   Upload,
   Trash2,
@@ -17,6 +25,7 @@ import {
   Box,
   Brush,
   FolderPlus,
+  Search,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
@@ -54,7 +63,7 @@ export function AssetThumb({ rec }: { rec: AssetRecord }) {
   const [ref, inView] = useInView<HTMLDivElement>('400px')
   const url = useMediaUrl(rec.type !== 'audio' && inView ? rec : null)
   const Icon = TYPE_ICON[rec.type]
-  const phClass = `afs-lib__ph${rec.type === 'audio' ? ' afs-lib__ph--audio' : ''}`
+  const phClass = `afs-lib__ph${rec.type === 'audio' ? ' afs-avph--audio' : ''}`
   return (
     <div className={phClass} ref={ref}>
       {rec.type === 'image' && url ? (
@@ -87,13 +96,13 @@ export default function AssetsView({ onInserted }: { onInserted: () => void }) {
   const [tab, setTab] = useState<'assets' | 'elements'>('assets')
   return (
     <div className="afs-surface">
-      <div className="afs-surface__head">
+      <div className="afs-surface__head afs-avhead">
         <h2 className="afs-surface__title">素材库</h2>
-        <Segmented
+        <Tabs
           ariaLabel="素材库视图"
           value={tab}
           onChange={(v) => setTab(v as 'assets' | 'elements')}
-          options={[
+          tabs={[
             { value: 'assets', label: '素材（图片 / 视频 / 音频）' },
             { value: 'elements', label: '角色 / 场景库' },
           ]}
@@ -121,6 +130,9 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   const moveAsset = useAssetStore((s) => s.moveAsset)
   const insertAssetNode = useGraphStore((s) => s.insertAssetNode)
   const saveProject = useGraphStore((s) => s.saveProject)
+
+  const confirm = useConfirm()
+  const prompt = usePrompt()
 
   const fileRef = useRef<HTMLInputElement>(null)
   const [typeF, setTypeF] = useState<'all' | AssetType>('all')
@@ -156,7 +168,7 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   }
 
   const onGc = async () => {
-    if (!window.confirm('清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。')) return
+    if (!(await confirm({ title: '清理未引用素材', message: '清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。', confirmLabel: '清理', danger: true }))) return
     await saveProject() // 先落盘当前工程，避免刚生成未保存的素材被误判为孤儿
     const r = await runGc()
     window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用素材，释放 ${fmtBytes(r.freedBytes)}`, 'success')
@@ -168,18 +180,21 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   }
 
   const onNewBoard = async () => {
-    const name = window.prompt('新建合集名称')
+    const name = await prompt({ title: '新建合集', placeholder: '合集名称', confirmLabel: '创建' })
     if (name && name.trim()) await createBoard(name.trim())
   }
   const onRenameBoard = async (id: string, cur: string) => {
-    const name = window.prompt('重命名合集', cur)
+    const name = await prompt({ title: '重命名合集', placeholder: '合集名称', defaultValue: cur })
     if (name && name.trim()) await renameBoard(id, name.trim())
   }
   const onDeleteBoard = async (id: string) => {
-    if (window.confirm('删除该合集？（素材不会被删除，仅归为未分组）')) {
+    if (await confirm({ title: '删除合集', message: '删除该合集？（素材不会被删除，仅归为未分组）', confirmLabel: '删除', danger: true })) {
       await deleteBoard(id)
       if (boardF === id) setBoardF('all')
     }
+  }
+  const onDeleteAsset = async (id: string) => {
+    if (await confirm({ title: '删除上传素材', message: '删除该上传素材？此操作不可撤销。', confirmLabel: '删除', danger: true })) removeAsset(id)
   }
   const boardCount = (id?: string) => assets.filter((a) => (id ? a.boardId === id : !a.boardId)).length
 
@@ -191,13 +206,11 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
 
   return (
     <>
-      <div className="afs-boards-layout">
+      <div className="afs-avgallery">
         <aside className="afs-boards">
           <div className="afs-boards__head">
             <span>合集</span>
-            <button onClick={onNewBoard} title="新建合集">
-              <FolderPlus size={14} />
-            </button>
+            <IconButton size="sm" icon={<FolderPlus size={14} />} aria-label="新建合集" onClick={onNewBoard} />
           </div>
           <button className={`afs-boards__row${boardF === 'all' ? ' is-active' : ''}`} onClick={() => setBoardF('all')}>
             <span>全部素材</span>
@@ -213,57 +226,79 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                 <span title={b.name}>{b.name}</span>
                 <span className="afs-boards__n">{boardCount(b.id)}</span>
               </button>
-              <button className="afs-boards__act" onClick={() => onRenameBoard(b.id, b.name)} title="重命名">
-                <Brush size={12} />
-              </button>
-              <button className="afs-boards__act" onClick={() => onDeleteBoard(b.id)} title="删除合集">
-                <Trash2 size={12} />
-              </button>
+              <IconButton
+                size="sm"
+                className="afs-boards__act"
+                icon={<Brush size={12} />}
+                aria-label="重命名"
+                onClick={() => onRenameBoard(b.id, b.name)}
+              />
+              <IconButton
+                size="sm"
+                variant="danger"
+                className="afs-boards__act"
+                icon={<Trash2 size={12} />}
+                aria-label="删除合集"
+                onClick={() => onDeleteBoard(b.id)}
+              />
             </div>
           ))}
         </aside>
 
-        <div className="afs-boards__main">
-          <div className="afs-lib__bar">
-            <div className="afs-lib__filters">
-              <Segmented
-                ariaLabel="按类型筛选"
-                size="sm"
-                value={typeF}
-                onChange={(v) => setTypeF(v as 'all' | 'image' | 'video' | 'audio')}
-                options={(['all', 'image', 'video', 'audio'] as const).map((t) => ({
-                  value: t,
-                  label: `${t === 'all' ? '全部' : TYPE_LABEL[t]} ${counts[t]}`,
-                }))}
+        <div className="afs-avcol">
+          <div className="afs-avtoolbar">
+            <Segmented
+              ariaLabel="按类型筛选"
+              size="sm"
+              value={typeF}
+              onChange={(v) => setTypeF(v as 'all' | 'image' | 'video' | 'audio')}
+              options={(['all', 'image', 'video', 'audio'] as const).map((t) => ({
+                value: t,
+                label: `${t === 'all' ? '全部' : TYPE_LABEL[t]} ${counts[t]}`,
+              }))}
+            />
+            <span className="afs-avtoolbar__divider" />
+            <Segmented
+              ariaLabel="按来源筛选"
+              size="sm"
+              value={roleF}
+              onChange={(v) => setRoleF(v as 'all' | 'generated' | 'uploaded')}
+              options={[
+                { value: 'all', label: '全部来源' },
+                { value: 'generated', label: '生成' },
+                { value: 'uploaded', label: '上传' },
+              ]}
+            />
+            <span className="afs-avtoolbar__spacer" />
+            <div className="afs-avsearch">
+              <Search size={13} className="afs-avsearch__icon" aria-hidden />
+              <input
+                type="search"
+                className="afs-avsearch__input"
+                placeholder="搜索名称 / 标签 / 工程…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
               />
-              <span className="afs-lib__sep" />
-              <Segmented
-                ariaLabel="按来源筛选"
-                size="sm"
-                value={roleF}
-                onChange={(v) => setRoleF(v as 'all' | 'generated' | 'uploaded')}
-                options={[
-                  { value: 'all', label: '全部来源' },
-                  { value: 'generated', label: '生成' },
-                  { value: 'uploaded', label: '上传' },
-                ]}
-              />
+              {q && (
+                <button className="afs-avsearch__clear" onClick={() => setQ('')} aria-label="清除搜索" type="button">
+                  <X size={12} />
+                </button>
+              )}
             </div>
-            <input className="afs-lib__search" placeholder="搜索名称 / 标签 / 工程…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <div className="afs-lib__actions">
-              <span className="afs-lib__usage" title="附件库占用">
+            <Tooltip content="附件库占用">
+              <span className="afs-avusage">
                 占用 {usage.count} 项 · {fmtBytes(usage.bytes)}
               </span>
-              <button className="afs-btn" disabled={busy} onClick={onGc} title="清理未引用素材（修复附件存储泄漏）">
-                <Sparkles size={15} /> 清理未引用
-              </button>
-              <button className="afs-btn afs-btn--save" disabled={busy} onClick={() => fileRef.current?.click()}>
-                <Upload size={15} /> 上传素材
-              </button>
-            </div>
+            </Tooltip>
+            <Button variant="secondary" size="sm" leadingIcon={Sparkles} disabled={busy} onClick={onGc} title="清理未引用素材（修复附件存储泄漏）">
+              清理未引用
+            </Button>
+            <Button variant="gradient" size="sm" glow leadingIcon={Upload} disabled={busy} onClick={() => fileRef.current?.click()}>
+              上传素材
+            </Button>
           </div>
 
-          <div className="afs-lib__scroll">
+          <div className="afs-avscroll">
             {filtered.length === 0 ? (
               loaded ? (
                 <EmptyState icon={ImageIcon} title="暂无素材" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地素材。" />
@@ -271,26 +306,27 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                 <EmptyState icon={ImageIcon} title="加载中…" loading />
               )
             ) : (
-              <div className="afs-lib__grid">
+              <div className="afs-avtiles">
                 {filtered.map((a) => {
                   const canInsert = a.type === 'image' || a.type === 'audio'
                   return (
-                    <div key={a.id} className="afs-acard">
-                      <div className="afs-acard__thumb" onClick={() => setPreview(a)} title="预览">
+                    <div key={a.id} className="afs-avcard">
+                      <div className="afs-avcard__thumb" onClick={() => setPreview(a)} title="预览">
                         <AssetThumb rec={a} />
-                        <span className="afs-acard__type">{TYPE_LABEL[a.type]}</span>
-                        {a.role === 'uploaded' && <span className="afs-acard__src">上传</span>}
+                        <span className="afs-avpill afs-avpill--type">{TYPE_LABEL[a.type]}</span>
+                        {a.role === 'uploaded' && <span className="afs-avpill afs-avpill--src">上传</span>}
                       </div>
-                      <div className="afs-acard__name" title={a.name || a.nodeKind || a.id}>
+                      <div className="afs-avcard__name" title={a.name || a.nodeKind || a.id}>
                         {a.name || a.nodeKind || '未命名'}
                       </div>
-                      <div className="afs-acard__meta">
+                      <div className="afs-avcard__meta">
                         {a.projectName ? a.projectName : a.role === 'uploaded' ? '本地上传' : '生成'} · {fmtBytes(a.bytes)}
                       </div>
                       {boards.length > 0 && (
                         <Select
                           size="sm"
-                          className="afs-acard__board"
+                          block
+                          className="afs-avcard__board"
                           value={a.boardId || ''}
                           onChange={(v) => moveAsset(a.id, v || undefined)}
                           options={[{ value: '', label: '未分组' }, ...boards.map((b) => ({ value: b.id, label: b.name }))]}
@@ -298,20 +334,21 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                           ariaLabel="移动到合集"
                         />
                       )}
-                      <div className="afs-acard__actions">
+                      <div className="afs-avcard__foot">
                         {canInsert && (
-                          <button onClick={() => onInsert(a)} title="插入到当前工程画布">
-                            <PlusSquare size={13} /> 插入画布
-                          </button>
+                          <Button variant="secondary" size="sm" leadingIcon={PlusSquare} onClick={() => onInsert(a)} title="插入到当前工程画布">
+                            插入画布
+                          </Button>
                         )}
                         {a.role === 'uploaded' && (
-                          <button
-                            className="afs-acard__del"
-                            title="删除上传素材"
-                            onClick={() => window.confirm('删除该上传素材？') && removeAsset(a.id)}
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          <IconButton
+                            variant="danger"
+                            size="sm"
+                            className="afs-avcard__foot--push"
+                            icon={<Trash2 size={13} />}
+                            aria-label="删除上传素材"
+                            onClick={() => onDeleteAsset(a.id)}
+                          />
                         )}
                       </div>
                     </div>
@@ -332,23 +369,23 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
 function Lightbox({ rec, onClose }: { rec: AssetRecord; onClose: () => void }) {
   const url = useMediaUrl(rec)
   return (
-    <div className="afs-lightbox" onClick={onClose}>
-      <div className="afs-lightbox__panel" onClick={(e) => e.stopPropagation()}>
-        <button className="afs-lightbox__close" onClick={onClose} aria-label="关闭" title="关闭">
-          <X size={18} />
-        </button>
-        <div className="afs-lightbox__media">
+    <div className="afs-avlightbox" onClick={onClose}>
+      <div className="afs-avlightbox__panel" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-avlightbox__close">
+          <IconButton variant="onmedia" icon={<X size={18} />} aria-label="关闭" onClick={onClose} />
+        </div>
+        <div className="afs-avlightbox__media">
           {rec.type === 'image' && url && <img src={url} alt="" />}
           {rec.type === 'video' && url && <video src={url} controls autoPlay />}
           {rec.type === 'audio' && url && <audio src={url} controls autoPlay />}
         </div>
-        <div className="afs-lightbox__meta">
-          <div className="afs-lightbox__name">{rec.name || rec.nodeKind || '未命名'}</div>
+        <div className="afs-avlightbox__info">
+          <div className="afs-avlightbox__name">{rec.name || rec.nodeKind || '未命名'}</div>
           <div>
             {TYPE_LABEL[rec.type]} · {rec.mime} · {fmtBytes(rec.bytes)}
             {rec.durationSec ? ` · ${rec.durationSec}s` : ''}
           </div>
-          <div className="afs-lightbox__sub">
+          <div className="afs-avlightbox__sub">
             来源：{rec.role === 'uploaded' ? '本地上传' : `生成${rec.projectName ? `（${rec.projectName}）` : ''}`}
             {rec.nodeKind ? ` · 节点：${rec.nodeKind}` : ''}
           </div>
@@ -371,6 +408,8 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
   const removeElement = useAssetStore((s) => s.removeElement)
   const insertElementNode = useGraphStore((s) => s.insertElementNode)
 
+  const confirm = useConfirm()
+
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
 
   useEffect(() => {
@@ -391,25 +430,27 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
     await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
     setEditing(null)
   }
+  const onDeleteElement = async (el: ElementRef) => {
+    if (await confirm({ title: '删除', message: `删除「${el.name}」？`, confirmLabel: '删除', danger: true })) removeElement(el.id)
+  }
 
   return (
     <>
-      <div className="afs-lib__bar">
+      <div className="afs-avtoolbar">
         <div className="afs-lib__hint">角色 / 场景 / 物品定义一次、跨工程复用（一致性底座）。「插入画布」生成绑定参考图的资产节点。</div>
-        <div className="afs-lib__actions">
-          <button className="afs-btn" onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
-            <Users size={15} /> 新建角色
-          </button>
-          <button className="afs-btn" onClick={() => setEditing({ kind: 'scene', name: '', refAssetIds: [] })}>
-            <Mountain size={15} /> 新建场景
-          </button>
-          <button className="afs-btn" onClick={() => setEditing({ kind: 'prop', name: '', refAssetIds: [] })}>
-            <Box size={15} /> 新建物品
-          </button>
-        </div>
+        <span className="afs-avtoolbar__spacer" />
+        <Button variant="secondary" size="sm" leadingIcon={Users} onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
+          新建角色
+        </Button>
+        <Button variant="secondary" size="sm" leadingIcon={Mountain} onClick={() => setEditing({ kind: 'scene', name: '', refAssetIds: [] })}>
+          新建场景
+        </Button>
+        <Button variant="secondary" size="sm" leadingIcon={Box} onClick={() => setEditing({ kind: 'prop', name: '', refAssetIds: [] })}>
+          新建物品
+        </Button>
       </div>
 
-      <div className="afs-lib__scroll">
+      <div className="afs-avscroll">
         {elements.length === 0 ? (
           loaded ? (
             <EmptyState icon={Users} title="暂无角色 / 场景" description="新建，或在画布的人物 / 场景节点点「保存到库」。" />
@@ -417,31 +458,34 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
             <EmptyState icon={Users} title="加载中…" loading />
           )
         ) : (
-          <div className="afs-lib__grid">
+          <div className="afs-avtiles">
             {elements.map((el) => {
               const Icon = KIND_ICON[el.kind]
               return (
-                <div key={el.id} className="afs-acard">
-                  <div className="afs-acard__thumb" onClick={() => onInsert(el)} title="插入到画布">
+                <div key={el.id} className="afs-avcard">
+                  <div className="afs-avcard__thumb" onClick={() => onInsert(el)} title="插入到画布">
                     <RefThumb assetId={el.refAssetIds?.[0]} />
-                    <span className="afs-acard__type">
+                    <span className="afs-avpill afs-avpill--type">
                       <Icon size={11} /> {KIND_LABEL[el.kind]}
                     </span>
                   </div>
-                  <div className="afs-acard__name" title={el.name}>
+                  <div className="afs-avcard__name" title={el.name}>
                     {el.name}
                   </div>
-                  <div className="afs-acard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
-                  <div className="afs-acard__actions">
-                    <button onClick={() => onInsert(el)} title="插入到当前工程画布">
-                      <PlusSquare size={13} /> 插入画布
-                    </button>
-                    <button onClick={() => setEditing(el)} title="编辑">
-                      <Brush size={13} />
-                    </button>
-                    <button className="afs-acard__del" onClick={() => window.confirm(`删除「${el.name}」？`) && removeElement(el.id)} title="删除">
-                      <Trash2 size={13} />
-                    </button>
+                  <div className="afs-avcard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
+                  <div className="afs-avcard__foot">
+                    <Button variant="secondary" size="sm" leadingIcon={PlusSquare} onClick={() => onInsert(el)} title="插入到当前工程画布">
+                      插入画布
+                    </Button>
+                    <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
+                    <IconButton
+                      variant="danger"
+                      size="sm"
+                      className="afs-avcard__foot--push"
+                      icon={<Trash2 size={13} />}
+                      aria-label="删除"
+                      onClick={() => onDeleteElement(el)}
+                    />
                   </div>
                 </div>
               )
@@ -451,115 +495,133 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
       </div>
 
       {editing && (
-        <div className="afs-lightbox" onClick={() => setEditing(null)}>
-          <div className="afs-elform" onClick={(e) => e.stopPropagation()}>
-            <div className="afs-elform__head">
-              <span>{editing.id ? '编辑' : '新建'}{KIND_LABEL[editing.kind]}</span>
-              <button className="afs-lightbox__close" onClick={() => setEditing(null)} aria-label="关闭" title="关闭">
-                <X size={16} />
-              </button>
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">名称</label>
-              <input className="afs-field__input" value={editing.name || ''} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder={editing.kind === 'character' ? '如：小明' : editing.kind === 'prop' ? '如：发光的剑' : '如：咖啡馆'} />
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">{editing.kind === 'character' ? '外貌 / 设定' : editing.kind === 'prop' ? '外观 / 描述' : '环境 / 氛围'}</label>
-              <textarea className="afs-field__input" rows={3} value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">英文提示词（可选）</label>
-              <textarea className="afs-field__input" rows={2} value={editing.prompt || ''} onChange={(e) => setEditing({ ...editing, prompt: e.target.value })} />
-            </div>
-            {editing.kind === 'character' && (
-              <>
-                <div className="afs-field">
-                  <label className="afs-field__label">身份特征（跨期不变 · 可选）</label>
-                  <textarea
-                    className="afs-field__input"
-                    rows={2}
-                    value={editing.identity || ''}
-                    onChange={(e) => setEditing({ ...editing, identity: e.target.value })}
-                    placeholder="脸型/五官/体型/标志记号(疤·痣·瞳色)，age-neutral；多时期角色填这里，各期外观放下方变体"
-                  />
-                </div>
-                <div className="afs-field">
-                  <label className="afs-field__label">时期 / 形态变体（少年→暮年 · 可选）</label>
-                  {(editing.appearanceVariants || []).map((v, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'center' }}>
-                      <input
-                        className="afs-field__input"
-                        style={{ flex: '0 0 120px' }}
-                        placeholder="时期标签(如:少年)"
-                        value={v.label || ''}
-                        onChange={(e) => {
-                          const vs = [...(editing.appearanceVariants || [])]
-                          vs[i] = { ...vs[i], label: e.target.value, id: vs[i].id || e.target.value }
-                          setEditing({ ...editing, appearanceVariants: vs })
-                        }}
-                      />
-                      <input
-                        className="afs-field__input"
-                        style={{ flex: 1 }}
-                        placeholder="该期外观（年龄/服饰/特征）"
-                        value={v.appearance || ''}
-                        onChange={(e) => {
-                          const vs = [...(editing.appearanceVariants || [])]
-                          vs[i] = { ...vs[i], appearance: e.target.value }
-                          setEditing({ ...editing, appearanceVariants: vs })
-                        }}
-                      />
-                      <button
-                        className="afs-btn"
-                        title="删除该变体"
-                        onClick={() => setEditing({ ...editing, appearanceVariants: (editing.appearanceVariants || []).filter((_, j) => j !== i) })}
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    className="afs-btn"
-                    onClick={() => setEditing({ ...editing, appearanceVariants: [...(editing.appearanceVariants || []), { id: '', label: '' }] })}
-                  >
-                    <Plus size={13} /> 添加时期变体
-                  </button>
-                </div>
-              </>
-            )}
-            <div className="afs-field">
-              <label className="afs-field__label">参考图（从图片素材选，可选）</label>
-              {imageAssets.length === 0 ? (
-                <div className="afs-inspector__note">暂无图片素材，可先在「素材」上传或生成</div>
-              ) : (
-                <div className="afs-elform__refs">
-                  {imageAssets.map((a) => {
-                    const picked = (editing.refAssetIds || []).includes(a.assetId!)
-                    return (
-                      <button
-                        key={a.id}
-                        className={`afs-elform__ref${picked ? ' is-picked' : ''}`}
-                        onClick={() => setEditing({ ...editing, refAssetIds: picked ? [] : [a.assetId!] })}
-                        title={a.name || a.assetId}
-                      >
-                        <RefThumb assetId={a.assetId} />
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="afs-elform__actions">
-              <button className="afs-btn" onClick={() => setEditing(null)}>
-                取消
-              </button>
-              <button className="afs-btn afs-btn--save" onClick={onSave}>
-                <Plus size={14} /> 保存
-              </button>
-            </div>
-          </div>
-        </div>
+        <ElementEditor
+          editing={editing}
+          setEditing={setEditing}
+          imageAssets={imageAssets}
+          onSave={onSave}
+        />
       )}
     </>
+  )
+}
+
+function ElementEditor({
+  editing,
+  setEditing,
+  imageAssets,
+  onSave,
+}: {
+  editing: Partial<ElementRef> & { kind: ElementKind }
+  setEditing: (v: (Partial<ElementRef> & { kind: ElementKind }) | null) => void
+  imageAssets: AssetRecord[]
+  onSave: () => void
+}) {
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => {
+        if (!o) setEditing(null)
+      }}
+      title={`${editing.id ? '编辑' : '新建'}${KIND_LABEL[editing.kind]}`}
+      size="sheet"
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => setEditing(null)}>
+            取消
+          </Button>
+          <Button variant="gradient" leadingIcon={Plus} onClick={onSave}>
+            保存
+          </Button>
+        </>
+      }
+    >
+      <Field label="名称">
+        <Input
+          value={editing.name || ''}
+          onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+          placeholder={editing.kind === 'character' ? '如：小明' : editing.kind === 'prop' ? '如：发光的剑' : '如：咖啡馆'}
+        />
+      </Field>
+      <Field label={editing.kind === 'character' ? '外貌 / 设定' : editing.kind === 'prop' ? '外观 / 描述' : '环境 / 氛围'}>
+        <Textarea rows={3} value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} />
+      </Field>
+      <Field label="英文提示词（可选）">
+        <Textarea rows={2} value={editing.prompt || ''} onChange={(e) => setEditing({ ...editing, prompt: e.target.value })} />
+      </Field>
+      {editing.kind === 'character' && (
+        <>
+          <Field label="身份特征（跨期不变 · 可选）">
+            <Textarea
+              rows={2}
+              value={editing.identity || ''}
+              onChange={(e) => setEditing({ ...editing, identity: e.target.value })}
+              placeholder="脸型/五官/体型/标志记号(疤·痣·瞳色)，age-neutral；多时期角色填这里，各期外观放下方变体"
+            />
+          </Field>
+          <Field label="时期 / 形态变体（少年→暮年 · 可选）">
+            {(editing.appearanceVariants || []).map((v, i) => (
+              <div key={i} className="afs-avvariant">
+                <Input
+                  placeholder="时期标签(如:少年)"
+                  value={v.label || ''}
+                  onChange={(e) => {
+                    const vs = [...(editing.appearanceVariants || [])]
+                    vs[i] = { ...vs[i], label: e.target.value, id: vs[i].id || e.target.value }
+                    setEditing({ ...editing, appearanceVariants: vs })
+                  }}
+                />
+                <Input
+                  placeholder="该期外观（年龄/服饰/特征）"
+                  value={v.appearance || ''}
+                  onChange={(e) => {
+                    const vs = [...(editing.appearanceVariants || [])]
+                    vs[i] = { ...vs[i], appearance: e.target.value }
+                    setEditing({ ...editing, appearanceVariants: vs })
+                  }}
+                />
+                <IconButton
+                  size="sm"
+                  icon={<X size={13} />}
+                  aria-label="删除该变体"
+                  onClick={() => setEditing({ ...editing, appearanceVariants: (editing.appearanceVariants || []).filter((_, j) => j !== i) })}
+                />
+              </div>
+            ))}
+            <Button
+              variant="secondary"
+              size="sm"
+              leadingIcon={Plus}
+              onClick={() => setEditing({ ...editing, appearanceVariants: [...(editing.appearanceVariants || []), { id: '', label: '' }] })}
+            >
+              添加时期变体
+            </Button>
+          </Field>
+        </>
+      )}
+      <Field label="参考图（从图片素材选，可选）">
+        {imageAssets.length === 0 ? (
+          <div className="afs-avnote">暂无图片素材，可先在「素材」上传或生成</div>
+        ) : (
+          <div className="afs-avrefgrid">
+            {imageAssets.map((a) => {
+              const picked = (editing.refAssetIds || []).includes(a.assetId!)
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="afs-avreftile"
+                  aria-pressed={picked}
+                  onClick={() => setEditing({ ...editing, refAssetIds: picked ? [] : [a.assetId!] })}
+                  title={a.name || a.assetId}
+                >
+                  <RefThumb assetId={a.assetId} />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </Field>
+    </Modal>
   )
 }

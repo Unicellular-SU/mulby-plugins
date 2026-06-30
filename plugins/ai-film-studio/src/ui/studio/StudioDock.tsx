@@ -11,6 +11,7 @@ import { AssetThumb, RefThumb } from '../components/views/AssetsView'
 import { useAssetStore } from '../store/assetStore'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS, type PromptSnippet } from '../store/promptStore'
 import { insertAtFocused } from './services/focusInsert'
+import Segmented from '../components/ui/Segmented'
 
 type DockTab = 'assets' | 'prompts'
 const TAB_LABEL: Record<DockTab, string> = { assets: '素材', prompts: '提示词' }
@@ -25,11 +26,13 @@ export default function StudioDock() {
   return (
     <div className="afs-dock afs-studio__dock">
       <div className="afs-dock__tabs">
-        {(['assets', 'prompts'] as const).map((t) => (
-          <button key={t} className={`afs-dock__tab${tab === t ? ' is-active' : ''}`} onClick={() => setTab(t)}>
-            {TAB_LABEL[t]}
-          </button>
-        ))}
+        <Segmented
+          size="sm"
+          value={tab}
+          onChange={(v) => setTab(v as DockTab)}
+          options={(['assets', 'prompts'] as const).map((t) => ({ value: t, label: TAB_LABEL[t] }))}
+          ariaLabel="资源类型"
+        />
       </div>
       <div className="afs-dock__body">
         {tab === 'assets' && <AssetInsertPanel />}

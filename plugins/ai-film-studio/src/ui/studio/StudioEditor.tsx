@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -14,6 +14,10 @@ import StudioDock from './StudioDock'
 import SettingsView from '../components/views/SettingsView'
 import Select from '../components/ui/Select'
 import NumberStepper from '../components/ui/NumberStepper'
+import Button from '../components/ui/Button'
+import IconButton from '../components/ui/IconButton'
+import Popover from '../components/ui/Popover'
+import Tabs from '../components/ui/Tabs'
 import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
@@ -68,71 +72,91 @@ export default function StudioEditor() {
   }, [tab, dockOpen])
 
   return (
-    <div className="afs-studio__editor">
-      <header className="afs-studio__topbar">
-        <button className="afs-btn afs-btn--ghost" onClick={() => void closeProject()} title="返回项目列表">
-          <ArrowLeft size={16} />
-        </button>
-        <input
-          className="afs-studio__title"
-          value={doc.meta.name}
-          onChange={(e) => updateMeta({ name: e.target.value })}
-          placeholder="项目名称"
-        />
-        <Select
-          className="afs-studio__sel"
-          value={doc.meta.artStyle}
-          onChange={(v) => updateMeta({ artStyle: v })}
-          options={listStylePacks().map((p) => ({ value: p.id, label: p.label }))}
-          ariaLabel="画风风格包"
-        />
-        <Select
-          className="afs-studio__sel"
-          value={doc.meta.videoRatio}
-          onChange={(v) => updateMeta({ videoRatio: v })}
-          options={['16:9', '9:16', '1:1'].map((r) => ({ value: r, label: r }))}
-          ariaLabel="视频画幅"
-        />
-        <StudioModelBar />
+    <div className="afs-stwb">
+      <header className="afs-stwb__toolbar" role="toolbar" aria-label="工作台工具栏">
+        <div className="afs-stwb__tbgroup">
+          <IconButton aria-label="返回项目列表" variant="ghost" icon={<ArrowLeft size={18} />} title="返回项目列表" onClick={() => void closeProject()} />
+          <span className="afs-stwb__brand" aria-hidden />
+          <input
+            className="afs-stwb__title"
+            value={doc.meta.name}
+            onChange={(e) => updateMeta({ name: e.target.value })}
+            placeholder="未命名工程"
+            aria-label="工程名称"
+          />
+        </div>
+        <span className="afs-stwb__tbdiv" aria-hidden />
+        <div className="afs-stwb__tbgroup afs-stwb__tbcluster">
+          <Select
+            size="sm"
+            className="afs-studio__sel"
+            value={doc.meta.artStyle}
+            onChange={(v) => updateMeta({ artStyle: v })}
+            options={listStylePacks().map((p) => ({ value: p.id, label: p.label }))}
+            ariaLabel="画风风格包"
+          />
+          <Select
+            size="sm"
+            className="afs-studio__sel"
+            value={doc.meta.videoRatio}
+            onChange={(v) => updateMeta({ videoRatio: v })}
+            options={['16:9', '9:16', '1:1'].map((r) => ({ value: r, label: r }))}
+            ariaLabel="视频画幅"
+          />
+          <span className="afs-stwb__tbdiv" aria-hidden />
+          <StudioModelBar />
+        </div>
         {busy && (
-          <span className="afs-studio__batchstat">
-            <Loader2 size={14} className="afs-spin" /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
+          <span className="afs-stwb__busy" role="status" aria-live="polite">
+            <Loader2 size={14} className="afs-spin" aria-hidden /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
           </span>
         )}
-        <button className="afs-btn afs-btn--ghost afs-btn--sm" title="设置（模型供应商 / 提示词 / 外观 / 存储）" onClick={() => setSettingsOpen(true)}>
-          <Settings size={15} />
-        </button>
-        <button
-          className="afs-btn afs-btn--gradient afs-btn--sm afs-studio__produce"
-          disabled={busy || doc.storyboards.length === 0}
-          title="资产 → 关键帧 → 视频 → 合成 一条龙"
-          onClick={() => void autoProduce()}
-        >
-          {busy ? <Loader2 size={14} className="afs-spin" /> : <Wand2 size={14} />} 一键成片
-        </button>
+        <span className="afs-stwb__tbspacer" aria-hidden />
+        <div className="afs-stwb__tbgroup">
+          <IconButton
+            aria-label="设置（模型供应商 / 提示词 / 外观 / 存储）"
+            variant="ghost"
+            icon={<Settings size={18} />}
+            title="设置（模型供应商 / 提示词 / 外观 / 存储）"
+            onClick={() => setSettingsOpen(true)}
+          />
+          <Button
+            variant="gradient"
+            glow
+            size="md"
+            leadingIcon={busy ? undefined : Wand2}
+            loading={busy}
+            disabled={busy || doc.storyboards.length === 0}
+            title="资产 → 关键帧 → 视频 → 合成 一条龙"
+            onClick={() => void autoProduce()}
+          >
+            一键成片
+          </Button>
+        </div>
       </header>
 
-      <nav className="afs-studio__tabs">
-        <button
-          className={`afs-studio__tab afs-studio__docktoggle${dockOpen ? ' is-active' : ''}`}
+      <div className="afs-stwb__tabsbar">
+        <IconButton
+          size="md"
+          variant="ghost"
+          pressed={dockOpen}
+          aria-label={dockOpen ? '收起资源面板' : '展开资源面板（素材/提示词）'}
           title={dockOpen ? '收起资源面板' : '展开资源面板（素材/提示词）'}
+          icon={<PanelLeft size={18} />}
           onClick={() => setDockOpen((v) => !v)}
-        >
-          <PanelLeft size={15} />
-        </button>
-        {TABS.map((t) => {
-          const Icon = t.icon
-          return (
-            <button key={t.id} className={`afs-studio__tab${tab === t.id ? ' is-active' : ''}`} onClick={() => setTab(t.id)}>
-              <Icon size={15} /> {t.label}
-            </button>
-          )
-        })}
-      </nav>
+        />
+        <span className="afs-stwb__tabsdiv" aria-hidden />
+        <Tabs
+          ariaLabel="工作台阶段"
+          value={tab}
+          onChange={(v) => setTab(v as Tab)}
+          tabs={TABS.map((t) => ({ value: t.id, label: t.label, icon: t.icon }))}
+        />
+      </div>
 
-      <div className="afs-studio__work">
+      <div className="afs-stwb__work">
         {dockOpen && <StudioDock />}
-        <div className="afs-studio__stage">
+        <div className="afs-stwb__stage">
           {tab === 'novel' && <NovelTab />}
           {tab === 'script' && <ScriptTab />}
           {tab === 'assets' && <AssetsTab />}
@@ -175,74 +199,85 @@ function StudioModelBar() {
   const setDefault = useProviderStore((s) => s.setDefault)
   const videoProviders = providers.filter((p) => (p.capabilities || ['video']).includes('video'))
   const videoProvider = videoProviders.find((p) => p.id === videoDefault) ?? videoProviders.find((p) => p.enabled) ?? null
-  const [open, setOpen] = useState(false)
   const ok = !!selectedModel && !!selectedImageModel && !!videoProvider
   return (
-    <div className="afs-studio__modelbar">
-      <button className="afs-btn afs-btn--sm" onClick={() => setOpen((v) => !v)} title="文本/图像/视频 模型设置（工作台复用全局选择）">
-        <Settings2 size={14} /> 模型{!ok && <AlertCircle size={12} style={{ color: 'var(--afs-warning)' }} />}
-      </button>
-      {open && (
-        <div className="afs-studio__modelpop">
-          <label>文本模型（剧本/对话/事件）</label>
+    <Popover
+      side="bottom"
+      align="end"
+      ariaLabel="模型设置"
+      trigger={
+        <Button
+          variant="secondary"
+          size="sm"
+          leadingIcon={Settings2}
+          trailingIcon={!ok ? AlertTriangle : undefined}
+          title="文本/图像/视频 模型设置（工作台复用全局选择）"
+        >
+          模型
+        </Button>
+      }
+    >
+      <div className="afs-stwb__popbody">
+        <label className="afs-stwb__poplbl">文本模型（剧本/对话/事件）</label>
+        <Select
+          block
+          value={selectedModel ?? ''}
+          onChange={(v) => setSelectedModel(v || null)}
+          options={[{ value: '', label: '（未选）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+          ariaLabel="文本模型"
+        />
+        <label className="afs-stwb__poplbl">图像模型（资产/关键帧）</label>
+        <Select
+          block
+          value={selectedImageModel ?? ''}
+          onChange={(v) => setSelectedImageModel(v || null)}
+          options={[{ value: '', label: '（未选）' }, ...imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))]}
+          ariaLabel="图像模型"
+        />
+        <label className="afs-stwb__poplbl">视频供应商（片段）</label>
+        {videoProviders.length ? (
           <Select
             block
-            value={selectedModel ?? ''}
-            onChange={(v) => setSelectedModel(v || null)}
-            options={[{ value: '', label: '（未选）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
-            ariaLabel="文本模型"
+            value={videoDefault ?? ''}
+            onChange={(v) => setDefault('video', v || null)}
+            options={[{ value: '', label: '（自动选第一个）' }, ...videoProviders.map((p) => ({ value: p.id, label: `${p.label}${p.model ? ` · ${p.model}` : ''}` }))]}
+            ariaLabel="视频供应商"
           />
-          <label>图像模型（资产/关键帧）</label>
-          <Select
-            block
-            value={selectedImageModel ?? ''}
-            onChange={(v) => setSelectedImageModel(v || null)}
-            options={[{ value: '', label: '（未选）' }, ...imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))]}
-            ariaLabel="图像模型"
-          />
-          <label>视频供应商（片段）</label>
-          {videoProviders.length ? (
-            <Select
-              block
-              value={videoDefault ?? ''}
-              onChange={(v) => setDefault('video', v || null)}
-              options={[{ value: '', label: '（自动选第一个）' }, ...videoProviders.map((p) => ({ value: p.id, label: `${p.label}${p.model ? ` · ${p.model}` : ''}` }))]}
-              ariaLabel="视频供应商"
-            />
-          ) : (
-            <div className="afs-studio__modelstat is-missing">未配置 — 在设置抽屉添加视频供应商</div>
-          )}
-          <label>视频模式</label>
-          <Select
-            block
-            value={meta?.videoMode ?? 'firstFrame'}
-            onChange={(v) => updateMeta({ videoMode: v })}
-            options={VIDEO_MODE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
-            ariaLabel="视频模式"
-          />
-          <label>分辨率</label>
-          <Select
-            block
-            value={meta?.videoResolution ?? '720p'}
-            onChange={(v) => updateMeta({ videoResolution: v })}
-            options={['480p', '720p', '1080p'].map((r) => ({ value: r, label: r }))}
-            ariaLabel="分辨率"
-          />
-          <label title="「全部生成」等批量同时跑的数量（资产/润色/段提示词并发；含承接的关键帧/视频仍按需串行）">批量并发数</label>
-          <NumberStepper
-            block
-            min={1}
-            max={8}
-            value={meta?.concurrency ?? 3}
-            onChange={(n) => updateMeta({ concurrency: n })}
-            ariaLabel="批量并发数"
-          />
-          {(models.length === 0 || imageModels.length === 0) && (
-            <div className="afs-studio__hint">没有可选模型？先去「设置」配置宿主文本/图像模型供应商。</div>
-          )}
-        </div>
-      )}
-    </div>
+        ) : (
+          <div className="afs-stwb__popmissing">
+            <AlertTriangle size={12} aria-hidden /> 未配置 — 在设置抽屉添加视频供应商
+          </div>
+        )}
+        <label className="afs-stwb__poplbl">视频模式</label>
+        <Select
+          block
+          value={meta?.videoMode ?? 'firstFrame'}
+          onChange={(v) => updateMeta({ videoMode: v })}
+          options={VIDEO_MODE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+          ariaLabel="视频模式"
+        />
+        <label className="afs-stwb__poplbl">分辨率</label>
+        <Select
+          block
+          value={meta?.videoResolution ?? '720p'}
+          onChange={(v) => updateMeta({ videoResolution: v })}
+          options={['480p', '720p', '1080p'].map((r) => ({ value: r, label: r }))}
+          ariaLabel="分辨率"
+        />
+        <label className="afs-stwb__poplbl" title="「全部生成」等批量同时跑的数量（资产/润色/段提示词并发；含承接的关键帧/视频仍按需串行）">批量并发数</label>
+        <NumberStepper
+          block
+          min={1}
+          max={8}
+          value={meta?.concurrency ?? 3}
+          onChange={(n) => updateMeta({ concurrency: n })}
+          ariaLabel="批量并发数"
+        />
+        {(models.length === 0 || imageModels.length === 0) && (
+          <div className="afs-stwb__pophint">没有可选模型？先去「设置」配置宿主文本/图像模型供应商。</div>
+        )}
+      </div>
+    </Popover>
   )
 }
 

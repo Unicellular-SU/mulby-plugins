@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Check, KeyRound, Plug, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Check, KeyRound, Plug, Loader2, AlertTriangle } from 'lucide-react'
 import { useProviderStore } from '../store/providerStore'
 import type { MediaProviderConfig, VideoProviderKind, MediaCapability } from '../services/providers'
 import { PROVIDER_PRESETS } from '../services/providers/presets'
@@ -7,6 +7,9 @@ import { testVideoProvider } from '../services/providers/test'
 import { getKey } from '../services/keys'
 import Select from './ui/Select'
 import Checkbox from './ui/Checkbox'
+import { Field, Input, Textarea } from './ui/Field'
+import Button from './ui/Button'
+import IconButton from './ui/IconButton'
 
 type Draft = Partial<MediaProviderConfig> & { kind: VideoProviderKind }
 
@@ -106,67 +109,91 @@ export default function ProviderSettings() {
   return (
     <div className="afs-settings-pane">
       <div className="afs-modal__body">
-          <div className="afs-modal__hint">
+          <p className="afs-pvs-hint">
             Mulby 不内置视频 / 配乐 / 语音模型，需自管供应商。一个供应商可声明多种能力；节点按能力选用，可在节点上覆盖。Key 经系统密钥库加密存储，仅本机可解。
-          </div>
+          </p>
 
           {providers.length > 0 && (
-            <div className="afs-provlist">
+            <div className="afs-pvs-list">
               {providers.map((p) => {
                 const caps = p.capabilities || ['video']
                 const isDef = isDefaultForAll(p)
+                const t = tests[p.id]
                 return (
-                  <div key={p.id} className={`afs-prov ${isDef ? 'afs-prov--active' : ''}`}>
-                    <button className="afs-prov__radio" title="设为这些能力的默认" onClick={() => makeDefault(p)}>
-                      {isDef ? <Check size={13} /> : <span className="afs-prov__dot" />}
+                  <div key={p.id} className={`afs-pvs-card${isDef ? ' is-active' : ''}`}>
+                    <button
+                      className="afs-pvs-radio"
+                      role="radio"
+                      aria-checked={isDef}
+                      aria-label="设为这些能力的默认"
+                      title="设为这些能力的默认"
+                      onClick={() => makeDefault(p)}
+                    >
+                      {isDef ? <Check size={13} /> : <span className="afs-pvs-radio__dot" />}
                     </button>
-                    <div className="afs-prov__main" onClick={() => onEdit(p)}>
-                      <div className="afs-prov__label">
+                    <div
+                      className="afs-pvs-card__main"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onEdit(p)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onEdit(p)
+                        }
+                      }}
+                    >
+                      <div className="afs-pvs-card__label">
                         {p.label}
                         {caps.map((c) => (
-                          <span key={c} className="afs-tag afs-tag--cap">
+                          <span key={c} className="afs-pvs-badge">
                             {CAP_LABEL[c]}
                             {defaults[c] === p.id ? '·默认' : ''}
                           </span>
                         ))}
                       </div>
-                      <div className="afs-prov__sub">
-                        {p.kind} · {p.mode === 'sync-binary' ? p.baseURL || '未设地址' : p.kind === 'fal' ? p.model || '未设模型' : p.submitUrl || '未设端点'}
-                        {keyPresence[p.id] ? <span className="afs-prov__key">· 有 Key</span> : <span className="afs-prov__nokey">· 无 Key</span>}
+                      <div className="afs-pvs-card__sub">
+                        {p.kind} · {p.mode === 'sync-binary' ? p.baseURL || '未设地址' : p.kind === 'fal' ? p.model || '未设模型' : p.submitUrl || '未设端点'}{' '}
+                        {keyPresence[p.id] ? (
+                          <span className="afs-pvs-badge afs-pvs-badge--key">
+                            <Check size={10} />有 Key
+                          </span>
+                        ) : (
+                          <span className="afs-pvs-badge afs-pvs-badge--nokey">
+                            <AlertTriangle size={10} />无 Key
+                          </span>
+                        )}
                       </div>
-                      {tests[p.id] && (
+                      {t && (
                         <div
-                          className={`afs-prov__testmsg ${tests[p.id].state === 'ok' ? 'afs-prov__testmsg--ok' : tests[p.id].state === 'fail' ? 'afs-prov__testmsg--fail' : ''}`}
+                          className={`afs-pvs-testmsg ${t.state === 'ok' ? 'afs-pvs-testmsg--ok' : t.state === 'fail' ? 'afs-pvs-testmsg--fail' : ''}`}
                         >
-                          {tests[p.id].msg}
+                          {t.msg}
                         </div>
                       )}
                     </div>
                     {p.mode !== 'sync-binary' && (
-                      <button
-                        className="afs-prov__testbtn"
+                      <IconButton
+                        aria-label="测试连接（轻量校验端点/Key）"
                         title="测试连接（轻量校验端点/Key）"
-                        disabled={tests[p.id]?.state === 'testing'}
+                        disabled={t?.state === 'testing'}
+                        aria-busy={t?.state === 'testing' || undefined}
                         onClick={() => onTest(p)}
-                      >
-                        {tests[p.id]?.state === 'testing' ? <Loader2 size={14} className="afs-spin" /> : <Plug size={14} />}
-                      </button>
+                        icon={t?.state === 'testing' ? <Loader2 size={14} className="afs-spin" /> : <Plug size={14} />}
+                      />
                     )}
-                    <button className="afs-prov__del" title="删除" onClick={() => removeProvider(p.id)}>
-                      <Trash2 size={14} />
-                    </button>
+                    <IconButton variant="danger" aria-label="删除" title="删除" onClick={() => removeProvider(p.id)} icon={<Trash2 size={14} />} />
                   </div>
                 )
               })}
             </div>
           )}
 
-          <div className="afs-form">
-            <div className="afs-form__title">{editingId ? '编辑供应商' : '添加供应商'}</div>
+          <div className="afs-pvs-form">
+            <div className="afs-pvs-form__title">{editingId ? '编辑供应商' : '添加供应商'}</div>
 
             {!editingId && (
-              <label className="afs-form__row">
-                <span>预设</span>
+              <Field label="预设" className="afs-field--inline">
                 <Select
                   block
                   value=""
@@ -175,12 +202,12 @@ export default function ProviderSettings() {
                   placeholder="从预设快速填充…"
                   ariaLabel="从预设快速填充"
                 />
-              </label>
+              </Field>
             )}
 
-            <label className="afs-form__row">
-              <span>能力</span>
-              <span className="afs-capbox">
+            <fieldset className="afs-pvs-fieldset">
+              <legend className="afs-pvs-fieldset__legend">能力</legend>
+              <div className="afs-pvs-caps">
                 {CAPS.map((c) => (
                   <Checkbox
                     key={c.value}
@@ -189,12 +216,11 @@ export default function ProviderSettings() {
                     label={c.label}
                   />
                 ))}
-                <span className="afs-form__note">模式：{draftMode === 'sync-binary' ? '同步（语音）' : '异步轮询（视频/音乐）'}</span>
-              </span>
-            </label>
+                <span className="afs-pvs-mode">模式：{draftMode === 'sync-binary' ? '同步（语音）' : '异步轮询（视频/音乐）'}</span>
+              </div>
+            </fieldset>
 
-            <label className="afs-form__row">
-              <span>类型</span>
+            <Field label="类型" className="afs-field--inline">
               <Select
                 block
                 value={draft.kind}
@@ -205,103 +231,104 @@ export default function ProviderSettings() {
                 ]}
                 ariaLabel="供应商类型"
               />
-            </label>
+            </Field>
 
-            <label className="afs-form__row">
-              <span>名称</span>
-              <input value={draft.label || ''} placeholder="如 fal 视频 / OpenAI 语音" onChange={(e) => set({ label: e.target.value })} />
-            </label>
+            <Field label="名称" className="afs-field--inline" htmlFor="afs-pvs-label">
+              <Input id="afs-pvs-label" value={draft.label || ''} placeholder="如 fal 视频 / OpenAI 语音" onChange={(e) => set({ label: e.target.value })} />
+            </Field>
 
-            {draftMode === 'sync-binary' ? (
-              <>
-                <label className="afs-form__row">
-                  <span>接口地址</span>
-                  <input value={draft.baseURL || ''} placeholder="https://api.openai.com/v1" onChange={(e) => set({ baseURL: e.target.value })} />
-                </label>
-                <label className="afs-form__row">
-                  <span>模型</span>
-                  <input value={draft.model || ''} placeholder="tts-1" onChange={(e) => set({ model: e.target.value })} />
-                </label>
-                <label className="afs-form__row">
-                  <span>音色</span>
-                  <input
-                    value={(draft.voices || []).join(', ')}
-                    placeholder="alloy, echo, nova…（逗号分隔，节点里可选）"
-                    onChange={(e) => set({ voices: e.target.value.split(',').map((v) => v.trim()).filter(Boolean) })}
-                  />
-                </label>
-                <div className="afs-form__note">同步语音：POST {'{接口地址}'}/audio/speech，直接返回音频（走后端，规避 CORS）。</div>
-              </>
-            ) : draft.kind === 'fal' ? (
-              <>
-                <label className="afs-form__row">
-                  <span>模型</span>
-                  <input value={draft.model || ''} placeholder="fal-ai/kling-video/v1/standard/image-to-video" onChange={(e) => set({ model: e.target.value })} />
-                </label>
-                <div className="afs-form__note">视频：I2V 用 image-to-video、T2V 用 text-to-video 模型；配乐填 fal 音乐模型路径。</div>
-              </>
-            ) : (
-              <>
-                <label className="afs-form__row">
-                  <span>模型</span>
-                  <input value={draft.model || ''} placeholder="模型 ID（用于请求体模板的 {model}）" onChange={(e) => set({ model: e.target.value })} />
-                </label>
-                <label className="afs-form__row">
-                  <span>提交 URL</span>
-                  <input value={draft.submitUrl || ''} placeholder="https://api.xxx/v1/video" onChange={(e) => set({ submitUrl: e.target.value })} />
-                </label>
-                <label className="afs-form__row">
-                  <span>轮询 URL</span>
-                  <input value={draft.pollUrl || ''} placeholder="https://api.xxx/v1/video/{taskId}" onChange={(e) => set({ pollUrl: e.target.value })} />
-                </label>
-                <div className="afs-form__grid">
-                  <input value={draft.taskIdPath || ''} placeholder="taskId 路径 (id)" onChange={(e) => set({ taskIdPath: e.target.value })} />
-                  <input value={draft.statusPath || ''} placeholder="status 路径 (status)" onChange={(e) => set({ statusPath: e.target.value })} />
-                  <input value={draft.videoUrlPath || ''} placeholder="结果地址路径 (video.url / audio.url)" onChange={(e) => set({ videoUrlPath: e.target.value })} />
-                </div>
-                <label className="afs-form__row afs-form__row--col">
-                  <span>请求体模板（可选）</span>
-                  <textarea
-                    className="afs-form__ta"
-                    rows={3}
-                    value={draft.bodyTemplate || ''}
-                    placeholder={'留空用通用 {prompt,image_url} body；占位符 {prompt}{imageUrl}{model}，条件块 {?imageUrl}…{/imageUrl}'}
-                    onChange={(e) => set({ bodyTemplate: e.target.value })}
-                  />
-                </label>
-                <label className="afs-form__row">
-                  <span>图片上传地址</span>
-                  <input
-                    value={draft.uploadUrl || ''}
-                    placeholder="可选；仅收公开图片URL的供应商填，如 https://toapis.com/v1/uploads/images"
-                    onChange={(e) => set({ uploadUrl: e.target.value })}
-                  />
-                </label>
-                <div className="afs-form__note">留空按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。填「图片上传地址」后，图生视频会先把本地关键帧上传换公开 URL。预设已为火山方舟/通义万相/toapis 填好。</div>
-              </>
-            )}
+            <div className="afs-pvs-shapecard">
+              {draftMode === 'sync-binary' ? (
+                <>
+                  <Field label="接口地址" className="afs-field--inline" htmlFor="afs-pvs-baseurl">
+                    <Input id="afs-pvs-baseurl" value={draft.baseURL || ''} placeholder="https://api.openai.com/v1" onChange={(e) => set({ baseURL: e.target.value })} />
+                  </Field>
+                  <Field label="模型" className="afs-field--inline" htmlFor="afs-pvs-model">
+                    <Input id="afs-pvs-model" value={draft.model || ''} placeholder="tts-1" onChange={(e) => set({ model: e.target.value })} />
+                  </Field>
+                  <Field label="音色" className="afs-field--inline" htmlFor="afs-pvs-voices">
+                    <Input
+                      id="afs-pvs-voices"
+                      value={(draft.voices || []).join(', ')}
+                      placeholder="alloy, echo, nova…（逗号分隔，节点里可选）"
+                      onChange={(e) => set({ voices: e.target.value.split(',').map((v) => v.trim()).filter(Boolean) })}
+                    />
+                  </Field>
+                  <p className="afs-pvs-note">同步语音：POST {'{接口地址}'}/audio/speech，直接返回音频（走后端，规避 CORS）。</p>
+                </>
+              ) : draft.kind === 'fal' ? (
+                <>
+                  <Field label="模型" className="afs-field--inline" htmlFor="afs-pvs-model">
+                    <Input id="afs-pvs-model" value={draft.model || ''} placeholder="fal-ai/kling-video/v1/standard/image-to-video" onChange={(e) => set({ model: e.target.value })} />
+                  </Field>
+                  <p className="afs-pvs-note">视频：I2V 用 image-to-video、T2V 用 text-to-video 模型；配乐填 fal 音乐模型路径。</p>
+                </>
+              ) : (
+                <>
+                  <Field label="模型" className="afs-field--inline" htmlFor="afs-pvs-model">
+                    <Input id="afs-pvs-model" value={draft.model || ''} placeholder="模型 ID（用于请求体模板的 {model}）" onChange={(e) => set({ model: e.target.value })} />
+                  </Field>
+                  <Field label="提交 URL" className="afs-field--inline" htmlFor="afs-pvs-submiturl">
+                    <Input id="afs-pvs-submiturl" value={draft.submitUrl || ''} placeholder="https://api.xxx/v1/video" onChange={(e) => set({ submitUrl: e.target.value })} />
+                  </Field>
+                  <Field label="轮询 URL" className="afs-field--inline" htmlFor="afs-pvs-pollurl">
+                    <Input id="afs-pvs-pollurl" value={draft.pollUrl || ''} placeholder="https://api.xxx/v1/video/{taskId}" onChange={(e) => set({ pollUrl: e.target.value })} />
+                  </Field>
+                  <div className="afs-pvs-grid">
+                    <Input value={draft.taskIdPath || ''} placeholder="taskId 路径 (id)" onChange={(e) => set({ taskIdPath: e.target.value })} />
+                    <Input value={draft.statusPath || ''} placeholder="status 路径 (status)" onChange={(e) => set({ statusPath: e.target.value })} />
+                    <Input value={draft.videoUrlPath || ''} placeholder="结果地址路径 (video.url / audio.url)" onChange={(e) => set({ videoUrlPath: e.target.value })} />
+                  </div>
+                  <Field label="请求体模板（可选）" htmlFor="afs-pvs-body">
+                    <Textarea
+                      id="afs-pvs-body"
+                      className="afs-pvs-mono"
+                      rows={3}
+                      value={draft.bodyTemplate || ''}
+                      placeholder={'留空用通用 {prompt,image_url} body；占位符 {prompt}{imageUrl}{model}，条件块 {?imageUrl}…{/imageUrl}'}
+                      onChange={(e) => set({ bodyTemplate: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="图片上传地址" className="afs-field--inline" htmlFor="afs-pvs-uploadurl">
+                    <Input
+                      id="afs-pvs-uploadurl"
+                      value={draft.uploadUrl || ''}
+                      placeholder="可选；仅收公开图片URL的供应商填，如 https://toapis.com/v1/uploads/images"
+                      onChange={(e) => set({ uploadUrl: e.target.value })}
+                    />
+                  </Field>
+                  <p className="afs-pvs-note">留空按常见命名自动尝试；URL 中 {'{taskId}'} 会被替换。填「图片上传地址」后，图生视频会先把本地关键帧上传换公开 URL。预设已为火山方舟/通义万相/toapis 填好。</p>
+                </>
+              )}
+            </div>
 
-            <label className="afs-form__row">
-              <span>
-                <KeyRound size={12} /> API Key
-              </span>
-              <input
+            <Field
+              className="afs-field--inline"
+              htmlFor="afs-pvs-key"
+              label={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <KeyRound size={12} /> API Key
+                </span>
+              }
+            >
+              <Input
+                id="afs-pvs-key"
                 type="password"
                 value={keyInput}
                 placeholder={editingId && keyPresence[editingId] ? '已配置（留空不修改）' : '粘贴 API Key'}
                 onChange={(e) => setKeyInput(e.target.value)}
               />
-            </label>
+            </Field>
 
-            <div className="afs-form__actions">
+            <div className="afs-pvs-actions">
               {editingId && (
-                <button className="afs-btn" onClick={resetForm}>
+                <Button variant="secondary" onClick={resetForm}>
                   取消编辑
-                </button>
+                </Button>
               )}
-              <button className="afs-btn afs-btn--save" onClick={onSave}>
-                <Plus size={14} /> {editingId ? '保存' : '添加'}
-              </button>
+              <Button variant="primary" leadingIcon={Plus} onClick={onSave}>
+                {editingId ? '保存' : '添加'}
+              </Button>
             </div>
           </div>
         </div>

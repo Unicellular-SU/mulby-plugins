@@ -5236,3 +5236,1692 @@ select.afs-toolbar__select,
 @media (forced-colors: active) {
   .afs-pdlg__hint { color: GrayText; }
 }
+
+
+/* ============================================================================
+   ProjectHome 发射台 Launchpad（§6.2）— NEW screen-scoped classes, prefix afs-lp-
+   All new names grepped clean (afs-lp-* unused anywhere; deliberately avoids the
+   pre-existing .afs-card / .afs-card__title/__sub/__meta/__text/__prompt/__dlg
+   block at styles.css ~1233-1291, the legacy .afs-pcard* block, and .afs-toolbar*).
+   Token-driven only; a11y fallbacks for glass/motion/forced-colors. Append at end
+   of styles.css (after the last rule). Note: .afs-glass / .afs-glow / .afs-segmented
+   / .afs-btn / .afs-iconbtn / .afs-menu / .afs-select / .afs-dialog / .afs-empty
+   are reused from atoms and are NOT redefined here.
+   ============================================================================ */
+
+/* —— 根：发射台铺满父容器（沿用 .afs-surface 的 flex 列；此类是该屏的内层根别名，
+      仍允许外层保留 .afs-surface 以复用 flex:1/min-height:0） —— */
+.afs-lp { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* —— 1) 玻璃工具栏（本屏唯一常驻玻璃 chrome） —— */
+.afs-lp-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-4);
+  height: 56px;
+  padding: 0 var(--afs-sp-7);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border-bottom: var(--afs-glass-border);
+  box-shadow: var(--afs-glass-highlight);
+  transition: box-shadow var(--afs-dur-ui) var(--afs-ease-standard),
+    border-color var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lp-bar.is-scrolled { box-shadow: var(--afs-elev-1), var(--afs-glass-highlight); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-lp-bar { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-lp-bar {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-panel);
+  }
+}
+@media (forced-colors: active) {
+  .afs-lp-bar { border-bottom: 1px solid CanvasText; background: Canvas; }
+}
+.afs-lp-bar__brand {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--afs-r-md);
+  background: var(--afs-grad-brand);
+  color: var(--afs-on-accent);
+  box-shadow: var(--afs-elev-1);
+}
+.afs-lp-bar__title { margin: 0; font-size: 16px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.afs-lp-bar__spacer { flex: 1; min-width: 0; }
+.afs-lp-bar__group { display: flex; align-items: center; gap: var(--afs-sp-3); min-width: 0; }
+.afs-lp-bar__divider { width: 1px; align-self: stretch; margin: 12px 0; background: var(--afs-border); }
+@media (forced-colors: active) { .afs-lp-bar__divider { background: CanvasText; } }
+
+/* 搜索胶囊：包裹 leading 图标 + 透明 input + 清除 X（用既有 .afs-field__input 内陷面会更重，这里用专用轻胶囊） */
+.afs-lp-search {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  width: 240px;
+  max-width: 240px;
+  height: 32px;
+  padding: 0 var(--afs-sp-4);
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  color: var(--afs-muted);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lp-search:focus-within {
+  border-color: var(--afs-border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-lp-search__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--afs-text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.afs-lp-search__input::placeholder { color: var(--afs-muted); }
+.afs-lp-search__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--afs-r-pill);
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+}
+.afs-lp-search__clear:hover { background: var(--afs-hover); color: var(--afs-text); }
+.afs-lp-search__clear:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: 1px; }
+@media (max-width: 720px) {
+  .afs-lp-search { width: 32px; max-width: 32px; padding: 0; justify-content: center; }
+  .afs-lp-search__input, .afs-lp-search__clear { display: none; }
+}
+
+/* —— 2) 滚动体 + 静态极光铺底（仅此一处装饰渐变，永不动画） —— */
+.afs-lp-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--afs-sp-7) var(--afs-sp-8) var(--afs-sp-9);
+}
+.afs-lp-body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--afs-aurora);
+  background-repeat: no-repeat;
+  opacity: 0.40;
+}
+html.light .afs-lp-body::before { opacity: 0.55; }
+@media (forced-colors: active) { .afs-lp-body::before { display: none; } }
+.afs-lp-body > * { position: relative; z-index: 1; }
+
+/* —— 2a) HERO「新建」行（两张等宽实底卡，渐变只在 hover/focus 的发丝边框 + 辉光） —— */
+.afs-lp-hero {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--afs-sp-6);
+}
+@media (max-width: 640px) { .afs-lp-hero { grid-template-columns: 1fr; } }
+.afs-lp-herocard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--afs-sp-4);
+  min-height: 132px;
+  padding: var(--afs-sp-6);
+  border-radius: var(--afs-r-xl);
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  box-shadow: var(--afs-elev-1);
+  transition: transform var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+/* 渐变发丝边框：::before mask-composite 仅描边，hover/focus 浮现 */
+.afs-lp-herocard::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--afs-grad-accent);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity var(--afs-dur-ui) var(--afs-ease-standard);
+  pointer-events: none;
+}
+.afs-lp-herocard:hover, .afs-lp-herocard:focus-within {
+  transform: translateY(-1px);
+  box-shadow: var(--afs-elev-2);
+}
+.afs-lp-herocard:hover::before, .afs-lp-herocard:focus-within::before { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .afs-lp-herocard { transition: none; }
+  .afs-lp-herocard:hover, .afs-lp-herocard:focus-within { transform: none; }
+}
+@media (forced-colors: active) {
+  .afs-lp-herocard::before { display: none; }
+  .afs-lp-herocard:hover, .afs-lp-herocard:focus-within { outline: 1px solid CanvasText; }
+}
+.afs-lp-herocard__head { display: flex; align-items: center; gap: var(--afs-sp-4); }
+.afs-lp-herocard__tile {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--afs-r-md);
+  /* --cat 由内联注入（canvas=--afs-cat-image / studio=--afs-type-video） */
+  background: color-mix(in srgb, var(--cat, var(--afs-accent)) 16%, transparent);
+  color: var(--cat, var(--afs-accent));
+}
+.afs-lp-herocard__title { font-size: 15px; font-weight: 600; line-height: 1.2; }
+.afs-lp-herocard__caption { font-size: 12px; color: var(--afs-text-dim); line-height: 1.4; }
+.afs-lp-herocard__foot { display: flex; align-items: center; gap: var(--afs-sp-3); margin-top: auto; flex-wrap: wrap; }
+
+/* —— 2b) RECENT 标签行 + 网格 —— */
+.afs-lp-recenthead {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  margin: var(--afs-sp-8) 0 var(--afs-sp-5);
+}
+.afs-lp-recenthead__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--afs-muted);
+}
+.afs-lp-recenthead__count {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-surface-sunken);
+  color: var(--afs-muted);
+  font-variant-numeric: tabular-nums;
+}
+.afs-lp-grid {
+  display: grid;
+  gap: var(--afs-sp-6);
+  grid-template-columns: repeat(auto-fill, minmax(224px, 1fr));
+}
+
+/* —— Recent 卡片（实底，非玻璃；前缀 afs-lp-card 避开既有 .afs-card 块） —— */
+.afs-lp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-lg);
+  overflow: hidden;
+  box-shadow: var(--afs-elev-1);
+  transition: transform var(--afs-dur-ui) var(--afs-ease-standard),
+    border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lp-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--afs-border-strong);
+  box-shadow: var(--afs-elev-2);
+}
+.afs-lp-card.is-selected { border-color: var(--afs-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-accent) 60%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .afs-lp-card { transition: border-color var(--afs-dur-ui) var(--afs-ease-standard); }
+  .afs-lp-card:hover { transform: none; }
+}
+@media (forced-colors: active) { .afs-lp-card.is-selected { outline: 2px solid Highlight; } }
+
+.afs-lp-card__media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--afs-panel-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+.afs-lp-card__media:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: -2px; }
+.afs-lp-card__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lp-card:hover .afs-lp-card__media img { transform: scale(1.02); }
+@media (prefers-reduced-motion: reduce) { .afs-lp-card:hover .afs-lp-card__media img { transform: none; } }
+/* 占位图：复用 placeholder 视觉，色用 --afs-text-dim */
+.afs-lp-card__ph {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--afs-text-dim);
+  background: linear-gradient(135deg, var(--afs-node-bg, var(--afs-panel)), var(--afs-panel-2));
+}
+
+/* 分类徽标（左上）：软底 + 引导圆点 + 文本（非纯色，理论无障碍） */
+.afs-lp-card__cat {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 4px 8px;
+  border-radius: var(--afs-r-pill);
+  /* --cat 内联注入 */
+  background: color-mix(in srgb, var(--cat, var(--afs-accent)) 18%, var(--afs-panel));
+  color: var(--cat, var(--afs-accent));
+}
+.afs-lp-card__cat::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+@media (forced-colors: active) { .afs-lp-card__cat { border: 1px solid CanvasText; } }
+
+/* 媒体上的胶囊（画幅左下 / 节点数右下）：--afs-scrim 衬白字，主题自调 */
+.afs-lp-card__pill {
+  position: absolute;
+  bottom: 6px;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  line-height: 1;
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-scrim);
+  color: #fff;
+}
+.afs-lp-card__pill--ratio { left: 6px; }
+.afs-lp-card__pill--count { right: 6px; font-variant-numeric: tabular-nums; }
+@media (forced-colors: active) { .afs-lp-card__pill { background: Canvas; color: CanvasText; border: 1px solid CanvasText; } }
+
+.afs-lp-card__body { display: flex; flex-direction: column; gap: var(--afs-sp-2); padding: var(--afs-sp-5); }
+.afs-lp-card__name {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+.afs-lp-card__nametext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.afs-lp-card__time { font-size: 11px; color: var(--afs-muted); font-variant-numeric: tabular-nums; }
+.afs-lp-card__meta {
+  font-size: 11px;
+  color: var(--afs-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 「当前」徽标：软 accent 底 + accent 字 + 引导 Check（替代裸 .afs-tag） */
+.afs-lp-card__current {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: var(--afs-r-pill);
+  background: color-mix(in srgb, var(--afs-accent) 16%, transparent);
+  color: var(--afs-accent);
+}
+
+.afs-lp-card__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  padding: var(--afs-sp-3) var(--afs-sp-5) var(--afs-sp-5);
+  border-top: 1px solid var(--afs-border);
+}
+.afs-lp-card__footspacer { flex: 1; }
+
+/* 重命名提示弹窗内的字段间距（用既有 Field/Input；这里仅给 body 内的输入留白） */
+.afs-lp-promptfield { display: flex; flex-direction: column; gap: var(--afs-sp-4); }
+
+/* ============================================================
+   §6.5 Inspector 4-region drawer (Aurora Glass restructure)
+   NEW screen-scoped classes — prefix .afs-insp4* / .afs-genprev / .afs-streamcard.
+   Verified zero collision vs existing .afs-inspector__* (head/badge/kind/scroll/
+   note/ports/delete/run/runrow/run--alt) and vs whole repo.
+   Solid near-opaque content panel; glass ONLY on transient generation-preview card.
+   Token-driven; a11y fallbacks for transparency/motion/forced-colors.
+   ============================================================ */
+
+/* Region 1 — pinned HEADER (replaces .afs-inspector__head). Optional category
+   tint synthesized from inline --cat (no --afs-grad-header token exists). */
+.afs-insp4__head {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  padding: 0 var(--afs-sp-5);
+  min-height: 48px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--cat, var(--afs-accent)) 12%, var(--afs-panel-2)),
+      var(--afs-panel-2)
+    );
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-insp4__head.is-scrolled {
+  border-bottom-color: var(--afs-border);
+  box-shadow: var(--afs-elev-1);
+}
+/* soft, tokenized category badge (replaces inline-bg .afs-inspector__badge) */
+.afs-insp4__catbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--afs-sp-2);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: var(--afs-r-pill);
+  color: var(--cat, var(--afs-accent));
+  background: color-mix(in srgb, var(--cat, var(--afs-accent)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cat, var(--afs-accent)) 32%, transparent);
+}
+.afs-insp4__catbadge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--afs-r-pill);
+  background: var(--cat, var(--afs-accent));
+}
+.afs-insp4__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--afs-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Region 2 — pinned ACTION ZONE (outside scroll). Collapses to 0 when empty. */
+.afs-insp4__actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--afs-sp-3);
+  padding: var(--afs-sp-5) var(--afs-sp-5) var(--afs-sp-4);
+}
+.afs-insp4__actions:empty {
+  display: none;
+  padding: 0;
+}
+/* run-row: primary gradient CTA grows, secondary continue auto-width */
+.afs-insp4__runrow {
+  display: flex;
+  gap: var(--afs-sp-3);
+}
+.afs-insp4__runrow > .afs-insp4__runcta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Region 3 — SCROLL BODY (thin scrollbar) */
+.afs-insp4__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--afs-sp-5);
+  scrollbar-width: thin;
+  scrollbar-color: var(--afs-dot) transparent;
+}
+.afs-insp4__body::-webkit-scrollbar { width: 8px; }
+.afs-insp4__body::-webkit-scrollbar-thumb {
+  background: var(--afs-dot);
+  border-radius: var(--afs-r-pill);
+}
+.afs-insp4__body::-webkit-scrollbar-track { background: transparent; }
+
+/* generic result card frame (replaces top-bordered .afs-result stacks) */
+.afs-rescard {
+  margin-top: var(--afs-sp-5);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-lg);
+  background: var(--afs-panel-2);
+  padding: var(--afs-sp-4) var(--afs-sp-5);
+}
+.afs-rescard__title {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--afs-muted);
+  margin-bottom: var(--afs-sp-3);
+}
+.afs-rescard__title svg { flex: 0 0 auto; }
+/* danger-framed error card (color paired with AlertTriangle icon, never color-only) */
+.afs-rescard--error {
+  border-color: var(--afs-danger);
+  background: color-mix(in srgb, var(--afs-danger) 12%, var(--afs-panel-2));
+}
+.afs-rescard--error .afs-rescard__title { color: var(--afs-danger); }
+.afs-rescard__msg {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--afs-danger);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.afs-rescard__pre {
+  margin: 0;
+  padding: var(--afs-sp-4);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  font: 11px/1.5 var(--afs-font-mono);
+  color: var(--afs-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+.afs-rescard__img {
+  display: block;
+  width: 100%;
+  border-radius: var(--afs-r-md);
+  border: 1px solid var(--afs-border);
+}
+
+/* transient running-preview GLASS card (sanctioned glass: short-lived, <=1) */
+.afs-genprev {
+  margin-top: var(--afs-sp-5);
+  border-radius: var(--afs-r-lg);
+  padding: var(--afs-sp-4) var(--afs-sp-5);
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: 1px solid color-mix(in srgb, var(--afs-accent) 40%, transparent);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+}
+.afs-genprev__title {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-2);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--afs-accent);
+  margin-bottom: var(--afs-sp-3);
+}
+.afs-genprev__title svg { flex: 0 0 auto; }
+.afs-genprev__img {
+  display: block;
+  width: 100%;
+  border-radius: var(--afs-r-md);
+  border: 1px solid color-mix(in srgb, var(--afs-accent) 30%, var(--afs-border));
+}
+
+/* streaming-text card: brand-gradient shimmer sweep while running */
+.afs-streamcard__pre {
+  position: relative;
+  margin: 0;
+  padding: var(--afs-sp-4);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  font: 11px/1.5 var(--afs-font-mono);
+  color: var(--afs-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+}
+.afs-streamcard__pre::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--afs-accent) 22%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: afs-streamcard-sweep var(--afs-dur-shimmer) linear infinite;
+}
+@keyframes afs-streamcard-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* Region 4 — pinned DELETE FOOTER (outside scroll) */
+.afs-insp4__footer {
+  flex: 0 0 auto;
+  padding: var(--afs-sp-5);
+  border-top: 1px solid var(--afs-border);
+}
+
+/* snippet/insert flow separator (ArrowRight inside Field label) */
+.afs-insp4__flowsep {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 2px;
+  color: var(--afs-text-dim);
+}
+
+/* input IO row (replaces dashed .afs-io; Divider-spacing rhythm) */
+.afs-insp4__iorow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--afs-sp-4);
+  padding: var(--afs-sp-3) 0;
+}
+.afs-insp4__iorow + .afs-insp4__iorow {
+  border-top: 1px solid var(--afs-border);
+}
+.afs-insp4__iolabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  font-size: 12px;
+  color: var(--afs-text);
+}
+/* type Badge tinted via --afs-type-* injected as --ptype */
+.afs-insp4__typebadge {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: var(--afs-r-xs);
+  color: var(--ptype, var(--afs-type-any));
+  background: color-mix(in srgb, var(--ptype, var(--afs-type-any)) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ptype, var(--afs-type-any)) 30%, transparent);
+}
+.afs-insp4__ioval {
+  font-size: 11px;
+  color: var(--afs-muted);
+  max-width: 60%;
+  text-align: right;
+  overflow: hidden;
+}
+
+/* a11y fallbacks for the one glass + one motion surface introduced here */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-genprev { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-genprev {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-surface-3);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-streamcard__pre::after { animation: none; }
+}
+@media (forced-colors: active) {
+  .afs-insp4__head,
+  .afs-insp4__catbadge,
+  .afs-rescard,
+  .afs-genprev { border: 1px solid CanvasText; background: Canvas; }
+  .afs-genprev { -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .afs-streamcard__pre::after { display: none; }
+}
+
+/* ---- OptimizableField retint (context file; additive — keeps existing
+   .afs-optfield layout, only swaps the two affix buttons to IconButtons) ---- */
+.afs-insp4__optaffix {
+  position: absolute;
+  right: var(--afs-sp-2);
+  bottom: var(--afs-sp-2);
+  display: inline-flex;
+  gap: var(--afs-sp-1);
+}
+.afs-insp4__optai {
+  color: var(--afs-type-image);
+}
+.afs-insp4__optai:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--afs-type-image) 16%, transparent);
+  color: var(--afs-type-image);
+}
+
+
+/* ============================================================================
+   Studio 3-col workbench frame (§6.10) — NEW screen-scoped classes.
+   PREFIX: .afs-stwb__*  (studio workbench) — chosen because `.afs-toolbar`
+   (canvas), `.afs-tabs` (Tabs atom), `.afs-popover`, `.afs-dialog*`, and every
+   `.afs-studio__*` name already exist. `afs-stwb` is grep-confirmed UNUSED.
+   Append at END of styles.css. Token-driven; a11y fallbacks included.
+   These classes ONLY relayout the FRAME (toolbar row, tabs row, work row,
+   dock width). Inner stage content keeps its existing .afs-studio__* classes.
+   ============================================================================ */
+
+/* Root: flex column, full height (replaces .afs-studio__editor 1:1) */
+.afs-stwb { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* (1) TOOLBAR — glass chrome, role=toolbar. 48px, one of ≤3-4 glass surfaces. */
+.afs-stwb__toolbar {
+  position: relative; z-index: 2; flex: 0 0 auto;
+  display: flex; align-items: center; gap: var(--afs-sp-3);
+  height: 48px; padding: 0 var(--afs-sp-5);
+  background: var(--afs-glass-fill-strong); /* ≥80% so the title text holds 4.5:1 */
+  -webkit-backdrop-filter: var(--afs-glass-blur); backdrop-filter: var(--afs-glass-blur);
+  border-bottom: var(--afs-glass-border); box-shadow: var(--afs-glass-highlight);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-stwb__toolbar { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-stwb__toolbar { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-panel); }
+}
+@media (forced-colors: active) { .afs-stwb__toolbar { background: Canvas; border-bottom: 1px solid CanvasText; } }
+
+/* Toolbar groups + vertical dividers between them */
+.afs-stwb__tbgroup { display: flex; align-items: center; gap: var(--afs-sp-2); min-width: 0; }
+.afs-stwb__tbdiv { flex: 0 0 auto; width: 1px; height: 22px; background: var(--afs-border); margin: 0 var(--afs-sp-1); }
+.afs-stwb__tbspacer { flex: 1 1 auto; min-width: var(--afs-sp-2); }
+
+/* Optional brand mark (28px gradient square) */
+.afs-stwb__brand {
+  flex: 0 0 auto; width: 28px; height: 28px; border-radius: var(--afs-r-sm);
+  background: var(--afs-grad-brand); box-shadow: var(--afs-glass-highlight);
+}
+
+/* Seamless inline-editable project title (replaces .afs-studio__title in toolbar) */
+.afs-stwb__title {
+  flex: 0 1 auto; min-width: 120px; max-width: 320px;
+  background: transparent; border: 1px solid transparent; color: var(--afs-text);
+  font: 600 16px/1.2 var(--afs-font-ui); padding: 4px 8px; border-radius: var(--afs-r-sm);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-stwb__title:hover { border-color: var(--afs-border); }
+.afs-stwb__title:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: 1px; border-color: transparent; }
+.afs-stwb__title::placeholder { color: var(--afs-text-dim); }
+
+/* aria-live busy Pill (Spinner + label) */
+.afs-stwb__busy {
+  display: inline-flex; align-items: center; gap: var(--afs-sp-2);
+  height: var(--afs-control-h-sm); padding: 0 var(--afs-sp-3);
+  border-radius: var(--afs-r-pill); background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border); color: var(--afs-muted);
+  font-size: 12px; white-space: nowrap; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.afs-stwb__busy svg { flex: 0 0 auto; color: var(--afs-accent); }
+
+/* (2) TABS BAR — solid (NOT glass): leading dock-toggle + divider + Tabs atom */
+.afs-stwb__tabsbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: var(--afs-sp-3);
+  height: 40px; padding: 0 var(--afs-sp-6);
+  border-bottom: 1px solid var(--afs-border); background: var(--afs-panel);
+}
+.afs-stwb__tabsbar .afs-tabs { border-bottom: 0; flex: 1 1 auto; } /* host the Tabs atom; underline handled by atom */
+.afs-stwb__tabsdiv { flex: 0 0 auto; width: 1px; height: 20px; background: var(--afs-border); }
+
+/* (3) WORK AREA — flex row, solid surfaces */
+.afs-stwb__work { flex: 1 1 auto; display: flex; min-height: 0; }
+.afs-stwb__stage { flex: 1 1 auto; overflow: auto; padding: var(--afs-sp-6); min-width: 0; }
+
+/* Dock + Agent column widths (relayout only; surfaces already solid via .afs-studio__dock/.afs-studio__agent) */
+.afs-stwb__work > .afs-studio__dock { width: 240px; flex: 0 0 240px; }
+.afs-stwb__work > .afs-studio__agent { width: 320px; flex: 0 0 320px; }
+@media (max-width: 1200px) {
+  .afs-stwb__work > .afs-studio__dock { width: 220px; flex-basis: 220px; }
+  .afs-stwb__work > .afs-studio__agent { width: 280px; flex-basis: 280px; }
+}
+
+/* Toolbar overflow collapse: under 1100px hide the inline artStyle/ratio/model
+   cluster and reveal a kebab overflow trigger that opens them in a Popover. */
+.afs-stwb__tbkebab { display: none; }
+@media (max-width: 1100px) {
+  .afs-stwb__tbcluster { display: none; }
+  .afs-stwb__tbkebab { display: inline-flex; }
+}
+/* Body of the overflow / model popover content (NOT glass-defining — the
+   .afs-popover atom already provides the glass chrome + elevation) */
+.afs-stwb__popbody { display: flex; flex-direction: column; gap: var(--afs-sp-2); width: 264px; }
+.afs-stwb__poplbl { font-size: 12px; color: var(--afs-muted); margin-top: var(--afs-sp-1); }
+.afs-stwb__popmissing {
+  display: inline-flex; align-items: center; gap: var(--afs-sp-1);
+  font-size: 12px; color: var(--afs-warning);
+  padding: var(--afs-sp-2) var(--afs-sp-3); border-radius: var(--afs-r-sm);
+  background: var(--afs-panel-2); border: 1px solid var(--afs-border);
+}
+.afs-stwb__pophint { font-size: 11px; color: var(--afs-text-dim); line-height: 1.5; }
+
+/* ============================================================
+   §6.7 AssetsView — Aurora Glass re-skin (screen-scoped: afs-av*)
+   All names verified collision-free vs styles.css + codebase.
+   Append CENTRALLY to styles.css. SOLID content surfaces; glass only
+   via the shared Modal atom (afs-dialog) which already exists.
+   The asset Lightbox theater scrim stays opaque-dark, NO backdrop-filter.
+   ============================================================ */
+
+/* ---- AssetsView shell head: title left + Tabs right on one 48px row ---- */
+.afs-avhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--afs-sp-5);
+}
+
+/* ---- Gallery two-region layout (left rail + content column) ---- */
+.afs-avgallery {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: var(--afs-sp-5);
+}
+@media (max-width: 900px) {
+  .afs-avgallery { grid-template-columns: 1fr; }
+}
+
+/* ---- Right content column: toolbar row + scroll region ---- */
+.afs-avcol {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+/* ---- Toolbar strip (does NOT wrap above 1100px) ---- */
+.afs-avtoolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-4);
+  min-height: 44px;
+  padding: var(--afs-sp-3) 0;
+}
+.afs-avtoolbar__spacer { flex: 1 1 auto; }
+.afs-avtoolbar__divider {
+  width: 1px;
+  align-self: stretch;
+  margin: var(--afs-sp-2) 0;
+  background: var(--afs-border);
+}
+@media (max-width: 1100px) {
+  .afs-avtoolbar { flex-wrap: wrap; }
+}
+
+/* ---- Search field (pill, leading icon, trailing clear) ---- */
+.afs-avsearch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 240px;
+  max-width: 240px;
+  height: var(--afs-control-h-sm);
+  padding: 0 var(--afs-sp-4) 0 26px;
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-pill);
+}
+.afs-avsearch:focus-within {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 35%, transparent);
+}
+.afs-avsearch__icon {
+  position: absolute;
+  left: 8px;
+  display: inline-flex;
+  color: var(--afs-text-dim);
+  pointer-events: none;
+}
+.afs-avsearch__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--afs-text);
+  font-size: 12px;
+}
+.afs-avsearch__input::placeholder { color: var(--afs-text-dim); }
+.afs-avsearch__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  border: none;
+  background: transparent;
+  color: var(--afs-text-dim);
+  cursor: pointer;
+  border-radius: var(--afs-r-pill);
+}
+.afs-avsearch__clear:hover { color: var(--afs-text); background: var(--afs-hover); }
+
+/* ---- Usage pill (surface, tabular) ---- */
+.afs-avusage {
+  display: inline-flex;
+  align-items: center;
+  height: var(--afs-control-h-sm);
+  padding: 0 var(--afs-sp-4);
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  color: var(--afs-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- Scroll region + responsive media-tile grid ---- */
+.afs-avscroll {
+  min-height: 0;
+  overflow: auto;
+}
+.afs-avtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--afs-sp-5);
+  padding: var(--afs-sp-5);
+}
+
+/* ---- Media-tile card (SOLID, near-opaque) ---- */
+.afs-avcard {
+  display: flex;
+  flex-direction: column;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-lg);
+  overflow: hidden;
+  box-shadow: var(--afs-elev-1);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard),
+    transform var(--afs-dur-micro) var(--afs-ease-standard);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 248px;
+}
+.afs-avcard:hover {
+  border-color: var(--afs-border-strong);
+  box-shadow: var(--afs-elev-2);
+  transform: translateY(-1px);
+}
+.afs-avcard:active { transform: scale(0.99); }
+.afs-avcard__thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--afs-surface-sunken);
+  cursor: pointer;
+  overflow: hidden;
+}
+.afs-avcard__thumb img,
+.afs-avcard__thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ---- On-media pills (scrim-backed, theme-tuned; replaces near-black rgba) ---- */
+.afs-avpill {
+  position: absolute;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  font-size: 10px;
+  line-height: 1.6;
+  border-radius: var(--afs-r-pill);
+  background: var(--afs-scrim);
+  color: #fff;
+  backdrop-filter: none;
+}
+.afs-avpill--type { left: 6px; }
+.afs-avpill--src {
+  right: 6px;
+  background: color-mix(in srgb, var(--afs-accent) 78%, #000);
+}
+
+/* ---- Card body ---- */
+.afs-avcard__name {
+  padding: var(--afs-sp-4) var(--afs-sp-5) var(--afs-sp-1);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--afs-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.afs-avcard__meta {
+  padding: 0 var(--afs-sp-5);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--afs-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.afs-avcard__board { margin: var(--afs-sp-4) var(--afs-sp-5) 0; }
+.afs-avcard__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  padding: var(--afs-sp-4) var(--afs-sp-5) var(--afs-sp-5);
+}
+.afs-avcard__foot .afs-btn { flex: 1; min-width: 0; }
+.afs-avcard__foot--push { margin-left: auto; }
+
+/* ---- Audio tile tint (theme token, replaces hardcoded emerald) ---- */
+.afs-avph--audio { color: var(--afs-type-audio); }
+
+/* ---- Element editor: ref-image picker as selectable media-tiles ---- */
+.afs-avrefgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: var(--afs-sp-4);
+}
+.afs-avreftile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  border: 2px solid var(--afs-border);
+  border-radius: var(--afs-r-md);
+  overflow: hidden;
+  background: var(--afs-surface-sunken);
+  cursor: pointer;
+  transition: border-color var(--afs-dur-micro) var(--afs-ease-standard),
+    transform var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-avreftile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.afs-avreftile:hover { border-color: var(--afs-border-strong); }
+.afs-avreftile:active { transform: scale(0.97); }
+.afs-avreftile[aria-pressed='true'] {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 45%, transparent);
+}
+.afs-avreftile:focus-visible {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
+}
+
+/* ---- Element editor: appearance-variant rows (replaces inline flex) ---- */
+.afs-avvariant {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: var(--afs-sp-3);
+  align-items: center;
+  margin-bottom: var(--afs-sp-2);
+}
+@media (max-width: 520px) {
+  .afs-avvariant { grid-template-columns: 1fr 1fr auto; }
+}
+
+/* ---- Asset preview Lightbox: opaque dark theater scrim (NO backdrop-filter) ---- */
+.afs-avlightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--afs-sp-8);
+  background: rgba(8, 11, 18, 0.86);
+  /* intentionally opaque-dark in BOTH themes (media theater); no blur (perf) */
+}
+.afs-avlightbox__panel {
+  position: relative;
+  max-width: 80vw;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--afs-sp-5);
+}
+.afs-avlightbox__media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.afs-avlightbox__media img,
+.afs-avlightbox__media video {
+  max-width: 80vw;
+  max-height: 70vh;
+  border-radius: var(--afs-r-md);
+  display: block;
+}
+.afs-avlightbox__close {
+  position: absolute;
+  top: var(--afs-sp-4);
+  right: var(--afs-sp-4);
+  z-index: 1;
+}
+/* on-media IconButton scrim fill (never white-on-white in light) */
+.afs-avlightbox__close .afs-iconbtn {
+  background: color-mix(in srgb, #000 55%, transparent);
+  color: #fff;
+  border-color: transparent;
+}
+.afs-avlightbox__close .afs-iconbtn:hover {
+  background: color-mix(in srgb, #000 70%, transparent);
+}
+/* glass-chrome info panel below the media */
+.afs-avlightbox__info {
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  border-radius: var(--afs-r-lg);
+  padding: var(--afs-sp-5) var(--afs-sp-6);
+  font-size: 12px;
+  color: var(--afs-muted);
+}
+.afs-avlightbox__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--afs-text);
+  margin-bottom: 3px;
+}
+.afs-avlightbox__sub { margin-top: 2px; }
+
+/* ---- Element-editor / dialog: ref-empty note (token-driven) ---- */
+.afs-avnote {
+  font-size: 12px;
+  color: var(--afs-text-dim);
+  padding: var(--afs-sp-3) 0;
+}
+
+/* ============ a11y fallbacks (match house patterns) ============ */
+@media (prefers-reduced-transparency: reduce) {
+  .afs-avlightbox__info {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-surface-3);
+  }
+}
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .afs-avlightbox__info { background: var(--afs-glass-fallback); }
+}
+@media (forced-colors: active) {
+  .afs-avlightbox__info { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+  .afs-avpill { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+  .afs-avreftile[aria-pressed='true'] { outline: 2px solid Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-avcard,
+  .afs-avreftile { transition: none; }
+  .afs-avcard:hover { transform: none; }
+}
+
+/* ============================================================
+   ProviderSettings (设置·模型供应商) — Aurora Glass restructure
+   Screen-scoped prefix: .afs-pvs-*  (verified collision-free in src/)
+   Solid content surfaces only; NO glass here (glass lives in the
+   Select/Combobox popovers + GC confirm Modal, already styled).
+   Token-driven; light+dark hold via existing :root / html.light vars.
+   APPEND centrally to styles.css.
+   ============================================================ */
+
+/* —— Provider list: solid interactive data cards —— */
+.afs-pvs-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--afs-sp-4);
+  margin-bottom: var(--afs-sp-6);
+}
+.afs-pvs-card {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-4);
+  padding: var(--afs-sp-4) var(--afs-sp-5);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-md);
+  box-shadow: var(--afs-elev-1);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard),
+    transform var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-pvs-card:hover {
+  border-color: var(--afs-border-strong);
+  box-shadow: var(--afs-elev-2);
+  transform: translateY(-1px);
+}
+.afs-pvs-card.is-active {
+  border-color: var(--afs-accent);
+  background: color-mix(in srgb, var(--afs-accent) 12%, var(--afs-surface-sunken));
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-pvs-card { transition: none; }
+  .afs-pvs-card:hover { transform: none; }
+}
+
+/* default-provider radio (button styled as radio dot) */
+.afs-pvs-radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--afs-border);
+  background: transparent;
+  color: var(--afs-accent);
+  cursor: pointer;
+  transition: border-color var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-pvs-radio:hover { border-color: var(--afs-accent); }
+.afs-pvs-card.is-active .afs-pvs-radio { border-color: var(--afs-accent); }
+.afs-pvs-radio:focus-visible {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
+}
+.afs-pvs-radio__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--afs-border);
+}
+.afs-pvs-card.is-active .afs-pvs-radio__dot { background: var(--afs-accent); }
+
+/* clickable main region (opens edit) — keyboard-openable */
+.afs-pvs-card__main {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  border-radius: var(--afs-r-sm);
+}
+.afs-pvs-card__main:focus-visible {
+  outline: 2px solid var(--afs-ring);
+  outline-offset: 2px;
+}
+.afs-pvs-card__label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--afs-sp-2);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--afs-text);
+}
+.afs-pvs-card__sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--afs-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* capability + key/nokey badges (icon+text, never color-only) */
+.afs-pvs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: var(--afs-r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.6;
+  background: color-mix(in srgb, var(--afs-muted) 18%, transparent);
+  color: var(--afs-muted);
+}
+.afs-pvs-badge--key {
+  background: color-mix(in srgb, var(--afs-success) 18%, transparent);
+  color: var(--afs-success);
+}
+.afs-pvs-badge--nokey {
+  background: color-mix(in srgb, var(--afs-warning) 18%, transparent);
+  color: var(--afs-warning);
+}
+
+/* inline test result line under the sub-line */
+.afs-pvs-testmsg {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--afs-text-dim);
+  word-break: break-word;
+}
+.afs-pvs-testmsg--ok { color: var(--afs-success); }
+.afs-pvs-testmsg--fail { color: var(--afs-danger); }
+
+/* —— Form shell —— */
+.afs-pvs-form {
+  border-top: 1px solid var(--afs-border);
+  padding-top: var(--afs-sp-5);
+}
+.afs-pvs-form__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--afs-text);
+  margin-bottom: var(--afs-sp-5);
+}
+
+/* 能力 fieldset (gradient checkboxes + mode badge) */
+.afs-pvs-fieldset {
+  border: none;
+  margin: 0 0 var(--afs-sp-5);
+  padding: 0;
+}
+.afs-pvs-fieldset__legend {
+  display: block;
+  font-size: 11px;
+  color: var(--afs-muted);
+  margin-bottom: var(--afs-sp-3);
+  padding: 0;
+}
+.afs-pvs-caps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--afs-sp-5);
+}
+.afs-pvs-mode {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: var(--afs-r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--afs-muted) 14%, transparent);
+  color: var(--afs-muted);
+}
+
+/* shape-driven card per provider shape (sync-binary / fal / custom-http) */
+.afs-pvs-shapecard {
+  margin: 0 0 var(--afs-sp-5);
+  padding: var(--afs-sp-5);
+  background: var(--afs-panel-2);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-lg);
+  box-shadow: var(--afs-elev-1);
+}
+.afs-pvs-shapecard > .afs-field:last-child { margin-bottom: 0; }
+
+/* 3-col micro-input grid (taskIdPath/statusPath/videoUrlPath) */
+.afs-pvs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--afs-sp-3);
+  margin-bottom: var(--afs-sp-5);
+}
+@media (max-width: 640px) {
+  .afs-pvs-grid { grid-template-columns: 1fr; }
+}
+
+/* help / note line (replaces afs-form__note, tokenized) */
+.afs-pvs-note {
+  font-size: 11px;
+  color: var(--afs-text-dim);
+  line-height: 1.5;
+  margin: calc(-1 * var(--afs-sp-3)) 0 0;
+}
+
+/* foot action row */
+.afs-pvs-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--afs-sp-4);
+  margin-top: var(--afs-sp-5);
+}
+
+/* lead hint */
+.afs-pvs-hint {
+  font-size: 12px;
+  color: var(--afs-text-dim);
+  line-height: 1.5;
+  margin-bottom: var(--afs-sp-5);
+}
+
+/* —— Field --inline variant: token label column, converges afs-form__row ——
+   Stacked Field stays default everywhere else; only ProviderSettings opts in. */
+.afs-field--inline {
+  --afs-field-label-w: 108px;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--afs-sp-5);
+}
+.afs-field--inline > .afs-field__label {
+  flex: 0 0 var(--afs-field-label-w);
+  width: var(--afs-field-label-w);
+  text-align: right;
+  margin-bottom: 0;
+  padding-top: 8px; /* baseline-align label to 32px control text */
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.afs-field--inline > .afs-field__input,
+.afs-field--inline > .afs-field__help,
+.afs-field--inline > .afs-field__error {
+  flex: 1;
+  min-width: 0;
+}
+/* help/error need to sit under the control, not in the label gutter */
+.afs-field--inline {
+  flex-wrap: wrap;
+}
+.afs-field--inline > .afs-field__help,
+.afs-field--inline > .afs-field__error {
+  flex-basis: 100%;
+  margin-left: calc(var(--afs-field-label-w) + var(--afs-sp-5));
+}
+@media (max-width: 640px) {
+  .afs-field--inline { flex-direction: column; align-items: stretch; }
+  .afs-field--inline > .afs-field__label {
+    flex-basis: auto; width: auto; text-align: left;
+    justify-content: flex-start; padding-top: 0; margin-bottom: var(--afs-sp-3);
+  }
+  .afs-field--inline > .afs-field__help,
+  .afs-field--inline > .afs-field__error { margin-left: 0; }
+}
+
+/* mono variant for bodyTemplate textarea (additive, opt-in class on Textarea) */
+.afs-pvs-mono {
+  font-family: var(--afs-font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* forced-colors: keep borders/focus visible */
+@media (forced-colors: active) {
+  .afs-pvs-card,
+  .afs-pvs-shapecard { border-color: CanvasText; }
+  .afs-pvs-radio:focus-visible,
+  .afs-pvs-card__main:focus-visible { outline-color: Highlight; }
+}
+
+/* =====================================================================
+   §6.6 Lightbox theater shell — Aurora Glass restructure (afs-lbx* scope)
+   New, screen-scoped names (grepped: no afs-lbx*/afs-theater* collisions).
+   Co-exists with legacy .afs-lbhost* until the TSX swaps class names.
+   - Scrim stays opaque-dark BOTH themes, NO backdrop-filter (perf, verbatim).
+   - Glass ONLY on the one info+chat chrome card. Gradient only on 连看-on + Send.
+   - Floating chrome (close/nav/count/连看) sits in a z-index:3 layer over media.
+   ===================================================================== */
+
+/* --- new token: theater scrim, opaque-dark in BOTH themes by design --- */
+:root { --afs-lb-scrim: rgba(0, 0, 0, 0.86); }
+html.light { --afs-lb-scrim: rgba(0, 0, 0, 0.86); } /* deliberately dark in light too */
+
+/* --- scrim / root overlay (no backdrop-filter: load-bearing GPU constraint) --- */
+.afs-lbx {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--afs-lb-scrim);
+  /* 不用 backdrop-filter：覆盖画布时，若背后有运行中节点的 spinner 在转，blur 会被迫每帧重算
+     整屏模糊 → GPU 饱和、转圈变慢、全系统卡顿。已是高不透明遮罩，去模糊几乎无视觉差。 */
+}
+
+/* on-media chips inside the theater want a stronger, photo-proof fill than the
+   thin --afs-scrim the onmedia atom uses by default; scope-override so glyphs
+   hold >=3:1 over any bright photo in either theme. Blur allowed ONLY on these
+   tiny chips, never on the scrim. */
+.afs-lbx .afs-iconbtn--onmedia { background: color-mix(in srgb, #000 50%, transparent); }
+.afs-lbx .afs-iconbtn--onmedia:hover { background: color-mix(in srgb, #000 62%, transparent); }
+
+/* --- floating control placements (chrome layer above media) --- */
+.afs-lbx__close { position: fixed; z-index: 3; top: 16px; right: 18px; }
+.afs-lbx__nav { position: fixed; z-index: 3; top: 50%; transform: translateY(-50%); }
+.afs-lbx__nav--prev { left: 16px; }
+.afs-lbx__nav--next { right: 16px; }
+
+/* 连看 pill toggle (pill button form; not the Switch atom — carries leading
+   icon + variable label + aria-pressed). off = on-media scrim; on = gradient. */
+.afs-lbx__toggle {
+  position: fixed;
+  z-index: 3;
+  top: 16px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: #fff;
+  background: color-mix(in srgb, #000 50%, transparent);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--afs-r-pill);
+  cursor: pointer;
+  transition: background var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lbx__toggle:hover { background: color-mix(in srgb, #000 62%, transparent); }
+.afs-lbx__toggle.is-on {
+  background: var(--afs-grad-accent);
+  color: var(--afs-on-accent);
+  border-color: transparent;
+}
+.afs-lbx__toggle:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: 2px; }
+
+/* count pill (on-media, tabular) bottom-center */
+.afs-lbx__count {
+  position: fixed;
+  z-index: 3;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  color: #fff;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, #000 55%, transparent);
+  border-radius: var(--afs-r-pill);
+}
+
+/* --- stage column (frame + info card) --- */
+.afs-lbx__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--afs-sp-4);
+  max-width: 92vw;
+  max-height: 94vh;
+}
+.afs-lbx__frame {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.afs-lbx__media {
+  /* 关键：用视口单位封顶（百分比相对 flex 父元素的非定高会失效→图原始尺寸溢出遮挡按钮） */
+  max-width: 90vw;
+  max-height: 68vh;
+  object-fit: contain;
+  border-radius: var(--afs-r-md);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+.afs-lbx__busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--afs-sp-4);
+  color: #fff;
+  background: color-mix(in srgb, #000 45%, transparent);
+  border-radius: var(--afs-r-md);
+}
+.afs-lbx__loading { color: #fff; font-size: 14px; opacity: 0.85; }
+
+/* --- info + chat card: the ONE sanctioned glass-chrome surface here --- */
+.afs-lbx__info {
+  width: min(680px, 92vw);
+  max-height: 24vh;
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: var(--afs-sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--afs-sp-4);
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-xl);
+  color: var(--afs-text);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+}
+.afs-lbx__info-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.afs-lbx__info-title { font-size: 14px; font-weight: 600; color: var(--afs-text); }
+.afs-lbx__chip {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--afs-muted);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-pill);
+  padding: 0 8px;
+}
+.afs-lbx__prompt {
+  position: relative;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--afs-text);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-md);
+  padding: 8px 10px;
+  max-height: 7em;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.afs-lbx__prompt-label {
+  display: inline-block;
+  margin-right: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--afs-muted);
+}
+
+/* --- edit row: regenerate + chat composer --- */
+.afs-lbx__edit { display: flex; align-items: center; gap: var(--afs-sp-4); }
+.afs-lbx__chatbar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 4px 0 10px;
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-pill);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard), box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-lbx__chatbar:focus-within {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-lbx__chatbar-icon { flex-shrink: 0; color: var(--afs-type-image); }
+.afs-lbx__chatbar input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--afs-text);
+  font-size: 12.5px;
+  font-family: inherit;
+}
+.afs-lbx__chatbar input::placeholder { color: var(--afs-text-dim); }
+
+/* glass-chrome fallbacks for the single info card */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-lbx__info { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-lbx__info,
+  .afs-lbx .afs-iconbtn--onmedia,
+  .afs-lbx__toggle,
+  .afs-lbx__count {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .afs-lbx__info { background: var(--afs-surface-3); }
+}
+@media (forced-colors: active) {
+  .afs-lbx__info { border: 1px solid CanvasText; background: Canvas; }
+  .afs-lbx__chip,
+  .afs-lbx__toggle { border: 1px solid CanvasText; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-lbx__toggle,
+  .afs-lbx__chatbar { transition: none; }
+}
+
+/* --- nav buttons: 44px lg target (atom TS prop tops out at md/32px) sized via
+   scope rule; base .afs-iconbtn uses place-items:center so glyph stays centered. */
+.afs-lbx__nav.afs-iconbtn { width: 44px; height: 44px; }
+
+/* --- Send action: gradient icon-only button (IconButton has no 'gradient'
+   variant, so it renders as a default iconbtn + this scope class supplies the
+   gradient fill + on-accent glyph + glow target). 28px to nest in the chatbar. */
+.afs-lbx__send.afs-iconbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--afs-r-md);
+  background: var(--afs-grad-accent);
+  color: var(--afs-on-accent);
+  border-color: transparent;
+}
+.afs-lbx__send.afs-iconbtn:hover:not(:disabled) { filter: brightness(1.06); }
+.afs-lbx__send.afs-iconbtn:disabled { opacity: 0.4; cursor: default; }
+.afs-lbx__send.afs-iconbtn:disabled.afs-glow::after { display: none; }
