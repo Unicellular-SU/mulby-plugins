@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Select from '../ui/Select'
 import Segmented from '../ui/Segmented'
 import EmptyState from '../ui/EmptyState'
+import Skeleton from '../ui/Skeleton'
 import Tabs from '../ui/Tabs'
 import Button from '../ui/Button'
 import IconButton from '../ui/IconButton'
@@ -303,7 +304,9 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
               loaded ? (
                 <EmptyState icon={ImageIcon} title="暂无素材" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地素材。" />
               ) : (
-                <EmptyState icon={ImageIcon} title="加载中…" loading />
+                <div className="afs-avtiles" role="status" aria-label="加载中…">
+                  <Skeleton count={8} height={150} radius={12} />
+                </div>
               )
             ) : (
               <div className="afs-avtiles">
@@ -455,7 +458,9 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
           loaded ? (
             <EmptyState icon={Users} title="暂无角色 / 场景" description="新建，或在画布的人物 / 场景节点点「保存到库」。" />
           ) : (
-            <EmptyState icon={Users} title="加载中…" loading />
+            <div className="afs-avtiles" role="status" aria-label="加载中…">
+              <Skeleton count={6} height={150} radius={12} />
+            </div>
           )
         ) : (
           <div className="afs-avtiles">

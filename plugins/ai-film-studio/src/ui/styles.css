@@ -6925,3 +6925,34 @@ html.light { --afs-lb-scrim: rgba(0, 0, 0, 0.86); } /* deliberately dark in ligh
 .afs-lbx__send.afs-iconbtn:hover:not(:disabled) { filter: brightness(1.06); }
 .afs-lbx__send.afs-iconbtn:disabled { opacity: 0.4; cursor: default; }
 .afs-lbx__send.afs-iconbtn:disabled.afs-glow::after { display: none; }
+
+/* ============ Skeleton 骨架屏（shimmer 扫光占位）+ 生成态呼吸（breathe） ============
+   afs-skeleton/afs-breathe 为新增（grep 零碰撞）；缺失的 keyframes 在此补齐。 */
+.afs-skeleton {
+  display: block;
+  position: relative;
+  overflow: hidden;
+  background: var(--afs-surface-sunken);
+  border-radius: var(--afs-r-sm);
+}
+.afs-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--afs-text) 8%, transparent), transparent);
+  animation: afs-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes afs-shimmer {
+  100% { transform: translateX(100%); }
+}
+/* 生成态呼吸：节点/卡片"生成中"的轻脉动 */
+@keyframes afs-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.afs-breathe { animation: afs-breathe 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .afs-skeleton::after,
+  .afs-breathe { animation: none; }
+}
