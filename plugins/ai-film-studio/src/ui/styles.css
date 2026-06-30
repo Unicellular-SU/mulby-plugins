@@ -663,8 +663,10 @@ body {
   gap: 6px;
   padding: 0 10px;
   border-radius: 7px 7px 0 0;
-  color: #fff;
+  /* 低饱和渐变色头（背景由 FilmNode 内联 color-mix(--afs-cat-* …) 注入），文字用主题色，明暗皆达标 */
+  color: var(--afs-text);
   font-weight: 600;
+  border-bottom: 1px solid var(--afs-border);
 }
 .afs-node__title {
   flex: 1;

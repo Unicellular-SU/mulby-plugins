@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Lock, LockOpen, Loader2, RotateCcw, Maximize2, X, Play, type LucideIcon } from 'lucide-react'
-import { getNodeDef, CATEGORY_META, PORT_COLORS } from '../../nodes/nodeDefs'
+import { getNodeDef, PORT_COLORS } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
 import { useUiStore, type LightboxItem } from '../../store/uiStore'
@@ -252,7 +252,7 @@ function MediaFrameNode({
       className={`afs-node afs-node--media${selected ? ' afs-node--selected' : ''}${data.locked ? ' afs-node--locked' : ''}`}
       style={{
         width: w,
-        ...(selected ? { boxShadow: `0 0 0 2px ${catColor}` } : data.locked ? { boxShadow: '0 0 0 1.5px #f59e0b' } : null),
+        ...(selected ? { boxShadow: `0 0 0 2px ${catColor}` } : data.locked ? { boxShadow: '0 0 0 1.5px var(--afs-warning)' } : null),
       }}
     >
       {/* 媒体区可拖动节点（无 nodrag）；看大图改用「右上展开按钮」或「双击」，避免与拖拽/选中冲突 */}
@@ -394,7 +394,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
   if (!def) {
     return <div className="afs-node afs-node--error">未知节点：{data.kind}</div>
   }
-  const cat = CATEGORY_META[def.category]
+  const catVar = `var(--afs-cat-${def.category})`
   const Icon = def.icon
   const rows = Math.max(def.inputs.length, def.outputs.length, 1)
   const bodyH = rows * ROW_H + TOP_PAD
@@ -480,7 +480,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
         id={id}
         data={data}
         def={def}
-        catColor={cat.color}
+        catColor={catVar}
         Icon={Icon}
         selected={selected}
         refv={media.ref}
@@ -496,14 +496,17 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
       style={{
         ...(showGrid ? { width: Math.max(200, gridWidth) } : showData ? { width: 300 } : null),
         ...(selected
-          ? { boxShadow: `0 0 0 2px ${cat.color}` }
+          ? { boxShadow: `0 0 0 2px ${catVar}` }
           : data.locked
-            ? { boxShadow: '0 0 0 1.5px #f59e0b' }
+            ? { boxShadow: '0 0 0 1.5px var(--afs-warning)' }
             : null),
       }}
     >
-      <div className="afs-node__header" style={{ background: cat.color }}>
-        <Icon size={13} strokeWidth={2.2} />
+      <div
+        className="afs-node__header"
+        style={{ background: `linear-gradient(135deg, color-mix(in srgb, ${catVar} 24%, var(--afs-panel-2)), color-mix(in srgb, ${catVar} 8%, var(--afs-panel-2)))` }}
+      >
+        <Icon size={13} strokeWidth={2.2} style={{ color: catVar }} />
         <span className="afs-node__title">{data.title || def.label}</span>
         <button
           type="button"
