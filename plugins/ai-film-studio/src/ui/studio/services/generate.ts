@@ -5,6 +5,8 @@
 import { generateImage, editImage } from '../../services/imageEngine'
 import { saveAsset, loadAsset } from '../../services/assets'
 import { getStylePack, applyStylePack, videoStyleTag, type StyleRole } from '../../services/stylePacks'
+import { getPrompt } from '../../store/promptStore'
+import { fillTemplate } from '../../services/promptTemplates'
 import { runVideo } from '../../services/providers'
 import { downloadVideoToDisk } from '../../services/download'
 import { ffmpegAvailable, extractLastFrame } from '../../services/ffmpeg'
@@ -102,6 +104,23 @@ function decodeImageSize(base64: string): { w: number; h: number } | null {
 // 仅出图类资产有画风角色映射；audio(音色)/clip(素材) 不出图（见 §2.1.1）
 const ASSET_ROLE: Partial<Record<Asset['type'], StyleRole>> = { role: 'character', scene: 'scene', prop: 'prop' }
 
+// 构图层模板（与画风无关、确定性强制）：把资产描述包进按类型的版面模板，再追加画风锚定。
+// 复用「提示词模板」面板里可编辑的同名模板（与画布工程共享）：人物=五视图设定板（左两面部特写+右正/侧/背，
+// 纯白底）、场景=无人空镜、物品=单物品纯底。保证无论是否润色、无论何种画风，版面都稳定可用于下游分镜/视频。
+const ASSET_LAYOUT_TPL: Partial<Record<Asset['type'], string>> = {
+  role: 'image.charImageBoard',
+  scene: 'image.assetScene',
+  prop: 'image.assetProp',
+}
+
+// 资产参考图尺寸：人物五视图板恒用 16:9 横图（否则被项目竖屏画幅压扁版面）；物品用方图便于居中展示；
+// 场景跟随成片画幅（场景图天然要与分镜/视频同比例）。
+function assetImageSize(type: Asset['type'], meta: ProjectMeta): string {
+  if (type === 'role') return '1344x768'
+  if (type === 'prop') return '1024x1024'
+  return sizeForRatio(meta.videoRatio)
+}
+
 // 景别中文→英文（注入关键帧/视频提示词，提升画面构图准确度）
 const SHOT_EN: Record<string, string> = {
   大远景: 'extreme wide shot',
@@ -139,8 +158,11 @@ export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promi
   if (!basis) throw new Error('请先填写资产名称或描述')
   const pack = getStylePack(meta.artStyle)
   const anchor = pack ? applyStylePack(pack, ASSET_ROLE[asset.type] ?? 'character') : ''
-  const prompt = [basis, anchor].filter(Boolean).join(', ')
-  const r = await generateImage({ model, prompt, size: sizeForRatio(meta.videoRatio) })
+  // 构图层：basis 包进按类型的版面模板（charImageBoard 用 {ref}、场景/物品用 {basis}），再叠画风锚定。
+  const tplId = ASSET_LAYOUT_TPL[asset.type]
+  const body = tplId ? fillTemplate(getPrompt(tplId), { ref: basis, basis }) : basis
+  const prompt = [body, anchor].filter(Boolean).join(', ')
+  const r = await generateImage({ model, prompt, size: assetImageSize(asset.type, meta) })
   return saveAsset(r.base64, r.mime)
 }
 
