@@ -44,7 +44,7 @@ const VIDEO_MODE_OPTIONS: { id: string; label: string }[] = [
   { id: 'singleImageFirst', label: '单图首帧（wan2.6 类）' },
 ]
 
-export default function StudioEditor() {
+export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const closeProject = useProjectStore((s) => s.closeProject)
   const updateMeta = useProjectStore((s) => s.updateMeta)
@@ -75,7 +75,16 @@ export default function StudioEditor() {
     <div className="afs-stwb">
       <header className="afs-stwb__toolbar" role="toolbar" aria-label="工作台工具栏">
         <div className="afs-stwb__tbgroup">
-          <IconButton aria-label="返回项目列表" variant="ghost" icon={<ArrowLeft size={18} />} title="返回项目列表" onClick={() => void closeProject()} />
+          <IconButton
+            aria-label="返回项目列表"
+            variant="ghost"
+            icon={<ArrowLeft size={18} />}
+            title="返回项目列表"
+            onClick={() => {
+              void closeProject()
+              onHome()
+            }}
+          />
           <span className="afs-stwb__brand" aria-hidden />
           <input
             className="afs-stwb__title"
