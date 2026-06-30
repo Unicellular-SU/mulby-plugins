@@ -110,14 +110,14 @@ const ASSET_ROLE: Partial<Record<Asset['type'], StyleRole>> = { role: 'character
 const ASSET_LAYOUT_TPL: Partial<Record<Asset['type'], string>> = {
   role: 'image.charImageBoard',
   scene: 'image.assetScene',
-  prop: 'image.assetProp',
+  prop: 'image.assetPropBoard',
 }
 
 // 资产参考图尺寸：人物五视图板恒用 16:9 横图（否则被项目竖屏画幅压扁版面）；物品用方图便于居中展示；
 // 场景跟随成片画幅（场景图天然要与分镜/视频同比例）。
 function assetImageSize(type: Asset['type'], meta: ProjectMeta): string {
   if (type === 'role') return '1344x768'
-  if (type === 'prop') return '1024x1024'
+  if (type === 'prop') return '1344x768' // 多角度展示板横向排布，用 16:9 横图
   return sizeForRatio(meta.videoRatio)
 }
 

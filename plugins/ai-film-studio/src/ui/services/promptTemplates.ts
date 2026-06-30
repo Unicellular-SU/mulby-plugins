@@ -290,6 +290,15 @@ JSON 结构：
     default:
       '{basis}, product reference shot, single isolated object, centered, plain neutral background, no people, no characters, studio lighting, high detail, sharp focus',
   },
+  {
+    id: 'image.assetPropBoard',
+    group: 'image',
+    label: '物品资产 · 多角度展示板',
+    desc: '工作流物品资产的多角度展示模板：同一物品按 front/side/back/45° 多视角横向排布，纯色背景、无人物。',
+    placeholders: ['{basis}'],
+    default:
+      'product turnaround reference sheet of {basis}, the same single isolated object shown from multiple angles (front view, side view, back view and a 45-degree three-quarter view) arranged in a row, identical consistent object across all views, plain solid-color seamless background, no people, no characters, no hands, soft even studio lighting, sharp focus, fine material detail, high detail',
+  },
 ]
 
 /** id → 默认模板文本 */
