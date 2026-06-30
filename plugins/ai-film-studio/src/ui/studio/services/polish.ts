@@ -14,8 +14,10 @@ const KIND: Partial<Record<Asset['type'], ArtAssetKind>> = { role: 'character', 
 
 // 手册缺失时的兜底约束（保证最低生效，见 §3.2 缺失兜底）
 const FALLBACK_SYS =
-  '你是 AI 绘画提示词工程师。把给定角色/场景/物品的中文描述润色成一条结构清晰、细节丰富的英文图像生成提示词，' +
-  '覆盖外貌/材质/光影/镜头/风格关键词。只输出提示词正文，不要解释、不要引号。'
+  '你是 AI 绘画提示词工程师。把给定角色/场景/物品的中文描述润色成一段结构清晰、细节丰富的英文【主体描述】，' +
+  '聚焦对象本身：角色写外貌/发型/体型/服装/气质，场景写地点/时段/天气/光线氛围，物品写材质/形状/颜色/做工。' +
+  '画面版面（多视图/背景/构图）与画风由系统统一追加，不要输出 reference sheet / turnaround / white background / 镜头 / 画风 等版面或风格词。' +
+  '只输出提示词正文，不要解释、不要引号。'
 const DERIVATIVE_NOTE = '这是某资产的【衍生变体】：保持原始面容/身份/体型不变，只改变服装/状态/场景等描述要求的部分。'
 
 export async function polishAssetPrompt(asset: Asset, meta: ProjectMeta): Promise<string> {

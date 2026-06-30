@@ -11,8 +11,13 @@ metaData: art_skills
 2. 真实材质与做工细节（金属/木/布/玻璃的质感与磨损）。
 3. 同一物品跨镜保持形制/颜色/标志特征一致。
 
+## 输出要求（版面与画风由系统统一控制，此处只描述物品本体）
+多角度展示 / 纯色背景 / 单物品 / 无人物的版面与画风锚定由系统模板统一追加，**润色只需输出物品本体细节**：
+材质、形状与结构、颜色、做工细节、磨损、标志特征。**不要**写 product shot / turnaround / background / 镜头 / 画风锚定词
+等版面或风格词。
+
 ## 提示词组装
-`photorealistic product shot of [物品: 材质/形状/颜色/特征], single isolated object, centered, clean neutral background, soft studio lighting, sharp focus, fine material detail, [画风锚定词]`
+`[物品名]: [材质], [形状与结构], [颜色], [做工与细节], [磨损/标志特征], fine material detail, highly detailed`
 
 ## 严禁
 出现人物 / 杂乱背景 / 卡通化 / 与物品设定冲突的形制。

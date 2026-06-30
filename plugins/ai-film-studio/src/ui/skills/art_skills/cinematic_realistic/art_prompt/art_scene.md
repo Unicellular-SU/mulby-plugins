@@ -7,12 +7,16 @@ metaData: art_skills
 # 场景概念图生成 · 写实电影感
 
 ## 原则
-1. 只画环境空镜（establishing plate），不含人物/主要动作。
+1. 默认无人空镜（establishing plate）；是否含匿名群演由系统版面统一控制（人群/集会类场景会放宽），润色**不要**硬写 "no people"。
 2. 同一地点跨镜复用同一 master plate，保持空间一致。
 3. 写明地点 + 时段 + 天气 + 光源方向 + 色温，作为该场所有镜头的光影基准。
 
+## 输出要求（版面与画风由系统统一控制，此处只描述环境本体）
+空镜/无人/构图与画风锚定由系统模板统一追加，**润色只需输出环境本体描述**：
+地点、时段、天气、光源方向 + 色温 + 氛围。**不要**写 establishing shot / no people / 镜头 / 画风锚定词。
+
 ## 提示词组装
-`photorealistic establishing shot of [地点描述, 时段, 天气], no people, unoccupied location, [光源方向+色温+氛围], [画风锚定词], cinematic, wide lens, atmospheric depth, highly detailed`
+`[地点描述], [时段], [天气], [光源方向 + 色温 + 氛围], atmospheric depth, highly detailed`
 
 ## 严禁
-出现人物/主体动作 / 风格与项目画风冲突 / 数码高饱和。
+具名主角 / 主体动作 / 风格与项目画风冲突 / 数码高饱和。

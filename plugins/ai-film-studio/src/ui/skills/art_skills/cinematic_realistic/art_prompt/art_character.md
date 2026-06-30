@@ -12,13 +12,14 @@ metaData: art_skills
 3. 五官由角色描述（性别/年龄/气质/职业）自然推导，保证人物间差异化，不预设固定参数。
 4. 真实质感：自然肤质（毛孔/细纹），不要塑料感/蜡像感。
 
-## 设定图版面（单张 16:9 设定板）
-- 左侧：正面面部特写 + 侧面面部特写（2 个）。
-- 右侧：正面 / 侧面 / 背面 全身（3 个）。
-- 纯白背景、均匀柔光、五视图同一人物高度一致。
+## 输出要求（版面与画风由系统统一控制，此处只描述角色本体）
+五视图设定板版面（左两面部特写 + 右正/侧/背、纯白底、一致性）与画风锚定由系统模板统一追加，
+**润色只需输出对角色本体的细节描述**：性别/年龄/气质/职业、脸型与五官、发型发色、体型、服装与配饰、
+标志特征（疤/痣/瞳色等）。**不要**写 reference sheet / turnaround / 多视图 / white background / 镜头 / 画风锚定词
+等版面或风格词，避免与系统版面冲突重复。
 
 ## 提示词组装
-`photorealistic character reference sheet of [角色名: 性别/年龄/气质/外貌/发型/服装], [画风锚定词], even soft studio lighting, pure white background, full body, identical consistent face across all views, highly detailed, natural skin texture`
+`[角色名]: [性别/年龄/气质], [脸型与五官], [发型发色], [体型], [服装与配饰], [标志特征], natural skin texture, highly detailed`
 
 ## 严禁
 动漫脸 / 多指 / 五官错位 / 高饱和数码感 / 与角色年龄气质冲突。
