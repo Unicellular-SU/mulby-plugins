@@ -27,12 +27,14 @@ import {
   Brush,
   FolderPlus,
   Search,
+  Download,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
-import { type AssetRecord, type AssetType } from '../../services/assetRegistry'
+import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
+import { SnippetLibrary } from './PromptLibrary'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -94,7 +96,7 @@ export function RefThumb({ assetId }: { assetId?: string }) {
 }
 
 export default function AssetsView({ onInserted }: { onInserted: () => void }) {
-  const [tab, setTab] = useState<'assets' | 'elements'>('assets')
+  const [tab, setTab] = useState<'assets' | 'elements' | 'prompts'>('assets')
   return (
     <div className="afs-surface">
       <div className="afs-surface__head afs-avhead">
@@ -102,14 +104,21 @@ export default function AssetsView({ onInserted }: { onInserted: () => void }) {
         <Tabs
           ariaLabel="素材库视图"
           value={tab}
-          onChange={(v) => setTab(v as 'assets' | 'elements')}
+          onChange={(v) => setTab(v as 'assets' | 'elements' | 'prompts')}
           tabs={[
             { value: 'assets', label: '素材（图片 / 视频 / 音频）' },
             { value: 'elements', label: '角色 / 场景库' },
+            { value: 'prompts', label: '提示词' },
           ]}
         />
       </div>
-      {tab === 'assets' ? <AssetGallery onInserted={onInserted} /> : <ElementLibrary onInserted={onInserted} />}
+      {tab === 'assets' ? (
+        <AssetGallery onInserted={onInserted} />
+      ) : tab === 'elements' ? (
+        <ElementLibrary onInserted={onInserted} />
+      ) : (
+        <SnippetLibrary />
+      )}
     </div>
   )
 }
@@ -196,6 +205,19 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   }
   const onDeleteAsset = async (id: string) => {
     if (await confirm({ title: '删除上传素材', message: '删除该上传素材？', confirmLabel: '删除', danger: true })) removeAsset(id)
+  }
+  // 导出本地素材：把该素材的媒体文件下载到本地
+  const onDownloadAsset = async (a: AssetRecord) => {
+    const url = await resolveAssetUrl(a)
+    if (!url) return
+    const ext = a.mime?.split('/')[1]?.split(';')[0] || (a.type === 'video' ? 'mp4' : a.type === 'audio' ? 'mp3' : 'png')
+    const safe = (a.name || a.nodeKind || a.id).replace(/[\\/:*?"<>|]+/g, '_')
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${safe}.${ext}`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
   const boardCount = (id?: string) => assets.filter((a) => (id ? a.boardId === id : !a.boardId)).length
 
@@ -343,6 +365,14 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                             插入画布
                           </Button>
                         )}
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          icon={<Download size={13} />}
+                          aria-label="导出（下载到本地）"
+                          title="导出（下载到本地）"
+                          onClick={() => void onDownloadAsset(a)}
+                        />
                         {a.role === 'uploaded' && (
                           <IconButton
                             variant="danger"

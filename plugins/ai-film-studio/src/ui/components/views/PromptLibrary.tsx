@@ -29,7 +29,7 @@ export default function PromptLibrary() {
 
 type Draft = Partial<PromptSnippet> & { name: string; group: SnippetGroup; text: string }
 
-function SnippetLibrary() {
+export function SnippetLibrary() {
   const snippets = usePromptStore((s) => s.snippets)
   const saveSnippet = usePromptStore((s) => s.saveSnippet)
   const removeSnippet = usePromptStore((s) => s.removeSnippet)
