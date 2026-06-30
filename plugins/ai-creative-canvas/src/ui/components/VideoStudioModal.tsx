@@ -3,7 +3,6 @@ import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2
 } from 'lucide-react'
-import { useEscClose } from '../hooks'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
 import { useStudio } from '../store/studioStore'
@@ -135,7 +134,6 @@ function Inner({ cardId }: { cardId: string }) {
     useStudio.getState().close()
     useUi.getState().setStudioCardId(null)
   }
-  useEscClose(close)
 
   // 挂载：打开会话 → ensureFfmpeg → 可中止 probeDuration → 缩略图条
   useEffect(() => {
@@ -169,18 +167,29 @@ function Inner({ cardId }: { cardId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardId])
 
-  // Ctrl+Z / Ctrl+Y（Shift+Z 也作重做）撤销重做
+  // 模态键盘：capture 相位 + stopImmediatePropagation —— 杜绝与画布全局键 / useEscClose 冒泡竞争
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || !!el?.isContentEditable
+      // Esc 分层：退全屏 → 取消选中 → 关闭（先吞事件，避免浏览器退全屏同时触发关闭）
+      if (e.key === 'Escape') {
+        if (document.fullscreenElement) { void document.exitFullscreen(); e.stopImmediatePropagation(); return }
+        if (useStudio.getState().selectedOpId) { useStudio.getState().selectOp(null); e.stopImmediatePropagation(); return }
+        e.stopImmediatePropagation()
+        close()
+        return
+      }
+      if (typing) return
+      const mod = e.ctrlKey || e.metaKey
       const k = e.key.toLowerCase()
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (k === 'z' && !e.shiftKey) { e.preventDefault(); useStudio.getState().undo() }
-      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); useStudio.getState().redo() }
+      if (mod && k === 'z' && !e.shiftKey) { e.preventDefault(); e.stopImmediatePropagation(); useStudio.getState().undo() }
+      else if ((mod && k === 'y') || (mod && k === 'z' && e.shiftKey)) { e.preventDefault(); e.stopImmediatePropagation(); useStudio.getState().redo() }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const pv = stackToPreview(stack)

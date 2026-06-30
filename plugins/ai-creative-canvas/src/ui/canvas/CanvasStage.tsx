@@ -498,6 +498,7 @@ export function CanvasStage() {
       return tag === 'input' || tag === 'textarea' || !!el?.isContentEditable
     }
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useUi.getState().studioCardId) return // 剪辑工作台打开时，画布全局快捷键全部让位（防 Del 误删画布卡等）
       if (e.code === 'Space' && !isTyping()) {
         spaceRef.current = true
         if (inter.current.mode === 'idle') setCursor('grab')
