@@ -4651,3 +4651,71 @@ select.afs-toolbar__select,
 @media (prefers-reduced-motion: reduce) {
   .afs-select__popover { animation: none; }
 }
+
+/* ============ 应用内 Toast（玻璃卡 + 语义左色条 + 自动消失） ============ */
+.afs-toast-viewport {
+  position: fixed;
+  z-index: 10002; /* 高于 tooltip(10001)，通知应处最上层 */
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(380px, 92vw);
+  pointer-events: none; /* 视口透传，仅卡片可交互 */
+}
+.afs-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-left: 3px solid var(--afs-info);
+  border-radius: var(--afs-r-md);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  color: var(--afs-text);
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: afs-toast-in var(--afs-dur-ui) var(--afs-ease-emphasized);
+}
+.afs-toast--success { border-left-color: var(--afs-success); }
+.afs-toast--warning { border-left-color: var(--afs-warning); }
+.afs-toast--error { border-left-color: var(--afs-danger); }
+.afs-toast--info { border-left-color: var(--afs-info); }
+.afs-toast__icon { flex: none; }
+.afs-toast--success .afs-toast__icon { color: var(--afs-success); }
+.afs-toast--warning .afs-toast__icon { color: var(--afs-warning); }
+.afs-toast--error .afs-toast__icon { color: var(--afs-danger); }
+.afs-toast--info .afs-toast__icon { color: var(--afs-info); }
+.afs-toast__msg { flex: 1; min-width: 0; }
+.afs-toast__close {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+  border-radius: var(--afs-r-xs);
+  transition: background var(--afs-dur-micro) var(--afs-ease-standard), color var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-toast__close:hover { background: var(--afs-hover); color: var(--afs-text); }
+@keyframes afs-toast-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-toast { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-toast { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-toast { animation: none; }
+}

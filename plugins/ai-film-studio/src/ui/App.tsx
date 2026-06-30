@@ -10,6 +10,7 @@ import SettingsView from './components/views/SettingsView'
 import LightboxHost from './components/LightboxHost'
 import ResultViewer from './components/ResultViewer'
 import { TooltipProvider } from './components/ui/Tooltip'
+import { ToastViewport } from './components/ui/Toast'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { clearAssetCache } from './services/assets'
 import { useProviderStore } from './store/providerStore'
@@ -121,6 +122,7 @@ export default function App() {
       </div>
       <LightboxHost />
       <ResultViewer />
+      <ToastViewport />
       </ReactFlowProvider>
     </TooltipProvider>
   )
