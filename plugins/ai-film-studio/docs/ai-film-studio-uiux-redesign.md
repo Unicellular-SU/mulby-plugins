@@ -43,6 +43,7 @@
 | 3 | 灯箱 + ResultViewer chrome 收尾 | ✅ 已完成（仅构建验证） | 灯箱恒为暗场（白控件保留正确），但：`is-on` 由随机蓝 `#3b82f6`→品牌靛蓝 `#6d7cff`；关闭/导航/连看控件加 `1px` 细描边（媒体上仍可见，回应审查）；ResultViewer 面板圆角/阴影令牌化（`--afs-r-xl`/`--afs-elev-4`，**保留其刻意不加 backdrop-filter 的性能决定**）。`build` 通过。 |
 | 4 | 状态色速赢令牌化（节点状态点/底部状态文字/进度条/供应商key） | ✅ 已完成 | 节点状态点 5 色 → `--afs-text-dim/--afs-warning/--afs-info/--afs-success/--afs-danger`；底部状态文字 3 色 → 同语义令牌；进度条轨道 → `--afs-surface-sunken`、填充 → `--afs-grad-progress`；`.afs-prov__key` `#4ade80`→`--afs-success`。修复这些「亮色下保持暗调」的破相。`build` 通过。 |
 | — | **完整性审计（8-agent 工作流）** | 📋 已出清单 | 核验出剩余 **107 项（高29/中37/低41）**。关键缺口：① `.afs-glass/.afs-glow` 工具类**应用到 0 元素**（仅 Select 弹层是玻璃）；② 多数**逐屏结构重设计未做**（ProjectHome 英雄卡/Studio 玻璃顶栏+三栏/设置竖 Tabs/Inspector 抽屉）；③ ~25 处硬编码 danger/状态色；④ 缺 Switch/统一 Input/Number Stepper/in-app 确认弹窗；⑤ 无 skeleton/shimmer/breathing（令牌已定义、`@keyframes` 缺）。详见审计输出。后续按 A速赢→B玻璃→C逐屏 推进。 |
+| B | **玻璃落地 · 浮动 Inspector 抽屉** | ✅ 已完成（仅构建验证） | `.afs-app__right--float`（已浮于画布上）改玻璃强配方：`--afs-glass-fill-strong` + `backdrop-filter` 模糊背后画布 + `--afs-glass-border` + `--afs-elev-4`/`--afs-glass-highlight` + `--afs-dur-overlay`/`emphasized` 入场；带 `@supports not(backdrop-filter)` 与 `prefers-reduced-transparency` 降级。**这是第一处真正的玻璃 chrome**（此前仅 Select 弹层）。`build` 通过。 |
 | 4 | 余下：运行态玻璃+辉光、扇出网格瓦片可按钮化、骨架/微光动效 | ⏳ 待办（视觉） | 需可视验证的打磨。 |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |
 

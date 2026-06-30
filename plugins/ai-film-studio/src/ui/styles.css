@@ -300,15 +300,33 @@ body {
   background: var(--afs-panel);
   overflow: hidden;
 }
-/* 悬浮属性抽屉：绝对定位于画布右侧之上，不挤压无限画布；仅选中节点时挂载 */
+/* 悬浮属性抽屉：绝对定位于画布右侧之上，不挤压无限画布；仅选中节点时挂载。
+   它真正浮于画布之上 → 用玻璃「承文」强配方（≥80% 填充保证文字对比，背后画布被模糊）。
+   边缘抽屉不做圆角；带 reduced-transparency / 无 backdrop-filter 降级。 */
 .afs-app__right--float {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   z-index: 50; /* 高于 React Flow 内部(控件/选中节点)，低于全屏模态 Lightbox(9999) */
-  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.3);
-  animation: afs-drawer-in 0.16s ease-out;
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border-left: var(--afs-glass-border);
+  box-shadow: var(--afs-elev-4), var(--afs-glass-highlight);
+  animation: afs-drawer-in var(--afs-dur-overlay) var(--afs-ease-emphasized);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-app__right--float {
+    background: var(--afs-glass-fallback);
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-app__right--float {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--afs-panel);
+  }
 }
 @keyframes afs-drawer-in {
   from {
