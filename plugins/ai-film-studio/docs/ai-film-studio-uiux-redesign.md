@@ -48,7 +48,8 @@
 | B/3 | **画布 Toolbar chrome 升级**（玻璃条 + 品牌芯片 + 状态点 + 保存 spinner） | ✅ 已完成（仅构建验证） | `.afs-toolbar` 改玻璃强配方（半透明 + `backdrop-filter` + `--afs-glass-border` + `--afs-glass-highlight` + 降级）；新增 `.afs-toolbar__brandmark`（`--afs-grad-brand` 渐变芯片，Clapperboard）补回左组品牌；状态文字加 `.afs-toolbar__statusdot`（saved=success/dirty=warning/saving=info）+ 保存中 `Loader2` 旋转。注：工具栏未重叠画布，磨砂效果较弱（真磨砂需画布延伸至栏下的布局改动，仍留作结构步骤）。`tsc`+`build` 通过。 |
 | B/3 | **Studio re-skin 批**：顶栏玻璃 + 阶段 Tabs 渐变下划线 + cand-badge 对比 | ✅ 已完成（仅构建验证） | `.afs-studio__topbar` 玻璃强配方 + 降级（第 7 处玻璃 chrome）；`.afs-studio__tab.is-active` 由实色边框下划线改 `::after` 的 `--afs-grad-brand` 渐变下划线（内缩 8px）；`.afs-studio__cand-badge` `#fff`→`--afs-on-accent`。**On-media 暗 pill（sbnum/imgthumb 等）刻意保留固定深色**——白字叠媒体需恒定深底，不应随主题变浅。`build` 通过。 |
 | 3 | 招牌渐变主操作 CTA | ✅ 已完成（仅构建验证） | `.afs-inspector__run` 实色 accent → `--afs-grad-accent` 渐变；Studio 四个主操作（一键成片/合成成片/生成并设为关键帧/Agent 发送）`--primary`→`--gradient`。**暂不加 `.afs-glow` 辉光**：辉光是大尺寸 blur ::after，在滚动面板内易被裁切，盲改风险高，留待可视验证。`tsc`+`build` 通过。 |
-| 4 | 余下：运行态玻璃+辉光、扇出网格瓦片可按钮化、骨架/微光动效、结构重设计（ProjectHome/设置/Studio 三栏） | ⏳ 待办（视觉/结构） | 需可视验证；结构重设计最值得你先看渲染再做。 |
+| 4 | 速赢清债 + **Switch 原子** | ✅ 已完成 | Inspector 节点头/徽标 = 全仓最后一处内联分类色 → `var(--afs-cat-*)`（**内联分类/端口色 100% 桥接**）；OptimizableField AI 按钮/chip/retry hover/prov-ok/audio 占位 5 处暗色硬编码 → 令牌；NodeLibrary 行 + 项目卡封面键盘可达（`role=button`/`tabIndex`/Enter·Space）；新建 `components/ui/Switch.tsx`（role=switch + 渐变轨 + 弹簧拇指），StudioSettings「高级」由 Checkbox→Switch。`tsc`+`build` 通过。 |
+| — | **二次完整性审计**：剩余约 24 项 | 📋 已出清单 | 三类大块仍在：① 6 屏结构重写；② 缺失原子（Number Stepper/Dropdown/Tooltip/Toast/Popover/Combobox + **app 内 Confirm 弹窗替换 14 处 `window.confirm`**，需同步→异步）；③ 动效（skeleton/shimmer/breathing keyframes 缺；`.afs-glow` 未接 CTA，盲改易裁切）。均建议**有可视验证再做**。 |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |
 
 ---
