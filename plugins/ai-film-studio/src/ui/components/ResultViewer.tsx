@@ -26,10 +26,10 @@ export default function ResultViewer() {
 
   return (
     <div className="afs-rv" onClick={close}>
-      <div className="afs-rv__panel" onClick={(e) => e.stopPropagation()}>
+      <div className="afs-rv__panel" role="dialog" aria-modal="true" aria-labelledby="afs-rv-title" onClick={(e) => e.stopPropagation()}>
         <div className="afs-rv__head">
-          <span className="afs-rv__title">{node.data.title || def?.label} · 结果</span>
-          <button className="afs-rv__close" onClick={close} title="关闭 (Esc)">
+          <span className="afs-rv__title" id="afs-rv-title">{node.data.title || def?.label} · 结果</span>
+          <button className="afs-rv__close" onClick={close} title="关闭 (Esc)" aria-label="关闭 (Esc)">
             <X size={18} />
           </button>
         </div>

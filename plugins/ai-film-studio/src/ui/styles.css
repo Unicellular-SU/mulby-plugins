@@ -1916,19 +1916,31 @@ select.afs-toolbar__select,
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.72);
-  /* 去 backdrop-filter：避免运行中节点 spinner 在背后转时每帧重算整屏模糊（性能） */
+  background: var(--afs-scrim);
+  /* 去 backdrop-filter：避免运行中节点 spinner 在背后转时每帧重算整屏模糊（性能）。
+     模糊只施加在卡片（.afs-rv__panel）上，承载正文的玻璃面，非整屏遮罩。 */
 }
 .afs-rv__panel {
   width: min(760px, 92vw);
   max-height: 86vh;
   display: flex;
   flex-direction: column;
-  background: var(--afs-node-bg);
-  border: 1px solid var(--afs-border);
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  backdrop-filter: blur(20px) saturate(160%);
+  border: var(--afs-glass-border);
   border-radius: var(--afs-r-xl);
   overflow: hidden;
-  box-shadow: var(--afs-elev-4);
+  box-shadow: var(--afs-elev-4), var(--afs-glass-highlight);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-rv__panel { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-rv__panel { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (forced-colors: active) {
+  .afs-rv__panel { background: Canvas; border-color: CanvasText; }
 }
 .afs-rv__head {
   display: flex;
@@ -1938,19 +1950,29 @@ select.afs-toolbar__select,
 }
 .afs-rv__title {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 16px;
+  color: var(--afs-text);
 }
 .afs-rv__close {
   margin-left: auto;
-  display: flex;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
-  color: inherit;
+  color: var(--afs-muted);
   cursor: pointer;
-  opacity: 0.7;
+  border-radius: var(--afs-r-md);
+  transition: background var(--afs-dur-micro) var(--afs-ease-standard), color var(--afs-dur-micro) var(--afs-ease-standard);
 }
 .afs-rv__close:hover {
-  opacity: 1;
+  background: var(--afs-hover);
+  color: var(--afs-text);
+}
+.afs-rv__close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
 }
 .afs-rv__body {
   padding: 12px 16px;
@@ -1959,7 +1981,7 @@ select.afs-toolbar__select,
 .afs-rv__empty {
   padding: 24px;
   text-align: center;
-  opacity: 0.6;
+  color: var(--afs-muted);
 }
 .afs-rv__list {
   display: flex;
@@ -1968,13 +1990,14 @@ select.afs-toolbar__select,
 }
 .afs-rv__seg {
   font-size: 12px;
-  opacity: 0.75;
+  color: var(--afs-muted);
   padding-bottom: 4px;
 }
 .afs-rv__row {
   padding: 8px 10px;
+  background: var(--afs-panel-2);
   border: 1px solid var(--afs-border);
-  border-radius: 8px;
+  border-radius: var(--afs-r-lg);
 }
 .afs-rv__row-h {
   display: flex;
@@ -1990,7 +2013,8 @@ select.afs-toolbar__select,
 .afs-rv__row-prompt {
   margin-top: 4px;
   font-size: 11px;
-  opacity: 0.6;
+  color: var(--afs-text-dim);
+  font-family: var(--afs-font-mono);
 }
 .afs-rv__chips {
   display: flex;
@@ -2003,11 +2027,11 @@ select.afs-toolbar__select,
   padding: 6px 8px;
   font-size: 13px;
   line-height: 1.6;
-  background: color-mix(in srgb, var(--afs-text) 5%, transparent);
-  border-radius: 6px;
+  background: var(--afs-surface-sunken);
+  border-radius: var(--afs-r-sm);
 }
 .afs-rv__dlg i {
-  opacity: 0.6;
+  color: var(--afs-text-dim);
   font-size: 11px;
 }
 .afs-rv__pre {
@@ -2015,19 +2039,28 @@ select.afs-toolbar__select,
   word-break: break-word;
   font-size: 12px;
   line-height: 1.5;
+  background: var(--afs-surface-sunken);
+  border-radius: var(--afs-r-md);
+  padding: var(--afs-sp-4);
+  font-family: var(--afs-font-mono);
 }
 .afs-rv__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--afs-sp-4);
 }
 .afs-rv__tile {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 6px;
+  border-radius: var(--afs-r-md);
   overflow: hidden;
-  background: color-mix(in srgb, var(--afs-text) 6%, transparent);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
   cursor: zoom-in;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-rv__tile:hover {
+  border-color: var(--afs-border-strong);
 }
 .afs-rv__tile img,
 .afs-rv__tile video {
@@ -2041,12 +2074,26 @@ select.afs-toolbar__select,
   right: 0;
   bottom: 0;
   padding: 2px 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: #fff;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  background: linear-gradient(transparent, var(--afs-scrim));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* ResultViewer 内的元信息 chip 是密集只读标签，不是可点 pill —— 用更高特异性覆盖全局 .afs-chip(可点 28px) */
+.afs-rv .afs-chip {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  border-radius: var(--afs-r-sm);
+  background: color-mix(in srgb, var(--afs-muted) 14%, transparent);
+  color: var(--afs-muted);
+  border: 1px solid var(--afs-border);
+  cursor: default;
 }
 .afs-spin {
   animation: afs-spin 0.9s linear infinite;
