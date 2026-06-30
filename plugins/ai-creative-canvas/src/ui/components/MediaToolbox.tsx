@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, ArrowUpDown } from 'lucide-react'
+import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, ArrowUpDown, SlidersHorizontal } from 'lucide-react'
 import type { Card } from '../types'
 import { runImageTool, runGridSlice, runVideoTool } from '../services/mediaOps'
 import { repairEquirectSeam } from '../services/mediaPano'
@@ -68,7 +68,14 @@ export function MediaToolbox({ card }: { card: Card }) {
       )}
       {isVid && (
         <>
-          <IconBtn icon={Scissors} title="裁剪片段（可视化时间轴）" onClick={() => useUi.getState().setTrimCardId(card.id)} />
+          <button
+            onClick={() => useUi.getState().setStudioCardId(card.id)}
+            title="剪辑工作台（裁切/变速/调色/叠加/导出，非破坏式）"
+            className="shrink-0 h-7 px-2 flex items-center gap-1 rounded-md bg-pink-500/15 text-pink-600 dark:text-pink-300 hover:bg-pink-500/25 text-[11px] font-medium"
+          >
+            <SlidersHorizontal size={13} /> 工作台
+          </button>
+          <IconBtn icon={Scissors} title="快速裁剪片段（可视化时间轴）" onClick={() => useUi.getState().setTrimCardId(card.id)} />
           <IconBtn icon={Film} title="转 GIF" onClick={() => runVideoTool(card.id, 'gif')} />
           <IconBtn icon={Images} title="抽帧" onClick={() => runVideoTool(card.id, 'frames')} />
           <IconBtn icon={Clapperboard} title="镜头检测" onClick={() => runVideoTool(card.id, 'scenes')} />

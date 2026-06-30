@@ -90,8 +90,10 @@ export const useStudio = create<StudioState>((set, get) => {
     cursor: -1,
 
     open: (cardId, base, recipe) => {
+      const ops: EditOp[] = recipe?.ops ? JSON.parse(JSON.stringify(recipe.ops)) : []
+      if (!ops.some((o) => o.kind === 'export')) ops.push(createOp('export')) // 栈尾恒有一个导出 op
       const stack: EditStack = {
-        ops: recipe?.ops ? JSON.parse(JSON.stringify(recipe.ops)) : [],
+        ops,
         version: 1,
         baseDuration: base.duration,
         baseW: base.w,

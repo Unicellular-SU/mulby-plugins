@@ -12,6 +12,7 @@ import { StoryboardModal } from './components/StoryboardModal'
 import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { VideoTrimModal } from './components/VideoTrimModal'
+import { VideoStudioModal } from './components/VideoStudioModal'
 import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
 import { ProjectLibrary } from './components/ProjectLibrary'
@@ -133,6 +134,7 @@ export default function App() {
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />
       <VideoTrimModal />
+      <VideoStudioModal />
       <TaskCenter />
       <Gallery />
       <DialogHost />

@@ -39,6 +39,8 @@ interface UiState {
   setMaskCardId: (id: string | null) => void
   trimCardId: string | null
   setTrimCardId: (id: string | null) => void
+  studioCardId: string | null
+  setStudioCardId: (id: string | null) => void
   showTaskCenter: boolean
   setShowTaskCenter: (v: boolean) => void
   connInvalidIds: Set<string> | null
@@ -98,6 +100,8 @@ export const useUi = create<UiState>((set) => ({
   setMaskCardId: (maskCardId) => set({ maskCardId }),
   trimCardId: null,
   setTrimCardId: (trimCardId) => set({ trimCardId }),
+  studioCardId: null,
+  setStudioCardId: (studioCardId) => set({ studioCardId }),
   showTaskCenter: false,
   setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter }),
   connInvalidIds: null,
