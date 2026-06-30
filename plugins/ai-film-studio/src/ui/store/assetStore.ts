@@ -9,7 +9,7 @@ import { releaseAsset } from '../services/assets'
 import {
   loadRegistry,
   loadBoards,
-  backfillFromProjects,
+  backfillAll,
   importAssetFile,
   removeAssetRecord,
   gcOrphans,
@@ -114,7 +114,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
 
   load: async () => {
     const [assets, elements, usage, boards] = await Promise.all([
-      backfillFromProjects(), // 回填生成素材 + 返回完整注册表
+      backfillAll(), // 回填画布工程 + 工作流项目生成素材 + 返回完整注册表
       kvGet<ElementRef[]>(KEY_ELEMENTS),
       storageUsage(),
       loadBoards(),
@@ -140,7 +140,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   },
 
   refresh: async () => {
-    const [assets, usage] = await Promise.all([backfillFromProjects(), storageUsage()])
+    const [assets, usage] = await Promise.all([backfillAll(), storageUsage()])
     set({ assets, usage })
   },
 

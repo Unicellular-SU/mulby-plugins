@@ -47,6 +47,8 @@ export interface AssetRecord {
   projectId?: string
   projectName?: string
   nodeKind?: string
+  /** 生成来源面：画布工程 or 工作流项目（uploaded 留空） */
+  surface?: 'canvas' | 'studio'
   /** 所属合集（Board）；未分组为 undefined */
   boardId?: string
   createdAt: number
@@ -215,6 +217,7 @@ export async function backfillFromProjects(): Promise<AssetRecord[]> {
         projectId: proj.id,
         projectName: proj.name,
         nodeKind,
+        surface: 'canvas',
         createdAt: Date.now(),
       })
       changed = true
@@ -222,6 +225,109 @@ export async function backfillFromProjects(): Promise<AssetRecord[]> {
   }
   if (changed) await saveRegistry(registry)
   return registry
+}
+
+/**
+ * 从所有工作流项目（studio:project:*）回填生成素材到全局注册表（幂等：按 refKey 去重）。
+ * 工作流产物（资产图/历史候选/变体/关键帧/精修流图/视频片段/试听音频）此前只受 GC 保护、不进注册表，
+ * 因而不在「素材库」可见、无法被画布或其它项目复用。此函数把它们登记为 surface:'studio' 的 generated 记录。
+ */
+export async function backfillFromStudio(): Promise<AssetRecord[]> {
+  const registry = await loadRegistry()
+  const seen = new Set(registry.map(refKey).filter(Boolean))
+  const cards = (await kvGet<{ id: string; name: string }[]>(KEY_STUDIO_INDEX)) || []
+  let changed = false
+  const addImage = (assetId: string | undefined, projId: string, projName: string, nodeKind: string, name?: string) => {
+    if (!assetId || seen.has(assetId)) return
+    seen.add(assetId)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'image',
+      mime: 'image/png',
+      role: 'generated',
+      assetId,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind,
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  for (const card of cards) {
+    if (!card?.id) continue
+    const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
+    if (!doc) continue
+    const pn = card.name || '工作流项目'
+    for (const a of doc.assets || []) {
+      addImage(a.refImageId, card.id, pn, a.type || 'asset', a.name)
+      for (const img of a.images || []) addImage(img.refImageId, card.id, pn, a.type || 'asset', a.name)
+      for (const v of a.variants || []) addImage(v.refImageId, card.id, pn, 'variant', a.name)
+      // 试听音频（type:audio 子资产）：本地路径或**非临时** url（临时 data:/blob: 不可持久引用，跳过避免每次重复入库）
+      const ap = a.audioFilePath || (a.audioUrl && !isEphemeralUrl(a.audioUrl) ? a.audioUrl : '')
+      if (ap && !seen.has(ap)) {
+        seen.add(ap)
+        registry.push({
+          id: `ar_${nanoid(8)}`,
+          type: 'audio',
+          mime: 'audio/mpeg',
+          role: 'generated',
+          ...(a.audioFilePath ? { localPath: a.audioFilePath } : { url: a.audioUrl }),
+          name: a.name,
+          projectId: card.id,
+          projectName: pn,
+          nodeKind: 'voice',
+          surface: 'studio',
+          createdAt: Date.now(),
+        })
+        changed = true
+      }
+    }
+    for (const s of doc.storyboards || []) addImage(s.keyframeImageId, card.id, pn, 'keyframe')
+    for (const flow of Object.values(doc.imageFlows || {})) for (const n of flow?.nodes || []) addImage(n?.assetId, card.id, pn, 'flow')
+    // 视频片段：videoFilePath（文件系统）/ 非临时 videoUrl（临时 data:/blob: 跳过）
+    for (const c of doc.clips || []) {
+      const vp = c.videoFilePath || (c.videoUrl && !isEphemeralUrl(c.videoUrl) ? c.videoUrl : '')
+      if (!vp || seen.has(vp)) continue
+      seen.add(vp)
+      registry.push({
+        id: `ar_${nanoid(8)}`,
+        type: 'video',
+        mime: 'video/mp4',
+        role: 'generated',
+        ...(c.videoFilePath ? { localPath: c.videoFilePath } : { url: c.videoUrl }),
+        durationSec: c.durationSec,
+        projectId: card.id,
+        projectName: pn,
+        nodeKind: 'clip',
+        surface: 'studio',
+        createdAt: Date.now(),
+      })
+      changed = true
+    }
+  }
+  if (changed) await saveRegistry(registry)
+  return registry
+}
+
+/**
+ * 画布工程 + 工作流项目两路回填（顺序执行，避免对同一注册表 key 的并发读改写竞争）。
+ * 用模块级 in-flight 句柄合并并发调用（多个组件同 tick 各自 load()/refresh() 时只跑一次读改写，
+ * 杜绝「后写覆盖前写、丢记录」竞态）。注意只合并并发、不缓存：完成即清空，下次调用重新回填。
+ */
+let backfillInFlight: Promise<AssetRecord[]> | null = null
+export async function backfillAll(): Promise<AssetRecord[]> {
+  if (backfillInFlight) return backfillInFlight
+  backfillInFlight = (async () => {
+    await backfillFromProjects()
+    return backfillFromStudio()
+  })()
+  try {
+    return await backfillInFlight
+  } finally {
+    backfillInFlight = null
+  }
 }
 
 /** 上传入库：图片/音频走附件库，视频走文件系统（可能 >50MB） */
@@ -284,12 +390,17 @@ export async function storageUsage(): Promise<{ count: number; bytes: number }> 
  */
 interface StudioDocShape {
   assets?: Array<{
+    type?: string
+    name?: string
     refImageId?: string
     images?: Array<{ refImageId?: string }>
     variants?: Array<{ refImageId?: string }>
     voiceAssetId?: string
+    audioFilePath?: string
+    audioUrl?: string
   }>
   storyboards?: Array<{ keyframeImageId?: string }>
+  clips?: Array<{ videoFilePath?: string; videoUrl?: string; durationSec?: number }>
   imageFlows?: Record<string, { nodes?: Array<{ assetId?: string }> }>
 }
 async function collectStudioReferenced(referenced: Set<string>): Promise<void> {

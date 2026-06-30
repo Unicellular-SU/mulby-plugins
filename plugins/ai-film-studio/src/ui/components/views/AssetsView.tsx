@@ -7,6 +7,7 @@ import Tabs from '../ui/Tabs'
 import Button from '../ui/Button'
 import IconButton from '../ui/IconButton'
 import Modal from '../ui/Modal'
+import Menu, { type MenuItem } from '../ui/Menu'
 import Tooltip from '../ui/Tooltip'
 import { Field, Input, Textarea } from '../ui/Field'
 import { useConfirm } from '../ui/ConfirmDialog'
@@ -28,9 +29,11 @@ import {
   FolderPlus,
   Search,
   Download,
+  Film,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
+import { useProjectStore } from '../../store/projectStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
@@ -97,6 +100,10 @@ export function RefThumb({ assetId }: { assetId?: string }) {
 
 export default function AssetsView({ onInserted }: { onInserted: () => void }) {
   const [tab, setTab] = useState<'assets' | 'elements' | 'prompts'>('assets')
+  // 「加入工作流项目」目标列表：进素材库即刷新工作流项目卡片（不依赖是否打开过工作台）
+  useEffect(() => {
+    void useProjectStore.getState().refreshCards()
+  }, [])
   return (
     <div className="afs-surface">
       <div className="afs-surface__head afs-avhead">
@@ -140,6 +147,8 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   const moveAsset = useAssetStore((s) => s.moveAsset)
   const insertAssetNode = useGraphStore((s) => s.insertAssetNode)
   const saveProject = useGraphStore((s) => s.saveProject)
+  const projects = useProjectStore((s) => s.cards)
+  const importImageToProject = useProjectStore((s) => s.importImageToProject)
 
   const confirm = useConfirm()
   const prompt = usePrompt()
@@ -187,6 +196,22 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
   const onInsert = async (rec: AssetRecord) => {
     await insertAssetNode(rec)
     onInserted()
+  }
+  const onAddToProject = async (projectId: string, name: string, rec: AssetRecord) => {
+    const id = await importImageToProject(projectId, rec, 'role')
+    if (id) window.mulby?.notification?.show(`已加入「${name}」项目素材（在工作流·资产里查看）`, 'success')
+  }
+  // 图片素材的「插入到…」目标菜单：画布 + 各工作流项目
+  const insertMenuItems = (rec: AssetRecord): MenuItem[] => {
+    const items: MenuItem[] = [{ label: '插入到画布', icon: PlusSquare, onSelect: () => void onInsert(rec) }]
+    if (projects.length) {
+      projects.forEach((p, i) =>
+        items.push({ label: `加入：${p.name}`, icon: Film, separatorBefore: i === 0, onSelect: () => void onAddToProject(p.id, p.name, rec) })
+      )
+    } else {
+      items.push({ label: '（暂无工作流项目）', disabled: true, separatorBefore: true })
+    }
+    return items
   }
 
   const onNewBoard = async () => {
@@ -333,7 +358,6 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
             ) : (
               <div className="afs-avtiles">
                 {filtered.map((a) => {
-                  const canInsert = a.type === 'image' || a.type === 'audio'
                   return (
                     <div key={a.id} className="afs-avcard">
                       <div className="afs-avcard__thumb" onClick={() => setPreview(a)} title="预览">
@@ -360,11 +384,21 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
                         />
                       )}
                       <div className="afs-avcard__foot">
-                        {canInsert && (
-                          <Button variant="secondary" size="sm" leadingIcon={PlusSquare} onClick={() => onInsert(a)} title="插入到当前工程画布">
+                        {a.type === 'image' ? (
+                          <Menu
+                            align="start"
+                            trigger={
+                              <Button variant="secondary" size="sm" leadingIcon={PlusSquare} title="插入到画布 / 加入工作流项目">
+                                插入到…
+                              </Button>
+                            }
+                            items={insertMenuItems(a)}
+                          />
+                        ) : a.type === 'audio' ? (
+                          <Button variant="secondary" size="sm" leadingIcon={PlusSquare} onClick={() => void onInsert(a)} title="插入到当前工程画布">
                             插入画布
                           </Button>
-                        )}
+                        ) : null}
                         <IconButton
                           variant="ghost"
                           size="sm"
@@ -440,6 +474,8 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
   const saveElement = useAssetStore((s) => s.saveElement)
   const removeElement = useAssetStore((s) => s.removeElement)
   const insertElementNode = useGraphStore((s) => s.insertElementNode)
+  const projects = useProjectStore((s) => s.cards)
+  const importElementToProject = useProjectStore((s) => s.importElementToProject)
 
   const confirm = useConfirm()
 
@@ -454,6 +490,21 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
   const onInsert = async (el: ElementRef) => {
     await insertElementNode(el)
     onInserted()
+  }
+  const onAddToProject = async (projectId: string, name: string, el: ElementRef) => {
+    const id = await importElementToProject(projectId, el)
+    if (id) window.mulby?.notification?.show(`已加入「${name}」项目素材（在工作流·资产里查看）`, 'success')
+  }
+  const insertMenuItems = (el: ElementRef): MenuItem[] => {
+    const items: MenuItem[] = [{ label: '插入到画布', icon: PlusSquare, onSelect: () => void onInsert(el) }]
+    if (projects.length) {
+      projects.forEach((p, i) =>
+        items.push({ label: `加入：${p.name}`, icon: Film, separatorBefore: i === 0, onSelect: () => void onAddToProject(p.id, p.name, el) })
+      )
+    } else {
+      items.push({ label: '（暂无工作流项目）', disabled: true, separatorBefore: true })
+    }
+    return items
   }
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) {
@@ -499,7 +550,7 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
               return (
                 <div key={el.id} className="afs-avcard">
                   <div className="afs-avcard__thumb" onClick={() => onInsert(el)} title="插入到画布">
-                    <RefThumb assetId={el.refAssetIds?.[0]} />
+                    <RefThumb assetId={el.views?.front ?? el.refAssetIds?.[0]} />
                     <span className="afs-avpill afs-avpill--type">
                       <Icon size={11} /> {KIND_LABEL[el.kind]}
                     </span>
@@ -509,9 +560,15 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
                   </div>
                   <div className="afs-avcard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
                   <div className="afs-avcard__foot">
-                    <Button variant="secondary" size="sm" leadingIcon={PlusSquare} onClick={() => onInsert(el)} title="插入到当前工程画布">
-                      插入画布
-                    </Button>
+                    <Menu
+                      align="start"
+                      trigger={
+                        <Button variant="secondary" size="sm" leadingIcon={PlusSquare} title="插入到画布 / 加入工作流项目">
+                          插入到…
+                        </Button>
+                      }
+                      items={insertMenuItems(el)}
+                    />
                     <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
                     <IconButton
                       variant="danger"

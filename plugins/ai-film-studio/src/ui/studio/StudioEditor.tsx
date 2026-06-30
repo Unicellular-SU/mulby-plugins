@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check, Image as ImageIcon, RotateCcw } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check, Image as ImageIcon, RotateCcw, BookmarkPlus } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -620,9 +620,12 @@ function AssetCard({ asset }: { asset: Asset }) {
   const polishAsset = useProjectStore((s) => s.polishAsset)
   const addDerivative = useProjectStore((s) => s.addDerivative)
   const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
+  const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
+  const canPromote = asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop'
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
   const [showDeriv, setShowDeriv] = useState(false)
   const [viewer, setViewer] = useState(false)
+  const [promoting, setPromoting] = useState(false)
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
   return (
@@ -703,6 +706,24 @@ function AssetCard({ asset }: { asset: Asset }) {
         >
           <Users size={13} />
         </button>
+        {canPromote && (
+          <button
+            className="afs-btn afs-btn--sm afs-btn--ghost"
+            disabled={!asset.refImageId || promoting}
+            title={asset.refImageId ? '保存到角色 / 场景库（全局复用）' : '先生成或选择一张参考图'}
+            aria-label="保存到角色 / 场景库"
+            onClick={async () => {
+              setPromoting(true)
+              try {
+                await promoteAssetToElement(asset.id)
+              } finally {
+                setPromoting(false)
+              }
+            }}
+          >
+            {promoting ? <Loader2 size={13} className="afs-spin" /> : <BookmarkPlus size={13} />}
+          </button>
+        )}
         <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除资产" aria-label="删除资产" onClick={() => removeAsset(asset.id)}>
           <Trash2 size={13} />
         </button>

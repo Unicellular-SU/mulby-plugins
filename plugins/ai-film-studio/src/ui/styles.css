@@ -3467,6 +3467,7 @@ select.afs-toolbar__select,
   gap: 6px;
 }
 .afs-dockitem {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -3478,6 +3479,35 @@ select.afs-toolbar__select,
 .afs-dockitem:hover {
   background: var(--afs-hover);
   border-color: var(--afs-border);
+}
+/* 右上「＋加入项目素材」：默认隐藏，hover/聚焦时浮现 */
+.afs-dockitem__add {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--afs-grad-accent, var(--afs-accent));
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.12s, transform 0.12s;
+}
+.afs-dockitem:hover .afs-dockitem__add,
+.afs-dockitem__add:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+.afs-dockitem__add:hover {
+  filter: brightness(1.08);
 }
 .afs-dockitem:active {
   cursor: grabbing;

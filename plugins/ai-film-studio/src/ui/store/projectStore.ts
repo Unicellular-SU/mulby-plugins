@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { Asset, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { Asset, AssetImage, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
@@ -19,6 +19,8 @@ import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
 import { abortText } from '../services/textEngine'
 import { useGraphStore } from './graphStore'
+import { useAssetStore, type ElementRef, type ElementKind } from './assetStore'
+import type { AssetRecord } from '../services/assetRegistry'
 import { useAgentDeployStore } from './agentDeployStore'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
@@ -62,6 +64,12 @@ export interface ProjectState {
   removeScript: (id: string) => void
   upsertAsset: (a: Partial<Asset> & { type: Asset['type']; name: string }) => string
   removeAsset: (id: string) => void
+  /** 从全局素材库把一张图片绑成项目资产（角色/场景/物品的参考图）。projectId 为当前打开项目时走 mutate，否则直接读写目标 doc。返回新资产 id；非图片/无 assetId 返回 ''。 */
+  importImageToProject: (projectId: string, rec: Pick<AssetRecord, 'assetId' | 'name' | 'type'>, kind: 'role' | 'scene' | 'prop') => Promise<string>
+  /** 从全局角色/场景库把元素绑成项目资产（带 refImageId + 桥接 elementId）。 */
+  importElementToProject: (projectId: string, el: ElementRef) => Promise<string>
+  /** 把项目里的角色/场景资产保存（回流）到全局角色场景库（复用 elementId，幂等更新）。 */
+  promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
   removeStoryboard: (id: string) => void
   reorderStoryboards: (orderedIds: string[]) => void
@@ -148,6 +156,39 @@ function pushAssetImage(get: () => ProjectState, id: string, refImageId: string,
     a.error = undefined
     if (extra) Object.assign(a, extra)
   })
+}
+
+/** 由「库素材规格」构造一条项目 Asset；带 assetId 时同步建一条图片历史候选并设为当前图。 */
+function buildLibraryAsset(spec: { kind: Asset['type']; name: string; assetId?: string; prompt?: string; desc?: string; elementId?: string }): Asset {
+  const asset: Asset = { id: P.newId('a_'), type: spec.kind, name: spec.name, state: spec.assetId ? 'done' : 'idle' }
+  if (spec.assetId) {
+    const img: AssetImage = { id: P.newId('ai_'), refImageId: spec.assetId, createdAt: Date.now(), state: 'done' }
+    asset.refImageId = spec.assetId
+    asset.images = [img]
+    asset.currentImageId = img.id
+  }
+  if (spec.prompt) asset.prompt = spec.prompt
+  if (spec.desc) asset.desc = spec.desc
+  if (spec.elementId) asset.elementId = spec.elementId
+  return asset
+}
+
+/** 把一条新资产写进指定项目：打开中的项目走 mutate（防抖落盘），未打开的直接读写其持久化 doc。返回资产 id。 */
+async function writeAssetToProject(get: () => ProjectState, projectId: string, asset: Asset): Promise<string> {
+  const cur = get().doc
+  if (cur && cur.meta.id === projectId) {
+    get().mutate((d) => {
+      d.assets.push(asset)
+    })
+    await get().flush()
+    return asset.id
+  }
+  const doc = await P.loadProject(projectId)
+  if (!doc) return ''
+  doc.assets.push(asset)
+  await P.saveProject(doc)
+  await get().refreshCards()
+  return asset.id
 }
 
 function scheduleSave(get: () => ProjectState) {
@@ -263,6 +304,51 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return id
   },
   removeAsset: (id) => get().mutate((d) => (d.assets = d.assets.filter((x) => x.id !== id && x.parentAssetId !== id))),
+
+  importImageToProject: async (projectId, rec, kind) => {
+    if (!rec.assetId || rec.type !== 'image') {
+      window.mulby?.notification?.show('仅图片素材可加入项目素材（视频/音频请在时间线/配音处使用）', 'warning')
+      return ''
+    }
+    return writeAssetToProject(get, projectId, buildLibraryAsset({ kind, name: rec.name || '素材', assetId: rec.assetId }))
+  },
+
+  importElementToProject: async (projectId, el) => {
+    const kind: Asset['type'] = el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role'
+    // 元素参考图优先取正视图，回退首张参考图（与画布 insertElementNode 取图口径一致）
+    const assetId = el.views?.front ?? el.refAssetIds?.[0]
+    return writeAssetToProject(
+      get,
+      projectId,
+      buildLibraryAsset({ kind, name: el.name, assetId, prompt: el.prompt, desc: el.description, elementId: el.id })
+    )
+  },
+
+  promoteAssetToElement: async (id) => {
+    const doc = get().doc
+    if (!doc) return
+    const a = doc.assets.find((x) => x.id === id)
+    if (!a) return
+    if (!a.refImageId) {
+      window.mulby?.notification?.show('该资产还没有参考图，先生成或选择一张图片', 'warning')
+      return
+    }
+    const kind: ElementKind = a.type === 'scene' ? 'scene' : a.type === 'prop' ? 'prop' : 'character'
+    // 复用 elementId（幂等更新已存在的库元素），首次保存则新建并回写桥接 id
+    const el = await useAssetStore.getState().saveElement({
+      id: a.elementId,
+      kind,
+      name: a.name,
+      description: a.desc,
+      prompt: a.prompt,
+      refAssetIds: [a.refImageId],
+    })
+    get().mutate((d) => {
+      const x = d.assets.find((y) => y.id === id)
+      if (x) x.elementId = el.id
+    })
+    window.mulby?.notification?.show(`已保存「${a.name}」到角色 / 场景库`, 'success')
+  },
 
   upsertStoryboard: (s) => {
     const id = s.id ?? P.newId('sb_')
