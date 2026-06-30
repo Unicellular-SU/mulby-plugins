@@ -130,6 +130,8 @@ compileStack(stack, ctx) → {
 - **trim 的 in/out 恒为源时间基**，编译时**永远最先施加**。UI 里用户在「变速/几何后的预览时间轴」拖 trim 手柄，UI 层负责把拖到的预览秒**映射回源秒**（除以累计 rate）再写入 op。
 - **变速/几何/overlay 的时间表达式由编译器按 rate 重映射**：overlay 在编译顺序里位于 setpts 之后，此时 `t` 已是变速后时间轴；用户在原速预览设的 `enable=between(t,a,b)` 的 a/b 是源时间，编译器必须 `a' = a / cumulativeRate`、`b' = b / cumulativeRate`。zoompan/crop(t) 同理。**漏掉此折算 → 变速存在时所有时间窗错位。**
 
+> **【P0 实现修订】** 已落地的 `compile.ts` 改用更简单且等价的方案：**overlay/audio 的时间窗 (start,end) 直接以「输出时间基」存储**（即叠加/音频面板编辑时预览呈现的 post-trim/post-speed 成片时间轴），编译器**不再做 rate/trim 折算**。理由：叠加面板的预览本就是变速/裁切后的成片，用户天然在输出时间轴上选窗；存输出时间避免了 trim 跨段 + 变速双重折算这一整类错位 bug。trim 的 in/out 仍恒为源时间基。
+
 **视频链固定顺序（不随 UI 重排打乱物理正确性）**
 ```
 trim → setpts(变速) → [方向校正 transpose] → crop/flip/scale/pad/zoompan
@@ -727,3 +729,4 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 
 - **[P0 地基·已完成]** 可取消执行：`mediaVideo.ts:runFf` / `probeDuration` 加可选 `signal?: AbortSignal`，`abort → task.kill()`，旧调用方传 undefined 完全兼容。`runFf` 导出供工作台/编译器复用。
 - **[P0 地基·已完成]** 编辑栈类型系统：新增 `src/ui/services/videoEdit/types.ts` —— `OpKind`/`EditOp`(按 kind 判别联合，7 大类参数类型)/`EditStack`/`EditRecipe`、大类编译顺序 `OP_KIND_ORDER`、`createOp` 工厂、`stackIsNoop`。纯类型骨架，typecheck green。
+- **[P0 引擎·已完成]** 滤镜图编译器：新增 `src/ui/services/videoEdit/compile.ts` —— `compileStack(stack,ctx,opts) → { passes, finalOut, cleanup, outDuration }`。`Graph` 构建器维护 v/a 标签 + split 去重；按固定顺序编译 trim(多段 trim+concat，无音轨退化 a=0)、speed(setpts+reverse+atempo 链 `buildAtempoChain` 任意倍率分解到[0.5,2])、transform(crop/flip/transpose/任意角 rotate/画幅适配 contain·cover·blur-pad)、color(hqdn3d→eq→colortemperature/colorbalance→hue→unsharp→vignette→noise→lut3d，含退化开关)、overlay(mosaic split 打码 / pip / PNG overlay，时间窗用 main_w/main_h 表达式)、audio(volume/afade/区间静音/afftdn 退化/loudnorm/变调)、export(mp4·webm 单遍；gif·webp 自动二遍 palettegen)。**P0 决策：overlay/audio 时间窗以输出时间基存储，不做 rate 折算**（规避时间错位类 bug，已更新 §3.2 约定）。typecheck green。
