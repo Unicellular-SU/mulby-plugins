@@ -11,7 +11,6 @@ import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, AssetType, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
-import SettingsView from '../components/views/SettingsView'
 import Select from '../components/ui/Select'
 import NumberStepper from '../components/ui/NumberStepper'
 import Button from '../components/ui/Button'
@@ -122,10 +121,10 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
         <span className="afs-stwb__tbspacer" aria-hidden />
         <div className="afs-stwb__tbgroup">
           <IconButton
-            aria-label="设置（模型供应商 / 提示词 / 外观 / 存储）"
+            aria-label="项目设置（Agent 部署 / 记忆）"
             variant="ghost"
             icon={<Settings size={18} />}
-            title="设置（模型供应商 / 提示词 / 外观 / 存储）"
+            title="项目设置（Agent 部署 / 记忆）"
             onClick={() => setSettingsOpen(true)}
           />
           <Button
@@ -177,14 +176,13 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
         <div className="afs-studio__drawer-scrim" onClick={() => setSettingsOpen(false)}>
           <div className="afs-studio__drawer" onClick={(e) => e.stopPropagation()}>
             <div className="afs-studio__drawer-head">
-              <span>设置</span>
+              <span>项目设置</span>
               <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={() => setSettingsOpen(false)} title="关闭">
                 <X size={16} />
               </button>
             </div>
             <div className="afs-studio__drawer-body">
               <StudioSettings />
-              <SettingsView />
             </div>
           </div>
         </div>
@@ -253,7 +251,7 @@ function StudioModelBar() {
           />
         ) : (
           <div className="afs-stwb__popmissing">
-            <AlertTriangle size={12} aria-hidden /> 未配置 — 在设置抽屉添加视频供应商
+            <AlertTriangle size={12} aria-hidden /> 未配置 — 在「设置」添加视频供应商
           </div>
         )}
         <label className="afs-stwb__poplbl">视频模式</label>
@@ -569,7 +567,7 @@ function VoiceLibrary() {
         </button>
       </div>
       <div className="afs-studio__cardgrid">
-        {voices.length === 0 && <span className="afs-studio__hint">暂无音色（先在设置抽屉配置 tts 供应商，再新增音色试听）</span>}
+        {voices.length === 0 && <span className="afs-studio__hint">暂无音色（先在「设置」配置 tts 供应商，再新增音色试听）</span>}
         {voices.map((v) => (
           <VoiceCard key={v.id} asset={v} />
         ))}

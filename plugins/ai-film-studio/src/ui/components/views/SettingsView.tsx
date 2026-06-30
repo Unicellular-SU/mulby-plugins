@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Sun, Moon, Sparkles, Server, Palette, HardDrive, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { Sparkles, Server, HardDrive, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 import ProviderSettings from '../ProviderSettings'
 import PromptSettings from '../PromptSettings'
-import { useUiStore, type Theme } from '../../store/uiStore'
 import { useAssetStore } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
 import { useConfirm } from '../ui/ConfirmDialog'
 
-type SettingsTab = 'providers' | 'appearance' | 'storage' | 'advanced'
+type SettingsTab = 'providers' | 'storage' | 'advanced'
 
 const TABS: { id: SettingsTab; label: string; desc: string; icon: LucideIcon }[] = [
   { id: 'providers', label: '模型供应商', desc: '视频 / 配乐 / 语音 自管供应商与 API Key', icon: Server },
-  { id: 'appearance', label: '外观', desc: '亮色 / 暗色主题', icon: Palette },
   { id: 'storage', label: '存储', desc: '素材附件占用与清理', icon: HardDrive },
   { id: 'advanced', label: '高级', desc: '节点提示词（引擎 system prompt）· 专家', icon: SlidersHorizontal },
 ]
@@ -24,7 +22,7 @@ function fmtBytes(n?: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
-/** 设置一级界面：模型供应商 / 外观 / 存储。左侧竖向 Tabs（ARIA tablist），内容居中。 */
+/** 设置一级界面：模型供应商 / 存储 / 高级。左侧竖向 Tabs（ARIA tablist），内容居中。主题切换在侧边导航栏。 */
 export default function SettingsView() {
   const [tab, setTab] = useState<SettingsTab>('providers')
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([])
@@ -85,63 +83,10 @@ export default function SettingsView() {
         >
           <div className="afs-settings__inner">
             {tab === 'providers' && <ProviderSettings />}
-            {tab === 'appearance' && <AppearanceSettings />}
             {tab === 'storage' && <StorageSettings />}
             {tab === 'advanced' && <AdvancedSettings />}
           </div>
         </section>
-      </div>
-    </div>
-  )
-}
-
-function AppearanceSettings() {
-  const theme = useUiStore((s) => s.theme)
-  const setTheme = useUiStore((s) => s.setTheme)
-  const options: { id: Theme; label: string }[] = [
-    { id: 'light', label: '亮色' },
-    { id: 'dark', label: '暗色' },
-  ]
-  const radioRefs = useRef<(HTMLButtonElement | null)[]>([])
-  // 单选组：保证恰好一个可 Tab 进入的成员（若当前 theme 不在选项内，则首项可聚焦）
-  const activeIdx = options.findIndex((o) => o.id === theme)
-  const rover = activeIdx === -1 ? 0 : activeIdx
-
-  // WAI-ARIA 单选组键盘：←/↑ 上一项、→/↓ 下一项（循环），移动即选中并移焦
-  const onRadioKey = (e: ReactKeyboardEvent, idx: number) => {
-    let next = idx
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % options.length
-    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + options.length) % options.length
-    else return
-    e.preventDefault()
-    setTheme(options[next].id)
-    radioRefs.current[next]?.focus()
-  }
-
-  return (
-    <div className="afs-setsec">
-      <div className="afs-setsec__title">外观</div>
-      <div className="afs-setsec__desc">选择界面主题。默认跟随 Mulby 宿主；手动切换后以你的选择为准。</div>
-      <div className="afs-themepick" role="radiogroup" aria-label="界面主题">
-        {options.map((o, i) => (
-          <button
-            key={o.id}
-            ref={(el) => {
-              radioRefs.current[i] = el
-            }}
-            role="radio"
-            aria-checked={theme === o.id}
-            tabIndex={i === rover ? 0 : -1}
-            className={`afs-themecard${theme === o.id ? ' is-active' : ''}`}
-            onClick={() => setTheme(o.id)}
-            onKeyDown={(e) => onRadioKey(e, i)}
-          >
-            <span className={`afs-themecard__sw afs-themecard__sw--${o.id}`}>
-              {o.id === 'light' ? <Sun size={16} /> : <Moon size={16} />}
-            </span>
-            <span>{o.label}</span>
-          </button>
-        ))}
       </div>
     </div>
   )
