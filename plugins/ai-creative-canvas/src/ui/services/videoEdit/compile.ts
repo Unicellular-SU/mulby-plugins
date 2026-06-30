@@ -261,7 +261,7 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
   }
 }
 
-function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx): void {
+function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number): void {
   for (const op of ops) {
     if (op.kind !== 'overlay') continue
     const p = op.params as OverlayParams
@@ -288,9 +288,11 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx): void {
     if (!resolved) continue // 未备好（PNG 尚未生成）→ 跳过，叠加段会补
     const idx = g.addInput(resolved.path)
     if (p.sub === 'pip') {
+      // 子画面宽 = 基准宽×rect.w（数值偶数化；位置仍用 overlay 的 main_w 表达式自适应）
+      const pipW = Math.max(2, Math.round(((baseW || 1280) * p.rect.w) / 2) * 2)
       const scaled = g.freshLabel('pip')
       const out = g.freshLabel('v')
-      g.raw(`[${idx}:v]fps=30,setsar=1,scale=main_w*${p.rect.w.toFixed(4)}:-1[${scaled}]`)
+      g.raw(`[${idx}:v]fps=30,setsar=1,scale=${pipW}:-2[${scaled}]`)
       g.raw(`[${g.v}][${scaled}]overlay=${xExpr}:${yExpr}${en}[${out}]`)
       g.setV(out)
     } else {
@@ -341,7 +343,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   if (speed) applyTimeEffects(g, speed)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
-  if (overlays.length) applyOverlays(g, overlays, ctx)
+  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW)
   // export 画幅（若未在 transform 指定）
   if (exp.outW && exp.outH) applyFit(g, exp.outW, exp.outH, exp.fit || 'contain')
 

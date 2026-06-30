@@ -232,7 +232,8 @@ function Inner({ cardId }: { cardId: string }) {
       text: { sub: 'text', rect: { x: 0.1, y: 0.78, w: 0.8, h: 0.12 }, text: '在此输入文字', style: { align: 'center' } },
       watermark: { sub: 'watermark', rect: { x: 0.66, y: 0.05, w: 0.3, h: 0.08 }, text: '水印', style: { align: 'left' } },
       sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
-      mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 }
+      mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
+      pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } }
     }
     useStudio.getState().addOp('overlay', presets[sub] as never)
   }
@@ -265,6 +266,10 @@ function Inner({ cardId }: { cardId: string }) {
                 if (o.sub === 'mosaic') {
                   return <div key={o.id} className="absolute pointer-events-none rounded-sm border-2 border-dashed border-amber-300/80 bg-black/30 backdrop-blur-sm grid place-items-center text-[9px] text-amber-200"
                     style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: '20%' }}>打码区</div>
+                }
+                if (o.sub === 'pip') {
+                  return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
+                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, aspectRatio: '16/9' }}>画中画</div>
                 }
                 return (
                   <div key={o.id} className="absolute pointer-events-none leading-tight"
@@ -322,7 +327,7 @@ function Inner({ cardId }: { cardId: string }) {
                   <Plus size={11} /> {a.label}
                 </button>
               ))}
-              {[{ s: 'text', l: '文字' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }].map((o) => (
+              {[{ s: 'text', l: '文字' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'pip', l: '画中画' }].map((o) => (
                 <button key={o.s} onClick={() => addOverlay(o.s)}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
                   <Plus size={11} /> {o.l}
@@ -625,10 +630,23 @@ function OverlayPanel({ op, params, dur }: { op: EditOp; params: OverlayParams; 
   const style = (p.style || {}) as Record<string, unknown>
   const isText = p.sub === 'text' || p.sub === 'watermark' || p.sub === 'sticker'
   const rangeOn = !!p.range
+  const board = useGraph((s) => s.getActiveBoard())
+  const selfId = useUi((s) => s.studioCardId)
+  const videoCards = Object.values(board.cards).filter((c) => c.kind === 'video' && !!c.assetLocalPath && c.id !== selfId)
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="text-[11px] font-medium opacity-70">{p.sub === 'mosaic' ? '局部打码' : p.sub === 'watermark' ? '水印' : p.sub === 'sticker' ? '贴纸/Emoji' : '文字'}</div>
+      <div className="text-[11px] font-medium opacity-70">{p.sub === 'mosaic' ? '局部打码' : p.sub === 'pip' ? '画中画 PiP' : p.sub === 'watermark' ? '水印' : p.sub === 'sticker' ? '贴纸/Emoji' : '文字'}</div>
+      {p.sub === 'pip' && (
+        <>
+          <Row label="来源">
+            <Select className="flex-1" value={p.pipCardId || ''} onChange={(v) => set({ pipCardId: v })} placeholder="选择画布上的视频卡"
+              options={videoCards.map((c) => ({ value: c.id, label: c.title || '视频' }))} />
+          </Row>
+          <SliderRow label="大小" value={p.rect.w} min={0.1} max={0.6} step={0.01} onLive={(v) => setRect({ w: Math.min(v, 1 - p.rect.x), h: Math.min(v, 1 - p.rect.y) })} onCommit={commit} />
+          {!videoCards.length && <div className="text-[10px] text-amber-500">画布上需另有视频卡作为子画面来源。</div>}
+        </>
+      )}
       {isText && (
         <>
           <Row label="内容">

@@ -8,7 +8,8 @@ import { toast } from './toastStore'
 import { toFileUrl } from '../services/media'
 import { saveToLocal } from '../services/saveLocal'
 import { exportStudio } from '../services/videoEdit/run'
-import { createOp, type EditOp, type EditStack, type OpKind, type ExportParams, type EditRecipe } from '../services/videoEdit/types'
+import { createOp, type EditOp, type EditStack, type OpKind, type ExportParams, type OverlayParams, type EditRecipe } from '../services/videoEdit/types'
+import type { OverlayInput } from '../services/videoEdit/compile'
 
 function clone(s: EditStack): EditStack {
   return JSON.parse(JSON.stringify(s))
@@ -200,13 +201,23 @@ export const useStudio = create<StudioState>((set, get) => {
       const format = ((expOp?.params as ExportParams)?.format || 'mp4') as ExportParams['format']
       const { kind, mime } = mimeKindFor(format)
 
+      // 解析 PiP 子画面：把 overlay(pip) 的源视频卡 → 本地路径，作为视频输入交给编译器
+      const pipResolved: Record<string, OverlayInput> = {}
+      for (const op of stack.ops) {
+        if (op.kind !== 'overlay' || !op.enabled) continue
+        const pp = op.params as OverlayParams
+        if (pp.sub !== 'pip' || !pp.pipCardId) continue
+        const c = board.cards[pp.pipCardId]
+        if (c?.assetLocalPath) pipResolved[op.id] = { kind: 'video', path: c.assetLocalPath }
+      }
+
       const abort = new AbortController()
       set({ busy: true, progress: 0, abort })
       useTask.getState().inc()
       try {
         const { finalOut } = await exportStudio(
           stack,
-          { inPath, projectId },
+          { inPath, projectId, overlayResolved: pipResolved },
           { signal: abort.signal, onProgress: (p) => set({ progress: p }) }
         )
         const recipe: EditRecipe = { ops: stack.ops, version: 1, baseDuration: stack.baseDuration }
