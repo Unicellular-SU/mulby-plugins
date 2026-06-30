@@ -30,11 +30,13 @@ export interface TrimParams {
   segments: TrimSegment[]
 }
 
-// ---- speed：匀速变速 + 倒放 ----
+// ---- speed：匀速变速 + 倒放 + 回旋 + 片尾冻结 ----
 export interface SpeedParams {
   rate: number // 0.25–4
   reverse: boolean
   pitchCompensate: boolean // 变速是否补偿音高（false=随速变调）
+  boomerang?: boolean // 回旋：正放→倒放接合（去音轨）
+  freezeEnd?: number // 片尾冻结秒数（末帧保持）
 }
 
 // ---- transform：裁画面 / 旋转翻转 / 改画幅 / Ken-Burns ----
@@ -126,6 +128,8 @@ export interface ExportParams {
   format: ExportFormat
   fit?: FitMode // 画幅适配方式
   platform?: string // 平台预设 id
+  fadeIn?: number // 成片首部黑场淡入秒数（视频+音频同步）
+  fadeOut?: number // 成片尾部黑场淡出秒数
 }
 
 // ---- 编辑操作（按 kind 判别联合）----

@@ -71,7 +71,7 @@ function reduceStack(stack: EditStack): { single: Partial<Record<OpKind, EditOp>
   return { single, overlays }
 }
 
-// 输出时长：trim 取保留段之和，再除以变速倍率
+// 输出时长：trim 取保留段之和，除以变速倍率，再计回旋(×2)与片尾冻结(+freeze)
 function computeOutDuration(stack: EditStack, trim?: TrimParams, speed?: SpeedParams): number {
   let dur = stack.baseDuration || 0
   if (trim?.segments?.length) {
@@ -79,7 +79,10 @@ function computeOutDuration(stack: EditStack, trim?: TrimParams, speed?: SpeedPa
     if (kept.length) dur = kept.reduce((a, s) => a + Math.max(0, s.out - s.in), 0)
   }
   const rate = speed && speed.rate > 0 ? speed.rate : 1
-  return dur / rate
+  dur = dur / rate
+  if (speed?.boomerang) dur *= 2
+  if (speed?.freezeEnd && speed.freezeEnd > 0) dur += speed.freezeEnd
+  return dur
 }
 
 // 图构建器：维护当前 v/a 标签与 filter 语句列表
@@ -162,6 +165,23 @@ function applySpeed(g: Graph, p: SpeedParams): void {
     g.vf(`setpts=PTS/${p.rate.toFixed(4)}`)
     if (p.pitchCompensate !== false) g.af(buildAtempoChain(p.rate))
     else g.af(`asetrate=44100*${p.rate.toFixed(4)},aresample=44100`)
+  }
+}
+
+// 时间特效（在变速之后、几何之前）：回旋 boomerang + 片尾冻结 freeze
+function applyTimeEffects(g: Graph, p: SpeedParams): void {
+  if (p.boomerang) {
+    const [a, b] = g.splitV()
+    const r = g.freshLabel('rv')
+    const out = g.freshLabel('v')
+    g.raw(`[${b}]reverse[${r}]`)
+    g.raw(`[${a}][${r}]concat=n=2:v=1[${out}]`)
+    g.setV(out)
+    g.a = null // 回旋去音轨（正放+倒放的音频无意义）
+  }
+  if (p.freezeEnd && p.freezeEnd > 0) {
+    g.vf(`tpad=stop_mode=clone:stop_duration=${p.freezeEnd.toFixed(2)}`)
+    if (g.a) g.af(`apad=pad_dur=${p.freezeEnd.toFixed(2)}`)
   }
 }
 
@@ -312,6 +332,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   // 视频链固定顺序
   if (trim) applyTrim(g, trim, ctx.hasAudio)
   if (speed) applySpeed(g, speed)
+  if (speed) applyTimeEffects(g, speed)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
   if (overlays.length) applyOverlays(g, overlays, ctx)
@@ -320,6 +341,17 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
 
   // 音频链
   if (single.audio) applyAudio(g, single.audio.params as AudioParams, outDuration, fb)
+
+  // 成片首尾黑场淡入淡出（视频 + 音频同步），最后施加
+  if (exp.fadeIn && exp.fadeIn > 0) {
+    g.vf(`fade=t=in:st=0:d=${exp.fadeIn.toFixed(2)}`)
+    if (g.a) g.af(`afade=t=in:st=0:d=${exp.fadeIn.toFixed(2)}`)
+  }
+  if (exp.fadeOut && exp.fadeOut > 0 && outDuration > 2 * exp.fadeOut) {
+    const st = Math.max(0, outDuration - exp.fadeOut).toFixed(2)
+    g.vf(`fade=t=out:st=${st}:d=${exp.fadeOut.toFixed(2)}`)
+    if (g.a) g.af(`afade=t=out:st=${st}:d=${exp.fadeOut.toFixed(2)}`)
+  }
 
   // 收尾：像素格式
   g.vf('format=yuv420p')

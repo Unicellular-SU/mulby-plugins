@@ -61,7 +61,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
   // 变速 → playbackRate
   const sp = enabled.find((o) => o.kind === 'speed')?.params as SpeedParams | undefined
   const rate = sp?.rate && sp.rate > 0 ? sp.rate : 1
-  if (sp?.reverse) exact = false
+  if (sp?.reverse || sp?.boomerang || (sp?.freezeEnd && sp.freezeEnd > 0)) exact = false
 
   // 叠加 → DOM
   const overlays: PreviewOverlay[] = enabled

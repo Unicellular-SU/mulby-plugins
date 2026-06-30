@@ -371,6 +371,8 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         <SliderRow label="倍率" value={p.rate} min={0.25} max={4} step={0.05} suffix="×" onLive={(v) => live({ rate: v })} onCommit={commit} />
         <Toggle label="倒放" checked={p.reverse} onChange={(v) => set({ reverse: v })} />
         <Toggle label="保持音调（变速不变调）" checked={p.pitchCompensate !== false} onChange={(v) => set({ pitchCompensate: v })} />
+        <Toggle label="回旋 Boomerang（正放→倒放，去音轨）" checked={!!p.boomerang} onChange={(v) => set({ boomerang: v })} />
+        <SliderRow label="片尾冻结" value={p.freezeEnd ?? 0} min={0} max={5} step={0.1} suffix="s" onLive={(v) => live({ freezeEnd: v })} onCommit={commit} />
       </div>
     )
   }
@@ -487,6 +489,8 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
             { value: 'src', label: '跟随原视频' }, { value: '24', label: '24 fps' }, { value: '30', label: '30 fps' }, { value: '12', label: '12 fps（动图）' }
           ]} />
         </Row>
+        <SliderRow label="淡入" value={p.fadeIn ?? 0} min={0} max={3} step={0.1} suffix="s" onLive={(v) => live({ fadeIn: v })} onCommit={commit} />
+        <SliderRow label="淡出" value={p.fadeOut ?? 0} min={0} max={3} step={0.1} suffix="s" onLive={(v) => live({ fadeOut: v })} onCommit={commit} />
         <div className="text-[10px] opacity-50 leading-relaxed">导出为画布上的一张新卡片，源卡保留；编辑配方写入卡片可二次编辑。</div>
       </div>
     )
