@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2
@@ -12,6 +12,7 @@ import { ensureFfmpeg, probeDuration, timelineThumbs } from '../services/mediaVi
 import { toFileUrl } from '../services/media'
 import { stackToPreview } from '../services/videoEdit/preview'
 import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
+import { loadWaveform } from '../services/audioWaveform'
 import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams } from '../services/videoEdit/types'
 import { Z } from '../zlayers'
 
@@ -78,6 +79,30 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   )
 }
 
+// 音频波形条（峰值 bar 用 useMemo 缓存，playhead/静音区为轻量浮层）+ 点击定位
+function WaveStrip({ peaks, dur, playhead, muteRanges, onSeek }: {
+  peaks: number[]; dur: number; playhead: number; muteRanges: { start: number; end: number }[]; onSeek: (t: number) => void
+}) {
+  const bars = useMemo(() => (
+    <div className="absolute inset-0 flex items-center gap-px px-px">
+      {peaks.map((p, i) => <div key={i} className="flex-1 bg-emerald-500/70 rounded-sm" style={{ height: `${Math.max(3, p * 100)}%` }} />)}
+    </div>
+  ), [peaks])
+  return (
+    <div className="relative h-9 rounded-md overflow-hidden border bg-black/20 cursor-pointer" style={{ borderColor: 'var(--ace-border)' }}
+      onPointerDown={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        onSeek(Math.min(dur, Math.max(0, ((e.clientX - r.left) / r.width) * dur)))
+      }}>
+      {bars}
+      {dur > 0 && muteRanges.map((m, i) => (
+        <div key={i} className="absolute inset-y-0 bg-rose-500/35 border-x border-rose-400/60 pointer-events-none" style={{ left: `${(m.start / dur) * 100}%`, width: `${((m.end - m.start) / dur) * 100}%` }} />
+      ))}
+      <div className="absolute inset-y-0 w-0.5 bg-pink-500 pointer-events-none" style={{ left: `${dur ? (playhead / dur) * 100 : 0}%` }} />
+    </div>
+  )
+}
+
 export function VideoStudioModal() {
   const id = useUi((s) => s.studioCardId)
   if (!id) return null
@@ -94,6 +119,7 @@ function Inner({ cardId }: { cardId: string }) {
   const [thumbs, setThumbs] = useState<string[]>([])
   const [playhead, setPlayhead] = useState(0)
   const [saveLocal, setSaveLocal] = useState(false)
+  const [waveform, setWaveform] = useState<number[] | null>(null)
 
   const card = useGraph((s) => s.getActiveBoard().cards[cardId])
   const close = () => {
@@ -124,6 +150,8 @@ function Inner({ cardId }: { cardId: string }) {
       if (path) {
         const projectId = useGraph.getState().project.id
         timelineThumbs(projectId, path, 12).then((r) => { if (alive) setThumbs(r.thumbs) }).catch(() => {})
+        const wurl = c?.assetUrl || toFileUrl(path)
+        loadWaveform(wurl, 240).then((w) => { if (alive) setWaveform(w) }).catch(() => {})
       }
     })()
     return () => {
@@ -270,6 +298,12 @@ function Inner({ cardId }: { cardId: string }) {
               })()}
               <div className="absolute inset-y-0 w-0.5 bg-pink-500 pointer-events-none" style={{ left: `${dur ? (playhead / dur) * 100 : 0}%` }} />
             </div>
+            {/* 音频波形（解码成功才显示；红区=区间静音） */}
+            {waveform && waveform.length > 0 && (
+              <WaveStrip peaks={waveform} dur={dur} playhead={playhead}
+                muteRanges={((stack?.ops.find((o) => o.kind === 'audio' && o.enabled)?.params as AudioParams | undefined)?.muteRanges) || []}
+                onSeek={(t) => { if (vref.current) vref.current.currentTime = t; setPlayhead(t) }} />
+            )}
             <div className="flex items-center justify-between text-[11px] tabular-nums opacity-60">
               <span>{fmt(playhead)} / {fmt(dur)}</span>
               <span>原始 {stack?.baseW}×{stack?.baseH}</span>
@@ -447,6 +481,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
   }
   if (op.kind === 'audio') {
     const p = op.params as AudioParams
+    const ranges = p.muteRanges || []
     return (
       <div className="flex flex-col gap-2.5">
         <SliderRow label="音量" value={p.gainDb ?? 0} min={-30} max={12} step={1} suffix="dB" onLive={(v) => live({ gainDb: v })} onCommit={commit} />
@@ -454,6 +489,26 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
         <SliderRow label="淡出" value={p.fadeOut ?? 0} min={0} max={5} step={0.1} suffix="s" onLive={(v) => live({ fadeOut: v })} onCommit={commit} />
         <Toggle label="响度归一（loudnorm）" checked={!!p.loudnorm} onChange={(v) => set({ loudnorm: v })} />
         <Toggle label="人声降噪" checked={!!p.denoise} onChange={(v) => set({ denoise: v })} />
+        <div className="flex items-center gap-2 pt-1">
+          <span className="text-[11px] opacity-60">区间静音（{ranges.length}）</span>
+          <button onClick={() => set({ muteRanges: [...ranges, { start: Math.min(playhead, dur - 0.5), end: Math.min(playhead + 2, dur) }] })}
+            className="text-[11px] flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-300 hover:bg-rose-500/25">
+            <Plus size={11} /> 在播放头加
+          </button>
+        </div>
+        {ranges.map((r, i) => (
+          <div key={i} className="rounded-md border p-2 flex flex-col gap-1" style={{ borderColor: 'var(--ace-border)' }}>
+            <div className="flex items-center text-[11px]">
+              <span className="opacity-50">静音 #{i + 1}</span>
+              <span className="ml-2 tabular-nums opacity-60">{fmt(r.start)}–{fmt(r.end)}</span>
+              <button onClick={() => set({ muteRanges: ranges.filter((_, k) => k !== i) })} className="ml-auto opacity-50 hover:opacity-100"><Trash2 size={12} /></button>
+            </div>
+            <SliderRow label="起" value={r.start} min={0} max={dur} step={0.1} suffix="s"
+              onLive={(v) => live({ muteRanges: ranges.map((x, k) => (k === i ? { start: Math.min(v, x.end - 0.1), end: x.end } : x)) })} onCommit={commit} />
+            <SliderRow label="止" value={r.end} min={0} max={dur} step={0.1} suffix="s"
+              onLive={(v) => live({ muteRanges: ranges.map((x, k) => (k === i ? { start: x.start, end: Math.max(v, x.start + 0.1) } : x)) })} onCommit={commit} />
+          </div>
+        ))}
       </div>
     )
   }
