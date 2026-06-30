@@ -1165,9 +1165,9 @@ select.afs-toolbar__select,
 .afs-result--error {
   margin-top: 12px;
   padding: 8px 10px;
-  background: rgba(185, 28, 28, 0.15);
+  background: color-mix(in srgb, var(--afs-danger) 14%, transparent);
   border: 1px solid var(--afs-danger);
-  border-radius: 6px;
+  border-radius: var(--afs-r-sm);
   color: var(--afs-danger);
   font-size: 12px;
   white-space: pre-wrap;

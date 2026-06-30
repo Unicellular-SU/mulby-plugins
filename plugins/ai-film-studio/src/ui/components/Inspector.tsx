@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus } from 'lucide-react'
+import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus, ArrowRight } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -10,6 +10,7 @@ import { OutputView, InputSummary } from './inspectorViews'
 import { OptimizableField } from './OptimizableField'
 import { getFieldOptimizer } from '../services/fieldOptimize'
 import Select from './ui/Select'
+import { Field, Input, Textarea } from './ui/Field'
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -164,8 +165,8 @@ export default function Inspector() {
             />
           )
         return (
-          <textarea
-            {...common}
+          <Textarea
+            value={(value ?? '') as string}
             rows={4}
             placeholder={p.placeholder}
             onChange={(e) => updateNodeParam(node.id, p.key, e.target.value)}
@@ -203,8 +204,8 @@ export default function Inspector() {
             />
           )
         return (
-          <input
-            {...common}
+          <Input
+            value={(value ?? '') as string}
             type="text"
             placeholder={p.placeholder}
             onChange={(e) => updateNodeParam(node.id, p.key, e.target.value)}
@@ -279,26 +280,24 @@ export default function Inspector() {
       )}
 
       <div className="afs-inspector__scroll">
-        <div className="afs-field">
-          <label className="afs-field__label">节点标题</label>
-          <input
-            className="afs-field__input"
-            type="text"
-            value={node.data.title}
-            onChange={(e) => updateNodeTitle(node.id, e.target.value)}
-          />
-        </div>
+        <Field label="节点标题">
+          <Input type="text" value={node.data.title} onChange={(e) => updateNodeTitle(node.id, e.target.value)} />
+        </Field>
 
         {def.params.map((p) => (
-          <div key={p.key} className="afs-field">
-            <label className="afs-field__label">{p.label}</label>
+          <Field key={p.key} label={p.label}>
             {renderControl(p)}
-          </div>
+          </Field>
         ))}
 
         {snippetTarget && snippets.length > 0 && (
-          <div className="afs-field">
-            <label className="afs-field__label">插入片段 → {snippetTargetLabel}</label>
+          <Field
+            label={
+              <>
+                插入片段 <ArrowRight size={12} aria-hidden /> {snippetTargetLabel}
+              </>
+            }
+          >
             <Select
               block
               value=""
@@ -310,12 +309,11 @@ export default function Inspector() {
               })).filter((grp) => grp.options.length > 0)}
               ariaLabel="插入片段"
             />
-          </div>
+          </Field>
         )}
 
         {def.category === 'text' && (
-          <div className="afs-field">
-            <label className="afs-field__label">文本模型（覆盖顶栏）</label>
+          <Field label="文本模型（覆盖顶栏）">
             <Select
               block
               value={(node.data.params.modelOverride as string) || ''}
@@ -323,12 +321,11 @@ export default function Inspector() {
               options={[{ value: '', label: '跟随顶栏（默认）' }, ...models.map((m) => ({ value: m.id, label: m.label || m.id }))]}
               ariaLabel="文本模型（覆盖顶栏）"
             />
-          </div>
+          </Field>
         )}
 
         {def.category === 'image' && (
-          <div className="afs-field">
-            <label className="afs-field__label">图像模型（覆盖顶栏）</label>
+          <Field label="图像模型（覆盖顶栏）">
             <Select
               block
               value={(node.data.params.imageModelOverride as string) || ''}
@@ -336,12 +333,11 @@ export default function Inspector() {
               options={[{ value: '', label: '跟随顶栏（默认）' }, ...imageModels.map((m) => ({ value: m.id, label: m.label || m.id }))]}
               ariaLabel="图像模型（覆盖顶栏）"
             />
-          </div>
+          </Field>
         )}
 
         {providerCap && (
-          <div className="afs-field">
-            <label className="afs-field__label">{providerCapLabel}供应商（覆盖默认）</label>
+          <Field label={`${providerCapLabel}供应商（覆盖默认）`}>
             <Select
               block
               value={(node.data.params.providerOverride as string) || ''}
@@ -352,7 +348,7 @@ export default function Inspector() {
             {capProviders.length === 0 && (
               <div className="afs-inspector__note">尚无{providerCapLabel}供应商，先在顶栏「模型供应商」添加</div>
             )}
-          </div>
+          </Field>
         )}
 
         {def.params.length === 0 &&
