@@ -4719,3 +4719,112 @@ select.afs-toolbar__select,
 @media (prefers-reduced-motion: reduce) {
   .afs-toast { animation: none; }
 }
+
+/* ============ 可搜索下拉 Combobox（文本触发器 + 过滤玻璃列表） ============ */
+.afs-combobox {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+}
+.afs-combobox--block { display: flex; width: 100%; flex: 1; min-width: 0; }
+.afs-combobox__field {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-2);
+  width: 100%;
+  height: var(--afs-control-h);
+  min-width: 0;
+  padding: 0 6px 0 10px;
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  color: var(--afs-text);
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-combobox__field--sm { height: var(--afs-control-h-sm); }
+.afs-combobox__field:hover { border-color: var(--afs-border-strong); }
+.afs-combobox__field:focus-within,
+.afs-combobox__field.is-open {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-combobox__search { color: var(--afs-muted); flex: none; }
+.afs-combobox__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--afs-text);
+  font: 400 13px/1 var(--afs-font-ui);
+  outline: none;
+}
+.afs-combobox__field--sm .afs-combobox__input { font-size: 12px; }
+.afs-combobox__input::placeholder { color: var(--afs-text-dim); }
+.afs-combobox__input:disabled { cursor: not-allowed; }
+.afs-combobox__chev {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+  transition: transform var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-combobox__field.is-open .afs-combobox__chev { transform: rotate(180deg); }
+.afs-combobox__chev:disabled { cursor: not-allowed; opacity: 0.5; }
+.afs-combobox__pop {
+  position: absolute;
+  z-index: 10000;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 100%;
+  min-width: max(180px, 100%);
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-lg);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  overflow: hidden;
+  animation: afs-select-pop var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-combobox__list {
+  padding: var(--afs-sp-2);
+  max-height: 320px;
+  overflow-y: auto;
+}
+.afs-combobox__option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  padding: 6px 28px 6px 8px;
+  border-radius: var(--afs-r-xs);
+  font-size: 13px;
+  color: var(--afs-text);
+  cursor: pointer;
+  user-select: none;
+}
+.afs-combobox__option.is-active { background: var(--afs-hover); }
+.afs-combobox__option[aria-selected='true'] { background: color-mix(in srgb, var(--afs-accent) 12%, transparent); }
+.afs-combobox__option[aria-selected='true'].is-active { background: color-mix(in srgb, var(--afs-accent) 18%, transparent); }
+.afs-combobox__option.is-disabled { opacity: 0.4; pointer-events: none; }
+.afs-combobox__opt-icon { color: var(--afs-muted); flex: none; }
+.afs-combobox__opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-combobox__check { position: absolute; right: 8px; display: inline-flex; color: var(--afs-accent); }
+.afs-combobox__hl { background: transparent; color: var(--afs-accent); font-weight: 600; }
+.afs-combobox__create { color: var(--afs-accent); }
+.afs-combobox__empty { padding: 8px; font-size: 12px; color: var(--afs-muted); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-combobox__pop { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-combobox__pop { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-combobox__pop { animation: none; }
+}
