@@ -2076,7 +2076,8 @@ select.afs-toolbar__select,
   padding: 2px 4px;
   font-size: 11px;
   color: #fff;
-  background: linear-gradient(transparent, var(--afs-scrim));
+  /* 媒体上的白字字幕需固定深色底（不能用 --afs-scrim：亮色下仅 0.30，白字会糊在亮缩略图上） */
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
