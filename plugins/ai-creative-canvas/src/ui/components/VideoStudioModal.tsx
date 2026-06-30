@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2
@@ -121,6 +121,8 @@ function Inner({ cardId }: { cardId: string }) {
   const busy = useStudio((s) => s.busy)
   const progress = useStudio((s) => s.progress)
   const vref = useRef<HTMLVideoElement>(null)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const [vrect, setVrect] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const [ready, setReady] = useState(false)
   const [thumbs, setThumbs] = useState<string[]>([])
   const [playhead, setPlayhead] = useState(0)
@@ -187,6 +189,30 @@ function Inner({ cardId }: { cardId: string }) {
   useEffect(() => {
     if (vref.current) vref.current.playbackRate = pv.playbackRate || 1
   }, [pv.playbackRate])
+
+  // 量出 <video> 在舞台内的实际渲染矩形 —— 叠加层精确贴合视频帧（消除信箱黑边导致的预览/导出错位）
+  const measure = useCallback(() => {
+    const v = vref.current
+    const s = stageRef.current
+    if (!v || !s) return
+    const vr = v.getBoundingClientRect()
+    const sr = s.getBoundingClientRect()
+    if (vr.width < 2 || vr.height < 2) return
+    setVrect({ left: vr.left - sr.left, top: vr.top - sr.top, width: vr.width, height: vr.height })
+  }, [])
+  useEffect(() => {
+    measure()
+    const ro = new ResizeObserver(() => measure())
+    if (vref.current) ro.observe(vref.current)
+    if (stageRef.current) ro.observe(stageRef.current)
+    window.addEventListener('resize', measure)
+    return () => { ro.disconnect(); window.removeEventListener('resize', measure) }
+  }, [measure])
+  // 旋转/翻转改变包围盒 → 下一帧重量
+  useEffect(() => {
+    const id = requestAnimationFrame(measure)
+    return () => cancelAnimationFrame(id)
+  }, [pv.transform, measure])
 
   // 播放头跟随 + trim 保留段跳过删除段
   useEffect(() => {
@@ -264,11 +290,10 @@ function Inner({ cardId }: { cardId: string }) {
         <div className="flex-1 min-h-0 flex">
           {/* 左：预览 + 时间轴 */}
           <div className="flex-1 min-w-0 flex flex-col p-3 gap-2 border-r" style={{ borderColor: 'var(--ace-border)' }}>
-            <div className="relative flex-1 min-h-0 grid place-items-center bg-black rounded-lg overflow-hidden">
-              <div className="relative max-h-full max-w-full" style={{ clipPath: pv.clipPath }}>
-                <video ref={vref} src={srcUrl} onLoadedMetadata={onMeta} controls className="max-h-[52vh] max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform }} />
-              </div>
-              {/* 叠加 DOM 近似 */}
+            <div ref={stageRef} className="relative flex-1 min-h-0 grid place-items-center bg-black rounded-lg overflow-hidden">
+              <video ref={vref} src={srcUrl} onLoadedMetadata={() => { onMeta(); measure() }} controls className="max-h-[52vh] max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform, clipPath: pv.clipPath }} />
+              {/* 叠加层：精确覆盖视频帧矩形（坐标系与导出 main_w/main_h 一致） */}
+              <div className="absolute pointer-events-none" style={vrect ? { left: vrect.left, top: vrect.top, width: vrect.width, height: vrect.height } : { inset: 0 }}>
               {pv.overlays.map((o) => {
                 const st = (o.style || {}) as Record<string, unknown>
                 if (o.sub === 'mosaic') {
@@ -296,16 +321,25 @@ function Inner({ cardId }: { cardId: string }) {
                 if (o.sub === 'subtitle') {
                   const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
                   if (!cue) return null
-                  return <div key={o.id} className="absolute pointer-events-none text-center leading-tight"
-                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, color: String(st.color || '#fff'), fontSize: 'clamp(9px, 2.6vw, 24px)', textShadow: '0 1px 3px rgba(0,0,0,.95)' }}>{cue.text}</div>
+                  const bH = stack?.baseH || 720
+                  const exFont = Number(st.fontSize) || bH * 0.06
+                  const pxFont = vrect ? exFont * (vrect.height / bH) : 16
+                  return <div key={o.id} className="absolute pointer-events-none text-center"
+                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, color: String(st.color || '#fff'), fontSize: pxFont, textShadow: '0 1px 3px rgba(0,0,0,.95)', whiteSpace: 'pre-wrap' }}>{cue.text}</div>
                 }
-                return (
-                  <div key={o.id} className="absolute pointer-events-none leading-tight"
-                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, textAlign: st.align === 'center' ? 'center' : 'left', color: String(st.color || '#fff'), fontWeight: st.bold ? 700 : 500, fontSize: 'clamp(8px, 2.4vw, 22px)', textShadow: st.stroke === false ? 'none' : '0 1px 2px rgba(0,0,0,.9)', opacity: o.sub === 'watermark' ? 0.7 : 1 }}>
-                    {o.text || (o.sub === 'sticker' ? '⭐' : '文字')}
-                  </div>
-                )
+                {
+                  const bH = stack?.baseH || 720
+                  const exFont = Number(st.fontSize) || bH * (o.sub === 'sticker' ? 0.16 : 0.06)
+                  const pxFont = vrect ? exFont * (vrect.height / bH) : 16
+                  return (
+                    <div key={o.id} className="absolute pointer-events-none"
+                      style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, padding: pxFont * 0.32, boxSizing: 'border-box', lineHeight: 1.28, textAlign: st.align === 'center' ? 'center' : 'left', color: String(st.color || '#fff'), fontWeight: st.bold ? 700 : 500, fontSize: pxFont, textShadow: st.stroke === false ? 'none' : '0 1px 2px rgba(0,0,0,.9)', opacity: o.sub === 'watermark' ? 0.7 : 1, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' }}>
+                      {o.text || (o.sub === 'sticker' ? '⭐' : '文字')}
+                    </div>
+                  )
+                }
               })}
+              </div>
               {!pv.exact && (
                 <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-amber-500/90 text-white text-[10px]">近似预览 · 导出更准</div>
               )}

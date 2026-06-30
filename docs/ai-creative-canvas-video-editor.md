@@ -727,6 +727,8 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 
 > 边实现边记录。每完成一段：更新本节 + tsc/build green + 提交。未在 Mulby 运行时验证（沿用本插件惯例：tsc + vite build + pack 通过，用户手动在 Mulby 测）。落地前必跑 §8.10 三项实测。
 
+- **[修复·叠加位置错位]** 用户实测：水印/文字/贴纸导出位置与预览不符。根因——预览叠加 DOM 用 `left/top%` 相对**外层信箱容器**定位，而导出相对**视频帧** `main_w/main_h`；视频被信箱黑边居中时二者错位。修复：`stageRef` + `vref.getBoundingClientRect()` 实测视频渲染矩形（ResizeObserver + 旋转时 rAF 重量），叠加层精确贴合该矩形，坐标系与导出一致。并把预览文字字号改用导出同公式（`baseH·0.06`/`sticker 0.16` × vrect/baseH 缩放）+ `padding=fontSize·0.32` + `box-sizing:border-box`，使文字大小/换行/位置 WYSIWYG。
+
 ### 完成情况小结（17 次实现提交，全程 typecheck + vite build green）
 
 **已实现（P0 全部 + P1 全部 + 可靠 P2）**：
