@@ -653,7 +653,7 @@ body {
 }
 .afs-node--error {
   padding: 10px;
-  color: #f87171;
+  color: var(--afs-danger);
 }
 .afs-node__header {
   height: 38px;
@@ -949,13 +949,13 @@ select.afs-toolbar__select,
   border-radius: 6px;
   border: 1px solid var(--afs-border);
   background: transparent;
-  color: #f87171;
+  color: var(--afs-danger);
   cursor: pointer;
   font-size: 12px;
 }
 .afs-inspector__delete:hover {
-  background: #7f1d1d;
-  border-color: #b91c1c;
+  background: var(--afs-danger);
+  border-color: var(--afs-danger);
   color: #fff;
 }
 
@@ -1081,9 +1081,9 @@ select.afs-toolbar__select,
   margin-top: 12px;
   padding: 8px 10px;
   background: rgba(185, 28, 28, 0.15);
-  border: 1px solid #b91c1c;
+  border: 1px solid var(--afs-danger);
   border-radius: 6px;
-  color: #fca5a5;
+  color: var(--afs-danger);
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1388,7 +1388,7 @@ select.afs-toolbar__select,
   line-height: 1.5;
 }
 .afs-editerr {
-  color: #f87171;
+  color: var(--afs-danger);
   font-size: 11px;
   margin: 4px 0;
 }
@@ -1452,11 +1452,11 @@ select.afs-toolbar__select,
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid #ef4444;
+  border: 1.5px solid var(--afs-danger);
   background: rgba(239, 68, 68, 0.12);
 }
 .afs-node__tile-x {
-  color: #ef4444;
+  color: var(--afs-danger);
   font-size: 20px;
   font-weight: 700;
   line-height: 1;
@@ -1487,7 +1487,7 @@ select.afs-toolbar__select,
   padding: 3px 6px;
   font-size: 11px;
   color: #fff;
-  background: #ef4444;
+  background: var(--afs-danger);
   border: none;
   border-radius: 5px;
   cursor: pointer;
@@ -1948,11 +1948,7 @@ select.afs-toolbar__select,
   animation: afs-spin 0.9s linear infinite;
   opacity: 0.8;
 }
-@keyframes afs-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+/* （此处旋转动画 keyframes 与文件上方重复，已删除去重） */
 @keyframes afs-pulse {
   0%,
   100% {
@@ -2334,7 +2330,7 @@ select.afs-toolbar__select,
 }
 .afs-prov__del:hover {
   background: rgba(185, 28, 28, 0.18);
-  color: #fca5a5;
+  color: var(--afs-danger);
 }
 
 .afs-form {
@@ -2465,7 +2461,7 @@ select.afs-toolbar__select,
   color: #4ade80;
 }
 .afs-prov__testmsg--fail {
-  color: #fca5a5;
+  color: var(--afs-danger);
 }
 
 /* 视频结果操作区（下载到本地 / 打开文件夹） */
@@ -2720,8 +2716,8 @@ select.afs-toolbar__select,
   flex: 1;
 }
 .afs-pcard__del:hover {
-  color: #ef4444 !important;
-  border-color: #ef4444 !important;
+  color: var(--afs-danger) !important;
+  border-color: var(--afs-danger) !important;
 }
 
 /* —— 设置一级界面（内嵌三个原模态） —— */
@@ -3156,8 +3152,8 @@ select.afs-toolbar__select,
   margin-left: auto;
 }
 .afs-acard__del:hover {
-  color: #ef4444 !important;
-  border-color: #ef4444 !important;
+  color: var(--afs-danger) !important;
+  border-color: var(--afs-danger) !important;
 }
 
 /* —— 灯箱 / Element 表单 公用遮罩 —— */
@@ -3389,8 +3385,8 @@ select.afs-toolbar__select,
   margin-left: auto;
 }
 .afs-snip__del:hover {
-  color: #ef4444 !important;
-  border-color: #ef4444 !important;
+  color: var(--afs-danger) !important;
+  border-color: var(--afs-danger) !important;
 }
 
 /* —— 片段变量 —— */
@@ -3731,8 +3727,8 @@ select.afs-toolbar__select,
   color: var(--afs-text);
 }
 .afs-snapitem__del:hover {
-  color: #ef4444 !important;
-  border-color: #ef4444 !important;
+  color: var(--afs-danger) !important;
+  border-color: var(--afs-danger) !important;
 }
 
 /* ============ 设置 · 高级横幅 ============ */
@@ -3849,7 +3845,7 @@ select.afs-toolbar__select,
 /* 阶段7：一资产多图 + 分镜详情 + 关键帧精修 imageFlow */
 .afs-studio__imgstrip { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .afs-studio__imgthumb { position: relative; width: 38px; height: 38px; border: 2px solid transparent; border-radius: 5px; overflow: hidden; }
-.afs-studio__imgthumb.is-sel { border-color: var(--afs-accent, #5b8cff); }
+.afs-studio__imgthumb.is-sel { border-color: var(--afs-accent); }
 .afs-studio__imgthumb img, .afs-studio__imgph { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; background: var(--afs-panel-2); }
 .afs-studio__imgthumb button { position: absolute; top: 0; right: 0; width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; border: none; background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer; padding: 0; }
 .afs-studio__sbdetail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--afs-border); display: flex; flex-direction: column; gap: 6px; }
@@ -3859,7 +3855,7 @@ select.afs-toolbar__select,
 .afs-studio__sbfieldlbl { font-size: 12px; color: var(--afs-text-dim); }
 .afs-studio__castchips { display: flex; flex-wrap: wrap; gap: 4px; }
 .afs-studio__chipbtn { font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid var(--afs-border); background: var(--afs-panel-2); color: var(--afs-text-dim); cursor: pointer; }
-.afs-studio__chipbtn.is-on { background: var(--afs-accent, #5b8cff); color: #fff; border-color: transparent; }
+.afs-studio__chipbtn.is-on { background: var(--afs-accent); color: #fff; border-color: transparent; }
 .afs-studio__dlgrow { display: flex; gap: 4px; }
 .afs-studio__dlgrow input { flex: 1; min-width: 0; background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 6px; font-size: 12px; }
 .afs-studio__dlgrow input:first-child { flex: 0 0 64px; }
@@ -3870,13 +3866,13 @@ select.afs-toolbar__select,
 .afs-studio__flowrefs { width: 280px; flex-shrink: 0; }
 .afs-studio__flowgrid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .afs-studio__flowref { width: 76px; border: 2px solid transparent; border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--afs-panel-2); text-align: center; }
-.afs-studio__flowref.is-sel { border-color: var(--afs-accent, #5b8cff); }
+.afs-studio__flowref.is-sel { border-color: var(--afs-accent); }
 .afs-studio__flowref img { width: 100%; height: 56px; object-fit: cover; display: block; }
 .afs-studio__flowref span { display: block; font-size: 10px; padding: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__flowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .afs-studio__flowkf { width: 100%; max-height: 280px; object-fit: contain; border-radius: 8px; background: #000; }
 /* 阶段6：Agent 原生工具调用开关激活态 */
-.afs-studio__manualtoggle.is-on { background: var(--afs-accent, #5b8cff); border-radius: 5px; }
+.afs-studio__manualtoggle.is-on { background: var(--afs-accent); border-radius: 5px; }
 /* 阶段5：资产润色提示词 + 衍生变体 */
 .afs-studio__cardprompt { margin-top: 6px; resize: vertical; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--afs-text-dim); }
 .afs-studio__derivrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--afs-border); }
@@ -3890,10 +3886,10 @@ select.afs-toolbar__select,
 .afs-studio__trackprompt textarea { flex: 1; resize: vertical; font-family: inherit; font-size: 12px; line-height: 1.5; }
 .afs-studio__candrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .afs-studio__cand { position: relative; width: 120px; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: #000; }
-.afs-studio__cand.is-sel { border-color: var(--afs-accent, #5b8cff); }
+.afs-studio__cand.is-sel { border-color: var(--afs-accent); }
 .afs-studio__cand video { width: 100%; height: 68px; object-fit: cover; display: block; cursor: pointer; }
 .afs-studio__cand-load { width: 100%; height: 68px; display: flex; align-items: center; justify-content: center; color: var(--afs-text-dim); }
-.afs-studio__cand-badge { position: absolute; top: 3px; left: 3px; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--afs-accent, #5b8cff); color: #fff; }
+.afs-studio__cand-badge { position: absolute; top: 3px; left: 3px; font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--afs-accent); color: #fff; }
 .afs-studio__cand-actions { position: absolute; bottom: 3px; right: 3px; display: flex; gap: 3px; }
 .afs-studio__cand-actions button { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 4px; background: rgba(0, 0, 0, 0.55); color: #fff; cursor: pointer; font-size: 11px; }
 .afs-studio__cand-actions button:hover { background: rgba(0, 0, 0, 0.8); }
