@@ -1,6 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
-import { Plus, X, Brush, Trash2, Download, Upload } from 'lucide-react'
+import { Plus, Brush, Trash2, Download, Upload } from 'lucide-react'
 import Select from '../ui/Select'
+import Button from '../ui/Button'
+import Modal from '../ui/Modal'
+import { Field, Input, Textarea } from '../ui/Field'
 import { useConfirm } from '../ui/ConfirmDialog'
 import {
   usePromptStore,
@@ -33,7 +36,10 @@ function SnippetLibrary() {
   const importPack = usePromptStore((s) => s.importPack)
   const fileRef = useRef<HTMLInputElement>(null)
   const [editing, setEditing] = useState<Draft | null>(null)
+  const [query, setQuery] = useState('')
   const confirm = useConfirm()
+  const q = query.trim().toLowerCase()
+  const match = (s: PromptSnippet) => !q || s.name.toLowerCase().includes(q) || s.text.toLowerCase().includes(q)
 
   const onDeleteSnippet = async (s: PromptSnippet) => {
     if (await confirm({ title: '删除片段', message: `删除片段「${s.name}」？`, danger: true, confirmLabel: '删除' })) removeSnippet(s.id)
@@ -95,16 +101,23 @@ function SnippetLibrary() {
         <div className="afs-lib__hint">
           可复用的画风 / 运镜 / 打光 / 负面 / 自定义提示词块，支持 <code>{'{变量}'}</code> 占位符。在画布节点的属性面板「插入片段」即可填入。
         </div>
+        <input
+          className="afs-lib__search"
+          placeholder="搜索片段…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="搜索片段"
+        />
         <div className="afs-lib__actions">
-          <button className="afs-btn" onClick={() => fileRef.current?.click()} title="导入提示词包（片段 + 全局模板）">
-            <Upload size={15} /> 导入
-          </button>
-          <button className="afs-btn" onClick={onExport} title="导出提示词包（片段 + 全局模板覆盖）">
-            <Download size={15} /> 导出
-          </button>
-          <button className="afs-btn afs-btn--save" onClick={startNew}>
-            <Plus size={15} /> 新建片段
-          </button>
+          <Button leadingIcon={Upload} onClick={() => fileRef.current?.click()} title="导入提示词包（片段 + 全局模板）">
+            导入
+          </Button>
+          <Button leadingIcon={Download} onClick={onExport} title="导出提示词包（片段 + 全局模板覆盖）">
+            导出
+          </Button>
+          <Button variant="primary" leadingIcon={Plus} onClick={startNew}>
+            新建片段
+          </Button>
         </div>
       </div>
       <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={onImportFile} />
@@ -112,13 +125,16 @@ function SnippetLibrary() {
       <div className="afs-lib__scroll">
         {snippets.length === 0 ? (
           <div className="afs-lib__empty">暂无片段。新建一个画风 / 运镜 / 打光 / 负面 提示词块，跨工程复用。</div>
+        ) : snippets.filter(match).length === 0 ? (
+          <div className="afs-lib__empty">无匹配片段</div>
         ) : (
-          SNIPPET_GROUPS.map((g) =>
-            grouped[g.id].length === 0 ? null : (
+          SNIPPET_GROUPS.map((g) => {
+            const items = grouped[g.id].filter(match)
+            return items.length === 0 ? null : (
               <div key={g.id} className="afs-snipgroup">
                 <div className="afs-modal__section">{g.label}</div>
                 <div className="afs-lib__grid">
-                  {grouped[g.id].map((s) => (
+                  {items.map((s) => (
                     <div key={s.id} className="afs-snip">
                       <div className="afs-snip__name" title={s.name}>
                         {s.name}
@@ -142,81 +158,73 @@ function SnippetLibrary() {
                 </div>
               </div>
             )
-          )
+          })
         )}
       </div>
 
       {editing && (
-        <div className="afs-lightbox" onClick={() => setEditing(null)}>
-          <div className="afs-elform" onClick={(e) => e.stopPropagation()}>
-            <div className="afs-elform__head">
-              <span>{editing.id ? '编辑片段' : '新建片段'}</span>
-              <button className="afs-lightbox__close" onClick={() => setEditing(null)}>
-                <X size={16} />
-              </button>
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">名称</label>
-              <input
-                className="afs-field__input"
-                value={editing.name}
-                onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                placeholder="如：吉卜力水彩 / 低角度推镜 / 伦勃朗光"
-              />
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">分组</label>
-              <Select
-                block
-                value={editing.group}
-                onChange={(v) => setEditing({ ...editing, group: v as SnippetGroup })}
-                options={SNIPPET_GROUPS.map((g) => ({ value: g.id, label: g.label }))}
-                ariaLabel="分组"
-              />
-            </div>
-            <div className="afs-field">
-              <label className="afs-field__label">片段内容（可用 {'{变量}'} 占位符）</label>
-              <textarea
-                className="afs-field__input afs-field__input--code"
-                rows={4}
-                value={editing.text}
-                onChange={(e) => onTextChange(e.target.value)}
-                placeholder="如：cinematic, {style} mood, soft {light} lighting, highly detailed"
-              />
-            </div>
-            {editing.vars && editing.vars.length > 0 && (
-              <div className="afs-field">
-                <label className="afs-field__label">变量默认值</label>
-                {editing.vars.map((v, i) => (
-                  <div key={v.name} className="afs-varrow">
-                    <span className="afs-varrow__name">{`{${v.name}}`}</span>
-                    <input
-                      className="afs-field__input"
-                      value={v.default || ''}
-                      placeholder="默认值（可留空）"
-                      onChange={(e) => {
-                        const vars = (editing.vars || []).slice()
-                        vars[i] = { ...vars[i], default: e.target.value }
-                        setEditing({ ...editing, vars })
-                      }}
-                    />
-                  </div>
-                ))}
-                <div className="afs-field__desc">
-                  预览：<span className="afs-varpreview">{resolveSnippet({ ...(editing as PromptSnippet), vars: editing.vars })}</span>
+        <Modal
+          open
+          onOpenChange={(o) => {
+            if (!o) setEditing(null)
+          }}
+          title={editing.id ? '编辑片段' : '新建片段'}
+          footer={
+            <>
+              <Button onClick={() => setEditing(null)}>取消</Button>
+              <Button variant="primary" leadingIcon={Plus} onClick={onSave}>
+                保存
+              </Button>
+            </>
+          }
+        >
+          <Field label="名称">
+            <Input
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              placeholder="如：吉卜力水彩 / 低角度推镜 / 伦勃朗光"
+            />
+          </Field>
+          <Field label="分组">
+            <Select
+              block
+              value={editing.group}
+              onChange={(v) => setEditing({ ...editing, group: v as SnippetGroup })}
+              options={SNIPPET_GROUPS.map((g) => ({ value: g.id, label: g.label }))}
+              ariaLabel="分组"
+            />
+          </Field>
+          <Field label="片段内容（可用 {变量} 占位符）">
+            <Textarea
+              className="afs-field__input--code"
+              rows={4}
+              value={editing.text}
+              onChange={(e) => onTextChange(e.target.value)}
+              placeholder="如：cinematic, {style} mood, soft {light} lighting, highly detailed"
+            />
+          </Field>
+          {editing.vars && editing.vars.length > 0 && (
+            <Field label="变量默认值">
+              {editing.vars.map((v, i) => (
+                <div key={v.name} className="afs-varrow">
+                  <span className="afs-varrow__name">{`{${v.name}}`}</span>
+                  <Input
+                    value={v.default || ''}
+                    placeholder="默认值（可留空）"
+                    onChange={(e) => {
+                      const vars = (editing.vars || []).slice()
+                      vars[i] = { ...vars[i], default: e.target.value }
+                      setEditing({ ...editing, vars })
+                    }}
+                  />
                 </div>
+              ))}
+              <div className="afs-field__desc">
+                预览：<span className="afs-varpreview">{resolveSnippet({ ...(editing as PromptSnippet), vars: editing.vars })}</span>
               </div>
-            )}
-            <div className="afs-elform__actions">
-              <button className="afs-btn" onClick={() => setEditing(null)}>
-                取消
-              </button>
-              <button className="afs-btn afs-btn--save" onClick={onSave}>
-                <Plus size={14} /> 保存
-              </button>
-            </div>
-          </div>
-        </div>
+            </Field>
+          )}
+        </Modal>
       )}
     </>
   )
