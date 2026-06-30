@@ -85,7 +85,6 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
               onHome()
             }}
           />
-          <span className="afs-stwb__brand" aria-hidden />
           <input
             className="afs-stwb__title"
             value={doc.meta.name}

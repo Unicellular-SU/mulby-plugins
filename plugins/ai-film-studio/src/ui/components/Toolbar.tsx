@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useReactFlow } from '@xyflow/react'
-import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon, Clapperboard, Loader2 } from 'lucide-react'
+import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import Select from './ui/Select'
 import Tooltip from './ui/Tooltip'
@@ -49,9 +49,6 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
   return (
     <div className="afs-toolbar">
       <div className="afs-toolbar__group">
-        <div className="afs-toolbar__brandmark" title="AI 影视工坊" aria-hidden="true">
-          <Clapperboard size={16} />
-        </div>
         {editingName ? (
           <input
             className="afs-toolbar__name"
