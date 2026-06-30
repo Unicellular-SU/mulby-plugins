@@ -24,34 +24,37 @@ export default function Modal({ open, onOpenChange, title, children, footer, siz
   return (
     <RD.Root open={open} onOpenChange={onOpenChange}>
       <RD.Portal>
-        <RD.Overlay className="afs-modal__scrim" />
-        <RD.Content
-          className={`afs-modal${size !== 'sheet' ? ` afs-modal--${size}` : ''}${className ? ' ' + className : ''}`}
-          {...(description ? {} : { 'aria-describedby': undefined })}
-          onEscapeKeyDown={(e) => {
-            if (busy) e.preventDefault()
-          }}
-          onPointerDownOutside={(e) => {
-            if (busy) e.preventDefault()
-          }}
-          onInteractOutside={(e) => {
-            if (busy) e.preventDefault()
-          }}
-        >
-          <div className="afs-modal__head">
-            <RD.Title className="afs-modal__title">{title}</RD.Title>
-            {!hideClose && (
-              <RD.Close asChild>
-                <button className="afs-rv__close" aria-label="关闭" title="关闭" disabled={busy}>
-                  <X size={18} />
-                </button>
-              </RD.Close>
-            )}
-          </div>
-          {description ? <RD.Description className="afs-modal__desc">{description}</RD.Description> : null}
-          <div className="afs-modal__body nowheel">{children}</div>
-          {footer ? <div className="afs-modal__foot">{footer}</div> : null}
-        </RD.Content>
+        <RD.Overlay className="afs-dialog__scrim" />
+        {/* 独立居中层：Radix Overlay/Content 为兄弟节点，故用此层用 grid 居中卡片 */}
+        <div className="afs-dialog__center">
+          <RD.Content
+            className={`afs-dialog${size !== 'sheet' ? ` afs-dialog--${size}` : ''}${className ? ' ' + className : ''}`}
+            {...(description ? {} : { 'aria-describedby': undefined })}
+            onEscapeKeyDown={(e) => {
+              if (busy) e.preventDefault()
+            }}
+            onPointerDownOutside={(e) => {
+              if (busy) e.preventDefault()
+            }}
+            onInteractOutside={(e) => {
+              if (busy) e.preventDefault()
+            }}
+          >
+            <div className="afs-dialog__head">
+              <RD.Title className="afs-dialog__title">{title}</RD.Title>
+              {!hideClose && (
+                <RD.Close asChild>
+                  <button className="afs-rv__close" aria-label="关闭" title="关闭" disabled={busy}>
+                    <X size={18} />
+                  </button>
+                </RD.Close>
+              )}
+            </div>
+            {description ? <RD.Description className="afs-dialog__desc">{description}</RD.Description> : null}
+            <div className="afs-dialog__body nowheel">{children}</div>
+            {footer ? <div className="afs-dialog__foot">{footer}</div> : null}
+          </RD.Content>
+        </div>
       </RD.Portal>
     </RD.Root>
   )

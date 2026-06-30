@@ -6,7 +6,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
 export type IconButtonVariant = 'ghost' | 'solid' | 'danger' | 'onmedia' | 'glass'
 
-export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'type'> {
   icon: ReactNode // lucide 图标元素，如 <Lock size={18} />
   'aria-label': string // 必填
   size?: 'sm' | 'md'

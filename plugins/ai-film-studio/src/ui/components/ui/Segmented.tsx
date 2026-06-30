@@ -7,10 +7,11 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEve
 
 export interface SegmentedOption {
   value: string
-  label?: ReactNode // 省略 => 图标-only 段（请配 title 提供无障碍名）
+  label?: ReactNode // 省略 => 图标-only 段（请配 ariaLabel 或 title 提供无障碍名）
   icon?: ReactNode
   disabled?: boolean
   title?: string
+  ariaLabel?: string // 图标-only 段的无障碍名（优先于 title）
 }
 
 export interface SegmentedProps {
@@ -30,9 +31,9 @@ export default function Segmented({ value, onChange, options, size = 'md', disab
 
   const activeIdx = options.findIndex((o) => o.value === value)
   const iconOnly = options.every((o) => o.label == null)
-  // 漫游 tabindex 落点：活动段；无活动则首个可用段
+  // 漫游 tabindex 落点：活动段；无活动或活动段恰为 disabled 时退回首个可用段（保证组内恒有一个可 Tab 进入）
   const firstEnabled = options.findIndex((o) => !o.disabled)
-  const rover = activeIdx === -1 ? firstEnabled : activeIdx
+  const rover = activeIdx === -1 || options[activeIdx]?.disabled ? firstEnabled : activeIdx
 
   // 测量活动段，定位滑动胶囊（布局期测量避免首帧跳动；ResizeObserver 跟随容器尺寸/文案变化重测）
   useLayoutEffect(() => {
@@ -97,6 +98,7 @@ export default function Segmented({ value, onChange, options, size = 'md', disab
           type="button"
           role="radio"
           aria-checked={opt.value === value}
+          aria-label={opt.label == null ? opt.ariaLabel ?? opt.title : undefined}
           tabIndex={i === rover ? 0 : -1}
           disabled={opt.disabled}
           title={opt.title}
@@ -104,7 +106,11 @@ export default function Segmented({ value, onChange, options, size = 'md', disab
           onClick={() => onChange(opt.value)}
           onKeyDown={(e) => onKey(e, i)}
         >
-          {opt.icon}
+          {opt.icon != null && (
+            <span aria-hidden style={{ display: 'contents' }}>
+              {opt.icon}
+            </span>
+          )}
           {opt.label != null && <span>{opt.label}</span>}
         </button>
       ))}

@@ -5121,18 +5121,28 @@ select.afs-toolbar__select,
   .afs-tabs__tab:focus-visible { outline-color: Highlight; }
 }
 
-/* ============ Modal / Dialog（§5.2 文本玻璃卡 + 不透明遮罩；遮罩无模糊，模糊只在卡片） ============ */
-.afs-modal__scrim {
+/* ============ Modal / Dialog（§5.2 文本玻璃卡 + 不透明遮罩；遮罩无模糊，模糊只在卡片）============
+   类名用 afs-dialog 以避开旧版全屏覆盖层 .afs-modal（其 position:fixed;inset:0 会泄漏到卡片）。
+   Radix 的 Overlay/Content 为兄弟节点，故用独立居中层 .afs-dialog__center（place-items:center）承载卡片；
+   卡片自身不定位，把 transform 留给入场缩放动画 afs-pop。 */
+.afs-dialog__scrim {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: grid;
-  place-items: center;
-  padding: var(--afs-sp-6);
   background: var(--afs-scrim);
   animation: afs-fade var(--afs-dur-overlay) var(--afs-ease-standard);
 }
-.afs-modal {
+.afs-dialog__center {
+  position: fixed;
+  inset: 0;
+  z-index: 101;
+  display: grid;
+  place-items: center;
+  padding: var(--afs-sp-6);
+  pointer-events: none; /* 透传点击到遮罩以触发外点关闭；仅卡片可交互 */
+}
+.afs-dialog {
+  pointer-events: auto;
   width: min(520px, 92vw);
   max-height: 86vh;
   display: flex;
@@ -5146,43 +5156,43 @@ select.afs-toolbar__select,
   box-shadow: var(--afs-elev-4), var(--afs-glass-highlight);
   animation: afs-pop var(--afs-dur-overlay) var(--afs-ease-emphasized);
 }
-.afs-modal--wide { width: min(720px, 94vw); }
-.afs-modal--confirm { width: min(360px, 92vw); }
+.afs-dialog--wide { width: min(720px, 94vw); }
+.afs-dialog--confirm { width: min(360px, 92vw); }
 @keyframes afs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes afs-pop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .afs-modal { background: var(--afs-glass-fallback); }
+  .afs-dialog { background: var(--afs-glass-fallback); }
 }
 @media (prefers-reduced-transparency: reduce) {
-  .afs-modal { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+  .afs-dialog { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
 }
 @media (forced-colors: active) {
-  .afs-modal { background: Canvas; border-color: CanvasText; }
+  .afs-dialog { background: Canvas; border-color: CanvasText; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .afs-modal,
-  .afs-modal__scrim { animation: none; }
+  .afs-dialog,
+  .afs-dialog__scrim { animation: none; }
 }
-.afs-modal__head {
+.afs-dialog__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--afs-sp-5) var(--afs-sp-6);
   border-bottom: 1px solid var(--afs-border);
 }
-.afs-modal__title { font: 600 16px/1.35 var(--afs-font-ui); color: var(--afs-text); }
-.afs-modal__desc { margin: 0; padding: var(--afs-sp-4) var(--afs-sp-6) 0; color: var(--afs-muted); font-size: 13px; line-height: 1.5; }
-.afs-modal__body { padding: var(--afs-sp-5) var(--afs-sp-6); overflow-y: auto; color: var(--afs-text); }
-.afs-modal__foot {
+.afs-dialog__title { font: 600 16px/1.35 var(--afs-font-ui); color: var(--afs-text); }
+.afs-dialog__desc { margin: 0; padding: var(--afs-sp-4) var(--afs-sp-6) 0; color: var(--afs-muted); font-size: 13px; line-height: 1.5; }
+.afs-dialog__body { padding: var(--afs-sp-5) var(--afs-sp-6); overflow-y: auto; color: var(--afs-text); }
+.afs-dialog__foot {
   display: flex;
   justify-content: flex-end;
   gap: var(--afs-sp-4);
   padding: var(--afs-sp-5) var(--afs-sp-6);
   border-top: 1px solid var(--afs-border);
 }
-.afs-modal__error { color: var(--afs-danger); font-size: 13px; padding: 0 var(--afs-sp-6) var(--afs-sp-4); }
-.afs-modal__icon { flex: 0 0 auto; color: var(--afs-danger); }
-.afs-modal--confirm .afs-modal__body { display: flex; gap: var(--afs-sp-5); align-items: flex-start; }
+.afs-dialog__error { color: var(--afs-danger); font-size: 13px; padding: 0 var(--afs-sp-6) var(--afs-sp-4); }
+.afs-dialog__icon { flex: 0 0 auto; color: var(--afs-danger); }
+.afs-dialog--confirm .afs-dialog__body { display: flex; gap: var(--afs-sp-5); align-items: flex-start; }
 
 /* ============ 空状态 EmptyState（§5.2 · aurora 装饰唯一合法落点之一） ============ */
 .afs-empty {

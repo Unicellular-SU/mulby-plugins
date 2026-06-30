@@ -36,6 +36,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const resolverRef = useRef<((v: boolean) => void) | null>(null)
 
   const confirm = useCallback<ConfirmFn>((next) => {
+    // 若已有未结算的确认（重叠调用），先以 false 结算上一个，避免其 Promise 永久挂起
+    if (resolverRef.current) {
+      resolverRef.current(false)
+      resolverRef.current = null
+    }
     setOpts(next)
     setOpen(true)
     return new Promise<boolean>((resolve) => {
@@ -71,7 +76,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           </>
         }
       >
-        {opts.danger ? <AlertTriangle size={20} className="afs-modal__icon" aria-hidden /> : null}
+        {opts.danger ? <AlertTriangle size={20} className="afs-dialog__icon" aria-hidden /> : null}
         <div>{opts.message}</div>
       </Modal>
     </ConfirmCtx.Provider>
