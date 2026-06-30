@@ -194,7 +194,7 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
     }
   }
   const onDeleteAsset = async (id: string) => {
-    if (await confirm({ title: '删除上传素材', message: '删除该上传素材？此操作不可撤销。', confirmLabel: '删除', danger: true })) removeAsset(id)
+    if (await confirm({ title: '删除上传素材', message: '删除该上传素材？', confirmLabel: '删除', danger: true })) removeAsset(id)
   }
   const boardCount = (id?: string) => assets.filter((a) => (id ? a.boardId === id : !a.boardId)).length
 
