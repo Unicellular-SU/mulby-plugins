@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react'
 import { Lock, LockOpen, Loader2, RotateCcw, Maximize2, X, Play, type LucideIcon } from 'lucide-react'
-import { getNodeDef, PORT_COLORS } from '../../nodes/nodeDefs'
+import { getNodeDef } from '../../nodes/nodeDefs'
 import { useGraphStore, type FilmNode as FilmNodeType, type FilmNodeData, type PortValue, type GenItem } from '../../store/graphStore'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../../services/mediaUrl'
 import { useUiStore, type LightboxItem } from '../../store/uiStore'
@@ -367,7 +367,7 @@ function MediaFrameNode({
         const top = (h * (i + 1)) / (ins.length + 1)
         return (
           <div key={`in-${p.id}`}>
-            <Handle id={p.id} type="target" position={Position.Left} style={{ top, background: PORT_COLORS[p.type] }} />
+            <Handle id={p.id} type="target" position={Position.Left} style={{ top, background: `var(--afs-type-${p.type})` }} />
             <span className="afs-port afs-port--in afs-port--onmedia" style={{ top }}>
               {p.label}
             </span>
@@ -378,7 +378,7 @@ function MediaFrameNode({
         const top = (h * (i + 1)) / (outs.length + 1)
         return (
           <div key={`out-${p.id}`}>
-            <Handle id={p.id} type="source" position={Position.Right} style={{ top, background: PORT_COLORS[p.type] }} />
+            <Handle id={p.id} type="source" position={Position.Right} style={{ top, background: `var(--afs-type-${p.type})` }} />
             <span className="afs-port afs-port--out afs-port--onmedia" style={{ top }}>
               {p.label}
             </span>
@@ -545,7 +545,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
                 id={p.id}
                 type="target"
                 position={Position.Left}
-                style={{ top, background: PORT_COLORS[p.type] }}
+                style={{ top, background: `var(--afs-type-${p.type})` }}
               />
               <span className="afs-port afs-port--in" style={{ top }}>
                 {p.label}
@@ -561,7 +561,7 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
                 id={p.id}
                 type="source"
                 position={Position.Right}
-                style={{ top, background: PORT_COLORS[p.type] }}
+                style={{ top, background: `var(--afs-type-${p.type})` }}
               />
               <span className="afs-port afs-port--out" style={{ top }}>
                 {p.label}

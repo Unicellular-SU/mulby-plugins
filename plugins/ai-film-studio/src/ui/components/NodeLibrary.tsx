@@ -32,7 +32,7 @@ export default function NodeLibrary() {
           return (
             <div key={cat} className="afs-libgroup">
               <div className="afs-libgroup__header">
-                <span className="afs-libgroup__dot" style={{ background: meta.color }} />
+                <span className="afs-libgroup__dot" style={{ background: `var(--afs-cat-${cat})` }} />
                 {meta.label}
               </div>
               {defs.map((def) => {
@@ -46,7 +46,7 @@ export default function NodeLibrary() {
                     onClick={() => onClickAdd(def)}
                     title={def.desc}
                   >
-                    <span className="afs-libitem__icon" style={{ color: meta.color }}>
+                    <span className="afs-libitem__icon" style={{ color: `var(--afs-cat-${cat})` }}>
                       <Icon size={15} />
                     </span>
                     <div className="afs-libitem__text">
