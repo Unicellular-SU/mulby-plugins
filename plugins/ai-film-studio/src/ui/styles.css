@@ -2274,6 +2274,20 @@ select.afs-toolbar__select,
   white-space: pre;
   overflow-x: auto;
 }
+/* 徽标 Badge 基类（此前缺失 → 裸 .afs-tag「当前」渲染成无样式文本） */
+.afs-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: var(--afs-r-pill);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--afs-accent) 16%, transparent);
+  color: var(--afs-accent);
+  vertical-align: middle;
+}
 .afs-field__label .afs-tag {
   display: inline-block;
   margin-left: 6px;
@@ -4142,9 +4156,9 @@ select.afs-toolbar__select,
 .afs-studio__dlgemo { flex: 0 0 72px; }
 
 /* 统一项目主页 · 类型徽标（画布/工作流）+ 工作台空状态操作 */
-.afs-pcard__kind { position: absolute; top: 6px; left: 6px; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 6px; color: #fff; font-weight: 600; letter-spacing: .03em; }
-.afs-pcard__kind--canvas { background: rgba(59,130,246,.92); }
-.afs-pcard__kind--studio { background: rgba(168,85,247,.92); }
+.afs-pcard__kind { position: absolute; top: 6px; left: 6px; font-size: 11px; line-height: 1; padding: 3px 7px; border-radius: 6px; color: #fff; font-weight: 600; letter-spacing: .03em; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.afs-pcard__kind--canvas { background: var(--afs-cat-text); }
+.afs-pcard__kind--studio { background: var(--afs-cat-image); }
 .afs-studio__emptyactions { display: flex; gap: 10px; margin-top: 14px; }
 
 /* 工作流 · 片段失败提示 + 时间线片段可点预览 + 片段灯箱 */
