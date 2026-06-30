@@ -741,6 +741,26 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 节点头/媒体框的图标小按钮（锁定 / 看大图）—— 取代逐处内联 style，令牌化 + hover 渐显 */
+.afs-node__lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-node__lock:hover { opacity: 1; }
+.afs-node__lock.is-locked { opacity: 1; }
+.afs-node__header .afs-node__lock { margin-right: 4px; }
+.afs-node__lock--media { color: #fff; opacity: 0.8; }
+.afs-node__lock--media.is-locked { opacity: 1; }
 .afs-node__status {
   width: 8px;
   height: 8px;

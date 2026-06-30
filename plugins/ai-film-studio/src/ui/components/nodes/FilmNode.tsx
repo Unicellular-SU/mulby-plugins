@@ -314,53 +314,27 @@ function MediaFrameNode({
           <span className="afs-node__frame-title">{data.title || def.label}</span>
           <button
             type="button"
-            className="afs-node__lock nodrag"
+            className="afs-node__lock afs-node__lock--media nodrag"
             title="看大图（也可双击媒体）"
             onClick={(e) => {
               e.stopPropagation()
               onOpen()
-            }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 16,
-              height: 16,
-              padding: 0,
-              border: 'none',
-              background: 'transparent',
-              color: '#fff',
-              cursor: 'pointer',
-              opacity: 0.8,
             }}
           >
             <Maximize2 size={10} strokeWidth={2.2} />
           </button>
           <button
             type="button"
-            className="afs-node__lock nodrag"
+            className={`afs-node__lock afs-node__lock--media nodrag${data.locked ? ' is-locked' : ''}`}
             title={data.locked ? '已锁定：重跑跳过、保留结果（点击解锁）' : '锁定此节点：重跑不覆盖产物'}
             onClick={(e) => {
               e.stopPropagation()
               useGraphStore.getState().toggleNodeLock(id)
             }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 16,
-              height: 16,
-              padding: 0,
-              border: 'none',
-              background: 'transparent',
-              color: '#fff',
-              cursor: 'pointer',
-              opacity: data.locked ? 1 : 0.75,
-            }}
           >
             {data.locked ? <Lock size={10} strokeWidth={2.4} /> : <LockOpen size={10} strokeWidth={2.2} />}
           </button>
-          <span className={`afs-node__status afs-node__status--${data.status}`} title={data.status} />
+          <span className={`afs-node__status afs-node__status--${data.status}${data.status === 'running' ? ' afs-breathe' : ''}`} title={data.status} />
         </div>
       </div>
       {ins.map((p, i) => {
@@ -510,25 +484,11 @@ function FilmNodeComp({ id, data, selected }: NodeProps<FilmNodeType>) {
         <span className="afs-node__title">{data.title || def.label}</span>
         <button
           type="button"
-          className="afs-node__lock nodrag"
+          className={`afs-node__lock nodrag${data.locked ? ' is-locked' : ''}`}
           title={data.locked ? '已锁定：重跑时跳过、保留结果（点击解锁）' : '锁定此节点：重跑不覆盖其产物'}
           onClick={(e) => {
             e.stopPropagation()
             useGraphStore.getState().toggleNodeLock(id)
-          }}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 16,
-            height: 16,
-            padding: 0,
-            marginRight: 4,
-            border: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            cursor: 'pointer',
-            opacity: data.locked ? 1 : 0.55,
           }}
         >
           {data.locked ? <Lock size={11} strokeWidth={2.4} /> : <LockOpen size={11} strokeWidth={2.2} />}
