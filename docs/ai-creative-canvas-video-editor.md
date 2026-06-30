@@ -727,6 +727,21 @@ ffmpeg -i in.mp4 -i bgm.mp3 -filter_complex "\
 
 > 边实现边记录。每完成一段：更新本节 + tsc/build green + 提交。未在 Mulby 运行时验证（沿用本插件惯例：tsc + vite build + pack 通过，用户手动在 Mulby 测）。落地前必跑 §8.10 三项实测。
 
+### 完成情况小结（17 次实现提交，全程 typecheck + vite build green）
+
+**已实现（P0 全部 + P1 全部 + 可靠 P2）**：
+- 引擎：EditStack 非破坏式编辑栈 + compileStack 单条/两遍 ffmpeg 编译器（固定滤镜顺序、时间基输出态、三级退化梯度）+ run.ts 执行器（可中止/进度均分/清产物）+ studioStore（undo/redo/导出落卡/可二次编辑配方）+ stackToPreview CSS 近似预览 + VideoStudioModal 工作台 UI。
+- 裁切：多段保留/删中段/剃刀分割。变速：0.25–4×/倒放/boomerang/片尾冻结/平滑慢动作(补帧)/运动残影。几何：裁画面/旋转翻转/画幅适配(黑边·裁满·模糊背景)/像素化/镜像/抖动/去抖。调色：eq 全项/色温/色相/锐化/降噪/暗角/颗粒/反相/LUT/glitch/7 风格预设。叠加：文字/字幕(+.srt)/水印/贴纸/打码/边框/进度条/时间码/画中画（全 canvas→PNG）。音频：音量/淡变/区间静音/响度归一/降噪/变调/波形可视化/配乐·替换·闪避/AI 配音。输出：mp4·webm·gif·webp/平台预设/保存本地。
+
+**有意延后（需先在 Mulby 跑通 §8.10 三项实测，否则盲做有风险）**：
+- 目标体积两遍编码（`-passlogfile` 斜杠方向未核实）
+- HEVC/AV1/APNG（需编码器探测）
+- 启动 GC 孤儿清理（误删活动卡产物风险——frames_/scenes_ 产物本身是卡）
+- 视频整段 Ken-Burns（zoompan 的 fps/时长风险）
+- **整套三级退化体系依赖「ffmpeg.run 非零退出会 reject」这一未核实前提**——这是头号待验证项。
+
+**边际/低价值未做**：curves 拖点编辑器（eq+预设已覆盖九成）、分屏 selfsplit、聚光灯、构图参考线、预设包、批量导出、封面帧。
+
 - **[P0 地基·已完成]** 可取消执行：`mediaVideo.ts:runFf` / `probeDuration` 加可选 `signal?: AbortSignal`，`abort → task.kill()`，旧调用方传 undefined 完全兼容。`runFf` 导出供工作台/编译器复用。
 - **[P0 地基·已完成]** 编辑栈类型系统：新增 `src/ui/services/videoEdit/types.ts` —— `OpKind`/`EditOp`(按 kind 判别联合，7 大类参数类型)/`EditStack`/`EditRecipe`、大类编译顺序 `OP_KIND_ORDER`、`createOp` 工厂、`stackIsNoop`。纯类型骨架，typecheck green。
 - **[P1 时间码·已完成]** overlay 加 `timecode`：`renderTimecodePng` 横排精灵图（每格一个 M:SS 标签，`step=ceil(dur/120)` 限格数防超宽画布），编译器 `crop=cellW:cellH:'floor(t/step)*cellW':0` 逐帧裁出当前格（单输入单次）。`OverlayInput` 扩 cellW/cellH/step；`compile.ts` 导出 `stackOutDuration` 供 `prepareOverlays` 算格数；`run.ts` 传入。OverlayPanel 颜色/位置；预览显示 M:SS。typecheck + vite build green。
