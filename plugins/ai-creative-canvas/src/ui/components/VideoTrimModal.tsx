@@ -62,6 +62,29 @@ function Inner({ cardId }: { cardId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cardId])
 
+  // 播放限定在所选区间：起点之外开播则跳到 in；播到 out 即停。并让播放头实时跟随。
+  useEffect(() => {
+    const v = vref.current
+    if (!v) return
+    const onPlay = () => {
+      if (outSec > inSec && (v.currentTime < inSec || v.currentTime >= outSec - 0.03)) v.currentTime = inSec
+    }
+    const onTime = () => {
+      setPlayhead(v.currentTime)
+      if (!v.paused && outSec > inSec && v.currentTime >= outSec - 0.03) {
+        v.pause()
+        v.currentTime = outSec
+        setPlayhead(outSec)
+      }
+    }
+    v.addEventListener('play', onPlay)
+    v.addEventListener('timeupdate', onTime)
+    return () => {
+      v.removeEventListener('play', onPlay)
+      v.removeEventListener('timeupdate', onTime)
+    }
+  }, [inSec, outSec])
+
   if (!card) return null
 
   const seek = (sec: number) => {
