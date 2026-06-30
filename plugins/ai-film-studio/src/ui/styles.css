@@ -4464,6 +4464,61 @@ select.afs-toolbar__select,
 @media (prefers-reduced-motion: reduce) {
   .afs-switch__thumb { transition: none; }
 }
+
+/* ============ 数字步进器 NumberStepper（抑制 OS 旋钮 + 自绘 ▲▼） ============ */
+.afs-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--afs-control-h);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  overflow: hidden;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard),
+    box-shadow var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-stepper--sm { height: var(--afs-control-h-sm); }
+.afs-stepper--block { display: flex; width: 100%; }
+.afs-stepper:focus-within {
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-stepper.is-disabled { opacity: 0.5; }
+.afs-stepper__input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--afs-text);
+  padding: 0 6px 0 8px;
+  font: 500 13px/1 var(--afs-font-ui);
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.afs-stepper__input::-webkit-outer-spin-button,
+.afs-stepper__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.afs-stepper__btns {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  border-left: 1px solid var(--afs-border);
+}
+.afs-stepper__btn {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  color: var(--afs-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.afs-stepper__btn + .afs-stepper__btn { border-top: 1px solid var(--afs-border); }
+.afs-stepper__btn:hover { background: var(--afs-hover); color: var(--afs-text); }
+.afs-stepper__btn:disabled { opacity: 0.35; pointer-events: none; }
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;
