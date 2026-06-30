@@ -2763,7 +2763,7 @@ select.afs-toolbar__select,
 }
 .afs-pcard:hover {
   border-color: color-mix(in srgb, var(--afs-accent) 55%, var(--afs-border));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--afs-elev-2);
 }
 .afs-pcard.is-current {
   border-color: var(--afs-accent);

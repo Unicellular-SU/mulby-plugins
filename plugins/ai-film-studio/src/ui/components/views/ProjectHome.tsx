@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Download, Upload, Trash2, Pencil, Clapperboard, Film, Workflow } from 'lucide-react'
+import { Copy, Download, Upload, Trash2, Pencil, Clapperboard, Film, Workflow, MoreHorizontal } from 'lucide-react'
 import { useGraphStore, type ProjectCard, type ProjectData } from '../../store/graphStore'
 import { useProjectStore } from '../../store/projectStore'
 import { listStylePacks } from '../../services/stylePacks'
 import { TEMPLATES } from '../../templates'
 import { useMediaUrl } from '../../services/mediaUrl'
 import Select from '../ui/Select'
+import Menu from '../ui/Menu'
 
 function relTime(ts: number): string {
   const d = Date.now() - ts
@@ -217,18 +218,20 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
                       打开
                     </button>
                     <span className="afs-pcard__spacer" />
-                    <button onClick={() => onRename(r.card)} title="重命名">
-                      <Pencil size={13} />
-                    </button>
-                    <button onClick={() => onDup(r.card)} title="复制工程">
-                      <Copy size={13} />
-                    </button>
-                    <button onClick={() => onExport(r.card)} title="导出 JSON">
-                      <Download size={13} />
-                    </button>
-                    <button className="afs-pcard__del" onClick={() => onDeleteCanvas(r.card)} title="删除工程">
-                      <Trash2 size={13} />
-                    </button>
+                    <Menu
+                      align="end"
+                      trigger={
+                        <button aria-label="更多操作" title="更多操作">
+                          <MoreHorizontal size={14} />
+                        </button>
+                      }
+                      items={[
+                        { label: '重命名', icon: Pencil, onSelect: () => onRename(r.card) },
+                        { label: '复制工程', icon: Copy, onSelect: () => onDup(r.card) },
+                        { label: '导出 JSON', icon: Download, onSelect: () => onExport(r.card) },
+                        { label: '删除工程', icon: Trash2, danger: true, separatorBefore: true, onSelect: () => onDeleteCanvas(r.card) },
+                      ]}
+                    />
                   </div>
                 </div>
               ) : (
@@ -263,9 +266,15 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
                       打开
                     </button>
                     <span className="afs-pcard__spacer" />
-                    <button className="afs-pcard__del" onClick={() => onDeleteStudio(r.id, r.name)} title="删除项目">
-                      <Trash2 size={13} />
-                    </button>
+                    <Menu
+                      align="end"
+                      trigger={
+                        <button aria-label="更多操作" title="更多操作">
+                          <MoreHorizontal size={14} />
+                        </button>
+                      }
+                      items={[{ label: '删除项目', icon: Trash2, danger: true, onSelect: () => onDeleteStudio(r.id, r.name) }]}
+                    />
                   </div>
                 </div>
               )
