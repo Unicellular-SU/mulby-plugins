@@ -978,6 +978,24 @@ select.afs-toolbar__select,
 .afs-toolbar__name::placeholder {
   color: var(--afs-text-dim);
 }
+/* 字段 Field 族：required 星标 / help / error / 失效态（见 components/ui/Field.tsx） */
+.afs-field__req { color: var(--afs-danger); }
+.afs-field__help {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--afs-text-dim);
+}
+.afs-field__error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--afs-danger);
+}
+.afs-field__input.is-invalid {
+  border-color: var(--afs-danger);
+}
+.afs-field__input.is-invalid:focus {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-danger) 55%, transparent);
+}
 .afs-inspector__note {
   font-size: 11px;
   color: var(--afs-muted);
