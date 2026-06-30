@@ -4548,6 +4548,52 @@ select.afs-toolbar__select,
 @media (prefers-reduced-motion: reduce) {
   .afs-tooltip { animation: none; }
 }
+
+/* ============ 下拉菜单 Menu（Radix DropdownMenu + 玻璃） ============ */
+.afs-menu {
+  z-index: 10000;
+  min-width: 180px;
+  padding: var(--afs-sp-2);
+  background: var(--afs-glass-fill);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-lg);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  animation: afs-select-pop var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--afs-r-xs);
+  font-size: 13px;
+  color: var(--afs-text);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.afs-menu__item[data-highlighted] { background: var(--afs-hover); }
+.afs-menu__item[data-disabled] { opacity: 0.4; pointer-events: none; }
+.afs-menu__item--danger { color: var(--afs-danger); }
+.afs-menu__item--danger[data-highlighted] { background: color-mix(in srgb, var(--afs-danger) 14%, transparent); }
+.afs-menu__icon { color: var(--afs-muted); flex: none; }
+.afs-menu__item--danger .afs-menu__icon { color: var(--afs-danger); }
+.afs-menu__label { flex: 1; min-width: 0; }
+.afs-menu__check { color: var(--afs-accent); flex: none; }
+.afs-menu__shortcut { font-size: 11px; color: var(--afs-text-dim); flex: none; }
+.afs-menu__sep { height: 1px; margin: 4px 2px; background: var(--afs-border); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-menu { background: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .afs-menu { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--afs-surface-3); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-menu { animation: none; }
+}
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;
