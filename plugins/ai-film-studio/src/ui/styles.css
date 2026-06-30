@@ -7080,3 +7080,115 @@ html.light { --afs-lb-scrim: rgba(0, 0, 0, 0.86); } /* deliberately dark in ligh
   outline: none;
 }
 .afs-tagsinput__input::placeholder { color: var(--afs-text-dim); }
+
+/* ============ Radio 单选组（自绘圆点 + 渐变填充） ============ */
+.afs-radio { display: flex; }
+.afs-radio--vertical { flex-direction: column; gap: var(--afs-sp-3); }
+.afs-radio--horizontal { flex-direction: row; flex-wrap: wrap; gap: var(--afs-sp-5); }
+.afs-radio__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--afs-sp-3);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--afs-text);
+  font: 400 13px/1 var(--afs-font-ui);
+  cursor: pointer;
+}
+.afs-radio__item:disabled { opacity: 0.4; cursor: not-allowed; }
+.afs-radio__dot {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid var(--afs-border-strong);
+  background: var(--afs-surface-sunken);
+  display: inline-grid;
+  place-items: center;
+  transition: border-color var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-radio__dot::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--afs-grad-accent);
+  transform: scale(0);
+  transition: transform var(--afs-dur-ui) var(--afs-ease-emphasized);
+}
+.afs-radio__item[aria-checked='true'] .afs-radio__dot { border-color: var(--afs-accent); }
+.afs-radio__item[aria-checked='true'] .afs-radio__dot::after { transform: scale(1); }
+.afs-radio__item:focus-visible { outline: none; }
+.afs-radio__item:focus-visible .afs-radio__dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent); }
+@media (prefers-reduced-motion: reduce) { .afs-radio__dot::after { transition: none; } }
+@media (forced-colors: active) {
+  .afs-radio__item[aria-checked='true'] .afs-radio__dot { border-color: Highlight; }
+  .afs-radio__item[aria-checked='true'] .afs-radio__dot::after { background: Highlight; }
+}
+
+/* ============ Slider 滑块（原生 range + 令牌化轨/拇指；--afs-slider-pct 填充） ============ */
+.afs-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--afs-r-pill);
+  background: linear-gradient(to right, var(--afs-accent) 0, var(--afs-accent) var(--afs-slider-pct, 0%), var(--afs-surface-sunken) var(--afs-slider-pct, 0%));
+  cursor: pointer;
+  outline: none;
+}
+.afs-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--afs-accent);
+  border: 2px solid var(--afs-panel);
+  box-shadow: var(--afs-elev-1);
+  cursor: pointer;
+}
+.afs-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--afs-accent);
+  border: 2px solid var(--afs-panel);
+  box-shadow: var(--afs-elev-1);
+  cursor: pointer;
+}
+.afs-slider:focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent); }
+.afs-slider:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ============ InlineEdit 行内可编辑文本 ============ */
+.afs-inlineedit {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--afs-r-sm);
+  background: transparent;
+  color: var(--afs-text);
+  font: inherit;
+  text-align: left;
+  cursor: text;
+  transition: background var(--afs-dur-ui) var(--afs-ease-standard), border-color var(--afs-dur-ui) var(--afs-ease-standard);
+}
+.afs-inlineedit:hover { background: var(--afs-hover); }
+.afs-inlineedit:focus-visible {
+  outline: none;
+  border-color: var(--afs-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
+.afs-inlineedit__ph { color: var(--afs-text-dim); }
+.afs-inlineedit__input {
+  padding: 2px 6px;
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-accent);
+  border-radius: var(--afs-r-sm);
+  color: var(--afs-text);
+  font: inherit;
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent);
+}
