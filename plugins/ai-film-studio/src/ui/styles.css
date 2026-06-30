@@ -1536,12 +1536,13 @@ select.afs-toolbar__select,
   font-size: 13px;
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.18); /* 媒体上仍可见的细描边 */
   border-radius: 8px;
   cursor: pointer;
 }
 .afs-lbhost__toggle.is-on {
-  background: #3b82f6;
+  background: #6d7cff; /* 品牌靛蓝（固定亮值，灯箱恒为暗场）取代随机蓝 #3b82f6 */
+  border-color: transparent;
 }
 .afs-lbhost__toggle:hover {
   filter: brightness(1.1);
@@ -1750,7 +1751,7 @@ select.afs-toolbar__select,
   justify-content: center;
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   cursor: pointer;
 }
@@ -1769,7 +1770,7 @@ select.afs-toolbar__select,
   justify-content: center;
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
   cursor: pointer;
 }
@@ -1821,9 +1822,9 @@ select.afs-toolbar__select,
   flex-direction: column;
   background: var(--afs-node-bg);
   border: 1px solid var(--afs-border);
-  border-radius: 12px;
+  border-radius: var(--afs-r-xl);
   overflow: hidden;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--afs-elev-4);
 }
 .afs-rv__head {
   display: flex;

@@ -40,7 +40,8 @@
 | 2 | 高频原生控件屏 · **Studio emoji → Lucide** | ✅ 已完成 | StudioEditor 的图标 emoji 全部替换：🛠→`Wrench`、🎬→`Clapperboard`（两个 toggle 补 `aria-pressed`+`aria-label`+激活态）、⚠→`AlertCircle`(warning 色)、✓(完成/当选)→`Check`(success 色)；🎙 在原生 `<option>` 内无法放图标，按设计去除前缀。`tsc --noEmit` + `build:ui` 均通过（markup 改动用 tsc 校验导入）。 |
 | 2/3 | 节点/浮层 emoji → Lucide（**FilmNode**） | ✅ 已完成 | FilmNode 失败瓦片 `✗`→`<X>`（红，`aria-label`）、媒体帧播放 `▶`→`<Play fill>`；`×{count}` 计数标签为字面文本保留。LightboxHost 经核查无图标 emoji（`←/→` 仅为 title 内键盘提示）。`tsc --noEmit` + `build:ui` 通过。 |
 | 2 | 高频原生控件屏 · 余下：设置（ProviderSettings 14 字段 / 原生 checkbox / radio）→ Inspector 重塑 | ⏳ 待办 | ProviderSettings 原生 checkbox/radio 需 Checkbox/Radio 组件（markup 层）。 |
-| 3 | 画布与节点视觉：节点头 / 状态 / 运行态 / 灯箱 chrome 令牌化 | ⏳ 待办 | — |
+| 3 | 灯箱 + ResultViewer chrome 收尾 | ✅ 已完成（仅构建验证） | 灯箱恒为暗场（白控件保留正确），但：`is-on` 由随机蓝 `#3b82f6`→品牌靛蓝 `#6d7cff`；关闭/导航/连看控件加 `1px` 细描边（媒体上仍可见，回应审查）；ResultViewer 面板圆角/阴影令牌化（`--afs-r-xl`/`--afs-elev-4`，**保留其刻意不加 backdrop-filter 的性能决定**）。`build` 通过。 |
+| 3 | 节点状态点 / 运行态 / 进度 微调（emoji 已替换，色彩可进一步令牌化） | ⏳ 待办（视觉） | 状态点 `#fbbf24/#3b82f6/#10b981/#ef4444` 可改 `--afs-warning/info/success/danger`；运行态玻璃+辉光、进度条渐变、skeleton/shimmer 属需可视验证的打磨。 |
 | 4 | 打磨：微交互 / 动效 / skeleton / 空状态 + 全量明暗与 a11y 回归 | ⏳ 待办 | — |
 
 ---
