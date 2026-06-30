@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Background,
@@ -14,7 +14,7 @@ import {
 } from '@xyflow/react'
 import FilmNode from './nodes/FilmNode'
 import { DND_MIME, DND_ASSET, DND_ELEMENT, DND_SNIPPET } from './NodeLibrary'
-import { getNodeDef, CATEGORY_META } from '../nodes/nodeDefs'
+import { getNodeDef } from '../nodes/nodeDefs'
 import { useGraphStore, isValidConnection, type FilmNode as FilmNodeType } from '../store/graphStore'
 import { useAssetStore } from '../store/assetStore'
 import { usePromptStore, resolveSnippet } from '../store/promptStore'
@@ -22,17 +22,26 @@ import { useUiStore } from '../store/uiStore'
 
 const nodeTypes = { film: FilmNode }
 
-function miniMapColor(node: Node): string {
-  const kind = (node.data as FilmNodeType['data'])?.kind
-  const def = kind ? getNodeDef(kind) : undefined
-  return def ? CATEGORY_META[def.category].color : '#64748b'
-}
-
 export default function FlowCanvas() {
   const { screenToFlowPosition } = useReactFlow()
   const theme = useUiStore((s) => s.theme)
-  const dotColor = theme === 'light' ? '#cbd5e1' : '#2a3650'
-  const maskColor = theme === 'light' ? 'rgba(226,232,240,0.65)' : 'rgba(11,15,23,0.7)'
+  // 画布 SVG 颜色：Background/MiniMap 走 SVG fill 属性，不解析 var()，故按主题取令牌等值；
+  // 分类色用 getComputedStyle 读 --afs-cat-*（随 theme 重算）。
+  const dotColor = theme === 'light' ? 'rgba(71,85,105,0.32)' : 'rgba(255,255,255,0.07)'
+  const maskColor = theme === 'light' ? 'rgba(0,0,0,0.30)' : 'rgba(0,0,0,0.42)'
+  const catColors = useMemo(() => {
+    const root = getComputedStyle(document.documentElement)
+    const get = (c: string) => root.getPropertyValue(`--afs-cat-${c}`).trim() || '#64748b'
+    return { input: get('input'), text: get('text'), image: get('image'), video: get('video'), audio: get('audio'), output: get('output') } as Record<string, string>
+  }, [theme])
+  const miniMapColor = useCallback(
+    (node: Node): string => {
+      const kind = (node.data as FilmNodeType['data'])?.kind
+      const def = kind ? getNodeDef(kind) : undefined
+      return (def && catColors[def.category]) || '#64748b'
+    },
+    [catColors]
+  )
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
   const viewport = useGraphStore((s) => s.viewport)
