@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus, ArrowRight } from 'lucide-react'
+import { Trash2, Play, Loader2, Upload, FastForward, BookmarkPlus, ArrowRight, MousePointerClick, AlertTriangle } from 'lucide-react'
 import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -11,6 +11,7 @@ import { OptimizableField } from './OptimizableField'
 import { getFieldOptimizer } from '../services/fieldOptimize'
 import Select from './ui/Select'
 import { Field, Input, Textarea } from './ui/Field'
+import EmptyState from './ui/EmptyState'
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -47,10 +48,7 @@ export default function Inspector() {
   if (!node || !selectedNodeId) {
     return (
       <div className="afs-inspector">
-        <div className="afs-inspector__empty">
-          <p>未选中节点</p>
-          <p className="afs-inspector__empty-hint">点击画布上的节点以编辑参数</p>
-        </div>
+        <EmptyState icon={MousePointerClick} title="未选中节点" description="点击画布上的节点以编辑参数" />
       </div>
     )
   }
@@ -59,7 +57,7 @@ export default function Inspector() {
   if (!def) {
     return (
       <div className="afs-inspector">
-        <div className="afs-inspector__empty">未知节点类型：{node.data.kind}</div>
+        <EmptyState icon={AlertTriangle} title="未知节点类型" description={node.data.kind} />
       </div>
     )
   }

@@ -226,18 +226,28 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
         <div className="afs-boards__main">
           <div className="afs-lib__bar">
             <div className="afs-lib__filters">
-              {(['all', 'image', 'video', 'audio'] as const).map((t) => (
-                <button key={t} className={`afs-chip${typeF === t ? ' is-active' : ''}`} onClick={() => setTypeF(t)}>
-                  {t === 'all' ? '全部' : TYPE_LABEL[t]}
-                  <span className="afs-chip__n">{counts[t]}</span>
-                </button>
-              ))}
+              <Segmented
+                ariaLabel="按类型筛选"
+                size="sm"
+                value={typeF}
+                onChange={(v) => setTypeF(v as 'all' | 'image' | 'video' | 'audio')}
+                options={(['all', 'image', 'video', 'audio'] as const).map((t) => ({
+                  value: t,
+                  label: `${t === 'all' ? '全部' : TYPE_LABEL[t]} ${counts[t]}`,
+                }))}
+              />
               <span className="afs-lib__sep" />
-              {(['all', 'generated', 'uploaded'] as const).map((r) => (
-                <button key={r} className={`afs-chip${roleF === r ? ' is-active' : ''}`} onClick={() => setRoleF(r)}>
-                  {r === 'all' ? '全部来源' : r === 'generated' ? '生成' : '上传'}
-                </button>
-              ))}
+              <Segmented
+                ariaLabel="按来源筛选"
+                size="sm"
+                value={roleF}
+                onChange={(v) => setRoleF(v as 'all' | 'generated' | 'uploaded')}
+                options={[
+                  { value: 'all', label: '全部来源' },
+                  { value: 'generated', label: '生成' },
+                  { value: 'uploaded', label: '上传' },
+                ]}
+              />
             </div>
             <input className="afs-lib__search" placeholder="搜索名称 / 标签 / 工程…" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="afs-lib__actions">
