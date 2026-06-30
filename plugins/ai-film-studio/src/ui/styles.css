@@ -4519,6 +4519,35 @@ select.afs-toolbar__select,
 .afs-stepper__btn + .afs-stepper__btn { border-top: 1px solid var(--afs-border); }
 .afs-stepper__btn:hover { background: var(--afs-hover); color: var(--afs-text); }
 .afs-stepper__btn:disabled { opacity: 0.35; pointer-events: none; }
+
+/* ============ 提示气泡 Tooltip（Radix + 玻璃） ============ */
+.afs-tooltip {
+  z-index: 10001;
+  max-width: 260px;
+  padding: 5px 9px;
+  background: var(--afs-glass-fill-strong);
+  -webkit-backdrop-filter: var(--afs-glass-blur);
+  backdrop-filter: var(--afs-glass-blur);
+  border: var(--afs-glass-border);
+  border-radius: var(--afs-r-sm);
+  box-shadow: var(--afs-elev-3), var(--afs-glass-highlight);
+  color: var(--afs-text);
+  font-size: 12px;
+  line-height: 1.4;
+  animation: afs-tooltip-in var(--afs-dur-micro) var(--afs-ease-standard);
+}
+.afs-tooltip__arrow { fill: var(--afs-glass-fill-strong); }
+@keyframes afs-tooltip-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .afs-tooltip { background: var(--afs-glass-fallback); }
+  .afs-tooltip__arrow { fill: var(--afs-glass-fallback); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .afs-tooltip { animation: none; }
+}
 .afs-select__empty {
   padding: 8px;
   font-size: 12px;

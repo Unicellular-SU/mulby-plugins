@@ -3,6 +3,7 @@ import { useReactFlow } from '@xyflow/react'
 import { Save, Maximize2, Play, Square, Camera, Palette, Type, Image as ImageIcon, Clapperboard, Loader2 } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import Select from './ui/Select'
+import Tooltip from './ui/Tooltip'
 
 interface ToolbarProps {
   onOpenSnapshots?: () => void
@@ -108,19 +109,25 @@ export default function Toolbar({ onOpenSnapshots, onOpenStyle }: ToolbarProps) 
           title="图像模型（endpointType=image-generation）"
           ariaLabel="图像模型"
         />
-        <button className="afs-iconbtn" onClick={() => fitView({ duration: 300, padding: 0.2 })} title="适应画布" aria-label="适应画布">
-          <Maximize2 size={16} />
-        </button>
+        <Tooltip content="适应画布">
+          <button className="afs-iconbtn" onClick={() => fitView({ duration: 300, padding: 0.2 })} aria-label="适应画布">
+            <Maximize2 size={16} />
+          </button>
+        </Tooltip>
         <button className="afs-btn afs-btn--save" onClick={() => saveProject()} title="保存 (Cmd/Ctrl+S)">
           <Save size={15} />
           <span>保存</span>
         </button>
-        <button className="afs-iconbtn" onClick={onOpenStyle} title="项目风格（画风 / 画幅，注入本工程所有生成）" aria-label="项目风格">
-          <Palette size={16} />
-        </button>
-        <button className="afs-iconbtn" onClick={onOpenSnapshots} title="工程快照（命名版本，可回滚）" aria-label="工程快照">
-          <Camera size={16} />
-        </button>
+        <Tooltip content="项目风格（画风 / 画幅，注入本工程所有生成）">
+          <button className="afs-iconbtn" onClick={onOpenStyle} aria-label="项目风格">
+            <Palette size={16} />
+          </button>
+        </Tooltip>
+        <Tooltip content="工程快照（命名版本，可回滚）">
+          <button className="afs-iconbtn" onClick={onOpenSnapshots} aria-label="工程快照">
+            <Camera size={16} />
+          </button>
+        </Tooltip>
         {isRunning ? (
           <button className="afs-btn afs-btn--stop" onClick={cancelRun} title="停止运行">
             <Square size={14} />

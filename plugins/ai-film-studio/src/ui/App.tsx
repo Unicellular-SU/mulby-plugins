@@ -9,6 +9,7 @@ import PromptLibrary from './components/views/PromptLibrary'
 import SettingsView from './components/views/SettingsView'
 import LightboxHost from './components/LightboxHost'
 import ResultViewer from './components/ResultViewer'
+import { TooltipProvider } from './components/ui/Tooltip'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { clearAssetCache } from './services/assets'
 import { useProviderStore } from './store/providerStore'
@@ -105,7 +106,8 @@ export default function App() {
   }, [deleteSelected, view])
 
   return (
-    <ReactFlowProvider>
+    <TooltipProvider delayDuration={400} skipDelayDuration={300}>
+      <ReactFlowProvider>
       <div className="afs-shell">
         <AppRail view={view} onChange={go} />
         <div className="afs-main">
@@ -119,6 +121,7 @@ export default function App() {
       </div>
       <LightboxHost />
       <ResultViewer />
-    </ReactFlowProvider>
+      </ReactFlowProvider>
+    </TooltipProvider>
   )
 }
