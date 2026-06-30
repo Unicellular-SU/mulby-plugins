@@ -7,6 +7,7 @@ import { TEMPLATES } from '../../templates'
 import { useMediaUrl } from '../../services/mediaUrl'
 import Select from '../ui/Select'
 import Menu from '../ui/Menu'
+import EmptyState from '../ui/EmptyState'
 
 function relTime(ts: number): string {
   const d = Date.now() - ts
@@ -174,10 +175,7 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
 
       <div className="afs-home__scroll">
         {rows.length === 0 ? (
-          <div className="afs-studio__empty">
-            <Clapperboard size={40} opacity={0.3} />
-            <p>还没有项目，点上方「新建画布 / 新建工作流」开始。</p>
-          </div>
+          <EmptyState icon={Clapperboard} title="还没有项目" description="点上方「新建画布 / 新建工作流」开始。" />
         ) : (
           <div className="afs-home__grid">
             {rows.map((r) =>

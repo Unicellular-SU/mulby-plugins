@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Select from '../ui/Select'
+import Segmented from '../ui/Segmented'
+import EmptyState from '../ui/EmptyState'
 import {
   Upload,
   Trash2,
@@ -87,14 +89,15 @@ export default function AssetsView({ onInserted }: { onInserted: () => void }) {
     <div className="afs-surface">
       <div className="afs-surface__head">
         <h2 className="afs-surface__title">素材库</h2>
-        <div className="afs-subtabs">
-          <button className={`afs-subtab${tab === 'assets' ? ' is-active' : ''}`} onClick={() => setTab('assets')}>
-            素材（图片 / 视频 / 音频）
-          </button>
-          <button className={`afs-subtab${tab === 'elements' ? ' is-active' : ''}`} onClick={() => setTab('elements')}>
-            角色 / 场景库
-          </button>
-        </div>
+        <Segmented
+          ariaLabel="素材库视图"
+          value={tab}
+          onChange={(v) => setTab(v as 'assets' | 'elements')}
+          options={[
+            { value: 'assets', label: '素材（图片 / 视频 / 音频）' },
+            { value: 'elements', label: '角色 / 场景库' },
+          ]}
+        />
       </div>
       {tab === 'assets' ? <AssetGallery onInserted={onInserted} /> : <ElementLibrary onInserted={onInserted} />}
     </div>
@@ -252,7 +255,11 @@ function AssetGallery({ onInserted }: { onInserted: () => void }) {
 
           <div className="afs-lib__scroll">
             {filtered.length === 0 ? (
-              <div className="afs-lib__empty">{loaded ? '暂无素材。生成的图片/视频/音频会自动入库，也可上传本地素材。' : '加载中…'}</div>
+              loaded ? (
+                <EmptyState icon={ImageIcon} title="暂无素材" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地素材。" />
+              ) : (
+                <EmptyState icon={ImageIcon} title="加载中…" loading />
+              )
             ) : (
               <div className="afs-lib__grid">
                 {filtered.map((a) => {
@@ -394,7 +401,11 @@ function ElementLibrary({ onInserted }: { onInserted: () => void }) {
 
       <div className="afs-lib__scroll">
         {elements.length === 0 ? (
-          <div className="afs-lib__empty">{loaded ? '暂无角色 / 场景。新建，或在画布的人物 / 场景节点点「保存到库」。' : '加载中…'}</div>
+          loaded ? (
+            <EmptyState icon={Users} title="暂无角色 / 场景" description="新建，或在画布的人物 / 场景节点点「保存到库」。" />
+          ) : (
+            <EmptyState icon={Users} title="加载中…" loading />
+          )
         ) : (
           <div className="afs-lib__grid">
             {elements.map((el) => {

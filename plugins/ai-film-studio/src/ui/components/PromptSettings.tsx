@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Segmented from './ui/Segmented'
 import { RotateCcw, History, Search } from 'lucide-react'
 import { usePromptStore } from '../store/promptStore'
 import { useGraphStore } from '../store/graphStore'
@@ -56,14 +57,15 @@ export default function PromptSettings() {
   return (
     <div className="afs-settings-pane">
       <div className="afs-modal__body">
-        <div className="afs-scope">
-          <button className={`afs-scope__tab${isProject ? ' is-active' : ''}`} onClick={() => setScope('project')}>
-            本工程{projectName ? `（${projectName}）` : ''}
-          </button>
-          <button className={`afs-scope__tab${!isProject ? ' is-active' : ''}`} onClick={() => setScope('global')}>
-            全局默认
-          </button>
-        </div>
+        <Segmented
+          ariaLabel="模板作用域"
+          value={scope}
+          onChange={(v) => setScope(v as 'project' | 'global')}
+          options={[
+            { value: 'project', label: `本工程${projectName ? `（${projectName}）` : ''}` },
+            { value: 'global', label: '全局默认' },
+          ]}
+        />
 
         <div className="afs-modal__hint">
           {isProject
