@@ -15,8 +15,9 @@ import { mediaPath } from '../media'
 import type { EditOp, EditStack, OpKind, OverlayParams, TransformParams, ColorParams, AudioParams, ExportParams, SpeedParams, TrimParams } from './types'
 
 export interface OverlayInput {
-  kind: 'png' | 'video'
-  path: string
+  kind: 'png' | 'video' | 'subtitle'
+  path?: string // png/video
+  cues?: { start: number; end: number; path: string }[] // subtitle：每条 cue 一张 PNG
 }
 export interface CompileCtx {
   inPath: string
@@ -283,9 +284,20 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number):
       g.setV(out)
       continue
     }
-    // png / pip 走外部输入
+    // png / pip / subtitle 走外部输入
     const resolved = ctx.overlayResolved?.[op.id]
     if (!resolved) continue // 未备好（PNG 尚未生成）→ 跳过，叠加段会补
+    if (p.sub === 'subtitle') {
+      // 字幕：每条 cue 一张 PNG，按其时间窗 overlay 串联（底部居中）
+      for (const cue of resolved.cues || []) {
+        const cidx = g.addInput(cue.path)
+        const out = g.freshLabel('v')
+        g.raw(`[${g.v}][${cidx}:v]overlay=${xExpr}:${yExpr}:enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'[${out}]`)
+        g.setV(out)
+      }
+      continue
+    }
+    if (!resolved.path) continue
     const idx = g.addInput(resolved.path)
     if (p.sub === 'pip') {
       // 子画面宽 = 基准宽×rect.w（数值偶数化；位置仍用 overlay 的 main_w 表达式自适应）

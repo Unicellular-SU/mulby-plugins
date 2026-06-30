@@ -91,12 +91,27 @@ export async function prepareOverlays(
 ): Promise<{ overlayResolved: Record<string, OverlayInput>; cleanup: string[] }> {
   const overlayResolved: Record<string, OverlayInput> = {}
   const cleanup: string[] = []
+  const bw = stack.baseW || 1280
+  const bh = stack.baseH || 720
   for (const op of stack.ops) {
     if (op.kind !== 'overlay' || !op.enabled) continue
     const p = op.params as OverlayParams
     if (p.sub === 'mosaic' || p.sub === 'pip') continue // mosaic 用源、pip 由调用方解析视频路径
     try {
-      const b64 = renderTextPng(p, stack.baseW || 1280, stack.baseH || 720)
+      if (p.sub === 'subtitle') {
+        // 每条 cue 渲一张 PNG（最多 80 条，超出截断防输入爆炸）
+        const cues = (p.cues || []).filter((c) => c.text.trim() && c.end > c.start).slice(0, 80)
+        const out: { start: number; end: number; path: string }[] = []
+        for (const c of cues) {
+          const cueParams: OverlayParams = { sub: 'text', rect: p.rect, text: c.text, style: { align: 'center', ...(p.style || {}) } }
+          const { path } = await saveBase64(projectId, 'ov', renderTextPng(cueParams, bw, bh), 'png')
+          out.push({ start: c.start, end: c.end, path })
+          cleanup.push(path)
+        }
+        overlayResolved[op.id] = { kind: 'subtitle', cues: out }
+        continue
+      }
+      const b64 = renderTextPng(p, bw, bh)
       const { path } = await saveBase64(projectId, 'ov', b64, 'png')
       overlayResolved[op.id] = { kind: 'png', path }
       cleanup.push(path)

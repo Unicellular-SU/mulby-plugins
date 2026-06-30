@@ -16,7 +16,8 @@ import { loadWaveform } from '../services/audioWaveform'
 import { useProviders } from '../store/providerStore'
 import { runTts } from '../services/providers/engine'
 import { toast } from '../store/toastStore'
-import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams } from '../services/videoEdit/types'
+import { OP_KIND_LABEL, type EditOp, type OpKind, type TrimParams, type SpeedParams, type TransformParams, type ColorParams, type AudioParams, type ExportParams, type OverlayParams, type SubtitleCue } from '../services/videoEdit/types'
+import { base64ToArrayBuffer } from '../util'
 import { Z } from '../zlayers'
 
 function fmt(s: number): string {
@@ -236,7 +237,8 @@ function Inner({ cardId }: { cardId: string }) {
       watermark: { sub: 'watermark', rect: { x: 0.66, y: 0.05, w: 0.3, h: 0.08 }, text: '水印', style: { align: 'left' } },
       sticker: { sub: 'sticker', rect: { x: 0.42, y: 0.42, w: 0.16, h: 0.16 }, text: '⭐' },
       mosaic: { sub: 'mosaic', rect: { x: 0.3, y: 0.3, w: 0.4, h: 0.3 }, blurKind: 'mosaic', pixelSize: 14 },
-      pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } }
+      pip: { sub: 'pip', rect: { x: 0.62, y: 0.62, w: 0.32, h: 0.32 } },
+      subtitle: { sub: 'subtitle', rect: { x: 0.1, y: 0.82, w: 0.8, h: 0.12 }, cues: [], style: { align: 'center' } }
     }
     useStudio.getState().addOp('overlay', presets[sub] as never)
   }
@@ -273,6 +275,12 @@ function Inner({ cardId }: { cardId: string }) {
                 if (o.sub === 'pip') {
                   return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
                     style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, aspectRatio: '16/9' }}>画中画</div>
+                }
+                if (o.sub === 'subtitle') {
+                  const cue = o.cues?.find((c) => playhead >= c.start && playhead <= c.end)
+                  if (!cue) return null
+                  return <div key={o.id} className="absolute pointer-events-none text-center leading-tight"
+                    style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, color: String(st.color || '#fff'), fontSize: 'clamp(9px, 2.6vw, 24px)', textShadow: '0 1px 3px rgba(0,0,0,.95)' }}>{cue.text}</div>
                 }
                 return (
                   <div key={o.id} className="absolute pointer-events-none leading-tight"
@@ -330,7 +338,7 @@ function Inner({ cardId }: { cardId: string }) {
                   <Plus size={11} /> {a.label}
                 </button>
               ))}
-              {[{ s: 'text', l: '文字' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'pip', l: '画中画' }].map((o) => (
+              {[{ s: 'text', l: '文字' }, { s: 'subtitle', l: '字幕' }, { s: 'watermark', l: '水印' }, { s: 'sticker', l: '贴纸' }, { s: 'mosaic', l: '打码' }, { s: 'pip', l: '画中画' }].map((o) => (
                 <button key={o.s} onClick={() => addOverlay(o.s)}
                   className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] bg-pink-500/10 text-pink-600 dark:text-pink-300 hover:bg-pink-500/20">
                   <Plus size={11} /> {o.l}
@@ -407,7 +415,7 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
   const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
 
   if (op.kind === 'trim') return <TrimPanel op={op} params={op.params as TrimParams} dur={dur} playhead={playhead} />
-  if (op.kind === 'overlay') return <OverlayPanel op={op} params={op.params as OverlayParams} dur={dur} />
+  if (op.kind === 'overlay') return <OverlayPanel op={op} params={op.params as OverlayParams} dur={dur} playhead={playhead} />
   if (op.kind === 'speed') {
     const p = op.params as SpeedParams
     return (
@@ -578,6 +586,90 @@ function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; playhead: 
   return null
 }
 
+// ---- 字幕：cue 序列编辑 + .srt 导入 ----
+function srtTime(t: string): number {
+  const m = /(\d+):(\d+):(\d+)[,.](\d+)/.exec(t)
+  return m ? Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000 : 0
+}
+function parseSrt(text: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = []
+  const blocks = text.replace(/\r/g, '').split(/\n\n+/)
+  for (const b of blocks) {
+    const lines = b.split('\n').filter((l) => l.trim() !== '')
+    const tl = lines.find((l) => l.includes('-->'))
+    if (!tl) continue
+    const [a, b2] = tl.split('-->')
+    const start = srtTime(a.trim())
+    const end = srtTime(b2.trim())
+    const txt = lines.slice(lines.indexOf(tl) + 1).join('\n').trim()
+    if (txt && end > start) cues.push({ start, end, text: txt })
+  }
+  return cues
+}
+
+function SubtitlePanel({ op, params, dur, playhead }: { op: EditOp; params: OverlayParams; dur: number; playhead: number }) {
+  const cues = params.cues || []
+  const style = (params.style || {}) as Record<string, unknown>
+  const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
+  const setCues = (c: SubtitleCue[]) => set({ cues: c })
+  const setStyle = (patch: Record<string, unknown>) => set({ style: { ...style, ...patch } })
+
+  const addCue = () => {
+    const start = Math.min(playhead, dur - 0.5)
+    setCues([...cues, { start, end: Math.min(start + 2, dur), text: '字幕内容' }].sort((a, b) => a.start - b.start))
+  }
+  const importSrt = async () => {
+    const m = (window as any).mulby
+    try {
+      const paths = await m?.dialog?.showOpenDialog({ title: '导入 .srt 字幕', filters: [{ name: '字幕', extensions: ['srt', 'vtt', 'txt'] }], properties: ['openFile'] })
+      if (!paths?.[0]) return
+      const b64 = await m.filesystem.readFile(paths[0], 'base64')
+      const buf = base64ToArrayBuffer(b64)
+      let text = new TextDecoder('utf-8').decode(buf)
+      if (text.includes('�')) { try { text = new TextDecoder('gbk').decode(buf) } catch { /* keep utf-8 */ } }
+      const parsed = parseSrt(text)
+      if (parsed.length) { setCues(parsed); toast(`已导入 ${parsed.length} 条字幕`, 'success') }
+      else toast('未解析到字幕', 'error')
+    } catch { toast('导入失败', 'error') }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <button onClick={addCue} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-pink-500/15 text-pink-600 dark:text-pink-300 hover:bg-pink-500/25"><Plus size={11} /> 在播放头加</button>
+        <button onClick={importSrt} className="px-2 py-1 rounded text-[11px] bg-black/5 dark:bg-white/10 hover:bg-black/10">导入 .srt</button>
+        <span className="text-[10px] opacity-50 ml-auto">{cues.length} 条</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <Row label="字号">
+          <input type="range" min={16} max={120} step={2} value={Number(style.fontSize) || 44} onChange={(e) => setStyle({ fontSize: Number(e.target.value) })} className="flex-1" />
+        </Row>
+        <input type="color" value={String(style.color || '#ffffff')} onChange={(e) => setStyle({ color: e.target.value })} className="w-7 h-6 rounded" />
+      </div>
+      <SliderRow label="垂直位置" value={params.rect.y} min={0} max={0.95} step={0.01} onLive={(v) => useStudio.getState().updateOpLive(op.id, { rect: { ...params.rect, y: v } })} onCommit={() => useStudio.getState().commitLive()} />
+      <div className="flex flex-col gap-1.5 max-h-[40vh] overflow-auto ace-scroll">
+        {cues.map((c, i) => {
+          const active = playhead >= c.start && playhead <= c.end
+          return (
+            <div key={i} className={`rounded-md border p-1.5 flex flex-col gap-1 ${active ? 'ring-1 ring-pink-500' : ''}`} style={{ borderColor: 'var(--ace-border)' }}>
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="tabular-nums opacity-60">{fmt(c.start)}–{fmt(c.end)}</span>
+                <button onClick={() => setCues(cues.filter((_, k) => k !== i))} className="ml-auto opacity-50 hover:opacity-100"><Trash2 size={11} /></button>
+              </div>
+              <input value={c.text} onChange={(e) => setCues(cues.map((x, k) => (k === i ? { ...x, text: e.target.value } : x)))} className="rounded px-1.5 py-0.5 text-xs bg-black/5 dark:bg-white/10 outline-none" />
+              <div className="flex items-center gap-1">
+                <input type="number" step={0.1} value={c.start.toFixed(1)} onChange={(e) => setCues(cues.map((x, k) => (k === i ? { ...x, start: Math.max(0, Math.min(Number(e.target.value), x.end - 0.1)) } : x)))} className="w-16 rounded px-1 py-0.5 text-[10px] bg-black/5 dark:bg-white/10 outline-none tabular-nums" />
+                <span className="text-[10px] opacity-40">→</span>
+                <input type="number" step={0.1} value={c.end.toFixed(1)} onChange={(e) => setCues(cues.map((x, k) => (k === i ? { ...x, end: Math.min(dur, Math.max(Number(e.target.value), x.start + 0.1)) } : x)))} className="w-16 rounded px-1 py-0.5 text-[10px] bg-black/5 dark:bg-white/10 outline-none tabular-nums" />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ---- trim 多段编辑 ----
 function TrimPanel({ op, params, dur, playhead }: { op: EditOp; params: TrimParams; dur: number; playhead: number }) {
   const segs = params.segments || []
@@ -690,8 +782,9 @@ function AudioBgmEditor({ op, p }: { op: EditOp; p: AudioParams }) {
 }
 
 // ---- overlay 叠加编辑（文字/水印/贴纸/打码）----
-function OverlayPanel({ op, params, dur }: { op: EditOp; params: OverlayParams; dur: number }) {
+function OverlayPanel({ op, params, dur, playhead }: { op: EditOp; params: OverlayParams; dur: number; playhead: number }) {
   const p = params
+  if (p.sub === 'subtitle') return <SubtitlePanel op={op} params={p} dur={dur} playhead={playhead} />
   const live = (patch: Record<string, unknown>) => useStudio.getState().updateOpLive(op.id, patch)
   const commit = () => useStudio.getState().commitLive()
   const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)

@@ -88,7 +88,12 @@ export interface ColorParams {
 }
 
 // ---- overlay：一切文字/图形（canvas→PNG→overlay）----
-export type OverlaySub = 'text' | 'watermark' | 'progress' | 'timecode' | 'sticker' | 'pip' | 'mosaic'
+export type OverlaySub = 'text' | 'watermark' | 'progress' | 'timecode' | 'sticker' | 'pip' | 'mosaic' | 'subtitle'
+export interface SubtitleCue {
+  start: number // 输出时间基秒
+  end: number
+  text: string
+}
 export interface OverlayRange {
   start: number // 源时间基秒；编译器按累计 rate 折算
   end: number
@@ -105,6 +110,8 @@ export interface OverlayParams {
   pipCardId?: string
   blurKind?: 'mosaic' | 'blur'
   pixelSize?: number
+  // 字幕专用：多条定时 cue（sub==='subtitle'）
+  cues?: SubtitleCue[]
 }
 
 // ---- audio：单卡音频精修 ----

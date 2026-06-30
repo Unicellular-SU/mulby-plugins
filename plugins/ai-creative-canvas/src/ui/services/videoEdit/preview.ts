@@ -14,6 +14,7 @@ export interface PreviewOverlay {
   text?: string
   style?: Record<string, unknown>
   range?: { start: number; end: number }
+  cues?: { start: number; end: number; text: string }[] // 字幕
 }
 export interface PreviewModel {
   filter: string
@@ -69,7 +70,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
     .filter((o) => o.kind === 'overlay')
     .map((o) => {
       const p = o.params as OverlayParams
-      return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, text: p.text, style: p.style, range: p.range }
+      return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, text: p.text, style: p.style, range: p.range, cues: p.cues }
     })
   if (overlays.some((o) => o.sub === 'mosaic' || o.sub === 'pip' || o.sub === 'progress' || o.sub === 'timecode')) exact = false
 
