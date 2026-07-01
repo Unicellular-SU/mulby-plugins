@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject, type PointerEvent as RPointerEvent } from 'react'
 import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus, FlipHorizontal2, FlipVertical2,
@@ -320,9 +320,9 @@ function Inner({ cardId }: { cardId: string }) {
           </div>
         </div>
 
-        {/* 中部：工具条 + 预览(含 Transport) + 检查器 */}
+        {/* 中部：功能面板 + 预览(含 Transport) + 检查器 */}
         <div className="flex-1 min-h-0 flex">
-          <ToolRail stack={stack} selectedOp={selectedOp} />
+          <ToolPanel stack={stack} selectedOp={selectedOp} />
           <div className="flex-1 min-w-0 flex flex-col p-3 gap-2 border-r" style={{ borderColor: 'var(--ace-border)' }}>
             <div ref={stageRef} className="relative flex-1 min-h-0 grid place-items-center bg-black rounded-lg overflow-hidden">
               <video ref={vref} src={srcUrl} onLoadedMetadata={() => { onMeta(); measure() }} className="max-h-full max-w-full object-contain" style={{ filter: pv.filter, transform: pv.transform, clipPath: pv.clipPath }} />
@@ -335,10 +335,10 @@ function Inner({ cardId }: { cardId: string }) {
           {/* 检查器 Inspector：图层(操作栈) + 参数面板 */}
           <div className="w-[320px] shrink-0 flex flex-col">
             <div className="px-3 py-1.5 text-[10px] font-medium opacity-50 border-b flex items-center gap-1" style={{ borderColor: 'var(--ace-border)' }}>
-              图层 <span className="opacity-60">· 左侧工具条添加</span>
+              图层 <span className="opacity-60">· 左侧面板添加</span>
             </div>
             <div className="max-h-[26%] overflow-auto ace-scroll p-2 flex flex-col gap-1 border-b" style={{ borderColor: 'var(--ace-border)' }}>
-              {!stack?.ops.length && <div className="text-[11px] opacity-40 text-center py-3">从左侧工具条添加操作</div>}
+              {!stack?.ops.length && <div className="text-[11px] opacity-40 text-center py-3">从左侧面板添加操作</div>}
               {stack?.ops.map((op, i) => {
                 const Icon = KIND_ICON[op.kind]
                 const sel = op.id === selectedOpId
@@ -482,27 +482,78 @@ function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selecte
   selectedOpId: string | null; onSeek: (t: number) => void; onSelect: (id: string) => void; onSplit: () => void
 }) {
   const pct = (t: number) => (dur ? (t / dur) * 100 : 0)
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
   // 以「被点击的内容区」自身矩形换算时间（内容区在 96px 轨道头之后，不能用整行宽度）
   const seekFromContent = (clientX: number, el: HTMLElement) => {
     if (!dur) return
-    const r = el.getBoundingClientRect()
-    onSeek(Math.min(dur, Math.max(0, ((clientX - r.left) / r.width) * dur)))
+    onSeek(clamp(((clientX - el.getBoundingClientRect().left) / el.getBoundingClientRect().width) * dur, 0, dur))
   }
+  // 播放头 scrub：按下即定位、拖动持续定位
+  const startScrub = (e: RPointerEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    seekFromContent(e.clientX, el)
+    const move = (ev: PointerEvent) => seekFromContent(ev.clientX, el)
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+  // 拖时间块：像素位移换秒 → apply 改时间窗（updateOpLive），松手 commit
+  const dragBlock = (e: RPointerEvent<HTMLDivElement>, apply: (dSec: number) => void) => {
+    e.stopPropagation()
+    const lane = (e.currentTarget as HTMLElement).closest('[data-lane]') as HTMLElement | null
+    const pxPerSec = (lane?.getBoundingClientRect().width || 1) / (dur || 1)
+    const startX = e.clientX
+    const move = (ev: PointerEvent) => apply((ev.clientX - startX) / pxPerSec)
+    const up = () => { useStudio.getState().commitLive(); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+
   const ops = stack?.ops.filter((o) => o.enabled) || []
-  const keeps = ((ops.find((o) => o.kind === 'trim')?.params as TrimParams | undefined)?.segments || []).filter((s) => s.keep !== false && s.out > s.in)
+  const trimSegs = (ops.find((o) => o.kind === 'trim')?.params as TrimParams | undefined)?.segments || []
+  const keeps = trimSegs.filter((s) => s.keep !== false && s.out > s.in)
+  const spd = ops.find((o) => o.kind === 'speed')?.params as SpeedParams | undefined
+  // 源时间基是否等于输出（无删段、无变速）→ 决定输出基块(字幕/静音)能否直接在轴上拖
+  const srcEqOut = !trimSegs.some((s) => s.keep === false) && !(spd && ((spd.rate ?? 1) !== 1 || spd.reverse || spd.boomerang || (spd.freezeEnd ?? 0) > 0))
   const overlayBlocks = ops.filter((o) => o.kind === 'overlay' && (o.params as OverlayParams).sub !== 'subtitle' && (o.params as OverlayParams).range)
     .map((o) => ({ id: o.id, p: o.params as OverlayParams }))
   const subtitleOp = ops.find((o) => o.kind === 'overlay' && (o.params as OverlayParams).sub === 'subtitle')
   const cues = (subtitleOp?.params as OverlayParams | undefined)?.cues || []
-  const muteRanges = (ops.find((o) => o.kind === 'audio')?.params as AudioParams | undefined)?.muteRanges || []
-  // 时间标尺刻度（约每 60px 一个）
+  const audioOp = ops.find((o) => o.kind === 'audio')
+  const muteRanges = (audioOp?.params as AudioParams | undefined)?.muteRanges || []
   const ticks: number[] = []
   if (dur > 0) { const step = dur <= 12 ? 1 : dur <= 40 ? 5 : dur <= 120 ? 10 : 30; for (let t = 0; t <= dur + 0.01; t += step) ticks.push(t) }
 
+  const rangeDrag = (r: { start: number; end: number }, mode: 'move' | 'in' | 'out', d: number) => {
+    const len = r.end - r.start
+    if (mode === 'move') { const s = clamp(r.start + d, 0, dur - len); return { start: s, end: s + len } }
+    if (mode === 'in') return { start: clamp(r.start + d, 0, r.end - 0.1), end: r.end }
+    return { start: r.start, end: clamp(r.end + d, r.start + 0.1, dur) }
+  }
+  const dragOverlay = (id: string, r: { start: number; end: number }, mode: 'move' | 'in' | 'out') => (e: RPointerEvent<HTMLDivElement>) => {
+    onSelect(id)
+    dragBlock(e, (d) => useStudio.getState().updateOpLive(id, { range: rangeDrag(r, mode, d) }))
+  }
+  const dragMute = (i: number, mode: 'move' | 'in' | 'out') => (e: RPointerEvent<HTMLDivElement>) => {
+    if (!audioOp) return
+    dragBlock(e, (d) => useStudio.getState().updateOpLive(audioOp.id, { muteRanges: muteRanges.map((x, k) => (k === i ? rangeDrag(x, mode, d) : x)) }))
+  }
+
   const Lane = ({ icon: Icon, label, children, onClick }: { icon: typeof Film; label: string; children: ReactNode; onClick?: () => void }) => (
-    <div className="flex h-10 border-t" style={{ borderColor: 'var(--ace-border)' }}>
+    <div className="flex h-11 border-t" style={{ borderColor: 'var(--ace-border)' }}>
       <div className="w-24 shrink-0 flex items-center gap-1 px-2 text-[10px] opacity-70 border-r" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }}><Icon size={11} /> {label}</div>
-      <div className="relative flex-1 min-w-0 cursor-pointer" onPointerDown={(e) => { onClick?.(); seekFromContent(e.clientX, e.currentTarget) }}>{children}</div>
+      <div data-lane className="relative flex-1 min-w-0 cursor-pointer" onPointerDown={(e) => { onClick?.(); startScrub(e) }}>{children}</div>
+    </div>
+  )
+  // 带左右把手的可拖时间块
+  const Block = ({ left, width, color, ring, label, onBody, onIn, onOut }: {
+    left: number; width: number; color: string; ring?: boolean; label?: string
+    onBody: (e: RPointerEvent<HTMLDivElement>) => void; onIn: (e: RPointerEvent<HTMLDivElement>) => void; onOut: (e: RPointerEvent<HTMLDivElement>) => void
+  }) => (
+    <div onPointerDown={onBody}
+      className={`absolute top-1 bottom-1 rounded flex items-center overflow-hidden text-[9px] text-white cursor-grab active:cursor-grabbing ${ring ? 'ring-2 ring-white' : ''}`}
+      style={{ left: `${left}%`, width: `${Math.max(1.5, width)}%`, background: color }}>
+      <div onPointerDown={onIn} className="absolute left-0 inset-y-0 w-1.5 bg-white/40 hover:bg-white/80 cursor-ew-resize" />
+      <span className="px-2 truncate flex-1 select-none pointer-events-none">{label}</span>
+      <div onPointerDown={onOut} className="absolute right-0 inset-y-0 w-1.5 bg-white/40 hover:bg-white/80 cursor-ew-resize" />
     </div>
   )
 
@@ -511,12 +562,13 @@ function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selecte
       {/* 工具栏 */}
       <div className="flex items-center gap-2 px-2 h-8 border-t" style={{ borderColor: 'var(--ace-border)' }}>
         <button onClick={onSplit} className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-pink-500/15 text-pink-600 dark:text-pink-300 hover:bg-pink-500/25"><Scissors size={11} /> 播放头切分</button>
-        <span className="text-[10px] opacity-40 ml-auto tabular-nums">源时间基 · {fmt(playhead)} / {fmt(dur)}</span>
+        {!srcEqOut && <span className="text-[10px] text-amber-500">变速/裁切下，字幕·静音块请在检查器编辑</span>}
+        <span className="text-[10px] opacity-40 ml-auto tabular-nums">拖块改时间 · {fmt(playhead)} / {fmt(dur)}</span>
       </div>
       {/* 标尺 */}
       <div className="flex border-t" style={{ borderColor: 'var(--ace-border)' }}>
         <div className="w-24 shrink-0 border-r" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }} />
-        <div className="relative flex-1 min-w-0 h-5 cursor-pointer" onPointerDown={(e) => seekFromContent(e.clientX, e.currentTarget)}>
+        <div data-lane className="relative flex-1 min-w-0 h-5 cursor-pointer" onPointerDown={startScrub}>
           {ticks.map((t, i) => (
             <div key={i} className="absolute top-0 bottom-0 border-l border-black/10 dark:border-white/10" style={{ left: `${pct(t)}%` }}>
               <span className="absolute top-0 left-0.5 text-[9px] opacity-50 tabular-nums">{fmt(t)}</span>
@@ -540,33 +592,33 @@ function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selecte
             return segs
           })()}
         </Lane>
-        {/* 叠加轨 */}
+        {/* 叠加轨（可拖：移动/拖边改时间窗，源时间基始终正确） */}
         {overlayBlocks.length > 0 && (
           <Lane icon={Type} label="叠加">
             {overlayBlocks.map((b) => {
               const r = b.p.range!
-              return <div key={b.id} onPointerDown={(e) => { e.stopPropagation(); onSelect(b.id) }}
-                className={`absolute top-1 bottom-1 rounded px-1 flex items-center text-[9px] text-white truncate cursor-pointer ${selectedOpId === b.id ? 'ring-2 ring-white' : ''}`}
-                style={{ left: `${pct(r.start)}%`, width: `${Math.max(2, pct(r.end - r.start))}%`, background: 'rgba(236,72,153,0.85)' }}>
-                {b.p.sub === 'text' ? (b.p.text || '文字') : TL_KIND_LABEL[b.p.sub] || b.p.sub}
-              </div>
+              return <Block key={b.id} left={pct(r.start)} width={pct(r.end - r.start)} color="rgba(236,72,153,0.9)" ring={selectedOpId === b.id}
+                label={b.p.sub === 'text' ? (b.p.text || '文字') : TL_KIND_LABEL[b.p.sub] || b.p.sub}
+                onBody={dragOverlay(b.id, r, 'move')} onIn={dragOverlay(b.id, r, 'in')} onOut={dragOverlay(b.id, r, 'out')} />
             })}
           </Lane>
         )}
-        {/* 字幕轨 */}
+        {/* 字幕轨（只读展示，编辑在检查器） */}
         {subtitleOp && (
-          <Lane icon={Type} label="字幕" onClick={() => onSelect(subtitleOp.id)}>
+          <Lane icon={Captions} label="字幕" onClick={() => onSelect(subtitleOp.id)}>
             {cues.map((c, i) => <div key={i} className="absolute top-1.5 bottom-1.5 rounded-sm bg-indigo-500/80 pointer-events-none" style={{ left: `${pct(c.start)}%`, width: `${Math.max(1.5, pct(c.end - c.start))}%` }} title={c.text} />)}
           </Lane>
         )}
-        {/* 音频轨 */}
+        {/* 音频轨（静音块 源≡输出 时可拖） */}
         <Lane icon={Music} label="音频">
           {waveform && waveform.length > 0 ? (
-            <div className="absolute inset-0 flex items-center gap-px px-px">
-              {waveform.map((p, i) => <div key={i} className="flex-1 bg-emerald-500/60 rounded-sm" style={{ height: `${Math.max(3, p * 90)}%` }} />)}
+            <div className="absolute inset-0 flex items-center gap-px px-px pointer-events-none">
+              {waveform.map((p, i) => <div key={i} className="flex-1 bg-emerald-500/55 rounded-sm" style={{ height: `${Math.max(3, p * 90)}%` }} />)}
             </div>
-          ) : <div className="absolute inset-0 grid place-items-center text-[9px] opacity-30">无音频波形</div>}
-          {muteRanges.map((m, i) => <div key={i} className="absolute inset-y-0 bg-rose-500/35 border-x border-rose-400/60 pointer-events-none" style={{ left: `${pct(m.start)}%`, width: `${pct(m.end - m.start)}%` }} />)}
+          ) : <div className="absolute inset-0 grid place-items-center text-[9px] opacity-30 pointer-events-none">无音频波形</div>}
+          {muteRanges.map((m, i) => srcEqOut
+            ? <Block key={i} left={pct(m.start)} width={pct(m.end - m.start)} color="rgba(244,63,94,0.55)" label="静音" onBody={dragMute(i, 'move')} onIn={dragMute(i, 'in')} onOut={dragMute(i, 'out')} />
+            : <div key={i} className="absolute inset-y-0 bg-rose-500/30 border-x border-rose-400/50 pointer-events-none opacity-60" style={{ left: `${pct(m.start)}%`, width: `${pct(m.end - m.start)}%` }} />)}
         </Lane>
         {/* 贯穿播放头 */}
         <div className="absolute top-0 bottom-0 w-0.5 bg-pink-500 pointer-events-none z-10" style={{ left: `calc(6rem + (100% - 6rem) * ${dur ? playhead / dur : 0})` }} />
@@ -575,17 +627,26 @@ function StudioTimeline({ stack, thumbs, waveform, dur, playhead, ready, selecte
   )
 }
 
-// ---------- 左侧工具条（PS 风竖排）----------
-function RailBtn({ icon: Icon, label, active, onClick }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void }) {
+// ---------- 左侧功能面板（CapCut/剪映 风：图标+文字，分组）----------
+function ToolTile({ icon: Icon, label, active, dot, onClick }: { icon: LucideIcon; label: string; active: boolean; dot?: boolean; onClick: () => void }) {
   return (
     <button onClick={onClick} title={label}
-      className={`relative w-11 h-11 grid place-items-center rounded-lg transition-colors group ${active ? 'bg-pink-500 text-white shadow-sm' : 'text-neutral-500 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/10'}`}>
-      <Icon size={18} />
-      {active && <span className="absolute left-0 inset-y-1.5 w-0.5 rounded-full bg-white" />}
+      className={`relative flex flex-col items-center justify-center gap-1 h-[52px] rounded-lg transition-colors ${active ? 'bg-pink-500/15 text-pink-600 dark:text-pink-300 ring-1 ring-pink-500/50' : 'text-neutral-600 dark:text-neutral-300 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+      <Icon size={17} />
+      <span className="text-[10px] leading-none">{label}</span>
+      {dot && !active && <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-pink-500/70" />}
     </button>
   )
 }
-function ToolRail({ stack, selectedOp }: { stack: EditStack | null; selectedOp: EditOp | null }) {
+function ToolSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="px-2 pt-2.5">
+      <div className="text-[10px] font-medium opacity-40 px-0.5 pb-1">{title}</div>
+      <div className="grid grid-cols-2 gap-1">{children}</div>
+    </div>
+  )
+}
+function ToolPanel({ stack, selectedOp }: { stack: EditStack | null; selectedOp: EditOp | null }) {
   const addGlobal = (kind: OpKind) => {
     const ex = stack?.ops.find((o) => o.kind === kind)
     if (ex) useStudio.getState().selectOp(ex.id)
@@ -594,13 +655,17 @@ function ToolRail({ stack, selectedOp }: { stack: EditStack | null; selectedOp: 
   }
   const addOverlay = (sub: string) => useStudio.getState().addOp('overlay', OVERLAY_PRESETS[sub] as never)
   const selSub = selectedOp?.kind === 'overlay' ? (selectedOp.params as OverlayParams).sub : null
+  const present = new Set((stack?.ops || []).map((o) => o.kind))
   return (
-    <div className="w-14 shrink-0 border-r flex flex-col items-center gap-1 py-2 overflow-y-auto ace-noscroll" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }}>
-      {GLOBAL_TOOLS.map((t) => <RailBtn key={t.kind} icon={t.icon} label={t.label} active={selectedOp?.kind === t.kind} onClick={() => addGlobal(t.kind)} />)}
-      <div className="w-7 h-px my-1.5 bg-black/10 dark:bg-white/15" />
-      {OVERLAY_TOOLS.map((t) => <RailBtn key={t.sub} icon={t.icon} label={t.label} active={selSub === t.sub} onClick={() => addOverlay(t.sub)} />)}
-      <div className="mt-auto pt-1.5 border-t w-full flex justify-center" style={{ borderColor: 'var(--ace-border)' }}>
-        <RailBtn icon={Settings2} label="导出设置" active={selectedOp?.kind === 'export'} onClick={() => addGlobal('export')} />
+    <div className="w-[132px] shrink-0 border-r flex flex-col overflow-y-auto ace-scroll pb-2" style={{ borderColor: 'var(--ace-border)', background: 'var(--surface-2)' }}>
+      <ToolSection title="基础编辑">
+        {GLOBAL_TOOLS.map((t) => <ToolTile key={t.kind} icon={t.icon} label={t.label} active={selectedOp?.kind === t.kind} dot={present.has(t.kind)} onClick={() => addGlobal(t.kind)} />)}
+      </ToolSection>
+      <ToolSection title="叠加元素">
+        {OVERLAY_TOOLS.map((t) => <ToolTile key={t.sub} icon={t.icon} label={t.label} active={selSub === t.sub} onClick={() => addOverlay(t.sub)} />)}
+      </ToolSection>
+      <div className="mt-auto">
+        <ToolSection title="输出"><ToolTile icon={Settings2} label="导出" active={selectedOp?.kind === 'export'} onClick={() => addGlobal('export')} /></ToolSection>
       </div>
     </div>
   )
