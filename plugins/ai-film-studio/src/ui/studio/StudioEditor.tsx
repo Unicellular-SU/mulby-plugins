@@ -11,7 +11,7 @@ import { useAssetStore } from '../store/assetStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import type { Asset, Storyboard, VideoTrack, Clip } from '../domain/types'
+import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
 import Select from '../components/ui/Select'
@@ -630,6 +630,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const polishAsset = useProjectStore((s) => s.polishAsset)
   const addDerivative = useProjectStore((s) => s.addDerivative)
+  const addAssetVariant = useProjectStore((s) => s.addAssetVariant)
   const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
   const canPromote = asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop'
@@ -638,6 +639,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const [viewer, setViewer] = useState(false)
   const [promoting, setPromoting] = useState(false)
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
+  const variants = asset.variants ?? []
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
   return (
     <div className="afs-studio__assetcard">
@@ -711,8 +713,8 @@ function AssetCard({ asset }: { asset: Asset }) {
         </button>
         <button
           className="afs-btn afs-btn--sm afs-btn--ghost"
-          title={`衍生变体（换装/状态/场景）${children.length ? ` · ${children.length}` : ''}`}
-          aria-label="衍生变体"
+          title={`形态/妆容/衍生变体${variants.length || children.length ? ` · ${variants.length + children.length}` : ''}`}
+          aria-label="形态/妆容/衍生变体"
           onClick={() => setShowDeriv((v) => !v)}
         >
           <Users size={13} />
@@ -742,14 +744,66 @@ function AssetCard({ asset }: { asset: Asset }) {
       {asset.promptState === 'failed' && <p className="afs-studio__sberr">润色失败：{asset.promptError}</p>}
       {showDeriv && (
         <div className="afs-studio__derivrow">
+          {variants.map((variant) => (
+            <AssetVariantCard key={variant.id} asset={asset} variant={variant} />
+          ))}
+          <button
+            className="afs-btn afs-btn--sm afs-studio__derivadd"
+            disabled={!asset.refImageId}
+            title={asset.refImageId ? '新增可被分镜引用的形态/妆容' : '先生成父资产图片'}
+            onClick={() => addAssetVariant(asset.id)}
+          >
+            <Plus size={13} /> 形态
+          </button>
           {children.map((c) => (
             <DerivativeCard key={c.id} asset={c} />
           ))}
           <button className="afs-btn afs-btn--sm afs-studio__derivadd" disabled={!asset.refImageId} title={asset.refImageId ? '新增衍生变体' : '先生成父资产图片'} onClick={() => addDerivative(asset.id)}>
-            <Plus size={13} /> 变体
+            <Plus size={13} /> 子资产
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVariant }) {
+  const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
+  const deleteAssetVariant = useProjectStore((s) => s.deleteAssetVariant)
+  const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const url = useMediaUrl(variant.refImageId ? { assetId: variant.refImageId } : null)
+  return (
+    <div className="afs-studio__deriv afs-studio__variantcard">
+      <div className="afs-studio__derivthumb">
+        {variant.state === 'generating' ? <Loader2 size={16} className="afs-spin" /> : url ? <img src={url} alt={variant.label} /> : <Users size={16} opacity={0.3} />}
+        {variant.state === 'failed' && (
+          <span className="afs-studio__err" title={variant.error}>
+            <AlertCircle size={12} />
+          </span>
+        )}
+      </div>
+      <input className="afs-studio__derivname" value={variant.label} onChange={(e) => updateAssetVariant(asset.id, variant.id, { label: e.target.value })} />
+      <input
+        className="afs-studio__derivdesc"
+        placeholder="妆容/服装/年龄/状态"
+        value={variant.desc ?? ''}
+        onChange={(e) => updateAssetVariant(asset.id, variant.id, { desc: e.target.value })}
+      />
+      <input
+        className="afs-studio__derivdesc"
+        placeholder="英文提示词（可选）"
+        value={variant.prompt ?? ''}
+        onChange={(e) => updateAssetVariant(asset.id, variant.id, { prompt: e.target.value })}
+      />
+      <div className="afs-studio__derivactions">
+        <button className="afs-btn afs-btn--sm" disabled={variant.state === 'generating' || !asset.refImageId} title="由主图生成该形态" onClick={() => void generateAssetVariant(asset.id, variant.id)}>
+          {variant.state === 'generating' ? <Loader2 size={12} className="afs-spin" /> : <Wand2 size={12} />}
+        </button>
+        <button className="afs-btn afs-btn--sm afs-btn--ghost" title="删除形态" onClick={() => void deleteAssetVariant(asset.id, variant.id)}>
+          <Trash2 size={12} />
+        </button>
+      </div>
+      {variant.state === 'failed' && <p className="afs-studio__sberr">{variant.error}</p>}
     </div>
   )
 }
@@ -956,6 +1010,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const moveStoryboard = useProjectStore((s) => s.moveStoryboard)
   const generateKeyframe = useProjectStore((s) => s.generateKeyframe)
   const generateClip = useProjectStore((s) => s.generateClip)
+  const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const [showFlow, setShowFlow] = useState(false)
   const [viewer, setViewer] = useState(false)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
@@ -967,6 +1022,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const roleAssets = doc.assets.filter((a) => !a.parentAssetId && a.type !== 'audio') // 出场资产候选：角色/场景/物品
   const charAssets = doc.assets.filter((a) => a.type === 'role' && !a.parentAssetId) // 说话人候选：仅角色（+旁白）
   const dialogues = sb.dialogues ?? []
+  const castRefs = castRefsForStoryboard(sb)
   // 统一改字段：保留 videoDesc 必填，合并其余 Partial
   const patch = (p: Partial<Storyboard>) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, ...p })
   const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => patch({ dialogues: dlgs })
@@ -978,6 +1034,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
       castRefs: associateAssetIds.map((assetId) => sb.castRefs?.find((ref) => ref.assetId === assetId) ?? { assetId }),
     })
   }
+  const variantForAsset = (assetId: string) => castRefs.find((ref) => ref.assetId === assetId)?.variantId ?? ''
   return (
     <div className="afs-studio__sbcard">
       {viewer && sb.keyframeImageId && (
@@ -1083,7 +1140,19 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
           <div className="afs-studio__castchips">
             {roleAssets.length === 0 && <span className="afs-studio__hint">暂无资产（去「资产」新增）</span>}
             {roleAssets.map((a) => (
-              <CastChip key={a.id} asset={a} on={sb.associateAssetIds.includes(a.id)} onToggle={() => toggleCast(a.id)} />
+              <div key={a.id} className="afs-studio__castpick">
+                <CastChip asset={a} on={sb.associateAssetIds.includes(a.id)} onToggle={() => toggleCast(a.id)} />
+                {sb.associateAssetIds.includes(a.id) && (a.variants?.length ?? 0) > 0 && (
+                  <Select
+                    size="sm"
+                    className="afs-studio__castvariant"
+                    value={variantForAsset(a.id)}
+                    onChange={(variantId) => setStoryboardCastVariant(sb.id, a.id, variantId || undefined)}
+                    options={[{ value: '', label: '主形象' }, ...(a.variants ?? []).map((v) => ({ value: v.id, label: v.label, title: v.desc }))]}
+                    ariaLabel={`${a.name} 形态`}
+                  />
+                )}
+              </div>
             ))}
           </div>
           <label className="afs-studio__sbfieldlbl">对白</label>

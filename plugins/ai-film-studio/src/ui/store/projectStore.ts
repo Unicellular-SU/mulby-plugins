@@ -7,7 +7,8 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { AgentStep, Asset, AssetImage, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import { castRefsForStoryboard } from '../domain/castRefs'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
@@ -99,6 +100,11 @@ export interface ProjectState {
   polishAllAssets: () => Promise<void>
   addDerivative: (parentId: string, init?: { name?: string; desc?: string }) => string
   generateDerivative: (childId: string) => Promise<void>
+  addAssetVariant: (assetId: string, init?: { label?: string; desc?: string; prompt?: string }) => string
+  updateAssetVariant: (assetId: string, variantId: string, patch: Partial<AssetVariant>) => void
+  deleteAssetVariant: (assetId: string, variantId: string) => Promise<void>
+  generateAssetVariant: (assetId: string, variantId: string) => Promise<void>
+  setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => void
   // 一资产多图历史（§3.3）
   selectAssetImage: (assetId: string, imageId: string) => void
   deleteAssetImage: (assetId: string, imageId: string) => Promise<void>
@@ -150,6 +156,12 @@ function setStoryboardState(get: () => ProjectState, id: string, patch: Partial<
   get().mutate((d) => {
     const s = d.storyboards.find((x) => x.id === id)
     if (s) Object.assign(s, patch)
+  })
+}
+function setAssetVariantState(get: () => ProjectState, assetId: string, variantId: string, patch: Partial<AssetVariant>) {
+  get().mutate((d) => {
+    const variant = d.assets.find((x) => x.id === assetId)?.variants?.find((x) => x.id === variantId)
+    if (variant) Object.assign(variant, patch)
   })
 }
 /** 资产生成成功：把新图作为一条历史候选追加（§3.3），并设为当前选定图（refImageId 同步） */
@@ -832,6 +844,79 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       setAssetState(get, childId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
   },
+  addAssetVariant: (assetId, init) => {
+    let id = ''
+    get().mutate((d) => {
+      const asset = d.assets.find((a) => a.id === assetId)
+      if (!asset || asset.type === 'audio' || asset.type === 'clip') return
+      const n = (asset.variants?.length ?? 0) + 1
+      id = P.newId('av_')
+      const variant: AssetVariant = {
+        id,
+        label: init?.label || `形态${n}`,
+        desc: init?.desc,
+        prompt: init?.prompt,
+        state: 'idle',
+      }
+      asset.variants = [...(asset.variants ?? []), variant]
+    })
+    return id
+  },
+  updateAssetVariant: (assetId, variantId, patch) =>
+    get().mutate((d) => {
+      const variant = d.assets.find((a) => a.id === assetId)?.variants?.find((v) => v.id === variantId)
+      if (variant) Object.assign(variant, patch)
+    }),
+  deleteAssetVariant: async (assetId, variantId) => {
+    const refImageId = get().doc?.assets.find((a) => a.id === assetId)?.variants?.find((v) => v.id === variantId)?.refImageId
+    if (refImageId) {
+      try {
+        await deleteAsset(refImageId)
+      } catch {
+        // 附件可能已经不存在，忽略
+      }
+    }
+    get().mutate((d) => {
+      const asset = d.assets.find((a) => a.id === assetId)
+      if (asset?.variants) asset.variants = asset.variants.filter((v) => v.id !== variantId)
+      for (const sb of d.storyboards) {
+        if (!sb.castRefs?.some((ref) => ref.assetId === assetId && ref.variantId === variantId)) continue
+        sb.castRefs = sb.castRefs.map((ref) => (ref.assetId === assetId && ref.variantId === variantId ? { ...ref, variantId: undefined } : ref))
+      }
+    })
+  },
+  generateAssetVariant: async (assetId, variantId) => {
+    const doc = get().doc
+    const asset = doc?.assets.find((a) => a.id === assetId)
+    const variant = asset?.variants?.find((v) => v.id === variantId)
+    if (!doc || !asset || !variant || asset.type === 'audio' || asset.type === 'clip') return
+    const child: Asset = {
+      id: `${asset.id}_${variant.id}`,
+      type: asset.type,
+      name: `${asset.name}-${variant.label}`,
+      desc: variant.desc || variant.label,
+      prompt: variant.prompt,
+      state: 'idle',
+    }
+    setAssetVariantState(get, assetId, variantId, { state: 'generating', error: undefined })
+    try {
+      const refImageId = await generateDerivativeImage(child, asset, doc.meta)
+      setAssetVariantState(get, assetId, variantId, { refImageId, state: 'done', error: undefined })
+    } catch (e) {
+      setAssetVariantState(get, assetId, variantId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
+    }
+  },
+  setStoryboardCastVariant: (storyboardId, assetId, variantId) =>
+    get().mutate((d) => {
+      const sb = d.storyboards.find((s) => s.id === storyboardId)
+      if (!sb) return
+      if (!sb.associateAssetIds.includes(assetId)) sb.associateAssetIds.push(assetId)
+      const refs = castRefsForStoryboard(sb)
+      const i = refs.findIndex((ref) => ref.assetId === assetId)
+      if (i >= 0) refs[i] = { ...refs[i], variantId: variantId || undefined }
+      else refs.push({ assetId, variantId: variantId || undefined })
+      sb.castRefs = refs
+    }),
   selectAssetImage: (assetId, imageId) =>
     get().mutate((d) => {
       const a = d.assets.find((x) => x.id === assetId)
