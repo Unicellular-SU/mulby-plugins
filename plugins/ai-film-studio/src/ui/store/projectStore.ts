@@ -30,7 +30,10 @@ import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
 import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
+import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
+import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { flushLogs, logError, logInfo } from '../services/localLog'
+import { useProviderStore } from './providerStore'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -253,6 +256,15 @@ function docCounts(doc: ProjectDoc | null | undefined) {
     tracks: doc?.track.length ?? 0,
     novelChapters: doc?.novel.length ?? 0,
   }
+}
+
+function logPreflightWarnings(stage: 'keyframe' | 'clip', storyboardId: string, warnings: GenerationPreflightIssue[]): void {
+  if (!warnings.length) return
+  logInfo('generation.preflight', 'warnings', {
+    stage,
+    storyboardId,
+    warnings: warnings.map((issue) => ({ code: issue.code, message: issue.message })),
+  })
 }
 
 function planForLog(plan: AgentPlan) {
@@ -1025,6 +1037,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc || !sb) return
     setStoryboardState(get, storyboardId, { state: 'generating', error: undefined })
     try {
+      const preflight = await preflightKeyframeGeneration(sb, doc.storyboards, doc.assets)
+      logPreflightWarnings('keyframe', storyboardId, preflight.warnings)
+      assertPreflight(preflight)
       // 连贯性：承接镜头取「上一镜（按 index）关键帧」作 img2img 主参考
       let chainBase: { base64: string; mime: string } | null = null
       if (sb.chainFromPrev) {
@@ -1091,6 +1106,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
       }
       const referenceStoryboards = track.storyboardIds.map((id) => doc.storyboards.find((s) => s.id === id)).filter(Boolean) as Storyboard[]
+      const provider = useProviderStore.getState().getActiveFor('video')
+      const preflight = await preflightClipGeneration(sb, referenceStoryboards, doc.assets, {
+        firstFrameUrl,
+        supportsReferenceImages: supportsVideoReferenceImages(provider),
+      })
+      logPreflightWarnings('clip', storyboardId, preflight.warnings)
+      assertPreflight(preflight)
       const r = await generateClipVideo(sb, doc.assets, doc.meta, { firstFrameUrl, durationSec: track.duration, promptOverride: track.prompt, referenceStoryboards })
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
     } catch (e) {
