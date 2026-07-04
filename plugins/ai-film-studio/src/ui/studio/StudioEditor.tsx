@@ -360,8 +360,18 @@ function NovelTab() {
   const clearNovel = useProjectStore((s) => s.clearNovel)
   const extractChapterEvents = useProjectStore((s) => s.extractChapterEvents)
   const extractAllEvents = useProjectStore((s) => s.extractAllEvents)
+  const setEpisodeNovelChapters = useProjectStore((s) => s.setEpisodeNovelChapters)
   const batch = useProjectStore((s) => s.batch)
   const [text, setText] = useState('')
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const toggleChapterEpisode = (chapterId: string, episodeId: string) => {
+    const episode = episodes.find((item) => item.id === episodeId)
+    if (!episode) return
+    const current = new Set(episode.novelChapterIds ?? [])
+    if (current.has(chapterId)) current.delete(chapterId)
+    else current.add(chapterId)
+    setEpisodeNovelChapters(episodeId, [...current])
+  }
   return (
     <div className="afs-studio__novel">
       {doc.novel.length === 0 ? (
@@ -412,6 +422,27 @@ function NovelTab() {
                   </button>
                 </div>
                 {c.event && <div className="afs-studio__chapterevent">{c.event}</div>}
+                {episodes.length > 1 && (
+                  <div className="afs-studio__chapterepisodes" aria-label={`${c.title} 剧集分配`}>
+                    <span className="afs-studio__chapterep-label">分配</span>
+                    {episodes.map((episode) => {
+                      const assigned = (episode.novelChapterIds ?? []).includes(c.id)
+                      return (
+                        <button
+                          key={episode.id}
+                          type="button"
+                          className={`afs-studio__chapterep${assigned ? ' is-on' : ''}`}
+                          title={`${assigned ? '移出' : '加入'} ${episode.title}`}
+                          onClick={() => toggleChapterEpisode(c.id, episode.id)}
+                        >
+                          {assigned && <Check size={10} />}
+                          E{episode.index + 1}
+                        </button>
+                      )
+                    })}
+                    {!episodes.some((episode) => (episode.novelChapterIds ?? []).includes(c.id)) && <span className="afs-studio__chapterep-empty">未分配</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -71,6 +71,7 @@ export interface ProjectState {
   switchEpisode: (id: string) => void
   renameEpisode: (id: string, title: string) => void
   deleteEpisode: (id: string) => void
+  setEpisodeNovelChapters: (episodeId: string, chapterIds: string[]) => void
 
   // 实体便捷增删改（基于 mutate）
   upsertScript: (s: Partial<Script> & { content: string }) => string
@@ -666,6 +667,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         d.currentEpisodeId = next.id
         P.applyEpisodeToFlat(d, next)
       }
+    }),
+
+  setEpisodeNovelChapters: (episodeId, chapterIds) =>
+    get().mutate((d) => {
+      const episode = d.episodes?.find((e) => e.id === episodeId)
+      if (!episode) return
+      const valid = new Set(d.novel.map((chapter) => chapter.id))
+      episode.novelChapterIds = [...new Set(chapterIds.filter((id) => valid.has(id)))]
+      episode.updatedAt = Date.now()
     }),
 
   upsertScript: (s) => {

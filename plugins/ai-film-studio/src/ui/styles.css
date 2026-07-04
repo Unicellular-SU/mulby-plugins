@@ -3942,6 +3942,12 @@ select.afs-toolbar__select,
 .afs-studio__chapterhead { display: flex; align-items: center; gap: 10px; }
 .afs-studio__chapterhead .afs-studio__chaptertitle { flex: 1; }
 .afs-studio__chapterevent { font-size: 12px; color: var(--afs-muted); line-height: 1.5; white-space: pre-wrap; padding-left: 2px; }
+.afs-studio__chapterepisodes { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 2px; }
+.afs-studio__chapterep-label { font-size: 11px; color: var(--afs-text-dim); margin-right: 2px; }
+.afs-studio__chapterep { height: 22px; min-width: 34px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; cursor: pointer; }
+.afs-studio__chapterep:hover { border-color: var(--afs-accent); color: var(--afs-text); }
+.afs-studio__chapterep.is-on { background: color-mix(in srgb, var(--afs-accent) 16%, var(--afs-panel-2)); border-color: var(--afs-accent); color: var(--afs-text); }
+.afs-studio__chapterep-empty { font-size: 11px; color: var(--afs-text-dim); }
 
 /* 工作台 · 模型设置弹层（阶段4d UX） */
 .afs-studio__modelbar { position: relative; }
