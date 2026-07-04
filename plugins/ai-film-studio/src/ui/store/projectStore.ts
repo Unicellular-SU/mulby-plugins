@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
 import { castRefsForStoryboard } from '../domain/castRefs'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
@@ -280,6 +280,7 @@ function planForLog(plan: AgentPlan) {
       videoDesc: textPreview(s?.videoDesc, 300),
       duration: s?.duration,
       cast: s?.cast,
+      castRefCount: s?.castRefs?.length ?? 0,
       dialogueCount: s?.dialogues?.length ?? 0,
     })),
     autoGenerate: plan.autoGenerate === true,
@@ -322,11 +323,74 @@ function applyAgentAssets(d: ProjectDoc, assets: AgentPlan['assets'] | undefined
   }
 }
 
+function cleanString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function agentCastAsset(d: ProjectDoc, token: unknown): Asset | undefined {
+  const text = cleanString(token)
+  if (!text) return undefined
+  const lower = text.toLowerCase()
+  return d.assets.find((asset) => asset.id === text) ?? d.assets.find((asset) => asset.name.toLowerCase() === lower)
+}
+
+function agentVariantId(asset: Asset, token: unknown): string | undefined {
+  const text = cleanString(token)
+  if (!text) return undefined
+  const lower = text.toLowerCase()
+  return asset.variants?.find((variant) => variant.id === text)?.id ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)?.id ?? text
+}
+
+function agentRoleInShot(value: unknown): StoryboardCastRef['roleInShot'] | undefined {
+  return value === 'lead' || value === 'supporting' || value === 'background' ? value : undefined
+}
+
+function agentCastRefFromString(d: ProjectDoc, raw: unknown): StoryboardCastRef | undefined {
+  const text = cleanString(raw)
+  if (!text) return undefined
+  const exact = agentCastAsset(d, text)
+  if (exact) return { assetId: exact.id }
+  const assets = [...d.assets].sort((a, b) => b.name.length - a.name.length)
+  for (const asset of assets) {
+    if (!text.toLowerCase().startsWith(asset.name.toLowerCase())) continue
+    let variantToken = text.slice(asset.name.length).trim()
+    variantToken = variantToken.replace(/^[\s\-—–_:：/|·]+/, '').trim()
+    variantToken = variantToken.replace(/^[（(\[]/, '').replace(/[）)\]]$/, '').trim()
+    return variantToken ? { assetId: asset.id, variantId: agentVariantId(asset, variantToken) } : { assetId: asset.id }
+  }
+  return undefined
+}
+
+function agentCastRefFromObject(d: ProjectDoc, value: Record<string, unknown>): StoryboardCastRef | undefined {
+  const asset = agentCastAsset(d, value.assetId) ?? agentCastAsset(d, value.assetName) ?? agentCastAsset(d, value.name)
+  if (!asset) return agentCastRefFromString(d, value.name ?? value.assetName)
+  return {
+    assetId: asset.id,
+    variantId: agentVariantId(asset, value.variantId ?? value.variantLabel ?? value.variant ?? value.label),
+    roleInShot: agentRoleInShot(value.roleInShot),
+    note: cleanString(value.note),
+  }
+}
+
+function agentStoryboardCastRefs(d: ProjectDoc, sb: NonNullable<AgentPlan['storyboards']>[number]): StoryboardCastRef[] {
+  const refs = new Map<string, StoryboardCastRef>()
+  const push = (ref: StoryboardCastRef | undefined) => {
+    if (!ref?.assetId) return
+    refs.set(`${ref.assetId}:${ref.variantId ?? ''}`, ref)
+  }
+  for (const item of Array.isArray(sb.castRefs) ? sb.castRefs : []) {
+    if (item && typeof item === 'object' && !Array.isArray(item)) push(agentCastRefFromObject(d, item as Record<string, unknown>))
+  }
+  for (const item of Array.isArray(sb.cast) ? sb.cast : []) push(agentCastRefFromString(d, item))
+  return [...refs.values()]
+}
+
 function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboards'] | undefined, applied: AgentApplySummary): void {
-  const nameToId = new Map(d.assets.map((a) => [a.name, a.id]))
   for (const sb of storyboards ?? []) {
     if (!sb?.videoDesc) continue
-    const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
+    const castRefs = agentStoryboardCastRefs(d, sb)
+    const cast = [...new Set(castRefs.map((ref) => ref.assetId))]
+    const hasCastInput = (Array.isArray(sb.cast) && sb.cast.length > 0) || (Array.isArray(sb.castRefs) && sb.castRefs.length > 0)
     const dlgs = Array.isArray(sb.dialogues)
       ? sb.dialogues
           .filter((x) => x && typeof x.line === 'string' && x.line.trim())
@@ -338,9 +402,9 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       target.videoDesc = sb.videoDesc
       if (sb.prompt != null) target.prompt = sb.prompt
       if (typeof sb.duration === 'number') target.duration = sb.duration
-      if (sb.cast) {
+      if (hasCastInput) {
         target.associateAssetIds = cast
-        target.castRefs = cast.map((assetId) => ({ assetId }))
+        target.castRefs = castRefs
       }
       if (dlgs) target.dialogues = dlgs
       if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
@@ -360,7 +424,7 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       prompt: sb.prompt,
       duration: typeof sb.duration === 'number' ? sb.duration : 5,
       associateAssetIds: cast,
-      castRefs: cast.map((assetId) => ({ assetId })),
+      castRefs,
       dialogues: dlgs ?? [],
       shouldGenerateImage: true,
       chainFromPrev: sb.chainFromPrev === true,
