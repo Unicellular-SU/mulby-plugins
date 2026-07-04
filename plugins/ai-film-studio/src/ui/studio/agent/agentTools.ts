@@ -284,6 +284,26 @@ function storyboardCastRefsFromArgs(doc: ProjectDoc, args: Record<string, unknow
   return { refs: [...byKey.values()], unresolved }
 }
 
+function stringArrayArg(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value.map((item) => stringArg(item)).filter((item): item is string => !!item)
+  return items.length ? items : undefined
+}
+
+function variantView(asset: Asset, variantId: string) {
+  const variant = asset.variants?.find((item) => item.id === variantId)
+  return variant ? { assetId: asset.id, assetName: asset.name, variant } : undefined
+}
+
+function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Storyboard | undefined {
+  if (typeof args.storyboardId === 'string' && args.storyboardId.trim()) return doc.storyboards.find((storyboard) => storyboard.id === args.storyboardId.trim())
+  if (typeof args.index === 'number') {
+    const sorted = [...doc.storyboards].sort((a, b) => a.index - b.index)
+    return sorted[Math.max(0, Math.floor(args.index) - 1)]
+  }
+  return undefined
+}
+
 export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
   const doc = getDoc
   return [
@@ -642,6 +662,119 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const type = a.type === 'scene' || a.type === 'prop' ? a.type : 'role'
         const id = get().upsertAsset({ type, name: String(a.name ?? '未命名'), desc: a.desc as string | undefined, prompt: a.prompt as string | undefined })
         return `已新增资产 ${a.name}（id ${id}）`
+      },
+    },
+    {
+      name: 'upsert_asset_variant',
+      description: '为角色/场景/道具创建或更新妆容、服装、年龄、时期等变体。资产仍是项目级共享，变体可按集/场/镜头标注适用范围。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string', description: '资产名，assetId/assetName 为空时使用。' },
+          variantId: { type: 'string' },
+          variantLabel: { type: 'string' },
+          label: { type: 'string' },
+          desc: { type: 'string' },
+          prompt: { type: 'string' },
+          tags: { type: 'array', items: { type: 'string' } },
+          appliesToEpisodeIds: { type: 'array', items: { type: 'string' } },
+          appliesToSceneIds: { type: 'array', items: { type: 'string' } },
+          appliesToStoryboardIds: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) {
+          return json({ error: '未找到可创建变体的资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        }
+
+        const lookup = a.variantId ?? a.variantLabel ?? a.label
+        const existing = findAssetVariant(asset, lookup)
+        let variantId = existing?.id
+        const label = stringArg(a.label) ?? stringArg(a.variantLabel) ?? existing?.label
+        if (!variantId) {
+          variantId = get().addAssetVariant(asset.id, {
+            label: label ?? `形态${(asset.variants?.length ?? 0) + 1}`,
+            desc: stringArg(a.desc),
+            prompt: stringArg(a.prompt),
+          })
+        }
+
+        const patch = {
+          label,
+          desc: stringArg(a.desc),
+          prompt: stringArg(a.prompt),
+          tags: stringArrayArg(a.tags),
+          appliesToEpisodeIds: stringArrayArg(a.appliesToEpisodeIds),
+          appliesToSceneIds: stringArrayArg(a.appliesToSceneIds),
+          appliesToStoryboardIds: stringArrayArg(a.appliesToStoryboardIds),
+        }
+        get().updateAssetVariant(asset.id, variantId, Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)))
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json(variantView(nextAsset, variantId))
+      },
+    },
+    {
+      name: 'generate_asset_variant',
+      description: '基于资产主参考图生成某个妆容/服装/时期变体的参考图。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
+          variantId: { type: 'string' },
+          variantLabel: { type: 'string' },
+          label: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产' })
+        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能生成变体', asset: assetView(asset, { includeImages: false }) })
+        const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
+        if (!variant) return json({ error: '未找到变体', variants: asset.variants ?? [] })
+        await get().generateAssetVariant(asset.id, variant.id)
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json(variantView(nextAsset, variant.id))
+      },
+    },
+    {
+      name: 'set_storyboard_cast_variant',
+      description: '给已有分镜里的某个出场资产绑定或清除指定变体，用于修正同一角色的妆容/服装/时期一致性。',
+      parameters: {
+        type: 'object',
+        properties: {
+          storyboardId: { type: 'string' },
+          index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空时使用。' },
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
+          variantId: { type: 'string' },
+          variantLabel: { type: 'string' },
+          label: { type: 'string' },
+          clear: { type: 'boolean', description: 'true 时清除该资产在此分镜上的变体绑定。' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const storyboard = resolveStoryboard(d, a)
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
+        if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
+        const next = doc()
+        const updated = next?.storyboards.find((s) => s.id === storyboard.id)
+        return json({ storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined })
       },
     },
     {
