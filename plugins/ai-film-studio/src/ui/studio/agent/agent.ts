@@ -195,6 +195,24 @@ function parsePlan(raw: string): AgentPlan {
   }
 }
 
+function formatEpisodeContext(doc: ProjectDoc): string {
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  if (!episodes.length) return '剧集：单集兼容模式。项目级资产跨集共享，当前剧本/分镜/时间线按工作区写入。'
+  const current = episodes.find((episode) => episode.id === doc.currentEpisodeId) ?? episodes[0]
+  const rows = episodes
+    .map((episode) => {
+      const marker = episode.id === current.id ? '（当前）' : ''
+      const summary = episode.summary ? `；梗概：${episode.summary.slice(0, 120)}` : ''
+      return `${episode.index + 1}. ${episode.title}${marker}：剧本 ${episode.scripts.length}，分镜 ${episode.storyboards.length}，片段 ${episode.clips.length}${summary}`
+    })
+    .join('\n')
+  return [
+    `当前剧集：第 ${current.index + 1} 集「${current.title}」（id: ${current.id}）。`,
+    '项目级资产跨集共享；剧本、分镜、视频片段、时间线按当前剧集写入。处理指定集时先确认或切换到目标剧集。',
+    `剧集列表：\n${rows}`,
+  ].join('\n')
+}
+
 /** 当前项目上下文（决策层 + 各执行子 Agent 共用）。memoryText 给定时替代默认近期对话（§6.6 召回） */
 function buildContext(doc: ProjectDoc, memoryText?: string): string {
   const pack = getStylePack(doc.meta.artStyle)
@@ -209,6 +227,7 @@ function buildContext(doc: ProjectDoc, memoryText?: string): string {
     '## 当前项目',
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
     doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
+    formatEpisodeContext(doc),
     `已有资产：${doc.assets.map((a) => `${a.name}(${a.type})`).join('、') || '无'}`,
     doc.storyboards.length
       ? `已有分镜（${doc.storyboards.length} 个，新增的分镜要承接这些、不要重复）：\n${[...doc.storyboards]
@@ -253,9 +272,10 @@ async function callJson(
 export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): string {
   const TOOL_GUIDE =
     '你是 AI 制片。工具返回的是当前项目的实时状态；凡是用户要求续写、修改、对齐已有内容、查询当前状态，先调用读取工具核对，不要只凭摘要猜测。' +
-    '只读工具：get_project_overview/get_workspace（项目概览）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
+    '多集项目先用 get_episodes/get_project_overview 确认当前剧集；用户指定第几集或新一集时，先 switch_episode 或 create_episode 再写入。' +
+    '只读工具：get_project_overview/get_workspace（项目概览）、get_episodes（剧集列表）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
-    '写入/生成工具：upsert_script（写剧本）、add_asset（加资产）、add_storyboard（加分镜）、generate_asset、generate_keyframe、generate_clip。' +
+    '写入/生成工具：create_episode（新建并切换剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、upsert_script（写剧本）、add_asset（加项目级共享资产）、add_storyboard（加当前剧集分镜）、generate_asset、generate_keyframe、generate_clip。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
@@ -491,7 +511,15 @@ export async function runAgentPipeline(
 
   // 决策层
   emit({ type: 'start', agent: 'decision', title: AGENT_TITLES.decision })
-  const decisionToolCtx = await readPipelineToolContext(getDoc, 'decision', [{ name: 'get_project_overview', limit: 16000 }], emit)
+  const decisionToolCtx = await readPipelineToolContext(
+    getDoc,
+    'decision',
+    [
+      { name: 'get_project_overview', limit: 16000 },
+      { name: 'get_episodes', limit: 12000 },
+    ],
+    emit,
+  )
   const decisionCtx = [makeBaseCtx(), decisionToolCtx].filter(Boolean).join('\n\n')
   const decisionRaw = await runText({
     model,
@@ -519,6 +547,7 @@ export async function runAgentPipeline(
       'script',
       [
         { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_episodes', limit: 12000 },
         { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
         { name: 'get_novel', args: { includeText: true, textLimit: 6000 }, limit: 30000 },
         { name: 'get_storyboard_table', limit: 18000 },
@@ -552,6 +581,7 @@ export async function runAgentPipeline(
       'assets',
       [
         { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_episodes', limit: 12000 },
         { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
         { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
       ],
@@ -585,6 +615,7 @@ export async function runAgentPipeline(
       'storyboard',
       [
         { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_episodes', limit: 12000 },
         { name: 'get_storyboards', args: { count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
         { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
         { name: 'get_timeline', args: { includeClips: false }, limit: 18000 },

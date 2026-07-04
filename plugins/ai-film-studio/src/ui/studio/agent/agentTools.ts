@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, ProjectDoc, Storyboard } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -98,11 +98,37 @@ function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: b
   }
 }
 
+function sortedEpisodes(doc: ProjectDoc): Episode[] {
+  return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+}
+
+function episodeView(doc: ProjectDoc, episode: Episode) {
+  return {
+    id: episode.id,
+    index: episode.index + 1,
+    title: episode.title,
+    summary: episode.summary,
+    status: episode.status,
+    current: episode.id === doc.currentEpisodeId,
+    counts: {
+      scripts: episode.scripts.length,
+      storyboards: episode.storyboards.length,
+      clips: episode.clips.length,
+      tracks: episode.track.length,
+      storyboardTableScenes: episode.storyboardTable?.length ?? 0,
+    },
+    updatedAt: episode.updatedAt,
+  }
+}
+
 function overview(doc: ProjectDoc) {
   const sortedStoryboards = [...doc.storyboards].sort((a, b) => a.index - b.index)
+  const episodes = sortedEpisodes(doc)
   return {
     meta: doc.meta,
+    currentEpisodeId: doc.currentEpisodeId,
     counts: {
+      episodes: episodes.length,
       scripts: doc.scripts.length,
       assets: doc.assets.length,
       rootAssets: doc.assets.filter((a) => !a.parentAssetId).length,
@@ -112,6 +138,7 @@ function overview(doc: ProjectDoc) {
       novelChapters: doc.novel.length,
       storyboardTableScenes: doc.storyboardTable?.length ?? 0,
     },
+    episodes: episodes.map((episode) => episodeView(doc, episode)),
     scripts: doc.scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
     assets: doc.assets
       .filter((a) => !a.parentAssetId)
@@ -142,6 +169,21 @@ function snippet(text: string, query: string, max = 240): string {
   return `${start > 0 ? '...' : ''}${t.slice(start, end)}${end < t.length ? '...' : ''}`
 }
 
+function resolveEpisode(doc: ProjectDoc, args: Record<string, unknown>): Episode | undefined {
+  const episodes = sortedEpisodes(doc)
+  if (typeof args.episodeId === 'string') {
+    const episodeId = args.episodeId.trim()
+    return episodeId ? episodes.find((episode) => episode.id === episodeId) : undefined
+  }
+  if (typeof args.index === 'number') return episodes[Math.max(0, Math.floor(args.index) - 1)]
+  if (typeof args.title === 'string') {
+    const title = args.title.trim().toLowerCase()
+    if (!title) return undefined
+    return episodes.find((episode) => episode.title.toLowerCase() === title) ?? episodes.find((episode) => episode.title.toLowerCase().includes(title))
+  }
+  return undefined
+}
+
 export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
   const doc = getDoc
   return [
@@ -161,6 +203,15 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async () => {
         const d = doc()
         return d ? json(overview(d)) : '无打开的项目'
+      },
+    },
+    {
+      name: 'get_episodes',
+      description: 'Read episode list and current episode before multi-episode planning or editing.',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const d = doc()
+        return d ? json({ currentEpisodeId: d.currentEpisodeId, episodes: sortedEpisodes(d).map((episode) => episodeView(d, episode)) }) : '无打开的项目'
       },
     },
     {
@@ -333,7 +384,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         type: 'object',
         properties: {
           query: { type: 'string' },
-          domains: { type: 'array', items: { type: 'string', enum: ['scripts', 'assets', 'storyboards', 'novel', 'storyboardTable'] } },
+          domains: { type: 'array', items: { type: 'string', enum: ['episodes', 'scripts', 'assets', 'storyboards', 'novel', 'storyboardTable'] } },
           limit: { type: 'number', description: '每类最多返回条数，默认 8，最大 30' },
         },
         required: ['query'],
@@ -349,6 +400,12 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         return json({
           query: q,
+          episodes: wants('episodes')
+            ? sortedEpisodes(d)
+                .filter((episode) => has(episode.title) || has(episode.summary))
+                .slice(0, limit)
+                .map((episode) => episodeView(d, episode))
+            : undefined,
           scripts: wants('scripts')
             ? d.scripts
                 .filter((s) => has(s.name) || has(s.content))
@@ -396,6 +453,81 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       execute: async (a) => {
         get().upsertScript({ name: typeof a.name === 'string' ? a.name : undefined, content: String(a.content ?? '') })
         return '剧本已更新'
+      },
+    },
+    {
+      name: 'create_episode',
+      description: 'Create a new episode and switch the workspace to it. Use before writing script/storyboards for a new episode.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          summary: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        if (!doc()) return '无打开的项目'
+        const id = get().createEpisode()
+        if (typeof a.title === 'string' && a.title.trim()) get().renameEpisode(id, a.title)
+        if (typeof a.summary === 'string') {
+          const summary = a.summary.trim()
+          get().mutate((d) => {
+            const episode = d.episodes?.find((e) => e.id === id)
+            if (episode) {
+              episode.summary = summary
+              episode.updatedAt = Date.now()
+            }
+          })
+        }
+        const next = get().doc
+        const episode = next?.episodes?.find((e) => e.id === id)
+        return json({ id, currentEpisodeId: next?.currentEpisodeId, episode: next && episode ? episodeView(next, episode) : undefined })
+      },
+    },
+    {
+      name: 'switch_episode',
+      description: 'Switch current workspace to an existing episode by episodeId, 1-based index, or title before editing it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          index: { type: 'number' },
+          title: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisode(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        get().switchEpisode(episode.id)
+        const next = get().doc ?? d
+        const current = next.episodes?.find((e) => e.id === episode.id) ?? episode
+        return json({ currentEpisodeId: next.currentEpisodeId, episode: episodeView(next, current) })
+      },
+    },
+    {
+      name: 'rename_episode',
+      description: 'Rename an existing episode by episodeId, 1-based index, or current title.',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          index: { type: 'number' },
+          title: { type: 'string', description: 'Current title when episodeId/index is omitted.' },
+          newTitle: { type: 'string' },
+        },
+        required: ['newTitle'],
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisode(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        get().renameEpisode(episode.id, String(a.newTitle ?? ''))
+        const next = get().doc ?? d
+        const renamed = next.episodes?.find((e) => e.id === episode.id) ?? episode
+        return json({ id: renamed.id, episode: episodeView(next, renamed) })
       },
     },
     {
