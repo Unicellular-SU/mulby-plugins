@@ -1,0 +1,211 @@
+# AI Film Studio 多集短剧与资产一致性优化方案
+
+## 背景
+
+当前 `ProjectDoc` 更像“一集项目”：`scripts`、`storyboards`、`clips`、`track` 都直接挂在项目顶层。资产虽然是项目级数组，并且已经有 `AssetVariant` 字段，但分镜只保存 `associateAssetIds`，只能表达“这个镜头出现了谁”，不能表达“这个镜头使用这个人的哪套妆容、服装、年龄阶段或受伤状态”。
+
+短剧多集化后，这会带来两个直接问题：
+
+- 多集内容会互相覆盖或混在同一条分镜时间线里，难以单集生成、复查、重剪和成片。
+- 同一角色的不同形态没有端到端引用，后续关键帧和视频只能拿角色主图，容易把“少年/成年/老年”“常服/战损/礼服”“淡妆/浓妆”等状态混成同一张参考图。
+
+目标是把项目升级成“系列工作台”：项目保存全局设定和资产池；每一集保存自己的剧本、分镜、视频轨和成片；分镜用结构化 cast 引用锁定具体资产变体。
+
+## Toonflow 启发
+
+Toonflow 的公开代码里有几个值得借鉴的结构思路：
+
+- 资产挂 `projectId`，形成项目级资产池，而不是每个镜头临时复制一份资产。
+- 剧本、分镜、视频和 Agent 工作数据大量使用 `scriptId` 做工作范围隔离，接近“每集一条内容线”的模型。
+- `episodesId` 字段已经出现在脚本相关记录里，说明它至少预留了剧集层级。
+- `assetsId` 作为资产自引用，可表达派生资产、换装、状态图等从属关系。
+
+本插件不需要复制 Toonflow 的表结构；在 Mulby 插件里仍保持 `ProjectDoc` JSON KV 的持久化方式。但数据边界应该对齐这些原则：项目级资产共享，剧集级内容隔离，资产变体可被镜头精确引用。
+
+## 目标模型
+
+### 1. Project 是系列容器
+
+项目顶层保留跨集共享数据：
+
+- `meta`：项目名、画风、比例、默认模型、导演手册等。
+- `novel`：可作为全集原著/章节池。
+- `assets`：全局角色、场景、道具、音色、素材片段。
+- `memory`：可按项目、剧集或 Agent 维度继续隔离。
+- `episodes`：每一集的剧本、分镜、视频轨、成片状态。
+- `currentEpisodeId`：当前正在编辑和生成的一集。
+
+### 2. Episode 是单集工作线
+
+新增 `Episode`，承载现在顶层那些单集专属内容：
+
+```ts
+export interface Episode {
+  id: string
+  index: number
+  title: string
+  summary?: string
+  status?: 'draft' | 'planned' | 'generating' | 'done'
+  novelChapterIds?: string[]
+  scripts: Script[]
+  storyboards: Storyboard[]
+  storyboardTable?: StoryboardTableScene[]
+  clips: Clip[]
+  track: VideoTrack[]
+  createdAt: number
+  updatedAt: number
+}
+```
+
+第一阶段保持旧字段兼容：顶层 `scripts/storyboards/clips/track/storyboardTable` 仍作为当前集的兼容镜像，旧 UI 和生成逻辑可以逐步迁移。迁移完成后，新的读写入口统一走当前 `Episode`。
+
+### 3. Asset 是跨集身份，Variant 是具体形态
+
+角色资产表示“同一个人”的稳定身份；变体表示某一集、某个场景或某个状态下的具体外观。
+
+推荐扩展 `AssetVariant`：
+
+```ts
+export interface AssetVariant {
+  id: string
+  label: string
+  desc?: string
+  prompt?: string
+  refImageId?: string
+  parentVariantId?: string
+  appliesToEpisodeIds?: string[]
+  appliesToSceneIds?: string[]
+  appliesToStoryboardIds?: string[]
+  tags?: string[]
+  state?: GenState
+  error?: string
+}
+```
+
+示例：
+
+- `role: 林砚` 是同一角色身份。
+- `variant: 第一集-日常淡妆`、`variant: 第二集-战损妆`、`variant: 回忆-少年期` 是不同形态。
+- 角色主图作为默认形象；分镜指定 `variantId` 时优先使用变体图。
+
+### 4. Storyboard 用 castRefs 锁定资产变体
+
+保留 `associateAssetIds` 做兼容，但新增结构化引用：
+
+```ts
+export interface StoryboardCastRef {
+  assetId: string
+  variantId?: string
+  roleInShot?: 'lead' | 'supporting' | 'background'
+  note?: string
+}
+```
+
+`Storyboard.castRefs?: StoryboardCastRef[]` 成为后续生成的权威输入。旧项目读取时，如果没有 `castRefs`，由 `associateAssetIds` 自动回退为 `{ assetId }`。
+
+关键帧、视频提示词和参考图收集必须从同一份 `castRefs` 派生，避免提示词里写了 `@图2`，实际发给供应商的第二张图却是另一张。
+
+## 多集工作流
+
+### 系列规划
+
+用户导入故事或输入短剧概念后，Agent 先生成系列级规划：
+
+- 总梗概。
+- 角色表和稳定身份。
+- 跨集场景、道具、音色。
+- 集数列表：标题、集梗概、冲突点、主要出场角色。
+
+这一步只创建项目级资产草稿和 `episodes` 骨架，不立即把所有集的分镜都生成出来。
+
+### 单集生产
+
+用户选择某一集后，工作流保持现在的熟悉顺序：
+
+`本集剧情 -> 本集剧本 -> 本集分镜 -> 关键帧 -> 视频候选 -> 选优 -> 合成`
+
+差异是所有单集产物写入当前 `Episode`。资产仍从项目全局池读取，并在需要时创建或选择变体。
+
+### 资产一致性守门
+
+生成关键帧或视频前做一次轻量预检：
+
+- 分镜里的 `assetId` 是否存在。
+- 指定 `variantId` 是否属于该资产。
+- 有 `variantId` 时是否已有 `refImageId`。
+- 无 `variantId` 时是否允许回退主图。
+- 同一镜头中是否出现同名但不同 `assetId` 的角色。
+
+预检结果应显示在 UI 或 Agent 回复里，阻止“静默错图”。
+
+## 分阶段落地计划
+
+### P0：数据边界与兼容迁移
+
+- 新增 `Episode` 类型。
+- `ProjectDoc` 新增 `episodes?: Episode[]` 和 `currentEpisodeId?: string`。
+- `normalizeDoc` 对旧项目自动创建“第 1 集”，把当前顶层 `scripts/storyboards/clips/track/storyboardTable` 复制进该集。
+- 暂时保留顶层字段作为当前集镜像，避免一次性重写全部 UI 和 store。
+- `ProjectCard` 增加可选 `episodeCount`，首页可逐步显示集数。
+
+验收：旧项目能正常打开；新项目默认带一集；构建通过；没有改变现有单集生成行为。
+
+### P0：castRefs 与变体引用
+
+- 新增 `StoryboardCastRef`。
+- `Storyboard` 新增 `episodeId?` 和 `castRefs?`。
+- 增加 helper：`castRefsForStoryboard(sb)`，没有 `castRefs` 时回退 `associateAssetIds`。
+- 参考图收集、视频提示词编号、关键帧提示词逐步改为使用同一 helper。
+- `AssetVariant` 增加适用范围字段，但保持旧字段可读。
+
+验收：旧分镜仍能生成；新分镜可以锁定某个角色变体；提示词编号和实际发送参考图一致。
+
+### P1：剧集 UI 与工作区操作
+
+- 在 Studio 顶部增加 Episode 切换器。
+- 支持新建、重命名、复制、删除剧集。
+- 切换剧集时同步当前集镜像，现有脚本、分镜、时间线视图展示当前集。
+- 首页卡片显示 `episodeCount` 和当前集进度。
+
+验收：用户可以在同一项目中维护多集，每集有独立分镜和视频候选，资产池共享。
+
+### P1：角色变体 UI
+
+- 角色卡增加“形态/妆容/服装”列表。
+- 支持从角色主图派生变体图。
+- 分镜详情中选择出场角色时可选择变体。
+- 视频和关键帧生成前显示本镜头实际使用的参考图。
+
+验收：同一角色不同妆容能被人工选择并用于生成；没有选择时按规则回退主图。
+
+### P1：Agent 多集能力
+
+- 决策 Agent 识别“生成第 N 集”“续写下一集”“只做资产”“总结这个故事”等意图。
+- 工具上下文增加当前集概览和全集概览。
+- 资产 Agent 优先复用全局角色，只有新角色或新形态才创建资产/变体。
+- 分镜 Agent 输出 `castRefs`，而不是只输出资产名称。
+
+验收：用户说“生成第 2 集，但沿用第 1 集人物，只给女主换成晚宴妆”，Agent 能写入正确 Episode 和 Variant。
+
+### P2：跨集质量门与批量生产
+
+- 系列一致性检查：角色名、别名、资产复用、变体覆盖、场景复用。
+- 多集批量生成队列：按集排队，支持暂停、跳过、失败重试。
+- 每集成片后生成摘要，回写到系列记忆，供下一集剧本和分镜使用。
+- 支持“一集一包导出”和“全季导出”。
+
+验收：多集连续生产时，资产复用和状态变化可追踪，失败不会污染其他集。
+
+## 关键风险
+
+- 顶层字段和 `episodes[current]` 在过渡期可能双写不一致。P0 必须明确当前阶段的权威来源，并通过 helper 同步。
+- 如果只加 UI，不先统一引用 helper，变体仍可能在生成链路里丢失。
+- 资产变体不能只靠文本描述；一旦进入关键帧/视频生成，必须能解析出实际 `refImageId`。
+- fal、可灵、Veo 等供应商的多参考图能力不同，提示词编号要以实际发送的参考图列表为准。
+
+## 下一步实现顺序
+
+1. 先加 `Episode` 类型、旧项目迁移和卡片集数统计。
+2. 再加 `castRefs` 类型与兼容 helper，并改造参考图收集链路。
+3. 然后做 Episode 切换 UI，把现有扁平视图逐步变成当前集视图。
+4. 最后扩展 Agent，让它能创建剧集、复用资产、指定变体。
