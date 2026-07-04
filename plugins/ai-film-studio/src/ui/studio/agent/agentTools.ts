@@ -6,6 +6,7 @@ import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
 import type { Asset, Episode, ProjectDoc, Storyboard, StoryboardCastRef } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
+import { buildContinuityReport } from '../services/continuityReport'
 
 type ProjectDocGetter = () => ProjectDoc | null
 
@@ -332,6 +333,15 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async () => {
         const d = doc()
         return d ? json({ currentEpisodeId: d.currentEpisodeId, episodes: sortedEpisodes(d).map((episode) => episodeView(d, episode)) }) : '无打开的项目'
+      },
+    },
+    {
+      name: 'get_continuity_report',
+      description: 'Audit multi-episode asset and variant consistency: per-episode cast refs, missing assets/images, and variants used outside their episode scope.',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const d = doc()
+        return d ? json(buildContinuityReport(d)) : '无打开的项目'
       },
     },
     {
