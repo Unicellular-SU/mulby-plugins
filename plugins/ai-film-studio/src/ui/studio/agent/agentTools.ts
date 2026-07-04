@@ -192,6 +192,27 @@ function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string) {
     .map((episode) => ({ id: episode.id, index: episode.index + 1, title: episode.title, current: episode.id === doc.currentEpisodeId }))
 }
 
+function resolveChapterIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
+  const ids: string[] = []
+  const unresolved: unknown[] = []
+  const valid = new Set(doc.novel.map((chapter) => chapter.id))
+  const pushId = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim()) return
+    const id = value.trim()
+    if (valid.has(id)) ids.push(id)
+    else unresolved.push(value)
+  }
+  const pushIndex = (value: unknown) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return
+    const chapter = doc.novel[Math.max(0, Math.floor(value) - 1)]
+    if (chapter) ids.push(chapter.id)
+    else unresolved.push(value)
+  }
+  for (const value of Array.isArray(args.chapterIds) ? args.chapterIds : []) pushId(value)
+  for (const value of Array.isArray(args.chapterIndexes) ? args.chapterIndexes : []) pushIndex(value)
+  return { ids: [...new Set(ids)], unresolved }
+}
+
 function stringArg(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
@@ -666,6 +687,38 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const next = get().doc ?? d
         const renamed = next.episodes?.find((e) => e.id === episode.id) ?? episode
         return json({ id: renamed.id, episode: episodeView(next, renamed) })
+      },
+    },
+    {
+      name: 'assign_episode_chapters',
+      description: 'Assign imported novel chapters to an episode. Use when planning multi-episode adaptation coverage before writing episode scripts.',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          index: { type: 'number', description: '1-based episode index when episodeId is omitted.' },
+          title: { type: 'string', description: 'Episode title when episodeId/index is omitted.' },
+          chapterIds: { type: 'array', items: { type: 'string' } },
+          chapterIndexes: { type: 'array', items: { type: 'number' }, description: '1-based novel chapter indexes.' },
+          mode: { type: 'string', enum: ['replace', 'add', 'remove'], description: 'Default replace.' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisode(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        const chapters = resolveChapterIds(d, a)
+        if (!chapters.ids.length) return json({ error: '未找到章节', unresolved: chapters.unresolved, chapters: d.novel.map((chapter) => ({ id: chapter.id, index: chapter.index + 1, title: chapter.title })) })
+        const current = new Set(episode.novelChapterIds ?? [])
+        const mode = a.mode === 'add' || a.mode === 'remove' ? a.mode : 'replace'
+        let nextIds = chapters.ids
+        if (mode === 'add') nextIds = [...new Set([...current, ...chapters.ids])]
+        else if (mode === 'remove') nextIds = [...current].filter((id) => !chapters.ids.includes(id))
+        get().setEpisodeNovelChapters(episode.id, nextIds)
+        const next = get().doc ?? d
+        const updated = next.episodes?.find((e) => e.id === episode.id) ?? episode
+        return json({ episode: episodeView(next, updated), chapterIds: updated.novelChapterIds ?? [], unresolved: chapters.unresolved })
       },
     },
     {

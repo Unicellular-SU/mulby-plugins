@@ -81,6 +81,7 @@ ${toolSchemaText(tools)}
 规则：
 - 需要确认当前剧本、分镜、资产、原著或时间线时，先请求读取工具。
 - 多集项目中，用户指定第几集、下一集或新一集时，先用 get_episodes 确认剧集，再用 switch_episode 或 create_episode 选中目标剧集；剧本、分镜和视频片段都写入当前剧集，资产是项目级共享。
+- 用户要求规划多集、按原著拆集或指定每集覆盖内容时，先用 get_novel/get_episodes 查看章节和剧集，再用 assign_episode_chapters 写入章节归属。
 - 检查跨集角色一致性、妆容/服装绑定或缺图问题时，优先调用 get_continuity_report，再决定是否补资产、补变体或修正分镜绑定。
 - 同一角色有妆容、服装、年龄或时期差异时，先用 get_assets 查看 variants；缺少变体就调用 upsert_asset_variant 创建/更新，再在 add_storyboard 或 set_storyboard_cast_variant 里传 castRefs/variant 精确绑定。不要只把变体写进画面描述。
 - 用户要求生成、新增、续写或修改项目内容时，最终回复前必须调用对应写入/生成工具：剧本用 upsert_script，资产用 add_asset，分镜用 add_storyboard，出图/关键帧/视频用 generate_*。不要只描述计划。
