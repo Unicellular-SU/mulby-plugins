@@ -1,4 +1,4 @@
-import { useState, type PointerEvent as RPointerEvent } from 'react'
+import { useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Play, ChevronDown, ChevronRight, Ungroup, Music, Save } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { generateCard, canGenerate } from '../services/generate'
@@ -23,6 +23,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   const color = (card.params?.color as string) || '#6366f1'
   const collapsed = !!card.params?.collapsed
   const [editing, setEditing] = useState(false)
+  const lastTitlePointer = useRef<{ time: number; x: number; y: number } | null>(null)
 
   const allDescendants = (): string[] => {
     const cards = useGraph.getState().getActiveBoard().cards
@@ -52,6 +53,19 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
       const b = useGraph.getState().getActiveBoard()
       void saveGroupAsTemplate(card.id, name, b).then((t) => notify(t ? `已保存模板：${name}` : '保存失败', t ? 'success' : 'error'))
     })
+  }
+
+  const startTitleRename = (e: RPointerEvent) => {
+    if (e.button !== 0) return
+    const now = e.timeStamp || performance.now()
+    const last = lastTitlePointer.current
+    lastTitlePointer.current = { time: now, x: e.clientX, y: e.clientY }
+    const isDoublePress = !!last && now - last.time <= 450 && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= 8
+    if (!isDoublePress) return
+    lastTitlePointer.current = null
+    e.stopPropagation()
+    e.preventDefault()
+    setEditing(true)
   }
 
   const startResize = (e: RPointerEvent) => {
@@ -114,7 +128,15 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
         ['--tw-ring-color' as any]: color
       }}
     >
-      <div className="absolute top-0 inset-x-0 h-9 flex items-center gap-1.5 px-2 rounded-t-xl pointer-events-auto" style={{ background: color + '22' }}>
+      <div
+        onPointerDown={startTitleRename}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          setEditing(true)
+        }}
+        className="absolute top-0 inset-x-0 h-9 flex items-center gap-1.5 px-2 rounded-t-xl pointer-events-auto"
+        style={{ background: color + '22' }}
+      >
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
         {editing ? (
           <input
@@ -131,7 +153,6 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
           />
         ) : (
           <span
-            onDoubleClick={() => setEditing(true)}
             title="双击重命名；按住标题拖动分组"
             className="flex-1 min-w-0 truncate text-sm font-medium select-none cursor-grab text-neutral-800 dark:text-neutral-100"
           >
