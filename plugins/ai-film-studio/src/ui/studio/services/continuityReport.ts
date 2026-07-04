@@ -80,6 +80,8 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const episodes = episodeList(doc)
   const episodeReports: ContinuityEpisodeReport[] = []
   const allIssues: ContinuityIssue[] = []
+  const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
+  const assignedChapterIds = new Set<string>()
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)
@@ -95,6 +97,17 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
     const addIssue = (issue: ContinuityIssue) => {
       report.issues.push(issue)
       allIssues.push(issue)
+    }
+
+    if (doc.novel.length > 0 && episodes.length > 1) {
+      const assigned = episode.novelChapterIds ?? []
+      if (!assigned.length) {
+        addIssue({ severity: 'warning', code: 'episode_without_chapters', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」还没有分配原著章节` })
+      }
+      for (const chapterId of assigned) {
+        if (chapterIds.has(chapterId)) assignedChapterIds.add(chapterId)
+        else addIssue({ severity: 'warning', code: 'invalid_episode_chapter', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」引用了不存在的原著章节 ${chapterId}` })
+      }
     }
 
     for (const storyboard of [...storyboards].sort((a, b) => a.index - b.index)) {
@@ -132,6 +145,14 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
       }
     }
     episodeReports.push(report)
+  }
+
+  if (doc.novel.length > 0 && episodes.length > 1) {
+    for (const chapter of doc.novel) {
+      if (!assignedChapterIds.has(chapter.id)) {
+        allIssues.push({ severity: 'warning', code: 'unassigned_chapter', message: `原著章节「${chapter.title}」还没有分配到任何剧集` })
+      }
+    }
   }
 
   return { currentEpisodeId: doc.currentEpisodeId, episodes: episodeReports, issues: allIssues }
