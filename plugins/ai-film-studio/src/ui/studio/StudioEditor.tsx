@@ -768,10 +768,20 @@ function AssetCard({ asset }: { asset: Asset }) {
 }
 
 function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVariant }) {
+  const doc = useProjectStore((s) => s.doc)!
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const deleteAssetVariant = useProjectStore((s) => s.deleteAssetVariant)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const url = useMediaUrl(variant.refImageId ? { assetId: variant.refImageId } : null)
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const selectedEpisodeIds = new Set(variant.appliesToEpisodeIds ?? [])
+  const setEpisodeScope = (ids: string[]) => updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: ids.length ? ids : undefined })
+  const toggleEpisodeScope = (episodeId: string) => {
+    const next = new Set(selectedEpisodeIds)
+    if (next.has(episodeId)) next.delete(episodeId)
+    else next.add(episodeId)
+    setEpisodeScope([...next])
+  }
   return (
     <div className="afs-studio__deriv afs-studio__variantcard">
       <div className="afs-studio__derivthumb">
@@ -795,6 +805,33 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
         value={variant.prompt ?? ''}
         onChange={(e) => updateAssetVariant(asset.id, variant.id, { prompt: e.target.value })}
       />
+      {episodes.length > 1 && (
+        <div className="afs-studio__variantepisodes" aria-label="适用剧集">
+          <span className="afs-studio__variantlabel">适用</span>
+          <div className="afs-studio__variantchips">
+            <button
+              type="button"
+              className={`afs-studio__variantchip${selectedEpisodeIds.size === 0 ? ' is-on' : ''}`}
+              title="适用于全部剧集"
+              onClick={() => setEpisodeScope([])}
+            >
+              全剧
+            </button>
+            {episodes.map((episode) => (
+              <button
+                key={episode.id}
+                type="button"
+                className={`afs-studio__variantchip${selectedEpisodeIds.has(episode.id) ? ' is-on' : ''}`}
+                title={`${episode.title} · ${selectedEpisodeIds.has(episode.id) ? '已适用' : '点击设为适用'}`}
+                onClick={() => toggleEpisodeScope(episode.id)}
+              >
+                {selectedEpisodeIds.has(episode.id) && <Check size={10} />}
+                E{episode.index + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="afs-studio__derivactions">
         <button className="afs-btn afs-btn--sm" disabled={variant.state === 'generating' || !asset.refImageId} title="由主图生成该形态" onClick={() => void generateAssetVariant(asset.id, variant.id)}>
           {variant.state === 'generating' ? <Loader2 size={12} className="afs-spin" /> : <Wand2 size={12} />}
