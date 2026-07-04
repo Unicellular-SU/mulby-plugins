@@ -231,15 +231,40 @@ export interface StoryboardTableScene {
   segments: StoryboardTableSegment[]
 }
 
+export type EpisodeStatus = 'draft' | 'planned' | 'generating' | 'done'
+
+/** 单集生产线。项目级资产仍保留在 ProjectDoc.assets 中跨集共享。 */
+export interface Episode {
+  id: string
+  index: number
+  title: string
+  summary?: string
+  status?: EpisodeStatus
+  novelChapterIds?: string[]
+  scripts: Script[]
+  storyboards: Storyboard[]
+  storyboardTable?: StoryboardTableScene[]
+  clips: Clip[]
+  track: VideoTrack[]
+  createdAt: number
+  updatedAt: number
+}
+
 /** 完整项目文档（一份 JSON 持久化） */
 export interface ProjectDoc {
   meta: ProjectMeta
   novel: NovelChapter[]
+  /** 多集迁移期的当前集兼容镜像。 */
   scripts: Script[]
   assets: Asset[]
+  /** 多集迁移期的当前集兼容镜像。 */
   storyboards: Storyboard[]
+  /** 多集迁移期的当前集兼容镜像。 */
   clips: Clip[]
+  /** 多集迁移期的当前集兼容镜像。 */
   track: VideoTrack[] // [阶段2] VideoTrackItem[] → VideoTrack[]（loadProject normalizeDoc 迁移）
+  episodes?: Episode[]
+  currentEpisodeId?: string
   memory: MemoryItem[]
   storyboardTable?: StoryboardTableScene[] // [阶段2] 分镜表设计层（§4.1）
   imageFlows?: Record<string, ImageEditFlow> // [阶段2] 以 flowId 为键的精修画布（§4.4）
@@ -254,4 +279,5 @@ export interface ProjectCard {
   updatedAt: number
   coverImageId?: string
   storyboardCount: number
+  episodeCount?: number
 }
