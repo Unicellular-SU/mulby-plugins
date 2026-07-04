@@ -1060,6 +1060,40 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const charAssets = doc.assets.filter((a) => a.type === 'role' && !a.parentAssetId) // 说话人候选：仅角色（+旁白）
   const dialogues = sb.dialogues ?? []
   const castRefs = castRefsForStoryboard(sb)
+  const currentEpisodeId = doc.currentEpisodeId
+  const episodeName = (id: string) => {
+    const episode = doc.episodes?.find((item) => item.id === id)
+    return episode ? `E${episode.index + 1} ${episode.title}` : id
+  }
+  const variantScope = (variant: AssetVariant) => {
+    const ids = variant.appliesToEpisodeIds ?? []
+    if (!ids.length) return { current: true, label: '全剧', title: '适用于全部剧集' }
+    const current = !!currentEpisodeId && ids.includes(currentEpisodeId)
+    return { current, label: current ? '当前集' : '其他集', title: `适用于：${ids.map(episodeName).join('、')}` }
+  }
+  const variantGroupsForAsset = (asset: Asset) => {
+    const currentOptions = [
+      { value: '', label: '主形象', title: '不使用妆容/服装/时期变体' },
+      ...(asset.variants ?? [])
+        .filter((variant) => variantScope(variant).current)
+        .map((variant) => {
+          const scope = variantScope(variant)
+          return { value: variant.id, label: `${variant.label} · ${scope.label}`, title: variant.desc ? `${scope.title} · ${variant.desc}` : scope.title }
+        }),
+    ]
+    const otherOptions = (asset.variants ?? [])
+      .filter((variant) => !variantScope(variant).current)
+      .map((variant) => {
+        const scope = variantScope(variant)
+        return { value: variant.id, label: `${variant.label} · ${scope.label}`, title: variant.desc ? `${scope.title} · ${variant.desc}` : scope.title }
+      })
+    return otherOptions.length
+      ? [
+          { label: '当前可用', options: currentOptions },
+          { label: '其他剧集', options: otherOptions },
+        ]
+      : [{ label: '当前可用', options: currentOptions }]
+  }
   // 统一改字段：保留 videoDesc 必填，合并其余 Partial
   const patch = (p: Partial<Storyboard>) => upsertStoryboard({ id: sb.id, videoDesc: sb.videoDesc, ...p })
   const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => patch({ dialogues: dlgs })
@@ -1185,7 +1219,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
                     className="afs-studio__castvariant"
                     value={variantForAsset(a.id)}
                     onChange={(variantId) => setStoryboardCastVariant(sb.id, a.id, variantId || undefined)}
-                    options={[{ value: '', label: '主形象' }, ...(a.variants ?? []).map((v) => ({ value: v.id, label: v.label, title: v.desc }))]}
+                    groups={variantGroupsForAsset(a)}
                     ariaLabel={`${a.name} 形态`}
                   />
                 )}
