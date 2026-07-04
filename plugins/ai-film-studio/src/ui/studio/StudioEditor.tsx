@@ -2,7 +2,7 @@
  * 工作台 · 分阶段编辑器：顶栏（项目设置）+ 阶段 Tab（剧本/资产/分镜/时间线）+ Agent 对话面板占位。
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
@@ -25,6 +25,7 @@ import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
+import { buildContinuityReport } from './services/continuityReport'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -1006,6 +1007,7 @@ function StoryboardTab() {
   const generateAllClips = useProjectStore((s) => s.generateAllClips)
   const batch = useProjectStore((s) => s.batch)
   const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
+  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
   const [showWall, setShowWall] = useState(false)
   return (
     <div className="afs-studio__storyboard">
@@ -1027,6 +1029,7 @@ function StoryboardTab() {
           <Clapperboard size={14} /> 预览故事板
         </button>
       </div>
+      <ContinuityNotice issues={continuity.issues} />
       {showWall && <StoryboardWall onClose={() => setShowWall(false)} />}
       <div className="afs-studio__sblist">
         {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（让右侧 AI 制片自动拆解，或手动新增）。</p>}
@@ -1035,6 +1038,29 @@ function StoryboardTab() {
           .map((s, i, arr) => (
             <StoryboardItem key={s.id} sb={s} index={i} total={arr.length} />
           ))}
+      </div>
+    </div>
+  )
+}
+
+function ContinuityNotice({ issues }: { issues: ReturnType<typeof buildContinuityReport>['issues'] }) {
+  if (!issues.length) return null
+  const errors = issues.filter((issue) => issue.severity === 'error')
+  const warnings = issues.filter((issue) => issue.severity === 'warning')
+  const visible = issues.slice(0, 3)
+  return (
+    <div className={`afs-studio__continuity${errors.length ? ' is-error' : ' is-warning'}`}>
+      <AlertTriangle size={15} />
+      <div className="afs-studio__continuitybody">
+        <div className="afs-studio__continuityhead">
+          一致性检查：{errors.length} 错误 / {warnings.length} 警告
+        </div>
+        <div className="afs-studio__continuitylist">
+          {visible.map((issue, index) => (
+            <span key={`${issue.code}-${index}`}>{issue.message}</span>
+          ))}
+          {issues.length > visible.length && <span>还有 {issues.length - visible.length} 项</span>}
+        </div>
       </div>
     </div>
   )

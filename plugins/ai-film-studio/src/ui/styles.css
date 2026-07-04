@@ -3710,6 +3710,12 @@ select.afs-toolbar__select,
 .afs-studio__castchips { display: flex; flex-wrap: wrap; gap: 4px; }
 .afs-studio__castpick { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
 .afs-studio__castvariant { width: 112px; }
+.afs-studio__continuity { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border)); background: color-mix(in srgb, var(--afs-warning) 10%, var(--afs-panel)); color: var(--afs-warning); }
+.afs-studio__continuity.is-error { border-color: color-mix(in srgb, var(--afs-danger) 48%, var(--afs-border)); background: color-mix(in srgb, var(--afs-danger) 10%, var(--afs-panel)); color: var(--afs-danger); }
+.afs-studio__continuity svg { flex: 0 0 auto; margin-top: 1px; }
+.afs-studio__continuitybody { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.afs-studio__continuityhead { font-size: 12px; font-weight: 600; color: var(--afs-text); }
+.afs-studio__continuitylist { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; line-height: 1.35; color: var(--afs-text-dim); }
 .afs-studio__chipbtn { font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid var(--afs-border); background: var(--afs-panel-2); color: var(--afs-text-dim); cursor: pointer; }
 .afs-studio__chipbtn.is-on { background: var(--afs-accent); color: #fff; border-color: transparent; }
 .afs-studio__dlgrow { display: flex; gap: 4px; }
