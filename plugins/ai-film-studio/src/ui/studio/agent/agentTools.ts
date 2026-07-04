@@ -112,6 +112,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     status: episode.status,
     current: episode.id === doc.currentEpisodeId,
     counts: {
+      novelChapters: episode.novelChapterIds?.length ?? 0,
       scripts: episode.scripts.length,
       storyboards: episode.storyboards.length,
       clips: episode.clips.length,
@@ -183,6 +184,12 @@ function resolveEpisode(doc: ProjectDoc, args: Record<string, unknown>): Episode
     return episodes.find((episode) => episode.title.toLowerCase() === title) ?? episodes.find((episode) => episode.title.toLowerCase().includes(title))
   }
   return undefined
+}
+
+function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string) {
+  return sortedEpisodes(doc)
+    .filter((episode) => episode.novelChapterIds?.includes(chapterId))
+    .map((episode) => ({ id: episode.id, index: episode.index + 1, title: episode.title, current: episode.id === doc.currentEpisodeId }))
 }
 
 function stringArg(value: unknown): string | undefined {
@@ -459,6 +466,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             id: c.id,
             index: c.index + 1,
             title: c.title,
+            episodes: chapterEpisodeRefs(d, c.id),
             event: c.event,
             eventState: c.eventState,
             text: includeText ? textBlock(c.text, limit) : { length: c.text.length, omitted: true },

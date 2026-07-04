@@ -222,6 +222,19 @@ function formatEpisodeContext(doc: ProjectDoc): string {
   ].join('\n')
 }
 
+function formatCurrentEpisodeNovelContext(doc: ProjectDoc): string {
+  const current = doc.episodes?.find((episode) => episode.id === doc.currentEpisodeId)
+  const ids = current?.novelChapterIds ?? []
+  if (!current || !ids.length) return ''
+  const wanted = new Set(ids)
+  const chapters = doc.novel.filter((chapter) => wanted.has(chapter.id))
+  if (!chapters.length) return ''
+  return `## 当前剧集原著范围\n第 ${current.index + 1} 集「${current.title}」已分配 ${chapters.length} 个原著章节，改编当前集时优先使用这些章节，不要串到未分配章节：\n${chapters
+    .map((chapter) => (chapter.event ? `【${chapter.title}】事件：${chapter.event}` : `【${chapter.title}】\n${chapter.text.slice(0, 1200)}`))
+    .join('\n\n')
+    .slice(0, 6000)}`
+}
+
 /** 当前项目上下文（决策层 + 各执行子 Agent 共用）。memoryText 给定时替代默认近期对话（§6.6 召回） */
 function buildContext(doc: ProjectDoc, memoryText?: string): string {
   const pack = getStylePack(doc.meta.artStyle)
@@ -245,6 +258,7 @@ function buildContext(doc: ProjectDoc, memoryText?: string): string {
           .join('\n')}`
       : '尚无分镜',
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
+    formatCurrentEpisodeNovelContext(doc),
     doc.novel.length
       ? `## 原著（${doc.novel.length} 章，按此改编剧本，可分集/分段，不丢关键信息）\n${doc.novel
           .map((c) => (c.event ? `【${c.title}】事件：${c.event}` : `【${c.title}】\n${c.text}`))
@@ -310,6 +324,7 @@ const DECIDE_CONTRACT = `
 
 const SCRIPT_SKILL =
   '你是「编剧」。把用户的素材（一句话/故事/小说/指令）改编成结构化短剧剧本：分场、对白、动作。遵循项目画风与对白语言。' +
+  '如果上下文给出了「当前剧集原著范围」或章节分配，当前集剧本必须优先只改编这些章节；跨集伏笔可以点到为止，不要把其他集剧情提前写完。' +
   '已有剧本则在其基础上修改/续写。必须把完整剧本正文放进 script.content，不要只在 reply 里说已生成。只输出 JSON：{"script":{"name":"剧本名","content":"剧本正文"}}'
 const ASSETS_SKILL =
   '你是「美术设定」。从当前剧本提炼需要的资产：人物(role)/场景(scene)/物品(prop)。当前剧本可能来自本轮新剧本，也可能来自工具读取到的已有剧本/get_script。' +
