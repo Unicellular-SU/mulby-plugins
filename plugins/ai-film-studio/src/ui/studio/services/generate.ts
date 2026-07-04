@@ -14,6 +14,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { useProviderStore } from '../../store/providerStore'
 import { logInfo } from '../../services/localLog'
 import { collectStoryboardVideoReferences, supportsVideoReferenceImages } from './videoReferences'
+import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import type { Asset, ProjectMeta, Storyboard } from '../../domain/types'
 
 /** 图像模型：项目级优先，否则用全局选中的图像模型 */
@@ -232,15 +233,19 @@ export async function generateKeyframeImage(
   if (!basis) throw new Error('请先填写分镜画面描述')
   const pack = getStylePack(meta.artStyle)
   const anchor = pack ? applyStylePack(pack, 'keyframe') : ''
-  const cast = assets.filter((a) => sb.associateAssetIds.includes(a.id))
-  const castHint = cast.length ? `, 出场：${cast.map((a) => a.name).join('、')}` : ''
+  const byAssetId = new Map(assets.map((a) => [a.id, a]))
+  const castRefs = castRefsForStoryboard(sb)
+  const castLabels = castRefs.map((ref) => labelForCastRef(byAssetId.get(ref.assetId), ref))
+  const castHint = castLabels.length ? `, 出场：${castLabels.join('、')}` : ''
   const chaining = sb.chainFromPrev && chainBase
   const shotHint = shotSizeEn(sb.shotSize) // 景别影响静帧构图（运镜只对视频有意义，关键帧不注入）
   const prompt = [basis + castHint, shotHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
   const size = sizeForRatio(meta.videoRatio)
 
   const canEdit = !!window.mulby?.ai?.images?.edit && !!window.mulby?.ai?.attachments?.upload
-  const refs = canEdit ? ((await Promise.all(cast.map((a) => refBase64(a.refImageId)))).filter(Boolean) as { base64: string; mime: string }[]) : []
+  const refs = canEdit
+    ? ((await Promise.all(castRefs.map((ref) => refBase64(refImageIdForCastRef(byAssetId.get(ref.assetId), ref))))).filter(Boolean) as { base64: string; mime: string }[])
+    : []
   // 有出场资产参考图（多为五视图/多角度板）时，追加防拼版泄漏子句，避免设定板版面被复制进画面
   const editPrompt = refs.length ? [prompt, REF_ANTILEAK_CLAUSE].join(', ') : prompt
   if (chaining && canEdit) {

@@ -291,7 +291,10 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       target.videoDesc = sb.videoDesc
       if (sb.prompt != null) target.prompt = sb.prompt
       if (typeof sb.duration === 'number') target.duration = sb.duration
-      if (sb.cast) target.associateAssetIds = cast
+      if (sb.cast) {
+        target.associateAssetIds = cast
+        target.castRefs = cast.map((assetId) => ({ assetId }))
+      }
       if (dlgs) target.dialogues = dlgs
       if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
       target.keyframeImageId = undefined
@@ -310,6 +313,7 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       prompt: sb.prompt,
       duration: typeof sb.duration === 'number' ? sb.duration : 5,
       associateAssetIds: cast,
+      castRefs: cast.map((assetId) => ({ assetId })),
       dialogues: dlgs ?? [],
       shouldGenerateImage: true,
       chainFromPrev: sb.chainFromPrev === true,
@@ -590,6 +594,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         state: 'idle',
       }
       const merged: Storyboard = { ...base, ...s, id }
+      if (s.associateAssetIds && !s.castRefs) {
+        const existingRefs = new Map((base.castRefs ?? []).map((ref) => [ref.assetId, ref]))
+        merged.castRefs = s.associateAssetIds.map((assetId) => existingRefs.get(assetId) ?? { assetId })
+      } else if (!merged.castRefs?.length && merged.associateAssetIds.length) {
+        merged.castRefs = merged.associateAssetIds.map((assetId) => ({ assetId }))
+      }
       if (i >= 0) d.storyboards[i] = merged
       else d.storyboards.push(merged)
       syncTracksFromStoryboards(d) // 新分镜惰性补一个段

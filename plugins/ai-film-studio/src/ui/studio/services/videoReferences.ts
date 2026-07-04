@@ -1,4 +1,5 @@
 import { loadAsset } from '../../services/assets'
+import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import type { Asset, Storyboard } from '../../domain/types'
 import type { VideoProviderConfig, VideoReferenceImage } from '../../services/providers'
 
@@ -22,26 +23,27 @@ export async function collectStoryboardVideoReferences(
 ): Promise<VideoReferenceImage[]> {
   const list = Array.isArray(storyboards) ? storyboards : [storyboards]
   const byId = new Map(assets.map((a) => [a.id, a]))
-  const seenAssets = new Set<string>()
+  const seenCastRefs = new Set<string>()
   const seenRefIds = new Set<string>()
   const seenUrls = new Set<string>(primaryImageUrl ? [primaryImageUrl] : [])
   const refs: VideoReferenceImage[] = []
 
   for (const sb of list) {
-    for (const id of sb.associateAssetIds) {
+    for (const castRef of castRefsForStoryboard(sb)) {
       if (refs.length >= max) return refs
-      const asset = byId.get(id)
-      if (!asset || seenAssets.has(asset.id)) continue
-      seenAssets.add(asset.id)
-      if (!asset.refImageId || asset.type === 'audio' || asset.type === 'clip') continue
-      if (seenRefIds.has(asset.refImageId)) continue
-      seenRefIds.add(asset.refImageId)
-      const img = await loadAsset(asset.refImageId)
+      const asset = byId.get(castRef.assetId)
+      const castKey = `${castRef.assetId}:${castRef.variantId ?? ''}`
+      if (!asset || seenCastRefs.has(castKey)) continue
+      seenCastRefs.add(castKey)
+      const refImageId = refImageIdForCastRef(asset, castRef)
+      if (!refImageId || seenRefIds.has(refImageId)) continue
+      seenRefIds.add(refImageId)
+      const img = await loadAsset(refImageId)
       if (!img) continue
       const url = `data:${img.mime};base64,${img.base64}`
       if (seenUrls.has(url)) continue
       seenUrls.add(url)
-      refs.push({ url, name: asset.name, type: asset.type, source: 'asset' })
+      refs.push({ url, name: labelForCastRef(asset, castRef), type: asset.type, source: 'asset' })
     }
   }
 

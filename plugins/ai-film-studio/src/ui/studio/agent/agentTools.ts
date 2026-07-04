@@ -5,6 +5,7 @@
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
 import type { Asset, ProjectDoc, Storyboard } from '../../domain/types'
+import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 
 type ProjectDocGetter = () => ProjectDoc | null
 
@@ -39,7 +40,13 @@ function assetNames(doc: ProjectDoc, ids: string[] | undefined): string[] {
   return (ids ?? []).map((id) => names.get(id) ?? id)
 }
 
+function castNames(doc: ProjectDoc, storyboard: Storyboard): string[] {
+  const assets = new Map(doc.assets.map((a) => [a.id, a]))
+  return castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
+}
+
 function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?: boolean; includeDialogues?: boolean; includeAssets?: boolean }) {
+  const castRefs = castRefsForStoryboard(s)
   return {
     id: s.id,
     index: s.index + 1,
@@ -49,8 +56,9 @@ function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?:
     shotSize: s.shotSize,
     cameraMove: s.cameraMove,
     duration: s.duration,
-    castAssetIds: s.associateAssetIds,
-    castNames: opts?.includeAssets === false ? undefined : assetNames(doc, s.associateAssetIds),
+    castAssetIds: castRefs.map((ref) => ref.assetId),
+    castRefs,
+    castNames: opts?.includeAssets === false ? undefined : castNames(doc, s),
     shouldGenerateImage: s.shouldGenerateImage,
     keyframeImageId: s.keyframeImageId,
     chainFromPrev: s.chainFromPrev,
@@ -114,7 +122,7 @@ function overview(doc: ProjectDoc) {
       track: s.track,
       videoDesc: s.videoDesc,
       duration: s.duration,
-      castNames: assetNames(doc, s.associateAssetIds),
+      castNames: castNames(doc, s),
       dialogueCount: s.dialogues?.length ?? 0,
       state: s.state,
       hasKeyframe: !!s.keyframeImageId,

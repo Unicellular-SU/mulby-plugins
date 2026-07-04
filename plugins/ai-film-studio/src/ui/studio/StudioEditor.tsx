@@ -24,6 +24,7 @@ import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
+import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -909,7 +910,11 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const setDlg = (dlgs: { character: string; line: string; emotion?: string }[]) => patch({ dialogues: dlgs })
   const toggleCast = (id: string) => {
     const has = sb.associateAssetIds.includes(id)
-    patch({ associateAssetIds: has ? sb.associateAssetIds.filter((x) => x !== id) : [...sb.associateAssetIds, id] })
+    const associateAssetIds = has ? sb.associateAssetIds.filter((x) => x !== id) : [...sb.associateAssetIds, id]
+    patch({
+      associateAssetIds,
+      castRefs: associateAssetIds.map((assetId) => sb.castRefs?.find((ref) => ref.assetId === assetId) ?? { assetId }),
+    })
   }
   return (
     <div className="afs-studio__sbcard">
@@ -1117,9 +1122,12 @@ function DialogueLine({ d, charAssets, onChange, onRemove }: { d: Dlg; charAsset
 function ImageFlowEditor({ sb, onClose }: { sb: Storyboard; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const refineKeyframe = useProjectStore((s) => s.refineKeyframe)
+  const byAssetId = new Map(doc.assets.map((a) => [a.id, a]))
   const assets = doc.assets.filter((a) => a.refImageId)
   const [sel, setSel] = useState<string[]>(() =>
-    sb.associateAssetIds.map((id) => doc.assets.find((a) => a.id === id)?.refImageId).filter((x): x is string => !!x)
+    castRefsForStoryboard(sb)
+      .map((ref) => refImageIdForCastRef(byAssetId.get(ref.assetId), ref))
+      .filter((x): x is string => !!x)
   )
   const [prompt, setPrompt] = useState(sb.prompt || sb.videoDesc || '')
   const kfUrl = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)

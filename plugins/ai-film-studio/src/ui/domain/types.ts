@@ -56,9 +56,15 @@ export interface Script {
 export interface AssetVariant {
   id: string
   label: string
+  desc?: string
   prompt?: string
   refImageId?: string // 资产库 assetId
+  parentVariantId?: string
   appliesTo?: string[] // 对齐节拍/段落关键字
+  appliesToEpisodeIds?: string[]
+  appliesToSceneIds?: string[]
+  appliesToStoryboardIds?: string[]
+  tags?: string[]
   state?: GenState // [阶段2]
   error?: string // [阶段2]
 }
@@ -107,6 +113,7 @@ export interface Asset {
 /** 分镜面板 */
 export interface Storyboard {
   id: string
+  episodeId?: string
   index: number
   track: string // 轨道名标签（分组/段落）——注意与 ProjectDoc.track(视频段数组) 同名不同义
   videoDesc: string // 画面描述（中文，给关键帧/视频）
@@ -115,6 +122,7 @@ export interface Storyboard {
   cameraMove?: string // 运镜（固定/推/拉/摇/移/跟…）—注入视频提示词
   duration: number // 推荐视频时长(秒)
   associateAssetIds: string[] // 出场资产
+  castRefs?: StoryboardCastRef[] // 精确出场资产引用（支持同一角色的妆容/服装/年龄变体）
   shouldGenerateImage: boolean
   keyframeImageId?: string // 关键帧图（资产库 assetId）
   chainFromPrev?: boolean // 承接上一镜（关键帧链式/尾帧接龙）
@@ -123,6 +131,13 @@ export interface Storyboard {
   flowId?: string // [阶段2] 关键帧精修画布引用（§4.4）
   state: GenState
   error?: string
+}
+
+export interface StoryboardCastRef {
+  assetId: string
+  variantId?: string
+  roleInShot?: 'lead' | 'supporting' | 'background'
+  note?: string
 }
 
 /** 图像编辑流节点（对标 o_imageFlow 的 nodes，§4.4） */
