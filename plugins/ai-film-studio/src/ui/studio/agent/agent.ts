@@ -276,6 +276,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     '只读工具：get_project_overview/get_workspace（项目概览）、get_episodes（剧集列表）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
     '写入/生成工具：create_episode（新建并切换剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、upsert_script（写剧本）、add_asset（加项目级共享资产）、add_storyboard（加当前剧集分镜）、generate_asset、generate_keyframe、generate_clip。' +
+    '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }

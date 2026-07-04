@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, Storyboard, StoryboardCastRef } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -182,6 +182,106 @@ function resolveEpisode(doc: ProjectDoc, args: Record<string, unknown>): Episode
     return episodes.find((episode) => episode.title.toLowerCase() === title) ?? episodes.find((episode) => episode.title.toLowerCase().includes(title))
   }
   return undefined
+}
+
+function stringArg(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function isCastableAsset(asset: Asset): boolean {
+  return !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop')
+}
+
+function findCastableAsset(doc: ProjectDoc, token: unknown): Asset | undefined {
+  const text = stringArg(token)
+  if (!text) return undefined
+  const lower = text.toLowerCase()
+  const assets = doc.assets.filter(isCastableAsset)
+  return assets.find((asset) => asset.id === text) ?? assets.find((asset) => asset.name.toLowerCase() === lower)
+}
+
+function findAssetVariant(asset: Asset, token: unknown) {
+  const text = stringArg(token)
+  if (!text) return undefined
+  const lower = text.toLowerCase()
+  return asset.variants?.find((variant) => variant.id === text) ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)
+}
+
+function roleInShot(value: unknown): StoryboardCastRef['roleInShot'] | undefined {
+  return value === 'lead' || value === 'supporting' || value === 'background' ? value : undefined
+}
+
+function parseCastString(doc: ProjectDoc, raw: unknown): { ref?: StoryboardCastRef; unresolved?: string } {
+  const text = stringArg(raw)
+  if (!text) return {}
+  const exact = findCastableAsset(doc, text)
+  if (exact) return { ref: { assetId: exact.id } }
+
+  const assets = doc.assets.filter(isCastableAsset).sort((a, b) => b.name.length - a.name.length)
+  for (const asset of assets) {
+    if (!text.toLowerCase().startsWith(asset.name.toLowerCase())) continue
+    let variantToken = text.slice(asset.name.length).trim()
+    variantToken = variantToken.replace(/^[\s\-—–_:：/|·]+/, '').trim()
+    variantToken = variantToken.replace(/^[（(\[]/, '').replace(/[）)\]]$/, '').trim()
+    if (!variantToken) return { ref: { assetId: asset.id } }
+    const variant = findAssetVariant(asset, variantToken)
+    if (variant) return { ref: { assetId: asset.id, variantId: variant.id } }
+    return { ref: { assetId: asset.id, note: `未找到变体：${variantToken}` }, unresolved: `${text}（未找到变体「${variantToken}」）` }
+  }
+
+  return { unresolved: text }
+}
+
+function parseCastObject(doc: ProjectDoc, value: Record<string, unknown>): { ref?: StoryboardCastRef; unresolved?: string } {
+  const asset =
+    findCastableAsset(doc, value.assetId) ??
+    findCastableAsset(doc, value.assetName) ??
+    findCastableAsset(doc, value.name) ??
+    findCastableAsset(doc, value.asset)
+  if (!asset) {
+    const fromName = parseCastString(doc, value.name ?? value.assetName)
+    return fromName.ref ? fromName : { unresolved: stringArg(value.name ?? value.assetName ?? value.assetId) ?? JSON.stringify(value) }
+  }
+
+  const variantToken = value.variantId ?? value.variantLabel ?? value.variant ?? value.label
+  const variant = findAssetVariant(asset, variantToken)
+  const note = stringArg(value.note)
+  const ref: StoryboardCastRef = {
+    assetId: asset.id,
+    variantId: variant?.id,
+    roleInShot: roleInShot(value.roleInShot),
+    note,
+  }
+  if (variantToken && !variant) {
+    ref.note = [note, `未找到变体：${String(variantToken)}`].filter(Boolean).join('；')
+    return { ref, unresolved: `${asset.name}（未找到变体「${String(variantToken)}」）` }
+  }
+  return { ref }
+}
+
+function storyboardCastRefsFromArgs(doc: ProjectDoc, args: Record<string, unknown>): { refs: StoryboardCastRef[]; unresolved: string[] } {
+  const unresolved: string[] = []
+  const byKey = new Map<string, StoryboardCastRef>()
+  const push = (result: { ref?: StoryboardCastRef; unresolved?: string }) => {
+    if (result.unresolved) unresolved.push(result.unresolved)
+    if (!result.ref?.assetId) return
+    const key = `${result.ref.assetId}:${result.ref.variantId ?? ''}`
+    byKey.set(key, result.ref)
+  }
+
+  const castRefs = Array.isArray(args.castRefs) ? args.castRefs : []
+  for (const item of castRefs) {
+    if (item && typeof item === 'object' && !Array.isArray(item)) push(parseCastObject(doc, item as Record<string, unknown>))
+    else push(parseCastString(doc, item))
+  }
+
+  const cast = Array.isArray(args.cast) ? args.cast : []
+  for (const item of cast) {
+    if (item && typeof item === 'object' && !Array.isArray(item)) push(parseCastObject(doc, item as Record<string, unknown>))
+    else push(parseCastString(doc, item))
+  }
+
+  return { refs: [...byKey.values()], unresolved }
 }
 
 export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
@@ -546,14 +646,30 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'add_storyboard',
-      description: '新增分镜面板（cast 用资产名，会自动关联 id；dialogues 逐句对白）',
+      description: '新增当前剧集的分镜面板。cast 可用资产名或“资产名-变体标签”；需要精确妆容/服装时优先传 castRefs。',
       parameters: {
         type: 'object',
         properties: {
           videoDesc: { type: 'string' },
           prompt: { type: 'string' },
           duration: { type: 'number' },
-          cast: { type: 'array', items: { type: 'string' } },
+          cast: { type: 'array', items: { type: 'string' }, description: '出场资产名；可写“角色名-变体标签”来指定已有妆容/服装/时期变体。' },
+          castRefs: {
+            type: 'array',
+            description: '精确出场引用。assetId/assetName/name 三选一；variantId 或 variantLabel 可选。',
+            items: {
+              type: 'object',
+              properties: {
+                assetId: { type: 'string' },
+                assetName: { type: 'string' },
+                name: { type: 'string' },
+                variantId: { type: 'string' },
+                variantLabel: { type: 'string' },
+                roleInShot: { type: 'string', enum: ['lead', 'supporting', 'background'] },
+                note: { type: 'string' },
+              },
+            },
+          },
           dialogues: {
             type: 'array',
             items: { type: 'object', properties: { character: { type: 'string' }, line: { type: 'string' }, emotion: { type: 'string' } } },
@@ -565,22 +681,29 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       execute: async (a) => {
         const d = doc()
         if (!d) return '无项目'
-        const names = Array.isArray(a.cast) ? (a.cast as unknown[]).map(String) : []
-        const ids = names.map((n) => d.assets.find((x) => x.name === n)?.id).filter((x): x is string => !!x)
+        const cast = storyboardCastRefsFromArgs(d, a)
+        const ids = [...new Set(cast.refs.map((ref) => ref.assetId))]
         const dialogues = Array.isArray(a.dialogues)
           ? (a.dialogues as Array<Record<string, unknown>>)
               .filter((x) => x && typeof x.line === 'string' && (x.line as string).trim())
               .map((x) => ({ character: String(x.character ?? ''), line: String(x.line).trim(), emotion: x.emotion ? String(x.emotion) : undefined }))
           : undefined
-        get().upsertStoryboard({
+        const id = get().upsertStoryboard({
           videoDesc: String(a.videoDesc ?? ''),
           prompt: a.prompt as string | undefined,
           duration: typeof a.duration === 'number' ? a.duration : undefined,
           associateAssetIds: ids,
+          castRefs: cast.refs.length ? cast.refs : undefined,
           dialogues,
           chainFromPrev: a.chainFromPrev === true,
         })
-        return '已新增分镜'
+        const next = doc()
+        const storyboard = next?.storyboards.find((s) => s.id === id)
+        return json({
+          id,
+          unresolvedCast: cast.unresolved,
+          storyboard: next && storyboard ? storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+        })
       },
     },
     {
