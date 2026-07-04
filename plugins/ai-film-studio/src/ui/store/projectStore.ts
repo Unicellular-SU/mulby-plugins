@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { AgentStep, Asset, AssetImage, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { AgentStep, Asset, AssetImage, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
@@ -63,6 +63,10 @@ export interface ProjectState {
   /** 通用：克隆当前 doc → 应用变更 → 落盘（防抖） */
   mutate: (fn: (doc: ProjectDoc) => void) => void
   updateMeta: (patch: Partial<ProjectMeta>) => void
+  createEpisode: () => string
+  switchEpisode: (id: string) => void
+  renameEpisode: (id: string, title: string) => void
+  deleteEpisode: (id: string) => void
 
   // 实体便捷增删改（基于 mutate）
   upsertScript: (s: Partial<Script> & { content: string }) => string
@@ -176,6 +180,25 @@ function buildLibraryAsset(spec: { kind: Asset['type']; name: string; assetId?: 
   if (spec.desc) asset.desc = spec.desc
   if (spec.elementId) asset.elementId = spec.elementId
   return asset
+}
+
+function emptyEpisode(index: number): Episode {
+  const now = Date.now()
+  return {
+    id: P.newId('ep_'),
+    index,
+    title: `第 ${index + 1} 集`,
+    scripts: [],
+    storyboards: [],
+    clips: [],
+    track: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function reindexEpisodes(episodes: Episode[]): void {
+  episodes.sort((a, b) => a.index - b.index).forEach((episode, index) => (episode.index = index))
 }
 
 /** 把一条新资产写进指定项目：打开中的项目走 mutate（防抖落盘），未打开的直接读写其持久化 doc。返回资产 id。 */
@@ -506,6 +529,56 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   updateMeta: (patch) => get().mutate((d) => Object.assign(d.meta, patch)),
+
+  createEpisode: () => {
+    let id = ''
+    get().mutate((d) => {
+      P.syncCurrentEpisodeFromFlat(d)
+      d.episodes ??= []
+      reindexEpisodes(d.episodes)
+      const episode = emptyEpisode(d.episodes.length)
+      d.episodes.push(episode)
+      d.currentEpisodeId = episode.id
+      P.applyEpisodeToFlat(d, episode)
+      id = episode.id
+    })
+    return id
+  },
+
+  switchEpisode: (id) =>
+    get().mutate((d) => {
+      if (d.currentEpisodeId === id) return
+      P.syncCurrentEpisodeFromFlat(d)
+      const episode = d.episodes?.find((e) => e.id === id)
+      if (!episode) return
+      d.currentEpisodeId = episode.id
+      P.applyEpisodeToFlat(d, episode)
+    }),
+
+  renameEpisode: (id, title) =>
+    get().mutate((d) => {
+      const episode = d.episodes?.find((e) => e.id === id)
+      if (!episode) return
+      episode.title = title.trim() || `第 ${episode.index + 1} 集`
+      episode.updatedAt = Date.now()
+    }),
+
+  deleteEpisode: (id) =>
+    get().mutate((d) => {
+      P.syncCurrentEpisodeFromFlat(d)
+      const episodes = d.episodes ?? []
+      if (episodes.length <= 1) return
+      const deleteIndex = episodes.findIndex((e) => e.id === id)
+      if (deleteIndex < 0) return
+      const deletingCurrent = d.currentEpisodeId === id
+      d.episodes = episodes.filter((e) => e.id !== id)
+      reindexEpisodes(d.episodes)
+      if (deletingCurrent || !d.episodes.some((e) => e.id === d.currentEpisodeId)) {
+        const next = d.episodes[Math.min(deleteIndex, d.episodes.length - 1)]
+        d.currentEpisodeId = next.id
+        P.applyEpisodeToFlat(d, next)
+      }
+    }),
 
   upsertScript: (s) => {
     const id = s.id ?? P.newId('s_')

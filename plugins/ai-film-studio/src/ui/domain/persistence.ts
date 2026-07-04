@@ -144,7 +144,7 @@ function normalizeEpisode(raw: Episode, index: number): Episode {
   }
 }
 
-function syncCurrentEpisodeFromFlat(doc: ProjectDoc): void {
+export function syncCurrentEpisodeFromFlat(doc: ProjectDoc): void {
   if (!Array.isArray(doc.episodes) || doc.episodes.length === 0) {
     const episode = episodeFromFlat(doc)
     doc.episodes = [episode]
@@ -164,7 +164,7 @@ function syncCurrentEpisodeFromFlat(doc: ProjectDoc): void {
   episode.updatedAt = doc.meta.updatedAt
 }
 
-function applyEpisodeToFlat(doc: ProjectDoc, episode: Episode): void {
+export function applyEpisodeToFlat(doc: ProjectDoc, episode: Episode): void {
   doc.scripts = episode.scripts
   doc.storyboards = episode.storyboards
   doc.storyboardTable = episode.storyboardTable

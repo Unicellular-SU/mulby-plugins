@@ -5675,6 +5675,18 @@ html.light .afs-lp-body::before { opacity: 0.55; }
 .afs-stwb__title:focus-visible { outline: 2px solid var(--afs-ring); outline-offset: 1px; border-color: transparent; }
 .afs-stwb__title::placeholder { color: var(--afs-text-dim); }
 
+.afs-stwb__episode {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--afs-sp-1);
+  min-width: 0;
+}
+.afs-stwb__episode-select {
+  width: 150px;
+  max-width: 20vw;
+}
+
 /* aria-live busy Pill (Spinner + label) */
 .afs-stwb__busy {
   display: inline-flex; align-items: center; gap: var(--afs-sp-2);

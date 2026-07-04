@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -96,6 +96,8 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
             aria-label="工程名称"
           />
         </div>
+        <span className="afs-stwb__tbdiv" aria-hidden />
+        <EpisodeSwitcher busy={busy} />
         <span className="afs-stwb__tbdiv" aria-hidden />
         <div className="afs-stwb__tbgroup afs-stwb__tbcluster">
           <Select
@@ -191,6 +193,66 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function EpisodeSwitcher({ busy }: { busy: boolean }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const createEpisode = useProjectStore((s) => s.createEpisode)
+  const switchEpisode = useProjectStore((s) => s.switchEpisode)
+  const renameEpisode = useProjectStore((s) => s.renameEpisode)
+  const deleteEpisode = useProjectStore((s) => s.deleteEpisode)
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const currentId = doc.currentEpisodeId ?? episodes[0]?.id ?? ''
+  const current = episodes.find((e) => e.id === currentId) ?? episodes[0]
+  const renameCurrent = () => {
+    if (!current) return
+    const title = window.prompt('集标题', current.title)
+    if (title != null) renameEpisode(current.id, title)
+  }
+  const deleteCurrent = () => {
+    if (!current || episodes.length <= 1) return
+    if (window.confirm(`删除「${current.title}」？`)) deleteEpisode(current.id)
+  }
+  return (
+    <div className="afs-stwb__episode" aria-label="剧集">
+      <Select
+        size="sm"
+        className="afs-stwb__episode-select"
+        value={currentId}
+        onChange={(id) => switchEpisode(id)}
+        disabled={busy || episodes.length === 0}
+        options={episodes.map((episode) => ({ value: episode.id, label: `E${episode.index + 1} ${episode.title}` }))}
+        ariaLabel="当前剧集"
+      />
+      <IconButton
+        size="sm"
+        variant="ghost"
+        aria-label="新建剧集"
+        title="新建剧集"
+        icon={<Plus size={16} />}
+        disabled={busy}
+        onClick={() => createEpisode()}
+      />
+      <IconButton
+        size="sm"
+        variant="ghost"
+        aria-label="重命名当前剧集"
+        title="重命名当前剧集"
+        icon={<Pencil size={16} />}
+        disabled={busy || !current}
+        onClick={renameCurrent}
+      />
+      <IconButton
+        size="sm"
+        variant="ghost"
+        aria-label="删除当前剧集"
+        title="删除当前剧集"
+        icon={<Trash2 size={16} />}
+        disabled={busy || episodes.length <= 1}
+        onClick={deleteCurrent}
+      />
     </div>
   )
 }
