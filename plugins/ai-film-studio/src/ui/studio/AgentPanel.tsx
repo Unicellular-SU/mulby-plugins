@@ -3,7 +3,7 @@
  *
  * 相比早期的纯文本气泡，这里把 Agent 的**每一步都展开可视化**：
  * - 分阶段管线：决策 / 编剧 / 美术 / 导演 各成一张卡片，内嵌**思考流**（流式）+ 产出摘要（markdown）；
- * - 原生工具循环：思考流 + 逐次**工具调用**（名称 / 入参 / 结果）；
+ * - 工具读取/调用：思考流 + 逐次**工具调用**（名称 / 入参 / 结果）；
  * - 最终回复用 markdown 渲染。
  * 数据来源：进行中回合读 store.agentTrace（实时），历史回合读 memory.steps（已落盘）。
  */
@@ -13,6 +13,7 @@ import type { LucideIcon } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import type { AgentStep, MemoryItem } from '../domain/types'
 import Markdown from './Markdown'
+import { getLogFilePath, logError, logInfo } from '../services/localLog'
 
 const AGENT_ICON: Record<string, LucideIcon> = {
   decision: Sparkles,
@@ -174,7 +175,6 @@ function LiveTurn({ steps, stage }: { steps?: AgentStep[]; stage?: string }) {
 export default function AgentPanel() {
   const doc = useProjectStore((s) => s.doc)!
   const runAgent = useProjectStore((s) => s.runAgent)
-  const runAgentToolLoop = useProjectStore((s) => s.runAgentToolLoop)
   const abortAgent = useProjectStore((s) => s.abortAgent)
   const updateMeta = useProjectStore((s) => s.updateMeta)
   const busy = useProjectStore((s) => s.agentBusy)
@@ -182,7 +182,6 @@ export default function AgentPanel() {
   const trace = useProjectStore((s) => s.agentTrace)
   const [text, setText] = useState('')
   const [showManual, setShowManual] = useState(false)
-  const [toolLoop, setToolLoop] = useState(false)
   const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
 
   // 贴底自动滚动：仅当用户已在底部附近时跟随新内容，向上翻阅历史时不打扰
@@ -202,7 +201,18 @@ export default function AgentPanel() {
     if (!text.trim() || busy) return
     const t = text
     setText('')
-    void (toolLoop ? runAgentToolLoop(t) : runAgent(t))
+    void runAgent(t)
+  }
+  const copyLogPath = async () => {
+    try {
+      const path = await getLogFilePath()
+      await window.mulby?.clipboard?.writeText(path)
+      window.mulby?.notification?.show('日志路径已复制', 'success')
+      logInfo('agent.panel', 'copyLogPath', { path })
+    } catch (e) {
+      window.mulby?.notification?.show('复制日志路径失败', 'error')
+      logError('agent.panel', 'copyLogPath.error', e)
+    }
   }
 
   return (
@@ -210,13 +220,12 @@ export default function AgentPanel() {
       <div className="afs-studio__agent-head">
         <Bot size={16} /> AI 制片
         <button
-          className={`afs-studio__manualtoggle${toolLoop ? ' is-on' : ''}`}
-          title="实验：原生工具调用（Agent 自主调用工具读写工作区；依赖宿主 function-calling，未生效则用默认结构化管线）"
-          aria-pressed={toolLoop}
-          aria-label="原生工具调用"
-          onClick={() => setToolLoop((v) => !v)}
+          className="afs-studio__manualtoggle"
+          title="复制日志文件路径"
+          aria-label="复制日志文件路径"
+          onClick={() => void copyLogPath()}
         >
-          <Wrench size={14} />
+          <FileText size={14} />
         </button>
         <button
           className={`afs-studio__manualtoggle${showManual ? ' is-on' : ''}`}

@@ -1,10 +1,9 @@
 /**
- * Toonflow 式重构 · 阶段6（§6.1）：Agent 工具循环运行时（host tool-calling）。
+ * Toonflow 式重构 · 阶段6（§6.1）：Agent 工具循环运行时（前端本地工具协议）。
  *
- * ⚠ R1 待验证（见 toolCallingProbe）：宿主对【插件自定义 function 工具】是否「吐 tool_call 后停下等回灌」
- * 未经证实。本实现采用「格式无关」的回灌策略——只用 role+string content 的消息（保证宿主支持），把工具结果
- * 作为对话消息喂回，而非依赖未知的结构化 tool-result 消息格式；因此对支持 function-calling 的模型可用，
- * 不支持则降级为「只回文本、不动作」（此时仍有 jsonMode 确定性管线作默认兜底）。
+ * Mulby 的 option.tools 会由宿主尝试执行同名 Host RPC 方法；右侧工作台工具需要读取当前
+ * renderer 内的 projectStore，所以不能交给宿主执行。这里用 JSON 文本协议让模型“请求工具”，
+ * 再由前端本地执行并把结果回灌给模型，从而避免 Host method not found。
  *
  * §6.1.1：每次 ai.call 用传入的 abortSignal，不复用 textEngine 全局单例，支持嵌套子 Agent / 并发取消。
  */
@@ -30,8 +29,13 @@ export interface ToolLoopOptions {
   onToolResult?: (name: string, result: string) => void
 }
 
-function toAiTool(t: AgentTool): AiTool {
-  return { type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }
+type ProtocolToolCall = { name?: string; args?: unknown }
+type ProtocolResponse = {
+  tool_calls?: ProtocolToolCall[]
+  toolCalls?: ProtocolToolCall[]
+  final?: string
+  reply?: string
+  content?: string
 }
 
 function normalizeArgs(args: unknown): Record<string, unknown> {
@@ -46,30 +50,81 @@ function normalizeArgs(args: unknown): Record<string, unknown> {
   return {}
 }
 
+function toolSchemaText(tools: AgentTool[]): string {
+  return JSON.stringify(
+    tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    })),
+    null,
+    2,
+  )
+}
+
+function protocolSystem(system: string, tools: AgentTool[]): string {
+  return `${system}
+
+## 本地工具协议
+你可以请求调用下列本地项目工具；这些工具由当前插件前端执行，能读取最新项目状态。
+宿主 MCP、skills、internal tools 可继续用于外部能力，但当前项目的剧本/分镜/资产读写必须使用下面的本地 JSON 协议。
+
+可用工具：
+${toolSchemaText(tools)}
+
+每轮只能输出一个 JSON 对象，二选一：
+1. 请求工具：
+{"tool_calls":[{"name":"get_project_overview","args":{}}]}
+2. 给用户最终回复：
+{"final":"这里写给用户的中文回复"}
+
+规则：
+- 需要确认当前剧本、分镜、资产、原著或时间线时，先请求读取工具。
+- 用户要求生成、新增、续写或修改项目内容时，最终回复前必须调用对应写入/生成工具：剧本用 upsert_script，资产用 add_asset，分镜用 add_storyboard，出图/关键帧/视频用 generate_*。不要只描述计划。
+- 写入后如需确认结果，再调用读取工具核对；确认完成后再给最终回复。
+- 工具返回后，再根据结果继续请求工具或给最终回复。
+- 不要把下列本地项目工具写成 Host RPC，也不要编造工具结果。
+- JSON 之外不要输出额外文字。`
+}
+
+function parseProtocol(raw: string): ProtocolResponse {
+  const trimmed = (raw || '').trim()
+  if (!trimmed) return { final: '' }
+  let s = trimmed
+  const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(s)
+  if (fence) s = fence[1].trim()
+  const start = s.indexOf('{')
+  const end = s.lastIndexOf('}')
+  if (start >= 0 && end > start) s = s.slice(start, end + 1)
+  try {
+    return JSON.parse(s) as ProtocolResponse
+  } catch {
+    return { final: trimmed }
+  }
+}
+
+function protocolFinal(res: ProtocolResponse, fallback: string): string {
+  return res.final ?? res.reply ?? res.content ?? fallback
+}
+
 /** 运行工具循环，返回最终文本回复。 */
 export async function runToolLoop(opts: ToolLoopOptions): Promise<string> {
   const ai = window.mulby?.ai
   if (!ai?.call) throw new Error('宿主 AI 不可用（请在宿主配置文本模型）')
-  const maxSteps = opts.maxSteps ?? 8
-  const params: AiModelParameters | undefined = opts.params && Object.keys(opts.params).length ? opts.params : undefined
-  const aiTools = opts.tools.map(toAiTool)
+  const maxSteps = opts.maxSteps ?? 12
+  const params: AiModelParameters = { responseFormat: 'json_object', ...(opts.params ?? {}) }
   const msgs: AiMessage[] = [
-    { role: 'system', content: opts.system },
+    { role: 'system', content: protocolSystem(opts.system, opts.tools) },
     { role: 'user', content: opts.user },
   ]
   let lastText = ''
 
   for (let step = 0; step < maxSteps; step++) {
     if (opts.signal?.aborted) break
-    const calls: Array<{ id?: string; name?: string; args?: unknown }> = []
-    let text = ''
-    const req = ai.call({ messages: msgs, model: opts.model, tools: aiTools, params }, (chunk: AiMessage) => {
-      if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
-        text += chunk.content
-        opts.onText?.(chunk.content)
-      }
+    let raw = ''
+    const req = ai.call({ messages: msgs, model: opts.model, params }, (chunk: AiMessage) => {
+      if (chunk.chunkType === 'text' && typeof chunk.content === 'string') raw += chunk.content
       if (chunk.chunkType === 'reasoning' && chunk.reasoning_content) opts.onReasoning?.(chunk.reasoning_content)
-      if (chunk.tool_call) calls.push(chunk.tool_call)
     })
     const onAbort = () => {
       try {
@@ -85,15 +140,18 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<string> {
     } finally {
       opts.signal?.removeEventListener('abort', onAbort)
     }
-    // 非流式：结果对象本身可能带 tool_call
-    if (result?.tool_call && !calls.some((c) => c.id === result.tool_call!.id)) calls.push(result.tool_call)
-    const finalText = text || (typeof result.content === 'string' ? result.content : '')
+    const finalText = raw || (typeof result.content === 'string' ? result.content : '')
     if (finalText) lastText = finalText
+    const parsed = parseProtocol(finalText)
+    const calls = parsed.tool_calls ?? parsed.toolCalls ?? []
 
-    if (calls.length === 0) return finalText || lastText || '（无回复）'
+    if (calls.length === 0) {
+      const reply = protocolFinal(parsed, finalText || lastText || '（无回复）')
+      if (reply) opts.onText?.(reply)
+      return reply
+    }
 
-    // 有工具调用：把本轮助手文本 + 各工具结果作为对话消息回灌（格式无关）
-    if (finalText) msgs.push({ role: 'assistant', content: finalText })
+    msgs.push({ role: 'assistant', content: JSON.stringify({ tool_calls: calls }) })
     for (const call of calls) {
       if (opts.signal?.aborted) return lastText
       const name = call.name || ''

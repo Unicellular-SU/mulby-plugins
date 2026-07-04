@@ -286,7 +286,7 @@ export default function ProviderSettings() {
                       className="afs-pvs-mono"
                       rows={3}
                       value={draft.bodyTemplate || ''}
-                      placeholder={'留空用通用 {prompt,image_url} body；占位符 {prompt}{imageUrl}{model}，条件块 {?imageUrl}…{/imageUrl}'}
+                      placeholder={'留空用通用 {prompt,image_url} body；占位符 {prompt}{imageUrl}{referenceImageUrls}{model}，条件块 {?imageUrl}…{/imageUrl} / {?referenceImageUrls}…{/referenceImageUrls}'}
                       onChange={(e) => set({ bodyTemplate: e.target.value })}
                     />
                   </Field>

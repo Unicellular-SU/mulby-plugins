@@ -10,6 +10,7 @@ import { getAgentSkill } from '../../services/skillSystem'
 import { getStylePack } from '../../services/stylePacks'
 import { useGraphStore } from '../../store/graphStore'
 import { recallContext, getMemoryConfig } from './memory'
+import { makeProjectReadTools } from './agentTools'
 import type { ProjectDoc } from '../../domain/types'
 
 export interface AgentPlan {
@@ -46,25 +47,148 @@ const CONTRACT = `
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
 - 全程使用项目设定的画风与对白语言。`
 
-function parsePlan(raw: string): AgentPlan {
+function stripJsonEnvelope(raw: string): string {
   const trimmed = (raw || '').trim()
   let s = trimmed
   const fence = /```(?:json)?\s*([\s\S]*?)```/.exec(s)
   if (fence) s = fence[1].trim()
+  return s
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  let s = stripJsonEnvelope(raw)
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
   if (start >= 0 && end > start) s = s.slice(start, end + 1)
-  // 无 JSON 对象（空/纯文本）：当作纯文字回复，不抛裸 SyntaxError
-  if (!s || s[0] !== '{') return { reply: trimmed || '（模型未返回内容，请重试）' }
-  let obj: Record<string, unknown>
+  if (!s || s[0] !== '{') return null
   try {
-    obj = JSON.parse(s) as Record<string, unknown>
+    return JSON.parse(s) as Record<string, unknown>
   } catch {
-    return { reply: trimmed || '（模型输出无法解析，请重试或换个说法）' }
+    return null
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function cleanText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function textFromKeys(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const text = cleanText(obj[key])
+    if (text) return text
+  }
+  return undefined
+}
+
+function arrayFromKeys(obj: Record<string, unknown>, keys: string[]): unknown[] | undefined {
+  for (const key of keys) {
+    const value = obj[key]
+    if (Array.isArray(value)) return value
+  }
+  return undefined
+}
+
+function formatDialogueLine(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (!isRecord(value)) return ''
+  const speaker = textFromKeys(value, ['character', 'speaker', 'name', '角色', '人物']) ?? '角色'
+  const line = textFromKeys(value, ['line', 'text', 'content', 'dialogue', '台词', '对白'])
+  const emotion = textFromKeys(value, ['emotion', '情绪'])
+  return line ? `${speaker}${emotion ? `（${emotion}）` : ''}：${line}` : ''
+}
+
+function formatBeatLine(value: unknown): string {
+  if (typeof value === 'string') return `- ${value.trim()}`
+  if (!isRecord(value)) return ''
+  const desc = textFromKeys(value, ['videoDesc', 'description', 'summary', 'action', 'content', 'text', '画面', '描述', '动作'])
+  const dialogues = arrayFromKeys(value, ['dialogues', 'dialogue', 'lines', '台词', '对白'])
+    ?.map(formatDialogueLine)
+    .filter(Boolean)
+    .join('\n  ')
+  const main = desc ?? JSON.stringify(value)
+  return [`- ${main}`, dialogues ? `  ${dialogues}` : ''].filter(Boolean).join('\n')
+}
+
+function formatScriptScene(value: unknown, index: number): string {
+  if (typeof value === 'string') return `第 ${index + 1} 场\n${value.trim()}`
+  if (!isRecord(value)) return ''
+  const title = textFromKeys(value, ['title', 'name', 'sceneName', 'scene', 'slug', 'heading', '标题', '场名'])
+  const location = textFromKeys(value, ['location', 'place', '地点', '场景'])
+  const time = textFromKeys(value, ['time', 'dayTime', '时间'])
+  const header = [title ?? `第 ${index + 1} 场`, location, time].filter(Boolean).join(' / ')
+  const body = textFromKeys(value, ['summary', 'description', 'action', 'content', 'text', '简介', '描述', '动作'])
+  const dialogues = arrayFromKeys(value, ['dialogues', 'dialogue', 'lines', '台词', '对白'])
+    ?.map(formatDialogueLine)
+    .filter(Boolean)
+    .join('\n')
+  const beats = arrayFromKeys(value, ['beats', 'shots', '镜头', '节拍'])
+    ?.map(formatBeatLine)
+    .filter(Boolean)
+    .join('\n')
+  const parts = [header, body, dialogues, beats].filter((part): part is string => !!part?.trim())
+  return parts.length > 1 ? parts.join('\n') : `${header}\n${JSON.stringify(value, null, 2)}`
+}
+
+function formatStructuredScript(obj: Record<string, unknown>): string | undefined {
+  const scenes = arrayFromKeys(obj, ['scenes', '场次', '场景', '分场'])
+  if (scenes?.length) return scenes.map(formatScriptScene).filter(Boolean).join('\n\n')
+  const acts = arrayFromKeys(obj, ['acts', 'segments', '幕', '段落'])
+  if (acts?.length) return acts.map(formatScriptScene).filter(Boolean).join('\n\n')
+  return undefined
+}
+
+function normalizeScriptCandidate(value: unknown, fallbackName?: string): AgentPlan['script'] | undefined {
+  const directText = cleanText(value)
+  if (directText) return { name: fallbackName, content: directText }
+  if (!isRecord(value)) return undefined
+
+  const name = textFromKeys(value, ['name', 'title', 'scriptName', '剧本名', '标题']) ?? fallbackName
+  const content = textFromKeys(value, ['content', 'scriptContent', 'screenplay', 'text', 'body', '正文', '剧本正文'])
+  if (content) return { name, content }
+
+  const nested =
+    normalizeScriptCandidate(value.script, name) ??
+    normalizeScriptCandidate(value['剧本'], name) ??
+    normalizeScriptCandidate(value.screenplay, name)
+  if (nested?.content) return { name: nested.name ?? name, content: nested.content }
+
+  const structured = formatStructuredScript(value)
+  return structured ? { name, content: structured } : undefined
+}
+
+function looksLikeScriptText(text: string): boolean {
+  return (
+    /(第\s*[0-9一二三四五六七八九十]+\s*[场幕镜]|场景|内景|外景|对白|旁白|INT\.|EXT\.|动作[:：]|人物[:：]|镜头\s*\d+)/i.test(text) ||
+    text.length >= 200
+  )
+}
+
+function parseScriptOutput(raw: string): AgentPlan['script'] | undefined {
+  const parsed = parsePlan(raw).script
+  if (parsed?.content?.trim()) return { name: parsed.name, content: parsed.content.trim() }
+  if (parseJsonObject(raw)) return undefined
+  const text = stripJsonEnvelope(raw)
+  if (looksLikeScriptText(text)) return { name: '剧本', content: text.trim() }
+  return undefined
+}
+
+function parsePlan(raw: string): AgentPlan {
+  const trimmed = (raw || '').trim()
+  const obj = parseJsonObject(trimmed)
+  // 无 JSON 对象（空/纯文本）：当作纯文字回复，不抛裸 SyntaxError
+  if (!obj) return { reply: trimmed || '（模型未返回内容，请重试）' }
+  const script =
+    normalizeScriptCandidate(obj.script) ??
+    normalizeScriptCandidate(obj['剧本']) ??
+    normalizeScriptCandidate(obj.screenplay) ??
+    normalizeScriptCandidate(obj)
   return {
     reply: typeof obj.reply === 'string' ? obj.reply : '已处理。',
-    script: obj.script && typeof obj.script === 'object' ? (obj.script as AgentPlan['script']) : undefined,
+    script,
     assets: Array.isArray(obj.assets) ? (obj.assets as AgentPlan['assets']) : undefined,
     storyboards: Array.isArray(obj.storyboards) ? (obj.storyboards as AgentPlan['storyboards']) : undefined,
     autoGenerate: obj.autoGenerate === true,
@@ -125,12 +249,14 @@ async function callJson(
   return parsePlan(r.content)
 }
 
-/** 工具循环（§6.1 实验路径）的 system 提示词：决策 skill + 项目上下文 + 工具使用说明 */
+/** 工具增强循环（§6.1）的 system 提示词：决策 skill + 项目上下文 + 工具使用说明 */
 export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): string {
   const TOOL_GUIDE =
-    '你是 AI 制片。可调用工具读写工作区：get_workspace（看现状）/upsert_script（写剧本）/add_asset（加资产）/' +
-    'add_storyboard（加分镜）/generate_asset、generate_keyframe、generate_clip（生成）。先规划，再按需调用工具完成用户需求；' +
-    '资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
+    '你是 AI 制片。工具返回的是当前项目的实时状态；凡是用户要求续写、修改、对齐已有内容、查询当前状态，先调用读取工具核对，不要只凭摘要猜测。' +
+    '只读工具：get_project_overview/get_workspace（项目概览）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
+    'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
+    '写入/生成工具：upsert_script（写剧本）、add_asset（加资产）、add_storyboard（加分镜）、generate_asset、generate_keyframe、generate_clip。' +
+    '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
 
@@ -147,14 +273,18 @@ type StageTask = 'script' | 'assets' | 'storyboard'
 const DECIDE_CONTRACT = `
 只输出一个 JSON 对象（无额外文字/围栏）：{"reply":"给用户的简短中文说明","tasks":["script"|"assets"|"storyboard"...],"autoGenerate":false}
 - tasks：本轮要做的环节（用户只想改剧本就只列 ["script"]；要从头出片列 ["script","assets","storyboard"]；只想加镜头列 ["storyboard"]）。
+- 用户说「列出人物和场景」「生成需要的资产」「资产没看到」「角色/场景/道具/素材」时，tasks 必须包含 "assets"。
+- 用户说「N 个镜头」「分镜」「短片」「视频片段」时，tasks 必须包含 "storyboard"。
+- 用户说「把故事改成」「改编」「写剧本/短剧/对白」时，tasks 必须包含 "script"。
 - autoGenerate：用户明确要求「出图/直接成片」时 true。`
 
 const SCRIPT_SKILL =
   '你是「编剧」。把用户的素材（一句话/故事/小说/指令）改编成结构化短剧剧本：分场、对白、动作。遵循项目画风与对白语言。' +
-  '已有剧本则在其基础上修改/续写。只输出 JSON：{"script":{"name":"剧本名","content":"剧本正文"}}'
+  '已有剧本则在其基础上修改/续写。必须把完整剧本正文放进 script.content，不要只在 reply 里说已生成。只输出 JSON：{"script":{"name":"剧本名","content":"剧本正文"}}'
 const ASSETS_SKILL =
-  '你是「美术设定」。从本轮剧本提炼需要的资产：人物(role)/场景(scene)/物品(prop)。每个给中文描述 desc + 英文生成提示词 prompt。' +
-  '已存在的资产（见上下文）不要重复。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","desc":"","prompt":""}]}'
+  '你是「美术设定」。从当前剧本提炼需要的资产：人物(role)/场景(scene)/物品(prop)。当前剧本可能来自本轮新剧本，也可能来自工具读取到的已有剧本/get_script。' +
+  '每个资产给中文描述 desc + 英文生成提示词 prompt。已存在的资产（见上下文）不要重复；如果用户明确要求补资产且已有资产为空/缺失，不允许返回空数组，至少提炼角色和主要场景。' +
+  '资产名要能被分镜 cast 直接引用。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","desc":"","prompt":""}]}'
 const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
@@ -184,12 +314,36 @@ function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGe
   }
 }
 
+const TASK_ORDER: StageTask[] = ['script', 'assets', 'storyboard']
+
+function normalizeDecisionTasks(tasks: StageTask[], userText: string): StageTask[] {
+  const text = userText.trim()
+  const set = new Set<StageTask>(tasks)
+  const wantsAssets =
+    /(资产|素材|人物|角色|场景|道具|美术|列出.*(人物|角色|场景)|生成.*(资产|素材|人物|角色|场景|道具)|需要的资产|资产.*没|没看到.*资产)/.test(text) &&
+    !/(不要|不需要|不用).*(资产|素材|人物|角色|场景|道具)/.test(text)
+  const wantsStoryboard = /(分镜|镜头|短片|视频片段|短视频|[0-9一二三四五六七八九十]+\s*个\s*镜头)/.test(text)
+  const wantsScript =
+    /(把|将|请把|请将).*(故事|小说|原著|剧本).*(改成|改写成|改编成|整理成).*(剧本|短剧|对白|分场)?/.test(text) ||
+    /(改编|改写|重写).*(故事|小说|原著|剧本|短剧|对白)/.test(text) ||
+    /(写|创作|生成|产出|整理).*(剧本|短剧|对白|分场)/.test(text) ||
+    /(续写|扩写|补写).*(剧本|短剧|对白|故事|小说)/.test(text) ||
+    /剧本.*(修改|重写|改成|改写|续写|扩写|补写)/.test(text)
+
+  if (wantsScript) set.add('script')
+  if (wantsAssets) set.add('assets')
+  if (wantsStoryboard) set.add('storyboard')
+  return TASK_ORDER.filter((t) => set.has(t))
+}
+
 // —— 管线过程事件：供对话面板逐步可视化（每个子 Agent 的开始/思考流/产出摘要/完成）——
 export type PipelineAgentId = 'decision' | 'script' | 'assets' | 'storyboard'
 export type PipelineEvent =
   | { type: 'start'; agent: PipelineAgentId; title: string }
   | { type: 'reasoning'; agent: PipelineAgentId; delta: string }
   | { type: 'output'; agent: PipelineAgentId; summary: string }
+  | { type: 'toolCall'; agent: PipelineAgentId; name: string; args: Record<string, unknown> }
+  | { type: 'toolResult'; agent: PipelineAgentId; name: string; result: string }
   | { type: 'done'; agent: PipelineAgentId }
 
 const AGENT_TITLES: Record<PipelineAgentId, string> = {
@@ -200,16 +354,102 @@ const AGENT_TITLES: Record<PipelineAgentId, string> = {
 }
 const TASK_ZH: Record<StageTask, string> = { script: '剧本', assets: '资产', storyboard: '分镜' }
 const ASSET_ZH: Record<string, string> = { role: '角色', scene: '场景', prop: '物品' }
+type PipelineToolRequest = { name: string; args?: Record<string, unknown>; limit?: number }
+type PlanAsset = NonNullable<AgentPlan['assets']>[number]
+
+const TOOL_CONTEXT_CAP = 24000
+const PIPELINE_TOOL_GUIDE =
+  '## 子 Agent 工具上下文\n' +
+  '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。'
+
+type ProjectDocSource = ProjectDoc | (() => ProjectDoc | null | undefined)
+export type PipelineStage = StageTask
+export type PipelineStagePlan = Pick<AgentPlan, 'script' | 'assets' | 'storyboards'>
+
+function resolvePipelineDoc(source: ProjectDocSource): ProjectDoc {
+  const doc = typeof source === 'function' ? source() : source
+  if (!doc) throw new Error('项目已关闭或未打开')
+  return doc
+}
+
+function capToolContext(result: string, limit = TOOL_CONTEXT_CAP): string {
+  if (limit <= 0 || result.length <= limit) return result
+  return `${result.slice(0, limit)}\n...（工具结果共 ${result.length} 字，已为上下文截断）`
+}
+
+async function readPipelineToolContext(
+  getDoc: () => ProjectDoc,
+  agent: PipelineAgentId,
+  requests: PipelineToolRequest[],
+  emit: (e: PipelineEvent) => void,
+): Promise<string> {
+  if (!requests.length) return ''
+  const tools = makeProjectReadTools(getDoc)
+  const chunks: string[] = []
+  for (const req of requests) {
+    const args = req.args ?? {}
+    emit({ type: 'toolCall', agent, name: req.name, args })
+    const tool = tools.find((t) => t.name === req.name)
+    let result = ''
+    try {
+      result = tool ? await tool.execute(args) : `未找到读取工具：${req.name}`
+    } catch (e) {
+      result = `读取工具执行出错：${e instanceof Error ? e.message : String(e)}`
+    }
+    const capped = capToolContext(result, req.limit)
+    emit({ type: 'toolResult', agent, name: req.name, result: capped })
+    chunks.push(`### ${req.name}\n${capped}`)
+  }
+  return [PIPELINE_TOOL_GUIDE, ...chunks].join('\n\n')
+}
 
 function summarizeAssets(assets?: AgentPlan['assets']): string {
   // 防御 LLM 畸形输出：仅统计有名字/类型的项（与 applyPlan 去重口径一致，避免摘要抛错拖垮整轮）
-  const valid = (assets ?? []).filter((a) => a && a.name && a.type)
+  const valid = cleanAssets(assets)
   if (!valid.length) return '本轮无新增资产。'
   const byType: Record<string, string[]> = {}
   for (const a of valid) (byType[ASSET_ZH[a.type] ?? a.type] ??= []).push(a.name)
   return Object.entries(byType)
     .map(([t, ns]) => `- **${t}**：${ns.join('、')}`)
     .join('\n')
+}
+
+function cleanAssets(assets?: AgentPlan['assets']): PlanAsset[] {
+  const seen = new Set<string>()
+  const out: PlanAsset[] = []
+  for (const a of assets ?? []) {
+    if (!a?.name || (a.type !== 'role' && a.type !== 'scene' && a.type !== 'prop')) continue
+    const name = String(a.name).trim()
+    if (!name) continue
+    const key = `${a.type}:${name}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ type: a.type, name, desc: a.desc, prompt: a.prompt })
+  }
+  return out
+}
+
+function currentScriptContent(doc: ProjectDoc, plan: AgentPlan): string {
+  return plan.script?.content?.trim() || doc.scripts[0]?.content?.trim() || ''
+}
+
+function summarizePlanResult(plan: AgentPlan, tasks: StageTask[]): string {
+  const parts: string[] = []
+  if (plan.script?.content) {
+    parts.push(`已生成剧本${plan.script.name ? `《${plan.script.name}》` : ''}。`)
+  }
+  const assets = cleanAssets(plan.assets)
+  if (assets.length) {
+    const byType: Record<string, string[]> = {}
+    for (const a of assets) (byType[ASSET_ZH[a.type] ?? a.type] ??= []).push(a.name)
+    parts.push(`已生成 ${assets.length} 个资产数据：${Object.entries(byType).map(([t, ns]) => `${t} ${ns.join('、')}`).join('；')}。`)
+  } else if (tasks.includes('assets')) {
+    parts.push('美术没有产出可写入的新资产，我没有向资产列表写入空结果。')
+  }
+  const storyboards = (plan.storyboards ?? []).filter((s) => s && typeof s.videoDesc === 'string' && s.videoDesc.trim())
+  if (storyboards.length) parts.push(`已生成 ${storyboards.length} 个分镜。`)
+  if (!parts.length) return '本轮没有产生可写入的新内容。'
+  return parts.join('\n')
 }
 
 function summarizeStoryboards(sbs?: AgentPlan['storyboards']): string {
@@ -231,26 +471,37 @@ function summarizeStoryboards(sbs?: AgentPlan['storyboards']): string {
  *（开始/思考流/产出摘要/完成），供对话面板把「多 Agent 各做了什么」可视化。
  */
 export async function runAgentPipeline(
-  doc: ProjectDoc,
+  docSource: ProjectDocSource,
   userText: string,
   onEvent?: (e: PipelineEvent) => void,
+  onStagePlan?: (stage: PipelineStage, plan: PipelineStagePlan) => void | Promise<void>,
 ): Promise<AgentPlan> {
   const model = ensureModel()
   const cfg = await getMemoryConfig()
-  const ctx = buildContext(doc, recallContext(doc, userText, cfg))
+  const getDoc = () => resolvePipelineDoc(docSource)
+  const makeBaseCtx = () => {
+    const current = getDoc()
+    return buildContext(current, recallContext(current, userText, cfg))
+  }
+  const stageApplied = async (stage: PipelineStage, fragment: PipelineStagePlan) => {
+    await onStagePlan?.(stage, fragment)
+  }
   const emit = onEvent ?? (() => {})
   const reasoner = (agent: PipelineAgentId) => (delta: string) => emit({ type: 'reasoning', agent, delta })
 
   // 决策层
   emit({ type: 'start', agent: 'decision', title: AGENT_TITLES.decision })
+  const decisionToolCtx = await readPipelineToolContext(getDoc, 'decision', [{ name: 'get_project_overview', limit: 16000 }], emit)
+  const decisionCtx = [makeBaseCtx(), decisionToolCtx].filter(Boolean).join('\n\n')
   const decisionRaw = await runText({
     model,
-    system: [getAgentSkill('production_agent_decision'), ctx, DECIDE_CONTRACT].filter(Boolean).join('\n\n'),
+    system: [getAgentSkill('production_agent_decision'), decisionCtx, DECIDE_CONTRACT].filter(Boolean).join('\n\n'),
     user: userText,
     jsonMode: true,
     onReasoning: reasoner('decision'),
   })
-  const decision = parseDecision(decisionRaw.content)
+  const parsedDecision = parseDecision(decisionRaw.content)
+  const decision = { ...parsedDecision, tasks: normalizeDecisionTasks(parsedDecision.tasks, userText) }
   const plan: AgentPlan = { reply: decision.reply, autoGenerate: decision.autoGenerate }
   emit({
     type: 'output',
@@ -263,7 +514,26 @@ export async function runAgentPipeline(
 
   if (decision.tasks.includes('script')) {
     emit({ type: 'start', agent: 'script', title: AGENT_TITLES.script })
-    plan.script = (await callJson(model, SCRIPT_SKILL, ctx, '', userText, reasoner('script'))).script
+    const scriptToolCtx = await readPipelineToolContext(
+      getDoc,
+      'script',
+      [
+        { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+        { name: 'get_novel', args: { includeText: true, textLimit: 6000 }, limit: 30000 },
+        { name: 'get_storyboard_table', limit: 18000 },
+      ],
+      emit,
+    )
+    const scriptCtx = [makeBaseCtx(), scriptToolCtx].filter(Boolean).join('\n\n')
+    const scriptRaw = await runText({
+      model,
+      system: [SCRIPT_SKILL, scriptCtx].filter(Boolean).join('\n\n'),
+      user: userText,
+      jsonMode: true,
+      onReasoning: reasoner('script'),
+    })
+    plan.script = parseScriptOutput(scriptRaw.content)
     emit({
       type: 'output',
       agent: 'script',
@@ -271,25 +541,72 @@ export async function runAgentPipeline(
         ? `已产出剧本${plan.script.name ? ` **《${plan.script.name}》**` : ''}（约 ${plan.script.content.length} 字）。`
         : '未产出剧本内容。',
     })
+    await stageApplied('script', { script: plan.script })
     emit({ type: 'done', agent: 'script' })
   }
   if (decision.tasks.includes('assets')) {
     emit({ type: 'start', agent: 'assets', title: AGENT_TITLES.assets })
-    const aCtx = plan.script ? `${ctx}\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : ctx
-    plan.assets = (await callJson(model, ASSETS_SKILL, aCtx, '', userText, reasoner('assets'))).assets
+    const scriptSource = currentScriptContent(getDoc(), plan)
+    const assetsToolCtx = await readPipelineToolContext(
+      getDoc,
+      'assets',
+      [
+        { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
+        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+      ],
+      emit,
+    )
+    const aCtx = [
+      makeBaseCtx(),
+      assetsToolCtx,
+      scriptSource ? `## 当前剧本正文（美术资产提炼的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
+      plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    plan.assets = cleanAssets((await callJson(model, ASSETS_SKILL, aCtx, '', userText, reasoner('assets'))).assets)
+    if (!plan.assets.length && scriptSource) {
+      const retrySkill =
+        ASSETS_SKILL +
+        '\n\n你上一次没有返回可写入资产，但当前任务明确需要资产。请只基于「当前剧本正文」提炼缺失资产；已有资产为空或缺失时，必须返回角色、主要场景和关键道具，不允许返回空数组。'
+      const retryUser = `${userText}\n\n请从当前剧本正文中提炼并生成缺失资产数据；只输出 assets JSON。`
+      plan.assets = cleanAssets((await callJson(model, retrySkill, aCtx, '', retryUser, reasoner('assets'))).assets)
+    }
     emit({ type: 'output', agent: 'assets', summary: summarizeAssets(plan.assets) })
+    await stageApplied('assets', { assets: plan.assets })
     emit({ type: 'done', agent: 'assets' })
   }
   if (decision.tasks.includes('storyboard')) {
     emit({ type: 'start', agent: 'storyboard', title: AGENT_TITLES.storyboard })
-    const aList = (plan.assets ?? []).map((a) => `${a.name}(${a.type})`).join('、')
-    const sCtx =
-      ctx +
-      (plan.script ? `\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : '') +
-      (aList ? `\n## 本轮新增资产\n${aList}` : '')
+    const scriptSource = currentScriptContent(getDoc(), plan)
+    const storyboardToolCtx = await readPipelineToolContext(
+      getDoc,
+      'storyboard',
+      [
+        { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_storyboards', args: { count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
+        { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
+        { name: 'get_timeline', args: { includeClips: false }, limit: 18000 },
+        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+      ],
+      emit,
+    )
+    const newAssets = plan.assets?.length ? JSON.stringify(plan.assets, null, 2).slice(0, 16000) : ''
+    const sCtx = [
+      makeBaseCtx(),
+      storyboardToolCtx,
+      scriptSource ? `## 当前剧本正文（分镜拆解的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
+      plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
+      newAssets ? `## 本轮新增资产（与已有资产合并使用，cast 名称必须匹配）\n${newAssets}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
     plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText, reasoner('storyboard'))).storyboards
     emit({ type: 'output', agent: 'storyboard', summary: summarizeStoryboards(plan.storyboards) })
+    await stageApplied('storyboard', { storyboards: plan.storyboards })
     emit({ type: 'done', agent: 'storyboard' })
   }
+  plan.reply = summarizePlanResult(plan, decision.tasks)
   return plan
 }

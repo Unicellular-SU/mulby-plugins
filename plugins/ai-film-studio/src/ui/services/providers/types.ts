@@ -67,6 +67,7 @@ export interface VideoGenRequest {
   prompt: string
   imageUrl?: string // 首帧（data URL 或可访问 URL）
   lastImageUrl?: string // 尾帧（first-last-frame，如 WAN FLF2V / Kling 起止帧）
+  referenceImages?: VideoReferenceImage[]
   duration?: number
   size?: string
   aspectRatio?: string // 画幅 16:9 / 9:16 / 1:1（toapis grok 等用 aspect_ratio；不传时供应商常默认竖屏 9:16）
@@ -77,6 +78,13 @@ export interface VideoGenRequest {
   dialogue?: { speaker: string; line: string; emotion?: string }[] // 结构化对白（带 speaker 标注的家族用）
   drivingAudioUrl?: string // driving-audio 家族（Wan/Seedance）/ lipsync：把音频 URL 喂入
   videoUrl?: string // P2-8 lipsync：被驱动的视频/静帧 URL
+}
+
+export interface VideoReferenceImage {
+  url: string
+  name?: string
+  type?: string
+  source?: 'asset' | 'storyboard' | 'frame'
 }
 
 export type VideoStatus = 'queued' | 'running' | 'completed' | 'failed'

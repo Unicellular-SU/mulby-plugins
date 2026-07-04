@@ -3725,7 +3725,7 @@ select.afs-toolbar__select,
 .afs-studio__flowref span { display: block; font-size: 10px; padding: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__flowmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .afs-studio__flowkf { width: 100%; max-height: 280px; object-fit: contain; border-radius: 8px; background: #000; }
-/* 阶段6：Agent 原生工具调用开关激活态 */
+/* 阶段6：Agent 面板图标按钮激活态 */
 .afs-studio__manualtoggle.is-on { background: var(--afs-grad-accent); color: var(--afs-on-accent); border-radius: 5px; }
 /* 阶段5：资产润色提示词 + 衍生变体 */
 .afs-studio__cardprompt { margin-top: 6px; resize: vertical; font-family: inherit; font-size: 11px; line-height: 1.5; color: var(--afs-text-dim); }
@@ -3908,7 +3908,8 @@ select.afs-toolbar__select,
 .afs-studio__chain.is-on { border-style: solid; border-color: var(--afs-accent); color: var(--afs-accent); background: color-mix(in srgb, var(--afs-accent) 12%, transparent); }
 
 /* 工作台 · 导演手册（阶段4a） */
-.afs-studio__manualtoggle { margin-left: auto; border: none; background: transparent; cursor: pointer; font-size: 15px; color: var(--afs-muted); border-radius: var(--afs-r-xs); transition: color var(--afs-dur-ui) var(--afs-ease-standard), background var(--afs-dur-ui) var(--afs-ease-standard); }
+.afs-studio__manualtoggle { margin-left: 0; border: none; background: transparent; cursor: pointer; font-size: 15px; color: var(--afs-muted); border-radius: var(--afs-r-xs); transition: color var(--afs-dur-ui) var(--afs-ease-standard), background var(--afs-dur-ui) var(--afs-ease-standard); }
+.afs-studio__agent-head .afs-studio__manualtoggle:first-of-type { margin-left: auto; }
 .afs-studio__manualtoggle:hover { color: var(--afs-text); }
 .afs-studio__manualtoggle:focus-visible { outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--afs-ring) 55%, transparent); }
 .afs-studio__manual { margin: 0 12px 8px; resize: vertical; font-size: 12px; }

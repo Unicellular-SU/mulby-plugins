@@ -8,7 +8,7 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
-import type { PipelineEvent } from '../studio/agent/agent'
+import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
@@ -16,6 +16,7 @@ import { synthVoiceSample, matchRoleVoices } from '../studio/services/audio'
 import { maybeSummarize, getMemoryConfig, recallContext } from '../studio/agent/memory'
 import { deleteAsset } from '../services/assets'
 import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
+import type { PipelineStage, PipelineStagePlan } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
 import { abortText } from '../services/textEngine'
@@ -28,6 +29,7 @@ import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
 import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
+import { flushLogs, logError, logInfo } from '../services/localLog'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -124,7 +126,7 @@ export interface ProjectState {
 
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
   runAgent: (userText: string) => Promise<void>
-  /** 实验：原生工具循环 Agent（§6.1，依赖 R1；jsonMode 管线仍为默认兜底） */
+  /** 工具增强 Agent（§6.1）：可按需读取真实项目状态并调用工具写入；jsonMode 管线保留为兜底 */
   runAgentToolLoop: (userText: string) => Promise<void>
   /** 中断进行中的 Agent（管线 runText 与工具循环均尽力中断） */
   abortAgent: () => void
@@ -202,6 +204,130 @@ function scheduleSave(get: () => ProjectState) {
   }, 700)
 }
 
+function textPreview(text: string | undefined, limit = 700): { length: number; preview: string } {
+  const value = text ?? ''
+  return { length: value.length, preview: value.length > limit ? `${value.slice(0, limit)}…` : value }
+}
+
+function docCounts(doc: ProjectDoc | null | undefined) {
+  return {
+    scripts: doc?.scripts.length ?? 0,
+    assets: doc?.assets.length ?? 0,
+    storyboards: doc?.storyboards.length ?? 0,
+    clips: doc?.clips.length ?? 0,
+    tracks: doc?.track.length ?? 0,
+    novelChapters: doc?.novel.length ?? 0,
+  }
+}
+
+function planForLog(plan: AgentPlan) {
+  return {
+    reply: textPreview(plan.reply, 1000),
+    script: plan.script
+      ? { name: plan.script.name, content: textPreview(plan.script.content, 1200) }
+      : undefined,
+    assets: (plan.assets ?? []).map((a) => ({ type: a?.type, name: a?.name, hasDesc: !!a?.desc, hasPrompt: !!a?.prompt })),
+    storyboards: (plan.storyboards ?? []).map((s, i) => ({
+      index: i + 1,
+      replaceIndex: s?.replaceIndex,
+      videoDesc: textPreview(s?.videoDesc, 300),
+      duration: s?.duration,
+      cast: s?.cast,
+      dialogueCount: s?.dialogues?.length ?? 0,
+    })),
+    autoGenerate: plan.autoGenerate === true,
+  }
+}
+
+interface AgentApplySummary {
+  script?: { name: string; length: number }
+  assetsCreated: Array<{ id: string; type: Asset['type']; name: string }>
+  assetsUpdated: Array<{ id: string; type: Asset['type']; name: string }>
+  storyboardsAdded: Array<{ id: string; index: number; desc: string }>
+  storyboardsReplaced: Array<{ id: string; index: number; desc: string }>
+}
+
+function createAgentApplySummary(): AgentApplySummary {
+  return { assetsCreated: [], assetsUpdated: [], storyboardsAdded: [], storyboardsReplaced: [] }
+}
+
+function applyAgentScript(d: ProjectDoc, script: AgentPlan['script'] | undefined, applied: AgentApplySummary): void {
+  if (!script?.content) return
+  const name = script.name || `剧本 ${d.scripts.length + 1}`
+  if (d.scripts.length) d.scripts[0] = { ...d.scripts[0], name, content: script.content, updatedAt: Date.now() }
+  else d.scripts.push({ id: P.newId('s_'), name, content: script.content, createdAt: Date.now(), updatedAt: Date.now() })
+  applied.script = { name, length: script.content.length }
+}
+
+function applyAgentAssets(d: ProjectDoc, assets: AgentPlan['assets'] | undefined, applied: AgentApplySummary): void {
+  for (const a of assets ?? []) {
+    if (!a?.name || !a.type) continue
+    const ex = d.assets.find((x) => x.name === a.name && x.type === a.type)
+    if (ex) {
+      ex.desc = a.desc ?? ex.desc
+      ex.prompt = a.prompt ?? ex.prompt
+      applied.assetsUpdated.push({ id: ex.id, type: ex.type, name: ex.name })
+    } else {
+      const id = P.newId('a_')
+      d.assets.push({ id, type: a.type, name: a.name, desc: a.desc, prompt: a.prompt, state: 'idle' })
+      applied.assetsCreated.push({ id, type: a.type, name: a.name })
+    }
+  }
+}
+
+function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboards'] | undefined, applied: AgentApplySummary): void {
+  const nameToId = new Map(d.assets.map((a) => [a.name, a.id]))
+  for (const sb of storyboards ?? []) {
+    if (!sb?.videoDesc) continue
+    const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
+    const dlgs = Array.isArray(sb.dialogues)
+      ? sb.dialogues
+          .filter((x) => x && typeof x.line === 'string' && x.line.trim())
+          .map((x) => ({ character: String(x.character ?? ''), line: String(x.line).trim(), emotion: x.emotion ? String(x.emotion) : undefined }))
+      : undefined
+    const ri = typeof sb.replaceIndex === 'number' && sb.replaceIndex > 0 ? sb.replaceIndex - 1 : -1
+    const target = ri >= 0 ? d.storyboards.find((s) => s.index === ri) : undefined
+    if (target) {
+      target.videoDesc = sb.videoDesc
+      if (sb.prompt != null) target.prompt = sb.prompt
+      if (typeof sb.duration === 'number') target.duration = sb.duration
+      if (sb.cast) target.associateAssetIds = cast
+      if (dlgs) target.dialogues = dlgs
+      if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
+      target.keyframeImageId = undefined
+      target.state = 'idle'
+      target.error = undefined
+      applied.storyboardsReplaced.push({ id: target.id, index: target.index + 1, desc: target.videoDesc.slice(0, 120) })
+      continue
+    }
+    const id = P.newId('sb_')
+    const index = d.storyboards.length
+    d.storyboards.push({
+      id,
+      index,
+      track: '默认',
+      videoDesc: sb.videoDesc,
+      prompt: sb.prompt,
+      duration: typeof sb.duration === 'number' ? sb.duration : 5,
+      associateAssetIds: cast,
+      dialogues: dlgs ?? [],
+      shouldGenerateImage: true,
+      chainFromPrev: sb.chainFromPrev === true,
+      state: 'idle',
+    })
+    applied.storyboardsAdded.push({ id, index: index + 1, desc: sb.videoDesc.slice(0, 120) })
+  }
+  if ((storyboards ?? []).some((sb) => sb?.videoDesc)) syncTracksFromStoryboards(d)
+}
+
+function pipelineEventForLog(e: PipelineEvent) {
+  if (e.type === 'reasoning') return null
+  if (e.type === 'toolResult') return { type: e.type, agent: e.agent, name: e.name, result: textPreview(e.result, 1200) }
+  if (e.type === 'output') return { type: e.type, agent: e.agent, summary: textPreview(e.summary, 1200) }
+  if (e.type === 'toolCall') return { type: e.type, agent: e.agent, name: e.name, args: e.args }
+  return e
+}
+
 /**
  * 过程轨迹构建器：把 Agent 运行中的事件（管线子 Agent / 工具循环的思考·工具调用）
  * 增量累积成 AgentStep[]，并实时写入 agentTrace 供对话面板逐步渲染；结束时 finalize 落到助手消息。
@@ -219,9 +345,30 @@ function makeTrace(set: (partial: Partial<ProjectState>) => void) {
   }
   const lastRunning = (kind: AgentStep['kind'], agent?: string) =>
     [...steps].reverse().find((s) => s.kind === kind && (agent === undefined || s.agent === agent) && s.status === 'running')
+  const recordToolCall = (name: string, args: unknown, title = `调用 ${name}`) => {
+    for (const s of steps) if ((s.kind === 'thinking' || s.kind === 'text') && s.status === 'running') s.status = 'done'
+    steps.push({ id: P.newId('st_'), kind: 'tool', title, toolName: name, toolArgs: safeData(args), status: 'running' })
+    sync()
+  }
+  const recordToolResult = (name: string, result: string) => {
+    const s = [...steps].reverse().find((x) => x.kind === 'tool' && x.toolName === name && x.status === 'running')
+    if (s) {
+      s.toolResult = result
+      s.status = 'done'
+    }
+    sync()
+  }
   return {
     /** 分阶段管线事件 → 每个子 Agent 一张卡片（内嵌思考流 + 产出摘要）。 */
     onPipeline(e: PipelineEvent) {
+      if (e.type === 'toolCall') {
+        recordToolCall(`读取 ${e.name}`, e.args, `读取 ${e.name}`)
+        return
+      }
+      if (e.type === 'toolResult') {
+        recordToolResult(`读取 ${e.name}`, e.result)
+        return
+      }
       if (e.type === 'start') {
         steps.push({ id: P.newId('st_'), kind: 'agent', agent: e.agent, title: e.title, thinking: '', content: '', status: 'running' })
       } else {
@@ -256,17 +403,10 @@ function makeTrace(set: (partial: Partial<ProjectState>) => void) {
     },
     /** 工具循环：一次工具调用（先收束在跑的思考/文本步——这些文本确属工具调用前的串联意图，保留）。 */
     toolCall(name: string, args: unknown) {
-      for (const s of steps) if ((s.kind === 'thinking' || s.kind === 'text') && s.status === 'running') s.status = 'done'
-      steps.push({ id: P.newId('st_'), kind: 'tool', title: `调用 ${name}`, toolName: name, toolArgs: safeData(args), status: 'running' })
-      sync()
+      recordToolCall(name, args)
     },
     toolResult(name: string, result: string) {
-      const s = [...steps].reverse().find((x) => x.kind === 'tool' && x.toolName === name && x.status === 'running')
-      if (s) {
-        s.toolResult = result
-        s.status = 'done'
-      }
-      sync()
+      recordToolResult(name, result)
     },
     /** 结束：剔除末尾未被工具收束的 text 步（=最终回复，已作气泡展示），把 running 标记完成、超长思考/结果截断，返回快照。 */
     finalize(): AgentStep[] {
@@ -782,7 +922,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             : undefined
         firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
       }
-      const r = await generateClipVideo(sb, doc.meta, { firstFrameUrl, durationSec: track.duration, promptOverride: track.prompt })
+      const referenceStoryboards = track.storyboardIds.map((id) => doc.storyboards.find((s) => s.id === id)).filter(Boolean) as Storyboard[]
+      const r = await generateClipVideo(sb, doc.assets, doc.meta, { firstFrameUrl, durationSec: track.duration, promptOverride: track.prompt, referenceStoryboards })
       setClip({ videoUrl: r.url, videoFilePath: r.localPath, durationSec: r.durationSec, state: 'done' })
     } catch (e) {
       setClip({ state: 'failed', error: e instanceof Error ? e.message : String(e) })
@@ -836,79 +977,50 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   runAgent: async (userText) => {
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
+    const runId = P.newId('run_')
+    const logCtx = { runId, projectId: doc0.meta.id, projectName: doc0.meta.name }
     const now = Date.now()
     get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
     const trace = makeTrace(set)
+    const onPipeline = (e: PipelineEvent) => {
+      trace.onPipeline(e)
+      const payload = pipelineEventForLog(e)
+      if (payload) logInfo('agent.pipeline', e.type, { ...logCtx, ...payload })
+    }
     agentAborted = false
     set({ agentBusy: true, agentStage: undefined, agentTrace: [] })
-    try {
-      const plan = await runAgentPipeline(get().doc!, userText, trace.onPipeline)
+    logInfo('agent', 'run.start', { ...logCtx, userText: textPreview(userText, 1200), before: docCounts(doc0) })
+    const applied = createAgentApplySummary()
+    const appliedStages = new Set<PipelineStage>()
+    const applyStagePlan = (stage: PipelineStage, fragment: PipelineStagePlan) => {
       get().mutate((d) => {
-        // 剧本：覆盖首个或新建
-        if (plan.script?.content) {
-          const name = plan.script.name || `剧本 ${d.scripts.length + 1}`
-          if (d.scripts.length) d.scripts[0] = { ...d.scripts[0], name, content: plan.script.content, updatedAt: Date.now() }
-          else d.scripts.push({ id: P.newId('s_'), name, content: plan.script.content, createdAt: Date.now(), updatedAt: Date.now() })
-        }
-        // 资产：按 名+类型 去重（已存在则补描述）
-        const nameToId = new Map(d.assets.map((a) => [a.name, a.id]))
-        for (const a of plan.assets ?? []) {
-          if (!a?.name || !a.type) continue
-          const ex = d.assets.find((x) => x.name === a.name && x.type === a.type)
-          if (ex) {
-            ex.desc = a.desc ?? ex.desc
-            ex.prompt = a.prompt ?? ex.prompt
-          } else {
-            const id = P.newId('a_')
-            d.assets.push({ id, type: a.type, name: a.name, desc: a.desc, prompt: a.prompt, state: 'idle' })
-            nameToId.set(a.name, id)
-          }
-        }
-        // 分镜：replaceIndex(1-based) 命中则就地替换（关键帧失效），否则追加（cast 名 → 资产 id）
-        for (const sb of plan.storyboards ?? []) {
-          if (!sb?.videoDesc) continue
-          const cast = (sb.cast ?? []).map((n) => nameToId.get(n)).filter((x): x is string => !!x)
-          // 对白：规范化 LLM 输出，剔除空台词；character 存名字（与角色/旁白名匹配 UI 药丸）
-          const dlgs = Array.isArray(sb.dialogues)
-            ? sb.dialogues
-                .filter((x) => x && typeof x.line === 'string' && x.line.trim())
-                .map((x) => ({ character: String(x.character ?? ''), line: String(x.line).trim(), emotion: x.emotion ? String(x.emotion) : undefined }))
-            : undefined
-          const ri = typeof sb.replaceIndex === 'number' && sb.replaceIndex > 0 ? sb.replaceIndex - 1 : -1
-          const target = ri >= 0 ? d.storyboards.find((s) => s.index === ri) : undefined
-          if (target) {
-            target.videoDesc = sb.videoDesc
-            if (sb.prompt != null) target.prompt = sb.prompt
-            if (typeof sb.duration === 'number') target.duration = sb.duration
-            if (sb.cast) target.associateAssetIds = cast
-            if (dlgs) target.dialogues = dlgs
-            if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
-            target.keyframeImageId = undefined // 内容变了 → 关键帧失效，待重生
-            target.state = 'idle'
-            target.error = undefined
-            continue
-          }
-          d.storyboards.push({
-            id: P.newId('sb_'),
-            index: d.storyboards.length,
-            track: '默认',
-            videoDesc: sb.videoDesc,
-            prompt: sb.prompt,
-            duration: typeof sb.duration === 'number' ? sb.duration : 5,
-            associateAssetIds: cast,
-            dialogues: dlgs ?? [],
-            shouldGenerateImage: true,
-            chainFromPrev: sb.chainFromPrev === true,
-            state: 'idle',
-          })
-        }
-        syncTracksFromStoryboards(d) // Agent 新增分镜 → 惰性补齐视频段
+        if (stage === 'script') applyAgentScript(d, fragment.script, applied)
+        else if (stage === 'assets') applyAgentAssets(d, fragment.assets, applied)
+        else if (stage === 'storyboard') applyAgentStoryboards(d, fragment.storyboards, applied)
+      })
+      appliedStages.add(stage)
+      logInfo('agent', 'stage.apply', { ...logCtx, stage, applied, after: docCounts(get().doc) })
+    }
+    try {
+      const plan = await runAgentPipeline(() => get().doc, userText, onPipeline, (stage, fragment) => {
+        applyStagePlan(stage, fragment)
+      })
+      logInfo('agent', 'plan.result', { ...logCtx, plan: planForLog(plan) })
+      if (plan.script?.content && !appliedStages.has('script')) applyStagePlan('script', { script: plan.script })
+      if (plan.assets?.length && !appliedStages.has('assets')) applyStagePlan('assets', { assets: plan.assets })
+      if (plan.storyboards?.length && !appliedStages.has('storyboard')) applyStagePlan('storyboard', { storyboards: plan.storyboards })
+      get().mutate((d) => {
         d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now(), steps: trace.finalize() })
       })
+      logInfo('agent', 'apply.result', { ...logCtx, applied, after: docCounts(get().doc) })
       // 用户明确要求出图/成片 → 应用方案后自动一键成片（后台执行，不阻塞对话）
-      if (plan.autoGenerate) void get().autoProduce()
+      if (plan.autoGenerate) {
+        logInfo('agent', 'autoProduce.start', { ...logCtx })
+        void get().autoProduce()
+      }
     } catch (e) {
       const stopped = agentAborted || (e instanceof Error && /abort/i.test(e.message))
+      logError('agent', 'run.error', e, { ...logCtx, stopped })
       get().mutate((d) =>
         d.memory.push({
           id: P.newId('m_'),
@@ -924,12 +1036,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const d = get().doc
       if (d) await maybeSummarize(d, get().mutate, await getMemoryConfig()) // §6.6 长会话压缩
       await get().flush()
+      await flushLogs()
     }
   },
 
   runAgentToolLoop: async (userText) => {
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
+    const runId = P.newId('run_')
+    const logCtx = { runId, projectId: doc0.meta.id, projectName: doc0.meta.name, mode: 'toolLoop' }
     const deploy = useAgentDeployStore.getState().resolve('decision') // §6.3 按 Agent 选模型/温度
     const model = deploy.model || useGraphStore.getState().selectedModel
     const push = (role: string, content: string, steps?: AgentStep[]) =>
@@ -944,6 +1059,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const trace = makeTrace(set)
     agentAborted = false
     set({ agentBusy: true, agentStage: '工具调用…', agentTrace: [] })
+    logInfo('agent', 'run.start', { ...logCtx, userText: textPreview(userText, 1200), before: docCounts(doc0), model })
     try {
       const cfg = await getMemoryConfig()
       const reply = await runToolLoop({
@@ -954,35 +1070,44 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         params: deploy.params,
         signal: controller.signal,
         onText: trace.text,
-        onReasoning: trace.reasoning,
+        onReasoning: (text) => {
+          trace.reasoning(text)
+        },
         onToolCall: (name, args) => {
           trace.toolCall(name, args)
+          logInfo('agent.toolLoop', 'tool.call', { ...logCtx, name, args })
           set({ agentStage: `调用 ${name}…` })
         },
         onToolResult: (name, result) => {
           trace.toolResult(name, result)
+          logInfo('agent.toolLoop', 'tool.result', { ...logCtx, name, result: textPreview(result, 1200) })
           set({ agentStage: `${name} 完成` })
         },
       })
+      logInfo('agent', 'run.reply', { ...logCtx, reply: textPreview(reply, 1200), after: docCounts(get().doc) })
       push('assistant', reply, trace.finalize())
       const d = get().doc
       if (d) await maybeSummarize(d, get().mutate, cfg)
     } catch (e) {
       const stopped = agentAborted || controller.signal.aborted || (e instanceof Error && /abort/i.test(e.message))
+      logError('agent', 'run.error', e, { ...logCtx, stopped })
       push('assistant', stopped ? '（已停止）' : '出错：' + (e instanceof Error ? e.message : String(e)), trace.finalize())
     } finally {
       agentAbort = null
       set({ agentBusy: false, agentStage: undefined, agentTrace: undefined })
       await get().flush()
+      await flushLogs()
     }
   },
 
   abortAgent: () => {
+    logInfo('agent', 'abort')
     agentAborted = true // 标记为用户主动中断，供 catch 区分「已停止」与真失败
     abortText() // 兜底中断管线进行中的 runText
     agentAbort?.abort()
     agentAbort = null
     set({ agentBusy: false, agentStage: undefined, agentTrace: undefined })
+    void flushLogs()
   },
 
   generateAllAssets: async () => {

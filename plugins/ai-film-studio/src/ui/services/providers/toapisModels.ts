@@ -137,23 +137,28 @@ function setField(body: Record<string, unknown>, path: string, value: unknown): 
 }
 
 /** 按模型各自的图像字段约定写入首帧（+可选尾帧） */
-function setImage(body: Record<string, unknown>, field: ImageField, url: string, lastUrl?: string): void {
+function refUrls(req: VideoGenRequest): string[] {
+  return (req.referenceImages ?? []).map((r) => r.url).filter(Boolean)
+}
+
+function setImage(body: Record<string, unknown>, field: ImageField, url: string, lastUrl?: string, refs: string[] = []): void {
   switch (field) {
     case 'image_with_roles': {
       const arr: Record<string, string>[] = [{ url, role: 'first_frame' }]
+      for (const ref of refs) arr.push({ url: ref, role: 'reference_image' })
       if (lastUrl) arr.push({ url: lastUrl, role: 'last_frame' })
       body.image_with_roles = arr
       break
     }
     case 'metadata.image_list': {
       const meta = (body.metadata as Record<string, unknown>) || {}
-      meta.image_list = [{ image_url: url }]
+      meta.image_list = [url, ...refs].map((image_url) => ({ image_url }))
       body.metadata = meta
       break
     }
     default:
       // image_urls / images / reference_images 均为 URL 数组
-      body[field] = [url]
+      body[field] = [url, ...refs]
   }
 }
 
@@ -164,8 +169,9 @@ function setImage(body: Record<string, unknown>, field: ImageField, url: string,
 export function buildToapisVideoBody(modelId: string, req: VideoGenRequest): Record<string, unknown> {
   const m = BY_ID[modelId]
   const body: Record<string, unknown> = { model: modelId, prompt: req.prompt }
+  const refs = refUrls(req)
   if (!m) {
-    if (req.imageUrl) body.image_urls = [req.imageUrl]
+    if (req.imageUrl) body.image_urls = [req.imageUrl, ...refs]
     if (req.aspectRatio) body.aspect_ratio = req.aspectRatio
     return body
   }
@@ -174,7 +180,7 @@ export function buildToapisVideoBody(modelId: string, req: VideoGenRequest): Rec
     const d = snapDuration(m.durationValues, req.duration)
     setField(body, m.durationParam, m.durationType === 'string' ? String(d) : d)
   }
-  if (req.imageUrl) setImage(body, m.imageField, req.imageUrl, req.lastImageUrl)
+  if (req.imageUrl) setImage(body, m.imageField, req.imageUrl, req.lastImageUrl, refs)
   if (m.resolutionParam && m.resolutionDefault) setField(body, m.resolutionParam, m.resolutionDefault)
   // 原生音频：native=开；external/silent=关；未指定时用模型默认
   if (m.audioField) {

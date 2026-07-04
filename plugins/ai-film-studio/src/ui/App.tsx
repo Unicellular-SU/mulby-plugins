@@ -15,6 +15,7 @@ import { ConfirmProvider } from './components/ui/ConfirmDialog'
 import { PromptProvider } from './components/ui/PromptDialog'
 import { useGraphStore, flushSave, requestSave } from './store/graphStore'
 import { clearAssetCache } from './services/assets'
+import { flushLogs, logInfo } from './services/localLog'
 import { useProviderStore } from './store/providerStore'
 import { usePromptStore } from './store/promptStore'
 import { useUiStore } from './store/uiStore'
@@ -44,6 +45,7 @@ export default function App() {
   )
 
   useEffect(() => {
+    logInfo('app', 'init.start')
     init()
     loadModels()
     loadProviders()
@@ -67,10 +69,14 @@ export default function App() {
   // 窗口隐藏/卸载边界：best-effort flush 落盘（宿主无「即将关闭」钩子；beforeunload 无法 await 异步 IPC）
   useEffect(() => {
     const onHide = () => {
-      if (document.visibilityState === 'hidden') void flushSave()
+      if (document.visibilityState === 'hidden') {
+        void flushSave()
+        void flushLogs()
+      }
     }
     const onPageHide = () => {
       void flushSave()
+      void flushLogs()
       clearAssetCache() // 卸载时释放所有 blob/字节缓存（best-effort，非内存上界的唯一来源）
     }
     document.addEventListener('visibilitychange', onHide)

@@ -41,6 +41,16 @@ async function ensurePublicUrl(url: string | undefined, cfg: VideoProviderConfig
   return data.url
 }
 
+async function publicReferenceImages(req: VideoGenRequest, cfg: VideoProviderConfig, apiKey: string): Promise<NonNullable<VideoGenRequest['referenceImages']>> {
+  const refs = req.referenceImages ?? []
+  const out: NonNullable<VideoGenRequest['referenceImages']> = []
+  for (const ref of refs) {
+    const url = await ensurePublicUrl(ref.url, cfg, apiKey)
+    if (url) out.push({ ...ref, url })
+  }
+  return out
+}
+
 const DEFAULT_TASKID_PATHS = ['id', 'request_id', 'requestId', 'task_id', 'taskId', 'data.id', 'data.task_id']
 const DEFAULT_STATUS_PATHS = ['status', 'state', 'data.status', 'data.state']
 const DEFAULT_VIDEO_PATHS = [
@@ -66,19 +76,26 @@ function headers(cfg: VideoProviderConfig, apiKey: string): Record<string, strin
 
 // 渲染请求体模板：先处理条件块 {?key}…{/key}（变量非空才保留），再替换 {key}。
 // 字符串变量做 JSON 内部转义（去外层引号），数字原样，便于嵌入任意 JSON 结构。
-function renderBodyTemplate(tpl: string, vars: Record<string, string | number | undefined>): Record<string, unknown> {
+function templateValuePresent(value: unknown): boolean {
+  if (value == null) return false
+  if (Array.isArray(value)) return value.length > 0
+  return String(value) !== ''
+}
+
+function renderBodyTemplate(tpl: string, vars: Record<string, unknown>): Record<string, unknown> {
   let s = tpl
   // 多趟剥离条件块 {?var}…{/var}，支持嵌套（如 image_with_roles 里嵌 lastImageUrl）；最多 6 趟防御不平衡标记
   for (let pass = 0; pass < 6 && /\{\?\w+\}/.test(s); pass++) {
     s = s.replace(/\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g, (_, k: string, inner: string) => {
       const v = vars[k]
-      return v !== undefined && v !== null && String(v) !== '' ? inner : ''
+      return templateValuePresent(v) ? inner : ''
     })
   }
   s = s.replace(/\{(\w+)\}/g, (_, k: string) => {
     const v = vars[k]
     if (v === undefined || v === null) return ''
-    if (typeof v === 'number') return String(v)
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+    if (typeof v === 'object') return JSON.stringify(v)
     return JSON.stringify(String(v)).slice(1, -1)
   })
   try {
@@ -102,6 +119,8 @@ export const customHttpAdapter: VideoProviderAdapter = {
     // 配了 uploadUrl 时，把本地帧先上传换公开 URL（仅收 URL 的供应商如 toapis 需要）
     const imageUrl = await ensurePublicUrl(req.imageUrl, cfg, apiKey)
     const lastImageUrl = await ensurePublicUrl(req.lastImageUrl, cfg, apiKey)
+    const referenceImages = await publicReferenceImages(req, cfg, apiKey)
+    const referenceImageUrls = referenceImages.map((r) => r.url)
     // M18-B/P2-8：原生音频 driving / lipsync 的视频与音频，按需换公开 URL
     const videoUrl = await ensurePublicUrl(req.videoUrl, cfg, apiKey)
     const drivingAudioUrl = await ensurePublicUrl(req.drivingAudioUrl, cfg, apiKey)
@@ -110,13 +129,16 @@ export const customHttpAdapter: VideoProviderAdapter = {
     let body: Record<string, unknown>
     if (!cfg.bodyTemplate?.trim() && toapisVideoModel(cfg.model)) {
       // 已知 toapis 模型：按模型定义自动拼正确 body（画幅/时长/图像字段/音频/分辨率），免手写模板
-      body = buildToapisVideoBody(cfg.model as string, { ...req, prompt: effPrompt, imageUrl, lastImageUrl })
+      body = buildToapisVideoBody(cfg.model as string, { ...req, prompt: effPrompt, imageUrl, lastImageUrl, referenceImages })
     } else if (cfg.bodyTemplate && cfg.bodyTemplate.trim()) {
       // 声明式模板（各家 body 不同，如火山方舟 content[]、通义万相 input{}）
       body = renderBodyTemplate(cfg.bodyTemplate, {
         prompt: effPrompt,
         imageUrl,
         lastImageUrl,
+        referenceImages,
+        referenceImageUrls,
+        referenceImageCount: referenceImageUrls.length,
         model: cfg.model,
         duration: req.duration,
         size: req.size,
@@ -131,6 +153,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
       // 通用默认 body（兜底）
       body = { prompt: effPrompt }
       if (imageUrl) body.image_url = imageUrl
+      if (referenceImageUrls.length) body.reference_images = referenceImageUrls
       if (lastImageUrl) body.tail_image_url = lastImageUrl // 尾帧（供应商不支持则忽略）
       if (req.duration) body.duration = req.duration
       if (req.size) body.size = req.size
@@ -146,7 +169,7 @@ export const customHttpAdapter: VideoProviderAdapter = {
     // 诊断：确认画幅/时长是否真进了请求体（缺失 → 供应商用默认）。bodyTemplate 非空时走的是模板渲染路径
     const b = body as Record<string, unknown>
     // keyLen=0 → 没带 Authorization（key 没存进本项目）→ toapis 常报"余额不足/未授权"
-    console.info('[ai-film-studio] 视频请求', { model: cfg.model, submitUrl: cfg.submitUrl, aspect_ratio: b.aspect_ratio, seconds: b.seconds, duration: b.duration, hasBodyTemplate: !!cfg.bodyTemplate?.trim(), keyLen: apiKey ? apiKey.length : 0 })
+    console.info('[ai-film-studio] 视频请求', { model: cfg.model, submitUrl: cfg.submitUrl, aspect_ratio: b.aspect_ratio, seconds: b.seconds, duration: b.duration, referenceImageCount: referenceImageUrls.length, hasBodyTemplate: !!cfg.bodyTemplate?.trim(), keyLen: apiKey ? apiKey.length : 0 })
     const res = await httpJson({ url: cfg.submitUrl, method: 'POST', headers: headers(cfg, apiKey), body })
     const taskId = cfg.taskIdPath
       ? firstString(res, [cfg.taskIdPath])

@@ -12,6 +12,8 @@ import { downloadVideoToDisk } from '../../services/download'
 import { ffmpegAvailable, extractLastFrame } from '../../services/ffmpeg'
 import { useGraphStore } from '../../store/graphStore'
 import { useProviderStore } from '../../store/providerStore'
+import { logInfo } from '../../services/localLog'
+import { collectStoryboardVideoReferences, supportsVideoReferenceImages } from './videoReferences'
 import type { Asset, ProjectMeta, Storyboard } from '../../domain/types'
 
 /** 图像模型：项目级优先，否则用全局选中的图像模型 */
@@ -277,6 +279,7 @@ export interface ClipGenOptions {
   firstFrameUrl?: string // 承接片段：上一片段真实尾帧作首帧
   durationSec?: number // 段时长覆盖（优先于 sb.duration，钳 [4,15]）
   promptOverride?: string // 段视频提示词（§5.3 生成，优先于硬拼 motion）
+  referenceStoryboards?: Storyboard[] // 与段提示词一致的参考分镜集合；默认仅当前分镜
   onProgress?: (s: string) => void
 }
 
@@ -295,7 +298,7 @@ function projectSeed(id: string): number {
  * 顺接（fix4 同源）：承接片段传 firstFrameUrl（上一片段真实尾帧）作首帧，无缝衔接。
  * 复用现有 providers（fal/custom-http 异步轮询）。下载落盘供后续 ffmpeg 合成。
  */
-export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts: ClipGenOptions = {}): Promise<ClipResult> {
+export async function generateClipVideo(sb: Storyboard, assets: Asset[], meta: ProjectMeta, opts: ClipGenOptions = {}): Promise<ClipResult> {
   const { firstFrameUrl, durationSec, promptOverride, onProgress } = opts
   const ps = useProviderStore.getState()
   const provider = ps.getActiveFor('video')
@@ -304,6 +307,9 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   const a = sb.keyframeImageId ? await loadAsset(sb.keyframeImageId) : null
   if (!a && !firstFrameUrl) throw new Error('请先生成该分镜的关键帧')
   const imageUrl = firstFrameUrl || `data:${a!.mime};base64,${a!.base64}`
+  const canSendReferenceImages = supportsVideoReferenceImages(provider)
+  const referenceStoryboards = opts.referenceStoryboards?.length ? opts.referenceStoryboards : [sb]
+  const referenceImages = canSendReferenceImages ? await collectStoryboardVideoReferences(referenceStoryboards, assets, imageUrl) : []
   const vtag = videoStyleTag(meta.artStyle)
   // 对白：把台词原文喂进视频提示词，让原生音频模型（如 grok-video-3）真正把每句对白说出来（否则只有画面没声音）
   const dlg = (sb.dialogues ?? [])
@@ -324,11 +330,21 @@ export async function generateClipVideo(sb: Storyboard, meta: ProjectMeta, opts:
   const ffB64 = !a && firstFrameUrl?.startsWith('data:') ? firstFrameUrl.split(',')[1] : undefined
   const sz = a ? decodeImageSize(a.base64) : ffB64 ? decodeImageSize(ffB64) : null
   const aspectRatio = sz ? aspectFromSize(sz.w, sz.h) : meta.videoRatio || '16:9'
-  console.info('[ai-film-studio] 片段画幅 →', aspectRatio, sz ? `(${sz.w}×${sz.h})` : '(图未解出，用项目画幅/16:9)')
+  console.info('[ai-film-studio] 片段画幅 →', aspectRatio, sz ? `(${sz.w}×${sz.h})` : '(图未解出，用项目画幅/16:9)', '| 资产参考图:', referenceImages.map((r) => r.name || r.type || 'ref'))
+  logInfo('video', 'clip_reference_images', {
+    storyboardId: sb.id,
+    provider: provider.label,
+    providerKind: provider.kind,
+    model: provider.model,
+    aspectRatio,
+    referenceImagesEnabled: canSendReferenceImages,
+    referenceImageCount: referenceImages.length,
+    referenceImages: referenceImages.map((r) => ({ name: r.name, type: r.type, source: r.source })),
+  })
   const { url } = await runVideo({
     cfg: provider,
     apiKey,
-    req: { prompt: motion, imageUrl, duration, aspectRatio, seed: projectSeed(meta.id) },
+    req: { prompt: motion, imageUrl, referenceImages, duration, aspectRatio, seed: projectSeed(meta.id) },
     onProgress: (p) => onProgress?.(p.status),
   })
   let localPath: string | undefined

@@ -1,4 +1,7 @@
 /// <reference path="./types/mulby.d.ts" />
+import { appendFile, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
+
 // 插件后端入口
 // 生命周期 + 启动提示。工程结构由前端通过 storage 持久化。
 // 后端 rpc：远程视频下载落盘（M4）、OpenAI 兼容配音合成落盘（M5）。
@@ -54,6 +57,24 @@ function getJsonPath(obj: any, path: string): unknown {
   return cur
 }
 
+async function resolveUserData(baseDir?: string): Promise<string> {
+  if (baseDir) return baseDir
+  try {
+    return await mulby.system.getPath('userData')
+  } catch {
+    return ''
+  }
+}
+
+async function resolveLogTarget(baseDir?: string): Promise<{ dir: string; path: string }> {
+  const base = await resolveUserData(baseDir)
+  if (!base) throw new Error('无法确定 userData 目录')
+  const dir = join(base, 'ai-film-studio', 'logs')
+  await mkdir(dir, { recursive: true })
+  const day = new Date().toISOString().slice(0, 10)
+  return { dir, path: join(dir, `ai-film-studio-${day}.log`) }
+}
+
 // Host 方法（供前端 window.mulby.host.call('ai-film-studio', method, ...args) 调用）
 export const rpc = {
   // 图片上传：把本地帧（base64）以 multipart/form-data 传到供应商图床，换取公开 URL（供仅收 URL 的图生视频用）。
@@ -98,6 +119,28 @@ export const rpc = {
   async exportToFile(input: { filePath: string; data: string; encoding?: 'utf-8' | 'base64' }) {
     await mulby.filesystem.writeFile(input.filePath, input.data, input.encoding || 'utf-8')
     return { success: true }
+  },
+
+  async appendLog(input: { lines?: string[]; baseDir?: string }) {
+    try {
+      const { path } = await resolveLogTarget(input?.baseDir)
+      const lines = Array.isArray(input?.lines) ? input.lines.filter((line) => typeof line === 'string' && line.trim()) : []
+      if (!lines.length) return { ok: true, path, written: 0 }
+      const payload = lines.map((line) => line.replace(/\r?\n/g, ' ') + '\n').join('')
+      await appendFile(path, payload, 'utf8')
+      return { ok: true, path, written: lines.length }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+
+  async getLogInfo(input?: { baseDir?: string }) {
+    try {
+      const { dir, path } = await resolveLogTarget(input?.baseDir)
+      return { ok: true, dir, path }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
   },
 
   // M4 视频落盘：主进程 fetch 远程视频 → base64 写入 {baseDir}/ai-film-studio/videos/
