@@ -25,6 +25,7 @@ export interface ToolLoopOptions {
   params?: { temperature?: number; maxOutputTokens?: number }
   signal?: AbortSignal
   onText?: (text: string) => void
+  onReasoning?: (text: string) => void
   onToolCall?: (name: string, args: unknown) => void
   onToolResult?: (name: string, result: string) => void
 }
@@ -67,6 +68,7 @@ export async function runToolLoop(opts: ToolLoopOptions): Promise<string> {
         text += chunk.content
         opts.onText?.(chunk.content)
       }
+      if (chunk.chunkType === 'reasoning' && chunk.reasoning_content) opts.onReasoning?.(chunk.reasoning_content)
       if (chunk.tool_call) calls.push(chunk.tool_call)
     })
     const onAbort = () => {

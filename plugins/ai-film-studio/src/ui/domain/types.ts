@@ -176,6 +176,25 @@ export interface VideoTrack {
   clipAssetId?: string // 非分镜来源的素材段引用（type:clip 资产）
 }
 
+/**
+ * 助手回合的过程轨迹单步（对话面板可视化用）。一个回合可含多步：
+ * - agent：某个子 Agent（决策/编剧/美术/导演）的工作卡片，内嵌思考流 + 产出摘要；
+ * - tool：一次工具调用（名称 + 入参 + 结果）；
+ * - thinking / text：工具循环里模型的思考流 / 文本增量。
+ */
+export interface AgentStep {
+  id: string
+  kind: 'agent' | 'tool' | 'thinking' | 'text'
+  agent?: string // 归属子 Agent 键（decision/script/assets/storyboard/production）
+  title?: string // 展示标题：如「制片决策」「导演 · 拆分镜」「调用 add_storyboard」
+  thinking?: string // agent 步内嵌的思考流（reasoning）
+  content?: string // 产出摘要 / 文本正文（markdown）
+  toolName?: string
+  toolArgs?: unknown
+  toolResult?: string
+  status?: 'running' | 'done' | 'error'
+}
+
 /** Agent 记忆项（轻量：短期/摘要/RAG） */
 export interface MemoryItem {
   id: string
@@ -186,6 +205,7 @@ export interface MemoryItem {
   summarized?: boolean
   embedding?: number[] // [阶段2] 可选向量（宿主有 embedding 模型时）
   relatedIds?: string[] // [阶段2] summary 关联的 message id
+  steps?: AgentStep[] // [阶段10] 助手回合过程轨迹（对话面板展示；content 仍为最终回复，供上下文/摘要用）
 }
 
 /** 分镜表行（设计层结构化来源，§4.1） */

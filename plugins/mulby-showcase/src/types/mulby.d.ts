@@ -1974,6 +1974,12 @@ interface MulbyAPI {
     launchRequestId?: string
   }) => void): Disposable
   onPluginDetached(callback: () => void): Disposable
+  /**
+   * 监听插件窗口模式切换（附着面板 <-> 独立窗口）。
+   * 与 onPluginInit 不同：该事件只通知模式变化，不携带 input/route，
+   * 因此切换时不会重置插件已有的运行时状态（如用户输入）。
+   */
+  onModeChange(callback: (data: { mode: 'attached' | 'detached'; windowType?: string; pluginName?: string }) => void): Disposable
   onPluginOut(callback: (isKill: boolean) => void): Disposable
   onPluginLaunchStart(callback: (data: PluginLaunchStartEvent) => void): Disposable
   onPluginLaunchEnd(callback: (data: PluginLaunchEndEvent) => void): Disposable

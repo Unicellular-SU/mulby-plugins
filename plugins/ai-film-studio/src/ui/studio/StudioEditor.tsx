@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Send, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Wrench, Check, Image as ImageIcon, RotateCcw, BookmarkPlus } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -13,6 +13,7 @@ import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import type { Asset, Storyboard, VideoTrack, Clip } from '../domain/types'
 import StudioDock from './StudioDock'
+import AgentPanel from './AgentPanel'
 import Select from '../components/ui/Select'
 import NumberStepper from '../components/ui/NumberStepper'
 import Button from '../components/ui/Button'
@@ -286,100 +287,6 @@ function StudioModelBar() {
         )}
       </div>
     </Popover>
-  )
-}
-
-function AgentPanel() {
-  const doc = useProjectStore((s) => s.doc)!
-  const runAgent = useProjectStore((s) => s.runAgent)
-  const runAgentToolLoop = useProjectStore((s) => s.runAgentToolLoop)
-  const abortAgent = useProjectStore((s) => s.abortAgent)
-  const updateMeta = useProjectStore((s) => s.updateMeta)
-  const busy = useProjectStore((s) => s.agentBusy)
-  const stage = useProjectStore((s) => s.agentStage)
-  const [text, setText] = useState('')
-  const [showManual, setShowManual] = useState(false)
-  const [toolLoop, setToolLoop] = useState(false)
-  const msgs = doc.memory.filter((m) => m.role === 'user' || m.role === 'assistant')
-  const send = () => {
-    if (!text.trim() || busy) return
-    const t = text
-    setText('')
-    void (toolLoop ? runAgentToolLoop(t) : runAgent(t))
-  }
-  return (
-    <aside className="afs-studio__agent">
-      <div className="afs-studio__agent-head">
-        <Bot size={16} /> AI 制片
-        <button
-          className={`afs-studio__manualtoggle${toolLoop ? ' is-on' : ''}`}
-          title="实验：原生工具调用（Agent 自主调用工具读写工作区；依赖宿主 function-calling，未生效则用默认结构化管线）"
-          aria-pressed={toolLoop}
-          aria-label="原生工具调用"
-          onClick={() => setToolLoop((v) => !v)}
-        >
-          <Wrench size={14} />
-        </button>
-        <button
-          className={`afs-studio__manualtoggle${showManual ? ' is-on' : ''}`}
-          title="导演手册（全局风格/节奏意图，注入 Agent）"
-          aria-pressed={showManual}
-          aria-label="导演手册"
-          onClick={() => setShowManual((v) => !v)}
-        >
-          <Clapperboard size={14} />
-        </button>
-      </div>
-      {showManual && (
-        <textarea
-          className="afs-field__input afs-studio__manual"
-          rows={2}
-          placeholder="导演手册：全局风格/节奏/调性意图（注入每次 Agent 生成）…"
-          value={doc.meta.directorManual ?? ''}
-          onChange={(e) => updateMeta({ directorManual: e.target.value })}
-        />
-      )}
-      <div className="afs-studio__agent-msgs">
-        {msgs.length === 0 && (
-          <p className="afs-studio__hint">
-            描述你的短剧（一句话/故事/指令），我来拆成剧本、资产和分镜。例如：「把这个故事改成 5 个镜头的悬疑短片，列出人物和场景」。
-          </p>
-        )}
-        {msgs.map((m) => (
-          <div key={m.id} className={`afs-studio__msg afs-studio__msg--${m.role}`}>
-            {m.content}
-          </div>
-        ))}
-        {busy && (
-          <div className="afs-studio__msg afs-studio__msg--assistant">
-            <Loader2 size={14} className="afs-spin" /> {stage || '思考中…'}
-          </div>
-        )}
-      </div>
-      <div className="afs-studio__agent-input">
-        <textarea
-          value={text}
-          placeholder="描述你的短剧或下一步…（Ctrl/Cmd+Enter 发送）"
-          rows={2}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault()
-              send()
-            }
-          }}
-        />
-        {busy ? (
-          <button className="afs-btn afs-btn--sm" title="停止" onClick={() => abortAgent()}>
-            <X size={14} />
-          </button>
-        ) : (
-          <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={!text.trim()} onClick={send}>
-            <Send size={14} />
-          </button>
-        )}
-      </div>
-    </aside>
   )
 }
 

@@ -170,6 +170,7 @@ export async function generateAssetImage(asset: Asset, meta: ProjectMeta): Promi
   const tplId = isCrowdScene ? 'image.assetSceneCrowd' : ASSET_LAYOUT_TPL[asset.type]
   const body = tplId ? fillTemplate(getPrompt(tplId), { ref: basis, basis }) : basis
   const prompt = [body, anchor].filter(Boolean).join(', ')
+  console.info('[ai-film-studio] 资产出图 →', asset.type, '| 模板:', tplId ?? '(无)', '| 尺寸:', assetImageSize(asset.type, meta), '\nprompt:', prompt)
   const r = await generateImage({ model, prompt, size: assetImageSize(asset.type, meta) })
   return saveAsset(r.base64, r.mime)
 }

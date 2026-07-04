@@ -63,7 +63,12 @@ export async function maybeSummarize(doc: ProjectDoc, applyMutation: (fn: (d: Pr
     })
     const ids = new Set(toSummarize.map((m) => m.id))
     applyMutation((d) => {
-      for (const m of d.memory) if (ids.has(m.id)) m.summarized = true
+      // 旧回合已并入摘要：标记 summarized 并清掉其 steps（过程轨迹展示价值低，避免 doc 体积无界膨胀）
+      for (const m of d.memory)
+        if (ids.has(m.id)) {
+          m.summarized = true
+          delete m.steps
+        }
       d.memory.push({ id: newId('m_'), agent: 'productionAgent', role: 'summary', content: content.trim(), createTime: Date.now(), summarized: true })
     })
   } catch {

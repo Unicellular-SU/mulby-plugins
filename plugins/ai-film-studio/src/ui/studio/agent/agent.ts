@@ -112,9 +112,16 @@ function ensureModel(): string {
   return model
 }
 
-async function callJson(model: string, skill: string, ctx: string, contract: string, userText: string): Promise<AgentPlan> {
+async function callJson(
+  model: string,
+  skill: string,
+  ctx: string,
+  contract: string,
+  userText: string,
+  onReasoning?: (delta: string) => void,
+): Promise<AgentPlan> {
   const system = [skill, ctx, contract].filter(Boolean).join('\n\n')
-  const r = await runText({ model, system, user: userText, jsonMode: true })
+  const r = await runText({ model, system, user: userText, jsonMode: true, onReasoning })
   return parsePlan(r.content)
 }
 
@@ -177,42 +184,112 @@ function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGe
   }
 }
 
+// —— 管线过程事件：供对话面板逐步可视化（每个子 Agent 的开始/思考流/产出摘要/完成）——
+export type PipelineAgentId = 'decision' | 'script' | 'assets' | 'storyboard'
+export type PipelineEvent =
+  | { type: 'start'; agent: PipelineAgentId; title: string }
+  | { type: 'reasoning'; agent: PipelineAgentId; delta: string }
+  | { type: 'output'; agent: PipelineAgentId; summary: string }
+  | { type: 'done'; agent: PipelineAgentId }
+
+const AGENT_TITLES: Record<PipelineAgentId, string> = {
+  decision: '制片决策',
+  script: '编剧 · 写剧本',
+  assets: '美术 · 设计资产',
+  storyboard: '导演 · 拆分镜',
+}
+const TASK_ZH: Record<StageTask, string> = { script: '剧本', assets: '资产', storyboard: '分镜' }
+const ASSET_ZH: Record<string, string> = { role: '角色', scene: '场景', prop: '物品' }
+
+function summarizeAssets(assets?: AgentPlan['assets']): string {
+  // 防御 LLM 畸形输出：仅统计有名字/类型的项（与 applyPlan 去重口径一致，避免摘要抛错拖垮整轮）
+  const valid = (assets ?? []).filter((a) => a && a.name && a.type)
+  if (!valid.length) return '本轮无新增资产。'
+  const byType: Record<string, string[]> = {}
+  for (const a of valid) (byType[ASSET_ZH[a.type] ?? a.type] ??= []).push(a.name)
+  return Object.entries(byType)
+    .map(([t, ns]) => `- **${t}**：${ns.join('、')}`)
+    .join('\n')
+}
+
+function summarizeStoryboards(sbs?: AgentPlan['storyboards']): string {
+  // 防御 LLM 畸形输出：缺 videoDesc（或非字符串）的分镜项跳过，避免 .slice 抛错（与 applyPlan 的 `if(!sb?.videoDesc) continue` 一致）
+  const valid = (sbs ?? []).filter((s) => s && typeof s.videoDesc === 'string')
+  if (!valid.length) return '本轮无新增分镜。'
+  return valid
+    .map((s, i) => {
+      const tag = typeof s.replaceIndex === 'number' && s.replaceIndex > 0 ? `改镜 #${s.replaceIndex}` : `镜 ${i + 1}`
+      const dl = s.dialogues?.length ? ` · ${s.dialogues.length} 句台词` : ''
+      return `${i + 1}. **${tag}**（${s.duration ?? 5}s${dl}）${s.videoDesc.slice(0, 42)}`
+    })
+    .join('\n')
+}
+
 /**
  * 分阶段管线：决策层决定要做哪些环节，再由各执行子 Agent（聚焦提示词）依次产出剧本/资产/分镜。
- * 比单次 mega-prompt 质量更高（每个子 Agent 只干一件事），并通过 onStage 暴露进度。
+ * 比单次 mega-prompt 质量更高（每个子 Agent 只干一件事），并通过 onEvent 逐步暴露过程
+ *（开始/思考流/产出摘要/完成），供对话面板把「多 Agent 各做了什么」可视化。
  */
-export async function runAgentPipeline(doc: ProjectDoc, userText: string, onStage?: (label: string) => void): Promise<AgentPlan> {
+export async function runAgentPipeline(
+  doc: ProjectDoc,
+  userText: string,
+  onEvent?: (e: PipelineEvent) => void,
+): Promise<AgentPlan> {
   const model = ensureModel()
   const cfg = await getMemoryConfig()
   const ctx = buildContext(doc, recallContext(doc, userText, cfg))
+  const emit = onEvent ?? (() => {})
+  const reasoner = (agent: PipelineAgentId) => (delta: string) => emit({ type: 'reasoning', agent, delta })
 
-  onStage?.('制片决策…')
+  // 决策层
+  emit({ type: 'start', agent: 'decision', title: AGENT_TITLES.decision })
   const decisionRaw = await runText({
     model,
     system: [getAgentSkill('production_agent_decision'), ctx, DECIDE_CONTRACT].filter(Boolean).join('\n\n'),
     user: userText,
     jsonMode: true,
+    onReasoning: reasoner('decision'),
   })
   const decision = parseDecision(decisionRaw.content)
   const plan: AgentPlan = { reply: decision.reply, autoGenerate: decision.autoGenerate }
+  emit({
+    type: 'output',
+    agent: 'decision',
+    summary: `**本轮规划**：${decision.tasks.map((t) => TASK_ZH[t]).join(' → ')}${
+      decision.autoGenerate ? '，随后自动一键成片' : ''
+    }。`,
+  })
+  emit({ type: 'done', agent: 'decision' })
 
   if (decision.tasks.includes('script')) {
-    onStage?.('编剧：写剧本…')
-    plan.script = (await callJson(model, SCRIPT_SKILL, ctx, '', userText)).script
+    emit({ type: 'start', agent: 'script', title: AGENT_TITLES.script })
+    plan.script = (await callJson(model, SCRIPT_SKILL, ctx, '', userText, reasoner('script'))).script
+    emit({
+      type: 'output',
+      agent: 'script',
+      summary: plan.script?.content
+        ? `已产出剧本${plan.script.name ? ` **《${plan.script.name}》**` : ''}（约 ${plan.script.content.length} 字）。`
+        : '未产出剧本内容。',
+    })
+    emit({ type: 'done', agent: 'script' })
   }
   if (decision.tasks.includes('assets')) {
-    onStage?.('美术：设计资产…')
+    emit({ type: 'start', agent: 'assets', title: AGENT_TITLES.assets })
     const aCtx = plan.script ? `${ctx}\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : ctx
-    plan.assets = (await callJson(model, ASSETS_SKILL, aCtx, '', userText)).assets
+    plan.assets = (await callJson(model, ASSETS_SKILL, aCtx, '', userText, reasoner('assets'))).assets
+    emit({ type: 'output', agent: 'assets', summary: summarizeAssets(plan.assets) })
+    emit({ type: 'done', agent: 'assets' })
   }
   if (decision.tasks.includes('storyboard')) {
-    onStage?.('导演：拆分镜…')
+    emit({ type: 'start', agent: 'storyboard', title: AGENT_TITLES.storyboard })
     const aList = (plan.assets ?? []).map((a) => `${a.name}(${a.type})`).join('、')
     const sCtx =
       ctx +
       (plan.script ? `\n## 本轮剧本\n${plan.script.content.slice(0, 3000)}` : '') +
       (aList ? `\n## 本轮新增资产\n${aList}` : '')
-    plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText)).storyboards
+    plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText, reasoner('storyboard'))).storyboards
+    emit({ type: 'output', agent: 'storyboard', summary: summarizeStoryboards(plan.storyboards) })
+    emit({ type: 'done', agent: 'storyboard' })
   }
   return plan
 }

@@ -7,7 +7,8 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { Asset, AssetImage, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { AgentStep, Asset, AssetImage, Clip, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard } from '../domain/types'
+import type { PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
@@ -37,6 +38,7 @@ export interface FilmState {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let agentAbort: AbortController | null = null // 工具循环 Agent 的中断句柄（§6.1.1 per-run）
+let agentAborted = false // 用户主动中断标志：catch 里据此把「中断」与「真失败」区分开（避免留下红色出错气泡）
 
 export interface ProjectState {
   cards: ProjectCard[]
@@ -45,6 +47,7 @@ export interface ProjectState {
   dirty: boolean
   agentBusy: boolean
   agentStage?: string
+  agentTrace?: AgentStep[] // 进行中回合的过程轨迹（busy 时实时更新；提交后随助手消息落到 memory.steps）
   film: FilmState
 
   init: () => Promise<void>
@@ -197,6 +200,88 @@ function scheduleSave(get: () => ProjectState) {
     saveTimer = null
     void get().flush()
   }, 700)
+}
+
+/**
+ * 过程轨迹构建器：把 Agent 运行中的事件（管线子 Agent / 工具循环的思考·工具调用）
+ * 增量累积成 AgentStep[]，并实时写入 agentTrace 供对话面板逐步渲染；结束时 finalize 落到助手消息。
+ */
+function makeTrace(set: (partial: Partial<ProjectState>) => void) {
+  const steps: AgentStep[] = []
+  const sync = () => set({ agentTrace: steps.slice() })
+  // 工具入参落库前先 JSON 往返：保证纯数据（后续 mutate 的 structuredClone / KV 持久化不会因异常值报错）
+  const safeData = (v: unknown): unknown => {
+    try {
+      return JSON.parse(JSON.stringify(v ?? null))
+    } catch {
+      return String(v)
+    }
+  }
+  const lastRunning = (kind: AgentStep['kind'], agent?: string) =>
+    [...steps].reverse().find((s) => s.kind === kind && (agent === undefined || s.agent === agent) && s.status === 'running')
+  return {
+    /** 分阶段管线事件 → 每个子 Agent 一张卡片（内嵌思考流 + 产出摘要）。 */
+    onPipeline(e: PipelineEvent) {
+      if (e.type === 'start') {
+        steps.push({ id: P.newId('st_'), kind: 'agent', agent: e.agent, title: e.title, thinking: '', content: '', status: 'running' })
+      } else {
+        const s = [...steps].reverse().find((x) => x.kind === 'agent' && x.agent === e.agent)
+        if (s) {
+          if (e.type === 'reasoning') s.thinking = (s.thinking ?? '') + e.delta
+          else if (e.type === 'output') s.content = e.summary
+          else if (e.type === 'done') s.status = 'done'
+        }
+      }
+      sync()
+    },
+    /** 工具循环：思考增量并入当前 thinking 步。 */
+    reasoning(delta: string) {
+      let s = lastRunning('thinking')
+      if (!s) {
+        s = { id: P.newId('st_'), kind: 'thinking', title: '思考', thinking: '', status: 'running' }
+        steps.push(s)
+      }
+      s.thinking = (s.thinking ?? '') + delta
+      sync()
+    },
+    /** 工具循环：模型在工具调用之间的说明性文本，并入当前 text 步（末尾未被工具收束者即最终回复，finalize 时剔除避免与气泡重复）。 */
+    text(delta: string) {
+      let s = lastRunning('text')
+      if (!s) {
+        s = { id: P.newId('st_'), kind: 'text', content: '', status: 'running' }
+        steps.push(s)
+      }
+      s.content = (s.content ?? '') + delta
+      sync()
+    },
+    /** 工具循环：一次工具调用（先收束在跑的思考/文本步——这些文本确属工具调用前的串联意图，保留）。 */
+    toolCall(name: string, args: unknown) {
+      for (const s of steps) if ((s.kind === 'thinking' || s.kind === 'text') && s.status === 'running') s.status = 'done'
+      steps.push({ id: P.newId('st_'), kind: 'tool', title: `调用 ${name}`, toolName: name, toolArgs: safeData(args), status: 'running' })
+      sync()
+    },
+    toolResult(name: string, result: string) {
+      const s = [...steps].reverse().find((x) => x.kind === 'tool' && x.toolName === name && x.status === 'running')
+      if (s) {
+        s.toolResult = result
+        s.status = 'done'
+      }
+      sync()
+    },
+    /** 结束：剔除末尾未被工具收束的 text 步（=最终回复，已作气泡展示），把 running 标记完成、超长思考/结果截断，返回快照。 */
+    finalize(): AgentStep[] {
+      const last = steps[steps.length - 1]
+      if (last && last.kind === 'text' && last.status === 'running') steps.pop()
+      const CAP_THINK = 6000
+      const CAP_RESULT = 4000
+      for (const s of steps) {
+        if (s.status === 'running') s.status = 'done'
+        if (s.thinking && s.thinking.length > CAP_THINK) s.thinking = s.thinking.slice(0, CAP_THINK) + '…（已截断）'
+        if (s.toolResult && s.toolResult.length > CAP_RESULT) s.toolResult = s.toolResult.slice(0, CAP_RESULT) + '…（已截断）'
+      }
+      return steps.slice()
+    },
+  }
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -753,9 +838,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const now = Date.now()
     get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
-    set({ agentBusy: true, agentStage: undefined })
+    const trace = makeTrace(set)
+    agentAborted = false
+    set({ agentBusy: true, agentStage: undefined, agentTrace: [] })
     try {
-      const plan = await runAgentPipeline(get().doc!, userText, (label) => set({ agentStage: label }))
+      const plan = await runAgentPipeline(get().doc!, userText, trace.onPipeline)
       get().mutate((d) => {
         // 剧本：覆盖首个或新建
         if (plan.script?.content) {
@@ -816,16 +903,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           })
         }
         syncTracksFromStoryboards(d) // Agent 新增分镜 → 惰性补齐视频段
-        d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now() })
+        d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: plan.reply, createTime: Date.now(), steps: trace.finalize() })
       })
       // 用户明确要求出图/成片 → 应用方案后自动一键成片（后台执行，不阻塞对话）
       if (plan.autoGenerate) void get().autoProduce()
     } catch (e) {
+      const stopped = agentAborted || (e instanceof Error && /abort/i.test(e.message))
       get().mutate((d) =>
-        d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'assistant', content: '出错：' + (e instanceof Error ? e.message : String(e)), createTime: Date.now() })
+        d.memory.push({
+          id: P.newId('m_'),
+          agent: 'productionAgent',
+          role: 'assistant',
+          content: stopped ? '（已停止）' : '出错：' + (e instanceof Error ? e.message : String(e)),
+          createTime: Date.now(),
+          steps: trace.finalize(),
+        }),
       )
     } finally {
-      set({ agentBusy: false, agentStage: undefined })
+      set({ agentBusy: false, agentStage: undefined, agentTrace: undefined })
       const d = get().doc
       if (d) await maybeSummarize(d, get().mutate, await getMemoryConfig()) // §6.6 长会话压缩
       await get().flush()
@@ -837,7 +932,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const deploy = useAgentDeployStore.getState().resolve('decision') // §6.3 按 Agent 选模型/温度
     const model = deploy.model || useGraphStore.getState().selectedModel
-    const push = (role: string, content: string) => get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role, content, createTime: Date.now() }))
+    const push = (role: string, content: string, steps?: AgentStep[]) =>
+      get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role, content, createTime: Date.now(), steps }))
     if (!model) {
       push('assistant', '未配置文本模型（请在「模型」里选择）')
       return
@@ -845,7 +941,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     push('user', userText)
     const controller = new AbortController()
     agentAbort = controller
-    set({ agentBusy: true, agentStage: '工具调用…' })
+    const trace = makeTrace(set)
+    agentAborted = false
+    set({ agentBusy: true, agentStage: '工具调用…', agentTrace: [] })
     try {
       const cfg = await getMemoryConfig()
       const reply = await runToolLoop({
@@ -855,26 +953,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         tools: makeAgentTools(get),
         params: deploy.params,
         signal: controller.signal,
-        onToolCall: (name) => set({ agentStage: `调用 ${name}…` }),
-        onToolResult: (name) => set({ agentStage: `${name} 完成` }),
+        onText: trace.text,
+        onReasoning: trace.reasoning,
+        onToolCall: (name, args) => {
+          trace.toolCall(name, args)
+          set({ agentStage: `调用 ${name}…` })
+        },
+        onToolResult: (name, result) => {
+          trace.toolResult(name, result)
+          set({ agentStage: `${name} 完成` })
+        },
       })
-      push('assistant', reply)
+      push('assistant', reply, trace.finalize())
       const d = get().doc
       if (d) await maybeSummarize(d, get().mutate, cfg)
     } catch (e) {
-      push('assistant', '出错：' + (e instanceof Error ? e.message : String(e)))
+      const stopped = agentAborted || controller.signal.aborted || (e instanceof Error && /abort/i.test(e.message))
+      push('assistant', stopped ? '（已停止）' : '出错：' + (e instanceof Error ? e.message : String(e)), trace.finalize())
     } finally {
       agentAbort = null
-      set({ agentBusy: false, agentStage: undefined })
+      set({ agentBusy: false, agentStage: undefined, agentTrace: undefined })
       await get().flush()
     }
   },
 
   abortAgent: () => {
+    agentAborted = true // 标记为用户主动中断，供 catch 区分「已停止」与真失败
     abortText() // 兜底中断管线进行中的 runText
     agentAbort?.abort()
     agentAbort = null
-    set({ agentBusy: false, agentStage: undefined })
+    set({ agentBusy: false, agentStage: undefined, agentTrace: undefined })
   },
 
   generateAllAssets: async () => {
