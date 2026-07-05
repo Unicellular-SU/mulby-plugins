@@ -1619,6 +1619,17 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       castRefs: nextRefs,
     })
   }
+  const patchStoryboardAssetRef = (storyboard: Storyboard, assetId: string) => {
+    const refs = castRefsForStoryboard(storyboard)
+    if (refs.some((ref) => ref.assetId === assetId)) return
+    const nextRefs = [...refs, { assetId }]
+    upsertStoryboard({
+      id: storyboard.id,
+      videoDesc: storyboard.videoDesc,
+      associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
+      castRefs: nextRefs,
+    })
+  }
   const bindSceneAsset = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'scene_group_missing_asset' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
     const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
@@ -1652,6 +1663,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!nextName || normalizeAssetLookup(nextName) === normalizeAssetLookup(asset.name)) return
     upsertAsset({ id: asset.id, type: asset.type, name: nextName })
   }
+  const addUnusedAssetToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'unused_project_asset' || !issue.assetId || !doc.storyboards.length) return
+    const raw = window.prompt('输入要加入的当前集分镜序号', '1')?.trim()
+    if (!raw) return
+    const index = Number(raw)
+    if (!Number.isFinite(index)) return
+    const storyboard = [...doc.storyboards].sort((a, b) => a.index - b.index)[Math.max(0, Math.floor(index) - 1)]
+    if (!storyboard) return
+    patchStoryboardAssetRef(storyboard, issue.assetId)
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1675,6 +1696,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const canRenameConflictAsset =
           !!issueAsset &&
           (issue.code === 'duplicate_asset_name' || (issue.code === 'duplicate_asset_alias' && issue.conflictSource === 'name'))
+        const canAddUnusedAsset = issue.code === 'unused_project_asset' && !!issue.assetId && doc.storyboards.length > 0
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1722,6 +1744,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canRenameConflictAsset && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => renameConflictAsset(issue)}>
                 重命名资产
+              </button>
+            )}
+            {canAddUnusedAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => addUnusedAssetToStoryboard(issue)}>
+                加入当前集分镜
               </button>
             )}
             {refAction && (
