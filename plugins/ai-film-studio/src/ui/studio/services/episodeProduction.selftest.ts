@@ -286,6 +286,52 @@ check(
   JSON.stringify(variantSwitchHandoff.suggestions),
 )
 
+const variantSwitchAfterMainResetHandoffDoc = doc({
+  currentEpisodeId: 'ep3',
+  assets: variantSwitchHandoffDoc.assets,
+  storyboards: [storyboard('ep3-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, {
+      title: 'Recovery',
+      storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
+    }),
+    episode('ep3', 2, { title: 'Aftermath' }),
+  ],
+})
+const variantSwitchAfterMainResetHandoff = buildEpisodeProductionHandoff(variantSwitchAfterMainResetHandoffDoc, variantSwitchAfterMainResetHandoffDoc.episodes![2])
+check(
+  'handoff does not compare unscoped variant against older variant after main reset',
+  !variantSwitchAfterMainResetHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala'),
+  JSON.stringify(variantSwitchAfterMainResetHandoff.suggestions),
+)
+
+const variantSwitchAfterSameVariantHandoffDoc = doc({
+  currentEpisodeId: 'ep3',
+  assets: variantSwitchHandoffDoc.assets,
+  storyboards: [storyboard('ep3-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, {
+      title: 'Gala',
+      storyboards: [storyboard('ep2-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
+    }),
+    episode('ep3', 2, { title: 'Aftermath' }),
+  ],
+})
+const variantSwitchAfterSameVariantHandoff = buildEpisodeProductionHandoff(variantSwitchAfterSameVariantHandoffDoc, variantSwitchAfterSameVariantHandoffDoc.episodes![2])
+check(
+  'handoff does not skip same prior variant to compare older variants',
+  !variantSwitchAfterSameVariantHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala'),
+  JSON.stringify(variantSwitchAfterSameVariantHandoff.suggestions),
+)
+
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)
   process.exit(1)

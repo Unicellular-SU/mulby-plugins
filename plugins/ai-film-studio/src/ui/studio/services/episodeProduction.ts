@@ -222,8 +222,10 @@ function latestPreviousVariantUse(
   currentVariantId: string,
 ): { ref: StoryboardCastRef; episode: Episode } | undefined {
   for (const sourceEpisode of episodes.filter((item) => item.index < episode.index).sort((a, b) => b.index - a.index)) {
-    const ref = latestCastRefsByAsset(doc, sourceEpisode).find((item) => item.assetId === assetId && !!item.variantId && item.variantId !== currentVariantId)
-    if (ref) return { ref, episode: sourceEpisode }
+    const ref = latestCastRefsByAsset(doc, sourceEpisode).find((item) => item.assetId === assetId)
+    if (!ref) continue
+    if (ref.variantId && ref.variantId !== currentVariantId) return { ref, episode: sourceEpisode }
+    return undefined
   }
   return undefined
 }
