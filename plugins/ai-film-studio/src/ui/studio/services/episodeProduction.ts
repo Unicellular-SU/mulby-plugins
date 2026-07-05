@@ -65,6 +65,14 @@ export interface EpisodeComposeReadiness {
   missingStoryboardIndexes: number[]
 }
 
+export interface EpisodeProductionScope {
+  current: boolean
+  episode?: Episode
+  storyboards: Storyboard[]
+  clips: Clip[]
+  track: ProjectDoc['track']
+}
+
 type HandoffAsset = ProjectDoc['assets'][number]
 type HandoffVariant = NonNullable<HandoffAsset['variants']>[number]
 
@@ -104,6 +112,25 @@ export function scriptsForEpisode(doc: ProjectDoc, episode: Episode): Script[] {
 
 export function clipsForEpisode(doc: ProjectDoc, episode: Episode): Clip[] {
   return episode.id === doc.currentEpisodeId ? doc.clips : episode.clips
+}
+
+export function productionScopeForStoryboard(doc: ProjectDoc, storyboardId: string): EpisodeProductionScope | undefined {
+  const currentEpisode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  if (doc.storyboards.some((storyboard) => storyboard.id === storyboardId)) {
+    return { current: true, episode: currentEpisode, storyboards: doc.storyboards, clips: doc.clips, track: doc.track }
+  }
+  for (const episode of doc.episodes ?? []) {
+    if (episode.id === doc.currentEpisodeId) continue
+    if (episode.storyboards.some((storyboard) => storyboard.id === storyboardId)) {
+      return { current: false, episode, storyboards: episode.storyboards, clips: episode.clips, track: episode.track }
+    }
+  }
+  return undefined
+}
+
+export function invalidateProductionScope(doc: ProjectDoc, scope: EpisodeProductionScope | undefined): boolean {
+  if (!scope) return false
+  return scope.current ? invalidateCurrentEpisodeProduction(doc) : invalidateEpisodeProduction(scope.episode)
 }
 
 export function currentEpisodeUsesCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {

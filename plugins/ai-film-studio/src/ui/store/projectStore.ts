@@ -36,7 +36,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -170,9 +170,10 @@ function setAssetState(get: () => ProjectState, id: string, patch: Partial<Asset
 }
 function setStoryboardState(get: () => ProjectState, id: string, patch: Partial<Storyboard>) {
   get().mutate((d) => {
-    const s = d.storyboards.find((x) => x.id === id)
+    const scope = productionScopeForStoryboard(d, id)
+    const s = scope?.storyboards.find((x) => x.id === id)
     if (s) Object.assign(s, patch)
-    if ('keyframeImageId' in patch) invalidateCurrentEpisodeProduction(d)
+    if ('keyframeImageId' in patch) invalidateProductionScope(d, scope)
   })
 }
 function setAssetVariantState(get: () => ProjectState, assetId: string, variantId: string, patch: Partial<AssetVariant>) {
@@ -1134,12 +1135,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   upsertClip: (c) => {
     const id = c.id ?? P.newId('c_')
     get().mutate((d) => {
-      const i = d.clips.findIndex((x) => x.id === id)
-      const base: Clip = d.clips[i] ?? { id, storyboardId: c.storyboardId, durationSec: c.durationSec ?? 5, state: 'idle' }
+      const scope = productionScopeForStoryboard(d, c.storyboardId)
+      if (!scope) return
+      const i = scope.clips.findIndex((x) => x.id === id)
+      const base: Clip = scope.clips[i] ?? { id, storyboardId: c.storyboardId, durationSec: c.durationSec ?? 5, state: 'idle' }
       const merged: Clip = { ...base, ...c, id }
-      if (i >= 0) d.clips[i] = merged
-      else d.clips.push(merged)
-      invalidateCurrentEpisodeProduction(d)
+      if (i >= 0) scope.clips[i] = merged
+      else scope.clips.push(merged)
+      invalidateProductionScope(d, scope)
     })
     return id
   },
@@ -1424,7 +1427,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       createdAt: Date.now(),
     })
     get().mutate((d) => {
-      const t = d.track.find((x) => x.id === track.id)
+      const scope = productionScopeForStoryboard(d, storyboardId)
+      const t = scope?.track.find((x) => x.id === track.id)
       if (t) {
         if (!t.clipIds.includes(clipId)) t.clipIds.push(clipId)
         t.selectClipId = clipId
@@ -1432,7 +1436,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     const setClip = (patch: Partial<Clip>) =>
       get().mutate((d) => {
-        const c = d.clips.find((x) => x.id === clipId)
+        const scope = productionScopeForStoryboard(d, storyboardId)
+        const c = scope?.clips.find((x) => x.id === clipId)
         if (c) Object.assign(c, patch)
       })
     try {
