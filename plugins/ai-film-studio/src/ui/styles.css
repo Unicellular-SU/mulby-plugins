@@ -6507,7 +6507,7 @@ html.light .afs-lp-body::before { opacity: 0.55; }
 
 /* =====================================================================
    §6.6 Lightbox theater shell — Aurora Glass restructure (afs-lbx* scope)
-   New, screen-scoped names (grepped: no afs-lbx*/afs-theater* collisions).
+   New, screen-scoped names (grepped: no afs-lbx or afs-theater collisions).
    Co-exists with legacy .afs-lbhost* until the TSX swaps class names.
    - Scrim stays opaque-dark BOTH themes, NO backdrop-filter (perf, verbatim).
    - Glass ONLY on the one info+chat chrome card. Gradient only on 连看-on + Send.
