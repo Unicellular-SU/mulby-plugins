@@ -1571,12 +1571,20 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!canRedistributeChapters) return
     if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
   }
+  const storyboardsForIssueEpisode = (episodeId?: string) => {
+    if (!episodeId || episodeId === doc.currentEpisodeId) return doc.storyboards
+    return doc.episodes?.find((episode) => episode.id === episodeId)?.storyboards ?? []
+  }
+  const findIssueStoryboard = (issue: ContinuityReportView['issues'][number]) => {
+    if (!issue.storyboardId) return undefined
+    return storyboardsForIssueEpisode(issue.episodeId).find((storyboard) => storyboard.id === issue.storyboardId)
+  }
   const addVariantScope = (issue: ContinuityReportView['issues'][number]) => {
     if ((issue.code !== 'variant_out_of_episode_scope' && issue.code !== 'asset_state_changed_variant') || !issue.assetId || !issue.variantId || !issue.episodeId) return
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
-    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
+    const storyboard = findIssueStoryboard(issue)
     const storyboardId = issue.storyboardId ?? storyboard?.id
     if (!storyboardId && issue.scopeKind !== 'episode') return
     const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, { id: storyboardId ?? '', sceneId: issue.sceneId ?? storyboard?.sceneId }, issue.scopeKind)
@@ -1714,11 +1722,14 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
+        const issueStoryboard = findIssueStoryboard(issue)
+        const variantScopeNeedsStoryboard = issue.scopeKind === 'scene' || issue.scopeKind === 'storyboard'
         const canAddVariantScope =
           (issue.code === 'variant_out_of_episode_scope' || issue.code === 'asset_state_changed_variant') &&
           !!issue.assetId &&
           !!issue.variantId &&
-          !!issue.episodeId
+          !!issue.episodeId &&
+          (!variantScopeNeedsStoryboard || !!issueStoryboard)
         const addVariantScopeLabel =
           issue.code === 'asset_state_changed_variant'
             ? '标记当前形态适用于本集'
