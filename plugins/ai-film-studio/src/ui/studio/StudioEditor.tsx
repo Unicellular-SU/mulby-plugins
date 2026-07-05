@@ -1274,6 +1274,8 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
+  const generateAsset = useProjectStore((s) => s.generateAsset)
+  const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
   const addVariantToEpisode = (issue: ContinuityReportView['issues'][number]) => {
@@ -1282,6 +1284,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
     updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+  }
+  const missingRefAction = (issue: ContinuityReportView['issues'][number]): { label: string; run: () => void } | null => {
+    if (issue.code !== 'missing_ref_image' || !issue.assetId) return null
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    if (!asset || asset.type === 'audio' || asset.type === 'clip') return null
+    if (!issue.variantId) return { label: '生成主形象参考图', run: () => void generateAsset(asset.id) }
+    const variant = asset.variants?.find((item) => item.id === issue.variantId)
+    if (!variant) return null
+    if (!asset.refImageId) return { label: '先生成主形象参考图', run: () => void generateAsset(asset.id) }
+    return { label: '生成该变体参考图', run: () => void generateAssetVariant(asset.id, variant.id) }
   }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
@@ -1293,6 +1305,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
         const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
+        const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
             <div className="afs-studio__continuityissue-top">
@@ -1304,6 +1317,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canAddVariantEpisode && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantToEpisode(issue)}>
                 标记变体适用于本集
+              </button>
+            )}
+            {refAction && (
+              <button type="button" className="afs-studio__continuityfix" onClick={refAction.run}>
+                {refAction.label}
               </button>
             )}
           </div>
