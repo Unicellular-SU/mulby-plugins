@@ -75,6 +75,43 @@ function variantAppliesToEpisode(asset: Asset, ref: StoryboardCastRef, episodeId
   return !ids.length || ids.includes(episodeId)
 }
 
+const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
+  role: '角色',
+  scene: '场景',
+  prop: '道具',
+  audio: '音色',
+  clip: '素材片段',
+}
+
+function normalizedAssetName(name: string): string {
+  return name.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase()
+}
+
+function addDuplicateAssetNameIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
+  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
+  const groups = new Map<string, Asset[]>()
+  for (const asset of doc.assets) {
+    if (!checkedTypes.includes(asset.type)) continue
+    const name = normalizedAssetName(asset.name)
+    if (!name) continue
+    const key = `${asset.type}:${name}`
+    groups.set(key, [...(groups.get(key) ?? []), asset])
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    const typeLabel = ASSET_TYPE_LABEL[group[0].type]
+    const ids = group.map((asset) => asset.id).join('、')
+    for (const asset of group) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'duplicate_asset_name',
+        assetId: asset.id,
+        message: `项目中存在多个同名${typeLabel}资产「${asset.name}」（${ids}），多集生成前建议合并或改名，避免同一角色/场景被当成不同资产。`,
+      })
+    }
+  }
+}
+
 export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const episodes = episodeList(doc)
@@ -83,6 +120,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
   const assignedChapterIds = new Set<string>()
   const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
+  addDuplicateAssetNameIssues(doc, allIssues)
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)

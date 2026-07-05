@@ -86,6 +86,17 @@ check('flags variant outside episode scope', !!ep2?.issues.some((issue) => issue
 check('flags missing variant ref image', !!ep2?.issues.some((issue) => issue.code === 'missing_ref_image'), JSON.stringify(ep2?.issues))
 check('records cast use as not applying to episode', ep2?.castUses[0]?.appliesToEpisode === false, JSON.stringify(ep2?.castUses))
 
+const duplicateAssetReport = buildContinuityReport(
+  doc({
+    assets: [
+      hero,
+      { id: 'hero-copy', type: 'role', name: ' hero ', refImageId: 'hero-copy-img', state: 'done' },
+      { id: 'hero-prop', type: 'prop', name: 'Hero', refImageId: 'hero-prop-img', state: 'done' },
+    ],
+  }),
+)
+check('flags duplicate asset names by type', duplicateAssetReport.issues.filter((issue) => issue.code === 'duplicate_asset_name').length === 2, JSON.stringify(duplicateAssetReport.issues))
+
 const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
 const chapterReport = buildContinuityReport(
   doc({
