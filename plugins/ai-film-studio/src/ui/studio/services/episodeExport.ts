@@ -1,4 +1,5 @@
 import type { Episode, ProjectDoc } from '../../domain/types'
+import { buildSrt, type SrtClip } from '../../services/subtitles'
 import { buildContinuityReport, type ContinuityIssue } from './continuityReport'
 
 export interface EpisodeExportItem {
@@ -9,12 +10,30 @@ export interface EpisodeExportItem {
   fileName: string
 }
 
+export interface EpisodeSubtitleExport {
+  format: 'srt'
+  fileName: string
+  exportedPath?: string
+  cueCount: number
+  error?: string
+}
+
+export interface GeneratedEpisodeSubtitle extends EpisodeSubtitleExport {
+  text: string
+}
+
+export interface EpisodeExportManifestEpisode extends EpisodeExportItem {
+  exportedPath?: string
+  error?: string
+  subtitles?: EpisodeSubtitleExport[]
+}
+
 export interface EpisodeExportManifest {
   projectId: string
   projectName: string
   exportedAt: string
   episodeCount: number
-  episodes: Array<EpisodeExportItem & { exportedPath?: string; error?: string }>
+  episodes: EpisodeExportManifestEpisode[]
   delivery: EpisodeDeliveryReport
 }
 
@@ -48,6 +67,7 @@ export interface SingleEpisodePackageManifest {
     }
     scripts: Episode['scripts']
     storyboards: Episode['storyboards']
+    subtitles?: EpisodeSubtitleExport[]
   }
 }
 
@@ -104,6 +124,69 @@ function sortedEpisodes(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
 }
 
+function sortedStoryboards(episode: Episode): Episode['storyboards'] {
+  return [...episode.storyboards].sort((a, b) => a.index - b.index)
+}
+
+function selectedClipForStoryboard(episode: Episode, storyboardId: string): Episode['clips'][number] | undefined {
+  const track = episode.track.find((item) => item.storyboardIds.includes(storyboardId))
+  if (track) {
+    const clipId = track.selectClipId || track.clipIds[0]
+    const selected = episode.clips.find((clip) => clip.id === clipId)
+    if (selected) return selected
+  }
+  return episode.clips.find((clip) => clip.storyboardId === storyboardId && clip.state === 'done')
+}
+
+function isUsableSubtitleClip(clip: Episode['clips'][number] | undefined): boolean {
+  return !!clip && (clip.state === 'done' || !!clip.videoFilePath || !!clip.videoUrl)
+}
+
+function subtitleShotFromStoryboard(storyboard: Episode['storyboards'][number]): Record<string, unknown> {
+  return {
+    id: storyboard.id,
+    dialogues: storyboard.dialogues,
+    description: storyboard.videoDesc,
+    duration: storyboard.duration,
+  }
+}
+
+function countSrtCues(text: string): number {
+  return (text.match(/-->/g) ?? []).length
+}
+
+function subtitleMetadata(subtitle: GeneratedEpisodeSubtitle): EpisodeSubtitleExport {
+  return {
+    format: subtitle.format,
+    fileName: subtitle.fileName,
+    exportedPath: subtitle.exportedPath,
+    cueCount: subtitle.cueCount,
+    error: subtitle.error,
+  }
+}
+
+export function buildEpisodeSubtitleExport(episode: Episode): GeneratedEpisodeSubtitle | undefined {
+  const rows = sortedStoryboards(episode).map((storyboard) => ({
+    storyboard,
+    clip: selectedClipForStoryboard(episode, storyboard.id),
+  }))
+  if (rows.length === 0) return undefined
+  const hasUsableClips = rows.some((row) => isUsableSubtitleClip(row.clip))
+  const subtitleRows = hasUsableClips ? rows.filter((row) => isUsableSubtitleClip(row.clip)) : rows
+  const clips: SrtClip[] = subtitleRows.map((row) => ({
+    duration: row.clip?.durationSec || row.storyboard.duration || 5,
+    shotId: row.storyboard.id,
+  }))
+  const text = buildSrt(clips, { shots: subtitleRows.map((row) => subtitleShotFromStoryboard(row.storyboard)) })
+  if (!text) return undefined
+  return {
+    format: 'srt',
+    fileName: `${safeFileName(`E${episode.index + 1}_${episode.title}_subtitles`, 'subtitles')}.srt`,
+    cueCount: countSrtCues(text),
+    text,
+  }
+}
+
 export function producedEpisodeExportItems(doc: ProjectDoc): EpisodeExportItem[] {
   return sortedEpisodes(doc)
     .filter((episode) => !!episode.filmPath)
@@ -124,14 +207,20 @@ export function episodePackageDirName(doc: ProjectDoc, episode: Episode, date = 
   return `${safeFileName(doc.meta.name || 'series', 'series')}_E${episode.index + 1}_${safeFileName(episode.title || 'episode', 'episode')}_${timestampPart(date)}`
 }
 
-export function buildEpisodeExportManifest(doc: ProjectDoc, episodes: EpisodeExportManifest['episodes'], exportedAt = new Date().toISOString()): EpisodeExportManifest {
-  const episodeIds = new Set(episodes.map((episode) => episode.episodeId))
+export function buildEpisodeExportManifest(doc: ProjectDoc, episodes: EpisodeExportManifestEpisode[], exportedAt = new Date().toISOString()): EpisodeExportManifest {
+  const manifestEpisodes = episodes.map((item) => {
+    if (item.subtitles !== undefined) return item
+    const episode = doc.episodes?.find((entry) => entry.id === item.episodeId)
+    const subtitle = episode ? buildEpisodeSubtitleExport(episode) : undefined
+    return subtitle ? { ...item, subtitles: [subtitleMetadata(subtitle)] } : item
+  })
+  const episodeIds = new Set(manifestEpisodes.map((episode) => episode.episodeId))
   return {
     projectId: doc.meta.id,
     projectName: doc.meta.name,
     exportedAt,
-    episodeCount: episodes.length,
-    episodes,
+    episodeCount: manifestEpisodes.length,
+    episodes: manifestEpisodes,
     delivery: buildEpisodeDeliveryReport(doc, episodeIds),
   }
 }
@@ -141,7 +230,12 @@ export function buildSingleEpisodePackageManifest(
   episode: Episode,
   exportedFilmPath?: string,
   exportedAt = new Date().toISOString(),
+  subtitles?: EpisodeSubtitleExport[],
 ): SingleEpisodePackageManifest {
+  const episodeSubtitles = subtitles ?? (() => {
+    const subtitle = buildEpisodeSubtitleExport(episode)
+    return subtitle ? [subtitleMetadata(subtitle)] : undefined
+  })()
   return {
     projectId: doc.meta.id,
     projectName: doc.meta.name,
@@ -164,6 +258,7 @@ export function buildSingleEpisodePackageManifest(
       },
       scripts: episode.scripts,
       storyboards: episode.storyboards,
+      subtitles: episodeSubtitles,
     },
   }
 }
@@ -229,18 +324,34 @@ export async function exportProducedEpisodes(doc: ProjectDoc): Promise<EpisodeEx
 
   const dir = joinPath(root, seasonPackageDirName(doc))
   await filesystem.mkdir(dir)
-  const exported: EpisodeExportManifest['episodes'] = []
+  const episodeById = new Map(sortedEpisodes(doc).map((episode) => [episode.id, episode]))
+  const exported: EpisodeExportManifestEpisode[] = []
   const errors: string[] = []
   for (const item of items) {
     const exportedPath = joinPath(dir, item.fileName)
+    const exportedItem: EpisodeExportManifestEpisode = { ...item, exportedPath }
     try {
       await filesystem.copy(item.sourcePath, exportedPath)
-      exported.push({ ...item, exportedPath })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       errors.push(`E${item.episodeIndex} ${item.episodeTitle}: ${message}`)
-      exported.push({ ...item, exportedPath, error: message })
+      exportedItem.error = message
     }
+    const episode = episodeById.get(item.episodeId)
+    const subtitle = episode ? buildEpisodeSubtitleExport(episode) : undefined
+    if (subtitle) {
+      const subtitlePath = joinPath(dir, subtitle.fileName)
+      const subtitleItem: EpisodeSubtitleExport = { ...subtitleMetadata(subtitle), exportedPath: subtitlePath }
+      try {
+        await filesystem.writeFile(subtitlePath, subtitle.text, 'utf-8')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        errors.push(`E${item.episodeIndex} ${item.episodeTitle} 字幕: ${message}`)
+        subtitleItem.error = message
+      }
+      exportedItem.subtitles = [subtitleItem]
+    }
+    exported.push(exportedItem)
   }
 
   const manifestPath = joinPath(dir, 'manifest.json')
@@ -267,16 +378,29 @@ export async function exportEpisodePackage(doc: ProjectDoc, episode: Episode): P
   const filmName = `${safeFileName(`E${episode.index + 1}_${episode.title}`)}${extName(episode.filmPath)}`
   const exportedFilmPath = joinPath(dir, filmName)
   const errors: string[] = []
+  let copiedFilmPath: string | undefined = exportedFilmPath
   try {
     await filesystem.copy(episode.filmPath, exportedFilmPath)
   } catch (error) {
+    copiedFilmPath = undefined
     errors.push(error instanceof Error ? error.message : String(error))
+  }
+  const subtitle = buildEpisodeSubtitleExport(episode)
+  const subtitles: EpisodeSubtitleExport[] | undefined = subtitle ? [{ ...subtitleMetadata(subtitle), exportedPath: joinPath(dir, subtitle.fileName) }] : undefined
+  if (subtitle && subtitles?.[0]) {
+    try {
+      await filesystem.writeFile(subtitles[0].exportedPath!, subtitle.text, 'utf-8')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      errors.push(`字幕: ${message}`)
+      subtitles[0].error = message
+    }
   }
   const manifestPath = joinPath(dir, 'episode.json')
   await filesystem.writeFile(
     manifestPath,
-    JSON.stringify(buildSingleEpisodePackageManifest(doc, episode, errors.length ? undefined : exportedFilmPath), null, 2),
+    JSON.stringify(buildSingleEpisodePackageManifest(doc, episode, copiedFilmPath, undefined, subtitles), null, 2),
     'utf-8',
   )
-  return { dir, manifestPath, count: errors.length ? 0 : 1, errors }
+  return { dir, manifestPath, count: copiedFilmPath ? 1 : 0, errors }
 }
