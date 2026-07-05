@@ -32,6 +32,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
+import { invalidateCurrentEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -281,36 +282,6 @@ function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partia
     if (!episode) return
     Object.assign(episode, patch, { updatedAt: Date.now() })
   })
-}
-
-function invalidateCurrentEpisodeProduction(doc: ProjectDoc): void {
-  const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
-  if (!episode || (!episode.filmPath && !episode.filmError && !episode.producedAt && episode.status !== 'done')) return
-  delete episode.filmPath
-  delete episode.filmError
-  delete episode.producedAt
-  if (episode.status === 'done') episode.status = 'planned'
-  episode.updatedAt = Date.now()
-}
-
-function missingReferencedVariantImages(doc: ProjectDoc): Array<{ assetId: string; variantId: string }> {
-  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
-  const seen = new Set<string>()
-  const result: Array<{ assetId: string; variantId: string }> = []
-  for (const storyboard of doc.storyboards) {
-    for (const ref of castRefsForStoryboard(storyboard)) {
-      if (!ref.variantId) continue
-      const key = `${ref.assetId}:${ref.variantId}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      const asset = assets.get(ref.assetId)
-      if (!asset || asset.type === 'audio' || asset.type === 'clip') continue
-      const variant = asset.variants?.find((item) => item.id === ref.variantId)
-      if (!variant || variant.refImageId) continue
-      result.push({ assetId: asset.id, variantId: variant.id })
-    }
-  }
-  return result
 }
 
 async function produceCurrentEpisode(
@@ -1610,11 +1581,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().autoProduce()
       return
     }
-    const pending = episodes.filter((episode) => {
-      if (episode.filmPath) return false
-      const storyboards = episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards
-      return storyboards.length > 0
-    })
+    const pending = pendingEpisodesForSeries(doc)
     if (!pending.length) return
     const startId = doc.currentEpisodeId
     set({ batch: { running: true, label: `生成全剧 0/${pending.length}` } })
