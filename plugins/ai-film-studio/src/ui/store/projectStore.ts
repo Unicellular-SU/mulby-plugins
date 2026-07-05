@@ -72,6 +72,7 @@ export interface ProjectState {
   renameEpisode: (id: string, title: string) => void
   deleteEpisode: (id: string) => void
   setEpisodeNovelChapters: (episodeId: string, chapterIds: string[]) => void
+  distributeNovelChaptersAcrossEpisodes: () => void
 
   // 实体便捷增删改（基于 mutate）
   upsertScript: (s: Partial<Script> & { content: string }) => string
@@ -676,6 +677,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const valid = new Set(d.novel.map((chapter) => chapter.id))
       episode.novelChapterIds = [...new Set(chapterIds.filter((id) => valid.has(id)))]
       episode.updatedAt = Date.now()
+    }),
+
+  distributeNovelChaptersAcrossEpisodes: () =>
+    get().mutate((d) => {
+      const episodes = [...(d.episodes ?? [])].sort((a, b) => a.index - b.index)
+      if (episodes.length <= 1 || !d.novel.length) return
+      const now = Date.now()
+      for (let i = 0; i < episodes.length; i += 1) {
+        const start = Math.floor((i * d.novel.length) / episodes.length)
+        const end = Math.floor(((i + 1) * d.novel.length) / episodes.length)
+        episodes[i].novelChapterIds = d.novel.slice(start, end).map((chapter) => chapter.id)
+        episodes[i].updatedAt = now
+      }
     }),
 
   upsertScript: (s) => {

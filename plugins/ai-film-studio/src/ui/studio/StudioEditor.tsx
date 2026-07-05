@@ -392,6 +392,7 @@ function NovelTab() {
   const extractChapterEvents = useProjectStore((s) => s.extractChapterEvents)
   const extractAllEvents = useProjectStore((s) => s.extractAllEvents)
   const setEpisodeNovelChapters = useProjectStore((s) => s.setEpisodeNovelChapters)
+  const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const batch = useProjectStore((s) => s.batch)
   const [text, setText] = useState('')
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
@@ -443,6 +444,17 @@ function NovelTab() {
               <Wand2 size={13} /> 提取全部事件
             </button>
             <span className="afs-studio__hint">提取后改编更省 token、长篇也装得下</span>
+            {episodes.length > 1 && (
+              <button
+                className="afs-btn afs-btn--sm afs-btn--ghost"
+                title="按章节顺序覆盖当前多集拆章"
+                onClick={() => {
+                  if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
+                }}
+              >
+                <BookOpen size={13} /> 顺序均分
+              </button>
+            )}
             <button className="afs-btn afs-btn--sm afs-btn--ghost" style={{ marginLeft: 'auto' }} onClick={() => clearNovel()}>
               <Trash2 size={13} /> 清空
             </button>

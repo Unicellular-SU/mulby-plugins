@@ -722,6 +722,21 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
     },
     {
+      name: 'distribute_episode_chapters',
+      description: 'Evenly distribute imported novel chapters across existing episodes in order. This overwrites current episode chapter assignments.',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episodes = sortedEpisodes(d)
+        if (episodes.length <= 1) return json({ error: '需要至少两集才能均分章节', episodes: episodes.map((episode) => episodeView(d, episode)) })
+        if (!d.novel.length) return json({ error: '还没有导入原著章节' })
+        get().distributeNovelChaptersAcrossEpisodes()
+        const next = get().doc ?? d
+        return json({ episodes: sortedEpisodes(next).map((episode) => episodeView(next, episode)) })
+      },
+    },
+    {
       name: 'add_asset',
       description: '新增资产：人物 role / 场景 scene / 物品 prop',
       parameters: {
