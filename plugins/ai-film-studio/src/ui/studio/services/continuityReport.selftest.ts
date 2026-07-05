@@ -138,6 +138,28 @@ const sceneMismatchReport = buildContinuityReport(
 )
 check('flags mixed scene assets in reused scene group', sceneMismatchReport.issues.filter((issue) => issue.code === 'scene_group_asset_mismatch').length === 2, JSON.stringify(sceneMismatchReport.issues))
 
+const unusedAssetReport = buildContinuityReport(
+  doc({
+    assets: [
+      { id: 'hero', type: 'role', name: 'Hero', refImageId: 'hero-img', state: 'done' },
+      { id: 'unused', type: 'role', name: 'Unused Role', refImageId: 'unused-img', state: 'done' },
+    ],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('uses-hero', 0, [{ assetId: 'hero' }])],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check('flags project assets unused by any storyboard', !!unusedAssetReport.issues.some((issue) => issue.code === 'unused_project_asset' && issue.assetId === 'unused'), JSON.stringify(unusedAssetReport.issues))
+
+const emptyStoryboardAssetReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'planned', type: 'role', name: 'Planned Role', refImageId: 'planned-img', state: 'done' }],
+    currentEpisodeId: 'ep1',
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check('does not flag unused assets before storyboards exist', !emptyStoryboardAssetReport.issues.some((issue) => issue.code === 'unused_project_asset'), JSON.stringify(emptyStoryboardAssetReport.issues))
+
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{

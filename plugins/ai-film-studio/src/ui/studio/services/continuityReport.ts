@@ -216,6 +216,32 @@ function addSceneReuseIssues(
   }
 }
 
+function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIssues: ContinuityIssue[]): void {
+  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
+  const usedAssetIds = new Set<string>()
+  let storyboardCount = 0
+  for (const episode of episodes) {
+    const storyboards = episodeStoryboards(doc, episode)
+    storyboardCount += storyboards.length
+    for (const storyboard of storyboards) {
+      for (const ref of castRefsForStoryboard(storyboard)) {
+        if (ref.assetId) usedAssetIds.add(ref.assetId)
+      }
+    }
+  }
+  if (!storyboardCount) return
+  for (const asset of doc.assets) {
+    if (asset.parentAssetId || !checkedTypes.includes(asset.type) || usedAssetIds.has(asset.id)) continue
+    const typeLabel = ASSET_TYPE_LABEL[asset.type]
+    allIssues.push({
+      severity: 'warning',
+      code: 'unused_project_asset',
+      assetId: asset.id,
+      message: `项目级${typeLabel}资产「${asset.name}」还没有被任何分镜引用。若它属于后续剧集，建议在对应分镜中复用；否则可合并、改名或移出当前资产池，避免资产池膨胀影响 Agent 选择。`,
+    })
+  }
+}
+
 export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const episodes = episodeList(doc)
@@ -226,6 +252,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
   addDuplicateAssetNameIssues(doc, allIssues)
   addDuplicateAssetAliasIssues(doc, allIssues)
+  addUnusedProjectAssetIssues(doc, episodes, allIssues)
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)
