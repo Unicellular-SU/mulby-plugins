@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
+import type { Asset, AssetVariant, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport } from '../services/continuityReport'
@@ -310,6 +310,51 @@ function findAssetVariant(asset: Asset, token: unknown) {
   if (!text) return undefined
   const lower = text.toLowerCase()
   return asset.variants?.find((variant) => variant.id === text) ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)
+}
+
+type VariantScopeKind = 'episode' | 'scene' | 'storyboard'
+type VariantScopeKey = 'appliesToEpisodeIds' | 'appliesToSceneIds' | 'appliesToStoryboardIds'
+
+function variantScopeKind(value: unknown): VariantScopeKind | undefined {
+  return value === 'episode' || value === 'scene' || value === 'storyboard' ? value : undefined
+}
+
+function inferVariantScopeKind(args: Record<string, unknown>): VariantScopeKind | undefined {
+  return (
+    variantScopeKind(args.scopeKind) ??
+    (stringArg(args.storyboardId) || typeof args.storyboardIndex === 'number' ? 'storyboard' : undefined) ??
+    (stringArg(args.sceneId) ? 'scene' : undefined) ??
+    (stringArg(args.episodeId) || typeof args.episodeIndex === 'number' || stringArg(args.episodeTitle) ? 'episode' : undefined)
+  )
+}
+
+function variantScopeKey(kind: VariantScopeKind): VariantScopeKey {
+  if (kind === 'scene') return 'appliesToSceneIds'
+  if (kind === 'storyboard') return 'appliesToStoryboardIds'
+  return 'appliesToEpisodeIds'
+}
+
+function resolveVariantScopeId(doc: ProjectDoc, args: Record<string, unknown>, kind: VariantScopeKind): string | undefined {
+  const scopeId = stringArg(args.scopeId)
+  if (scopeId) return scopeId
+  if (kind === 'scene') return stringArg(args.sceneId)
+  if (kind === 'storyboard') {
+    const storyboardId = stringArg(args.storyboardId)
+    if (storyboardId) return storyboardId
+    const index = typeof args.storyboardIndex === 'number' ? args.storyboardIndex : undefined
+    if (index === undefined || !Number.isFinite(index)) return undefined
+    const episode = resolveEpisodeSelector(doc, args)
+    const storyboards = episode ? [...storyboardsForEpisode(doc, episode)].sort((a, b) => a.index - b.index) : []
+    return storyboards[Math.max(0, Math.floor(index) - 1)]?.id
+  }
+  if (hasEpisodeSelector(args)) return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle })?.id
+  return currentEpisode(doc)?.id
+}
+
+function nextVariantScopeIds(variant: AssetVariant, key: VariantScopeKey, scopeId: string, remove: boolean): string[] | undefined {
+  const existing = variant[key] ?? []
+  const ids = remove ? existing.filter((id) => id !== scopeId) : [...new Set([...existing, scopeId])]
+  return ids.length ? ids : undefined
 }
 
 function roleInShot(value: unknown): StoryboardCastRef['roleInShot'] | undefined {
@@ -1127,6 +1172,52 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().updateAssetVariant(asset.id, variantId, Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)))
         const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
         return json(variantView(nextAsset, variantId))
+      },
+    },
+    {
+      name: 'set_asset_variant_scope',
+      description: '增量标记或移除资产变体适用范围，不会覆盖其它 episode/scene/storyboard 适用范围；用于修正 variant_out_of_episode_scope。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
+          variantId: { type: 'string' },
+          variantLabel: { type: 'string' },
+          label: { type: 'string' },
+          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'] },
+          scopeId: { type: 'string', description: '直接指定要追加/移除的 episodeId、sceneId 或 storyboardId。' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号；scopeKind=episode 时可作为目标范围。' },
+          episodeTitle: { type: 'string' },
+          sceneId: { type: 'string' },
+          storyboardId: { type: 'string' },
+          storyboardIndex: { type: 'number', description: '1-based 分镜序号；scopeKind=storyboard 且 storyboardId 为空时使用。' },
+          remove: { type: 'boolean', description: 'true 时从该层级适用范围中移除目标 ID。' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
+        if (!variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        const scopeKind = inferVariantScopeKind(a)
+        if (!scopeKind) return json({ error: '未指定适用范围层级', expected: ['episode', 'scene', 'storyboard'] })
+        const scopeId = resolveVariantScopeId(d, a, scopeKind)
+        if (!scopeId) return json({ error: '未找到适用范围 ID', scopeKind, episodes: scopeKind === 'episode' ? sortedEpisodes(d).map((episode) => episodeInfo(d, episode)) : undefined })
+        const key = variantScopeKey(scopeKind)
+        const patch: Partial<AssetVariant> = { [key]: nextVariantScopeIds(variant, key, scopeId, a.remove === true) }
+        get().updateAssetVariant(asset.id, variant.id, patch)
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json({
+          scopeKind,
+          scopeId,
+          action: a.remove === true ? 'remove' : 'add',
+          result: variantView(nextAsset, variant.id),
+        })
       },
     },
     {

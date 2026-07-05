@@ -1,5 +1,5 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
-import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
+import type { Asset, AssetVariant, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
 
 let failures = 0
@@ -187,6 +187,10 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       sb.castRefs = refs
       sb.associateAssetIds = [...new Set(refs.map((ref) => ref.assetId))]
     },
+    updateAssetVariant: (assetId: string, variantId: string, patch: Partial<AssetVariant>) => {
+      const variant = current.assets.find((item) => item.id === assetId)?.variants?.find((item) => item.id === variantId)
+      if (variant) Object.assign(variant, patch)
+    },
     setCurrentEpisodeSeriesSkip: (skip: boolean) => {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
       if (episode) episode.seriesSkip = skip || undefined
@@ -206,7 +210,7 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
 
 const writableDoc = cloneDoc(doc)
 writableDoc.assets = [
-  { id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] },
+  { id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep1'] }] },
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
@@ -217,11 +221,12 @@ const writeTools = makeAgentTools(() => writeState)
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
+const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !updateAsset || !setAssetRef || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!addStoryboard || !updateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -245,6 +250,25 @@ check(
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
+
+const sceneScopeResult = JSON.parse(await setVariantScope.execute({ assetName: 'Hero', variantLabel: 'Gala', scopeKind: 'scene', sceneId: 'banquet' }))
+const scopedHeroVariant = writableDoc.assets.find((item) => item.id === 'hero')?.variants?.find((item) => item.id === 'gala')
+check(
+  'set_asset_variant_scope adds scene scope without replacing episode scope',
+  sceneScopeResult.scopeKind === 'scene' &&
+    scopedHeroVariant?.appliesToEpisodeIds?.includes('ep1') === true &&
+    scopedHeroVariant?.appliesToSceneIds?.includes('banquet') === true,
+  JSON.stringify(sceneScopeResult),
+)
+
+const removeScopeResult = JSON.parse(await setVariantScope.execute({ assetId: 'hero', variantId: 'gala', scopeKind: 'episode', episodeId: 'ep1', remove: true }))
+check(
+  'set_asset_variant_scope removes one scope and keeps other scope kinds',
+  removeScopeResult.action === 'remove' &&
+    !scopedHeroVariant?.appliesToEpisodeIds?.includes('ep1') &&
+    scopedHeroVariant?.appliesToSceneIds?.includes('banquet') === true,
+  JSON.stringify(removeScopeResult),
+)
 
 const assetRefResult = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Lantern', roleInShot: 'supporting' }))
 check(
