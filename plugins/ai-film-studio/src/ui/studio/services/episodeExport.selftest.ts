@@ -98,6 +98,36 @@ check('builds single episode package manifest', episodeManifest.episode.index ==
 check('scopes delivery report to single episode package', episodeManifest.delivery.assetReferences.length === 1 && episodeManifest.delivery.assetReferences[0].assetId === 'hero' && episodeManifest.delivery.missingItems.length === 0, JSON.stringify(episodeManifest.delivery))
 check('adds subtitle metadata to single episode package', episodeManifest.episode.subtitles?.[0]?.exportedPath === '/exports/E1_Pilot_subtitles.srt', JSON.stringify(episodeManifest.episode.subtitles))
 
+const currentSnapshotProject = doc({
+  currentEpisodeId: 'ep1',
+  scripts: [{ id: 'flat-script', name: 'Flat Script', content: 'Current flat script.', createdAt: 0, updatedAt: 0 }],
+  storyboards: [{ ...storyboard('flat-sb', 0, [{ assetId: 'hero' }]), dialogues: [{ character: 'Hero', line: 'Fresh current line.' }] }],
+  clips: [{ id: 'flat-clip', storyboardId: 'flat-sb', durationSec: 2, state: 'done', videoFilePath: '/tmp/current-clip.mp4' }],
+  track: [{ id: 'flat-track', storyboardIds: ['flat-sb'], clipIds: ['flat-clip'], selectClipId: 'flat-clip', order: 0 }],
+  assets,
+  episodes: [
+    episode('ep1', 0, { title: 'Current', filmPath: '/tmp/current.mp4' }),
+    episode('ep2', 1, { title: 'Stored', filmPath: '/tmp/stored.mp4', storyboards: [storyboard('stored-sb', 0, [{ assetId: 'hero' }])] }),
+  ],
+})
+const currentSnapshotEpisode = currentSnapshotProject.episodes![0]
+const currentSnapshotManifest = buildSingleEpisodePackageManifest(currentSnapshotProject, currentSnapshotEpisode, '/exports/current.mp4')
+check(
+  'single episode export snapshots current flat episode data',
+  currentSnapshotManifest.episode.counts.scripts === 1 &&
+    currentSnapshotManifest.episode.counts.storyboards === 1 &&
+    currentSnapshotManifest.episode.storyboards[0]?.id === 'flat-sb' &&
+    currentSnapshotManifest.episode.subtitles?.[0]?.cueCount === 1,
+  JSON.stringify(currentSnapshotManifest.episode),
+)
+const currentSnapshotItems = producedEpisodeExportItems(currentSnapshotProject).map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` }))
+const currentSnapshotSeasonManifest = buildEpisodeExportManifest(currentSnapshotProject, currentSnapshotItems)
+check(
+  'season export manifest snapshots current flat subtitles',
+  currentSnapshotSeasonManifest.episodes.find((item) => item.episodeId === 'ep1')?.subtitles?.[0]?.cueCount === 1,
+  JSON.stringify(currentSnapshotSeasonManifest.episodes),
+)
+
 if (failures) {
   console.error(`\nepisodeExport selftest: ${failures} FAILED`)
   process.exit(1)
