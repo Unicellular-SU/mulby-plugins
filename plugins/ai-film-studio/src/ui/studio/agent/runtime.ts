@@ -82,6 +82,7 @@ ${toolSchemaText(tools)}
 - 需要确认当前剧本、分镜、资产、原著或时间线时，先请求读取工具。
 - 多集项目中，用户指定第几集、下一集或新一集时，先用 get_episodes 确认剧集，再用 switch_episode 或 create_episode 选中目标剧集；剧本、分镜和视频片段都写入当前剧集，资产是项目级共享。
 - 用户要求规划多集、按原著拆集或指定每集覆盖内容时，先用 get_novel/get_episodes 查看章节和剧集；剧集数量不足时先用 create_episodes 补空剧集；粗略初始化可用 distribute_episode_chapters 顺序均分，精确拆集用 assign_episode_chapters 写入章节归属。
+- 续写下一集、承接上一集状态、处理换装/妆容/受伤/时期变化时，先调用 get_episode_handoff 读取最近制作回顾、共享资产出场记录和承接建议；看到上一相关剧集使用过具体形态或本集已有适用变体时，分镜写入必须用 castRefs/variant 精确绑定。
 - 检查跨集角色一致性、妆容/服装绑定或缺图问题时，优先调用 get_continuity_report，再决定是否补资产、补变体或修正分镜绑定。
 - get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产、补充/调整 aliases 或建议合并资产；不要继续用同一称呼创建新角色、场景或道具。
 - get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就把它加入相应分镜 cast/castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。

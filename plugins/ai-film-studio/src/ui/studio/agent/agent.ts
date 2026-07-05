@@ -52,6 +52,7 @@ const CONTRACT = `
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
 - assets 的 name 要与 storyboards 的 cast 名字一致，便于关联；同一个人/场景有昵称、称谓或原著别称时写入 aliases，后续分镜可用别名匹配同一资产；同一角色有妆容/服装/年龄/时期变体时，在 castRefs 里写 assetName + variantLabel，不要只写进画面描述。
+- 如果上下文、连续性报告或跨集承接线索显示某角色在上一相关剧集使用过具体变体，或本集已有适用变体，分镜必须用 castRefs 绑定 variantLabel/variantId；除非剧情明确恢复默认状态，不要只写 cast 让它回到主形象。
 - **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
 - 分镜按叙事顺序排列；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
@@ -302,9 +303,10 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
   const TOOL_GUIDE =
     '你是 AI 制片。工具返回的是当前项目的实时状态；凡是用户要求续写、修改、对齐已有内容、查询当前状态，先调用读取工具核对，不要只凭摘要猜测。' +
     '多集项目先用 get_episodes/get_project_overview 确认当前剧集；用户指定第几集或新一集时，先 switch_episode 或 create_episode 再写入。' +
-    '只读工具：get_project_overview/get_workspace（项目概览）、get_episodes（剧集列表）、get_continuity_report（跨集资产/变体一致性审计）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
+    '只读工具：get_project_overview/get_workspace（项目概览）、get_episodes（剧集列表）、get_continuity_report（跨集资产/变体一致性审计）、get_episode_handoff（当前集跨集承接线索）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
     '写入/生成工具：create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、upsert_asset_variant（创建/更新资产变体）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_cast_variant（修正既有分镜变体绑定）、generate_asset、generate_keyframe、generate_clip。' +
+    '续写下一集、处理换装妆容或承接上一集状态时，先读取 get_episode_handoff；如果 handoff/continuity 指出上一相关剧集使用过具体形态或本集已有适用变体，分镜必须通过 castRefs 绑定 variantLabel/variantId，除非剧情明确恢复默认状态。' +
     '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致，昵称/称谓写 aliases 以便后续复用同一资产。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
@@ -340,6 +342,8 @@ const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
   '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
+  '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
+  '当连续性报告出现 episode_variant_available 或 asset_state_regressed_to_main 时，优先把分镜输出为绑定候选/新形态的 castRefs，避免生成后再回退到主形象。' +
   '紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
   '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"castRefs":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
 
@@ -412,7 +416,8 @@ type PlanAsset = NonNullable<AgentPlan['assets']>[number]
 const TOOL_CONTEXT_CAP = 24000
 const PIPELINE_TOOL_GUIDE =
   '## 子 Agent 工具上下文\n' +
-  '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。'
+  '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。\n' +
+  '多集续写、换装、妆容、受伤状态或时期变化要以 get_episode_handoff 和 get_continuity_report 为准；分镜子 Agent 看到上一相关剧集形态、本集适用变体、episode_variant_available 或 asset_state_regressed_to_main 时，必须输出带 variantLabel/variantId 的 castRefs，除非剧本明确恢复默认状态。'
 
 type ProjectDocSource = ProjectDoc | (() => ProjectDoc | null | undefined)
 export type PipelineStage = StageTask
@@ -650,6 +655,7 @@ export async function runAgentPipeline(
         { name: 'get_project_overview', limit: 12000 },
         { name: 'get_episodes', limit: 12000 },
         { name: 'get_continuity_report', limit: 20000 },
+        { name: 'get_episode_handoff', limit: 24000 },
         { name: 'get_storyboards', args: { count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
         { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
         { name: 'get_timeline', args: { includeClips: false }, limit: 18000 },
