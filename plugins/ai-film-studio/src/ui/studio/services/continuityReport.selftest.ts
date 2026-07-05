@@ -154,6 +154,11 @@ check(
   sceneVariantMismatchReport.issues.filter((issue) => issue.code === 'scene_group_variant_mismatch' && issue.assetId === 'hero').length === 2,
   JSON.stringify(sceneVariantMismatchReport.issues),
 )
+check(
+  'includes scene id for scene variant mismatch fixes',
+  sceneVariantMismatchReport.issues.some((issue) => issue.code === 'scene_group_variant_mismatch' && issue.sceneId === 'same-room' && issue.storyboardId === 'hero-gala' && issue.variantId === 'v-gala'),
+  JSON.stringify(sceneVariantMismatchReport.issues),
+)
 
 const unusedAssetReport = buildContinuityReport(
   doc({

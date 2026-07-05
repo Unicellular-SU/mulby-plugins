@@ -9,6 +9,7 @@ export interface ContinuityIssue {
   episodeId?: string
   storyboardId?: string
   storyboardIndex?: number
+  sceneId?: string
   assetId?: string
   variantId?: string
 }
@@ -209,6 +210,7 @@ function addSceneRoleVariantIssues(
         episodeId: episode.id,
         storyboardId: use.storyboard.id,
         storyboardIndex: use.storyboard.index + 1,
+        sceneId,
         assetId,
         variantId: use.variantId,
         message: `E${episode.index + 1} 场景组「${sceneId}」中「${asset?.name ?? assetId}」混用了 ${labels.join('、')}。连续场景建议统一绑定同一角色形态，除非镜头内明确发生换装或状态变化。`,
@@ -245,6 +247,7 @@ function addSceneReuseIssues(
           episodeId: episode.id,
           storyboardId: storyboard.id,
           storyboardIndex: storyboard.index + 1,
+          sceneId,
           assetId: refs[0],
           message: `E${episode.index + 1} 场景组「${sceneId}」混用了多个场景资产：${sceneLabels}。连续场景建议统一复用同一个场景资产，避免跨镜环境漂移。`,
         })
@@ -262,6 +265,7 @@ function addSceneReuseIssues(
         episodeId: episode.id,
         storyboardId: storyboard.id,
         storyboardIndex: storyboard.index + 1,
+        sceneId,
         assetId: sceneAssetId,
         message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 属于场景组「${sceneId}」，但没有引用场景资产「${sceneLabel}」。建议绑定同一场景资产以保持连续场景复用。`,
       })

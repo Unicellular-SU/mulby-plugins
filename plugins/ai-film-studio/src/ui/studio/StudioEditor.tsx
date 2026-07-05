@@ -1593,6 +1593,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     }
     setStoryboardCastVariant(issue.storyboardId, asset.id, variant.id)
   }
+  const unifySceneVariant = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'scene_group_variant_mismatch' || issue.episodeId !== doc.currentEpisodeId || !issue.sceneId || !issue.assetId) return
+    const sceneId = issue.sceneId.trim()
+    if (!sceneId) return
+    for (const storyboard of doc.storyboards) {
+      if (storyboard.sceneId?.trim() !== sceneId) continue
+      if (!castRefsForStoryboard(storyboard).some((ref) => ref.assetId === issue.assetId)) continue
+      setStoryboardCastVariant(storyboard.id, issue.assetId, issue.variantId)
+    }
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1605,6 +1615,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
         const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
+        const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1627,6 +1638,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canCarryPreviousVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => carryPreviousVariant(issue)}>
                 沿用上一形态
+              </button>
+            )}
+            {canUnifySceneVariant && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneVariant(issue)}>
+                统一为此形态
               </button>
             )}
             {refAction && (
