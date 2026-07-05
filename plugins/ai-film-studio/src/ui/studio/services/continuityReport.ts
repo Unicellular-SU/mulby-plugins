@@ -1,4 +1,5 @@
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
+import { normalizeAssetLookup } from '../../domain/assetAliases'
 import type { Asset, Episode, ProjectDoc, Storyboard, StoryboardCastRef } from '../../domain/types'
 
 export interface ContinuityIssue {
@@ -87,16 +88,12 @@ const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
   clip: '素材片段',
 }
 
-function normalizedAssetName(name: string): string {
-  return name.normalize('NFKC').replace(/\s+/g, '').toLocaleLowerCase()
-}
-
 function addDuplicateAssetNameIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
   const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
   const groups = new Map<string, Asset[]>()
   for (const asset of doc.assets) {
     if (!checkedTypes.includes(asset.type)) continue
-    const name = normalizedAssetName(asset.name)
+    const name = normalizeAssetLookup(asset.name)
     if (!name) continue
     const key = `${asset.type}:${name}`
     groups.set(key, [...(groups.get(key) ?? []), asset])
@@ -116,6 +113,49 @@ function addDuplicateAssetNameIssues(doc: ProjectDoc, allIssues: ContinuityIssue
   }
 }
 
+interface AssetLookupEntry {
+  asset: Asset
+  label: string
+  source: 'name' | 'alias'
+}
+
+function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
+  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
+  const groups = new Map<string, AssetLookupEntry[]>()
+  for (const asset of doc.assets) {
+    if (!checkedTypes.includes(asset.type)) continue
+    const entries: AssetLookupEntry[] = [
+      { asset, label: asset.name, source: 'name' },
+      ...(asset.aliases ?? []).map((alias): AssetLookupEntry => ({ asset, label: alias, source: 'alias' })),
+    ]
+    const seenForAsset = new Set<string>()
+    for (const entry of entries) {
+      const lookup = normalizeAssetLookup(entry.label)
+      if (!lookup || seenForAsset.has(lookup)) continue
+      seenForAsset.add(lookup)
+      const key = `${asset.type}:${lookup}`
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+  }
+  for (const entries of groups.values()) {
+    const assetIds = new Set(entries.map((entry) => entry.asset.id))
+    if (assetIds.size < 2 || !entries.some((entry) => entry.source === 'alias')) continue
+    const assets = [...assetIds].map((id) => entries.find((entry) => entry.asset.id === id)?.asset).filter((asset): asset is Asset => !!asset)
+    const typeLabel = ASSET_TYPE_LABEL[assets[0].type]
+    const labels = [...new Set(entries.map((entry) => entry.label.trim()).filter(Boolean))]
+    const sharedLabel = labels.length === 1 ? labels[0] : labels.join(' / ')
+    const ids = assets.map((asset) => asset.id).join('、')
+    for (const asset of assets) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'duplicate_asset_alias',
+        assetId: asset.id,
+        message: `项目中多个${typeLabel}资产共享名称/别名「${sharedLabel}」（${ids}），多集生成前建议合并资产或调整别名，避免 Agent 把同一称呼解析到不同资产。`,
+      })
+    }
+  }
+}
+
 export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const episodes = episodeList(doc)
@@ -125,6 +165,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const assignedChapterIds = new Set<string>()
   const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
   addDuplicateAssetNameIssues(doc, allIssues)
+  addDuplicateAssetAliasIssues(doc, allIssues)
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)

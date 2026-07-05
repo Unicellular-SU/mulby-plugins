@@ -97,6 +97,18 @@ const duplicateAssetReport = buildContinuityReport(
 )
 check('flags duplicate asset names by type', duplicateAssetReport.issues.filter((issue) => issue.code === 'duplicate_asset_name').length === 2, JSON.stringify(duplicateAssetReport.issues))
 
+const duplicateAliasReport = buildContinuityReport(
+  doc({
+    assets: [
+      { ...hero, aliases: ['Captain'] },
+      { id: 'captain-role', type: 'role', name: ' captain ', refImageId: 'captain-img', state: 'done' },
+      { id: 'captain-prop', type: 'prop', name: 'Captain', refImageId: 'captain-prop-img', state: 'done' },
+    ],
+  }),
+)
+check('flags duplicate asset aliases by type', duplicateAliasReport.issues.filter((issue) => issue.code === 'duplicate_asset_alias').length === 2, JSON.stringify(duplicateAliasReport.issues))
+check('does not flag alias collisions across asset types', !duplicateAliasReport.issues.some((issue) => issue.assetId === 'captain-prop'), JSON.stringify(duplicateAliasReport.issues))
+
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{
