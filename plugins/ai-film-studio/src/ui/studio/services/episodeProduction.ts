@@ -37,6 +37,18 @@ export function clipsForEpisode(doc: ProjectDoc, episode: Episode): Clip[] {
   return episode.id === doc.currentEpisodeId ? doc.clips : episode.clips
 }
 
+export function currentEpisodeUsesCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
+  const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  const storyboards = episode ? storyboardsForEpisode(doc, episode) : doc.storyboards
+  return storyboards.some((storyboard) =>
+    castRefsForStoryboard(storyboard).some((ref) => ref.assetId === assetId && (variantId ? ref.variantId === variantId : !ref.variantId)),
+  )
+}
+
+export function invalidateCurrentEpisodeProductionIfCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
+  return currentEpisodeUsesCastRef(doc, assetId, variantId) ? invalidateCurrentEpisodeProduction(doc) : false
+}
+
 export function pendingEpisodesForSeries(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])]
     .sort((a, b) => a.index - b.index)

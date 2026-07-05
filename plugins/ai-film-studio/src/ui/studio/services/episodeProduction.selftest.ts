@@ -1,4 +1,4 @@
-import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, hasEpisodeProductionState, invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -87,7 +87,7 @@ check('collects only referenced missing variant images', missing.length === 1 &&
 
 const planned = doc({
   currentEpisodeId: 'ep1',
-  storyboards: [storyboard('current', 0, [])],
+  storyboards: [storyboard('current', 0, [{ assetId: 'prop' }])],
   episodes: [
     episode('ep1', 0, { storyboards: [] }),
     episode('ep2', 1, { storyboards: [storyboard('ep2-shot', 0, [])], filmPath: 'done.mp4' }),
@@ -97,6 +97,9 @@ const planned = doc({
 })
 const pending = pendingEpisodesForSeries(planned)
 check('series production uses current flat storyboards and skips completed episodes', pending.map((item) => item.id).join(',') === 'ep1,ep4', JSON.stringify(pending.map((item) => item.id)))
+check('detects current episode main cast reference use', currentEpisodeUsesCastRef(planned, 'prop'), JSON.stringify(planned.storyboards))
+const variantOnly = doc({ currentEpisodeId: 'ep1', storyboards: [storyboard('variant-only', 0, [{ assetId: 'hero', variantId: 'battle' }])], episodes: [episode('ep1', 0)] })
+check('does not treat variant use as main cast reference use', !currentEpisodeUsesCastRef(variantOnly, 'hero') && currentEpisodeUsesCastRef(variantOnly, 'hero', 'battle'), 'variant-only use should not invalidate main refs')
 
 const produced = episode('done', 0, { status: 'done', filmPath: 'film.mp4', filmError: 'old error', producedAt: 123, productionRecap: 'old recap', updatedAt: 10 })
 const changed = invalidateEpisodeProduction(produced)
