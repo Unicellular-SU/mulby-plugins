@@ -1,4 +1,4 @@
-import { recoverInterruptedGenerationState } from './persistence'
+import { loadProject, recoverInterruptedGenerationState } from './persistence'
 import type { Episode, ProjectDoc, ProjectMeta, Storyboard } from './types'
 
 let failures = 0
@@ -98,6 +98,44 @@ check('recovers episode production state to retryable planned', episodes[0]?.sta
 check('recovers non-current episode work without overwriting film errors', episodes[1]?.status === 'planned' && episodes[1].filmError === 'old film error' && episodes[1].storyboards[0].state === 'failed' && episodes[1].clips[0].state === 'failed', JSON.stringify(episodes[1]))
 check('keeps existing track prompt errors', episodes[1]?.track[0].promptError === 'old prompt error', JSON.stringify(episodes[1]?.track[0]))
 check('is idempotent after recovery', !recoverInterruptedGenerationState(doc, 99), 'second recovery should not change the doc')
+
+const legacyProject: ProjectDoc = {
+  meta: meta(),
+  currentEpisodeId: 'ep1',
+  novel: [],
+  scripts: [],
+  assets: [],
+  storyboards: [storyboard('flat-sb', 0)],
+  clips: [],
+  track: [],
+  memory: [],
+  episodes: [
+    episode('ep1', 0, { storyboards: [], track: [] }),
+    episode('ep2', 1, {
+      storyboards: [storyboard('ep2-second', 1), storyboard('ep2-first', 0)],
+      track: [{ id: 'stale-track', storyboardIds: ['deleted-sb'], clipIds: [], order: 0 }, { id: 'existing-track', storyboardIds: ['ep2-second'], clipIds: [], order: 9 }],
+    }),
+  ],
+}
+
+;(globalThis as unknown as { window: { mulby: unknown } }).window = {
+  mulby: {
+    storage: {
+      get: async () => legacyProject,
+    },
+  },
+}
+const normalizedProject = await loadProject('legacy')
+const normalizedEp2 = normalizedProject?.episodes?.find((episode) => episode.id === 'ep2')
+check('normalizes missing flat tracks while loading legacy projects', normalizedProject?.track.length === 1 && normalizedProject.track[0].storyboardIds.join(',') === 'flat-sb', JSON.stringify(normalizedProject?.track))
+check(
+  'normalizes non-current episode tracks while loading legacy projects',
+  normalizedEp2?.track.length === 2 &&
+    normalizedEp2.track[0].storyboardIds.join(',') === 'ep2-first' &&
+    normalizedEp2.track[1].storyboardIds.join(',') === 'ep2-second' &&
+    !normalizedEp2.track.some((track) => track.storyboardIds.includes('deleted-sb')),
+  JSON.stringify(normalizedEp2?.track),
+)
 
 if (failures) {
   console.error(`\npersistence selftest: ${failures} FAILED`)

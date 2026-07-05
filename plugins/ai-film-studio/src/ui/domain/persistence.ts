@@ -121,6 +121,29 @@ function normalizeTrack(raw: unknown[] | undefined): VideoTrack[] {
   })
 }
 
+function syncTracksForStoryboards(storyboards: ProjectDoc['storyboards'], track: VideoTrack[]): VideoTrack[] {
+  const storyboardIds = new Set(storyboards.map((storyboard) => storyboard.id))
+  const normalized = track
+    .map((item) => ({ ...item, storyboardIds: item.storyboardIds.filter((id) => storyboardIds.has(id)) }))
+    .filter((item) => item.storyboardIds.length > 0 || !!item.kind || !!item.clipAssetId)
+  const assigned = new Set<string>()
+  for (const item of normalized) for (const storyboardId of item.storyboardIds) assigned.add(storyboardId)
+  for (const storyboard of [...storyboards].sort((a, b) => a.index - b.index)) {
+    if (assigned.has(storyboard.id)) continue
+    normalized.push({ id: newId('t_'), storyboardIds: [storyboard.id], clipIds: [], order: normalized.length })
+    assigned.add(storyboard.id)
+  }
+  const storyboardIndex = (item: VideoTrack): number => {
+    const first = item.storyboardIds[0]
+    const storyboard = first ? storyboards.find((candidate) => candidate.id === first) : undefined
+    return storyboard ? storyboard.index : Number.MAX_SAFE_INTEGER
+  }
+  return normalized
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => storyboardIndex(a.item) - storyboardIndex(b.item) || a.index - b.index)
+    .map(({ item }, order) => ({ ...item, order }))
+}
+
 function episodeFromFlat(doc: ProjectDoc, now = Date.now()): Episode {
   return {
     id: doc.currentEpisodeId ?? newId('ep_'),
@@ -138,7 +161,7 @@ function episodeFromFlat(doc: ProjectDoc, now = Date.now()): Episode {
 
 function normalizeEpisode(raw: Episode, index: number): Episode {
   const episode = raw as Episode & { track?: unknown[] }
-  return {
+  const normalized = {
     ...episode,
     id: String(episode.id ?? newId('ep_')),
     index: typeof episode.index === 'number' ? episode.index : index,
@@ -151,6 +174,8 @@ function normalizeEpisode(raw: Episode, index: number): Episode {
     createdAt: typeof episode.createdAt === 'number' ? episode.createdAt : Date.now(),
     updatedAt: typeof episode.updatedAt === 'number' ? episode.updatedAt : Date.now(),
   }
+  normalized.track = syncTracksForStoryboards(normalized.storyboards, normalized.track)
+  return normalized
 }
 
 function recoverGeneratingState(item: { state?: GenState; error?: string }): boolean {
@@ -248,6 +273,7 @@ function normalizeDoc(raw: ProjectDoc): ProjectDoc {
   doc.storyboards ??= []
   doc.clips ??= []
   doc.memory ??= []
+  doc.track = syncTracksForStoryboards(doc.storyboards, doc.track)
   doc.episodes = Array.isArray(doc.episodes) ? (doc.episodes as Episode[]).map((e, i) => normalizeEpisode(e, i)) : []
   if (doc.episodes.length === 0) doc.episodes = [episodeFromFlat(doc)]
   if (!doc.currentEpisodeId || !doc.episodes.some((e) => e.id === doc.currentEpisodeId)) doc.currentEpisodeId = doc.episodes[0].id
