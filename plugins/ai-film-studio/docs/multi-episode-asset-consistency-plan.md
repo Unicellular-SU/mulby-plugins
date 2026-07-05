@@ -278,4 +278,5 @@ export interface StoryboardCastRef {
 42. 已完成：跨集承接面板和 `get_episode_handoff` 会对未标注作用域的跨集形态切换给出 `add_variant_episode_scope` 建议，可一键确认当前形态适用本集。
 43. 已完成：一致性抽屉沿用上一形态时，会根据上一形态已有作用域层级补当前剧集、场景或分镜范围；场景级/分镜级形态不会在一键修复后再次触发适用范围告警。
 44. 已完成：Agent 工具 `set_storyboard_cast_variant` 支持 `ensureScope` / `scopeKind`；工具循环沿用上一形态或绑定场景/分镜级形态时，可在写入 `castRefs` 后同步补当前剧集、场景或分镜适用范围，避免修复后再次触发范围告警。
-45. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
+45. 已完成：Agent 工具和分阶段管线在新增/续写分镜时支持写入 `sceneId`；`add_storyboard` 也支持 `ensureScope` / `scopeKind`，可在新分镜绑定上一形态或场景/分镜级形态时同步补当前使用范围。
+46. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
