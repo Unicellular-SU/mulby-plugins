@@ -22,6 +22,7 @@ import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import type { PipelineStage, PipelineStagePlan } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
+import { resolveAgentEpisodeTarget } from '../studio/agent/episodeTarget'
 import { abortText } from '../services/textEngine'
 import { useGraphStore } from './graphStore'
 import { useAssetStore, type ElementRef, type ElementKind } from './assetStore'
@@ -273,6 +274,16 @@ function docCounts(doc: ProjectDoc | null | undefined) {
     tracks: doc?.track.length ?? 0,
     novelChapters: doc?.novel.length ?? 0,
   }
+}
+
+function switchProjectDocEpisode(d: ProjectDoc, episodeId: string | undefined): boolean {
+  if (!episodeId || d.currentEpisodeId === episodeId) return false
+  P.syncCurrentEpisodeFromFlat(d)
+  const episode = d.episodes?.find((item) => item.id === episodeId)
+  if (!episode) return false
+  d.currentEpisodeId = episode.id
+  P.applyEpisodeToFlat(d, episode)
+  return true
 }
 
 function logPreflightWarnings(stage: 'keyframe' | 'clip', storyboardId: string, warnings: GenerationPreflightIssue[]): void {
@@ -1496,9 +1507,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const runId = P.newId('run_')
-    const logCtx = { runId, projectId: doc0.meta.id, projectName: doc0.meta.name }
+    const targetEpisode = resolveAgentEpisodeTarget(doc0, userText)
+    const writeEpisodeId = targetEpisode?.episode.id ?? doc0.currentEpisodeId
+    const logCtx = { runId, projectId: doc0.meta.id, projectName: doc0.meta.name, writeEpisodeId, targetEpisodeMatch: targetEpisode?.match }
     const now = Date.now()
     get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
+    if (targetEpisode?.episode.id && targetEpisode.episode.id !== doc0.currentEpisodeId) {
+      let switched = false
+      get().mutate((d) => {
+        switched = switchProjectDocEpisode(d, targetEpisode.episode.id)
+      })
+      if (switched) logInfo('agent', 'targetEpisode.switch', { ...logCtx, episodeTitle: targetEpisode.episode.title })
+    }
     const trace = makeTrace(set)
     const onPipeline = (e: PipelineEvent) => {
       trace.onPipeline(e)
@@ -1512,6 +1532,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const appliedStages = new Set<PipelineStage>()
     const applyStagePlan = (stage: PipelineStage, fragment: PipelineStagePlan) => {
       get().mutate((d) => {
+        if (stage === 'script' || stage === 'storyboard') switchProjectDocEpisode(d, writeEpisodeId)
         if (stage === 'script') applyAgentScript(d, fragment.script, applied)
         else if (stage === 'assets') applyAgentAssets(d, fragment.assets, applied)
         else if (stage === 'storyboard') applyAgentStoryboards(d, fragment.storyboards, applied)
@@ -1522,7 +1543,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const plan = await runAgentPipeline(() => get().doc, userText, onPipeline, (stage, fragment) => {
         applyStagePlan(stage, fragment)
-      })
+      }, { episodeId: writeEpisodeId })
       logInfo('agent', 'plan.result', { ...logCtx, plan: planForLog(plan) })
       if (plan.script?.content && !appliedStages.has('script')) applyStagePlan('script', { script: plan.script })
       if (plan.assets?.length && !appliedStages.has('assets')) applyStagePlan('assets', { assets: plan.assets })

@@ -11,6 +11,7 @@ import { getStylePack } from '../../services/stylePacks'
 import { useGraphStore } from '../../store/graphStore'
 import { recallContext, getMemoryConfig } from './memory'
 import { makeProjectReadTools } from './agentTools'
+import { resolveAgentEpisodeTarget } from './episodeTarget'
 import type { ProjectDoc } from '../../domain/types'
 import { cleanAssetAliases } from '../../domain/assetAliases'
 
@@ -500,8 +501,11 @@ function cleanAssets(assets?: AgentPlan['assets']): PlanAsset[] {
   return out
 }
 
-function currentScriptContent(doc: ProjectDoc, plan: AgentPlan): string {
-  return plan.script?.content?.trim() || doc.scripts[0]?.content?.trim() || ''
+function currentScriptContent(doc: ProjectDoc, plan: AgentPlan, episodeId?: string): string {
+  if (plan.script?.content?.trim()) return plan.script.content.trim()
+  const episode = episodeId ? doc.episodes?.find((item) => item.id === episodeId) : undefined
+  const scripts = episode && episode.id !== doc.currentEpisodeId ? episode.scripts : doc.scripts
+  return scripts[0]?.content?.trim() || ''
 }
 
 function summarizePlanResult(plan: AgentPlan, tasks: StageTask[]): string {
@@ -546,10 +550,20 @@ export async function runAgentPipeline(
   userText: string,
   onEvent?: (e: PipelineEvent) => void,
   onStagePlan?: (stage: PipelineStage, plan: PipelineStagePlan) => void | Promise<void>,
+  options?: { episodeId?: string },
 ): Promise<AgentPlan> {
   const model = ensureModel()
   const cfg = await getMemoryConfig()
   const getDoc = () => resolvePipelineDoc(docSource)
+  const targetEpisodeId = (): string | undefined => {
+    const current = getDoc()
+    return options?.episodeId ?? resolveAgentEpisodeTarget(current, userText)?.episode.id
+  }
+  const targetEpisodeArgs = (): Record<string, unknown> => {
+    const current = getDoc()
+    const episodeId = targetEpisodeId()
+    return episodeId && current.episodes?.some((episode) => episode.id === episodeId) ? { episodeId } : {}
+  }
   const makeBaseCtx = () => {
     const current = getDoc()
     return buildContext(current, recallContext(current, userText, cfg))
@@ -600,9 +614,9 @@ export async function runAgentPipeline(
       [
         { name: 'get_project_overview', limit: 12000 },
         { name: 'get_episodes', limit: 12000 },
-        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
         { name: 'get_novel', args: { includeText: true, textLimit: 6000 }, limit: 30000 },
-        { name: 'get_storyboard_table', limit: 18000 },
+        { name: 'get_storyboard_table', args: targetEpisodeArgs(), limit: 18000 },
       ],
       emit,
     )
@@ -627,7 +641,7 @@ export async function runAgentPipeline(
   }
   if (decision.tasks.includes('assets')) {
     emit({ type: 'start', agent: 'assets', title: AGENT_TITLES.assets })
-    const scriptSource = currentScriptContent(getDoc(), plan)
+    const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
     const assetsToolCtx = await readPipelineToolContext(
       getDoc,
       'assets',
@@ -635,7 +649,7 @@ export async function runAgentPipeline(
         { name: 'get_project_overview', limit: 12000 },
         { name: 'get_episodes', limit: 12000 },
         { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
-        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
       ],
       emit,
     )
@@ -661,7 +675,7 @@ export async function runAgentPipeline(
   }
   if (decision.tasks.includes('storyboard')) {
     emit({ type: 'start', agent: 'storyboard', title: AGENT_TITLES.storyboard })
-    const scriptSource = currentScriptContent(getDoc(), plan)
+    const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
     const storyboardToolCtx = await readPipelineToolContext(
       getDoc,
       'storyboard',
@@ -669,11 +683,11 @@ export async function runAgentPipeline(
         { name: 'get_project_overview', limit: 12000 },
         { name: 'get_episodes', limit: 12000 },
         { name: 'get_continuity_report', limit: 20000 },
-        { name: 'get_episode_handoff', limit: 24000 },
-        { name: 'get_storyboards', args: { count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
+        { name: 'get_episode_handoff', args: targetEpisodeArgs(), limit: 24000 },
+        { name: 'get_storyboards', args: { ...targetEpisodeArgs(), count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
         { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
-        { name: 'get_timeline', args: { includeClips: false }, limit: 18000 },
-        { name: 'get_script', args: { contentLimit: 50000 }, limit: 30000 },
+        { name: 'get_timeline', args: { ...targetEpisodeArgs(), includeClips: false }, limit: 18000 },
+        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
       ],
       emit,
     )
