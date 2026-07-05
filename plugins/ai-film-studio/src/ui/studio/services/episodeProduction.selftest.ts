@@ -230,6 +230,35 @@ const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHand
 const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
 check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
 
+const mainResetHandoffDoc = doc({
+  currentEpisodeId: 'ep3',
+  assets: handoffAssets,
+  storyboards: [storyboard('ep3-main-hero', 0, [{ assetId: 'hero' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      productionRecap: 'Hero stayed wounded after the chase.',
+      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, {
+      title: 'Recovery',
+      productionRecap: 'Hero recovered to the default look.',
+      storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
+    }),
+    episode('ep3', 2, { title: 'Aftermath' }),
+  ],
+})
+const mainResetHandoff = buildEpisodeProductionHandoff(mainResetHandoffDoc, mainResetHandoffDoc.episodes![2])
+const mainResetSuggestion = mainResetHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
+check(
+  'handoff stops carrying older variants after a main-image reset',
+  !!mainResetSuggestion &&
+    mainResetSuggestion.label === '新建并应用「Hero」本集形态' &&
+    !mainResetSuggestion.detail.includes('当前集仍用主形象') &&
+    !mainResetSuggestion.variantPrompt?.includes('Hero-Battle'),
+  JSON.stringify(mainResetSuggestion),
+)
+
 const variantSwitchHandoffDoc = doc({
   currentEpisodeId: 'ep2',
   assets: [{

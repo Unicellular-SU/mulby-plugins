@@ -260,6 +260,14 @@ function episodeVariantSeed(
   }
 }
 
+function previousVariantBeforeMainReset(appearances: EpisodeHandoffAppearance[]): EpisodeHandoffAppearance | undefined {
+  for (const appearance of appearances) {
+    if ((appearance.variantLabels?.length ?? 0) > 0) return appearance
+    if (appearance.mainImageUsed) return undefined
+  }
+  return undefined
+}
+
 export function buildEpisodeProductionRecap(doc: ProjectDoc, episode: Episode, limit = 1200): string {
   const scripts = scriptsForEpisode(doc, episode)
   const storyboards = [...storyboardsForEpisode(doc, episode)].sort((a, b) => a.index - b.index)
@@ -410,7 +418,7 @@ export function buildEpisodeProductionHandoff(
         const previousAppearances = appearances
           .filter((item) => item.episodeIndex < episode.index)
           .sort((a, b) => b.episodeIndex - a.episodeIndex)
-        const previousVariantAppearance = previousAppearances.find((item) => (item.variantLabels?.length ?? 0) > 0)
+        const previousVariantAppearance = previousVariantBeforeMainReset(previousAppearances)
         const previousAppearance = previousAppearances[0]
         const seed = episodeVariantSeed(asset.name, episode, previousVariantAppearance ?? previousAppearance ?? appearances[0])
         const stateRegressionDetail = previousVariantAppearance
