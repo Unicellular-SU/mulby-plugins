@@ -1602,7 +1602,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const target = latest.episodes?.find((episode) => episode.id === pending[i].id)
         if (!target) continue
         if (latest.currentEpisodeId !== target.id) get().switchEpisode(target.id)
-        await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${pending.length} · E${target.index + 1}` })
+        try {
+          await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${pending.length} · E${target.index + 1}` })
+        } catch (e) {
+          const error = e instanceof Error ? e.message : String(e)
+          logError('production.series', error, { episodeId: target.id, episodeIndex: target.index + 1 })
+          setCurrentEpisodeProductionState(get, { status: 'planned', filmError: error })
+        }
       }
     } finally {
       const latest = get().doc
