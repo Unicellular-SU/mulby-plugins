@@ -10,6 +10,7 @@ import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
 import { castRefsForStoryboard } from '../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias } from '../domain/assetAliases'
+import { removeVariantScopeReferences } from '../domain/variantScopes'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
@@ -819,8 +820,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (episodes.length <= 1) return
       const deleteIndex = episodes.findIndex((e) => e.id === id)
       if (deleteIndex < 0) return
+      const deleted = episodes[deleteIndex]
+      const deletedStoryboardIds = deleted.storyboards.map((storyboard) => storyboard.id)
       const deletingCurrent = d.currentEpisodeId === id
       d.episodes = episodes.filter((e) => e.id !== id)
+      removeVariantScopeReferences(d, { episodeIds: [id], storyboardIds: deletedStoryboardIds })
       reindexEpisodes(d.episodes)
       if (deletingCurrent || !d.episodes.some((e) => e.id === d.currentEpisodeId)) {
         const next = d.episodes[Math.min(deleteIndex, d.episodes.length - 1)]
@@ -1003,6 +1007,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       d.storyboards = d.storyboards.filter((x) => x.id !== id)
       d.clips = d.clips.filter((c) => c.storyboardId !== id)
+      removeVariantScopeReferences(d, { storyboardIds: [id] })
       // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
       d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
       syncTracksFromStoryboards(d) // 段内去该分镜 + 空段删除 + order 重排
