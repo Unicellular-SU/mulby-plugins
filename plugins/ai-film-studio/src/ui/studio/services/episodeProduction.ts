@@ -39,6 +39,10 @@ export function clipsForEpisode(doc: ProjectDoc, episode: Episode): Clip[] {
 
 export function currentEpisodeUsesCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
   const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  return episodeUsesCastRef(doc, episode, assetId, variantId)
+}
+
+export function episodeUsesCastRef(doc: ProjectDoc, episode: Episode | undefined, assetId: string, variantId?: string): boolean {
   const storyboards = episode ? storyboardsForEpisode(doc, episode) : doc.storyboards
   return storyboards.some((storyboard) =>
     castRefsForStoryboard(storyboard).some((ref) => ref.assetId === assetId && (variantId ? ref.variantId === variantId : !ref.variantId)),
@@ -47,6 +51,16 @@ export function currentEpisodeUsesCastRef(doc: ProjectDoc, assetId: string, vari
 
 export function invalidateCurrentEpisodeProductionIfCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
   return currentEpisodeUsesCastRef(doc, assetId, variantId) ? invalidateCurrentEpisodeProduction(doc) : false
+}
+
+export function invalidateEpisodesUsingCastRef(doc: ProjectDoc, assetId: string, variantId?: string): number {
+  const episodes = doc.episodes?.length ? doc.episodes : undefined
+  if (!episodes) return invalidateCurrentEpisodeProductionIfCastRef(doc, assetId, variantId) ? 1 : 0
+  let changed = 0
+  for (const episode of episodes) {
+    if (episodeUsesCastRef(doc, episode, assetId, variantId) && invalidateEpisodeProduction(episode)) changed += 1
+  }
+  return changed
 }
 
 export function pendingEpisodesForSeries(doc: ProjectDoc): Episode[] {

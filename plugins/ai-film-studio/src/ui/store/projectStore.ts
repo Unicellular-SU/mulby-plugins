@@ -32,7 +32,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
-import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateCurrentEpisodeProductionIfCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -174,7 +174,7 @@ function setAssetVariantState(get: () => ProjectState, assetId: string, variantI
     const variant = d.assets.find((x) => x.id === assetId)?.variants?.find((x) => x.id === variantId)
     if (variant) {
       Object.assign(variant, patch)
-      if ('refImageId' in patch) invalidateCurrentEpisodeProductionIfCastRef(d, assetId, variantId)
+      if ('refImageId' in patch) invalidateEpisodesUsingCastRef(d, assetId, variantId)
     }
   })
 }
@@ -190,7 +190,7 @@ function pushAssetImage(get: () => ProjectState, id: string, refImageId: string,
     a.state = 'done'
     a.error = undefined
     if (extra) Object.assign(a, extra)
-    invalidateCurrentEpisodeProductionIfCastRef(d, id)
+    invalidateEpisodesUsingCastRef(d, id)
   })
 }
 
@@ -1121,13 +1121,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       const asset = d.assets.find((a) => a.id === assetId)
       if (asset?.variants) asset.variants = asset.variants.filter((v) => v.id !== variantId)
-      let changedStoryboardRefs = false
-      for (const sb of d.storyboards) {
-        if (!sb.castRefs?.some((ref) => ref.assetId === assetId && ref.variantId === variantId)) continue
-        sb.castRefs = sb.castRefs.map((ref) => (ref.assetId === assetId && ref.variantId === variantId ? { ...ref, variantId: undefined } : ref))
-        changedStoryboardRefs = true
+      invalidateEpisodesUsingCastRef(d, assetId, variantId)
+      const clearVariantRefs = (storyboards: Storyboard[]) => {
+        for (const sb of storyboards) {
+          if (!sb.castRefs?.some((ref) => ref.assetId === assetId && ref.variantId === variantId)) continue
+          sb.castRefs = sb.castRefs.map((ref) => (ref.assetId === assetId && ref.variantId === variantId ? { ...ref, variantId: undefined } : ref))
+        }
       }
-      if (changedStoryboardRefs) invalidateCurrentEpisodeProduction(d)
+      clearVariantRefs(d.storyboards)
+      for (const episode of d.episodes ?? []) {
+        if (episode.id !== d.currentEpisodeId) clearVariantRefs(episode.storyboards)
+      }
     })
   },
   generateAssetVariant: async (assetId, variantId) => {
@@ -1170,7 +1174,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (a && img) {
         a.currentImageId = imageId
         a.refImageId = img.refImageId
-        invalidateCurrentEpisodeProductionIfCastRef(d, assetId)
+        invalidateEpisodesUsingCastRef(d, assetId)
       }
     }),
   deleteAssetImage: async (assetId, imageId) => {
@@ -1191,7 +1195,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         const last = x.images[x.images.length - 1]
         x.currentImageId = last?.id
         x.refImageId = last?.refImageId
-        invalidateCurrentEpisodeProductionIfCastRef(d, assetId)
+        invalidateEpisodesUsingCastRef(d, assetId)
       }
     })
   },
