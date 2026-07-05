@@ -1544,16 +1544,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await get().autoProduce()
       return
     }
+    const pending = episodes.filter((episode) => {
+      if (episode.filmPath) return false
+      const storyboards = episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards
+      return storyboards.length > 0
+    })
+    if (!pending.length) return
     const startId = doc.currentEpisodeId
-    set({ batch: { running: true, label: `生成全剧 0/${episodes.length}` } })
+    set({ batch: { running: true, label: `生成全剧 0/${pending.length}` } })
     try {
-      for (let i = 0; i < episodes.length; i += 1) {
+      for (let i = 0; i < pending.length; i += 1) {
         const latest = get().doc
         if (!latest) return
-        const target = latest.episodes?.find((episode) => episode.id === episodes[i].id)
+        const target = latest.episodes?.find((episode) => episode.id === pending[i].id)
         if (!target) continue
         if (latest.currentEpisodeId !== target.id) get().switchEpisode(target.id)
-        await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${episodes.length} · E${target.index + 1}` })
+        await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${pending.length} · E${target.index + 1}` })
       }
     } finally {
       const latest = get().doc

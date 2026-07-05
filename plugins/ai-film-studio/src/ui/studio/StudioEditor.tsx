@@ -59,7 +59,9 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const busy = batch.running || film.state === 'composing'
   const episodes = doc.episodes ?? []
   const canProduceCurrent = doc.storyboards.length > 0
-  const canProduceSeries = episodes.length > 1 && episodes.some((episode) => (episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards).length > 0)
+  const canProduceSeries =
+    episodes.length > 1 &&
+    episodes.some((episode) => !episode.filmPath && (episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards).length > 0)
   const [tab, setTab] = useState<Tab>('script')
   const [dockOpen, setDockOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -144,7 +146,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
               size="md"
               leadingIcon={Film}
               disabled={busy || !canProduceSeries}
-              title="按剧集顺序生成资产、关键帧、视频并分别合成"
+              title="按剧集顺序生成未成片剧集，已成片剧集会跳过"
               onClick={() => void autoProduceSeries()}
             >
               生成全剧
