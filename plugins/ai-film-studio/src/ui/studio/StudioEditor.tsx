@@ -1548,6 +1548,7 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
 
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
+  const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
@@ -1603,6 +1604,34 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       setStoryboardCastVariant(storyboard.id, issue.assetId, issue.variantId)
     }
   }
+  const patchStoryboardSceneAsset = (storyboard: Storyboard, sceneAssetId: string, replaceOtherSceneAssets: boolean) => {
+    const refs = castRefsForStoryboard(storyboard)
+    const nextRefs = replaceOtherSceneAssets
+      ? refs.filter((ref) => ref.assetId === sceneAssetId || doc.assets.find((asset) => asset.id === ref.assetId)?.type !== 'scene')
+      : refs
+    if (!nextRefs.some((ref) => ref.assetId === sceneAssetId)) nextRefs.push({ assetId: sceneAssetId })
+    upsertStoryboard({
+      id: storyboard.id,
+      videoDesc: storyboard.videoDesc,
+      associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
+      castRefs: nextRefs,
+    })
+  }
+  const bindSceneAsset = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'scene_group_missing_asset' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
+    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
+    if (!storyboard) return
+    patchStoryboardSceneAsset(storyboard, issue.assetId, false)
+  }
+  const unifySceneAsset = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'scene_group_asset_mismatch' || issue.episodeId !== doc.currentEpisodeId || !issue.sceneId || !issue.assetId) return
+    const sceneId = issue.sceneId.trim()
+    if (!sceneId) return
+    for (const storyboard of doc.storyboards) {
+      if (storyboard.sceneId?.trim() !== sceneId) continue
+      patchStoryboardSceneAsset(storyboard, issue.assetId, true)
+    }
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1616,6 +1645,8 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
+        const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
+        const canUnifySceneAsset = issue.code === 'scene_group_asset_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1643,6 +1674,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canUnifySceneVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneVariant(issue)}>
                 统一为此形态
+              </button>
+            )}
+            {canBindSceneAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => bindSceneAsset(issue)}>
+                补场景资产
+              </button>
+            )}
+            {canUnifySceneAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneAsset(issue)}>
+                统一为此场景
               </button>
             )}
             {refAction && (
