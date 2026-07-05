@@ -1,6 +1,6 @@
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import { normalizeAssetLookup } from '../../domain/assetAliases'
-import type { Asset, Episode, ProjectDoc, Storyboard, StoryboardCastRef } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
 
 export interface ContinuityIssue {
   severity: 'error' | 'warning'
@@ -15,6 +15,7 @@ export interface ContinuityIssue {
   conflictLabel?: string
   conflictSource?: 'name' | 'alias'
   relatedAssetIds?: string[]
+  scopeKind?: 'episode' | 'scene' | 'storyboard'
 }
 
 export interface ContinuityCastUse {
@@ -73,15 +74,22 @@ function episodeList(doc: ProjectDoc): Episode[] {
   ]
 }
 
-function variantAppliesToEpisode(asset: Asset, ref: StoryboardCastRef, episodeId: string): boolean {
-  if (!ref.variantId) return true
-  const variant = asset.variants?.find((item) => item.id === ref.variantId)
-  const ids = variant?.appliesToEpisodeIds ?? []
-  return !ids.length || ids.includes(episodeId)
+function variantScopeIssue(variant: NonNullable<Asset['variants']>[number] | undefined, episode: Episode, storyboard: Storyboard): ContinuityIssue['scopeKind'] | undefined {
+  if (!variant) return undefined
+  const episodeIds = variant.appliesToEpisodeIds ?? []
+  if (episodeIds.length && !episodeIds.includes(episode.id)) return 'episode'
+  const sceneIds = variant.appliesToSceneIds ?? []
+  if (sceneIds.length && (!storyboard.sceneId || !sceneIds.includes(storyboard.sceneId))) return 'scene'
+  const storyboardIds = variant.appliesToStoryboardIds ?? []
+  if (storyboardIds.length && !storyboardIds.includes(storyboard.id)) return 'storyboard'
+  return undefined
 }
 
-function variantsScopedToEpisode(asset: Asset, episodeId: string): NonNullable<Asset['variants']> {
-  return (asset.variants ?? []).filter((variant) => variant.appliesToEpisodeIds?.includes(episodeId))
+function variantsScopedToStoryboard(asset: Asset, episode: Episode, storyboard: Storyboard): NonNullable<Asset['variants']> {
+  return (asset.variants ?? []).filter((variant) => {
+    const hasScope = !!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length
+    return hasScope && !variantScopeIssue(variant, episode, storyboard)
+  })
 }
 
 const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
@@ -368,12 +376,14 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
           addIssue({ ...base, severity: 'error', code: 'missing_variant', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 引用了「${asset.name}」不存在的变体 ${ref.variantId}` })
           continue
         }
-        const appliesToEpisode = variantAppliesToEpisode(asset, ref, episode.id)
-        if (!appliesToEpisode) {
-          addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于本集的「${labelForCastRef(asset, ref)}」` })
+        const scopeIssue = variantScopeIssue(variant, episode, storyboard)
+        const appliesToEpisode = !scopeIssue
+        if (scopeIssue) {
+          const scopeLabel = scopeIssue === 'episode' ? '本集' : scopeIssue === 'scene' ? '本场景' : '本分镜'
+          addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
         }
         if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
-          const scopedVariants = variantsScopedToEpisode(asset, episode.id)
+          const scopedVariants = variantsScopedToStoryboard(asset, episode, storyboard)
           if (scopedVariants.length) {
             const labels = scopedVariants.map((item) => item.label).join('、')
             addIssue({
@@ -381,7 +391,8 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
               variantId: scopedVariants.length === 1 ? scopedVariants[0].id : undefined,
               severity: 'warning',
               code: 'episode_variant_available',
-              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但本集已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
+              sceneId: storyboard.sceneId,
+              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但当前分镜已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
             })
           } else {
             const previous = lastVariantUseByAsset.get(asset.id)

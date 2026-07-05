@@ -205,6 +205,40 @@ const episodeVariantCoverageReport = buildContinuityReport(
 const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
 check('flags main asset use when episode scoped variant exists', availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.storyboardId === 'main-use', JSON.stringify(episodeVariantCoverageReport.issues))
 
+const sceneVariantCoverageReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [{ id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
+    }],
+    currentEpisodeId: 'ep1',
+    storyboards: [{ ...storyboard('scene-main-use', 0, [{ assetId: 'hero' }]), sceneId: 'banquet' }],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check(
+  'flags main asset use when scene scoped variant applies',
+  sceneVariantCoverageReport.issues.some((issue) => issue.code === 'episode_variant_available' && issue.variantId === 'v-mask' && issue.sceneId === 'banquet'),
+  JSON.stringify(sceneVariantCoverageReport.issues),
+)
+
+const sceneVariantScopeReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [{ id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
+    }],
+    currentEpisodeId: 'ep1',
+    storyboards: [{ ...storyboard('wrong-scene-use', 0, [{ assetId: 'hero', variantId: 'v-mask' }]), sceneId: 'street' }],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check(
+  'flags variant use outside scene scope',
+  sceneVariantScopeReport.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.scopeKind === 'scene' && issue.storyboardId === 'wrong-scene-use'),
+  JSON.stringify(sceneVariantScopeReport.issues),
+)
+
 const stateRegressionReport = buildContinuityReport(
   doc({
     assets: [{

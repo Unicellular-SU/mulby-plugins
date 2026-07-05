@@ -1564,12 +1564,20 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!canRedistributeChapters) return
     if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
   }
-  const addVariantToEpisode = (issue: ContinuityReportView['issues'][number]) => {
+  const addVariantScope = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'variant_out_of_episode_scope' || !issue.assetId || !issue.variantId || !issue.episodeId) return
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
-    updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+    if (issue.scopeKind === 'scene') {
+      if (!issue.sceneId) return
+      updateAssetVariant(asset.id, variant.id, { appliesToSceneIds: [...new Set([...(variant.appliesToSceneIds ?? []), issue.sceneId])] })
+    } else if (issue.scopeKind === 'storyboard') {
+      if (!issue.storyboardId) return
+      updateAssetVariant(asset.id, variant.id, { appliesToStoryboardIds: [...new Set([...(variant.appliesToStoryboardIds ?? []), issue.storyboardId])] })
+    } else {
+      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+    }
   }
   const missingRefAction = (issue: ContinuityReportView['issues'][number]): { label: string; run: () => void } | null => {
     if (issue.code !== 'missing_ref_image' || !issue.assetId) return null
@@ -1682,7 +1690,8 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
-        const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
+        const canAddVariantScope = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
+        const addVariantScopeLabel = issue.scopeKind === 'scene' ? '标记变体适用于本场景' : issue.scopeKind === 'storyboard' ? '标记变体适用于本分镜' : '标记变体适用于本集'
         const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
@@ -1706,9 +1715,9 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             </div>
             <p>{issue.message}</p>
             {loc && <small>{loc}</small>}
-            {canAddVariantEpisode && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantToEpisode(issue)}>
-                标记变体适用于本集
+            {canAddVariantScope && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantScope(issue)}>
+                {addVariantScopeLabel}
               </button>
             )}
             {canBindEpisodeVariant && (
