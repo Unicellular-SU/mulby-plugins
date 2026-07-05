@@ -174,7 +174,7 @@ const handoffDoc = doc({
     episode('ep1', 0, {
       title: 'Setup',
       productionRecap: 'Hero stayed in Battle look after the chase.',
-      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
     }),
     episode('ep2', 1, { title: 'Gala' }),
     episode('ep3', 2, {
@@ -189,6 +189,8 @@ check('builds cross-episode handoff recaps from prior produced episodes', handof
 check('builds shared asset handoff cues for current episode refs', !!heroCue && heroCue.label === 'Hero-Gala' && heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3', JSON.stringify(heroCue))
 check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala'), JSON.stringify(handoff.suggestions))
 check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))
+const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
+check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
 
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)

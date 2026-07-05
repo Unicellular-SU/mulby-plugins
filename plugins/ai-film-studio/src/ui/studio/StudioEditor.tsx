@@ -424,13 +424,14 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
   const hasHints = handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
-  const runSuggestion = (suggestion: (typeof handoff.suggestions)[number]) => {
+  const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
+  const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]) => {
     if (suggestion.kind === 'generate_asset_ref_image') {
-      void generateAsset(suggestion.assetId)
+      await generateAsset(suggestion.assetId)
       return
     }
     if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
-      void generateAssetVariant(suggestion.assetId, suggestion.variantId)
+      await generateAssetVariant(suggestion.assetId, suggestion.variantId)
       return
     }
     if (suggestion.kind === 'add_variant_episode_scope' && suggestion.variantId) {
@@ -444,8 +445,9 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       const asset = doc.assets.find((item) => item.id === suggestion.assetId)
       if (!asset) return
       const variantId = addAssetVariant(asset.id, {
-        label: `E${episode.index + 1} ${episode.title}形态`,
-        desc: `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。`,
+        label: suggestion.variantLabel ?? `E${episode.index + 1} ${episode.title}形态`,
+        desc: suggestion.variantDesc ?? `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。`,
+        prompt: suggestion.variantPrompt,
       })
       if (!variantId) return
       updateAssetVariant(asset.id, variantId, { appliesToEpisodeIds: [episode.id] })
@@ -455,6 +457,9 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
         }
       }
     }
+  }
+  const runAutoSuggestions = async () => {
+    for (const suggestion of autoSuggestions) await runSuggestion(suggestion)
   }
   return (
     <Popover
@@ -481,7 +486,19 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
         {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有可承接的制作回顾或跨集复用资产。</p>}
         {handoff.suggestions.length > 0 && (
           <section className="afs-stwb__handoff-sec">
-            <h4>建议处理</h4>
+            <div className="afs-stwb__handoff-secbar">
+              <h4>建议处理</h4>
+              <button
+                type="button"
+                className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk"
+                disabled={actionBusy || autoSuggestions.length === 0}
+                title={autoSuggestions.length ? `顺序执行 ${autoSuggestions.length} 条可自动处理建议` : '没有可自动处理的建议'}
+                onClick={() => void runAutoSuggestions()}
+              >
+                <Wand2 size={11} />
+                一键处理
+              </button>
+            </div>
             <div className="afs-stwb__handoff-list">
               {handoff.suggestions.map((suggestion) => (
                 <article key={suggestion.id} className="afs-stwb__handoff-item afs-stwb__handoff-suggestion">
@@ -492,7 +509,7 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
                     className="afs-stwb__handoff-action"
                     disabled={actionBusy || !!suggestion.disabledReason}
                     title={suggestion.disabledReason || suggestion.detail}
-                    onClick={() => runSuggestion(suggestion)}
+                    onClick={() => void runSuggestion(suggestion)}
                   >
                     {suggestion.kind === 'create_episode_variant' ? <Plus size={11} /> : <Wand2 size={11} />}
                     {suggestion.kind === 'add_variant_episode_scope' ? '标记适用' : suggestion.kind === 'create_episode_variant' ? '新建并应用' : '执行'}

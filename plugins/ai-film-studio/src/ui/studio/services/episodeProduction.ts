@@ -36,6 +36,10 @@ export interface EpisodeHandoffSuggestion {
   variantId?: string
   label: string
   detail: string
+  autoRepairable?: boolean
+  variantLabel?: string
+  variantDesc?: string
+  variantPrompt?: string
   disabledReason?: string
 }
 
@@ -178,6 +182,31 @@ function storyboardLabel(storyboard: Storyboard, assets: Map<string, ProjectDoc[
   return `#${storyboard.index + 1} ${compact(storyboard.videoDesc || storyboard.prompt, 76)}${castText}`
 }
 
+function episodeVariantSeed(
+  assetName: string,
+  episode: Episode,
+  appearance: EpisodeHandoffAppearance | undefined,
+): Pick<EpisodeHandoffSuggestion, 'variantLabel' | 'variantDesc' | 'variantPrompt'> {
+  const label = `E${episode.index + 1} ${episode.title}形态`
+  const source = appearance
+    ? `承接 E${appearance.episodeIndex + 1}「${appearance.episodeTitle}」的 ${appearance.variants.join('、')}`
+    : `适用于 E${episode.index + 1}「${episode.title}」`
+  const recap = appearance?.recap ? `上一状态：${compact(appearance.recap, 180)}` : ''
+  return {
+    variantLabel: label,
+    variantDesc: `${source}，用于本集的新妆容、服装或剧情状态。`,
+    variantPrompt: limitLines(
+      [
+        `为「${assetName}」生成 E${episode.index + 1}「${episode.title}」专属形态参考图。`,
+        source,
+        recap,
+        '保持同一角色身份、脸型、体态和核心识别特征一致；只改变本集需要的妆容、服装、发型、道具或受伤/战损等状态。',
+      ],
+      520,
+    ),
+  }
+}
+
 export function buildEpisodeProductionRecap(doc: ProjectDoc, episode: Episode, limit = 1200): string {
   const scripts = scriptsForEpisode(doc, episode)
   const storyboards = [...storyboardsForEpisode(doc, episode)].sort((a, b) => a.index - b.index)
@@ -247,6 +276,7 @@ export function buildEpisodeProductionHandoff(
         assetId: asset.id,
         label: `生成「${asset.name}」主参考图`,
         detail: '当前集引用了该资产，但它还没有主参考图。',
+        autoRepairable: true,
       })
     }
     if (ref.variantId) {
@@ -260,6 +290,7 @@ export function buildEpisodeProductionHandoff(
             variantId: variant.id,
             label: `标记「${variant.label}」适用本集`,
             detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}。`,
+            autoRepairable: true,
           })
         }
         if (!variant.refImageId) {
@@ -270,6 +301,7 @@ export function buildEpisodeProductionHandoff(
             variantId: variant.id,
             label: `生成「${asset.name}-${variant.label}」参考图`,
             detail: '当前集引用了该形态，但它还没有独立参考图。',
+            autoRepairable: true,
             disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
           })
         }
@@ -298,12 +330,18 @@ export function buildEpisodeProductionHandoff(
         appearances,
       })
       if (!ref.variantId) {
+        const previousAppearance = appearances
+          .filter((item) => item.episodeIndex < episode.index)
+          .sort((a, b) => b.episodeIndex - a.episodeIndex)[0]
+        const seed = episodeVariantSeed(asset.name, episode, previousAppearance ?? appearances[0])
         addSuggestion({
           id: `create-variant:${asset.id}:${episode.id}`,
           kind: 'create_episode_variant',
           assetId: asset.id,
           label: `新建并应用「${asset.name}」本集形态`,
           detail: `该资产在其他集也出现过；如果 E${episode.index + 1} 有新妆容、服装或状态，先建本集专属形态再生成参考图。`,
+          autoRepairable: true,
+          ...seed,
         })
       }
     }

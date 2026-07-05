@@ -5855,6 +5855,12 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   color: var(--afs-text);
   font-size: 12px;
 }
+.afs-stwb__handoff-secbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
 .afs-stwb__handoff-list {
   display: flex;
   flex-direction: column;
@@ -5901,6 +5907,9 @@ html.light .afs-lp-body::before { opacity: 0.55; }
 }
 .afs-stwb__handoff-action:hover:not(:disabled) {
   background: color-mix(in srgb, var(--afs-accent) 22%, transparent);
+}
+.afs-stwb__handoff-action--bulk {
+  margin-top: 0;
 }
 .afs-stwb__handoff-action:disabled {
   cursor: not-allowed;
