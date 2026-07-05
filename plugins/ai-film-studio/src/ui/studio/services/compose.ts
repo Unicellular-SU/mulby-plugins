@@ -37,6 +37,21 @@ function outputBaseName(doc: ProjectDoc): string {
   return safeFileName(`${doc.meta.name || 'film'}_E${episode.index + 1}_${episode.title}`)
 }
 
+async function existingLocalPath(path: string | undefined): Promise<string | undefined> {
+  if (!path) return undefined
+  const exists = window.mulby?.filesystem?.exists
+  if (!exists) return path
+  try {
+    return (await exists(path)) ? path : undefined
+  } catch {
+    return path
+  }
+}
+
+function clipPrepError(index: number, reason?: string): Error {
+  return new Error(`分镜 #${index + 1} 的视频片段无法用于合成${reason ? `：${reason}` : '：没有可用视频文件'}`)
+}
+
 export async function composeProject(
   doc: ProjectDoc,
   onProgress?: (text: string, percent?: number) => void,
@@ -65,12 +80,15 @@ export async function composeProject(
     const clip = t
       ? doc.clips.find((c) => c.id === (t.selectClipId || t.clipIds[0]))
       : doc.clips.find((c) => c.storyboardId === sb.id && c.state === 'done')
-    let path = clip?.videoFilePath
+    let prepError: string | undefined
+    let path = await existingLocalPath(clip?.videoFilePath)
+    if (!path && clip?.videoFilePath) prepError = '本地视频文件不存在'
     if (!path && clip?.videoUrl) {
       try {
         path = await downloadVideoToDisk(clip.videoUrl, `clip_${sb.id}`)
-      } catch {
-        // 下载失败则跳过该片段
+        prepError = undefined
+      } catch (e) {
+        prepError = e instanceof Error ? e.message : String(e)
       }
     }
     // Ken-Burns 兜底：无视频但有关键帧图 → 用静图按计划运镜生成运动片段（替代直接丢弃，呼应 #4 静默降级）
@@ -84,10 +102,12 @@ export async function composeProject(
             onProgress: (p) => onProgress?.(p.text, p.percent),
           })
         }
-      } catch {
-        // 兜底失败则跳过该镜
+        prepError = path ? undefined : '关键帧运动片段生成失败'
+      } catch (e) {
+        prepError = e instanceof Error ? e.message : String(e)
       }
     }
+    if (!path) throw clipPrepError(sb.index, prepError)
     if (path) {
       clipPaths.push(path)
       fallbackDurs.push(clip?.durationSec || sb.duration || 5)
