@@ -1,4 +1,4 @@
-import { parseEpisodeOrdinal, resolveAgentEpisodeTarget } from './episodeTarget'
+import { parseEpisodeOrdinal, resolveAgentEpisodeTarget, resolveAgentRelativeEpisodeDirection } from './episodeTarget'
 import type { Episode, ProjectDoc, ProjectMeta } from '../../domain/types'
 
 let failures = 0
@@ -46,6 +46,9 @@ check('resolves previous episode from middle episode', resolveAgentEpisodeTarget
 check('resolves English next episode from middle episode', resolveAgentEpisodeTarget(middleDoc, 'write next episode storyboards')?.episode.id === 'ep3', JSON.stringify(resolveAgentEpisodeTarget(middleDoc, 'write next episode storyboards')))
 const finalDoc: ProjectDoc = { ...doc, currentEpisodeId: 'ep3' }
 check('does not resolve missing next episode to current episode', !resolveAgentEpisodeTarget(finalDoc, '续写下一集剧本'), JSON.stringify(resolveAgentEpisodeTarget(finalDoc, '续写下一集剧本')))
+check('detects relative next episode intent', resolveAgentRelativeEpisodeDirection('续写下一集剧本') === 'next', String(resolveAgentRelativeEpisodeDirection('续写下一集剧本')))
+check('detects relative previous episode intent', resolveAgentRelativeEpisodeDirection('回到上一集补分镜') === 'previous', String(resolveAgentRelativeEpisodeDirection('回到上一集补分镜')))
+check('does not treat ambiguous last episode as previous intent', resolveAgentRelativeEpisodeDirection('rewrite last episode') === undefined, String(resolveAgentRelativeEpisodeDirection('rewrite last episode')))
 
 if (failures) {
   console.error(`\nepisodeTarget selftest: ${failures} FAILED`)

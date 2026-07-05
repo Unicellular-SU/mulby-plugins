@@ -22,7 +22,7 @@ import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import type { PipelineStage, PipelineStagePlan } from '../studio/agent/agent'
 import { runToolLoop } from '../studio/agent/runtime'
 import { makeAgentTools } from '../studio/agent/agentTools'
-import { resolveAgentEpisodeTarget } from '../studio/agent/episodeTarget'
+import { resolveAgentEpisodeTarget, resolveAgentRelativeEpisodeDirection } from '../studio/agent/episodeTarget'
 import { abortText } from '../services/textEngine'
 import { useGraphStore } from './graphStore'
 import { useAssetStore, type ElementRef, type ElementKind } from './assetStore'
@@ -1533,11 +1533,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const runId = P.newId('run_')
-    const targetEpisode = resolveAgentEpisodeTarget(doc0, userText)
-    const writeEpisodeId = targetEpisode?.episode.id ?? doc0.currentEpisodeId
+    let targetEpisode = resolveAgentEpisodeTarget(doc0, userText)
+    const relativeDirection = targetEpisode ? undefined : resolveAgentRelativeEpisodeDirection(userText)
+    let createdRelativeEpisode: Episode | undefined
+    let relativeTargetError: string | undefined
+    if (!targetEpisode && relativeDirection === 'next') {
+      get().mutate((d) => {
+        P.syncCurrentEpisodeFromFlat(d)
+        d.episodes ??= []
+        reindexEpisodes(d.episodes)
+        const episode = emptyEpisode(d.episodes.length)
+        d.episodes.push(episode)
+        d.currentEpisodeId = episode.id
+        P.applyEpisodeToFlat(d, episode)
+        createdRelativeEpisode = episode
+      })
+      if (createdRelativeEpisode) targetEpisode = { episode: createdRelativeEpisode, match: 'relative', value: 'next' }
+    } else if (!targetEpisode && relativeDirection === 'previous') {
+      relativeTargetError = '当前已经是第一集，没有上一集可写入。'
+    }
+    const writeEpisodeId = targetEpisode?.episode.id ?? (relativeTargetError ? undefined : doc0.currentEpisodeId)
     const logCtx = { runId, projectId: doc0.meta.id, projectName: doc0.meta.name, writeEpisodeId, targetEpisodeMatch: targetEpisode?.match }
     const now = Date.now()
     get().mutate((d) => d.memory.push({ id: P.newId('m_'), agent: 'productionAgent', role: 'user', content: userText, createTime: now }))
+    if (createdRelativeEpisode) logInfo('agent', 'targetEpisode.create', { ...logCtx, episodeTitle: createdRelativeEpisode.title })
     if (targetEpisode?.episode.id && targetEpisode.episode.id !== doc0.currentEpisodeId) {
       let switched = false
       get().mutate((d) => {
@@ -1567,6 +1586,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       logInfo('agent', 'stage.apply', { ...logCtx, stage, applied, after: docCounts(get().doc) })
     }
     try {
+      if (relativeTargetError) throw new Error(relativeTargetError)
       const plan = await runAgentPipeline(() => get().doc, userText, onPipeline, (stage, fragment) => {
         applyStagePlan(stage, fragment)
       }, { episodeId: writeEpisodeId })

@@ -8,6 +8,8 @@ export interface AgentEpisodeTarget {
   value: string
 }
 
+export type AgentRelativeEpisodeDirection = 'next' | 'previous'
+
 const CHINESE_DIGITS: Record<string, number> = {
   零: 0,
   〇: 0,
@@ -87,16 +89,23 @@ function findEpisodeByTitle(episodes: Episode[], text: string): AgentEpisodeTarg
   return { episode: matches[0], match: 'title', value: matches[0].title }
 }
 
+export function resolveAgentRelativeEpisodeDirection(userText: string): AgentRelativeEpisodeDirection | undefined {
+  const text = userText.trim()
+  const wantsNext = /(?:下一|下)(?:集|话|回)/.test(text) || /\bnext\s+(?:episode|ep)\b/i.test(text)
+  const wantsPrevious = /(?:上一|上|前一)(?:集|话|回)/.test(text) || /\b(?:previous|prev)\s+(?:episode|ep)\b/i.test(text)
+  if (wantsNext === wantsPrevious) return undefined
+  return wantsNext ? 'next' : 'previous'
+}
+
 function findRelativeEpisode(doc: ProjectDoc, episodes: Episode[], text: string): AgentEpisodeTarget | undefined {
   const currentIndex = episodes.findIndex((episode) => episode.id === doc.currentEpisodeId)
   if (currentIndex < 0) return undefined
-  const wantsNext = /(?:下一|下)(?:集|话|回)/.test(text) || /\bnext\s+(?:episode|ep)\b/i.test(text)
-  const wantsPrevious = /(?:上一|上|前一)(?:集|话|回)/.test(text) || /\b(?:previous|prev)\s+(?:episode|ep)\b/i.test(text)
-  if (wantsNext && !wantsPrevious) {
+  const direction = resolveAgentRelativeEpisodeDirection(text)
+  if (direction === 'next') {
     const episode = episodes[currentIndex + 1]
     return episode ? { episode, match: 'relative', value: 'next' } : undefined
   }
-  if (wantsPrevious && !wantsNext) {
+  if (direction === 'previous') {
     const episode = episodes[currentIndex - 1]
     return episode ? { episode, match: 'relative', value: 'previous' } : undefined
   }
