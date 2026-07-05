@@ -18,6 +18,8 @@ export interface EpisodeHandoffAppearance {
   episodeIndex: number
   episodeTitle: string
   variants: string[]
+  variantLabels?: string[]
+  mainImageUsed?: boolean
   recap?: string
 }
 
@@ -188,8 +190,9 @@ function episodeVariantSeed(
   appearance: EpisodeHandoffAppearance | undefined,
 ): Pick<EpisodeHandoffSuggestion, 'variantLabel' | 'variantDesc' | 'variantPrompt'> {
   const label = `E${episode.index + 1} ${episode.title}形态`
+  const sourceVariants = appearance?.variantLabels?.length ? appearance.variantLabels : appearance?.variants
   const source = appearance
-    ? `承接 E${appearance.episodeIndex + 1}「${appearance.episodeTitle}」的 ${appearance.variants.join('、')}`
+    ? `承接 E${appearance.episodeIndex + 1}「${appearance.episodeTitle}」的 ${sourceVariants?.join('、')}`
     : `适用于 E${episode.index + 1}「${episode.title}」`
   const recap = appearance?.recap ? `上一状态：${compact(appearance.recap, 180)}` : ''
   return {
@@ -312,11 +315,14 @@ export function buildEpisodeProductionHandoff(
       .map((item) => {
         const refs = uniqueCastRefs(storyboardsForEpisode(doc, item)).filter((itemRef) => itemRef.assetId === ref.assetId)
         if (!refs.length) return null
+        const variantLabels = unique(refs.filter((itemRef) => !!itemRef.variantId).map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4)
         return {
           episodeId: item.id,
           episodeIndex: item.index,
           episodeTitle: item.title,
           variants: unique(refs.map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4),
+          variantLabels,
+          mainImageUsed: refs.some((itemRef) => !itemRef.variantId),
           recap: item.productionRecap ? compact(item.productionRecap, 180) : undefined,
         }
       })
@@ -330,16 +336,21 @@ export function buildEpisodeProductionHandoff(
         appearances,
       })
       if (!ref.variantId) {
-        const previousAppearance = appearances
+        const previousAppearances = appearances
           .filter((item) => item.episodeIndex < episode.index)
-          .sort((a, b) => b.episodeIndex - a.episodeIndex)[0]
-        const seed = episodeVariantSeed(asset.name, episode, previousAppearance ?? appearances[0])
+          .sort((a, b) => b.episodeIndex - a.episodeIndex)
+        const previousVariantAppearance = previousAppearances.find((item) => (item.variantLabels?.length ?? 0) > 0)
+        const previousAppearance = previousAppearances[0]
+        const seed = episodeVariantSeed(asset.name, episode, previousVariantAppearance ?? previousAppearance ?? appearances[0])
+        const stateRegressionDetail = previousVariantAppearance
+          ? `上一相关剧集 E${previousVariantAppearance.episodeIndex + 1}「${previousVariantAppearance.episodeTitle}」使用过 ${previousVariantAppearance.variantLabels?.join('、')}，当前集仍用主形象；如果不是剧情恢复默认，建议一键创建并绑定本集形态。`
+          : undefined
         addSuggestion({
           id: `create-variant:${asset.id}:${episode.id}`,
           kind: 'create_episode_variant',
           assetId: asset.id,
-          label: `新建并应用「${asset.name}」本集形态`,
-          detail: `该资产在其他集也出现过；如果 E${episode.index + 1} 有新妆容、服装或状态，先建本集专属形态再生成参考图。`,
+          label: previousVariantAppearance ? `承接「${asset.name}」上一形态` : `新建并应用「${asset.name}」本集形态`,
+          detail: stateRegressionDetail ?? `该资产在其他集也出现过；如果 E${episode.index + 1} 有新妆容、服装或状态，先建本集专属形态再生成参考图。`,
           autoRepairable: true,
           ...seed,
         })

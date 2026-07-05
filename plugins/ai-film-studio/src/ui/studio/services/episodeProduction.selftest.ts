@@ -192,6 +192,23 @@ check('suggests creating an episode-specific variant for reused main refs', hand
 const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
 check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
 
+const stateRegressionHandoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets: handoffAssets,
+  storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      productionRecap: 'Hero stayed wounded after the chase.',
+      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, { title: 'Gala' }),
+  ],
+})
+const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
+const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
+check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
+
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)
   process.exit(1)
