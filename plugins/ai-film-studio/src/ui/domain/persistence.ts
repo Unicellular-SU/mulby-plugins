@@ -44,14 +44,19 @@ export function newId(prefix = ''): string {
 }
 
 export function docToCard(doc: ProjectDoc): ProjectCard {
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const episodeStoryboards = episodes.length
+    ? episodes.map((episode) => (episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards))
+    : [doc.storyboards]
+  const storyboards = episodeStoryboards.flat()
   return {
     id: doc.meta.id,
     name: doc.meta.name,
     artStyle: doc.meta.artStyle,
     videoRatio: doc.meta.videoRatio,
     updatedAt: doc.meta.updatedAt,
-    coverImageId: doc.storyboards.find((s) => s.keyframeImageId)?.keyframeImageId,
-    storyboardCount: doc.storyboards.length,
+    coverImageId: storyboards.find((s) => s.keyframeImageId)?.keyframeImageId,
+    storyboardCount: storyboards.length,
     episodeCount: doc.episodes?.length,
   }
 }

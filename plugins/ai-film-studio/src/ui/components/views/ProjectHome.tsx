@@ -120,7 +120,7 @@ export default function ProjectHome({ onOpenCanvas, onOpenStudio }: { onOpenCanv
       updatedAt: c.updatedAt,
       name: c.name,
       cover: c.coverImageId,
-      meta: `${styleLabel(c.artStyle)} · ${c.videoRatio} · ${c.storyboardCount} 分镜`,
+      meta: `${styleLabel(c.artStyle)} · ${c.videoRatio} · ${c.episodeCount && c.episodeCount > 1 ? `${c.episodeCount} 集 · ` : ''}${c.storyboardCount} 分镜`,
     }))
     return [...a, ...b].sort((x, y) => y.updatedAt - x.updatedAt)
     // eslint-disable-next-line react-hooks/exhaustive-deps
