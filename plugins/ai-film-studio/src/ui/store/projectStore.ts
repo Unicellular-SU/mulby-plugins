@@ -283,6 +283,13 @@ function logPreflightWarnings(stage: 'keyframe' | 'clip', storyboardId: string, 
   })
 }
 
+function composeReadinessError(readiness: ReturnType<typeof episodeComposeReadiness> | undefined): string {
+  const missing = readiness?.missingStoryboardIndexes.length
+    ? `，缺少分镜 #${readiness.missingStoryboardIndexes.slice(0, 8).join('、')}${readiness.missingStoryboardIndexes.length > 8 ? ` 等 ${readiness.missingStoryboardIndexes.length} 个` : ''}`
+    : ''
+  return readiness?.total ? `未合成：仍有分镜没有可用视频片段${missing}` : '没有可合成的视频片段'
+}
+
 function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partial<Episode>): void {
   const doc = get().doc
   if (!doc?.currentEpisodeId) return
@@ -356,8 +363,7 @@ async function produceCurrentEpisode(
       setLabel('合成成片…')
       await get().compose()
     } else {
-      const missing = readiness?.missingStoryboardIndexes.length ? `，缺少分镜 #${readiness.missingStoryboardIndexes.slice(0, 8).join('、')}${readiness.missingStoryboardIndexes.length > 8 ? ` 等 ${readiness.missingStoryboardIndexes.length} 个` : ''}` : ''
-      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: readiness?.total ? `未合成：仍有分镜没有可用视频片段${missing}` : '没有可合成的视频片段' })
+      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: composeReadinessError(readiness) })
     }
   } finally {
     if (opts.manageBatch) set({ batch: { running: false } })
@@ -1723,6 +1729,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   compose: async () => {
     const doc = get().doc
     if (!doc || get().film.state === 'composing') return
+    const readiness = episodeComposeReadiness(doc)
+    if (!readiness.ready) {
+      const error = composeReadinessError(readiness)
+      set({ film: { state: 'failed', error } })
+      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: error })
+      return
+    }
     set({ film: { state: 'composing', text: '开始合成…' } })
     try {
       const path = await composeProject(doc, (text, percent) => set({ film: { state: 'composing', text: percent != null ? `${text} ${percent}%` : text } }))

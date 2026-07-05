@@ -27,7 +27,7 @@ import { loadAssetUrl } from '../services/assets'
 import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport, variantScopePatchForUse } from './services/continuityReport'
-import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
+import { buildEpisodeProductionHandoff, episodeComposeReadiness, pendingEpisodesForSeries } from './services/episodeProduction'
 import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
@@ -2209,7 +2209,12 @@ function TimelineTab() {
   const updateMeta = useProjectStore((s) => s.updateMeta)
   const [preview, setPreview] = useState<{ localPath?: string; url?: string } | null>(null)
   const tracks = [...doc.track].sort((a, b) => a.order - b.order)
-  const anyDone = doc.clips.some((c) => c.state === 'done')
+  const composeReadiness = episodeComposeReadiness(doc)
+  const composeTitle = composeReadiness.ready
+    ? '合成当前集成片'
+    : composeReadiness.total
+      ? `仍有 ${composeReadiness.missingStoryboardIndexes.length} 个分镜缺少可用视频片段`
+      : '没有可合成的视频片段'
   if (tracks.length === 0)
     return (
       <div className="afs-studio__timeline">
@@ -2235,7 +2240,7 @@ function TimelineTab() {
           ]}
           ariaLabel="整片转场"
         />
-        <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={film.state === 'composing' || !anyDone} onClick={() => void compose()}>
+        <button className="afs-btn afs-btn--gradient afs-btn--sm" disabled={film.state === 'composing' || !composeReadiness.ready} title={composeTitle} onClick={() => void compose()}>
           {film.state === 'composing' ? <Loader2 size={14} className="afs-spin" /> : <Film size={14} />} 合成成片
         </button>
       </div>
