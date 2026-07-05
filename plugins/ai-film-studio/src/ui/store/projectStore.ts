@@ -33,6 +33,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
+import { variantScopePatchForUse } from '../studio/services/continuityReport'
 import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
@@ -372,6 +373,7 @@ function planForLog(plan: AgentPlan) {
     storyboards: (plan.storyboards ?? []).map((s, i) => ({
       index: i + 1,
       replaceIndex: s?.replaceIndex,
+      sceneId: s?.sceneId,
       videoDesc: textPreview(s?.videoDesc, 300),
       duration: s?.duration,
       cast: s?.cast,
@@ -447,6 +449,10 @@ function agentRoleInShot(value: unknown): StoryboardCastRef['roleInShot'] | unde
   return value === 'lead' || value === 'supporting' || value === 'background' ? value : undefined
 }
 
+function agentScopeKind(value: unknown): 'episode' | 'scene' | 'storyboard' | undefined {
+  return value === 'episode' || value === 'scene' || value === 'storyboard' ? value : undefined
+}
+
 function agentCastRefFromString(d: ProjectDoc, raw: unknown): StoryboardCastRef | undefined {
   const text = cleanString(raw)
   if (!text) return undefined
@@ -488,12 +494,28 @@ function agentStoryboardCastRefs(d: ProjectDoc, sb: NonNullable<AgentPlan['story
   return [...refs.values()]
 }
 
+function scopeAgentStoryboardVariants(d: ProjectDoc, episode: Episode | undefined, storyboard: Storyboard, refs: StoryboardCastRef[], scopeKind?: 'episode' | 'scene' | 'storyboard'): void {
+  if (!episode) return
+  for (const ref of refs) {
+    if (!ref.variantId) continue
+    const asset = d.assets.find((item) => item.id === ref.assetId)
+    const variant = asset?.variants?.find((item) => item.id === ref.variantId)
+    const patch = variant ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
+    if (asset && variant && patch) {
+      asset.variants = asset.variants?.map((item) => (item.id === variant.id ? { ...item, ...patch } : item))
+    }
+  }
+}
+
 function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboards'] | undefined, applied: AgentApplySummary): void {
+  const currentEpisode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
   for (const sb of storyboards ?? []) {
     if (!sb?.videoDesc) continue
     const castRefs = agentStoryboardCastRefs(d, sb)
     const cast = [...new Set(castRefs.map((ref) => ref.assetId))]
     const hasCastInput = (Array.isArray(sb.cast) && sb.cast.length > 0) || (Array.isArray(sb.castRefs) && sb.castRefs.length > 0)
+    const sceneId = cleanString(sb.sceneId)
+    const scopeKind = agentScopeKind(sb.scopeKind)
     const dlgs = Array.isArray(sb.dialogues)
       ? sb.dialogues
           .filter((x) => x && typeof x.line === 'string' && x.line.trim())
@@ -509,11 +531,13 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
         target.associateAssetIds = cast
         target.castRefs = castRefs
       }
+      if (sceneId) target.sceneId = sceneId
       if (dlgs) target.dialogues = dlgs
       if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
       target.keyframeImageId = undefined
       target.state = 'idle'
       target.error = undefined
+      if (sb.ensureScope === true || scopeKind) scopeAgentStoryboardVariants(d, currentEpisode, target, castRefs, scopeKind)
       applied.storyboardsReplaced.push({ id: target.id, index: target.index + 1, desc: target.videoDesc.slice(0, 120) })
       continue
     }
@@ -528,11 +552,14 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       duration: typeof sb.duration === 'number' ? sb.duration : 5,
       associateAssetIds: cast,
       castRefs,
+      sceneId,
       dialogues: dlgs ?? [],
       shouldGenerateImage: true,
       chainFromPrev: sb.chainFromPrev === true,
       state: 'idle',
     })
+    const added = d.storyboards[d.storyboards.length - 1]
+    if (sb.ensureScope === true || scopeKind) scopeAgentStoryboardVariants(d, currentEpisode, added, castRefs, scopeKind)
     applied.storyboardsAdded.push({ id, index: index + 1, desc: sb.videoDesc.slice(0, 120) })
   }
   if ((storyboards ?? []).some((sb) => sb?.videoDesc)) {

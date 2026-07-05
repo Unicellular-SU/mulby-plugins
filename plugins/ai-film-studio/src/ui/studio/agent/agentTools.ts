@@ -446,6 +446,17 @@ function variantView(asset: Asset, variantId: string) {
   return variant ? { assetId: asset.id, assetName: asset.name, variant } : undefined
 }
 
+function scopedVariantViews(doc: ProjectDoc | null | undefined, refs: StoryboardCastRef[]): Array<ReturnType<typeof variantView>> {
+  if (!doc) return []
+  return refs
+    .filter((ref) => !!ref.variantId)
+    .map((ref) => {
+      const asset = doc.assets.find((item) => item.id === ref.assetId)
+      return asset && ref.variantId ? variantView(asset, ref.variantId) : undefined
+    })
+    .filter((item): item is NonNullable<ReturnType<typeof variantView>> => !!item)
+}
+
 function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Storyboard | undefined {
   const storyboardId = stringArg(args.storyboardId)
   if (storyboardId) return doc.storyboards.find((storyboard) => storyboard.id === storyboardId)
@@ -1397,7 +1408,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'add_storyboard',
-      description: '新增当前剧集的分镜面板。cast 可用资产名或“资产名-变体标签”；需要精确妆容/服装时优先传 castRefs。',
+      description: '新增当前剧集的分镜面板。cast 可用资产名或“资产名-变体标签”；需要精确妆容/服装时优先传 castRefs。可传 sceneId 支撑同场连续性检查，也可用 ensureScope/scopeKind 在绑定变体时补当前使用范围。',
       parameters: {
         type: 'object',
         properties: {
@@ -1407,6 +1418,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           videoDesc: { type: 'string' },
           prompt: { type: 'string' },
           duration: { type: 'number' },
+          sceneId: { type: 'string', description: '连续场景组 ID；同一空间或连续动作的镜头应复用同一个 sceneId。' },
           cast: { type: 'array', items: { type: 'string' }, description: '出场资产名；可写“角色名-变体标签”来指定已有妆容/服装/时期变体。' },
           castRefs: {
             type: 'array',
@@ -1428,6 +1440,8 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
             type: 'array',
             items: { type: 'object', properties: { character: { type: 'string' }, line: { type: 'string' }, emotion: { type: 'string' } } },
           },
+          ensureScope: { type: 'boolean', description: 'true 时按变体已有作用域层级，或 scopeKind 指定层级，把当前使用位置加入适用范围。' },
+          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'], description: 'ensureScope 时可指定补剧集/场景/分镜范围。' },
           chainFromPrev: { type: 'boolean' },
         },
         required: ['videoDesc'],
@@ -1448,18 +1462,35 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           videoDesc: String(a.videoDesc ?? ''),
           prompt: a.prompt as string | undefined,
           duration: typeof a.duration === 'number' ? a.duration : undefined,
+          sceneId: stringArg(a.sceneId),
           associateAssetIds: ids,
           castRefs: cast.refs.length ? cast.refs : undefined,
           dialogues,
           chainFromPrev: a.chainFromPrev === true,
         })
-        const next = doc()
+        let next = doc()
         const storyboard = next?.storyboards.find((s) => s.id === id)
+        const scopeKind = variantScopeKind(a.scopeKind)
+        if (storyboard && (a.ensureScope === true || scopeKind)) {
+          const episode = target.episode ?? (next ? currentEpisode(next) : currentEpisode(d))
+          if (episode) {
+            for (const ref of cast.refs) {
+              if (!ref.variantId) continue
+              const asset = next?.assets.find((item) => item.id === ref.assetId)
+              const variant = asset?.variants?.find((item) => item.id === ref.variantId)
+              const patch = variant ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
+              if (asset && variant && patch) get().updateAssetVariant(asset.id, variant.id, patch)
+            }
+            next = doc()
+          }
+        }
+        const updatedStoryboard = next?.storyboards.find((s) => s.id === id)
         return json({
           id,
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           unresolvedCast: cast.unresolved,
-          storyboard: next && storyboard ? storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+          variants: scopedVariantViews(next, cast.refs),
+          storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
         })
       },
     },

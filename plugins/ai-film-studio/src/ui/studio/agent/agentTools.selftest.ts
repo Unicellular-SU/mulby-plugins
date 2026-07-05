@@ -210,7 +210,17 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
 
 const writableDoc = cloneDoc(doc)
 writableDoc.assets = [
-  { id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep1'] }] },
+  {
+    id: 'hero',
+    type: 'role',
+    name: 'Hero',
+    aliases: ['主角'],
+    state: 'done',
+    variants: [
+      { id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep1'] },
+      { id: 'cloak', label: 'Cloak', appliesToEpisodeIds: ['ep1'] },
+    ],
+  },
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
@@ -236,6 +246,17 @@ const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
 check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
 check('add_storyboard resolves cast aliases', addedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string }) => ref.assetId === 'hero'), JSON.stringify(addedStoryboard.storyboard))
 check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
+
+const scopedAddedStoryboard = JSON.parse(
+  await addStoryboard.execute({ episodeTitle: 'Second', videoDesc: 'Second episode scoped shot.', sceneId: 'rooftop', castRefs: [{ assetName: 'Hero', variantLabel: 'Cloak' }], ensureScope: true, scopeKind: 'scene' }),
+)
+check(
+  'add_storyboard can persist sceneId and scope bound variants',
+  scopedAddedStoryboard.storyboard?.sceneId === 'rooftop' &&
+    scopedAddedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'cloak') &&
+    scopedAddedStoryboard.variants?.some((item: { variant?: { id: string; appliesToSceneIds?: string[] } }) => item.variant?.id === 'cloak' && item.variant.appliesToSceneIds?.includes('rooftop')),
+  JSON.stringify(scopedAddedStoryboard),
+)
 
 const updatedAsset = JSON.parse(await updateAsset.execute({ assetName: 'Hero', aliases: ['主角', '队长'], aliasMode: 'replace', desc: 'Lead role with a stable identity.' }))
 check(

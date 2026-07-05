@@ -22,6 +22,9 @@ export interface AgentPlan {
     videoDesc: string
     prompt?: string
     duration?: number
+    sceneId?: string
+    ensureScope?: boolean
+    scopeKind?: 'episode' | 'scene' | 'storyboard'
     cast?: string[]
     castRefs?: {
       assetId?: string
@@ -46,15 +49,16 @@ const CONTRACT = `
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
   "assets": [ { "type": "role|scene|prop", "name": "名称", "aliases": ["别名/称谓"], "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
-  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"], "castRefs": [{"assetName":"资产名","variantLabel":"妆容/服装/时期(可选)","roleInShot":"lead|supporting|background","note":"可选说明"}], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
+  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "sceneId": "同一空间/连续动作的稳定场景组ID(可选)", "ensureScope": false, "scopeKind": "episode|scene|storyboard(可选)", "cast": ["出场资产名"], "castRefs": [{"assetName":"资产名","variantLabel":"妆容/服装/时期(可选)","roleInShot":"lead|supporting|background","note":"可选说明"}], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
   "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
 - assets 的 name 要与 storyboards 的 cast 名字一致，便于关联；同一个人/场景有昵称、称谓或原著别称时写入 aliases，后续分镜可用别名匹配同一资产；同一角色有妆容/服装/年龄/时期变体时，在 castRefs 里写 assetName + variantLabel，不要只写进画面描述。
 - 如果上下文、连续性报告或跨集承接线索显示某角色在上一相关剧集使用过具体变体，或本集已有适用变体，分镜必须用 castRefs 绑定 variantLabel/variantId；除非剧情明确恢复默认状态，不要只写 cast 让它回到主形象。
+- 当分镜为了沿用上一形态或使用场景/分镜级形态而绑定了已有 variant 时，设置 ensureScope=true；若已写 sceneId，优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集都适用时用 "episode"。
 - **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
-- 分镜按叙事顺序排列；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
+- 分镜按叙事顺序排列；同一空间或连续动作的镜头写稳定 sceneId，用于同场景资产和角色形态一致性检查；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
 - 全程使用项目设定的画风与对白语言。`
 
@@ -313,7 +317,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     'get_continuity_report 返回 asset_state_changed_variant 时，若剧情明确换装/妆容/受伤/时期变化，用 set_asset_variant_scope 标记当前 variantId 适用于本集；否则用 set_storyboard_cast_variant 绑定 previousVariantId 沿用上一形态，并传 ensureScope=true 补当前使用范围。' +
     'get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要调整名称或 aliases 用 update_asset，不要用 add_asset 再创建同名/同别名资产。' +
     'get_continuity_report 返回 unused_project_asset 时，如果资产应在当前或指定剧集出场，用 set_storyboard_asset_ref 加入合适分镜；不要只口头说明复用。' +
-    '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
+    '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）；同一空间/连续动作传稳定 sceneId，承接上一形态或场景/分镜级形态时传 ensureScope=true 和合适 scopeKind。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致，昵称/称谓写 aliases 以便后续复用同一资产。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
@@ -347,12 +351,14 @@ const ASSETS_SKILL =
 const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
+  '同一空间、同一连续动作或同一场景段落的镜头必须写相同 sceneId；换场时更换 sceneId。sceneId 用稳定短标识，不要每镜都新造。' +
   '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
   '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
+  '当你为了承接上一形态或使用已有场景/分镜级形态而绑定 variant 时，给该分镜写 ensureScope=true；有 sceneId 时优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集适用才用 "episode"。' +
   '当连续性报告出现 episode_variant_available、asset_state_regressed_to_main 或 asset_state_changed_variant 时，优先把分镜输出为绑定候选/上一形态/新形态的 castRefs，避免生成后再回退或漂移到错误形态。' +
   '同一 sceneId 的连续分镜里，同一角色默认保持同一 castRefs 形态；只有镜头内明确发生换装、化妆、受伤或状态转变时，才切换 variantLabel/variantId。' +
   '紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
-  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"castRefs":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
+  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"sceneId":"","ensureScope":false,"scopeKind":"scene","cast":[],"castRefs":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
 
 function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGenerate: boolean } {
   const fallback = { reply: '已处理。', tasks: ['script', 'assets', 'storyboard'] as StageTask[], autoGenerate: false }
