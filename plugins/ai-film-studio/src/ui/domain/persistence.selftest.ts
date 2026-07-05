@@ -107,13 +107,16 @@ const legacyProject: ProjectDoc = {
   assets: [],
   storyboards: [storyboard('flat-sb', 0)],
   clips: [],
-  track: [],
+  track: [{ id: 'flat-track', storyboardIds: ['flat-sb'], clipIds: 'bad-clip-list', selectClipId: 7, order: 'late' } as unknown as ProjectDoc['track'][number]],
   memory: [],
   episodes: [
     episode('ep1', 0, { storyboards: [], track: [] }),
     episode('ep2', 1, {
       storyboards: [storyboard('ep2-second', 1), storyboard('ep2-first', 0)],
-      track: [{ id: 'stale-track', storyboardIds: ['deleted-sb'], clipIds: [], order: 0 }, { id: 'existing-track', storyboardIds: ['ep2-second'], clipIds: [], order: 9 }],
+      track: [
+        { id: 'stale-track', storyboardIds: ['deleted-sb'], clipIds: [], order: 0 },
+        { id: 'existing-track', storyboardIds: ['ep2-second'], clipIds: 'bad-clip-list', selectClipId: 12, order: 'late' } as unknown as Episode['track'][number],
+      ],
     }),
   ],
 }
@@ -128,6 +131,7 @@ const legacyProject: ProjectDoc = {
 const normalizedProject = await loadProject('legacy')
 const normalizedEp2 = normalizedProject?.episodes?.find((episode) => episode.id === 'ep2')
 check('normalizes missing flat tracks while loading legacy projects', normalizedProject?.track.length === 1 && normalizedProject.track[0].storyboardIds.join(',') === 'flat-sb', JSON.stringify(normalizedProject?.track))
+check('sanitizes malformed flat track fields while loading legacy projects', Array.isArray(normalizedProject?.track[0]?.clipIds) && normalizedProject.track[0].clipIds.length === 0 && normalizedProject.track[0].selectClipId === undefined && normalizedProject.track[0].order === 0, JSON.stringify(normalizedProject?.track[0]))
 check(
   'normalizes non-current episode tracks while loading legacy projects',
   normalizedEp2?.track.length === 2 &&
@@ -136,6 +140,7 @@ check(
     !normalizedEp2.track.some((track) => track.storyboardIds.includes('deleted-sb')),
   JSON.stringify(normalizedEp2?.track),
 )
+check('sanitizes malformed non-current episode track fields while loading legacy projects', Array.isArray(normalizedEp2?.track[1]?.clipIds) && normalizedEp2.track[1].clipIds.length === 0 && normalizedEp2.track[1].selectClipId === undefined && normalizedEp2.track[1].order === 1, JSON.stringify(normalizedEp2?.track[1]))
 
 if (failures) {
   console.error(`\npersistence selftest: ${failures} FAILED`)

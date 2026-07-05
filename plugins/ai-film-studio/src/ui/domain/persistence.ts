@@ -101,22 +101,26 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
 function normalizeTrack(raw: unknown[] | undefined): VideoTrack[] {
   const rawTrack = Array.isArray(raw) ? (raw as Array<Record<string, unknown>>) : []
   return rawTrack.map((t, i): VideoTrack => {
+    const clipIds = Array.isArray(t.clipIds) ? (t.clipIds as unknown[]).filter((id): id is string => typeof id === 'string') : []
+    const selectClipId = typeof t.selectClipId === 'string' ? t.selectClipId : undefined
+    const order = typeof t.order === 'number' ? t.order : i
     if (Array.isArray(t.storyboardIds)) {
       return {
-        id: String(t.id ?? newId('t_')),
-        storyboardIds: t.storyboardIds as string[],
-        clipIds: Array.isArray(t.clipIds) ? (t.clipIds as string[]) : [],
-        selectClipId: t.selectClipId as string | undefined,
-        order: typeof t.order === 'number' ? t.order : i,
         ...t,
+        id: String(t.id ?? newId('t_')),
+        storyboardIds: (t.storyboardIds as unknown[]).filter((id): id is string => typeof id === 'string'),
+        clipIds,
+        selectClipId,
+        order,
       } as VideoTrack
     }
     return {
+      ...t,
       id: String(t.id ?? newId('t_')),
-      storyboardIds: t.storyboardId ? [t.storyboardId as string] : [],
-      clipIds: Array.isArray(t.clipIds) ? (t.clipIds as string[]) : [],
-      selectClipId: t.selectClipId as string | undefined,
-      order: i,
+      storyboardIds: typeof t.storyboardId === 'string' ? [t.storyboardId] : [],
+      clipIds,
+      selectClipId,
+      order,
     }
   })
 }
