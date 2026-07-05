@@ -1,6 +1,6 @@
 import type { Episode, ProjectDoc } from '../../domain/types'
 
-export type AgentEpisodeTargetMatch = 'index' | 'title' | 'id'
+export type AgentEpisodeTargetMatch = 'index' | 'title' | 'id' | 'relative'
 
 export interface AgentEpisodeTarget {
   episode: Episode
@@ -87,6 +87,22 @@ function findEpisodeByTitle(episodes: Episode[], text: string): AgentEpisodeTarg
   return { episode: matches[0], match: 'title', value: matches[0].title }
 }
 
+function findRelativeEpisode(doc: ProjectDoc, episodes: Episode[], text: string): AgentEpisodeTarget | undefined {
+  const currentIndex = episodes.findIndex((episode) => episode.id === doc.currentEpisodeId)
+  if (currentIndex < 0) return undefined
+  const wantsNext = /(?:下一|下)(?:集|话|回)/.test(text) || /\bnext\s+(?:episode|ep)\b/i.test(text)
+  const wantsPrevious = /(?:上一|上|前一)(?:集|话|回)/.test(text) || /\b(?:previous|prev)\s+(?:episode|ep)\b/i.test(text)
+  if (wantsNext && !wantsPrevious) {
+    const episode = episodes[currentIndex + 1]
+    return episode ? { episode, match: 'relative', value: 'next' } : undefined
+  }
+  if (wantsPrevious && !wantsNext) {
+    const episode = episodes[currentIndex - 1]
+    return episode ? { episode, match: 'relative', value: 'previous' } : undefined
+  }
+  return undefined
+}
+
 export function resolveAgentEpisodeTarget(doc: ProjectDoc, userText: string): AgentEpisodeTarget | undefined {
   const text = userText.trim()
   if (!text) return undefined
@@ -105,5 +121,5 @@ export function resolveAgentEpisodeTarget(doc: ProjectDoc, userText: string): Ag
     if (episode) return { episode, match: 'index', value: match[1] }
   }
 
-  return findEpisodeById(episodes, text) ?? findEpisodeByTitle(episodes, text)
+  return findRelativeEpisode(doc, episodes, text) ?? findEpisodeById(episodes, text) ?? findEpisodeByTitle(episodes, text)
 }

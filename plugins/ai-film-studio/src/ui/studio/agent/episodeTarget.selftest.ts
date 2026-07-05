@@ -40,6 +40,12 @@ check('resolves E-prefixed target', resolveAgentEpisodeTarget(doc, 'E02 生成�
 check('resolves episode-prefixed target', resolveAgentEpisodeTarget(doc, 'episode 3 needs storyboards')?.episode.id === 'ep3', JSON.stringify(resolveAgentEpisodeTarget(doc, 'episode 3 needs storyboards')))
 check('resolves unique title target', resolveAgentEpisodeTarget(doc, '重写 Second 的剧本')?.episode.id === 'ep2', JSON.stringify(resolveAgentEpisodeTarget(doc, '重写 Second 的剧本')))
 check('does not treat episode counts as target episodes', !resolveAgentEpisodeTarget(doc, '生成 3 集短剧'), JSON.stringify(resolveAgentEpisodeTarget(doc, '生成 3 集短剧')))
+check('resolves next episode from current episode', resolveAgentEpisodeTarget(doc, '续写下一集剧本')?.episode.id === 'ep2', JSON.stringify(resolveAgentEpisodeTarget(doc, '续写下一集剧本')))
+const middleDoc: ProjectDoc = { ...doc, currentEpisodeId: 'ep2' }
+check('resolves previous episode from middle episode', resolveAgentEpisodeTarget(middleDoc, '回到上一集补分镜')?.episode.id === 'ep1', JSON.stringify(resolveAgentEpisodeTarget(middleDoc, '回到上一集补分镜')))
+check('resolves English next episode from middle episode', resolveAgentEpisodeTarget(middleDoc, 'write next episode storyboards')?.episode.id === 'ep3', JSON.stringify(resolveAgentEpisodeTarget(middleDoc, 'write next episode storyboards')))
+const finalDoc: ProjectDoc = { ...doc, currentEpisodeId: 'ep3' }
+check('does not resolve missing next episode to current episode', !resolveAgentEpisodeTarget(finalDoc, '续写下一集剧本'), JSON.stringify(resolveAgentEpisodeTarget(finalDoc, '续写下一集剧本')))
 
 if (failures) {
   console.error(`\nepisodeTarget selftest: ${failures} FAILED`)
