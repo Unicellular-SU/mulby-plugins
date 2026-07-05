@@ -34,15 +34,6 @@ function textBlock(value: string | undefined, limit: number) {
   }
 }
 
-function assetNameMap(doc: ProjectDoc): Map<string, string> {
-  return new Map(doc.assets.map((a) => [a.id, a.name]))
-}
-
-function assetNames(doc: ProjectDoc, ids: string[] | undefined): string[] {
-  const names = assetNameMap(doc)
-  return (ids ?? []).map((id) => names.get(id) ?? id)
-}
-
 function castNames(doc: ProjectDoc, storyboard: Storyboard): string[] {
   const assets = new Map(doc.assets.map((a) => [a.id, a]))
   return castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
@@ -411,7 +402,8 @@ function variantView(asset: Asset, variantId: string) {
 }
 
 function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Storyboard | undefined {
-  if (typeof args.storyboardId === 'string' && args.storyboardId.trim()) return doc.storyboards.find((storyboard) => storyboard.id === args.storyboardId.trim())
+  const storyboardId = stringArg(args.storyboardId)
+  if (storyboardId) return doc.storyboards.find((storyboard) => storyboard.id === storyboardId)
   if (typeof args.index === 'number') {
     const sorted = [...doc.storyboards].sort((a, b) => a.index - b.index)
     return sorted[Math.max(0, Math.floor(args.index) - 1)]

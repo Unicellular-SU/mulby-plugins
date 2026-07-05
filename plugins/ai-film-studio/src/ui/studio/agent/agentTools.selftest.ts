@@ -1,5 +1,5 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
-import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardTableScene } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
 
 let failures = 0
@@ -180,7 +180,7 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
     setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => {
       const sb = current.storyboards.find((item) => item.id === storyboardId)
       if (!sb) return
-      const refs = (sb.castRefs?.length ? [...sb.castRefs] : sb.associateAssetIds.map((id) => ({ assetId: id })))
+      const refs: StoryboardCastRef[] = sb.castRefs?.length ? [...sb.castRefs] : sb.associateAssetIds.map((id) => ({ assetId: id }))
       const existing = refs.find((ref) => ref.assetId === assetId)
       if (existing) existing.variantId = variantId
       else refs.push({ assetId, variantId })

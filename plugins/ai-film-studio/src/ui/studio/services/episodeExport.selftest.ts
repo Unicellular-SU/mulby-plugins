@@ -82,7 +82,7 @@ const dirName = seasonPackageDirName(project, new Date('2026-07-06T01:02:03Z'))
 check('builds stable season package directory name', dirName === 'My_Series__Pilot__season_20260706T010203Z', dirName)
 
 const manifest = buildEpisodeExportManifest(project, items.map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` })), '2026-07-06T01:02:03.000Z')
-check('builds season export manifest', manifest.projectId === 'p1' && manifest.episodeCount === 2 && manifest.episodes[1].exportedPath?.endsWith('.mp4'), JSON.stringify(manifest))
+check('builds season export manifest', manifest.projectId === 'p1' && manifest.episodeCount === 2 && manifest.episodes[1].exportedPath?.endsWith('.mp4') === true, JSON.stringify(manifest))
 check('adds delivery asset references to season manifest', manifest.delivery.assetReferences.some((item) => item.assetId === 'hero' && item.episodeId === 'ep1'), JSON.stringify(manifest.delivery.assetReferences))
 check('adds missing item report to season manifest', manifest.delivery.missingItems.some((item) => item.code === 'missing_asset' && item.episodeId === 'ep2'), JSON.stringify(manifest.delivery.missingItems))
 check('adds subtitle metadata to season manifest', manifest.episodes[0].subtitles?.[0]?.fileName === 'E1_Pilot_subtitles.srt' && manifest.episodes[0].subtitles?.[0]?.cueCount === 1, JSON.stringify(manifest.episodes[0].subtitles))

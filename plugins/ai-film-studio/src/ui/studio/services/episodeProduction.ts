@@ -58,7 +58,7 @@ export function hasEpisodeProductionState(episode: Episode | undefined): boolean
 }
 
 export function invalidateEpisodeProduction(episode: Episode | undefined): boolean {
-  if (!hasEpisodeProductionState(episode)) return false
+  if (!episode || !hasEpisodeProductionState(episode)) return false
   delete episode.filmPath
   delete episode.filmError
   delete episode.producedAt
@@ -348,21 +348,20 @@ export function buildEpisodeProductionHandoff(
     }
     const appearances = episodes
       .filter((item) => item.id !== episode.id)
-      .map((item) => {
+      .flatMap((item): EpisodeHandoffAppearance[] => {
         const refs = uniqueCastRefs(storyboardsForEpisode(doc, item)).filter((itemRef) => itemRef.assetId === ref.assetId)
-        if (!refs.length) return null
+        if (!refs.length) return []
         const variantLabels = unique(refs.filter((itemRef) => !!itemRef.variantId).map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4)
-        return {
+        return [{
           episodeId: item.id,
           episodeIndex: item.index,
           episodeTitle: item.title,
           variants: unique(refs.map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4),
-          variantLabels,
+          variantLabels: variantLabels.length ? variantLabels : undefined,
           mainImageUsed: refs.some((itemRef) => !itemRef.variantId),
           recap: item.productionRecap ? compact(item.productionRecap, 180) : undefined,
-        }
+        }]
       })
-      .filter((item): item is EpisodeHandoffAppearance => !!item)
       .sort((a, b) => Math.abs(a.episodeIndex - episode.index) - Math.abs(b.episodeIndex - episode.index) || a.episodeIndex - b.episodeIndex)
       .slice(0, maxAppearances)
     if (appearances.length) {

@@ -1,7 +1,7 @@
 import type { Asset, Storyboard, StoryboardCastRef } from './types'
 
 export function castRefsForStoryboard(storyboard: Pick<Storyboard, 'associateAssetIds' | 'castRefs'>): StoryboardCastRef[] {
-  const source = storyboard.castRefs?.length
+  const source: StoryboardCastRef[] = storyboard.castRefs?.length
     ? storyboard.castRefs
     : (storyboard.associateAssetIds ?? []).map((assetId) => ({ assetId }))
   const seen = new Set<string>()

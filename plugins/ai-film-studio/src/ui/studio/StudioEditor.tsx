@@ -1586,12 +1586,13 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     setStoryboardCastVariant(issue.storyboardId, issue.assetId, issue.variantId)
   }
   const carryPreviousVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'asset_state_regressed_to_main' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
+    if (issue.code !== 'asset_state_regressed_to_main' || !issue.episodeId || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
+    const episodeId = issue.episodeId
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
     if ((variant.appliesToEpisodeIds?.length ?? 0) > 0) {
-      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), episodeId])] })
     }
     setStoryboardCastVariant(issue.storyboardId, asset.id, variant.id)
   }
