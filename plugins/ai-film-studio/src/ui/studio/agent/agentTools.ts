@@ -415,6 +415,28 @@ function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Stor
   return undefined
 }
 
+function findSceneAsset(doc: ProjectDoc, args: Record<string, unknown>): Asset | undefined {
+  const asset =
+    findCastableAsset(doc, args.assetId) ??
+    findCastableAsset(doc, args.assetName) ??
+    findCastableAsset(doc, args.sceneAssetId) ??
+    findCastableAsset(doc, args.sceneAssetName) ??
+    findCastableAsset(doc, args.name)
+  return asset?.type === 'scene' ? asset : undefined
+}
+
+function storyboardWithSceneAsset(doc: ProjectDoc, storyboard: Storyboard, sceneAssetId: string, replaceOtherSceneAssets: boolean): Pick<Storyboard, 'associateAssetIds' | 'castRefs'> {
+  const refs = castRefsForStoryboard(storyboard)
+  const nextRefs = replaceOtherSceneAssets
+    ? refs.filter((ref) => ref.assetId === sceneAssetId || doc.assets.find((asset) => asset.id === ref.assetId)?.type !== 'scene')
+    : refs
+  if (!nextRefs.some((ref) => ref.assetId === sceneAssetId)) nextRefs.push({ assetId: sceneAssetId })
+  return {
+    associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
+    castRefs: nextRefs,
+  }
+}
+
 function hasEpisodeSelector(args: Record<string, unknown>): boolean {
   return (
     (typeof args.episodeId === 'string' && !!args.episodeId.trim()) ||
@@ -1093,6 +1115,54 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+        })
+      },
+    },
+    {
+      name: 'set_storyboard_scene_asset',
+      description: '给已有分镜绑定场景资产；也可按 sceneId 把当前剧集中同一连续场景组统一为同一个场景资产，用于修正 scene_group_missing_asset/scene_group_asset_mismatch。',
+      parameters: {
+        type: 'object',
+        properties: {
+          storyboardId: { type: 'string' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
+          index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空且 sceneId 为空时使用。' },
+          sceneId: { type: 'string', description: '连续场景组 ID。提供时可批量处理该组分镜。' },
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          sceneAssetId: { type: 'string' },
+          sceneAssetName: { type: 'string' },
+          name: { type: 'string' },
+          unifySceneGroup: { type: 'boolean', description: 'true 时移除同一 sceneId 组内其他场景资产并统一为该场景资产。' },
+        },
+      },
+      execute: async (a) => {
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
+        if (!d) return '无项目'
+        const asset = findSceneAsset(d, a)
+        if (!asset) return json({ error: '未找到场景资产', assets: d.assets.filter((item) => item.type === 'scene').map((item) => ({ id: item.id, name: item.name })) })
+        const sceneId = stringArg(a.sceneId)
+        const replaceOtherSceneAssets = a.unifySceneGroup === true || !!sceneId
+        const targets = sceneId
+          ? d.storyboards.filter((storyboard) => storyboard.sceneId?.trim() === sceneId)
+          : [resolveStoryboard(d, a)].filter((storyboard): storyboard is Storyboard => !!storyboard)
+        if (!targets.length) return json({ error: sceneId ? `未找到场景组：${sceneId}` : '未找到分镜' })
+        const updatedIds: string[] = []
+        for (const storyboard of targets) {
+          const patch = storyboardWithSceneAsset(d, storyboard, asset.id, replaceOtherSceneAssets)
+          get().upsertStoryboard({ id: storyboard.id, videoDesc: storyboard.videoDesc, ...patch })
+          updatedIds.push(storyboard.id)
+        }
+        const next = doc()
+        const updated = next ? updatedIds.map((id) => next.storyboards.find((s) => s.id === id)).filter((item): item is Storyboard => !!item) : []
+        return json({
+          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          asset: assetView(asset, { includeImages: false }),
+          storyboards: next ? updated.map((storyboard) => storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true })) : undefined,
         })
       },
     },

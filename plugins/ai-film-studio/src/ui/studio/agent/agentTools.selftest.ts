@@ -195,15 +195,20 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
 }
 
 const writableDoc = cloneDoc(doc)
-writableDoc.assets = [{ id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }]
+writableDoc.assets = [
+  { id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] },
+  { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
+  { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
+]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
+const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !setCastVariant || !setEpisodeSeriesSkip) {
+if (!addStoryboard || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -216,6 +221,16 @@ check('add_storyboard does not append to previous current episode', !ep1AfterAdd
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
+
+writableDoc.storyboards.push({ ...storyboard('scene-a', writableDoc.storyboards.length, 'Hall first shot.'), sceneId: 'hallway', associateAssetIds: ['hall'], castRefs: [{ assetId: 'hall' }] })
+writableDoc.storyboards.push({ ...storyboard('scene-b', writableDoc.storyboards.length, 'Hall second shot.'), sceneId: 'hallway', associateAssetIds: ['lobby'], castRefs: [{ assetId: 'lobby' }] })
+const sceneAssetResult = JSON.parse(await setSceneAsset.execute({ episodeTitle: 'Second', sceneId: 'hallway', sceneAssetName: 'Hall' }))
+check(
+  'set_storyboard_scene_asset unifies selected scene group',
+  sceneAssetResult.storyboards?.length === 2 &&
+    sceneAssetResult.storyboards.every((item: { castRefs?: Array<{ assetId: string }> }) => item.castRefs?.some((ref) => ref.assetId === 'hall') && !item.castRefs?.some((ref) => ref.assetId === 'lobby')),
+  JSON.stringify(sceneAssetResult),
+)
 
 const restoredEpisode = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: false }))
 check('set_episode_series_skip restores selected episode queue state', restoredEpisode.episode?.id === 'ep2' && restoredEpisode.episode?.seriesSkip === false && restoredEpisode.episode?.seriesQueueState === 'pending', JSON.stringify(restoredEpisode))
