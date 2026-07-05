@@ -207,6 +207,15 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const currentId = doc.currentEpisodeId ?? episodes[0]?.id ?? ''
   const current = episodes.find((e) => e.id === currentId) ?? episodes[0]
+  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
+  const currentReport = current ? continuity.episodes.find((episode) => episode.id === current.id) : undefined
+  const currentIssues = currentReport?.issues ?? []
+  const currentErrors = currentIssues.filter((issue) => issue.severity === 'error').length
+  const currentWarnings = currentIssues.length - currentErrors
+  const validChapterIds = new Set(doc.novel.map((chapter) => chapter.id))
+  const chapterCount = (current?.novelChapterIds ?? []).filter((id) => validChapterIds.has(id)).length
+  const castUseCount = new Set((currentReport?.castUses ?? []).map((use) => `${use.assetId}:${use.variantId ?? ''}`)).size
+  const issueTitle = currentIssues.length ? currentIssues.slice(0, 5).map((issue) => issue.message).join('\n') : '当前集资产和变体引用正常'
   const renameCurrent = () => {
     if (!current) return
     const title = window.prompt('集标题', current.title)
@@ -227,6 +236,28 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
         options={episodes.map((episode) => ({ value: episode.id, label: `E${episode.index + 1} ${episode.title}` }))}
         ariaLabel="当前剧集"
       />
+      {current && (
+        <div className="afs-stwb__episode-meta" aria-label="当前集制作状态">
+          {doc.novel.length > 0 && (
+            <span className="afs-stwb__episode-chip" title={`当前集已分配 ${chapterCount}/${doc.novel.length} 个原著章节`}>
+              章节 {chapterCount}/{doc.novel.length}
+            </span>
+          )}
+          <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title="当前集分镜数量">
+            分镜 {currentReport?.storyboards ?? 0}
+          </span>
+          <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title="当前集已绑定的角色/场景/物品引用数量">
+            引用 {castUseCount}
+          </span>
+          <span
+            className={`afs-stwb__episode-chip afs-stwb__episode-chip--audit${currentErrors ? ' is-error' : currentWarnings ? ' is-warning' : ' is-ok'}`}
+            title={issueTitle}
+          >
+            {currentErrors || currentWarnings ? <AlertTriangle size={11} /> : <Check size={11} />}
+            {currentErrors ? `${currentErrors} 错误` : currentWarnings ? `${currentWarnings} 警告` : '一致'}
+          </span>
+        </div>
+      )}
       <IconButton
         size="sm"
         variant="ghost"

@@ -5707,6 +5707,51 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   width: 150px;
   max-width: 20vw;
 }
+.afs-stwb__episode-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(360px, 32vw);
+  overflow: hidden;
+}
+.afs-stwb__episode-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--afs-panel-2) 88%, transparent);
+  color: var(--afs-text-dim);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.afs-stwb__episode-chip--audit { color: var(--afs-text); }
+.afs-stwb__episode-chip--audit svg { flex: 0 0 auto; }
+.afs-stwb__episode-chip--audit.is-ok {
+  border-color: color-mix(in srgb, var(--afs-success) 44%, var(--afs-border));
+  color: var(--afs-success);
+}
+.afs-stwb__episode-chip--audit.is-warning {
+  border-color: color-mix(in srgb, var(--afs-warning) 48%, var(--afs-border));
+  color: var(--afs-warning);
+}
+.afs-stwb__episode-chip--audit.is-error {
+  border-color: color-mix(in srgb, var(--afs-danger) 48%, var(--afs-border));
+  color: var(--afs-danger);
+}
+@media (max-width: 1260px) {
+  .afs-stwb__episode-chip--optional { display: none; }
+  .afs-stwb__episode-meta { max-width: 220px; }
+}
+@media (max-width: 1120px) {
+  .afs-stwb__episode-meta { display: none; }
+}
 
 /* aria-live busy Pill (Spinner + label) */
 .afs-stwb__busy {
