@@ -1272,8 +1272,17 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
 }
 
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
+  const doc = useProjectStore((s) => s.doc)!
+  const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
+  const addVariantToEpisode = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'variant_out_of_episode_scope' || !issue.assetId || !issue.variantId || !issue.episodeId) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
+    if (!asset || !variant) return
+    updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1283,6 +1292,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
+        const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
             <div className="afs-studio__continuityissue-top">
@@ -1291,6 +1301,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             </div>
             <p>{issue.message}</p>
             {loc && <small>{loc}</small>}
+            {canAddVariantEpisode && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantToEpisode(issue)}>
+                标记变体适用于本集
+              </button>
+            )}
           </div>
         )
       })}
