@@ -68,6 +68,7 @@ export interface ProjectState {
   mutate: (fn: (doc: ProjectDoc) => void) => void
   updateMeta: (patch: Partial<ProjectMeta>) => void
   createEpisode: () => string
+  createEpisodes: (count: number) => string[]
   switchEpisode: (id: string) => void
   renameEpisode: (id: string, title: string) => void
   deleteEpisode: (id: string) => void
@@ -633,6 +634,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       id = episode.id
     })
     return id
+  },
+
+  createEpisodes: (count) => {
+    const ids: string[] = []
+    const n = Math.max(0, Math.min(100, Math.floor(count)))
+    if (!n) return ids
+    get().mutate((d) => {
+      P.syncCurrentEpisodeFromFlat(d)
+      d.episodes ??= []
+      reindexEpisodes(d.episodes)
+      const currentId = d.currentEpisodeId
+      for (let i = 0; i < n; i += 1) {
+        const episode = emptyEpisode(d.episodes.length)
+        d.episodes.push(episode)
+        ids.push(episode.id)
+      }
+      d.currentEpisodeId = currentId
+      const current = d.episodes.find((episode) => episode.id === currentId)
+      if (current) P.applyEpisodeToFlat(d, current)
+    })
+    return ids
   },
 
   switchEpisode: (id) =>

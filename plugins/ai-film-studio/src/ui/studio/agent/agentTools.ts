@@ -644,6 +644,29 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
     },
     {
+      name: 'create_episodes',
+      description: 'Batch create empty episodes. Use when the user asks for many episodes before chapter distribution or episode production.',
+      parameters: {
+        type: 'object',
+        properties: {
+          count: { type: 'number', description: 'Number of new episodes to add. Max 100.' },
+          titlePrefix: { type: 'string', description: 'Optional prefix for new episode titles.' },
+        },
+        required: ['count'],
+      },
+      execute: async (a) => {
+        if (!doc()) return '无打开的项目'
+        const count = Math.max(0, Math.min(100, Math.floor(Number(a.count ?? 0))))
+        if (!count) return json({ error: 'count 必须大于 0' })
+        const ids = get().createEpisodes(count)
+        if (typeof a.titlePrefix === 'string' && a.titlePrefix.trim()) {
+          ids.forEach((id, index) => get().renameEpisode(id, `${a.titlePrefix}${index + 1}`))
+        }
+        const next = get().doc
+        return json({ ids, currentEpisodeId: next?.currentEpisodeId, episodes: next ? sortedEpisodes(next).map((episode) => episodeView(next, episode)) : [] })
+      },
+    },
+    {
       name: 'switch_episode',
       description: 'Switch current workspace to an existing episode by episodeId, 1-based index, or title before editing it.',
       parameters: {

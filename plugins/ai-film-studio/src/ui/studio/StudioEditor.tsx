@@ -392,6 +392,7 @@ function NovelTab() {
   const extractChapterEvents = useProjectStore((s) => s.extractChapterEvents)
   const extractAllEvents = useProjectStore((s) => s.extractAllEvents)
   const setEpisodeNovelChapters = useProjectStore((s) => s.setEpisodeNovelChapters)
+  const createEpisodes = useProjectStore((s) => s.createEpisodes)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const batch = useProjectStore((s) => s.batch)
   const [text, setText] = useState('')
@@ -444,6 +445,17 @@ function NovelTab() {
               <Wand2 size={13} /> 提取全部事件
             </button>
             <span className="afs-studio__hint">提取后改编更省 token、长篇也装得下</span>
+            <button
+              className="afs-btn afs-btn--sm afs-btn--ghost"
+              title="一次新增多集空白生产线"
+              onClick={() => {
+                const raw = window.prompt('要新增几集？', '5')
+                const count = raw == null ? 0 : Math.floor(Number(raw))
+                if (count > 0) createEpisodes(count)
+              }}
+            >
+              <Plus size={13} /> 新增多集
+            </button>
             {episodes.length > 1 && (
               <button
                 className="afs-btn afs-btn--sm afs-btn--ghost"
