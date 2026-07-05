@@ -1276,8 +1276,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
+  const chapterIssueCodes = new Set(['episode_without_chapters', 'invalid_episode_chapter', 'unassigned_chapter', 'duplicated_chapter_assignment'])
+  const chapterIssueCount = report.issues.filter((issue) => chapterIssueCodes.has(issue.code)).length
+  const canRedistributeChapters = chapterIssueCount > 0 && doc.novel.length > 0 && (doc.episodes?.length ?? 0) > 1
+  const redistributeChapters = () => {
+    if (!canRedistributeChapters) return
+    if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
+  }
   const addVariantToEpisode = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'variant_out_of_episode_scope' || !issue.assetId || !issue.variantId || !issue.episodeId) return
     const asset = doc.assets.find((item) => item.id === issue.assetId)
@@ -1343,6 +1351,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             <span>{report.episodes.length} 集</span>
             <span>{errors.length} 错误</span>
             <span>{warnings.length} 警告</span>
+            {canRedistributeChapters && (
+              <button type="button" className="afs-studio__continuityfix" onClick={redistributeChapters}>
+                重新均分原著章节
+              </button>
+            )}
           </div>
           {errors.length > 0 && (
             <section className="afs-studio__continuitysection">
