@@ -173,6 +173,50 @@ function sceneAssetIdsForStoryboard(storyboard: Storyboard, assets: Map<string, 
   return [...ids]
 }
 
+function roleVariantLabel(asset: Asset, variantId: string | undefined): string {
+  if (!variantId) return '主形象'
+  return asset.variants?.find((variant) => variant.id === variantId)?.label ?? variantId
+}
+
+function addSceneRoleVariantIssues(
+  episode: Episode,
+  sceneId: string,
+  group: Storyboard[],
+  assets: Map<string, Asset>,
+  addIssue: (issue: ContinuityIssue) => void,
+): void {
+  const roleVariantUses = new Map<string, { storyboard: Storyboard; variantId?: string; label: string }[]>()
+  for (const storyboard of group) {
+    for (const ref of castRefsForStoryboard(storyboard)) {
+      const asset = assets.get(ref.assetId)
+      if (asset?.type !== 'role') continue
+      const uses = roleVariantUses.get(asset.id) ?? []
+      uses.push({ storyboard, variantId: ref.variantId, label: roleVariantLabel(asset, ref.variantId) })
+      roleVariantUses.set(asset.id, uses)
+    }
+  }
+  for (const [assetId, uses] of roleVariantUses) {
+    const labels = [...new Set(uses.map((use) => use.label).filter(Boolean))]
+    if (labels.length < 2) continue
+    const asset = assets.get(assetId)
+    const seenStoryboards = new Set<string>()
+    for (const use of uses) {
+      if (seenStoryboards.has(use.storyboard.id)) continue
+      seenStoryboards.add(use.storyboard.id)
+      addIssue({
+        severity: 'warning',
+        code: 'scene_group_variant_mismatch',
+        episodeId: episode.id,
+        storyboardId: use.storyboard.id,
+        storyboardIndex: use.storyboard.index + 1,
+        assetId,
+        variantId: use.variantId,
+        message: `E${episode.index + 1} 场景组「${sceneId}」中「${asset?.name ?? assetId}」混用了 ${labels.join('、')}。连续场景建议统一绑定同一角色形态，除非镜头内明确发生换装或状态变化。`,
+      })
+    }
+  }
+}
+
 function addSceneReuseIssues(
   episode: Episode,
   storyboards: Storyboard[],
@@ -187,6 +231,7 @@ function addSceneReuseIssues(
   }
   for (const [sceneId, group] of groups) {
     if (group.length < 2) continue
+    addSceneRoleVariantIssues(episode, sceneId, group, assets, addIssue)
     const sceneRefsByStoryboard = new Map(group.map((storyboard) => [storyboard.id, sceneAssetIdsForStoryboard(storyboard, assets)]))
     const sceneAssetIds = [...new Set([...sceneRefsByStoryboard.values()].flat())]
     if (!sceneAssetIds.length) continue

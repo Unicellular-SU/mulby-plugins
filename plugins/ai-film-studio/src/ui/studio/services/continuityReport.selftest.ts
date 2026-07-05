@@ -138,6 +138,23 @@ const sceneMismatchReport = buildContinuityReport(
 )
 check('flags mixed scene assets in reused scene group', sceneMismatchReport.issues.filter((issue) => issue.code === 'scene_group_asset_mismatch').length === 2, JSON.stringify(sceneMismatchReport.issues))
 
+const sceneVariantMismatchReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
+    currentEpisodeId: 'ep1',
+    storyboards: [
+      { ...storyboard('hero-main', 0, [{ assetId: 'hero' }]), sceneId: 'same-room' },
+      { ...storyboard('hero-gala', 1, [{ assetId: 'hero', variantId: 'v-gala' }]), sceneId: 'same-room' },
+    ],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check(
+  'flags mixed role variants in reused scene group',
+  sceneVariantMismatchReport.issues.filter((issue) => issue.code === 'scene_group_variant_mismatch' && issue.assetId === 'hero').length === 2,
+  JSON.stringify(sceneVariantMismatchReport.issues),
+)
+
 const unusedAssetReport = buildContinuityReport(
   doc({
     assets: [
