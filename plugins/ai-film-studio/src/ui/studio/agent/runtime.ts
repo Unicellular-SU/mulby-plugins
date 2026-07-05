@@ -84,14 +84,14 @@ ${toolSchemaText(tools)}
 - 用户要求规划多集、按原著拆集或指定每集覆盖内容时，先用 get_novel/get_episodes 查看章节和剧集；剧集数量不足时先用 create_episodes 补空剧集；粗略初始化可用 distribute_episode_chapters 顺序均分，精确拆集用 assign_episode_chapters 写入章节归属。
 - 续写下一集、承接上一集状态、处理换装/妆容/受伤/时期变化时，先调用 get_episode_handoff 读取最近制作回顾、共享资产出场记录和承接建议；看到上一相关剧集使用过具体形态或本集已有适用变体时，分镜写入必须用 castRefs/variant 精确绑定。
 - 检查跨集角色一致性、妆容/服装绑定或缺图问题时，优先调用 get_continuity_report，再决定是否补资产、补变体或修正分镜绑定。
-- get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产、补充/调整 aliases 或建议合并资产；不要继续用同一称呼创建新角色、场景或道具。
+- get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要改名、补充或移除 aliases 时调用 update_asset，确认是真重复且引用复杂时再建议合并资产；不要继续用同一称呼创建新角色、场景或道具。
 - get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就把它加入相应分镜 cast/castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。
 - get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，优先调用 set_storyboard_scene_asset，让同一 sceneId 的连续分镜复用同一个场景资产；不要为同一空间重复创建新场景。
 - get_continuity_report 返回 scene_group_variant_mismatch 时，先判断是否有明确换装/状态变化；没有明确变化时，优先用 set_storyboard_cast_variant 让同一 sceneId 连续分镜里的同一角色使用同一形态。
 - get_continuity_report 返回 episode_variant_available 且带 variantId 时，优先调用 set_storyboard_cast_variant 把该分镜资产绑定到本集适用形态；不要继续让分镜使用主形象。
 - get_continuity_report 返回 asset_state_regressed_to_main 时，先判断剧情是否确实恢复默认状态；如果状态应延续或变化，调用 upsert_asset_variant 创建本集形态并用 set_storyboard_cast_variant 绑定。
 - 同一角色有妆容、服装、年龄或时期差异时，先用 get_assets 查看 variants；缺少变体就调用 upsert_asset_variant 创建/更新，再在 add_storyboard 或 set_storyboard_cast_variant 里传 castRefs/variant 精确绑定。不要只把变体写进画面描述。
-- 用户要求生成、新增、续写或修改项目内容时，最终回复前必须调用对应写入/生成工具：剧本用 upsert_script，资产用 add_asset，分镜用 add_storyboard，出图/关键帧/视频用 generate_*。不要只描述计划。
+- 用户要求生成、新增、续写或修改项目内容时，最终回复前必须调用对应写入/生成工具：剧本用 upsert_script，新资产用 add_asset，修改既有资产用 update_asset，分镜用 add_storyboard，出图/关键帧/视频用 generate_*。不要只描述计划。
 - 写入后如需确认结果，再调用读取工具核对；确认完成后再给最终回复。
 - 工具返回后，再根据结果继续请求工具或给最终回复。
 - 不要把下列本地项目工具写成 Host RPC，也不要编造工具结果。

@@ -6,7 +6,7 @@ import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
 import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
-import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias } from '../../domain/assetAliases'
+import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
 
@@ -295,6 +295,10 @@ function stringArg(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+function hasArg(args: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(args, key)
+}
+
 function isCastableAsset(asset: Asset): boolean {
   return !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop')
 }
@@ -423,6 +427,18 @@ function findSceneAsset(doc: ProjectDoc, args: Record<string, unknown>): Asset |
     findCastableAsset(doc, args.sceneAssetName) ??
     findCastableAsset(doc, args.name)
   return asset?.type === 'scene' ? asset : undefined
+}
+
+function assetLookupConflicts(doc: ProjectDoc, target: Asset): Array<{ assetId: string; assetName: string; value: string }> {
+  const targetKeys = new Set([target.name, ...(target.aliases ?? [])].map((value) => normalizeAssetLookup(value)).filter(Boolean))
+  if (!targetKeys.size) return []
+  return doc.assets
+    .filter((asset) => asset.id !== target.id && !asset.parentAssetId && asset.type === target.type)
+    .flatMap((asset) =>
+      [asset.name, ...(asset.aliases ?? [])]
+        .filter((value) => targetKeys.has(normalizeAssetLookup(value)))
+        .map((value) => ({ assetId: asset.id, assetName: asset.name, value })),
+    )
 }
 
 function storyboardWithSceneAsset(doc: ProjectDoc, storyboard: Storyboard, sceneAssetId: string, replaceOtherSceneAssets: boolean): Pick<Storyboard, 'associateAssetIds' | 'castRefs'> {
@@ -995,6 +1011,54 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const type = a.type === 'scene' || a.type === 'prop' ? a.type : 'role'
         const id = get().upsertAsset({ type, name: String(a.name ?? '未命名'), aliases: cleanAssetAliases(a.aliases), desc: a.desc as string | undefined, prompt: a.prompt as string | undefined })
         return `已新增资产 ${a.name}（id ${id}）`
+      },
+    },
+    {
+      name: 'update_asset',
+      description: '更新已有项目级资产的名称、别名、描述或提示词；用于修正 duplicate_asset_name / duplicate_asset_alias，不会创建新资产或自动合并引用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string', description: '资产查找名；如需改名请传 newName。' },
+          newName: { type: 'string' },
+          aliases: { type: 'array', items: { type: 'string' }, description: '默认替换 aliases；传空数组可清空。' },
+          aliasMode: { type: 'string', enum: ['replace', 'add', 'remove'], description: 'aliases 的处理方式，默认 replace。' },
+          desc: { type: 'string' },
+          prompt: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type, aliases: item.aliases })) })
+
+        const aliasMode = a.aliasMode === 'add' || a.aliasMode === 'remove' ? a.aliasMode : 'replace'
+        const patch: Partial<Asset> & { id: string; type: Asset['type']; name: string } = {
+          id: asset.id,
+          type: asset.type,
+          name: stringArg(a.newName) ?? asset.name,
+        }
+        if (Array.isArray(a.aliases) || typeof a.aliases === 'string') {
+          const incoming = cleanAssetAliases(a.aliases)
+          if (aliasMode === 'add') patch.aliases = cleanAssetAliases([...(asset.aliases ?? []), ...incoming])
+          else if (aliasMode === 'remove') {
+            const removing = new Set(incoming.map((alias) => normalizeAssetLookup(alias)))
+            patch.aliases = (asset.aliases ?? []).filter((alias) => !removing.has(normalizeAssetLookup(alias)))
+          } else patch.aliases = incoming
+        }
+        if (hasArg(a, 'desc')) patch.desc = typeof a.desc === 'string' && a.desc.trim() ? a.desc.trim() : undefined
+        if (hasArg(a, 'prompt')) patch.prompt = typeof a.prompt === 'string' && a.prompt.trim() ? a.prompt.trim() : undefined
+
+        get().upsertAsset(patch)
+        const next = doc()
+        const updated = next?.assets.find((item) => item.id === asset.id) ?? { ...asset, ...patch }
+        return json({
+          asset: assetView(updated, { includeImages: false }),
+          conflicts: next ? assetLookupConflicts(next, updated) : [],
+        })
       },
     },
     {

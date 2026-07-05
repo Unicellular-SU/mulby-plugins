@@ -1,5 +1,5 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
-import type { Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardTableScene } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardTableScene } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
 
 let failures = 0
@@ -127,6 +127,7 @@ function cloneDoc(input: ProjectDoc): ProjectDoc {
 
 function makeWritableState(initial: ProjectDoc): ProjectState {
   const current = initial
+  let nextAsset = 1
   let nextStoryboard = 1
 
   const syncCurrentEpisode = () => {
@@ -190,6 +191,15 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
       if (episode) episode.seriesSkip = skip || undefined
     },
+    upsertAsset: (a: Partial<Asset> & { type: Asset['type']; name: string }) => {
+      const id = a.id ?? `asset-write-${nextAsset++}`
+      const index = current.assets.findIndex((item) => item.id === id)
+      const base: Asset = index >= 0 ? current.assets[index] : { id, type: a.type, name: a.name, state: 'idle' }
+      const merged: Asset = { ...base, ...a, id, aliases: a.aliases?.length ? a.aliases : undefined }
+      if (index >= 0) current.assets[index] = merged
+      else current.assets.push(merged)
+      return id
+    },
   }
   return state as unknown as ProjectState
 }
@@ -204,11 +214,12 @@ writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
+const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!addStoryboard || !updateAsset || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -218,6 +229,17 @@ const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
 check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
 check('add_storyboard resolves cast aliases', addedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string }) => ref.assetId === 'hero'), JSON.stringify(addedStoryboard.storyboard))
 check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
+
+const updatedAsset = JSON.parse(await updateAsset.execute({ assetName: 'Hero', aliases: ['主角', '队长'], aliasMode: 'replace', desc: 'Lead role with a stable identity.' }))
+check(
+  'update_asset edits existing asset aliases and desc',
+  updatedAsset.asset?.id === 'hero' &&
+    updatedAsset.asset?.aliases?.includes('主角') &&
+    updatedAsset.asset?.aliases?.includes('队长') &&
+    updatedAsset.asset?.desc === 'Lead role with a stable identity.' &&
+    writableDoc.assets.find((item) => item.id === 'hero')?.aliases?.includes('队长') === true,
+  JSON.stringify(updatedAsset),
+)
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
