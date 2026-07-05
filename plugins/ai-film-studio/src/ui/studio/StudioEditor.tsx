@@ -267,9 +267,13 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
           <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title="当前集已绑定的角色/场景/物品引用数量">
             引用 {castUseCount}
           </span>
-          {current.filmPath && (
-            <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title={current.filmPath}>
-              已成片
+          {(current.filmPath || current.filmError || current.status === 'generating') && (
+            <span
+              className={`afs-stwb__episode-chip afs-stwb__episode-chip--optional afs-stwb__episode-chip--audit${current.filmError ? ' is-error' : current.status === 'generating' ? ' is-warning' : ' is-ok'}`}
+              title={current.filmError || current.filmPath || '当前集正在生成'}
+            >
+              {current.filmError ? <AlertTriangle size={11} /> : current.status === 'generating' ? <Loader2 size={11} className="afs-spin" /> : <Check size={11} />}
+              {current.filmError ? '成片失败' : current.status === 'generating' ? '生成中' : '已成片'}
             </span>
           )}
           <span
