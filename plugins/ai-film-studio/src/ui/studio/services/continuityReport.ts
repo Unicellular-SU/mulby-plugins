@@ -96,6 +96,34 @@ function variantHasScope(variant: NonNullable<Asset['variants']>[number] | undef
   return !!variant && (!!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length)
 }
 
+function withScopeId(ids: string[] | undefined, id: string): string[] {
+  return [...new Set([...(ids ?? []), id].filter(Boolean))]
+}
+
+export function variantScopePatchForUse(
+  variant: NonNullable<Asset['variants']>[number],
+  episode: Pick<Episode, 'id'>,
+  storyboard: Pick<Storyboard, 'id' | 'sceneId'>,
+  preferredScope?: ContinuityIssue['scopeKind'],
+): Partial<NonNullable<Asset['variants']>[number]> | undefined {
+  const scope =
+    preferredScope ??
+    ((variant.appliesToStoryboardIds?.length ?? 0) > 0
+      ? 'storyboard'
+      : (variant.appliesToSceneIds?.length ?? 0) > 0
+        ? 'scene'
+        : (variant.appliesToEpisodeIds?.length ?? 0) > 0
+          ? 'episode'
+          : undefined)
+  if (!scope) return undefined
+  if (scope === 'storyboard') return { appliesToStoryboardIds: withScopeId(variant.appliesToStoryboardIds, storyboard.id) }
+  if (scope === 'scene') {
+    if (storyboard.sceneId) return { appliesToSceneIds: withScopeId(variant.appliesToSceneIds, storyboard.sceneId) }
+    return { appliesToStoryboardIds: withScopeId(variant.appliesToStoryboardIds, storyboard.id) }
+  }
+  return { appliesToEpisodeIds: withScopeId(variant.appliesToEpisodeIds, episode.id) }
+}
+
 function variantsScopedToStoryboard(asset: Asset, episode: Episode, storyboard: Storyboard): NonNullable<Asset['variants']> {
   return (asset.variants ?? []).filter((variant) => {
     return variantHasScope(variant) && !variantScopeIssue(variant, episode, storyboard)

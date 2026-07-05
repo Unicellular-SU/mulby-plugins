@@ -26,7 +26,7 @@ import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
-import { buildContinuityReport } from './services/continuityReport'
+import { buildContinuityReport, variantScopePatchForUse } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
 import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
 
@@ -1569,15 +1569,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
-    if (issue.scopeKind === 'scene') {
-      if (!issue.sceneId) return
-      updateAssetVariant(asset.id, variant.id, { appliesToSceneIds: [...new Set([...(variant.appliesToSceneIds ?? []), issue.sceneId])] })
-    } else if (issue.scopeKind === 'storyboard') {
-      if (!issue.storyboardId) return
-      updateAssetVariant(asset.id, variant.id, { appliesToStoryboardIds: [...new Set([...(variant.appliesToStoryboardIds ?? []), issue.storyboardId])] })
-    } else {
-      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
-    }
+    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
+    const storyboardId = issue.storyboardId ?? storyboard?.id
+    if (!storyboardId && issue.scopeKind !== 'episode') return
+    const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, { id: storyboardId ?? '', sceneId: issue.sceneId ?? storyboard?.sceneId }, issue.scopeKind)
+    if (patch) updateAssetVariant(asset.id, variant.id, patch)
   }
   const missingRefAction = (issue: ContinuityReportView['issues'][number]): { label: string; run: () => void } | null => {
     if (issue.code !== 'missing_ref_image' || !issue.assetId) return null
@@ -1620,9 +1616,9 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === targetVariantId)
     if (!asset || !variant) return
-    if ((variant.appliesToEpisodeIds?.length ?? 0) > 0) {
-      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), episodeId])] })
-    }
+    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
+    const scopePatch = storyboard ? variantScopePatchForUse(variant, { id: episodeId }, storyboard) : undefined
+    if (scopePatch) updateAssetVariant(asset.id, variant.id, scopePatch)
     setStoryboardCastVariant(issue.storyboardId, asset.id, variant.id)
   }
   const unifySceneVariant = (issue: ContinuityReportView['issues'][number]) => {

@@ -1,5 +1,5 @@
-import { buildContinuityReport } from './continuityReport'
-import type { Asset, Episode, NovelChapter, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
+import { buildContinuityReport, variantScopePatchForUse } from './continuityReport'
+import type { Asset, AssetVariant, Episode, NovelChapter, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
 
@@ -266,6 +266,20 @@ check(
   sceneVariantScopeReport.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.scopeKind === 'scene' && issue.storyboardId === 'wrong-scene-use'),
   JSON.stringify(sceneVariantScopeReport.issues),
 )
+
+const sceneScopePatch = variantScopePatchForUse(
+  { id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'] } satisfies AssetVariant,
+  episode('ep2', 1),
+  { ...storyboard('street-use', 0, []), sceneId: 'street' },
+)
+check('builds scene scope patch for reused scoped variants', sceneScopePatch?.appliesToSceneIds?.join(',') === 'banquet,street', JSON.stringify(sceneScopePatch))
+
+const storyboardScopePatch = variantScopePatchForUse(
+  { id: 'v-close', label: 'Closeup', appliesToStoryboardIds: ['sb-prev'] } satisfies AssetVariant,
+  episode('ep2', 1),
+  storyboard('sb-current', 0, []),
+)
+check('builds storyboard scope patch for reused scoped variants', storyboardScopePatch?.appliesToStoryboardIds?.join(',') === 'sb-prev,sb-current', JSON.stringify(storyboardScopePatch))
 
 const stateRegressionReport = buildContinuityReport(
   doc({
