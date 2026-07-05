@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, Episode, ProjectDoc, Storyboard, StoryboardCastRef } from '../../domain/types'
+import type { Asset, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { buildContinuityReport } from '../services/continuityReport'
 
@@ -103,10 +103,45 @@ function sortedEpisodes(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
 }
 
+function episodeList(doc: ProjectDoc): Episode[] {
+  const episodes = sortedEpisodes(doc)
+  if (episodes.length) return episodes
+  return [
+    {
+      id: doc.currentEpisodeId ?? 'current',
+      index: 0,
+      title: '当前集',
+      scripts: doc.scripts,
+      storyboards: doc.storyboards,
+      storyboardTable: doc.storyboardTable,
+      clips: doc.clips,
+      track: doc.track,
+      createdAt: doc.meta.createdAt,
+      updatedAt: doc.meta.updatedAt,
+    },
+  ]
+}
+
+function episodeInfo(doc: ProjectDoc, episode: Episode) {
+  return { episodeId: episode.id, episodeIndex: episode.index + 1, episodeTitle: episode.title, current: episode.id === doc.currentEpisodeId }
+}
+
+function scriptsForEpisode(doc: ProjectDoc, episode: Episode): Script[] {
+  return episode.id === doc.currentEpisodeId ? doc.scripts : episode.scripts
+}
+
+function storyboardsForEpisode(doc: ProjectDoc, episode: Episode): Storyboard[] {
+  return episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards
+}
+
+function storyboardTableForEpisode(doc: ProjectDoc, episode: Episode): StoryboardTableScene[] {
+  return episode.id === doc.currentEpisodeId ? (doc.storyboardTable ?? []) : (episode.storyboardTable ?? [])
+}
+
 function episodeView(doc: ProjectDoc, episode: Episode) {
   const current = episode.id === doc.currentEpisodeId
-  const scripts = current ? doc.scripts : episode.scripts
-  const storyboards = current ? doc.storyboards : episode.storyboards
+  const scripts = scriptsForEpisode(doc, episode)
+  const storyboards = storyboardsForEpisode(doc, episode)
   const clips = current ? doc.clips : episode.clips
   const track = current ? doc.track : episode.track
   return {
@@ -136,38 +171,48 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
 }
 
 function overview(doc: ProjectDoc) {
-  const sortedStoryboards = [...doc.storyboards].sort((a, b) => a.index - b.index)
-  const episodes = sortedEpisodes(doc)
+  const episodes = episodeList(doc)
+  const allScripts = episodes.flatMap((episode) => scriptsForEpisode(doc, episode))
+  const allStoryboards = episodes.flatMap((episode) => storyboardsForEpisode(doc, episode))
+  const allClips = episodes.flatMap((episode) => (episode.id === doc.currentEpisodeId ? doc.clips : episode.clips))
+  const allTracks = episodes.flatMap((episode) => (episode.id === doc.currentEpisodeId ? doc.track : episode.track))
   return {
     meta: doc.meta,
     currentEpisodeId: doc.currentEpisodeId,
     counts: {
       episodes: episodes.length,
-      scripts: doc.scripts.length,
+      scripts: allScripts.length,
       assets: doc.assets.length,
       rootAssets: doc.assets.filter((a) => !a.parentAssetId).length,
-      storyboards: doc.storyboards.length,
-      clips: doc.clips.length,
-      tracks: doc.track.length,
+      storyboards: allStoryboards.length,
+      clips: allClips.length,
+      tracks: allTracks.length,
       novelChapters: doc.novel.length,
-      storyboardTableScenes: doc.storyboardTable?.length ?? 0,
+      storyboardTableScenes: episodes.reduce((total, episode) => total + storyboardTableForEpisode(doc, episode).length, 0),
     },
     episodes: episodes.map((episode) => episodeView(doc, episode)),
-    scripts: doc.scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
+    scripts: episodes.flatMap((episode) =>
+      scriptsForEpisode(doc, episode).map((s, i) => ({ ...episodeInfo(doc, episode), id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
+    ),
     assets: doc.assets
       .filter((a) => !a.parentAssetId)
       .map((a) => ({ id: a.id, type: a.type, name: a.name, state: a.state, hasPrompt: !!a.prompt, hasRefImage: !!a.refImageId })),
-    storyboards: sortedStoryboards.map((s) => ({
-      id: s.id,
-      index: s.index + 1,
-      track: s.track,
-      videoDesc: s.videoDesc,
-      duration: s.duration,
-      castNames: castNames(doc, s),
-      dialogueCount: s.dialogues?.length ?? 0,
-      state: s.state,
-      hasKeyframe: !!s.keyframeImageId,
-    })),
+    storyboards: episodes.flatMap((episode) =>
+      [...storyboardsForEpisode(doc, episode)]
+        .sort((a, b) => a.index - b.index)
+        .map((s) => ({
+          ...episodeInfo(doc, episode),
+          id: s.id,
+          index: s.index + 1,
+          track: s.track,
+          videoDesc: s.videoDesc,
+          duration: s.duration,
+          castNames: castNames(doc, s),
+          dialogueCount: s.dialogues?.length ?? 0,
+          state: s.state,
+          hasKeyframe: !!s.keyframeImageId,
+        })),
+    ),
     novel: doc.novel.map((c) => ({ id: c.id, index: c.index + 1, title: c.title, textLength: c.text.length, event: c.event, eventState: c.eventState })),
   }
 }
@@ -550,7 +595,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'search_project',
-      description: '按关键词搜索当前项目的剧本、资产、分镜、原著章节和分镜表。',
+      description: '按关键词搜索当前项目的剧集、全剧剧本、资产、全剧分镜、原著章节和分镜表；结果会标明所属剧集。',
       parameters: {
         type: 'object',
         properties: {
@@ -569,19 +614,29 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const wants = (name: string) => !domains || domains.has(name)
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
+        const episodes = episodeList(d)
         return json({
           query: q,
           episodes: wants('episodes')
-            ? sortedEpisodes(d)
+            ? episodes
                 .filter((episode) => has(episode.title) || has(episode.summary) || has(episode.productionRecap))
                 .slice(0, limit)
                 .map((episode) => episodeView(d, episode))
             : undefined,
           scripts: wants('scripts')
-            ? d.scripts
+            ? episodes
+                .flatMap((episode) =>
+                  scriptsForEpisode(d, episode).map((s, i) => ({
+                    ...episodeInfo(d, episode),
+                    id: s.id,
+                    index: i + 1,
+                    name: s.name,
+                    content: s.content,
+                  })),
+                )
                 .filter((s) => has(s.name) || has(s.content))
                 .slice(0, limit)
-                .map((s, i) => ({ id: s.id, index: i + 1, name: s.name, snippet: snippet(s.content, q) }))
+                .map((s) => ({ episodeId: s.episodeId, episodeIndex: s.episodeIndex, episodeTitle: s.episodeTitle, current: s.current, id: s.id, index: s.index, name: s.name, snippet: snippet(s.content, q) }))
             : undefined,
           assets: wants('assets')
             ? d.assets
@@ -590,11 +645,17 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                 .map((asset) => ({ id: asset.id, type: asset.type, name: asset.name, desc: asset.desc, promptSnippet: snippet(asset.prompt ?? '', q, 180) }))
             : undefined,
           storyboards: wants('storyboards')
-            ? d.storyboards
-                .filter((s) => has(s.videoDesc) || has(s.prompt) || (s.dialogues ?? []).some((dl) => has(dl.character) || has(dl.line)))
-                .sort((x, y) => x.index - y.index)
+            ? episodes
+                .flatMap((episode) =>
+                  storyboardsForEpisode(d, episode).map((s) => ({
+                    ...episodeInfo(d, episode),
+                    storyboard: s,
+                  })),
+                )
+                .filter(({ storyboard }) => has(storyboard.videoDesc) || has(storyboard.prompt) || (storyboard.dialogues ?? []).some((dl) => has(dl.character) || has(dl.line)))
+                .sort((x, y) => x.episodeIndex - y.episodeIndex || x.storyboard.index - y.storyboard.index)
                 .slice(0, limit)
-                .map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc, promptSnippet: snippet(s.prompt ?? '', q, 180), dialogues: s.dialogues }))
+                .map(({ storyboard: s, ...episode }) => ({ ...episode, id: s.id, index: s.index + 1, videoDesc: s.videoDesc, promptSnippet: snippet(s.prompt ?? '', q, 180), dialogues: s.dialogues }))
             : undefined,
           novel: wants('novel')
             ? d.novel
@@ -603,9 +664,16 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                 .map((c) => ({ id: c.id, index: c.index + 1, title: c.title, event: c.event, snippet: snippet(c.text, q) }))
             : undefined,
           storyboardTable: wants('storyboardTable')
-            ? (d.storyboardTable ?? [])
-                .filter((scene) => has(scene.sceneName) || scene.segments.some((seg) => has(seg.title) || seg.rows.some((row) => has(row.videoDesc) || has(row.dialogue))))
+            ? episodes
+                .flatMap((episode) =>
+                  storyboardTableForEpisode(d, episode).map((scene) => ({
+                    ...episodeInfo(d, episode),
+                    scene,
+                  })),
+                )
+                .filter(({ scene }) => has(scene.sceneName) || scene.segments.some((seg) => has(seg.title) || seg.rows.some((row) => has(row.videoDesc) || has(row.dialogue))))
                 .slice(0, limit)
+                .map(({ scene, ...episode }) => ({ ...episode, scene }))
             : undefined,
         })
       },
