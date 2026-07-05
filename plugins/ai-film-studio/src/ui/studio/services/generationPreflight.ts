@@ -99,10 +99,11 @@ export async function preflightClipGeneration(
     addIssue(result, { severity: 'error', code: 'missing_keyframe_binary', message: `分镜 #${storyboard.index + 1} 的关键帧已丢失或无法读取` })
   }
 
-  if (!opts.supportsReferenceImages && referenceStoryboards.some((item) => castRefsForStoryboard(item).length > 0)) {
+  const hasCastReferences = referenceStoryboards.some((item) => castRefsForStoryboard(item).length > 0)
+  if (!opts.supportsReferenceImages && hasCastReferences) {
     addIssue(result, { severity: 'warning', code: 'video_provider_ignores_cast_refs', message: '当前视频供应商不支持多参考图，视频阶段不会额外发送资产/变体参考图' })
   }
-  if (opts.supportsReferenceImages) await checkCastReferences(referenceStoryboards, assets, checked, result)
+  await checkCastReferences(referenceStoryboards, assets, checked, result)
   return result
 }
 
