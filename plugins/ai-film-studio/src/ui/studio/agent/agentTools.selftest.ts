@@ -69,6 +69,7 @@ const doc: ProjectDoc = {
       clips: [{ id: 'clip-ep2', storyboardId: 'sb-ep2', durationSec: 4, state: 'done', videoFilePath: 'ep2.mp4' }],
       track: [{ id: 'track-ep2', storyboardIds: ['sb-ep2'], clipIds: ['clip-ep2'], selectClipId: 'clip-ep2', order: 0 }],
     }),
+    episode('ep3', 2, { title: 'Third' }),
   ],
 }
 
@@ -101,6 +102,12 @@ check('get_workspace exposes skipped series queue state', workspace.episodes?.so
 
 const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
 check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
+const emptyEpisodeHandoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 3 }))
+check(
+  'get_episode_handoff carries prior refs for empty episode',
+  emptyEpisodeHandoff.episodeId === 'ep3' && emptyEpisodeHandoff.sharedAssets?.some((cue: { assetId: string; label: string; carryForward?: boolean }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala' && cue.carryForward === true),
+  JSON.stringify(emptyEpisodeHandoff),
+)
 
 const ep2Script = JSON.parse(await getScript.execute({ episodeIndex: 2, contentLimit: 200 }))
 check('get_script reads non-current episode by episode index', ep2Script.id === 'script-ep2' && ep2Script.episodeId === 'ep2' && ep2Script.content?.text.includes('hidden clue'), JSON.stringify(ep2Script))

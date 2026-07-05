@@ -1,5 +1,5 @@
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
-import type { Clip, Episode, ProjectDoc, Script, Storyboard } from '../../domain/types'
+import type { Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
 
 export interface VariantImageRequest {
   assetId: string
@@ -27,6 +27,8 @@ export interface EpisodeHandoffAssetCue {
   assetId: string
   label: string
   appearances: EpisodeHandoffAppearance[]
+  carryForward?: boolean
+  detail?: string
 }
 
 export type EpisodeHandoffSuggestionKind = 'generate_asset_ref_image' | 'generate_variant_ref_image' | 'add_variant_episode_scope' | 'create_episode_variant'
@@ -178,6 +180,36 @@ function uniqueCastRefs(storyboards: Storyboard[]): ReturnType<typeof castRefsFo
   return refs
 }
 
+function latestCastRefsByAsset(doc: ProjectDoc, episode: Episode): StoryboardCastRef[] {
+  const storyboards = [...storyboardsForEpisode(doc, episode)].sort((a, b) => b.index - a.index)
+  const seen = new Set<string>()
+  const refs: StoryboardCastRef[] = []
+  for (const storyboard of storyboards) {
+    for (const ref of [...castRefsForStoryboard(storyboard)].reverse()) {
+      if (seen.has(ref.assetId)) continue
+      seen.add(ref.assetId)
+      refs.push(ref)
+    }
+  }
+  return refs
+}
+
+function carryForwardCastRefs(doc: ProjectDoc, episode: Episode, episodes: Episode[], limit: number): { ref: StoryboardCastRef; sourceEpisode: Episode }[] {
+  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const seen = new Set<string>()
+  const refs: { ref: StoryboardCastRef; sourceEpisode: Episode }[] = []
+  for (const sourceEpisode of episodes.filter((item) => item.index < episode.index).sort((a, b) => b.index - a.index)) {
+    for (const ref of latestCastRefsByAsset(doc, sourceEpisode)) {
+      const asset = assets.get(ref.assetId)
+      if (!asset || asset.type === 'audio' || asset.type === 'clip' || seen.has(ref.assetId)) continue
+      seen.add(ref.assetId)
+      refs.push({ ref, sourceEpisode })
+      if (refs.length >= limit) return refs
+    }
+  }
+  return refs
+}
+
 function storyboardLabel(storyboard: Storyboard, assets: Map<string, ProjectDoc['assets'][number]>): string {
   const cast = castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
   const castText = cast.length ? `（${unique(cast).slice(0, 4).join('、')}）` : ''
@@ -261,6 +293,9 @@ export function buildEpisodeProductionHandoff(
     }))
 
   const currentRefs = uniqueCastRefs(storyboardsForEpisode(doc, episode))
+  const sourceRefs = currentRefs.length
+    ? currentRefs.map((ref) => ({ ref, carryForward: false as const, sourceEpisode: undefined }))
+    : carryForwardCastRefs(doc, episode, episodes, maxAssets).map(({ ref, sourceEpisode }) => ({ ref, carryForward: true as const, sourceEpisode }))
   const sharedAssets: EpisodeHandoffAssetCue[] = []
   const suggestions: EpisodeHandoffSuggestion[] = []
   const suggested = new Set<string>()
@@ -269,10 +304,11 @@ export function buildEpisodeProductionHandoff(
     suggested.add(suggestion.id)
     suggestions.push(suggestion)
   }
-  for (const ref of currentRefs) {
+  for (const sourceRef of sourceRefs) {
+    const { ref } = sourceRef
     const asset = assets.get(ref.assetId)
     if (!asset || asset.type === 'audio' || asset.type === 'clip') continue
-    if (!asset.refImageId) {
+    if (!sourceRef.carryForward && !asset.refImageId) {
       addSuggestion({
         id: `asset-image:${asset.id}`,
         kind: 'generate_asset_ref_image',
@@ -282,7 +318,7 @@ export function buildEpisodeProductionHandoff(
         autoRepairable: true,
       })
     }
-    if (ref.variantId) {
+    if (!sourceRef.carryForward && ref.variantId) {
       const variant = asset.variants?.find((item) => item.id === ref.variantId)
       if (variant) {
         if ((variant.appliesToEpisodeIds?.length ?? 0) > 0 && !variant.appliesToEpisodeIds?.includes(episode.id)) {
@@ -334,8 +370,12 @@ export function buildEpisodeProductionHandoff(
         assetId: ref.assetId,
         label: labelForCastRef(asset, ref),
         appearances,
+        carryForward: sourceRef.carryForward,
+        detail: sourceRef.carryForward && sourceRef.sourceEpisode
+          ? `当前集还没有分镜出场记录，建议从 E${sourceRef.sourceEpisode.index + 1}「${sourceRef.sourceEpisode.title}」承接该资产/形态。`
+          : undefined,
       })
-      if (!ref.variantId) {
+      if (!sourceRef.carryForward && !ref.variantId) {
         const previousAppearances = appearances
           .filter((item) => item.episodeIndex < episode.index)
           .sort((a, b) => b.episodeIndex - a.episodeIndex)

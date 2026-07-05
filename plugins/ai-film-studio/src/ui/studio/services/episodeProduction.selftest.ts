@@ -192,6 +192,27 @@ check('suggests creating an episode-specific variant for reused main refs', hand
 const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
 check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
 
+const emptyNextEpisodeHandoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets: handoffAssets,
+  storyboards: [],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      productionRecap: 'Hero stayed in Battle look after the chase.',
+      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
+    }),
+    episode('ep2', 1, { title: 'Gala' }),
+  ],
+})
+const emptyNextEpisodeHandoff = buildEpisodeProductionHandoff(emptyNextEpisodeHandoffDoc, emptyNextEpisodeHandoffDoc.episodes![1])
+const carriedHeroCue = emptyNextEpisodeHandoff.sharedAssets.find((cue) => cue.assetId === 'hero')
+check(
+  'carries prior episode cast cues into empty next episode handoff',
+  !!carriedHeroCue?.carryForward && carriedHeroCue.label === 'Hero-Battle' && !!carriedHeroCue.detail?.includes('E1') && emptyNextEpisodeHandoff.suggestions.length === 0,
+  JSON.stringify(emptyNextEpisodeHandoff),
+)
+
 const stateRegressionHandoffDoc = doc({
   currentEpisodeId: 'ep2',
   assets: handoffAssets,

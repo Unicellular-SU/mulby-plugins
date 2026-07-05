@@ -540,6 +540,7 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
               {handoff.sharedAssets.map((cue) => (
                 <article key={cue.assetId + cue.label} className="afs-stwb__handoff-item">
                   <strong>{cue.label}</strong>
+                  {cue.detail && <p>{cue.detail}</p>}
                   <div className="afs-stwb__handoff-chips">
                     {cue.appearances.map((item) => (
                       <span key={item.episodeId} title={item.recap || `${item.episodeTitle} 使用 ${item.variants.join('、')}`}>
