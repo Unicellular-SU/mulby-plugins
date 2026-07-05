@@ -64,6 +64,8 @@ const doc: ProjectDoc = {
       scripts: [{ id: 'script-ep2', name: 'Hidden Script', content: 'The hidden clue is found in episode two.', createdAt: 0, updatedAt: 0 }],
       storyboards: [storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.')],
       storyboardTable: table('Hidden clue scene'),
+      clips: [{ id: 'clip-ep2', storyboardId: 'sb-ep2', durationSec: 4, state: 'done', videoFilePath: 'ep2.mp4' }],
+      track: [{ id: 'track-ep2', storyboardIds: ['sb-ep2'], clipIds: ['clip-ep2'], selectClipId: 'clip-ep2', order: 0 }],
     }),
   ],
 }
@@ -74,8 +76,9 @@ const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
+const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getScript || !getStoryboards || !getStoryboardTable) {
+if (!searchProject || !getWorkspace || !getScript || !getStoryboards || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -97,6 +100,9 @@ check('get_storyboards reads non-current episode by title', ep2Storyboards.story
 
 const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' }))
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))
+
+const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
+check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
 
 if (failures) {
   console.error(`\nagentTools selftest: ${failures} FAILED`)

@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
+import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { buildContinuityReport } from '../services/continuityReport'
 
@@ -138,12 +138,20 @@ function storyboardTableForEpisode(doc: ProjectDoc, episode: Episode): Storyboar
   return episode.id === doc.currentEpisodeId ? (doc.storyboardTable ?? []) : (episode.storyboardTable ?? [])
 }
 
+function clipsForEpisode(doc: ProjectDoc, episode: Episode): Clip[] {
+  return episode.id === doc.currentEpisodeId ? doc.clips : episode.clips
+}
+
+function trackForEpisode(doc: ProjectDoc, episode: Episode): VideoTrack[] {
+  return episode.id === doc.currentEpisodeId ? doc.track : episode.track
+}
+
 function episodeView(doc: ProjectDoc, episode: Episode) {
   const current = episode.id === doc.currentEpisodeId
   const scripts = scriptsForEpisode(doc, episode)
   const storyboards = storyboardsForEpisode(doc, episode)
-  const clips = current ? doc.clips : episode.clips
-  const track = current ? doc.track : episode.track
+  const clips = clipsForEpisode(doc, episode)
+  const track = trackForEpisode(doc, episode)
   return {
     id: episode.id,
     index: episode.index + 1,
@@ -174,8 +182,8 @@ function overview(doc: ProjectDoc) {
   const episodes = episodeList(doc)
   const allScripts = episodes.flatMap((episode) => scriptsForEpisode(doc, episode))
   const allStoryboards = episodes.flatMap((episode) => storyboardsForEpisode(doc, episode))
-  const allClips = episodes.flatMap((episode) => (episode.id === doc.currentEpisodeId ? doc.clips : episode.clips))
-  const allTracks = episodes.flatMap((episode) => (episode.id === doc.currentEpisodeId ? doc.track : episode.track))
+  const allClips = episodes.flatMap((episode) => clipsForEpisode(doc, episode))
+  const allTracks = episodes.flatMap((episode) => trackForEpisode(doc, episode))
   return {
     meta: doc.meta,
     currentEpisodeId: doc.currentEpisodeId,
@@ -586,20 +594,33 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_timeline',
-      description: '读取时间线、视频段和候选片段状态，包含 clip 路径、时长、选中候选和生成状态。',
-      parameters: { type: 'object', properties: { includeClips: { type: 'boolean' } } },
+      description: '读取某集时间线、视频段和候选片段状态，包含 clip 路径、时长、选中候选和生成状态。默认当前集。',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
+          includeClips: { type: 'boolean' },
+        },
+      },
       execute: async (a) => {
         const d = doc()
         if (!d) return '无打开的项目'
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        const storyboards = storyboardsForEpisode(d, episode)
+        const clips = clipsForEpisode(d, episode)
         const includeClips = boolArg(a.includeClips, true)
         return json({
-          tracks: [...d.track].sort((x, y) => x.order - y.order).map((t) => ({
+          ...episodeInfo(d, episode),
+          tracks: [...trackForEpisode(d, episode)].sort((x, y) => x.order - y.order).map((t) => ({
             id: t.id,
             order: t.order,
             kind: t.kind,
             storyboardIds: t.storyboardIds,
             storyboardIndexes: t.storyboardIds.map((id) => {
-              const sb = d.storyboards.find((s) => s.id === id)
+              const sb = storyboards.find((s) => s.id === id)
               return sb ? sb.index + 1 : id
             }),
             duration: t.duration,
@@ -612,7 +633,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             audioClipId: t.audioClipId,
             clipAssetId: t.clipAssetId,
           })),
-          clips: includeClips ? d.clips : undefined,
+          clips: includeClips ? clips : undefined,
         })
       },
     },
