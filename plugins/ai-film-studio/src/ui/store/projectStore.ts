@@ -886,9 +886,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const i = d.assets.findIndex((x) => x.id === id)
       const base: Asset = d.assets[i] ?? { id, type: a.type, name: a.name, state: 'idle' }
       const aliases = a.aliases !== undefined ? cleanAssetAliases(a.aliases) : base.aliases
+      const nameChanged = i >= 0 && 'name' in a && a.name !== base.name
+      const refImageChanged = i >= 0 && 'refImageId' in a && a.refImageId !== base.refImageId
       const merged: Asset = { ...base, ...a, id, aliases: aliases?.length ? aliases : undefined }
       if (i >= 0) d.assets[i] = merged
       else d.assets.push(merged)
+      if (nameChanged) invalidateEpisodesUsingAsset(d, id)
+      else if (refImageChanged) invalidateEpisodesUsingCastRef(d, id)
     })
     return id
   },
