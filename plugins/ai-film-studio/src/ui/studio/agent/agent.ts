@@ -307,6 +307,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
     '写入/生成工具：create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、upsert_asset_variant（创建/更新资产变体）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_cast_variant（修正既有分镜变体绑定）、generate_asset、generate_keyframe、generate_clip。' +
     '续写下一集、处理换装妆容或承接上一集状态时，先读取 get_episode_handoff；如果 handoff/continuity 指出上一相关剧集使用过具体形态或本集已有适用变体，分镜必须通过 castRefs 绑定 variantLabel/variantId，除非剧情明确恢复默认状态。' +
+    '连续场景里的同一角色默认保持同一形态；get_continuity_report 返回 scene_group_variant_mismatch 时，除非剧情明确发生换装/状态变化，否则用 set_storyboard_cast_variant 统一同一 sceneId 里的角色变体。' +
     '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致，昵称/称谓写 aliases 以便后续复用同一资产。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
@@ -344,6 +345,7 @@ const STORYBOARD_SKILL =
   '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
   '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
   '当连续性报告出现 episode_variant_available 或 asset_state_regressed_to_main 时，优先把分镜输出为绑定候选/新形态的 castRefs，避免生成后再回退到主形象。' +
+  '同一 sceneId 的连续分镜里，同一角色默认保持同一 castRefs 形态；只有镜头内明确发生换装、化妆、受伤或状态转变时，才切换 variantLabel/variantId。' +
   '紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
   '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"cast":[],"castRefs":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
 
@@ -417,7 +419,8 @@ const TOOL_CONTEXT_CAP = 24000
 const PIPELINE_TOOL_GUIDE =
   '## 子 Agent 工具上下文\n' +
   '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。\n' +
-  '多集续写、换装、妆容、受伤状态或时期变化要以 get_episode_handoff 和 get_continuity_report 为准；分镜子 Agent 看到上一相关剧集形态、本集适用变体、episode_variant_available 或 asset_state_regressed_to_main 时，必须输出带 variantLabel/variantId 的 castRefs，除非剧本明确恢复默认状态。'
+  '多集续写、换装、妆容、受伤状态或时期变化要以 get_episode_handoff 和 get_continuity_report 为准；分镜子 Agent 看到上一相关剧集形态、本集适用变体、episode_variant_available 或 asset_state_regressed_to_main 时，必须输出带 variantLabel/variantId 的 castRefs，除非剧本明确恢复默认状态。\n' +
+  '如果 continuity 出现 scene_group_variant_mismatch，同一 sceneId 的连续分镜应统一同一角色形态，除非剧本明确描述该场内发生换装、化妆、受伤或状态转变。'
 
 type ProjectDocSource = ProjectDoc | (() => ProjectDoc | null | undefined)
 export type PipelineStage = StageTask
