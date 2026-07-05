@@ -164,6 +164,7 @@ function setStoryboardState(get: () => ProjectState, id: string, patch: Partial<
   get().mutate((d) => {
     const s = d.storyboards.find((x) => x.id === id)
     if (s) Object.assign(s, patch)
+    if ('keyframeImageId' in patch) invalidateCurrentEpisodeProduction(d)
   })
 }
 function setAssetVariantState(get: () => ProjectState, assetId: string, variantId: string, patch: Partial<AssetVariant>) {
@@ -280,6 +281,16 @@ function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partia
     if (!episode) return
     Object.assign(episode, patch, { updatedAt: Date.now() })
   })
+}
+
+function invalidateCurrentEpisodeProduction(doc: ProjectDoc): void {
+  const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  if (!episode || (!episode.filmPath && !episode.filmError && !episode.producedAt && episode.status !== 'done')) return
+  delete episode.filmPath
+  delete episode.filmError
+  delete episode.producedAt
+  if (episode.status === 'done') episode.status = 'planned'
+  episode.updatedAt = Date.now()
 }
 
 function missingReferencedVariantImages(doc: ProjectDoc): Array<{ assetId: string; variantId: string }> {
@@ -409,6 +420,7 @@ function applyAgentScript(d: ProjectDoc, script: AgentPlan['script'] | undefined
   const name = script.name || `剧本 ${d.scripts.length + 1}`
   if (d.scripts.length) d.scripts[0] = { ...d.scripts[0], name, content: script.content, updatedAt: Date.now() }
   else d.scripts.push({ id: P.newId('s_'), name, content: script.content, createdAt: Date.now(), updatedAt: Date.now() })
+  invalidateCurrentEpisodeProduction(d)
   applied.script = { name, length: script.content.length }
 }
 
@@ -537,7 +549,10 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
     })
     applied.storyboardsAdded.push({ id, index: index + 1, desc: sb.videoDesc.slice(0, 120) })
   }
-  if ((storyboards ?? []).some((sb) => sb?.videoDesc)) syncTracksFromStoryboards(d)
+  if ((storyboards ?? []).some((sb) => sb?.videoDesc)) {
+    syncTracksFromStoryboards(d)
+    invalidateCurrentEpisodeProduction(d)
+  }
 }
 
 function pipelineEventForLog(e: PipelineEvent) {
@@ -825,10 +840,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const merged: Script = { ...base, ...s, id, content: s.content, updatedAt: now }
       if (i >= 0) d.scripts[i] = merged
       else d.scripts.push(merged)
+      invalidateCurrentEpisodeProduction(d)
     })
     return id
   },
-  removeScript: (id) => get().mutate((d) => (d.scripts = d.scripts.filter((x) => x.id !== id))),
+  removeScript: (id) =>
+    get().mutate((d) => {
+      d.scripts = d.scripts.filter((x) => x.id !== id)
+      invalidateCurrentEpisodeProduction(d)
+    }),
 
   upsertAsset: (a) => {
     const id = a.id ?? P.newId('a_')
@@ -912,6 +932,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (i >= 0) d.storyboards[i] = merged
       else d.storyboards.push(merged)
       syncTracksFromStoryboards(d) // 新分镜惰性补一个段
+      invalidateCurrentEpisodeProduction(d)
     })
     return id
   },
@@ -922,6 +943,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
       d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
       syncTracksFromStoryboards(d) // 段内去该分镜 + 空段删除 + order 重排
+      invalidateCurrentEpisodeProduction(d)
     }),
   reorderStoryboards: (orderedIds) =>
     get().mutate((d) => {
@@ -929,6 +951,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       d.storyboards.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0))
       d.storyboards.forEach((s, i) => (s.index = i))
       syncTracksFromStoryboards(d) // 段顺序跟随分镜 index
+      invalidateCurrentEpisodeProduction(d)
     }),
   moveStoryboard: (id, delta) =>
     get().mutate((d) => {
@@ -940,13 +963,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ordered.forEach((s, k) => (s.index = k))
       d.storyboards = ordered
       syncTracksFromStoryboards(d)
+      invalidateCurrentEpisodeProduction(d)
     }),
 
   syncTracks: () => get().mutate((d) => syncTracksFromStoryboards(d)),
   selectClip: (trackId, clipId) =>
     get().mutate((d) => {
       const t = d.track.find((x) => x.id === trackId)
-      if (t && t.clipIds.includes(clipId)) t.selectClipId = clipId
+      if (t && t.clipIds.includes(clipId)) {
+        t.selectClipId = clipId
+        invalidateCurrentEpisodeProduction(d)
+      }
     }),
   deleteClip: (trackId, clipId) =>
     get().mutate((d) => {
@@ -956,11 +983,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (t.selectClipId === clipId) t.selectClipId = t.clipIds[0]
       }
       d.clips = d.clips.filter((c) => c.id !== clipId)
+      invalidateCurrentEpisodeProduction(d)
     }),
   updateTrackDuration: (trackId, sec) =>
     get().mutate((d) => {
       const t = d.track.find((x) => x.id === trackId)
-      if (t) t.duration = sec && sec > 0 ? sec : undefined
+      if (t) {
+        t.duration = sec && sec > 0 ? sec : undefined
+        invalidateCurrentEpisodeProduction(d)
+      }
     }),
   updateTrackPrompt: (trackId, prompt) =>
     get().mutate((d) => {
@@ -968,6 +999,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (t) {
         t.prompt = prompt
         t.promptState = 'done'
+        invalidateCurrentEpisodeProduction(d)
       }
     }),
   generateTrackPrompt: async (trackId) => {
@@ -1021,6 +1053,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const merged: Clip = { ...base, ...c, id }
       if (i >= 0) d.clips[i] = merged
       else d.clips.push(merged)
+      invalidateCurrentEpisodeProduction(d)
     })
     return id
   },
@@ -1140,6 +1173,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (i >= 0) refs[i] = { ...refs[i], variantId: variantId || undefined }
       else refs.push({ assetId, variantId: variantId || undefined })
       sb.castRefs = refs
+      invalidateCurrentEpisodeProduction(d)
     }),
   selectAssetImage: (assetId, imageId) =>
     get().mutate((d) => {
