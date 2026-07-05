@@ -145,7 +145,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
               size="md"
               leadingIcon={Film}
               disabled={busy || !canProduceSeries}
-              title="按剧集顺序生成未成片剧集，已成片剧集会跳过"
+              title="按剧集顺序生成待处理剧集，已成片和失败剧集会跳过；失败集需重置后重试"
               onClick={() => void autoProduceSeries()}
             >
               生成全剧
