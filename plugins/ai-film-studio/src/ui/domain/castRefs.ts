@@ -24,7 +24,7 @@ export function refImageIdForCastRef(asset: Asset | undefined, ref: StoryboardCa
   if (!asset || asset.type === 'audio' || asset.type === 'clip') return undefined
   if (ref.variantId) {
     const variant = asset.variants?.find((v) => v.id === ref.variantId)
-    if (variant?.refImageId) return variant.refImageId
+    return variant?.refImageId
   }
   return asset.refImageId
 }

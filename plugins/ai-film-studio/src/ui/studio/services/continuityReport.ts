@@ -126,6 +126,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         const variant = ref.variantId ? asset.variants?.find((item) => item.id === ref.variantId) : undefined
         if (ref.variantId && !variant) {
           addIssue({ ...base, severity: 'error', code: 'missing_variant', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 引用了「${asset.name}」不存在的变体 ${ref.variantId}` })
+          continue
         }
         const appliesToEpisode = variantAppliesToEpisode(asset, ref, episode.id)
         if (!appliesToEpisode) {
