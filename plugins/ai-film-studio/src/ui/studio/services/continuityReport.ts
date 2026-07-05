@@ -14,6 +14,11 @@ export interface ContinuityIssue {
   variantId?: string
   candidateVariantIds?: string[]
   candidateVariantLabels?: string[]
+  previousEpisodeId?: string
+  previousEpisodeIndex?: number
+  previousEpisodeTitle?: string
+  previousVariantId?: string
+  previousVariantLabel?: string
   conflictLabel?: string
   conflictSource?: 'name' | 'alias'
   relatedAssetIds?: string[]
@@ -87,10 +92,13 @@ function variantScopeIssue(variant: NonNullable<Asset['variants']>[number] | und
   return undefined
 }
 
+function variantHasScope(variant: NonNullable<Asset['variants']>[number] | undefined): boolean {
+  return !!variant && (!!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length)
+}
+
 function variantsScopedToStoryboard(asset: Asset, episode: Episode, storyboard: Storyboard): NonNullable<Asset['variants']> {
   return (asset.variants ?? []).filter((variant) => {
-    const hasScope = !!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length
-    return hasScope && !variantScopeIssue(variant, episode, storyboard)
+    return variantHasScope(variant) && !variantScopeIssue(variant, episode, storyboard)
   })
 }
 
@@ -383,6 +391,26 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         if (scopeIssue) {
           const scopeLabel = scopeIssue === 'episode' ? '本集' : scopeIssue === 'scene' ? '本场景' : '本分镜'
           addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
+        }
+        if (variant && !scopeIssue && !variantHasScope(variant)) {
+          const previous = lastVariantUseByAsset.get(asset.id)
+          const key = `${episode.id}:${storyboard.id}:${asset.id}:${variant.id}`
+          if (previous && previous.episodeId !== episode.id && previous.variantId !== variant.id && !stateRegressionWarnings.has(key)) {
+            stateRegressionWarnings.add(key)
+            addIssue({
+              ...base,
+              previousEpisodeId: previous.episodeId,
+              previousEpisodeIndex: previous.episodeIndex,
+              previousEpisodeTitle: previous.episodeTitle,
+              previousVariantId: previous.variantId,
+              previousVariantLabel: previous.variantLabel,
+              severity: 'warning',
+              code: 'asset_state_changed_variant',
+              scopeKind: 'episode',
+              sceneId: storyboard.sceneId,
+              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}-${variant.label}」，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel}」。若这是剧情中的换装/妆容变化，建议把当前形态标记适用于本集；否则建议沿用上一形态。`,
+            })
+          }
         }
         if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
           const scopedVariants = variantsScopedToStoryboard(asset, episode, storyboard)

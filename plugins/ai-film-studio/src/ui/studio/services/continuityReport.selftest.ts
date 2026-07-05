@@ -283,6 +283,52 @@ const stateRegressionReport = buildContinuityReport(
 )
 check('flags cross-episode state regression to main asset', !!stateRegressionReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-after-variant'), JSON.stringify(stateRegressionReport.issues))
 
+const variantSwitchReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [
+        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img' },
+        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img' },
+      ],
+    }],
+    currentEpisodeId: 'ep2',
+    storyboards: [storyboard('gala-after-battle', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
+    episodes: [
+      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
+      episode('ep2', 1),
+    ],
+  }),
+)
+check(
+  'flags cross-episode switch to unscoped variant',
+  variantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-battle' && issue.variantId === 'v-gala' && issue.previousVariantId === 'v-battle'),
+  JSON.stringify(variantSwitchReport.issues),
+)
+
+const scopedVariantSwitchReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [
+        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] },
+        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img', appliesToEpisodeIds: ['ep2'] },
+      ],
+    }],
+    currentEpisodeId: 'ep2',
+    storyboards: [storyboard('scoped-gala-after-battle', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
+    episodes: [
+      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
+      episode('ep2', 1),
+    ],
+  }),
+)
+check(
+  'does not flag scoped cross-episode variant switch',
+  !scopedVariantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant'),
+  JSON.stringify(scopedVariantSwitchReport.issues),
+)
+
 const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
 const chapterReport = buildContinuityReport(
   doc({

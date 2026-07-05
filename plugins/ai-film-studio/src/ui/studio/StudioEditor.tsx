@@ -1565,7 +1565,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
   }
   const addVariantScope = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'variant_out_of_episode_scope' || !issue.assetId || !issue.variantId || !issue.episodeId) return
+    if ((issue.code !== 'variant_out_of_episode_scope' && issue.code !== 'asset_state_changed_variant') || !issue.assetId || !issue.variantId || !issue.episodeId) return
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
@@ -1613,10 +1613,12 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     setStoryboardCastVariant(issue.storyboardId, issue.assetId, variantId)
   }
   const carryPreviousVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'asset_state_regressed_to_main' || !issue.episodeId || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
+    if ((issue.code !== 'asset_state_regressed_to_main' && issue.code !== 'asset_state_changed_variant') || !issue.episodeId || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
+    const targetVariantId = issue.previousVariantId ?? issue.variantId
+    if (!targetVariantId) return
     const episodeId = issue.episodeId
     const asset = doc.assets.find((item) => item.id === issue.assetId)
-    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
+    const variant = asset?.variants?.find((item) => item.id === targetVariantId)
     if (!asset || !variant) return
     if ((variant.appliesToEpisodeIds?.length ?? 0) > 0) {
       updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), episodeId])] })
@@ -1709,15 +1711,31 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
-        const canAddVariantScope = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
-        const addVariantScopeLabel = issue.scopeKind === 'scene' ? '标记变体适用于本场景' : issue.scopeKind === 'storyboard' ? '标记变体适用于本分镜' : '标记变体适用于本集'
+        const canAddVariantScope =
+          (issue.code === 'variant_out_of_episode_scope' || issue.code === 'asset_state_changed_variant') &&
+          !!issue.assetId &&
+          !!issue.variantId &&
+          !!issue.episodeId
+        const addVariantScopeLabel =
+          issue.code === 'asset_state_changed_variant'
+            ? '标记当前形态适用于本集'
+            : issue.scopeKind === 'scene'
+              ? '标记变体适用于本场景'
+              : issue.scopeKind === 'storyboard'
+                ? '标记变体适用于本分镜'
+                : '标记变体适用于本集'
         const canBindEpisodeVariant =
           issue.code === 'episode_variant_available' &&
           issue.episodeId === doc.currentEpisodeId &&
           !!issue.storyboardId &&
           !!issue.assetId &&
           (!!issue.variantId || (issue.candidateVariantIds?.length ?? 0) > 0)
-        const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
+        const canCarryPreviousVariant =
+          (issue.code === 'asset_state_regressed_to_main' || issue.code === 'asset_state_changed_variant') &&
+          issue.episodeId === doc.currentEpisodeId &&
+          !!issue.storyboardId &&
+          !!issue.assetId &&
+          (!!issue.previousVariantId || !!issue.variantId)
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
         const canUnifySceneAsset = issue.code === 'scene_group_asset_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
