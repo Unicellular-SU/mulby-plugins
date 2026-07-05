@@ -52,19 +52,19 @@ const doc: ProjectDoc = {
   meta: meta(),
   novel: [],
   scripts: [{ id: 'script-current', name: 'Current Script', content: 'Current episode only.', createdAt: 0, updatedAt: 0 }],
-  assets: [],
-  storyboards: [storyboard('sb-current', 0, 'Current shot only.')],
+  assets: [{ id: 'hero', type: 'role', name: 'Hero', state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }],
+  storyboards: [{ ...storyboard('sb-current', 0, 'Current shot only.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero' }] }],
   clips: [],
   track: [],
   memory: [],
   currentEpisodeId: 'ep1',
   episodes: [
-    episode('ep1', 0),
+    episode('ep1', 0, { productionRecap: 'Hero entered with the original look.' }),
     episode('ep2', 1, {
       title: 'Second',
       seriesSkip: true,
       scripts: [{ id: 'script-ep2', name: 'Hidden Script', content: 'The hidden clue is found in episode two.', createdAt: 0, updatedAt: 0 }],
-      storyboards: [storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.')],
+      storyboards: [{ ...storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero', variantId: 'gala' }] }],
       storyboardTable: table('Hidden clue scene'),
       clips: [{ id: 'clip-ep2', storyboardId: 'sb-ep2', durationSec: 4, state: 'done', videoFilePath: 'ep2.mp4' }],
       track: [{ id: 'track-ep2', storyboardIds: ['sb-ep2'], clipIds: ['clip-ep2'], selectClipId: 'clip-ep2', order: 0 }],
@@ -75,12 +75,13 @@ const doc: ProjectDoc = {
 const tools = makeProjectReadTools(() => doc)
 const searchProject = tools.find((tool) => tool.name === 'search_project')
 const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
+const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handoff')
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getScript || !getStoryboards || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getEpisodeHandoff || !getScript || !getStoryboards || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -94,6 +95,9 @@ const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
+
+const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
+check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
 
 const ep2Script = JSON.parse(await getScript.execute({ episodeIndex: 2, contentLimit: 200 }))
 check('get_script reads non-current episode by episode index', ep2Script.id === 'script-ep2' && ep2Script.episodeId === 'ep2' && ep2Script.content?.text.includes('hidden clue'), JSON.stringify(ep2Script))

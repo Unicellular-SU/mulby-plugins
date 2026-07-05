@@ -7,7 +7,7 @@ import type { ProjectState } from '../../store/projectStore'
 import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { buildContinuityReport } from '../services/continuityReport'
-import { episodeSeriesQueueState } from '../services/episodeProduction'
+import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
 
 type ProjectDocGetter = () => ProjectDoc | null
 
@@ -469,6 +469,25 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async () => {
         const d = doc()
         return d ? json(buildContinuityReport(d)) : '无打开的项目'
+      },
+    },
+    {
+      name: 'get_episode_handoff',
+      description: '读取某集的跨集承接线索：最近已制作剧集回顾，以及当前集资产/形态在其他剧集中的出现记录。适合续写多集、复用角色或处理换装/妆容时调用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        return json({ ...episodeInfo(d, episode), ...buildEpisodeProductionHandoff(d, episode) })
       },
     },
     {
