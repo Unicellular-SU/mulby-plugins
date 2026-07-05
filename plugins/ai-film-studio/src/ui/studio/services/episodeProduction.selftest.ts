@@ -1,4 +1,4 @@
-import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -252,6 +252,13 @@ const stateRegressionHandoffDoc = doc({
 const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
 const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
 check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
+const stateRegressionBlockers = episodeProductionContinuityBlockers(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
+const stateRegressionBlockerError = formatEpisodeProductionContinuityError(stateRegressionHandoffDoc.episodes![1], stateRegressionBlockers)
+check(
+  'blocks series production on unresolved cross-episode state regression',
+  stateRegressionBlockers.some((item) => item.code === 'asset_state_regressed_to_main') && stateRegressionBlockerError.includes('E2'),
+  JSON.stringify({ stateRegressionBlockers, stateRegressionBlockerError }),
+)
 
 const mainResetHandoffDoc = doc({
   currentEpisodeId: 'ep3',

@@ -1,6 +1,6 @@
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import type { Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
-import { variantScopeIssue } from './continuityReport'
+import { buildContinuityReport, variantScopeIssue, type ContinuityIssue } from './continuityReport'
 
 export interface VariantImageRequest {
   assetId: string
@@ -166,6 +166,30 @@ export function pendingEpisodesForSeries(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])]
     .sort((a, b) => a.index - b.index)
     .filter((episode) => episodeIsPendingForSeries(doc, episode))
+}
+
+const PRODUCTION_BLOCKING_CONTINUITY_CODES = new Set([
+  'missing_asset',
+  'missing_variant',
+  'missing_ref_image',
+  'variant_out_of_episode_scope',
+  'episode_variant_available',
+  'asset_state_regressed_to_main',
+  'asset_state_changed_variant',
+  'scene_group_asset_mismatch',
+  'scene_group_missing_asset',
+  'scene_group_variant_mismatch',
+])
+
+export function episodeProductionContinuityBlockers(doc: ProjectDoc, episode: Episode): ContinuityIssue[] {
+  return buildContinuityReport(doc).issues.filter((issue) => issue.episodeId === episode.id && PRODUCTION_BLOCKING_CONTINUITY_CODES.has(issue.code))
+}
+
+export function formatEpisodeProductionContinuityError(episode: Episode, issues: ContinuityIssue[]): string {
+  if (!issues.length) return ''
+  const details = issues.slice(0, 5).map((issue) => `- ${issue.message}`).join('\n')
+  const more = issues.length > 5 ? `\n- 另有 ${issues.length - 5} 个连续性问题` : ''
+  return `E${episode.index + 1}「${episode.title}」存在需要先确认的资产/形态连续性问题，已暂停本集生成：\n${details}${more}`
 }
 
 function usableClip(clip: Clip | undefined): boolean {

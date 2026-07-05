@@ -36,7 +36,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -315,7 +315,7 @@ function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partia
 async function produceCurrentEpisode(
   get: () => ProjectState,
   set: (partial: Partial<ProjectState>) => void,
-  opts: { labelPrefix?: string; manageBatch?: boolean } = {},
+  opts: { labelPrefix?: string; manageBatch?: boolean; enforceContinuity?: boolean } = {},
 ): Promise<void> {
   const doc = get().doc
   if (!doc) return
@@ -343,6 +343,13 @@ async function produceCurrentEpisode(
         ({ assetId, variantId }) => get().generateAssetVariant(assetId, variantId),
         (done, total) => setLabel(`生成形态参考图 ${done}/${total}`),
       )
+    }
+
+    if (opts.enforceContinuity) {
+      const latest = get().doc
+      const episode = latest?.episodes?.find((item) => item.id === latest.currentEpisodeId)
+      const issues = latest && episode ? episodeProductionContinuityBlockers(latest, episode) : []
+      if (episode && issues.length) throw new Error(formatEpisodeProductionContinuityError(episode, issues))
     }
 
     const keyframeIds = [...(get().doc?.storyboards ?? [])]
@@ -1735,7 +1742,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         if (!target) continue
         if (latest.currentEpisodeId !== target.id) get().switchEpisode(target.id)
         try {
-          await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${pending.length} · E${target.index + 1}` })
+          await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${pending.length} · E${target.index + 1}`, enforceContinuity: true })
         } catch (e) {
           const error = e instanceof Error ? e.message : String(e)
           logError('production.series', error, { episodeId: target.id, episodeIndex: target.index + 1 })
