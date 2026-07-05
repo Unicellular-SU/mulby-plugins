@@ -36,7 +36,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -1099,6 +1099,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const scope = doc ? productionScopeForTrack(doc, trackId) : undefined
     const track = scope?.track.find((t) => t.id === trackId)
     if (!doc || !track) return
+    const sourceDoc = projectDocForProductionScope(doc, scope)
     get().mutate((d) => {
       const nextScope = productionScopeForTrack(d, trackId)
       const t = nextScope?.track.find((x) => x.id === trackId)
@@ -1108,7 +1109,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     })
     try {
-      const prompt = await generateTrackVideoPrompt(track, doc)
+      const prompt = await generateTrackVideoPrompt(track, sourceDoc)
       get().mutate((d) => {
         const nextScope = productionScopeForTrack(d, trackId)
         const t = nextScope?.track.find((x) => x.id === trackId)
@@ -1392,17 +1393,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateKeyframe: async (storyboardId) => {
     const doc = get().doc
-    const sb = doc?.storyboards.find((s) => s.id === storyboardId)
-    if (!doc || !sb) return
+    const scope = doc ? productionScopeForStoryboard(doc, storyboardId) : undefined
+    const sb = scope?.storyboards.find((s) => s.id === storyboardId)
+    if (!doc || !scope || !sb) return
     setStoryboardState(get, storyboardId, { state: 'generating', error: undefined })
     try {
-      const preflight = await preflightKeyframeGeneration(sb, doc.storyboards, doc.assets)
+      const preflight = await preflightKeyframeGeneration(sb, scope.storyboards, doc.assets)
       logPreflightWarnings('keyframe', storyboardId, preflight.warnings)
       assertPreflight(preflight)
       // 连贯性：承接镜头取「上一镜（按 index）关键帧」作 img2img 主参考
       let chainBase: { base64: string; mime: string } | null = null
       if (sb.chainFromPrev) {
-        const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
+        const ordered = [...scope.storyboards].sort((a, b) => a.index - b.index)
         const i = ordered.findIndex((s) => s.id === storyboardId)
         const prev = i > 0 ? ordered[i - 1] : undefined
         if (prev?.keyframeImageId) chainBase = await loadImageBase64(prev.keyframeImageId)
@@ -1416,15 +1418,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateClip: async (storyboardId) => {
     const doc0 = get().doc
-    const sb = doc0?.storyboards.find((s) => s.id === storyboardId)
-    if (!doc0 || !sb) return
+    const scope0 = doc0 ? productionScopeForStoryboard(doc0, storyboardId) : undefined
+    const sb = scope0?.storyboards.find((s) => s.id === storyboardId)
+    if (!doc0 || !scope0 || !sb) return
     // 确保该分镜有段（1 分镜=1 段惰性补齐），再取段
-    get().syncTracks()
+    if (scope0.current) get().syncTracks()
     const doc = get().doc!
-    const track = doc.track.find((t) => t.storyboardIds.includes(storyboardId))
-    if (!track) return
+    const scope = productionScopeForStoryboard(doc, storyboardId)
+    const track = scope?.track.find((t) => t.storyboardIds.includes(storyboardId))
+    if (!scope || !track) return
     // 一镜多生选优（§5.2）：重试「失败」候选则就地覆盖（不堆孤儿），否则新建候选并自动选中
-    const last = track.clipIds.length ? doc.clips.find((c) => c.id === track.clipIds[track.clipIds.length - 1]) : undefined
+    const last = track.clipIds.length ? scope.clips.find((c) => c.id === track.clipIds[track.clipIds.length - 1]) : undefined
     if (last?.state === 'generating') return // 防重入
     const reuse = last?.state === 'failed' ? last : undefined
     const clipId = get().upsertClip({
@@ -1454,19 +1458,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 顺接：承接片段取「上一镜选用片段的真实尾帧」作首帧，无缝衔接
       let firstFrameUrl: string | undefined
       if (sb.chainFromPrev) {
-        const ordered = [...doc.storyboards].sort((a, b) => a.index - b.index)
+        const ordered = [...scope.storyboards].sort((a, b) => a.index - b.index)
         const i = ordered.findIndex((s) => s.id === storyboardId)
         const prev = i > 0 ? ordered[i - 1] : undefined
-        const pt = prev ? doc.track.find((t) => t.storyboardIds.includes(prev.id)) : undefined
+        const pt = prev ? scope.track.find((t) => t.storyboardIds.includes(prev.id)) : undefined
         const selId = pt ? selectedClipId(pt) : undefined
         const prevClip = selId
-          ? doc.clips.find((c) => c.id === selId)
+          ? scope.clips.find((c) => c.id === selId)
           : prev
-            ? doc.clips.find((c) => c.storyboardId === prev.id && c.state === 'done')
+            ? scope.clips.find((c) => c.storyboardId === prev.id && c.state === 'done')
             : undefined
         firstFrameUrl = await clipLastFrameDataUrl(prevClip?.videoFilePath)
       }
-      const referenceStoryboards = track.storyboardIds.map((id) => doc.storyboards.find((s) => s.id === id)).filter(Boolean) as Storyboard[]
+      const referenceStoryboards = track.storyboardIds.map((id) => scope.storyboards.find((s) => s.id === id)).filter(Boolean) as Storyboard[]
       const provider = useProviderStore.getState().getActiveFor('video')
       const preflight = await preflightClipGeneration(sb, referenceStoryboards, doc.assets, {
         firstFrameUrl,

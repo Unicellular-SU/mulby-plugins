@@ -147,6 +147,19 @@ export function invalidateProductionScope(doc: ProjectDoc, scope: EpisodeProduct
   return scope.current ? invalidateCurrentEpisodeProduction(doc) : invalidateEpisodeProduction(scope.episode)
 }
 
+export function projectDocForProductionScope(doc: ProjectDoc, scope: EpisodeProductionScope | undefined): ProjectDoc {
+  if (!scope || scope.current) return doc
+  return {
+    ...doc,
+    currentEpisodeId: scope.episode?.id ?? doc.currentEpisodeId,
+    scripts: scope.episode?.scripts ?? doc.scripts,
+    storyboards: scope.storyboards,
+    storyboardTable: scope.episode?.storyboardTable,
+    clips: scope.clips,
+    track: scope.track,
+  }
+}
+
 export function currentEpisodeUsesCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
   const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
   return episodeUsesCastRef(doc, episode, assetId, variantId)
