@@ -7,12 +7,16 @@
  *
  * 不考虑老节点图数据兼容（独立命名空间）。资产二进制仍走现有资产库（assetStore/saveAsset）。
  */
-import type { Episode, ProjectCard, ProjectDoc, ProjectMeta, VideoTrack } from './types'
+import type { Episode, GenState, ProjectCard, ProjectDoc, ProjectMeta, VideoTrack } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
 const INDEX_KEY = 'studio:index'
 const CURRENT_KEY = 'studio:current'
 const projectKey = (id: string) => `studio:project:${id}`
+const INTERRUPTED_GENERATION_ERROR = '上次生成在完成前中断，请重新生成。'
+const INTERRUPTED_PROMPT_ERROR = '上次提示词生成在完成前中断，请重新生成。'
+const INTERRUPTED_POLISH_ERROR = '上次提示词润色在完成前中断，请重新润色。'
+const INTERRUPTED_EPISODE_ERROR = '上次整集成片在完成前中断，请重新生成本集。'
 
 async function kvGet<T>(key: string): Promise<T | null> {
   try {
@@ -149,6 +153,59 @@ function normalizeEpisode(raw: Episode, index: number): Episode {
   }
 }
 
+function recoverGeneratingState(item: { state?: GenState; error?: string }): boolean {
+  if (item.state !== 'generating') return false
+  item.state = 'failed'
+  item.error ||= INTERRUPTED_GENERATION_ERROR
+  return true
+}
+
+function recoverTrackPrompt(track: VideoTrack): boolean {
+  if (track.promptState !== 'generating') return false
+  track.promptState = 'failed'
+  track.promptError ||= INTERRUPTED_PROMPT_ERROR
+  return true
+}
+
+function recoverEpisodeInterruptedState(episode: Episode, now: number): boolean {
+  let changed = false
+  if (episode.status === 'generating') {
+    episode.status = 'planned'
+    episode.filmError ||= INTERRUPTED_EPISODE_ERROR
+    changed = true
+  }
+  for (const storyboard of episode.storyboards) changed = recoverGeneratingState(storyboard) || changed
+  for (const clip of episode.clips) changed = recoverGeneratingState(clip) || changed
+  for (const track of episode.track) changed = recoverTrackPrompt(track) || changed
+  if (changed) episode.updatedAt = now
+  return changed
+}
+
+export function recoverInterruptedGenerationState(doc: ProjectDoc, now = Date.now()): boolean {
+  let changed = false
+  for (const chapter of doc.novel ?? []) {
+    if (chapter.eventState === 'generating') {
+      chapter.eventState = 'failed'
+      changed = true
+    }
+  }
+  for (const asset of doc.assets ?? []) {
+    changed = recoverGeneratingState(asset) || changed
+    if (asset.promptState === 'polishing') {
+      asset.promptState = 'failed'
+      asset.promptError ||= INTERRUPTED_POLISH_ERROR
+      changed = true
+    }
+    for (const image of asset.images ?? []) changed = recoverGeneratingState(image) || changed
+    for (const variant of asset.variants ?? []) changed = recoverGeneratingState(variant) || changed
+  }
+  for (const episode of doc.episodes ?? []) changed = recoverEpisodeInterruptedState(episode, now) || changed
+  for (const storyboard of doc.storyboards ?? []) changed = recoverGeneratingState(storyboard) || changed
+  for (const clip of doc.clips ?? []) changed = recoverGeneratingState(clip) || changed
+  for (const track of doc.track ?? []) changed = recoverTrackPrompt(track) || changed
+  return changed
+}
+
 export function syncCurrentEpisodeFromFlat(doc: ProjectDoc): void {
   if (!Array.isArray(doc.episodes) || doc.episodes.length === 0) {
     const episode = episodeFromFlat(doc)
@@ -204,6 +261,7 @@ function normalizeDoc(raw: ProjectDoc): ProjectDoc {
   if (!flatHasContent && current) applyEpisodeToFlat(doc, current)
   else syncCurrentEpisodeFromFlat(doc)
   if (doc.meta && !doc.meta.videoRatio) doc.meta.videoRatio = '16:9' // 旧/空画幅 doc 兜底，避免视频出竖屏
+  recoverInterruptedGenerationState(doc)
   return doc
 }
 
