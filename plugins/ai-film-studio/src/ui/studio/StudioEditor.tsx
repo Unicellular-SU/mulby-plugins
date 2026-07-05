@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Download, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -27,6 +27,7 @@ import { loadAssetUrl } from '../services/assets'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
+import { exportProducedEpisodes } from './services/episodeExport'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -63,9 +64,21 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const episodes = doc.episodes ?? []
   const canProduceCurrent = doc.storyboards.length > 0
   const canProduceSeries = episodes.length > 1 && pendingEpisodesForSeries(doc).length > 0
+  const producedEpisodeCount = episodes.filter((episode) => !!episode.filmPath).length
   const [tab, setTab] = useState<Tab>('script')
   const [dockOpen, setDockOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const exportSeason = async () => {
+    try {
+      const result = await exportProducedEpisodes(doc)
+      if (result.cancelled) return
+      if (result.errors.length) window.mulby?.notification?.show(`已导出 ${result.count} 集，${result.errors.length} 集失败`, 'warning')
+      else window.mulby?.notification?.show(`已导出 ${result.count} 集成片`, 'success')
+      if (result.manifestPath) void window.mulby?.shell?.showItemInFolder(result.manifestPath)
+    } catch (error) {
+      window.mulby?.notification?.show(`全季导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
+  }
 
   // 工作台输入焦点跟踪：左侧资源 Dock 的片段/资产名插入「最后聚焦的输入框」
   useEffect(() => installFocusTracker(), [])
@@ -163,6 +176,18 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
               onClick={() => void autoProduceSeries()}
             >
               生成全剧
+            </Button>
+          )}
+          {episodes.length > 1 && !seriesRunning && (
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={Download}
+              disabled={busy || producedEpisodeCount === 0}
+              title={producedEpisodeCount > 0 ? `导出 ${producedEpisodeCount} 集已成片视频和 manifest.json` : '暂无已成片剧集可导出'}
+              onClick={() => void exportSeason()}
+            >
+              导出全季
             </Button>
           )}
           <Button

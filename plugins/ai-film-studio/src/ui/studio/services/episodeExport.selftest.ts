@@ -1,0 +1,70 @@
+import { buildEpisodeExportManifest, producedEpisodeExportItems, seasonPackageDirName } from './episodeExport'
+import type { Episode, ProjectDoc, ProjectMeta } from '../../domain/types'
+
+let failures = 0
+
+function check(name: string, condition: boolean, detail: string) {
+  if (condition) console.log(`  OK ${name}`)
+  else {
+    failures += 1
+    console.error(`  FAIL ${name}: ${detail}`)
+  }
+}
+
+function meta(): ProjectMeta {
+  return { id: 'p1', name: 'My Series: Pilot?', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 0, updatedAt: 0 }
+}
+
+function episode(id: string, index: number, patch: Partial<Episode> = {}): Episode {
+  return {
+    id,
+    index,
+    title: `Episode ${index + 1}`,
+    scripts: [],
+    storyboards: [],
+    clips: [],
+    track: [],
+    createdAt: 0,
+    updatedAt: 0,
+    ...patch,
+  }
+}
+
+function doc(patch: Partial<ProjectDoc>): ProjectDoc {
+  return {
+    meta: meta(),
+    novel: [],
+    scripts: [],
+    assets: [],
+    storyboards: [],
+    clips: [],
+    track: [],
+    memory: [],
+    ...patch,
+  }
+}
+
+const project = doc({
+  episodes: [
+    episode('ep2', 1, { title: 'Dinner / Reveal', filmPath: 'D:\\films\\ep2.final.mp4' }),
+    episode('ep1', 0, { title: 'Pilot', filmPath: '/tmp/ep1.mov' }),
+    episode('ep3', 2, { title: 'Not Ready' }),
+  ],
+})
+
+const items = producedEpisodeExportItems(project)
+check('collects produced episodes in episode order', items.map((item) => item.episodeId).join(',') === 'ep1,ep2', JSON.stringify(items))
+check('sanitizes exported episode file names and keeps extensions', items[0].fileName === 'E1_Pilot.mov' && items[1].fileName === 'E2_Dinner___Reveal.mp4', JSON.stringify(items.map((item) => item.fileName)))
+
+const dirName = seasonPackageDirName(project, new Date('2026-07-06T01:02:03Z'))
+check('builds stable season package directory name', dirName === 'My_Series__Pilot__season_20260706T010203Z', dirName)
+
+const manifest = buildEpisodeExportManifest(project, items.map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` })), '2026-07-06T01:02:03.000Z')
+check('builds season export manifest', manifest.projectId === 'p1' && manifest.episodeCount === 2 && manifest.episodes[1].exportedPath?.endsWith('.mp4'), JSON.stringify(manifest))
+
+if (failures) {
+  console.error(`\nepisodeExport selftest: ${failures} FAILED`)
+  process.exit(1)
+}
+
+console.log('\nepisodeExport selftest: ALL PASSED')
