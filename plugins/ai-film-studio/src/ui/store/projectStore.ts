@@ -133,6 +133,8 @@ export interface ProjectState {
   generateAllClips: () => Promise<void>
   /** 一键成片：资产 → 关键帧 → 视频 → 合成 一条龙 */
   autoProduce: () => Promise<void>
+  /** 全剧生成：按剧集顺序逐集执行一键成片，并把每集成片路径回写到 Episode。 */
+  autoProduceSeries: () => Promise<void>
 
   // 小说导入（长文 → 章节，供 Agent 改编）
   importNovel: (text: string) => void
@@ -268,6 +270,74 @@ function logPreflightWarnings(stage: 'keyframe' | 'clip', storyboardId: string, 
     storyboardId,
     warnings: warnings.map((issue) => ({ code: issue.code, message: issue.message })),
   })
+}
+
+function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partial<Episode>): void {
+  const doc = get().doc
+  if (!doc?.currentEpisodeId) return
+  get().mutate((d) => {
+    const episode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
+    if (!episode) return
+    Object.assign(episode, patch, { updatedAt: Date.now() })
+  })
+}
+
+async function produceCurrentEpisode(
+  get: () => ProjectState,
+  set: (partial: Partial<ProjectState>) => void,
+  opts: { labelPrefix?: string; manageBatch?: boolean } = {},
+): Promise<void> {
+  const doc = get().doc
+  if (!doc) return
+  const prefix = opts.labelPrefix ? `${opts.labelPrefix} · ` : ''
+  const setLabel = (label: string) => set({ batch: { running: true, label: `${prefix}${label}` } })
+  if (opts.manageBatch) setLabel('准备…')
+  try {
+    if (doc.storyboards.length === 0) return
+    setCurrentEpisodeProductionState(get, { status: 'generating', filmError: undefined })
+
+    const assetIds = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.refImageId).map((a) => a.id)
+    if (assetIds.length) {
+      const c = get().doc!.meta.concurrency ?? 3
+      setLabel(`生成资产 0/${assetIds.length}`)
+      await mapPool(assetIds, c, (id) => get().generateAsset(id), (done, total) => setLabel(`生成资产 ${done}/${total}`))
+    }
+
+    const keyframeIds = [...(get().doc?.storyboards ?? [])]
+      .sort((a, b) => a.index - b.index)
+      .filter((s) => !s.keyframeImageId)
+      .map((s) => s.id)
+    if (keyframeIds.length) {
+      const current = get().doc!
+      const chained = current.storyboards.some((s) => s.chainFromPrev)
+      const c = chained ? 1 : (current.meta.concurrency ?? 3)
+      setLabel(`生成关键帧 0/${keyframeIds.length}`)
+      await mapPool(keyframeIds, c, (id) => get().generateKeyframe(id), (done, total) => setLabel(`生成关键帧 ${done}/${total}`))
+    }
+
+    const clipIds = [...(get().doc?.storyboards ?? [])]
+      .sort((a, b) => a.index - b.index)
+      .filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
+      .map((s) => s.id)
+    if (clipIds.length) {
+      const current = get().doc!
+      const chained = current.storyboards.some((s) => s.chainFromPrev)
+      const c = chained ? 1 : (current.meta.concurrency ?? 3)
+      setLabel(`生成视频 0/${clipIds.length}`)
+      await mapPool(clipIds, c, (id) => get().generateClip(id), (done, total) => setLabel(`生成视频 ${done}/${total}`))
+    }
+
+    const latest = get().doc
+    const hasDoneClip = !!latest?.storyboards.some((s) => latest.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
+    if (hasDoneClip) {
+      setLabel('合成成片…')
+      await get().compose()
+    } else {
+      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: '没有可合成的视频片段' })
+    }
+  } finally {
+    if (opts.manageBatch) set({ batch: { running: false } })
+  }
 }
 
 function planForLog(plan: AgentPlan) {
@@ -1461,15 +1531,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   autoProduce: async () => {
-    // 各子步骤自管 batch/film 标志；这里只做顺序编排（守卫避免重入）
+    // 当前集一键生产：资产 → 关键帧 → 视频 → 合成，保持旧入口语义。
     if (get().batch.running || get().film.state === 'composing' || !get().doc) return
-    await get().generateAllAssets()
-    await get().generateAllKeyframes()
-    await get().generateAllClips()
-    // 重新取 doc 并守卫：generation 期间用户若关/删项目，doc 可能已为 null（避免 null.storyboards 崩溃）
-    const d = get().doc
-    if (d && d.storyboards.some((s) => d.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))) {
-      await get().compose()
+    await produceCurrentEpisode(get, set, { manageBatch: true })
+  },
+
+  autoProduceSeries: async () => {
+    const doc = get().doc
+    if (get().batch.running || get().film.state === 'composing' || !doc) return
+    const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+    if (episodes.length <= 1) {
+      await get().autoProduce()
+      return
+    }
+    const startId = doc.currentEpisodeId
+    set({ batch: { running: true, label: `生成全剧 0/${episodes.length}` } })
+    try {
+      for (let i = 0; i < episodes.length; i += 1) {
+        const latest = get().doc
+        if (!latest) return
+        const target = latest.episodes?.find((episode) => episode.id === episodes[i].id)
+        if (!target) continue
+        if (latest.currentEpisodeId !== target.id) get().switchEpisode(target.id)
+        await produceCurrentEpisode(get, set, { labelPrefix: `全剧 ${i + 1}/${episodes.length} · E${target.index + 1}` })
+      }
+    } finally {
+      const latest = get().doc
+      if (startId && latest?.episodes?.some((episode) => episode.id === startId) && latest.currentEpisodeId !== startId) {
+        get().switchEpisode(startId)
+      }
+      set({ batch: { running: false } })
+      await get().flush()
     }
   },
 
@@ -1480,8 +1572,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const path = await composeProject(doc, (text, percent) => set({ film: { state: 'composing', text: percent != null ? `${text} ${percent}%` : text } }))
       set({ film: { state: 'done', path } })
+      setCurrentEpisodeProductionState(get, { status: 'done', filmPath: path, filmError: undefined, producedAt: Date.now() })
     } catch (e) {
-      set({ film: { state: 'failed', error: e instanceof Error ? e.message : String(e) } })
+      const error = e instanceof Error ? e.message : String(e)
+      set({ film: { state: 'failed', error } })
+      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: error })
     }
   },
 }))

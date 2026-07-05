@@ -27,6 +27,16 @@ function ratioWH(ratio: string): [number, number] {
   return [1280, 720]
 }
 
+function safeFileName(value: string): string {
+  return (value || 'film').replace(/[<>:"/\\|?*\x00-\x1f]+/g, '_').replace(/\s+/g, '_').slice(0, 90) || 'film'
+}
+
+function outputBaseName(doc: ProjectDoc): string {
+  const episode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  if (!episode || (doc.episodes?.length ?? 0) <= 1) return safeFileName(doc.meta.name || 'film')
+  return safeFileName(`${doc.meta.name || 'film'}_E${episode.index + 1}_${episode.title}`)
+}
+
 export async function composeProject(
   doc: ProjectDoc,
   onProgress?: (text: string, percent?: number) => void,
@@ -93,7 +103,7 @@ export async function composeProject(
     durations.push(real && real > 0.1 ? real : fallbackDurs[i])
   }
 
-  const outPath = await exportPath(`${(doc.meta.name || 'film').replace(/\s+/g, '_')}_${Date.now()}.mp4`)
+  const outPath = await exportPath(`${outputBaseName(doc)}_${Date.now()}.mp4`)
   const base = {
     clips: clipPaths,
     outPath,

@@ -255,6 +255,9 @@ export interface Episode {
   title: string
   summary?: string
   status?: EpisodeStatus
+  filmPath?: string
+  filmError?: string
+  producedAt?: number
   novelChapterIds?: string[]
   scripts: Script[]
   storyboards: Storyboard[]

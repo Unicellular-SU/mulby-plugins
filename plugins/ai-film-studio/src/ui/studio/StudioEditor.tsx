@@ -55,7 +55,11 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const batch = useProjectStore((s) => s.batch)
   const film = useProjectStore((s) => s.film)
   const autoProduce = useProjectStore((s) => s.autoProduce)
+  const autoProduceSeries = useProjectStore((s) => s.autoProduceSeries)
   const busy = batch.running || film.state === 'composing'
+  const episodes = doc.episodes ?? []
+  const canProduceCurrent = doc.storyboards.length > 0
+  const canProduceSeries = episodes.length > 1 && episodes.some((episode) => (episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards).length > 0)
   const [tab, setTab] = useState<Tab>('script')
   const [dockOpen, setDockOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -134,13 +138,25 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
             title="项目设置（Agent 部署 / 记忆）"
             onClick={() => setSettingsOpen(true)}
           />
+          {episodes.length > 1 && (
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={Film}
+              disabled={busy || !canProduceSeries}
+              title="按剧集顺序生成资产、关键帧、视频并分别合成"
+              onClick={() => void autoProduceSeries()}
+            >
+              生成全剧
+            </Button>
+          )}
           <Button
             variant="gradient"
             glow
             size="md"
             leadingIcon={busy ? undefined : Wand2}
             loading={busy}
-            disabled={busy || doc.storyboards.length === 0}
+            disabled={busy || !canProduceCurrent}
             title="资产 → 关键帧 → 视频 → 合成 一条龙"
             onClick={() => void autoProduce()}
           >
@@ -249,6 +265,11 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
           <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title="当前集已绑定的角色/场景/物品引用数量">
             引用 {castUseCount}
           </span>
+          {current.filmPath && (
+            <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional" title={current.filmPath}>
+              已成片
+            </span>
+          )}
           <span
             className={`afs-stwb__episode-chip afs-stwb__episode-chip--audit${currentErrors ? ' is-error' : currentWarnings ? ' is-warning' : ' is-ok'}`}
             title={issueTitle}
