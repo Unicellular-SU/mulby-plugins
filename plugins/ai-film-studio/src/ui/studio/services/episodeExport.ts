@@ -1,4 +1,5 @@
 import type { Episode, ProjectDoc } from '../../domain/types'
+import { buildContinuityReport, type ContinuityIssue } from './continuityReport'
 
 export interface EpisodeExportItem {
   episodeId: string
@@ -14,6 +15,7 @@ export interface EpisodeExportManifest {
   exportedAt: string
   episodeCount: number
   episodes: Array<EpisodeExportItem & { exportedPath?: string; error?: string }>
+  delivery: EpisodeDeliveryReport
 }
 
 export interface EpisodeExportResult {
@@ -28,6 +30,7 @@ export interface SingleEpisodePackageManifest {
   projectId: string
   projectName: string
   exportedAt: string
+  delivery: EpisodeDeliveryReport
   episode: {
     id: string
     index: number
@@ -46,6 +49,33 @@ export interface SingleEpisodePackageManifest {
     scripts: Episode['scripts']
     storyboards: Episode['storyboards']
   }
+}
+
+export interface EpisodeDeliveryAssetReference {
+  episodeId: string
+  episodeIndex: number
+  episodeTitle: string
+  storyboardId: string
+  storyboardIndex: number
+  assetId: string
+  assetName: string
+  assetType: string
+  variantId?: string
+  variantLabel?: string
+  label: string
+  refImageId?: string
+  appliesToEpisode: boolean
+}
+
+export interface EpisodeDeliveryIssue extends ContinuityIssue {
+  episodeIndex?: number
+  episodeTitle?: string
+}
+
+export interface EpisodeDeliveryReport {
+  assetReferences: EpisodeDeliveryAssetReference[]
+  issues: EpisodeDeliveryIssue[]
+  missingItems: EpisodeDeliveryIssue[]
 }
 
 function safeFileName(value: string, fallback = 'film'): string {
@@ -95,12 +125,14 @@ export function episodePackageDirName(doc: ProjectDoc, episode: Episode, date = 
 }
 
 export function buildEpisodeExportManifest(doc: ProjectDoc, episodes: EpisodeExportManifest['episodes'], exportedAt = new Date().toISOString()): EpisodeExportManifest {
+  const episodeIds = new Set(episodes.map((episode) => episode.episodeId))
   return {
     projectId: doc.meta.id,
     projectName: doc.meta.name,
     exportedAt,
     episodeCount: episodes.length,
     episodes,
+    delivery: buildEpisodeDeliveryReport(doc, episodeIds),
   }
 }
 
@@ -114,6 +146,7 @@ export function buildSingleEpisodePackageManifest(
     projectId: doc.meta.id,
     projectName: doc.meta.name,
     exportedAt,
+    delivery: buildEpisodeDeliveryReport(doc, new Set([episode.id])),
     episode: {
       id: episode.id,
       index: episode.index + 1,
@@ -132,6 +165,50 @@ export function buildSingleEpisodePackageManifest(
       scripts: episode.scripts,
       storyboards: episode.storyboards,
     },
+  }
+}
+
+function isMissingItemIssue(issue: ContinuityIssue): boolean {
+  return issue.severity === 'error' || issue.code.startsWith('missing_') || issue.code.startsWith('invalid_')
+}
+
+export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<string>): EpisodeDeliveryReport {
+  const report = buildContinuityReport(doc)
+  const episodeMeta = new Map(report.episodes.map((episode) => [episode.id, episode]))
+  const includeEpisode = (episodeId: string | undefined) => !episodeIds || !episodeId || episodeIds.has(episodeId)
+  const issues = report.issues
+    .filter((issue) => includeEpisode(issue.episodeId))
+    .map((issue) => {
+      const episode = issue.episodeId ? episodeMeta.get(issue.episodeId) : undefined
+      return {
+        ...issue,
+        episodeIndex: episode?.index,
+        episodeTitle: episode?.title,
+      }
+    })
+  const assetReferences = report.episodes
+    .filter((episode) => !episodeIds || episodeIds.has(episode.id))
+    .flatMap((episode) =>
+      episode.castUses.map((use) => ({
+        episodeId: episode.id,
+        episodeIndex: episode.index,
+        episodeTitle: episode.title,
+        storyboardId: use.storyboardId,
+        storyboardIndex: use.storyboardIndex,
+        assetId: use.assetId,
+        assetName: use.assetName,
+        assetType: use.assetType,
+        variantId: use.variantId,
+        variantLabel: use.variantLabel,
+        label: use.label,
+        refImageId: use.refImageId,
+        appliesToEpisode: use.appliesToEpisode,
+      })),
+    )
+  return {
+    assetReferences,
+    issues,
+    missingItems: issues.filter(isMissingItemIssue),
   }
 }
 
