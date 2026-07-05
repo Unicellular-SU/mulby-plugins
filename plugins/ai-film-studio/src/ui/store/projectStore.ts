@@ -32,7 +32,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
-import { invalidateCurrentEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, invalidateCurrentEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -1611,7 +1611,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const path = await composeProject(doc, (text, percent) => set({ film: { state: 'composing', text: percent != null ? `${text} ${percent}%` : text } }))
       set({ film: { state: 'done', path } })
-      setCurrentEpisodeProductionState(get, { status: 'done', filmPath: path, filmError: undefined, producedAt: Date.now() })
+      get().mutate((d) => {
+        const episode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
+        if (!episode) return
+        Object.assign(episode, { status: 'done' as const, filmPath: path, filmError: undefined, producedAt: Date.now() })
+        episode.productionRecap = buildEpisodeProductionRecap(d, episode)
+        episode.updatedAt = Date.now()
+      })
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
       set({ film: { state: 'failed', error } })

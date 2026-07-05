@@ -212,11 +212,12 @@ function formatEpisodeContext(doc: ProjectDoc): string {
     .map((episode) => {
       const marker = episode.id === current.id ? '（当前）' : ''
       const summary = episode.summary ? `；梗概：${episode.summary.slice(0, 120)}` : ''
+      const recap = episode.productionRecap ? `；制作回顾：${episode.productionRecap.slice(0, 160)}` : ''
       const scripts = episode.id === current.id ? doc.scripts : episode.scripts
       const storyboards = episode.id === current.id ? doc.storyboards : episode.storyboards
       const clips = episode.id === current.id ? doc.clips : episode.clips
       const film = episode.filmPath ? '已成片' : episode.filmError ? `合成失败：${episode.filmError.slice(0, 80)}` : '未合成'
-      return `${episode.index + 1}. ${episode.title}${marker}：剧本 ${scripts.length}，分镜 ${storyboards.length}，片段 ${clips.length}，${film}${summary}`
+      return `${episode.index + 1}. ${episode.title}${marker}：剧本 ${scripts.length}，分镜 ${storyboards.length}，片段 ${clips.length}，${film}${summary}${recap}`
     })
     .join('\n')
   return [

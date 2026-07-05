@@ -254,6 +254,7 @@ export interface Episode {
   index: number
   title: string
   summary?: string
+  productionRecap?: string
   status?: EpisodeStatus
   filmPath?: string
   filmError?: string

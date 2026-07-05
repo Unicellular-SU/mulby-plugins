@@ -114,6 +114,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     index: episode.index + 1,
     title: episode.title,
     summary: episode.summary,
+    productionRecap: episode.productionRecap,
     status: episode.status,
     current,
     production: {
@@ -572,7 +573,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
           query: q,
           episodes: wants('episodes')
             ? sortedEpisodes(d)
-                .filter((episode) => has(episode.title) || has(episode.summary))
+                .filter((episode) => has(episode.title) || has(episode.summary) || has(episode.productionRecap))
                 .slice(0, limit)
                 .map((episode) => episodeView(d, episode))
             : undefined,

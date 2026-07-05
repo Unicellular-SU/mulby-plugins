@@ -1,4 +1,4 @@
-import { invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionRecap, invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -98,12 +98,27 @@ const planned = doc({
 const pending = pendingEpisodesForSeries(planned)
 check('series production uses current flat storyboards and skips completed episodes', pending.map((item) => item.id).join(',') === 'ep1,ep4', JSON.stringify(pending.map((item) => item.id)))
 
-const produced = episode('done', 0, { status: 'done', filmPath: 'film.mp4', filmError: 'old error', producedAt: 123, updatedAt: 10 })
+const produced = episode('done', 0, { status: 'done', filmPath: 'film.mp4', filmError: 'old error', producedAt: 123, productionRecap: 'old recap', updatedAt: 10 })
 const changed = invalidateEpisodeProduction(produced)
-check('invalidates produced episode state', changed && produced.status === 'planned' && !produced.filmPath && !produced.filmError && !produced.producedAt && produced.updatedAt >= 10, JSON.stringify(produced))
+check('invalidates produced episode state', changed && produced.status === 'planned' && !produced.filmPath && !produced.filmError && !produced.producedAt && !produced.productionRecap && produced.updatedAt >= 10, JSON.stringify(produced))
 
 const untouched = episode('draft', 1, { status: 'draft' })
 check('leaves untouched episode unchanged', !invalidateEpisodeProduction(untouched), JSON.stringify(untouched))
+
+const recapDoc = doc({
+  currentEpisodeId: 'ep1',
+  novel: [{ id: 'c1', index: 0, title: 'Opening', text: 'chapter text' }],
+  scripts: [{ id: 'script', name: 'Script', content: 'Hero enters the gala and notices the locked door.', createdAt: 0, updatedAt: 0 }],
+  assets,
+  storyboards: [
+    storyboard('r1', 0, [{ assetId: 'hero', variantId: 'battle' }]),
+    storyboard('r2', 1, [{ assetId: 'hero', variantId: 'gala' }]),
+  ],
+  clips: [{ id: 'clip1', storyboardId: 'r1', durationSec: 4, state: 'done' }],
+  episodes: [episode('ep1', 0, { title: 'Pilot', novelChapterIds: ['c1'], filmPath: 'film.mp4' })],
+})
+const recap = buildEpisodeProductionRecap(recapDoc, recapDoc.episodes![0])
+check('builds episode production recap from current flat data', recap.includes('E1「Pilot」') && recap.includes('Opening') && recap.includes('Hero-Battle') && recap.includes('1/2'), recap)
 
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)
