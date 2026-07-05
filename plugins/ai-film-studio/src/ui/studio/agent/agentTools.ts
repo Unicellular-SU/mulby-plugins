@@ -243,6 +243,14 @@ function resolveEpisode(doc: ProjectDoc, args: Record<string, unknown>): Episode
   return undefined
 }
 
+function currentEpisode(doc: ProjectDoc): Episode | undefined {
+  return sortedEpisodes(doc).find((episode) => episode.id === doc.currentEpisodeId) ?? sortedEpisodes(doc)[0]
+}
+
+function resolveEpisodeSelector(doc: ProjectDoc, args: Record<string, unknown>): Episode | undefined {
+  return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle }) ?? currentEpisode(doc)
+}
+
 function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string) {
   return sortedEpisodes(doc)
     .filter((episode) => episode.novelChapterIds?.includes(chapterId))
@@ -431,10 +439,13 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_script',
-      description: '读取完整或指定长度的剧本正文。默认读取主剧本，可用 scriptId 或 index(1-based) 指定。',
+      description: '读取剧本正文。默认读取当前集，可用 episodeId/episodeIndex/episodeTitle 指定剧集；scriptId 或 index(1-based) 指定该集内剧本。',
       parameters: {
         type: 'object',
         properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
           scriptId: { type: 'string' },
           index: { type: 'number', description: '1-based 剧本序号' },
           contentLimit: { type: 'number', description: '正文最多返回字符数，默认 12000，最大 50000' },
@@ -443,19 +454,25 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async (a) => {
         const d = doc()
         if (!d) return '无打开的项目'
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        const scripts = scriptsForEpisode(d, episode)
         const limit = numberArg(a.contentLimit, 12000, 0, 50000)
         const idx = typeof a.index === 'number' ? Math.max(0, Math.floor(a.index) - 1) : 0
-        const script = typeof a.scriptId === 'string' ? d.scripts.find((s) => s.id === a.scriptId) : d.scripts[idx]
-        if (!script) return json({ error: '未找到剧本', scripts: d.scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name })) })
-        return json({ id: script.id, index: d.scripts.indexOf(script) + 1, name: script.name, createdAt: script.createdAt, updatedAt: script.updatedAt, content: textBlock(script.content, limit) })
+        const script = typeof a.scriptId === 'string' ? scripts.find((s) => s.id === a.scriptId) : scripts[idx]
+        if (!script) return json({ error: '未找到剧本', episode: episodeInfo(d, episode), scripts: scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name })) })
+        return json({ ...episodeInfo(d, episode), id: script.id, index: scripts.indexOf(script) + 1, name: script.name, createdAt: script.createdAt, updatedAt: script.updatedAt, content: textBlock(script.content, limit) })
       },
     },
     {
       name: 'get_storyboards',
-      description: '读取真实分镜列表，包含画面、提示词、时长、对白、关联资产、生成状态等。支持 startIndex/count 分页。',
+      description: '读取某集真实分镜列表，包含画面、提示词、时长、对白、关联资产、生成状态等。默认当前集；支持 episodeId/episodeIndex/episodeTitle 和 startIndex/count 分页。',
       parameters: {
         type: 'object',
         properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
           startIndex: { type: 'number', description: '1-based 起始分镜序号，默认 1' },
           count: { type: 'number', description: '最多读取多少条，默认全部，最大 200' },
           includePrompt: { type: 'boolean' },
@@ -466,11 +483,14 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async (a) => {
         const d = doc()
         if (!d) return '无打开的项目'
-        const sorted = [...d.storyboards].sort((x, y) => x.index - y.index)
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        const sorted = [...storyboardsForEpisode(d, episode)].sort((x, y) => x.index - y.index)
         const start = numberArg(a.startIndex, 1, 1, Math.max(1, sorted.length)) - 1
         const count = numberArg(a.count, sorted.length, 1, 200)
         const slice = sorted.slice(start, start + count)
         return json({
+          ...episodeInfo(d, episode),
           total: sorted.length,
           startIndex: start + 1,
           count: slice.length,
@@ -554,11 +574,14 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_storyboard_table',
-      description: '读取设计层分镜表/大纲（场次、段落、镜头行）。当用户问大纲、段落、分场或结构时优先使用。',
-      parameters: { type: 'object', properties: {} },
-      execute: async () => {
+      description: '读取某集设计层分镜表/大纲（场次、段落、镜头行）。默认当前集；当用户问大纲、段落、分场或结构时优先使用。',
+      parameters: { type: 'object', properties: { episodeId: { type: 'string' }, episodeIndex: { type: 'number', description: '1-based 剧集序号' }, episodeTitle: { type: 'string' } } },
+      execute: async (a) => {
         const d = doc()
-        return d ? json({ scenes: d.storyboardTable ?? [] }) : '无打开的项目'
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        return json({ ...episodeInfo(d, episode), scenes: storyboardTableForEpisode(d, episode) })
       },
     },
     {
