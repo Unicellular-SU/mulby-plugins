@@ -1582,6 +1582,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (issue.code !== 'episode_variant_available' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
     setStoryboardCastVariant(issue.storyboardId, issue.assetId, issue.variantId)
   }
+  const carryPreviousVariant = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'asset_state_regressed_to_main' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
+    if (!asset || !variant) return
+    if ((variant.appliesToEpisodeIds?.length ?? 0) > 0) {
+      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), issue.episodeId])] })
+    }
+    setStoryboardCastVariant(issue.storyboardId, asset.id, variant.id)
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1593,6 +1603,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
         const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
         const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
+        const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1610,6 +1621,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canBindEpisodeVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => bindEpisodeVariant(issue)}>
                 绑定本集形态
+              </button>
+            )}
+            {canCarryPreviousVariant && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => carryPreviousVariant(issue)}>
+                沿用上一形态
               </button>
             )}
             {refAction && (
