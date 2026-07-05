@@ -268,4 +268,5 @@ export interface StoryboardCastRef {
 32. 已完成：新增 Agent 工具 `set_storyboard_scene_asset`，可按单个分镜或同一 `sceneId` 场景组补齐/统一场景资产，用于自动修复 `scene_group_missing_asset` 和 `scene_group_asset_mismatch`。
 33. 已完成：新增 Agent 工具 `update_asset`，可更新既有资产的名称、别名、描述和提示词；工具循环遇到 `duplicate_asset_name` 或 `duplicate_asset_alias` 时，会优先调整既有资产而不是继续创建重复角色、场景或道具。
 34. 已完成：一致性抽屉的别名冲突告警会标出冲突称呼来源；当冲突来自当前资产 aliases 时，可一键移除此别名，避免继续误匹配到多个同类型资产。
-35. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
+35. 已完成：新增 Agent 工具 `set_storyboard_asset_ref`，可把已有角色、场景或道具资产补入指定分镜，也可移除分镜资产引用；工具循环遇到 `unused_project_asset` 且资产应在某集出场时，会优先把它复用到合适分镜，而不是只给出口头建议。
+36. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
