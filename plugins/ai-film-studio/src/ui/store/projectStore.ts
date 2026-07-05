@@ -9,7 +9,7 @@ import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
 import { castRefsForStoryboard } from '../domain/castRefs'
-import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias } from '../domain/assetAliases'
+import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases } from '../domain/assetAliases'
 import { removeVariantScopeReferences } from '../domain/variantScopes'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
@@ -444,7 +444,7 @@ function applyAgentAssets(d: ProjectDoc, assets: AgentPlan['assets'] | undefined
     if (ex) {
       ex.desc = a.desc ?? ex.desc
       ex.prompt = a.prompt ?? ex.prompt
-      const aliases = a.aliases !== undefined ? cleanAssetAliases(a.aliases) : ex.aliases
+      const aliases = a.aliases !== undefined ? mergeAssetAliases(ex.aliases, a.aliases) : ex.aliases
       ex.aliases = aliases?.length ? aliases : undefined
       applied.assetsUpdated.push({ id: ex.id, type: ex.type, name: ex.name })
     } else {

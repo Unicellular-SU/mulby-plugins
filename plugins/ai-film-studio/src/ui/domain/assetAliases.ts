@@ -18,6 +18,14 @@ export function cleanAssetAliases(value: unknown): string[] {
   return aliases
 }
 
+export function mergeAssetAliases(existing: unknown, incoming: unknown): string[] {
+  const values = [
+    ...(Array.isArray(existing) ? existing : existing !== undefined ? [existing] : []),
+    ...(Array.isArray(incoming) ? incoming : incoming !== undefined ? [incoming] : []),
+  ]
+  return cleanAssetAliases(values)
+}
+
 export function assetLookupNames(asset: Pick<Asset, 'name' | 'aliases'>): string[] {
   return [asset.name, ...(asset.aliases ?? [])].filter((item) => item.trim())
 }
