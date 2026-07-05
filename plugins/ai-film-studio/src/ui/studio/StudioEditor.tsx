@@ -11,7 +11,7 @@ import { useAssetStore } from '../store/assetStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip } from '../domain/types'
+import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, ProjectDoc } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
 import Select from '../components/ui/Select'
@@ -26,7 +26,7 @@ import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
-import { pendingEpisodesForSeries } from './services/episodeProduction'
+import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -315,6 +315,7 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
           </span>
         </div>
       )}
+      {current && episodes.length > 1 && <EpisodeHandoffPopover doc={doc} episode={current} />}
       <IconButton
         size="sm"
         variant="ghost"
@@ -363,6 +364,69 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
         onClick={deleteCurrent}
       />
     </div>
+  )
+}
+
+function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Episode }) {
+  const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
+  const hasHints = handoff.recaps.length > 0 || handoff.sharedAssets.length > 0
+  return (
+    <Popover
+      side="bottom"
+      align="start"
+      className="afs-stwb__handoff-pop"
+      ariaLabel="跨集承接线索"
+      trigger={
+        <IconButton
+          size="sm"
+          variant="ghost"
+          className={hasHints ? 'afs-stwb__handoff-trigger is-active' : 'afs-stwb__handoff-trigger'}
+          aria-label="查看跨集承接线索"
+          title={hasHints ? '查看最近制作回顾和复用资产线索' : '暂无跨集承接线索'}
+          icon={<BookmarkPlus size={16} />}
+        />
+      }
+    >
+      <div className="afs-stwb__handoff">
+        <div className="afs-stwb__handoff-head">
+          <b>E{episode.index + 1} 跨集承接</b>
+          <span>{handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产</span>
+        </div>
+        {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有可承接的制作回顾或跨集复用资产。</p>}
+        {handoff.recaps.length > 0 && (
+          <section className="afs-stwb__handoff-sec">
+            <h4>最近制作回顾</h4>
+            <div className="afs-stwb__handoff-list">
+              {handoff.recaps.map((recap) => (
+                <article key={recap.episodeId} className="afs-stwb__handoff-item">
+                  <strong>E{recap.episodeIndex + 1} {recap.episodeTitle}</strong>
+                  <p>{recap.recap}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+        {handoff.sharedAssets.length > 0 && (
+          <section className="afs-stwb__handoff-sec">
+            <h4>资产/形态复用</h4>
+            <div className="afs-stwb__handoff-list">
+              {handoff.sharedAssets.map((cue) => (
+                <article key={cue.assetId + cue.label} className="afs-stwb__handoff-item">
+                  <strong>{cue.label}</strong>
+                  <div className="afs-stwb__handoff-chips">
+                    {cue.appearances.map((item) => (
+                      <span key={item.episodeId} title={item.recap || `${item.episodeTitle} 使用 ${item.variants.join('、')}`}>
+                        E{item.episodeIndex + 1} {item.variants.join('、')}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </Popover>
   )
 }
 

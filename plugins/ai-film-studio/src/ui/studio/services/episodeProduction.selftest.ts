@@ -1,4 +1,4 @@
-import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -155,6 +155,28 @@ const recapDoc = doc({
 })
 const recap = buildEpisodeProductionRecap(recapDoc, recapDoc.episodes![0])
 check('builds episode production recap from current flat data', recap.includes('E1「Pilot」') && recap.includes('Opening') && recap.includes('Hero-Battle') && recap.includes('1/2'), recap)
+
+const handoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets,
+  storyboards: [storyboard('ep2-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      productionRecap: 'Hero stayed in Battle look after the chase.',
+      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, { title: 'Gala' }),
+    episode('ep3', 2, {
+      title: 'Aftermath',
+      storyboards: [storyboard('ep3-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
+    }),
+  ],
+})
+const handoff = buildEpisodeProductionHandoff(handoffDoc, handoffDoc.episodes![1])
+const heroCue = handoff.sharedAssets.find((cue) => cue.assetId === 'hero')
+check('builds cross-episode handoff recaps from prior produced episodes', handoff.recaps.length === 1 && handoff.recaps[0].episodeId === 'ep1' && handoff.recaps[0].recap.includes('Battle'), JSON.stringify(handoff.recaps))
+check('builds shared asset handoff cues for current episode refs', !!heroCue && heroCue.label === 'Hero-Gala' && heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3', JSON.stringify(heroCue))
 
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)

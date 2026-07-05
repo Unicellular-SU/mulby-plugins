@@ -6,6 +6,32 @@ export interface VariantImageRequest {
   variantId: string
 }
 
+export interface EpisodeHandoffRecap {
+  episodeId: string
+  episodeIndex: number
+  episodeTitle: string
+  recap: string
+}
+
+export interface EpisodeHandoffAppearance {
+  episodeId: string
+  episodeIndex: number
+  episodeTitle: string
+  variants: string[]
+  recap?: string
+}
+
+export interface EpisodeHandoffAssetCue {
+  assetId: string
+  label: string
+  appearances: EpisodeHandoffAppearance[]
+}
+
+export interface EpisodeProductionHandoff {
+  recaps: EpisodeHandoffRecap[]
+  sharedAssets: EpisodeHandoffAssetCue[]
+}
+
 export function hasEpisodeProductionState(episode: Episode | undefined): boolean {
   return !!episode && (!!episode.filmPath || !!episode.filmError || !!episode.producedAt || !!episode.productionRecap || episode.status === 'done')
 }
@@ -115,6 +141,24 @@ function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
 }
 
+function sortedEpisodes(doc: ProjectDoc): Episode[] {
+  return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+}
+
+function uniqueCastRefs(storyboards: Storyboard[]): ReturnType<typeof castRefsForStoryboard> {
+  const seen = new Set<string>()
+  const refs: ReturnType<typeof castRefsForStoryboard> = []
+  for (const storyboard of storyboards) {
+    for (const ref of castRefsForStoryboard(storyboard)) {
+      const key = `${ref.assetId}:${ref.variantId ?? ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      refs.push(ref)
+    }
+  }
+  return refs
+}
+
 function storyboardLabel(storyboard: Storyboard, assets: Map<string, ProjectDoc['assets'][number]>): string {
   const cast = castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
   const castText = cast.length ? `（${unique(cast).slice(0, 4).join('、')}）` : ''
@@ -148,6 +192,61 @@ export function buildEpisodeProductionRecap(doc: ProjectDoc, episode: Episode, l
     ],
     limit,
   )
+}
+
+export function buildEpisodeProductionHandoff(
+  doc: ProjectDoc,
+  episode: Episode,
+  options: { maxRecaps?: number; maxAssets?: number; maxAppearances?: number } = {},
+): EpisodeProductionHandoff {
+  const maxRecaps = options.maxRecaps ?? 3
+  const maxAssets = options.maxAssets ?? 8
+  const maxAppearances = options.maxAppearances ?? 4
+  const episodes = sortedEpisodes(doc)
+  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const recaps = episodes
+    .filter((item) => item.index < episode.index && !!item.productionRecap?.trim())
+    .sort((a, b) => b.index - a.index)
+    .slice(0, maxRecaps)
+    .map((item) => ({
+      episodeId: item.id,
+      episodeIndex: item.index,
+      episodeTitle: item.title,
+      recap: compact(item.productionRecap, 260),
+    }))
+
+  const currentRefs = uniqueCastRefs(storyboardsForEpisode(doc, episode))
+  const sharedAssets: EpisodeHandoffAssetCue[] = []
+  for (const ref of currentRefs) {
+    const asset = assets.get(ref.assetId)
+    if (!asset || asset.type === 'audio' || asset.type === 'clip') continue
+    const appearances = episodes
+      .filter((item) => item.id !== episode.id)
+      .map((item) => {
+        const refs = uniqueCastRefs(storyboardsForEpisode(doc, item)).filter((itemRef) => itemRef.assetId === ref.assetId)
+        if (!refs.length) return null
+        return {
+          episodeId: item.id,
+          episodeIndex: item.index,
+          episodeTitle: item.title,
+          variants: unique(refs.map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4),
+          recap: item.productionRecap ? compact(item.productionRecap, 180) : undefined,
+        }
+      })
+      .filter((item): item is EpisodeHandoffAppearance => !!item)
+      .sort((a, b) => Math.abs(a.episodeIndex - episode.index) - Math.abs(b.episodeIndex - episode.index) || a.episodeIndex - b.episodeIndex)
+      .slice(0, maxAppearances)
+    if (appearances.length) {
+      sharedAssets.push({
+        assetId: ref.assetId,
+        label: labelForCastRef(asset, ref),
+        appearances,
+      })
+    }
+    if (sharedAssets.length >= maxAssets) break
+  }
+
+  return { recaps, sharedAssets }
 }
 
 export function missingReferencedVariantImages(doc: Pick<ProjectDoc, 'assets' | 'storyboards'>): VariantImageRequest[] {
