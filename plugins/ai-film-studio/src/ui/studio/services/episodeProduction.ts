@@ -128,6 +128,20 @@ export function productionScopeForStoryboard(doc: ProjectDoc, storyboardId: stri
   return undefined
 }
 
+export function productionScopeForTrack(doc: ProjectDoc, trackId: string): EpisodeProductionScope | undefined {
+  const currentEpisode = doc.episodes?.find((item) => item.id === doc.currentEpisodeId)
+  if (doc.track.some((track) => track.id === trackId)) {
+    return { current: true, episode: currentEpisode, storyboards: doc.storyboards, clips: doc.clips, track: doc.track }
+  }
+  for (const episode of doc.episodes ?? []) {
+    if (episode.id === doc.currentEpisodeId) continue
+    if (episode.track.some((track) => track.id === trackId)) {
+      return { current: false, episode, storyboards: episode.storyboards, clips: episode.clips, track: episode.track }
+    }
+  }
+  return undefined
+}
+
 export function invalidateProductionScope(doc: ProjectDoc, scope: EpisodeProductionScope | undefined): boolean {
   if (!scope) return false
   return scope.current ? invalidateCurrentEpisodeProduction(doc) : invalidateEpisodeProduction(scope.episode)

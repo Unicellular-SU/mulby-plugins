@@ -36,7 +36,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -303,14 +303,19 @@ function composeReadinessError(readiness: ReturnType<typeof episodeComposeReadin
   return readiness?.total ? `未合成：仍有分镜没有可用视频片段${missing}` : '没有可合成的视频片段'
 }
 
-function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partial<Episode>): void {
-  const doc = get().doc
-  if (!doc?.currentEpisodeId) return
+function setEpisodeProductionState(get: () => ProjectState, episodeId: string | undefined, patch: Partial<Episode>): void {
+  if (!episodeId) return
   get().mutate((d) => {
-    const episode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
+    const episode = d.episodes?.find((item) => item.id === episodeId)
     if (!episode) return
     Object.assign(episode, patch, { updatedAt: Date.now() })
   })
+}
+
+function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partial<Episode>): void {
+  const doc = get().doc
+  if (!doc?.currentEpisodeId) return
+  setEpisodeProductionState(get, doc.currentEpisodeId, patch)
 }
 
 async function produceCurrentEpisode(
@@ -1091,10 +1096,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }),
   generateTrackPrompt: async (trackId) => {
     const doc = get().doc
-    const track = doc?.track.find((t) => t.id === trackId)
+    const scope = doc ? productionScopeForTrack(doc, trackId) : undefined
+    const track = scope?.track.find((t) => t.id === trackId)
     if (!doc || !track) return
     get().mutate((d) => {
-      const t = d.track.find((x) => x.id === trackId)
+      const nextScope = productionScopeForTrack(d, trackId)
+      const t = nextScope?.track.find((x) => x.id === trackId)
       if (t) {
         t.promptState = 'generating'
         t.promptError = undefined
@@ -1103,15 +1110,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const prompt = await generateTrackVideoPrompt(track, doc)
       get().mutate((d) => {
-        const t = d.track.find((x) => x.id === trackId)
+        const nextScope = productionScopeForTrack(d, trackId)
+        const t = nextScope?.track.find((x) => x.id === trackId)
         if (t) {
           t.prompt = prompt
           t.promptState = 'done'
+          invalidateProductionScope(d, nextScope)
         }
       })
     } catch (e) {
       get().mutate((d) => {
-        const t = d.track.find((x) => x.id === trackId)
+        const nextScope = productionScopeForTrack(d, trackId)
+        const t = nextScope?.track.find((x) => x.id === trackId)
         if (t) {
           t.promptState = 'failed'
           t.promptError = e instanceof Error ? e.message : String(e)
@@ -1767,11 +1777,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   compose: async () => {
     const doc = get().doc
     if (!doc || get().film.state === 'composing') return
+    const composeEpisodeId = doc.currentEpisodeId
     const readiness = episodeComposeReadiness(doc)
     if (!readiness.ready) {
       const error = composeReadinessError(readiness)
       set({ film: { state: 'failed', error } })
-      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: error })
+      setEpisodeProductionState(get, composeEpisodeId, { status: 'planned', filmError: error })
       return
     }
     set({ film: { state: 'composing', text: '开始合成…' } })
@@ -1779,7 +1790,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const path = await composeProject(doc, (text, percent) => set({ film: { state: 'composing', text: percent != null ? `${text} ${percent}%` : text } }))
       set({ film: { state: 'done', path } })
       get().mutate((d) => {
-        const episode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
+        const episode = d.episodes?.find((item) => item.id === composeEpisodeId)
         if (!episode) return
         Object.assign(episode, { status: 'done' as const, filmPath: path, filmError: undefined, producedAt: Date.now() })
         episode.productionRecap = buildEpisodeProductionRecap(d, episode)
@@ -1788,7 +1799,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e)
       set({ film: { state: 'failed', error } })
-      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: error })
+      setEpisodeProductionState(get, composeEpisodeId, { status: 'planned', filmError: error })
     }
   },
 }))

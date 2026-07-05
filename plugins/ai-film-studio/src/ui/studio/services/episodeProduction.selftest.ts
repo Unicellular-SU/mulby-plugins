@@ -1,4 +1,4 @@
-import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -93,7 +93,7 @@ const planned = doc({
     episode('ep1', 0, { storyboards: [] }),
     episode('ep2', 1, { storyboards: [storyboard('ep2-shot', 0, [])], filmPath: 'done.mp4' }),
     episode('ep3', 2, { storyboards: [] }),
-    episode('ep4', 3, { storyboards: [storyboard('ep4-shot', 0, [])], filmError: 'failed' }),
+    episode('ep4', 3, { storyboards: [storyboard('ep4-shot', 0, [])], track: [{ id: 'ep4-track', storyboardIds: ['ep4-shot'], clipIds: [], order: 0 }], filmError: 'failed' }),
     episode('ep5', 4, { storyboards: [storyboard('ep5-shot', 0, [])], seriesSkip: true }),
     episode('ep6', 5, { status: 'done', storyboards: [storyboard('ep6-shot', 0, [])] }),
   ],
@@ -108,10 +108,16 @@ check('restoring a held episode returns it to the series queue', pendingEpisodes
 const resetFailedEpisode = invalidateEpisodeProduction(planned.episodes![3])
 check('resetting a failed episode returns it to the series queue', resetFailedEpisode && pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep4,ep5,ep6', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
 const nonCurrentScope = productionScopeForStoryboard(planned, 'ep4-shot')
+const nonCurrentTrackScope = productionScopeForTrack(planned, 'ep4-track')
 check(
   'finds non-current episode production scope by storyboard id',
   !!nonCurrentScope && !nonCurrentScope.current && nonCurrentScope.episode?.id === 'ep4' && nonCurrentScope.storyboards[0]?.id === 'ep4-shot',
   JSON.stringify(nonCurrentScope?.episode),
+)
+check(
+  'finds non-current episode production scope by track id',
+  !!nonCurrentTrackScope && !nonCurrentTrackScope.current && nonCurrentTrackScope.episode?.id === 'ep4' && nonCurrentTrackScope.track[0]?.id === 'ep4-track',
+  JSON.stringify(nonCurrentTrackScope?.episode),
 )
 Object.assign(planned.episodes![3], { filmPath: 'ep4.mp4', status: 'done' as const })
 const invalidatedScopedEpisode = invalidateProductionScope(planned, nonCurrentScope)
