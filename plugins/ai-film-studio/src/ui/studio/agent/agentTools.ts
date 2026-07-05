@@ -104,19 +104,30 @@ function sortedEpisodes(doc: ProjectDoc): Episode[] {
 }
 
 function episodeView(doc: ProjectDoc, episode: Episode) {
+  const current = episode.id === doc.currentEpisodeId
+  const scripts = current ? doc.scripts : episode.scripts
+  const storyboards = current ? doc.storyboards : episode.storyboards
+  const clips = current ? doc.clips : episode.clips
+  const track = current ? doc.track : episode.track
   return {
     id: episode.id,
     index: episode.index + 1,
     title: episode.title,
     summary: episode.summary,
     status: episode.status,
-    current: episode.id === doc.currentEpisodeId,
+    current,
+    production: {
+      hasFilm: !!episode.filmPath,
+      filmPath: episode.filmPath,
+      filmError: episode.filmError,
+      producedAt: episode.producedAt,
+    },
     counts: {
       novelChapters: episode.novelChapterIds?.length ?? 0,
-      scripts: episode.scripts.length,
-      storyboards: episode.storyboards.length,
-      clips: episode.clips.length,
-      tracks: episode.track.length,
+      scripts: scripts.length,
+      storyboards: storyboards.length,
+      clips: clips.length,
+      tracks: track.length,
       storyboardTableScenes: episode.storyboardTable?.length ?? 0,
     },
     updatedAt: episode.updatedAt,
