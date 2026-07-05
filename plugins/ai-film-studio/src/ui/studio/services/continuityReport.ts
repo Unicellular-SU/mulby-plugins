@@ -82,6 +82,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const allIssues: ContinuityIssue[] = []
   const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
   const assignedChapterIds = new Set<string>()
+  const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)
@@ -105,8 +106,12 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         addIssue({ severity: 'warning', code: 'episode_without_chapters', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」还没有分配原著章节` })
       }
       for (const chapterId of assigned) {
-        if (chapterIds.has(chapterId)) assignedChapterIds.add(chapterId)
-        else addIssue({ severity: 'warning', code: 'invalid_episode_chapter', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」引用了不存在的原著章节 ${chapterId}` })
+        if (chapterIds.has(chapterId)) {
+          assignedChapterIds.add(chapterId)
+          const refs = chapterEpisodeRefs.get(chapterId) ?? []
+          refs.push({ id: episode.id, index: episode.index + 1, title: episode.title, report })
+          chapterEpisodeRefs.set(chapterId, refs)
+        } else addIssue({ severity: 'warning', code: 'invalid_episode_chapter', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」引用了不存在的原著章节 ${chapterId}` })
       }
     }
 
@@ -151,6 +156,15 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
     for (const chapter of doc.novel) {
       if (!assignedChapterIds.has(chapter.id)) {
         allIssues.push({ severity: 'warning', code: 'unassigned_chapter', message: `原著章节「${chapter.title}」还没有分配到任何剧集` })
+      }
+      const refs = chapterEpisodeRefs.get(chapter.id) ?? []
+      if (refs.length > 1) {
+        const labels = refs.map((ref) => `E${ref.index}「${ref.title}」`).join('、')
+        for (const ref of refs) {
+          const issue: ContinuityIssue = { severity: 'warning', code: 'duplicated_chapter_assignment', episodeId: ref.id, message: `原著章节「${chapter.title}」同时分配给 ${labels}` }
+          ref.report.issues.push(issue)
+          allIssues.push(issue)
+        }
       }
     }
   }
