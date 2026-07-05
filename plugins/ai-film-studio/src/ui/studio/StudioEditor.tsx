@@ -27,7 +27,7 @@ import { loadAssetUrl } from '../services/assets'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
-import { exportProducedEpisodes } from './services/episodeExport'
+import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -288,6 +288,18 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
     if (!current) return
     if (window.confirm(`重置「${current.title}」的成片状态？该集会重新进入全剧生成队列。`)) resetCurrentEpisodeProduction()
   }
+  const exportCurrentEpisode = async () => {
+    if (!current) return
+    try {
+      const result = await exportEpisodePackage(doc, current)
+      if (result.cancelled) return
+      if (result.errors.length) window.mulby?.notification?.show(`本集导出失败：${result.errors[0]}`, 'error')
+      else window.mulby?.notification?.show(`已导出 E${current.index + 1}「${current.title}」`, 'success')
+      if (result.manifestPath) void window.mulby?.shell?.showItemInFolder(result.manifestPath)
+    } catch (error) {
+      window.mulby?.notification?.show(`本集导出失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
+  }
   const toggleSeriesSkip = () => {
     if (!current) return
     setCurrentEpisodeSeriesSkip(!current.seriesSkip)
@@ -377,6 +389,17 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
           icon={<RotateCcw size={16} />}
           disabled={busy}
           onClick={resetProduction}
+        />
+      )}
+      {current?.filmPath && (
+        <IconButton
+          size="sm"
+          variant="ghost"
+          aria-label="导出当前集成片包"
+          title="导出当前集成片和 episode.json"
+          icon={<Download size={16} />}
+          disabled={busy}
+          onClick={() => void exportCurrentEpisode()}
         />
       )}
       <IconButton

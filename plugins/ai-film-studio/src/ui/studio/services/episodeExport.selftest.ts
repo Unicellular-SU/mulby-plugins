@@ -1,4 +1,4 @@
-import { buildEpisodeExportManifest, producedEpisodeExportItems, seasonPackageDirName } from './episodeExport'
+import { buildEpisodeExportManifest, buildSingleEpisodePackageManifest, episodePackageDirName, producedEpisodeExportItems, seasonPackageDirName } from './episodeExport'
 import type { Episode, ProjectDoc, ProjectMeta } from '../../domain/types'
 
 let failures = 0
@@ -61,6 +61,13 @@ check('builds stable season package directory name', dirName === 'My_Series__Pil
 
 const manifest = buildEpisodeExportManifest(project, items.map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` })), '2026-07-06T01:02:03.000Z')
 check('builds season export manifest', manifest.projectId === 'p1' && manifest.episodeCount === 2 && manifest.episodes[1].exportedPath?.endsWith('.mp4'), JSON.stringify(manifest))
+
+const ep1 = project.episodes![1]
+const episodeDir = episodePackageDirName(project, ep1, new Date('2026-07-06T01:02:03Z'))
+check('builds stable single episode package directory name', episodeDir === 'My_Series__Pilot__E1_Pilot_20260706T010203Z', episodeDir)
+
+const episodeManifest = buildSingleEpisodePackageManifest(project, ep1, '/exports/E1_Pilot.mov', '2026-07-06T01:02:03.000Z')
+check('builds single episode package manifest', episodeManifest.episode.index === 1 && episodeManifest.episode.exportedFilmPath === '/exports/E1_Pilot.mov' && episodeManifest.episode.counts.scripts === 0, JSON.stringify(episodeManifest))
 
 if (failures) {
   console.error(`\nepisodeExport selftest: ${failures} FAILED`)

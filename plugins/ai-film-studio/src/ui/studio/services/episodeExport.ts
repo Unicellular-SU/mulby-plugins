@@ -24,6 +24,30 @@ export interface EpisodeExportResult {
   errors: string[]
 }
 
+export interface SingleEpisodePackageManifest {
+  projectId: string
+  projectName: string
+  exportedAt: string
+  episode: {
+    id: string
+    index: number
+    title: string
+    summary?: string
+    productionRecap?: string
+    filmPath?: string
+    exportedFilmPath?: string
+    producedAt?: number
+    counts: {
+      scripts: number
+      storyboards: number
+      clips: number
+      tracks: number
+    }
+    scripts: Episode['scripts']
+    storyboards: Episode['storyboards']
+  }
+}
+
 function safeFileName(value: string, fallback = 'film'): string {
   return (value || fallback)
     .replace(/[<>:"/\\|?*\x00-\x1f]+/g, '_')
@@ -66,6 +90,10 @@ export function seasonPackageDirName(doc: ProjectDoc, date = new Date()): string
   return `${safeFileName(doc.meta.name || 'series', 'series')}_season_${timestampPart(date)}`
 }
 
+export function episodePackageDirName(doc: ProjectDoc, episode: Episode, date = new Date()): string {
+  return `${safeFileName(doc.meta.name || 'series', 'series')}_E${episode.index + 1}_${safeFileName(episode.title || 'episode', 'episode')}_${timestampPart(date)}`
+}
+
 export function buildEpisodeExportManifest(doc: ProjectDoc, episodes: EpisodeExportManifest['episodes'], exportedAt = new Date().toISOString()): EpisodeExportManifest {
   return {
     projectId: doc.meta.id,
@@ -73,6 +101,37 @@ export function buildEpisodeExportManifest(doc: ProjectDoc, episodes: EpisodeExp
     exportedAt,
     episodeCount: episodes.length,
     episodes,
+  }
+}
+
+export function buildSingleEpisodePackageManifest(
+  doc: ProjectDoc,
+  episode: Episode,
+  exportedFilmPath?: string,
+  exportedAt = new Date().toISOString(),
+): SingleEpisodePackageManifest {
+  return {
+    projectId: doc.meta.id,
+    projectName: doc.meta.name,
+    exportedAt,
+    episode: {
+      id: episode.id,
+      index: episode.index + 1,
+      title: episode.title,
+      summary: episode.summary,
+      productionRecap: episode.productionRecap,
+      filmPath: episode.filmPath,
+      exportedFilmPath,
+      producedAt: episode.producedAt,
+      counts: {
+        scripts: episode.scripts.length,
+        storyboards: episode.storyboards.length,
+        clips: episode.clips.length,
+        tracks: episode.track.length,
+      },
+      scripts: episode.scripts,
+      storyboards: episode.storyboards,
+    },
   }
 }
 
@@ -110,4 +169,37 @@ export async function exportProducedEpisodes(doc: ProjectDoc): Promise<EpisodeEx
   const manifestPath = joinPath(dir, 'manifest.json')
   await filesystem.writeFile(manifestPath, JSON.stringify(buildEpisodeExportManifest(doc, exported), null, 2), 'utf-8')
   return { dir, manifestPath, count: exported.filter((item) => !item.error).length, errors }
+}
+
+export async function exportEpisodePackage(doc: ProjectDoc, episode: Episode): Promise<EpisodeExportResult> {
+  if (!episode.filmPath) throw new Error('当前集还没有成片可导出')
+  const dialog = window.mulby?.dialog
+  const filesystem = window.mulby?.filesystem
+  if (!dialog || !filesystem) throw new Error('宿主文件系统 API 不可用')
+
+  const dirs = await dialog.showOpenDialog({
+    title: `选择 E${episode.index + 1} 导出目录`,
+    buttonLabel: '导出到这里',
+    properties: ['openDirectory'],
+  })
+  const root = dirs?.[0]
+  if (!root) return { cancelled: true, count: 0, errors: [] }
+
+  const dir = joinPath(root, episodePackageDirName(doc, episode))
+  await filesystem.mkdir(dir)
+  const filmName = `${safeFileName(`E${episode.index + 1}_${episode.title}`)}${extName(episode.filmPath)}`
+  const exportedFilmPath = joinPath(dir, filmName)
+  const errors: string[] = []
+  try {
+    await filesystem.copy(episode.filmPath, exportedFilmPath)
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error))
+  }
+  const manifestPath = joinPath(dir, 'episode.json')
+  await filesystem.writeFile(
+    manifestPath,
+    JSON.stringify(buildSingleEpisodePackageManifest(doc, episode, errors.length ? undefined : exportedFilmPath), null, 2),
+    'utf-8',
+  )
+  return { dir, manifestPath, count: errors.length ? 0 : 1, errors }
 }
