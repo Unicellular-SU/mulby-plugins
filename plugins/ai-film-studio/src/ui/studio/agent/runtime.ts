@@ -85,7 +85,7 @@ ${toolSchemaText(tools)}
 - 续写下一集、承接上一集状态、处理换装/妆容/受伤/时期变化时，先调用 get_episode_handoff 读取最近制作回顾、共享资产出场记录和承接建议；看到上一相关剧集使用过具体形态或本集已有适用变体时，分镜写入必须用 castRefs/variant 精确绑定。
 - 检查跨集角色一致性、妆容/服装绑定或缺图问题时，优先调用 get_continuity_report，再决定是否补资产、补变体或修正分镜绑定。
 - get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要改名、补充或移除 aliases 时调用 update_asset，确认是真重复且引用复杂时再建议合并资产；不要继续用同一称呼创建新角色、场景或道具。
-- get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就把它加入相应分镜 cast/castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。
+- get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就调用 set_storyboard_asset_ref 把它加入相应分镜 castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。
 - get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，优先调用 set_storyboard_scene_asset，让同一 sceneId 的连续分镜复用同一个场景资产；不要为同一空间重复创建新场景。
 - get_continuity_report 返回 scene_group_variant_mismatch 时，先判断是否有明确换装/状态变化；没有明确变化时，优先用 set_storyboard_cast_variant 让同一 sceneId 连续分镜里的同一角色使用同一形态。
 - get_continuity_report 返回 episode_variant_available 且带 variantId 时，优先调用 set_storyboard_cast_variant 把该分镜资产绑定到本集适用形态；不要继续让分镜使用主形象。

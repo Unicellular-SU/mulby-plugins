@@ -445,6 +445,28 @@ function storyboardWithSceneAsset(doc: ProjectDoc, storyboard: Storyboard, scene
   }
 }
 
+function storyboardWithAssetRef(storyboard: Storyboard, assetId: string, opts?: { remove?: boolean; variantId?: string; roleInShot?: StoryboardCastRef['roleInShot']; note?: string }): Pick<Storyboard, 'associateAssetIds' | 'castRefs'> {
+  const refs = castRefsForStoryboard(storyboard)
+  let nextRefs = refs.filter((ref) => ref.assetId !== assetId)
+  if (opts?.remove !== true) {
+    const existing = refs.find((ref) => ref.assetId === assetId)
+    nextRefs = [
+      ...nextRefs,
+      {
+        ...existing,
+        assetId,
+        variantId: opts?.variantId ?? existing?.variantId,
+        roleInShot: opts?.roleInShot ?? existing?.roleInShot,
+        note: opts?.note ?? existing?.note,
+      },
+    ]
+  }
+  return {
+    associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
+    castRefs: nextRefs,
+  }
+}
+
 function hasEpisodeSelector(args: Record<string, unknown>): boolean {
   return (
     (typeof args.episodeId === 'string' && !!args.episodeId.trim()) ||
@@ -1170,6 +1192,56 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+        })
+      },
+    },
+    {
+      name: 'set_storyboard_asset_ref',
+      description: '给已有分镜补充或移除角色/场景/道具资产引用，可选绑定变体；用于把 unused_project_asset 复用到合适分镜，或修正既有分镜出场资产。',
+      parameters: {
+        type: 'object',
+        properties: {
+          storyboardId: { type: 'string' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
+          index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空时使用。' },
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
+          variantId: { type: 'string' },
+          variantLabel: { type: 'string' },
+          label: { type: 'string' },
+          roleInShot: { type: 'string', enum: ['lead', 'supporting', 'background'] },
+          note: { type: 'string' },
+          remove: { type: 'boolean', description: 'true 时从该分镜移除此资产引用。' },
+        },
+      },
+      execute: async (a) => {
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
+        if (!d) return '无项目'
+        const storyboard = resolveStoryboard(d, a)
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const variantToken = a.variantId ?? a.variantLabel ?? a.label
+        const variant = variantToken ? findAssetVariant(asset, variantToken) : undefined
+        if (variantToken && !variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        const patch = storyboardWithAssetRef(storyboard, asset.id, {
+          remove: a.remove === true,
+          variantId: variant?.id,
+          roleInShot: roleInShot(a.roleInShot),
+          note: stringArg(a.note),
+        })
+        get().upsertStoryboard({ id: storyboard.id, videoDesc: storyboard.videoDesc, ...patch })
+        const next = doc()
+        const updated = next?.storyboards.find((s) => s.id === storyboard.id)
+        return json({
+          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          asset: assetView(asset, { includeImages: false }),
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
         })
       },

@@ -209,17 +209,19 @@ writableDoc.assets = [
   { id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] },
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
+  { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
+const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !updateAsset || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!addStoryboard || !updateAsset || !setAssetRef || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -243,6 +245,15 @@ check(
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
+
+const assetRefResult = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Lantern', roleInShot: 'supporting' }))
+check(
+  'set_storyboard_asset_ref adds unused asset to selected storyboard',
+  assetRefResult.episode?.episodeId === 'ep2' &&
+    assetRefResult.storyboard?.castRefs?.some((ref: { assetId: string; roleInShot?: string }) => ref.assetId === 'lantern' && ref.roleInShot === 'supporting') &&
+    assetRefResult.storyboard?.castAssetIds?.includes('lantern'),
+  JSON.stringify(assetRefResult),
+)
 
 writableDoc.storyboards.push({ ...storyboard('scene-a', writableDoc.storyboards.length, 'Hall first shot.'), sceneId: 'hallway', associateAssetIds: ['hall'], castRefs: [{ assetId: 'hall' }] })
 writableDoc.storyboards.push({ ...storyboard('scene-b', writableDoc.storyboards.length, 'Hall second shot.'), sceneId: 'hallway', associateAssetIds: ['lobby'], castRefs: [{ assetId: 'lobby' }] })
