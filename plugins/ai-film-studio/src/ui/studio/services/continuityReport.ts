@@ -169,12 +169,12 @@ interface AssetLookupEntry {
   source: 'name' | 'alias'
 }
 
-interface LastVariantUse {
+interface LastAppearanceUse {
   episodeId: string
   episodeIndex: number
   episodeTitle: string
-  variantId: string
-  variantLabel: string
+  variantId?: string
+  variantLabel?: string
 }
 
 function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
@@ -363,7 +363,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
   const assignedChapterIds = new Set<string>()
   const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
-  const lastVariantUseByAsset = new Map<string, LastVariantUse>()
+  const lastAppearanceUseByAsset = new Map<string, LastAppearanceUse>()
   const stateRegressionWarnings = new Set<string>()
   addDuplicateAssetNameIssues(doc, allIssues)
   addDuplicateAssetAliasIssues(doc, allIssues)
@@ -421,9 +421,9 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
           addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
         }
         if (variant && !scopeIssue && !variantHasScope(variant)) {
-          const previous = lastVariantUseByAsset.get(asset.id)
+          const previous = lastAppearanceUseByAsset.get(asset.id)
           const key = `${episode.id}:${storyboard.id}:${asset.id}:${variant.id}`
-          if (previous && previous.episodeId !== episode.id && previous.variantId !== variant.id && !stateRegressionWarnings.has(key)) {
+          if (previous?.variantId && previous.episodeId !== episode.id && previous.variantId !== variant.id && !stateRegressionWarnings.has(key)) {
             stateRegressionWarnings.add(key)
             addIssue({
               ...base,
@@ -436,7 +436,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
               code: 'asset_state_changed_variant',
               scopeKind: 'episode',
               sceneId: storyboard.sceneId,
-              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}-${variant.label}」，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel}」。若这是剧情中的换装/妆容变化，建议把当前形态标记适用于本集；否则建议沿用上一形态。`,
+              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}-${variant.label}」，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel ?? previous.variantId}」。若这是剧情中的换装/妆容变化，建议把当前形态标记适用于本集；否则建议沿用上一形态。`,
             })
           }
         }
@@ -455,16 +455,16 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
               message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但当前分镜已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
             })
           } else {
-            const previous = lastVariantUseByAsset.get(asset.id)
+            const previous = lastAppearanceUseByAsset.get(asset.id)
             const key = `${episode.id}:${storyboard.id}:${asset.id}`
-            if (previous && previous.episodeId !== episode.id && !stateRegressionWarnings.has(key)) {
+            if (previous?.variantId && previous.episodeId !== episode.id && !stateRegressionWarnings.has(key)) {
               stateRegressionWarnings.add(key)
               addIssue({
                 ...base,
                 variantId: previous.variantId,
                 severity: 'warning',
                 code: 'asset_state_regressed_to_main',
-                message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel}」。如果状态延续，建议创建或绑定本集形态；如果剧情已恢复默认状态，可忽略。`,
+                message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel ?? previous.variantId}」。如果状态延续，建议创建或绑定本集形态；如果剧情已恢复默认状态，可忽略。`,
               })
             }
           }
@@ -486,12 +486,18 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
           appliesToEpisode,
         })
         if (variant) {
-          lastVariantUseByAsset.set(asset.id, {
+          lastAppearanceUseByAsset.set(asset.id, {
             episodeId: episode.id,
             episodeIndex: episode.index + 1,
             episodeTitle: episode.title,
             variantId: variant.id,
             variantLabel: variant.label,
+          })
+        } else if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
+          lastAppearanceUseByAsset.set(asset.id, {
+            episodeId: episode.id,
+            episodeIndex: episode.index + 1,
+            episodeTitle: episode.title,
           })
         }
       }

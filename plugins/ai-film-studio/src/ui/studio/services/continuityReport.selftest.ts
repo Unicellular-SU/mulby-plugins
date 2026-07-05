@@ -343,6 +343,31 @@ check(
   JSON.stringify(scopedVariantSwitchReport.issues),
 )
 
+const variantSwitchAfterMainResetReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [
+        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img' },
+        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img' },
+      ],
+    }],
+    currentEpisodeId: 'ep3',
+    storyboards: [storyboard('gala-after-main-reset', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
+    episodes: [
+      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
+      episode('ep2', 1, { storyboards: [storyboard('main-reset', 0, [{ assetId: 'hero' }])] }),
+      episode('ep3', 2),
+    ],
+  }),
+)
+check(
+  'does not compare new variant against older variant after main reset',
+  variantSwitchAfterMainResetReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-reset') &&
+    !variantSwitchAfterMainResetReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-main-reset'),
+  JSON.stringify(variantSwitchAfterMainResetReport.issues),
+)
+
 const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
 const chapterReport = buildContinuityReport(
   doc({
