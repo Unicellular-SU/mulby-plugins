@@ -1174,7 +1174,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   updateAssetVariant: (assetId, variantId, patch) =>
     get().mutate((d) => {
       const variant = d.assets.find((a) => a.id === assetId)?.variants?.find((v) => v.id === variantId)
-      if (variant) Object.assign(variant, patch)
+      if (!variant) return
+      const affectsGeneratedRefs =
+        ('label' in patch && patch.label !== undefined && patch.label !== variant.label) ||
+        ('refImageId' in patch && patch.refImageId !== variant.refImageId)
+      Object.assign(variant, patch)
+      if (affectsGeneratedRefs) invalidateEpisodesUsingCastRef(d, assetId, variantId)
     }),
   deleteAssetVariant: async (assetId, variantId) => {
     const refImageId = get().doc?.assets.find((a) => a.id === assetId)?.variants?.find((v) => v.id === variantId)?.refImageId
