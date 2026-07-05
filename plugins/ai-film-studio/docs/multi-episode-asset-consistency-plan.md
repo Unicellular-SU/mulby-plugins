@@ -265,4 +265,5 @@ export interface StoryboardCastRef {
 29. 已完成：把 `scene_group_variant_mismatch` 写入 Agent 生成/修正规则；除非剧本明确发生换装、化妆、受伤或状态转变，Agent 会优先统一同一 `sceneId` 内的角色形态。
 30. 已完成：一致性抽屉的同场景角色形态漂移告警支持一键统一；点击某条漂移告警会把当前集同一 `sceneId` 内该角色统一为该分镜的形态。
 31. 已完成：一致性抽屉的连续场景资产告警支持一键补齐漏挂场景资产，或把当前集同一 `sceneId` 内的分镜统一为选中场景资产。
-32. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
+32. 已完成：新增 Agent 工具 `set_storyboard_scene_asset`，可按单个分镜或同一 `sceneId` 场景组补齐/统一场景资产，用于自动修复 `scene_group_missing_asset` 和 `scene_group_asset_mismatch`。
+33. 下一步：继续扩展系列一致性质量门，把更复杂的跨集状态变化纳入自动修复和更细粒度的 Agent 生成约束。
