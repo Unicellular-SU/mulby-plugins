@@ -6,7 +6,7 @@
  * 关键帧作参考、画风锚定 + 提示词出图，返回新 assetId。节点图编辑（edges）作 P2，先用参考图勾选列表覆盖核心。
  */
 import { editImage, generateImage } from '../../services/imageEngine'
-import { saveAsset } from '../../services/assets'
+import { saveAsset, loadAsset } from '../../services/assets'
 import { getStylePack, applyStylePack } from '../../services/stylePacks'
 import { useGraphStore } from '../../store/graphStore'
 import type { ProjectMeta } from '../../domain/types'
@@ -18,7 +18,6 @@ function sizeForRatio(ratio: string): string {
 }
 
 async function refBase64(assetId: string): Promise<{ base64: string; mime: string } | null> {
-  const { loadAsset } = await import('../../services/assets')
   const a = await loadAsset(assetId)
   return a ? { base64: a.base64, mime: a.mime } : null
 }
