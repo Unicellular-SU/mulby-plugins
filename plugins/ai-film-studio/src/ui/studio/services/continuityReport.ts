@@ -12,6 +12,8 @@ export interface ContinuityIssue {
   sceneId?: string
   assetId?: string
   variantId?: string
+  candidateVariantIds?: string[]
+  candidateVariantLabels?: string[]
   conflictLabel?: string
   conflictSource?: 'name' | 'alias'
   relatedAssetIds?: string[]
@@ -389,6 +391,8 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
             addIssue({
               ...base,
               variantId: scopedVariants.length === 1 ? scopedVariants[0].id : undefined,
+              candidateVariantIds: scopedVariants.map((item) => item.id),
+              candidateVariantLabels: scopedVariants.map((item) => item.label),
               severity: 'warning',
               code: 'episode_variant_available',
               sceneId: storyboard.sceneId,

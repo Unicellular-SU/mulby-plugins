@@ -1590,8 +1590,27 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     return { label: '生成该变体参考图', run: () => void generateAssetVariant(asset.id, variant.id) }
   }
   const bindEpisodeVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'episode_variant_available' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
-    setStoryboardCastVariant(issue.storyboardId, issue.assetId, issue.variantId)
+    if (issue.code !== 'episode_variant_available' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    const candidates = (issue.candidateVariantIds ?? []).flatMap((id) => {
+      const variant = asset?.variants?.find((item) => item.id === id)
+      return variant ? [variant] : []
+    })
+    const directVariant = issue.variantId ? asset?.variants?.find((variant) => variant.id === issue.variantId) : undefined
+    let variantId = directVariant?.id
+    if (!variantId && candidates.length === 1) variantId = candidates[0].id
+    if (!variantId && candidates.length > 1) {
+      const options = candidates.map((variant, index) => `${index + 1}. ${variant.label} (${variant.id})`).join('\n')
+      const raw = window.prompt(`选择要绑定的形态序号：\n${options}`, '1')?.trim()
+      if (!raw) return
+      const byIndex = Number(raw)
+      const selected = Number.isFinite(byIndex)
+        ? candidates[Math.max(0, Math.floor(byIndex) - 1)]
+        : candidates.find((variant) => variant.id === raw || variant.label.toLowerCase() === raw.toLowerCase())
+      variantId = selected?.id
+    }
+    if (!variantId) return
+    setStoryboardCastVariant(issue.storyboardId, issue.assetId, variantId)
   }
   const carryPreviousVariant = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'asset_state_regressed_to_main' || !issue.episodeId || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
@@ -1692,7 +1711,12 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
         const canAddVariantScope = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
         const addVariantScopeLabel = issue.scopeKind === 'scene' ? '标记变体适用于本场景' : issue.scopeKind === 'storyboard' ? '标记变体适用于本分镜' : '标记变体适用于本集'
-        const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
+        const canBindEpisodeVariant =
+          issue.code === 'episode_variant_available' &&
+          issue.episodeId === doc.currentEpisodeId &&
+          !!issue.storyboardId &&
+          !!issue.assetId &&
+          (!!issue.variantId || (issue.candidateVariantIds?.length ?? 0) > 0)
         const canCarryPreviousVariant = issue.code === 'asset_state_regressed_to_main' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
@@ -1722,7 +1746,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             )}
             {canBindEpisodeVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => bindEpisodeVariant(issue)}>
-                绑定本集形态
+                {(issue.candidateVariantIds?.length ?? 0) > 1 ? '选择并绑定形态' : '绑定本集形态'}
               </button>
             )}
             {canCarryPreviousVariant && (

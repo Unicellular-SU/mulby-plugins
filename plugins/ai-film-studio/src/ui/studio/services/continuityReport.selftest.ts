@@ -203,7 +203,35 @@ const episodeVariantCoverageReport = buildContinuityReport(
   }),
 )
 const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
-check('flags main asset use when episode scoped variant exists', availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.storyboardId === 'main-use', JSON.stringify(episodeVariantCoverageReport.issues))
+check(
+  'flags main asset use when episode scoped variant exists',
+  availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.candidateVariantIds?.[0] === 'v-gala' && availableVariantIssue.storyboardId === 'main-use',
+  JSON.stringify(episodeVariantCoverageReport.issues),
+)
+
+const multiVariantCoverageReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [
+        { id: 'v-gala', label: 'Gala', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
+        { id: 'v-mask', label: 'Masked', appliesToEpisodeIds: ['ep1'], refImageId: 'mask-img' },
+      ],
+    }],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('main-use-multiple', 0, [{ assetId: 'hero' }])],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+const multiVariantIssue = multiVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
+check(
+  'lists candidate variants when multiple scoped variants apply',
+  !multiVariantIssue?.variantId &&
+    multiVariantIssue?.candidateVariantIds?.includes('v-gala') === true &&
+    multiVariantIssue?.candidateVariantIds?.includes('v-mask') === true &&
+    multiVariantIssue?.candidateVariantLabels?.includes('Masked') === true,
+  JSON.stringify(multiVariantCoverageReport.issues),
+)
 
 const sceneVariantCoverageReport = buildContinuityReport(
   doc({

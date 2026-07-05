@@ -88,7 +88,7 @@ ${toolSchemaText(tools)}
 - get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就调用 set_storyboard_asset_ref 把它加入相应分镜 castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。
 - get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，优先调用 set_storyboard_scene_asset，让同一 sceneId 的连续分镜复用同一个场景资产；不要为同一空间重复创建新场景。
 - get_continuity_report 返回 scene_group_variant_mismatch 时，先判断是否有明确换装/状态变化；没有明确变化时，优先用 set_storyboard_cast_variant 让同一 sceneId 连续分镜里的同一角色使用同一形态。
-- get_continuity_report 返回 episode_variant_available 且带 variantId 时，优先调用 set_storyboard_cast_variant 把该分镜资产绑定到当前分镜/场景/剧集适用形态；不要继续让分镜使用主形象。
+- get_continuity_report 返回 episode_variant_available 且带 variantId 或 candidateVariantIds 时，先按剧情选择正确形态，再调用 set_storyboard_cast_variant 把该分镜资产绑定到当前分镜/场景/剧集适用形态；不要继续让分镜使用主形象。
 - get_continuity_report 返回 variant_out_of_episode_scope 且带 assetId/variantId/scopeKind 时，优先调用 set_asset_variant_scope 把该变体标记为适用于对应分镜、场景或剧集；不要用 upsert_asset_variant 覆盖已有适用范围数组。
 - get_continuity_report 返回 asset_state_regressed_to_main 时，先判断剧情是否确实恢复默认状态；如果状态应延续或变化，调用 upsert_asset_variant 创建本集形态并用 set_storyboard_cast_variant 绑定。
 - 同一角色有妆容、服装、年龄或时期差异时，先用 get_assets 查看 variants；缺少变体就调用 upsert_asset_variant 创建/更新，再在 add_storyboard 或 set_storyboard_cast_variant 里传 castRefs/variant 精确绑定。不要只把变体写进画面描述。
