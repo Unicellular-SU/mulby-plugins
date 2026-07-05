@@ -74,6 +74,7 @@ export interface ProjectState {
   renameEpisode: (id: string, title: string) => void
   deleteEpisode: (id: string) => void
   resetCurrentEpisodeProduction: () => void
+  setCurrentEpisodeSeriesSkip: (skip: boolean) => void
   setEpisodeNovelChapters: (episodeId: string, chapterIds: string[]) => void
   distributeNovelChaptersAcrossEpisodes: () => void
 
@@ -793,6 +794,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       invalidateCurrentEpisodeProduction(d)
     })
   },
+
+  setCurrentEpisodeSeriesSkip: (skip) =>
+    get().mutate((d) => {
+      const episode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
+      if (!episode) return
+      episode.seriesSkip = skip || undefined
+      episode.updatedAt = Date.now()
+    }),
 
   setEpisodeNovelChapters: (episodeId, chapterIds) =>
     get().mutate((d) => {

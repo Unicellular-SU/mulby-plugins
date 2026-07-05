@@ -78,12 +78,13 @@ export function invalidateEpisodesUsingAsset(doc: ProjectDoc, assetId: string): 
   return changed
 }
 
-export type EpisodeSeriesQueueState = 'pending' | 'completed' | 'failed' | 'generating' | 'empty'
+export type EpisodeSeriesQueueState = 'pending' | 'completed' | 'failed' | 'generating' | 'skipped' | 'empty'
 
 export function episodeSeriesQueueState(doc: ProjectDoc, episode: Episode): EpisodeSeriesQueueState {
   if (episode.status === 'generating') return 'generating'
   if (episode.filmPath || episode.status === 'done') return 'completed'
   if (episode.filmError) return 'failed'
+  if (episode.seriesSkip) return 'skipped'
   if (storyboardsForEpisode(doc, episode).length === 0) return 'empty'
   return 'pending'
 }

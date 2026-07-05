@@ -255,6 +255,7 @@ export interface Episode {
   title: string
   summary?: string
   productionRecap?: string
+  seriesSkip?: boolean
   status?: EpisodeStatus
   filmPath?: string
   filmError?: string

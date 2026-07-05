@@ -62,6 +62,7 @@ const doc: ProjectDoc = {
     episode('ep1', 0),
     episode('ep2', 1, {
       title: 'Second',
+      seriesSkip: true,
       scripts: [{ id: 'script-ep2', name: 'Hidden Script', content: 'The hidden clue is found in episode two.', createdAt: 0, updatedAt: 0 }],
       storyboards: [storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.')],
       storyboardTable: table('Hidden clue scene'),
@@ -92,6 +93,7 @@ check('search_project finds non-current episode storyboard table', search.storyb
 const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
+check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
 
 const ep2Script = JSON.parse(await getScript.execute({ episodeIndex: 2, contentLimit: 200 }))
 check('get_script reads non-current episode by episode index', ep2Script.id === 'script-ep2' && ep2Script.episodeId === 'ep2' && ep2Script.content?.text.includes('hidden clue'), JSON.stringify(ep2Script))
@@ -170,6 +172,10 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       sb.castRefs = refs
       sb.associateAssetIds = [...new Set(refs.map((ref) => ref.assetId))]
     },
+    setCurrentEpisodeSeriesSkip: (skip: boolean) => {
+      const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
+      if (episode) episode.seriesSkip = skip || undefined
+    },
   }
   return state as unknown as ProjectState
 }
@@ -181,8 +187,9 @@ const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
+const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !setCastVariant) {
+if (!addStoryboard || !setCastVariant || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -194,6 +201,9 @@ check('add_storyboard does not append to previous current episode', !ep1AfterAdd
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
+
+const restoredEpisode = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: false }))
+check('set_episode_series_skip restores selected episode queue state', restoredEpisode.episode?.id === 'ep2' && restoredEpisode.episode?.seriesSkip === false && restoredEpisode.episode?.seriesQueueState === 'pending', JSON.stringify(restoredEpisode))
 
 if (failures) {
   console.error(`\nagentTools selftest: ${failures} FAILED`)

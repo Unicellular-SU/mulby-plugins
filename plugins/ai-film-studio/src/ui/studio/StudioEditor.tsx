@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -145,7 +145,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
               size="md"
               leadingIcon={Film}
               disabled={busy || !canProduceSeries}
-              title="按剧集顺序生成待处理剧集，已成片和失败剧集会跳过；失败集需重置后重试"
+              title="按剧集顺序生成待处理剧集，已成片、失败和暂缓剧集会跳过；失败集需重置后重试"
               onClick={() => void autoProduceSeries()}
             >
               生成全剧
@@ -222,6 +222,7 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const renameEpisode = useProjectStore((s) => s.renameEpisode)
   const deleteEpisode = useProjectStore((s) => s.deleteEpisode)
   const resetCurrentEpisodeProduction = useProjectStore((s) => s.resetCurrentEpisodeProduction)
+  const setCurrentEpisodeSeriesSkip = useProjectStore((s) => s.setCurrentEpisodeSeriesSkip)
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const currentId = doc.currentEpisodeId ?? episodes[0]?.id ?? ''
   const current = episodes.find((e) => e.id === currentId) ?? episodes[0]
@@ -247,6 +248,10 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const resetProduction = () => {
     if (!current) return
     if (window.confirm(`重置「${current.title}」的成片状态？该集会重新进入全剧生成队列。`)) resetCurrentEpisodeProduction()
+  }
+  const toggleSeriesSkip = () => {
+    if (!current) return
+    setCurrentEpisodeSeriesSkip(!current.seriesSkip)
   }
   return (
     <div className="afs-stwb__episode" aria-label="剧集">
@@ -281,6 +286,12 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
               {current.filmError ? '成片失败' : current.status === 'generating' ? '生成中' : '已成片'}
             </span>
           )}
+          {current.seriesSkip && (
+            <span className="afs-stwb__episode-chip afs-stwb__episode-chip--optional afs-stwb__episode-chip--audit is-warning" title="当前集已暂缓，不会参与生成全剧">
+              <PauseCircle size={11} />
+              已暂缓
+            </span>
+          )}
           <span
             className={`afs-stwb__episode-chip afs-stwb__episode-chip--audit${currentErrors ? ' is-error' : currentWarnings ? ' is-warning' : ' is-ok'}`}
             title={issueTitle}
@@ -307,6 +318,15 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
         icon={<Pencil size={16} />}
         disabled={busy || !current}
         onClick={renameCurrent}
+      />
+      <IconButton
+        size="sm"
+        variant="ghost"
+        aria-label={current?.seriesSkip ? '恢复当前集进入全剧生成队列' : '暂缓当前集，不参与生成全剧'}
+        title={current?.seriesSkip ? '恢复当前集进入全剧生成队列' : '暂缓当前集，不参与生成全剧'}
+        icon={current?.seriesSkip ? <PlayCircle size={16} /> : <PauseCircle size={16} />}
+        disabled={busy || !current || current.status === 'generating'}
+        onClick={toggleSeriesSkip}
       />
       {canResetProduction && (
         <IconButton

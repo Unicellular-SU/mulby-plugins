@@ -7,6 +7,7 @@ import type { ProjectState } from '../../store/projectStore'
 import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { buildContinuityReport } from '../services/continuityReport'
+import { episodeSeriesQueueState } from '../services/episodeProduction'
 
 type ProjectDocGetter = () => ProjectDoc | null
 
@@ -159,6 +160,8 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     summary: episode.summary,
     productionRecap: episode.productionRecap,
     status: episode.status,
+    seriesSkip: episode.seriesSkip === true,
+    seriesQueueState: episodeSeriesQueueState(doc, episode),
     current,
     production: {
       hasFilm: !!episode.filmPath,
@@ -857,6 +860,33 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const next = get().doc ?? d
         const renamed = next.episodes?.find((e) => e.id === episode.id) ?? episode
         return json({ id: renamed.id, episode: episodeView(next, renamed) })
+      },
+    },
+    {
+      name: 'set_episode_series_skip',
+      description: 'Temporarily hold or restore an episode in the full-series production queue.',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          index: { type: 'number', description: '1-based episode index when episodeId is omitted.' },
+          title: { type: 'string', description: 'Episode title when episodeId/index is omitted.' },
+          episodeIndex: { type: 'number', description: '1-based episode index; alias of index.' },
+          episodeTitle: { type: 'string', description: 'Episode title; alias of title.' },
+          skip: { type: 'boolean', description: 'true to hold the episode out of series production; false to restore it.' },
+        },
+        required: ['skip'],
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisode(d, { episodeId: a.episodeId, index: a.index ?? a.episodeIndex, title: a.title ?? a.episodeTitle })
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (d.currentEpisodeId !== episode.id) get().switchEpisode(episode.id)
+        get().setCurrentEpisodeSeriesSkip(a.skip === true)
+        const next = get().doc ?? d
+        const updated = next.episodes?.find((e) => e.id === episode.id) ?? episode
+        return json({ episode: episodeView(next, updated) })
       },
     },
     {
