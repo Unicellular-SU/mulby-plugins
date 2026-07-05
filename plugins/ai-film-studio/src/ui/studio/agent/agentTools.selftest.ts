@@ -251,6 +251,16 @@ check(
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
 
+const scopedVariantStoryboard = writableDoc.storyboards.find((item) => item.id === variantResult.storyboard?.id)
+if (scopedVariantStoryboard) scopedVariantStoryboard.sceneId = 'banquet'
+const scopedVariantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala', ensureScope: true, scopeKind: 'scene' }))
+check(
+  'set_storyboard_cast_variant can scope a bound variant to the selected scene',
+  scopedVariantResult.variant?.variant?.appliesToSceneIds?.includes('banquet') === true &&
+    scopedVariantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'),
+  JSON.stringify(scopedVariantResult),
+)
+
 const sceneScopeResult = JSON.parse(await setVariantScope.execute({ assetName: 'Hero', variantLabel: 'Gala', scopeKind: 'scene', sceneId: 'banquet' }))
 const scopedHeroVariant = writableDoc.assets.find((item) => item.id === 'hero')?.variants?.find((item) => item.id === 'gala')
 check(

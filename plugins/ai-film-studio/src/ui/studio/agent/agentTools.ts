@@ -7,7 +7,7 @@ import type { ProjectState } from '../../store/projectStore'
 import type { Asset, AssetVariant, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
-import { buildContinuityReport } from '../services/continuityReport'
+import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -1249,7 +1249,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'set_storyboard_cast_variant',
-      description: '给已有分镜里的某个出场资产绑定或清除指定变体，用于修正同一角色的妆容/服装/时期一致性。',
+      description: '给已有分镜里的某个出场资产绑定或清除指定变体，用于修正同一角色的妆容/服装/时期一致性；可选 ensureScope/scopeKind 在绑定时补当前剧集/场景/分镜适用范围。',
       parameters: {
         type: 'object',
         properties: {
@@ -1264,6 +1264,8 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           variantId: { type: 'string' },
           variantLabel: { type: 'string' },
           label: { type: 'string' },
+          ensureScope: { type: 'boolean', description: 'true 时按该变体已有作用域层级，或 scopeKind 指定层级，把当前使用位置加入适用范围。' },
+          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'], description: 'ensureScope 时可指定补剧集/场景/分镜范围。' },
           clear: { type: 'boolean', description: 'true 时清除该资产在此分镜上的变体绑定。' },
         },
       },
@@ -1279,10 +1281,18 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
+        const scopeKind = variantScopeKind(a.scopeKind)
+        if (variant && (a.ensureScope === true || scopeKind)) {
+          const episode = target.episode ?? currentEpisode(d)
+          const patch = episode ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
+          if (patch) get().updateAssetVariant(asset.id, variant.id, patch)
+        }
         const next = doc()
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
+        const nextAsset = next?.assets.find((item) => item.id === asset.id)
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          variant: variant ? variantView(nextAsset ?? asset, variant.id) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
         })
       },

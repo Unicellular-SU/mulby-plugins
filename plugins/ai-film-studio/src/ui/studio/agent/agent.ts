@@ -310,7 +310,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     '连续场景里的同一角色默认保持同一形态；get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，用 set_storyboard_scene_asset 补齐或统一同一 sceneId 的场景资产；返回 scene_group_variant_mismatch 时，除非剧情明确发生换装/状态变化，否则用 set_storyboard_cast_variant 统一同一 sceneId 里的角色变体。' +
     'get_continuity_report 返回 episode_variant_available 且有多个 candidateVariantIds 时，先按剧情选择正确形态，再用 set_storyboard_cast_variant 绑定；不要继续让分镜使用主形象。' +
     'get_continuity_report 返回 variant_out_of_episode_scope 时，用 set_asset_variant_scope 追加对应分镜/场景/剧集适用范围，不要用 upsert_asset_variant 重写已有范围数组。' +
-    'get_continuity_report 返回 asset_state_changed_variant 时，若剧情明确换装/妆容/受伤/时期变化，用 set_asset_variant_scope 标记当前 variantId 适用于本集；否则用 set_storyboard_cast_variant 绑定 previousVariantId 沿用上一形态。' +
+    'get_continuity_report 返回 asset_state_changed_variant 时，若剧情明确换装/妆容/受伤/时期变化，用 set_asset_variant_scope 标记当前 variantId 适用于本集；否则用 set_storyboard_cast_variant 绑定 previousVariantId 沿用上一形态，并传 ensureScope=true 补当前使用范围。' +
     'get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要调整名称或 aliases 用 update_asset，不要用 add_asset 再创建同名/同别名资产。' +
     'get_continuity_report 返回 unused_project_asset 时，如果资产应在当前或指定剧集出场，用 set_storyboard_asset_ref 加入合适分镜；不要只口头说明复用。' +
     '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
