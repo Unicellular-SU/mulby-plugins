@@ -395,6 +395,16 @@ function NovelTab() {
   const batch = useProjectStore((s) => s.batch)
   const [text, setText] = useState('')
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const chapterById = new Map(doc.novel.map((chapter) => [chapter.id, chapter]))
+  const chapterUseCounts = new Map<string, number>()
+  for (const episode of episodes) {
+    for (const chapterId of episode.novelChapterIds ?? []) {
+      if (chapterById.has(chapterId)) chapterUseCounts.set(chapterId, (chapterUseCounts.get(chapterId) ?? 0) + 1)
+    }
+  }
+  const assignedChapterIds = new Set(chapterUseCounts.keys())
+  const unassignedChapters = doc.novel.filter((chapter) => !assignedChapterIds.has(chapter.id))
+  const reusedChapters = doc.novel.filter((chapter) => (chapterUseCounts.get(chapter.id) ?? 0) > 1)
   const toggleChapterEpisode = (chapterId: string, episodeId: string) => {
     const episode = episodes.find((item) => item.id === episodeId)
     if (!episode) return
@@ -437,6 +447,56 @@ function NovelTab() {
               <Trash2 size={13} /> 清空
             </button>
           </div>
+          {episodes.length > 1 && (
+            <div className="afs-studio__episodeplan" aria-label="多集章节规划">
+              <div className="afs-studio__episodeplan-head">
+                <b>多集拆章</b>
+                <span>
+                  已分配 {assignedChapterIds.size}/{doc.novel.length}
+                </span>
+                {unassignedChapters.length > 0 && <span className="is-warning">未分配 {unassignedChapters.length}</span>}
+                {reusedChapters.length > 0 && <span className="is-warning">重复 {reusedChapters.length}</span>}
+              </div>
+              <div className="afs-studio__episodeplan-grid">
+                {episodes.map((episode) => {
+                  const validChapters = (episode.novelChapterIds ?? []).map((id) => chapterById.get(id)).filter(Boolean) as typeof doc.novel
+                  const invalidCount = (episode.novelChapterIds ?? []).filter((id) => !chapterById.has(id)).length
+                  return (
+                    <div key={episode.id} className={`afs-studio__episodeplan-row${validChapters.length ? '' : ' is-empty'}`}>
+                      <div className="afs-studio__episodeplan-title">
+                        <b>E{episode.index + 1}</b>
+                        <span title={episode.title}>{episode.title}</span>
+                      </div>
+                      <div className="afs-studio__episodeplan-chapters">
+                        {validChapters.length ? (
+                          validChapters.slice(0, 5).map((chapter) => (
+                            <button key={chapter.id} type="button" title={`从 ${episode.title} 移出 ${chapter.title}`} onClick={() => toggleChapterEpisode(chapter.id, episode.id)}>
+                              {chapter.index + 1}. {chapter.title}
+                            </button>
+                          ))
+                        ) : (
+                          <span>未分配章节</span>
+                        )}
+                        {validChapters.length > 5 && <span>+{validChapters.length - 5}</span>}
+                        {invalidCount > 0 && <span className="is-warning">失效 {invalidCount}</span>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              {unassignedChapters.length > 0 && (
+                <div className="afs-studio__episodeplan-unassigned">
+                  <span>未分配</span>
+                  {unassignedChapters.slice(0, 8).map((chapter) => (
+                    <span key={chapter.id} title={chapter.title}>
+                      {chapter.index + 1}. {chapter.title}
+                    </span>
+                  ))}
+                  {unassignedChapters.length > 8 && <span>+{unassignedChapters.length - 8}</span>}
+                </div>
+              )}
+            </div>
+          )}
           <div className="afs-studio__chapters">
             {doc.novel.map((c) => (
               <div key={c.id} className="afs-studio__chapter afs-studio__chapter--col">

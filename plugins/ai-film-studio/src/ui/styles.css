@@ -3936,6 +3936,35 @@ select.afs-toolbar__select,
 .afs-studio__chapter { display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; border: 1px solid var(--afs-border); border-radius: 8px; }
 .afs-studio__chaptertitle { font-size: 13px; }
 .afs-studio__chapterlen { color: var(--afs-muted); font-size: 12px; }
+.afs-studio__episodeplan { display: flex; flex-direction: column; gap: 8px; padding: 9px 0 10px; border-top: 1px solid var(--afs-border); border-bottom: 1px solid var(--afs-border); }
+.afs-studio__episodeplan-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--afs-text-dim); }
+.afs-studio__episodeplan-head b { color: var(--afs-text); font-size: 13px; }
+.afs-studio__episodeplan .is-warning { color: var(--afs-warning); }
+.afs-studio__episodeplan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.afs-studio__episodeplan-row { min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 7px 8px; border: 1px solid var(--afs-border); border-radius: 8px; background: var(--afs-panel); }
+.afs-studio__episodeplan-row.is-empty { border-style: dashed; background: transparent; }
+.afs-studio__episodeplan-title { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
+.afs-studio__episodeplan-title b { flex: 0 0 auto; color: var(--afs-accent); }
+.afs-studio__episodeplan-title span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio__episodeplan-chapters, .afs-studio__episodeplan-unassigned { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
+.afs-studio__episodeplan-chapters button, .afs-studio__episodeplan-chapters span, .afs-studio__episodeplan-unassigned span {
+  max-width: 180px;
+  min-height: 22px;
+  padding: 3px 6px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-studio__episodeplan-chapters button { cursor: pointer; }
+.afs-studio__episodeplan-chapters button:hover { border-color: var(--afs-accent); color: var(--afs-text); }
+.afs-studio__episodeplan-chapters > span:first-child, .afs-studio__episodeplan-unassigned > span:first-child { background: transparent; border-color: transparent; padding-left: 0; color: var(--afs-muted); }
+.afs-studio__episodeplan-unassigned { padding-top: 2px; }
 
 /* 工作台 · 章节事件（阶段4c） */
 .afs-studio__chapter--col { flex-direction: column; align-items: stretch; gap: 6px; }
