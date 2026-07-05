@@ -1,4 +1,4 @@
-import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -114,6 +114,17 @@ const invalidatedMainRefs = invalidateEpisodesUsingCastRef(crossEpisodeRefs, 'pr
 check('invalidates every produced episode that uses a shared main asset ref', invalidatedMainRefs === 2 && !crossEpisodeRefs.episodes![0].filmPath && !crossEpisodeRefs.episodes![1].filmPath && !!crossEpisodeRefs.episodes![2].filmPath, JSON.stringify(crossEpisodeRefs.episodes))
 const invalidatedVariantRefs = invalidateEpisodesUsingCastRef(crossEpisodeRefs, 'hero', 'battle')
 check('invalidates produced non-current episode that uses a shared variant ref', invalidatedVariantRefs === 1 && !crossEpisodeRefs.episodes![2].filmPath, JSON.stringify(crossEpisodeRefs.episodes))
+
+const deletedAssetRefs = doc({
+  currentEpisodeId: 'ep1',
+  storyboards: [storyboard('ep1-main-delete', 0, [{ assetId: 'hero' }])],
+  episodes: [
+    episode('ep1', 0, { status: 'done', filmPath: 'ep1.mp4' }),
+    episode('ep2', 1, { status: 'done', filmPath: 'ep2.mp4', storyboards: [storyboard('ep2-variant-delete', 0, [{ assetId: 'hero', variantId: 'battle' }])] }),
+  ],
+})
+const invalidatedDeletedAsset = invalidateEpisodesUsingAsset(deletedAssetRefs, 'hero')
+check('invalidates all produced episodes that use a deleted shared asset', invalidatedDeletedAsset === 2 && !deletedAssetRefs.episodes![0].filmPath && !deletedAssetRefs.episodes![1].filmPath, JSON.stringify(deletedAssetRefs.episodes))
 
 const produced = episode('done', 0, { status: 'done', filmPath: 'film.mp4', filmError: 'old error', producedAt: 123, productionRecap: 'old recap', updatedAt: 10 })
 const changed = invalidateEpisodeProduction(produced)

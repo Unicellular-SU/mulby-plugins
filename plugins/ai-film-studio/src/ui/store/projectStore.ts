@@ -32,7 +32,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
-import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -846,7 +846,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     return id
   },
-  removeAsset: (id) => get().mutate((d) => (d.assets = d.assets.filter((x) => x.id !== id && x.parentAssetId !== id))),
+  removeAsset: (id) =>
+    get().mutate((d) => {
+      const removing = d.assets.filter((asset) => asset.id === id || asset.parentAssetId === id).map((asset) => asset.id)
+      if (!removing.length) return
+      for (const assetId of removing) invalidateEpisodesUsingAsset(d, assetId)
+      const removed = new Set(removing)
+      d.assets = d.assets.filter((asset) => !removed.has(asset.id))
+      const cleanStoryboards = (storyboards: Storyboard[]) => {
+        for (const storyboard of storyboards) {
+          if (storyboard.associateAssetIds.some((assetId) => removed.has(assetId))) {
+            storyboard.associateAssetIds = storyboard.associateAssetIds.filter((assetId) => !removed.has(assetId))
+          }
+          if (storyboard.castRefs?.some((ref) => removed.has(ref.assetId))) {
+            storyboard.castRefs = storyboard.castRefs.filter((ref) => !removed.has(ref.assetId))
+          }
+        }
+      }
+      cleanStoryboards(d.storyboards)
+      for (const episode of d.episodes ?? []) {
+        if (episode.id !== d.currentEpisodeId) cleanStoryboards(episode.storyboards)
+      }
+    }),
 
   importImageToProject: async (projectId, rec, kind) => {
     if (!rec.assetId || rec.type !== 'image') {

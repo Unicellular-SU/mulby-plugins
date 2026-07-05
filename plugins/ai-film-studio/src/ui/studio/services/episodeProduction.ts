@@ -49,6 +49,11 @@ export function episodeUsesCastRef(doc: ProjectDoc, episode: Episode | undefined
   )
 }
 
+export function episodeUsesAsset(doc: ProjectDoc, episode: Episode | undefined, assetId: string): boolean {
+  const storyboards = episode ? storyboardsForEpisode(doc, episode) : doc.storyboards
+  return storyboards.some((storyboard) => castRefsForStoryboard(storyboard).some((ref) => ref.assetId === assetId))
+}
+
 export function invalidateCurrentEpisodeProductionIfCastRef(doc: ProjectDoc, assetId: string, variantId?: string): boolean {
   return currentEpisodeUsesCastRef(doc, assetId, variantId) ? invalidateCurrentEpisodeProduction(doc) : false
 }
@@ -59,6 +64,16 @@ export function invalidateEpisodesUsingCastRef(doc: ProjectDoc, assetId: string,
   let changed = 0
   for (const episode of episodes) {
     if (episodeUsesCastRef(doc, episode, assetId, variantId) && invalidateEpisodeProduction(episode)) changed += 1
+  }
+  return changed
+}
+
+export function invalidateEpisodesUsingAsset(doc: ProjectDoc, assetId: string): number {
+  const episodes = doc.episodes?.length ? doc.episodes : undefined
+  if (!episodes) return episodeUsesAsset(doc, undefined, assetId) && invalidateCurrentEpisodeProduction(doc) ? 1 : 0
+  let changed = 0
+  for (const episode of episodes) {
+    if (episodeUsesAsset(doc, episode, assetId) && invalidateEpisodeProduction(episode)) changed += 1
   }
   return changed
 }
