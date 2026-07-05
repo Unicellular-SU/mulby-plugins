@@ -151,7 +151,7 @@ export type EpisodeSeriesQueueState = 'pending' | 'completed' | 'failed' | 'gene
 
 export function episodeSeriesQueueState(doc: ProjectDoc, episode: Episode): EpisodeSeriesQueueState {
   if (episode.status === 'generating') return 'generating'
-  if (episode.filmPath || episode.status === 'done') return 'completed'
+  if (episode.filmPath) return 'completed'
   if (episode.filmError) return 'failed'
   if (episode.seriesSkip) return 'skipped'
   if (storyboardsForEpisode(doc, episode).length === 0) return 'empty'

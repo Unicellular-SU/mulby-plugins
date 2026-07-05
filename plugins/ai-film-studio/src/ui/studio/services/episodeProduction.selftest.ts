@@ -95,16 +95,18 @@ const planned = doc({
     episode('ep3', 2, { storyboards: [] }),
     episode('ep4', 3, { storyboards: [storyboard('ep4-shot', 0, [])], filmError: 'failed' }),
     episode('ep5', 4, { storyboards: [storyboard('ep5-shot', 0, [])], seriesSkip: true }),
+    episode('ep6', 5, { status: 'done', storyboards: [storyboard('ep6-shot', 0, [])] }),
   ],
 })
 const pending = pendingEpisodesForSeries(planned)
-check('series production uses current flat storyboards and skips completed, failed, or held episodes', pending.map((item) => item.id).join(',') === 'ep1', JSON.stringify(pending.map((item) => item.id)))
+check('series production uses current flat storyboards and skips completed, failed, or held episodes', pending.map((item) => item.id).join(',') === 'ep1,ep6', JSON.stringify(pending.map((item) => item.id)))
 check('classifies failed episodes as held for explicit retry', episodeSeriesQueueState(planned, planned.episodes![3]) === 'failed', episodeSeriesQueueState(planned, planned.episodes![3]))
+check('does not treat done status without film path as completed', episodeSeriesQueueState(planned, planned.episodes![5]) === 'pending', episodeSeriesQueueState(planned, planned.episodes![5]))
 check('skips manually held episodes from series production', episodeSeriesQueueState(planned, planned.episodes![4]) === 'skipped' && !pendingEpisodesForSeries(planned).some((item) => item.id === 'ep5'), JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
 planned.episodes![4].seriesSkip = false
-check('restoring a held episode returns it to the series queue', pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep5', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
+check('restoring a held episode returns it to the series queue', pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep5,ep6', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
 const resetFailedEpisode = invalidateEpisodeProduction(planned.episodes![3])
-check('resetting a failed episode returns it to the series queue', resetFailedEpisode && pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep4,ep5', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
+check('resetting a failed episode returns it to the series queue', resetFailedEpisode && pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep4,ep5,ep6', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
 check('detects current episode main cast reference use', currentEpisodeUsesCastRef(planned, 'prop'), JSON.stringify(planned.storyboards))
 const variantOnly = doc({ currentEpisodeId: 'ep1', storyboards: [storyboard('variant-only', 0, [{ assetId: 'hero', variantId: 'battle' }])], episodes: [episode('ep1', 0)] })
 check('does not treat variant use as main cast reference use', !currentEpisodeUsesCastRef(variantOnly, 'hero') && currentEpisodeUsesCastRef(variantOnly, 'hero', 'battle'), 'variant-only use should not invalidate main refs')
