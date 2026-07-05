@@ -3779,6 +3779,23 @@ select.afs-toolbar__select,
 /* 资产 Tab */
 .afs-studio__assets { display: flex; flex-direction: column; gap: 18px; }
 /* 资产分组：可作为「从 Dock 拖入」的放置区，拖悬时高亮（落入该组即按该组类别加入） */
+.afs-studio__assetmatrix { display: flex; flex-direction: column; gap: 7px; padding: 9px 0 10px; border-top: 1px solid var(--afs-border); border-bottom: 1px solid var(--afs-border); }
+.afs-studio__assetmatrix-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--afs-text-dim); }
+.afs-studio__assetmatrix-head b { color: var(--afs-text); font-size: 13px; }
+.afs-studio__assetmatrix .is-warning { color: var(--afs-warning); }
+.afs-studio__assetmatrix-rows { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto; }
+.afs-studio__assetmatrix-row { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(92px, 1fr) minmax(120px, 1.2fr) auto; align-items: center; gap: 6px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--afs-border); border-radius: 8px; background: var(--afs-panel); }
+.afs-studio__assetmatrix-row.is-warning { border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border)); }
+.afs-studio__assetmatrix-name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.afs-studio__assetmatrix-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.afs-studio__assetmatrix-name em { flex: 0 0 auto; font-style: normal; font-size: 10px; color: var(--afs-text-dim); }
+.afs-studio__assetmatrix-chipset { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; min-width: 0; }
+.afs-studio__assetmatrix-chipset i, .afs-studio__assetmatrix-issue { max-width: 92px; min-height: 20px; padding: 2px 5px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; font-style: normal; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio__assetmatrix-issue { color: var(--afs-warning); border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border)); }
+@media (max-width: 1180px) {
+  .afs-studio__assetmatrix-row { grid-template-columns: minmax(110px, 1fr) minmax(90px, 1fr); }
+  .afs-studio__assetmatrix-issue { justify-self: start; }
+}
 .afs-studio__assetgroup { border: 1.5px dashed transparent; border-radius: 12px; transition: border-color .12s, background .12s; }
 .afs-studio__assetgroup.is-dragover { border-color: var(--afs-accent); background: var(--afs-hover); }
 .afs-studio__assetgroup-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }

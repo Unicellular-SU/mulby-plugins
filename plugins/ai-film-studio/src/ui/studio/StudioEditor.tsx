@@ -675,6 +675,7 @@ function AssetsTab() {
           {batch.running ? <Loader2 size={13} className="afs-spin" /> : <Bot size={13} />} AI 配音匹配
         </button>
       </div>
+      {(doc.episodes?.length ?? 0) > 1 && <AssetContinuityPanel />}
       {groups.map((g) => {
         const items = doc.assets.filter((a) => a.type === g.type && !a.parentAssetId)
         return (
@@ -708,6 +709,56 @@ function AssetsTab() {
         )
       })}
       <VoiceLibrary />
+    </div>
+  )
+}
+
+function AssetContinuityPanel() {
+  const doc = useProjectStore((s) => s.doc)!
+  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
+  const rows = doc.assets
+    .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
+    .map((asset) => {
+      const uses = continuity.episodes.flatMap((episode) => episode.castUses.filter((use) => use.assetId === asset.id).map((use) => ({ episode, use })))
+      const episodeLabels = [...new Map(uses.map(({ episode }) => [episode.id, `E${episode.index}`])).values()]
+      const variantLabels = [...new Set(uses.map(({ use }) => use.variantLabel ?? (use.variantId ? use.variantId : '主形象')))]
+      const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
+      return { asset, episodeLabels, variantLabels, issues }
+    })
+    .filter((row) => row.episodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
+  if (!rows.length) return null
+  const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
+  const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
+  return (
+    <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
+      <div className="afs-studio__assetmatrix-head">
+        <b>跨集资产一致性</b>
+        <span>{rows.length} 个资产</span>
+        {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
+      </div>
+      <div className="afs-studio__assetmatrix-rows">
+        {rows.map((row) => (
+          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${row.issues.length ? ' is-warning' : ''}`}>
+            <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
+              <b>{row.asset.name}</b>
+              <em>{typeLabel(row.asset.type)}</em>
+            </span>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`}>
+              {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
+              {row.episodeLabels.length > 8 && <i>+{row.episodeLabels.length - 8}</i>}
+            </span>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`}>
+              {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
+              {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
+            </span>
+            {row.issues.length > 0 && (
+              <span className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
+                {row.issues.length} 问题
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
