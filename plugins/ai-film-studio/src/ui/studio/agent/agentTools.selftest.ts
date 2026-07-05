@@ -1,5 +1,6 @@
-import { makeProjectReadTools } from './agentTools'
+import { makeAgentTools, makeProjectReadTools } from './agentTools'
 import type { Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardTableScene } from '../../domain/types'
+import type { ProjectState } from '../../store/projectStore'
 
 let failures = 0
 
@@ -103,6 +104,96 @@ check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[
 
 const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
+
+function cloneDoc(input: ProjectDoc): ProjectDoc {
+  return JSON.parse(JSON.stringify(input)) as ProjectDoc
+}
+
+function makeWritableState(initial: ProjectDoc): ProjectState {
+  const current = initial
+  let nextStoryboard = 1
+
+  const syncCurrentEpisode = () => {
+    const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
+    if (!episode) return
+    episode.scripts = current.scripts
+    episode.storyboards = current.storyboards
+    episode.storyboardTable = current.storyboardTable
+    episode.clips = current.clips
+    episode.track = current.track
+  }
+  const applyEpisode = (episode: Episode) => {
+    current.scripts = episode.scripts
+    current.storyboards = episode.storyboards
+    current.storyboardTable = episode.storyboardTable
+    current.clips = episode.clips
+    current.track = episode.track
+  }
+
+  const state = {
+    get doc() {
+      return current
+    },
+    switchEpisode: (id: string) => {
+      if (current.currentEpisodeId === id) return
+      syncCurrentEpisode()
+      const episode = current.episodes?.find((item) => item.id === id)
+      if (!episode) return
+      current.currentEpisodeId = episode.id
+      applyEpisode(episode)
+    },
+    upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => {
+      const id = s.id ?? `sb-write-${nextStoryboard++}`
+      const index = current.storyboards.findIndex((item) => item.id === id)
+      const base = index >= 0 ? current.storyboards[index] : storyboard(id, current.storyboards.length, s.videoDesc)
+      const merged: Storyboard = {
+        ...base,
+        ...s,
+        id,
+        index: index >= 0 ? base.index : current.storyboards.length,
+        videoDesc: s.videoDesc,
+        associateAssetIds: s.associateAssetIds ?? base.associateAssetIds ?? [],
+        shouldGenerateImage: s.shouldGenerateImage ?? base.shouldGenerateImage ?? true,
+        state: s.state ?? base.state ?? 'idle',
+      }
+      if (index >= 0) current.storyboards[index] = merged
+      else current.storyboards.push(merged)
+      return id
+    },
+    setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => {
+      const sb = current.storyboards.find((item) => item.id === storyboardId)
+      if (!sb) return
+      const refs = (sb.castRefs?.length ? [...sb.castRefs] : sb.associateAssetIds.map((id) => ({ assetId: id })))
+      const existing = refs.find((ref) => ref.assetId === assetId)
+      if (existing) existing.variantId = variantId
+      else refs.push({ assetId, variantId })
+      sb.castRefs = refs
+      sb.associateAssetIds = [...new Set(refs.map((ref) => ref.assetId))]
+    },
+  }
+  return state as unknown as ProjectState
+}
+
+const writableDoc = cloneDoc(doc)
+writableDoc.assets = [{ id: 'hero', type: 'role', name: 'Hero', state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }]
+writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
+const writeState = makeWritableState(writableDoc)
+const writeTools = makeAgentTools(() => writeState)
+const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
+const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
+
+if (!addStoryboard || !setCastVariant) {
+  console.error('  FAIL write tools exist: required write tools missing')
+  process.exit(1)
+}
+
+const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2, videoDesc: 'Second episode new shot.', cast: ['Hero'] }))
+const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
+check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
+check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
+
+const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
+check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
 
 if (failures) {
   console.error(`\nagentTools selftest: ${failures} FAILED`)

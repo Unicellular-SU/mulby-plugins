@@ -406,6 +406,29 @@ function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Stor
   return undefined
 }
 
+function hasEpisodeSelector(args: Record<string, unknown>): boolean {
+  return (
+    (typeof args.episodeId === 'string' && !!args.episodeId.trim()) ||
+    (typeof args.episodeIndex === 'number' && Number.isFinite(args.episodeIndex)) ||
+    (typeof args.episodeTitle === 'string' && !!args.episodeTitle.trim())
+  )
+}
+
+function resolveEpisodeForWrite(doc: ProjectDoc, args: Record<string, unknown>): Episode | undefined {
+  if (hasEpisodeSelector(args)) return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle })
+  return currentEpisode(doc)
+}
+
+function switchToEpisodeForWrite(get: () => ProjectState, args: Record<string, unknown>): { doc?: ProjectDoc; episode?: Episode; error?: string } {
+  const d = get().doc
+  if (!d) return { error: '无项目' }
+  const episode = resolveEpisodeForWrite(d, args)
+  if (!episode) return { error: '未找到剧集' }
+  if (d.currentEpisodeId !== episode.id) get().switchEpisode(episode.id)
+  const next = get().doc ?? d
+  return { doc: next, episode: next.episodes?.find((item) => item.id === episode.id) ?? episode }
+}
+
 export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
   const doc = getDoc
   return [
@@ -985,6 +1008,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         type: 'object',
         properties: {
           storyboardId: { type: 'string' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
           index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空时使用。' },
           assetId: { type: 'string' },
           assetName: { type: 'string' },
@@ -996,7 +1022,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         },
       },
       execute: async (a) => {
-        const d = doc()
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
         if (!d) return '无项目'
         const storyboard = resolveStoryboard(d, a)
         if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
@@ -1007,7 +1035,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
         const next = doc()
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
-        return json({ storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined })
+        return json({
+          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+        })
       },
     },
     {
@@ -1016,6 +1047,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       parameters: {
         type: 'object',
         properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
           videoDesc: { type: 'string' },
           prompt: { type: 'string' },
           duration: { type: 'number' },
@@ -1045,7 +1079,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         required: ['videoDesc'],
       },
       execute: async (a) => {
-        const d = doc()
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
         if (!d) return '无项目'
         const cast = storyboardCastRefsFromArgs(d, a)
         const ids = [...new Set(cast.refs.map((ref) => ref.assetId))]
@@ -1067,6 +1103,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const storyboard = next?.storyboards.find((s) => s.id === id)
         return json({
           id,
+          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           unresolvedCast: cast.unresolved,
           storyboard: next && storyboard ? storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
         })
@@ -1086,9 +1123,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     {
       name: 'generate_keyframe',
       description: '按分镜序号(1-based)生成关键帧',
-      parameters: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'] },
+      parameters: { type: 'object', properties: { episodeId: { type: 'string' }, episodeIndex: { type: 'number' }, episodeTitle: { type: 'string' }, index: { type: 'number' } }, required: ['index'] },
       execute: async (a) => {
-        const d = doc()
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
         if (!d) return '无项目'
         const sb = [...d.storyboards].sort((x, y) => x.index - y.index)[Number(a.index) - 1]
         if (!sb) return '分镜序号越界'
@@ -1099,9 +1138,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     {
       name: 'generate_clip',
       description: '按分镜序号(1-based)生成视频片段',
-      parameters: { type: 'object', properties: { index: { type: 'number' } }, required: ['index'] },
+      parameters: { type: 'object', properties: { episodeId: { type: 'string' }, episodeIndex: { type: 'number' }, episodeTitle: { type: 'string' }, index: { type: 'number' } }, required: ['index'] },
       execute: async (a) => {
-        const d = doc()
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const d = target.doc
         if (!d) return '无项目'
         const sb = [...d.storyboards].sort((x, y) => x.index - y.index)[Number(a.index) - 1]
         if (!sb) return '分镜序号越界'
