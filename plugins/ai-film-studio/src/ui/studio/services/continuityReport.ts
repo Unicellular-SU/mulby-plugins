@@ -12,6 +12,9 @@ export interface ContinuityIssue {
   sceneId?: string
   assetId?: string
   variantId?: string
+  conflictLabel?: string
+  conflictSource?: 'name' | 'alias'
+  relatedAssetIds?: string[]
 }
 
 export interface ContinuityCastUse {
@@ -146,19 +149,26 @@ function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssu
       groups.set(key, [...(groups.get(key) ?? []), entry])
     }
   }
-  for (const entries of groups.values()) {
+  for (const [key, entries] of groups.entries()) {
     const assetIds = new Set(entries.map((entry) => entry.asset.id))
     if (assetIds.size < 2 || !entries.some((entry) => entry.source === 'alias')) continue
+    const lookup = key.slice(key.indexOf(':') + 1)
     const assets = [...assetIds].map((id) => entries.find((entry) => entry.asset.id === id)?.asset).filter((asset): asset is Asset => !!asset)
     const typeLabel = ASSET_TYPE_LABEL[assets[0].type]
     const labels = [...new Set(entries.map((entry) => entry.label.trim()).filter(Boolean))]
     const sharedLabel = labels.length === 1 ? labels[0] : labels.join(' / ')
     const ids = assets.map((asset) => asset.id).join('、')
     for (const asset of assets) {
+      const currentEntry =
+        entries.find((entry) => entry.asset.id === asset.id && entry.source === 'alias' && normalizeAssetLookup(entry.label) === lookup) ??
+        entries.find((entry) => entry.asset.id === asset.id && normalizeAssetLookup(entry.label) === lookup)
       allIssues.push({
         severity: 'warning',
         code: 'duplicate_asset_alias',
         assetId: asset.id,
+        conflictLabel: currentEntry?.label.trim() || sharedLabel,
+        conflictSource: currentEntry?.source,
+        relatedAssetIds: assets.map((item) => item.id).filter((id) => id !== asset.id),
         message: `项目中多个${typeLabel}资产共享名称/别名「${sharedLabel}」（${ids}），多集生成前建议合并资产或调整别名，避免 Agent 把同一称呼解析到不同资产。`,
       })
     }

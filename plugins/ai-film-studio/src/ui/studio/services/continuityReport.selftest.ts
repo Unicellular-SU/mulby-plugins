@@ -107,6 +107,12 @@ const duplicateAliasReport = buildContinuityReport(
   }),
 )
 check('flags duplicate asset aliases by type', duplicateAliasReport.issues.filter((issue) => issue.code === 'duplicate_asset_alias').length === 2, JSON.stringify(duplicateAliasReport.issues))
+check(
+  'duplicate alias issues expose removable alias metadata',
+  duplicateAliasReport.issues.some((issue) => issue.code === 'duplicate_asset_alias' && issue.assetId === 'hero' && issue.conflictLabel === 'Captain' && issue.conflictSource === 'alias' && issue.relatedAssetIds?.includes('captain-role')) &&
+    duplicateAliasReport.issues.some((issue) => issue.code === 'duplicate_asset_alias' && issue.assetId === 'captain-role' && issue.conflictSource === 'name'),
+  JSON.stringify(duplicateAliasReport.issues),
+)
 check('does not flag alias collisions across asset types', !duplicateAliasReport.issues.some((issue) => issue.assetId === 'captain-prop'), JSON.stringify(duplicateAliasReport.issues))
 
 const sceneReuseReport = buildContinuityReport(

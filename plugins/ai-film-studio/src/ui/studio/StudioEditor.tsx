@@ -24,7 +24,7 @@ import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
-import { cleanAssetAliases } from '../domain/assetAliases'
+import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
@@ -1548,6 +1548,7 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
 
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
+  const upsertAsset = useProjectStore((s) => s.upsertAsset)
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const generateAsset = useProjectStore((s) => s.generateAsset)
@@ -1632,6 +1633,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       patchStoryboardSceneAsset(storyboard, issue.assetId, true)
     }
   }
+  const removeDuplicateAlias = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'duplicate_asset_alias' || !issue.assetId || !issue.conflictLabel) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    if (!asset) return
+    const conflictKey = normalizeAssetLookup(issue.conflictLabel)
+    const aliases = asset.aliases ?? []
+    const nextAliases = aliases.filter((alias) => normalizeAssetLookup(alias) !== conflictKey)
+    if (nextAliases.length === aliases.length) return
+    upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: nextAliases })
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1647,6 +1658,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
         const canUnifySceneAsset = issue.code === 'scene_group_asset_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
+        const issueAsset = issue.assetId ? doc.assets.find((item) => item.id === issue.assetId) : undefined
+        const canRemoveDuplicateAlias =
+          issue.code === 'duplicate_asset_alias' &&
+          !!issue.conflictLabel &&
+          !!issueAsset?.aliases?.some((alias) => normalizeAssetLookup(alias) === normalizeAssetLookup(issue.conflictLabel))
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1684,6 +1700,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canUnifySceneAsset && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneAsset(issue)}>
                 统一为此场景
+              </button>
+            )}
+            {canRemoveDuplicateAlias && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => removeDuplicateAlias(issue)}>
+                移除此别名
               </button>
             )}
             {refAction && (
