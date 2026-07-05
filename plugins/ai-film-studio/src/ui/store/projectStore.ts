@@ -282,6 +282,26 @@ function setCurrentEpisodeProductionState(get: () => ProjectState, patch: Partia
   })
 }
 
+function missingReferencedVariantImages(doc: ProjectDoc): Array<{ assetId: string; variantId: string }> {
+  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const seen = new Set<string>()
+  const result: Array<{ assetId: string; variantId: string }> = []
+  for (const storyboard of doc.storyboards) {
+    for (const ref of castRefsForStoryboard(storyboard)) {
+      if (!ref.variantId) continue
+      const key = `${ref.assetId}:${ref.variantId}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const asset = assets.get(ref.assetId)
+      if (!asset || asset.type === 'audio' || asset.type === 'clip') continue
+      const variant = asset.variants?.find((item) => item.id === ref.variantId)
+      if (!variant || variant.refImageId) continue
+      result.push({ assetId: asset.id, variantId: variant.id })
+    }
+  }
+  return result
+}
+
 async function produceCurrentEpisode(
   get: () => ProjectState,
   set: (partial: Partial<ProjectState>) => void,
@@ -301,6 +321,18 @@ async function produceCurrentEpisode(
       const c = get().doc!.meta.concurrency ?? 3
       setLabel(`生成资产 0/${assetIds.length}`)
       await mapPool(assetIds, c, (id) => get().generateAsset(id), (done, total) => setLabel(`生成资产 ${done}/${total}`))
+    }
+
+    const variantRefs = missingReferencedVariantImages(get().doc!)
+    if (variantRefs.length) {
+      const c = get().doc!.meta.concurrency ?? 3
+      setLabel(`生成形态参考图 0/${variantRefs.length}`)
+      await mapPool(
+        variantRefs,
+        c,
+        ({ assetId, variantId }) => get().generateAssetVariant(assetId, variantId),
+        (done, total) => setLabel(`生成形态参考图 ${done}/${total}`),
+      )
     }
 
     const keyframeIds = [...(get().doc?.storyboards ?? [])]
