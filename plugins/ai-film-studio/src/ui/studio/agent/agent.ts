@@ -58,7 +58,7 @@ const CONTRACT = `
 - 如果上下文、连续性报告或跨集承接线索显示某角色在上一相关剧集使用过具体变体，或本集已有适用变体，分镜必须用 castRefs 绑定 variantLabel/variantId；除非剧情明确恢复默认状态，不要只写 cast 让它回到主形象。
 - 当分镜为了沿用上一形态或使用场景/分镜级形态而绑定了已有 variant 时，设置 ensureScope=true；若已写 sceneId，优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集都适用时用 "episode"。
 - **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
-- 分镜按叙事顺序排列；同一空间或连续动作的镜头写稳定 sceneId，用于同场景资产和角色形态一致性检查；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
+- 分镜按叙事顺序排列；同一空间或连续动作的镜头写稳定 sceneId，用于同场景资产和角色形态一致性检查；替换已有分镜且发生换场时必须写新的 sceneId，确实不属于任何场景组时可写空字符串清除旧 sceneId；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
 - 全程使用项目设定的画风与对白语言。`
 
@@ -351,7 +351,7 @@ const ASSETS_SKILL =
 const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
-  '同一空间、同一连续动作或同一场景段落的镜头必须写相同 sceneId；换场时更换 sceneId。sceneId 用稳定短标识，不要每镜都新造。' +
+  '同一空间、同一连续动作或同一场景段落的镜头必须写相同 sceneId；换场时更换 sceneId，替换已有分镜且不再属于任何场景组时可写 sceneId="" 清除旧值。sceneId 用稳定短标识，不要每镜都新造。' +
   '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
   '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
   '当你为了承接上一形态或使用已有场景/分镜级形态而绑定 variant 时，给该分镜写 ensureScope=true；有 sceneId 时优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集适用才用 "episode"。' +

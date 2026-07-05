@@ -531,7 +531,7 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
         target.associateAssetIds = cast
         target.castRefs = castRefs
       }
-      if (sceneId) target.sceneId = sceneId
+      if ('sceneId' in sb) target.sceneId = sceneId
       if (dlgs) target.dialogues = dlgs
       if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
       target.keyframeImageId = undefined
