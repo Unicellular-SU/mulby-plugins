@@ -34,7 +34,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -351,12 +351,13 @@ async function produceCurrentEpisode(
     }
 
     const latest = get().doc
-    const hasDoneClip = !!latest?.storyboards.some((s) => latest.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
-    if (hasDoneClip) {
+    const readiness = latest ? episodeComposeReadiness(latest) : undefined
+    if (readiness?.ready) {
       setLabel('合成成片…')
       await get().compose()
     } else {
-      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: '没有可合成的视频片段' })
+      const missing = readiness?.missingStoryboardIndexes.length ? `，缺少分镜 #${readiness.missingStoryboardIndexes.slice(0, 8).join('、')}${readiness.missingStoryboardIndexes.length > 8 ? ` 等 ${readiness.missingStoryboardIndexes.length} 个` : ''}` : ''
+      setCurrentEpisodeProductionState(get, { status: 'planned', filmError: readiness?.total ? `未合成：仍有分镜没有可用视频片段${missing}` : '没有可合成的视频片段' })
     }
   } finally {
     if (opts.manageBatch) set({ batch: { running: false } })

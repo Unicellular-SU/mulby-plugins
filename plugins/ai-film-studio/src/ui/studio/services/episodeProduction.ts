@@ -57,6 +57,14 @@ export interface EpisodeProductionHandoff {
   suggestions: EpisodeHandoffSuggestion[]
 }
 
+export interface EpisodeComposeReadiness {
+  ready: boolean
+  total: number
+  readyCount: number
+  missingStoryboardIds: string[]
+  missingStoryboardIndexes: number[]
+}
+
 type HandoffAsset = ProjectDoc['assets'][number]
 type HandoffVariant = NonNullable<HandoffAsset['variants']>[number]
 
@@ -158,6 +166,32 @@ export function pendingEpisodesForSeries(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])]
     .sort((a, b) => a.index - b.index)
     .filter((episode) => episodeIsPendingForSeries(doc, episode))
+}
+
+function usableClip(clip: Clip | undefined): boolean {
+  return !!clip && clip.state === 'done' && (!!clip.videoFilePath || !!clip.videoUrl)
+}
+
+export function episodeComposeReadiness(doc: Pick<ProjectDoc, 'storyboards' | 'clips' | 'track'>): EpisodeComposeReadiness {
+  const storyboards = [...doc.storyboards].sort((a, b) => a.index - b.index)
+  const missingStoryboardIds: string[] = []
+  const missingStoryboardIndexes: number[] = []
+  for (const storyboard of storyboards) {
+    const track = doc.track.find((item) => item.storyboardIds.includes(storyboard.id))
+    const clip = track
+      ? doc.clips.find((item) => item.id === (track.selectClipId || track.clipIds[0]))
+      : doc.clips.find((item) => item.storyboardId === storyboard.id && item.state === 'done')
+    if (usableClip(clip)) continue
+    missingStoryboardIds.push(storyboard.id)
+    missingStoryboardIndexes.push(storyboard.index + 1)
+  }
+  return {
+    ready: storyboards.length > 0 && missingStoryboardIds.length === 0,
+    total: storyboards.length,
+    readyCount: storyboards.length - missingStoryboardIds.length,
+    missingStoryboardIds,
+    missingStoryboardIndexes,
+  }
 }
 
 function compact(value: string | undefined, limit: number): string {

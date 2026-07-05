@@ -1,4 +1,4 @@
-import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -156,6 +156,26 @@ const recapDoc = doc({
 })
 const recap = buildEpisodeProductionRecap(recapDoc, recapDoc.episodes![0])
 check('builds episode production recap from current flat data', recap.includes('E1「Pilot」') && recap.includes('Opening') && recap.includes('Hero-Battle') && recap.includes('1/2'), recap)
+
+const partialComposeDoc = doc({
+  storyboards: [storyboard('ready-shot', 0, []), storyboard('missing-shot', 1, [])],
+  clips: [{ id: 'clip-ready', storyboardId: 'ready-shot', durationSec: 4, state: 'done', videoUrl: 'https://example.test/ready.mp4' }],
+  track: [
+    { id: 'track-ready', storyboardIds: ['ready-shot'], clipIds: ['clip-ready'], selectClipId: 'clip-ready', order: 0 },
+    { id: 'track-missing', storyboardIds: ['missing-shot'], clipIds: [], order: 1 },
+  ],
+})
+const partialComposeReadiness = episodeComposeReadiness(partialComposeDoc)
+check(
+  'blocks composing an incomplete episode when any storyboard lacks a usable clip',
+  !partialComposeReadiness.ready && partialComposeReadiness.readyCount === 1 && partialComposeReadiness.missingStoryboardIds.join(',') === 'missing-shot',
+  JSON.stringify(partialComposeReadiness),
+)
+partialComposeDoc.clips.push({ id: 'clip-missing', storyboardId: 'missing-shot', durationSec: 4, state: 'done', videoFilePath: 'D:\\films\\missing.mp4' })
+partialComposeDoc.track[1].clipIds = ['clip-missing']
+partialComposeDoc.track[1].selectClipId = 'clip-missing'
+const completeComposeReadiness = episodeComposeReadiness(partialComposeDoc)
+check('allows composing only after every storyboard has a usable selected clip', completeComposeReadiness.ready && completeComposeReadiness.readyCount === 2, JSON.stringify(completeComposeReadiness))
 
 const handoffAssets: Asset[] = [
   {
