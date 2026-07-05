@@ -75,6 +75,10 @@ function variantAppliesToEpisode(asset: Asset, ref: StoryboardCastRef, episodeId
   return !ids.length || ids.includes(episodeId)
 }
 
+function variantsScopedToEpisode(asset: Asset, episodeId: string): NonNullable<Asset['variants']> {
+  return (asset.variants ?? []).filter((variant) => variant.appliesToEpisodeIds?.includes(episodeId))
+}
+
 const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
   role: '角色',
   scene: '场景',
@@ -169,6 +173,19 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         const appliesToEpisode = variantAppliesToEpisode(asset, ref, episode.id)
         if (!appliesToEpisode) {
           addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于本集的「${labelForCastRef(asset, ref)}」` })
+        }
+        if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
+          const scopedVariants = variantsScopedToEpisode(asset, episode.id)
+          if (scopedVariants.length) {
+            const labels = scopedVariants.map((item) => item.label).join('、')
+            addIssue({
+              ...base,
+              variantId: scopedVariants.length === 1 ? scopedVariants[0].id : undefined,
+              severity: 'warning',
+              code: 'episode_variant_available',
+              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但本集已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
+            })
+          }
         }
         const refImageId = refImageIdForCastRef(asset, ref)
         if (!refImageId) {

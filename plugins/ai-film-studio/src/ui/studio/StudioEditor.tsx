@@ -1543,6 +1543,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
@@ -1570,6 +1571,10 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!asset.refImageId) return { label: '先生成主形象参考图', run: () => void generateAsset(asset.id) }
     return { label: '生成该变体参考图', run: () => void generateAssetVariant(asset.id, variant.id) }
   }
+  const bindEpisodeVariant = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'episode_variant_available' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId || !issue.variantId) return
+    setStoryboardCastVariant(issue.storyboardId, issue.assetId, issue.variantId)
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1580,6 +1585,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
         const canAddVariantEpisode = issue.code === 'variant_out_of_episode_scope' && !!issue.assetId && !!issue.variantId && !!issue.episodeId
+        const canBindEpisodeVariant = issue.code === 'episode_variant_available' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId && !!issue.variantId
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1592,6 +1598,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canAddVariantEpisode && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantToEpisode(issue)}>
                 标记变体适用于本集
+              </button>
+            )}
+            {canBindEpisodeVariant && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => bindEpisodeVariant(issue)}>
+                绑定本集形态
               </button>
             )}
             {refAction && (

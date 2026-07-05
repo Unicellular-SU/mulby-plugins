@@ -97,6 +97,23 @@ const duplicateAssetReport = buildContinuityReport(
 )
 check('flags duplicate asset names by type', duplicateAssetReport.issues.filter((issue) => issue.code === 'duplicate_asset_name').length === 2, JSON.stringify(duplicateAssetReport.issues))
 
+const episodeVariantCoverageReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [
+        { id: 'v-gala', label: 'Gala', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
+        { id: 'v-battle', label: 'Battle', appliesToEpisodeIds: ['ep2'], refImageId: 'battle-img' },
+      ],
+    }],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('main-use', 0, [{ assetId: 'hero' }])],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
+check('flags main asset use when episode scoped variant exists', availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.storyboardId === 'main-use', JSON.stringify(episodeVariantCoverageReport.issues))
+
 const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
 const chapterReport = buildContinuityReport(
   doc({
