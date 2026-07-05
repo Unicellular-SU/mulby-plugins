@@ -1644,6 +1644,14 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (nextAliases.length === aliases.length) return
     upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: nextAliases })
   }
+  const renameConflictAsset = (issue: ContinuityReportView['issues'][number]) => {
+    if ((issue.code !== 'duplicate_asset_name' && issue.code !== 'duplicate_asset_alias') || !issue.assetId) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    if (!asset) return
+    const nextName = window.prompt('输入新的资产名称', asset.name)?.trim()
+    if (!nextName || normalizeAssetLookup(nextName) === normalizeAssetLookup(asset.name)) return
+    upsertAsset({ id: asset.id, type: asset.type, name: nextName })
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1664,6 +1672,9 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           issue.code === 'duplicate_asset_alias' &&
           !!issue.conflictLabel &&
           !!issueAsset?.aliases?.some((alias) => normalizeAssetLookup(alias) === normalizeAssetLookup(issue.conflictLabel))
+        const canRenameConflictAsset =
+          !!issueAsset &&
+          (issue.code === 'duplicate_asset_name' || (issue.code === 'duplicate_asset_alias' && issue.conflictSource === 'name'))
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -1706,6 +1717,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canRemoveDuplicateAlias && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => removeDuplicateAlias(issue)}>
                 移除此别名
+              </button>
+            )}
+            {canRenameConflictAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => renameConflictAsset(issue)}>
+                重命名资产
               </button>
             )}
             {refAction && (
