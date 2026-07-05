@@ -109,6 +109,35 @@ const duplicateAliasReport = buildContinuityReport(
 check('flags duplicate asset aliases by type', duplicateAliasReport.issues.filter((issue) => issue.code === 'duplicate_asset_alias').length === 2, JSON.stringify(duplicateAliasReport.issues))
 check('does not flag alias collisions across asset types', !duplicateAliasReport.issues.some((issue) => issue.assetId === 'captain-prop'), JSON.stringify(duplicateAliasReport.issues))
 
+const sceneReuseReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' }],
+    currentEpisodeId: 'ep1',
+    storyboards: [
+      { ...storyboard('hall-1', 0, [{ assetId: 'hall' }]), sceneId: 'hallway' },
+      { ...storyboard('hall-2', 1, []), sceneId: 'hallway' },
+    ],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check('flags missing scene asset in reused scene group', !!sceneReuseReport.issues.some((issue) => issue.code === 'scene_group_missing_asset' && issue.storyboardId === 'hall-2'), JSON.stringify(sceneReuseReport.issues))
+
+const sceneMismatchReport = buildContinuityReport(
+  doc({
+    assets: [
+      { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' },
+      { id: 'lobby', type: 'scene', name: 'Lobby', refImageId: 'lobby-img', state: 'done' },
+    ],
+    currentEpisodeId: 'ep1',
+    storyboards: [
+      { ...storyboard('hall-1', 0, [{ assetId: 'hall' }]), sceneId: 'same-space' },
+      { ...storyboard('hall-2', 1, [{ assetId: 'lobby' }]), sceneId: 'same-space' },
+    ],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check('flags mixed scene assets in reused scene group', sceneMismatchReport.issues.filter((issue) => issue.code === 'scene_group_asset_mismatch').length === 2, JSON.stringify(sceneMismatchReport.issues))
+
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{

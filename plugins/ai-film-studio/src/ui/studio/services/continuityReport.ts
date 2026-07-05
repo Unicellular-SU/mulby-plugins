@@ -156,6 +156,66 @@ function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssu
   }
 }
 
+function sceneAssetIdsForStoryboard(storyboard: Storyboard, assets: Map<string, Asset>): string[] {
+  const ids = new Set<string>()
+  for (const ref of castRefsForStoryboard(storyboard)) {
+    const asset = assets.get(ref.assetId)
+    if (asset?.type === 'scene') ids.add(asset.id)
+  }
+  return [...ids]
+}
+
+function addSceneReuseIssues(
+  episode: Episode,
+  storyboards: Storyboard[],
+  assets: Map<string, Asset>,
+  addIssue: (issue: ContinuityIssue) => void,
+): void {
+  const groups = new Map<string, Storyboard[]>()
+  for (const storyboard of storyboards) {
+    const sceneId = storyboard.sceneId?.trim()
+    if (!sceneId) continue
+    groups.set(sceneId, [...(groups.get(sceneId) ?? []), storyboard])
+  }
+  for (const [sceneId, group] of groups) {
+    if (group.length < 2) continue
+    const sceneRefsByStoryboard = new Map(group.map((storyboard) => [storyboard.id, sceneAssetIdsForStoryboard(storyboard, assets)]))
+    const sceneAssetIds = [...new Set([...sceneRefsByStoryboard.values()].flat())]
+    if (!sceneAssetIds.length) continue
+    const sceneLabels = sceneAssetIds.map((id) => assets.get(id)?.name ?? id).join('、')
+    if (sceneAssetIds.length > 1) {
+      for (const storyboard of group) {
+        const refs = sceneRefsByStoryboard.get(storyboard.id) ?? []
+        addIssue({
+          severity: 'warning',
+          code: 'scene_group_asset_mismatch',
+          episodeId: episode.id,
+          storyboardId: storyboard.id,
+          storyboardIndex: storyboard.index + 1,
+          assetId: refs[0],
+          message: `E${episode.index + 1} 场景组「${sceneId}」混用了多个场景资产：${sceneLabels}。连续场景建议统一复用同一个场景资产，避免跨镜环境漂移。`,
+        })
+      }
+      continue
+    }
+    const sceneAssetId = sceneAssetIds[0]
+    const sceneLabel = assets.get(sceneAssetId)?.name ?? sceneAssetId
+    for (const storyboard of group) {
+      const refs = sceneRefsByStoryboard.get(storyboard.id) ?? []
+      if (refs.length) continue
+      addIssue({
+        severity: 'warning',
+        code: 'scene_group_missing_asset',
+        episodeId: episode.id,
+        storyboardId: storyboard.id,
+        storyboardIndex: storyboard.index + 1,
+        assetId: sceneAssetId,
+        message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 属于场景组「${sceneId}」，但没有引用场景资产「${sceneLabel}」。建议绑定同一场景资产以保持连续场景复用。`,
+      })
+    }
+  }
+}
+
 export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const episodes = episodeList(doc)
@@ -198,7 +258,8 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
       }
     }
 
-    for (const storyboard of [...storyboards].sort((a, b) => a.index - b.index)) {
+    const sortedStoryboards = [...storyboards].sort((a, b) => a.index - b.index)
+    for (const storyboard of sortedStoryboards) {
       for (const ref of castRefsForStoryboard(storyboard)) {
         const base = { episodeId: episode.id, storyboardId: storyboard.id, storyboardIndex: storyboard.index + 1, assetId: ref.assetId, variantId: ref.variantId }
         const asset = assets.get(ref.assetId)
@@ -246,6 +307,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         })
       }
     }
+    addSceneReuseIssues(episode, sortedStoryboards, assets, addIssue)
     episodeReports.push(report)
   }
 
