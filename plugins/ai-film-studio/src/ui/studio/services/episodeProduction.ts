@@ -78,10 +78,24 @@ export function invalidateEpisodesUsingAsset(doc: ProjectDoc, assetId: string): 
   return changed
 }
 
+export type EpisodeSeriesQueueState = 'pending' | 'completed' | 'failed' | 'generating' | 'empty'
+
+export function episodeSeriesQueueState(doc: ProjectDoc, episode: Episode): EpisodeSeriesQueueState {
+  if (episode.status === 'generating') return 'generating'
+  if (episode.filmPath || episode.status === 'done') return 'completed'
+  if (episode.filmError) return 'failed'
+  if (storyboardsForEpisode(doc, episode).length === 0) return 'empty'
+  return 'pending'
+}
+
+export function episodeIsPendingForSeries(doc: ProjectDoc, episode: Episode): boolean {
+  return episodeSeriesQueueState(doc, episode) === 'pending'
+}
+
 export function pendingEpisodesForSeries(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])]
     .sort((a, b) => a.index - b.index)
-    .filter((episode) => !episode.filmPath && storyboardsForEpisode(doc, episode).length > 0)
+    .filter((episode) => episodeIsPendingForSeries(doc, episode))
 }
 
 function compact(value: string | undefined, limit: number): string {

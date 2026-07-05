@@ -26,6 +26,7 @@ import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
+import { pendingEpisodesForSeries } from './services/episodeProduction'
 
 type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
@@ -59,9 +60,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const busy = batch.running || film.state === 'composing'
   const episodes = doc.episodes ?? []
   const canProduceCurrent = doc.storyboards.length > 0
-  const canProduceSeries =
-    episodes.length > 1 &&
-    episodes.some((episode) => !episode.filmPath && (episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards).length > 0)
+  const canProduceSeries = episodes.length > 1 && pendingEpisodesForSeries(doc).length > 0
   const [tab, setTab] = useState<Tab>('script')
   const [dockOpen, setDockOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)

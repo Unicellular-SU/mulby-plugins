@@ -1,4 +1,4 @@
-import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeSeriesQueueState, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -96,7 +96,10 @@ const planned = doc({
   ],
 })
 const pending = pendingEpisodesForSeries(planned)
-check('series production uses current flat storyboards and skips completed episodes', pending.map((item) => item.id).join(',') === 'ep1,ep4', JSON.stringify(pending.map((item) => item.id)))
+check('series production uses current flat storyboards and skips completed or failed episodes', pending.map((item) => item.id).join(',') === 'ep1', JSON.stringify(pending.map((item) => item.id)))
+check('classifies failed episodes as held for explicit retry', episodeSeriesQueueState(planned, planned.episodes![3]) === 'failed', episodeSeriesQueueState(planned, planned.episodes![3]))
+const resetFailedEpisode = invalidateEpisodeProduction(planned.episodes![3])
+check('resetting a failed episode returns it to the series queue', resetFailedEpisode && pendingEpisodesForSeries(planned).map((item) => item.id).join(',') === 'ep1,ep4', JSON.stringify(pendingEpisodesForSeries(planned).map((item) => item.id)))
 check('detects current episode main cast reference use', currentEpisodeUsesCastRef(planned, 'prop'), JSON.stringify(planned.storyboards))
 const variantOnly = doc({ currentEpisodeId: 'ep1', storyboards: [storyboard('variant-only', 0, [{ assetId: 'hero', variantId: 'battle' }])], episodes: [episode('ep1', 0)] })
 check('does not treat variant use as main cast reference use', !currentEpisodeUsesCastRef(variantOnly, 'hero') && currentEpisodeUsesCastRef(variantOnly, 'hero', 'battle'), 'variant-only use should not invalidate main refs')
