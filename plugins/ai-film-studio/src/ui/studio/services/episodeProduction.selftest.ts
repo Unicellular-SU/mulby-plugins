@@ -230,6 +230,33 @@ const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHand
 const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
 check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
 
+const variantSwitchHandoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets: [{
+    ...assets[0],
+    variants: [
+      { id: 'battle', label: 'Battle', refImageId: 'hero-battle' },
+      { id: 'gala', label: 'Gala', refImageId: 'hero-gala' },
+    ],
+  }],
+  storyboards: [storyboard('ep2-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Setup',
+      productionRecap: 'Hero stayed wounded after the chase.',
+      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
+    }),
+    episode('ep2', 1, { title: 'Gala' }),
+  ],
+})
+const variantSwitchHandoff = buildEpisodeProductionHandoff(variantSwitchHandoffDoc, variantSwitchHandoffDoc.episodes![1])
+const variantSwitchSuggestion = variantSwitchHandoff.suggestions.find((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala')
+check(
+  'suggests confirming unscoped cross-episode variant switches',
+  !!variantSwitchSuggestion?.detail.includes('上一相关剧集') && !!variantSwitchSuggestion.detail.includes('Hero-Battle'),
+  JSON.stringify(variantSwitchHandoff.suggestions),
+)
+
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)
   process.exit(1)

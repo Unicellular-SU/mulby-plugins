@@ -210,6 +210,24 @@ function carryForwardCastRefs(doc: ProjectDoc, episode: Episode, episodes: Episo
   return refs
 }
 
+function variantHasScope(variant: NonNullable<ProjectDoc['assets'][number]['variants']>[number] | undefined): boolean {
+  return !!variant && (!!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length)
+}
+
+function latestPreviousVariantUse(
+  doc: ProjectDoc,
+  episodes: Episode[],
+  episode: Episode,
+  assetId: string,
+  currentVariantId: string,
+): { ref: StoryboardCastRef; episode: Episode } | undefined {
+  for (const sourceEpisode of episodes.filter((item) => item.index < episode.index).sort((a, b) => b.index - a.index)) {
+    const ref = latestCastRefsByAsset(doc, sourceEpisode).find((item) => item.assetId === assetId && !!item.variantId && item.variantId !== currentVariantId)
+    if (ref) return { ref, episode: sourceEpisode }
+  }
+  return undefined
+}
+
 function storyboardLabel(storyboard: Storyboard, assets: Map<string, ProjectDoc['assets'][number]>): string {
   const cast = castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
   const castText = cast.length ? `（${unique(cast).slice(0, 4).join('、')}）` : ''
@@ -331,6 +349,20 @@ export function buildEpisodeProductionHandoff(
             detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}。`,
             autoRepairable: true,
           })
+        }
+        if (!variantHasScope(variant)) {
+          const previous = latestPreviousVariantUse(doc, episodes, episode, asset.id, variant.id)
+          if (previous) {
+            addSuggestion({
+              id: `variant-switch-scope:${asset.id}:${variant.id}:${episode.id}`,
+              kind: 'add_variant_episode_scope',
+              assetId: asset.id,
+              variantId: variant.id,
+              label: `确认「${variant.label}」为本集形态`,
+              detail: `上一相关剧集 E${previous.episode.index + 1}「${previous.episode.title}」使用过 ${labelForCastRef(asset, previous.ref)}，当前集切到 ${asset.name}-${variant.label} 但尚未标记适用本集；若这是明确换装/妆容变化，建议标记本集适用，否则回到分镜沿用上一形态。`,
+              autoRepairable: true,
+            })
+          }
         }
         if (!variant.refImageId) {
           addSuggestion({
