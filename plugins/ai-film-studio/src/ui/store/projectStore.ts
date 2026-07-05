@@ -9,6 +9,7 @@ import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
 import { castRefsForStoryboard } from '../domain/castRefs'
+import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias } from '../domain/assetAliases'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
@@ -405,14 +406,17 @@ function applyAgentScript(d: ProjectDoc, script: AgentPlan['script'] | undefined
 function applyAgentAssets(d: ProjectDoc, assets: AgentPlan['assets'] | undefined, applied: AgentApplySummary): void {
   for (const a of assets ?? []) {
     if (!a?.name || !a.type) continue
-    const ex = d.assets.find((x) => x.name === a.name && x.type === a.type)
+    const ex = findAssetByNameOrAlias(d.assets.filter((x) => x.type === a.type), a.name)
     if (ex) {
       ex.desc = a.desc ?? ex.desc
       ex.prompt = a.prompt ?? ex.prompt
+      const aliases = a.aliases !== undefined ? cleanAssetAliases(a.aliases) : ex.aliases
+      ex.aliases = aliases?.length ? aliases : undefined
       applied.assetsUpdated.push({ id: ex.id, type: ex.type, name: ex.name })
     } else {
       const id = P.newId('a_')
-      d.assets.push({ id, type: a.type, name: a.name, desc: a.desc, prompt: a.prompt, state: 'idle' })
+      const aliases = cleanAssetAliases(a.aliases)
+      d.assets.push({ id, type: a.type, name: a.name, aliases: aliases.length ? aliases : undefined, desc: a.desc, prompt: a.prompt, state: 'idle' })
       applied.assetsCreated.push({ id, type: a.type, name: a.name })
     }
   }
@@ -425,8 +429,11 @@ function cleanString(value: unknown): string | undefined {
 function agentCastAsset(d: ProjectDoc, token: unknown): Asset | undefined {
   const text = cleanString(token)
   if (!text) return undefined
-  const lower = text.toLowerCase()
-  return d.assets.find((asset) => asset.id === text) ?? d.assets.find((asset) => asset.name.toLowerCase() === lower)
+  return findAssetByNameOrAlias(d.assets, text)
+}
+
+function assetLookupLength(asset: Asset): number {
+  return Math.max(...[asset.name, ...(asset.aliases ?? [])].map((name) => name.length))
 }
 
 function agentVariantId(asset: Asset, token: unknown): string | undefined {
@@ -445,10 +452,11 @@ function agentCastRefFromString(d: ProjectDoc, raw: unknown): StoryboardCastRef 
   if (!text) return undefined
   const exact = agentCastAsset(d, text)
   if (exact) return { assetId: exact.id }
-  const assets = [...d.assets].sort((a, b) => b.name.length - a.name.length)
+  const assets = [...d.assets].sort((a, b) => assetLookupLength(b) - assetLookupLength(a))
   for (const asset of assets) {
-    if (!text.toLowerCase().startsWith(asset.name.toLowerCase())) continue
-    let variantToken = text.slice(asset.name.length).trim()
+    const prefix = assetPrefixLookup(asset, text)
+    if (!prefix) continue
+    let variantToken = text.slice(prefix.length).trim()
     variantToken = variantToken.replace(/^[\s\-—–_:：/|·]+/, '').trim()
     variantToken = variantToken.replace(/^[（(\[]/, '').replace(/[）)\]]$/, '').trim()
     return variantToken ? { assetId: asset.id, variantId: agentVariantId(asset, variantToken) } : { assetId: asset.id }
@@ -850,7 +858,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       const i = d.assets.findIndex((x) => x.id === id)
       const base: Asset = d.assets[i] ?? { id, type: a.type, name: a.name, state: 'idle' }
-      const merged: Asset = { ...base, ...a, id }
+      const aliases = a.aliases !== undefined ? cleanAssetAliases(a.aliases) : base.aliases
+      const merged: Asset = { ...base, ...a, id, aliases: aliases?.length ? aliases : undefined }
       if (i >= 0) d.assets[i] = merged
       else d.assets.push(merged)
     })

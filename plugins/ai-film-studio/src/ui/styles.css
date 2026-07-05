@@ -3838,6 +3838,8 @@ select.afs-toolbar__select,
 .afs-studio__err { position: absolute; top: 4px; right: 4px; color: var(--afs-danger); background: color-mix(in srgb, #000 40%, transparent); border-radius: 4px; padding: 2px; display: inline-flex; }
 .afs-studio__cardname { background: transparent; border: 1px solid transparent; color: var(--afs-text); font-size: 13px; font-weight: 600; padding: 3px 5px; border-radius: 5px; }
 .afs-studio__cardname:hover, .afs-studio__cardname:focus { border-color: var(--afs-border); outline: none; }
+.afs-studio__cardalias { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text-dim); border-radius: 5px; padding: 3px 5px; font-size: 11px; }
+.afs-studio__cardalias:focus { color: var(--afs-text); outline: none; border-color: var(--afs-accent); }
 .afs-studio__carddesc { resize: none; font-size: 12px; }
 .afs-studio__cardactions { display: flex; flex-wrap: wrap; gap: 6px; }
 .afs-studio__cardactions .afs-btn { flex: 1 1 0; justify-content: center; min-width: 34px; }

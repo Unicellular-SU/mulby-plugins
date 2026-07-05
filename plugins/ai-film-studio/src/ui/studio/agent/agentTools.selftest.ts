@@ -52,7 +52,7 @@ const doc: ProjectDoc = {
   meta: meta(),
   novel: [],
   scripts: [{ id: 'script-current', name: 'Current Script', content: 'Current episode only.', createdAt: 0, updatedAt: 0 }],
-  assets: [{ id: 'hero', type: 'role', name: 'Hero', state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }],
+  assets: [{ id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }],
   storyboards: [{ ...storyboard('sb-current', 0, 'Current shot only.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero' }] }],
   clips: [],
   track: [],
@@ -90,6 +90,9 @@ const search = JSON.parse(await searchProject.execute({ query: 'hidden clue', do
 check('search_project finds non-current episode scripts', search.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(search.scripts))
 check('search_project finds non-current episode storyboards', search.storyboards?.some((item: { id: string; episodeIndex: number }) => item.id === 'sb-ep2' && item.episodeIndex === 2), JSON.stringify(search.storyboards))
 check('search_project finds non-current episode storyboard table', search.storyboardTable?.some((item: { scene: { sceneName: string }; episodeId: string }) => item.scene.sceneName === 'Hidden clue scene' && item.episodeId === 'ep2'), JSON.stringify(search.storyboardTable))
+
+const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角', domains: ['assets'], limit: 10 }))
+check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
 
 const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
@@ -185,7 +188,7 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
 }
 
 const writableDoc = cloneDoc(doc)
-writableDoc.assets = [{ id: 'hero', type: 'role', name: 'Hero', state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }]
+writableDoc.assets = [{ id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
@@ -198,9 +201,10 @@ if (!addStoryboard || !setCastVariant || !setEpisodeSeriesSkip) {
   process.exit(1)
 }
 
-const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2, videoDesc: 'Second episode new shot.', cast: ['Hero'] }))
+const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2, videoDesc: 'Second episode new shot.', cast: ['主角'] }))
 const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
 check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
+check('add_storyboard resolves cast aliases', addedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string }) => ref.assetId === 'hero'), JSON.stringify(addedStoryboard.storyboard))
 check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))

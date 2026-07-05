@@ -6,6 +6,7 @@ import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
 import type { Asset, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
+import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias } from '../../domain/assetAliases'
 import { buildContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
 
@@ -77,6 +78,7 @@ function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: b
     id: a.id,
     type: a.type,
     name: a.name,
+    aliases: a.aliases,
     desc: a.desc,
     prompt: opts?.includePrompt === false ? undefined : a.prompt,
     refImageId: a.refImageId,
@@ -300,9 +302,12 @@ function isCastableAsset(asset: Asset): boolean {
 function findCastableAsset(doc: ProjectDoc, token: unknown): Asset | undefined {
   const text = stringArg(token)
   if (!text) return undefined
-  const lower = text.toLowerCase()
   const assets = doc.assets.filter(isCastableAsset)
-  return assets.find((asset) => asset.id === text) ?? assets.find((asset) => asset.name.toLowerCase() === lower)
+  return findAssetByNameOrAlias(assets, text)
+}
+
+function assetLookupLength(asset: Asset): number {
+  return Math.max(...[asset.name, ...(asset.aliases ?? [])].map((name) => name.length))
 }
 
 function findAssetVariant(asset: Asset, token: unknown) {
@@ -322,10 +327,11 @@ function parseCastString(doc: ProjectDoc, raw: unknown): { ref?: StoryboardCastR
   const exact = findCastableAsset(doc, text)
   if (exact) return { ref: { assetId: exact.id } }
 
-  const assets = doc.assets.filter(isCastableAsset).sort((a, b) => b.name.length - a.name.length)
+  const assets = doc.assets.filter(isCastableAsset).sort((a, b) => assetLookupLength(b) - assetLookupLength(a))
   for (const asset of assets) {
-    if (!text.toLowerCase().startsWith(asset.name.toLowerCase())) continue
-    let variantToken = text.slice(asset.name.length).trim()
+    const prefix = assetPrefixLookup(asset, text)
+    if (!prefix) continue
+    let variantToken = text.slice(prefix.length).trim()
     variantToken = variantToken.replace(/^[\s\-—–_:：/|·]+/, '').trim()
     variantToken = variantToken.replace(/^[（(\[]/, '').replace(/[）)\]]$/, '').trim()
     if (!variantToken) return { ref: { assetId: asset.id } }
@@ -729,9 +735,9 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             : undefined,
           assets: wants('assets')
             ? d.assets
-                .filter((asset) => has(asset.name) || has(asset.desc) || has(asset.prompt))
+                .filter((asset) => has(asset.name) || asset.aliases?.some((alias) => has(alias)) || has(asset.desc) || has(asset.prompt))
                 .slice(0, limit)
-                .map((asset) => ({ id: asset.id, type: asset.type, name: asset.name, desc: asset.desc, promptSnippet: snippet(asset.prompt ?? '', q, 180) }))
+                .map((asset) => ({ id: asset.id, type: asset.type, name: asset.name, aliases: asset.aliases, desc: asset.desc, promptSnippet: snippet(asset.prompt ?? '', q, 180) }))
             : undefined,
           storyboards: wants('storyboards')
             ? episodes
@@ -957,15 +963,15 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'add_asset',
-      description: '新增资产：人物 role / 场景 scene / 物品 prop',
+      description: '新增资产：人物 role / 场景 scene / 物品 prop；aliases 用于昵称、称谓、原著别称，帮助后续分镜复用同一资产。',
       parameters: {
         type: 'object',
-        properties: { type: { type: 'string', enum: ['role', 'scene', 'prop'] }, name: { type: 'string' }, desc: { type: 'string' }, prompt: { type: 'string' } },
+        properties: { type: { type: 'string', enum: ['role', 'scene', 'prop'] }, name: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } }, desc: { type: 'string' }, prompt: { type: 'string' } },
         required: ['type', 'name'],
       },
       execute: async (a) => {
         const type = a.type === 'scene' || a.type === 'prop' ? a.type : 'role'
-        const id = get().upsertAsset({ type, name: String(a.name ?? '未命名'), desc: a.desc as string | undefined, prompt: a.prompt as string | undefined })
+        const id = get().upsertAsset({ type, name: String(a.name ?? '未命名'), aliases: cleanAssetAliases(a.aliases), desc: a.desc as string | undefined, prompt: a.prompt as string | undefined })
         return `已新增资产 ${a.name}（id ${id}）`
       },
     },

@@ -24,6 +24,7 @@ import StudioSettings from './StudioSettings'
 import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
+import { cleanAssetAliases } from '../domain/assetAliases'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, pendingEpisodesForSeries } from './services/episodeProduction'
@@ -1137,6 +1138,12 @@ function AssetCard({ asset }: { asset: Asset }) {
         )}
       </div>
       <input className="afs-studio__cardname" value={asset.name} onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: e.target.value })} />
+      <input
+        className="afs-studio__cardalias"
+        value={(asset.aliases ?? []).join('、')}
+        placeholder="别名（用顿号/逗号分隔）"
+        onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: cleanAssetAliases(e.target.value) })}
+      />
       <textarea
         className="afs-field__input afs-studio__carddesc"
         rows={2}

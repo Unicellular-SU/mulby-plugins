@@ -12,11 +12,12 @@ import { useGraphStore } from '../../store/graphStore'
 import { recallContext, getMemoryConfig } from './memory'
 import { makeProjectReadTools } from './agentTools'
 import type { ProjectDoc } from '../../domain/types'
+import { cleanAssetAliases } from '../../domain/assetAliases'
 
 export interface AgentPlan {
   reply: string
   script?: { name?: string; content: string }
-  assets?: { type: 'role' | 'scene' | 'prop'; name: string; desc?: string; prompt?: string }[]
+  assets?: { type: 'role' | 'scene' | 'prop'; name: string; aliases?: string[]; desc?: string; prompt?: string }[]
   storyboards?: {
     videoDesc: string
     prompt?: string
@@ -44,13 +45,13 @@ const CONTRACT = `
 {
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
-  "assets": [ { "type": "role|scene|prop", "name": "名称", "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
+  "assets": [ { "type": "role|scene|prop", "name": "名称", "aliases": ["别名/称谓"], "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
   "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "cast": ["出场资产名"], "castRefs": [{"assetName":"资产名","variantLabel":"妆容/服装/时期(可选)","roleInShot":"lead|supporting|background","note":"可选说明"}], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
   "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
-- assets 的 name 要与 storyboards 的 cast 名字一致，便于关联；同一角色有妆容/服装/年龄/时期变体时，在 castRefs 里写 assetName + variantLabel，不要只写进画面描述。
+- assets 的 name 要与 storyboards 的 cast 名字一致，便于关联；同一个人/场景有昵称、称谓或原著别称时写入 aliases，后续分镜可用别名匹配同一资产；同一角色有妆容/服装/年龄/时期变体时，在 castRefs 里写 assetName + variantLabel，不要只写进画面描述。
 - **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
 - 分镜按叙事顺序排列；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
@@ -255,7 +256,7 @@ function buildContext(doc: ProjectDoc, memoryText?: string): string {
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
     doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
     formatEpisodeContext(doc),
-    `已有资产：${doc.assets.map((a) => `${a.name}(${a.type})`).join('、') || '无'}`,
+    `已有资产：${doc.assets.map((a) => `${a.name}${a.aliases?.length ? ` alias:${a.aliases.join('/')}` : ''}(${a.type})`).join('、') || '无'}`,
     doc.storyboards.length
       ? `已有分镜（${doc.storyboards.length} 个，新增的分镜要承接这些、不要重复）：\n${[...doc.storyboards]
           .sort((a, b) => a.index - b.index)
@@ -305,7 +306,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
     '写入/生成工具：create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、upsert_asset_variant（创建/更新资产变体）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_cast_variant（修正既有分镜变体绑定）、generate_asset、generate_keyframe、generate_clip。' +
     '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）。' +
-    '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致。全部做完后用一句中文说明你做了什么。'
+    '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致，昵称/称谓写 aliases 以便后续复用同一资产。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
 
@@ -334,7 +335,7 @@ const SCRIPT_SKILL =
 const ASSETS_SKILL =
   '你是「美术设定」。从当前剧本提炼需要的资产：人物(role)/场景(scene)/物品(prop)。当前剧本可能来自本轮新剧本，也可能来自工具读取到的已有剧本/get_script。' +
   '每个资产给中文描述 desc + 英文生成提示词 prompt。已存在的资产（见上下文）不要重复；如果用户明确要求补资产且已有资产为空/缺失，不允许返回空数组，至少提炼角色和主要场景。' +
-  '资产名要能被分镜 cast 直接引用。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","desc":"","prompt":""}]}'
+  '资产名要能被分镜 cast 直接引用；昵称、称谓、原著别称写 aliases。只输出 JSON：{"assets":[{"type":"role|scene|prop","name":"","aliases":[],"desc":"","prompt":""}]}'
 const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
@@ -475,7 +476,7 @@ function cleanAssets(assets?: AgentPlan['assets']): PlanAsset[] {
     const key = `${a.type}:${name}`
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ type: a.type, name, desc: a.desc, prompt: a.prompt })
+    out.push({ type: a.type, name, aliases: cleanAssetAliases(a.aliases), desc: a.desc, prompt: a.prompt })
   }
   return out
 }

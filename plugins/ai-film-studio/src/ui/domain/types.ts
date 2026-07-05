@@ -85,6 +85,7 @@ export interface Asset {
   id: string
   type: AssetType
   name: string
+  aliases?: string[] // 角色/场景/道具的别名，用于跨集复用和 Agent 匹配
   prompt?: string // 英文生成提示词
   desc?: string // 中文描述
   refImageId?: string // 主参考图（= 当前选定图的 refImageId；selectAssetImage 时同步写回）
