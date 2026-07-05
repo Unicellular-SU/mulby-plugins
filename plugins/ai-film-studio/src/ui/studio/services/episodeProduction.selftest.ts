@@ -1,4 +1,4 @@
-import { buildEpisodeProductionRecap, invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
+import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -104,6 +104,7 @@ check('invalidates produced episode state', changed && produced.status === 'plan
 
 const untouched = episode('draft', 1, { status: 'draft' })
 check('leaves untouched episode unchanged', !invalidateEpisodeProduction(untouched), JSON.stringify(untouched))
+check('detects recap-only production state', hasEpisodeProductionState(episode('recap', 2, { productionRecap: 'old recap' })), 'recap-only state was not detected')
 
 const recapDoc = doc({
   currentEpisodeId: 'ep1',

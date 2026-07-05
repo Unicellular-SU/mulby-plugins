@@ -6,8 +6,12 @@ export interface VariantImageRequest {
   variantId: string
 }
 
+export function hasEpisodeProductionState(episode: Episode | undefined): boolean {
+  return !!episode && (!!episode.filmPath || !!episode.filmError || !!episode.producedAt || !!episode.productionRecap || episode.status === 'done')
+}
+
 export function invalidateEpisodeProduction(episode: Episode | undefined): boolean {
-  if (!episode || (!episode.filmPath && !episode.filmError && !episode.producedAt && !episode.productionRecap && episode.status !== 'done')) return false
+  if (!hasEpisodeProductionState(episode)) return false
   delete episode.filmPath
   delete episode.filmError
   delete episode.producedAt

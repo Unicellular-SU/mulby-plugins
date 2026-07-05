@@ -32,7 +32,7 @@ import { mapPool } from '../studio/services/concurrency'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
-import { buildEpisodeProductionRecap, invalidateCurrentEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, missingReferencedVariantImages, pendingEpisodesForSeries } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -73,6 +73,7 @@ export interface ProjectState {
   switchEpisode: (id: string) => void
   renameEpisode: (id: string, title: string) => void
   deleteEpisode: (id: string) => void
+  resetCurrentEpisodeProduction: () => void
   setEpisodeNovelChapters: (episodeId: string, chapterIds: string[]) => void
   distributeNovelChaptersAcrossEpisodes: () => void
 
@@ -779,6 +780,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         P.applyEpisodeToFlat(d, next)
       }
     }),
+
+  resetCurrentEpisodeProduction: () => {
+    const doc = get().doc
+    const episode = doc?.episodes?.find((item) => item.id === doc.currentEpisodeId)
+    if (!hasEpisodeProductionState(episode)) return
+    get().mutate((d) => {
+      invalidateCurrentEpisodeProduction(d)
+    })
+  },
 
   setEpisodeNovelChapters: (episodeId, chapterIds) =>
     get().mutate((d) => {

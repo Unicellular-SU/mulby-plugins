@@ -222,6 +222,7 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const switchEpisode = useProjectStore((s) => s.switchEpisode)
   const renameEpisode = useProjectStore((s) => s.renameEpisode)
   const deleteEpisode = useProjectStore((s) => s.deleteEpisode)
+  const resetCurrentEpisodeProduction = useProjectStore((s) => s.resetCurrentEpisodeProduction)
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const currentId = doc.currentEpisodeId ?? episodes[0]?.id ?? ''
   const current = episodes.find((e) => e.id === currentId) ?? episodes[0]
@@ -234,6 +235,7 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const chapterCount = (current?.novelChapterIds ?? []).filter((id) => validChapterIds.has(id)).length
   const castUseCount = new Set((currentReport?.castUses ?? []).map((use) => `${use.assetId}:${use.variantId ?? ''}`)).size
   const issueTitle = currentIssues.length ? currentIssues.slice(0, 5).map((issue) => issue.message).join('\n') : '当前集资产和变体引用正常'
+  const canResetProduction = !!current && current.status !== 'generating' && (!!current.filmPath || !!current.filmError || !!current.producedAt || !!current.productionRecap || current.status === 'done')
   const renameCurrent = () => {
     if (!current) return
     const title = window.prompt('集标题', current.title)
@@ -242,6 +244,10 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const deleteCurrent = () => {
     if (!current || episodes.length <= 1) return
     if (window.confirm(`删除「${current.title}」？`)) deleteEpisode(current.id)
+  }
+  const resetProduction = () => {
+    if (!current) return
+    if (window.confirm(`重置「${current.title}」的成片状态？该集会重新进入全剧生成队列。`)) resetCurrentEpisodeProduction()
   }
   return (
     <div className="afs-stwb__episode" aria-label="剧集">
@@ -303,6 +309,17 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
         disabled={busy || !current}
         onClick={renameCurrent}
       />
+      {canResetProduction && (
+        <IconButton
+          size="sm"
+          variant="ghost"
+          aria-label="重置当前集成片状态"
+          title="重置当前集成片状态"
+          icon={<RotateCcw size={16} />}
+          disabled={busy}
+          onClick={resetProduction}
+        />
+      )}
       <IconButton
         size="sm"
         variant="ghost"
