@@ -57,7 +57,9 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const film = useProjectStore((s) => s.film)
   const autoProduce = useProjectStore((s) => s.autoProduce)
   const autoProduceSeries = useProjectStore((s) => s.autoProduceSeries)
+  const pauseSeriesProduction = useProjectStore((s) => s.pauseSeriesProduction)
   const busy = batch.running || film.state === 'composing'
+  const seriesRunning = batch.running && batch.kind === 'series'
   const episodes = doc.episodes ?? []
   const canProduceCurrent = doc.storyboards.length > 0
   const canProduceSeries = episodes.length > 1 && pendingEpisodesForSeries(doc).length > 0
@@ -139,7 +141,19 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
             title="项目设置（Agent 部署 / 记忆）"
             onClick={() => setSettingsOpen(true)}
           />
-          {episodes.length > 1 && (
+          {episodes.length > 1 && seriesRunning && (
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={PauseCircle}
+              disabled={batch.pauseRequested}
+              title="当前集完成后暂停后续剧集，不中断正在生成的当前集"
+              onClick={() => pauseSeriesProduction()}
+            >
+              {batch.pauseRequested ? '暂停中' : '暂停后续'}
+            </Button>
+          )}
+          {episodes.length > 1 && !seriesRunning && (
             <Button
               variant="secondary"
               size="md"

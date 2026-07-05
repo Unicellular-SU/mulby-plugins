@@ -130,7 +130,7 @@ export interface ProjectState {
   generateKeyframe: (storyboardId: string) => Promise<void>
   generateClip: (storyboardId: string) => Promise<void>
   // 批量「一键生成」（顺序执行，跳过已完成；batch 显示当前进度标签）
-  batch: { running: boolean; label?: string }
+  batch: { running: boolean; label?: string; kind?: 'series'; pauseRequested?: boolean }
   generateAllAssets: () => Promise<void>
   generateAllKeyframes: () => Promise<void>
   generateAllClips: () => Promise<void>
@@ -138,6 +138,7 @@ export interface ProjectState {
   autoProduce: () => Promise<void>
   /** 全剧生成：按剧集顺序逐集执行一键成片，并把每集成片路径回写到 Episode。 */
   autoProduceSeries: () => Promise<void>
+  pauseSeriesProduction: () => void
 
   // 小说导入（长文 → 章节，供 Agent 改编）
   importNovel: (text: string) => void
@@ -298,7 +299,7 @@ async function produceCurrentEpisode(
   const doc = get().doc
   if (!doc) return
   const prefix = opts.labelPrefix ? `${opts.labelPrefix} · ` : ''
-  const setLabel = (label: string) => set({ batch: { running: true, label: `${prefix}${label}` } })
+  const setLabel = (label: string) => set({ batch: { ...get().batch, running: true, label: `${prefix}${label}` } })
   if (opts.manageBatch) setLabel('准备…')
   try {
     if (doc.storyboards.length === 0) return
@@ -1626,6 +1627,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await produceCurrentEpisode(get, set, { manageBatch: true })
   },
 
+  pauseSeriesProduction: () => {
+    const batch = get().batch
+    if (!batch.running || batch.kind !== 'series' || batch.pauseRequested) return
+    set({ batch: { ...batch, pauseRequested: true, label: batch.label ? `${batch.label}（将暂停后续）` : '生成全剧：将暂停后续' } })
+  },
+
   autoProduceSeries: async () => {
     const doc = get().doc
     if (get().batch.running || get().film.state === 'composing' || !doc) return
@@ -1637,9 +1644,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const pending = pendingEpisodesForSeries(doc)
     if (!pending.length) return
     const startId = doc.currentEpisodeId
-    set({ batch: { running: true, label: `生成全剧 0/${pending.length}` } })
+    set({ batch: { running: true, label: `生成全剧 0/${pending.length}`, kind: 'series', pauseRequested: false } })
     try {
       for (let i = 0; i < pending.length; i += 1) {
+        if (get().batch.pauseRequested) {
+          set({ batch: { ...get().batch, running: true, label: `生成全剧已暂停：完成 ${i}/${pending.length}` } })
+          break
+        }
         const latest = get().doc
         if (!latest) return
         const target = latest.episodes?.find((episode) => episode.id === pending[i].id)
