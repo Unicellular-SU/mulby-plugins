@@ -1206,6 +1206,7 @@ function StoryboardTab() {
   const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
   const continuity = useMemo(() => buildContinuityReport(doc), [doc])
   const [showWall, setShowWall] = useState(false)
+  const [showContinuity, setShowContinuity] = useState(false)
   return (
     <div className="afs-studio__storyboard">
       <div className="afs-studio__tabbar">
@@ -1226,8 +1227,9 @@ function StoryboardTab() {
           <Clapperboard size={14} /> 预览故事板
         </button>
       </div>
-      <ContinuityNotice issues={continuity.issues} />
+      <ContinuityNotice report={continuity} onOpen={() => setShowContinuity(true)} />
       {showWall && <StoryboardWall onClose={() => setShowWall(false)} />}
+      {showContinuity && <ContinuityDetailsDrawer report={continuity} onClose={() => setShowContinuity(false)} />}
       <div className="afs-studio__sblist">
         {doc.storyboards.length === 0 && <p className="afs-studio__hint">暂无分镜（让右侧 AI 制片自动拆解，或手动新增）。</p>}
         {[...doc.storyboards]
@@ -1240,7 +1242,10 @@ function StoryboardTab() {
   )
 }
 
-function ContinuityNotice({ issues }: { issues: ReturnType<typeof buildContinuityReport>['issues'] }) {
+type ContinuityReportView = ReturnType<typeof buildContinuityReport>
+
+function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; onOpen: () => void }) {
+  const issues = report.issues
   if (!issues.length) return null
   const errors = issues.filter((issue) => issue.severity === 'error')
   const warnings = issues.filter((issue) => issue.severity === 'warning')
@@ -1250,13 +1255,74 @@ function ContinuityNotice({ issues }: { issues: ReturnType<typeof buildContinuit
       <AlertTriangle size={15} />
       <div className="afs-studio__continuitybody">
         <div className="afs-studio__continuityhead">
-          一致性检查：{errors.length} 错误 / {warnings.length} 警告
+          <span>一致性检查：{errors.length} 错误 / {warnings.length} 警告</span>
+          <button type="button" className="afs-studio__continuityopen" onClick={onOpen}>
+            查看全部
+          </button>
         </div>
         <div className="afs-studio__continuitylist">
           {visible.map((issue, index) => (
             <span key={`${issue.code}-${index}`}>{issue.message}</span>
           ))}
           {issues.length > visible.length && <span>还有 {issues.length - visible.length} 项</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
+  const errors = report.issues.filter((issue) => issue.severity === 'error')
+  const warnings = report.issues.filter((issue) => issue.severity === 'warning')
+  const episodeName = (episodeId?: string) => {
+    if (!episodeId) return ''
+    const episode = report.episodes.find((item) => item.id === episodeId)
+    return episode ? `E${episode.index} ${episode.title}` : episodeId
+  }
+  const renderIssues = (items: ContinuityReportView['issues']) => (
+    <div className="afs-studio__continuityissues">
+      {items.map((issue, index) => {
+        const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
+        return (
+          <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
+            <div className="afs-studio__continuityissue-top">
+              <span>{issue.severity === 'error' ? '错误' : '警告'}</span>
+              <code>{issue.code}</code>
+            </div>
+            <p>{issue.message}</p>
+            {loc && <small>{loc}</small>}
+          </div>
+        )
+      })}
+    </div>
+  )
+  return (
+    <div className="afs-studio__drawer-scrim" onClick={onClose}>
+      <div className="afs-studio__drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-studio__drawer-head">
+          <span>一致性检查详情</span>
+          <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={onClose} title="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="afs-studio__drawer-body afs-studio__continuitydrawer">
+          <div className="afs-studio__continuitysummary">
+            <span>{report.episodes.length} 集</span>
+            <span>{errors.length} 错误</span>
+            <span>{warnings.length} 警告</span>
+          </div>
+          {errors.length > 0 && (
+            <section className="afs-studio__continuitysection">
+              <h3>错误</h3>
+              {renderIssues(errors)}
+            </section>
+          )}
+          {warnings.length > 0 && (
+            <section className="afs-studio__continuitysection">
+              <h3>警告</h3>
+              {renderIssues(warnings)}
+            </section>
+          )}
         </div>
       </div>
     </div>
