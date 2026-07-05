@@ -177,6 +177,22 @@ const episodeVariantCoverageReport = buildContinuityReport(
 const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
 check('flags main asset use when episode scoped variant exists', availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.storyboardId === 'main-use', JSON.stringify(episodeVariantCoverageReport.issues))
 
+const stateRegressionReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      variants: [{ id: 'v-battle', label: 'Battle', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] }],
+    }],
+    currentEpisodeId: 'ep2',
+    storyboards: [storyboard('main-after-variant', 0, [{ assetId: 'hero' }])],
+    episodes: [
+      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
+      episode('ep2', 1),
+    ],
+  }),
+)
+check('flags cross-episode state regression to main asset', !!stateRegressionReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-after-variant'), JSON.stringify(stateRegressionReport.issues))
+
 const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
 const chapterReport = buildContinuityReport(
   doc({

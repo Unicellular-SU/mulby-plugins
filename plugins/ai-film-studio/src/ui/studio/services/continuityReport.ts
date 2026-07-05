@@ -119,6 +119,14 @@ interface AssetLookupEntry {
   source: 'name' | 'alias'
 }
 
+interface LastVariantUse {
+  episodeId: string
+  episodeIndex: number
+  episodeTitle: string
+  variantId: string
+  variantLabel: string
+}
+
 function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
   const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
   const groups = new Map<string, AssetLookupEntry[]>()
@@ -250,6 +258,8 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
   const assignedChapterIds = new Set<string>()
   const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
+  const lastVariantUseByAsset = new Map<string, LastVariantUse>()
+  const stateRegressionWarnings = new Set<string>()
   addDuplicateAssetNameIssues(doc, allIssues)
   addDuplicateAssetAliasIssues(doc, allIssues)
   addUnusedProjectAssetIssues(doc, episodes, allIssues)
@@ -314,6 +324,19 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
               code: 'episode_variant_available',
               message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但本集已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
             })
+          } else {
+            const previous = lastVariantUseByAsset.get(asset.id)
+            const key = `${episode.id}:${storyboard.id}:${asset.id}`
+            if (previous && previous.episodeId !== episode.id && !stateRegressionWarnings.has(key)) {
+              stateRegressionWarnings.add(key)
+              addIssue({
+                ...base,
+                variantId: previous.variantId,
+                severity: 'warning',
+                code: 'asset_state_regressed_to_main',
+                message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel}」。如果状态延续，建议创建或绑定本集形态；如果剧情已恢复默认状态，可忽略。`,
+              })
+            }
           }
         }
         const refImageId = refImageIdForCastRef(asset, ref)
@@ -332,6 +355,15 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
           refImageId,
           appliesToEpisode,
         })
+        if (variant) {
+          lastVariantUseByAsset.set(asset.id, {
+            episodeId: episode.id,
+            episodeIndex: episode.index + 1,
+            episodeTitle: episode.title,
+            variantId: variant.id,
+            variantLabel: variant.label,
+          })
+        }
       }
     }
     addSceneReuseIssues(episode, sortedStoryboards, assets, addIssue)
