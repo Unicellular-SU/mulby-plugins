@@ -156,9 +156,19 @@ const recapDoc = doc({
 const recap = buildEpisodeProductionRecap(recapDoc, recapDoc.episodes![0])
 check('builds episode production recap from current flat data', recap.includes('E1「Pilot」') && recap.includes('Opening') && recap.includes('Hero-Battle') && recap.includes('1/2'), recap)
 
+const handoffAssets: Asset[] = [
+  {
+    ...assets[0],
+    variants: [
+      { id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep3'] },
+      { id: 'battle', label: 'Battle', refImageId: 'hero-battle' },
+    ],
+  },
+  { id: 'prop', type: 'prop', name: 'Key', refImageId: 'key-main', state: 'done' },
+]
 const handoffDoc = doc({
   currentEpisodeId: 'ep2',
-  assets,
+  assets: handoffAssets,
   storyboards: [storyboard('ep2-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
   episodes: [
     episode('ep1', 0, {
@@ -177,6 +187,8 @@ const handoff = buildEpisodeProductionHandoff(handoffDoc, handoffDoc.episodes![1
 const heroCue = handoff.sharedAssets.find((cue) => cue.assetId === 'hero')
 check('builds cross-episode handoff recaps from prior produced episodes', handoff.recaps.length === 1 && handoff.recaps[0].episodeId === 'ep1' && handoff.recaps[0].recap.includes('Battle'), JSON.stringify(handoff.recaps))
 check('builds shared asset handoff cues for current episode refs', !!heroCue && heroCue.label === 'Hero-Gala' && heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3', JSON.stringify(heroCue))
+check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala'), JSON.stringify(handoff.suggestions))
+check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))
 
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)

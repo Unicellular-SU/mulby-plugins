@@ -368,8 +368,46 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
 }
 
 function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Episode }) {
+  const actionBusy = useProjectStore((s) => s.batch.running || s.film.state === 'composing')
+  const generateAsset = useProjectStore((s) => s.generateAsset)
+  const addAssetVariant = useProjectStore((s) => s.addAssetVariant)
+  const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
+  const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
-  const hasHints = handoff.recaps.length > 0 || handoff.sharedAssets.length > 0
+  const hasHints = handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
+  const runSuggestion = (suggestion: (typeof handoff.suggestions)[number]) => {
+    if (suggestion.kind === 'generate_asset_ref_image') {
+      void generateAsset(suggestion.assetId)
+      return
+    }
+    if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
+      void generateAssetVariant(suggestion.assetId, suggestion.variantId)
+      return
+    }
+    if (suggestion.kind === 'add_variant_episode_scope' && suggestion.variantId) {
+      const asset = doc.assets.find((item) => item.id === suggestion.assetId)
+      const variant = asset?.variants?.find((item) => item.id === suggestion.variantId)
+      if (!asset || !variant) return
+      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), episode.id])] })
+      return
+    }
+    if (suggestion.kind === 'create_episode_variant') {
+      const asset = doc.assets.find((item) => item.id === suggestion.assetId)
+      if (!asset) return
+      const variantId = addAssetVariant(asset.id, {
+        label: `E${episode.index + 1} ${episode.title}形态`,
+        desc: `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。`,
+      })
+      if (!variantId) return
+      updateAssetVariant(asset.id, variantId, { appliesToEpisodeIds: [episode.id] })
+      for (const storyboard of doc.storyboards) {
+        if (castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && !ref.variantId)) {
+          setStoryboardCastVariant(storyboard.id, asset.id, variantId)
+        }
+      }
+    }
+  }
   return (
     <Popover
       side="bottom"
@@ -390,9 +428,32 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       <div className="afs-stwb__handoff">
         <div className="afs-stwb__handoff-head">
           <b>E{episode.index + 1} 跨集承接</b>
-          <span>{handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产</span>
+          <span>{handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产 · {handoff.suggestions.length} 条建议</span>
         </div>
         {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有可承接的制作回顾或跨集复用资产。</p>}
+        {handoff.suggestions.length > 0 && (
+          <section className="afs-stwb__handoff-sec">
+            <h4>建议处理</h4>
+            <div className="afs-stwb__handoff-list">
+              {handoff.suggestions.map((suggestion) => (
+                <article key={suggestion.id} className="afs-stwb__handoff-item afs-stwb__handoff-suggestion">
+                  <strong>{suggestion.label}</strong>
+                  <p>{suggestion.detail}</p>
+                  <button
+                    type="button"
+                    className="afs-stwb__handoff-action"
+                    disabled={actionBusy || !!suggestion.disabledReason}
+                    title={suggestion.disabledReason || suggestion.detail}
+                    onClick={() => runSuggestion(suggestion)}
+                  >
+                    {suggestion.kind === 'create_episode_variant' ? <Plus size={11} /> : <Wand2 size={11} />}
+                    {suggestion.kind === 'add_variant_episode_scope' ? '标记适用' : suggestion.kind === 'create_episode_variant' ? '新建并应用' : '执行'}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
         {handoff.recaps.length > 0 && (
           <section className="afs-stwb__handoff-sec">
             <h4>最近制作回顾</h4>

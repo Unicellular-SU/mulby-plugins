@@ -27,9 +27,22 @@ export interface EpisodeHandoffAssetCue {
   appearances: EpisodeHandoffAppearance[]
 }
 
+export type EpisodeHandoffSuggestionKind = 'generate_asset_ref_image' | 'generate_variant_ref_image' | 'add_variant_episode_scope' | 'create_episode_variant'
+
+export interface EpisodeHandoffSuggestion {
+  id: string
+  kind: EpisodeHandoffSuggestionKind
+  assetId: string
+  variantId?: string
+  label: string
+  detail: string
+  disabledReason?: string
+}
+
 export interface EpisodeProductionHandoff {
   recaps: EpisodeHandoffRecap[]
   sharedAssets: EpisodeHandoffAssetCue[]
+  suggestions: EpisodeHandoffSuggestion[]
 }
 
 export function hasEpisodeProductionState(episode: Episode | undefined): boolean {
@@ -217,9 +230,51 @@ export function buildEpisodeProductionHandoff(
 
   const currentRefs = uniqueCastRefs(storyboardsForEpisode(doc, episode))
   const sharedAssets: EpisodeHandoffAssetCue[] = []
+  const suggestions: EpisodeHandoffSuggestion[] = []
+  const suggested = new Set<string>()
+  const addSuggestion = (suggestion: EpisodeHandoffSuggestion) => {
+    if (suggested.has(suggestion.id)) return
+    suggested.add(suggestion.id)
+    suggestions.push(suggestion)
+  }
   for (const ref of currentRefs) {
     const asset = assets.get(ref.assetId)
     if (!asset || asset.type === 'audio' || asset.type === 'clip') continue
+    if (!asset.refImageId) {
+      addSuggestion({
+        id: `asset-image:${asset.id}`,
+        kind: 'generate_asset_ref_image',
+        assetId: asset.id,
+        label: `生成「${asset.name}」主参考图`,
+        detail: '当前集引用了该资产，但它还没有主参考图。',
+      })
+    }
+    if (ref.variantId) {
+      const variant = asset.variants?.find((item) => item.id === ref.variantId)
+      if (variant) {
+        if ((variant.appliesToEpisodeIds?.length ?? 0) > 0 && !variant.appliesToEpisodeIds?.includes(episode.id)) {
+          addSuggestion({
+            id: `variant-scope:${asset.id}:${variant.id}:${episode.id}`,
+            kind: 'add_variant_episode_scope',
+            assetId: asset.id,
+            variantId: variant.id,
+            label: `标记「${variant.label}」适用本集`,
+            detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}。`,
+          })
+        }
+        if (!variant.refImageId) {
+          addSuggestion({
+            id: `variant-image:${asset.id}:${variant.id}`,
+            kind: 'generate_variant_ref_image',
+            assetId: asset.id,
+            variantId: variant.id,
+            label: `生成「${asset.name}-${variant.label}」参考图`,
+            detail: '当前集引用了该形态，但它还没有独立参考图。',
+            disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
+          })
+        }
+      }
+    }
     const appearances = episodes
       .filter((item) => item.id !== episode.id)
       .map((item) => {
@@ -242,11 +297,20 @@ export function buildEpisodeProductionHandoff(
         label: labelForCastRef(asset, ref),
         appearances,
       })
+      if (!ref.variantId) {
+        addSuggestion({
+          id: `create-variant:${asset.id}:${episode.id}`,
+          kind: 'create_episode_variant',
+          assetId: asset.id,
+          label: `新建并应用「${asset.name}」本集形态`,
+          detail: `该资产在其他集也出现过；如果 E${episode.index + 1} 有新妆容、服装或状态，先建本集专属形态再生成参考图。`,
+        })
+      }
     }
     if (sharedAssets.length >= maxAssets) break
   }
 
-  return { recaps, sharedAssets }
+  return { recaps, sharedAssets, suggestions }
 }
 
 export function missingReferencedVariantImages(doc: Pick<ProjectDoc, 'assets' | 'storyboards'>): VariantImageRequest[] {
