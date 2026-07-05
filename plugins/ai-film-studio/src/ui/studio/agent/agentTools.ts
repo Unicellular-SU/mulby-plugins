@@ -890,11 +890,27 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     ...makeProjectReadTools(doc),
     {
       name: 'upsert_script',
-      description: '写入或更新剧本',
-      parameters: { type: 'object', properties: { name: { type: 'string' }, content: { type: 'string', description: '剧本正文' } }, required: ['content'] },
+      description: '写入或更新某集的剧本，默认当前集；可用 episodeId/episodeIndex/episodeTitle 指定剧集。',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
+          name: { type: 'string' },
+          content: { type: 'string', description: '剧本正文' },
+        },
+        required: ['content'],
+      },
       execute: async (a) => {
-        get().upsertScript({ name: typeof a.name === 'string' ? a.name : undefined, content: String(a.content ?? '') })
-        return '剧本已更新'
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const id = get().upsertScript({ name: typeof a.name === 'string' ? a.name : undefined, content: String(a.content ?? '') })
+        const next = doc()
+        const episode = next?.episodes?.find((item) => item.id === target.episode?.id) ?? target.episode
+        const scripts = next && episode ? scriptsForEpisode(next, episode) : []
+        const script = scripts.find((item) => item.id === id)
+        return json({ id, episode: next && episode ? episodeInfo(next, episode) : undefined, script: script ? { id: script.id, name: script.name, length: script.content.length } : undefined })
       },
     },
     {

@@ -1,5 +1,5 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
-import type { Asset, AssetVariant, Episode, ProjectDoc, ProjectMeta, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
+import type { Asset, AssetVariant, Episode, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
 
 let failures = 0
@@ -128,6 +128,7 @@ function cloneDoc(input: ProjectDoc): ProjectDoc {
 function makeWritableState(initial: ProjectDoc): ProjectState {
   const current = initial
   let nextAsset = 1
+  let nextScript = 1
   let nextStoryboard = 1
 
   const syncCurrentEpisode = () => {
@@ -158,6 +159,15 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       if (!episode) return
       current.currentEpisodeId = episode.id
       applyEpisode(episode)
+    },
+    upsertScript: (s: Partial<Script> & { content: string }) => {
+      const id = s.id ?? `script-write-${nextScript++}`
+      const index = current.scripts.findIndex((item) => item.id === id)
+      const base: Script = index >= 0 ? current.scripts[index] : { id, name: s.name ?? 'Script', content: '', createdAt: 0, updatedAt: 0 }
+      const merged: Script = { ...base, ...s, id, content: s.content, updatedAt: 1 }
+      if (index >= 0) current.scripts[index] = merged
+      else current.scripts.push(merged)
+      return id
     },
     upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => {
       const id = s.id ?? `sb-write-${nextStoryboard++}`
@@ -228,6 +238,7 @@ writableDoc.assets = [
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
+const upsertScript = writeTools.find((tool) => tool.name === 'upsert_script')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
@@ -236,10 +247,22 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!addStoryboard || !updateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
+
+const upsertEp2Script = JSON.parse(await upsertScript.execute({ episodeTitle: 'Second', name: 'Second Script Rewrite', content: 'Second episode targeted rewrite.' }))
+const ep1AfterScript = writableDoc.episodes?.find((item) => item.id === 'ep1')
+const ep2WrittenScript = writableDoc.scripts.find((item) => item.id === upsertEp2Script.id)
+check(
+  'upsert_script writes selected non-current episode',
+  writableDoc.currentEpisodeId === 'ep2' &&
+    upsertEp2Script.episode?.episodeId === 'ep2' &&
+    ep2WrittenScript?.content === 'Second episode targeted rewrite.' &&
+    ep1AfterScript?.scripts[0]?.content === 'Current episode only.',
+  JSON.stringify({ upsertEp2Script, currentScripts: writableDoc.scripts, ep1Scripts: ep1AfterScript?.scripts }),
+)
 
 const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2, videoDesc: 'Second episode new shot.', cast: ['主角'] }))
 const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
