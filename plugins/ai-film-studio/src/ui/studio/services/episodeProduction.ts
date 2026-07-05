@@ -1,5 +1,6 @@
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import type { Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
+import { variantScopeIssue } from './continuityReport'
 
 export interface VariantImageRequest {
   assetId: string
@@ -38,6 +39,9 @@ export interface EpisodeHandoffSuggestion {
   kind: EpisodeHandoffSuggestionKind
   assetId: string
   variantId?: string
+  scopeKind?: 'episode' | 'scene' | 'storyboard'
+  storyboardId?: string
+  sceneId?: string
   label: string
   detail: string
   autoRepairable?: boolean
@@ -51,6 +55,16 @@ export interface EpisodeProductionHandoff {
   recaps: EpisodeHandoffRecap[]
   sharedAssets: EpisodeHandoffAssetCue[]
   suggestions: EpisodeHandoffSuggestion[]
+}
+
+type HandoffAsset = ProjectDoc['assets'][number]
+type HandoffVariant = NonNullable<HandoffAsset['variants']>[number]
+
+interface EpisodeHandoffSourceRef {
+  ref: StoryboardCastRef
+  storyboard?: Storyboard
+  carryForward: boolean
+  sourceEpisode?: Episode
 }
 
 export function hasEpisodeProductionState(episode: Episode | undefined): boolean {
@@ -180,6 +194,22 @@ function uniqueCastRefs(storyboards: Storyboard[]): ReturnType<typeof castRefsFo
   return refs
 }
 
+function castRefUses(storyboards: Storyboard[]): { ref: StoryboardCastRef; storyboard: Storyboard }[] {
+  return storyboards.flatMap((storyboard) => castRefsForStoryboard(storyboard).map((ref) => ({ ref, storyboard })))
+}
+
+function uniqueCastRefUses(storyboards: Storyboard[]): { ref: StoryboardCastRef; storyboard: Storyboard }[] {
+  const seen = new Set<string>()
+  const uses: { ref: StoryboardCastRef; storyboard: Storyboard }[] = []
+  for (const use of castRefUses(storyboards)) {
+    const key = `${use.ref.assetId}:${use.ref.variantId ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    uses.push(use)
+  }
+  return uses
+}
+
 function latestCastRefsByAsset(doc: ProjectDoc, episode: Episode): StoryboardCastRef[] {
   const storyboards = [...storyboardsForEpisode(doc, episode)].sort((a, b) => b.index - a.index)
   const seen = new Set<string>()
@@ -212,6 +242,12 @@ function carryForwardCastRefs(doc: ProjectDoc, episode: Episode, episodes: Episo
 
 function variantHasScope(variant: NonNullable<ProjectDoc['assets'][number]['variants']>[number] | undefined): boolean {
   return !!variant && (!!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length)
+}
+
+function scopeTargetLabel(kind: NonNullable<EpisodeHandoffSuggestion['scopeKind']>, episode: Episode, storyboard?: Storyboard): string {
+  if (kind === 'scene') return storyboard?.sceneId ? `场景「${storyboard.sceneId}」` : `分镜 #${(storyboard?.index ?? 0) + 1}`
+  if (kind === 'storyboard') return `分镜 #${(storyboard?.index ?? 0) + 1}`
+  return `E${episode.index + 1}`
 }
 
 function latestPreviousVariantUse(
@@ -320,9 +356,11 @@ export function buildEpisodeProductionHandoff(
       recap: compact(item.productionRecap, 260),
     }))
 
-  const currentRefs = uniqueCastRefs(storyboardsForEpisode(doc, episode))
-  const sourceRefs = currentRefs.length
-    ? currentRefs.map((ref) => ({ ref, carryForward: false as const, sourceEpisode: undefined }))
+  const currentStoryboards = storyboardsForEpisode(doc, episode)
+  const allCurrentUses = castRefUses(currentStoryboards)
+  const currentUses = uniqueCastRefUses(currentStoryboards)
+  const sourceRefs: EpisodeHandoffSourceRef[] = currentUses.length
+    ? currentUses.map(({ ref, storyboard }) => ({ ref, storyboard, carryForward: false as const, sourceEpisode: undefined }))
     : carryForwardCastRefs(doc, episode, episodes, maxAssets).map(({ ref, sourceEpisode }) => ({ ref, carryForward: true as const, sourceEpisode }))
   const sharedAssets: EpisodeHandoffAssetCue[] = []
   const suggestions: EpisodeHandoffSuggestion[] = []
@@ -331,6 +369,29 @@ export function buildEpisodeProductionHandoff(
     if (suggested.has(suggestion.id)) return
     suggested.add(suggestion.id)
     suggestions.push(suggestion)
+  }
+  const addVariantScopeSuggestion = (asset: HandoffAsset, variant: HandoffVariant, storyboard: Storyboard) => {
+    const scopeIssue = variantScopeIssue(variant, episode, storyboard)
+    if (!scopeIssue) return
+    const target = scopeTargetLabel(scopeIssue, episode, storyboard)
+    addSuggestion({
+      id: `variant-scope:${asset.id}:${variant.id}:${episode.id}:${scopeIssue}:${storyboard.id}`,
+      kind: 'add_variant_episode_scope',
+      assetId: asset.id,
+      variantId: variant.id,
+      scopeKind: scopeIssue,
+      storyboardId: storyboard.id,
+      sceneId: storyboard.sceneId,
+      label: `标记「${variant.label}」适用${target}`,
+      detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于${target}。`,
+      autoRepairable: true,
+    })
+  }
+  for (const { ref, storyboard } of allCurrentUses) {
+    if (!ref.variantId) continue
+    const asset = assets.get(ref.assetId)
+    const variant = asset?.variants?.find((item) => item.id === ref.variantId)
+    if (asset && variant) addVariantScopeSuggestion(asset, variant, storyboard)
   }
   for (const sourceRef of sourceRefs) {
     const { ref } = sourceRef
@@ -349,17 +410,6 @@ export function buildEpisodeProductionHandoff(
     if (!sourceRef.carryForward && ref.variantId) {
       const variant = asset.variants?.find((item) => item.id === ref.variantId)
       if (variant) {
-        if ((variant.appliesToEpisodeIds?.length ?? 0) > 0 && !variant.appliesToEpisodeIds?.includes(episode.id)) {
-          addSuggestion({
-            id: `variant-scope:${asset.id}:${variant.id}:${episode.id}`,
-            kind: 'add_variant_episode_scope',
-            assetId: asset.id,
-            variantId: variant.id,
-            label: `标记「${variant.label}」适用本集`,
-            detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}。`,
-            autoRepairable: true,
-          })
-        }
         if (!variantHasScope(variant)) {
           const previous = latestPreviousVariantUse(doc, episodes, episode, asset.id, variant.id)
           if (previous) {

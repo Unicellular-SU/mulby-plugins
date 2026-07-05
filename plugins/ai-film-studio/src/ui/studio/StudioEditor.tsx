@@ -439,7 +439,14 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       const asset = doc.assets.find((item) => item.id === suggestion.assetId)
       const variant = asset?.variants?.find((item) => item.id === suggestion.variantId)
       if (!asset || !variant) return
-      updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: [...new Set([...(variant.appliesToEpisodeIds ?? []), episode.id])] })
+      const storyboard = suggestion.storyboardId ? doc.storyboards.find((item) => item.id === suggestion.storyboardId) : undefined
+      const patch = variantScopePatchForUse(
+        variant,
+        { id: episode.id },
+        { id: suggestion.storyboardId ?? storyboard?.id ?? '', sceneId: suggestion.sceneId ?? storyboard?.sceneId },
+        suggestion.scopeKind ?? 'episode',
+      )
+      if (patch) updateAssetVariant(asset.id, variant.id, patch)
       return
     }
     if (suggestion.kind === 'create_episode_variant') {

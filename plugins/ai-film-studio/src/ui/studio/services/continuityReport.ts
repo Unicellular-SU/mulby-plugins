@@ -81,7 +81,7 @@ function episodeList(doc: ProjectDoc): Episode[] {
   ]
 }
 
-function variantScopeIssue(variant: NonNullable<Asset['variants']>[number] | undefined, episode: Episode, storyboard: Storyboard): ContinuityIssue['scopeKind'] | undefined {
+export function variantScopeIssue(variant: NonNullable<Asset['variants']>[number] | undefined, episode: Episode, storyboard: Storyboard): ContinuityIssue['scopeKind'] | undefined {
   if (!variant) return undefined
   const episodeIds = variant.appliesToEpisodeIds ?? []
   if (episodeIds.length && !episodeIds.includes(episode.id)) return 'episode'

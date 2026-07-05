@@ -15,7 +15,7 @@ function meta(): ProjectMeta {
   return { id: 'p1', name: 'series', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 0, updatedAt: 0 }
 }
 
-function storyboard(id: string, index: number, castRefs: Storyboard['castRefs']): Storyboard {
+function storyboard(id: string, index: number, castRefs: Storyboard['castRefs'], patch: Partial<Storyboard> = {}): Storyboard {
   return {
     id,
     index,
@@ -26,6 +26,7 @@ function storyboard(id: string, index: number, castRefs: Storyboard['castRefs'])
     castRefs,
     shouldGenerateImage: true,
     state: 'idle',
+    ...patch,
   }
 }
 
@@ -284,6 +285,29 @@ check(
   'suggests confirming unscoped cross-episode variant switches',
   !!variantSwitchSuggestion?.detail.includes('上一相关剧集') && !!variantSwitchSuggestion.detail.includes('Hero-Battle'),
   JSON.stringify(variantSwitchHandoff.suggestions),
+)
+
+const sceneScopedHandoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets: [{
+    ...assets[0],
+    variants: [{ id: 'mask', label: 'Masked', refImageId: 'hero-mask', appliesToSceneIds: ['banquet'] }],
+  }],
+  storyboards: [
+    storyboard('ep2-banquet-hero', 0, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'banquet' }),
+    storyboard('ep2-street-hero', 1, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'street' }),
+  ],
+  episodes: [
+    episode('ep1', 0, { title: 'Banquet', storyboards: [storyboard('ep1-banquet-hero', 0, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'banquet' })] }),
+    episode('ep2', 1, { title: 'Street' }),
+  ],
+})
+const sceneScopedHandoff = buildEpisodeProductionHandoff(sceneScopedHandoffDoc, sceneScopedHandoffDoc.episodes![1])
+const sceneScopeSuggestion = sceneScopedHandoff.suggestions.find((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'mask')
+check(
+  'handoff suggestions preserve scene scope for scoped variant fixes',
+  sceneScopeSuggestion?.scopeKind === 'scene' && sceneScopeSuggestion.sceneId === 'street' && sceneScopeSuggestion.storyboardId === 'ep2-street-hero',
+  JSON.stringify(sceneScopedHandoff.suggestions),
 )
 
 const variantSwitchAfterMainResetHandoffDoc = doc({
