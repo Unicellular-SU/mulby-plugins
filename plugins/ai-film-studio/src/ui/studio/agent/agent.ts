@@ -12,6 +12,7 @@ import { useGraphStore } from '../../store/graphStore'
 import { recallContext, getMemoryConfig } from './memory'
 import { makeProjectReadTools } from './agentTools'
 import { resolveAgentEpisodeTarget } from './episodeTarget'
+import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 import type { ProjectDoc } from '../../domain/types'
 import { cleanAssetAliases } from '../../domain/assetAliases'
 
@@ -334,6 +335,7 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
     '写入/生成工具：update_series_bible（更新整季蓝图）、upsert_episode_plan（更新单集 hook/冲突/结尾钩子和必需资产/变体）、create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、update_asset（改已有资产名称/别名/描述/提示词）、upsert_asset_variant（创建/更新资产变体）、set_asset_variant_scope（增量标记变体适用分镜/场景/剧集）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_asset_ref（修正既有分镜出场资产引用）、set_storyboard_cast_variant（修正既有分镜变体绑定）、set_storyboard_scene_asset（修正连续场景资产绑定）、generate_asset、generate_keyframe、generate_clip。' +
     '用户要求规划整季、拆多集、维护角色弧光或只做大纲时，优先 update_series_bible/upsert_episode_plan，不要直接重写已有剧本；生成单集剧本/分镜时必须遵守对应 Episode.plan 的 requiredAssetIds 和 requiredVariantIds。' +
+    PLANNED_HANDOFF_STORYBOARD_RULE +
     '续写下一集、处理换装妆容或承接上一集状态时，先读取 get_episode_handoff；如果 handoff/continuity 指出上一相关剧集使用过具体形态，或当前分镜/场景/剧集已有适用变体，分镜必须通过 castRefs 绑定 variantLabel/variantId，除非剧情明确恢复默认状态。' +
     '连续场景里的同一角色默认保持同一形态；get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，用 set_storyboard_scene_asset 补齐或统一同一 sceneId 的场景资产；返回 scene_group_variant_mismatch 时，除非剧情明确发生换装/状态变化，否则用 set_storyboard_cast_variant 统一同一 sceneId 里的角色变体。' +
     'get_continuity_report 返回 episode_variant_available 且有多个 candidateVariantIds 时，先按剧情选择正确形态，再用 set_storyboard_cast_variant 绑定；不要继续让分镜使用主形象。' +
@@ -377,6 +379,7 @@ const STORYBOARD_SKILL =
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
   '同一空间、同一连续动作或同一场景段落的镜头必须写相同 sceneId；换场时更换 sceneId，替换已有分镜且不再属于任何场景组时可写 sceneId="" 清除旧值。sceneId 用稳定短标识，不要每镜都新造。' +
   '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
+  PLANNED_HANDOFF_STORYBOARD_RULE +
   '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
   '当你为了承接上一形态或使用已有场景/分镜级形态而绑定 variant 时，给该分镜写 ensureScope=true；有 sceneId 时优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集适用才用 "episode"。' +
   '当连续性报告出现 episode_variant_available、asset_state_regressed_to_main 或 asset_state_changed_variant 时，优先把分镜输出为绑定候选/上一形态/新形态的 castRefs，避免生成后再回退或漂移到错误形态。' +
@@ -454,6 +457,7 @@ const TOOL_CONTEXT_CAP = 24000
 const PIPELINE_TOOL_GUIDE =
   '## 子 Agent 工具上下文\n' +
   '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。\n' +
+  `${PLANNED_HANDOFF_STORYBOARD_RULE}\n` +
   '多集续写、换装、妆容、受伤状态或时期变化要以 get_episode_handoff 和 get_continuity_report 为准；分镜子 Agent 看到上一相关剧集形态、本集适用变体、episode_variant_available、asset_state_regressed_to_main 或 asset_state_changed_variant 时，必须输出带 variantLabel/variantId 的 castRefs，除非剧本明确恢复默认状态。\n' +
   '如果 continuity 出现 scene_group_variant_mismatch，同一 sceneId 的连续分镜应统一同一角色形态，除非剧本明确描述该场内发生换装、化妆、受伤或状态转变。'
 

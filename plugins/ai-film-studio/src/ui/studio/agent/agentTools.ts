@@ -10,6 +10,7 @@ import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalize
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
 import { loadAssetHub, projectAssetIdentityEntityId, type LibraryEntity } from '../../services/assetHub'
+import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
 type ProjectDocGetter = () => ProjectDoc | null
 type LinkableLibraryEntity = {
@@ -835,7 +836,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_episode_handoff',
-      description: '读取某集的跨集承接线索：最近已制作剧集回顾，以及当前集资产/形态在其他剧集中的出现记录。适合续写多集、复用角色或处理换装/妆容时调用。',
+      description: `读取某集的跨集承接线索：最近已制作剧集回顾、plannedAssets/plannedVariants 本集计划输入、当前集资产/形态在其他剧集中的出现记录，以及可执行承接建议。${PLANNED_HANDOFF_STORYBOARD_RULE}`,
       parameters: {
         type: 'object',
         properties: {

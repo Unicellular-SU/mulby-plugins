@@ -907,6 +907,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - “本集计划输入”区块会列出计划项目资产、计划形态/妆容、主参考图/形态图是否缺失，以及形态是否已标记适用于当前集；已有作用域会以剧集标签展示，方便用户理解修复建议来自哪条计划约束。
 - 本轮只改 UI 可解释性，不改变 `buildEpisodeProductionHandoff` 的生成口径，也不改变生产阻断规则；计划级修复建议仍由上一轮的 handoff 服务统一产出。
 
+第六十一轮提交继续落地 P4/P5 的 Agent planned handoff 约束：
+
+- 新增共享 Agent 策略常量，明确 `get_episode_handoff.plannedAssets/plannedVariants` 是当前集 `Episode.plan` 的权威生产输入；新增或续写分镜时，计划资产必须进入 `castRefs/associateAssetIds`，计划形态必须进入对应资产的 `castRefs.variantId/variantLabel`。
+- 工具循环 system、分阶段分镜子 Agent、子 Agent 工具上下文、运行时本地工具协议和 `get_episode_handoff` 工具描述都复用同一条规则；缺主图、缺形态图或形态未适用本集时，Agent 应先执行 handoff 建议或对应补图/补作用域工具，再生成关键帧/视频。
+- 新增 `agentPolicy.selftest.ts` 并接入 `npm run test:continuity`，回归检查工具描述、工具循环 system 和本地工具协议都包含 `plannedAssets/plannedVariants` 以及必须落到分镜绑定的约束，避免后续提示词改动重新削弱计划输入边界。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
