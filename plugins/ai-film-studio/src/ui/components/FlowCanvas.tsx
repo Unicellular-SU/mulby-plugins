@@ -16,7 +16,6 @@ import FilmNode from './nodes/FilmNode'
 import { DND_MIME, DND_ASSET, DND_ELEMENT, DND_SNIPPET } from './NodeLibrary'
 import { getNodeDef } from '../nodes/nodeDefs'
 import { useGraphStore, isValidConnection, type FilmNode as FilmNodeType } from '../store/graphStore'
-import { useAssetStore } from '../store/assetStore'
 import { useAssetHubStore } from '../store/assetHubStore'
 import { usePromptStore, resolveSnippet } from '../store/promptStore'
 import { useUiStore } from '../store/uiStore'
@@ -77,7 +76,7 @@ export default function FlowCanvas() {
   }, [])
 
   const onDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault()
       const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
       const kind = e.dataTransfer.getData(DND_MIME)
@@ -85,16 +84,19 @@ export default function FlowCanvas() {
         addNode(kind, position)
         return
       }
+      const hub = useAssetHubStore.getState()
+      if (!hub.loaded) await hub.refresh()
+      const hubState = useAssetHubStore.getState()
       const assetId = e.dataTransfer.getData(DND_ASSET)
       if (assetId) {
-        const rec = useAssetHubStore.getState().mediaAssets.find((a) => a.id === assetId) ?? useAssetStore.getState().assets.find((a) => a.id === assetId)
+        const rec = hubState.mediaAssets.find((a) => a.id === assetId)
         if (rec) void useGraphStore.getState().insertAssetNode(rec, position)
         return
       }
       const elId = e.dataTransfer.getData(DND_ELEMENT)
       if (elId) {
-        const entity = useAssetHubStore.getState().entities.find((x) => x.id === elId)
-        const el = entity ? libraryEntityToElement(entity) : useAssetStore.getState().elements.find((x) => x.id === elId)
+        const entity = hubState.entities.find((x) => x.id === elId)
+        const el = entity ? libraryEntityToElement(entity) : undefined
         if (el) void useGraphStore.getState().insertElementNode(el, position)
         return
       }

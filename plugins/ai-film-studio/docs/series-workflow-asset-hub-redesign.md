@@ -665,6 +665,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 身份资产编辑器的参考图候选不再回退读取旧媒体 store，而是使用 `assetHubStore.mediaAssets`；页面加载时统一刷新资产中心快照。
 - 新建、编辑、删除身份资产仍通过兼容的旧 `elements:library` 写入 API 执行，但写入前会确保旧 store 已加载，写入后刷新 `assetHubStore`，避免把未加载的旧列表误当成空库覆盖。
 
+第二十一轮提交继续落地 P6 的拖拽落点读取收敛：
+
+- Studio 项目资产页接收“身份资产/媒体文件”拖入时不再直接读取 `assetStore.elements` / `assetStore.assets` 作为 fallback，而是先确保 `assetHubStore` 已加载，再从 `entities` / `mediaAssets` 解析拖拽 id。
+- FlowCanvas 接收“身份资产/媒体文件”拖入时同样只从 `assetHubStore` 解析，并通过 `libraryEntityToElement` 转为当前画布节点写入所需的兼容结构。
+- 旧 `elements:library` 仍作为持久化兼容层存在，但 UI 拖拽入口不再把旧 store 当作并列数据源，减少“同一资产从两个列表读取”的状态漂移。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

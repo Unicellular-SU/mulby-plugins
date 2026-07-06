@@ -7,7 +7,6 @@ import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loade
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
-import { useAssetStore } from '../store/assetStore'
 import { useAssetHubStore } from '../store/assetHubStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
@@ -1132,13 +1131,16 @@ function AssetsTab() {
     setDropKind(null)
     const elId = e.dataTransfer.getData(DND_ELEMENT)
     const asId = e.dataTransfer.getData(DND_ASSET)
+    const hub = useAssetHubStore.getState()
+    if (!hub.loaded) await hub.refresh()
+    const hubState = useAssetHubStore.getState()
     if (elId) {
-      const entity = useAssetHubStore.getState().entities.find((item) => item.id === elId)
-      const el = entity ? libraryEntityToElement(entity) : useAssetStore.getState().elements.find((x) => x.id === elId)
+      const entity = hubState.entities.find((item) => item.id === elId)
+      const el = entity ? libraryEntityToElement(entity) : undefined
       if (el && (await importElementToProject(doc.meta.id, el, kind)))
         window.mulby?.notification?.show(`已把「${el.name}」加入${label}`, 'success')
     } else if (asId) {
-      const rec = useAssetHubStore.getState().mediaAssets.find((x) => x.id === asId) ?? useAssetStore.getState().assets.find((x) => x.id === asId)
+      const rec = hubState.mediaAssets.find((x) => x.id === asId)
       if (rec && (await importImageToProject(doc.meta.id, rec, kind)))
         window.mulby?.notification?.show(`已把「${rec.name || '媒体文件'}」加入${label}`, 'success')
     }
