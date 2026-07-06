@@ -2235,7 +2235,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issue.assetId &&
           (issue.candidateLibraryEntityIds?.length ?? 0) > 0
         const canMergeDuplicateLibraryAsset = (issue.code === 'duplicate_library_entity_project_assets' || issue.code === 'cross_episode_duplicate_project_asset_candidate') && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
-        const canSyncLibraryEntity = issue.code === 'library_entity_version_outdated' && !!issue.assetId && !!issue.libraryEntityId && hubEntities.some((entity) => entity.id === issue.libraryEntityId)
+        const canSyncLibraryEntity = issue.code === 'library_entity_version_outdated' && !!issue.assetId && !!issue.libraryEntityId && hubEntities.some((entity) => entity.id === issue.libraryEntityId && !entity.archived)
         const canPublishMissingLibraryEntity = issue.code === 'library_entity_missing' && !!issue.assetId
         const refAction = missingRefAction(issue)
         return (

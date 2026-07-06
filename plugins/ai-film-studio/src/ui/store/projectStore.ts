@@ -1254,6 +1254,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   syncAssetFromLibraryEntity: (assetId, entity) => {
     if (!assetId || !entity.id) return false
+    if (entity.archived) {
+      window.mulby?.notification?.show(`「${entity.name}」已归档，恢复后才能同步到项目资产`, 'warning')
+      return false
+    }
     let synced = false
     get().mutate((d) => {
       const index = d.assets.findIndex((asset) => asset.id === assetId)

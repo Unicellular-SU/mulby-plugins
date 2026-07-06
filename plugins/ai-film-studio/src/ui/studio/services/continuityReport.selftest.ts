@@ -349,14 +349,33 @@ check(
   JSON.stringify(linkedAssetReport.issues),
 )
 check(
-  'flags outdated linked library entity versions',
-  linkedAssetReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.assetId === 'hero-a' && issue.entityVersion === 1 && issue.currentEntityVersion === 3),
+  'does not suggest syncing archived linked library entities',
+  !linkedAssetReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.libraryEntityId === 'el-hero'),
   JSON.stringify(linkedAssetReport.issues),
 )
 check(
   'flags duplicate project assets imported from the same library entity',
   linkedAssetReport.issues.filter((issue) => issue.code === 'duplicate_library_entity_project_assets' && issue.libraryEntityId === 'el-hero' && issue.relatedAssetIds?.length === 1).length === 2,
   JSON.stringify(linkedAssetReport.issues),
+)
+
+const outdatedLinkedEntityReport = buildContinuityReport(
+  doc({
+    assets: [
+      {
+        ...hero,
+        id: 'hero-outdated',
+        name: 'Hero Outdated',
+        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
+      },
+    ],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3 })] },
+)
+check(
+  'flags outdated linked library entity versions',
+  outdatedLinkedEntityReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.assetId === 'hero-outdated' && issue.entityVersion === 1 && issue.currentEntityVersion === 3),
+  JSON.stringify(outdatedLinkedEntityReport.issues),
 )
 
 const missingLinkedEntityReport = buildContinuityReport(

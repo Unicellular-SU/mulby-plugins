@@ -791,6 +791,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - `projectStore.promoteAssetToElement` 在复用 `libraryLink.entityId/elementId` 前会读取资产中心快照；目标身份已归档时直接返回失败，不再更新已废弃身份。
 - Agent 工具 `publish_project_asset_to_library` 改为读取发布动作的布尔结果，被 store 拦截时返回 `published: false` 和错误信息，避免自动流程误判为已写回。
 
+第四十二轮提交继续落地 P5/P6 的归档身份同步防御：
+
+- 连续性报告遇到已归档的链接身份时只保留 `library_entity_archived` 问题，不再继续追加 `library_entity_version_outdated`，避免给用户展示“同步新版”的误导性修复动作。
+- Studio 连续性详情里的“同步资产中心新版”入口再次检查目标身份未归档，防止旧报告或异步快照变化后仍触发同步。
+- `projectStore.syncAssetFromLibraryEntity` 增加 store 层兜底，直接调用同步 API 时如果目标身份已归档会返回失败并提示先恢复身份。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

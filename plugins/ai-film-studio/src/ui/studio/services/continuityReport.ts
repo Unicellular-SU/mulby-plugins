@@ -607,6 +607,7 @@ function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | u
         currentEntityVersion: entity.version,
         message: `项目资产「${asset.name}」链接的身份资产「${entity.name}」已归档。生产仍会使用项目快照，但多集继续制作前建议确认是否保留、解除关联或改用新的身份资产。`,
       })
+      continue
     }
     const linkedVersion = asset.libraryLink?.entityVersion
     if (typeof linkedVersion === 'number' && entity.version > linkedVersion) {
