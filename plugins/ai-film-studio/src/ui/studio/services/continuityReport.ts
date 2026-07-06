@@ -15,6 +15,8 @@ export interface ContinuityIssue {
   variantId?: string
   candidateVariantIds?: string[]
   candidateVariantLabels?: string[]
+  candidateLibraryEntityIds?: string[]
+  candidateLibraryEntityLabels?: string[]
   previousEpisodeId?: string
   previousEpisodeIndex?: number
   previousEpisodeTitle?: string
@@ -173,6 +175,12 @@ function addDuplicateAssetNameIssues(doc: ProjectDoc, allIssues: ContinuityIssue
 
 interface AssetLookupEntry {
   asset: Asset
+  label: string
+  source: 'name' | 'alias'
+}
+
+interface EntityLookupEntry {
+  entity: LibraryEntity
   label: string
   source: 'name' | 'alias'
 }
@@ -445,11 +453,46 @@ function linkedLibraryEntityId(asset: Asset): string | undefined {
   return asset.libraryLink?.entityId || asset.elementId
 }
 
+function entityKindForAsset(asset: Asset): LibraryEntity['kind'] | undefined {
+  if (asset.type === 'role') return 'character'
+  if (asset.type === 'scene') return 'scene'
+  if (asset.type === 'prop') return 'prop'
+  return undefined
+}
+
+function entityLookupEntries(entity: LibraryEntity): EntityLookupEntry[] {
+  return [
+    { entity, label: entity.name, source: 'name' },
+    ...(entity.aliases ?? []).map((alias): EntityLookupEntry => ({ entity, label: alias, source: 'alias' })),
+  ]
+}
+
+function assetLookupEntries(asset: Asset): Array<{ label: string; source: 'name' | 'alias' }> {
+  return [
+    { label: asset.name, source: 'name' },
+    ...(asset.aliases ?? []).map((alias) => ({ label: alias, source: 'alias' }) as const),
+  ]
+}
+
+function entityDisplayName(entry: EntityLookupEntry): string {
+  return entry.source === 'alias' ? `${entry.entity.name}（别名：${entry.label}）` : entry.entity.name
+}
+
 function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | undefined, allIssues: ContinuityIssue[]): void {
   const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
   const entitiesProvided = !!options?.libraryEntities
   const entities = new Map((options?.libraryEntities ?? []).map((entity) => [entity.id, entity]))
   const linkedAssetsByEntity = new Map<string, Asset[]>()
+  const entityLookup = new Map<string, EntityLookupEntry[]>()
+  for (const entity of options?.libraryEntities ?? []) {
+    if (entity.archived) continue
+    for (const entry of entityLookupEntries(entity)) {
+      const lookup = normalizeAssetLookup(entry.label)
+      if (!lookup) continue
+      const key = `${entity.kind}:${lookup}`
+      entityLookup.set(key, [...(entityLookup.get(key) ?? []), entry])
+    }
+  }
 
   for (const asset of doc.assets) {
     if (asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
@@ -492,6 +535,59 @@ function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | u
         currentEntityVersion: entity.version,
         message: `项目资产「${asset.name}」来自身份资产「${entity.name}」v${linkedVersion}，资产中心已有 v${entity.version}。建议确认继续使用项目快照，或手动同步新版身份资产。`,
       })
+    }
+  }
+
+  if (entitiesProvided) {
+    for (const asset of doc.assets) {
+      if (asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
+      const kind = entityKindForAsset(asset)
+      if (!kind) continue
+      const linkedEntityId = linkedLibraryEntityId(asset)
+      const matches = new Map<string, EntityLookupEntry>()
+      let conflictLabel = ''
+      let conflictSource: ContinuityIssue['conflictSource'] | undefined
+      for (const entry of assetLookupEntries(asset)) {
+        const lookup = normalizeAssetLookup(entry.label)
+        if (!lookup) continue
+        const candidates = entityLookup.get(`${kind}:${lookup}`) ?? []
+        for (const candidate of candidates) {
+          if (candidate.entity.id === linkedEntityId) continue
+          if (!matches.has(candidate.entity.id)) matches.set(candidate.entity.id, candidate)
+          if (!conflictLabel) {
+            conflictLabel = entry.label.trim() || candidate.label
+            conflictSource = entry.source
+          }
+        }
+      }
+      if (!matches.size) continue
+      const candidateEntries = [...matches.values()]
+      const candidateIds = candidateEntries.map((entry) => entry.entity.id)
+      const candidateLabels = candidateEntries.map(entityDisplayName)
+      if (linkedEntityId) {
+        allIssues.push({
+          severity: 'warning',
+          code: 'library_entity_alias_conflict',
+          assetId: asset.id,
+          libraryEntityId: linkedEntityId,
+          candidateLibraryEntityIds: candidateIds,
+          candidateLibraryEntityLabels: candidateLabels,
+          conflictLabel,
+          conflictSource,
+          message: `项目资产「${asset.name}」已关联身份资产 ${linkedEntityId}，但名称/别名「${conflictLabel}」也命中了资产中心的其他身份：${candidateLabels.join('、')}。建议确认是否关联错身份，或调整别名避免 Agent 选错对象。`,
+        })
+      } else {
+        allIssues.push({
+          severity: 'warning',
+          code: 'asset_matches_unlinked_library_entity',
+          assetId: asset.id,
+          candidateLibraryEntityIds: candidateIds,
+          candidateLibraryEntityLabels: candidateLabels,
+          conflictLabel,
+          conflictSource,
+          message: `项目资产「${asset.name}」尚未关联身份资产，但名称/别名「${conflictLabel}」命中了资产中心身份：${candidateLabels.join('、')}。若这是同一对象，建议改为从资产中心快照导入或手动关联；否则请改名或标记为不同身份。`,
+        })
+      }
     }
   }
 

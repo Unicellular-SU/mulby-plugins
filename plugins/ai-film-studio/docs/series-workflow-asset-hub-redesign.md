@@ -588,7 +588,15 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Studio 工作台的一致性提示、详情抽屉和跨集资产矩阵会自动加载资产中心快照并传给连续性报告；Agent 的 `get_continuity_report` 也会尽量加载资产中心快照，失败时回退为项目内报告。
 - 新增 `library_entity_missing`、`library_entity_archived`、`library_entity_version_outdated`、`duplicate_library_entity_project_assets` 四类问题，并在 `assetHub.selftest.ts` / `continuityReport.selftest.ts` 中覆盖。
 
-本轮仍未完成 P5 里的匹配和处置交互：项目资产与全局身份别名冲突、资产中心存在更明确同名身份、同一角色的不同项目资产跨集出现，以及一键合并/标记不同身份的 UI 流程仍属于后续 P5。
+第十轮提交继续落地 P5 的身份候选匹配：
+
+- 连续性报告会基于资产中心快照构建同类型身份查找表：项目人物只匹配 `character`，项目场景只匹配 `scene`，项目道具只匹配 `prop`，避免跨类型同名误报。
+- 已关联身份的项目资产如果名称/别名命中其他未归档身份，会报告 `library_entity_alias_conflict`，提示可能关联错身份或别名冲突。
+- 尚未关联身份的项目资产如果名称/别名命中资产中心身份，会报告 `asset_matches_unlinked_library_entity`，提示应该从资产中心快照导入、手动关联，或明确改名为不同身份。
+- 归档身份不会作为合并候选参与匹配，避免把项目资产引导回废弃身份。
+- `continuityReport.selftest.ts` 覆盖了已关联资产命中其他身份、未关联资产命中资产中心身份、归档身份跳过候选、跨类型同名不误报。
+
+本轮仍未完成 P5 里的处置交互：同一角色的不同项目资产跨集出现的更精确判定，以及一键合并/标记不同身份的 UI 流程仍属于后续 P5。
 
 ### P0：术语和边界先落地
 

@@ -316,6 +316,59 @@ const noHubSnapshotReport = buildContinuityReport(
 )
 check('does not flag missing linked library entities before asset hub snapshot is loaded', !noHubSnapshotReport.issues.some((issue) => issue.code === 'library_entity_missing'), JSON.stringify(noHubSnapshotReport.issues))
 
+const linkedAliasConflictReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, aliases: ['Captain'], libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' } }],
+  }),
+  {
+    libraryEntities: [
+      libraryEntity({ id: 'el-hero', name: 'Hero', aliases: ['Lead'] }),
+      libraryEntity({ id: 'el-captain', name: 'Captain', aliases: ['Commander'] }),
+    ],
+  },
+)
+check(
+  'flags linked project assets whose aliases match another library identity',
+  linkedAliasConflictReport.issues.some((issue) => issue.code === 'library_entity_alias_conflict' && issue.assetId === 'hero' && issue.libraryEntityId === 'el-hero' && issue.candidateLibraryEntityIds?.includes('el-captain')),
+  JSON.stringify(linkedAliasConflictReport.issues),
+)
+
+const unlinkedLibraryMatchReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'local-hero', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done' }],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain' })] },
+)
+check(
+  'flags unlinked project assets that match an asset-center identity',
+  unlinkedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' && issue.assetId === 'local-hero' && issue.candidateLibraryEntityLabels?.includes('Captain')),
+  JSON.stringify(unlinkedLibraryMatchReport.issues),
+)
+
+const archivedCandidateMatchReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'archived-name', type: 'role', name: 'Archived Hero', refImageId: 'archived-img', state: 'done' }],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-archived', name: 'Archived Hero', archived: true })] },
+)
+check(
+  'does not suggest archived identities as merge candidates',
+  !archivedCandidateMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity'),
+  JSON.stringify(archivedCandidateMatchReport.issues),
+)
+
+const crossTypeLibraryMatchReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'hero-prop', type: 'prop', name: 'Hero', refImageId: 'hero-prop-img', state: 'done' }],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-hero', kind: 'character', name: 'Hero' })] },
+)
+check(
+  'does not match project assets to different asset-center identity kinds',
+  !crossTypeLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict'),
+  JSON.stringify(crossTypeLibraryMatchReport.issues),
+)
+
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{
