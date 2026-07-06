@@ -689,10 +689,24 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
     })
     for (const clip of clips) {
       addMediaStoryboardUsage(usages, mediaKey({ localPath: clip.videoFilePath, url: clip.videoUrl }), doc.meta.id, doc.meta.name, clip.id, `视频片段 ${clip.id}`)
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: clip.posterImageId }), doc.meta.id, doc.meta.name, clip.id, `视频片段 ${clip.id} 首帧`)
+    }
+    const seenTracks = new Set<string>()
+    const tracks = [
+      ...(doc.track ?? []),
+      ...(doc.episodes ?? []).flatMap((episode) => episode.track ?? []),
+    ].filter((track) => {
+      if (seenTracks.has(track.id)) return false
+      seenTracks.add(track.id)
+      return true
+    })
+    for (const track of tracks) {
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: track.audioClipId }), doc.meta.id, doc.meta.name, track.id, `轨道音频 ${track.id}`)
     }
     for (const [flowId, flow] of Object.entries(doc.imageFlows ?? {})) {
       for (const node of flow?.nodes ?? []) {
         addMediaStoryboardUsage(usages, mediaKey({ assetId: node.assetId }), doc.meta.id, doc.meta.name, node.id, `精修流 ${flowId}`)
+        for (const referenceId of node.references ?? []) addMediaStoryboardUsage(usages, mediaKey({ assetId: referenceId }), doc.meta.id, doc.meta.name, node.id, `精修流 ${flowId} 参考`)
       }
     }
   }
