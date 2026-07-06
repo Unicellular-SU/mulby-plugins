@@ -270,6 +270,28 @@ check('suggests creating an episode-specific variant for reused main refs', hand
 const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
 check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
 
+const plannedOnlyHandoffDoc = doc({
+  currentEpisodeId: 'ep2',
+  assets: [
+    { ...assets[0], variants: [{ id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep3'] }] },
+    { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
+  ],
+  storyboards: [],
+  episodes: [
+    episode('ep1', 0, { title: 'Setup' }),
+    episode('ep2', 1, { title: 'Planned', plan: { requiredAssetIds: ['hero', 'hall'], requiredVariantIds: ['gala'] } }),
+    episode('ep3', 2, { title: 'Later' }),
+  ],
+})
+const plannedOnlyHandoff = buildEpisodeProductionHandoff(plannedOnlyHandoffDoc, plannedOnlyHandoffDoc.episodes![1])
+check(
+  'suggests planned asset and variant repairs before storyboards exist',
+  plannedOnlyHandoff.suggestions.some((item) => item.kind === 'generate_asset_ref_image' && item.assetId === 'hall') &&
+    plannedOnlyHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.assetId === 'hero' && item.variantId === 'gala' && item.scopeKind === 'episode' && !item.storyboardId) &&
+    plannedOnlyHandoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.assetId === 'hero' && item.variantId === 'gala' && !item.disabledReason),
+  JSON.stringify(plannedOnlyHandoff.suggestions),
+)
+
 const emptyNextEpisodeHandoffDoc = doc({
   currentEpisodeId: 'ep2',
   assets: handoffAssets,

@@ -569,7 +569,7 @@ export function buildEpisodeProductionHandoff(
     if (!scopeIssue) return
     const target = scopeTargetLabel(scopeIssue, episode, storyboard)
     addSuggestion({
-      id: `variant-scope:${asset.id}:${variant.id}:${episode.id}:${scopeIssue}:${storyboard.id}`,
+      id: scopeIssue === 'episode' ? `variant-scope:${asset.id}:${variant.id}:${episode.id}:episode` : `variant-scope:${asset.id}:${variant.id}:${episode.id}:${scopeIssue}:${storyboard.id}`,
       kind: 'add_variant_episode_scope',
       assetId: asset.id,
       variantId: variant.id,
@@ -580,6 +580,46 @@ export function buildEpisodeProductionHandoff(
       detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于${target}。`,
       autoRepairable: true,
     })
+  }
+  for (const plannedAsset of planned.plannedAssets) {
+    if (plannedAsset.refImageId) continue
+    addSuggestion({
+      id: `asset-image:${plannedAsset.assetId}`,
+      kind: 'generate_asset_ref_image',
+      assetId: plannedAsset.assetId,
+      label: `生成「${plannedAsset.assetName}」主参考图`,
+      detail: `本集计划要求项目资产「${plannedAsset.assetName}」，但它还没有主参考图。生成分镜或关键帧前建议先补齐。`,
+      autoRepairable: true,
+    })
+  }
+  for (const plannedVariant of planned.plannedVariants) {
+    const asset = assets.get(plannedVariant.assetId)
+    const variant = asset?.variants?.find((item) => item.id === plannedVariant.variantId)
+    if (!asset || !variant) continue
+    if (!plannedVariant.scopeAppliesToEpisode) {
+      addSuggestion({
+        id: `variant-scope:${asset.id}:${variant.id}:${episode.id}:episode`,
+        kind: 'add_variant_episode_scope',
+        assetId: asset.id,
+        variantId: variant.id,
+        scopeKind: 'episode',
+        label: `标记「${variant.label}」适用于E${episode.index + 1}`,
+        detail: `本集计划要求 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}「${episode.title}」。建议生成分镜前先把本集加入适用范围。`,
+        autoRepairable: true,
+      })
+    }
+    if (!plannedVariant.refImageId) {
+      addSuggestion({
+        id: `variant-image:${asset.id}:${variant.id}`,
+        kind: 'generate_variant_ref_image',
+        assetId: asset.id,
+        variantId: variant.id,
+        label: `生成「${asset.name}-${variant.label}」参考图`,
+        detail: `本集计划要求该形态/妆容，但它还没有独立参考图。建议生成关键帧前先补齐。`,
+        autoRepairable: true,
+        disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
+      })
+    }
   }
   for (const { ref, storyboard } of allCurrentUses) {
     if (!ref.variantId) continue

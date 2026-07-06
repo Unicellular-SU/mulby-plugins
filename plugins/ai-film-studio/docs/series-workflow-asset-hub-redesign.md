@@ -895,6 +895,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 计划形态会携带 `scopeAppliesToEpisode` 和已有 `appliesToEpisodeIds`，让 Agent 在生成分镜前就能知道该妆容是否已经适用于当前剧集，而不是等到分镜绑定后才发现作用域问题。
 - `get_episode_handoff` 自动透出这些字段；服务自测和 Agent 工具自测都覆盖计划资产/计划形态进入交接包，保证“系列计划 -> 单集生成上下文 -> 连续性质量门”闭环一致。
 
+第五十九轮提交继续落地 P4/P5 的计划级 handoff 修复建议：
+
+- `buildEpisodeProductionHandoff` 会直接从 `plannedAssets/plannedVariants` 生成可执行建议：计划资产缺主参考图时建议生成主图，计划形态缺参考图时建议生成形态图，计划形态未适用于本集时建议补 `appliesToEpisodeIds`。
+- 这些建议不再依赖本集已经存在分镜；用户或 Agent 在“先规划、后分镜”的阶段也能提前补齐本集生产输入，避免到了关键帧/视频生成前才发现缺图或作用域不符。
+- `episodeProduction.selftest.ts` 增加“无分镜但有剧集计划”的覆盖，确保计划本身能驱动补图和补作用域建议。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
