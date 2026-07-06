@@ -96,7 +96,7 @@ export interface ProjectState {
   /** 从资产中心身份资产把元素绑成项目资产快照（带 refImageId + 桥接 elementId）。kind 显式指定时优先（拖入「项目资产」某分组时按该组类别），否则按 el.kind 映射。 */
   importElementToProject: (projectId: string, el: ElementRef, kind?: 'role' | 'scene' | 'prop') => Promise<string>
   /** 只把项目资产标记为来自某个身份资产快照，不覆盖项目内生产字段。 */
-  linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; variants?: Array<Pick<NonNullable<LibraryEntity['variants']>[number], 'id' | 'label'>> }) => boolean
+  linkAssetToLibraryEntity: (assetId: string, entity: { id: string; name?: string; version?: number; archived?: boolean; variants?: Array<Pick<NonNullable<LibraryEntity['variants']>[number], 'id' | 'label'>> }) => boolean
   /** 明确标记候选身份不是该项目资产，压制同名/别名候选误报。 */
   markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => boolean
   /** 合并重复项目资产：把分镜/剧集计划引用从 source 迁移到 target，并删除 source 及其子资产。 */
@@ -1183,6 +1183,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   linkAssetToLibraryEntity: (assetId, entity) => {
     if (!entity.id) return false
+    if (entity.archived) {
+      window.mulby?.notification?.show(`「${entity.name || '身份资产'}」已归档，恢复后才能关联项目资产`, 'warning')
+      return false
+    }
     let linked = false
     get().mutate((d) => {
       const asset = d.assets.find((item) => item.id === assetId)

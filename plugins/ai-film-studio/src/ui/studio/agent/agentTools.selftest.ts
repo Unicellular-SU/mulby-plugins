@@ -241,7 +241,8 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       else current.assets.push(merged)
       return id
     },
-    linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; variants?: Array<{ id: string; label: string }> }) => {
+    linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; archived?: boolean; variants?: Array<{ id: string; label: string }> }) => {
+      if (entity.archived) return false
       const asset = current.assets.find((item) => item.id === assetId)
       if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return false
       const variants = entity.variants ?? []

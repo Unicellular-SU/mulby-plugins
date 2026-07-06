@@ -2043,7 +2043,9 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const entity = hubEntities.find((item) => item.id === entityId)
     const linked = linkAssetToLibraryEntity(issue.assetId, {
       id: entityId,
+      name: entity?.name,
       version: entity?.version,
+      archived: entity?.archived,
       variants: entity?.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
     })
     if (linked) window.mulby?.notification?.show('已关联身份资产快照', 'success')

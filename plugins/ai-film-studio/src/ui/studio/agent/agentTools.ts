@@ -1509,7 +1509,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         }
         const linked = get().linkAssetToLibraryEntity(asset.id, {
           id: resolved.entity.id,
+          name: resolved.entity.name,
           version: resolved.entity.version,
+          archived: resolved.entity.archived,
           variants: resolved.entity.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
         })
         const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset

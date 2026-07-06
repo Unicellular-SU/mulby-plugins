@@ -797,6 +797,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Studio 连续性详情里的“同步资产中心新版”入口再次检查目标身份未归档，防止旧报告或异步快照变化后仍触发同步。
 - `projectStore.syncAssetFromLibraryEntity` 增加 store 层兜底，直接调用同步 API 时如果目标身份已归档会返回失败并提示先恢复身份。
 
+第四十三轮提交继续落地 P5/P6 的归档身份链接防御：
+
+- `projectStore.linkAssetToLibraryEntity` 的入参补充 `name/archived`，直接调用链接 API 时如果目标身份已归档会返回失败并提示需要先恢复身份。
+- Studio 连续性候选关联入口和 Agent 工具 `link_project_asset_to_library_entity` 会把身份名称与归档状态传入 store，避免兜底层只能看到裸 id。
+- 这把“导入、链接、同步、发布/更新”四条项目资产与资产中心身份之间的主要写入通道都收敛到同一条归档语义：归档身份只可查看和恢复，不能继续作为新的生产绑定目标。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
