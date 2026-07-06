@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectImageFlowMediaUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -115,6 +115,42 @@ check(
   'formats scoped variant media usage labels',
   projectVariantMediaUsageLabel('女主', { id: 'injured', label: '战损妆', refImageId: 'injured-img', appliesToEpisodeIds: ['ep3'], state: 'done' }, new Map([['ep3', { index: 2, title: '雨夜' }]])) === '女主 / 战损妆（E3 雨夜）'
 )
+const flowUsageProject = {
+  meta: { id: 'p_flow', name: '精修短剧', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 1, updatedAt: 1 },
+  novel: [],
+  scripts: [],
+  assets: [{ id: 'a_room', type: 'scene', name: '客厅', state: 'done', flowId: 'flow-asset' }],
+  storyboards: [],
+  clips: [],
+  track: [],
+  memory: [],
+  currentEpisodeId: 'ep2',
+  episodes: [{
+    id: 'ep2',
+    index: 1,
+    title: '雨夜',
+    scripts: [],
+    storyboards: [{
+      id: 'sb-flow',
+      episodeId: 'ep2',
+      index: 2,
+      track: 'A',
+      videoDesc: '女主回到客厅',
+      duration: 5,
+      associateAssetIds: ['a_room'],
+      shouldGenerateImage: true,
+      flowId: 'flow-storyboard',
+      state: 'done',
+    }],
+    clips: [],
+    track: [],
+    createdAt: 1,
+    updatedAt: 1,
+  }],
+} as ProjectDoc
+check('formats asset image flow media usage labels', projectImageFlowMediaUsageLabel(flowUsageProject, 'flow-asset') === '客厅 · 精修流 flow-asset')
+check('formats storyboard image flow media usage labels', projectImageFlowMediaUsageLabel(flowUsageProject, 'flow-storyboard', 'reference') === 'E2 雨夜 · 分镜 #3 精修流 flow-storyboard 参考')
+check('keeps fallback image flow media usage labels', projectImageFlowMediaUsageLabel(flowUsageProject, 'missing-flow') === '精修流 missing-flow')
 const identityEpisodeProject = {
   meta: { id: 'p_series', name: '多集短剧', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 1, updatedAt: 1 },
   novel: [],

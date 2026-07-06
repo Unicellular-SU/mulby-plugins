@@ -475,6 +475,18 @@ export function projectVariantMediaUsageLabel(assetName: string, variant: AssetV
   return `${assetName} / ${variant.label}${scope}`
 }
 
+export function projectImageFlowMediaUsageLabel(doc: ProjectDoc, flowId: string, kind: 'output' | 'reference' = 'output'): string {
+  const normalizedFlowId = lineageString(flowId)
+  const base = `精修流 ${normalizedFlowId || '未命名'}${kind === 'reference' ? ' 参考' : ''}`
+  if (!normalizedFlowId) return base
+  const asset = doc.assets?.find((item) => lineageString(item.flowId) === normalizedFlowId)
+  if (asset) return `${asset.name} · ${base}`
+  const episodesById = new Map((doc.episodes ?? []).map((episode) => [episode.id, episode]))
+  const currentEpisode = doc.currentEpisodeId ? episodesById.get(doc.currentEpisodeId) : undefined
+  const entry = collectEpisodeStoryboards(doc, episodesById, currentEpisode).find(({ storyboard }) => lineageString(storyboard.flowId) === normalizedFlowId)
+  return entry ? projectEpisodeUsageLabel(`分镜 #${entry.storyboard.index + 1} ${base}`, entry.episode) : base
+}
+
 export function projectAssetIdentityEpisodeLabels(doc: ProjectDoc, assetId: string): string[] {
   const episodesById = new Map((doc.episodes ?? []).map((episode) => [episode.id, episode]))
   const currentEpisode = doc.currentEpisodeId ? episodesById.get(doc.currentEpisodeId) : undefined
@@ -861,9 +873,11 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
       addMediaStoryboardUsage(usages, mediaKey({ assetId: track.audioClipId }), doc.meta.id, doc.meta.name, track.id, projectEpisodeUsageLabel(`轨道音频 ${track.id}`, episode))
     }
     for (const [flowId, flow] of Object.entries(doc.imageFlows ?? {})) {
+      const outputLabel = projectImageFlowMediaUsageLabel(doc, flowId)
+      const referenceLabel = projectImageFlowMediaUsageLabel(doc, flowId, 'reference')
       for (const node of flow?.nodes ?? []) {
-        addMediaStoryboardUsage(usages, mediaKey({ assetId: node.assetId }), doc.meta.id, doc.meta.name, node.id, `精修流 ${flowId}`)
-        for (const referenceId of node.references ?? []) addMediaStoryboardUsage(usages, mediaKey({ assetId: referenceId }), doc.meta.id, doc.meta.name, node.id, `精修流 ${flowId} 参考`)
+        addMediaStoryboardUsage(usages, mediaKey({ assetId: node.assetId }), doc.meta.id, doc.meta.name, node.id, outputLabel)
+        for (const referenceId of node.references ?? []) addMediaStoryboardUsage(usages, mediaKey({ assetId: referenceId }), doc.meta.id, doc.meta.name, node.id, referenceLabel)
       }
     }
   }
