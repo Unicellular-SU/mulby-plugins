@@ -1791,6 +1791,22 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const chapterIssueCodes = new Set(['episode_without_chapters', 'invalid_episode_chapter', 'unassigned_chapter', 'duplicated_chapter_assignment'])
   const chapterIssueCount = report.issues.filter((issue) => chapterIssueCodes.has(issue.code)).length
   const canRedistributeChapters = chapterIssueCount > 0 && doc.novel.length > 0 && (doc.episodes?.length ?? 0) > 1
+  const storyboardEntries = useMemo(() => {
+    const seen = new Set<string>()
+    const entries: { storyboard: Storyboard; episodeId?: string }[] = []
+    for (const storyboard of doc.storyboards) {
+      seen.add(storyboard.id)
+      entries.push({ storyboard, episodeId: storyboard.episodeId ?? doc.currentEpisodeId })
+    }
+    for (const episode of doc.episodes ?? []) {
+      for (const storyboard of episode.storyboards ?? []) {
+        if (seen.has(storyboard.id)) continue
+        seen.add(storyboard.id)
+        entries.push({ storyboard, episodeId: storyboard.episodeId ?? episode.id })
+      }
+    }
+    return entries
+  }, [doc.currentEpisodeId, doc.episodes, doc.storyboards])
   const redistributeChapters = () => {
     if (!canRedistributeChapters) return
     if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
@@ -2008,6 +2024,86 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const episode = report.episodes.find((item) => item.id === episodeId)
     return episode ? `E${episode.index} ${episode.title}` : episodeId
   }
+  const assetTypeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type === 'audio' ? '音色' : '片段')
+  const mergeAssetUsage = (assetId: string) => {
+    const episodeIds = new Set<string>()
+    let storyboardCount = 0
+    let variantRefCount = 0
+    for (const entry of storyboardEntries) {
+      const refs = castRefsForStoryboard(entry.storyboard)
+      const inCastRefs = refs.some((ref) => ref.assetId === assetId)
+      const inLegacyRefs = entry.storyboard.associateAssetIds.includes(assetId)
+      if (!inCastRefs && !inLegacyRefs) continue
+      storyboardCount += 1
+      if (entry.episodeId) episodeIds.add(entry.episodeId)
+      variantRefCount += refs.filter((ref) => ref.assetId === assetId && !!ref.variantId).length
+    }
+    const planCount = (doc.episodes ?? []).filter((episode) => episode.plan?.requiredAssetIds?.includes(assetId)).length
+    const episodeLabels = [...episodeIds].map(episodeName).filter(Boolean).slice(0, 3)
+    return { storyboardCount, variantRefCount, planCount, episodeLabels, moreEpisodes: Math.max(0, episodeIds.size - 3) }
+  }
+  const mergeAssetFacts = (asset: Asset) => {
+    const usage = mergeAssetUsage(asset.id)
+    const variants = asset.variants ?? []
+    const scopedVariants = variants.filter(
+      (variant) =>
+        (variant.appliesToEpisodeIds?.length ?? 0) > 0 ||
+        (variant.appliesToSceneIds?.length ?? 0) > 0 ||
+        (variant.appliesToStoryboardIds?.length ?? 0) > 0,
+    ).length
+    const imageCount = asset.images?.length ?? (asset.refImageId ? 1 : 0)
+    return [
+      assetTypeLabel(asset.type),
+      `${asset.aliases?.length ?? 0} 别名`,
+      `${variants.length} 形态`,
+      scopedVariants ? `${scopedVariants} 个作用域形态` : '无作用域形态',
+      `${imageCount} 图`,
+      usage.storyboardCount ? `${usage.storyboardCount} 分镜` : '未进分镜',
+      usage.variantRefCount ? `${usage.variantRefCount} 形态绑定` : '',
+      usage.planCount ? `${usage.planCount} 集计划` : '',
+      usage.episodeLabels.length ? `${usage.episodeLabels.join(' / ')}${usage.moreEpisodes ? ` +${usage.moreEpisodes}` : ''}` : '',
+      asset.libraryLink?.entityId ? `身份 v${asset.libraryLink.entityVersion ?? '-'}` : '未链身份',
+    ].filter(Boolean)
+  }
+  const mergeAssetVariantLabels = (asset: Asset) => {
+    const labels = (asset.variants ?? []).map((variant) => variant.label).filter(Boolean)
+    if (!labels.length) return ''
+    const shown = labels.slice(0, 4).join('、')
+    return labels.length > 4 ? `${shown} 等 ${labels.length} 个` : shown
+  }
+  const renderMergeAssetPreviewRow = (role: string, asset: Asset) => {
+    const variants = mergeAssetVariantLabels(asset)
+    return (
+      <div className="afs-studio__mergepreview-row">
+        <span className="afs-studio__mergepreview-role">{role}</span>
+        <div className="afs-studio__mergepreview-main">
+          <strong>{asset.name}</strong>
+          <span className="afs-studio__mergepreview-tags">
+            {mergeAssetFacts(asset).map((fact) => (
+              <span key={fact}>{fact}</span>
+            ))}
+          </span>
+          {variants && <span className="afs-studio__mergepreview-variants">形态：{variants}</span>}
+        </div>
+      </div>
+    )
+  }
+  const renderMergePreview = (issue: ContinuityReportView['issues'][number]) => {
+    if ((issue.code !== 'duplicate_library_entity_project_assets' && issue.code !== 'cross_episode_duplicate_project_asset_candidate') || !issue.assetId) return null
+    const source = doc.assets.find((asset) => asset.id === issue.assetId)
+    const targets = (issue.relatedAssetIds ?? []).map((id) => doc.assets.find((asset) => asset.id === id)).filter((asset): asset is Asset => !!asset)
+    if (!source || !targets.length) return null
+    return (
+      <div className="afs-studio__mergepreview" aria-label="资产合并差异预览">
+        <div className="afs-studio__mergepreview-title">
+          <span>合并预览</span>
+          {issue.conflictLabel && <code>命中：{issue.conflictLabel}</code>}
+        </div>
+        {renderMergeAssetPreviewRow('源', source)}
+        {targets.map((target, index) => renderMergeAssetPreviewRow(targets.length > 1 ? `目标 ${index + 1}` : '目标', target))}
+      </div>
+    )
+  }
   const renderIssues = (items: ContinuityReportView['issues']) => (
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
@@ -2068,6 +2164,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             </div>
             <p>{issue.message}</p>
             {loc && <small>{loc}</small>}
+            {canMergeDuplicateLibraryAsset && renderMergePreview(issue)}
             {canAddVariantScope && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantScope(issue)}>
                 {addVariantScopeLabel}

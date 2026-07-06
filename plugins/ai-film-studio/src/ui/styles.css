@@ -3911,6 +3911,16 @@ select.afs-toolbar__select,
 .afs-studio__continuityissue-top code { padding: 1px 5px; border-radius: 4px; background: var(--afs-panel-2); color: var(--afs-muted); font-size: 10px; }
 .afs-studio__continuityissue p { margin: 0; color: var(--afs-text); font-size: 12px; line-height: 1.45; }
 .afs-studio__continuityissue small { display: block; margin-top: 5px; color: var(--afs-text-dim); font-size: 11px; line-height: 1.35; }
+.afs-studio__mergepreview { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--afs-border); display: flex; flex-direction: column; gap: 6px; }
+.afs-studio__mergepreview-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--afs-text-dim); font-size: 11px; }
+.afs-studio__mergepreview-title code { padding: 1px 5px; border-radius: 4px; background: var(--afs-panel-2); color: var(--afs-muted); font-size: 10px; }
+.afs-studio__mergepreview-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 7px; align-items: start; }
+.afs-studio__mergepreview-role { min-height: 20px; padding: 2px 6px; border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 11px; text-align: center; }
+.afs-studio__mergepreview-main { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.afs-studio__mergepreview-main strong { color: var(--afs-text); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.afs-studio__mergepreview-tags { display: flex; flex-wrap: wrap; gap: 4px; color: var(--afs-text-dim); font-size: 11px; line-height: 1.35; }
+.afs-studio__mergepreview-tags span { padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--afs-panel-2) 82%, transparent); }
+.afs-studio__mergepreview-variants { color: var(--afs-text-dim); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .afs-studio__continuityfix { margin-top: 7px; height: 24px; padding: 0 8px; border: 1px solid var(--afs-accent); border-radius: 5px; background: color-mix(in srgb, var(--afs-accent) 12%, transparent); color: var(--afs-text); font-size: 11px; cursor: pointer; }
 .afs-studio__continuityfix:hover { background: color-mix(in srgb, var(--afs-accent) 20%, transparent); }
 .afs-studio__chipbtn { font-size: 11px; padding: 2px 8px; border-radius: 12px; border: 1px solid var(--afs-border); background: var(--afs-panel-2); color: var(--afs-text-dim); cursor: pointer; }
