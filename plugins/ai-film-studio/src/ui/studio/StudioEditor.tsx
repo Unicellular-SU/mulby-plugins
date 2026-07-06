@@ -1350,7 +1350,17 @@ function AssetCard({ asset }: { asset: Asset }) {
   const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
   const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
   const linkedEntityArchived = !!linkedEntity?.archived
+  const forkedLibraryLink = asset.libraryLink?.syncPolicy === 'forked'
+  const archivedLinkBlocksPublish = linkedEntityArchived && !forkedLibraryLink
   const linkedStatusLabels = projectAssetLinkStatusLabels(asset, linkedEntity)
+  const publishActionLabel = forkedLibraryLink ? '另存为新身份资产' : '发布到资产中心'
+  const publishActionTitle = !asset.refImageId
+    ? '先生成或选择一张参考图'
+    : archivedLinkBlocksPublish
+      ? '关联身份已归档，恢复后才能更新'
+      : forkedLibraryLink
+        ? '已分叉资产会另存为新的身份资产'
+        : '发布/更新到资产中心身份资产'
   useEffect(() => {
     if (linkedEntityId && !hubLoaded) void refreshAssetHub()
   }, [hubLoaded, linkedEntityId, refreshAssetHub])
@@ -1449,9 +1459,9 @@ function AssetCard({ asset }: { asset: Asset }) {
         {canPromote && (
           <button
             className="afs-btn afs-btn--sm afs-btn--ghost"
-            disabled={!asset.refImageId || promoting || linkedEntityArchived}
-            title={!asset.refImageId ? '先生成或选择一张参考图' : linkedEntityArchived ? '关联身份已归档，恢复后才能更新' : '发布/更新到资产中心身份资产'}
-            aria-label="发布到资产中心"
+            disabled={!asset.refImageId || promoting || archivedLinkBlocksPublish}
+            title={publishActionTitle}
+            aria-label={publishActionLabel}
             onClick={async () => {
               setPromoting(true)
               try {

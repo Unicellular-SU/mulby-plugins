@@ -38,7 +38,7 @@ import { variantScopePatchForUse } from '../studio/services/continuityReport'
 import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
-import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from '../services/assetHub'
+import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity } from '../services/assetHub'
 import type { LibraryEntity } from '../services/assetHub'
 import { useAssetHubStore } from './assetHubStore'
 
@@ -1221,7 +1221,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const asset = d.assets.find((item) => item.id === assetId)
       if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return
       asset.rejectedLibraryEntityIds = [...new Set([...(asset.rejectedLibraryEntityIds ?? []), ...ids])]
-      if (asset.libraryLink && ids.includes(asset.libraryLink.entityId)) asset.libraryLink.syncPolicy = 'forked'
+      const currentEntityId = asset.libraryLink?.entityId || asset.elementId
+      if (currentEntityId && ids.includes(currentEntityId)) {
+        asset.libraryLink = {
+          ...asset.libraryLink,
+          entityId: currentEntityId,
+          syncPolicy: 'forked',
+        }
+      }
       marked = true
     })
     return marked
@@ -1284,7 +1291,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       window.mulby?.notification?.show('该资产还没有参考图，先生成或选择一张图片', 'warning')
       return false
     }
-    const entityId = a.libraryLink?.entityId ?? a.elementId
+    const entityId = projectAssetIdentityEntityId(a)
     const hub = useAssetHubStore.getState()
     if (!hub.loaded) await hub.refresh()
     const existingEntity = entityId ? useAssetHubStore.getState().entities.find((entity) => entity.id === entityId) : undefined
@@ -1292,7 +1299,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       window.mulby?.notification?.show(`「${existingEntity.name}」已归档，恢复后才能更新身份资产`, 'warning')
       return false
     }
-    const entity = promoteProjectAssetToEntity(entityId && entityId !== a.elementId ? { ...a, elementId: entityId } : a, existingEntity)
+    const publishAsset = entityId ? (entityId !== a.elementId ? { ...a, elementId: entityId } : a) : { ...a, elementId: undefined }
+    const entity = promoteProjectAssetToEntity(publishAsset, existingEntity)
     const publishedVariantMap = a.variants?.reduce<Record<string, string>>((acc, variant) => {
       acc[variant.id] = variant.libraryVariantId ?? variant.id
       return acc
@@ -1322,6 +1330,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           variantMap: variantMap && Object.keys(variantMap).length ? variantMap : undefined,
           lastSyncedAt: Date.now(),
         }
+        const rejected = (x.rejectedLibraryEntityIds ?? []).filter((entityId) => entityId !== el.id)
+        x.rejectedLibraryEntityIds = rejected.length ? rejected : undefined
       }
     })
     await useAssetHubStore.getState().refresh()

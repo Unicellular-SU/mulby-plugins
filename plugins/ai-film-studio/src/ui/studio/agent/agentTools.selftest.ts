@@ -1,6 +1,7 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
 import type { Asset, AssetVariant, Episode, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
+import { projectAssetIdentityEntityId } from '../../services/assetHub'
 
 let failures = 0
 
@@ -271,7 +272,14 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       const ids = [...new Set(entityIds.map((id) => id.trim()).filter(Boolean))]
       if (!ids.length) return false
       asset.rejectedLibraryEntityIds = [...new Set([...(asset.rejectedLibraryEntityIds ?? []), ...ids])]
-      if (asset.libraryLink && ids.includes(asset.libraryLink.entityId)) asset.libraryLink.syncPolicy = 'forked'
+      const currentEntityId = asset.libraryLink?.entityId || asset.elementId
+      if (currentEntityId && ids.includes(currentEntityId)) {
+        asset.libraryLink = {
+          ...asset.libraryLink,
+          entityId: currentEntityId,
+          syncPolicy: 'forked',
+        }
+      }
       return true
     },
     mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => {
@@ -331,9 +339,12 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       if (assetId === 'publish-blocked') return false
       const asset = current.assets.find((item) => item.id === assetId)
       if (!asset) return false
-      const entityId = asset.elementId ?? `el-${asset.id}`
+      const activeEntityId = projectAssetIdentityEntityId(asset)
+      const entityId = activeEntityId || `el-${asset.id}`
       asset.elementId = entityId
       asset.libraryLink = { entityId, entityVersion: (asset.libraryLink?.entityVersion ?? 0) + 1, syncPolicy: 'snapshot', lastSyncedAt: 1 }
+      asset.rejectedLibraryEntityIds = asset.rejectedLibraryEntityIds?.filter((id) => id !== entityId)
+      if (!asset.rejectedLibraryEntityIds?.length) asset.rejectedLibraryEntityIds = undefined
       asset.variants = asset.variants?.map((variant) => ({ ...variant, libraryVariantId: variant.libraryVariantId ?? variant.id }))
       return true
     },
@@ -360,6 +371,7 @@ writableDoc.assets = [
   { id: 'sync-target', type: 'role', name: 'Local Hero', refImageId: 'local-hero-img', state: 'done', variants: [{ id: 'local-gala', label: 'Library Gala', appliesToEpisodeIds: ['ep1'] }] },
   { id: 'publish-blocked', type: 'role', name: 'Archived Linked Hero', refImageId: 'archived-linked-img', state: 'done', libraryLink: { entityId: 'el-archived', syncPolicy: 'snapshot' } },
   { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
+  { id: 'legacy-linked', type: 'role', name: 'Legacy Linked Hero', refImageId: 'legacy-linked-img', state: 'done', elementId: 'el-legacy-old' },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
@@ -475,6 +487,26 @@ check(
     distinctIdentity.rejectedLibraryEntityIds?.includes('el-hero') &&
     distinctIdentity.asset?.libraryLink?.syncPolicy === 'forked',
   JSON.stringify(distinctIdentity),
+)
+
+const legacyDistinctIdentity = JSON.parse(await markDistinctIdentity.execute({ assetId: 'legacy-linked', libraryEntityIds: ['el-legacy-old'] }))
+check(
+  'mark_project_asset_distinct_identity forks legacy element links',
+  legacyDistinctIdentity.marked === true &&
+    legacyDistinctIdentity.rejectedLibraryEntityIds?.includes('el-legacy-old') &&
+    legacyDistinctIdentity.asset?.libraryLink?.entityId === 'el-legacy-old' &&
+    legacyDistinctIdentity.asset?.libraryLink?.syncPolicy === 'forked',
+  JSON.stringify(legacyDistinctIdentity),
+)
+const publishedForkedLegacyAsset = JSON.parse(await publishProjectAsset.execute({ assetId: 'legacy-linked' }))
+check(
+  'publish_project_asset_to_library saves forked legacy assets as a new identity',
+  publishedForkedLegacyAsset.published === true &&
+    publishedForkedLegacyAsset.asset?.id === 'legacy-linked' &&
+    publishedForkedLegacyAsset.asset?.elementId === 'el-legacy-linked' &&
+    publishedForkedLegacyAsset.asset?.libraryLink?.entityId === 'el-legacy-linked' &&
+    publishedForkedLegacyAsset.asset?.rejectedLibraryEntityIds?.includes('el-legacy-old'),
+  JSON.stringify(publishedForkedLegacyAsset),
 )
 
 const publishedProjectAsset = JSON.parse(await publishProjectAsset.execute({ assetId: 'sync-target' }))

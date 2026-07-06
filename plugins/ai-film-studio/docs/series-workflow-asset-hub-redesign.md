@@ -851,6 +851,13 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 连续性报告的 `linkedLibraryEntityId` 同步跳过已分叉链接，避免用户已经标记“不同身份”后继续触发身份缺失、归档、版本过期和同一身份重复导入提示。
 - 已分叉资产仍可通过 UI 看到历史链接状态；如果同时记录了 `rejectedLibraryEntityIds`，候选身份匹配也会继续被压制，避免质量门反复建议用户刚刚拒绝的身份。
 
+第五十二轮提交继续落地 P2/P5/P6 的已分叉发布目标：
+
+- `projectStore.promoteAssetToElement` 发布项目资产时改用活动身份解析，不再直接复用 `libraryLink.entityId ?? elementId`；已分叉资产发布会另存为新的身份资产，避免覆盖用户已经拒绝的旧身份。
+- `markAssetAsDistinctIdentity` 会把旧 `elementId` 兼容链接也显式标成 `syncPolicy: 'forked'`，让旧项目数据在被用户标记“不是同一身份”后进入同一套分叉语义。
+- Studio 项目资产卡的发布按钮在已分叉状态下提示“另存为新身份资产”，且不会因为旧身份已归档而禁用；Agent 工具描述同步说明已分叉发布会另存新身份。
+- `agentTools.selftest.ts` 增加旧 `elementId` 分叉和分叉后发布另存新身份的覆盖，确保自动流程不会把 forked 项目快照写回旧身份资产。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

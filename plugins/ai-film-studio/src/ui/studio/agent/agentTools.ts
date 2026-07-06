@@ -1563,7 +1563,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'publish_project_asset_to_library',
-      description: '把项目资产发布/更新到资产中心身份资产。会复用已有 elementId/libraryLink，并把可复用变体写入资产中心；发布后项目资产保持快照链接。',
+      description: '把项目资产发布/更新到资产中心身份资产。会复用已有活动 elementId/libraryLink，并把可复用变体写入资产中心；已分叉资产会另存为新身份，发布后项目资产保持快照链接。',
       parameters: {
         type: 'object',
         properties: {
