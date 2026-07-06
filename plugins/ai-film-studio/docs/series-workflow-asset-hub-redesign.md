@@ -919,6 +919,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 该工具复用 handoff suggestion id 作为稳定入口，支持计划资产生成主参考图、计划形态生成参考图、补 `plannedVariants` 的 episode 作用域，以及创建本集专属形态并绑定当前已有分镜；执行后会返回新的 `remainingSuggestions`，供 Agent 继续判断是否还缺生产输入。
 - `PLANNED_HANDOFF_STORYBOARD_RULE` 改为优先引导 Agent 使用 `apply_episode_handoff_suggestion`，并在 `agentTools.selftest.ts` 中覆盖“E3 只规划 Cloak 形态 -> 自动补父资产主图、补形态作用域、生成形态图”的闭环。
 
+第六十三轮提交继续落地 P4/P5 的 handoff 执行口径收敛：
+
+- 新增 `episodeHandoffSuggestions` 服务，把 `generate_asset_ref_image`、`generate_variant_ref_image`、`add_variant_episode_scope`、`create_episode_variant` 四类建议的执行逻辑从 Agent 工具和 Studio 弹层中抽为同一份实现。
+- Agent 的 `apply_episode_handoff_suggestion` 保留“执行后重读最新 handoff”的循环策略，但单条建议执行改为调用共享服务；Studio 跨集承接弹层的单条修复和“全部执行”也改用同一服务，批量执行会在每一步后重新读取最新项目文档和最新建议，避免旧弹层状态导致重复或漏修。
+- 新增 `episodeHandoffSuggestions.selftest.ts` 并接入 `npm run test:continuity`，直接覆盖主图生成、形态图生成、episode 作用域补齐、本集专属形态创建并绑定当前分镜，保证 UI 和 Agent 共享的执行器后续改动有独立回归。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

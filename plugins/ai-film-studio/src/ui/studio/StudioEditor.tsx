@@ -29,6 +29,7 @@ import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport, variantScopePatchForUse } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeComposeReadiness, pendingEpisodesForSeries } from './services/episodeProduction'
+import { applyEpisodeHandoffSuggestion } from './services/episodeHandoffSuggestions'
 import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
 
 type Tab = 'series' | 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
@@ -466,47 +467,26 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
   const hasHints = plannedCount > 0 || handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
   const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]) => {
-    if (suggestion.kind === 'generate_asset_ref_image') {
-      await generateAsset(suggestion.assetId)
-      return
-    }
-    if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
-      await generateAssetVariant(suggestion.assetId, suggestion.variantId)
-      return
-    }
-    if (suggestion.kind === 'add_variant_episode_scope' && suggestion.variantId) {
-      const asset = doc.assets.find((item) => item.id === suggestion.assetId)
-      const variant = asset?.variants?.find((item) => item.id === suggestion.variantId)
-      if (!asset || !variant) return
-      const storyboard = suggestion.storyboardId ? doc.storyboards.find((item) => item.id === suggestion.storyboardId) : undefined
-      const patch = variantScopePatchForUse(
-        variant,
-        { id: episode.id },
-        { id: suggestion.storyboardId ?? storyboard?.id ?? '', sceneId: suggestion.sceneId ?? storyboard?.sceneId },
-        suggestion.scopeKind ?? 'episode',
-      )
-      if (patch) updateAssetVariant(asset.id, variant.id, patch)
-      return
-    }
-    if (suggestion.kind === 'create_episode_variant') {
-      const asset = doc.assets.find((item) => item.id === suggestion.assetId)
-      if (!asset) return
-      const variantId = addAssetVariant(asset.id, {
-        label: suggestion.variantLabel ?? `E${episode.index + 1} ${episode.title}形态`,
-        desc: suggestion.variantDesc ?? `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。`,
-        prompt: suggestion.variantPrompt,
-      })
-      if (!variantId) return
-      updateAssetVariant(asset.id, variantId, { appliesToEpisodeIds: [episode.id] })
-      for (const storyboard of doc.storyboards) {
-        if (castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && !ref.variantId)) {
-          setStoryboardCastVariant(storyboard.id, asset.id, variantId)
-        }
-      }
-    }
+    await applyEpisodeHandoffSuggestion(episode, suggestion, {
+      getDoc: () => useProjectStore.getState().doc,
+      generateAsset,
+      generateAssetVariant,
+      updateAssetVariant,
+      addAssetVariant,
+      setStoryboardCastVariant,
+    })
   }
   const runAutoSuggestions = async () => {
-    for (const suggestion of autoSuggestions) await runSuggestion(suggestion)
+    const attempted = new Set<string>()
+    for (let i = 0; i < 24; i += 1) {
+      const latestDoc = useProjectStore.getState().doc
+      const latestEpisode = latestDoc?.episodes?.find((item) => item.id === episode.id)
+      if (!latestDoc || !latestEpisode) break
+      const suggestion = buildEpisodeProductionHandoff(latestDoc, latestEpisode).suggestions.find((item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id))
+      if (!suggestion) break
+      attempted.add(suggestion.id)
+      await runSuggestion(suggestion)
+    }
   }
   return (
     <Popover

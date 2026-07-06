@@ -9,6 +9,7 @@ import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion } from '../services/episodeProduction'
+import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
 import { loadAssetHub, projectAssetIdentityEntityId, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
@@ -1159,59 +1160,17 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
 export function makeAgentTools(get: () => ProjectState): AgentTool[] {
   const doc = () => get().doc
   const applyHandoffSuggestion = async (episodeId: string, suggestion: EpisodeHandoffSuggestion) => {
-    if (suggestion.autoRepairable === false || suggestion.disabledReason) {
-      return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: suggestion.disabledReason ?? '该建议不可自动处理' }
-    }
-
-    if (suggestion.kind === 'generate_asset_ref_image') {
-      await get().generateAsset(suggestion.assetId)
-      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId }
-    }
-
-    if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
-      await get().generateAssetVariant(suggestion.assetId, suggestion.variantId)
-      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId, variantId: suggestion.variantId }
-    }
-
-    if (suggestion.kind === 'add_variant_episode_scope' && suggestion.variantId) {
-      const d = doc()
-      const asset = d?.assets.find((item) => item.id === suggestion.assetId)
-      const variant = asset?.variants?.find((item) => item.id === suggestion.variantId)
-      const storyboard = suggestion.storyboardId ? d?.storyboards.find((item) => item.id === suggestion.storyboardId) : undefined
-      if (!asset || !variant) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '资产或变体已不存在' }
-      const patch = variantScopePatchForUse(
-        variant,
-        { id: episodeId },
-        { id: suggestion.storyboardId ?? storyboard?.id ?? '', sceneId: suggestion.sceneId ?? storyboard?.sceneId },
-        suggestion.scopeKind ?? 'episode',
-      )
-      if (!patch) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '无法解析要补充的作用域' }
-      get().updateAssetVariant(asset.id, variant.id, patch)
-      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId: variant.id, patch }
-    }
-
-    if (suggestion.kind === 'create_episode_variant') {
-      const d = doc()
-      if (!d) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '无项目' }
-      const asset = d.assets.find((item) => item.id === suggestion.assetId)
-      if (!asset) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '资产已不存在' }
-      const episode = d.episodes?.find((item) => item.id === episodeId) ?? currentEpisode(d)
-      const variantId = get().addAssetVariant(asset.id, {
-        label: suggestion.variantLabel ?? (episode ? `E${episode.index + 1} ${episode.title}形态` : '本集形态'),
-        desc: suggestion.variantDesc ?? (episode ? `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。` : undefined),
-        prompt: suggestion.variantPrompt,
-      })
-      if (!variantId) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '未能创建变体' }
-      get().updateAssetVariant(asset.id, variantId, { appliesToEpisodeIds: [episodeId] })
-      for (const storyboard of d.storyboards) {
-        if (castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && !ref.variantId)) {
-          get().setStoryboardCastVariant(storyboard.id, asset.id, variantId)
-        }
-      }
-      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId }
-    }
-
-    return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '暂不支持该建议类型' }
+    const d = doc()
+    const episode = d?.episodes?.find((item) => item.id === episodeId) ?? (d ? currentEpisode(d) : undefined)
+    if (!episode) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '未找到剧集' }
+    return applyEpisodeHandoffSuggestion(episode, suggestion, {
+      getDoc: doc,
+      generateAsset: (assetId) => get().generateAsset(assetId),
+      generateAssetVariant: (assetId, variantId) => get().generateAssetVariant(assetId, variantId),
+      updateAssetVariant: (assetId, variantId, patch) => get().updateAssetVariant(assetId, variantId, patch),
+      addAssetVariant: (assetId, init) => get().addAssetVariant(assetId, init),
+      setStoryboardCastVariant: (storyboardId, assetId, variantId) => get().setStoryboardCastVariant(storyboardId, assetId, variantId),
+    })
   }
 
   return [
