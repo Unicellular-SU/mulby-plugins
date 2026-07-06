@@ -35,7 +35,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity } from '../services/assetHub'
@@ -539,7 +539,9 @@ async function produceCurrentEpisode(
       const latest = get().doc
       const episode = latest?.episodes?.find((item) => item.id === latest.currentEpisodeId)
       const issues = latest && episode ? episodeProductionContinuityBlockers(latest, episode) : []
-      if (episode && issues.length) throw new Error(formatEpisodeProductionContinuityError(episode, issues))
+      if (latest && episode && issues.length) {
+        throw new Error(formatEpisodeProductionContinuityError(episode, issues, { suggestions: buildEpisodeProductionHandoff(latest, episode).suggestions }))
+      }
     }
 
     const keyframeIds = [...(get().doc?.storyboards ?? [])]

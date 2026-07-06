@@ -281,11 +281,24 @@ export function episodeProductionContinuityBlockers(doc: ProjectDoc, episode: Ep
   return buildContinuityReport(doc).issues.filter((issue) => issue.episodeId === episode.id && PRODUCTION_BLOCKING_CONTINUITY_CODES.has(issue.code))
 }
 
-export function formatEpisodeProductionContinuityError(episode: Episode, issues: ContinuityIssue[]): string {
+function formatHandoffSuggestionLine(suggestion: EpisodeHandoffSuggestion): string {
+  const id = suggestion.id ? ` (${suggestion.id})` : ''
+  return `- ${suggestion.label}${id}`
+}
+
+export function formatEpisodeProductionContinuityError(
+  episode: Episode,
+  issues: ContinuityIssue[],
+  options: { suggestions?: EpisodeHandoffSuggestion[] } = {},
+): string {
   if (!issues.length) return ''
   const details = issues.slice(0, 5).map((issue) => `- ${issue.message}`).join('\n')
   const more = issues.length > 5 ? `\n- 另有 ${issues.length - 5} 个连续性问题` : ''
-  return `E${episode.index + 1}「${episode.title}」存在需要先确认的资产/形态连续性问题，已暂停本集生成：\n${details}${more}`
+  const suggestions = (options.suggestions ?? []).filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
+  const suggestionLines = suggestions.slice(0, 5).map(formatHandoffSuggestionLine).join('\n')
+  const suggestionMore = suggestions.length > 5 ? `\n- 另有 ${suggestions.length - 5} 条可自动处理建议` : ''
+  const suggestionBlock = suggestionLines ? `\n可先处理以下 handoff 建议：\n${suggestionLines}${suggestionMore}` : ''
+  return `E${episode.index + 1}「${episode.title}」存在需要先确认的资产/形态连续性问题，已暂停本集生成：\n${details}${more}${suggestionBlock}`
 }
 
 function usableClip(clip: Clip | undefined): boolean {

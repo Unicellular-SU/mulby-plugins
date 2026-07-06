@@ -925,6 +925,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent 的 `apply_episode_handoff_suggestion` 保留“执行后重读最新 handoff”的循环策略，但单条建议执行改为调用共享服务；Studio 跨集承接弹层的单条修复和“全部执行”也改用同一服务，批量执行会在每一步后重新读取最新项目文档和最新建议，避免旧弹层状态导致重复或漏修。
 - 新增 `episodeHandoffSuggestions.selftest.ts` 并接入 `npm run test:continuity`，直接覆盖主图生成、形态图生成、episode 作用域补齐、本集专属形态创建并绑定当前分镜，保证 UI 和 Agent 共享的执行器后续改动有独立回归。
 
+第六十四轮提交继续落地 P4/P5 的生产拦截可修复性：
+
+- `formatEpisodeProductionContinuityError` 支持接收当前集 handoff suggestions，并在连续性 blocker 文案后追加可自动处理的 handoff 建议摘要和稳定 suggestion id，让全剧生成被暂停时不只说明“哪里错了”，也告诉用户或 Agent 下一步可先执行哪些修复。
+- `produceCurrentEpisode` 在 `enforceContinuity` 模式下构建当前集 `buildEpisodeProductionHandoff(...).suggestions` 后再格式化错误；因此 `autoProduceSeries` 写入 `Episode.filmError` 的生产失败信息也会携带可执行修复入口。
+- `episodeProduction.selftest.ts` 覆盖跨集主形象回退和剧集计划形态作用域不匹配两类 blocker，确认生产拦截错误中包含 `handoff` 提示和对应 suggestion id，为 UI 弹层和 Agent 工具的修复闭环提供更直接的失败上下文。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

@@ -330,10 +330,10 @@ const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHand
 const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
 check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
 const stateRegressionBlockers = episodeProductionContinuityBlockers(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
-const stateRegressionBlockerError = formatEpisodeProductionContinuityError(stateRegressionHandoffDoc.episodes![1], stateRegressionBlockers)
+const stateRegressionBlockerError = formatEpisodeProductionContinuityError(stateRegressionHandoffDoc.episodes![1], stateRegressionBlockers, { suggestions: stateRegressionHandoff.suggestions })
 check(
   'blocks series production on unresolved cross-episode state regression',
-  stateRegressionBlockers.some((item) => item.code === 'asset_state_regressed_to_main') && stateRegressionBlockerError.includes('E2'),
+  stateRegressionBlockers.some((item) => item.code === 'asset_state_regressed_to_main') && stateRegressionBlockerError.includes('E2') && stateRegressionBlockerError.includes('handoff') && stateRegressionBlockerError.includes('create-variant:hero:ep2'),
   JSON.stringify({ stateRegressionBlockers, stateRegressionBlockerError }),
 )
 
@@ -353,12 +353,14 @@ const episodePlanBlockerDoc = doc({
   ],
 })
 const episodePlanBlockers = episodeProductionContinuityBlockers(episodePlanBlockerDoc, episodePlanBlockerDoc.episodes![0])
-const episodePlanBlockerError = formatEpisodeProductionContinuityError(episodePlanBlockerDoc.episodes![0], episodePlanBlockers)
+const episodePlanHandoff = buildEpisodeProductionHandoff(episodePlanBlockerDoc, episodePlanBlockerDoc.episodes![0])
+const episodePlanBlockerError = formatEpisodeProductionContinuityError(episodePlanBlockerDoc.episodes![0], episodePlanBlockers, { suggestions: episodePlanHandoff.suggestions })
 check(
   'blocks production on unresolved episode plan asset and variant scope requirements',
   episodePlanBlockers.some((item) => item.code === 'episode_plan_missing_asset' && item.assetId === 'hall') &&
     episodePlanBlockers.some((item) => item.code === 'episode_plan_variant_scope_mismatch' && item.variantId === 'gala') &&
-    episodePlanBlockerError.includes('E1'),
+    episodePlanBlockerError.includes('E1') &&
+    episodePlanBlockerError.includes('variant-scope:hero:gala:ep1:episode'),
   JSON.stringify({ episodePlanBlockers, episodePlanBlockerError }),
 )
 
