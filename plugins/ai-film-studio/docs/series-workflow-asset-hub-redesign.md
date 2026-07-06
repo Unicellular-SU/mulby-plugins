@@ -877,6 +877,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent 工具 `upsert_episode_plan` 写入 `requiredVariants` 时会自动把这些变体所属资产并入 `requiredAssetIds`；`remove` 模式不自动删除父资产，避免误删仍被其他规划项依赖的资产。
 - 新增连续性报告和 Agent 工具自测，覆盖“已规划父资产不误报”“只规划变体会提示”“Agent 只写变体也会补父资产”三条路径。
 
+第五十六轮提交继续落地 P5 的剧集计划变体作用域前置质量门：
+
+- 连续性报告新增 `episode_plan_variant_scope_mismatch`：当 `Episode.plan.requiredVariantIds` 指向的形态/妆容已经通过 `appliesToEpisodeIds` 限定到其他剧集时，即使本集还没有分镜也会提示，避免多集计划阶段就埋下错用妆容或服装的风险。
+- Studio 连续性详情复用变体作用域修复动作，为该问题提供“标记计划形态适用于本集”入口，把当前剧集补入该变体的 `appliesToEpisodeIds`。
+- Agent 工具 `set_asset_variant_scope` 的说明补充该问题码，人工修复和 Agent 修复都走同一条增量作用域更新路径，不会覆盖已有 scene/storyboard 作用域。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

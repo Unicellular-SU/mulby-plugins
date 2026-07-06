@@ -292,6 +292,22 @@ check(
   JSON.stringify(plannedVariantWithoutAssetReport.issues),
 )
 
+const plannedVariantScopeMismatchReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img', appliesToEpisodeIds: ['ep2'] }] }],
+    currentEpisodeId: 'ep1',
+    episodes: [
+      episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } }),
+      episode('ep2', 1),
+    ],
+  }),
+)
+check(
+  'flags planned variants whose episode scope excludes the planned episode before storyboards exist',
+  plannedVariantScopeMismatchReport.issues.some((issue) => issue.code === 'episode_plan_variant_scope_mismatch' && issue.assetId === 'hero' && issue.variantId === 'v-gala' && issue.scopeKind === 'episode'),
+  JSON.stringify(plannedVariantScopeMismatchReport.issues),
+)
+
 const plannedVariantBoundReport = buildContinuityReport(
   doc({
     assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],

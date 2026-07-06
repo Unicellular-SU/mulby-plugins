@@ -418,7 +418,20 @@ function addEpisodePlanIssues(
         message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但未把父项目资产「${owner.asset.name}」列入本集必需资产。建议补入 requiredAssetIds，保证系列资产矩阵能按资产和形态两层追踪。`,
       })
     }
-    if (hasStoryboards && !validVariantUses.has(`${owner.asset.id}:${owner.variant.id}`)) {
+    const scopedEpisodeIds = owner.variant.appliesToEpisodeIds ?? []
+    const variantScopeExcludesEpisode = scopedEpisodeIds.length > 0 && !scopedEpisodeIds.includes(episode.id)
+    if (variantScopeExcludesEpisode) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_variant_scope_mismatch',
+        episodeId: episode.id,
+        assetId: owner.asset.id,
+        variantId: owner.variant.id,
+        scopeKind: 'episode',
+        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但该形态只标记适用于其他剧集（${scopedEpisodeIds.join('、')}）。生成本集前请把本集加入该形态适用范围，或从本集计划移除该形态。`,
+      })
+    }
+    if (hasStoryboards && !variantScopeExcludesEpisode && !validVariantUses.has(`${owner.asset.id}:${owner.variant.id}`)) {
       addIssue({
         severity: 'warning',
         code: 'episode_plan_missing_variant',

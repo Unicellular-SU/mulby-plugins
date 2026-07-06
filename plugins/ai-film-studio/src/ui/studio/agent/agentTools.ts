@@ -1745,7 +1745,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'set_asset_variant_scope',
-      description: '增量标记或移除资产变体适用范围，不会覆盖其它 episode/scene/storyboard 适用范围；用于修正 variant_out_of_episode_scope。',
+      description: '增量标记或移除资产变体适用范围，不会覆盖其它 episode/scene/storyboard 适用范围；用于修正 variant_out_of_episode_scope 和 episode_plan_variant_scope_mismatch。',
       parameters: {
         type: 'object',
         properties: {

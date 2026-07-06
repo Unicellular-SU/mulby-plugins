@@ -1869,7 +1869,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     return storyboardsForIssueEpisode(issue.episodeId).find((storyboard) => storyboard.id === issue.storyboardId)
   }
   const addVariantScope = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'variant_out_of_episode_scope' && issue.code !== 'asset_state_changed_variant') || !issue.assetId || !issue.variantId || !issue.episodeId) return
+    if ((issue.code !== 'variant_out_of_episode_scope' && issue.code !== 'asset_state_changed_variant' && issue.code !== 'episode_plan_variant_scope_mismatch') || !issue.assetId || !issue.variantId || !issue.episodeId) return
     const asset = doc.assets.find((item) => item.id === issue.assetId)
     const variant = asset?.variants?.find((item) => item.id === issue.variantId)
     if (!asset || !variant) return
@@ -2213,13 +2213,15 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const issueStoryboard = findIssueStoryboard(issue)
         const variantScopeNeedsStoryboard = issue.scopeKind === 'scene' || issue.scopeKind === 'storyboard'
         const canAddVariantScope =
-          (issue.code === 'variant_out_of_episode_scope' || issue.code === 'asset_state_changed_variant') &&
+          (issue.code === 'variant_out_of_episode_scope' || issue.code === 'asset_state_changed_variant' || issue.code === 'episode_plan_variant_scope_mismatch') &&
           !!issue.assetId &&
           !!issue.variantId &&
           !!issue.episodeId &&
           (!variantScopeNeedsStoryboard || !!issueStoryboard)
         const addVariantScopeLabel =
-          issue.code === 'asset_state_changed_variant'
+          issue.code === 'episode_plan_variant_scope_mismatch'
+            ? '标记计划形态适用于本集'
+            : issue.code === 'asset_state_changed_variant'
             ? '标记当前形态适用于本集'
             : issue.scopeKind === 'scene'
               ? '标记变体适用于本场景'
