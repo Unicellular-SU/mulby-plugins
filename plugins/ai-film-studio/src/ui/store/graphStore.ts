@@ -11,7 +11,6 @@ import { resolveAssetUrl, type AssetRecord } from '../services/assetRegistry'
 import type { ElementRef } from './assetStore'
 import { buildPrompt, buildImagePrompts, buildAssetImageJob, buildCharViewSets, validateNodeJson, buildRepairPrompt, shotCameraMotion, buildAudioPrompt, checkAxisContinuity, scaleSpec } from '../services/prompts'
 import { videoStyleTag } from '../services/stylePacks'
-import { useAssetStore } from './assetStore'
 import { extractJson, stripCodeFences } from '../services/jsonParse'
 import { topoOrder, resolveOutput, gatherInputs, computeInputHash } from '../services/executor'
 import { runVideo, abortVideo } from '../services/providers'
@@ -61,7 +60,18 @@ export interface PortValue {
   // 扇出：一个端口承载多份产物（N 张图 / N 个视频）；flat 字段镜像 items[0] 兼容单值渲染（M7）
   items?: PortValue[]
   // 产物元信息（如角色名/镜头号），用于跨镜一致性匹配与展示
-  meta?: Record<string, unknown>
+  meta?: AssetLineageMeta & Record<string, unknown>
+}
+
+export interface AssetLineageMeta {
+  mediaAssetId?: string
+  libraryEntityId?: string
+  libraryVariantId?: string
+  projectId?: string
+  projectAssetId?: string
+  projectVariantId?: string
+  view?: 'front' | 'side' | 'back' | 'concept' | 'primary' | 'reference' | string
+  purpose?: 'experiment' | 'candidate' | 'approved'
 }
 
 export interface FilmNodeData {
@@ -725,7 +735,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         // 只连了素材图、没写描述：直接把素材图作为该资产的参考图（无需「生成」）
         const r0 = refImgs[0]
         const assetId = await saveAsset(r0.base64, r0.mime)
-        baseOut.image = { type: 'image', assetId, mime: r0.mime, meta: { ...(p.name ? { name: String(p.name) } : {}), kind: node.data.kind } }
+        baseOut.image = { type: 'image', assetId, mime: r0.mime, meta: { ...(p.name ? { name: String(p.name) } : {}), kind: node.data.kind, mediaAssetId: assetId, purpose: 'candidate' } }
         patchNode(id, { status: 'done', error: undefined, outputs: baseOut })
         return
       }
@@ -759,7 +769,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         // 去生成时持久 data: url：显示走 useMediaUrl(assetId)→blob(saveAsset 已灌缓存，即时)；
         // 下游 portImageDataUrl 按 assetId 取字节。免整段 base64 常驻会话内存。
         mime: r.mime,
-        meta: { ...job.meta, kind: node.data.kind },
+        meta: { ...job.meta, kind: node.data.kind, mediaAssetId: assetId, purpose: 'candidate' },
       }
       patchNode(id, { status: 'done', previewUrl: undefined, stream: undefined, outputs: { ...baseOut, image: img } })
     } catch (e) {
@@ -1193,8 +1203,8 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
     const idxOf = new Map<CharSet, number>(sets.map((s, i) => [s, i]))
     const baseBoards = new Map<string, { b64: string; mime: string }>() // M22b：组键 → 底模板，供变体派生锁脸
     const grpKey = (s: CharSet) => s.baseGroup || '' // 修复 ORD-1：唯一组键配对底模/变体，杜绝同名/无名串脸
-    // view:'board' 标记单张设定板（promoteCharViews 据此写回库角色的 views.board）
-    const metaOf = (set: CharSet) => ({ name: set.name, kind: 'character', charId: set.charId, variantId: set.variantId, view: 'board' })
+    // view:'primary' 标记单张设定板；是否写回身份资产由输出面板的显式保存动作决定。
+    const metaOf = (set: CharSet) => ({ name: set.name, kind: 'character', charId: set.charId, variantId: set.variantId, view: 'primary' })
     const genSet = async (set: CharSet, anchor?: { b64: string; mime: string }): Promise<void> => {
       const si = idxOf.get(set) ?? 0
       const extRef = canEdit ? pickRef(extRefs, set.refName) : null
@@ -1217,7 +1227,8 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
           b64 = r.base64
           mime = r.mime
         }
-        results[si] = { type: 'image', assetId: await saveAsset(b64, mime), mime, meta: metaOf(set) }
+        const assetId = await saveAsset(b64, mime)
+        results[si] = { type: 'image', assetId, mime, meta: { ...metaOf(set), mediaAssetId: assetId, purpose: 'candidate' } }
         if (set.isBase && grpKey(set)) baseBoards.set(grpKey(set), { b64, mime }) // 捕获底模板（空组键不入）
         done++
         writeBack()
@@ -1251,14 +1262,6 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         gen: undefined,
         outputs: { [outId]: bundle(items) },
       })
-      // M27：把生成的设定板写回「已存在」的库角色（按 charId/name 匹配，幂等、不自动新建）
-      void useAssetStore
-        .getState()
-        .promoteCharViews(items.map((it) => ({ assetId: it.assetId, meta: it.meta })))
-        .then((n) => {
-          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张角色设定图写回资产中心对应角色`, 'info')
-        })
-        .catch(() => {})
     } catch (e) {
       patchNode(id, { status: 'error', error: e instanceof Error ? e.message : String(e), previewUrl: undefined, stream: undefined, gen: undefined })
     } finally {
@@ -2884,7 +2887,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const name = node?.data.params?.name ? String(node.data.params.name) : ''
     const kind =
       node?.data.kind === 'character' || node?.data.kind === 'scene' || node?.data.kind === 'prop' ? node.data.kind : undefined
-    const meta = name || kind ? { ...(name ? { name } : {}), ...(kind ? { kind } : {}) } : undefined
+    const meta = { ...(name ? { name } : {}), ...(kind ? { kind } : {}), mediaAssetId: assetId, purpose: 'candidate' as const }
     const img: PortValue = { type: 'image', assetId, mime, ...(meta ? { meta } : {}) }
     const prev = node?.data.outputs || {}
     patchNode(id, { status: 'done', error: undefined, outputs: { ...prev, [port]: img } })
@@ -2941,7 +2944,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       const r = await editImage({ model, prompt, refBase64: base64, refMime: mime })
       const newAssetId = await saveAsset(r.base64, r.mime)
       // 去生成时 data: url；显式清掉 ...target 带来的旧 url，避免显示编辑前的旧图（useMediaUrl 按新 assetId 解析）
-      const newItem: PortValue = { ...target, assetId: newAssetId, url: undefined, mime: r.mime }
+      const newItem: PortValue = { ...target, assetId: newAssetId, url: undefined, mime: r.mime, meta: { ...(target.meta ?? {}), mediaAssetId: newAssetId, purpose: 'candidate' } }
       const cur = get().nodes.find((n) => n.id === nodeId)
       const cval = cur?.data.outputs?.[port]
       if (cur && cval) {
@@ -3021,7 +3024,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         mime = r.mime
       }
       const assetId = await saveAsset(base64, mime)
-      const newItem: PortValue = { type: 'image', assetId, mime, meta: job.meta }
+      const newItem: PortValue = { type: 'image', assetId, mime, meta: { ...(job.meta ?? {}), mediaAssetId: assetId, purpose: 'candidate' } }
       const cur = get().nodes.find((n) => n.id === nodeId)
       const cval = cur?.data.outputs?.[port]
       if (cur && cval) {
@@ -3127,8 +3130,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const url = await resolveAssetUrl(rec)
     const out: PortValue =
       rec.type === 'audio'
-        ? { type: 'audio', assetId: rec.assetId, url, localPath: rec.localPath, mime: rec.mime }
-        : { type: 'image', assetId: rec.assetId, url, mime: rec.mime }
+        ? { type: 'audio', assetId: rec.assetId, url, localPath: rec.localPath, mime: rec.mime, meta: { mediaAssetId: rec.assetId, purpose: 'approved' } }
+        : { type: 'image', assetId: rec.assetId, url, mime: rec.mime, meta: { mediaAssetId: rec.assetId, purpose: 'approved' } }
     const node: FilmNode = {
       id: `n_${nanoid(6)}`,
       type: 'film',
@@ -3174,7 +3177,16 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         assetId,
         url: toDataUrl(a.base64, a.mime),
         mime: a.mime,
-        meta: { name: el.name, charId, kind, ...(el.voiceId ? { voiceId: el.voiceId } : {}), ...(view ? { view } : {}) },
+        meta: {
+          name: el.name,
+          charId,
+          kind,
+          mediaAssetId: assetId,
+          libraryEntityId: el.id,
+          purpose: 'approved',
+          ...(el.voiceId ? { voiceId: el.voiceId } : {}),
+          ...(view ? { view } : { view: 'primary' }),
+        },
       })
     }
     // M27：库角色各时期变体的已生成视图也下沉为图像项（带 variantId），供 keyframe 按 (charId,variantId) 取该期图
@@ -3191,7 +3203,41 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           assetId,
           url: toDataUrl(a.base64, a.mime),
           mime: a.mime,
-          meta: { name: el.name, charId, kind, variantId: v.id, view },
+          meta: {
+            name: el.name,
+            charId,
+            kind,
+            variantId: v.id,
+            variantLabel: v.label,
+            mediaAssetId: assetId,
+            libraryEntityId: el.id,
+            libraryVariantId: v.id,
+            view,
+            purpose: 'approved',
+          },
+        })
+      }
+      for (const [index, assetId] of (v.refAssetIds ?? []).entries()) {
+        if (!assetId) continue
+        const a = await loadAsset(assetId)
+        if (!a) continue
+        items.push({
+          type: 'image',
+          assetId,
+          url: toDataUrl(a.base64, a.mime),
+          mime: a.mime,
+          meta: {
+            name: el.name,
+            charId,
+            kind,
+            variantId: v.id,
+            variantLabel: v.label,
+            mediaAssetId: assetId,
+            libraryEntityId: el.id,
+            libraryVariantId: v.id,
+            view: index === 0 ? 'primary' : 'reference',
+            purpose: 'approved',
+          },
         })
       }
     }

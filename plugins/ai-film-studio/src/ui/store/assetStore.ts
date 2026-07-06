@@ -68,6 +68,19 @@ export interface ElementRef {
   appearanceVariants?: ElementVariant[] // 时期/形态变体（富结构）
 }
 
+export type CanvasOutputViewRole = 'primary' | 'front' | 'side' | 'back' | 'concept' | 'reference'
+export interface CanvasOutputPromotionItem {
+  assetId?: string
+  meta?: Record<string, unknown>
+}
+export interface CanvasOutputPromotionTarget {
+  kind: 'libraryEntity'
+  entityId: string
+  libraryVariantId?: string
+  variantLabel?: string
+  view: CanvasOutputViewRole
+}
+
 async function kvGet<T>(key: string): Promise<T | null> {
   try {
     const v = await window.mulby?.storage?.get(key, PLUGIN_ID)
@@ -82,6 +95,40 @@ async function kvSet(key: string, value: unknown): Promise<void> {
   } catch {
     // 忽略
   }
+}
+
+const isElementViewRole = (view: CanvasOutputViewRole): view is 'front' | 'side' | 'back' =>
+  view === 'front' || view === 'side' || view === 'back'
+
+function prependUnique(ids: string[] | undefined, assetId: string): string[] {
+  return [assetId, ...(ids ?? []).filter((id) => id && id !== assetId)]
+}
+
+function applyCanvasOutputToElement(el: ElementRef, assetId: string, target: CanvasOutputPromotionTarget): ElementRef {
+  const next: ElementRef = { ...el, refAssetIds: [...(el.refAssetIds ?? [])], updatedAt: Date.now(), version: (el.version ?? 1) + 1 }
+  if (!target.libraryVariantId) {
+    if (isElementViewRole(target.view)) {
+      next.views = { ...(next.views ?? {}), [target.view]: assetId }
+    } else {
+      next.refAssetIds = prependUnique(next.refAssetIds, assetId)
+    }
+    return next
+  }
+  const variants = [...(next.appearanceVariants ?? [])]
+  let idx = variants.findIndex((variant) => variant.id === target.libraryVariantId)
+  if (idx < 0) {
+    variants.push({ id: target.libraryVariantId, label: target.variantLabel || target.libraryVariantId })
+    idx = variants.length - 1
+  }
+  const variant = { ...variants[idx] }
+  if (isElementViewRole(target.view)) {
+    variant.views = { ...(variant.views ?? {}), [target.view]: assetId }
+  } else {
+    variant.refAssetIds = prependUnique(variant.refAssetIds, assetId)
+  }
+  variants[idx] = variant
+  next.appearanceVariants = variants
+  return next
 }
 
 interface AssetState {
@@ -105,8 +152,8 @@ interface AssetState {
 
   saveElement: (el: Partial<ElementRef> & { kind: ElementKind; name: string }) => Promise<ElementRef>
   removeElement: (id: string) => Promise<void>
-  /** M27：把画布生成的角色三视图（meta 带 charId/variantId/view）写回已存在的库角色，幂等、不自动新建 */
-  promoteCharViews: (items: { assetId?: string; meta?: Record<string, unknown> }[]) => Promise<number>
+  /** P3：把画布输出显式发布到身份资产；必须由调用方传入明确目标，不从 meta 自动猜测写回。 */
+  promoteCanvasOutputs: (items: CanvasOutputPromotionItem[], target: CanvasOutputPromotionTarget) => Promise<number>
 }
 
 export const useAssetStore = create<AssetState>((set, get) => ({
@@ -207,39 +254,20 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     await kvSet(KEY_ELEMENTS, list)
   },
 
-  promoteCharViews: async (items) => {
+  promoteCanvasOutputs: async (items, target) => {
     const list = get().elements.slice()
     let changed = 0
+    const idx = list.findIndex((el) => el.id === target.entityId)
+    if (target.kind !== 'libraryEntity' || idx < 0) return 0
+    let nextElement = list[idx]
     for (const it of items) {
-      const m = (it.meta || {}) as Record<string, unknown>
       const assetId = it.assetId
-      const view = typeof m.view === 'string' ? m.view : ''
-      if (!assetId || !view) continue
-      const charId = typeof m.charId === 'string' ? m.charId : ''
-      const name = typeof m.name === 'string' ? m.name : ''
-      const variantId = typeof m.variantId === 'string' ? m.variantId : ''
-      // 仅写回已存在的库角色（按 charId/name 匹配），不自动新建，避免污染素材库
-      const idx = list.findIndex(
-        (e) => e.kind === 'character' && ((charId && (e.charId === charId || e.name === charId)) || (name && e.name === name))
-      )
-      if (idx < 0) continue
-      const el: ElementRef = { ...list[idx], updatedAt: Date.now() }
-      if (!variantId) {
-        el.views = { ...(el.views || {}), [view]: assetId }
-      } else {
-        const vs = (el.appearanceVariants || []).slice()
-        let vi = vs.findIndex((v) => v.id === variantId)
-        if (vi < 0) {
-          vs.push({ id: variantId, label: variantId, views: {} })
-          vi = vs.length - 1
-        }
-        vs[vi] = { ...vs[vi], views: { ...(vs[vi].views || {}), [view]: assetId } }
-        el.appearanceVariants = vs
-      }
-      list[idx] = el
+      if (!assetId) continue
+      nextElement = applyCanvasOutputToElement(nextElement, assetId, target)
       changed++
     }
     if (changed) {
+      list[idx] = nextElement
       set({ elements: list })
       await kvSet(KEY_ELEMENTS, list)
     }

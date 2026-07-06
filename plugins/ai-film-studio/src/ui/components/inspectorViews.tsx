@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { FolderOpen, ChevronRight, ChevronDown, Pencil } from 'lucide-react'
+import { FolderOpen, ChevronRight, ChevronDown, Pencil, BookmarkPlus } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
+import { useAssetStore, type CanvasOutputViewRole, type ElementRef } from '../store/assetStore'
 import { basename } from '../services/download'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../services/mediaUrl'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
@@ -12,6 +13,74 @@ function openFolder(p?: string) {
 }
 
 const rec = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? (v as Record<string, unknown>) : {})
+const viewLabels: Record<CanvasOutputViewRole, string> = {
+  primary: '主图',
+  front: '正面图',
+  side: '侧面图',
+  back: '背面图',
+  concept: '概念图',
+  reference: '参考图',
+}
+
+function normalizeViewRole(value: unknown): CanvasOutputViewRole {
+  if (value === 'front' || value === 'side' || value === 'back' || value === 'concept' || value === 'reference') return value
+  return 'primary'
+}
+
+function metaKind(value: unknown): ElementRef['kind'] | undefined {
+  if (value === 'character' || value === 'scene' || value === 'prop') return value
+  return undefined
+}
+
+function uniqueElements(items: ElementRef[]): ElementRef[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
+}
+
+function resolveCanvasSaveTarget(elements: ElementRef[], value: PortValue) {
+  if (value.type !== 'image' || !value.assetId) return null
+  const meta = rec(value.meta)
+  const entityId = asStr(meta.libraryEntityId)
+  const charId = asStr(meta.charId)
+  const name = asStr(meta.name)
+  const kind = metaKind(meta.kind)
+  let matches = entityId ? elements.filter((element) => element.id === entityId) : []
+  if (!matches.length && (charId || name)) {
+    matches = elements.filter((element) => {
+      if (kind && element.kind !== kind) return false
+      const byCharId = charId && (element.id === charId || element.charId === charId || element.name === charId)
+      const byName = name && (element.name === name || element.aliases?.includes(name))
+      return !!byCharId || !!byName
+    })
+  }
+  const unique = uniqueElements(matches)
+  if (unique.length !== 1) return null
+  const element = unique[0]
+  const variantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
+  const variantLabel =
+    asStr(meta.variantLabel) ||
+    (variantId ? element.appearanceVariants?.find((variant) => variant.id === variantId)?.label : undefined) ||
+    variantId ||
+    undefined
+  const view = normalizeViewRole(meta.view)
+  return {
+    target: {
+      kind: 'libraryEntity' as const,
+      entityId: element.id,
+      libraryVariantId: variantId || undefined,
+      variantLabel,
+      view,
+    },
+    label: variantId ? `保存为${variantLabel || variantId}${viewLabels[view]}` : `保存为${viewLabels[view]}`,
+    title: variantId
+      ? `保存到身份资产「${element.name}」的「${variantLabel || variantId}」${viewLabels[view]}`
+      : `保存到身份资产「${element.name}」的${viewLabels[view]}`,
+  }
+}
 
 // ============ 结构化 JSON 卡片 ============
 function SceneList({ j }: { j: Record<string, unknown> }) {
@@ -139,7 +208,15 @@ export function JsonView({ json }: { json: unknown }) {
 }
 
 // ============ 媒体画廊 ============
-function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
+function MediaTile({
+  v,
+  onClick,
+  action,
+}: {
+  v: PortValue
+  onClick?: () => void
+  action?: { label: string; title?: string; disabled?: boolean; onClick: () => void }
+}) {
   const name = typeof v.meta?.name === 'string' ? v.meta.name : typeof v.meta?.shot === 'string' ? v.meta.shot : ''
   const [inViewRef, inView] = useInView<HTMLDivElement>('400px')
   // 视频惰性挂载（离屏不解析 blob/不挂 <video>）；图/音频随挂随解析
@@ -162,7 +239,7 @@ function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
           title={onClick ? '点击查看大图 / 对话修改' : undefined}
         />
       )}
-      {(name || v.localPath) && (
+      {(name || v.localPath || action) && (
         <div className="afs-tile__bar">
           {name ? (
             <span className="afs-tile__name" title={name}>
@@ -174,6 +251,20 @@ function MediaTile({ v, onClick }: { v: PortValue; onClick?: () => void }) {
           {v.localPath ? (
             <button className="afs-tile__folder" title={`已存本地：${basename(v.localPath)}`} onClick={() => openFolder(v.localPath)}>
               <FolderOpen size={12} />
+            </button>
+          ) : null}
+          {action ? (
+            <button
+              className="afs-tile__save"
+              disabled={action.disabled}
+              title={action.title}
+              onClick={(e) => {
+                e.stopPropagation()
+                action.onClick()
+              }}
+            >
+              <BookmarkPlus size={11} />
+              {action.label}
             </button>
           ) : null}
         </div>
@@ -260,6 +351,8 @@ export function OutputView({
   onEditText?: (text: string) => string | null
 }) {
   const openLightbox = useUiStore((s) => s.openLightbox)
+  const elements = useAssetStore((s) => s.elements)
+  const promoteCanvasOutputs = useAssetStore((s) => s.promoteCanvasOutputs)
 
   if (value.type === 'json' || value.type === 'text' || (!value.items && value.text && !value.url)) {
     return <EditableValue value={value} onEditText={onEditText} />
@@ -291,17 +384,40 @@ export function OutputView({
       const i = lbItems.findIndex((x) => x.ref === (it as MediaRef))
       if (i >= 0) openLightbox(lbItems, i)
     }
+    const saveToIdentity = async (it: PortValue) => {
+      const resolved = resolveCanvasSaveTarget(elements, it)
+      if (!resolved || !it.assetId) {
+        window.mulby?.notification?.show('该输出缺少明确的身份资产目标，请从资产中心拖入身份资产或在身份资产上生成后再保存', 'warning')
+        return
+      }
+      const count = await promoteCanvasOutputs([{ assetId: it.assetId, meta: it.meta }], resolved.target)
+      window.mulby?.notification?.show(count > 0 ? `已${resolved.label}` : '没有可保存的画布输出', count > 0 ? 'success' : 'warning')
+    }
     return (
       <div>
         {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
         <div className="afs-gallery">
-          {mediaList.map((it, i) => (
-            <MediaTile
-              key={it.assetId || it.url || `item-${i}`}
-              v={it}
-              onClick={it.type === 'image' || it.type === 'video' ? () => openAt(it) : undefined}
-            />
-          ))}
+          {mediaList.map((it, i) => {
+            const resolved = resolveCanvasSaveTarget(elements, it)
+            const hasIdentityHint = !!it.meta?.libraryEntityId || !!it.meta?.charId || !!it.meta?.name
+            return (
+              <MediaTile
+                key={it.assetId || it.url || `item-${i}`}
+                v={it}
+                onClick={it.type === 'image' || it.type === 'video' ? () => openAt(it) : undefined}
+                action={
+                  it.type === 'image' && hasIdentityHint
+                    ? {
+                        label: resolved?.label || '目标不明确',
+                        title: resolved?.title || '无法唯一匹配身份资产，未执行写回',
+                        disabled: !resolved,
+                        onClick: () => void saveToIdentity(it),
+                      }
+                    : undefined
+                }
+              />
+            )
+          })}
         </div>
       </div>
     )
