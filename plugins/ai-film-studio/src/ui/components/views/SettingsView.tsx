@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react'
 import ProviderSettings from '../ProviderSettings'
 import PromptSettings from '../PromptSettings'
 import { useAssetStore } from '../../store/assetStore'
+import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
 import { useConfirm } from '../ui/ConfirmDialog'
 
@@ -41,6 +42,7 @@ function StorageSettings() {
   const busy = useAssetStore((s) => s.busy)
   const load = useAssetStore((s) => s.load)
   const runGc = useAssetStore((s) => s.runGc)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const saveProject = useGraphStore((s) => s.saveProject)
   const confirm = useConfirm()
 
@@ -52,6 +54,7 @@ function StorageSettings() {
     if (!(await confirm({ title: '清理未引用素材', message: '清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。', danger: true, confirmLabel: '清理' }))) return
     await saveProject()
     const r = await runGc()
+    await refreshAssetHub()
     window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用素材，释放 ${fmtBytes(r.freedBytes)}`, 'success')
   }
 
