@@ -507,6 +507,18 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 
 本轮没有改变持久化数据结构，也没有改变生成链路；它只先把现有边界显性化，为 P1 的 `assetHub` 服务层和 P2 的完整双向映射做准备。
 
+第二轮提交继续落地 P1：
+
+- 新增 `src/ui/services/assetHub.ts`，统一读取 `assets:registry`、`assets:boards` 和旧 `elements:library`。
+- 新增 `LibraryEntity`、`LibraryVariant`、`MediaRef` 兼容视图，先不迁移旧数据，只把 `ElementRef` 映射成新资产中心模型。
+- 新增 `src/ui/store/assetHubStore.ts`，作为 UI 读取媒体文件、身份资产、合集和 usage 的统一 Store。
+- 将身份资产页迁移为从 `assetHubStore` 读取 `elements/mediaAssets/usageByEntity`；原 P0 的单独 `assetUsage` 扫描被移除。
+- usage 扫描范围扩展到 `studio:index` / `studio:project:<id>`、画布 `projects:index` / `project:<id>` 和 `snapshots`。
+- 新增 `createProjectAssetFromEntity` 与 `promoteProjectAssetToEntity` 纯映射函数，为 P2 的双向导入/发布提供字段映射底座。
+- 新增 `assetHub.selftest.ts` 并接入 `npm run test:continuity`，覆盖 ElementRef → LibraryEntity、LibraryEntity → 项目资产、项目资产 → LibraryEntity 的核心映射。
+
+本轮仍不改变持久化数据结构；`elements:library` 继续作为兼容来源，P2 再把 `importElementToProject` / `promoteAssetToElement` 接入新映射。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

@@ -29,9 +29,9 @@ import {
   Download,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
+import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
-import { loadIdentityAssetUsages, type IdentityAssetUsage } from '../../services/assetUsage'
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
@@ -415,32 +415,31 @@ const KIND_ICON: Record<ElementKind, typeof Users> = { character: Users, scene: 
 const KIND_LABEL: Record<ElementKind, string> = { character: '角色', scene: '场景', prop: '物品' }
 
 function ElementLibrary() {
-  const elements = useAssetStore((s) => s.elements)
-  const assets = useAssetStore((s) => s.assets)
+  const fallbackElements = useAssetStore((s) => s.elements)
+  const fallbackAssets = useAssetStore((s) => s.assets)
   const loaded = useAssetStore((s) => s.loaded)
   const load = useAssetStore((s) => s.load)
   const saveElement = useAssetStore((s) => s.saveElement)
   const removeElement = useAssetStore((s) => s.removeElement)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const hubElements = useAssetHubStore((s) => s.elements)
+  const hubMediaAssets = useAssetHubStore((s) => s.mediaAssets)
+  const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
+  const refreshHub = useAssetHubStore((s) => s.refresh)
 
   const confirm = useConfirm()
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
-  const [usageByEntity, setUsageByEntity] = useState<Record<string, IdentityAssetUsage>>({})
+  const elements = hubLoaded ? hubElements : fallbackElements
 
   useEffect(() => {
     if (!loaded) void load()
   }, [loaded, load])
   useEffect(() => {
-    let active = true
-    void loadIdentityAssetUsages().then((usage) => {
-      if (active) setUsageByEntity(usage)
-    })
-    return () => {
-      active = false
-    }
-  }, [elements])
+    if (!hubLoaded) void refreshHub()
+  }, [hubLoaded, refreshHub])
 
-  const imageAssets = useMemo(() => assets.filter((a) => a.type === 'image' && a.assetId), [assets])
+  const imageAssets = useMemo(() => (hubLoaded ? hubMediaAssets : fallbackAssets).filter((a) => a.type === 'image' && a.assetId), [fallbackAssets, hubLoaded, hubMediaAssets])
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) {
@@ -448,13 +447,13 @@ function ElementLibrary() {
       return
     }
     await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
-    setUsageByEntity(await loadIdentityAssetUsages())
+    await refreshHub()
     setEditing(null)
   }
   const onDeleteElement = async (el: ElementRef) => {
     if (await confirm({ title: '删除', message: `删除身份资产「${el.name}」？`, confirmLabel: '删除', danger: true })) {
       await removeElement(el.id)
-      setUsageByEntity(await loadIdentityAssetUsages())
+      await refreshHub()
     }
   }
 
