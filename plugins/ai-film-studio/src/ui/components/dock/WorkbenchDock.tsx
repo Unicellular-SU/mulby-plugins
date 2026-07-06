@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import NodeLibrary, { DND_ASSET, DND_ELEMENT, DND_SNIPPET } from '../NodeLibrary'
 import { AssetThumb, RefThumb } from '../views/AssetsView'
-import { useAssetStore } from '../../store/assetStore'
+import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS, type PromptSnippet } from '../../store/promptStore'
 
@@ -31,20 +31,26 @@ export default function WorkbenchDock() {
 }
 
 function AssetDockPanel() {
-  const assets = useAssetStore((s) => s.assets)
-  const elements = useAssetStore((s) => s.elements)
-  const loaded = useAssetStore((s) => s.loaded)
-  const load = useAssetStore((s) => s.load)
+  const assets = useAssetHubStore((s) => s.mediaAssets)
+  const entities = useAssetHubStore((s) => s.entities)
+  const loaded = useAssetHubStore((s) => s.loaded)
+  const refresh = useAssetHubStore((s) => s.refresh)
   const [q, setQ] = useState('')
 
   useEffect(() => {
-    if (!loaded) void load()
-  }, [loaded, load])
+    if (!loaded) void refresh()
+  }, [loaded, refresh])
 
   const kw = q.trim().toLowerCase()
   const fa = assets
     .filter((a) => !kw || `${a.name || ''} ${a.nodeKind || ''} ${a.projectName || ''}`.toLowerCase().includes(kw))
     .sort((a, b) => b.createdAt - a.createdAt)
+  const filteredEntities = entities.filter((entity) => !kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw))
+  const entityPreviewAssetId = (entity: (typeof entities)[number]) =>
+    entity.mediaRefs?.find((ref) => ref.role === 'front' && ref.assetId)?.assetId ??
+    entity.mediaRefs?.find((ref) => (ref.role === 'primary' || ref.role === 'reference') && ref.assetId)?.assetId ??
+    entity.mediaRefs?.find((ref) => !!ref.assetId)?.assetId
+  const entityKindLabel = (kind: string) => (kind === 'character' ? '角色' : kind === 'prop' ? '物品' : kind === 'voice' ? '音色' : '场景')
 
   return (
     <div className="afs-dockpanel">
@@ -54,23 +60,23 @@ function AssetDockPanel() {
       </div>
       <div className="afs-dockpanel__hint">拖到画布即插入：媒体文件→参考节点；身份资产→人物/场景/物品节点</div>
       <div className="afs-dockpanel__scroll">
-        {elements.length > 0 && (
+        {filteredEntities.length > 0 && (
           <>
             <div className="afs-dockpanel__sec">身份资产</div>
             <div className="afs-dock__grid">
-              {elements.map((el) => (
+              {filteredEntities.map((entity) => (
                 <div
-                  key={el.id}
+                  key={entity.id}
                   className="afs-dockitem"
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData(DND_ELEMENT, el.id)
+                    e.dataTransfer.setData(DND_ELEMENT, entity.id)
                     e.dataTransfer.effectAllowed = 'move'
                   }}
-                  title={`${el.kind === 'character' ? '角色' : el.kind === 'prop' ? '物品' : '场景'}：${el.name}`}
+                  title={`${entityKindLabel(entity.kind)}：${entity.name}`}
                 >
-                  <RefThumb assetId={el.views?.front ?? el.refAssetIds?.[0]} />
-                  <span className="afs-dockitem__cap">{el.name}</span>
+                  <RefThumb assetId={entityPreviewAssetId(entity)} />
+                  <span className="afs-dockitem__cap">{entity.name}</span>
                 </div>
               ))}
             </div>

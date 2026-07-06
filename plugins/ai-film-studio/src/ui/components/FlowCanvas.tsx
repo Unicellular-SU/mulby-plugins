@@ -17,8 +17,10 @@ import { DND_MIME, DND_ASSET, DND_ELEMENT, DND_SNIPPET } from './NodeLibrary'
 import { getNodeDef } from '../nodes/nodeDefs'
 import { useGraphStore, isValidConnection, type FilmNode as FilmNodeType } from '../store/graphStore'
 import { useAssetStore } from '../store/assetStore'
+import { useAssetHubStore } from '../store/assetHubStore'
 import { usePromptStore, resolveSnippet } from '../store/promptStore'
 import { useUiStore } from '../store/uiStore'
+import { libraryEntityToElement } from '../services/assetHub'
 
 const nodeTypes = { film: FilmNode }
 
@@ -85,13 +87,14 @@ export default function FlowCanvas() {
       }
       const assetId = e.dataTransfer.getData(DND_ASSET)
       if (assetId) {
-        const rec = useAssetStore.getState().assets.find((a) => a.id === assetId)
+        const rec = useAssetHubStore.getState().mediaAssets.find((a) => a.id === assetId) ?? useAssetStore.getState().assets.find((a) => a.id === assetId)
         if (rec) void useGraphStore.getState().insertAssetNode(rec, position)
         return
       }
       const elId = e.dataTransfer.getData(DND_ELEMENT)
       if (elId) {
-        const el = useAssetStore.getState().elements.find((x) => x.id === elId)
+        const entity = useAssetHubStore.getState().entities.find((x) => x.id === elId)
+        const el = entity ? libraryEntityToElement(entity) : useAssetStore.getState().elements.find((x) => x.id === elId)
         if (el) void useGraphStore.getState().insertElementNode(el, position)
         return
       }

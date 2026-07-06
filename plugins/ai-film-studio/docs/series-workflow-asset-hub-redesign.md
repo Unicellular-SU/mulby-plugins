@@ -641,6 +641,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 预览会显示命中的名称/别名、资产类型、别名数量、形态数量、有作用域形态数量、参考图数量、分镜引用、形态绑定、剧集计划引用、出现剧集以及身份链接版本。
 - 多个候选目标会按目标序号并列展示，用户可以先比较哪一个项目资产承载了更多已绑定分镜、变体和剧集计划，再决定合并方向。
 
+第十七轮提交开始落地 P6 的 UI 读取收敛：
+
+- Studio 工作台左侧 Dock 和画布 Workbench Dock 的“身份资产/媒体文件”列表改为从 `assetHubStore.entities` / `assetHubStore.mediaAssets` 读取，不再直接订阅 `useAssetStore.elements`。
+- Dock 中的身份资产仍沿用原有 `DND_ELEMENT` 拖拽协议，但拖入项目资产页和画布时会优先从 `assetHubStore.entities` 解析，再通过 `libraryEntityToElement` 转为兼容写入结构，旧 `assetStore.elements` 仅作为回退。
+- 媒体文件拖入项目资产页和画布时同样优先读取 `assetHubStore.mediaAssets`，旧媒体注册表 store 作为兼容回退；这让两个主要入口开始使用资产中心快照，同时保持旧数据可拖拽。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
