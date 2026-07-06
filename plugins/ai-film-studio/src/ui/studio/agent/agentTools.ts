@@ -1561,7 +1561,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'merge_project_asset_into',
-      description: '把一个重复项目资产合并到另一个同类型项目资产，迁移分镜/每集计划引用并删除源资产；用于处理 duplicate_library_entity_project_assets。',
+      description: '把一个重复项目资产合并到另一个同类型项目资产，迁移分镜/每集计划引用并删除源资产；用于处理 duplicate_library_entity_project_assets / cross_episode_duplicate_project_asset_candidate。',
       parameters: {
         type: 'object',
         properties: {

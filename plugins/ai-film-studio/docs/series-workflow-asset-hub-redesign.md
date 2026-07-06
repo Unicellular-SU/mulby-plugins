@@ -613,7 +613,15 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent 写入工具新增 `merge_project_asset_into`，可处理连续性报告中同一身份资产被导入成多个项目资产的情况，并返回合并后的目标资产状态。
 - `agentTools.selftest.ts` 覆盖了 Agent 合并项目资产后源资产被删除、分镜引用迁移到目标资产、源变体映射到目标变体。
 
-本轮仍未完成 P5 里的更高阶判断：同一角色的不同项目资产跨集出现但尚未链接到同一身份时的自动候选判定，以及合并前后的可视化差异预览。
+第十三轮提交继续落地 P5 的跨集疑似重复资产判断：
+
+- 连续性报告新增 `cross_episode_duplicate_project_asset_candidate`，会在同类型项目资产实际出现在不同剧集、名称/别名命中同一称呼、且没有已经链接到同一身份时提示可能被拆成了多个生产资产。
+- 该问题会带上 `relatedAssetIds`、命中的 `conflictLabel` 和跨集出场摘要，便于 UI 或 Agent 直接选择要合并到的目标项目资产。
+- Studio 连续性详情抽屉复用“合并到同身份项目资产”动作处理该问题，用户确认后迁移分镜和剧集计划引用。
+- Agent `merge_project_asset_into` 的用途扩展到 `cross_episode_duplicate_project_asset_candidate`，让工具循环可以修复未链接身份但跨集疑似重复的项目资产。
+- `continuityReport.selftest.ts` 覆盖了跨集名称/别名重叠时报告候选，以及两个资产已链接到同一身份时不重复报告。
+
+本轮仍未完成 P5 的合并前后可视化差异预览；当前处置仍以连续性详情抽屉的确认弹窗和合并结果为主。
 
 ### P0：术语和边界先落地
 

@@ -128,6 +128,46 @@ check(
 )
 check('does not flag alias collisions across asset types', !duplicateAliasReport.issues.some((issue) => issue.assetId === 'captain-prop'), JSON.stringify(duplicateAliasReport.issues))
 
+const crossEpisodeDuplicateCandidateReport = buildContinuityReport(
+  doc({
+    assets: [
+      { ...hero, aliases: ['Captain'] },
+      { id: 'captain-role', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done' },
+    ],
+    currentEpisodeId: 'ep1',
+    episodes: [
+      episode('ep1', 0),
+      episode('ep2', 1, { storyboards: [storyboard('sb-ep2-captain', 0, [{ assetId: 'captain-role' }])] }),
+    ],
+    storyboards: [storyboard('sb-ep1-hero', 0, [{ assetId: 'hero' }])],
+  }),
+)
+check(
+  'flags cross-episode project assets that share a name or alias as merge candidates',
+  crossEpisodeDuplicateCandidateReport.issues.some((issue) => issue.code === 'cross_episode_duplicate_project_asset_candidate' && issue.assetId === 'hero' && issue.relatedAssetIds?.includes('captain-role')),
+  JSON.stringify(crossEpisodeDuplicateCandidateReport.issues),
+)
+
+const linkedCrossEpisodeDuplicateCandidateReport = buildContinuityReport(
+  doc({
+    assets: [
+      { ...hero, aliases: ['Captain'], libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' } },
+      { id: 'captain-role', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' } },
+    ],
+    currentEpisodeId: 'ep1',
+    episodes: [
+      episode('ep1', 0),
+      episode('ep2', 1, { storyboards: [storyboard('sb-ep2-captain-linked', 0, [{ assetId: 'captain-role' }])] }),
+    ],
+    storyboards: [storyboard('sb-ep1-hero-linked', 0, [{ assetId: 'hero' }])],
+  }),
+)
+check(
+  'does not flag cross-episode project duplicates already linked to the same identity',
+  !linkedCrossEpisodeDuplicateCandidateReport.issues.some((issue) => issue.code === 'cross_episode_duplicate_project_asset_candidate'),
+  JSON.stringify(linkedCrossEpisodeDuplicateCandidateReport.issues),
+)
+
 const sceneReuseReport = buildContinuityReport(
   doc({
     assets: [{ id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' }],

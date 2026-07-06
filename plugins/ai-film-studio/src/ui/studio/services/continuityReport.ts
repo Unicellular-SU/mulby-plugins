@@ -449,6 +449,79 @@ function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIs
   }
 }
 
+function addCrossEpisodeDuplicateAssetIssues(doc: ProjectDoc, episodeReports: ContinuityEpisodeReport[], allIssues: ContinuityIssue[]): void {
+  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
+  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const episodeUsesByAsset = new Map<string, Set<string>>()
+  const episodeLabelsByAsset = new Map<string, Set<string>>()
+  for (const report of episodeReports) {
+    for (const use of report.castUses) {
+      const asset = assets.get(use.assetId)
+      if (!asset || asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
+      const episodes = episodeUsesByAsset.get(asset.id) ?? new Set<string>()
+      episodes.add(report.id)
+      episodeUsesByAsset.set(asset.id, episodes)
+      const labels = episodeLabelsByAsset.get(asset.id) ?? new Set<string>()
+      labels.add(`E${report.index}「${report.title}」`)
+      episodeLabelsByAsset.set(asset.id, labels)
+    }
+  }
+  const groups = new Map<string, AssetLookupEntry[]>()
+  for (const asset of doc.assets) {
+    if (asset.parentAssetId || !checkedTypes.includes(asset.type) || !episodeUsesByAsset.has(asset.id)) continue
+    const entries: AssetLookupEntry[] = [
+      { asset, label: asset.name, source: 'name' },
+      ...(asset.aliases ?? []).map((alias): AssetLookupEntry => ({ asset, label: alias, source: 'alias' })),
+    ]
+    const seenForAsset = new Set<string>()
+    for (const entry of entries) {
+      const lookup = normalizeAssetLookup(entry.label)
+      if (!lookup || seenForAsset.has(lookup)) continue
+      seenForAsset.add(lookup)
+      const key = `${asset.type}:${lookup}`
+      groups.set(key, [...(groups.get(key) ?? []), entry])
+    }
+  }
+  const emitted = new Set<string>()
+  for (const [key, entries] of groups) {
+    const assetIds = [...new Set(entries.map((entry) => entry.asset.id))]
+    if (assetIds.length < 2) continue
+    const assetsInGroup = assetIds.map((id) => assets.get(id)).filter((asset): asset is Asset => !!asset)
+    const linkedValues = assetsInGroup.map(linkedLibraryEntityId)
+    if (linkedValues.every(Boolean) && new Set(linkedValues).size === 1) continue
+    const lookup = key.slice(key.indexOf(':') + 1)
+    const labels = [...new Set(entries.map((entry) => entry.label.trim()).filter(Boolean))]
+    const sharedLabel = labels.length === 1 ? labels[0] : labels.join(' / ')
+    for (const asset of assetsInGroup) {
+      const assetEpisodes = episodeUsesByAsset.get(asset.id) ?? new Set<string>()
+      const related = assetsInGroup.filter((candidate) => {
+        if (candidate.id === asset.id) return false
+        const candidateEpisodes = episodeUsesByAsset.get(candidate.id) ?? new Set<string>()
+        return [...assetEpisodes].some((episodeId) => !candidateEpisodes.has(episodeId)) || [...candidateEpisodes].some((episodeId) => !assetEpisodes.has(episodeId))
+      })
+      if (!related.length) continue
+      const emitKey = `${asset.id}:${lookup}`
+      if (emitted.has(emitKey)) continue
+      emitted.add(emitKey)
+      const typeLabel = ASSET_TYPE_LABEL[asset.type]
+      const currentEntry =
+        entries.find((entry) => entry.asset.id === asset.id && entry.source === 'alias' && normalizeAssetLookup(entry.label) === lookup) ??
+        entries.find((entry) => entry.asset.id === asset.id && normalizeAssetLookup(entry.label) === lookup)
+      const appearanceLabels = [...(episodeLabelsByAsset.get(asset.id) ?? [])].join('、')
+      const relatedLabels = related.map((item) => `${item.name}（${[...(episodeLabelsByAsset.get(item.id) ?? [])].join('、') || item.id}）`).join('、')
+      allIssues.push({
+        severity: 'warning',
+        code: 'cross_episode_duplicate_project_asset_candidate',
+        assetId: asset.id,
+        conflictLabel: currentEntry?.label.trim() || sharedLabel,
+        conflictSource: currentEntry?.source,
+        relatedAssetIds: related.map((item) => item.id),
+        message: `项目${typeLabel}资产「${asset.name}」在 ${appearanceLabels} 出现，且名称/别名「${sharedLabel}」与其他跨集项目资产重叠：${relatedLabels}。如果它们是同一对象，建议合并到同一个项目资产；如果不是，请调整名称或别名以降低 Agent 误选风险。`,
+      })
+    }
+  }
+}
+
 function linkedLibraryEntityId(asset: Asset): string | undefined {
   return asset.libraryLink?.entityId || asset.elementId
 }
@@ -763,6 +836,8 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
     addSceneReuseIssues(episode, sortedStoryboards, assets, addIssue)
     episodeReports.push(report)
   }
+
+  addCrossEpisodeDuplicateAssetIssues(doc, episodeReports, allIssues)
 
   if (doc.novel.length > 0 && episodes.length > 1) {
     for (const chapter of doc.novel) {

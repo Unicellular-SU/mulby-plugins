@@ -1981,7 +1981,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     return ids.find((id) => id === raw || doc.assets.find((asset) => asset.id === id)?.name.toLowerCase() === raw.toLowerCase())
   }
   const mergeDuplicateProjectAsset = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'duplicate_library_entity_project_assets' || !issue.assetId) return
+    if ((issue.code !== 'duplicate_library_entity_project_assets' && issue.code !== 'cross_episode_duplicate_project_asset_candidate') || !issue.assetId) return
     const targetId = selectMergeTargetAssetId(issue)
     if (!targetId) return
     const source = doc.assets.find((item) => item.id === issue.assetId)
@@ -2042,7 +2042,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           (issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict') &&
           !!issue.assetId &&
           (issue.candidateLibraryEntityIds?.length ?? 0) > 0
-        const canMergeDuplicateLibraryAsset = issue.code === 'duplicate_library_entity_project_assets' && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
+        const canMergeDuplicateLibraryAsset = (issue.code === 'duplicate_library_entity_project_assets' || issue.code === 'cross_episode_duplicate_project_asset_candidate') && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
