@@ -1,5 +1,6 @@
 import { buildContinuityReport, variantScopePatchForUse } from './continuityReport'
 import type { Asset, AssetVariant, Episode, NovelChapter, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
+import type { LibraryEntity } from '../../services/assetHub'
 
 let failures = 0
 
@@ -58,6 +59,18 @@ function doc(patch: Partial<ProjectDoc>): ProjectDoc {
     clips: [],
     track: [],
     memory: [],
+    ...patch,
+  }
+}
+
+function libraryEntity(patch: Partial<LibraryEntity>): LibraryEntity {
+  return {
+    id: 'el-hero',
+    kind: 'character',
+    name: 'Hero Entity',
+    version: 1,
+    createdAt: 0,
+    updatedAt: 0,
     ...patch,
   }
 }
@@ -252,6 +265,56 @@ check(
   !plannedBeforeStoryboardReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' || issue.code === 'episode_plan_missing_variant'),
   JSON.stringify(plannedBeforeStoryboardReport.issues),
 )
+
+const linkedAssetReport = buildContinuityReport(
+  doc({
+    assets: [
+      {
+        ...hero,
+        id: 'hero-a',
+        name: 'Hero A',
+        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
+      },
+      {
+        ...hero,
+        id: 'hero-b',
+        name: 'Hero B',
+        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
+      },
+    ],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3, archived: true })] },
+)
+check(
+  'flags archived linked library entities',
+  linkedAssetReport.issues.filter((issue) => issue.code === 'library_entity_archived' && issue.libraryEntityId === 'el-hero').length === 2,
+  JSON.stringify(linkedAssetReport.issues),
+)
+check(
+  'flags outdated linked library entity versions',
+  linkedAssetReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.assetId === 'hero-a' && issue.entityVersion === 1 && issue.currentEntityVersion === 3),
+  JSON.stringify(linkedAssetReport.issues),
+)
+check(
+  'flags duplicate project assets imported from the same library entity',
+  linkedAssetReport.issues.filter((issue) => issue.code === 'duplicate_library_entity_project_assets' && issue.libraryEntityId === 'el-hero' && issue.relatedAssetIds?.length === 1).length === 2,
+  JSON.stringify(linkedAssetReport.issues),
+)
+
+const missingLinkedEntityReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, libraryLink: { entityId: 'deleted-entity', entityVersion: 1, syncPolicy: 'snapshot' } }],
+  }),
+  { libraryEntities: [] },
+)
+check('flags missing linked library entities when asset hub snapshot is available', missingLinkedEntityReport.issues.some((issue) => issue.code === 'library_entity_missing' && issue.libraryEntityId === 'deleted-entity'), JSON.stringify(missingLinkedEntityReport.issues))
+
+const noHubSnapshotReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, libraryLink: { entityId: 'not-loaded-yet', entityVersion: 1, syncPolicy: 'snapshot' } }],
+  }),
+)
+check('does not flag missing linked library entities before asset hub snapshot is loaded', !noHubSnapshotReport.issues.some((issue) => issue.code === 'library_entity_missing'), JSON.stringify(noHubSnapshotReport.issues))
 
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({

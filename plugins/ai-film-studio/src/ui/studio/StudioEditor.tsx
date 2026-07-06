@@ -8,6 +8,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { useAssetStore } from '../store/assetStore'
+import { useAssetHubStore } from '../store/assetHubStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
@@ -51,6 +52,16 @@ const VIDEO_MODE_OPTIONS: { id: string; label: string }[] = [
   { id: 'multiRef', label: '多参考（seedance 类）' },
   { id: 'singleImageFirst', label: '单图首帧（wan2.6 类）' },
 ]
+
+function useStudioContinuityReport(doc: ProjectDoc) {
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const hubEntities = useAssetHubStore((s) => s.entities)
+  const refreshHub = useAssetHubStore((s) => s.refresh)
+  useEffect(() => {
+    if (!hubLoaded) void refreshHub()
+  }, [hubLoaded, refreshHub])
+  return useMemo(() => buildContinuityReport(doc, hubLoaded ? { libraryEntities: hubEntities } : undefined), [doc, hubLoaded, hubEntities])
+}
 
 export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
@@ -268,7 +279,7 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const currentId = doc.currentEpisodeId ?? episodes[0]?.id ?? ''
   const current = episodes.find((e) => e.id === currentId) ?? episodes[0]
-  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
+  const continuity = useStudioContinuityReport(doc)
   const currentReport = current ? continuity.episodes.find((episode) => episode.id === current.id) : undefined
   const currentIssues = currentReport?.issues ?? []
   const currentErrors = currentIssues.filter((issue) => issue.severity === 'error').length
@@ -1189,7 +1200,7 @@ function AssetsTab() {
 
 function AssetContinuityPanel() {
   const doc = useProjectStore((s) => s.doc)!
-  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
+  const continuity = useStudioContinuityReport(doc)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
     .map((asset) => {
@@ -1692,7 +1703,7 @@ function StoryboardTab() {
   const generateAllClips = useProjectStore((s) => s.generateAllClips)
   const batch = useProjectStore((s) => s.batch)
   const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
-  const continuity = useMemo(() => buildContinuityReport(doc), [doc])
+  const continuity = useStudioContinuityReport(doc)
   const [showWall, setShowWall] = useState(false)
   const [showContinuity, setShowContinuity] = useState(false)
   return (

@@ -20,6 +20,7 @@ const element: ElementRef = {
   prompt: 'consistent face, sharp eyes',
   refAssetIds: ['base-img'],
   tags: ['lead'],
+  archived: true,
   identity: 'oval face, mole under left eye',
   views: { front: 'front-img', side: 'side-img' },
   appearanceVariants: [{
@@ -37,6 +38,7 @@ const element: ElementRef = {
 
 const entity = elementToLibraryEntity(element)
 check('maps ElementRef to LibraryEntity kind and identity', entity.kind === 'character' && entity.identity === element.identity, JSON.stringify(entity))
+check('maps ElementRef archive state to LibraryEntity', entity.archived === true, JSON.stringify(entity))
 check('maps element views to media refs', !!entity.mediaRefs?.some((ref) => ref.role === 'front' && ref.assetId === 'front-img'), JSON.stringify(entity.mediaRefs))
 check('maps appearance variants to library variants', entity.variants?.[0]?.id === 'gala' && entity.variants[0].mediaRefs?.[0]?.assetId === 'gala-front', JSON.stringify(entity.variants))
 
@@ -74,6 +76,7 @@ check('promoted entity carries aliases and primary image', promoted.aliases?.[0]
 const savedElement = libraryEntityToElement(promoted)
 check('maps promoted entity back to ElementRef with aliases', savedElement.aliases?.[0] === '记者' && savedElement.refAssetIds.includes('project-front'), JSON.stringify(savedElement))
 check('maps promoted entity version back to ElementRef', savedElement.version === 2, JSON.stringify(savedElement))
+check('maps promoted entity archive state back to ElementRef', savedElement.archived === true, JSON.stringify(savedElement))
 check('maps promoted variants back to appearance variants', savedElement.appearanceVariants?.[0]?.id === 'injured' && savedElement.appearanceVariants[0].refAssetIds?.[0] === 'injured-img', JSON.stringify(savedElement.appearanceVariants))
 
 if (failures) {

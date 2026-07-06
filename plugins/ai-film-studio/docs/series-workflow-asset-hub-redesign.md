@@ -579,7 +579,16 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 还没有创建分镜的剧集不会因为缺少计划资产/变体使用而报警，避免规划阶段产生噪音；但无效计划引用仍会被提示，便于清理旧数据。
 - `continuityReport.selftest.ts` 覆盖了计划资产已使用、计划资产缺失、计划变体缺失、计划变体已绑定、无效计划引用，以及无分镜时跳过缺失检查。
 
-本轮仍未完成完整资产中心维度的质量门，例如全局身份归档、新版本差异、同一 `LibraryEntity` 被导入成多个项目资产、同名身份冲突和一键合并流程仍属于后续 P5。
+第九轮提交继续落地 P5 的资产中心质量门：
+
+- `ElementRef` 兼容增加 `archived` 字段，`elementToLibraryEntity` / `libraryEntityToElement` / `promoteProjectAssetToEntity` 会保留身份资产归档状态。
+- 连续性报告新增可选 `libraryEntities` 快照参数；未传入资产中心快照时保持原有纯项目内检查，避免 UI 首次加载阶段误报链接缺失。
+- 资产中心快照可用时，连续性报告会检查项目资产链接的身份资产是否已不存在、已归档、或资产中心版本高于项目快照版本。
+- 即使没有资产中心快照，连续性报告也会基于项目内 `libraryLink.entityId` / `elementId` 检查同一个 `LibraryEntity` 是否被导入成多个项目资产。
+- Studio 工作台的一致性提示、详情抽屉和跨集资产矩阵会自动加载资产中心快照并传给连续性报告；Agent 的 `get_continuity_report` 也会尽量加载资产中心快照，失败时回退为项目内报告。
+- 新增 `library_entity_missing`、`library_entity_archived`、`library_entity_version_outdated`、`duplicate_library_entity_project_assets` 四类问题，并在 `assetHub.selftest.ts` / `continuityReport.selftest.ts` 中覆盖。
+
+本轮仍未完成 P5 里的匹配和处置交互：项目资产与全局身份别名冲突、资产中心存在更明确同名身份、同一角色的不同项目资产跨集出现，以及一键合并/标记不同身份的 UI 流程仍属于后续 P5。
 
 ### P0：术语和边界先落地
 

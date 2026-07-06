@@ -9,6 +9,7 @@ import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
+import { loadAssetHub } from '../../services/assetHub'
 
 type ProjectDocGetter = () => ProjectDoc | null
 
@@ -711,11 +712,17 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_continuity_report',
-      description: 'Audit multi-episode asset and variant consistency: per-episode cast refs, missing assets/images, and variants used outside their episode scope.',
+      description: 'Audit multi-episode asset, variant, episode-plan, and asset-center consistency.',
       parameters: { type: 'object', properties: {} },
       execute: async () => {
         const d = doc()
-        return d ? json(buildContinuityReport(d)) : '无打开的项目'
+        if (!d) return '无打开的项目'
+        try {
+          const hub = await loadAssetHub()
+          return json(buildContinuityReport(d, { libraryEntities: hub.entities }))
+        } catch {
+          return json(buildContinuityReport(d))
+        }
       },
     },
     {

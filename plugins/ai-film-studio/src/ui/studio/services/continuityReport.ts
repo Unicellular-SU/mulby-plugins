@@ -1,6 +1,7 @@
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import { normalizeAssetLookup } from '../../domain/assetAliases'
 import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
+import type { LibraryEntity } from '../../services/assetHub'
 
 export interface ContinuityIssue {
   severity: 'error' | 'warning'
@@ -22,7 +23,14 @@ export interface ContinuityIssue {
   conflictLabel?: string
   conflictSource?: 'name' | 'alias'
   relatedAssetIds?: string[]
+  libraryEntityId?: string
+  entityVersion?: number
+  currentEntityVersion?: number
   scopeKind?: 'episode' | 'scene' | 'storyboard'
+}
+
+export interface ContinuityReportOptions {
+  libraryEntities?: readonly LibraryEntity[]
 }
 
 export interface ContinuityCastUse {
@@ -433,7 +441,79 @@ function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIs
   }
 }
 
-export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
+function linkedLibraryEntityId(asset: Asset): string | undefined {
+  return asset.libraryLink?.entityId || asset.elementId
+}
+
+function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | undefined, allIssues: ContinuityIssue[]): void {
+  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
+  const entitiesProvided = !!options?.libraryEntities
+  const entities = new Map((options?.libraryEntities ?? []).map((entity) => [entity.id, entity]))
+  const linkedAssetsByEntity = new Map<string, Asset[]>()
+
+  for (const asset of doc.assets) {
+    if (asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
+    const entityId = linkedLibraryEntityId(asset)
+    if (!entityId) continue
+    linkedAssetsByEntity.set(entityId, [...(linkedAssetsByEntity.get(entityId) ?? []), asset])
+
+    if (!entitiesProvided) continue
+    const entity = entities.get(entityId)
+    if (!entity) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'library_entity_missing',
+        assetId: asset.id,
+        libraryEntityId: entityId,
+        entityVersion: asset.libraryLink?.entityVersion,
+        message: `项目资产「${asset.name}」链接的身份资产 ${entityId} 已不存在。生产仍会使用项目快照，但建议确认是否另存为新身份或重新关联资产中心。`,
+      })
+      continue
+    }
+    if (entity.archived) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'library_entity_archived',
+        assetId: asset.id,
+        libraryEntityId: entity.id,
+        entityVersion: asset.libraryLink?.entityVersion,
+        currentEntityVersion: entity.version,
+        message: `项目资产「${asset.name}」链接的身份资产「${entity.name}」已归档。生产仍会使用项目快照，但多集继续制作前建议确认是否保留、解除关联或改用新的身份资产。`,
+      })
+    }
+    const linkedVersion = asset.libraryLink?.entityVersion
+    if (typeof linkedVersion === 'number' && entity.version > linkedVersion) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'library_entity_version_outdated',
+        assetId: asset.id,
+        libraryEntityId: entity.id,
+        entityVersion: linkedVersion,
+        currentEntityVersion: entity.version,
+        message: `项目资产「${asset.name}」来自身份资产「${entity.name}」v${linkedVersion}，资产中心已有 v${entity.version}。建议确认继续使用项目快照，或手动同步新版身份资产。`,
+      })
+    }
+  }
+
+  for (const [entityId, linkedAssets] of linkedAssetsByEntity.entries()) {
+    if (linkedAssets.length < 2) continue
+    const entityName = entities.get(entityId)?.name
+    const label = entityName ? `「${entityName}」` : entityId
+    const ids = linkedAssets.map((asset) => asset.id).join('、')
+    for (const asset of linkedAssets) {
+      allIssues.push({
+        severity: 'warning',
+        code: 'duplicate_library_entity_project_assets',
+        assetId: asset.id,
+        libraryEntityId: entityId,
+        relatedAssetIds: linkedAssets.map((item) => item.id).filter((id) => id !== asset.id),
+        message: `同一个身份资产${label}被导入成多个项目资产（${ids}）。多集生产前建议合并到同一个项目资产，避免同一角色/场景被 Agent 当成不同对象。`,
+      })
+    }
+  }
+}
+
+export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityReportOptions): ContinuityReport {
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const episodes = episodeList(doc)
   const episodeReports: ContinuityEpisodeReport[] = []
@@ -446,6 +526,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
   addDuplicateAssetNameIssues(doc, allIssues)
   addDuplicateAssetAliasIssues(doc, allIssues)
   addUnusedProjectAssetIssues(doc, episodes, allIssues)
+  addAssetHubIssues(doc, options, allIssues)
 
   for (const episode of episodes) {
     const storyboards = episodeStoryboards(doc, episode)

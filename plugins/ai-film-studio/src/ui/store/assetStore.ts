@@ -54,6 +54,7 @@ export interface ElementRef {
   refAssetIds: string[]
   tags?: string[]
   version?: number
+  archived?: boolean
   createdAt: number
   updatedAt: number
   // —— P1-5 身份资产（全部可选，向后兼容；charId 缺省=id，复用同一主键命名空间） ——
