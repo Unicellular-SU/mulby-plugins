@@ -82,14 +82,15 @@ function entityKindMatches(kind: ElementKind | undefined, entityKind: LibraryEnt
 
 function resolveCanvasSaveTarget(entities: LibraryEntity[], value: PortValue) {
   if (value.type !== 'image' || !value.assetId) return null
+  const activeEntities = entities.filter((entity) => !entity.archived)
   const meta = rec(value.meta)
   const entityId = asStr(meta.libraryEntityId)
   const charId = asStr(meta.charId)
   const name = asStr(meta.name)
   const kind = metaKind(meta.kind)
-  let matches = entityId ? entities.filter((entity) => entity.id === entityId) : []
+  let matches = entityId ? activeEntities.filter((entity) => entity.id === entityId) : []
   if (!matches.length && (charId || name)) {
-    matches = entities.filter((entity) => {
+    matches = activeEntities.filter((entity) => {
       if (!entityKindMatches(kind, entity.kind)) return false
       const byCharId = charId && (entity.id === charId || entity.legacyElement?.charId === charId || entity.name === charId)
       const byName = name && (entity.name === name || entity.aliases?.includes(name))
