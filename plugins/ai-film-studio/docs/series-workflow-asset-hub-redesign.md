@@ -647,6 +647,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Dock 中的身份资产仍沿用原有 `DND_ELEMENT` 拖拽协议，但拖入项目资产页和画布时会优先从 `assetHubStore.entities` 解析，再通过 `libraryEntityToElement` 转为兼容写入结构，旧 `assetStore.elements` 仅作为回退。
 - 媒体文件拖入项目资产页和画布时同样优先读取 `assetHubStore.mediaAssets`，旧媒体注册表 store 作为兼容回退；这让两个主要入口开始使用资产中心快照，同时保持旧数据可拖拽。
 
+第十八轮提交继续落地 P6 的项目资产卡读取收敛：
+
+- Studio 项目资产卡不再用 `useAssetStore.elements` 判断“身份资产”链接状态，改为读取 `assetHubStore.entities`，并优先使用 `libraryLink.entityId`，再兼容旧 `elementId`。
+- 项目资产卡的身份链接标签会展示资产中心实体名称和项目快照版本；如果资产中心尚未加载，会按需刷新快照。
+- “发布/更新到资产中心身份资产”完成后会刷新 `assetHubStore`，避免项目资产卡和其他资产中心入口继续显示旧身份快照。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

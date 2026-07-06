@@ -1318,7 +1318,9 @@ function AssetCard({ asset }: { asset: Asset }) {
   const addAssetVariant = useProjectStore((s) => s.addAssetVariant)
   const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
-  const elements = useAssetStore((s) => s.elements)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const hubEntities = useAssetHubStore((s) => s.entities)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const canPromote = asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop'
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
   const [showDeriv, setShowDeriv] = useState(false)
@@ -1327,7 +1329,11 @@ function AssetCard({ asset }: { asset: Asset }) {
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
   const variants = asset.variants ?? []
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
-  const linkedElement = asset.elementId ? elements.find((el) => el.id === asset.elementId) : undefined
+  const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
+  const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
+  useEffect(() => {
+    if (linkedEntityId && !hubLoaded) void refreshAssetHub()
+  }, [hubLoaded, linkedEntityId, refreshAssetHub])
   return (
     <div className="afs-studio__assetcard">
       {viewer && asset.refImageId && (
@@ -1365,10 +1371,11 @@ function AssetCard({ asset }: { asset: Asset }) {
         placeholder="别名（用顿号/逗号分隔）"
         onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: cleanAssetAliases(e.target.value) })}
       />
-      {asset.elementId && (
+      {linkedEntityId && (
         <div className="afs-studio__assetlink" title="该项目资产来自资产中心的身份资产快照；生产仍使用项目内资产和变体">
           <BookmarkPlus size={12} />
-          身份资产：{linkedElement?.name ?? '已关联'}
+          身份资产：{linkedEntity?.name ?? '已关联'}
+          {asset.libraryLink?.entityVersion ? ` · v${asset.libraryLink.entityVersion}` : ''}
         </div>
       )}
       <textarea
@@ -1428,6 +1435,7 @@ function AssetCard({ asset }: { asset: Asset }) {
               setPromoting(true)
               try {
                 await promoteAssetToElement(asset.id)
+                await refreshAssetHub()
               } finally {
                 setPromoting(false)
               }
