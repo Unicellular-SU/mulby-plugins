@@ -8,7 +8,7 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, EpisodePlan, ProjectCard, ProjectDoc, ProjectMeta, Script, SeriesBible, Storyboard, StoryboardCastRef } from '../domain/types'
-import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases } from '../domain/assetAliases'
+import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { removeVariantScopeReferences } from '../domain/variantScopes'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
@@ -39,6 +39,7 @@ import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProduction
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from '../services/assetHub'
+import type { LibraryEntity } from '../services/assetHub'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -93,6 +94,10 @@ export interface ProjectState {
   importImageToProject: (projectId: string, rec: Pick<AssetRecord, 'assetId' | 'name' | 'type'>, kind: 'role' | 'scene' | 'prop') => Promise<string>
   /** 从资产中心身份资产把元素绑成项目资产快照（带 refImageId + 桥接 elementId）。kind 显式指定时优先（拖入「项目资产」某分组时按该组类别），否则按 el.kind 映射。 */
   importElementToProject: (projectId: string, el: ElementRef, kind?: 'role' | 'scene' | 'prop') => Promise<string>
+  /** 只把项目资产标记为来自某个身份资产快照，不覆盖项目内生产字段。 */
+  linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; variants?: Array<Pick<NonNullable<LibraryEntity['variants']>[number], 'id' | 'label'>> }) => boolean
+  /** 明确标记候选身份不是该项目资产，压制同名/别名候选误报。 */
+  markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => boolean
   /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。 */
   promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
@@ -217,6 +222,22 @@ function buildLibraryAsset(spec: { kind: Asset['type']; name: string; assetId?: 
   if (spec.desc) asset.desc = spec.desc
   if (spec.elementId) asset.elementId = spec.elementId
   return asset
+}
+
+function libraryVariantMapForAsset(asset: Asset, entity: { variants?: Array<Pick<NonNullable<LibraryEntity['variants']>[number], 'id' | 'label'>> }): Record<string, string> | undefined {
+  const variants = asset.variants ?? []
+  const entityVariants = entity.variants ?? []
+  if (!variants.length || !entityVariants.length) return undefined
+  const entityIds = new Set(entityVariants.map((variant) => variant.id))
+  const byLabel = new Map(entityVariants.map((variant) => [normalizeAssetLookup(variant.label), variant.id]))
+  const map: Record<string, string> = {}
+  for (const variant of variants) {
+    const linked = variant.libraryVariantId && entityIds.has(variant.libraryVariantId)
+      ? variant.libraryVariantId
+      : byLabel.get(normalizeAssetLookup(variant.label))
+    if (linked) map[variant.id] = linked
+  }
+  return Object.keys(map).length ? map : undefined
 }
 
 function emptyEpisode(index: number): Episode {
@@ -1030,6 +1051,48 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const k: Asset['type'] = kind ?? (el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role')
     const asset = createProjectAssetFromEntity(elementToLibraryEntity(el), k)
     return writeAssetToProject(get, projectId, asset)
+  },
+
+  linkAssetToLibraryEntity: (assetId, entity) => {
+    if (!entity.id) return false
+    let linked = false
+    get().mutate((d) => {
+      const asset = d.assets.find((item) => item.id === assetId)
+      if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return
+      const variantMap = libraryVariantMapForAsset(asset, entity)
+      if (asset.variants?.length && variantMap) {
+        asset.variants = asset.variants.map((variant) => ({
+          ...variant,
+          libraryVariantId: variantMap[variant.id] ?? variant.libraryVariantId,
+        }))
+      }
+      asset.elementId = entity.id
+      asset.libraryLink = {
+        entityId: entity.id,
+        entityVersion: entity.version,
+        syncPolicy: 'snapshot',
+        variantMap,
+        lastSyncedAt: Date.now(),
+      }
+      const rejected = (asset.rejectedLibraryEntityIds ?? []).filter((id) => id !== entity.id)
+      asset.rejectedLibraryEntityIds = rejected.length ? rejected : undefined
+      linked = true
+    })
+    return linked
+  },
+
+  markAssetAsDistinctIdentity: (assetId, entityIds) => {
+    const ids = [...new Set(entityIds.map((id) => id.trim()).filter(Boolean))]
+    if (!ids.length) return false
+    let marked = false
+    get().mutate((d) => {
+      const asset = d.assets.find((item) => item.id === assetId)
+      if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return
+      asset.rejectedLibraryEntityIds = [...new Set([...(asset.rejectedLibraryEntityIds ?? []), ...ids])]
+      if (asset.libraryLink && ids.includes(asset.libraryLink.entityId)) asset.libraryLink.syncPolicy = 'forked'
+      marked = true
+    })
+    return marked
   },
 
   promoteAssetToElement: async (id) => {

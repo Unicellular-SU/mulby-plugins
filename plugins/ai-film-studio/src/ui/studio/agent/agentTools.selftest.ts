@@ -241,6 +241,38 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       else current.assets.push(merged)
       return id
     },
+    linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; variants?: Array<{ id: string; label: string }> }) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return false
+      const variants = entity.variants ?? []
+      const byLabel = new Map(variants.map((variant) => [variant.label.toLowerCase(), variant.id]))
+      const variantMap: Record<string, string> = {}
+      asset.variants = asset.variants?.map((variant) => {
+        const libraryVariantId = variant.libraryVariantId ?? byLabel.get(variant.label.toLowerCase())
+        if (libraryVariantId) variantMap[variant.id] = libraryVariantId
+        return { ...variant, libraryVariantId }
+      })
+      asset.elementId = entity.id
+      asset.libraryLink = {
+        entityId: entity.id,
+        entityVersion: entity.version,
+        syncPolicy: 'snapshot',
+        variantMap: Object.keys(variantMap).length ? variantMap : undefined,
+        lastSyncedAt: 1,
+      }
+      asset.rejectedLibraryEntityIds = (asset.rejectedLibraryEntityIds ?? []).filter((id) => id !== entity.id)
+      if (!asset.rejectedLibraryEntityIds.length) asset.rejectedLibraryEntityIds = undefined
+      return true
+    },
+    markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return false
+      const ids = [...new Set(entityIds.map((id) => id.trim()).filter(Boolean))]
+      if (!ids.length) return false
+      asset.rejectedLibraryEntityIds = [...new Set([...(asset.rejectedLibraryEntityIds ?? []), ...ids])]
+      if (asset.libraryLink && ids.includes(asset.libraryLink.entityId)) asset.libraryLink.syncPolicy = 'forked'
+      return true
+    },
   }
   return state as unknown as ProjectState
 }
@@ -271,13 +303,15 @@ const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
 const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series_bible')
 const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
+const linkLibraryEntity = writeTools.find((tool) => tool.name === 'link_project_asset_to_library_entity')
+const markDistinctIdentity = writeTools.find((tool) => tool.name === 'mark_project_asset_distinct_identity')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -349,6 +383,28 @@ check(
     updatedAsset.asset?.desc === 'Lead role with a stable identity.' &&
     writableDoc.assets.find((item) => item.id === 'hero')?.aliases?.includes('队长') === true,
   JSON.stringify(updatedAsset),
+)
+
+const linkedLibraryAsset = JSON.parse(await linkLibraryEntity.execute({ assetName: 'Hero', libraryEntityId: 'el-hero', entityVersion: 2 }))
+check(
+  'link_project_asset_to_library_entity links without overwriting project fields',
+  linkedLibraryAsset.linked === true &&
+    linkedLibraryAsset.asset?.id === 'hero' &&
+    linkedLibraryAsset.asset?.name === 'Hero' &&
+    linkedLibraryAsset.asset?.elementId === 'el-hero' &&
+    linkedLibraryAsset.asset?.libraryLink?.entityId === 'el-hero' &&
+    linkedLibraryAsset.asset?.libraryLink?.entityVersion === 2,
+  JSON.stringify(linkedLibraryAsset),
+)
+
+const distinctIdentity = JSON.parse(await markDistinctIdentity.execute({ assetName: 'Hero', libraryEntityIds: ['el-rival', 'el-hero'] }))
+check(
+  'mark_project_asset_distinct_identity stores rejected identity ids and forks current link',
+  distinctIdentity.marked === true &&
+    distinctIdentity.rejectedLibraryEntityIds?.includes('el-rival') &&
+    distinctIdentity.rejectedLibraryEntityIds?.includes('el-hero') &&
+    distinctIdentity.asset?.libraryLink?.syncPolicy === 'forked',
+  JSON.stringify(distinctIdentity),
 )
 
 await generateAsset.execute({ name: '队长' })

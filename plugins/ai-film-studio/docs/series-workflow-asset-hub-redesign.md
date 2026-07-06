@@ -596,7 +596,16 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 归档身份不会作为合并候选参与匹配，避免把项目资产引导回废弃身份。
 - `continuityReport.selftest.ts` 覆盖了已关联资产命中其他身份、未关联资产命中资产中心身份、归档身份跳过候选、跨类型同名不误报。
 
-本轮仍未完成 P5 里的处置交互：同一角色的不同项目资产跨集出现的更精确判定，以及一键合并/标记不同身份的 UI 流程仍属于后续 P5。
+第十一轮提交继续落地 P5 的候选身份处置：
+
+- 项目资产新增 `rejectedLibraryEntityIds`，用于记录用户或 Agent 已明确判定“不是同一身份”的资产中心候选，连续性报告会跳过这些候选，避免同名/别名误报反复出现。
+- `projectStore` 新增 `linkAssetToLibraryEntity`，只把项目资产关联到资产中心身份快照并写入 `libraryLink` / `elementId` / 可匹配的变体映射，不覆盖项目内名称、提示词、参考图等生产字段。
+- `projectStore` 新增 `markAssetAsDistinctIdentity`，可把候选身份加入拒绝列表；如果拒绝的是当前已链接身份，则把 `syncPolicy` 标为 `forked`，表示项目快照已明确分叉。
+- Studio 连续性详情抽屉为 `asset_matches_unlinked_library_entity` 和 `library_entity_alias_conflict` 增加“关联候选身份”和“标记为不同身份”处置按钮。
+- Agent 写入工具新增 `link_project_asset_to_library_entity` 和 `mark_project_asset_distinct_identity`，让自动修复流程可以处理同样的资产中心候选问题；`get_assets` 也会返回 `libraryLink` 和 `rejectedLibraryEntityIds` 供 Agent 观察结果。
+- `continuityReport.selftest.ts` 覆盖被拒绝的身份候选不会再报告；`agentTools.selftest.ts` 覆盖 Agent 关联身份和标记不同身份的写入结果。
+
+本轮仍未完成 P5 里的更高阶处置：真正的项目资产合并流程、同一角色的不同项目资产跨集出现时的更精确判定，以及合并前后的分镜引用迁移与差异预览。
 
 ### P0：术语和边界先落地
 

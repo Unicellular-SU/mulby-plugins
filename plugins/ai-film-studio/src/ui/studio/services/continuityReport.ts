@@ -544,6 +544,7 @@ function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | u
       const kind = entityKindForAsset(asset)
       if (!kind) continue
       const linkedEntityId = linkedLibraryEntityId(asset)
+      const rejectedEntityIds = new Set(asset.rejectedLibraryEntityIds ?? [])
       const matches = new Map<string, EntityLookupEntry>()
       let conflictLabel = ''
       let conflictSource: ContinuityIssue['conflictSource'] | undefined
@@ -553,6 +554,7 @@ function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | u
         const candidates = entityLookup.get(`${kind}:${lookup}`) ?? []
         for (const candidate of candidates) {
           if (candidate.entity.id === linkedEntityId) continue
+          if (rejectedEntityIds.has(candidate.entity.id)) continue
           if (!matches.has(candidate.entity.id)) matches.set(candidate.entity.id, candidate)
           if (!conflictLabel) {
             conflictLabel = entry.label.trim() || candidate.label

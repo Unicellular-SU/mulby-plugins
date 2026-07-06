@@ -9,9 +9,18 @@ import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
-import { loadAssetHub } from '../../services/assetHub'
+import { loadAssetHub, type LibraryEntity } from '../../services/assetHub'
 
 type ProjectDocGetter = () => ProjectDoc | null
+type LinkableLibraryEntity = {
+  id: string
+  kind?: LibraryEntity['kind']
+  name?: string
+  aliases?: string[]
+  version?: number
+  archived?: boolean
+  variants?: LibraryEntity['variants']
+}
 
 function json(value: unknown): string {
   return JSON.stringify(value, null, 2)
@@ -84,6 +93,8 @@ function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: b
     promptError: a.promptError,
     derivedFromImageId: a.derivedFromImageId,
     elementId: a.elementId,
+    libraryLink: a.libraryLink,
+    rejectedLibraryEntityIds: a.rejectedLibraryEntityIds,
     flowId: a.flowId,
     voice: a.voice,
     voiceAssetId: a.voiceAssetId,
@@ -602,6 +613,90 @@ function assetLookupConflicts(doc: ProjectDoc, target: Asset): Array<{ assetId: 
         .filter((value) => targetKeys.has(normalizeAssetLookup(value)))
         .map((value) => ({ assetId: asset.id, assetName: asset.name, value })),
     )
+}
+
+function libraryEntityKindForAsset(asset: Asset): LibraryEntity['kind'] | undefined {
+  if (asset.type === 'role') return 'character'
+  if (asset.type === 'scene') return 'scene'
+  if (asset.type === 'prop') return 'prop'
+  if (asset.type === 'audio') return 'voice'
+  return undefined
+}
+
+function libraryEntityMatchesAsset(entity: LibraryEntity, asset: Asset): boolean {
+  const kind = libraryEntityKindForAsset(asset)
+  return !kind || entity.kind === kind
+}
+
+function libraryEntityView(entity: LinkableLibraryEntity) {
+  return {
+    id: entity.id,
+    kind: entity.kind,
+    name: entity.name,
+    aliases: entity.aliases,
+    version: entity.version,
+    archived: entity.archived,
+    variants: entity.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
+  }
+}
+
+async function loadLibraryEntitiesSafe(): Promise<LibraryEntity[]> {
+  try {
+    const hub = await loadAssetHub()
+    return hub.entities
+  } catch {
+    return []
+  }
+}
+
+function entityVersionArg(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined
+}
+
+async function resolveLibraryEntityForAsset(asset: Asset, args: Record<string, unknown>): Promise<{ entity?: LinkableLibraryEntity; candidates?: LibraryEntity[]; error?: string }> {
+  const entityId = stringArg(args.libraryEntityId) ?? stringArg(args.entityId)
+  const entityName = stringArg(args.libraryEntityName) ?? stringArg(args.entityName)
+  const entities = await loadLibraryEntitiesSafe()
+
+  if (entityId) {
+    const entity = entities.find((item) => item.id === entityId)
+    if (entity?.archived) return { error: '身份资产已归档，不能作为新的项目链接', candidates: [entity] }
+    if (entity && !libraryEntityMatchesAsset(entity, asset)) {
+      return { error: '身份资产类型与项目资产类型不匹配', candidates: [entity] }
+    }
+    return { entity: entity ?? { id: entityId, version: entityVersionArg(args.entityVersion) } }
+  }
+
+  if (!entityName) return { error: '缺少 libraryEntityId/entityId 或 libraryEntityName/entityName' }
+  const lookup = normalizeAssetLookup(entityName)
+  const candidates = entities.filter((entity) => {
+    if (entity.archived || !libraryEntityMatchesAsset(entity, asset)) return false
+    const names = [entity.name, ...(entity.aliases ?? [])].map((value) => normalizeAssetLookup(value))
+    return names.includes(lookup)
+  })
+  if (candidates.length === 1) return { entity: candidates[0] }
+  if (candidates.length > 1) return { error: '身份名称匹配到多个候选，请传 libraryEntityId', candidates }
+  return { error: '未找到身份资产', candidates: entities.filter((entity) => !entity.archived && libraryEntityMatchesAsset(entity, asset)) }
+}
+
+async function resolveLibraryEntityIdsForAsset(asset: Asset, args: Record<string, unknown>): Promise<{ ids: string[]; candidates?: LibraryEntity[]; error?: string }> {
+  const ids = [
+    stringArg(args.libraryEntityId),
+    stringArg(args.entityId),
+    ...(Array.isArray(args.libraryEntityIds) ? args.libraryEntityIds.map((item) => stringArg(item)) : []),
+    ...(Array.isArray(args.entityIds) ? args.entityIds.map((item) => stringArg(item)) : []),
+  ].filter((id): id is string => !!id)
+  const entityName = stringArg(args.libraryEntityName) ?? stringArg(args.entityName)
+  if (!entityName) return ids.length ? { ids: [...new Set(ids)] } : { ids: [], error: '缺少要标记的身份资产 ID 或名称' }
+
+  const entities = await loadLibraryEntitiesSafe()
+  const lookup = normalizeAssetLookup(entityName)
+  const matches = entities.filter((entity) => {
+    if (entity.archived || !libraryEntityMatchesAsset(entity, asset)) return false
+    const names = [entity.name, ...(entity.aliases ?? [])].map((value) => normalizeAssetLookup(value))
+    return names.includes(lookup)
+  })
+  return { ids: [...new Set([...ids, ...matches.map((entity) => entity.id)])], candidates: matches, error: matches.length ? undefined : '未找到身份资产' }
 }
 
 function storyboardWithSceneAsset(doc: ProjectDoc, storyboard: Storyboard, sceneAssetId: string, replaceOtherSceneAssets: boolean): Pick<Storyboard, 'associateAssetIds' | 'castRefs'> {
@@ -1380,6 +1475,87 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         return json({
           asset: assetView(updated, { includeImages: false }),
           conflicts: next ? assetLookupConflicts(next, updated) : [],
+        })
+      },
+    },
+    {
+      name: 'link_project_asset_to_library_entity',
+      description: '把已有项目资产关联到资产中心身份快照，不覆盖项目内名称、提示词、图片等生产字段；用于处理 asset_matches_unlinked_library_entity / library_entity_alias_conflict。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string', description: '项目资产查找名；不是身份资产名。' },
+          libraryEntityId: { type: 'string' },
+          entityId: { type: 'string' },
+          libraryEntityName: { type: 'string' },
+          entityName: { type: 'string' },
+          entityVersion: { type: 'number', description: '资产中心快照版本；只有无法读取资产中心且按 id 关联时才需要。' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const resolved = await resolveLibraryEntityForAsset(asset, a)
+        if (!resolved.entity) {
+          return json({
+            error: resolved.error ?? '未找到身份资产',
+            asset: assetView(asset, { includeImages: false }),
+            candidates: resolved.candidates?.map(libraryEntityView),
+          })
+        }
+        const linked = get().linkAssetToLibraryEntity(asset.id, {
+          id: resolved.entity.id,
+          version: resolved.entity.version,
+          variants: resolved.entity.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
+        })
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json({
+          linked,
+          asset: assetView(nextAsset, { includeImages: false }),
+          entity: libraryEntityView(resolved.entity),
+        })
+      },
+    },
+    {
+      name: 'mark_project_asset_distinct_identity',
+      description: '把连续性报告中的身份候选标记为“不是同一身份”，压制同名/别名候选误报；如果当前链接到该身份，会把项目资产标为 forked。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string', description: '项目资产查找名；不是身份资产名。' },
+          libraryEntityId: { type: 'string' },
+          entityId: { type: 'string' },
+          libraryEntityIds: { type: 'array', items: { type: 'string' } },
+          entityIds: { type: 'array', items: { type: 'string' } },
+          libraryEntityName: { type: 'string' },
+          entityName: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const resolved = await resolveLibraryEntityIdsForAsset(asset, a)
+        if (!resolved.ids.length) {
+          return json({
+            error: resolved.error ?? '缺少要标记的身份资产 ID',
+            asset: assetView(asset, { includeImages: false }),
+            candidates: resolved.candidates?.map(libraryEntityView),
+          })
+        }
+        const marked = get().markAssetAsDistinctIdentity(asset.id, resolved.ids)
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json({
+          marked,
+          rejectedLibraryEntityIds: nextAsset.rejectedLibraryEntityIds ?? [],
+          asset: assetView(nextAsset, { includeImages: false }),
         })
       },
     },

@@ -1778,7 +1778,10 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
+  const linkAssetToLibraryEntity = useProjectStore((s) => s.linkAssetToLibraryEntity)
+  const markAssetAsDistinctIdentity = useProjectStore((s) => s.markAssetAsDistinctIdentity)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
+  const hubEntities = useAssetHubStore((s) => s.entities)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
   const chapterIssueCodes = new Set(['episode_without_chapters', 'invalid_episode_chapter', 'unassigned_chapter', 'duplicated_chapter_assignment'])
@@ -1930,6 +1933,36 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!storyboard) return
     patchStoryboardAssetRef(storyboard, issue.assetId)
   }
+  const selectCandidateLibraryEntityId = (issue: ContinuityReportView['issues'][number]) => {
+    const ids = issue.candidateLibraryEntityIds ?? []
+    if (!ids.length) return undefined
+    if (ids.length === 1) return ids[0]
+    const labels = issue.candidateLibraryEntityLabels ?? []
+    const options = ids.map((id, index) => `${index + 1}. ${labels[index] ?? id} (${id})`).join('\n')
+    const raw = window.prompt(`选择身份资产序号：\n${options}`, '1')?.trim()
+    if (!raw) return undefined
+    const byIndex = Number(raw)
+    if (Number.isFinite(byIndex)) return ids[Math.max(0, Math.floor(byIndex) - 1)]
+    return ids.find((id, index) => id === raw || labels[index]?.toLowerCase() === raw.toLowerCase())
+  }
+  const linkCandidateLibraryEntity = (issue: ContinuityReportView['issues'][number]) => {
+    if ((issue.code !== 'asset_matches_unlinked_library_entity' && issue.code !== 'library_entity_alias_conflict') || !issue.assetId) return
+    const entityId = selectCandidateLibraryEntityId(issue)
+    if (!entityId) return
+    const entity = hubEntities.find((item) => item.id === entityId)
+    const linked = linkAssetToLibraryEntity(issue.assetId, {
+      id: entityId,
+      version: entity?.version,
+      variants: entity?.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
+    })
+    if (linked) window.mulby?.notification?.show('已关联身份资产快照', 'success')
+  }
+  const markDistinctLibraryIdentity = (issue: ContinuityReportView['issues'][number]) => {
+    if ((issue.code !== 'asset_matches_unlinked_library_entity' && issue.code !== 'library_entity_alias_conflict') || !issue.assetId) return
+    const ids = issue.candidateLibraryEntityIds ?? []
+    if (!ids.length) return
+    if (markAssetAsDistinctIdentity(issue.assetId, ids)) window.mulby?.notification?.show('已标记为不同身份', 'success')
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -1979,6 +2012,10 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issueAsset &&
           (issue.code === 'duplicate_asset_name' || (issue.code === 'duplicate_asset_alias' && issue.conflictSource === 'name'))
         const canAddUnusedAsset = issue.code === 'unused_project_asset' && !!issue.assetId && doc.storyboards.length > 0
+        const canResolveLibraryCandidate =
+          (issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict') &&
+          !!issue.assetId &&
+          (issue.candidateLibraryEntityIds?.length ?? 0) > 0
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -2031,6 +2068,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canAddUnusedAsset && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => addUnusedAssetToStoryboard(issue)}>
                 加入当前集分镜
+              </button>
+            )}
+            {canResolveLibraryCandidate && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => linkCandidateLibraryEntity(issue)}>
+                {issue.code === 'library_entity_alias_conflict' ? '改关联候选身份' : '关联候选身份'}
+              </button>
+            )}
+            {canResolveLibraryCandidate && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => markDistinctLibraryIdentity(issue)}>
+                {(issue.candidateLibraryEntityIds?.length ?? 0) > 1 ? '候选均为不同身份' : '标记为不同身份'}
               </button>
             )}
             {refAction && (

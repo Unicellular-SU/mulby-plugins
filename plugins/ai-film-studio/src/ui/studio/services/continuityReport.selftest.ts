@@ -345,6 +345,18 @@ check(
   JSON.stringify(unlinkedLibraryMatchReport.issues),
 )
 
+const rejectedLibraryMatchReport = buildContinuityReport(
+  doc({
+    assets: [{ id: 'local-hero', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done', rejectedLibraryEntityIds: ['el-captain'] }],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain' })] },
+)
+check(
+  'does not flag rejected asset-center identity candidates',
+  !rejectedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict'),
+  JSON.stringify(rejectedLibraryMatchReport.issues),
+)
+
 const archivedCandidateMatchReport = buildContinuityReport(
   doc({
     assets: [{ id: 'archived-name', type: 'role', name: 'Archived Hero', refImageId: 'archived-img', state: 'done' }],
