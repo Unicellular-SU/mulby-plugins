@@ -1057,6 +1057,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让 Agent 回看某集时间线、候选片段和选中视频段时，可以直接从 track 追溯到该视频段使用了哪些项目资产、全局身份和形态/妆容历史，减少成片整理或重生成时只凭 clip id 判断上下文的风险。
 - 自测新增第二集时间线断言，验证 `track-ep2` 关联的 `sb-ep2` 能暴露 `Hero-Gala` 的 `el-hero` 和 `E2 Second · Gala`。
 
+第八十六轮提交继续落地 P4/P5 的设计层分镜表资产 usage 可见性：
+
+- `get_storyboard_table` 不再只返回原始 `castNames/assetRefNames`，会额外把场景级 cast 名和行级资产引用名解析为 `resolvedCastAssets` / `resolvedAssetRefs`，包含匹配到的项目资产和 `assetCenterUsage`。
+- 这让 Agent 在正式生成分镜前读取大纲/分镜表时，就能把“主角/女主/场景”等名称绑定到已有项目资产、全局身份和出场历史，减少从设计层阶段开始误建重复资产。
+- 自测新增第二集分镜表断言，验证 `主角` 能解析到 `hero`、`el-hero` 和 `E2 Second · Gala`。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

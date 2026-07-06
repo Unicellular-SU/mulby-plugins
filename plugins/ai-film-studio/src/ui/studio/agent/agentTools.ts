@@ -135,6 +135,31 @@ function projectAssetUsageView(doc: ProjectDoc, assetId: string, usageByEntity?:
   }
 }
 
+function projectAssetNameUsageView(doc: ProjectDoc, name: string, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const asset = findAssetByNameOrAlias(doc.assets, name)
+  return {
+    name,
+    assetId: asset?.id,
+    assetName: asset?.name,
+    assetType: asset?.type,
+    assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
+  }
+}
+
+function storyboardTableView(doc: ProjectDoc, scenes: StoryboardTableScene[], usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return scenes.map((scene) => ({
+    ...scene,
+    resolvedCastAssets: scene.castNames.map((name) => projectAssetNameUsageView(doc, name, usageByEntity)),
+    segments: scene.segments.map((segment) => ({
+      ...segment,
+      rows: segment.rows.map((row) => ({
+        ...row,
+        resolvedAssetRefs: row.assetRefNames.map((name) => projectAssetNameUsageView(doc, name, usageByEntity)),
+      })),
+    })),
+  }))
+}
+
 function continuityIssueView(doc: ProjectDoc, issue: ContinuityIssue, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return {
     ...issue,
@@ -1148,7 +1173,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
         if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
-        return json({ ...episodeInfo(d, episode), scenes: storyboardTableForEpisode(d, episode) })
+        return json({ ...episodeInfo(d, episode), scenes: storyboardTableView(d, storyboardTableForEpisode(d, episode), await loadIdentityUsageSafe()) })
       },
     },
     {

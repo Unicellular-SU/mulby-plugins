@@ -31,7 +31,7 @@ function storyboard(id: string, index: number, videoDesc: string): Storyboard {
 }
 
 function table(sceneName: string): StoryboardTableScene[] {
-  return [{ id: `scene-${sceneName}`, sceneName, castNames: [], segments: [{ id: 'seg1', title: 'Segment', rows: [{ index: 1, videoDesc: 'hidden clue board row', duration: 4, assetRefNames: [] }] }] }]
+  return [{ id: `scene-${sceneName}`, sceneName, castNames: ['主角'], segments: [{ id: 'seg1', title: 'Segment', rows: [{ index: 1, videoDesc: 'hidden clue board row', duration: 4, assetRefNames: ['主角'] }] }] }]
 }
 
 function episode(id: string, index: number, patch: Partial<Episode> = {}): Episode {
@@ -245,6 +245,21 @@ check(
 
 const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' }))
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))
+check(
+  'get_storyboard_table resolves asset-center usage for design refs',
+  ep2Table.scenes?.[0]?.resolvedCastAssets?.some((item: { name: string; assetId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
+    item.name === '主角' &&
+    item.assetId === 'hero' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
+  ) &&
+    ep2Table.scenes?.[0]?.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some((item: { name: string; assetId?: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
+      item.name === '主角' &&
+      item.assetId === 'hero' &&
+      item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(ep2Table.scenes),
+)
 
 const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
