@@ -1560,6 +1560,64 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
     },
     {
+      name: 'publish_project_asset_to_library',
+      description: '把项目资产发布/更新到资产中心身份资产。会复用已有 elementId/libraryLink，并把可复用变体写入资产中心；发布后项目资产保持快照链接。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: assetView(asset, { includeImages: false }) })
+        await get().promoteAssetToElement(asset.id)
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json({ published: !!nextAsset.libraryLink?.entityId || !!nextAsset.elementId, asset: assetView(nextAsset, { includeImages: false }) })
+      },
+    },
+    {
+      name: 'sync_project_asset_from_library',
+      description: '从资产中心身份资产同步项目资产快照。会更新项目资产的身份字段、参考图和可复用变体，但保留项目内变体适用范围。',
+      parameters: {
+        type: 'object',
+        properties: {
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string', description: '项目资产查找名；不是身份资产名。' },
+          libraryEntityId: { type: 'string' },
+          entityId: { type: 'string' },
+          libraryEntityName: { type: 'string' },
+          entityName: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        const resolved = await resolveLibraryEntityForAsset(asset, {
+          libraryEntityId: a.libraryEntityId ?? a.entityId ?? asset.libraryLink?.entityId ?? asset.elementId,
+          libraryEntityName: a.libraryEntityName ?? a.entityName,
+        })
+        if (!resolved.entity?.name) {
+          return json({
+            error: resolved.error ?? '需要可读取的资产中心身份快照才能同步',
+            asset: assetView(asset, { includeImages: false }),
+            candidates: resolved.candidates?.map(libraryEntityView),
+          })
+        }
+        const synced = get().syncAssetFromLibraryEntity(asset.id, resolved.entity as LibraryEntity)
+        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        return json({ synced, entity: libraryEntityView(resolved.entity), asset: assetView(nextAsset, { includeImages: false }) })
+      },
+    },
+    {
       name: 'merge_project_asset_into',
       description: '把一个重复项目资产合并到另一个同类型项目资产，迁移分镜/每集计划引用并删除源资产；用于处理 duplicate_library_entity_project_assets / cross_episode_duplicate_project_asset_candidate。',
       parameters: {

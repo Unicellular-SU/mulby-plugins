@@ -621,6 +621,14 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent `merge_project_asset_into` 的用途扩展到 `cross_episode_duplicate_project_asset_candidate`，让工具循环可以修复未链接身份但跨集疑似重复的项目资产。
 - `continuityReport.selftest.ts` 覆盖了跨集名称/别名重叠时报告候选，以及两个资产已链接到同一身份时不重复报告。
 
+第十四轮提交补齐 P4/P5 的 Agent 资产中心发布与同步工具：
+
+- `projectStore` 新增 `syncAssetFromLibraryEntity`，可从资产中心身份资产同步项目资产快照字段，更新名称、别名、提示词、主参考图、媒体图和可复用变体，同时保留项目内变体的剧集/场景/分镜作用域。
+- Agent 写入工具新增 `publish_project_asset_to_library`，调用现有 `promoteAssetToElement` 把项目资产发布或更新到资产中心，并在项目资产上回写 `elementId` / `libraryLink`。
+- Agent 写入工具新增 `sync_project_asset_from_library`，从资产中心快照同步项目资产；未指定身份时默认使用项目资产已有的 `libraryLink.entityId` / `elementId`。
+- 同步后会让使用该资产的已制作剧集失效，避免后续导出继续沿用旧参考图。
+- `agentTools.selftest.ts` 覆盖了发布项目资产到资产中心，以及从模拟资产中心同步项目资产时保留本地变体作用域。
+
 本轮仍未完成 P5 的合并前后可视化差异预览；当前处置仍以连续性详情抽屉的确认弹窗和合并结果为主。
 
 ### P0：术语和边界先落地

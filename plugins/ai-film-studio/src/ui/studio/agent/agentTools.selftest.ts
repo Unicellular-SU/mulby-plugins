@@ -303,6 +303,37 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       current.assets = current.assets.filter((item) => item.id !== source.id && item.parentAssetId !== source.id)
       return true
     },
+    syncAssetFromLibraryEntity: (assetId: string, entity: { id: string; name: string; aliases?: string[]; description?: string; prompt?: string; mediaRefs?: Array<{ assetId?: string; role: string }>; variants?: Array<{ id: string; label: string; mediaRefs?: Array<{ assetId?: string }> }>; version: number }) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return false
+      const currentVariants = asset.variants ?? []
+      asset.name = entity.name
+      asset.aliases = entity.aliases
+      asset.desc = entity.description
+      asset.prompt = entity.prompt
+      asset.refImageId = entity.mediaRefs?.find((ref) => ref.assetId)?.assetId
+      asset.elementId = entity.id
+      asset.variants = entity.variants?.map((variant) => {
+        const existing = currentVariants.find((item) => item.libraryVariantId === variant.id || item.label === variant.label)
+        return {
+          id: existing?.id ?? variant.id,
+          libraryVariantId: variant.id,
+          label: variant.label,
+          refImageId: variant.mediaRefs?.find((ref) => ref.assetId)?.assetId,
+          appliesToEpisodeIds: existing?.appliesToEpisodeIds,
+        }
+      })
+      asset.libraryLink = { entityId: entity.id, entityVersion: entity.version, syncPolicy: 'snapshot', lastSyncedAt: 1 }
+      return true
+    },
+    promoteAssetToElement: async (assetId: string) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (!asset) return
+      const entityId = asset.elementId ?? `el-${asset.id}`
+      asset.elementId = entityId
+      asset.libraryLink = { entityId, entityVersion: (asset.libraryLink?.entityVersion ?? 0) + 1, syncPolicy: 'snapshot', lastSyncedAt: 1 }
+      asset.variants = asset.variants?.map((variant) => ({ ...variant, libraryVariantId: variant.libraryVariantId ?? variant.id }))
+    },
   }
   return state as unknown as ProjectState
 }
@@ -323,6 +354,7 @@ writableDoc.assets = [
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
+  { id: 'sync-target', type: 'role', name: 'Local Hero', refImageId: 'local-hero-img', state: 'done', variants: [{ id: 'local-gala', label: 'Library Gala', appliesToEpisodeIds: ['ep1'] }] },
   { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
@@ -336,6 +368,8 @@ const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series
 const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
 const linkLibraryEntity = writeTools.find((tool) => tool.name === 'link_project_asset_to_library_entity')
 const markDistinctIdentity = writeTools.find((tool) => tool.name === 'mark_project_asset_distinct_identity')
+const publishProjectAsset = writeTools.find((tool) => tool.name === 'publish_project_asset_to_library')
+const syncProjectAsset = writeTools.find((tool) => tool.name === 'sync_project_asset_from_library')
 const mergeProjectAsset = writeTools.find((tool) => tool.name === 'merge_project_asset_into')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
@@ -343,7 +377,7 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -437,6 +471,53 @@ check(
     distinctIdentity.rejectedLibraryEntityIds?.includes('el-hero') &&
     distinctIdentity.asset?.libraryLink?.syncPolicy === 'forked',
   JSON.stringify(distinctIdentity),
+)
+
+const publishedProjectAsset = JSON.parse(await publishProjectAsset.execute({ assetId: 'sync-target' }))
+check(
+  'publish_project_asset_to_library publishes a project asset and links the snapshot',
+  publishedProjectAsset.published === true &&
+    publishedProjectAsset.asset?.id === 'sync-target' &&
+    publishedProjectAsset.asset?.elementId === 'el-sync-target' &&
+    publishedProjectAsset.asset?.libraryLink?.entityId === 'el-sync-target',
+  JSON.stringify(publishedProjectAsset),
+)
+
+;(globalThis as unknown as { window: unknown }).window = {
+  mulby: {
+    storage: {
+      get: async (key: string) =>
+        key === 'elements:library'
+          ? [
+              {
+                id: 'el-sync',
+                kind: 'character',
+                name: 'Synced Hero',
+                aliases: ['Synced Alias'],
+                description: 'From library snapshot.',
+                prompt: 'library prompt',
+                refAssetIds: ['synced-main-img'],
+                appearanceVariants: [{ id: 'lib-gala', label: 'Library Gala', refAssetIds: ['synced-gala-img'] }],
+                createdAt: 0,
+                updatedAt: 2,
+                version: 4,
+              },
+            ]
+          : [],
+    },
+  },
+}
+const syncedProjectAsset = JSON.parse(await syncProjectAsset.execute({ assetId: 'sync-target', libraryEntityId: 'el-sync' }))
+check(
+  'sync_project_asset_from_library updates snapshot fields and preserves local variant scope',
+  syncedProjectAsset.synced === true &&
+    syncedProjectAsset.asset?.id === 'sync-target' &&
+    syncedProjectAsset.asset?.name === 'Synced Hero' &&
+    syncedProjectAsset.asset?.refImageId === 'synced-main-img' &&
+    syncedProjectAsset.asset?.libraryLink?.entityId === 'el-sync' &&
+    syncedProjectAsset.asset?.libraryLink?.entityVersion === 4 &&
+    syncedProjectAsset.asset?.variants?.some((variant: { id: string; libraryVariantId?: string; appliesToEpisodeIds?: string[]; refImageId?: string }) => variant.id === 'local-gala' && variant.libraryVariantId === 'lib-gala' && variant.appliesToEpisodeIds?.includes('ep1') && variant.refImageId === 'synced-gala-img'),
+  JSON.stringify(syncedProjectAsset),
 )
 
 await generateAsset.execute({ name: '队长' })

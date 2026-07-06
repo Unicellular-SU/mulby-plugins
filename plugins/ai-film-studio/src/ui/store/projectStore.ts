@@ -100,6 +100,8 @@ export interface ProjectState {
   markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => boolean
   /** 合并重复项目资产：把分镜/剧集计划引用从 source 迁移到 target，并删除 source 及其子资产。 */
   mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => boolean
+  /** 从资产中心身份同步项目快照字段，保留项目内变体作用域。 */
+  syncAssetFromLibraryEntity: (assetId: string, entity: LibraryEntity) => boolean
   /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。 */
   promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
@@ -316,6 +318,49 @@ function rewriteEpisodePlanAssetRefs(episode: Episode, removedIds: Set<string>, 
     changed = true
   }
   return changed
+}
+
+function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): Asset {
+  const snapshot = createProjectAssetFromEntity(entity, current.type)
+  const currentVariants = current.variants ?? []
+  const nextVariants = (snapshot.variants ?? []).map((variant) => {
+    const existing =
+      currentVariants.find((item) => item.libraryVariantId && item.libraryVariantId === variant.libraryVariantId) ??
+      currentVariants.find((item) => normalizeAssetLookup(item.label) === normalizeAssetLookup(variant.label))
+    return {
+      ...variant,
+      id: existing?.id ?? variant.id,
+      appliesToEpisodeIds: existing?.appliesToEpisodeIds,
+      appliesToSceneIds: existing?.appliesToSceneIds,
+      appliesToStoryboardIds: existing?.appliesToStoryboardIds,
+    }
+  })
+  const variantMap = nextVariants.reduce<Record<string, string>>((acc, variant) => {
+    if (variant.libraryVariantId) acc[variant.id] = variant.libraryVariantId
+    return acc
+  }, {})
+  return {
+    ...current,
+    name: snapshot.name,
+    aliases: snapshot.aliases,
+    desc: snapshot.desc,
+    prompt: snapshot.prompt,
+    refImageId: snapshot.refImageId,
+    images: snapshot.images,
+    currentImageId: snapshot.currentImageId,
+    variants: nextVariants.length ? nextVariants : undefined,
+    elementId: entity.id,
+    libraryLink: {
+      entityId: entity.id,
+      entityVersion: entity.version,
+      syncPolicy: 'snapshot',
+      variantMap: Object.keys(variantMap).length ? variantMap : undefined,
+      lastSyncedAt: Date.now(),
+    },
+    state: snapshot.state,
+    audioFilePath: snapshot.audioFilePath ?? current.audioFilePath,
+    audioUrl: snapshot.audioUrl ?? current.audioUrl,
+  }
 }
 
 function emptyEpisode(index: number): Episode {
@@ -1200,6 +1245,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       merged = true
     })
     return merged
+  },
+
+  syncAssetFromLibraryEntity: (assetId, entity) => {
+    if (!assetId || !entity.id) return false
+    let synced = false
+    get().mutate((d) => {
+      const index = d.assets.findIndex((asset) => asset.id === assetId)
+      const current = d.assets[index]
+      if (!isMergeableProjectAsset(current)) return
+      const next = syncedProjectAssetFromEntity(current, entity)
+      d.assets[index] = next
+      invalidateEpisodesUsingAsset(d, current.id)
+      synced = true
+    })
+    return synced
   },
 
   promoteAssetToElement: async (id) => {
