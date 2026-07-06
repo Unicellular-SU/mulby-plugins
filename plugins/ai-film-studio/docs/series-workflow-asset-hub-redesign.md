@@ -1039,6 +1039,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让 Agent 通过关键词或别名搜索“主角/女主/场景/道具”时，不只拿到 `id/name/type/aliases`，也能立即看到该资产关联的全局身份、当前项目出场剧集和形态/妆容摘要。
 - 自测新增搜索入口断言，验证 `search_project.assets` 能暴露 `el-hero`、`E1 Episode 1`、`E2 Second` 和 `Gala`，避免后续只优化完整读取工具而遗漏常用搜索路径。
 
+第八十三轮提交继续落地 P4/P5 的分镜 cast 资产 usage 可见性：
+
+- `get_storyboards` 在返回分镜时新增 `castAssets`，把每条 `castRef` 对应的项目资产、变体标签、镜头角色和 `assetCenterUsage` 放在同一条结构化记录里；`includeAssets=false` 时仍会省略这部分，保留原有轻量读取能力。
+- 这让 Agent 读取某集真实分镜时，不只看到 `castRefs` 里的 `assetId/variantId`，也能同时看到该资产对应的全局身份、当前项目出场剧集和形态/妆容摘要，减少续写时误把同一人的不同妆容当成新角色。
+- 自测新增第二集分镜读取断言，验证 `Hero-Gala` cast 记录能暴露 `el-hero` 和 `E2 Second · Gala`。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

@@ -215,6 +215,17 @@ check('get_script reads non-current episode by episode index', ep2Script.id === 
 
 const ep2Storyboards = JSON.parse(await getStoryboards.execute({ episodeTitle: 'Second' }))
 check('get_storyboards reads non-current episode by title', ep2Storyboards.storyboards?.[0]?.id === 'sb-ep2' && ep2Storyboards.episodeId === 'ep2', JSON.stringify(ep2Storyboards))
+check(
+  'get_storyboards exposes cast asset-center usage',
+  ep2Storyboards.storyboards?.[0]?.castAssets?.some((item: { assetId: string; variantId?: string; label?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+    item.assetId === 'hero' &&
+    item.variantId === 'gala' &&
+    item.label === 'Hero-Gala' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ),
+  JSON.stringify(ep2Storyboards.storyboards),
+)
 
 const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' }))
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))

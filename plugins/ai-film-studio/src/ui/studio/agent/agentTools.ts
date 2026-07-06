@@ -51,7 +51,26 @@ function castNames(doc: ProjectDoc, storyboard: Storyboard): string[] {
   return castRefsForStoryboard(storyboard).map((ref) => labelForCastRef(assets.get(ref.assetId), ref))
 }
 
-function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?: boolean; includeDialogues?: boolean; includeAssets?: boolean }) {
+function storyboardCastAssets(doc: ProjectDoc, storyboard: Storyboard, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const assets = new Map(doc.assets.map((a) => [a.id, a]))
+  return castRefsForStoryboard(storyboard).map((ref) => {
+    const asset = assets.get(ref.assetId)
+    const variant = asset?.variants?.find((item) => item.id === ref.variantId)
+    return {
+      assetId: ref.assetId,
+      name: asset?.name,
+      type: asset?.type,
+      variantId: ref.variantId,
+      variantLabel: variant?.label,
+      label: labelForCastRef(asset, ref),
+      roleInShot: ref.roleInShot,
+      note: ref.note,
+      assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
+    }
+  })
+}
+
+function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?: boolean; includeDialogues?: boolean; includeAssets?: boolean; usageByEntity?: Record<string, IdentityAssetUsage> }) {
   const castRefs = castRefsForStoryboard(s)
   return {
     id: s.id,
@@ -65,6 +84,7 @@ function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?:
     castAssetIds: castRefs.map((ref) => ref.assetId),
     castRefs,
     castNames: opts?.includeAssets === false ? undefined : castNames(doc, s),
+    castAssets: opts?.includeAssets === false ? undefined : storyboardCastAssets(doc, s, opts?.usageByEntity),
     shouldGenerateImage: s.shouldGenerateImage,
     keyframeImageId: s.keyframeImageId,
     chainFromPrev: s.chainFromPrev,
@@ -992,6 +1012,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const start = numberArg(a.startIndex, 1, 1, Math.max(1, sorted.length)) - 1
         const count = numberArg(a.count, sorted.length, 1, 200)
         const slice = sorted.slice(start, start + count)
+        const includeAssets = boolArg(a.includeAssets, true)
+        const usageByEntity = includeAssets ? await loadIdentityUsageSafe() : undefined
         return json({
           ...episodeInfo(d, episode),
           total: sorted.length,
@@ -1001,7 +1023,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             storyboardView(d, s, {
               includePrompt: boolArg(a.includePrompt, true),
               includeDialogues: boolArg(a.includeDialogues, true),
-              includeAssets: boolArg(a.includeAssets, true),
+              includeAssets,
+              usageByEntity,
             }),
           ),
         })
