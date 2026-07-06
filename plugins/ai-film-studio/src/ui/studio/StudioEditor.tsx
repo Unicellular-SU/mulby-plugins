@@ -1992,6 +1992,12 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (patch) updateAssetVariant(asset.id, variant.id, patch)
     setStoryboardCastVariant(storyboard.id, asset.id, variant.id)
   }
+  const addVariantParentToEpisodePlan = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'episode_plan_variant_asset_missing' || !issue.episodeId || !issue.assetId) return
+    const episode = doc.episodes?.find((item) => item.id === issue.episodeId)
+    const requiredAssetIds = [...new Set([...(episode?.plan?.requiredAssetIds ?? []), issue.assetId])]
+    updateEpisodePlan(issue.episodeId, { requiredAssetIds })
+  }
   const removeInvalidEpisodePlanRef = (issue: ContinuityReportView['issues'][number]) => {
     if (!issue.episodeId) return
     const episode = doc.episodes?.find((item) => item.id === issue.episodeId)
@@ -2242,6 +2248,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issue.variantId &&
           !!issue.episodeId &&
           storyboardsForIssueEpisode(issue.episodeId).length > 0
+        const canAddVariantParentToPlan = issue.code === 'episode_plan_variant_asset_missing' && !!issue.episodeId && !!issue.assetId
         const canCreateMissingPlannedEpisodes = issue.code === 'series_planned_episodes_missing' && (doc.seriesBible?.plannedEpisodeCount ?? 0) > (doc.episodes?.length || report.episodes.length)
         const canRemoveInvalidPlanRef =
           !!issue.episodeId &&
@@ -2310,6 +2317,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canBindPlannedVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => bindPlannedVariantToStoryboard(issue)}>
                 绑定计划形态到分镜
+              </button>
+            )}
+            {canAddVariantParentToPlan && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantParentToEpisodePlan(issue)}>
+                补入本集计划资产
               </button>
             )}
             {canCreateMissingPlannedEpisodes && (

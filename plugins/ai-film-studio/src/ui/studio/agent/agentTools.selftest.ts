@@ -430,6 +430,20 @@ check(
   JSON.stringify(updatedEpisodePlan),
 )
 
+const variantOnlyEpisodePlan = JSON.parse(
+  await upsertEpisodePlan.execute({
+    episodeTitle: 'Third',
+    requiredVariants: [{ assetName: 'Hero', variantLabel: 'Cloak' }],
+  }),
+)
+check(
+  'upsert_episode_plan adds parent assets for required variants',
+  variantOnlyEpisodePlan.episode?.episodeId === 'ep3' &&
+    variantOnlyEpisodePlan.plan?.requiredVariantIds?.includes('cloak') &&
+    variantOnlyEpisodePlan.plan?.requiredAssetIds?.includes('hero'),
+  JSON.stringify(variantOnlyEpisodePlan),
+)
+
 const upsertEp2Script = JSON.parse(await upsertScript.execute({ episodeTitle: 'Second', name: 'Second Script Rewrite', content: 'Second episode targeted rewrite.' }))
 const ep1AfterScript = writableDoc.episodes?.find((item) => item.id === 'ep1')
 const ep2WrittenScript = writableDoc.scripts.find((item) => item.id === upsertEp2Script.id)

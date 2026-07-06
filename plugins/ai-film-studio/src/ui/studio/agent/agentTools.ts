@@ -539,14 +539,19 @@ function findVariantOption(doc: ProjectDoc, value: unknown) {
   return variants.find((variant) => variant.id === text) ?? variants.find((variant) => variant.label.toLowerCase() === text.toLowerCase())
 }
 
-function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
+function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; assetIds: string[]; unresolved: unknown[] } {
   const ids: string[] = []
+  const assetIds: string[] = []
   const unresolved: unknown[] = []
-  const valid = new Set(variantOptions(doc).map((variant) => variant.id))
+  const variantsById = new Map(variantOptions(doc).map((variant) => [variant.id, variant]))
   for (const value of Array.isArray(args.requiredVariantIds) ? args.requiredVariantIds : []) {
     const id = stringArg(value)
     if (!id) continue
-    if (valid.has(id)) ids.push(id)
+    const variant = variantsById.get(id)
+    if (variant) {
+      ids.push(id)
+      assetIds.push(variant.assetId)
+    }
     else unresolved.push(value)
   }
   const variants = Array.isArray(args.requiredVariants) ? args.requiredVariants : []
@@ -554,16 +559,24 @@ function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): 
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>
       const asset = findCastableAsset(doc, record.assetId) ?? findCastableAsset(doc, record.assetName) ?? findCastableAsset(doc, record.name)
-      const variant = asset ? findAssetVariant(asset, record.variantId ?? record.variantLabel ?? record.label) : findVariantOption(doc, record.variantId ?? record.variantLabel ?? record.label)
-      if (variant) ids.push(variant.id)
+      const variantOption = asset ? undefined : findVariantOption(doc, record.variantId ?? record.variantLabel ?? record.label)
+      const variant = asset ? findAssetVariant(asset, record.variantId ?? record.variantLabel ?? record.label) : variantOption
+      if (variant) {
+        ids.push(variant.id)
+        const assetId = asset?.id ?? variantOption?.assetId
+        if (assetId) assetIds.push(assetId)
+      }
       else unresolved.push(value)
       continue
     }
     const variant = findVariantOption(doc, value)
-    if (variant) ids.push(variant.id)
+    if (variant) {
+      ids.push(variant.id)
+      assetIds.push(variant.assetId)
+    }
     else if (value != null) unresolved.push(value)
   }
-  return { ids: [...new Set(ids)], unresolved }
+  return { ids: [...new Set(ids)], assetIds: [...new Set(assetIds)], unresolved }
 }
 
 function variantView(asset: Asset, variantId: string) {
@@ -1279,10 +1292,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (hasArg(a, 'cliffhanger')) patch.cliffhanger = stringArg(a.cliffhanger)
         const assets = resolvePlanAssetIds(d, a)
         const variants = resolvePlanVariantIds(d, a)
-        if (hasArg(a, 'requiredAssetIds') || hasArg(a, 'requiredAssetNames') || hasArg(a, 'assetNames')) {
-          patch.requiredAssetIds = mergeIdList(episode.plan?.requiredAssetIds, assets.ids, a.mode)
+        const hasAssetArgs = hasArg(a, 'requiredAssetIds') || hasArg(a, 'requiredAssetNames') || hasArg(a, 'assetNames')
+        const hasVariantArgs = hasArg(a, 'requiredVariantIds') || hasArg(a, 'requiredVariants')
+        const requiredAssetIds = a.mode === 'remove' ? assets.ids : [...new Set([...assets.ids, ...variants.assetIds])]
+        if (hasAssetArgs || (hasVariantArgs && variants.assetIds.length && a.mode !== 'remove')) {
+          patch.requiredAssetIds = mergeIdList(episode.plan?.requiredAssetIds, requiredAssetIds, hasAssetArgs ? a.mode : 'add')
         }
-        if (hasArg(a, 'requiredVariantIds') || hasArg(a, 'requiredVariants')) {
+        if (hasVariantArgs) {
           patch.requiredVariantIds = mergeIdList(episode.plan?.requiredVariantIds, variants.ids, a.mode)
         }
         get().updateEpisodePlan(episode.id, patch)

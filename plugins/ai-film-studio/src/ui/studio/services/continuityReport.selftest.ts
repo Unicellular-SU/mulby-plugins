@@ -273,6 +273,24 @@ check(
   plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_missing_variant' && issue.assetId === 'hero' && issue.variantId === 'v-gala' && issue.candidateVariantLabels?.includes('Gala')),
   JSON.stringify(plannedCoverageReport.issues),
 )
+check(
+  'does not flag planned variant parent asset when already required',
+  !plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_variant_asset_missing'),
+  JSON.stringify(plannedCoverageReport.issues),
+)
+
+const plannedVariantWithoutAssetReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
+    currentEpisodeId: 'ep1',
+    episodes: [episode('ep1', 0, { plan: { requiredVariantIds: ['v-gala'] } })],
+  }),
+)
+check(
+  'flags planned variants whose parent asset is not planned',
+  plannedVariantWithoutAssetReport.issues.some((issue) => issue.code === 'episode_plan_variant_asset_missing' && issue.assetId === 'hero' && issue.variantId === 'v-gala'),
+  JSON.stringify(plannedVariantWithoutAssetReport.issues),
+)
 
 const plannedVariantBoundReport = buildContinuityReport(
   doc({

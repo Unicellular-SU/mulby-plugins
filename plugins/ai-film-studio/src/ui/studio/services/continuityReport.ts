@@ -408,6 +408,16 @@ function addEpisodePlanIssues(
       })
       continue
     }
+    if (!requiredAssetIds.includes(owner.asset.id)) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_variant_asset_missing',
+        episodeId: episode.id,
+        assetId: owner.asset.id,
+        variantId: owner.variant.id,
+        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但未把父项目资产「${owner.asset.name}」列入本集必需资产。建议补入 requiredAssetIds，保证系列资产矩阵能按资产和形态两层追踪。`,
+      })
+    }
     if (hasStoryboards && !validVariantUses.has(`${owner.asset.id}:${owner.variant.id}`)) {
       addIssue({
         severity: 'warning',

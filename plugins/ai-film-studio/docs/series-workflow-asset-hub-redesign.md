@@ -870,6 +870,13 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent 工具测试替身同步这条 store 语义，并新增“显式同步 forked 资产到目标身份后清理该 rejected id”的覆盖，支持用户或 Agent 明确撤销之前的不同身份判断。
 - 这让“标记不同身份 -> forked -> 显式重新同步/恢复身份”的闭环保持一致：隐式流程尊重 forked，显式接受则清理冲突状态。
 
+第五十五轮提交继续落地 P5 的剧集计划资产矩阵完整性：
+
+- 连续性报告新增 `episode_plan_variant_asset_missing`：当 `Episode.plan.requiredVariantIds` 要求某个形态/妆容，但该形态所属项目资产没有出现在同一集 `requiredAssetIds` 时提示，避免系列资产矩阵只看到变体却缺少父资产。
+- Studio 连续性详情为该问题提供“补入本集计划资产”动作，直接把父项目资产追加到对应剧集计划，不需要用户回系列页手动查 id。
+- Agent 工具 `upsert_episode_plan` 写入 `requiredVariants` 时会自动把这些变体所属资产并入 `requiredAssetIds`；`remove` 模式不自动删除父资产，避免误删仍被其他规划项依赖的资产。
+- 新增连续性报告和 Agent 工具自测，覆盖“已规划父资产不误报”“只规划变体会提示”“Agent 只写变体也会补父资产”三条路径。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
