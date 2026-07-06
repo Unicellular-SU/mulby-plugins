@@ -103,8 +103,8 @@ export interface ProjectState {
   mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => boolean
   /** 从资产中心身份同步项目快照字段，保留项目内变体作用域。 */
   syncAssetFromLibraryEntity: (assetId: string, entity: LibraryEntity) => boolean
-  /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。 */
-  promoteAssetToElement: (id: string) => Promise<void>
+  /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。返回是否实际发布。 */
+  promoteAssetToElement: (id: string) => Promise<boolean>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
   removeStoryboard: (id: string) => void
   reorderStoryboards: (orderedIds: string[]) => void
@@ -1269,17 +1269,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   promoteAssetToElement: async (id) => {
     const doc = get().doc
-    if (!doc) return
+    if (!doc) return false
     const a = doc.assets.find((x) => x.id === id)
-    if (!a) return
+    if (!a) return false
     if (!a.refImageId) {
       window.mulby?.notification?.show('该资产还没有参考图，先生成或选择一张图片', 'warning')
-      return
+      return false
     }
     const entityId = a.libraryLink?.entityId ?? a.elementId
     const hub = useAssetHubStore.getState()
     if (!hub.loaded) await hub.refresh()
     const existingEntity = entityId ? useAssetHubStore.getState().entities.find((entity) => entity.id === entityId) : undefined
+    if (existingEntity?.archived) {
+      window.mulby?.notification?.show(`「${existingEntity.name}」已归档，恢复后才能更新身份资产`, 'warning')
+      return false
+    }
     const entity = promoteProjectAssetToEntity(entityId && entityId !== a.elementId ? { ...a, elementId: entityId } : a, existingEntity)
     const publishedVariantMap = a.variants?.reduce<Record<string, string>>((acc, variant) => {
       acc[variant.id] = variant.libraryVariantId ?? variant.id
@@ -1314,6 +1318,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     await useAssetHubStore.getState().refresh()
     window.mulby?.notification?.show(`已保存「${a.name}」到资产中心`, 'success')
+    return true
   },
 
   upsertStoryboard: (s) => {

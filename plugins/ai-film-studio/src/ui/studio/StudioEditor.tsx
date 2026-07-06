@@ -1337,6 +1337,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
   const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
   const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
+  const linkedEntityArchived = !!linkedEntity?.archived
   useEffect(() => {
     if (linkedEntityId && !hubLoaded) void refreshAssetHub()
   }, [hubLoaded, linkedEntityId, refreshAssetHub])
@@ -1382,6 +1383,7 @@ function AssetCard({ asset }: { asset: Asset }) {
           <BookmarkPlus size={12} />
           身份资产：{linkedEntity?.name ?? '已关联'}
           {asset.libraryLink?.entityVersion ? ` · v${asset.libraryLink.entityVersion}` : ''}
+          {linkedEntityArchived ? ' · 已归档' : ''}
         </div>
       )}
       <textarea
@@ -1434,8 +1436,8 @@ function AssetCard({ asset }: { asset: Asset }) {
         {canPromote && (
           <button
             className="afs-btn afs-btn--sm afs-btn--ghost"
-            disabled={!asset.refImageId || promoting}
-            title={asset.refImageId ? '发布/更新到资产中心身份资产' : '先生成或选择一张参考图'}
+            disabled={!asset.refImageId || promoting || linkedEntityArchived}
+            title={!asset.refImageId ? '先生成或选择一张参考图' : linkedEntityArchived ? '关联身份已归档，恢复后才能更新' : '发布/更新到资产中心身份资产'}
             aria-label="发布到资产中心"
             onClick={async () => {
               setPromoting(true)

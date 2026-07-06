@@ -327,12 +327,14 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       return true
     },
     promoteAssetToElement: async (assetId: string) => {
+      if (assetId === 'publish-blocked') return false
       const asset = current.assets.find((item) => item.id === assetId)
-      if (!asset) return
+      if (!asset) return false
       const entityId = asset.elementId ?? `el-${asset.id}`
       asset.elementId = entityId
       asset.libraryLink = { entityId, entityVersion: (asset.libraryLink?.entityVersion ?? 0) + 1, syncPolicy: 'snapshot', lastSyncedAt: 1 }
       asset.variants = asset.variants?.map((variant) => ({ ...variant, libraryVariantId: variant.libraryVariantId ?? variant.id }))
+      return true
     },
   }
   return state as unknown as ProjectState
@@ -355,6 +357,7 @@ writableDoc.assets = [
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
   { id: 'sync-target', type: 'role', name: 'Local Hero', refImageId: 'local-hero-img', state: 'done', variants: [{ id: 'local-gala', label: 'Library Gala', appliesToEpisodeIds: ['ep1'] }] },
+  { id: 'publish-blocked', type: 'role', name: 'Archived Linked Hero', refImageId: 'archived-linked-img', state: 'done', libraryLink: { entityId: 'el-archived', syncPolicy: 'snapshot' } },
   { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
@@ -481,6 +484,12 @@ check(
     publishedProjectAsset.asset?.elementId === 'el-sync-target' &&
     publishedProjectAsset.asset?.libraryLink?.entityId === 'el-sync-target',
   JSON.stringify(publishedProjectAsset),
+)
+const blockedPublishedProjectAsset = JSON.parse(await publishProjectAsset.execute({ assetId: 'publish-blocked' }))
+check(
+  'publish_project_asset_to_library reports blocked publish',
+  blockedPublishedProjectAsset.published === false && !!blockedPublishedProjectAsset.error && blockedPublishedProjectAsset.asset?.id === 'publish-blocked',
+  JSON.stringify(blockedPublishedProjectAsset),
 )
 
 ;(globalThis as unknown as { window: unknown }).window = {

@@ -1576,9 +1576,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: assetView(asset, { includeImages: false }) })
-        await get().promoteAssetToElement(asset.id)
+        const published = await get().promoteAssetToElement(asset.id)
         const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
-        return json({ published: !!nextAsset.libraryLink?.entityId || !!nextAsset.elementId, asset: assetView(nextAsset, { includeImages: false }) })
+        return json({
+          published,
+          error: published ? undefined : '未发布，可能缺少主参考图或关联身份已归档',
+          asset: assetView(nextAsset, { includeImages: false }),
+        })
       },
     },
     {

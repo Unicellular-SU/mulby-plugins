@@ -785,6 +785,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 画布拖拽落点同样阻止归档身份生成角色/场景/物品节点，避免实验画布继续引用已废弃身份。
 - `projectStore.importElementToProject` 增加兜底校验，直接调用导入 API 时也会返回空 id 并提示需要先恢复身份，保证归档语义不只依赖 UI 列表过滤。
 
+第四十一轮提交继续落地 P3/P6 的归档身份写回防御：
+
+- 项目资产卡如果仍链接到已归档身份，会在身份链接状态中显示“已归档”，并禁用“发布/更新到资产中心”动作。
+- `projectStore.promoteAssetToElement` 在复用 `libraryLink.entityId/elementId` 前会读取资产中心快照；目标身份已归档时直接返回失败，不再更新已废弃身份。
+- Agent 工具 `publish_project_asset_to_library` 改为读取发布动作的布尔结果，被 store 拦截时返回 `published: false` 和错误信息，避免自动流程误判为已写回。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
