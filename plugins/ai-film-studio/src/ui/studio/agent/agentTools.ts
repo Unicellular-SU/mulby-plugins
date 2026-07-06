@@ -186,6 +186,19 @@ function trackForEpisode(doc: ProjectDoc, episode: Episode): VideoTrack[] {
   return episode.id === doc.currentEpisodeId ? doc.track : episode.track
 }
 
+function episodeHandoffSummary(doc: ProjectDoc, episode: Episode) {
+  const handoff = buildEpisodeProductionHandoff(doc, episode, { maxRecaps: 1, maxAssets: 4, maxAppearances: 2 })
+  const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
+  return {
+    plannedAssetCount: handoff.plannedAssets.length,
+    plannedVariantCount: handoff.plannedVariants.length,
+    sharedAssetCount: handoff.sharedAssets.length,
+    suggestionCount: handoff.suggestions.length,
+    autoRepairableSuggestionCount: autoSuggestions.length,
+    suggestions: handoff.suggestions.slice(0, 6).map(handoffSuggestionRef),
+  }
+}
+
 function episodeView(doc: ProjectDoc, episode: Episode) {
   const current = episode.id === doc.currentEpisodeId
   const scripts = scriptsForEpisode(doc, episode)
@@ -202,6 +215,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     seriesSkip: episode.seriesSkip === true,
     seriesQueueState: episodeSeriesQueueState(doc, episode),
     plan: planView(doc, episode.plan),
+    handoff: episodeHandoffSummary(doc, episode),
     current,
     production: {
       hasFilm: !!episode.filmPath,

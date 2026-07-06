@@ -931,6 +931,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - `produceCurrentEpisode` 在 `enforceContinuity` 模式下构建当前集 `buildEpisodeProductionHandoff(...).suggestions` 后再格式化错误；因此 `autoProduceSeries` 写入 `Episode.filmError` 的生产失败信息也会携带可执行修复入口。
 - `episodeProduction.selftest.ts` 覆盖跨集主形象回退和剧集计划形态作用域不匹配两类 blocker，确认生产拦截错误中包含 `handoff` 提示和对应 suggestion id，为 UI 弹层和 Agent 工具的修复闭环提供更直接的失败上下文。
 
+第六十五轮提交继续落地 P4/P5 的 Agent 剧集概览可操作性：
+
+- `episodeView` 新增轻量 `handoff` 摘要，`get_workspace/get_project_overview/get_episodes` 会随每集返回计划输入数量、跨集复用数量、建议数量、可自动处理建议数量，以及前几条稳定 suggestion 引用。
+- 这样 Agent 在普通项目概览阶段就能判断某集是否有待处理 handoff 建议，并能直接拿到 suggestion id 去调用 `apply_episode_handoff_suggestion`；只有需要完整回顾、共享资产出现记录和细节时，才继续读取 `get_episode_handoff`。
+- `agentTools.selftest.ts` 增加 `get_workspace exposes episode handoff summary`，确认剧集计划缺主图时概览能暴露 `asset-image:<assetId>` 这类可执行入口。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

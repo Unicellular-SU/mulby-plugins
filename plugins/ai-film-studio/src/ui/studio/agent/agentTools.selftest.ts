@@ -109,6 +109,16 @@ check('get_workspace exposes series bible summary', workspace.seriesBible?.logli
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
 check('get_workspace exposes episode plans', workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string }>; requiredVariants?: Array<{ id: string }> } }) => item.id === 'ep2' && item.plan?.requiredAssets?.some((asset) => asset.id === 'hero') && item.plan?.requiredVariants?.some((variant) => variant.id === 'gala')), JSON.stringify(workspace.episodes))
+check(
+  'get_workspace exposes episode handoff summary',
+  workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string }> } }) =>
+    item.id === 'ep2' &&
+    !!item.handoff?.suggestionCount &&
+    !!item.handoff?.autoRepairableSuggestionCount &&
+    item.handoff?.suggestions?.some((suggestion) => suggestion.id === 'asset-image:hero' && suggestion.kind === 'generate_asset_ref_image'),
+  ),
+  JSON.stringify(workspace.episodes),
+)
 
 const seriesBible = JSON.parse(await getSeriesBible.execute({}))
 check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
