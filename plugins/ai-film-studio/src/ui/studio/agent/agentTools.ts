@@ -219,6 +219,7 @@ function assetView(a: Asset, opts?: { doc?: ProjectDoc; includePrompt?: boolean;
     libraryLink: a.libraryLink,
     assetCenterUsage: opts?.doc ? assetCenterUsageView(opts.doc, a, opts.usageByEntity) : undefined,
     rejectedLibraryEntityIds: a.rejectedLibraryEntityIds,
+    lora: a.lora,
     flowId: a.flowId,
     voice: a.voice,
     voiceAssetId: a.voiceAssetId,

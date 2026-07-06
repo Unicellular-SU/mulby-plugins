@@ -328,6 +328,7 @@ export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset
       lastSyncedAt: now(),
     },
     variants,
+    lora: entity.lora,
     state: media.refImageId ? 'done' : 'idle',
   }
   if (entity.kind === 'voice') {
@@ -396,7 +397,7 @@ export function promoteProjectAssetToEntity(asset: Asset, existing?: LibraryEnti
         : asset.type === 'role' && asset.voiceAssetId
           ? mediaRefFromAssetId(asset.voiceAssetId, 'audio', 'voice')
           : existing?.voiceRef,
-    lora: existing?.lora,
+    lora: asset.lora ?? existing?.lora,
     version: (existing?.version ?? 0) + 1,
     archived: existing?.archived,
     createdAt: existing?.createdAt ?? ts,

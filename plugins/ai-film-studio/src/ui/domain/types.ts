@@ -112,6 +112,7 @@ export interface Asset {
   elementId?: string // 桥接全局 assetStore.ElementRef.id（§3.6）
   libraryLink?: ProjectAssetLibraryLink
   rejectedLibraryEntityIds?: string[] // 明确标记为“不是同一身份”的资产中心候选，用于压制同名/别名误报
+  lora?: { provider?: string; ref: string; weight?: number }
   flowId?: string // 资产精修画布引用（指向 doc.imageFlows，§4.4）
   // —— 音色子资产(type:audio) 专用 ——
   voice?: string // 供应商音色 id（用于合成）

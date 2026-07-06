@@ -360,7 +360,10 @@ function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): As
       lastSyncedAt: Date.now(),
     },
     rejectedLibraryEntityIds: rejectedLibraryEntityIds.length ? rejectedLibraryEntityIds : undefined,
+    lora: snapshot.lora ?? current.lora,
     state: snapshot.state,
+    voiceAssetId: snapshot.voiceAssetId ?? current.voiceAssetId,
+    audioBindState: snapshot.voiceAssetId ? snapshot.audioBindState ?? 'done' : current.audioBindState,
     audioFilePath: snapshot.audioFilePath ?? current.audioFilePath,
     audioUrl: snapshot.audioUrl ?? current.audioUrl,
   }

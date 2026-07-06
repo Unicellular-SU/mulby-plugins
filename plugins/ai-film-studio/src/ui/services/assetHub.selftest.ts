@@ -24,6 +24,7 @@ const element: ElementRef = {
   identity: 'oval face, mole under left eye',
   views: { front: 'front-img', side: 'side-img' },
   voiceId: 'voice-global',
+  lora: { provider: 'fal', ref: 'hero-base-lora', weight: 0.7 },
   appearanceVariants: [{
     id: 'gala',
     label: '晚宴妆',
@@ -43,6 +44,7 @@ check('maps ElementRef archive state to LibraryEntity', entity.archived === true
 check('maps element views to media refs', !!entity.mediaRefs?.some((ref) => ref.role === 'front' && ref.assetId === 'front-img'), JSON.stringify(entity.mediaRefs))
 check('maps appearance variants to library variants', entity.variants?.[0]?.id === 'gala' && entity.variants[0].mediaRefs?.[0]?.assetId === 'gala-front', JSON.stringify(entity.variants))
 check('maps element voice id to library voice ref', entity.voiceRef?.role === 'audio' && entity.voiceRef.assetId === 'voice-global', JSON.stringify(entity.voiceRef))
+check('maps element lora to library entity', entity.lora?.ref === 'hero-base-lora' && entity.lora.weight === 0.7, JSON.stringify(entity.lora))
 
 const projectAsset = createProjectAssetFromEntity(entity)
 check('creates project asset snapshot from entity', projectAsset.type === 'role' && projectAsset.elementId === 'el_hero' && projectAsset.refImageId === 'front-img', JSON.stringify(projectAsset))
@@ -51,6 +53,7 @@ check('creates project asset image history from entity refs', (projectAsset.imag
 check('creates project asset variants from entity variants', projectAsset.variants?.[0]?.refImageId === 'gala-front' && projectAsset.variants[0].libraryVariantId === 'gala' && projectAsset.variants[0].variantKind === 'makeup', JSON.stringify(projectAsset.variants))
 check('maps project variant ids back to library variant ids', projectAsset.libraryLink?.variantMap?.gala === 'gala', JSON.stringify(projectAsset.libraryLink))
 check('creates project role voice binding from entity voice ref', projectAsset.voiceAssetId === 'voice-global' && projectAsset.audioBindState === 'done', JSON.stringify(projectAsset))
+check('creates project asset lora snapshot from entity', projectAsset.lora?.ref === 'hero-base-lora' && projectAsset.lora.provider === 'fal', JSON.stringify(projectAsset.lora))
 
 const scopedAsset: Asset = {
   id: 'a_hero',
@@ -63,6 +66,7 @@ const scopedAsset: Asset = {
   elementId: 'el_hero',
   voiceAssetId: 'voice-project',
   audioBindState: 'done',
+  lora: { provider: 'fal', ref: 'hero-project-lora', weight: 0.9 },
   state: 'done',
   variants: [{
     id: 'injured',
@@ -79,12 +83,14 @@ check('promoted entity keeps reusable variant fields and drops project scopes', 
 check('promoted entity carries aliases and primary image', promoted.aliases?.[0] === '记者' && !!promoted.mediaRefs?.some((ref) => ref.assetId === 'project-front'), JSON.stringify(promoted))
 
 check('promoted entity carries role voice binding', promoted.voiceRef?.role === 'audio' && promoted.voiceRef.assetId === 'voice-project', JSON.stringify(promoted.voiceRef))
+check('promoted entity carries project lora binding', promoted.lora?.ref === 'hero-project-lora' && promoted.lora.weight === 0.9, JSON.stringify(promoted.lora))
 
 const savedElement = libraryEntityToElement(promoted)
 check('maps promoted entity back to ElementRef with aliases', savedElement.aliases?.[0] === '记者' && savedElement.refAssetIds.includes('project-front'), JSON.stringify(savedElement))
 check('maps promoted entity version back to ElementRef', savedElement.version === 2, JSON.stringify(savedElement))
 check('maps promoted entity archive state back to ElementRef', savedElement.archived === true, JSON.stringify(savedElement))
 check('maps promoted entity voice ref back to ElementRef', savedElement.voiceId === 'voice-project', JSON.stringify(savedElement))
+check('maps promoted entity lora back to ElementRef', savedElement.lora?.ref === 'hero-project-lora' && savedElement.lora.weight === 0.9, JSON.stringify(savedElement.lora))
 check('maps promoted variants back to appearance variants', savedElement.appearanceVariants?.[0]?.id === 'injured' && savedElement.appearanceVariants[0].refAssetIds?.[0] === 'injured-img', JSON.stringify(savedElement.appearanceVariants))
 check('uses library link as project asset identity usage source', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: { entityId: 'linked-id', syncPolicy: 'snapshot' } }) === 'linked-id')
 check('falls back to legacy element id for project asset identity usage', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: undefined }) === 'legacy-id')
