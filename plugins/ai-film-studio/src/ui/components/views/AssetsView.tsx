@@ -191,8 +191,6 @@ export default function AssetsView() {
 // ===================== 素材画廊（多模态）=====================
 function AssetGallery() {
   const busy = useAssetStore((s) => s.busy)
-  const legacyLoaded = useAssetStore((s) => s.loaded)
-  const load = useAssetStore((s) => s.load)
   const upload = useAssetStore((s) => s.upload)
   const removeAsset = useAssetStore((s) => s.removeAsset)
   const runGc = useAssetStore((s) => s.runGc)
@@ -218,10 +216,6 @@ function AssetGallery() {
   const [q, setQ] = useState('')
   const [preview, setPreview] = useState<AssetRecord | null>(null)
   const [usageDetail, setUsageDetail] = useState<{ asset: AssetRecord; usage: MediaAssetUsage } | null>(null)
-
-  useEffect(() => {
-    if (!legacyLoaded) void load().then(refreshHub)
-  }, [legacyLoaded, load, refreshHub])
 
   useEffect(() => {
     if (!hubLoaded) void refreshHub()

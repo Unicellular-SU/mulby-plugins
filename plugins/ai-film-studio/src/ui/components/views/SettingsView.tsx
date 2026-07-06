@@ -37,9 +37,7 @@ export default function SettingsView({ section }: { section: SettingsSection }) 
 }
 
 function StorageSettings() {
-  const loaded = useAssetStore((s) => s.loaded)
   const busy = useAssetStore((s) => s.busy)
-  const load = useAssetStore((s) => s.load)
   const runGc = useAssetStore((s) => s.runGc)
   const usage = useAssetHubStore((s) => s.storageUsage)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
@@ -47,9 +45,6 @@ function StorageSettings() {
   const saveProject = useGraphStore((s) => s.saveProject)
   const confirm = useConfirm()
 
-  useEffect(() => {
-    if (!loaded) void load()
-  }, [loaded, load])
   useEffect(() => {
     if (!hubLoaded) void refreshAssetHub()
   }, [hubLoaded, refreshAssetHub])
