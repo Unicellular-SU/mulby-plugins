@@ -577,7 +577,7 @@ interface GraphState {
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
   downloadVideo: (id: string) => Promise<void>
-  /** 从素材库把一条素材插入画布（生成绑定的参考图/音频输入节点）；position 用于拖拽落点 */
+  /** 从媒体文件库把一条媒体插入画布（生成绑定的参考图/音频输入节点）；position 用于拖拽落点 */
   insertAssetNode: (rec: AssetRecord, position?: { x: number; y: number }) => Promise<void>
   /** 从 Elements 库把角色/场景插入画布（生成绑定参考图的人物/场景节点）；position 用于拖拽落点 */
   insertElementNode: (el: ElementRef, position?: { x: number; y: number }) => Promise<void>
@@ -1256,7 +1256,7 @@ async function execNode(id: string, opts?: { force?: boolean; retryFailed?: bool
         .getState()
         .promoteCharViews(items.map((it) => ({ assetId: it.assetId, meta: it.meta })))
         .then((n) => {
-          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张角色设定图写回素材库对应角色`, 'info')
+          if (n > 0) window.mulby?.notification?.show(`已将 ${n} 张角色设定图写回资产中心对应角色`, 'info')
         })
         .catch(() => {})
     } catch (e) {
@@ -3118,7 +3118,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   insertAssetNode: async (rec, position) => {
     if (rec.type === 'video') {
-      window.mulby?.notification?.show('视频素材暂不支持插入画布（可在素材库预览/导出）', 'warning')
+      window.mulby?.notification?.show('视频媒体文件暂不支持插入画布（可在媒体文件页预览/导出）', 'warning')
       return
     }
     const kind = rec.type === 'audio' ? 'audio-input' : 'image-input'

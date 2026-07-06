@@ -3840,6 +3840,21 @@ select.afs-toolbar__select,
 .afs-studio__cardname:hover, .afs-studio__cardname:focus { border-color: var(--afs-border); outline: none; }
 .afs-studio__cardalias { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text-dim); border-radius: 5px; padding: 3px 5px; font-size: 11px; }
 .afs-studio__cardalias:focus { color: var(--afs-text); outline: none; border-color: var(--afs-accent); }
+.afs-studio__assetlink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--afs-accent);
+  background: color-mix(in srgb, var(--afs-accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--afs-accent) 28%, transparent);
+  border-radius: 5px;
+  padding: 3px 5px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .afs-studio__carddesc { resize: none; font-size: 12px; }
 .afs-studio__cardactions { display: flex; flex-wrap: wrap; gap: 6px; }
 .afs-studio__cardactions .afs-btn { flex: 1 1 0; justify-content: center; min-width: 34px; }
@@ -6202,6 +6217,24 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.afs-avcard__usage {
+  margin: var(--afs-sp-3) var(--afs-sp-5) 0;
+  padding: 3px 6px;
+  border-radius: var(--afs-r-xs);
+  background: var(--afs-surface-sunken);
+  border: 1px solid var(--afs-border);
+  color: var(--afs-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.afs-avcard__usage.is-linked {
+  color: var(--afs-accent);
+  background: color-mix(in srgb, var(--afs-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--afs-accent) 28%, transparent);
 }
 .afs-avcard__board { margin: var(--afs-sp-4) var(--afs-sp-5) 0; }
 .afs-avcard__foot {

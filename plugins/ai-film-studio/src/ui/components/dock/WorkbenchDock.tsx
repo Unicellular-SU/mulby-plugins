@@ -7,9 +7,9 @@ import { useGraphStore } from '../../store/graphStore'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS, type PromptSnippet } from '../../store/promptStore'
 
 type DockTab = 'nodes' | 'assets' | 'prompts'
-const TAB_LABEL: Record<DockTab, string> = { nodes: '节点', assets: '素材', prompts: '提示词' }
+const TAB_LABEL: Record<DockTab, string> = { nodes: '节点', assets: '资源', prompts: '提示词' }
 
-/** 编辑器左侧 Dock：节点 | 素材 | 提示词 三标签，可把素材/角色/片段拖到画布。 */
+/** 编辑器左侧 Dock：节点 | 资源 | 提示词 三标签，可把媒体文件/身份资产/片段拖到画布。 */
 export default function WorkbenchDock() {
   const [tab, setTab] = useState<DockTab>('nodes')
   return (
@@ -50,13 +50,13 @@ function AssetDockPanel() {
     <div className="afs-dockpanel">
       <div className="afs-dockpanel__search">
         <Search size={13} />
-        <input placeholder="搜索素材…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder="搜索资源…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
-      <div className="afs-dockpanel__hint">拖到画布即插入：图片/音频→参考节点；角色/场景→人物/场景节点</div>
+      <div className="afs-dockpanel__hint">拖到画布即插入：媒体文件→参考节点；身份资产→人物/场景/物品节点</div>
       <div className="afs-dockpanel__scroll">
         {elements.length > 0 && (
           <>
-            <div className="afs-dockpanel__sec">角色 / 场景</div>
+            <div className="afs-dockpanel__sec">身份资产</div>
             <div className="afs-dock__grid">
               {elements.map((el) => (
                 <div
@@ -67,18 +67,18 @@ function AssetDockPanel() {
                     e.dataTransfer.setData(DND_ELEMENT, el.id)
                     e.dataTransfer.effectAllowed = 'move'
                   }}
-                  title={`${el.kind === 'character' ? '角色' : '场景'}：${el.name}`}
+                  title={`${el.kind === 'character' ? '角色' : el.kind === 'prop' ? '物品' : '场景'}：${el.name}`}
                 >
-                  <RefThumb assetId={el.refAssetIds?.[0]} />
+                  <RefThumb assetId={el.views?.front ?? el.refAssetIds?.[0]} />
                   <span className="afs-dockitem__cap">{el.name}</span>
                 </div>
               ))}
             </div>
           </>
         )}
-        <div className="afs-dockpanel__sec">素材</div>
+        <div className="afs-dockpanel__sec">媒体文件</div>
         {fa.length === 0 ? (
-          <div className="afs-dockpanel__empty">{loaded ? '暂无素材' : '加载中…'}</div>
+          <div className="afs-dockpanel__empty">{loaded ? '暂无媒体文件' : '加载中…'}</div>
         ) : (
           <div className="afs-dock__grid">
             {fa.map((a) => (

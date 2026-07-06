@@ -129,7 +129,7 @@ export default function Inspector() {
     const prompt = String(p.refPrompt || '')
     const imgAssetId = node.data.outputs?.image?.assetId
     await saveElement({ kind, name, description, prompt, refAssetIds: imgAssetId ? [imgAssetId] : [] })
-    window.mulby?.notification?.show(`已保存到库：${name}`, 'success')
+    window.mulby?.notification?.show(`已保存到资产中心：${name}`, 'success')
   }
 
   // 可插入片段的目标参数：节点第一个 textarea 参数（如 故事/指令/描述/运镜…）
@@ -245,9 +245,9 @@ export default function Inspector() {
             leadingIcon={BookmarkPlus}
             block
             onClick={onSaveToLibrary}
-            title="把该角色/场景（含参考图）保存到全局库，跨工程复用"
+            title="把该角色/场景（含参考图）保存到资产中心身份资产，跨项目复用"
           >
-            保存到库
+            保存到资产中心
           </Button>
         )}
 

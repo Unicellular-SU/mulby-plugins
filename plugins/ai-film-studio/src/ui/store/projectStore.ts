@@ -86,11 +86,11 @@ export interface ProjectState {
   removeScript: (id: string) => void
   upsertAsset: (a: Partial<Asset> & { type: Asset['type']; name: string }) => string
   removeAsset: (id: string) => void
-  /** 从全局素材库把一张图片绑成项目资产（角色/场景/物品的参考图）。projectId 为当前打开项目时走 mutate，否则直接读写目标 doc。返回新资产 id；非图片/无 assetId 返回 ''。 */
+  /** 从媒体文件库把一张图片绑成项目资产（角色/场景/物品的参考图）。projectId 为当前打开项目时走 mutate，否则直接读写目标 doc。返回新资产 id；非图片/无 assetId 返回 ''。 */
   importImageToProject: (projectId: string, rec: Pick<AssetRecord, 'assetId' | 'name' | 'type'>, kind: 'role' | 'scene' | 'prop') => Promise<string>
-  /** 从全局角色/场景库把元素绑成项目资产（带 refImageId + 桥接 elementId）。kind 显式指定时优先（拖入「资产」某分组时按该组类别），否则按 el.kind 映射。 */
+  /** 从资产中心身份资产把元素绑成项目资产快照（带 refImageId + 桥接 elementId）。kind 显式指定时优先（拖入「项目资产」某分组时按该组类别），否则按 el.kind 映射。 */
   importElementToProject: (projectId: string, el: ElementRef, kind?: 'role' | 'scene' | 'prop') => Promise<string>
-  /** 把项目里的角色/场景资产保存（回流）到全局角色场景库（复用 elementId，幂等更新）。 */
+  /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。 */
   promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
   removeStoryboard: (id: string) => void
@@ -955,10 +955,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   importImageToProject: async (projectId, rec, kind) => {
     if (!rec.assetId || rec.type !== 'image') {
-      window.mulby?.notification?.show('仅图片素材可加入项目素材（视频/音频请在时间线/配音处使用）', 'warning')
+      window.mulby?.notification?.show('仅图片媒体文件可加入项目资产（视频/音频请在时间线/配音处使用）', 'warning')
       return ''
     }
-    return writeAssetToProject(get, projectId, buildLibraryAsset({ kind, name: rec.name || '素材', assetId: rec.assetId }))
+    return writeAssetToProject(get, projectId, buildLibraryAsset({ kind, name: rec.name || '媒体文件', assetId: rec.assetId }))
   },
 
   importElementToProject: async (projectId, el, kind) => {
@@ -995,7 +995,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const x = d.assets.find((y) => y.id === id)
       if (x) x.elementId = el.id
     })
-    window.mulby?.notification?.show(`已保存「${a.name}」到角色 / 场景库`, 'success')
+    window.mulby?.notification?.show(`已保存「${a.name}」到资产中心`, 'success')
   },
 
   upsertStoryboard: (s) => {

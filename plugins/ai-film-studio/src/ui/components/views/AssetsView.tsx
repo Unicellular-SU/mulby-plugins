@@ -31,6 +31,7 @@ import {
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useGraphStore } from '../../store/graphStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
+import { loadIdentityAssetUsages, type IdentityAssetUsage } from '../../services/assetUsage'
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
@@ -99,14 +100,14 @@ export default function AssetsView() {
   return (
     <div className="afs-surface">
       <div className="afs-surface__head afs-avhead">
-        <h2 className="afs-surface__title">素材库</h2>
+        <h2 className="afs-surface__title">资产中心</h2>
         <Tabs
-          ariaLabel="素材库视图"
+          ariaLabel="资产中心视图"
           value={tab}
           onChange={(v) => setTab(v as 'assets' | 'elements' | 'prompts')}
           tabs={[
-            { value: 'assets', label: '素材（图片 / 视频 / 音频）' },
-            { value: 'elements', label: '角色 / 场景库' },
+            { value: 'assets', label: '媒体文件' },
+            { value: 'elements', label: '身份资产' },
             { value: 'prompts', label: '提示词' },
           ]}
         />
@@ -170,10 +171,10 @@ function AssetGallery() {
   }
 
   const onGc = async () => {
-    if (!(await confirm({ title: '清理未引用素材', message: '清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。', confirmLabel: '清理', danger: true }))) return
+    if (!(await confirm({ title: '清理未引用媒体', message: '清理「未被任何工程 / 身份资产 / 上传媒体 / 快照」引用的附件？此操作不可撤销。', confirmLabel: '清理', danger: true }))) return
     await saveProject() // 先落盘当前工程，避免刚生成未保存的素材被误判为孤儿
     const r = await runGc()
-    window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用素材，释放 ${fmtBytes(r.freedBytes)}`, 'success')
+    window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用媒体，释放 ${fmtBytes(r.freedBytes)}`, 'success')
   }
 
   const onNewBoard = async () => {
@@ -185,15 +186,15 @@ function AssetGallery() {
     if (name && name.trim()) await renameBoard(id, name.trim())
   }
   const onDeleteBoard = async (id: string) => {
-    if (await confirm({ title: '删除合集', message: '删除该合集？（素材不会被删除，仅归为未分组）', confirmLabel: '删除', danger: true })) {
+    if (await confirm({ title: '删除合集', message: '删除该合集？（媒体文件不会被删除，仅归为未分组）', confirmLabel: '删除', danger: true })) {
       await deleteBoard(id)
       if (boardF === id) setBoardF('all')
     }
   }
   const onDeleteAsset = async (id: string) => {
-    if (await confirm({ title: '删除上传素材', message: '删除该上传素材？', confirmLabel: '删除', danger: true })) removeAsset(id)
+    if (await confirm({ title: '删除上传媒体', message: '删除该上传媒体文件？', confirmLabel: '删除', danger: true })) removeAsset(id)
   }
-  // 导出本地素材：把该素材的媒体文件下载到本地
+  // 导出本地媒体：把该媒体文件下载到本地
   const onDownloadAsset = async (a: AssetRecord) => {
     const url = await resolveAssetUrl(a)
     if (!url) return
@@ -223,7 +224,7 @@ function AssetGallery() {
             <IconButton size="sm" icon={<FolderPlus size={14} />} aria-label="新建合集" onClick={onNewBoard} />
           </div>
           <button className={`afs-boards__row${boardF === 'all' ? ' is-active' : ''}`} onClick={() => setBoardF('all')}>
-            <span>全部素材</span>
+            <span>全部媒体</span>
             <span className="afs-boards__n">{assets.length}</span>
           </button>
           <button className={`afs-boards__row${boardF === 'none' ? ' is-active' : ''}`} onClick={() => setBoardF('none')}>
@@ -300,18 +301,18 @@ function AssetGallery() {
                 占用 {usage.count} 项 · {fmtBytes(usage.bytes)}
               </span>
             </Tooltip>
-            <Button variant="secondary" size="sm" leadingIcon={Sparkles} disabled={busy} onClick={onGc} title="清理未引用素材（修复附件存储泄漏）">
+            <Button variant="secondary" size="sm" leadingIcon={Sparkles} disabled={busy} onClick={onGc} title="清理未引用媒体（修复附件存储泄漏）">
               清理未引用
             </Button>
             <Button variant="gradient" size="sm" glow leadingIcon={Upload} disabled={busy} onClick={() => fileRef.current?.click()}>
-              上传素材
+              上传媒体
             </Button>
           </div>
 
           <div className="afs-avscroll">
             {filtered.length === 0 ? (
               loaded ? (
-                <EmptyState icon={ImageIcon} title="暂无素材" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地素材。" />
+                <EmptyState icon={ImageIcon} title="暂无媒体文件" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地媒体。" />
               ) : (
                 <div className="afs-avtiles" role="status" aria-label="加载中…">
                   <Skeleton count={8} height={150} radius={12} />
@@ -360,7 +361,7 @@ function AssetGallery() {
                             size="sm"
                             className="afs-avcard__foot--push"
                             icon={<Trash2 size={13} />}
-                            aria-label="删除上传素材"
+                            aria-label="删除上传媒体"
                             onClick={() => onDeleteAsset(a.id)}
                           />
                         )}
@@ -424,10 +425,20 @@ function ElementLibrary() {
   const confirm = useConfirm()
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
+  const [usageByEntity, setUsageByEntity] = useState<Record<string, IdentityAssetUsage>>({})
 
   useEffect(() => {
     if (!loaded) void load()
   }, [loaded, load])
+  useEffect(() => {
+    let active = true
+    void loadIdentityAssetUsages().then((usage) => {
+      if (active) setUsageByEntity(usage)
+    })
+    return () => {
+      active = false
+    }
+  }, [elements])
 
   const imageAssets = useMemo(() => assets.filter((a) => a.type === 'image' && a.assetId), [assets])
 
@@ -437,16 +448,20 @@ function ElementLibrary() {
       return
     }
     await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
+    setUsageByEntity(await loadIdentityAssetUsages())
     setEditing(null)
   }
   const onDeleteElement = async (el: ElementRef) => {
-    if (await confirm({ title: '删除', message: `删除「${el.name}」？`, confirmLabel: '删除', danger: true })) removeElement(el.id)
+    if (await confirm({ title: '删除', message: `删除身份资产「${el.name}」？`, confirmLabel: '删除', danger: true })) {
+      await removeElement(el.id)
+      setUsageByEntity(await loadIdentityAssetUsages())
+    }
   }
 
   return (
     <>
       <div className="afs-avtoolbar">
-        <div className="afs-lib__hint">角色 / 场景 / 物品定义一次、跨工程复用（一致性底座）。在画布 / 工作流的左侧 Dock 把它拖进去即可使用。</div>
+        <div className="afs-lib__hint">身份资产用于沉淀可跨项目复用的角色 / 场景 / 物品；工作流会导入为项目资产快照，画布产物需显式回写。</div>
         <span className="afs-avtoolbar__spacer" />
         <Button variant="secondary" size="sm" leadingIcon={Users} onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
           新建角色
@@ -462,7 +477,7 @@ function ElementLibrary() {
       <div className="afs-avscroll">
         {elements.length === 0 ? (
           loaded ? (
-            <EmptyState icon={Users} title="暂无角色 / 场景" description="新建，或在画布的人物 / 场景节点点「保存到库」。" />
+            <EmptyState icon={Users} title="暂无身份资产" description="新建角色、场景或物品；项目生产时会导入为项目资产快照。" />
           ) : (
             <div className="afs-avtiles" role="status" aria-label="加载中…">
               <Skeleton count={6} height={150} radius={12} />
@@ -472,6 +487,8 @@ function ElementLibrary() {
           <div className="afs-avtiles">
             {elements.map((el) => {
               const Icon = KIND_ICON[el.kind]
+              const usage = usageByEntity[el.id]
+              const usageTitle = usage?.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`).join('\n')
               return (
                 <div key={el.id} className="afs-avcard">
                   <div className="afs-avcard__thumb" onClick={() => setEditing(el)} title="编辑">
@@ -484,6 +501,9 @@ function ElementLibrary() {
                     {el.name}
                   </div>
                   <div className="afs-avcard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
+                  <div className={`afs-avcard__usage${usage?.projectCount ? ' is-linked' : ''}`} title={usageTitle || '暂未被工作流项目引用'}>
+                    {usage?.projectCount ? `已被 ${usage.projectCount} 个工作流项目引用` : '未被工作流项目引用'}
+                  </div>
                   <div className="afs-avcard__foot">
                     <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
                     <IconButton
@@ -607,9 +627,9 @@ function ElementEditor({
           </Field>
         </>
       )}
-      <Field label="参考图（从图片素材选，可选）">
+      <Field label="参考图（从图片媒体文件选，可选）">
         {imageAssets.length === 0 ? (
-          <div className="afs-avnote">暂无图片素材，可先在「素材」上传或生成</div>
+          <div className="afs-avnote">暂无图片媒体，可先在「媒体文件」上传或生成</div>
         ) : (
           <div className="afs-avrefgrid">
             {imageAssets.map((a) => {

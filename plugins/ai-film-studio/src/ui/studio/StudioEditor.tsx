@@ -34,7 +34,7 @@ type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
   { id: 'novel', label: '原著', icon: BookOpen },
   { id: 'script', label: '剧本', icon: FileText },
-  { id: 'assets', label: '资产', icon: Users },
+  { id: 'assets', label: '项目资产', icon: Users },
   { id: 'storyboard', label: '分镜', icon: Clapperboard },
   { id: 'timeline', label: '时间线', icon: Film },
 ]
@@ -211,8 +211,8 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
           size="md"
           variant="ghost"
           pressed={dockOpen}
-          aria-label={dockOpen ? '收起资源面板' : '展开资源面板（素材/提示词）'}
-          title={dockOpen ? '收起资源面板' : '展开资源面板（素材/提示词）'}
+          aria-label={dockOpen ? '收起资源面板' : '展开资源面板（资源/提示词）'}
+          title={dockOpen ? '收起资源面板' : '展开资源面板（资源/提示词）'}
           icon={<PanelLeft size={18} />}
           onClick={() => setDockOpen((v) => !v)}
         />
@@ -911,7 +911,7 @@ function AssetsTab() {
     { type: 'prop', label: '物品' },
   ]
 
-  // 从 Dock 拖入素材/角色：落到哪个分组就按该分组类别（人物/场景/物品）加入项目
+  // 从 Dock 拖入媒体文件/身份资产：落到哪个分组就按该分组类别（人物/场景/物品）加入项目资产快照
   const canAcceptDrag = (e: React.DragEvent) => {
     const t = Array.from(e.dataTransfer.types)
     return t.includes(DND_ELEMENT) || t.includes(DND_ASSET)
@@ -929,7 +929,7 @@ function AssetsTab() {
     } else if (asId) {
       const rec = useAssetStore.getState().assets.find((x) => x.id === asId)
       if (rec && (await importImageToProject(doc.meta.id, rec, kind)))
-        window.mulby?.notification?.show(`已把「${rec.name || '素材'}」加入${label}`, 'success')
+        window.mulby?.notification?.show(`已把「${rec.name || '媒体文件'}」加入${label}`, 'success')
     }
   }
 
@@ -976,7 +976,7 @@ function AssetsTab() {
               </button>
             </div>
             <div className="afs-studio__cardgrid">
-              {items.length === 0 && <span className="afs-studio__hint">暂无（可从左侧 Dock 拖图片 / 角色到这里）</span>}
+              {items.length === 0 && <span className="afs-studio__hint">暂无（可从左侧 Dock 拖图片媒体 / 身份资产到这里）</span>}
               {items.map((a) => (
                 <AssetCard key={a.id} asset={a} />
               ))}
@@ -1107,6 +1107,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const addAssetVariant = useProjectStore((s) => s.addAssetVariant)
   const bindRoleVoice = useProjectStore((s) => s.bindRoleVoice)
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
+  const elements = useAssetStore((s) => s.elements)
   const canPromote = asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop'
   const url = useMediaUrl(asset.refImageId ? { assetId: asset.refImageId } : null)
   const [showDeriv, setShowDeriv] = useState(false)
@@ -1115,6 +1116,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const children = doc.assets.filter((a) => a.parentAssetId === asset.id)
   const variants = asset.variants ?? []
   const voiceAssets = asset.type === 'role' ? doc.assets.filter((a) => a.type === 'audio') : []
+  const linkedElement = asset.elementId ? elements.find((el) => el.id === asset.elementId) : undefined
   return (
     <div className="afs-studio__assetcard">
       {viewer && asset.refImageId && (
@@ -1152,6 +1154,12 @@ function AssetCard({ asset }: { asset: Asset }) {
         placeholder="别名（用顿号/逗号分隔）"
         onChange={(e) => upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: cleanAssetAliases(e.target.value) })}
       />
+      {asset.elementId && (
+        <div className="afs-studio__assetlink" title="该项目资产来自资产中心的身份资产快照；生产仍使用项目内资产和变体">
+          <BookmarkPlus size={12} />
+          身份资产：{linkedElement?.name ?? '已关联'}
+        </div>
+      )}
       <textarea
         className="afs-field__input afs-studio__carddesc"
         rows={2}
@@ -1203,8 +1211,8 @@ function AssetCard({ asset }: { asset: Asset }) {
           <button
             className="afs-btn afs-btn--sm afs-btn--ghost"
             disabled={!asset.refImageId || promoting}
-            title={asset.refImageId ? '保存到角色 / 场景库（全局复用）' : '先生成或选择一张参考图'}
-            aria-label="保存到角色 / 场景库"
+            title={asset.refImageId ? '发布/更新到资产中心身份资产' : '先生成或选择一张参考图'}
+            aria-label="发布到资产中心"
             onClick={async () => {
               setPromoting(true)
               try {
