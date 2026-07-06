@@ -132,11 +132,17 @@ function identityUsageLabel(usage: IdentityAssetUsage | undefined): string {
 function identityUsageTitle(usage: IdentityAssetUsage | undefined): string {
   if (!hasIdentityUsage(usage)) return '暂未被工作流项目、画布或快照引用'
   const lines = [
-    ...usage.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`),
+    ...usage.projects.map((project) => `${project.projectName}：${projectUsageDetailText(project)}`),
     ...usage.canvasProjects.map((project) => `画布 ${project.projectName}：${project.nodeTitles.join('、')}`),
     ...usage.snapshots.map((snapshot) => `快照 ${snapshot.snapshotName}：${snapshot.nodeTitles.join('、')}`),
   ]
   return lines.length ? lines.join('\n') : '暂未被工作流项目、画布或快照引用'
+}
+
+function projectUsageDetailText(project: IdentityAssetUsage['projects'][number]): string {
+  const assetPart = commaList(project.assetNames)
+  const episodePart = project.episodeLabels?.length ? `出场：${commaList(project.episodeLabels)}` : ''
+  return [assetPart, episodePart].filter(Boolean).join('；') || project.projectId
 }
 
 function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {
@@ -524,7 +530,7 @@ function MediaUsageDialog({ asset, usage, onClose }: { asset: AssetRecord; usage
             {usage.projects.map((project) => (
               <div key={project.projectId} className="afs-avusage-detail__row">
                 <span>{project.projectName}</span>
-                <small>{commaList(project.assetNames) || project.projectId}</small>
+                <small>{projectUsageDetailText(project)}</small>
               </div>
             ))}
           </section>
@@ -824,7 +830,7 @@ function IdentityUsageDialog({ element, usage, onClose }: { element: ElementRef;
             {usage.projects.map((project) => (
               <div key={project.projectId} className="afs-avusage-detail__row">
                 <span>{project.projectName}</span>
-                <small>{commaList(project.assetNames) || project.projectId}</small>
+                <small>{projectUsageDetailText(project)}</small>
               </div>
             ))}
           </section>

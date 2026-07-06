@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -115,6 +115,63 @@ check(
   'formats scoped variant media usage labels',
   projectVariantMediaUsageLabel('女主', { id: 'injured', label: '战损妆', refImageId: 'injured-img', appliesToEpisodeIds: ['ep3'], state: 'done' }, new Map([['ep3', { index: 2, title: '雨夜' }]])) === '女主 / 战损妆（E3 雨夜）'
 )
+const identityEpisodeProject = {
+  meta: { id: 'p_series', name: '多集短剧', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 1, updatedAt: 1 },
+  novel: [],
+  scripts: [],
+  assets: [scopedAsset],
+  storyboards: [],
+  clips: [],
+  track: [],
+  memory: [],
+  currentEpisodeId: 'ep1',
+  episodes: [
+    {
+      id: 'ep1',
+      index: 0,
+      title: '开局',
+      scripts: [],
+      storyboards: [{
+        id: 'sb1',
+        episodeId: 'ep1',
+        index: 0,
+        track: 'A',
+        videoDesc: '女主登场',
+        duration: 5,
+        associateAssetIds: ['a_hero'],
+        shouldGenerateImage: true,
+        state: 'done',
+      }],
+      clips: [],
+      track: [],
+      createdAt: 1,
+      updatedAt: 1,
+    },
+    {
+      id: 'ep2',
+      index: 1,
+      title: '雨夜',
+      scripts: [],
+      storyboards: [{
+        id: 'sb2',
+        episodeId: 'ep2',
+        index: 0,
+        track: 'A',
+        videoDesc: '女主受伤',
+        duration: 5,
+        associateAssetIds: [],
+        castRefs: [{ assetId: 'a_hero', variantId: 'injured' }],
+        shouldGenerateImage: true,
+        state: 'done',
+      }],
+      clips: [],
+      track: [],
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  ],
+} as ProjectDoc
+check('lists identity project episode appearances', projectAssetIdentityEpisodeLabels(identityEpisodeProject, 'a_hero').join('、') === 'E1 开局、E2 雨夜')
 const candidateLineage = resolveCanvasProjectAssetMediaUsage(
   { assetId: 'candidate-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', purpose: 'candidate' } },
   lineageProject
