@@ -1021,6 +1021,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - `assetCenterUsage` 通过 `loadAssetHub().usageByEntity` 读取，只暴露 `entityId`、项目/画布/快照计数以及当前项目的 `episodeLabels`、`appearanceLabels`；Hub 加载失败时保留原工具输出，避免只读工具被资产中心异常拖垮。
 - 这让 Agent 在生成或续写多集时能先看到 `E1 Episode 1`、`E2 Second · Gala` 这类资产中心 usage 线索，减少只凭资产名误建重复角色或误用妆容的概率。
 
+第八十轮提交继续落地 P4/P5 的系列规划资产 usage 可见性：
+
+- `get_series_bible` 的 `availableAssets` 现在也会返回 `assetCenterUsage`，让整季规划工具在列出可用角色/场景/道具时同时看到资产中心身份链接、当前项目出场剧集和形态/妆容摘要。
+- 这把上一轮的 usage 线索从“工作区概览/完整资产读取”扩展到“系列圣经与每集计划读取”，避免 Agent 在规划后续剧集时只看到 `id/name/type/aliases`，却看不到该角色已经在哪些剧集以何种形态出现。
+- 自测通过模拟真实 `studio:index`、`studio:project:<id>` 和 `elements:library`，验证 `get_series_bible.availableAssets` 能暴露 `E2 Second` 与 `E2 Second · Gala`，继续支撑多集一致性和同人多妆容管理。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

@@ -877,6 +877,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async () => {
         const d = doc()
         if (!d) return '无打开的项目'
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           seriesBible: {
             ...(d.seriesBible ?? {}),
@@ -884,7 +885,9 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             continuityRules: d.seriesBible?.continuityRules ?? [],
           },
           episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan) })),
-          availableAssets: d.assets.filter(isCastableAsset).map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases })),
+          availableAssets: d.assets
+            .filter(isCastableAsset)
+            .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
           availableVariants: variantOptions(d),
         })
       },

@@ -163,6 +163,16 @@ check(
 
 const seriesBible = JSON.parse(await getSeriesBible.execute({}))
 check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
+check(
+  'get_series_bible exposes asset-center usage for planning assets',
+  seriesBible.availableAssets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+    item.id === 'hero' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+    item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ),
+  JSON.stringify(seriesBible.availableAssets),
+)
 
 const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
 check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
