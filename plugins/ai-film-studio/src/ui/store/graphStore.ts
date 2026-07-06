@@ -584,9 +584,9 @@ interface GraphState {
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
   /** 标记画布媒体产物已被显式采纳为项目资产/变体，保留 lineage 供后续使用图谱读取。 */
-  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectId?: string; projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => boolean
+  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectId?: string; projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => Promise<boolean>
   /** 标记画布媒体产物已被显式采纳为身份资产/身份变体，保留 lineage 供后续使用图谱读取。 */
-  markOutputAsLibraryEntity: (nodeId: string, port: string, assetId: string, target: { libraryEntityId: string; libraryVariantId?: string; variantLabel?: string; view?: string }, itemIndex?: number) => boolean
+  markOutputAsLibraryEntity: (nodeId: string, port: string, assetId: string, target: { libraryEntityId: string; libraryVariantId?: string; variantLabel?: string; view?: string }, itemIndex?: number) => Promise<boolean>
   setNodeImage: (id: string, dataUrl: string, port?: string) => Promise<void>
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
@@ -3139,25 +3139,25 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     return null
   },
 
-  markOutputAsProjectAsset: (nodeId, port, assetId, target, itemIndex) => {
+  markOutputAsProjectAsset: async (nodeId, port, assetId, target, itemIndex) => {
     const node = get().nodes.find((n) => n.id === nodeId)
     const current = node?.data.outputs?.[port]
     if (!node || !current) return false
     const next = markPortValueAsProjectAsset(current, assetId, target, itemIndex)
     if (!next.changed) return false
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: next.value }, error: undefined })
-    void safeSave()
+    await safeSave()
     return true
   },
 
-  markOutputAsLibraryEntity: (nodeId, port, assetId, target, itemIndex) => {
+  markOutputAsLibraryEntity: async (nodeId, port, assetId, target, itemIndex) => {
     const node = get().nodes.find((n) => n.id === nodeId)
     const current = node?.data.outputs?.[port]
     if (!node || !current) return false
     const next = markPortValueAsLibraryEntity(current, assetId, target, itemIndex)
     if (!next.changed) return false
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: next.value }, error: undefined })
-    void safeSave()
+    await safeSave()
     return true
   },
 

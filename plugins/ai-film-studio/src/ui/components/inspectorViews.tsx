@@ -629,7 +629,7 @@ export function OutputView({
       })
       if (count > 0) {
         if (nodeId && port) {
-          markOutputAsLibraryEntity(
+          await markOutputAsLibraryEntity(
             nodeId,
             port,
             it.assetId,
@@ -649,7 +649,7 @@ export function OutputView({
         count > 0 ? 'success' : 'warning'
       )
     }
-    const saveToProjectAsset = (it: PortValue, itemIndex?: number) => {
+    const saveToProjectAsset = async (it: PortValue, itemIndex?: number) => {
       if (!it.assetId || !selectedProjectTarget) {
         window.mulby?.notification?.show('请先选择要写入的项目资产或项目变体', 'warning')
         return
@@ -659,18 +659,21 @@ export function OutputView({
         variantId: selectedProjectTarget.variantId,
         refImageId: it.assetId,
       })
-      if (changed && nodeId && port) {
-        markOutputAsProjectAsset(
-          nodeId,
-          port,
-          it.assetId,
-          {
-            projectId: projectDoc?.meta.id,
-            projectAssetId: selectedProjectTarget.assetId,
-            projectVariantId: selectedProjectTarget.variantId,
-          },
-          itemIndex
-        )
+      if (changed) {
+        if (nodeId && port) {
+          await markOutputAsProjectAsset(
+            nodeId,
+            port,
+            it.assetId,
+            {
+              projectId: projectDoc?.meta.id,
+              projectAssetId: selectedProjectTarget.assetId,
+              projectVariantId: selectedProjectTarget.variantId,
+            },
+            itemIndex
+          )
+        }
+        await refreshAssetHub()
       }
       window.mulby?.notification?.show(
         changed ? `已保存到${selectedProjectTarget.label}` : '未找到可写入的项目资产目标',
@@ -734,7 +737,7 @@ export function OutputView({
                 label: '存项目',
                 title: selectedProjectTarget?.title || '先选择要写入的项目资产或项目变体',
                 disabled: !selectedProjectTarget || !it.assetId,
-                onClick: () => saveToProjectAsset(it, itemIndex),
+                onClick: () => void saveToProjectAsset(it, itemIndex),
               })
             }
             return (

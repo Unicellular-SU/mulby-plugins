@@ -943,6 +943,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - `assetHub` 身份使用图谱读取画布输出时，和项目采纳 lineage 使用同一条边界：只接受 `approved` 或旧数据未标 `purpose` 的身份目标，`candidate/experiment` 不再被当成正式身份引用，仍只作为媒体层画布引用保留。
 - `assetHub.selftest.ts` 增加身份 lineage 的 approved/legacy/candidate 覆盖，确保后续画布实验图不会重新污染身份资产删除保护和引用详情。
 
+第六十七轮提交继续落地 P3/P6 的画布采纳后刷新一致性：
+
+- `markOutputAsProjectAsset` 和 `markOutputAsLibraryEntity` 改为可等待的保存动作，调用方会在画布 lineage 写入并落盘后再刷新 `assetHubStore`，避免资产中心使用图谱立刻刷新时读到旧画布工程。
+- “存身份”成功后仍先更新身份资产兼容存储，再等待画布输出 `approved` lineage 保存，最后刷新 Hub；“存项目”成功后也会刷新 Hub，让媒体详情能立即看到项目资产来源和画布采纳证据。
+- 这个调整不改变用户操作入口，只收紧保存顺序，保证显式回写目标、媒体使用图谱和身份引用详情在一次点击后可读一致。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
