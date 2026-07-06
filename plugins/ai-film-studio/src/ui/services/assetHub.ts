@@ -454,6 +454,10 @@ export function resolveCanvasProjectAssetMediaUsage(port: CanvasPortValue, proje
   return { projectId, projectName: project.meta.name, assetId: asset.id, assetName }
 }
 
+export function projectAssetIdentityEntityId(asset: Asset): string {
+  return lineageString(asset.libraryLink?.entityId) || lineageString(asset.elementId)
+}
+
 function emptyUsage(entityId: string): IdentityAssetUsage {
   return { entityId, projectCount: 0, assetCount: 0, canvasProjectCount: 0, canvasNodeCount: 0, snapshotCount: 0, projects: [], canvasProjects: [], snapshots: [] }
 }
@@ -668,8 +672,9 @@ export async function loadIdentityAssetUsages(elements: ElementRef[]): Promise<R
     const doc = await loadProject(card.id)
     if (!doc) continue
     for (const asset of doc.assets ?? []) {
-      if (!asset.elementId) continue
-      addStudioUsage(usages, asset.elementId, doc.meta.id, doc.meta.name, asset.id, asset.name)
+      const entityId = projectAssetIdentityEntityId(asset)
+      if (!entityId) continue
+      addStudioUsage(usages, entityId, doc.meta.id, doc.meta.name, asset.id, asset.name)
     }
   }
   for (const project of await loadCanvasProjects()) {

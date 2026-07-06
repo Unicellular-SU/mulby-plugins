@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -78,6 +78,9 @@ check('maps promoted entity back to ElementRef with aliases', savedElement.alias
 check('maps promoted entity version back to ElementRef', savedElement.version === 2, JSON.stringify(savedElement))
 check('maps promoted entity archive state back to ElementRef', savedElement.archived === true, JSON.stringify(savedElement))
 check('maps promoted variants back to appearance variants', savedElement.appearanceVariants?.[0]?.id === 'injured' && savedElement.appearanceVariants[0].refAssetIds?.[0] === 'injured-img', JSON.stringify(savedElement.appearanceVariants))
+check('uses library link as project asset identity usage source', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: { entityId: 'linked-id', syncPolicy: 'snapshot' } }) === 'linked-id')
+check('falls back to legacy element id for project asset identity usage', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: undefined }) === 'legacy-id')
+check('ignores blank project asset identity ids', projectAssetIdentityEntityId({ ...scopedAsset, elementId: ' ', libraryLink: { entityId: ' ', syncPolicy: 'snapshot' } }) === '')
 
 const lineageProject = {
   meta: { id: 'p_series', name: '悬疑短剧' },

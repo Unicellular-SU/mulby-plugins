@@ -827,6 +827,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 采纳血缘只接受 `approved` 或旧数据里未标明 `purpose` 的项目目标；`candidate/experiment` 仍只作为画布媒体引用显示，避免候选实验图被误认为正式生产资产。
 - 项目资产用量继续复用原有去重逻辑：如果项目文档本身已经把该媒体设为主图或变体图，不会重复增加项目资产计数；如果项目保存尚未 flush，画布 lineage 也能补上可读的项目资产来源。
 
+第四十八轮提交继续落地 P1/P6 的身份资产使用图谱口径收敛：
+
+- `assetHub.loadIdentityAssetUsages` 扫描工作流项目资产时，开始优先读取 `Asset.libraryLink.entityId`，旧 `Asset.elementId` 仅作为兼容回退。
+- 这让资产中心身份资产卡的“被哪些工作流项目引用”不再依赖旧 Element 桥接字段；后续项目快照逐步收敛到 `libraryLink` 后，引用详情和删除/归档保护仍能看到正确来源。
+- 新增 `projectAssetIdentityEntityId` 纯解析函数和自测，覆盖新字段优先、旧字段回退、空白 id 忽略，避免使用图谱再次退回只识别 `elementId` 的旧口径。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
