@@ -11,7 +11,7 @@ import { useAssetStore } from '../store/assetStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, ProjectDoc } from '../domain/types'
+import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, EpisodePlan, ProjectDoc } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
 import Select from '../components/ui/Select'
@@ -30,8 +30,9 @@ import { buildContinuityReport, variantScopePatchForUse } from './services/conti
 import { buildEpisodeProductionHandoff, episodeComposeReadiness, pendingEpisodesForSeries } from './services/episodeProduction'
 import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
 
-type Tab = 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
+type Tab = 'series' | 'novel' | 'script' | 'assets' | 'storyboard' | 'timeline'
 const TABS: { id: Tab; label: string; icon: typeof FileText }[] = [
+  { id: 'series', label: '系列', icon: Settings2 },
   { id: 'novel', label: '原著', icon: BookOpen },
   { id: 'script', label: '剧本', icon: FileText },
   { id: 'assets', label: '项目资产', icon: Users },
@@ -66,7 +67,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const canProduceCurrent = doc.storyboards.length > 0
   const canProduceSeries = episodes.length > 1 && pendingEpisodesForSeries(doc).length > 0
   const producedEpisodeCount = episodes.filter((episode) => !!episode.filmPath).length
-  const [tab, setTab] = useState<Tab>('script')
+  const [tab, setTab] = useState<Tab>('series')
   const [dockOpen, setDockOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const exportSeason = async () => {
@@ -228,6 +229,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
       <div className="afs-stwb__work">
         {dockOpen && <StudioDock />}
         <div className="afs-stwb__stage">
+          {tab === 'series' && <SeriesTab />}
           {tab === 'novel' && <NovelTab />}
           {tab === 'script' && <ScriptTab />}
           {tab === 'assets' && <AssetsTab />}
@@ -658,6 +660,202 @@ function StudioModelBar() {
         )}
       </div>
     </Popover>
+  )
+}
+
+const splitRuleLines = (value: string): string[] =>
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+function toggleId(list: string[] | undefined, id: string): string[] {
+  const set = new Set(list ?? [])
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+  return [...set]
+}
+
+function SeriesTab() {
+  const doc = useProjectStore((s) => s.doc)!
+  const updateSeriesBible = useProjectStore((s) => s.updateSeriesBible)
+  const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
+  const createEpisodes = useProjectStore((s) => s.createEpisodes)
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+  const bible = doc.seriesBible ?? { continuityRules: [], plannedEpisodeCount: episodes.length || 1 }
+  const plannedCount = bible.plannedEpisodeCount ?? (episodes.length || 1)
+  const assetOptions = doc.assets.filter((asset) => (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId)
+  const variantOptions = assetOptions.flatMap((asset) =>
+    (asset.variants ?? []).map((variant) => ({
+      id: variant.id,
+      label: `${asset.name} / ${variant.label}`,
+    }))
+  )
+  const fillEpisodes = () => {
+    const missing = Math.max(0, plannedCount - episodes.length)
+    if (missing > 0) createEpisodes(missing)
+  }
+  const patchPlan = (episode: Episode, patch: Partial<EpisodePlan>) => updateEpisodePlan(episode.id, patch)
+  return (
+    <div className="afs-series">
+      <section className="afs-series__bible">
+        <div className="afs-studio__tabbar">
+          <b>系列圣经</b>
+          <span className="afs-studio__hint">整季生产蓝图，不直接生成媒体</span>
+          <span className="afs-series__spacer" />
+          <span className="afs-studio__hint">计划集数</span>
+          <NumberStepper
+            size="sm"
+            min={1}
+            max={100}
+            value={plannedCount}
+            onChange={(n) => updateSeriesBible({ plannedEpisodeCount: n })}
+            ariaLabel="计划集数"
+          />
+          <button className="afs-btn afs-btn--sm" disabled={plannedCount <= episodes.length} onClick={fillEpisodes}>
+            <Plus size={13} /> 补齐剧集
+          </button>
+        </div>
+        <div className="afs-series__bible-grid">
+          <label className="afs-series__field">
+            <span>一句话钩子</span>
+            <input
+              className="afs-field__input"
+              value={bible.logline ?? ''}
+              placeholder="整季核心卖点 / 第一眼吸引力"
+              onChange={(e) => updateSeriesBible({ logline: e.target.value })}
+            />
+          </label>
+          <label className="afs-series__field">
+            <span>主题</span>
+            <input
+              className="afs-field__input"
+              value={bible.theme ?? ''}
+              placeholder="复仇、成长、悬疑、爽感节奏等"
+              onChange={(e) => updateSeriesBible({ theme: e.target.value })}
+            />
+          </label>
+          <label className="afs-series__field afs-series__field--wide">
+            <span>整季梗概</span>
+            <textarea
+              className="afs-field__input"
+              rows={4}
+              value={bible.synopsis ?? ''}
+              placeholder="整季故事主线、主角目标、核心反转和结局方向"
+              onChange={(e) => updateSeriesBible({ synopsis: e.target.value })}
+            />
+          </label>
+          <label className="afs-series__field afs-series__field--wide">
+            <span>世界规则</span>
+            <textarea
+              className="afs-field__input"
+              rows={3}
+              value={bible.worldRules ?? ''}
+              placeholder="时代背景、空间规则、能力边界、视觉基调等"
+              onChange={(e) => updateSeriesBible({ worldRules: e.target.value })}
+            />
+          </label>
+          <label className="afs-series__field afs-series__field--wide">
+            <span>连续性规则</span>
+            <textarea
+              className="afs-field__input"
+              rows={4}
+              value={(bible.continuityRules ?? []).join('\n')}
+              placeholder={'每行一条，例如：\nE3 起女主左脸有伤疤\nE5 宴会前不能使用晚宴妆'}
+              onChange={(e) => updateSeriesBible({ continuityRules: splitRuleLines(e.target.value) })}
+            />
+          </label>
+        </div>
+      </section>
+      <section className="afs-series__episodes">
+        <div className="afs-studio__tabbar">
+          <b>剧集规划</b>
+          <span className="afs-studio__hint">
+            当前 {episodes.length} 集，计划 {plannedCount} 集
+          </span>
+        </div>
+        <div className="afs-series__episode-grid">
+          {episodes.map((episode) => {
+            const plan = episode.plan ?? {}
+            const requiredAssetIds = new Set(plan.requiredAssetIds ?? [])
+            const requiredVariantIds = new Set(plan.requiredVariantIds ?? [])
+            return (
+              <article key={episode.id} className="afs-series__episode">
+                <div className="afs-series__episode-head">
+                  <b>E{episode.index + 1}</b>
+                  <span title={episode.title}>{episode.title}</span>
+                </div>
+                <div className="afs-series__plan-grid">
+                  <label className="afs-series__field">
+                    <span>开场钩子</span>
+                    <textarea
+                      className="afs-field__input"
+                      rows={2}
+                      value={plan.hook ?? ''}
+                      onChange={(e) => patchPlan(episode, { hook: e.target.value })}
+                    />
+                  </label>
+                  <label className="afs-series__field">
+                    <span>本集冲突</span>
+                    <textarea
+                      className="afs-field__input"
+                      rows={2}
+                      value={plan.conflict ?? ''}
+                      onChange={(e) => patchPlan(episode, { conflict: e.target.value })}
+                    />
+                  </label>
+                  <label className="afs-series__field afs-series__field--wide">
+                    <span>结尾钩子</span>
+                    <textarea
+                      className="afs-field__input"
+                      rows={2}
+                      value={plan.cliffhanger ?? ''}
+                      onChange={(e) => patchPlan(episode, { cliffhanger: e.target.value })}
+                    />
+                  </label>
+                </div>
+                <div className="afs-series__requirements">
+                  <span>必需项目资产</span>
+                  {assetOptions.length ? (
+                    <div className="afs-series__checks">
+                      {assetOptions.map((asset) => (
+                        <label key={asset.id} className={`afs-series__check${requiredAssetIds.has(asset.id) ? ' is-on' : ''}`}>
+                          <input
+                            type="checkbox"
+                            checked={requiredAssetIds.has(asset.id)}
+                            onChange={() => patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, asset.id) })}
+                          />
+                          {asset.name}
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="afs-studio__hint">项目资产页还没有角色、场景或道具。</p>
+                  )}
+                  {variantOptions.length ? (
+                    <>
+                      <span>必需形态/妆容</span>
+                      <div className="afs-series__checks">
+                        {variantOptions.map((variant) => (
+                          <label key={variant.id} className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={requiredVariantIds.has(variant.id)}
+                              onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
+                            />
+                            {variant.label}
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+    </div>
   )
 }
 

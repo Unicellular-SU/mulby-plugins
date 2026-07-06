@@ -3699,6 +3699,114 @@ select.afs-toolbar__select,
 .afs-studio--center { align-items: center; justify-content: center; color: var(--afs-muted); }
 .afs-studio__hint { color: var(--afs-muted); font-size: 13px; }
 
+.afs-series {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+}
+.afs-series__bible,
+.afs-series__episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.afs-series__spacer {
+  flex: 1 1 auto;
+}
+.afs-series__bible-grid,
+.afs-series__plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.afs-series__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.afs-series__field > span {
+  font-size: 11.5px;
+  color: var(--afs-muted);
+}
+.afs-series__field textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+.afs-series__field--wide {
+  grid-column: 1 / -1;
+}
+.afs-series__episode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+.afs-series__episode {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-md);
+  background: var(--afs-panel);
+}
+.afs-series__episode-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.afs-series__episode-head b {
+  flex: 0 0 auto;
+  color: var(--afs-accent);
+}
+.afs-series__episode-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.afs-series__requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.afs-series__requirements > span {
+  font-size: 11.5px;
+  color: var(--afs-muted);
+}
+.afs-series__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.afs-series__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.afs-series__check.is-on {
+  border-color: color-mix(in srgb, var(--afs-accent) 65%, var(--afs-border));
+  color: var(--afs-text);
+  background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2));
+}
+.afs-series__check input {
+  margin: 0;
+}
+
 /* 旧的第二套 .afs-btn / --primary / --ghost / --sm 定义已删除，统一并入文件上方「按钮 Button」区块。 */
 
 /* 主页 */

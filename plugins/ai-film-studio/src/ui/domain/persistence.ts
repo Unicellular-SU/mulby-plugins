@@ -7,7 +7,7 @@
  *
  * 不考虑老节点图数据兼容（独立命名空间）。资产二进制仍走现有资产库（assetStore/saveAsset）。
  */
-import type { Episode, GenState, ProjectCard, ProjectDoc, ProjectMeta, VideoTrack } from './types'
+import type { Episode, EpisodePlan, GenState, ProjectCard, ProjectDoc, ProjectMeta, SeriesBible, VideoTrack } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
 const INDEX_KEY = 'studio:index'
@@ -85,6 +85,7 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
       updatedAt: now,
     },
     novel: [],
+    seriesBible: { continuityRules: [], plannedEpisodeCount: 1 },
     scripts: [],
     assets: [],
     storyboards: [],
@@ -148,11 +149,53 @@ function syncTracksForStoryboards(storyboards: ProjectDoc['storyboards'], track:
     .map(({ item }, order) => ({ ...item, order }))
 }
 
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const items = value.filter((item): item is string => typeof item === 'string' && !!item.trim()).map((item) => item.trim())
+  return items.length ? [...new Set(items)] : undefined
+}
+
+function normalizeSeriesBible(raw: unknown, episodeCount: number): SeriesBible {
+  const source = raw && typeof raw === 'object' ? (raw as SeriesBible) : {}
+  const planned =
+    typeof source.plannedEpisodeCount === 'number' && Number.isFinite(source.plannedEpisodeCount)
+      ? Math.max(1, Math.floor(source.plannedEpisodeCount))
+      : Math.max(1, episodeCount || 1)
+  return {
+    ...source,
+    continuityRules: stringArray(source.continuityRules) ?? [],
+    plannedEpisodeCount: planned,
+    characterArcNotes: source.characterArcNotes && typeof source.characterArcNotes === 'object' ? source.characterArcNotes : undefined,
+    locationNotes: source.locationNotes && typeof source.locationNotes === 'object' ? source.locationNotes : undefined,
+  }
+}
+
+function normalizeEpisodePlan(raw: unknown): EpisodePlan | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const source = raw as EpisodePlan
+  const plan: EpisodePlan = {
+    ...source,
+    hook: typeof source.hook === 'string' && source.hook.trim() ? source.hook.trim() : undefined,
+    conflict: typeof source.conflict === 'string' && source.conflict.trim() ? source.conflict.trim() : undefined,
+    cliffhanger: typeof source.cliffhanger === 'string' && source.cliffhanger.trim() ? source.cliffhanger.trim() : undefined,
+    requiredAssetIds: stringArray(source.requiredAssetIds),
+    requiredVariantIds: stringArray(source.requiredVariantIds),
+  }
+  const hasContent =
+    !!plan.hook?.trim() ||
+    !!plan.conflict?.trim() ||
+    !!plan.cliffhanger?.trim() ||
+    !!plan.requiredAssetIds?.length ||
+    !!plan.requiredVariantIds?.length
+  return hasContent ? plan : undefined
+}
+
 function episodeFromFlat(doc: ProjectDoc, now = Date.now()): Episode {
   return {
     id: doc.currentEpisodeId ?? newId('ep_'),
     index: 0,
     title: '第 1 集',
+    plan: normalizeEpisodePlan((doc.episodes?.[0] as Episode | undefined)?.plan),
     scripts: doc.scripts,
     storyboards: doc.storyboards,
     storyboardTable: doc.storyboardTable,
@@ -170,6 +213,7 @@ function normalizeEpisode(raw: Episode, index: number): Episode {
     id: String(episode.id ?? newId('ep_')),
     index: typeof episode.index === 'number' ? episode.index : index,
     title: typeof episode.title === 'string' && episode.title.trim() ? episode.title : `第 ${index + 1} 集`,
+    plan: normalizeEpisodePlan(episode.plan),
     scripts: Array.isArray(episode.scripts) ? episode.scripts : [],
     storyboards: Array.isArray(episode.storyboards) ? episode.storyboards : [],
     storyboardTable: Array.isArray(episode.storyboardTable) ? episode.storyboardTable : undefined,
@@ -280,6 +324,7 @@ function normalizeDoc(raw: ProjectDoc): ProjectDoc {
   doc.track = syncTracksForStoryboards(doc.storyboards, doc.track)
   doc.episodes = Array.isArray(doc.episodes) ? (doc.episodes as Episode[]).map((e, i) => normalizeEpisode(e, i)) : []
   if (doc.episodes.length === 0) doc.episodes = [episodeFromFlat(doc)]
+  doc.seriesBible = normalizeSeriesBible(doc.seriesBible, doc.episodes.length)
   if (!doc.currentEpisodeId || !doc.episodes.some((e) => e.id === doc.currentEpisodeId)) doc.currentEpisodeId = doc.episodes[0].id
   const current = doc.episodes.find((e) => e.id === doc.currentEpisodeId) ?? doc.episodes[0]
   const flatHasContent =

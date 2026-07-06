@@ -260,12 +260,32 @@ export interface StoryboardTableScene {
 
 export type EpisodeStatus = 'draft' | 'planned' | 'generating' | 'done'
 
+export interface SeriesBible {
+  logline?: string
+  synopsis?: string
+  theme?: string
+  worldRules?: string
+  continuityRules?: string[]
+  plannedEpisodeCount?: number
+  characterArcNotes?: Record<string, string>
+  locationNotes?: Record<string, string>
+}
+
+export interface EpisodePlan {
+  hook?: string
+  conflict?: string
+  cliffhanger?: string
+  requiredAssetIds?: string[]
+  requiredVariantIds?: string[]
+}
+
 /** 单集生产线。项目级资产仍保留在 ProjectDoc.assets 中跨集共享。 */
 export interface Episode {
   id: string
   index: number
   title: string
   summary?: string
+  plan?: EpisodePlan
   productionRecap?: string
   seriesSkip?: boolean
   status?: EpisodeStatus
@@ -286,6 +306,7 @@ export interface Episode {
 export interface ProjectDoc {
   meta: ProjectMeta
   novel: NovelChapter[]
+  seriesBible?: SeriesBible
   /** 多集迁移期的当前集兼容镜像。 */
   scripts: Script[]
   assets: Asset[]

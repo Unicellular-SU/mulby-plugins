@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
+import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, EpisodePlan, ProjectCard, ProjectDoc, ProjectMeta, Script, SeriesBible, Storyboard, StoryboardCastRef } from '../domain/types'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases } from '../domain/assetAliases'
 import { removeVariantScopeReferences } from '../domain/variantScopes'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
@@ -72,6 +72,8 @@ export interface ProjectState {
   /** 通用：克隆当前 doc → 应用变更 → 落盘（防抖） */
   mutate: (fn: (doc: ProjectDoc) => void) => void
   updateMeta: (patch: Partial<ProjectMeta>) => void
+  updateSeriesBible: (patch: Partial<SeriesBible>) => void
+  updateEpisodePlan: (episodeId: string, patch: Partial<EpisodePlan>) => void
   createEpisode: () => string
   createEpisodes: (count: number) => string[]
   switchEpisode: (id: string) => void
@@ -234,6 +236,40 @@ function emptyEpisode(index: number): Episode {
 
 function reindexEpisodes(episodes: Episode[]): void {
   episodes.sort((a, b) => a.index - b.index).forEach((episode, index) => (episode.index = index))
+}
+
+function compactText(value: string | undefined): string | undefined {
+  const text = value?.trim()
+  return text || undefined
+}
+
+function uniqueStrings(items: unknown[] | undefined): string[] | undefined {
+  if (!Array.isArray(items)) return undefined
+  const values = items.filter((item): item is string => typeof item === 'string' && !!item.trim()).map((item) => item.trim())
+  return values.length ? [...new Set(values)] : undefined
+}
+
+function cleanEpisodePlanPatch(doc: ProjectDoc, patch: Partial<EpisodePlan>): Partial<EpisodePlan> {
+  const assetIds = new Set(doc.assets.filter((asset) => asset.type !== 'audio' && asset.type !== 'clip').map((asset) => asset.id))
+  const variantIds = new Set(doc.assets.flatMap((asset) => (asset.variants ?? []).map((variant) => variant.id)))
+  return {
+    ...patch,
+    hook: 'hook' in patch ? compactText(patch.hook) : patch.hook,
+    conflict: 'conflict' in patch ? compactText(patch.conflict) : patch.conflict,
+    cliffhanger: 'cliffhanger' in patch ? compactText(patch.cliffhanger) : patch.cliffhanger,
+    requiredAssetIds: 'requiredAssetIds' in patch ? uniqueStrings(patch.requiredAssetIds)?.filter((id) => assetIds.has(id)) : patch.requiredAssetIds,
+    requiredVariantIds: 'requiredVariantIds' in patch ? uniqueStrings(patch.requiredVariantIds)?.filter((id) => variantIds.has(id)) : patch.requiredVariantIds,
+  }
+}
+
+function episodePlanHasContent(plan: EpisodePlan | undefined): boolean {
+  return !!(
+    plan?.hook ||
+    plan?.conflict ||
+    plan?.cliffhanger ||
+    plan?.requiredAssetIds?.length ||
+    plan?.requiredVariantIds?.length
+  )
 }
 
 /** 把一条新资产写进指定项目：打开中的项目走 mutate（防抖落盘），未打开的直接读写其持久化 doc。返回资产 id。 */
@@ -783,6 +819,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   updateMeta: (patch) => get().mutate((d) => Object.assign(d.meta, patch)),
+
+  updateSeriesBible: (patch) =>
+    get().mutate((d) => {
+      const current = d.seriesBible ?? { continuityRules: [], plannedEpisodeCount: d.episodes?.length || 1 }
+      d.seriesBible = {
+        ...current,
+        ...patch,
+        logline: 'logline' in patch ? compactText(patch.logline) : current.logline,
+        synopsis: 'synopsis' in patch ? compactText(patch.synopsis) : current.synopsis,
+        theme: 'theme' in patch ? compactText(patch.theme) : current.theme,
+        worldRules: 'worldRules' in patch ? compactText(patch.worldRules) : current.worldRules,
+        continuityRules: 'continuityRules' in patch ? uniqueStrings(patch.continuityRules) ?? [] : current.continuityRules ?? [],
+        plannedEpisodeCount:
+          typeof patch.plannedEpisodeCount === 'number' && Number.isFinite(patch.plannedEpisodeCount)
+            ? Math.max(1, Math.floor(patch.plannedEpisodeCount))
+            : current.plannedEpisodeCount,
+      }
+    }),
+
+  updateEpisodePlan: (episodeId, patch) =>
+    get().mutate((d) => {
+      const episode = d.episodes?.find((item) => item.id === episodeId)
+      if (!episode) return
+      const next = { ...(episode.plan ?? {}), ...cleanEpisodePlanPatch(d, patch) }
+      episode.plan = episodePlanHasContent(next) ? next : undefined
+      episode.updatedAt = Date.now()
+    }),
 
   createEpisode: () => {
     let id = ''

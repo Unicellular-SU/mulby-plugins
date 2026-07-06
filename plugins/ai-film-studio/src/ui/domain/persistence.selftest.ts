@@ -112,6 +112,11 @@ const legacyProject: ProjectDoc = {
   episodes: [
     episode('ep1', 0, { storyboards: [], track: [] }),
     episode('ep2', 1, {
+      plan: {
+        hook: '  open on a reversal  ',
+        requiredAssetIds: ['hero', '', 'hero', 7 as unknown as string],
+        requiredVariantIds: ['gala', 'gala', null as unknown as string],
+      },
       storyboards: [storyboard('ep2-second', 1), storyboard('ep2-first', 0)],
       track: [
         { id: 'stale-track', storyboardIds: ['deleted-sb'], clipIds: [], order: 0 },
@@ -132,6 +137,7 @@ const normalizedProject = await loadProject('legacy')
 const normalizedEp2 = normalizedProject?.episodes?.find((episode) => episode.id === 'ep2')
 check('normalizes missing flat tracks while loading legacy projects', normalizedProject?.track.length === 1 && normalizedProject.track[0].storyboardIds.join(',') === 'flat-sb', JSON.stringify(normalizedProject?.track))
 check('sanitizes malformed flat track fields while loading legacy projects', Array.isArray(normalizedProject?.track[0]?.clipIds) && normalizedProject.track[0].clipIds.length === 0 && normalizedProject.track[0].selectClipId === undefined && normalizedProject.track[0].order === 0, JSON.stringify(normalizedProject?.track[0]))
+check('normalizes missing series bible while loading legacy projects', normalizedProject?.seriesBible?.plannedEpisodeCount === 2 && normalizedProject.seriesBible.continuityRules?.length === 0, JSON.stringify(normalizedProject?.seriesBible))
 check(
   'normalizes non-current episode tracks while loading legacy projects',
   normalizedEp2?.track.length === 2 &&
@@ -141,6 +147,7 @@ check(
   JSON.stringify(normalizedEp2?.track),
 )
 check('sanitizes malformed non-current episode track fields while loading legacy projects', Array.isArray(normalizedEp2?.track[1]?.clipIds) && normalizedEp2.track[1].clipIds.length === 0 && normalizedEp2.track[1].selectClipId === undefined && normalizedEp2.track[1].order === 1, JSON.stringify(normalizedEp2?.track[1]))
+check('normalizes episode plans while loading legacy projects', normalizedEp2?.plan?.hook === 'open on a reversal' && normalizedEp2.plan.requiredAssetIds?.join(',') === 'hero' && normalizedEp2.plan.requiredVariantIds?.join(',') === 'gala', JSON.stringify(normalizedEp2?.plan))
 
 if (failures) {
   console.error(`\npersistence selftest: ${failures} FAILED`)
