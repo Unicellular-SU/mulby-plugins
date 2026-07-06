@@ -223,6 +223,7 @@ export function elementToLibraryEntity(element: ElementRef): LibraryEntity {
     tags: element.tags,
     mediaRefs,
     variants: element.appearanceVariants?.map(elementVariantToLibraryVariant),
+    voiceRef: mediaRefFromAssetId(element.voiceId, 'audio', 'voice'),
     lora: element.lora,
     version: element.version ?? 1,
     archived: element.archived,
@@ -252,7 +253,7 @@ export function libraryEntityToElement(entity: LibraryEntity): ElementRef {
     updatedAt: entity.updatedAt,
     identity: entity.identity,
     views: front || side || back ? { front, side, back } : undefined,
-    voiceId: entity.legacyElement?.voiceId ?? entity.voiceRef?.assetId,
+    voiceId: entity.voiceRef?.assetId ?? entity.legacyElement?.voiceId,
     lora: entity.lora,
     appearanceVariants: entity.variants?.map((variant) => ({
       id: variant.id,
@@ -334,6 +335,9 @@ export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset
     asset.audioFilePath = voice?.localPath
     asset.audioUrl = voice?.url
     asset.state = voice?.localPath || voice?.url ? 'done' : asset.state
+  } else if (type === 'role' && entity.voiceRef?.assetId) {
+    asset.voiceAssetId = entity.voiceRef.assetId
+    asset.audioBindState = 'done'
   }
   return asset
 }
@@ -386,7 +390,12 @@ export function promoteProjectAssetToEntity(asset: Asset, existing?: LibraryEnti
     prompt: asset.prompt,
     mediaRefs,
     variants: asset.variants?.map(assetVariantToLibraryVariant),
-    voiceRef: asset.type === 'audio' ? { role: 'audio', localPath: asset.audioFilePath, url: asset.audioUrl, createdAt: ts } : existing?.voiceRef,
+    voiceRef:
+      asset.type === 'audio'
+        ? { role: 'audio', localPath: asset.audioFilePath, url: asset.audioUrl, createdAt: ts }
+        : asset.type === 'role' && asset.voiceAssetId
+          ? mediaRefFromAssetId(asset.voiceAssetId, 'audio', 'voice')
+          : existing?.voiceRef,
     lora: existing?.lora,
     version: (existing?.version ?? 0) + 1,
     archived: existing?.archived,

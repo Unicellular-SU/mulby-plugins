@@ -1063,6 +1063,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让 Agent 在正式生成分镜前读取大纲/分镜表时，就能把“主角/女主/场景”等名称绑定到已有项目资产、全局身份和出场历史，减少从设计层阶段开始误建重复资产。
 - 自测新增第二集分镜表断言，验证 `主角` 能解析到 `hero`、`el-hero` 和 `E2 Second · Gala`。
 
+第八十七轮提交继续落地 P2 的身份资产音色映射：
+
+- `elementToLibraryEntity` 现在会把旧 `ElementRef.voiceId` 映射为 `LibraryEntity.voiceRef`，让资产中心身份层能显式知道角色绑定的音色引用。
+- `createProjectAssetFromEntity` 在从角色身份导入项目资产时，会把 `voiceRef.assetId` 恢复为项目角色的 `voiceAssetId`；`promoteProjectAssetToEntity` 在项目角色发布回身份资产时，也会把 `voiceAssetId` 写回 `voiceRef`。
+- 自测新增音色往返断言，验证旧身份资产、项目角色资产和发布后的身份资产都能保留同一个角色的音色绑定，不再只依赖 legacyElement 回退。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
