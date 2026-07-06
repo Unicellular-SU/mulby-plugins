@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FolderOpen, ChevronRight, ChevronDown, Pencil, BookmarkPlus } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
-import { useAssetStore, type CanvasOutputViewRole, type ElementRef } from '../store/assetStore'
+import { useAssetStore, type CanvasOutputViewRole, type ElementKind } from '../store/assetStore'
 import type { Asset } from '../domain/types'
 import { basename } from '../services/download'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../services/mediaUrl'
 import { useProjectStore } from '../store/projectStore'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
+import { useAssetHubStore } from '../store/assetHubStore'
+import type { LibraryEntity, LibraryEntityKind } from '../services/assetHub'
 
 const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
 
@@ -29,7 +31,7 @@ function normalizeViewRole(value: unknown): CanvasOutputViewRole {
   return 'primary'
 }
 
-function metaKind(value: unknown): ElementRef['kind'] | undefined {
+function metaKind(value: unknown): ElementKind | undefined {
   if (value === 'character' || value === 'scene' || value === 'prop') return value
   return undefined
 }
@@ -53,7 +55,7 @@ const projectAssetTypeLabels: Record<ProjectImageAsset['type'], string> = {
   prop: '道具',
 }
 
-function projectTypeFromMetaKind(kind: ElementRef['kind'] | undefined): ProjectImageAsset['type'] | undefined {
+function projectTypeFromMetaKind(kind: ElementKind | undefined): ProjectImageAsset['type'] | undefined {
   if (kind === 'character') return 'role'
   if (kind === 'scene' || kind === 'prop') return kind
   return undefined
@@ -63,7 +65,7 @@ function isProjectImageAsset(asset: Asset): asset is ProjectImageAsset {
   return (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId
 }
 
-function uniqueElements(items: ElementRef[]): ElementRef[] {
+function uniqueEntities(items: LibraryEntity[]): LibraryEntity[] {
   const seen = new Set<string>()
   return items.filter((item) => {
     if (seen.has(item.id)) return false
@@ -72,44 +74,50 @@ function uniqueElements(items: ElementRef[]): ElementRef[] {
   })
 }
 
-function resolveCanvasSaveTarget(elements: ElementRef[], value: PortValue) {
+function entityKindMatches(kind: ElementKind | undefined, entityKind: LibraryEntityKind) {
+  if (!kind) return entityKind !== 'voice'
+  if (kind === 'character') return entityKind === 'character'
+  return entityKind === kind
+}
+
+function resolveCanvasSaveTarget(entities: LibraryEntity[], value: PortValue) {
   if (value.type !== 'image' || !value.assetId) return null
   const meta = rec(value.meta)
   const entityId = asStr(meta.libraryEntityId)
   const charId = asStr(meta.charId)
   const name = asStr(meta.name)
   const kind = metaKind(meta.kind)
-  let matches = entityId ? elements.filter((element) => element.id === entityId) : []
+  let matches = entityId ? entities.filter((entity) => entity.id === entityId) : []
   if (!matches.length && (charId || name)) {
-    matches = elements.filter((element) => {
-      if (kind && element.kind !== kind) return false
-      const byCharId = charId && (element.id === charId || element.charId === charId || element.name === charId)
-      const byName = name && (element.name === name || element.aliases?.includes(name))
+    matches = entities.filter((entity) => {
+      if (!entityKindMatches(kind, entity.kind)) return false
+      const byCharId = charId && (entity.id === charId || entity.legacyElement?.charId === charId || entity.name === charId)
+      const byName = name && (entity.name === name || entity.aliases?.includes(name))
       return !!byCharId || !!byName
     })
   }
-  const unique = uniqueElements(matches)
+  const unique = uniqueEntities(matches)
   if (unique.length !== 1) return null
-  const element = unique[0]
+  const entity = unique[0]
   const variantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
   const variantLabel =
     asStr(meta.variantLabel) ||
-    (variantId ? element.appearanceVariants?.find((variant) => variant.id === variantId)?.label : undefined) ||
+    (variantId ? entity.variants?.find((variant) => variant.id === variantId)?.label : undefined) ||
     variantId ||
     undefined
   const view = normalizeViewRole(meta.view)
   return {
     target: {
       kind: 'libraryEntity' as const,
-      entityId: element.id,
+      entityId: entity.id,
       libraryVariantId: variantId || undefined,
       variantLabel,
       view,
     },
     label: variantId ? `保存为${variantLabel || variantId}${viewLabels[view]}` : `保存为${viewLabels[view]}`,
     title: variantId
-      ? `保存到身份资产「${element.name}」的「${variantLabel || variantId}」${viewLabels[view]}`
-      : `保存到身份资产「${element.name}」的${viewLabels[view]}`,
+      ? `保存到身份资产「${entity.name}」的「${variantLabel || variantId}」${viewLabels[view]}`
+      : `保存到身份资产「${entity.name}」的${viewLabels[view]}`,
   }
 }
 
@@ -467,7 +475,11 @@ export function OutputView({
   onEditText?: (text: string) => string | null
 }) {
   const openLightbox = useUiStore((s) => s.openLightbox)
-  const elements = useAssetStore((s) => s.elements)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const hubEntities = useAssetHubStore((s) => s.entities)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
+  const assetStoreLoaded = useAssetStore((s) => s.loaded)
+  const loadAssetStore = useAssetStore((s) => s.load)
   const promoteCanvasOutputs = useAssetStore((s) => s.promoteCanvasOutputs)
   const projectDoc = useProjectStore((s) => s.doc)
   const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
@@ -486,6 +498,9 @@ export function OutputView({
   const selectedProjectTargetKey =
     explicitProjectTargetKey ?? (hintedProjectTargetKey || (projectSaveTargets.length === 1 ? projectSaveTargets[0].key : ''))
   const selectedProjectTarget = projectSaveTargets.find((target) => target.key === selectedProjectTargetKey)
+  useEffect(() => {
+    if (!hubLoaded) void refreshAssetHub()
+  }, [hubLoaded, refreshAssetHub])
 
   if (value.type === 'json' || value.type === 'text' || (!value.items && value.text && !value.url)) {
     return <EditableValue value={value} onEditText={onEditText} />
@@ -518,12 +533,14 @@ export function OutputView({
       if (i >= 0) openLightbox(lbItems, i)
     }
     const saveToIdentity = async (it: PortValue) => {
-      const resolved = resolveCanvasSaveTarget(elements, it)
+      const resolved = resolveCanvasSaveTarget(hubEntities, it)
       if (!resolved || !it.assetId) {
         window.mulby?.notification?.show('该输出缺少明确的身份资产目标，请从资产中心拖入身份资产或在身份资产上生成后再保存', 'warning')
         return
       }
+      if (!assetStoreLoaded) await loadAssetStore()
       const count = await promoteCanvasOutputs([{ assetId: it.assetId, meta: it.meta }], resolved.target)
+      if (count > 0) await refreshAssetHub()
       window.mulby?.notification?.show(count > 0 ? `已${resolved.label}` : '没有可保存的画布输出', count > 0 ? 'success' : 'warning')
     }
     const saveToProjectAsset = (it: PortValue) => {
@@ -564,7 +581,7 @@ export function OutputView({
         ) : null}
         <div className="afs-gallery">
           {mediaList.map((it, i) => {
-            const resolved = resolveCanvasSaveTarget(elements, it)
+            const resolved = resolveCanvasSaveTarget(hubEntities, it)
             const hasIdentityHint = !!it.meta?.libraryEntityId || !!it.meta?.charId || !!it.meta?.name
             const actions: MediaTileAction[] = []
             if (it.type === 'image' && hasIdentityHint) {

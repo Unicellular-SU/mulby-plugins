@@ -653,6 +653,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 项目资产卡的身份链接标签会展示资产中心实体名称和项目快照版本；如果资产中心尚未加载，会按需刷新快照。
 - “发布/更新到资产中心身份资产”完成后会刷新 `assetHubStore`，避免项目资产卡和其他资产中心入口继续显示旧身份快照。
 
+第十九轮提交继续落地 P3/P6 的画布回写读取收敛：
+
+- 画布检查器中“保存到身份资产”的目标匹配不再直接订阅 `useAssetStore.elements`，改为使用 `assetHubStore.entities` 的身份资产快照。
+- 目标解析会基于 `libraryEntityId`、旧 `charId`、名称/别名和身份类型匹配唯一 `LibraryEntity`，并读取 `LibraryVariant` 标签显示将要保存到的变体/视图。
+- 实际写入仍通过兼容的 `promoteCanvasOutputs` 更新旧 `elements:library` 存储；写入前确保旧 store 已加载，写入成功后刷新 `assetHubStore`，让资产中心视图和后续画布回写看到新版本。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
