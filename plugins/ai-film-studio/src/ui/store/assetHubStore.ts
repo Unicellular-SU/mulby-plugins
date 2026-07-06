@@ -4,6 +4,7 @@ import {
   type AssetHubSnapshot,
   type IdentityAssetUsage,
   type LibraryEntity,
+  type MediaAssetUsage,
 } from '../services/assetHub'
 import type { AssetRecord, Board } from '../services/assetRegistry'
 import type { ElementRef } from './assetStore'
@@ -14,6 +15,7 @@ interface AssetHubState {
   elements: ElementRef[]
   entities: LibraryEntity[]
   usageByEntity: Record<string, IdentityAssetUsage>
+  usageByMedia: Record<string, MediaAssetUsage>
   loading: boolean
   loaded: boolean
   error?: string
@@ -22,13 +24,14 @@ interface AssetHubState {
   getUsage: (entityId: string) => IdentityAssetUsage | undefined
 }
 
-function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAssets' | 'boards' | 'elements' | 'entities' | 'usageByEntity'> {
+function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAssets' | 'boards' | 'elements' | 'entities' | 'usageByEntity' | 'usageByMedia'> {
   return {
     mediaAssets: snapshot.mediaAssets,
     boards: snapshot.boards,
     elements: snapshot.elements,
     entities: snapshot.entities,
     usageByEntity: snapshot.usageByEntity,
+    usageByMedia: snapshot.usageByMedia,
   }
 }
 
@@ -38,6 +41,7 @@ export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   elements: [],
   entities: [],
   usageByEntity: {},
+  usageByMedia: {},
   loading: false,
   loaded: false,
 

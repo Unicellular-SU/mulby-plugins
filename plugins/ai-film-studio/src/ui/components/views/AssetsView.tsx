@@ -35,7 +35,7 @@ import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../service
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
-import { libraryEntityToElement } from '../../services/assetHub'
+import { libraryEntityToElement, type MediaAssetUsage } from '../../services/assetHub'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -96,6 +96,33 @@ export function RefThumb({ assetId }: { assetId?: string }) {
   return url ? <img src={url} alt="" /> : <div className="afs-lib__ph"><ImageIcon size={20} /></div>
 }
 
+function mediaRecordKey(rec: Pick<AssetRecord, 'id' | 'assetId' | 'localPath' | 'url'>): string {
+  return rec.assetId || rec.localPath || rec.url || rec.id
+}
+
+function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {
+  if (!usage) return '未被引用'
+  const parts = [
+    usage.projectAssetCount ? `${usage.projectAssetCount} 项目资产` : '',
+    usage.storyboardCount ? `${usage.storyboardCount} 分镜/片段` : '',
+    usage.libraryEntityCount ? `${usage.libraryEntityCount} 身份资产` : '',
+    usage.canvasNodeCount ? `${usage.canvasNodeCount} 画布节点` : '',
+    usage.snapshotCount ? `${usage.snapshotCount} 快照` : '',
+  ].filter(Boolean)
+  return parts.length ? `已被 ${parts.join(' / ')} 引用` : '未被引用'
+}
+
+function mediaUsageTitle(usage: MediaAssetUsage | undefined): string {
+  if (!usage) return '暂未发现项目、身份资产或画布引用'
+  const lines = [
+    ...usage.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`),
+    ...usage.libraryEntities.map((entity) => `身份资产 ${entity.entityName}：${entity.roles.join('、') || entity.entityId}`),
+    ...usage.canvasProjects.map((project) => `画布 ${project.projectName}：${project.nodeTitles.join('、')}`),
+    ...usage.snapshots.map((snapshot) => `快照 ${snapshot.snapshotName}：${snapshot.nodeTitles.join('、')}`),
+  ]
+  return lines.length ? lines.join('\n') : '暂未发现项目、身份资产或画布引用'
+}
+
 export default function AssetsView() {
   const [tab, setTab] = useState<'assets' | 'elements' | 'prompts'>('assets')
   return (
@@ -133,6 +160,7 @@ function AssetGallery() {
   const moveAsset = useAssetStore((s) => s.moveAsset)
   const assets = useAssetHubStore((s) => s.mediaAssets)
   const boards = useAssetHubStore((s) => s.boards)
+  const usageByMedia = useAssetHubStore((s) => s.usageByMedia)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const refreshHub = useAssetHubStore((s) => s.refresh)
   const saveProject = useGraphStore((s) => s.saveProject)
@@ -340,6 +368,7 @@ function AssetGallery() {
             ) : (
               <div className="afs-avtiles">
                 {filtered.map((a) => {
+                  const mediaUsage = usageByMedia[mediaRecordKey(a)]
                   return (
                     <div key={a.id} className="afs-avcard">
                       <div className="afs-avcard__thumb" onClick={() => setPreview(a)} title="预览">
@@ -352,6 +381,9 @@ function AssetGallery() {
                       </div>
                       <div className="afs-avcard__meta">
                         {a.projectName ? a.projectName : a.role === 'uploaded' ? '本地上传' : '生成'} · {fmtBytes(a.bytes)}
+                      </div>
+                      <div className={`afs-avcard__usage${mediaUsage ? ' is-linked' : ''}`} title={mediaUsageTitle(mediaUsage)}>
+                        {mediaUsageLabel(mediaUsage)}
                       </div>
                       {boards.length > 0 && (
                         <Select

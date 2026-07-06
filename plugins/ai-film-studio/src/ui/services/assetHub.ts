@@ -90,12 +90,34 @@ export interface IdentityAssetUsage {
   snapshots: AssetHubSnapshotUsage[]
 }
 
+export interface AssetHubLibraryEntityMediaUsage {
+  entityId: string
+  entityName: string
+  roles: string[]
+}
+
+export interface MediaAssetUsage {
+  mediaKey: string
+  projectCount: number
+  projectAssetCount: number
+  storyboardCount: number
+  libraryEntityCount: number
+  canvasProjectCount: number
+  canvasNodeCount: number
+  snapshotCount: number
+  projects: AssetHubProjectUsage[]
+  libraryEntities: AssetHubLibraryEntityMediaUsage[]
+  canvasProjects: AssetHubCanvasUsage[]
+  snapshots: AssetHubSnapshotUsage[]
+}
+
 export interface AssetHubSnapshot {
   mediaAssets: AssetRecord[]
   boards: Board[]
   elements: ElementRef[]
   entities: LibraryEntity[]
   usageByEntity: Record<string, IdentityAssetUsage>
+  usageByMedia: Record<string, MediaAssetUsage>
 }
 
 async function kvGet<T>(key: string): Promise<T | null> {
@@ -372,6 +394,8 @@ export function promoteProjectAssetToEntity(asset: Asset, existing?: LibraryEnti
 
 interface CanvasPortValue {
   assetId?: string
+  localPath?: string
+  url?: string
   items?: CanvasPortValue[]
   meta?: Record<string, unknown>
 }
@@ -400,9 +424,22 @@ function emptyUsage(entityId: string): IdentityAssetUsage {
   return { entityId, projectCount: 0, assetCount: 0, canvasProjectCount: 0, canvasNodeCount: 0, snapshotCount: 0, projects: [], canvasProjects: [], snapshots: [] }
 }
 
+function mediaKey(ref: { assetId?: string; localPath?: string; url?: string } | undefined): string {
+  return ref?.assetId || ref?.localPath || ref?.url || ''
+}
+
+function emptyMediaUsage(mediaKey: string): MediaAssetUsage {
+  return { mediaKey, projectCount: 0, projectAssetCount: 0, storyboardCount: 0, libraryEntityCount: 0, canvasProjectCount: 0, canvasNodeCount: 0, snapshotCount: 0, projects: [], libraryEntities: [], canvasProjects: [], snapshots: [] }
+}
+
 function usageFor(map: Record<string, IdentityAssetUsage>, entityId: string): IdentityAssetUsage {
   map[entityId] ??= emptyUsage(entityId)
   return map[entityId]
+}
+
+function mediaUsageFor(map: Record<string, MediaAssetUsage>, key: string): MediaAssetUsage {
+  map[key] ??= emptyMediaUsage(key)
+  return map[key]
 }
 
 function addStudioUsage(map: Record<string, IdentityAssetUsage>, entityId: string, projectId: string, projectName: string, assetId: string, assetName: string): void {
@@ -418,6 +455,81 @@ function addStudioUsage(map: Record<string, IdentityAssetUsage>, entityId: strin
     usage.assetCount += 1
   }
   usage.projectCount = usage.projects.length
+}
+
+function addMediaProjectAssetUsage(map: Record<string, MediaAssetUsage>, key: string, projectId: string, projectName: string, assetId: string, assetName: string): void {
+  if (!key) return
+  const usage = mediaUsageFor(map, key)
+  let project = usage.projects.find((item) => item.projectId === projectId)
+  if (!project) {
+    project = { projectId, projectName, assetIds: [], assetNames: [] }
+    usage.projects.push(project)
+  }
+  if (!project.assetIds.includes(assetId)) {
+    project.assetIds.push(assetId)
+    project.assetNames.push(assetName)
+    usage.projectAssetCount += 1
+  }
+  usage.projectCount = usage.projects.length
+}
+
+function addMediaStoryboardUsage(map: Record<string, MediaAssetUsage>, key: string, projectId: string, projectName: string, storyboardId: string, label: string): void {
+  if (!key) return
+  const usage = mediaUsageFor(map, key)
+  let project = usage.projects.find((item) => item.projectId === projectId)
+  if (!project) {
+    project = { projectId, projectName, assetIds: [], assetNames: [] }
+    usage.projects.push(project)
+  }
+  if (!project.assetIds.includes(storyboardId)) {
+    project.assetIds.push(storyboardId)
+    project.assetNames.push(label)
+    usage.storyboardCount += 1
+  }
+  usage.projectCount = usage.projects.length
+}
+
+function addMediaLibraryEntityUsage(map: Record<string, MediaAssetUsage>, key: string, entityId: string, entityName: string, role: string): void {
+  if (!key) return
+  const usage = mediaUsageFor(map, key)
+  let entity = usage.libraryEntities.find((item) => item.entityId === entityId)
+  if (!entity) {
+    entity = { entityId, entityName, roles: [] }
+    usage.libraryEntities.push(entity)
+  }
+  if (role && !entity.roles.includes(role)) entity.roles.push(role)
+  usage.libraryEntityCount = usage.libraryEntities.length
+}
+
+function addMediaCanvasUsage(map: Record<string, MediaAssetUsage>, key: string, projectId: string, projectName: string, node: CanvasNode): void {
+  if (!key) return
+  const usage = mediaUsageFor(map, key)
+  let project = usage.canvasProjects.find((item) => item.projectId === projectId)
+  if (!project) {
+    project = { projectId, projectName, nodeIds: [], nodeTitles: [] }
+    usage.canvasProjects.push(project)
+  }
+  const nodeId = node.id ?? ''
+  if (nodeId && project.nodeIds.includes(nodeId)) return
+  if (nodeId) project.nodeIds.push(nodeId)
+  project.nodeTitles.push(node.data?.title ?? node.data?.kind ?? '未命名节点')
+  usage.canvasProjectCount = usage.canvasProjects.length
+  usage.canvasNodeCount += 1
+}
+
+function addMediaSnapshotUsage(map: Record<string, MediaAssetUsage>, key: string, snapshot: CanvasSnapshot, node: CanvasNode): void {
+  if (!key) return
+  const usage = mediaUsageFor(map, key)
+  let item = usage.snapshots.find((entry) => entry.snapshotId === snapshot.id)
+  if (!item) {
+    item = { snapshotId: snapshot.id ?? '', snapshotName: snapshot.name ?? '未命名快照', projectId: snapshot.projectId, nodeIds: [], nodeTitles: [] }
+    usage.snapshots.push(item)
+  }
+  const nodeId = node.id ?? ''
+  if (nodeId && item.nodeIds.includes(nodeId)) return
+  if (nodeId) item.nodeIds.push(nodeId)
+  item.nodeTitles.push(node.data?.title ?? node.data?.kind ?? '未命名节点')
+  usage.snapshotCount = usage.snapshots.length
 }
 
 function normalizeKey(value: unknown): string {
@@ -542,6 +654,77 @@ export async function loadIdentityAssetUsages(elements: ElementRef[]): Promise<R
   return usages
 }
 
+export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<Record<string, MediaAssetUsage>> {
+  const usages: Record<string, MediaAssetUsage> = {}
+  const cards = await loadIndex()
+  for (const card of cards) {
+    const doc = await loadProject(card.id)
+    if (!doc) continue
+    for (const asset of doc.assets ?? []) {
+      addMediaProjectAssetUsage(usages, mediaKey({ assetId: asset.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
+      for (const image of asset.images ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: image.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
+      for (const variant of asset.variants ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: variant.refImageId }), doc.meta.id, doc.meta.name, asset.id, `${asset.name} / ${variant.label}`)
+      addMediaProjectAssetUsage(usages, mediaKey({ localPath: asset.audioFilePath, url: asset.audioUrl }), doc.meta.id, doc.meta.name, asset.id, asset.name)
+    }
+    const seenStoryboards = new Set<string>()
+    const storyboards = [
+      ...(doc.storyboards ?? []),
+      ...(doc.episodes ?? []).flatMap((episode) => episode.storyboards ?? []),
+    ].filter((storyboard) => {
+      if (seenStoryboards.has(storyboard.id)) return false
+      seenStoryboards.add(storyboard.id)
+      return true
+    })
+    for (const storyboard of storyboards) {
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: storyboard.keyframeImageId }), doc.meta.id, doc.meta.name, storyboard.id, `分镜 #${storyboard.index + 1}`)
+    }
+    const seenClips = new Set<string>()
+    const clips = [
+      ...(doc.clips ?? []),
+      ...(doc.episodes ?? []).flatMap((episode) => episode.clips ?? []),
+    ].filter((clip) => {
+      if (seenClips.has(clip.id)) return false
+      seenClips.add(clip.id)
+      return true
+    })
+    for (const clip of clips) {
+      addMediaStoryboardUsage(usages, mediaKey({ localPath: clip.videoFilePath, url: clip.videoUrl }), doc.meta.id, doc.meta.name, clip.id, `视频片段 ${clip.id}`)
+    }
+    for (const [flowId, flow] of Object.entries(doc.imageFlows ?? {})) {
+      for (const node of flow?.nodes ?? []) {
+        addMediaStoryboardUsage(usages, mediaKey({ assetId: node.assetId }), doc.meta.id, doc.meta.name, node.id, `精修流 ${flowId}`)
+      }
+    }
+  }
+
+  for (const entity of entities) {
+    for (const ref of entity.mediaRefs ?? []) addMediaLibraryEntityUsage(usages, mediaKey(ref), entity.id, entity.name, ref.label ?? ref.role)
+    for (const variant of entity.variants ?? []) {
+      for (const ref of variant.mediaRefs ?? []) addMediaLibraryEntityUsage(usages, mediaKey(ref), entity.id, entity.name, `${variant.label}/${ref.label ?? ref.role}`)
+    }
+    if (entity.voiceRef) addMediaLibraryEntityUsage(usages, mediaKey(entity.voiceRef), entity.id, entity.name, entity.voiceRef.label ?? entity.voiceRef.role)
+  }
+
+  for (const project of await loadCanvasProjects()) {
+    const projectId = project.id ?? ''
+    const projectName = project.name ?? '未命名画布'
+    for (const node of project.nodes ?? []) {
+      const ports: CanvasPortValue[] = []
+      for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
+      for (const port of ports) addMediaCanvasUsage(usages, mediaKey(port), projectId, projectName, node)
+    }
+  }
+  const snapshots = (await kvGet<CanvasSnapshot[]>(KEY_SNAPSHOTS)) ?? []
+  for (const snapshot of snapshots) {
+    for (const node of snapshot.nodes ?? []) {
+      const ports: CanvasPortValue[] = []
+      for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
+      for (const port of ports) addMediaSnapshotUsage(usages, mediaKey(port), snapshot, node)
+    }
+  }
+  return usages
+}
+
 export async function loadAssetHub(): Promise<AssetHubSnapshot> {
   const [mediaAssets, boards, elements] = await Promise.all([
     loadRegistry(),
@@ -551,5 +734,6 @@ export async function loadAssetHub(): Promise<AssetHubSnapshot> {
   const normalizedElements = Array.isArray(elements) ? elements : []
   const entities = normalizedElements.map(elementToLibraryEntity)
   const usageByEntity = await loadIdentityAssetUsages(normalizedElements)
-  return { mediaAssets, boards, elements: normalizedElements, entities, usageByEntity }
+  const usageByMedia = await loadMediaAssetUsages(entities)
+  return { mediaAssets, boards, elements: normalizedElements, entities, usageByEntity, usageByMedia }
 }
