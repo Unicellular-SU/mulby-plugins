@@ -647,7 +647,11 @@ export function OutputView({
           nodeId,
           port,
           it.assetId,
-          { projectAssetId: selectedProjectTarget.assetId, projectVariantId: selectedProjectTarget.variantId },
+          {
+            projectId: projectDoc?.meta.id,
+            projectAssetId: selectedProjectTarget.assetId,
+            projectVariantId: selectedProjectTarget.variantId,
+          },
           itemIndex
         )
       }

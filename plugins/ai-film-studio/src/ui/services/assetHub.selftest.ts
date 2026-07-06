@@ -1,6 +1,6 @@
-import type { Asset } from '../domain/types'
+import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from './assetHub'
+import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -78,6 +78,37 @@ check('maps promoted entity back to ElementRef with aliases', savedElement.alias
 check('maps promoted entity version back to ElementRef', savedElement.version === 2, JSON.stringify(savedElement))
 check('maps promoted entity archive state back to ElementRef', savedElement.archived === true, JSON.stringify(savedElement))
 check('maps promoted variants back to appearance variants', savedElement.appearanceVariants?.[0]?.id === 'injured' && savedElement.appearanceVariants[0].refAssetIds?.[0] === 'injured-img', JSON.stringify(savedElement.appearanceVariants))
+
+const lineageProject = {
+  meta: { id: 'p_series', name: '悬疑短剧' },
+  assets: [{
+    id: 'a_hero',
+    type: 'role',
+    name: '女主',
+    state: 'done',
+    variants: [{ id: 'gala', label: '晚宴妆', state: 'done', refImageId: 'gala-img' }],
+  }],
+} as ProjectDoc
+const lineageBase = resolveCanvasProjectAssetMediaUsage(
+  { assetId: 'hero-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', purpose: 'approved' } },
+  lineageProject
+)
+check('resolves canvas project asset lineage', lineageBase?.projectName === '悬疑短剧' && lineageBase.assetName === '女主', JSON.stringify(lineageBase))
+const lineageVariant = resolveCanvasProjectAssetMediaUsage(
+  { assetId: 'gala-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', projectVariantId: 'gala', purpose: 'approved' } },
+  lineageProject
+)
+check('resolves canvas project variant lineage', lineageVariant?.assetName === '女主 / 晚宴妆', JSON.stringify(lineageVariant))
+const candidateLineage = resolveCanvasProjectAssetMediaUsage(
+  { assetId: 'candidate-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', purpose: 'candidate' } },
+  lineageProject
+)
+check('ignores unapproved canvas project lineage', candidateLineage === null, JSON.stringify(candidateLineage))
+const missingVariantLineage = resolveCanvasProjectAssetMediaUsage(
+  { assetId: 'old-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', projectVariantId: 'missing', purpose: 'approved' } },
+  lineageProject
+)
+check('ignores missing project variant lineage', missingVariantLineage === null, JSON.stringify(missingVariantLineage))
 
 if (failures) {
   console.error(`\nassetHub selftest: ${failures} FAILED`)

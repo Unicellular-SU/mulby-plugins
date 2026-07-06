@@ -584,7 +584,7 @@ interface GraphState {
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
   /** 标记画布媒体产物已被显式采纳为项目资产/变体，保留 lineage 供后续使用图谱读取。 */
-  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => boolean
+  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectId?: string; projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => boolean
   setNodeImage: (id: string, dataUrl: string, port?: string) => Promise<void>
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
@@ -704,19 +704,24 @@ function patchNode(id: string, patch: Partial<FilmNodeData>) {
 function markPortValueAsProjectAsset(
   value: PortValue,
   assetId: string,
-  target: { projectAssetId: string; projectVariantId?: string },
+  target: { projectId?: string; projectAssetId: string; projectVariantId?: string },
   itemIndex?: number
 ): { value: PortValue; changed: boolean } {
-  const metaPatch = (item: PortValue): PortValue => ({
-    ...item,
-    meta: {
-      ...(item.meta ?? {}),
-      mediaAssetId: item.meta?.mediaAssetId ?? item.assetId,
-      projectAssetId: target.projectAssetId,
-      projectVariantId: target.projectVariantId,
-      purpose: 'approved',
-    },
-  })
+  const metaPatch = (item: PortValue): PortValue => {
+    const existingProjectId = typeof item.meta?.projectId === 'string' ? item.meta.projectId : undefined
+    const projectId = target.projectId ?? existingProjectId
+    return {
+      ...item,
+      meta: {
+        ...(item.meta ?? {}),
+        mediaAssetId: item.meta?.mediaAssetId ?? item.assetId,
+        ...(projectId ? { projectId } : {}),
+        projectAssetId: target.projectAssetId,
+        projectVariantId: target.projectVariantId,
+        purpose: 'approved',
+      },
+    }
+  }
   if (value.items?.length) {
     const idx = typeof itemIndex === 'number' ? itemIndex : value.items.findIndex((item) => item.assetId === assetId)
     const item = value.items[idx]

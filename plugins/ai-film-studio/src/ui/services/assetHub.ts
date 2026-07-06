@@ -1,4 +1,4 @@
-import type { Asset, AssetImage, AssetVariant } from '../domain/types'
+import type { Asset, AssetImage, AssetVariant, ProjectDoc } from '../domain/types'
 import { loadIndex, loadProject, newId } from '../domain/persistence'
 import type { ElementKind, ElementRef, ElementVariant } from '../store/assetStore'
 import { loadBoards, loadRegistry, type AssetRecord, type Board } from './assetRegistry'
@@ -392,7 +392,7 @@ export function promoteProjectAssetToEntity(asset: Asset, existing?: LibraryEnti
   }
 }
 
-interface CanvasPortValue {
+export interface CanvasPortValue {
   assetId?: string
   localPath?: string
   url?: string
@@ -418,6 +418,40 @@ interface CanvasSnapshot {
   projectId?: string
   name?: string
   nodes?: CanvasNode[]
+}
+
+export interface CanvasProjectAssetMediaUsage {
+  projectId: string
+  projectName: string
+  assetId: string
+  assetName: string
+}
+
+function lineageString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function canvasLineageProjectId(port: CanvasPortValue): string {
+  return lineageString(port.meta?.projectId)
+}
+
+function projectAssetUsageName(asset: Asset, variantId: string): string | null {
+  if (!variantId) return asset.name
+  const variant = asset.variants?.find((item) => item.id === variantId)
+  return variant ? `${asset.name} / ${variant.label}` : null
+}
+
+export function resolveCanvasProjectAssetMediaUsage(port: CanvasPortValue, project: ProjectDoc | undefined): CanvasProjectAssetMediaUsage | null {
+  const projectId = canvasLineageProjectId(port)
+  const projectAssetId = lineageString(port.meta?.projectAssetId)
+  if (!projectId || !projectAssetId || !project || project.meta.id !== projectId) return null
+  const purpose = lineageString(port.meta?.purpose)
+  if (purpose && purpose !== 'approved') return null
+  const asset = project.assets?.find((item) => item.id === projectAssetId)
+  if (!asset) return null
+  const assetName = projectAssetUsageName(asset, lineageString(port.meta?.projectVariantId))
+  if (!assetName) return null
+  return { projectId, projectName: project.meta.name, assetId: asset.id, assetName }
 }
 
 function emptyUsage(entityId: string): IdentityAssetUsage {
@@ -657,9 +691,12 @@ export async function loadIdentityAssetUsages(elements: ElementRef[]): Promise<R
 export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<Record<string, MediaAssetUsage>> {
   const usages: Record<string, MediaAssetUsage> = {}
   const cards = await loadIndex()
+  const projectDocs = new Map<string, ProjectDoc>()
   for (const card of cards) {
     const doc = await loadProject(card.id)
     if (!doc) continue
+    projectDocs.set(card.id, doc)
+    projectDocs.set(doc.meta.id, doc)
     for (const asset of doc.assets ?? []) {
       addMediaProjectAssetUsage(usages, mediaKey({ assetId: asset.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
       for (const image of asset.images ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: image.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
@@ -725,7 +762,14 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
     for (const node of project.nodes ?? []) {
       const ports: CanvasPortValue[] = []
       for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
-      for (const port of ports) addMediaCanvasUsage(usages, mediaKey(port), projectId, projectName, node)
+      for (const port of ports) {
+        const key = mediaKey(port)
+        addMediaCanvasUsage(usages, key, projectId, projectName, node)
+        const projectUsage = resolveCanvasProjectAssetMediaUsage(port, projectDocs.get(canvasLineageProjectId(port)))
+        if (projectUsage) {
+          addMediaProjectAssetUsage(usages, key, projectUsage.projectId, projectUsage.projectName, projectUsage.assetId, projectUsage.assetName)
+        }
+      }
     }
   }
   const snapshots = (await kvGet<CanvasSnapshot[]>(KEY_SNAPSHOTS)) ?? []
