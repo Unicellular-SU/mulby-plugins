@@ -188,6 +188,71 @@ const emptyStoryboardAssetReport = buildContinuityReport(
 )
 check('does not flag unused assets before storyboards exist', !emptyStoryboardAssetReport.issues.some((issue) => issue.code === 'unused_project_asset'), JSON.stringify(emptyStoryboardAssetReport.issues))
 
+const plannedCoverageReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('uses-hero-main', 0, [{ assetId: 'hero' }])],
+    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
+  }),
+)
+check('does not flag planned asset when used by episode storyboards', !plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset'), JSON.stringify(plannedCoverageReport.issues))
+check(
+  'flags planned variant when not bound by episode storyboards',
+  plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_missing_variant' && issue.assetId === 'hero' && issue.variantId === 'v-gala' && issue.candidateVariantLabels?.includes('Gala')),
+  JSON.stringify(plannedCoverageReport.issues),
+)
+
+const plannedVariantBoundReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('uses-gala', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
+    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
+  }),
+)
+check(
+  'does not flag planned variant when bound by episode storyboards',
+  !plannedVariantBoundReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' || issue.code === 'episode_plan_missing_variant'),
+  JSON.stringify(plannedVariantBoundReport.issues),
+)
+
+const missingPlannedAssetReport = buildContinuityReport(
+  doc({
+    assets: [
+      { id: 'hero', type: 'role', name: 'Hero', refImageId: 'hero-img', state: 'done' },
+      { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' },
+    ],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('uses-hero-only', 0, [{ assetId: 'hero' }])],
+    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hall'] } })],
+  }),
+)
+check('flags planned asset when not used by episode storyboards', missingPlannedAssetReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' && issue.assetId === 'hall'), JSON.stringify(missingPlannedAssetReport.issues))
+
+const invalidPlanRefsReport = buildContinuityReport(
+  doc({
+    assets: [hero],
+    currentEpisodeId: 'ep1',
+    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['deleted-asset'], requiredVariantIds: ['deleted-variant'] } })],
+  }),
+)
+check('flags invalid planned asset references', invalidPlanRefsReport.issues.some((issue) => issue.code === 'episode_plan_invalid_asset' && issue.assetId === 'deleted-asset'), JSON.stringify(invalidPlanRefsReport.issues))
+check('flags invalid planned variant references', invalidPlanRefsReport.issues.some((issue) => issue.code === 'episode_plan_invalid_variant' && issue.variantId === 'deleted-variant'), JSON.stringify(invalidPlanRefsReport.issues))
+
+const plannedBeforeStoryboardReport = buildContinuityReport(
+  doc({
+    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
+    currentEpisodeId: 'ep1',
+    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
+  }),
+)
+check(
+  'does not flag missing planned requirements before storyboards exist',
+  !plannedBeforeStoryboardReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' || issue.code === 'episode_plan_missing_variant'),
+  JSON.stringify(plannedBeforeStoryboardReport.issues),
+)
+
 const episodeVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{

@@ -329,6 +329,84 @@ function addSceneReuseIssues(
   }
 }
 
+function isPlanCastAsset(asset: Asset): boolean {
+  return !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop')
+}
+
+function findVariantOwner(assets: Map<string, Asset>, variantId: string): { asset: Asset; variant: NonNullable<Asset['variants']>[number] } | undefined {
+  for (const asset of assets.values()) {
+    const variant = asset.variants?.find((item) => item.id === variantId)
+    if (variant) return { asset, variant }
+  }
+  return undefined
+}
+
+function addEpisodePlanIssues(
+  episode: Episode,
+  storyboards: Storyboard[],
+  assets: Map<string, Asset>,
+  castUses: ContinuityCastUse[],
+  addIssue: (issue: ContinuityIssue) => void,
+): void {
+  const plan = episode.plan
+  const requiredAssetIds = [...new Set(plan?.requiredAssetIds ?? [])]
+  const requiredVariantIds = [...new Set(plan?.requiredVariantIds ?? [])]
+  if (!requiredAssetIds.length && !requiredVariantIds.length) return
+
+  const hasStoryboards = storyboards.length > 0
+  const usedAssetIds = new Set(castUses.map((use) => use.assetId))
+  const validVariantUses = new Set(castUses.filter((use) => use.variantId && use.appliesToEpisode).map((use) => `${use.assetId}:${use.variantId}`))
+
+  for (const assetId of requiredAssetIds) {
+    const asset = assets.get(assetId)
+    if (!asset || !isPlanCastAsset(asset)) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_invalid_asset',
+        episodeId: episode.id,
+        assetId,
+        message: `E${episode.index + 1}「${episode.title}」计划要求的项目资产 ${assetId} 已不存在或不是可用于分镜的角色/场景/道具。`,
+      })
+      continue
+    }
+    if (hasStoryboards && !usedAssetIds.has(asset.id)) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_missing_asset',
+        episodeId: episode.id,
+        assetId: asset.id,
+        message: `E${episode.index + 1}「${episode.title}」计划要求项目资产「${asset.name}」，但本集分镜尚未引用。`,
+      })
+    }
+  }
+
+  for (const variantId of requiredVariantIds) {
+    const owner = findVariantOwner(assets, variantId)
+    if (!owner || !isPlanCastAsset(owner.asset)) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_invalid_variant',
+        episodeId: episode.id,
+        variantId,
+        message: `E${episode.index + 1}「${episode.title}」计划要求的形态/妆容 ${variantId} 已不存在或不属于可用于分镜的项目资产。`,
+      })
+      continue
+    }
+    if (hasStoryboards && !validVariantUses.has(`${owner.asset.id}:${owner.variant.id}`)) {
+      addIssue({
+        severity: 'warning',
+        code: 'episode_plan_missing_variant',
+        episodeId: episode.id,
+        assetId: owner.asset.id,
+        variantId: owner.variant.id,
+        candidateVariantIds: owner.asset.variants?.map((item) => item.id),
+        candidateVariantLabels: owner.asset.variants?.map((item) => item.label),
+        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但本集分镜尚未有效绑定该变体。`,
+      })
+    }
+  }
+}
+
 function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIssues: ContinuityIssue[]): void {
   const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
   const usedAssetIds = new Set<string>()
@@ -502,6 +580,7 @@ export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
         }
       }
     }
+    addEpisodePlanIssues(episode, sortedStoryboards, assets, report.castUses, addIssue)
     addSceneReuseIssues(episode, sortedStoryboards, assets, addIssue)
     episodeReports.push(report)
   }

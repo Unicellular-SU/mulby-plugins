@@ -571,7 +571,15 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 工具循环系统提示已要求：整季规划和只做大纲时优先写 `seriesBible` / `Episode.plan`，不要直接重写剧本；生成单集剧本/分镜时必须遵守对应 episode plan。
 - `agentTools.selftest.ts` 覆盖了读取系列规划、写入系列圣经、按剧集写入计划以及资产/变体名称解析。
 
-本轮仍未把 `Episode.plan.requiredAssetIds/requiredVariantIds` 接入连续性质量门；下一步应在 P5 前先让质量报告检查“计划要求但本集分镜未使用”的项目资产和形态。
+第八轮提交开始落地 P5 的前置质量门：
+
+- 连续性报告会读取 `Episode.plan.requiredAssetIds`，检查计划要求的项目资产是否仍存在、是否属于可用于分镜的角色/场景/道具，以及在本集已有分镜时是否已经被 `castRefs` 引用。
+- 连续性报告会读取 `Episode.plan.requiredVariantIds`，解析变体所属项目资产，检查计划要求的形态/妆容是否仍存在、是否属于可用于分镜的项目资产，以及在本集已有分镜时是否已经被有效绑定。
+- 新增 `episode_plan_invalid_asset`、`episode_plan_invalid_variant`、`episode_plan_missing_asset`、`episode_plan_missing_variant` 四类问题，避免 Agent 或用户规划了本集必需资产，但分镜生产链路实际没有使用。
+- 还没有创建分镜的剧集不会因为缺少计划资产/变体使用而报警，避免规划阶段产生噪音；但无效计划引用仍会被提示，便于清理旧数据。
+- `continuityReport.selftest.ts` 覆盖了计划资产已使用、计划资产缺失、计划变体缺失、计划变体已绑定、无效计划引用，以及无分镜时跳过缺失检查。
+
+本轮仍未完成完整资产中心维度的质量门，例如全局身份归档、新版本差异、同一 `LibraryEntity` 被导入成多个项目资产、同名身份冲突和一键合并流程仍属于后续 P5。
 
 ### P0：术语和边界先落地
 
@@ -683,8 +691,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 
 ### P5：连续性质量门升级
 
-在现有连续性报告上增加资产中心维度：
+在现有连续性报告上先接入单集生产计划，再增加资产中心维度：
 
+- `Episode.plan.requiredAssetIds` 指定的项目资产已不存在，或不是可用于分镜的角色/场景/道具。
+- `Episode.plan.requiredAssetIds` 指定了本集必需项目资产，但本集已有分镜仍未通过 `castRefs` 引用。
+- `Episode.plan.requiredVariantIds` 指定的形态/妆容已不存在，或不属于可用于分镜的项目资产。
+- `Episode.plan.requiredVariantIds` 指定了本集必需形态/妆容，但本集已有分镜仍未绑定该 `variantId`。
 - 项目资产链接的全局身份已被归档。
 - 项目资产链接的全局身份有新版本。
 - 项目资产和全局身份别名冲突。
@@ -695,6 +707,7 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 验收：
 
 - 多集生产前能发现“同一个人被拆成两个项目资产”的问题。
+- 多集生产前能发现“本集计划要求的角色/场景/道具/妆容没有进入分镜 castRefs”的问题。
 - 能一键合并到同一个项目资产，或明确标记为不同身份。
 
 ### P6：逐步废弃旧 `elements:library` 直接访问
