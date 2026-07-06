@@ -37,6 +37,8 @@ function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAs
   }
 }
 
+let refreshInFlight: Promise<void> | null = null
+
 export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   mediaAssets: [],
   boards: [],
@@ -49,14 +51,19 @@ export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   loaded: false,
 
   refresh: async () => {
-    if (get().loading) return
-    set({ loading: true, error: undefined })
-    try {
-      const snapshot = await loadAssetHub()
-      set({ ...applySnapshot(snapshot), loading: false, loaded: true })
-    } catch (error) {
-      set({ loading: false, loaded: false, error: error instanceof Error ? error.message : String(error) })
-    }
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = (async () => {
+      set({ loading: true, error: undefined })
+      try {
+        const snapshot = await loadAssetHub()
+        set({ ...applySnapshot(snapshot), loading: false, loaded: true })
+      } catch (error) {
+        set({ loading: false, loaded: false, error: error instanceof Error ? error.message : String(error) })
+      } finally {
+        refreshInFlight = null
+      }
+    })()
+    return refreshInFlight
   },
 
   getUsage: (entityId) => get().usageByEntity[entityId],
