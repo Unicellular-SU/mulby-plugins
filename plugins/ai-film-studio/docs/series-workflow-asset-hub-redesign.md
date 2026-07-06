@@ -1051,6 +1051,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让 Agent 处理 `episode_variant_available`、`asset_state_changed_variant`、重复资产、缺失计划资产等质量门问题时，不需要再二次查询资产中心就能判断该资产对应的全局身份、出场剧集和形态/妆容历史。
 - 自测新增连续性报告入口断言，验证第二集 `Hero-Gala` cast use 能直接暴露 `el-hero` 和 `E2 Second · Gala`。
 
+第八十五轮提交继续落地 P4/P5 的时间线资产 usage 可见性：
+
+- `get_timeline` 的每条 track 新增 `storyboardCastAssets`，按 `storyboardIds` 聚合对应分镜的 cast 资产、变体和 `assetCenterUsage`；原有 track/clip 字段保持不变。
+- 这让 Agent 回看某集时间线、候选片段和选中视频段时，可以直接从 track 追溯到该视频段使用了哪些项目资产、全局身份和形态/妆容历史，减少成片整理或重生成时只凭 clip id 判断上下文的风险。
+- 自测新增第二集时间线断言，验证 `track-ep2` 关联的 `sb-ep2` 能暴露 `Hero-Gala` 的 `el-hero` 和 `E2 Second · Gala`。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

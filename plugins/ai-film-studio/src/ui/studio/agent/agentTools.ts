@@ -1169,8 +1169,10 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const episode = resolveEpisodeSelector(d, a)
         if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
         const storyboards = storyboardsForEpisode(d, episode)
+        const storyboardById = new Map(storyboards.map((s) => [s.id, s]))
         const clips = clipsForEpisode(d, episode)
         const includeClips = boolArg(a.includeClips, true)
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           ...episodeInfo(d, episode),
           tracks: [...trackForEpisode(d, episode)].sort((x, y) => x.order - y.order).map((t) => ({
@@ -1181,6 +1183,14 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             storyboardIndexes: t.storyboardIds.map((id) => {
               const sb = storyboards.find((s) => s.id === id)
               return sb ? sb.index + 1 : id
+            }),
+            storyboardCastAssets: t.storyboardIds.map((id) => {
+              const sb = storyboardById.get(id)
+              return {
+                storyboardId: id,
+                storyboardIndex: sb ? sb.index + 1 : undefined,
+                castAssets: sb ? storyboardCastAssets(d, sb, usageByEntity) : [],
+              }
             }),
             duration: t.duration,
             prompt: t.prompt,

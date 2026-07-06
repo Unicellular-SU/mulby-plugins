@@ -248,6 +248,19 @@ check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[
 
 const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
+check(
+  'get_timeline exposes storyboard cast asset-center usage',
+  ep2Timeline.tracks?.[0]?.storyboardCastAssets?.some((item: { storyboardId: string; castAssets?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+    item.storyboardId === 'sb-ep2' &&
+    item.castAssets?.some((cast) =>
+      cast.assetId === 'hero' &&
+      cast.variantId === 'gala' &&
+      cast.assetCenterUsage?.entityId === 'el-hero' &&
+      cast.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(ep2Timeline.tracks),
+)
 const missingEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 99 }))
 check('read tools reject invalid explicit episode selectors instead of falling back to current episode', !!missingEpisodeRead.error && !missingEpisodeRead.id, JSON.stringify(missingEpisodeRead))
 const zeroEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 0 }))
