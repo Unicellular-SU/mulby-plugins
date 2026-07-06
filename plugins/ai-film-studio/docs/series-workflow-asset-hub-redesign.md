@@ -1015,6 +1015,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 如果精修流来自分镜 `Storyboard.flowId`，媒体引用会显示对应剧集和分镜，例如 `E2 雨夜 · 分镜 #3 精修流 flow-storyboard 参考`，让精修输出和参考图都能回到单集生产链路。
 - 无法反查到项目资产或分镜时仍保留原有 flowId fallback，避免破坏旧项目；这补齐了验收场景 4 中“精修流图片也能说明来自哪个项目生产环节”的使用图谱缺口。
 
+第七十九轮提交继续落地 P1/P5 的 Agent 资产中心 usage 可见性：
+
+- `get_workspace` / `get_project_overview` 的根资产概览新增 `assetCenterUsage` 摘要；`get_assets` 的完整资产视图也会在可用时返回同一字段，让工具循环不只看到 `libraryLink`，还能看到该身份在当前项目中的出场剧集和形态/妆容摘要。
+- `assetCenterUsage` 通过 `loadAssetHub().usageByEntity` 读取，只暴露 `entityId`、项目/画布/快照计数以及当前项目的 `episodeLabels`、`appearanceLabels`；Hub 加载失败时保留原工具输出，避免只读工具被资产中心异常拖垮。
+- 这让 Agent 在生成或续写多集时能先看到 `E1 Episode 1`、`E2 Second · Gala` 这类资产中心 usage 线索，减少只凭资产名误建重复角色或误用妆容的概率。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

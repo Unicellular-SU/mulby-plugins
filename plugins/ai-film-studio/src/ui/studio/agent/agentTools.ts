@@ -10,7 +10,7 @@ import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalize
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
-import { loadAssetHub, projectAssetIdentityEntityId, type LibraryEntity } from '../../services/assetHub'
+import { loadAssetHub, projectAssetIdentityEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -76,7 +76,36 @@ function storyboardView(doc: ProjectDoc, s: Storyboard, opts?: { includePrompt?:
   }
 }
 
-function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: boolean }) {
+async function loadIdentityUsageSafe(): Promise<Record<string, IdentityAssetUsage> | undefined> {
+  try {
+    return (await loadAssetHub()).usageByEntity
+  } catch {
+    return undefined
+  }
+}
+
+function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const entityId = projectAssetIdentityEntityId(asset)
+  if (!entityId) return undefined
+  const usage = usageByEntity?.[entityId]
+  if (!usage) return { entityId }
+  const currentProject = usage.projects.find((project) => project.projectId === doc.meta.id && project.assetIds.includes(asset.id))
+  return {
+    entityId,
+    projectCount: usage.projectCount,
+    projectAssetCount: usage.assetCount,
+    canvasNodeCount: usage.canvasNodeCount,
+    snapshotCount: usage.snapshotCount,
+    currentProject: currentProject
+      ? {
+          episodeLabels: currentProject.episodeLabels ?? [],
+          appearanceLabels: currentProject.appearanceLabels ?? [],
+        }
+      : undefined,
+  }
+}
+
+function assetView(a: Asset, opts?: { doc?: ProjectDoc; includePrompt?: boolean; includeImages?: boolean; usageByEntity?: Record<string, IdentityAssetUsage> }) {
   return {
     id: a.id,
     type: a.type,
@@ -96,6 +125,7 @@ function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: b
     derivedFromImageId: a.derivedFromImageId,
     elementId: a.elementId,
     libraryLink: a.libraryLink,
+    assetCenterUsage: opts?.doc ? assetCenterUsageView(opts.doc, a, opts.usageByEntity) : undefined,
     rejectedLibraryEntityIds: a.rejectedLibraryEntityIds,
     flowId: a.flowId,
     voice: a.voice,
@@ -235,7 +265,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
   }
 }
 
-function overview(doc: ProjectDoc) {
+function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, IdentityAssetUsage> }) {
   const episodes = episodeList(doc)
   const allScripts = episodes.flatMap((episode) => scriptsForEpisode(doc, episode))
   const allStoryboards = episodes.flatMap((episode) => storyboardsForEpisode(doc, episode))
@@ -266,7 +296,7 @@ function overview(doc: ProjectDoc) {
     ),
     assets: doc.assets
       .filter((a) => !a.parentAssetId)
-      .map((a) => ({ id: a.id, type: a.type, name: a.name, state: a.state, hasPrompt: !!a.prompt, hasRefImage: !!a.refImageId })),
+      .map((a) => ({ id: a.id, type: a.type, name: a.name, state: a.state, hasPrompt: !!a.prompt, hasRefImage: !!a.refImageId, assetCenterUsage: assetCenterUsageView(doc, a, opts?.usageByEntity) })),
     storyboards: episodes.flatMap((episode) =>
       [...storyboardsForEpisode(doc, episode)]
         .sort((a, b) => a.index - b.index)
@@ -817,7 +847,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       parameters: { type: 'object', properties: {} },
       execute: async () => {
         const d = doc()
-        return d ? json(overview(d)) : '无打开的项目'
+        if (!d) return '无打开的项目'
+        return json(overview(d, { usageByEntity: await loadIdentityUsageSafe() }))
       },
     },
     {
@@ -826,7 +857,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       parameters: { type: 'object', properties: {} },
       execute: async () => {
         const d = doc()
-        return d ? json(overview(d)) : '无打开的项目'
+        if (!d) return '无打开的项目'
+        return json(overview(d, { usageByEntity: await loadIdentityUsageSafe() }))
       },
     },
     {
@@ -982,9 +1014,17 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
           if (name && ![x.name, ...(x.aliases ?? [])].some((value) => normalizeAssetLookup(value).includes(name))) return false
           return true
         })
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           total: assets.length,
-          assets: assets.map((x) => assetView(x, { includePrompt: boolArg(a.includePrompt, true), includeImages: boolArg(a.includeImages, true) })),
+          assets: assets.map((x) =>
+            assetView(x, {
+              doc: d,
+              includePrompt: boolArg(a.includePrompt, true),
+              includeImages: boolArg(a.includeImages, true),
+              usageByEntity,
+            }),
+          ),
         })
       },
     },
