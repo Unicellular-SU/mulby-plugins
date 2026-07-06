@@ -1136,6 +1136,10 @@ function AssetsTab() {
     const hubState = useAssetHubStore.getState()
     if (elId) {
       const entity = hubState.entities.find((item) => item.id === elId)
+      if (entity?.archived) {
+        window.mulby?.notification?.show(`「${entity.name}」已归档，恢复后才能加入项目资产`, 'warning')
+        return
+      }
       const el = entity ? libraryEntityToElement(entity) : undefined
       if (el && (await importElementToProject(doc.meta.id, el, kind)))
         window.mulby?.notification?.show(`已把「${el.name}」加入${label}`, 'success')

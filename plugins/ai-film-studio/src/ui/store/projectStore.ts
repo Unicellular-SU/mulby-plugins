@@ -1172,6 +1172,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   importElementToProject: async (projectId, el, kind) => {
+    if (el.archived) {
+      window.mulby?.notification?.show(`「${el.name || '身份资产'}」已归档，恢复后才能加入项目资产`, 'warning')
+      return ''
+    }
     const k: Asset['type'] = kind ?? (el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role')
     const asset = createProjectAssetFromEntity(elementToLibraryEntity(el), k)
     return writeAssetToProject(get, projectId, asset)

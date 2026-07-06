@@ -96,6 +96,10 @@ export default function FlowCanvas() {
       const elId = e.dataTransfer.getData(DND_ELEMENT)
       if (elId) {
         const entity = hubState.entities.find((x) => x.id === elId)
+        if (entity?.archived) {
+          window.mulby?.notification?.show(`「${entity.name}」已归档，恢复后才能拖入画布`, 'warning')
+          return
+        }
         const el = entity ? libraryEntityToElement(entity) : undefined
         if (el) void useGraphStore.getState().insertElementNode(el, position)
         return
