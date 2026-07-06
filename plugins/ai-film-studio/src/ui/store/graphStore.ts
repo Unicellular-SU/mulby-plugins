@@ -584,7 +584,7 @@ interface GraphState {
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
   /** 标记画布媒体产物已被显式采纳为项目资产/变体，保留 lineage 供后续使用图谱读取。 */
-  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectId?: string; projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => Promise<boolean>
+  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectId?: string; projectAssetId: string; projectVariantId?: string; libraryEntityId?: string; libraryVariantId?: string }, itemIndex?: number) => Promise<boolean>
   /** 标记画布媒体产物已被显式采纳为身份资产/身份变体，保留 lineage 供后续使用图谱读取。 */
   markOutputAsLibraryEntity: (nodeId: string, port: string, assetId: string, target: { libraryEntityId: string; libraryVariantId?: string; variantLabel?: string; view?: string }, itemIndex?: number) => Promise<boolean>
   setNodeImage: (id: string, dataUrl: string, port?: string) => Promise<void>
@@ -706,12 +706,13 @@ function patchNode(id: string, patch: Partial<FilmNodeData>) {
 function markPortValueAsProjectAsset(
   value: PortValue,
   assetId: string,
-  target: { projectId?: string; projectAssetId: string; projectVariantId?: string },
+  target: { projectId?: string; projectAssetId: string; projectVariantId?: string; libraryEntityId?: string; libraryVariantId?: string },
   itemIndex?: number
 ): { value: PortValue; changed: boolean } {
   const metaPatch = (item: PortValue): PortValue => {
     const existingProjectId = typeof item.meta?.projectId === 'string' ? item.meta.projectId : undefined
     const projectId = target.projectId ?? existingProjectId
+    const hasLibraryTarget = !!target.libraryEntityId || !!target.libraryVariantId
     return {
       ...item,
       meta: {
@@ -720,6 +721,10 @@ function markPortValueAsProjectAsset(
         ...(projectId ? { projectId } : {}),
         projectAssetId: target.projectAssetId,
         projectVariantId: target.projectVariantId,
+        libraryEntityId: target.libraryEntityId ?? item.meta?.libraryEntityId,
+        libraryVariantId: hasLibraryTarget ? target.libraryVariantId : item.meta?.libraryVariantId,
+        variantId: hasLibraryTarget ? target.libraryVariantId : item.meta?.variantId,
+        variantLabel: hasLibraryTarget ? undefined : item.meta?.variantLabel,
         purpose: 'approved',
       },
     }

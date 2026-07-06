@@ -669,6 +669,8 @@ export function OutputView({
               projectId: projectDoc?.meta.id,
               projectAssetId: selectedProjectTarget.assetId,
               projectVariantId: selectedProjectTarget.variantId,
+              libraryEntityId: selectedProjectTarget.libraryEntityId,
+              libraryVariantId: selectedProjectTarget.libraryVariantId,
             },
             itemIndex
           )
