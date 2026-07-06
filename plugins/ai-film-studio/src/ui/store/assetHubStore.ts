@@ -12,6 +12,7 @@ import type { ElementRef } from './assetStore'
 interface AssetHubState {
   mediaAssets: AssetRecord[]
   boards: Board[]
+  storageUsage: { count: number; bytes: number }
   elements: ElementRef[]
   entities: LibraryEntity[]
   usageByEntity: Record<string, IdentityAssetUsage>
@@ -24,10 +25,11 @@ interface AssetHubState {
   getUsage: (entityId: string) => IdentityAssetUsage | undefined
 }
 
-function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAssets' | 'boards' | 'elements' | 'entities' | 'usageByEntity' | 'usageByMedia'> {
+function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAssets' | 'boards' | 'storageUsage' | 'elements' | 'entities' | 'usageByEntity' | 'usageByMedia'> {
   return {
     mediaAssets: snapshot.mediaAssets,
     boards: snapshot.boards,
+    storageUsage: snapshot.storageUsage,
     elements: snapshot.elements,
     entities: snapshot.entities,
     usageByEntity: snapshot.usageByEntity,
@@ -38,6 +40,7 @@ function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAs
 export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   mediaAssets: [],
   boards: [],
+  storageUsage: { count: 0, bytes: 0 },
   elements: [],
   entities: [],
   usageByEntity: {},

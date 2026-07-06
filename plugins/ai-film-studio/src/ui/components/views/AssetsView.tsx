@@ -190,7 +190,6 @@ export default function AssetsView() {
 
 // ===================== 素材画廊（多模态）=====================
 function AssetGallery() {
-  const usage = useAssetStore((s) => s.usage)
   const busy = useAssetStore((s) => s.busy)
   const legacyLoaded = useAssetStore((s) => s.loaded)
   const load = useAssetStore((s) => s.load)
@@ -203,6 +202,7 @@ function AssetGallery() {
   const moveAsset = useAssetStore((s) => s.moveAsset)
   const assets = useAssetHubStore((s) => s.mediaAssets)
   const boards = useAssetHubStore((s) => s.boards)
+  const storageUsage = useAssetHubStore((s) => s.storageUsage)
   const usageByMedia = useAssetHubStore((s) => s.usageByMedia)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const refreshHub = useAssetHubStore((s) => s.refresh)
@@ -394,7 +394,7 @@ function AssetGallery() {
             </div>
             <Tooltip content="附件库占用">
               <span className="afs-avusage">
-                占用 {usage.count} 项 · {fmtBytes(usage.bytes)}
+                占用 {storageUsage.count} 项 · {fmtBytes(storageUsage.bytes)}
               </span>
             </Tooltip>
             <Button variant="secondary" size="sm" leadingIcon={Sparkles} disabled={busy} onClick={onGc} title="清理未引用媒体（修复附件存储泄漏）">

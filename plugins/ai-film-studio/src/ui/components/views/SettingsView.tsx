@@ -37,11 +37,12 @@ export default function SettingsView({ section }: { section: SettingsSection }) 
 }
 
 function StorageSettings() {
-  const usage = useAssetStore((s) => s.usage)
   const loaded = useAssetStore((s) => s.loaded)
   const busy = useAssetStore((s) => s.busy)
   const load = useAssetStore((s) => s.load)
   const runGc = useAssetStore((s) => s.runGc)
+  const usage = useAssetHubStore((s) => s.storageUsage)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
   const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const saveProject = useGraphStore((s) => s.saveProject)
   const confirm = useConfirm()
@@ -49,6 +50,9 @@ function StorageSettings() {
   useEffect(() => {
     if (!loaded) void load()
   }, [loaded, load])
+  useEffect(() => {
+    if (!hubLoaded) void refreshAssetHub()
+  }, [hubLoaded, refreshAssetHub])
 
   const onGc = async () => {
     if (!(await confirm({ title: '清理未引用素材', message: '清理「未被任何工程 / 角色场景库 / 上传素材 / 快照」引用的附件？此操作不可撤销。', danger: true, confirmLabel: '清理' }))) return

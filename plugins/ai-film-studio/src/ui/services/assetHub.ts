@@ -1,7 +1,7 @@
 import type { Asset, AssetImage, AssetVariant, ProjectDoc } from '../domain/types'
 import { loadIndex, loadProject, newId } from '../domain/persistence'
 import type { ElementKind, ElementRef, ElementVariant } from '../store/assetStore'
-import { loadBoards, loadRegistry, type AssetRecord, type Board } from './assetRegistry'
+import { loadBoards, loadRegistry, storageUsage, type AssetRecord, type Board } from './assetRegistry'
 
 const PLUGIN_ID = 'ai-film-studio'
 const KEY_ELEMENTS = 'elements:library'
@@ -114,6 +114,7 @@ export interface MediaAssetUsage {
 export interface AssetHubSnapshot {
   mediaAssets: AssetRecord[]
   boards: Board[]
+  storageUsage: { count: number; bytes: number }
   elements: ElementRef[]
   entities: LibraryEntity[]
   usageByEntity: Record<string, IdentityAssetUsage>
@@ -809,14 +810,15 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
 }
 
 export async function loadAssetHub(): Promise<AssetHubSnapshot> {
-  const [mediaAssets, boards, elements] = await Promise.all([
+  const [mediaAssets, boards, usage, elements] = await Promise.all([
     loadRegistry(),
     loadBoards(),
+    storageUsage(),
     kvGet<ElementRef[]>(KEY_ELEMENTS),
   ])
   const normalizedElements = Array.isArray(elements) ? elements : []
   const entities = normalizedElements.map(elementToLibraryEntity)
   const usageByEntity = await loadIdentityAssetUsages(normalizedElements)
   const usageByMedia = await loadMediaAssetUsages(entities)
-  return { mediaAssets, boards, elements: normalizedElements, entities, usageByEntity, usageByMedia }
+  return { mediaAssets, boards, storageUsage: usage, elements: normalizedElements, entities, usageByEntity, usageByMedia }
 }
