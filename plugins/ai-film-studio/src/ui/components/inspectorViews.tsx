@@ -49,6 +49,17 @@ type CanvasProjectSaveTarget = {
   libraryVariantId?: string
 }
 
+type CanvasIdentitySaveTarget = {
+  key: string
+  entityId: string
+  libraryVariantId?: string
+  variantLabel?: string
+  label: string
+  title: string
+  entityKind: LibraryEntityKind
+  aliases: string[]
+}
+
 const projectAssetTypeLabels: Record<ProjectImageAsset['type'], string> = {
   role: '角色',
   scene: '场景',
@@ -80,9 +91,9 @@ function entityKindMatches(kind: ElementKind | undefined, entityKind: LibraryEnt
   return entityKind === kind
 }
 
-function resolveCanvasSaveTarget(entities: LibraryEntity[], value: PortValue) {
+function resolveHintedLibraryEntity(entities: LibraryEntity[], value: PortValue): LibraryEntity | null {
   if (value.type !== 'image' || !value.assetId) return null
-  const activeEntities = entities.filter((entity) => !entity.archived)
+  const activeEntities = entities.filter((entity) => !entity.archived && entity.kind !== 'voice')
   const meta = rec(value.meta)
   const entityId = asStr(meta.libraryEntityId)
   const charId = asStr(meta.charId)
@@ -98,28 +109,77 @@ function resolveCanvasSaveTarget(entities: LibraryEntity[], value: PortValue) {
     })
   }
   const unique = uniqueEntities(matches)
-  if (unique.length !== 1) return null
-  const entity = unique[0]
-  const variantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
-  const variantLabel =
-    asStr(meta.variantLabel) ||
-    (variantId ? entity.variants?.find((variant) => variant.id === variantId)?.label : undefined) ||
-    variantId ||
-    undefined
-  const view = normalizeViewRole(meta.view)
-  return {
-    target: {
-      kind: 'libraryEntity' as const,
+  return unique.length === 1 ? unique[0] : null
+}
+
+function targetViewTitle(target: CanvasIdentitySaveTarget, view: CanvasOutputViewRole): string {
+  return `${target.title}的${viewLabels[view]}`
+}
+
+function addIdentityTarget(list: CanvasIdentitySaveTarget[], target: CanvasIdentitySaveTarget) {
+  if (list.some((item) => item.key === target.key)) return
+  list.push(target)
+}
+
+function buildIdentitySaveTargets(entities: LibraryEntity[], values: PortValue[]): CanvasIdentitySaveTarget[] {
+  const targets: CanvasIdentitySaveTarget[] = []
+  for (const entity of entities) {
+    if (entity.archived || entity.kind === 'voice') continue
+    const aliases = [entity.name, ...(entity.aliases ?? []), entity.id].filter(Boolean)
+    addIdentityTarget(targets, {
+      key: entity.id,
       entityId: entity.id,
-      libraryVariantId: variantId || undefined,
-      variantLabel,
-      view,
-    },
-    label: variantId ? `保存为${variantLabel || variantId}${viewLabels[view]}` : `保存为${viewLabels[view]}`,
-    title: variantId
-      ? `保存到身份资产「${entity.name}」的「${variantLabel || variantId}」${viewLabels[view]}`
-      : `保存到身份资产「${entity.name}」的${viewLabels[view]}`,
+      label: `身份 · ${entity.name}`,
+      title: `保存到身份资产「${entity.name}」`,
+      entityKind: entity.kind,
+      aliases,
+    })
+    for (const variant of entity.variants ?? []) {
+      addIdentityTarget(targets, {
+        key: `${entity.id}::${variant.id}`,
+        entityId: entity.id,
+        libraryVariantId: variant.id,
+        variantLabel: variant.label,
+        label: `身份变体 · ${entity.name} / ${variant.label}`,
+        title: `保存到身份资产「${entity.name}」的变体「${variant.label}」`,
+        entityKind: entity.kind,
+        aliases,
+      })
+    }
   }
+
+  for (const value of values) {
+    const entity = resolveHintedLibraryEntity(entities, value)
+    if (!entity) continue
+    const meta = rec(value.meta)
+    const variantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
+    if (!variantId) continue
+    const variantLabel =
+      asStr(meta.variantLabel) ||
+      entity.variants?.find((variant) => variant.id === variantId)?.label ||
+      variantId
+    addIdentityTarget(targets, {
+      key: `${entity.id}::${variantId}`,
+      entityId: entity.id,
+      libraryVariantId: variantId,
+      variantLabel,
+      label: `身份变体 · ${entity.name} / ${variantLabel}`,
+      title: `保存到身份资产「${entity.name}」的变体「${variantLabel}」`,
+      entityKind: entity.kind,
+      aliases: [entity.name, ...(entity.aliases ?? []), entity.id].filter(Boolean),
+    })
+  }
+  return targets
+}
+
+function resolveIdentitySaveTargetKey(targets: CanvasIdentitySaveTarget[], entities: LibraryEntity[], value: PortValue | undefined): string {
+  if (!value || value.type !== 'image') return ''
+  const entity = resolveHintedLibraryEntity(entities, value)
+  if (!entity) return ''
+  const meta = rec(value.meta)
+  const variantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
+  const key = variantId ? `${entity.id}::${variantId}` : entity.id
+  return targets.some((target) => target.key === key) ? key : ''
 }
 
 function buildProjectSaveTargets(assets: Asset[] | undefined): CanvasProjectSaveTarget[] {
@@ -195,6 +255,12 @@ function resolveProjectSaveTargetKey(targets: CanvasProjectSaveTarget[], value: 
 function firstImageOutput(value: PortValue): PortValue | undefined {
   if (value.items?.length) return value.items.find((item) => item.type === 'image' && hasMedia(item))
   return value.type === 'image' && hasMedia(value) ? value : undefined
+}
+
+function mediaOutputsForValue(value: PortValue): PortValue[] | null {
+  if (value.items?.length) return value.items.filter((it) => hasMedia(it))
+  if ((value.type === 'image' || value.type === 'video' || value.type === 'audio') && hasMedia(value)) return [value]
+  return null
 }
 
 // ============ 结构化 JSON 卡片 ============
@@ -484,13 +550,30 @@ export function OutputView({
   const promoteCanvasOutputs = useAssetStore((s) => s.promoteCanvasOutputs)
   const projectDoc = useProjectStore((s) => s.doc)
   const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
+  const mediaList = useMemo(() => mediaOutputsForValue(value), [value])
+  const imageMediaList = useMemo(() => (mediaList ?? []).filter((it) => it.type === 'image' && !!it.assetId), [mediaList])
+  const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(hubEntities, imageMediaList), [hubEntities, imageMediaList])
+  const hintedIdentityTargetKey = useMemo(
+    () => resolveIdentitySaveTargetKey(identitySaveTargets, hubEntities, firstImageOutput(value)),
+    [hubEntities, identitySaveTargets, value]
+  )
   const projectSaveTargets = useMemo(() => buildProjectSaveTargets(projectDoc?.assets), [projectDoc?.assets])
   const hintedProjectTargetKey = useMemo(
     () => resolveProjectSaveTargetKey(projectSaveTargets, firstImageOutput(value)),
     [projectSaveTargets, value]
   )
   const projectChoiceScope = `${nodeId || ''}:${port || ''}`
+  const identityChoiceScope = `${nodeId || ''}:${port || ''}`
+  const [identityTargetChoice, setIdentityTargetChoice] = useState<{ scope: string; key: string | null }>({ scope: '', key: null })
   const [projectTargetChoice, setProjectTargetChoice] = useState<{ scope: string; key: string | null }>({ scope: '', key: null })
+  const explicitIdentityTargetKey =
+    identityTargetChoice.scope === identityChoiceScope &&
+    (identityTargetChoice.key === '' || identitySaveTargets.some((target) => target.key === identityTargetChoice.key))
+      ? identityTargetChoice.key
+      : null
+  const selectedIdentityTargetKey =
+    explicitIdentityTargetKey ?? (hintedIdentityTargetKey || (identitySaveTargets.length === 1 ? identitySaveTargets[0].key : ''))
+  const selectedIdentityTarget = identitySaveTargets.find((target) => target.key === selectedIdentityTargetKey)
   const explicitProjectTargetKey =
     projectTargetChoice.scope === projectChoiceScope &&
     (projectTargetChoice.key === '' || projectSaveTargets.some((target) => target.key === projectTargetChoice.key))
@@ -508,11 +591,6 @@ export function OutputView({
   }
 
   const rawItems = value.items && value.items.length ? value.items : null
-  const mediaList: PortValue[] | null = rawItems
-    ? rawItems.filter((it) => hasMedia(it))
-    : (value.type === 'image' || value.type === 'video' || value.type === 'audio') && hasMedia(value)
-      ? [value]
-      : null
 
   if (mediaList) {
     if (mediaList.length === 0) return <div className="afs-inspector__note">（暂无可显示内容）</div>
@@ -534,15 +612,24 @@ export function OutputView({
       if (i >= 0) openLightbox(lbItems, i)
     }
     const saveToIdentity = async (it: PortValue) => {
-      const resolved = resolveCanvasSaveTarget(hubEntities, it)
-      if (!resolved || !it.assetId) {
-        window.mulby?.notification?.show('该输出缺少明确的身份资产目标，请从资产中心拖入身份资产或在身份资产上生成后再保存', 'warning')
+      if (!selectedIdentityTarget || !it.assetId) {
+        window.mulby?.notification?.show('请先选择要写入的身份资产或身份变体', 'warning')
         return
       }
+      const view = normalizeViewRole(it.meta?.view)
       if (!assetStoreLoaded) await loadAssetStore()
-      const count = await promoteCanvasOutputs([{ assetId: it.assetId, meta: it.meta }], resolved.target)
+      const count = await promoteCanvasOutputs([{ assetId: it.assetId, meta: it.meta }], {
+        kind: 'libraryEntity',
+        entityId: selectedIdentityTarget.entityId,
+        libraryVariantId: selectedIdentityTarget.libraryVariantId,
+        variantLabel: selectedIdentityTarget.variantLabel,
+        view,
+      })
       if (count > 0) await refreshAssetHub()
-      window.mulby?.notification?.show(count > 0 ? `已${resolved.label}` : '没有可保存的画布输出', count > 0 ? 'success' : 'warning')
+      window.mulby?.notification?.show(
+        count > 0 ? `已${targetViewTitle(selectedIdentityTarget, view)}` : '没有可保存的画布输出',
+        count > 0 ? 'success' : 'warning'
+      )
     }
     const saveToProjectAsset = (it: PortValue) => {
       if (!it.assetId || !selectedProjectTarget) {
@@ -559,10 +646,28 @@ export function OutputView({
         changed ? 'success' : 'warning'
       )
     }
+    const canSaveImageToIdentity = imageMediaList.length > 0 && identitySaveTargets.length > 0
     const canSaveImageToProject = mediaList.some((it) => it.type === 'image' && !!it.assetId) && projectSaveTargets.length > 0
     return (
       <div>
         {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
+        {canSaveImageToIdentity ? (
+          <div className="afs-gallery__toolbar">
+            <span className="afs-gallery__toolbar-label">保存到身份资产</span>
+            <select
+              className="afs-gallery__target"
+              value={selectedIdentityTargetKey}
+              onChange={(e) => setIdentityTargetChoice({ scope: identityChoiceScope, key: e.target.value })}
+            >
+              <option value="">选择身份资产/变体</option>
+              {identitySaveTargets.map((target) => (
+                <option key={target.key} value={target.key}>
+                  {target.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         {canSaveImageToProject ? (
           <div className="afs-gallery__toolbar">
             <span className="afs-gallery__toolbar-label">保存到项目</span>
@@ -582,14 +687,13 @@ export function OutputView({
         ) : null}
         <div className="afs-gallery">
           {mediaList.map((it, i) => {
-            const resolved = resolveCanvasSaveTarget(hubEntities, it)
-            const hasIdentityHint = !!it.meta?.libraryEntityId || !!it.meta?.charId || !!it.meta?.name
             const actions: MediaTileAction[] = []
-            if (it.type === 'image' && hasIdentityHint) {
+            if (it.type === 'image' && identitySaveTargets.length) {
+              const view = normalizeViewRole(it.meta?.view)
               actions.push({
-                label: resolved?.label || '目标不明确',
-                title: resolved?.title || '无法唯一匹配身份资产，未执行写回',
-                disabled: !resolved,
+                label: '存身份',
+                title: selectedIdentityTarget ? targetViewTitle(selectedIdentityTarget, view) : '先选择要写入的身份资产或身份变体',
+                disabled: !selectedIdentityTarget || !it.assetId,
                 onClick: () => void saveToIdentity(it),
               })
             }
