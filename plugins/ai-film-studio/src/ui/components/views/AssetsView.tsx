@@ -637,9 +637,6 @@ function ElementLibrary() {
   )
 
   useEffect(() => {
-    if (!legacyLoaded) void loadLegacyStore()
-  }, [legacyLoaded, loadLegacyStore])
-  useEffect(() => {
     if (!hubLoaded) void refreshHub()
   }, [hubLoaded, refreshHub])
 
