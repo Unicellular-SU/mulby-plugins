@@ -63,6 +63,18 @@ function useStudioContinuityReport(doc: ProjectDoc) {
   return useMemo(() => buildContinuityReport(doc, hubLoaded ? { libraryEntities: hubEntities } : undefined), [doc, hubLoaded, hubEntities])
 }
 
+function projectAssetLinkStatusLabels(asset: Asset, linkedEntity?: { version: number; archived?: boolean }): string[] {
+  const labels: string[] = []
+  const link = asset.libraryLink
+  if (!link && asset.elementId) labels.push('旧链接')
+  if (link?.syncPolicy === 'forked') labels.push('已分叉')
+  else if (link?.syncPolicy === 'linked') labels.push('已关联')
+  else if (link?.syncPolicy === 'snapshot') labels.push('快照')
+  if (link?.entityVersion && linkedEntity && linkedEntity.version > link.entityVersion) labels.push('有新版')
+  if (linkedEntity?.archived) labels.push('已归档')
+  return labels
+}
+
 export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const closeProject = useProjectStore((s) => s.closeProject)
@@ -1338,6 +1350,7 @@ function AssetCard({ asset }: { asset: Asset }) {
   const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
   const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
   const linkedEntityArchived = !!linkedEntity?.archived
+  const linkedStatusLabels = projectAssetLinkStatusLabels(asset, linkedEntity)
   useEffect(() => {
     if (linkedEntityId && !hubLoaded) void refreshAssetHub()
   }, [hubLoaded, linkedEntityId, refreshAssetHub])
@@ -1383,7 +1396,7 @@ function AssetCard({ asset }: { asset: Asset }) {
           <BookmarkPlus size={12} />
           身份资产：{linkedEntity?.name ?? '已关联'}
           {asset.libraryLink?.entityVersion ? ` · v${asset.libraryLink.entityVersion}` : ''}
-          {linkedEntityArchived ? ' · 已归档' : ''}
+          {linkedStatusLabels.length ? ` · ${linkedStatusLabels.join(' · ')}` : ''}
         </div>
       )}
       <textarea
