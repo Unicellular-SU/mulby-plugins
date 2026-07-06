@@ -58,7 +58,7 @@ function AssetInsertPanel() {
   const fa = assets
     .filter((a) => !kw || `${a.name || ''} ${a.nodeKind || ''} ${a.projectName || ''}`.toLowerCase().includes(kw))
     .sort((a, b) => b.createdAt - a.createdAt)
-  const filteredEntities = entities.filter((entity) => !kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw))
+  const filteredEntities = entities.filter((entity) => !entity.archived && (!kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw)))
   const entityPreviewAssetId = (entity: (typeof entities)[number]) =>
     entity.mediaRefs?.find((ref) => ref.role === 'front' && ref.assetId)?.assetId ??
     entity.mediaRefs?.find((ref) => (ref.role === 'primary' || ref.role === 'reference') && ref.assetId)?.assetId ??
