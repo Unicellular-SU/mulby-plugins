@@ -40,6 +40,7 @@ import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from '../services/assetHub'
 import type { LibraryEntity } from '../services/assetHub'
+import { useAssetHubStore } from './assetHubStore'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -1271,14 +1272,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       window.mulby?.notification?.show('该资产还没有参考图，先生成或选择一张图片', 'warning')
       return
     }
-    const existingElement = a.elementId ? useAssetStore.getState().elements.find((el) => el.id === a.elementId) : undefined
-    const existingEntity = existingElement ? elementToLibraryEntity(existingElement) : undefined
-    const entity = promoteProjectAssetToEntity(a, existingEntity)
+    const entityId = a.libraryLink?.entityId ?? a.elementId
+    const hub = useAssetHubStore.getState()
+    if (!hub.loaded) await hub.refresh()
+    const existingEntity = entityId ? useAssetHubStore.getState().entities.find((entity) => entity.id === entityId) : undefined
+    const entity = promoteProjectAssetToEntity(entityId && entityId !== a.elementId ? { ...a, elementId: entityId } : a, existingEntity)
     const publishedVariantMap = a.variants?.reduce<Record<string, string>>((acc, variant) => {
       acc[variant.id] = variant.libraryVariantId ?? variant.id
       return acc
     }, {})
     // 复用 elementId（幂等更新已存在的库元素），首次保存则新建并回写桥接 id
+    const assetStore = useAssetStore.getState()
+    if (!assetStore.loaded) await assetStore.load()
     const el = await useAssetStore.getState().saveElement(libraryEntityToElement(entity))
     get().mutate((d) => {
       const x = d.assets.find((y) => y.id === id)
@@ -1303,6 +1308,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }
     })
+    await useAssetHubStore.getState().refresh()
     window.mulby?.notification?.show(`已保存「${a.name}」到资产中心`, 'success')
   },
 
