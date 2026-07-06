@@ -142,7 +142,8 @@ function identityUsageTitle(usage: IdentityAssetUsage | undefined): string {
 function projectUsageDetailText(project: IdentityAssetUsage['projects'][number]): string {
   const assetPart = commaList(project.assetNames)
   const episodePart = project.episodeLabels?.length ? `出场：${commaList(project.episodeLabels)}` : ''
-  return [assetPart, episodePart].filter(Boolean).join('；') || project.projectId
+  const appearancePart = project.appearanceLabels?.length ? `形态：${commaList(project.appearanceLabels)}` : ''
+  return [assetPart, episodePart, appearancePart].filter(Boolean).join('；') || project.projectId
 }
 
 function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {

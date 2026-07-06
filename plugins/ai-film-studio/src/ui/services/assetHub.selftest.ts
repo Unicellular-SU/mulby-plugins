@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -172,6 +172,7 @@ const identityEpisodeProject = {
   ],
 } as ProjectDoc
 check('lists identity project episode appearances', projectAssetIdentityEpisodeLabels(identityEpisodeProject, 'a_hero').join('、') === 'E1 开局、E2 雨夜')
+check('lists identity project appearance variants by episode', projectAssetIdentityAppearanceLabels(identityEpisodeProject, scopedAsset).join('、') === 'E1 开局 · 主形象、E2 雨夜 · 受伤')
 const candidateLineage = resolveCanvasProjectAssetMediaUsage(
   { assetId: 'candidate-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', purpose: 'candidate' } },
   lineageProject

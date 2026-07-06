@@ -63,6 +63,7 @@ export interface AssetHubProjectUsage {
   assetIds: string[]
   assetNames: string[]
   episodeLabels?: string[]
+  appearanceLabels?: string[]
 }
 
 export interface AssetHubCanvasUsage {
@@ -486,6 +487,22 @@ export function projectAssetIdentityEpisodeLabels(doc: ProjectDoc, assetId: stri
   return [...labels]
 }
 
+export function projectAssetIdentityAppearanceLabels(doc: ProjectDoc, asset: Asset): string[] {
+  const episodesById = new Map((doc.episodes ?? []).map((episode) => [episode.id, episode]))
+  const currentEpisode = doc.currentEpisodeId ? episodesById.get(doc.currentEpisodeId) : undefined
+  const labels = new Set<string>()
+  for (const { storyboard, episode } of collectEpisodeStoryboards(doc, episodesById, currentEpisode)) {
+    for (const ref of castRefsForStoryboard(storyboard)) {
+      if (ref.assetId !== asset.id) continue
+      const variantLabel = ref.variantId
+        ? asset.variants?.find((variant) => variant.id === ref.variantId)?.label ?? ref.variantId
+        : '主形象'
+      labels.add(projectEpisodeUsageLabel(variantLabel, episode))
+    }
+  }
+  return [...labels]
+}
+
 export function resolveCanvasProjectAssetMediaUsage(port: CanvasPortValue, project: ProjectDoc | undefined): CanvasProjectAssetMediaUsage | null {
   const projectId = canvasLineageProjectId(port)
   const projectAssetId = lineageString(port.meta?.projectAssetId)
@@ -526,7 +543,16 @@ function mediaUsageFor(map: Record<string, MediaAssetUsage>, key: string): Media
   return map[key]
 }
 
-function addStudioUsage(map: Record<string, IdentityAssetUsage>, entityId: string, projectId: string, projectName: string, assetId: string, assetName: string, episodeLabels: string[] = []): void {
+function addStudioUsage(
+  map: Record<string, IdentityAssetUsage>,
+  entityId: string,
+  projectId: string,
+  projectName: string,
+  assetId: string,
+  assetName: string,
+  episodeLabels: string[] = [],
+  appearanceLabels: string[] = [],
+): void {
   const usage = usageFor(map, entityId)
   let project = usage.projects.find((item) => item.projectId === projectId)
   if (!project) {
@@ -539,6 +565,7 @@ function addStudioUsage(map: Record<string, IdentityAssetUsage>, entityId: strin
     usage.assetCount += 1
   }
   if (episodeLabels.length) project.episodeLabels = [...new Set([...(project.episodeLabels ?? []), ...episodeLabels])]
+  if (appearanceLabels.length) project.appearanceLabels = [...new Set([...(project.appearanceLabels ?? []), ...appearanceLabels])]
   usage.projectCount = usage.projects.length
 }
 
@@ -733,7 +760,16 @@ export async function loadIdentityAssetUsages(elements: ElementRef[]): Promise<R
     for (const asset of doc.assets ?? []) {
       const entityId = projectAssetIdentityEntityId(asset)
       if (!entityId) continue
-      addStudioUsage(usages, entityId, doc.meta.id, doc.meta.name, asset.id, asset.name, projectAssetIdentityEpisodeLabels(doc, asset.id))
+      addStudioUsage(
+        usages,
+        entityId,
+        doc.meta.id,
+        doc.meta.name,
+        asset.id,
+        asset.name,
+        projectAssetIdentityEpisodeLabels(doc, asset.id),
+        projectAssetIdentityAppearanceLabels(doc, asset),
+      )
     }
   }
   for (const project of await loadCanvasProjects()) {
