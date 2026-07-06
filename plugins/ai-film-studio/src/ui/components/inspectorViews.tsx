@@ -551,6 +551,7 @@ export function OutputView({
   const projectDoc = useProjectStore((s) => s.doc)
   const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
   const markOutputAsProjectAsset = useGraphStore((s) => s.markOutputAsProjectAsset)
+  const markOutputAsLibraryEntity = useGraphStore((s) => s.markOutputAsLibraryEntity)
   const mediaList = useMemo(() => mediaOutputsForValue(value), [value])
   const imageMediaList = useMemo(() => (mediaList ?? []).filter((it) => it.type === 'image' && !!it.assetId), [mediaList])
   const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(hubEntities, imageMediaList), [hubEntities, imageMediaList])
@@ -612,7 +613,7 @@ export function OutputView({
       const i = lbItems.findIndex((x) => x.ref === (it as MediaRef))
       if (i >= 0) openLightbox(lbItems, i)
     }
-    const saveToIdentity = async (it: PortValue) => {
+    const saveToIdentity = async (it: PortValue, itemIndex?: number) => {
       if (!selectedIdentityTarget || !it.assetId) {
         window.mulby?.notification?.show('请先选择要写入的身份资产或身份变体', 'warning')
         return
@@ -626,7 +627,23 @@ export function OutputView({
         variantLabel: selectedIdentityTarget.variantLabel,
         view,
       })
-      if (count > 0) await refreshAssetHub()
+      if (count > 0) {
+        if (nodeId && port) {
+          markOutputAsLibraryEntity(
+            nodeId,
+            port,
+            it.assetId,
+            {
+              libraryEntityId: selectedIdentityTarget.entityId,
+              libraryVariantId: selectedIdentityTarget.libraryVariantId,
+              variantLabel: selectedIdentityTarget.variantLabel,
+              view,
+            },
+            itemIndex
+          )
+        }
+        await refreshAssetHub()
+      }
       window.mulby?.notification?.show(
         count > 0 ? `已${targetViewTitle(selectedIdentityTarget, view)}` : '没有可保存的画布输出',
         count > 0 ? 'success' : 'warning'
@@ -709,7 +726,7 @@ export function OutputView({
                 label: '存身份',
                 title: selectedIdentityTarget ? targetViewTitle(selectedIdentityTarget, view) : '先选择要写入的身份资产或身份变体',
                 disabled: !selectedIdentityTarget || !it.assetId,
-                onClick: () => void saveToIdentity(it),
+                onClick: () => void saveToIdentity(it, itemIndex),
               })
             }
             if (it.type === 'image' && projectSaveTargets.length) {

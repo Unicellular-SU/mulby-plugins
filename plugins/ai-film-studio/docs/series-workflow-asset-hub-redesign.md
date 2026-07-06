@@ -937,6 +937,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这样 Agent 在普通项目概览阶段就能判断某集是否有待处理 handoff 建议，并能直接拿到 suggestion id 去调用 `apply_episode_handoff_suggestion`；只有需要完整回顾、共享资产出现记录和细节时，才继续读取 `get_episode_handoff`。
 - `agentTools.selftest.ts` 增加 `get_workspace exposes episode handoff summary`，确认剧集计划缺主图时概览能暴露 `asset-image:<assetId>` 这类可执行入口。
 
+第六十六轮提交继续落地 P3/P6 的画布身份采纳 lineage：
+
+- 画布图片输出保存到身份资产或身份变体成功后，会在原输出 `meta` 中写入 `libraryEntityId/libraryVariantId/view`，并把 `purpose` 从候选产物标记为 `approved`；扇出图片按原始 `items[]` 下标更新，第一张被采纳时同步更新端口顶层 `meta`。
+- `assetHub` 身份使用图谱读取画布输出时，和项目采纳 lineage 使用同一条边界：只接受 `approved` 或旧数据未标 `purpose` 的身份目标，`candidate/experiment` 不再被当成正式身份引用，仍只作为媒体层画布引用保留。
+- `assetHub.selftest.ts` 增加身份 lineage 的 approved/legacy/candidate 覆盖，确保后续画布实验图不会重新污染身份资产删除保护和引用详情。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

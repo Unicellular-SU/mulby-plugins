@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -86,6 +86,9 @@ const canvasLookup = new Map([['id:el_hero', 'el_hero'], ['char:hero-code', 'el_
 check('uses explicit canvas library entity lineage', canvasPortIdentityEntityId({ meta: { libraryEntityId: 'el_hero', charId: 'other-code' } }, canvasLookup) === 'el_hero')
 check('falls back to canvas char id lineage', canvasPortIdentityEntityId({ meta: { charId: 'hero-code' } }, canvasLookup) === 'el_hero')
 check('keeps unknown explicit canvas library entity lineage', canvasPortIdentityEntityId({ meta: { libraryEntityId: 'missing-entity' } }, canvasLookup) === 'missing-entity')
+check('counts approved canvas identity lineage as entity usage', resolveCanvasIdentityEntityUsage({ meta: { libraryEntityId: 'el_hero', purpose: 'approved' } }, canvasLookup) === 'el_hero')
+check('keeps legacy canvas identity lineage without purpose', resolveCanvasIdentityEntityUsage({ meta: { libraryEntityId: 'el_hero' } }, canvasLookup) === 'el_hero')
+check('ignores unapproved canvas identity lineage', resolveCanvasIdentityEntityUsage({ meta: { libraryEntityId: 'el_hero', purpose: 'candidate' } }, canvasLookup) === '')
 
 const lineageProject = {
   meta: { id: 'p_series', name: '悬疑短剧' },

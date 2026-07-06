@@ -599,6 +599,12 @@ export function canvasPortIdentityEntityId(port: CanvasPortValue, lookup: Map<st
   return charId ? lookup.get(`char:${charId}`) ?? lookup.get(`id:${charId}`) ?? '' : ''
 }
 
+export function resolveCanvasIdentityEntityUsage(port: CanvasPortValue, lookup: Map<string, string> = new Map()): string {
+  const purpose = lineageString(port.meta?.purpose)
+  if (purpose && purpose !== 'approved') return ''
+  return canvasPortIdentityEntityId(port, lookup)
+}
+
 function collectPortValues(value: CanvasPortValue | undefined, out: CanvasPortValue[]): void {
   if (!value) return
   out.push(value)
@@ -617,7 +623,9 @@ function referencedEntityIds(node: CanvasNode, lookup: Map<string, string>): str
   const ports: CanvasPortValue[] = []
   for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
   for (const port of ports) {
-    const metaEntityId = canvasPortIdentityEntityId(port, lookup)
+    const purpose = lineageString(port.meta?.purpose)
+    if (purpose && purpose !== 'approved') continue
+    const metaEntityId = resolveCanvasIdentityEntityUsage(port, lookup)
     if (metaEntityId) ids.add(metaEntityId)
     const metaName = normalizeKey(port.meta?.name)
     const metaKind = typeof port.meta?.kind === 'string' ? entityKindFromNode(port.meta.kind) : nodeKind
