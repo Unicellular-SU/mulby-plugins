@@ -100,8 +100,19 @@ function mediaRecordKey(rec: Pick<AssetRecord, 'id' | 'assetId' | 'localPath' | 
   return rec.assetId || rec.localPath || rec.url || rec.id
 }
 
+function hasMediaUsage(usage: MediaAssetUsage | undefined): usage is MediaAssetUsage {
+  return Boolean(
+    usage &&
+      (usage.projectAssetCount ||
+        usage.storyboardCount ||
+        usage.libraryEntityCount ||
+        usage.canvasNodeCount ||
+        usage.snapshotCount)
+  )
+}
+
 function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {
-  if (!usage) return '未被引用'
+  if (!hasMediaUsage(usage)) return '未被引用'
   const parts = [
     usage.projectAssetCount ? `${usage.projectAssetCount} 项目资产` : '',
     usage.storyboardCount ? `${usage.storyboardCount} 分镜/片段` : '',
@@ -113,7 +124,7 @@ function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {
 }
 
 function mediaUsageTitle(usage: MediaAssetUsage | undefined): string {
-  if (!usage) return '暂未发现项目、身份资产或画布引用'
+  if (!hasMediaUsage(usage)) return '暂未发现项目、身份资产或画布引用'
   const lines = [
     ...usage.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`),
     ...usage.libraryEntities.map((entity) => `身份资产 ${entity.entityName}：${entity.roles.join('、') || entity.entityId}`),
@@ -235,9 +246,14 @@ function AssetGallery() {
       if (boardF === id) setBoardF('all')
     }
   }
-  const onDeleteAsset = async (id: string) => {
+  const onDeleteAsset = async (asset: AssetRecord) => {
+    const mediaUsage = usageByMedia[mediaRecordKey(asset)]
+    if (hasMediaUsage(mediaUsage)) {
+      window.mulby?.notification?.show('该媒体仍被引用，请先解除项目、身份资产或画布引用后再删除。', 'warning')
+      return
+    }
     if (await confirm({ title: '删除上传媒体', message: '删除该上传媒体文件？', confirmLabel: '删除', danger: true })) {
-      await removeAsset(id)
+      await removeAsset(asset.id)
       await refreshHub()
     }
   }
@@ -369,6 +385,7 @@ function AssetGallery() {
               <div className="afs-avtiles">
                 {filtered.map((a) => {
                   const mediaUsage = usageByMedia[mediaRecordKey(a)]
+                  const mediaUsed = hasMediaUsage(mediaUsage)
                   return (
                     <div key={a.id} className="afs-avcard">
                       <div className="afs-avcard__thumb" onClick={() => setPreview(a)} title="预览">
@@ -415,8 +432,10 @@ function AssetGallery() {
                             size="sm"
                             className="afs-avcard__foot--push"
                             icon={<Trash2 size={13} />}
-                            aria-label="删除上传媒体"
-                            onClick={() => onDeleteAsset(a.id)}
+                            aria-label={mediaUsed ? '已被引用，不能删除上传媒体' : '删除上传媒体'}
+                            title={mediaUsed ? '已被引用，先解除引用后再删除' : '删除上传媒体'}
+                            disabled={mediaUsed}
+                            onClick={() => onDeleteAsset(a)}
                           />
                         )}
                       </div>
