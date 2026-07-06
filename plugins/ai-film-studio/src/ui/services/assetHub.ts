@@ -591,6 +591,13 @@ function entityKindFromNode(kind: string | undefined): ElementKind | undefined {
   return undefined
 }
 
+export function canvasPortIdentityEntityId(port: CanvasPortValue, lookup: Map<string, string> = new Map()): string {
+  const libraryEntityId = lineageString(port.meta?.libraryEntityId)
+  if (libraryEntityId) return lookup.get(`id:${libraryEntityId}`) ?? libraryEntityId
+  const charId = normalizeKey(port.meta?.charId)
+  return charId ? lookup.get(`char:${charId}`) ?? lookup.get(`id:${charId}`) ?? '' : ''
+}
+
 function collectPortValues(value: CanvasPortValue | undefined, out: CanvasPortValue[]): void {
   if (!value) return
   out.push(value)
@@ -609,11 +616,8 @@ function referencedEntityIds(node: CanvasNode, lookup: Map<string, string>): str
   const ports: CanvasPortValue[] = []
   for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
   for (const port of ports) {
-    const charId = normalizeKey(port.meta?.charId)
-    if (charId) {
-      const matched = lookup.get(`char:${charId}`) ?? lookup.get(`id:${charId}`)
-      if (matched) ids.add(matched)
-    }
+    const metaEntityId = canvasPortIdentityEntityId(port, lookup)
+    if (metaEntityId) ids.add(metaEntityId)
     const metaName = normalizeKey(port.meta?.name)
     const metaKind = typeof port.meta?.kind === 'string' ? entityKindFromNode(port.meta.kind) : nodeKind
     if (metaName && metaKind) {

@@ -833,6 +833,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让资产中心身份资产卡的“被哪些工作流项目引用”不再依赖旧 Element 桥接字段；后续项目快照逐步收敛到 `libraryLink` 后，引用详情和删除/归档保护仍能看到正确来源。
 - 新增 `projectAssetIdentityEntityId` 纯解析函数和自测，覆盖新字段优先、旧字段回退、空白 id 忽略，避免使用图谱再次退回只识别 `elementId` 的旧口径。
 
+第四十九轮提交继续落地 P3/P6 的画布身份 lineage 使用图谱：
+
+- `assetHub` 扫描画布项目和快照节点时，开始优先读取输出端口 `meta.libraryEntityId`，不再只靠旧 `charId` 或 `name/kind` 做身份匹配。
+- 旧画布数据仍保留 `charId` 与名称匹配回退；新画布输出里的稳定身份 id 会直接进入 `usageByEntity`，让身份资产引用详情、删除保护和归档可解释性更接近真实 lineage。
+- 新增 `canvasPortIdentityEntityId` 纯解析函数和自测，覆盖显式身份 id、旧 `charId` 回退和未知显式 id 保留，避免后续画布使用图谱再次退回名称猜测。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
