@@ -795,7 +795,14 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
     for (const node of snapshot.nodes ?? []) {
       const ports: CanvasPortValue[] = []
       for (const output of Object.values(node.data?.outputs ?? {})) collectPortValues(output, ports)
-      for (const port of ports) addMediaSnapshotUsage(usages, mediaKey(port), snapshot, node)
+      for (const port of ports) {
+        const key = mediaKey(port)
+        addMediaSnapshotUsage(usages, key, snapshot, node)
+        const projectUsage = resolveCanvasProjectAssetMediaUsage(port, projectDocs.get(canvasLineageProjectId(port)))
+        if (projectUsage) {
+          addMediaProjectAssetUsage(usages, key, projectUsage.projectId, projectUsage.projectName, projectUsage.assetId, projectUsage.assetName)
+        }
+      }
     }
   }
   return usages
