@@ -38,6 +38,7 @@ function applySnapshot(snapshot: AssetHubSnapshot): Pick<AssetHubState, 'mediaAs
 }
 
 let refreshInFlight: Promise<void> | null = null
+let refreshQueued = false
 
 export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   mediaAssets: [],
@@ -51,15 +52,24 @@ export const useAssetHubStore = create<AssetHubState>((set, get) => ({
   loaded: false,
 
   refresh: async () => {
-    if (refreshInFlight) return refreshInFlight
+    if (refreshInFlight) {
+      refreshQueued = true
+      return refreshInFlight
+    }
     refreshInFlight = (async () => {
-      set({ loading: true, error: undefined })
       try {
-        const snapshot = await loadAssetHub()
-        set({ ...applySnapshot(snapshot), loading: false, loaded: true })
-      } catch (error) {
-        set({ loading: false, loaded: false, error: error instanceof Error ? error.message : String(error) })
+        do {
+          refreshQueued = false
+          set({ loading: true, error: undefined })
+          try {
+            const snapshot = await loadAssetHub()
+            set({ ...applySnapshot(snapshot), loaded: true })
+          } catch (error) {
+            set({ loaded: false, error: error instanceof Error ? error.message : String(error) })
+          }
+        } while (refreshQueued)
       } finally {
+        set({ loading: false })
         refreshInFlight = null
       }
     })()
