@@ -333,6 +333,8 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
         }
       })
       asset.libraryLink = { entityId: entity.id, entityVersion: entity.version, syncPolicy: 'snapshot', lastSyncedAt: 1 }
+      asset.rejectedLibraryEntityIds = asset.rejectedLibraryEntityIds?.filter((id) => id !== entity.id)
+      if (!asset.rejectedLibraryEntityIds?.length) asset.rejectedLibraryEntityIds = undefined
       return true
     },
     promoteAssetToElement: async (assetId: string) => {
@@ -567,6 +569,17 @@ check(
     implicitForkedSync.asset?.name === 'Forked Sync Hero' &&
     implicitForkedSync.asset?.libraryLink?.syncPolicy === 'forked',
   JSON.stringify(implicitForkedSync),
+)
+const explicitForkedSync = JSON.parse(await syncProjectAsset.execute({ assetId: 'forked-sync', libraryEntityId: 'el-forked-old' }))
+check(
+  'sync_project_asset_from_library clears accepted rejected identity ids',
+  explicitForkedSync.synced === true &&
+    explicitForkedSync.asset?.id === 'forked-sync' &&
+    explicitForkedSync.asset?.name === 'Old Forked Hero' &&
+    explicitForkedSync.asset?.libraryLink?.entityId === 'el-forked-old' &&
+    explicitForkedSync.asset?.libraryLink?.syncPolicy === 'snapshot' &&
+    !explicitForkedSync.asset?.rejectedLibraryEntityIds?.includes('el-forked-old'),
+  JSON.stringify(explicitForkedSync),
 )
 const syncedProjectAsset = JSON.parse(await syncProjectAsset.execute({ assetId: 'sync-target', libraryEntityId: 'el-sync' }))
 check(

@@ -324,6 +324,7 @@ function rewriteEpisodePlanAssetRefs(episode: Episode, removedIds: Set<string>, 
 function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): Asset {
   const snapshot = createProjectAssetFromEntity(entity, current.type)
   const currentVariants = current.variants ?? []
+  const rejectedLibraryEntityIds = (current.rejectedLibraryEntityIds ?? []).filter((id) => id !== entity.id)
   const nextVariants = (snapshot.variants ?? []).map((variant) => {
     const existing =
       currentVariants.find((item) => item.libraryVariantId && item.libraryVariantId === variant.libraryVariantId) ??
@@ -358,6 +359,7 @@ function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): As
       variantMap: Object.keys(variantMap).length ? variantMap : undefined,
       lastSyncedAt: Date.now(),
     },
+    rejectedLibraryEntityIds: rejectedLibraryEntityIds.length ? rejectedLibraryEntityIds : undefined,
     state: snapshot.state,
     audioFilePath: snapshot.audioFilePath ?? current.audioFilePath,
     audioUrl: snapshot.audioUrl ?? current.audioUrl,
