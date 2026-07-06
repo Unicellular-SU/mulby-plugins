@@ -24,7 +24,7 @@ import { makeAgentTools } from '../studio/agent/agentTools'
 import { resolveAgentEpisodeTarget, resolveAgentRelativeEpisodeDirection } from '../studio/agent/episodeTarget'
 import { abortText } from '../services/textEngine'
 import { useGraphStore } from './graphStore'
-import { useAssetStore, type ElementRef, type ElementKind } from './assetStore'
+import { useAssetStore, type ElementRef } from './assetStore'
 import type { AssetRecord } from '../services/assetRegistry'
 import { useAgentDeployStore } from './agentDeployStore'
 import { splitNovelChapters, extractEvents } from '../studio/services/novel'
@@ -38,6 +38,7 @@ import { variantScopePatchForUse } from '../studio/services/continuityReport'
 import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
+import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from '../services/assetHub'
 
 export interface FilmState {
   state: 'idle' | 'composing' | 'done' | 'failed'
@@ -963,13 +964,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   importElementToProject: async (projectId, el, kind) => {
     const k: Asset['type'] = kind ?? (el.kind === 'scene' ? 'scene' : el.kind === 'prop' ? 'prop' : 'role')
-    // 元素参考图优先取正视图，回退首张参考图（与画布 insertElementNode 取图口径一致）
-    const assetId = el.views?.front ?? el.refAssetIds?.[0]
-    return writeAssetToProject(
-      get,
-      projectId,
-      buildLibraryAsset({ kind: k, name: el.name, assetId, prompt: el.prompt, desc: el.description, elementId: el.id })
-    )
+    const asset = createProjectAssetFromEntity(elementToLibraryEntity(el), k)
+    return writeAssetToProject(get, projectId, asset)
   },
 
   promoteAssetToElement: async (id) => {
@@ -981,19 +977,37 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       window.mulby?.notification?.show('该资产还没有参考图，先生成或选择一张图片', 'warning')
       return
     }
-    const kind: ElementKind = a.type === 'scene' ? 'scene' : a.type === 'prop' ? 'prop' : 'character'
+    const existingElement = a.elementId ? useAssetStore.getState().elements.find((el) => el.id === a.elementId) : undefined
+    const existingEntity = existingElement ? elementToLibraryEntity(existingElement) : undefined
+    const entity = promoteProjectAssetToEntity(a, existingEntity)
+    const publishedVariantMap = a.variants?.reduce<Record<string, string>>((acc, variant) => {
+      acc[variant.id] = variant.libraryVariantId ?? variant.id
+      return acc
+    }, {})
     // 复用 elementId（幂等更新已存在的库元素），首次保存则新建并回写桥接 id
-    const el = await useAssetStore.getState().saveElement({
-      id: a.elementId,
-      kind,
-      name: a.name,
-      description: a.desc,
-      prompt: a.prompt,
-      refAssetIds: [a.refImageId],
-    })
+    const el = await useAssetStore.getState().saveElement(libraryEntityToElement(entity))
     get().mutate((d) => {
       const x = d.assets.find((y) => y.id === id)
-      if (x) x.elementId = el.id
+      if (x) {
+        x.elementId = el.id
+        if (x.variants) {
+          x.variants = x.variants.map((variant) => ({
+            ...variant,
+            libraryVariantId: variant.libraryVariantId ?? publishedVariantMap?.[variant.id] ?? variant.id,
+          }))
+        }
+        const variantMap = x.variants?.reduce<Record<string, string>>((acc, variant) => {
+          if (variant.libraryVariantId) acc[variant.id] = variant.libraryVariantId
+          return acc
+        }, {})
+        x.libraryLink = {
+          entityId: el.id,
+          entityVersion: entity.version,
+          syncPolicy: 'snapshot',
+          variantMap: variantMap && Object.keys(variantMap).length ? variantMap : undefined,
+          lastSyncedAt: Date.now(),
+        }
+      }
     })
     window.mulby?.notification?.show(`已保存「${a.name}」到资产中心`, 'success')
   },

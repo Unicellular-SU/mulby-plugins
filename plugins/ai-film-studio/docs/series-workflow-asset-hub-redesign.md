@@ -519,6 +519,17 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 
 本轮仍不改变持久化数据结构；`elements:library` 继续作为兼容来源，P2 再把 `importElementToProject` / `promoteAssetToElement` 接入新映射。
 
+第三轮提交继续落地 P2：
+
+- `ProjectDoc.assets.Asset` 增加 `libraryLink`，记录来源身份资产、来源版本、快照同步策略和本地变体到全局变体的映射。
+- `AssetVariant` 增加 `libraryVariantId` 与 `variantKind`，用于区分“本项目使用的形态”与“资产中心可复用形态”。
+- `ElementRef` 兼容增加 `aliases/version`，`ElementVariant` 兼容增加 `kind/parentVariantId/tags`，避免发布回资产中心时丢别名、版本和变体语义。
+- `importElementToProject` 已改为通过 `elementToLibraryEntity` + `createProjectAssetFromEntity` 导入，默认生成项目快照，并导入别名、多图、变体和 `libraryLink`。
+- `promoteAssetToElement` 已改为通过 `promoteProjectAssetToEntity` + `libraryEntityToElement` 发布，保留项目资产别名、图片历史、变体与已有身份资产的视图角色，同时剥离项目内 episode/scene/storyboard 作用域。
+- `assetHub.selftest.ts` 增加别名、`libraryLink`、变体映射和发布回 ElementRef 的覆盖。
+
+本轮仍然不做持久化 key 迁移，也不把全局身份资产改成实时 linked 模式；项目生产链路继续以项目内 `Asset` 快照为准。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

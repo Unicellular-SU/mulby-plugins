@@ -1,6 +1,6 @@
 import type { Asset } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { createProjectAssetFromEntity, elementToLibraryEntity, promoteProjectAssetToEntity } from './assetHub'
+import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, promoteProjectAssetToEntity } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -15,6 +15,7 @@ const element: ElementRef = {
   id: 'el_hero',
   kind: 'character',
   name: '女主',
+  aliases: ['阿瑶', '王记者'],
   description: '冷静的调查记者',
   prompt: 'consistent face, sharp eyes',
   refAssetIds: ['base-img'],
@@ -24,9 +25,11 @@ const element: ElementRef = {
   appearanceVariants: [{
     id: 'gala',
     label: '晚宴妆',
+    kind: 'makeup',
     appearance: 'black dress, formal makeup',
     prompt: 'formal makeup and black dress',
     views: { front: 'gala-front' },
+    tags: ['formal'],
   }],
   createdAt: 1,
   updatedAt: 2,
@@ -39,8 +42,10 @@ check('maps appearance variants to library variants', entity.variants?.[0]?.id =
 
 const projectAsset = createProjectAssetFromEntity(entity)
 check('creates project asset snapshot from entity', projectAsset.type === 'role' && projectAsset.elementId === 'el_hero' && projectAsset.refImageId === 'front-img', JSON.stringify(projectAsset))
+check('creates project asset aliases and library link', projectAsset.aliases?.includes('阿瑶') === true && projectAsset.libraryLink?.entityId === 'el_hero' && projectAsset.libraryLink.syncPolicy === 'snapshot', JSON.stringify(projectAsset))
 check('creates project asset image history from entity refs', (projectAsset.images ?? []).some((image) => image.refImageId === 'side-img'), JSON.stringify(projectAsset.images))
-check('creates project asset variants from entity variants', projectAsset.variants?.[0]?.refImageId === 'gala-front', JSON.stringify(projectAsset.variants))
+check('creates project asset variants from entity variants', projectAsset.variants?.[0]?.refImageId === 'gala-front' && projectAsset.variants[0].libraryVariantId === 'gala' && projectAsset.variants[0].variantKind === 'makeup', JSON.stringify(projectAsset.variants))
+check('maps project variant ids back to library variant ids', projectAsset.libraryLink?.variantMap?.gala === 'gala', JSON.stringify(projectAsset.libraryLink))
 
 const scopedAsset: Asset = {
   id: 'a_hero',
@@ -65,6 +70,11 @@ const promoted = promoteProjectAssetToEntity(scopedAsset, entity)
 check('promotes project asset back to existing entity id', promoted.id === 'el_hero' && promoted.version === 2, JSON.stringify(promoted))
 check('promoted entity keeps reusable variant fields and drops project scopes', promoted.variants?.[0]?.id === 'injured' && !('appliesToEpisodeIds' in promoted.variants[0]), JSON.stringify(promoted.variants))
 check('promoted entity carries aliases and primary image', promoted.aliases?.[0] === '记者' && !!promoted.mediaRefs?.some((ref) => ref.assetId === 'project-front'), JSON.stringify(promoted))
+
+const savedElement = libraryEntityToElement(promoted)
+check('maps promoted entity back to ElementRef with aliases', savedElement.aliases?.[0] === '记者' && savedElement.refAssetIds.includes('project-front'), JSON.stringify(savedElement))
+check('maps promoted entity version back to ElementRef', savedElement.version === 2, JSON.stringify(savedElement))
+check('maps promoted variants back to appearance variants', savedElement.appearanceVariants?.[0]?.id === 'injured' && savedElement.appearanceVariants[0].refAssetIds?.[0] === 'injured-img', JSON.stringify(savedElement.appearanceVariants))
 
 if (failures) {
   console.error(`\nassetHub selftest: ${failures} FAILED`)

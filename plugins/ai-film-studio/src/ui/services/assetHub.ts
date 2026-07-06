@@ -167,9 +167,12 @@ function elementVariantToLibraryVariant(variant: ElementVariant): LibraryVariant
   return {
     id: variant.id || variant.label || newId('lv_'),
     label: variant.label || variant.id || '未命名形态',
+    kind: variant.kind,
     desc: variant.appearance,
     prompt: variant.prompt,
+    parentVariantId: variant.parentVariantId,
     mediaRefs,
+    tags: variant.tags,
     createdAt: ts,
     updatedAt: ts,
   }
@@ -187,6 +190,7 @@ export function elementToLibraryEntity(element: ElementRef): LibraryEntity {
     id: element.id,
     kind: elementKindToEntityKind(element.kind),
     name: element.name,
+    aliases: element.aliases,
     identity: element.identity,
     description: element.description,
     prompt: element.prompt,
@@ -194,7 +198,7 @@ export function elementToLibraryEntity(element: ElementRef): LibraryEntity {
     mediaRefs,
     variants: element.appearanceVariants?.map(elementVariantToLibraryVariant),
     lora: element.lora,
-    version: 1,
+    version: element.version ?? 1,
     createdAt: element.createdAt,
     updatedAt: ts,
     legacyElement: element,
@@ -205,31 +209,37 @@ export function libraryEntityToElement(entity: LibraryEntity): ElementRef {
   const front = entity.mediaRefs?.find((ref) => ref.role === 'front')?.assetId
   const side = entity.mediaRefs?.find((ref) => ref.role === 'side')?.assetId
   const back = entity.mediaRefs?.find((ref) => ref.role === 'back')?.assetId
-  const refs = (entity.mediaRefs ?? []).map((ref) => ref.assetId).filter((assetId): assetId is string => !!assetId)
+  const refs = [...new Set((entity.mediaRefs ?? []).map((ref) => ref.assetId).filter((assetId): assetId is string => !!assetId))]
   return {
     id: entity.id,
     kind: entity.kind === 'scene' ? 'scene' : entity.kind === 'prop' ? 'prop' : 'character',
     name: entity.name,
+    aliases: entity.aliases,
     description: entity.description,
     prompt: entity.prompt,
     refAssetIds: refs,
     tags: entity.tags,
+    version: entity.version,
     createdAt: entity.createdAt,
     updatedAt: entity.updatedAt,
     identity: entity.identity,
     views: front || side || back ? { front, side, back } : undefined,
+    voiceId: entity.legacyElement?.voiceId ?? entity.voiceRef?.assetId,
     lora: entity.lora,
     appearanceVariants: entity.variants?.map((variant) => ({
       id: variant.id,
       label: variant.label,
+      kind: variant.kind,
       appearance: variant.desc,
       prompt: variant.prompt,
+      parentVariantId: variant.parentVariantId,
       views: {
         front: variant.mediaRefs?.find((ref) => ref.role === 'front')?.assetId,
         side: variant.mediaRefs?.find((ref) => ref.role === 'side')?.assetId,
         back: variant.mediaRefs?.find((ref) => ref.role === 'back')?.assetId,
       },
-      refAssetIds: (variant.mediaRefs ?? []).map((ref) => ref.assetId).filter((assetId): assetId is string => !!assetId),
+      refAssetIds: [...new Set((variant.mediaRefs ?? []).map((ref) => ref.assetId).filter((assetId): assetId is string => !!assetId))],
+      tags: variant.tags,
     })),
   }
 }
@@ -250,7 +260,9 @@ function libraryVariantToAssetVariant(variant: LibraryVariant): AssetVariant {
   const selected = primaryRef(variant.mediaRefs)
   return {
     id: variant.id,
+    libraryVariantId: variant.id,
     label: variant.label,
+    variantKind: variant.kind,
     desc: variant.desc,
     prompt: variant.prompt,
     refImageId: selected?.assetId,
@@ -263,6 +275,11 @@ function libraryVariantToAssetVariant(variant: LibraryVariant): AssetVariant {
 export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset['type']): Asset {
   const type = kind ?? entityKindToAssetType(entity.kind)
   const media = mediaRefsToAssetImages(entity.mediaRefs)
+  const variants = entity.variants?.map(libraryVariantToAssetVariant)
+  const variantMap = variants?.reduce<Record<string, string>>((acc, variant) => {
+    if (variant.libraryVariantId) acc[variant.id] = variant.libraryVariantId
+    return acc
+  }, {})
   const asset: Asset = {
     id: newId('a_'),
     type,
@@ -274,7 +291,14 @@ export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset
     images: media.images,
     currentImageId: media.currentImageId,
     elementId: entity.id,
-    variants: entity.variants?.map(libraryVariantToAssetVariant),
+    libraryLink: {
+      entityId: entity.id,
+      entityVersion: entity.version,
+      syncPolicy: 'snapshot',
+      variantMap: variantMap && Object.keys(variantMap).length ? variantMap : undefined,
+      lastSyncedAt: now(),
+    },
+    variants,
     state: media.refImageId ? 'done' : 'idle',
   }
   if (entity.kind === 'voice') {
@@ -289,8 +313,9 @@ export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset
 function assetVariantToLibraryVariant(variant: AssetVariant): LibraryVariant {
   const ts = now()
   return {
-    id: variant.id,
+    id: variant.libraryVariantId ?? variant.id,
     label: variant.label,
+    kind: variant.variantKind,
     desc: variant.desc,
     prompt: variant.prompt,
     parentVariantId: variant.parentVariantId,
@@ -301,10 +326,21 @@ function assetVariantToLibraryVariant(variant: AssetVariant): LibraryVariant {
   }
 }
 
-function assetMediaRefs(asset: Asset): MediaRef[] | undefined {
+function existingMediaRefFor(assetId: string | undefined, refs: MediaRef[] | undefined): MediaRef | undefined {
+  if (!assetId) return undefined
+  return refs?.find((ref) => ref.assetId === assetId)
+}
+
+function projectImageMediaRef(assetId: string | undefined, role: MediaRefRole, existingRefs?: MediaRef[]): MediaRef | undefined {
+  if (!assetId) return undefined
+  const existing = existingMediaRefFor(assetId, existingRefs)
+  return { assetId, role: existing?.role ?? role, label: existing?.label, createdAt: existing?.createdAt ?? now() }
+}
+
+function assetMediaRefs(asset: Asset, existingRefs?: MediaRef[]): MediaRef[] | undefined {
   const refs = [
-    ...(asset.images ?? []).map((image) => mediaRefFromAssetId(image.refImageId, image.id === asset.currentImageId ? 'primary' : 'reference')),
-    mediaRefFromAssetId(asset.refImageId, 'primary'),
+    ...(asset.images ?? []).map((image) => projectImageMediaRef(image.refImageId, image.id === asset.currentImageId ? 'primary' : 'reference', existingRefs)),
+    projectImageMediaRef(asset.refImageId, 'primary', existingRefs),
   ]
   if (asset.type === 'audio') refs.push({ role: 'audio', localPath: asset.audioFilePath, url: asset.audioUrl, createdAt: now() })
   return dedupeMediaRefs(refs)
@@ -312,7 +348,7 @@ function assetMediaRefs(asset: Asset): MediaRef[] | undefined {
 
 export function promoteProjectAssetToEntity(asset: Asset, existing?: LibraryEntity): LibraryEntity {
   const ts = now()
-  const mediaRefs = assetMediaRefs(asset)
+  const mediaRefs = assetMediaRefs(asset, existing?.mediaRefs)
   return {
     id: existing?.id ?? asset.elementId ?? newId('el_'),
     kind: existing?.kind ?? assetTypeToEntityKind(asset.type),

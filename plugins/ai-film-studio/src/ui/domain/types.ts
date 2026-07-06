@@ -59,6 +59,8 @@ export interface AssetVariant {
   desc?: string
   prompt?: string
   refImageId?: string // 资产库 assetId
+  libraryVariantId?: string // 来源身份资产变体 id；本地 id 可独立演进
+  variantKind?: 'age' | 'outfit' | 'makeup' | 'injury' | 'state' | 'time' | 'weather' | 'custom'
   parentVariantId?: string
   appliesTo?: string[] // 对齐节拍/段落关键字
   appliesToEpisodeIds?: string[]
@@ -67,6 +69,14 @@ export interface AssetVariant {
   tags?: string[]
   state?: GenState // [阶段2]
   error?: string // [阶段2]
+}
+
+export interface ProjectAssetLibraryLink {
+  entityId: string
+  entityVersion?: number
+  syncPolicy: 'linked' | 'snapshot' | 'forked'
+  variantMap?: Record<string, string> // local AssetVariant.id -> LibraryVariant.id
+  lastSyncedAt?: number
 }
 
 /** 一资产多图历史候选（对标 o_image，§3.3） */
@@ -100,6 +110,7 @@ export interface Asset {
   promptError?: string
   derivedFromImageId?: string // 衍生所用父图（img2img 来源，§3.1）
   elementId?: string // 桥接全局 assetStore.ElementRef.id（§3.6）
+  libraryLink?: ProjectAssetLibraryLink
   flowId?: string // 资产精修画布引用（指向 doc.imageFlows，§4.4）
   // —— 音色子资产(type:audio) 专用 ——
   voice?: string // 供应商音色 id（用于合成）

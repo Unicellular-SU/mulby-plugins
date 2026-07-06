@@ -31,12 +31,15 @@ export type ElementKind = 'character' | 'scene' | 'prop'
 export interface ElementVariant {
   id: string
   label: string
+  kind?: 'age' | 'outfit' | 'makeup' | 'injury' | 'state' | 'time' | 'weather' | 'custom'
   stageKey?: string
   appliesTo?: string[]
   appearance?: string
   prompt?: string
+  parentVariantId?: string
   views?: { front?: string; side?: string; back?: string }
   refAssetIds?: string[]
+  tags?: string[]
   voiceId?: string
 }
 
@@ -44,11 +47,13 @@ export interface ElementRef {
   id: string
   kind: ElementKind
   name: string
+  aliases?: string[]
   description?: string
   prompt?: string
   /** 参考图：附件库 assetId（直接绑定到画布节点的 image 输出） */
   refAssetIds: string[]
   tags?: string[]
+  version?: number
   createdAt: number
   updatedAt: number
   // —— P1-5 身份资产（全部可选，向后兼容；charId 缺省=id，复用同一主键命名空间） ——
