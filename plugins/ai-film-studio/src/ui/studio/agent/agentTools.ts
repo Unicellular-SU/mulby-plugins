@@ -9,7 +9,7 @@ import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
-import { loadAssetHub, type LibraryEntity } from '../../services/assetHub'
+import { loadAssetHub, projectAssetIdentityEntityId, type LibraryEntity } from '../../services/assetHub'
 
 type ProjectDocGetter = () => ProjectDoc | null
 type LinkableLibraryEntity = {
@@ -1589,7 +1589,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'sync_project_asset_from_library',
-      description: '从资产中心身份资产同步项目资产快照。会更新项目资产的身份字段、参考图和可复用变体，但保留项目内变体适用范围。',
+      description: '从资产中心身份资产同步项目资产快照。会更新项目资产的身份字段、参考图和可复用变体，但保留项目内变体适用范围；已分叉资产必须显式指定新的身份目标。',
       parameters: {
         type: 'object',
         properties: {
@@ -1608,7 +1608,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         const resolved = await resolveLibraryEntityForAsset(asset, {
-          libraryEntityId: a.libraryEntityId ?? a.entityId ?? asset.libraryLink?.entityId ?? asset.elementId,
+          libraryEntityId: a.libraryEntityId ?? a.entityId ?? projectAssetIdentityEntityId(asset),
           libraryEntityName: a.libraryEntityName ?? a.entityName,
         })
         if (!resolved.entity?.name) {

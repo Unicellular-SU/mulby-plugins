@@ -858,6 +858,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Studio 项目资产卡的发布按钮在已分叉状态下提示“另存为新身份资产”，且不会因为旧身份已归档而禁用；Agent 工具描述同步说明已分叉发布会另存新身份。
 - `agentTools.selftest.ts` 增加旧 `elementId` 分叉和分叉后发布另存新身份的覆盖，确保自动流程不会把 forked 项目快照写回旧身份资产。
 
+第五十三轮提交继续落地 P5/P6 的已分叉同步目标：
+
+- Agent 工具 `sync_project_asset_from_library` 未显式指定目标身份时，改用 `projectAssetIdentityEntityId` 解析活动身份链接；已分叉项目资产不会再通过旧 `libraryLink.entityId` 或 `elementId` 被隐式同步回旧身份。
+- 工具描述补充“已分叉资产必须显式指定新的身份目标”，让自动流程在恢复/同步项目资产时先确认目标身份，而不是反向撤销用户刚刚做出的分叉判断。
+- `agentTools.selftest.ts` 增加“资产中心存在旧身份快照，但 forked 项目资产未指定目标时仍拒绝同步”的覆盖，避免后续 Agent 默认参数再次绕过 forked 边界。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

@@ -372,6 +372,7 @@ writableDoc.assets = [
   { id: 'publish-blocked', type: 'role', name: 'Archived Linked Hero', refImageId: 'archived-linked-img', state: 'done', libraryLink: { entityId: 'el-archived', syncPolicy: 'snapshot' } },
   { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
   { id: 'legacy-linked', type: 'role', name: 'Legacy Linked Hero', refImageId: 'legacy-linked-img', state: 'done', elementId: 'el-legacy-old' },
+  { id: 'forked-sync', type: 'role', name: 'Forked Sync Hero', refImageId: 'forked-sync-img', state: 'done', elementId: 'el-forked-old', libraryLink: { entityId: 'el-forked-old', syncPolicy: 'forked' }, rejectedLibraryEntityIds: ['el-forked-old'] },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
@@ -544,11 +545,29 @@ check(
                 updatedAt: 2,
                 version: 4,
               },
+              {
+                id: 'el-forked-old',
+                kind: 'character',
+                name: 'Old Forked Hero',
+                refAssetIds: ['old-forked-img'],
+                createdAt: 0,
+                updatedAt: 2,
+                version: 7,
+              },
             ]
           : [],
     },
   },
 }
+const implicitForkedSync = JSON.parse(await syncProjectAsset.execute({ assetId: 'forked-sync' }))
+check(
+  'sync_project_asset_from_library does not implicitly sync forked identity links',
+  !!implicitForkedSync.error &&
+    implicitForkedSync.asset?.id === 'forked-sync' &&
+    implicitForkedSync.asset?.name === 'Forked Sync Hero' &&
+    implicitForkedSync.asset?.libraryLink?.syncPolicy === 'forked',
+  JSON.stringify(implicitForkedSync),
+)
 const syncedProjectAsset = JSON.parse(await syncProjectAsset.execute({ assetId: 'sync-target', libraryEntityId: 'el-sync' }))
 check(
   'sync_project_asset_from_library updates snapshot fields and preserves local variant scope',
