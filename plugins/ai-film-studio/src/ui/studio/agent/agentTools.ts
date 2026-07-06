@@ -8,7 +8,7 @@ import type { Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Scrip
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
-import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion } from '../services/episodeProduction'
+import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
 import { loadAssetHub, projectAssetIdentityEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
@@ -102,6 +102,20 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
           appearanceLabels: currentProject.appearanceLabels ?? [],
         }
       : undefined,
+  }
+}
+
+function handoffAssetCenterUsageView(doc: ProjectDoc, assetId: string, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const asset = doc.assets.find((item) => item.id === assetId)
+  return asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined
+}
+
+function episodeHandoffView(doc: ProjectDoc, handoff: EpisodeProductionHandoff, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return {
+    ...handoff,
+    plannedAssets: handoff.plannedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
+    plannedVariants: handoff.plannedVariants.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
+    sharedAssets: handoff.sharedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
   }
 }
 
@@ -923,7 +937,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
         if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
-        return json({ ...episodeInfo(d, episode), ...buildEpisodeProductionHandoff(d, episode) })
+        return json({ ...episodeInfo(d, episode), ...episodeHandoffView(d, buildEpisodeProductionHandoff(d, episode), await loadIdentityUsageSafe()) })
       },
     },
     {

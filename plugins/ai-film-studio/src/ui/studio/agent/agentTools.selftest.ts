@@ -182,6 +182,16 @@ check(
     handoff.plannedVariants?.some((item: { assetId: string; variantId: string; scopeAppliesToEpisode: boolean }) => item.assetId === 'hero' && item.variantId === 'gala' && item.scopeAppliesToEpisode === true),
   JSON.stringify(handoff),
 )
+check(
+  'get_episode_handoff exposes asset-center usage for planned and shared assets',
+  handoff.plannedAssets?.some((item: { assetId: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
+    item.assetId === 'hero' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E1 Episode 1'),
+  ) &&
+    handoff.sharedAssets?.some((item: { assetId: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
+      item.assetId === 'hero' && item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(handoff),
+)
 const emptyEpisodeHandoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 3 }))
 check(
   'get_episode_handoff carries prior refs for empty episode',

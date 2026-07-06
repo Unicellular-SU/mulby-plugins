@@ -1027,6 +1027,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这把上一轮的 usage 线索从“工作区概览/完整资产读取”扩展到“系列圣经与每集计划读取”，避免 Agent 在规划后续剧集时只看到 `id/name/type/aliases`，却看不到该角色已经在哪些剧集以何种形态出现。
 - 自测通过模拟真实 `studio:index`、`studio:project:<id>` 和 `elements:library`，验证 `get_series_bible.availableAssets` 能暴露 `E2 Second` 与 `E2 Second · Gala`，继续支撑多集一致性和同人多妆容管理。
 
+第八十一轮提交继续落地 P4/P5 的单集承接资产 usage 可见性：
+
+- `get_episode_handoff` 的 `plannedAssets`、`plannedVariants` 和 `sharedAssets` 现在会附带 `assetCenterUsage`，让 Agent 在生成某一集前能直接看到计划资产、计划形态和承接资产对应的身份链接、出场剧集和形态/妆容摘要。
+- 这把资产中心 usage 线索从整季规划继续下沉到单集生产承接包，减少 Agent 在处理“本集要不要沿用上一集妆容、是否要创建本集专属形态”时只依赖局部分镜或资产名称的风险。
+- 自测验证 `get_episode_handoff` 返回的 planned/shared 资产都能暴露 `el-hero`、`E1 Episode 1` 和 `E2 Second · Gala`，继续补强多集资产一致性和同人多妆容管理闭环。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
