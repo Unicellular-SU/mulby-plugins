@@ -689,6 +689,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让项目资产发布、缺失身份重建、资产中心兼容编辑等路径可以保持 `libraryLink.entityId` / `elementId` 的稳定性，减少多集项目快照与全局身份资产之间的无谓断链。
 - 旧 `elements:library` 仍只是兼容持久化层，但它不再在“恢复已有身份 id”时主动改写身份主键。
 
+第二十五轮提交继续落地 P1/P6 的媒体文件页读取收敛：
+
+- 资产中心“媒体文件”页的列表和合集读取改为使用 `assetHubStore.mediaAssets` / `assetHubStore.boards`，不再直接把 `useAssetStore.assets` / `useAssetStore.boards` 当作渲染数据源。
+- 上传、删除、移动合集、创建/重命名/删除合集、GC 清理仍沿用旧 `assetStore` 的兼容写 API，但每次写入后刷新 `assetHubStore`，让媒体文件页、Dock 和画布拖拽入口看到同一份快照。
+- 首次进入媒体文件页时会先确保旧 store 完成 backfill，再刷新 Hub，避免 Hub 在旧注册表尚未回填时展示不完整媒体索引。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

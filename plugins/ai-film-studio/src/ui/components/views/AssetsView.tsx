@@ -120,19 +120,21 @@ export default function AssetsView() {
 
 // ===================== 素材画廊（多模态）=====================
 function AssetGallery() {
-  const assets = useAssetStore((s) => s.assets)
   const usage = useAssetStore((s) => s.usage)
   const busy = useAssetStore((s) => s.busy)
-  const loaded = useAssetStore((s) => s.loaded)
+  const legacyLoaded = useAssetStore((s) => s.loaded)
   const load = useAssetStore((s) => s.load)
   const upload = useAssetStore((s) => s.upload)
   const removeAsset = useAssetStore((s) => s.removeAsset)
   const runGc = useAssetStore((s) => s.runGc)
-  const boards = useAssetStore((s) => s.boards)
   const createBoard = useAssetStore((s) => s.createBoard)
   const renameBoard = useAssetStore((s) => s.renameBoard)
   const deleteBoard = useAssetStore((s) => s.deleteBoard)
   const moveAsset = useAssetStore((s) => s.moveAsset)
+  const assets = useAssetHubStore((s) => s.mediaAssets)
+  const boards = useAssetHubStore((s) => s.boards)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const refreshHub = useAssetHubStore((s) => s.refresh)
   const saveProject = useGraphStore((s) => s.saveProject)
 
   const confirm = useConfirm()
@@ -146,8 +148,12 @@ function AssetGallery() {
   const [preview, setPreview] = useState<AssetRecord | null>(null)
 
   useEffect(() => {
-    if (!loaded) void load()
-  }, [loaded, load])
+    if (!legacyLoaded) void load().then(refreshHub)
+  }, [legacyLoaded, load, refreshHub])
+
+  useEffect(() => {
+    if (!hubLoaded) void refreshHub()
+  }, [hubLoaded, refreshHub])
 
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase()
@@ -169,31 +175,43 @@ function AssetGallery() {
     if (!files.length) return
     const payload = await Promise.all(files.map(readFile))
     await upload(payload.filter((p) => p.base64))
+    await refreshHub()
   }
 
   const onGc = async () => {
     if (!(await confirm({ title: '清理未引用媒体', message: '清理「未被任何工程 / 身份资产 / 上传媒体 / 快照」引用的附件？此操作不可撤销。', confirmLabel: '清理', danger: true }))) return
     await saveProject() // 先落盘当前工程，避免刚生成未保存的素材被误判为孤儿
     const r = await runGc()
+    await refreshHub()
     window.mulby?.notification?.show(`已清理 ${r.removed} 个未引用媒体，释放 ${fmtBytes(r.freedBytes)}`, 'success')
   }
 
   const onNewBoard = async () => {
     const name = await prompt({ title: '新建合集', placeholder: '合集名称', confirmLabel: '创建' })
-    if (name && name.trim()) await createBoard(name.trim())
+    if (name && name.trim()) {
+      await createBoard(name.trim())
+      await refreshHub()
+    }
   }
   const onRenameBoard = async (id: string, cur: string) => {
     const name = await prompt({ title: '重命名合集', placeholder: '合集名称', defaultValue: cur })
-    if (name && name.trim()) await renameBoard(id, name.trim())
+    if (name && name.trim()) {
+      await renameBoard(id, name.trim())
+      await refreshHub()
+    }
   }
   const onDeleteBoard = async (id: string) => {
     if (await confirm({ title: '删除合集', message: '删除该合集？（媒体文件不会被删除，仅归为未分组）', confirmLabel: '删除', danger: true })) {
       await deleteBoard(id)
+      await refreshHub()
       if (boardF === id) setBoardF('all')
     }
   }
   const onDeleteAsset = async (id: string) => {
-    if (await confirm({ title: '删除上传媒体', message: '删除该上传媒体文件？', confirmLabel: '删除', danger: true })) removeAsset(id)
+    if (await confirm({ title: '删除上传媒体', message: '删除该上传媒体文件？', confirmLabel: '删除', danger: true })) {
+      await removeAsset(id)
+      await refreshHub()
+    }
   }
   // 导出本地媒体：把该媒体文件下载到本地
   const onDownloadAsset = async (a: AssetRecord) => {
@@ -312,7 +330,7 @@ function AssetGallery() {
 
           <div className="afs-avscroll">
             {filtered.length === 0 ? (
-              loaded ? (
+              hubLoaded ? (
                 <EmptyState icon={ImageIcon} title="暂无媒体文件" description="生成的图片 / 视频 / 音频会自动入库，也可上传本地媒体。" />
               ) : (
                 <div className="afs-avtiles" role="status" aria-label="加载中…">
@@ -341,7 +359,10 @@ function AssetGallery() {
                           block
                           className="afs-avcard__board"
                           value={a.boardId || ''}
-                          onChange={(v) => moveAsset(a.id, v || undefined)}
+                          onChange={async (v) => {
+                            await moveAsset(a.id, v || undefined)
+                            await refreshHub()
+                          }}
                           options={[{ value: '', label: '未分组' }, ...boards.map((b) => ({ value: b.id, label: b.name }))]}
                           title="移动到合集"
                           ariaLabel="移动到合集"
