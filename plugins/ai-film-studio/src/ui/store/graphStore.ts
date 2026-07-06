@@ -583,6 +583,8 @@ interface GraphState {
   regenNodeImageItem: (nodeId: string, port: string, index: number) => Promise<void>
   /** 二次编辑文本/JSON 产物；返回错误信息（null 表示成功） */
   updateNodeOutputText: (nodeId: string, port: string, text: string) => string | null
+  /** 标记画布媒体产物已被显式采纳为项目资产/变体，保留 lineage 供后续使用图谱读取。 */
+  markOutputAsProjectAsset: (nodeId: string, port: string, assetId: string, target: { projectAssetId: string; projectVariantId?: string }, itemIndex?: number) => boolean
   setNodeImage: (id: string, dataUrl: string, port?: string) => Promise<void>
   setNodeAudio: (id: string, dataUrl: string) => Promise<void>
   loadTemplate: (templateId: string) => Promise<void>
@@ -697,6 +699,37 @@ function patchNode(id: string, patch: Partial<FilmNodeData>) {
   useGraphStore.setState({
     nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
   })
+}
+
+function markPortValueAsProjectAsset(
+  value: PortValue,
+  assetId: string,
+  target: { projectAssetId: string; projectVariantId?: string },
+  itemIndex?: number
+): { value: PortValue; changed: boolean } {
+  const metaPatch = (item: PortValue): PortValue => ({
+    ...item,
+    meta: {
+      ...(item.meta ?? {}),
+      mediaAssetId: item.meta?.mediaAssetId ?? item.assetId,
+      projectAssetId: target.projectAssetId,
+      projectVariantId: target.projectVariantId,
+      purpose: 'approved',
+    },
+  })
+  if (value.items?.length) {
+    const idx = typeof itemIndex === 'number' ? itemIndex : value.items.findIndex((item) => item.assetId === assetId)
+    const item = value.items[idx]
+    if (!item || item.assetId !== assetId) return { value, changed: false }
+    const nextItem = metaPatch(item)
+    const items = value.items.map((entry, index) => (index === idx ? nextItem : entry))
+    return {
+      value: idx === 0 ? { ...value, items, meta: nextItem.meta } : { ...value, items },
+      changed: true,
+    }
+  }
+  if (value.assetId !== assetId) return { value, changed: false }
+  return { value: metaPatch(value), changed: true }
 }
 
 // 执行单个节点（不切换全局 isRunning，由 runNode/runAll 包裹）
@@ -3063,6 +3096,17 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: nextVal }, error: undefined })
     void safeSave()
     return null
+  },
+
+  markOutputAsProjectAsset: (nodeId, port, assetId, target, itemIndex) => {
+    const node = get().nodes.find((n) => n.id === nodeId)
+    const current = node?.data.outputs?.[port]
+    if (!node || !current) return false
+    const next = markPortValueAsProjectAsset(current, assetId, target, itemIndex)
+    if (!next.changed) return false
+    patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: next.value }, error: undefined })
+    void safeSave()
+    return true
   },
 
   loadTemplate: async (templateId) => {

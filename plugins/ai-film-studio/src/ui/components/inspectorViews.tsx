@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FolderOpen, ChevronRight, ChevronDown, Pencil, BookmarkPlus } from 'lucide-react'
-import type { PortValue } from '../store/graphStore'
+import { useGraphStore, type PortValue } from '../store/graphStore'
 import { useAssetStore, type CanvasOutputViewRole, type ElementKind } from '../store/assetStore'
 import type { Asset } from '../domain/types'
 import { basename } from '../services/download'
@@ -550,6 +550,7 @@ export function OutputView({
   const promoteCanvasOutputs = useAssetStore((s) => s.promoteCanvasOutputs)
   const projectDoc = useProjectStore((s) => s.doc)
   const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
+  const markOutputAsProjectAsset = useGraphStore((s) => s.markOutputAsProjectAsset)
   const mediaList = useMemo(() => mediaOutputsForValue(value), [value])
   const imageMediaList = useMemo(() => (mediaList ?? []).filter((it) => it.type === 'image' && !!it.assetId), [mediaList])
   const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(hubEntities, imageMediaList), [hubEntities, imageMediaList])
@@ -631,7 +632,7 @@ export function OutputView({
         count > 0 ? 'success' : 'warning'
       )
     }
-    const saveToProjectAsset = (it: PortValue) => {
+    const saveToProjectAsset = (it: PortValue, itemIndex?: number) => {
       if (!it.assetId || !selectedProjectTarget) {
         window.mulby?.notification?.show('请先选择要写入的项目资产或项目变体', 'warning')
         return
@@ -641,6 +642,15 @@ export function OutputView({
         variantId: selectedProjectTarget.variantId,
         refImageId: it.assetId,
       })
+      if (changed && nodeId && port) {
+        markOutputAsProjectAsset(
+          nodeId,
+          port,
+          it.assetId,
+          { projectAssetId: selectedProjectTarget.assetId, projectVariantId: selectedProjectTarget.variantId },
+          itemIndex
+        )
+      }
       window.mulby?.notification?.show(
         changed ? `已保存到${selectedProjectTarget.label}` : '未找到可写入的项目资产目标',
         changed ? 'success' : 'warning'
@@ -687,6 +697,7 @@ export function OutputView({
         ) : null}
         <div className="afs-gallery">
           {mediaList.map((it, i) => {
+            const itemIndex = rawItems ? rawItems.indexOf(it) : undefined
             const actions: MediaTileAction[] = []
             if (it.type === 'image' && identitySaveTargets.length) {
               const view = normalizeViewRole(it.meta?.view)
@@ -702,7 +713,7 @@ export function OutputView({
                 label: '存项目',
                 title: selectedProjectTarget?.title || '先选择要写入的项目资产或项目变体',
                 disabled: !selectedProjectTarget || !it.assetId,
-                onClick: () => saveToProjectAsset(it),
+                onClick: () => saveToProjectAsset(it, itemIndex),
               })
             }
             return (
