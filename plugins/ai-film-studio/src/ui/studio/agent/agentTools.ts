@@ -699,11 +699,11 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const includeDerived = boolArg(a.includeDerived, true)
-        const name = typeof a.name === 'string' ? a.name.trim().toLowerCase() : ''
+        const name = normalizeAssetLookup(a.name)
         const assets = d.assets.filter((x) => {
           if (!includeDerived && x.parentAssetId) return false
           if (typeof a.type === 'string' && x.type !== a.type) return false
-          if (name && !x.name.toLowerCase().includes(name)) return false
+          if (name && ![x.name, ...(x.aliases ?? [])].some((value) => normalizeAssetLookup(value).includes(name))) return false
           return true
         })
         return json({
@@ -1524,12 +1524,14 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     {
       name: 'generate_asset',
       description: '按名称生成资产参考图',
-      parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      parameters: { type: 'object', properties: { assetId: { type: 'string' }, assetName: { type: 'string' }, name: { type: 'string' } } },
       execute: async (a) => {
-        const as = doc()?.assets.find((x) => x.name === a.name)
-        if (!as) return `未找到资产 ${a.name}`
-        await get().generateAsset(as.id)
-        return `已生成资产 ${a.name}`
+        const d = doc()
+        if (!d) return '无项目'
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return `未找到资产 ${String(a.assetId ?? a.assetName ?? a.name ?? '')}`
+        await get().generateAsset(asset.id)
+        return `已生成资产 ${asset.name}`
       },
     },
     {

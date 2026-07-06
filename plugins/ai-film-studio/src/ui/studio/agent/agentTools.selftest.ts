@@ -79,10 +79,11 @@ const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
 const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handoff')
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
+const getAssets = tools.find((tool) => tool.name === 'get_assets')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getEpisodeHandoff || !getScript || !getStoryboards || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -94,6 +95,9 @@ check('search_project finds non-current episode storyboard table', search.storyb
 
 const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角', domains: ['assets'], limit: 10 }))
 check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
+
+const aliasFilteredAssets = JSON.parse(await getAssets.execute({ name: '主角', includeImages: false }))
+check('get_assets filters by asset aliases', aliasFilteredAssets.assets?.some((item: { id: string }) => item.id === 'hero'), JSON.stringify(aliasFilteredAssets.assets))
 
 const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
@@ -205,6 +209,10 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       const variant = current.assets.find((item) => item.id === assetId)?.variants?.find((item) => item.id === variantId)
       if (variant) Object.assign(variant, patch)
     },
+    generateAsset: async (assetId: string) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (asset) asset.refImageId = `generated-${assetId}`
+    },
     setCurrentEpisodeSeriesSkip: (skip: boolean) => {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
       if (episode) episode.seriesSkip = skip || undefined
@@ -245,13 +253,14 @@ const writeTools = makeAgentTools(() => writeState)
 const upsertScript = writeTools.find((tool) => tool.name === 'upsert_script')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
+const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -295,6 +304,9 @@ check(
     writableDoc.assets.find((item) => item.id === 'hero')?.aliases?.includes('队长') === true,
   JSON.stringify(updatedAsset),
 )
+
+await generateAsset.execute({ name: '队长' })
+check('generate_asset resolves asset aliases', writableDoc.assets.find((item) => item.id === 'hero')?.refImageId === 'generated-hero', JSON.stringify(writableDoc.assets.find((item) => item.id === 'hero')))
 
 const invalidStoryboardIndex = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 0, assetName: 'Hero', variantLabel: 'Gala' }))
 check('write tools reject non-positive storyboard indexes', !!invalidStoryboardIndex.error, JSON.stringify(invalidStoryboardIndex))
