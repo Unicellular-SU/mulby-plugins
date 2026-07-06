@@ -237,7 +237,7 @@ export const useAssetStore = create<AssetState>((set, get) => ({
       // M22a/M27：新建分支改为整体展开，杜绝丢字段（旧版只拷贝子集，丢 charId/views/voiceId/lora/identity/appearanceVariants）
       saved = {
         ...el,
-        id: `el_${nanoid(8)}`,
+        id: el.id ?? `el_${nanoid(8)}`,
         refAssetIds: el.refAssetIds || [],
         createdAt: ts,
         updatedAt: ts,
