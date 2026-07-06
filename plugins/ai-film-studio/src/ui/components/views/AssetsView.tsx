@@ -36,7 +36,7 @@ import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../service
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
-import { libraryEntityToElement, type MediaAssetUsage } from '../../services/assetHub'
+import { libraryEntityToElement, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -110,6 +110,31 @@ function hasMediaUsage(usage: MediaAssetUsage | undefined): usage is MediaAssetU
         usage.canvasNodeCount ||
         usage.snapshotCount)
   )
+}
+
+function hasIdentityUsage(usage: IdentityAssetUsage | undefined): usage is IdentityAssetUsage {
+  return Boolean(usage && (usage.assetCount || usage.canvasNodeCount || usage.snapshotCount))
+}
+
+function identityUsageLabel(usage: IdentityAssetUsage | undefined): string {
+  if (!hasIdentityUsage(usage)) return '未被工作流项目引用'
+  const parts = [
+    usage.projectCount ? `${usage.projectCount} 项目` : '',
+    usage.assetCount ? `${usage.assetCount} 项目资产` : '',
+    usage.canvasNodeCount ? `${usage.canvasNodeCount} 画布节点` : '',
+    usage.snapshotCount ? `${usage.snapshotCount} 快照` : '',
+  ].filter(Boolean)
+  return `已被 ${parts.join(' / ')} 引用`
+}
+
+function identityUsageTitle(usage: IdentityAssetUsage | undefined): string {
+  if (!hasIdentityUsage(usage)) return '暂未被工作流项目、画布或快照引用'
+  const lines = [
+    ...usage.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`),
+    ...usage.canvasProjects.map((project) => `画布 ${project.projectName}：${project.nodeTitles.join('、')}`),
+    ...usage.snapshots.map((snapshot) => `快照 ${snapshot.snapshotName}：${snapshot.nodeTitles.join('、')}`),
+  ]
+  return lines.length ? lines.join('\n') : '暂未被工作流项目、画布或快照引用'
 }
 
 function mediaUsageLabel(usage: MediaAssetUsage | undefined): string {
@@ -596,6 +621,7 @@ function ElementLibrary() {
   const confirm = useConfirm()
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
+  const [usageDetail, setUsageDetail] = useState<{ element: ElementRef; usage: IdentityAssetUsage } | null>(null)
   const elements = useMemo(() => hubEntities.filter((entity) => entity.kind !== 'voice').map(libraryEntityToElement), [hubEntities])
 
   useEffect(() => {
@@ -618,6 +644,11 @@ function ElementLibrary() {
     setEditing(null)
   }
   const onDeleteElement = async (el: ElementRef) => {
+    const usage = usageByEntity[el.id]
+    if (hasIdentityUsage(usage)) {
+      window.mulby?.notification?.show('该身份资产仍被项目、画布或快照引用，请先解除引用后再删除。', 'warning')
+      return
+    }
     if (await confirm({ title: '删除', message: `删除身份资产「${el.name}」？`, confirmLabel: '删除', danger: true })) {
       if (!legacyLoaded) await loadLegacyStore()
       await removeElement(el.id)
@@ -655,7 +686,7 @@ function ElementLibrary() {
             {elements.map((el) => {
               const Icon = KIND_ICON[el.kind]
               const usage = usageByEntity[el.id]
-              const usageTitle = usage?.projects.map((project) => `${project.projectName}：${project.assetNames.join('、')}`).join('\n')
+              const identityUsed = hasIdentityUsage(usage)
               return (
                 <div key={el.id} className="afs-avcard">
                   <div className="afs-avcard__thumb" onClick={() => setEditing(el)} title="编辑">
@@ -668,9 +699,16 @@ function ElementLibrary() {
                     {el.name}
                   </div>
                   <div className="afs-avcard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
-                  <div className={`afs-avcard__usage${usage?.projectCount ? ' is-linked' : ''}`} title={usageTitle || '暂未被工作流项目引用'}>
-                    {usage?.projectCount ? `已被 ${usage.projectCount} 个工作流项目引用` : '未被工作流项目引用'}
-                  </div>
+                  <button
+                    type="button"
+                    className={`afs-avcard__usage${identityUsed ? ' is-linked' : ''}`}
+                    title={identityUsed ? '查看引用详情' : identityUsageTitle(usage)}
+                    aria-label={identityUsed ? `查看身份资产 ${el.name} 的引用详情` : '未被引用'}
+                    disabled={!identityUsed}
+                    onClick={() => identityUsed && setUsageDetail({ element: el, usage })}
+                  >
+                    {identityUsageLabel(usage)}
+                  </button>
                   <div className="afs-avcard__foot">
                     <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
                     <IconButton
@@ -678,7 +716,9 @@ function ElementLibrary() {
                       size="sm"
                       className="afs-avcard__foot--push"
                       icon={<Trash2 size={13} />}
-                      aria-label="删除"
+                      aria-label={identityUsed ? '已被引用，不能删除身份资产' : '删除'}
+                      title={identityUsed ? '已被引用，先解除引用后再删除' : '删除'}
+                      disabled={identityUsed}
                       onClick={() => onDeleteElement(el)}
                     />
                   </div>
@@ -697,7 +737,78 @@ function ElementLibrary() {
           onSave={onSave}
         />
       )}
+      {usageDetail && <IdentityUsageDialog element={usageDetail.element} usage={usageDetail.usage} onClose={() => setUsageDetail(null)} />}
     </>
+  )
+}
+
+function IdentityUsageDialog({ element, usage, onClose }: { element: ElementRef; usage: IdentityAssetUsage; onClose: () => void }) {
+  const Icon = KIND_ICON[element.kind]
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="wide"
+      title="身份资产引用详情"
+      description="这些位置仍在使用该身份资产；解除引用前不要删除。"
+      footer={
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      <div className="afs-avusage-detail">
+        <div className="afs-avusage-detail__head">
+          <div className="afs-avusage-detail__icon">
+            <Icon size={16} aria-hidden />
+          </div>
+          <div>
+            <div className="afs-avusage-detail__title">{element.name}</div>
+            <div className="afs-avusage-detail__sub">
+              {KIND_LABEL[element.kind]} · {element.description || '无描述'}
+            </div>
+          </div>
+        </div>
+
+        {usage.projects.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>工作流项目</h3>
+            {usage.projects.map((project) => (
+              <div key={project.projectId} className="afs-avusage-detail__row">
+                <span>{project.projectName}</span>
+                <small>{commaList(project.assetNames) || project.projectId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {usage.canvasProjects.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>画布项目</h3>
+            {usage.canvasProjects.map((project) => (
+              <div key={project.projectId} className="afs-avusage-detail__row">
+                <span>{project.projectName}</span>
+                <small>{commaList(project.nodeTitles) || project.projectId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {usage.snapshots.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>快照</h3>
+            {usage.snapshots.map((snapshot) => (
+              <div key={snapshot.snapshotId} className="afs-avusage-detail__row">
+                <span>{snapshot.snapshotName}</span>
+                <small>{commaList(snapshot.nodeTitles) || snapshot.snapshotId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+    </Modal>
   )
 }
 
