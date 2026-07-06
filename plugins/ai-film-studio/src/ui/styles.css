@@ -6387,6 +6387,10 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   right: 6px;
   background: color-mix(in srgb, var(--afs-accent) 78%, #000);
 }
+.afs-avpill--archived {
+  right: 6px;
+  background: color-mix(in srgb, var(--afs-muted) 76%, #000);
+}
 
 /* ---- Card body ---- */
 .afs-avcard__name {

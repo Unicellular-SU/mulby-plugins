@@ -28,6 +28,8 @@ import {
   Search,
   Download,
   Info,
+  Archive,
+  RotateCcw,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
@@ -655,6 +657,22 @@ function ElementLibrary() {
       await refreshHub()
     }
   }
+  const onToggleArchiveElement = async (el: ElementRef) => {
+    const nextArchived = !el.archived
+    const ok = await confirm({
+      title: nextArchived ? '归档身份资产' : '恢复身份资产',
+      message: nextArchived
+        ? `归档「${el.name}」？已有项目快照不会被删除，但后续候选匹配和导入会跳过该身份。`
+        : `恢复「${el.name}」？恢复后它会重新参与资产中心候选匹配和导入。`,
+      confirmLabel: nextArchived ? '归档' : '恢复',
+      danger: nextArchived,
+    })
+    if (!ok) return
+    if (!legacyLoaded) await loadLegacyStore()
+    await saveElement({ ...el, kind: el.kind, name: el.name, archived: nextArchived })
+    await refreshHub()
+    window.mulby?.notification?.show(nextArchived ? '已归档身份资产' : '已恢复身份资产', 'success')
+  }
 
   return (
     <>
@@ -694,11 +712,14 @@ function ElementLibrary() {
                     <span className="afs-avpill afs-avpill--type">
                       <Icon size={11} /> {KIND_LABEL[el.kind]}
                     </span>
+                    {el.archived && <span className="afs-avpill afs-avpill--archived">已归档</span>}
                   </div>
                   <div className="afs-avcard__name" title={el.name}>
                     {el.name}
                   </div>
-                  <div className="afs-avcard__meta">{el.description ? el.description.slice(0, 28) : '无描述'}</div>
+                  <div className="afs-avcard__meta">
+                    {el.archived ? '已归档 · ' : ''}{el.description ? el.description.slice(0, 28) : '无描述'}
+                  </div>
                   <button
                     type="button"
                     className={`afs-avcard__usage${identityUsed ? ' is-linked' : ''}`}
@@ -711,6 +732,13 @@ function ElementLibrary() {
                   </button>
                   <div className="afs-avcard__foot">
                     <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
+                    <IconButton
+                      size="sm"
+                      icon={el.archived ? <RotateCcw size={13} /> : <Archive size={13} />}
+                      aria-label={el.archived ? '恢复身份资产' : '归档身份资产'}
+                      title={el.archived ? '恢复身份资产' : '归档身份资产'}
+                      onClick={() => onToggleArchiveElement(el)}
+                    />
                     <IconButton
                       variant="danger"
                       size="sm"
