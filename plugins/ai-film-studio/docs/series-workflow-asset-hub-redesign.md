@@ -889,6 +889,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 全剧生成开启 `enforceContinuity` 时，不再只拦截分镜实际使用中的资产/形态问题，也会拦截“计划要求但没有落到本集分镜”或“计划形态不适用于本集”的问题，避免系列资产矩阵报警后仍继续出片。
 - `episodeProduction.selftest.ts` 增加计划资产缺失和计划变体作用域不符的生产 blocker 覆盖，确保连续性报告、生产前错误文案和全剧队列拦截口径一致。
 
+第五十八轮提交继续落地 P4/P5 的剧集计划交接包：
+
+- `EpisodeProductionHandoff` 新增 `plannedAssets` 和 `plannedVariants`，从 `Episode.plan.requiredAssetIds/requiredVariantIds` 解析本集必须覆盖的项目资产和形态/妆容，作为下一集制片/分镜 Agent 的结构化输入。
+- 计划形态会携带 `scopeAppliesToEpisode` 和已有 `appliesToEpisodeIds`，让 Agent 在生成分镜前就能知道该妆容是否已经适用于当前剧集，而不是等到分镜绑定后才发现作用域问题。
+- `get_episode_handoff` 自动透出这些字段；服务自测和 Agent 工具自测都覆盖计划资产/计划形态进入交接包，保证“系列计划 -> 单集生成上下文 -> 连续性质量门”闭环一致。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

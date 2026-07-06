@@ -32,6 +32,24 @@ export interface EpisodeHandoffAssetCue {
   detail?: string
 }
 
+export interface EpisodeHandoffPlannedAsset {
+  assetId: string
+  assetName: string
+  assetType: ProjectDoc['assets'][number]['type']
+  refImageId?: string
+  requiredVariantIds: string[]
+}
+
+export interface EpisodeHandoffPlannedVariant {
+  assetId: string
+  assetName: string
+  variantId: string
+  variantLabel: string
+  refImageId?: string
+  scopeAppliesToEpisode: boolean
+  appliesToEpisodeIds?: string[]
+}
+
 export type EpisodeHandoffSuggestionKind = 'generate_asset_ref_image' | 'generate_variant_ref_image' | 'add_variant_episode_scope' | 'create_episode_variant'
 
 export interface EpisodeHandoffSuggestion {
@@ -53,6 +71,8 @@ export interface EpisodeHandoffSuggestion {
 
 export interface EpisodeProductionHandoff {
   recaps: EpisodeHandoffRecap[]
+  plannedAssets: EpisodeHandoffPlannedAsset[]
+  plannedVariants: EpisodeHandoffPlannedVariant[]
   sharedAssets: EpisodeHandoffAssetCue[]
   suggestions: EpisodeHandoffSuggestion[]
 }
@@ -314,6 +334,45 @@ function sortedEpisodes(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
 }
 
+function plannedHandoffRequirements(episode: Episode, assets: Map<string, HandoffAsset>): Pick<EpisodeProductionHandoff, 'plannedAssets' | 'plannedVariants'> {
+  const requiredVariantIds = unique(episode.plan?.requiredVariantIds ?? [])
+  const ownerByVariant = new Map<string, { asset: HandoffAsset; variant: HandoffVariant }>()
+  for (const asset of assets.values()) {
+    if (asset.parentAssetId || asset.type === 'audio' || asset.type === 'clip') continue
+    for (const variant of asset.variants ?? []) ownerByVariant.set(variant.id, { asset, variant })
+  }
+  const plannedVariants = requiredVariantIds.flatMap((variantId): EpisodeHandoffPlannedVariant[] => {
+    const owner = ownerByVariant.get(variantId)
+    if (!owner) return []
+    const appliesToEpisodeIds = owner.variant.appliesToEpisodeIds
+    return [{
+      assetId: owner.asset.id,
+      assetName: owner.asset.name,
+      variantId: owner.variant.id,
+      variantLabel: owner.variant.label,
+      refImageId: owner.variant.refImageId,
+      scopeAppliesToEpisode: !appliesToEpisodeIds?.length || appliesToEpisodeIds.includes(episode.id),
+      appliesToEpisodeIds,
+    }]
+  })
+  const requiredVariantIdsByAsset = new Map<string, string[]>()
+  for (const item of plannedVariants) {
+    requiredVariantIdsByAsset.set(item.assetId, [...(requiredVariantIdsByAsset.get(item.assetId) ?? []), item.variantId])
+  }
+  const plannedAssets = unique(episode.plan?.requiredAssetIds ?? []).flatMap((assetId): EpisodeHandoffPlannedAsset[] => {
+    const asset = assets.get(assetId)
+    if (!asset || asset.parentAssetId || asset.type === 'audio' || asset.type === 'clip') return []
+    return [{
+      assetId: asset.id,
+      assetName: asset.name,
+      assetType: asset.type,
+      refImageId: asset.refImageId,
+      requiredVariantIds: requiredVariantIdsByAsset.get(asset.id) ?? [],
+    }]
+  })
+  return { plannedAssets, plannedVariants }
+}
+
 function uniqueCastRefs(storyboards: Storyboard[]): ReturnType<typeof castRefsForStoryboard> {
   const seen = new Set<string>()
   const refs: ReturnType<typeof castRefsForStoryboard> = []
@@ -479,6 +538,7 @@ export function buildEpisodeProductionHandoff(
   const maxAppearances = options.maxAppearances ?? 4
   const episodes = sortedEpisodes(doc)
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const planned = plannedHandoffRequirements(episode, assets)
   const recaps = episodes
     .filter((item) => item.index < episode.index && !!item.productionRecap?.trim())
     .sort((a, b) => b.index - a.index)
@@ -624,7 +684,7 @@ export function buildEpisodeProductionHandoff(
     if (sharedAssets.length >= maxAssets) break
   }
 
-  return { recaps, sharedAssets, suggestions }
+  return { recaps, ...planned, sharedAssets, suggestions }
 }
 
 export function missingReferencedVariantImages(doc: Pick<ProjectDoc, 'assets' | 'storyboards'>): VariantImageRequest[] {

@@ -247,7 +247,7 @@ const handoffDoc = doc({
       productionRecap: 'Hero stayed in Battle look after the chase.',
       storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
     }),
-    episode('ep2', 1, { title: 'Gala' }),
+    episode('ep2', 1, { title: 'Gala', plan: { requiredAssetIds: ['hero', 'prop'], requiredVariantIds: ['gala'] } }),
     episode('ep3', 2, {
       title: 'Aftermath',
       storyboards: [storyboard('ep3-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
@@ -257,6 +257,13 @@ const handoffDoc = doc({
 const handoff = buildEpisodeProductionHandoff(handoffDoc, handoffDoc.episodes![1])
 const heroCue = handoff.sharedAssets.find((cue) => cue.assetId === 'hero')
 check('builds cross-episode handoff recaps from prior produced episodes', handoff.recaps.length === 1 && handoff.recaps[0].episodeId === 'ep1' && handoff.recaps[0].recap.includes('Battle'), JSON.stringify(handoff.recaps))
+check(
+  'includes episode plan assets and variants in production handoff',
+  handoff.plannedAssets.some((item) => item.assetId === 'hero' && item.requiredVariantIds.includes('gala')) &&
+    handoff.plannedAssets.some((item) => item.assetId === 'prop') &&
+    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
+  JSON.stringify({ plannedAssets: handoff.plannedAssets, plannedVariants: handoff.plannedVariants }),
+)
 check('builds shared asset handoff cues for current episode refs', !!heroCue && heroCue.label === 'Hero-Gala' && heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3', JSON.stringify(heroCue))
 check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala'), JSON.stringify(handoff.suggestions))
 check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))

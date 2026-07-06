@@ -115,6 +115,12 @@ check('get_series_bible returns bible and episode plans', seriesBible.seriesBibl
 
 const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
 check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
+check(
+  'get_episode_handoff exposes episode plan requirements',
+  handoff.plannedAssets?.some((item: { assetId: string; requiredVariantIds?: string[] }) => item.assetId === 'hero' && item.requiredVariantIds?.includes('gala')) &&
+    handoff.plannedVariants?.some((item: { assetId: string; variantId: string; scopeAppliesToEpisode: boolean }) => item.assetId === 'hero' && item.variantId === 'gala' && item.scopeAppliesToEpisode === true),
+  JSON.stringify(handoff),
+)
 const emptyEpisodeHandoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 3 }))
 check(
   'get_episode_handoff carries prior refs for empty episode',
