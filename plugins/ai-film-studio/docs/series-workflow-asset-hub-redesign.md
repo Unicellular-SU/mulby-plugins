@@ -1033,6 +1033,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这把资产中心 usage 线索从整季规划继续下沉到单集生产承接包，减少 Agent 在处理“本集要不要沿用上一集妆容、是否要创建本集专属形态”时只依赖局部分镜或资产名称的风险。
 - 自测验证 `get_episode_handoff` 返回的 planned/shared 资产都能暴露 `el-hero`、`E1 Episode 1` 和 `E2 Second · Gala`，继续补强多集资产一致性和同人多妆容管理闭环。
 
+第八十二轮提交继续落地 P4/P5 的项目搜索资产 usage 可见性：
+
+- `search_project` 在搜索资产域时会按需读取资产中心 usage，并在每条资产结果上附带 `assetCenterUsage`；搜索失败或 Hub 加载失败时仍保留原有资产搜索结果。
+- 这让 Agent 通过关键词或别名搜索“主角/女主/场景/道具”时，不只拿到 `id/name/type/aliases`，也能立即看到该资产关联的全局身份、当前项目出场剧集和形态/妆容摘要。
+- 自测新增搜索入口断言，验证 `search_project.assets` 能暴露 `el-hero`、`E1 Episode 1`、`E2 Second` 和 `Gala`，避免后续只优化完整读取工具而遗漏常用搜索路径。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

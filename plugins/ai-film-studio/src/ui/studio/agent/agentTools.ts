@@ -1162,6 +1162,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         const episodes = episodeList(d)
+        const usageByEntity = wants('assets') ? await loadIdentityUsageSafe() : undefined
         return json({
           query: q,
           episodes: wants('episodes')
@@ -1189,7 +1190,15 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             ? d.assets
                 .filter((asset) => has(asset.name) || asset.aliases?.some((alias) => has(alias)) || has(asset.desc) || has(asset.prompt))
                 .slice(0, limit)
-                .map((asset) => ({ id: asset.id, type: asset.type, name: asset.name, aliases: asset.aliases, desc: asset.desc, promptSnippet: snippet(asset.prompt ?? '', q, 180) }))
+                .map((asset) => ({
+                  id: asset.id,
+                  type: asset.type,
+                  name: asset.name,
+                  aliases: asset.aliases,
+                  desc: asset.desc,
+                  promptSnippet: snippet(asset.prompt ?? '', q, 180),
+                  assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity),
+                }))
             : undefined,
           storyboards: wants('storyboards')
             ? episodes

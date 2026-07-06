@@ -129,6 +129,17 @@ check('search_project finds non-current episode storyboard table', search.storyb
 
 const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角', domains: ['assets'], limit: 10 }))
 check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
+check(
+  'search_project exposes asset-center usage for assets',
+  assetAliasSearch.assets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+    item.id === 'hero' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E1 Episode 1') &&
+    item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+    item.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('E2 Second') && label.includes('Gala')),
+  ),
+  JSON.stringify(assetAliasSearch.assets),
+)
 
 const aliasFilteredAssets = JSON.parse(await getAssets.execute({ name: '主角', includeImages: false }))
 check('get_assets filters by asset aliases', aliasFilteredAssets.assets?.some((item: { id: string }) => item.id === 'hero'), JSON.stringify(aliasFilteredAssets.assets))
