@@ -441,6 +441,19 @@ function EpisodeSwitcher({ busy }: { busy: boolean }) {
   )
 }
 
+function handoffAssetTypeLabel(type: ProjectDoc['assets'][number]['type']): string {
+  if (type === 'role') return '人物'
+  if (type === 'scene') return '场景'
+  if (type === 'prop') return '物品'
+  if (type === 'audio') return '音色'
+  return '片段'
+}
+
+function handoffEpisodeLabel(doc: ProjectDoc, episodeId: string): string {
+  const episode = doc.episodes?.find((item) => item.id === episodeId)
+  return episode ? `E${episode.index + 1}` : episodeId
+}
+
 function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Episode }) {
   const actionBusy = useProjectStore((s) => s.batch.running || s.film.state === 'composing')
   const generateAsset = useProjectStore((s) => s.generateAsset)
@@ -449,7 +462,8 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
-  const hasHints = handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
+  const plannedCount = handoff.plannedAssets.length + handoff.plannedVariants.length
+  const hasHints = plannedCount > 0 || handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
   const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]) => {
     if (suggestion.kind === 'generate_asset_ref_image') {
@@ -506,7 +520,7 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
           variant="ghost"
           className={hasHints ? 'afs-stwb__handoff-trigger is-active' : 'afs-stwb__handoff-trigger'}
           aria-label="查看跨集承接线索"
-          title={hasHints ? '查看最近制作回顾和复用资产线索' : '暂无跨集承接线索'}
+          title={hasHints ? '查看本集计划输入、制作回顾和复用资产线索' : '暂无跨集承接线索'}
           icon={<BookmarkPlus size={16} />}
         />
       }
@@ -514,9 +528,47 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       <div className="afs-stwb__handoff">
         <div className="afs-stwb__handoff-head">
           <b>E{episode.index + 1} 跨集承接</b>
-          <span>{handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产 · {handoff.suggestions.length} 条建议</span>
+          <span>{plannedCount} 个计划输入 · {handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产 · {handoff.suggestions.length} 条建议</span>
         </div>
-        {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有可承接的制作回顾或跨集复用资产。</p>}
+        {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有计划输入、制作回顾或跨集复用资产。</p>}
+        {plannedCount > 0 && (
+          <section className="afs-stwb__handoff-sec">
+            <h4>本集计划输入</h4>
+            <div className="afs-stwb__handoff-list">
+              {handoff.plannedAssets.map((asset) => (
+                <article key={`planned-asset-${asset.assetId}`} className={`afs-stwb__handoff-item afs-stwb__handoff-plan${asset.refImageId ? '' : ' is-warning'}`}>
+                  <strong>{asset.assetName}</strong>
+                  <p>
+                    {handoffAssetTypeLabel(asset.assetType)}
+                    {' · '}
+                    {asset.refImageId ? '已有主参考图' : '缺主参考图'}
+                    {asset.requiredVariantIds.length > 0 ? ` · 要求 ${asset.requiredVariantIds.length} 个形态` : ''}
+                  </p>
+                </article>
+              ))}
+              {handoff.plannedVariants.map((variant) => {
+                const scopeLabels = variant.appliesToEpisodeIds?.map((episodeId) => handoffEpisodeLabel(doc, episodeId)) ?? []
+                return (
+                  <article key={`planned-variant-${variant.assetId}-${variant.variantId}`} className={`afs-stwb__handoff-item afs-stwb__handoff-plan${variant.refImageId && variant.scopeAppliesToEpisode ? '' : ' is-warning'}`}>
+                    <strong>{variant.assetName}-{variant.variantLabel}</strong>
+                    <p>
+                      计划形态
+                      {' · '}
+                      {variant.refImageId ? '已有形态图' : '缺形态图'}
+                      {' · '}
+                      {variant.scopeAppliesToEpisode ? '已适用本集' : '未标记适用本集'}
+                    </p>
+                    {scopeLabels.length > 0 && (
+                      <div className="afs-stwb__handoff-chips">
+                        {scopeLabels.map((label) => <span key={label}>作用域 {label}</span>)}
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+        )}
         {handoff.suggestions.length > 0 && (
           <section className="afs-stwb__handoff-sec">
             <div className="afs-stwb__handoff-secbar">

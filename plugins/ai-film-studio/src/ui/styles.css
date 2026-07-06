@@ -6095,6 +6095,13 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   border-color: color-mix(in srgb, var(--afs-accent) 38%, var(--afs-border));
   background: color-mix(in srgb, var(--afs-accent) 8%, var(--afs-panel));
 }
+.afs-stwb__handoff-plan {
+  background: color-mix(in srgb, var(--afs-success) 5%, var(--afs-panel));
+}
+.afs-stwb__handoff-plan.is-warning {
+  border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border));
+  background: color-mix(in srgb, var(--afs-warning) 7%, var(--afs-panel));
+}
 .afs-stwb__handoff-action {
   display: inline-flex;
   align-items: center;
