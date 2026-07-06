@@ -35,6 +35,7 @@ import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../service
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
+import { libraryEntityToElement } from '../../services/assetHub'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -415,14 +416,12 @@ const KIND_ICON: Record<ElementKind, typeof Users> = { character: Users, scene: 
 const KIND_LABEL: Record<ElementKind, string> = { character: '角色', scene: '场景', prop: '物品' }
 
 function ElementLibrary() {
-  const fallbackElements = useAssetStore((s) => s.elements)
-  const fallbackAssets = useAssetStore((s) => s.assets)
-  const loaded = useAssetStore((s) => s.loaded)
-  const load = useAssetStore((s) => s.load)
+  const legacyLoaded = useAssetStore((s) => s.loaded)
+  const loadLegacyStore = useAssetStore((s) => s.load)
   const saveElement = useAssetStore((s) => s.saveElement)
   const removeElement = useAssetStore((s) => s.removeElement)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
-  const hubElements = useAssetHubStore((s) => s.elements)
+  const hubEntities = useAssetHubStore((s) => s.entities)
   const hubMediaAssets = useAssetHubStore((s) => s.mediaAssets)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const refreshHub = useAssetHubStore((s) => s.refresh)
@@ -430,28 +429,30 @@ function ElementLibrary() {
   const confirm = useConfirm()
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
-  const elements = hubLoaded ? hubElements : fallbackElements
+  const elements = useMemo(() => hubEntities.filter((entity) => entity.kind !== 'voice').map(libraryEntityToElement), [hubEntities])
 
   useEffect(() => {
-    if (!loaded) void load()
-  }, [loaded, load])
+    if (!legacyLoaded) void loadLegacyStore()
+  }, [legacyLoaded, loadLegacyStore])
   useEffect(() => {
     if (!hubLoaded) void refreshHub()
   }, [hubLoaded, refreshHub])
 
-  const imageAssets = useMemo(() => (hubLoaded ? hubMediaAssets : fallbackAssets).filter((a) => a.type === 'image' && a.assetId), [fallbackAssets, hubLoaded, hubMediaAssets])
+  const imageAssets = useMemo(() => hubMediaAssets.filter((a) => a.type === 'image' && a.assetId), [hubMediaAssets])
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) {
       window.mulby?.notification?.show('请填写名称', 'warning')
       return
     }
+    if (!legacyLoaded) await loadLegacyStore()
     await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
     await refreshHub()
     setEditing(null)
   }
   const onDeleteElement = async (el: ElementRef) => {
     if (await confirm({ title: '删除', message: `删除身份资产「${el.name}」？`, confirmLabel: '删除', danger: true })) {
+      if (!legacyLoaded) await loadLegacyStore()
       await removeElement(el.id)
       await refreshHub()
     }
@@ -475,7 +476,7 @@ function ElementLibrary() {
 
       <div className="afs-avscroll">
         {elements.length === 0 ? (
-          loaded ? (
+          hubLoaded ? (
             <EmptyState icon={Users} title="暂无身份资产" description="新建角色、场景或物品；项目生产时会导入为项目资产快照。" />
           ) : (
             <div className="afs-avtiles" role="status" aria-label="加载中…">

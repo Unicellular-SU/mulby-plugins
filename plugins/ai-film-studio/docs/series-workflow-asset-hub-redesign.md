@@ -659,6 +659,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 目标解析会基于 `libraryEntityId`、旧 `charId`、名称/别名和身份类型匹配唯一 `LibraryEntity`，并读取 `LibraryVariant` 标签显示将要保存到的变体/视图。
 - 实际写入仍通过兼容的 `promoteCanvasOutputs` 更新旧 `elements:library` 存储；写入前确保旧 store 已加载，写入成功后刷新 `assetHubStore`，让资产中心视图和后续画布回写看到新版本。
 
+第二十轮提交继续落地 P6 的资产中心页面读取收敛：
+
+- 资产中心“身份资产”页的列表不再订阅 `useAssetStore.elements`，改为从 `assetHubStore.entities` 派生兼容编辑视图，展示与使用图谱都以资产中心快照为准。
+- 身份资产编辑器的参考图候选不再回退读取旧媒体 store，而是使用 `assetHubStore.mediaAssets`；页面加载时统一刷新资产中心快照。
+- 新建、编辑、删除身份资产仍通过兼容的旧 `elements:library` 写入 API 执行，但写入前会确保旧 store 已加载，写入后刷新 `assetHubStore`，避免把未加载的旧列表误当成空库覆盖。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
