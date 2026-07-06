@@ -1,4 +1,4 @@
-import type { Asset, AssetImage, AssetVariant, ProjectDoc } from '../domain/types'
+import type { Asset, AssetImage, AssetVariant, Clip, Episode, ProjectDoc, Storyboard, VideoTrack } from '../domain/types'
 import { loadIndex, loadProject, newId } from '../domain/persistence'
 import type { ElementKind, ElementRef, ElementVariant } from '../store/assetStore'
 import { loadBoards, loadRegistry, storageUsage, type AssetRecord, type Board } from './assetRegistry'
@@ -442,6 +442,36 @@ function projectAssetUsageName(asset: Asset, variantId: string): string | null {
   return variant ? `${asset.name} / ${variant.label}` : null
 }
 
+type EpisodeUsageSource = Pick<Episode, 'index' | 'title'>
+
+function episodeUsagePrefix(episode: EpisodeUsageSource | undefined): string {
+  if (!episode) return ''
+  const index = Number.isFinite(episode.index) ? `E${episode.index + 1}` : ''
+  const title = episode.title?.trim()
+  return [index, title].filter(Boolean).join(' ')
+}
+
+export function projectEpisodeUsageLabel(label: string, episode?: EpisodeUsageSource): string {
+  const prefix = episodeUsagePrefix(episode)
+  return prefix ? `${prefix} · ${label}` : label
+}
+
+function variantEpisodeScopeLabel(variant: AssetVariant, episodesById: ReadonlyMap<string, EpisodeUsageSource>): string {
+  const labels = [
+    ...new Set(
+      (variant.appliesToEpisodeIds ?? [])
+        .map((episodeId) => episodeUsagePrefix(episodesById.get(episodeId)))
+        .filter(Boolean),
+    ),
+  ]
+  return labels.length ? `（${labels.join('、')}）` : ''
+}
+
+export function projectVariantMediaUsageLabel(assetName: string, variant: AssetVariant, episodesById: ReadonlyMap<string, EpisodeUsageSource> = new Map()): string {
+  const scope = variantEpisodeScopeLabel(variant, episodesById)
+  return `${assetName} / ${variant.label}${scope}`
+}
+
 export function resolveCanvasProjectAssetMediaUsage(port: CanvasPortValue, project: ProjectDoc | undefined): CanvasProjectAssetMediaUsage | null {
   const projectId = canvasLineageProjectId(port)
   const projectAssetId = lineageString(port.meta?.projectAssetId)
@@ -707,6 +737,48 @@ export async function loadIdentityAssetUsages(elements: ElementRef[]): Promise<R
   return usages
 }
 
+function collectEpisodeStoryboards(doc: ProjectDoc, episodesById: Map<string, Episode>, currentEpisode: Episode | undefined): Array<{ storyboard: Storyboard; episode?: Episode }> {
+  const sources: Array<{ storyboard: Storyboard; episode?: Episode }> = [
+    ...(doc.storyboards ?? []).map((storyboard) => ({
+      storyboard,
+      episode: currentEpisode ?? (storyboard.episodeId ? episodesById.get(storyboard.episodeId) : undefined),
+    })),
+    ...(doc.episodes ?? []).flatMap((episode) => (episode.storyboards ?? []).map((storyboard) => ({ storyboard, episode }))),
+  ]
+  const seen = new Set<string>()
+  return sources.filter(({ storyboard }) => {
+    if (seen.has(storyboard.id)) return false
+    seen.add(storyboard.id)
+    return true
+  })
+}
+
+function collectEpisodeClips(doc: ProjectDoc, currentEpisode: Episode | undefined): Array<{ clip: Clip; episode?: Episode }> {
+  const sources: Array<{ clip: Clip; episode?: Episode }> = [
+    ...(doc.clips ?? []).map((clip) => ({ clip, episode: currentEpisode })),
+    ...(doc.episodes ?? []).flatMap((episode) => (episode.clips ?? []).map((clip) => ({ clip, episode }))),
+  ]
+  const seen = new Set<string>()
+  return sources.filter(({ clip }) => {
+    if (seen.has(clip.id)) return false
+    seen.add(clip.id)
+    return true
+  })
+}
+
+function collectEpisodeTracks(doc: ProjectDoc, currentEpisode: Episode | undefined): Array<{ track: VideoTrack; episode?: Episode }> {
+  const sources: Array<{ track: VideoTrack; episode?: Episode }> = [
+    ...(doc.track ?? []).map((track) => ({ track, episode: currentEpisode })),
+    ...(doc.episodes ?? []).flatMap((episode) => (episode.track ?? []).map((track) => ({ track, episode }))),
+  ]
+  const seen = new Set<string>()
+  return sources.filter(({ track }) => {
+    if (seen.has(track.id)) return false
+    seen.add(track.id)
+    return true
+  })
+}
+
 export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<Record<string, MediaAssetUsage>> {
   const usages: Record<string, MediaAssetUsage> = {}
   const cards = await loadIndex()
@@ -714,50 +786,28 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
   for (const card of cards) {
     const doc = await loadProject(card.id)
     if (!doc) continue
+    const episodesById = new Map((doc.episodes ?? []).map((episode) => [episode.id, episode]))
+    const currentEpisode = doc.currentEpisodeId ? episodesById.get(doc.currentEpisodeId) : undefined
     projectDocs.set(card.id, doc)
     projectDocs.set(doc.meta.id, doc)
     for (const asset of doc.assets ?? []) {
       addMediaProjectAssetUsage(usages, mediaKey({ assetId: asset.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
       for (const image of asset.images ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: image.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
-      for (const variant of asset.variants ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: variant.refImageId }), doc.meta.id, doc.meta.name, asset.id, `${asset.name} / ${variant.label}`)
+      for (const variant of asset.variants ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: variant.refImageId }), doc.meta.id, doc.meta.name, asset.id, projectVariantMediaUsageLabel(asset.name, variant, episodesById))
       addMediaProjectAssetUsage(usages, mediaKey({ localPath: asset.audioFilePath, url: asset.audioUrl }), doc.meta.id, doc.meta.name, asset.id, asset.name)
     }
-    const seenStoryboards = new Set<string>()
-    const storyboards = [
-      ...(doc.storyboards ?? []),
-      ...(doc.episodes ?? []).flatMap((episode) => episode.storyboards ?? []),
-    ].filter((storyboard) => {
-      if (seenStoryboards.has(storyboard.id)) return false
-      seenStoryboards.add(storyboard.id)
-      return true
-    })
-    for (const storyboard of storyboards) {
-      addMediaStoryboardUsage(usages, mediaKey({ assetId: storyboard.keyframeImageId }), doc.meta.id, doc.meta.name, storyboard.id, `分镜 #${storyboard.index + 1}`)
+    const storyboards = collectEpisodeStoryboards(doc, episodesById, currentEpisode)
+    for (const { storyboard, episode } of storyboards) {
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: storyboard.keyframeImageId }), doc.meta.id, doc.meta.name, storyboard.id, projectEpisodeUsageLabel(`分镜 #${storyboard.index + 1}`, episode))
     }
-    const seenClips = new Set<string>()
-    const clips = [
-      ...(doc.clips ?? []),
-      ...(doc.episodes ?? []).flatMap((episode) => episode.clips ?? []),
-    ].filter((clip) => {
-      if (seenClips.has(clip.id)) return false
-      seenClips.add(clip.id)
-      return true
-    })
-    for (const clip of clips) {
-      addMediaStoryboardUsage(usages, mediaKey({ localPath: clip.videoFilePath, url: clip.videoUrl }), doc.meta.id, doc.meta.name, clip.id, `视频片段 ${clip.id}`)
-      addMediaStoryboardUsage(usages, mediaKey({ assetId: clip.posterImageId }), doc.meta.id, doc.meta.name, clip.id, `视频片段 ${clip.id} 首帧`)
+    const clips = collectEpisodeClips(doc, currentEpisode)
+    for (const { clip, episode } of clips) {
+      addMediaStoryboardUsage(usages, mediaKey({ localPath: clip.videoFilePath, url: clip.videoUrl }), doc.meta.id, doc.meta.name, clip.id, projectEpisodeUsageLabel(`视频片段 ${clip.id}`, episode))
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: clip.posterImageId }), doc.meta.id, doc.meta.name, clip.id, projectEpisodeUsageLabel(`视频片段 ${clip.id} 首帧`, episode))
     }
-    const seenTracks = new Set<string>()
-    const tracks = [
-      ...(doc.track ?? []),
-      ...(doc.episodes ?? []).flatMap((episode) => episode.track ?? []),
-    ].filter((track) => {
-      if (seenTracks.has(track.id)) return false
-      seenTracks.add(track.id)
-      return true
-    })
-    for (const track of tracks) {
-      addMediaStoryboardUsage(usages, mediaKey({ assetId: track.audioClipId }), doc.meta.id, doc.meta.name, track.id, `轨道音频 ${track.id}`)
+    const tracks = collectEpisodeTracks(doc, currentEpisode)
+    for (const { track, episode } of tracks) {
+      addMediaStoryboardUsage(usages, mediaKey({ assetId: track.audioClipId }), doc.meta.id, doc.meta.name, track.id, projectEpisodeUsageLabel(`轨道音频 ${track.id}`, episode))
     }
     for (const [flowId, flow] of Object.entries(doc.imageFlows ?? {})) {
       for (const node of flow?.nodes ?? []) {

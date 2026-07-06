@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, projectEpisodeUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -110,6 +110,11 @@ const lineageVariant = resolveCanvasProjectAssetMediaUsage(
   lineageProject
 )
 check('resolves canvas project variant lineage', lineageVariant?.assetName === '女主 / 晚宴妆', JSON.stringify(lineageVariant))
+check('formats episode media usage labels', projectEpisodeUsageLabel('分镜 #2', { index: 2, title: '晚宴追凶' }) === 'E3 晚宴追凶 · 分镜 #2')
+check(
+  'formats scoped variant media usage labels',
+  projectVariantMediaUsageLabel('女主', { id: 'injured', label: '战损妆', refImageId: 'injured-img', appliesToEpisodeIds: ['ep3'], state: 'done' }, new Map([['ep3', { index: 2, title: '雨夜' }]])) === '女主 / 战损妆（E3 雨夜）'
+)
 const candidateLineage = resolveCanvasProjectAssetMediaUsage(
   { assetId: 'candidate-img', meta: { projectId: 'p_series', projectAssetId: 'a_hero', purpose: 'candidate' } },
   lineageProject
