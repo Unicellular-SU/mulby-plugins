@@ -308,6 +308,31 @@ check(
   JSON.stringify({ stateRegressionBlockers, stateRegressionBlockerError }),
 )
 
+const episodePlanBlockerDoc = doc({
+  currentEpisodeId: 'ep1',
+  assets: [
+    {
+      ...assets[0],
+      variants: [{ id: 'gala', label: 'Gala', refImageId: 'hero-gala', appliesToEpisodeIds: ['ep2'] }],
+    },
+    { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-main', state: 'done' },
+  ],
+  storyboards: [storyboard('ep1-plan-shot', 0, [{ assetId: 'hero' }])],
+  episodes: [
+    episode('ep1', 0, { title: 'Pilot', plan: { requiredAssetIds: ['hero', 'hall'], requiredVariantIds: ['gala'] } }),
+    episode('ep2', 1, { title: 'Gala' }),
+  ],
+})
+const episodePlanBlockers = episodeProductionContinuityBlockers(episodePlanBlockerDoc, episodePlanBlockerDoc.episodes![0])
+const episodePlanBlockerError = formatEpisodeProductionContinuityError(episodePlanBlockerDoc.episodes![0], episodePlanBlockers)
+check(
+  'blocks production on unresolved episode plan asset and variant scope requirements',
+  episodePlanBlockers.some((item) => item.code === 'episode_plan_missing_asset' && item.assetId === 'hall') &&
+    episodePlanBlockers.some((item) => item.code === 'episode_plan_variant_scope_mismatch' && item.variantId === 'gala') &&
+    episodePlanBlockerError.includes('E1'),
+  JSON.stringify({ episodePlanBlockers, episodePlanBlockerError }),
+)
+
 const mainResetHandoffDoc = doc({
   currentEpisodeId: 'ep3',
   assets: handoffAssets,

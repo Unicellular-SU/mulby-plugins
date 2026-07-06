@@ -883,6 +883,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Studio 连续性详情复用变体作用域修复动作，为该问题提供“标记计划形态适用于本集”入口，把当前剧集补入该变体的 `appliesToEpisodeIds`。
 - Agent 工具 `set_asset_variant_scope` 的说明补充该问题码，人工修复和 Agent 修复都走同一条增量作用域更新路径，不会覆盖已有 scene/storyboard 作用域。
 
+第五十七轮提交继续落地 P5 的剧集计划生产前拦截：
+
+- `episodeProductionContinuityBlockers` 将剧集计划类问题纳入生产 blocker，包括 `episode_plan_invalid_asset`、`episode_plan_missing_asset`、`episode_plan_invalid_variant`、`episode_plan_variant_asset_missing`、`episode_plan_variant_scope_mismatch` 和 `episode_plan_missing_variant`。
+- 全剧生成开启 `enforceContinuity` 时，不再只拦截分镜实际使用中的资产/形态问题，也会拦截“计划要求但没有落到本集分镜”或“计划形态不适用于本集”的问题，避免系列资产矩阵报警后仍继续出片。
+- `episodeProduction.selftest.ts` 增加计划资产缺失和计划变体作用域不符的生产 blocker 覆盖，确保连续性报告、生产前错误文案和全剧队列拦截口径一致。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
