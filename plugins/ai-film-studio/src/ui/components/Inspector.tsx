@@ -4,6 +4,7 @@ import { getNodeDef, CATEGORY_META, type ParamDef } from '../nodes/nodeDefs'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
 import { useAssetStore } from '../store/assetStore'
+import { useAssetHubStore } from '../store/assetHubStore'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS } from '../store/promptStore'
 import { gatherInputs } from '../services/executor'
 import { OutputView, InputSummary } from './inspectorViews'
@@ -39,7 +40,10 @@ export default function Inspector() {
   const updateNodeOutputText = useGraphStore((s) => s.updateNodeOutputText)
   const setNodeImage = useGraphStore((s) => s.setNodeImage)
   const setNodeAudio = useGraphStore((s) => s.setNodeAudio)
+  const assetStoreLoaded = useAssetStore((s) => s.loaded)
+  const loadAssetStore = useAssetStore((s) => s.load)
   const saveElement = useAssetStore((s) => s.saveElement)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const snippets = usePromptStore((s) => s.snippets)
   const isRunning = useGraphStore((s) => s.isRunning)
   const runningNodeId = useGraphStore((s) => s.runningNodeId)
@@ -128,7 +132,9 @@ export default function Inspector() {
     const description = String((isCharacter ? p.appearance : p.description) || '')
     const prompt = String(p.refPrompt || '')
     const imgAssetId = node.data.outputs?.image?.assetId
+    if (!assetStoreLoaded) await loadAssetStore()
     await saveElement({ kind, name, description, prompt, refAssetIds: imgAssetId ? [imgAssetId] : [] })
+    await refreshAssetHub()
     window.mulby?.notification?.show(`已保存到资产中心：${name}`, 'success')
   }
 
