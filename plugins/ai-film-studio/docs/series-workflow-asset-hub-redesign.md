@@ -562,6 +562,17 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 
 本轮还没有把 `seriesBible` / `Episode.plan` 接入 Agent 工具循环和连续性质量门；下一步需要让 Agent 能读取、更新和遵守这些规划字段。
 
+第七轮提交继续落地 P4：
+
+- Agent 只读工具新增 `get_series_bible`，返回系列圣经、每集计划、可用项目资产和可用变体，供整季规划、续写和换装决策使用。
+- `get_workspace` / `get_episodes` 的剧集视图会返回 `Episode.plan` 摘要，并把必需资产/必需变体解析成可读名称，降低 Agent 只看 id 误判的概率。
+- Agent 写入工具新增 `update_series_bible`，可更新整季 logline、梗概、主题、世界规则、连续性规则和计划集数。
+- Agent 写入工具新增 `upsert_episode_plan`，可按剧集选择器更新某集 hook/conflict/cliffhanger，并能用资产名或变体名解析本集必需项目资产和必需形态/妆容。
+- 工具循环系统提示已要求：整季规划和只做大纲时优先写 `seriesBible` / `Episode.plan`，不要直接重写剧本；生成单集剧本/分镜时必须遵守对应 episode plan。
+- `agentTools.selftest.ts` 覆盖了读取系列规划、写入系列圣经、按剧集写入计划以及资产/变体名称解析。
+
+本轮仍未把 `Episode.plan.requiredAssetIds/requiredVariantIds` 接入连续性质量门；下一步应在 P5 前先让质量报告检查“计划要求但本集分镜未使用”的项目资产和形态。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

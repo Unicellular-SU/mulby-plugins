@@ -4,7 +4,7 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, AssetVariant, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
+import type { Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
@@ -93,6 +93,38 @@ function assetView(a: Asset, opts?: { includePrompt?: boolean; includeImages?: b
   }
 }
 
+function variantOptions(doc: ProjectDoc) {
+  return doc.assets
+    .filter(isCastableAsset)
+    .flatMap((asset) =>
+      (asset.variants ?? []).map((variant) => ({
+        id: variant.id,
+        label: variant.label,
+        assetId: asset.id,
+        assetName: asset.name,
+      })),
+    )
+}
+
+function planView(doc: ProjectDoc, plan: EpisodePlan | undefined) {
+  const requiredAssets = (plan?.requiredAssetIds ?? [])
+    .map((id) => doc.assets.find((asset) => asset.id === id))
+    .filter((asset): asset is Asset => !!asset)
+    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type }))
+  const requiredVariants = (plan?.requiredVariantIds ?? [])
+    .map((variantId) => variantOptions(doc).find((variant) => variant.id === variantId))
+    .filter((variant): variant is NonNullable<ReturnType<typeof variantOptions>[number]> => !!variant)
+  return {
+    hook: plan?.hook,
+    conflict: plan?.conflict,
+    cliffhanger: plan?.cliffhanger,
+    requiredAssetIds: plan?.requiredAssetIds,
+    requiredAssets,
+    requiredVariantIds: plan?.requiredVariantIds,
+    requiredVariants,
+  }
+}
+
 function sortedEpisodes(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
 }
@@ -155,6 +187,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     status: episode.status,
     seriesSkip: episode.seriesSkip === true,
     seriesQueueState: episodeSeriesQueueState(doc, episode),
+    plan: planView(doc, episode.plan),
     current,
     production: {
       hasFilm: !!episode.filmPath,
@@ -183,6 +216,11 @@ function overview(doc: ProjectDoc) {
   return {
     meta: doc.meta,
     currentEpisodeId: doc.currentEpisodeId,
+    seriesBible: {
+      ...(doc.seriesBible ?? {}),
+      plannedEpisodeCount: doc.seriesBible?.plannedEpisodeCount ?? episodes.length,
+      continuityRules: doc.seriesBible?.continuityRules ?? [],
+    },
     counts: {
       episodes: episodes.length,
       scripts: allScripts.length,
@@ -451,6 +489,71 @@ function stringArrayArg(value: unknown): string[] | undefined {
   return items.length ? items : undefined
 }
 
+function mergeIdList(existing: string[] | undefined, incoming: string[], mode: unknown): string[] | undefined {
+  const current = existing ?? []
+  const clean = [...new Set(incoming)]
+  if (mode === 'add') return [...new Set([...current, ...clean])]
+  if (mode === 'remove') {
+    const removing = new Set(clean)
+    const next = current.filter((id) => !removing.has(id))
+    return next.length ? next : undefined
+  }
+  return clean.length ? clean : undefined
+}
+
+function resolvePlanAssetIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
+  const ids: string[] = []
+  const unresolved: unknown[] = []
+  const valid = new Set(doc.assets.filter(isCastableAsset).map((asset) => asset.id))
+  for (const value of Array.isArray(args.requiredAssetIds) ? args.requiredAssetIds : []) {
+    const id = stringArg(value)
+    if (!id) continue
+    if (valid.has(id)) ids.push(id)
+    else unresolved.push(value)
+  }
+  const names = [...(Array.isArray(args.requiredAssetNames) ? args.requiredAssetNames : []), ...(Array.isArray(args.assetNames) ? args.assetNames : [])]
+  for (const value of names) {
+    const asset = findCastableAsset(doc, value)
+    if (asset) ids.push(asset.id)
+    else if (value != null) unresolved.push(value)
+  }
+  return { ids: [...new Set(ids)], unresolved }
+}
+
+function findVariantOption(doc: ProjectDoc, value: unknown) {
+  const text = stringArg(value)
+  if (!text) return undefined
+  const variants = variantOptions(doc)
+  return variants.find((variant) => variant.id === text) ?? variants.find((variant) => variant.label.toLowerCase() === text.toLowerCase())
+}
+
+function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
+  const ids: string[] = []
+  const unresolved: unknown[] = []
+  const valid = new Set(variantOptions(doc).map((variant) => variant.id))
+  for (const value of Array.isArray(args.requiredVariantIds) ? args.requiredVariantIds : []) {
+    const id = stringArg(value)
+    if (!id) continue
+    if (valid.has(id)) ids.push(id)
+    else unresolved.push(value)
+  }
+  const variants = Array.isArray(args.requiredVariants) ? args.requiredVariants : []
+  for (const value of variants) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>
+      const asset = findCastableAsset(doc, record.assetId) ?? findCastableAsset(doc, record.assetName) ?? findCastableAsset(doc, record.name)
+      const variant = asset ? findAssetVariant(asset, record.variantId ?? record.variantLabel ?? record.label) : findVariantOption(doc, record.variantId ?? record.variantLabel ?? record.label)
+      if (variant) ids.push(variant.id)
+      else unresolved.push(value)
+      continue
+    }
+    const variant = findVariantOption(doc, value)
+    if (variant) ids.push(variant.id)
+    else if (value != null) unresolved.push(value)
+  }
+  return { ids: [...new Set(ids)], unresolved }
+}
+
 function variantView(asset: Asset, variantId: string) {
   const variant = asset.variants?.find((item) => item.id === variantId)
   return variant ? { assetId: asset.id, assetName: asset.name, variant } : undefined
@@ -585,6 +688,25 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       execute: async () => {
         const d = doc()
         return d ? json({ currentEpisodeId: d.currentEpisodeId, episodes: sortedEpisodes(d).map((episode) => episodeView(d, episode)) }) : '无打开的项目'
+      },
+    },
+    {
+      name: 'get_series_bible',
+      description: '读取系列圣经和每集规划。用于整季规划、续写多集、决定每集必须出现的资产/妆容/形态。',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        return json({
+          seriesBible: {
+            ...(d.seriesBible ?? {}),
+            plannedEpisodeCount: d.seriesBible?.plannedEpisodeCount ?? sortedEpisodes(d).length,
+            continuityRules: d.seriesBible?.continuityRules ?? [],
+          },
+          episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan) })),
+          availableAssets: d.assets.filter(isCastableAsset).map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases })),
+          availableVariants: variantOptions(d),
+        })
       },
     },
     {
@@ -974,6 +1096,102 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         }
         const next = get().doc
         return json({ ids, currentEpisodeId: next?.currentEpisodeId, episodes: next ? sortedEpisodes(next).map((episode) => episodeView(next, episode)) : [] })
+      },
+    },
+    {
+      name: 'update_series_bible',
+      description: '创建或更新系列圣经：整季 logline、梗概、主题、世界规则、连续性规则和计划集数。用于多集规划前先建立整季蓝图。',
+      parameters: {
+        type: 'object',
+        properties: {
+          logline: { type: 'string' },
+          synopsis: { type: 'string' },
+          theme: { type: 'string' },
+          worldRules: { type: 'string' },
+          continuityRules: { type: 'array', items: { type: 'string' } },
+          continuityRulesText: { type: 'string', description: '多行连续性规则；continuityRules 为空时可用。' },
+          plannedEpisodeCount: { type: 'number' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const continuityRules =
+          stringArrayArg(a.continuityRules) ??
+          (typeof a.continuityRulesText === 'string'
+            ? a.continuityRulesText
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+            : undefined)
+        const patch: Parameters<ProjectState['updateSeriesBible']>[0] = {}
+        if (hasArg(a, 'logline')) patch.logline = stringArg(a.logline)
+        if (hasArg(a, 'synopsis')) patch.synopsis = stringArg(a.synopsis)
+        if (hasArg(a, 'theme')) patch.theme = stringArg(a.theme)
+        if (hasArg(a, 'worldRules')) patch.worldRules = stringArg(a.worldRules)
+        if (hasArg(a, 'continuityRules') || hasArg(a, 'continuityRulesText')) patch.continuityRules = continuityRules ?? []
+        if (typeof a.plannedEpisodeCount === 'number') patch.plannedEpisodeCount = a.plannedEpisodeCount
+        get().updateSeriesBible(patch)
+        const next = doc() ?? d
+        return json({
+          seriesBible: {
+            ...(next.seriesBible ?? {}),
+            plannedEpisodeCount: next.seriesBible?.plannedEpisodeCount ?? sortedEpisodes(next).length,
+            continuityRules: next.seriesBible?.continuityRules ?? [],
+          },
+        })
+      },
+    },
+    {
+      name: 'upsert_episode_plan',
+      description: '创建或更新某集规划：开场钩子、核心冲突、结尾钩子，以及本集必须出现的项目资产和妆容/形态。默认当前集；可用 episodeId/episodeIndex/episodeTitle 指定。',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
+          hook: { type: 'string' },
+          conflict: { type: 'string' },
+          cliffhanger: { type: 'string' },
+          requiredAssetIds: { type: 'array', items: { type: 'string' } },
+          requiredAssetNames: { type: 'array', items: { type: 'string' } },
+          assetNames: { type: 'array', items: { type: 'string' }, description: 'requiredAssetNames 的别名。' },
+          requiredVariantIds: { type: 'array', items: { type: 'string' } },
+          requiredVariants: {
+            type: 'array',
+            description: '可传变体 id/label 字符串，或 {assetId/assetName/name, variantId/variantLabel/label} 对象。',
+            items: { type: 'object' },
+          },
+          mode: { type: 'string', enum: ['replace', 'add', 'remove'], description: '仅作用于本次传入的 requiredAsset/requiredVariant 列表；默认 replace。' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无打开的项目'
+        const episode = resolveEpisodeSelector(d, a)
+        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((item) => episodeView(d, item)) })
+        const patch: Partial<EpisodePlan> = {}
+        if (hasArg(a, 'hook')) patch.hook = stringArg(a.hook)
+        if (hasArg(a, 'conflict')) patch.conflict = stringArg(a.conflict)
+        if (hasArg(a, 'cliffhanger')) patch.cliffhanger = stringArg(a.cliffhanger)
+        const assets = resolvePlanAssetIds(d, a)
+        const variants = resolvePlanVariantIds(d, a)
+        if (hasArg(a, 'requiredAssetIds') || hasArg(a, 'requiredAssetNames') || hasArg(a, 'assetNames')) {
+          patch.requiredAssetIds = mergeIdList(episode.plan?.requiredAssetIds, assets.ids, a.mode)
+        }
+        if (hasArg(a, 'requiredVariantIds') || hasArg(a, 'requiredVariants')) {
+          patch.requiredVariantIds = mergeIdList(episode.plan?.requiredVariantIds, variants.ids, a.mode)
+        }
+        get().updateEpisodePlan(episode.id, patch)
+        const next = doc() ?? d
+        const updated = next.episodes?.find((item) => item.id === episode.id) ?? episode
+        return json({
+          episode: episodeInfo(next, updated),
+          plan: planView(next, updated.plan),
+          unresolvedAssets: assets.unresolved,
+          unresolvedVariants: variants.unresolved,
+        })
       },
     },
     {

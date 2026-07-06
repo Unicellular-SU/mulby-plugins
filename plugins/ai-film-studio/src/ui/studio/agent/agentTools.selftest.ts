@@ -50,6 +50,7 @@ function episode(id: string, index: number, patch: Partial<Episode> = {}): Episo
 
 const doc: ProjectDoc = {
   meta: meta(),
+  seriesBible: { logline: 'A hidden heir returns.', plannedEpisodeCount: 3, continuityRules: ['Hero keeps the same identity across episodes.'] },
   novel: [],
   scripts: [{ id: 'script-current', name: 'Current Script', content: 'Current episode only.', createdAt: 0, updatedAt: 0 }],
   assets: [{ id: 'hero', type: 'role', name: 'Hero', aliases: ['主角'], state: 'done', variants: [{ id: 'gala', label: 'Gala' }] }],
@@ -63,6 +64,7 @@ const doc: ProjectDoc = {
     episode('ep2', 1, {
       title: 'Second',
       seriesSkip: true,
+      plan: { hook: 'A clue appears.', requiredAssetIds: ['hero'], requiredVariantIds: ['gala'] },
       scripts: [{ id: 'script-ep2', name: 'Hidden Script', content: 'The hidden clue is found in episode two.', createdAt: 0, updatedAt: 0 }],
       storyboards: [{ ...storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero', variantId: 'gala' }] }],
       storyboardTable: table('Hidden clue scene'),
@@ -76,6 +78,7 @@ const doc: ProjectDoc = {
 const tools = makeProjectReadTools(() => doc)
 const searchProject = tools.find((tool) => tool.name === 'search_project')
 const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
+const getSeriesBible = tools.find((tool) => tool.name === 'get_series_bible')
 const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handoff')
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
@@ -83,7 +86,7 @@ const getAssets = tools.find((tool) => tool.name === 'get_assets')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getSeriesBible || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -101,8 +104,13 @@ check('get_assets filters by asset aliases', aliasFilteredAssets.assets?.some((i
 
 const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
+check('get_workspace exposes series bible summary', workspace.seriesBible?.logline === 'A hidden heir returns.' && workspace.seriesBible?.plannedEpisodeCount === 3, JSON.stringify(workspace.seriesBible))
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
+check('get_workspace exposes episode plans', workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string }>; requiredVariants?: Array<{ id: string }> } }) => item.id === 'ep2' && item.plan?.requiredAssets?.some((asset) => asset.id === 'hero') && item.plan?.requiredVariants?.some((variant) => variant.id === 'gala')), JSON.stringify(workspace.episodes))
+
+const seriesBible = JSON.parse(await getSeriesBible.execute({}))
+check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
 
 const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
 check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
@@ -217,6 +225,13 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
       if (episode) episode.seriesSkip = skip || undefined
     },
+    updateSeriesBible: (patch: Partial<NonNullable<ProjectDoc['seriesBible']>>) => {
+      current.seriesBible = { ...(current.seriesBible ?? {}), ...patch }
+    },
+    updateEpisodePlan: (episodeId: string, patch: Partial<NonNullable<Episode['plan']>>) => {
+      const episode = current.episodes?.find((item) => item.id === episodeId)
+      if (episode) episode.plan = { ...(episode.plan ?? {}), ...patch }
+    },
     upsertAsset: (a: Partial<Asset> & { type: Asset['type']; name: string }) => {
       const id = a.id ?? `asset-write-${nextAsset++}`
       const index = current.assets.findIndex((item) => item.id === id)
@@ -254,16 +269,47 @@ const upsertScript = writeTools.find((tool) => tool.name === 'upsert_script')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
+const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series_bible')
+const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
+
+const updatedSeriesBible = JSON.parse(await updateSeriesBible.execute({ logline: 'A sharper season hook.', plannedEpisodeCount: 5, continuityRules: ['Hero wears Gala only in E2'] }))
+check(
+  'update_series_bible writes season planning fields',
+  updatedSeriesBible.seriesBible?.logline === 'A sharper season hook.' &&
+    updatedSeriesBible.seriesBible?.plannedEpisodeCount === 5 &&
+    writableDoc.seriesBible?.continuityRules?.includes('Hero wears Gala only in E2') === true,
+  JSON.stringify(updatedSeriesBible),
+)
+
+const updatedEpisodePlan = JSON.parse(
+  await upsertEpisodePlan.execute({
+    episodeTitle: 'Second',
+    hook: 'Hero sees the hidden clue.',
+    conflict: 'The hallway trap closes.',
+    cliffhanger: 'The Gala mask cracks.',
+    requiredAssetNames: ['Hero', 'Hall'],
+    requiredVariants: [{ assetName: 'Hero', variantLabel: 'Gala' }],
+  }),
+)
+check(
+  'upsert_episode_plan writes selected episode plan and resolves names',
+  updatedEpisodePlan.episode?.episodeId === 'ep2' &&
+    updatedEpisodePlan.plan?.hook === 'Hero sees the hidden clue.' &&
+    updatedEpisodePlan.plan?.requiredAssetIds?.includes('hero') &&
+    updatedEpisodePlan.plan?.requiredAssetIds?.includes('hall') &&
+    updatedEpisodePlan.plan?.requiredVariantIds?.includes('gala'),
+  JSON.stringify(updatedEpisodePlan),
+)
 
 const upsertEp2Script = JSON.parse(await upsertScript.execute({ episodeTitle: 'Second', name: 'Second Script Rewrite', content: 'Second episode targeted rewrite.' }))
 const ep1AfterScript = writableDoc.episodes?.find((item) => item.id === 'ep1')

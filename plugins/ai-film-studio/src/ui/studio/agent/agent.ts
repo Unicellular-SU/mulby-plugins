@@ -224,7 +224,14 @@ function formatEpisodeContext(doc: ProjectDoc): string {
       const storyboards = episode.id === current.id ? doc.storyboards : episode.storyboards
       const clips = episode.id === current.id ? doc.clips : episode.clips
       const film = episode.filmPath ? '已成片' : episode.filmError ? `合成失败：${episode.filmError.slice(0, 80)}` : '未合成'
-      return `${episode.index + 1}. ${episode.title}${marker}：剧本 ${scripts.length}，分镜 ${storyboards.length}，片段 ${clips.length}，${film}${summary}${recap}`
+      const plan = episode.plan
+      const planText = plan
+        ? `；计划：${[plan.hook ? `hook=${plan.hook}` : '', plan.conflict ? `冲突=${plan.conflict}` : '', plan.cliffhanger ? `结尾=${plan.cliffhanger}` : '']
+            .filter(Boolean)
+            .join('；')
+            .slice(0, 180)}`
+        : ''
+      return `${episode.index + 1}. ${episode.title}${marker}：剧本 ${scripts.length}，分镜 ${storyboards.length}，片段 ${clips.length}，${film}${summary}${planText}${recap}`
     })
     .join('\n')
   return [
@@ -232,6 +239,20 @@ function formatEpisodeContext(doc: ProjectDoc): string {
     '项目级资产跨集共享；剧本、分镜、视频片段、时间线按当前剧集写入。处理指定集时先确认或切换到目标剧集。',
     `剧集列表：\n${rows}`,
   ].join('\n')
+}
+
+function formatSeriesBibleContext(doc: ProjectDoc): string {
+  const bible = doc.seriesBible
+  if (!bible) return ''
+  const parts = [
+    bible.logline ? `logline：${bible.logline}` : '',
+    bible.theme ? `主题：${bible.theme}` : '',
+    bible.synopsis ? `整季梗概：${bible.synopsis.slice(0, 800)}` : '',
+    bible.worldRules ? `世界规则：${bible.worldRules.slice(0, 500)}` : '',
+    bible.continuityRules?.length ? `连续性规则：\n${bible.continuityRules.map((rule, index) => `${index + 1}. ${rule}`).join('\n').slice(0, 1000)}` : '',
+    bible.plannedEpisodeCount ? `计划集数：${bible.plannedEpisodeCount}` : '',
+  ].filter(Boolean)
+  return parts.length ? `## 系列圣经\n${parts.join('\n')}` : ''
 }
 
 function formatCurrentEpisodeNovelContext(doc: ProjectDoc): string {
@@ -261,6 +282,7 @@ function buildContext(doc: ProjectDoc, memoryText?: string): string {
     '## 当前项目',
     `名称：${doc.meta.name}；画风：${pack?.label ?? doc.meta.artStyle}；画幅：${doc.meta.videoRatio}；对白语言：${doc.meta.dialogueLang ?? '中文'}`,
     doc.meta.directorManual ? `导演手册（全局风格/节奏意图，务必遵循）：${doc.meta.directorManual}` : '',
+    formatSeriesBibleContext(doc),
     formatEpisodeContext(doc),
     `已有资产：${doc.assets.map((a) => `${a.name}${a.aliases?.length ? ` alias:${a.aliases.join('/')}` : ''}(${a.type})`).join('、') || '无'}`,
     doc.storyboards.length
@@ -307,10 +329,11 @@ async function callJson(
 export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): string {
   const TOOL_GUIDE =
     '你是 AI 制片。工具返回的是当前项目的实时状态；凡是用户要求续写、修改、对齐已有内容、查询当前状态，先调用读取工具核对，不要只凭摘要猜测。' +
-    '多集项目先用 get_episodes/get_project_overview 确认当前剧集；用户指定第几集或新一集时，先 switch_episode 或 create_episode 再写入。' +
-    '只读工具：get_project_overview/get_workspace（项目概览）、get_episodes（剧集列表）、get_continuity_report（跨集资产/变体一致性审计）、get_episode_handoff（当前集跨集承接线索）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
+    '多集项目先用 get_series_bible/get_episodes/get_project_overview 确认整季蓝图和当前剧集；用户指定第几集或新一集时，先 switch_episode 或 create_episode 再写入。' +
+    '只读工具：get_project_overview/get_workspace（项目概览）、get_series_bible（系列圣经和每集计划）、get_episodes（剧集列表）、get_continuity_report（跨集资产/变体一致性审计）、get_episode_handoff（当前集跨集承接线索）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
-    '写入/生成工具：create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、update_asset（改已有资产名称/别名/描述/提示词）、upsert_asset_variant（创建/更新资产变体）、set_asset_variant_scope（增量标记变体适用分镜/场景/剧集）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_asset_ref（修正既有分镜出场资产引用）、set_storyboard_cast_variant（修正既有分镜变体绑定）、set_storyboard_scene_asset（修正连续场景资产绑定）、generate_asset、generate_keyframe、generate_clip。' +
+    '写入/生成工具：update_series_bible（更新整季蓝图）、upsert_episode_plan（更新单集 hook/冲突/结尾钩子和必需资产/变体）、create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、update_asset（改已有资产名称/别名/描述/提示词）、upsert_asset_variant（创建/更新资产变体）、set_asset_variant_scope（增量标记变体适用分镜/场景/剧集）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_asset_ref（修正既有分镜出场资产引用）、set_storyboard_cast_variant（修正既有分镜变体绑定）、set_storyboard_scene_asset（修正连续场景资产绑定）、generate_asset、generate_keyframe、generate_clip。' +
+    '用户要求规划整季、拆多集、维护角色弧光或只做大纲时，优先 update_series_bible/upsert_episode_plan，不要直接重写已有剧本；生成单集剧本/分镜时必须遵守对应 Episode.plan 的 requiredAssetIds 和 requiredVariantIds。' +
     '续写下一集、处理换装妆容或承接上一集状态时，先读取 get_episode_handoff；如果 handoff/continuity 指出上一相关剧集使用过具体形态，或当前分镜/场景/剧集已有适用变体，分镜必须通过 castRefs 绑定 variantLabel/variantId，除非剧情明确恢复默认状态。' +
     '连续场景里的同一角色默认保持同一形态；get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，用 set_storyboard_scene_asset 补齐或统一同一 sceneId 的场景资产；返回 scene_group_variant_mismatch 时，除非剧情明确发生换装/状态变化，否则用 set_storyboard_cast_variant 统一同一 sceneId 里的角色变体。' +
     'get_continuity_report 返回 episode_variant_available 且有多个 candidateVariantIds 时，先按剧情选择正确形态，再用 set_storyboard_cast_variant 绑定；不要继续让分镜使用主形象。' +
