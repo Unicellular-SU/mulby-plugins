@@ -624,7 +624,23 @@ function ElementLibrary() {
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
   const [usageDetail, setUsageDetail] = useState<{ element: ElementRef; usage: IdentityAssetUsage } | null>(null)
-  const elements = useMemo(() => hubEntities.filter((entity) => entity.kind !== 'voice').map(libraryEntityToElement), [hubEntities])
+  const [archiveF, setArchiveF] = useState<'active' | 'archived' | 'all'>('active')
+  const allElements = useMemo(() => hubEntities.filter((entity) => entity.kind !== 'voice').map(libraryEntityToElement), [hubEntities])
+  const elements = useMemo(
+    () =>
+      allElements.filter((element) =>
+        archiveF === 'all' ? true : archiveF === 'archived' ? !!element.archived : !element.archived
+      ),
+    [allElements, archiveF]
+  )
+  const elementCounts = useMemo(
+    () => ({
+      all: allElements.length,
+      active: allElements.filter((element) => !element.archived).length,
+      archived: allElements.filter((element) => !!element.archived).length,
+    }),
+    [allElements]
+  )
 
   useEffect(() => {
     if (!legacyLoaded) void loadLegacyStore()
@@ -679,6 +695,17 @@ function ElementLibrary() {
       <div className="afs-avtoolbar">
         <div className="afs-lib__hint">身份资产用于沉淀可跨项目复用的角色 / 场景 / 物品；工作流会导入为项目资产快照，画布产物需显式回写。</div>
         <span className="afs-avtoolbar__spacer" />
+        <Segmented
+          ariaLabel="按归档状态筛选身份资产"
+          size="sm"
+          value={archiveF}
+          onChange={(v) => setArchiveF(v as 'active' | 'archived' | 'all')}
+          options={[
+            { value: 'active', label: `可用 ${elementCounts.active}` },
+            { value: 'archived', label: `已归档 ${elementCounts.archived}` },
+            { value: 'all', label: `全部 ${elementCounts.all}` },
+          ]}
+        />
         <Button variant="secondary" size="sm" leadingIcon={Users} onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
           新建角色
         </Button>
