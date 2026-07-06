@@ -1781,8 +1781,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const linkAssetToLibraryEntity = useProjectStore((s) => s.linkAssetToLibraryEntity)
   const markAssetAsDistinctIdentity = useProjectStore((s) => s.markAssetAsDistinctIdentity)
   const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
+  const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
+  const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const hubEntities = useAssetHubStore((s) => s.entities)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
   const warnings = report.issues.filter((issue) => issue.severity === 'warning')
   const chapterIssueCodes = new Set(['episode_without_chapters', 'invalid_episode_chapter', 'unassigned_chapter', 'duplicated_chapter_assignment'])
@@ -1989,6 +1992,17 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!window.confirm(`把「${source?.name ?? issue.assetId}」合并到「${target?.name ?? targetId}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
     if (mergeProjectAssetInto(issue.assetId, targetId)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
   }
+  const syncLinkedLibraryEntity = async (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'library_entity_version_outdated' || !issue.assetId || !issue.libraryEntityId) return
+    const entity = hubEntities.find((item) => item.id === issue.libraryEntityId)
+    if (!entity) return
+    if (syncAssetFromLibraryEntity(issue.assetId, entity)) window.mulby?.notification?.show('已同步资产中心新版快照', 'success')
+  }
+  const publishMissingLibraryEntity = async (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'library_entity_missing' || !issue.assetId) return
+    await promoteAssetToElement(issue.assetId)
+    await refreshAssetHub()
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -2043,6 +2057,8 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issue.assetId &&
           (issue.candidateLibraryEntityIds?.length ?? 0) > 0
         const canMergeDuplicateLibraryAsset = (issue.code === 'duplicate_library_entity_project_assets' || issue.code === 'cross_episode_duplicate_project_asset_candidate') && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
+        const canSyncLibraryEntity = issue.code === 'library_entity_version_outdated' && !!issue.assetId && !!issue.libraryEntityId && hubEntities.some((entity) => entity.id === issue.libraryEntityId)
+        const canPublishMissingLibraryEntity = issue.code === 'library_entity_missing' && !!issue.assetId
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -2110,6 +2126,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canMergeDuplicateLibraryAsset && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => mergeDuplicateProjectAsset(issue)}>
                 合并到同身份项目资产
+              </button>
+            )}
+            {canSyncLibraryEntity && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => void syncLinkedLibraryEntity(issue)}>
+                同步资产中心新版
+              </button>
+            )}
+            {canPublishMissingLibraryEntity && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => void publishMissingLibraryEntity(issue)}>
+                重新发布为身份资产
               </button>
             )}
             {refAction && (
