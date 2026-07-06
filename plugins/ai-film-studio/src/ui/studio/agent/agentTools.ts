@@ -232,13 +232,21 @@ function snippet(text: string, query: string, max = 240): string {
   return `${start > 0 ? '...' : ''}${t.slice(start, end)}${end < t.length ? '...' : ''}`
 }
 
+function oneBasedIndex(value: unknown, length: number): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+  const index = Math.floor(value)
+  if (index < 1 || index > length) return undefined
+  return index - 1
+}
+
 function resolveEpisode(doc: ProjectDoc, args: Record<string, unknown>): Episode | undefined {
   const episodes = sortedEpisodes(doc)
   if (typeof args.episodeId === 'string') {
     const episodeId = args.episodeId.trim()
     return episodeId ? episodes.find((episode) => episode.id === episodeId) : undefined
   }
-  if (typeof args.index === 'number') return episodes[Math.max(0, Math.floor(args.index) - 1)]
+  const episodeIndex = oneBasedIndex(args.index, episodes.length)
+  if (episodeIndex !== undefined) return episodes[episodeIndex]
   if (typeof args.title === 'string') {
     const title = args.title.trim().toLowerCase()
     if (!title) return undefined
@@ -346,7 +354,8 @@ function resolveVariantScopeId(doc: ProjectDoc, args: Record<string, unknown>, k
     if (index === undefined || !Number.isFinite(index)) return undefined
     const episode = resolveEpisodeSelector(doc, args)
     const storyboards = episode ? [...storyboardsForEpisode(doc, episode)].sort((a, b) => a.index - b.index) : []
-    return storyboards[Math.max(0, Math.floor(index) - 1)]?.id
+    const storyboardIndex = oneBasedIndex(index, storyboards.length)
+    return storyboardIndex === undefined ? undefined : storyboards[storyboardIndex]?.id
   }
   if (hasEpisodeSelector(args)) return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle })?.id
   return currentEpisode(doc)?.id
@@ -463,7 +472,8 @@ function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Stor
   if (storyboardId) return doc.storyboards.find((storyboard) => storyboard.id === storyboardId)
   if (typeof args.index === 'number') {
     const sorted = [...doc.storyboards].sort((a, b) => a.index - b.index)
-    return sorted[Math.max(0, Math.floor(args.index) - 1)]
+    const index = oneBasedIndex(args.index, sorted.length)
+    return index === undefined ? undefined : sorted[index]
   }
   return undefined
 }
@@ -626,8 +636,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
         const scripts = scriptsForEpisode(d, episode)
         const limit = numberArg(a.contentLimit, 12000, 0, 50000)
-        const idx = typeof a.index === 'number' ? Math.max(0, Math.floor(a.index) - 1) : 0
-        const script = typeof a.scriptId === 'string' ? scripts.find((s) => s.id === a.scriptId) : scripts[idx]
+        const idx = typeof a.index === 'number' ? oneBasedIndex(a.index, scripts.length) : 0
+        const script = typeof a.scriptId === 'string' ? scripts.find((s) => s.id === a.scriptId) : idx === undefined ? undefined : scripts[idx]
         if (!script) return json({ error: '未找到剧本', episode: episodeInfo(d, episode), scripts: scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name })) })
         return json({ ...episodeInfo(d, episode), id: script.id, index: scripts.indexOf(script) + 1, name: script.name, createdAt: script.createdAt, updatedAt: script.updatedAt, content: textBlock(script.content, limit) })
       },
@@ -1531,7 +1541,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (target.error) return json({ error: target.error })
         const d = target.doc
         if (!d) return '无项目'
-        const sb = [...d.storyboards].sort((x, y) => x.index - y.index)[Number(a.index) - 1]
+        const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
+        const index = oneBasedIndex(a.index, storyboards.length)
+        const sb = index === undefined ? undefined : storyboards[index]
         if (!sb) return '分镜序号越界'
         await get().generateKeyframe(sb.id)
         return `已生成第 ${a.index} 镜关键帧`
@@ -1546,7 +1558,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (target.error) return json({ error: target.error })
         const d = target.doc
         if (!d) return '无项目'
-        const sb = [...d.storyboards].sort((x, y) => x.index - y.index)[Number(a.index) - 1]
+        const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
+        const index = oneBasedIndex(a.index, storyboards.length)
+        const sb = index === undefined ? undefined : storyboards[index]
         if (!sb) return '分镜序号越界'
         await get().generateClip(sb.id)
         return `已生成第 ${a.index} 镜视频`

@@ -122,6 +122,8 @@ const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
 const missingEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 99 }))
 check('read tools reject invalid explicit episode selectors instead of falling back to current episode', !!missingEpisodeRead.error && !missingEpisodeRead.id, JSON.stringify(missingEpisodeRead))
+const zeroEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 0 }))
+check('read tools reject non-positive episode indexes', !!zeroEpisodeRead.error && !zeroEpisodeRead.id, JSON.stringify(zeroEpisodeRead))
 
 function cloneDoc(input: ProjectDoc): ProjectDoc {
   return JSON.parse(JSON.stringify(input)) as ProjectDoc
@@ -293,6 +295,9 @@ check(
     writableDoc.assets.find((item) => item.id === 'hero')?.aliases?.includes('队长') === true,
   JSON.stringify(updatedAsset),
 )
+
+const invalidStoryboardIndex = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 0, assetName: 'Hero', variantLabel: 'Gala' }))
+check('write tools reject non-positive storyboard indexes', !!invalidStoryboardIndex.error, JSON.stringify(invalidStoryboardIndex))
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
