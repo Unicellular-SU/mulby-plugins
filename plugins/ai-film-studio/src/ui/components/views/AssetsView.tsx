@@ -27,6 +27,7 @@ import {
   FolderPlus,
   Search,
   Download,
+  Info,
 } from 'lucide-react'
 import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
@@ -134,6 +135,10 @@ function mediaUsageTitle(usage: MediaAssetUsage | undefined): string {
   return lines.length ? lines.join('\n') : '暂未发现项目、身份资产或画布引用'
 }
 
+function commaList(items: string[]): string {
+  return [...new Set(items.filter(Boolean))].join('、')
+}
+
 export default function AssetsView() {
   const [tab, setTab] = useState<'assets' | 'elements' | 'prompts'>('assets')
   return (
@@ -185,6 +190,7 @@ function AssetGallery() {
   const [boardF, setBoardF] = useState<string>('all') // 'all' | 'none' | boardId
   const [q, setQ] = useState('')
   const [preview, setPreview] = useState<AssetRecord | null>(null)
+  const [usageDetail, setUsageDetail] = useState<{ asset: AssetRecord; usage: MediaAssetUsage } | null>(null)
 
   useEffect(() => {
     if (!legacyLoaded) void load().then(refreshHub)
@@ -399,9 +405,16 @@ function AssetGallery() {
                       <div className="afs-avcard__meta">
                         {a.projectName ? a.projectName : a.role === 'uploaded' ? '本地上传' : '生成'} · {fmtBytes(a.bytes)}
                       </div>
-                      <div className={`afs-avcard__usage${mediaUsage ? ' is-linked' : ''}`} title={mediaUsageTitle(mediaUsage)}>
+                      <button
+                        type="button"
+                        className={`afs-avcard__usage${mediaUsed ? ' is-linked' : ''}`}
+                        title={mediaUsed ? '查看引用详情' : mediaUsageTitle(mediaUsage)}
+                        aria-label={mediaUsed ? `查看 ${a.name || a.nodeKind || '未命名媒体'} 的引用详情` : '未被引用'}
+                        disabled={!mediaUsed}
+                        onClick={() => mediaUsed && setUsageDetail({ asset: a, usage: mediaUsage })}
+                      >
                         {mediaUsageLabel(mediaUsage)}
-                      </div>
+                      </button>
                       {boards.length > 0 && (
                         <Select
                           size="sm"
@@ -450,7 +463,89 @@ function AssetGallery() {
 
       <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple hidden onChange={onPick} />
       {preview && <Lightbox rec={preview} onClose={() => setPreview(null)} />}
+      {usageDetail && <MediaUsageDialog asset={usageDetail.asset} usage={usageDetail.usage} onClose={() => setUsageDetail(null)} />}
     </>
+  )
+}
+
+function MediaUsageDialog({ asset, usage, onClose }: { asset: AssetRecord; usage: MediaAssetUsage; onClose: () => void }) {
+  return (
+    <Modal
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+      size="wide"
+      title="媒体引用详情"
+      description="这些位置仍在使用该媒体；解除引用前不要删除或清理。"
+      footer={
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      <div className="afs-avusage-detail">
+        <div className="afs-avusage-detail__head">
+          <div className="afs-avusage-detail__icon">
+            <Info size={16} aria-hidden />
+          </div>
+          <div>
+            <div className="afs-avusage-detail__title">{asset.name || asset.nodeKind || '未命名媒体'}</div>
+            <div className="afs-avusage-detail__sub">
+              {TYPE_LABEL[asset.type]} · {asset.role === 'uploaded' ? '本地上传' : asset.projectName ? `生成于 ${asset.projectName}` : '生成媒体'} · {fmtBytes(asset.bytes)}
+            </div>
+          </div>
+        </div>
+
+        {usage.projects.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>工作流项目</h3>
+            {usage.projects.map((project) => (
+              <div key={project.projectId} className="afs-avusage-detail__row">
+                <span>{project.projectName}</span>
+                <small>{commaList(project.assetNames) || project.projectId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {usage.libraryEntities.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>身份资产</h3>
+            {usage.libraryEntities.map((entity) => (
+              <div key={entity.entityId} className="afs-avusage-detail__row">
+                <span>{entity.entityName}</span>
+                <small>{commaList(entity.roles) || entity.entityId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {usage.canvasProjects.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>画布项目</h3>
+            {usage.canvasProjects.map((project) => (
+              <div key={project.projectId} className="afs-avusage-detail__row">
+                <span>{project.projectName}</span>
+                <small>{commaList(project.nodeTitles) || project.projectId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {usage.snapshots.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>快照</h3>
+            {usage.snapshots.map((snapshot) => (
+              <div key={snapshot.snapshotId} className="afs-avusage-detail__row">
+                <span>{snapshot.snapshotName}</span>
+                <small>{commaList(snapshot.nodeTitles) || snapshot.snapshotId}</small>
+              </div>
+            ))}
+          </section>
+        )}
+      </div>
+    </Modal>
   )
 }
 
