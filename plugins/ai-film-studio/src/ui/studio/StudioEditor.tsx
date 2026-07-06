@@ -1922,6 +1922,39 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       castRefs: nextRefs,
     })
   }
+  const selectStoryboardForEpisodeIssue = (issue: ContinuityReportView['issues'][number], label: string): Storyboard | undefined => {
+    const storyboards = [...storyboardsForIssueEpisode(issue.episodeId)].sort((a, b) => a.index - b.index)
+    if (!storyboards.length) return undefined
+    if (issue.storyboardId) return storyboards.find((storyboard) => storyboard.id === issue.storyboardId)
+    const episode = issue.episodeId ? report.episodes.find((item) => item.id === issue.episodeId) : undefined
+    const episodeLabel = episode ? `E${episode.index} ${episode.title}` : issue.episodeId ?? '当前集'
+    const options = storyboards
+      .slice(0, 12)
+      .map((storyboard, index) => `${index + 1}. #${storyboard.index + 1} ${(storyboard.videoDesc || storyboard.prompt || '').slice(0, 60)}`)
+      .join('\n')
+    const raw = window.prompt(`${label}：${episodeLabel}\n${options}\n输入分镜序号`, '1')?.trim()
+    if (!raw) return undefined
+    const index = Number(raw)
+    if (!Number.isFinite(index)) return undefined
+    return storyboards[Math.max(0, Math.min(storyboards.length - 1, Math.floor(index) - 1))]
+  }
+  const addPlannedAssetToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'episode_plan_missing_asset' || !issue.assetId) return
+    const storyboard = selectStoryboardForEpisodeIssue(issue, '选择要加入计划资产的分镜')
+    if (!storyboard) return
+    setStoryboardCastVariant(storyboard.id, issue.assetId, undefined)
+  }
+  const bindPlannedVariantToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'episode_plan_missing_variant' || !issue.assetId || !issue.variantId || !issue.episodeId) return
+    const storyboard = selectStoryboardForEpisodeIssue(issue, '选择要绑定计划形态的分镜')
+    if (!storyboard) return
+    const asset = doc.assets.find((item) => item.id === issue.assetId)
+    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
+    if (!asset || !variant) return
+    const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, storyboard)
+    if (patch) updateAssetVariant(asset.id, variant.id, patch)
+    setStoryboardCastVariant(storyboard.id, asset.id, variant.id)
+  }
   const bindSceneAsset = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'scene_group_missing_asset' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
     const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
@@ -2151,6 +2184,13 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
         const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
         const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
         const canUnifySceneAsset = issue.code === 'scene_group_asset_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
+        const canAddPlannedAsset = issue.code === 'episode_plan_missing_asset' && !!issue.assetId && storyboardsForIssueEpisode(issue.episodeId).length > 0
+        const canBindPlannedVariant =
+          issue.code === 'episode_plan_missing_variant' &&
+          !!issue.assetId &&
+          !!issue.variantId &&
+          !!issue.episodeId &&
+          storyboardsForIssueEpisode(issue.episodeId).length > 0
         const issueAsset = issue.assetId ? doc.assets.find((item) => item.id === issue.assetId) : undefined
         const canRemoveDuplicateAlias =
           issue.code === 'duplicate_asset_alias' &&
@@ -2205,6 +2245,16 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canUnifySceneAsset && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneAsset(issue)}>
                 统一为此场景
+              </button>
+            )}
+            {canAddPlannedAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => addPlannedAssetToStoryboard(issue)}>
+                加入计划资产到分镜
+              </button>
+            )}
+            {canBindPlannedVariant && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => bindPlannedVariantToStoryboard(issue)}>
+                绑定计划形态到分镜
               </button>
             )}
             {canRemoveDuplicateAlias && (
