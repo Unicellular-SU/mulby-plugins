@@ -449,6 +449,17 @@ function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIs
   }
 }
 
+function addSeriesPlanIssues(doc: ProjectDoc, episodes: Episode[], allIssues: ContinuityIssue[]): void {
+  const plannedEpisodeCount = doc.seriesBible?.plannedEpisodeCount
+  if (!Number.isFinite(plannedEpisodeCount) || !plannedEpisodeCount || plannedEpisodeCount <= episodes.length) return
+  const missingCount = plannedEpisodeCount - episodes.length
+  allIssues.push({
+    severity: 'warning',
+    code: 'series_planned_episodes_missing',
+    message: `系列圣经计划 ${plannedEpisodeCount} 集，但当前只创建了 ${episodes.length} 集，还缺 ${missingCount} 集。建议补齐剧集后再进行整季生产。`,
+  })
+}
+
 function addCrossEpisodeDuplicateAssetIssues(doc: ProjectDoc, episodeReports: ContinuityEpisodeReport[], allIssues: ContinuityIssue[]): void {
   const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
   const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
@@ -696,6 +707,7 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
   const stateRegressionWarnings = new Set<string>()
   addDuplicateAssetNameIssues(doc, allIssues)
   addDuplicateAssetAliasIssues(doc, allIssues)
+  addSeriesPlanIssues(doc, episodes, allIssues)
   addUnusedProjectAssetIssues(doc, episodes, allIssues)
   addAssetHubIssues(doc, options, allIssues)
 

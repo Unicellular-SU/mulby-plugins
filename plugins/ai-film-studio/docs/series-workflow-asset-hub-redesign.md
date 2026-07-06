@@ -713,6 +713,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 当系列页里某集计划仍引用已删除的项目资产或形态时，用户可以直接在质量门里清掉无效 id，不需要回到系列页逐项查找。
 - 这个动作只修改目标剧集的 `Episode.plan.requiredAssetIds` / `requiredVariantIds`，不会改分镜、资产或身份资产。
 
+第二十九轮提交继续落地 P4/P5 的计划集数质量门：
+
+- 连续性报告新增 `series_planned_episodes_missing`，当系列圣经的 `plannedEpisodeCount` 大于当前已创建剧集数量时提示缺口。
+- 连续性详情抽屉为该问题增加“补齐计划剧集”动作，直接调用现有 `createEpisodes` 补足缺失剧集。
+- `continuityReport.selftest.ts` 覆盖了计划集数缺口会报警、剧集已补齐时不报警，避免整季蓝图只停留在系列页提示层。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

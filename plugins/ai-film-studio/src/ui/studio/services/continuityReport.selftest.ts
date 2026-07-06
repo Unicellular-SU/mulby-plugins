@@ -241,6 +241,24 @@ const emptyStoryboardAssetReport = buildContinuityReport(
 )
 check('does not flag unused assets before storyboards exist', !emptyStoryboardAssetReport.issues.some((issue) => issue.code === 'unused_project_asset'), JSON.stringify(emptyStoryboardAssetReport.issues))
 
+const missingPlannedEpisodesReport = buildContinuityReport(
+  doc({
+    currentEpisodeId: 'ep1',
+    seriesBible: { plannedEpisodeCount: 3, continuityRules: [] },
+    episodes: [episode('ep1', 0)],
+  }),
+)
+check('flags missing planned episodes when series bible exceeds episode list', missingPlannedEpisodesReport.issues.some((issue) => issue.code === 'series_planned_episodes_missing'), JSON.stringify(missingPlannedEpisodesReport.issues))
+
+const completePlannedEpisodesReport = buildContinuityReport(
+  doc({
+    currentEpisodeId: 'ep1',
+    seriesBible: { plannedEpisodeCount: 2, continuityRules: [] },
+    episodes: [episode('ep1', 0), episode('ep2', 1)],
+  }),
+)
+check('does not flag planned episode count when episodes are created', !completePlannedEpisodesReport.issues.some((issue) => issue.code === 'series_planned_episodes_missing'), JSON.stringify(completePlannedEpisodesReport.issues))
+
 const plannedCoverageReport = buildContinuityReport(
   doc({
     assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],

@@ -1788,6 +1788,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
+  const createEpisodes = useProjectStore((s) => s.createEpisodes)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
@@ -1823,6 +1824,12 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const redistributeChapters = () => {
     if (!canRedistributeChapters) return
     if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
+  }
+  const createMissingPlannedEpisodes = () => {
+    const plannedCount = doc.seriesBible?.plannedEpisodeCount ?? 0
+    const currentCount = doc.episodes?.length || report.episodes.length
+    const missingCount = Math.max(0, plannedCount - currentCount)
+    if (missingCount > 0) createEpisodes(missingCount)
   }
   const storyboardsForIssueEpisode = (episodeId?: string) => {
     if (!episodeId || episodeId === doc.currentEpisodeId) return doc.storyboards
@@ -2204,6 +2211,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issue.variantId &&
           !!issue.episodeId &&
           storyboardsForIssueEpisode(issue.episodeId).length > 0
+        const canCreateMissingPlannedEpisodes = issue.code === 'series_planned_episodes_missing' && (doc.seriesBible?.plannedEpisodeCount ?? 0) > (doc.episodes?.length || report.episodes.length)
         const canRemoveInvalidPlanRef =
           !!issue.episodeId &&
           ((issue.code === 'episode_plan_invalid_asset' && !!issue.assetId) || (issue.code === 'episode_plan_invalid_variant' && !!issue.variantId))
@@ -2271,6 +2279,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canBindPlannedVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => bindPlannedVariantToStoryboard(issue)}>
                 绑定计划形态到分镜
+              </button>
+            )}
+            {canCreateMissingPlannedEpisodes && (
+              <button type="button" className="afs-studio__continuityfix" onClick={createMissingPlannedEpisodes}>
+                补齐计划剧集
               </button>
             )}
             {canRemoveInvalidPlanRef && (
