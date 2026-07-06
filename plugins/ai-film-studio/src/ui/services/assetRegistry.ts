@@ -255,6 +255,64 @@ export async function backfillFromStudio(): Promise<AssetRecord[]> {
     })
     changed = true
   }
+  const addAudio = (asset: StudioAssetShape, projId: string, projName: string) => {
+    const ap = asset.audioFilePath || (asset.audioUrl && !isEphemeralUrl(asset.audioUrl) ? asset.audioUrl : '')
+    if (!ap || seen.has(ap)) return
+    seen.add(ap)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'audio',
+      mime: 'audio/mpeg',
+      role: 'generated',
+      ...(asset.audioFilePath ? { localPath: asset.audioFilePath } : { url: asset.audioUrl }),
+      name: asset.name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'voice',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  const addClip = (clip: StudioClipShape, projId: string, projName: string, name?: string) => {
+    addImage(clip.posterImageId, projId, projName, 'clip-poster', name)
+    const vp = clip.videoFilePath || (clip.videoUrl && !isEphemeralUrl(clip.videoUrl) ? clip.videoUrl : '')
+    if (!vp || seen.has(vp)) return
+    seen.add(vp)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'video',
+      mime: 'video/mp4',
+      role: 'generated',
+      ...(clip.videoFilePath ? { localPath: clip.videoFilePath } : { url: clip.videoUrl }),
+      durationSec: clip.durationSec,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'clip',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  const addTrackMedia = (track: StudioTrackShape, projId: string, projName: string, name?: string) => {
+    if (!track.audioClipId || seen.has(track.audioClipId)) return
+    seen.add(track.audioClipId)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'audio',
+      mime: 'audio/mpeg',
+      role: 'generated',
+      assetId: track.audioClipId,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'track-audio',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
   for (const card of cards) {
     if (!card?.id) continue
     const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
@@ -265,46 +323,18 @@ export async function backfillFromStudio(): Promise<AssetRecord[]> {
       for (const img of a.images || []) addImage(img.refImageId, card.id, pn, a.type || 'asset', a.name)
       for (const v of a.variants || []) addImage(v.refImageId, card.id, pn, 'variant', a.name)
       // 试听音频（type:audio 子资产）：本地路径或**非临时** url（临时 data:/blob: 不可持久引用，跳过避免每次重复入库）
-      const ap = a.audioFilePath || (a.audioUrl && !isEphemeralUrl(a.audioUrl) ? a.audioUrl : '')
-      if (ap && !seen.has(ap)) {
-        seen.add(ap)
-        registry.push({
-          id: `ar_${nanoid(8)}`,
-          type: 'audio',
-          mime: 'audio/mpeg',
-          role: 'generated',
-          ...(a.audioFilePath ? { localPath: a.audioFilePath } : { url: a.audioUrl }),
-          name: a.name,
-          projectId: card.id,
-          projectName: pn,
-          nodeKind: 'voice',
-          surface: 'studio',
-          createdAt: Date.now(),
-        })
-        changed = true
-      }
+      addAudio(a, card.id, pn)
     }
     for (const s of doc.storyboards || []) addImage(s.keyframeImageId, card.id, pn, 'keyframe')
     for (const flow of Object.values(doc.imageFlows || {})) for (const n of flow?.nodes || []) addImage(n?.assetId, card.id, pn, 'flow')
     // 视频片段：videoFilePath（文件系统）/ 非临时 videoUrl（临时 data:/blob: 跳过）
-    for (const c of doc.clips || []) {
-      const vp = c.videoFilePath || (c.videoUrl && !isEphemeralUrl(c.videoUrl) ? c.videoUrl : '')
-      if (!vp || seen.has(vp)) continue
-      seen.add(vp)
-      registry.push({
-        id: `ar_${nanoid(8)}`,
-        type: 'video',
-        mime: 'video/mp4',
-        role: 'generated',
-        ...(c.videoFilePath ? { localPath: c.videoFilePath } : { url: c.videoUrl }),
-        durationSec: c.durationSec,
-        projectId: card.id,
-        projectName: pn,
-        nodeKind: 'clip',
-        surface: 'studio',
-        createdAt: Date.now(),
-      })
-      changed = true
+    for (const c of doc.clips || []) addClip(c, card.id, pn)
+    for (const t of doc.track || []) addTrackMedia(t, card.id, pn)
+    for (const episode of doc.episodes || []) {
+      const episodeName = episode.title || `第${(episode.index ?? 0) + 1}集`
+      for (const s of episode.storyboards || []) addImage(s.keyframeImageId, card.id, pn, 'keyframe', episodeName)
+      for (const c of episode.clips || []) addClip(c, card.id, pn, episodeName)
+      for (const t of episode.track || []) addTrackMedia(t, card.id, pn, episodeName)
     }
   }
   if (changed) await saveRegistry(registry)
@@ -388,33 +418,111 @@ export async function storageUsage(): Promise<{ count: number; bytes: number }> 
  * 关键帧图（均经 saveAsset 落 attachment）会被 gcOrphans 当孤儿删除。这里以「studio 文档实际引用」为准
  * 收集所有 assetId（含 phase7 多图历史 images[] 与 imageFlow 节点，向前兼容、字段不存在时静默跳过）。
  */
+interface StudioAssetShape {
+  type?: string
+  name?: string
+  refImageId?: string
+  images?: Array<{ refImageId?: string }>
+  variants?: Array<{ refImageId?: string }>
+  voiceAssetId?: string
+  audioFilePath?: string
+  audioUrl?: string
+}
+interface StudioStoryboardShape {
+  id?: string
+  index?: number
+  keyframeImageId?: string
+}
+interface StudioClipShape {
+  id?: string
+  videoFilePath?: string
+  videoUrl?: string
+  durationSec?: number
+  posterImageId?: string
+}
+interface StudioTrackShape {
+  id?: string
+  audioClipId?: string
+  clipAssetId?: string
+}
+interface StudioEpisodeShape {
+  id?: string
+  index?: number
+  title?: string
+  storyboards?: StudioStoryboardShape[]
+  clips?: StudioClipShape[]
+  track?: StudioTrackShape[]
+}
 interface StudioDocShape {
-  assets?: Array<{
-    type?: string
-    name?: string
-    refImageId?: string
-    images?: Array<{ refImageId?: string }>
-    variants?: Array<{ refImageId?: string }>
-    voiceAssetId?: string
-    audioFilePath?: string
-    audioUrl?: string
-  }>
-  storyboards?: Array<{ keyframeImageId?: string }>
-  clips?: Array<{ videoFilePath?: string; videoUrl?: string; durationSec?: number }>
+  assets?: StudioAssetShape[]
+  storyboards?: StudioStoryboardShape[]
+  clips?: StudioClipShape[]
+  track?: StudioTrackShape[]
+  episodes?: StudioEpisodeShape[]
   imageFlows?: Record<string, { nodes?: Array<{ assetId?: string }> }>
 }
+
+interface ElementLibraryShape {
+  refAssetIds?: string[]
+  views?: { front?: string; side?: string; back?: string }
+  voiceId?: string
+  variants?: Array<{ assetId?: string }>
+  appearanceVariants?: Array<{
+    refAssetIds?: string[]
+    views?: { front?: string; side?: string; back?: string }
+    voiceId?: string
+  }>
+}
+
+function addElementAssetIds(referenced: Set<string>, element: ElementLibraryShape): void {
+  for (const aid of element.refAssetIds || []) if (aid) referenced.add(aid)
+  if (element.views?.front) referenced.add(element.views.front)
+  if (element.views?.side) referenced.add(element.views.side)
+  if (element.views?.back) referenced.add(element.views.back)
+  if (element.voiceId) referenced.add(element.voiceId)
+  for (const variant of element.variants || []) if (variant.assetId) referenced.add(variant.assetId)
+  for (const variant of element.appearanceVariants || []) {
+    for (const aid of variant.refAssetIds || []) if (aid) referenced.add(aid)
+    if (variant.views?.front) referenced.add(variant.views.front)
+    if (variant.views?.side) referenced.add(variant.views.side)
+    if (variant.views?.back) referenced.add(variant.views.back)
+    if (variant.voiceId) referenced.add(variant.voiceId)
+  }
+}
+
+function addStudioAssetRefs(referenced: Set<string>, asset: StudioAssetShape): void {
+  if (asset.refImageId) referenced.add(asset.refImageId)
+  for (const img of asset.images || []) if (img.refImageId) referenced.add(img.refImageId)
+  for (const variant of asset.variants || []) if (variant.refImageId) referenced.add(variant.refImageId)
+}
+
+function addStudioStoryboardRefs(referenced: Set<string>, storyboard: StudioStoryboardShape): void {
+  if (storyboard.keyframeImageId) referenced.add(storyboard.keyframeImageId)
+}
+
+function addStudioClipRefs(referenced: Set<string>, clip: StudioClipShape): void {
+  if (clip.posterImageId) referenced.add(clip.posterImageId)
+}
+
+function addStudioTrackRefs(referenced: Set<string>, track: StudioTrackShape): void {
+  if (track.audioClipId) referenced.add(track.audioClipId)
+}
+
 async function collectStudioReferenced(referenced: Set<string>): Promise<void> {
   const cards = (await kvGet<{ id: string }[]>(KEY_STUDIO_INDEX)) || []
   for (const card of cards) {
     if (!card?.id) continue
     const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
     if (!doc) continue
-    for (const a of doc.assets || []) {
-      if (a.refImageId) referenced.add(a.refImageId)
-      for (const img of a.images || []) if (img.refImageId) referenced.add(img.refImageId)
-      for (const v of a.variants || []) if (v.refImageId) referenced.add(v.refImageId)
+    for (const a of doc.assets || []) addStudioAssetRefs(referenced, a)
+    for (const s of doc.storyboards || []) addStudioStoryboardRefs(referenced, s)
+    for (const c of doc.clips || []) addStudioClipRefs(referenced, c)
+    for (const t of doc.track || []) addStudioTrackRefs(referenced, t)
+    for (const episode of doc.episodes || []) {
+      for (const s of episode.storyboards || []) addStudioStoryboardRefs(referenced, s)
+      for (const c of episode.clips || []) addStudioClipRefs(referenced, c)
+      for (const t of episode.track || []) addStudioTrackRefs(referenced, t)
     }
-    for (const s of doc.storyboards || []) if (s.keyframeImageId) referenced.add(s.keyframeImageId)
     for (const flow of Object.values(doc.imageFlows || {}))
       for (const n of flow?.nodes || []) if (n?.assetId) referenced.add(n.assetId)
   }
@@ -426,8 +534,8 @@ async function collectReferenced(): Promise<Set<string>> {
   for (const proj of await listProjects()) {
     for (const { pv } of eachPortValue(proj.nodes)) if (pv.assetId) referenced.add(pv.assetId)
   }
-  const elements = (await kvGet<{ refAssetIds?: string[] }[]>(KEY_ELEMENTS)) || []
-  for (const el of elements) for (const aid of el.refAssetIds || []) referenced.add(aid)
+  const elements = (await kvGet<ElementLibraryShape[]>(KEY_ELEMENTS)) || []
+  for (const el of elements) addElementAssetIds(referenced, el)
   // 工程快照里引用的素材也要保护（避免回滚后图丢失）
   const snapshots = (await kvGet<{ nodes?: ProjNode[] }[]>(KEY_SNAPSHOTS)) || []
   for (const snap of snapshots) for (const { pv } of eachPortValue(snap.nodes || [])) if (pv.assetId) referenced.add(pv.assetId)
