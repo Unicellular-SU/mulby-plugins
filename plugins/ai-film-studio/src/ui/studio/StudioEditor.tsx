@@ -1787,6 +1787,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
   const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
   const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
+  const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
@@ -1954,6 +1955,18 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, storyboard)
     if (patch) updateAssetVariant(asset.id, variant.id, patch)
     setStoryboardCastVariant(storyboard.id, asset.id, variant.id)
+  }
+  const removeInvalidEpisodePlanRef = (issue: ContinuityReportView['issues'][number]) => {
+    if (!issue.episodeId) return
+    const episode = doc.episodes?.find((item) => item.id === issue.episodeId)
+    const plan = episode?.plan
+    if (issue.code === 'episode_plan_invalid_asset' && issue.assetId) {
+      updateEpisodePlan(issue.episodeId, { requiredAssetIds: (plan?.requiredAssetIds ?? []).filter((id) => id !== issue.assetId) })
+      return
+    }
+    if (issue.code === 'episode_plan_invalid_variant' && issue.variantId) {
+      updateEpisodePlan(issue.episodeId, { requiredVariantIds: (plan?.requiredVariantIds ?? []).filter((id) => id !== issue.variantId) })
+    }
   }
   const bindSceneAsset = (issue: ContinuityReportView['issues'][number]) => {
     if (issue.code !== 'scene_group_missing_asset' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
@@ -2191,6 +2204,9 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           !!issue.variantId &&
           !!issue.episodeId &&
           storyboardsForIssueEpisode(issue.episodeId).length > 0
+        const canRemoveInvalidPlanRef =
+          !!issue.episodeId &&
+          ((issue.code === 'episode_plan_invalid_asset' && !!issue.assetId) || (issue.code === 'episode_plan_invalid_variant' && !!issue.variantId))
         const issueAsset = issue.assetId ? doc.assets.find((item) => item.id === issue.assetId) : undefined
         const canRemoveDuplicateAlias =
           issue.code === 'duplicate_asset_alias' &&
@@ -2255,6 +2271,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canBindPlannedVariant && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => bindPlannedVariantToStoryboard(issue)}>
                 绑定计划形态到分镜
+              </button>
+            )}
+            {canRemoveInvalidPlanRef && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => removeInvalidEpisodePlanRef(issue)}>
+                从剧集计划移除
               </button>
             )}
             {canRemoveDuplicateAlias && (
