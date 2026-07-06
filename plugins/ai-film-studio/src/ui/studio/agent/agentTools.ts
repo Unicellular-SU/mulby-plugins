@@ -252,7 +252,8 @@ function currentEpisode(doc: ProjectDoc): Episode | undefined {
 }
 
 function resolveEpisodeSelector(doc: ProjectDoc, args: Record<string, unknown>): Episode | undefined {
-  return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle }) ?? currentEpisode(doc)
+  if (hasEpisodeSelector(args)) return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle })
+  return currentEpisode(doc)
 }
 
 function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string) {
