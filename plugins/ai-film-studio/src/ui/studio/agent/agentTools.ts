@@ -8,7 +8,7 @@ import type { Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Scrip
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
-import { buildEpisodeProductionHandoff, episodeSeriesQueueState } from '../services/episodeProduction'
+import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion } from '../services/episodeProduction'
 import { loadAssetHub, projectAssetIdentityEntityId, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
@@ -770,6 +770,29 @@ function switchToEpisodeForWrite(get: () => ProjectState, args: Record<string, u
   return { doc: next, episode: next.episodes?.find((item) => item.id === episode.id) ?? episode }
 }
 
+function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion) {
+  return {
+    id: suggestion.id,
+    kind: suggestion.kind,
+    assetId: suggestion.assetId,
+    variantId: suggestion.variantId,
+    scopeKind: suggestion.scopeKind,
+    storyboardId: suggestion.storyboardId,
+    sceneId: suggestion.sceneId,
+    label: suggestion.label,
+    disabledReason: suggestion.disabledReason,
+    autoRepairable: suggestion.autoRepairable,
+  }
+}
+
+function handoffSuggestionIds(args: Record<string, unknown>): string[] {
+  return [
+    stringArg(args.suggestionId),
+    stringArg(args.id),
+    ...(Array.isArray(args.suggestionIds) ? args.suggestionIds.map((item) => stringArg(item)) : []),
+  ].filter((id): id is string => !!id)
+}
+
 export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
   const doc = getDoc
   return [
@@ -1135,8 +1158,127 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
 
 export function makeAgentTools(get: () => ProjectState): AgentTool[] {
   const doc = () => get().doc
+  const applyHandoffSuggestion = async (episodeId: string, suggestion: EpisodeHandoffSuggestion) => {
+    if (suggestion.autoRepairable === false || suggestion.disabledReason) {
+      return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: suggestion.disabledReason ?? '该建议不可自动处理' }
+    }
+
+    if (suggestion.kind === 'generate_asset_ref_image') {
+      await get().generateAsset(suggestion.assetId)
+      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId }
+    }
+
+    if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
+      await get().generateAssetVariant(suggestion.assetId, suggestion.variantId)
+      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId, variantId: suggestion.variantId }
+    }
+
+    if (suggestion.kind === 'add_variant_episode_scope' && suggestion.variantId) {
+      const d = doc()
+      const asset = d?.assets.find((item) => item.id === suggestion.assetId)
+      const variant = asset?.variants?.find((item) => item.id === suggestion.variantId)
+      const storyboard = suggestion.storyboardId ? d?.storyboards.find((item) => item.id === suggestion.storyboardId) : undefined
+      if (!asset || !variant) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '资产或变体已不存在' }
+      const patch = variantScopePatchForUse(
+        variant,
+        { id: episodeId },
+        { id: suggestion.storyboardId ?? storyboard?.id ?? '', sceneId: suggestion.sceneId ?? storyboard?.sceneId },
+        suggestion.scopeKind ?? 'episode',
+      )
+      if (!patch) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '无法解析要补充的作用域' }
+      get().updateAssetVariant(asset.id, variant.id, patch)
+      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId: variant.id, patch }
+    }
+
+    if (suggestion.kind === 'create_episode_variant') {
+      const d = doc()
+      if (!d) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '无项目' }
+      const asset = d.assets.find((item) => item.id === suggestion.assetId)
+      if (!asset) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '资产已不存在' }
+      const episode = d.episodes?.find((item) => item.id === episodeId) ?? currentEpisode(d)
+      const variantId = get().addAssetVariant(asset.id, {
+        label: suggestion.variantLabel ?? (episode ? `E${episode.index + 1} ${episode.title}形态` : '本集形态'),
+        desc: suggestion.variantDesc ?? (episode ? `适用于 E${episode.index + 1}「${episode.title}」的妆容、服装或状态变体。` : undefined),
+        prompt: suggestion.variantPrompt,
+      })
+      if (!variantId) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '未能创建变体' }
+      get().updateAssetVariant(asset.id, variantId, { appliesToEpisodeIds: [episodeId] })
+      for (const storyboard of d.storyboards) {
+        if (castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && !ref.variantId)) {
+          get().setStoryboardCastVariant(storyboard.id, asset.id, variantId)
+        }
+      }
+      return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId }
+    }
+
+    return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '暂不支持该建议类型' }
+  }
+
   return [
     ...makeProjectReadTools(doc),
+    {
+      name: 'apply_episode_handoff_suggestion',
+      description: '执行 get_episode_handoff 返回的可自动处理建议。可传 suggestionId/suggestionIds，或 allAuto=true 顺序执行当前集所有未禁用的 handoff.suggestions；用于先补齐计划资产主图、计划形态图和 plannedVariants 的 episode 作用域，再生成分镜、关键帧或视频。',
+      parameters: {
+        type: 'object',
+        properties: {
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number', description: '1-based 剧集序号' },
+          episodeTitle: { type: 'string' },
+          suggestionId: { type: 'string' },
+          id: { type: 'string', description: 'suggestionId 的别名。' },
+          suggestionIds: { type: 'array', items: { type: 'string' } },
+          allAuto: { type: 'boolean', description: 'true 时循环执行当前集所有 autoRepairable 且未 disabled 的建议。' },
+        },
+      },
+      execute: async (a) => {
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json({ error: target.error })
+        const episodeId = target.episode?.id
+        if (!episodeId) return json({ error: '未找到剧集' })
+        const requestedIds = handoffSuggestionIds(a)
+        const applied: unknown[] = []
+        const missing: string[] = []
+        const attempted = new Set<string>()
+
+        if (a.allAuto === true && !requestedIds.length) {
+          for (let i = 0; i < 24; i += 1) {
+            const d = doc()
+            const episode = d?.episodes?.find((item) => item.id === episodeId)
+            if (!d || !episode) break
+            const suggestion = buildEpisodeProductionHandoff(d, episode).suggestions.find((item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id))
+            if (!suggestion) break
+            attempted.add(suggestion.id)
+            applied.push(await applyHandoffSuggestion(episodeId, suggestion))
+          }
+        } else {
+          if (!requestedIds.length) {
+            const handoff = target.doc && target.episode ? buildEpisodeProductionHandoff(target.doc, target.episode) : undefined
+            return json({ error: '缺少 suggestionId/suggestionIds，或传 allAuto=true', suggestions: handoff?.suggestions.map(handoffSuggestionRef) ?? [] })
+          }
+          for (const id of requestedIds) {
+            const d = doc()
+            const episode = d?.episodes?.find((item) => item.id === episodeId)
+            const suggestion = d && episode ? buildEpisodeProductionHandoff(d, episode).suggestions.find((item) => item.id === id) : undefined
+            if (!suggestion) {
+              missing.push(id)
+              continue
+            }
+            applied.push(await applyHandoffSuggestion(episodeId, suggestion))
+          }
+        }
+
+        const next = doc()
+        const episode = next?.episodes?.find((item) => item.id === episodeId)
+        const handoff = next && episode ? buildEpisodeProductionHandoff(next, episode) : undefined
+        return json({
+          episode: next && episode ? episodeInfo(next, episode) : undefined,
+          applied,
+          missing,
+          remainingSuggestions: handoff?.suggestions.map(handoffSuggestionRef) ?? [],
+        })
+      },
+    },
     {
       name: 'upsert_script',
       description: '写入或更新某集的剧本，默认当前集；可用 episodeId/episodeIndex/episodeTitle 指定剧集。',

@@ -151,6 +151,7 @@ function cloneDoc(input: ProjectDoc): ProjectDoc {
 function makeWritableState(initial: ProjectDoc): ProjectState {
   const current = initial
   let nextAsset = 1
+  let nextVariant = 1
   let nextScript = 1
   let nextStoryboard = 1
 
@@ -224,9 +225,23 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       const variant = current.assets.find((item) => item.id === assetId)?.variants?.find((item) => item.id === variantId)
       if (variant) Object.assign(variant, patch)
     },
+    addAssetVariant: (assetId: string, init?: { label?: string; desc?: string; prompt?: string }) => {
+      const asset = current.assets.find((item) => item.id === assetId)
+      if (!asset || asset.type === 'audio' || asset.type === 'clip') return ''
+      const id = `variant-write-${nextVariant++}`
+      asset.variants = [...(asset.variants ?? []), { id, label: init?.label ?? `Variant ${nextVariant}`, desc: init?.desc, prompt: init?.prompt, state: 'idle' }]
+      return id
+    },
     generateAsset: async (assetId: string) => {
       const asset = current.assets.find((item) => item.id === assetId)
       if (asset) asset.refImageId = `generated-${assetId}`
+    },
+    generateAssetVariant: async (assetId: string, variantId: string) => {
+      const variant = current.assets.find((item) => item.id === assetId)?.variants?.find((item) => item.id === variantId)
+      if (variant) {
+        variant.refImageId = `generated-${assetId}-${variantId}`
+        variant.state = 'done'
+      }
     },
     setCurrentEpisodeSeriesSkip: (skip: boolean) => {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
@@ -391,6 +406,7 @@ const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
 const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series_bible')
 const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
+const applyHandoffSuggestion = writeTools.find((tool) => tool.name === 'apply_episode_handoff_suggestion')
 const linkLibraryEntity = writeTools.find((tool) => tool.name === 'link_project_asset_to_library_entity')
 const markDistinctIdentity = writeTools.find((tool) => tool.name === 'mark_project_asset_distinct_identity')
 const publishProjectAsset = writeTools.find((tool) => tool.name === 'publish_project_asset_to_library')
@@ -402,7 +418,7 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -448,6 +464,22 @@ check(
     variantOnlyEpisodePlan.plan?.requiredVariantIds?.includes('cloak') &&
     variantOnlyEpisodePlan.plan?.requiredAssetIds?.includes('hero'),
   JSON.stringify(variantOnlyEpisodePlan),
+)
+
+const appliedHandoffSuggestions = JSON.parse(await applyHandoffSuggestion.execute({ episodeTitle: 'Third', allAuto: true }))
+const heroAfterHandoff = writableDoc.assets.find((item) => item.id === 'hero')
+const cloakAfterHandoff = heroAfterHandoff?.variants?.find((item) => item.id === 'cloak')
+check(
+  'apply_episode_handoff_suggestion repairs planned handoff inputs',
+  appliedHandoffSuggestions.episode?.episodeId === 'ep3' &&
+    appliedHandoffSuggestions.applied?.some((item: { kind: string; assetId?: string }) => item.kind === 'generate_asset_ref_image' && item.assetId === 'hero') &&
+    appliedHandoffSuggestions.applied?.some((item: { kind: string; variantId?: string }) => item.kind === 'add_variant_episode_scope' && item.variantId === 'cloak') &&
+    appliedHandoffSuggestions.applied?.some((item: { kind: string; variantId?: string }) => item.kind === 'generate_variant_ref_image' && item.variantId === 'cloak') &&
+    heroAfterHandoff?.refImageId === 'generated-hero' &&
+    cloakAfterHandoff?.refImageId === 'generated-hero-cloak' &&
+    cloakAfterHandoff?.appliesToEpisodeIds?.includes('ep3') === true &&
+    !appliedHandoffSuggestions.remainingSuggestions?.some((item: { id: string }) => item.id.includes('cloak')),
+  JSON.stringify({ appliedHandoffSuggestions, heroAfterHandoff, cloakAfterHandoff }),
 )
 
 const upsertEp2Script = JSON.parse(await upsertScript.execute({ episodeTitle: 'Second', name: 'Second Script Rewrite', content: 'Second episode targeted rewrite.' }))

@@ -913,6 +913,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 工具循环 system、分阶段分镜子 Agent、子 Agent 工具上下文、运行时本地工具协议和 `get_episode_handoff` 工具描述都复用同一条规则；缺主图、缺形态图或形态未适用本集时，Agent 应先执行 handoff 建议或对应补图/补作用域工具，再生成关键帧/视频。
 - 新增 `agentPolicy.selftest.ts` 并接入 `npm run test:continuity`，回归检查工具描述、工具循环 system 和本地工具协议都包含 `plannedAssets/plannedVariants` 以及必须落到分镜绑定的约束，避免后续提示词改动重新削弱计划输入边界。
 
+第六十二轮提交继续落地 P4/P5 的 handoff 建议执行闭环：
+
+- Agent 写入工具新增 `apply_episode_handoff_suggestion`，可按 `suggestionId/suggestionIds` 执行 `get_episode_handoff.suggestions`，也可用 `allAuto=true` 循环处理当前集所有未禁用的自动建议。
+- 该工具复用 handoff suggestion id 作为稳定入口，支持计划资产生成主参考图、计划形态生成参考图、补 `plannedVariants` 的 episode 作用域，以及创建本集专属形态并绑定当前已有分镜；执行后会返回新的 `remainingSuggestions`，供 Agent 继续判断是否还缺生产输入。
+- `PLANNED_HANDOFF_STORYBOARD_RULE` 改为优先引导 Agent 使用 `apply_episode_handoff_suggestion`，并在 `agentTools.selftest.ts` 中覆盖“E3 只规划 Cloak 形态 -> 自动补父资产主图、补形态作用域、生成形态图”的闭环。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。
