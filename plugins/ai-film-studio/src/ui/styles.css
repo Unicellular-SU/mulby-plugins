@@ -1339,6 +1339,29 @@ select.afs-toolbar__select,
   grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
+.afs-gallery__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  min-width: 0;
+}
+.afs-gallery__toolbar-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--afs-muted);
+}
+.afs-gallery__target {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  border: 1px solid var(--afs-border);
+  border-radius: var(--afs-r-sm);
+  background: var(--afs-panel-2);
+  color: var(--afs-text);
+  font-size: 11px;
+  padding: 0 6px;
+}
 .afs-tile {
   border: 1px solid var(--afs-border);
   border-radius: 6px;
@@ -1379,6 +1402,14 @@ select.afs-toolbar__select,
   padding: 0;
   display: inline-flex;
 }
+.afs-tile__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
 .afs-tile__save {
   display: inline-flex;
   align-items: center;
@@ -1411,6 +1442,11 @@ select.afs-toolbar__select,
 }
 .afs-tile__save svg {
   flex: 0 0 auto;
+}
+.afs-tile__save span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 输入摘要 */

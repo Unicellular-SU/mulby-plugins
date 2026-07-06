@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { FolderOpen, ChevronRight, ChevronDown, Pencil, BookmarkPlus } from 'lucide-react'
 import type { PortValue } from '../store/graphStore'
 import { useAssetStore, type CanvasOutputViewRole, type ElementRef } from '../store/assetStore'
+import type { Asset } from '../domain/types'
 import { basename } from '../services/download'
 import { useMediaUrl, useInView, hasMedia, type MediaRef } from '../services/mediaUrl'
+import { useProjectStore } from '../store/projectStore'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
 
 const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
@@ -30,6 +32,35 @@ function normalizeViewRole(value: unknown): CanvasOutputViewRole {
 function metaKind(value: unknown): ElementRef['kind'] | undefined {
   if (value === 'character' || value === 'scene' || value === 'prop') return value
   return undefined
+}
+
+type ProjectImageAsset = Asset & { type: 'role' | 'scene' | 'prop' }
+type CanvasProjectSaveTarget = {
+  key: string
+  assetId: string
+  variantId?: string
+  label: string
+  title: string
+  assetType: ProjectImageAsset['type']
+  aliases: string[]
+  libraryEntityId?: string
+  libraryVariantId?: string
+}
+
+const projectAssetTypeLabels: Record<ProjectImageAsset['type'], string> = {
+  role: '角色',
+  scene: '场景',
+  prop: '道具',
+}
+
+function projectTypeFromMetaKind(kind: ElementRef['kind'] | undefined): ProjectImageAsset['type'] | undefined {
+  if (kind === 'character') return 'role'
+  if (kind === 'scene' || kind === 'prop') return kind
+  return undefined
+}
+
+function isProjectImageAsset(asset: Asset): asset is ProjectImageAsset {
+  return (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId
 }
 
 function uniqueElements(items: ElementRef[]): ElementRef[] {
@@ -80,6 +111,81 @@ function resolveCanvasSaveTarget(elements: ElementRef[], value: PortValue) {
       ? `保存到身份资产「${element.name}」的「${variantLabel || variantId}」${viewLabels[view]}`
       : `保存到身份资产「${element.name}」的${viewLabels[view]}`,
   }
+}
+
+function buildProjectSaveTargets(assets: Asset[] | undefined): CanvasProjectSaveTarget[] {
+  return (assets ?? []).filter(isProjectImageAsset).flatMap((asset) => {
+    const libraryEntityId = asset.libraryLink?.entityId || asset.elementId
+    const aliases = [asset.name, ...(asset.aliases ?? []), asset.id, ...(libraryEntityId ? [libraryEntityId] : [])].filter(Boolean)
+    const base: CanvasProjectSaveTarget = {
+      key: asset.id,
+      assetId: asset.id,
+      label: `项目主图 · ${asset.name}`,
+      title: `保存到${projectAssetTypeLabels[asset.type]}项目资产「${asset.name}」主图`,
+      assetType: asset.type,
+      aliases,
+      libraryEntityId,
+    }
+    const variants: CanvasProjectSaveTarget[] = (asset.variants ?? []).map((variant) => ({
+      key: `${asset.id}::${variant.id}`,
+      assetId: asset.id,
+      variantId: variant.id,
+      label: `项目变体 · ${asset.name} / ${variant.label}`,
+      title: `保存到${projectAssetTypeLabels[asset.type]}项目资产「${asset.name}」的变体「${variant.label}」`,
+      assetType: asset.type,
+      aliases,
+      libraryEntityId,
+      libraryVariantId: variant.libraryVariantId,
+    }))
+    return [base, ...variants]
+  })
+}
+
+function uniqueTargetKey(targets: CanvasProjectSaveTarget[]): string {
+  const keys = new Set(targets.map((target) => target.key))
+  return keys.size === 1 ? targets[0]?.key || '' : ''
+}
+
+function resolveProjectSaveTargetKey(targets: CanvasProjectSaveTarget[], value: PortValue | undefined): string {
+  if (!value || value.type !== 'image') return ''
+  const meta = rec(value.meta)
+  const projectAssetId = asStr(meta.projectAssetId)
+  const projectVariantId = asStr(meta.projectVariantId)
+  if (projectAssetId) {
+    const exactKey = projectVariantId ? `${projectAssetId}::${projectVariantId}` : projectAssetId
+    if (targets.some((target) => target.key === exactKey)) return exactKey
+  }
+
+  const libraryEntityId = asStr(meta.libraryEntityId)
+  const libraryVariantId = asStr(meta.libraryVariantId) || asStr(meta.variantId)
+  if (libraryEntityId && libraryVariantId) {
+    const variantMatch = uniqueTargetKey(
+      targets.filter((target) => target.libraryEntityId === libraryEntityId && target.libraryVariantId === libraryVariantId)
+    )
+    if (variantMatch) return variantMatch
+  }
+  if (libraryEntityId) {
+    const entityMatch = uniqueTargetKey(
+      targets.filter((target) => target.libraryEntityId === libraryEntityId && (!libraryVariantId || !target.variantId))
+    )
+    if (entityMatch) return entityMatch
+  }
+
+  const kind = projectTypeFromMetaKind(metaKind(meta.kind))
+  const charId = asStr(meta.charId)
+  const name = asStr(meta.name)
+  if (!charId && !name) return ''
+  return uniqueTargetKey(
+    targets.filter((target) => {
+      if (kind && target.assetType !== kind) return false
+      return target.aliases.includes(charId) || target.aliases.includes(name)
+    })
+  )
+}
+
+function firstImageOutput(value: PortValue): PortValue | undefined {
+  if (value.items?.length) return value.items.find((item) => item.type === 'image' && hasMedia(item))
+  return value.type === 'image' && hasMedia(value) ? value : undefined
 }
 
 // ============ 结构化 JSON 卡片 ============
@@ -208,20 +314,25 @@ export function JsonView({ json }: { json: unknown }) {
 }
 
 // ============ 媒体画廊 ============
+type MediaTileAction = { label: string; title?: string; disabled?: boolean; onClick: () => void }
+
 function MediaTile({
   v,
   onClick,
   action,
+  actions,
 }: {
   v: PortValue
   onClick?: () => void
-  action?: { label: string; title?: string; disabled?: boolean; onClick: () => void }
+  action?: MediaTileAction
+  actions?: MediaTileAction[]
 }) {
   const name = typeof v.meta?.name === 'string' ? v.meta.name : typeof v.meta?.shot === 'string' ? v.meta.shot : ''
   const [inViewRef, inView] = useInView<HTMLDivElement>('400px')
   // 视频惰性挂载（离屏不解析 blob/不挂 <video>）；图/音频随挂随解析
   const lazy = v.type === 'video'
   const url = useMediaUrl(!lazy || inView ? v : null)
+  const tileActions = actions ?? (action ? [action] : [])
   return (
     <div className="afs-tile" ref={inViewRef}>
       {!url ? (
@@ -239,7 +350,7 @@ function MediaTile({
           title={onClick ? '点击查看大图 / 对话修改' : undefined}
         />
       )}
-      {(name || v.localPath || action) && (
+      {(name || v.localPath || tileActions.length) && (
         <div className="afs-tile__bar">
           {name ? (
             <span className="afs-tile__name" title={name}>
@@ -253,19 +364,24 @@ function MediaTile({
               <FolderOpen size={12} />
             </button>
           ) : null}
-          {action ? (
-            <button
-              className="afs-tile__save"
-              disabled={action.disabled}
-              title={action.title}
-              onClick={(e) => {
-                e.stopPropagation()
-                action.onClick()
-              }}
-            >
-              <BookmarkPlus size={11} />
-              {action.label}
-            </button>
+          {tileActions.length ? (
+            <span className="afs-tile__actions">
+              {tileActions.map((item) => (
+                <button
+                  key={item.label}
+                  className="afs-tile__save"
+                  disabled={item.disabled}
+                  title={item.title}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    item.onClick()
+                  }}
+                >
+                  <BookmarkPlus size={11} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </span>
           ) : null}
         </div>
       )}
@@ -353,6 +469,23 @@ export function OutputView({
   const openLightbox = useUiStore((s) => s.openLightbox)
   const elements = useAssetStore((s) => s.elements)
   const promoteCanvasOutputs = useAssetStore((s) => s.promoteCanvasOutputs)
+  const projectDoc = useProjectStore((s) => s.doc)
+  const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
+  const projectSaveTargets = useMemo(() => buildProjectSaveTargets(projectDoc?.assets), [projectDoc?.assets])
+  const hintedProjectTargetKey = useMemo(
+    () => resolveProjectSaveTargetKey(projectSaveTargets, firstImageOutput(value)),
+    [projectSaveTargets, value]
+  )
+  const projectChoiceScope = `${nodeId || ''}:${port || ''}`
+  const [projectTargetChoice, setProjectTargetChoice] = useState<{ scope: string; key: string | null }>({ scope: '', key: null })
+  const explicitProjectTargetKey =
+    projectTargetChoice.scope === projectChoiceScope &&
+    (projectTargetChoice.key === '' || projectSaveTargets.some((target) => target.key === projectTargetChoice.key))
+      ? projectTargetChoice.key
+      : null
+  const selectedProjectTargetKey =
+    explicitProjectTargetKey ?? (hintedProjectTargetKey || (projectSaveTargets.length === 1 ? projectSaveTargets[0].key : ''))
+  const selectedProjectTarget = projectSaveTargets.find((target) => target.key === selectedProjectTargetKey)
 
   if (value.type === 'json' || value.type === 'text' || (!value.items && value.text && !value.url)) {
     return <EditableValue value={value} onEditText={onEditText} />
@@ -393,28 +526,69 @@ export function OutputView({
       const count = await promoteCanvasOutputs([{ assetId: it.assetId, meta: it.meta }], resolved.target)
       window.mulby?.notification?.show(count > 0 ? `已${resolved.label}` : '没有可保存的画布输出', count > 0 ? 'success' : 'warning')
     }
+    const saveToProjectAsset = (it: PortValue) => {
+      if (!it.assetId || !selectedProjectTarget) {
+        window.mulby?.notification?.show('请先选择要写入的项目资产或项目变体', 'warning')
+        return
+      }
+      const changed = promoteCanvasImageToProjectAsset({
+        assetId: selectedProjectTarget.assetId,
+        variantId: selectedProjectTarget.variantId,
+        refImageId: it.assetId,
+      })
+      window.mulby?.notification?.show(
+        changed ? `已保存到${selectedProjectTarget.label}` : '未找到可写入的项目资产目标',
+        changed ? 'success' : 'warning'
+      )
+    }
+    const canSaveImageToProject = mediaList.some((it) => it.type === 'image' && !!it.assetId) && projectSaveTargets.length > 0
     return (
       <div>
         {rawItems ? <div className="afs-gallery__count">{mediaList.length} 项</div> : null}
+        {canSaveImageToProject ? (
+          <div className="afs-gallery__toolbar">
+            <span className="afs-gallery__toolbar-label">保存到项目</span>
+            <select
+              className="afs-gallery__target"
+              value={selectedProjectTargetKey}
+              onChange={(e) => setProjectTargetChoice({ scope: projectChoiceScope, key: e.target.value })}
+            >
+              <option value="">选择项目资产/变体</option>
+              {projectSaveTargets.map((target) => (
+                <option key={target.key} value={target.key}>
+                  {target.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className="afs-gallery">
           {mediaList.map((it, i) => {
             const resolved = resolveCanvasSaveTarget(elements, it)
             const hasIdentityHint = !!it.meta?.libraryEntityId || !!it.meta?.charId || !!it.meta?.name
+            const actions: MediaTileAction[] = []
+            if (it.type === 'image' && hasIdentityHint) {
+              actions.push({
+                label: resolved?.label || '目标不明确',
+                title: resolved?.title || '无法唯一匹配身份资产，未执行写回',
+                disabled: !resolved,
+                onClick: () => void saveToIdentity(it),
+              })
+            }
+            if (it.type === 'image' && projectSaveTargets.length) {
+              actions.push({
+                label: '存项目',
+                title: selectedProjectTarget?.title || '先选择要写入的项目资产或项目变体',
+                disabled: !selectedProjectTarget || !it.assetId,
+                onClick: () => saveToProjectAsset(it),
+              })
+            }
             return (
               <MediaTile
                 key={it.assetId || it.url || `item-${i}`}
                 v={it}
                 onClick={it.type === 'image' || it.type === 'video' ? () => openAt(it) : undefined}
-                action={
-                  it.type === 'image' && hasIdentityHint
-                    ? {
-                        label: resolved?.label || '目标不明确',
-                        title: resolved?.title || '无法唯一匹配身份资产，未执行写回',
-                        disabled: !resolved,
-                        onClick: () => void saveToIdentity(it),
-                      }
-                    : undefined
-                }
+                actions={actions}
               />
             )
           })}

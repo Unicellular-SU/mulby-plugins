@@ -117,6 +117,7 @@ export interface ProjectState {
   updateAssetVariant: (assetId: string, variantId: string, patch: Partial<AssetVariant>) => void
   deleteAssetVariant: (assetId: string, variantId: string) => Promise<void>
   generateAssetVariant: (assetId: string, variantId: string) => Promise<void>
+  promoteCanvasImageToProjectAsset: (target: { assetId: string; refImageId: string; variantId?: string }) => boolean
   setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => void
   // 一资产多图历史（§3.3）
   selectAssetImage: (assetId: string, imageId: string) => void
@@ -1287,6 +1288,33 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (e) {
       setAssetVariantState(get, assetId, variantId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
     }
+  },
+  promoteCanvasImageToProjectAsset: ({ assetId, refImageId, variantId }) => {
+    let changed = false
+    get().mutate((d) => {
+      const asset = d.assets.find((item) => item.id === assetId)
+      if (!asset || asset.type === 'audio' || asset.type === 'clip') return
+      if (variantId) {
+        const variant = asset.variants?.find((item) => item.id === variantId)
+        if (!variant) return
+        variant.refImageId = refImageId
+        variant.state = 'done'
+        variant.error = undefined
+        invalidateEpisodesUsingCastRef(d, assetId, variantId)
+        changed = true
+        return
+      }
+      const existing = asset.images?.find((image) => image.refImageId === refImageId)
+      const image: AssetImage = existing ?? { id: P.newId('ai_'), refImageId, createdAt: Date.now(), state: 'done' }
+      asset.images = existing ? asset.images : [...(asset.images ?? []), image]
+      asset.currentImageId = image.id
+      asset.refImageId = refImageId
+      asset.state = 'done'
+      asset.error = undefined
+      invalidateEpisodesUsingCastRef(d, assetId)
+      changed = true
+    })
+    return changed
   },
   setStoryboardCastVariant: (storyboardId, assetId, variantId) =>
     get().mutate((d) => {

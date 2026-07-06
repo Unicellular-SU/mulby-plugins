@@ -540,7 +540,16 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - `assetStore` 新增 `promoteCanvasOutputs(items, target)`，调用方必须传入明确的身份资产、视图角色和可选变体目标，避免继续按 `charId/name` 自动猜测写回。
 - Inspector 输出画廊增加显式“保存为主图/正面图/侧面图/背面图/变体图”动作；只有能解析到唯一身份资产目标时才允许保存。
 
-本轮仍不处理“保存到当前工作流项目资产/项目变体”的路径；该能力需要在 P3 后续增量里接入当前工作流项目上下文和项目资产选择器。
+第五轮提交继续落地 P3：
+
+- `projectStore` 新增 `promoteCanvasImageToProjectAsset(target)`，允许画布输出图显式写入当前工作流项目资产主图或某个项目变体图。
+- 写入项目资产主图时，会加入资产候选图历史、更新 `currentImageId/refImageId/state`，并让使用该项目资产的剧集生产状态失效。
+- 写入项目变体图时，会更新 `AssetVariant.refImageId/state`，并让绑定该变体的剧集生产状态失效。
+- Inspector 输出画廊增加“保存到项目”选择器，候选目标来自当前打开工作流项目中的角色/场景/道具项目资产及其变体。
+- 画布输出如果携带 `projectAssetId/projectVariantId`、`libraryEntityId/libraryVariantId` 或明确名称，会尝试自动选中唯一项目目标；否则需要用户手动选择。
+- 单张输出图现在可以同时提供“保存到身份资产”和“存项目”两个显式动作，但仍不会自动回写任何生产资产。
+
+本轮仍不处理全局身份资产更新后的“同步到所有引用项目”流程；该能力需要在后续 P4/P5 的系列资产矩阵和连续性质量门中做差异确认。
 
 ### P0：术语和边界先落地
 
