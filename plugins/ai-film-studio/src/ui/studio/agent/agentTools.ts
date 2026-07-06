@@ -7,7 +7,7 @@ import type { ProjectState } from '../../store/projectStore'
 import type { Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
-import { buildContinuityReport, variantScopePatchForUse } from '../services/continuityReport'
+import { buildContinuityReport, variantScopePatchForUse, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
 import { loadAssetHub, projectAssetIdentityEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
@@ -122,6 +122,39 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
           appearanceLabels: currentProject.appearanceLabels ?? [],
         }
       : undefined,
+  }
+}
+
+function projectAssetUsageView(doc: ProjectDoc, assetId: string, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const asset = doc.assets.find((item) => item.id === assetId)
+  return {
+    assetId,
+    name: asset?.name,
+    type: asset?.type,
+    assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
+  }
+}
+
+function continuityIssueView(doc: ProjectDoc, issue: ContinuityIssue, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return {
+    ...issue,
+    assetCenterUsage: issue.assetId ? projectAssetUsageView(doc, issue.assetId, usageByEntity).assetCenterUsage : undefined,
+    relatedAssetUsages: issue.relatedAssetIds?.map((assetId) => projectAssetUsageView(doc, assetId, usageByEntity)),
+  }
+}
+
+function continuityReportView(doc: ProjectDoc, report: ContinuityReport, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return {
+    ...report,
+    episodes: report.episodes.map((episode) => ({
+      ...episode,
+      castUses: episode.castUses.map((use) => ({
+        ...use,
+        assetCenterUsage: projectAssetUsageView(doc, use.assetId, usageByEntity).assetCenterUsage,
+      })),
+      issues: episode.issues.map((issue) => continuityIssueView(doc, issue, usageByEntity)),
+    })),
+    issues: report.issues.map((issue) => continuityIssueView(doc, issue, usageByEntity)),
   }
 }
 
@@ -935,7 +968,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         try {
           const hub = await loadAssetHub()
-          return json(buildContinuityReport(d, { libraryEntities: hub.entities }))
+          return json(continuityReportView(d, buildContinuityReport(d, { libraryEntities: hub.entities }), hub.usageByEntity))
         } catch {
           return json(buildContinuityReport(d))
         }

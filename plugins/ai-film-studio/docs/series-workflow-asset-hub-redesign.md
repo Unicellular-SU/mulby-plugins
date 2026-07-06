@@ -1045,6 +1045,12 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - 这让 Agent 读取某集真实分镜时，不只看到 `castRefs` 里的 `assetId/variantId`，也能同时看到该资产对应的全局身份、当前项目出场剧集和形态/妆容摘要，减少续写时误把同一人的不同妆容当成新角色。
 - 自测新增第二集分镜读取断言，验证 `Hero-Gala` cast 记录能暴露 `el-hero` 和 `E2 Second · Gala`。
 
+第八十四轮提交继续落地 P5 的连续性质量门资产 usage 可见性：
+
+- `get_continuity_report` 在 Hub 可用时会把报告包装为 Agent 专用视图：每集 `castUses` 附带 `assetCenterUsage`，每条 issue 也会在存在 `assetId` 或 `relatedAssetIds` 时暴露对应 usage 摘要；Hub 加载失败时仍返回原始连续性报告。
+- 这让 Agent 处理 `episode_variant_available`、`asset_state_changed_variant`、重复资产、缺失计划资产等质量门问题时，不需要再二次查询资产中心就能判断该资产对应的全局身份、出场剧集和形态/妆容历史。
+- 自测新增连续性报告入口断言，验证第二集 `Hero-Gala` cast use 能直接暴露 `el-hero` 和 `E2 Second · Gala`。
+
 ### P0：术语和边界先落地
 
 改动范围小，先降低用户认知混乱。

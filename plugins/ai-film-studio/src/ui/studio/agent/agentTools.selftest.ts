@@ -110,6 +110,7 @@ const tools = makeProjectReadTools(() => doc)
 const searchProject = tools.find((tool) => tool.name === 'search_project')
 const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
 const getSeriesBible = tools.find((tool) => tool.name === 'get_series_bible')
+const getContinuityReport = tools.find((tool) => tool.name === 'get_continuity_report')
 const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handoff')
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
@@ -117,7 +118,7 @@ const getAssets = tools.find((tool) => tool.name === 'get_assets')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getSeriesBible || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getSeriesBible || !getContinuityReport || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -170,6 +171,21 @@ check(
     item.handoff?.suggestions?.some((suggestion) => suggestion.id === 'asset-image:hero' && suggestion.kind === 'generate_asset_ref_image'),
   ),
   JSON.stringify(workspace.episodes),
+)
+
+const continuityReport = JSON.parse(await getContinuityReport.execute({}))
+check(
+  'get_continuity_report exposes cast asset-center usage',
+  continuityReport.episodes?.some((episode: { id: string; castUses?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+    episode.id === 'ep2' &&
+    episode.castUses?.some((use) =>
+      use.assetId === 'hero' &&
+      use.variantId === 'gala' &&
+      use.assetCenterUsage?.entityId === 'el-hero' &&
+      use.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(continuityReport.episodes),
 )
 
 const seriesBible = JSON.parse(await getSeriesBible.execute({}))
