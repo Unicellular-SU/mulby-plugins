@@ -260,6 +260,10 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     let changed = 0
     const idx = list.findIndex((el) => el.id === target.entityId)
     if (target.kind !== 'libraryEntity' || idx < 0) return 0
+    if (list[idx].archived) {
+      window.mulby?.notification?.show(`「${list[idx].name}」已归档，恢复后才能保存画布输出`, 'warning')
+      return 0
+    }
     let nextElement = list[idx]
     for (const it of items) {
       const assetId = it.assetId
