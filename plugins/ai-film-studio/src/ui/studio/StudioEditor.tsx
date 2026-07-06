@@ -1780,6 +1780,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const linkAssetToLibraryEntity = useProjectStore((s) => s.linkAssetToLibraryEntity)
   const markAssetAsDistinctIdentity = useProjectStore((s) => s.markAssetAsDistinctIdentity)
+  const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const hubEntities = useAssetHubStore((s) => s.entities)
   const errors = report.issues.filter((issue) => issue.severity === 'error')
@@ -1963,6 +1964,31 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (!ids.length) return
     if (markAssetAsDistinctIdentity(issue.assetId, ids)) window.mulby?.notification?.show('已标记为不同身份', 'success')
   }
+  const selectMergeTargetAssetId = (issue: ContinuityReportView['issues'][number]) => {
+    const ids = issue.relatedAssetIds ?? []
+    if (!ids.length) return undefined
+    if (ids.length === 1) return ids[0]
+    const options = ids
+      .map((id, index) => {
+        const asset = doc.assets.find((item) => item.id === id)
+        return `${index + 1}. ${asset?.name ?? id} (${id})`
+      })
+      .join('\n')
+    const raw = window.prompt(`选择要合并到的目标项目资产：\n${options}`, '1')?.trim()
+    if (!raw) return undefined
+    const byIndex = Number(raw)
+    if (Number.isFinite(byIndex)) return ids[Math.max(0, Math.floor(byIndex) - 1)]
+    return ids.find((id) => id === raw || doc.assets.find((asset) => asset.id === id)?.name.toLowerCase() === raw.toLowerCase())
+  }
+  const mergeDuplicateProjectAsset = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code !== 'duplicate_library_entity_project_assets' || !issue.assetId) return
+    const targetId = selectMergeTargetAssetId(issue)
+    if (!targetId) return
+    const source = doc.assets.find((item) => item.id === issue.assetId)
+    const target = doc.assets.find((item) => item.id === targetId)
+    if (!window.confirm(`把「${source?.name ?? issue.assetId}」合并到「${target?.name ?? targetId}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
+    if (mergeProjectAssetInto(issue.assetId, targetId)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
+  }
   const episodeName = (episodeId?: string) => {
     if (!episodeId) return ''
     const episode = report.episodes.find((item) => item.id === episodeId)
@@ -2016,6 +2042,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           (issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict') &&
           !!issue.assetId &&
           (issue.candidateLibraryEntityIds?.length ?? 0) > 0
+        const canMergeDuplicateLibraryAsset = issue.code === 'duplicate_library_entity_project_assets' && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
         const refAction = missingRefAction(issue)
         return (
           <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
@@ -2078,6 +2105,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
             {canResolveLibraryCandidate && (
               <button type="button" className="afs-studio__continuityfix" onClick={() => markDistinctLibraryIdentity(issue)}>
                 {(issue.candidateLibraryEntityIds?.length ?? 0) > 1 ? '候选均为不同身份' : '标记为不同身份'}
+              </button>
+            )}
+            {canMergeDuplicateLibraryAsset && (
+              <button type="button" className="afs-studio__continuityfix" onClick={() => mergeDuplicateProjectAsset(issue)}>
+                合并到同身份项目资产
               </button>
             )}
             {refAction && (

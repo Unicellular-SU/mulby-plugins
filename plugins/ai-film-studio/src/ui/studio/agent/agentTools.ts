@@ -1560,6 +1560,56 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
     },
     {
+      name: 'merge_project_asset_into',
+      description: '把一个重复项目资产合并到另一个同类型项目资产，迁移分镜/每集计划引用并删除源资产；用于处理 duplicate_library_entity_project_assets。',
+      parameters: {
+        type: 'object',
+        properties: {
+          sourceAssetId: { type: 'string' },
+          sourceAssetName: { type: 'string' },
+          fromAssetId: { type: 'string' },
+          fromAssetName: { type: 'string' },
+          targetAssetId: { type: 'string' },
+          targetAssetName: { type: 'string' },
+          toAssetId: { type: 'string' },
+          toAssetName: { type: 'string' },
+        },
+      },
+      execute: async (a) => {
+        const d = doc()
+        if (!d) return '无项目'
+        const source =
+          findCastableAsset(d, a.sourceAssetId) ??
+          findCastableAsset(d, a.fromAssetId) ??
+          findCastableAsset(d, a.sourceAssetName) ??
+          findCastableAsset(d, a.fromAssetName)
+        const target =
+          findCastableAsset(d, a.targetAssetId) ??
+          findCastableAsset(d, a.toAssetId) ??
+          findCastableAsset(d, a.targetAssetName) ??
+          findCastableAsset(d, a.toAssetName)
+        if (!source || !target) {
+          return json({
+            error: '未找到源资产或目标资产',
+            sourceFound: source ? { id: source.id, name: source.name, type: source.type } : undefined,
+            targetFound: target ? { id: target.id, name: target.name, type: target.type } : undefined,
+            assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type, libraryLink: item.libraryLink })),
+          })
+        }
+        if (source.id === target.id) return json({ error: '源资产和目标资产不能相同', asset: assetView(source, { includeImages: false }) })
+        if (source.type !== target.type) return json({ error: '只能合并同类型项目资产', source: assetView(source, { includeImages: false }), target: assetView(target, { includeImages: false }) })
+        const merged = get().mergeProjectAssetInto(source.id, target.id)
+        const next = doc()
+        const nextTarget = next?.assets.find((item) => item.id === target.id)
+        return json({
+          merged,
+          removedSourceId: merged ? source.id : undefined,
+          target: nextTarget ? assetView(nextTarget, { includeImages: false }) : undefined,
+          sourceStillExists: next?.assets.some((item) => item.id === source.id),
+        })
+      },
+    },
+    {
       name: 'upsert_asset_variant',
       description: '为角色/场景/道具创建或更新妆容、服装、年龄、时期等变体。资产仍是项目级共享，变体可按集/场/镜头标注适用范围。',
       parameters: {

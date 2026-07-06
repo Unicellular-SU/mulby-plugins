@@ -605,7 +605,15 @@ Agent 工具循环和分阶段 Agent 需要增加几条硬约束：
 - Agent 写入工具新增 `link_project_asset_to_library_entity` 和 `mark_project_asset_distinct_identity`，让自动修复流程可以处理同样的资产中心候选问题；`get_assets` 也会返回 `libraryLink` 和 `rejectedLibraryEntityIds` 供 Agent 观察结果。
 - `continuityReport.selftest.ts` 覆盖被拒绝的身份候选不会再报告；`agentTools.selftest.ts` 覆盖 Agent 关联身份和标记不同身份的写入结果。
 
-本轮仍未完成 P5 里的更高阶处置：真正的项目资产合并流程、同一角色的不同项目资产跨集出现时的更精确判定，以及合并前后的分镜引用迁移与差异预览。
+第十二轮提交继续落地 P5 的项目资产合并：
+
+- `projectStore` 新增 `mergeProjectAssetInto`，只允许同类型项目资产合并；合并时把分镜 `associateAssetIds` / `castRefs` 和 `Episode.plan.requiredAssetIds` / `requiredVariantIds` 从源资产迁移到目标资产，然后删除源资产及其子资产。
+- 合并时会按 `libraryVariantId` 或变体标签匹配源/目标变体；目标缺少的源变体会复制过去，避免同一角色的妆容、服装、状态引用在合并后丢失。
+- Studio 连续性详情抽屉为 `duplicate_library_entity_project_assets` 增加“合并到同身份项目资产”动作，多候选时需要选择目标，并在执行前确认源资产会被移除。
+- Agent 写入工具新增 `merge_project_asset_into`，可处理连续性报告中同一身份资产被导入成多个项目资产的情况，并返回合并后的目标资产状态。
+- `agentTools.selftest.ts` 覆盖了 Agent 合并项目资产后源资产被删除、分镜引用迁移到目标资产、源变体映射到目标变体。
+
+本轮仍未完成 P5 里的更高阶判断：同一角色的不同项目资产跨集出现但尚未链接到同一身份时的自动候选判定，以及合并前后的可视化差异预览。
 
 ### P0：术语和边界先落地
 

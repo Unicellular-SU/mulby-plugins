@@ -98,6 +98,8 @@ export interface ProjectState {
   linkAssetToLibraryEntity: (assetId: string, entity: { id: string; version?: number; variants?: Array<Pick<NonNullable<LibraryEntity['variants']>[number], 'id' | 'label'>> }) => boolean
   /** 明确标记候选身份不是该项目资产，压制同名/别名候选误报。 */
   markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => boolean
+  /** 合并重复项目资产：把分镜/剧集计划引用从 source 迁移到 target，并删除 source 及其子资产。 */
+  mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => boolean
   /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。 */
   promoteAssetToElement: (id: string) => Promise<void>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
@@ -238,6 +240,82 @@ function libraryVariantMapForAsset(asset: Asset, entity: { variants?: Array<Pick
     if (linked) map[variant.id] = linked
   }
   return Object.keys(map).length ? map : undefined
+}
+
+function isMergeableProjectAsset(asset: Asset | undefined): asset is Asset {
+  return !!asset && !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop')
+}
+
+function mergeProjectAssetVariants(source: Asset, target: Asset): Record<string, string> {
+  const sourceVariants = source.variants ?? []
+  if (!sourceVariants.length) return {}
+  const targetVariants = [...(target.variants ?? [])]
+  const map: Record<string, string> = {}
+  const targetIds = new Set(targetVariants.map((variant) => variant.id))
+  const byLibraryId = new Map(targetVariants.map((variant) => [variant.libraryVariantId ?? variant.id, variant.id]))
+  const byLabel = new Map(targetVariants.map((variant) => [normalizeAssetLookup(variant.label), variant.id]))
+  for (const variant of sourceVariants) {
+    const matched =
+      (variant.libraryVariantId ? byLibraryId.get(variant.libraryVariantId) : undefined) ??
+      byLabel.get(normalizeAssetLookup(variant.label))
+    if (matched) {
+      map[variant.id] = matched
+      continue
+    }
+    const nextId = targetIds.has(variant.id) ? P.newId('v_') : variant.id
+    targetIds.add(nextId)
+    targetVariants.push({ ...variant, id: nextId })
+    map[variant.id] = nextId
+  }
+  target.variants = targetVariants.length ? targetVariants : undefined
+  return map
+}
+
+function rewriteStoryboardAssetRefs(storyboards: Storyboard[], removedIds: Set<string>, targetAssetId: string, variantMap: Record<string, string>): boolean {
+  let changed = false
+  for (const storyboard of storyboards) {
+    const refs: StoryboardCastRef[] = storyboard.castRefs?.length ? [...storyboard.castRefs] : []
+    for (const assetId of storyboard.associateAssetIds ?? []) {
+      if (!refs.some((ref) => ref.assetId === assetId)) refs.push({ assetId })
+    }
+    if (!refs.some((ref) => removedIds.has(ref.assetId))) continue
+    const nextRefs: StoryboardCastRef[] = []
+    const seen = new Set<string>()
+    for (const ref of refs) {
+      const next: StoryboardCastRef = removedIds.has(ref.assetId)
+        ? { ...ref, assetId: targetAssetId, variantId: ref.variantId ? variantMap[ref.variantId] : undefined }
+        : ref
+      const key = `${next.assetId}:${next.variantId ?? ''}:${next.roleInShot ?? ''}:${next.note ?? ''}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      nextRefs.push(next)
+    }
+    storyboard.castRefs = nextRefs
+    storyboard.associateAssetIds = [...new Set(nextRefs.map((ref) => ref.assetId))]
+    changed = true
+  }
+  return changed
+}
+
+function rewriteEpisodePlanAssetRefs(episode: Episode, removedIds: Set<string>, targetAssetId: string, sourceVariantIds: Set<string>, variantMap: Record<string, string>): boolean {
+  const plan = episode.plan
+  if (!plan) return false
+  let changed = false
+  if (plan.requiredAssetIds?.some((id) => removedIds.has(id))) {
+    plan.requiredAssetIds = [...new Set(plan.requiredAssetIds.map((id) => (removedIds.has(id) ? targetAssetId : id)))]
+    changed = true
+  }
+  if (plan.requiredVariantIds?.some((id) => sourceVariantIds.has(id))) {
+    plan.requiredVariantIds = [
+      ...new Set(
+        plan.requiredVariantIds
+          .map((id) => (sourceVariantIds.has(id) ? variantMap[id] : id))
+          .filter((id): id is string => !!id),
+      ),
+    ]
+    changed = true
+  }
+  return changed
 }
 
 function emptyEpisode(index: number): Episode {
@@ -1093,6 +1171,35 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       marked = true
     })
     return marked
+  },
+
+  mergeProjectAssetInto: (sourceAssetId, targetAssetId) => {
+    if (!sourceAssetId || !targetAssetId || sourceAssetId === targetAssetId) return false
+    let merged = false
+    get().mutate((d) => {
+      const source = d.assets.find((asset) => asset.id === sourceAssetId)
+      const target = d.assets.find((asset) => asset.id === targetAssetId)
+      if (!isMergeableProjectAsset(source) || !isMergeableProjectAsset(target) || source.type !== target.type) return
+      const removedIds = new Set(d.assets.filter((asset) => asset.id === source.id || asset.parentAssetId === source.id).map((asset) => asset.id))
+      const sourceVariantIds = new Set((source.variants ?? []).map((variant) => variant.id))
+      const variantMap = mergeProjectAssetVariants(source, target)
+      const aliases = mergeAssetAliases(target.aliases, [source.name, ...(source.aliases ?? [])]).filter((alias) => normalizeAssetLookup(alias) !== normalizeAssetLookup(target.name))
+      target.aliases = aliases.length ? aliases : undefined
+      if (!target.libraryLink && source.libraryLink) target.libraryLink = source.libraryLink
+      if (!target.elementId && source.elementId) target.elementId = source.elementId
+      target.rejectedLibraryEntityIds = [...new Set([...(target.rejectedLibraryEntityIds ?? []), ...(source.rejectedLibraryEntityIds ?? [])])].filter(Boolean)
+      if (!target.rejectedLibraryEntityIds.length) target.rejectedLibraryEntityIds = undefined
+
+      let refsChanged = rewriteStoryboardAssetRefs(d.storyboards, removedIds, target.id, variantMap)
+      for (const episode of d.episodes ?? []) {
+        if (episode.id !== d.currentEpisodeId) refsChanged = rewriteStoryboardAssetRefs(episode.storyboards, removedIds, target.id, variantMap) || refsChanged
+        if (rewriteEpisodePlanAssetRefs(episode, removedIds, target.id, sourceVariantIds, variantMap)) refsChanged = true
+      }
+      d.assets = d.assets.filter((asset) => !removedIds.has(asset.id))
+      if (refsChanged) invalidateEpisodesUsingAsset(d, target.id)
+      merged = true
+    })
+    return merged
   },
 
   promoteAssetToElement: async (id) => {

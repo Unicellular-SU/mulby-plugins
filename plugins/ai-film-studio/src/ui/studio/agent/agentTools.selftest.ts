@@ -273,6 +273,36 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       if (asset.libraryLink && ids.includes(asset.libraryLink.entityId)) asset.libraryLink.syncPolicy = 'forked'
       return true
     },
+    mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => {
+      const source = current.assets.find((item) => item.id === sourceAssetId)
+      const target = current.assets.find((item) => item.id === targetAssetId)
+      if (!source || !target || source.id === target.id || source.type !== target.type) return false
+      const byLabel = new Map((target.variants ?? []).map((variant) => [variant.label.toLowerCase(), variant.id]))
+      const variantMap: Record<string, string> = {}
+      for (const variant of source.variants ?? []) {
+        const matched = byLabel.get(variant.label.toLowerCase())
+        if (matched) variantMap[variant.id] = matched
+        else {
+          target.variants = [...(target.variants ?? []), variant]
+          variantMap[variant.id] = variant.id
+        }
+      }
+      const rewrite = (storyboards: Storyboard[]) => {
+        for (const sb of storyboards) {
+          if (!sb.associateAssetIds.includes(source.id) && !sb.castRefs?.some((ref) => ref.assetId === source.id)) continue
+          const baseRefs: StoryboardCastRef[] = sb.castRefs?.length ? sb.castRefs : sb.associateAssetIds.map((assetId): StoryboardCastRef => ({ assetId }))
+          const refs: StoryboardCastRef[] = baseRefs.map((ref) =>
+            ref.assetId === source.id ? { ...ref, assetId: target.id, variantId: ref.variantId ? variantMap[ref.variantId] : undefined } : ref,
+          )
+          sb.castRefs = refs
+          sb.associateAssetIds = [...new Set(refs.map((ref) => ref.assetId))]
+        }
+      }
+      rewrite(current.storyboards)
+      for (const episode of current.episodes ?? []) rewrite(episode.storyboards)
+      current.assets = current.assets.filter((item) => item.id !== source.id && item.parentAssetId !== source.id)
+      return true
+    },
   }
   return state as unknown as ProjectState
 }
@@ -293,6 +323,7 @@ writableDoc.assets = [
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
+  { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
 ]
 writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second episode original shot.')]
 const writeState = makeWritableState(writableDoc)
@@ -305,13 +336,14 @@ const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series
 const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
 const linkLibraryEntity = writeTools.find((tool) => tool.name === 'link_project_asset_to_library_entity')
 const markDistinctIdentity = writeTools.find((tool) => tool.name === 'mark_project_asset_distinct_identity')
+const mergeProjectAsset = writeTools.find((tool) => tool.name === 'merge_project_asset_into')
 const setAssetRef = writeTools.find((tool) => tool.name === 'set_storyboard_asset_ref')
 const setVariantScope = writeTools.find((tool) => tool.name === 'set_asset_variant_scope')
 const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_cast_variant')
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !linkLibraryEntity || !markDistinctIdentity || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -409,6 +441,22 @@ check(
 
 await generateAsset.execute({ name: '队长' })
 check('generate_asset resolves asset aliases', writableDoc.assets.find((item) => item.id === 'hero')?.refImageId === 'generated-hero', JSON.stringify(writableDoc.assets.find((item) => item.id === 'hero')))
+
+writableDoc.storyboards.push({
+  ...storyboard('dup-hero-shot', writableDoc.storyboards.length, 'Duplicate hero appears.'),
+  associateAssetIds: ['hero-duplicate'],
+  castRefs: [{ assetId: 'hero-duplicate', variantId: 'alt-gala' }],
+})
+const mergedProjectAsset = JSON.parse(await mergeProjectAsset.execute({ sourceAssetId: 'hero-duplicate', targetAssetId: 'hero' }))
+const rewrittenDuplicateShot = writableDoc.storyboards.find((item) => item.id === 'dup-hero-shot')
+check(
+  'merge_project_asset_into removes source asset and rewrites storyboard refs',
+  mergedProjectAsset.merged === true &&
+    mergedProjectAsset.sourceStillExists === false &&
+    !writableDoc.assets.some((item) => item.id === 'hero-duplicate') &&
+    rewrittenDuplicateShot?.castRefs?.some((ref) => ref.assetId === 'hero' && ref.variantId === 'gala') === true,
+  JSON.stringify({ mergedProjectAsset, rewrittenDuplicateShot }),
+)
 
 const invalidStoryboardIndex = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 0, assetName: 'Hero', variantLabel: 'Gala' }))
 check('write tools reject non-positive storyboard indexes', !!invalidStoryboardIndex.error, JSON.stringify(invalidStoryboardIndex))
