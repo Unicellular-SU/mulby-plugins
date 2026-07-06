@@ -455,6 +455,7 @@ export function resolveCanvasProjectAssetMediaUsage(port: CanvasPortValue, proje
 }
 
 export function projectAssetIdentityEntityId(asset: Asset): string {
+  if (asset.libraryLink?.syncPolicy === 'forked') return ''
   return lineageString(asset.libraryLink?.entityId) || lineageString(asset.elementId)
 }
 

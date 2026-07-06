@@ -81,6 +81,7 @@ check('maps promoted variants back to appearance variants', savedElement.appeara
 check('uses library link as project asset identity usage source', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: { entityId: 'linked-id', syncPolicy: 'snapshot' } }) === 'linked-id')
 check('falls back to legacy element id for project asset identity usage', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: undefined }) === 'legacy-id')
 check('ignores blank project asset identity ids', projectAssetIdentityEntityId({ ...scopedAsset, elementId: ' ', libraryLink: { entityId: ' ', syncPolicy: 'snapshot' } }) === '')
+check('ignores forked project asset identity usage source', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: { entityId: 'linked-id', syncPolicy: 'forked' } }) === '')
 const canvasLookup = new Map([['id:el_hero', 'el_hero'], ['char:hero-code', 'el_hero']])
 check('uses explicit canvas library entity lineage', canvasPortIdentityEntityId({ meta: { libraryEntityId: 'el_hero', charId: 'other-code' } }, canvasLookup) === 'el_hero')
 check('falls back to canvas char id lineage', canvasPortIdentityEntityId({ meta: { charId: 'hero-code' } }, canvasLookup) === 'el_hero')

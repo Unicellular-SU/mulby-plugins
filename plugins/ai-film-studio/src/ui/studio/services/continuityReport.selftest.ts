@@ -378,6 +378,33 @@ check(
   JSON.stringify(outdatedLinkedEntityReport.issues),
 )
 
+const forkedLinkedEntityReport = buildContinuityReport(
+  doc({
+    assets: [
+      {
+        ...hero,
+        id: 'hero-forked',
+        name: 'Hero Forked',
+        elementId: 'el-hero',
+        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'forked' },
+      },
+      {
+        ...hero,
+        id: 'hero-active',
+        name: 'Hero Active',
+        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
+      },
+    ],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3 })] },
+)
+check(
+  'does not treat forked library links as active continuity links',
+  !forkedLinkedEntityReport.issues.some((issue) => issue.assetId === 'hero-forked' && (issue.code === 'library_entity_version_outdated' || issue.code === 'library_entity_missing' || issue.code === 'library_entity_archived' || issue.code === 'duplicate_library_entity_project_assets')) &&
+    !forkedLinkedEntityReport.issues.some((issue) => issue.code === 'duplicate_library_entity_project_assets' && issue.relatedAssetIds?.includes('hero-forked')),
+  JSON.stringify(forkedLinkedEntityReport.issues),
+)
+
 const missingLinkedEntityReport = buildContinuityReport(
   doc({
     assets: [{ ...hero, libraryLink: { entityId: 'deleted-entity', entityVersion: 1, syncPolicy: 'snapshot' } }],
@@ -432,6 +459,27 @@ check(
   'does not flag rejected asset-center identity candidates',
   !rejectedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict'),
   JSON.stringify(rejectedLibraryMatchReport.issues),
+)
+
+const forkedRejectedLibraryMatchReport = buildContinuityReport(
+  doc({
+    assets: [{
+      id: 'forked-captain',
+      type: 'role',
+      name: 'Captain',
+      elementId: 'el-captain',
+      refImageId: 'captain-img',
+      state: 'done',
+      libraryLink: { entityId: 'el-captain', entityVersion: 1, syncPolicy: 'forked' },
+      rejectedLibraryEntityIds: ['el-captain'],
+    }],
+  }),
+  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain', version: 3 })] },
+)
+check(
+  'does not re-suggest rejected forked asset-center identity candidates',
+  !forkedRejectedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict' || issue.code === 'library_entity_version_outdated'),
+  JSON.stringify(forkedRejectedLibraryMatchReport.issues),
 )
 
 const archivedCandidateMatchReport = buildContinuityReport(

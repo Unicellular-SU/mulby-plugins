@@ -534,6 +534,7 @@ function addCrossEpisodeDuplicateAssetIssues(doc: ProjectDoc, episodeReports: Co
 }
 
 function linkedLibraryEntityId(asset: Asset): string | undefined {
+  if (asset.libraryLink?.syncPolicy === 'forked') return undefined
   return asset.libraryLink?.entityId || asset.elementId
 }
 
