@@ -8,7 +8,6 @@
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
 import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, ProjectCard, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef } from '../domain/types'
-import { castRefsForStoryboard } from '../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases } from '../domain/assetAliases'
 import { removeVariantScopeReferences } from '../domain/variantScopes'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
@@ -36,7 +35,7 @@ import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
 import { variantScopePatchForUse } from '../studio/services/continuityReport'
-import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope } from '../studio/services/episodeProduction'
+import { buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 
@@ -1277,15 +1276,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   setStoryboardCastVariant: (storyboardId, assetId, variantId) =>
     get().mutate((d) => {
-      const sb = d.storyboards.find((s) => s.id === storyboardId)
-      if (!sb) return
-      if (!sb.associateAssetIds.includes(assetId)) sb.associateAssetIds.push(assetId)
-      const refs = castRefsForStoryboard(sb)
-      const i = refs.findIndex((ref) => ref.assetId === assetId)
-      if (i >= 0) refs[i] = { ...refs[i], variantId: variantId || undefined }
-      else refs.push({ assetId, variantId: variantId || undefined })
-      sb.castRefs = refs
-      invalidateCurrentEpisodeProduction(d)
+      setStoryboardCastVariantForScope(d, storyboardId, assetId, variantId)
     }),
   selectAssetImage: (assetId, imageId) =>
     get().mutate((d) => {

@@ -147,6 +147,22 @@ export function invalidateProductionScope(doc: ProjectDoc, scope: EpisodeProduct
   return scope.current ? invalidateCurrentEpisodeProduction(doc) : invalidateEpisodeProduction(scope.episode)
 }
 
+export function setStoryboardCastVariantForScope(doc: ProjectDoc, storyboardId: string, assetId: string, variantId: string | undefined): boolean {
+  const scope = productionScopeForStoryboard(doc, storyboardId)
+  const storyboard = scope?.storyboards.find((item) => item.id === storyboardId)
+  if (!scope || !storyboard) return false
+  storyboard.associateAssetIds ??= []
+  if (!storyboard.associateAssetIds.includes(assetId)) storyboard.associateAssetIds.push(assetId)
+  const refs = castRefsForStoryboard(storyboard)
+  const index = refs.findIndex((ref) => ref.assetId === assetId)
+  const nextRef: StoryboardCastRef = { assetId, variantId: variantId || undefined }
+  if (index >= 0) refs[index] = { ...refs[index], variantId: nextRef.variantId }
+  else refs.push(nextRef)
+  storyboard.castRefs = refs
+  invalidateProductionScope(doc, scope)
+  return true
+}
+
 export function projectDocForProductionScope(doc: ProjectDoc, scope: EpisodeProductionScope | undefined): ProjectDoc {
   if (!scope || scope.current) return doc
   return {

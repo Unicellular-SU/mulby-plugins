@@ -1,4 +1,4 @@
-import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -131,6 +131,29 @@ check(
   'invalidates the episode matched by production scope',
   invalidatedScopedEpisode && planned.episodes![3].status === 'planned' && !planned.episodes![3].filmPath,
   JSON.stringify(planned.episodes![3]),
+)
+const scopedCastVariantDoc = doc({
+  currentEpisodeId: 'ep1',
+  storyboards: [storyboard('ep1-scope-shot', 0, [{ assetId: 'hero' }])],
+  episodes: [
+    episode('ep1', 0, { status: 'done', filmPath: 'ep1.mp4' }),
+    episode('ep2', 1, { status: 'done', filmPath: 'ep2.mp4', storyboards: [storyboard('ep2-scope-shot', 0, [])] }),
+  ],
+})
+const scopedCastVariantSet = setStoryboardCastVariantForScope(scopedCastVariantDoc, 'ep2-scope-shot', 'hero', 'battle')
+const scopedCastVariantStoryboard = scopedCastVariantDoc.episodes![1].storyboards[0]
+check(
+  'sets cast variants on non-current episode storyboards without touching current flat data',
+  scopedCastVariantSet &&
+    scopedCastVariantStoryboard.associateAssetIds.includes('hero') &&
+    scopedCastVariantStoryboard.castRefs?.some((ref) => ref.assetId === 'hero' && ref.variantId === 'battle') === true &&
+    !scopedCastVariantDoc.storyboards[0].castRefs?.some((ref) => ref.variantId === 'battle'),
+  JSON.stringify({ current: scopedCastVariantDoc.storyboards[0], target: scopedCastVariantStoryboard }),
+)
+check(
+  'invalidates only the episode containing the cast variant edit',
+  scopedCastVariantDoc.episodes![0].filmPath === 'ep1.mp4' && scopedCastVariantDoc.episodes![1].status === 'planned' && !scopedCastVariantDoc.episodes![1].filmPath,
+  JSON.stringify(scopedCastVariantDoc.episodes),
 )
 check('detects current episode main cast reference use', currentEpisodeUsesCastRef(planned, 'prop'), JSON.stringify(planned.storyboards))
 const variantOnly = doc({ currentEpisodeId: 'ep1', storyboards: [storyboard('variant-only', 0, [{ assetId: 'hero', variantId: 'battle' }])], episodes: [episode('ep1', 0)] })
