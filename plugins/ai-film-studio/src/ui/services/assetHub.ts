@@ -1,7 +1,7 @@
 import type { Asset, AssetImage, AssetVariant, Clip, Episode, ProjectDoc, Storyboard, VideoTrack } from '../domain/types'
 import { loadIndex, loadProject, newId } from '../domain/persistence'
 import { castRefsForStoryboard } from '../domain/castRefs'
-import type { ElementKind, ElementRef, ElementVariant } from '../store/assetStore'
+import type { ElementKind, ElementMediaRef, ElementRef, ElementVariant } from '../store/assetStore'
 import { loadBoards, loadRegistry, storageUsage, type AssetRecord, type Board } from './assetRegistry'
 
 const PLUGIN_ID = 'ai-film-studio'
@@ -142,6 +142,25 @@ function mediaRefFromAssetId(assetId: string | undefined, role: MediaRefRole, la
   return { assetId, role, label, createdAt: now() }
 }
 
+function mediaRefFromElementRef(ref: ElementMediaRef | undefined): MediaRef | undefined {
+  if (!ref?.assetId) return undefined
+  return { assetId: ref.assetId, role: ref.role, label: ref.label, createdAt: ref.createdAt || now() }
+}
+
+function legacyMediaRefs(
+  explicitRefs: ElementMediaRef[] | undefined,
+  views?: { front?: string; side?: string; back?: string },
+  refAssetIds?: string[],
+): Array<MediaRef | undefined> {
+  const explicitAssetIds = new Set((explicitRefs ?? []).map((ref) => ref.assetId).filter(Boolean))
+  return [
+    mediaRefFromAssetId(views?.front, 'front', 'front'),
+    mediaRefFromAssetId(views?.side, 'side', 'side'),
+    mediaRefFromAssetId(views?.back, 'back', 'back'),
+    ...(refAssetIds ?? []).filter((assetId) => !explicitAssetIds.has(assetId)).map((assetId, index) => mediaRefFromAssetId(assetId, index === 0 ? 'primary' : 'reference')),
+  ]
+}
+
 function dedupeMediaRefs(refs: Array<MediaRef | undefined>): MediaRef[] | undefined {
   const out: MediaRef[] = []
   const seen = new Set<string>()
@@ -185,10 +204,8 @@ function primaryRef(refs: MediaRef[] | undefined, roles: MediaRefRole[] = ['fron
 function elementVariantToLibraryVariant(variant: ElementVariant): LibraryVariant {
   const ts = now()
   const mediaRefs = dedupeMediaRefs([
-    mediaRefFromAssetId(variant.views?.front, 'front', 'front'),
-    mediaRefFromAssetId(variant.views?.side, 'side', 'side'),
-    mediaRefFromAssetId(variant.views?.back, 'back', 'back'),
-    ...(variant.refAssetIds ?? []).map((assetId, index) => mediaRefFromAssetId(assetId, index === 0 ? 'primary' : 'reference')),
+    ...(variant.mediaRefs ?? []).map(mediaRefFromElementRef),
+    ...legacyMediaRefs(variant.mediaRefs, variant.views, variant.refAssetIds),
   ])
   return {
     id: variant.id || variant.label || newId('lv_'),
@@ -207,10 +224,8 @@ function elementVariantToLibraryVariant(variant: ElementVariant): LibraryVariant
 export function elementToLibraryEntity(element: ElementRef): LibraryEntity {
   const ts = element.updatedAt || element.createdAt || now()
   const mediaRefs = dedupeMediaRefs([
-    mediaRefFromAssetId(element.views?.front, 'front', 'front'),
-    mediaRefFromAssetId(element.views?.side, 'side', 'side'),
-    mediaRefFromAssetId(element.views?.back, 'back', 'back'),
-    ...(element.refAssetIds ?? []).map((assetId, index) => mediaRefFromAssetId(assetId, index === 0 ? 'primary' : 'reference')),
+    ...(element.mediaRefs ?? []).map(mediaRefFromElementRef),
+    ...legacyMediaRefs(element.mediaRefs, element.views, element.refAssetIds),
   ])
   return {
     id: element.id,
@@ -253,6 +268,7 @@ export function libraryEntityToElement(entity: LibraryEntity): ElementRef {
     updatedAt: entity.updatedAt,
     identity: entity.identity,
     views: front || side || back ? { front, side, back } : undefined,
+    mediaRefs: entity.mediaRefs?.map((ref) => ({ assetId: ref.assetId, role: ref.role, label: ref.label, createdAt: ref.createdAt })),
     voiceId: entity.voiceRef?.assetId ?? entity.legacyElement?.voiceId,
     lora: entity.lora,
     appearanceVariants: entity.variants?.map((variant) => ({
@@ -267,6 +283,7 @@ export function libraryEntityToElement(entity: LibraryEntity): ElementRef {
         side: variant.mediaRefs?.find((ref) => ref.role === 'side')?.assetId,
         back: variant.mediaRefs?.find((ref) => ref.role === 'back')?.assetId,
       },
+      mediaRefs: variant.mediaRefs?.map((ref) => ({ assetId: ref.assetId, role: ref.role, label: ref.label, createdAt: ref.createdAt })),
       refAssetIds: [...new Set((variant.mediaRefs ?? []).map((ref) => ref.assetId).filter((assetId): assetId is string => !!assetId))],
       tags: variant.tags,
     })),

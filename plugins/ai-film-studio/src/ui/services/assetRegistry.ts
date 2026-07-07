@@ -464,11 +464,13 @@ interface StudioDocShape {
 
 interface ElementLibraryShape {
   refAssetIds?: string[]
+  mediaRefs?: Array<{ assetId?: string }>
   views?: { front?: string; side?: string; back?: string }
   voiceId?: string
   variants?: Array<{ assetId?: string }>
   appearanceVariants?: Array<{
     refAssetIds?: string[]
+    mediaRefs?: Array<{ assetId?: string }>
     views?: { front?: string; side?: string; back?: string }
     voiceId?: string
   }>
@@ -476,6 +478,7 @@ interface ElementLibraryShape {
 
 function addElementAssetIds(referenced: Set<string>, element: ElementLibraryShape): void {
   for (const aid of element.refAssetIds || []) if (aid) referenced.add(aid)
+  for (const ref of element.mediaRefs || []) if (ref.assetId) referenced.add(ref.assetId)
   if (element.views?.front) referenced.add(element.views.front)
   if (element.views?.side) referenced.add(element.views.side)
   if (element.views?.back) referenced.add(element.views.back)
@@ -483,6 +486,7 @@ function addElementAssetIds(referenced: Set<string>, element: ElementLibraryShap
   for (const variant of element.variants || []) if (variant.assetId) referenced.add(variant.assetId)
   for (const variant of element.appearanceVariants || []) {
     for (const aid of variant.refAssetIds || []) if (aid) referenced.add(aid)
+    for (const ref of variant.mediaRefs || []) if (ref.assetId) referenced.add(ref.assetId)
     if (variant.views?.front) referenced.add(variant.views.front)
     if (variant.views?.side) referenced.add(variant.views.side)
     if (variant.views?.back) referenced.add(variant.views.back)

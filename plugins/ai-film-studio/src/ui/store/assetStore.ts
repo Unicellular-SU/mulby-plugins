@@ -26,6 +26,14 @@ const PLUGIN_ID = 'ai-film-studio'
 const KEY_ELEMENTS = 'elements:library'
 
 export type ElementKind = 'character' | 'scene' | 'prop'
+export type CanvasOutputViewRole = 'primary' | 'front' | 'side' | 'back' | 'concept' | 'reference'
+
+export interface ElementMediaRef {
+  assetId?: string
+  role: CanvasOutputViewRole | 'audio'
+  label?: string
+  createdAt?: number
+}
 
 /** M27：时期/形态变体（角色少年/暮年、场景时段、物品状态）。views 存各角度 assetId。 */
 export interface ElementVariant {
@@ -39,6 +47,7 @@ export interface ElementVariant {
   parentVariantId?: string
   views?: { front?: string; side?: string; back?: string }
   refAssetIds?: string[]
+  mediaRefs?: ElementMediaRef[]
   tags?: string[]
   voiceId?: string
 }
@@ -61,6 +70,7 @@ export interface ElementRef {
   charId?: string
   /** 多角度视图：存 assetId（非 url/base64），缺省回退 refAssetIds */
   views?: { front?: string; side?: string; back?: string }
+  mediaRefs?: ElementMediaRef[]
   voiceId?: string
   variants?: { id: string; label: string; assetId: string; tags?: string[] }[]
   lora?: { provider?: string; ref: string; weight?: number }
@@ -69,7 +79,6 @@ export interface ElementRef {
   appearanceVariants?: ElementVariant[] // 时期/形态变体（富结构）
 }
 
-export type CanvasOutputViewRole = 'primary' | 'front' | 'side' | 'back' | 'concept' | 'reference'
 export interface CanvasOutputPromotionItem {
   assetId?: string
   meta?: Record<string, unknown>
@@ -105,9 +114,17 @@ function prependUnique(ids: string[] | undefined, assetId: string): string[] {
   return [assetId, ...(ids ?? []).filter((id) => id && id !== assetId)]
 }
 
-function applyCanvasOutputToElement(el: ElementRef, assetId: string, target: CanvasOutputPromotionTarget): ElementRef {
+function upsertMediaRef(refs: ElementMediaRef[] | undefined, assetId: string, role: CanvasOutputViewRole, label?: string): ElementMediaRef[] {
+  const nextRef: ElementMediaRef = { assetId, role, label: label || role, createdAt: Date.now() }
+  const singleRole = role === 'primary' || isElementViewRole(role)
+  const filtered = (refs ?? []).filter((ref) => (singleRole ? ref.role !== role : !(ref.role === role && ref.assetId === assetId)))
+  return [nextRef, ...filtered]
+}
+
+export function applyCanvasOutputToElement(el: ElementRef, assetId: string, target: CanvasOutputPromotionTarget): ElementRef {
   const next: ElementRef = { ...el, refAssetIds: [...(el.refAssetIds ?? [])], updatedAt: Date.now(), version: (el.version ?? 1) + 1 }
   if (!target.libraryVariantId) {
+    next.mediaRefs = upsertMediaRef(next.mediaRefs, assetId, target.view)
     if (isElementViewRole(target.view)) {
       next.views = { ...(next.views ?? {}), [target.view]: assetId }
     } else {
@@ -122,6 +139,7 @@ function applyCanvasOutputToElement(el: ElementRef, assetId: string, target: Can
     idx = variants.length - 1
   }
   const variant = { ...variants[idx] }
+  variant.mediaRefs = upsertMediaRef(variant.mediaRefs, assetId, target.view, target.variantLabel)
   if (isElementViewRole(target.view)) {
     variant.views = { ...(variant.views ?? {}), [target.view]: assetId }
   } else {

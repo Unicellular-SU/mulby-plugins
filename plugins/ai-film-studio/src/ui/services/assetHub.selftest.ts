@@ -19,6 +19,7 @@ const element: ElementRef = {
   description: '冷静的调查记者',
   prompt: 'consistent face, sharp eyes',
   refAssetIds: ['base-img'],
+  mediaRefs: [{ assetId: 'concept-img', role: 'concept', label: 'concept', createdAt: 3 }],
   tags: ['lead'],
   archived: true,
   identity: 'oval face, mole under left eye',
@@ -32,6 +33,7 @@ const element: ElementRef = {
     appearance: 'black dress, formal makeup',
     prompt: 'formal makeup and black dress',
     views: { front: 'gala-front' },
+    mediaRefs: [{ assetId: 'gala-ref', role: 'reference', label: 'pose reference', createdAt: 4 }],
     tags: ['formal'],
   }],
   createdAt: 1,
@@ -42,9 +44,15 @@ const entity = elementToLibraryEntity(element)
 check('maps ElementRef to LibraryEntity kind and identity', entity.kind === 'character' && entity.identity === element.identity, JSON.stringify(entity))
 check('maps ElementRef archive state to LibraryEntity', entity.archived === true, JSON.stringify(entity))
 check('maps element views to media refs', !!entity.mediaRefs?.some((ref) => ref.role === 'front' && ref.assetId === 'front-img'), JSON.stringify(entity.mediaRefs))
-check('maps appearance variants to library variants', entity.variants?.[0]?.id === 'gala' && entity.variants[0].mediaRefs?.[0]?.assetId === 'gala-front', JSON.stringify(entity.variants))
+check('maps explicit element media roles to media refs', !!entity.mediaRefs?.some((ref) => ref.role === 'concept' && ref.assetId === 'concept-img'), JSON.stringify(entity.mediaRefs))
+check('maps appearance variants to library variants', entity.variants?.[0]?.id === 'gala' && entity.variants[0].mediaRefs?.some((ref) => ref.assetId === 'gala-front') === true, JSON.stringify(entity.variants))
+check('maps explicit variant media roles to media refs', !!entity.variants?.[0]?.mediaRefs?.some((ref) => ref.role === 'reference' && ref.assetId === 'gala-ref'), JSON.stringify(entity.variants))
 check('maps element voice id to library voice ref', entity.voiceRef?.role === 'audio' && entity.voiceRef.assetId === 'voice-global', JSON.stringify(entity.voiceRef))
 check('maps element lora to library entity', entity.lora?.ref === 'hero-base-lora' && entity.lora.weight === 0.7, JSON.stringify(entity.lora))
+
+const roundTripElement = libraryEntityToElement(entity)
+check('maps library media roles back to ElementRef', roundTripElement.mediaRefs?.some((ref) => ref.role === 'concept' && ref.assetId === 'concept-img') === true, JSON.stringify(roundTripElement.mediaRefs))
+check('maps library variant media roles back to ElementRef', roundTripElement.appearanceVariants?.[0]?.mediaRefs?.some((ref) => ref.role === 'reference' && ref.assetId === 'gala-ref') === true, JSON.stringify(roundTripElement.appearanceVariants))
 
 const projectAsset = createProjectAssetFromEntity(entity)
 check('creates project asset snapshot from entity', projectAsset.type === 'role' && projectAsset.elementId === 'el_hero' && projectAsset.refImageId === 'front-img', JSON.stringify(projectAsset))
