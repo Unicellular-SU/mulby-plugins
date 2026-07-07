@@ -1219,7 +1219,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
         if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
-        return json({ ...episodeInfo(d, episode), ...episodeHandoffView(d, buildEpisodeProductionHandoff(d, episode), await loadIdentityUsageSafe()) })
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json({ ...episodeInfoWithPlan(d, episode, usageByEntity), ...episodeHandoffView(d, buildEpisodeProductionHandoff(d, episode), usageByEntity) })
       },
     },
     {

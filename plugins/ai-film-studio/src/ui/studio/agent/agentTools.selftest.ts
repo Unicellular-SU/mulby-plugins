@@ -557,6 +557,24 @@ check(
     ),
   JSON.stringify(handoff),
 )
+check(
+  'get_episode_handoff returns episode plan usage',
+  handoff.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    handoff.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(handoff.plan),
+)
 const emptyEpisodeHandoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 3 }))
 check(
   'get_episode_handoff carries prior refs for empty episode',
