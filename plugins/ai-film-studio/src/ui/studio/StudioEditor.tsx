@@ -759,15 +759,28 @@ function SeriesTab() {
   const updateSeriesBible = useProjectStore((s) => s.updateSeriesBible)
   const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
   const createEpisodes = useProjectStore((s) => s.createEpisodes)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
+  const refreshHub = useAssetHubStore((s) => s.refresh)
+  useEffect(() => {
+    if (!hubLoaded) void refreshHub()
+  }, [hubLoaded, refreshHub])
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const bible = doc.seriesBible ?? { continuityRules: [], plannedEpisodeCount: episodes.length || 1 }
   const plannedCount = bible.plannedEpisodeCount ?? (episodes.length || 1)
-  const assetOptions = doc.assets.filter((asset) => (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId)
+  const assetOptions = doc.assets
+    .filter((asset) => (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId)
+    .map((asset) => {
+      const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
+      return { asset, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage) }
+    })
   const variantOptions = assetOptions.flatMap((asset) =>
-    (asset.variants ?? []).map((variant) => ({
+    (asset.asset.variants ?? []).map((variant) => ({
       id: variant.id,
-      label: `${asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
+      label: `${asset.asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
       title: [variantKindLabel(variant.variantKind) ? `类型：${variantKindLabel(variant.variantKind)}` : '', variant.desc].filter(Boolean).join(' · '),
+      assetCenterUsage: asset.assetCenterUsage,
+      assetCenterChips: asset.assetCenterChips,
     }))
   )
   const fillEpisodes = () => {
@@ -897,14 +910,19 @@ function SeriesTab() {
                   <span>必需项目资产</span>
                   {assetOptions.length ? (
                     <div className="afs-series__checks">
-                      {assetOptions.map((asset) => (
+                      {assetOptions.map(({ asset, assetCenterUsage, assetCenterChips }) => (
                         <label key={asset.id} className={`afs-series__check${requiredAssetIds.has(asset.id) ? ' is-on' : ''}`}>
                           <input
                             type="checkbox"
                             checked={requiredAssetIds.has(asset.id)}
                             onChange={() => patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, asset.id) })}
                           />
-                          {asset.name}
+                          <span className="afs-series__checktext">{asset.name}</span>
+                          {assetCenterChips.length > 0 && (
+                            <span className="afs-series__usagechips" aria-label={`${asset.name} 资产中心图谱`} title={assetCenterUsageTitle(assetCenterUsage)}>
+                              {assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
+                            </span>
+                          )}
                         </label>
                       ))}
                     </div>
@@ -916,13 +934,22 @@ function SeriesTab() {
                       <span>必需形态/妆容</span>
                       <div className="afs-series__checks">
                         {variantOptions.map((variant) => (
-                          <label key={variant.id} className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`} title={variant.title || variant.label}>
+                          <label
+                            key={variant.id}
+                            className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`}
+                            title={[variant.title, variant.assetCenterChips.length ? assetCenterUsageTitle(variant.assetCenterUsage) : ''].filter(Boolean).join('\n') || variant.label}
+                          >
                             <input
                               type="checkbox"
                               checked={requiredVariantIds.has(variant.id)}
                               onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
                             />
                             <span className="afs-series__checktext">{variant.label}</span>
+                            {variant.assetCenterChips.length > 0 && (
+                              <span className="afs-series__usagechips" aria-label={`${variant.label} 资产中心图谱`}>
+                                {variant.assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
+                              </span>
+                            )}
                           </label>
                         ))}
                       </div>

@@ -3789,7 +3789,7 @@ select.afs-toolbar__select,
   gap: 4px;
   max-width: 100%;
   min-width: 0;
-  height: 24px;
+  min-height: 24px;
   padding: 0 7px;
   border: 1px solid var(--afs-border);
   border-radius: var(--afs-r-sm);
@@ -3804,10 +3804,33 @@ select.afs-toolbar__select,
   background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2));
 }
 .afs-series__check input {
+  flex: 0 0 auto;
   margin: 0;
 }
 .afs-series__checktext {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-series__usagechips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.afs-series__usagechips i {
+  max-width: 58px;
+  min-height: 18px;
+  padding: 2px 4px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--afs-accent) 10%, var(--afs-panel));
+  color: var(--afs-text-dim);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
