@@ -277,17 +277,21 @@ const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' 
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))
 check(
   'get_storyboard_table resolves asset-center usage for design refs',
-  ep2Table.scenes?.[0]?.resolvedCastAssets?.some((item: { name: string; assetId?: string; variants?: Array<{ id: string; variantKind?: string }>; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
+  ep2Table.scenes?.[0]?.resolvedCastAssets?.some((item: { name: string; assetId?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; variants?: Array<{ id: string; variantKind?: string; libraryVariantId?: string }>; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
     item.name === '主角' &&
     item.assetId === 'hero' &&
-    item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup') &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 1 &&
+    item.librarySyncPolicy === 'snapshot' &&
+    item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup' && variant.libraryVariantId === 'lib-gala') &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
   ) &&
-    ep2Table.scenes?.[0]?.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some((item: { name: string; assetId?: string; variants?: Array<{ id: string; variantKind?: string }>; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
+    ep2Table.scenes?.[0]?.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some((item: { name: string; assetId?: string; libraryEntityId?: string; variants?: Array<{ id: string; variantKind?: string; libraryVariantId?: string }>; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
       item.name === '主角' &&
       item.assetId === 'hero' &&
-      item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup') &&
+      item.libraryEntityId === 'el-hero' &&
+      item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup' && variant.libraryVariantId === 'lib-gala') &&
       item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
   JSON.stringify(ep2Table.scenes),
