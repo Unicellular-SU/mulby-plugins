@@ -2571,7 +2571,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           id,
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? { ...episodeInfo(next, target.episode), plan: planView(next, target.episode.plan, usageByEntity) } : undefined,
           unresolvedCast: cast.unresolved,
           variants: scopedVariantViews(next, cast.refs, usageByEntity),
           storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,

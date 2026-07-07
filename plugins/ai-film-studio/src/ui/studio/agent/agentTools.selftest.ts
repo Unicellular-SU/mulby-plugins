@@ -1197,6 +1197,24 @@ const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
 check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
 check('add_storyboard resolves cast aliases', addedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string }) => ref.assetId === 'hero'), JSON.stringify(addedStoryboard.storyboard))
 check(
+  'add_storyboard returns episode plan usage',
+  addedStoryboard.episode?.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    addedStoryboard.episode?.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(addedStoryboard.episode),
+)
+check(
   'add_storyboard returns cast asset-center usage',
   addedStoryboard.storyboard?.castAssets?.some((item: { assetId: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
     item.assetId === 'hero' &&
