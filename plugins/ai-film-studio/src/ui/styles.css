@@ -4203,6 +4203,10 @@ select.afs-toolbar__select,
 .afs-studio__assetmatrix-scope { color: var(--afs-accent); }
 .afs-studio__assetmatrix-spacer { flex: 1 1 auto; }
 .afs-studio__assetmatrix-filters { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.afs-studio__assetmatrix-search { min-height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); }
+.afs-studio__assetmatrix-search:focus-within { border-color: var(--afs-accent); color: var(--afs-text); }
+.afs-studio__assetmatrix-search input { width: 96px; border: 0; outline: none; background: transparent; color: var(--afs-text); font-size: 11px; }
+.afs-studio__assetmatrix-search input::placeholder { color: var(--afs-text-dim); }
 .afs-studio__assetmatrix-filtergroup { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .afs-studio__assetmatrix-filtergroup + .afs-studio__assetmatrix-filtergroup { margin-left: 4px; padding-left: 6px; border-left: 1px solid var(--afs-border); }
 .afs-studio__assetmatrix-filtergroup em { font-style: normal; font-size: 10px; color: var(--afs-text-dim); }
