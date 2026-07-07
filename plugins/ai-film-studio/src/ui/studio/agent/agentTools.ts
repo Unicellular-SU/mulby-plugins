@@ -354,6 +354,10 @@ function episodeInfo(doc: ProjectDoc, episode: Episode) {
   return { episodeId: episode.id, episodeIndex: episode.index + 1, episodeTitle: episode.title, current: episode.id === doc.currentEpisodeId }
 }
 
+function episodeInfoWithPlan(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return { ...episodeInfo(doc, episode), plan: planView(doc, episode.plan, usageByEntity) }
+}
+
 function scriptEpisodeContext(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return { ...episodeInfo(doc, episode), episodePlan: planView(doc, episode.plan, usageByEntity) }
 }
@@ -1616,7 +1620,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const handoff = next && episode ? buildEpisodeProductionHandoff(next, episode) : undefined
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
-          episode: next && episode ? { ...episodeInfo(next, episode), plan: planView(next, episode.plan, usageByEntity) } : undefined,
+          episode: next && episode ? episodeInfoWithPlan(next, episode, usageByEntity) : undefined,
           applied: applied.map((item) => handoffSuggestionApplyResultView(item, next, usageByEntity)),
           missing,
           remainingSuggestions: handoff?.suggestions.map((suggestion) => handoffSuggestionRef(suggestion, next, usageByEntity)) ?? [],
@@ -2571,7 +2575,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           id,
-          episode: next && target.episode ? { ...episodeInfo(next, target.episode), plan: planView(next, target.episode.plan, usageByEntity) } : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           unresolvedCast: cast.unresolved,
           variants: scopedVariantViews(next, cast.refs, usageByEntity),
           storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
@@ -2616,7 +2620,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           generated: true,
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
@@ -2641,7 +2645,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           generated: true,
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
           clips,
         })
