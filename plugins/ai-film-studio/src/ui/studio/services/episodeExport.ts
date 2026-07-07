@@ -1,4 +1,4 @@
-import type { Episode, ProjectDoc } from '../../domain/types'
+import type { Episode, ProjectAssetLibraryLink, ProjectDoc } from '../../domain/types'
 import { buildSrt, type SrtClip } from '../../services/subtitles'
 import { buildContinuityReport, type ContinuityIssue } from './continuityReport'
 
@@ -80,9 +80,13 @@ export interface EpisodeDeliveryAssetReference {
   assetId: string
   assetName: string
   assetType: string
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   variantId?: string
   variantLabel?: string
   variantKind?: ContinuityIssue['variantKind']
+  libraryVariantId?: string
   label: string
   refImageId?: string
   appliesToEpisode: boolean
@@ -285,6 +289,7 @@ function isMissingItemIssue(issue: ContinuityIssue): boolean {
 export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<string>): EpisodeDeliveryReport {
   const report = buildContinuityReport(doc)
   const episodeMeta = new Map(report.episodes.map((episode) => [episode.id, episode]))
+  const assetsById = new Map(doc.assets.map((asset) => [asset.id, asset]))
   const includeEpisode = (episodeId: string | undefined) => !episodeIds || !episodeId || episodeIds.has(episodeId)
   const issues = report.issues
     .filter((issue) => includeEpisode(issue.episodeId))
@@ -299,22 +304,31 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
   const assetReferences = report.episodes
     .filter((episode) => !episodeIds || episodeIds.has(episode.id))
     .flatMap((episode) =>
-      episode.castUses.map((use) => ({
-        episodeId: episode.id,
-        episodeIndex: episode.index,
-        episodeTitle: episode.title,
-        storyboardId: use.storyboardId,
-        storyboardIndex: use.storyboardIndex,
-        assetId: use.assetId,
-        assetName: use.assetName,
-        assetType: use.assetType,
-        variantId: use.variantId,
-        variantLabel: use.variantLabel,
-        variantKind: use.variantKind,
-        label: use.label,
-        refImageId: use.refImageId,
-        appliesToEpisode: use.appliesToEpisode,
-      })),
+      episode.castUses.map((use) => {
+        const asset = assetsById.get(use.assetId)
+        const variant = use.variantId ? asset?.variants?.find((item) => item.id === use.variantId) : undefined
+        const libraryLink = asset?.libraryLink
+        return {
+          episodeId: episode.id,
+          episodeIndex: episode.index,
+          episodeTitle: episode.title,
+          storyboardId: use.storyboardId,
+          storyboardIndex: use.storyboardIndex,
+          assetId: use.assetId,
+          assetName: use.assetName,
+          assetType: use.assetType,
+          libraryEntityId: libraryLink?.entityId ?? asset?.elementId,
+          libraryEntityVersion: libraryLink?.entityVersion,
+          librarySyncPolicy: libraryLink?.syncPolicy,
+          variantId: use.variantId,
+          variantLabel: use.variantLabel,
+          variantKind: use.variantKind,
+          libraryVariantId: variant?.libraryVariantId ?? (use.variantId ? libraryLink?.variantMap?.[use.variantId] : undefined),
+          label: use.label,
+          refImageId: use.refImageId,
+          appliesToEpisode: use.appliesToEpisode,
+        }
+      }),
     )
   return {
     assetReferences,

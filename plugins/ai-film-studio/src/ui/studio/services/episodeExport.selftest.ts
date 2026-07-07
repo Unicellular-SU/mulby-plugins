@@ -64,7 +64,8 @@ const assets: Asset[] = [{
   name: 'Hero',
   refImageId: 'hero-img',
   state: 'done',
-  variants: [{ id: 'gala', label: 'Gala', variantKind: 'makeup', refImageId: 'gala-img' }],
+  libraryLink: { entityId: 'el-hero', entityVersion: 3, syncPolicy: 'snapshot', variantMap: { gala: 'lib-gala' } },
+  variants: [{ id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup', refImageId: 'gala-img' }],
 }]
 const project = doc({
   assets,
@@ -90,7 +91,20 @@ check('builds stable season package directory name', dirName === 'My_Series__Pil
 
 const manifest = buildEpisodeExportManifest(project, items.map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` })), '2026-07-06T01:02:03.000Z')
 check('builds season export manifest', manifest.projectId === 'p1' && manifest.episodeCount === 2 && manifest.episodes[1].exportedPath?.endsWith('.mp4') === true, JSON.stringify(manifest))
-check('adds delivery asset references to season manifest', manifest.delivery.assetReferences.some((item) => item.assetId === 'hero' && item.episodeId === 'ep1' && item.variantId === 'gala' && item.variantKind === 'makeup'), JSON.stringify(manifest.delivery.assetReferences))
+check(
+  'adds delivery asset references to season manifest',
+  manifest.delivery.assetReferences.some((item) =>
+    item.assetId === 'hero' &&
+    item.episodeId === 'ep1' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 3 &&
+    item.librarySyncPolicy === 'snapshot' &&
+    item.variantId === 'gala' &&
+    item.variantKind === 'makeup' &&
+    item.libraryVariantId === 'lib-gala',
+  ),
+  JSON.stringify(manifest.delivery.assetReferences),
+)
 check('adds missing item report to season manifest', manifest.delivery.missingItems.some((item) => item.code === 'missing_asset' && item.episodeId === 'ep2'), JSON.stringify(manifest.delivery.missingItems))
 check('adds subtitle metadata to season manifest', manifest.episodes[0].subtitles?.[0]?.fileName === 'E1_Pilot_subtitles.srt' && manifest.episodes[0].subtitles?.[0]?.cueCount === 1, JSON.stringify(manifest.episodes[0].subtitles))
 
@@ -102,7 +116,16 @@ check('builds stable single episode package directory name', episodeDir === 'My_
 
 const episodeManifest = buildSingleEpisodePackageManifest(project, ep1, '/exports/E1_Pilot.mov', '2026-07-06T01:02:03.000Z', subtitle ? [{ format: 'srt', fileName: subtitle.fileName, cueCount: subtitle.cueCount, exportedPath: '/exports/E1_Pilot_subtitles.srt' }] : undefined)
 check('builds single episode package manifest', episodeManifest.episode.index === 1 && episodeManifest.episode.exportedFilmPath === '/exports/E1_Pilot.mov' && episodeManifest.episode.counts.scripts === 0, JSON.stringify(episodeManifest))
-check('scopes delivery report to single episode package', episodeManifest.delivery.assetReferences.length === 1 && episodeManifest.delivery.assetReferences[0].assetId === 'hero' && episodeManifest.delivery.assetReferences[0].variantKind === 'makeup' && episodeManifest.delivery.missingItems.length === 0, JSON.stringify(episodeManifest.delivery))
+check(
+  'scopes delivery report to single episode package',
+  episodeManifest.delivery.assetReferences.length === 1 &&
+    episodeManifest.delivery.assetReferences[0].assetId === 'hero' &&
+    episodeManifest.delivery.assetReferences[0].libraryEntityId === 'el-hero' &&
+    episodeManifest.delivery.assetReferences[0].libraryVariantId === 'lib-gala' &&
+    episodeManifest.delivery.assetReferences[0].variantKind === 'makeup' &&
+    episodeManifest.delivery.missingItems.length === 0,
+  JSON.stringify(episodeManifest.delivery),
+)
 check('adds subtitle metadata to single episode package', episodeManifest.episode.subtitles?.[0]?.exportedPath === '/exports/E1_Pilot_subtitles.srt', JSON.stringify(episodeManifest.episode.subtitles))
 
 const currentSnapshotProject = doc({
