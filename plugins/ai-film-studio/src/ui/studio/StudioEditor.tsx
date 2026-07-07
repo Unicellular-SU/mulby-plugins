@@ -1724,6 +1724,15 @@ function AssetContinuityPanel() {
           ))}
         </span>
       </div>
+      <div className="afs-studio__assetmatrix-columns" aria-hidden="true">
+        <span>资产</span>
+        <span>出现剧集</span>
+        <span>计划剧集</span>
+        <span>使用形态</span>
+        <span>计划形态</span>
+        <span>资产中心</span>
+        <span>状态</span>
+      </div>
       <div className="afs-studio__assetmatrix-rows">
         {filteredRows.length === 0 && <span className="afs-studio__assetmatrix-empty">当前筛选下没有资产</span>}
         {filteredRows.map((row) => (
