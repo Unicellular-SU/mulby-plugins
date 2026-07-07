@@ -60,9 +60,9 @@ const doc: ProjectDoc = {
     name: 'Hero',
     aliases: ['主角'],
     elementId: 'el-hero',
-    libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
+    libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot', variantMap: { gala: 'lib-gala' } },
     state: 'done',
-    variants: [{ id: 'gala', label: 'Gala', variantKind: 'makeup' }],
+    variants: [{ id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup' }],
   }],
   storyboards: [{ ...storyboard('sb-current', 0, 'Current shot only.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero' }] }],
   clips: [],
@@ -176,12 +176,16 @@ check(
 const continuityReport = JSON.parse(await getContinuityReport.execute({}))
 check(
   'get_continuity_report exposes cast asset-center usage',
-  continuityReport.episodes?.some((episode: { id: string; castUses?: Array<{ assetId: string; variantId?: string; variantKind?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+  continuityReport.episodes?.some((episode: { id: string; castUses?: Array<{ assetId: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
     episode.id === 'ep2' &&
     episode.castUses?.some((use) =>
       use.assetId === 'hero' &&
       use.variantId === 'gala' &&
       use.variantKind === 'makeup' &&
+      use.libraryEntityId === 'el-hero' &&
+      use.libraryEntityVersion === 1 &&
+      use.librarySyncPolicy === 'snapshot' &&
+      use.libraryVariantId === 'lib-gala' &&
       use.assetCenterUsage?.entityId === 'el-hero' &&
       use.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),

@@ -99,6 +99,28 @@ check('flags variant outside episode scope', !!ep2?.issues.some((issue) => issue
 check('flags missing variant ref image', !!ep2?.issues.some((issue) => issue.code === 'missing_ref_image' && issue.variantKind === 'makeup'), JSON.stringify(ep2?.issues))
 check('records cast use as not applying to episode', ep2?.castUses[0]?.appliesToEpisode === false && ep2.castUses[0]?.variantKind === 'makeup', JSON.stringify(ep2?.castUses))
 
+const lineageReport = buildContinuityReport(
+  doc({
+    assets: [{
+      ...hero,
+      libraryLink: { entityId: 'el-hero', entityVersion: 5, syncPolicy: 'snapshot', variantMap: { 'v-gala': 'lib-gala' } },
+      variants: [{ id: 'v-gala', label: 'Gala', variantKind: 'makeup', refImageId: 'gala-img' }],
+    }],
+    currentEpisodeId: 'ep1',
+    storyboards: [storyboard('lineage-use', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
+    episodes: [episode('ep1', 0)],
+  }),
+)
+const lineageUse = lineageReport.episodes[0]?.castUses[0]
+check(
+  'records cast use asset-center lineage',
+  lineageUse?.libraryEntityId === 'el-hero' &&
+    lineageUse.libraryEntityVersion === 5 &&
+    lineageUse.librarySyncPolicy === 'snapshot' &&
+    lineageUse.libraryVariantId === 'lib-gala',
+  JSON.stringify(lineageUse),
+)
+
 const duplicateAssetReport = buildContinuityReport(
   doc({
     assets: [

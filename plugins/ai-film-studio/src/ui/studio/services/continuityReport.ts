@@ -1,6 +1,6 @@
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import { normalizeAssetLookup } from '../../domain/assetAliases'
-import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
+import type { Asset, Episode, ProjectAssetLibraryLink, ProjectDoc, Storyboard } from '../../domain/types'
 import type { LibraryEntity } from '../../services/assetHub'
 
 type VariantKind = NonNullable<Asset['variants']>[number]['variantKind']
@@ -46,9 +46,13 @@ export interface ContinuityCastUse {
   assetId: string
   assetName: string
   assetType: Asset['type']
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   variantId?: string
   variantLabel?: string
   variantKind?: VariantKind
+  libraryVariantId?: string
   label: string
   refImageId?: string
   appliesToEpisode: boolean
@@ -859,9 +863,13 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
           assetId: asset.id,
           assetName: asset.name,
           assetType: asset.type,
+          libraryEntityId: asset.libraryLink?.entityId ?? asset.elementId,
+          libraryEntityVersion: asset.libraryLink?.entityVersion,
+          librarySyncPolicy: asset.libraryLink?.syncPolicy,
           variantId: ref.variantId,
           variantLabel: variant?.label,
           variantKind: variant?.variantKind,
+          libraryVariantId: variant?.libraryVariantId ?? (ref.variantId ? asset.libraryLink?.variantMap?.[ref.variantId] : undefined),
           label: labelForCastRef(asset, ref),
           refImageId,
           appliesToEpisode,
