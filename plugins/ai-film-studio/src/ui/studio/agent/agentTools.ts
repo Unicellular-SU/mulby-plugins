@@ -1342,7 +1342,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         const episodes = episodeList(d)
-        const usageByEntity = wants('assets') || wants('episodes') ? await loadIdentityUsageSafe() : undefined
+        const usageByEntity = wants('assets') || wants('episodes') || wants('storyboards') || wants('storyboardTable') ? await loadIdentityUsageSafe() : undefined
         return json({
           query: q,
           episodes: wants('episodes')
@@ -1392,7 +1392,15 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                 .filter(({ storyboard }) => has(storyboard.videoDesc) || has(storyboard.prompt) || (storyboard.dialogues ?? []).some((dl) => has(dl.character) || has(dl.line)))
                 .sort((x, y) => x.episodeIndex - y.episodeIndex || x.storyboard.index - y.storyboard.index)
                 .slice(0, limit)
-                .map(({ storyboard: s, ...episode }) => ({ ...episode, id: s.id, index: s.index + 1, videoDesc: s.videoDesc, promptSnippet: snippet(s.prompt ?? '', q, 180), dialogues: s.dialogues }))
+                .map(({ storyboard: s, ...episode }) => ({
+                  ...episode,
+                  id: s.id,
+                  index: s.index + 1,
+                  videoDesc: s.videoDesc,
+                  promptSnippet: snippet(s.prompt ?? '', q, 180),
+                  dialogues: s.dialogues,
+                  castAssets: storyboardCastAssets(d, s, usageByEntity),
+                }))
             : undefined,
           novel: wants('novel')
             ? d.novel
@@ -1410,7 +1418,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                 )
                 .filter(({ scene }) => has(scene.sceneName) || scene.segments.some((seg) => has(seg.title) || seg.rows.some((row) => has(row.videoDesc) || has(row.dialogue))))
                 .slice(0, limit)
-                .map(({ scene, ...episode }) => ({ ...episode, scene }))
+                .map(({ scene, ...episode }) => ({ ...episode, scene: storyboardTableView(d, [scene], usageByEntity)[0] }))
             : undefined,
         })
       },

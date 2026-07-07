@@ -128,6 +128,40 @@ const search = JSON.parse(await searchProject.execute({ query: 'hidden clue', do
 check('search_project finds non-current episode scripts', search.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(search.scripts))
 check('search_project finds non-current episode storyboards', search.storyboards?.some((item: { id: string; episodeIndex: number }) => item.id === 'sb-ep2' && item.episodeIndex === 2), JSON.stringify(search.storyboards))
 check('search_project finds non-current episode storyboard table', search.storyboardTable?.some((item: { scene: { sceneName: string }; episodeId: string }) => item.scene.sceneName === 'Hidden clue scene' && item.episodeId === 'ep2'), JSON.stringify(search.storyboardTable))
+check(
+  'search_project exposes storyboard cast asset usage',
+  search.storyboards?.some((item: { id: string; castAssets?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+    item.id === 'sb-ep2' &&
+    item.castAssets?.some(
+      (asset) =>
+        asset.assetId === 'hero' &&
+        asset.variantId === 'gala' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(search.storyboards),
+)
+check(
+  'search_project exposes storyboard table resolved asset usage',
+  search.storyboardTable?.some((item: { scene: { sceneName: string; resolvedCastAssets?: Array<{ name: string; assetId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }>; segments?: Array<{ rows?: Array<{ resolvedAssetRefs?: Array<{ name: string; assetId?: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }> }> }> } }) =>
+    item.scene.sceneName === 'Hidden clue scene' &&
+    item.scene.resolvedCastAssets?.some(
+      (asset) =>
+        asset.name === '主角' &&
+        asset.assetId === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
+    ) &&
+    item.scene.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some(
+      (asset) =>
+        asset.name === '主角' &&
+        asset.assetId === 'hero' &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(search.storyboardTable),
+)
 
 const episodeSearch = JSON.parse(await searchProject.execute({ query: 'Second', domains: ['episodes'], limit: 10 }))
 check(
