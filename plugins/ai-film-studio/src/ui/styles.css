@@ -3762,12 +3762,45 @@ select.afs-toolbar__select,
   flex: 0 0 auto;
   color: var(--afs-accent);
 }
-.afs-series__episode-head span {
+.afs-series__episode-title {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
+}
+.afs-series__episode-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 48%;
+}
+.afs-series__episode-summary i {
+  min-height: 20px;
+  max-width: 72px;
+  padding: 2px 5px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-series__episode-summary i.is-ready {
+  border-color: color-mix(in srgb, var(--afs-success) 42%, var(--afs-border));
+  color: var(--afs-success);
+}
+.afs-series__episode-summary i.is-warning {
+  border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border));
+  background: color-mix(in srgb, var(--afs-warning) 10%, var(--afs-panel));
+  color: var(--afs-warning);
 }
 .afs-series__requirements {
   display: flex;
