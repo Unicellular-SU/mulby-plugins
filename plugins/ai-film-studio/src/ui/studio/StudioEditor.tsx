@@ -1886,6 +1886,30 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
   )
 }
 
+function continuityIssueVariantKindChips(issue: ContinuityReportView['issues'][number]): string[] {
+  const chips: string[] = []
+  const seen = new Set<string>()
+  const push = (text: string) => {
+    if (!text || seen.has(text)) return
+    seen.add(text)
+    chips.push(text)
+  }
+  const pushKind = (prefix: string, kind: typeof issue.variantKind) => {
+    const label = variantKindLabel(kind)
+    if (label) push(`${prefix}：${label}`)
+  }
+
+  pushKind('形态', issue.variantKind)
+  const candidateKinds = [...new Set(issue.candidateVariantKinds ?? [])]
+    .map((kind) => variantKindLabel(kind))
+    .filter(Boolean)
+  if (candidateKinds.length === 1) push(`候选：${candidateKinds[0]}`)
+  else if (candidateKinds.length > 1) push(`候选：${candidateKinds.join('、')}`)
+  pushKind('上一形态', issue.previousVariantKind)
+
+  return chips
+}
+
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
@@ -2285,6 +2309,7 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     <div className="afs-studio__continuityissues">
       {items.map((issue, index) => {
         const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
+        const variantKindChips = continuityIssueVariantKindChips(issue)
         const issueStoryboard = findIssueStoryboard(issue)
         const variantScopeNeedsStoryboard = issue.scopeKind === 'scene' || issue.scopeKind === 'storyboard'
         const canAddVariantScope =
@@ -2354,6 +2379,11 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
               <code>{issue.code}</code>
             </div>
             <p>{issue.message}</p>
+            {variantKindChips.length > 0 && (
+              <div className="afs-studio__continuitymeta" aria-label="形态类型">
+                {variantKindChips.map((chip) => <span key={chip}>{chip}</span>)}
+              </div>
+            )}
             {loc && <small>{loc}</small>}
             {canMergeDuplicateLibraryAsset && renderMergePreview(issue)}
             {canAddVariantScope && (

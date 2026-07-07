@@ -82,6 +82,7 @@ export interface EpisodeDeliveryAssetReference {
   assetType: string
   variantId?: string
   variantLabel?: string
+  variantKind?: ContinuityIssue['variantKind']
   label: string
   refImageId?: string
   appliesToEpisode: boolean
@@ -309,6 +310,7 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
         assetType: use.assetType,
         variantId: use.variantId,
         variantLabel: use.variantLabel,
+        variantKind: use.variantKind,
         label: use.label,
         refImageId: use.refImageId,
         appliesToEpisode: use.appliesToEpisode,

@@ -3916,6 +3916,8 @@ select.afs-toolbar__select,
 .afs-studio__continuityissue-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 11px; color: var(--afs-text-dim); }
 .afs-studio__continuityissue-top code { padding: 1px 5px; border-radius: 4px; background: var(--afs-panel-2); color: var(--afs-muted); font-size: 10px; }
 .afs-studio__continuityissue p { margin: 0; color: var(--afs-text); font-size: 12px; line-height: 1.45; }
+.afs-studio__continuitymeta { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.afs-studio__continuitymeta span { max-width: 160px; min-height: 20px; padding: 2px 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__continuityissue small { display: block; margin-top: 5px; color: var(--afs-text-dim); font-size: 11px; line-height: 1.35; }
 .afs-studio__mergepreview { margin-top: 7px; padding-top: 7px; border-top: 1px solid var(--afs-border); display: flex; flex-direction: column; gap: 6px; }
 .afs-studio__mergepreview-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; color: var(--afs-text-dim); font-size: 11px; }
