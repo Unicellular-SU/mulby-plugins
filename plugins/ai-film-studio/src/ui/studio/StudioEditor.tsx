@@ -774,7 +774,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'missingRef' | 'library' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'missingRef' | 'missingVariantRef' | 'library' | 'unlinked'
 type AssetMatrixTypeFilter = 'all' | 'role' | 'scene' | 'prop'
 const ASSET_MATRIX_LINK_ATTENTION_LABELS = new Set(['有新版', '已归档', '已分叉', '旧链接'])
 
@@ -1566,6 +1566,7 @@ function AssetContinuityPanel() {
   const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
   const generateAsset = useProjectStore((s) => s.generateAsset)
+  const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
@@ -1612,6 +1613,18 @@ function AssetContinuityPanel() {
         const variant = variantById.get(variantId)
         return { episodeId: episode.id, label: variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind) }
       })
+      const missingVariantRefEntries = [
+        ...plannedVariantUses.map(({ episode, variantId }) => {
+          const variant = variantById.get(variantId)
+          const variantLabel = variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)
+          return { episodeId: episode.id, variantId, label: `E${episode.index + 1}/${variantLabel}`, variantLabel, state: variant?.state, refImageId: variant?.refImageId }
+        }),
+        ...actualVariantUses.map(({ episode, use, variantId }) => {
+          const variant = variantById.get(variantId)
+          const variantLabel = use.variantLabel ?? variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)
+          return { episodeId: episode.id, variantId, label: `E${episode.index + 1}/${variantLabel}`, variantLabel, state: variant?.state, refImageId: variant?.refImageId }
+        }),
+      ].filter((entry) => !entry.refImageId)
       const plannedVariantUnusedEntries = plannedVariantUses
         .filter(({ episode, variantId }) => !actualVariantUseKeys.has(`${episode.id}:${variantId}`))
         .map(({ episode, variantId }) => {
@@ -1634,7 +1647,7 @@ function AssetContinuityPanel() {
       const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
       const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
       const linkStatusLabels = projectAssetLinkStatusLabels(asset, linkedEntity)
-      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeEntries, planEpisodeEntries, variantEntries, planVariantEntries, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedEntries, unplannedUseEntries, plannedVariantUnusedEntries, unplannedVariantUseEntries, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkedEntity, linkStatusLabels, issues }
+      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeEntries, planEpisodeEntries, variantEntries, planVariantEntries, missingVariantRefEntries, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedEntries, unplannedUseEntries, plannedVariantUnusedEntries, unplannedVariantUseEntries, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkedEntity, linkStatusLabels, issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   const labelsForEpisodeFilter = (entries: { episodeId: string; label: string }[], episodeFilter = assetMatrixEpisodeFilter) =>
@@ -1647,6 +1660,10 @@ function AssetContinuityPanel() {
   const rowVisibleUnplannedUseLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.unplannedUseEntries, episodeFilter)
   const rowVisiblePlannedVariantUnusedLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.plannedVariantUnusedEntries, episodeFilter)
   const rowVisibleUnplannedVariantUseLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.unplannedVariantUseEntries, episodeFilter)
+  const rowVisibleMissingVariantRefs = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => {
+    const entries = episodeFilter === 'all' ? row.missingVariantRefEntries : row.missingVariantRefEntries.filter((entry) => entry.episodeId === episodeFilter)
+    return [...new Map(entries.map((entry) => [`${entry.episodeId}:${entry.variantId}`, entry])).values()]
+  }
   const rowHasPlanDrift = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
     rowVisiblePlannedUnusedLabels(row, episodeFilter).length > 0 ||
     rowVisibleUnplannedUseLabels(row, episodeFilter).length > 0 ||
@@ -1671,8 +1688,9 @@ function AssetContinuityPanel() {
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowNeedsMainReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
     !row.asset.refImageId && (rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0 || rowVisibleEpisodeLabels(row, episodeFilter).length > 0)
+  const rowNeedsVariantReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleMissingVariantRefs(row, episodeFilter).length > 0
   const rowHasLibraryStatusAttention = (row: (typeof rows)[number]) => row.linkStatusLabels.some((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label))
-  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowNeedsMainReference(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
+  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowNeedsMainReference(row) || rowNeedsVariantReference(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
   const rowMatchesEpisode = (row: (typeof rows)[number], episodeId: string) =>
     row.episodeIds.includes(episodeId) ||
     row.planEpisodeIds.includes(episodeId) ||
@@ -1686,11 +1704,12 @@ function AssetContinuityPanel() {
     if (rowHasVisibleIssue(row)) return 0
     if (rowHasPlanDrift(row)) return 1
     if (rowNeedsMainReference(row)) return 2
-    if (rowHasLibraryStatusAttention(row)) return 3
-    if (rowMissingAssetCenter(row)) return 4
-    if (rowVisiblePlanEpisodeLabels(row).length > 0) return 5
-    if (rowVisibleEpisodeLabels(row).length > 0) return 6
-    return 7
+    if (rowNeedsVariantReference(row)) return 3
+    if (rowHasLibraryStatusAttention(row)) return 4
+    if (rowMissingAssetCenter(row)) return 5
+    if (rowVisiblePlanEpisodeLabels(row).length > 0) return 6
+    if (rowVisibleEpisodeLabels(row).length > 0) return 7
+    return 8
   }
   if (!rows.length) return null
   const sortedRows = [...rows].sort((a, b) =>
@@ -1717,6 +1736,7 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row, episodeFilter)
     if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row, episodeFilter)
     if (assetMatrixFilter === 'missingRef') return rowNeedsMainReference(row, episodeFilter)
+    if (assetMatrixFilter === 'missingVariantRef') return rowNeedsVariantReference(row, episodeFilter)
     if (assetMatrixFilter === 'library') return rowHasLibraryStatusAttention(row)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
@@ -1734,6 +1754,7 @@ function AssetContinuityPanel() {
   const planDriftCount = typeFilteredRows.filter((row) => rowHasPlanDrift(row)).length
   const issueAssetCount = typeFilteredRows.filter((row) => rowHasVisibleIssue(row)).length
   const missingMainReferenceCount = typeFilteredRows.filter((row) => rowNeedsMainReference(row)).length
+  const missingVariantReferenceCount = typeFilteredRows.filter((row) => rowNeedsVariantReference(row)).length
   const libraryStatusCount = typeFilteredRows.filter((row) => rowHasLibraryStatusAttention(row)).length
   const filteredRows = typeFilteredRows.filter((row) => rowMatchesAssetMatrixFilter(row))
   const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
@@ -1774,6 +1795,7 @@ function AssetContinuityPanel() {
       options: [
         { id: 'issue', label: '连续性问题', count: issueAssetCount },
         { id: 'missingRef', label: '缺主图', count: missingMainReferenceCount },
+        { id: 'missingVariantRef', label: '缺形态图', count: missingVariantReferenceCount },
         { id: 'library', label: '身份状态', count: libraryStatusCount },
       ],
     },
@@ -1817,6 +1839,11 @@ function AssetContinuityPanel() {
     if (row.asset.refImageId || row.asset.state === 'generating') return
     void generateAsset(row.asset.id)
   }
+  const generateAssetMatrixVariantReference = (row: (typeof rows)[number], variantId: string) => {
+    const variant = row.asset.variants?.find((item) => item.id === variantId)
+    if (!row.asset.refImageId || !variant || variant.refImageId || variant.state === 'generating') return
+    void generateAssetVariant(row.asset.id, variant.id)
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1832,6 +1859,7 @@ function AssetContinuityPanel() {
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {missingMainReferenceCount > 0 && <span className="is-warning">{missingMainReferenceCount} 个缺主图</span>}
+        {missingVariantReferenceCount > 0 && <span className="is-warning">{missingVariantReferenceCount} 个缺形态图</span>}
         {libraryStatusCount > 0 && <span className="is-warning">{libraryStatusCount} 个身份状态待确认</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
@@ -1921,6 +1949,10 @@ function AssetContinuityPanel() {
           const visibleUnplannedUseLabels = rowVisibleUnplannedUseLabels(row)
           const visiblePlannedVariantUnusedLabels = rowVisiblePlannedVariantUnusedLabels(row)
           const visibleUnplannedVariantUseLabels = rowVisibleUnplannedVariantUseLabels(row)
+          const visibleMissingVariantRefs = rowVisibleMissingVariantRefs(row)
+          const visibleMissingVariantRefLabels = visibleMissingVariantRefs.map((entry) => entry.label)
+          const firstGeneratableMissingVariantRef = visibleMissingVariantRefs.find((entry) => entry.state !== 'generating' && !!row.asset.refImageId)
+          const generatingVariantRefCount = visibleMissingVariantRefs.filter((entry) => entry.state === 'generating').length
           const visibleIssues = rowVisibleIssues(row)
           return (
             <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
@@ -1997,6 +2029,11 @@ function AssetContinuityPanel() {
                     缺主图
                   </i>
                 )}
+                {visibleMissingVariantRefLabels.length > 0 && generatingVariantRefCount < visibleMissingVariantRefLabels.length && (
+                  <i className="afs-studio__assetmatrix-drift" title={`缺少形态参考图：${visibleMissingVariantRefLabels.join('、')}`}>
+                    缺形态图 {visibleMissingVariantRefLabels.length}
+                  </i>
+                )}
                 {rowHasLibraryStatusAttention(row) && (
                   <i className="afs-studio__assetmatrix-drift" title={`身份状态：${row.linkStatusLabels.join('、')}`}>
                     身份状态 {row.linkStatusLabels.filter((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label)).length}
@@ -2037,8 +2074,23 @@ function AssetContinuityPanel() {
                     生成中
                   </i>
                 )}
+                {firstGeneratableMissingVariantRef && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`生成形态参考图：${row.asset.name} / ${firstGeneratableMissingVariantRef.variantLabel}`}
+                    onClick={() => generateAssetMatrixVariantReference(row, firstGeneratableMissingVariantRef.variantId)}
+                  >
+                    生成形态
+                  </button>
+                )}
+                {generatingVariantRefCount > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 有 ${generatingVariantRefCount} 个形态参考图生成中`}>
+                    形态生成中 {generatingVariantRefCount}
+                  </i>
+                )}
                 {!rowHasStatusWarning(row) && (
-                  <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题、主参考图缺口或资产中心图谱警告`}>
+                  <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题、参考图缺口或资产中心图谱警告`}>
                     正常
                   </i>
                 )}
