@@ -1175,6 +1175,24 @@ check(
   JSON.stringify(clipResult),
 )
 
+const invalidKeyframeIndex = JSON.parse(await generateKeyframe.execute({ episodeTitle: 'Second', index: 99 }))
+check(
+  'storyboard index errors expose candidate storyboard asset usage',
+  !!invalidKeyframeIndex.error &&
+    invalidKeyframeIndex.storyboards?.some(
+      (storyboard: { id: string; castAssets?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+        storyboard.id === keyframeResult.storyboard?.id &&
+        storyboard.castAssets?.some(
+          (asset) =>
+            asset.assetId === 'hero' &&
+            asset.variantId === 'cloak' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+        ),
+    ),
+  JSON.stringify(invalidKeyframeIndex),
+)
+
 const missingGeneratedVariant = JSON.parse(await generateAssetVariant.execute({ assetName: 'Hero', variantLabel: 'Missing Look' }))
 check(
   'generate_asset_variant errors expose variant candidate usage',

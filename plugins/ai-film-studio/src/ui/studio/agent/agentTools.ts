@@ -830,8 +830,14 @@ function scopedVariantViews(doc: ProjectDoc | null | undefined, refs: Storyboard
     .filter((item): item is NonNullable<ReturnType<typeof variantView>> => !!item)
 }
 
-function storyboardIndexOptions(storyboards: Storyboard[]) {
-  return [...storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) }))
+function storyboardCandidateList(doc: ProjectDoc, storyboards: Storyboard[] = doc.storyboards, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return [...storyboards]
+    .sort((x, y) => x.index - y.index)
+    .map((storyboard) => storyboardView(doc, storyboard, { includePrompt: false, includeDialogues: false, includeAssets: true, usageByEntity }))
+}
+
+async function storyboardCandidateListWithUsage(doc: ProjectDoc, storyboards: Storyboard[] = doc.storyboards) {
+  return storyboardCandidateList(doc, storyboards, await loadIdentityUsageSafe())
 }
 
 function resolveStoryboard(doc: ProjectDoc, args: Record<string, unknown>): Storyboard | undefined {
@@ -2297,7 +2303,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = target.doc
         if (!d) return '无项目'
         const storyboard = resolveStoryboard(d, a)
-        if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: await storyboardCandidateListWithUsage(d) })
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
@@ -2348,7 +2354,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = target.doc
         if (!d) return '无项目'
         const storyboard = resolveStoryboard(d, a)
-        if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: await storyboardCandidateListWithUsage(d) })
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variantToken = a.variantId ?? a.variantLabel ?? a.label
@@ -2404,7 +2410,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const targets = sceneId
           ? d.storyboards.filter((storyboard) => storyboard.sceneId?.trim() === sceneId)
           : [resolveStoryboard(d, a)].filter((storyboard): storyboard is Storyboard => !!storyboard)
-        if (!targets.length) return json({ error: sceneId ? `未找到场景组：${sceneId}` : '未找到分镜' })
+        if (!targets.length) return json({ error: sceneId ? `未找到场景组：${sceneId}` : '未找到分镜', storyboards: await storyboardCandidateListWithUsage(d) })
         const updatedIds: string[] = []
         for (const storyboard of targets) {
           const patch = storyboardWithSceneAsset(d, storyboard, asset.id, replaceOtherSceneAssets)
@@ -2542,7 +2548,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
         const index = oneBasedIndex(a.index, storyboards.length)
         const sb = index === undefined ? undefined : storyboards[index]
-        if (!sb) return json({ error: '分镜序号越界', storyboards: storyboardIndexOptions(d.storyboards) })
+        if (!sb) return json({ error: '分镜序号越界', storyboards: await storyboardCandidateListWithUsage(d) })
         await get().generateKeyframe(sb.id)
         const next = doc()
         const updated = next?.storyboards.find((storyboard) => storyboard.id === sb.id)
@@ -2566,7 +2572,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
         const index = oneBasedIndex(a.index, storyboards.length)
         const sb = index === undefined ? undefined : storyboards[index]
-        if (!sb) return json({ error: '分镜序号越界', storyboards: storyboardIndexOptions(d.storyboards) })
+        if (!sb) return json({ error: '分镜序号越界', storyboards: await storyboardCandidateListWithUsage(d) })
         await get().generateClip(sb.id)
         const next = doc()
         const updated = next?.storyboards.find((storyboard) => storyboard.id === sb.id)
