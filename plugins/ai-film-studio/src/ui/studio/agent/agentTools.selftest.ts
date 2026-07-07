@@ -749,6 +749,7 @@ writableDoc.assets = [
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
   { id: 'lobby', type: 'scene', name: 'Lobby', state: 'done' },
   { id: 'lantern', type: 'prop', name: 'Lantern', state: 'done' },
+  { id: 'no-ref-linked', type: 'role', name: 'No Ref Linked Hero', state: 'done', libraryLink: { entityId: 'el-no-ref', entityVersion: 1, syncPolicy: 'snapshot' } },
   { id: 'sync-target', type: 'role', name: 'Local Hero', refImageId: 'local-hero-img', state: 'done', variants: [{ id: 'local-gala', label: 'Library Gala', appliesToEpisodeIds: ['ep1'] }] },
   { id: 'publish-blocked', type: 'role', name: 'Archived Linked Hero', refImageId: 'archived-linked-img', state: 'done', libraryLink: { entityId: 'el-archived', syncPolicy: 'snapshot' } },
   { id: 'hero-duplicate', type: 'role', name: 'Hero Double', aliases: ['影子主角'], state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' }, variants: [{ id: 'alt-gala', label: 'Gala' }] },
@@ -983,6 +984,27 @@ check(
     writableDoc.assets.find((item) => item.id === 'hero')?.aliases?.includes('队长') === true,
   JSON.stringify(updatedAsset),
 )
+check(
+  'update_asset returns asset-center usage',
+  updatedAsset.asset?.libraryEntityId === 'el-hero' &&
+    updatedAsset.asset?.libraryEntityVersion === 1 &&
+    updatedAsset.asset?.librarySyncPolicy === 'snapshot' &&
+    updatedAsset.asset?.assetCenterUsage?.entityId === 'el-hero' &&
+    updatedAsset.asset?.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+    updatedAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.some((label: string) => label.includes('Cloak')),
+  JSON.stringify(updatedAsset.asset),
+)
+
+const missingRefPublish = JSON.parse(await publishProjectAsset.execute({ assetId: 'no-ref-linked' }))
+check(
+  'publish_project_asset_to_library missing-ref error returns asset usage',
+  !!missingRefPublish.error &&
+    missingRefPublish.asset?.id === 'no-ref-linked' &&
+    missingRefPublish.asset?.libraryEntityId === 'el-no-ref' &&
+    missingRefPublish.asset?.librarySyncPolicy === 'snapshot' &&
+    missingRefPublish.asset?.assetCenterUsage?.entityId === 'el-no-ref',
+  JSON.stringify(missingRefPublish),
+)
 
 const linkedLibraryAsset = JSON.parse(await linkLibraryEntity.execute({ assetName: 'Hero', libraryEntityId: 'el-hero', entityVersion: 2 }))
 check(
@@ -1200,6 +1222,17 @@ check(
     !scopedHeroVariant?.appliesToEpisodeIds?.includes('ep1') &&
     scopedHeroVariant?.appliesToSceneIds?.includes('banquet') === true,
   JSON.stringify(removeScopeResult),
+)
+
+const invalidAssetRefVariant = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Missing Look' }))
+check(
+  'set_storyboard_asset_ref invalid variant returns asset lineage',
+  !!invalidAssetRefVariant.error &&
+    invalidAssetRefVariant.asset?.id === 'hero' &&
+    invalidAssetRefVariant.asset?.libraryEntityId === 'el-hero' &&
+    invalidAssetRefVariant.asset?.librarySyncPolicy === 'forked' &&
+    !invalidAssetRefVariant.asset?.assetCenterUsage,
+  JSON.stringify(invalidAssetRefVariant),
 )
 
 const assetRefResult = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Lantern', roleInShot: 'supporting' }))

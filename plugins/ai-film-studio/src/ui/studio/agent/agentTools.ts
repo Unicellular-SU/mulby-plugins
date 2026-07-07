@@ -273,6 +273,15 @@ function assetView(a: Asset, opts?: { doc?: ProjectDoc; includePrompt?: boolean;
   }
 }
 
+async function assetViewWithUsage(doc: ProjectDoc, asset: Asset, opts?: { includePrompt?: boolean; includeImages?: boolean }) {
+  return assetView(asset, {
+    doc,
+    includePrompt: opts?.includePrompt,
+    includeImages: opts?.includeImages,
+    usageByEntity: await loadIdentityUsageSafe(),
+  })
+}
+
 function variantOptions(doc: ProjectDoc, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return doc.assets
     .filter(isCastableAsset)
@@ -1873,8 +1882,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().upsertAsset(patch)
         const next = doc()
         const updated = next?.assets.find((item) => item.id === asset.id) ?? { ...asset, ...patch }
+        const nextDoc = next ?? d
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
-          asset: assetView(updated, { includeImages: false }),
+          asset: assetView(updated, { doc: nextDoc, includeImages: false, usageByEntity }),
           conflicts: next ? assetLookupConflicts(next, updated) : [],
         })
       },
@@ -1904,7 +1915,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!resolved.entity) {
           return json({
             error: resolved.error ?? '未找到身份资产',
-            asset: assetView(asset, { includeImages: false }),
+            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
             candidates: resolved.candidates?.map(libraryEntityView),
           })
         }
@@ -1951,7 +1962,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!resolved.ids.length) {
           return json({
             error: resolved.error ?? '缺少要标记的身份资产 ID',
-            asset: assetView(asset, { includeImages: false }),
+            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
             candidates: resolved.candidates?.map(libraryEntityView),
           })
         }
@@ -1982,7 +1993,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
-        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: assetView(asset, { includeImages: false }) })
+        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const published = await get().promoteAssetToElement(asset.id)
         const nextDoc = get().doc ?? d
         const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
@@ -2021,7 +2032,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!resolved.entity?.name) {
           return json({
             error: resolved.error ?? '需要可读取的资产中心身份快照才能同步',
-            asset: assetView(asset, { includeImages: false }),
+            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
             candidates: resolved.candidates?.map(libraryEntityView),
           })
         }
@@ -2069,8 +2080,15 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
             assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type, libraryLink: item.libraryLink })),
           })
         }
-        if (source.id === target.id) return json({ error: '源资产和目标资产不能相同', asset: assetView(source, { includeImages: false }) })
-        if (source.type !== target.type) return json({ error: '只能合并同类型项目资产', source: assetView(source, { includeImages: false }), target: assetView(target, { includeImages: false }) })
+        if (source.id === target.id) return json({ error: '源资产和目标资产不能相同', asset: await assetViewWithUsage(d, source, { includeImages: false }) })
+        if (source.type !== target.type) {
+          const usageByEntity = await loadIdentityUsageSafe()
+          return json({
+            error: '只能合并同类型项目资产',
+            source: assetView(source, { doc: d, includeImages: false, usageByEntity }),
+            target: assetView(target, { doc: d, includeImages: false, usageByEntity }),
+          })
+        }
         const merged = get().mergeProjectAssetInto(source.id, target.id)
         const next = doc()
         const nextTarget = next?.assets.find((item) => item.id === target.id)
@@ -2168,7 +2186,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (!variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const scopeKind = inferVariantScopeKind(a)
         if (!scopeKind) return json({ error: '未指定适用范围层级', expected: ['episode', 'scene', 'storyboard'] })
         const scopeId = resolveVariantScopeId(d, a, scopeKind)
@@ -2206,7 +2224,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产' })
-        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能生成变体', asset: assetView(asset, { includeImages: false }) })
+        if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能生成变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (!variant) return json({ error: '未找到变体', variants: asset.variants ?? [] })
         await get().generateAssetVariant(asset.id, variant.id)
@@ -2248,7 +2266,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
         const scopeKind = variantScopeKind(a.scopeKind)
         if (variant && (a.ensureScope === true || scopeKind)) {
@@ -2300,7 +2318,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         const variantToken = a.variantId ?? a.variantLabel ?? a.label
         const variant = variantToken ? findAssetVariant(asset, variantToken) : undefined
-        if (variantToken && !variant) return json({ error: '未找到变体', asset: assetView(asset, { includeImages: false }) })
+        if (variantToken && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const patch = storyboardWithAssetRef(storyboard, asset.id, {
           remove: a.remove === true,
           variantId: variant?.id,
@@ -2314,7 +2332,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
-          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : assetView(asset, { includeImages: false }),
+          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : await assetViewWithUsage(d, asset, { includeImages: false }),
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
@@ -2364,7 +2382,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
-          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : assetView(asset, { includeImages: false }),
+          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : await assetViewWithUsage(d, asset, { includeImages: false }),
           storyboards: next ? updated.map((storyboard) => storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity })) : undefined,
         })
       },
