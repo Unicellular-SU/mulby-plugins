@@ -4155,12 +4155,17 @@ select.afs-toolbar__select,
 .afs-studio__derivthumb img { width: 100%; height: 100%; object-fit: cover; }
 .afs-studio__derivname, .afs-studio__derivdesc { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 5px; font-size: 11px; }
 .afs-studio__variantkind { width: 100%; justify-content: space-between; }
+.afs-studio__variantplan,
 .afs-studio__variantepisodes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .afs-studio__variantlabel { font-size: 10px; line-height: 1; color: var(--afs-text-dim); }
 .afs-studio__variantchips { display: flex; flex-wrap: wrap; gap: 4px; }
 .afs-studio__variantchip { height: 22px; min-width: 34px; padding: 0 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; cursor: pointer; }
 .afs-studio__variantchip:hover { border-color: var(--afs-accent); color: var(--afs-text); }
 .afs-studio__variantchip.is-on { background: color-mix(in srgb, var(--afs-accent) 18%, var(--afs-panel-2)); border-color: var(--afs-accent); color: var(--afs-text); }
+.afs-studio__variantchip--action { max-width: 78px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio__variantchip--action:disabled { opacity: .45; cursor: default; }
+.afs-studio__variantchip--action:disabled:hover { border-color: var(--afs-border); color: var(--afs-text-dim); }
+.afs-studio__variantchips i { display: inline-flex; align-items: center; justify-content: center; height: 22px; min-width: 28px; padding: 0 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; font-style: normal; line-height: 1; }
 .afs-studio__derivactions { display: flex; gap: 4px; }
 .afs-studio__derivadd { align-self: center; height: fit-content; }
 .afs-studio__trackprompt { display: flex; gap: 8px; margin-top: 8px; align-items: flex-end; }

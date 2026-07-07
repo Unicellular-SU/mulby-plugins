@@ -1850,6 +1850,14 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
   const url = useMediaUrl(variant.refImageId ? { assetId: variant.refImageId } : null)
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const selectedEpisodeIds = new Set(variant.appliesToEpisodeIds ?? [])
+  const plannedEpisodes = episodes.filter((episode) => (episode.plan?.requiredVariantIds ?? []).includes(variant.id))
+  const plannedEpisodeIds = plannedEpisodes.map((episode) => episode.id)
+  const plannedEpisodeLabels = plannedEpisodes.map((episode) => `E${episode.index + 1}`)
+  const scopeMatchesPlan = plannedEpisodeIds.length > 0 && (
+    selectedEpisodeIds.size === 0
+      ? plannedEpisodeIds.length === episodes.length
+      : selectedEpisodeIds.size === plannedEpisodeIds.length && plannedEpisodeIds.every((id) => selectedEpisodeIds.has(id))
+  )
   const setEpisodeScope = (ids: string[]) => updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: ids.length ? ids : undefined })
   const toggleEpisodeScope = (episodeId: string) => {
     const next = new Set(selectedEpisodeIds)
@@ -1890,6 +1898,26 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
         value={variant.prompt ?? ''}
         onChange={(e) => updateAssetVariant(asset.id, variant.id, { prompt: e.target.value })}
       />
+      {episodes.length > 1 && (
+        <div className="afs-studio__variantplan" title={plannedEpisodeLabels.length ? `剧集计划要求：${plannedEpisodeLabels.join('、')}` : '还没有剧集计划要求该形态'}>
+          <span className="afs-studio__variantlabel">计划</span>
+          <div className="afs-studio__variantchips">
+            {plannedEpisodeLabels.length ? plannedEpisodeLabels.slice(0, 5).map((label) => <i key={label}>{label}</i>) : <i>未纳入</i>}
+            {plannedEpisodeLabels.length > 5 && <i>+{plannedEpisodeLabels.length - 5}</i>}
+            {plannedEpisodeIds.length > 0 && (
+              <button
+                type="button"
+                className="afs-studio__variantchip afs-studio__variantchip--action"
+                disabled={scopeMatchesPlan}
+                title={scopeMatchesPlan ? '当前适用范围已覆盖计划剧集' : '将适用剧集同步为剧集计划中要求该形态的集数'}
+                onClick={() => setEpisodeScope(plannedEpisodeIds)}
+              >
+                按计划适用
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {episodes.length > 1 && (
         <div className="afs-studio__variantepisodes" aria-label="适用剧集">
           <span className="afs-studio__variantlabel">适用</span>
