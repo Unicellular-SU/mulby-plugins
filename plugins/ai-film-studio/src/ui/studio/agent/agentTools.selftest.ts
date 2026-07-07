@@ -1045,6 +1045,24 @@ check(
     ),
   JSON.stringify(updatedEpisodePlan),
 )
+check(
+  'upsert_episode_plan returns episode plan usage',
+  updatedEpisodePlan.episode?.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    updatedEpisodePlan.episode?.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(updatedEpisodePlan.episode),
+)
 
 const skippedEpisodePlan = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: true }))
 check(
