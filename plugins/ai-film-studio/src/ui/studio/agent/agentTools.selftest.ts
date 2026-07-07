@@ -1223,6 +1223,25 @@ check(
   ),
   JSON.stringify(addedStoryboard.storyboard?.castAssets),
 )
+const castVariantPlanResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
+check(
+  'set_storyboard_cast_variant returns episode plan usage before asset fork',
+  castVariantPlanResult.episode?.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    castVariantPlanResult.episode?.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(castVariantPlanResult.episode),
+)
 check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
 
 const scopedAddedStoryboard = JSON.parse(
@@ -1673,6 +1692,12 @@ check(
     variantResult.variant?.variantId === 'gala',
   JSON.stringify(variantResult.variant),
 )
+check(
+  'set_storyboard_cast_variant returns episode plan context after asset fork',
+  variantResult.episode?.plan?.requiredAssets?.some((asset: { id: string; librarySyncPolicy?: string; assetCenterUsage?: unknown }) => asset.id === 'hero' && asset.librarySyncPolicy === 'forked' && !asset.assetCenterUsage) &&
+    variantResult.episode?.plan?.requiredVariants?.some((variant: { id: string; librarySyncPolicy?: string; assetCenterUsage?: unknown }) => variant.id === 'gala' && variant.librarySyncPolicy === 'forked' && !variant.assetCenterUsage),
+  JSON.stringify(variantResult.episode),
+)
 
 const scopedVariantStoryboard = writableDoc.storyboards.find((item) => item.id === variantResult.storyboard?.id)
 if (scopedVariantStoryboard) scopedVariantStoryboard.sceneId = 'banquet'
@@ -1724,6 +1749,12 @@ check(
     assetRefResult.storyboard?.castAssetIds?.includes('lantern'),
   JSON.stringify(assetRefResult),
 )
+check(
+  'set_storyboard_asset_ref returns episode plan context',
+  assetRefResult.episode?.plan?.requiredAssets?.some((asset: { id: string; librarySyncPolicy?: string }) => asset.id === 'hero' && asset.librarySyncPolicy === 'forked') &&
+    assetRefResult.episode?.plan?.requiredVariantIds?.includes('gala'),
+  JSON.stringify(assetRefResult.episode),
+)
 
 writableDoc.storyboards.push({ ...storyboard('scene-a', writableDoc.storyboards.length, 'Hall first shot.'), sceneId: 'hallway', associateAssetIds: ['hall'], castRefs: [{ assetId: 'hall' }] })
 writableDoc.storyboards.push({ ...storyboard('scene-b', writableDoc.storyboards.length, 'Hall second shot.'), sceneId: 'hallway', associateAssetIds: ['lobby'], castRefs: [{ assetId: 'lobby' }] })
@@ -1733,6 +1764,12 @@ check(
   sceneAssetResult.storyboards?.length === 2 &&
     sceneAssetResult.storyboards.every((item: { castRefs?: Array<{ assetId: string }> }) => item.castRefs?.some((ref) => ref.assetId === 'hall') && !item.castRefs?.some((ref) => ref.assetId === 'lobby')),
   JSON.stringify(sceneAssetResult),
+)
+check(
+  'set_storyboard_scene_asset returns episode plan context',
+  sceneAssetResult.episode?.plan?.requiredAssets?.some((asset: { id: string }) => asset.id === 'hall') &&
+    sceneAssetResult.episode?.plan?.requiredVariantIds?.includes('gala'),
+  JSON.stringify(sceneAssetResult.episode),
 )
 
 const restoredEpisode = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: false }))

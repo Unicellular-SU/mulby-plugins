@@ -2385,7 +2385,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const nextAsset = next?.assets.find((item) => item.id === asset.id)
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           variant: variant ? variantView(nextAsset ?? asset, variant.id, next ? { doc: next, usageByEntity } : undefined) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
@@ -2437,7 +2437,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : await assetViewWithUsage(d, asset, { includeImages: false }),
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
@@ -2487,7 +2487,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
-          episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
+          episode: next && target.episode ? episodeInfoWithPlan(next, target.episode, usageByEntity) : undefined,
           asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : await assetViewWithUsage(d, asset, { includeImages: false }),
           storyboards: next ? updated.map((storyboard) => storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity })) : undefined,
         })
