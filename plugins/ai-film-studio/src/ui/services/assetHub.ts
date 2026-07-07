@@ -24,6 +24,14 @@ export interface MediaRef {
   createdAt: number
 }
 
+interface MediaRefCandidate {
+  assetId?: string
+  localPath?: string
+  url?: string
+  role: MediaRefRole
+  createdAt?: number
+}
+
 export interface LibraryVariant {
   id: string
   label: string
@@ -192,13 +200,21 @@ function entityKindToAssetType(kind: LibraryEntityKind): Asset['type'] {
   return 'role'
 }
 
-function primaryRef(refs: MediaRef[] | undefined, roles: MediaRefRole[] = ['front', 'primary', 'reference', 'concept']): MediaRef | undefined {
+function preferredMediaCandidate<T extends MediaRefCandidate>(refs: T[] | undefined, roles: MediaRefRole[] = ['front', 'primary', 'reference', 'concept']): T | undefined {
   if (!refs?.length) return undefined
   for (const role of roles) {
     const ref = refs.find((item) => item.role === role && (item.assetId || item.localPath || item.url))
     if (ref) return ref
   }
   return refs.find((item) => item.assetId || item.localPath || item.url)
+}
+
+export function preferredMediaRef(refs: MediaRef[] | undefined, roles?: MediaRefRole[]): MediaRef | undefined {
+  return preferredMediaCandidate(refs, roles)
+}
+
+export function preferredMediaAssetId(refs: MediaRefCandidate[] | undefined, roles?: MediaRefRole[]): string | undefined {
+  return preferredMediaCandidate(refs, roles)?.assetId
 }
 
 function elementVariantToLibraryVariant(variant: ElementVariant): LibraryVariant {
@@ -293,7 +309,7 @@ export function libraryEntityToElement(entity: LibraryEntity): ElementRef {
 function mediaRefsToAssetImages(refs: MediaRef[] | undefined): { images?: AssetImage[]; currentImageId?: string; refImageId?: string } {
   const imageRefs = (refs ?? []).filter((ref) => !!ref.assetId)
   const images = imageRefs.map((ref): AssetImage => ({ id: newId('ai_'), refImageId: ref.assetId as string, createdAt: ref.createdAt || now(), state: 'done' }))
-  const selectedRef = primaryRef(refs)
+  const selectedRef = preferredMediaRef(refs)
   const selected = selectedRef?.assetId ? images.find((image) => image.refImageId === selectedRef.assetId) : images[0]
   return {
     images: images.length ? images : undefined,
@@ -303,7 +319,7 @@ function mediaRefsToAssetImages(refs: MediaRef[] | undefined): { images?: AssetI
 }
 
 function libraryVariantToAssetVariant(variant: LibraryVariant): AssetVariant {
-  const selected = primaryRef(variant.mediaRefs)
+  const selected = preferredMediaRef(variant.mediaRefs)
   return {
     id: variant.id,
     libraryVariantId: variant.id,
@@ -349,7 +365,7 @@ export function createProjectAssetFromEntity(entity: LibraryEntity, kind?: Asset
     state: media.refImageId ? 'done' : 'idle',
   }
   if (entity.kind === 'voice') {
-    const voice = entity.voiceRef ?? primaryRef(entity.mediaRefs, ['audio', 'primary'])
+    const voice = entity.voiceRef ?? preferredMediaRef(entity.mediaRefs, ['audio', 'primary'])
     asset.audioFilePath = voice?.localPath
     asset.audioUrl = voice?.url
     asset.state = voice?.localPath || voice?.url ? 'done' : asset.state

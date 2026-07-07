@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, projectAssetIdentityUsageFromHub, projectEpisodeUsageLabel, projectImageFlowMediaUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage, type IdentityAssetUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, preferredMediaAssetId, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, projectAssetIdentityUsageFromHub, projectEpisodeUsageLabel, projectImageFlowMediaUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage, type IdentityAssetUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -53,6 +53,15 @@ check('maps element lora to library entity', entity.lora?.ref === 'hero-base-lor
 const roundTripElement = libraryEntityToElement(entity)
 check('maps library media roles back to ElementRef', roundTripElement.mediaRefs?.some((ref) => ref.role === 'concept' && ref.assetId === 'concept-img') === true, JSON.stringify(roundTripElement.mediaRefs))
 check('maps library variant media roles back to ElementRef', roundTripElement.appearanceVariants?.[0]?.mediaRefs?.some((ref) => ref.role === 'reference' && ref.assetId === 'gala-ref') === true, JSON.stringify(roundTripElement.appearanceVariants))
+check(
+  'preferred media selection keeps production role order',
+  preferredMediaAssetId([
+    { assetId: 'newer-reference', role: 'reference', createdAt: 10 },
+    { assetId: 'primary-img', role: 'primary', createdAt: 2 },
+    { assetId: 'front-img', role: 'front', createdAt: 1 },
+  ]) === 'front-img',
+)
+check('preferred media selection falls back to concept image', preferredMediaAssetId([{ assetId: 'concept-only', role: 'concept', createdAt: 1 }]) === 'concept-only')
 
 const projectAsset = createProjectAssetFromEntity(entity)
 check('creates project asset snapshot from entity', projectAsset.type === 'role' && projectAsset.elementId === 'el_hero' && projectAsset.refImageId === 'front-img', JSON.stringify(projectAsset))

@@ -38,7 +38,7 @@ import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../service
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
-import { libraryEntityToElement, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
+import { libraryEntityToElement, preferredMediaAssetId, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -733,7 +733,7 @@ function ElementLibrary() {
               return (
                 <div key={el.id} className="afs-avcard">
                   <div className="afs-avcard__thumb" onClick={() => setEditing(el)} title="编辑">
-                    <RefThumb assetId={el.views?.front ?? el.refAssetIds?.[0]} />
+                    <RefThumb assetId={preferredMediaAssetId(el.mediaRefs) ?? el.views?.front ?? el.refAssetIds?.[0]} />
                     <span className="afs-avpill afs-avpill--type">
                       <Icon size={11} /> {KIND_LABEL[el.kind]}
                     </span>

@@ -10,6 +10,7 @@ import { Search } from 'lucide-react'
 import { AssetThumb, RefThumb } from '../components/views/AssetsView'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { useAssetHubStore } from '../store/assetHubStore'
+import { preferredMediaAssetId } from '../services/assetHub'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS, type PromptSnippet } from '../store/promptStore'
 import { insertAtFocused } from './services/focusInsert'
 import Segmented from '../components/ui/Segmented'
@@ -59,10 +60,7 @@ function AssetInsertPanel() {
     .filter((a) => !kw || `${a.name || ''} ${a.nodeKind || ''} ${a.projectName || ''}`.toLowerCase().includes(kw))
     .sort((a, b) => b.createdAt - a.createdAt)
   const filteredEntities = entities.filter((entity) => !entity.archived && (!kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw)))
-  const entityPreviewAssetId = (entity: (typeof entities)[number]) =>
-    entity.mediaRefs?.find((ref) => ref.role === 'front' && ref.assetId)?.assetId ??
-    entity.mediaRefs?.find((ref) => (ref.role === 'primary' || ref.role === 'reference') && ref.assetId)?.assetId ??
-    entity.mediaRefs?.find((ref) => !!ref.assetId)?.assetId
+  const entityPreviewAssetId = (entity: (typeof entities)[number]) => preferredMediaAssetId(entity.mediaRefs)
   const entityKindLabel = (kind: string) => (kind === 'character' ? '角色' : kind === 'prop' ? '物品' : kind === 'voice' ? '音色' : '场景')
 
   return (
