@@ -1,4 +1,4 @@
-import { applyCanvasOutputToElement, setElementPrimaryReference, type ElementRef } from './assetStore'
+import { applyCanvasOutputToElement, setElementPrimaryReference, setElementVariantPrimaryReference, type ElementRef } from './assetStore'
 
 let failures = 0
 
@@ -101,6 +101,36 @@ check(
     clearedPrimary.mediaRefs?.some((ref) => ref.role === 'primary') !== true &&
     clearedPrimary.mediaRefs?.some((ref) => ref.assetId === 'concept-img' && ref.role === 'concept') === true,
   JSON.stringify(clearedPrimary),
+)
+
+const editedVariantPrimary = setElementVariantPrimaryReference(
+  {
+    refAssetIds: ['old-gala', 'gala-ref'],
+    mediaRefs: [
+      { assetId: 'old-gala', role: 'primary', createdAt: 1 },
+      { assetId: 'gala-ref', role: 'reference', createdAt: 2 },
+      { assetId: 'gala-concept', role: 'concept', createdAt: 3 },
+    ],
+  },
+  'new-gala',
+)
+check(
+  'manual variant reference edit replaces primary media role',
+  editedVariantPrimary.refAssetIds[0] === 'new-gala' &&
+    editedVariantPrimary.mediaRefs?.some((ref) => ref.assetId === 'new-gala' && ref.role === 'primary') === true &&
+    editedVariantPrimary.mediaRefs?.some((ref) => ref.assetId === 'old-gala' && ref.role === 'primary') !== true &&
+    editedVariantPrimary.mediaRefs?.some((ref) => ref.assetId === 'gala-ref' && ref.role === 'reference') === true &&
+    editedVariantPrimary.mediaRefs?.some((ref) => ref.assetId === 'gala-concept' && ref.role === 'concept') === true,
+  JSON.stringify(editedVariantPrimary),
+)
+
+const clearedVariantPrimary = setElementVariantPrimaryReference(editedVariantPrimary, undefined)
+check(
+  'manual variant reference clear only removes primary media role',
+  clearedVariantPrimary.refAssetIds.length === 0 &&
+    clearedVariantPrimary.mediaRefs?.some((ref) => ref.role === 'primary') !== true &&
+    clearedVariantPrimary.mediaRefs?.some((ref) => ref.assetId === 'gala-ref' && ref.role === 'reference') === true,
+  JSON.stringify(clearedVariantPrimary),
 )
 
 if (failures) {

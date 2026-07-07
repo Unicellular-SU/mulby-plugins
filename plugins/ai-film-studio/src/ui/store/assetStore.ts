@@ -130,6 +130,15 @@ export function setElementPrimaryReference<T extends Partial<Pick<ElementRef, 'r
   }
 }
 
+export function setElementVariantPrimaryReference<T extends Partial<Pick<ElementVariant, 'refAssetIds' | 'mediaRefs'>>>(variant: T, assetId?: string): T {
+  const refsWithoutPrimary = (variant.mediaRefs ?? []).filter((ref) => ref.role !== 'primary')
+  return {
+    ...variant,
+    refAssetIds: assetId ? prependUnique(variant.refAssetIds, assetId) : [],
+    mediaRefs: assetId ? upsertMediaRef(refsWithoutPrimary, assetId, 'primary') : refsWithoutPrimary.length ? refsWithoutPrimary : undefined,
+  }
+}
+
 export function applyCanvasOutputToElement(el: ElementRef, assetId: string, target: CanvasOutputPromotionTarget): ElementRef {
   const next: ElementRef = { ...el, refAssetIds: [...(el.refAssetIds ?? [])], updatedAt: Date.now(), version: (el.version ?? 1) + 1 }
   if (!target.libraryVariantId) {

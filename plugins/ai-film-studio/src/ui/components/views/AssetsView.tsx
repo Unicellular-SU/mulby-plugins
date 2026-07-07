@@ -31,7 +31,7 @@ import {
   Archive,
   RotateCcw,
 } from 'lucide-react'
-import { setElementPrimaryReference, useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
+import { setElementPrimaryReference, setElementVariantPrimaryReference, useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
@@ -945,6 +945,30 @@ function ElementEditor({
                   aria-label="删除该变体"
                   onClick={() => setEditing({ ...editing, appearanceVariants: (editing.appearanceVariants || []).filter((_, j) => j !== i) })}
                 />
+                {imageAssets.length > 0 && (
+                  <div className="afs-avvariant__refs" aria-label={`${v.label || '形态变体'}主参考图`}>
+                    {imageAssets.map((a) => {
+                      const primaryAssetId = v.mediaRefs?.find((ref) => ref.role === 'primary' && ref.assetId)?.assetId ?? v.refAssetIds?.[0]
+                      const picked = primaryAssetId === a.assetId
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="afs-avreftile afs-avreftile--mini"
+                          aria-pressed={picked}
+                          onClick={() => {
+                            const vs = [...(editing.appearanceVariants || [])]
+                            vs[i] = setElementVariantPrimaryReference(vs[i], picked ? undefined : a.assetId)
+                            setEditing({ ...editing, appearanceVariants: vs })
+                          }}
+                          title={a.name || a.assetId}
+                        >
+                          <RefThumb assetId={a.assetId} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             ))}
             <Button

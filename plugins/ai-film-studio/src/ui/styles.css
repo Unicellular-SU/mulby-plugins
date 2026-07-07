@@ -6566,6 +6566,10 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   outline: 2px solid var(--afs-ring);
   outline-offset: 2px;
 }
+.afs-avreftile--mini {
+  width: 44px;
+  min-width: 44px;
+}
 
 /* ---- Element editor: appearance-variant rows (replaces inline flex) ---- */
 .afs-avvariant {
@@ -6574,6 +6578,16 @@ html.light .afs-lp-body::before { opacity: 0.55; }
   gap: var(--afs-sp-3);
   align-items: center;
   margin-bottom: var(--afs-sp-2);
+}
+.afs-avvariant__refs {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--afs-sp-2);
+  min-width: 0;
+  max-height: 54px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px;
 }
 @media (max-width: 520px) {
   .afs-avvariant { grid-template-columns: 1fr 1fr auto; }
