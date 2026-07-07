@@ -959,10 +959,34 @@ function SeriesTab() {
           </span>
           <span className="afs-series__spacer" />
           <span className="afs-series__rollup" title={seriesReadinessTitle} aria-label="整季规划摘要">
-            {missingEpisodeCount > 0 && <i className="is-warning">缺集 {missingEpisodeCount}</i>}
-            {unplannedEpisodeCount > 0 && <i>未规划 {unplannedEpisodeCount}</i>}
-            {riskyEpisodeCount > 0 && <i className="is-warning">风险 {riskyEpisodeCount}</i>}
-            {readyEpisodeCount > 0 && <i className="is-ready">就绪 {readyEpisodeCount}</i>}
+            {missingEpisodeCount > 0 && (
+              <button
+                type="button"
+                className="is-warning"
+                title="补齐缺少的剧集，并显示未规划剧集"
+                onClick={() => {
+                  setSeriesPlanFilter('unplanned')
+                  fillEpisodes()
+                }}
+              >
+                缺集 {missingEpisodeCount}
+              </button>
+            )}
+            {unplannedEpisodeCount > 0 && (
+              <button type="button" className={seriesPlanFilter === 'unplanned' ? 'is-on' : ''} onClick={() => setSeriesPlanFilter('unplanned')}>
+                未规划 {unplannedEpisodeCount}
+              </button>
+            )}
+            {riskyEpisodeCount > 0 && (
+              <button type="button" className={seriesPlanFilter === 'risk' ? 'is-warning is-on' : 'is-warning'} onClick={() => setSeriesPlanFilter('risk')}>
+                风险 {riskyEpisodeCount}
+              </button>
+            )}
+            {readyEpisodeCount > 0 && (
+              <button type="button" className={seriesPlanFilter === 'ready' ? 'is-ready is-on' : 'is-ready'} onClick={() => setSeriesPlanFilter('ready')}>
+                就绪 {readyEpisodeCount}
+              </button>
+            )}
           </span>
           <span className="afs-series__filters" aria-label="剧集规划筛选">
             {seriesFilterOptions.map((option) => (

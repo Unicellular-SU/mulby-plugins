@@ -3722,8 +3722,8 @@ select.afs-toolbar__select,
   flex: 0 1 auto;
   min-width: 0;
 }
-.afs-series__rollup i {
-  min-height: 22px;
+.afs-series__rollup button {
+  height: 22px;
   max-width: 82px;
   padding: 3px 6px;
   border: 1px solid var(--afs-border);
@@ -3731,20 +3731,27 @@ select.afs-toolbar__select,
   background: var(--afs-panel-2);
   color: var(--afs-text-dim);
   font-size: 10.5px;
-  font-style: normal;
   line-height: 1.2;
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.afs-series__rollup i.is-ready {
+.afs-series__rollup button:hover {
+  border-color: var(--afs-accent);
+  color: var(--afs-text);
+}
+.afs-series__rollup button.is-ready {
   border-color: color-mix(in srgb, var(--afs-success) 42%, var(--afs-border));
   color: var(--afs-success);
 }
-.afs-series__rollup i.is-warning {
+.afs-series__rollup button.is-warning {
   border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border));
   background: color-mix(in srgb, var(--afs-warning) 10%, var(--afs-panel));
   color: var(--afs-warning);
+}
+.afs-series__rollup button.is-on {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--afs-accent) 56%, transparent) inset;
 }
 .afs-series__filters {
   display: inline-flex;
