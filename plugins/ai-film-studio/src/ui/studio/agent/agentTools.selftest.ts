@@ -1064,6 +1064,31 @@ check(
   JSON.stringify(updatedEpisodePlan.episode),
 )
 
+const invalidVariantEpisodeScope = JSON.parse(await setVariantScope.execute({ assetName: 'Hero', variantLabel: 'Gala', scopeKind: 'episode', episodeIndex: 99 }))
+check(
+  'set_asset_variant_scope episode candidates expose plan asset usage after invalid scope',
+  !!invalidVariantEpisodeScope.error &&
+    invalidVariantEpisodeScope.episodes?.some(
+      (episode: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+        episode.id === 'ep2' &&
+        episode.plan?.requiredAssets?.some(
+          (asset) =>
+            asset.id === 'hero' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ) &&
+        episode.plan?.requiredVariants?.some(
+          (variant) =>
+            variant.id === 'gala' &&
+            variant.assetCenterUsage?.entityId === 'el-hero' &&
+            variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ),
+    ),
+  JSON.stringify(invalidVariantEpisodeScope),
+)
+
 const skippedEpisodePlan = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: true }))
 check(
   'set_episode_series_skip returns episode plan asset and variant usage',

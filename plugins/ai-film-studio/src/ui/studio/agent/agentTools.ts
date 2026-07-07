@@ -2296,7 +2296,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const scopeKind = inferVariantScopeKind(a)
         if (!scopeKind) return json({ error: '未指定适用范围层级', expected: ['episode', 'scene', 'storyboard'] })
         const scopeId = resolveVariantScopeId(d, a, scopeKind)
-        if (!scopeId) return json({ error: '未找到适用范围 ID', scopeKind, episodes: scopeKind === 'episode' ? sortedEpisodes(d).map((episode) => episodeInfo(d, episode)) : undefined })
+        if (!scopeId) return json({ error: '未找到适用范围 ID', scopeKind, episodes: scopeKind === 'episode' ? await episodeListWithUsage(d) : undefined })
         const key = variantScopeKey(scopeKind)
         const patch: Partial<AssetVariant> = { [key]: nextVariantScopeIds(variant, key, scopeId, a.remove === true) }
         get().updateAssetVariant(asset.id, variant.id, patch)
