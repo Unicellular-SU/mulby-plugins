@@ -258,11 +258,15 @@ const ep2Storyboards = JSON.parse(await getStoryboards.execute({ episodeTitle: '
 check('get_storyboards reads non-current episode by title', ep2Storyboards.storyboards?.[0]?.id === 'sb-ep2' && ep2Storyboards.episodeId === 'ep2', JSON.stringify(ep2Storyboards))
 check(
   'get_storyboards exposes cast asset-center usage',
-  ep2Storyboards.storyboards?.[0]?.castAssets?.some((item: { assetId: string; variantId?: string; variantKind?: string; label?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+  ep2Storyboards.storyboards?.[0]?.castAssets?.some((item: { assetId: string; variantId?: string; variantKind?: string; label?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
     item.assetId === 'hero' &&
     item.variantId === 'gala' &&
     item.variantKind === 'makeup' &&
     item.label === 'Hero-Gala' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 1 &&
+    item.librarySyncPolicy === 'snapshot' &&
+    item.libraryVariantId === 'lib-gala' &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
   ),
@@ -293,12 +297,16 @@ const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
 check(
   'get_timeline exposes storyboard cast asset-center usage',
-  ep2Timeline.tracks?.[0]?.storyboardCastAssets?.some((item: { storyboardId: string; castAssets?: Array<{ assetId: string; variantId?: string; variantKind?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+  ep2Timeline.tracks?.[0]?.storyboardCastAssets?.some((item: { storyboardId: string; castAssets?: Array<{ assetId: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
     item.storyboardId === 'sb-ep2' &&
     item.castAssets?.some((cast) =>
       cast.assetId === 'hero' &&
       cast.variantId === 'gala' &&
       cast.variantKind === 'makeup' &&
+      cast.libraryEntityId === 'el-hero' &&
+      cast.libraryEntityVersion === 1 &&
+      cast.librarySyncPolicy === 'snapshot' &&
+      cast.libraryVariantId === 'lib-gala' &&
       cast.assetCenterUsage?.entityId === 'el-hero' &&
       cast.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
