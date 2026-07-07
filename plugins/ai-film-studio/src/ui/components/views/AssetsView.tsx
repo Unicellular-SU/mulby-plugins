@@ -39,6 +39,7 @@ import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
 import { libraryEntityToElement, preferredMediaAssetId, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
+import { VARIANT_KIND_OPTIONS } from '../../domain/variantKinds'
 
 function fmtBytes(n?: number): string {
   if (!n) return '—'
@@ -63,17 +64,6 @@ function readFile(file: File): Promise<{ name: string; mime: string; base64: str
 
 const TYPE_ICON: Record<AssetType, typeof ImageIcon> = { image: ImageIcon, video: Video, audio: Music }
 const TYPE_LABEL: Record<AssetType, string> = { image: '图片', video: '视频', audio: '音频' }
-const VARIANT_KIND_OPTIONS = [
-  { value: '', label: '未分类' },
-  { value: 'age', label: '年龄/时期' },
-  { value: 'outfit', label: '服装' },
-  { value: 'makeup', label: '妆容' },
-  { value: 'injury', label: '伤情' },
-  { value: 'state', label: '状态' },
-  { value: 'time', label: '时段' },
-  { value: 'weather', label: '天气' },
-  { value: 'custom', label: '自定义' },
-]
 
 /** 素材缩略：图片/视频出缩略，音频出图标 */
 export function AssetThumb({ rec }: { rec: AssetRecord }) {

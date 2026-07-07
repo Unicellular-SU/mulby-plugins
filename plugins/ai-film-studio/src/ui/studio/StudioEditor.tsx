@@ -26,6 +26,7 @@ import { installFocusTracker } from './services/focusInsert'
 import { listProviderVoices } from './services/audio'
 import { loadAssetUrl } from '../services/assets'
 import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
+import { VARIANT_KIND_OPTIONS, variantKindLabel, variantLabelWithKind } from '../domain/variantKinds'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
 import { buildContinuityReport, variantScopePatchForUse } from './services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeComposeReadiness, pendingEpisodesForSeries } from './services/episodeProduction'
@@ -765,7 +766,8 @@ function SeriesTab() {
   const variantOptions = assetOptions.flatMap((asset) =>
     (asset.variants ?? []).map((variant) => ({
       id: variant.id,
-      label: `${asset.name} / ${variant.label}`,
+      label: `${asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
+      title: [variantKindLabel(variant.variantKind) ? `类型：${variantKindLabel(variant.variantKind)}` : '', variant.desc].filter(Boolean).join(' · '),
     }))
   )
   const fillEpisodes = () => {
@@ -914,13 +916,13 @@ function SeriesTab() {
                       <span>必需形态/妆容</span>
                       <div className="afs-series__checks">
                         {variantOptions.map((variant) => (
-                          <label key={variant.id} className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`}>
+                          <label key={variant.id} className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`} title={variant.title || variant.label}>
                             <input
                               type="checkbox"
                               checked={requiredVariantIds.has(variant.id)}
                               onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
                             />
-                            {variant.label}
+                            <span className="afs-series__checktext">{variant.label}</span>
                           </label>
                         ))}
                       </div>
@@ -1594,6 +1596,16 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
         )}
       </div>
       <input className="afs-studio__derivname" value={variant.label} onChange={(e) => updateAssetVariant(asset.id, variant.id, { label: e.target.value })} />
+      <Select
+        size="sm"
+        block
+        className="afs-studio__variantkind"
+        value={variant.variantKind ?? ''}
+        options={VARIANT_KIND_OPTIONS}
+        ariaLabel="形态类型"
+        title="形态类型"
+        onChange={(value) => updateAssetVariant(asset.id, variant.id, { variantKind: value ? (value as AssetVariant['variantKind']) : undefined })}
+      />
       <input
         className="afs-studio__derivdesc"
         placeholder="妆容/服装/年龄/状态"
@@ -2525,14 +2537,24 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
         .filter((variant) => variantScope(variant).current)
         .map((variant) => {
           const scope = variantScope(variant)
-          return { value: variant.id, label: `${variant.label} · ${scope.label}`, title: variant.desc ? `${scope.title} · ${variant.desc}` : scope.title }
+          const kind = variantKindLabel(variant.variantKind)
+          return {
+            value: variant.id,
+            label: `${variantLabelWithKind(variant.label, variant.variantKind)} · ${scope.label}`,
+            title: [scope.title, kind ? `类型：${kind}` : '', variant.desc].filter(Boolean).join(' · '),
+          }
         }),
     ]
     const otherOptions = (asset.variants ?? [])
       .filter((variant) => !variantScope(variant).current)
       .map((variant) => {
         const scope = variantScope(variant)
-        return { value: variant.id, label: `${variant.label} · ${scope.label}`, title: variant.desc ? `${scope.title} · ${variant.desc}` : scope.title }
+        const kind = variantKindLabel(variant.variantKind)
+        return {
+          value: variant.id,
+          label: `${variantLabelWithKind(variant.label, variant.variantKind)} · ${scope.label}`,
+          title: [scope.title, kind ? `类型：${kind}` : '', variant.desc].filter(Boolean).join(' · '),
+        }
       })
     return otherOptions.length
       ? [

@@ -3806,6 +3806,12 @@ select.afs-toolbar__select,
 .afs-series__check input {
   margin: 0;
 }
+.afs-series__checktext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* 旧的第二套 .afs-btn / --primary / --ghost / --sm 定义已删除，统一并入文件上方「按钮 Button」区块。 */
 
@@ -3950,6 +3956,7 @@ select.afs-toolbar__select,
 .afs-studio__derivthumb { position: relative; height: 60px; border-radius: 4px; overflow: hidden; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; }
 .afs-studio__derivthumb img { width: 100%; height: 100%; object-fit: cover; }
 .afs-studio__derivname, .afs-studio__derivdesc { background: var(--afs-panel-2); border: 1px solid var(--afs-border); color: var(--afs-text); border-radius: 5px; padding: 3px 5px; font-size: 11px; }
+.afs-studio__variantkind { width: 100%; justify-content: space-between; }
 .afs-studio__variantepisodes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .afs-studio__variantlabel { font-size: 10px; line-height: 1; color: var(--afs-text-dim); }
 .afs-studio__variantchips { display: flex; flex-wrap: wrap; gap: 4px; }
