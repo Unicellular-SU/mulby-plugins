@@ -777,6 +777,7 @@ function SeriesTab() {
   const variantOptions = assetOptions.flatMap((asset) =>
     (asset.asset.variants ?? []).map((variant) => ({
       id: variant.id,
+      assetId: asset.asset.id,
       label: `${asset.asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
       title: [variantKindLabel(variant.variantKind) ? `类型：${variantKindLabel(variant.variantKind)}` : '', variant.desc].filter(Boolean).join(' · '),
       hasRefImage: !!variant.refImageId,
@@ -790,6 +791,29 @@ function SeriesTab() {
     if (missing > 0) createEpisodes(missing)
   }
   const patchPlan = (episode: Episode, patch: Partial<EpisodePlan>) => updateEpisodePlan(episode.id, patch)
+  const togglePlanAsset = (episode: Episode, plan: EpisodePlan, assetId: string) => {
+    if (!(plan.requiredAssetIds ?? []).includes(assetId)) {
+      patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, assetId) })
+      return
+    }
+    const childVariantIds = new Set(variantOptions.filter((variant) => variant.assetId === assetId).map((variant) => variant.id))
+    patchPlan(episode, {
+      requiredAssetIds: (plan.requiredAssetIds ?? []).filter((id) => id !== assetId),
+      requiredVariantIds: (plan.requiredVariantIds ?? []).filter((id) => !childVariantIds.has(id)),
+    })
+  }
+  const togglePlanVariant = (episode: Episode, plan: EpisodePlan, variantId: string, assetId: string) => {
+    if ((plan.requiredVariantIds ?? []).includes(variantId)) {
+      patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variantId) })
+      return
+    }
+    patchPlan(episode, {
+      requiredVariantIds: toggleId(plan.requiredVariantIds, variantId),
+      requiredAssetIds: (plan.requiredAssetIds ?? []).includes(assetId)
+        ? plan.requiredAssetIds
+        : [...new Set([...(plan.requiredAssetIds ?? []), assetId])],
+    })
+  }
   return (
     <div className="afs-series">
       <section className="afs-series__bible">
@@ -927,7 +951,7 @@ function SeriesTab() {
                             <input
                               type="checkbox"
                               checked={requiredAssetIds.has(asset.id)}
-                              onChange={() => patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, asset.id) })}
+                              onChange={() => togglePlanAsset(episode, plan, asset.id)}
                             />
                             <span className="afs-series__checktext">{asset.name}</span>
                             {readinessWarnings.length > 0 && (
@@ -953,7 +977,9 @@ function SeriesTab() {
                       <div className="afs-series__checks">
                         {variantOptions.map((variant) => {
                           const scopedToOtherEpisodes = variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)
+                          const parentAssetMissing = requiredVariantIds.has(variant.id) && !requiredAssetIds.has(variant.assetId)
                           const readinessWarnings = [
+                            parentAssetMissing ? '未规划父资产' : '',
                             variant.hasRefImage ? '' : '缺形态图',
                             scopedToOtherEpisodes ? '未适用本集' : '',
                           ].filter(Boolean)
@@ -971,7 +997,7 @@ function SeriesTab() {
                               <input
                                 type="checkbox"
                                 checked={requiredVariantIds.has(variant.id)}
-                                onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
+                                onChange={() => togglePlanVariant(episode, plan, variant.id, variant.assetId)}
                               />
                               <span className="afs-series__checktext">{variant.label}</span>
                               {readinessWarnings.length > 0 && (
