@@ -191,6 +191,33 @@ check(
   JSON.stringify(episodeSearch.episodes),
 )
 
+const novelSearch = JSON.parse(await searchProject.execute({ query: 'hidden clue appears', domains: ['novel'], limit: 10 }))
+check(
+  'search_project exposes novel assigned episode plan usage',
+  novelSearch.novel?.some((chapter: { id: string; episodes?: Array<{ id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }> }) =>
+    chapter.id === 'ch2' &&
+    chapter.episodes?.some(
+      (episode) =>
+        episode.id === 'ep2' &&
+        episode.plan?.requiredAssets?.some(
+          (asset) =>
+            asset.id === 'hero' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ) &&
+        episode.plan?.requiredVariants?.some(
+          (variant) =>
+            variant.id === 'gala' &&
+            variant.assetCenterUsage?.entityId === 'el-hero' &&
+            variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ),
+    ),
+  ),
+  JSON.stringify(novelSearch),
+)
+
 const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角', domains: ['assets'], limit: 10 }))
 check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
 check(

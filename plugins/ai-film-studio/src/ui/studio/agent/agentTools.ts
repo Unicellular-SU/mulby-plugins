@@ -1442,7 +1442,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         const episodes = episodeList(d)
-        const usageByEntity = wants('assets') || wants('episodes') || wants('storyboards') || wants('storyboardTable') ? await loadIdentityUsageSafe() : undefined
+        const usageByEntity = wants('assets') || wants('episodes') || wants('storyboards') || wants('novel') || wants('storyboardTable') ? await loadIdentityUsageSafe() : undefined
         return json({
           query: q,
           episodes: wants('episodes')
@@ -1506,7 +1506,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             ? d.novel
                 .filter((c) => has(c.title) || has(c.event) || has(c.text))
                 .slice(0, limit)
-                .map((c) => ({ id: c.id, index: c.index + 1, title: c.title, event: c.event, snippet: snippet(c.text, q) }))
+                .map((c) => ({ id: c.id, index: c.index + 1, title: c.title, event: c.event, episodes: chapterEpisodeRefs(d, c.id, usageByEntity), snippet: snippet(c.text, q) }))
             : undefined,
           storyboardTable: wants('storyboardTable')
             ? episodes
