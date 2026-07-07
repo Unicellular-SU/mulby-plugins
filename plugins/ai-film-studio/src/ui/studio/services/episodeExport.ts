@@ -95,6 +95,12 @@ export interface EpisodeDeliveryAssetReference {
 export interface EpisodeDeliveryIssue extends ContinuityIssue {
   episodeIndex?: number
   episodeTitle?: string
+  assetName?: string
+  assetType?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
+  variantLabel?: string
+  libraryVariantId?: string
 }
 
 export interface EpisodeDeliveryReport {
@@ -286,6 +292,28 @@ function isMissingItemIssue(issue: ContinuityIssue): boolean {
   return issue.severity === 'error' || issue.code.startsWith('missing_') || issue.code.startsWith('invalid_')
 }
 
+function deliveryAssetLineage(
+  assetsById: Map<string, ProjectDoc['assets'][number]>,
+  assetId?: string,
+  variantId?: string,
+): Partial<Pick<EpisodeDeliveryAssetReference, 'assetName' | 'assetType' | 'libraryEntityId' | 'libraryEntityVersion' | 'librarySyncPolicy' | 'variantLabel' | 'variantKind' | 'libraryVariantId'>> {
+  if (!assetId) return {}
+  const asset = assetsById.get(assetId)
+  if (!asset) return {}
+  const variant = variantId ? asset.variants?.find((item) => item.id === variantId) : undefined
+  const libraryLink = asset.libraryLink
+  return {
+    assetName: asset.name,
+    assetType: asset.type,
+    libraryEntityId: libraryLink?.entityId ?? asset.elementId,
+    libraryEntityVersion: libraryLink?.entityVersion,
+    librarySyncPolicy: libraryLink?.syncPolicy,
+    variantLabel: variant?.label,
+    variantKind: variant?.variantKind,
+    libraryVariantId: variant?.libraryVariantId ?? (variantId ? libraryLink?.variantMap?.[variantId] : undefined),
+  }
+}
+
 export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<string>): EpisodeDeliveryReport {
   const report = buildContinuityReport(doc)
   const episodeMeta = new Map(report.episodes.map((episode) => [episode.id, episode]))
@@ -295,8 +323,12 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
     .filter((issue) => includeEpisode(issue.episodeId))
     .map((issue) => {
       const episode = issue.episodeId ? episodeMeta.get(issue.episodeId) : undefined
+      const lineage = deliveryAssetLineage(assetsById, issue.assetId, issue.variantId)
       return {
         ...issue,
+        ...lineage,
+        libraryEntityId: issue.libraryEntityId ?? lineage.libraryEntityId,
+        variantKind: issue.variantKind ?? lineage.variantKind,
         episodeIndex: episode?.index,
         episodeTitle: episode?.title,
       }
@@ -305,9 +337,7 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
     .filter((episode) => !episodeIds || episodeIds.has(episode.id))
     .flatMap((episode) =>
       episode.castUses.map((use) => {
-        const asset = assetsById.get(use.assetId)
-        const variant = use.variantId ? asset?.variants?.find((item) => item.id === use.variantId) : undefined
-        const libraryLink = asset?.libraryLink
+        const lineage = deliveryAssetLineage(assetsById, use.assetId, use.variantId)
         return {
           episodeId: episode.id,
           episodeIndex: episode.index,
@@ -317,13 +347,13 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
           assetId: use.assetId,
           assetName: use.assetName,
           assetType: use.assetType,
-          libraryEntityId: libraryLink?.entityId ?? asset?.elementId,
-          libraryEntityVersion: libraryLink?.entityVersion,
-          librarySyncPolicy: libraryLink?.syncPolicy,
+          libraryEntityId: lineage.libraryEntityId,
+          libraryEntityVersion: lineage.libraryEntityVersion,
+          librarySyncPolicy: lineage.librarySyncPolicy,
           variantId: use.variantId,
           variantLabel: use.variantLabel,
           variantKind: use.variantKind,
-          libraryVariantId: variant?.libraryVariantId ?? (use.variantId ? libraryLink?.variantMap?.[use.variantId] : undefined),
+          libraryVariantId: lineage.libraryVariantId,
           label: use.label,
           refImageId: use.refImageId,
           appliesToEpisode: use.appliesToEpisode,

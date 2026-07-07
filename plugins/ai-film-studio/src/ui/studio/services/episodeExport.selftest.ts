@@ -108,6 +108,41 @@ check(
 check('adds missing item report to season manifest', manifest.delivery.missingItems.some((item) => item.code === 'missing_asset' && item.episodeId === 'ep2'), JSON.stringify(manifest.delivery.missingItems))
 check('adds subtitle metadata to season manifest', manifest.episodes[0].subtitles?.[0]?.fileName === 'E1_Pilot_subtitles.srt' && manifest.episodes[0].subtitles?.[0]?.cueCount === 1, JSON.stringify(manifest.episodes[0].subtitles))
 
+const missingVariantProject = doc({
+  assets: [{
+    ...assets[0],
+    variants: [{ id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup' }],
+  }],
+  episodes: [
+    episode('ep1', 0, {
+      title: 'Missing Variant Ref',
+      filmPath: '/tmp/missing-variant.mp4',
+      storyboards: [storyboard('missing-variant-ref', 0, [{ assetId: 'hero', variantId: 'gala' }])],
+    }),
+  ],
+})
+const missingVariantManifest = buildEpisodeExportManifest(
+  missingVariantProject,
+  producedEpisodeExportItems(missingVariantProject).map((item) => ({ ...item, exportedPath: `/exports/${item.fileName}` })),
+)
+check(
+  'adds asset-center lineage to delivery missing item report',
+  missingVariantManifest.delivery.missingItems.some((item) =>
+    item.code === 'missing_ref_image' &&
+    item.assetId === 'hero' &&
+    item.assetName === 'Hero' &&
+    item.assetType === 'role' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 3 &&
+    item.librarySyncPolicy === 'snapshot' &&
+    item.variantId === 'gala' &&
+    item.variantLabel === 'Gala' &&
+    item.variantKind === 'makeup' &&
+    item.libraryVariantId === 'lib-gala',
+  ),
+  JSON.stringify(missingVariantManifest.delivery.missingItems),
+)
+
 const ep1 = project.episodes![1]
 const subtitle = buildEpisodeSubtitleExport(ep1)
 check('builds SRT subtitle export from episode dialogue', !!subtitle && subtitle.text.includes('We keep moving.') && subtitle.text.includes('00:00:03,000'), subtitle?.text ?? 'missing')
