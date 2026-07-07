@@ -273,7 +273,7 @@ function assetView(a: Asset, opts?: { doc?: ProjectDoc; includePrompt?: boolean;
   }
 }
 
-function variantOptions(doc: ProjectDoc) {
+function variantOptions(doc: ProjectDoc, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return doc.assets
     .filter(isCastableAsset)
     .flatMap((asset) =>
@@ -285,6 +285,7 @@ function variantOptions(doc: ProjectDoc) {
         assetId: asset.id,
         assetName: asset.name,
         ...assetLineageView(asset),
+        assetCenterUsage: assetCenterUsageView(doc, asset, usageByEntity),
       })),
     )
 }
@@ -295,7 +296,7 @@ function planView(doc: ProjectDoc, plan: EpisodePlan | undefined, usageByEntity?
     .filter((asset): asset is Asset => !!asset)
     .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(doc, asset, usageByEntity) }))
   const requiredVariants = (plan?.requiredVariantIds ?? [])
-    .map((variantId) => variantOptions(doc).find((variant) => variant.id === variantId))
+    .map((variantId) => variantOptions(doc, usageByEntity).find((variant) => variant.id === variantId))
     .filter((variant): variant is NonNullable<ReturnType<typeof variantOptions>[number]> => !!variant)
   return {
     hook: plan?.hook,
@@ -1057,7 +1058,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
           availableAssets: d.assets
             .filter(isCastableAsset)
             .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
-          availableVariants: variantOptions(d),
+          availableVariants: variantOptions(d, usageByEntity),
         })
       },
     },

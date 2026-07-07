@@ -167,8 +167,8 @@ check('get_workspace exposes series bible summary', workspace.seriesBible?.logli
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
 check(
-  'get_workspace exposes episode plan asset usage',
-  workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string }> } }) =>
+  'get_workspace exposes episode plan asset and variant usage',
+  workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
     item.id === 'ep2' &&
     item.plan?.requiredAssets?.some(
       (asset) =>
@@ -180,7 +180,13 @@ check(
         asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
         asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ) &&
-    item.plan?.requiredVariants?.some((variant) => variant.id === 'gala'),
+    item.plan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
   ),
   JSON.stringify(workspace.episodes),
 )
@@ -234,8 +240,8 @@ check(
 const seriesBible = JSON.parse(await getSeriesBible.execute({}))
 check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
 check(
-  'get_series_bible exposes episode plan asset usage',
-  seriesBible.episodes?.some((item: { episodeId: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+  'get_series_bible exposes episode plan asset and variant usage',
+  seriesBible.episodes?.some((item: { episodeId: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
     item.episodeId === 'ep2' &&
     item.plan?.requiredAssets?.some(
       (asset) =>
@@ -246,6 +252,13 @@ check(
         asset.assetCenterUsage?.entityId === 'el-hero' &&
         asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
         asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.plan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
   ),
   JSON.stringify(seriesBible.episodes),
@@ -264,9 +277,16 @@ check(
   JSON.stringify(seriesBible.availableAssets),
 )
 check(
-  'get_series_bible exposes available variant asset-center lineage',
-  seriesBible.availableVariants?.some((item: { id: string; assetId: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string }) =>
-    item.id === 'gala' && item.assetId === 'hero' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala',
+  'get_series_bible exposes available variant asset-center usage',
+  seriesBible.availableVariants?.some((item: { id: string; assetId: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+    item.id === 'gala' &&
+    item.assetId === 'hero' &&
+    item.variantKind === 'makeup' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryVariantId === 'lib-gala' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+    item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
   ),
   JSON.stringify(seriesBible.availableVariants),
 )
