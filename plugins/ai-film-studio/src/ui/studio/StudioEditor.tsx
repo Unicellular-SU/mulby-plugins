@@ -772,7 +772,7 @@ function SeriesTab() {
     .filter((asset) => (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId)
     .map((asset) => {
       const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
-      return { asset, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage) }
+      return { asset, hasRefImage: !!asset.refImageId, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage) }
     })
   const variantOptions = assetOptions.flatMap((asset) =>
     (asset.asset.variants ?? []).map((variant) => ({
@@ -912,21 +912,37 @@ function SeriesTab() {
                   <span>必需项目资产</span>
                   {assetOptions.length ? (
                     <div className="afs-series__checks">
-                      {assetOptions.map(({ asset, assetCenterUsage, assetCenterChips }) => (
-                        <label key={asset.id} className={`afs-series__check${requiredAssetIds.has(asset.id) ? ' is-on' : ''}`}>
-                          <input
-                            type="checkbox"
-                            checked={requiredAssetIds.has(asset.id)}
-                            onChange={() => patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, asset.id) })}
-                          />
-                          <span className="afs-series__checktext">{asset.name}</span>
-                          {assetCenterChips.length > 0 && (
-                            <span className="afs-series__usagechips" aria-label={`${asset.name} 资产中心图谱`} title={assetCenterUsageTitle(assetCenterUsage)}>
-                              {assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
-                            </span>
-                          )}
-                        </label>
-                      ))}
+                      {assetOptions.map(({ asset, hasRefImage, assetCenterUsage, assetCenterChips }) => {
+                        const readinessWarnings = hasRefImage ? [] : ['缺主参考图']
+                        const title = [
+                          readinessWarnings.length ? `提示：${readinessWarnings.join(' · ')}` : '',
+                          assetCenterChips.length ? assetCenterUsageTitle(assetCenterUsage) : '',
+                        ].filter(Boolean).join('\n') || asset.name
+                        return (
+                          <label
+                            key={asset.id}
+                            className={`afs-series__check${requiredAssetIds.has(asset.id) ? ' is-on' : ''}${readinessWarnings.length ? ' is-warning' : ''}`}
+                            title={title}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={requiredAssetIds.has(asset.id)}
+                              onChange={() => patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, asset.id) })}
+                            />
+                            <span className="afs-series__checktext">{asset.name}</span>
+                            {readinessWarnings.length > 0 && (
+                              <span className="afs-series__warnchips" aria-label={`${asset.name} 就绪提示`}>
+                                {readinessWarnings.map((chip) => <i key={chip}>{chip}</i>)}
+                              </span>
+                            )}
+                            {assetCenterChips.length > 0 && (
+                              <span className="afs-series__usagechips" aria-label={`${asset.name} 资产中心图谱`}>
+                                {assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
+                              </span>
+                            )}
+                          </label>
+                        )
+                      })}
                     </div>
                   ) : (
                     <p className="afs-studio__hint">项目资产页还没有角色、场景或道具。</p>
