@@ -1573,6 +1573,7 @@ function AssetContinuityPanel() {
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
   const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
@@ -1856,6 +1857,12 @@ function AssetContinuityPanel() {
     if (!row.asset.refImageId || !variant || variant.refImageId || variant.state === 'generating') return
     void generateAssetVariant(row.asset.id, variant.id)
   }
+  const mergeAssetMatrixDuplicate = (row: (typeof rows)[number], targetAssetId: string) => {
+    const target = doc.assets.find((asset) => asset.id === targetAssetId)
+    if (!target || target.type !== row.asset.type || target.parentAssetId) return
+    if (!window.confirm(`把「${row.asset.name}」合并到「${target.name}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
+    if (mergeProjectAssetInto(row.asset.id, target.id)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1968,7 +1975,11 @@ function AssetContinuityPanel() {
           const generatingVariantRefCount = visibleMissingVariantRefs.filter((entry) => entry.state === 'generating').length
           const visibleIssues = rowVisibleIssues(row)
           const visibleDuplicateIssues = rowVisibleDuplicateIssues(row)
-          const duplicateRelatedAssetCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.relatedAssetIds ?? [])).size
+          const duplicateRelatedAssetIds = [...new Set(visibleDuplicateIssues.flatMap((issue) => issue.relatedAssetIds ?? []))]
+          const mergeableDuplicateTarget = duplicateRelatedAssetIds
+            .map((id) => doc.assets.find((asset) => asset.id === id))
+            .find((asset): asset is Asset => !!asset && asset.type === row.asset.type && !asset.parentAssetId)
+          const duplicateRelatedAssetCount = duplicateRelatedAssetIds.length
           const duplicateIdentityCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.libraryEntityId ? [issue.libraryEntityId] : [])).size
           return (
             <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
@@ -2071,6 +2082,16 @@ function AssetContinuityPanel() {
                     onClick={() => syncAssetMatrixLibraryEntity(row)}
                   >
                     同步
+                  </button>
+                )}
+                {mergeableDuplicateTarget && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`合并到重复项目资产：${mergeableDuplicateTarget.name}`}
+                    onClick={() => mergeAssetMatrixDuplicate(row, mergeableDuplicateTarget.id)}
+                  >
+                    合并
                   </button>
                 )}
                 {rowMissingAssetCenter(row) && !!row.asset.refImageId && row.asset.libraryLink?.syncPolicy !== 'forked' && !row.linkedEntity?.archived && (
