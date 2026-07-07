@@ -1551,6 +1551,7 @@ function AssetContinuityPanel() {
   const continuity = useStudioContinuityReport(doc)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
+  const hasAnyEpisodePlan = (doc.episodes ?? []).some((episode) => episodePlanInputCount(episode.plan) > 0)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
     .map((asset) => {
@@ -1563,18 +1564,25 @@ function AssetContinuityPanel() {
         return (plan?.requiredAssetIds ?? []).includes(asset.id) || (plan?.requiredVariantIds ?? []).some((id) => variantIds.has(id))
       })
       const planEpisodeLabels = plannedEpisodes.map((episode) => `E${episode.index + 1}`)
+      const actualEpisodeIds = new Set(uses.map(({ episode }) => episode.id))
+      const plannedEpisodeIds = new Set(plannedEpisodes.map((episode) => episode.id))
+      const plannedUnusedLabels = plannedEpisodes.filter((episode) => !actualEpisodeIds.has(episode.id)).map((episode) => `E${episode.index + 1}`)
+      const unplannedUseLabels = hasAnyEpisodePlan
+        ? [...new Map(uses.filter(({ episode }) => !plannedEpisodeIds.has(episode.id)).map(({ episode }) => [episode.id, `E${episode.index + 1}`])).values()]
+        : []
       const planVariantLabels = (asset.variants ?? [])
         .filter((variant) => (doc.episodes ?? []).some((episode) => (episode.plan?.requiredVariantIds ?? []).includes(variant.id)))
         .map((variant) => variantLabelWithKind(variant.label, variant.variantKind))
       const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
       const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
-      return { asset, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
+      return { asset, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedLabels, unplannedUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   if (!rows.length) return null
   const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
   const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
   const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
+  const planDriftCount = rows.filter((row) => row.plannedUnusedLabels.length > 0 || row.unplannedUseLabels.length > 0).length
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1582,6 +1590,7 @@ function AssetContinuityPanel() {
         <b>跨集资产一致性</b>
         <span>{rows.length} 个资产</span>
         {plannedAssetCount > 0 && <span>{plannedAssetCount} 个进入剧集计划</span>}
+        {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
       </div>
@@ -1612,9 +1621,23 @@ function AssetContinuityPanel() {
               {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
               {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
             </span>
-            {row.issues.length > 0 && (
-              <span className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
-                {row.issues.length} 问题
+            {(row.plannedUnusedLabels.length > 0 || row.unplannedUseLabels.length > 0 || row.issues.length > 0) && (
+              <span className="afs-studio__assetmatrix-status">
+                {row.plannedUnusedLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
+                    计划未用 {row.plannedUnusedLabels.length}
+                  </i>
+                )}
+                {row.unplannedUseLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${row.unplannedUseLabels.join('、')}`}>
+                    未计划 {row.unplannedUseLabels.length}
+                  </i>
+                )}
+                {row.issues.length > 0 && (
+                  <i className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
+                    {row.issues.length} 问题
+                  </i>
+                )}
               </span>
             )}
           </div>
