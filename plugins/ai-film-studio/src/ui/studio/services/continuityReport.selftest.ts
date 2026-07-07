@@ -81,7 +81,7 @@ const hero: Asset = {
   name: 'Hero',
   refImageId: 'hero-main',
   state: 'done',
-  variants: [{ id: 'v-gala', label: 'Gala', appliesToEpisodeIds: ['ep1'] }],
+  variants: [{ id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'] }],
 }
 
 const scoped = doc({
@@ -95,9 +95,9 @@ const scoped = doc({
 
 const scopedReport = buildContinuityReport(scoped)
 const ep2 = scopedReport.episodes.find((item) => item.id === 'ep2')
-check('flags variant outside episode scope', !!ep2?.issues.some((issue) => issue.code === 'variant_out_of_episode_scope'), JSON.stringify(ep2?.issues))
-check('flags missing variant ref image', !!ep2?.issues.some((issue) => issue.code === 'missing_ref_image'), JSON.stringify(ep2?.issues))
-check('records cast use as not applying to episode', ep2?.castUses[0]?.appliesToEpisode === false, JSON.stringify(ep2?.castUses))
+check('flags variant outside episode scope', !!ep2?.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.variantKind === 'makeup'), JSON.stringify(ep2?.issues))
+check('flags missing variant ref image', !!ep2?.issues.some((issue) => issue.code === 'missing_ref_image' && issue.variantKind === 'makeup'), JSON.stringify(ep2?.issues))
+check('records cast use as not applying to episode', ep2?.castUses[0]?.appliesToEpisode === false && ep2.castUses[0]?.variantKind === 'makeup', JSON.stringify(ep2?.castUses))
 
 const duplicateAssetReport = buildContinuityReport(
   doc({
@@ -545,8 +545,8 @@ const episodeVariantCoverageReport = buildContinuityReport(
     assets: [{
       ...hero,
       variants: [
-        { id: 'v-gala', label: 'Gala', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
-        { id: 'v-battle', label: 'Battle', appliesToEpisodeIds: ['ep2'], refImageId: 'battle-img' },
+        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
+        { id: 'v-battle', label: 'Battle', variantKind: 'injury', appliesToEpisodeIds: ['ep2'], refImageId: 'battle-img' },
       ],
     }],
     currentEpisodeId: 'ep1',
@@ -557,7 +557,7 @@ const episodeVariantCoverageReport = buildContinuityReport(
 const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
 check(
   'flags main asset use when episode scoped variant exists',
-  availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.candidateVariantIds?.[0] === 'v-gala' && availableVariantIssue.storyboardId === 'main-use',
+  availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.variantKind === 'makeup' && availableVariantIssue.candidateVariantIds?.[0] === 'v-gala' && availableVariantIssue.candidateVariantKinds?.[0] === 'makeup' && availableVariantIssue.storyboardId === 'main-use',
   JSON.stringify(episodeVariantCoverageReport.issues),
 )
 
@@ -566,8 +566,8 @@ const multiVariantCoverageReport = buildContinuityReport(
     assets: [{
       ...hero,
       variants: [
-        { id: 'v-gala', label: 'Gala', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
-        { id: 'v-mask', label: 'Masked', appliesToEpisodeIds: ['ep1'], refImageId: 'mask-img' },
+        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
+        { id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToEpisodeIds: ['ep1'], refImageId: 'mask-img' },
       ],
     }],
     currentEpisodeId: 'ep1',
@@ -581,7 +581,9 @@ check(
   !multiVariantIssue?.variantId &&
     multiVariantIssue?.candidateVariantIds?.includes('v-gala') === true &&
     multiVariantIssue?.candidateVariantIds?.includes('v-mask') === true &&
-    multiVariantIssue?.candidateVariantLabels?.includes('Masked') === true,
+    multiVariantIssue?.candidateVariantLabels?.includes('Masked') === true &&
+    multiVariantIssue?.candidateVariantKinds?.includes('makeup') === true &&
+    multiVariantIssue?.candidateVariantKinds?.includes('outfit') === true,
   JSON.stringify(multiVariantCoverageReport.issues),
 )
 
@@ -589,7 +591,7 @@ const sceneVariantCoverageReport = buildContinuityReport(
   doc({
     assets: [{
       ...hero,
-      variants: [{ id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
+      variants: [{ id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
     }],
     currentEpisodeId: 'ep1',
     storyboards: [{ ...storyboard('scene-main-use', 0, [{ assetId: 'hero' }]), sceneId: 'banquet' }],
@@ -598,7 +600,7 @@ const sceneVariantCoverageReport = buildContinuityReport(
 )
 check(
   'flags main asset use when scene scoped variant applies',
-  sceneVariantCoverageReport.issues.some((issue) => issue.code === 'episode_variant_available' && issue.variantId === 'v-mask' && issue.sceneId === 'banquet'),
+  sceneVariantCoverageReport.issues.some((issue) => issue.code === 'episode_variant_available' && issue.variantId === 'v-mask' && issue.variantKind === 'outfit' && issue.sceneId === 'banquet'),
   JSON.stringify(sceneVariantCoverageReport.issues),
 )
 
@@ -606,7 +608,7 @@ const sceneVariantScopeReport = buildContinuityReport(
   doc({
     assets: [{
       ...hero,
-      variants: [{ id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
+      variants: [{ id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
     }],
     currentEpisodeId: 'ep1',
     storyboards: [{ ...storyboard('wrong-scene-use', 0, [{ assetId: 'hero', variantId: 'v-mask' }]), sceneId: 'street' }],
@@ -615,7 +617,7 @@ const sceneVariantScopeReport = buildContinuityReport(
 )
 check(
   'flags variant use outside scene scope',
-  sceneVariantScopeReport.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.scopeKind === 'scene' && issue.storyboardId === 'wrong-scene-use'),
+  sceneVariantScopeReport.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.variantKind === 'outfit' && issue.scopeKind === 'scene' && issue.storyboardId === 'wrong-scene-use'),
   JSON.stringify(sceneVariantScopeReport.issues),
 )
 
@@ -637,7 +639,7 @@ const stateRegressionReport = buildContinuityReport(
   doc({
     assets: [{
       ...hero,
-      variants: [{ id: 'v-battle', label: 'Battle', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] }],
+      variants: [{ id: 'v-battle', label: 'Battle', variantKind: 'injury', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] }],
     }],
     currentEpisodeId: 'ep2',
     storyboards: [storyboard('main-after-variant', 0, [{ assetId: 'hero' }])],
@@ -647,15 +649,15 @@ const stateRegressionReport = buildContinuityReport(
     ],
   }),
 )
-check('flags cross-episode state regression to main asset', !!stateRegressionReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-after-variant'), JSON.stringify(stateRegressionReport.issues))
+check('flags cross-episode state regression to main asset', !!stateRegressionReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-after-variant' && issue.variantKind === 'injury' && issue.previousVariantKind === 'injury'), JSON.stringify(stateRegressionReport.issues))
 
 const variantSwitchReport = buildContinuityReport(
   doc({
     assets: [{
       ...hero,
       variants: [
-        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img' },
-        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img' },
+        { id: 'v-battle', label: 'Battle', variantKind: 'injury', refImageId: 'battle-img' },
+        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', refImageId: 'gala-img' },
       ],
     }],
     currentEpisodeId: 'ep2',
@@ -668,7 +670,7 @@ const variantSwitchReport = buildContinuityReport(
 )
 check(
   'flags cross-episode switch to unscoped variant',
-  variantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-battle' && issue.variantId === 'v-gala' && issue.previousVariantId === 'v-battle'),
+  variantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-battle' && issue.variantId === 'v-gala' && issue.variantKind === 'makeup' && issue.previousVariantId === 'v-battle' && issue.previousVariantKind === 'injury'),
   JSON.stringify(variantSwitchReport.issues),
 )
 

@@ -176,14 +176,23 @@ check(
 const continuityReport = JSON.parse(await getContinuityReport.execute({}))
 check(
   'get_continuity_report exposes cast asset-center usage',
-  continuityReport.episodes?.some((episode: { id: string; castUses?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+  continuityReport.episodes?.some((episode: { id: string; castUses?: Array<{ assetId: string; variantId?: string; variantKind?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
     episode.id === 'ep2' &&
     episode.castUses?.some((use) =>
       use.assetId === 'hero' &&
       use.variantId === 'gala' &&
+      use.variantKind === 'makeup' &&
       use.assetCenterUsage?.entityId === 'el-hero' &&
       use.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
+  ),
+  JSON.stringify(continuityReport.episodes),
+)
+check(
+  'get_continuity_report exposes issue variant kinds',
+  continuityReport.episodes?.some((episode: { id: string; issues?: Array<{ code: string; variantId?: string; variantKind?: string }> }) =>
+    episode.id === 'ep2' &&
+    episode.issues?.some((issue) => issue.code === 'missing_ref_image' && issue.variantId === 'gala' && issue.variantKind === 'makeup'),
   ),
   JSON.stringify(continuityReport.episodes),
 )

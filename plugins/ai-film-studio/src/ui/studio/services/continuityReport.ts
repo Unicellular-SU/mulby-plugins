@@ -3,6 +3,8 @@ import { normalizeAssetLookup } from '../../domain/assetAliases'
 import type { Asset, Episode, ProjectDoc, Storyboard } from '../../domain/types'
 import type { LibraryEntity } from '../../services/assetHub'
 
+type VariantKind = NonNullable<Asset['variants']>[number]['variantKind']
+
 export interface ContinuityIssue {
   severity: 'error' | 'warning'
   code: string
@@ -13,8 +15,10 @@ export interface ContinuityIssue {
   sceneId?: string
   assetId?: string
   variantId?: string
+  variantKind?: VariantKind
   candidateVariantIds?: string[]
   candidateVariantLabels?: string[]
+  candidateVariantKinds?: VariantKind[]
   candidateLibraryEntityIds?: string[]
   candidateLibraryEntityLabels?: string[]
   previousEpisodeId?: string
@@ -22,6 +26,7 @@ export interface ContinuityIssue {
   previousEpisodeTitle?: string
   previousVariantId?: string
   previousVariantLabel?: string
+  previousVariantKind?: VariantKind
   conflictLabel?: string
   conflictSource?: 'name' | 'alias'
   relatedAssetIds?: string[]
@@ -43,6 +48,7 @@ export interface ContinuityCastUse {
   assetType: Asset['type']
   variantId?: string
   variantLabel?: string
+  variantKind?: VariantKind
   label: string
   refImageId?: string
   appliesToEpisode: boolean
@@ -191,6 +197,7 @@ interface LastAppearanceUse {
   episodeTitle: string
   variantId?: string
   variantLabel?: string
+  variantKind?: VariantKind
 }
 
 function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
@@ -785,7 +792,7 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
         const appliesToEpisode = !scopeIssue
         if (scopeIssue) {
           const scopeLabel = scopeIssue === 'episode' ? '本集' : scopeIssue === 'scene' ? '本场景' : '本分镜'
-          addIssue({ ...base, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
+          addIssue({ ...base, variantKind: variant?.variantKind, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
         }
         if (variant && !scopeIssue && !variantHasScope(variant)) {
           const previous = lastAppearanceUseByAsset.get(asset.id)
@@ -799,6 +806,8 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
               previousEpisodeTitle: previous.episodeTitle,
               previousVariantId: previous.variantId,
               previousVariantLabel: previous.variantLabel,
+              previousVariantKind: previous.variantKind,
+              variantKind: variant.variantKind,
               severity: 'warning',
               code: 'asset_state_changed_variant',
               scopeKind: 'episode',
@@ -814,8 +823,10 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
             addIssue({
               ...base,
               variantId: scopedVariants.length === 1 ? scopedVariants[0].id : undefined,
+              variantKind: scopedVariants.length === 1 ? scopedVariants[0].variantKind : undefined,
               candidateVariantIds: scopedVariants.map((item) => item.id),
               candidateVariantLabels: scopedVariants.map((item) => item.label),
+              candidateVariantKinds: scopedVariants.map((item) => item.variantKind).filter((kind): kind is VariantKind => !!kind),
               severity: 'warning',
               code: 'episode_variant_available',
               sceneId: storyboard.sceneId,
@@ -829,6 +840,8 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
               addIssue({
                 ...base,
                 variantId: previous.variantId,
+                variantKind: previous.variantKind,
+                previousVariantKind: previous.variantKind,
                 severity: 'warning',
                 code: 'asset_state_regressed_to_main',
                 message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel ?? previous.variantId}」。如果状态延续，建议创建或绑定本集形态；如果剧情已恢复默认状态，可忽略。`,
@@ -838,7 +851,7 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
         }
         const refImageId = refImageIdForCastRef(asset, ref)
         if (!refImageId) {
-          addIssue({ ...base, severity: 'error', code: 'missing_ref_image', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 的「${labelForCastRef(asset, ref)}」没有参考图` })
+          addIssue({ ...base, variantKind: variant?.variantKind, severity: 'error', code: 'missing_ref_image', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 的「${labelForCastRef(asset, ref)}」没有参考图` })
         }
         report.castUses.push({
           storyboardId: storyboard.id,
@@ -848,6 +861,7 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
           assetType: asset.type,
           variantId: ref.variantId,
           variantLabel: variant?.label,
+          variantKind: variant?.variantKind,
           label: labelForCastRef(asset, ref),
           refImageId,
           appliesToEpisode,
@@ -859,6 +873,7 @@ export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityRepor
             episodeTitle: episode.title,
             variantId: variant.id,
             variantLabel: variant.label,
+            variantKind: variant.variantKind,
           })
         } else if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
           lastAppearanceUseByAsset.set(asset.id, {
