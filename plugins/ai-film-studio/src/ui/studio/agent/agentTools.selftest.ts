@@ -757,6 +757,27 @@ check(
   JSON.stringify(updatedEpisodePlan),
 )
 
+const skippedEpisodePlan = JSON.parse(await setEpisodeSeriesSkip.execute({ episodeTitle: 'Second', skip: true }))
+check(
+  'set_episode_series_skip returns episode plan asset and variant usage',
+  skippedEpisodePlan.episode?.id === 'ep2' &&
+    skippedEpisodePlan.episode?.plan?.requiredAssets?.some(
+      (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    skippedEpisodePlan.episode?.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(skippedEpisodePlan),
+)
+
 const variantOnlyEpisodePlan = JSON.parse(
   await upsertEpisodePlan.execute({
     episodeTitle: 'Third',

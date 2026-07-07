@@ -405,6 +405,15 @@ function episodeView(doc: ProjectDoc, episode: Episode, opts?: { usageByEntity?:
   }
 }
 
+async function episodeViewWithUsage(doc: ProjectDoc, episode: Episode) {
+  return episodeView(doc, episode, { usageByEntity: await loadIdentityUsageSafe() })
+}
+
+async function episodeListWithUsage(doc: ProjectDoc, episodes: Episode[] = sortedEpisodes(doc)) {
+  const usageByEntity = await loadIdentityUsageSafe()
+  return episodes.map((episode) => episodeView(doc, episode, { usageByEntity }))
+}
+
 function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, IdentityAssetUsage> }) {
   const episodes = episodeList(doc)
   const allScripts = episodes.flatMap((episode) => scriptsForEpisode(doc, episode))
@@ -1541,7 +1550,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         }
         const next = get().doc
         const episode = next?.episodes?.find((e) => e.id === id)
-        return json({ id, currentEpisodeId: next?.currentEpisodeId, episode: next && episode ? episodeView(next, episode) : undefined })
+        return json({ id, currentEpisodeId: next?.currentEpisodeId, episode: next && episode ? await episodeViewWithUsage(next, episode) : undefined })
       },
     },
     {
@@ -1564,7 +1573,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           ids.forEach((id, index) => get().renameEpisode(id, `${a.titlePrefix}${index + 1}`))
         }
         const next = get().doc
-        return json({ ids, currentEpisodeId: next?.currentEpisodeId, episodes: next ? sortedEpisodes(next).map((episode) => episodeView(next, episode)) : [] })
+        return json({ ids, currentEpisodeId: next?.currentEpisodeId, episodes: next ? await episodeListWithUsage(next) : [] })
       },
     },
     {
@@ -1639,7 +1648,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((item) => episodeView(d, item)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         const patch: Partial<EpisodePlan> = {}
         if (hasArg(a, 'hook')) patch.hook = stringArg(a.hook)
         if (hasArg(a, 'conflict')) patch.conflict = stringArg(a.conflict)
@@ -1682,11 +1691,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisode(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         get().switchEpisode(episode.id)
         const next = get().doc ?? d
         const current = next.episodes?.find((e) => e.id === episode.id) ?? episode
-        return json({ currentEpisodeId: next.currentEpisodeId, episode: episodeView(next, current) })
+        return json({ currentEpisodeId: next.currentEpisodeId, episode: await episodeViewWithUsage(next, current) })
       },
     },
     {
@@ -1706,11 +1715,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisode(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         get().renameEpisode(episode.id, String(a.newTitle ?? ''))
         const next = get().doc ?? d
         const renamed = next.episodes?.find((e) => e.id === episode.id) ?? episode
-        return json({ id: renamed.id, episode: episodeView(next, renamed) })
+        return json({ id: renamed.id, episode: await episodeViewWithUsage(next, renamed) })
       },
     },
     {
@@ -1732,12 +1741,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisode(d, { episodeId: a.episodeId, index: a.index ?? a.episodeIndex, title: a.title ?? a.episodeTitle })
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         if (d.currentEpisodeId !== episode.id) get().switchEpisode(episode.id)
         get().setCurrentEpisodeSeriesSkip(a.skip === true)
         const next = get().doc ?? d
         const updated = next.episodes?.find((e) => e.id === episode.id) ?? episode
-        return json({ episode: episodeView(next, updated) })
+        return json({ episode: await episodeViewWithUsage(next, updated) })
       },
     },
     {
@@ -1758,7 +1767,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisode(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         const chapters = resolveChapterIds(d, a)
         if (!chapters.ids.length) return json({ error: '未找到章节', unresolved: chapters.unresolved, chapters: d.novel.map((chapter) => ({ id: chapter.id, index: chapter.index + 1, title: chapter.title })) })
         const current = new Set(episode.novelChapterIds ?? [])
@@ -1769,7 +1778,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().setEpisodeNovelChapters(episode.id, nextIds)
         const next = get().doc ?? d
         const updated = next.episodes?.find((e) => e.id === episode.id) ?? episode
-        return json({ episode: episodeView(next, updated), chapterIds: updated.novelChapterIds ?? [], unresolved: chapters.unresolved })
+        return json({ episode: await episodeViewWithUsage(next, updated), chapterIds: updated.novelChapterIds ?? [], unresolved: chapters.unresolved })
       },
     },
     {
@@ -1780,11 +1789,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episodes = sortedEpisodes(d)
-        if (episodes.length <= 1) return json({ error: '需要至少两集才能均分章节', episodes: episodes.map((episode) => episodeView(d, episode)) })
+        if (episodes.length <= 1) return json({ error: '需要至少两集才能均分章节', episodes: await episodeListWithUsage(d, episodes) })
         if (!d.novel.length) return json({ error: '还没有导入原著章节' })
         get().distributeNovelChaptersAcrossEpisodes()
         const next = get().doc ?? d
-        return json({ episodes: sortedEpisodes(next).map((episode) => episodeView(next, episode)) })
+        return json({ episodes: await episodeListWithUsage(next) })
       },
     },
     {
