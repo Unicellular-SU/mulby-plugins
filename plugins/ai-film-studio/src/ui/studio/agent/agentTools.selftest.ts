@@ -470,7 +470,7 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       current.assets = current.assets.filter((item) => item.id !== source.id && item.parentAssetId !== source.id)
       return true
     },
-    syncAssetFromLibraryEntity: (assetId: string, entity: { id: string; name: string; aliases?: string[]; description?: string; prompt?: string; mediaRefs?: Array<{ assetId?: string; role: string }>; variants?: Array<{ id: string; label: string; mediaRefs?: Array<{ assetId?: string }> }>; version: number }) => {
+    syncAssetFromLibraryEntity: (assetId: string, entity: { id: string; name: string; aliases?: string[]; description?: string; prompt?: string; mediaRefs?: Array<{ assetId?: string; role: string }>; variants?: Array<{ id: string; label: string; kind?: AssetVariant['variantKind']; mediaRefs?: Array<{ assetId?: string }> }>; voiceRef?: { assetId?: string }; lora?: Asset['lora']; version: number }) => {
       const asset = current.assets.find((item) => item.id === assetId)
       if (!asset || asset.parentAssetId || (asset.type !== 'role' && asset.type !== 'scene' && asset.type !== 'prop')) return false
       const currentVariants = asset.variants ?? []
@@ -480,12 +480,16 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
       asset.prompt = entity.prompt
       asset.refImageId = entity.mediaRefs?.find((ref) => ref.assetId)?.assetId
       asset.elementId = entity.id
+      asset.voiceAssetId = asset.type === 'role' && entity.voiceRef?.assetId ? entity.voiceRef.assetId : asset.voiceAssetId
+      asset.audioBindState = asset.type === 'role' && entity.voiceRef?.assetId ? 'done' : asset.audioBindState
+      asset.lora = entity.lora
       asset.variants = entity.variants?.map((variant) => {
         const existing = currentVariants.find((item) => item.libraryVariantId === variant.id || item.label === variant.label)
         return {
           id: existing?.id ?? variant.id,
           libraryVariantId: variant.id,
           label: variant.label,
+          variantKind: variant.kind,
           refImageId: variant.mediaRefs?.find((ref) => ref.assetId)?.assetId,
           appliesToEpisodeIds: existing?.appliesToEpisodeIds,
         }
@@ -728,10 +732,14 @@ check(
                 kind: 'character',
                 name: 'Synced Hero',
                 aliases: ['Synced Alias'],
+                identity: 'same face, silver scar',
                 description: 'From library snapshot.',
                 prompt: 'library prompt',
                 refAssetIds: ['synced-main-img'],
-                appearanceVariants: [{ id: 'lib-gala', label: 'Library Gala', refAssetIds: ['synced-gala-img'] }],
+                tags: ['lead'],
+                voiceId: 'voice-synced',
+                lora: { provider: 'fal', ref: 'synced-hero-lora', weight: 0.65 },
+                appearanceVariants: [{ id: 'lib-gala', label: 'Library Gala', kind: 'makeup', refAssetIds: ['synced-gala-img'], tags: ['formal'] }],
                 createdAt: 0,
                 updatedAt: 2,
                 version: 4,
@@ -777,9 +785,17 @@ check(
     syncedProjectAsset.asset?.id === 'sync-target' &&
     syncedProjectAsset.asset?.name === 'Synced Hero' &&
     syncedProjectAsset.asset?.refImageId === 'synced-main-img' &&
+    syncedProjectAsset.asset?.voiceAssetId === 'voice-synced' &&
+    syncedProjectAsset.asset?.audioBindState === 'done' &&
+    syncedProjectAsset.asset?.lora?.ref === 'synced-hero-lora' &&
     syncedProjectAsset.asset?.libraryLink?.entityId === 'el-sync' &&
     syncedProjectAsset.asset?.libraryLink?.entityVersion === 4 &&
-    syncedProjectAsset.asset?.variants?.some((variant: { id: string; libraryVariantId?: string; appliesToEpisodeIds?: string[]; refImageId?: string }) => variant.id === 'local-gala' && variant.libraryVariantId === 'lib-gala' && variant.appliesToEpisodeIds?.includes('ep1') && variant.refImageId === 'synced-gala-img'),
+    syncedProjectAsset.entity?.identity === 'same face, silver scar' &&
+    syncedProjectAsset.entity?.voiceRef?.assetId === 'voice-synced' &&
+    syncedProjectAsset.entity?.lora?.ref === 'synced-hero-lora' &&
+    syncedProjectAsset.entity?.mediaRefs?.some((ref: { assetId?: string; role?: string }) => ref.assetId === 'synced-main-img' && ref.role === 'primary') &&
+    syncedProjectAsset.entity?.variants?.some((variant: { id: string; kind?: string; mediaRefs?: Array<{ assetId?: string }> }) => variant.id === 'lib-gala' && variant.kind === 'makeup' && variant.mediaRefs?.some((ref) => ref.assetId === 'synced-gala-img')) &&
+    syncedProjectAsset.asset?.variants?.some((variant: { id: string; libraryVariantId?: string; variantKind?: string; appliesToEpisodeIds?: string[]; refImageId?: string }) => variant.id === 'local-gala' && variant.libraryVariantId === 'lib-gala' && variant.variantKind === 'makeup' && variant.appliesToEpisodeIds?.includes('ep1') && variant.refImageId === 'synced-gala-img'),
   JSON.stringify(syncedProjectAsset),
 )
 

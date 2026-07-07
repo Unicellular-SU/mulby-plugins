@@ -19,6 +19,12 @@ type LinkableLibraryEntity = {
   kind?: LibraryEntity['kind']
   name?: string
   aliases?: string[]
+  identity?: string
+  description?: string
+  tags?: string[]
+  mediaRefs?: LibraryEntity['mediaRefs']
+  voiceRef?: LibraryEntity['voiceRef']
+  lora?: LibraryEntity['lora']
   version?: number
   archived?: boolean
   variants?: LibraryEntity['variants']
@@ -780,15 +786,40 @@ function libraryEntityMatchesAsset(entity: LibraryEntity, asset: Asset): boolean
   return !kind || entity.kind === kind
 }
 
+function mediaRefView(ref: NonNullable<LibraryEntity['mediaRefs']>[number] | LibraryEntity['voiceRef']) {
+  if (!ref) return undefined
+  return {
+    role: ref.role,
+    label: ref.label,
+    assetId: ref.assetId,
+    mediaAssetId: ref.mediaAssetId,
+    localPath: ref.localPath,
+    url: ref.url,
+  }
+}
+
 function libraryEntityView(entity: LinkableLibraryEntity) {
   return {
     id: entity.id,
     kind: entity.kind,
     name: entity.name,
     aliases: entity.aliases,
+    identity: entity.identity,
+    description: entity.description,
+    tags: entity.tags,
+    mediaRefs: entity.mediaRefs?.map(mediaRefView),
+    voiceRef: mediaRefView(entity.voiceRef),
+    lora: entity.lora,
     version: entity.version,
     archived: entity.archived,
-    variants: entity.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
+    variants: entity.variants?.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      kind: variant.kind,
+      parentVariantId: variant.parentVariantId,
+      tags: variant.tags,
+      mediaRefs: variant.mediaRefs?.map(mediaRefView),
+    })),
   }
 }
 
