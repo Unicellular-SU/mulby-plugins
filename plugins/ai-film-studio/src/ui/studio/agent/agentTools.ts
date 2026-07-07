@@ -1658,9 +1658,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().updateEpisodePlan(episode.id, patch)
         const next = doc() ?? d
         const updated = next.episodes?.find((item) => item.id === episode.id) ?? episode
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           episode: episodeInfo(next, updated),
-          plan: planView(next, updated.plan),
+          plan: planView(next, updated.plan, usageByEntity),
           unresolvedAssets: assets.unresolved,
           unresolvedVariants: variants.unresolved,
         })
