@@ -1657,7 +1657,7 @@ function AssetContinuityPanel() {
       <div className="afs-studio__assetmatrix-rows">
         {filteredRows.length === 0 && <span className="afs-studio__assetmatrix-empty">当前筛选下没有资产</span>}
         {filteredRows.map((row) => (
-          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasIssue(row) || rowHasPlanDrift(row) ? ' is-warning' : ''}`}>
+          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row) ? ' is-warning' : ''}`}>
             <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
               <b>{row.asset.name}</b>
               <em>{typeLabel(row.asset.type)}</em>
@@ -1682,8 +1682,13 @@ function AssetContinuityPanel() {
               {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
               {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
             </span>
-            {(row.plannedUnusedLabels.length > 0 || row.unplannedUseLabels.length > 0 || row.plannedVariantUnusedLabels.length > 0 || row.unplannedVariantUseLabels.length > 0 || row.issues.length > 0) && (
+            {(row.plannedUnusedLabels.length > 0 || row.unplannedUseLabels.length > 0 || row.plannedVariantUnusedLabels.length > 0 || row.unplannedVariantUseLabels.length > 0 || rowMissingAssetCenter(row) || row.issues.length > 0) && (
               <span className="afs-studio__assetmatrix-status">
+                {rowMissingAssetCenter(row) && (
+                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
+                    未入图谱
+                  </i>
+                )}
                 {row.plannedUnusedLabels.length > 0 && (
                   <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
                     计划未用 {row.plannedUnusedLabels.length}
