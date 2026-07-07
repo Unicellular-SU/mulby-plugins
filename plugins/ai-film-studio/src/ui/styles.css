@@ -4201,7 +4201,7 @@ select.afs-toolbar__select,
 .afs-studio__assetmatrix-head b { color: var(--afs-text); font-size: 13px; }
 .afs-studio__assetmatrix .is-warning { color: var(--afs-warning); }
 .afs-studio__assetmatrix-rows { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow: auto; }
-.afs-studio__assetmatrix-row { display: grid; grid-template-columns: minmax(120px, 1.1fr) minmax(92px, 1fr) minmax(120px, 1.15fr) minmax(110px, 1fr) auto; align-items: center; gap: 6px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--afs-border); border-radius: 8px; background: var(--afs-panel); }
+.afs-studio__assetmatrix-row { display: grid; grid-template-columns: minmax(112px, 1fr) minmax(84px, .8fr) minmax(84px, .8fr) minmax(108px, 1fr) minmax(108px, 1fr) minmax(104px, .9fr) auto; align-items: center; gap: 6px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--afs-border); border-radius: 8px; background: var(--afs-panel); }
 .afs-studio__assetmatrix-row.is-warning { border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border)); }
 .afs-studio__assetmatrix-name { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .afs-studio__assetmatrix-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }

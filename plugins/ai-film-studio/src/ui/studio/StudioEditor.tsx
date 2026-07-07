@@ -1555,22 +1555,33 @@ function AssetContinuityPanel() {
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
     .map((asset) => {
       const uses = continuity.episodes.flatMap((episode) => episode.castUses.filter((use) => use.assetId === asset.id).map((use) => ({ episode, use })))
-      const episodeLabels = [...new Map(uses.map(({ episode }) => [episode.id, `E${episode.index}`])).values()]
+      const episodeLabels = [...new Map(uses.map(({ episode }) => [episode.id, `E${episode.index + 1}`])).values()]
       const variantLabels = [...new Set(uses.map(({ use }) => use.variantLabel ?? (use.variantId ? use.variantId : '主形象')))]
+      const variantIds = new Set((asset.variants ?? []).map((variant) => variant.id))
+      const plannedEpisodes = (doc.episodes ?? []).filter((episode) => {
+        const plan = episode.plan
+        return (plan?.requiredAssetIds ?? []).includes(asset.id) || (plan?.requiredVariantIds ?? []).some((id) => variantIds.has(id))
+      })
+      const planEpisodeLabels = plannedEpisodes.map((episode) => `E${episode.index + 1}`)
+      const planVariantLabels = (asset.variants ?? [])
+        .filter((variant) => (doc.episodes ?? []).some((episode) => (episode.plan?.requiredVariantIds ?? []).includes(variant.id)))
+        .map((variant) => variantLabelWithKind(variant.label, variant.variantKind))
       const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
       const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
-      return { asset, episodeLabels, variantLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
+      return { asset, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
     })
-    .filter((row) => row.episodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
+    .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   if (!rows.length) return null
   const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
   const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
+  const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
       <div className="afs-studio__assetmatrix-head">
         <b>跨集资产一致性</b>
         <span>{rows.length} 个资产</span>
+        {plannedAssetCount > 0 && <span>{plannedAssetCount} 个进入剧集计划</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
       </div>
@@ -1585,9 +1596,17 @@ function AssetContinuityPanel() {
               {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
               {row.episodeLabels.length > 8 && <i>+{row.episodeLabels.length - 8}</i>}
             </span>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`}>
+              {row.planEpisodeLabels.length ? row.planEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未计划</i>}
+              {row.planEpisodeLabels.length > 8 && <i>+{row.planEpisodeLabels.length - 8}</i>}
+            </span>
             <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`}>
               {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
               {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
+            </span>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`}>
+              {row.planVariantLabels.length ? row.planVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未计划形态</i>}
+              {row.planVariantLabels.length > 4 && <i>+{row.planVariantLabels.length - 4}</i>}
             </span>
             <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 资产中心图谱`} title={assetCenterUsageTitle(row.assetCenterUsage)}>
               {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
