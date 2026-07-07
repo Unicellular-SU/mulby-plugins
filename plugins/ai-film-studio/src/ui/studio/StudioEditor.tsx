@@ -1626,9 +1626,15 @@ function AssetContinuityPanel() {
   const rowHasVariantDrift = (row: (typeof rows)[number]) =>
     row.plannedVariantUnusedLabels.length > 0 ||
     row.unplannedVariantUseLabels.length > 0
-  const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
+  const issueMatchesActiveEpisode = (issue: (typeof rows)[number]['issues'][number]) =>
+    assetMatrixEpisodeFilter === 'all' ||
+    issue.episodeId === assetMatrixEpisodeFilter ||
+    issue.previousEpisodeId === assetMatrixEpisodeFilter ||
+    (!issue.episodeId && !issue.previousEpisodeId)
+  const rowVisibleIssues = (row: (typeof rows)[number]) => row.issues.filter(issueMatchesActiveEpisode)
+  const rowHasVisibleIssue = (row: (typeof rows)[number]) => rowVisibleIssues(row).length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
-  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row)
+  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row)
   const rowMatchesEpisode = (row: (typeof rows)[number], episodeId: string) =>
     row.episodeIds.includes(episodeId) ||
     row.planEpisodeIds.includes(episodeId) ||
@@ -1636,7 +1642,7 @@ function AssetContinuityPanel() {
   const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
     row.plannedUnusedLabels.length + row.unplannedUseLabels.length + row.plannedVariantUnusedLabels.length + row.unplannedVariantUseLabels.length
   const rowPriority = (row: (typeof rows)[number]) => {
-    if (rowHasIssue(row)) return 0
+    if (rowHasVisibleIssue(row)) return 0
     if (rowHasPlanDrift(row)) return 1
     if (rowMissingAssetCenter(row)) return 2
     if (row.planEpisodeLabels.length > 0) return 3
@@ -1659,7 +1665,7 @@ function AssetContinuityPanel() {
     : sortedRows
   const episodeFilteredRows = searchFilteredRows.filter((row) => assetMatrixEpisodeFilter === 'all' || rowMatchesEpisode(row, assetMatrixEpisodeFilter))
   const typeFilteredRows = episodeFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
-  const issueCount = typeFilteredRows.reduce((sum, row) => sum + row.issues.length, 0)
+  const issueCount = typeFilteredRows.reduce((sum, row) => sum + rowVisibleIssues(row).length, 0)
   const assetCenterUsageCount = typeFilteredRows.filter((row) => row.assetCenterChips.length > 0).length
   const missingAssetCenterCount = hubLoaded ? typeFilteredRows.filter(rowMissingAssetCenter).length : 0
   const plannedAssetCount = typeFilteredRows.filter((row) => row.planEpisodeLabels.length > 0).length
@@ -1668,7 +1674,7 @@ function AssetContinuityPanel() {
   const variantDriftCount = typeFilteredRows.filter(rowHasVariantDrift).length
   const appearedAssetCount = typeFilteredRows.filter((row) => row.episodeLabels.length > 0).length
   const planDriftCount = typeFilteredRows.filter(rowHasPlanDrift).length
-  const issueAssetCount = typeFilteredRows.filter(rowHasIssue).length
+  const issueAssetCount = typeFilteredRows.filter(rowHasVisibleIssue).length
   const filteredRows = typeFilteredRows.filter((row) => {
     if (assetMatrixFilter === 'planned') return row.planEpisodeLabels.length > 0
     if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row)
@@ -1676,7 +1682,7 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'variant') return rowHasVariantDrift(row)
     if (assetMatrixFilter === 'appeared') return row.episodeLabels.length > 0
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
-    if (assetMatrixFilter === 'issue') return rowHasIssue(row)
+    if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   })
@@ -1822,72 +1828,75 @@ function AssetContinuityPanel() {
             )}
           </span>
         )}
-        {filteredRows.map((row) => (
-          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
-            <span className="afs-studio__assetmatrix-name" title={[row.asset.name, row.asset.aliases?.length ? `别名：${row.asset.aliases.join('、')}` : undefined].filter(Boolean).join('\n')}>
-              <b>{row.asset.name}</b>
-              <em>{typeLabel(row.asset.type)}</em>
-              {!!row.asset.aliases?.length && <small>别名 {row.asset.aliases.length}</small>}
-            </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`} title={assetMatrixChipsetTitle('出现剧集', row.episodeLabels, '未出场')}>
-              {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
-              {row.episodeLabels.length > 8 && <i>+{row.episodeLabels.length - 8}</i>}
-            </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`} title={assetMatrixChipsetTitle('计划剧集', row.planEpisodeLabels, '未计划')}>
-              {row.planEpisodeLabels.length ? row.planEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未计划</i>}
-              {row.planEpisodeLabels.length > 8 && <i>+{row.planEpisodeLabels.length - 8}</i>}
-            </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`} title={assetMatrixChipsetTitle('使用形态', row.variantLabels, '未绑定形态')}>
-              {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
-              {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
-            </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`} title={assetMatrixChipsetTitle('计划形态', row.planVariantLabels, '未计划形态')}>
-              {row.planVariantLabels.length ? row.planVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未计划形态</i>}
-              {row.planVariantLabels.length > 4 && <i>+{row.planVariantLabels.length - 4}</i>}
-            </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 资产中心图谱`} title={assetCenterUsageTitle(row.assetCenterUsage)}>
-              {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
-              {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
-            </span>
-            <span className="afs-studio__assetmatrix-status">
-              {rowMissingAssetCenter(row) && (
-                <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
-                  未入图谱
-                </i>
-              )}
-              {row.plannedUnusedLabels.length > 0 && (
-                <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
-                  计划未用 {row.plannedUnusedLabels.length}
-                </i>
-              )}
-              {row.unplannedUseLabels.length > 0 && (
-                <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${row.unplannedUseLabels.join('、')}`}>
-                  未计划 {row.unplannedUseLabels.length}
-                </i>
-              )}
-              {row.plannedVariantUnusedLabels.length > 0 && (
-                <i className="afs-studio__assetmatrix-drift" title={`计划形态未进入分镜：${row.plannedVariantUnusedLabels.join('、')}`}>
-                  形态未用 {row.plannedVariantUnusedLabels.length}
-                </i>
-              )}
-              {row.unplannedVariantUseLabels.length > 0 && (
-                <i className="afs-studio__assetmatrix-drift" title={`分镜形态未进入剧集计划：${row.unplannedVariantUseLabels.join('、')}`}>
-                  形态未计划 {row.unplannedVariantUseLabels.length}
-                </i>
-              )}
-              {row.issues.length > 0 && (
-                <i className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
-                  {row.issues.length} 问题
-                </i>
-              )}
-              {!rowHasStatusWarning(row) && (
-                <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>
-                  正常
-                </i>
-              )}
-            </span>
-          </div>
-        ))}
+        {filteredRows.map((row) => {
+          const visibleIssues = rowVisibleIssues(row)
+          return (
+            <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
+              <span className="afs-studio__assetmatrix-name" title={[row.asset.name, row.asset.aliases?.length ? `别名：${row.asset.aliases.join('、')}` : undefined].filter(Boolean).join('\n')}>
+                <b>{row.asset.name}</b>
+                <em>{typeLabel(row.asset.type)}</em>
+                {!!row.asset.aliases?.length && <small>别名 {row.asset.aliases.length}</small>}
+              </span>
+              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`} title={assetMatrixChipsetTitle('出现剧集', row.episodeLabels, '未出场')}>
+                {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
+                {row.episodeLabels.length > 8 && <i>+{row.episodeLabels.length - 8}</i>}
+              </span>
+              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`} title={assetMatrixChipsetTitle('计划剧集', row.planEpisodeLabels, '未计划')}>
+                {row.planEpisodeLabels.length ? row.planEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未计划</i>}
+                {row.planEpisodeLabels.length > 8 && <i>+{row.planEpisodeLabels.length - 8}</i>}
+              </span>
+              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`} title={assetMatrixChipsetTitle('使用形态', row.variantLabels, '未绑定形态')}>
+                {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
+                {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
+              </span>
+              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`} title={assetMatrixChipsetTitle('计划形态', row.planVariantLabels, '未计划形态')}>
+                {row.planVariantLabels.length ? row.planVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未计划形态</i>}
+                {row.planVariantLabels.length > 4 && <i>+{row.planVariantLabels.length - 4}</i>}
+              </span>
+              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 资产中心图谱`} title={assetCenterUsageTitle(row.assetCenterUsage)}>
+                {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
+                {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
+              </span>
+              <span className="afs-studio__assetmatrix-status">
+                {rowMissingAssetCenter(row) && (
+                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
+                    未入图谱
+                  </i>
+                )}
+                {row.plannedUnusedLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
+                    计划未用 {row.plannedUnusedLabels.length}
+                  </i>
+                )}
+                {row.unplannedUseLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${row.unplannedUseLabels.join('、')}`}>
+                    未计划 {row.unplannedUseLabels.length}
+                  </i>
+                )}
+                {row.plannedVariantUnusedLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`计划形态未进入分镜：${row.plannedVariantUnusedLabels.join('、')}`}>
+                    形态未用 {row.plannedVariantUnusedLabels.length}
+                  </i>
+                )}
+                {row.unplannedVariantUseLabels.length > 0 && (
+                  <i className="afs-studio__assetmatrix-drift" title={`分镜形态未进入剧集计划：${row.unplannedVariantUseLabels.join('、')}`}>
+                    形态未计划 {row.unplannedVariantUseLabels.length}
+                  </i>
+                )}
+                {visibleIssues.length > 0 && (
+                  <i className="afs-studio__assetmatrix-issue" title={visibleIssues.slice(0, 4).map((issue) => issue.message).join('\n')}>
+                    {visibleIssues.length} 问题
+                  </i>
+                )}
+                {!rowHasStatusWarning(row) && (
+                  <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>
+                    正常
+                  </i>
+                )}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
