@@ -770,7 +770,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'drift' | 'issue' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'drift' | 'issue' | 'unlinked'
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
@@ -1640,6 +1640,7 @@ function AssetContinuityPanel() {
     a.asset.id.localeCompare(b.asset.id)
   )
   const filteredRows = sortedRows.filter((row) => {
+    if (assetMatrixFilter === 'planned') return row.planEpisodeLabels.length > 0
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
     if (assetMatrixFilter === 'issue') return rowHasIssue(row)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
@@ -1647,6 +1648,7 @@ function AssetContinuityPanel() {
   })
   const assetMatrixFilterOptions: { id: AssetMatrixFilter; label: string; count: number }[] = [
     { id: 'all', label: '全部', count: rows.length },
+    { id: 'planned', label: '已规划', count: plannedAssetCount },
     { id: 'drift', label: '计划差异', count: planDriftCount },
     { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
   ]
