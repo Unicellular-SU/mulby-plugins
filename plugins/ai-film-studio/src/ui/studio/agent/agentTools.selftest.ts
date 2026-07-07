@@ -166,7 +166,15 @@ check('get_workspace counts all episode storyboards', workspace.counts?.storyboa
 check('get_workspace exposes series bible summary', workspace.seriesBible?.logline === 'A hidden heir returns.' && workspace.seriesBible?.plannedEpisodeCount === 3, JSON.stringify(workspace.seriesBible))
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
-check('get_workspace exposes episode plans', workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string }>; requiredVariants?: Array<{ id: string }> } }) => item.id === 'ep2' && item.plan?.requiredAssets?.some((asset) => asset.id === 'hero') && item.plan?.requiredVariants?.some((variant) => variant.id === 'gala')), JSON.stringify(workspace.episodes))
+check(
+  'get_workspace exposes episode plan asset lineage',
+  workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }>; requiredVariants?: Array<{ id: string }> } }) =>
+    item.id === 'ep2' &&
+    item.plan?.requiredAssets?.some((asset) => asset.id === 'hero' && asset.libraryEntityId === 'el-hero' && asset.libraryEntityVersion === 1 && asset.librarySyncPolicy === 'snapshot') &&
+    item.plan?.requiredVariants?.some((variant) => variant.id === 'gala'),
+  ),
+  JSON.stringify(workspace.episodes),
+)
 check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
 check(
   'get_workspace exposes episode handoff summary',
@@ -216,6 +224,14 @@ check(
 
 const seriesBible = JSON.parse(await getSeriesBible.execute({}))
 check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
+check(
+  'get_series_bible exposes episode plan asset lineage',
+  seriesBible.episodes?.some((item: { episodeId: string; plan?: { requiredAssets?: Array<{ id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }> } }) =>
+    item.episodeId === 'ep2' &&
+    item.plan?.requiredAssets?.some((asset) => asset.id === 'hero' && asset.libraryEntityId === 'el-hero' && asset.libraryEntityVersion === 1 && asset.librarySyncPolicy === 'snapshot'),
+  ),
+  JSON.stringify(seriesBible.episodes),
+)
 check(
   'get_series_bible exposes asset-center usage for planning assets',
   seriesBible.availableAssets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>

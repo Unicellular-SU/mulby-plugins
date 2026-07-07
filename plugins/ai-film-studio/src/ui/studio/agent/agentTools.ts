@@ -293,7 +293,7 @@ function planView(doc: ProjectDoc, plan: EpisodePlan | undefined) {
   const requiredAssets = (plan?.requiredAssetIds ?? [])
     .map((id) => doc.assets.find((asset) => asset.id === id))
     .filter((asset): asset is Asset => !!asset)
-    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type }))
+    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, ...assetLineageView(asset) }))
   const requiredVariants = (plan?.requiredVariantIds ?? [])
     .map((variantId) => variantOptions(doc).find((variant) => variant.id === variantId))
     .filter((variant): variant is NonNullable<ReturnType<typeof variantOptions>[number]> => !!variant)
