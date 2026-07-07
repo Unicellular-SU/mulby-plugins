@@ -3846,6 +3846,28 @@ select.afs-toolbar__select,
   white-space: nowrap;
   font-weight: 600;
 }
+.afs-series__episode-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  cursor: pointer;
+}
+.afs-series__episode-copy:hover:not(:disabled) {
+  border-color: var(--afs-accent);
+  color: var(--afs-text);
+}
+.afs-series__episode-copy:disabled {
+  opacity: .42;
+  cursor: default;
+}
 .afs-series__episode-summary {
   display: inline-flex;
   align-items: center;

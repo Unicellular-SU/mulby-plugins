@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Download, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Download, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle, Copy } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -754,6 +754,10 @@ function toggleId(list: string[] | undefined, id: string): string[] {
   return [...set]
 }
 
+function episodePlanInputCount(plan: EpisodePlan | undefined): number {
+  return (plan?.requiredAssetIds?.length ?? 0) + (plan?.requiredVariantIds?.length ?? 0)
+}
+
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
 
 function SeriesTab() {
@@ -796,6 +800,13 @@ function SeriesTab() {
     if (missing > 0) createEpisodes(missing)
   }
   const patchPlan = (episode: Episode, patch: Partial<EpisodePlan>) => updateEpisodePlan(episode.id, patch)
+  const copyPreviousPlanInputs = (episode: Episode, previousEpisode: Episode) => {
+    const previousPlan = previousEpisode.plan ?? {}
+    patchPlan(episode, {
+      requiredAssetIds: previousPlan.requiredAssetIds ?? [],
+      requiredVariantIds: previousPlan.requiredVariantIds ?? [],
+    })
+  }
   const togglePlanAsset = (episode: Episode, plan: EpisodePlan, assetId: string) => {
     if (!(plan.requiredAssetIds ?? []).includes(assetId)) {
       patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, assetId) })
@@ -856,6 +867,7 @@ function SeriesTab() {
     }
   }
   const episodeReadiness = episodes.map((episode) => ({ episode, readiness: readinessForEpisode(episode) }))
+  const episodeIndexById = new Map(episodes.map((episode, index) => [episode.id, index]))
   const unplannedEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount === 0).length
   const riskyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.readinessIssueCount > 0).length
   const readyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0).length
@@ -1006,11 +1018,26 @@ function SeriesTab() {
           <div className="afs-series__episode-grid">
             {filteredEpisodeReadiness.map(({ episode, readiness }) => {
             const { plan, requiredAssetIds, requiredVariantIds, plannedInputCount, readinessIssueCount, summaryTitle } = readiness
+            const previousEpisode = episodes[(episodeIndexById.get(episode.id) ?? 0) - 1]
+            const previousPlanInputCount = episodePlanInputCount(previousEpisode?.plan)
+            const canCopyPreviousInputs = !!previousEpisode && previousPlanInputCount > 0
             return (
               <article key={episode.id} className="afs-series__episode">
                 <div className="afs-series__episode-head">
                   <b>E{episode.index + 1}</b>
                   <span className="afs-series__episode-title" title={episode.title}>{episode.title}</span>
+                  {previousEpisode && (
+                    <button
+                      type="button"
+                      className="afs-series__episode-copy"
+                      disabled={!canCopyPreviousInputs}
+                      title={canCopyPreviousInputs ? `复用 E${previousEpisode.index + 1} 的 ${previousPlanInputCount} 个生产输入` : `E${previousEpisode.index + 1} 还没有生产输入`}
+                      aria-label={`复用上一集生产输入到 E${episode.index + 1}`}
+                      onClick={() => copyPreviousPlanInputs(episode, previousEpisode)}
+                    >
+                      <Copy size={12} />
+                    </button>
+                  )}
                   <div className="afs-series__episode-summary" title={summaryTitle} aria-label={`E${episode.index + 1} 计划摘要`}>
                     <i>{plannedInputCount ? `计划 ${plannedInputCount}` : '未规划'}</i>
                     {readinessIssueCount > 0 ? <i className="is-warning">风险 {readinessIssueCount}</i> : plannedInputCount > 0 ? <i className="is-ready">就绪</i> : null}
