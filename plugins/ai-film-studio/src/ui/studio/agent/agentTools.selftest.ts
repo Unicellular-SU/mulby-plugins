@@ -621,6 +621,24 @@ check(
   ),
   JSON.stringify(ep2Storyboards.storyboards),
 )
+check(
+  'get_storyboards returns episode plan usage',
+  ep2Storyboards.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    ep2Storyboards.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(ep2Storyboards.plan),
+)
 
 const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' }))
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))
@@ -645,6 +663,24 @@ check(
     ),
   JSON.stringify(ep2Table.scenes),
 )
+check(
+  'get_storyboard_table returns episode plan usage',
+  ep2Table.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    ep2Table.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(ep2Table.plan),
+)
 
 const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
@@ -665,6 +701,24 @@ check(
     ),
   ),
   JSON.stringify(ep2Timeline.tracks),
+)
+check(
+  'get_timeline returns episode plan usage',
+  ep2Timeline.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    ep2Timeline.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(ep2Timeline.plan),
 )
 const missingEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 99 }))
 check('read tools reject invalid explicit episode selectors instead of falling back to current episode', !!missingEpisodeRead.error && !missingEpisodeRead.id, JSON.stringify(missingEpisodeRead))

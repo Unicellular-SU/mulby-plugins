@@ -1278,9 +1278,9 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const count = numberArg(a.count, sorted.length, 1, 200)
         const slice = sorted.slice(start, start + count)
         const includeAssets = boolArg(a.includeAssets, true)
-        const usageByEntity = includeAssets ? await loadIdentityUsageSafe() : undefined
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
-          ...episodeInfo(d, episode),
+          ...episodeInfoWithPlan(d, episode, usageByEntity),
           total: sorted.length,
           startIndex: start + 1,
           count: slice.length,
@@ -1381,7 +1381,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
         if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
-        return json({ ...episodeInfo(d, episode), scenes: storyboardTableView(d, storyboardTableForEpisode(d, episode), await loadIdentityUsageSafe()) })
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json({ ...episodeInfoWithPlan(d, episode, usageByEntity), scenes: storyboardTableView(d, storyboardTableForEpisode(d, episode), usageByEntity) })
       },
     },
     {
@@ -1407,7 +1408,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const includeClips = boolArg(a.includeClips, true)
         const usageByEntity = await loadIdentityUsageSafe()
         return json({
-          ...episodeInfo(d, episode),
+          ...episodeInfoWithPlan(d, episode, usageByEntity),
           tracks: [...trackForEpisode(d, episode)].sort((x, y) => x.order - y.order).map((t) => ({
             id: t.id,
             order: t.order,
