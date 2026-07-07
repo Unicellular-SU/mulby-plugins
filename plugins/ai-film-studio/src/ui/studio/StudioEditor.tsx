@@ -770,7 +770,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'appeared' | 'drift' | 'issue' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'appeared' | 'drift' | 'issue' | 'unlinked'
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
@@ -1612,6 +1612,9 @@ function AssetContinuityPanel() {
     row.unplannedUseLabels.length > 0 ||
     row.plannedVariantUnusedLabels.length > 0 ||
     row.unplannedVariantUseLabels.length > 0
+  const rowHasPlannedUnused = (row: (typeof rows)[number]) =>
+    row.plannedUnusedLabels.length > 0 ||
+    row.plannedVariantUnusedLabels.length > 0
   const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
@@ -1629,6 +1632,7 @@ function AssetContinuityPanel() {
   const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
   const missingAssetCenterCount = hubLoaded ? rows.filter(rowMissingAssetCenter).length : 0
   const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
+  const plannedUnusedCount = rows.filter(rowHasPlannedUnused).length
   const appearedAssetCount = rows.filter((row) => row.episodeLabels.length > 0).length
   const planDriftCount = rows.filter(rowHasPlanDrift).length
   const sortedRows = [...rows].sort((a, b) =>
@@ -1642,6 +1646,7 @@ function AssetContinuityPanel() {
   )
   const filteredRows = sortedRows.filter((row) => {
     if (assetMatrixFilter === 'planned') return row.planEpisodeLabels.length > 0
+    if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row)
     if (assetMatrixFilter === 'appeared') return row.episodeLabels.length > 0
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
     if (assetMatrixFilter === 'issue') return rowHasIssue(row)
@@ -1651,6 +1656,7 @@ function AssetContinuityPanel() {
   const assetMatrixFilterOptions: { id: AssetMatrixFilter; label: string; count: number }[] = [
     { id: 'all', label: '全部', count: rows.length },
     { id: 'planned', label: '已规划', count: plannedAssetCount },
+    { id: 'unused', label: '待落分镜', count: plannedUnusedCount },
     { id: 'appeared', label: '已出场', count: appearedAssetCount },
     { id: 'drift', label: '计划差异', count: planDriftCount },
     { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
@@ -1664,6 +1670,7 @@ function AssetContinuityPanel() {
         <span>{rows.length} 个资产</span>
         {plannedAssetCount > 0 && <span>{plannedAssetCount} 个进入剧集计划</span>}
         {appearedAssetCount > 0 && <span>{appearedAssetCount} 个已有分镜出场</span>}
+        {plannedUnusedCount > 0 && <span className="is-warning">{plannedUnusedCount} 个计划待落分镜</span>}
         {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
