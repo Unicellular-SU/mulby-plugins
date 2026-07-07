@@ -475,6 +475,7 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
           videoDesc: s.videoDesc,
           duration: s.duration,
           castNames: castNames(doc, s),
+          castAssets: storyboardCastAssets(doc, s, opts?.usageByEntity),
           dialogueCount: s.dialogues?.length ?? 0,
           state: s.state,
           hasKeyframe: !!s.keyframeImageId,

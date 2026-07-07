@@ -250,6 +250,24 @@ check(
 )
 check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
 check(
+  'get_workspace exposes storyboard cast asset usage summary',
+  workspace.storyboards?.some((item: { id: string; episodeId?: string; castAssets?: Array<{ assetId: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+    item.id === 'sb-ep2' &&
+    item.episodeId === 'ep2' &&
+    item.castAssets?.some(
+      (asset) =>
+        asset.assetId === 'hero' &&
+        asset.variantId === 'gala' &&
+        asset.variantKind === 'makeup' &&
+        asset.libraryEntityId === 'el-hero' &&
+        asset.libraryVariantId === 'lib-gala' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(workspace.storyboards),
+)
+check(
   'get_workspace exposes episode handoff summary',
   workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }> } }) =>
     item.id === 'ep2' &&
