@@ -774,9 +774,15 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'missingRef' | 'missingVariantRef' | 'library' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'duplicate' | 'missingRef' | 'missingVariantRef' | 'library' | 'unlinked'
 type AssetMatrixTypeFilter = 'all' | 'role' | 'scene' | 'prop'
 const ASSET_MATRIX_LINK_ATTENTION_LABELS = new Set(['有新版', '已归档', '已分叉', '旧链接'])
+const ASSET_MATRIX_DUPLICATE_ISSUE_CODES = new Set([
+  'duplicate_asset_name',
+  'duplicate_asset_alias',
+  'duplicate_library_entity_project_assets',
+  'cross_episode_duplicate_project_asset_candidate',
+])
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
@@ -1685,6 +1691,9 @@ function AssetContinuityPanel() {
     (!issue.episodeId && !issue.previousEpisodeId)
   const rowVisibleIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => row.issues.filter((issue) => issueMatchesEpisodeFilter(issue, episodeFilter))
   const rowHasVisibleIssue = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleIssues(row, episodeFilter).length > 0
+  const rowVisibleDuplicateIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
+    rowVisibleIssues(row, episodeFilter).filter((issue) => ASSET_MATRIX_DUPLICATE_ISSUE_CODES.has(issue.code))
+  const rowHasDuplicateRisk = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleDuplicateIssues(row, episodeFilter).length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowNeedsMainReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
     !row.asset.refImageId && (rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0 || rowVisibleEpisodeLabels(row, episodeFilter).length > 0)
@@ -1735,6 +1744,7 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'appeared') return rowVisibleEpisodeLabels(row, episodeFilter).length > 0
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row, episodeFilter)
     if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row, episodeFilter)
+    if (assetMatrixFilter === 'duplicate') return rowHasDuplicateRisk(row, episodeFilter)
     if (assetMatrixFilter === 'missingRef') return rowNeedsMainReference(row, episodeFilter)
     if (assetMatrixFilter === 'missingVariantRef') return rowNeedsVariantReference(row, episodeFilter)
     if (assetMatrixFilter === 'library') return rowHasLibraryStatusAttention(row)
@@ -1753,6 +1763,7 @@ function AssetContinuityPanel() {
   const appearedAssetCount = typeFilteredRows.filter((row) => rowVisibleEpisodeLabels(row).length > 0).length
   const planDriftCount = typeFilteredRows.filter((row) => rowHasPlanDrift(row)).length
   const issueAssetCount = typeFilteredRows.filter((row) => rowHasVisibleIssue(row)).length
+  const duplicateRiskCount = typeFilteredRows.filter((row) => rowHasDuplicateRisk(row)).length
   const missingMainReferenceCount = typeFilteredRows.filter((row) => rowNeedsMainReference(row)).length
   const missingVariantReferenceCount = typeFilteredRows.filter((row) => rowNeedsVariantReference(row)).length
   const libraryStatusCount = typeFilteredRows.filter((row) => rowHasLibraryStatusAttention(row)).length
@@ -1794,6 +1805,7 @@ function AssetContinuityPanel() {
       label: '质量',
       options: [
         { id: 'issue', label: '连续性问题', count: issueAssetCount },
+        { id: 'duplicate', label: '重复身份', count: duplicateRiskCount },
         { id: 'missingRef', label: '缺主图', count: missingMainReferenceCount },
         { id: 'missingVariantRef', label: '缺形态图', count: missingVariantReferenceCount },
         { id: 'library', label: '身份状态', count: libraryStatusCount },
@@ -1860,6 +1872,7 @@ function AssetContinuityPanel() {
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {missingMainReferenceCount > 0 && <span className="is-warning">{missingMainReferenceCount} 个缺主图</span>}
         {missingVariantReferenceCount > 0 && <span className="is-warning">{missingVariantReferenceCount} 个缺形态图</span>}
+        {duplicateRiskCount > 0 && <span className="is-warning">{duplicateRiskCount} 个重复身份风险</span>}
         {libraryStatusCount > 0 && <span className="is-warning">{libraryStatusCount} 个身份状态待确认</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
@@ -1954,6 +1967,9 @@ function AssetContinuityPanel() {
           const firstGeneratableMissingVariantRef = visibleMissingVariantRefs.find((entry) => entry.state !== 'generating' && !!row.asset.refImageId)
           const generatingVariantRefCount = visibleMissingVariantRefs.filter((entry) => entry.state === 'generating').length
           const visibleIssues = rowVisibleIssues(row)
+          const visibleDuplicateIssues = rowVisibleDuplicateIssues(row)
+          const duplicateRelatedAssetCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.relatedAssetIds ?? [])).size
+          const duplicateIdentityCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.libraryEntityId ? [issue.libraryEntityId] : [])).size
           return (
             <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
               <span className="afs-studio__assetmatrix-name" title={[row.asset.name, row.asset.aliases?.length ? `别名：${row.asset.aliases.join('、')}` : undefined].filter(Boolean).join('\n')}>
@@ -2022,6 +2038,14 @@ function AssetContinuityPanel() {
                 {visibleIssues.length > 0 && (
                   <i className="afs-studio__assetmatrix-issue" title={visibleIssues.slice(0, 4).map((issue) => issue.message).join('\n')}>
                     {visibleIssues.length} 问题
+                  </i>
+                )}
+                {visibleDuplicateIssues.length > 0 && (
+                  <i
+                    className="afs-studio__assetmatrix-drift"
+                    title={visibleDuplicateIssues.slice(0, 4).map((issue) => issue.message).join('\n')}
+                  >
+                    重复身份 {duplicateRelatedAssetCount || duplicateIdentityCount || visibleDuplicateIssues.length}
                   </i>
                 )}
                 {rowNeedsMainReference(row) && row.asset.state !== 'generating' && (
