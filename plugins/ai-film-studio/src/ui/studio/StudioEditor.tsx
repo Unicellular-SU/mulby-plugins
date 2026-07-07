@@ -758,6 +758,13 @@ function episodePlanInputCount(plan: EpisodePlan | undefined): number {
   return (plan?.requiredAssetIds?.length ?? 0) + (plan?.requiredVariantIds?.length ?? 0)
 }
 
+function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePlan> {
+  return {
+    requiredAssetIds: [...(plan?.requiredAssetIds ?? [])],
+    requiredVariantIds: [...(plan?.requiredVariantIds ?? [])],
+  }
+}
+
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
 
 function SeriesTab() {
@@ -801,11 +808,34 @@ function SeriesTab() {
   }
   const patchPlan = (episode: Episode, patch: Partial<EpisodePlan>) => updateEpisodePlan(episode.id, patch)
   const copyPreviousPlanInputs = (episode: Episode, previousEpisode: Episode) => {
-    const previousPlan = previousEpisode.plan ?? {}
-    patchPlan(episode, {
-      requiredAssetIds: previousPlan.requiredAssetIds ?? [],
-      requiredVariantIds: previousPlan.requiredVariantIds ?? [],
-    })
+    patchPlan(episode, episodePlanInputPatch(previousEpisode.plan))
+  }
+  const countSeedableUnplannedEpisodes = () => {
+    let carryInputs: Partial<EpisodePlan> | undefined
+    let count = 0
+    for (const episode of episodes) {
+      if (episodePlanInputCount(episode.plan) > 0) {
+        carryInputs = episodePlanInputPatch(episode.plan)
+        continue
+      }
+      if (episodePlanInputCount(carryInputs) > 0) count += 1
+      else carryInputs = undefined
+    }
+    return count
+  }
+  const seedUnplannedPlanInputsFromPrevious = () => {
+    let carryInputs: Partial<EpisodePlan> | undefined
+    for (const episode of episodes) {
+      if (episodePlanInputCount(episode.plan) > 0) {
+        carryInputs = episodePlanInputPatch(episode.plan)
+        continue
+      }
+      if (!carryInputs || episodePlanInputCount(carryInputs) <= 0) {
+        carryInputs = undefined
+        continue
+      }
+      patchPlan(episode, carryInputs)
+    }
   }
   const togglePlanAsset = (episode: Episode, plan: EpisodePlan, assetId: string) => {
     if (!(plan.requiredAssetIds ?? []).includes(assetId)) {
@@ -872,6 +902,7 @@ function SeriesTab() {
   const riskyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.readinessIssueCount > 0).length
   const readyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0).length
   const missingEpisodeCount = Math.max(0, plannedCount - episodes.length)
+  const seedableUnplannedEpisodeCount = countSeedableUnplannedEpisodes()
   const filteredEpisodeReadiness = episodeReadiness.filter(({ readiness }) => {
     if (seriesPlanFilter === 'unplanned') return readiness.plannedInputCount === 0
     if (seriesPlanFilter === 'risk') return readiness.readinessIssueCount > 0
@@ -1000,6 +1031,16 @@ function SeriesTab() {
               </button>
             )}
           </span>
+          {seedableUnplannedEpisodeCount > 0 && (
+            <button
+              type="button"
+              className="afs-series__bulk-copy"
+              title="把每个未规划剧集的生产输入复制自上一集；只复制资产和形态，不覆盖钩子、冲突或结尾"
+              onClick={seedUnplannedPlanInputsFromPrevious}
+            >
+              <Copy size={12} /> 沿用上集 {seedableUnplannedEpisodeCount}
+            </button>
+          )}
           <span className="afs-series__filters" aria-label="剧集规划筛选">
             {seriesFilterOptions.map((option) => (
               <button

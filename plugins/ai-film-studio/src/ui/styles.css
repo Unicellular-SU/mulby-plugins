@@ -3784,6 +3784,32 @@ select.afs-toolbar__select,
   background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2));
   color: var(--afs-text);
 }
+.afs-series__bulk-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  height: 24px;
+  max-width: 112px;
+  padding: 0 7px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-series__bulk-copy:hover {
+  border-color: var(--afs-accent);
+  color: var(--afs-text);
+}
+.afs-series__bulk-copy svg {
+  flex: 0 0 auto;
+}
 .afs-series__bible-grid,
 .afs-series__plan-grid {
   display: grid;
