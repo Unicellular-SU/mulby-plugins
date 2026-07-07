@@ -300,6 +300,31 @@ check(
   JSON.stringify(workspace.storyboards),
 )
 check(
+  'get_workspace exposes novel assigned episode plan usage',
+  workspace.novel?.some((chapter: { id: string; episodes?: Array<{ id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }> }) =>
+    chapter.id === 'ch2' &&
+    chapter.episodes?.some(
+      (episode) =>
+        episode.id === 'ep2' &&
+        episode.plan?.requiredAssets?.some(
+          (asset) =>
+            asset.id === 'hero' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ) &&
+        episode.plan?.requiredVariants?.some(
+          (variant) =>
+            variant.id === 'gala' &&
+            variant.assetCenterUsage?.entityId === 'el-hero' &&
+            variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ),
+    ),
+  ),
+  JSON.stringify(workspace.novel),
+)
+check(
   'get_workspace exposes episode handoff summary',
   workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }> } }) =>
     item.id === 'ep2' &&

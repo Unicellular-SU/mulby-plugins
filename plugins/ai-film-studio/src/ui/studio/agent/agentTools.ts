@@ -481,7 +481,15 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
           hasKeyframe: !!s.keyframeImageId,
         })),
     ),
-    novel: doc.novel.map((c) => ({ id: c.id, index: c.index + 1, title: c.title, textLength: c.text.length, event: c.event, eventState: c.eventState })),
+    novel: doc.novel.map((c) => ({
+      id: c.id,
+      index: c.index + 1,
+      title: c.title,
+      textLength: c.text.length,
+      event: c.event,
+      eventState: c.eventState,
+      episodes: chapterEpisodeRefs(doc, c.id, opts?.usageByEntity),
+    })),
   }
 }
 
