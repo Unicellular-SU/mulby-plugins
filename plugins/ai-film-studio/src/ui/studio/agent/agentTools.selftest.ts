@@ -218,13 +218,19 @@ const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))
 check('get_episode_handoff exposes prior recap and shared cast refs', handoff.episodeId === 'ep2' && handoff.recaps?.[0]?.episodeId === 'ep1' && handoff.sharedAssets?.some((cue: { assetId: string; label: string }) => cue.assetId === 'hero' && cue.label === 'Hero-Gala'), JSON.stringify(handoff))
 check(
   'get_episode_handoff exposes episode plan requirements',
-  handoff.plannedAssets?.some((item: { assetId: string; requiredVariantIds?: string[] }) => item.assetId === 'hero' && item.requiredVariantIds?.includes('gala')) &&
-    handoff.plannedVariants?.some((item: { assetId: string; variantId: string; variantKind?: string; scopeAppliesToEpisode: boolean }) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.scopeAppliesToEpisode === true),
+  handoff.plannedAssets?.some((item: { assetId: string; requiredVariantIds?: string[]; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }) =>
+    item.assetId === 'hero' && item.requiredVariantIds?.includes('gala') && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot',
+  ) &&
+    handoff.plannedVariants?.some((item: { assetId: string; variantId: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string; scopeAppliesToEpisode: boolean }) =>
+      item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala' && item.scopeAppliesToEpisode === true,
+    ),
   JSON.stringify(handoff),
 )
 check(
   'get_episode_handoff exposes structured variant kinds',
-  handoff.sharedAssets?.some((cue: { assetId: string; variantId?: string; variantKind?: string }) => cue.assetId === 'hero' && cue.variantId === 'gala' && cue.variantKind === 'makeup') &&
+  handoff.sharedAssets?.some((cue: { assetId: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string }) =>
+    cue.assetId === 'hero' && cue.variantId === 'gala' && cue.variantKind === 'makeup' && cue.libraryEntityId === 'el-hero' && cue.libraryEntityVersion === 1 && cue.librarySyncPolicy === 'snapshot' && cue.libraryVariantId === 'lib-gala',
+  ) &&
     handoff.suggestions?.some((suggestion: { kind: string; variantId?: string; variantKind?: string }) => suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId === 'gala' && suggestion.variantKind === 'makeup'),
   JSON.stringify(handoff),
 )

@@ -230,9 +230,11 @@ check('allows composing only after every storyboard has a usable selected clip',
 const handoffAssets: Asset[] = [
   {
     ...assets[0],
+    elementId: 'el-hero',
+    libraryLink: { entityId: 'el-hero', entityVersion: 2, syncPolicy: 'snapshot', variantMap: { gala: 'lib-gala', battle: 'lib-battle' } },
     variants: [
-      { id: 'gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep3'] },
-      { id: 'battle', label: 'Battle', variantKind: 'injury', refImageId: 'hero-battle' },
+      { id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep3'] },
+      { id: 'battle', label: 'Battle', libraryVariantId: 'lib-battle', variantKind: 'injury', refImageId: 'hero-battle' },
     ],
   },
   { id: 'prop', type: 'prop', name: 'Key', refImageId: 'key-main', state: 'done' },
@@ -259,9 +261,9 @@ const heroCue = handoff.sharedAssets.find((cue) => cue.assetId === 'hero')
 check('builds cross-episode handoff recaps from prior produced episodes', handoff.recaps.length === 1 && handoff.recaps[0].episodeId === 'ep1' && handoff.recaps[0].recap.includes('Battle'), JSON.stringify(handoff.recaps))
 check(
   'includes episode plan assets and variants in production handoff',
-  handoff.plannedAssets.some((item) => item.assetId === 'hero' && item.requiredVariantIds.includes('gala')) &&
+  handoff.plannedAssets.some((item) => item.assetId === 'hero' && item.requiredVariantIds.includes('gala') && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 2 && item.librarySyncPolicy === 'snapshot') &&
     handoff.plannedAssets.some((item) => item.assetId === 'prop') &&
-    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
+    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
   JSON.stringify({ plannedAssets: handoff.plannedAssets, plannedVariants: handoff.plannedVariants }),
 )
 check(
@@ -270,8 +272,12 @@ check(
     heroCue.label === 'Hero-Gala' &&
     heroCue.variantId === 'gala' &&
     heroCue.variantKind === 'makeup' &&
+    heroCue.libraryEntityId === 'el-hero' &&
+    heroCue.libraryEntityVersion === 2 &&
+    heroCue.librarySyncPolicy === 'snapshot' &&
+    heroCue.libraryVariantId === 'lib-gala' &&
     heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3' &&
-    heroCue.appearances.some((item) => item.variantDetails?.some((variant) => variant.variantId === 'battle' && variant.variantKind === 'injury')),
+    heroCue.appearances.some((item) => item.variantDetails?.some((variant) => variant.variantId === 'battle' && variant.variantKind === 'injury' && variant.libraryVariantId === 'lib-battle')),
   JSON.stringify(heroCue),
 )
 check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala' && item.variantKind === 'makeup') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala' && item.variantKind === 'makeup'), JSON.stringify(handoff.suggestions))

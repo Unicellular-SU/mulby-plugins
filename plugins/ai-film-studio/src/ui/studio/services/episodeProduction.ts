@@ -1,5 +1,5 @@
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
-import type { AssetVariant, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
+import type { AssetVariant, Clip, Episode, ProjectAssetLibraryLink, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
 import { buildContinuityReport, variantScopeIssue, type ContinuityIssue } from './continuityReport'
 
 export interface VariantImageRequest {
@@ -18,6 +18,7 @@ export interface EpisodeHandoffVariantDetail {
   variantId: string
   label: string
   variantKind?: AssetVariant['variantKind']
+  libraryVariantId?: string
 }
 
 export interface EpisodeHandoffAppearance {
@@ -34,8 +35,12 @@ export interface EpisodeHandoffAppearance {
 export interface EpisodeHandoffAssetCue {
   assetId: string
   label: string
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   variantId?: string
   variantKind?: AssetVariant['variantKind']
+  libraryVariantId?: string
   appearances: EpisodeHandoffAppearance[]
   carryForward?: boolean
   detail?: string
@@ -45,6 +50,9 @@ export interface EpisodeHandoffPlannedAsset {
   assetId: string
   assetName: string
   assetType: ProjectDoc['assets'][number]['type']
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   refImageId?: string
   requiredVariantIds: string[]
 }
@@ -55,6 +63,10 @@ export interface EpisodeHandoffPlannedVariant {
   variantId: string
   variantLabel: string
   variantKind?: AssetVariant['variantKind']
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
+  libraryVariantId?: string
   refImageId?: string
   scopeAppliesToEpisode: boolean
   appliesToEpisodeIds?: string[]
@@ -359,11 +371,23 @@ function variantForCastRef(asset: HandoffAsset | undefined, ref: StoryboardCastR
   return asset.variants?.find((variant) => variant.id === ref.variantId)
 }
 
+function handoffAssetLineage(asset: HandoffAsset): Pick<EpisodeHandoffAssetCue, 'libraryEntityId' | 'libraryEntityVersion' | 'librarySyncPolicy'> {
+  return {
+    libraryEntityId: asset.libraryLink?.entityId ?? asset.elementId,
+    libraryEntityVersion: asset.libraryLink?.entityVersion,
+    librarySyncPolicy: asset.libraryLink?.syncPolicy,
+  }
+}
+
+function handoffVariantLibraryId(asset: HandoffAsset, variant: HandoffVariant): string | undefined {
+  return variant.libraryVariantId ?? asset.libraryLink?.variantMap?.[variant.id]
+}
+
 function uniqueVariantDetails(details: EpisodeHandoffVariantDetail[]): EpisodeHandoffVariantDetail[] {
   const seen = new Set<string>()
   const result: EpisodeHandoffVariantDetail[] = []
   for (const detail of details) {
-    const key = `${detail.variantId}:${detail.label}:${detail.variantKind ?? ''}`
+    const key = `${detail.variantId}:${detail.label}:${detail.variantKind ?? ''}:${detail.libraryVariantId ?? ''}`
     if (seen.has(key)) continue
     seen.add(key)
     result.push(detail)
@@ -380,6 +404,7 @@ function variantDetailsForRefs(asset: HandoffAsset, refs: StoryboardCastRef[]): 
         variantId: ref.variantId,
         label: labelForCastRef(asset, ref),
         variantKind: variant.variantKind,
+        libraryVariantId: handoffVariantLibraryId(asset, variant),
       }]
     }),
   )
@@ -406,6 +431,8 @@ function plannedHandoffRequirements(episode: Episode, assets: Map<string, Handof
       variantId: owner.variant.id,
       variantLabel: owner.variant.label,
       variantKind: owner.variant.variantKind,
+      ...handoffAssetLineage(owner.asset),
+      libraryVariantId: handoffVariantLibraryId(owner.asset, owner.variant),
       refImageId: owner.variant.refImageId,
       scopeAppliesToEpisode: !appliesToEpisodeIds?.length || appliesToEpisodeIds.includes(episode.id),
       appliesToEpisodeIds,
@@ -422,6 +449,7 @@ function plannedHandoffRequirements(episode: Episode, assets: Map<string, Handof
       assetId: asset.id,
       assetName: asset.name,
       assetType: asset.type,
+      ...handoffAssetLineage(asset),
       refImageId: asset.refImageId,
       requiredVariantIds: requiredVariantIdsByAsset.get(asset.id) ?? [],
     }]
@@ -754,11 +782,14 @@ export function buildEpisodeProductionHandoff(
       .sort((a, b) => Math.abs(a.episodeIndex - episode.index) - Math.abs(b.episodeIndex - episode.index) || a.episodeIndex - b.episodeIndex)
       .slice(0, maxAppearances)
     if (appearances.length) {
+      const variant = variantForCastRef(asset, ref)
       sharedAssets.push({
         assetId: ref.assetId,
         label: labelForCastRef(asset, ref),
+        ...handoffAssetLineage(asset),
         variantId: ref.variantId,
-        variantKind: variantForCastRef(asset, ref)?.variantKind,
+        variantKind: variant?.variantKind,
+        libraryVariantId: variant ? handoffVariantLibraryId(asset, variant) : undefined,
         appearances,
         carryForward: sourceRef.carryForward,
         detail: sourceRef.carryForward && sourceRef.sourceEpisode
