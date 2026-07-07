@@ -762,6 +762,8 @@ const upsertScript = writeTools.find((tool) => tool.name === 'upsert_script')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
+const upsertAssetVariant = writeTools.find((tool) => tool.name === 'upsert_asset_variant')
+const generateAssetVariant = writeTools.find((tool) => tool.name === 'generate_asset_variant')
 const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series_bible')
 const upsertEpisodePlan = writeTools.find((tool) => tool.name === 'upsert_episode_plan')
 const applyHandoffSuggestion = writeTools.find((tool) => tool.name === 'apply_episode_handoff_suggestion')
@@ -776,7 +778,7 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !upsertAssetVariant || !generateAssetVariant || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -942,6 +944,34 @@ check(
     scopedAddedStoryboard.variants?.some((item: { variant?: { id: string; appliesToSceneIds?: string[] } }) => item.variant?.id === 'cloak' && item.variant.appliesToSceneIds?.includes('rooftop')),
   JSON.stringify(scopedAddedStoryboard),
 )
+check(
+  'add_storyboard returns scoped variant lineage and usage',
+  scopedAddedStoryboard.variants?.some((item: { assetId: string; variantId?: string; libraryEntityId?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+    item.assetId === 'hero' &&
+    item.variantId === 'cloak' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryVariantId === 'lib-cloak' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+  ),
+  JSON.stringify(scopedAddedStoryboard.variants),
+)
+
+const upsertedVariant = JSON.parse(await upsertAssetVariant.execute({ assetName: 'Hero', variantLabel: 'Cloak', desc: 'Cloak for rooftop scenes.' }))
+check(
+  'upsert_asset_variant returns variant lineage and usage',
+  upsertedVariant.assetId === 'hero' &&
+    upsertedVariant.assetName === 'Hero' &&
+    upsertedVariant.libraryEntityId === 'el-hero' &&
+    upsertedVariant.libraryEntityVersion === 1 &&
+    upsertedVariant.librarySyncPolicy === 'snapshot' &&
+    upsertedVariant.variantId === 'cloak' &&
+    upsertedVariant.variantKind === 'outfit' &&
+    upsertedVariant.libraryVariantId === 'lib-cloak' &&
+    upsertedVariant.assetCenterUsage?.entityId === 'el-hero' &&
+    upsertedVariant.assetCenterUsage?.currentProject?.appearanceLabels?.some((label: string) => label.includes('Cloak')),
+  JSON.stringify(upsertedVariant),
+)
 
 const updatedAsset = JSON.parse(await updateAsset.execute({ assetName: 'Hero', aliases: ['主角', '队长'], aliasMode: 'replace', desc: 'Lead role with a stable identity.' }))
 check(
@@ -1100,6 +1130,16 @@ check(
 
 await generateAsset.execute({ name: '队长' })
 check('generate_asset resolves asset aliases', writableDoc.assets.find((item) => item.id === 'hero')?.refImageId === 'generated-hero', JSON.stringify(writableDoc.assets.find((item) => item.id === 'hero')))
+const generatedVariant = JSON.parse(await generateAssetVariant.execute({ assetName: 'Hero', variantLabel: 'Cloak' }))
+check(
+  'generate_asset_variant returns generated variant lineage',
+  generatedVariant.variant?.refImageId === 'generated-hero-cloak' &&
+    generatedVariant.libraryEntityId === 'el-hero' &&
+    generatedVariant.librarySyncPolicy === 'forked' &&
+    generatedVariant.variantId === 'cloak' &&
+    generatedVariant.libraryVariantId === 'lib-cloak',
+  JSON.stringify(generatedVariant),
+)
 
 writableDoc.storyboards.push({
   ...storyboard('dup-hero-shot', writableDoc.storyboards.length, 'Duplicate hero appears.'),
@@ -1122,6 +1162,14 @@ check('write tools reject non-positive storyboard indexes', !!invalidStoryboardI
 
 const variantResult = JSON.parse(await setCastVariant.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Gala' }))
 check('set_storyboard_cast_variant writes selected episode storyboard', variantResult.episode?.episodeId === 'ep2' && variantResult.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'gala'), JSON.stringify(variantResult))
+check(
+  'set_storyboard_cast_variant returns variant lineage',
+  variantResult.variant?.assetId === 'hero' &&
+    variantResult.variant?.libraryEntityId === 'el-hero' &&
+    variantResult.variant?.librarySyncPolicy === 'forked' &&
+    variantResult.variant?.variantId === 'gala',
+  JSON.stringify(variantResult.variant),
+)
 
 const scopedVariantStoryboard = writableDoc.storyboards.find((item) => item.id === variantResult.storyboard?.id)
 if (scopedVariantStoryboard) scopedVariantStoryboard.sceneId = 'banquet'
@@ -1139,7 +1187,9 @@ check(
   'set_asset_variant_scope adds scene scope without replacing episode scope',
   sceneScopeResult.scopeKind === 'scene' &&
     scopedHeroVariant?.appliesToEpisodeIds?.includes('ep1') === true &&
-    scopedHeroVariant?.appliesToSceneIds?.includes('banquet') === true,
+    scopedHeroVariant?.appliesToSceneIds?.includes('banquet') === true &&
+    sceneScopeResult.result?.libraryEntityId === 'el-hero' &&
+    sceneScopeResult.result?.variantId === 'gala',
   JSON.stringify(sceneScopeResult),
 )
 

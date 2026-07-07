@@ -774,18 +774,31 @@ function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): 
   return { ids: [...new Set(ids)], assetIds: [...new Set(assetIds)], unresolved }
 }
 
-function variantView(asset: Asset, variantId: string) {
+function variantView(asset: Asset, variantId: string, opts?: { doc?: ProjectDoc; usageByEntity?: Record<string, IdentityAssetUsage> }) {
   const variant = asset.variants?.find((item) => item.id === variantId)
-  return variant ? { assetId: asset.id, assetName: asset.name, variant } : undefined
+  return variant
+    ? {
+        assetId: asset.id,
+        assetName: asset.name,
+        assetType: asset.type,
+        ...assetLineageView(asset),
+        variantId: variant.id,
+        variantLabel: variant.label,
+        variantKind: variant.variantKind,
+        libraryVariantId: variantLibraryIdView(asset, variant),
+        assetCenterUsage: opts?.doc ? assetCenterUsageView(opts.doc, asset, opts.usageByEntity) : undefined,
+        variant,
+      }
+    : undefined
 }
 
-function scopedVariantViews(doc: ProjectDoc | null | undefined, refs: StoryboardCastRef[]): Array<ReturnType<typeof variantView>> {
+function scopedVariantViews(doc: ProjectDoc | null | undefined, refs: StoryboardCastRef[], usageByEntity?: Record<string, IdentityAssetUsage>): Array<ReturnType<typeof variantView>> {
   if (!doc) return []
   return refs
     .filter((ref) => !!ref.variantId)
     .map((ref) => {
       const asset = doc.assets.find((item) => item.id === ref.assetId)
-      return asset && ref.variantId ? variantView(asset, ref.variantId) : undefined
+      return asset && ref.variantId ? variantView(asset, ref.variantId, { doc, usageByEntity }) : undefined
     })
     .filter((item): item is NonNullable<ReturnType<typeof variantView>> => !!item)
 }
@@ -2120,8 +2133,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           appliesToStoryboardIds: stringArrayArg(a.appliesToStoryboardIds),
         }
         get().updateAssetVariant(asset.id, variantId, Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)))
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
-        return json(variantView(nextAsset, variantId))
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json(variantView(nextAsset, variantId, { doc: nextDoc, usageByEntity }))
       },
     },
     {
@@ -2161,12 +2176,14 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const key = variantScopeKey(scopeKind)
         const patch: Partial<AssetVariant> = { [key]: nextVariantScopeIds(variant, key, scopeId, a.remove === true) }
         get().updateAssetVariant(asset.id, variant.id, patch)
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           scopeKind,
           scopeId,
           action: a.remove === true ? 'remove' : 'add',
-          result: variantView(nextAsset, variant.id),
+          result: variantView(nextAsset, variant.id, { doc: nextDoc, usageByEntity }),
         })
       },
     },
@@ -2193,8 +2210,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (!variant) return json({ error: '未找到变体', variants: asset.variants ?? [] })
         await get().generateAssetVariant(asset.id, variant.id)
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
-        return json(variantView(nextAsset, variant.id))
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json(variantView(nextAsset, variant.id, { doc: nextDoc, usageByEntity }))
       },
     },
     {
@@ -2243,7 +2262,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
-          variant: variant ? variantView(nextAsset ?? asset, variant.id) : undefined,
+          variant: variant ? variantView(nextAsset ?? asset, variant.id, next ? { doc: next, usageByEntity } : undefined) : undefined,
           storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
@@ -2434,7 +2453,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           id,
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           unresolvedCast: cast.unresolved,
-          variants: scopedVariantViews(next, cast.refs),
+          variants: scopedVariantViews(next, cast.refs, usageByEntity),
           storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
