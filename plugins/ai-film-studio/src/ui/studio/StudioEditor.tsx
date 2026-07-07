@@ -1563,6 +1563,7 @@ function AssetContinuityPanel() {
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const hubEntities = useAssetHubStore((s) => s.entities)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
+  const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
   const [assetMatrixEpisodeFilter, setAssetMatrixEpisodeFilter] = useState('all')
@@ -1630,7 +1631,7 @@ function AssetContinuityPanel() {
       const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
       const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
       const linkStatusLabels = projectAssetLinkStatusLabels(asset, linkedEntity)
-      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeEntries, planEpisodeEntries, variantEntries, planVariantEntries, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedEntries, unplannedUseEntries, plannedVariantUnusedEntries, unplannedVariantUseEntries, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkStatusLabels, issues }
+      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeEntries, planEpisodeEntries, variantEntries, planVariantEntries, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedEntries, unplannedUseEntries, plannedVariantUnusedEntries, unplannedVariantUseEntries, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkedEntity, linkStatusLabels, issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   const labelsForEpisodeFilter = (entries: { episodeId: string; label: string }[], episodeFilter = assetMatrixEpisodeFilter) =>
@@ -1791,6 +1792,12 @@ function AssetContinuityPanel() {
     if (!card) return
     card.scrollIntoView({ block: 'center', behavior: 'smooth' })
     card.focus({ preventScroll: true })
+  }
+  const syncAssetMatrixLibraryEntity = (row: (typeof rows)[number]) => {
+    if (!row.linkedEntity || row.linkedEntity.archived) return
+    if (row.asset.libraryLink?.syncPolicy === 'forked') return
+    if (!row.asset.libraryLink?.entityVersion || row.linkedEntity.version <= row.asset.libraryLink.entityVersion) return
+    if (syncAssetFromLibraryEntity(row.asset.id, row.linkedEntity)) window.mulby?.notification?.show('已同步资产中心新版快照', 'success')
   }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
@@ -1970,6 +1977,16 @@ function AssetContinuityPanel() {
                   <i className="afs-studio__assetmatrix-drift" title={`身份状态：${row.linkStatusLabels.join('、')}`}>
                     身份状态 {row.linkStatusLabels.filter((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label)).length}
                   </i>
+                )}
+                {row.asset.libraryLink?.syncPolicy !== 'forked' && row.linkedEntity && !row.linkedEntity.archived && row.asset.libraryLink?.entityVersion && row.linkedEntity.version > row.asset.libraryLink.entityVersion && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`同步资产中心新版：v${row.asset.libraryLink.entityVersion} -> v${row.linkedEntity.version}`}
+                    onClick={() => syncAssetMatrixLibraryEntity(row)}
+                  >
+                    同步
+                  </button>
                 )}
                 {!rowHasStatusWarning(row) && (
                   <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>

@@ -4241,6 +4241,9 @@ select.afs-toolbar__select,
 .afs-studio__assetmatrix-chipset i.afs-studio__assetmatrix-linkstatus.is-attention { color: var(--afs-warning); border-color: color-mix(in srgb, var(--afs-warning) 38%, var(--afs-border)); background: color-mix(in srgb, var(--afs-warning) 9%, var(--afs-panel-2)); }
 .afs-studio__assetmatrix-status { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; min-width: 0; }
 .afs-studio__assetmatrix-drift { max-width: 86px; min-height: 20px; padding: 2px 5px; border: 1px solid color-mix(in srgb, var(--afs-warning) 32%, var(--afs-border)); border-radius: 5px; background: color-mix(in srgb, var(--afs-warning) 8%, var(--afs-panel-2)); color: var(--afs-warning); font-size: 10px; font-style: normal; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.afs-studio__assetmatrix-action { min-height: 20px; padding: 2px 6px; border: 1px solid var(--afs-accent); border-radius: 5px; background: color-mix(in srgb, var(--afs-accent) 12%, var(--afs-panel-2)); color: var(--afs-text); font-size: 10px; line-height: 1.25; cursor: pointer; }
+.afs-studio__assetmatrix-action:hover,
+.afs-studio__assetmatrix-action:focus-visible { background: color-mix(in srgb, var(--afs-accent) 20%, var(--afs-panel-2)); outline: none; }
 .afs-studio__assetmatrix-issue { color: var(--afs-warning); border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border)); }
 .afs-studio__assetmatrix-ok { color: var(--afs-text-dim); }
 @media (max-width: 1180px) {
