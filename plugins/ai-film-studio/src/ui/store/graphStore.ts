@@ -22,6 +22,7 @@ import { synthSpeech } from '../services/tts'
 import { writeBase64, writeText, exportPath, toFileUrl } from '../services/fsutil'
 import { TEMPLATES, instantiateTemplate } from '../templates'
 import { useProviderStore } from './providerStore'
+import { markCanvasPortValueAsLibraryEntity, markCanvasPortValueAsProjectAsset } from '../services/canvasLineage'
 
 const PLUGIN_ID = 'ai-film-studio'
 const KEY_PROJECTS = 'projects' // 旧版单键（全量 ProjectData[]）；仅用于一次性迁移读取
@@ -701,81 +702,6 @@ function patchNode(id: string, patch: Partial<FilmNodeData>) {
   useGraphStore.setState({
     nodes: s.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)),
   })
-}
-
-function markPortValueAsProjectAsset(
-  value: PortValue,
-  assetId: string,
-  target: { projectId?: string; projectAssetId: string; projectVariantId?: string; libraryEntityId?: string; libraryVariantId?: string },
-  itemIndex?: number
-): { value: PortValue; changed: boolean } {
-  const metaPatch = (item: PortValue): PortValue => {
-    const existingProjectId = typeof item.meta?.projectId === 'string' ? item.meta.projectId : undefined
-    const projectId = target.projectId ?? existingProjectId
-    const hasLibraryTarget = !!target.libraryEntityId || !!target.libraryVariantId
-    return {
-      ...item,
-      meta: {
-        ...(item.meta ?? {}),
-        mediaAssetId: item.meta?.mediaAssetId ?? item.assetId,
-        ...(projectId ? { projectId } : {}),
-        projectAssetId: target.projectAssetId,
-        projectVariantId: target.projectVariantId,
-        libraryEntityId: target.libraryEntityId ?? item.meta?.libraryEntityId,
-        libraryVariantId: hasLibraryTarget ? target.libraryVariantId : item.meta?.libraryVariantId,
-        variantId: hasLibraryTarget ? target.libraryVariantId : item.meta?.variantId,
-        variantLabel: hasLibraryTarget ? undefined : item.meta?.variantLabel,
-        purpose: 'approved',
-      },
-    }
-  }
-  if (value.items?.length) {
-    const idx = typeof itemIndex === 'number' ? itemIndex : value.items.findIndex((item) => item.assetId === assetId)
-    const item = value.items[idx]
-    if (!item || item.assetId !== assetId) return { value, changed: false }
-    const nextItem = metaPatch(item)
-    const items = value.items.map((entry, index) => (index === idx ? nextItem : entry))
-    return {
-      value: idx === 0 ? { ...value, items, meta: nextItem.meta } : { ...value, items },
-      changed: true,
-    }
-  }
-  if (value.assetId !== assetId) return { value, changed: false }
-  return { value: metaPatch(value), changed: true }
-}
-
-function markPortValueAsLibraryEntity(
-  value: PortValue,
-  assetId: string,
-  target: { libraryEntityId: string; libraryVariantId?: string; variantLabel?: string; view?: string },
-  itemIndex?: number
-): { value: PortValue; changed: boolean } {
-  const metaPatch = (item: PortValue): PortValue => ({
-    ...item,
-    meta: {
-      ...(item.meta ?? {}),
-      mediaAssetId: item.meta?.mediaAssetId ?? item.assetId,
-      libraryEntityId: target.libraryEntityId,
-      libraryVariantId: target.libraryVariantId,
-      variantId: target.libraryVariantId,
-      variantLabel: target.libraryVariantId ? target.variantLabel ?? item.meta?.variantLabel : undefined,
-      view: target.view ?? item.meta?.view,
-      purpose: 'approved',
-    },
-  })
-  if (value.items?.length) {
-    const idx = typeof itemIndex === 'number' ? itemIndex : value.items.findIndex((item) => item.assetId === assetId)
-    const item = value.items[idx]
-    if (!item || item.assetId !== assetId) return { value, changed: false }
-    const nextItem = metaPatch(item)
-    const items = value.items.map((entry, index) => (index === idx ? nextItem : entry))
-    return {
-      value: idx === 0 ? { ...value, items, meta: nextItem.meta } : { ...value, items },
-      changed: true,
-    }
-  }
-  if (value.assetId !== assetId) return { value, changed: false }
-  return { value: metaPatch(value), changed: true }
 }
 
 // 执行单个节点（不切换全局 isRunning，由 runNode/runAll 包裹）
@@ -3148,7 +3074,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const node = get().nodes.find((n) => n.id === nodeId)
     const current = node?.data.outputs?.[port]
     if (!node || !current) return false
-    const next = markPortValueAsProjectAsset(current, assetId, target, itemIndex)
+    const next = markCanvasPortValueAsProjectAsset(current, assetId, target, itemIndex)
     if (!next.changed) return false
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: next.value }, error: undefined })
     await safeSave()
@@ -3159,7 +3085,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const node = get().nodes.find((n) => n.id === nodeId)
     const current = node?.data.outputs?.[port]
     if (!node || !current) return false
-    const next = markPortValueAsLibraryEntity(current, assetId, target, itemIndex)
+    const next = markCanvasPortValueAsLibraryEntity(current, assetId, target, itemIndex)
     if (!next.changed) return false
     patchNode(nodeId, { outputs: { ...node.data.outputs, [port]: next.value }, error: undefined })
     await safeSave()
