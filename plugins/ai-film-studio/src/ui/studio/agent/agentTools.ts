@@ -476,7 +476,7 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
       [...storyboardsForEpisode(doc, episode)]
         .sort((a, b) => a.index - b.index)
         .map((s) => ({
-          ...episodeInfo(doc, episode),
+          ...episodeInfoWithPlan(doc, episode, opts?.usageByEntity),
           id: s.id,
           index: s.index + 1,
           track: s.track,

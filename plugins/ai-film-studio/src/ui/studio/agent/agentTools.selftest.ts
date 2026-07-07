@@ -384,6 +384,27 @@ check(
   JSON.stringify(workspace.storyboards),
 )
 check(
+  'get_workspace exposes storyboard episode plan usage summary',
+  workspace.storyboards?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'sb-ep2' &&
+    item.plan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.plan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(workspace.storyboards),
+)
+check(
   'get_workspace exposes novel assigned episode plan usage',
   workspace.novel?.some((chapter: { id: string; episodes?: Array<{ id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }> }) =>
     chapter.id === 'ch2' &&
