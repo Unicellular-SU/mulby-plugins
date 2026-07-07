@@ -766,7 +766,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'drift' | 'issue'
+type AssetMatrixFilter = 'all' | 'drift' | 'issue' | 'unlinked'
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
@@ -1609,14 +1609,17 @@ function AssetContinuityPanel() {
     row.plannedVariantUnusedLabels.length > 0 ||
     row.unplannedVariantUseLabels.length > 0
   const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
+  const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   if (!rows.length) return null
   const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
   const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
+  const missingAssetCenterCount = hubLoaded ? rows.filter(rowMissingAssetCenter).length : 0
   const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
   const planDriftCount = rows.filter(rowHasPlanDrift).length
   const filteredRows = rows.filter((row) => {
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
     if (assetMatrixFilter === 'issue') return rowHasIssue(row)
+    if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   })
   const assetMatrixFilterOptions: { id: AssetMatrixFilter; label: string; count: number }[] = [
@@ -1624,6 +1627,7 @@ function AssetContinuityPanel() {
     { id: 'drift', label: '计划差异', count: planDriftCount },
     { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
   ]
+  if (hubLoaded) assetMatrixFilterOptions.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1633,6 +1637,7 @@ function AssetContinuityPanel() {
         {plannedAssetCount > 0 && <span>{plannedAssetCount} 个进入剧集计划</span>}
         {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
+        {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
