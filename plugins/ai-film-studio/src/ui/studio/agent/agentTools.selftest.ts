@@ -170,11 +170,18 @@ check('get_workspace exposes episode plans', workspace.episodes?.some((item: { i
 check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
 check(
   'get_workspace exposes episode handoff summary',
-  workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string }> } }) =>
+  workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }> } }) =>
     item.id === 'ep2' &&
     !!item.handoff?.suggestionCount &&
     !!item.handoff?.autoRepairableSuggestionCount &&
-    item.handoff?.suggestions?.some((suggestion) => suggestion.id === 'asset-image:hero' && suggestion.kind === 'generate_asset_ref_image'),
+    item.handoff?.suggestions?.some(
+      (suggestion) =>
+        suggestion.id === 'asset-image:hero' &&
+        suggestion.kind === 'generate_asset_ref_image' &&
+        suggestion.libraryEntityId === 'el-hero' &&
+        suggestion.libraryEntityVersion === 1 &&
+        suggestion.librarySyncPolicy === 'snapshot',
+    ),
   ),
   JSON.stringify(workspace.episodes),
 )
@@ -582,10 +589,12 @@ writableDoc.assets = [
     type: 'role',
     name: 'Hero',
     aliases: ['主角'],
+    elementId: 'el-hero',
+    libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot', variantMap: { cloak: 'lib-cloak' } },
     state: 'done',
     variants: [
       { id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep1'] },
-      { id: 'cloak', label: 'Cloak', appliesToEpisodeIds: ['ep1'] },
+      { id: 'cloak', label: 'Cloak', libraryVariantId: 'lib-cloak', variantKind: 'outfit', appliesToEpisodeIds: ['ep1'] },
     ],
   },
   { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
@@ -672,9 +681,30 @@ const cloakAfterHandoff = heroAfterHandoff?.variants?.find((item) => item.id ===
 check(
   'apply_episode_handoff_suggestion repairs planned handoff inputs',
   appliedHandoffSuggestions.episode?.episodeId === 'ep3' &&
-    appliedHandoffSuggestions.applied?.some((item: { kind: string; assetId?: string }) => item.kind === 'generate_asset_ref_image' && item.assetId === 'hero') &&
-    appliedHandoffSuggestions.applied?.some((item: { kind: string; variantId?: string }) => item.kind === 'add_variant_episode_scope' && item.variantId === 'cloak') &&
-    appliedHandoffSuggestions.applied?.some((item: { kind: string; variantId?: string }) => item.kind === 'generate_variant_ref_image' && item.variantId === 'cloak') &&
+    appliedHandoffSuggestions.applied?.some(
+      (item: { kind: string; assetId?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }) =>
+        item.kind === 'generate_asset_ref_image' &&
+        item.assetId === 'hero' &&
+        item.libraryEntityId === 'el-hero' &&
+        item.libraryEntityVersion === 1 &&
+        item.librarySyncPolicy === 'snapshot',
+    ) &&
+    appliedHandoffSuggestions.applied?.some(
+      (item: { kind: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string }) =>
+        item.kind === 'add_variant_episode_scope' &&
+        item.variantId === 'cloak' &&
+        item.variantKind === 'outfit' &&
+        item.libraryEntityId === 'el-hero' &&
+        item.libraryVariantId === 'lib-cloak',
+    ) &&
+    appliedHandoffSuggestions.applied?.some(
+      (item: { kind: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string }) =>
+        item.kind === 'generate_variant_ref_image' &&
+        item.variantId === 'cloak' &&
+        item.variantKind === 'outfit' &&
+        item.libraryEntityId === 'el-hero' &&
+        item.libraryVariantId === 'lib-cloak',
+    ) &&
     heroAfterHandoff?.refImageId === 'generated-hero' &&
     cloakAfterHandoff?.refImageId === 'generated-hero-cloak' &&
     cloakAfterHandoff?.appliesToEpisodeIds?.includes('ep3') === true &&

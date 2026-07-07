@@ -20,11 +20,26 @@ export interface EpisodeHandoffSuggestionApplyResult {
   reason?: string
   assetId?: string
   variantId?: string
+  variantKind?: EpisodeHandoffSuggestion['variantKind']
+  libraryEntityId?: EpisodeHandoffSuggestion['libraryEntityId']
+  libraryEntityVersion?: EpisodeHandoffSuggestion['libraryEntityVersion']
+  librarySyncPolicy?: EpisodeHandoffSuggestion['librarySyncPolicy']
+  libraryVariantId?: EpisodeHandoffSuggestion['libraryVariantId']
   patch?: Partial<AssetVariant>
 }
 
+function suggestionResultLineage(suggestion: EpisodeHandoffSuggestion): Pick<EpisodeHandoffSuggestionApplyResult, 'variantKind' | 'libraryEntityId' | 'libraryEntityVersion' | 'librarySyncPolicy' | 'libraryVariantId'> {
+  return {
+    variantKind: suggestion.variantKind,
+    libraryEntityId: suggestion.libraryEntityId,
+    libraryEntityVersion: suggestion.libraryEntityVersion,
+    librarySyncPolicy: suggestion.librarySyncPolicy,
+    libraryVariantId: suggestion.libraryVariantId,
+  }
+}
+
 function skipped(suggestion: EpisodeHandoffSuggestion, reason: string): EpisodeHandoffSuggestionApplyResult {
-  return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason }
+  return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason, ...suggestionResultLineage(suggestion) }
 }
 
 function episodeForLatestDoc(doc: ProjectDoc, episode: Episode): Episode {
@@ -42,12 +57,12 @@ export async function applyEpisodeHandoffSuggestion(
 
   if (suggestion.kind === 'generate_asset_ref_image') {
     await actions.generateAsset(suggestion.assetId)
-    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId }
+    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId, ...suggestionResultLineage(suggestion) }
   }
 
   if (suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId) {
     await actions.generateAssetVariant(suggestion.assetId, suggestion.variantId)
-    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId, variantId: suggestion.variantId }
+    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: suggestion.assetId, variantId: suggestion.variantId, ...suggestionResultLineage(suggestion) }
   }
 
   const doc = actions.getDoc()
@@ -66,7 +81,7 @@ export async function applyEpisodeHandoffSuggestion(
     )
     if (!patch) return skipped(suggestion, '无法解析要补充的作用域')
     actions.updateAssetVariant(asset.id, variant.id, patch)
-    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId: variant.id, patch }
+    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId: variant.id, patch, ...suggestionResultLineage(suggestion) }
   }
 
   if (suggestion.kind === 'create_episode_variant') {
@@ -85,7 +100,7 @@ export async function applyEpisodeHandoffSuggestion(
         actions.setStoryboardCastVariant(storyboard.id, asset.id, variantId)
       }
     }
-    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId }
+    return { id: suggestion.id, kind: suggestion.kind, applied: true, assetId: asset.id, variantId, ...suggestionResultLineage(suggestion) }
   }
 
   return skipped(suggestion, '暂不支持该建议类型')

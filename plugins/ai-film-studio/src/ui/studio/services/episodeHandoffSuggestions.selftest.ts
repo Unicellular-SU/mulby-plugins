@@ -67,11 +67,16 @@ const hero: Asset = {
   id: 'hero',
   type: 'role',
   name: 'Hero',
+  elementId: 'el-hero',
+  libraryLink: { entityId: 'el-hero', entityVersion: 3, syncPolicy: 'snapshot', variantMap: { cloak: 'lib-cloak' } },
   state: 'idle',
   variants: [
-    { id: 'cloak', label: 'Cloak', appliesToEpisodeIds: ['ep1'] },
+    { id: 'cloak', label: 'Cloak', libraryVariantId: 'lib-cloak', variantKind: 'outfit', appliesToEpisodeIds: ['ep1'] },
   ],
 }
+
+const heroLineage = { libraryEntityId: 'el-hero', libraryEntityVersion: 3, librarySyncPolicy: 'snapshot' as const }
+const cloakLineage = { ...heroLineage, libraryVariantId: 'lib-cloak', variantKind: 'outfit' as const }
 
 const sharedDoc = doc({
   currentEpisodeId: 'ep2',
@@ -122,8 +127,17 @@ const generatedMain = await applyEpisodeHandoffSuggestion(targetEpisode, {
   assetId: 'hero',
   label: 'Generate Hero',
   detail: 'missing main image',
+  ...heroLineage,
 }, actions)
-check('generates planned asset main image', generatedMain.applied === true && sharedDoc.assets[0].refImageId === 'generated-hero', JSON.stringify({ generatedMain, asset: sharedDoc.assets[0] }))
+check(
+  'generates planned asset main image',
+  generatedMain.applied === true &&
+    sharedDoc.assets[0].refImageId === 'generated-hero' &&
+    generatedMain.libraryEntityId === 'el-hero' &&
+    generatedMain.libraryEntityVersion === 3 &&
+    generatedMain.librarySyncPolicy === 'snapshot',
+  JSON.stringify({ generatedMain, asset: sharedDoc.assets[0] }),
+)
 
 const scopedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   id: 'scope-cloak',
@@ -133,8 +147,17 @@ const scopedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   scopeKind: 'episode',
   label: 'Scope Cloak',
   detail: 'missing episode scope',
+  ...cloakLineage,
 }, actions)
-check('adds planned variant episode scope', scopedVariant.applied === true && findVariant(sharedDoc, 'hero', 'cloak')?.appliesToEpisodeIds?.includes('ep2') === true, JSON.stringify({ scopedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }))
+check(
+  'adds planned variant episode scope',
+  scopedVariant.applied === true &&
+    findVariant(sharedDoc, 'hero', 'cloak')?.appliesToEpisodeIds?.includes('ep2') === true &&
+    scopedVariant.variantKind === 'outfit' &&
+    scopedVariant.libraryEntityId === 'el-hero' &&
+    scopedVariant.libraryVariantId === 'lib-cloak',
+  JSON.stringify({ scopedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }),
+)
 
 const generatedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   id: 'variant-ref',
@@ -143,8 +166,17 @@ const generatedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   variantId: 'cloak',
   label: 'Generate Cloak',
   detail: 'missing variant image',
+  ...cloakLineage,
 }, actions)
-check('generates planned variant reference image', generatedVariant.applied === true && findVariant(sharedDoc, 'hero', 'cloak')?.refImageId === 'generated-hero-cloak', JSON.stringify({ generatedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }))
+check(
+  'generates planned variant reference image',
+  generatedVariant.applied === true &&
+    findVariant(sharedDoc, 'hero', 'cloak')?.refImageId === 'generated-hero-cloak' &&
+    generatedVariant.variantKind === 'outfit' &&
+    generatedVariant.libraryEntityId === 'el-hero' &&
+    generatedVariant.libraryVariantId === 'lib-cloak',
+  JSON.stringify({ generatedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }),
+)
 
 const createdVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   id: 'create-episode-variant',
@@ -154,12 +186,16 @@ const createdVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
   detail: 'main image reused after prior state',
   variantLabel: 'Reveal makeup',
   variantPrompt: 'Hero with reveal makeup',
+  ...heroLineage,
 }, actions)
 const newVariant = sharedDoc.assets[0].variants?.find((variant) => variant.id === createdVariant.variantId)
 check(
   'creates episode variant and binds current storyboards',
   createdVariant.applied === true &&
     !!newVariant &&
+    createdVariant.libraryEntityId === 'el-hero' &&
+    createdVariant.librarySyncPolicy === 'snapshot' &&
+    !createdVariant.libraryVariantId &&
     newVariant.appliesToEpisodeIds?.includes('ep2') === true &&
     sharedDoc.storyboards[0].castRefs?.some((ref) => ref.assetId === 'hero' && ref.variantId === newVariant.id) === true,
   JSON.stringify({ createdVariant, newVariant, storyboard: sharedDoc.storyboards[0] }),
