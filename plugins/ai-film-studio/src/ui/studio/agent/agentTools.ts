@@ -899,7 +899,27 @@ function mediaRefView(ref: NonNullable<LibraryEntity['mediaRefs']>[number] | Lib
   }
 }
 
-function libraryEntityView(entity: LinkableLibraryEntity) {
+function identityAssetUsageView(entityId: string | undefined, usageByEntity?: Record<string, IdentityAssetUsage>, doc?: ProjectDoc | null) {
+  if (!entityId) return undefined
+  const usage = usageByEntity?.[entityId]
+  const currentProject = doc && usage ? usage.projects.find((project) => project.projectId === doc.meta.id) : undefined
+  if (!usage) return { entityId }
+  return {
+    entityId: usage.entityId,
+    projectCount: usage.projectCount,
+    projectAssetCount: usage.assetCount,
+    canvasNodeCount: usage.canvasNodeCount,
+    snapshotCount: usage.snapshotCount,
+    currentProject: currentProject
+      ? {
+          episodeLabels: currentProject.episodeLabels,
+          appearanceLabels: currentProject.appearanceLabels,
+        }
+      : undefined,
+  }
+}
+
+function libraryEntityView(entity: LinkableLibraryEntity, opts?: { doc?: ProjectDoc | null; usageByEntity?: Record<string, IdentityAssetUsage> }) {
   return {
     id: entity.id,
     kind: entity.kind,
@@ -921,6 +941,7 @@ function libraryEntityView(entity: LinkableLibraryEntity) {
       tags: variant.tags,
       mediaRefs: variant.mediaRefs?.map(mediaRefView),
     })),
+    assetCenterUsage: identityAssetUsageView(entity.id, opts?.usageByEntity, opts?.doc),
   }
 }
 
@@ -1967,11 +1988,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const resolved = await resolveLibraryEntityForAsset(asset, a)
+        const usageByEntity = await loadIdentityUsageSafe()
         if (!resolved.entity) {
           return json({
             error: resolved.error ?? '未找到身份资产',
-            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
-            candidates: resolved.candidates?.map(libraryEntityView),
+            asset: assetView(asset, { doc: d, includeImages: false, usageByEntity }),
+            candidates: resolved.candidates?.map((entity) => libraryEntityView(entity, { doc: d, usageByEntity })),
           })
         }
         const linked = get().linkAssetToLibraryEntity(asset.id, {
@@ -1983,11 +2005,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         })
         const nextDoc = get().doc ?? d
         const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
-        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           linked,
           asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }),
-          entity: libraryEntityView(resolved.entity),
+          entity: libraryEntityView(resolved.entity, { doc: nextDoc, usageByEntity }),
         })
       },
     },
@@ -2015,10 +2036,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const resolved = await resolveLibraryEntityIdsForAsset(asset, a)
         if (!resolved.ids.length) {
+          const usageByEntity = await loadIdentityUsageSafe()
           return json({
             error: resolved.error ?? '缺少要标记的身份资产 ID',
-            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
-            candidates: resolved.candidates?.map(libraryEntityView),
+            asset: assetView(asset, { doc: d, includeImages: false, usageByEntity }),
+            candidates: resolved.candidates?.map((entity) => libraryEntityView(entity, { doc: d, usageByEntity })),
           })
         }
         const marked = get().markAssetAsDistinctIdentity(asset.id, resolved.ids)
@@ -2084,18 +2106,18 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           libraryEntityId: a.libraryEntityId ?? a.entityId ?? projectAssetIdentityEntityId(asset),
           libraryEntityName: a.libraryEntityName ?? a.entityName,
         })
+        const usageByEntity = await loadIdentityUsageSafe()
         if (!resolved.entity?.name) {
           return json({
             error: resolved.error ?? '需要可读取的资产中心身份快照才能同步',
-            asset: await assetViewWithUsage(d, asset, { includeImages: false }),
-            candidates: resolved.candidates?.map(libraryEntityView),
+            asset: assetView(asset, { doc: d, includeImages: false, usageByEntity }),
+            candidates: resolved.candidates?.map((entity) => libraryEntityView(entity, { doc: d, usageByEntity })),
           })
         }
         const synced = get().syncAssetFromLibraryEntity(asset.id, resolved.entity as LibraryEntity)
         const nextDoc = get().doc ?? d
         const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
-        const usageByEntity = await loadIdentityUsageSafe()
-        return json({ synced, entity: libraryEntityView(resolved.entity), asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }) })
+        return json({ synced, entity: libraryEntityView(resolved.entity, { doc: nextDoc, usageByEntity }), asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }) })
       },
     },
     {

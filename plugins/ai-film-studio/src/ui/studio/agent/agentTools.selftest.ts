@@ -1135,6 +1135,23 @@ check(
   JSON.stringify(missingRefPublish),
 )
 
+const missingLibraryEntityLink = JSON.parse(await linkLibraryEntity.execute({ assetName: 'Hero', libraryEntityName: 'Missing Library Hero' }))
+check(
+  'library entity link errors expose candidate usage',
+  !!missingLibraryEntityLink.error &&
+    missingLibraryEntityLink.asset?.id === 'hero' &&
+    missingLibraryEntityLink.asset?.assetCenterUsage?.entityId === 'el-hero' &&
+    missingLibraryEntityLink.candidates?.some(
+      (entity: { id: string; assetCenterUsage?: { entityId?: string; projectCount?: number; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        entity.id === 'el-hero' &&
+        entity.assetCenterUsage?.entityId === 'el-hero' &&
+        entity.assetCenterUsage?.projectCount === 1 &&
+        entity.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        entity.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(missingLibraryEntityLink),
+)
+
 const linkedLibraryAsset = JSON.parse(await linkLibraryEntity.execute({ assetName: 'Hero', libraryEntityId: 'el-hero', entityVersion: 2 }))
 check(
   'link_project_asset_to_library_entity links without overwriting project fields',
@@ -1147,7 +1164,9 @@ check(
     linkedLibraryAsset.asset?.assetCenterUsage?.entityId === 'el-hero' &&
     linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
     linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala') &&
-    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Cloak'),
+    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Cloak') &&
+    linkedLibraryAsset.entity?.assetCenterUsage?.entityId === 'el-hero' &&
+    linkedLibraryAsset.entity?.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
   JSON.stringify(linkedLibraryAsset),
 )
 
@@ -1339,6 +1358,7 @@ check(
     syncedProjectAsset.asset?.libraryLink?.entityId === 'el-sync' &&
     syncedProjectAsset.asset?.libraryLink?.entityVersion === 4 &&
     syncedProjectAsset.asset?.assetCenterUsage?.entityId === 'el-sync' &&
+    syncedProjectAsset.entity?.assetCenterUsage?.entityId === 'el-sync' &&
     syncedProjectAsset.entity?.identity === 'same face, silver scar' &&
     syncedProjectAsset.entity?.voiceRef?.assetId === 'voice-synced' &&
     syncedProjectAsset.entity?.lora?.ref === 'synced-hero-lora' &&
