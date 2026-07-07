@@ -1,5 +1,5 @@
 import { makeAgentTools, makeProjectReadTools } from './agentTools'
-import type { Asset, AssetVariant, Episode, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef, StoryboardTableScene } from '../../domain/types'
+import type { Asset, AssetVariant, Clip, Episode, ProjectDoc, ProjectMeta, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import type { ProjectState } from '../../store/projectStore'
 import { projectAssetIdentityEntityId } from '../../services/assetHub'
 
@@ -506,6 +506,7 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
   let nextVariant = 1
   let nextScript = 1
   let nextStoryboard = 1
+  let nextClip = 1
 
   const syncCurrentEpisode = () => {
     const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
@@ -594,6 +595,33 @@ function makeWritableState(initial: ProjectDoc): ProjectState {
         variant.refImageId = `generated-${assetId}-${variantId}`
         variant.state = 'done'
       }
+    },
+    generateKeyframe: async (storyboardId: string) => {
+      const sb = current.storyboards.find((item) => item.id === storyboardId)
+      if (!sb) return
+      sb.keyframeImageId = `keyframe-${storyboardId}`
+      sb.state = 'done'
+    },
+    generateClip: async (storyboardId: string) => {
+      const sb = current.storyboards.find((item) => item.id === storyboardId)
+      if (!sb) return
+      let track = current.track.find((item) => item.storyboardIds.includes(storyboardId))
+      if (!track) {
+        track = { id: `track-${storyboardId}`, storyboardIds: [storyboardId], clipIds: [], order: current.track.length, duration: sb.duration } satisfies VideoTrack
+        current.track.push(track)
+      }
+      const clip: Clip = {
+        id: `clip-write-${nextClip++}`,
+        storyboardId,
+        trackId: track.id,
+        videoFilePath: `${storyboardId}.mp4`,
+        durationSec: track.duration ?? sb.duration,
+        state: 'done',
+        createdAt: nextClip,
+      }
+      current.clips.push(clip)
+      track.clipIds.push(clip.id)
+      track.selectClipId = clip.id
     },
     setCurrentEpisodeSeriesSkip: (skip: boolean) => {
       const episode = current.episodes?.find((item) => item.id === current.currentEpisodeId)
@@ -764,6 +792,8 @@ const addAsset = writeTools.find((tool) => tool.name === 'add_asset')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
+const generateKeyframe = writeTools.find((tool) => tool.name === 'generate_keyframe')
+const generateClip = writeTools.find((tool) => tool.name === 'generate_clip')
 const upsertAssetVariant = writeTools.find((tool) => tool.name === 'upsert_asset_variant')
 const generateAssetVariant = writeTools.find((tool) => tool.name === 'generate_asset_variant')
 const updateSeriesBible = writeTools.find((tool) => tool.name === 'update_series_bible')
@@ -780,7 +810,7 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addAsset || !addStoryboard || !updateAsset || !generateAsset || !upsertAssetVariant || !generateAssetVariant || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addAsset || !addStoryboard || !updateAsset || !generateAsset || !generateKeyframe || !generateClip || !upsertAssetVariant || !generateAssetVariant || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -1034,6 +1064,39 @@ check(
     linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala') &&
     linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Cloak'),
   JSON.stringify(linkedLibraryAsset),
+)
+
+const keyframeResult = JSON.parse(await generateKeyframe.execute({ episodeTitle: 'Second', index: 3 }))
+check(
+  'generate_keyframe returns storyboard asset usage',
+  keyframeResult.generated === true &&
+    keyframeResult.episode?.episodeId === 'ep2' &&
+    keyframeResult.storyboard?.keyframeImageId === `keyframe-${keyframeResult.storyboard?.id}` &&
+    keyframeResult.storyboard?.castAssets?.some(
+      (item: { assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+        item.assetId === 'hero' &&
+        item.variantId === 'cloak' &&
+        item.assetCenterUsage?.entityId === 'el-hero' &&
+        item.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(keyframeResult),
+)
+
+const clipResult = JSON.parse(await generateClip.execute({ episodeTitle: 'Second', index: 3 }))
+check(
+  'generate_clip returns storyboard asset usage and clips',
+  clipResult.generated === true &&
+    clipResult.episode?.episodeId === 'ep2' &&
+    clipResult.storyboard?.id === keyframeResult.storyboard?.id &&
+    clipResult.clips?.some((clip: { storyboardId: string; state?: string; videoFilePath?: string }) => clip.storyboardId === keyframeResult.storyboard?.id && clip.state === 'done' && !!clip.videoFilePath) &&
+    clipResult.storyboard?.castAssets?.some(
+      (item: { assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+        item.assetId === 'hero' &&
+        item.variantId === 'cloak' &&
+        item.assetCenterUsage?.entityId === 'el-hero' &&
+        item.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(clipResult),
 )
 
 const distinctIdentity = JSON.parse(await markDistinctIdentity.execute({ assetName: 'Hero', libraryEntityIds: ['el-rival', 'el-hero'] }))
