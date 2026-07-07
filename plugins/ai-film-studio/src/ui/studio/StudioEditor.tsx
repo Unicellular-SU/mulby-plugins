@@ -1688,6 +1688,7 @@ function AssetContinuityPanel() {
   const searchFilteredRows = assetMatrixSearchKey
     ? sortedRows.filter((row) => [row.asset.name, ...(row.asset.aliases ?? [])].some((value) => normalizeAssetLookup(value).includes(assetMatrixSearchKey)))
     : sortedRows
+  const episodeOptionRows = searchFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const episodeFilteredRows = searchFilteredRows.filter((row) => assetMatrixEpisodeFilter === 'all' || rowMatchesEpisode(row, assetMatrixEpisodeFilter))
   const typeFilteredRows = episodeFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const issueCount = typeFilteredRows.reduce((sum, row) => sum + rowVisibleIssues(row).length, 0)
@@ -1711,6 +1712,7 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   })
+  const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
   const assetMatrixTypeOptions: { id: AssetMatrixTypeFilter; label: string; count: number }[] = [
     { id: 'all', label: '全部类型', count: episodeFilteredRows.length },
     { id: 'role', label: '人物', count: episodeFilteredRows.filter((row) => row.asset.type === 'role').length },
@@ -1718,11 +1720,11 @@ function AssetContinuityPanel() {
     { id: 'prop', label: '物品', count: episodeFilteredRows.filter((row) => row.asset.type === 'prop').length },
   ]
   const assetMatrixEpisodeOptions = [
-    { id: 'all', label: '全部剧集', count: searchFilteredRows.length },
+    { id: 'all', label: '全部剧集', count: episodeOptionRows.length },
     ...episodes.map((episode) => ({
       id: episode.id,
       label: `E${episode.index + 1}${episode.title ? ` ${episode.title}` : ''}`,
-      count: searchFilteredRows.filter((row) => rowMatchesEpisode(row, episode.id)).length,
+      count: episodeOptionRows.filter((row) => rowMatchesEpisode(row, episode.id)).length,
     })),
   ]
   const assetMatrixFilterGroups: { label: string; options: { id: AssetMatrixFilter; label: string; count: number }[] }[] = [
@@ -1776,7 +1778,7 @@ function AssetContinuityPanel() {
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
-        {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{rows.length}</span>}
+        {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
           <label className="afs-studio__assetmatrix-search">
