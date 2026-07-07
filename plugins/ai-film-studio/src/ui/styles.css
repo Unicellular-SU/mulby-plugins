@@ -4232,6 +4232,9 @@ select.afs-toolbar__select,
 .afs-studio__assetmatrix-name b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .afs-studio__assetmatrix-name em { flex: 0 0 auto; font-style: normal; font-size: 10px; color: var(--afs-text-dim); }
 .afs-studio__assetmatrix-name small { flex: 0 0 auto; max-width: 48px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--afs-accent); }
+.afs-studio__assetmatrix-jump { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); cursor: pointer; }
+.afs-studio__assetmatrix-jump:hover,
+.afs-studio__assetmatrix-jump:focus-visible { border-color: var(--afs-accent); color: var(--afs-text); outline: none; }
 .afs-studio__assetmatrix-chipset { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; min-width: 0; }
 .afs-studio__assetmatrix-chipset i, .afs-studio__assetmatrix-issue, .afs-studio__assetmatrix-ok { max-width: 92px; min-height: 20px; padding: 2px 5px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 10px; font-style: normal; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .afs-studio__assetmatrix-status { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; min-width: 0; }
@@ -4262,6 +4265,7 @@ select.afs-toolbar__select,
 /* 工作台 · 资产/分镜卡片（阶段2d） */
 .afs-studio__cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 .afs-studio__assetcard { border: 1px solid var(--afs-border); border-radius: 10px; background: var(--afs-panel); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.afs-studio__assetcard:focus { outline: 2px solid var(--afs-accent); outline-offset: 2px; }
 .afs-studio__thumb { position: relative; height: 120px; border-radius: 7px; background: var(--afs-panel-2); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .afs-studio__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .afs-studio__err { position: absolute; top: 4px; right: 4px; color: var(--afs-danger); background: color-mix(in srgb, #000 40%, transparent); border-radius: 4px; padding: 2px; display: inline-flex; }

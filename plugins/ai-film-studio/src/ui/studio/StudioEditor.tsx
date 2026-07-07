@@ -103,6 +103,10 @@ function assetMatrixChipsetTitle(label: string, values: string[], empty: string)
   return `${label}：${values.length ? values.join('、') : empty}`
 }
 
+function studioAssetDomId(assetId: string): string {
+  return `afs-studio-asset-${encodeURIComponent(assetId)}`
+}
+
 export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const closeProject = useProjectStore((s) => s.closeProject)
@@ -1772,6 +1776,12 @@ function AssetContinuityPanel() {
     setAssetMatrixTypeFilter('all')
     setAssetMatrixFilter('all')
   }
+  const jumpToAssetCard = (asset: Asset) => {
+    const card = document.getElementById(studioAssetDomId(asset.id)) as HTMLElement | null
+    if (!card) return
+    card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    card.focus({ preventScroll: true })
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1881,6 +1891,15 @@ function AssetContinuityPanel() {
                 <b>{row.asset.name}</b>
                 <em>{typeLabel(row.asset.type)}</em>
                 {!!row.asset.aliases?.length && <small>别名 {row.asset.aliases.length}</small>}
+                <button
+                  type="button"
+                  className="afs-studio__assetmatrix-jump"
+                  title={`定位到项目资产卡：${row.asset.name}`}
+                  aria-label={`定位到项目资产卡：${row.asset.name}`}
+                  onClick={() => jumpToAssetCard(row.asset)}
+                >
+                  <Link2 size={11} />
+                </button>
               </span>
               <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`} title={assetMatrixChipsetTitle('出现剧集', visibleEpisodeLabels, '未出场')}>
                 {visibleEpisodeLabels.length ? visibleEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
@@ -2044,7 +2063,7 @@ function AssetCard({ asset }: { asset: Asset }) {
     if (linkedEntityId && !hubLoaded) void refreshAssetHub()
   }, [hubLoaded, linkedEntityId, refreshAssetHub])
   return (
-    <div className="afs-studio__assetcard">
+    <div id={studioAssetDomId(asset.id)} className="afs-studio__assetcard" tabIndex={-1}>
       {viewer && asset.refImageId && (
         <StudioImageViewer
           assetId={asset.refImageId}
