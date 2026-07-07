@@ -1690,6 +1690,8 @@ function AssetContinuityPanel() {
     },
   ]
   if (hubLoaded) assetMatrixFilterGroups[2].options.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
+  const activeFilterOption = assetMatrixFilterGroups.flatMap((group) => group.options).find((option) => option.id === assetMatrixFilter)
+  const activeFilterLabel = activeFilterOption?.label ?? '当前'
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1705,6 +1707,7 @@ function AssetContinuityPanel() {
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
+        {assetMatrixFilter !== 'all' && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{rows.length}</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
           {assetMatrixFilterGroups.map((group) => (
@@ -1735,7 +1738,16 @@ function AssetContinuityPanel() {
         <span>状态</span>
       </div>
       <div className="afs-studio__assetmatrix-rows">
-        {filteredRows.length === 0 && <span className="afs-studio__assetmatrix-empty">当前筛选下没有资产</span>}
+        {filteredRows.length === 0 && (
+          <span className="afs-studio__assetmatrix-empty">
+            当前没有符合「{activeFilterLabel}」筛选的资产
+            {assetMatrixFilter !== 'all' && (
+              <button type="button" onClick={() => setAssetMatrixFilter('all')}>
+                显示全部
+              </button>
+            )}
+          </span>
+        )}
         {filteredRows.map((row) => (
           <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
             <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
