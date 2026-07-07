@@ -85,6 +85,10 @@ export interface EpisodeHandoffSuggestion {
   label: string
   detail: string
   autoRepairable?: boolean
+  libraryEntityId?: string
+  libraryEntityVersion?: number
+  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
+  libraryVariantId?: string
   variantLabel?: string
   variantKind?: AssetVariant['variantKind']
   variantDesc?: string
@@ -383,6 +387,13 @@ function handoffVariantLibraryId(asset: HandoffAsset, variant: HandoffVariant): 
   return variant.libraryVariantId ?? asset.libraryLink?.variantMap?.[variant.id]
 }
 
+function handoffSuggestionLineage(asset: HandoffAsset, variant?: HandoffVariant): Pick<EpisodeHandoffSuggestion, 'libraryEntityId' | 'libraryEntityVersion' | 'librarySyncPolicy' | 'libraryVariantId'> {
+  return {
+    ...handoffAssetLineage(asset),
+    libraryVariantId: variant ? handoffVariantLibraryId(asset, variant) : undefined,
+  }
+}
+
 function uniqueVariantDetails(details: EpisodeHandoffVariantDetail[]): EpisodeHandoffVariantDetail[] {
   const seen = new Set<string>()
   const result: EpisodeHandoffVariantDetail[] = []
@@ -663,11 +674,13 @@ export function buildEpisodeProductionHandoff(
       label: `标记「${variant.label}」适用${target}`,
       detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于${target}。`,
       autoRepairable: true,
+      ...handoffSuggestionLineage(asset, variant),
       variantKind: variant.variantKind,
     })
   }
   for (const plannedAsset of planned.plannedAssets) {
     if (plannedAsset.refImageId) continue
+    const asset = assets.get(plannedAsset.assetId)
     addSuggestion({
       id: `asset-image:${plannedAsset.assetId}`,
       kind: 'generate_asset_ref_image',
@@ -675,6 +688,7 @@ export function buildEpisodeProductionHandoff(
       label: `生成「${plannedAsset.assetName}」主参考图`,
       detail: `本集计划要求项目资产「${plannedAsset.assetName}」，但它还没有主参考图。生成分镜或关键帧前建议先补齐。`,
       autoRepairable: true,
+      ...(asset ? handoffSuggestionLineage(asset) : {}),
     })
   }
   for (const plannedVariant of planned.plannedVariants) {
@@ -691,6 +705,7 @@ export function buildEpisodeProductionHandoff(
         label: `标记「${variant.label}」适用于E${episode.index + 1}`,
         detail: `本集计划要求 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}「${episode.title}」。建议生成分镜前先把本集加入适用范围。`,
         autoRepairable: true,
+        ...handoffSuggestionLineage(asset, variant),
         variantKind: variant.variantKind,
       })
     }
@@ -703,6 +718,7 @@ export function buildEpisodeProductionHandoff(
         label: `生成「${asset.name}-${variant.label}」参考图`,
         detail: `本集计划要求该形态/妆容，但它还没有独立参考图。建议生成关键帧前先补齐。`,
         autoRepairable: true,
+        ...handoffSuggestionLineage(asset, variant),
         variantKind: variant.variantKind,
         disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
       })
@@ -726,6 +742,7 @@ export function buildEpisodeProductionHandoff(
         label: `生成「${asset.name}」主参考图`,
         detail: '当前集引用了该资产，但它还没有主参考图。',
         autoRepairable: true,
+        ...handoffSuggestionLineage(asset),
       })
     }
     if (!sourceRef.carryForward && ref.variantId) {
@@ -742,6 +759,7 @@ export function buildEpisodeProductionHandoff(
               label: `确认「${variant.label}」为本集形态`,
               detail: `上一相关剧集 E${previous.episode.index + 1}「${previous.episode.title}」使用过 ${labelForCastRef(asset, previous.ref)}，当前集切到 ${asset.name}-${variant.label} 但尚未标记适用本集；若这是明确换装/妆容变化，建议标记本集适用，否则回到分镜沿用上一形态。`,
               autoRepairable: true,
+              ...handoffSuggestionLineage(asset, variant),
               variantKind: variant.variantKind,
             })
           }
@@ -755,6 +773,7 @@ export function buildEpisodeProductionHandoff(
             label: `生成「${asset.name}-${variant.label}」参考图`,
             detail: '当前集引用了该形态，但它还没有独立参考图。',
             autoRepairable: true,
+            ...handoffSuggestionLineage(asset, variant),
             variantKind: variant.variantKind,
             disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
           })
@@ -813,6 +832,7 @@ export function buildEpisodeProductionHandoff(
           label: previousVariantAppearance ? `承接「${asset.name}」上一形态` : `新建并应用「${asset.name}」本集形态`,
           detail: stateRegressionDetail ?? `该资产在其他集也出现过；如果 E${episode.index + 1} 有新妆容、服装或状态，先建本集专属形态再生成参考图。`,
           autoRepairable: true,
+          ...handoffSuggestionLineage(asset),
           ...seed,
         })
       }

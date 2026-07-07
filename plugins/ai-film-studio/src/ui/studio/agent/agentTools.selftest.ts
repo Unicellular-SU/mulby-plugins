@@ -247,7 +247,9 @@ check(
   handoff.sharedAssets?.some((cue: { assetId: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string }) =>
     cue.assetId === 'hero' && cue.variantId === 'gala' && cue.variantKind === 'makeup' && cue.libraryEntityId === 'el-hero' && cue.libraryEntityVersion === 1 && cue.librarySyncPolicy === 'snapshot' && cue.libraryVariantId === 'lib-gala',
   ) &&
-    handoff.suggestions?.some((suggestion: { kind: string; variantId?: string; variantKind?: string }) => suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId === 'gala' && suggestion.variantKind === 'makeup'),
+    handoff.suggestions?.some((suggestion: { kind: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; libraryVariantId?: string }) =>
+      suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId === 'gala' && suggestion.variantKind === 'makeup' && suggestion.libraryEntityId === 'el-hero' && suggestion.libraryEntityVersion === 1 && suggestion.librarySyncPolicy === 'snapshot' && suggestion.libraryVariantId === 'lib-gala',
+    ),
   JSON.stringify(handoff),
 )
 check(

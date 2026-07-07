@@ -280,7 +280,12 @@ check(
     heroCue.appearances.some((item) => item.variantDetails?.some((variant) => variant.variantId === 'battle' && variant.variantKind === 'injury' && variant.libraryVariantId === 'lib-battle')),
   JSON.stringify(heroCue),
 )
-check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala' && item.variantKind === 'makeup') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala' && item.variantKind === 'makeup'), JSON.stringify(handoff.suggestions))
+check(
+  'suggests handoff fixes with asset-center lineage',
+  handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 2 && item.librarySyncPolicy === 'snapshot' && item.libraryVariantId === 'lib-gala') &&
+    handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala'),
+  JSON.stringify(handoff.suggestions),
+)
 check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))
 const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
 check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
