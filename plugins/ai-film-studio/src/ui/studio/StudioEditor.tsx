@@ -99,6 +99,10 @@ function assetCenterUsageTitle(usage: IdentityAssetUsage | undefined): string {
   return [...projectLines, ...canvasLines, ...snapshotLines].filter(Boolean).join('\n') || '暂未发现资产中心、画布或快照引用'
 }
 
+function assetMatrixChipsetTitle(label: string, values: string[], empty: string): string {
+  return `${label}：${values.length ? values.join('、') : empty}`
+}
+
 export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const closeProject = useProjectStore((s) => s.closeProject)
@@ -1662,19 +1666,19 @@ function AssetContinuityPanel() {
               <b>{row.asset.name}</b>
               <em>{typeLabel(row.asset.type)}</em>
             </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`}>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`} title={assetMatrixChipsetTitle('出现剧集', row.episodeLabels, '未出场')}>
               {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
               {row.episodeLabels.length > 8 && <i>+{row.episodeLabels.length - 8}</i>}
             </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`}>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`} title={assetMatrixChipsetTitle('计划剧集', row.planEpisodeLabels, '未计划')}>
               {row.planEpisodeLabels.length ? row.planEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未计划</i>}
               {row.planEpisodeLabels.length > 8 && <i>+{row.planEpisodeLabels.length - 8}</i>}
             </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`}>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`} title={assetMatrixChipsetTitle('使用形态', row.variantLabels, '未绑定形态')}>
               {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
               {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
             </span>
-            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`}>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`} title={assetMatrixChipsetTitle('计划形态', row.planVariantLabels, '未计划形态')}>
               {row.planVariantLabels.length ? row.planVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未计划形态</i>}
               {row.planVariantLabels.length > 4 && <i>+{row.planVariantLabels.length - 4}</i>}
             </span>
