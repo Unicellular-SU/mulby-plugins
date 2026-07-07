@@ -1663,17 +1663,32 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   })
-  const assetMatrixFilterOptions: { id: AssetMatrixFilter; label: string; count: number }[] = [
-    { id: 'all', label: '全部', count: rows.length },
-    { id: 'planned', label: '已规划', count: plannedAssetCount },
-    { id: 'unused', label: '待落分镜', count: plannedUnusedCount },
-    { id: 'unplanned', label: '计划外', count: unplannedUseCount },
-    { id: 'variant', label: '形态差异', count: variantDriftCount },
-    { id: 'appeared', label: '已出场', count: appearedAssetCount },
-    { id: 'drift', label: '计划差异', count: planDriftCount },
-    { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
+  const assetMatrixFilterGroups: { label: string; options: { id: AssetMatrixFilter; label: string; count: number }[] }[] = [
+    {
+      label: '范围',
+      options: [
+        { id: 'all', label: '全部', count: rows.length },
+        { id: 'planned', label: '已规划', count: plannedAssetCount },
+        { id: 'appeared', label: '已出场', count: appearedAssetCount },
+      ],
+    },
+    {
+      label: '差异',
+      options: [
+        { id: 'unused', label: '待落分镜', count: plannedUnusedCount },
+        { id: 'unplanned', label: '计划外', count: unplannedUseCount },
+        { id: 'variant', label: '形态差异', count: variantDriftCount },
+        { id: 'drift', label: '计划差异', count: planDriftCount },
+      ],
+    },
+    {
+      label: '质量',
+      options: [
+        { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
+      ],
+    },
   ]
-  if (hubLoaded) assetMatrixFilterOptions.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
+  if (hubLoaded) assetMatrixFilterGroups[2].options.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1691,16 +1706,21 @@ function AssetContinuityPanel() {
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
-          {assetMatrixFilterOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={assetMatrixFilter === option.id ? 'is-on' : ''}
-              aria-pressed={assetMatrixFilter === option.id}
-              onClick={() => setAssetMatrixFilter(option.id)}
-            >
-              {option.label} {option.count}
-            </button>
+          {assetMatrixFilterGroups.map((group) => (
+            <span key={group.label} className="afs-studio__assetmatrix-filtergroup" role="group" aria-label={`资产矩阵${group.label}筛选`}>
+              <em>{group.label}</em>
+              {group.options.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={assetMatrixFilter === option.id ? 'is-on' : ''}
+                  aria-pressed={assetMatrixFilter === option.id}
+                  onClick={() => setAssetMatrixFilter(option.id)}
+                >
+                  {option.label} {option.count}
+                </button>
+              ))}
+            </span>
           ))}
         </span>
       </div>
