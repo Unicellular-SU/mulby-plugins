@@ -132,8 +132,11 @@ const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角
 check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
 check(
   'search_project exposes asset-center usage for assets',
-  assetAliasSearch.assets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+  assetAliasSearch.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
     item.id === 'hero' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 1 &&
+    item.librarySyncPolicy === 'snapshot' &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E1 Episode 1') &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
@@ -146,8 +149,11 @@ const aliasFilteredAssets = JSON.parse(await getAssets.execute({ name: '主角',
 check('get_assets filters by asset aliases', aliasFilteredAssets.assets?.some((item: { id: string }) => item.id === 'hero'), JSON.stringify(aliasFilteredAssets.assets))
 check(
   'get_assets exposes asset-center episode and appearance usage',
-  aliasFilteredAssets.assets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+  aliasFilteredAssets.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
     item.id === 'hero' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 1 &&
+    item.librarySyncPolicy === 'snapshot' &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.join('、') === 'E1 Episode 1、E2 Second' &&
     item.assetCenterUsage?.currentProject?.appearanceLabels?.join('、') === 'E1 Episode 1 · 主形象、E2 Second · Gala',
@@ -161,7 +167,7 @@ check('get_workspace exposes series bible summary', workspace.seriesBible?.logli
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
 check('get_workspace exposes episode plans', workspace.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string }>; requiredVariants?: Array<{ id: string }> } }) => item.id === 'ep2' && item.plan?.requiredAssets?.some((asset) => asset.id === 'hero') && item.plan?.requiredVariants?.some((variant) => variant.id === 'gala')), JSON.stringify(workspace.episodes))
-check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
+check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
 check(
   'get_workspace exposes episode handoff summary',
   workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string }> } }) =>
@@ -205,13 +211,23 @@ const seriesBible = JSON.parse(await getSeriesBible.execute({}))
 check('get_series_bible returns bible and episode plans', seriesBible.seriesBible?.logline === 'A hidden heir returns.' && seriesBible.episodes?.some((item: { episodeId: string; plan?: { hook?: string } }) => item.episodeId === 'ep2' && item.plan?.hook === 'A clue appears.'), JSON.stringify(seriesBible))
 check(
   'get_series_bible exposes asset-center usage for planning assets',
-  seriesBible.availableAssets?.some((item: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+  seriesBible.availableAssets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
     item.id === 'hero' &&
+    item.libraryEntityId === 'el-hero' &&
+    item.libraryEntityVersion === 1 &&
+    item.librarySyncPolicy === 'snapshot' &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
     item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
   ),
   JSON.stringify(seriesBible.availableAssets),
+)
+check(
+  'get_series_bible exposes available variant asset-center lineage',
+  seriesBible.availableVariants?.some((item: { id: string; assetId: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string }) =>
+    item.id === 'gala' && item.assetId === 'hero' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala',
+  ),
+  JSON.stringify(seriesBible.availableVariants),
 )
 
 const handoff = JSON.parse(await getEpisodeHandoff.execute({ episodeIndex: 2 }))

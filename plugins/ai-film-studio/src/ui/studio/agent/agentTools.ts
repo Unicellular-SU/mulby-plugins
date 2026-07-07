@@ -66,13 +66,11 @@ function storyboardCastAssets(doc: ProjectDoc, storyboard: Storyboard, usageByEn
       assetId: ref.assetId,
       name: asset?.name,
       type: asset?.type,
-      libraryEntityId: asset?.libraryLink?.entityId ?? asset?.elementId,
-      libraryEntityVersion: asset?.libraryLink?.entityVersion,
-      librarySyncPolicy: asset?.libraryLink?.syncPolicy,
+      ...assetLineageView(asset),
       variantId: ref.variantId,
       variantLabel: variant?.label,
       variantKind: variant?.variantKind,
-      libraryVariantId: variant?.libraryVariantId ?? (ref.variantId ? asset?.libraryLink?.variantMap?.[ref.variantId] : undefined),
+      libraryVariantId: asset && variant ? variantLibraryIdView(asset, variant) : undefined,
       label: labelForCastRef(asset, ref),
       roleInShot: ref.roleInShot,
       note: ref.note,
@@ -147,12 +145,25 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
   }
 }
 
+function assetLineageView(asset: Asset | undefined) {
+  return {
+    libraryEntityId: asset?.libraryLink?.entityId ?? asset?.elementId,
+    libraryEntityVersion: asset?.libraryLink?.entityVersion,
+    librarySyncPolicy: asset?.libraryLink?.syncPolicy,
+  }
+}
+
+function variantLibraryIdView(asset: Asset, variant: AssetVariant): string | undefined {
+  return variant.libraryVariantId ?? asset.libraryLink?.variantMap?.[variant.id]
+}
+
 function projectAssetUsageView(doc: ProjectDoc, assetId: string, usageByEntity?: Record<string, IdentityAssetUsage>) {
   const asset = doc.assets.find((item) => item.id === assetId)
   return {
     assetId,
     name: asset?.name,
     type: asset?.type,
+    ...assetLineageView(asset),
     assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
   }
 }
@@ -164,14 +175,12 @@ function projectAssetNameUsageView(doc: ProjectDoc, name: string, usageByEntity?
     assetId: asset?.id,
     assetName: asset?.name,
     assetType: asset?.type,
-    libraryEntityId: asset?.libraryLink?.entityId ?? asset?.elementId,
-    libraryEntityVersion: asset?.libraryLink?.entityVersion,
-    librarySyncPolicy: asset?.libraryLink?.syncPolicy,
+    ...assetLineageView(asset),
     variants: asset?.variants?.map((variant) => ({
       id: variant.id,
       label: variant.label,
       variantKind: variant.variantKind,
-      libraryVariantId: variant.libraryVariantId ?? asset.libraryLink?.variantMap?.[variant.id],
+      libraryVariantId: variantLibraryIdView(asset, variant),
       refImageId: variant.refImageId,
       appliesToEpisodeIds: variant.appliesToEpisodeIds,
     })),
@@ -250,6 +259,7 @@ function assetView(a: Asset, opts?: { doc?: ProjectDoc; includePrompt?: boolean;
     derivedFromImageId: a.derivedFromImageId,
     elementId: a.elementId,
     libraryLink: a.libraryLink,
+    ...assetLineageView(a),
     assetCenterUsage: opts?.doc ? assetCenterUsageView(opts.doc, a, opts.usageByEntity) : undefined,
     rejectedLibraryEntityIds: a.rejectedLibraryEntityIds,
     lora: a.lora,
@@ -270,8 +280,11 @@ function variantOptions(doc: ProjectDoc) {
       (asset.variants ?? []).map((variant) => ({
         id: variant.id,
         label: variant.label,
+        variantKind: variant.variantKind,
+        libraryVariantId: variantLibraryIdView(asset, variant),
         assetId: asset.id,
         assetName: asset.name,
+        ...assetLineageView(asset),
       })),
     )
 }
@@ -422,7 +435,7 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
     ),
     assets: doc.assets
       .filter((a) => !a.parentAssetId)
-      .map((a) => ({ id: a.id, type: a.type, name: a.name, state: a.state, hasPrompt: !!a.prompt, hasRefImage: !!a.refImageId, assetCenterUsage: assetCenterUsageView(doc, a, opts?.usageByEntity) })),
+      .map((a) => ({ id: a.id, type: a.type, name: a.name, state: a.state, hasPrompt: !!a.prompt, hasRefImage: !!a.refImageId, ...assetLineageView(a), assetCenterUsage: assetCenterUsageView(doc, a, opts?.usageByEntity) })),
     storyboards: episodes.flatMap((episode) =>
       [...storyboardsForEpisode(doc, episode)]
         .sort((a, b) => a.index - b.index)
@@ -1038,7 +1051,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
           episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan) })),
           availableAssets: d.assets
             .filter(isCastableAsset)
-            .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
+            .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
           availableVariants: variantOptions(d),
         })
       },
@@ -1347,6 +1360,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                   aliases: asset.aliases,
                   desc: asset.desc,
                   promptSnippet: snippet(asset.prompt ?? '', q, 180),
+                  ...assetLineageView(asset),
                   assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity),
                 }))
             : undefined,
