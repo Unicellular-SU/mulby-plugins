@@ -1690,6 +1690,18 @@ function AssetContinuityPanel() {
     : sortedRows
   const episodeOptionRows = searchFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const episodeFilteredRows = searchFilteredRows.filter((row) => assetMatrixEpisodeFilter === 'all' || rowMatchesEpisode(row, assetMatrixEpisodeFilter))
+  const rowMatchesAssetMatrixFilter = (row: (typeof rows)[number]) => {
+    if (assetMatrixFilter === 'planned') return rowVisiblePlanEpisodeLabels(row).length > 0
+    if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row)
+    if (assetMatrixFilter === 'unplanned') return rowHasUnplannedUse(row)
+    if (assetMatrixFilter === 'variant') return rowHasVariantDrift(row)
+    if (assetMatrixFilter === 'appeared') return rowVisibleEpisodeLabels(row).length > 0
+    if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
+    if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row)
+    if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
+    return true
+  }
+  const typeOptionRows = episodeFilteredRows.filter(rowMatchesAssetMatrixFilter)
   const typeFilteredRows = episodeFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const issueCount = typeFilteredRows.reduce((sum, row) => sum + rowVisibleIssues(row).length, 0)
   const assetCenterUsageCount = typeFilteredRows.filter((row) => row.assetCenterChips.length > 0).length
@@ -1701,23 +1713,13 @@ function AssetContinuityPanel() {
   const appearedAssetCount = typeFilteredRows.filter((row) => rowVisibleEpisodeLabels(row).length > 0).length
   const planDriftCount = typeFilteredRows.filter(rowHasPlanDrift).length
   const issueAssetCount = typeFilteredRows.filter(rowHasVisibleIssue).length
-  const filteredRows = typeFilteredRows.filter((row) => {
-    if (assetMatrixFilter === 'planned') return rowVisiblePlanEpisodeLabels(row).length > 0
-    if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row)
-    if (assetMatrixFilter === 'unplanned') return rowHasUnplannedUse(row)
-    if (assetMatrixFilter === 'variant') return rowHasVariantDrift(row)
-    if (assetMatrixFilter === 'appeared') return rowVisibleEpisodeLabels(row).length > 0
-    if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
-    if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row)
-    if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
-    return true
-  })
+  const filteredRows = typeFilteredRows.filter(rowMatchesAssetMatrixFilter)
   const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
   const assetMatrixTypeOptions: { id: AssetMatrixTypeFilter; label: string; count: number }[] = [
-    { id: 'all', label: '全部类型', count: episodeFilteredRows.length },
-    { id: 'role', label: '人物', count: episodeFilteredRows.filter((row) => row.asset.type === 'role').length },
-    { id: 'scene', label: '场景', count: episodeFilteredRows.filter((row) => row.asset.type === 'scene').length },
-    { id: 'prop', label: '物品', count: episodeFilteredRows.filter((row) => row.asset.type === 'prop').length },
+    { id: 'all', label: '全部类型', count: typeOptionRows.length },
+    { id: 'role', label: '人物', count: typeOptionRows.filter((row) => row.asset.type === 'role').length },
+    { id: 'scene', label: '场景', count: typeOptionRows.filter((row) => row.asset.type === 'scene').length },
+    { id: 'prop', label: '物品', count: typeOptionRows.filter((row) => row.asset.type === 'prop').length },
   ]
   const assetMatrixEpisodeOptions = [
     { id: 'all', label: '全部剧集', count: episodeOptionRows.length },
