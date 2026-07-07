@@ -1616,7 +1616,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const handoff = next && episode ? buildEpisodeProductionHandoff(next, episode) : undefined
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
-          episode: next && episode ? episodeInfo(next, episode) : undefined,
+          episode: next && episode ? { ...episodeInfo(next, episode), plan: planView(next, episode.plan, usageByEntity) } : undefined,
           applied: applied.map((item) => handoffSuggestionApplyResultView(item, next, usageByEntity)),
           missing,
           remainingSuggestions: handoff?.suggestions.map((suggestion) => handoffSuggestionRef(suggestion, next, usageByEntity)) ?? [],

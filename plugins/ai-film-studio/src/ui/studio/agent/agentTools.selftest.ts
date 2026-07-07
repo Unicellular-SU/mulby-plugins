@@ -1143,6 +1143,24 @@ check(
     !appliedHandoffSuggestions.remainingSuggestions?.some((item: { id: string }) => item.id.includes('cloak')),
   JSON.stringify({ appliedHandoffSuggestions, heroAfterHandoff, cloakAfterHandoff }),
 )
+check(
+  'apply_episode_handoff_suggestion returns episode plan usage',
+  appliedHandoffSuggestions.episode?.plan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    appliedHandoffSuggestions.episode?.plan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'cloak' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(appliedHandoffSuggestions.episode),
+)
 
 const upsertEp2Script = JSON.parse(await upsertScript.execute({ episodeTitle: 'Second', name: 'Second Script Rewrite', content: 'Second episode targeted rewrite.' }))
 const ep1AfterScript = writableDoc.episodes?.find((item) => item.id === 'ep1')
