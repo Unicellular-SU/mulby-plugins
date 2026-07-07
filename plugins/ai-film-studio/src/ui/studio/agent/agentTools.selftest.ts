@@ -251,7 +251,7 @@ check(
 check('get_workspace exposes asset-center usage summary', workspace.assets?.some((item: { id: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) => item.id === 'hero' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 1 && item.librarySyncPolicy === 'snapshot' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second')), JSON.stringify(workspace.assets))
 check(
   'get_workspace exposes episode handoff summary',
-  workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }> } }) =>
+  workspace.episodes?.some((item: { id: string; handoff?: { suggestionCount?: number; autoRepairableSuggestionCount?: number; suggestions?: Array<{ id: string; kind: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }> } }) =>
     item.id === 'ep2' &&
     !!item.handoff?.suggestionCount &&
     !!item.handoff?.autoRepairableSuggestionCount &&
@@ -261,7 +261,9 @@ check(
         suggestion.kind === 'generate_asset_ref_image' &&
         suggestion.libraryEntityId === 'el-hero' &&
         suggestion.libraryEntityVersion === 1 &&
-        suggestion.librarySyncPolicy === 'snapshot',
+        suggestion.librarySyncPolicy === 'snapshot' &&
+        suggestion.assetCenterUsage?.entityId === 'el-hero' &&
+        suggestion.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
     ),
   ),
   JSON.stringify(workspace.episodes),
@@ -395,12 +397,18 @@ check(
   JSON.stringify(handoff),
 )
 check(
-  'get_episode_handoff exposes asset-center usage for planned and shared assets',
+  'get_episode_handoff exposes asset-center usage for planned, shared, and suggested assets',
   handoff.plannedAssets?.some((item: { assetId: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
     item.assetId === 'hero' && item.assetCenterUsage?.entityId === 'el-hero' && item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E1 Episode 1'),
   ) &&
     handoff.sharedAssets?.some((item: { assetId: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
       item.assetId === 'hero' && item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    handoff.suggestions?.some((item: { kind: string; assetId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+      item.kind === 'generate_variant_ref_image' &&
+      item.assetId === 'hero' &&
+      item.assetCenterUsage?.entityId === 'el-hero' &&
+      item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
   JSON.stringify(handoff),
 )
@@ -942,12 +950,13 @@ check(
   'apply_episode_handoff_suggestion repairs planned handoff inputs',
   appliedHandoffSuggestions.episode?.episodeId === 'ep3' &&
     appliedHandoffSuggestions.applied?.some(
-      (item: { kind: string; assetId?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string }) =>
+      (item: { kind: string; assetId?: string; libraryEntityId?: string; libraryEntityVersion?: number; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string } }) =>
         item.kind === 'generate_asset_ref_image' &&
         item.assetId === 'hero' &&
         item.libraryEntityId === 'el-hero' &&
         item.libraryEntityVersion === 1 &&
-        item.librarySyncPolicy === 'snapshot',
+        item.librarySyncPolicy === 'snapshot' &&
+        item.assetCenterUsage?.entityId === 'el-hero',
     ) &&
     appliedHandoffSuggestions.applied?.some(
       (item: { kind: string; variantId?: string; variantKind?: string; libraryEntityId?: string; libraryVariantId?: string }) =>

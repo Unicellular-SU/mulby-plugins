@@ -9,7 +9,7 @@ import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
 import { buildContinuityReport, variantScopePatchForUse, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
-import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
+import { applyEpisodeHandoffSuggestion, type EpisodeHandoffSuggestionApplyResult } from '../services/episodeHandoffSuggestions'
 import { loadAssetHub, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
@@ -236,6 +236,7 @@ function episodeHandoffView(doc: ProjectDoc, handoff: EpisodeProductionHandoff, 
     plannedAssets: handoff.plannedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
     plannedVariants: handoff.plannedVariants.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
     sharedAssets: handoff.sharedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
+    suggestions: handoff.suggestions.map((item) => handoffSuggestionRef(item, doc, usageByEntity)),
   }
 }
 
@@ -373,7 +374,7 @@ function trackForEpisode(doc: ProjectDoc, episode: Episode): VideoTrack[] {
   return episode.id === doc.currentEpisodeId ? doc.track : episode.track
 }
 
-function episodeHandoffSummary(doc: ProjectDoc, episode: Episode) {
+function episodeHandoffSummary(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
   const handoff = buildEpisodeProductionHandoff(doc, episode, { maxRecaps: 1, maxAssets: 4, maxAppearances: 2 })
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
   return {
@@ -382,7 +383,7 @@ function episodeHandoffSummary(doc: ProjectDoc, episode: Episode) {
     sharedAssetCount: handoff.sharedAssets.length,
     suggestionCount: handoff.suggestions.length,
     autoRepairableSuggestionCount: autoSuggestions.length,
-    suggestions: handoff.suggestions.slice(0, 6).map(handoffSuggestionRef),
+    suggestions: handoff.suggestions.slice(0, 6).map((suggestion) => handoffSuggestionRef(suggestion, doc, usageByEntity)),
   }
 }
 
@@ -402,7 +403,7 @@ function episodeView(doc: ProjectDoc, episode: Episode, opts?: { usageByEntity?:
     seriesSkip: episode.seriesSkip === true,
     seriesQueueState: episodeSeriesQueueState(doc, episode),
     plan: planView(doc, episode.plan, opts?.usageByEntity),
-    handoff: episodeHandoffSummary(doc, episode),
+    handoff: episodeHandoffSummary(doc, episode, opts?.usageByEntity),
     current,
     production: {
       hasFilm: !!episode.filmPath,
@@ -1046,7 +1047,11 @@ async function episodeWriteTargetErrorView(target: { doc?: ProjectDoc; error?: s
   }
 }
 
-function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion) {
+function handoffSuggestionAssetCenterUsage(doc: ProjectDoc | null | undefined, item: { assetId?: string }, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return doc && item.assetId ? handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) : undefined
+}
+
+function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion, doc?: ProjectDoc | null, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return {
     id: suggestion.id,
     kind: suggestion.kind,
@@ -1063,6 +1068,14 @@ function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion) {
     label: suggestion.label,
     disabledReason: suggestion.disabledReason,
     autoRepairable: suggestion.autoRepairable,
+    assetCenterUsage: handoffSuggestionAssetCenterUsage(doc, suggestion, usageByEntity),
+  }
+}
+
+function handoffSuggestionApplyResultView(result: EpisodeHandoffSuggestionApplyResult, doc?: ProjectDoc | null, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return {
+    ...result,
+    assetCenterUsage: handoffSuggestionAssetCenterUsage(doc, result, usageByEntity),
   }
 }
 
@@ -1485,7 +1498,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
 
 export function makeAgentTools(get: () => ProjectState): AgentTool[] {
   const doc = () => get().doc
-  const applyHandoffSuggestion = async (episodeId: string, suggestion: EpisodeHandoffSuggestion) => {
+  const applyHandoffSuggestion = async (episodeId: string, suggestion: EpisodeHandoffSuggestion): Promise<EpisodeHandoffSuggestionApplyResult> => {
     const d = doc()
     const episode = d?.episodes?.find((item) => item.id === episodeId) ?? (d ? currentEpisode(d) : undefined)
     if (!episode) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '未找到剧集' }
@@ -1522,7 +1535,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const episodeId = target.episode?.id
         if (!episodeId) return json({ error: '未找到剧集' })
         const requestedIds = handoffSuggestionIds(a)
-        const applied: unknown[] = []
+        const applied: EpisodeHandoffSuggestionApplyResult[] = []
         const missing: string[] = []
         const attempted = new Set<string>()
 
@@ -1539,7 +1552,8 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         } else {
           if (!requestedIds.length) {
             const handoff = target.doc && target.episode ? buildEpisodeProductionHandoff(target.doc, target.episode) : undefined
-            return json({ error: '缺少 suggestionId/suggestionIds，或传 allAuto=true', suggestions: handoff?.suggestions.map(handoffSuggestionRef) ?? [] })
+            const usageByEntity = target.doc ? await loadIdentityUsageSafe() : undefined
+            return json({ error: '缺少 suggestionId/suggestionIds，或传 allAuto=true', suggestions: handoff?.suggestions.map((suggestion) => handoffSuggestionRef(suggestion, target.doc, usageByEntity)) ?? [] })
           }
           for (const id of requestedIds) {
             const d = doc()
@@ -1556,11 +1570,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const next = doc()
         const episode = next?.episodes?.find((item) => item.id === episodeId)
         const handoff = next && episode ? buildEpisodeProductionHandoff(next, episode) : undefined
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && episode ? episodeInfo(next, episode) : undefined,
-          applied,
+          applied: applied.map((item) => handoffSuggestionApplyResultView(item, next, usageByEntity)),
           missing,
-          remainingSuggestions: handoff?.suggestions.map(handoffSuggestionRef) ?? [],
+          remainingSuggestions: handoff?.suggestions.map((suggestion) => handoffSuggestionRef(suggestion, next, usageByEntity)) ?? [],
         })
       },
     },
