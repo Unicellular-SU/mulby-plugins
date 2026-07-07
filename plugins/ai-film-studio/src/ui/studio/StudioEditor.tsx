@@ -766,6 +766,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
+type AssetMatrixFilter = 'all' | 'drift' | 'issue'
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
@@ -1551,6 +1552,7 @@ function AssetContinuityPanel() {
   const continuity = useStudioContinuityReport(doc)
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
+  const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const hasAnyEpisodePlan = (doc.episodes ?? []).some((episode) => episodePlanInputCount(episode.plan) > 0)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
@@ -1601,16 +1603,27 @@ function AssetContinuityPanel() {
       return { asset, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
-  if (!rows.length) return null
-  const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
-  const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
-  const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
-  const planDriftCount = rows.filter((row) =>
+  const rowHasPlanDrift = (row: (typeof rows)[number]) =>
     row.plannedUnusedLabels.length > 0 ||
     row.unplannedUseLabels.length > 0 ||
     row.plannedVariantUnusedLabels.length > 0 ||
     row.unplannedVariantUseLabels.length > 0
-  ).length
+  const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
+  if (!rows.length) return null
+  const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
+  const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
+  const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
+  const planDriftCount = rows.filter(rowHasPlanDrift).length
+  const filteredRows = rows.filter((row) => {
+    if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
+    if (assetMatrixFilter === 'issue') return rowHasIssue(row)
+    return true
+  })
+  const assetMatrixFilterOptions: { id: AssetMatrixFilter; label: string; count: number }[] = [
+    { id: 'all', label: '全部', count: rows.length },
+    { id: 'drift', label: '计划差异', count: planDriftCount },
+    { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
+  ]
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1621,10 +1634,25 @@ function AssetContinuityPanel() {
         {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
+        <span className="afs-studio__assetmatrix-spacer" />
+        <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
+          {assetMatrixFilterOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={assetMatrixFilter === option.id ? 'is-on' : ''}
+              aria-pressed={assetMatrixFilter === option.id}
+              onClick={() => setAssetMatrixFilter(option.id)}
+            >
+              {option.label} {option.count}
+            </button>
+          ))}
+        </span>
       </div>
       <div className="afs-studio__assetmatrix-rows">
-        {rows.map((row) => (
-          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${row.issues.length ? ' is-warning' : ''}`}>
+        {filteredRows.length === 0 && <span className="afs-studio__assetmatrix-empty">当前筛选下没有资产</span>}
+        {filteredRows.map((row) => (
+          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasIssue(row) || rowHasPlanDrift(row) ? ' is-warning' : ''}`}>
             <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
               <b>{row.asset.name}</b>
               <em>{typeLabel(row.asset.type)}</em>
