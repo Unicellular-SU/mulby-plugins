@@ -1505,7 +1505,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             ? episodes
                 .flatMap((episode) =>
                   storyboardsForEpisode(d, episode).map((s) => ({
-                    ...episodeInfo(d, episode),
+                    ...episodeInfoWithPlan(d, episode, usageByEntity),
                     storyboard: s,
                   })),
                 )
@@ -1532,7 +1532,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             ? episodes
                 .flatMap((episode) =>
                   storyboardTableForEpisode(d, episode).map((scene) => ({
-                    ...episodeInfo(d, episode),
+                    ...episodeInfoWithPlan(d, episode, usageByEntity),
                     scene,
                   })),
                 )
