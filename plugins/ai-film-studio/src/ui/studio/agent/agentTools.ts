@@ -282,6 +282,14 @@ async function assetViewWithUsage(doc: ProjectDoc, asset: Asset, opts?: { includ
   })
 }
 
+function assetCandidateList(doc: ProjectDoc, assets = doc.assets.filter(isCastableAsset), usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return assets.map((asset) => assetView(asset, { doc, includePrompt: false, includeImages: false, usageByEntity }))
+}
+
+async function assetCandidateListWithUsage(doc: ProjectDoc, assets = doc.assets.filter(isCastableAsset)) {
+  return assetCandidateList(doc, assets, await loadIdentityUsageSafe())
+}
+
 function variantOptions(doc: ProjectDoc, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return doc.assets
     .filter(isCastableAsset)
@@ -1876,7 +1884,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type, aliases: item.aliases })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
 
         const aliasMode = a.aliasMode === 'add' || a.aliasMode === 'remove' ? a.aliasMode : 'replace'
         const patch: Partial<Asset> & { id: string; type: Asset['type']; name: string } = {
@@ -1926,7 +1934,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const resolved = await resolveLibraryEntityForAsset(asset, a)
         if (!resolved.entity) {
           return json({
@@ -1973,7 +1981,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const resolved = await resolveLibraryEntityIdsForAsset(asset, a)
         if (!resolved.ids.length) {
           return json({
@@ -2008,7 +2016,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const published = await get().promoteAssetToElement(asset.id)
         const nextDoc = get().doc ?? d
@@ -2040,7 +2048,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const resolved = await resolveLibraryEntityForAsset(asset, {
           libraryEntityId: a.libraryEntityId ?? a.entityId ?? projectAssetIdentityEntityId(asset),
           libraryEntityName: a.libraryEntityName ?? a.entityName,
@@ -2089,11 +2097,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           findCastableAsset(d, a.targetAssetName) ??
           findCastableAsset(d, a.toAssetName)
         if (!source || !target) {
+          const usageByEntity = await loadIdentityUsageSafe()
           return json({
             error: '未找到源资产或目标资产',
-            sourceFound: source ? { id: source.id, name: source.name, type: source.type } : undefined,
-            targetFound: target ? { id: target.id, name: target.name, type: target.type } : undefined,
-            assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type, libraryLink: item.libraryLink })),
+            sourceFound: source ? assetView(source, { doc: d, includePrompt: false, includeImages: false, usageByEntity }) : undefined,
+            targetFound: target ? assetView(target, { doc: d, includePrompt: false, includeImages: false, usageByEntity }) : undefined,
+            assets: assetCandidateList(d, undefined, usageByEntity),
           })
         }
         if (source.id === target.id) return json({ error: '源资产和目标资产不能相同', asset: await assetViewWithUsage(d, source, { includeImages: false }) })
@@ -2142,7 +2151,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) {
-          return json({ error: '未找到可创建变体的资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+          return json({ error: '未找到可创建变体的资产', assets: await assetCandidateListWithUsage(d) })
         }
 
         const lookup = a.variantId ?? a.variantLabel ?? a.label
@@ -2200,7 +2209,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const scopeKind = inferVariantScopeKind(a)
@@ -2239,7 +2248,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产' })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能生成变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (!variant) return json({ error: '未找到变体', variants: asset.variants ?? [] })
@@ -2280,7 +2289,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const storyboard = resolveStoryboard(d, a)
         if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
@@ -2331,7 +2340,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const storyboard = resolveStoryboard(d, a)
         if (!storyboard) return json({ error: '未找到分镜', storyboards: [...d.storyboards].sort((x, y) => x.index - y.index).map((s) => ({ id: s.id, index: s.index + 1, videoDesc: s.videoDesc.slice(0, 80) })) })
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variantToken = a.variantId ?? a.variantLabel ?? a.label
         const variant = variantToken ? findAssetVariant(asset, variantToken) : undefined
         if (variantToken && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
@@ -2379,7 +2388,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = target.doc
         if (!d) return '无项目'
         const asset = findSceneAsset(d, a)
-        if (!asset) return json({ error: '未找到场景资产', assets: d.assets.filter((item) => item.type === 'scene').map((item) => ({ id: item.id, name: item.name })) })
+        if (!asset) return json({ error: '未找到场景资产', assets: await assetCandidateListWithUsage(d, d.assets.filter((item) => item.type === 'scene' && !item.parentAssetId)) })
         const sceneId = stringArg(a.sceneId)
         const replaceOtherSceneAssets = a.unifySceneGroup === true || !!sceneId
         const targets = sceneId
@@ -2500,7 +2509,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return json({ error: `未找到资产 ${String(a.assetId ?? a.assetName ?? a.name ?? '')}`, assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
+        if (!asset) return json({ error: `未找到资产 ${String(a.assetId ?? a.assetName ?? a.name ?? '')}`, assets: await assetCandidateListWithUsage(d) })
         await get().generateAsset(asset.id)
         const next = doc()
         const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset

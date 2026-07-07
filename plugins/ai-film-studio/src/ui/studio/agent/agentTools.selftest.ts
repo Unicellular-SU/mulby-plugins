@@ -1064,6 +1064,39 @@ check(
   JSON.stringify(updatedAsset.asset),
 )
 
+const missingAssetUpdate = JSON.parse(await updateAsset.execute({ assetName: 'Missing Hero', desc: 'No-op.' }))
+check(
+  'asset write errors expose candidate asset usage',
+  !!missingAssetUpdate.error &&
+    missingAssetUpdate.assets?.some(
+      (asset: { id: string; aliases?: string[]; libraryEntityId?: string; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        asset.id === 'hero' &&
+        asset.aliases?.includes('队长') &&
+        asset.libraryEntityId === 'el-hero' &&
+        asset.librarySyncPolicy === 'snapshot' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(missingAssetUpdate),
+)
+
+const missingStoryboardAssetRef = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Missing Prop' }))
+check(
+  'storyboard asset write errors expose candidate asset usage',
+  !!missingStoryboardAssetRef.error &&
+    missingStoryboardAssetRef.assets?.some(
+      (asset: { id: string; libraryEntityId?: string; librarySyncPolicy?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        asset.id === 'hero' &&
+        asset.libraryEntityId === 'el-hero' &&
+        asset.librarySyncPolicy === 'snapshot' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(missingStoryboardAssetRef),
+)
+
 const missingRefPublish = JSON.parse(await publishProjectAsset.execute({ assetId: 'no-ref-linked' }))
 check(
   'publish_project_asset_to_library missing-ref error returns asset usage',
