@@ -779,6 +779,8 @@ function SeriesTab() {
       id: variant.id,
       label: `${asset.asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
       title: [variantKindLabel(variant.variantKind) ? `类型：${variantKindLabel(variant.variantKind)}` : '', variant.desc].filter(Boolean).join(' · '),
+      hasRefImage: !!variant.refImageId,
+      appliesToEpisodeIds: variant.appliesToEpisodeIds ?? [],
       assetCenterUsage: asset.assetCenterUsage,
       assetCenterChips: asset.assetCenterChips,
     }))
@@ -933,25 +935,42 @@ function SeriesTab() {
                     <>
                       <span>必需形态/妆容</span>
                       <div className="afs-series__checks">
-                        {variantOptions.map((variant) => (
-                          <label
-                            key={variant.id}
-                            className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}`}
-                            title={[variant.title, variant.assetCenterChips.length ? assetCenterUsageTitle(variant.assetCenterUsage) : ''].filter(Boolean).join('\n') || variant.label}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={requiredVariantIds.has(variant.id)}
-                              onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
-                            />
-                            <span className="afs-series__checktext">{variant.label}</span>
-                            {variant.assetCenterChips.length > 0 && (
-                              <span className="afs-series__usagechips" aria-label={`${variant.label} 资产中心图谱`}>
-                                {variant.assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
-                              </span>
-                            )}
-                          </label>
-                        ))}
+                        {variantOptions.map((variant) => {
+                          const scopedToOtherEpisodes = variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)
+                          const readinessWarnings = [
+                            variant.hasRefImage ? '' : '缺形态图',
+                            scopedToOtherEpisodes ? '未适用本集' : '',
+                          ].filter(Boolean)
+                          const title = [
+                            variant.title,
+                            readinessWarnings.length ? `提示：${readinessWarnings.join(' · ')}` : '',
+                            variant.assetCenterChips.length ? assetCenterUsageTitle(variant.assetCenterUsage) : '',
+                          ].filter(Boolean).join('\n') || variant.label
+                          return (
+                            <label
+                              key={variant.id}
+                              className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}${readinessWarnings.length ? ' is-warning' : ''}`}
+                              title={title}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={requiredVariantIds.has(variant.id)}
+                                onChange={() => patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variant.id) })}
+                              />
+                              <span className="afs-series__checktext">{variant.label}</span>
+                              {readinessWarnings.length > 0 && (
+                                <span className="afs-series__warnchips" aria-label={`${variant.label} 就绪提示`}>
+                                  {readinessWarnings.map((chip) => <i key={chip}>{chip}</i>)}
+                                </span>
+                              )}
+                              {variant.assetCenterChips.length > 0 && (
+                                <span className="afs-series__usagechips" aria-label={`${variant.label} 资产中心图谱`}>
+                                  {variant.assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
+                                </span>
+                              )}
+                            </label>
+                          )
+                        })}
                       </div>
                     </>
                   ) : null}

@@ -3803,6 +3803,9 @@ select.afs-toolbar__select,
   color: var(--afs-text);
   background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2));
 }
+.afs-series__check.is-warning {
+  border-color: color-mix(in srgb, var(--afs-warning) 40%, var(--afs-border));
+}
 .afs-series__check input {
   flex: 0 0 auto;
   margin: 0;
@@ -3820,7 +3823,15 @@ select.afs-toolbar__select,
   min-width: 0;
   flex: 0 1 auto;
 }
-.afs-series__usagechips i {
+.afs-series__warnchips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.afs-series__usagechips i,
+.afs-series__warnchips i {
   max-width: 58px;
   min-height: 18px;
   padding: 2px 4px;
@@ -3834,6 +3845,11 @@ select.afs-toolbar__select,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.afs-series__warnchips i {
+  border-color: color-mix(in srgb, var(--afs-warning) 42%, var(--afs-border));
+  background: color-mix(in srgb, var(--afs-warning) 10%, var(--afs-panel));
+  color: var(--afs-warning);
 }
 
 /* 旧的第二套 .afs-btn / --primary / --ghost / --sm 定义已删除，统一并入文件上方「按钮 Button」区块。 */
