@@ -674,7 +674,8 @@ check(
     linkedLibraryAsset.asset?.libraryLink?.entityVersion === 2 &&
     linkedLibraryAsset.asset?.assetCenterUsage?.entityId === 'el-hero' &&
     linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
-    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala') &&
+    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Cloak'),
   JSON.stringify(linkedLibraryAsset),
 )
 

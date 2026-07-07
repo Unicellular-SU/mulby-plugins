@@ -110,6 +110,10 @@ async function loadIdentityUsageSafe(): Promise<Record<string, IdentityAssetUsag
   }
 }
 
+function mergeLabels(...groups: Array<string[] | undefined>): string[] {
+  return [...new Set(groups.flatMap((group) => group ?? []))]
+}
+
 function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>) {
   const entityId = projectAssetIdentityEntityId(asset)
   if (!entityId) return undefined
@@ -131,8 +135,8 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
     currentProject:
       currentProject || currentProjectFromDoc
         ? {
-            episodeLabels: currentProject?.episodeLabels ?? currentProjectFromDoc?.episodeLabels ?? [],
-            appearanceLabels: currentProject?.appearanceLabels ?? currentProjectFromDoc?.appearanceLabels ?? [],
+            episodeLabels: mergeLabels(currentProject?.episodeLabels, currentProjectFromDoc?.episodeLabels),
+            appearanceLabels: mergeLabels(currentProject?.appearanceLabels, currentProjectFromDoc?.appearanceLabels),
           }
         : undefined,
   }
