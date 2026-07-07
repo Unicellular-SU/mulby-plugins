@@ -1797,9 +1797,10 @@ function AssetContinuityPanel() {
         )}
         {filteredRows.map((row) => (
           <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
-            <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
+            <span className="afs-studio__assetmatrix-name" title={[row.asset.name, row.asset.aliases?.length ? `别名：${row.asset.aliases.join('、')}` : undefined].filter(Boolean).join('\n')}>
               <b>{row.asset.name}</b>
               <em>{typeLabel(row.asset.type)}</em>
+              {!!row.asset.aliases?.length && <small>别名 {row.asset.aliases.length}</small>}
             </span>
             <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 出现剧集`} title={assetMatrixChipsetTitle('出现剧集', row.episodeLabels, '未出场')}>
               {row.episodeLabels.length ? row.episodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
