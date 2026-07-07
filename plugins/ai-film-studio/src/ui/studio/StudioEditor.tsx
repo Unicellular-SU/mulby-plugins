@@ -1565,6 +1565,7 @@ function AssetContinuityPanel() {
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
   const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
+  const generateAsset = useProjectStore((s) => s.generateAsset)
   const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
@@ -1806,6 +1807,10 @@ function AssetContinuityPanel() {
     await promoteAssetToElement(row.asset.id)
     await refreshAssetHub()
   }
+  const generateAssetMatrixReference = (row: (typeof rows)[number]) => {
+    if (row.asset.refImageId || row.asset.state === 'generating') return
+    void generateAsset(row.asset.id)
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -2004,6 +2009,21 @@ function AssetContinuityPanel() {
                   >
                     发布
                   </button>
+                )}
+                {!row.asset.refImageId && row.asset.state !== 'generating' && (visiblePlanEpisodeLabels.length > 0 || visibleEpisodeLabels.length > 0) && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`生成主参考图：${row.asset.name}`}
+                    onClick={() => generateAssetMatrixReference(row)}
+                  >
+                    生成图
+                  </button>
+                )}
+                {!row.asset.refImageId && row.asset.state === 'generating' && (
+                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 主参考图生成中`}>
+                    生成中
+                  </i>
                 )}
                 {!rowHasStatusWarning(row) && (
                   <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>
