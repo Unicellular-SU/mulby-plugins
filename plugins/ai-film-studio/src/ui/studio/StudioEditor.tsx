@@ -1559,8 +1559,10 @@ function AssetContinuityPanel() {
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
+  const [assetMatrixEpisodeFilter, setAssetMatrixEpisodeFilter] = useState('all')
   const [assetMatrixSearch, setAssetMatrixSearch] = useState('')
   const hasAnyEpisodePlan = (doc.episodes ?? []).some((episode) => episodePlanInputCount(episode.plan) > 0)
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
     .map((asset) => {
@@ -1607,7 +1609,7 @@ function AssetContinuityPanel() {
         .map((variant) => variantLabelWithKind(variant.label, variant.variantKind))
       const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
       const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
-      return { asset, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
+      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   const rowHasPlanDrift = (row: (typeof rows)[number]) =>
@@ -1627,6 +1629,10 @@ function AssetContinuityPanel() {
   const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row)
+  const rowMatchesEpisode = (row: (typeof rows)[number], episodeId: string) =>
+    row.episodeIds.includes(episodeId) ||
+    row.planEpisodeIds.includes(episodeId) ||
+    row.issues.some((issue) => issue.episodeId === episodeId || issue.previousEpisodeId === episodeId || (!issue.episodeId && !issue.previousEpisodeId))
   const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
     row.plannedUnusedLabels.length + row.unplannedUseLabels.length + row.plannedVariantUnusedLabels.length + row.unplannedVariantUseLabels.length
   const rowPriority = (row: (typeof rows)[number]) => {
@@ -1651,7 +1657,8 @@ function AssetContinuityPanel() {
   const searchFilteredRows = assetMatrixSearchKey
     ? sortedRows.filter((row) => [row.asset.name, ...(row.asset.aliases ?? [])].some((value) => normalizeAssetLookup(value).includes(assetMatrixSearchKey)))
     : sortedRows
-  const typeFilteredRows = searchFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
+  const episodeFilteredRows = searchFilteredRows.filter((row) => assetMatrixEpisodeFilter === 'all' || rowMatchesEpisode(row, assetMatrixEpisodeFilter))
+  const typeFilteredRows = episodeFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const issueCount = typeFilteredRows.reduce((sum, row) => sum + row.issues.length, 0)
   const assetCenterUsageCount = typeFilteredRows.filter((row) => row.assetCenterChips.length > 0).length
   const missingAssetCenterCount = hubLoaded ? typeFilteredRows.filter(rowMissingAssetCenter).length : 0
@@ -1674,10 +1681,18 @@ function AssetContinuityPanel() {
     return true
   })
   const assetMatrixTypeOptions: { id: AssetMatrixTypeFilter; label: string; count: number }[] = [
-    { id: 'all', label: '全部类型', count: searchFilteredRows.length },
-    { id: 'role', label: '人物', count: searchFilteredRows.filter((row) => row.asset.type === 'role').length },
-    { id: 'scene', label: '场景', count: searchFilteredRows.filter((row) => row.asset.type === 'scene').length },
-    { id: 'prop', label: '物品', count: searchFilteredRows.filter((row) => row.asset.type === 'prop').length },
+    { id: 'all', label: '全部类型', count: episodeFilteredRows.length },
+    { id: 'role', label: '人物', count: episodeFilteredRows.filter((row) => row.asset.type === 'role').length },
+    { id: 'scene', label: '场景', count: episodeFilteredRows.filter((row) => row.asset.type === 'scene').length },
+    { id: 'prop', label: '物品', count: episodeFilteredRows.filter((row) => row.asset.type === 'prop').length },
+  ]
+  const assetMatrixEpisodeOptions = [
+    { id: 'all', label: '全部剧集', count: searchFilteredRows.length },
+    ...episodes.map((episode) => ({
+      id: episode.id,
+      label: `E${episode.index + 1}${episode.title ? ` ${episode.title}` : ''}`,
+      count: searchFilteredRows.filter((row) => rowMatchesEpisode(row, episode.id)).length,
+    })),
   ]
   const assetMatrixFilterGroups: { label: string; options: { id: AssetMatrixFilter; label: string; count: number }[] }[] = [
     {
@@ -1706,9 +1721,11 @@ function AssetContinuityPanel() {
   ]
   if (hubLoaded) assetMatrixFilterGroups[2].options.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
   const activeFilterOption = assetMatrixFilterGroups.flatMap((group) => group.options).find((option) => option.id === assetMatrixFilter)
+  const activeEpisodeOption = assetMatrixEpisodeOptions.find((option) => option.id === assetMatrixEpisodeFilter)
   const activeTypeOption = assetMatrixTypeOptions.find((option) => option.id === assetMatrixTypeFilter)
   const activeFilterLabels = [
     assetMatrixSearchKey ? `搜索“${assetMatrixSearch.trim()}”` : undefined,
+    assetMatrixEpisodeFilter !== 'all' ? activeEpisodeOption?.label ?? '当前剧集' : undefined,
     assetMatrixTypeFilter !== 'all' ? activeTypeOption?.label ?? '当前类型' : undefined,
     assetMatrixFilter !== 'all' ? activeFilterOption?.label ?? '当前' : undefined,
   ].filter(Boolean)
@@ -1728,7 +1745,7 @@ function AssetContinuityPanel() {
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
-        {(assetMatrixSearchKey || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{rows.length}</span>}
+        {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{rows.length}</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
           <label className="afs-studio__assetmatrix-search">
@@ -1739,6 +1756,14 @@ function AssetContinuityPanel() {
               placeholder="搜索名称/别名"
               aria-label="搜索资产名称或别名"
             />
+          </label>
+          <label className="afs-studio__assetmatrix-select">
+            <span>剧集</span>
+            <select value={assetMatrixEpisodeFilter} onChange={(event) => setAssetMatrixEpisodeFilter(event.target.value)} aria-label="按剧集筛选资产矩阵">
+              {assetMatrixEpisodeOptions.map((option) => (
+                <option key={option.id} value={option.id}>{option.label} {option.count}</option>
+              ))}
+            </select>
           </label>
           <span className="afs-studio__assetmatrix-filtergroup" role="group" aria-label="资产矩阵类型筛选">
             <em>类型</em>
@@ -1785,9 +1810,10 @@ function AssetContinuityPanel() {
         {filteredRows.length === 0 && (
           <span className="afs-studio__assetmatrix-empty">
             当前没有符合「{activeFilterLabel}」筛选的资产
-            {(assetMatrixSearchKey || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && (
+            {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && (
               <button type="button" onClick={() => {
                 setAssetMatrixSearch('')
+                setAssetMatrixEpisodeFilter('all')
                 setAssetMatrixTypeFilter('all')
                 setAssetMatrixFilter('all')
               }}>
