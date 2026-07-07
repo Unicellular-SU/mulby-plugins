@@ -3746,6 +3746,37 @@ select.afs-toolbar__select,
   background: color-mix(in srgb, var(--afs-warning) 10%, var(--afs-panel));
   color: var(--afs-warning);
 }
+.afs-series__filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.afs-series__filters button {
+  height: 24px;
+  max-width: 82px;
+  padding: 0 7px;
+  border: 1px solid var(--afs-border);
+  border-radius: 5px;
+  background: var(--afs-panel-2);
+  color: var(--afs-text-dim);
+  font-size: 10.5px;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.afs-series__filters button:hover {
+  border-color: var(--afs-accent);
+  color: var(--afs-text);
+}
+.afs-series__filters button.is-on {
+  border-color: var(--afs-accent);
+  background: color-mix(in srgb, var(--afs-accent) 14%, var(--afs-panel-2));
+  color: var(--afs-text);
+}
 .afs-series__bible-grid,
 .afs-series__plan-grid {
   display: grid;
@@ -3773,6 +3804,12 @@ select.afs-toolbar__select,
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 10px;
+}
+.afs-series__empty {
+  margin: 0;
+  padding: 18px 0;
+  color: var(--afs-muted);
+  font-size: 12px;
 }
 .afs-series__episode {
   display: flex;

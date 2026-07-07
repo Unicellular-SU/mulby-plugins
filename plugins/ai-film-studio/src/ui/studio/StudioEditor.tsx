@@ -754,6 +754,8 @@ function toggleId(list: string[] | undefined, id: string): string[] {
   return [...set]
 }
 
+type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
+
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
   const updateSeriesBible = useProjectStore((s) => s.updateSeriesBible)
@@ -762,6 +764,7 @@ function SeriesTab() {
   const hubLoaded = useAssetHubStore((s) => s.loaded)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const refreshHub = useAssetHubStore((s) => s.refresh)
+  const [seriesPlanFilter, setSeriesPlanFilter] = useState<SeriesPlanFilter>('all')
   useEffect(() => {
     if (!hubLoaded) void refreshHub()
   }, [hubLoaded, refreshHub])
@@ -857,6 +860,18 @@ function SeriesTab() {
   const riskyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.readinessIssueCount > 0).length
   const readyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0).length
   const missingEpisodeCount = Math.max(0, plannedCount - episodes.length)
+  const filteredEpisodeReadiness = episodeReadiness.filter(({ readiness }) => {
+    if (seriesPlanFilter === 'unplanned') return readiness.plannedInputCount === 0
+    if (seriesPlanFilter === 'risk') return readiness.readinessIssueCount > 0
+    if (seriesPlanFilter === 'ready') return readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0
+    return true
+  })
+  const seriesFilterOptions: { id: SeriesPlanFilter; label: string; count: number }[] = [
+    { id: 'all', label: '全部', count: episodes.length },
+    { id: 'unplanned', label: '未规划', count: unplannedEpisodeCount },
+    { id: 'risk', label: '风险', count: riskyEpisodeCount },
+    { id: 'ready', label: '就绪', count: readyEpisodeCount },
+  ]
   const seriesReadinessTitle = [
     `已建剧集 ${episodes.length}`,
     `计划集数 ${plannedCount}`,
@@ -949,9 +964,23 @@ function SeriesTab() {
             {riskyEpisodeCount > 0 && <i className="is-warning">风险 {riskyEpisodeCount}</i>}
             {readyEpisodeCount > 0 && <i className="is-ready">就绪 {readyEpisodeCount}</i>}
           </span>
+          <span className="afs-series__filters" aria-label="剧集规划筛选">
+            {seriesFilterOptions.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                className={seriesPlanFilter === option.id ? 'is-on' : ''}
+                aria-pressed={seriesPlanFilter === option.id}
+                onClick={() => setSeriesPlanFilter(option.id)}
+              >
+                {option.label} {option.count}
+              </button>
+            ))}
+          </span>
         </div>
-        <div className="afs-series__episode-grid">
-          {episodeReadiness.map(({ episode, readiness }) => {
+        {filteredEpisodeReadiness.length ? (
+          <div className="afs-series__episode-grid">
+            {filteredEpisodeReadiness.map(({ episode, readiness }) => {
             const { plan, requiredAssetIds, requiredVariantIds, plannedInputCount, readinessIssueCount, summaryTitle } = readiness
             return (
               <article key={episode.id} className="afs-series__episode">
@@ -1079,8 +1108,11 @@ function SeriesTab() {
                 </div>
               </article>
             )
-          })}
-        </div>
+            })}
+          </div>
+        ) : (
+          <p className="afs-series__empty">当前筛选下没有剧集。</p>
+        )}
       </section>
     </div>
   )
