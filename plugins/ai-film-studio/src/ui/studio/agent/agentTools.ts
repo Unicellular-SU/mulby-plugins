@@ -809,6 +809,16 @@ function variantView(asset: Asset, variantId: string, opts?: { doc?: ProjectDoc;
     : undefined
 }
 
+function variantCandidateList(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return (asset.variants ?? [])
+    .map((variant) => variantView(asset, variant.id, { doc, usageByEntity }))
+    .filter((item): item is NonNullable<ReturnType<typeof variantView>> => !!item)
+}
+
+async function variantCandidateListWithUsage(doc: ProjectDoc, asset: Asset) {
+  return variantCandidateList(doc, asset, await loadIdentityUsageSafe())
+}
+
 function scopedVariantViews(doc: ProjectDoc | null | undefined, refs: StoryboardCastRef[], usageByEntity?: Record<string, IdentityAssetUsage>): Array<ReturnType<typeof variantView>> {
   if (!doc) return []
   return refs
@@ -2211,7 +2221,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
+        if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
         const scopeKind = inferVariantScopeKind(a)
         if (!scopeKind) return json({ error: '未指定适用范围层级', expected: ['episode', 'scene', 'storyboard'] })
         const scopeId = resolveVariantScopeId(d, a, scopeKind)
@@ -2251,7 +2261,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能生成变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
         const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (!variant) return json({ error: '未找到变体', variants: asset.variants ?? [] })
+        if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
         await get().generateAssetVariant(asset.id, variant.id)
         const nextDoc = get().doc ?? d
         const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
@@ -2291,7 +2301,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
+        if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
         const scopeKind = variantScopeKind(a.scopeKind)
         if (variant && (a.ensureScope === true || scopeKind)) {
@@ -2343,7 +2353,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
         const variantToken = a.variantId ?? a.variantLabel ?? a.label
         const variant = variantToken ? findAssetVariant(asset, variantToken) : undefined
-        if (variantToken && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }) })
+        if (variantToken && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
         const patch = storyboardWithAssetRef(storyboard, asset.id, {
           remove: a.remove === true,
           variantId: variant?.id,

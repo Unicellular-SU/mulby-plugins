@@ -1097,6 +1097,24 @@ check(
   JSON.stringify(missingStoryboardAssetRef),
 )
 
+const missingAssetRefVariant = JSON.parse(await setAssetRef.execute({ episodeTitle: 'Second', index: 2, assetName: 'Hero', variantLabel: 'Missing Look' }))
+check(
+  'storyboard variant write errors expose variant candidate usage',
+  !!missingAssetRefVariant.error &&
+    missingAssetRefVariant.asset?.id === 'hero' &&
+    missingAssetRefVariant.variants?.some(
+      (variant: { assetId: string; variantId?: string; libraryEntityId?: string; librarySyncPolicy?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+        variant.assetId === 'hero' &&
+        variant.variantId === 'cloak' &&
+        variant.libraryEntityId === 'el-hero' &&
+        variant.librarySyncPolicy === 'snapshot' &&
+        variant.libraryVariantId === 'lib-cloak' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(missingAssetRefVariant),
+)
+
 const missingRefPublish = JSON.parse(await publishProjectAsset.execute({ assetId: 'no-ref-linked' }))
 check(
   'publish_project_asset_to_library missing-ref error returns asset usage',
@@ -1155,6 +1173,24 @@ check(
         item.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
     ),
   JSON.stringify(clipResult),
+)
+
+const missingGeneratedVariant = JSON.parse(await generateAssetVariant.execute({ assetName: 'Hero', variantLabel: 'Missing Look' }))
+check(
+  'generate_asset_variant errors expose variant candidate usage',
+  !!missingGeneratedVariant.error &&
+    missingGeneratedVariant.asset?.id === 'hero' &&
+    missingGeneratedVariant.variants?.some(
+      (variant: { assetId: string; variantId?: string; libraryEntityId?: string; librarySyncPolicy?: string; libraryVariantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+        variant.assetId === 'hero' &&
+        variant.variantId === 'cloak' &&
+        variant.libraryEntityId === 'el-hero' &&
+        variant.librarySyncPolicy === 'snapshot' &&
+        variant.libraryVariantId === 'lib-cloak' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ),
+  JSON.stringify(missingGeneratedVariant),
 )
 
 const distinctIdentity = JSON.parse(await markDistinctIdentity.execute({ assetName: 'Hero', libraryEntityIds: ['el-rival', 'el-hero'] }))
