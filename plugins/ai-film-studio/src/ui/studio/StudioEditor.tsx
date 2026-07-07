@@ -1614,13 +1614,32 @@ function AssetContinuityPanel() {
     row.unplannedVariantUseLabels.length > 0
   const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
+  const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
+    row.plannedUnusedLabels.length + row.unplannedUseLabels.length + row.plannedVariantUnusedLabels.length + row.unplannedVariantUseLabels.length
+  const rowPriority = (row: (typeof rows)[number]) => {
+    if (rowHasIssue(row)) return 0
+    if (rowHasPlanDrift(row)) return 1
+    if (rowMissingAssetCenter(row)) return 2
+    if (row.planEpisodeLabels.length > 0) return 3
+    if (row.episodeLabels.length > 0) return 4
+    return 5
+  }
   if (!rows.length) return null
   const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
   const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
   const missingAssetCenterCount = hubLoaded ? rows.filter(rowMissingAssetCenter).length : 0
   const plannedAssetCount = rows.filter((row) => row.planEpisodeLabels.length > 0).length
   const planDriftCount = rows.filter(rowHasPlanDrift).length
-  const filteredRows = rows.filter((row) => {
+  const sortedRows = [...rows].sort((a, b) =>
+    rowPriority(a) - rowPriority(b) ||
+    b.issues.length - a.issues.length ||
+    rowPlanDriftItemCount(b) - rowPlanDriftItemCount(a) ||
+    b.planEpisodeLabels.length - a.planEpisodeLabels.length ||
+    b.episodeLabels.length - a.episodeLabels.length ||
+    a.asset.name.localeCompare(b.asset.name, 'zh-Hans') ||
+    a.asset.id.localeCompare(b.asset.id)
+  )
+  const filteredRows = sortedRows.filter((row) => {
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row)
     if (assetMatrixFilter === 'issue') return rowHasIssue(row)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
