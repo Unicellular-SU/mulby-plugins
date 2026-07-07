@@ -1,4 +1,4 @@
-import { applyCanvasOutputToElement, type ElementRef } from './assetStore'
+import { applyCanvasOutputToElement, setElementPrimaryReference, type ElementRef } from './assetStore'
 
 let failures = 0
 
@@ -71,6 +71,36 @@ check(
     variant.mediaRefs?.some((ref) => ref.assetId === 'cloak-ref' && ref.role === 'reference') === true &&
     variant.refAssetIds?.[0] === 'cloak-ref',
   JSON.stringify(variantRef),
+)
+
+const editedPrimary = setElementPrimaryReference(
+  {
+    refAssetIds: ['old-primary', 'concept-img'],
+    mediaRefs: [
+      { assetId: 'concept-img', role: 'concept', createdAt: 1 },
+      { assetId: 'old-primary', role: 'primary', createdAt: 2 },
+      { assetId: 'pose-ref', role: 'reference', createdAt: 3 },
+    ],
+  },
+  'new-primary',
+)
+check(
+  'manual identity reference edit replaces primary media role',
+  editedPrimary.refAssetIds[0] === 'new-primary' &&
+    editedPrimary.mediaRefs?.some((ref) => ref.assetId === 'new-primary' && ref.role === 'primary') === true &&
+    editedPrimary.mediaRefs?.some((ref) => ref.assetId === 'old-primary' && ref.role === 'primary') !== true &&
+    editedPrimary.mediaRefs?.some((ref) => ref.assetId === 'concept-img' && ref.role === 'concept') === true &&
+    editedPrimary.mediaRefs?.some((ref) => ref.assetId === 'pose-ref' && ref.role === 'reference') === true,
+  JSON.stringify(editedPrimary),
+)
+
+const clearedPrimary = setElementPrimaryReference(editedPrimary, undefined)
+check(
+  'manual identity reference clear only removes primary media role',
+  clearedPrimary.refAssetIds.length === 0 &&
+    clearedPrimary.mediaRefs?.some((ref) => ref.role === 'primary') !== true &&
+    clearedPrimary.mediaRefs?.some((ref) => ref.assetId === 'concept-img' && ref.role === 'concept') === true,
+  JSON.stringify(clearedPrimary),
 )
 
 if (failures) {

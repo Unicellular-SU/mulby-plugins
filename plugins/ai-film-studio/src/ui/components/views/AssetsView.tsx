@@ -31,7 +31,7 @@ import {
   Archive,
   RotateCcw,
 } from 'lucide-react'
-import { useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
+import { setElementPrimaryReference, useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
@@ -964,14 +964,15 @@ function ElementEditor({
         ) : (
           <div className="afs-avrefgrid">
             {imageAssets.map((a) => {
-              const picked = (editing.refAssetIds || []).includes(a.assetId!)
+              const primaryAssetId = editing.mediaRefs?.find((ref) => ref.role === 'primary' && ref.assetId)?.assetId ?? editing.refAssetIds?.[0]
+              const picked = primaryAssetId === a.assetId
               return (
                 <button
                   key={a.id}
                   type="button"
                   className="afs-avreftile"
                   aria-pressed={picked}
-                  onClick={() => setEditing({ ...editing, refAssetIds: picked ? [] : [a.assetId!] })}
+                  onClick={() => setEditing(setElementPrimaryReference(editing, picked ? undefined : a.assetId))}
                   title={a.name || a.assetId}
                 >
                   <RefThumb assetId={a.assetId} />
