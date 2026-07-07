@@ -68,6 +68,7 @@ function storyboardCastAssets(doc: ProjectDoc, storyboard: Storyboard, usageByEn
       type: asset?.type,
       variantId: ref.variantId,
       variantLabel: variant?.label,
+      variantKind: variant?.variantKind,
       label: labelForCastRef(asset, ref),
       roleInShot: ref.roleInShot,
       note: ref.note,
@@ -159,6 +160,13 @@ function projectAssetNameUsageView(doc: ProjectDoc, name: string, usageByEntity?
     assetId: asset?.id,
     assetName: asset?.name,
     assetType: asset?.type,
+    variants: asset?.variants?.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      variantKind: variant.variantKind,
+      refImageId: variant.refImageId,
+      appliesToEpisodeIds: variant.appliesToEpisodeIds,
+    })),
     assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
   }
 }

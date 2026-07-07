@@ -239,9 +239,10 @@ const ep2Storyboards = JSON.parse(await getStoryboards.execute({ episodeTitle: '
 check('get_storyboards reads non-current episode by title', ep2Storyboards.storyboards?.[0]?.id === 'sb-ep2' && ep2Storyboards.episodeId === 'ep2', JSON.stringify(ep2Storyboards))
 check(
   'get_storyboards exposes cast asset-center usage',
-  ep2Storyboards.storyboards?.[0]?.castAssets?.some((item: { assetId: string; variantId?: string; label?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
+  ep2Storyboards.storyboards?.[0]?.castAssets?.some((item: { assetId: string; variantId?: string; variantKind?: string; label?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }) =>
     item.assetId === 'hero' &&
     item.variantId === 'gala' &&
+    item.variantKind === 'makeup' &&
     item.label === 'Hero-Gala' &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
@@ -253,15 +254,17 @@ const ep2Table = JSON.parse(await getStoryboardTable.execute({ episodeId: 'ep2' 
 check('get_storyboard_table reads non-current episode by id', ep2Table.scenes?.[0]?.sceneName === 'Hidden clue scene' && ep2Table.episodeIndex === 2, JSON.stringify(ep2Table))
 check(
   'get_storyboard_table resolves asset-center usage for design refs',
-  ep2Table.scenes?.[0]?.resolvedCastAssets?.some((item: { name: string; assetId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
+  ep2Table.scenes?.[0]?.resolvedCastAssets?.some((item: { name: string; assetId?: string; variants?: Array<{ id: string; variantKind?: string }>; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
     item.name === '主角' &&
     item.assetId === 'hero' &&
+    item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup') &&
     item.assetCenterUsage?.entityId === 'el-hero' &&
     item.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second'),
   ) &&
-    ep2Table.scenes?.[0]?.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some((item: { name: string; assetId?: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
+    ep2Table.scenes?.[0]?.segments?.[0]?.rows?.[0]?.resolvedAssetRefs?.some((item: { name: string; assetId?: string; variants?: Array<{ id: string; variantKind?: string }>; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
       item.name === '主角' &&
       item.assetId === 'hero' &&
+      item.variants?.some((variant) => variant.id === 'gala' && variant.variantKind === 'makeup') &&
       item.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
   JSON.stringify(ep2Table.scenes),
@@ -271,11 +274,12 @@ const ep2Timeline = JSON.parse(await getTimeline.execute({ episodeIndex: 2 }))
 check('get_timeline reads non-current episode by episode index', ep2Timeline.tracks?.[0]?.id === 'track-ep2' && ep2Timeline.clips?.[0]?.id === 'clip-ep2' && ep2Timeline.episodeId === 'ep2', JSON.stringify(ep2Timeline))
 check(
   'get_timeline exposes storyboard cast asset-center usage',
-  ep2Timeline.tracks?.[0]?.storyboardCastAssets?.some((item: { storyboardId: string; castAssets?: Array<{ assetId: string; variantId?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
+  ep2Timeline.tracks?.[0]?.storyboardCastAssets?.some((item: { storyboardId: string; castAssets?: Array<{ assetId: string; variantId?: string; variantKind?: string; assetCenterUsage?: { entityId?: string; currentProject?: { appearanceLabels?: string[] } } }> }) =>
     item.storyboardId === 'sb-ep2' &&
     item.castAssets?.some((cast) =>
       cast.assetId === 'hero' &&
       cast.variantId === 'gala' &&
+      cast.variantKind === 'makeup' &&
       cast.assetCenterUsage?.entityId === 'el-hero' &&
       cast.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
     ),
