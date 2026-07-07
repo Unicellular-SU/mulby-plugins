@@ -1,6 +1,6 @@
 import type { Asset, ProjectDoc } from '../domain/types'
 import type { ElementRef } from '../store/assetStore'
-import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectEpisodeUsageLabel, projectImageFlowMediaUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage } from './assetHub'
+import { canvasPortIdentityEntityId, createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, projectAssetIdentityUsageFromHub, projectEpisodeUsageLabel, projectImageFlowMediaUsageLabel, projectVariantMediaUsageLabel, promoteProjectAssetToEntity, resolveCanvasIdentityEntityUsage, resolveCanvasProjectAssetMediaUsage, type IdentityAssetUsage } from './assetHub'
 
 let failures = 0
 function check(name: string, ok: boolean, detail?: string) {
@@ -96,6 +96,34 @@ check('uses library link as project asset identity usage source', projectAssetId
 check('falls back to legacy element id for project asset identity usage', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: undefined }) === 'legacy-id')
 check('ignores blank project asset identity ids', projectAssetIdentityEntityId({ ...scopedAsset, elementId: ' ', libraryLink: { entityId: ' ', syncPolicy: 'snapshot' } }) === '')
 check('ignores forked project asset identity usage source', projectAssetIdentityEntityId({ ...scopedAsset, elementId: 'legacy-id', libraryLink: { entityId: 'linked-id', syncPolicy: 'forked' } }) === '')
+const usageFallbackDoc = {
+  meta: { id: 'p_usage', name: 'Usage Project' },
+  assets: [{ ...scopedAsset, id: 'local-hero', elementId: undefined, libraryLink: undefined }],
+} as ProjectDoc
+const usageFallbackMap: Record<string, IdentityAssetUsage> = {
+  el_hero: {
+    entityId: 'el_hero',
+    projectCount: 1,
+    assetCount: 1,
+    canvasProjectCount: 1,
+    canvasNodeCount: 2,
+    snapshotCount: 1,
+    projects: [{ projectId: 'p_usage', projectName: 'Usage Project', assetIds: ['local-hero'], assetNames: ['女主'], episodeLabels: ['E2 雨夜'], appearanceLabels: ['E2 雨夜 · 晚宴妆'] }],
+    canvasProjects: [{ projectId: 'canvas_1', projectName: '定妆画布', nodeIds: ['node_1', 'node_2'], nodeTitles: ['正面', '侧面'] }],
+    snapshots: [{ snapshotId: 'snap_1', snapshotName: '三视图快照', nodeIds: ['node_1'], nodeTitles: ['正面'] }],
+  },
+}
+check(
+  'resolves project asset identity usage from hub project mapping',
+  projectAssetIdentityUsageEntityId(usageFallbackDoc, usageFallbackDoc.assets[0], usageFallbackMap) === 'el_hero' &&
+    projectAssetIdentityUsageFromHub(usageFallbackDoc, usageFallbackDoc.assets[0], usageFallbackMap)?.projects[0]?.appearanceLabels?.includes('E2 雨夜 · 晚宴妆') === true,
+  JSON.stringify(projectAssetIdentityUsageFromHub(usageFallbackDoc, usageFallbackDoc.assets[0], usageFallbackMap)),
+)
+check(
+  'does not revive forked project asset identity from stale hub usage',
+  projectAssetIdentityUsageEntityId(usageFallbackDoc, { ...usageFallbackDoc.assets[0], libraryLink: { entityId: 'el_hero', syncPolicy: 'forked' } }, usageFallbackMap) === '',
+  JSON.stringify(usageFallbackMap),
+)
 const canvasLookup = new Map([['id:el_hero', 'el_hero'], ['char:hero-code', 'el_hero']])
 check('uses explicit canvas library entity lineage', canvasPortIdentityEntityId({ meta: { libraryEntityId: 'el_hero', charId: 'other-code' } }, canvasLookup) === 'el_hero')
 check('falls back to canvas char id lineage', canvasPortIdentityEntityId({ meta: { charId: 'hero-code' } }, canvasLookup) === 'el_hero')

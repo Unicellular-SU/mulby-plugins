@@ -10,7 +10,7 @@ import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalize
 import { buildContinuityReport, variantScopePatchForUse, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
-import { loadAssetHub, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
+import { loadAssetHub, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -114,18 +114,8 @@ function mergeLabels(...groups: Array<string[] | undefined>): string[] {
   return [...new Set(groups.flatMap((group) => group ?? []))]
 }
 
-function resolveAssetCenterEntityId(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>): string {
-  const linkedEntityId = projectAssetIdentityEntityId(asset)
-  if (linkedEntityId) return linkedEntityId
-  if (!usageByEntity) return ''
-  for (const usage of Object.values(usageByEntity)) {
-    if (usage.projects.some((project) => project.projectId === doc.meta.id && project.assetIds.includes(asset.id))) return usage.entityId
-  }
-  return ''
-}
-
 function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  const entityId = resolveAssetCenterEntityId(doc, asset, usageByEntity)
+  const entityId = projectAssetIdentityUsageEntityId(doc, asset, usageByEntity)
   if (!entityId) return undefined
   const usage = usageByEntity?.[entityId]
   const currentEpisodeLabels = projectAssetIdentityEpisodeLabels(doc, asset.id)

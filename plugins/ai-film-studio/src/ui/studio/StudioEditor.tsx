@@ -11,7 +11,7 @@ import { useAssetHubStore } from '../store/assetHubStore'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
-import { libraryEntityToElement } from '../services/assetHub'
+import { libraryEntityToElement, projectAssetIdentityUsageFromHub, type IdentityAssetUsage } from '../services/assetHub'
 import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, EpisodePlan, ProjectDoc } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
@@ -74,6 +74,28 @@ function projectAssetLinkStatusLabels(asset: Asset, linkedEntity?: { version: nu
   if (link?.entityVersion && linkedEntity && linkedEntity.version > link.entityVersion) labels.push('有新版')
   if (linkedEntity?.archived) labels.push('已归档')
   return labels
+}
+
+function assetCenterUsageChips(usage: IdentityAssetUsage | undefined): string[] {
+  if (!usage) return []
+  return [
+    usage.projectCount ? `${usage.projectCount} 项目` : '',
+    usage.assetCount ? `${usage.assetCount} 项目资产` : '',
+    usage.canvasNodeCount ? `${usage.canvasNodeCount} 画布节点` : '',
+    usage.snapshotCount ? `${usage.snapshotCount} 快照` : '',
+  ].filter(Boolean)
+}
+
+function assetCenterUsageTitle(usage: IdentityAssetUsage | undefined): string {
+  if (!usage) return '暂未发现资产中心、画布或快照引用'
+  const projectLines = usage.projects.map((project) => {
+    const episode = project.episodeLabels?.length ? `出场：${project.episodeLabels.join('、')}` : ''
+    const appearance = project.appearanceLabels?.length ? `形态：${project.appearanceLabels.join('、')}` : ''
+    return `${project.projectName}：${[project.assetNames.join('、'), episode, appearance].filter(Boolean).join('；')}`
+  })
+  const canvasLines = usage.canvasProjects.map((project) => `画布 ${project.projectName}：${project.nodeTitles.join('、')}`)
+  const snapshotLines = usage.snapshots.map((snapshot) => `快照 ${snapshot.snapshotName}：${snapshot.nodeTitles.join('、')}`)
+  return [...projectLines, ...canvasLines, ...snapshotLines].filter(Boolean).join('\n') || '暂未发现资产中心、画布或快照引用'
 }
 
 export default function StudioEditor({ onHome }: { onHome: () => void }) {
@@ -1253,6 +1275,8 @@ function AssetsTab() {
 function AssetContinuityPanel() {
   const doc = useProjectStore((s) => s.doc)!
   const continuity = useStudioContinuityReport(doc)
+  const hubLoaded = useAssetHubStore((s) => s.loaded)
+  const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
     .map((asset) => {
@@ -1260,17 +1284,20 @@ function AssetContinuityPanel() {
       const episodeLabels = [...new Map(uses.map(({ episode }) => [episode.id, `E${episode.index}`])).values()]
       const variantLabels = [...new Set(uses.map(({ use }) => use.variantLabel ?? (use.variantId ? use.variantId : '主形象')))]
       const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
-      return { asset, episodeLabels, variantLabels, issues }
+      const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
+      return { asset, episodeLabels, variantLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), issues }
     })
     .filter((row) => row.episodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   if (!rows.length) return null
   const issueCount = rows.reduce((sum, row) => sum + row.issues.length, 0)
+  const assetCenterUsageCount = rows.filter((row) => row.assetCenterChips.length > 0).length
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
       <div className="afs-studio__assetmatrix-head">
         <b>跨集资产一致性</b>
         <span>{rows.length} 个资产</span>
+        {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
       </div>
       <div className="afs-studio__assetmatrix-rows">
@@ -1287,6 +1314,10 @@ function AssetContinuityPanel() {
             <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`}>
               {row.variantLabels.length ? row.variantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
               {row.variantLabels.length > 4 && <i>+{row.variantLabels.length - 4}</i>}
+            </span>
+            <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 资产中心图谱`} title={assetCenterUsageTitle(row.assetCenterUsage)}>
+              {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
+              {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
             </span>
             {row.issues.length > 0 && (
               <span className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>

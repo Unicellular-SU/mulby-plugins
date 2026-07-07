@@ -543,6 +543,21 @@ export function projectAssetIdentityEntityId(asset: Asset): string {
   return lineageString(asset.libraryLink?.entityId) || lineageString(asset.elementId)
 }
 
+export function projectAssetIdentityUsageEntityId(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>): string {
+  const linkedEntityId = projectAssetIdentityEntityId(asset)
+  if (linkedEntityId) return linkedEntityId
+  if (asset.libraryLink?.syncPolicy === 'forked' || !usageByEntity) return ''
+  for (const usage of Object.values(usageByEntity)) {
+    if (usage.projects.some((project) => project.projectId === doc.meta.id && project.assetIds.includes(asset.id))) return usage.entityId
+  }
+  return ''
+}
+
+export function projectAssetIdentityUsageFromHub(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>): IdentityAssetUsage | undefined {
+  const entityId = projectAssetIdentityUsageEntityId(doc, asset, usageByEntity)
+  return entityId ? usageByEntity?.[entityId] : undefined
+}
+
 function emptyUsage(entityId: string): IdentityAssetUsage {
   return { entityId, projectCount: 0, assetCount: 0, canvasProjectCount: 0, canvasNodeCount: 0, snapshotCount: 0, projects: [], canvasProjects: [], snapshots: [] }
 }
