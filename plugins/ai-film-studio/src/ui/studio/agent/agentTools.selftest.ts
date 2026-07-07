@@ -1155,6 +1155,24 @@ check(
     ep1AfterScript?.scripts[0]?.content === 'Current episode only.',
   JSON.stringify({ upsertEp2Script, currentScripts: writableDoc.scripts, ep1Scripts: ep1AfterScript?.scripts }),
 )
+check(
+  'upsert_script returns episode plan usage',
+  upsertEp2Script.episode?.episodePlan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    upsertEp2Script.episode?.episodePlan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(upsertEp2Script),
+)
 
 const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2, videoDesc: 'Second episode new shot.', cast: ['主角'] }))
 const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')

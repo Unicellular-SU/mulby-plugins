@@ -1645,7 +1645,8 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const episode = next?.episodes?.find((item) => item.id === target.episode?.id) ?? target.episode
         const scripts = next && episode ? scriptsForEpisode(next, episode) : []
         const script = scripts.find((item) => item.id === id)
-        return json({ id, episode: next && episode ? episodeInfo(next, episode) : undefined, script: script ? { id: script.id, name: script.name, length: script.content.length } : undefined })
+        const usageByEntity = next && episode ? await loadIdentityUsageSafe() : undefined
+        return json({ id, episode: next && episode ? scriptEpisodeContext(next, episode, usageByEntity) : undefined, script: script ? { id: script.id, name: script.name, length: script.content.length } : undefined })
       },
     },
     {
