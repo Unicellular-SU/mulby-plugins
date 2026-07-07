@@ -6574,7 +6574,7 @@ html.light .afs-lp-body::before { opacity: 0.55; }
 /* ---- Element editor: appearance-variant rows (replaces inline flex) ---- */
 .afs-avvariant {
   display: grid;
-  grid-template-columns: 120px 1fr auto;
+  grid-template-columns: 120px 120px 1fr auto;
   gap: var(--afs-sp-3);
   align-items: center;
   margin-bottom: var(--afs-sp-2);
@@ -6591,6 +6591,8 @@ html.light .afs-lp-body::before { opacity: 0.55; }
 }
 @media (max-width: 520px) {
   .afs-avvariant { grid-template-columns: 1fr 1fr auto; }
+  .afs-avvariant > .afs-select__trigger { grid-column: 1 / 2; }
+  .afs-avvariant > .afs-field__input { grid-column: 1 / -1; }
 }
 
 /* ---- Asset preview Lightbox: opaque dark theater scrim (NO backdrop-filter) ---- */

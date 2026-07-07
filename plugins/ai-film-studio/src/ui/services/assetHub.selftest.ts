@@ -53,6 +53,7 @@ check('maps element lora to library entity', entity.lora?.ref === 'hero-base-lor
 const roundTripElement = libraryEntityToElement(entity)
 check('maps library media roles back to ElementRef', roundTripElement.mediaRefs?.some((ref) => ref.role === 'concept' && ref.assetId === 'concept-img') === true, JSON.stringify(roundTripElement.mediaRefs))
 check('maps library variant media roles back to ElementRef', roundTripElement.appearanceVariants?.[0]?.mediaRefs?.some((ref) => ref.role === 'reference' && ref.assetId === 'gala-ref') === true, JSON.stringify(roundTripElement.appearanceVariants))
+check('maps library variant kind back to ElementRef', roundTripElement.appearanceVariants?.[0]?.kind === 'makeup', JSON.stringify(roundTripElement.appearanceVariants))
 check(
   'preferred media selection keeps production role order',
   preferredMediaAssetId([
