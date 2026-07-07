@@ -114,8 +114,18 @@ function mergeLabels(...groups: Array<string[] | undefined>): string[] {
   return [...new Set(groups.flatMap((group) => group ?? []))]
 }
 
+function resolveAssetCenterEntityId(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>): string {
+  const linkedEntityId = projectAssetIdentityEntityId(asset)
+  if (linkedEntityId) return linkedEntityId
+  if (!usageByEntity) return ''
+  for (const usage of Object.values(usageByEntity)) {
+    if (usage.projects.some((project) => project.projectId === doc.meta.id && project.assetIds.includes(asset.id))) return usage.entityId
+  }
+  return ''
+}
+
 function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  const entityId = projectAssetIdentityEntityId(asset)
+  const entityId = resolveAssetCenterEntityId(doc, asset, usageByEntity)
   if (!entityId) return undefined
   const usage = usageByEntity?.[entityId]
   const currentEpisodeLabels = projectAssetIdentityEpisodeLabels(doc, asset.id)
@@ -2184,10 +2194,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const next = doc()
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
         const nextAsset = next?.assets.find((item) => item.id === asset.id)
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           variant: variant ? variantView(nextAsset ?? asset, variant.id) : undefined,
-          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
     },
@@ -2234,10 +2245,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         get().upsertStoryboard({ id: storyboard.id, videoDesc: storyboard.videoDesc, ...patch })
         const next = doc()
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
+        const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
-          asset: assetView(asset, { includeImages: false }),
-          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : assetView(asset, { includeImages: false }),
+          storyboard: next && updated ? storyboardView(next, updated, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
     },
@@ -2282,10 +2295,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         }
         const next = doc()
         const updated = next ? updatedIds.map((id) => next.storyboards.find((s) => s.id === id)).filter((item): item is Storyboard => !!item) : []
+        const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
-          asset: assetView(asset, { includeImages: false }),
-          storyboards: next ? updated.map((storyboard) => storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true })) : undefined,
+          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : assetView(asset, { includeImages: false }),
+          storyboards: next ? updated.map((storyboard) => storyboardView(next, storyboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity })) : undefined,
         })
       },
     },
@@ -2368,12 +2383,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           }
         }
         const updatedStoryboard = next?.storyboards.find((s) => s.id === id)
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({
           id,
           episode: next && target.episode ? episodeInfo(next, target.episode) : undefined,
           unresolvedCast: cast.unresolved,
           variants: scopedVariantViews(next, cast.refs),
-          storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true }) : undefined,
+          storyboard: next && updatedStoryboard ? storyboardView(next, updatedStoryboard, { includePrompt: true, includeDialogues: true, includeAssets: true, usageByEntity }) : undefined,
         })
       },
     },

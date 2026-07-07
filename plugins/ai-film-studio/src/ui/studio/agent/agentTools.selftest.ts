@@ -639,6 +639,15 @@ const addedStoryboard = JSON.parse(await addStoryboard.execute({ episodeIndex: 2
 const ep1AfterAdd = writableDoc.episodes?.find((item) => item.id === 'ep1')
 check('add_storyboard writes selected non-current episode', writableDoc.currentEpisodeId === 'ep2' && addedStoryboard.episode?.episodeId === 'ep2' && addedStoryboard.storyboard?.videoDesc === 'Second episode new shot.', JSON.stringify(addedStoryboard))
 check('add_storyboard resolves cast aliases', addedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string }) => ref.assetId === 'hero'), JSON.stringify(addedStoryboard.storyboard))
+check(
+  'add_storyboard returns cast asset-center usage',
+  addedStoryboard.storyboard?.castAssets?.some((item: { assetId: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[] } } }) =>
+    item.assetId === 'hero' &&
+    item.assetCenterUsage?.entityId === 'el-hero' &&
+    item.assetCenterUsage.currentProject?.episodeLabels?.includes('E2 Second'),
+  ),
+  JSON.stringify(addedStoryboard.storyboard?.castAssets),
+)
 check('add_storyboard does not append to previous current episode', !ep1AfterAdd?.storyboards.some((item) => item.videoDesc === 'Second episode new shot.'), JSON.stringify(ep1AfterAdd?.storyboards))
 
 const scopedAddedStoryboard = JSON.parse(
@@ -648,6 +657,11 @@ check(
   'add_storyboard can persist sceneId and scope bound variants',
   scopedAddedStoryboard.storyboard?.sceneId === 'rooftop' &&
     scopedAddedStoryboard.storyboard?.castRefs?.some((ref: { assetId: string; variantId?: string }) => ref.assetId === 'hero' && ref.variantId === 'cloak') &&
+    scopedAddedStoryboard.storyboard?.castAssets?.some((item: { assetId: string; variantId?: string; assetCenterUsage?: { currentProject?: { appearanceLabels?: string[] } } }) =>
+      item.assetId === 'hero' &&
+      item.variantId === 'cloak' &&
+      item.assetCenterUsage?.currentProject?.appearanceLabels?.some((label) => label.includes('Cloak')),
+    ) &&
     scopedAddedStoryboard.variants?.some((item: { variant?: { id: string; appliesToSceneIds?: string[] } }) => item.variant?.id === 'cloak' && item.variant.appliesToSceneIds?.includes('rooftop')),
   JSON.stringify(scopedAddedStoryboard),
 )
