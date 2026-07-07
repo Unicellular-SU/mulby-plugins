@@ -109,6 +109,7 @@ const readStorage = new Map<string, unknown>([
 const tools = makeProjectReadTools(() => doc)
 const searchProject = tools.find((tool) => tool.name === 'search_project')
 const getWorkspace = tools.find((tool) => tool.name === 'get_workspace')
+const getEpisodes = tools.find((tool) => tool.name === 'get_episodes')
 const getSeriesBible = tools.find((tool) => tool.name === 'get_series_bible')
 const getContinuityReport = tools.find((tool) => tool.name === 'get_continuity_report')
 const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handoff')
@@ -118,7 +119,7 @@ const getAssets = tools.find((tool) => tool.name === 'get_assets')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getSeriesBible || !getContinuityReport || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getEpisodes || !getSeriesBible || !getContinuityReport || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -207,6 +208,29 @@ check(
     ),
   ),
   JSON.stringify(workspace.episodes),
+)
+
+const episodesRead = JSON.parse(await getEpisodes.execute({}))
+check(
+  'get_episodes exposes episode plan asset and variant usage',
+  episodesRead.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'ep2' &&
+    item.plan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.plan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(episodesRead.episodes),
 )
 
 const continuityReport = JSON.parse(await getContinuityReport.execute({}))

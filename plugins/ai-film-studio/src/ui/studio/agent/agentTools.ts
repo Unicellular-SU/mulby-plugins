@@ -1037,7 +1037,9 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
       parameters: { type: 'object', properties: {} },
       execute: async () => {
         const d = doc()
-        return d ? json({ currentEpisodeId: d.currentEpisodeId, episodes: sortedEpisodes(d).map((episode) => episodeView(d, episode)) }) : '无打开的项目'
+        if (!d) return '无打开的项目'
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json({ currentEpisodeId: d.currentEpisodeId, episodes: sortedEpisodes(d).map((episode) => episodeView(d, episode, { usageByEntity })) })
       },
     },
     {
