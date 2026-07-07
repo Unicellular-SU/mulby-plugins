@@ -774,7 +774,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'library' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'missingRef' | 'library' | 'unlinked'
 type AssetMatrixTypeFilter = 'all' | 'role' | 'scene' | 'prop'
 const ASSET_MATRIX_LINK_ATTENTION_LABELS = new Set(['有新版', '已归档', '已分叉', '旧链接'])
 
@@ -1669,8 +1669,10 @@ function AssetContinuityPanel() {
   const rowVisibleIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => row.issues.filter((issue) => issueMatchesEpisodeFilter(issue, episodeFilter))
   const rowHasVisibleIssue = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleIssues(row, episodeFilter).length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
+  const rowNeedsMainReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
+    !row.asset.refImageId && (rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0 || rowVisibleEpisodeLabels(row, episodeFilter).length > 0)
   const rowHasLibraryStatusAttention = (row: (typeof rows)[number]) => row.linkStatusLabels.some((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label))
-  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
+  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowNeedsMainReference(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
   const rowMatchesEpisode = (row: (typeof rows)[number], episodeId: string) =>
     row.episodeIds.includes(episodeId) ||
     row.planEpisodeIds.includes(episodeId) ||
@@ -1683,11 +1685,12 @@ function AssetContinuityPanel() {
   const rowPriority = (row: (typeof rows)[number]) => {
     if (rowHasVisibleIssue(row)) return 0
     if (rowHasPlanDrift(row)) return 1
-    if (rowHasLibraryStatusAttention(row)) return 2
-    if (rowMissingAssetCenter(row)) return 3
-    if (rowVisiblePlanEpisodeLabels(row).length > 0) return 4
-    if (rowVisibleEpisodeLabels(row).length > 0) return 5
-    return 6
+    if (rowNeedsMainReference(row)) return 2
+    if (rowHasLibraryStatusAttention(row)) return 3
+    if (rowMissingAssetCenter(row)) return 4
+    if (rowVisiblePlanEpisodeLabels(row).length > 0) return 5
+    if (rowVisibleEpisodeLabels(row).length > 0) return 6
+    return 7
   }
   if (!rows.length) return null
   const sortedRows = [...rows].sort((a, b) =>
@@ -1713,6 +1716,7 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'appeared') return rowVisibleEpisodeLabels(row, episodeFilter).length > 0
     if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row, episodeFilter)
     if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row, episodeFilter)
+    if (assetMatrixFilter === 'missingRef') return rowNeedsMainReference(row, episodeFilter)
     if (assetMatrixFilter === 'library') return rowHasLibraryStatusAttention(row)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
@@ -1729,6 +1733,7 @@ function AssetContinuityPanel() {
   const appearedAssetCount = typeFilteredRows.filter((row) => rowVisibleEpisodeLabels(row).length > 0).length
   const planDriftCount = typeFilteredRows.filter((row) => rowHasPlanDrift(row)).length
   const issueAssetCount = typeFilteredRows.filter((row) => rowHasVisibleIssue(row)).length
+  const missingMainReferenceCount = typeFilteredRows.filter((row) => rowNeedsMainReference(row)).length
   const libraryStatusCount = typeFilteredRows.filter((row) => rowHasLibraryStatusAttention(row)).length
   const filteredRows = typeFilteredRows.filter((row) => rowMatchesAssetMatrixFilter(row))
   const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
@@ -1768,6 +1773,7 @@ function AssetContinuityPanel() {
       label: '质量',
       options: [
         { id: 'issue', label: '连续性问题', count: issueAssetCount },
+        { id: 'missingRef', label: '缺主图', count: missingMainReferenceCount },
         { id: 'library', label: '身份状态', count: libraryStatusCount },
       ],
     },
@@ -1825,6 +1831,7 @@ function AssetContinuityPanel() {
         {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
+        {missingMainReferenceCount > 0 && <span className="is-warning">{missingMainReferenceCount} 个缺主图</span>}
         {libraryStatusCount > 0 && <span className="is-warning">{libraryStatusCount} 个身份状态待确认</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
@@ -1985,6 +1992,11 @@ function AssetContinuityPanel() {
                     {visibleIssues.length} 问题
                   </i>
                 )}
+                {rowNeedsMainReference(row) && row.asset.state !== 'generating' && (
+                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 已进入计划或分镜，但还没有主参考图`}>
+                    缺主图
+                  </i>
+                )}
                 {rowHasLibraryStatusAttention(row) && (
                   <i className="afs-studio__assetmatrix-drift" title={`身份状态：${row.linkStatusLabels.join('、')}`}>
                     身份状态 {row.linkStatusLabels.filter((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label)).length}
@@ -2026,7 +2038,7 @@ function AssetContinuityPanel() {
                   </i>
                 )}
                 {!rowHasStatusWarning(row) && (
-                  <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>
+                  <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题、主参考图缺口或资产中心图谱警告`}>
                     正常
                   </i>
                 )}
