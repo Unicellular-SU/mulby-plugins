@@ -4202,6 +4202,8 @@ select.afs-toolbar__select,
 .afs-studio__assetmatrix .is-warning { color: var(--afs-warning); }
 .afs-studio__assetmatrix-scope { color: var(--afs-accent); }
 .afs-studio__assetmatrix-filterlabel { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--afs-text-dim); }
+.afs-studio__assetmatrix-clear { min-height: 22px; display: inline-flex; align-items: center; gap: 3px; padding: 2px 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); font-size: 11px; cursor: pointer; }
+.afs-studio__assetmatrix-clear:hover { border-color: var(--afs-accent); color: var(--afs-text); }
 .afs-studio__assetmatrix-spacer { flex: 1 1 auto; }
 .afs-studio__assetmatrix-filters { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .afs-studio__assetmatrix-search { min-height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--afs-border); border-radius: 5px; background: var(--afs-panel-2); color: var(--afs-text-dim); }

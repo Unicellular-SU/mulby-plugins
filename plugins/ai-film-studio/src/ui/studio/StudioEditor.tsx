@@ -1766,6 +1766,12 @@ function AssetContinuityPanel() {
   ].filter(Boolean)
   const hasActiveAssetMatrixFilter = activeFilterLabels.length > 0
   const activeFilterLabel = activeFilterLabels.length ? activeFilterLabels.join(' / ') : '当前'
+  const resetAssetMatrixFilters = () => {
+    setAssetMatrixSearch('')
+    setAssetMatrixEpisodeFilter('all')
+    setAssetMatrixTypeFilter('all')
+    setAssetMatrixFilter('all')
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1783,6 +1789,11 @@ function AssetContinuityPanel() {
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
         {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
         {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-filterlabel" title={activeFilterLabel}>筛选：{activeFilterLabel}</span>}
+        {hasActiveAssetMatrixFilter && (
+          <button type="button" className="afs-studio__assetmatrix-clear" title="清空资产矩阵筛选" onClick={resetAssetMatrixFilters}>
+            <X size={12} /> 清空
+          </button>
+        )}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
           <label className="afs-studio__assetmatrix-search">
@@ -1847,13 +1858,8 @@ function AssetContinuityPanel() {
         {filteredRows.length === 0 && (
           <span className="afs-studio__assetmatrix-empty">
             当前没有符合「{activeFilterLabel}」筛选的资产
-            {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && (
-              <button type="button" onClick={() => {
-                setAssetMatrixSearch('')
-                setAssetMatrixEpisodeFilter('all')
-                setAssetMatrixTypeFilter('all')
-                setAssetMatrixFilter('all')
-              }}>
+            {hasActiveAssetMatrixFilter && (
+              <button type="button" onClick={resetAssetMatrixFilters}>
                 显示全部
               </button>
             )}
