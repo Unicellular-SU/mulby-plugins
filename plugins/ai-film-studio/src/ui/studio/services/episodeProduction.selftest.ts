@@ -231,8 +231,8 @@ const handoffAssets: Asset[] = [
   {
     ...assets[0],
     variants: [
-      { id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep3'] },
-      { id: 'battle', label: 'Battle', refImageId: 'hero-battle' },
+      { id: 'gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep3'] },
+      { id: 'battle', label: 'Battle', variantKind: 'injury', refImageId: 'hero-battle' },
     ],
   },
   { id: 'prop', type: 'prop', name: 'Key', refImageId: 'key-main', state: 'done' },
@@ -261,11 +261,20 @@ check(
   'includes episode plan assets and variants in production handoff',
   handoff.plannedAssets.some((item) => item.assetId === 'hero' && item.requiredVariantIds.includes('gala')) &&
     handoff.plannedAssets.some((item) => item.assetId === 'prop') &&
-    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
+    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
   JSON.stringify({ plannedAssets: handoff.plannedAssets, plannedVariants: handoff.plannedVariants }),
 )
-check('builds shared asset handoff cues for current episode refs', !!heroCue && heroCue.label === 'Hero-Gala' && heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3', JSON.stringify(heroCue))
-check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala'), JSON.stringify(handoff.suggestions))
+check(
+  'builds shared asset handoff cues for current episode refs',
+  !!heroCue &&
+    heroCue.label === 'Hero-Gala' &&
+    heroCue.variantId === 'gala' &&
+    heroCue.variantKind === 'makeup' &&
+    heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3' &&
+    heroCue.appearances.some((item) => item.variantDetails?.some((variant) => variant.variantId === 'battle' && variant.variantKind === 'injury')),
+  JSON.stringify(heroCue),
+)
+check('suggests handoff fixes for scoped and missing variant refs', handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala' && item.variantKind === 'makeup') && handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala' && item.variantKind === 'makeup'), JSON.stringify(handoff.suggestions))
 check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))
 const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
 check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))

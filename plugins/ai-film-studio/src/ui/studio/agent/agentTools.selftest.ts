@@ -62,7 +62,7 @@ const doc: ProjectDoc = {
     elementId: 'el-hero',
     libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
     state: 'done',
-    variants: [{ id: 'gala', label: 'Gala' }],
+    variants: [{ id: 'gala', label: 'Gala', variantKind: 'makeup' }],
   }],
   storyboards: [{ ...storyboard('sb-current', 0, 'Current shot only.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero' }] }],
   clips: [],
@@ -206,7 +206,13 @@ check('get_episode_handoff exposes prior recap and shared cast refs', handoff.ep
 check(
   'get_episode_handoff exposes episode plan requirements',
   handoff.plannedAssets?.some((item: { assetId: string; requiredVariantIds?: string[] }) => item.assetId === 'hero' && item.requiredVariantIds?.includes('gala')) &&
-    handoff.plannedVariants?.some((item: { assetId: string; variantId: string; scopeAppliesToEpisode: boolean }) => item.assetId === 'hero' && item.variantId === 'gala' && item.scopeAppliesToEpisode === true),
+    handoff.plannedVariants?.some((item: { assetId: string; variantId: string; variantKind?: string; scopeAppliesToEpisode: boolean }) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.scopeAppliesToEpisode === true),
+  JSON.stringify(handoff),
+)
+check(
+  'get_episode_handoff exposes structured variant kinds',
+  handoff.sharedAssets?.some((cue: { assetId: string; variantId?: string; variantKind?: string }) => cue.assetId === 'hero' && cue.variantId === 'gala' && cue.variantKind === 'makeup') &&
+    handoff.suggestions?.some((suggestion: { kind: string; variantId?: string; variantKind?: string }) => suggestion.kind === 'generate_variant_ref_image' && suggestion.variantId === 'gala' && suggestion.variantKind === 'makeup'),
   JSON.stringify(handoff),
 )
 check(

@@ -1,5 +1,5 @@
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
-import type { Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
+import type { AssetVariant, Clip, Episode, ProjectDoc, Script, Storyboard, StoryboardCastRef } from '../../domain/types'
 import { buildContinuityReport, variantScopeIssue, type ContinuityIssue } from './continuityReport'
 
 export interface VariantImageRequest {
@@ -14,12 +14,19 @@ export interface EpisodeHandoffRecap {
   recap: string
 }
 
+export interface EpisodeHandoffVariantDetail {
+  variantId: string
+  label: string
+  variantKind?: AssetVariant['variantKind']
+}
+
 export interface EpisodeHandoffAppearance {
   episodeId: string
   episodeIndex: number
   episodeTitle: string
   variants: string[]
   variantLabels?: string[]
+  variantDetails?: EpisodeHandoffVariantDetail[]
   mainImageUsed?: boolean
   recap?: string
 }
@@ -27,6 +34,8 @@ export interface EpisodeHandoffAppearance {
 export interface EpisodeHandoffAssetCue {
   assetId: string
   label: string
+  variantId?: string
+  variantKind?: AssetVariant['variantKind']
   appearances: EpisodeHandoffAppearance[]
   carryForward?: boolean
   detail?: string
@@ -45,6 +54,7 @@ export interface EpisodeHandoffPlannedVariant {
   assetName: string
   variantId: string
   variantLabel: string
+  variantKind?: AssetVariant['variantKind']
   refImageId?: string
   scopeAppliesToEpisode: boolean
   appliesToEpisodeIds?: string[]
@@ -64,6 +74,7 @@ export interface EpisodeHandoffSuggestion {
   detail: string
   autoRepairable?: boolean
   variantLabel?: string
+  variantKind?: AssetVariant['variantKind']
   variantDesc?: string
   variantPrompt?: string
   disabledReason?: string
@@ -343,6 +354,37 @@ function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
 }
 
+function variantForCastRef(asset: HandoffAsset | undefined, ref: StoryboardCastRef): HandoffVariant | undefined {
+  if (!asset || !ref.variantId) return undefined
+  return asset.variants?.find((variant) => variant.id === ref.variantId)
+}
+
+function uniqueVariantDetails(details: EpisodeHandoffVariantDetail[]): EpisodeHandoffVariantDetail[] {
+  const seen = new Set<string>()
+  const result: EpisodeHandoffVariantDetail[] = []
+  for (const detail of details) {
+    const key = `${detail.variantId}:${detail.label}:${detail.variantKind ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(detail)
+  }
+  return result
+}
+
+function variantDetailsForRefs(asset: HandoffAsset, refs: StoryboardCastRef[]): EpisodeHandoffVariantDetail[] {
+  return uniqueVariantDetails(
+    refs.flatMap((ref): EpisodeHandoffVariantDetail[] => {
+      const variant = variantForCastRef(asset, ref)
+      if (!ref.variantId || !variant) return []
+      return [{
+        variantId: ref.variantId,
+        label: labelForCastRef(asset, ref),
+        variantKind: variant.variantKind,
+      }]
+    }),
+  )
+}
+
 function sortedEpisodes(doc: ProjectDoc): Episode[] {
   return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
 }
@@ -363,6 +405,7 @@ function plannedHandoffRequirements(episode: Episode, assets: Map<string, Handof
       assetName: owner.asset.name,
       variantId: owner.variant.id,
       variantLabel: owner.variant.label,
+      variantKind: owner.variant.variantKind,
       refImageId: owner.variant.refImageId,
       scopeAppliesToEpisode: !appliesToEpisodeIds?.length || appliesToEpisodeIds.includes(episode.id),
       appliesToEpisodeIds,
@@ -592,6 +635,7 @@ export function buildEpisodeProductionHandoff(
       label: `标记「${variant.label}」适用${target}`,
       detail: `当前集使用了 ${asset.name}-${variant.label}，但该形态尚未标记适用于${target}。`,
       autoRepairable: true,
+      variantKind: variant.variantKind,
     })
   }
   for (const plannedAsset of planned.plannedAssets) {
@@ -619,6 +663,7 @@ export function buildEpisodeProductionHandoff(
         label: `标记「${variant.label}」适用于E${episode.index + 1}`,
         detail: `本集计划要求 ${asset.name}-${variant.label}，但该形态尚未标记适用于 E${episode.index + 1}「${episode.title}」。建议生成分镜前先把本集加入适用范围。`,
         autoRepairable: true,
+        variantKind: variant.variantKind,
       })
     }
     if (!plannedVariant.refImageId) {
@@ -630,6 +675,7 @@ export function buildEpisodeProductionHandoff(
         label: `生成「${asset.name}-${variant.label}」参考图`,
         detail: `本集计划要求该形态/妆容，但它还没有独立参考图。建议生成关键帧前先补齐。`,
         autoRepairable: true,
+        variantKind: variant.variantKind,
         disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
       })
     }
@@ -668,6 +714,7 @@ export function buildEpisodeProductionHandoff(
               label: `确认「${variant.label}」为本集形态`,
               detail: `上一相关剧集 E${previous.episode.index + 1}「${previous.episode.title}」使用过 ${labelForCastRef(asset, previous.ref)}，当前集切到 ${asset.name}-${variant.label} 但尚未标记适用本集；若这是明确换装/妆容变化，建议标记本集适用，否则回到分镜沿用上一形态。`,
               autoRepairable: true,
+              variantKind: variant.variantKind,
             })
           }
         }
@@ -680,6 +727,7 @@ export function buildEpisodeProductionHandoff(
             label: `生成「${asset.name}-${variant.label}」参考图`,
             detail: '当前集引用了该形态，但它还没有独立参考图。',
             autoRepairable: true,
+            variantKind: variant.variantKind,
             disabledReason: asset.refImageId ? undefined : '先生成主参考图，再派生形态图。',
           })
         }
@@ -691,12 +739,14 @@ export function buildEpisodeProductionHandoff(
         const refs = uniqueCastRefs(storyboardsForEpisode(doc, item)).filter((itemRef) => itemRef.assetId === ref.assetId)
         if (!refs.length) return []
         const variantLabels = unique(refs.filter((itemRef) => !!itemRef.variantId).map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4)
+        const variantDetails = variantDetailsForRefs(asset, refs).slice(0, 4)
         return [{
           episodeId: item.id,
           episodeIndex: item.index,
           episodeTitle: item.title,
           variants: unique(refs.map((itemRef) => labelForCastRef(asset, itemRef))).slice(0, 4),
           variantLabels: variantLabels.length ? variantLabels : undefined,
+          variantDetails: variantDetails.length ? variantDetails : undefined,
           mainImageUsed: refs.some((itemRef) => !itemRef.variantId),
           recap: item.productionRecap ? compact(item.productionRecap, 180) : undefined,
         }]
@@ -707,6 +757,8 @@ export function buildEpisodeProductionHandoff(
       sharedAssets.push({
         assetId: ref.assetId,
         label: labelForCastRef(asset, ref),
+        variantId: ref.variantId,
+        variantKind: variantForCastRef(asset, ref)?.variantKind,
         appearances,
         carryForward: sourceRef.carryForward,
         detail: sourceRef.carryForward && sourceRef.sourceEpisode
