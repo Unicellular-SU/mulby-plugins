@@ -892,8 +892,33 @@ check(
         variant.assetCenterUsage?.entityId === 'el-hero' &&
         variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
         variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
-    ),
+  ),
   JSON.stringify(skippedEpisodePlan),
+)
+
+const invalidWriteEpisode = JSON.parse(await addStoryboard.execute({ episodeTitle: 'Missing Episode', videoDesc: 'Should not be written.' }))
+check(
+  'write tool episode candidates expose plan asset usage after invalid selector',
+  !!invalidWriteEpisode.error &&
+    invalidWriteEpisode.episodes?.some(
+      (episode: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+        episode.id === 'ep2' &&
+        episode.plan?.requiredAssets?.some(
+          (asset) =>
+            asset.id === 'hero' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ) &&
+        episode.plan?.requiredVariants?.some(
+          (variant) =>
+            variant.id === 'gala' &&
+            variant.assetCenterUsage?.entityId === 'el-hero' &&
+            variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ),
+    ),
+  JSON.stringify(invalidWriteEpisode),
 )
 
 const variantOnlyEpisodePlan = JSON.parse(

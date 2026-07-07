@@ -1009,10 +1009,17 @@ function switchToEpisodeForWrite(get: () => ProjectState, args: Record<string, u
   const d = get().doc
   if (!d) return { error: '无项目' }
   const episode = resolveEpisodeForWrite(d, args)
-  if (!episode) return { error: '未找到剧集' }
+  if (!episode) return { doc: d, error: '未找到剧集' }
   if (d.currentEpisodeId !== episode.id) get().switchEpisode(episode.id)
   const next = get().doc ?? d
   return { doc: next, episode: next.episodes?.find((item) => item.id === episode.id) ?? episode }
+}
+
+async function episodeWriteTargetErrorView(target: { doc?: ProjectDoc; error?: string }) {
+  return {
+    error: target.error,
+    episodes: target.doc ? await episodeListWithUsage(target.doc) : undefined,
+  }
 }
 
 function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion) {
@@ -1487,7 +1494,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const episodeId = target.episode?.id
         if (!episodeId) return json({ error: '未找到剧集' })
         const requestedIds = handoffSuggestionIds(a)
@@ -1549,7 +1556,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const id = get().upsertScript({ name: typeof a.name === 'string' ? a.name : undefined, content: String(a.content ?? '') })
         const next = doc()
         const episode = next?.episodes?.find((item) => item.id === target.episode?.id) ?? target.episode
@@ -2267,7 +2274,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const storyboard = resolveStoryboard(d, a)
@@ -2318,7 +2325,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const storyboard = resolveStoryboard(d, a)
@@ -2368,7 +2375,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const asset = findSceneAsset(d, a)
@@ -2438,7 +2445,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const cast = storyboardCastRefsFromArgs(d, a)
@@ -2510,7 +2517,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       parameters: { type: 'object', properties: { episodeId: { type: 'string' }, episodeIndex: { type: 'number' }, episodeTitle: { type: 'string' }, index: { type: 'number' } }, required: ['index'] },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
@@ -2534,7 +2541,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       parameters: { type: 'object', properties: { episodeId: { type: 'string' }, episodeIndex: { type: 'number' }, episodeTitle: { type: 'string' }, index: { type: 'number' } }, required: ['index'] },
       execute: async (a) => {
         const target = switchToEpisodeForWrite(get, a)
-        if (target.error) return json({ error: target.error })
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
         const d = target.doc
         if (!d) return '无项目'
         const storyboards = [...d.storyboards].sort((x, y) => x.index - y.index)
