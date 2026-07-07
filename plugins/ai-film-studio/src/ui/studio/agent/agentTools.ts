@@ -10,7 +10,7 @@ import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalize
 import { buildContinuityReport, variantScopePatchForUse, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from '../services/episodeHandoffSuggestions'
-import { loadAssetHub, projectAssetIdentityEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
+import { loadAssetHub, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
 import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
 
 type ProjectDocGetter = () => ProjectDoc | null
@@ -114,7 +114,13 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
   const entityId = projectAssetIdentityEntityId(asset)
   if (!entityId) return undefined
   const usage = usageByEntity?.[entityId]
-  if (!usage) return { entityId }
+  const currentEpisodeLabels = projectAssetIdentityEpisodeLabels(doc, asset.id)
+  const currentAppearanceLabels = projectAssetIdentityAppearanceLabels(doc, asset)
+  const currentProjectFromDoc =
+    currentEpisodeLabels.length || currentAppearanceLabels.length
+      ? { episodeLabels: currentEpisodeLabels, appearanceLabels: currentAppearanceLabels }
+      : undefined
+  if (!usage) return { entityId, currentProject: currentProjectFromDoc }
   const currentProject = usage.projects.find((project) => project.projectId === doc.meta.id && project.assetIds.includes(asset.id))
   return {
     entityId,
@@ -122,12 +128,13 @@ function assetCenterUsageView(doc: ProjectDoc, asset: Asset, usageByEntity?: Rec
     projectAssetCount: usage.assetCount,
     canvasNodeCount: usage.canvasNodeCount,
     snapshotCount: usage.snapshotCount,
-    currentProject: currentProject
-      ? {
-          episodeLabels: currentProject.episodeLabels ?? [],
-          appearanceLabels: currentProject.appearanceLabels ?? [],
-        }
-      : undefined,
+    currentProject:
+      currentProject || currentProjectFromDoc
+        ? {
+            episodeLabels: currentProject?.episodeLabels ?? currentProjectFromDoc?.episodeLabels ?? [],
+            appearanceLabels: currentProject?.appearanceLabels ?? currentProjectFromDoc?.appearanceLabels ?? [],
+          }
+        : undefined,
   }
 }
 
@@ -1835,10 +1842,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           archived: resolved.entity.archived,
           variants: resolved.entity.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
         })
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           linked,
-          asset: assetView(nextAsset, { includeImages: false }),
+          asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }),
           entity: libraryEntityView(resolved.entity),
         })
       },
@@ -1874,11 +1883,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           })
         }
         const marked = get().markAssetAsDistinctIdentity(asset.id, resolved.ids)
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           marked,
           rejectedLibraryEntityIds: nextAsset.rejectedLibraryEntityIds ?? [],
-          asset: assetView(nextAsset, { includeImages: false }),
+          asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }),
         })
       },
     },
@@ -1900,11 +1911,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (!asset) return json({ error: '未找到资产', assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         if (!asset.refImageId) return json({ error: '该资产还没有主参考图，不能发布到资产中心', asset: assetView(asset, { includeImages: false }) })
         const published = await get().promoteAssetToElement(asset.id)
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           published,
           error: published ? undefined : '未发布，可能缺少主参考图或关联身份已归档',
-          asset: assetView(nextAsset, { includeImages: false }),
+          asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }),
         })
       },
     },
@@ -1940,8 +1953,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           })
         }
         const synced = get().syncAssetFromLibraryEntity(asset.id, resolved.entity as LibraryEntity)
-        const nextAsset = get().doc?.assets.find((item) => item.id === asset.id) ?? asset
-        return json({ synced, entity: libraryEntityView(resolved.entity), asset: assetView(nextAsset, { includeImages: false }) })
+        const nextDoc = get().doc ?? d
+        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json({ synced, entity: libraryEntityView(resolved.entity), asset: assetView(nextAsset, { doc: nextDoc, includeImages: false, usageByEntity }) })
       },
     },
     {
@@ -1986,10 +2001,11 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const merged = get().mergeProjectAssetInto(source.id, target.id)
         const next = doc()
         const nextTarget = next?.assets.find((item) => item.id === target.id)
+        const usageByEntity = nextTarget ? await loadIdentityUsageSafe() : undefined
         return json({
           merged,
           removedSourceId: merged ? source.id : undefined,
-          target: nextTarget ? assetView(nextTarget, { includeImages: false }) : undefined,
+          target: next && nextTarget ? assetView(nextTarget, { doc: next, includeImages: false, usageByEntity }) : undefined,
           sourceStillExists: next?.assets.some((item) => item.id === source.id),
         })
       },

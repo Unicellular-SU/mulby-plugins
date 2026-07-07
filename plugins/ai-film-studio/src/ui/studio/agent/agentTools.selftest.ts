@@ -671,7 +671,10 @@ check(
     linkedLibraryAsset.asset?.name === 'Hero' &&
     linkedLibraryAsset.asset?.elementId === 'el-hero' &&
     linkedLibraryAsset.asset?.libraryLink?.entityId === 'el-hero' &&
-    linkedLibraryAsset.asset?.libraryLink?.entityVersion === 2,
+    linkedLibraryAsset.asset?.libraryLink?.entityVersion === 2 &&
+    linkedLibraryAsset.asset?.assetCenterUsage?.entityId === 'el-hero' &&
+    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+    linkedLibraryAsset.asset?.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
   JSON.stringify(linkedLibraryAsset),
 )
 
@@ -701,6 +704,7 @@ check(
     publishedForkedLegacyAsset.asset?.id === 'legacy-linked' &&
     publishedForkedLegacyAsset.asset?.elementId === 'el-legacy-linked' &&
     publishedForkedLegacyAsset.asset?.libraryLink?.entityId === 'el-legacy-linked' &&
+    publishedForkedLegacyAsset.asset?.assetCenterUsage?.entityId === 'el-legacy-linked' &&
     publishedForkedLegacyAsset.asset?.rejectedLibraryEntityIds?.includes('el-legacy-old'),
   JSON.stringify(publishedForkedLegacyAsset),
 )
@@ -711,7 +715,8 @@ check(
   publishedProjectAsset.published === true &&
     publishedProjectAsset.asset?.id === 'sync-target' &&
     publishedProjectAsset.asset?.elementId === 'el-sync-target' &&
-    publishedProjectAsset.asset?.libraryLink?.entityId === 'el-sync-target',
+    publishedProjectAsset.asset?.libraryLink?.entityId === 'el-sync-target' &&
+    publishedProjectAsset.asset?.assetCenterUsage?.entityId === 'el-sync-target',
   JSON.stringify(publishedProjectAsset),
 )
 const blockedPublishedProjectAsset = JSON.parse(await publishProjectAsset.execute({ assetId: 'publish-blocked' }))
@@ -775,6 +780,7 @@ check(
     explicitForkedSync.asset?.name === 'Old Forked Hero' &&
     explicitForkedSync.asset?.libraryLink?.entityId === 'el-forked-old' &&
     explicitForkedSync.asset?.libraryLink?.syncPolicy === 'snapshot' &&
+    explicitForkedSync.asset?.assetCenterUsage?.entityId === 'el-forked-old' &&
     !explicitForkedSync.asset?.rejectedLibraryEntityIds?.includes('el-forked-old'),
   JSON.stringify(explicitForkedSync),
 )
@@ -790,6 +796,7 @@ check(
     syncedProjectAsset.asset?.lora?.ref === 'synced-hero-lora' &&
     syncedProjectAsset.asset?.libraryLink?.entityId === 'el-sync' &&
     syncedProjectAsset.asset?.libraryLink?.entityVersion === 4 &&
+    syncedProjectAsset.asset?.assetCenterUsage?.entityId === 'el-sync' &&
     syncedProjectAsset.entity?.identity === 'same face, silver scar' &&
     syncedProjectAsset.entity?.voiceRef?.assetId === 'voice-synced' &&
     syncedProjectAsset.entity?.lora?.ref === 'synced-hero-lora' &&
