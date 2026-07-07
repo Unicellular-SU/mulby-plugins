@@ -1623,6 +1623,7 @@ function AssetContinuityPanel() {
     row.unplannedVariantUseLabels.length > 0
   const rowHasIssue = (row: (typeof rows)[number]) => row.issues.length > 0
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
+  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row)
   const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
     row.plannedUnusedLabels.length + row.unplannedUseLabels.length + row.plannedVariantUnusedLabels.length + row.unplannedVariantUseLabels.length
   const rowPriority = (row: (typeof rows)[number]) => {
@@ -1736,7 +1737,7 @@ function AssetContinuityPanel() {
       <div className="afs-studio__assetmatrix-rows">
         {filteredRows.length === 0 && <span className="afs-studio__assetmatrix-empty">当前筛选下没有资产</span>}
         {filteredRows.map((row) => (
-          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasIssue(row) || rowHasPlanDrift(row) || rowMissingAssetCenter(row) ? ' is-warning' : ''}`}>
+          <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
             <span className="afs-studio__assetmatrix-name" title={row.asset.name}>
               <b>{row.asset.name}</b>
               <em>{typeLabel(row.asset.type)}</em>
@@ -1761,40 +1762,43 @@ function AssetContinuityPanel() {
               {row.assetCenterChips.length ? row.assetCenterChips.slice(0, 3).map((label) => <i key={label}>{label}</i>) : <i>{hubLoaded ? '未入图谱' : '图谱加载中'}</i>}
               {row.assetCenterChips.length > 3 && <i>+{row.assetCenterChips.length - 3}</i>}
             </span>
-            {(row.plannedUnusedLabels.length > 0 || row.unplannedUseLabels.length > 0 || row.plannedVariantUnusedLabels.length > 0 || row.unplannedVariantUseLabels.length > 0 || rowMissingAssetCenter(row) || row.issues.length > 0) && (
-              <span className="afs-studio__assetmatrix-status">
-                {rowMissingAssetCenter(row) && (
-                  <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
-                    未入图谱
-                  </i>
-                )}
-                {row.plannedUnusedLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
-                    计划未用 {row.plannedUnusedLabels.length}
-                  </i>
-                )}
-                {row.unplannedUseLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${row.unplannedUseLabels.join('、')}`}>
-                    未计划 {row.unplannedUseLabels.length}
-                  </i>
-                )}
-                {row.plannedVariantUnusedLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`计划形态未进入分镜：${row.plannedVariantUnusedLabels.join('、')}`}>
-                    形态未用 {row.plannedVariantUnusedLabels.length}
-                  </i>
-                )}
-                {row.unplannedVariantUseLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`分镜形态未进入剧集计划：${row.unplannedVariantUseLabels.join('、')}`}>
-                    形态未计划 {row.unplannedVariantUseLabels.length}
-                  </i>
-                )}
-                {row.issues.length > 0 && (
-                  <i className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
-                    {row.issues.length} 问题
-                  </i>
-                )}
-              </span>
-            )}
+            <span className="afs-studio__assetmatrix-status">
+              {rowMissingAssetCenter(row) && (
+                <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
+                  未入图谱
+                </i>
+              )}
+              {row.plannedUnusedLabels.length > 0 && (
+                <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${row.plannedUnusedLabels.join('、')}`}>
+                  计划未用 {row.plannedUnusedLabels.length}
+                </i>
+              )}
+              {row.unplannedUseLabels.length > 0 && (
+                <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${row.unplannedUseLabels.join('、')}`}>
+                  未计划 {row.unplannedUseLabels.length}
+                </i>
+              )}
+              {row.plannedVariantUnusedLabels.length > 0 && (
+                <i className="afs-studio__assetmatrix-drift" title={`计划形态未进入分镜：${row.plannedVariantUnusedLabels.join('、')}`}>
+                  形态未用 {row.plannedVariantUnusedLabels.length}
+                </i>
+              )}
+              {row.unplannedVariantUseLabels.length > 0 && (
+                <i className="afs-studio__assetmatrix-drift" title={`分镜形态未进入剧集计划：${row.unplannedVariantUseLabels.join('、')}`}>
+                  形态未计划 {row.unplannedVariantUseLabels.length}
+                </i>
+              )}
+              {row.issues.length > 0 && (
+                <i className="afs-studio__assetmatrix-issue" title={row.issues.slice(0, 4).map((issue) => issue.message).join('\n')}>
+                  {row.issues.length} 问题
+                </i>
+              )}
+              {!rowHasStatusWarning(row) && (
+                <i className="afs-studio__assetmatrix-ok" title={`${row.asset.name} 当前没有计划差异、连续性问题或资产中心图谱警告`}>
+                  正常
+                </i>
+              )}
+            </span>
           </div>
         ))}
       </div>
