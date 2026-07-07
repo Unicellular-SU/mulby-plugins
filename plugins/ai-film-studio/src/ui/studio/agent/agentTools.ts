@@ -1837,7 +1837,12 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       execute: async (a) => {
         const type = a.type === 'scene' || a.type === 'prop' ? a.type : 'role'
         const id = get().upsertAsset({ type, name: String(a.name ?? '未命名'), aliases: cleanAssetAliases(a.aliases), desc: a.desc as string | undefined, prompt: a.prompt as string | undefined })
-        return `已新增资产 ${a.name}（id ${id}）`
+        const next = get().doc
+        const asset = next?.assets.find((item) => item.id === id)
+        return json({
+          id,
+          asset: next && asset ? assetView(asset, { doc: next, includeImages: false, usageByEntity: await loadIdentityUsageSafe() }) : undefined,
+        })
       },
     },
     {
@@ -2484,9 +2489,15 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const d = doc()
         if (!d) return '无项目'
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
-        if (!asset) return `未找到资产 ${String(a.assetId ?? a.assetName ?? a.name ?? '')}`
+        if (!asset) return json({ error: `未找到资产 ${String(a.assetId ?? a.assetName ?? a.name ?? '')}`, assets: d.assets.filter(isCastableAsset).map((item) => ({ id: item.id, name: item.name, type: item.type })) })
         await get().generateAsset(asset.id)
-        return `已生成资产 ${asset.name}`
+        const next = doc()
+        const nextAsset = next?.assets.find((item) => item.id === asset.id) ?? asset
+        const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
+        return json({
+          generated: true,
+          asset: next ? assetView(nextAsset, { doc: next, includeImages: false, usageByEntity }) : await assetViewWithUsage(d, asset, { includeImages: false }),
+        })
       },
     },
     {

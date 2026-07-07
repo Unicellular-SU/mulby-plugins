@@ -760,6 +760,7 @@ writableDoc.episodes![1].storyboards = [storyboard('sb-ep2-original', 0, 'Second
 const writeState = makeWritableState(writableDoc)
 const writeTools = makeAgentTools(() => writeState)
 const upsertScript = writeTools.find((tool) => tool.name === 'upsert_script')
+const addAsset = writeTools.find((tool) => tool.name === 'add_asset')
 const addStoryboard = writeTools.find((tool) => tool.name === 'add_storyboard')
 const updateAsset = writeTools.find((tool) => tool.name === 'update_asset')
 const generateAsset = writeTools.find((tool) => tool.name === 'generate_asset')
@@ -779,7 +780,7 @@ const setCastVariant = writeTools.find((tool) => tool.name === 'set_storyboard_c
 const setSceneAsset = writeTools.find((tool) => tool.name === 'set_storyboard_scene_asset')
 const setEpisodeSeriesSkip = writeTools.find((tool) => tool.name === 'set_episode_series_skip')
 
-if (!upsertScript || !addStoryboard || !updateAsset || !generateAsset || !upsertAssetVariant || !generateAssetVariant || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
+if (!upsertScript || !addAsset || !addStoryboard || !updateAsset || !generateAsset || !upsertAssetVariant || !generateAssetVariant || !updateSeriesBible || !upsertEpisodePlan || !applyHandoffSuggestion || !linkLibraryEntity || !markDistinctIdentity || !publishProjectAsset || !syncProjectAsset || !mergeProjectAsset || !setAssetRef || !setVariantScope || !setCastVariant || !setSceneAsset || !setEpisodeSeriesSkip) {
   console.error('  FAIL write tools exist: required write tools missing')
   process.exit(1)
 }
@@ -791,6 +792,19 @@ check(
     updatedSeriesBible.seriesBible?.plannedEpisodeCount === 5 &&
     writableDoc.seriesBible?.continuityRules?.includes('Hero wears Gala only in E2') === true,
   JSON.stringify(updatedSeriesBible),
+)
+
+const addedAsset = JSON.parse(await addAsset.execute({ type: 'prop', name: 'Compass', aliases: ['罗盘'], desc: 'A brass compass.' }))
+check(
+  'add_asset returns structured asset view',
+  addedAsset.id &&
+    addedAsset.asset?.id === addedAsset.id &&
+    addedAsset.asset?.name === 'Compass' &&
+    addedAsset.asset?.type === 'prop' &&
+    addedAsset.asset?.aliases?.includes('罗盘') &&
+    addedAsset.asset?.desc === 'A brass compass.' &&
+    !addedAsset.asset?.assetCenterUsage,
+  JSON.stringify(addedAsset),
 )
 
 const updatedEpisodePlan = JSON.parse(
@@ -1150,8 +1164,18 @@ check(
   JSON.stringify(syncedProjectAsset),
 )
 
-await generateAsset.execute({ name: '队长' })
-check('generate_asset resolves asset aliases', writableDoc.assets.find((item) => item.id === 'hero')?.refImageId === 'generated-hero', JSON.stringify(writableDoc.assets.find((item) => item.id === 'hero')))
+const generatedAsset = JSON.parse(await generateAsset.execute({ name: '队长' }))
+check(
+  'generate_asset resolves aliases and returns asset lineage',
+  generatedAsset.generated === true &&
+    generatedAsset.asset?.id === 'hero' &&
+    generatedAsset.asset?.refImageId === 'generated-hero' &&
+    generatedAsset.asset?.libraryEntityId === 'el-hero' &&
+    generatedAsset.asset?.librarySyncPolicy === 'forked' &&
+    !generatedAsset.asset?.assetCenterUsage &&
+    writableDoc.assets.find((item) => item.id === 'hero')?.refImageId === 'generated-hero',
+  JSON.stringify(generatedAsset),
+)
 const generatedVariant = JSON.parse(await generateAssetVariant.execute({ assetName: 'Hero', variantLabel: 'Cloak' }))
 check(
   'generate_asset_variant returns generated variant lineage',
