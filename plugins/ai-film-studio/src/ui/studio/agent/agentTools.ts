@@ -1103,7 +1103,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         return json({ ...episodeInfo(d, episode), ...episodeHandoffView(d, buildEpisodeProductionHandoff(d, episode), await loadIdentityUsageSafe()) })
       },
     },
@@ -1125,7 +1125,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         const scripts = scriptsForEpisode(d, episode)
         const limit = numberArg(a.contentLimit, 12000, 0, 50000)
         const idx = typeof a.index === 'number' ? oneBasedIndex(a.index, scripts.length) : 0
@@ -1154,7 +1154,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         const sorted = [...storyboardsForEpisode(d, episode)].sort((x, y) => x.index - y.index)
         const start = numberArg(a.startIndex, 1, 1, Math.max(1, sorted.length)) - 1
         const count = numberArg(a.count, sorted.length, 1, 200)
@@ -1261,7 +1261,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         return json({ ...episodeInfo(d, episode), scenes: storyboardTableView(d, storyboardTableForEpisode(d, episode), await loadIdentityUsageSafe()) })
       },
     },
@@ -1281,7 +1281,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const d = doc()
         if (!d) return '无打开的项目'
         const episode = resolveEpisodeSelector(d, a)
-        if (!episode) return json({ error: '未找到剧集', episodes: sortedEpisodes(d).map((e) => episodeView(d, e)) })
+        if (!episode) return json({ error: '未找到剧集', episodes: await episodeListWithUsage(d) })
         const storyboards = storyboardsForEpisode(d, episode)
         const storyboardById = new Map(storyboards.map((s) => [s.id, s]))
         const clips = clipsForEpisode(d, episode)
@@ -1342,14 +1342,14 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         const episodes = episodeList(d)
-        const usageByEntity = wants('assets') ? await loadIdentityUsageSafe() : undefined
+        const usageByEntity = wants('assets') || wants('episodes') ? await loadIdentityUsageSafe() : undefined
         return json({
           query: q,
           episodes: wants('episodes')
             ? episodes
                 .filter((episode) => has(episode.title) || has(episode.summary) || has(episode.productionRecap))
                 .slice(0, limit)
-                .map((episode) => episodeView(d, episode))
+                .map((episode) => episodeView(d, episode, { usageByEntity }))
             : undefined,
           scripts: wants('scripts')
             ? episodes

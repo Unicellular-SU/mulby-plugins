@@ -129,6 +129,29 @@ check('search_project finds non-current episode scripts', search.scripts?.some((
 check('search_project finds non-current episode storyboards', search.storyboards?.some((item: { id: string; episodeIndex: number }) => item.id === 'sb-ep2' && item.episodeIndex === 2), JSON.stringify(search.storyboards))
 check('search_project finds non-current episode storyboard table', search.storyboardTable?.some((item: { scene: { sceneName: string }; episodeId: string }) => item.scene.sceneName === 'Hidden clue scene' && item.episodeId === 'ep2'), JSON.stringify(search.storyboardTable))
 
+const episodeSearch = JSON.parse(await searchProject.execute({ query: 'Second', domains: ['episodes'], limit: 10 }))
+check(
+  'search_project exposes episode plan asset and variant usage',
+  episodeSearch.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'ep2' &&
+    item.plan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.plan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(episodeSearch.episodes),
+)
+
 const assetAliasSearch = JSON.parse(await searchProject.execute({ query: '主角', domains: ['assets'], limit: 10 }))
 check('search_project finds assets by alias', assetAliasSearch.assets?.some((item: { id: string; aliases?: string[] }) => item.id === 'hero' && item.aliases?.includes('主角')), JSON.stringify(assetAliasSearch.assets))
 check(
@@ -422,6 +445,20 @@ check(
 )
 const missingEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 99 }))
 check('read tools reject invalid explicit episode selectors instead of falling back to current episode', !!missingEpisodeRead.error && !missingEpisodeRead.id, JSON.stringify(missingEpisodeRead))
+check(
+  'read tool episode candidates expose plan asset usage after invalid selector',
+  missingEpisodeRead.episodes?.some((item: { id: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'ep2' &&
+    item.plan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(missingEpisodeRead.episodes),
+)
 const zeroEpisodeRead = JSON.parse(await getScript.execute({ episodeIndex: 0 }))
 check('read tools reject non-positive episode indexes', !!zeroEpisodeRead.error && !zeroEpisodeRead.id, JSON.stringify(zeroEpisodeRead))
 
