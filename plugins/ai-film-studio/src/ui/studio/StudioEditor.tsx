@@ -1764,6 +1764,7 @@ function AssetContinuityPanel() {
     assetMatrixTypeFilter !== 'all' ? activeTypeOption?.label ?? '当前类型' : undefined,
     assetMatrixFilter !== 'all' ? activeFilterOption?.label ?? '当前' : undefined,
   ].filter(Boolean)
+  const hasActiveAssetMatrixFilter = activeFilterLabels.length > 0
   const activeFilterLabel = activeFilterLabels.length ? activeFilterLabels.join(' / ') : '当前'
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
@@ -1780,7 +1781,8 @@ function AssetContinuityPanel() {
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {issueCount > 0 && <span className="is-warning">{issueCount} 个问题</span>}
-        {(assetMatrixSearchKey || assetMatrixEpisodeFilter !== 'all' || assetMatrixTypeFilter !== 'all' || assetMatrixFilter !== 'all') && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
+        {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-scope">当前显示 {filteredRows.length}/{assetMatrixScopeTotal}</span>}
+        {hasActiveAssetMatrixFilter && <span className="afs-studio__assetmatrix-filterlabel" title={activeFilterLabel}>筛选：{activeFilterLabel}</span>}
         <span className="afs-studio__assetmatrix-spacer" />
         <span className="afs-studio__assetmatrix-filters" aria-label="资产矩阵筛选">
           <label className="afs-studio__assetmatrix-search">
