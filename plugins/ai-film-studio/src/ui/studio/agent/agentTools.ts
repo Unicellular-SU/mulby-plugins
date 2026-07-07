@@ -528,10 +528,17 @@ function resolveEpisodeSelector(doc: ProjectDoc, args: Record<string, unknown>):
   return currentEpisode(doc)
 }
 
-function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string) {
+function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return sortedEpisodes(doc)
     .filter((episode) => episode.novelChapterIds?.includes(chapterId))
-    .map((episode) => ({ id: episode.id, index: episode.index + 1, title: episode.title, current: episode.id === doc.currentEpisodeId }))
+    .map((episode) => ({
+      id: episode.id,
+      index: episode.index + 1,
+      title: episode.title,
+      current: episode.id === doc.currentEpisodeId,
+      seriesQueueState: episodeSeriesQueueState(doc, episode),
+      plan: planView(doc, episode.plan, usageByEntity),
+    }))
 }
 
 function resolveChapterIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
@@ -1331,13 +1338,14 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
               ? d.novel[Math.max(0, Math.floor(a.chapterIndex) - 1)]
               : undefined
         const chapters = one ? [one] : d.novel
+        const usageByEntity = await loadIdentityUsageSafe()
         return json({
           total: d.novel.length,
           chapters: chapters.map((c) => ({
             id: c.id,
             index: c.index + 1,
             title: c.title,
-            episodes: chapterEpisodeRefs(d, c.id),
+            episodes: chapterEpisodeRefs(d, c.id, usageByEntity),
             event: c.event,
             eventState: c.eventState,
             text: includeText ? textBlock(c.text, limit) : { length: c.text.length, omitted: true },

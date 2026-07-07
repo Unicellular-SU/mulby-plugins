@@ -52,7 +52,10 @@ function episode(id: string, index: number, patch: Partial<Episode> = {}): Episo
 const doc: ProjectDoc = {
   meta: meta(),
   seriesBible: { logline: 'A hidden heir returns.', plannedEpisodeCount: 3, continuityRules: ['Hero keeps the same identity across episodes.'] },
-  novel: [],
+  novel: [
+    { id: 'ch1', index: 0, title: 'Return', text: 'The hidden heir returns.', event: 'Hero returns.', eventState: 'done' },
+    { id: 'ch2', index: 1, title: 'Hidden Clue', text: 'The hidden clue appears.', event: 'Hero finds a clue.', eventState: 'done' },
+  ],
   scripts: [{ id: 'script-current', name: 'Current Script', content: 'Current episode only.', createdAt: 0, updatedAt: 0 }],
   assets: [{
     id: 'hero',
@@ -74,6 +77,7 @@ const doc: ProjectDoc = {
     episode('ep2', 1, {
       title: 'Second',
       seriesSkip: true,
+      novelChapterIds: ['ch2'],
       plan: { hook: 'A clue appears.', requiredAssetIds: ['hero'], requiredVariantIds: ['gala'] },
       scripts: [{ id: 'script-ep2', name: 'Hidden Script', content: 'The hidden clue is found in episode two.', createdAt: 0, updatedAt: 0 }],
       storyboards: [{ ...storyboard('sb-ep2', 0, 'The hidden clue glows in the hallway.'), associateAssetIds: ['hero'], castRefs: [{ assetId: 'hero', variantId: 'gala' }] }],
@@ -116,10 +120,11 @@ const getEpisodeHandoff = tools.find((tool) => tool.name === 'get_episode_handof
 const getScript = tools.find((tool) => tool.name === 'get_script')
 const getStoryboards = tools.find((tool) => tool.name === 'get_storyboards')
 const getAssets = tools.find((tool) => tool.name === 'get_assets')
+const getNovel = tools.find((tool) => tool.name === 'get_novel')
 const getStoryboardTable = tools.find((tool) => tool.name === 'get_storyboard_table')
 const getTimeline = tools.find((tool) => tool.name === 'get_timeline')
 
-if (!searchProject || !getWorkspace || !getEpisodes || !getSeriesBible || !getContinuityReport || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getStoryboardTable || !getTimeline) {
+if (!searchProject || !getWorkspace || !getEpisodes || !getSeriesBible || !getContinuityReport || !getEpisodeHandoff || !getScript || !getStoryboards || !getAssets || !getNovel || !getStoryboardTable || !getTimeline) {
   console.error('  FAIL tools exist: required read tools missing')
   process.exit(1)
 }
@@ -308,6 +313,34 @@ check(
     ),
   ),
   JSON.stringify(episodesRead.episodes),
+)
+
+const novelRead = JSON.parse(await getNovel.execute({ chapterId: 'ch2' }))
+check(
+  'get_novel exposes assigned episode plan usage',
+  novelRead.chapters?.some((chapter: { id: string; episodes?: Array<{ id: string; seriesQueueState?: string; plan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }> }) =>
+    chapter.id === 'ch2' &&
+    chapter.episodes?.some(
+      (episode) =>
+        episode.id === 'ep2' &&
+        episode.seriesQueueState === 'skipped' &&
+        episode.plan?.requiredAssets?.some(
+          (asset) =>
+            asset.id === 'hero' &&
+            asset.assetCenterUsage?.entityId === 'el-hero' &&
+            asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ) &&
+        episode.plan?.requiredVariants?.some(
+          (variant) =>
+            variant.id === 'gala' &&
+            variant.assetCenterUsage?.entityId === 'el-hero' &&
+            variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+            variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+        ),
+    ),
+  ),
+  JSON.stringify(novelRead),
 )
 
 const continuityReport = JSON.parse(await getContinuityReport.execute({}))
