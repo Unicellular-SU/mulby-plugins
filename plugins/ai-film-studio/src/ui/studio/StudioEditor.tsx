@@ -1661,6 +1661,7 @@ function AssetContinuityPanel() {
   const variantDriftCount = typeFilteredRows.filter(rowHasVariantDrift).length
   const appearedAssetCount = typeFilteredRows.filter((row) => row.episodeLabels.length > 0).length
   const planDriftCount = typeFilteredRows.filter(rowHasPlanDrift).length
+  const issueAssetCount = typeFilteredRows.filter(rowHasIssue).length
   const filteredRows = typeFilteredRows.filter((row) => {
     if (assetMatrixFilter === 'planned') return row.planEpisodeLabels.length > 0
     if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row)
@@ -1682,7 +1683,7 @@ function AssetContinuityPanel() {
     {
       label: '范围',
       options: [
-        { id: 'all', label: '全部', count: rows.length },
+        { id: 'all', label: '全部', count: typeFilteredRows.length },
         { id: 'planned', label: '已规划', count: plannedAssetCount },
         { id: 'appeared', label: '已出场', count: appearedAssetCount },
       ],
@@ -1699,7 +1700,7 @@ function AssetContinuityPanel() {
     {
       label: '质量',
       options: [
-        { id: 'issue', label: '连续性问题', count: rows.filter(rowHasIssue).length },
+        { id: 'issue', label: '连续性问题', count: issueAssetCount },
       ],
     },
   ]
