@@ -354,6 +354,10 @@ function episodeInfo(doc: ProjectDoc, episode: Episode) {
   return { episodeId: episode.id, episodeIndex: episode.index + 1, episodeTitle: episode.title, current: episode.id === doc.currentEpisodeId }
 }
 
+function scriptEpisodeContext(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  return { ...episodeInfo(doc, episode), episodePlan: planView(doc, episode.plan, usageByEntity) }
+}
+
 function scriptsForEpisode(doc: ProjectDoc, episode: Episode): Script[] {
   return episode.id === doc.currentEpisodeId ? doc.scripts : episode.scripts
 }
@@ -459,7 +463,7 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
     },
     episodes: episodes.map((episode) => episodeView(doc, episode, opts)),
     scripts: episodes.flatMap((episode) =>
-      scriptsForEpisode(doc, episode).map((s, i) => ({ ...episodeInfo(doc, episode), id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
+      scriptsForEpisode(doc, episode).map((s, i) => ({ ...scriptEpisodeContext(doc, episode, opts?.usageByEntity), id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
     ),
     assets: doc.assets
       .filter((a) => !a.parentAssetId)
@@ -1237,8 +1241,10 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.contentLimit, 12000, 0, 50000)
         const idx = typeof a.index === 'number' ? oneBasedIndex(a.index, scripts.length) : 0
         const script = typeof a.scriptId === 'string' ? scripts.find((s) => s.id === a.scriptId) : idx === undefined ? undefined : scripts[idx]
-        if (!script) return json({ error: '未找到剧本', episode: episodeInfo(d, episode), scripts: scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name })) })
-        return json({ ...episodeInfo(d, episode), id: script.id, index: scripts.indexOf(script) + 1, name: script.name, createdAt: script.createdAt, updatedAt: script.updatedAt, content: textBlock(script.content, limit) })
+        const usageByEntity = await loadIdentityUsageSafe()
+        const episodeContext = scriptEpisodeContext(d, episode, usageByEntity)
+        if (!script) return json({ error: '未找到剧本', episode: episodeContext, scripts: scripts.map((s, i) => ({ id: s.id, index: i + 1, name: s.name })) })
+        return json({ ...episodeContext, id: script.id, index: scripts.indexOf(script) + 1, name: script.name, createdAt: script.createdAt, updatedAt: script.updatedAt, content: textBlock(script.content, limit) })
       },
     },
     {
@@ -1450,7 +1456,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         const limit = numberArg(a.limit, 8, 1, 30)
         const has = (s: string | undefined) => (s ?? '').toLowerCase().includes(q.toLowerCase())
         const episodes = episodeList(d)
-        const usageByEntity = wants('assets') || wants('episodes') || wants('storyboards') || wants('novel') || wants('storyboardTable') ? await loadIdentityUsageSafe() : undefined
+        const usageByEntity = wants('assets') || wants('episodes') || wants('scripts') || wants('storyboards') || wants('novel') || wants('storyboardTable') ? await loadIdentityUsageSafe() : undefined
         return json({
           query: q,
           episodes: wants('episodes')
@@ -1463,7 +1469,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             ? episodes
                 .flatMap((episode) =>
                   scriptsForEpisode(d, episode).map((s, i) => ({
-                    ...episodeInfo(d, episode),
+                    ...scriptEpisodeContext(d, episode, usageByEntity),
                     id: s.id,
                     index: i + 1,
                     name: s.name,
@@ -1472,7 +1478,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
                 )
                 .filter((s) => has(s.name) || has(s.content))
                 .slice(0, limit)
-                .map((s) => ({ episodeId: s.episodeId, episodeIndex: s.episodeIndex, episodeTitle: s.episodeTitle, current: s.current, id: s.id, index: s.index, name: s.name, snippet: snippet(s.content, q) }))
+                .map((s) => ({ episodeId: s.episodeId, episodeIndex: s.episodeIndex, episodeTitle: s.episodeTitle, current: s.current, episodePlan: s.episodePlan, id: s.id, index: s.index, name: s.name, snippet: snippet(s.content, q) }))
             : undefined,
           assets: wants('assets')
             ? d.assets

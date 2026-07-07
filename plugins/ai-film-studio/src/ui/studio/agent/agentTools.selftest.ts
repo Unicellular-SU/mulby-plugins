@@ -131,6 +131,27 @@ if (!searchProject || !getWorkspace || !getEpisodes || !getSeriesBible || !getCo
 
 const search = JSON.parse(await searchProject.execute({ query: 'hidden clue', domains: ['scripts', 'storyboards', 'storyboardTable'], limit: 10 }))
 check('search_project finds non-current episode scripts', search.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(search.scripts))
+check(
+  'search_project exposes script episode plan usage',
+  search.scripts?.some((item: { id: string; episodePlan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'script-ep2' &&
+    item.episodePlan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.episodePlan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(search.scripts),
+)
 check('search_project finds non-current episode storyboards', search.storyboards?.some((item: { id: string; episodeIndex: number }) => item.id === 'sb-ep2' && item.episodeIndex === 2), JSON.stringify(search.storyboards))
 check('search_project finds non-current episode storyboard table', search.storyboardTable?.some((item: { scene: { sceneName: string }; episodeId: string }) => item.scene.sceneName === 'Hidden clue scene' && item.episodeId === 'ep2'), JSON.stringify(search.storyboardTable))
 check(
@@ -255,6 +276,27 @@ const workspace = JSON.parse(await getWorkspace.execute({}))
 check('get_workspace counts all episode storyboards', workspace.counts?.storyboards === 2, JSON.stringify(workspace.counts))
 check('get_workspace exposes series bible summary', workspace.seriesBible?.logline === 'A hidden heir returns.' && workspace.seriesBible?.plannedEpisodeCount === 3, JSON.stringify(workspace.seriesBible))
 check('get_workspace lists script episode ownership', workspace.scripts?.some((item: { id: string; episodeId: string }) => item.id === 'script-ep2' && item.episodeId === 'ep2'), JSON.stringify(workspace.scripts))
+check(
+  'get_workspace exposes script episode plan usage',
+  workspace.scripts?.some((item: { id: string; episodePlan?: { requiredAssets?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }>; requiredVariants?: Array<{ id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }> } }) =>
+    item.id === 'script-ep2' &&
+    item.episodePlan?.requiredAssets?.some(
+      (asset) =>
+        asset.id === 'hero' &&
+        asset.assetCenterUsage?.entityId === 'el-hero' &&
+        asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ) &&
+    item.episodePlan?.requiredVariants?.some(
+      (variant) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  ),
+  JSON.stringify(workspace.scripts),
+)
 check('get_workspace exposes skipped series queue state', workspace.episodes?.some((item: { id: string; seriesSkip?: boolean; seriesQueueState?: string }) => item.id === 'ep2' && item.seriesSkip === true && item.seriesQueueState === 'skipped'), JSON.stringify(workspace.episodes))
 check(
   'get_workspace exposes episode plan asset and variant usage',
@@ -524,6 +566,24 @@ check(
 
 const ep2Script = JSON.parse(await getScript.execute({ episodeIndex: 2, contentLimit: 200 }))
 check('get_script reads non-current episode by episode index', ep2Script.id === 'script-ep2' && ep2Script.episodeId === 'ep2' && ep2Script.content?.text.includes('hidden clue'), JSON.stringify(ep2Script))
+check(
+  'get_script exposes episode plan usage',
+  ep2Script.episodePlan?.requiredAssets?.some(
+    (asset: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+      asset.id === 'hero' &&
+      asset.assetCenterUsage?.entityId === 'el-hero' &&
+      asset.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+      asset.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+  ) &&
+    ep2Script.episodePlan?.requiredVariants?.some(
+      (variant: { id: string; assetCenterUsage?: { entityId?: string; currentProject?: { episodeLabels?: string[]; appearanceLabels?: string[] } } }) =>
+        variant.id === 'gala' &&
+        variant.assetCenterUsage?.entityId === 'el-hero' &&
+        variant.assetCenterUsage?.currentProject?.episodeLabels?.includes('E2 Second') &&
+        variant.assetCenterUsage?.currentProject?.appearanceLabels?.includes('E2 Second · Gala'),
+    ),
+  JSON.stringify(ep2Script),
+)
 
 const ep2Storyboards = JSON.parse(await getStoryboards.execute({ episodeTitle: 'Second' }))
 check('get_storyboards reads non-current episode by title', ep2Storyboards.storyboards?.[0]?.id === 'sb-ep2' && ep2Storyboards.episodeId === 'ep2', JSON.stringify(ep2Storyboards))
