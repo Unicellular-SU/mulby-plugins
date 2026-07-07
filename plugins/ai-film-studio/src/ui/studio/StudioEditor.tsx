@@ -1564,6 +1564,8 @@ function AssetContinuityPanel() {
   const hubEntities = useAssetHubStore((s) => s.entities)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
+  const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
+  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
   const [assetMatrixEpisodeFilter, setAssetMatrixEpisodeFilter] = useState('all')
@@ -1799,6 +1801,11 @@ function AssetContinuityPanel() {
     if (!row.asset.libraryLink?.entityVersion || row.linkedEntity.version <= row.asset.libraryLink.entityVersion) return
     if (syncAssetFromLibraryEntity(row.asset.id, row.linkedEntity)) window.mulby?.notification?.show('已同步资产中心新版快照', 'success')
   }
+  const publishAssetMatrixLibraryEntity = async (row: (typeof rows)[number]) => {
+    if (!row.asset.refImageId || row.asset.libraryLink?.syncPolicy === 'forked' || row.linkedEntity?.archived) return
+    await promoteAssetToElement(row.asset.id)
+    await refreshAssetHub()
+  }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
     <div className="afs-studio__assetmatrix" aria-label="跨集资产一致性">
@@ -1986,6 +1993,16 @@ function AssetContinuityPanel() {
                     onClick={() => syncAssetMatrixLibraryEntity(row)}
                   >
                     同步
+                  </button>
+                )}
+                {rowMissingAssetCenter(row) && !!row.asset.refImageId && row.asset.libraryLink?.syncPolicy !== 'forked' && !row.linkedEntity?.archived && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`发布到资产中心：${row.asset.name}`}
+                    onClick={() => void publishAssetMatrixLibraryEntity(row)}
+                  >
+                    发布
                   </button>
                 )}
                 {!rowHasStatusWarning(row) && (
