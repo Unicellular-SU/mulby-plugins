@@ -289,11 +289,11 @@ function variantOptions(doc: ProjectDoc) {
     )
 }
 
-function planView(doc: ProjectDoc, plan: EpisodePlan | undefined) {
+function planView(doc: ProjectDoc, plan: EpisodePlan | undefined, usageByEntity?: Record<string, IdentityAssetUsage>) {
   const requiredAssets = (plan?.requiredAssetIds ?? [])
     .map((id) => doc.assets.find((asset) => asset.id === id))
     .filter((asset): asset is Asset => !!asset)
-    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, ...assetLineageView(asset) }))
+    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(doc, asset, usageByEntity) }))
   const requiredVariants = (plan?.requiredVariantIds ?? [])
     .map((variantId) => variantOptions(doc).find((variant) => variant.id === variantId))
     .filter((variant): variant is NonNullable<ReturnType<typeof variantOptions>[number]> => !!variant)
@@ -368,7 +368,7 @@ function episodeHandoffSummary(doc: ProjectDoc, episode: Episode) {
   }
 }
 
-function episodeView(doc: ProjectDoc, episode: Episode) {
+function episodeView(doc: ProjectDoc, episode: Episode, opts?: { usageByEntity?: Record<string, IdentityAssetUsage> }) {
   const current = episode.id === doc.currentEpisodeId
   const scripts = scriptsForEpisode(doc, episode)
   const storyboards = storyboardsForEpisode(doc, episode)
@@ -383,7 +383,7 @@ function episodeView(doc: ProjectDoc, episode: Episode) {
     status: episode.status,
     seriesSkip: episode.seriesSkip === true,
     seriesQueueState: episodeSeriesQueueState(doc, episode),
-    plan: planView(doc, episode.plan),
+    plan: planView(doc, episode.plan, opts?.usageByEntity),
     handoff: episodeHandoffSummary(doc, episode),
     current,
     production: {
@@ -429,7 +429,7 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
       novelChapters: doc.novel.length,
       storyboardTableScenes: episodes.reduce((total, episode) => total + storyboardTableForEpisode(doc, episode).length, 0),
     },
-    episodes: episodes.map((episode) => episodeView(doc, episode)),
+    episodes: episodes.map((episode) => episodeView(doc, episode, opts)),
     scripts: episodes.flatMap((episode) =>
       scriptsForEpisode(doc, episode).map((s, i) => ({ ...episodeInfo(doc, episode), id: s.id, index: i + 1, name: s.name, length: s.content.length, updatedAt: s.updatedAt })),
     ),
@@ -1053,7 +1053,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
             plannedEpisodeCount: d.seriesBible?.plannedEpisodeCount ?? sortedEpisodes(d).length,
             continuityRules: d.seriesBible?.continuityRules ?? [],
           },
-          episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan) })),
+          episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan, usageByEntity) })),
           availableAssets: d.assets
             .filter(isCastableAsset)
             .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
