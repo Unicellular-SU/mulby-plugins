@@ -816,6 +816,55 @@ function SeriesTab() {
         : [...new Set([...(plan.requiredAssetIds ?? []), assetId])],
     })
   }
+  const readinessForEpisode = (episode: Episode) => {
+    const plan = episode.plan ?? {}
+    const requiredAssetIds = new Set(plan.requiredAssetIds ?? [])
+    const requiredVariantIds = new Set(plan.requiredVariantIds ?? [])
+    const plannedAssetIds = plan.requiredAssetIds ?? []
+    const plannedVariantIds = plan.requiredVariantIds ?? []
+    const missingAssetRefs = plannedAssetIds.filter((id) => assetOptionById.get(id)?.hasRefImage === false).length
+    const invalidAssetRefs = plannedAssetIds.filter((id) => !assetOptionById.has(id)).length
+    const plannedVariantOptions = plannedVariantIds.map((id) => variantOptionById.get(id))
+    const missingVariantRefs = plannedVariantOptions.filter((variant) => variant && !variant.hasRefImage).length
+    const scopedOutsideEpisode = plannedVariantOptions.filter((variant) => variant && variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)).length
+    const parentAssetMissing = plannedVariantOptions.filter((variant) => variant && !requiredAssetIds.has(variant.assetId)).length
+    const invalidVariantRefs = plannedVariantIds.filter((id) => !variantOptionById.has(id)).length
+    const plannedInputCount = plannedAssetIds.length + plannedVariantIds.length
+    const readinessIssueCount = missingAssetRefs + invalidAssetRefs + missingVariantRefs + scopedOutsideEpisode + parentAssetMissing + invalidVariantRefs
+    const readinessSummary = [
+      missingAssetRefs ? `缺主图 ${missingAssetRefs}` : '',
+      missingVariantRefs ? `缺形态图 ${missingVariantRefs}` : '',
+      scopedOutsideEpisode ? `作用域 ${scopedOutsideEpisode}` : '',
+      parentAssetMissing ? `父资产 ${parentAssetMissing}` : '',
+      invalidAssetRefs || invalidVariantRefs ? `无效引用 ${invalidAssetRefs + invalidVariantRefs}` : '',
+    ].filter(Boolean)
+    const summaryTitle = [
+      `计划资产 ${plannedAssetIds.length}`,
+      `计划形态 ${plannedVariantIds.length}`,
+      readinessSummary.length ? `风险：${readinessSummary.join(' · ')}` : plannedInputCount ? '生产输入就绪' : '还没有规划必需项目资产或形态',
+    ].join('\n')
+    return {
+      plan,
+      requiredAssetIds,
+      requiredVariantIds,
+      plannedInputCount,
+      readinessIssueCount,
+      summaryTitle,
+    }
+  }
+  const episodeReadiness = episodes.map((episode) => ({ episode, readiness: readinessForEpisode(episode) }))
+  const unplannedEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount === 0).length
+  const riskyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.readinessIssueCount > 0).length
+  const readyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0).length
+  const missingEpisodeCount = Math.max(0, plannedCount - episodes.length)
+  const seriesReadinessTitle = [
+    `已建剧集 ${episodes.length}`,
+    `计划集数 ${plannedCount}`,
+    missingEpisodeCount ? `缺少剧集 ${missingEpisodeCount}` : '',
+    unplannedEpisodeCount ? `未规划剧集 ${unplannedEpisodeCount}` : '',
+    riskyEpisodeCount ? `存在风险剧集 ${riskyEpisodeCount}` : '',
+    readyEpisodeCount ? `生产输入就绪剧集 ${readyEpisodeCount}` : '',
+  ].filter(Boolean).join('\n')
   return (
     <div className="afs-series">
       <section className="afs-series__bible">
@@ -893,35 +942,17 @@ function SeriesTab() {
           <span className="afs-studio__hint">
             当前 {episodes.length} 集，计划 {plannedCount} 集
           </span>
+          <span className="afs-series__spacer" />
+          <span className="afs-series__rollup" title={seriesReadinessTitle} aria-label="整季规划摘要">
+            {missingEpisodeCount > 0 && <i className="is-warning">缺集 {missingEpisodeCount}</i>}
+            {unplannedEpisodeCount > 0 && <i>未规划 {unplannedEpisodeCount}</i>}
+            {riskyEpisodeCount > 0 && <i className="is-warning">风险 {riskyEpisodeCount}</i>}
+            {readyEpisodeCount > 0 && <i className="is-ready">就绪 {readyEpisodeCount}</i>}
+          </span>
         </div>
         <div className="afs-series__episode-grid">
-          {episodes.map((episode) => {
-            const plan = episode.plan ?? {}
-            const requiredAssetIds = new Set(plan.requiredAssetIds ?? [])
-            const requiredVariantIds = new Set(plan.requiredVariantIds ?? [])
-            const plannedAssetIds = plan.requiredAssetIds ?? []
-            const plannedVariantIds = plan.requiredVariantIds ?? []
-            const missingAssetRefs = plannedAssetIds.filter((id) => assetOptionById.get(id)?.hasRefImage === false).length
-            const invalidAssetRefs = plannedAssetIds.filter((id) => !assetOptionById.has(id)).length
-            const plannedVariantOptions = plannedVariantIds.map((id) => variantOptionById.get(id))
-            const missingVariantRefs = plannedVariantOptions.filter((variant) => variant && !variant.hasRefImage).length
-            const scopedOutsideEpisode = plannedVariantOptions.filter((variant) => variant && variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)).length
-            const parentAssetMissing = plannedVariantOptions.filter((variant) => variant && !requiredAssetIds.has(variant.assetId)).length
-            const invalidVariantRefs = plannedVariantIds.filter((id) => !variantOptionById.has(id)).length
-            const plannedInputCount = plannedAssetIds.length + plannedVariantIds.length
-            const readinessIssueCount = missingAssetRefs + invalidAssetRefs + missingVariantRefs + scopedOutsideEpisode + parentAssetMissing + invalidVariantRefs
-            const readinessSummary = [
-              missingAssetRefs ? `缺主图 ${missingAssetRefs}` : '',
-              missingVariantRefs ? `缺形态图 ${missingVariantRefs}` : '',
-              scopedOutsideEpisode ? `作用域 ${scopedOutsideEpisode}` : '',
-              parentAssetMissing ? `父资产 ${parentAssetMissing}` : '',
-              invalidAssetRefs || invalidVariantRefs ? `无效引用 ${invalidAssetRefs + invalidVariantRefs}` : '',
-            ].filter(Boolean)
-            const summaryTitle = [
-              `计划资产 ${plannedAssetIds.length}`,
-              `计划形态 ${plannedVariantIds.length}`,
-              readinessSummary.length ? `风险：${readinessSummary.join(' · ')}` : plannedInputCount ? '生产输入就绪' : '还没有规划必需项目资产或形态',
-            ].join('\n')
+          {episodeReadiness.map(({ episode, readiness }) => {
+            const { plan, requiredAssetIds, requiredVariantIds, plannedInputCount, readinessIssueCount, summaryTitle } = readiness
             return (
               <article key={episode.id} className="afs-series__episode">
                 <div className="afs-series__episode-head">
