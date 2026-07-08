@@ -583,6 +583,19 @@ interface ProjectAssetHubSettings {
 
 这些改动风险高，会破坏现有项目可复现性。
 
+## 当前落地进度
+
+### 第一轮提交：P1 资产中心领域 helper
+
+- 新增 `src/ui/services/assetHubDomain.ts`，集中实现 V2 方案 P1 要求的四类领域判断：
+  - `assetHubEntityVersionStatus(asset, entity)`：统一解析项目资产与身份资产的链接状态（未链接/旧链接/快照/已关联/已分叉）、版本落差、归档状态和可同步性，并输出 UI 状态标签；`entity` 传 `null` 表示 Hub 已加载但身份缺失，可用于区分“未加载”和“已丢失”。
+  - `assetHubProjectAssetDiff(asset, entity)`：计算“项目快照 vs 身份库当前版本”的字段级差异，覆盖名称、别名、描述、提示词、主参考图、形态、音色、LoRA；别名忽略顺序差异，形态区分“项目专属”和“未导入”，项目作用域字段不参与比较。
+  - `assetHubAdoptionTargetForCanvasOutput(port, doc, entities)`：从画布输出 lineage 解析显式采纳目标（项目主图/项目形态/身份主图/身份形态），项目目标优先；目标失效时回退身份目标，身份已归档时不作为目标返回。
+  - `assetHubVariantScopeSummary(asset, variant, episodes)`：汇总项目变体的剧集/场景/分镜作用域为可读摘要，未限定作用域时明确显示“全剧通用”，并统计已失效的未知剧集引用。
+- `StudioEditor` 的项目资产链接状态标签改为复用 `assetHubEntityVersionStatus`，收敛第一处散落判断；行为对齐连续性报告既有语义：已分叉和已归档身份不再提示“有新版”。
+- 新增 `assetHubDomain.selftest.ts` 并接入 `npm run test:continuity`，覆盖版本状态（快照/分叉/归档/旧链接/缺失/未链接）、字段差异（漂移检测、别名顺序不敏感、形态双向差异）、画布采纳目标（项目优先、归档排除、失效回退、无 lineage 候选）和变体作用域摘要。
+- 本轮不改变持久化结构和生成链路；矩阵、连续性抽屉、画布检查器的其余重复判断将在后续轮次逐步收敛到该 helper。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：

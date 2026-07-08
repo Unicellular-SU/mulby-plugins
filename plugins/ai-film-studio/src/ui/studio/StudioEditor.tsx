@@ -12,6 +12,7 @@ import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import { libraryEntityToElement, projectAssetIdentityUsageFromHub, type IdentityAssetUsage } from '../services/assetHub'
+import { assetHubEntityVersionStatus } from '../services/assetHubDomain'
 import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, EpisodePlan, ProjectDoc } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
@@ -66,15 +67,7 @@ function useStudioContinuityReport(doc: ProjectDoc) {
 }
 
 function projectAssetLinkStatusLabels(asset: Asset, linkedEntity?: { version: number; archived?: boolean }): string[] {
-  const labels: string[] = []
-  const link = asset.libraryLink
-  if (!link && asset.elementId) labels.push('旧链接')
-  if (link?.syncPolicy === 'forked') labels.push('已分叉')
-  else if (link?.syncPolicy === 'linked') labels.push('已关联')
-  else if (link?.syncPolicy === 'snapshot') labels.push('快照')
-  if (link?.entityVersion && linkedEntity && linkedEntity.version > link.entityVersion) labels.push('有新版')
-  if (linkedEntity?.archived) labels.push('已归档')
-  return labels
+  return assetHubEntityVersionStatus(asset, linkedEntity).labels
 }
 
 function assetCenterUsageChips(usage: IdentityAssetUsage | undefined): string[] {
