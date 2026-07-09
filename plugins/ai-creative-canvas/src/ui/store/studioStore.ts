@@ -208,7 +208,11 @@ export const useStudio = create<StudioState>((set, get) => {
         const pp = op.params as OverlayParams
         if (pp.sub !== 'pip' || !pp.pipCardId) continue
         const c = board.cards[pp.pipCardId]
-        if (c?.assetLocalPath) pipResolved[op.id] = { kind: 'video', path: c.assetLocalPath }
+        if (!c?.assetLocalPath) {
+          toast(`画中画源「${c?.title || '已删除'}」不可用，请重新指定或移除该层`, 'error')
+          return
+        }
+        pipResolved[op.id] = { kind: 'video', path: c.assetLocalPath }
       }
 
       const abort = new AbortController()

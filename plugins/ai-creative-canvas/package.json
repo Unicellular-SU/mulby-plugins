@@ -4,6 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "mulby dev",
+    "test": "npm run test:compile && npm run test:refs",
+    "test:compile": "esbuild test/videoEdit/run-compile.test.ts --bundle --platform=node --format=esm --outfile=dist/run-compile.test.mjs && node dist/run-compile.test.mjs",
+    "test:refs": "esbuild test/references.test.ts --bundle --platform=node --format=esm --outfile=dist/references.test.mjs && node dist/references.test.mjs",
+    "test:export": "esbuild src/ui/services/videoEdit/compile.ts --bundle --platform=node --format=esm --outfile=dist/compile.mjs && node test/videoEdit/run-export.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "build": "npm run typecheck && npm run build:backend && npm run build:ui",
     "build:backend": "esbuild src/main.ts --bundle --platform=node --outfile=dist/main.js",

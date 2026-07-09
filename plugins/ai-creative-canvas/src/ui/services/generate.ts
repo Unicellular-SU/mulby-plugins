@@ -6,13 +6,14 @@ import { aiLimiter } from './limiter'
 import { generateText } from './aiText'
 import { generateImage } from './aiImage'
 import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
-import { resolveGenInputs } from './references'
+import { resolveGenInputs, findUnresolvedMentions, buildMaterials } from './references'
 import { useProviders } from '../store/providerStore'
 import { runVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { snapDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
+import { toast } from '../store/toastStore'
 
 const limiter = aiLimiter // 共享并发池（card 生成 + 360/局部修复 共用，统一限流）
 const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
@@ -94,6 +95,13 @@ export async function generateCard(cardId: string): Promise<void> {
   if ((card0.kind === 'text' || card0.kind === 'image') && !card0.prompt?.trim()) {
     g0.updateCard(cardId, { status: 'error', error: '请先填写提示词' })
     return
+  }
+
+  const board0 = g0.getActiveBoard()
+  const mats0 = buildMaterials(card0, board0)
+  const badMentions = findUnresolvedMentions(card0.prompt || '', mats0)
+  if (badMentions.length) {
+    toast(`提示词中有无效 @ 引用：${badMentions.join('、')}（将忽略，改用全部素材）`, 'info')
   }
 
   // 默认模型回填：卡片未选 → 工程默认 → 可用列表第一个（让批量/分镜卡无需逐个选模型）

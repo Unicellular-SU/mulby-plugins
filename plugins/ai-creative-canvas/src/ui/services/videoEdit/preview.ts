@@ -66,13 +66,16 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
   if (sp?.reverse || sp?.boomerang || (sp?.freezeEnd && sp.freezeEnd > 0) || (sp?.motionTrail && sp.motionTrail >= 2)) exact = false
 
   // 叠加 → DOM
-  const overlays: PreviewOverlay[] = enabled
-    .filter((o) => o.kind === 'overlay')
-    .map((o) => {
+  const overlayOps = enabled.filter((o) => o.kind === 'overlay')
+  const overlays: PreviewOverlay[] = overlayOps.map((o) => {
       const p = o.params as OverlayParams
       return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, text: p.text, style: p.style, range: p.range, cues: p.cues }
     })
   if (overlays.some((o) => o.sub === 'mosaic' || o.sub === 'pip' || o.sub === 'progress' || o.sub === 'timecode')) exact = false
+  if (overlayOps.some((o) => {
+    const anim = (o.params as OverlayParams).anim
+    return anim && anim !== 'none'
+  })) exact = false
 
   // 裁切 → 保留段
   const trimP = enabled.find((o) => o.kind === 'trim')?.params as TrimParams | undefined

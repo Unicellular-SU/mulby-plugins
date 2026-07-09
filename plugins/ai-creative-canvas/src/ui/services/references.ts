@@ -87,9 +87,7 @@ export interface GenInputs {
 // 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
 export function resolveGenInputs(card: Card, board: Board): GenInputs {
   const mats = buildMaterials(card, board)
-  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const refd = mats.filter((m) => new RegExp('@' + esc(m.label) + '(?=$|[\\s,，。、；;@])').test(card.prompt))
-  const selected = refd.length ? refd : mats
+  const selected = selectedGenMaterials(card, board, mats)
   const texts: { label: string; text: string }[] = []
   const images: GenImageInput[] = []
   for (const m of selected) {
@@ -100,4 +98,44 @@ export function resolveGenInputs(card: Card, board: Board): GenInputs {
     }
   }
   return { texts, images }
+}
+
+/** 本次生成将使用的素材（与 resolveGenInputs 同源） */
+export function selectedGenMaterials(card: Card, board: Board, mats = buildMaterials(card, board)): Material[] {
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const refd = mats.filter((m) => new RegExp('@' + esc(m.label) + '(?=$|[\\s,，。、；;@])').test(card.prompt || ''))
+  const picked = refd.length ? refd : mats
+  return picked.filter((m) => m.kind === 'text' || m.kind === 'image')
+}
+
+/** 提示词中 @token（不含 @ 符号） */
+export function extractMentionTokens(prompt: string): string[] {
+  const out: string[] = []
+  const re = /@([^\s,，。、；;@]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(prompt || ''))) out.push(m[1])
+  return out
+}
+
+/** 未匹配到当前素材列表的 @ 引用 */
+export function findUnresolvedMentions(prompt: string, mats: Material[]): string[] {
+  const labels = new Set(mats.map((m) => m.label))
+  return extractMentionTokens(prompt).filter((t) => !labels.has(t))
+}
+
+/** 某源卡在画布上被下游看到的引用标签（取第一个命中） */
+export function findLabelForSourceCard(sourceId: string, board: Board): string | null {
+  for (const c of Object.values(board.cards)) {
+    if (c.id === sourceId || c.kind === 'group' || c.kind === 'note') continue
+    const m = buildMaterials(c, board).find((x) => x.cardId === sourceId)
+    if (m) return m.label
+  }
+  return null
+}
+
+/** 卡片改名后，把全画布提示词里的 @旧标签 替换为 @新标签 */
+export function replaceMentionInPrompt(prompt: string, oldLabel: string, newLabel: string): string {
+  if (!oldLabel || oldLabel === newLabel) return prompt
+  const esc = oldLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return (prompt || '').replace(new RegExp('@' + esc + '(?=$|[\\s,，。、；;@])', 'g'), '@' + newLabel)
 }

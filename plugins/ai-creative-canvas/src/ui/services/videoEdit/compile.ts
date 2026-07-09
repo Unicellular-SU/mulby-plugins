@@ -28,6 +28,8 @@ export interface CompileCtx {
   hasAudio: boolean
   // 叠加输入（PNG / PiP 视频）：opId → 已落盘输入。由调用方在编译前用 mediaOverlay 备好。
   overlayResolved?: Record<string, OverlayInput>
+  /** 测试/集成脚本注入：固定输出路径，绕过 mulby mediaPath */
+  resolveOutPath?: (projectId: string, base: string, ext: string) => string | Promise<string>
 }
 export interface CompileOpts {
   // 执行器探测到某滤镜不可用时，加入对应 key 触发退化重编译
@@ -402,25 +404,26 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, 
 }
 
 function applyAudio(g: Graph, p: AudioParams, outDur: number, fb: Set<string>): void {
-  if (!g.a) return
-  if (p.gainDb) g.af(`volume=${p.gainDb.toFixed(2)}dB`)
-  if (p.fadeIn && p.fadeIn > 0) g.af(`afade=t=in:st=0:d=${p.fadeIn.toFixed(2)}`)
-  if (p.fadeOut && p.fadeOut > 0 && outDur > 2 * p.fadeOut) {
-    g.af(`afade=t=out:st=${Math.max(0, outDur - p.fadeOut).toFixed(2)}:d=${p.fadeOut.toFixed(2)}`)
+  if (g.a) {
+    if (p.gainDb) g.af(`volume=${p.gainDb.toFixed(2)}dB`)
+    if (p.fadeIn && p.fadeIn > 0) g.af(`afade=t=in:st=0:d=${p.fadeIn.toFixed(2)}`)
+    if (p.fadeOut && p.fadeOut > 0 && outDur > 2 * p.fadeOut) {
+      g.af(`afade=t=out:st=${Math.max(0, outDur - p.fadeOut).toFixed(2)}:d=${p.fadeOut.toFixed(2)}`)
+    }
+    for (const r of p.muteRanges || []) {
+      g.af(`volume=0:enable='between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})'`)
+    }
+    if (p.denoise) {
+      if (fb.has('denoise')) g.af('highpass=f=80,lowpass=f=12000')
+      else g.af('afftdn=nf=-25')
+    }
+    if (p.loudnorm) g.af('loudnorm=I=-16:TP=-1.5:LRA=11')
+    if (p.pitchSemitones) {
+      const pr = Math.pow(2, p.pitchSemitones / 12)
+      g.af(`asetrate=44100*${pr.toFixed(4)},aresample=44100,atempo=${(1 / pr).toFixed(4)}`)
+    }
   }
-  for (const r of p.muteRanges || []) {
-    g.af(`volume=0:enable='between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})'`)
-  }
-  if (p.denoise) {
-    if (fb.has('denoise')) g.af('highpass=f=80,lowpass=f=12000')
-    else g.af('afftdn=nf=-25')
-  }
-  if (p.loudnorm) g.af('loudnorm=I=-16:TP=-1.5:LRA=11')
-  if (p.pitchSemitones) {
-    const pr = Math.pow(2, p.pitchSemitones / 12)
-    g.af(`asetrate=44100*${pr.toFixed(4)},aresample=44100,atempo=${(1 / pr).toFixed(4)}`)
-  }
-  // 配乐 / 旁白：第二音频输入 → 混音 / 替换 / 闪避
+  // 配乐 / 旁白：第二音频输入 → 混音 / 替换 / 闪避（无原声时仍可 replace/mix）
   if (p.bgm?.path) {
     const idx = g.addInput(p.bgm.path)
     const ms = Math.max(0, Math.round((p.bgm.offset || 0) * 1000))
@@ -489,7 +492,8 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   // 中间产物 mp4（pass1）
   const needSecondPass = exp.format === 'gif' || exp.format === 'webp'
   const pass1Ext = needSecondPass ? 'mp4' : exp.format === 'webm' ? 'webm' : 'mp4'
-  const pass1Out = await mediaPath(ctx.projectId, 'studio', pass1Ext)
+  const pathFor = ctx.resolveOutPath ?? ((pid, base, ext) => mediaPath(pid, base, ext))
+  const pass1Out = await pathFor(ctx.projectId, 'studio', pass1Ext)
 
   const args: string[] = ['-i', ctx.inPath]
   for (const inp of g.inputs) args.push('-i', inp)
@@ -517,7 +521,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
 
   if (needSecondPass) {
     const ext = exp.format // gif | webp
-    const out2 = await mediaPath(ctx.projectId, 'studio', ext)
+    const out2 = await pathFor(ctx.projectId, 'studio', ext)
     const fps = exp.fps || 12
     const w = exp.outW || 480
     const args2: string[] =

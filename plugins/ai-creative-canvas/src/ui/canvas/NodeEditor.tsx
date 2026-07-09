@@ -3,7 +3,7 @@ import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon,
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
-import { buildMaterials } from '../services/references'
+import { buildMaterials, findUnresolvedMentions, selectedGenMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
 import { enhancePrompt, describeImage } from '../services/promptTools'
@@ -80,6 +80,8 @@ export function NodeEditor() {
   const vp = board.viewport
   const accent = KIND_ACCENT[card.kind]
   const materials = buildMaterials(card, board)
+  const genMaterials = selectedGenMaterials(card, board, materials)
+  const unresolvedMentions = findUnresolvedMentions(card.prompt || '', materials)
   const generatable = canGenerate(card.kind)
   const busy = card.status === 'running' || card.status === 'queued'
   const hasMedia = !!(card.assetUrl || card.assetLocalPath)
@@ -355,6 +357,24 @@ export function NodeEditor() {
                   <Maximize2 size={12} />
                 </button>
               </div>
+              {(genMaterials.length > 0 || unresolvedMentions.length > 0) && (
+                <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px]">
+                  {genMaterials.length > 0 && <span className="opacity-50 shrink-0">生成引用：</span>}
+                  {genMaterials.map((m) => {
+                    const Icon = MAT_ICON[m.kind]
+                    return (
+                      <span key={m.matId} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">
+                        <Icon size={10} /> @{m.label}
+                      </span>
+                    )
+                  })}
+                  {unresolvedMentions.map((t) => (
+                    <span key={t} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-300" title="未匹配到素材，生成时将忽略">
+                      @{t}?
+                    </span>
+                  ))}
+                </div>
+              )}
             </>
           )}
 

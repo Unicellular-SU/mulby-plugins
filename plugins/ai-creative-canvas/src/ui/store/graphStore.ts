@@ -3,6 +3,7 @@ import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate, 
 import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
 import { canConnect } from '../services/connectionPolicy'
+import { findLabelForSourceCard, replaceMentionInPrompt } from '../services/references'
 import { toast } from './toastStore'
 
 const HISTORY_LIMIT = 100
@@ -403,14 +404,39 @@ export const useGraph = create<GraphState>((set, get) => ({
   },
 
   updateCard: (id, patch) =>
-    set((s) => ({
-      // 按 id 定位拥有该卡的画布（异步生成途中切换画布也写对地方）
-      project: withBoardOfCard(s.project, id, (b) => {
-        const cur = b.cards[id]
-        if (!cur) return b
-        return { ...b, cards: { ...b.cards, [id]: { ...cur, ...patch } } }
-      })
-    })),
+    set((s) => {
+      let project = s.project
+      if (patch.title !== undefined) {
+        for (const b of project.boards) {
+          const cur = b.cards[id]
+          if (!cur) continue
+          const oldLabel = findLabelForSourceCard(id, b)
+          const nextTitle = patch.title ?? cur.title
+          const boardAfter = { ...b, cards: { ...b.cards, [id]: { ...cur, title: nextTitle } } }
+          const newLabel = findLabelForSourceCard(id, boardAfter)
+          if (oldLabel && newLabel && oldLabel !== newLabel) {
+            const cards = { ...boardAfter.cards }
+            for (const cid of Object.keys(cards)) {
+              const c = cards[cid]
+              if (!c.prompt?.includes('@' + oldLabel)) continue
+              cards[cid] = { ...c, prompt: replaceMentionInPrompt(c.prompt, oldLabel, newLabel) }
+            }
+            project = {
+              ...project,
+              boards: project.boards.map((bb) => (bb.id === b.id ? { ...boardAfter, cards } : bb))
+            }
+            break
+          }
+        }
+      }
+      return {
+        project: withBoardOfCard(project, id, (b) => {
+          const cur = b.cards[id]
+          if (!cur) return b
+          return { ...b, cards: { ...b.cards, [id]: { ...cur, ...patch } } }
+        })
+      }
+    }),
 
   applyParamsTo: (ids, params) => {
     if (ids.length === 0) return
