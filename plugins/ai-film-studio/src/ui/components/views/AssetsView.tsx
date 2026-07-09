@@ -56,6 +56,20 @@ import {
   loadAdoptions,
   type AssetHubAdoptionRecord,
 } from '../../services/assetHubAdoption'
+import {
+  COLLECTION_KIND_LABELS,
+  addEntityToCollection,
+  deleteCollection,
+  filterEntitiesByCollection,
+  loadCollections,
+  loadProjectCollectionSettings,
+  removeEntityFromCollection,
+  saveProjectCollectionSettings,
+  upsertCollection,
+  addEntityToProjectDefaultCollections,
+  type AssetHubCollection,
+  type AssetHubCollectionKind,
+} from '../../services/assetHubCollections'
 import { loadIndex, loadProject } from '../../domain/persistence'
 import type { Asset, ProjectDoc } from '../../domain/types'
 import { VARIANT_KIND_OPTIONS } from '../../domain/variantKinds'
@@ -815,19 +829,48 @@ function ElementLibrary() {
   const hubMediaAssets = useAssetHubStore((s) => s.mediaAssets)
   const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
   const refreshHub = useAssetHubStore((s) => s.refresh)
+  const currentProjectId = useProjectStore((s) => s.doc?.meta.id)
+  const currentProjectName = useProjectStore((s) => s.doc?.meta.name)
 
   const confirm = useConfirm()
+  const prompt = usePrompt()
 
   const [editing, setEditing] = useState<(Partial<ElementRef> & { kind: ElementKind }) | null>(null)
   const [usageDetail, setUsageDetail] = useState<{ element: ElementRef; usage: IdentityAssetUsage } | null>(null)
   const [archiveF, setArchiveF] = useState<'active' | 'archived' | 'all'>('active')
+  const [collections, setCollections] = useState<AssetHubCollection[]>([])
+  const [collectionF, setCollectionF] = useState<string>('all')
+  const [projectCollectionIds, setProjectCollectionIds] = useState<string[]>([])
+
+  const refreshCollections = async () => {
+    setCollections(await loadCollections())
+    if (currentProjectId) {
+      const settings = await loadProjectCollectionSettings(currentProjectId)
+      setProjectCollectionIds(settings.collectionIds ?? [])
+    } else {
+      setProjectCollectionIds([])
+    }
+  }
+
+  useEffect(() => {
+    if (!hubLoaded) void refreshHub()
+  }, [hubLoaded, refreshHub])
+
+  useEffect(() => {
+    void refreshCollections()
+  }, [currentProjectId])
+
   const allElements = useMemo(() => hubEntities.filter((entity) => entity.kind !== 'voice').map(libraryEntityToElement), [hubEntities])
-  const elements = useMemo(
+  const archiveFiltered = useMemo(
     () =>
       allElements.filter((element) =>
         archiveF === 'all' ? true : archiveF === 'archived' ? !!element.archived : !element.archived
       ),
     [allElements, archiveF]
+  )
+  const elements = useMemo(
+    () => filterEntitiesByCollection(archiveFiltered, collections, collectionF),
+    [archiveFiltered, collections, collectionF],
   )
   const elementCounts = useMemo(
     () => ({
@@ -838,11 +881,58 @@ function ElementLibrary() {
     [allElements]
   )
 
-  useEffect(() => {
-    if (!hubLoaded) void refreshHub()
-  }, [hubLoaded, refreshHub])
-
   const imageAssets = useMemo(() => hubMediaAssets.filter((a) => a.type === 'image' && a.assetId), [hubMediaAssets])
+
+  const onCreateCollection = async () => {
+    const name = (await prompt({ title: '新建身份集合', message: '例如：短剧A角色包 / 客户B资产包', defaultValue: '系列资产包' }))?.trim()
+    if (!name) return
+    const kindRaw = (await prompt({
+      title: '集合类型',
+      message: '填写 series / client / style / personal / archive',
+      defaultValue: 'series',
+    }))?.trim() as AssetHubCollectionKind | undefined
+    const kind: AssetHubCollectionKind =
+      kindRaw === 'client' || kindRaw === 'style' || kindRaw === 'personal' || kindRaw === 'archive' ? kindRaw : 'series'
+    const created = await upsertCollection({ name, kind, entityIds: [] })
+    await refreshCollections()
+    setCollectionF(created.id)
+    window.mulby?.notification?.show(`已创建集合「${created.name}」`, 'success')
+  }
+
+  const onDeleteCollection = async (collectionId: string) => {
+    const collection = collections.find((item) => item.id === collectionId)
+    if (!collection) return
+    if (!(await confirm({ title: '删除集合', message: `删除集合「${collection.name}」？身份资产本身不会被删除。`, confirmLabel: '删除', danger: true }))) return
+    await deleteCollection(collectionId)
+    if (collectionF === collectionId) setCollectionF('all')
+    await refreshCollections()
+  }
+
+  const onToggleEntityInCollection = async (el: ElementRef, collectionId: string) => {
+    const collection = collections.find((item) => item.id === collectionId)
+    if (!collection) return
+    const next = collection.entityIds.includes(el.id)
+      ? removeEntityFromCollection(collection, el.id)
+      : addEntityToCollection(collection, el.id)
+    await upsertCollection(next)
+    await refreshCollections()
+  }
+
+  const onToggleProjectDefaultCollection = async (collectionId: string) => {
+    if (!currentProjectId) {
+      window.mulby?.notification?.show('请先打开一个工作流项目，再设置默认集合', 'warning')
+      return
+    }
+    const next = projectCollectionIds.includes(collectionId)
+      ? projectCollectionIds.filter((id) => id !== collectionId)
+      : [...projectCollectionIds, collectionId]
+    await saveProjectCollectionSettings(currentProjectId, { collectionIds: next, importPolicy: 'snapshot', syncPolicy: 'manual' })
+    setProjectCollectionIds(next)
+    window.mulby?.notification?.show(
+      next.includes(collectionId) ? '已设为当前项目默认集合' : '已取消当前项目默认集合',
+      'success',
+    )
+  }
 
   const onSave = async () => {
     if (!editing || !editing.name?.trim()) {
@@ -850,8 +940,18 @@ function ElementLibrary() {
       return
     }
     if (!legacyLoaded) await loadLegacyStore()
-    await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
+    const saved = await saveElement({ ...editing, kind: editing.kind, name: editing.name.trim() })
+    if (saved?.id) {
+      if (collectionF !== 'all') {
+        const collection = collections.find((item) => item.id === collectionF)
+        if (collection && !collection.entityIds.includes(saved.id)) {
+          await upsertCollection(addEntityToCollection(collection, saved.id))
+        }
+      }
+      await addEntityToProjectDefaultCollections(currentProjectId, saved.id)
+    }
     await refreshHub()
+    await refreshCollections()
     setEditing(null)
   }
   const onDeleteElement = async (el: ElementRef) => {
@@ -886,8 +986,28 @@ function ElementLibrary() {
   return (
     <>
       <div className="afs-avtoolbar">
-        <div className="afs-lib__hint">身份资产用于沉淀可跨项目复用的角色 / 场景 / 物品；工作流会导入为项目资产快照，画布产物需显式回写。</div>
+        <div className="afs-lib__hint">
+          身份资产用于沉淀可跨项目复用的角色 / 场景 / 物品；可用集合隔离同名身份
+          {currentProjectName ? `（当前项目：${currentProjectName}）` : ''}。
+        </div>
         <span className="afs-avtoolbar__spacer" />
+        <label className="afs-avsearch" style={{ minWidth: 160 }}>
+          <span className="afs-avsearch__icon" aria-hidden>集合</span>
+          <select
+            className="afs-avsearch__input"
+            value={collectionF}
+            aria-label="按身份集合筛选"
+            onChange={(event) => setCollectionF(event.target.value)}
+          >
+            <option value="all">全部集合</option>
+            {collections.map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {COLLECTION_KIND_LABELS[collection.kind]} · {collection.name}（{collection.entityIds.length}）
+                {projectCollectionIds.includes(collection.id) ? ' · 项目默认' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
         <Segmented
           ariaLabel="按归档状态筛选身份资产"
           size="sm"
@@ -899,6 +1019,24 @@ function ElementLibrary() {
             { value: 'all', label: `全部 ${elementCounts.all}` },
           ]}
         />
+        <Button variant="secondary" size="sm" leadingIcon={FolderPlus} onClick={() => void onCreateCollection()}>
+          新建集合
+        </Button>
+        {collectionF !== 'all' && (
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void onToggleProjectDefaultCollection(collectionF)}
+              title={currentProjectId ? '把当前集合设为/取消当前工作流项目的默认搜索范围' : '先打开工作流项目'}
+            >
+              {projectCollectionIds.includes(collectionF) ? '取消项目默认' : '设为项目默认'}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => void onDeleteCollection(collectionF)}>
+              删除集合
+            </Button>
+          </>
+        )}
         <Button variant="secondary" size="sm" leadingIcon={Users} onClick={() => setEditing({ kind: 'character', name: '', refAssetIds: [] })}>
           新建角色
         </Button>
@@ -913,7 +1051,7 @@ function ElementLibrary() {
       <div className="afs-avscroll">
         {elements.length === 0 ? (
           hubLoaded ? (
-            <EmptyState icon={Users} title="暂无身份资产" description="新建角色、场景或物品；项目生产时会导入为项目资产快照。" />
+            <EmptyState icon={Users} title="暂无身份资产" description="新建角色、场景或物品；也可先建集合，把一部短剧的身份整理成资产包。" />
           ) : (
             <div className="afs-avtiles" role="status" aria-label="加载中…">
               <Skeleton count={6} height={150} radius={12} />
@@ -925,6 +1063,7 @@ function ElementLibrary() {
               const Icon = KIND_ICON[el.kind]
               const usage = usageByEntity[el.id]
               const identityUsed = hasIdentityUsage(usage)
+              const memberCollections = collections.filter((collection) => collection.entityIds.includes(el.id))
               return (
                 <div key={el.id} className="afs-avcard">
                   <div className="afs-avcard__thumb" onClick={() => setEditing(el)} title="编辑">
@@ -938,7 +1077,9 @@ function ElementLibrary() {
                     {el.name}
                   </div>
                   <div className="afs-avcard__meta">
-                    {el.archived ? '已归档 · ' : ''}{el.description ? el.description.slice(0, 28) : '无描述'}
+                    {el.archived ? '已归档 · ' : ''}
+                    {memberCollections.length ? `集合 ${memberCollections.map((item) => item.name).join('、')} · ` : ''}
+                    {el.description ? el.description.slice(0, 28) : '无描述'}
                   </div>
                   <button
                     type="button"
@@ -950,6 +1091,25 @@ function ElementLibrary() {
                   >
                     {identityUsageLabel(usage)}
                   </button>
+                  {collections.length > 0 && (
+                    <div className="afs-avcard__meta" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                      {collections.slice(0, 4).map((collection) => {
+                        const inCollection = collection.entityIds.includes(el.id)
+                        return (
+                          <button
+                            key={collection.id}
+                            type="button"
+                            className={`afs-avpill${inCollection ? ' afs-avpill--type' : ''}`}
+                            title={inCollection ? `从「${collection.name}」移除` : `加入「${collection.name}」`}
+                            onClick={() => void onToggleEntityInCollection(el, collection.id)}
+                          >
+                            {inCollection ? '✓ ' : '+ '}
+                            {collection.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
                   <div className="afs-avcard__foot">
                     <IconButton size="sm" icon={<Brush size={13} />} aria-label="编辑" onClick={() => setEditing(el)} />
                     <IconButton

@@ -10,7 +10,9 @@ import { Search } from 'lucide-react'
 import { AssetThumb, RefThumb } from '../components/views/AssetsView'
 import { DND_ASSET, DND_ELEMENT } from '../components/NodeLibrary'
 import { useAssetHubStore } from '../store/assetHubStore'
+import { useProjectStore } from '../store/projectStore'
 import { preferredMediaAssetId } from '../services/assetHub'
+import { loadCollections, loadProjectCollectionSettings, prioritizeEntitiesByCollections, type AssetHubCollection } from '../services/assetHubCollections'
 import { usePromptStore, resolveSnippet, SNIPPET_GROUPS, type PromptSnippet } from '../store/promptStore'
 import { insertAtFocused } from './services/focusInsert'
 import Segmented from '../components/ui/Segmented'
@@ -49,17 +51,39 @@ function AssetInsertPanel() {
   const entities = useAssetHubStore((s) => s.entities)
   const loaded = useAssetHubStore((s) => s.loaded)
   const refresh = useAssetHubStore((s) => s.refresh)
+  const currentProjectId = useProjectStore((s) => s.doc?.meta.id)
   const [q, setQ] = useState('')
+  const [collections, setCollections] = useState<AssetHubCollection[]>([])
+  const [preferredCollectionIds, setPreferredCollectionIds] = useState<string[]>([])
 
   useEffect(() => {
     if (!loaded) void refresh()
   }, [loaded, refresh])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const nextCollections = await loadCollections()
+      const settings = currentProjectId ? await loadProjectCollectionSettings(currentProjectId) : {}
+      if (!cancelled) {
+        setCollections(nextCollections)
+        setPreferredCollectionIds(settings.collectionIds ?? [])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentProjectId, loaded])
+
   const kw = q.trim().toLowerCase()
   const fa = assets
     .filter((a) => !kw || `${a.name || ''} ${a.nodeKind || ''} ${a.projectName || ''}`.toLowerCase().includes(kw))
     .sort((a, b) => b.createdAt - a.createdAt)
-  const filteredEntities = entities.filter((entity) => !entity.archived && (!kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw)))
+  const filteredEntities = prioritizeEntitiesByCollections(
+    entities.filter((entity) => !kw || `${entity.name || ''} ${entity.aliases?.join(' ') || ''} ${entity.kind}`.toLowerCase().includes(kw)),
+    collections,
+    preferredCollectionIds,
+  )
   const entityPreviewAssetId = (entity: (typeof entities)[number]) => preferredMediaAssetId(entity.mediaRefs)
   const entityKindLabel = (kind: string) => (kind === 'character' ? '角色' : kind === 'prop' ? '物品' : kind === 'voice' ? '音色' : '场景')
 

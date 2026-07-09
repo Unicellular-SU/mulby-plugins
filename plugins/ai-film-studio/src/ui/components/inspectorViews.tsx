@@ -10,6 +10,7 @@ import { useUiStore, type LightboxItem } from '../store/uiStore'
 import { useAssetHubStore } from '../store/assetHubStore'
 import type { LibraryEntity, LibraryEntityKind } from '../services/assetHub'
 import { appendAdoptionRecord, purposeBeforeFromMeta } from '../services/assetHubAdoption'
+import { addEntityToProjectDefaultCollections, loadCollections, loadProjectCollectionSettings, prioritizeEntitiesByCollections } from '../services/assetHubCollections'
 
 const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
 
@@ -557,10 +558,32 @@ export function OutputView({
   const canvasProjectName = useGraphStore((s) => s.projectName)
   const mediaList = useMemo(() => mediaOutputsForValue(value), [value])
   const imageMediaList = useMemo(() => (mediaList ?? []).filter((it) => it.type === 'image' && !!it.assetId), [mediaList])
-  const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(hubEntities, imageMediaList), [hubEntities, imageMediaList])
+  const [preferredEntityOrder, setPreferredEntityOrder] = useState<string[] | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!canvasProjectId) {
+        if (!cancelled) setPreferredEntityOrder(null)
+        return
+      }
+      const [collections, settings] = await Promise.all([loadCollections(), loadProjectCollectionSettings(canvasProjectId)])
+      if (cancelled) return
+      const ordered = prioritizeEntitiesByCollections(hubEntities, collections, settings.collectionIds)
+      setPreferredEntityOrder(ordered.map((entity) => entity.id))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [canvasProjectId, hubEntities])
+  const orderedHubEntities = useMemo(() => {
+    if (!preferredEntityOrder?.length) return hubEntities
+    const rank = new Map(preferredEntityOrder.map((id, index) => [id, index]))
+    return [...hubEntities].sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+  }, [hubEntities, preferredEntityOrder])
+  const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(orderedHubEntities, imageMediaList), [orderedHubEntities, imageMediaList])
   const hintedIdentityTargetKey = useMemo(
-    () => resolveIdentitySaveTargetKey(identitySaveTargets, hubEntities, firstImageOutput(value)),
-    [hubEntities, identitySaveTargets, value]
+    () => resolveIdentitySaveTargetKey(identitySaveTargets, orderedHubEntities, firstImageOutput(value)),
+    [orderedHubEntities, identitySaveTargets, value]
   )
   const projectSaveTargets = useMemo(() => buildProjectSaveTargets(projectDoc?.assets), [projectDoc?.assets])
   const hintedProjectTargetKey = useMemo(
@@ -671,6 +694,7 @@ export function OutputView({
           },
           action: existingPrimary ? 'overwrite' : 'save',
         })
+        await addEntityToProjectDefaultCollections(canvasProjectId || undefined, selectedIdentityTarget.entityId)
         await refreshAssetHub()
       }
       window.mulby?.notification?.show(

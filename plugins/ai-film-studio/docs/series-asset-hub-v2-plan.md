@@ -631,6 +631,18 @@ interface ProjectAssetHubSettings {
   - 同步前确认框展示覆盖字段与影响范围（剧集/分镜）。
 - 自测覆盖字段筛选与同步影响摘要；`typecheck`、`test:continuity`、`build` 通过。
 
+### 第五轮提交：P5 身份库集合与项目资产包
+
+- 新增 `src/ui/services/assetHubCollections.ts`，独立 KV：
+  - `assetHub:collections`：身份集合（系列/客户/风格/个人/归档包），成员为 `entityIds`。
+  - `assetHub:projectCollections`：项目默认集合偏好（不写入 `ProjectDoc`）。
+  - `prioritizeEntitiesByCollections`：导入/搜索时优先项目默认集合内身份，并跳过已归档。
+  - `addEntityToProjectDefaultCollections`：画布/编辑器保存身份后自动写入当前项目默认集合。
+- 资产中心「身份资产」页：集合筛选、新建/删除集合、卡片加减成员、设为/取消当前工作流项目默认集合；在集合视图下新建身份会自动加入该集合。
+- 工作台 Dock 身份列表按项目默认集合优先排序；画布「保存到身份」下拉同样优先，保存成功后写入默认集合。
+- 新增 `assetHubCollections.selftest.ts` 并接入 `test:continuity`；不改 `ProjectDoc` / 生成链路。
+- `typecheck`、`test:continuity`、`build` 通过。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：
