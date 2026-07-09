@@ -596,6 +596,16 @@ interface ProjectAssetHubSettings {
 - 新增 `assetHubDomain.selftest.ts` 并接入 `npm run test:continuity`，覆盖版本状态（快照/分叉/归档/旧链接/缺失/未链接）、字段差异（漂移检测、别名顺序不敏感、形态双向差异）、画布采纳目标（项目优先、归档排除、失效回退、无 lineage 候选）和变体作用域摘要。
 - 本轮不改变持久化结构和生成链路；矩阵、连续性抽屉、画布检查器的其余重复判断将在后续轮次逐步收敛到该 helper。
 
+### 第二轮提交：P2 资产矩阵身份候选动作
+
+- 跨集资产矩阵新增行级身份候选处置，不再依赖连续性详情抽屉：
+  - 「关联」：读取 `asset_matches_unlinked_library_entity` / `library_entity_alias_conflict` 的候选身份；单候选直接关联，多候选弹出序号选择，再调用 `linkAssetToLibraryEntity`。
+  - 「不同身份」：确认后把当前行全部候选写入 `rejectedLibraryEntityIds`，调用 `markAssetAsDistinctIdentity`，后续不再重复提示。
+  - 「合并」：多重复目标时先让用户选择合并目标，不再自动取第一个；确认后仍走 `mergeProjectAssetInto`。
+- 身份状态筛选从单一「身份状态」细分为独立筛选项：有新版、已归档、候选身份、重复身份、未入图谱；并单独成「身份」筛选组，与质量组（连续性问题 / 缺主图 / 缺形态图）分开。
+- 验收口径：不打开连续性抽屉也能处理常见身份候选问题；`asset_matches_unlinked_library_entity` 与 `library_entity_alias_conflict` 有行级处理入口。
+- 本轮不新增持久化字段；`typecheck`、`test:continuity`、`build` 通过。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：

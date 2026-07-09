@@ -767,7 +767,7 @@ function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePl
 }
 
 type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'duplicate' | 'missingRef' | 'missingVariantRef' | 'library' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'duplicate' | 'missingRef' | 'missingVariantRef' | 'library' | 'libraryNewer' | 'libraryArchived' | 'libraryCandidate' | 'unlinked'
 type AssetMatrixTypeFilter = 'all' | 'role' | 'scene' | 'prop'
 const ASSET_MATRIX_LINK_ATTENTION_LABELS = new Set(['有新版', '已归档', '已分叉', '旧链接'])
 const ASSET_MATRIX_DUPLICATE_ISSUE_CODES = new Set([
@@ -775,6 +775,10 @@ const ASSET_MATRIX_DUPLICATE_ISSUE_CODES = new Set([
   'duplicate_asset_alias',
   'duplicate_library_entity_project_assets',
   'cross_episode_duplicate_project_asset_candidate',
+])
+const ASSET_MATRIX_LIBRARY_CANDIDATE_ISSUE_CODES = new Set([
+  'asset_matches_unlinked_library_entity',
+  'library_entity_alias_conflict',
 ])
 
 function SeriesTab() {
@@ -1567,6 +1571,8 @@ function AssetContinuityPanel() {
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
+  const linkAssetToLibraryEntity = useProjectStore((s) => s.linkAssetToLibraryEntity)
+  const markAssetAsDistinctIdentity = useProjectStore((s) => s.markAssetAsDistinctIdentity)
   const refreshAssetHub = useAssetHubStore((s) => s.refresh)
   const [assetMatrixFilter, setAssetMatrixFilter] = useState<AssetMatrixFilter>('all')
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
@@ -1688,6 +1694,11 @@ function AssetContinuityPanel() {
   const rowVisibleDuplicateIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
     rowVisibleIssues(row, episodeFilter).filter((issue) => ASSET_MATRIX_DUPLICATE_ISSUE_CODES.has(issue.code))
   const rowHasDuplicateRisk = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleDuplicateIssues(row, episodeFilter).length > 0
+  const rowVisibleLibraryCandidateIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
+    rowVisibleIssues(row, episodeFilter).filter((issue) => ASSET_MATRIX_LIBRARY_CANDIDATE_ISSUE_CODES.has(issue.code) && (issue.candidateLibraryEntityIds?.length ?? 0) > 0)
+  const rowHasLibraryCandidate = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleLibraryCandidateIssues(row, episodeFilter).length > 0
+  const rowHasNewerLibraryVersion = (row: (typeof rows)[number]) => row.linkStatusLabels.includes('有新版')
+  const rowHasArchivedLibraryLink = (row: (typeof rows)[number]) => row.linkStatusLabels.includes('已归档')
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowNeedsMainReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
     !row.asset.refImageId && (rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0 || rowVisibleEpisodeLabels(row, episodeFilter).length > 0)
@@ -1742,6 +1753,9 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'missingRef') return rowNeedsMainReference(row, episodeFilter)
     if (assetMatrixFilter === 'missingVariantRef') return rowNeedsVariantReference(row, episodeFilter)
     if (assetMatrixFilter === 'library') return rowHasLibraryStatusAttention(row)
+    if (assetMatrixFilter === 'libraryNewer') return rowHasNewerLibraryVersion(row)
+    if (assetMatrixFilter === 'libraryArchived') return rowHasArchivedLibraryLink(row)
+    if (assetMatrixFilter === 'libraryCandidate') return rowHasLibraryCandidate(row, episodeFilter)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   }
@@ -1761,6 +1775,9 @@ function AssetContinuityPanel() {
   const missingMainReferenceCount = typeFilteredRows.filter((row) => rowNeedsMainReference(row)).length
   const missingVariantReferenceCount = typeFilteredRows.filter((row) => rowNeedsVariantReference(row)).length
   const libraryStatusCount = typeFilteredRows.filter((row) => rowHasLibraryStatusAttention(row)).length
+  const libraryNewerCount = typeFilteredRows.filter((row) => rowHasNewerLibraryVersion(row)).length
+  const libraryArchivedCount = typeFilteredRows.filter((row) => rowHasArchivedLibraryLink(row)).length
+  const libraryCandidateCount = typeFilteredRows.filter((row) => rowHasLibraryCandidate(row)).length
   const filteredRows = typeFilteredRows.filter((row) => rowMatchesAssetMatrixFilter(row))
   const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
   const assetMatrixTypeOptions: { id: AssetMatrixTypeFilter; label: string; count: number }[] = [
@@ -1799,14 +1816,22 @@ function AssetContinuityPanel() {
       label: '质量',
       options: [
         { id: 'issue', label: '连续性问题', count: issueAssetCount },
-        { id: 'duplicate', label: '重复身份', count: duplicateRiskCount },
         { id: 'missingRef', label: '缺主图', count: missingMainReferenceCount },
         { id: 'missingVariantRef', label: '缺形态图', count: missingVariantReferenceCount },
+      ],
+    },
+    {
+      label: '身份',
+      options: [
         { id: 'library', label: '身份状态', count: libraryStatusCount },
+        { id: 'libraryNewer', label: '有新版', count: libraryNewerCount },
+        { id: 'libraryArchived', label: '已归档', count: libraryArchivedCount },
+        { id: 'libraryCandidate', label: '候选身份', count: libraryCandidateCount },
+        { id: 'duplicate', label: '重复身份', count: duplicateRiskCount },
       ],
     },
   ]
-  if (hubLoaded) assetMatrixFilterGroups[2].options.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
+  if (hubLoaded) assetMatrixFilterGroups[3].options.push({ id: 'unlinked', label: '未入图谱', count: missingAssetCenterCount })
   const activeFilterOption = assetMatrixFilterGroups.flatMap((group) => group.options).find((option) => option.id === assetMatrixFilter)
   const activeEpisodeOption = assetMatrixEpisodeOptions.find((option) => option.id === assetMatrixEpisodeFilter)
   const activeTypeOption = assetMatrixTypeOptions.find((option) => option.id === assetMatrixTypeFilter)
@@ -1850,11 +1875,65 @@ function AssetContinuityPanel() {
     if (!row.asset.refImageId || !variant || variant.refImageId || variant.state === 'generating') return
     void generateAssetVariant(row.asset.id, variant.id)
   }
-  const mergeAssetMatrixDuplicate = (row: (typeof rows)[number], targetAssetId: string) => {
-    const target = doc.assets.find((asset) => asset.id === targetAssetId)
-    if (!target || target.type !== row.asset.type || target.parentAssetId) return
+  const mergeAssetMatrixDuplicate = (row: (typeof rows)[number], targets: Asset[]) => {
+    if (!targets.length) return
+    let target = targets[0]
+    if (targets.length > 1) {
+      const options = targets.map((asset, index) => `${index + 1}. ${asset.name} (${asset.id})`).join('\n')
+      const raw = window.prompt(`「${row.asset.name}」有多个可合并目标，选择要合并到的项目资产序号：\n${options}`, '1')?.trim()
+      if (!raw) return
+      const byIndex = Number(raw)
+      const selected = Number.isFinite(byIndex)
+        ? targets[Math.max(0, Math.floor(byIndex) - 1)]
+        : targets.find((asset) => asset.id === raw || asset.name.toLowerCase() === raw.toLowerCase())
+      if (!selected) return
+      target = selected
+    }
     if (!window.confirm(`把「${row.asset.name}」合并到「${target.name}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
     if (mergeProjectAssetInto(row.asset.id, target.id)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
+  }
+  const rowLibraryCandidateEntries = (row: (typeof rows)[number]) => {
+    const entries = new Map<string, { id: string; label: string }>()
+    for (const issue of rowVisibleLibraryCandidateIssues(row)) {
+      const ids = issue.candidateLibraryEntityIds ?? []
+      const labels = issue.candidateLibraryEntityLabels ?? []
+      ids.forEach((id, index) => {
+        if (!entries.has(id)) entries.set(id, { id, label: labels[index] ?? hubEntities.find((entity) => entity.id === id)?.name ?? id })
+      })
+    }
+    return [...entries.values()]
+  }
+  const linkAssetMatrixCandidateIdentity = (row: (typeof rows)[number]) => {
+    const candidates = rowLibraryCandidateEntries(row)
+    if (!candidates.length) return
+    let candidate = candidates[0]
+    if (candidates.length > 1) {
+      const options = candidates.map((entry, index) => `${index + 1}. ${entry.label} (${entry.id})`).join('\n')
+      const raw = window.prompt(`选择要关联的身份资产序号：\n${options}`, '1')?.trim()
+      if (!raw) return
+      const byIndex = Number(raw)
+      const selected = Number.isFinite(byIndex)
+        ? candidates[Math.max(0, Math.floor(byIndex) - 1)]
+        : candidates.find((entry) => entry.id === raw || entry.label.toLowerCase() === raw.toLowerCase())
+      if (!selected) return
+      candidate = selected
+    }
+    const entity = hubEntities.find((item) => item.id === candidate.id)
+    const linked = linkAssetToLibraryEntity(row.asset.id, {
+      id: candidate.id,
+      name: entity?.name ?? candidate.label,
+      version: entity?.version,
+      archived: entity?.archived,
+      variants: entity?.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
+    })
+    if (linked) window.mulby?.notification?.show('已关联身份资产快照', 'success')
+  }
+  const markAssetMatrixDistinctIdentity = (row: (typeof rows)[number]) => {
+    const candidates = rowLibraryCandidateEntries(row)
+    if (!candidates.length) return
+    const names = candidates.map((entry) => entry.label).join('、')
+    if (!window.confirm(`确认「${row.asset.name}」与候选身份（${names}）不是同一身份？之后这些候选不会再提示。`)) return
+    if (markAssetAsDistinctIdentity(row.asset.id, candidates.map((entry) => entry.id))) window.mulby?.notification?.show('已标记为不同身份', 'success')
   }
   const typeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type)
   return (
@@ -1969,9 +2048,10 @@ function AssetContinuityPanel() {
           const visibleIssues = rowVisibleIssues(row)
           const visibleDuplicateIssues = rowVisibleDuplicateIssues(row)
           const duplicateRelatedAssetIds = [...new Set(visibleDuplicateIssues.flatMap((issue) => issue.relatedAssetIds ?? []))]
-          const mergeableDuplicateTarget = duplicateRelatedAssetIds
+          const mergeableDuplicateTargets = duplicateRelatedAssetIds
             .map((id) => doc.assets.find((asset) => asset.id === id))
-            .find((asset): asset is Asset => !!asset && asset.type === row.asset.type && !asset.parentAssetId)
+            .filter((asset): asset is Asset => !!asset && asset.type === row.asset.type && !asset.parentAssetId)
+          const libraryCandidateEntries = rowLibraryCandidateEntries(row)
           const duplicateRelatedAssetCount = duplicateRelatedAssetIds.length
           const duplicateIdentityCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.libraryEntityId ? [issue.libraryEntityId] : [])).size
           return (
@@ -2077,14 +2157,38 @@ function AssetContinuityPanel() {
                     同步
                   </button>
                 )}
-                {mergeableDuplicateTarget && (
+                {mergeableDuplicateTargets.length > 0 && (
                   <button
                     type="button"
                     className="afs-studio__assetmatrix-action"
-                    title={`合并到重复项目资产：${mergeableDuplicateTarget.name}`}
-                    onClick={() => mergeAssetMatrixDuplicate(row, mergeableDuplicateTarget.id)}
+                    title={
+                      mergeableDuplicateTargets.length > 1
+                        ? `合并到重复项目资产（${mergeableDuplicateTargets.length} 个候选目标）：${mergeableDuplicateTargets.map((asset) => asset.name).join('、')}`
+                        : `合并到重复项目资产：${mergeableDuplicateTargets[0].name}`
+                    }
+                    onClick={() => mergeAssetMatrixDuplicate(row, mergeableDuplicateTargets)}
                   >
-                    合并
+                    合并{mergeableDuplicateTargets.length > 1 ? ` ${mergeableDuplicateTargets.length}` : ''}
+                  </button>
+                )}
+                {libraryCandidateEntries.length > 0 && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`关联候选身份（${libraryCandidateEntries.length} 个候选）：${libraryCandidateEntries.map((entry) => entry.label).join('、')}`}
+                    onClick={() => linkAssetMatrixCandidateIdentity(row)}
+                  >
+                    关联{libraryCandidateEntries.length > 1 ? ` ${libraryCandidateEntries.length}` : ''}
+                  </button>
+                )}
+                {libraryCandidateEntries.length > 0 && (
+                  <button
+                    type="button"
+                    className="afs-studio__assetmatrix-action"
+                    title={`标记与候选身份不是同一身份：${libraryCandidateEntries.map((entry) => entry.label).join('、')}`}
+                    onClick={() => markAssetMatrixDistinctIdentity(row)}
+                  >
+                    不同身份
                   </button>
                 )}
                 {rowMissingAssetCenter(row) && !!row.asset.refImageId && row.asset.libraryLink?.syncPolicy !== 'forked' && !row.linkedEntity?.archived && (
