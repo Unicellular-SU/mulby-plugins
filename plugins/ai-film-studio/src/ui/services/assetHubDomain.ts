@@ -1,4 +1,5 @@
 import type { Asset, AssetVariant, Episode, ProjectDoc } from '../domain/types'
+import { castRefsForStoryboard } from '../domain/castRefs'
 import { preferredMediaAssetId, type CanvasPortValue, type LibraryEntity, type LibraryVariant } from './assetHub'
 
 /**
@@ -62,6 +63,28 @@ export function assetHubEntityVersionStatus(asset: Asset, entity?: EntityVersion
 
 export type AssetHubDiffField = 'name' | 'aliases' | 'description' | 'prompt' | 'primaryImage' | 'variants' | 'voice' | 'lora'
 
+export const ASSET_HUB_DIFF_FIELD_LABELS: Record<AssetHubDiffField, string> = {
+  name: '名称',
+  aliases: '别名',
+  description: '描述',
+  prompt: '提示词',
+  primaryImage: '主参考图',
+  variants: '形态',
+  voice: '音色',
+  lora: 'LoRA',
+}
+
+export const ASSET_HUB_SYNC_FIELDS: AssetHubDiffField[] = [
+  'name',
+  'aliases',
+  'description',
+  'prompt',
+  'primaryImage',
+  'variants',
+  'voice',
+  'lora',
+]
+
 export interface AssetHubProjectAssetFieldDiff {
   field: AssetHubDiffField
   label: string
@@ -122,6 +145,69 @@ export function assetHubProjectAssetDiff(asset: Asset, entity: LibraryEntity): A
   push('voice', '音色', normalizeText(asset.voiceAssetId), normalizeText(entity.voiceRef?.assetId))
   push('lora', 'LoRA', normalizeText(asset.lora?.ref), normalizeText(entity.lora?.ref))
   return diffs
+}
+
+/** 只保留用户勾选的差异字段。 */
+export function assetHubSelectedFieldDiffs(
+  diffs: AssetHubProjectAssetFieldDiff[],
+  fields: AssetHubDiffField[] | undefined,
+): AssetHubProjectAssetFieldDiff[] {
+  if (!fields?.length) return diffs
+  const selected = new Set(fields)
+  return diffs.filter((diff) => selected.has(diff.field))
+}
+
+export interface AssetHubSyncImpact {
+  episodeLabels: string[]
+  storyboardCount: number
+  planEpisodeLabels: string[]
+  summary: string
+}
+
+/**
+ * 估算同步某项目资产后会影响哪些剧集/分镜（只读，不改文档）。
+ * 出场来自 castRefs；计划来自 Episode.plan。
+ */
+export function assetHubSyncImpactSummary(doc: ProjectDoc, assetId: string): AssetHubSyncImpact {
+  const asset = doc.assets?.find((item) => item.id === assetId)
+  const variantIds = new Set((asset?.variants ?? []).map((variant) => variant.id))
+  const episodeLabels = new Set<string>()
+  const planEpisodeLabels = new Set<string>()
+  let storyboardCount = 0
+
+  const considerStoryboards = (episode: Pick<Episode, 'id' | 'index' | 'title'> | undefined, storyboards: NonNullable<ProjectDoc['storyboards']>) => {
+    for (const storyboard of storyboards) {
+      const hit = castRefsForStoryboard(storyboard).some((ref) => ref.assetId === assetId)
+      if (!hit) continue
+      storyboardCount += 1
+      const label = episodeScopeLabel(episode)
+      if (label) episodeLabels.add(label)
+    }
+  }
+
+  for (const episode of doc.episodes ?? []) {
+    const plan = episode.plan
+    if ((plan?.requiredAssetIds ?? []).includes(assetId) || (plan?.requiredVariantIds ?? []).some((id) => variantIds.has(id))) {
+      const label = episodeScopeLabel(episode)
+      if (label) planEpisodeLabels.add(label)
+    }
+    considerStoryboards(episode, episode.storyboards ?? [])
+  }
+  const currentEpisode = doc.currentEpisodeId ? (doc.episodes ?? []).find((episode) => episode.id === doc.currentEpisodeId) : undefined
+  considerStoryboards(currentEpisode, doc.storyboards ?? [])
+
+  const episodeList = [...episodeLabels]
+  const planList = [...planEpisodeLabels]
+  const parts: string[] = []
+  if (episodeList.length) parts.push(`出场剧集：${episodeList.join('、')}`)
+  if (planList.length) parts.push(`计划剧集：${planList.join('、')}`)
+  if (storyboardCount) parts.push(`${storyboardCount} 个分镜引用`)
+  return {
+    episodeLabels: episodeList,
+    storyboardCount,
+    planEpisodeLabels: planList,
+    summary: parts.length ? parts.join('；') : '当前项目暂无分镜或计划引用该资产',
+  }
 }
 
 export type AssetHubAdoptionTargetKind = 'project-asset' | 'project-variant' | 'library-entity' | 'library-variant'

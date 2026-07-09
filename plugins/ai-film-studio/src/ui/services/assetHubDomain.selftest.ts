@@ -4,6 +4,8 @@ import {
   assetHubAdoptionTargetForCanvasOutput,
   assetHubEntityVersionStatus,
   assetHubProjectAssetDiff,
+  assetHubSelectedFieldDiffs,
+  assetHubSyncImpactSummary,
   assetHubVariantScopeSummary,
 } from './assetHubDomain'
 
@@ -119,6 +121,27 @@ const aliasOrderOnly = assetHubProjectAssetDiff(
   entity,
 )
 check('alias order difference is not a diff', !aliasOrderOnly.some((diff) => diff.field === 'aliases'), JSON.stringify(aliasOrderOnly))
+
+const selectedOnly = assetHubSelectedFieldDiffs(drifted, ['name', 'prompt'])
+check('selected field diffs keep only chosen fields', selectedOnly.map((diff) => diff.field).join() === 'name,prompt', JSON.stringify(selectedOnly))
+
+const impactDoc = {
+  meta: { id: 'p1', name: '短剧A' },
+  assets: [snapshotAsset],
+  episodes: [
+    {
+      id: 'ep5',
+      index: 4,
+      title: '晚宴',
+      plan: { requiredAssetIds: ['a_hero'], requiredVariantIds: ['v-gala'] },
+      storyboards: [{ id: 'sb1', index: 0, associateAssetIds: ['a_hero'], castRefs: [{ assetId: 'a_hero', variantId: 'v-gala' }] }],
+    },
+  ],
+  storyboards: [],
+} as never
+const impact = assetHubSyncImpactSummary(impactDoc, 'a_hero')
+check('sync impact lists episode and storyboard usage', impact.episodeLabels.includes('E5 晚宴') && impact.storyboardCount === 1 && impact.planEpisodeLabels.includes('E5 晚宴'), JSON.stringify(impact))
+check('sync impact summary is readable', impact.summary.includes('出场剧集') && impact.summary.includes('分镜引用'), impact.summary)
 
 // —— assetHubAdoptionTargetForCanvasOutput ——
 const doc = {

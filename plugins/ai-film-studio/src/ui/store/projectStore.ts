@@ -40,6 +40,7 @@ import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
 import { createProjectAssetFromEntity, elementToLibraryEntity, libraryEntityToElement, projectAssetIdentityEntityId, promoteProjectAssetToEntity } from '../services/assetHub'
 import type { LibraryEntity } from '../services/assetHub'
+import { ASSET_HUB_SYNC_FIELDS, type AssetHubDiffField } from '../services/assetHubDomain'
 import { useAssetHubStore } from './assetHubStore'
 
 export interface FilmState {
@@ -101,8 +102,8 @@ export interface ProjectState {
   markAssetAsDistinctIdentity: (assetId: string, entityIds: string[]) => boolean
   /** 合并重复项目资产：把分镜/剧集计划引用从 source 迁移到 target，并删除 source 及其子资产。 */
   mergeProjectAssetInto: (sourceAssetId: string, targetAssetId: string) => boolean
-  /** 从资产中心身份同步项目快照字段，保留项目内变体作用域。 */
-  syncAssetFromLibraryEntity: (assetId: string, entity: LibraryEntity) => boolean
+  /** 从资产中心身份同步项目快照字段，保留项目内变体作用域；fields 可限制同步字段。 */
+  syncAssetFromLibraryEntity: (assetId: string, entity: LibraryEntity, fields?: AssetHubDiffField[]) => boolean
   /** 把项目里的角色/场景/物品资产保存（回流）到资产中心身份资产（复用 elementId，幂等更新）。返回是否实际发布。 */
   promoteAssetToElement: (id: string) => Promise<boolean>
   upsertStoryboard: (s: Partial<Storyboard> & { videoDesc: string }) => string
@@ -321,35 +322,38 @@ function rewriteEpisodePlanAssetRefs(episode: Episode, removedIds: Set<string>, 
   return changed
 }
 
-function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): Asset {
+function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity, fields?: AssetHubDiffField[]): Asset {
+  const selected = new Set(fields?.length ? fields : ASSET_HUB_SYNC_FIELDS)
   const snapshot = createProjectAssetFromEntity(entity, current.type)
   const currentVariants = current.variants ?? []
   const rejectedLibraryEntityIds = (current.rejectedLibraryEntityIds ?? []).filter((id) => id !== entity.id)
-  const nextVariants = (snapshot.variants ?? []).map((variant) => {
-    const existing =
-      currentVariants.find((item) => item.libraryVariantId && item.libraryVariantId === variant.libraryVariantId) ??
-      currentVariants.find((item) => normalizeAssetLookup(item.label) === normalizeAssetLookup(variant.label))
-    return {
-      ...variant,
-      id: existing?.id ?? variant.id,
-      appliesToEpisodeIds: existing?.appliesToEpisodeIds,
-      appliesToSceneIds: existing?.appliesToSceneIds,
-      appliesToStoryboardIds: existing?.appliesToStoryboardIds,
-    }
-  })
+  const nextVariants = selected.has('variants')
+    ? (snapshot.variants ?? []).map((variant) => {
+        const existing =
+          currentVariants.find((item) => item.libraryVariantId && item.libraryVariantId === variant.libraryVariantId) ??
+          currentVariants.find((item) => normalizeAssetLookup(item.label) === normalizeAssetLookup(variant.label))
+        return {
+          ...variant,
+          id: existing?.id ?? variant.id,
+          appliesToEpisodeIds: existing?.appliesToEpisodeIds,
+          appliesToSceneIds: existing?.appliesToSceneIds,
+          appliesToStoryboardIds: existing?.appliesToStoryboardIds,
+        }
+      })
+    : currentVariants
   const variantMap = nextVariants.reduce<Record<string, string>>((acc, variant) => {
     if (variant.libraryVariantId) acc[variant.id] = variant.libraryVariantId
     return acc
   }, {})
   return {
     ...current,
-    name: snapshot.name,
-    aliases: snapshot.aliases,
-    desc: snapshot.desc,
-    prompt: snapshot.prompt,
-    refImageId: snapshot.refImageId,
-    images: snapshot.images,
-    currentImageId: snapshot.currentImageId,
+    name: selected.has('name') ? snapshot.name : current.name,
+    aliases: selected.has('aliases') ? snapshot.aliases : current.aliases,
+    desc: selected.has('description') ? snapshot.desc : current.desc,
+    prompt: selected.has('prompt') ? snapshot.prompt : current.prompt,
+    refImageId: selected.has('primaryImage') ? snapshot.refImageId : current.refImageId,
+    images: selected.has('primaryImage') ? snapshot.images : current.images,
+    currentImageId: selected.has('primaryImage') ? snapshot.currentImageId : current.currentImageId,
     variants: nextVariants.length ? nextVariants : undefined,
     elementId: entity.id,
     libraryLink: {
@@ -360,12 +364,16 @@ function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity): As
       lastSyncedAt: Date.now(),
     },
     rejectedLibraryEntityIds: rejectedLibraryEntityIds.length ? rejectedLibraryEntityIds : undefined,
-    lora: snapshot.lora ?? current.lora,
-    state: snapshot.state,
-    voiceAssetId: snapshot.voiceAssetId ?? current.voiceAssetId,
-    audioBindState: snapshot.voiceAssetId ? snapshot.audioBindState ?? 'done' : current.audioBindState,
-    audioFilePath: snapshot.audioFilePath ?? current.audioFilePath,
-    audioUrl: snapshot.audioUrl ?? current.audioUrl,
+    lora: selected.has('lora') ? snapshot.lora ?? current.lora : current.lora,
+    state: selected.has('primaryImage') ? snapshot.state : current.state,
+    voiceAssetId: selected.has('voice') ? snapshot.voiceAssetId ?? current.voiceAssetId : current.voiceAssetId,
+    audioBindState: selected.has('voice')
+      ? snapshot.voiceAssetId
+        ? snapshot.audioBindState ?? 'done'
+        : current.audioBindState
+      : current.audioBindState,
+    audioFilePath: selected.has('voice') ? snapshot.audioFilePath ?? current.audioFilePath : current.audioFilePath,
+    audioUrl: selected.has('voice') ? snapshot.audioUrl ?? current.audioUrl : current.audioUrl,
   }
 }
 
@@ -1270,7 +1278,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return merged
   },
 
-  syncAssetFromLibraryEntity: (assetId, entity) => {
+  syncAssetFromLibraryEntity: (assetId, entity, fields) => {
     if (!assetId || !entity.id) return false
     if (entity.archived) {
       window.mulby?.notification?.show(`「${entity.name}」已归档，恢复后才能同步到项目资产`, 'warning')
@@ -1281,7 +1289,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const index = d.assets.findIndex((asset) => asset.id === assetId)
       const current = d.assets[index]
       if (!isMergeableProjectAsset(current)) return
-      const next = syncedProjectAssetFromEntity(current, entity)
+      const next = syncedProjectAssetFromEntity(current, entity, fields)
       d.assets[index] = next
       invalidateEpisodesUsingAsset(d, current.id)
       synced = true

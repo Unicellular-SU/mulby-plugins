@@ -618,6 +618,19 @@ interface ProjectAssetHubSettings {
 - 新增 `assetHubAdoption.selftest.ts` 并接入 `test:continuity`；GC / usage 引用计数逻辑不变。
 - `typecheck`、`test:continuity`、`build` 通过。
 
+### 第四轮提交：P4 身份库详情与版本差异
+
+- `assetHubDomain` 新增：
+  - `assetHubSelectedFieldDiffs`：按勾选字段过滤差异。
+  - `assetHubSyncImpactSummary`：估算同步会影响的出场剧集、计划剧集与分镜引用数。
+  - `ASSET_HUB_SYNC_FIELDS` / `ASSET_HUB_DIFF_FIELD_LABELS`：同步字段清单与中文标签。
+- `projectStore.syncAssetFromLibraryEntity(assetId, entity, fields?)` 支持按字段选择性同步；未传 `fields` 时保持全量同步兼容旧调用。同步仍保留项目内变体作用域，并会使相关剧集失效。
+- 身份资产「引用详情」弹窗新增「项目快照差异」：
+  - 显示每个链接项目资产的快照版本、状态标签、字段级差异（项目值 → 身份库值）。
+  - 可勾选要同步的字段；仅当前打开的工作流项目可执行同步，其他项目提示先打开。
+  - 同步前确认框展示覆盖字段与影响范围（剧集/分镜）。
+- 自测覆盖字段筛选与同步影响摘要；`typecheck`、`test:continuity`、`build` 通过。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：

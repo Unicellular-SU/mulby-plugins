@@ -35,11 +35,20 @@ import {
 import { setElementPrimaryReference, setElementVariantPrimaryReference, useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
 import { useGraphStore } from '../../store/graphStore'
+import { useProjectStore } from '../../store/projectStore'
 import { resolveAssetUrl, type AssetRecord, type AssetType } from '../../services/assetRegistry'
 import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
 import { libraryEntityToElement, preferredMediaAssetId, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
+import {
+  ASSET_HUB_DIFF_FIELD_LABELS,
+  assetHubEntityVersionStatus,
+  assetHubProjectAssetDiff,
+  assetHubSyncImpactSummary,
+  type AssetHubDiffField,
+  type AssetHubProjectAssetFieldDiff,
+} from '../../services/assetHubDomain'
 import {
   adoptionTargetLabel,
   filterAdoptions,
@@ -47,6 +56,8 @@ import {
   loadAdoptions,
   type AssetHubAdoptionRecord,
 } from '../../services/assetHubAdoption'
+import { loadIndex, loadProject } from '../../domain/persistence'
+import type { Asset, ProjectDoc } from '../../domain/types'
 import { VARIANT_KIND_OPTIONS } from '../../domain/variantKinds'
 
 function fmtBytes(n?: number): string {
@@ -981,6 +992,99 @@ function ElementLibrary() {
 
 function IdentityUsageDialog({ element, usage, onClose }: { element: ElementRef; usage: IdentityAssetUsage; onClose: () => void }) {
   const Icon = KIND_ICON[element.kind]
+  const hubEntities = useAssetHubStore((s) => s.entities)
+  const currentDoc = useProjectStore((s) => s.doc)
+  const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
+  const entity = hubEntities.find((item) => item.id === element.id)
+  const [projectDocs, setProjectDocs] = useState<ProjectDoc[]>([])
+  const [selectedFieldsByAsset, setSelectedFieldsByAsset] = useState<Record<string, AssetHubDiffField[]>>({})
+  const [busyAssetId, setBusyAssetId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const cards = await loadIndex()
+      const docs: ProjectDoc[] = []
+      for (const card of cards) {
+        if (!usage.projects.some((project) => project.projectId === card.id)) continue
+        if (currentDoc?.meta.id === card.id) {
+          docs.push(currentDoc)
+          continue
+        }
+        const doc = await loadProject(card.id)
+        if (doc) docs.push(doc)
+      }
+      if (!cancelled) setProjectDocs(docs)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [usage.projects, currentDoc])
+
+  const linkedSnapshots = useMemo(() => {
+    if (!entity) return []
+    const rows: Array<{
+      projectId: string
+      projectName: string
+      asset: Asset
+      statusLabels: string[]
+      diffs: AssetHubProjectAssetFieldDiff[]
+      impactSummary: string
+      canSync: boolean
+      isCurrentProject: boolean
+    }> = []
+    for (const doc of projectDocs) {
+      for (const asset of doc.assets ?? []) {
+        const linkedId = asset.libraryLink?.entityId || asset.elementId
+        if (linkedId !== entity.id) continue
+        if (asset.libraryLink?.syncPolicy === 'forked') continue
+        const status = assetHubEntityVersionStatus(asset, entity)
+        const diffs = assetHubProjectAssetDiff(asset, entity)
+        const isCurrentProject = currentDoc?.meta.id === doc.meta.id
+        rows.push({
+          projectId: doc.meta.id,
+          projectName: doc.meta.name,
+          asset,
+          statusLabels: status.labels,
+          diffs,
+          impactSummary: assetHubSyncImpactSummary(doc, asset.id).summary,
+          canSync: isCurrentProject && (status.canSync || diffs.length > 0),
+          isCurrentProject,
+        })
+      }
+    }
+    return rows
+  }, [projectDocs, entity, currentDoc])
+
+  const fieldsFor = (assetId: string, diffs: AssetHubProjectAssetFieldDiff[]) => {
+    const selected = selectedFieldsByAsset[assetId]
+    if (selected) return selected
+    return diffs.map((diff) => diff.field)
+  }
+
+  const toggleField = (assetId: string, field: AssetHubDiffField, diffs: AssetHubProjectAssetFieldDiff[]) => {
+    const current = fieldsFor(assetId, diffs)
+    const next = current.includes(field) ? current.filter((item) => item !== field) : [...current, field]
+    setSelectedFieldsByAsset((prev) => ({ ...prev, [assetId]: next }))
+  }
+
+  const syncSnapshot = (row: (typeof linkedSnapshots)[number]) => {
+    if (!entity || entity.archived || !row.isCurrentProject) return
+    const fields = fieldsFor(row.asset.id, row.diffs)
+    if (!fields.length) {
+      window.mulby?.notification?.show('请至少选择一个要同步的字段', 'warning')
+      return
+    }
+    if (!window.confirm(`同步「${row.asset.name}」到身份库 v${entity.version}？\n将覆盖字段：${fields.map((field) => ASSET_HUB_DIFF_FIELD_LABELS[field]).join('、')}\n影响：${row.impactSummary}`)) return
+    setBusyAssetId(row.asset.id)
+    try {
+      const ok = syncAssetFromLibraryEntity(row.asset.id, entity, fields)
+      if (ok) window.mulby?.notification?.show(`已同步「${row.asset.name}」所选字段`, 'success')
+    } finally {
+      setBusyAssetId(null)
+    }
+  }
+
   return (
     <Modal
       open
@@ -989,7 +1093,7 @@ function IdentityUsageDialog({ element, usage, onClose }: { element: ElementRef;
       }}
       size="wide"
       title="身份资产引用详情"
-      description="这些位置仍在使用该身份资产；解除引用前不要删除。"
+      description="这些位置仍在使用该身份资产；解除引用前不要删除。同步只会更新勾选字段，不会静默改写项目。"
       footer={
         <Button variant="secondary" size="sm" onClick={onClose}>
           关闭
@@ -1004,10 +1108,65 @@ function IdentityUsageDialog({ element, usage, onClose }: { element: ElementRef;
           <div>
             <div className="afs-avusage-detail__title">{element.name}</div>
             <div className="afs-avusage-detail__sub">
-              {KIND_LABEL[element.kind]} · {element.description || '无描述'}
+              {KIND_LABEL[element.kind]} · 版本 v{entity?.version ?? element.version ?? 1}
+              {element.archived ? ' · 已归档' : ''} · {element.description || '无描述'}
             </div>
           </div>
         </div>
+
+        {linkedSnapshots.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>项目快照差异</h3>
+            {linkedSnapshots.map((row) => {
+              const selected = fieldsFor(row.asset.id, row.diffs)
+              return (
+                <div key={`${row.projectId}:${row.asset.id}`} className="afs-avusage-detail__row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <span>
+                      {row.projectName} · {row.asset.name}
+                      {row.statusLabels.length ? `（${row.statusLabels.join('、')}）` : ''}
+                      {row.asset.libraryLink?.entityVersion != null ? ` · 快照 v${row.asset.libraryLink.entityVersion}` : ''}
+                    </span>
+                    {row.canSync && !entity?.archived ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busyAssetId === row.asset.id || selected.length === 0}
+                        onClick={() => syncSnapshot(row)}
+                      >
+                        {busyAssetId === row.asset.id ? '同步中…' : '同步所选字段'}
+                      </Button>
+                    ) : !row.isCurrentProject && row.diffs.length > 0 ? (
+                      <small>打开该项目后可同步</small>
+                    ) : null}
+                  </div>
+                  <small>{row.impactSummary}</small>
+                  {row.diffs.length === 0 ? (
+                    <small>项目快照与身份库当前版本一致</small>
+                  ) : (
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      {row.diffs.map((diff) => (
+                        <label key={diff.field} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                          <input
+                            type="checkbox"
+                            checked={selected.includes(diff.field)}
+                            disabled={!row.isCurrentProject || !!entity?.archived}
+                            onChange={() => toggleField(row.asset.id, diff.field, row.diffs)}
+                          />
+                          <span>
+                            <b>{diff.label}</b>
+                            <br />
+                            <small>项目：{diff.projectValue || '（空）'} → 身份库：{diff.entityValue || '（空）'}</small>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </section>
+        )}
 
         {usage.projects.length > 0 && (
           <section className="afs-avusage-detail__section">
