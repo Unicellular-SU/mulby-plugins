@@ -9,6 +9,7 @@ import { useProjectStore } from '../store/projectStore'
 import { useUiStore, type LightboxItem } from '../store/uiStore'
 import { useAssetHubStore } from '../store/assetHubStore'
 import type { LibraryEntity, LibraryEntityKind } from '../services/assetHub'
+import { appendAdoptionRecord, purposeBeforeFromMeta } from '../services/assetHubAdoption'
 
 const asStr = (x: unknown): string => (typeof x === 'string' ? x : '')
 
@@ -552,6 +553,8 @@ export function OutputView({
   const promoteCanvasImageToProjectAsset = useProjectStore((s) => s.promoteCanvasImageToProjectAsset)
   const markOutputAsProjectAsset = useGraphStore((s) => s.markOutputAsProjectAsset)
   const markOutputAsLibraryEntity = useGraphStore((s) => s.markOutputAsLibraryEntity)
+  const canvasProjectId = useGraphStore((s) => s.currentId)
+  const canvasProjectName = useGraphStore((s) => s.projectName)
   const mediaList = useMemo(() => mediaOutputsForValue(value), [value])
   const imageMediaList = useMemo(() => (mediaList ?? []).filter((it) => it.type === 'image' && !!it.assetId), [mediaList])
   const identitySaveTargets = useMemo(() => buildIdentitySaveTargets(hubEntities, imageMediaList), [hubEntities, imageMediaList])
@@ -642,6 +645,32 @@ export function OutputView({
             itemIndex
           )
         }
+        const entity = hubEntities.find((item) => item.id === selectedIdentityTarget.entityId)
+        const existingPrimary = selectedIdentityTarget.libraryVariantId
+          ? entity?.variants?.find((variant) => variant.id === selectedIdentityTarget.libraryVariantId)?.mediaRefs?.some((ref) => !!ref.assetId)
+          : entity?.mediaRefs?.some((ref) => !!ref.assetId)
+        await appendAdoptionRecord({
+          sourceSurface: 'canvas',
+          sourceProjectId: canvasProjectId || undefined,
+          sourceProjectName: canvasProjectName || undefined,
+          sourceNodeId: nodeId,
+          sourceNodeTitle: title,
+          sourcePort: port,
+          sourceItemIndex: itemIndex,
+          mediaAssetId: it.assetId,
+          localPath: typeof it.localPath === 'string' ? it.localPath : undefined,
+          url: typeof it.url === 'string' ? it.url : undefined,
+          prompt: asStr(it.meta?.prompt) || asStr(it.meta?.description) || nodePrompt || undefined,
+          model: asStr(it.meta?.model) || undefined,
+          purposeBefore: purposeBeforeFromMeta(it.meta),
+          target: {
+            kind: 'libraryEntity',
+            entityId: selectedIdentityTarget.entityId,
+            libraryVariantId: selectedIdentityTarget.libraryVariantId,
+            view,
+          },
+          action: existingPrimary ? 'overwrite' : 'save',
+        })
         await refreshAssetHub()
       }
       window.mulby?.notification?.show(
@@ -654,6 +683,10 @@ export function OutputView({
         window.mulby?.notification?.show('请先选择要写入的项目资产或项目变体', 'warning')
         return
       }
+      const projectAsset = projectDoc?.assets?.find((asset) => asset.id === selectedProjectTarget.assetId)
+      const existingRef = selectedProjectTarget.variantId
+        ? projectAsset?.variants?.find((variant) => variant.id === selectedProjectTarget.variantId)?.refImageId
+        : projectAsset?.refImageId
       const changed = promoteCanvasImageToProjectAsset({
         assetId: selectedProjectTarget.assetId,
         variantId: selectedProjectTarget.variantId,
@@ -674,6 +707,32 @@ export function OutputView({
             },
             itemIndex
           )
+        }
+        if (projectDoc?.meta.id) {
+          await appendAdoptionRecord({
+            sourceSurface: 'canvas',
+            sourceProjectId: canvasProjectId || undefined,
+            sourceProjectName: canvasProjectName || undefined,
+            sourceNodeId: nodeId,
+            sourceNodeTitle: title,
+            sourcePort: port,
+            sourceItemIndex: itemIndex,
+            mediaAssetId: it.assetId,
+            localPath: typeof it.localPath === 'string' ? it.localPath : undefined,
+            url: typeof it.url === 'string' ? it.url : undefined,
+            prompt: asStr(it.meta?.prompt) || asStr(it.meta?.description) || nodePrompt || undefined,
+            model: asStr(it.meta?.model) || undefined,
+            purposeBefore: purposeBeforeFromMeta(it.meta),
+            target: {
+              kind: 'projectAsset',
+              projectId: projectDoc.meta.id,
+              assetId: selectedProjectTarget.assetId,
+              variantId: selectedProjectTarget.variantId,
+              libraryEntityId: selectedProjectTarget.libraryEntityId,
+              libraryVariantId: selectedProjectTarget.libraryVariantId,
+            },
+            action: existingRef ? 'overwrite' : 'save',
+          })
         }
         await refreshAssetHub()
       }

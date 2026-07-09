@@ -606,6 +606,18 @@ interface ProjectAssetHubSettings {
 - 验收口径：不打开连续性抽屉也能处理常见身份候选问题；`asset_matches_unlinked_library_entity` 与 `library_entity_alias_conflict` 有行级处理入口。
 - 本轮不新增持久化字段；`typecheck`、`test:continuity`、`build` 通过。
 
+### 第三轮提交：P3 画布采纳记录与采纳箱
+
+- 新增 `src/ui/services/assetHubAdoption.ts`，KV key 为 `assetHub:adoptions`：
+  - `AssetHubAdoptionRecord` 按 V2 方案落地，记录来源画布工程/节点/端口、媒体、prompt/model、采纳前 purpose、目标（项目资产或身份资产）、动作（save/overwrite）与状态（applied/superseded/rejected）。
+  - `appendAdoptionRecord` 写入前会把同一媒体+同一目标的旧 applied 记录标为 `superseded`。
+  - 提供 `listAdoptionsByMedia` / `filterAdoptions` / `adoptionTargetLabel` 供 UI 与媒体详情复用。
+- 画布 Inspector 的「保存到身份资产」「保存到项目」成功后写入采纳记录；覆盖已有主图/形态图时记为 `overwrite`，否则 `save`。
+- 资产中心新增「采纳箱」页签：按全部/已采纳/已覆盖/来自候选/已拒绝筛选，支持搜索节点、目标与提示词。
+- 媒体引用详情弹窗增加「采纳来源」区块，可追溯该媒体为何进入项目或身份库。
+- 新增 `assetHubAdoption.selftest.ts` 并接入 `test:continuity`；GC / usage 引用计数逻辑不变。
+- `typecheck`、`test:continuity`、`build` 通过。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：

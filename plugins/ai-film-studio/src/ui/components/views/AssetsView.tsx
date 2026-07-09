@@ -30,6 +30,7 @@ import {
   Info,
   Archive,
   RotateCcw,
+  BookmarkPlus,
 } from 'lucide-react'
 import { setElementPrimaryReference, setElementVariantPrimaryReference, useAssetStore, type ElementKind, type ElementRef } from '../../store/assetStore'
 import { useAssetHubStore } from '../../store/assetHubStore'
@@ -39,6 +40,13 @@ import { loadAssetUrl } from '../../services/assets'
 import { useMediaUrl, useInView } from '../../services/mediaUrl'
 import { SnippetLibrary } from './PromptLibrary'
 import { libraryEntityToElement, preferredMediaAssetId, type IdentityAssetUsage, type MediaAssetUsage } from '../../services/assetHub'
+import {
+  adoptionTargetLabel,
+  filterAdoptions,
+  listAdoptionsByMedia,
+  loadAdoptions,
+  type AssetHubAdoptionRecord,
+} from '../../services/assetHubAdoption'
 import { VARIANT_KIND_OPTIONS } from '../../domain/variantKinds'
 
 function fmtBytes(n?: number): string {
@@ -175,7 +183,7 @@ function commaList(items: string[]): string {
 }
 
 export default function AssetsView() {
-  const [tab, setTab] = useState<'assets' | 'elements' | 'prompts'>('assets')
+  const [tab, setTab] = useState<'assets' | 'elements' | 'adoptions' | 'prompts'>('assets')
   return (
     <div className="afs-surface">
       <div className="afs-surface__head afs-avhead">
@@ -183,15 +191,16 @@ export default function AssetsView() {
         <Tabs
           ariaLabel="资产中心视图"
           value={tab}
-          onChange={(v) => setTab(v as 'assets' | 'elements' | 'prompts')}
+          onChange={(v) => setTab(v as 'assets' | 'elements' | 'adoptions' | 'prompts')}
           tabs={[
             { value: 'assets', label: '媒体文件' },
             { value: 'elements', label: '身份资产' },
+            { value: 'adoptions', label: '采纳箱' },
             { value: 'prompts', label: '提示词' },
           ]}
         />
       </div>
-      {tab === 'assets' ? <AssetGallery /> : tab === 'elements' ? <ElementLibrary /> : <SnippetLibrary />}
+      {tab === 'assets' ? <AssetGallery /> : tab === 'elements' ? <ElementLibrary /> : tab === 'adoptions' ? <AdoptionInbox /> : <SnippetLibrary />}
     </div>
   )
 }
@@ -498,6 +507,16 @@ function AssetGallery() {
 }
 
 function MediaUsageDialog({ asset, usage, onClose }: { asset: AssetRecord; usage: MediaAssetUsage; onClose: () => void }) {
+  const [adoptions, setAdoptions] = useState<AssetHubAdoptionRecord[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void loadAdoptions().then((records) => {
+      if (!cancelled) setAdoptions(listAdoptionsByMedia(records, asset.id))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [asset.id])
   return (
     <Modal
       open
@@ -525,6 +544,18 @@ function MediaUsageDialog({ asset, usage, onClose }: { asset: AssetRecord; usage
             </div>
           </div>
         </div>
+
+        {adoptions.length > 0 && (
+          <section className="afs-avusage-detail__section">
+            <h3>采纳来源</h3>
+            {adoptions.slice(0, 8).map((record) => (
+              <div key={record.id} className="afs-avusage-detail__row">
+                <span>{adoptionRecordSummary(record)}</span>
+                <small>{adoptionRecordDetail(record)}</small>
+              </div>
+            ))}
+          </section>
+        )}
 
         {usage.projects.length > 0 && (
           <section className="afs-avusage-detail__section">
@@ -575,6 +606,158 @@ function MediaUsageDialog({ asset, usage, onClose }: { asset: AssetRecord; usage
         )}
       </div>
     </Modal>
+  )
+}
+
+function adoptionStateLabel(state: AssetHubAdoptionRecord['state']): string {
+  if (state === 'applied') return '已采纳'
+  if (state === 'superseded') return '已覆盖'
+  return '已拒绝'
+}
+
+function adoptionActionLabel(action: AssetHubAdoptionRecord['action']): string {
+  if (action === 'overwrite') return '覆盖写入'
+  if (action === 'link-only') return '仅关联'
+  return '新建写入'
+}
+
+function adoptionRecordSummary(record: AssetHubAdoptionRecord): string {
+  const surface = record.sourceSurface === 'canvas' ? '画布' : '工作流'
+  const project = record.sourceProjectName || record.sourceProjectId || '未命名来源'
+  return `${surface} · ${project} → ${adoptionTargetLabel(record.target)}`
+}
+
+function adoptionRecordDetail(record: AssetHubAdoptionRecord): string {
+  return [
+    adoptionStateLabel(record.state),
+    adoptionActionLabel(record.action),
+    record.sourceNodeTitle || record.sourceNodeId,
+    record.sourcePort ? `端口 ${record.sourcePort}` : '',
+    typeof record.sourceItemIndex === 'number' ? `#${record.sourceItemIndex + 1}` : '',
+    record.purposeBefore ? `原状态 ${record.purposeBefore}` : '',
+    record.model,
+    record.prompt ? `提示词：${record.prompt.slice(0, 80)}` : '',
+    new Date(record.createdAt).toLocaleString(),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+function AdoptionInbox() {
+  const [records, setRecords] = useState<AssetHubAdoptionRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const [filter, setFilter] = useState<'all' | 'applied' | 'superseded' | 'rejected' | 'candidate'>('all')
+  const [query, setQuery] = useState('')
+
+  const refresh = async () => {
+    setLoading(true)
+    try {
+      setRecords(await loadAdoptions())
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const filtered = useMemo(() => {
+    const base = filterAdoptions(records, filter)
+    const key = query.trim().toLowerCase()
+    if (!key) return base
+    return base.filter((record) =>
+      [
+        record.sourceProjectName,
+        record.sourceProjectId,
+        record.sourceNodeTitle,
+        record.sourceNodeId,
+        record.sourcePort,
+        record.mediaAssetId,
+        record.prompt,
+        record.model,
+        adoptionTargetLabel(record.target),
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(key)),
+    )
+  }, [records, filter, query])
+
+  const counts = useMemo(
+    () => ({
+      all: records.length,
+      applied: filterAdoptions(records, 'applied').length,
+      superseded: filterAdoptions(records, 'superseded').length,
+      rejected: filterAdoptions(records, 'rejected').length,
+      candidate: filterAdoptions(records, 'candidate').length,
+    }),
+    [records],
+  )
+
+  return (
+    <div className="afs-avcol">
+      <div className="afs-avtoolbar">
+        <Segmented
+          ariaLabel="采纳记录筛选"
+          size="sm"
+          value={filter}
+          onChange={(value) => setFilter(value as typeof filter)}
+          options={[
+            { value: 'all', label: `全部 ${counts.all}` },
+            { value: 'applied', label: `已采纳 ${counts.applied}` },
+            { value: 'superseded', label: `已覆盖 ${counts.superseded}` },
+            { value: 'candidate', label: `来自候选 ${counts.candidate}` },
+            { value: 'rejected', label: `已拒绝 ${counts.rejected}` },
+          ]}
+        />
+        <div className="afs-avsearch">
+          <Search size={13} className="afs-avsearch__icon" aria-hidden />
+          <input
+            type="search"
+            className="afs-avsearch__input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索节点/目标/提示词"
+            aria-label="搜索采纳记录"
+          />
+          {query && (
+            <button className="afs-avsearch__clear" onClick={() => setQuery('')} aria-label="清除搜索" type="button">
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <span className="afs-avtoolbar__spacer" />
+        <Button variant="secondary" size="sm" onClick={() => void refresh()}>
+          刷新
+        </Button>
+      </div>
+      <div className="afs-avscroll">
+        {loading ? (
+          <div className="afs-avtiles" role="status" aria-label="加载中…">
+            <Skeleton count={6} height={120} radius={12} />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={BookmarkPlus} title="暂无采纳记录" description="画布输出保存到项目资产或身份资产后，会在这里留下可追溯来源。" />
+        ) : (
+          <div className="afs-avtiles">
+            {filtered.map((record) => (
+              <div key={record.id} className="afs-avcard">
+                <div className="afs-avcard__name" title={adoptionRecordSummary(record)}>
+                  {adoptionRecordSummary(record)}
+                </div>
+                <div className="afs-avcard__meta">
+                  {adoptionStateLabel(record.state)} · {adoptionActionLabel(record.action)}
+                  {record.mediaAssetId ? ` · 媒体 ${record.mediaAssetId}` : ''}
+                </div>
+                <div className="afs-avcard__usage is-linked" title={adoptionRecordDetail(record)}>
+                  {adoptionRecordDetail(record)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
