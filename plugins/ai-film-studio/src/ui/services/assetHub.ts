@@ -3,9 +3,14 @@ import { loadIndex, loadProject, newId } from '../domain/persistence'
 import { castRefsForStoryboard } from '../domain/castRefs'
 import type { ElementKind, ElementMediaRef, ElementRef, ElementVariant } from '../store/assetStore'
 import { loadBoards, loadRegistry, storageUsage, type AssetRecord, type Board } from './assetRegistry'
+import {
+  persistableLibraryEntity,
+  readElementsLibraryRaw,
+  readEntitiesV2Raw,
+  saveLibraryEntities,
+} from './assetHubEntities'
 
 const PLUGIN_ID = 'ai-film-studio'
-const KEY_ELEMENTS = 'elements:library'
 const KEY_CANVAS_INDEX = 'projects:index'
 const KEY_SNAPSHOTS = 'snapshots'
 const canvasProjectKey = (id: string) => `project:${id}`
@@ -982,16 +987,38 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
   return usages
 }
 
+/** 读取身份库：优先 V2；缺失时从 elements:library 一次性迁移并双写。 */
+export async function loadLibraryEntitiesDual(): Promise<{ entities: LibraryEntity[]; elements: ElementRef[]; migrated: boolean }> {
+  const [v2, legacyElements] = await Promise.all([readEntitiesV2Raw(), readElementsLibraryRaw()])
+  if (v2.length) {
+    const elements = v2.map(libraryEntityToElement)
+    return { entities: v2, elements, migrated: false }
+  }
+  if (legacyElements.length) {
+    const entities = legacyElements.map((element) => persistableLibraryEntity(elementToLibraryEntity(element)))
+    const elements = entities.map(libraryEntityToElement)
+    await saveLibraryEntities(entities, elements)
+    return { entities, elements, migrated: true }
+  }
+  return { entities: [], elements: [], migrated: false }
+}
+
 export async function loadAssetHub(): Promise<AssetHubSnapshot> {
-  const [mediaAssets, boards, usage, elements] = await Promise.all([
+  const [mediaAssets, boards, usage, library] = await Promise.all([
     loadRegistry(),
     loadBoards(),
     storageUsage(),
-    kvGet<ElementRef[]>(KEY_ELEMENTS),
+    loadLibraryEntitiesDual(),
   ])
-  const normalizedElements = Array.isArray(elements) ? elements : []
-  const entities = normalizedElements.map(elementToLibraryEntity)
-  const usageByEntity = await loadIdentityAssetUsages(normalizedElements)
-  const usageByMedia = await loadMediaAssetUsages(entities)
-  return { mediaAssets, boards, storageUsage: usage, elements: normalizedElements, entities, usageByEntity, usageByMedia }
+  const usageByEntity = await loadIdentityAssetUsages(library.elements)
+  const usageByMedia = await loadMediaAssetUsages(library.entities)
+  return {
+    mediaAssets,
+    boards,
+    storageUsage: usage,
+    elements: library.elements,
+    entities: library.entities,
+    usageByEntity,
+    usageByMedia,
+  }
 }

@@ -643,6 +643,17 @@ interface ProjectAssetHubSettings {
 - 新增 `assetHubCollections.selftest.ts` 并接入 `test:continuity`；不改 `ProjectDoc` / 生成链路。
 - `typecheck`、`test:continuity`、`build` 通过。
 
+### 第六轮提交：P6 身份实体正式持久层
+
+- 新增 `src/ui/services/assetHubEntities.ts`：
+  - 权威 KV：`assetHub:entities:v2`（`LibraryEntity[]`）。
+  - 兼容 KV：继续双写 `elements:library`（`ElementRef[]`）。
+  - `loadLibraryEntitiesDual`：优先读 V2；若为空且旧库有数据，一次性迁移并双写。
+  - `persistableLibraryEntity` / `normalizeLibraryEntity`：落盘前剥离 `legacyElement`，规范化字段。
+- `assetHub.loadAssetHub` 与 `assetStore` 的 `load` / `saveElement` / `removeElement` / `promoteCanvasOutputs` 全部走双写路径。
+- 新增 `assetHubEntities.selftest.ts` 并接入 `test:continuity`；不删除旧 Element 读取能力，旧项目/画布仍可打开。
+- `typecheck`、`test:continuity`、`build` 通过。
+
 ## 最小安全落地线
 
 任何下一步实现都应满足：

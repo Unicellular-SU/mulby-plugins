@@ -1,7 +1,7 @@
 /**
  * 素材库 + 角色/场景 Elements 库（全局，跨工程复用）。
  * - 素材：多模态（图片/视频/音频），由 assetRegistry 提供索引、上传、GC。
- * - Elements：角色/场景定义一次、跨工程复用（LTX Elements 式），存 `elements:library`。
+ * - Elements：角色/场景定义一次、跨工程复用；权威 KV 为 `assetHub:entities:v2`，并双写 `elements:library`。
  */
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
@@ -21,9 +21,15 @@ import {
   type AssetRecord,
   type Board,
 } from '../services/assetRegistry'
+import { elementToLibraryEntity, libraryEntityToElement, loadLibraryEntitiesDual } from '../services/assetHub'
+import { persistableLibraryEntity, saveLibraryEntities } from '../services/assetHubEntities'
 
-const PLUGIN_ID = 'ai-film-studio'
-const KEY_ELEMENTS = 'elements:library'
+async function persistElements(list: ElementRef[]): Promise<ElementRef[]> {
+  const entities = list.map((element) => persistableLibraryEntity(elementToLibraryEntity(element)))
+  const synced = entities.map(libraryEntityToElement)
+  await saveLibraryEntities(entities, synced)
+  return synced
+}
 
 export type ElementKind = 'character' | 'scene' | 'prop'
 export type CanvasOutputViewRole = 'primary' | 'front' | 'side' | 'back' | 'concept' | 'reference'
@@ -89,22 +95,6 @@ export interface CanvasOutputPromotionTarget {
   libraryVariantId?: string
   variantLabel?: string
   view: CanvasOutputViewRole
-}
-
-async function kvGet<T>(key: string): Promise<T | null> {
-  try {
-    const v = await window.mulby?.storage?.get(key, PLUGIN_ID)
-    return (v as T) ?? null
-  } catch {
-    return null
-  }
-}
-async function kvSet(key: string, value: unknown): Promise<void> {
-  try {
-    await window.mulby?.storage?.set(key, value, PLUGIN_ID)
-  } catch {
-    // 忽略
-  }
 }
 
 const isElementViewRole = (view: CanvasOutputViewRole): view is 'front' | 'side' | 'back' =>
@@ -202,13 +192,13 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   busy: false,
 
   load: async () => {
-    const [assets, elements, usage, boards] = await Promise.all([
+    const [assets, library, usage, boards] = await Promise.all([
       backfillAll(), // 回填画布工程 + 工作流项目生成素材 + 返回完整注册表
-      kvGet<ElementRef[]>(KEY_ELEMENTS),
+      loadLibraryEntitiesDual(),
       storageUsage(),
       loadBoards(),
     ])
-    set({ assets, boards, elements: Array.isArray(elements) ? elements : [], usage, loaded: true })
+    set({ assets, boards, elements: library.elements, usage, loaded: true })
   },
 
   createBoard: async (name) => {
@@ -280,15 +270,16 @@ export const useAssetStore = create<AssetState>((set, get) => ({
       } as ElementRef
       list.push(saved)
     }
-    set({ elements: list })
-    await kvSet(KEY_ELEMENTS, list)
-    return saved
+    const synced = await persistElements(list)
+    const syncedSaved = synced.find((item) => item.id === saved.id) ?? saved
+    set({ elements: synced })
+    return syncedSaved
   },
 
   removeElement: async (id) => {
     const list = get().elements.filter((e) => e.id !== id)
-    set({ elements: list })
-    await kvSet(KEY_ELEMENTS, list)
+    const synced = await persistElements(list)
+    set({ elements: synced })
   },
 
   promoteCanvasOutputs: async (items, target) => {
@@ -309,8 +300,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     }
     if (changed) {
       list[idx] = nextElement
-      set({ elements: list })
-      await kvSet(KEY_ELEMENTS, list)
+      const synced = await persistElements(list)
+      set({ elements: synced })
     }
     return changed
   },
