@@ -1,4 +1,4 @@
-import { Music } from 'lucide-react'
+import { Music, Maximize2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Modal } from './Modal'
@@ -49,12 +49,15 @@ export function Gallery() {
       ) : (
         <div className="p-3 grid grid-cols-4 gap-2 max-h-[64vh] overflow-auto ace-scroll">
           {items.map((it) => (
-            <button
+            // 单击=定位跳卡（会关闭作品库）；预览走右上角悬停按钮（独立入口）——此前 onClick 先 close 致 dblclick 永不触发
+            <div
               key={it.cardId}
+              role="button"
+              tabIndex={0}
               onClick={() => focus(it)}
-              onDoubleClick={() => preview(it)}
-              title={`${it.title} · ${it.boardName}（单击定位 / 双击预览）`}
-              className="group relative aspect-square rounded-lg overflow-hidden border bg-black/5 dark:bg-white/5"
+              onKeyDown={(e) => { if (e.key === 'Enter') focus(it) }}
+              title={`${it.title} · ${it.boardName}（点击定位；右上角放大预览）`}
+              className="group relative aspect-square rounded-lg overflow-hidden border bg-black/5 dark:bg-white/5 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
               style={{ borderColor: 'var(--ace-border)' }}
             >
               {it.kind === 'video' ? (
@@ -64,8 +67,17 @@ export function Gallery() {
               ) : (
                 <img src={it.url} className="w-full h-full object-cover" draggable={false} alt="" />
               )}
-              <span className="absolute bottom-0 inset-x-0 text-[10px] text-white bg-black/55 truncate px-1 py-0.5">{it.title}</span>
-            </button>
+              {it.kind !== 'audio' && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); preview(it) }}
+                  title="预览"
+                  className="absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-md bg-black/55 text-white opacity-0 group-hover:opacity-100 hover:bg-black/75 transition-opacity"
+                >
+                  <Maximize2 size={13} />
+                </button>
+              )}
+              <span className="absolute bottom-0 inset-x-0 text-[10px] text-white bg-black/55 truncate px-1 py-0.5 pointer-events-none">{it.title}</span>
+            </div>
           ))}
         </div>
       )}

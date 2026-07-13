@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：34/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：35/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -194,7 +194,7 @@
   - 位置：`src/ui/components/Gallery.tsx:24`；对照 `generate.ts:148`（流式把 preview dataURL 写 assetUrl）
   - 修法：过滤条件加 status==='done'；audio 卡纳入收录（波形占位图渲染）。
 
-- [ ] **C17 [P2/bug] 作品库「双击预览」不可达：单击 focus() 即 close()，dblclick 永不触发**
+- [x] **C17 [P2/bug] 作品库「双击预览」不可达：单击 focus() 即 close()，dblclick 永不触发**（✓ 2026-07-14 改为独立预览入口：缩略图右上角悬停放大按钮(Maximize2)触发 preview 并 stopPropagation，单击卡片仍=定位跳卡（会关作品库）。删除永不触发的 onDoubleClick。外层 button→div(role=button,tabIndex,Enter 定位,focus-visible ring) 以避免 button 嵌 button 非法结构。audio 无预览按钮（单击跳卡播放）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/Gallery.tsx:42,54-57`
   - 修法：预览改独立入口（缩略图角上放大按钮），或单击仅选中+「定位」按钮。
 
