@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDialog } from '../store/dialogStore'
+import { isImeComposing } from '../util'
 import { Modal } from './Modal'
 import { Button } from './ui'
 
@@ -45,6 +46,7 @@ export function DialogHost() {
             value={val}
             onChange={(e) => setVal(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return // 组合期回车=确认候选，别当对话框提交
               if (e.key === 'Enter') close(val)
             }}
             placeholder={current.placeholder}

@@ -4,7 +4,7 @@ import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
-import { uid } from '../util'
+import { uid, isImeComposing } from '../util'
 
 // 3D 导演台 v4：Outliner + Inspector + 模型导入 + 缩放 + 拖拽摆姿 + 镜头/机位/生成。
 // three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
@@ -1007,6 +1007,7 @@ function Inner() {
                   onChange={(e) => setEditName(e.target.value)}
                   onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
                     if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
                     else if (e.key === 'Escape') setEditId(null)
                   }}

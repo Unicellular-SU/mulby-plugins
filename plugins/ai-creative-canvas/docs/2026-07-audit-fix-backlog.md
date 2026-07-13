@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：23/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：24/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -149,7 +149,7 @@
   - 位置：`src/ui/services/generate.ts:86`；未设防入口 `MediaToolbox.tsx:38`、`NodeEditor.tsx:143`
   - 修法：入口加守卫（running/queued 时 return，或语义化为先 stopCard 再重跑）；aborters/videoAborts 值带 runId，finally 仅在自己的 runId 在位时删除。先决：C4（共用 runId 机制）。
 
-- [ ] **C6 [P2/bug] 全库无 IME isComposing 防护：中文组合期 Enter/Esc 误提交/误关闭**
+- [x] **C6 [P2/bug] 全库无 IME isComposing 防护：中文组合期 Enter/Esc 误提交/误关闭**（✓ 2026-07-14 util.ts 新增 `isImeComposing(e)`（兼容 React 合成事件的 nativeEvent.isComposing 与原生 window 事件的 isComposing，含 keyCode===229 旧浏览器兜底），6 处统一加防护：GroupView 组重命名、DirectorStage 对象重命名、DialogHost prompt 提交、NodeEditor Ctrl+Enter 生成的 onKeyDown 开头 return；useEscClose 与共享 Modal 的 window Escape 监听加 `&& !isImeComposing(e)`。审查点名 3 处，实查补足到 6 处（含 Modal shell 的 Esc、NodeEditor、DirectorStage）。typecheck+UI 构建+全套件全绿）
   - 位置：`GroupView.tsx:149-151`、`DialogHost.tsx:48`、`hooks.ts:9`（useEscClose）
   - 修法：这些 onKeyDown 开头加 `if (e.nativeEvent.isComposing || e.keyCode === 229) return`；useEscClose 的 window 监听同样检查。
 

@@ -7,6 +7,7 @@ import { saveGroupAsTemplate } from '../services/templates'
 import { stageEl } from './stageEl'
 import { screenToWorld } from './viewport'
 import { isCardInsideGroup, type Card } from '../types'
+import { isImeComposing } from '../util'
 
 const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ef4444', '#64748b']
 
@@ -162,6 +163,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitEdit}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return // 拼音组合期回车=确认候选，别当提交
               if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
               else if (e.key === 'Escape') { e.preventDefault(); setEditing(false) } // Esc 取消不提交
             }}

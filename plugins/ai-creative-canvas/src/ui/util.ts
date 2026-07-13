@@ -13,6 +13,13 @@ export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
 }
 
+// IME 组合期判定：中文/日文等输入法拼字未上屏时，Enter/Escape 等 keydown 会先于「确认候选词」触发，
+// 若不忽略会把半截拼音提交/把输入框关掉。React 合成事件读 nativeEvent.isComposing；229 为旧浏览器兜底。
+// 兼容原生 window KeyboardEvent（直接带 isComposing）与 React 合成事件（isComposing 在 nativeEvent 上）。
+export function isImeComposing(e: { nativeEvent?: { isComposing?: boolean }; isComposing?: boolean; keyCode?: number }): boolean {
+  return !!(e.nativeEvent?.isComposing ?? e.isComposing) || e.keyCode === 229
+}
+
 export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T & { cancel: () => void } {
   let t: ReturnType<typeof setTimeout> | null = null
   const wrapped = ((...args: any[]) => {

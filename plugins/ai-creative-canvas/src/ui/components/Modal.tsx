@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Z } from '../zlayers'
+import { isImeComposing } from '../util'
 
 // 统一模态外壳：玻璃对话框 + 遮罩模糊 + ESC/点遮罩关闭 + 进场动画
 export function Modal({
@@ -19,7 +20,7 @@ export function Modal({
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !isImeComposing(e)) onClose() // 组合期 Esc = 取消 IME 候选，不关模态
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

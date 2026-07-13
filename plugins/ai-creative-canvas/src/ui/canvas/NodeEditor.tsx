@@ -9,7 +9,7 @@ import { shotToVideo } from '../services/storyboard'
 import { enhancePrompt, describeImage } from '../services/promptTools'
 import { PROMPT_PRESETS, PRESET_GROUPS, type Preset } from '../services/presets'
 import { saveBase64 } from '../services/media'
-import { arrayBufferToBase64, uid } from '../util'
+import { arrayBufferToBase64, uid, isImeComposing } from '../util'
 import { worldToScreen } from './viewport'
 import { stageEl } from './stageEl'
 import { ModelPicker } from '../components/ModelPicker'
@@ -342,6 +342,7 @@ export function NodeEditor() {
                   value={card.prompt}
                   onChange={onPrompt}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return // 组合期不触发生成（避免半截拼音入提示词）
                     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && generatable && !busy) {
                       e.preventDefault()
                       generateCard(card.id)
