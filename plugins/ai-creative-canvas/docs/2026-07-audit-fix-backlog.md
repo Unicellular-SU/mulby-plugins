@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：21/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：22/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -141,7 +141,7 @@
   - 修法：copySelection 按 parentId 递归收集选中组全部后代；paste 仿 insertTemplate（graphStore.ts:390-399）用 idMap 重映射并复制两端都在剪贴板内的 edges。
   - 验证：编组 5 卡→复制→粘贴，成员+内部连线齐全。
 
-- [ ] **C4 [P1/bug] 生成取消不贯穿：requestId 未到达 / images.edit / TTS 三条路径点停止后照跑，卡片几十秒后「复活」成 done**
+- [x] **C4 [P1/bug] 生成取消不贯穿：requestId 未到达 / images.edit / TTS 三条路径点停止后照跑，卡片几十秒后「复活」成 done**（✓ 2026-07-14 引入 runId 机制：generateCard 起跑分配 `runId=++runSeq` 存 `runIds<cardId,runId>`，生成体内所有卡片写入经 `commit(patch)`（仅当 `isCurrentRun` 才写）；图/视频/TTS 各在结果落盘前加 `if(!isCurrentRun) throw AbortError`（作废结果、不产孤儿媒体）。stopCard 首行 `runIds.delete(cardId)` 使当前 run 失效——三条无法真正中止底层的路径，其后续 done 写入全部落空，卡片停在 idle 不复活。catch 改用 commit 门控（不覆盖已停/新状态）；finally 仅在 isCurrentRun 时清 aborters/videoAborts/runIds（顺带利好 C5，避免误删新 run 的取消器）。typecheck+UI 构建+全套件全绿。为 C5 预置了 runId 基础）
   - 位置：`src/ui/services/generate.ts:335-359`（stopCard）、`aiText.ts:44-47`、`aiImage.ts:121-142`、`engine.ts:280-298`
   - 修法：每次生成分配 runId（cardId→runId map），stopCard 使其失效；**所有成功写回前校验 runId 仍有效**，无效则丢弃结果不写卡；images.edit/runTts 至少做到「结果作废」级取消。
 
