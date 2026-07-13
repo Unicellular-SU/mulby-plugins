@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEven
 import { Sparkles } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
+import { useDialog } from '../store/dialogStore'
 import { CardView } from './CardView'
 import { CardPlaceholder } from './CardPlaceholder'
 import { GroupView } from './GroupView'
@@ -498,7 +499,8 @@ export function CanvasStage() {
       return tag === 'input' || tag === 'textarea' || !!el?.isContentEditable
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (useUi.getState().studioCardId) return // 剪辑工作台打开时，画布全局快捷键全部让位（防 Del 误删画布卡等）
+      // 任意全屏模态/对话框打开时，画布全局快捷键全部让位（防 Del/Ctrl+A/V 误伤背后选中的卡片）。
+      if (useUi.getState().anyModalOpen() || useDialog.getState().current) return
       if (e.code === 'Space' && !isTyping()) {
         spaceRef.current = true
         if (inter.current.mode === 'idle') setCursor('grab')

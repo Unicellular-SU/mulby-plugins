@@ -59,9 +59,12 @@ interface UiState {
   setAnnotTool: (t: 'pen' | 'arrow' | 'rect' | 'text' | null) => void
   annotColor: string
   setAnnotColor: (c: string) => void
+  // 是否有任意全屏模态/预览开着（画布全局快捷键据此让位，避免 Del/Ctrl+A 等误伤背后卡片）。
+  // 单点维护：任何新增全屏模态在此登记其可见性来源。不含 dialogStore（跨 store，调用方另判）。
+  anyModalOpen: () => boolean
 }
 
-export const useUi = create<UiState>((set) => ({
+export const useUi = create<UiState>((set, get) => ({
   showGrid: true,
   showMinimap: true,
   theme: 'light',
@@ -134,5 +137,24 @@ export const useUi = create<UiState>((set) => ({
   annotTool: null,
   setAnnotTool: (annotTool) => set({ annotTool }),
   annotColor: '#ef4444',
-  setAnnotColor: (annotColor) => set({ annotColor })
+  setAnnotColor: (annotColor) => set({ annotColor }),
+  anyModalOpen: () => {
+    const s = get()
+    return !!(
+      s.showProviderSettings ||
+      s.showCompose ||
+      s.showTimeline ||
+      s.showTemplates ||
+      s.showTaskCenter ||
+      s.showGallery ||
+      s.showProjectLibrary ||
+      s.showDirector ||
+      s.studioCardId ||
+      s.storyboardCardId ||
+      s.maskCardId ||
+      s.trimCardId ||
+      s.panoCardId ||
+      s.preview
+    )
+  }
 }))

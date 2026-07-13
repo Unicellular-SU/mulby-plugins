@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：19/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：20/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -132,7 +132,7 @@
   - 修法：resize 在首次越过阈值时 pushHistory 一次（中间态照走 updateCard）；重命名/便签 blur 提交且有变时 push；折叠/换色各 push；或给 updateCard 加 options.history 由调用方声明，保证所有改 cards 的入口要么入栈要么明确豁免（fitAspect、生成进度）。
   - 验证：补 graphStore 单测：resize→undo 回到原尺寸；undo→resize→redo 不覆盖。
 
-- [ ] **C2 [P1/bug] 弹窗打开时画布快捷键仍生效：作品库/工程库下按 Delete 静默删卡**
+- [x] **C2 [P1/bug] 弹窗打开时画布快捷键仍生效：作品库/工程库下按 Delete 静默删卡**（✓ 2026-07-14 uiStore 加统一 `anyModalOpen()`（覆盖全部 13 个全屏模态/预览来源：showProviderSettings/Compose/Timeline/Templates/TaskCenter/Gallery/ProjectLibrary/Director + studioCardId/storyboardCardId/maskCardId/trimCardId/panoCardId + preview lightbox），单点维护、新模态在此登记。CanvasStage keydown 入口从单一 studioCardId 豁免改为 `anyModalOpen() || useDialog.current` 全豁免。核实过所有模态可见性均源自 uiStore/dialogStore，枚举无遗漏。为 C7（模态栈/ESC 层级）预置了共用状态。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/canvas/CanvasStage.tsx:501`（只豁免 studioCardId）
   - 修法：keydown 入口统一判断「任意模态开着」（showGallery/showProjectLibrary/showProviderSettings/showTemplates/dialogStore.current…或模态计数器）即 return。
 
