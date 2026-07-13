@@ -3,6 +3,9 @@ import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { KIND_ACCENT, KIND_LABEL, type Card } from '../types'
 import { stopCard, generateCard, canGenerate } from '../services/generate'
+import { focusCard } from '../focusCard'
+
+interface Entry { card: Card; boardId: string; boardName: string }
 
 function statusText(c: Card, queueIdx: number): string {
   if (c.status === 'queued') return `排队中 · 第 ${queueIdx + 1} 位`
@@ -11,15 +14,19 @@ function statusText(c: Card, queueIdx: number): string {
   return ''
 }
 
-function Row({ card, queueIdx }: { card: Card; queueIdx: number }) {
+function Row({ entry, queueIdx, foreign }: { entry: Entry; queueIdx: number; foreign: boolean }) {
+  const { card, boardId, boardName } = entry
   const accent = KIND_ACCENT[card.kind]
   const active = card.status === 'running' || card.status === 'queued'
-  const jump = () => useGraph.getState().setSelection([card.id])
+  const jump = () => focusCard(boardId, card.id) // 跨画布定位：切画布 + 居中 + 选中，而非只改选中态
   return (
     <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10">
       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: accent }} />
       <button onClick={jump} className="flex-1 min-w-0 text-left" title="定位到该卡片">
-        <div className="text-xs font-medium truncate">{card.title || KIND_LABEL[card.kind]}</div>
+        <div className="text-xs font-medium truncate">
+          {card.title || KIND_LABEL[card.kind]}
+          {foreign && <span className="ml-1 opacity-40 font-normal">· {boardName}</span>}
+        </div>
         <div className={`text-[10px] truncate ${card.status === 'error' ? 'text-red-500' : 'opacity-60'}`}>{statusText(card, queueIdx)}</div>
         {card.status === 'running' && (
           <div className="mt-1 h-1 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
@@ -42,17 +49,26 @@ function Row({ card, queueIdx }: { card: Card; queueIdx: number }) {
   )
 }
 
-// 任务中心：从卡片状态派生的进行中 / 失败列表（进度、取消、重试、定位）
+// 任务中心：从**全部画布**卡片状态派生的进行中 / 失败列表（进度、取消、重试、跨画布定位）。
+// 扫全部画布而非仅活动画布——否则与顶栏全局计数、跨画布续跑脱节（非活动画布的任务看不到也管不了）。
 export function TaskCenter() {
   const show = useUi((s) => s.showTaskCenter)
-  const board = useGraph((s) => s.getActiveBoard())
+  const project = useGraph((s) => s.project)
   const notifyDone = useUi((s) => s.notifyDone)
   if (!show) return null
 
-  const cards = Object.values(board.cards)
-  const running = cards.filter((c) => c.status === 'running')
-  const queued = cards.filter((c) => c.status === 'queued')
-  const failed = cards.filter((c) => c.status === 'error')
+  const activeBoardId = project.activeBoardId
+  const running: Entry[] = []
+  const queued: Entry[] = []
+  const failed: Entry[] = []
+  for (const b of project.boards) {
+    for (const c of Object.values(b.cards)) {
+      const e: Entry = { card: c, boardId: b.id, boardName: b.name }
+      if (c.status === 'running') running.push(e)
+      else if (c.status === 'queued') queued.push(e)
+      else if (c.status === 'error') failed.push(e)
+    }
+  }
   const close = () => useUi.getState().setShowTaskCenter(false)
   const empty = running.length + queued.length + failed.length === 0
 
@@ -82,15 +98,15 @@ export function TaskCenter() {
             <Loader2 size={10} className="animate-spin" /> 进行中（{running.length + queued.length}）
           </div>
         )}
-        {running.map((c) => (
-          <Row key={c.id} card={c} queueIdx={-1} />
+        {running.map((e) => (
+          <Row key={e.card.id} entry={e} queueIdx={-1} foreign={e.boardId !== activeBoardId} />
         ))}
-        {queued.map((c, i) => (
-          <Row key={c.id} card={c} queueIdx={i} />
+        {queued.map((e, i) => (
+          <Row key={e.card.id} entry={e} queueIdx={i} foreign={e.boardId !== activeBoardId} />
         ))}
         {failed.length > 0 && <div className="px-1.5 py-1 mt-1 text-[10px] uppercase tracking-wide text-red-500/70">失败（{failed.length}）</div>}
-        {failed.map((c) => (
-          <Row key={c.id} card={c} queueIdx={-1} />
+        {failed.map((e) => (
+          <Row key={e.card.id} entry={e} queueIdx={-1} foreign={e.boardId !== activeBoardId} />
         ))}
       </div>
     </div>

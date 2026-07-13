@@ -2,6 +2,7 @@ import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Modal } from './Modal'
 import { Empty } from './ui'
+import { focusCard } from '../focusCard'
 
 interface Item {
   boardId: string
@@ -29,16 +30,7 @@ export function Gallery() {
   const close = () => useUi.getState().setShowGallery(false)
 
   const focus = (it: Item) => {
-    const g = useGraph.getState()
-    if (g.project.activeBoardId !== it.boardId) g.setActiveBoard(it.boardId)
-    g.setSelection([it.cardId])
-    const b = g.getActiveBoard()
-    const c = b.cards[it.cardId]
-    if (c) {
-      const ss = useUi.getState().stageSize
-      const zoom = b.viewport.zoom
-      g.setViewport({ zoom, x: ss.w / 2 - (c.x + c.w / 2) * zoom, y: ss.h / 2 - (c.y + c.h / 2) * zoom })
-    }
+    focusCard(it.boardId, it.cardId)
     close()
   }
   const preview = (it: Item) => useUi.getState().setPreview({ url: it.url, kind: it.kind === 'video' ? 'video' : 'image' })

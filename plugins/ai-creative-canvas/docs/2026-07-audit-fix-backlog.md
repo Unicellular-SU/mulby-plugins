@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：29/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：30/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -174,7 +174,7 @@
   - 证据：历史快照本身带 boardId（undo 还会跳回对应画布），清空并非结构必需。
   - 修法：按 boardId 维护多份历史栈（改动集中在 push/undo/redo 取栈），或至少切换不清空。先决：C1（undo 语义先修对）。
 
-- [ ] **C12 [P2/bug] 任务中心三处脱节：只列活动画布（与顶栏全局计数、跨画布续跑矛盾）；「定位」只改选中不移视口不切画布**
+- [x] **C12 [P2/bug] 任务中心三处脱节：只列活动画布（与顶栏全局计数、跨画布续跑矛盾）；「定位」只改选中不移视口不切画布**（✓ 2026-07-14 ①TaskCenter 从 getActiveBoard 改为遍历 project.boards 全部卡片，与顶栏全局计数/跨画布续跑对齐；②行内对非活动画布任务标注画布名（`· 画布名`）；③定位从 setSelection 改为共用新建的 focusCard(boardId, cardId)——切所属画布+选中+视口居中。提取 Gallery.focus 的居中逻辑到 src/ui/focusCard.ts，Gallery 与 TaskCenter 共用（消除重复）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/TaskCenter.tsx:17,48-56`；对照 `TopBar.tsx:19`、`generate.ts:305-320`、Gallery.focus（`Gallery.tsx:31-43`）
   - 修法：改为扫描 project.boards 全部卡片，行内标注画布名；jump 复用 Gallery.focus 逻辑（setActiveBoard→setViewport 居中→选中）。
 
