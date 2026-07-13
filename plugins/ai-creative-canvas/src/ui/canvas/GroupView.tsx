@@ -23,6 +23,16 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   const color = (card.params?.color as string) || '#6366f1'
   const collapsed = !!card.params?.collapsed
   const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('') // 重命名草稿：编辑期本地保存，提交时一次性写 store（避免逐键入历史/逐键触发 @ 传播）
+  const beginEdit = () => { setDraft(card.title); setEditing(true) }
+  const commitEdit = () => {
+    const next = draft.trim()
+    if (next && next !== card.title) {
+      useGraph.getState().pushHistory()
+      updateCard(card.id, { title: next })
+    }
+    setEditing(false)
+  }
   const lastTitlePointer = useRef<{ time: number; x: number; y: number } | null>(null)
 
   const allDescendants = (): string[] => {
@@ -36,6 +46,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   }
 
   const toggleCollapse = () => {
+    useGraph.getState().pushHistory()
     if (collapsed) updateCard(card.id, { h: (card.params?.expandedH as number) || card.h, params: { ...card.params, collapsed: false } })
     else updateCard(card.id, { h: 36, params: { ...card.params, collapsed: true, expandedH: card.h } })
   }
@@ -65,23 +76,27 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
     lastTitlePointer.current = null
     e.stopPropagation()
     e.preventDefault()
-    setEditing(true)
+    beginEdit()
   }
 
   const startResize = (e: RPointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    // 首次实际拖动时压一次历史，捕获 resize 前的尺寸与成员归属；resize + 结束时的成员吸入/弹出合为一次撤销。
+    let pushed = false
+    const ensurePush = () => { if (!pushed) { useGraph.getState().pushHistory(); pushed = true } }
     const move = (ev: PointerEvent) => {
       const rect = stageEl.current?.getBoundingClientRect()
       if (!rect) return
       const b = useGraph.getState().getActiveBoard()
       const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
+      ensurePush()
       useGraph.getState().updateCard(card.id, { w: Math.max(140, w.x - card.x), h: Math.max(90, w.y - card.y) })
     }
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
-      // resize 结束：吸入完全落入的顶层卡 / 弹出移出框的直属子（一次历史）
+      // resize 结束：吸入完全落入的顶层卡 / 弹出移出框的直属子
       const b = useGraph.getState().getActiveBoard()
       const grp = b.cards[card.id]
       if (!grp) return
@@ -93,7 +108,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
         else if (c.parentId == null && inside && c.kind !== 'group') ops.push([c.id, card.id]) // 吸入仅限非组顶层卡，避免成环
       }
       if (ops.length) {
-        useGraph.getState().pushHistory()
+        ensurePush() // 若成员变更但未经 move-push（极少见）也兜底压一次；已 push 则复用同一步
         useGraph.setState((s) => ({
           project: {
             ...s.project,
@@ -132,7 +147,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
         onPointerDown={startTitleRename}
         onDoubleClick={(e) => {
           e.stopPropagation()
-          setEditing(true)
+          beginEdit()
         }}
         className="absolute top-0 inset-x-0 h-9 flex items-center gap-1.5 px-2 rounded-t-xl pointer-events-auto"
         style={{ background: color + '22' }}
@@ -143,11 +158,12 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
             data-interactive
             autoFocus
             onPointerDown={(e) => e.stopPropagation()}
-            value={card.title}
-            onChange={(e) => updateCard(card.id, { title: e.target.value })}
-            onBlur={() => setEditing(false)}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitEdit}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === 'Escape') setEditing(false)
+              if (e.key === 'Enter') { e.preventDefault(); commitEdit() }
+              else if (e.key === 'Escape') { e.preventDefault(); setEditing(false) } // Esc 取消不提交
             }}
             className="bg-transparent text-sm font-medium outline-none flex-1 min-w-0 text-neutral-800 dark:text-neutral-100"
           />
@@ -184,7 +200,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
       {selected && !collapsed && (
         <div data-interactive onPointerDown={(e) => e.stopPropagation()} className="absolute top-10 left-2 flex gap-1 pointer-events-auto">
           {COLORS.map((c) => (
-            <button key={c} onClick={() => updateCard(card.id, { params: { ...card.params, color: c } })} className="w-3.5 h-3.5 rounded-full border border-white/60" style={{ background: c }} />
+            <button key={c} onClick={() => { useGraph.getState().pushHistory(); updateCard(card.id, { params: { ...card.params, color: c } }) }} className="w-3.5 h-3.5 rounded-full border border-white/60" style={{ background: c }} />
           ))}
         </div>
       )}

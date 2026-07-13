@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：18/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：19/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -126,7 +126,7 @@
 
 ## 批次 C · 画布与任务交互（信任感）
 
-- [ ] **C1 [P1/bug] resize/重命名/便签文本等 updateCard 路径全部漏入 undo 栈；无历史操作不清 future 导致 redo 覆盖新改动**
+- [x] **C1 [P1/bug] resize/重命名/便签文本等 updateCard 路径全部漏入 undo 栈；无历史操作不清 future 导致 redo 覆盖新改动**（✓ 2026-07-14 采「调用方在离散编辑前 pushHistory」方案（与拖拽移动同构，非改 updateCard），7 处入口全补：CardView 卡片 resize(首帧 push)/便签文本 onBlur(有变才 push)/便签色；GroupView 组 resize(首帧 push，与结束时成员吸入/弹出合为一次撤销)/折叠/组色/重命名(重构为本地 draft+提交时一次 push，消除逐键写 store & 逐键触发 @ 传播)。pushHistory 清 future 顺带修好 redo 覆盖(新编辑后 future 清空→redo 不再用旧快照覆盖)。新增 test/store/graphStore.test.ts 2 用例（resize→undo 回原尺寸、undo→新编辑→redo 不覆盖）接入 test:graph。typecheck+UI 构建+全套件(33+4+3+2)全绿）
   - 位置：`src/ui/store/graphStore.ts:406-439`；入口 `CardView.tsx:215`、`GroupView.tsx:79,96,147`、`CardView.tsx:271`
   - 证据：resize 后 Cmd+Z 不回退尺寸反而回退更早操作；undo 后做一次 resize 再 redo，旧快照整体覆盖 cards 静默丢掉刚做的修改。对照：addCard/removeCards/paste/拖动均正确入栈。
   - 修法：resize 在首次越过阈值时 pushHistory 一次（中间态照走 updateCard）；重命名/便签 blur 提交且有变时 push；折叠/换色各 push；或给 updateCard 加 options.history 由调用方声明，保证所有改 cards 的入口要么入栈要么明确豁免（fitAspect、生成进度）。

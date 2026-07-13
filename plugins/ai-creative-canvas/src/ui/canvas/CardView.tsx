@@ -205,6 +205,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     const handle = e.currentTarget as HTMLElement
     const pid = e.pointerId
     try { handle.setPointerCapture(pid) } catch { /* ignore */ }
+    let pushed = false // 首次实际拖动（越过阈值）时压一次历史，捕获 resize 前尺寸；中间态继续 live 更新
     const move = (ev: PointerEvent) => {
       const rect = stageEl.current?.getBoundingClientRect()
       if (!rect) return
@@ -212,6 +213,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
       const nw = Math.max(120, Math.round(w.x - card.x))
       const nh = Math.max(80, Math.round(w.y - card.y))
+      if (!pushed) { useGraph.getState().pushHistory(); pushed = true }
       updateCard(card.id, { w: nw, h: nh, meta: { ...card.meta, fittedFor: card.assetUrl } })
       setResizeBubble({ w: nw, h: nh })
     }
@@ -268,6 +270,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
               defaultValue={card.text || ''}
               onPointerDown={(e) => e.stopPropagation()}
               onBlur={(e) => {
+                if (e.target.value !== (card.text || '')) useGraph.getState().pushHistory() // 文本有变才入撤销栈
                 updateCard(card.id, { text: e.target.value })
                 setEditing(false)
               }}
@@ -292,6 +295,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
               key={c}
               onClick={(e) => {
                 e.stopPropagation()
+                useGraph.getState().pushHistory()
                 updateCard(card.id, { params: { ...card.params, noteColor: c } })
               }}
               className="w-3.5 h-3.5 rounded-full border border-black/10 shadow"
