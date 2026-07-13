@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：26/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：27/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -161,7 +161,7 @@
   - 位置：`GroupView.tsx:71-113`、`MultiConnectHandle.tsx:66-67`、`CardView.tsx:158-198`（startConnect cleanup 全绑在 handle 元素上）
   - 修法：复制同文件 startCardResize 已有的 setPointerCapture+四事件收尾模式；startConnect 的兜底监听放 window 或在 unmount cleanup 调用。
 
-- [ ] **C9 [P2/bug] createConnectedNode 绕过 canConnect：便签可连出永远无效的僵尸边**
+- [x] **C9 [P2/bug] createConnectedNode 绕过 canConnect：便签可连出永远无效的僵尸边**（✓ 2026-07-14 createConnectedNode 建边前对每个 source 过 `canConnect(cards[sid], card).ok`（新节点是 target），与 addEdgeBetween/connectAll 一致——便签/分组源不再建出 buildMaterials 会跳过、却仍在 EdgeLayer 渲染的僵尸边；MultiConnectHandle 的 sources 过滤补 `c.kind !== 'note'`（纵深防御，便签不显示多选连接手柄）。新增 graphStore 用例：从[便签,图片]连出新节点，断言仅图片建边、便签被跳过。typecheck+UI 构建+全套件(33+4+3+4)全绿）
   - 位置：`src/ui/store/graphStore.ts:565-589`、`MultiConnectHandle.tsx:22`（过滤漏 note）
   - 修法：createConnectedNode 建边前逐 source 过 canConnect；MultiConnectHandle 过滤补 `c.kind !== 'note'`。
 

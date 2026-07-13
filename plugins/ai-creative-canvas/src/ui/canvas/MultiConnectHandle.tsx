@@ -19,7 +19,7 @@ export function MultiConnectHandle() {
   }
   for (const c of Object.values(board.cards)) if (c.kind === 'group' && c.params?.collapsed) hideDesc(c.id)
 
-  const sources = selectedIds.map((id) => board.cards[id]).filter((c) => c && c.kind !== 'group' && !hidden.has(c.id))
+  const sources = selectedIds.map((id) => board.cards[id]).filter((c) => c && c.kind !== 'group' && c.kind !== 'note' && !hidden.has(c.id))
   if (sources.length < 2) return null
 
   const maxX = Math.max(...sources.map((c) => c.x + c.w))

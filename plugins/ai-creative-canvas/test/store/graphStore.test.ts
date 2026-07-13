@@ -79,11 +79,25 @@ function testCopyGroupCarriesMembersAndEdges() {
   assert.equal(Object.keys(board.edges).length, 2, 'internal edge duplicated on paste')
 }
 
+function testCreateConnectedNodeSkipsNoteSource() {
+  reset()
+  const g = useGraph.getState()
+  const note = g.addCard('note', { x: 0, y: 0 })
+  const img = g.addCard('image', { x: 200, y: 0 })
+  // 从 [便签, 图片] 连出一个新文本节点：便签源应被 canConnect 过滤，仅图片建边
+  const newId = useGraph.getState().createConnectedNode('text', { x: 400, y: 0 }, [note, img])
+  const edges = Object.values(useGraph.getState().getActiveBoard().edges)
+  const toNew = edges.filter((e) => e.target === newId)
+  assert.equal(toNew.length, 1, 'only the image source connects; note source is skipped')
+  assert.equal(toNew[0].source, img, 'the surviving edge is from the image card')
+}
+
 function main() {
   testResizeThenUndo()
   testUndoThenEditDoesNotClobberOnRedo()
   testCopyGroupCarriesMembersAndEdges()
-  console.log('graphStore: 3 tests OK')
+  testCreateConnectedNodeSkipsNoteSource()
+  console.log('graphStore: 4 tests OK')
 }
 
 main()

@@ -577,6 +577,7 @@ export const useGraph = create<GraphState>((set, get) => ({
         const edges = { ...b.edges }
         for (const sid of sourceIds) {
           if (sid === id || !cards[sid]) continue
+          if (!canConnect(cards[sid], card).ok) continue // 过连接策略：便签/分组不参与引用连线，避免建出永久失效的僵尸边
           if (Object.values(edges).some((e) => e.source === sid && e.target === id)) continue
           const eid = uid('edge')
           edges[eid] = { id: eid, source: sid, target: id, kind: 'ref' }
