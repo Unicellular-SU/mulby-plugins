@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：1/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
+**进度：2/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
 
 ---
 
@@ -29,7 +29,7 @@
   - 修法：保存键改用 `state.project.id` 而非 `useProject.getState().activeId`（代码中 pid===doc.id 恒成立），根治 id/doc 错配；辅以 switch/delete 前 `saveMain.cancel()/saveRec.cancel()`（把两个 debounce 句柄挂到可供 projectStore 调用的位置）。
   - 验证：模拟复现——文本卡流式生成中切换工程，确认新工程存储未被旧 doc 覆盖（检查 `proj:<新id>:current` 的 doc.id）。
 
-- [ ] **A2 [P1/bug] 崩溃恢复被采纳后主存分片永不落盘，重启丢回崩溃前版本**
+- [x] **A2 [P1/bug] 崩溃恢复被采纳后主存分片永不落盘，重启丢回崩溃前版本**（✓ 2026-07-13 loadIntoGraph 恢复分支重构：采纳恢复 → sanitize 后先 `await saveProject(pid, doc)` 全量落主存 → 成功才 clearRecovery，失败保留快照并 toast 提示可再恢复；用户拒绝恢复的分支保持原「即刻丢弃快照」语义。基线机制核实过：恢复路径 ensureBaselineFor 必然重置（冷启/切换）且恢复 doc 的 board 为新反序列化引用，全量重写成立。typecheck+29 测试全绿；宿主内崩溃→恢复→重启链路待人工验证）
   - 位置：`src/ui/store/projectStore.ts:64-77`（loadIntoGraph 恢复分支）、`src/ui/services/persistence.ts:57-61,180-184`
   - 证据：选「恢复」后 `seedMainBaseline(pid, rec.doc)` 把基线播种为恢复快照的 board 引用，writeSharded 按 `baseline.get(b.id) !== b` 判「未改动」全部跳过——磁盘主存仍是崩溃前旧数据，恢复 manifest 又已被删。不编辑或只编辑部分画布 → 再重启即静默丢失恢复的内容。
   - 修法：恢复路径先 `await saveProject(pid, doc)` 全量落盘（空基线会重写全部分片），成功后再 `clearRecovery(pid)`，最后才 applyLoaded/seedMainBaseline。

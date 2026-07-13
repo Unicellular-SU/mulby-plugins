@@ -62,6 +62,7 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
   })()
   if (name) doc = { ...doc, name }
   const rec = await loadRecovery(pid)
+  let recovered = false
   if (rec?.doc) {
     const useRec = await confirmDialog({
       title: '恢复未保存的改动',
@@ -69,11 +70,22 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
       confirmLabel: '恢复',
       cancelLabel: '用已保存版本'
     })
-    if (useRec) doc = name ? { ...rec.doc, name } : rec.doc
-    await clearRecovery(pid)
+    if (useRec) {
+      doc = name ? { ...rec.doc, name } : rec.doc
+      recovered = true
+    } else {
+      await clearRecovery(pid) // 用户选「用已保存版本」→ 丢弃快照
+    }
   }
   if (doc.id !== pid) doc = { ...doc, id: pid } // 强制 doc.id 与注册表键一致——自动保存按 doc.id 键控（App.tsx），不容分叉
   sanitizeDoc(doc)
+  if (recovered) {
+    // 恢复内容必须先全量写回主存、成功后才能删恢复快照：applyLoaded 会按本 doc 播种增量基线，
+    // 若不先落盘，所有画布被判「未改动」而永不重写分片——磁盘主存仍是崩溃前旧数据，
+    // 快照又已删除，下次重开即静默丢回旧版本。
+    if (await saveProject(pid, doc)) await clearRecovery(pid)
+    else toast('恢复内容写回主存失败，已保留恢复快照（重开工程可再次恢复）', 'error')
+  }
   applyLoaded(pid, doc)
   void resumeInflightVideos() // 断点续跑：重开/切换后继续在途视频任务的轮询
 }
