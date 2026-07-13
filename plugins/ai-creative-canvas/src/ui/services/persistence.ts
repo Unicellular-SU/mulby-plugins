@@ -164,6 +164,10 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
   return d
 }
 
+// 已删除工程的墓碑（会话级）：删除时同步立碑，此后任何在途/挂起的防抖保存一律拒写该工程，
+// 防止 800ms 防抖窗口内的保存把已删工程的 manifest/分片写回成永久孤儿键。
+const deletedProjects = new Set<string>()
+
 // 上次落盘的画布引用基线（增量判定）；按工程区分——切换工程时重置。
 let baselineProjectId: string | null = null
 let mainBaseline = new Map<string, Board>()
@@ -256,6 +260,7 @@ export async function loadProject(pid: string): Promise<ProjectDoc | null> {
 }
 
 export function saveProject(pid: string, p: ProjectDoc): Promise<boolean> {
+  if (deletedProjects.has(pid)) return Promise.resolve(false) // 已删工程：拒写，防键复活
   return serializeIo(async () => {
     try {
       ensureBaselineFor(pid)
@@ -269,6 +274,7 @@ export function saveProject(pid: string, p: ProjectDoc): Promise<boolean> {
 
 // 删除某工程的全部存储（manifest + 主分片 + 恢复分片）
 export function deleteProjectStorage(pid: string): Promise<void> {
+  deletedProjects.add(pid) // 同步立墓碑：先于任何后续排队的保存生效（serializeIo 为 FIFO，先入队的保存会被随后的删除清理）
   return serializeIo(async () => {
     try {
       const s = storage()
@@ -321,6 +327,7 @@ export interface RecoverySnap {
 }
 
 export function saveRecovery(pid: string, p: ProjectDoc, savedAt: number): Promise<void> {
+  if (deletedProjects.has(pid)) return Promise.resolve() // 已删工程：拒写，防键复活
   return serializeIo(async () => {
     try {
       ensureBaselineFor(pid)

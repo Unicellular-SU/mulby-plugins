@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：2/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
+**进度：3/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
 
 ---
 
@@ -35,7 +35,7 @@
   - 修法：恢复路径先 `await saveProject(pid, doc)` 全量落盘（空基线会重写全部分片），成功后再 `clearRecovery(pid)`，最后才 applyLoaded/seedMainBaseline。
   - 验证：手工构造恢复快照 → 采纳 → 不做任何编辑直接重载，确认读到的是恢复后内容。
 
-- [ ] **A3 [P2/bug] deleteProject 不取消挂起的防抖保存：已删工程的存储键被写回成永久孤儿**
+- [x] **A3 [P2/bug] deleteProject 不取消挂起的防抖保存：已删工程的存储键被写回成永久孤儿**（✓ 2026-07-13 persistence.ts 加会话级墓碑集合 deletedProjects：deleteProjectStorage 同步立碑，saveProject/saveRecovery 对墓碑 pid 拒写；serializeIo FIFO 保证先入队的保存会被随后的删除清理，两种时序均安全。核实过 importProject/duplicateProject 均强制换新 uid，无 id 复用误伤。cancel 防抖句柄方案弃用——墓碑更彻底且不引入 App↔store 耦合。typecheck+29 测试全绿）
   - 位置：`src/ui/store/projectStore.ts:191-222`
   - 证据：编辑后 800ms 内删除工程 → deleteProjectStorage 清键后，防抖到期的 saveProject(旧pid) 经 ensureBaselineFor 全量重写 manifest+分片——注册表已无该 id，这批键永远无人清理。
   - 修法：persistence 层加 tombstone 集合（deleteProjectStorage 记录 pid，saveProject/saveRecovery 拒写 tombstone 中的 pid）；配合 A1 的 cancel 双保险。先决：A1。
