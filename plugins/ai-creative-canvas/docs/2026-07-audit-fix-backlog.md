@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：28/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：29/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -169,7 +169,7 @@
   - 位置：`src/ui/store/graphStore.ts:536-539`、`AnnotationToolbar.tsx:49`
   - 修法：最低成本 clearAnnotations 前加 confirmDialog；更完整则 BoardSnap 增加 annotations 并让增删清都 pushHistory，修正注释。
 
-- [ ] **C11 [P2/debt] 切换/新建画布 Tab 即清空撤销栈，无提示**
+- [x] **C11 [P2/debt] 切换/新建画布 Tab 即清空撤销栈，无提示**（✓ 2026-07-14 单一 past/future 栈改为按 boardId 维护的 `boardHistories: Record<boardId,{past,future}>`：pushHistory/addCard-inline/undo/redo/canUndo/canRedo 全部操作当前(或目标)画布自己的栈；setActiveBoard/addBoard 不再清空（各画布历史独立保留），removeBoard 连带删该画布历史，replaceProject(换工程)清空全部。CanvasControls 的 `s.past.length` reactive 订阅改为派生选择器 `boardHistories[activeBoardId]?.past.length`（唯一外部消费者，DirectorStage 的 canUndo 是 3D 台本地状态无关）。新增 graphStore 用例：A 编辑→新建切 B→切回 A，断言 A 历史保留且 undo 仍生效。typecheck+UI 构建+全套件(33+4+3+5)全绿）
   - 位置：`src/ui/store/graphStore.ts:236-246`
   - 证据：历史快照本身带 boardId（undo 还会跳回对应画布），清空并非结构必需。
   - 修法：按 boardId 维护多份历史栈（改动集中在 push/undo/redo 取栈），或至少切换不清空。先决：C1（undo 语义先修对）。

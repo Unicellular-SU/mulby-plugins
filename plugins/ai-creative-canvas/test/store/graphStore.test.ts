@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { useGraph, createDefaultProject } from '../../src/ui/store/graphStore.ts'
 
 function reset() {
-  useGraph.setState({ project: createDefaultProject(), selectedIds: [], past: [], future: [] })
+  useGraph.setState({ project: createDefaultProject(), selectedIds: [], boardHistories: {} })
 }
 
 function testResizeThenUndo() {
@@ -92,12 +92,35 @@ function testCreateConnectedNodeSkipsNoteSource() {
   assert.equal(toNew[0].source, img, 'the surviving edge is from the image card')
 }
 
+function testPerBoardHistorySurvivesSwitch() {
+  reset()
+  const g = useGraph.getState()
+  const boardA = useGraph.getState().project.activeBoardId
+  const a = g.addCard('note', { x: 0, y: 0 }, { w: 280 })
+  g.pushHistory()
+  g.updateCard(a, { w: 600 })
+  assert.equal(useGraph.getState().canUndo(), true, 'board A has undo history')
+
+  // 新建并切到画布 B：A 的历史不应被清空
+  g.addBoard()
+  const boardB = useGraph.getState().project.activeBoardId
+  assert.notEqual(boardA, boardB)
+  assert.equal(useGraph.getState().canUndo(), false, 'new board B starts with empty history')
+
+  // 切回 A：撤销仍可用，且能回退尺寸
+  useGraph.getState().setActiveBoard(boardA)
+  assert.equal(useGraph.getState().canUndo(), true, 'board A history preserved across switch')
+  useGraph.getState().undo()
+  assert.equal(useGraph.getState().getCard(a)!.w, 280, 'undo on board A still works after switching away and back')
+}
+
 function main() {
   testResizeThenUndo()
   testUndoThenEditDoesNotClobberOnRedo()
   testCopyGroupCarriesMembersAndEdges()
   testCreateConnectedNodeSkipsNoteSource()
-  console.log('graphStore: 4 tests OK')
+  testPerBoardHistorySurvivesSwitch()
+  console.log('graphStore: 5 tests OK')
 }
 
 main()

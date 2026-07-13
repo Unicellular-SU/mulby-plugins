@@ -14,6 +14,17 @@ interface BoardSnap {
   edges: Record<string, Edge>
 }
 
+type BoardHist = { past: BoardSnap[]; future: BoardSnap[] }
+const EMPTY_HIST: BoardHist = { past: [], future: [] }
+// 往指定画布的历史栈压入一份快照（截断超限、清空 redo 尾），返回新的 histories 表
+function pushBoardSnap(
+  histories: Record<string, BoardHist>,
+  snap: BoardSnap
+): Record<string, BoardHist> {
+  const h = histories[snap.boardId] || EMPTY_HIST
+  return { ...histories, [snap.boardId]: { past: [...h.past, snap].slice(-HISTORY_LIMIT), future: [] } }
+}
+
 function defaultTitle(kind: CardKind): string {
   switch (kind) {
     case 'image': return 'AI 图片'
@@ -91,8 +102,8 @@ function wouldCycle(nodeId: string, target: string | null, cards: Record<string,
 interface GraphState {
   project: ProjectDoc
   selectedIds: string[]
-  past: BoardSnap[]
-  future: BoardSnap[]
+  // 按 boardId 维护各自的 undo/redo 栈——切换/新建画布不再清空其它画布的历史（快照本就带 boardId）
+  boardHistories: Record<string, { past: BoardSnap[]; future: BoardSnap[] }>
 
   // 选择器（便捷）
   getActiveBoard: () => Board
@@ -160,8 +171,7 @@ interface GraphState {
 export const useGraph = create<GraphState>((set, get) => ({
   project: createDefaultProject(),
   selectedIds: [],
-  past: [],
-  future: [],
+  boardHistories: {},
   clipboard: { cards: [], edges: [] },
 
   getActiveBoard: () => activeBoardOf(get().project),
@@ -177,47 +187,45 @@ export const useGraph = create<GraphState>((set, get) => ({
   pushHistory: () => {
     const b = activeBoardOf(get().project)
     const snap: BoardSnap = { boardId: b.id, cards: b.cards, edges: b.edges }
-    set((s) => ({ past: [...s.past, snap].slice(-HISTORY_LIMIT), future: [] }))
+    set((s) => ({ boardHistories: pushBoardSnap(s.boardHistories, snap) }))
   },
 
   undo: () => {
-    const { past, project } = get()
-    if (past.length === 0) return
-    const snap = past[past.length - 1]
+    const { project, boardHistories } = get()
+    const bid = project.activeBoardId
+    const h = boardHistories[bid]
+    if (!h || h.past.length === 0) return // 仅撤销当前画布自己的历史
+    const snap = h.past[h.past.length - 1]
     const cur = activeBoardOf(project)
-    const curSnap: BoardSnap = { boardId: cur.id, cards: cur.cards, edges: cur.edges }
-    const boards = project.boards.map((b) =>
-      b.id === snap.boardId ? { ...b, cards: snap.cards, edges: snap.edges } : b
-    )
+    const curSnap: BoardSnap = { boardId: bid, cards: cur.cards, edges: cur.edges }
+    const boards = project.boards.map((b) => (b.id === bid ? { ...b, cards: snap.cards, edges: snap.edges } : b))
     set((s) => ({
-      project: { ...project, boards, activeBoardId: snap.boardId, updatedAt: Date.now() },
-      past: s.past.slice(0, -1),
-      future: [curSnap, ...s.future].slice(0, HISTORY_LIMIT),
+      project: { ...project, boards, updatedAt: Date.now() },
+      boardHistories: { ...s.boardHistories, [bid]: { past: h.past.slice(0, -1), future: [curSnap, ...h.future].slice(0, HISTORY_LIMIT) } },
       selectedIds: []
     }))
   },
 
   redo: () => {
-    const { future, project } = get()
-    if (future.length === 0) return
-    const snap = future[0]
+    const { project, boardHistories } = get()
+    const bid = project.activeBoardId
+    const h = boardHistories[bid]
+    if (!h || h.future.length === 0) return
+    const snap = h.future[0]
     const cur = activeBoardOf(project)
-    const curSnap: BoardSnap = { boardId: cur.id, cards: cur.cards, edges: cur.edges }
-    const boards = project.boards.map((b) =>
-      b.id === snap.boardId ? { ...b, cards: snap.cards, edges: snap.edges } : b
-    )
+    const curSnap: BoardSnap = { boardId: bid, cards: cur.cards, edges: cur.edges }
+    const boards = project.boards.map((b) => (b.id === bid ? { ...b, cards: snap.cards, edges: snap.edges } : b))
     set((s) => ({
-      project: { ...project, boards, activeBoardId: snap.boardId, updatedAt: Date.now() },
-      past: [...s.past, curSnap].slice(-HISTORY_LIMIT),
-      future: s.future.slice(1),
+      project: { ...project, boards, updatedAt: Date.now() },
+      boardHistories: { ...s.boardHistories, [bid]: { past: [...h.past, curSnap].slice(-HISTORY_LIMIT), future: h.future.slice(1) } },
       selectedIds: []
     }))
   },
 
-  canUndo: () => get().past.length > 0,
-  canRedo: () => get().future.length > 0,
+  canUndo: () => (get().boardHistories[get().project.activeBoardId]?.past.length ?? 0) > 0,
+  canRedo: () => (get().boardHistories[get().project.activeBoardId]?.future.length ?? 0) > 0,
 
-  replaceProject: (p) => set({ project: p, selectedIds: [], past: [], future: [] }),
+  replaceProject: (p) => set({ project: p, selectedIds: [], boardHistories: {} }), // 换工程：清空全部画布历史
   renameProject: (name) => set((s) => ({ project: { ...s.project, name, updatedAt: Date.now() } })),
   setGlobalModel: (modelId) => set((s) => ({ project: { ...s.project, globalModelId: modelId, updatedAt: Date.now() } })),
   setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
@@ -237,13 +245,11 @@ export const useGraph = create<GraphState>((set, get) => ({
     const board = createDefaultBoard(`画布 ${get().project.boards.length + 1}`)
     set((s) => ({
       project: { ...s.project, boards: [...s.project.boards, board], activeBoardId: board.id, updatedAt: Date.now() },
-      selectedIds: [],
-      past: [],
-      future: []
+      selectedIds: [] // 各画布历史独立保存在 boardHistories，切换/新建不再清空
     }))
   },
   setActiveBoard: (id) =>
-    set((s) => ({ project: { ...s.project, activeBoardId: id }, selectedIds: [], past: [], future: [] })),
+    set((s) => ({ project: { ...s.project, activeBoardId: id }, selectedIds: [] })), // 保留各画布历史
   renameBoard: (id, name) =>
     set((s) => ({
       project: { ...s.project, boards: s.project.boards.map((b) => (b.id === id ? { ...b, name } : b)), updatedAt: Date.now() }
@@ -253,7 +259,8 @@ export const useGraph = create<GraphState>((set, get) => ({
       if (s.project.boards.length <= 1) return s
       const boards = s.project.boards.filter((b) => b.id !== id)
       const activeBoardId = s.project.activeBoardId === id ? boards[0].id : s.project.activeBoardId
-      return { project: { ...s.project, boards, activeBoardId, updatedAt: Date.now() }, selectedIds: [], past: [], future: [] }
+      const { [id]: _removed, ...boardHistories } = s.boardHistories // 删画布：连带清掉其历史栈
+      return { project: { ...s.project, boards, activeBoardId, updatedAt: Date.now() }, selectedIds: [], boardHistories }
     }),
 
   setViewport: (vp) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, viewport: vp })) })),
@@ -263,8 +270,8 @@ export const useGraph = create<GraphState>((set, get) => ({
     const targetId = boardId ?? proj.activeBoardId
     const target = proj.boards.find((b) => b.id === targetId) ?? activeBoardOf(proj)
     const isActive = target.id === proj.activeBoardId
-    // 历史快照取「目标画布」（异步媒体处理完成可能写非活动画布）
-    set((s) => ({ past: [...s.past, { boardId: target.id, cards: target.cards, edges: target.edges }].slice(-HISTORY_LIMIT), future: [] }))
+    // 历史快照压入「目标画布」自己的栈（异步媒体处理完成可能写非活动画布）
+    set((s) => ({ boardHistories: pushBoardSnap(s.boardHistories, { boardId: target.id, cards: target.cards, edges: target.edges }) }))
     const size = CARD_DEFAULT_SIZE[kind]
     const card: Card = {
       id: uid('card'),
