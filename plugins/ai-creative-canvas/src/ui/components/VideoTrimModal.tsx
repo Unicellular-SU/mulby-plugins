@@ -16,7 +16,7 @@ function fmt(s: number): string {
 
 export function VideoTrimModal() {
   const id = useUi((s) => s.trimCardId)
-  useEscClose(() => useUi.getState().setTrimCardId(null))
+  useEscClose(() => useUi.getState().setTrimCardId(null), !!id)
   if (!id) return null
   return <Inner cardId={id} />
 }

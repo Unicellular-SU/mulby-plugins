@@ -10,7 +10,7 @@ import type { GroupTemplate } from '../types'
 import { toast } from '../store/toastStore'
 
 export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () => void }) {
-  useEscClose(onClose)
+  useEscClose(onClose, show)
   const [tpls, setTpls] = useState<GroupTemplate[]>([])
   useEffect(() => {
     if (show) void listTemplates().then(setTpls)

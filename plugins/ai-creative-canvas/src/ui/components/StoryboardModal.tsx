@@ -13,7 +13,7 @@ function notify(m: string, t?: string) {
 
 export function StoryboardModal() {
   const cardId = useUi((s) => s.storyboardCardId)
-  useEscClose(() => useUi.getState().setStoryboardCardId(null))
+  useEscClose(() => useUi.getState().setStoryboardCardId(null), !!cardId)
   if (!cardId) return null
   return <Inner cardId={cardId} />
 }

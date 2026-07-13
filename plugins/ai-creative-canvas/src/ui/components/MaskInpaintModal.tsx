@@ -13,7 +13,7 @@ function notify(m: string, t?: string) {
 
 export function MaskInpaintModal() {
   const cardId = useUi((s) => s.maskCardId)
-  useEscClose(() => useUi.getState().setMaskCardId(null))
+  useEscClose(() => useUi.getState().setMaskCardId(null), !!cardId)
   if (!cardId) return null
   return <Inner cardId={cardId} />
 }

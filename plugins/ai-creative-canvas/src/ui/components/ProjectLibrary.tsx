@@ -15,7 +15,7 @@ const fmtTime = (ts: number) => {
 
 export function ProjectLibrary() {
   const show = useUi((s) => s.showProjectLibrary)
-  useEscClose(() => useUi.getState().setShowProjectLibrary(false))
+  useEscClose(() => useUi.getState().setShowProjectLibrary(false), show)
   if (!show) return null
   return <Inner />
 }

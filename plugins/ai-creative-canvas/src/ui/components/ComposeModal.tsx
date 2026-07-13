@@ -26,7 +26,7 @@ function collectClips(ids: string[], cards: Record<string, Card>): Card[] {
 
 export function ComposeModal() {
   const show = useUi((s) => s.showCompose)
-  useEscClose(() => useUi.getState().setShowCompose(false))
+  useEscClose(() => useUi.getState().setShowCompose(false), show)
   if (!show) return null
   return <Inner />
 }

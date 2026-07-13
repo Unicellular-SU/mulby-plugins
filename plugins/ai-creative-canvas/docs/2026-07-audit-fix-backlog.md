@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：24/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：25/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -153,7 +153,7 @@
   - 位置：`GroupView.tsx:149-151`、`DialogHost.tsx:48`、`hooks.ts:9`（useEscClose）
   - 修法：这些 onKeyDown 开头加 `if (e.nativeEvent.isComposing || e.keyCode === 229) return`；useEscClose 的 window 监听同样检查。
 
-- [ ] **C7 [P2/bug] ESC 无模态层级管理：多层弹窗一键同关；Modal 无焦点 trap/焦点恢复**
+- [x] **C7 [P2/bug] ESC 无模态层级管理：多层弹窗一键同关；Modal 无焦点 trap/焦点恢复**（✓ 2026-07-14 新建 modalStack.ts：单一 window Esc 监听按挂载顺序只关**栈顶**一层；Modal 与 useEscClose 统一委托 useModalEsc，消除各挂 window 监听导致一次 Esc 连关多层。关键：hooks 不能条件调用，多数模态在 `if(!show)return null` 前调 hook——给 useModalEsc/useEscClose 加 `active` 参数（依赖它增删栈），7 个早返回模态（Timeline/Compose/ProjectLibrary/VideoTrim/Storyboard/MaskInpaint/TemplatePanel）传各自可见性；父级条件挂载的（ProviderSettings/CropModal/Gallery/DialogHost）用默认 true。Modal 加焦点管理：render 阶段捕获 opener（早于子 autoFocus 提交）、挂载聚焦容器（已有 autoFocus 则不抢）、卸载还焦；轻量 Tab 陷阱首尾循环不移出遮罩。CanvasStage 的 Esc 已由 C2 anyModalOpen 守住。VideoStudioModal 自管 capture 相位 Esc 不入栈（保留）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/Modal.tsx:20-26`、`hooks.ts:8-12`；连带 `CanvasStage.tsx:543` 的 Escape clearSelection 同帧执行
   - 修法：引入模态栈（zustand 记录打开顺序），ESC 只关栈顶；Modal 挂载时 focus 容器、卸载还焦到 opener。与 C2 的「模态计数器」共用一套状态。先决：C2。
 

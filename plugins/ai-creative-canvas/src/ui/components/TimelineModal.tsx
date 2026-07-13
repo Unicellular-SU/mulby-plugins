@@ -37,7 +37,7 @@ interface ATrack {
 
 export function TimelineModal() {
   const show = useUi((s) => s.showTimeline)
-  useEscClose(() => useUi.getState().setShowTimeline(false))
+  useEscClose(() => useUi.getState().setShowTimeline(false), show)
   if (!show) return null
   return <Inner />
 }
