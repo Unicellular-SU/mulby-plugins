@@ -17,6 +17,7 @@ import {
   metaOf,
   migrateProject
 } from '../services/persistence'
+import { removeProjectMediaOnDisk } from '../services/media'
 import { confirmDialog } from './dialogStore'
 import { toast } from './toastStore'
 
@@ -207,6 +208,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       const ok = await confirmDialog({ title: '清空工程', message: '这是唯一的工程，删除将清空为一个新的空工程。确定？', confirmLabel: '清空', cancelLabel: '取消' })
       if (!ok) return
       await deleteProjectStorage(id)
+      void removeProjectMediaOnDisk(id) // 唯一工程被清空：无副本可引用，直接清盘
       const doc = createDefaultProject()
       await saveProject(doc.id, doc)
       const next = [metaOf(doc)]
@@ -231,6 +233,21 @@ export const useProject = create<ProjectState>((set, get) => ({
       await saveRegistry({ activeId, items: next })
       await deleteProjectStorage(id)
     }
+    // 磁盘媒体清理（best-effort，后台进行）：duplicateProject 的副本与原工程共享媒体文件路径，
+    // 任一剩余工程引用了本工程的媒体目录（media/<id> 或 A5 前遗留的 media_<id>）则跳过清盘，避免弄裂副本。
+    void (async () => {
+      try {
+        for (const it of next) {
+          const doc = await loadProject(it.id)
+          if (!doc) continue
+          const s = JSON.stringify(doc)
+          if (s.includes(`/media/${id}/`) || s.includes(`/media_${id}/`)) return
+        }
+        await removeProjectMediaOnDisk(id)
+      } catch {
+        /* best-effort */
+      }
+    })()
     toast('工程已删除', 'success')
   },
 

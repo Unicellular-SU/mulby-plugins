@@ -1016,7 +1016,7 @@ function AudioBgmEditor({ op, p }: { op: EditOp; p: AudioParams }) {
     setTtsBusy(true)
     try {
       const key = await useProviders.getState().getKey(cfg.id)
-      const r = await runTts(cfg, key, ttsText.trim())
+      const r = await runTts(cfg, key, ttsText.trim(), { projectId: useGraph.getState().project.id })
       set({ bgm: { path: r.path, source: 'tts', text: ttsText.trim(), volume: 1, offset: 0, mode: 'mix' } })
       toast('配音已生成', 'success')
     } catch (e: any) {

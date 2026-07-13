@@ -40,6 +40,16 @@ function stamp(): string {
   return `${Date.now()}_${Math.floor(Math.random() * 1e4)}`
 }
 
+// 删除某工程的全部磁盘媒体（host 侧递归删文件；宿主无 rmdir，空目录骨架残留零体积）。best-effort。
+// 调用方需先确认无其他工程引用该目录（duplicateProject 的副本与原工程共享媒体文件路径）。
+export async function removeProjectMediaOnDisk(projectId: string): Promise<void> {
+  try {
+    await (window as any).mulby?.host?.call(PLUGIN_ID, 'removeProjectMedia', { projectId })
+  } catch {
+    /* best-effort */
+  }
+}
+
 export async function saveBase64(
   projectId: string,
   cardId: string,

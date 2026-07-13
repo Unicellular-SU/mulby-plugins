@@ -236,7 +236,8 @@ export async function generateCard(cardId: string): Promise<void> {
         const res = await runTts(cfg, key, text, {
           voice: typeof pp.voice === 'string' ? pp.voice : undefined,
           speed: typeof pp.speed === 'number' ? pp.speed : undefined,
-          format: typeof pp.format === 'string' ? pp.format : undefined
+          format: typeof pp.format === 'string' ? pp.format : undefined,
+          projectId: useGraph.getState().project.id
         })
         useGraph.getState().updateCard(cardId, {
           status: 'done',

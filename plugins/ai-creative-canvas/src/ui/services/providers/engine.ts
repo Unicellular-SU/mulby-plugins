@@ -281,7 +281,7 @@ export async function runTts(
   cfg: ProviderConfig,
   key: string,
   text: string,
-  opts?: { voice?: string; speed?: number; format?: string }
+  opts?: { voice?: string; speed?: number; format?: string; projectId?: string }
 ): Promise<{ path: string; url: string; mime: string }> {
   const r = await host().call(PLUGIN_ID, 'synthSpeech', {
     baseURL: cfg.baseURL,
@@ -290,7 +290,8 @@ export async function runTts(
     voice: opts?.voice || cfg.ttsVoice || 'alloy',
     input: text,
     speed: opts?.speed,
-    format: opts?.format || cfg.ttsFormat || 'mp3'
+    format: opts?.format || cfg.ttsFormat || 'mp3',
+    projectId: opts?.projectId // 落盘到 media/<projectId>，随工程删除清理
   })
   const d = r?.data
   if (!d?.ok) throw new Error(d?.error || '配音失败')

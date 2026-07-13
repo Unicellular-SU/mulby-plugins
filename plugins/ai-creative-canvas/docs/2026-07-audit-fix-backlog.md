@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：5/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
+**进度：6/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
 
 ---
 
@@ -50,7 +50,7 @@
   - 证据：`media/p123` 被 sanitize 成 `media_p123`，逐级 mkdir 循环是死逻辑（宿主 mkdir 本就递归）；同一工程素材分裂两处，按文档路径做迁移/清理会漏掉全部 host 下载媒体。
   - 修法：与 A4 同批改——路径由后端以 projectId 拼 `media/<pid>`（仅对 projectId 段 sanitize）；需兼容读取/一次性迁移已存在的 `media_<pid>` 目录；修正 main.ts:35 错误注释。先决：A4。
 
-- [ ] **A6 [P1/incomplete] 删除工程不清理磁盘媒体；重复生成旧文件永不回收；TTS 不分工程目录**
+- [x] **A6 [P1/incomplete] 删除工程不清理磁盘媒体；重复生成旧文件永不回收；TTS 不分工程目录**（✓ 2026-07-13 ①main.ts 新增 removeProjectMedia RPC：递归删 media/<pid> 与遗留 media_<pid> 全部文件——宿主 filesystem 无 rmdir 只有 unlink，空目录骨架残留（零体积）；②deleteProject 两分支接入清理，普通删除分支加引用护栏：扫描剩余工程 doc 是否引用本工程媒体路径（duplicateProject 副本共享原工程文件，审查未覆盖的坑），有引用则跳过清盘；③TTS 归档到 media/<projectId>：runTts 增加 opts.projectId 并在 generate.ts/VideoStudioModal 两个调用点传入，synthSpeech 无 projectId 时退回旧 audio/ 目录。未做：旧共享 audio/ 目录的存量孤儿不清（无工程归属无法安全删）；「保存时惰性孤儿清扫」为可选项未做（重复生成的旧文件仍会累积，删工程时才回收）。typecheck+双端构建+29 测试全绿）
   - 位置：`src/ui/services/persistence.ts:271-315`、`src/main.ts:176-183`（synthSpeech 写 `${root}/audio`，收了 projectId 没用）
   - 证据：deleteProjectStorage 只删 storage 键，media/<pid> 目录整体成孤儿；每次重生成用 `${cardId}_${stamp()}` 新文件名，旧文件从不删；生成中删卡后落盘文件无主。磁盘只增不减。
   - 修法：main.ts 增加 `removeProjectMedia(projectId)` RPC（递归删 media/{pid}），deleteProject 调用；synthSpeech 改写入 media/{projectId}/；可选：保存时对比卡片 assetLocalPath 集合做惰性孤儿清扫。先决：A5（已完成）。注意：A5 修复前的存量安装存在遗留 `media_<pid>` 目录（host 下载曾落此处），removeProjectMedia 须同时清扫 `media/<pid>` 与 `media_<pid>` 两个位置。

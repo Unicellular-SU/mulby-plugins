@@ -42,6 +42,30 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
+// 递归删除目录下全部文件（宿主 filesystem 只有 unlink 无 rmdir——空目录骨架会残留，零体积可接受）
+async function removeDirFiles(dir: string): Promise<number> {
+  let n = 0
+  try {
+    if (!(await mulby.filesystem.exists(dir))) return 0
+    for (const name of await mulby.filesystem.readdir(dir)) {
+      const p = `${dir}/${name}`
+      try {
+        const st: any = await mulby.filesystem.stat(p)
+        if (st?.isDirectory) n += await removeDirFiles(p)
+        else {
+          await mulby.filesystem.unlink(p)
+          n++
+        }
+      } catch {
+        // 单个条目失败不阻断其余清理
+      }
+    }
+  } catch {
+    // best-effort
+  }
+  return n
+}
+
 // 取 JSON 路径（如 data.url / data.0.url）
 function getJsonPath(obj: any, path: string): unknown {
   if (!obj || !path) return undefined
@@ -98,6 +122,22 @@ export const rpc = {
       const b64 = Buffer.from(ab).toString('base64')
       await mulby.filesystem.writeFile(filePath, b64, 'base64')
       return { ok: true, path: filePath, mime: ct || undefined }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+
+  // 删除某工程的全部磁盘媒体：media/<pid> 与 A5 修复前 host 下载的遗留目录 media_<pid>。
+  // 调用方（projectStore.deleteProject）负责先确认无其他工程引用这些文件（duplicateProject 的副本共享原工程媒体路径）。
+  async removeProjectMedia(input: { projectId: string }) {
+    try {
+      const pid = sanitizeName(String(input?.projectId || ''), '')
+      if (!pid) return { ok: false, error: '缺少工程 id' }
+      const base = await resolveBaseDir()
+      if (!base) return { ok: false, error: '无法确定存储目录' }
+      const root = `${base}/${ROOT_DIR}`
+      const removed = (await removeDirFiles(`${root}/media/${pid}`)) + (await removeDirFiles(`${root}/media_${pid}`))
+      return { ok: true, removed }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -170,8 +210,8 @@ export const rpc = {
       const base = await resolveBaseDir()
       if (!base) return { ok: false, error: '无法确定存储目录' }
       const root = `${base}/${ROOT_DIR}`
-      const dir = `${root}/audio`
-      await ensureDir(root)
+      // 按工程归档到 media/<projectId>（与其他媒体一致，随工程删除清理）；无 projectId 时退回旧共享目录
+      const dir = input.projectId ? `${root}/media/${sanitizeName(input.projectId, 'proj')}` : `${root}/audio`
       await ensureDir(dir)
       const ab = await resp.arrayBuffer()
       const b64 = Buffer.from(ab).toString('base64')
