@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：20/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：21/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -136,7 +136,7 @@
   - 位置：`src/ui/canvas/CanvasStage.tsx:501`（只豁免 studioCardId）
   - 修法：keydown 入口统一判断「任意模态开着」（showGallery/showProjectLibrary/showProviderSettings/showTemplates/dialogStore.current…或模态计数器）即 return。
 
-- [ ] **C3 [P1/incomplete] 复制/粘贴/Ctrl+D 不携带组成员与连线：复制分组得到空组框**
+- [x] **C3 [P1/incomplete] 复制/粘贴/Ctrl+D 不携带组成员与连线：复制分组得到空组框**（✓ 2026-07-14 clipboard 从 `Card[]` 改为 `{cards,edges}`；copySelection 用 getDescendants 递归展开选中组的全部后代、并收集两端都在选区内的连线；paste 用 idMap 重映射连线（uid('edge')）一并落盘，级联粘贴的 clipboard 也带重映射后的 edges。同步改 ContextMenu 的 `clipboard.length`→`clipboard.cards.length`。新增 graphStore 测试用例：编组(2卡+1连线)→只选组→复制粘贴，断言 +3 卡(非空框)且连线复制。typecheck+UI 构建+全套件(33+4+3+3)全绿）
   - 位置：`src/ui/store/graphStore.ts:601-629`；对照拖动路径的递归收集 `CanvasStage.tsx:269-272`
   - 修法：copySelection 按 parentId 递归收集选中组全部后代；paste 仿 insertTemplate（graphStore.ts:390-399）用 idMap 重映射并复制两端都在剪贴板内的 edges。
   - 验证：编组 5 卡→复制→粘贴，成员+内部连线齐全。

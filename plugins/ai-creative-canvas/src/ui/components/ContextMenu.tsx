@@ -192,7 +192,7 @@ export function ContextMenu() {
     ;(['text', 'image', 'video', 'audio', 'source', 'note'] as CardKind[]).forEach((k) => {
       items.push({ label: '新建' + NEW_LABEL[k], onClick: () => run(() => g.addCard(k, world)) })
     })
-    if (g.clipboard && g.clipboard.length) {
+    if (g.clipboard?.cards.length) {
       items.push({ sep: true })
       items.push({ label: '粘贴', onClick: () => run(() => g.paste(40, 40)) })
     }

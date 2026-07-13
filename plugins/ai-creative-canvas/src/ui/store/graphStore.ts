@@ -151,8 +151,8 @@ interface GraphState {
   toggleSelect: (id: string, additive: boolean) => void
   clearSelection: () => void
 
-  // 剪贴板
-  clipboard: Card[]
+  // 剪贴板（cards + 两端都在剪贴板内的连线）
+  clipboard: { cards: Card[]; edges: Edge[] }
   copySelection: () => void
   paste: (dx: number, dy: number) => void
 }
@@ -162,7 +162,7 @@ export const useGraph = create<GraphState>((set, get) => ({
   selectedIds: [],
   past: [],
   future: [],
-  clipboard: [],
+  clipboard: { cards: [], edges: [] },
 
   getActiveBoard: () => activeBoardOf(get().project),
   getCard: (id) => {
@@ -600,31 +600,53 @@ export const useGraph = create<GraphState>((set, get) => ({
 
   copySelection: () => {
     const b = activeBoardOf(get().project)
-    const cards = get()
-      .selectedIds.map((id) => b.cards[id])
-      .filter(Boolean)
-      .map((c) => ({ ...c }))
-    set({ clipboard: cards })
+    // 展开选中集：选中的组要递归带上全部后代，否则复制组只得到空框
+    const ids = new Set<string>()
+    for (const id of get().selectedIds) {
+      if (!b.cards[id]) continue
+      ids.add(id)
+      for (const d of getDescendants(id, b.cards)) ids.add(d)
+    }
+    const cards = [...ids].map((id) => ({ ...b.cards[id] }))
+    // 只复制两端都在选中集内的连线（跨出选区的外部连线不带）
+    const edges = Object.values(b.edges)
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e) => ({ ...e }))
+    set({ clipboard: { cards, edges } })
   },
 
   paste: (dx, dy) => {
     const clip = get().clipboard
-    if (clip.length === 0) return
+    if (clip.cards.length === 0) return
     get().pushHistory()
     const idMap = new Map<string, string>()
-    for (const c of clip) idMap.set(c.id, uid('card'))
-    const added: Record<string, Card> = {}
+    for (const c of clip.cards) idMap.set(c.id, uid('card'))
+    const addedCards: Record<string, Card> = {}
     const newIds: string[] = []
-    for (const c of clip) {
+    for (const c of clip.cards) {
       const id = idMap.get(c.id) as string
       const pid = c.parentId ? (idMap.get(c.parentId) ?? null) : null // 保留剪贴板内的父子关系，外部父置空
-      added[id] = { ...c, id, x: c.x + dx, y: c.y + dy, parentId: pid }
+      addedCards[id] = { ...c, id, x: c.x + dx, y: c.y + dy, parentId: pid }
       newIds.push(id)
     }
+    // 重映射连线（两端都需在剪贴板内，idMap 已保证）
+    const addedEdges: Record<string, Edge> = {}
+    for (const e of clip.edges) {
+      const s = idMap.get(e.source)
+      const t = idMap.get(e.target)
+      if (!s || !t) continue
+      const eid = uid('edge')
+      addedEdges[eid] = { ...e, id: eid, source: s, target: t }
+    }
     set((s) => ({
-      project: withActiveBoard(s.project, (b) => ({ ...b, cards: { ...b.cards, ...added } })),
+      project: withActiveBoard(s.project, (b) => ({
+        ...b,
+        cards: { ...b.cards, ...addedCards },
+        edges: { ...b.edges, ...addedEdges }
+      })),
       selectedIds: newIds,
-      clipboard: Object.values(added).map((c) => ({ ...c })) // 级联粘贴：下次再偏移
+      // 级联粘贴：下次再偏移（clipboard 指向刚粘贴的 cards/edges）
+      clipboard: { cards: Object.values(addedCards).map((c) => ({ ...c })), edges: Object.values(addedEdges).map((e) => ({ ...e })) }
     }))
   }
 }))
