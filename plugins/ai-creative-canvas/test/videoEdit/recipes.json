@@ -647,5 +647,68 @@
       "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } }
     },
     "expect": { "outDuration": 6, "filterContains": ["overlay", "enable='between(t,3.000,5.000)'"], "filterNotContains": ["between(t,7.000,9.000)"] }
+  },
+  {
+    "id": "fallback-minterpolate-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 0.5, "reverse": false, "pitchCompensate": true, "smoothSlowmo": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["minterpolate"],
+    "expect": { "outDuration": 8, "filterNotContains": ["minterpolate"] }
+  },
+  {
+    "id": "fallback-tmix-to-tblend",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "motionTrail": 4 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["tmix"],
+    "expect": { "outDuration": 3, "filterContains": ["tblend"], "filterNotContains": ["tmix"] }
+  },
+  {
+    "id": "fallback-lut3d-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "color1", "kind": "color", "enabled": true, "params": { "lutPath": "/test/fixtures/look.cube" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["lut3d"],
+    "expect": { "outDuration": 3, "filterNotContains": ["lut3d"] }
+  },
+  {
+    "id": "gif-with-text-overlay",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "gif", "fps": 12, "outW": 480 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 2, "passCount": 2, "filterContains": ["overlay"], "argsContains": ["palettegen"] }
   }
 ]

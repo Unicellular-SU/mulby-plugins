@@ -1025,5 +1025,148 @@
       }
     ],
     "cleanup": []
+  },
+  "fallback-minterpolate-skip": {
+    "passCount": 1,
+    "outDuration": 8,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-filter_complex",
+          "[0:v]setpts=PTS/0.5000[v0];[v0]format=yuv420p[v1]",
+          "-map",
+          "[v1]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
+  "fallback-tmix-to-tblend": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-filter_complex",
+          "[0:v]tblend=all_mode=average[v0];[v0]format=yuv420p[v1]",
+          "-map",
+          "[v1]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
+  "fallback-lut3d-skip": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-filter_complex",
+          "[0:v]format=yuv420p[v0]",
+          "-map",
+          "[v0]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
+  "gif-with-text-overlay": {
+    "passCount": 2,
+    "outDuration": 2,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-i",
+          "/test/fixtures/overlay.png",
+          "-filter_complex",
+          "[0:v][1:v]overlay=main_w*0.1000:main_h*0.8000[v0];[v0]format=yuv420p[v1]",
+          "-map",
+          "[v1]",
+          "-an",
+          "-r",
+          "12",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      },
+      {
+        "outPath": "/test/out/studio.gif",
+        "args": [
+          "-i",
+          "/test/out/studio.mp4",
+          "-vf",
+          "fps=12,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3",
+          "-loop",
+          "0",
+          "-y",
+          "/test/out/studio.gif"
+        ]
+      }
+    ],
+    "cleanup": [
+      "/test/out/studio.mp4"
+    ]
   }
 }

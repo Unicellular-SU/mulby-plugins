@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：18/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：18/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -118,10 +118,11 @@
   - 位置：`src/ui/store/studioStore.ts:140-143`；触发点 `VideoStudioModal.tsx:103-104`（onPointerUp+onKeyUp 都挂 onCommit）
   - 修法：commitLive 先比较 stack 与 history[cursor]（或 liveDirty 标志），相同跳过；history 设上限（如 100）。补 store 级单测：updateOpLive×N+commitLive 后 undo 一步回到拖拽前（正是计划 WS1-T4 要求、至今缺失的测试）。
 
-- [ ] **B12 [P1/incomplete] 测试矩阵补齐：多行缺失、快照曾锁定已知 bug、集成脚本只跑 25 条中的 1 条**（放批次末，B1-B11 修完后做）
+- [~] **B12 [P1/incomplete] 测试矩阵补齐：多行缺失、快照曾锁定已知 bug、集成脚本只跑 25 条中的 1 条**（部分完成，D 依赖项待回填——不勾选）
   - 位置：`test/videoEdit/recipes.json`、`run-export.mjs:32`
-  - 缺口清单：①kenBurns+mirror（依赖 D3 决策）②bitrate ABR（依赖 D5 决策）③needsNormalize/baseRotation 断言（依赖 D4）④stackIsNoop=真导出原样 ⑤gif/webp/webm/mp4 各补一条**带 overlay** ⑥退化键 tmix/minterpolate/rgbashift/lut3d 各一条 fallback 用例；时间窗用例 expect 升级为具体 between(...) 数值（B1 已做则核对）。
-  - 修法：run-export.mjs 改为遍历全部 recipe（fixtures 按 README 的 testsrc 命令现场合成，补 VFR 源）断言 exit=0 + ffprobe 时长/分辨率/流数；快照数 ≥35。
+  - 缺口清单：①kenBurns+mirror（依赖 D3 决策）②bitrate ABR（依赖 D5 决策）③needsNormalize/baseRotation 断言（依赖 D4）④stackIsNoop=真导出原样（依赖 D5）⑤gif/webp/webm/mp4 各补一条**带 overlay** ⑥退化键 tmix/minterpolate/rgbashift/lut3d 各一条 fallback 用例；时间窗用例 expect 升级为具体 between(...) 数值（B1 已做则核对）。
+  - **✓ 2026-07-14 已做（不依赖 D 的部分）**：⑥补齐 fallback recipe `fallback-minterpolate-skip`(smoothSlowmo→NotContains minterpolate)、`fallback-tmix-to-tblend`(motionTrail→tblend、NotContains tmix)、`fallback-lut3d-skip`(lutPath→NotContains lut3d)（rgbashift 在 B10、colortemperature/denoise/sidechain 在 export-webm-fallback 已覆盖）；⑤补 `gif-with-text-overlay`(passCount=2+overlay+palettegen)。时间窗数值断言 B1 已做。recipe 数 25→33。
+  - **待回填（D 决策后）**：①kenBurns ②bitrate ③needsNormalize/baseRotation ④stackIsNoop 各自的用例；run-export.mjs 改为遍历全部 recipe（fixtures 按 README testsrc 现场合成 + 补 VFR 源）断言 exit=0 + ffprobe 时长/分辨率/流数。
 
 ## 批次 C · 画布与任务交互（信任感）
 
