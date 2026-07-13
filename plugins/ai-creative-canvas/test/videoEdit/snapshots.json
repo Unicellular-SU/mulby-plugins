@@ -350,7 +350,7 @@
           "-i",
           "/test/fixtures/landscape.mp4",
           "-filter_complex",
-          "[0:v]hqdn3d=2.4[v0];[v0]eq=brightness=0.100:contrast=1.200:saturation=1.100:gamma=1.100[v1];[v1]colortemperature=temperature=7000[v2];[v2]colorbalance=gm=-0.030[v3];[v3]hue=h=5.0[v4];[v4]unsharp=5:5:1.00:5:5:0[v5];[v5]vignette=PI/3.80[v6];[v6]noise=alls=10:allf=t[v7];[v7]format=yuv420p[v8]",
+          "[0:v]hqdn3d=2.4[v0];[v0]eq=brightness=0.100:contrast=1.200:saturation=1.100:gamma=1.100[v1];[v1]colortemperature=temperature=6000[v2];[v2]colorbalance=gm=-0.030[v3];[v3]hue=h=5.0[v4];[v4]unsharp=5:5:1.00:5:5:0[v5];[v5]vignette=PI/3.80[v6];[v6]noise=alls=10:allf=t[v7];[v7]format=yuv420p[v8]",
           "-map",
           "[v8]",
           "-an",

@@ -344,8 +344,9 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
       const t = p.temp / 100
       g.vf(`colorbalance=rs=${(t * 0.3).toFixed(3)}:bs=${(-t * 0.3).toFixed(3)}`)
     } else {
-      // colortemperature: 4000(暖)–8000(冷)，把 -100..100 映射到该区间
-      const k = 6500 + p.temp * 25
+      // colortemperature：低开尔文=偏橙暖、高开尔文=偏蓝冷。UI 约定正 temp=暖（暖阳预设 temp>0），
+      // 故正 temp 映射到低 K：temp=+100→4000K(暖)，temp=-100→9000K(冷)。方向须与退化路径 colorbalance(正=加红)一致。
+      const k = 6500 - p.temp * 25
       g.vf(`colortemperature=temperature=${Math.round(k)}`)
     }
   }

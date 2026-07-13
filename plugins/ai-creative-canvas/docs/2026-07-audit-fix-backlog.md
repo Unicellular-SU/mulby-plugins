@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：8/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
+**进度：9/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
 
 ---
 
@@ -68,7 +68,7 @@
   - 修法：统一为「存源时间基、编译器折算」：compile.ts 增加 `srcToOut(t)`（按 trim 保留段累计扣删除段，再除以 rate；reverse/boomerang 先禁用 range 或按 outDur-t 镜像），applyOverlays/muteRanges/cues 三处都过映射；改 compile.ts 头注；recipes 的时间窗用例升级为断言具体数值（如 trim[0,3]+[7,10]+2x 下源 8–9 → between(0.5,1.0)）后刷新快照。
   - 验证：快照 diff 逐条人工确认折算数值；有条件时 `npm run test:export` 真跑一条 trim+speed+overlay。
 
-- [ ] **B2 [P1/bug] 色温方向反转：「暖阳」导出偏蓝，且与退化路径方向互斥**
+- [x] **B2 [P1/bug] 色温方向反转：「暖阳」导出偏蓝，且与退化路径方向互斥**（✓ 2026-07-13 主路径映射改 `k = 6500 - temp*25`：正 temp（暖阳预设 temp>0）→ 低开尔文 → 暖，与预设语义及退化路径 colorbalance(正=加红) 对齐；补注释说明方向约束。验证：temp=20 recipe 断言升级为 `colortemperature=temperature=6000`（原 7000，正值现更暖）、退化 recipe 断言 `colorbalance=rs=0.150`（>0=暖）——两路径方向都锁死。26 recipe 全绿）
   - 位置：`src/ui/services/videoEdit/compile.ts:313-315`；对照预设 `VideoStudioModal.tsx:76-77`、退化分支 `compile.ts:309-311`
   - 证据：`k = 6500 + temp*25` 把正 temp 映射到冷端（colortemperature 低开尔文=暖），UI 约定正=暖；退化路径 rs=+0.3t 方向却是对的——同一配方新旧 ffmpeg 色调相反。
   - 修法：改为 `k = 6500 - temp*25`；recipes 增加 temp=+50 用例，断言主路径 K 值 <6500 且退化路径 rs>0，防再次反向。

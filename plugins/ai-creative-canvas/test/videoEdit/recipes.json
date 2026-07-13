@@ -256,7 +256,7 @@
       ]
     },
     "ctx": { "hasAudio": false },
-    "expect": { "outDuration": 3, "filterContains": ["eq=", "colortemperature", "unsharp", "vignette", "noise"] }
+    "expect": { "outDuration": 3, "filterContains": ["eq=", "colortemperature=temperature=6000", "unsharp", "vignette", "noise"] }
   },
   {
     "id": "overlay-pip-mosaic-progress-timecode",
@@ -539,7 +539,7 @@
     },
     "ctx": { "hasAudio": true },
     "fallbacks": ["denoise", "colortemperature", "sidechain"],
-    "expect": { "outDuration": 3, "filterContains": ["colorbalance", "highpass"] }
+    "expect": { "outDuration": 3, "filterContains": ["colorbalance=rs=0.150", "highpass"] }
   },
   {
     "id": "transform-rotate-arbitrary",
