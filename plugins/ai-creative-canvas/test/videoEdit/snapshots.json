@@ -402,6 +402,37 @@
     ],
     "cleanup": []
   },
+  "glitch-fallback-rgbashift-skip": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-filter_complex",
+          "[0:v]format=yuv420p[v0]",
+          "-map",
+          "[v0]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
   "color-full-preset": {
     "passCount": 1,
     "outDuration": 3,

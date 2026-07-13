@@ -303,11 +303,12 @@ function applyTransform(g: Graph, p: TransformParams, fb: Set<string>): void {
         `'(iw-ow)/2*(1+${k}*sin(2*PI*t*${F}))':'(ih-oh)/2*(1+${k}*cos(2*PI*t*${(Number(F) * 1.3).toFixed(2)}))',setsar=1`
     )
   }
-  // RGB 故障位移
-  if (p.glitch && p.glitch > 0) {
+  // RGB 故障位移。注意：rgbashift 与 chromashift 均在 FFmpeg 4.1 由同一文件(vf_chromashift.c)引入——
+  // 旧版缺 rgbashift 时 chromashift 也必缺，退化到 chromashift 名存实亡。故退化路径直接跳过 glitch：
+  // 用户失去故障特效但导出不再失败（exportStudio 的退化变体会 toast 告知「部分特效不可用」）。
+  if (p.glitch && p.glitch > 0 && !fb.has('rgbashift')) {
     const s = Math.round(p.glitch * 14)
-    if (fb.has('rgbashift')) g.vf(`chromashift=crh=${s}:cbh=${-s}`)
-    else g.vf(`rgbashift=rh=${s}:bh=${-s}`)
+    g.vf(`rgbashift=rh=${s}:bh=${-s}`)
   }
   // 画面去抖（单遍 deshake）
   if (p.deshake) g.vf('deshake=edge=mirror')

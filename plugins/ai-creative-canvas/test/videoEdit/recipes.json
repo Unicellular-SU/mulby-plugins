@@ -257,6 +257,22 @@
     "expect": { "outDuration": 4, "filterContains": ["hstack", "rgbashift", "deshake"] }
   },
   {
+    "id": "glitch-fallback-rgbashift-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "glitch": 0.5 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["rgbashift"],
+    "expect": { "outDuration": 3, "filterNotContains": ["rgbashift", "chromashift"] }
+  },
+  {
     "id": "color-full-preset",
     "stack": {
       "version": 1,

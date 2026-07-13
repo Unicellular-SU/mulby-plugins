@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：16/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：17/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -110,7 +110,7 @@
   - 证据：变体只有 ①hasAudio ②无音 ③无音+broadFallback，缺「hasAudio+fallbacks」；旧 ffmpeg 缺 colortemperature → 用户拿到被静音+全量降级的成片，除成功 toast 外零提示。LUT 路径失效同理。
   - 修法：梯度改为 {audio}→{audio+fallbacks}→{无音}→{无音+fallbacks}；更优：解析 stderr 的 `No such filter: 'xxx'` 精准 fallback 后重编译；任何降级都 toast 告知。
 
-- [ ] **B10 [P2/debt] glitch 的 rgbashift→chromashift 退化名存实亡：两滤镜同版本同源文件引入，旧 ffmpeg 必然一起缺失**
+- [x] **B10 [P2/debt] glitch 的 rgbashift→chromashift 退化名存实亡：两滤镜同版本同源文件引入，旧 ffmpeg 必然一起缺失**（✓ 2026-07-14 退化路径改为直接跳过 glitch（`!fb.has('rgbashift')` 时才发 rgbashift，否则不发任何滤镜）——rgbashift/chromashift 均 FFmpeg 4.1 同文件引入，退化到 chromashift 无意义。用户失去故障特效但导出不再失败，B9 的退化 toast 已告知「部分特效不可用」。「geq 等老滤镜近似」未取——无法在此跑 ffmpeg 验证，写错会让 fallback 变体也失败致导出彻底挂，风险大于收益。新增 recipe `glitch-fallback-rgbashift-skip`（fallbacks:['rgbashift']）断言 filterNotContains rgbashift+chromashift；既有非退化 glitch recipe 快照不变。29 recipe 全绿）
   - 位置：`src/ui/services/videoEdit/compile.ts:270-274`
   - 修法：退化改用老滤镜可表达的近似（split+overlay 通道错位或 lutrgb+blend），或退化时跳过 glitch 并 toast「当前 ffmpeg 不支持故障特效」；recipes 补 `fallbacks:['rgbashift']` 用例。
 
