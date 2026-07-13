@@ -16,7 +16,7 @@ interface ProviderState {
   upsert: (p: ProviderConfig) => void
   remove: (id: string) => void
   setActive: (kind: ProviderKind, id: string | null) => void
-  setKey: (id: string, key: string) => Promise<void>
+  setKey: (id: string, key: string) => Promise<boolean>
   getKey: (id: string) => Promise<string>
   activeFor: (kind: ProviderKind) => ProviderConfig | null
   exportJson: () => string
@@ -90,10 +90,14 @@ export const useProviders = create<ProviderState>((set, get) => ({
   },
 
   setKey: async (id, key) => {
+    // 返回是否真的写入成功——调用方据此如实提示，不再「失败也报已保存」
     try {
-      await storage()?.encrypted?.set(`providerKey:${id}`, key)
+      const enc = storage()?.encrypted
+      if (!enc?.set) return false // 系统安全存储不可用
+      await enc.set(`providerKey:${id}`, key)
+      return true
     } catch {
-      /* ignore */
+      return false
     }
   },
 

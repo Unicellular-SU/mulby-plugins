@@ -78,12 +78,12 @@ export function ProviderSettings() {
     setSel(p.id)
   }
   const upd = (patch: Partial<ProviderConfig>) => setDraft((d) => (d ? { ...d, ...patch } : d))
-  const save = () => {
+  const save = async () => {
     if (!draft) return
     upsert(draft)
-    void setKey(draft.id, keyVal)
-    useUi.getState().setSaving(false)
-    toast('Provider 已保存', 'success')
+    const ok = await setKey(draft.id, keyVal) // await + 校验：密钥写入失败要如实告知，别谎报已保存
+    if (ok) toast('Provider 已保存', 'success')
+    else toast('配置已保存，但密钥保存失败：系统安全存储不可用', 'error')
   }
 
   const isActive = draft ? (draft.kind === 'video' ? activeVideoId : activeAudioId) === draft.id : false
@@ -276,7 +276,7 @@ export function ProviderSettings() {
               </label>
 
               <div className="flex gap-2 mt-2 items-center">
-                <button onClick={save} className="px-4 py-1.5 rounded-md bg-indigo-500 text-white text-sm hover:bg-indigo-600">保存</button>
+                <button onClick={() => void save()} className="px-4 py-1.5 rounded-md bg-indigo-500 text-white text-sm hover:bg-indigo-600">保存</button>
                 <button
                   onClick={() => {
                     remove(draft.id)

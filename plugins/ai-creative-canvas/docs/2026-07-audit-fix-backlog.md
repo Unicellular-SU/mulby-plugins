@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：30/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：31/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -178,7 +178,7 @@
   - 位置：`src/ui/components/TaskCenter.tsx:17,48-56`；对照 `TopBar.tsx:19`、`generate.ts:305-320`、Gallery.focus（`Gallery.tsx:31-43`）
   - 修法：改为扫描 project.boards 全部卡片，行内标注画布名；jump 复用 Gallery.focus 逻辑（setActiveBoard→setViewport 居中→选中）。
 
-- [ ] **C13 [P2/bug] Provider 密钥保存静默吞错：setKey 失败也 toast「已保存」，且误操作工程保存指示器**
+- [x] **C13 [P2/bug] Provider 密钥保存静默吞错：setKey 失败也 toast「已保存」，且误操作工程保存指示器**（✓ 2026-07-14 providerStore.setKey 返回类型 Promise&lt;void&gt;→Promise&lt;boolean&gt;：encrypted 不可用或写入抛错返回 false（不再 catch 吞成 void）；ProviderSettings.save 改 async 并 `await setKey`——成功才 toast success，失败 toast error「密钥保存失败：系统安全存储不可用」。删除误写的 `useUi.setSaving(false)`（那操作的是工程自动保存指示器，与 Provider 保存无关）。keyVal 加载现有密钥故空值=主动清除，总是写入语义不变。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/ProviderSettings.tsx:81-87`、`providerStore.ts:92-98`
   - 修法：await setKey 并对失败给出明确错误 toast；删除误写的 `setSaving(false)`。
 
