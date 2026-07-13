@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：6/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
+**进度：7/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
 
 ---
 
@@ -55,7 +55,7 @@
   - 证据：deleteProjectStorage 只删 storage 键，media/<pid> 目录整体成孤儿；每次重生成用 `${cardId}_${stamp()}` 新文件名，旧文件从不删；生成中删卡后落盘文件无主。磁盘只增不减。
   - 修法：main.ts 增加 `removeProjectMedia(projectId)` RPC（递归删 media/{pid}），deleteProject 调用；synthSpeech 改写入 media/{projectId}/；可选：保存时对比卡片 assetLocalPath 集合做惰性孤儿清扫。先决：A5（已完成）。注意：A5 修复前的存量安装存在遗留 `media_<pid>` 目录（host 下载曾落此处），removeProjectMedia 须同时清扫 `media/<pid>` 与 `media_<pid>` 两个位置。
 
-- [ ] **A7 [P2/bug] downloadMedia/synthSpeech 网络拉取无超时、无大小上限、无内容类型校验**
+- [x] **A7 [P2/bug] downloadMedia/synthSpeech 网络拉取无超时、无大小上限、无内容类型校验**（✓ 2026-07-13 main.ts 新增 fetchBinaryGuarded：AbortSignal.timeout 整体超时（含响应体读取）+ content-type 前缀校验（媒体 image|video|audio、TTS audio|octet-stream）+ Content-Length 预检与流式计数兜底。downloadMedia 10min/500MB、synthSpeech 120s/50MB；UI 端两处 `mime:'video/mp4'` 硬编码改为优先用后端返回的真实 content-type。typecheck+后端构建+29 测试全绿）
   - 位置：`src/main.ts:92`（downloadMedia fetch）、`:158`（synthSpeech fetch）；连带 `src/ui/services/generate.ts:224` 硬编码 `mime:'video/mp4'`
   - 证据：签名 URL 过期返回 200+HTML 时被当视频落盘、卡片标 done；数百 MB 文件 base64（×1.33）整串跨 RPC，内存峰值 ≈2.3× 文件大小；服务器挂起则 RPC 无限等待、卡片永停 running。
   - 修法：fetch 加 `AbortSignal.timeout`（下载 5-10min、TTS 60-120s）；Content-Length 超阈值（如 500MB）拒绝，无长度则边读边计数；校验 content-type 前缀 image/|video/|audio/ 否则 `{ok:false,error:'非媒体响应: '+ct}`；返回真实 mime，UI 端去掉硬编码。

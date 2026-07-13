@@ -42,6 +42,51 @@ async function ensureDir(dir: string): Promise<void> {
   }
 }
 
+const MB = 1024 * 1024
+
+// 受控二进制拉取：整体超时（AbortSignal.timeout 覆盖含响应体读取的全程）+ 内容类型前缀校验
+// （签名 URL 过期常回 200+HTML 错误页，不校验会把 HTML 当媒体落盘）+ 大小上限
+// （Content-Length 预检；无声明或声明不实时流式计数兜底，防大文件把 base64 撑爆 RPC）。
+async function fetchBinaryGuarded(
+  url: string,
+  init: RequestInit | undefined,
+  guard: { timeoutMs: number; maxBytes: number; typePattern?: RegExp; typeLabel?: string }
+): Promise<{ ok: true; buf: Buffer; contentType: string } | { ok: false; error: string }> {
+  const resp = await fetch(url, { ...(init || {}), signal: AbortSignal.timeout(guard.timeoutMs) })
+  if (!resp.ok) {
+    let detail = ''
+    try { detail = (await resp.text()).slice(0, 300) } catch { /* ignore */ }
+    return { ok: false, error: `HTTP ${resp.status}${detail ? ` ${detail}` : ''}` }
+  }
+  const ct = (resp.headers.get('content-type') || '').toLowerCase()
+  if (guard.typePattern && ct && !guard.typePattern.test(ct)) {
+    return { ok: false, error: `${guard.typeLabel || '响应'}类型不符（${ct}）——地址可能已过期或返回了错误页` }
+  }
+  const declared = Number(resp.headers.get('content-length') || 0)
+  if (declared > guard.maxBytes) {
+    return { ok: false, error: `文件过大（${Math.round(declared / MB)}MB，上限 ${Math.round(guard.maxBytes / MB)}MB）` }
+  }
+  if (!resp.body) {
+    const ab = await resp.arrayBuffer()
+    if (ab.byteLength > guard.maxBytes) return { ok: false, error: `文件过大（上限 ${Math.round(guard.maxBytes / MB)}MB）` }
+    return { ok: true, buf: Buffer.from(ab), contentType: ct }
+  }
+  const reader = resp.body.getReader()
+  const chunks: Buffer[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > guard.maxBytes) {
+      try { await reader.cancel() } catch { /* ignore */ }
+      return { ok: false, error: `文件过大（超过上限 ${Math.round(guard.maxBytes / MB)}MB），已中止下载` }
+    }
+    chunks.push(Buffer.from(value))
+  }
+  return { ok: true, buf: Buffer.concat(chunks), contentType: ct }
+}
+
 // 递归删除目录下全部文件（宿主 filesystem 只有 unlink 无 rmdir——空目录骨架会残留，零体积可接受）
 async function removeDirFiles(dir: string): Promise<number> {
   let n = 0
@@ -109,18 +154,21 @@ export const rpc = {
         ? `${base}/${ROOT_DIR}/media/${sanitizeName(input.projectId, 'proj')}`
         : `${base}/${ROOT_DIR}/media`
       await ensureDir(dir)
-      const resp = await fetch(input.url)
-      if (!resp.ok) return { ok: false, error: `下载失败 HTTP ${resp.status}` }
-      const ct = resp.headers.get('content-type') || ''
+      const r = await fetchBinaryGuarded(input.url, undefined, {
+        timeoutMs: 10 * 60_000, // 生成的长视频可达数百 MB，给足 10 分钟
+        maxBytes: 500 * MB,
+        typePattern: /^(image|video|audio)\//,
+        typeLabel: '媒体'
+      })
+      if (!r.ok) return { ok: false, error: `下载失败 ${r.error}` }
+      const ct = r.contentType
       const guessedExt = ct.includes('mp4') ? 'mp4' : ct.includes('webm') ? 'webm' : ct.includes('png') ? 'png'
         : ct.includes('webp') ? 'webp' : ct.includes('jpeg') || ct.includes('jpg') ? 'jpg'
         : ct.includes('mpeg') || ct.includes('mp3') ? 'mp3' : ct.includes('wav') ? 'wav' : ''
       let fname = sanitizeName(input.name || `media_${Date.now()}`, `media_${Date.now()}`)
       if (!/\.[a-z0-9]{2,4}$/i.test(fname)) fname = `${fname}.${guessedExt || 'bin'}`
       const filePath = `${dir}/${fname}`
-      const ab = await resp.arrayBuffer()
-      const b64 = Buffer.from(ab).toString('base64')
-      await mulby.filesystem.writeFile(filePath, b64, 'base64')
+      await mulby.filesystem.writeFile(filePath, r.buf.toString('base64'), 'base64')
       return { ok: true, path: filePath, mime: ct || undefined }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -191,30 +239,34 @@ export const rpc = {
       const format = (input.format || 'mp3').toLowerCase()
       const mime = format === 'wav' ? 'audio/wav' : format === 'opus' ? 'audio/opus' : format === 'aac' ? 'audio/aac' : 'audio/mpeg'
       const url = `${String(input.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/speech`
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: input.model || 'tts-1',
-          voice: input.voice || 'alloy',
-          input: input.input,
-          response_format: format,
-          speed: input.speed || 1
-        })
-      })
-      if (!resp.ok) {
-        let detail = ''
-        try { detail = (await resp.text()).slice(0, 300) } catch { /* ignore */ }
-        return { ok: false, error: `配音请求失败 HTTP ${resp.status}${detail ? ` ${detail}` : ''}` }
-      }
+      const r = await fetchBinaryGuarded(
+        url,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: input.model || 'tts-1',
+            voice: input.voice || 'alloy',
+            input: input.input,
+            response_format: format,
+            speed: input.speed || 1
+          })
+        },
+        {
+          timeoutMs: 120_000,
+          maxBytes: 50 * MB,
+          typePattern: /^(audio\/|application\/octet-stream)/, // 部分兼容服务以 octet-stream 回二进制
+          typeLabel: '音频'
+        }
+      )
+      if (!r.ok) return { ok: false, error: `配音请求失败 ${r.error}` }
       const base = await resolveBaseDir()
       if (!base) return { ok: false, error: '无法确定存储目录' }
       const root = `${base}/${ROOT_DIR}`
       // 按工程归档到 media/<projectId>（与其他媒体一致，随工程删除清理）；无 projectId 时退回旧共享目录
       const dir = input.projectId ? `${root}/media/${sanitizeName(input.projectId, 'proj')}` : `${root}/audio`
       await ensureDir(dir)
-      const ab = await resp.arrayBuffer()
-      const b64 = Buffer.from(ab).toString('base64')
+      const b64 = r.buf.toString('base64')
       const ext = format === 'aac' ? 'aac' : format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'mp3'
       const filePath = `${dir}/tts_${Date.now()}.${ext}`
       await mulby.filesystem.writeFile(filePath, b64, 'base64')

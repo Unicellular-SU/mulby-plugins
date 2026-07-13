@@ -221,7 +221,7 @@ export async function generateCard(cardId: string): Promise<void> {
           progress: 1,
           assetUrl: toFileUrl(path),
           assetLocalPath: path,
-          mime: 'video/mp4',
+          mime: (r?.data?.mime as string) || 'video/mp4', // 后端已回真实 content-type，仅缺失时才回退
           meta: { ...mDone, task: undefined }
         })
       } else if (card.kind === 'audio') {
@@ -288,7 +288,7 @@ async function resumeVideoCard(cardId: string, taskId: string, providerId: strin
     if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
     const mDone = useGraph.getState().getCard(cardId)?.meta || {}
     useGraph.getState().updateCard(cardId, {
-      status: 'done', progress: 1, assetUrl: toFileUrl(path), assetLocalPath: path, mime: 'video/mp4', meta: { ...mDone, task: undefined }
+      status: 'done', progress: 1, assetUrl: toFileUrl(path), assetLocalPath: path, mime: (r?.data?.mime as string) || 'video/mp4', meta: { ...mDone, task: undefined }
     })
     notifyDone(cardId)
   } catch (e: any) {
