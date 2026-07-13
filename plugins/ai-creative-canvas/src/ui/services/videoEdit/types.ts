@@ -96,12 +96,12 @@ export interface ColorParams {
 // ---- overlay：一切文字/图形（canvas→PNG→overlay）----
 export type OverlaySub = 'text' | 'watermark' | 'progress' | 'timecode' | 'sticker' | 'pip' | 'mosaic' | 'subtitle' | 'frame'
 export interface SubtitleCue {
-  start: number // 输出时间基秒
+  start: number // 源时间基秒（与 OverlayRange 一致；编译器 buildTimeMap 折算到输出时间基）
   end: number
   text: string
 }
 export interface OverlayRange {
-  start: number // 源时间基秒；编译器按累计 rate 折算
+  start: number // 源时间基秒；编译器 buildTimeMap 按 trim 保留段折叠 + rate 折算 + reverse 镜像
   end: number
 }
 export interface OverlayParams {

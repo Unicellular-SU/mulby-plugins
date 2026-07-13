@@ -1,10 +1,12 @@
 // 滤镜图编译器：EditStack → 一条（必要时两遍）ffmpeg 命令
 // 设计依据：docs/ai-creative-canvas-video-editor.md §3.2 / ⑩附录
 //
-// 关键约定（P0 落地决策，偏离原稿 §3.2 的「源时间基 + rate 折算」）：
-//   overlay/audio 的时间窗 (start,end) 以**输出时间基**存储（即预览看到的最终时间轴），
-//   编译器不再做 rate/trim 折算 —— 因为叠加/音频面板编辑时预览本就是 post-trim/post-speed
-//   的成片，用户天然在输出时间轴上选窗。这样规避了一整类时间错位 bug。
+// 关键约定（时间基契约，B1 修复后）：
+//   overlay/字幕/静音的时间窗 (start,end) 以**源时间基**存储（与预览一致：预览 <video> 放的是
+//   源文件，playhead=currentTime 为源时间，删除段靠跳播实现、变速不改播放速率，滑块 max=baseDuration）。
+//   编译器用 buildTimeMap 的 srcToOut 把源时间折算到输出时间轴（trim 保留段折叠 + 变速倍率 + reverse 镜像），
+//   因为 overlay/audio 施加在 trim/setpts 之后、t 已是输出时间基。这样预览与导出对齐。
+//   （历史：曾误改为「输出时间基、不折算」，与源时间基的 UI 编辑冲突，trim/变速下时间窗错位——已回正。）
 //
 // 视频链固定顺序：trim(多段concat) → setpts/reverse(变速) → transpose(方向) →
 //   crop/flip/scale/pad(几何) → eq/color/unsharp/vignette(调色) → overlay×N → format
@@ -83,6 +85,38 @@ export function stackOutDuration(stack: EditStack): number {
   const trim = enabled.find((o) => o.kind === 'trim')?.params as TrimParams | undefined
   const speed = enabled.find((o) => o.kind === 'speed')?.params as SpeedParams | undefined
   return computeOutDuration(stack, trim, speed)
+}
+
+// 源时间基 → 输出时间基映射。overlay/字幕/静音的时间窗均以源时间基存储（见 types.ts / 头注）。
+// 语义：先按 trim 保留段折叠源时间（删除段坍缩到接缝），再除以变速倍率；reverse 镜像；
+// boomerang 下同一源瞬间在正放/倒放两段各出现一次，单个 between 无法表达 → 退回全程显示。
+interface TimeMap {
+  srcToOut(t: number): number
+  // 返回 `:enable='between(...)'`（已折算到输出时间基）或 ''（全程/无窗）
+  enable(range?: { start: number; end: number }): string
+}
+function buildTimeMap(stack: EditStack, trim?: TrimParams, speed?: SpeedParams): TimeMap {
+  const keeps = (trim?.segments || []).filter((s) => s.keep !== false && s.out > s.in).sort((a, b) => a.in - b.in)
+  const rate = speed && speed.rate > 0 ? speed.rate : 1
+  const reverse = !!speed?.reverse
+  const boomerang = !!speed?.boomerang
+  const trimmedDur = keeps.length ? keeps.reduce((a, s) => a + (s.out - s.in), 0) : stack.baseDuration || 0
+  const baseOutDur = rate > 0 ? trimmedDur / rate : trimmedDur // 变速后、boomerang/freeze 前的时长（reverse 镜像基准）
+  const postTrim = (t: number): number =>
+    keeps.length ? keeps.reduce((acc, s) => acc + Math.max(0, Math.min(t, s.out) - s.in), 0) : t
+  const srcToOut = (t: number): number => {
+    const o = postTrim(t) / rate
+    return reverse && !boomerang ? Math.max(0, baseOutDur - o) : o
+  }
+  const enable = (range?: { start: number; end: number }): string => {
+    if (!range) return ''
+    if (boomerang) return '' // 无法用单 between 表达，退回全程
+    let a = srcToOut(range.start)
+    let b = srcToOut(range.end)
+    if (a > b) [a, b] = [b, a] // reverse 会翻转首尾
+    return `:enable='between(t,${a.toFixed(3)},${b.toFixed(3)})'`
+  }
+  return { srcToOut, enable }
 }
 
 // 输出时长：trim 取保留段之和，除以变速倍率，再计回旋(×2)与片尾冻结(+freeze)
@@ -327,11 +361,11 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
   }
 }
 
-function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, outDur: number): void {
+function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, outDur: number, tm: TimeMap): void {
   for (const op of ops) {
     if (op.kind !== 'overlay') continue
     const p = op.params as OverlayParams
-    const en = p.range ? `:enable='between(t,${p.range.start.toFixed(3)},${p.range.end.toFixed(3)})'` : ''
+    const en = tm.enable(p.range) // 源时间窗 → 输出时间基 enable
     const xExpr = `main_w*${p.rect.x.toFixed(4)}`
     const yExpr = `main_h*${p.rect.y.toFixed(4)}`
     if (p.sub === 'mosaic') {
@@ -353,11 +387,12 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, 
     const resolved = ctx.overlayResolved?.[op.id]
     if (!resolved) continue // 未备好（PNG 尚未生成）→ 跳过，叠加段会补
     if (p.sub === 'subtitle') {
-      // 字幕：每条 cue 一张 PNG，按其时间窗 overlay 串联（底部居中）
+      // 字幕：每条 cue 一张 PNG，按其时间窗 overlay 串联（底部居中）；cue 时间为源时间基，折算到输出
       for (const cue of resolved.cues || []) {
         const cidx = g.addInput(cue.path)
         const out = g.freshLabel('v')
-        g.raw(`[${g.v}][${cidx}:v]overlay=${xExpr}:${yExpr}:enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'[${out}]`)
+        const cen = tm.enable({ start: cue.start, end: cue.end }) || `:enable='between(t,${cue.start.toFixed(3)},${cue.end.toFixed(3)})'`
+        g.raw(`[${g.v}][${cidx}:v]overlay=${xExpr}:${yExpr}${cen}[${out}]`)
         g.setV(out)
       }
       continue
@@ -403,7 +438,7 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, 
   }
 }
 
-function applyAudio(g: Graph, p: AudioParams, outDur: number, fb: Set<string>): void {
+function applyAudio(g: Graph, p: AudioParams, outDur: number, fb: Set<string>, tm: TimeMap): void {
   if (g.a) {
     if (p.gainDb) g.af(`volume=${p.gainDb.toFixed(2)}dB`)
     if (p.fadeIn && p.fadeIn > 0) g.af(`afade=t=in:st=0:d=${p.fadeIn.toFixed(2)}`)
@@ -411,7 +446,8 @@ function applyAudio(g: Graph, p: AudioParams, outDur: number, fb: Set<string>): 
       g.af(`afade=t=out:st=${Math.max(0, outDur - p.fadeOut).toFixed(2)}:d=${p.fadeOut.toFixed(2)}`)
     }
     for (const r of p.muteRanges || []) {
-      g.af(`volume=0:enable='between(t,${r.start.toFixed(3)},${r.end.toFixed(3)})'`)
+      const en = tm.enable(r) // 源时间窗 → 输出时间基（与视频链同一映射，音频经 atrim/atempo 后也是输出时间基）
+      if (en) g.af(`volume=0${en}`)
     }
     if (p.denoise) {
       if (fb.has('denoise')) g.af('highpass=f=80,lowpass=f=12000')
@@ -458,6 +494,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   const speed = single.speed?.params as SpeedParams | undefined
   const exp = (single.export?.params as ExportParams | undefined) || ({ format: 'mp4', crf: 23 } as ExportParams)
   const outDuration = computeOutDuration(stack, trim, speed)
+  const tm = buildTimeMap(stack, trim, speed)
 
   const g = new Graph(ctx.hasAudio)
 
@@ -468,12 +505,12 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   if (speed?.motionTrail && speed.motionTrail >= 2) applyMotionTrail(g, speed.motionTrail, fb)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams, fb)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
-  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW, outDuration)
+  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW, outDuration, tm)
   // export 画幅（若未在 transform 指定）
   if (exp.outW && exp.outH) applyFit(g, exp.outW, exp.outH, exp.fit || 'contain')
 
   // 音频链
-  if (single.audio) applyAudio(g, single.audio.params as AudioParams, outDuration, fb)
+  if (single.audio) applyAudio(g, single.audio.params as AudioParams, outDuration, fb, tm)
 
   // 成片首尾黑场淡入淡出（视频 + 音频同步），最后施加
   if (exp.fadeIn && exp.fadeIn > 0) {

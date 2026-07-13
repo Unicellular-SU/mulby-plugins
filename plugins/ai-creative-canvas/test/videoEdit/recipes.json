@@ -67,7 +67,7 @@
       "hasAudio": true,
       "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } }
     },
-    "expect": { "outDuration": 3, "filterContains": ["trim", "setpts", "overlay"] }
+    "expect": { "outDuration": 3, "filterContains": ["trim", "setpts", "overlay", "enable='between(t,0.000,0.750)'"] }
   },
   {
     "id": "trim-delete-middle-subtitle",
@@ -577,5 +577,28 @@
       }
     },
     "expect": { "outDuration": 5, "filterContains": ["overlay"] }
+  },
+  {
+    "id": "trim-secondseg-overlay-timewindow-fold",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "trim1", "kind": "trim", "enabled": true, "params": { "segments": [
+          { "in": 0, "out": 2, "keep": true },
+          { "in": 2, "out": 6, "keep": false },
+          { "in": 6, "out": 10, "keep": true }
+        ] } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Late", "range": { "start": 7, "end": 9 }, "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": false,
+      "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } }
+    },
+    "expect": { "outDuration": 6, "filterContains": ["overlay", "enable='between(t,3.000,5.000)'"], "filterNotContains": ["between(t,7.000,9.000)"] }
   }
 ]

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：7/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
+**进度：8/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
 
 ---
 
@@ -62,7 +62,7 @@
 
 ## 批次 B · 剪辑引擎正确性（WS1 遗留风险，B1 是根因先做）
 
-- [ ] **B1 [P1/bug] overlay/字幕/静音时间基契约三处矛盾：trim/变速下导出时间窗必错（预览↔导出不一致的根因）**
+- [x] **B1 [P1/bug] overlay/字幕/静音时间基契约三处矛盾：trim/变速下导出时间窗必错（预览↔导出不一致的根因）**（✓ 2026-07-13 核实预览真相：预览 `<video>` 放的是源文件、playhead=currentTime 为源时间、删除段靠跳播、变速不改播放速率、滑块 max=baseDuration——UI 全程源时间基，compile.ts 头注声称的「预览已 post-trim/post-speed」是错的。统一契约为「源时间基存储、编译器折算」：新增 buildTimeMap（trim 保留段折叠→删除段坍缩到接缝，除以 rate，reverse 镜像，boomerang 退回全程），applyOverlays 的 range、字幕 cue、applyAudio 的 muteRanges 三处都过映射；修正 compile.ts 头注与 types.ts 两处时间基注释（SubtitleCue 原误标「输出时间基」）。验证：`trim-two-keeps-speed2x` 的窗 `1.500→0.750`（rate2 折算）、新增 recipe `trim-secondseg-overlay-timewindow-fold` 锁定跨段偏移 源`[7,9]→[3,5]`，均加了 filterContains 数值断言；`trim-delete-middle-subtitle` cue 都在首段故快照不变。typecheck+26 recipe 快照全绿。**注**：预览侧本就源时间基、现与导出对齐，无需改预览；timeline 的 srcEqOut 拖拽禁用可后续放宽，不属本项）
   - 位置：`src/ui/services/videoEdit/compile.ts:334`（enable 不折算）、`types.ts:104`（注释称「源时间基、编译器折算」）、`VideoStudioModal.tsx:411-412,806,897-899,941-943,1166-1167`（UI 按源时间基写入/编辑）
   - 证据：trim 保留 [7,10]（输出 3s），播放头 8s 处加 overlay 8–9 → 导出 `between(t,8,9)` 永不出现；speed 2× 时源 4–8s 字幕落在输出 4–8s（应为 2–4s）。muteRanges（compile.ts:413-415）、subtitle cues（:357-362）同病。**snapshots.json:81 已把未折算行为锁成基准**。
   - 修法：统一为「存源时间基、编译器折算」：compile.ts 增加 `srcToOut(t)`（按 trim 保留段累计扣删除段，再除以 rate；reverse/boomerang 先禁用 range 或按 outDur-t 镜像），applyOverlays/muteRanges/cues 三处都过映射；改 compile.ts 头注；recipes 的时间窗用例升级为断言具体数值（如 trim[0,3]+[7,10]+2x 下源 8–9 → between(0.5,1.0)）后刷新快照。
