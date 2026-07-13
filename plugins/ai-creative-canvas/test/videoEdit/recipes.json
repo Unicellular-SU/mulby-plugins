@@ -150,6 +150,37 @@
     "expect": { "outDuration": 8, "filterContains": ["concat"] }
   },
   {
+    "id": "trim-boomerang-hasaudio-nosink",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "trim1", "kind": "trim", "enabled": true, "params": { "segments": [{ "in": 0, "out": 4, "keep": true }] } },
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "boomerang": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 8, "filterContains": ["atrim", "anullsink", "concat=n=2:v=1"], "argsContains": ["-an"] }
+  },
+  {
+    "id": "speed2x-boomerang-hasaudio-nosink",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 2, "reverse": false, "pitchCompensate": true, "boomerang": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 10, "filterContains": ["atempo", "anullsink"], "argsContains": ["-an"] }
+  },
+  {
     "id": "speed-slowmo-smooth",
     "stack": {
       "version": 1,

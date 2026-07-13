@@ -229,7 +229,10 @@ function applyTimeEffects(g: Graph, p: SpeedParams): void {
     g.raw(`[${b}]reverse[${r}]`)
     g.raw(`[${a}][${r}]concat=n=2:v=1[${out}]`)
     g.setV(out)
-    g.a = null // 回旋去音轨（正放+倒放的音频无意义）
+    // 回旋去音轨（正放+倒放的音频无意义）。但若 trim/变速已产出具名音频输出（非原始 0:a 输入），
+    // 直接置 null 会让该标签悬空 → filter_complex 报 "Output pad not connected"。先 anullsink 消费掉。
+    if (g.a && g.a !== '0:a') g.raw(`[${g.a}]anullsink`)
+    g.a = null
   }
   if (p.freezeEnd && p.freezeEnd > 0) {
     g.vf(`tpad=stop_mode=clone:stop_duration=${p.freezeEnd.toFixed(2)}`)

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：14/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：15/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -100,7 +100,7 @@
   - 证据：导出 ready 门槛只等 probeDuration 与 metadata 无依赖；预览黑屏但探测成功时 baseW 恒 16 → renderTextPng 画布 ≈13px、pip ≈2px，无任何报错。
   - 修法：宽高不依赖 `<video>`——ensureFfmpeg 后与 probeDuration 一并用 ffmpeg 探测分辨率再置 ready；或 exportStack 前校验 baseW>100 否则阻断提示。
 
-- [ ] **B8 [P2/bug] boomerang 与 trim/变速组合产生悬空音频输出标签，主变体 filtergraph 非法，全靠失败重试兜底**
+- [x] **B8 [P2/bug] boomerang 与 trim/变速组合产生悬空音频输出标签，主变体 filtergraph 非法，全靠失败重试兜底**（✓ 2026-07-14 applyTimeEffects boomerang 分支置 g.a=null 前，若 g.a 是滤镜输出（≠原始 `0:a` 输入）先 `[label]anullsink` 消费，消除悬空报错。现有 speed-boomerang(rate=1 无 trim) g.a 仍为 `0:a`→不加 sink，快照不变。新增 recipe `trim-boomerang-hasaudio-nosink`（[ta0]anullsink）+`speed2x-boomerang-hasaudio-nosink`（[a1]anullsink）断言 anullsink 存在且 -an，28 recipe 全绿）
   - 位置：`src/ui/services/videoEdit/compile.ts:190-199`（g.a=null 前不清理已产出的 [ta0]/[ca]/atempo 链标签）
   - 证据：hasAudio 源+trim+boomerang → 变体① 必编译失败（Output pad not connected），靠变体②出片；测试用例 speed-boomerang 恰无 trim/rate 绕开缺陷。
   - 修法：boomerang 置空前若 g.a≠'0:a' 追加 `anullsink`（或 Graph 记录音频语句整体剔除）；recipes 补 trim+boomerang+hasAudio、rate2x+boomerang+hasAudio 两条。
