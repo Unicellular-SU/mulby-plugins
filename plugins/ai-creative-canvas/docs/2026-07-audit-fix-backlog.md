@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：32/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：33/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -186,7 +186,7 @@
   - 位置：`src/ui/components/ProviderSettings.tsx:281-288`
   - 修法：confirmDialog（danger 样式），文案说明「将同时删除已保存的 API Key，不可恢复」。
 
-- [ ] **C15 [P2/bug] pollTaskTemplate 不识别完成态：videoUrlPath 配错时任务已成功却空转 10 分钟报「生成超时」**
+- [x] **C15 [P2/bug] pollTaskTemplate 不识别完成态：videoUrlPath 配错时任务已成功却空转 10 分钟报「生成超时」**（✓ 2026-07-14 pollTaskTemplate 补 doneValues 判定（`cfg.doneValues || 'completed,succeeded,success'`，与 pollTaskDefault 一致）：状态命中 done 但 videoUrlPath 取不到 URL 时立即抛「任务已完成但未取到结果 URL（请检查 videoUrlPath 配置）」，而非空转到 600s 超时把配错伪装成超时。url 检查在 done 检查之前，配置正确时先 return，done-check 仅在配错场景触发。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/services/providers/engine.ts:92-113`；对照默认轮询 `:138-142` 的快速失败
   - 修法：增加 doneValues 判定（`cfg.doneValues || 'completed,succeeded,success'`）：状态命中 done 但取不到 URL 时立即抛「已完成但未找到结果 URL（检查 videoUrlPath）」。
 

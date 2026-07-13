@@ -92,6 +92,7 @@ function renderTemplate(tpl: string, vars: Record<string, string | undefined>): 
 async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
   const interval = cfg.pollIntervalMs || 3000
   const timeout = cfg.timeoutMs || 600000
+  const done = (cfg.doneValues || 'completed,succeeded,success').split(',').map((s) => s.trim().toLowerCase())
   const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
   const startedAt = Date.now()
   // eslint-disable-next-line no-constant-condition
@@ -109,6 +110,8 @@ async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: strin
     const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
     onProgress?.(0.5)
     if (st && fail.includes(st)) throw new Error('生成失败：' + st)
+    // 已完成但 videoUrlPath 取不到 URL → 大概率是路径配错，立即快速失败而非空转到超时（与 pollTaskDefault 一致）
+    if (st && done.includes(st)) throw new Error('任务已完成但未取到结果 URL（请检查 Provider 的 videoUrlPath 配置）')
   }
 }
 
