@@ -41,7 +41,9 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
     if (color.saturation != null && color.saturation !== 1) fParts.push(`saturate(${color.saturation})`)
     if (color.hue) fParts.push(`hue-rotate(${color.hue}deg)`)
     if (color.invert) fParts.push('invert(1)')
-    if (color.gamma || color.temp || color.tint || color.sharpen || color.vignette || color.grain || color.lutPath || color.preset) exact = false
+    // brightness：预览用 CSS brightness(1+b) 是乘法（暗部按比例保持），导出用 ffmpeg eq=brightness 是加法（整体平移、黑位被抬起/压死）——
+    // 语义不同，只调亮度时也非精确预览，如实置 exact=false（b=0 无改动则不告警）。
+    if (color.brightness || color.gamma || color.temp || color.tint || color.sharpen || color.vignette || color.grain || color.lutPath || color.preset) exact = false
   }
 
   // 几何 → transform / clip-path

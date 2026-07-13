@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：11/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：12/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -86,7 +86,7 @@
   - 前置决策：预览侧 crop 是「整帧+遮罩」还是「只显示裁剪帧」？定了才能决定换算方向。若保持整帧预览：编译时把 overlay 坐标从原始帧归一换算到裁剪后帧（x'=(x-crop.x)/crop.w、y'=(y-crop.y)/crop.h），frame/progress/pip 画布尺寸改用裁剪/适配后输出宽高。
   - 验证：加 crop+text、crop+frame 两条 recipe 断言换算后的 overlay x 表达式；换算生效后可回收 B4 的 exact=false（预览与导出一致则不再需要角标）。
 
-- [ ] **B5 [P1/bug] 亮度预览 CSS 乘法 vs 导出 eq 加法，语义不同却未标 exact=false（计划 T3 点名项）**
+- [x] **B5 [P1/bug] 亮度预览 CSS 乘法 vs 导出 eq 加法，语义不同却未标 exact=false（计划 T3 点名项）**（✓ 2026-07-13 preview.ts inexact 条件补 `color.brightness`：只调亮度时也置 exact=false 挂角标（b=0 不告警）。与 B4 同策略选诚实角标——「改导出为乘法语义（curves/colorlevels）」需真跑 ffmpeg 视觉验证且改变所有存量用户出图，风险大，未取（角标已消除『声称精确』的失真主因）。typecheck+UI 构建+29 测试全绿）
   - 位置：`src/ui/services/videoEdit/preview.ts:39,44`、`compile.ts:302`
   - 证据：b=-0.4 预览暗部有层次、导出大面积死黑；inexact 列表含 gamma/temp/tint/…唯独不含 brightness。
   - 修法：最小改动——exact 判定加入 `brightness!==0`；或改导出为乘法语义（curves/colorlevels 实现 y=x·(1+b)）。
