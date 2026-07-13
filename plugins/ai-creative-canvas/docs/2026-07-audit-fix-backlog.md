@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：31/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：32/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -182,7 +182,7 @@
   - 位置：`src/ui/components/ProviderSettings.tsx:81-87`、`providerStore.ts:92-98`
   - 修法：await setKey 并对失败给出明确错误 toast；删除误写的 `setSaving(false)`。
 
-- [ ] **C14 [P2/bug] 删除 Provider 无确认：单击即删配置并销毁加密密钥**
+- [x] **C14 [P2/bug] 删除 Provider 无确认：单击即删配置并销毁加密密钥**（✓ 2026-07-14 ProviderSettings 删除按钮加 confirmDialog(danger)：文案带 Provider 名（draft.label）并说明「将删除…及其已保存的 API Key，不可恢复」——防误点（删除按钮紧邻保存/测试）。remove 会同时删配置+encrypted key，确认后才执行。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/ProviderSettings.tsx:281-288`
   - 修法：confirmDialog（danger 样式），文案说明「将同时删除已保存的 API Key，不可恢复」。
 

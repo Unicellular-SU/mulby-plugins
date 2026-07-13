@@ -4,6 +4,7 @@ import { useEscClose } from '../hooks'
 import { useProviders } from '../store/providerStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
+import { confirmDialog } from '../store/dialogStore'
 import type { ProviderConfig } from '../services/providers/types'
 import { presetOpenAiTts, presetCustomVideo, PROVIDER_TEMPLATES } from '../services/providers/presets'
 import { testProvider } from '../services/providers/engine'
@@ -278,7 +279,16 @@ export function ProviderSettings() {
               <div className="flex gap-2 mt-2 items-center">
                 <button onClick={() => void save()} className="px-4 py-1.5 rounded-md bg-indigo-500 text-white text-sm hover:bg-indigo-600">保存</button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    // 删除会同时销毁已保存的加密 API Key 且不可恢复，二次确认防误点（删除按钮紧邻保存/测试）
+                    const ok = await confirmDialog({
+                      title: '删除 Provider',
+                      message: `将删除「${draft.label || '该 Provider'}」及其已保存的 API Key，不可恢复。确定？`,
+                      confirmLabel: '删除',
+                      cancelLabel: '取消',
+                      danger: true
+                    })
+                    if (!ok) return
                     remove(draft.id)
                     setSel(null)
                   }}
