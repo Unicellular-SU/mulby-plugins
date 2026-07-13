@@ -306,7 +306,7 @@
         "tc1": { "kind": "timecode", "path": "/test/fixtures/tc.png", "cellW": 48, "cellH": 24, "step": 1 }
       }
     },
-    "expect": { "outDuration": 6, "filterContains": ["scale=", "overlay"] }
+    "expect": { "outDuration": 6, "filterContains": ["scale=", "overlay"], "argsContains": ["-loop 1 -i /test/fixtures/tc.png"] }
   },
   {
     "id": "overlay-pip-missing-resolved",

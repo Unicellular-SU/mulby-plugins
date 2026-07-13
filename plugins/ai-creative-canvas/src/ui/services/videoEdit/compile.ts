@@ -139,7 +139,7 @@ class Graph {
   v = '0:v'
   a: string | null
   n = 0
-  inputs: string[] = [] // 额外 -i（input 0 之外）
+  inputs: { path: string; pre?: string[] }[] = [] // 额外 -i（input 0 之外）；pre 为该输入的前置参数（如 -loop 1）
   constructor(hasAudio: boolean) {
     this.a = hasAudio ? '0:a' : null
   }
@@ -170,8 +170,8 @@ class Graph {
   setV(label: string): void {
     this.v = label
   }
-  addInput(path: string): number {
-    this.inputs.push(path)
+  addInput(path: string, pre?: string[]): number {
+    this.inputs.push({ path, pre })
     return this.inputs.length // input 索引（input 0 是源，故额外输入从 1 起）
   }
   freshLabel(p = 'x'): string {
@@ -399,8 +399,10 @@ function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, 
       continue
     }
     if (p.sub === 'timecode' && resolved.path && resolved.cellW) {
-      // 精灵图按时间裁出当前格（单输入单次；crop 的 x 逐帧求值）
-      const idx = g.addInput(resolved.path)
+      // 精灵图按时间裁出当前格：必须 -loop 1 让单帧 PNG 持续产帧，crop 的 x 才能逐帧求值前推
+      // （否则单帧只在 t=0 求值一次，overlay eof_action=repeat 把首格重复到全片 → 时间码永远停在 0:00）。
+      // 输出长度由主流经 overlay 收束，-loop 1 的无限输入不会让成片变长。
+      const idx = g.addInput(resolved.path, ['-loop', '1'])
       const cw = resolved.cellW
       const ch = resolved.cellH || cw
       const step = resolved.step || 1
@@ -534,7 +536,10 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   const pass1Out = await pathFor(ctx.projectId, 'studio', pass1Ext)
 
   const args: string[] = ['-i', ctx.inPath]
-  for (const inp of g.inputs) args.push('-i', inp)
+  for (const inp of g.inputs) {
+    if (inp.pre) args.push(...inp.pre)
+    args.push('-i', inp.path)
+  }
   args.push('-filter_complex', g.parts.join(';'), '-map', `[${g.v}]`)
   if (g.a) args.push('-map', `[${g.a}]`)
   else args.push('-an')

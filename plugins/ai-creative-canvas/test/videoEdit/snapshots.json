@@ -384,6 +384,8 @@
           "/test/fixtures/pip.mp4",
           "-i",
           "/test/fixtures/progress.png",
+          "-loop",
+          "1",
           "-i",
           "/test/fixtures/tc.png",
           "-filter_complex",

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：9/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
+**进度：10/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
 
 ---
 
@@ -73,7 +73,7 @@
   - 证据：`k = 6500 + temp*25` 把正 temp 映射到冷端（colortemperature 低开尔文=暖），UI 约定正=暖；退化路径 rs=+0.3t 方向却是对的——同一配方新旧 ffmpeg 色调相反。
   - 修法：改为 `k = 6500 - temp*25`；recipes 增加 temp=+50 用例，断言主路径 K 值 <6500 且退化路径 rs>0，防再次反向。
 
-- [ ] **B3 [P1/bug] timecode 叠加导出后永远停在 0:00：精灵图输入缺 `-loop 1`，crop 的 t 表达式只求值一次**
+- [x] **B3 [P1/bug] timecode 叠加导出后永远停在 0:00：精灵图输入缺 `-loop 1`，crop 的 t 表达式只求值一次**（✓ 2026-07-13 Graph.inputs 从 `string[]` 改为 `{path,pre?}[]` 支持 per-input 前置参数，args 组装相应展开；timecode 精灵图输入加 `['-loop','1']` 让单帧 PNG 持续产帧、crop 的 x 逐帧前推。输出长度由主流经 overlay 收束，无限输入不会让成片变长。验证：已有 `overlay-pip-mosaic-progress-timecode` recipe 加 argsContains `-loop 1 -i /test/fixtures/tc.png` 锁定，26 recipe 全绿。**遗留**：backlog 建议的「真跑 ffmpeg 抽帧断言第 2 秒≠第 0 秒」属集成测试，归入 B12）
   - 位置：`src/ui/services/videoEdit/compile.ts:365-376,498-499`；对照 `mediaOverlay.ts:127-153`
   - 证据：image2 单帧输入只产 t=0 一帧，crop x 恒为 0，overlay 以 eof_action=repeat 把第一格重复到整片；progress 条能动是因为其表达式写在 overlay 上按主流求值。
   - 修法：g.addInput 支持 per-input 前置参数，对精灵图输入加 `['-loop','1']`；或改用 `[idx:v]loop=loop=-1:size=1` 滤镜。补集成用例：抽帧断言第 2 秒画面 ≠ 第 0 秒。
