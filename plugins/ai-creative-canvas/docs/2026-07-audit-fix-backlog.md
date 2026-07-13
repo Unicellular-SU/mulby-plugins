@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：12/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：13/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -91,7 +91,7 @@
   - 证据：b=-0.4 预览暗部有层次、导出大面积死黑；inexact 列表含 gamma/temp/tint/…唯独不含 brightness。
   - 修法：最小改动——exact 判定加入 `brightness!==0`；或改导出为乘法语义（curves/colorlevels 实现 y=x·(1+b)）。
 
-- [ ] **B6 [P1/bug] 打码（mosaic）预览框高度硬编码 20%，忽略 rect.h——隐私遮挡漏码风险**
+- [x] **B6 [P1/bug] 打码（mosaic）预览框高度硬编码 20%，忽略 rect.h——隐私遮挡漏码风险**（✓ 2026-07-13 PreviewOverlay 加 height 字段并透传 rect.h；mosaic 预览框 `height:'20%'`→`${o.height*100}%`，与导出 crop `h='ih*rect.h'`（compile.ts:377）对齐——消除漏码风险。pip 分支保持 aspectRatio:16/9 不动：导出 pip 用 `scale=pipW:-2` 自动高度、不读 rect.h，改用 rect.h 反而误导，且 pip 已标 exact=false。typecheck+UI 构建+29 测试全绿）
   - 位置：`src/ui/components/VideoStudioModal.tsx:415`；对照高度滑块 `:1157`、导出 `compile.ts:342`
   - 修法：PreviewOverlay 增加 height 字段（preview.ts:70-73 透传 rect.h），mosaic 分支改 `height:\`${o.height*100}%\``；pip 分支同理用 rect.h 替代硬编码 aspectRatio。
 

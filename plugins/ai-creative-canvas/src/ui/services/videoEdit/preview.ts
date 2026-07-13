@@ -11,6 +11,7 @@ export interface PreviewOverlay {
   left: number // 0..1
   top: number
   width: number
+  height: number // 0..1（rect.h；打码/PiP 预览按它出框，须与导出一致——遮挡范围是强正确性需求）
   text?: string
   style?: Record<string, unknown>
   range?: { start: number; end: number }
@@ -71,7 +72,7 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
   const overlayOps = enabled.filter((o) => o.kind === 'overlay')
   const overlays: PreviewOverlay[] = overlayOps.map((o) => {
       const p = o.params as OverlayParams
-      return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, text: p.text, style: p.style, range: p.range, cues: p.cues }
+      return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, height: p.rect.h, text: p.text, style: p.style, range: p.range, cues: p.cues }
     })
   if (overlays.some((o) => o.sub === 'mosaic' || o.sub === 'pip' || o.sub === 'progress' || o.sub === 'timecode')) exact = false
   if (overlayOps.some((o) => {

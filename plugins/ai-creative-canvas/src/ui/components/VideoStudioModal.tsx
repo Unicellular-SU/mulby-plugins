@@ -412,7 +412,7 @@ function OverlayLayer({ overlays, playhead, dur, baseH, vrect }: {
         if (o.sub !== 'subtitle' && o.range && (playhead < o.range.start || playhead > o.range.end)) return null
         if (o.sub === 'mosaic') {
           return <div key={o.id} className="absolute pointer-events-none rounded-sm border-2 border-dashed border-amber-300/80 bg-black/30 backdrop-blur-sm grid place-items-center text-[9px] text-amber-200"
-            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: '20%' }}>打码区</div>
+            style={{ left: `${o.left * 100}%`, top: `${o.top * 100}%`, width: `${o.width * 100}%`, height: `${o.height * 100}%` }}>打码区</div>
         }
         if (o.sub === 'pip') {
           return <div key={o.id} className="absolute pointer-events-none rounded border-2 border-pink-400/80 bg-pink-500/20 grid place-items-center text-[9px] text-pink-100"
