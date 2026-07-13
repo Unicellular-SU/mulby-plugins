@@ -72,6 +72,7 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
     if (useRec) doc = name ? { ...rec.doc, name } : rec.doc
     await clearRecovery(pid)
   }
+  if (doc.id !== pid) doc = { ...doc, id: pid } // 强制 doc.id 与注册表键一致——自动保存按 doc.id 键控（App.tsx），不容分叉
   sanitizeDoc(doc)
   applyLoaded(pid, doc)
   void resumeInflightVideos() // 断点续跑：重开/切换后继续在途视频任务的轮询

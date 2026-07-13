@@ -69,8 +69,10 @@ export default function App() {
 
   // 自动保存（防抖）+ 崩溃恢复快照（独立键，更短防抖；主存成功后清除）
   useEffect(() => {
-    // 注意：id 必须在「调度时」随 p 一起捕获——若在「触发时」才读 activeId，
-    // 跨工程切换/删除时挂起的保存会把旧 doc 写到新工程 id 上（串工程）。
+    // 注意：保存键取 doc 自身的 project.id（各载入路径均保证 pid===doc.id），绝不读 useProject.activeId——
+    // 切换/删除工程存在窗口期：activeId 已指向新工程、graphStore 里仍是旧 doc，此时在途生成的回调
+    // （流式 onChunk/onProgress、abortAllInflightVideos 触发的 catch 置 idle）会经 updateCard 触发本订阅，
+    // 按 activeId 键控会把旧工程 doc 整体写到新工程 id 下（串工程覆盖）。id 仍随 p 在「调度时」一起捕获。
     const saveMain = debounce((id: string, p: ProjectDoc) => {
       useUi.getState().setSaving(true)
       saveProject(id, p)
@@ -88,17 +90,18 @@ export default function App() {
       if (state.project !== last) {
         last = state.project
         if (isLoadedRef(state.project)) return // 载入/切换工程引发的变更，非用户编辑 → 不保存
-        const id = useProject.getState().activeId
-        if (!id) return
+        if (!useProject.getState().activeId) return // 注册表未初始化完成 → 不保存（避免把初始占位工程写成孤儿键）
+        const id = state.project.id
         saveRec(id, state.project)
         saveMain(id, state.project)
       }
     })
-    // 关窗/隐藏前尽力抢救一次恢复快照
+    // 关窗/隐藏前尽力抢救一次恢复快照（同样按 doc.id 键控，防止切换窗口期把旧 doc 抢救到新工程的恢复键下）
     const flush = () => {
       try {
-        const id = useProject.getState().activeId
-        if (id) void saveRecovery(id, useGraph.getState().project, Date.now())
+        if (!useProject.getState().activeId) return
+        const p = useGraph.getState().project
+        void saveRecovery(p.id, p, Date.now())
       } catch {
         /* ignore */
       }
