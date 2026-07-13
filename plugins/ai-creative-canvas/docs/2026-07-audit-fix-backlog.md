@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：3/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
+**进度：5/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）
 
 ---
 
@@ -40,12 +40,12 @@
   - 证据：编辑后 800ms 内删除工程 → deleteProjectStorage 清键后，防抖到期的 saveProject(旧pid) 经 ensureBaselineFor 全量重写 manifest+分片——注册表已无该 id，这批键永远无人清理。
   - 修法：persistence 层加 tombstone 集合（deleteProjectStorage 记录 pid，saveProject/saveRecovery 拒写 tombstone 中的 pid）；配合 A1 的 cancel 双保险。先决：A1。
 
-- [ ] **A4 [P1/bug] main.ts sanitizeName 白名单含 `.`，subdir 传 `..` 可逃逸出插件落盘根目录**
+- [x] **A4 [P1/bug] main.ts sanitizeName 白名单含 `.`，subdir 传 `..` 可逃逸出插件落盘根目录**（✓ 2026-07-13 与 A5 同轮修复：downloadMedia 删除 subdir 入参，路径全由后端拼接；sanitizeName 追加 `.replace(/^\.+$/,'_')` 归一纯点序列作纵深防御。两个调用方（generate.ts:210/285）核实只传 url/name/projectId，无破坏性变更）
   - 位置：`src/main.ts:68`（sanitizeName）、`:82-88`（downloadMedia 路径拼接）
   - 证据：`/[^\w.\-]+/g` 不改写纯点序列，`subdir:'..'` + `name:'xxx.json'` 可把任意 URL 内容写到 userData 根目录（`host.call` 允许跨插件调用，属暴露面）。宿主 checkSystemProtection 不拦 userData。
   - 修法：downloadMedia 直接删掉 subdir 入参（现有调用方只用 projectId，路径全部后端拼接）；保留 sanitizeName 时追加 `.replace(/^\.+$/,'_')` 或逐段拒绝 `..`/`.`。
 
-- [ ] **A5 [P2/bug] sanitizeName 把 subdir 的 `/` 压成 `_`：host 下载落盘到 media_&lt;pid&gt; 而非 media/&lt;pid&gt;，与 UI 端/README 分裂**
+- [x] **A5 [P2/bug] sanitizeName 把 subdir 的 `/` 压成 `_`：host 下载落盘到 media_&lt;pid&gt; 而非 media/&lt;pid&gt;，与 UI 端/README 分裂**（✓ 2026-07-13 与 A4 同轮：后端直接拼 `media/<projectId>`（仅对 projectId 段消毒），与 UI 端/README 一致；死的逐级 mkdir 循环删除（宿主 mkdir 已核实为 mkdirSync recursive，plugin/filesystem.ts:318），两处错误注释修正。旧 `media_<pid>` 目录不迁移——卡片按绝对路径引用仍可用，清扫责任记入 A6）
   - 位置：`src/main.ts:82-88`；对照 `src/ui/services/media.ts:30`、README L39
   - 证据：`media/p123` 被 sanitize 成 `media_p123`，逐级 mkdir 循环是死逻辑（宿主 mkdir 本就递归）；同一工程素材分裂两处，按文档路径做迁移/清理会漏掉全部 host 下载媒体。
   - 修法：与 A4 同批改——路径由后端以 projectId 拼 `media/<pid>`（仅对 projectId 段 sanitize）；需兼容读取/一次性迁移已存在的 `media_<pid>` 目录；修正 main.ts:35 错误注释。先决：A4。
@@ -53,7 +53,7 @@
 - [ ] **A6 [P1/incomplete] 删除工程不清理磁盘媒体；重复生成旧文件永不回收；TTS 不分工程目录**
   - 位置：`src/ui/services/persistence.ts:271-315`、`src/main.ts:176-183`（synthSpeech 写 `${root}/audio`，收了 projectId 没用）
   - 证据：deleteProjectStorage 只删 storage 键，media/<pid> 目录整体成孤儿；每次重生成用 `${cardId}_${stamp()}` 新文件名，旧文件从不删；生成中删卡后落盘文件无主。磁盘只增不减。
-  - 修法：main.ts 增加 `removeProjectMedia(projectId)` RPC（递归删 media/{pid}），deleteProject 调用；synthSpeech 改写入 media/{projectId}/；可选：保存时对比卡片 assetLocalPath 集合做惰性孤儿清扫。先决：A5（目录统一后再做清理，否则漏删 media_<pid>）。
+  - 修法：main.ts 增加 `removeProjectMedia(projectId)` RPC（递归删 media/{pid}），deleteProject 调用；synthSpeech 改写入 media/{projectId}/；可选：保存时对比卡片 assetLocalPath 集合做惰性孤儿清扫。先决：A5（已完成）。注意：A5 修复前的存量安装存在遗留 `media_<pid>` 目录（host 下载曾落此处），removeProjectMedia 须同时清扫 `media/<pid>` 与 `media_<pid>` 两个位置。
 
 - [ ] **A7 [P2/bug] downloadMedia/synthSpeech 网络拉取无超时、无大小上限、无内容类型校验**
   - 位置：`src/main.ts:92`（downloadMedia fetch）、`:158`（synthSpeech fetch）；连带 `src/ui/services/generate.ts:224` 硬编码 `mime:'video/mp4'`

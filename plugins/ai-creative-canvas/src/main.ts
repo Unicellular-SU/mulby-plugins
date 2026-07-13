@@ -32,7 +32,7 @@ export async function run(context: PluginContext) {
 
 // ---- 工具 ----
 
-// 逐级创建目录（mkdir 非递归），已存在则忽略
+// 创建目录（宿主 mkdir 为递归创建，见 mulby plugin/filesystem.ts），已存在则忽略
 async function ensureDir(dir: string): Promise<void> {
   try {
     const exists = await mulby.filesystem.exists(dir)
@@ -65,30 +65,26 @@ async function resolveBaseDir(input?: string): Promise<string> {
 const ROOT_DIR = 'ai-creative-canvas'
 
 function sanitizeName(name: string, fallback: string): string {
-  const safe = String(name || fallback).replace(/[^\w.\-]+/g, '_').slice(0, 80)
+  // 纯点序列（. / .. / ...）必须归一为 _：白名单保留 '.'，否则 '..' 会原样通过并逃逸出落盘根目录
+  const safe = String(name || fallback).replace(/[^\w.\-]+/g, '_').replace(/^\.+$/, '_').slice(0, 80)
   return safe || fallback
 }
 
 // ---- Host RPC（前端 window.mulby.host.call('ai-creative-canvas', method, args) 调用）----
 export const rpc = {
-  // 远程媒体落盘：主进程 fetch（规避渲染进程 CORS）→ base64 写入 {base}/ai-creative-canvas/{subdir}/
-  // 二进制经 base64 落盘避免截断。
-  async downloadMedia(input: { url: string; name?: string; subdir?: string; projectId?: string }) {
+  // 远程媒体落盘：主进程 fetch（规避渲染进程 CORS）→ base64 写入 {base}/ai-creative-canvas/media/<projectId>/
+  // 二进制经 base64 落盘避免截断。落盘路径完全由后端拼接，不接受任何路径型入参（杜绝 ../ 目录逃逸）；
+  // 目录布局与 UI 端 media.ts / README 约定一致（media/<projectId> 两级）。host.call 可被其他插件指名调用，入参按不可信处理。
+  async downloadMedia(input: { url: string; name?: string; projectId?: string }) {
     try {
       if (!input?.url) return { ok: false, error: '缺少媒体地址' }
       if (typeof fetch === 'undefined') return { ok: false, error: '后端环境不支持 fetch，无法下载' }
       const base = await resolveBaseDir()
       if (!base) return { ok: false, error: '无法确定存储目录' }
-      const sub = sanitizeName(input.subdir || (input.projectId ? `media/${input.projectId}` : 'media'), 'media')
-      const root = `${base}/${ROOT_DIR}`
-      const dir = `${root}/${sub}`
-      await ensureDir(root)
-      // 逐级创建 media/<projectId>
-      let acc = root
-      for (const seg of sub.split('/')) {
-        acc = `${acc}/${seg}`
-        await ensureDir(acc)
-      }
+      const dir = input.projectId
+        ? `${base}/${ROOT_DIR}/media/${sanitizeName(input.projectId, 'proj')}`
+        : `${base}/${ROOT_DIR}/media`
+      await ensureDir(dir)
       const resp = await fetch(input.url)
       if (!resp.ok) return { ok: false, error: `下载失败 HTTP ${resp.status}` }
       const ct = resp.headers.get('content-type') || ''
