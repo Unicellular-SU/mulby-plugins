@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：33/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：34/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -190,7 +190,7 @@
   - 位置：`src/ui/services/providers/engine.ts:92-113`；对照默认轮询 `:138-142` 的快速失败
   - 修法：增加 doneValues 判定（`cfg.doneValues || 'completed,succeeded,success'`）：状态命中 done 但取不到 URL 时立即抛「已完成但未找到结果 URL（检查 videoUrlPath）」。
 
-- [ ] **C16 [P2/bug] 作品库收录规则偏差：生成中的流式预览图被当成品收录；音频/TTS 成品被排除**
+- [x] **C16 [P2/bug] 作品库收录规则偏差：生成中的流式预览图被当成品收录；音频/TTS 成品被排除**（✓ 2026-07-14 收录条件加「非 running/queued」过滤——流式生成期 assetUrl 存半成品预览 dataURL 不再混入作品库；用「非生成中」而非「==done」以保留 idle 的导入素材卡(source)。纳入 audio kind（TTS/配音成品），网格用 Music 图标占位；音频双击跳卡片播放（Lightbox 仅支持图/视频）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/Gallery.tsx:24`；对照 `generate.ts:148`（流式把 preview dataURL 写 assetUrl）
   - 修法：过滤条件加 status==='done'；audio 卡纳入收录（波形占位图渲染）。
 

@@ -1,3 +1,4 @@
+import { Music } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { Modal } from './Modal'
@@ -22,7 +23,10 @@ export function Gallery() {
   const items: Item[] = []
   for (const b of project.boards) {
     for (const c of Object.values(b.cards)) {
-      if (c.assetUrl && (c.kind === 'image' || c.kind === 'video' || c.kind === 'source')) {
+      // 排除生成中的卡：流式生成期 assetUrl 存的是半成品预览 dataURL，不是成品。
+      // 用「非 running/queued」而非「== done」——保留 idle 的导入素材卡(source)。纳入 audio(TTS/配音成品)。
+      const generating = c.status === 'running' || c.status === 'queued'
+      if (!generating && c.assetUrl && (c.kind === 'image' || c.kind === 'video' || c.kind === 'source' || c.kind === 'audio')) {
         items.push({ boardId: b.id, boardName: b.name, cardId: c.id, url: c.assetUrl, kind: c.kind, title: c.title || '未命名' })
       }
     }
@@ -33,7 +37,10 @@ export function Gallery() {
     focusCard(it.boardId, it.cardId)
     close()
   }
-  const preview = (it: Item) => useUi.getState().setPreview({ url: it.url, kind: it.kind === 'video' ? 'video' : 'image' })
+  const preview = (it: Item) => {
+    if (it.kind === 'audio') { focus(it); return } // 音频无 Lightbox，双击直接跳到卡片播放
+    useUi.getState().setPreview({ url: it.url, kind: it.kind === 'video' ? 'video' : 'image' })
+  }
 
   return (
     <Modal title={`作品库（${items.length}）`} width={760} onClose={close}>
@@ -52,6 +59,8 @@ export function Gallery() {
             >
               {it.kind === 'video' ? (
                 <video src={it.url} muted preload="metadata" className="w-full h-full object-cover" />
+              ) : it.kind === 'audio' ? (
+                <div className="w-full h-full grid place-items-center text-neutral-400 dark:text-neutral-500"><Music size={28} /></div>
               ) : (
                 <img src={it.url} className="w-full h-full object-cover" draggable={false} alt="" />
               )}
