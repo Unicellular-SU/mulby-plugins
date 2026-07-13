@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：17/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：18/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -114,7 +114,7 @@
   - 位置：`src/ui/services/videoEdit/compile.ts:270-274`
   - 修法：退化改用老滤镜可表达的近似（split+overlay 通道错位或 lutrgb+blend），或退化时跳过 glitch 并 toast「当前 ffmpeg 不支持故障特效」；recipes 补 `fallbacks:['rgbashift']` 用例。
 
-- [ ] **B11 [P2/bug] commitLive 无条件压历史：点击滑块不拖也产生重复 undo 步；history 无上限**
+- [x] **B11 [P2/bug] commitLive 无条件压历史：点击滑块不拖也产生重复 undo 步；history 无上限**（✓ 2026-07-14 commitLive 先 JSON.stringify 比较 stack 与 history[cursor]，相同则跳过（点击滑块/Tab 路过 keyup 触发但未改值不再压重复步）；commit 加 HISTORY_MAX=100 上限，超出从头丢最旧、cursor 恒指末项。**补齐计划 WS1-T4 缺失的 studioStore 单测**：新建 test/store/studioStore.test.ts（脱 React 驱动 zustand），3 用例——拖拽×N+commitLive 后 undo 一步回到拖拽前、点击未改值不压重复步、history 上限 100 且 canUndo；接入 package.json test:studio。typecheck+全套件(29 compile+4 refs+3 studio)+UI 构建全绿）
   - 位置：`src/ui/store/studioStore.ts:140-143`；触发点 `VideoStudioModal.tsx:103-104`（onPointerUp+onKeyUp 都挂 onCommit）
   - 修法：commitLive 先比较 stack 与 history[cursor]（或 liveDirty 标志），相同跳过；history 设上限（如 100）。补 store 级单测：updateOpLive×N+commitLive 后 undo 一步回到拖拽前（正是计划 WS1-T4 要求、至今缺失的测试）。
 

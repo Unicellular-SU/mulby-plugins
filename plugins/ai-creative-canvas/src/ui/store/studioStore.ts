@@ -73,12 +73,16 @@ interface StudioState {
 }
 
 export const useStudio = create<StudioState>((set, get) => {
+  const HISTORY_MAX = 100 // 历史上限：每份是整栈深克隆，长会话防内存膨胀
+
   // 把新 stack 提交进历史（截断 redo 尾），并设为当前
   const commit = (next: EditStack) => {
     const { history, cursor } = get()
     const trimmed = history.slice(0, cursor + 1)
     trimmed.push(clone(next))
-    set({ stack: next, history: trimmed, cursor: trimmed.length - 1 })
+    // 超过上限则从头丢弃最旧快照（cursor 恒指向新压入的末项）
+    const capped = trimmed.length > HISTORY_MAX ? trimmed.slice(trimmed.length - HISTORY_MAX) : trimmed
+    set({ stack: next, history: capped, cursor: capped.length - 1 })
   }
 
   return {
@@ -138,8 +142,12 @@ export const useStudio = create<StudioState>((set, get) => {
     },
 
     commitLive: () => {
-      const { stack } = get()
-      if (stack) commit(stack)
+      const { stack, history, cursor } = get()
+      if (!stack) return
+      // 与当前历史顶比较：点击滑块未拖动 / Tab 路过滑块的 keyup 也会触发 onCommit，
+      // 此时 stack 未变，不应压入重复 undo 步（否则 Ctrl+Z 表现为「按了没反应」，还撑大历史）。
+      if (cursor >= 0 && history[cursor] && JSON.stringify(history[cursor]) === JSON.stringify(stack)) return
+      commit(stack)
     },
 
     toggleOp: (id) => {
