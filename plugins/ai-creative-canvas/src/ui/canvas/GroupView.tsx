@@ -97,6 +97,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up) // 打断(触摸/笔/系统手势)也收尾，否则 move 残留继续改尺寸
       // resize 结束：吸入完全落入的顶层卡 / 弹出移出框的直属子
       const b = useGraph.getState().getActiveBoard()
       const grp = b.cards[card.id]
@@ -126,6 +127,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
 
   const btn = 'p-1 rounded hover:bg-black/10 dark:hover:bg-white/15'

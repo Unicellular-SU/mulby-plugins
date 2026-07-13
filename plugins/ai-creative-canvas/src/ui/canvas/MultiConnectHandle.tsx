@@ -42,11 +42,16 @@ export function MultiConnectHandle() {
       const w = screenToWorld(ev.clientX - rect.left, ev.clientY - rect.top, b.viewport)
       useUi.getState().setConnectTemp({ x1: maxX, y1: midY, x2: w.x, y2: w.y })
     }
-    const up = (ev: PointerEvent) => {
+    const detach = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', onCancel)
       useUi.getState().setConnectTemp(null)
       setDragging(false)
+    }
+    const onCancel = () => detach() // 打断(触摸/笔/系统手势)：仅清理临时线与监听，不连线
+    const up = (ev: PointerEvent) => {
+      detach()
       if (!moved) return // 仅点一下不拉动 → 不动作
       const g = useGraph.getState()
       const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null
@@ -65,6 +70,7 @@ export function MultiConnectHandle() {
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   return (

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：25/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：26/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -157,7 +157,7 @@
   - 位置：`src/ui/components/Modal.tsx:20-26`、`hooks.ts:8-12`；连带 `CanvasStage.tsx:543` 的 Escape clearSelection 同帧执行
   - 修法：引入模态栈（zustand 记录打开顺序），ESC 只关栈顶；Modal 挂载时 focus 容器、卸载还焦到 opener。与 C2 的「模态计数器」共用一套状态。先决：C2。
 
-- [ ] **C8 [P2/bug] 三处指针交互收尾不完备：pointercancel/源卡卸载时 window 监听与临时状态残留**
+- [x] **C8 [P2/bug] 三处指针交互收尾不完备：pointercancel/源卡卸载时 window 监听与临时状态残留**（✓ 2026-07-14 ①CardView.startConnect：pointermove/up/cancel 从 handle 元素移到 window——源卡在连线拖拽中被删(Delete)时 handle 卸载、Chrome 不派发 lostpointercapture，绑 handle 则 cleanup 永不执行、临时线残留；改 window 后卸载也能收尾（lostpointercapture 保留作正常丢指针兜底）。②GroupView.startResize：补 pointercancel→up（打断也收尾，否则 move 残留继续改尺寸）。③MultiConnectHandle.start：拆出 detach() 清理，补 pointercancel→onCancel（仅清理不连线）。typecheck+UI 构建+全套件全绿）
   - 位置：`GroupView.tsx:71-113`、`MultiConnectHandle.tsx:66-67`、`CardView.tsx:158-198`（startConnect cleanup 全绑在 handle 元素上）
   - 修法：复制同文件 startCardResize 已有的 setPointerCapture+四事件收尾模式；startConnect 的兜底监听放 window 或在 unmount cleanup 调用。
 

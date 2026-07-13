@@ -156,9 +156,11 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       useUi.getState().setConnectTemp({ x1: src.x + src.w, y1: src.y + src.h / 2, x2: w.x, y2: w.y })
     }
     const cleanup = () => {
-      handle.removeEventListener('pointermove', move)
-      handle.removeEventListener('pointerup', up)
-      handle.removeEventListener('pointercancel', cancel)
+      // 指针事件挂 window（而非 handle）：源卡在连线拖拽中被删（如 Delete 快捷键）时 handle 已卸载、
+      // Chrome 不再派发 lostpointercapture，若绑在 handle 上则 cleanup 永不执行、临时线与置灰状态残留。
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
       handle.removeEventListener('lostpointercapture', cancel)
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('contextmenu', onCtx)
@@ -190,10 +192,10 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         }
       }
     }
-    handle.addEventListener('pointermove', move)
-    handle.addEventListener('pointerup', up)
-    handle.addEventListener('pointercancel', cancel)
-    handle.addEventListener('lostpointercapture', cancel)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+    handle.addEventListener('lostpointercapture', cancel) // 保留：正常丢指针时也收尾
     window.addEventListener('keydown', onKey)
     window.addEventListener('contextmenu', onCtx)
   }
