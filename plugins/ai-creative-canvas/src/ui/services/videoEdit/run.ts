@@ -5,6 +5,7 @@ import { runFf } from '../mediaVideo'
 import { prepareOverlays } from '../mediaOverlay'
 import { compileStack, stackOutDuration, type CompileCtx, type CompileOpts } from './compile'
 import type { EditStack } from './types'
+import { toast } from '../../store/toastStore'
 
 function fs(): any {
   return (window as any).mulby?.filesystem
@@ -56,8 +57,10 @@ async function runVariant(
   return { finalOut: compiled.finalOut, outDuration: compiled.outDuration }
 }
 
-// 高层导出：先按有音轨编译；失败（常因无音轨 / 某滤镜不可用）→ 退化重编
-// 退化梯度：① 有音轨 ② 无音轨 ③ 无音轨 + 常见可选滤镜退化集
+// 高层导出：先按最高保真编译；失败则按退化梯度重试。
+// 梯度顺序刻意「先保音轨、后丢音轨」——旧 FFmpeg 缺某滤镜(如 colortemperature 4.4+)时应先退化滤镜而非误丢音轨：
+//   ① 有音轨 ② 有音轨 + 滤镜退化 ③ 无音轨 ④ 无音轨 + 滤镜退化
+// 非首选变体成功 → toast 告知具体降级了什么（此前静默，用户拿到被静音/降级的成片却毫不知情）。
 export async function exportStudio(
   stack: EditStack,
   ctxBase: { inPath: string; projectId: string; overlayResolved?: CompileCtx['overlayResolved'] },
@@ -67,10 +70,11 @@ export async function exportStudio(
   const { overlayResolved: ovPng, cleanup: ovCleanup } = await prepareOverlays(stack, ctxBase.projectId, stackOutDuration(stack))
   const overlayResolved = { ...ovPng, ...(ctxBase.overlayResolved || {}) }
   const broadFallback = new Set(['denoise', 'colortemperature', 'lut3d', 'sidechain', 'rgbashift', 'tmix', 'minterpolate'])
-  const variants: { hasAudio: boolean; fallbacks?: Set<string> }[] = [
+  const variants: { hasAudio: boolean; fallbacks?: Set<string>; note?: string }[] = [
     { hasAudio: true },
-    { hasAudio: false },
-    { hasAudio: false, fallbacks: broadFallback }
+    { hasAudio: true, fallbacks: broadFallback, note: '部分特效在当前 FFmpeg 版本上不可用，已用近似滤镜导出（音轨已保留）' },
+    { hasAudio: false, note: '音轨无法处理，已导出为无声视频' },
+    { hasAudio: false, fallbacks: broadFallback, note: '音轨无法处理、且部分特效不可用，已用近似滤镜导出无声视频' }
   ]
   let lastErr: any
   try {
@@ -78,7 +82,9 @@ export async function exportStudio(
       if (o.signal?.aborted) throw new DOMException('已取消', 'AbortError')
       try {
         const ctx: CompileCtx = { inPath: ctxBase.inPath, projectId: ctxBase.projectId, hasAudio: v.hasAudio, overlayResolved }
-        return await runVariant(stack, ctx, { fallbacks: v.fallbacks }, o.signal, o.onProgress)
+        const res = await runVariant(stack, ctx, { fallbacks: v.fallbacks }, o.signal, o.onProgress)
+        if (v.note) toast(v.note, 'warning') // 退化成功：如实告知用户，而非静默出片
+        return res
       } catch (e: any) {
         if (isAbort(e)) throw e // 用户取消不再退化重试
         lastErr = e

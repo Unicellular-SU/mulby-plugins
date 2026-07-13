@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：15/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：16/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -105,7 +105,7 @@
   - 证据：hasAudio 源+trim+boomerang → 变体① 必编译失败（Output pad not connected），靠变体②出片；测试用例 speed-boomerang 恰无 trim/rate 绕开缺陷。
   - 修法：boomerang 置空前若 g.a≠'0:a' 追加 `anullsink`（或 Graph 记录音频语句整体剔除）；recipes 补 trim+boomerang+hasAudio、rate2x+boomerang+hasAudio 两条。
 
-- [ ] **B9 [P2/bug] 退化梯度把「滤镜缺失」与「无音轨」混为一谈：任一视频滤镜不可用即静默丢整条音轨并全量降级**
+- [x] **B9 [P2/bug] 退化梯度把「滤镜缺失」与「无音轨」混为一谈：任一视频滤镜不可用即静默丢整条音轨并全量降级**（✓ 2026-07-14 run.ts exportStudio 梯度重排为「先保音轨、后丢音轨」：①有音轨 ②有音轨+滤镜退化（新增）③无音轨 ④无音轨+滤镜退化——旧 FFmpeg 缺 colortemperature 时变体②即可保音轨出片，不再无谓静音。非首选变体成功 toast('warning') 告知具体降级了什么（音轨保留/无声/近似滤镜），消除静默降级。「解析 stderr 的 No such filter 精准 fallback」未取——宿主 ffmpeg.run 只暴露 onProgress 无 stderr/日志，无法实现。typecheck+UI 构建+28 recipe 全绿）
   - 位置：`src/ui/services/videoEdit/run.ts:69-74`
   - 证据：变体只有 ①hasAudio ②无音 ③无音+broadFallback，缺「hasAudio+fallbacks」；旧 ffmpeg 缺 colortemperature → 用户拿到被静音+全量降级的成片，除成功 toast 外零提示。LUT 路径失效同理。
   - 修法：梯度改为 {audio}→{audio+fallbacks}→{无音}→{无音+fallbacks}；更优：解析 stderr 的 `No such filter: 'xxx'` 精准 fallback 后重编译；任何降级都 toast 告知。
