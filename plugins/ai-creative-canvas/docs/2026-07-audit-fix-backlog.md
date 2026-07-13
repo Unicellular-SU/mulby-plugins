@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：27/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：28/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -165,7 +165,7 @@
   - 位置：`src/ui/store/graphStore.ts:565-589`、`MultiConnectHandle.tsx:22`（过滤漏 note）
   - 修法：createConnectedNode 建边前逐 source 过 canConnect；MultiConnectHandle 过滤补 `c.kind !== 'note'`。
 
-- [ ] **C10 [P2/incomplete] 标注不入 undo 栈也无清空确认，注释却写「即可逆操作」**
+- [x] **C10 [P2/incomplete] 标注不入 undo 栈也无清空确认，注释却写「即可逆操作」**（✓ 2026-07-14 AnnotationToolbar 清空按钮加 confirmDialog(danger) 二次确认——有标注时才弹（空则直接返回），消除手滑抹掉全部评审批注；确认逻辑放 UI 层保持 clearAnnotations store action 纯净。修正 graphStore 误导注释（明说 BoardSnap 不含 annotations、Ctrl+Z 无法恢复、清空由 UI confirm 兜底）。选清空确认而非「BoardSnap 加 annotations 入 undo」——后者需改快照结构 + 验证标注绘制粒度（每笔 vs 每点，避免逐点刷栈），范围/风险大，严重度主因（一键永久清空）已由确认消除。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/store/graphStore.ts:536-539`、`AnnotationToolbar.tsx:49`
   - 修法：最低成本 clearAnnotations 前加 confirmDialog；更完整则 BoardSnap 增加 annotations 并让增删清都 pushHistory，修正注释。
 

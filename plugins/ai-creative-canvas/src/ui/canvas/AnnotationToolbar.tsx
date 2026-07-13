@@ -1,6 +1,7 @@
 import { Pencil, ArrowUpRight, Square, Type, Eraser, MousePointer2 } from 'lucide-react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
+import { confirmDialog } from '../store/dialogStore'
 
 const COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#a855f7', '#111827', '#ffffff']
 const TOOLS = [
@@ -46,7 +47,13 @@ export function AnnotationToolbar() {
       ))}
       <div className="w-px h-5 bg-current opacity-10 mx-0.5" />
       <button
-        onClick={() => useGraph.getState().clearAnnotations()}
+        onClick={async () => {
+          // 标注不入撤销栈，清空不可撤销 → 有内容时先确认，避免手滑一键抹掉全部评审批注
+          const has = (useGraph.getState().getActiveBoard().annotations || []).length > 0
+          if (!has) return
+          const ok = await confirmDialog({ title: '清空标注', message: '将删除本画布的全部标注，清空后无法撤销。确定？', confirmLabel: '清空', cancelLabel: '取消', danger: true })
+          if (ok) useGraph.getState().clearAnnotations()
+        }}
         data-tip="清空本画布标注"
         className="w-7 h-7 grid place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/10 text-red-500"
       >

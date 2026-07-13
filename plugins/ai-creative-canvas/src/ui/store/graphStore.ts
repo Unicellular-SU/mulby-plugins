@@ -533,7 +533,8 @@ export const useGraph = create<GraphState>((set, get) => ({
     }))
   },
 
-  // 标注（不入撤销栈——BoardSnap 不含 annotations；删除/清空即可逆操作）
+  // 标注（不入撤销栈——BoardSnap 不含 annotations，故删除/清空无法用 Ctrl+Z 恢复；
+  // 清空全部为破坏性操作，由 UI 层 AnnotationToolbar 加 confirmDialog 二次确认兜底）
   addAnnotation: (a) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [...(b.annotations || []), a] })) })),
   removeAnnotation: (id) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: (b.annotations || []).filter((x) => x.id !== id) })) })),
   clearAnnotations: () => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [] })) })),
