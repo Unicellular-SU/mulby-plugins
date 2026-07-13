@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：22/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
+**进度：23/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -145,7 +145,7 @@
   - 位置：`src/ui/services/generate.ts:335-359`（stopCard）、`aiText.ts:44-47`、`aiImage.ts:121-142`、`engine.ts:280-298`
   - 修法：每次生成分配 runId（cardId→runId map），stopCard 使其失效；**所有成功写回前校验 runId 仍有效**，无效则丢弃结果不写卡；images.edit/runTts 至少做到「结果作废」级取消。
 
-- [ ] **C5 [P2/bug] 同一卡片可并发重复生成：generateCard 无 running/queued 守卫，取消器互相覆盖**
+- [x] **C5 [P2/bug] 同一卡片可并发重复生成：generateCard 无 running/queued 守卫，取消器互相覆盖**（✓ 2026-07-14 generateCard 入口加 `if (card0.status === 'running' || 'queued') return` 守卫，与 generateSelected 既有守卫一致——从源头阻止 MediaToolbox「重新生成」/NodeEditor direct 预设等未设防入口的并发重触发。C4 的 runId 机制已让 finally 按 isCurrentRun 守卫取消器清理（缓解交叉删除），本守卫杜绝并发发生。「重新生成」语义为先停止再重跑（当前 running 时忽略重复点击，符合既有 generateSelected 行为）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/services/generate.ts:86`；未设防入口 `MediaToolbox.tsx:38`、`NodeEditor.tsx:143`
   - 修法：入口加守卫（running/queued 时 return，或语义化为先 stopCard 再重跑）；aborters/videoAborts 值带 runId，finally 仅在自己的 runId 在位时删除。先决：C4（共用 runId 机制）。
 

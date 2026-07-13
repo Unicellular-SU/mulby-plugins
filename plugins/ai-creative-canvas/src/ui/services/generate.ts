@@ -95,6 +95,10 @@ export async function generateCard(cardId: string): Promise<void> {
   const g0 = useGraph.getState()
   const card0 = g0.getActiveBoard().cards[cardId]
   if (!card0) return
+  // 并发守卫：本卡已在生成中/排队中 → 忽略重复触发（重新生成请先「停止」）。防两个 limiter 任务写同一
+  // cardId 致 aborters/videoAborts 互相覆盖（停止只能中止其一、先结束方的 finally 又删掉另一方取消器）+ 双倍消耗配额。
+  // 未设防的入口有 MediaToolbox「重新生成」、NodeEditor direct 预设等；与 generateSelected 的既有守卫一致。
+  if (card0.status === 'running' || card0.status === 'queued') return
   canceledCards.delete(cardId) // 清理上一轮可能残留的取消标记，避免本轮被误早退
   if (!canGenerate(card0.kind)) {
     g0.updateCard(cardId, { status: 'error', error: '该类型卡片不支持生成（素材/分组/便签卡仅用于组织与引用）' })
