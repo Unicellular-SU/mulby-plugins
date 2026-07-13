@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：13/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
+**进度：14/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -95,7 +95,7 @@
   - 位置：`src/ui/components/VideoStudioModal.tsx:415`；对照高度滑块 `:1157`、导出 `compile.ts:342`
   - 修法：PreviewOverlay 增加 height 字段（preview.ts:70-73 透传 rect.h），mosaic 分支改 `height:\`${o.height*100}%\``；pip 分支同理用 rect.h 替代硬编码 aspectRatio。
 
-- [ ] **B7 [P1/bug] baseW/baseH 以 16×9 占位、只靠 loadedmetadata 修正：HEVC 等浏览器不能解码的源导出叠加层缩成几像素**
+- [x] **B7 [P1/bug] baseW/baseH 以 16×9 占位、只靠 loadedmetadata 修正：HEVC 等浏览器不能解码的源导出叠加层缩成几像素**（✓ 2026-07-13 mediaVideo.ts 新增 probeResolution：宿主无 ffprobe，改用 frameAt 抽首帧 PNG → sharp.metadata() 读真实宽高（绕开浏览器解码），临时帧 finally unlink。VideoStudioModal open 里在 setReady 前调用并 setBase({baseW,baseH})，探测失败退回 onLoadedMetadata 路径。probeDuration 本就整片解码一遍，多抽一帧开销可忽略。typecheck+UI 构建+29 测试全绿。选 probe 而非「exportStack 前校验 baseW>100 阻断」——后者只拦截不修复，probe 是根治）
   - 位置：`src/ui/components/VideoStudioModal.tsx:167,176-177,285-288`
   - 证据：导出 ready 门槛只等 probeDuration 与 metadata 无依赖；预览黑屏但探测成功时 baseW 恒 16 → renderTextPng 画布 ≈13px、pip ≈2px，无任何报错。
   - 修法：宽高不依赖 `<video>`——ensureFfmpeg 后与 probeDuration 一并用 ffmpeg 探测分辨率再置 ready；或 exportStack 前校验 baseW>100 否则阻断提示。

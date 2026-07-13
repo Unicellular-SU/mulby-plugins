@@ -9,7 +9,7 @@ import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
 import { useStudio } from '../store/studioStore'
 import { Select } from './Select'
-import { ensureFfmpeg, probeDuration, timelineThumbs } from '../services/mediaVideo'
+import { ensureFfmpeg, probeDuration, probeResolution, timelineThumbs } from '../services/mediaVideo'
 import { toFileUrl } from '../services/media'
 import { stackToPreview, type PreviewOverlay } from '../services/videoEdit/preview'
 import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
@@ -174,6 +174,13 @@ function Inner({ cardId }: { cardId: string }) {
       const dur = path ? (await probeDuration(path, ac.signal)) || 0 : 0
       if (!alive) return
       useStudio.getState().setBase({ baseDuration: dur })
+      // 用 ffmpeg+sharp 探测真实分辨率并在 ready 前落定：<video> 无法解码（HEVC 等）时 onLoadedMetadata 不触发，
+      // baseW 会恒为占位 16，导致导出叠加 PNG 缩成几像素。探测失败则退回 onLoadedMetadata 路径（可解码源）。
+      if (path) {
+        const res = await probeResolution(useGraph.getState().project.id, path, ac.signal)
+        if (!alive) return
+        if (res) useStudio.getState().setBase({ baseW: res.width, baseH: res.height })
+      }
       setReady(true)
       if (path) {
         const projectId = useGraph.getState().project.id

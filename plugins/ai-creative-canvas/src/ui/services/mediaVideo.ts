@@ -1,4 +1,5 @@
 import { mediaPath, ensureSubDir, toFileUrl } from './media'
+import { base64ToArrayBuffer } from '../util'
 
 function ff(): any {
   return (window as any).mulby.ffmpeg
@@ -266,6 +267,38 @@ export async function probeDuration(localPath: string, signal?: AbortSignal): Pr
     return dur
   } catch {
     return undefined
+  }
+}
+
+// 探测视频真实分辨率（宿主无 ffprobe）：抽首帧 PNG → sharp metadata 读宽高。
+// 用途：浏览器 <video> 无法解码（如 HEVC）时 onLoadedMetadata 不触发/videoWidth=0、baseW 恒为占位 16，
+// 导致导出的文字/边框/PiP 叠加 PNG 全按 16px 渲染缩成几像素。此路由绕开浏览器解码，直接用 ffmpeg+sharp。
+export async function probeResolution(
+  projectId: string,
+  localPath: string,
+  signal?: AbortSignal
+): Promise<{ width: number; height: number } | undefined> {
+  let framePath: string | undefined
+  try {
+    if (signal?.aborted) return undefined
+    framePath = await frameAt(projectId, localPath, 0)
+    if (signal?.aborted) return undefined
+    const fsAny = (window as any).mulby?.filesystem
+    const b64 = (await fsAny.readFile(framePath, 'base64')) as string
+    const meta = await (window as any).mulby.sharp(base64ToArrayBuffer(b64)).metadata()
+    const w = Number(meta?.width) || 0
+    const h = Number(meta?.height) || 0
+    return w > 0 && h > 0 ? { width: w, height: h } : undefined
+  } catch {
+    return undefined
+  } finally {
+    if (framePath) {
+      try {
+        await (window as any).mulby?.filesystem?.unlink(framePath)
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
