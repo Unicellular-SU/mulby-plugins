@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：10/64**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成
+**进度：11/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修，需写原因）——批次 A 已全部完成；B4 拆出 B4b（中期换算），总数 +1
 
 ---
 
@@ -78,10 +78,13 @@
   - 证据：image2 单帧输入只产 t=0 一帧，crop x 恒为 0，overlay 以 eof_action=repeat 把第一格重复到整片；progress 条能动是因为其表达式写在 overlay 上按主流求值。
   - 修法：g.addInput 支持 per-input 前置参数，对精灵图输入加 `['-loop','1']`；或改用 `[idx:v]loop=loop=-1:size=1` 滤镜。补集成用例：抽帧断言第 2 秒画面 ≠ 第 0 秒。
 
-- [ ] **B4 [P1/bug] crop/改画幅后 overlay 坐标基不一致：预览按整帧、导出按裁剪后画面；frame/progress/pip 尺寸按原始 baseW 渲染**
+- [x] **B4 [P1/bug] crop/改画幅后 overlay 坐标基不一致：预览按整帧、导出按裁剪后画面；frame/progress/pip 尺寸按原始 baseW 渲染**（✓ 2026-07-13 做**短期诚实角标**：preview.ts 在「有 overlay 且存在 crop 或 outW/outH」时置 exact=false，挂「近似预览·导出更准」角标——消除静默失真（严重度主因，用户此前毫不知情）。精确门控：纯 crop 无叠加时预览内容一致，不过度告警。typecheck+UI 构建+29 测试全绿。**中期坐标换算拆为 B4b 独立跟踪**）
   - 位置：`src/ui/services/videoEdit/compile.ts:469-471,335-336,391`、`preview.ts:51-60`（inexact 列表不含 crop）、`mediaOverlay.ts:87-119`
-  - 证据：crop{x:0.25,w:0.5}+文字 rect.x=0.1 → 预览文字在将被裁掉的区域、导出在裁剪后画面 10% 处，肉眼可见漂移且无「近似预览」角标；frame/progress PNG 按 baseW×baseH 整幅渲染叠到更小画面会截断/失真。
-  - 修法：短期 preview.ts 对存在 crop 或 outW/outH 时置 exact=false；中期编译时把 overlay 坐标换算到裁剪后帧（x'=(x-crop.x)/crop.w 等）、frame/progress/pip 画布尺寸改用输出宽高；加 crop+text、crop+frame 两条 recipe 断言换算表达式。
+
+- [ ] **B4b [P1/bug]（B4 拆出·中期）crop/改画幅后 overlay 坐标真实换算，让导出与预览对齐（而非仅角标提示）**
+  - 位置：同 B4
+  - 前置决策：预览侧 crop 是「整帧+遮罩」还是「只显示裁剪帧」？定了才能决定换算方向。若保持整帧预览：编译时把 overlay 坐标从原始帧归一换算到裁剪后帧（x'=(x-crop.x)/crop.w、y'=(y-crop.y)/crop.h），frame/progress/pip 画布尺寸改用裁剪/适配后输出宽高。
+  - 验证：加 crop+text、crop+frame 两条 recipe 断言换算后的 overlay x 表达式；换算生效后可回收 B4 的 exact=false（预览与导出一致则不再需要角标）。
 
 - [ ] **B5 [P1/bug] 亮度预览 CSS 乘法 vs 导出 eq 加法，语义不同却未标 exact=false（计划 T3 点名项）**
   - 位置：`src/ui/services/videoEdit/preview.ts:39,44`、`compile.ts:302`

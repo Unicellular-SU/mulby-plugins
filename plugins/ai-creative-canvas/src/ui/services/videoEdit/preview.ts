@@ -76,6 +76,9 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
     const anim = (o.params as OverlayParams).anim
     return anim && anim !== 'none'
   })) exact = false
+  // crop / 画幅缩放会改变 overlay 的坐标基（导出按裁剪/适配后画面定位，预览按整帧）与 frame/progress/pip 的尺寸基。
+  // 有叠加时导出位置与预览会漂移——如实置 exact=false 挂「近似预览·导出更准」角标（纯 crop 无叠加则内容一致，不告警）。
+  if (overlayOps.length && (tf?.crop || (tf?.outW && tf?.outH))) exact = false
 
   // 裁切 → 保留段
   const trimP = enabled.find((o) => o.kind === 'trim')?.params as TrimParams | undefined
