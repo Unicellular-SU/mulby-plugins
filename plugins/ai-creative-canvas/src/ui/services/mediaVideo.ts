@@ -4,7 +4,7 @@ import { base64ToArrayBuffer } from '../util'
 function ff(): any {
   return (window as any).mulby.ffmpeg
 }
-import { toast, type ToastType } from '../store/toastStore'
+import { toast, toastSticky, toastUpdate, toastDismiss, type ToastType } from '../store/toastStore'
 function notify(msg: string, type?: string) {
   toast(msg, (type as ToastType) || 'info')
 }
@@ -18,14 +18,26 @@ export { toFileUrl }
 export async function ensureFfmpeg(): Promise<boolean> {
   try {
     if (await ff().isAvailable()) return true
-    notify('首次使用：正在下载 FFmpeg，请稍候…')
-    const r = await ff().download(() => {})
-    if (r?.success) {
-      notify('FFmpeg 已就绪', 'success')
-      return true
+    // 首次下载（几十 MB）用常驻进度 toast 实时反映百分比，避免用户以为卡死而反复点击
+    const tid = toastSticky('首次使用：正在下载 FFmpeg…', 'info')
+    try {
+      const r = await ff().download((pr: any) => {
+        const pct = typeof pr?.percent === 'number' ? Math.max(0, Math.min(100, Math.round(pr.percent))) : null
+        const phase = pr?.phase === 'extracting' ? '解压' : pr?.phase === 'done' ? '完成' : '下载'
+        toastUpdate(tid, pct != null ? `FFmpeg ${phase}中 ${pct}%` : `FFmpeg ${phase}中…`)
+      })
+      if (r?.success) {
+        toastUpdate(tid, 'FFmpeg 已就绪', 'success')
+        setTimeout(() => toastDismiss(tid), 1500) // 终态短暂展示后关闭
+        return true
+      }
+      toastUpdate(tid, 'FFmpeg 下载失败：' + (r?.error || ''), 'error')
+      setTimeout(() => toastDismiss(tid), 4700)
+      return false
+    } catch (e) {
+      toastDismiss(tid)
+      throw e
     }
-    notify('FFmpeg 下载失败：' + (r?.error || ''), 'error')
-    return false
   } catch (e: any) {
     notify('FFmpeg 不可用：' + (e?.message || String(e)), 'error')
     return false

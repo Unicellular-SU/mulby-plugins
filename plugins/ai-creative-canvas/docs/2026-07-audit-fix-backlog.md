@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：36/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：37/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -204,7 +204,7 @@
   - 位置：`src/ui/components/TopBar.tsx:51-70`；`graphStore.ts:247,251`
   - 修法：Tab 加右键菜单/双击重命名（promptDialog 现成）+ 删除项（confirmDialog+removeBoard），成本极低。
 
-- [ ] **D2 [P1/incomplete] FFmpeg 首次下载无进度反馈（README 承诺「带进度提示」）**
+- [x] **D2 [P1/incomplete] FFmpeg 首次下载无进度反馈（README 承诺「带进度提示」）**（✓ 2026-07-15 toastStore 扩展 pushSticky(不自动消失)+update(原位刷新)+对应导出 toastSticky/toastUpdate/toastDismiss；ensureFfmpeg 的 download 空回调改为用 FFmpegDownloadProgress(phase+percent) 实时更新常驻 toast「FFmpeg 下载中 42%」/「解压中」，终态「已就绪」短暂展示后关闭、失败展示错误。README 承诺的「带进度提示」兑现。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/services/mediaVideo.ts:20-21`（进度回调是空函数，toast ~4.7s 即消失）
   - 修法：download 进度回调更新常驻 toast 或任务中心条目（「FFmpeg 下载中 42%」），完成/失败替换终态提示。
 
