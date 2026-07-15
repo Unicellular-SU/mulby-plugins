@@ -101,7 +101,6 @@ export interface OverlayParams {
   // 渲染参数（canvas 重绘的真相，不存 PNG 路径）：
   text?: string
   style?: Record<string, unknown> // 字体/颜色/描边/背景等
-  anim?: 'none' | 'fade' | 'slide' | 'typewriter'
   // PiP / 打码专用：
   pipCardId?: string
   blurKind?: 'mosaic' | 'blur'
@@ -138,7 +137,6 @@ export interface ExportParams {
   outH?: number
   fps?: number
   crf?: number // 画质（libx264）
-  bitrate?: number // 目标码率 kbps（两遍 ABR）
   format: ExportFormat
   fit?: FitMode // 画幅适配方式
   platform?: string // 平台预设 id
@@ -150,7 +148,6 @@ export interface ExportParams {
 interface OpBase {
   id: string
   enabled: boolean // 旁路开关：false=编译跳过、预览不施加（便于 A/B）
-  label?: string // 用户可改名
 }
 export type EditOp =
   | (OpBase & { kind: 'trim'; params: TrimParams })
@@ -185,7 +182,7 @@ const DEFAULTS: { [K in OpKind]: () => OpParamsOf<K> } = {
   speed: () => ({ rate: 1, reverse: false, pitchCompensate: true }),
   transform: () => ({}),
   color: () => ({}),
-  overlay: () => ({ sub: 'text', rect: { x: 0.1, y: 0.8, w: 0.8, h: 0.12 }, text: '文字', anim: 'none' }),
+  overlay: () => ({ sub: 'text', rect: { x: 0.1, y: 0.8, w: 0.8, h: 0.12 }, text: '文字' }),
   audio: () => ({}),
   export: () => ({ format: 'mp4', crf: 23 })
 }

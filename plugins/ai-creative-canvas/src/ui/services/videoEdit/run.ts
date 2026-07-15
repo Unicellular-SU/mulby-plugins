@@ -2,13 +2,32 @@
 // 设计依据：docs/ai-creative-canvas-video-editor.md §3.2「多 pass 状态机」/ §8.6 取消模型
 
 import { runFf } from '../mediaVideo'
+import { mediaPath } from '../media'
 import { prepareOverlays } from '../mediaOverlay'
 import { compileStack, stackOutDuration, type CompileCtx, type CompileOpts } from './compile'
-import type { EditStack } from './types'
+import { stackIsNoop, type EditStack, type ExportParams } from './types'
 import { toast } from '../../store/toastStore'
 
 function fs(): any {
   return (window as any).mulby?.filesystem
+}
+
+// 无编辑 op、且导出也不做任何变换（无缩放/帧率/淡入淡出）、且导出格式与源容器一致 →
+// 可直接复制源文件而非整片重编码（避免无谓的画质劣化与耗时）。任何不确定都返回 false 走正常编码。
+function extOf(p: string): string {
+  return (p.split('.').pop() || '').toLowerCase()
+}
+function canPassthrough(stack: EditStack, exp: ExportParams | undefined, inPath: string): boolean {
+  if (!stackIsNoop(stack)) return false
+  if (exp && (exp.outW || exp.outH || exp.fps || exp.fadeIn || exp.fadeOut)) return false
+  const fmt = exp?.format || 'mp4'
+  const ext = extOf(inPath)
+  return (
+    (fmt === 'mp4' && (ext === 'mp4' || ext === 'mov' || ext === 'm4v')) ||
+    (fmt === 'webm' && ext === 'webm') ||
+    (fmt === 'gif' && ext === 'gif') ||
+    (fmt === 'webp' && ext === 'webp')
+  )
 }
 async function unlinkQuiet(path: string): Promise<void> {
   try {
@@ -36,14 +55,12 @@ async function runVariant(
   onProgress: ((p: number) => void) | undefined
 ): Promise<RunResult> {
   const compiled = await compileStack(stack, ctx, opts)
-  const produced: string[] = []
   const totalWeight = compiled.passes.reduce((a, p) => a + p.weight, 0) || 1
   let done = 0
   try {
     for (const pass of compiled.passes) {
       if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
       await runFf(pass.args, (p) => onProgress?.((done + p * pass.weight) / totalWeight), signal)
-      produced.push(pass.outPath)
       done += pass.weight
     }
   } catch (e) {
@@ -53,7 +70,6 @@ async function runVariant(
   }
   // 成功：仅清中间产物（保留 finalOut）
   for (const c of compiled.cleanup) await unlinkQuiet(c)
-  void produced
   return { finalOut: compiled.finalOut, outDuration: compiled.outDuration }
 }
 
@@ -66,6 +82,18 @@ export async function exportStudio(
   ctxBase: { inPath: string; projectId: string; overlayResolved?: CompileCtx['overlayResolved'] },
   o: { signal?: AbortSignal; onProgress?: (p: number) => void }
 ): Promise<RunResult> {
+  // 空栈直通：无编辑 op + 导出无变换 + 格式匹配 → 复制源，跳过整片重编码（保画质、省时）
+  const exp = stack.ops.find((op) => op.kind === 'export' && op.enabled)?.params as ExportParams | undefined
+  if (canPassthrough(stack, exp, ctxBase.inPath)) {
+    try {
+      const out = await mediaPath(ctxBase.projectId, 'studio', extOf(ctxBase.inPath))
+      await fs()?.copy?.(ctxBase.inPath, out)
+      o.onProgress?.(1)
+      return { finalOut: out, outDuration: stackOutDuration(stack) }
+    } catch {
+      /* 复制失败 → 回落正常编码路径 */
+    }
+  }
   // 备好叠加 PNG（canvas→PNG）；与调用方传入的已解析项（如 PiP 视频路径）合并
   const { overlayResolved: ovPng, cleanup: ovCleanup } = await prepareOverlays(stack, ctxBase.projectId, stackOutDuration(stack))
   const overlayResolved = { ...ovPng, ...(ctxBase.overlayResolved || {}) }

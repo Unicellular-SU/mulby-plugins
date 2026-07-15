@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：39/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：40/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -220,7 +220,7 @@
   - 位置：`types.ts:183-184`、`studioStore.ts:103`、`VideoStudioModal.tsx:167`（恒传 undefined）
   - 修法（删除）：删 needsNormalize/baseRotation 两字段及 studioStore.open/setBase 的透传；避免误导维护者以为预检已存在。B12 的 needsNormalize/baseRotation 断言取消。（注：rotation 目前靠 ffmpeg autorotate 兜底，删字段不改运行时行为。）
 
-- [ ] **D5 [P2/debt] 剪辑死代码组：stackIsNoop 零调用（空栈也整片重编码）、bitrate/anim/op.label 无实现、单例 op 上移下移无效、run.ts void produced**
+- [x] **D5 [P2/debt] 剪辑死代码组：stackIsNoop 零调用（空栈也整片重编码）、bitrate/anim/op.label 无实现、单例 op 上移下移无效、run.ts void produced**（✓ 2026-07-15 删除：ExportParams.bitrate、OverlayParams.anim(+DEFAULTS 默认值+preview.ts 的 anim→inexact 块)、OpBase.label(+VideoStudioModal 图层名回退改为纯 OP_KIND_LABEL)、run.ts 的 produced 数组+void produced；moveOp 上/下移箭头改为**仅对 overlay op 渲染**（单例大类顺序被 OP_KIND_ORDER 钉死、reduceStack 取最后启用项，重排无效）。**stackIsNoop 接线**：exportStudio 顶部加 canPassthrough——无编辑 op + 导出无变换(outW/outH/fps/fade) + 格式与源容器一致时直接 fs.copy 源文件，跳过整片重编码（保画质省时），复制失败回落编码。typecheck+UI 构建+33 recipe 全绿。B12 的 bitrate 用例取消、stackIsNoop 保留（属集成脚本层，无法在 compile 快照测）。）
   - 位置：`types.ts:211-213,151,114,162,11`、`studioStore.ts:222`、`VideoStudioModal.tsx:349-353`、`run.ts:55`
   - 修法（删除为主 + stackIsNoop 接线）：删 ExportParams.bitrate、OverlayParams.anim、op.label 改名残余、run.ts 的 void produced；moveOp 箭头仅对 overlay 渲染。**stackIsNoop 保留并接线**：exportStack 开头判 noop 直接复制源为新卡（真实画质优化，非死代码）。B12 的 bitrate 用例取消、stackIsNoop 用例保留。
 

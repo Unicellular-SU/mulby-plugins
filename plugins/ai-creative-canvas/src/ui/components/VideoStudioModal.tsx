@@ -353,11 +353,16 @@ function Inner({ cardId }: { cardId: string }) {
                   <div key={op.id} onClick={() => useStudio.getState().selectOp(op.id)}
                     className={`flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer text-[11px] ${sel ? 'bg-pink-500/15 ring-1 ring-pink-500/40' : 'hover:bg-black/5 dark:hover:bg-white/10'} ${op.enabled ? '' : 'opacity-45'}`}>
                     <Icon size={13} className="shrink-0 text-pink-500" />
-                    <span className="flex-1 truncate">{op.label || OP_KIND_LABEL[op.kind]}</span>
+                    <span className="flex-1 truncate">{OP_KIND_LABEL[op.kind]}</span>
                     {op.kind !== 'export' && (
                       <>
-                        <button title="上移" onClick={(e) => { e.stopPropagation(); useStudio.getState().moveOp(op.id, -1) }} className="opacity-50 hover:opacity-100" disabled={i === 0}><ChevronUp size={12} /></button>
-                        <button title="下移" onClick={(e) => { e.stopPropagation(); useStudio.getState().moveOp(op.id, 1) }} className="opacity-50 hover:opacity-100"><ChevronDown size={12} /></button>
+                        {/* 上/下移仅对 overlay 有意义：单例大类(trim/speed/color…)编译顺序被 OP_KIND_ORDER 钉死、reduceStack 每类只取最后启用项，重排看不到变化 */}
+                        {op.kind === 'overlay' && (
+                          <>
+                            <button title="上移" onClick={(e) => { e.stopPropagation(); useStudio.getState().moveOp(op.id, -1) }} className="opacity-50 hover:opacity-100" disabled={i === 0}><ChevronUp size={12} /></button>
+                            <button title="下移" onClick={(e) => { e.stopPropagation(); useStudio.getState().moveOp(op.id, 1) }} className="opacity-50 hover:opacity-100"><ChevronDown size={12} /></button>
+                          </>
+                        )}
                         <button title={op.enabled ? '停用' : '启用'} onClick={(e) => { e.stopPropagation(); useStudio.getState().toggleOp(op.id) }} className="opacity-60 hover:opacity-100">{op.enabled ? <Eye size={12} /> : <EyeOff size={12} />}</button>
                         <button title="删除" onClick={(e) => { e.stopPropagation(); useStudio.getState().removeOp(op.id) }} className="opacity-50 hover:opacity-100"><Trash2 size={12} /></button>
                       </>
