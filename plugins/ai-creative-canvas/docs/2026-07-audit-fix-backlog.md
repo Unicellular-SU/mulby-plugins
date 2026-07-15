@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：40/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：41/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -224,7 +224,7 @@
   - 位置：`types.ts:211-213,151,114,162,11`、`studioStore.ts:222`、`VideoStudioModal.tsx:349-353`、`run.ts:55`
   - 修法（删除为主 + stackIsNoop 接线）：删 ExportParams.bitrate、OverlayParams.anim、op.label 改名残余、run.ts 的 void produced；moveOp 箭头仅对 overlay 渲染。**stackIsNoop 保留并接线**：exportStack 开头判 noop 直接复制源为新卡（真实画质优化，非死代码）。B12 的 bitrate 用例取消、stackIsNoop 用例保留。
 
-- [ ] **D6 [P2/incomplete] 新手引导「打开模板」指向必然为空的模板库（无内置模板）**
+- [x] **D6 [P2/incomplete] 新手引导「打开模板」指向必然为空的模板库（无内置模板）**（✓ 2026-07-15 新建 builtinTemplates.ts：3 个演示模板（文生图基础链 text→image、图生视频链 image→video、分镜扇出 text→3×image），用 GroupTemplate 格式硬编码、纯结构无产物、id 前缀 builtin-。listTemplates 置顶合并内置+用户模板，新手引导「打开模板」不再指向空列表。TemplatePanel 内置项显示「内置」徽标、隐藏删除按钮；deleteTemplate 拒删内置并**修正潜在 bug**——原 filter 写回的是含内置的 listTemplates 结果、会污染用户存储，改为直接读用户存储过滤。typecheck+UI 构建+全套件全绿）
   - 位置：`CanvasStage.tsx:628`、`templates.ts:8-15`、`TemplatePanel.tsx:50`
   - 修法：内置 2-3 个演示模板（文生图基础链/图生视频链/分镜扇出，纯结构无产物，用现有 GroupTemplate 格式硬编码），listTemplates 合并展示。
 

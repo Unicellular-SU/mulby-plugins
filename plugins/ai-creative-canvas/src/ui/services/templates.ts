@@ -1,17 +1,21 @@
 import type { Card, GroupTemplate, Edge } from '../types'
 import { uid } from '../util'
+import { BUILTIN_TEMPLATES, isBuiltinTemplate } from './builtinTemplates'
 
 const PLUGIN_ID = 'ai-creative-canvas'
 const KEY = 'templates:list'
 const storage = () => (window as any).mulby?.storage
 
+// 内置演示模板置顶，后接用户保存的模板（空模板库不再是死路，新手可一键搭链）
 export async function listTemplates(): Promise<GroupTemplate[]> {
+  let user: GroupTemplate[] = []
   try {
     const v = await storage()?.get(KEY, PLUGIN_ID)
-    return Array.isArray(v) ? (v as GroupTemplate[]) : []
+    if (Array.isArray(v)) user = v as GroupTemplate[]
   } catch {
-    return []
+    /* ignore */
   }
+  return [...BUILTIN_TEMPLATES, ...user]
 }
 
 // 把一个组（含嵌套子树 + 内部连线）存为模板；坐标归一化到组左上角；不存产物
@@ -78,9 +82,12 @@ export async function saveGroupAsTemplate(
 }
 
 export async function deleteTemplate(id: string): Promise<boolean> {
+  if (isBuiltinTemplate(id)) return false // 内置模板不可删（也不在用户存储里）
   try {
-    const all = await listTemplates()
-    await storage()?.set(KEY, all.filter((t) => t.id !== id), PLUGIN_ID)
+    // 只对用户存储生效——listTemplates 含内置项，过滤时须排除它们，避免把内置写进存储
+    const v = await storage()?.get(KEY, PLUGIN_ID)
+    const user: GroupTemplate[] = Array.isArray(v) ? (v as GroupTemplate[]) : []
+    await storage()?.set(KEY, user.filter((t) => t.id !== id), PLUGIN_ID)
     return true
   } catch {
     return false

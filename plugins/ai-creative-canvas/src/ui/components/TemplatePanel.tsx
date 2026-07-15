@@ -5,6 +5,7 @@ import { useEscClose } from '../hooks'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { listTemplates, deleteTemplate } from '../services/templates'
+import { isBuiltinTemplate } from '../services/builtinTemplates'
 import { screenToWorld } from '../canvas/viewport'
 import type { GroupTemplate } from '../types'
 import { toast } from '../store/toastStore'
@@ -58,9 +59,13 @@ export function TemplatePanel({ show, onClose }: { show: boolean; onClose: () =>
                 <button onClick={() => insert(t)} className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-500 hover:bg-indigo-600 text-white">
                   <Plus size={12} /> 插入
                 </button>
-                <button onClick={() => void del(t.id)} title="删除模板" className="p-1 text-red-500 opacity-70 hover:opacity-100">
-                  <Trash2 size={13} />
-                </button>
+                {isBuiltinTemplate(t.id) ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/10 opacity-60">内置</span>
+                ) : (
+                  <button onClick={() => void del(t.id)} title="删除模板" className="p-1 text-red-500 opacity-70 hover:opacity-100">
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             ))
           )}
