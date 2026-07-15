@@ -15,6 +15,7 @@ import { VideoTrimModal } from './components/VideoTrimModal'
 import { VideoStudioModal } from './components/VideoStudioModal'
 import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
+import { CardSearch } from './components/CardSearch'
 import { ProjectLibrary } from './components/ProjectLibrary'
 import { PanoViewer } from './canvas/PanoViewer'
 import { DirectorStage } from './canvas/DirectorStage'
@@ -140,6 +141,7 @@ export default function App() {
       <VideoStudioModal />
       <TaskCenter />
       <Gallery />
+      <CardSearch />
       <DialogHost />
       <ToastHost />
       <TooltipHost />

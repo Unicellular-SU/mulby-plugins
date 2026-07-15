@@ -538,6 +538,9 @@ export function CanvasStage() {
       } else if (mod && e.key.toLowerCase() === 'g') {
         e.preventDefault()
         g.groupSelection()
+      } else if (mod && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        useUi.getState().setShowSearch(true) // Ctrl/Cmd+F 搜索卡片
       } else if (e.key.toLowerCase() === 'f') {
         doFit()
       } else if (e.key.toLowerCase() === 'm') {

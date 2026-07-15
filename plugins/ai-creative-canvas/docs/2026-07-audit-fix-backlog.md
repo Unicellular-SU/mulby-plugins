@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：42/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：43/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -232,7 +232,7 @@
   - 位置：`src/ui/store/projectStore.ts:241`
   - 修法：「导出含媒体」选项——host-worker 把 JSON+media 目录打 zip；至少导入时把缺媒体的卡片标注出来 + README 说明仅同机可恢复。
 
-- [ ] **D8 [P2/optimization] 无卡片搜索/按标题定位**
+- [x] **D8 [P2/optimization] 无卡片搜索/按标题定位**（✓ 2026-07-15 新建 CardSearch 面板：按 标题/提示词/文本 过滤全工程卡片（跳过 group），带命中摘要片段、结果上限 50、行内标 kind+画布名；点击结果调 focusCard 切画布+居中。uiStore 加 showSearch 并纳入 anyModalOpen(C2 一致)。TopBar 加搜索图标入口，App 挂载 CardSearch，CanvasStage 加 Ctrl/Cmd+F 快捷键。typecheck+UI 构建+全套件全绿）
   - 位置：确认不存在（全 src/ui 无过滤逻辑）；跳转所需 Gallery.focus 已有
   - 修法：顶栏或作品库加搜索框，按 title/prompt/text 过滤全工程卡片，点击复用 focus 跳转。
 

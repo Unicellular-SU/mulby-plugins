@@ -55,6 +55,8 @@ interface UiState {
   setPanoCardId: (id: string | null) => void
   showDirector: boolean
   setShowDirector: (v: boolean) => void
+  showSearch: boolean
+  setShowSearch: (v: boolean) => void
   annotTool: 'pen' | 'arrow' | 'rect' | 'text' | null
   setAnnotTool: (t: 'pen' | 'arrow' | 'rect' | 'text' | null) => void
   annotColor: string
@@ -134,6 +136,8 @@ export const useUi = create<UiState>((set, get) => ({
   setPanoCardId: (panoCardId) => set({ panoCardId }),
   showDirector: false,
   setShowDirector: (showDirector) => set({ showDirector }),
+  showSearch: false,
+  setShowSearch: (showSearch) => set({ showSearch }),
   annotTool: null,
   setAnnotTool: (annotTool) => set({ annotTool }),
   annotColor: '#ef4444',
@@ -149,6 +153,7 @@ export const useUi = create<UiState>((set, get) => ({
       s.showGallery ||
       s.showProjectLibrary ||
       s.showDirector ||
+      s.showSearch ||
       s.studioCardId ||
       s.storyboardCardId ||
       s.maskCardId ||
