@@ -208,17 +208,21 @@
   - 位置：`src/ui/services/mediaVideo.ts:20-21`（进度回调是空函数，toast ~4.7s 即消失）
   - 修法：download 进度回调更新常驻 toast 或任务中心条目（「FFmpeg 下载中 42%」），完成/失败替换终态提示。
 
-- [ ] **D3 [P2/incomplete] Ken-Burns 全链路未实现：类型/预览分支/计划用例都在，编译器与 UI 均空——实现或删除，二选一**
-  - 位置：`types.ts:51-58,69`、`preview.ts:60`、`compile.ts:213-277`（applyTransform 不读）
-  - 修法：实现（zoompan 或 scale+crop 表达式随 t 插值，注意与 mirror/crop 顺序）+UI 入口 + recipe；或删字段并在计划文档标注放弃。不要留在「有类型无实现」状态。
+> **用户决策（2026-07-15）**：D3/D4/D5 的「有类型无实现」项一律**删除类型/死代码**（不实现）。D 批次全部要做。
+> 删除后同步收缩 B12：kenBurns/needsNormalize/baseRotation/bitrate 相关的待补用例取消（因为功能删了）；
+> stackIsNoop 例外——它是「空栈导出=原样」的真实优化点，保留并接线（详见 D5）。
 
-- [ ] **D4 [P2/incomplete] needsNormalize/baseRotation 是死字段：VFR/竖屏 rotation 预检（计划风险面 4）完全未做**
+- [ ] **D3 [P2/incomplete]（决策：删除）Ken-Burns 全链路未实现：类型/预览分支/计划用例都在，编译器与 UI 均空**
+  - 位置：`types.ts:51-58,69`、`preview.ts:60`、`compile.ts:213-277`（applyTransform 不读）
+  - 修法（删除）：删 KenBurns 类型与 TransformParams.kenBurns 字段、preview.ts 的 kenBurns→inexact 分支；消除「有类型无实现」假象。B12 的 kenBurns+mirror 用例取消。
+
+- [ ] **D4 [P2/incomplete]（决策：删除）needsNormalize/baseRotation 是死字段：VFR/竖屏 rotation 预检完全未做**
   - 位置：`types.ts:183-184`、`studioStore.ts:103`、`VideoStudioModal.tsx:167`（恒传 undefined）
-  - 修法：最小闭环——打开工作台时经 probeDuration 通道扩展探测 VFR/透明 webm，置 needsNormalize 并在编译首段插 fps=30/format 归一；或删两字段与透传，避免误导维护者。决策后同步 B12 的用例。
+  - 修法（删除）：删 needsNormalize/baseRotation 两字段及 studioStore.open/setBase 的透传；避免误导维护者以为预检已存在。B12 的 needsNormalize/baseRotation 断言取消。（注：rotation 目前靠 ffmpeg autorotate 兜底，删字段不改运行时行为。）
 
 - [ ] **D5 [P2/debt] 剪辑死代码组：stackIsNoop 零调用（空栈也整片重编码）、bitrate/anim/op.label 无实现、单例 op 上移下移无效、run.ts void produced**
   - 位置：`types.ts:211-213,151,114,162,11`、`studioStore.ts:222`、`VideoStudioModal.tsx:349-353`、`run.ts:55`
-  - 修法：exportStack 开头判 stackIsNoop 直接复制源文件为新卡；bitrate/anim/label 删除或补齐；moveOp 箭头仅对 overlay 渲染；清 void produced。涉及 B12 用例 ④②。
+  - 修法（删除为主 + stackIsNoop 接线）：删 ExportParams.bitrate、OverlayParams.anim、op.label 改名残余、run.ts 的 void produced；moveOp 箭头仅对 overlay 渲染。**stackIsNoop 保留并接线**：exportStack 开头判 noop 直接复制源为新卡（真实画质优化，非死代码）。B12 的 bitrate 用例取消、stackIsNoop 用例保留。
 
 - [ ] **D6 [P2/incomplete] 新手引导「打开模板」指向必然为空的模板库（无内置模板）**
   - 位置：`CanvasStage.tsx:628`、`templates.ts:8-15`、`TemplatePanel.tsx:50`
