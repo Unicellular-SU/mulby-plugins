@@ -1,5 +1,5 @@
 import { useRef, type ChangeEvent } from 'react'
-import { FolderOpen, Plus, Upload, Download, Copy, Pencil, Trash2, Check, X, Layers } from 'lucide-react'
+import { FolderOpen, Plus, Upload, Download, Package, Copy, Pencil, Trash2, Check, X, Layers } from 'lucide-react'
 import { useEscClose } from '../hooks'
 import { useUi } from '../store/uiStore'
 import { useProject } from '../store/projectStore'
@@ -107,14 +107,15 @@ function Inner() {
                   )}
                   <IconAct title="重命名" onClick={() => void onRename(p.id, p.name)} icon={Pencil} />
                   <IconAct title="复制" onClick={() => void useProject.getState().duplicateProject(p.id)} icon={Copy} />
-                  <IconAct title="导出 JSON" onClick={() => void useProject.getState().exportProject(p.id)} icon={Download} />
+                  <IconAct title="导出 JSON（不含媒体，仅同机）" onClick={() => void useProject.getState().exportProject(p.id)} icon={Download} />
+                  <IconAct title="导出含媒体（可跨机恢复）" onClick={() => void useProject.getState().exportProjectWithMedia(p.id)} icon={Package} />
                   <IconAct title="删除" onClick={() => void useProject.getState().deleteProject(p.id)} icon={Trash2} danger />
                 </div>
               </div>
             )
           })}
         </div>
-        <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onFile} />
+        <input ref={fileRef} type="file" accept="application/json,.json,.acmedia.json,.acproj.json" className="hidden" onChange={onFile} />
       </div>
     </div>
   )

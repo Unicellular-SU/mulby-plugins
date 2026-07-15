@@ -369,6 +369,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         className="absolute inset-0 rounded-xl overflow-hidden border bg-white dark:bg-neutral-900"
         style={{ borderColor: selected ? meta.accent : 'var(--ace-border)' }}
       >
+        {(card.meta as any)?.mediaMissing && (
+          <div className="absolute top-1 left-1 z-20 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/90 text-white pointer-events-none" title="导入的工程未随附此媒体文件，请重新生成或重新导入含媒体的工程">媒体缺失</div>
+        )}
         {isImg ? (
           <img
             src={card.assetUrl as string}

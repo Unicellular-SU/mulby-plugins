@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：41/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：42/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -228,7 +228,7 @@
   - 位置：`CanvasStage.tsx:628`、`templates.ts:8-15`、`TemplatePanel.tsx:50`
   - 修法：内置 2-3 个演示模板（文生图基础链/图生视频链/分镜扇出，纯结构无产物，用现有 GroupTemplate 格式硬编码），listTemplates 合并展示。
 
-- [ ] **D7 [P2/incomplete] 工程导出 JSON 不含媒体：跨机迁移后全部裂图**
+- [x] **D7 [P2/incomplete] 工程导出 JSON 不含媒体：跨机迁移后全部裂图**（✓ 2026-07-15 host 无 zip 能力、jszip 是重依赖，采自包含 base64 内嵌方案：新增 `exportProjectWithMedia`——把全部画布卡片的本地媒体读为 base64 装进 `{__ac:'project-with-media',doc,media}` 信封，200MB base64 上限超限拒绝(防撑爆内存)并提示改用 JSON 导出，文件名 .acmedia.json。importProject 兼容信封+裸 doc：含媒体则用现成 saveBase64 写回新工程媒体目录并重写 assetLocalPath/assetUrl/mime，未随附媒体的卡标 meta.mediaMissing。CardView 对 mediaMissing 卡显示琥珀色「媒体缺失」徽标(带解释 title)。ProjectLibrary 加「导出含媒体」按钮(Package 图标)，原 JSON 导出提示改为「仅同机可恢复」。导入 toast 报告恢复/缺失数。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/store/projectStore.ts:241`
   - 修法：「导出含媒体」选项——host-worker 把 JSON+media 目录打 zip；至少导入时把缺媒体的卡片标注出来 + README 说明仅同机可恢复。
 

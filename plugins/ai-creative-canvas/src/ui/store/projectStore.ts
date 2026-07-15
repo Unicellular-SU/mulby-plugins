@@ -17,9 +17,27 @@ import {
   metaOf,
   migrateProject
 } from '../services/persistence'
-import { removeProjectMediaOnDisk } from '../services/media'
+import { removeProjectMediaOnDisk, saveBase64, toFileUrl } from '../services/media'
 import { confirmDialog } from './dialogStore'
 import { toast } from './toastStore'
+
+const MEDIA_EXPORT_CAP = 200 * 1024 * 1024 // 含媒体导出的 base64 总量上限（~150MB 实际），超限拒绝以免撑爆内存
+const fsApi = () => (window as any).mulby?.filesystem
+
+// 触发浏览器下载一段 JSON
+function downloadJson(filename: string, obj: unknown): void {
+  const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+const safeName = (n?: string) => (n || 'project').replace(/[^\w.\-]+/g, '_')
+const extOfPath = (p: string) => (p.split('.').pop() || 'bin').toLowerCase()
 
 // 记录"刚载入/新建/导入"的工程引用：App 的保存订阅据此跳过这次（非用户编辑引发的）变更，
 // 避免载入/切换后立刻又把未改动的工程全量写一遍（尤其恢复快照）。任何真实编辑都会产生新引用→照常保存。
@@ -102,6 +120,7 @@ interface ProjectState {
   duplicateProject: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
   exportProject: (id: string) => Promise<void>
+  exportProjectWithMedia: (id: string) => Promise<void>
   importProject: (raw: unknown) => Promise<void>
   syncActiveMeta: (doc: ProjectDoc) => void
   flushSave: () => Promise<void>
@@ -258,24 +277,53 @@ export const useProject = create<ProjectState>((set, get) => ({
       return
     }
     try {
-      const json = JSON.stringify(doc, null, 2)
-      const blob = new Blob([json], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${(doc.name || 'project').replace(/[^\w.\-]+/g, '_')}.acproj.json`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-      toast('已导出（不含本地媒体文件）', 'success')
+      downloadJson(`${safeName(doc.name)}.acproj.json`, doc)
+      toast('已导出（不含本地媒体文件，仅同机可恢复）', 'success')
+    } catch (e: any) {
+      toast('导出失败：' + (e?.message || String(e)), 'error')
+    }
+  },
+
+  exportProjectWithMedia: async (id) => {
+    const doc = id === get().activeId ? useGraph.getState().project : await loadProject(id)
+    if (!doc) {
+      toast('导出失败：工程不存在', 'error')
+      return
+    }
+    try {
+      // 收集全部画布卡片引用的本地媒体，读为 base64 内嵌信封；超上限则拒绝（避免撑爆内存），提示改用同机 JSON 导出
+      const media: Record<string, { b64: string; ext: string; mime: string | null }> = {}
+      let total = 0
+      for (const b of doc.boards) {
+        for (const c of Object.values(b.cards)) {
+          if (!c.assetLocalPath) continue
+          try {
+            const b64 = (await fsApi()?.readFile?.(c.assetLocalPath, 'base64')) as string
+            if (typeof b64 !== 'string' || !b64) continue
+            total += b64.length
+            if (total > MEDIA_EXPORT_CAP) {
+              toast(`工程媒体过大（>${Math.round(MEDIA_EXPORT_CAP / 1024 / 1024)}MB），无法打包导出；请改用「导出 JSON」在同机恢复`, 'error')
+              return
+            }
+            media[c.id] = { b64, ext: extOfPath(c.assetLocalPath), mime: c.mime ?? null }
+          } catch {
+            /* 单个文件读失败：跳过，不阻断整体导出 */
+          }
+        }
+      }
+      downloadJson(`${safeName(doc.name)}.acmedia.json`, { __ac: 'project-with-media', doc, media })
+      const n = Object.keys(media).length
+      toast(`已导出含 ${n} 个媒体文件（约 ${Math.round(total / 1024 / 1024)}MB，可跨机恢复）`, 'success')
     } catch (e: any) {
       toast('导出失败：' + (e?.message || String(e)), 'error')
     }
   },
 
   importProject: async (raw) => {
-    const doc0 = raw as ProjectDoc
+    // 兼容两种文件：含媒体信封 { __ac:'project-with-media', doc, media } 与裸 ProjectDoc
+    const env = raw as { __ac?: string; doc?: ProjectDoc; media?: Record<string, { b64: string; ext: string; mime: string | null }> }
+    const withMedia = env?.__ac === 'project-with-media' && env.doc && Array.isArray(env.doc.boards)
+    const doc0 = (withMedia ? env.doc : raw) as ProjectDoc
     if (!doc0 || typeof doc0 !== 'object' || !Array.isArray(doc0.boards)) {
       toast('导入失败：不是有效的工程文件', 'error')
       return
@@ -283,12 +331,44 @@ export const useProject = create<ProjectState>((set, get) => ({
     await get().flushSave()
     const now = Date.now()
     const doc = migrateProject({ ...doc0, id: uid('proj'), createdAt: doc0.createdAt || now, updatedAt: now, name: doc0.name || '导入的工程' })
+
+    // 含媒体：把内嵌 base64 写回新工程的媒体目录，并重写卡片的 assetLocalPath/assetUrl/mime；
+    // 无内嵌媒体（裸 JSON 或某卡缺失）→ 该卡的绝对路径在异机不存在，标注 meta.mediaMissing 以便 UI 提示裂图原因
+    const media = withMedia ? env.media || {} : {}
+    let restored = 0
+    let missing = 0
+    for (const b of doc.boards) {
+      for (const c of Object.values(b.cards)) {
+        if (!c.assetLocalPath) continue
+        const m = media[c.id]
+        if (m?.b64) {
+          try {
+            const saved = await saveBase64(doc.id, c.id, m.b64, m.ext || 'bin')
+            c.assetLocalPath = saved.path
+            c.assetUrl = toFileUrl(saved.path)
+            if (m.mime) c.mime = m.mime
+            restored++
+            continue
+          } catch {
+            /* 写回失败 → 落入缺失分支 */
+          }
+        }
+        // 未随文件携带媒体：路径来自导出机，异机大概率不存在
+        c.meta = { ...(c.meta || {}), mediaMissing: true }
+        missing++
+      }
+    }
+
     await saveProject(doc.id, doc)
     const items = [...get().items, metaOf(doc)]
     set({ items, activeId: doc.id })
     await saveRegistry({ activeId: doc.id, items })
     sanitizeDoc(doc)
     applyLoaded(doc.id, doc)
-    toast('已导入工程', 'success')
+    if (restored || missing) {
+      toast(`已导入工程（媒体恢复 ${restored}${missing ? `，缺失 ${missing}` : ''}）`, missing ? 'warning' : 'success')
+    } else {
+      toast('已导入工程', 'success')
+    }
   }
 }))
