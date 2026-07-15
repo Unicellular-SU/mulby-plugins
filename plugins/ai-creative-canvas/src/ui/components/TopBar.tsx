@@ -5,6 +5,7 @@ import { useTask } from '../store/taskStore'
 import { Select } from './Select'
 import { STYLE_PACKS } from '../services/stylePacks'
 import { ProjectSettings } from './ProjectSettings'
+import { promptDialog, confirmDialog } from '../store/dialogStore'
 
 export function TopBar() {
   const name = useGraph((s) => s.project.name)
@@ -13,6 +14,8 @@ export function TopBar() {
   const renameProject = useGraph((s) => s.renameProject)
   const addBoard = useGraph((s) => s.addBoard)
   const setActiveBoard = useGraph((s) => s.setActiveBoard)
+  const renameBoard = useGraph((s) => s.renameBoard)
+  const removeBoard = useGraph((s) => s.removeBoard)
   const stylePackId = useGraph((s) => s.getActiveBoard().stylePackId || '')
   const setStylePack = useGraph((s) => s.setStylePack)
   const saving = useUi((s) => s.saving)
@@ -52,6 +55,17 @@ export function TopBar() {
           <button
             key={b.id}
             onClick={() => setActiveBoard(b.id)}
+            onDoubleClick={async () => {
+              const next = await promptDialog({ title: '重命名画布', defaultValue: b.name, confirmLabel: '重命名' })
+              if (next && next.trim()) renameBoard(b.id, next.trim())
+            }}
+            onContextMenu={async (e) => {
+              e.preventDefault()
+              if (boards.length <= 1) return // 至少保留一块画布
+              const ok = await confirmDialog({ title: '删除画布', message: `删除画布「${b.name}」及其全部卡片？不可撤销。`, confirmLabel: '删除', cancelLabel: '取消', danger: true })
+              if (ok) removeBoard(b.id)
+            }}
+            title="单击切换 · 双击重命名 · 右键删除"
             className={`px-2.5 py-1 rounded-md text-xs whitespace-nowrap transition-colors ${
               b.id === activeBoardId
                 ? 'bg-indigo-500 text-white'

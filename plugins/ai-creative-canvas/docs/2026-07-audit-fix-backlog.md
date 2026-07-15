@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：35/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：36/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -200,7 +200,7 @@
 
 ## 批次 D · 功能缺口补完
 
-- [ ] **D1 [P1/incomplete] 画布 Tab 无法重命名/删除：store 的 renameBoard/removeBoard 已实现但全 UI 零调用**
+- [x] **D1 [P1/incomplete] 画布 Tab 无法重命名/删除：store 的 renameBoard/removeBoard 已实现但全 UI 零调用**（✓ 2026-07-15 TopBar 画布 Tab 加 onDoubleClick→promptDialog 重命名（renameBoard）、onContextMenu→confirmDialog(danger) 删除（removeBoard，boards>1 才允许、preventDefault 屏蔽系统右键菜单）；title 提示「单击切换·双击重命名·右键删除」。store 层现成，纯 UI 接线。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/components/TopBar.tsx:51-70`；`graphStore.ts:247,251`
   - 修法：Tab 加右键菜单/双击重命名（promptDialog 现成）+ 删除项（confirmDialog+removeBoard），成本极低。
 
