@@ -170,8 +170,6 @@ export interface EditStack {
   baseDuration: number // probeDuration 一次，缓存
   baseW: number // 方向校正后的真实显示宽高
   baseH: number
-  baseRotation?: 0 | 90 | 180 | 270 // 容器 rotate 元数据，供编译器显式 transpose
-  needsNormalize?: boolean // 入栈预检判定为 VFR/source/透明 webm 时置 true
 }
 
 // 存进 card.meta 的编辑配方（可二次编辑、可重放）

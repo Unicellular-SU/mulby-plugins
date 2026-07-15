@@ -50,9 +50,9 @@ interface StudioState {
   history: EditStack[]
   cursor: number
 
-  open: (cardId: string, base: { duration: number; w: number; h: number; rotation?: 0 | 90 | 180 | 270 }, recipe?: EditRecipe | null) => void
+  open: (cardId: string, base: { duration: number; w: number; h: number }, recipe?: EditRecipe | null) => void
   close: () => void
-  setBase: (base: Partial<Pick<EditStack, 'baseDuration' | 'baseW' | 'baseH' | 'baseRotation' | 'needsNormalize'>>) => void
+  setBase: (base: Partial<Pick<EditStack, 'baseDuration' | 'baseW' | 'baseH'>>) => void
 
   addOp: (kind: OpKind, params?: Record<string, unknown>) => void
   updateOp: (id: string, patch: Record<string, unknown>) => void // 提交进历史
@@ -103,8 +103,7 @@ export const useStudio = create<StudioState>((set, get) => {
         version: 1,
         baseDuration: base.duration,
         baseW: base.w,
-        baseH: base.h,
-        baseRotation: base.rotation
+        baseH: base.h
       }
       set({ cardId, stack, selectedOpId: stack.ops[0]?.id || null, history: [clone(stack)], cursor: 0, progress: 0, busy: false })
     },

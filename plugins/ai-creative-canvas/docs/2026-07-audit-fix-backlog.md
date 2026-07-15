@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：38/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：39/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -216,7 +216,7 @@
   - 位置：`types.ts:51-58,69`、`preview.ts:60`、`compile.ts:213-277`（applyTransform 不读）
   - 修法（删除）：删 KenBurns 类型与 TransformParams.kenBurns 字段、preview.ts 的 kenBurns→inexact 分支；消除「有类型无实现」假象。B12 的 kenBurns+mirror 用例取消。
 
-- [ ] **D4 [P2/incomplete]（决策：删除）needsNormalize/baseRotation 是死字段：VFR/竖屏 rotation 预检完全未做**
+- [x] **D4 [P2/incomplete]（决策：删除）needsNormalize/baseRotation 是死字段：VFR/竖屏 rotation 预检完全未做**（✓ 2026-07-15 删 EditStack.baseRotation/needsNormalize 字段、studioStore.open 的 rotation 参数与 `baseRotation: base.rotation` 赋值、setBase Pick 中两字段；清理 recipes.json 两条死数据(transform-crop-blurpad 的 baseRotation:90、export-webm 的 needsNormalize:true)。编译器从不读，删除不改运行时（rotation 仍靠 ffmpeg autorotate 兜底），快照不变。B12 的 needsNormalize/baseRotation 断言取消。typecheck+UI 构建+33 recipe 全绿）
   - 位置：`types.ts:183-184`、`studioStore.ts:103`、`VideoStudioModal.tsx:167`（恒传 undefined）
   - 修法（删除）：删 needsNormalize/baseRotation 两字段及 studioStore.open/setBase 的透传；避免误导维护者以为预检已存在。B12 的 needsNormalize/baseRotation 断言取消。（注：rotation 目前靠 ffmpeg autorotate 兜底，删字段不改运行时行为。）
 

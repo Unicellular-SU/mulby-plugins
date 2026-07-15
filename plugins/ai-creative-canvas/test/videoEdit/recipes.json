@@ -217,7 +217,6 @@
       "baseDuration": 5,
       "baseW": 1920,
       "baseH": 1080,
-      "baseRotation": 90,
       "ops": [
         {
           "id": "tf1",
@@ -482,8 +481,7 @@
       "baseDuration": 3,
       "baseW": 1280,
       "baseH": 720,
-      "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webm", "crf": 30 } }],
-      "needsNormalize": true
+      "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webm", "crf": 30 } }]
     },
     "ctx": { "hasAudio": true },
     "expect": { "outDuration": 3, "argsContains": ["libvpx-vp9"], "passCount": 1 }
