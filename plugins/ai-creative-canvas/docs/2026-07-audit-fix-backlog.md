@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：37/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：38/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -212,7 +212,7 @@
 > 删除后同步收缩 B12：kenBurns/needsNormalize/baseRotation/bitrate 相关的待补用例取消（因为功能删了）；
 > stackIsNoop 例外——它是「空栈导出=原样」的真实优化点，保留并接线（详见 D5）。
 
-- [ ] **D3 [P2/incomplete]（决策：删除）Ken-Burns 全链路未实现：类型/预览分支/计划用例都在，编译器与 UI 均空**
+- [x] **D3 [P2/incomplete]（决策：删除）Ken-Burns 全链路未实现：类型/预览分支/计划用例都在，编译器与 UI 均空**（✓ 2026-07-15 删除 KenBurns 接口、TransformParams.kenBurns 字段、preview.ts 的 kenBurns→inexact 分支——全库 kenBurns 引用清零，消除「有类型无实现」假象。编译器本就不读该字段，删除不改运行时行为。B12 的 kenBurns+mirror 用例随之取消。typecheck+UI 构建+全套件全绿）
   - 位置：`types.ts:51-58,69`、`preview.ts:60`、`compile.ts:213-277`（applyTransform 不读）
   - 修法（删除）：删 KenBurns 类型与 TransformParams.kenBurns 字段、preview.ts 的 kenBurns→inexact 分支；消除「有类型无实现」假象。B12 的 kenBurns+mirror 用例取消。
 

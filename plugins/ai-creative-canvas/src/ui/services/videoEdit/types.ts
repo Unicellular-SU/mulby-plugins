@@ -48,15 +48,6 @@ export interface CropRect {
   w: number
   h: number // 全部 0..1 归一
 }
-export interface KenBurns {
-  fromZoom: number
-  toZoom: number
-  fromX: number // 0..1 焦点
-  fromY: number
-  toX: number
-  toY: number
-  ease: 'linear' | 'easeInOut'
-}
 export type FitMode = 'contain' | 'cover' | 'blur-pad'
 export interface TransformParams {
   crop?: CropRect
@@ -66,7 +57,6 @@ export interface TransformParams {
   outW?: number // 目标画幅（配 fit）
   outH?: number
   fit?: FitMode
-  kenBurns?: KenBurns
   pixelate?: number // 全画面像素化块大小（>1 生效，neighbor 缩放）
   mirror?: 'none' | 'h' | 'v' // 镜像万花筒：左右/上下对称
   shake?: number // 镜头抖动强度 0..1（过扫描 + 振荡裁剪）
