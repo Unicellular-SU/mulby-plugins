@@ -272,7 +272,8 @@ export const rpc = {
       const ext = format === 'aac' ? 'aac' : format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'mp3'
       const filePath = `${dir}/tts_${Date.now()}.${ext}`
       await mulby.filesystem.writeFile(filePath, b64, 'base64')
-      return { ok: true, path: filePath, base64: b64, mime }
+      // 只回 path/mime：音频已落盘，无需再把整段 base64 跨 IPC 传回渲染进程（长音频负载翻倍，F13）
+      return { ok: true, path: filePath, mime }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }

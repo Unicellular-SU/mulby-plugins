@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：64/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F12 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F13）+ B12 回填
+**进度：65/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E/F 全清（F1-F13 完成）**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。**唯一剩余：B12 测试矩阵回填**
 
 ---
 
@@ -309,7 +309,8 @@
   - 位置：`src/main.ts:4`；`providerStore.ts:100-106`、`engine.ts:201,258`
   - 修法：修正注释；（可选长期项）把带密钥的 submit/poll 移到 host worker（uploadImageToHost/synthSpeech 已是此模式）。
 
-- [ ] **F13 [optimization] synthSpeech 返回值冗余携带整段音频 base64（调用方只用 path/mime），长音频 IPC 负载翻倍**
+- [x] **F13 [optimization] synthSpeech 返回值冗余携带整段音频 base64（调用方只用 path/mime），长音频 IPC 负载翻倍**（✓ 2026-07-16 核实唯一调用方 engine.ts runTts 只用 ok/path/mime（F4 已把返回类型定为无 base64），main.ts synthSpeech 从 `return {ok,path,base64:b64,mime}` 去掉 `base64:b64`——音频已 writeFile 落盘、b64 仅用于写盘，无需再把整段 base64 跨 IPC 回传渲染进程。长音频 RPC 负载减半。build:backend+typecheck+engine 单测绿）
+  - 位置：`src/main.ts:275`
   - 位置：`src/main.ts:185`；调用方 `engine.ts:296-298`
   - 修法：返回值去掉 base64 字段，只留 { ok, path, mime }。
 
