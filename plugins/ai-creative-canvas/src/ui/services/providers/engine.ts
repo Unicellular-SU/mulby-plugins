@@ -161,8 +161,9 @@ export async function resumeVideoJob(cfg: ProviderConfig, key: string, taskId: s
   return { url: await pollTaskDefault(cfg, headers, base, taskId, onProgress, signal) }
 }
 
-// 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath
-async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, signal?: AbortSignal, onTask?: (taskId: string) => void): Promise<{ url: string }> {
+// 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath。
+// 仅提交、拿到 url/taskId 即返回（轮询交给 resumeVideoJob，二者同一 pollTaskTemplate 路径）。
+async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<{ url?: string; taskId?: string }> {
   let imageUrl: string | undefined
   if (req.imageDataUrl) {
     if (cfg.uploadUrl) {
@@ -206,27 +207,14 @@ async function runViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, o
   const resp = await submitWithRetry(cfg.submitUrl as string, headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-  let url = jget(data, cfg.videoUrlPath)
+  const url = jget(data, cfg.videoUrlPath)
   const taskId = jget(data, cfg.taskIdPath)
   if (taskId) onTask?.(String(taskId))
-  if (!url && taskId && cfg.pollUrl) {
-    url = await pollTaskTemplate(cfg, headers, String(taskId), onProgress, signal)
-  }
-  if (!url || typeof url !== 'string') throw new Error('未获取到结果 URL（检查 taskIdPath/videoUrlPath）')
-  onProgress?.(0.95)
-  return { url }
+  return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }
 }
 
-// 提交 + 轮询，返回结果媒体 URL
-export async function runVideoJob(
-  cfg: ProviderConfig,
-  key: string,
-  req: VideoReq,
-  onProgress?: (p: number) => void,
-  signal?: AbortSignal,
-  onTask?: (taskId: string) => void
-): Promise<{ url: string }> {
-  if (cfg.bodyTemplate && cfg.submitUrl) return runViaTemplate(cfg, key, req, onProgress, signal, onTask)
+// 默认路径：提交视频任务、拿到 url/taskId 即返回（轮询交给 resumeVideoJob 的 pollTaskDefault）。
+async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<{ url?: string; taskId?: string }> {
   const body: any = {}
   if (cfg.extraBody && cfg.extraBody.trim()) {
     try {
@@ -266,18 +254,44 @@ export async function runVideoJob(
   const resp = await submitWithRetry(submitUrl, headers, body, cfg.timeoutMs || 600000)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-
-  let url = jget(data, cfg.resultPath)
+  const url = jget(data, cfg.resultPath)
   const taskId = jget(data, cfg.idPath)
   if (taskId) onTask?.(String(taskId))
+  return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }
+}
 
-  if (!url && taskId && cfg.statusPath) {
-    url = await pollTaskDefault(cfg, headers, base, String(taskId), onProgress, signal)
+// 仅提交视频任务、拿到 taskId（或同步 url）即返回，不轮询——供 generate.ts 在并发池内提交、拿到 taskId
+// 即释放槽位，轮询交由池外 resumeVideoJob 续跑（长视频不再挂满整个 poll 周期饿死文/图队列，E6）。
+export async function submitVideoJob(
+  cfg: ProviderConfig,
+  key: string,
+  req: VideoReq,
+  onProgress?: (p: number) => void,
+  onTask?: (taskId: string) => void
+): Promise<{ url?: string; taskId?: string }> {
+  return cfg.bodyTemplate && cfg.submitUrl ? submitViaTemplate(cfg, key, req, onProgress, onTask) : submitDefault(cfg, key, req, onProgress, onTask)
+}
+
+// 提交 + 轮询，返回结果媒体 URL（提交与轮询二段复用 submitVideoJob/resumeVideoJob，二者各自分发模板/默认路径）
+export async function runVideoJob(
+  cfg: ProviderConfig,
+  key: string,
+  req: VideoReq,
+  onProgress?: (p: number) => void,
+  signal?: AbortSignal,
+  onTask?: (taskId: string) => void
+): Promise<{ url: string }> {
+  const { url, taskId } = await submitVideoJob(cfg, key, req, onProgress, onTask)
+  if (url) {
+    onProgress?.(0.95)
+    return { url }
   }
-
-  if (!url || typeof url !== 'string') throw new Error('未获取到结果 URL（检查 idPath/statusPath/resultPath 配置）')
-  onProgress?.(0.95)
-  return { url }
+  if (taskId) {
+    const r = await resumeVideoJob(cfg, key, taskId, onProgress, signal)
+    onProgress?.(0.95)
+    return r
+  }
+  throw new Error('未获取到结果 URL（检查 taskIdPath/videoUrlPath 或 idPath/statusPath/resultPath 配置）')
 }
 
 export async function runTts(

@@ -8,7 +8,7 @@ import { generateImage } from './aiImage'
 import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
 import { resolveGenInputs, findUnresolvedMentions, buildMaterials } from './references'
 import { useProviders } from '../store/providerStore'
-import { runVideoJob, runTts, resumeVideoJob } from './providers/engine'
+import { submitVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { snapDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
@@ -126,6 +126,12 @@ export async function generateCard(cardId: string): Promise<void> {
   g0.updateCard(cardId, { status: 'queued', error: null, progress: 0 })
   useTask.getState().inc()
 
+  // 视频卡走专用两段生命周期：提交占并发槽、拿到 taskId 即释放，轮询/下载在池外（E6 不饿死文/图队列）
+  if (card0.kind === 'video') {
+    await generateVideoCard(cardId)
+    return
+  }
+
   await limiter(async () => {
     // 排队期间被「停止」：出队时直接早退，不消耗额度（修复排队态点停止无效）
     if (canceledCards.has(cardId)) {
@@ -186,66 +192,6 @@ export async function generateCard(cardId: string): Promise<void> {
           mime: res.mime,
           meta: { ...(base0?.meta || {}), results, ...(card.params?.pano ? { pano: true } : {}) }
         })
-      } else if (card.kind === 'video') {
-        const cfg = useProviders.getState().activeFor('video')
-        if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
-        const key = await useProviders.getState().getKey(cfg.id)
-        const inputs = resolveGenInputs(card, board)
-        const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
-          const bytes = await loadImageInput(im)
-          return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
-        }
-        const refMode = (card.params?.refMode as string) || 'omni'
-        let imageDataUrl: string | undefined
-        let lastImageDataUrl: string | undefined
-        if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
-        if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
-        const proj = useGraph.getState().project
-        const vboard = proj.boards.find((b) => b.cards[cardId]) ?? useGraph.getState().getActiveBoard()
-        const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
-        const cam = (card.params?.camera as string) || ''
-        const mot = (card.params?.motion as string) || ''
-        const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
-        const vprompt =
-          card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
-        // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
-        const sentParams = {
-          ...card.params,
-          aspect: (card.params?.aspect as string) || '16:9',
-          duration: snapDuration(card.modelId, Number(card.params?.duration) || 5)
-        }
-        const vctrl = new AbortController()
-        videoAborts.set(cardId, vctrl)
-        const { url } = await runVideoJob(
-          cfg,
-          key,
-          { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams },
-          (p) => commit({ progress: p }),
-          vctrl.signal,
-          (taskId) => {
-            const m = useGraph.getState().getCard(cardId)?.meta || {}
-            commit({ meta: { ...m, task: { taskId, provider: cfg.id } } })
-          }
-        )
-        if (!isCurrentRun(cardId, runId)) throw new DOMException('已取消', 'AbortError') // 已取消：不下载不写卡
-        const projectId = useGraph.getState().project.id
-        const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', {
-          url,
-          // 文件名必须含全局唯一 cardId——否则后端按标题落盘，多个默认标题（如"AI 视频"）会写到同一文件互相覆盖
-          name: `${card.title || 'video'}-${cardId}`,
-          projectId
-        })
-        const path = r?.data?.path
-        if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
-        const mDone = useGraph.getState().getCard(cardId)?.meta || {}
-        commit({
-          status: 'done',
-          progress: 1,
-          assetUrl: toFileUrl(path),
-          assetLocalPath: path,
-          mime: (r?.data?.mime as string) || 'video/mp4', // 后端已回真实 content-type，仅缺失时才回退
-          meta: { ...mDone, task: undefined }
-        })
       } else if (card.kind === 'audio') {
         const cfg = useProviders.getState().activeFor('audio')
         if (!cfg) throw new Error('未配置音频/TTS Provider（右上角“设置”）')
@@ -291,6 +237,119 @@ export async function generateCard(cardId: string): Promise<void> {
       useTask.getState().dec()
     }
   })
+}
+
+// 视频卡专用两段生命周期（E6）：提交在并发池内（一次 HTTP，很快），拿到 taskId 即释放槽位；轮询/下载在
+// 池外进行——长视频不再占着并发槽挂满整个 poll 周期（默认 4 并发、上限 600s）饿死文/图队列。inc() 已由
+// generateCard 统一在入池前计数，本函数 finally 里 dec() 对齐。取消沿用 videoAborts(poll 的 abort signal)
+// + runId 门控：videoAborts 在池内提交前才注册（与原逻辑一致）——排队期被「停止」时无取消器，stopCard 走
+// canceledCards 路径，出队即早退不消耗额度；提交阶段 abort 不中断底层 HTTP，但 runId 失效即丢弃结果。
+async function generateVideoCard(cardId: string): Promise<void> {
+  const runId = ++runSeq
+  runIds.set(cardId, runId)
+  const commit = (patch: Record<string, unknown>) => {
+    if (isCurrentRun(cardId, runId)) useGraph.getState().updateCard(cardId, patch)
+  }
+  try {
+    // ---- 提交阶段：占用并发槽（submit 拿到 taskId 即返回）----
+    const submit = await limiter(async () => {
+      // 排队期间被「停止」：出队时直接早退，不提交、不消耗额度
+      if (canceledCards.has(cardId)) {
+        canceledCards.delete(cardId)
+        return { canceled: true as const }
+      }
+      const g = useGraph.getState()
+      const board = g.project.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
+      const card = board.cards[cardId]
+      if (!card) return null
+      commit({ status: 'running', progress: 0, error: null })
+      const cfg = useProviders.getState().activeFor('video')
+      if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
+      const key = await useProviders.getState().getKey(cfg.id)
+      const inputs = resolveGenInputs(card, board)
+      const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
+        const bytes = await loadImageInput(im)
+        return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
+      }
+      const refMode = (card.params?.refMode as string) || 'omni'
+      let imageDataUrl: string | undefined
+      let lastImageDataUrl: string | undefined
+      if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
+      if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
+      const proj = g.project
+      const vboard = proj.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
+      const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
+      const cam = (card.params?.camera as string) || ''
+      const mot = (card.params?.motion as string) || ''
+      const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
+      const vprompt = card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
+      // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
+      const sentParams = {
+        ...card.params,
+        aspect: (card.params?.aspect as string) || '16:9',
+        duration: snapDuration(card.modelId, Number(card.params?.duration) || 5)
+      }
+      // videoAborts 在提交前注册（不早于入池）：排队态无取消器 → stopCard 走 canceledCards 早退
+      const vctrl = new AbortController()
+      videoAborts.set(cardId, vctrl)
+      const { url, taskId } = await submitVideoJob(
+        cfg,
+        key,
+        { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams },
+        (p) => commit({ progress: p }),
+        (tid) => {
+          // 持久化 taskId：释放槽位后由池外轮询续跑；切/关工程后也能由 resumeInflightVideos 接管
+          const m = useGraph.getState().getCard(cardId)?.meta || {}
+          commit({ meta: { ...m, task: { taskId: tid, provider: cfg.id } } })
+        }
+      )
+      return { cfg, key, vctrl, url, taskId }
+    })
+    // 槽位在此已释放——以下轮询/下载都在池外
+    if (!submit) return // 卡已删除
+    if ('canceled' in submit) {
+      commit({ status: 'idle', progress: 0 })
+      return
+    }
+    if (!isCurrentRun(cardId, runId)) return // 提交途中被「停止」或被新生成取代：不轮询、不下载
+
+    // ---- 轮询阶段（池外）：无同步 url 时凭 taskId 续跑 ----
+    let url = submit.url
+    if (!url && submit.taskId) {
+      const r = await resumeVideoJob(submit.cfg, submit.key, submit.taskId, (p) => commit({ progress: p }), submit.vctrl.signal)
+      url = r.url
+    }
+    if (!url) throw new Error('未获取到结果 URL（检查 Provider 配置）')
+    if (!isCurrentRun(cardId, runId)) throw new DOMException('已取消', 'AbortError') // 已取消：不下载不写卡
+
+    // ---- 下载落盘 ----
+    const projectId = useGraph.getState().project.id
+    // 文件名必须含全局唯一 cardId——否则后端按标题落盘，多个默认标题（如"AI 视频"）会写到同一文件互相覆盖
+    const title = useGraph.getState().getCard(cardId)?.title || 'video'
+    const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })
+    const path = r?.data?.path
+    if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
+    const mDone = useGraph.getState().getCard(cardId)?.meta || {}
+    commit({
+      status: 'done',
+      progress: 1,
+      assetUrl: toFileUrl(path),
+      assetLocalPath: path,
+      mime: (r?.data?.mime as string) || 'video/mp4', // 后端已回真实 content-type，仅缺失时才回退
+      meta: { ...mDone, task: undefined }
+    })
+    if (isCurrentRun(cardId, runId)) notifyDone(cardId)
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    const aborted = canceledCards.has(cardId) || e?.name === 'AbortError' || /\babort(ed)?\b/i.test(msg)
+    commit({ status: aborted ? 'idle' : 'error', error: aborted ? null : msg, progress: 0 })
+  } finally {
+    if (isCurrentRun(cardId, runId)) {
+      videoAborts.delete(cardId)
+      runIds.delete(cardId)
+    }
+    useTask.getState().dec()
+  }
 }
 
 // 断点续跑单个视频卡：仅凭持久化的 taskId 重新轮询（不重新提交），完成后下载落盘

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：51/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2
+**进度：52/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F1-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -261,9 +261,8 @@
 
 - [x] **E5b [P2/optimization]（E5 拆出）视频卡逐个挂 &lt;video&gt; 强制首帧解码**（✓ 2026-07-16 mediaVideo.ts 新增 makeVideoPoster（ffmpeg frameAt 首帧 → makeThumbnail 缩 640 webp，**仅 ffmpeg 就绪时生成**、否则 null 不触发下载）；VideoCardPlayer 重构为 activated 状态机——默认展示 meta.poster 封面(`<img>`)或占位(Video 图标)，**首次点播才挂载 `<video>`(autoPlay)**、之后常驻。删除 onLoadedMetadata 的强制首帧 seek。虚拟化下未播放的视频卡不再各挂 `<video>`+强制解码，避免耗尽浏览器并发解码器；poster 懒生成集中覆盖所有视频卡、失配重生成、ffmpeg 未就绪回退占位。typecheck+UI 构建+全套件全绿）
 
-- [ ] **E6 [P2/optimization] 视频任务在共享并发池内挂满整个轮询周期（默认 4 并发、poll 上限 600s），长视频饿死文/图队列**
-  - 位置：`src/ui/services/generate.ts:117-264`
-  - 修法：视频拆两段——submit 在 aiLimiter 内、拿到 taskId 即释放槽位，poll 循环放池外（resumeVideoCard 已天然在池外，行为对齐即可）。
+- [x] **E6 [P2/optimization] 视频任务在共享并发池内挂满整个轮询周期（默认 4 并发、poll 上限 600s），长视频饿死文/图队列**（✓ 2026-07-16 engine.ts 把 runVideoJob 拆成 submit + poll 两段：新增 exported `submitVideoJob`（仅提交、拿到 taskId/同步 url 即返回，内部分发模板/默认路径），runVideoJob 改为 `submitVideoJob` → `resumeVideoJob`（复用既有池外轮询、行为不变）。generate.ts 把视频卡抽成专用 `generateVideoCard`：**提交在 `limiter()` 内（一次 HTTP，很快），拿到 taskId 即从回调返回释放并发槽；轮询/下载在池外用 resumeVideoJob 续跑**——长视频不再占着 4 个槽之一挂满 ≤600s poll 周期饿死文/图队列。inc/dec、runId 门控、videoAborts（仍在池内提交前才注册，故排队被停走 canceledCards 早退不耗额度）、meta.task 持久化续跑全部保持原语义。新增 `test/providers/engine.test.ts`（stub window.mulby.http 记录 method/url）4 条断言：submit 只发 POST 零 GET 轮询、同步 url 也不轮询、runVideoJob 仍轮询 status/{id}、resume 不重新提交。typecheck+5 套件+UI 构建全绿）
+  - 位置：`src/ui/services/generate.ts`（generateVideoCard）、`src/ui/services/providers/engine.ts`（submitVideoJob）
 
 ## 批次 F · 技术债 / 文档 / 工程配置
 
