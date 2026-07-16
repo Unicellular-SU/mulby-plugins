@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：46/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
+**进度：47/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -250,7 +250,7 @@
   - 位置：`src/ui/canvas/snapping.ts:23`
   - 修法：候选先用 cardIndex.query(视口外扩吸附阈值) 取可见集再比较；顺带消除「吸附到看不见的卡」的怪异手感。
 
-- [ ] **E3 [P2/optimization] GroupView 未 memo；折叠组渲染函数内调用 O(N) allDescendants()，每个平移帧全量重跑**
+- [x] **E3 [P2/optimization] GroupView 未 memo；折叠组渲染函数内调用 O(N) allDescendants()，每个平移帧全量重跑**（✓ 2026-07-16 GroupViewImpl + `export const GroupView = memo(GroupViewImpl)`（与 CardView 一致）：平移/缩放时 props(card/selected) 不变即跳过重渲，消除每帧 O(N) 成本。折叠计数从渲染函数内 allDescendants().length 改为 reactive selector descendantCount——仅折叠组遍历、返回数字，zustand 浅比较使计数不变时不重渲且平移期不触发；同时保持计数对成员增删的响应性（此前 getState 非响应，靠每帧重渲蒙对）。allDescendants 保留给 genGroup。typecheck+UI 构建+全套件全绿）
   - 位置：`GroupView.tsx:20,162`；对照 `CardView.tsx:486` 的 memo
   - 修法：`memo(GroupViewImpl)`；后代计数 useMemo 依赖 cards，或由 CanvasStage 算 hiddenMembers 时顺带产出传入。
 

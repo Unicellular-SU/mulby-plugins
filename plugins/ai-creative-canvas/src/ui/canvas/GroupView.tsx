@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent as RPointerEvent } from 'react'
+import { memo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Play, ChevronDown, ChevronRight, Ungroup, Music, Save } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { generateCard, canGenerate } from '../services/generate'
@@ -19,11 +19,22 @@ function notify(m: string, t?: string) {
 }
 
 // 分组框：命名/换色/折叠/生成组/同步播放/存为模板/取消编组；成员归属用 parentId（CanvasStage 拖动带动后代）
-export function GroupView({ card, selected }: { card: Card; selected: boolean }) {
+// memo（与 CardView 一致）：平移/缩放时 CanvasStage 每帧重渲，本组 props(card 引用/selected) 不变即跳过。
+function GroupViewImpl({ card, selected }: { card: Card; selected: boolean }) {
   const updateCard = useGraph((s) => s.updateCard)
   const removeCards = useGraph((s) => s.removeCards)
   const color = (card.params?.color as string) || '#6366f1'
   const collapsed = !!card.params?.collapsed
+  // 后代计数（折叠时显示）：reactive selector，仅折叠组遍历、返回数字——zustand 浅比较使计数不变时不重渲，
+  // 且平移/缩放期(cards 引用稳定)不触发；避免此前每帧一次 O(N) walk。
+  const descendantCount = useGraph((s) => {
+    const cards = s.getActiveBoard().cards
+    if (!cards[card.id]?.params?.collapsed) return 0
+    let n = 0
+    const walk = (gid: string) => { for (const c of Object.values(cards)) if (c.parentId === gid) { n++; if (c.kind === 'group') walk(c.id) } }
+    walk(card.id)
+    return n
+  })
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('') // 重命名草稿：编辑期本地保存，提交时一次性写 store（避免逐键入历史/逐键触发 @ 传播）
   const beginEdit = () => { setDraft(card.title); setEditing(true) }
@@ -182,7 +193,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
             {card.title || '分组'}
           </span>
         )}
-        {collapsed && <span className="text-xs opacity-60 shrink-0">{allDescendants().length} 项</span>}
+        {collapsed && <span className="text-xs opacity-60 shrink-0">{descendantCount} 项</span>}
         <div data-interactive onPointerDown={(e) => e.stopPropagation()} className="flex items-center gap-0.5 shrink-0">
           <button onClick={genGroup} title="生成组内全部" className={btn}>
             <Play size={13} />
@@ -223,3 +234,5 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
     </div>
   )
 }
+
+export const GroupView = memo(GroupViewImpl)
