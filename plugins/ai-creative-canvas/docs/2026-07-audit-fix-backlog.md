@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：52/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F1-F13 技术债/文档/配置）+ B12 回填
+**进度：53/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 起步（F1 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F2-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -266,8 +266,9 @@
 
 ## 批次 F · 技术债 / 文档 / 工程配置
 
-- [ ] **F1 [debt] WS1-T5：VideoStudioModal.tsx 76KB → 按功能面板拆分子组件（目标 <40KB，纯机械移动不改行为）**
+- [x] **F1 [debt] WS1-T5：VideoStudioModal.tsx 76KB → 按功能面板拆分子组件（目标 <40KB，纯机械移动不改行为）**（✓ 2026-07-16 纯机械拆分：① `studioControls.tsx`——共享展示原语 fmt/Row/SliderRow/Toggle/IconBtn/TBtn/ToolTile/ToolSection（icon 属性由 `typeof X` 收敛为 `LucideIcon`）；② `studioPanels.tsx`——右侧参数面板族 ParamPanel + Trim/Overlay/Subtitle/AudioBgm 子面板 + srt 解析 + COLOR_PRESETS/RES_OPTIONS（两常量仅面板用、无跨文件共享故无循环依赖）。主文件 `VideoStudioModal.tsx` 从 1184 行/77KB 降到 **598 行/37.8KB（达标 <40KB）**，保留 VideoStudioModal/Inner/OverlayLayer/TransportBar/StudioTimeline/ToolPanel + 主文件独用常量（KIND_ICON/GLOBAL_TOOLS/OVERLAY_TOOLS/OVERLAY_PRESETS）。移动后按 noUnusedLocals 清理主文件失效 import（Select/PLATFORM_PRESETS/useProviders/runTts/toast/base64ToArrayBuffer/FlipHorizontal2 等）。拆分中未见死代码——所有组件都经 ParamPanel 派发或 ToolPanel 可达，故「死代码清理」无对象。typecheck+5 套件+UI 构建全绿，行为零改动）
   - 前置：批次 B 完成后做（快照守护拆分）。三次 UI 范式迭代的死代码/死样式一并清理。
+  - 产物：`src/ui/components/studioControls.tsx`、`src/ui/components/studioPanels.tsx`
 
 - [ ] **F2 [debt] WS3-T1 收尾：panoOutpaint.ts 的 eqToPersp/perspToEqPaste/planPanoViews 三个 export 已无外部消费者；文件头注释仍是过期的「渐进式 outpaint 第 1 步」**
   - 位置：`src/ui/services/panoOutpaint.ts`（repairEquirectPoles 被 MediaToolbox 使用，保留）
