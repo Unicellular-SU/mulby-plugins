@@ -106,6 +106,24 @@ export async function frameAt(projectId: string, inPath: string, atSec: number):
   return out
 }
 
+// 视频封面：抽首帧 → 缩为小 webp，供视频卡默认展示（免挂 <video> 强制解码/耗解码器）。
+// 仅在 ffmpeg 已就绪时生成——避免仅为封面触发 FFmpeg 下载；未就绪返回 null（卡片回退占位/播放时再挂 video）。
+export async function makeVideoPoster(projectId: string, cardId: string, localPath: string): Promise<{ path: string; url: string } | null> {
+  try {
+    if (!(await ff().isAvailable())) return null
+    const frame = await frameAt(projectId, localPath, 0)
+    const { makeThumbnail } = await import('./mediaImage') // 动态导入避免与 mediaImage 的潜在环
+    const thumb = await makeThumbnail(projectId, `${cardId}_poster`, frame, 640)
+    if (thumb) {
+      try { await (window as any).mulby?.filesystem?.unlink(frame) } catch { /* ignore */ }
+      return thumb
+    }
+    return { path: frame, url: toFileUrl(frame) } // 帧本身已够小，直接用
+  } catch {
+    return null
+  }
+}
+
 // 时间轴缩略图：沿全片均匀抽 count 张小图（裁剪时间轴用）
 export async function timelineThumbs(projectId: string, inPath: string, count = 12): Promise<{ thumbs: string[]; duration: number }> {
   const duration = (await probeDuration(inPath)) || 0

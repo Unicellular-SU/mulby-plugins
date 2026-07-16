@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { captureFrame } from '../services/mediaOps'
 import { makeThumbnail } from '../services/mediaImage'
+import { makeVideoPoster } from '../services/mediaVideo'
 import { invalidTargetIds } from '../services/connectionPolicy'
 import { useGraph } from '../store/graphStore'
 import { useInteraction } from '../store/interactionStore'
@@ -32,16 +33,41 @@ const fmtTime = (s: number) => {
   return `${m}:${sec.toString().padStart(2, '0')}`
 }
 
-// 卡内视频播放器：中央播放钮 + 悬停底部控制条（播放/静音/可拖拽进度/时间）
+// 卡内视频播放器：默认展示 poster 封面（免挂 <video> 强制解码/耗尽解码器），点播才挂载 <video>。
 function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: number) => void }) {
   const vref = useRef<HTMLVideoElement>(null)
+  const [activated, setActivated] = useState(false) // 是否已挂载 <video>（首次点播后为 true 并常驻）
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(true)
   const [prog, setProg] = useState(0)
   const [dur, setDur] = useState(0)
 
+  // 懒生成视频封面：ffmpeg 就绪时抽首帧存 meta.poster；未就绪则回退占位（不触发下载）。集中覆盖所有视频卡。
+  const metaAny = card.meta as Record<string, unknown> | undefined
+  const poster = metaAny?.posterFor === card.assetUrl ? (metaAny?.poster as string | undefined) : undefined
+  useEffect(() => {
+    if (!card.assetLocalPath || !card.assetUrl) return
+    if (metaAny?.posterFor === card.assetUrl && metaAny?.poster) return
+    const key = `${card.id}|poster|${card.assetUrl}`
+    if (thumbGenerating.has(key)) return
+    thumbGenerating.add(key)
+    let alive = true
+    void makeVideoPoster(useGraph.getState().project.id, card.id, card.assetLocalPath)
+      .then((p) => {
+        thumbGenerating.delete(key)
+        if (!alive || !p) return
+        const cur = useGraph.getState().getCard(card.id)
+        if (!cur || cur.assetUrl !== card.assetUrl) return
+        useGraph.getState().updateCard(card.id, { meta: { ...(cur.meta || {}), poster: p.url, posterFor: card.assetUrl } })
+      })
+      .catch(() => thumbGenerating.delete(key))
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.assetLocalPath, card.assetUrl])
+
   const toggle = (e: { stopPropagation: () => void }) => {
     e.stopPropagation()
+    if (!activated) { setActivated(true); setPlaying(true); return } // 首次点播：挂载 <video>(autoPlay)
     const v = vref.current
     if (!v) return
     if (v.paused) {
@@ -63,30 +89,31 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
 
   return (
     <div className="relative w-full h-full bg-neutral-900">
-      <video
-        ref={vref}
-        src={card.assetUrl as string}
-        muted={muted}
-        playsInline
-        loop
-        preload="metadata"
-        onLoadedMetadata={(e) => {
-          onFit(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
-          setDur(e.currentTarget.duration)
-          // 轻微 seek 强制首帧解码渲染，避免加载完成前的黑屏 poster
-          try {
-            e.currentTarget.currentTime = Math.min(0.1, (e.currentTarget.duration || 1) / 100)
-          } catch {
-            /* ignore */
-          }
-        }}
-        onTimeUpdate={(e) => {
-          const v = e.currentTarget
-          if (v.duration) setProg(v.currentTime / v.duration)
-        }}
-        onEnded={() => setPlaying(false)}
-        className="w-full h-full object-cover"
-      />
+      {activated ? (
+        <video
+          ref={vref}
+          src={card.assetUrl as string}
+          muted={muted}
+          playsInline
+          loop
+          autoPlay
+          preload="metadata"
+          onLoadedMetadata={(e) => {
+            onFit(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
+            setDur(e.currentTarget.duration)
+          }}
+          onTimeUpdate={(e) => {
+            const v = e.currentTarget
+            if (v.duration) setProg(v.currentTime / v.duration)
+          }}
+          onEnded={() => setPlaying(false)}
+          className="w-full h-full object-cover"
+        />
+      ) : poster ? (
+        <img src={poster} draggable={false} onLoad={(e) => onFit(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} className="w-full h-full object-cover" alt="" />
+      ) : (
+        <div className="w-full h-full grid place-items-center"><Video size={26} className="opacity-25 text-white" /></div>
+      )}
       {!playing && (
         <button
           data-interactive
