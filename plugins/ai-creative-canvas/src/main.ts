@@ -274,17 +274,6 @@ export const rpc = {
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
-  },
-
-  // 导出：把文本/二进制写入指定路径（成片/图片导出）
-  async exportFile(input: { filePath: string; data: string; encoding?: 'utf-8' | 'base64' }) {
-    try {
-      if (!input?.filePath) return { ok: false, error: '缺少导出路径' }
-      await mulby.filesystem.writeFile(input.filePath, input.data, input.encoding || 'utf-8')
-      return { ok: true, path: input.filePath }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
-    }
   }
 }
 
