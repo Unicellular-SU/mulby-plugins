@@ -116,6 +116,34 @@ export function ContextMenu() {
       toast('导出失败', 'error')
     }
   }
+  // 批量导出：选一次目录，把多选卡片的媒体逐个 copy 过去（文件名 = 标题_序号.ext，去文件系统非法字符）
+  const exportMany = async (cs: Card[]) => {
+    const m = (window as any).mulby
+    if (!m?.dialog) return
+    const withMedia = cs.filter((c) => c.assetLocalPath)
+    if (!withMedia.length) return
+    try {
+      const picked = await m.dialog.showOpenDialog({ title: '选择导出目录', properties: ['openDirectory'] })
+      const dir = Array.isArray(picked) ? picked[0] : undefined
+      if (!dir) return
+      let ok = 0
+      for (let i = 0; i < withMedia.length; i++) {
+        const c = withMedia[i]
+        const path = c.assetLocalPath as string
+        const ext = path.split('.').pop() || 'png'
+        const base = (c.title || 'card').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40)
+        try {
+          await m.filesystem.copy(path, `${dir}/${base}_${i + 1}.${ext}`)
+          ok++
+        } catch {
+          /* 单个失败不阻断其余 */
+        }
+      }
+      toast(`已导出 ${ok}/${withMedia.length} 到目录`, ok ? 'success' : 'error')
+    } catch {
+      toast('批量导出失败', 'error')
+    }
+  }
 
   // 选中若干卡 → 新建一个下游节点并把它们全部连进去
   const connectToNew = (kind: CardKind) => {
@@ -185,6 +213,10 @@ export function ContextMenu() {
     items.push({ sep: true })
     items.push({ label: '复制副本', onClick: () => run(() => { g.copySelection(); g.paste(40, 40) }) })
     if (cards.length === 1 && cards[0].assetLocalPath) items.push({ label: '导出', onClick: () => run(() => void exportCard(cards[0])) })
+    else if (nonGroup.filter((c) => c.assetLocalPath).length >= 2) {
+      const mediaCards = nonGroup.filter((c) => c.assetLocalPath)
+      items.push({ label: `导出所选（${mediaCards.length}）`, onClick: () => run(() => void exportMany(mediaCards)) })
+    }
     items.push({ label: '删除', danger: true, onClick: () => run(() => g.removeCards(sel)) })
   } else {
     const rect = stageEl.current?.getBoundingClientRect()

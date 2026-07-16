@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：43/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；B12 部分完成（D 依赖项待回填）；**批次 C 全清**；B4 拆出 B4b，总数 +1
+**进度：44/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -236,7 +236,7 @@
   - 位置：确认不存在（全 src/ui 无过滤逻辑）；跳转所需 Gallery.focus 已有
   - 修法：顶栏或作品库加搜索框，按 title/prompt/text 过滤全工程卡片，点击复用 focus 跳转。
 
-- [ ] **D9 [P2/optimization] 无批量导出：多选后只能逐卡另存**
+- [x] **D9 [P2/optimization] 无批量导出：多选后只能逐卡另存**（✓ 2026-07-16 ContextMenu 加 exportMany：多选≥2 张带媒体卡时显示「导出所选（N）」，showOpenDialog(openDirectory) 选一次目录 → 逐个 filesystem.copy（文件名=标题_序号.ext，去文件系统非法字符、单个失败不阻断），toast 报告 ok/total。单卡仍走原「导出」。typecheck+UI 构建+全套件全绿）
   - 位置：`ContextMenu.tsx:187`（cards.length===1 才显示导出）、NodeEditor 单卡下载
   - 修法：多选时 ContextMenu/BatchActions 加「导出所选（N）」：一次选目录，循环 filesystem.copy，文件名 title+序号。
 
