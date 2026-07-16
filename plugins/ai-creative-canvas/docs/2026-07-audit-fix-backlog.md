@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：56/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F4 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F5-F13 技术债/文档/配置）+ B12 回填
+**进度：57/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F5 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F6-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -280,8 +280,8 @@
   - 位置：`src/ui/services/*`、`src/ui/store/*`、`src/ui/components/*`（26 文件）
   - 修法：d.ts 已声明 Window.mulby——useMulby 返回 `MulbyAPI | null`，各 helper 去掉 `: any`，一次性改动后跑 typecheck 清理暴露的问题。
 
-- [ ] **F5 [debt] manifest 声明 clipboard 权限但全代码零使用（权限面板向用户展示用不到的能力）**
-  - 位置：`manifest.json:13`。修法：删除 `"clipboard": true`，保留 notification。
+- [x] **F5 [debt] manifest 声明 clipboard 权限但全代码零使用（权限面板向用户展示用不到的能力）**（✓ 2026-07-16 grep 核实全仓无 window.mulby.clipboard 宿主剪贴板调用（画布 Ctrl+C/V 走 graphStore 内存 clipboard，非宿主权限）。删除 manifest.json `"clipboard": true`，保留仍在用的 notification（main.ts:27、generate.ts:71 的 notification.show）。权限面板不再向用户索要用不到的剪贴板能力。JSON 合法、typecheck 绿）
+  - 位置：`manifest.json`。修法：删除 `"clipboard": true`，保留 notification。
 
 - [ ] **F6 [incomplete] manifest features exts 与实际支持不一致：缺 .gif/.aac/.opus（自家「转 GIF」产物拖回 Mulby 都不触发本插件）**
   - 位置：`manifest.json:35-36`；对照 `importMedia.ts:15-18`
