@@ -1,7 +1,9 @@
 /// <reference path="./types/mulby.d.ts" />
 // AI 创意画布 — 插件后端入口
 // 职责：生命周期；以及渲染进程不便/易截断的活：远程媒体落盘、图床 multipart 上传、TTS 二进制合成、导出落盘。
-// 画布/工程状态由前端通过 storage 持久化；生成请求与轮询走前端 mulby.http（无 CORS、密钥不进页面）。
+// 画布/工程状态由前端通过 storage 持久化；生成请求与轮询走前端 mulby.http（无 CORS）。
+// 密钥策略：静态加密存 storage.encrypted（按插件隔离）；请求时前端解密出明文拼 Authorization: Bearer 头，
+// 故明文密钥会短暂进入渲染进程内存——并非「零暴露」，切勿据此误判密钥永不进页面。
 
 // 后端宿主 API（types/mulby.d.ts 已含完整定义）：让 filesystem/system/notification 等 RPC 获得类型检查
 declare const mulby: BackendPluginAPIDirect

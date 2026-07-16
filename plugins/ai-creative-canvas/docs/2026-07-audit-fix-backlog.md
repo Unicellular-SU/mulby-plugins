@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：63/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F11 完成，README 三项 F9/F10/F11 同批修）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F12-F13）+ B12 回填
+**进度：64/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F12 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F13）+ B12 回填
 
 ---
 
@@ -304,7 +304,8 @@
 - [x] **F11 [doc] README 功能清单大幅落后：工程库/任务中心/作品库/3D 导演台/标注/分镜/局部重绘/对齐分布均未提及**（✓ 2026-07-16 逐个对照 App.tsx 渲染的面板/模态核实存在后补入功能清单：标注层(AnnotationLayer/Toolbar)、对齐分布(snapping+ContextMenu)、局部重绘(MaskInpaintModal，双击图片进入)、分镜扇出(StoryboardModal)、3D 导演台(DirectorStage/three.js)、360 全景(PanoViewer)、工程库(ProjectLibrary)/任务中心(TaskCenter)/作品库(Gallery)、模板(TemplatePanel)。卡片类型补便签/分组。每项都先 grep 验证实现再写，不虚列）
   - 位置：`README.md`；对照 `App.tsx:127-142`
 
-- [ ] **F12 [doc] main.ts 头注宣称「密钥不进页面」与实现不符（明文 key 读入渲染进程拼 Authorization）**
+- [x] **F12 [doc] main.ts 头注宣称「密钥不进页面」与实现不符（明文 key 读入渲染进程拼 Authorization）**（✓ 2026-07-16 核实真实密钥流：providerStore.getKey 从 storage.encrypted 解密出**明文**（providerStore.ts:106），engine.ts 在渲染进程拼 `Authorization: Bearer <key>`（:154/159/205/249/329）经 mulby.http 发出。故明文密钥确实短暂进入渲染进程内存。订正 main.ts 头注：保留准确的「无 CORS」，把「密钥不进页面」改为如实说明「静态加密存 storage.encrypted、请求时前端解密拼 Bearer 头、明文短暂进渲染进程、并非零暴露」。build:backend + typecheck 绿）
+  - 位置：`src/main.ts:4`
   - 位置：`src/main.ts:4`；`providerStore.ts:100-106`、`engine.ts:201,258`
   - 修法：修正注释；（可选长期项）把带密钥的 submit/poll 移到 host worker（uploadImageToHost/synthSpeech 已是此模式）。
 
