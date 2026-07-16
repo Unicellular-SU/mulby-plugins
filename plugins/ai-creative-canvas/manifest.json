@@ -31,8 +31,8 @@
         { "type": "keyword", "value": "创意画布" },
         { "type": "keyword", "value": "无限画布" },
         { "type": "keyword", "value": "AI画布" },
-        { "type": "img", "label": "在创意画布中打开图片", "exts": [".png", ".jpg", ".jpeg", ".webp"] },
-        { "type": "files", "label": "在创意画布中打开媒体", "exts": [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".mp3", ".wav"], "fileType": "file" }
+        { "type": "img", "label": "在创意画布中打开图片", "exts": [".png", ".jpg", ".jpeg", ".webp", ".gif"] },
+        { "type": "files", "label": "在创意画布中打开媒体", "exts": [".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".aac", ".opus"], "fileType": "file" }
       ]
     }
   ]
