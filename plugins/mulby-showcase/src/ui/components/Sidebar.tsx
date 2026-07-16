@@ -1,6 +1,7 @@
 
 import {
     Bot,
+    Bug,
     CalendarClock,
     Clipboard,
     FileText,
@@ -58,6 +59,7 @@ const modules: ModuleItem[] = [
     { id: 'plugin', icon: Puzzle, label: '插件编排' },
     { id: 'features', icon: ListChecks, label: '动态指令' },
     { id: 'log', icon: FileText, label: '日志' },
+    { id: 'devtools', icon: Bug, label: 'DevTools 排查' },
 ]
 
 export function Sidebar({ activeModule, onModuleChange }: SidebarProps) {

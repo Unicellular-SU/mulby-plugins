@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#161d2e"/>
+      <stop offset="1" stop-color="#0b0f17"/>
+    </linearGradient>
+    <linearGradient id="ind" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：暗色圆角方，呼应 UI 主题 -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)" stroke="#1f2a3d" stroke-width="3"/>
+
+  <!-- 节点工作流：三个节点 → 汇入播放/影片 -->
+  <g stroke="url(#ind)" stroke-width="13" stroke-linecap="round" fill="none" opacity="0.85">
+    <path d="M148 158 C 214 158, 238 236, 292 250"/>
+    <path d="M148 256 L292 256"/>
+    <path d="M148 354 C 214 354, 238 276, 292 262"/>
+  </g>
+  <g fill="url(#ind)">
+    <circle cx="142" cy="158" r="30"/>
+    <circle cx="142" cy="256" r="30"/>
+    <circle cx="142" cy="354" r="30"/>
+  </g>
+  <g fill="#0b0f17" opacity="0.55">
+    <circle cx="142" cy="158" r="11"/>
+    <circle cx="142" cy="256" r="11"/>
+    <circle cx="142" cy="354" r="11"/>
+  </g>
+
+  <!-- 影片/播放：圆角播放三角（成片） -->
+  <path d="M296 166 L438 256 L296 346 Z" fill="url(#ind)" stroke="url(#ind)" stroke-width="30" stroke-linejoin="round"/>
+</svg>

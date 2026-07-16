@@ -1,0 +1,579 @@
+/**
+ * 素材注册表（全局，跨工程）：为「素材库」提供可检索的多模态素材索引，并修复附件存储泄漏。
+ *
+ * 现状问题（见 docs/ai-film-studio-workbench-redesign.md §1.3）：素材只散落在节点 outputs 里、
+ * 无索引；deleteAsset 从未被调用 → storage.attachment 只写不删、无界泄漏。
+ *
+ * 本模块：
+ * - 维护 `assets:registry`（AssetRecord[]）作为素材索引（图片/视频/音频 多模态）。
+ * - backfill：扫描所有工程节点 outputs，把已有生成素材登记进来（幂等）。
+ * - 上传入库：图片/音频走 attachment，视频走 filesystem（可能 >50MB）。
+ * - GC：用 attachment.list() 全量 ∖（工程引用 ∪ Elements 引用 ∪ 上传素材）→ 删除孤儿，回收泄漏。
+ *
+ * 仅读 KV/attachment/filesystem 这些已确认存在的宿主 API；不改 PortValue/executor 语义。
+ */
+import { nanoid } from 'nanoid'
+import { loadAssetUrl, deleteAsset, saveAsset, isEphemeralUrl } from './assets'
+import { writeBase64, toFileUrl } from './fsutil'
+
+const PLUGIN_ID = 'ai-film-studio'
+const KEY_REGISTRY = 'assets:registry'
+const KEY_BOARDS = 'assets:boards'
+const KEY_INDEX = 'projects:index'
+const KEY_ELEMENTS = 'elements:library'
+const KEY_SNAPSHOTS = 'snapshots'
+const projectKey = (id: string) => `project:${id}`
+// 工作台（studio:*）命名空间——GC 必须把这里引用的附件视为「在用」，否则会误删工作台资产图/关键帧。
+const KEY_STUDIO_INDEX = 'studio:index'
+const studioProjectKey = (id: string) => `studio:project:${id}`
+
+export type AssetType = 'image' | 'video' | 'audio'
+export type AssetRole = 'generated' | 'uploaded'
+
+export interface AssetRecord {
+  id: string
+  type: AssetType
+  mime: string
+  name?: string
+  tags?: string[]
+  role: AssetRole
+  // 二进制位置（三选一）：assetId=附件库；localPath=文件系统；url=远程
+  assetId?: string
+  localPath?: string
+  url?: string
+  durationSec?: number
+  bytes?: number
+  // 来源（generated）
+  projectId?: string
+  projectName?: string
+  nodeKind?: string
+  /** 生成来源面：画布工程 or 工作流项目（uploaded 留空） */
+  surface?: 'canvas' | 'studio'
+  /** 所属合集（Board）；未分组为 undefined */
+  boardId?: string
+  createdAt: number
+}
+
+/** 素材合集（Board，InvokeAI 式）：把素材分组归置 */
+export interface Board {
+  id: string
+  name: string
+  createdAt: number
+}
+
+async function kvGet<T>(key: string): Promise<T | null> {
+  try {
+    const v = await window.mulby?.storage?.get(key, PLUGIN_ID)
+    return (v as T) ?? null
+  } catch {
+    return null
+  }
+}
+async function kvSet(key: string, value: unknown): Promise<void> {
+  try {
+    await window.mulby?.storage?.set(key, value, PLUGIN_ID)
+  } catch {
+    // 忽略
+  }
+}
+
+export function typeFromMime(mime?: string): AssetType {
+  const m = (mime || '').toLowerCase()
+  if (m.startsWith('video')) return 'video'
+  if (m.startsWith('audio')) return 'audio'
+  return 'image'
+}
+
+export async function loadRegistry(): Promise<AssetRecord[]> {
+  const v = await kvGet<AssetRecord[]>(KEY_REGISTRY)
+  return Array.isArray(v) ? v : []
+}
+async function saveRegistry(list: AssetRecord[]): Promise<void> {
+  await kvSet(KEY_REGISTRY, list)
+}
+
+// ===== 合集（Boards）=====
+export async function loadBoards(): Promise<Board[]> {
+  const v = await kvGet<Board[]>(KEY_BOARDS)
+  return Array.isArray(v) ? v : []
+}
+async function saveBoards(list: Board[]): Promise<void> {
+  await kvSet(KEY_BOARDS, list)
+}
+export async function createBoard(name: string): Promise<Board> {
+  const b: Board = { id: `bd_${nanoid(6)}`, name: name.trim() || '未命名合集', createdAt: Date.now() }
+  const list = await loadBoards()
+  list.push(b)
+  await saveBoards(list)
+  return b
+}
+export async function renameBoard(id: string, name: string): Promise<void> {
+  const list = await loadBoards()
+  const i = list.findIndex((b) => b.id === id)
+  if (i < 0) return
+  list[i] = { ...list[i], name: name.trim() || list[i].name }
+  await saveBoards(list)
+}
+export async function deleteBoard(id: string): Promise<void> {
+  await saveBoards((await loadBoards()).filter((b) => b.id !== id))
+  // 解绑该合集下的素材（不删素材，仅归为未分组）
+  const reg = await loadRegistry()
+  let changed = false
+  for (const r of reg)
+    if (r.boardId === id) {
+      r.boardId = undefined
+      changed = true
+    }
+  if (changed) await saveRegistry(reg)
+}
+export async function setAssetBoard(assetRecordId: string, boardId?: string): Promise<void> {
+  const reg = await loadRegistry()
+  const r = reg.find((x) => x.id === assetRecordId)
+  if (!r) return
+  r.boardId = boardId
+  await saveRegistry(reg)
+}
+
+/** 去重键：附件 id / 本地路径 / 远程 url */
+function refKey(r: { assetId?: string; localPath?: string; url?: string }): string {
+  return r.assetId || r.localPath || (r.url && !isEphemeralUrl(r.url) ? r.url : '') || ''
+}
+
+/**
+ * 解析素材为可显示 URL（附件→blob:；文件→file://；远程→原样）。
+ * 注意：附件分支经 assets.ts 字节缓存返回 blob:，其生命周期由该缓存拥有，调用方不可 revoke。
+ * React 组件请用 useMediaUrl（M6）而非直接调本函数。
+ */
+export async function resolveAssetUrl(rec: Pick<AssetRecord, 'assetId' | 'localPath' | 'url'>): Promise<string> {
+  if (rec.assetId) {
+    const url = await loadAssetUrl(rec.assetId)
+    if (url) return url
+  }
+  if (rec.localPath) return toFileUrl(rec.localPath)
+  if (rec.url) return rec.url
+  return ''
+}
+
+// ===== 遍历工程节点 outputs（含扇出 items）=====
+interface PV {
+  type?: string
+  assetId?: string
+  url?: string
+  localPath?: string
+  mime?: string
+  durationSec?: number
+  items?: PV[]
+  meta?: Record<string, unknown>
+}
+interface ProjNode {
+  data?: { kind?: string; outputs?: Record<string, PV> }
+}
+function* eachPortValue(nodes: ProjNode[]): Generator<{ pv: PV; nodeKind: string }> {
+  for (const n of nodes || []) {
+    const outs = n?.data?.outputs
+    if (!outs) continue
+    const nodeKind = n?.data?.kind || ''
+    for (const v of Object.values(outs)) {
+      if (!v) continue
+      const list = v.items && v.items.length ? v.items : [v]
+      for (const it of list) if (it) yield { pv: it, nodeKind }
+    }
+  }
+}
+
+async function listProjects(): Promise<{ id: string; name: string; nodes: ProjNode[] }[]> {
+  const index = (await kvGet<{ id: string; name: string }[]>(KEY_INDEX)) || []
+  const out: { id: string; name: string; nodes: ProjNode[] }[] = []
+  for (const meta of index) {
+    const p = await kvGet<{ nodes?: ProjNode[] }>(projectKey(meta.id))
+    if (p) out.push({ id: meta.id, name: meta.name, nodes: p.nodes || [] })
+  }
+  return out
+}
+
+/** 从所有工程节点 outputs 回填生成素材（幂等：按 refKey 去重） */
+export async function backfillFromProjects(): Promise<AssetRecord[]> {
+  const registry = await loadRegistry()
+  const seen = new Set(registry.map(refKey).filter(Boolean))
+  const projects = await listProjects()
+  let changed = false
+  for (const proj of projects) {
+    for (const { pv, nodeKind } of eachPortValue(proj.nodes)) {
+      const t = pv.type
+      if (t !== 'image' && t !== 'video' && t !== 'audio') continue
+      const key = refKey(pv)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      registry.push({
+        id: `ar_${nanoid(8)}`,
+        type: t,
+        mime: pv.mime || (t === 'image' ? 'image/png' : t === 'video' ? 'video/mp4' : 'audio/mpeg'),
+        role: 'generated',
+        assetId: pv.assetId,
+        localPath: pv.localPath,
+        url: pv.url && !isEphemeralUrl(pv.url) ? pv.url : undefined,
+        durationSec: pv.durationSec,
+        name: typeof pv.meta?.name === 'string' ? (pv.meta.name as string) : undefined,
+        projectId: proj.id,
+        projectName: proj.name,
+        nodeKind,
+        surface: 'canvas',
+        createdAt: Date.now(),
+      })
+      changed = true
+    }
+  }
+  if (changed) await saveRegistry(registry)
+  return registry
+}
+
+/**
+ * 从所有工作流项目（studio:project:*）回填生成素材到全局注册表（幂等：按 refKey 去重）。
+ * 工作流产物（资产图/历史候选/变体/关键帧/精修流图/视频片段/试听音频）此前只受 GC 保护、不进注册表，
+ * 因而不在「素材库」可见、无法被画布或其它项目复用。此函数把它们登记为 surface:'studio' 的 generated 记录。
+ */
+export async function backfillFromStudio(): Promise<AssetRecord[]> {
+  const registry = await loadRegistry()
+  const seen = new Set(registry.map(refKey).filter(Boolean))
+  const cards = (await kvGet<{ id: string; name: string }[]>(KEY_STUDIO_INDEX)) || []
+  let changed = false
+  const addImage = (assetId: string | undefined, projId: string, projName: string, nodeKind: string, name?: string) => {
+    if (!assetId || seen.has(assetId)) return
+    seen.add(assetId)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'image',
+      mime: 'image/png',
+      role: 'generated',
+      assetId,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind,
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  const addAudio = (asset: StudioAssetShape, projId: string, projName: string) => {
+    const ap = asset.audioFilePath || (asset.audioUrl && !isEphemeralUrl(asset.audioUrl) ? asset.audioUrl : '')
+    if (!ap || seen.has(ap)) return
+    seen.add(ap)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'audio',
+      mime: 'audio/mpeg',
+      role: 'generated',
+      ...(asset.audioFilePath ? { localPath: asset.audioFilePath } : { url: asset.audioUrl }),
+      name: asset.name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'voice',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  const addClip = (clip: StudioClipShape, projId: string, projName: string, name?: string) => {
+    addImage(clip.posterImageId, projId, projName, 'clip-poster', name)
+    const vp = clip.videoFilePath || (clip.videoUrl && !isEphemeralUrl(clip.videoUrl) ? clip.videoUrl : '')
+    if (!vp || seen.has(vp)) return
+    seen.add(vp)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'video',
+      mime: 'video/mp4',
+      role: 'generated',
+      ...(clip.videoFilePath ? { localPath: clip.videoFilePath } : { url: clip.videoUrl }),
+      durationSec: clip.durationSec,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'clip',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  const addTrackMedia = (track: StudioTrackShape, projId: string, projName: string, name?: string) => {
+    if (!track.audioClipId || seen.has(track.audioClipId)) return
+    seen.add(track.audioClipId)
+    registry.push({
+      id: `ar_${nanoid(8)}`,
+      type: 'audio',
+      mime: 'audio/mpeg',
+      role: 'generated',
+      assetId: track.audioClipId,
+      name,
+      projectId: projId,
+      projectName: projName,
+      nodeKind: 'track-audio',
+      surface: 'studio',
+      createdAt: Date.now(),
+    })
+    changed = true
+  }
+  for (const card of cards) {
+    if (!card?.id) continue
+    const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
+    if (!doc) continue
+    const pn = card.name || '工作流项目'
+    for (const a of doc.assets || []) {
+      addImage(a.refImageId, card.id, pn, a.type || 'asset', a.name)
+      for (const img of a.images || []) addImage(img.refImageId, card.id, pn, a.type || 'asset', a.name)
+      for (const v of a.variants || []) addImage(v.refImageId, card.id, pn, 'variant', a.name)
+      // 试听音频（type:audio 子资产）：本地路径或**非临时** url（临时 data:/blob: 不可持久引用，跳过避免每次重复入库）
+      addAudio(a, card.id, pn)
+    }
+    for (const s of doc.storyboards || []) addImage(s.keyframeImageId, card.id, pn, 'keyframe')
+    for (const flow of Object.values(doc.imageFlows || {})) for (const n of flow?.nodes || []) addImage(n?.assetId, card.id, pn, 'flow')
+    // 视频片段：videoFilePath（文件系统）/ 非临时 videoUrl（临时 data:/blob: 跳过）
+    for (const c of doc.clips || []) addClip(c, card.id, pn)
+    for (const t of doc.track || []) addTrackMedia(t, card.id, pn)
+    for (const episode of doc.episodes || []) {
+      const episodeName = episode.title || `第${(episode.index ?? 0) + 1}集`
+      for (const s of episode.storyboards || []) addImage(s.keyframeImageId, card.id, pn, 'keyframe', episodeName)
+      for (const c of episode.clips || []) addClip(c, card.id, pn, episodeName)
+      for (const t of episode.track || []) addTrackMedia(t, card.id, pn, episodeName)
+    }
+  }
+  if (changed) await saveRegistry(registry)
+  return registry
+}
+
+/**
+ * 画布工程 + 工作流项目两路回填（顺序执行，避免对同一注册表 key 的并发读改写竞争）。
+ * 用模块级 in-flight 句柄合并并发调用（多个组件同 tick 各自 load()/refresh() 时只跑一次读改写，
+ * 杜绝「后写覆盖前写、丢记录」竞态）。注意只合并并发、不缓存：完成即清空，下次调用重新回填。
+ */
+let backfillInFlight: Promise<AssetRecord[]> | null = null
+export async function backfillAll(): Promise<AssetRecord[]> {
+  if (backfillInFlight) return backfillInFlight
+  backfillInFlight = (async () => {
+    await backfillFromProjects()
+    return backfillFromStudio()
+  })()
+  try {
+    return await backfillInFlight
+  } finally {
+    backfillInFlight = null
+  }
+}
+
+/** 上传入库：图片/音频走附件库，视频走文件系统（可能 >50MB） */
+export async function importAssetFile(input: { name: string; mime: string; base64: string }): Promise<AssetRecord> {
+  const type = typeFromMime(input.mime)
+  const bytes = Math.floor((input.base64.length * 3) / 4)
+  const rec: AssetRecord = {
+    id: `ar_${nanoid(8)}`,
+    type,
+    mime: input.mime,
+    role: 'uploaded',
+    name: input.name,
+    bytes,
+    createdAt: Date.now(),
+  }
+  if (type === 'video') {
+    const ext = (input.mime.split('/')[1] || 'mp4').split(';')[0]
+    rec.localPath = await writeBase64('library', `up_${rec.id}`, ext, input.base64)
+  } else {
+    rec.assetId = await saveAsset(input.base64, input.mime)
+  }
+  const registry = await loadRegistry()
+  registry.push(rec)
+  await saveRegistry(registry)
+  return rec
+}
+
+/** 删除一条素材记录及其二进制（仅用于「上传」素材；生成素材的回收走 GC，避免误删在用产物） */
+export async function removeAssetRecord(id: string): Promise<void> {
+  const registry = await loadRegistry()
+  const rec = registry.find((r) => r.id === id)
+  if (!rec) return
+  if (rec.assetId) await deleteAsset(rec.assetId)
+  if (rec.localPath) {
+    try {
+      await window.mulby?.filesystem?.unlink(rec.localPath)
+    } catch {
+      // 文件可能已不存在，忽略
+    }
+  }
+  await saveRegistry(registry.filter((r) => r.id !== id))
+}
+
+/** 附件库占用统计 */
+export async function storageUsage(): Promise<{ count: number; bytes: number }> {
+  try {
+    const all = await window.mulby?.storage?.attachment?.list?.()
+    if (!all) return { count: 0, bytes: 0 }
+    return { count: all.length, bytes: all.reduce((a, x) => a + (x.size || 0), 0) }
+  } catch {
+    return { count: 0, bytes: 0 }
+  }
+}
+
+/**
+ * 工作台（studio:*）文档引用的附件 assetId 收集。
+ * GC 只认 assetRegistry 这套引用图，studio 文档不在其中 → 若不扫描，工作台生成的资产主图/变体图/
+ * 关键帧图（均经 saveAsset 落 attachment）会被 gcOrphans 当孤儿删除。这里以「studio 文档实际引用」为准
+ * 收集所有 assetId（含 phase7 多图历史 images[] 与 imageFlow 节点，向前兼容、字段不存在时静默跳过）。
+ */
+interface StudioAssetShape {
+  type?: string
+  name?: string
+  refImageId?: string
+  images?: Array<{ refImageId?: string }>
+  variants?: Array<{ refImageId?: string }>
+  voiceAssetId?: string
+  audioFilePath?: string
+  audioUrl?: string
+}
+interface StudioStoryboardShape {
+  id?: string
+  index?: number
+  keyframeImageId?: string
+}
+interface StudioClipShape {
+  id?: string
+  videoFilePath?: string
+  videoUrl?: string
+  durationSec?: number
+  posterImageId?: string
+}
+interface StudioTrackShape {
+  id?: string
+  audioClipId?: string
+  clipAssetId?: string
+}
+interface StudioEpisodeShape {
+  id?: string
+  index?: number
+  title?: string
+  storyboards?: StudioStoryboardShape[]
+  clips?: StudioClipShape[]
+  track?: StudioTrackShape[]
+}
+interface StudioDocShape {
+  assets?: StudioAssetShape[]
+  storyboards?: StudioStoryboardShape[]
+  clips?: StudioClipShape[]
+  track?: StudioTrackShape[]
+  episodes?: StudioEpisodeShape[]
+  imageFlows?: Record<string, { nodes?: Array<{ assetId?: string }> }>
+}
+
+interface ElementLibraryShape {
+  refAssetIds?: string[]
+  mediaRefs?: Array<{ assetId?: string }>
+  views?: { front?: string; side?: string; back?: string }
+  voiceId?: string
+  variants?: Array<{ assetId?: string }>
+  appearanceVariants?: Array<{
+    refAssetIds?: string[]
+    mediaRefs?: Array<{ assetId?: string }>
+    views?: { front?: string; side?: string; back?: string }
+    voiceId?: string
+  }>
+}
+
+function addElementAssetIds(referenced: Set<string>, element: ElementLibraryShape): void {
+  for (const aid of element.refAssetIds || []) if (aid) referenced.add(aid)
+  for (const ref of element.mediaRefs || []) if (ref.assetId) referenced.add(ref.assetId)
+  if (element.views?.front) referenced.add(element.views.front)
+  if (element.views?.side) referenced.add(element.views.side)
+  if (element.views?.back) referenced.add(element.views.back)
+  if (element.voiceId) referenced.add(element.voiceId)
+  for (const variant of element.variants || []) if (variant.assetId) referenced.add(variant.assetId)
+  for (const variant of element.appearanceVariants || []) {
+    for (const aid of variant.refAssetIds || []) if (aid) referenced.add(aid)
+    for (const ref of variant.mediaRefs || []) if (ref.assetId) referenced.add(ref.assetId)
+    if (variant.views?.front) referenced.add(variant.views.front)
+    if (variant.views?.side) referenced.add(variant.views.side)
+    if (variant.views?.back) referenced.add(variant.views.back)
+    if (variant.voiceId) referenced.add(variant.voiceId)
+  }
+}
+
+function addStudioAssetRefs(referenced: Set<string>, asset: StudioAssetShape): void {
+  if (asset.refImageId) referenced.add(asset.refImageId)
+  for (const img of asset.images || []) if (img.refImageId) referenced.add(img.refImageId)
+  for (const variant of asset.variants || []) if (variant.refImageId) referenced.add(variant.refImageId)
+}
+
+function addStudioStoryboardRefs(referenced: Set<string>, storyboard: StudioStoryboardShape): void {
+  if (storyboard.keyframeImageId) referenced.add(storyboard.keyframeImageId)
+}
+
+function addStudioClipRefs(referenced: Set<string>, clip: StudioClipShape): void {
+  if (clip.posterImageId) referenced.add(clip.posterImageId)
+}
+
+function addStudioTrackRefs(referenced: Set<string>, track: StudioTrackShape): void {
+  if (track.audioClipId) referenced.add(track.audioClipId)
+}
+
+async function collectStudioReferenced(referenced: Set<string>): Promise<void> {
+  const cards = (await kvGet<{ id: string }[]>(KEY_STUDIO_INDEX)) || []
+  for (const card of cards) {
+    if (!card?.id) continue
+    const doc = await kvGet<StudioDocShape>(studioProjectKey(card.id))
+    if (!doc) continue
+    for (const a of doc.assets || []) addStudioAssetRefs(referenced, a)
+    for (const s of doc.storyboards || []) addStudioStoryboardRefs(referenced, s)
+    for (const c of doc.clips || []) addStudioClipRefs(referenced, c)
+    for (const t of doc.track || []) addStudioTrackRefs(referenced, t)
+    for (const episode of doc.episodes || []) {
+      for (const s of episode.storyboards || []) addStudioStoryboardRefs(referenced, s)
+      for (const c of episode.clips || []) addStudioClipRefs(referenced, c)
+      for (const t of episode.track || []) addStudioTrackRefs(referenced, t)
+    }
+    for (const flow of Object.values(doc.imageFlows || {}))
+      for (const n of flow?.nodes || []) if (n?.assetId) referenced.add(n.assetId)
+  }
+}
+
+/** 收集仍被引用的附件 assetId（工程节点 ∪ Elements 参考图 ∪ 工程快照 ∪ 上传素材根 ∪ 工作台 studio:*） */
+async function collectReferenced(): Promise<Set<string>> {
+  const referenced = new Set<string>()
+  for (const proj of await listProjects()) {
+    for (const { pv } of eachPortValue(proj.nodes)) if (pv.assetId) referenced.add(pv.assetId)
+  }
+  const elements = (await kvGet<ElementLibraryShape[]>(KEY_ELEMENTS)) || []
+  for (const el of elements) addElementAssetIds(referenced, el)
+  // 工程快照里引用的素材也要保护（避免回滚后图丢失）
+  const snapshots = (await kvGet<{ nodes?: ProjNode[] }[]>(KEY_SNAPSHOTS)) || []
+  for (const snap of snapshots) for (const { pv } of eachPortValue(snap.nodes || [])) if (pv.assetId) referenced.add(pv.assetId)
+  // 上传到库的素材即使尚未上画布，也由注册表「根引用」保护
+  for (const r of await loadRegistry()) if (r.role === 'uploaded' && r.assetId) referenced.add(r.assetId)
+  // 工作台文档引用的资产图/关键帧（防 GC 误删 studio 资产）
+  await collectStudioReferenced(referenced)
+  return referenced
+}
+
+/** 清理未引用素材（标记-清除）：删除附件库里不再被任何工程/Elements/上传引用的孤儿，修复历史泄漏 */
+export async function gcOrphans(): Promise<{ removed: number; freedBytes: number; removedIds: string[] }> {
+  const att = window.mulby?.storage?.attachment
+  if (!att?.list) return { removed: 0, freedBytes: 0, removedIds: [] }
+  const all = await att.list()
+  const referenced = await collectReferenced()
+  let removed = 0
+  let freedBytes = 0
+  const removedIds = new Set<string>()
+  for (const item of all) {
+    if (referenced.has(item.id)) continue
+    try {
+      await att.remove(item.id)
+      removed++
+      freedBytes += item.size || 0
+      removedIds.add(item.id)
+    } catch {
+      // 忽略单个失败
+    }
+  }
+  if (removedIds.size) {
+    const registry = await loadRegistry()
+    await saveRegistry(registry.filter((r) => !(r.assetId && removedIds.has(r.assetId))))
+  }
+  // 返回 removedIds：调用方（assetStore.runGc）据此 releaseAsset，revoke 这些孤儿的 blob/字节缓存
+  return { removed, freedBytes, removedIds: [...removedIds] }
+}

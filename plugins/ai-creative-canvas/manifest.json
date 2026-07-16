@@ -1,0 +1,39 @@
+{
+  "id": "ai-creative-canvas",
+  "name": "ai-creative-canvas",
+  "displayName": "AI 创意画布",
+  "version": "0.3.0",
+  "author": "mulby",
+  "type": "ai",
+  "description": "无限画布 AI 影像创作 + 媒体编辑工坊：自由画布上逐卡片生成图像/视频/文本/配音，内置裁剪·扩图·抠像·放大·宫格分镜·视频裁剪·抽帧·场景检测·倒放等媒体工具箱",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true
+  },
+  "window": {
+    "type": "default",
+    "width": 1440,
+    "height": 960,
+    "minWidth": 1120,
+    "minHeight": 720
+  },
+  "features": [
+    {
+      "code": "open-canvas",
+      "explain": "打开 AI 创意画布（无限画布影像创作 + 媒体编辑）",
+      "mode": "detached",
+      "cmds": [
+        { "type": "keyword", "value": "创意画布" },
+        { "type": "keyword", "value": "无限画布" },
+        { "type": "keyword", "value": "AI画布" },
+        { "type": "img", "label": "在创意画布中打开图片", "exts": [".png", ".jpg", ".jpeg", ".webp", ".gif"] },
+        { "type": "files", "label": "在创意画布中打开媒体", "exts": [".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".aac", ".opus"], "fileType": "file" }
+      ]
+    }
+  ]
+}

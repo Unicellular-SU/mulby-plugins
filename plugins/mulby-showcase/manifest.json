@@ -56,6 +56,24 @@
       ]
     },
     {
+      "code": "devtools",
+      "explain": "DevTools 排查（日志与网络可观测性测试）",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "devtools"
+        },
+        {
+          "type": "keyword",
+          "value": "调试"
+        },
+        {
+          "type": "keyword",
+          "value": "排查"
+        }
+      ]
+    },
+    {
       "code": "screenshot",
       "explain": "区域截图并进入图片编辑",
       "preCapture": "region",

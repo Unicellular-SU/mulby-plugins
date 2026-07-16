@@ -1,0 +1,11 @@
+/** 质量护栏统一出口。详见 docs/openmontage-borrowings.md。 */
+export * from './types'
+export { scoreSlideshowRisk } from './slideshowRisk'
+export { checkVariation } from './variationChecker'
+export type { VariationViolation, VariationResult, Severity } from './variationChecker'
+export { validateCuts, classifyCut, classifyFromBrief, PROMISE_RULES } from './deliveryPromise'
+export type { DeliveryPromiseKind, DeliveryViolation, DeliveryResult, CutLike, BriefHints } from './deliveryPromise'
+export { evaluateComposeGate, auditComposed, projectToShots, projectToCuts } from './composeGate'
+export type { ComposeGateResult, ComposeAudit } from './composeGate'
+export { styleLint } from './styleLint'
+export type { StyleLintViolation, StyleLintResult } from './styleLint'

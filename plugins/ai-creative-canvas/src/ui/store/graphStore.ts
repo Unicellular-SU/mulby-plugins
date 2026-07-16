@@ -1,0 +1,661 @@
+import { create } from 'zustand'
+import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate, Annotation } from '../types'
+import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
+import { uid } from '../util'
+import { canConnect } from '../services/connectionPolicy'
+import { findLabelForSourceCard, replaceMentionInPrompt } from '../services/references'
+import { toast } from './toastStore'
+
+const HISTORY_LIMIT = 100
+
+interface BoardSnap {
+  boardId: string
+  cards: Record<string, Card>
+  edges: Record<string, Edge>
+}
+
+type BoardHist = { past: BoardSnap[]; future: BoardSnap[] }
+const EMPTY_HIST: BoardHist = { past: [], future: [] }
+// 往指定画布的历史栈压入一份快照（截断超限、清空 redo 尾），返回新的 histories 表
+function pushBoardSnap(
+  histories: Record<string, BoardHist>,
+  snap: BoardSnap
+): Record<string, BoardHist> {
+  const h = histories[snap.boardId] || EMPTY_HIST
+  return { ...histories, [snap.boardId]: { past: [...h.past, snap].slice(-HISTORY_LIMIT), future: [] } }
+}
+
+function defaultTitle(kind: CardKind): string {
+  switch (kind) {
+    case 'image': return 'AI 图片'
+    case 'video': return 'AI 视频'
+    case 'text': return 'AI 文本'
+    case 'audio': return 'AI 音频'
+    case 'source': return '素材'
+    case 'group': return '分组'
+    case 'note': return '便签'
+  }
+}
+
+export function createDefaultBoard(name = '画布 1'): Board {
+  return { id: uid('board'), name, cards: {}, edges: {}, viewport: { x: 0, y: 0, zoom: 1 } }
+}
+
+export function createDefaultProject(name = '未命名工程'): ProjectDoc {
+  const board = createDefaultBoard()
+  const now = Date.now()
+  return {
+    id: uid('proj'),
+    name,
+    boards: [board],
+    activeBoardId: board.id,
+    globalModelId: null,
+    style: '',
+    defaultImageModel: null,
+    defaultTextModel: null,
+    concurrency: 4,
+    createdAt: now,
+    updatedAt: now,
+    schemaVersion: SCHEMA_VERSION
+  }
+}
+
+function activeBoardOf(p: ProjectDoc): Board {
+  return p.boards.find((b) => b.id === p.activeBoardId) ?? p.boards[0]
+}
+
+function withActiveBoard(p: ProjectDoc, fn: (b: Board) => Board): ProjectDoc {
+  const boards = p.boards.map((b) => (b.id === p.activeBoardId ? fn(b) : b))
+  return { ...p, boards, updatedAt: Date.now() }
+}
+
+// 卡片 id 全局唯一：异步写入（生成/媒体处理完成时）按 id 定位「真正拥有该卡的画布」，
+// 而非当前活动画布——否则在生成途中切换画布会把结果写到错的画布上（跨板串卡 bug）。
+function withBoardOfCard(p: ProjectDoc, cardId: string, fn: (b: Board) => Board): ProjectDoc {
+  const owner = p.boards.find((b) => b.cards[cardId])
+  if (!owner) return p
+  const boards = p.boards.map((b) => (b.id === owner.id ? fn(b) : b))
+  return { ...p, boards, updatedAt: Date.now() }
+}
+
+// 递归收集某组的所有后代（含嵌套组的后代）
+function getDescendants(groupId: string, cards: Record<string, Card>): string[] {
+  const out: string[] = []
+  for (const c of Object.values(cards)) {
+    if (c.parentId === groupId) {
+      out.push(c.id)
+      if (c.kind === 'group') out.push(...getDescendants(c.id, cards))
+    }
+  }
+  return out
+}
+// 把 nodeId 设为 target 的子是否会成环（target 在 nodeId 的子树内）
+function wouldCycle(nodeId: string, target: string | null, cards: Record<string, Card>): boolean {
+  let cur = target
+  while (cur) {
+    if (cur === nodeId) return true
+    cur = cards[cur]?.parentId ?? null
+  }
+  return false
+}
+
+interface GraphState {
+  project: ProjectDoc
+  selectedIds: string[]
+  // 按 boardId 维护各自的 undo/redo 栈——切换/新建画布不再清空其它画布的历史（快照本就带 boardId）
+  boardHistories: Record<string, { past: BoardSnap[]; future: BoardSnap[] }>
+
+  // 选择器（便捷）
+  getActiveBoard: () => Board
+  getCard: (id: string) => Card | undefined
+  boardIdOfCard: (id: string) => string | undefined
+
+  // 历史
+  pushHistory: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
+
+  // 工程
+  replaceProject: (p: ProjectDoc) => void
+  renameProject: (name: string) => void
+  setGlobalModel: (modelId: string | null) => void
+  setStyle: (style: string) => void
+  setStylePack: (id: string | undefined) => void
+  setDefaultModel: (kind: 'image' | 'text' | 'pano' | 'control', id: string | null) => void
+  setDirectorScene: (s: import('../types').DirectorScene | null) => void
+  setConcurrency: (n: number) => void
+
+  // 画布(board)
+  addBoard: () => void
+  setActiveBoard: (id: string) => void
+  renameBoard: (id: string, name: string) => void
+  removeBoard: (id: string) => void
+
+  // 视口
+  setViewport: (vp: Viewport) => void
+
+  // 卡片
+  addCard: (kind: CardKind, world: { x: number; y: number }, partial?: Partial<Card>, boardId?: string) => string
+  updateCard: (id: string, patch: Partial<Card>) => void
+  removeCards: (ids: string[]) => void
+  moveCardsBy: (ids: string[], dx: number, dy: number) => void
+  groupSelection: () => void
+  applyParamsTo: (ids: string[], params: Record<string, unknown>) => void
+  setParent: (ids: string[], parentId: string | null) => void
+  insertTemplate: (tpl: GroupTemplate, world: { x: number; y: number }) => void
+
+  // 连线
+  addEdgeBetween: (source: string, target: string) => void
+  connectAll: (sourceIds: string[], target: string) => void
+  createConnectedNode: (kind: CardKind, world: { x: number; y: number }, sourceIds: string[]) => string
+  removeEdge: (id: string) => void
+
+  // 标注
+  addAnnotation: (a: Annotation) => void
+  removeAnnotation: (id: string) => void
+  clearAnnotations: () => void
+
+  // 选择
+  setSelection: (ids: string[]) => void
+  toggleSelect: (id: string, additive: boolean) => void
+  clearSelection: () => void
+
+  // 剪贴板（cards + 两端都在剪贴板内的连线）
+  clipboard: { cards: Card[]; edges: Edge[] }
+  copySelection: () => void
+  paste: (dx: number, dy: number) => void
+}
+
+export const useGraph = create<GraphState>((set, get) => ({
+  project: createDefaultProject(),
+  selectedIds: [],
+  boardHistories: {},
+  clipboard: { cards: [], edges: [] },
+
+  getActiveBoard: () => activeBoardOf(get().project),
+  getCard: (id) => {
+    for (const b of get().project.boards) {
+      const c = b.cards[id]
+      if (c) return c
+    }
+    return undefined
+  },
+  boardIdOfCard: (id) => get().project.boards.find((b) => b.cards[id])?.id,
+
+  pushHistory: () => {
+    const b = activeBoardOf(get().project)
+    const snap: BoardSnap = { boardId: b.id, cards: b.cards, edges: b.edges }
+    set((s) => ({ boardHistories: pushBoardSnap(s.boardHistories, snap) }))
+  },
+
+  undo: () => {
+    const { project, boardHistories } = get()
+    const bid = project.activeBoardId
+    const h = boardHistories[bid]
+    if (!h || h.past.length === 0) return // 仅撤销当前画布自己的历史
+    const snap = h.past[h.past.length - 1]
+    const cur = activeBoardOf(project)
+    const curSnap: BoardSnap = { boardId: bid, cards: cur.cards, edges: cur.edges }
+    const boards = project.boards.map((b) => (b.id === bid ? { ...b, cards: snap.cards, edges: snap.edges } : b))
+    set((s) => ({
+      project: { ...project, boards, updatedAt: Date.now() },
+      boardHistories: { ...s.boardHistories, [bid]: { past: h.past.slice(0, -1), future: [curSnap, ...h.future].slice(0, HISTORY_LIMIT) } },
+      selectedIds: []
+    }))
+  },
+
+  redo: () => {
+    const { project, boardHistories } = get()
+    const bid = project.activeBoardId
+    const h = boardHistories[bid]
+    if (!h || h.future.length === 0) return
+    const snap = h.future[0]
+    const cur = activeBoardOf(project)
+    const curSnap: BoardSnap = { boardId: bid, cards: cur.cards, edges: cur.edges }
+    const boards = project.boards.map((b) => (b.id === bid ? { ...b, cards: snap.cards, edges: snap.edges } : b))
+    set((s) => ({
+      project: { ...project, boards, updatedAt: Date.now() },
+      boardHistories: { ...s.boardHistories, [bid]: { past: [...h.past, curSnap].slice(-HISTORY_LIMIT), future: h.future.slice(1) } },
+      selectedIds: []
+    }))
+  },
+
+  canUndo: () => (get().boardHistories[get().project.activeBoardId]?.past.length ?? 0) > 0,
+  canRedo: () => (get().boardHistories[get().project.activeBoardId]?.future.length ?? 0) > 0,
+
+  replaceProject: (p) => set({ project: p, selectedIds: [], boardHistories: {} }), // 换工程：清空全部画布历史
+  renameProject: (name) => set((s) => ({ project: { ...s.project, name, updatedAt: Date.now() } })),
+  setGlobalModel: (modelId) => set((s) => ({ project: { ...s.project, globalModelId: modelId, updatedAt: Date.now() } })),
+  setStyle: (style) => set((s) => ({ project: { ...s.project, style, updatedAt: Date.now() } })),
+  setStylePack: (stylePackId) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, stylePackId })) })),
+  setDefaultModel: (kind, id) =>
+    set((s) => ({
+      project: {
+        ...s.project,
+        [kind === 'image' ? 'defaultImageModel' : kind === 'pano' ? 'defaultPanoModel' : kind === 'control' ? 'defaultControlModel' : 'defaultTextModel']: id,
+        updatedAt: Date.now()
+      }
+    })),
+  setDirectorScene: (s2) => set((s) => ({ project: { ...s.project, director: s2, updatedAt: Date.now() } })),
+  setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),
+
+  addBoard: () => {
+    const board = createDefaultBoard(`画布 ${get().project.boards.length + 1}`)
+    set((s) => ({
+      project: { ...s.project, boards: [...s.project.boards, board], activeBoardId: board.id, updatedAt: Date.now() },
+      selectedIds: [] // 各画布历史独立保存在 boardHistories，切换/新建不再清空
+    }))
+  },
+  setActiveBoard: (id) =>
+    set((s) => ({ project: { ...s.project, activeBoardId: id }, selectedIds: [] })), // 保留各画布历史
+  renameBoard: (id, name) =>
+    set((s) => ({
+      project: { ...s.project, boards: s.project.boards.map((b) => (b.id === id ? { ...b, name } : b)), updatedAt: Date.now() }
+    })),
+  removeBoard: (id) =>
+    set((s) => {
+      if (s.project.boards.length <= 1) return s
+      const boards = s.project.boards.filter((b) => b.id !== id)
+      const activeBoardId = s.project.activeBoardId === id ? boards[0].id : s.project.activeBoardId
+      const { [id]: _removed, ...boardHistories } = s.boardHistories // 删画布：连带清掉其历史栈
+      return { project: { ...s.project, boards, activeBoardId, updatedAt: Date.now() }, selectedIds: [], boardHistories }
+    }),
+
+  setViewport: (vp) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, viewport: vp })) })),
+
+  addCard: (kind, world, partial, boardId) => {
+    const proj = get().project
+    const targetId = boardId ?? proj.activeBoardId
+    const target = proj.boards.find((b) => b.id === targetId) ?? activeBoardOf(proj)
+    const isActive = target.id === proj.activeBoardId
+    // 历史快照压入「目标画布」自己的栈（异步媒体处理完成可能写非活动画布）
+    set((s) => ({ boardHistories: pushBoardSnap(s.boardHistories, { boardId: target.id, cards: target.cards, edges: target.edges }) }))
+    const size = CARD_DEFAULT_SIZE[kind]
+    const card: Card = {
+      id: uid('card'),
+      kind,
+      x: Math.round(world.x - size.w / 2),
+      y: Math.round(world.y - size.h / 2),
+      w: size.w,
+      h: size.h,
+      title: defaultTitle(kind),
+      prompt: '',
+      modelId: null,
+      providerId: null,
+      params: {},
+      status: 'idle',
+      progress: 0,
+      error: null,
+      assetUrl: null,
+      assetLocalPath: null,
+      attachmentId: null,
+      mime: null,
+      text: null,
+      refIds: [],
+      assets: [],
+      meta: {},
+      parentId: null,
+      ...partial
+    }
+    set((s) => ({
+      project: {
+        ...s.project,
+        updatedAt: Date.now(),
+        boards: s.project.boards.map((b) => (b.id === target.id ? { ...b, cards: { ...b.cards, [card.id]: card } } : b))
+      },
+      // 仅当写入活动画布时才改选中（避免选中一张当前看不见的卡）
+      selectedIds: isActive ? [card.id] : s.selectedIds
+    }))
+    return card.id
+  },
+
+  groupSelection: () => {
+    const board = activeBoardOf(get().project)
+    const ids = get().selectedIds.filter((id) => !!board.cards[id]) // 允许把已有组也编入（嵌套）
+    if (ids.length === 0) return
+    const cs = ids.map((id) => board.cards[id])
+    const PAD = 28
+    const HEAD = 36
+    const minX = Math.min(...cs.map((c) => c.x)) - PAD
+    const minY = Math.min(...cs.map((c) => c.y)) - PAD - HEAD
+    const maxX = Math.max(...cs.map((c) => c.x + c.w)) + PAD
+    const maxY = Math.max(...cs.map((c) => c.y + c.h)) + PAD
+    // 若新组完全落在某个已存在组内 → 自动嵌套（取最深的）
+    let nestParent: string | null = null
+    let bestArea = Infinity
+    for (const c of Object.values(board.cards)) {
+      if (c.kind !== 'group' || ids.includes(c.id)) continue
+      if (minX >= c.x && minY >= c.y && maxX <= c.x + c.w && maxY <= c.y + c.h && c.w * c.h < bestArea) {
+        bestArea = c.w * c.h
+        nestParent = c.id
+      }
+    }
+    const groupId = uid('card')
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        cards[groupId] = {
+          id: groupId, kind: 'group', x: minX, y: minY, w: maxX - minX, h: maxY - minY,
+          title: '分组', prompt: '', modelId: null, providerId: null,
+          params: { color: '#6366f1', collapsed: false }, status: 'idle', progress: 0, error: null,
+          assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null,
+          refIds: [], assets: [], meta: {}, parentId: nestParent
+        }
+        for (const id of ids) cards[id] = { ...cards[id], parentId: groupId }
+        return { ...b, cards }
+      }),
+      selectedIds: [groupId]
+    }))
+  },
+
+  setParent: (ids, parentId) => {
+    if (ids.length === 0) return
+    const cards0 = activeBoardOf(get().project).cards
+    const valid = ids.filter((id) => cards0[id] && !wouldCycle(id, parentId, cards0))
+    if (valid.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        for (const id of valid) if (cards[id]) cards[id] = { ...cards[id], parentId }
+        return { ...b, cards }
+      })
+    }))
+  },
+
+  insertTemplate: (tpl, world) => {
+    get().pushHistory()
+    const idMap = new Map<string, string>()
+    const groupId = uid('card')
+    for (const m of tpl.members) idMap.set(m.localId, uid('card'))
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        cards[groupId] = {
+          id: groupId, kind: 'group', x: Math.round(world.x), y: Math.round(world.y), w: tpl.group.w, h: tpl.group.h,
+          title: tpl.group.title, prompt: '', modelId: null, providerId: null,
+          params: { ...tpl.group.params, collapsed: false }, status: 'idle', progress: 0, error: null,
+          assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null,
+          refIds: [], assets: [], meta: {}, parentId: null
+        }
+        for (const m of tpl.members) {
+          const nid = idMap.get(m.localId) as string
+          const pid = m.parentLocalId ? (idMap.get(m.parentLocalId) ?? groupId) : groupId
+          cards[nid] = {
+            ...m.card,
+            id: nid,
+            parentId: pid,
+            x: Math.round(world.x + m.card.x),
+            y: Math.round(world.y + m.card.y),
+            assetUrl: null, assetLocalPath: null, attachmentId: null,
+            status: 'idle', progress: 0, error: null
+          }
+        }
+        const edges = { ...b.edges }
+        for (const e of tpl.edges) {
+          const sid = idMap.get(e.source)
+          const tid = idMap.get(e.target)
+          if (sid && tid) {
+            let eid = uid('edge')
+            while (edges[eid]) eid = uid('edge')
+            edges[eid] = { id: eid, source: sid, target: tid, kind: e.kind }
+          }
+        }
+        return { ...b, cards, edges }
+      }),
+      selectedIds: [groupId]
+    }))
+  },
+
+  updateCard: (id, patch) =>
+    set((s) => {
+      let project = s.project
+      if (patch.title !== undefined) {
+        for (const b of project.boards) {
+          const cur = b.cards[id]
+          if (!cur) continue
+          const oldLabel = findLabelForSourceCard(id, b)
+          const nextTitle = patch.title ?? cur.title
+          const boardAfter = { ...b, cards: { ...b.cards, [id]: { ...cur, title: nextTitle } } }
+          const newLabel = findLabelForSourceCard(id, boardAfter)
+          if (oldLabel && newLabel && oldLabel !== newLabel) {
+            const cards = { ...boardAfter.cards }
+            for (const cid of Object.keys(cards)) {
+              const c = cards[cid]
+              if (!c.prompt?.includes('@' + oldLabel)) continue
+              cards[cid] = { ...c, prompt: replaceMentionInPrompt(c.prompt, oldLabel, newLabel) }
+            }
+            project = {
+              ...project,
+              boards: project.boards.map((bb) => (bb.id === b.id ? { ...boardAfter, cards } : bb))
+            }
+            break
+          }
+        }
+      }
+      return {
+        project: withBoardOfCard(project, id, (b) => {
+          const cur = b.cards[id]
+          if (!cur) return b
+          return { ...b, cards: { ...b.cards, [id]: { ...cur, ...patch } } }
+        })
+      }
+    }),
+
+  applyParamsTo: (ids, params) => {
+    if (ids.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        for (const id of ids) {
+          const c = cards[id]
+          if (c) cards[id] = { ...c, params: { ...c.params, ...params } }
+        }
+        return { ...b, cards }
+      })
+    }))
+  },
+
+  removeCards: (ids) => {
+    if (ids.length === 0) return
+    get().pushHistory()
+    const idSet = new Set(ids)
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        // 记录被删卡的父，删除后把其直接子上提到（仍存在的）祖先，保留嵌套层级
+        const parentOf = new Map<string, string | null>()
+        for (const id of ids) {
+          const c = cards[id]
+          if (c) parentOf.set(id, c.parentId)
+          delete cards[id]
+        }
+        const resolveParent = (p: string | null): string | null => {
+          let cur = p
+          while (cur && parentOf.has(cur)) cur = parentOf.get(cur) ?? null
+          return cur
+        }
+        for (const k of Object.keys(cards)) {
+          const p = cards[k].parentId
+          if (p && parentOf.has(p)) cards[k] = { ...cards[k], parentId: resolveParent(p) }
+        }
+        const edges: Record<string, Edge> = {}
+        for (const [eid, e] of Object.entries(b.edges)) {
+          if (!idSet.has(e.source) && !idSet.has(e.target)) edges[eid] = e
+        }
+        return { ...b, cards, edges }
+      }),
+      selectedIds: s.selectedIds.filter((id) => !idSet.has(id))
+    }))
+  },
+
+  moveCardsBy: (ids, dx, dy) => {
+    if (ids.length === 0 || (dx === 0 && dy === 0)) return
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const cards = { ...b.cards }
+        const toMove = new Set(ids)
+        for (const id of ids) for (const d of getDescendants(id, b.cards)) toMove.add(d)
+        for (const id of toMove) {
+          const c = cards[id]
+          if (c) cards[id] = { ...c, x: Math.round(c.x + dx), y: Math.round(c.y + dy) }
+        }
+        return { ...b, cards }
+      })
+    }))
+  },
+
+  addEdgeBetween: (source, target) => {
+    if (source === target) return
+    const b = activeBoardOf(get().project)
+    const s = b.cards[source]
+    const t = b.cards[target]
+    if (!s || !t) return
+    const v = canConnect(s, t)
+    if (!v.ok) {
+      toast(v.reason || '无法连接', 'warning')
+      return
+    }
+    const dup = Object.values(b.edges).some((e) => e.source === source && e.target === target)
+    if (dup) return
+    get().pushHistory()
+    const edge: Edge = { id: uid('edge'), source, target, kind: 'ref' }
+    set((s) => ({
+      project: withActiveBoard(s.project, (bd) => ({ ...bd, edges: { ...bd.edges, [edge.id]: edge } }))
+    }))
+  },
+
+  removeEdge: (id) => {
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const edges = { ...b.edges }
+        delete edges[id]
+        return { ...b, edges }
+      })
+    }))
+  },
+
+  // 标注（不入撤销栈——BoardSnap 不含 annotations，故删除/清空无法用 Ctrl+Z 恢复；
+  // 清空全部为破坏性操作，由 UI 层 AnnotationToolbar 加 confirmDialog 二次确认兜底）
+  addAnnotation: (a) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [...(b.annotations || []), a] })) })),
+  removeAnnotation: (id) => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: (b.annotations || []).filter((x) => x.id !== id) })) })),
+  clearAnnotations: () => set((s) => ({ project: withActiveBoard(s.project, (b) => ({ ...b, annotations: [] })) })),
+
+  connectAll: (sourceIds, target) => {
+    const b = activeBoardOf(get().project)
+    if (!b.cards[target]) return
+    const toAdd = sourceIds.filter(
+      (sid) =>
+        sid !== target &&
+        b.cards[sid] &&
+        canConnect(b.cards[sid], b.cards[target]).ok &&
+        !Object.values(b.edges).some((e) => e.source === sid && e.target === target)
+    )
+    if (toAdd.length === 0) return
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (bd) => {
+        const edges = { ...bd.edges }
+        for (const sid of toAdd) {
+          const id = uid('edge')
+          edges[id] = { id, source: sid, target, kind: 'ref' }
+        }
+        return { ...bd, edges }
+      })
+    }))
+  },
+
+  createConnectedNode: (kind, world, sourceIds) => {
+    const size = CARD_DEFAULT_SIZE[kind]
+    const id = uid('card')
+    get().pushHistory()
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => {
+        const card: Card = {
+          id, kind, x: Math.round(world.x - size.w / 2), y: Math.round(world.y - size.h / 2), w: size.w, h: size.h,
+          title: defaultTitle(kind), prompt: '', modelId: null, providerId: null, params: {}, status: 'idle', progress: 0,
+          error: null, assetUrl: null, assetLocalPath: null, attachmentId: null, mime: null, text: null, refIds: [], assets: [], meta: {}, parentId: null
+        }
+        const cards = { ...b.cards, [id]: card }
+        const edges = { ...b.edges }
+        for (const sid of sourceIds) {
+          if (sid === id || !cards[sid]) continue
+          if (!canConnect(cards[sid], card).ok) continue // 过连接策略：便签/分组不参与引用连线，避免建出永久失效的僵尸边
+          if (Object.values(edges).some((e) => e.source === sid && e.target === id)) continue
+          const eid = uid('edge')
+          edges[eid] = { id: eid, source: sid, target: id, kind: 'ref' }
+        }
+        return { ...b, cards, edges }
+      }),
+      selectedIds: [id]
+    }))
+    return id
+  },
+
+  setSelection: (ids) => set({ selectedIds: ids }),
+  toggleSelect: (id, additive) =>
+    set((s) => {
+      if (!additive) return { selectedIds: [id] }
+      return s.selectedIds.includes(id)
+        ? { selectedIds: s.selectedIds.filter((x) => x !== id) }
+        : { selectedIds: [...s.selectedIds, id] }
+    }),
+  clearSelection: () => set({ selectedIds: [] }),
+
+  copySelection: () => {
+    const b = activeBoardOf(get().project)
+    // 展开选中集：选中的组要递归带上全部后代，否则复制组只得到空框
+    const ids = new Set<string>()
+    for (const id of get().selectedIds) {
+      if (!b.cards[id]) continue
+      ids.add(id)
+      for (const d of getDescendants(id, b.cards)) ids.add(d)
+    }
+    const cards = [...ids].map((id) => ({ ...b.cards[id] }))
+    // 只复制两端都在选中集内的连线（跨出选区的外部连线不带）
+    const edges = Object.values(b.edges)
+      .filter((e) => ids.has(e.source) && ids.has(e.target))
+      .map((e) => ({ ...e }))
+    set({ clipboard: { cards, edges } })
+  },
+
+  paste: (dx, dy) => {
+    const clip = get().clipboard
+    if (clip.cards.length === 0) return
+    get().pushHistory()
+    const idMap = new Map<string, string>()
+    for (const c of clip.cards) idMap.set(c.id, uid('card'))
+    const addedCards: Record<string, Card> = {}
+    const newIds: string[] = []
+    for (const c of clip.cards) {
+      const id = idMap.get(c.id) as string
+      const pid = c.parentId ? (idMap.get(c.parentId) ?? null) : null // 保留剪贴板内的父子关系，外部父置空
+      addedCards[id] = { ...c, id, x: c.x + dx, y: c.y + dy, parentId: pid }
+      newIds.push(id)
+    }
+    // 重映射连线（两端都需在剪贴板内，idMap 已保证）
+    const addedEdges: Record<string, Edge> = {}
+    for (const e of clip.edges) {
+      const s = idMap.get(e.source)
+      const t = idMap.get(e.target)
+      if (!s || !t) continue
+      const eid = uid('edge')
+      addedEdges[eid] = { ...e, id: eid, source: s, target: t }
+    }
+    set((s) => ({
+      project: withActiveBoard(s.project, (b) => ({
+        ...b,
+        cards: { ...b.cards, ...addedCards },
+        edges: { ...b.edges, ...addedEdges }
+      })),
+      selectedIds: newIds,
+      // 级联粘贴：下次再偏移（clipboard 指向刚粘贴的 cards/edges）
+      clipboard: { cards: Object.values(addedCards).map((c) => ({ ...c })), edges: Object.values(addedEdges).map((e) => ({ ...e })) }
+    }))
+  }
+}))

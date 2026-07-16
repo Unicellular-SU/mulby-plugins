@@ -5,6 +5,9 @@
  * 对于纯 UI 插件，后端主要用于初始化和资源管理。
  */
 
+// DevTools 排查示例：后端原生 https 请求（对应 DevTools 控制台 [network:backend-http]）
+import https from 'node:https'
+
 type DynamicFeatureMode = 'ui' | 'silent' | 'detached'
 type DynamicFeatureCmd =
   | string
@@ -309,6 +312,10 @@ declare const mulby: {
   features: BackendFeaturesApi
   notification: {
     show: (message: string, type?: 'info' | 'success' | 'warning' | 'error') => Promise<void> | void
+  }
+  http: {
+    request: (options: { url: string; method?: string; headers?: Record<string, string>; body?: unknown; timeout?: number }) => Promise<{ status: number; statusText: string; headers: Record<string, string>; data: string }>
+    get: (url: string, headers?: Record<string, string>) => Promise<{ status: number; statusText: string; headers: Record<string, string>; data: string }>
   }
 }
 
@@ -1061,6 +1068,72 @@ export const rpc = {
   clearShowcaseMessages() {
     recentMessages.splice(0)
     return { success: true }
+  },
+
+  // ===== DevTools 排查：后端控制台日志 =====
+  // 在插件 DevTools 控制台以 [plugin-backend] 前缀回灌，无需查看宿主日志（需开启开发者模式）。
+  emitBackendLogs(input?: { message?: string }) {
+    const message = input?.message?.trim() || 'Mulby Showcase 后端日志测试'
+    const at = new Date().toISOString()
+    console.debug(`[showcase-backend] console.debug —— ${message}`, { at })
+    console.log(`[showcase-backend] console.log —— ${message}`, { sample: true })
+    console.info(`[showcase-backend] console.info —— ${message}`)
+    console.warn(`[showcase-backend] console.warn —— ${message}`)
+    console.error(`[showcase-backend] console.error —— ${message}`, new Error('演示后端错误（可忽略）'))
+    return {
+      ok: true,
+      pluginId: SHOWCASE_PLUGIN_ID,
+      levels: ['debug', 'log', 'info', 'warn', 'error'],
+      at
+    }
+  },
+
+  // ===== DevTools 排查：后端网络探测 =====
+  // 依次通过 mulby.http / 原生 fetch / node:https 发起请求，
+  // 对应 DevTools 控制台 [network:mulby.http] / [network:backend-fetch] / [network:backend-http]。
+  async backendNetworkProbe(input?: { url?: string }) {
+    const url = (typeof input?.url === 'string' && input.url.trim()) ? input.url.trim() : 'https://httpbin.org/get'
+    const results: Array<{ via: string; url: string; status?: number; ok: boolean; durationMs: number; error?: string }> = []
+
+    const record = async (via: string, fn: () => Promise<{ status?: number }>) => {
+      const startedAt = Date.now()
+      try {
+        const { status } = await fn()
+        results.push({ via, url, status, ok: typeof status === 'number' ? status < 400 : true, durationMs: Date.now() - startedAt })
+      } catch (error) {
+        results.push({ via, url, ok: false, durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) })
+      }
+    }
+
+    // 1) mulby.http → [network:mulby.http]
+    await record('mulby.http', async () => {
+      const res = await mulby.http.get(url)
+      return { status: res.status }
+    })
+
+    // 2) 原生 fetch（Node 22 undici） → [network:backend-fetch]
+    await record('backend-fetch', async () => {
+      const res = await fetch(url)
+      await res.text().catch(() => '')
+      return { status: res.status }
+    })
+
+    // 3) node:https → [network:backend-http]
+    await record('backend-http', () => new Promise<{ status?: number }>((resolve, reject) => {
+      const req = https.get(url, (res) => {
+        res.resume()
+        res.on('end', () => resolve({ status: res.statusCode }))
+      })
+      req.on('error', reject)
+    }))
+
+    return {
+      ok: true,
+      pluginId: SHOWCASE_PLUGIN_ID,
+      url,
+      results,
+      at: new Date().toISOString()
+    }
   }
 }
 

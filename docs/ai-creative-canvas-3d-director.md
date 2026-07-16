@@ -1,0 +1,85 @@
+# 3D 导演台 设计方案 · v1
+
+> 适用插件：`mulby-plugins/plugins/ai-creative-canvas`（复用已引入的 three.js，动态分割）
+> 目标：在 3D 场景里摆机位/主体做 blocking（previs），导出"结构化镜头提示词 + 控制/参考图"驱动 AI 生成。
+
+## 一、调研（优秀开源 / 参考）
+- **3D OpenPose Editor**（`nonnonstop/sd-webui-3d-open-pose-editor`、`ZhUyU1997/open-pose-editor`）、**Posex**：浏览器摆 3D 骨架/人台 + 移动相机，导出 **OpenPose / Depth / Normal / Canny** 控制图 → ControlNet。这是"3D blocking → AI 图像控制"的主流闭环。
+- **three.js `PerspectiveCamera.setFocalLength`**（film gauge 默认 35mm）：内置镜头模型；与 AI-CanvasPro PanoramaScene 的焦段(16–135mm)+画幅(36mm) 一致。
+- **Previs Pro / 虚拟制片 previs**：机位/焦段/镜别/调度的影视化元数据与 UX。
+- **AI-CanvasPro PanoramaScene**（已有反混淆源）：GLTF 人台 + 摄影机位 + 360 环境 → 生成。
+
+## 二、控制机制（决定精度上限）
+- **强控制 = ControlNet（OpenPose/Depth/Canny）**：3D 渲染控制图 → 条件生成，姿态/构图被严格遵守。需 provider 支持控制模型（按"360 专用模型"同款 model id 路由接入）。
+- **弱控制 = img2img 参考（通用 gpt-image-2）**：3D 视口截图/深度图当参考，引导布局/机位，但模型自由重绘、姿态不严格。
+- 设计上两者都支持：默认走参考图；若配了"控制模型 id"则走控制图。
+
+## 三、架构（DirectorStage，复用 three.js）
+- `DirectorStage` 全屏 modal（`await import('three')` 动态分割，主包不增）：
+  - **场景**：地面 + 网格 + 基础灯光。
+  - **主体**：人台（GLTF）/ 道具代理；可移动/旋转/缩放（v1 摆位；v2 摆姿）。带标签（角色A/道具）。
+  - **相机**：焦段(mm) + 35mm 画幅 → FOV（`setFocalLength`）；轨道/推拉；机位高度（低/平/高/俯）；镜别预设（特写/中景/全景 → 设距离/构图）。
+  - **输出**：① 结构化镜头提示词（机位/角度/焦段/镜别/主体相对位置 → 中英文片段）；② 控制/参考图（视口截图 +（可选）深度图）。
+  - **生成**：「用此机位生成」→ 新图像/视频卡（提示词 + 参考图/控制图），衔接分镜表/时间线。
+
+## 四、分期
+- **v1**：场景 + 可摆位主体 + 相机(焦段/镜别/角度) + **视口截图当参考** + 结构化提示词 → 生成。最快闭环。
+- **v2**：可摆姿人台（GLTF rig + 关节）；**深度/OpenPose 控制图** + ControlNet 模型路由（若 provider 支持）。
+- **v3**：多机位 shot list、与分镜表/时间线打通、镜头动画关键帧。
+
+## 五、取舍 / 风险
+- three 已是依赖，DirectorStage 动态分割 → 主包不增。
+- **精度天花板取决于 provider 是否支持 ControlNet**；否则只能到"构图参考"级（与之前 360 的教训一致——根因常在 API 能力）。
+- 主体资源：GLTF 人台需内置一个轻量 mannequin glb（注意体积）；或先用 primitive 代理（胶囊=人、盒=道具）零体积起步。
+
+## 六、v1 实现（2026-06-28，已提交）
+用户选定：轻量人台 + 视口截图当 img2img 参考。
+- `DirectorStage` 全屏 modal（three + OrbitControls + TransformControls，全部 `await import` 动态分割，three 仍单独 chunk）。
+- 人台=**程序化人形**（胶囊/球拼，零资源、零打包体积——无法内置真实 glb，遂用基础几何，视觉目的一致）；道具=盒。点选 → TransformControls 移动/旋转。
+- 相机=视图（OrbitControls 转/推拉）；焦段滑杆（`setFocalLength`，filmGauge 36）；镜别预设（特写/中景/全景=调相机到 target 距离）；角度预设（仰/平/俯=调相机高度）。
+- 「用此机位生成」：`shotFragment()` 由相机几何推导镜头提示词（焦段→镜头类型、俯仰角→仰/平/俯、距离→镜别）+ 用户场景描述 → 视口截图 `toDataURL` 当 `ai.images.edit` 的 img2img 参考 → 落图像卡（活动画布）。
+- 入口：TopBar Clapperboard 按钮；模型用工程默认图像模型。
+- 控制为「弱控制/构图参考」级（gpt-image-2 会自由重绘，灰模仅作站位/机位引导）。
+- **v2**：可摆姿（关节）、深度/OpenPose 控制图 + ControlNet 路由、场景持久化、多机位 shot list、接分镜/时间线。
+
+## 七、v2 增强（2026-06-28，已提交）
+- **可摆姿人台**：人台改为关节层级（root + 头/左右肩·肘/左右髋·膝 joint 组）。「旋转/摆姿」模式下点关节即选中该关节，用 TransformControls 旋转掰姿势；「移动」模式操作整体。
+- **复制 / 看向选中 / 删除**：复制 = clone(true) 偏移放置；看向 = 把相机 target 设到选中主体（快速框人）。
+- **焦段预设** 24/35/50/85 一键；保留焦段滑杆 + 镜别(特写/中景/全景) + 角度(仰/平/俯)。
+- **布局感知镜头提示词**：`shotFragment` 把各人台投影到相机 NDC → 居左/中/右 + 角色数量，连同 镜头/焦段/角度/镜别 一起写进生成提示，机位语义更准。
+- 仍为弱控制（gpt-image-2 img2img 参考）；v3 再上深度/OpenPose ControlNet（需控制模型）、场景持久化、多机位 shot list、接分镜/时间线。
+
+## 八、v3（2026-06-28，已提交）：ControlNet 强控制 + 场景持久化 + 多机位 shot list
+- **ControlNet 强控制**：`ProjectDoc.defaultControlModel` + `setDefaultModel('control')` + ProjectSettings「ControlNet 控制模型」下拉。导出**深度控制图**（`MeshDepthMaterial` BasicDepthPacking + 临时 far=14 + 反相使近=亮，符合 controlnet-depth 约定）；配了控制模型时生成走「控制模型 + 深度图 + 严格据此构图/姿态」提示，否则回落「默认图像模型 + 截图参考」。
+- **场景持久化**：`ProjectDoc.director`（subjects 含 kind/pos/rot/scale/关节欧拉角 + camera + shots + prompt）；`setDirectorScene`；打开恢复、关闭/Esc 保存（随分片 manifest 持久化）。
+- **多机位 shot list**：右侧面板「+记录」当前机位为 shot、点 shot 切换机位、删除；「批量生成 N 机位」逐个 applyCam → 生成 → 成片在画布排成一行。生成不再自动关闭（便于多机位迭代）。
+- 控制精度仍取决于 provider 是否真支持控制模型；未配则为构图参考级（已如实标注）。
+
+## 九、摆姿优化（2026-06-28，已提交）
+逐关节 gizmo 摆姿太繁琐 → 参考 Magic Poser/JustSketchMe/3D OpenPose Editor，加**一键预设**：
+- **姿势预设**（站立/T姿/叉腰/举双手/招手/行走/坐/指向前）：`applyPose` 先清零关节再套预设欧拉角；选中人台时左面板出现。
+- **整体朝向**（面向/背向/朝左/朝右）：`setFacing` 设 root.rotation.y（精确）。
+- **姿势名写进生成提示**：`shotFragment` 输出「角色1居左(招手)」，即使灰模粗略，AI 也据姿势名渲染。
+- 手动逐关节（旋转/摆姿点关节）保留作微调。预设欧拉角为粗摆估值，可按真机反馈微调正负号。
+
+## 十、v4 重做（2026-06-28，已提交）：Outliner/Inspector + 模型导入 + 缩放 + 拖拽摆姿
+参考 three.js editor(Outliner/Inspector/gizmo) + open-pose-editor/Magic Poser(拖拽摆姿) + GLTFLoader。
+- **UI 重构**：左 Outliner（场景对象树：人台/道具/导入模型，选中/显隐/复制/删除 + 顶部 人台/道具/导入）；右 Inspector（选中项 复制/看向/删除 + 人台姿势库/朝向 + 镜头焦段/镜别/角度 + 机位列表/批量）；顶栏变换四态；底栏场景描述+生成。
+- **模型导入**：GLB/GLTF 文件选择 + 拖拽到画面；GLTFLoader.parse(ArrayBuffer)；导入后 Box3 归一化（缩放约 2 单位、落地、居中）。
+- **缩放**：变换加 scale 档。
+- **拖拽摆姿**：顶栏「摆姿」模式 → 点人台关节 + 拖动鼠标，按相机右/上轴做世界增量旋转→关节父空间共轭，替代繁琐 gizmo；一键姿势库仍为主路径。
+- **默认角色**：无法内置二进制 glb → 默认仍是程序化骨架人形（有关节/可摆姿/缩放）；导入 rigged GLB 可换真人。导入模型本会话可用、暂不随工程持久化（二进制无法序列化）。
+- **对抗式审查后修复**（6-agent workflow）：① cleanup 增加 scene.traverse 释放 geometry/material/texture + depthMat.dispose + forceContextLoss（修 GPU 泄漏）；② busy 期间全屏遮罩拦截交互（修批量逐机位抓帧被改动场景污染）；③ GLTF 回调加 disposed 守卫 + 早返回 disposeTree（修卸载后 use-after-dispose/泄漏）；④ 空盒/无网格模型归一化 NaN 防御；⑤ .gltf 外部资源/Draco 局限写进错误提示；⑥ jnt.parent 空值防御。
+
+## 十一、v4.3（2026-06-28，已提交）：OpenPose 控制图导出 + Mixamo 骨骼重定向
+- **OpenPose 控制图**：`collectKeypoints`（人台从关节组推导腕/踝/颈/鼻眼耳；rigged 模型读骨骼）+ `captureOpenPose`（COCO-18 标准 KP_ORDER/OP_LIMBS/OP_COLORS，世界坐标→相机投影→黑底画 stick+dot，相机后方剔除）。
+- **控制图类型**：工程配了 ControlNet 控制模型时，Inspector 出「控制：深度/骨架」开关；`doGenerate` 据此用 captureDepth / captureOpenPose + 对应提示。
+- **Mixamo 重定向**：导入 GLB 按 `MIXAMO_MAP`(LeftArm/LeftForeArm/LeftHand/LeftUpLeg/LeftLeg/LeftFoot/Head/Neck…后缀)自动标记标准关节名，骨骼≥6 标 `rigged`；rigged 模型可拖拽摆姿（蒙皮命中点就近选骨）+ 导出 OpenPose。姿势库预设仅对自有 rig（局部轴相关）。VRM 需 @pixiv/three-vrm（未引入）。
+- **审查后修复**（3-agent workflow）：① 深度图渲染前隐藏 grid/ground（避免地面强梯度+网格线污染深度控制图）；② 骨架控制无人台/rigged 目标时拦截并提示（避免上传全黑骨架图静默生成）。
+
+## 十二、三大件（2026-06-29，已提交）：导入模型持久化 + 取景 PiP 双相机 + 撤销重做
+- **导入模型持久化**（数据丢失级修复）：导入 GLB → 字节存 `storage.attachment`（assetId），`DirectorSubject` 加 `assetId`/`name`/三轴 `scale`；`serializeSceneOnly` 纳入模型（含 rigged 骨骼姿势 joints），重开/撤销时 `buildModelFromState` 异步取字节 `parseGLB` 重建（不归一化、套用保存的变换/姿势）；删工程时 `deleteProjectStorage` 清理 director 模型 attachment。存储失败（>50MB/不可用）按 `put` 返回的 `{ok}` 降级为「本次可用、不随工程保存」并提示。
+- **取景 PiP 双相机**：`cam`=视图（轨道自由查看）、`shotCam`=出图相机；默认 `shotLocked=false` 时 shotCam 每帧 `copy(cam)`（与旧单相机零回归）。「锁定取景」冻结出图机位 → 主视图可绕到侧面摆姿，角落 **PiP**（第二 renderer）实时显示出图构图 + 主视图 `CameraHelper` 取景框；`capture`/`captureDepth`/`captureOpenPose`/`shotFragment`/`getCam`/`applyCam`/`shotSize`/`angle`/`setFocal` 全部走 `outCam()`/`outTarget()`，捕获时隐藏取景框线。
+- **撤销重做**：`commit()` 快照 `serializeSceneOnly()`（栈顶=当前态），提交点覆盖 增删/复制/导入/摆姿/姿势库/朝向/TransformControls 拖拽结束/拖拽摆姿；`applyState` 整体重建（人台/道具同步 + 模型异步）；Ctrl+Z / Ctrl+Shift+Z(/Y) + 顶栏按钮（输入框内不拦截）。
+- **审查后修复**（3-agent 工作流）：① **blocker** `attachment.put` 返回 `{ok,error}` 对象（非 boolean）—— 原 `!==false` 判定恒真使 >50MB 失败路径失效、重开必丢；改为取 `.ok` + 修正本地 d.ts 类型。② **major** 异步模型重建竞态 —— 引入 `sceneGen` 代次令牌（过期重建丢弃）+ `restoring` 持有到模型到齐（期间抑制 commit，避免快照漏模型）+ 种子/applyState 等 `Promise.all` 后再快照；importGLTF 也加代次守卫。③ undo 后 `setFocal` 同步滑块；④ 三轴缩放持久化（非均匀缩放不再被压平）；⑤ `setLock/setShotFromView` 加 `updateMatrixWorld`。
+- **仍延后/已知**：锁定取景后改窗口尺寸会按新视口比例重取景（shotCam.aspect 跟随主视口，保证 capture 不变形；真机少见）；IK / VRM / 姿势缩略图（独立增强）。**需真机实测**：attachment put/get、第二 WebGL context、CameraHelper/PiP 表现。

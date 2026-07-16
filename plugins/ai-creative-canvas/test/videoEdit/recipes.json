@@ -1,0 +1,774 @@
+[
+  {
+    "id": "noop-empty",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 10, "filterContains": ["format=yuv420p"], "argsContains": ["-map 0:a"] }
+  },
+  {
+    "id": "all-ops-disabled",
+    "stack": {
+      "version": 1,
+      "baseDuration": 8,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "trim", "kind": "trim", "enabled": false, "params": { "segments": [{ "in": 0, "out": 4, "keep": true }] } },
+        { "id": "speed", "kind": "speed", "enabled": false, "params": { "rate": 2, "reverse": false, "pitchCompensate": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 8 }
+  },
+  {
+    "id": "trim-two-keeps-speed2x-overlay-text",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "trim1",
+          "kind": "trim",
+          "enabled": true,
+          "params": {
+            "segments": [
+              { "in": 0, "out": 3, "keep": true },
+              { "in": 3, "out": 7, "keep": false },
+              { "in": 7, "out": 10, "keep": true }
+            ]
+          }
+        },
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 2, "reverse": false, "pitchCompensate": true } },
+        {
+          "id": "ov1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": {
+            "sub": "text",
+            "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 },
+            "text": "Hello",
+            "range": { "start": 0, "end": 1.5 },
+            "anim": "none"
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": true,
+      "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } }
+    },
+    "expect": { "outDuration": 3, "filterContains": ["trim", "setpts", "overlay", "enable='between(t,0.000,0.750)'"] }
+  },
+  {
+    "id": "trim-delete-middle-subtitle",
+    "stack": {
+      "version": 1,
+      "baseDuration": 12,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "trim1",
+          "kind": "trim",
+          "enabled": true,
+          "params": {
+            "segments": [
+              { "in": 0, "out": 4, "keep": true },
+              { "in": 4, "out": 8, "keep": false },
+              { "in": 8, "out": 12, "keep": true }
+            ]
+          }
+        },
+        {
+          "id": "sub1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": {
+            "sub": "subtitle",
+            "rect": { "x": 0.1, "y": 0.85, "w": 0.8, "h": 0.1 },
+            "cues": [
+              { "start": 0.5, "end": 2, "text": "第一幕" },
+              { "start": 2.5, "end": 4, "text": "第二幕" }
+            ]
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": true,
+      "overlayResolved": {
+        "sub1": {
+          "kind": "subtitle",
+          "cues": [
+            { "start": 0.5, "end": 2, "path": "/test/fixtures/sub1.png" },
+            { "start": 2.5, "end": 4, "path": "/test/fixtures/sub2.png" }
+          ]
+        }
+      }
+    },
+    "expect": { "outDuration": 8, "filterContains": ["concat", "overlay"] }
+  },
+  {
+    "id": "speed-reverse-freeze",
+    "stack": {
+      "version": 1,
+      "baseDuration": 6,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": true, "pitchCompensate": true, "freezeEnd": 1.5 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 7.5, "filterContains": ["reverse", "tpad"] }
+  },
+  {
+    "id": "speed-boomerang",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "boomerang": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 8, "filterContains": ["concat"] }
+  },
+  {
+    "id": "trim-boomerang-hasaudio-nosink",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "trim1", "kind": "trim", "enabled": true, "params": { "segments": [{ "in": 0, "out": 4, "keep": true }] } },
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "boomerang": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 8, "filterContains": ["atrim", "anullsink", "concat=n=2:v=1"], "argsContains": ["-an"] }
+  },
+  {
+    "id": "speed2x-boomerang-hasaudio-nosink",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 2, "reverse": false, "pitchCompensate": true, "boomerang": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 10, "filterContains": ["atempo", "anullsink"], "argsContains": ["-an"] }
+  },
+  {
+    "id": "speed-slowmo-smooth",
+    "stack": {
+      "version": 1,
+      "baseDuration": 5,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 0.5, "reverse": false, "pitchCompensate": true, "smoothSlowmo": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 10, "filterContains": ["minterpolate"] }
+  },
+  {
+    "id": "speed-motion-trail",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "motionTrail": 4 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 3, "filterContains": ["tmix"] }
+  },
+  {
+    "id": "transform-crop-blurpad",
+    "stack": {
+      "version": 1,
+      "baseDuration": 5,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "tf1",
+          "kind": "transform",
+          "enabled": true,
+          "params": {
+            "crop": { "x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8 },
+            "outW": 1080,
+            "outH": 1920,
+            "fit": "blur-pad"
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 5, "filterContains": ["crop", "boxblur=luma_radius='min(20,w/40)'", "overlay"], "filterNotContains": ["iw/40"] }
+  },
+  {
+    "id": "transform-mirror-glitch-shake",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "tf1",
+          "kind": "transform",
+          "enabled": true,
+          "params": { "mirror": "h", "shake": 0.4, "glitch": 0.5, "pixelate": 8, "deshake": true }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 4, "filterContains": ["hstack", "rgbashift", "deshake"] }
+  },
+  {
+    "id": "glitch-fallback-rgbashift-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "glitch": 0.5 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["rgbashift"],
+    "expect": { "outDuration": 3, "filterNotContains": ["rgbashift", "chromashift"] }
+  },
+  {
+    "id": "color-full-preset",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "col1",
+          "kind": "color",
+          "enabled": true,
+          "params": {
+            "brightness": 0.1,
+            "contrast": 1.2,
+            "saturation": 1.1,
+            "gamma": 1.1,
+            "temp": 20,
+            "tint": -10,
+            "hue": 5,
+            "sharpen": 1,
+            "denoise": 0.3,
+            "vignette": 0.4,
+            "grain": 10,
+            "invert": false
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 3, "filterContains": ["eq=", "colortemperature=temperature=6000", "unsharp", "vignette", "noise"] }
+  },
+  {
+    "id": "overlay-pip-mosaic-progress-timecode",
+    "stack": {
+      "version": 1,
+      "baseDuration": 6,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "pip1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": { "sub": "pip", "rect": { "x": 0.7, "y": 0.05, "w": 0.25, "h": 0.2 }, "pipCardId": "card-pip" }
+        },
+        {
+          "id": "mos1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": {
+            "sub": "mosaic",
+            "rect": { "x": 0.2, "y": 0.2, "w": 0.3, "h": 0.2 },
+            "blurKind": "mosaic",
+            "pixelSize": 12
+          }
+        },
+        {
+          "id": "prog1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": { "sub": "progress", "rect": { "x": 0, "y": 0.95, "w": 1, "h": 0.05 } }
+        },
+        {
+          "id": "tc1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": { "sub": "timecode", "rect": { "x": 0.02, "y": 0.02, "w": 0.2, "h": 0.06 } }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": false,
+      "overlayResolved": {
+        "pip1": { "kind": "video", "path": "/test/fixtures/pip.mp4" },
+        "prog1": { "kind": "png", "path": "/test/fixtures/progress.png" },
+        "tc1": { "kind": "timecode", "path": "/test/fixtures/tc.png", "cellW": 48, "cellH": 24, "step": 1 }
+      }
+    },
+    "expect": { "outDuration": 6, "filterContains": ["scale=", "overlay"], "argsContains": ["-loop 1 -i /test/fixtures/tc.png", "-t 6.000"] }
+  },
+  {
+    "id": "overlay-pip-missing-resolved",
+    "stack": {
+      "version": 1,
+      "baseDuration": 5,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "pip1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": { "sub": "pip", "rect": { "x": 0.6, "y": 0.1, "w": 0.3, "h": 0.3 }, "pipCardId": "missing" }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": {} },
+    "expect": { "outDuration": 5, "passCount": 1 }
+  },
+  {
+    "id": "audio-bgm-duck-mute-fade",
+    "stack": {
+      "version": 1,
+      "baseDuration": 8,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "aud1",
+          "kind": "audio",
+          "enabled": true,
+          "params": {
+            "gainDb": 3,
+            "fadeIn": 0.5,
+            "fadeOut": 1,
+            "muteRanges": [{ "start": 2, "end": 3 }],
+            "loudnorm": true,
+            "denoise": true,
+            "bgm": {
+              "path": "/test/fixtures/bgm.mp3",
+              "source": "card",
+              "volume": 0.6,
+              "offset": 0.5,
+              "mode": "duck"
+            }
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 8, "filterContains": ["sidechaincompress", "loudnorm", "afade"] }
+  },
+  {
+    "id": "audio-no-source-bgm-replace",
+    "stack": {
+      "version": 1,
+      "baseDuration": 5,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "aud1",
+          "kind": "audio",
+          "enabled": true,
+          "params": {
+            "bgm": { "path": "/test/fixtures/bgm.mp3", "source": "tts", "text": "旁白", "volume": 1, "mode": "replace" }
+          }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 5, "filterContains": ["adelay", "aresample"], "argsContains": ["-map", "[bg"] }
+  },
+  {
+    "id": "audio-pitch-semitones",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "aud1", "kind": "audio", "enabled": true, "params": { "pitchSemitones": 4 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 4, "filterContains": ["asetrate"] }
+  },
+  {
+    "id": "export-mp4-platform-fade",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "exp",
+          "kind": "export",
+          "enabled": true,
+          "params": {
+            "format": "mp4",
+            "crf": 20,
+            "outW": 1080,
+            "outH": 1920,
+            "fit": "cover",
+            "fps": 30,
+            "platform": "douyin",
+            "fadeIn": 0.5,
+            "fadeOut": 0.8
+          }
+        }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 10, "filterContains": ["fade=t=in", "fade=t=out"], "passCount": 1 }
+  },
+  {
+    "id": "export-webm",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webm", "crf": 30 } }]
+    },
+    "ctx": { "hasAudio": true },
+    "expect": { "outDuration": 3, "argsContains": ["libvpx-vp9"], "passCount": 1 }
+  },
+  {
+    "id": "export-gif-two-pass",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 2, "reverse": false, "pitchCompensate": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "gif", "fps": 12, "outW": 480 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 1, "passCount": 2, "argsContains": ["palettegen"] }
+  },
+  {
+    "id": "export-webp-two-pass",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webp", "fps": 10, "outW": 400 } }]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 2, "passCount": 2, "argsContains": ["libwebp"] }
+  },
+  {
+    "id": "combo-trim-speed-color-overlay",
+    "stack": {
+      "version": 1,
+      "baseDuration": 15,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        {
+          "id": "trim1",
+          "kind": "trim",
+          "enabled": true,
+          "params": { "segments": [{ "in": 2, "out": 12, "keep": true }] }
+        },
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1.5, "reverse": false, "pitchCompensate": true } },
+        { "id": "col1", "kind": "color", "enabled": true, "params": { "brightness": -0.05, "contrast": 1.15, "saturation": 1.2 } },
+        {
+          "id": "wm1",
+          "kind": "overlay",
+          "enabled": true,
+          "params": { "sub": "watermark", "rect": { "x": 0.75, "y": 0.02, "w": 0.2, "h": 0.08 }, "text": "© Mulby" }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23, "bitrate": 4000 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": true,
+      "overlayResolved": { "wm1": { "kind": "png", "path": "/test/fixtures/wm.png" } }
+    },
+    "expect": { "outDuration": 6.666666666666666, "filterContains": ["trim", "setpts", "eq="] }
+  },
+  {
+    "id": "color-lut-path",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "col1", "kind": "color", "enabled": true, "params": { "lutPath": "C:/test/luts/cinematic.cube" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 3, "filterContains": ["lut3d"] }
+  },
+  {
+    "id": "fallback-denoise-colortemp",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        {
+          "id": "col1",
+          "kind": "color",
+          "enabled": true,
+          "params": { "temp": 50, "denoise": 0.5 }
+        },
+        {
+          "id": "aud1",
+          "kind": "audio",
+          "enabled": true,
+          "params": { "denoise": true, "bgm": { "path": "/test/bgm.mp3", "source": "card", "mode": "mix" } }
+        },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": true },
+    "fallbacks": ["denoise", "colortemperature", "sidechain"],
+    "expect": { "outDuration": 3, "filterContains": ["colorbalance=rs=0.150", "highpass"] }
+  },
+  {
+    "id": "transform-rotate-arbitrary",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 800,
+      "baseH": 600,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "rotate": 45, "hflip": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 4, "filterContains": ["rotate=", "hflip"] }
+  },
+  {
+    "id": "overlay-frame-sticker",
+    "stack": {
+      "version": 1,
+      "baseDuration": 5,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "fr1", "kind": "overlay", "enabled": true, "params": { "sub": "frame", "rect": { "x": 0, "y": 0, "w": 1, "h": 1 } } },
+        { "id": "st1", "kind": "overlay", "enabled": true, "params": { "sub": "sticker", "rect": { "x": 0.4, "y": 0.4, "w": 0.2, "h": 0.2 } } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": false,
+      "overlayResolved": {
+        "fr1": { "kind": "png", "path": "/test/frame.png" },
+        "st1": { "kind": "png", "path": "/test/sticker.png" }
+      }
+    },
+    "expect": { "outDuration": 5, "filterContains": ["overlay"] }
+  },
+  {
+    "id": "trim-secondseg-overlay-timewindow-fold",
+    "stack": {
+      "version": 1,
+      "baseDuration": 10,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "trim1", "kind": "trim", "enabled": true, "params": { "segments": [
+          { "in": 0, "out": 2, "keep": true },
+          { "in": 2, "out": 6, "keep": false },
+          { "in": 6, "out": 10, "keep": true }
+        ] } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Late", "range": { "start": 7, "end": 9 }, "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": {
+      "hasAudio": false,
+      "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } }
+    },
+    "expect": { "outDuration": 6, "filterContains": ["overlay", "enable='between(t,3.000,5.000)'"], "filterNotContains": ["between(t,7.000,9.000)"] }
+  },
+  {
+    "id": "fallback-minterpolate-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 4,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 0.5, "reverse": false, "pitchCompensate": true, "smoothSlowmo": true } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["minterpolate"],
+    "expect": { "outDuration": 8, "filterNotContains": ["minterpolate"] }
+  },
+  {
+    "id": "fallback-tmix-to-tblend",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "speed1", "kind": "speed", "enabled": true, "params": { "rate": 1, "reverse": false, "pitchCompensate": true, "motionTrail": 4 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["tmix"],
+    "expect": { "outDuration": 3, "filterContains": ["tblend"], "filterNotContains": ["tmix"] }
+  },
+  {
+    "id": "fallback-lut3d-skip",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "color1", "kind": "color", "enabled": true, "params": { "lutPath": "/test/fixtures/look.cube" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "fallbacks": ["lut3d"],
+    "expect": { "outDuration": 3, "filterNotContains": ["lut3d"] }
+  },
+  {
+    "id": "gif-with-text-overlay",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "gif", "fps": 12, "outW": 480 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 2, "passCount": 2, "filterContains": ["overlay"], "argsContains": ["palettegen"] }
+  },
+  {
+    "id": "crop-overlay-text-remap",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "crop": { "x": 0.2, "y": 0.1, "w": 0.5, "h": 0.8 } } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.5, "y": 0.3, "w": 0.2, "h": 0.1 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 3, "filterContains": ["crop=", "main_w*0.6000", "main_h*0.2500"], "filterNotContains": ["main_w*0.5000", "main_h*0.3000"] }
+  },
+  {
+    "id": "crop-overlay-mosaic-remap",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "crop": { "x": 0.2, "y": 0.1, "w": 0.5, "h": 0.8 } } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "mosaic", "rect": { "x": 0.55, "y": 0.3, "w": 0.3, "h": 0.4 }, "blurKind": "pixel", "pixelSize": 14 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 3, "filterContains": ["iw*0.7000", "ih*0.2500", "iw*0.6000", "ih*0.5000", "main_w*0.7000"], "filterNotContains": ["iw*0.5500", "iw*0.3000", "main_w*0.5500"] }
+  },
+  {
+    "id": "export-webm-overlay-text",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webm", "crf": 30 } }
+      ]
+    },
+    "ctx": { "hasAudio": true, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 3, "passCount": 1, "filterContains": ["overlay"], "argsContains": ["libvpx-vp9"] }
+  },
+  {
+    "id": "export-webp-overlay-text",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webp", "fps": 12, "outW": 480 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 2, "passCount": 2, "filterContains": ["overlay"], "argsContains": ["libwebp"] }
+  }
+]

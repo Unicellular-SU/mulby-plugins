@@ -1,0 +1,250 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* 兼容旧变量（保留，勿删） */
+  --ace-border: #e5e7eb;
+  --ace-dot: #d4d4d8;
+  --ace-edge: #94a3b8;
+  --ace-bg: #f6f7f9;
+  /* 表面 surface */
+  --surface-1: #ffffff;
+  --surface-2: #f6f7f9;
+  --surface-3: #eceef1;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --blur-glass: blur(28px);
+  /* 文本 text */
+  --text-1: #16181d;
+  --text-2: #5b606b;
+  --text-3: #9aa0ac;
+  /* 主色 accent */
+  --accent: #6366f1;
+  --accent-40: rgba(99, 102, 241, 0.4);
+  --accent-08: rgba(99, 102, 241, 0.08);
+  /* 类型色 —— 必须与 types.ts 的 KIND_ACCENT 同源（单一真相） */
+  --kind-image: #6366f1;
+  --kind-video: #ec4899;
+  --kind-text: #10b981;
+  --kind-audio: #f59e0b;
+  --kind-source: #64748b;
+  --kind-group: #64748b;
+  --kind-note: #eab308;
+  /* 圆角 / 间距 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  /* 阴影 */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-menu: 0 8px 28px rgba(0, 0, 0, 0.16);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.28);
+  --shadow-fab: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.dark {
+  --ace-border: #2a2a2e;
+  --ace-dot: #34343a;
+  --ace-edge: #565660;
+  --ace-bg: #0b0b0d;
+  --surface-1: #16181d;
+  --surface-2: #1d2027;
+  --surface-3: #24272f;
+  --surface-glass: rgba(24, 26, 31, 0.74);
+  --text-1: #f2f3f5;
+  --text-2: #aab0bb;
+  --text-3: #6b7280;
+  --accent: #818cf8;
+  --accent-40: rgba(129, 140, 248, 0.4);
+  --accent-08: rgba(129, 140, 248, 0.1);
+  /* 暗色下类型色提亮（仅供纯 CSS 着色；JS 侧用 KIND_ACCENT 基准色） */
+  --kind-image: #818cf8;
+  --kind-video: #f472b6;
+  --kind-text: #34d399;
+  --kind-audio: #fbbf24;
+  --kind-source: #94a3b8;
+  --kind-group: #94a3b8;
+  --kind-note: #fbbf24;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-menu: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.6);
+  --shadow-fab: 0 4px 16px rgba(0, 0, 0, 0.55);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ace-bg);
+  overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+}
+
+.ace-stage {
+  background: var(--ace-bg);
+}
+
+/* 连线 */
+.ace-edge {
+  stroke: var(--ace-edge);
+  stroke-width: 2;
+}
+.ace-edge-temp {
+  stroke-dasharray: 6 4;
+  opacity: 0.85;
+}
+.ace-edge-hover {
+  stroke: #6366f1;
+  stroke-width: 2.5;
+}
+.ace-edge-active {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+.ace-edge-del-bg {
+  fill: #ef4444;
+}
+.ace-edge-del-x {
+  stroke: #ffffff;
+  stroke-width: 1.6;
+}
+
+/* 小地图 */
+.ace-mini-card {
+  fill: var(--ace-edge);
+  opacity: 0.55;
+}
+.ace-mini-view {
+  fill: rgba(99, 102, 241, 0.12);
+  stroke: #6366f1;
+  stroke-width: 1.5;
+}
+
+/* Inspector 输入 */
+.ace-input {
+  width: 100%;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  outline: none;
+  border: 1px solid transparent;
+}
+.dark .ace-input {
+  background: rgba(255, 255, 255, 0.06);
+}
+.ace-input:focus {
+  border-color: #818cf8;
+  background: transparent;
+}
+
+/* 滚动条 */
+.ace-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.ace-scroll::-webkit-scrollbar-thumb {
+  background: rgba(130, 130, 140, 0.4);
+  border-radius: 4px;
+}
+.ace-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 隐藏滚动条但保留滚动 */
+.ace-noscroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.ace-noscroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.line-clamp-4 {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── 玻璃浮层规范（菜单 / 浮岛 / 对话框统一质感） ── */
+.ace-glass {
+  background: var(--surface-glass);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+  border: 1px solid var(--ace-border);
+  box-shadow: var(--shadow-menu);
+  border-radius: var(--radius-lg);
+}
+/* 顶/侧栏：玻璃背景但不带圆角/独立阴影（边框由布局类提供） */
+.ace-bar {
+  background: var(--surface-glass);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+}
+/* 下拉 / 右键 / 弹出菜单 */
+.ace-menu {
+  background: var(--surface-glass);
+  backdrop-filter: var(--blur-glass);
+  -webkit-backdrop-filter: var(--blur-glass);
+  border: 1px solid var(--ace-border);
+  box-shadow: var(--shadow-menu);
+  border-radius: var(--radius-md);
+}
+/* 模态对话框（不透明卡） */
+.ace-dialog {
+  background: var(--surface-1);
+  border: 1px solid var(--ace-border);
+  box-shadow: var(--shadow-dialog);
+  border-radius: var(--radius-lg);
+}
+
+/* ── 动效库（菜单/模态/toast/任务卡复用，统一弹性手感） ── */
+@keyframes ace-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes ace-scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes ace-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ace-menu-pop {
+  0% { opacity: 0; transform: scale(0.96); }
+  60% { transform: scale(1.01); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.ace-anim-fade { animation: ace-fade-in 0.14s ease both; }
+.ace-anim-scale { animation: ace-scale-in 0.16s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.ace-anim-slide { animation: ace-slide-up 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.ace-anim-pop { animation: ace-menu-pop 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .ace-anim-fade, .ace-anim-scale, .ace-anim-slide, .ace-anim-pop { animation: none; }
+}
+
+/* ── 交互期降级（平移/拖动/框选/缩放时换流畅：关过渡与阴影、禁用卡片指针事件） ── */
+.ace-stage[data-interacting] [data-card-id] {
+  transition: none !important;
+  box-shadow: none !important;
+}
+.ace-stage[data-interacting='pan'] [data-card-id],
+.ace-stage[data-interacting='drag'] [data-card-id],
+.ace-stage[data-interacting='marquee'] [data-card-id] {
+  pointer-events: none;
+}
+/* 低缩放：弱化阴影细节，减少合成开销 */
+.ace-stage[data-zoom-low] [data-card-id] {
+  box-shadow: none !important;
+}
