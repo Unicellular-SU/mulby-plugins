@@ -8,6 +8,7 @@ import { stageEl } from './stageEl'
 import { screenToWorld } from './viewport'
 import { isCardInsideGroup, type Card } from '../types'
 import { isImeComposing } from '../util'
+import { useInteraction } from '../store/interactionStore'
 
 const COLORS = ['#6366f1', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#8b5cf6', '#ef4444', '#64748b']
 
@@ -83,6 +84,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
   const startResize = (e: RPointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    useInteraction.getState().setResizing(true) // 冻结大画布索引
     // 首次实际拖动时压一次历史，捕获 resize 前的尺寸与成员归属；resize + 结束时的成员吸入/弹出合为一次撤销。
     let pushed = false
     const ensurePush = () => { if (!pushed) { useGraph.getState().pushHistory(); pushed = true } }
@@ -98,6 +100,7 @@ export function GroupView({ card, selected }: { card: Card; selected: boolean })
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', up) // 打断(触摸/笔/系统手势)也收尾，否则 move 残留继续改尺寸
+      useInteraction.getState().setResizing(false) // 解冻并按最终尺寸重建一次
       // resize 结束：吸入完全落入的顶层卡 / 弹出移出框的直属子
       const b = useGraph.getState().getActiveBoard()
       const grp = b.cards[card.id]

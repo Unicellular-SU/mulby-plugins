@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
 import { Sparkles } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
+import { useInteraction } from '../store/interactionStore'
 import { useUi } from '../store/uiStore'
 import { useDialog } from '../store/dialogStore'
 import { CardView } from './CardView'
@@ -71,7 +72,9 @@ export function CanvasStage() {
   // 拖的是选中卡(force 渲染)，冻结的略旧裁剪框不影响其显示；松手 commitTick++ 触发一次按最终位置重建。
   // 仅在虚拟化(大画布)时冻结——小画布保持原行为，零风险。
   const [commitTick, setCommitTick] = useState(0)
-  const frozen = virtualize && inter.current.mode === 'drag'
+  const resizing = useInteraction((s) => s.resizing) // CardView/GroupView resize 期间为 true
+  // 冻结覆盖 drag 与 resize 两种连续交互：resize 也高频改 cards(w/h)，不冻结会每帧 O(N) 重建索引
+  const frozen = virtualize && (inter.current.mode === 'drag' || resizing)
 
   // 折叠组隐藏成员集合：仅卡片变化时重算（平移因 cards 引用稳定而命中缓存；拖动期冻结）
   const hiddenRef = useRef<Set<string>>(new Set())

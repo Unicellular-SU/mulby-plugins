@@ -3,6 +3,7 @@ import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Paus
 import { captureFrame } from '../services/mediaOps'
 import { invalidTargetIds } from '../services/connectionPolicy'
 import { useGraph } from '../store/graphStore'
+import { useInteraction } from '../store/interactionStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from './viewport'
 import { stageEl } from './stageEl'
@@ -207,6 +208,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     const handle = e.currentTarget as HTMLElement
     const pid = e.pointerId
     try { handle.setPointerCapture(pid) } catch { /* ignore */ }
+    useInteraction.getState().setResizing(true) // 冻结大画布索引，避免每帧 O(N) 重建
     let pushed = false // 首次实际拖动（越过阈值）时压一次历史，捕获 resize 前尺寸；中间态继续 live 更新
     const move = (ev: PointerEvent) => {
       const rect = stageEl.current?.getBoundingClientRect()
@@ -228,6 +230,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('contextmenu', onCtx)
       try { handle.releasePointerCapture(pid) } catch { /* ignore */ }
+      useInteraction.getState().setResizing(false) // 解冻：CanvasStage 重渲按最终尺寸重建一次索引
       setResizeBubble(null)
     }
     const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') cleanup() }

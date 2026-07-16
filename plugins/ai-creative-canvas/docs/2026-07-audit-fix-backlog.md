@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：44/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
+**进度：45/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -242,7 +242,7 @@
 
 ## 批次 E · 性能优化（大画布体验）
 
-- [ ] **E1 [P1/optimization] 索引冻结不覆盖 resize：缩放卡片/分组时每个 pointermove 触发 O(N) 全量重建，且无 rAF 合帧**
+- [x] **E1 [P1/optimization] 索引冻结不覆盖 resize：缩放卡片/分组时每个 pointermove 触发 O(N) 全量重建，且无 rAF 合帧**（✓ 2026-07-16 新建 interactionStore(useInteraction.resizing)：CardView/GroupView resize 开始 setResizing(true)、收尾(cleanup/up)setResizing(false)；CanvasStage 订阅 resizing，frozen 扩展为 `drag || resizing`——resize 期间三个 useMemo(hiddenMembers/cardIndex/edgeIndex) 命中冻结缓存，不再每帧 O(N) 重建，结束翻 false 时 frozen 变化触发按最终尺寸重建一次（天然复用现有 frozen 机制，无需 commitTick）。rAF 合帧未做——pointermove 本就约按帧触发、冻结已消除主要 O(N) 成本，收益边际。typecheck+UI 构建+全套件全绿）
   - 位置：`CanvasStage.tsx:73`（frozen 条件）、`CardView.tsx:208-216`、`GroupView.tsx:74-79`；对照拖动的 dragAcc `CanvasStage.tsx:231-233`
   - 修法：resize 走 rAF 合帧（仿 dragAcc）；冻结条件扩展为「任何连续交互」（resize 开始设 ref 标志，结束 commitTick++ 重建一次，与拖动同构）。
 
