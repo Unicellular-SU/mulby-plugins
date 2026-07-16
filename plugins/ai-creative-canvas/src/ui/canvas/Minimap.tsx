@@ -21,15 +21,24 @@ export function Minimap() {
   const vx1 = (stageSize.w - v.x) / v.zoom
   const vy1 = (stageSize.h - v.y) / v.zoom
 
-  let minX = vx0
-  let minY = vy0
-  let maxX = vx1
-  let maxY = vy1
+  // 边界只用卡片包围盒（不并入视口矩形）——否则视口一移出内容 bbox，minX/scale 每帧变，
+  // 触发重绘 effect 每帧 O(N) 全量重绘。视口指示框允许画出/裁剪到 minimap 边缘（容器 overflow-hidden）。
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
   for (const c of cards) {
     minX = Math.min(minX, c.x)
     minY = Math.min(minY, c.y)
     maxX = Math.max(maxX, c.x + c.w)
     maxY = Math.max(maxY, c.y + c.h)
+  }
+  // 空画布：退回当前视口矩形，避免退化（Infinity）
+  if (!isFinite(minX)) {
+    minX = vx0
+    minY = vy0
+    maxX = vx1
+    maxY = vy1
   }
 
   const cw = Math.max(1, maxX - minX)

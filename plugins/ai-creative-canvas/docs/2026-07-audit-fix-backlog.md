@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：47/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
+**进度：48/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -254,7 +254,7 @@
   - 位置：`GroupView.tsx:20,162`；对照 `CardView.tsx:486` 的 memo
   - 修法：`memo(GroupViewImpl)`；后代计数 useMemo 依赖 cards，或由 CanvasStage 算 hiddenMembers 时顺带产出传入。
 
-- [ ] **E4 [P2/optimization] Minimap 视口一出内容包围盒即每帧 O(N) canvas 全量重绘（与注释承诺相反）**
+- [x] **E4 [P2/optimization] Minimap 视口一出内容包围盒即每帧 O(N) canvas 全量重绘（与注释承诺相反）**（✓ 2026-07-16 Minimap 边界(minX/minY/maxX/maxY)从「视口矩形初值 + 折卡片 bbox」改为**只折卡片 bbox**（空画布退回视口矩形防退化）——pan 期卡片不动、bbox/scale 稳定，重绘 effect 依赖不变即跳过，兑现注释「平移期跳过重绘」的承诺。视口指示框仍按 toMini 映射、允许画出/裁剪到 minimap 边缘（容器 overflow-hidden）。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/canvas/Minimap.tsx:24-33,43,60`
   - 修法：边界只用卡片包围盒（视口指示框裁剪到边缘），或对 minX/scale 量化取整减少依赖抖动。
 
