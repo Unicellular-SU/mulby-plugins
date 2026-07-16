@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：60/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F8 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F9-F13 文档/技术债）+ B12 回填
+**进度：63/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F11 完成，README 三项 F9/F10/F11 同批修）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F12-F13）+ B12 回填
 
 ---
 
@@ -295,15 +295,14 @@
   - 位置：`tsconfig.json:19`
   - 修法：tsconfig.json include 扩为 ["src","test"]（或独立 tsconfig.test.json + typecheck 脚本第三段）。
 
-- [ ] **F9 [doc] README「开发」一节的 dev/pack 命令依赖未声明未安装的 mulby CLI，按文档执行必失败**
-  - 位置：`README.md:81-90`；CLI 实际在同工作区 mulby/packages/mulby-cli
-  - 修法：README 补 CLI 获取方式，或 devDependencies 以 workspace 协议声明使 dev/pack 开箱可跑。
+- [x] **F9 [doc] README「开发」一节的 dev/pack 命令依赖未声明未安装的 mulby CLI，按文档执行必失败**（✓ 2026-07-16 与 F10/F11 同批 README 修正。开发一节重写：先列**不依赖 CLI、开箱可跑**的 typecheck/test/build（顺带补上原文档缺失的 typecheck/test 命令），再单独说明 dev/pack 需 Mulby CLI（`mulby dev`/`mulby pack`），指明 CLI 在同 workspace 的 mulby/packages/mulby-cli、需先构建并全局链接使命令可用。选文档澄清而非改 devDependencies——避免动 workspace 依赖 + pnpm install 副作用，[doc] 项范围内以准确说明为宜）
+  - 位置：`README.md`；CLI 实际在同工作区 mulby/packages/mulby-cli
 
-- [ ] **F10 [doc] README 快捷键表失实：「L」键无绑定；「Ctrl+D 原位复制」实为偏移粘贴；Ctrl+G/Esc/加选/双击进局部编辑已实现未收录**
-  - 位置：`README.md:55`；对照 `CanvasStage.tsx:500-545`
+- [x] **F10 [doc] README 快捷键表失实：「L」键无绑定；「Ctrl+D 原位复制」实为偏移粘贴；Ctrl+G/Esc/加选/双击进局部编辑已实现未收录**（✓ 2026-07-16 逐条对照 CanvasStage.tsx:518-567 重写快捷键表：删除无绑定的「L」（网格显隐仅工具条、加脚注说明）；「Ctrl+D 原位复制」订正为「复制副本 = 复制+偏移粘贴、非原位」（代码即 copySelection+paste(28,28)）；「Ctrl+V」标注带 28px 偏移；补收 加选/减选(Shift/Ctrl/Cmd+点击)、进入局部重绘编辑(双击图片卡，对照 CardView:396/CanvasStage:421)、编组(Ctrl+G)、取消选择(Esc)、搜索卡片(Ctrl/Cmd+F)。表与代码逐项一致）
+  - 位置：`README.md`；对照 `CanvasStage.tsx:518-567`
 
-- [ ] **F11 [doc] README 功能清单大幅落后：工程库/任务中心/作品库/3D 导演台/标注/分镜/局部重绘/对齐分布均未提及**
-  - 位置：`README.md:25-40`；对照 `App.tsx:127-142`
+- [x] **F11 [doc] README 功能清单大幅落后：工程库/任务中心/作品库/3D 导演台/标注/分镜/局部重绘/对齐分布均未提及**（✓ 2026-07-16 逐个对照 App.tsx 渲染的面板/模态核实存在后补入功能清单：标注层(AnnotationLayer/Toolbar)、对齐分布(snapping+ContextMenu)、局部重绘(MaskInpaintModal，双击图片进入)、分镜扇出(StoryboardModal)、3D 导演台(DirectorStage/three.js)、360 全景(PanoViewer)、工程库(ProjectLibrary)/任务中心(TaskCenter)/作品库(Gallery)、模板(TemplatePanel)。卡片类型补便签/分组。每项都先 grep 验证实现再写，不虚列）
+  - 位置：`README.md`；对照 `App.tsx:127-142`
 
 - [ ] **F12 [doc] main.ts 头注宣称「密钥不进页面」与实现不符（明文 key 读入渲染进程拼 Authorization）**
   - 位置：`src/main.ts:4`；`providerStore.ts:100-106`、`engine.ts:201,258`

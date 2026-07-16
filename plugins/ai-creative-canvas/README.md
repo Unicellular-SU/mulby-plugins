@@ -25,17 +25,25 @@
 ## 功能
 
 - **无限画布**：滚轮缩放（朝光标）、空格 / 中键拖拽平移、框选多选、拖动、网格、小地图、适配视图、撤销/重做、多画布 Tab。
-- **卡片**：文本 / 图片 / 视频 / 音频 / 素材。拖拽、粘贴、拖入文件即可导入素材。
+- **卡片**：文本 / 图片 / 视频 / 音频 / 素材 / 便签 / 分组。拖拽、粘贴、拖入文件即可导入素材。
+- **标注层**：在画布上用画笔 / 形状 / 文字批注（随工程持久化），供审阅与讲解。
+- **对齐分布**：拖动时吸附对齐参考线；右键菜单对齐 / 分布多张卡片。
 - **AI 生成**（Mulby 原生）：
   - 文本卡：`ai.call` 流式生成（分镜脚本 / 文案 / 提示词扩写），支持看图（引用图片作 vision 输入）。
   - 图片卡：`ai.images` 文生图（流式进度 + 预览）、图生图、多图参考一致性（`referenceAttachmentIds`）。
 - **引用**：把一张卡片连线到另一张（拖卡片右侧圆点），或在节点编辑器用 `@` 选素材 / `/` 选预设；生成时 `@名称` 只引用被点名的素材（未 @ 则用全部）。提示词下方会显示「生成引用」预览；无效 @ 会标红并在生成前 toast 提示。
 - **图像媒体工具箱**（`sharp` + `ai.images.edit`）：裁剪（框选）、扩图、放大、抠像/去背景、宫格分镜切分（2×2 / 3×3 / 1×3）。
 - **视频媒体工具箱**（`ffmpeg`，首次自动下载）：裁剪片段、转 GIF、抽帧、镜头检测（取每个切点代表帧）、提取/去除音轨、倒放、压制。
+- **局部重绘**（蒙版 inpaint）：双击图片卡进入局部编辑页，涂抹蒙版区域交模型重绘（`ai.images.edit`）。
+- **分镜扇出**：把故事 / 脚本一键拆成多张分镜卡并批量生成（「分镜」面板）。
+- **3D 导演台**：three.js 3D 场景摆位与运镜预览，导出运镜参数用于视频生成。
+- **360 全景**：球面全景查看器 + 专用模型路线（天/地极点修复）。
 - **可插拔视频/音频生成**（外部 Provider，右上角「设置」配置）：
   - 视频：通用「异步 submit + poll」，按 JSON 路径映射任务 id / 状态 / 结果 URL（兼容 fal、Replicate 风格），支持图生视频。
   - 音频：OpenAI 兼容 `/audio/speech` 配音。
   - API Key 经系统安全存储加密保存。
+- **工程库 / 任务中心 / 作品库**：多工程管理与切换；生成任务队列与进度总览；已完成媒体画廊浏览并可定位回画布。
+- **模板**：内置工作流模板（文生图链 / 图生视频链 / 分镜扇出），一键铺入画布。
 - **持久化**：工程（画布/卡片/连线/视口）自动保存到 Mulby storage；媒体文件落本地磁盘（`<userData>/ai-creative-canvas/media/<projectId>/`）。
 - **导出**：选中带媒体的卡片，点 Inspector 的下载图标导出到任意路径。
 
@@ -46,14 +54,21 @@
 | 缩放 | 滚轮（朝光标） |
 | 平移 | 空格 + 拖拽 / 中键拖拽 / 空白拖拽 |
 | 框选多选 | 空白处左键拖拽 |
+| 加选 / 减选 | Shift / Ctrl / Cmd + 点击卡片 |
 | 新建文本卡 | 双击空白处 |
-| 删除 | Delete / Backspace |
+| 进入局部重绘编辑 | 双击图片卡 |
+| 删除选中 | Delete / Backspace |
 | 撤销 / 重做 | Ctrl+Z / Ctrl+Shift+Z（或 Ctrl+Y） |
-| 复制 / 粘贴 / 原位复制 | Ctrl+C / Ctrl+V / Ctrl+D |
-| 全选 | Ctrl+A |
+| 复制 / 粘贴 | Ctrl+C / Ctrl+V（粘贴带 28px 偏移） |
+| 复制副本 | Ctrl+D（= 复制 + 偏移粘贴，**非原位**） |
+| 编组 | Ctrl+G |
+| 全选 / 取消选择 | Ctrl+A / Esc |
 | 适配视图 | F |
-| 网格 / 小地图 | L（网格通过工具条）/ M |
+| 搜索卡片 | Ctrl+F / Cmd+F |
+| 小地图开关 | M |
 | 提示词 @ 素材 / / 预设 | 输入 `@` 或 `/` 弹出菜单 |
+
+> 网格显隐在左下工具条切换，无键盘快捷键。
 
 ## 剪辑 vs 时间线
 
@@ -78,15 +93,20 @@
 
 ## 开发
 
+以下命令**不依赖 Mulby CLI**，克隆后开箱可跑：
+
 ```bash
-# 安装依赖（pnpm workspace）
-pnpm install
+pnpm install       # 安装依赖（pnpm workspace）
+npm run typecheck  # 三段 tsc：src / node 配置 / test（test 见 tsconfig.test.json）
+npm test           # 编译快照 + store + engine 单测
+npm run build      # typecheck → esbuild 后端 → vite UI
+```
 
-# 构建（esbuild 后端 + vite UI）
-npm run build
+`dev` / `pack` 需要 **Mulby CLI**（`mulby dev` 热载调试、`mulby pack` 打包 `.inplugin`）。CLI 在同一 workspace 的 `mulby/packages/mulby-cli`，先在该目录构建并全局链接（或把其 bin 加入 PATH）使 `mulby` 命令可用，然后：
 
-# 打包为 .inplugin
-npm run pack
+```bash
+npm run dev   # = mulby dev
+npm run pack  # = npm run build && mulby pack
 ```
 
 ## 已知限制
