@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：45/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
+**进度：46/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
 
 ---
 
@@ -246,7 +246,7 @@
   - 位置：`CanvasStage.tsx:73`（frozen 条件）、`CardView.tsx:208-216`、`GroupView.tsx:74-79`；对照拖动的 dragAcc `CanvasStage.tsx:231-233`
   - 修法：resize 走 rAF 合帧（仿 dragAcc）；冻结条件扩展为「任何连续交互」（resize 开始设 ref 标志，结束 commitTick++ 重建一次，与拖动同构）。
 
-- [ ] **E2 [P2/optimization] 拖动吸附每帧全量扫描所有卡片（含屏幕外），未用空间索引**
+- [x] **E2 [P2/optimization] 拖动吸附每帧全量扫描所有卡片（含屏幕外），未用空间索引**（✓ 2026-07-16 snapping.ts 的 snapBox/computeSnap/computeSnapBox 参数从 `cards: Record` 改为 `candidates: Card[]`；CanvasStage flush 大画布(>VIRTUALIZE_THRESHOLD)用 cardIndexRef.query(worldViewRect 视口外扩 600) 预筛候选——每帧 O(可见) 而非 O(全部)，且天然不吸附到屏外看不见的卡（消除「顿一下却看不到对齐目标」的怪异手感）。小画布保持全量扫描零行为变化。typecheck+UI 构建+全套件全绿）
   - 位置：`src/ui/canvas/snapping.ts:23`
   - 修法：候选先用 cardIndex.query(视口外扩吸附阈值) 取可见集再比较；顺带消除「吸附到看不见的卡」的怪异手感。
 

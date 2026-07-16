@@ -7,8 +7,9 @@ export interface SnapResult {
   hy: number[] // 对齐参考线（世界 y）
 }
 
-// 把一个矩形（已含位移后的 px/py）的 边/中轴 对其它卡吸附 + 可选网格吸附，返回修正量与参考线
-function snapBox(px: number, py: number, w: number, h: number, cards: Record<string, Card>, dragged: Set<string>, zoom: number, snapGrid: boolean) {
+// 把一个矩形（已含位移后的 px/py）的 边/中轴 对其它卡吸附 + 可选网格吸附，返回修正量与参考线。
+// candidates 为吸附候选卡（大画布上由调用方按视口空间索引预筛，避免每帧全量 O(N) 扫描 + 消除吸附到屏外卡）
+function snapBox(px: number, py: number, w: number, h: number, candidates: Card[], dragged: Set<string>, zoom: number, snapGrid: boolean) {
   const TH = 6 / Math.max(0.0001, zoom) // 屏幕 6px 对应的世界阈值
   const sV = [px, px + w / 2, px + w] // left / centerX / right
   const sH = [py, py + h / 2, py + h] // top / centerY / bottom
@@ -20,7 +21,7 @@ function snapBox(px: number, py: number, w: number, h: number, cards: Record<str
   let cdy = 0
   let hLine: number | null = null
 
-  for (const o of Object.values(cards)) {
+  for (const o of candidates) {
     if (dragged.has(o.id)) continue
     const oV = [o.x, o.x + o.w / 2, o.x + o.w]
     const oH = [o.y, o.y + o.h / 2, o.y + o.h]
@@ -48,12 +49,12 @@ export function computeSnap(
   primary: Card,
   wdx: number,
   wdy: number,
-  cards: Record<string, Card>,
+  candidates: Card[],
   dragged: Set<string>,
   zoom: number,
   snapGrid: boolean
 ): SnapResult {
-  const r = snapBox(primary.x + wdx, primary.y + wdy, primary.w, primary.h, cards, dragged, zoom, snapGrid)
+  const r = snapBox(primary.x + wdx, primary.y + wdy, primary.w, primary.h, candidates, dragged, zoom, snapGrid)
   return { dx: wdx + r.cdx, dy: wdy + r.cdy, vx: r.vx, hy: r.hy }
 }
 
@@ -62,11 +63,11 @@ export function computeSnapBox(
   box: { x: number; y: number; w: number; h: number },
   wdx: number,
   wdy: number,
-  cards: Record<string, Card>,
+  candidates: Card[],
   dragged: Set<string>,
   zoom: number,
   snapGrid: boolean
 ): SnapResult {
-  const r = snapBox(box.x + wdx, box.y + wdy, box.w, box.h, cards, dragged, zoom, snapGrid)
+  const r = snapBox(box.x + wdx, box.y + wdy, box.w, box.h, candidates, dragged, zoom, snapGrid)
   return { dx: wdx + r.cdx, dy: wdy + r.cdy, vx: r.vx, hy: r.hy }
 }

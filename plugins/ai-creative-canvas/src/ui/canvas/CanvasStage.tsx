@@ -24,7 +24,7 @@ import { MultiConnectHandle } from './MultiConnectHandle'
 import { GuideLayer } from './GuideLayer'
 import { computeSnap, computeSnapBox } from './snapping'
 import { ContextMenu } from '../components/ContextMenu'
-import type { CardKind } from '../types'
+import type { Card, CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
 import { fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
 import { buildGridIndex, type RectItem } from './spatialIndex'
@@ -208,6 +208,20 @@ export function CanvasStage() {
       const ids = inter.current.ids
       const dragged = new Set(ids)
       const snapGrid = useUi.getState().snapGrid
+      // 吸附候选：大画布用视口空间索引预筛（每帧 O(可见) 而非 O(全部)，且不吸附到屏外看不见的卡）；
+      // 小画布(未达虚拟化阈值)保持全量扫描，零行为变化。
+      const idx = cardIndexRef.current
+      const sw = useUi.getState().stageSize
+      let candidates: Card[]
+      if (idx && Object.keys(b.cards).length > VIRTUALIZE_THRESHOLD && sw.w > 0 && sw.h > 0) {
+        candidates = []
+        for (const id of idx.query(worldViewRect(cur, sw.w, sw.h, 600))) {
+          const c = b.cards[id]
+          if (c) candidates.push(c)
+        }
+      } else {
+        candidates = Object.values(b.cards)
+      }
       let snap: ReturnType<typeof computeSnap> | null = null
       if (ids.length > 1) {
         // 多选：用整体包围盒吸附（拖动前的盒）
@@ -218,10 +232,10 @@ export function CanvasStage() {
           minX = Math.min(minX, c.x); minY = Math.min(minY, c.y)
           maxX = Math.max(maxX, c.x + c.w); maxY = Math.max(maxY, c.y + c.h)
         }
-        if (isFinite(minX)) snap = computeSnapBox({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, wdx, wdy, b.cards, dragged, cur.zoom, snapGrid)
+        if (isFinite(minX)) snap = computeSnapBox({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, wdx, wdy, candidates, dragged, cur.zoom, snapGrid)
       } else {
         const primary = b.cards[ids[0]]
-        if (primary) snap = computeSnap(primary, wdx, wdy, b.cards, dragged, cur.zoom, snapGrid)
+        if (primary) snap = computeSnap(primary, wdx, wdy, candidates, dragged, cur.zoom, snapGrid)
       }
       if (snap) {
         wdx = snap.dx
