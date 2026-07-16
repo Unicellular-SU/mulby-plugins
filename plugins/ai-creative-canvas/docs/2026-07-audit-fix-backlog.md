@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：59/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F7 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F8-F13 技术债/文档/配置）+ B12 回填
+**进度：60/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F8 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F9-F13 文档/技术债）+ B12 回填
 
 ---
 
@@ -291,7 +291,7 @@
   - 位置：`manifest.json:5`、package.json
   - 修法：直接升 0.3.0（manifest 与 package.json 同步）；建立「功能合入即 bump」约定；可在 scripts/validate-plugin.js 加 CI 检查（插件目录有变更但 version 未变则告警）。
 
-- [ ] **F8 [incomplete] test/ 不在任何 tsconfig 覆盖内：esbuild 直出不做类型检查，测试床可信度打折**
+- [x] **F8 [incomplete] test/ 不在任何 tsconfig 覆盖内：esbuild 直出不做类型检查，测试床可信度打折**（✓ 2026-07-16 新增 tsconfig.test.json：extends 主 tsconfig（承 strict/DOM/jsx/noUnusedLocals/allowImportingTsExtensions）+ `types:["node"]`（测试用 node:assert/fs/path、process），`include:["src","test"]`——必须含 src 否则 mulby.d.ts 的 ambient `interface Window{mulby}` 全局增强不加载、window.mulby 全线误报。接入 `npm run typecheck`（第三段 tsc -p tsconfig.test.json）。一上线即抓到真实测试 bug：references.test.ts 的 card() 显式 `kind: patch.kind` 又 `...patch`（kind 必选、必被覆写，TS2783），删冗余行。typecheck（三段）+5 套件全绿）
   - 位置：`tsconfig.json:19`
   - 修法：tsconfig.json include 扩为 ["src","test"]（或独立 tsconfig.test.json + typecheck 脚本第三段）。
 

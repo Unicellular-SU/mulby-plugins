@@ -12,7 +12,6 @@ import type { Board, Card } from '../src/ui/types.ts'
 function card(id: string, patch: Partial<Card> & Pick<Card, 'kind'>): Card {
   return {
     id,
-    kind: patch.kind,
     x: 0,
     y: 0,
     w: 320,

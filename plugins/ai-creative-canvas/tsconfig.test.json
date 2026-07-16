@@ -1,0 +1,12 @@
+{
+  // 测试床类型检查（F8）：test/*.ts 原本不在任何 tsconfig 覆盖内，esbuild 直出不做类型检查。
+  // 继承主配置（strict / DOM / jsx / noUnusedLocals / allowImportingTsExtensions 等），再加 node 类型
+  // （测试用 node:assert/fs/path + process）。include 必须含 src——否则 src/types/mulby.d.ts 的
+  // ambient `interface Window { mulby }` 全局增强不会被加载（ambient 全局按 include 集加载、不随 import 传递），
+  // window.mulby 会全线报错。含 src 也顺带在 node 环境下复检 src。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}
