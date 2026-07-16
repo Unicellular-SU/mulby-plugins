@@ -4,7 +4,9 @@ import { saveBase64, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
 import { aiLimiter } from './limiter'
 
-// ─────────── ③ equirect 渐进式 outpaint —— 第 1 步：投影核心(eq↔persp) + 自检 ───────────
+// ─────────── equirect(2048×1024)↔透视投影 WebGL 工具，服务于全景卡「天/地极点修复」 ───────────
+// 唯一对外导出 = repairEquirectPoles（被 MediaToolbox 调用）；eqToPersp/perspToEqPaste/planPanoViews
+// 均为其内部步骤、无外部消费者（早期「渐进式 outpaint」全景生成范式已弃用，仅极点修复沿用这套投影核心）。
 // 约定(与查看器一致，用户未抱怨朝向)：world +X=front(lon0)、+Z=right(lon+90)、+Y=up(lat+90)。
 // equirect 画布顶行 = lat+90(天)。统一规则：贴图上传 UNPACK_FLIP_Y=true；渲染后 readPixels 翻行使
 // 输出画布顶行=GL 顶；采样一律用"v 向上"的自然坐标。2048×1024 是 2 的幂 → 经度可 REPEAT 无缝。
@@ -125,8 +127,8 @@ function pass(w: number, h: number, frag: string, setup: (gl: WebGLRenderingCont
   return out
 }
 
-// equirect → 正交透视面（size×size，fov 度）
-export function eqToPersp(eq: TexImageSource, lonDeg: number, latDeg: number, fovDeg: number, size: number): HTMLCanvasElement {
+// equirect → 正交透视面（size×size，fov 度）——内部步骤，供 repairEquirectPoles 复用
+function eqToPersp(eq: TexImageSource, lonDeg: number, latDeg: number, fovDeg: number, size: number): HTMLCanvasElement {
   const t = Math.tan((fovDeg * PI) / 360)
   const { F, R, U } = basis(lonDeg, latDeg)
   return pass(size, size, EQ_SAMPLE, (gl, prog) => {
@@ -138,8 +140,8 @@ export function eqToPersp(eq: TexImageSource, lonDeg: number, latDeg: number, fo
   })
 }
 
-// 透视面回贴到（旧）equirect → 新 equirect
-export function perspToEqPaste(eqOld: TexImageSource, persp: TexImageSource, lonDeg: number, latDeg: number, fovDeg: number): HTMLCanvasElement {
+// 透视面回贴到（旧）equirect → 新 equirect——内部步骤，供 repairEquirectPoles 复用
+function perspToEqPaste(eqOld: TexImageSource, persp: TexImageSource, lonDeg: number, latDeg: number, fovDeg: number): HTMLCanvasElement {
   const t = Math.tan((fovDeg * PI) / 360)
   const { F, R, U } = basis(lonDeg, latDeg)
   return pass(EQ_W, EQ_H, EQ_PASTE, (gl, prog) => {
@@ -191,7 +193,7 @@ async function outpaintFace(model: string, persp: HTMLCanvasElement, prompt: str
 }
 
 // ── LLM 全局规划（PanoDreamer 思路）：先把场景拆成前后左右上下都连贯一致的方向描述 ──
-export interface PanoPlan {
+interface PanoPlan {
   global: string
   front: string
   right: string
@@ -210,7 +212,7 @@ async function chat(messages: any[], model?: string): Promise<string> {
   if (!acc && final && typeof final.content === 'string') acc = final.content
   return acc
 }
-export async function planPanoViews(scene: string): Promise<PanoPlan> {
+async function planPanoViews(scene: string): Promise<PanoPlan> {
   const fb: PanoPlan = { global: scene, front: scene, right: scene, back: scene, left: scene, up: '天花板或天空', down: '地面或地板' }
   if (!scene.trim()) return fb
   try {

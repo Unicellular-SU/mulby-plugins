@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：53/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 起步（F1 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F2-F13 技术债/文档/配置）+ B12 回填
+**进度：54/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F2 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F3-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -270,9 +270,8 @@
   - 前置：批次 B 完成后做（快照守护拆分）。三次 UI 范式迭代的死代码/死样式一并清理。
   - 产物：`src/ui/components/studioControls.tsx`、`src/ui/components/studioPanels.tsx`
 
-- [ ] **F2 [debt] WS3-T1 收尾：panoOutpaint.ts 的 eqToPersp/perspToEqPaste/planPanoViews 三个 export 已无外部消费者；文件头注释仍是过期的「渐进式 outpaint 第 1 步」**
+- [x] **F2 [debt] WS3-T1 收尾：panoOutpaint.ts 的 eqToPersp/perspToEqPaste/planPanoViews 三个 export 已无外部消费者；文件头注释仍是过期的「渐进式 outpaint 第 1 步」**（✓ 2026-07-16 grep 核实：全仓仅 MediaToolbox 从本文件 import `repairEquirectPoles`，eqToPersp/perspToEqPaste/planPanoViews/PanoPlan 零外部消费者但都被 repairEquirectPoles 内部调用。去掉这三个函数 + PanoPlan interface 的 `export`（改内部，仍被极点修复复用），文件头注释从「③ 渐进式 outpaint 第 1 步」重写为现状说明（唯一对外导出=repairEquirectPoles，投影三函数为其内部步骤、渐进式 outpaint 范式已弃用），保留仍准确的坐标约定注释。未选「并入 mediaPano.ts」方案——本文件自洽、无需为一次去 export 动更大重构。typecheck+5 套件+UI 构建全绿）
   - 位置：`src/ui/services/panoOutpaint.ts`（repairEquirectPoles 被 MediaToolbox 使用，保留）
-  - 修法：去掉三个死 export（改内部函数），重写文件头注释说明现状（工具函数服务于极点修复），或把保留函数并入 mediaPano.ts 后删文件。
 
 - [ ] **F3 [debt] exportFile RPC 是死代码，却暴露「任意绝对路径+任意内容」写盘接口——直接删除**
   - 位置：`src/main.ts:192`（UI 导出实际走 saveLocal.ts 的 dialog+copy）
