@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：50/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D/E 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2
+**进度：51/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2
 
 ---
 
@@ -81,10 +81,8 @@
 - [x] **B4 [P1/bug] crop/改画幅后 overlay 坐标基不一致：预览按整帧、导出按裁剪后画面；frame/progress/pip 尺寸按原始 baseW 渲染**（✓ 2026-07-13 做**短期诚实角标**：preview.ts 在「有 overlay 且存在 crop 或 outW/outH」时置 exact=false，挂「近似预览·导出更准」角标——消除静默失真（严重度主因，用户此前毫不知情）。精确门控：纯 crop 无叠加时预览内容一致，不过度告警。typecheck+UI 构建+29 测试全绿。**中期坐标换算拆为 B4b 独立跟踪**）
   - 位置：`src/ui/services/videoEdit/compile.ts:469-471,335-336,391`、`preview.ts:51-60`（inexact 列表不含 crop）、`mediaOverlay.ts:87-119`
 
-- [ ] **B4b [P1/bug]（B4 拆出·中期）crop/改画幅后 overlay 坐标真实换算，让导出与预览对齐（而非仅角标提示）**
+- [x] **B4b [P1/bug]（B4 拆出·中期）crop/改画幅后 overlay 坐标真实换算，让导出与预览对齐（而非仅角标提示）**（✓ 2026-07-16 前置决策已由现状敲定：预览侧 crop 用 `clip-path: inset()` = **整帧+遮罩**，OverlayLayer 是 `<video>` 的兄弟节点、不随 clip 裁剪、按整帧归一坐标定位——故保持整帧预览、编译期换算。compile.ts 新增 `remapCropRect`：把内容锚定 overlay 的原始帧归一坐标换算到裁剪帧（x'=(x-crop.x)/crop.w、y'=(y-crop.y)/crop.h、w'/h' 同理），applyOverlays 的 xExpr/yExpr 与 mosaic 的 crop 表达式都过换算。关键洞察：overlay PNG 盒宽本就按 `rect.w*baseW` 出**绝对像素**（mediaOverlay.ts:44），故位置换算后 overlay 的绝对内容坐标+尺寸都与预览一致（原先按裁剪帧归一漂到别处）。frame 描边贴合输出边框、非内容锚定（预览按 inset 整帧渲染）——单独排除不换算。preview.ts 相应收回角标：纯 crop（无 frame、无画幅适配）现判 exact=true，仅 frame+crop 或 outW/outH letterbox 仍挂「近似预览·导出更准」。验证：新增 `crop-overlay-text-remap`（断言 `main_w*0.6000`/`main_h*0.2500` 出现、原始 `main_w*0.5000`/`main_h*0.3000` 不出现）与 `crop-overlay-mosaic-remap`（断言换算后 `iw*0.7000`/`ih*0.2500`/`iw*0.6000`/`ih*0.5000`，原始 `iw*0.5500`/`iw*0.3000` 不出现）两条 recipe；快照 diff 确认仅新增 2 键、存量 33 条零变化。typecheck+35 recipe+全套件+UI 构建全绿）
   - 位置：同 B4
-  - 前置决策：预览侧 crop 是「整帧+遮罩」还是「只显示裁剪帧」？定了才能决定换算方向。若保持整帧预览：编译时把 overlay 坐标从原始帧归一换算到裁剪后帧（x'=(x-crop.x)/crop.w、y'=(y-crop.y)/crop.h），frame/progress/pip 画布尺寸改用裁剪/适配后输出宽高。
-  - 验证：加 crop+text、crop+frame 两条 recipe 断言换算后的 overlay x 表达式；换算生效后可回收 B4 的 exact=false（预览与导出一致则不再需要角标）。
 
 - [x] **B5 [P1/bug] 亮度预览 CSS 乘法 vs 导出 eq 加法，语义不同却未标 exact=false（计划 T3 点名项）**（✓ 2026-07-13 preview.ts inexact 条件补 `color.brightness`：只调亮度时也置 exact=false 挂角标（b=0 不告警）。与 B4 同策略选诚实角标——「改导出为乘法语义（curves/colorlevels）」需真跑 ffmpeg 视觉验证且改变所有存量用户出图，风险大，未取（角标已消除『声称精确』的失真主因）。typecheck+UI 构建+29 测试全绿）
   - 位置：`src/ui/services/videoEdit/preview.ts:39,44`、`compile.ts:302`

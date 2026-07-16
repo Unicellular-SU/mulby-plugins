@@ -75,9 +75,11 @@ export function stackToPreview(stack: EditStack | null): PreviewModel {
       return { id: o.id, sub: p.sub, left: p.rect.x, top: p.rect.y, width: p.rect.w, height: p.rect.h, text: p.text, style: p.style, range: p.range, cues: p.cues }
     })
   if (overlays.some((o) => o.sub === 'mosaic' || o.sub === 'pip' || o.sub === 'progress' || o.sub === 'timecode')) exact = false
-  // crop / 画幅缩放会改变 overlay 的坐标基（导出按裁剪/适配后画面定位，预览按整帧）与 frame/progress/pip 的尺寸基。
-  // 有叠加时导出位置与预览会漂移——如实置 exact=false 挂「近似预览·导出更准」角标（纯 crop 无叠加则内容一致，不告警）。
-  if (overlayOps.length && (tf?.crop || (tf?.outW && tf?.outH))) exact = false
+  // crop 后内容锚定 overlay 的坐标基已在编译期换算（B4b：x'=(x-crop.x)/crop.w，绝对位置+尺寸都与「整帧+clip」预览一致），
+  // 故纯 crop 不再告警。仍近似的两种：① frame 描边贴合输出边框、预览按 inset 整帧渲染、未随 crop 换算；
+  // ② 画幅适配(outW/outH)的 letterbox/cover 预览不表现几何。命中其一才挂「近似预览·导出更准」角标。
+  const hasFrame = overlayOps.some((o) => (o.params as OverlayParams).sub === 'frame')
+  if (overlayOps.length && ((tf?.outW && tf?.outH) || (tf?.crop && hasFrame))) exact = false
 
   // 裁切 → 保留段
   const trimP = enabled.find((o) => o.kind === 'trim')?.params as TrimParams | undefined

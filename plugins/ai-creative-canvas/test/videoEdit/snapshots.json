@@ -1168,5 +1168,69 @@
     "cleanup": [
       "/test/out/studio.mp4"
     ]
+  },
+  "crop-overlay-text-remap": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-i",
+          "/test/fixtures/overlay.png",
+          "-filter_complex",
+          "[0:v]crop=trunc(iw*0.5000/2)*2:trunc(ih*0.8000/2)*2:trunc(iw*0.2000):trunc(ih*0.1000),setsar=1[v0];[v0][1:v]overlay=main_w*0.6000:main_h*0.2500[v1];[v1]format=yuv420p[v2]",
+          "-map",
+          "[v2]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
+  "crop-overlay-mosaic-remap": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-filter_complex",
+          "[0:v]crop=trunc(iw*0.5000/2)*2:trunc(ih*0.8000/2)*2:trunc(iw*0.2000):trunc(ih*0.1000),setsar=1[v0];[v0]split=2[v1][v2];[v2]crop=w='iw*0.6000':h='ih*0.5000':x='iw*0.7000':y='ih*0.2500',scale='iw/14':'ih/14':flags=neighbor,scale='iw*14':'ih*14':flags=neighbor[fg3];[v1][fg3]overlay=main_w*0.7000:main_h*0.2500[v4];[v4]format=yuv420p[v5]",
+          "-map",
+          "[v5]",
+          "-an",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      }
+    ],
+    "cleanup": []
   }
 }

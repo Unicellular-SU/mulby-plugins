@@ -366,19 +366,41 @@ function applyColor(g: Graph, p: ColorParams, fb: Set<string>): void {
   }
 }
 
-function applyOverlays(g: Graph, ops: EditOp[], ctx: CompileCtx, baseW: number, outDur: number, tm: TimeMap): void {
+// crop 后 overlay 坐标换算（B4b）：用户在「整帧 + clip-path」预览上按原始帧归一坐标定位/画框 overlay，
+// 但导出时 crop 先执行、overlay 落在裁剪后帧（main_w/iw = 裁剪宽）。把原始帧归一坐标换算到裁剪帧归一坐标：
+// x'=(x-crop.x)/crop.w、y'=(y-crop.y)/crop.h、w'=w/crop.w、h'=h/crop.h。因 overlay PNG 盒宽仍按 rect.w*baseW
+// 出绝对像素（见 mediaOverlay），位置换算后 overlay 的绝对内容坐标与尺寸都与预览一致（原先按裁剪帧归一漂移到别处）。
+// frame 描边贴合输出边框、非内容锚定（预览按 inset 整帧渲染），单独排除不换算。无 crop 时恒等。
+function remapCropRect(
+  r: { x: number; y: number; w: number; h: number },
+  crop?: { x: number; y: number; w: number; h: number }
+): { x: number; y: number; w: number; h: number } {
+  if (!crop || crop.w <= 0 || crop.h <= 0) return r
+  return { x: (r.x - crop.x) / crop.w, y: (r.y - crop.y) / crop.h, w: r.w / crop.w, h: r.h / crop.h }
+}
+
+function applyOverlays(
+  g: Graph,
+  ops: EditOp[],
+  ctx: CompileCtx,
+  baseW: number,
+  outDur: number,
+  tm: TimeMap,
+  crop?: { x: number; y: number; w: number; h: number }
+): void {
   for (const op of ops) {
     if (op.kind !== 'overlay') continue
     const p = op.params as OverlayParams
     const en = tm.enable(p.range) // 源时间窗 → 输出时间基 enable
-    const xExpr = `main_w*${p.rect.x.toFixed(4)}`
-    const yExpr = `main_h*${p.rect.y.toFixed(4)}`
+    const rr = p.sub === 'frame' ? p.rect : remapCropRect(p.rect, crop) // crop 后内容锚定 overlay 换算坐标基（B4b）
+    const xExpr = `main_w*${rr.x.toFixed(4)}`
+    const yExpr = `main_h*${rr.y.toFixed(4)}`
     if (p.sub === 'mosaic') {
       // 局部打码（split 去重 → crop → 模糊/像素化 → overlay 回原位）
       const [base, src] = g.splitV()
       const fg = g.freshLabel('fg')
       const out = g.freshLabel('v')
-      const cr = `crop=w='iw*${p.rect.w.toFixed(4)}':h='ih*${p.rect.h.toFixed(4)}':x='iw*${p.rect.x.toFixed(4)}':y='ih*${p.rect.y.toFixed(4)}'`
+      const cr = `crop=w='iw*${rr.w.toFixed(4)}':h='ih*${rr.h.toFixed(4)}':x='iw*${rr.x.toFixed(4)}':y='ih*${rr.y.toFixed(4)}'`
       const eff =
         p.blurKind === 'blur'
           ? `boxblur=${Math.round(p.pixelSize || 12)}:2`
@@ -512,7 +534,9 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   if (speed?.motionTrail && speed.motionTrail >= 2) applyMotionTrail(g, speed.motionTrail, fb)
   if (single.transform) applyTransform(g, single.transform.params as TransformParams, fb)
   if (single.color) applyColor(g, single.color.params as ColorParams, fb)
-  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW, outDuration, tm)
+  // crop 与 overlay 同栈时把 crop 传入：编译期换算 overlay 坐标基，导出与整帧预览对齐（B4b）
+  const cropRect = (single.transform?.params as TransformParams | undefined)?.crop
+  if (overlays.length) applyOverlays(g, overlays, ctx, stack.baseW, outDuration, tm, cropRect)
   // export 画幅（若未在 transform 指定）
   if (exp.outW && exp.outH) applyFit(g, exp.outW, exp.outH, exp.fit || 'contain')
 

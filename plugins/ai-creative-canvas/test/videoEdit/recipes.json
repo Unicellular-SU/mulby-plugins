@@ -708,5 +708,37 @@
     },
     "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
     "expect": { "outDuration": 2, "passCount": 2, "filterContains": ["overlay"], "argsContains": ["palettegen"] }
+  },
+  {
+    "id": "crop-overlay-text-remap",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "crop": { "x": 0.2, "y": 0.1, "w": 0.5, "h": 0.8 } } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.5, "y": 0.3, "w": 0.2, "h": 0.1 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 3, "filterContains": ["crop=", "main_w*0.6000", "main_h*0.2500"], "filterNotContains": ["main_w*0.5000", "main_h*0.3000"] }
+  },
+  {
+    "id": "crop-overlay-mosaic-remap",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1920,
+      "baseH": 1080,
+      "ops": [
+        { "id": "tf1", "kind": "transform", "enabled": true, "params": { "crop": { "x": 0.2, "y": 0.1, "w": 0.5, "h": 0.8 } } },
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "mosaic", "rect": { "x": 0.55, "y": 0.3, "w": 0.3, "h": 0.4 }, "blurKind": "pixel", "pixelSize": 14 } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }
+      ]
+    },
+    "ctx": { "hasAudio": false },
+    "expect": { "outDuration": 3, "filterContains": ["iw*0.7000", "ih*0.2500", "iw*0.6000", "ih*0.5000", "main_w*0.7000"], "filterNotContains": ["iw*0.5500", "iw*0.3000", "main_w*0.5500"] }
   }
 ]
