@@ -1,7 +1,26 @@
 import type { Card } from '../types'
-import { readAsArrayBuffer } from './media'
+import { readAsArrayBuffer, saveBytes } from './media'
 import { arrayBufferToBase64 } from '../util'
 import { listImageModels } from './models'
+
+// 生成卡片缩略图（sharp 缩到 maxW 宽、webp）：大图(如 4K)卡片渲染缩略图而非全分辨率原图，
+// 避免可见图片卡全量全分辨率解码占用数 GB 位图。已够小(宽≤maxW)则返回 null（不必缩）。
+export async function makeThumbnail(
+  projectId: string,
+  cardId: string,
+  localPath: string,
+  maxW = 640
+): Promise<{ path: string; url: string } | null> {
+  try {
+    const bytes = await readAsArrayBuffer(localPath)
+    const meta = await sharp(bytes).metadata()
+    if (!meta?.width || meta.width <= maxW) return null
+    const out: ArrayBuffer = await sharp(bytes).resize({ width: maxW, withoutEnlargement: true }).webp({ quality: 78 }).toBuffer()
+    return await saveBytes(projectId, `${cardId}_thumb`, out, 'image/webp')
+  } catch {
+    return null
+  }
+}
 
 function ai(): any {
   return (window as any).mulby.ai

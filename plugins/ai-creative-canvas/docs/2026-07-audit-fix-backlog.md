@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：48/65**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b，总数 +1
+**进度：49/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清；**批次 C/D 全清**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2
 
 ---
 
@@ -258,9 +258,12 @@
   - 位置：`src/ui/canvas/Minimap.tsx:24-33,43,60`
   - 修法：边界只用卡片包围盒（视口指示框裁剪到边缘），或对 minX/scale 量化取整减少依赖抖动。
 
-- [ ] **E5 [P2/optimization] 媒体卡无缩略图：可见图片卡全分辨率解码（100 张 4K ≈ 数 GB 位图），视频卡逐个挂 &lt;video&gt; 强制首帧解码**
-  - 位置：`CardView.tsx:367-373,68-77`；LOD 仅 >200 卡且 zoom<0.4 生效（`CanvasStage.tsx:65-66`）
-  - 修法：导入/生成完成时用 sharp/canvas 生成 ~2x 卡片尺寸缩略图存 meta.thumbUrl，卡片渲染 thumb、预览/编辑才用原图；视频卡默认渲染 poster（captureFrame 已有），点击播放才挂 video。
+- [x] **E5 [P2/optimization] 媒体卡无缩略图（图片部分）：可见图片卡全分辨率解码（100 张 4K ≈ 数 GB 位图）**（✓ 2026-07-16 mediaImage.ts 新增 makeThumbnail(sharp 缩到 640 宽 webp，已够小则返回 null)；CardView 懒生成：图片/素材卡首次渲染后台生成缩略图存 meta.thumb+thumbFor，此后渲染缩略图而非全分辨率原图（集中在 CardView 覆盖所有来源，虚拟化下仅可见卡触发、增量而非一次性）。图片改变时 thumbFor 失配→用全分辨率并重新生成；thumb 文件缺失(如跨机导入)→img onError 回退全分辨率。全分辨率仍供 Lightbox 预览与局部编辑。thumbGenerating Set 跨重渲去重。typecheck+UI 构建+全套件全绿）
+  - **视频部分拆为 E5b**：视频卡逐个挂 &lt;video&gt; 强制首帧解码——需 poster 截帧基础设施，风险更大，独立跟踪。
+
+- [ ] **E5b [P2/optimization]（E5 拆出）视频卡逐个挂 &lt;video&gt; 强制首帧解码**
+  - 位置：`CardView.tsx` VideoCardPlayer（onLoadedMetadata seek 0.1 强制解码首帧）
+  - 修法：默认渲染 poster 缩略图（captureFrame 首帧存 meta.poster），点击播放才挂 &lt;video&gt;；虚拟化下省去 N 个 video 元素 + N 次强制解码。
 
 - [ ] **E6 [P2/optimization] 视频任务在共享并发池内挂满整个轮询周期（默认 4 并发、poll 上限 600s），长视频饿死文/图队列**
   - 位置：`src/ui/services/generate.ts:117-264`

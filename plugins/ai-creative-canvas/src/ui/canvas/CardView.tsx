@@ -1,6 +1,7 @@
-import { memo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { captureFrame } from '../services/mediaOps'
+import { makeThumbnail } from '../services/mediaImage'
 import { invalidTargetIds } from '../services/connectionPolicy'
 import { useGraph } from '../store/graphStore'
 import { useInteraction } from '../store/interactionStore'
@@ -18,6 +19,9 @@ const KIND_ICON: Record<CardKind, typeof ImageIcon> = {
   group: Package,
   note: StickyNote
 }
+
+// 正在生成缩略图的卡（key = cardId|assetUrl）：跨重渲/重挂去重，避免同图重复缩略
+const thumbGenerating = new Set<string>()
 
 const NOTE_COLORS = ['#fef9c3', '#fde68a', '#fecaca', '#bbf7d0', '#bfdbfe', '#e9d5ff', '#ffffff']
 
@@ -137,6 +141,31 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     const newH = Math.max(90, Math.min(620, Math.round(card.w * (h / w))))
     updateCard(card.id, { h: newH, meta: { ...card.meta, fittedFor: card.assetUrl } })
   }
+
+  // 懒生成缩略图：图片/素材卡首次渲染时后台缩到 640 宽存 meta.thumb，此后卡片渲染缩略图而非全分辨率原图。
+  // 集中在此覆盖所有来源（生成/导入/工具产出）；全分辨率仍供 Lightbox 预览与局部编辑（读 assetUrl/assetLocalPath）。
+  const metaAny = card.meta as Record<string, unknown> | undefined
+  const thumbUrl = metaAny?.thumbFor === card.assetUrl ? (metaAny?.thumb as string | undefined) : undefined
+  const isImgKind = card.kind === 'image' || card.kind === 'source'
+  useEffect(() => {
+    if (!isImgKind || !card.assetLocalPath || !card.assetUrl) return
+    if (metaAny?.thumbFor === card.assetUrl && metaAny?.thumb) return // 已有对应缩略图
+    const key = `${card.id}|${card.assetUrl}`
+    if (thumbGenerating.has(key)) return
+    thumbGenerating.add(key)
+    let alive = true
+    void makeThumbnail(useGraph.getState().project.id, card.id, card.assetLocalPath)
+      .then((t) => {
+        thumbGenerating.delete(key)
+        if (!alive || !t) return
+        const cur = useGraph.getState().getCard(card.id)
+        if (!cur || cur.assetUrl !== card.assetUrl) return // 期间图片已变 → 作废
+        updateCard(card.id, { meta: { ...(cur.meta || {}), thumb: t.url, thumbFor: card.assetUrl } })
+      })
+      .catch(() => thumbGenerating.delete(key))
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isImgKind, card.assetLocalPath, card.assetUrl])
 
   // 从端口拖出连线：window 级监听，最稳，不依赖合成事件 / 指针捕获 / 事件委托
   const startConnect = (e: ReactPointerEvent) => {
@@ -377,9 +406,10 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         )}
         {isImg ? (
           <img
-            src={card.assetUrl as string}
+            src={thumbUrl || (card.assetUrl as string)}
             draggable={false}
             onLoad={(e) => fitAspect(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+            onError={(e) => { if (thumbUrl && e.currentTarget.src !== card.assetUrl) e.currentTarget.src = card.assetUrl as string }}
             className="w-full h-full object-cover"
             alt=""
           />
