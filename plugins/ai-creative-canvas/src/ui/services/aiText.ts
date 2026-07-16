@@ -2,8 +2,8 @@ import type { Board, Card } from '../types'
 import { resolveGenInputs } from './references'
 import { loadImageInput } from './media'
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 export async function generateText(

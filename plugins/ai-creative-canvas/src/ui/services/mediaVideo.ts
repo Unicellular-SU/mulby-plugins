@@ -1,15 +1,15 @@
 import { mediaPath, ensureSubDir, toFileUrl } from './media'
 import { base64ToArrayBuffer } from '../util'
 
-function ff(): any {
-  return (window as any).mulby.ffmpeg
+function ff() {
+  return window.mulby.ffmpeg
 }
 import { toast, toastSticky, toastUpdate, toastDismiss, type ToastType } from '../store/toastStore'
 function notify(msg: string, type?: string) {
   toast(msg, (type as ToastType) || 'info')
 }
 function readdir(dir: string): Promise<string[]> {
-  return (window as any).mulby.filesystem.readdir(dir) as Promise<string[]>
+  return window.mulby.filesystem.readdir(dir) as Promise<string[]>
 }
 
 export { toFileUrl }
@@ -115,7 +115,7 @@ export async function makeVideoPoster(projectId: string, cardId: string, localPa
     const { makeThumbnail } = await import('./mediaImage') // 动态导入避免与 mediaImage 的潜在环
     const thumb = await makeThumbnail(projectId, `${cardId}_poster`, frame, 640)
     if (thumb) {
-      try { await (window as any).mulby?.filesystem?.unlink(frame) } catch { /* ignore */ }
+      try { await window.mulby?.filesystem?.unlink(frame) } catch { /* ignore */ }
       return thumb
     }
     return { path: frame, url: toFileUrl(frame) } // 帧本身已够小，直接用
@@ -313,9 +313,9 @@ export async function probeResolution(
     if (signal?.aborted) return undefined
     framePath = await frameAt(projectId, localPath, 0)
     if (signal?.aborted) return undefined
-    const fsAny = (window as any).mulby?.filesystem
+    const fsAny = window.mulby?.filesystem
     const b64 = (await fsAny.readFile(framePath, 'base64')) as string
-    const meta = await (window as any).mulby.sharp(base64ToArrayBuffer(b64)).metadata()
+    const meta = await window.mulby.sharp(base64ToArrayBuffer(b64)).metadata()
     const w = Number(meta?.width) || 0
     const h = Number(meta?.height) || 0
     return w > 0 && h > 0 ? { width: w, height: h } : undefined
@@ -324,7 +324,7 @@ export async function probeResolution(
   } finally {
     if (framePath) {
       try {
-        await (window as any).mulby?.filesystem?.unlink(framePath)
+        await window.mulby?.filesystem?.unlink(framePath)
       } catch {
         /* ignore */
       }

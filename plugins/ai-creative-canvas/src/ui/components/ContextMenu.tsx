@@ -103,7 +103,7 @@ export function ContextMenu() {
     applyPos(up)
   }
   const exportCard = async (c: Card) => {
-    const m = (window as any).mulby
+    const m = window.mulby
     if (!m?.dialog || !c.assetLocalPath) return
     const ext = c.assetLocalPath.split('.').pop() || 'png'
     try {
@@ -118,7 +118,7 @@ export function ContextMenu() {
   }
   // 批量导出：选一次目录，把多选卡片的媒体逐个 copy 过去（文件名 = 标题_序号.ext，去文件系统非法字符）
   const exportMany = async (cs: Card[]) => {
-    const m = (window as any).mulby
+    const m = window.mulby
     if (!m?.dialog) return
     const withMedia = cs.filter((c) => c.assetLocalPath)
     if (!withMedia.length) return

@@ -133,7 +133,7 @@ export function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; pla
         <Toggle label="反相 negate" checked={!!p.invert} onChange={(v) => set({ invert: v })} />
         <Row label="LUT">
           <button onClick={async () => {
-            const m = (window as any).mulby
+            const m = window.mulby
             try {
               const paths = await m?.dialog?.showOpenDialog({ title: '选择 3D LUT', filters: [{ name: 'LUT', extensions: ['cube', '3dl'] }], properties: ['openFile'] })
               if (paths?.[0]) set({ lutPath: paths[0] })
@@ -254,11 +254,11 @@ function SubtitlePanel({ op, params, dur, playhead }: { op: EditOp; params: Over
     setCues([...cues, { start, end: Math.min(start + 2, dur), text: '字幕内容' }].sort((a, b) => a.start - b.start))
   }
   const importSrt = async () => {
-    const m = (window as any).mulby
+    const m = window.mulby
     try {
       const paths = await m?.dialog?.showOpenDialog({ title: '导入 .srt 字幕', filters: [{ name: '字幕', extensions: ['srt', 'vtt', 'txt'] }], properties: ['openFile'] })
       if (!paths?.[0]) return
-      const b64 = await m.filesystem.readFile(paths[0], 'base64')
+      const b64 = (await m.filesystem.readFile(paths[0], 'base64')) as string
       const buf = base64ToArrayBuffer(b64)
       let text = new TextDecoder('utf-8').decode(buf)
       if (text.includes('�')) { try { text = new TextDecoder('gbk').decode(buf) } catch { /* keep utf-8 */ } }

@@ -59,7 +59,7 @@ interface AttachmentLike {
 export async function importAttachments(atts: AttachmentLike[], world: { x: number; y: number }): Promise<void> {
   const g = useGraph.getState()
   const projectId = g.project.id
-  const fs = (window as any).mulby?.filesystem
+  const fs = window.mulby?.filesystem
   let i = 0
   for (const a of atts) {
     const pos = { x: world.x + i * 30, y: world.y + i * 30 }

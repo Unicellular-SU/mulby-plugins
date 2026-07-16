@@ -28,8 +28,8 @@ function isCurrentRun(cardId: string, runId: number): boolean {
   return runIds.get(cardId) === runId
 }
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 // 完成提示音（WebAudio 短促双衰减 blip，无需打包音频文件）
@@ -68,7 +68,7 @@ function notifyDone(_cardId: string) {
   playDoneSound()
   if (typeof document !== 'undefined' && document.hidden) {
     try {
-      ;(window as any).mulby?.notification?.show?.('生成完成', 'success')
+      ;window.mulby?.notification?.show?.('生成完成', 'success')
     } catch {
       /* ignore */
     }
@@ -326,7 +326,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
     const projectId = useGraph.getState().project.id
     // 文件名必须含全局唯一 cardId——否则后端按标题落盘，多个默认标题（如"AI 视频"）会写到同一文件互相覆盖
     const title = useGraph.getState().getCard(cardId)?.title || 'video'
-    const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })
+    const r = (await window.mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })) as { data?: { path?: string; mime?: string; error?: string } }
     const path = r?.data?.path
     if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
     const mDone = useGraph.getState().getCard(cardId)?.meta || {}
@@ -370,7 +370,7 @@ async function resumeVideoCard(cardId: string, taskId: string, providerId: strin
     const { url } = await resumeVideoJob(cfg, key, taskId, (p) => useGraph.getState().updateCard(cardId, { progress: p }), vctrl.signal)
     const projectId = useGraph.getState().project.id
     const title = useGraph.getState().getCard(cardId)?.title || 'video'
-    const r = await (window as any).mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })
+    const r = (await window.mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })) as { data?: { path?: string; mime?: string; error?: string } }
     const path = r?.data?.path
     if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
     const mDone = useGraph.getState().getCard(cardId)?.meta || {}

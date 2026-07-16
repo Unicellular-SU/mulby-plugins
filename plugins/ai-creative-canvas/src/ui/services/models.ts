@@ -1,5 +1,5 @@
-function ai(): any {
-  return (window as any).mulby?.ai
+function ai() {
+  return window.mulby?.ai
 }
 
 export interface ModelOption {

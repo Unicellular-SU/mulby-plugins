@@ -32,7 +32,7 @@ import type { ProjectDoc } from './types'
 export default function App() {
   // 加载工程（多工程注册表 + 旧单工程自动迁移 + 恢复快照询问）+ 主题
   useEffect(() => {
-    const mulby = (window as any).mulby
+    const mulby = window.mulby
 
     void useProject.getState().init()
     void useProviders.getState().load()

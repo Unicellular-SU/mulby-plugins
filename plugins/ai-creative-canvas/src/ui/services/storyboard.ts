@@ -1,8 +1,8 @@
 import { useGraph } from '../store/graphStore'
 import type { Board, Shot } from '../types'
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 import { toast, type ToastType } from '../store/toastStore'
 function notify(msg: string, type?: string) {

@@ -22,11 +22,11 @@ export async function makeThumbnail(
   }
 }
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 function sharp(input: any): any {
-  return (window as any).mulby.sharp(input)
+  return window.mulby.sharp(input)
 }
 
 export interface ImageResult {
@@ -114,7 +114,7 @@ export async function outpaintImage(card: Card, ratio = 0.25, prompt?: string): 
 // 通用：上传后用提示词重绘（放大 / 抠像 等）
 export async function editWithPrompt(card: Card, prompt: string): Promise<ImageResult> {
   const bytes = await getImageBytes(card)
-  const att = await ai().attachments.upload({ buffer: bytes.buffer, mimeType: card.mime || 'image/png', purpose: 'image' })
+  const att = await ai().attachments.upload({ buffer: bytes.buffer as ArrayBuffer, mimeType: card.mime || 'image/png', purpose: 'image' })
   const model = await resolveModel(card)
   const res = await ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt })
   if (!res.images?.length) throw new Error('未返回结果')

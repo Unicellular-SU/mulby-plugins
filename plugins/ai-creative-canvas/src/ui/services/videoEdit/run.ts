@@ -8,8 +8,8 @@ import { compileStack, stackOutDuration, type CompileCtx, type CompileOpts } fro
 import { stackIsNoop, type EditStack, type ExportParams } from './types'
 import { toast } from '../../store/toastStore'
 
-function fs(): any {
-  return (window as any).mulby?.filesystem
+function fs() {
+  return window.mulby?.filesystem
 }
 
 // 无编辑 op、且导出也不做任何变换（无缩放/帧率/淡入淡出）、且导出格式与源容器一致 →

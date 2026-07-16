@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：55/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F3 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F4-F13 技术债/文档/配置）+ B12 回填
+**进度：56/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F4 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F5-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -276,8 +276,8 @@
 - [x] **F3 [debt] exportFile RPC 是死代码，却暴露「任意绝对路径+任意内容」写盘接口——直接删除**（✓ 2026-07-16 全仓 grep（含字符串式 host.call 调用名）确认 exportFile 零消费者，UI 导出实走 saveLocal.ts 的 dialog+copy。删除 main.ts rpc 对象里的 exportFile handler（连同过期注释），同步修正前一方法尾逗号。移除后宿主不再暴露「任意绝对路径 + 任意内容 writeFile」的攻击面。typecheck+build:backend+5 套件全绿）
   - 位置：`src/main.ts`（UI 导出实际走 saveLocal.ts 的 dialog+copy）
 
-- [ ] **F4 [debt] UI 侧约 20 个文件用 (window as any).mulby 绕过 1846 行 d.ts 类型：typecheck 对宿主 API 调用面形同虚设**
-  - 位置：`src/ui/hooks/useMulby.ts:10`、`media.ts:4-9`、`mediaVideo.ts:4`、`engine.ts:6` 等
+- [x] **F4 [debt] UI 侧约 20 个文件用 (window as any).mulby 绕过 1846 行 d.ts 类型：typecheck 对宿主 API 调用面形同虚设**（✓ 2026-07-16 d.ts 本就有 ambient `interface Window { mulby: MulbyAPI }`，`(window as any)` 白白丢弃它。全仓 26 文件 41 处 `(window as any).mulby` → `window.mulby`（运行时同一对象访问、零行为改动），并去掉 ai/ff/fs/sys/http/host/storage 等 ~17 个 helper 的 `: any` 返回（改由 window.mulby.X 推断出 MulbyAi/MulbyFilesystem 等具体类型）。typecheck 一次性暴露 24 处真实调用面不匹配、全部按精确类型修复（**非 as any**）：host.call 的 `data: unknown` 在 generate.ts/engine.ts 各站点按 RPC 返回形状 `{ data?: {...} }` 收窄；filesystem.readFile 的 `string|ArrayBuffer` 按 base64 收 string；attachments.upload 的 buffer `ArrayBufferLike`→ArrayBuffer；images.generateStream 的 genReq 补精确形状；mediaPano modelId 经上游 guard 补非空断言；providerStore storage.get 的 unknown 按存储形状收窄。至此宿主 API 调用面纳入 typecheck。typecheck+build:ui+build:backend+5 套件全绿。注：useMulby 无消费者(死代码)但已随之类型化，未删（非本项范围）。）
+  - 位置：`src/ui/services/*`、`src/ui/store/*`、`src/ui/components/*`（26 文件）
   - 修法：d.ts 已声明 Window.mulby——useMulby 返回 `MulbyAPI | null`，各 helper 去掉 `: any`，一次性改动后跑 typecheck 清理暴露的问题。
 
 - [ ] **F5 [debt] manifest 声明 clipboard 权限但全代码零使用（权限面板向用户展示用不到的能力）**

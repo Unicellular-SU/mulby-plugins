@@ -1,11 +1,11 @@
 import { base64ToArrayBuffer } from '../util'
 import { PLUGIN_ID } from './persistence'
 
-function fs(): any {
-  return (window as any).mulby?.filesystem
+function fs() {
+  return window.mulby?.filesystem
 }
-function sys(): any {
-  return (window as any).mulby?.system
+function sys() {
+  return window.mulby?.system
 }
 
 // Windows: C:\a\b → file:///C:/a/b ; *nix: /a/b → file:///a/b
@@ -44,7 +44,7 @@ function stamp(): string {
 // 调用方需先确认无其他工程引用该目录（duplicateProject 的副本与原工程共享媒体文件路径）。
 export async function removeProjectMediaOnDisk(projectId: string): Promise<void> {
   try {
-    await (window as any).mulby?.host?.call(PLUGIN_ID, 'removeProjectMedia', { projectId })
+    await window.mulby?.host?.call(PLUGIN_ID, 'removeProjectMedia', { projectId })
   } catch {
     /* best-effort */
   }

@@ -4,8 +4,8 @@ import { saveBase64, loadImageInput } from './media'
 import { toast } from '../store/toastStore'
 import { aiLimiter } from './limiter'
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 
@@ -70,7 +70,7 @@ export async function repairEquirectSeam(cardId: string): Promise<void> {
       'Seamlessly inpaint only the transparent vertical strip to continue the equirectangular panorama; no visible seam.'
     const res = await aiLimiter(async () => {
       const att = await ai().attachments.upload({ buffer: dataUrlToBuffer(shifted.toDataURL('image/png')), mimeType: 'image/png', purpose: 'image' })
-      return ai().images.edit({ model: src.modelId, imageAttachmentId: att.attachmentId, prompt })
+      return ai().images.edit({ model: src.modelId!, imageAttachmentId: att.attachmentId, prompt })
     })
     const out = res?.images?.[0]
     if (!out) throw new Error('模型未返回结果')

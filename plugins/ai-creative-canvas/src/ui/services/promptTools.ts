@@ -2,8 +2,8 @@ import { useGraph } from '../store/graphStore'
 import { resolveGenInputs } from './references'
 import { loadImageInput } from './media'
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 // 提示词增强：LLM 改写得更具体、更有画面感

@@ -7,7 +7,7 @@ import { PLUGIN_ID } from '../services/persistence'
  */
 export function useMulby() {
   return useMemo(() => {
-    const mulby = (window as any).mulby
+    const mulby = window.mulby
     if (!mulby) return null
     const storage = {
       ...mulby.storage,

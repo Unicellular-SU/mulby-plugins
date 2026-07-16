@@ -325,7 +325,7 @@ function Inner() {
             onOk(obj)
           }, (err: any) => onErr?.(err))
         }
-        const attachStore = () => (window as any).mulby?.storage?.attachment
+        const attachStore = () => window.mulby?.storage?.attachment
         // 用户导入：解析 → 归一化 → GLB 字节存 attachment（据此随工程持久化）→ 落场景
         const importGLTF = (arrayBuffer: ArrayBuffer, fname: string) => {
           const gen = sceneGen // 导入异步期间若发生整体重建(undo)则丢弃本次结果
@@ -884,7 +884,7 @@ function Inner() {
       return false
     }
     try {
-      const ai = (window as any).mulby.ai
+      const ai = window.mulby.ai
       const useControl = !!controlModel
       const usePose = useControl && ctrlType === 'pose'
       if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {

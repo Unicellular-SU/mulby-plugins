@@ -2,11 +2,11 @@ import type { ProviderConfig } from './types'
 import { toFileUrl } from '../media'
 import { PLUGIN_ID } from '../persistence'
 
-function http(): any {
-  return (window as any).mulby.http
+function http() {
+  return window.mulby.http
 }
-function host(): any {
-  return (window as any).mulby.host
+function host() {
+  return window.mulby.host
 }
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -168,7 +168,7 @@ async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq
   if (req.imageDataUrl) {
     if (cfg.uploadUrl) {
       const b64 = req.imageDataUrl.includes(',') ? req.imageDataUrl.split(',')[1] : req.imageDataUrl
-      const r = await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })
+      const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })) as { data?: { url?: string; error?: string } }
       const u = r?.data?.url
       if (!u) throw new Error('图片上传失败：' + (r?.data?.error || '检查 uploadUrl'))
       imageUrl = u
@@ -180,7 +180,7 @@ async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq
   if (req.lastImageDataUrl) {
     if (cfg.uploadUrl) {
       const b64 = req.lastImageDataUrl.includes(',') ? req.lastImageDataUrl.split(',')[1] : req.lastImageDataUrl
-      const r = await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })
+      const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })) as { data?: { url?: string; error?: string } }
       lastImageUrl = r?.data?.url || undefined
     } else {
       lastImageUrl = req.lastImageDataUrl
@@ -232,13 +232,13 @@ async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, on
     } else {
       // 上传图床换公网 URL（后端 multipart）
       const b64 = req.imageDataUrl.includes(',') ? req.imageDataUrl.split(',')[1] : req.imageDataUrl
-      const r = await host().call(PLUGIN_ID, 'uploadImageToHost', {
+      const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', {
         uploadUrl: cfg.uploadUrl,
         apiKey: key,
         base64: b64,
         field: cfg.uploadField,
         urlPath: cfg.uploadUrlPath
-      })
+      })) as { data?: { url?: string; error?: string } }
       const url = r?.data?.url
       if (!url) throw new Error('图片上传失败：' + (r?.data?.error || '未配置 uploadUrl'))
       setPath(body, cfg.imageField, url)
@@ -300,7 +300,7 @@ export async function runTts(
   text: string,
   opts?: { voice?: string; speed?: number; format?: string; projectId?: string }
 ): Promise<{ path: string; url: string; mime: string }> {
-  const r = await host().call(PLUGIN_ID, 'synthSpeech', {
+  const r = (await host().call(PLUGIN_ID, 'synthSpeech', {
     baseURL: cfg.baseURL,
     apiKey: key,
     model: cfg.ttsModel || 'tts-1',
@@ -309,7 +309,7 @@ export async function runTts(
     speed: opts?.speed,
     format: opts?.format || cfg.ttsFormat || 'mp3',
     projectId: opts?.projectId // 落盘到 media/<projectId>，随工程删除清理
-  })
+  })) as { data?: { ok?: boolean; path: string; mime?: string; error?: string } }
   const d = r?.data
   if (!d?.ok) throw new Error(d?.error || '配音失败')
   return { path: d.path, url: toFileUrl(d.path), mime: d.mime || 'audio/mpeg' }

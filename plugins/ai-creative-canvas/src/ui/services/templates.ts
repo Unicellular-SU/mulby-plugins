@@ -4,7 +4,7 @@ import { BUILTIN_TEMPLATES, isBuiltinTemplate } from './builtinTemplates'
 
 const PLUGIN_ID = 'ai-creative-canvas'
 const KEY = 'templates:list'
-const storage = () => (window as any).mulby?.storage
+const storage = () => window.mulby?.storage
 
 // 内置演示模板置顶，后接用户保存的模板（空模板库不再是死路，新手可一键搭链）
 export async function listTemplates(): Promise<GroupTemplate[]> {

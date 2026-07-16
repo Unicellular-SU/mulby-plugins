@@ -2,8 +2,8 @@ import { useGraph } from '../store/graphStore'
 import { saveBase64, mimeToExt } from './media'
 import { aiLimiter } from './limiter'
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 function dataUrlToArrayBuffer(d: string): ArrayBuffer {

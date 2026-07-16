@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import type { ProviderConfig, ProviderKind } from '../services/providers/types'
 import { PLUGIN_ID } from '../services/persistence'
 
-function storage(): any {
-  return (window as any).mulby?.storage
+function storage() {
+  return window.mulby?.storage
 }
 
 interface ProviderState {
@@ -32,7 +32,7 @@ export const useProviders = create<ProviderState>((set, get) => ({
   load: async () => {
     if (get().loaded) return // 已加载则短路，避免重复 IO/订阅者重渲（续跑每次 loadIntoGraph 都会调用）
     try {
-      const data = await storage()?.get('providers', PLUGIN_ID)
+      const data = (await storage()?.get('providers', PLUGIN_ID)) as { providers?: unknown; activeVideoId?: string | null; activeAudioId?: string | null } | undefined
       if (data && typeof data === 'object') {
         set({
           providers: Array.isArray(data.providers) ? data.providers : [],

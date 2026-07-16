@@ -158,8 +158,8 @@ function b64(cv: HTMLCanvasElement): string {
   return cv.toDataURL('image/png').split(',')[1]
 }
 
-function ai(): any {
-  return (window as any).mulby.ai
+function ai() {
+  return window.mulby.ai
 }
 
 function dataUrlToBuffer(d: string): ArrayBuffer {

@@ -23,7 +23,7 @@ const kRecovery = (pid: string) => `proj:${pid}:recovery`
 const kRecBoard = (pid: string) => `proj:${pid}:rec:board:`
 
 function storage() {
-  return (window as any).mulby?.storage
+  return window.mulby?.storage
 }
 
 // 物理删除一个键：优先 remove（真正删键），回落旧 delete，再回落 set(null)（逻辑删除，键残留）

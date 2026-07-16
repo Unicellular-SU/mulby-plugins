@@ -4,7 +4,7 @@
 import { toast } from '../store/toastStore'
 
 export async function saveToLocal(localPath: string | null | undefined, suggestedName: string): Promise<boolean> {
-  const m = (window as any).mulby
+  const m = window.mulby
   if (!m?.dialog || !localPath) {
     toast('无可导出文件', 'error')
     return false

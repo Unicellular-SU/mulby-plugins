@@ -188,7 +188,7 @@ export function NodeEditor() {
   }
 
   const exportCard = async () => {
-    const m = (window as any).mulby
+    const m = window.mulby
     if (!m?.dialog || !card.assetLocalPath) return
     const ext = card.assetLocalPath.split('.').pop() || 'png'
     try {

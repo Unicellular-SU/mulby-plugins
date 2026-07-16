@@ -22,7 +22,7 @@ import { confirmDialog } from './dialogStore'
 import { toast } from './toastStore'
 
 const MEDIA_EXPORT_CAP = 200 * 1024 * 1024 // 含媒体导出的 base64 总量上限（~150MB 实际），超限拒绝以免撑爆内存
-const fsApi = () => (window as any).mulby?.filesystem
+const fsApi = () => window.mulby?.filesystem
 
 // 触发浏览器下载一段 JSON
 function downloadJson(filename: string, obj: unknown): void {
