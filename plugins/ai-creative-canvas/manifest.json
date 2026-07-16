@@ -2,7 +2,7 @@
   "id": "ai-creative-canvas",
   "name": "ai-creative-canvas",
   "displayName": "AI 创意画布",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "author": "mulby",
   "type": "ai",
   "description": "无限画布 AI 影像创作 + 媒体编辑工坊：自由画布上逐卡片生成图像/视频/文本/配音，内置裁剪·扩图·抠像·放大·宫格分镜·视频裁剪·抽帧·场景检测·倒放等媒体工具箱",

@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：58/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F6 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F7-F13 技术债/文档/配置）+ B12 回填
+**进度：59/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E 全清（含 E6）**；批次 F 进行中（F1-F7 完成）；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。剩余：批次 F（F8-F13 技术债/文档/配置）+ B12 回填
 
 ---
 
@@ -287,7 +287,7 @@
   - 位置：`manifest.json:35-36`；对照 `importMedia.ts:15-18`
   - 修法：files cmd 增补 ".gif",".aac",".opus"，img cmd 增补 ".gif"；或反向收敛 importMedia 格式表，两边单一事实源。
 
-- [ ] **F7 [debt] 版本号 0.1.0 历经 108 commit 从未 bump：商店更新检测（compareVersions>0）永远不推送更新**
+- [x] **F7 [debt] 版本号 0.1.0 历经 108 commit 从未 bump：商店更新检测（compareVersions>0）永远不推送更新**（✓ 2026-07-16 manifest.json + package.json 同步 0.1.0 → 0.3.0，商店 compareVersions>0 得以对存量 0.1.0 用户推送更新。全仓无其它 0.1.0 硬编码引用。**约定**：此后功能合入即同步 bump 两处 version。未加 CI 检查——仓库无 scripts/validate-plugin.js 且无可见 CI 配置，为一次 bump 新建 git-diff 校验脚本+CI 属过度工程，留作后续基建）
   - 位置：`manifest.json:5`、package.json
   - 修法：直接升 0.3.0（manifest 与 package.json 同步）；建立「功能合入即 bump」约定；可在 scripts/validate-plugin.js 加 CI 检查（插件目录有变更但 version 未变则告警）。
 
