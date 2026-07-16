@@ -5,7 +5,7 @@
 > 基线：commit `dd59c3c`；typecheck / 25 条 compile 快照 / 4 条引用测试 / 完整构建全绿。
 > 行号为审查时点快照，修复过程中会漂移——**动手前先用 grep 定位确认**。
 
-**进度：65/66**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A 全清；B1-B11 全清（含 B4b）；**批次 C/D/E/F 全清（F1-F13 完成）**；B12 部分完成（D 决策已定：删除，待回填测试）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。**唯一剩余：B12 测试矩阵回填**
+**进度：66/66 ✅ 全清**（☐ 待办 · ☑ 完成 · ☒ 决定不修 · ~ 部分完成）——批次 A/B/C/D/E/F 全部完成（含 B4b、E5b、E6、F1-F13、B12）；B4 拆出 B4b、E5 拆出 E5b，总数 +2。**本清单全部落地**；仅「不进本循环的大项」（附录另立项）与集成测试的 libwebp 环境缺失（非代码问题）除外。B12 集成脚本上线额外抓到并修复 3 个快照测不出的真实导出 bug（音频直通 map / 时间码卡死 / blur-pad 滤镜表达式）。
 
 ---
 
@@ -116,8 +116,8 @@
   - 位置：`src/ui/store/studioStore.ts:140-143`；触发点 `VideoStudioModal.tsx:103-104`（onPointerUp+onKeyUp 都挂 onCommit）
   - 修法：commitLive 先比较 stack 与 history[cursor]（或 liveDirty 标志），相同跳过；history 设上限（如 100）。补 store 级单测：updateOpLive×N+commitLive 后 undo 一步回到拖拽前（正是计划 WS1-T4 要求、至今缺失的测试）。
 
-- [~] **B12 [P1/incomplete] 测试矩阵补齐：多行缺失、快照曾锁定已知 bug、集成脚本只跑 25 条中的 1 条**（部分完成，D 依赖项待回填——不勾选）
-  - 位置：`test/videoEdit/recipes.json`、`run-export.mjs:32`
+- [x] **B12 [P1/incomplete] 测试矩阵补齐：多行缺失、快照曾锁定已知 bug、集成脚本只跑 25 条中的 1 条**（✓ 2026-07-16 D 决策落定后收尾：①kenBurns ②bitrate ③needsNormalize/baseRotation 三项**取消**——D3/D4/D5=删除，对应特性/死代码已删，无用例可补；④stackIsNoop 由 `noop-empty`+`all-ops-disabled` 覆盖；⑤补 `export-webm-overlay-text`/`export-webp-overlay-text`（gif/mp4+overlay 早已覆盖）。recipe 数 35→37。**集成脚本 run-export.mjs 从「只跑 1 条 noop」重写为：现场合成 fixtures（按 baseDuration 出短主素材+缓存、pip/bgm/各 overlay PNG/身份 LUT）→ 遍历全部 37 条 → 真跑 ffmpeg 每 pass 断言 exit=0 → ffprobe 校验含视频流+时长≈预期**；每 ffmpeg 加 90s 超时（卡死按失败上报）、传入 fallbacks、缺编码器(libwebp)优雅 skip 并打印。**该集成测试一上线即抓到快照测不出的 3 个真实导出 bug 并已修**：(a) 音频直通 `-map [0:a]` 方括号非法→改 `-map 0:a`（仅视频编辑+带音轨的导出此前必失败）；(b) 时间码 `-loop 1` 无限输入无 `-t` 收束致 ffmpeg 卡死→补 `-t outDuration`；(c) blur-pad 的 `boxblur=luma_radius='min(20,iw/40)'` 用了 boxblur 不认的 `iw`→改 `w`（模糊填充画幅适配导出此前整体失败）。三处均加 argsContains/filterNotContains 断言锁死。终态：集成 35 passed·2 skipped(libwebp 环境缺)·0 failed；编译 37 recipe + 全套件 + UI 构建全绿）
+  - 位置：`test/videoEdit/recipes.json`、`run-export.mjs`、`compile.ts`（3 处真实 bug 修复）
   - 缺口清单：①kenBurns+mirror（依赖 D3 决策）②bitrate ABR（依赖 D5 决策）③needsNormalize/baseRotation 断言（依赖 D4）④stackIsNoop=真导出原样（依赖 D5）⑤gif/webp/webm/mp4 各补一条**带 overlay** ⑥退化键 tmix/minterpolate/rgbashift/lut3d 各一条 fallback 用例；时间窗用例 expect 升级为具体 between(...) 数值（B1 已做则核对）。
   - **✓ 2026-07-14 已做（不依赖 D 的部分）**：⑥补齐 fallback recipe `fallback-minterpolate-skip`(smoothSlowmo→NotContains minterpolate)、`fallback-tmix-to-tblend`(motionTrail→tblend、NotContains tmix)、`fallback-lut3d-skip`(lutPath→NotContains lut3d)（rgbashift 在 B10、colortemperature/denoise/sidechain 在 export-webm-fallback 已覆盖）；⑤补 `gif-with-text-overlay`(passCount=2+overlay+palettegen)。时间窗数值断言 B1 已做。recipe 数 25→33。
   - **待回填（D 决策后）**：①kenBurns ②bitrate ③needsNormalize/baseRotation ④stackIsNoop 各自的用例；run-export.mjs 改为遍历全部 recipe（fixtures 按 README testsrc 现场合成 + 补 VFR 源）断言 exit=0 + ffprobe 时长/分辨率/流数。

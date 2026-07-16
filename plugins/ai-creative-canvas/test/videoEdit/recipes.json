@@ -9,7 +9,7 @@
       "ops": [{ "id": "exp", "kind": "export", "enabled": true, "params": { "format": "mp4", "crf": 23 } }]
     },
     "ctx": { "hasAudio": true },
-    "expect": { "outDuration": 10, "filterContains": ["format=yuv420p"] }
+    "expect": { "outDuration": 10, "filterContains": ["format=yuv420p"], "argsContains": ["-map 0:a"] }
   },
   {
     "id": "all-ops-disabled",
@@ -233,7 +233,7 @@
       ]
     },
     "ctx": { "hasAudio": false },
-    "expect": { "outDuration": 5, "filterContains": ["crop", "boxblur", "overlay"] }
+    "expect": { "outDuration": 5, "filterContains": ["crop", "boxblur=luma_radius='min(20,w/40)'", "overlay"], "filterNotContains": ["iw/40"] }
   },
   {
     "id": "transform-mirror-glitch-shake",
@@ -352,7 +352,7 @@
         "tc1": { "kind": "timecode", "path": "/test/fixtures/tc.png", "cellW": 48, "cellH": 24, "step": 1 }
       }
     },
-    "expect": { "outDuration": 6, "filterContains": ["scale=", "overlay"], "argsContains": ["-loop 1 -i /test/fixtures/tc.png"] }
+    "expect": { "outDuration": 6, "filterContains": ["scale=", "overlay"], "argsContains": ["-loop 1 -i /test/fixtures/tc.png", "-t 6.000"] }
   },
   {
     "id": "overlay-pip-missing-resolved",
@@ -740,5 +740,35 @@
     },
     "ctx": { "hasAudio": false },
     "expect": { "outDuration": 3, "filterContains": ["iw*0.7000", "ih*0.2500", "iw*0.6000", "ih*0.5000", "main_w*0.7000"], "filterNotContains": ["iw*0.5500", "iw*0.3000", "main_w*0.5500"] }
+  },
+  {
+    "id": "export-webm-overlay-text",
+    "stack": {
+      "version": 1,
+      "baseDuration": 3,
+      "baseW": 1280,
+      "baseH": 720,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webm", "crf": 30 } }
+      ]
+    },
+    "ctx": { "hasAudio": true, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 3, "passCount": 1, "filterContains": ["overlay"], "argsContains": ["libvpx-vp9"] }
+  },
+  {
+    "id": "export-webp-overlay-text",
+    "stack": {
+      "version": 1,
+      "baseDuration": 2,
+      "baseW": 640,
+      "baseH": 360,
+      "ops": [
+        { "id": "ov1", "kind": "overlay", "enabled": true, "params": { "sub": "text", "rect": { "x": 0.1, "y": 0.8, "w": 0.8, "h": 0.12 }, "text": "Hi", "anim": "none" } },
+        { "id": "exp", "kind": "export", "enabled": true, "params": { "format": "webp", "fps": 12, "outW": 480 } }
+      ]
+    },
+    "ctx": { "hasAudio": false, "overlayResolved": { "ov1": { "kind": "png", "path": "/test/fixtures/overlay.png" } } },
+    "expect": { "outDuration": 2, "passCount": 2, "filterContains": ["overlay"], "argsContains": ["libwebp"] }
   }
 ]

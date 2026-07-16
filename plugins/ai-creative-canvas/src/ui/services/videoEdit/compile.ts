@@ -324,7 +324,7 @@ function applyFit(g: Graph, W: number, H: number, fit: 'contain' | 'cover' | 'bl
     const fgs = g.freshLabel('fg')
     const out = g.freshLabel('v')
     g.raw(
-      `[${bg}]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=luma_radius='min(20,iw/40)':luma_power=2,setsar=1[${bgb}]`
+      `[${bg}]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=luma_radius='min(20,w/40)':luma_power=2,setsar=1[${bgb}]`
     )
     g.raw(`[${fg}]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[${fgs}]`)
     g.raw(`[${bgb}][${fgs}]overlay=(W-w)/2:(H-h)/2[${out}]`)
@@ -569,7 +569,10 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
     args.push('-i', inp.path)
   }
   args.push('-filter_complex', g.parts.join(';'), '-map', `[${g.v}]`)
-  if (g.a) args.push('-map', `[${g.a}]`)
+  // 音频直通（无任何音频处理）时 g.a 仍是原始输入流引用 `0:a`，须 `-map 0:a`（不加方括号）；
+  // 经音频滤镜后 g.a 是 filtergraph 标签（如 `ta0`/`mx`），才用 `-map [label]`。此前一律加括号，
+  // 导致「仅视频编辑 + 有音轨」的直通导出报 Invalid argument 打不开输出文件（集成测试 B12 抓到）。
+  if (g.a) args.push('-map', /^\d+:a$/.test(g.a) ? g.a : `[${g.a}]`)
   else args.push('-an')
   if (exp.fps) args.push('-r', String(exp.fps))
   if (pass1Ext === 'webm') {
@@ -580,8 +583,12 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
     if (g.a) args.push('-c:a', 'aac', '-b:a', '192k')
     args.push('-movflags', '+faststart')
   }
-  // 含配乐/旁白时把成片时长钉到视频长（amix=longest 不会让音频拖长成片）
-  if ((single.audio?.params as AudioParams | undefined)?.bgm?.path && outDuration > 0) {
+  // 把成片时长钉到 outDuration 的两种情形：
+  // ① 含配乐/旁白：amix=longest 不会让音频拖长成片；
+  // ② 带 `-loop 1` 无限输入（时间码精灵图）：该输入是无限流，overlay 虽以主流收束、但某些
+  //    filtergraph 结构下 ffmpeg 会一直等无限输入而永不结束——必须 `-t` 显式收束（B12 集成测试抓到卡死）。
+  const hasLoopInput = g.inputs.some((inp) => inp.pre?.includes('-loop'))
+  if (outDuration > 0 && (((single.audio?.params as AudioParams | undefined)?.bgm?.path) || hasLoopInput)) {
     args.push('-t', outDuration.toFixed(3))
   }
   args.push('-y', pass1Out)

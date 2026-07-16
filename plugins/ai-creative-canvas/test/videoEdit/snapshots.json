@@ -13,7 +13,7 @@
           "-map",
           "[v0]",
           "-map",
-          "[0:a]",
+          "0:a",
           "-c:v",
           "libx264",
           "-crf",
@@ -350,7 +350,7 @@
           "-i",
           "/test/fixtures/landscape.mp4",
           "-filter_complex",
-          "[0:v]crop=trunc(iw*0.8000/2)*2:trunc(ih*0.8000/2)*2:trunc(iw*0.1000):trunc(ih*0.1000),setsar=1[v0];[v0]split=2[v1][v2];[v1]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=luma_radius='min(20,iw/40)':luma_power=2,setsar=1[bg3];[v2]scale=1080:1920:force_original_aspect_ratio=decrease,setsar=1[fg4];[bg3][fg4]overlay=(W-w)/2:(H-h)/2[v5];[v5]format=yuv420p[v6]",
+          "[0:v]crop=trunc(iw*0.8000/2)*2:trunc(ih*0.8000/2)*2:trunc(iw*0.1000):trunc(ih*0.1000),setsar=1[v0];[v0]split=2[v1][v2];[v1]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=luma_radius='min(20,w/40)':luma_power=2,setsar=1[bg3];[v2]scale=1080:1920:force_original_aspect_ratio=decrease,setsar=1[fg4];[bg3][fg4]overlay=(W-w)/2:(H-h)/2[v5];[v5]format=yuv420p[v6]",
           "-map",
           "[v6]",
           "-an",
@@ -496,6 +496,8 @@
           "yuv420p",
           "-movflags",
           "+faststart",
+          "-t",
+          "6.000",
           "-y",
           "/test/out/studio.mp4"
         ]
@@ -702,7 +704,7 @@
           "-map",
           "[v0]",
           "-map",
-          "[0:a]",
+          "0:a",
           "-c:v",
           "libvpx-vp9",
           "-crf",
@@ -1232,5 +1234,91 @@
       }
     ],
     "cleanup": []
+  },
+  "export-webm-overlay-text": {
+    "passCount": 1,
+    "outDuration": 3,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.webm",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-i",
+          "/test/fixtures/overlay.png",
+          "-filter_complex",
+          "[0:v][1:v]overlay=main_w*0.1000:main_h*0.8000[v0];[v0]format=yuv420p[v1]",
+          "-map",
+          "[v1]",
+          "-map",
+          "0:a",
+          "-c:v",
+          "libvpx-vp9",
+          "-crf",
+          "30",
+          "-b:v",
+          "0",
+          "-c:a",
+          "libopus",
+          "-y",
+          "/test/out/studio.webm"
+        ]
+      }
+    ],
+    "cleanup": []
+  },
+  "export-webp-overlay-text": {
+    "passCount": 2,
+    "outDuration": 2,
+    "passes": [
+      {
+        "outPath": "/test/out/studio.mp4",
+        "args": [
+          "-i",
+          "/test/fixtures/landscape.mp4",
+          "-i",
+          "/test/fixtures/overlay.png",
+          "-filter_complex",
+          "[0:v][1:v]overlay=main_w*0.1000:main_h*0.8000[v0];[v0]format=yuv420p[v1]",
+          "-map",
+          "[v1]",
+          "-an",
+          "-r",
+          "12",
+          "-c:v",
+          "libx264",
+          "-crf",
+          "23",
+          "-preset",
+          "fast",
+          "-pix_fmt",
+          "yuv420p",
+          "-movflags",
+          "+faststart",
+          "-y",
+          "/test/out/studio.mp4"
+        ]
+      },
+      {
+        "outPath": "/test/out/studio.webp",
+        "args": [
+          "-i",
+          "/test/out/studio.mp4",
+          "-vf",
+          "fps=12,scale=480:-1:flags=lanczos",
+          "-loop",
+          "0",
+          "-c:v",
+          "libwebp",
+          "-q:v",
+          "75",
+          "-y",
+          "/test/out/studio.webp"
+        ]
+      }
+    ],
+    "cleanup": [
+      "/test/out/studio.mp4"
+    ]
   }
 }
