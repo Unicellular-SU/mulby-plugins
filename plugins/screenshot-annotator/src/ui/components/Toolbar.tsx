@@ -56,6 +56,8 @@ export interface ToolbarRange {
   max: number
   value: number
   onChange: (nextValue: number) => void
+  /** 一次拖动/按键调整结束（pointerup/keyup）时回调。 */
+  onCommit?: () => void
 }
 
 export interface ToolbarDragHandlers {
@@ -177,6 +179,8 @@ export default function Toolbar({
             type="range"
             value={clamp(range.value, range.min, range.max)}
             onChange={(event) => range.onChange(Number(event.target.value))}
+            onPointerUp={() => range.onCommit?.()}
+            onKeyUp={() => range.onCommit?.()}
           />
         </label>
 

@@ -8,7 +8,7 @@ import {
   normalizeRect,
   visualSizeToImageSize
 } from './geometry'
-import { getTextBoxWidth, getWrappedTextLines } from './textLayout'
+import { getTextAnnotationFont, getTextBoxWidth, getWrappedTextLines } from './textLayout'
 import type { Annotation, LoadedImage, Point, Rect, StepAnnotation, TextAnnotation } from './types'
 
 export function drawTaperedArrow(
@@ -165,7 +165,7 @@ export function drawTextAnnotation(context: CanvasRenderingContext2D, annotation
   const lineHeight = fontSize * 1.25
 
   context.save()
-  context.font = `700 ${fontSize}px "Segoe UI", "PingFang SC", sans-serif`
+  context.font = getTextAnnotationFont(fontSize)
   context.textBaseline = 'top'
 
   const paddingX = Math.max(8, fontSize * 0.28)

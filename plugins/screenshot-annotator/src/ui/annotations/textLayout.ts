@@ -1,9 +1,23 @@
-// 文字标注的度量与换行布局（从 App.tsx 搬移，保持原样）。
+// 文字标注的度量与换行布局（从 App.tsx 搬移；测量改为与绘制一致的真实字体度量）。
 
 import { TEXT_BOX_MIN_WIDTH } from './constants'
 import type { Rect, TextAnnotation } from './types'
 
-export function isWideTextCharacter(character: string) {
+// 与 drawTextAnnotation 完全一致的字体定义，保证「包围盒/命中区域」与「实际绘制」同源。
+export function getTextAnnotationFont(fontSize: number) {
+  return `700 ${fontSize}px "Segoe UI", "PingFang SC", sans-serif`
+}
+
+let sharedMeasureContext: CanvasRenderingContext2D | null = null
+
+function getSharedMeasureContext() {
+  if (!sharedMeasureContext) {
+    sharedMeasureContext = document.createElement('canvas').getContext('2d')
+  }
+  return sharedMeasureContext
+}
+
+function isWideTextCharacter(character: string) {
   const codePoint = character.codePointAt(0) ?? 0
   return (
     (codePoint >= 0x1100 && codePoint <= 0x11ff) ||
@@ -14,7 +28,7 @@ export function isWideTextCharacter(character: string) {
   )
 }
 
-export function estimateTextWidth(text: string, fontSize: number) {
+function estimateTextWidth(text: string, fontSize: number) {
   return Array.from(text).reduce((width, character) => {
     if (character === ' ') {
       return width + fontSize * 0.34
@@ -28,6 +42,17 @@ export function estimateTextWidth(text: string, fontSize: number) {
   }, 0)
 }
 
+/** 用与绘制一致的字体测量文字宽度；canvas 不可用时退回字符宽度估算。 */
+function measureTextWidth(text: string, fontSize: number) {
+  const context = getSharedMeasureContext()
+  if (!context) {
+    return estimateTextWidth(text, fontSize)
+  }
+
+  context.font = getTextAnnotationFont(fontSize)
+  return context.measureText(text).width
+}
+
 export function getTextBoxWidth(annotation: TextAnnotation) {
   const fontSize = Math.max(14, annotation.size)
 
@@ -37,7 +62,7 @@ export function getTextBoxWidth(annotation: TextAnnotation) {
 
   const paddingX = Math.max(8, fontSize * 0.28)
   const estimatedWidth = annotation.text.split(/\r?\n/).reduce((maxWidth, line) => {
-    return Math.max(maxWidth, estimateTextWidth(line, fontSize))
+    return Math.max(maxWidth, measureTextWidth(line, fontSize))
   }, 0)
 
   return Math.max(TEXT_BOX_MIN_WIDTH, fontSize * 4, estimatedWidth + paddingX * 2)
@@ -78,7 +103,7 @@ export function getWrappedTextLines(
   const paddingX = Math.max(8, fontSize * 0.28)
   const boxWidth = getTextBoxWidth(annotation)
   const maxLineWidth = Math.max(fontSize, boxWidth - paddingX * 2)
-  const measure = measureText ?? ((line: string) => estimateTextWidth(line, fontSize))
+  const measure = measureText ?? ((line: string) => measureTextWidth(line, fontSize))
   const lines = annotation.text.split(/\r?\n/).flatMap((paragraph) =>
     wrapTextParagraph(paragraph, maxLineWidth, measure)
   )

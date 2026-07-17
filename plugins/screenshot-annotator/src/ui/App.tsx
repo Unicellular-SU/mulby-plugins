@@ -94,6 +94,9 @@ export default function App() {
   const inlineTextEditRef = useRef<InlineTextEdit | null>(null)
   const inlineStepEditRef = useRef<InlineStepEdit | null>(null)
   const imageLoadTokenRef = useRef(0)
+  // 滑块连续拖动时标记当前撤销会话（值为标注 id），用于把一次拖动合并成一条撤销记录。
+  const sizeEditSessionRef = useRef<string | null>(null)
+  const annotationsPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [mode, setMode] = useState<AppMode>(getInitialMode)
   const [image, setImage] = useState<LoadedImage | null>(null)
@@ -364,6 +367,28 @@ export default function App() {
     [persistCurrentHistory]
   )
 
+  // 轻量持久化：只把已提交的标注写回历史索引，不重渲染 PNG（供防抖即存使用）。
+  const persistCurrentAnnotations = useCallback(async () => {
+    const historyItemId = activeHistoryItemIdRef.current
+    const currentImage = imageRef.current
+
+    if (!historyItemId || !currentImage) {
+      return
+    }
+
+    await updateHistoryItem(mulby, historyItemId, {
+      annotations: annotationsRef.current,
+      width: currentImage.width,
+      height: currentImage.height,
+      displaySize: getDisplaySize(currentImage),
+      capture: currentImage.capture,
+      imageMeta: {
+        mime: 'image/png',
+        scaleFactor: currentImage.scaleFactor
+      }
+    })
+  }, [mulby])
+
   const loadImageFromHistory = useCallback(
     async (historyItemId: string) => {
       const token = imageLoadTokenRef.current + 1
@@ -417,6 +442,10 @@ export default function App() {
   )
 
   const closeAnnotatorWindow = useCallback(async () => {
+    if (annotationsPersistTimerRef.current) {
+      clearTimeout(annotationsPersistTimerRef.current)
+      annotationsPersistTimerRef.current = null
+    }
     await persistCurrentHistoryQuietly()
     mulby.window.close()
   }, [mulby.window, persistCurrentHistoryQuietly])
@@ -595,20 +624,30 @@ export default function App() {
     selectedAnnotationId
   ])
 
+  // 标注变化后做一次轻量持久化（防抖）。窗口被异常关闭（宿主终止/崩溃）时，
+  // beforeunload 里的异步持久化来不及完成，这里用「提交后即存」代替它兜底。
   useEffect(() => {
-    if (mode !== 'annotate') {
+    if (mode !== 'annotate' || !activeHistoryItemIdRef.current) {
       return
     }
 
-    const onBeforeUnload = () => {
-      void persistCurrentHistoryQuietly()
+    if (annotationsPersistTimerRef.current) {
+      clearTimeout(annotationsPersistTimerRef.current)
     }
+    annotationsPersistTimerRef.current = setTimeout(() => {
+      annotationsPersistTimerRef.current = null
+      void persistCurrentAnnotations().catch((error) => {
+        console.warn('[screenshot-annotator] 保存标注历史失败:', error)
+      })
+    }, 800)
 
-    window.addEventListener('beforeunload', onBeforeUnload)
     return () => {
-      window.removeEventListener('beforeunload', onBeforeUnload)
+      if (annotationsPersistTimerRef.current) {
+        clearTimeout(annotationsPersistTimerRef.current)
+        annotationsPersistTimerRef.current = null
+      }
     }
-  }, [mode, persistCurrentHistoryQuietly])
+  }, [annotations, mode, persistCurrentAnnotations])
 
   useEffect(() => {
     const dispose = window.mulby?.onPluginInit?.((data: PluginInitData) => {
@@ -1629,7 +1668,7 @@ export default function App() {
   )
 
   const updateSelectedAnnotation = useCallback(
-    (patch: Partial<Pick<Annotation, 'color' | 'size'>>) => {
+    (patch: Partial<Pick<Annotation, 'color' | 'size'>>, options?: { coalesceSession?: boolean }) => {
       if (!selectedAnnotationId) {
         return
       }
@@ -1637,11 +1676,23 @@ export default function App() {
       const nextAnnotations = annotationsRef.current.map((annotation) => {
         return annotation.id === selectedAnnotationId ? ({ ...annotation, ...patch } as Annotation) : annotation
       })
-      replaceAnnotations(nextAnnotations, { recordHistory: true })
+
+      if (options?.coalesceSession && sizeEditSessionRef.current === selectedAnnotationId) {
+        // 同一次滑块拖动的后续 tick 不再产生新的撤销记录。
+        replaceAnnotations(nextAnnotations)
+      } else {
+        sizeEditSessionRef.current = options?.coalesceSession ? selectedAnnotationId : null
+        replaceAnnotations(nextAnnotations, { recordHistory: true })
+      }
       setStatus('已更新标注')
     },
     [replaceAnnotations, selectedAnnotationId]
   )
+
+  // 滑块一次拖动结束（pointerup/keyup）后收尾会话，下次拖动重新记一条撤销。
+  const clearSizeEditSession = useCallback(() => {
+    sizeEditSessionRef.current = null
+  }, [])
 
   const handleColorChange = useCallback(
     (nextColor: string) => {
@@ -1665,7 +1716,7 @@ export default function App() {
         onChange: (nextValue: number) => {
           setTextSize(nextValue)
           if (selectedAnnotation) {
-            updateSelectedAnnotation({ size: toImageSize(nextValue) })
+            updateSelectedAnnotation({ size: toImageSize(nextValue) }, { coalesceSession: true })
           }
         }
       }
@@ -1680,7 +1731,7 @@ export default function App() {
         onChange: (nextValue: number) => {
           setStepSize(nextValue)
           if (selectedAnnotation) {
-            updateSelectedAnnotation({ size: toImageSize(nextValue) })
+            updateSelectedAnnotation({ size: toImageSize(nextValue) }, { coalesceSession: true })
           }
         }
       }
@@ -1695,7 +1746,7 @@ export default function App() {
         onChange: (nextValue: number) => {
           setMosaicSize(nextValue)
           if (selectedAnnotation) {
-            updateSelectedAnnotation({ size: toImageSize(nextValue) })
+            updateSelectedAnnotation({ size: toImageSize(nextValue) }, { coalesceSession: true })
           }
         }
       }
@@ -1710,7 +1761,7 @@ export default function App() {
         onChange: (nextValue: number) => {
           setBlurSize(nextValue)
           if (selectedAnnotation) {
-            updateSelectedAnnotation({ size: toImageSize(nextValue) })
+            updateSelectedAnnotation({ size: toImageSize(nextValue) }, { coalesceSession: true })
           }
         }
       }
@@ -1724,7 +1775,7 @@ export default function App() {
       onChange: (nextValue: number) => {
         setStrokeSize(nextValue)
         if (selectedAnnotation) {
-          updateSelectedAnnotation({ size: toImageSize(nextValue) })
+          updateSelectedAnnotation({ size: toImageSize(nextValue) }, { coalesceSession: true })
         }
       }
     }
@@ -1740,6 +1791,11 @@ export default function App() {
     toVisualSize,
     updateSelectedAnnotation
   ])
+
+  const activeRangeWithCommit = useMemo(
+    () => ({ ...activeRange, onCommit: clearSizeEditSession }),
+    [activeRange, clearSizeEditSession]
+  )
 
   const hasSharp = Boolean(window.mulby?.sharp)
   const canEditImage = Boolean(image && hasSharp && !busy)
@@ -1860,7 +1916,7 @@ export default function App() {
           onSelectTool={handleSelectTool}
           effectiveColor={effectiveColor}
           onColorChange={handleColorChange}
-          range={activeRange}
+          range={activeRangeWithCommit}
           statusText={busy ?? status}
           onOpenHistory={() => void handleOpenHistory()}
           canUndo={undoStack.length > 0}
