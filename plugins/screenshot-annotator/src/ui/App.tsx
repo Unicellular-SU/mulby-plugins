@@ -441,12 +441,14 @@ export default function App() {
     [applyWindowBoundsForImage, mulby, replaceAnnotations, resetEditingState]
   )
 
-  const closeAnnotatorWindow = useCallback(async () => {
+  const closeAnnotatorWindow = useCallback(async (options?: { skipPersist?: boolean }) => {
     if (annotationsPersistTimerRef.current) {
       clearTimeout(annotationsPersistTimerRef.current)
       annotationsPersistTimerRef.current = null
     }
-    await persistCurrentHistoryQuietly()
+    if (!options?.skipPersist) {
+      await persistCurrentHistoryQuietly()
+    }
     mulby.window.close()
   }, [mulby.window, persistCurrentHistoryQuietly])
 
@@ -1412,12 +1414,15 @@ export default function App() {
       await persistCurrentHistoryQuietly({ finalDataUrl })
       setStatus('已复制')
       mulby.notification.show('已复制到剪贴板', 'success')
+      // 复制即完成本次标注使命：已持久化过，直接关窗。
+      await closeAnnotatorWindow({ skipPersist: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : '复制失败'
       setStatus(message)
       mulby.notification.show(message, 'error')
     }
   }, [
+    closeAnnotatorWindow,
     commitInlineStep,
     commitInlineText,
     image,
@@ -1463,12 +1468,15 @@ export default function App() {
       await persistCurrentHistoryQuietly({ finalDataUrl })
       setStatus('已保存')
       mulby.notification.show('已保存截图', 'success')
+      // 保存完毕即完成本次标注使命：已持久化过，直接关窗。
+      await closeAnnotatorWindow({ skipPersist: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : '保存失败'
       setStatus(message)
       mulby.notification.show(message, 'error')
     }
   }, [
+    closeAnnotatorWindow,
     commitInlineStep,
     commitInlineText,
     image,
