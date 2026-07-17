@@ -1538,6 +1538,86 @@ export default function App() {
     }
   }, [flushInlineEditorsForPersistence, mulby.notification, mulby.storage, mulby.window])
 
+  // ── 钉图 ───────────────────────────────────────────────────
+  // 把当前截图（含标注）交给独立的置顶贴图窗口（参考 screen-pin 插件），
+  // 交接方式与「问 AI」相同（pin-handoff-{id} 存储键）；钉图成功后关闭标注窗口。
+  const handlePin = useCallback(async () => {
+    const current = imageRef.current
+    if (!current) {
+      return
+    }
+    flushInlineEditorsForPersistence()
+    const dataUrl = exportPng(current, annotationsRef.current)
+    const handoffId = createId('pin')
+    const displaySize = getDisplaySize(current)
+
+    // 优先把贴图窗口贴回截图区域（大屏时留 24px 边距）；取不到区域则只约束尺寸，位置交给宿主。
+    let frame: { x?: number; y?: number; width: number; height: number }
+    const region = current.region
+    if (region) {
+      try {
+        const display = await mulby.screen.getDisplayMatching(region)
+        const workArea = display.workArea ?? display.bounds
+        const margin = 24
+        const scale = Math.min(
+          1,
+          (workArea.width - margin * 2) / displaySize.width,
+          (workArea.height - margin * 2) / displaySize.height
+        )
+        const width = Math.max(1, Math.round(displaySize.width * scale))
+        const height = Math.max(1, Math.round(displaySize.height * scale))
+        frame = {
+          x: Math.round(clamp(region.x, workArea.x, workArea.x + Math.max(0, workArea.width - width))),
+          y: Math.round(clamp(region.y, workArea.y, workArea.y + Math.max(0, workArea.height - height))),
+          width,
+          height
+        }
+      } catch {
+        frame = { width: displaySize.width, height: displaySize.height }
+      }
+    } else {
+      const maxWidth = Math.round((window.screen.availWidth || 1920) * 0.85)
+      const maxHeight = Math.round((window.screen.availHeight || 1080) * 0.85)
+      const scale = Math.min(1, maxWidth / displaySize.width, maxHeight / displaySize.height)
+      frame = {
+        width: Math.max(1, Math.round(displaySize.width * scale)),
+        height: Math.max(1, Math.round(displaySize.height * scale))
+      }
+    }
+
+    try {
+      await mulby.storage.set(`pin-handoff-${handoffId}`, { dataUrl, createdAt: Date.now() })
+      const pinWindow = await mulby.window.create(`/index.html?mode=pin&pinHandoff=${handoffId}`, {
+        ...frame,
+        minWidth: 80,
+        minHeight: 60,
+        title: '截图置顶',
+        resizable: true,
+        alwaysOnTop: true,
+        transparent: true,
+        type: 'borderless',
+        titleBar: false
+      })
+
+      if (!pinWindow) {
+        throw new Error('创建置顶窗口失败')
+      }
+
+      await persistCurrentHistoryQuietly({ finalDataUrl: dataUrl })
+      await closeAnnotatorWindow({ skipPersist: true })
+    } catch (error) {
+      mulby.notification.show(error instanceof Error ? error.message : '打开置顶窗口失败', 'error')
+    }
+  }, [
+    closeAnnotatorWindow,
+    flushInlineEditorsForPersistence,
+    mulby.notification,
+    mulby.screen,
+    mulby.storage,
+    mulby.window,
+    persistCurrentHistoryQuietly
+  ])
+
   const runSharpTransform = useCallback(
     async (
       busyLabel: string,
@@ -1946,7 +2026,9 @@ export default function App() {
           onEnhance={() => void applyEnhance()}
           aiDisabled={!image}
           exportDisabled={!image || Boolean(busy)}
+          pinDisabled={!image || Boolean(busy)}
           onOpenAi={() => void handleOpenAi()}
+          onPin={() => void handlePin()}
           onCopy={() => void handleCopy()}
           onSave={() => void handleSave()}
           onClose={() => void closeAnnotatorWindow()}

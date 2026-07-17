@@ -1438,3 +1438,59 @@ html.ai-window #root {
   color: #7dd3fc;
   text-decoration: underline;
 }
+
+/* ===== 钉图窗口（参考 screen-pin 插件） ===== */
+.pin-window-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.pin-window-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
+
+.pin-window-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* 半透明描边 + 轻微投影，让贴图在任意背景上都有边界感 */
+.pin-window-border {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 2px;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.pin-window-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--toolbar-bg);
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}

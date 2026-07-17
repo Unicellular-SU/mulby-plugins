@@ -4,6 +4,7 @@ import { RESIZE_EDGES, useFloatingWindow } from './hooks/useFloatingWindow'
 import AiPanel from './components/AiPanel'
 import type { VisionAiClient } from './services/aiVision'
 import { dataUrlToBase64, defaultPngFileName, ensurePngPath } from './utils/image'
+import { readLaunchQueryParam } from './utils/launch'
 
 const PLUGIN_ID = 'screenshot-annotator'
 const HEADER_HEIGHT = 46
@@ -12,16 +13,6 @@ const MIN_WINDOW_HEIGHT = 220
 interface HandoffSnapshot {
   annotated?: string
   original?: string
-}
-
-function readQueryParam(name: string): string | null {
-  const fromSearch = new URLSearchParams(window.location.search).get(name)
-  if (fromSearch) return fromSearch
-  const hashQuery = window.location.hash.indexOf('?')
-  if (hashQuery >= 0) {
-    return new URLSearchParams(window.location.hash.slice(hashQuery + 1)).get(name)
-  }
-  return null
 }
 
 /**
@@ -99,7 +90,7 @@ export default function AiView() {
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      const handoffId = readQueryParam('aiHandoff')
+      const handoffId = readLaunchQueryParam('aiHandoff')
       try {
         const [handoff, text, image] = await Promise.all([
           handoffId ? mulby.storage.get(`ai-handoff-${handoffId}`) : Promise.resolve(null),

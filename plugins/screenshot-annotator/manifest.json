@@ -5,7 +5,7 @@
   "author": "mulby",
   "type": "productivity",
   "displayName": "截图标注",
-  "description": "区域截图后在透明独立窗口中快速添加矩形、箭头和画笔标注，并复制或保存为 PNG；内置「问 AI」可对截图解释、解题、提取文字、翻译或 AI 修图。",
+  "description": "区域截图后在透明独立窗口中快速添加矩形、箭头和画笔标注，结果可复制、保存为 PNG 或钉在屏幕最上层；内置「问 AI」可对截图解释、解题、提取文字、翻译或 AI 修图。",
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",

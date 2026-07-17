@@ -62,3 +62,8 @@ export function parseLaunchMode(data?: Pick<PluginInitData, 'featureCode' | 'rou
 export function getInitialMode(): AppMode {
   return parseLaunchMode().mode
 }
+
+/** 读取单个启动参数（search 与 hash 两处兼容，hash 同名参数优先）。 */
+export function readLaunchQueryParam(name: string): string | null {
+  return collectLaunchParams().get(name)
+}

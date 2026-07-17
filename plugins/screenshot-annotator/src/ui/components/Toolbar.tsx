@@ -18,6 +18,7 @@ import {
   MousePointer2,
   MoveRight,
   Pencil,
+  Pin,
   Redo2,
   RotateCcw,
   RotateCw,
@@ -94,7 +95,9 @@ export interface ToolbarProps {
   onEnhance: () => void
   aiDisabled: boolean
   exportDisabled: boolean
+  pinDisabled: boolean
   onOpenAi: () => void
+  onPin: () => void
   onCopy: () => void
   onSave: () => void
   onClose: () => void
@@ -128,7 +131,9 @@ export default function Toolbar({
   onEnhance,
   aiDisabled,
   exportDisabled,
+  pinDisabled,
   onOpenAi,
+  onPin,
   onCopy,
   onSave,
   onClose,
@@ -153,6 +158,7 @@ export default function Toolbar({
             )
           })}
         </div>
+
         <div className="status-line">{statusText}</div>
       </div>
 
@@ -187,6 +193,15 @@ export default function Toolbar({
         <div className="tool-group history-group">
           <button className="icon-button" title="截图历史" type="button" onClick={onOpenHistory}>
             <HistoryIcon size={18} />
+          </button>
+          <button
+            className="icon-button"
+            title="钉图：把标注后的截图钉在屏幕最上层（可拖动/缩放，右键菜单，双击或 Esc 关闭）"
+            type="button"
+            onClick={onPin}
+            disabled={pinDisabled}
+          >
+            <Pin size={18} />
           </button>
           <button className="icon-button" title="撤销" type="button" onClick={onUndo} disabled={!canUndo}>
             <Undo2 size={18} />
