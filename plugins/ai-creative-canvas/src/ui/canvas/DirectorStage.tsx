@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Camera, Undo2, Redo2 } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Layers, RefreshCw, Clapperboard } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
 
-// 3D 导演台 v4：Outliner + Inspector + 模型导入 + 缩放 + 拖拽摆姿 + 镜头/机位/生成。
+// 3D 导演台 v7：v6（场景即提示词/机位即分镜/成片对比）+ take 历史（每机位多条成片可切换）+ 分镜导出（机位表一键落画布）。
 // three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
@@ -27,6 +27,14 @@ const FACINGS: { k: string; r: number }[] = [
   { k: '背向', r: Math.PI },
   { k: '朝左', r: Math.PI / 2 },
   { k: '朝右', r: -Math.PI / 2 }
+]
+
+// 灯光预设：两盏灯 + 背景色；frag 为追加进提示词的氛围描述（AI 据此渲染对应光线）
+const LIGHTINGS: { k: string; hemiSky: number; hemiGround: number; hemiInt: number; dirColor: number; dirInt: number; dirPos: [number, number, number]; bg: number; frag: string }[] = [
+  { k: '默认', hemiSky: 0xffffff, hemiGround: 0x404050, hemiInt: 1.15, dirColor: 0xffffff, dirInt: 1.1, dirPos: [3, 6, 4], bg: 0x1b1d23, frag: '' },
+  { k: '棚拍柔光', hemiSky: 0xffffff, hemiGround: 0x909098, hemiInt: 1.5, dirColor: 0xfff4e6, dirInt: 0.5, dirPos: [2, 7, 3], bg: 0x24262c, frag: '柔和均匀的棚拍布光(soft studio lighting, low contrast)' },
+  { k: '黄昏暖调', hemiSky: 0xffd9a0, hemiGround: 0x40302a, hemiInt: 0.8, dirColor: 0xffa040, dirInt: 1.6, dirPos: [-6, 2, 2], bg: 0x2a2226, frag: '黄昏金色时刻的暖调逆光(warm golden-hour rim light)' },
+  { k: '夜景冷调', hemiSky: 0x8090c0, hemiGround: 0x101018, hemiInt: 0.5, dirColor: 0x6080ff, dirInt: 0.9, dirPos: [-3, 5, -4], bg: 0x0e1016, frag: '夜晚冷调月光氛围(cool moonlit night ambience)' }
 ]
 
 // COCO-18 OpenPose：关键点顺序、连接、配色（controlnet_aux 同款）
@@ -80,14 +88,22 @@ function Inner() {
   const [editName, setEditName] = useState('')
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
-  const [shots, setShots] = useState<{ id: string; name: string; cam: any }[]>([])
+  const [shots, setShots] = useState<{ id: string; name: string; cam: any; thumb?: string; take?: string; takes?: string[] }[]>([])
+  const [editShotId, setEditShotId] = useState<string | null>(null) // 机位行内改名中
+  const [editShotName, setEditShotName] = useState('')
+  const [showGuides, setShowGuides] = useState(true) // 三分构图线
+  const [lighting, setLighting] = useState('默认')
+  const [descDraft, setDescDraft] = useState('') // 选中对象的语义描述草稿（blur 提交）
+  const [lastTake, setLastTake] = useState<string | null>(null) // 最近一次成片 url（叠图对比）
+  const [compareOn, setCompareOn] = useState(false) // 成片叠加对比开关
+  const [compareOpacity, setCompareOpacity] = useState(0.45)
   const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
   const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
 
   const saveScene = () => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt })
+      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), lastTake: lastTake || undefined })
     } catch { /* ignore */ }
   }
   const close = () => {
@@ -132,7 +148,8 @@ function Inner() {
         cam.position.set(0, 1.5, 4)
         cam.setFocalLength(35)
 
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.15))
+        const hemi = new THREE.HemisphereLight(0xffffff, 0x404050, 1.15)
+        scene.add(hemi)
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.1)
         dirLight.position.set(3, 6, 4)
         scene.add(dirLight)
@@ -176,7 +193,7 @@ function Inner() {
           pipMount.appendChild(pip.domElement)
         }
 
-        interface Subj { obj: any; kind: string; id: string; name: string }
+        interface Subj { obj: any; kind: string; id: string; name: string; desc?: string }
         const subjects: Subj[] = []
         const raycaster = new THREE.Raycaster()
         const ndc = new THREE.Vector2()
@@ -274,12 +291,12 @@ function Inner() {
             setSelKind(root ? root.userData.kind || '' : null)
           }
         }
-        const addSubject = (obj: any, kind: string) => {
+        const addSubject = (obj: any, kind: string, desc?: string) => {
           const id = uid('obj')
           const name = nextName(kind)
           obj.userData.kind = kind
           scene.add(obj)
-          subjects.push({ obj, kind, id, name })
+          subjects.push({ obj, kind, id, name, desc })
           sync()
           select(obj)
           commit()
@@ -392,7 +409,7 @@ function Inner() {
                       if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
                       const id = uid('obj')
                       scene.add(obj)
-                      subjects.push({ obj, kind: '模型', id, name: st.name || '模型' })
+                      subjects.push({ obj, kind: '模型', id, name: st.name || '模型', desc: st.desc })
                       sync()
                       resolve()
                     },
@@ -420,7 +437,7 @@ function Inner() {
           if (!sub) return
           const clone = sub.obj.clone(true)
           clone.position.x += 0.7
-          addSubject(clone, sub.kind)
+          addSubject(clone, sub.kind, sub.desc)
         }
         const toggleVisById = (id: string) => {
           const sub = findById(id)
@@ -556,6 +573,65 @@ function Inner() {
             cam.updateProjectionMatrix()
           }
         }
+        // ── 灯光预设：只调两盏灯 + 背景色；不进 undo 快照（与视图操作同类）──
+        let curLighting = '默认'
+        const applyLighting = (k: string) => {
+          const L = LIGHTINGS.find((l) => l.k === k) || LIGHTINGS[0]
+          curLighting = L.k
+          hemi.color.setHex(L.hemiSky)
+          ;(hemi.groundColor as any).setHex(L.hemiGround)
+          hemi.intensity = L.hemiInt
+          dirLight.color.setHex(L.dirColor)
+          dirLight.intensity = L.dirInt
+          dirLight.position.set(L.dirPos[0], L.dirPos[1], L.dirPos[2])
+          scene.background = new THREE.Color(L.bg)
+        }
+        // 机位缩略图：出图相机渲一帧 → 96px 宽 jpeg（记录机位时调用）
+        const captureThumb = (): string => {
+          tcontrol.detach()
+          const chv = camHelper.visible
+          camHelper.visible = false
+          renderer.render(scene, outCam())
+          const src = renderer.domElement
+          const tw = 96
+          const th = Math.max(1, Math.round((tw * src.height) / src.width))
+          const c = document.createElement('canvas')
+          c.width = tw
+          c.height = th
+          c.getContext('2d')!.drawImage(src, 0, 0, tw, th)
+          camHelper.visible = chv
+          attachByMode()
+          return c.toDataURL('image/jpeg', 0.7)
+        }
+        // 一键落地：包围盒底部贴合地面
+        const dropToGround = () => {
+          if (!curRoot) return
+          const box = new THREE.Box3().setFromObject(curRoot)
+          if (box.isEmpty() || !isFinite(box.min.y)) return
+          curRoot.position.y -= box.min.y
+          commit()
+        }
+        // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
+        const stagePreset = (key: string) => {
+          if (key === '双人对话') {
+            const a = makeMannequin(0xc7ccd6)
+            a.position.set(-0.6, 0, 0)
+            a.rotation.y = Math.PI / 2
+            addSubject(a, '人台')
+            const b = makeMannequin(0xaab4c8)
+            b.position.set(0.6, 0, 0)
+            b.rotation.y = -Math.PI / 2
+            addSubject(b, '人台')
+          } else if (key === '产品展示') {
+            const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
+            m.position.set(0, 0.25, 0)
+            addSubject(m, '道具')
+          } else {
+            return
+          }
+          applyCam({ pos: [0, 1.4, 3.2], target: [0, 0.9, 0], focal: 35 })
+          commit()
+        }
         // 重建程序生成的人台/道具（导入模型走 buildModelFromState）
         const buildFromState = (st: any) => {
           if (st.kind !== '人台' && st.kind !== '道具') return
@@ -570,7 +646,7 @@ function Inner() {
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
           scene.add(obj)
-          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind) })
+          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc })
         }
         const serializeSceneOnly = () => ({
           // 人台/道具 + 已存字节的导入模型；导入模型为空 assetId（存储失败）则不持久化
@@ -585,6 +661,7 @@ function Inner() {
                 kind: s.kind,
                 assetId: s.kind === '模型' ? o.userData.assetId : undefined,
                 name: s.name,
+                desc: s.desc || undefined,
                 pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
                 rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number],
                 scale: [o.scale.x, o.scale.y, o.scale.z] as [number, number, number],
@@ -719,6 +796,11 @@ function Inner() {
             setShots(saved0.shots || [])
             if (saved0.prompt) setPrompt(saved0.prompt)
             setFocal(Math.round((saved0.cam && saved0.cam.focal) || 35))
+            if (saved0.lighting && LIGHTINGS.some((l) => l.k === saved0.lighting)) {
+              applyLighting(saved0.lighting)
+              setLighting(saved0.lighting)
+            }
+            if (saved0.lastTake) setLastTake(saved0.lastTake)
           }
           // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
           void Promise.all(ps).then(() => { restoring = false; if (!disposed) { sync(); commit() } })
@@ -726,9 +808,10 @@ function Inner() {
           addMannequin() // addSubject 内已 commit 种子
         }
 
-        const shotFragment = (): string => {
-          const C = outCam()
-          const target = outTarget()
+        // 可传入任意相机/目标点（默认=出图相机）：分镜导出时按各机位相机离线算描述
+        const shotFragment = (C?: any, target?: any): string => {
+          C = C || outCam()
+          target = target || outTarget()
           const d = C.position.distanceTo(target)
           const dy = C.position.y - target.y
           const ang = (Math.asin(Math.max(-1, Math.min(1, dy / Math.max(0.001, d)))) * 180) / Math.PI
@@ -736,23 +819,40 @@ function Inner() {
           const lens = f < 28 ? '广角镜头(wide-angle)' : f <= 50 ? '标准镜头(normal)' : f <= 85 ? '中长焦(short telephoto)' : '长焦(telephoto)'
           const angle = ang > 18 ? '俯拍(high angle)' : ang < -12 ? '仰拍(low angle)' : '平视(eye level)'
           const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
-          const people = subjects.filter((s) => s.kind === '人台')
+          const people = subjects.filter((s) => s.kind === '人台' && s.obj.visible !== false)
           const v = new THREE.Vector3()
+          const whereOf = (s: Subj): string => {
+            s.obj.getWorldPosition(v)
+            v.project(C)
+            if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
+            return v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+          }
           const layout = people
             .map((s, i) => {
-              s.obj.getWorldPosition(v)
-              v.project(C)
-              if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
-              const where = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+              const where = whereOf(s)
+              if (!where) return ''
               const pose = (s.obj as any).userData?.poseName
-              // 用户改过名就用真实角色名（更利于成片语义），否则回落「角色N」
-              const nm = s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`
+              // 优先用对象语义描述（场景即提示词）；其次用户改名；否则回落「角色N」
+              const nm = s.desc || (s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`)
               return `${nm}${where}${pose ? `(${pose})` : ''}`
             })
             .filter(Boolean)
             .join('，')
           const count = people.length ? `画面中有 ${people.length} 个角色（${layout || '居中'}）。` : ''
-          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${count}`
+          // 道具/导入模型也进提示词：AI 才知道场景里有桌子/产品（未改名对象用 kind 统称）
+          const propLayout = subjects
+            .filter((s) => s.kind !== '人台' && s.obj.visible !== false)
+            .map((s) => {
+              const where = whereOf(s)
+              if (!where) return ''
+              const nm = s.desc || (s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : s.kind)
+              return `${nm}${where}`
+            })
+            .filter(Boolean)
+            .join('，')
+          const propTxt = propLayout ? `场景道具：${propLayout}。` : ''
+          const lightTxt = (LIGHTINGS.find((l) => l.k === curLighting) || LIGHTINGS[0]).frag
+          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
         }
 
         api.current = {
@@ -761,6 +861,8 @@ function Inner() {
           importFile: (ab: ArrayBuffer, name: string) => importGLTF(ab, name),
           selectById: (id: string) => { const s = findById(id); if (s) select(s.obj) },
           renameById: (id: string, name: string) => { const s = findById(id); if (s) { s.name = name; sync() } },
+          getDescById: (id: string) => findById(id)?.desc || '',
+          setDescById: (id: string, desc: string) => { const s = findById(id); if (s && (s.desc || '') !== desc) { s.desc = desc || undefined; commit() } },
           removeById,
           duplicateById,
           toggleVisById,
@@ -817,7 +919,23 @@ function Inner() {
           getCam,
           applyCam,
           serializeSceneOnly,
-          shotFragment
+          shotFragment,
+          // 按给定机位相机离线算镜头描述（分镜导出用；不碰主视图/出图相机）
+          fragmentFor: (c: any) => {
+            const tc = new THREE.PerspectiveCamera(50, cam.aspect, 0.05, 1000)
+            tc.filmGauge = FILM_GAUGE
+            tc.position.set(c.pos[0], c.pos[1], c.pos[2])
+            tc.setFocalLength(c.focal || 35)
+            const tv = new THREE.Vector3(c.target[0], c.target[1], c.target[2])
+            tc.lookAt(tv)
+            tc.updateMatrixWorld(true)
+            return shotFragment(tc, tv)
+          },
+          setLighting: applyLighting,
+          getLighting: () => curLighting,
+          captureThumb,
+          dropToGround,
+          stagePreset
         }
         if (!disposed) setReady(true)
 
@@ -852,18 +970,34 @@ function Inner() {
     }
   }, [])
 
+  // keyRef 每次渲染重赋值：快捷键闭包始终拿到最新 selId/locked/mode（监听器本身保持稳定）
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  keyRef.current = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') { closeRef.current(); return }
+    const t = e.target as HTMLElement
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return // 输入框内交给原生
+    const meta = e.ctrlKey || e.metaKey
+    if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) api.current.redo?.(); else api.current.undo?.(); return }
+    if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.current.redo?.(); return }
+    if (meta || e.altKey) return // 其余组合键交给系统/浏览器
+    const k = e.key.toLowerCase()
+    if (k === 'q') onMode('translate')
+    else if (k === 'w') onMode('rotate')
+    else if (k === 'e') onMode('scale')
+    else if (k === 'r') onMode('pose')
+    else if (k === 'f') { if (selId) api.current.lookAtSelected?.() }
+    else if (k === 'l') { const v = !locked; setLocked(v); api.current.setLock?.(v) }
+    else if (k === 'c') { if (lastTake) setCompareOn((v) => !v) }
+    else if (e.key === 'Delete' || e.key === 'Backspace') { if (selId) api.current.removeById?.(selId) }
+  }
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { closeRef.current(); return }
-      const t = e.target as HTMLElement
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return // 输入框内交给原生
-      const meta = e.ctrlKey || e.metaKey
-      if (meta && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) api.current.redo?.(); else api.current.undo?.() }
-      else if (meta && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); api.current.redo?.() }
-    }
+    const onKey = (e: KeyboardEvent) => keyRef.current(e)
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // 切换选中 → 拉取该对象的语义描述进草稿
+  useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
 
   const onFocal = (mm: number) => { setFocal(mm); api.current.setFocal?.(mm) }
   const onMode = (m: TMode) => { setMode(m); api.current.setMode?.(m) }
@@ -875,13 +1009,13 @@ function Inner() {
     api.current.importFile?.(await f.arrayBuffer(), f.name)
   }
 
-  const doGenerate = async (placeIndex: number): Promise<boolean> => {
+  const doGenerate = async (placeIndex: number): Promise<string | null> => {
     const proj = useGraph.getState().project
     const controlModel = proj.defaultControlModel
     const model = controlModel || proj.defaultImageModel
     if (!model) {
       toast('请在工程设置（顶栏 ⚙）选「默认图像模型」或「ControlNet 控制模型」', 'error')
-      return false
+      return null
     }
     try {
       const ai = window.mulby.ai
@@ -889,7 +1023,7 @@ function Inner() {
       const usePose = useControl && ctrlType === 'pose'
       if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
         toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
-        return false
+        return null
       }
       const dataUrl = (usePose ? api.current.captureOpenPose() : useControl ? api.current.captureDepth() : api.current.capture()) as string
       const b64 = dataUrl.split(',')[1]
@@ -913,19 +1047,35 @@ function Inner() {
       const wx = (-vp.x + 360) / vp.zoom + placeIndex * 340
       const wy = (-vp.y + 320) / vp.zoom
       g.addCard('image', { x: wx, y: wy }, { title: '导演台成片', status: 'done', modelId: model, prompt: prompt.trim(), assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
-      return true
+      return saved.url as string
     } catch (e: any) {
       toast('生成失败：' + (e?.message || String(e)), 'error')
-      return false
+      return null
     }
   }
 
   const run = async () => {
     if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
     setBusy(true)
-    const ok = await doGenerate(0)
+    const url = await doGenerate(0)
     setBusy(false)
-    if (ok) toast('已生成（导演台）', 'success')
+    if (url) { setLastTake(url); toast('已生成（导演台），按 C 叠加成片对比', 'success') }
+  }
+  // 生成指定机位并把成片回贴为该 shot 的 take（机位即分镜；takes 保留最近 6 条历史）
+  const genShot = async (i: number): Promise<boolean> => {
+    api.current.applyCam?.(shots[i].cam)
+    const url = await doGenerate(i)
+    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); setLastTake(url); return true }
+    return false
+  }
+  // 在 takes 历史里切换当前成片（循环）
+  const cycleTake = (i: number, dir: number) => {
+    setShots((ss) => ss.map((x, xi) => {
+      if (xi !== i || !x.takes || x.takes.length < 2) return x
+      const cur = x.takes.indexOf(x.take || '')
+      const next = x.takes[(cur + dir + x.takes.length) % x.takes.length]
+      return { ...x, take: next }
+    }))
   }
   const batchGenerate = async () => {
     if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
@@ -933,8 +1083,7 @@ function Inner() {
     setBusy(true)
     let ok = 0
     for (let i = 0; i < shots.length; i++) {
-      api.current.applyCam?.(shots[i].cam)
-      if (await doGenerate(i)) ok++
+      if (await genShot(i)) ok++
     }
     setBusy(false)
     toast(`已生成 ${ok}/${shots.length} 个机位`, ok ? 'success' : 'error')
@@ -942,13 +1091,59 @@ function Inner() {
   const addShot = () => {
     const cam = api.current.getCam?.()
     if (!cam) return
-    setShots((s) => [...s, { id: 'shot_' + Date.now().toString(36), name: `机位${s.length + 1}`, cam }])
+    const thumb = api.current.captureThumb?.()
+    setShots((s) => [...s, { id: 'shot_' + Date.now().toString(36), name: `机位${s.length + 1}`, cam, thumb }])
   }
   const applyShot = (sh: { cam: any }) => { api.current.applyCam?.(sh.cam); setFocal(Math.round(sh.cam?.focal || 35)) }
   const delShot = (id: string) => setShots((s) => s.filter((x) => x.id !== id))
 
+  // 分镜导出：机位表 → 画布分镜卡（4 列网格）。有 take 的直接带成片(status=done)，
+  // 没出片的带装配好的提示词(status=idle) 可「生成选中」；meta.shot 兼容分镜生态（shotToVideo 等）。
+  const exportStoryboard = () => {
+    if (!shots.length) { toast('请先「记录机位」添加 shot', 'error'); return }
+    const g = useGraph.getState()
+    const boardId = g.project.activeBoardId
+    const vp = g.getActiveBoard().viewport
+    const W = 280
+    const H = 320
+    const cols = 4
+    const gapX = 40
+    const gapY = 48
+    const baseX = (-vp.x + 360) / vp.zoom
+    const baseY = (-vp.y + 200) / vp.zoom
+    const ids: string[] = []
+    shots.forEach((s, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      const center = { x: baseX + col * (W + gapX) + W / 2, y: baseY + row * (H + gapY) + H / 2 }
+      const frag = (api.current.fragmentFor?.(s.cam) as string) || ''
+      const full = `${prompt.trim()}\n\n${frag}`.trim()
+      const id = g.addCard('image', center, {
+        title: s.name,
+        prompt: full,
+        status: s.take ? 'done' : 'idle',
+        assetUrl: s.take || null,
+        mime: s.take ? 'image/png' : null,
+        meta: { shot: { shotNumber: i + 1, desc: s.name, imagePrompt: full, camera: frag } }
+      }, boardId)
+      ids.push(id)
+    })
+    g.setSelection(ids)
+    toast(`已导出 ${shots.length} 个分镜卡到画布（${shots.filter((s) => s.take).length} 个带成片，其余可「生成选中」批量出图）`, 'success')
+  }
+
+  // ── 视觉体系：摄影棚监视器语言。暖黑玻璃浮板 + 单一钨丝灯琥珀强调色，全台统一 ──
+  const panelCls = 'rounded-2xl border border-white/10 bg-zinc-950/60 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.45)]'
+  const secCls = 'text-[11px] font-medium text-white/50' // 面板分区小标题
+  const hintCls = 'text-white/35 leading-snug text-[11px]'
   const Btn = ({ on, onClick, children, title }: { on?: boolean; onClick: () => void; children: any; title: string }) => (
-    <button onClick={onClick} title={title} className={`px-2 py-1 rounded-md text-xs flex items-center gap-1 ${on ? 'bg-indigo-600 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+    <button
+      onClick={onClick}
+      title={title}
+      className={`px-2 py-1 rounded-lg text-xs flex items-center gap-1 border transition-colors duration-150 active:scale-[0.97] ${
+        on ? 'border-amber-300/50 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
+      }`}
+    >
       {children}
     </button>
   )
@@ -956,50 +1151,87 @@ function Inner() {
   const kindIcon = (k: string) => (k === '人台' ? <User size={12} /> : k === '道具' ? <BoxIcon size={12} /> : <Upload size={12} />)
 
   return (
-    <div className="fixed inset-0 z-[90] bg-black flex flex-col text-white" data-interactive>
+    <div className="fixed inset-0 z-[90] bg-zinc-950 flex flex-col text-white" data-interactive>
       <div ref={mountRef} className="absolute inset-0" style={{ touchAction: 'none' }} />
-      {!ready && <div className="absolute inset-0 grid place-items-center text-white/70 text-sm pointer-events-none">正在加载 3D 导演台…</div>}
+      {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染） */}
+      {showGuides && ready && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]" viewBox="0 0 3 3" preserveAspectRatio="none">
+          {[1, 2].map((n) => (
+            <g key={n} stroke="#fff" strokeOpacity="0.28" strokeWidth="1" vectorEffect="non-scaling-stroke">
+              <line x1={n} y1="0" x2={n} y2="3" vectorEffect="non-scaling-stroke" />
+              <line x1="0" y1={n} x2="3" y2={n} vectorEffect="non-scaling-stroke" />
+            </g>
+          ))}
+          <g stroke="#fff" strokeOpacity="0.45" strokeWidth="1">
+            <line x1="1.44" y1="1.5" x2="1.56" y2="1.5" vectorEffect="non-scaling-stroke" />
+            <line x1="1.5" y1="1.44" x2="1.5" y2="1.56" vectorEffect="non-scaling-stroke" />
+          </g>
+        </svg>
+      )}
+      {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍 */}
+      {compareOn && lastTake && (
+        <div className="absolute inset-0 z-[1] pointer-events-none grid place-items-center">
+          <img src={lastTake} className="max-w-full max-h-full object-contain" style={{ opacity: compareOpacity }} />
+        </div>
+      )}
+      {!ready && (
+        <div className="absolute inset-0 grid place-items-center pointer-events-none">
+          <span className={`${panelCls} px-4 py-2 text-sm text-white/70 flex items-center gap-2`}><Loader2 size={15} className="animate-spin text-amber-300" /> 正在加载 3D 导演台…</span>
+        </div>
+      )}
       <input ref={fileRef} type="file" accept=".glb,.gltf" className="hidden" onChange={onFile} />
 
-      {/* 顶栏：标题 + 变换模式 + 关闭 */}
-      <div className="absolute top-3 left-3 right-3 flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-black/55">
-          <Film size={14} className="text-indigo-400" />
-          <span className="text-xs font-medium">3D 导演台</span>
+      {/* 顶栏：一体化玻璃工具条（品牌 / 变换模式 / 视图 / 取景 / 撤销重做 / 关闭） */}
+      <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none z-[3]">
+        <div className={`pointer-events-auto flex items-center gap-1.5 px-2 py-1.5 max-w-full flex-wrap ${panelCls}`}>
+          <div className="flex items-center gap-1.5 pl-1.5 pr-2">
+            <Film size={14} className="text-amber-300" />
+            <span className="text-xs font-medium">3D 导演台</span>
+          </div>
+          <div className="w-px h-5 bg-white/10" />
+          <Btn on={mode === 'translate'} onClick={() => onMode('translate')} title="移动整体 (Q)"><Move size={13} /> 移动</Btn>
+          <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转整体 (W)"><Rotate3d size={13} /> 旋转</Btn>
+          <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体 (E)"><Maximize size={13} /> 缩放</Btn>
+          <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿：点人台关节后拖动鼠标摆姿 (R)"><Hand size={13} /> 摆姿</Btn>
+          <div className="w-px h-5 bg-white/10" />
+          <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
+          <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加最近一次成片对比 (C)：对着上一条调场景/构图' : '尚无成片可对比（先「生成」一条）'}><Layers size={13} /></Btn>
+          {compareOn && lastTake && (
+            <input type="range" min={0.1} max={1} step={0.05} value={compareOpacity} onChange={(e) => setCompareOpacity(Number(e.target.value))} className="w-16 accent-amber-300" title="成片叠加透明度" />
+          )}
+          <div className="w-px h-5 bg-white/10" />
+          <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景 (L)：冻结出图机位，主视图可自由查看/摆姿；PiP 实时显示出图构图"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
+          {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
+          <div className="w-px h-5 bg-white/10" />
+          <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
+          <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
+          <div className="w-px h-5 bg-white/10" />
+          <button onClick={close} title="关闭 (Esc)" className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors"><X size={15} /></button>
         </div>
-        <Btn on={mode === 'translate'} onClick={() => onMode('translate')} title="移动整体"><Move size={13} /> 移动</Btn>
-        <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转整体"><Rotate3d size={13} /> 旋转</Btn>
-        <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体"><Maximize size={13} /> 缩放</Btn>
-        <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿：点人台关节后拖动鼠标摆姿"><Hand size={13} /> 摆姿</Btn>
-        <div className="w-px h-5 bg-white/20" />
-        <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景：冻结出图机位，主视图可自由查看/摆姿；PiP 实时显示出图构图"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
-        {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
-        <div className="w-px h-5 bg-white/20" />
-        <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="px-2 py-1 rounded-md text-xs bg-white/10 hover:bg-white/20 disabled:opacity-30"><Undo2 size={13} /></button>
-        <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="px-2 py-1 rounded-md text-xs bg-white/10 hover:bg-white/20 disabled:opacity-30"><Redo2 size={13} /></button>
-        <div className="ml-auto" />
-        <button onClick={close} className="w-8 h-8 grid place-items-center rounded-lg bg-black/55 hover:bg-black/70"><X size={16} /></button>
       </div>
 
       {/* PiP：出图取景预览（仅锁定取景时显示） */}
-      <div className={`absolute top-14 right-64 z-[2] rounded-lg overflow-hidden ring-1 ring-indigo-400/60 shadow-lg ${locked ? '' : 'hidden'}`}>
+      <div className={`absolute top-16 right-[17rem] z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
         <div ref={pipRef} />
-        <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-black/60 rounded-br">出图取景</div>
+        <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-zinc-950/70 text-amber-200/90 rounded-br-lg">出图取景</div>
       </div>
 
       {/* 左：Outliner */}
-      <div className="absolute top-14 left-3 bottom-24 w-44 flex flex-col gap-1.5 p-2.5 rounded-lg bg-black/55 text-xs">
-        <div className="flex items-center justify-between">
-          <span className="opacity-70 font-medium">场景对象</span>
-        </div>
+      <div className={`absolute top-16 left-3 bottom-24 w-48 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
+        <span className={secCls}>场景对象</span>
         <div className="flex items-center gap-1">
           <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={12} /> 人台</Btn>
           <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={12} /> 道具</Btn>
           <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
         </div>
+        <div className="flex items-center gap-1">
+          <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人面对面站位（追加，不清空场景）"><Users size={12} /> 双人</Btn>
+          <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示台（追加，不清空场景）"><Package size={12} /> 产品</Btn>
+        </div>
+        <div className="h-px bg-white/[0.07]" />
         <div className="flex flex-col gap-1 overflow-auto ace-scroll flex-1">
           {objs.map((o) => (
-            <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded ${selId === o.id ? 'bg-indigo-600' : 'bg-white/5 hover:bg-white/10'}`}>
+            <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors ${selId === o.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/75'}`}>
               {editId === o.id ? (
                 <input
                   autoFocus
@@ -1011,7 +1243,7 @@ function Inner() {
                     if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
                     else if (e.key === 'Escape') setEditId(null)
                   }}
-                  className="flex-1 min-w-0 bg-black/40 rounded px-1 outline-none ring-1 ring-indigo-400"
+                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
                 />
               ) : (
                 <button
@@ -1023,67 +1255,85 @@ function Inner() {
                   {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
                 </button>
               )}
-              <button onClick={() => api.current.toggleVisById?.(o.id)} className="opacity-60 hover:opacity-100" title="显隐">{o.visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
-              <button onClick={() => api.current.duplicateById?.(o.id)} className="opacity-60 hover:opacity-100" title="复制"><Copy size={12} /></button>
-              <button onClick={() => api.current.removeById?.(o.id)} className="opacity-60 hover:opacity-100" title="删除"><Trash2 size={12} /></button>
+              <button onClick={() => api.current.toggleVisById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="显隐">{o.visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
+              <button onClick={() => api.current.duplicateById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="复制"><Copy size={12} /></button>
+              <button onClick={() => api.current.removeById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
             </div>
           ))}
-          {!objs.length && <span className="opacity-40">用上面按钮添加/导入对象</span>}
+          {!objs.length && <span className="text-white/35">用上面按钮添加/导入对象</span>}
         </div>
-        <div className="opacity-45 leading-snug">拖 .glb/.gltf 到画面也可导入</div>
+        <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
       </div>
 
       {/* 右：Inspector + 镜头 + 机位 */}
-      <div className="absolute top-14 right-3 bottom-24 w-56 flex flex-col gap-2 p-2.5 rounded-lg bg-black/55 text-xs overflow-auto ace-scroll">
+      <div className={`absolute top-16 right-3 bottom-24 w-60 flex flex-col gap-3 p-3 ${panelCls} text-xs overflow-auto ace-scroll`}>
         {selId && (
-          <div className="flex flex-col gap-2 pb-2 border-b border-white/10">
-            <span className="opacity-70 font-medium">选中：{objs.find((o) => o.id === selId)?.name}</span>
+          <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
+            <span className={secCls}>选中：{objs.find((o) => o.id === selId)?.name}</span>
             <div className="flex items-center gap-1 flex-wrap">
               <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
-              <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向"><Crosshair size={12} /> 看向</Btn>
-              <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除"><Trash2 size={12} /> 删除</Btn>
+              <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
+              <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
+              <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
             </div>
+            <div className="flex items-start gap-1">
+              <span className="text-white/40 w-8 mt-1">描述</span>
+              <textarea
+                value={descDraft}
+                onChange={(e) => setDescDraft(e.target.value)}
+                onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
+                placeholder={selKind === '人台' ? '如：穿长衫的老者，白发拄拐' : selKind === '模型' ? '如：红色跑车' : '如：红木书桌，上有一盏台灯'}
+                className="flex-1 h-12 resize-none rounded-lg bg-white/[0.04] border border-white/10 p-1.5 outline-none placeholder:text-white/25 focus:border-amber-300/50 transition-colors"
+              />
+            </div>
+            <div className={hintCls}>描述会按画面方位自动装配进提示词，场景即提示词。</div>
             {selKind === '人台' && (
               <>
                 <div className="flex items-start gap-1">
-                  <span className="opacity-60 w-8 mt-1">姿势</span>
+                  <span className="text-white/40 w-8 mt-1">姿势</span>
                   <div className="flex-1 flex flex-wrap gap-1">{POSES.map((p) => <Btn key={p.k} onClick={() => api.current.applyPose?.(p.k, p.m)} title={`一键姿势：${p.k}`}>{p.k}</Btn>)}</div>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
-                  <span className="opacity-60 w-8">朝向</span>
+                  <span className="text-white/40 w-8">朝向</span>
                   {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
                 </div>
-                <div className="opacity-45 leading-snug">一键姿势最省事；微调用顶栏「摆姿」点关节后拖动鼠标。</div>
+                <div className={hintCls}>一键姿势最省事；微调用顶栏「摆姿」点关节后拖动鼠标。</div>
               </>
             )}
           </div>
         )}
         {/* 镜头 */}
-        <div className="flex flex-col gap-2 pb-2 border-b border-white/10">
-          <span className="opacity-70 font-medium">镜头</span>
+        <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
+          <span className={secCls}>镜头</span>
           <div className="flex items-center gap-2">
-            <span className="opacity-60 w-8">焦段</span>
-            <input type="range" min={18} max={135} value={focal} onChange={(e) => onFocal(Number(e.target.value))} className="flex-1" />
-            <span className="w-9 text-right tabular-nums">{focal}</span>
+            <span className="text-white/40 w-8">焦段</span>
+            <input type="range" min={18} max={135} value={focal} onChange={(e) => onFocal(Number(e.target.value))} className="flex-1 accent-amber-300" />
+            <span className="w-9 text-right tabular-nums text-amber-200">{focal}</span>
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}</Btn>)}
           </div>
           <div className="flex items-center gap-1 flex-wrap">
-            <span className="opacity-60 w-8">镜别</span>
+            <span className="text-white/40 w-8">镜别</span>
             <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
             <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
             <Btn onClick={() => api.current.shotSize?.('fs')} title="全景">全景</Btn>
           </div>
           <div className="flex items-center gap-1 flex-wrap">
-            <span className="opacity-60 w-8">角度</span>
+            <span className="text-white/40 w-8">角度</span>
             <Btn onClick={() => api.current.angle?.('low')} title="仰拍">仰拍</Btn>
             <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
             <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
           </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-white/40 w-8">灯光</span>
+            {LIGHTINGS.map((l) => (
+              <Btn key={l.k} on={lighting === l.k} onClick={() => { setLighting(l.k); api.current.setLighting?.(l.k) }} title={`灯光预设：${l.k}（写入提示词，影响成片氛围）`}>{l.k}</Btn>
+            ))}
+          </div>
           {hasControlModel && (
             <div className="flex items-center gap-1 flex-wrap">
-              <span className="opacity-60 w-8">控制</span>
+              <span className="text-white/40 w-8">控制</span>
               <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
               <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
             </div>
@@ -1092,40 +1342,73 @@ function Inner() {
         {/* 机位 */}
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="opacity-70 font-medium">机位（{shots.length}）</span>
+            <span className={secCls}>机位（{shots.length}）</span>
             <Btn onClick={addShot} title="记录当前机位">+记录</Btn>
           </div>
-          {shots.map((s) => (
-            <div key={s.id} className="flex items-center gap-1">
-              <button onClick={() => applyShot(s)} className="flex-1 text-left px-1.5 py-1 rounded bg-white/10 hover:bg-white/20 truncate" title="切到此机位">{s.name}</button>
-              <button onClick={() => delShot(s.id)} className="px-1 opacity-60 hover:opacity-100" title="删除"><Trash2 size={12} /></button>
+          {shots.map((s, i) => (
+            <div key={s.id} className="flex items-center gap-1.5">
+              {(s.take || s.thumb) && (
+                <div className="w-10 shrink-0 flex flex-col items-center gap-0.5">
+                  <img src={s.take || s.thumb} onClick={() => applyShot(s)} className={`w-10 rounded-md ring-1 cursor-pointer transition-shadow hover:ring-amber-200 ${s.take ? 'ring-amber-300/70' : 'ring-white/15'}`} title={s.take ? '切到此机位（亮框=已出成片）' : '切到此机位'} />
+                  {(s.takes?.length || 0) > 1 && (
+                    <div className="flex items-center gap-0.5 text-[9px] text-white/50">
+                      <button onClick={() => cycleTake(i, -1)} className="px-0.5 hover:text-white transition-colors" title="上一条成片">‹</button>
+                      <span className="tabular-nums">{(s.takes!.indexOf(s.take || '') + 1) || 1}/{s.takes!.length}</span>
+                      <button onClick={() => cycleTake(i, 1)} className="px-0.5 hover:text-white transition-colors" title="下一条成片">›</button>
+                    </div>
+                  )}
+                </div>
+              )}
+              {editShotId === s.id ? (
+                <input
+                  autoFocus
+                  value={editShotName}
+                  onChange={(e) => setEditShotName(e.target.value)}
+                  onBlur={() => { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }}
+                  onKeyDown={(e) => {
+                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
+                    if (e.key === 'Enter') { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }
+                    else if (e.key === 'Escape') setEditShotId(null)
+                  }}
+                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
+                />
+              ) : (
+                <button onClick={() => applyShot(s)} onDoubleClick={() => { setEditShotId(s.id); setEditShotName(s.name) }} className="flex-1 text-left px-1.5 py-1 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/10 text-white/75 hover:text-white truncate transition-colors" title="切到此机位（双击改名）">{s.name}</button>
+              )}
+              <button onClick={() => void genShot(i)} disabled={busy} className="text-white/40 hover:text-amber-200 disabled:opacity-30 transition-colors" title="按此机位生成/重拍"><RefreshCw size={12} /></button>
+              <button onClick={() => delShot(s.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
             </div>
           ))}
           {shots.length > 0 && (
-            <button onClick={() => void batchGenerate()} disabled={busy} className="mt-1 px-2 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-xs flex items-center justify-center gap-1 disabled:opacity-60">
+            <button onClick={() => void batchGenerate()} disabled={busy} className="mt-1 px-2 py-1.5 rounded-lg border border-amber-300/50 bg-amber-300/15 text-amber-200 hover:bg-amber-300/25 text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors active:scale-[0.98]">
               <Film size={13} /> 批量生成 {shots.length} 机位
+            </button>
+          )}
+          {shots.length > 0 && (
+            <button onClick={exportStoryboard} disabled={busy} className="px-2 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors" title="把机位表落为画布上的分镜卡：带成片的直接显示，未出片的带提示词可批量生成">
+              <Clapperboard size={13} /> 导出分镜到画布
             </button>
           )}
         </div>
       </div>
 
       {/* 底：场景描述 + 生成 */}
-      <div className="absolute bottom-3 left-48 right-60 flex items-end gap-2">
+      <div className="absolute bottom-3 left-52 right-64 flex items-end gap-2">
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="场景/角色描述（如：中式书房，一位穿长衫的老者站在书桌前…）"
-          className="flex-1 h-16 resize-none rounded-lg bg-black/55 text-sm p-2 outline-none placeholder:text-white/40"
+          className={`flex-1 h-16 resize-none ${panelCls} text-sm px-3 py-2 outline-none placeholder:text-white/30 focus:border-amber-300/40 transition-colors`}
         />
-        <button onClick={() => void run()} disabled={busy} className="h-16 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-sm font-medium flex items-center gap-2 disabled:opacity-60 whitespace-nowrap">
+        <button onClick={() => void run()} disabled={busy} className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
           {busy ? <><Loader2 size={16} className="animate-spin" /> 生成中…</> : <><Film size={16} /> 生成</>}
         </button>
       </div>
 
       {/* 生成中：遮罩拦截一切交互，避免改动场景/相机影响抓帧（尤其批量逐机位） */}
       {busy && (
-        <div className="absolute inset-0 z-[95] grid place-items-center bg-black/30 cursor-wait">
-          <span className="px-3 py-1.5 rounded-lg bg-black/75 text-sm flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> 生成中…请稍候</span>
+        <div className="absolute inset-0 z-[95] grid place-items-center bg-zinc-950/40 backdrop-blur-[2px] cursor-wait">
+          <span className={`${panelCls} px-4 py-2 text-sm text-white/80 flex items-center gap-2`}><Loader2 size={16} className="animate-spin text-amber-300" /> 生成中…请稍候</span>
         </div>
       )}
     </div>

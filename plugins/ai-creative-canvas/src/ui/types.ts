@@ -105,17 +105,23 @@ export interface DirectorSubject {
   poseName?: string // 一键姿势名（供生成提示）
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
+  desc?: string // 对象语义描述（"穿长衫的老者"）：场景即提示词，生成时按画面方位装配
 }
 export interface DirectorShot {
   id: string
   name: string
   cam: DirectorCam
+  thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
+  take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
+  takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
 }
 export interface DirectorScene {
   subjects: DirectorSubject[]
   cam: DirectorCam
   shots: DirectorShot[]
   prompt?: string
+  lighting?: string // 灯光预设 key（DirectorStage LIGHTINGS）
+  lastTake?: string // 最近一次成片 url（重开后可继续叠图对比）
 }
 
 export interface ProjectDoc {
