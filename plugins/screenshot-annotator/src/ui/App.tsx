@@ -23,7 +23,8 @@ import {
   COLORS,
   HISTORY_LIMIT,
   STEP_LABEL_MAX_LENGTH,
-  TEXT_BOX_DEFAULT_VISUAL_WIDTH
+  TEXT_BOX_DEFAULT_VISUAL_WIDTH,
+  TOOLBAR_HEIGHT
 } from './annotations/constants'
 import {
   clamp,
@@ -222,6 +223,8 @@ export default function App() {
       if (shouldCenter) {
         window.mulby?.window?.center?.()
       }
+
+      return bounds
     },
     [resolveWindowBounds]
   )
@@ -258,6 +261,9 @@ export default function App() {
         scaleFactor: baseImage.scaleFactor
       }
 
+      // 先把窗口调到新图尺寸并预置视口，再渲染，避免按旧视口先显示一帧。
+      const bounds = await applyWindowBoundsForImage(getDisplaySize(nextImage), undefined, true)
+      setCanvasViewport({ width: bounds.width, height: Math.max(0, bounds.height - TOOLBAR_HEIGHT) })
       setImage(nextImage)
       setPendingPreview(null)
       replaceAnnotations([], { keepRedo: false })
@@ -265,7 +271,6 @@ export default function App() {
       setRedoStack([])
       resetEditingState()
       setStatus(nextStatus)
-      void applyWindowBoundsForImage(getDisplaySize(nextImage), undefined, true)
       return nextImage
     },
     [applyWindowBoundsForImage, replaceAnnotations, resetEditingState]
@@ -422,13 +427,18 @@ export default function App() {
         }
 
         activeHistoryItemIdRef.current = item.id
+        // 先把窗口调到目标尺寸并预置视口，再渲染，避免按旧视口先显示一帧。
+        const bounds = await applyWindowBoundsForImage(getDisplaySize(nextImage), region, !region)
+        if (imageLoadTokenRef.current !== token) {
+          return
+        }
+        setCanvasViewport({ width: bounds.width, height: Math.max(0, bounds.height - TOOLBAR_HEIGHT) })
         setImage(nextImage)
         replaceAnnotations(normalizeAnnotations(item.annotations), { keepRedo: false })
         setUndoStack([])
         setRedoStack([])
         setPendingPreview(null)
         setStatus(`${element.naturalWidth} x ${element.naturalHeight}`)
-        void applyWindowBoundsForImage(getDisplaySize(nextImage), region, !region)
       } catch (error) {
         if (imageLoadTokenRef.current !== token) {
           return
@@ -681,15 +691,10 @@ export default function App() {
           window.devicePixelRatio ??
           1
         const region = attachment.capture?.region
-        const previewSize = getPreviewDisplaySize({ region, scaleFactor })
+        const previewSize = region ? getPreviewDisplaySize({ region, scaleFactor }) : null
 
         try {
           setImage(null)
-          setPendingPreview({
-            dataUrl,
-            displayWidth: previewSize.width,
-            displayHeight: previewSize.height
-          })
           replaceAnnotations([], { keepRedo: false })
           setUndoStack([])
           setRedoStack([])
@@ -697,7 +702,19 @@ export default function App() {
           activeHistoryItemIdRef.current = null
           setStatus('正在载入截图')
 
-          void applyWindowBoundsForImage(previewSize, region, !region)
+          if (region && previewSize) {
+            // 区域元数据齐全：预览尺寸就是最终尺寸，立即预览并贴合窗口。
+            setPendingPreview({
+              dataUrl,
+              displayWidth: previewSize.width,
+              displayHeight: previewSize.height
+            })
+            void applyWindowBoundsForImage(previewSize, region, false)
+          } else {
+            // 区域信息缺失（如 macOS 系统截图不返回选区坐标）：不按猜测尺寸渲染预览，
+            // 等图片解码出真实尺寸后再一次性调整窗口，避免预览闪动。
+            setPendingPreview(null)
+          }
 
           const element = await loadImage(dataUrl, '截图图片加载失败')
           if (imageLoadTokenRef.current !== token) {
@@ -711,8 +728,17 @@ export default function App() {
             height: element.naturalHeight,
             region,
             capture: attachment.capture,
-            displaySize: region ? previewSize : undefined,
+            displaySize: previewSize ?? undefined,
             scaleFactor
+          }
+
+          if (!region) {
+            // 先把窗口调到真实尺寸并用即将生效的尺寸预置视口，再渲染首帧。
+            const bounds = await applyWindowBoundsForImage(getDisplaySize(nextImage), undefined, true)
+            if (imageLoadTokenRef.current !== token) {
+              return
+            }
+            setCanvasViewport({ width: bounds.width, height: Math.max(0, bounds.height - TOOLBAR_HEIGHT) })
           }
 
           setImage(nextImage)
@@ -735,11 +761,6 @@ export default function App() {
             activeHistoryItemIdRef.current = historyItem.id
           } catch (historyError) {
             console.warn('[screenshot-annotator] 创建截图历史失败:', historyError)
-          }
-
-          if (!region) {
-            const displaySize = getDisplaySize(nextImage)
-            void applyWindowBoundsForImage(displaySize, undefined, true)
           }
         } catch (error) {
           if (imageLoadTokenRef.current !== token) {
