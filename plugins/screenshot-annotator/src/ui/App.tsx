@@ -1,33 +1,4 @@
 import {
-  Bot,
-  Circle,
-  Clipboard,
-  Crop,
-  Droplets,
-  Eraser,
-  FlipHorizontal,
-  FlipVertical,
-  Grid3x3,
-  Hash,
-  History as HistoryIcon,
-  Highlighter,
-  LucideIcon,
-  Minus,
-  MousePointer2,
-  MoveRight,
-  Pencil,
-  Redo2,
-  RotateCcw,
-  RotateCw,
-  Save,
-  Sparkles,
-  Square,
-  Trash2,
-  Type as TypeIcon,
-  Undo2,
-  X
-} from 'lucide-react'
-import {
   PointerEvent as ReactPointerEvent,
   MouseEvent as ReactMouseEvent,
   useCallback,
@@ -39,1714 +10,74 @@ import {
 import HistoryView from './HistoryView'
 import {
   createHistoryItem,
+  getHistoryCaptureRegion,
+  getHistoryScaleFactor,
   loadHistoryItem,
-  updateHistoryItem,
-  type ScreenshotHistoryItem
+  updateHistoryItem
 } from './history'
 import { useMulby } from './hooks/useMulby'
-
-type Tool =
-  | 'select'
-  | 'line'
-  | 'rect'
-  | 'ellipse'
-  | 'arrow'
-  | 'pen'
-  | 'highlighter'
-  | 'text'
-  | 'step'
-  | 'mosaic'
-  | 'blur'
-  | 'crop'
-  | 'eraser'
-
-type ResizeEdge =
-  | 'top'
-  | 'right'
-  | 'bottom'
-  | 'left'
-  | 'top-left'
-  | 'top-right'
-  | 'bottom-right'
-  | 'bottom-left'
-
-type Point = {
-  x: number
-  y: number
-}
-
-type Rect = {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-type StrokeAnnotation = {
-  id: string
-  type: 'pen' | 'highlighter'
-  points: Point[]
-  color: string
-  size: number
-}
-
-type ShapeAnnotation = {
-  id: string
-  type: 'line' | 'rect' | 'ellipse' | 'arrow'
-  start: Point
-  end: Point
-  color: string
-  size: number
-}
-
-type TextAnnotation = {
-  id: string
-  type: 'text'
-  point: Point
-  text: string
-  color: string
-  size: number
-  boxWidth?: number
-}
-
-type StepAnnotation = {
-  id: string
-  type: 'step'
-  point: Point
-  value: string
-  color: string
-  size: number
-}
-
-type EffectAnnotation = {
-  id: string
-  type: 'mosaic' | 'blur'
-  start: Point
-  end: Point
-  color: string
-  size: number
-}
-
-type Annotation = StrokeAnnotation | ShapeAnnotation | TextAnnotation | StepAnnotation | EffectAnnotation
-
-type CaptureRegion = {
-  x: number
-  y: number
-  width: number
-  height: number
-  scaleFactor?: number
-}
-
-type PluginAttachment = {
-  id: string
-  name: string
-  kind: 'file' | 'image'
-  path?: string
-  dataUrl?: string
-  mime?: string
-  capture?: {
-    type: 'region' | 'fullscreen'
-    region?: CaptureRegion
-    display?: {
-      scaleFactor?: number
-    }
-  }
-}
-
-type PluginInitData = {
-  featureCode: string
-  input?: string
-  route?: string
-  attachments?: PluginAttachment[]
-}
-
-type AppMode = 'annotate' | 'history'
-
-type LoadedImage = {
-  dataUrl: string
-  element: HTMLImageElement
-  width: number
-  height: number
-  region?: CaptureRegion
-  capture?: PluginAttachment['capture']
-  displaySize?: DisplaySize
-  scaleFactor: number
-}
-
-type PendingPreview = {
-  dataUrl: string
-  displayWidth: number
-  displayHeight: number
-}
-
-type DisplaySize = {
-  width: number
-  height: number
-}
-
-type InlineTextEdit = {
-  id: string
-  point: Point
-  text: string
-  color: string
-  size: number
-  boxWidth: number
-  insertIndex: number
-}
-
-type InlineStepEdit = {
-  id: string
-  point: Point
-  value: string
-  color: string
-  size: number
-}
-
-type ResizeHandle =
-  | 'resize-n'
-  | 'resize-ne'
-  | 'resize-e'
-  | 'resize-se'
-  | 'resize-s'
-  | 'resize-sw'
-  | 'resize-w'
-  | 'resize-nw'
-
-type EditHandleMode = 'move' | 'line-start' | 'line-end' | 'text-width' | ResizeHandle
-
-type EditHandle = {
-  id: string
-  mode: EditHandleMode
-}
-
-type EditDragState = EditHandle & {
-  pointerId: number
-  startPoint: Point
-  snapshot: Annotation
-  annotationsSnapshot: Annotation[]
-  moved: boolean
-}
+import { RESIZE_EDGES, useFloatingWindow } from './hooks/useFloatingWindow'
+import Toolbar from './components/Toolbar'
+import { InlineStepEditor, InlineTextEditor } from './components/InlineEditors'
+import {
+  COLORS,
+  HISTORY_LIMIT,
+  STEP_LABEL_MAX_LENGTH,
+  TEXT_BOX_DEFAULT_VISUAL_WIDTH
+} from './annotations/constants'
+import {
+  clamp,
+  getEditableAnnotationTypeForTool,
+  isDragAnnotation,
+  isStrokeAnnotation,
+  normalizeRect,
+  resizeAnnotation,
+  snapPointTo45Degrees,
+  snapPointToSquare,
+  annotationHasRenderableArea
+} from './annotations/geometry'
+import { cursorForEditMode, hitTestAnnotation, hitTestEditHandle } from './annotations/hitTest'
+import { getTextBounds, getTextBoxWidth } from './annotations/textLayout'
+import { exportPng, renderCanvas } from './annotations/render'
+import { normalizeAnnotations } from './annotations/normalize'
+import type {
+  Annotation,
+  AppMode,
+  CaptureRegion,
+  DisplaySize,
+  EditDragState,
+  EditHandle,
+  EditHandleMode,
+  InlineStepEdit,
+  InlineTextEdit,
+  LoadedImage,
+  PendingPreview,
+  PluginAttachment,
+  PluginInitData,
+  Point,
+  Rect,
+  StepAnnotation,
+  TextAnnotation,
+  Tool
+} from './annotations/types'
+import {
+  arrayBufferToDataUrl,
+  createId,
+  dataUrlToArrayBuffer,
+  dataUrlToBase64,
+  defaultPngFileName,
+  ensurePngPath,
+  loadImage
+} from './utils/image'
+import { getInitialMode, parseLaunchMode } from './utils/launch'
+import {
+  buildConstrainedBounds,
+  fitDisplaySize,
+  getDisplaySize,
+  getPreviewDisplaySize
+} from './utils/display'
 
 const PLUGIN_ID = 'screenshot-annotator'
-const TOOLBAR_HEIGHT = 96
-const TOOLBAR_MIN_WIDTH = 1080
-const HISTORY_LIMIT = 30
-const EDIT_HANDLE_VISUAL_SIZE = 10
-const EDIT_HANDLE_HIT_VISUAL_SIZE = 18
-const TEXT_BOX_DEFAULT_VISUAL_WIDTH = 240
-const TEXT_BOX_MIN_WIDTH = 72
-const STEP_LABEL_MAX_LENGTH = 6
-const COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#a855f7']
-const RESIZE_EDGES: ResizeEdge[] = [
-  'top',
-  'right',
-  'bottom',
-  'left',
-  'top-left',
-  'top-right',
-  'bottom-right',
-  'bottom-left'
-]
-
-const createId = (prefix = 'annotation') => {
-  const randomId = globalThis.crypto?.randomUUID?.()
-  if (randomId) {
-    return `${prefix}-${randomId}`
-  }
-
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-const loadImage = (dataUrl: string) =>
-  new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('截图图片加载失败'))
-    image.src = dataUrl
-  })
-
-const dataUrlToBase64 = (dataUrl: string) => dataUrl.split(',', 2)[1] ?? ''
-
-function dataUrlToArrayBuffer(dataUrl: string) {
-  const base64 = dataUrlToBase64(dataUrl)
-  const binary = atob(base64)
-  const bytes = new Uint8Array(binary.length)
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-
-  return bytes.buffer
-}
-
-function arrayBufferToDataUrl(buffer: ArrayBuffer | Uint8Array, mime = 'image/png') {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-  const chunkSize = 0x8000
-  let binary = ''
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-  }
-
-  return `data:${mime};base64,${btoa(binary)}`
-}
-
-const ensurePngPath = (path: string) => (
-  path.toLowerCase().endsWith('.png') ? path : `${path}.png`
-)
-
-const defaultFileName = () => {
-  const now = new Date()
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-    String(now.getHours()).padStart(2, '0'),
-    String(now.getMinutes()).padStart(2, '0'),
-    String(now.getSeconds()).padStart(2, '0')
-  ].join('')
-
-  return `screenshot-${stamp}.png`
-}
-
-function appendSearchParams(params: URLSearchParams, search: string) {
-  const query = search.startsWith('?') ? search.slice(1) : search
-  if (!query) {
-    return
-  }
-
-  new URLSearchParams(query).forEach((value, key) => {
-    params.set(key, value)
-  })
-}
-
-function collectLaunchParams(route?: string) {
-  const params = new URLSearchParams()
-  appendSearchParams(params, window.location.search)
-
-  const hashQueryIndex = window.location.hash.indexOf('?')
-  if (hashQueryIndex >= 0) {
-    appendSearchParams(params, window.location.hash.slice(hashQueryIndex + 1))
-  }
-
-  if (route) {
-    const routeQueryIndex = route.indexOf('?')
-    if (routeQueryIndex >= 0) {
-      appendSearchParams(params, route.slice(routeQueryIndex + 1))
-    } else if (route.startsWith('?')) {
-      appendSearchParams(params, route.slice(1))
-    }
-  }
-
-  return params
-}
-
-function parseLaunchMode(data?: Pick<PluginInitData, 'featureCode' | 'route'>): {
-  mode: AppMode
-  historyItemId?: string
-} {
-  const params = collectLaunchParams(data?.route)
-  const route = data?.route ?? ''
-  const modeParam = params.get('mode')
-  const historyItemId = params.get('historyItemId') ?? undefined
-
-  if (historyItemId) {
-    return { mode: 'annotate', historyItemId }
-  }
-
-  if (
-    data?.featureCode === 'history' ||
-    modeParam === 'history' ||
-    route === 'history' ||
-    route.endsWith('/history')
-  ) {
-    return { mode: 'history' }
-  }
-
-  return { mode: 'annotate' }
-}
-
-function getInitialMode(): AppMode {
-  return parseLaunchMode().mode
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max)
-}
-
-function normalizeRect(start: Point, end: Point): Rect {
-  return {
-    x: Math.min(start.x, end.x),
-    y: Math.min(start.y, end.y),
-    width: Math.abs(end.x - start.x),
-    height: Math.abs(end.y - start.y)
-  }
-}
-
-function getDisplaySize(image: LoadedImage) {
-  if (image.displaySize?.width && image.displaySize.height) {
-    return image.displaySize
-  }
-
-  const regionWidth = image.region?.width
-  const regionHeight = image.region?.height
-
-  if (regionWidth && regionHeight) {
-    return { width: regionWidth, height: regionHeight }
-  }
-
-  return {
-    width: Math.max(240, Math.round(image.width / image.scaleFactor)),
-    height: Math.max(120, Math.round(image.height / image.scaleFactor))
-  }
-}
-
-function getPreviewDisplaySize(data: {
-  region?: CaptureRegion
-  scaleFactor: number
-  naturalWidth?: number
-  naturalHeight?: number
-}) {
-  if (data.region?.width && data.region.height) {
-    return {
-      width: data.region.width,
-      height: data.region.height
-    }
-  }
-
-  if (data.naturalWidth && data.naturalHeight) {
-    return {
-      width: Math.max(240, Math.round(data.naturalWidth / data.scaleFactor)),
-      height: Math.max(120, Math.round(data.naturalHeight / data.scaleFactor))
-    }
-  }
-
-  return {
-    width: TOOLBAR_MIN_WIDTH,
-    height: Math.max(240, window.innerHeight - TOOLBAR_HEIGHT)
-  }
-}
-
-function fitDisplaySize(size: DisplaySize, viewport: DisplaySize): DisplaySize {
-  if (size.width <= 0 || size.height <= 0) {
-    return { width: 0, height: 0 }
-  }
-
-  const safeViewport = {
-    width: viewport.width > 0 ? viewport.width : Math.max(1, window.innerWidth),
-    height: viewport.height > 0 ? viewport.height : Math.max(1, window.innerHeight - TOOLBAR_HEIGHT)
-  }
-  const scale = Math.min(
-    1,
-    safeViewport.width / size.width,
-    safeViewport.height / size.height
-  )
-
-  return {
-    width: Math.max(1, Math.floor(size.width * scale)),
-    height: Math.max(1, Math.floor(size.height * scale))
-  }
-}
-
-function buildConstrainedBounds(args: {
-  displaySize: DisplaySize
-  region?: CaptureRegion
-  workArea?: { x: number; y: number; width: number; height: number }
-}) {
-  const requestedWidth = Math.max(args.displaySize.width, TOOLBAR_MIN_WIDTH)
-  const requestedHeight = args.displaySize.height + TOOLBAR_HEIGHT
-
-  if (!args.region || !args.workArea) {
-    return {
-      width: requestedWidth,
-      height: requestedHeight
-    }
-  }
-
-  const width = Math.max(1, Math.min(requestedWidth, args.workArea.width))
-  const height = Math.max(1, Math.min(requestedHeight, args.workArea.height))
-
-  return {
-    x: clamp(args.region.x, args.workArea.x, args.workArea.x + Math.max(0, args.workArea.width - width)),
-    y: clamp(args.region.y, args.workArea.y, args.workArea.y + Math.max(0, args.workArea.height - height)),
-    width,
-    height
-  }
-}
-
-function clampRect(rect: Rect, canvas: HTMLCanvasElement): Rect {
-  const x = Math.max(0, Math.min(rect.x, canvas.width))
-  const y = Math.max(0, Math.min(rect.y, canvas.height))
-  const maxX = Math.max(0, Math.min(rect.x + rect.width, canvas.width))
-  const maxY = Math.max(0, Math.min(rect.y + rect.height, canvas.height))
-
-  return {
-    x,
-    y,
-    width: Math.max(0, maxX - x),
-    height: Math.max(0, maxY - y)
-  }
-}
-
-function pointDistanceToSegment(point: Point, start: Point, end: Point) {
-  const dx = end.x - start.x
-  const dy = end.y - start.y
-  const lengthSquared = dx * dx + dy * dy
-
-  if (lengthSquared === 0) {
-    return Math.hypot(point.x - start.x, point.y - start.y)
-  }
-
-  const t = clamp(
-    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared,
-    0,
-    1
-  )
-  const projection = {
-    x: start.x + t * dx,
-    y: start.y + t * dy
-  }
-
-  return Math.hypot(point.x - projection.x, point.y - projection.y)
-}
-
-function isPointInRect(point: Point, rect: Rect, padding = 0) {
-  return (
-    point.x >= rect.x - padding &&
-    point.y >= rect.y - padding &&
-    point.x <= rect.x + rect.width + padding &&
-    point.y <= rect.y + rect.height + padding
-  )
-}
-
-function isPointNearRectStroke(point: Point, rect: Rect, tolerance: number) {
-  if (rect.width <= 0 || rect.height <= 0) {
-    return false
-  }
-
-  const insideOuter = isPointInRect(point, rect, tolerance)
-  const insideInner =
-    rect.width > tolerance * 2 &&
-    rect.height > tolerance * 2 &&
-    isPointInRect(
-      point,
-      {
-        x: rect.x + tolerance,
-        y: rect.y + tolerance,
-        width: rect.width - tolerance * 2,
-        height: rect.height - tolerance * 2
-      }
-    )
-
-  return insideOuter && !insideInner
-}
-
-function isPointNearEllipseStroke(point: Point, rect: Rect, tolerance: number) {
-  const radiusX = rect.width / 2
-  const radiusY = rect.height / 2
-
-  if (radiusX <= 0 || radiusY <= 0) {
-    return false
-  }
-
-  const centerX = rect.x + radiusX
-  const centerY = rect.y + radiusY
-  const normalizedDistance = Math.hypot(
-    (point.x - centerX) / radiusX,
-    (point.y - centerY) / radiusY
-  )
-  const normalizedTolerance = tolerance / Math.max(1, Math.min(radiusX, radiusY))
-
-  return Math.abs(normalizedDistance - 1) <= normalizedTolerance
-}
-
-function isStrokeAnnotation(annotation: Annotation): annotation is StrokeAnnotation {
-  return annotation.type === 'pen' || annotation.type === 'highlighter'
-}
-
-function isDragAnnotation(annotation: Annotation): annotation is ShapeAnnotation | EffectAnnotation {
-  return (
-    annotation.type === 'line' ||
-    annotation.type === 'rect' ||
-    annotation.type === 'ellipse' ||
-    annotation.type === 'arrow' ||
-    annotation.type === 'mosaic' ||
-    annotation.type === 'blur'
-  )
-}
-
-function getEditableAnnotationTypeForTool(tool: Tool): Annotation['type'] | null {
-  if (
-    tool === 'line' ||
-    tool === 'rect' ||
-    tool === 'ellipse' ||
-    tool === 'arrow' ||
-    tool === 'pen' ||
-    tool === 'highlighter' ||
-    tool === 'text' ||
-    tool === 'step' ||
-    tool === 'mosaic' ||
-    tool === 'blur'
-  ) {
-    return tool
-  }
-
-  return null
-}
-
-function visualSizeToImageSize(visualSize: number, imageToCssScale: number) {
-  return Math.max(1, visualSize / Math.max(imageToCssScale, 0.01))
-}
-
-function isWideTextCharacter(character: string) {
-  const codePoint = character.codePointAt(0) ?? 0
-  return (
-    (codePoint >= 0x1100 && codePoint <= 0x11ff) ||
-    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
-    (codePoint >= 0xac00 && codePoint <= 0xd7af) ||
-    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-    (codePoint >= 0xff00 && codePoint <= 0xffef)
-  )
-}
-
-function estimateTextWidth(text: string, fontSize: number) {
-  return Array.from(text).reduce((width, character) => {
-    if (character === ' ') {
-      return width + fontSize * 0.34
-    }
-
-    if (isWideTextCharacter(character)) {
-      return width + fontSize
-    }
-
-    return width + fontSize * 0.58
-  }, 0)
-}
-
-function getTextBoxWidth(annotation: TextAnnotation) {
-  const fontSize = Math.max(14, annotation.size)
-
-  if (annotation.boxWidth && Number.isFinite(annotation.boxWidth)) {
-    return Math.max(TEXT_BOX_MIN_WIDTH, fontSize * 4, annotation.boxWidth)
-  }
-
-  const paddingX = Math.max(8, fontSize * 0.28)
-  const estimatedWidth = annotation.text.split(/\r?\n/).reduce((maxWidth, line) => {
-    return Math.max(maxWidth, estimateTextWidth(line, fontSize))
-  }, 0)
-
-  return Math.max(TEXT_BOX_MIN_WIDTH, fontSize * 4, estimatedWidth + paddingX * 2)
-}
-
-function wrapTextParagraph(
-  paragraph: string,
-  maxWidth: number,
-  measureText: (text: string) => number
-) {
-  if (!paragraph) {
-    return ['']
-  }
-
-  const lines: string[] = []
-  let currentLine = ''
-
-  Array.from(paragraph.replace(/\t/g, ' ')).forEach((character) => {
-    const nextLine = `${currentLine}${character}`
-    if (currentLine && measureText(nextLine) > maxWidth) {
-      lines.push(currentLine.trimEnd())
-      currentLine = character.trimStart()
-      return
-    }
-
-    currentLine = nextLine
-  })
-
-  lines.push(currentLine.trimEnd())
-  return lines
-}
-
-function getWrappedTextLines(
-  annotation: TextAnnotation,
-  measureText?: (text: string) => number
-) {
-  const fontSize = Math.max(14, annotation.size)
-  const paddingX = Math.max(8, fontSize * 0.28)
-  const boxWidth = getTextBoxWidth(annotation)
-  const maxLineWidth = Math.max(fontSize, boxWidth - paddingX * 2)
-  const measure = measureText ?? ((line: string) => estimateTextWidth(line, fontSize))
-  const lines = annotation.text.split(/\r?\n/).flatMap((paragraph) =>
-    wrapTextParagraph(paragraph, maxLineWidth, measure)
-  )
-
-  return lines.length ? lines : ['']
-}
-
-function getTextBounds(annotation: TextAnnotation): Rect {
-  const fontSize = Math.max(14, annotation.size)
-  const paddingX = Math.max(8, fontSize * 0.28)
-  const paddingY = Math.max(6, fontSize * 0.2)
-  const lineHeight = fontSize * 1.25
-  const displayLines = getWrappedTextLines(annotation)
-
-  return {
-    x: annotation.point.x,
-    y: annotation.point.y,
-    width: Math.max(TEXT_BOX_MIN_WIDTH, getTextBoxWidth(annotation), paddingX * 2),
-    height: displayLines.length * lineHeight + paddingY * 2
-  }
-}
-
-function getAnnotationBounds(annotation: Annotation): Rect {
-  if (annotation.type === 'text') {
-    return getTextBounds(annotation)
-  }
-
-  if (annotation.type === 'step') {
-    const radius = Math.max(14, annotation.size * 0.7)
-    return {
-      x: annotation.point.x - radius,
-      y: annotation.point.y - radius,
-      width: radius * 2,
-      height: radius * 2
-    }
-  }
-
-  if (isStrokeAnnotation(annotation)) {
-    if (!annotation.points.length) {
-      return { x: 0, y: 0, width: 0, height: 0 }
-    }
-
-    let minX = Infinity
-    let minY = Infinity
-    let maxX = -Infinity
-    let maxY = -Infinity
-
-    annotation.points.forEach((point) => {
-      minX = Math.min(minX, point.x)
-      minY = Math.min(minY, point.y)
-      maxX = Math.max(maxX, point.x)
-      maxY = Math.max(maxY, point.y)
-    })
-
-    const padding = annotation.size + 4
-    return {
-      x: minX - padding,
-      y: minY - padding,
-      width: maxX - minX + padding * 2,
-      height: maxY - minY + padding * 2
-    }
-  }
-
-  const rect = normalizeRect(annotation.start, annotation.end)
-  const padding = annotation.size + 4
-  return {
-    x: rect.x - padding,
-    y: rect.y - padding,
-    width: rect.width + padding * 2,
-    height: rect.height + padding * 2
-  }
-}
-
-function hitTestAnnotation(point: Point, annotations: Annotation[], filterType?: Annotation['type']) {
-  for (let index = annotations.length - 1; index >= 0; index -= 1) {
-    const annotation = annotations[index]
-
-    if (filterType && annotation.type !== filterType) {
-      continue
-    }
-
-    if (isStrokeAnnotation(annotation)) {
-      for (let pointIndex = 1; pointIndex < annotation.points.length; pointIndex += 1) {
-        const distance = pointDistanceToSegment(
-          point,
-          annotation.points[pointIndex - 1],
-          annotation.points[pointIndex]
-        )
-
-        if (distance <= annotation.size + 8) {
-          return annotation.id
-        }
-      }
-      continue
-    }
-
-    if (annotation.type === 'line' || annotation.type === 'arrow') {
-      if (pointDistanceToSegment(point, annotation.start, annotation.end) <= annotation.size + 10) {
-        return annotation.id
-      }
-      continue
-    }
-
-    if (annotation.type === 'rect') {
-      if (isPointNearRectStroke(point, normalizeRect(annotation.start, annotation.end), annotation.size + 8)) {
-        return annotation.id
-      }
-      continue
-    }
-
-    if (annotation.type === 'ellipse') {
-      if (isPointNearEllipseStroke(point, normalizeRect(annotation.start, annotation.end), annotation.size + 8)) {
-        return annotation.id
-      }
-      continue
-    }
-
-    if (annotation.type === 'mosaic' || annotation.type === 'blur') {
-      if (isPointInRect(point, normalizeRect(annotation.start, annotation.end), 8)) {
-        return annotation.id
-      }
-      continue
-    }
-
-    if (annotation.type === 'text') {
-      if (isPointInRect(point, getTextBounds(annotation), 8)) {
-        return annotation.id
-      }
-      continue
-    }
-
-    if (annotation.type === 'step') {
-      const radius = Math.max(14, annotation.size * 0.7)
-      if (Math.hypot(point.x - annotation.point.x, point.y - annotation.point.y) <= radius + 8) {
-        return annotation.id
-      }
-    }
-  }
-
-  return null
-}
-
-function annotationHasRenderableArea(annotation: Annotation) {
-  if (isStrokeAnnotation(annotation)) {
-    return annotation.points.length > 1
-  }
-
-  if (annotation.type === 'text') {
-    return annotation.text.trim().length > 0
-  }
-
-  if (annotation.type === 'step') {
-    return annotation.value.trim().length > 0
-  }
-
-  const rect = normalizeRect(annotation.start, annotation.end)
-  return rect.width > 4 || rect.height > 4
-}
-
-function moveAnnotation(annotation: Annotation, delta: Point): Annotation {
-  if (isStrokeAnnotation(annotation)) {
-    return {
-      ...annotation,
-      points: annotation.points.map((point) => ({
-        x: point.x + delta.x,
-        y: point.y + delta.y
-      }))
-    }
-  }
-
-  if (annotation.type === 'text' || annotation.type === 'step') {
-    return {
-      ...annotation,
-      point: {
-        x: annotation.point.x + delta.x,
-        y: annotation.point.y + delta.y
-      }
-    }
-  }
-
-  return {
-    ...annotation,
-    start: {
-      x: annotation.start.x + delta.x,
-      y: annotation.start.y + delta.y
-    },
-    end: {
-      x: annotation.end.x + delta.x,
-      y: annotation.end.y + delta.y
-    }
-  }
-}
-
-function snapPointTo45Degrees(origin: Point, point: Point): Point {
-  const dx = point.x - origin.x
-  const dy = point.y - origin.y
-  const length = Math.hypot(dx, dy)
-
-  if (length === 0) {
-    return point
-  }
-
-  const snappedAngle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4)
-  return {
-    x: origin.x + Math.cos(snappedAngle) * length,
-    y: origin.y + Math.sin(snappedAngle) * length
-  }
-}
-
-function snapPointToSquare(origin: Point, point: Point): Point {
-  const dx = point.x - origin.x
-  const dy = point.y - origin.y
-  const side = Math.max(Math.abs(dx), Math.abs(dy))
-
-  return {
-    x: origin.x + (dx < 0 ? -side : side),
-    y: origin.y + (dy < 0 ? -side : side)
-  }
-}
-
-function getResizeHandlePoints(rect: Rect): Array<{ mode: ResizeHandle; point: Point }> {
-  const left = rect.x
-  const right = rect.x + rect.width
-  const top = rect.y
-  const bottom = rect.y + rect.height
-  const centerX = rect.x + rect.width / 2
-  const centerY = rect.y + rect.height / 2
-
-  return [
-    { mode: 'resize-nw', point: { x: left, y: top } },
-    { mode: 'resize-n', point: { x: centerX, y: top } },
-    { mode: 'resize-ne', point: { x: right, y: top } },
-    { mode: 'resize-e', point: { x: right, y: centerY } },
-    { mode: 'resize-se', point: { x: right, y: bottom } },
-    { mode: 'resize-s', point: { x: centerX, y: bottom } },
-    { mode: 'resize-sw', point: { x: left, y: bottom } },
-    { mode: 'resize-w', point: { x: left, y: centerY } }
-  ]
-}
-
-function resizeRectFromHandle(rect: Rect, mode: ResizeHandle, point: Point, keepSquare: boolean) {
-  const handle = mode.replace('resize-', '')
-  let left = rect.x
-  let right = rect.x + rect.width
-  let top = rect.y
-  let bottom = rect.y + rect.height
-  const isCorner = handle.length === 2
-  const minSize = 4
-
-  if (keepSquare && isCorner) {
-    const fixedCorner = {
-      x: handle.includes('w') ? right : left,
-      y: handle.includes('n') ? bottom : top
-    }
-    const controlledPoint = snapPointToSquare(fixedCorner, point)
-
-    if (handle.includes('w')) {
-      left = controlledPoint.x
-    } else {
-      right = controlledPoint.x
-    }
-
-    if (handle.includes('n')) {
-      top = controlledPoint.y
-    } else {
-      bottom = controlledPoint.y
-    }
-  } else {
-    if (handle.includes('w')) {
-      left = point.x
-    }
-    if (handle.includes('e')) {
-      right = point.x
-    }
-    if (handle.includes('n')) {
-      top = point.y
-    }
-    if (handle.includes('s')) {
-      bottom = point.y
-    }
-  }
-
-  if (Math.abs(right - left) < minSize) {
-    const direction = right >= left ? 1 : -1
-    if (handle.includes('w')) {
-      left = right - direction * minSize
-    } else if (handle.includes('e')) {
-      right = left + direction * minSize
-    }
-  }
-
-  if (Math.abs(bottom - top) < minSize) {
-    const direction = bottom >= top ? 1 : -1
-    if (handle.includes('n')) {
-      top = bottom - direction * minSize
-    } else if (handle.includes('s')) {
-      bottom = top + direction * minSize
-    }
-  }
-
-  return {
-    start: { x: left, y: top },
-    end: { x: right, y: bottom }
-  }
-}
-
-function resizeAnnotation(
-  annotation: Annotation,
-  mode: EditHandleMode,
-  startPoint: Point,
-  currentPoint: Point,
-  modifiers: { shiftKey: boolean }
-): Annotation {
-  if (mode === 'move') {
-    return moveAnnotation(annotation, {
-      x: currentPoint.x - startPoint.x,
-      y: currentPoint.y - startPoint.y
-    })
-  }
-
-  if ((annotation.type === 'line' || annotation.type === 'arrow') && mode === 'line-start') {
-    const nextStart = modifiers.shiftKey
-      ? snapPointTo45Degrees(annotation.end, currentPoint)
-      : currentPoint
-    return { ...annotation, start: nextStart }
-  }
-
-  if ((annotation.type === 'line' || annotation.type === 'arrow') && mode === 'line-end') {
-    const nextEnd = modifiers.shiftKey
-      ? snapPointTo45Degrees(annotation.start, currentPoint)
-      : currentPoint
-    return { ...annotation, end: nextEnd }
-  }
-
-  if ((annotation.type === 'rect' || annotation.type === 'ellipse') && mode.startsWith('resize-')) {
-    const nextRect = resizeRectFromHandle(
-      normalizeRect(annotation.start, annotation.end),
-      mode as ResizeHandle,
-      currentPoint,
-      modifiers.shiftKey
-    )
-    return { ...annotation, ...nextRect }
-  }
-
-  if (annotation.type === 'text' && mode === 'text-width') {
-    return {
-      ...annotation,
-      boxWidth: Math.max(TEXT_BOX_MIN_WIDTH, currentPoint.x - annotation.point.x)
-    }
-  }
-
-  return annotation
-}
-
-function isPointInHandle(point: Point, handlePoint: Point, handleSize: number) {
-  const halfSize = handleSize / 2
-  return isPointInRect(
-    point,
-    {
-      x: handlePoint.x - halfSize,
-      y: handlePoint.y - halfSize,
-      width: handleSize,
-      height: handleSize
-    }
-  )
-}
-
-function hitTestEditHandle(
-  point: Point,
-  annotation: Annotation,
-  imageToCssScale: number,
-  includeMove = true
-): EditHandle | null {
-  const hitSize = visualSizeToImageSize(EDIT_HANDLE_HIT_VISUAL_SIZE, imageToCssScale)
-  const hitRadius = hitSize / 2
-
-  if (annotation.type === 'line' || annotation.type === 'arrow') {
-    if (Math.hypot(point.x - annotation.start.x, point.y - annotation.start.y) <= hitRadius) {
-      return { id: annotation.id, mode: 'line-start' }
-    }
-
-    if (Math.hypot(point.x - annotation.end.x, point.y - annotation.end.y) <= hitRadius) {
-      return { id: annotation.id, mode: 'line-end' }
-    }
-  }
-
-  if (annotation.type === 'rect' || annotation.type === 'ellipse') {
-    const hitHandle = getResizeHandlePoints(normalizeRect(annotation.start, annotation.end)).find((handle) =>
-      isPointInHandle(point, handle.point, hitSize)
-    )
-
-    if (hitHandle) {
-      return { id: annotation.id, mode: hitHandle.mode }
-    }
-  }
-
-  if (annotation.type === 'text') {
-    const bounds = getTextBounds(annotation)
-    const widthHandle = {
-      x: bounds.x + bounds.width,
-      y: bounds.y + bounds.height
-    }
-
-    if (isPointInHandle(point, widthHandle, hitSize)) {
-      return { id: annotation.id, mode: 'text-width' }
-    }
-  }
-
-  if (includeMove && hitTestAnnotation(point, [annotation]) === annotation.id) {
-    return { id: annotation.id, mode: 'move' }
-  }
-
-  return null
-}
-
-function cursorForEditMode(mode: EditHandleMode, dragging = false) {
-  if (mode === 'move') {
-    return dragging ? 'grabbing' : 'move'
-  }
-
-  if (mode === 'line-start' || mode === 'line-end') {
-    return 'crosshair'
-  }
-
-  if (mode === 'text-width' || mode === 'resize-e' || mode === 'resize-w') {
-    return 'ew-resize'
-  }
-
-  if (mode === 'resize-n' || mode === 'resize-s') {
-    return 'ns-resize'
-  }
-
-  if (mode === 'resize-ne' || mode === 'resize-sw') {
-    return 'nesw-resize'
-  }
-
-  return 'nwse-resize'
-}
-
-function drawTaperedArrow(
-  context: CanvasRenderingContext2D,
-  start: Point,
-  end: Point,
-  size: number
-) {
-  const dx = end.x - start.x
-  const dy = end.y - start.y
-  const length = Math.hypot(dx, dy)
-
-  if (length < 1) {
-    return
-  }
-
-  const directionX = dx / length
-  const directionY = dy / length
-  const normalX = -directionY
-  const normalY = directionX
-  const tailWidth = Math.max(1.5, size * 0.45)
-  const shaftWidth = Math.max(tailWidth + 1, size * 1.35)
-  const headLength = Math.min(Math.max(12, size * 4.8), length * 0.62)
-  const headWidth = Math.max(shaftWidth * 2.45, size * 4.2)
-  const headBase = {
-    x: end.x - directionX * headLength,
-    y: end.y - directionY * headLength
-  }
-
-  context.save()
-  context.fillStyle = context.strokeStyle
-  context.beginPath()
-  context.moveTo(
-    start.x + normalX * tailWidth / 2,
-    start.y + normalY * tailWidth / 2
-  )
-  context.lineTo(
-    headBase.x + normalX * shaftWidth / 2,
-    headBase.y + normalY * shaftWidth / 2
-  )
-  context.lineTo(
-    headBase.x + normalX * headWidth / 2,
-    headBase.y + normalY * headWidth / 2
-  )
-  context.lineTo(end.x, end.y)
-  context.lineTo(
-    headBase.x - normalX * headWidth / 2,
-    headBase.y - normalY * headWidth / 2
-  )
-  context.lineTo(
-    headBase.x - normalX * shaftWidth / 2,
-    headBase.y - normalY * shaftWidth / 2
-  )
-  context.lineTo(
-    start.x - normalX * tailWidth / 2,
-    start.y - normalY * tailWidth / 2
-  )
-  context.closePath()
-  context.fill()
-
-  context.beginPath()
-  context.arc(start.x, start.y, tailWidth / 2, 0, Math.PI * 2)
-  context.fill()
-  context.restore()
-}
-
-function pixelateRect(context: CanvasRenderingContext2D, rect: Rect, cellSize: number) {
-  const safeRect = clampRect(rect, context.canvas)
-  if (safeRect.width < 2 || safeRect.height < 2) {
-    return
-  }
-
-  const cell = Math.max(6, Math.round(cellSize))
-  const smallCanvas = document.createElement('canvas')
-  smallCanvas.width = Math.max(1, Math.ceil(safeRect.width / cell))
-  smallCanvas.height = Math.max(1, Math.ceil(safeRect.height / cell))
-
-  const smallContext = smallCanvas.getContext('2d')
-  if (!smallContext) {
-    return
-  }
-
-  smallContext.drawImage(
-    context.canvas,
-    safeRect.x,
-    safeRect.y,
-    safeRect.width,
-    safeRect.height,
-    0,
-    0,
-    smallCanvas.width,
-    smallCanvas.height
-  )
-
-  context.save()
-  context.imageSmoothingEnabled = false
-  context.drawImage(
-    smallCanvas,
-    0,
-    0,
-    smallCanvas.width,
-    smallCanvas.height,
-    safeRect.x,
-    safeRect.y,
-    safeRect.width,
-    safeRect.height
-  )
-  context.strokeStyle = 'rgba(255, 255, 255, 0.45)'
-  context.lineWidth = Math.max(1, cell / 14)
-  context.strokeRect(safeRect.x, safeRect.y, safeRect.width, safeRect.height)
-  context.restore()
-}
-
-function blurRect(context: CanvasRenderingContext2D, rect: Rect, radius: number) {
-  const safeRect = clampRect(rect, context.canvas)
-  if (safeRect.width < 2 || safeRect.height < 2) {
-    return
-  }
-
-  const sourceCanvas = document.createElement('canvas')
-  sourceCanvas.width = safeRect.width
-  sourceCanvas.height = safeRect.height
-
-  const sourceContext = sourceCanvas.getContext('2d')
-  if (!sourceContext) {
-    return
-  }
-
-  sourceContext.drawImage(
-    context.canvas,
-    safeRect.x,
-    safeRect.y,
-    safeRect.width,
-    safeRect.height,
-    0,
-    0,
-    safeRect.width,
-    safeRect.height
-  )
-
-  context.save()
-  context.filter = `blur(${Math.max(2, radius)}px)`
-  context.drawImage(sourceCanvas, safeRect.x, safeRect.y)
-  context.filter = 'none'
-  context.setLineDash([10, 7])
-  context.strokeStyle = 'rgba(255, 255, 255, 0.42)'
-  context.lineWidth = Math.max(1, radius / 8)
-  context.strokeRect(safeRect.x, safeRect.y, safeRect.width, safeRect.height)
-  context.restore()
-}
-
-function drawTextAnnotation(context: CanvasRenderingContext2D, annotation: TextAnnotation) {
-  const fontSize = Math.max(14, annotation.size)
-  const lineHeight = fontSize * 1.25
-
-  context.save()
-  context.font = `700 ${fontSize}px "Segoe UI", "PingFang SC", sans-serif`
-  context.textBaseline = 'top'
-
-  const paddingX = Math.max(8, fontSize * 0.28)
-  const paddingY = Math.max(6, fontSize * 0.2)
-  const blockWidth = getTextBoxWidth(annotation)
-  const maxLineWidth = Math.max(fontSize, blockWidth - paddingX * 2)
-  const displayLines = getWrappedTextLines(annotation, (line) => context.measureText(line).width)
-
-  context.lineJoin = 'round'
-  context.lineWidth = Math.max(2, fontSize * 0.12)
-  context.strokeStyle = 'rgba(6, 11, 20, 0.7)'
-  context.fillStyle = annotation.color
-
-  displayLines.forEach((line, index) => {
-    const y = annotation.point.y + paddingY + index * lineHeight
-    context.strokeText(line, annotation.point.x + paddingX, y, maxLineWidth)
-    context.fillText(line, annotation.point.x + paddingX, y, maxLineWidth)
-  })
-
-  context.restore()
-}
-
-function drawStepAnnotation(context: CanvasRenderingContext2D, annotation: StepAnnotation) {
-  const radius = Math.max(14, annotation.size * 0.7)
-
-  context.save()
-  context.fillStyle = annotation.color
-  context.shadowColor = 'rgba(5, 12, 22, 0.34)'
-  context.shadowBlur = 14
-  context.beginPath()
-  context.arc(annotation.point.x, annotation.point.y, radius, 0, Math.PI * 2)
-  context.fill()
-
-  context.shadowBlur = 0
-  context.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-  context.lineWidth = Math.max(2, radius * 0.12)
-  context.stroke()
-  context.fillStyle = '#fff'
-  context.font = `800 ${Math.max(12, radius * (annotation.value.length > 2 ? 0.82 : 1))}px "Segoe UI", sans-serif`
-  context.textAlign = 'center'
-  context.textBaseline = 'middle'
-  context.fillText(annotation.value, annotation.point.x, annotation.point.y, radius * 1.55)
-  context.restore()
-}
-
-function drawAnnotation(context: CanvasRenderingContext2D, annotation: Annotation) {
-  if (annotation.type === 'mosaic') {
-    pixelateRect(context, normalizeRect(annotation.start, annotation.end), annotation.size)
-    return
-  }
-
-  if (annotation.type === 'blur') {
-    blurRect(context, normalizeRect(annotation.start, annotation.end), annotation.size)
-    return
-  }
-
-  if (annotation.type === 'text') {
-    drawTextAnnotation(context, annotation)
-    return
-  }
-
-  if (annotation.type === 'step') {
-    drawStepAnnotation(context, annotation)
-    return
-  }
-
-  context.save()
-  context.lineCap = 'round'
-  context.lineJoin = 'round'
-  context.strokeStyle = annotation.color
-  context.lineWidth = annotation.size
-
-  if (annotation.type === 'highlighter') {
-    context.globalAlpha = 0.34
-    context.lineWidth = annotation.size * 2.5
-  }
-
-  if (annotation.type === 'rect') {
-    const rect = normalizeRect(annotation.start, annotation.end)
-    context.strokeRect(rect.x, rect.y, rect.width, rect.height)
-  }
-
-  if (annotation.type === 'ellipse') {
-    const rect = normalizeRect(annotation.start, annotation.end)
-    context.beginPath()
-    context.ellipse(
-      rect.x + rect.width / 2,
-      rect.y + rect.height / 2,
-      rect.width / 2,
-      rect.height / 2,
-      0,
-      0,
-      Math.PI * 2
-    )
-    context.stroke()
-  }
-
-  if (annotation.type === 'line') {
-    context.beginPath()
-    context.moveTo(annotation.start.x, annotation.start.y)
-    context.lineTo(annotation.end.x, annotation.end.y)
-    context.stroke()
-  }
-
-  if (annotation.type === 'arrow') {
-    drawTaperedArrow(context, annotation.start, annotation.end, annotation.size)
-  }
-
-  if ((annotation.type === 'pen' || annotation.type === 'highlighter') && annotation.points.length > 1) {
-    context.beginPath()
-    context.moveTo(annotation.points[0].x, annotation.points[0].y)
-    annotation.points.slice(1).forEach((point) => {
-      context.lineTo(point.x, point.y)
-    })
-    context.stroke()
-  }
-
-  context.restore()
-}
-
-function drawSelectionOverlay(context: CanvasRenderingContext2D, rect: Rect) {
-  if (rect.width < 2 || rect.height < 2) {
-    return
-  }
-
-  context.save()
-  context.fillStyle = 'rgba(3, 8, 15, 0.42)'
-  context.beginPath()
-  context.rect(0, 0, context.canvas.width, context.canvas.height)
-  context.rect(rect.x, rect.y, rect.width, rect.height)
-  context.fill('evenodd')
-
-  context.setLineDash([10, 6])
-  context.lineWidth = 2
-  context.strokeStyle = 'rgba(255, 255, 255, 0.92)'
-  context.strokeRect(rect.x, rect.y, rect.width, rect.height)
-
-  context.setLineDash([])
-  context.fillStyle = '#ffffff'
-  const handleSize = 8
-  const halfHandle = handleSize / 2
-  const handles = [
-    [rect.x, rect.y],
-    [rect.x + rect.width, rect.y],
-    [rect.x, rect.y + rect.height],
-    [rect.x + rect.width, rect.y + rect.height]
-  ]
-
-  handles.forEach(([x, y]) => {
-    context.fillRect(x - halfHandle, y - halfHandle, handleSize, handleSize)
-  })
-
-  context.restore()
-}
-
-function drawAnnotationHighlight(
-  context: CanvasRenderingContext2D,
-  annotation: Annotation,
-  imageToCssScale: number
-) {
-  const handleSize = visualSizeToImageSize(EDIT_HANDLE_VISUAL_SIZE, imageToCssScale)
-  const halfHandle = handleSize / 2
-  const strokeWidth = Math.max(1, visualSizeToImageSize(1.5, imageToCssScale))
-
-  const drawSquareHandle = (point: Point) => {
-    context.fillStyle = '#f8fafc'
-    context.strokeStyle = '#2563eb'
-    context.lineWidth = strokeWidth
-    context.fillRect(point.x - halfHandle, point.y - halfHandle, handleSize, handleSize)
-    context.strokeRect(point.x - halfHandle, point.y - halfHandle, handleSize, handleSize)
-  }
-
-  const drawCircleHandle = (point: Point) => {
-    context.fillStyle = '#f8fafc'
-    context.strokeStyle = '#2563eb'
-    context.lineWidth = strokeWidth
-    context.beginPath()
-    context.arc(point.x, point.y, halfHandle, 0, Math.PI * 2)
-    context.fill()
-    context.stroke()
-  }
-
-  context.save()
-  context.setLineDash([8, 5])
-  context.lineWidth = strokeWidth
-  context.strokeStyle = '#60a5fa'
-
-  if (annotation.type === 'line' || annotation.type === 'arrow') {
-    context.beginPath()
-    context.moveTo(annotation.start.x, annotation.start.y)
-    context.lineTo(annotation.end.x, annotation.end.y)
-    context.stroke()
-    context.setLineDash([])
-    drawCircleHandle(annotation.start)
-    drawCircleHandle(annotation.end)
-    context.restore()
-    return
-  }
-
-  if (annotation.type === 'rect' || annotation.type === 'ellipse') {
-    const rect = normalizeRect(annotation.start, annotation.end)
-
-    if (annotation.type === 'ellipse') {
-      context.beginPath()
-      context.ellipse(
-        rect.x + rect.width / 2,
-        rect.y + rect.height / 2,
-        rect.width / 2,
-        rect.height / 2,
-        0,
-        0,
-        Math.PI * 2
-      )
-      context.stroke()
-    } else {
-      context.strokeRect(rect.x, rect.y, rect.width, rect.height)
-    }
-
-    context.setLineDash([])
-    getResizeHandlePoints(rect).forEach((handle) => drawSquareHandle(handle.point))
-    context.restore()
-    return
-  }
-
-  const bounds = getAnnotationBounds(annotation)
-  const margin = visualSizeToImageSize(5, imageToCssScale)
-  const x = bounds.x - margin
-  const y = bounds.y - margin
-  const width = bounds.width + margin * 2
-  const height = bounds.height + margin * 2
-
-  if (annotation.type === 'step') {
-    const radius = Math.max(14, annotation.size * 0.7) + margin
-    context.beginPath()
-    context.arc(annotation.point.x, annotation.point.y, radius, 0, Math.PI * 2)
-    context.stroke()
-    context.restore()
-    return
-  }
-
-  context.strokeRect(x, y, width, height)
-  context.setLineDash([])
-
-  if (annotation.type === 'text') {
-    drawSquareHandle({
-      x: bounds.x + bounds.width,
-      y: bounds.y + bounds.height
-    })
-  }
-
-  context.restore()
-}
-
-function renderCanvas(args: {
-  canvas: HTMLCanvasElement | null
-  image: LoadedImage | null
-  annotations: Annotation[]
-  draft: Annotation | null
-  cropRect: Rect | null
-  selectedAnnotationId: string | null
-  imageToCssScale: number
-}) {
-  const { canvas, image, annotations, draft, cropRect, selectedAnnotationId, imageToCssScale } = args
-
-  if (!canvas || !image) {
-    return
-  }
-
-  const context = canvas.getContext('2d')
-  if (!context) {
-    return
-  }
-
-  canvas.width = image.width
-  canvas.height = image.height
-  context.clearRect(0, 0, image.width, image.height)
-  context.drawImage(image.element, 0, 0, image.width, image.height)
-  annotations.forEach((annotation) => drawAnnotation(context, annotation))
-
-  if (draft) {
-    drawAnnotation(context, draft)
-  }
-
-  if (cropRect) {
-    drawSelectionOverlay(context, cropRect)
-  }
-
-  if (selectedAnnotationId) {
-    const selectedAnnotation = annotations.find((annotation) => annotation.id === selectedAnnotationId)
-    if (selectedAnnotation) {
-      drawAnnotationHighlight(context, selectedAnnotation, imageToCssScale)
-    }
-  }
-}
-
-function exportPng(image: LoadedImage, annotations: Annotation[]) {
-  const canvas = document.createElement('canvas')
-  canvas.width = image.width
-  canvas.height = image.height
-
-  const context = canvas.getContext('2d')
-  if (!context) {
-    throw new Error('无法创建导出画布')
-  }
-
-  context.drawImage(image.element, 0, 0, image.width, image.height)
-  annotations.forEach((annotation) => drawAnnotation(context, annotation))
-
-  return canvas.toDataURL('image/png')
-}
-
-function asFiniteNumber(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function asPoint(value: unknown): Point | null {
-  if (!value || typeof value !== 'object') {
-    return null
-  }
-
-  const point = value as { x?: unknown; y?: unknown }
-  const x = asFiniteNumber(point.x)
-  const y = asFiniteNumber(point.y)
-
-  return x === null || y === null ? null : { x, y }
-}
-
-function asColor(value: unknown) {
-  return typeof value === 'string' && value ? value : COLORS[0]
-}
-
-function asSize(value: unknown, fallback: number) {
-  const size = asFiniteNumber(value)
-  return size === null ? fallback : Math.max(1, size)
-}
-
-function normalizeAnnotations(value: unknown): Annotation[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((raw): Annotation[] => {
-    if (!raw || typeof raw !== 'object') {
-      return []
-    }
-
-    const annotation = raw as Record<string, unknown>
-    const id = typeof annotation.id === 'string' && annotation.id ? annotation.id : createId('history')
-    const type = annotation.type
-    const color = asColor(annotation.color)
-
-    if (type === 'pen' || type === 'highlighter') {
-      const points = Array.isArray(annotation.points)
-        ? annotation.points.map(asPoint).filter((point): point is Point => Boolean(point))
-        : []
-
-      return [{
-        id,
-        type,
-        points,
-        color,
-        size: asSize(annotation.size, type === 'highlighter' ? 12 : 5)
-      }]
-    }
-
-    if (type === 'line' || type === 'rect' || type === 'ellipse' || type === 'arrow') {
-      const start = asPoint(annotation.start)
-      const end = asPoint(annotation.end)
-      if (!start || !end) {
-        return []
-      }
-
-      return [{
-        id,
-        type,
-        start,
-        end,
-        color,
-        size: asSize(annotation.size, 5)
-      }]
-    }
-
-    if (type === 'mosaic' || type === 'blur') {
-      const start = asPoint(annotation.start)
-      const end = asPoint(annotation.end)
-      if (!start || !end) {
-        return []
-      }
-
-      return [{
-        id,
-        type,
-        start,
-        end,
-        color,
-        size: asSize(annotation.size, type === 'mosaic' ? 18 : 14)
-      }]
-    }
-
-    if (type === 'text') {
-      const point = asPoint(annotation.point)
-      if (!point) {
-        return []
-      }
-
-      const boxWidth = asFiniteNumber(annotation.boxWidth)
-
-      return [{
-        id,
-        type,
-        point,
-        text: typeof annotation.text === 'string' ? annotation.text : '',
-        color,
-        size: asSize(annotation.size, 28),
-        boxWidth: boxWidth === null ? undefined : boxWidth
-      }]
-    }
-
-    if (type === 'step') {
-      const point = asPoint(annotation.point)
-      if (!point) {
-        return []
-      }
-
-      return [{
-        id,
-        type,
-        point,
-        value: typeof annotation.value === 'string' ? annotation.value : '1',
-        color,
-        size: asSize(annotation.size, 28)
-      }]
-    }
-
-    return []
-  })
-}
-
-function getHistoryCaptureRegion(item: ScreenshotHistoryItem): CaptureRegion | undefined {
-  const capture = item.capture as { region?: unknown } | undefined
-  const region = capture?.region
-
-  if (!region || typeof region !== 'object') {
-    return undefined
-  }
-
-  const source = region as Record<string, unknown>
-  const x = asFiniteNumber(source.x)
-  const y = asFiniteNumber(source.y)
-  const width = asFiniteNumber(source.width)
-  const height = asFiniteNumber(source.height)
-
-  if (x === null || y === null || width === null || height === null) {
-    return undefined
-  }
-
-  return {
-    x,
-    y,
-    width,
-    height,
-    scaleFactor: asFiniteNumber(source.scaleFactor) ?? undefined
-  }
-}
-
-function getHistoryScaleFactor(item: ScreenshotHistoryItem) {
-  const capture = item.capture as {
-    region?: { scaleFactor?: unknown }
-    display?: { scaleFactor?: unknown }
-  } | undefined
-
-  return (
-    item.imageMeta.scaleFactor ??
-    asFiniteNumber(capture?.region?.scaleFactor) ??
-    asFiniteNumber(capture?.display?.scaleFactor) ??
-    window.devicePixelRatio ??
-    1
-  )
-}
 
 export default function App() {
   const mulby = useMulby(PLUGIN_ID)
@@ -1762,29 +93,7 @@ export default function App() {
   const textEditSnapshotRef = useRef<Annotation[] | null>(null)
   const inlineTextEditRef = useRef<InlineTextEdit | null>(null)
   const inlineStepEditRef = useRef<InlineStepEdit | null>(null)
-  const inlineTextRef = useRef<HTMLTextAreaElement | null>(null)
-  const inlineStepRef = useRef<HTMLInputElement | null>(null)
-  const inlineBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const imageLoadTokenRef = useRef(0)
-  const resizeStateRef = useRef<{
-    edge: ResizeEdge
-    pointerId: number
-    startX: number
-    startY: number
-    currentX: number
-    currentY: number
-    baseBounds: { x: number; y: number; width: number; height: number }
-    rafId: number
-  } | null>(null)
-  const toolbarDragStateRef = useRef<{
-    pointerId: number
-    startX: number
-    startY: number
-    currentX: number
-    currentY: number
-    baseBounds: { x: number; y: number; width: number; height: number }
-    rafId: number
-  } | null>(null)
 
   const [mode, setMode] = useState<AppMode>(getInitialMode)
   const [image, setImage] = useState<LoadedImage | null>(null)
@@ -1937,7 +246,7 @@ export default function App() {
 
   const loadTransformedImage = useCallback(
     async (dataUrl: string, baseImage: LoadedImage, nextStatus: string) => {
-      const element = await loadImage(dataUrl)
+      const element = await loadImage(dataUrl, '截图图片加载失败')
       const nextImage: LoadedImage = {
         dataUrl,
         element,
@@ -2070,7 +379,7 @@ export default function App() {
         setStatus('正在载入历史截图')
 
         const { item, editableDataUrl } = await loadHistoryItem(mulby, historyItemId)
-        const element = await loadImage(editableDataUrl)
+        const element = await loadImage(editableDataUrl, '截图图片加载失败')
         if (imageLoadTokenRef.current !== token) {
           return
         }
@@ -2273,15 +582,6 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      if (inlineBlurTimerRef.current) {
-        clearTimeout(inlineBlurTimerRef.current)
-      }
-      if (resizeStateRef.current?.rafId) {
-        cancelAnimationFrame(resizeStateRef.current.rafId)
-      }
-      if (toolbarDragStateRef.current?.rafId) {
-        cancelAnimationFrame(toolbarDragStateRef.current.rafId)
-      }
     }
   }, [
     closeAnnotatorWindow,
@@ -2358,7 +658,7 @@ export default function App() {
 
           void applyWindowBoundsForImage(previewSize, region, !region)
 
-          const element = await loadImage(dataUrl)
+          const element = await loadImage(dataUrl, '截图图片加载失败')
           if (imageLoadTokenRef.current !== token) {
             return
           }
@@ -2417,21 +717,6 @@ export default function App() {
     }
   }, [applyWindowBoundsForImage, loadImageFromHistory, mulby, replaceAnnotations, resetEditingState])
 
-  useEffect(() => {
-    if (inlineTextEdit && inlineTextRef.current) {
-      requestAnimationFrame(() => inlineTextRef.current?.focus())
-    }
-  }, [inlineTextEdit?.id])
-
-  useEffect(() => {
-    if (inlineStepEdit && inlineStepRef.current) {
-      requestAnimationFrame(() => {
-        inlineStepRef.current?.focus()
-        inlineStepRef.current?.select()
-      })
-    }
-  }, [inlineStepEdit?.id])
-
   const getPointFromClient = useCallback((clientX: number, clientY: number): Point => {
     const canvas = canvasRef.current
     if (!canvas) {
@@ -2445,230 +730,22 @@ export default function App() {
     }
   }, [])
 
-  const flushToolbarDrag = useCallback(() => {
-    const state = toolbarDragStateRef.current
-    if (!state) {
-      return
-    }
-
-    state.rafId = 0
-    void mulby.window.setBounds({
-      x: state.baseBounds.x + state.currentX - state.startX,
-      y: state.baseBounds.y + state.currentY - state.startY,
-      width: state.baseBounds.width,
-      height: state.baseBounds.height
-    })
-  }, [mulby.window])
-
-  const shouldStartToolbarDrag = useCallback((target: EventTarget | null) => {
-    if (!(target instanceof Element)) {
-      return false
-    }
-
-    return !target.closest(
-      [
-        'button',
-        'input',
-        'textarea',
-        'select',
-        'a',
-        '.icon-button',
-        '.command-button',
-        '.swatch',
-        '.size-control',
-        '.resize-handle'
-      ].join(',')
-    )
-  }, [])
-
-  const handleToolbarPointerDown = useCallback(
-    async (event: ReactPointerEvent<HTMLElement>) => {
-      if (busy || event.button !== 0 || !shouldStartToolbarDrag(event.target)) {
-        return
-      }
-
-      event.preventDefault()
-      const pointerTarget = event.currentTarget
-      const pointerId = event.pointerId
-      const startX = event.screenX
-      const startY = event.screenY
-      const fallbackBounds = {
-        x: window.screenX,
-        y: window.screenY,
-        width: window.outerWidth,
-        height: window.outerHeight
-      }
-      const baseBounds = await mulby.window.getBounds().catch(() => fallbackBounds) ?? fallbackBounds
-
-      toolbarDragStateRef.current = {
-        pointerId,
-        startX,
-        startY,
-        currentX: startX,
-        currentY: startY,
-        baseBounds,
-        rafId: 0
-      }
-
-      pointerTarget.setPointerCapture(pointerId)
-    },
-    [busy, mulby.window, shouldStartToolbarDrag]
-  )
-
-  const handleToolbarPointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      const state = toolbarDragStateRef.current
-      if (!state || state.pointerId !== event.pointerId) {
-        return
-      }
-
-      event.preventDefault()
-      state.currentX = event.screenX
-      state.currentY = event.screenY
-
-      if (!state.rafId) {
-        state.rafId = requestAnimationFrame(flushToolbarDrag)
-      }
-    },
-    [flushToolbarDrag]
-  )
-
-  const handleToolbarPointerUp = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      const state = toolbarDragStateRef.current
-      if (!state || state.pointerId !== event.pointerId) {
-        return
-      }
-
-      event.preventDefault()
-
-      if (state.rafId) {
-        cancelAnimationFrame(state.rafId)
-        state.rafId = 0
-      }
-
-      void mulby.window.setBounds({
-        x: state.baseBounds.x + state.currentX - state.startX,
-        y: state.baseBounds.y + state.currentY - state.startY,
-        width: state.baseBounds.width,
-        height: state.baseBounds.height
-      })
-
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId)
-      } catch {
-        // Ignore stale pointer capture.
-      }
-
-      toolbarDragStateRef.current = null
-    },
-    [mulby.window]
-  )
-
-  const flushResizeDrag = useCallback(() => {
-    const state = resizeStateRef.current
-    if (!state) {
-      return
-    }
-
-    state.rafId = 0
-    mulby.window.resizeDrag({
-      edge: state.edge,
-      startX: state.startX,
-      startY: state.startY,
-      currentX: state.currentX,
-      currentY: state.currentY,
-      baseBounds: state.baseBounds
-    })
-  }, [mulby.window])
-
-  const handleResizePointerDown = useCallback(
-    async (edge: ResizeEdge, event: ReactPointerEvent<HTMLDivElement>) => {
-      if (busy) {
-        return
-      }
-
-      event.preventDefault()
-      event.stopPropagation()
-      const pointerTarget = event.currentTarget
-      const pointerId = event.pointerId
-      const startX = event.screenX
-      const startY = event.screenY
-
-      const fallbackBounds = {
-        x: window.screenX,
-        y: window.screenY,
-        width: window.outerWidth,
-        height: window.outerHeight
-      }
-      const baseBounds = await mulby.window.getBounds().catch(() => fallbackBounds) ?? fallbackBounds
-
-      resizeStateRef.current = {
-        edge,
-        pointerId,
-        startX,
-        startY,
-        currentX: startX,
-        currentY: startY,
-        baseBounds,
-        rafId: 0
-      }
-
-      pointerTarget.setPointerCapture(pointerId)
-    },
-    [busy, mulby.window]
-  )
-
-  const handleResizePointerMove = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      const state = resizeStateRef.current
-      if (!state || state.pointerId !== event.pointerId) {
-        return
-      }
-
-      event.preventDefault()
-      event.stopPropagation()
-      state.currentX = event.screenX
-      state.currentY = event.screenY
-
-      if (!state.rafId) {
-        state.rafId = requestAnimationFrame(flushResizeDrag)
-      }
-    },
-    [flushResizeDrag]
-  )
-
-  const handleResizePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const state = resizeStateRef.current
-    if (!state || state.pointerId !== event.pointerId) {
-      return
-    }
-
-    event.preventDefault()
-    event.stopPropagation()
-
-    if (state.rafId) {
-      cancelAnimationFrame(state.rafId)
-      state.rafId = 0
-    }
-
-    mulby.window.resizeDrag({
-      edge: state.edge,
-      startX: state.startX,
-      startY: state.startY,
-      currentX: state.currentX,
-      currentY: state.currentY,
-      baseBounds: state.baseBounds
-    })
-
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId)
-    } catch {
-      // Ignore stale pointer capture.
-    }
-
-    resizeStateRef.current = null
-  }, [mulby.window])
+  // 工具栏拖动 + 窗口边缘缩放与「问 AI」浮窗共用同一套实现。
+  const floating = useFloatingWindow(mulby.window as unknown as Parameters<typeof useFloatingWindow>[0], {
+    disabled: Boolean(busy),
+    dragExcludeSelector: [
+      'button',
+      'input',
+      'textarea',
+      'select',
+      'a',
+      '.icon-button',
+      '.command-button',
+      '.swatch',
+      '.size-control',
+      '.resize-handle'
+    ].join(',')
+  })
 
   const handleUndo = useCallback(() => {
     setUndoStack((stack) => {
@@ -2826,6 +903,24 @@ export default function App() {
       color: annotation.color,
       size: annotation.size
     })
+  }, [])
+
+  const handleInlineTextChange = useCallback((text: string) => {
+    setInlineTextEdit((current) => (
+      current ? { ...current, text } : null
+    ))
+    if (inlineTextEditRef.current) {
+      inlineTextEditRef.current = { ...inlineTextEditRef.current, text }
+    }
+  }, [])
+
+  const handleInlineStepChange = useCallback((value: string) => {
+    setInlineStepEdit((current) => (
+      current ? { ...current, value } : null
+    ))
+    if (inlineStepEditRef.current) {
+      inlineStepEditRef.current = { ...inlineStepEditRef.current, value }
+    }
   }, [])
 
   const getEditHandleAtPoint = useCallback(
@@ -3044,7 +1139,6 @@ export default function App() {
       replaceAnnotations,
       stepSize,
       startAnnotationEditDrag,
-      startInlineTextEdit,
       strokeSize,
       textSize,
       toImageSize,
@@ -3311,7 +1405,7 @@ export default function App() {
     try {
       const pickedPath = await mulby.dialog.showSaveDialog({
         title: '保存标注截图',
-        defaultPath: defaultFileName(),
+        defaultPath: defaultPngFileName('screenshot'),
         buttonLabel: '保存',
         filters: [{ name: 'PNG Image', extensions: ['png'] }]
       })
@@ -3511,6 +1605,29 @@ export default function App() {
     )
   }, [runSharpTransform])
 
+  const handleClearCropSelection = useCallback(() => {
+    setCropRect(null)
+    setDraftCropRect(null)
+    setStatus('已清除裁剪选区')
+  }, [])
+
+  const handleSelectTool = useCallback(
+    (nextTool: Tool) => {
+      if (inlineTextEdit && nextTool !== 'text') {
+        commitInlineText()
+      }
+      if (inlineStepEdit && nextTool !== 'step') {
+        commitInlineStep()
+      }
+      setTool(nextTool)
+      setCanvasCursor(null)
+      if (nextTool !== 'select') {
+        setSelectedAnnotationId(null)
+      }
+    },
+    [commitInlineStep, commitInlineText, inlineStepEdit, inlineTextEdit]
+  )
+
   const updateSelectedAnnotation = useCallback(
     (patch: Partial<Pick<Annotation, 'color' | 'size'>>) => {
       if (!selectedAnnotationId) {
@@ -3524,6 +1641,16 @@ export default function App() {
       setStatus('已更新标注')
     },
     [replaceAnnotations, selectedAnnotationId]
+  )
+
+  const handleColorChange = useCallback(
+    (nextColor: string) => {
+      setColor(nextColor)
+      if (selectedAnnotation) {
+        updateSelectedAnnotation({ color: nextColor })
+      }
+    },
+    [selectedAnnotation, updateSelectedAnnotation]
   )
 
   const activeRange = useMemo(() => {
@@ -3614,22 +1741,6 @@ export default function App() {
     updateSelectedAnnotation
   ])
 
-  const toolItems: Array<{ key: Tool; icon: LucideIcon; label: string }> = [
-    { key: 'select', icon: MousePointer2, label: '选择/移动' },
-    { key: 'line', icon: Minus, label: '直线' },
-    { key: 'rect', icon: Square, label: '矩形' },
-    { key: 'ellipse', icon: Circle, label: '圆形' },
-    { key: 'arrow', icon: MoveRight, label: '箭头' },
-    { key: 'pen', icon: Pencil, label: '画笔' },
-    { key: 'highlighter', icon: Highlighter, label: '高亮' },
-    { key: 'text', icon: TypeIcon, label: '文字' },
-    { key: 'step', icon: Hash, label: '编号' },
-    { key: 'mosaic', icon: Grid3x3, label: '马赛克' },
-    { key: 'blur', icon: Droplets, label: '模糊' },
-    { key: 'crop', icon: Crop, label: '裁剪选区' },
-    { key: 'eraser', icon: Eraser, label: '橡皮擦' }
-  ]
-
   const hasSharp = Boolean(window.mulby?.sharp)
   const canEditImage = Boolean(image && hasSharp && !busy)
   const hasVisualContent = Boolean(image || pendingPreview)
@@ -3705,94 +1816,21 @@ export default function App() {
               onPointerLeave={handlePointerLeave}
             />
             {inlineTextEdit && inlineTextPosition && (
-              <textarea
-                ref={inlineTextRef}
-                className="inline-text-editor"
-                style={{
-                  left: inlineTextPosition.left,
-                  top: inlineTextPosition.top,
-                  width: inlineTextPosition.width,
-                  height: inlineTextPosition.height,
-                  fontSize: inlineTextPosition.fontSize,
-                  color: inlineTextEdit.color,
-                  minWidth: Math.max(120, inlineTextPosition.fontSize * 4)
-                }}
-                value={inlineTextEdit.text}
-                onChange={(event) => {
-                  const text = event.target.value
-                  setInlineTextEdit((current) => (
-                    current ? { ...current, text } : null
-                  ))
-                  if (inlineTextEditRef.current) {
-                    inlineTextEditRef.current = { ...inlineTextEditRef.current, text }
-                  }
-                }}
-                onBlur={() => {
-                  inlineBlurTimerRef.current = setTimeout(() => {
-                    inlineBlurTimerRef.current = null
-                    commitInlineText()
-                  }, 80)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    if (inlineBlurTimerRef.current) {
-                      clearTimeout(inlineBlurTimerRef.current)
-                      inlineBlurTimerRef.current = null
-                    }
-                    cancelInlineText()
-                  }
-                  event.stopPropagation()
-                }}
-                placeholder="输入文字"
+              <InlineTextEditor
+                edit={inlineTextEdit}
+                position={inlineTextPosition}
+                onTextChange={handleInlineTextChange}
+                onCommit={commitInlineText}
+                onCancel={cancelInlineText}
               />
             )}
             {inlineStepEdit && inlineStepPosition && (
-              <input
-                ref={inlineStepRef}
-                className="inline-step-editor"
-                style={{
-                  left: inlineStepPosition.left,
-                  top: inlineStepPosition.top,
-                  width: inlineStepPosition.width,
-                  height: inlineStepPosition.height,
-                  fontSize: inlineStepPosition.fontSize,
-                  backgroundColor: inlineStepEdit.color
-                }}
-                value={inlineStepEdit.value}
-                maxLength={STEP_LABEL_MAX_LENGTH}
-                onChange={(event) => {
-                  const value = event.target.value.slice(0, STEP_LABEL_MAX_LENGTH)
-                  setInlineStepEdit((current) => (
-                    current ? { ...current, value } : null
-                  ))
-                  if (inlineStepEditRef.current) {
-                    inlineStepEditRef.current = { ...inlineStepEditRef.current, value }
-                  }
-                }}
-                onBlur={() => {
-                  inlineBlurTimerRef.current = setTimeout(() => {
-                    inlineBlurTimerRef.current = null
-                    commitInlineStep()
-                  }, 80)
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    if (inlineBlurTimerRef.current) {
-                      clearTimeout(inlineBlurTimerRef.current)
-                      inlineBlurTimerRef.current = null
-                    }
-                    commitInlineStep()
-                  }
-                  if (event.key === 'Escape') {
-                    if (inlineBlurTimerRef.current) {
-                      clearTimeout(inlineBlurTimerRef.current)
-                      inlineBlurTimerRef.current = null
-                    }
-                    cancelInlineStep()
-                  }
-                  event.stopPropagation()
-                }}
+              <InlineStepEditor
+                edit={inlineStepEdit}
+                position={inlineStepPosition}
+                onValueChange={handleInlineStepChange}
+                onCommit={commitInlineStep}
+                onCancel={cancelInlineStep}
               />
             )}
           </div>
@@ -3817,165 +1855,39 @@ export default function App() {
       </main>
 
       {hasVisualContent && (
-        <footer
-          className="toolbar"
-          onPointerDown={(event) => void handleToolbarPointerDown(event)}
-          onPointerMove={handleToolbarPointerMove}
-          onPointerUp={handleToolbarPointerUp}
-          onPointerCancel={handleToolbarPointerUp}
-        >
-          <div className="toolbar-row">
-            <div className="tool-group primary-tools">
-              {toolItems.map((item) => {
-                const Icon = item.icon
-                return (
-                  <button
-                    key={item.key}
-                    className={`icon-button ${tool === item.key ? 'is-active' : ''}`}
-                    title={item.label}
-                    type="button"
-                    onClick={() => {
-                      if (inlineTextEdit && item.key !== 'text') {
-                        commitInlineText()
-                      }
-                      if (inlineStepEdit && item.key !== 'step') {
-                        commitInlineStep()
-                      }
-                      setTool(item.key)
-                      setCanvasCursor(null)
-                      if (item.key !== 'select') {
-                        setSelectedAnnotationId(null)
-                      }
-                    }}
-                  >
-                    <Icon size={18} />
-                  </button>
-                )
-              })}
-            </div>
-            <div className="status-line">{busy ?? status}</div>
-          </div>
-
-          <div className="toolbar-row">
-            <div className="tool-group color-group" aria-label="颜色">
-              {COLORS.map((item) => (
-                <button
-                  key={item}
-                  className={`swatch ${effectiveColor === item ? 'is-active' : ''}`}
-                  style={{ backgroundColor: item }}
-                  title={item}
-                  type="button"
-                  onClick={() => {
-                    setColor(item)
-                    if (selectedAnnotation) {
-                      updateSelectedAnnotation({ color: item })
-                    }
-                  }}
-                />
-              ))}
-            </div>
-
-            <label className="size-control" title={activeRange.label}>
-              <span>{activeRange.label}</span>
-              <strong>{activeRange.value}</strong>
-              <input
-                min={activeRange.min}
-                max={activeRange.max}
-                type="range"
-                value={clamp(activeRange.value, activeRange.min, activeRange.max)}
-                onChange={(event) => activeRange.onChange(Number(event.target.value))}
-              />
-            </label>
-
-            <div className="tool-group history-group">
-              <button className="icon-button" title="截图历史" type="button" onClick={() => void handleOpenHistory()}>
-                <HistoryIcon size={18} />
-              </button>
-              <button className="icon-button" title="撤销" type="button" onClick={handleUndo} disabled={!undoStack.length}>
-                <Undo2 size={18} />
-              </button>
-              <button className="icon-button" title="重做" type="button" onClick={handleRedo} disabled={!redoStack.length}>
-                <Redo2 size={18} />
-              </button>
-              <button
-                className="icon-button"
-                title="清空标注"
-                type="button"
-                onClick={handleClear}
-                disabled={!annotations.length && !inlineTextEdit && !inlineStepEdit}
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
-
-            <div className="tool-group adjust-group">
-              <button
-                className="icon-button"
-                title="应用裁剪"
-                type="button"
-                onClick={() => void applyCropSelection()}
-                disabled={!canEditImage || !cropRect}
-              >
-                <Crop size={17} />
-              </button>
-              <button
-                className="icon-button"
-                title="清除裁剪选区"
-                type="button"
-                onClick={() => {
-                  setCropRect(null)
-                  setDraftCropRect(null)
-                  setStatus('已清除裁剪选区')
-                }}
-                disabled={!cropRect && !draftCropRect}
-              >
-                <X size={17} />
-              </button>
-              <button className="icon-button" title="向左旋转" type="button" onClick={() => void rotateLeft()} disabled={!canEditImage}>
-                <RotateCcw size={17} />
-              </button>
-              <button className="icon-button" title="向右旋转" type="button" onClick={() => void rotateRight()} disabled={!canEditImage}>
-                <RotateCw size={17} />
-              </button>
-              <button className="icon-button" title="水平翻转" type="button" onClick={() => void flipHorizontal()} disabled={!canEditImage}>
-                <FlipHorizontal size={17} />
-              </button>
-              <button className="icon-button" title="垂直翻转" type="button" onClick={() => void flipVertical()} disabled={!canEditImage}>
-                <FlipVertical size={17} />
-              </button>
-              <button className="icon-button" title="灰度" type="button" onClick={() => void applyGreyscale()} disabled={!canEditImage}>
-                <Circle size={17} />
-              </button>
-              <button className="icon-button" title="增强" type="button" onClick={() => void applyEnhance()} disabled={!canEditImage}>
-                <Sparkles size={17} />
-              </button>
-            </div>
-
-            <div className="tool-group command-group">
-              <button
-                className="command-button ai-ask-button"
-                type="button"
-                title="在独立窗口里把这张截图发给 AI 解释 / 解题 / 提取文字 / 翻译 / 修图"
-                onClick={() => void handleOpenAi()}
-                disabled={!image}
-              >
-                <Bot size={17} />
-                问 AI
-              </button>
-              <button className="command-button" type="button" onClick={() => void handleCopy()} disabled={!image || Boolean(busy)}>
-                <Clipboard size={17} />
-                复制
-              </button>
-              <button className="command-button" type="button" onClick={() => void handleSave()} disabled={!image || Boolean(busy)}>
-                <Save size={17} />
-                保存
-              </button>
-              <button className="icon-button close-button" title="关闭" type="button" onClick={() => void closeAnnotatorWindow()}>
-                <X size={18} />
-              </button>
-            </div>
-          </div>
-        </footer>
+        <Toolbar
+          tool={tool}
+          onSelectTool={handleSelectTool}
+          effectiveColor={effectiveColor}
+          onColorChange={handleColorChange}
+          range={activeRange}
+          statusText={busy ?? status}
+          onOpenHistory={() => void handleOpenHistory()}
+          canUndo={undoStack.length > 0}
+          canRedo={redoStack.length > 0}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          clearDisabled={!annotations.length && !inlineTextEdit && !inlineStepEdit}
+          onClear={handleClear}
+          canEditImage={canEditImage}
+          applyCropDisabled={!canEditImage || !cropRect}
+          cropClearDisabled={!cropRect && !draftCropRect}
+          onApplyCrop={() => void applyCropSelection()}
+          onClearCrop={handleClearCropSelection}
+          onRotateLeft={() => void rotateLeft()}
+          onRotateRight={() => void rotateRight()}
+          onFlipHorizontal={() => void flipHorizontal()}
+          onFlipVertical={() => void flipVertical()}
+          onGreyscale={() => void applyGreyscale()}
+          onEnhance={() => void applyEnhance()}
+          aiDisabled={!image}
+          exportDisabled={!image || Boolean(busy)}
+          onOpenAi={() => void handleOpenAi()}
+          onCopy={() => void handleCopy()}
+          onSave={() => void handleSave()}
+          onClose={() => void closeAnnotatorWindow()}
+          dragHandlers={floating.dragHandlers}
+        />
       )}
 
       <div className="resize-layer" aria-hidden="true">
@@ -3983,10 +1895,7 @@ export default function App() {
           <div
             key={edge}
             className={`resize-handle resize-${edge}`}
-            onPointerDown={(event) => void handleResizePointerDown(edge, event)}
-            onPointerMove={handleResizePointerMove}
-            onPointerUp={handleResizePointerUp}
-            onPointerCancel={handleResizePointerUp}
+            {...floating.getResizeHandlers(edge)}
           />
         ))}
       </div>

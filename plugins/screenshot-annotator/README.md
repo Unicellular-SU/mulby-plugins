@@ -65,12 +65,29 @@ plugins/screenshot-annotator/
 ├── icon.png
 ├── manifest.json
 ├── src/main.ts
-├── src/ui/App.tsx
+├── src/ui/App.tsx                       # 标注窗口组件（状态/交互/窗口管理）
 ├── src/ui/styles.css
-├── src/ui/AiView.tsx                  # 独立「问 AI」浮窗视图
-├── src/ui/hooks/useFloatingWindow.ts  # 无边框浮窗拖动/缩放
-├── src/ui/components/AiPanel.tsx      # 问 AI 主体（动作/提问/结果）
-├── src/ui/components/MdRenderer.tsx   # react-markdown 渲染器
-├── src/ui/services/aiVision.ts        # 视觉问答 / 修图服务层
+├── src/ui/AiView.tsx                    # 独立「问 AI」浮窗视图
+├── src/ui/HistoryView.tsx               # 截图历史视图
+├── src/ui/history.ts                    # 历史记录存储（索引/图片文件/缩略图）
+├── src/ui/annotations/                  # 标注领域模块（纯函数）
+│   ├── types.ts                         # 标注与窗口类型定义
+│   ├── constants.ts                     # 颜色/尺寸/历史上限等常量
+│   ├── textLayout.ts                    # 文字度量与换行
+│   ├── geometry.ts                      # 几何计算与标注变换
+│   ├── hitTest.ts                       # 命中测试与编辑手柄
+│   ├── render.ts                        # canvas 绘制与 PNG 导出
+│   └── normalize.ts                     # 历史数据归一化
+├── src/ui/utils/
+│   ├── image.ts                         # dataURL/base64/文件名等工具
+│   ├── launch.ts                        # 启动参数解析
+│   └── display.ts                       # 显示尺寸与窗口边界计算
+├── src/ui/hooks/useMulby.ts             # 宿主 API 封装
+├── src/ui/hooks/useFloatingWindow.ts    # 无边框浮窗拖动/缩放（标注窗与 AI 窗共用）
+├── src/ui/components/Toolbar.tsx        # 底部标注工具栏
+├── src/ui/components/InlineEditors.tsx  # 画布内联文字/编号编辑器
+├── src/ui/components/AiPanel.tsx        # 问 AI 主体（动作/提问/结果）
+├── src/ui/components/MdRenderer.tsx     # react-markdown 渲染器
+├── src/ui/services/aiVision.ts          # 视觉问答 / 修图服务层
 └── src/types/mulby.d.ts
 ```

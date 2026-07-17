@@ -1,4 +1,4 @@
-import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { useCallback, useEffect, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 
 // 无边框浮窗的自绘拖动 + 缩放（复用宿主 window.setBounds / resizeDrag），
 // 与截图标注窗口同款机制，供独立「问 AI」窗口使用。
@@ -55,7 +55,21 @@ function readBounds(win?: FloatingWindowApi): Promise<Bounds> {
   return win.getBounds().then((b) => b ?? fallback).catch(() => fallback)
 }
 
-export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualResize?: () => void) {
+export interface FloatingWindowOptions {
+  /** 用户手动缩放窗口时回调（例如停止高度自适应）。 */
+  onManualResize?: () => void
+  /** 拖动时命中这些选择器的元素不触发拖动，默认 'button, input, textarea, select, a'。 */
+  dragExcludeSelector?: string
+  /** 为 true 时禁止开始拖动/缩放（例如忙碌状态）。 */
+  disabled?: boolean
+}
+
+const DEFAULT_DRAG_EXCLUDE_SELECTOR = 'button, input, textarea, select, a'
+
+export function useFloatingWindow(win: FloatingWindowApi | undefined, options?: FloatingWindowOptions) {
+  const onManualResize = options?.onManualResize
+  const dragExcludeSelector = options?.dragExcludeSelector ?? DEFAULT_DRAG_EXCLUDE_SELECTOR
+  const disabled = options?.disabled ?? false
   const dragRef = useRef<{
     pointerId: number
     startX: number
@@ -76,6 +90,16 @@ export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualRe
     rafId: number
   } | null>(null)
 
+  // 卸载时取消未执行的 rAF，避免窗口关闭后仍回调 setBounds/resizeDrag。
+  useEffect(() => () => {
+    if (dragRef.current?.rafId) {
+      cancelAnimationFrame(dragRef.current.rafId)
+    }
+    if (resizeRef.current?.rafId) {
+      cancelAnimationFrame(resizeRef.current.rafId)
+    }
+  }, [])
+
   // ── 拖动（标题区）─────────────────────────────────────────
   const flushDrag = useCallback(() => {
     const state = dragRef.current
@@ -91,8 +115,8 @@ export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualRe
 
   const onDragPointerDown = useCallback(
     async (event: ReactPointerEvent<HTMLElement>) => {
-      if (event.button !== 0) return
-      if (event.target instanceof Element && event.target.closest('button, input, textarea, select, a')) {
+      if (event.button !== 0 || disabled) return
+      if (event.target instanceof Element && event.target.closest(dragExcludeSelector)) {
         return
       }
       event.preventDefault()
@@ -108,7 +132,7 @@ export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualRe
         /* ignore */
       }
     },
-    [win]
+    [disabled, dragExcludeSelector, win]
   )
 
   const onDragPointerMove = useCallback(
@@ -165,6 +189,7 @@ export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualRe
 
   const onResizePointerDown = useCallback(
     async (edge: ResizeEdge, event: ReactPointerEvent<HTMLDivElement>) => {
+      if (disabled) return
       event.preventDefault()
       event.stopPropagation()
       onManualResize?.()
@@ -180,7 +205,7 @@ export function useFloatingWindow(win: FloatingWindowApi | undefined, onManualRe
         /* ignore */
       }
     },
-    [onManualResize, win]
+    [disabled, onManualResize, win]
   )
 
   const onResizePointerMove = useCallback(

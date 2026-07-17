@@ -1,3 +1,7 @@
+import { asFiniteNumber } from './annotations/normalize'
+import type { CaptureRegion } from './annotations/types'
+import { bytesToBase64, createId, dataUrlToBase64, loadImage } from './utils/image'
+
 export type HistoryAnnotation = {
   id: string
   type: string
@@ -89,15 +93,6 @@ const IMAGE_FILES = {
   editable: 'editable.png',
   thumbnail: 'thumbnail.png'
 } as const
-
-function createId() {
-  const randomId = globalThis.crypto?.randomUUID?.()
-  if (randomId) {
-    return `shot-${randomId}`
-  }
-
-  return `shot-${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -212,10 +207,6 @@ async function ensureItemDirectory(api: HistoryApi, id: string) {
   await ensureDirectory(api, await getItemDir(api, id))
 }
 
-export function dataUrlToBase64(dataUrl: string) {
-  return dataUrl.split(',', 2)[1] ?? ''
-}
-
 function getDataUrlMime(dataUrl: string) {
   return /^data:([^;,]+)[;,]/.exec(dataUrl)?.[1] ?? 'image/png'
 }
@@ -224,18 +215,6 @@ function base64ByteLength(base64: string) {
   const clean = base64.replace(/\s/g, '')
   const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0
   return Math.max(0, Math.floor(clean.length * 3 / 4) - padding)
-}
-
-function bytesToBase64(buffer: ArrayBuffer | Uint8Array) {
-  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer)
-  const chunkSize = 0x8000
-  let binary = ''
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
-  }
-
-  return btoa(binary)
 }
 
 async function writeDataUrl(api: HistoryApi, path: string, dataUrl: string) {
@@ -308,17 +287,8 @@ export async function listHistoryItems(api: HistoryApi) {
   return sortItems(values.map(normalizeHistoryItem).filter((item): item is ScreenshotHistoryItem => Boolean(item)))
 }
 
-function loadImage(dataUrl: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => resolve(image)
-    image.onerror = () => reject(new Error('缩略图生成失败'))
-    image.src = dataUrl
-  })
-}
-
 async function createThumbnailDataUrl(dataUrl: string, maxSize = 320) {
-  const image = await loadImage(dataUrl)
+  const image = await loadImage(dataUrl, '缩略图生成失败')
   const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight))
   const width = Math.max(1, Math.round(image.naturalWidth * scale))
   const height = Math.max(1, Math.round(image.naturalHeight * scale))
@@ -339,7 +309,7 @@ export async function createHistoryItem<TAnnotation extends { id: string; type: 
   api: HistoryApi,
   input: CreateHistoryInput<TAnnotation>
 ) {
-  const id = createId()
+  const id = createId('shot')
   const now = Date.now()
   const originalImagePath = await getItemPath(api, id, IMAGE_FILES.original)
   const thumbnailPath = await getItemPath(api, id, IMAGE_FILES.thumbnail)
@@ -501,4 +471,46 @@ export async function loadHistoryItem(api: HistoryApi, id: string) {
     item,
     editableDataUrl: await readHistoryImageDataUrl(api, item, 'editable')
   }
+}
+
+export function getHistoryCaptureRegion(item: ScreenshotHistoryItem): CaptureRegion | undefined {
+  const capture = item.capture as { region?: unknown } | undefined
+  const region = capture?.region
+
+  if (!region || typeof region !== 'object') {
+    return undefined
+  }
+
+  const source = region as Record<string, unknown>
+  const x = asFiniteNumber(source.x)
+  const y = asFiniteNumber(source.y)
+  const width = asFiniteNumber(source.width)
+  const height = asFiniteNumber(source.height)
+
+  if (x === null || y === null || width === null || height === null) {
+    return undefined
+  }
+
+  return {
+    x,
+    y,
+    width,
+    height,
+    scaleFactor: asFiniteNumber(source.scaleFactor) ?? undefined
+  }
+}
+
+export function getHistoryScaleFactor(item: ScreenshotHistoryItem) {
+  const capture = item.capture as {
+    region?: { scaleFactor?: unknown }
+    display?: { scaleFactor?: unknown }
+  } | undefined
+
+  return (
+    item.imageMeta.scaleFactor ??
+    asFiniteNumber(capture?.region?.scaleFactor) ??
+    asFiniteNumber(capture?.display?.scaleFactor) ??
+    window.devicePixelRatio ??
+    1
+  )
 }

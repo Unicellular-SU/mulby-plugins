@@ -3,6 +3,7 @@ import { useMulby } from './hooks/useMulby'
 import { RESIZE_EDGES, useFloatingWindow } from './hooks/useFloatingWindow'
 import AiPanel from './components/AiPanel'
 import type { VisionAiClient } from './services/aiVision'
+import { dataUrlToBase64, defaultPngFileName, ensurePngPath } from './utils/image'
 
 const PLUGIN_ID = 'screenshot-annotator'
 const HEADER_HEIGHT = 46
@@ -21,27 +22,6 @@ function readQueryParam(name: string): string | null {
     return new URLSearchParams(window.location.hash.slice(hashQuery + 1)).get(name)
   }
   return null
-}
-
-function dataUrlToBase64(dataUrl: string): string {
-  return dataUrl.split(',', 2)[1] ?? ''
-}
-
-function defaultFileName(): string {
-  const now = new Date()
-  const stamp = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, '0'),
-    String(now.getDate()).padStart(2, '0'),
-    String(now.getHours()).padStart(2, '0'),
-    String(now.getMinutes()).padStart(2, '0'),
-    String(now.getSeconds()).padStart(2, '0')
-  ].join('')
-  return `ai-image-${stamp}.png`
-}
-
-function ensurePngPath(path: string): string {
-  return path.toLowerCase().endsWith('.png') ? path : `${path}.png`
 }
 
 /**
@@ -67,7 +47,7 @@ export default function AiView() {
     autoHeightRef.current = false
   }, [])
 
-  const floating = useFloatingWindow(win, handleManualResize)
+  const floating = useFloatingWindow(win, { onManualResize: handleManualResize })
 
   // 深色窗口背景 + 置顶。
   useEffect(() => {
@@ -190,7 +170,7 @@ export default function AiView() {
       try {
         const pickedPath = (await mulby.dialog.showSaveDialog({
           title: '保存 AI 图片',
-          defaultPath: defaultFileName(),
+          defaultPath: defaultPngFileName('ai-image'),
           buttonLabel: '保存',
           filters: [{ name: 'PNG Image', extensions: ['png'] }]
         })) as string | undefined
