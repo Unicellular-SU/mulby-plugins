@@ -1132,8 +1132,9 @@ function Inner() {
     toast(`已导出 ${shots.length} 个分镜卡到画布（${shots.filter((s) => s.take).length} 个带成片，其余可「生成选中」批量出图）`, 'success')
   }
 
-  // ── 视觉体系：摄影棚监视器语言。暖黑玻璃浮板 + 单一钨丝灯琥珀强调色，全台统一 ──
-  const panelCls = 'rounded-2xl border border-white/10 bg-zinc-950/60 backdrop-blur-md shadow-[0_12px_40px_rgba(0,0,0,0.45)]'
+  // ── 视觉体系：摄影棚监视器语言。暖黑浮板 + 单一钨丝灯琥珀强调色，全台统一 ──
+  // 注意：不用 backdrop-filter——macOS 上毛玻璃与 WebGL 画布同层合成会偶发整层丢帧（闪现露出后面的画布）
+  const panelCls = 'rounded-2xl border border-white/10 bg-zinc-950/80 shadow-[0_12px_40px_rgba(0,0,0,0.45)]'
   const secCls = 'text-[11px] font-medium text-white/50' // 面板分区小标题
   const hintCls = 'text-white/35 leading-snug text-[11px]'
   const Btn = ({ on, onClick, children, title }: { on?: boolean; onClick: () => void; children: any; title: string }) => (
@@ -1151,8 +1152,9 @@ function Inner() {
   const kindIcon = (k: string) => (k === '人台' ? <User size={12} /> : k === '道具' ? <BoxIcon size={12} /> : <Upload size={12} />)
 
   return (
-    <div className="fixed inset-0 z-[90] bg-zinc-950 flex flex-col text-white" data-interactive>
-      <div ref={mountRef} className="absolute inset-0" style={{ touchAction: 'none' }} />
+    <div className="fixed inset-0 z-[90] bg-zinc-950 flex flex-col text-white overscroll-none" data-interactive>
+      {/* 挂载容器内联不透明底色：即使 WebGL 画布在 mac 合成时偶发丢帧，露出的也是深色而不是后面的画布 */}
+      <div ref={mountRef} className="absolute inset-0" style={{ touchAction: 'none', backgroundColor: '#18181b' }} />
       {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染） */}
       {showGuides && ready && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none z-[1]" viewBox="0 0 3 3" preserveAspectRatio="none">
@@ -1407,7 +1409,7 @@ function Inner() {
 
       {/* 生成中：遮罩拦截一切交互，避免改动场景/相机影响抓帧（尤其批量逐机位） */}
       {busy && (
-        <div className="absolute inset-0 z-[95] grid place-items-center bg-zinc-950/40 backdrop-blur-[2px] cursor-wait">
+        <div className="absolute inset-0 z-[95] grid place-items-center bg-zinc-950/60 cursor-wait">
           <span className={`${panelCls} px-4 py-2 text-sm text-white/80 flex items-center gap-2`}><Loader2 size={16} className="animate-spin text-amber-300" /> 生成中…请稍候</span>
         </div>
       )}
