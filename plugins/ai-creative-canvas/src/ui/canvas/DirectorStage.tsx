@@ -1166,9 +1166,9 @@ function Inner() {
       {/* 挂载容器内联不透明底色：即使 WebGL 画布在 mac 合成时偶发丢帧，露出的也是深色而不是后面的画布 */}
       <div ref={mountRef} className="absolute inset-0" style={{ touchAction: 'none', backgroundColor: '#18181b' }} />
       {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染）。
-          范围限制在中央可视取景区内：线不能压到左右面板/顶栏/底栏（面板半透明，线透过去像把面板也分割了） */}
+          范围限制在中央可视取景区内；不带 z-index——按 DOM 顺序沉到左右面板/顶栏/底栏之下，只盖 3D 视口 */}
       {showGuides && ready && (
-        <svg className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none z-[1]" viewBox="0 0 3 3" preserveAspectRatio="none">
+        <svg className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none" viewBox="0 0 3 3" preserveAspectRatio="none">
           {[1, 2].map((n) => (
             <g key={n} stroke="#fff" strokeOpacity="0.28" strokeWidth="1" vectorEffect="non-scaling-stroke">
               <line x1={n} y1="0" x2={n} y2="3" vectorEffect="non-scaling-stroke" />
@@ -1181,9 +1181,10 @@ function Inner() {
           </g>
         </svg>
       )}
-      {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍 */}
+      {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍。
+          与构图线同理不带 z-index：沉到面板之下，只覆盖 3D 视口区域 */}
       {compareOn && lastTake && (
-        <div className="absolute inset-0 z-[1] pointer-events-none grid place-items-center">
+        <div className="absolute inset-0 pointer-events-none grid place-items-center">
           <img src={lastTake} className="max-w-full max-h-full object-contain" style={{ opacity: compareOpacity }} />
         </div>
       )}
