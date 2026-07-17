@@ -7,10 +7,11 @@
 - 区域截图：触发 `annotate` 功能前由 Mulby 执行 `preCapture: "region"`。
 - 贴合截图区域：窗口使用 `position: "capture-region"` 和 `fit: "capture-region-with-toolbar"`，工具条使用 96px 双排布局；小截图会保留截图原尺寸画布，但窗口宽度至少为 1080px 以完整显示增强工具条。
 - 透明窗口缩放：插件自绘边缘拖拽热区并调用宿主 `window.resizeDrag`，保证透明无边框窗口仍可调整尺寸。
-- 图片尺寸回退：如果截图区域元数据缺失，插件会按图片自然尺寸和屏幕缩放比例计算窗口高度，避免画布和工具条之间留白或图片比例被挤压。
+- 图片尺寸回退：如果截图区域元数据缺失（如 macOS 系统截图不返回选区坐标），插件先解码图片拿到自然尺寸，再按屏幕缩放比例一次性调整窗口并预置视口，避免按猜测尺寸渲染预览造成的闪动。
 - 标注工具：直线、矩形、圆形、箭头、画笔、高亮、文字、编号、马赛克、模糊和橡皮擦，支持颜色和线宽调整。
 - 历史操作：支持撤销、重做和清空全部标注。
-- 导出操作：复制最终 PNG 到剪贴板，或选择路径保存 PNG 文件。
+- 导出操作：复制最终 PNG 到剪贴板，或选择路径保存 PNG 文件；复制/保存成功后自动关闭标注窗口。
+- 钉图：工具栏「钉图」把标注后的截图钉在屏幕最上层（参考 screen-pin 插件）：无边框透明置顶窗口，支持拖动移动、拖边缩放、右键菜单（复制/保存/透明度/关闭）、双击或 Esc 关闭；钉图成功后标注窗口自动关闭。
 - 快捷关闭：按 Esc 或点击关闭按钮退出窗口。
 - **问 AI**：工具栏「问 AI」按钮会在截图旁边弹出一个**无边框浮窗**（置顶、可拖动标题区、可拖边缩放、高度随内容自适应、自带关闭按钮），把当前截图（带标注或原图可切换）发给系统多模态模型；截图标注窗口尺寸/比例完全不受影响：
   - **解释这是什么** / **解题·回答** / **提取文字（OCR）** / **翻译图中文字**：流式返回文字，按 Markdown 渲染，可一键复制。
@@ -65,12 +66,30 @@ plugins/screenshot-annotator/
 ├── icon.png
 ├── manifest.json
 ├── src/main.ts
-├── src/ui/App.tsx
+├── src/ui/App.tsx                       # 标注窗口组件（状态/交互/窗口管理）
 ├── src/ui/styles.css
-├── src/ui/AiView.tsx                  # 独立「问 AI」浮窗视图
-├── src/ui/hooks/useFloatingWindow.ts  # 无边框浮窗拖动/缩放
-├── src/ui/components/AiPanel.tsx      # 问 AI 主体（动作/提问/结果）
-├── src/ui/components/MdRenderer.tsx   # react-markdown 渲染器
-├── src/ui/services/aiVision.ts        # 视觉问答 / 修图服务层
+├── src/ui/AiView.tsx                    # 独立「问 AI」浮窗视图
+├── src/ui/PinView.tsx                   # 置顶贴图窗口视图（参考 screen-pin）
+├── src/ui/HistoryView.tsx               # 截图历史视图
+├── src/ui/history.ts                    # 历史记录存储（索引/图片文件/缩略图）
+├── src/ui/annotations/                  # 标注领域模块（纯函数）
+│   ├── types.ts                         # 标注与窗口类型定义
+│   ├── constants.ts                     # 颜色/尺寸/历史上限等常量
+│   ├── textLayout.ts                    # 文字度量与换行
+│   ├── geometry.ts                      # 几何计算与标注变换
+│   ├── hitTest.ts                       # 命中测试与编辑手柄
+│   ├── render.ts                        # canvas 绘制与 PNG 导出
+│   └── normalize.ts                     # 历史数据归一化
+├── src/ui/utils/
+│   ├── image.ts                         # dataURL/base64/文件名等工具
+│   ├── launch.ts                        # 启动参数解析
+│   └── display.ts                       # 显示尺寸与窗口边界计算
+├── src/ui/hooks/useMulby.ts             # 宿主 API 封装
+├── src/ui/hooks/useFloatingWindow.ts    # 无边框浮窗拖动/缩放（标注窗与 AI 窗共用）
+├── src/ui/components/Toolbar.tsx        # 底部标注工具栏
+├── src/ui/components/InlineEditors.tsx  # 画布内联文字/编号编辑器
+├── src/ui/components/AiPanel.tsx        # 问 AI 主体（动作/提问/结果）
+├── src/ui/components/MdRenderer.tsx     # react-markdown 渲染器
+├── src/ui/services/aiVision.ts          # 视觉问答 / 修图服务层
 └── src/types/mulby.d.ts
 ```

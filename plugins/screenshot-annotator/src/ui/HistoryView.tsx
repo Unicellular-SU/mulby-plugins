@@ -17,13 +17,13 @@ import {
 } from 'react'
 import {
   clearHistory,
-  dataUrlToBase64,
   deleteHistoryItem,
   listHistoryItems,
   readHistoryImageDataUrl,
   type HistoryApi,
   type ScreenshotHistoryItem
 } from './history'
+import { dataUrlToBase64, ensurePngPath } from './utils/image'
 
 type HistoryViewProps = {
   mulby: HistoryApi & {
@@ -33,10 +33,6 @@ type HistoryViewProps = {
     window: MulbyWindow
     filesystem: HistoryApi['filesystem'] & MulbyFilesystem
   }
-}
-
-function ensurePngPath(path: string) {
-  return path.toLowerCase().endsWith('.png') ? path : `${path}.png`
 }
 
 function formatDate(timestamp: number) {
