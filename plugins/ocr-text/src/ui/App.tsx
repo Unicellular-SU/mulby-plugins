@@ -92,7 +92,7 @@ export default function App() {
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [targetLang, setTargetLang] = useState<string>('zh')
-  // RapidOCR state
+  // Built-in offline OCR (PP-OCR) state
   const [rapidocrStatus, setRapidocrStatus] = useState<RapidOcrEngineStatus>('uninitialized')
   const [rapidocrDownloadPercent, setRapidocrDownloadPercent] = useState(0)
   const [rapidocrMessage, setRapidocrMessage] = useState('')
@@ -163,7 +163,8 @@ export default function App() {
     }
   }, [showSettings])
 
-  // Backend-based RapidOCR doesn't need cleanup — no in-browser engine to dispose
+  // The built-in offline engine keeps its ONNX sessions alive for the
+  // lifetime of the page — nothing to dispose between recognitions.
 
   const handleSelectModel = async (modelId: string) => {
     setSelectedModel(modelId)
@@ -200,33 +201,35 @@ export default function App() {
     setRapidocrDownloadPercent(0)
 
     try {
-      setRapidocrMessage('正在检测 Python RapidOCR 环境...')
-      console.log('[rapidocr] Starting checkRapidOcrAvailable...')
-      const { available, error } = await checkRapidOcrAvailable(mulby)
-      console.log('[rapidocr] check result — available:', available, 'error:', error)
+      setRapidocrMessage('正在加载离线 OCR 引擎...')
+      const { available, error } = await checkRapidOcrAvailable(mulby, (p) => {
+        setRapidocrMessage(p.message)
+        rapidocrMessageRef.current = p.message
+        setRapidocrDownloadPercent(p.downloadPercent)
+        if (p.status === 'ready' || p.status === 'error') setRapidocrStatus(p.status)
+      })
       if (available) {
         setRapidocrStatus('ready')
         setRapidocrDownloadPercent(100)
-        setRapidocrMessage('RapidOCR 就绪')
+        setRapidocrMessage('离线 OCR 引擎就绪')
         rapidocrMessageRef.current = ''
       } else {
         setRapidocrStatus('error')
-        setRapidocrMessage(error || 'RapidOCR 不可用')
-        rapidocrMessageRef.current = error || 'RapidOCR 不可用'
-        console.error('[rapidocr] Not available:', error)
+        setRapidocrMessage(error || '离线 OCR 引擎不可用')
+        rapidocrMessageRef.current = error || '离线 OCR 引擎不可用'
       }
     } catch (err: any) {
       console.error('[rapidocr] init exception:', err)
       setRapidocrStatus('error')
-      setRapidocrMessage(err?.message || '检测失败')
-      rapidocrMessageRef.current = err?.message || '检测失败'
+      setRapidocrMessage(err?.message || '初始化失败')
+      rapidocrMessageRef.current = err?.message || '初始化失败'
     } finally {
       resolveInit!()
       rapidocrInitPromise.current = null
     }
   }, [mulby])
 
-  // Pre-check RapidOCR when engine is rapidocr (e.g. restored from storage)
+  // Pre-load the offline engine when it is the selected engine (e.g. restored from storage)
   useEffect(() => {
     if (engine === 'rapidocr' && !isRapidOcrReady()) {
       initRapidOcr()
@@ -238,7 +241,7 @@ export default function App() {
       const result = await processRapidOcrImage(mulby, dataUrl)
       return { success: true, text: result.text }
     } catch (err: any) {
-      return { success: false, text: '', error: err?.message || 'RapidOCR 识别失败' }
+      return { success: false, text: '', error: err?.message || '离线 OCR 识别失败' }
     }
   }, [mulby])
 
@@ -296,7 +299,7 @@ export default function App() {
           await initRapidOcr()
           if (!isRapidOcrReady()) {
             const detail = rapidocrMessageRef.current || rapidocrMessage
-            setError(detail || 'RapidOCR 引擎未就绪，请检查错误信息后重试')
+            setError(detail || '离线 OCR 引擎未就绪，请检查错误信息后重试')
             return
           }
         }
@@ -496,7 +499,7 @@ export default function App() {
     const currentIdx = engines.indexOf(engineRef.current)
     const newEngine = engines[(currentIdx + 1) % engines.length]
     wrapSetEngine(newEngine)
-    // Start RapidOCR availability check immediately on switch
+    // Start loading the offline engine immediately on switch
     if (newEngine === 'rapidocr' && !isRapidOcrReady()) {
       initRapidOcr()
     }
@@ -586,7 +589,7 @@ export default function App() {
                   : 'border-emerald-300 dark:border-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
               }`}>
               {engine === 'rapidocr' ? <ScanEye className="w-3 h-3" /> : engine === 'native' ? <Cpu className="w-3 h-3" /> : <Sparkles className="w-3 h-3" />}
-              {engine === 'rapidocr' ? 'Rapid' : engine === 'native' ? '本地' : 'AI'}
+              {engine === 'rapidocr' ? '离线' : engine === 'native' ? '本地' : 'AI'}
             </button>
           )}
           <div className="relative" ref={settingsRef}>
@@ -685,7 +688,7 @@ export default function App() {
               <div className="flex flex-col items-center justify-center h-full gap-3">
                 <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
                 <span className="text-sm text-zinc-500 dark:text-zinc-400">
-                  {activeEngine === 'rapidocr' ? 'RapidOCR 识别中...' : activeEngine === 'native' ? '本地识别中...' : mode === 'table' ? 'AI 识别表格...' : mode === 'formula' ? 'AI 识别公式...' : 'AI 识别文字...'}
+                  {activeEngine === 'rapidocr' ? '离线识别中...' : activeEngine === 'native' ? '本地识别中...' : mode === 'table' ? 'AI 识别表格...' : mode === 'formula' ? 'AI 识别公式...' : 'AI 识别文字...'}
                 </span>
               </div>
             ) : error && !result?.text ? (
@@ -741,7 +744,7 @@ export default function App() {
                 : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
             }`}>
               {result.engine === 'rapidocr' ? <ScanEye className="w-2.5 h-2.5" /> : result.engine === 'native' ? <Cpu className="w-2.5 h-2.5" /> : <Sparkles className="w-2.5 h-2.5" />}
-              {result.engine === 'rapidocr' ? 'Rapid' : result.engine === 'native' ? '本地' : 'AI'}
+              {result.engine === 'rapidocr' ? '离线' : result.engine === 'native' ? '本地' : 'AI'}
             </span>
           )}
         </div>

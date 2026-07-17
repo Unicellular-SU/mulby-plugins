@@ -3,3 +3,4 @@ dist
 /ui/
 .DS_Store
 *.log
+scripts/debug-crops/

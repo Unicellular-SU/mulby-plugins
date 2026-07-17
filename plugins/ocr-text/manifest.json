@@ -1,7 +1,7 @@
 {
   "id": "ocr-text",
   "name": "ocr-text",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "mulby",
   "type": "productivity",
   "displayName": "OCR 文字识别",
