@@ -159,6 +159,45 @@ export default function Toolbar({
           })}
         </div>
 
+        <div className="tool-group adjust-group">
+          <button
+            className="icon-button"
+            title="应用裁剪"
+            type="button"
+            onClick={onApplyCrop}
+            disabled={applyCropDisabled}
+          >
+            <Crop size={17} />
+          </button>
+          <button
+            className="icon-button"
+            title="清除裁剪选区"
+            type="button"
+            onClick={onClearCrop}
+            disabled={cropClearDisabled}
+          >
+            <X size={17} />
+          </button>
+          <button className="icon-button" title="向左旋转" type="button" onClick={onRotateLeft} disabled={!canEditImage}>
+            <RotateCcw size={17} />
+          </button>
+          <button className="icon-button" title="向右旋转" type="button" onClick={onRotateRight} disabled={!canEditImage}>
+            <RotateCw size={17} />
+          </button>
+          <button className="icon-button" title="水平翻转" type="button" onClick={onFlipHorizontal} disabled={!canEditImage}>
+            <FlipHorizontal size={17} />
+          </button>
+          <button className="icon-button" title="垂直翻转" type="button" onClick={onFlipVertical} disabled={!canEditImage}>
+            <FlipVertical size={17} />
+          </button>
+          <button className="icon-button" title="灰度" type="button" onClick={onGreyscale} disabled={!canEditImage}>
+            <Circle size={17} />
+          </button>
+          <button className="icon-button" title="增强" type="button" onClick={onEnhance} disabled={!canEditImage}>
+            <Sparkles size={17} />
+          </button>
+        </div>
+
         <div className="status-line">{statusText}</div>
       </div>
 
@@ -217,45 +256,6 @@ export default function Toolbar({
             disabled={clearDisabled}
           >
             <Trash2 size={18} />
-          </button>
-        </div>
-
-        <div className="tool-group adjust-group">
-          <button
-            className="icon-button"
-            title="应用裁剪"
-            type="button"
-            onClick={onApplyCrop}
-            disabled={applyCropDisabled}
-          >
-            <Crop size={17} />
-          </button>
-          <button
-            className="icon-button"
-            title="清除裁剪选区"
-            type="button"
-            onClick={onClearCrop}
-            disabled={cropClearDisabled}
-          >
-            <X size={17} />
-          </button>
-          <button className="icon-button" title="向左旋转" type="button" onClick={onRotateLeft} disabled={!canEditImage}>
-            <RotateCcw size={17} />
-          </button>
-          <button className="icon-button" title="向右旋转" type="button" onClick={onRotateRight} disabled={!canEditImage}>
-            <RotateCw size={17} />
-          </button>
-          <button className="icon-button" title="水平翻转" type="button" onClick={onFlipHorizontal} disabled={!canEditImage}>
-            <FlipHorizontal size={17} />
-          </button>
-          <button className="icon-button" title="垂直翻转" type="button" onClick={onFlipVertical} disabled={!canEditImage}>
-            <FlipVertical size={17} />
-          </button>
-          <button className="icon-button" title="灰度" type="button" onClick={onGreyscale} disabled={!canEditImage}>
-            <Circle size={17} />
-          </button>
-          <button className="icon-button" title="增强" type="button" onClick={onEnhance} disabled={!canEditImage}>
-            <Sparkles size={17} />
           </button>
         </div>
 

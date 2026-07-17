@@ -300,17 +300,6 @@ textarea {
   margin-left: auto;
 }
 
-.adjust-group {
-  max-width: 294px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-}
-
-.adjust-group::-webkit-scrollbar {
-  display: none;
-}
-
 .icon-button,
 .command-button,
 .swatch {
