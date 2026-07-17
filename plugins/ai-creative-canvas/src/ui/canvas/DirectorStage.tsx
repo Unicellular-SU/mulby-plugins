@@ -782,10 +782,8 @@ function Inner() {
           c.height = ch
           const cx = c.getContext('2d')!
           cx.drawImage(renderer.domElement, 0, 0)
-          const idata = cx.getImageData(0, 0, cw, ch)
-          const dd = idata.data
-          for (let i = 0; i < dd.length; i += 4) { const v = 255 - dd[i]; dd[i] = v; dd[i + 1] = v; dd[i + 2] = v; dd[i + 3] = 255 }
-          cx.putImageData(idata, 0, 0)
+          // 注意：不要反相。three 的 BasicDepthPacking 输出即「近白远黑」（1.0 - fragCoordZ），
+          // 正是 ControlNet 深度模型（MiDaS/Depth Anything）的约定；再反相纵深关系就倒了。
           attachByMode()
           return c.toDataURL('image/png')
         }
@@ -1046,7 +1044,8 @@ function Inner() {
         : useControl
           ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
           : '【以上为 3D 导演台的机位/构图参考（灰色人台=角色站位/姿态），请据此构图与镜头渲染成片，忽略灰模材质。】'
-      const full = `${prompt.trim()}\n\n${api.current.shotFragment()}${note}`
+      // 构图指令前置：镜头描述 + 控制图说明放最前（导演台的核心诉求就是构图），用户场景描述在后
+      const full = `${note}${api.current.shotFragment()}\n\n${prompt.trim()}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
