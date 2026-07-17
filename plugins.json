@@ -745,13 +745,13 @@
       "id": "ocr-text",
       "name": "ocr-text",
       "displayName": "OCR 文字识别",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": "mulby",
       "description": "极便捷的 OCR 识别工具，截图提取文字/表格/公式，支持翻译和一键复制。",
-      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.06.25-1659/ocr-text-1.0.0.inplugin",
-      "lastPackageTime": "2026-06-25T17:00:35.393Z",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.07.17-1120/ocr-text-1.1.0.inplugin",
+      "lastPackageTime": "2026-07-17T11:20:53.701Z",
       "type": "productivity",
-      "details": "# OCR 文字识别\n\n极便捷的 OCR 识别工具，支持提取文字、表格、公式。\n\n## 功能特性\n\n- **截图文字识别** - 一键截图提取文字内容\n- **截图文字识别+复制** - 识别文字并自动复制到剪贴板\n- **截图文字识别+翻译** - 识别文字并自动翻译\n- **截图表格识别** - 识别图片中的表格，输出 Markdown 表格格式\n- **截图公式识别** - 识别数学公式，输出 LaTeX 格式\n- **图片文字识别** - 拖入图片文件进行识别\n- **插件内截图/选图** - 打开插件后可直接点击“截图识别”或“选择图片”重新识别\n- **表格结果导出** - 支持复制 Markdown、复制可粘贴到 Excel 的 TSV，以及导出 `.xls`\n- **公式结果导出** - 支持复制 LaTeX，以及导出 SVG 公式图片\n\n## 触发方式\n\n| 功能 | 关键词 |\n|------|--------|\n| 文字识别 | `OCR` / `文字识别` / `ocr` |\n| 文字识别+复制 | `OCR复制` / `文字识别复制` |\n| 表格识别 | `表格识别` / `OCR表格` |\n| 公式识别 | `公式识别` / `OCR公式` |\n| 文字识别+翻译 | `OCR翻译` / `文字识别翻译` |\n| 图片识别 | 拖入 PNG/JPG/JPEG/BMP/GIF/WebP/TIFF 图片 |\n\n## 使用说明\n\n1. 在 Mulby 搜索框输入对应关键词\n2. 截取需要识别的屏幕区域\n3. 也可以在插件窗口内点击“截图识别”或“选择图片”重新选择输入\n4. 等待识别完成\n5. 点击复制按钮复制识别结果\n6. 切换到表格模式后，可复制 Markdown、复制 Excel 格式或导出 `.xls`\n7. 切换到公式模式后，可复制 LaTeX 或导出 SVG 公式图片\n8. 可切换文字/表格/公式模式重新识别\n\n## 快捷键\n\n可在 Mulby 设置中为各功能绑定全局快捷键，实现一键调用。\n\n## 依赖\n\n- 需要配置 AI 模型（支持视觉识别的模型，如 GPT-4o、Claude 等）",
+      "details": "# OCR 文字识别\n\n极便捷的 OCR 识别工具，支持提取文字、表格、公式。\n\n## 功能特性\n\n- **内置离线 OCR 引擎** - PP-OCRv4 + WebAssembly，随插件打包，无需安装任何环境，三平台可用\n- **截图文字识别** - 一键截图提取文字内容\n- **截图文字识别+复制** - 识别文字并自动复制到剪贴板\n- **截图文字识别+翻译** - 识别文字并自动翻译\n- **截图表格识别** - 识别图片中的表格，输出 Markdown 表格格式\n- **截图公式识别** - 识别数学公式，输出 LaTeX 格式\n- **图片文字识别** - 拖入图片文件进行识别\n- **插件内截图/选图** - 打开插件后可直接点击“截图识别”或“选择图片”重新识别\n- **表格结果导出** - 支持复制 Markdown、复制可粘贴到 Excel 的 TSV，以及导出 `.xls`\n- **公式结果导出** - 支持复制 LaTeX，以及导出 SVG 公式图片\n\n## 触发方式\n\n| 功能 | 关键词 |\n|------|--------|\n| 文字识别 | `OCR` / `文字识别` / `ocr` |\n| 文字识别+复制 | `OCR复制` / `文字识别复制` |\n| 表格识别 | `表格识别` / `OCR表格` |\n| 公式识别 | `公式识别` / `OCR公式` |\n| 文字识别+翻译 | `OCR翻译` / `文字识别翻译` |\n| 图片识别 | 拖入 PNG/JPG/JPEG/BMP/GIF/WebP/TIFF 图片 |\n\n## 使用说明\n\n1. 在 Mulby 搜索框输入对应关键词\n2. 截取需要识别的屏幕区域\n3. 也可以在插件窗口内点击“截图识别”或“选择图片”重新选择输入\n4. 等待识别完成\n5. 点击复制按钮复制识别结果\n6. 切换到表格模式后，可复制 Markdown、复制 Excel 格式或导出 `.xls`\n7. 切换到公式模式后，可复制 LaTeX 或导出 SVG 公式图片\n8. 可切换文字/表格/公式模式重新识别\n\n## 快捷键\n\n可在 Mulby 设置中为各功能绑定全局快捷键，实现一键调用。\n\n## 依赖\n\n- **离线文字识别（开箱即用）**：插件内置 PP-OCRv4 识别引擎（ONNX Runtime WebAssembly），模型随插件打包——无需 Python、无需联网、跨平台（macOS / Windows / Linux）\n- **系统原生 OCR**：macOS 使用 Vision 框架、Windows 使用 WinRT OCR（均为系统自带，无需安装）\n- **表格/公式识别与翻译**：需要配置 AI 模型（支持视觉识别的模型，如 GPT-4o、Claude 等）",
       "icon": {
         "type": "url",
         "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/ocr-text/[object Object]"
@@ -762,7 +762,7 @@
           "caption": "主界面"
         }
       ],
-      "sha256": "8230d7fa479ac10fe86b4934fa3eb191d6e2ee00771e2c44383a8d186850a350",
+      "sha256": "be5ebd5736e8e225b504cd7dac1bc270eb5f216f36320de3273504ac4a2355b2",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/ocr-text"
     },
