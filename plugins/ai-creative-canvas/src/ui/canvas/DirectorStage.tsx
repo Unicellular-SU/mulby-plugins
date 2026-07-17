@@ -136,7 +136,9 @@ function Inner() {
         const W = mount.clientWidth || 1
         const H = mount.clientHeight || 1
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+        // mac 防闪烁：preserveDrawingBuffer 不开（retained buffer 在双显卡 MacBook 上迁移时周期性出空白帧；
+        // 本文件所有抓帧都是 render 后同步读取，规范上不需要保留）；powerPreference 钉独显避免 GPU 自动切换
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
         renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
         renderer.setSize(W, H)
         mount.appendChild(renderer.domElement)
@@ -187,7 +189,7 @@ function Inner() {
         let pip: any = null
         const pipMount = pipRef.current
         if (pipMount) {
-          pip = new THREE.WebGLRenderer({ antialias: true })
+          pip = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
           pip.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
           pip.setSize(240, Math.round(240 / (W / H)))
           pipMount.appendChild(pip.domElement)
@@ -525,6 +527,12 @@ function Inner() {
         }
         renderer.domElement.addEventListener('dragover', onDragOver)
         renderer.domElement.addEventListener('drop', onDrop)
+
+        // WebGL 上下文丢失/恢复：preventDefault 才允许浏览器恢复上下文；恢复后立刻补渲一帧（mac GPU 切换/内存压力会触发）
+        const onCtxLost = (e: Event) => { e.preventDefault() }
+        const onCtxRestored = () => { renderer.render(scene, cam) }
+        renderer.domElement.addEventListener('webglcontextlost', onCtxLost)
+        renderer.domElement.addEventListener('webglcontextrestored', onCtxRestored)
 
         let raf = 0
         const animate = () => {
@@ -948,6 +956,8 @@ function Inner() {
           safe(() => window.removeEventListener('pointerup', onPointerUp))
           safe(() => renderer.domElement.removeEventListener('dragover', onDragOver))
           safe(() => renderer.domElement.removeEventListener('drop', onDrop))
+          safe(() => renderer.domElement.removeEventListener('webglcontextlost', onCtxLost))
+          safe(() => renderer.domElement.removeEventListener('webglcontextrestored', onCtxRestored))
           safe(() => tcontrol.detach())
           safe(() => scene.remove(tHelper))
           safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
