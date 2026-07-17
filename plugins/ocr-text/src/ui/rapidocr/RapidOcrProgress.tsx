@@ -9,15 +9,17 @@ interface RapidOcrProgressBarProps {
 }
 
 /**
- * Progress UI for RapidOCR initialization (backend-based, no model download).
+ * Progress UI while the built-in offline OCR engine loads its WASM runtime
+ * and models from the plugin package.
  *
  * Three visual states:
- * - initializing: spinner + "正在检测..."
+ * - initializing/downloading: spinner + status message
  * - ready: green checkmark + "就绪"
  * - error: red X + error message
  */
 export function RapidOcrProgressBar({
   status,
+  percent,
   message,
   onRetry,
 }: RapidOcrProgressBarProps) {
@@ -47,22 +49,25 @@ export function RapidOcrProgressBar({
             </button>
           )}
         </div>
-        {message.includes('pip install') && (
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 text-center mt-1 max-w-xs">
-            请在终端执行上述命令安装 RapidOCR，安装完成后重试
-          </p>
-        )}
       </div>
     )
   }
 
-  // initializing
+  // downloading / initializing
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3">
       <Loader2 className="w-8 h-8 text-amber-500 animate-spin" />
       <span className="text-sm text-zinc-500 dark:text-zinc-400">
         {message}
       </span>
+      {percent > 0 && percent < 100 && (
+        <div className="w-40 h-1 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+          <div
+            className="h-full bg-amber-500 transition-all duration-300"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      )}
     </div>
   )
 }
