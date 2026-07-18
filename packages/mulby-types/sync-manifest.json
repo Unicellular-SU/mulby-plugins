@@ -1,0 +1,21 @@
+{
+  "syncedAt": "2026-07-18T07:34:12.459Z",
+  "hostRepo": "../../../mulby",
+  "hostCommit": "c99615d8e900cf69cf10442c848d73aac6c8315c",
+  "hostTypesDir": "src/shared/types",
+  "baselineSha256": "747616862071055c025f410bff1a269e814b3cc3b5134cb5b09e4d62837b2dc2",
+  "files": {
+    "ai.ts": "f133b865aa87c0377aaccee72eee664f4467ed24ea6898256da09cda60394807",
+    "deep-link.ts": "5eff07410ea3a3e821164ae09d73473a522828fc484acec1831c3527e644dcf0",
+    "developer.ts": "cf2aa261dacde6d5a7b57d2746da7bcdcef89dc5eddfe425902a0960bfcdc2e6",
+    "electron.d.ts": "0e1f1e822c735d33a01eeb530984bba639d7ae823deac900c12709cad33afd0c",
+    "inbrowser.d.ts": "057bd21cec44348e928ba93a3f1a9f8ff2088d97286029d290bccac9a8149adb",
+    "openclaw-protocol.ts": "590719ed50c4b3b8c98b1cc0a29ea15355bee603a6ab481785ea6af1664d0b00",
+    "plugin-store.ts": "f7c47b9f8539a2b75ecbdcf18011c7db500b9548fd6d569f98fa10654c7cf9c1",
+    "plugin-verify.ts": "352dc92b3c6f513d55f93909e742b0bcb1c0b9825a8c271fe70be8634a8f9bff",
+    "plugin.ts": "abe43547f0f2b379a15c82506b5f357ad754e1542ba5207c966e8256717ef521",
+    "settings.ts": "b92ae4f4e4a984ba9695213943616e4d3dcbce6c0dfeb0b806081161ee9de2be",
+    "storage-v2.ts": "9ca71dc94212652610ed996b6a2be51483705f038306ed8cb19f203e2ca03950",
+    "task.ts": "5151e5b0cc73b86aa8862d2ca5c8fe5b7cc30cb9f9209409c1c94c7f5b08a14c"
+  }
+}

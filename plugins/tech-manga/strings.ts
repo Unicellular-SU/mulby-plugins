@@ -1,0 +1,163 @@
+// ================= 界面文案常量表（方案 5.4） =================
+// 全量简体中文，专有名词（token、prompt、ZIP、PDF 等）保留英文；不上 i18n 框架。
+// 注意：不能放 ui/ 目录——那是 vite outDir 构建产物目录（vite.config.ts）。
+
+export const S = {
+  // ---- 通用 ----
+  appTitleSetup: '需要完成设置',
+  startOver: '重新开始',
+  cancelAll: '中止全部任务',
+  cancelAllTitle: '中止剧本流式生成、作废在途图像任务并清空排队任务',
+
+  // ---- 配置面板 ----
+  configTitle: '故事配置',
+  sourceLabel: '源素材（文本 / 代码）',
+  uploadSource: '上传 .txt/.md',
+  sourcePlaceholder: '粘贴技术文档、代码片段或文章…',
+  sourcePlaceholderHistory: '粘贴历史事件描述或人物传记…',
+  styleLabel: '漫画画风',
+  customStyleOption: '自定义画风…',
+  storyModeLabel: '叙事模式',
+  customStoryLabel: '自定义叙事规则',
+  customStoryPlaceholder: '描述你的自定义叙事规则（例如「黑色侦探故事，Bug 是罪案…」）',
+  mainCharacterLabel: '主角',
+  autoDetectOption: '👥 自动识别历史人物',
+  selectCharacterOption: '请选择角色',
+  customCharacterOption: '自定义角色…',
+  autoCastBadge: '自动选角',
+  autoCastHint: '* 严肃历史模式下将从源文本自动提取真实历史人物，确保史实准确。',
+  charNameLabel: '角色名',
+  charDescLabel: '外观描述（发型、服装、气质）',
+  pageLengthLabel: '总页数',
+  panelsLabel: '每页分格',
+  panelsAuto: '自动',
+  panelsN: (n: number) => `${n} 格`,
+  ratioLabel: '页面比例',
+  generating: '正在构思你的漫画…',
+  generateBtn: '生成漫画',
+  estimatedInputTokens: (n: string) => `预计输入约 ${n} tokens`,
+  readFileFailed: '无法读取文件，请确认文件为 UTF-8 文本。',
+
+  // ---- 资产工作室 ----
+  assetStudioTitle: '资产工作室',
+  assetStudioSubtitle: '确认角色 / 道具设定，并生成风格一致的参考立绘。',
+  charactersTab: (n: number) => `角色（${n}）`,
+  propsTab: (n: number) => `关键道具（${n}）`,
+  noReference: '暂无立绘',
+  generatingLabel: '生成中…',
+  generateRef: '生成立绘',
+  regenerateRef: '重新生成立绘',
+  generateProp: '生成道具图',
+  regenerateProp: '重新生成道具图',
+  uploadCustomImage: '上传自定义图片',
+  noPropsFound: '剧本中未识别出关键道具。',
+  noPropsHint: 'AI 没有找到需要保持一致性的重复出现物品。',
+  goToScriptEditor: '保存并进入剧本编辑 →',
+  charDescPlaceholder: '必须以「From [作品名]」开头，例如 "From Doraemon, a blue robot cat..."',
+  propDescPlaceholder: '道具外观描述…',
+
+  // ---- 剧本编辑器 ----
+  storyboardTitle: '剧本 / 分镜编辑器',
+  storyboardSubtitle: '开始绘制前，检查并润色 AI 生成的剧本。',
+  startProduction: '开始绘制漫画 →',
+  sidebarGlobal: '全局',
+  sidebarOverview: '总览与分析',
+  sidebarPages: '页面',
+  sidebarCover: '00. 封面设计',
+  sidebarPage: (n: string) => `${n}. 页面分镜`,
+  comicTitleLabel: '漫画标题',
+  analysisLabel: '故事分析与节奏策略',
+  coverDesignTitle: '封面设计',
+  coverPromptLabel: '封面图像 prompt',
+  pageTitle: (n: number) => `第 ${n} 页`,
+  layoutLabel: '分镜描述',
+  fullPromptLabel: '整页图像 prompt（含视觉状态与对白）',
+  fullPromptHint: '这是发给图像模型的原始指令，包含角色状态、环境细节与必须出现的中文对白。',
+  charsInScene: '本页角色',
+  propsInScene: '本页道具',
+  noCharsInScene: '本页未列出特定角色。',
+  noPropsInScene: '本页未列出关键道具。',
+  refinePlaceholder: '让 AI 润色这段文本（如「更有戏剧性」「修正对白」）…',
+  refineBtn: 'AI 润色',
+  refining: '润色中…',
+  refineFailed: 'AI 润色失败，请重试',
+
+  // ---- 漫画页 ----
+  comicPagesTitle: '漫画页',
+  pagesBadge: (ratio: string, n: number) => `${ratio} · 共 ${n} 页（含封面）`,
+  progressBadge: (done: number, total: number) => `已完成 ${done} / ${total} 页`,
+  resumeAll: (n: number) => `续绘全部未完成页（${n}）`,
+  resumeAllTitle: '按并发 2 批量重发全部失败/中止页',
+  exportBtn: '导出漫画',
+  exportZip: 'ZIP 散图',
+  exportPdf: 'PDF 文档',
+  exportLong: '竖向长图',
+  exporting: '正在导出…',
+  exportedTo: (p: string) => `已导出到 ${p}`,
+  revealInFolder: '在文件夹中显示',
+  exportFailed: (m: string) => `导出失败：${m}`,
+  coverBadge: '封面',
+  pageBadge: (n: number) => `第 ${n} 页`,
+  designingCover: '正在设计封面…',
+  drawingPage: (n: number) => `正在绘制第 ${n} 页…`,
+  retryPage: '重试本页',
+  downloadPage: '保存本页',
+  openReader: '进入阅读模式',
+  editPrompt: '查看 / 编辑 prompt 与角色',
+  closePrompt: '收起编辑面板',
+  includeChars: '本页包含角色',
+  includeProps: '本页包含道具',
+  fullImagePrompt: '整页图像 prompt（含对白文本）',
+  aiRefinePrompt: 'AI 润色 prompt',
+  refineInputPlaceholder: '如「把背景调暗」「改成三格布局」…',
+  cancelBtn: '取消',
+  redrawBtn: '重新绘制本页',
+  viewPromptLink: '查看 prompt 与对白',
+  pageLayoutLabel: '页面布局',
+  writtenBy: 'TechManga AI 出品',
+  untitled: '未命名漫画',
+  pageSaveFailed: (m: string) => `保存失败：${m}`,
+
+  // ---- 生成进度（方案 5.3） ----
+  stageQueued: '排队中…',
+  stageDrawing: '绘制中…',
+  stageDrawingN: (r: number, t: number) => `绘制中 ${r}/${t}…`,
+  stageFinalizing: '合成中…',
+  stageFallback: '回退重试中…',
+
+  // ---- 通知（方案 5.1） ----
+  notifyBatchDone: (title: string, done: number) => `《${title}》${done} 页全部生成完成`,
+  notifyBatchFailed: (title: string, done: number, failed: number) =>
+    `《${title}》生成结束：成功 ${done} 页 / 失败 ${failed} 页，可在卡片上单独重绘`,
+  notifyScriptDone: (title: string) => `《${title}》剧本已生成，可回来确认角色设定`,
+
+  // ---- 错误文案（方案 5.4） ----
+  pageDrawFailed: (m: string) =>
+    `绘制失败：${m}。可点击「重试本页」；若持续失败，请在配置页更换图像模型（当前模型可能不支持多图参考输入）。`,
+  pageAborted: '已被用户中止（可单独重绘）',
+
+  // ---- 终端日志面板 ----
+  terminalTitle: (model: string) => `AI_AGENT_TERMINAL -- ${model}`,
+  defaultModelLabel: 'Mulby 默认模型',
+  terminalReady: '系统就绪。',
+  terminalWaiting: '等待剧本生成任务…',
+  terminalStreaming: '● 流式输出中',
+  terminalIdle: '○ 空闲',
+
+  // ---- Token 监控 ----
+  taskCost: '任务费用',
+  totalTokens: '累计 tokens：',
+  imagesGenerated: '已生成图像：',
+  costBreakdown: '按模型分组',
+  recentActivity: '最近调用',
+  noActivity: '暂无调用记录。',
+  estimatedBadge: '估算',
+  unpricedCalls: (n: number) => `另有 ${n} 次未计价调用`,
+  unpricedRow: '未计价',
+} as const;
+
+/** 错误摘要截断（方案 5.4）：防错误层溢出 PanelCard 浮层（7.4 拆分后由 App 与 useImageQueue 共用） */
+export const trimErr = (msg: unknown): string => {
+  const s = String(msg ?? '').trim() || '未知错误';
+  return s.length > 140 ? `${s.slice(0, 140)}…` : s;
+};

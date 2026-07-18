@@ -1,0 +1,27 @@
+{
+  "name": "@mulby-plugins/manga-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "manga 系插件（tech-manga / horror-manga）的公共层：AI 桥接纯函数、中止纪元 scope、附件缓存、并发池与构建配置模板（方案 7.1/7.3）。以 .ts 源码直接分发，由各插件的 vite/esbuild 全量打包内联，无独立构建步骤。",
+  "exports": {
+    ".": "./src/index.ts",
+    "./configs/vite": "./src/configs/vite.ts",
+    "./configs/tailwind": "./src/configs/tailwind.js",
+    "./configs/postcss": "./src/configs/postcss.mjs"
+  },
+  "peerDependencies": {
+    "vite": "^6.2.0",
+    "@vitejs/plugin-react": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vite": { "optional": true },
+    "@vitejs/plugin-react": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
