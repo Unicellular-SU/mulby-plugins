@@ -1,0 +1,34 @@
+{
+  "id": "horror-manga",
+  "name": "horror-manga",
+  "version": "1.0.0",
+  "author": "Unicellular-SU",
+  "type": "ai",
+  "displayName": "恐怖漫画生成器",
+  "description": "AI 恐怖漫画生成器：输入故事大意，自动编写分页漫画脚本、生成角色设定图，并逐页绘制带中文对白的恐怖漫画（支持多种大师画风与黑白/彩色模式）",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "window": {
+    "width": 1280,
+    "height": 820,
+    "minWidth": 960,
+    "minHeight": 640,
+    "type": "default"
+  },
+  "pluginSetting": {
+    "single": true
+  },
+  "features": [
+    {
+      "code": "horror-manga-open",
+      "explain": "打开恐怖漫画生成器 - 从故事文本生成恐怖漫画",
+      "mode": "detached",
+      "cmds": [
+        { "type": "keyword", "value": "恐怖漫画" },
+        { "type": "keyword", "value": "horrormanga" },
+        { "type": "keyword", "value": "漫画生成" }
+      ]
+    }
+  ]
+}
