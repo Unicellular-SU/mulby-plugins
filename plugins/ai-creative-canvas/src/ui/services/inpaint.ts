@@ -16,9 +16,10 @@ function dataUrlToArrayBuffer(d: string): ArrayBuffer {
 
 export type InpaintOp = 'repaint' | 'remove'
 
-// 局部重绘正确范式：调用方已把涂抹区在底图上「挖透明洞」(repaint) 或「填绿」(remove)，
-// 整图喂模型比单独给黑白遮罩更可能被遵守；结果落「新卡」（非破坏式，可与原图对比）。
-export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl: string, prompt: string): Promise<void> {
+// 局部重绘双保险范式：主图=挖透明洞(repaint)/填绿(remove)的合成图（不支持 mask 的 provider 也能看懂），
+// 同时上传真遮罩附件走 maskAttachmentId（涂抹区 alpha=0，OpenAI edits 约定）；
+// 结果落「新卡」（非破坏式，可与原图对比）。
+export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl: string, prompt: string, maskPngDataUrl?: string): Promise<void> {
   const g = useGraph.getState()
   const card = g.getActiveBoard().cards[cardId]
   if (!card || !card.assetUrl) throw new Error('没有底图')
@@ -33,7 +34,16 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
 
   const res = await aiLimiter(async () => {
     const att = await ai().attachments.upload({ buffer: dataUrlToArrayBuffer(compositePngDataUrl), mimeType: 'image/png', purpose: 'image' })
-    return ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt: instruction })
+    let maskAttachmentId: string | undefined
+    if (maskPngDataUrl) {
+      try {
+        const maskAtt = await ai().attachments.upload({ buffer: dataUrlToArrayBuffer(maskPngDataUrl), mimeType: 'image/png', purpose: 'image' })
+        maskAttachmentId = maskAtt.attachmentId
+      } catch {
+        // 遮罩上传失败降级为无遮罩（合成图本身仍含挖洞/填绿信息）
+      }
+    }
+    return ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt: instruction, maskAttachmentId })
   })
   const img = res.images?.[0]
   if (!img) throw new Error('模型未返回结果')

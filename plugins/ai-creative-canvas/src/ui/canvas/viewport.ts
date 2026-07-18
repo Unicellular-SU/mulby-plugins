@@ -17,6 +17,36 @@ export function clampZoom(z: number) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 }
 
+// ── wheel 手势分流（纯函数便于单测）──
+export interface WheelSample {
+  deltaX: number
+  deltaY: number
+  deltaMode: number // 0=像素 1=行 2=页
+  ctrlKey: boolean
+  metaKey: boolean
+}
+export type WheelGesture = { kind: 'zoom'; factor: number } | { kind: 'pan'; dx: number; dy: number }
+
+// 行/页模式（老式鼠标）→ 近似像素步长，避免一格滚过头
+const LINE_PX = 16
+const PAGE_PX = 400
+function toPx(delta: number, mode: number): number {
+  return delta * (mode === 1 ? LINE_PX : mode === 2 ? PAGE_PX : 1)
+}
+
+// 把一个 wheel 事件分流成 缩放 / 平移（无歧义、可预测，对齐 Figma/FigJam 惯例）：
+//   捏合(ctrlKey)、Cmd/Ctrl+滚轮 → 朝光标缩放（捏合 deltaY 小而细→灵敏度高更跟手；Cmd+滚轮沿用小步长）
+//   其余一切普通 wheel（触控板两指滑动、鼠标滚轮、Shift+滚轮借道 deltaX）→ 平移（内容跟手，取负 delta）
+// 不再做「触控板 vs 鼠标」猜测：大整数竖直 delta 在单事件里与鼠标一格滚动无法区分，猜测必错一边
+//（快速竖扫首帧误缩放 / 妙控鼠标被锁进平移）。缩放统一走 捏合 / Cmd·Ctrl+滚轮 / 缩放按钮。
+export function classifyWheel(e: WheelSample): WheelGesture {
+  if (e.ctrlKey || e.metaKey) {
+    const pinch = e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaY) < 50
+    return { kind: 'zoom', factor: Math.exp(-e.deltaY * (pinch ? 0.01 : 0.0015)) }
+  }
+  return { kind: 'pan', dx: -toPx(e.deltaX, e.deltaMode), dy: -toPx(e.deltaY, e.deltaMode) }
+}
+
 // 朝光标(sx,sy 为相对舞台的屏幕坐标)缩放：保持光标处世界点不动
 export function zoomAt(v: Viewport, sx: number, sy: number, factor: number): Viewport {
   const zoom = clampZoom(v.zoom * factor)

@@ -24,6 +24,7 @@
   --accent-08: rgba(99, 102, 241, 0.08);
   /* 类型色 —— 必须与 types.ts 的 KIND_ACCENT 同源（单一真相） */
   --kind-image: #6366f1;
+  --kind-pano: #06b6d4;
   --kind-video: #ec4899;
   --kind-text: #10b981;
   --kind-audio: #f59e0b;
@@ -62,6 +63,7 @@
   --accent-08: rgba(129, 140, 248, 0.1);
   /* 暗色下类型色提亮（仅供纯 CSS 着色；JS 侧用 KIND_ACCENT 基准色） */
   --kind-image: #818cf8;
+  --kind-pano: #22d3ee;
   --kind-video: #f472b6;
   --kind-text: #34d399;
   --kind-audio: #fbbf24;

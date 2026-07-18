@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Brush, Maximize2 } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Compass, Film, Wand2, ScanText, Loader2, Brush, Maximize2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
@@ -328,6 +328,15 @@ export function NodeEditor() {
                     <Brush size={12} /> 局部编辑
                   </button>
                 )}
+                {card.kind === 'pano' && hasMedia && (
+                  <button
+                    onClick={() => { const s = useUi.getState(); s.setPanoCardId(s.panoCardId === card.id ? null : card.id) }}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100"
+                    title="节点内 360 预览：拖动环视、滚轮缩放，相机按钮截取当前视角为新图片卡"
+                  >
+                    <Compass size={12} /> 360 预览
+                  </button>
+                )}
                 {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
                 <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
               </div>
@@ -350,7 +359,13 @@ export function NodeEditor() {
                   }}
                   onBlur={() => setTimeout(() => setMention(null), 150)}
                   rows={2}
-                  placeholder={card.kind === 'text' ? '让 AI 写点什么…（/ 预设，@ 素材）' : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'}
+                  placeholder={
+                    card.kind === 'text'
+                      ? '让 AI 写点什么…（/ 预设，@ 素材）'
+                      : card.kind === 'pano'
+                        ? '描述 360 场景（自动注入等距柱状全景关键词；接参考图可留空，Ctrl+Enter 生成）'
+                        : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'
+                  }
                   className="ace-input ace-noscroll resize-none w-full block"
                   style={{ maxHeight: 220 }}
                 />
@@ -382,9 +397,9 @@ export function NodeEditor() {
           {/* 模型/Provider + 参数 */}
           {generatable && (
             <div className="flex flex-wrap items-center gap-1.5">
-              {card.kind === 'text' || card.kind === 'image' ? (
+              {card.kind === 'text' || card.kind === 'image' || card.kind === 'pano' ? (
                 <div className="flex-1 min-w-[130px]">
-                  <ModelPicker kind={card.kind as 'text' | 'image'} value={card.modelId} onChange={(id) => updateCard(card.id, { modelId: id })} />
+                  <ModelPicker kind={card.kind as 'text' | 'image' | 'pano'} value={card.modelId} onChange={(id) => updateCard(card.id, { modelId: id })} />
                 </div>
               ) : (
                 <ProviderHintInline kind={card.kind as 'video' | 'audio'} modelId={card.modelId} onModel={(id) => updateCard(card.id, { modelId: id })} />

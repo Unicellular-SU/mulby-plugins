@@ -1,7 +1,7 @@
 import type { Card } from '../types'
 
 // 可作为引用目标（消费上游素材去生成）的卡片类型；与 generate.canGenerate 保持一致
-const GENERATABLE = new Set(['text', 'image', 'video', 'audio'])
+const GENERATABLE = new Set(['text', 'image', 'pano', 'video', 'audio'])
 
 export interface ConnVerdict {
   ok: boolean
@@ -13,7 +13,7 @@ export function canConnect(source: Card, target: Card): ConnVerdict {
   if (source.id === target.id) return { ok: false, reason: '不能连接到自身' }
   if (source.kind === 'group' || target.kind === 'group') return { ok: false, reason: '分组不能作为连线端点' }
   if (source.kind === 'note' || target.kind === 'note') return { ok: false, reason: '便签不参与引用连线' }
-  if (!GENERATABLE.has(target.kind)) return { ok: false, reason: '目标需是可生成卡片（文本/图片/视频/音频）' }
+  if (!GENERATABLE.has(target.kind)) return { ok: false, reason: '目标需是可生成卡片（文本/图片/全景/视频/音频）' }
   return { ok: true }
 }
 

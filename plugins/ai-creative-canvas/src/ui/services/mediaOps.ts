@@ -31,8 +31,10 @@ export async function runImageTool(
     g.updateCard(cardId, { status: 'error', error: '该卡片没有图片' })
     return
   }
+  // 高清放大不改几何 → 全景放大仍是全景卡；裁剪/扩图/抠像改画面几何 → 一律落普通图片卡
+  const resultKind = tool === 'upscale' && src.kind === 'pano' ? 'pano' : 'image'
   const resultId = g.addCard(
-    'image',
+    resultKind,
     { x: src.x + src.w + 200, y: src.y + src.h / 2 },
     { title: `${src.title} · ${TOOL_LABEL[tool]}`, status: 'running', progress: 0.2, modelId: src.modelId, refIds: [src.id] },
     boardId
@@ -114,7 +116,7 @@ export async function runCollage(cardIds: string[]): Promise<void> {
   const g = useGraph.getState()
   const board = g.getActiveBoard()
   const boardId = board.id
-  const cards = cardIds.map((id) => board.cards[id]).filter((c): c is Card => !!c && !!c.assetUrl && (c.kind === 'image' || c.kind === 'source'))
+  const cards = cardIds.map((id) => board.cards[id]).filter((c): c is Card => !!c && !!c.assetUrl && (c.kind === 'image' || c.kind === 'pano' || c.kind === 'source'))
   if (cards.length < 2) {
     toast('请选择至少 2 张图片卡', 'error')
     return

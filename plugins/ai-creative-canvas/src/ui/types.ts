@@ -1,6 +1,6 @@
 // 领域模型：卡片 / 连线 / 视口 / 画布(board) / 工程(project)
 
-export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source' | 'group' | 'note'
+export type CardKind = 'image' | 'pano' | 'video' | 'text' | 'audio' | 'source' | 'group' | 'note'
 export type CardStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
 
 export interface Card {
@@ -105,17 +105,25 @@ export interface DirectorSubject {
   poseName?: string // 一键姿势名（供生成提示）
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
+  desc?: string // 对象语义描述（"穿长衫的老者"）：场景即提示词，生成时按画面方位装配
+  colorName?: string // 人台锚定色名（"红衣"）：参考图颜色块 + prompt 颜色锚定，锁定站位/朝向
 }
 export interface DirectorShot {
   id: string
   name: string
   cam: DirectorCam
+  thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
+  take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
+  takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
 }
 export interface DirectorScene {
   subjects: DirectorSubject[]
   cam: DirectorCam
   shots: DirectorShot[]
   prompt?: string
+  lighting?: string // 灯光预设 key（DirectorStage LIGHTINGS）
+  aspect?: string // 出图画幅 key（DirectorStage ASPECTS，默认视口=不裁剪）
+  lastTake?: string // 最近一次成片 url（重开后可继续叠图对比）
 }
 
 export interface ProjectDoc {
@@ -156,11 +164,12 @@ export interface Shot {
   roleImageRefs?: string[] // 角色一致性参考图 id
 }
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2 // v2：360 全景独立为 pano 卡（image + params.pano/meta.pano → kind 'pano'）
 
 // 类型色 —— 单一真相：JS 侧用此处，CSS 侧 styles.css 的 --kind-* 须与之同源
 export const KIND_ACCENT: Record<CardKind, string> = {
   image: '#6366f1',
+  pano: '#06b6d4',
   video: '#ec4899',
   text: '#10b981',
   audio: '#f59e0b',
@@ -171,6 +180,7 @@ export const KIND_ACCENT: Record<CardKind, string> = {
 
 export const KIND_LABEL: Record<CardKind, string> = {
   image: '图片',
+  pano: '360 全景',
   video: '视频',
   text: '文本',
   audio: '音频',
@@ -181,6 +191,7 @@ export const KIND_LABEL: Record<CardKind, string> = {
 
 export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   image: { w: 280, h: 320 },
+  pano: { w: 360, h: 220 }, // 等距柱状 2:1，出图后 fitAspect 收敛到真实比例
   video: { w: 320, h: 280 },
   text: { w: 300, h: 220 },
   audio: { w: 300, h: 140 },

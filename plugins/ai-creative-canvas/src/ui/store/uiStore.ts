@@ -158,7 +158,8 @@ export const useUi = create<UiState>((set, get) => ({
       s.storyboardCardId ||
       s.maskCardId ||
       s.trimCardId ||
-      s.panoCardId ||
+      // panoCardId 不算模态：360 预览内嵌在卡片节点里，画布快捷键照常；且预览卡在 LOD/切板时会
+      // 卸载，若算模态会把快捷键卡死在「无人响应 Esc」的状态
       s.preview
     )
   }

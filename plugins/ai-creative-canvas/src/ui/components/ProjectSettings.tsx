@@ -49,7 +49,7 @@ export function ProjectSettings() {
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        title="项目设置（默认模型 / 并发）"
+        title="项目设置"
         className={`h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20 ${open ? 'text-indigo-500' : ''}`}
       >
         <SlidersHorizontal size={15} />
@@ -86,7 +86,7 @@ export function ProjectSettings() {
                 onChange={(v) => setDefaultModel('pano', v || null)}
                 options={[{ value: '', label: '不用（沿用图像模型）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label }))]}
               />
-              <span className="text-[11px] opacity-50">开启「全景」生成时优先用它（应选能直接出等距柱状 equirect 的模型/LoRA）。</span>
+              <span className="text-[11px] opacity-50">全景卡未选模型时优先用它（应选能直接出等距柱状 equirect 的模型/LoRA；卡上显式所选模型优先）。</span>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs opacity-60">ControlNet 控制模型</label>

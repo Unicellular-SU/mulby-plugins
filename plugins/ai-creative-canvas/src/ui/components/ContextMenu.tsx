@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../zlayers'
-import { Sparkles, Film, Grid2x2, Boxes, LayoutTemplate, Link2, Copy, ClipboardPaste, AlignCenter, Download, Trash2, Plus } from 'lucide-react'
+import { Sparkles, Film, Grid2x2, Boxes, Compass, LayoutTemplate, Link2, Copy, ClipboardPaste, AlignCenter, Download, Trash2, Plus } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { generateCard, generateSelected, canGenerate } from '../services/generate'
@@ -18,6 +18,7 @@ type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: tr
 
 // 按关键词给菜单项配 lucide 图标（无需逐项声明）
 function iconFor(label: string): typeof Sparkles | null {
+  if (label.includes('全景')) return Compass
   if (label.includes('生成')) return Sparkles
   if (label.includes('转视频') || label.includes('合成') || label.includes('视频')) return Film
   if (label.includes('拼贴')) return Grid2x2
@@ -33,7 +34,7 @@ function iconFor(label: string): typeof Sparkles | null {
   return null
 }
 
-const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', video: '视频', audio: '音频', source: '素材', note: '便签' }
+const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', pano: '360 全景', video: '视频', audio: '音频', source: '素材', note: '便签' }
 
 export function ContextMenu() {
   const ctx = useUi((s) => s.ctxMenu)
@@ -164,7 +165,7 @@ export function ContextMenu() {
     if (genTargets.length >= 2) items.push({ label: `生成选中（${genTargets.length}）`, onClick: () => run(() => generateSelected()) })
     else if (genTargets.length === 1) items.push({ label: '生成', onClick: () => run(() => void generateCard(genTargets[0].id)) })
     if (cards.length === 1 && cards[0].kind === 'image' && cards[0].assetLocalPath) items.push({ label: '转视频（以此为首帧）', onClick: () => run(() => shotToVideo(cards[0].id)) })
-    if (cards.length === 1 && (cards[0].kind === 'image' || cards[0].kind === 'source' || cards[0].kind === 'video') && cards[0].assetUrl)
+    if (cards.length === 1 && (cards[0].kind === 'image' || cards[0].kind === 'pano' || cards[0].kind === 'source' || cards[0].kind === 'video') && cards[0].assetUrl)
       items.push({
         label: '提取为素材卡',
         onClick: () =>
@@ -174,9 +175,27 @@ export function ContextMenu() {
             g.addCard(newKind, { x: c.x + c.w + 160, y: c.y + c.h / 2 }, { title: c.title || '素材', status: 'done', assetUrl: c.assetUrl, assetLocalPath: c.assetLocalPath, mime: c.mime })
           })
       })
+    // 手动导入的等距柱状全景（素材/图片卡）→ 一键转独立全景卡，获得 360 环视与接缝/天地修复。
+    // 生成中不给转（流式预览也有 assetUrl，且多图/比例语义未定）；非图片资产（如 PDF 素材）不给转
+    if (
+      cards.length === 1 &&
+      (cards[0].kind === 'image' || cards[0].kind === 'source') &&
+      cards[0].assetUrl &&
+      cards[0].status !== 'running' &&
+      cards[0].status !== 'queued' &&
+      (!cards[0].mime || cards[0].mime.startsWith('image'))
+    )
+      items.push({
+        label: '转为 360 全景卡',
+        onClick: () =>
+          run(() => {
+            g.pushHistory()
+            g.updateCard(cards[0].id, { kind: 'pano', meta: { ...cards[0].meta, pano: true } })
+          })
+      })
     if (clips.length >= 2) items.push({ label: `合成成片（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowCompose(true)) })
     if (clips.length >= 1) items.push({ label: `时间线编辑（${clips.length}）`, onClick: () => run(() => useUi.getState().setShowTimeline(true)) })
-    const imgCards = cards.filter((c) => (c.kind === 'image' || c.kind === 'source') && c.assetUrl)
+    const imgCards = cards.filter((c) => (c.kind === 'image' || c.kind === 'pano' || c.kind === 'source') && c.assetUrl)
     if (imgCards.length >= 2) items.push({ label: `拼贴合成（${imgCards.length}）`, onClick: () => run(() => void runCollage(imgCards.map((c) => c.id))) })
     if (cards.length >= 1) items.push({ label: '编组', onClick: () => run(() => g.groupSelection()) })
     if (cards.length === 1 && cards[0].kind === 'group')
@@ -193,6 +212,7 @@ export function ContextMenu() {
       items.push({ header: '连接到新节点' })
       items.push({ label: '↳ 连到新文本节点', onClick: () => run(() => connectToNew('text')) })
       items.push({ label: '↳ 连到新图片节点', onClick: () => run(() => connectToNew('image')) })
+      items.push({ label: '↳ 连到新全景节点', onClick: () => run(() => connectToNew('pano')) })
       items.push({ label: '↳ 连到新视频节点', onClick: () => run(() => connectToNew('video')) })
     }
     if (cards.length >= 2) {
@@ -221,7 +241,7 @@ export function ContextMenu() {
   } else {
     const rect = stageEl.current?.getBoundingClientRect()
     const world = screenToWorld(ctx.x - (rect?.left || 0), ctx.y - (rect?.top || 0), board.viewport)
-    ;(['text', 'image', 'video', 'audio', 'source', 'note'] as CardKind[]).forEach((k) => {
+    ;(['text', 'image', 'pano', 'video', 'audio', 'source', 'note'] as CardKind[]).forEach((k) => {
       items.push({ label: '新建' + NEW_LABEL[k], onClick: () => run(() => g.addCard(k, world)) })
     })
     if (g.clipboard?.cards.length) {

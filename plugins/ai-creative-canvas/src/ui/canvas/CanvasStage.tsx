@@ -26,7 +26,7 @@ import { computeSnap, computeSnapBox } from './snapping'
 import { ContextMenu } from '../components/ContextMenu'
 import type { Card, CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
-import { fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
+import { classifyWheel, fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
 import { buildGridIndex, type RectItem } from './spatialIndex'
 import { importFiles } from '../services/importMedia'
 import { stageEl } from './stageEl'
@@ -176,7 +176,8 @@ export function CanvasStage() {
     if (assetJson) {
       try {
         const a = JSON.parse(assetJson)
-        const newKind: CardKind = a.kind === 'video' ? 'video' : 'source'
+        // 全景拖出保留 pano 身份（角标 + 360 环视），其余产物落成素材/视频源卡
+        const newKind: CardKind = a.kind === 'video' ? 'video' : a.kind === 'pano' ? 'pano' : 'source'
         useGraph.getState().addCard(newKind, world, { title: a.title || '素材', status: 'done', assetUrl: a.url, assetLocalPath: a.localPath, mime: a.mime })
       } catch {
         /* ignore */
@@ -415,8 +416,8 @@ export function CanvasStage() {
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
       const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
-      if (c?.assetUrl && (c.meta as any)?.pano) {
-        useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视
+      if (c?.assetUrl && (c.kind === 'pano' || (c.meta as any)?.pano)) {
+        useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视（须先于 image/source 分支，与 CardView 同步）
       } else if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
         useUi.getState().setMaskCardId(c.id) // 双击图片节点 → 局部编辑页面
       } else if (c?.assetUrl && c.kind === 'video') {
@@ -445,25 +446,39 @@ export function CanvasStage() {
     useUi.getState().setCtxMenu({ x: e.clientX, y: e.clientY, cardId })
   }
 
-  // 原生 wheel（非 passive，便于 preventDefault）→ 朝光标缩放
+  // 原生 wheel（非 passive，便于 preventDefault）。普通 wheel（触控板两指滑动 / 鼠标滚轮）→ 平移；
+  // 捏合 / Cmd·Ctrl+滚轮 → 朝光标缩放。对齐 Figma/FigJam 惯例，无歧义无偏好开关（见 classifyWheel）。
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
-    const onWheel = (e: WheelEvent) => {
-      if ((e.target as HTMLElement)?.closest?.('[data-interactive]')) return // 让面板/工具条内部滚动，不缩放画布
-      e.preventDefault()
-      const rect = el.getBoundingClientRect()
-      const sx = e.clientX - rect.left
-      const sy = e.clientY - rect.top
-      const factor = Math.exp(-e.deltaY * 0.0015)
-      const g = useGraph.getState()
-      g.setViewport(zoomAt(g.getActiveBoard().viewport, sx, sy, factor))
-      el.dataset.interacting = 'zoom'
+    // 手势进行中标脏（DOM data 属性，不触发 React 重渲）：CSS 据此关阴影/过渡；静默 220ms 后清除
+    const markGesture = (mode: 'pan' | 'zoom') => {
+      el.dataset.interacting = mode
       if (zoomTimer.current != null) clearTimeout(zoomTimer.current)
       zoomTimer.current = window.setTimeout(() => {
         if (inter.current.mode === 'idle' && stageRef.current) delete stageRef.current.dataset.interacting
         zoomTimer.current = null
       }, 220)
+    }
+    const onWheel = (e: WheelEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('[data-interactive]')) return // 让面板/工具条内部滚动，不劫持
+      e.preventDefault()
+      // 指针交互进行中（拖卡/框选/中键或空格平移）：吞掉滚轮，避免动量惯性帧改视口导致坐标漂移、
+      // 拖动目标错位或框选矩形与光标错开（滚轮平移写 panAcc，flush 的平移分支不按 mode 门控）
+      if (inter.current.mode !== 'idle') return
+      const gesture = classifyWheel(e)
+      const g = useGraph.getState()
+      if (gesture.kind === 'zoom') {
+        const rect = el.getBoundingClientRect()
+        g.setViewport(zoomAt(g.getActiveBoard().viewport, e.clientX - rect.left, e.clientY - rect.top, gesture.factor))
+        markGesture('zoom')
+      } else {
+        // 平移：走 panAcc + RAF 批处理，与拖拽平移同源；macOS 惯性经浏览器续发的 wheel 自带
+        panAcc.current.dx += gesture.dx
+        panAcc.current.dy += gesture.dy
+        markGesture('pan')
+        schedule()
+      }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
@@ -651,7 +666,7 @@ export function CanvasStage() {
                 打开模板
               </button>
             </div>
-            <div className="text-[11px] opacity-40 mt-3">双击空白新建 · 拖图片进来导入 · 滚轮缩放 · 空格拖拽平移</div>
+            <div className="text-[11px] opacity-40 mt-3">双击空白新建 · 拖图片进来导入 · 两指滑动或滚轮平移 · 捏合或 Cmd/Ctrl+滚轮缩放</div>
           </div>
         </div>
       )}

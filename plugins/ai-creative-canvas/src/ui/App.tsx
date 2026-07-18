@@ -17,7 +17,6 @@ import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
 import { CardSearch } from './components/CardSearch'
 import { ProjectLibrary } from './components/ProjectLibrary'
-import { PanoViewer } from './canvas/PanoViewer'
 import { DirectorStage } from './canvas/DirectorStage'
 import { DialogHost } from './components/DialogHost'
 import { ToastHost } from './components/ToastHost'
@@ -132,7 +131,7 @@ export default function App() {
       <ComposeModal />
       <TimelineModal />
       <ProjectLibrary />
-      <PanoViewer />
+      {/* 360 预览已内嵌到全景卡节点内（PanoNodePreview，随 panoCardId 激活），不再有全屏查看器 */}
       <DirectorStage />
       <StoryboardModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />

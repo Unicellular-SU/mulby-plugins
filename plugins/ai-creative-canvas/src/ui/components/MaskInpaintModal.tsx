@@ -112,6 +112,22 @@ function Inner({ cardId }: { cardId: string }) {
     return gcv.toDataURL('image/png')
   }
 
+  // 真遮罩：涂抹区 alpha=0（OpenAI edits 约定「透明=待重绘区」），其余不透明黑底
+  const buildMask = (): string | null => {
+    const cv = canvasRef.current
+    if (!cv) return null
+    const m = document.createElement('canvas')
+    m.width = cv.width
+    m.height = cv.height
+    const mc = m.getContext('2d')
+    if (!mc) return null
+    mc.fillStyle = '#000'
+    mc.fillRect(0, 0, m.width, m.height)
+    mc.globalCompositeOperation = 'destination-out'
+    mc.drawImage(cv, 0, 0)
+    return m.toDataURL('image/png')
+  }
+
   const run = async () => {
     if (!painted.current) {
       notify('请先涂抹要修改的区域', 'error')
@@ -123,9 +139,10 @@ function Inner({ cardId }: { cardId: string }) {
     }
     const composite = await buildComposite()
     if (!composite) return
+    const mask = buildMask() || undefined
     setBusy(true)
     try {
-      await inpaint(cardId, op, composite, prompt.trim())
+      await inpaint(cardId, op, composite, prompt.trim(), mask)
       notify(op === 'remove' ? '已擦除，结果落为新卡' : '局部重绘完成，结果落为新卡', 'success')
       useUi.getState().setMaskCardId(null)
     } catch (e: any) {

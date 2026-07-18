@@ -115,13 +115,13 @@ function consistencyRefs(textCardId: string, board: Board): string[] {
   for (const e of Object.values(board.edges)) {
     if (e.target === textCardId) {
       const src = board.cards[e.source]
-      if (src && src.assetUrl && (src.kind === 'image' || src.kind === 'source')) ids.add(src.id)
+      if (src && src.assetUrl && (src.kind === 'image' || src.kind === 'pano' || src.kind === 'source')) ids.add(src.id)
     }
   }
   const tc = board.cards[textCardId]
   for (const rid of tc?.refIds || []) {
     const c = board.cards[rid]
-    if (c && c.assetUrl && (c.kind === 'image' || c.kind === 'source')) ids.add(rid)
+    if (c && c.assetUrl && (c.kind === 'image' || c.kind === 'pano' || c.kind === 'source')) ids.add(rid)
   }
   return [...ids]
 }
