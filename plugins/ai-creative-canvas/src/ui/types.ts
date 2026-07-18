@@ -106,6 +106,7 @@ export interface DirectorSubject {
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
   desc?: string // 对象语义描述（"穿长衫的老者"）：场景即提示词，生成时按画面方位装配
+  colorName?: string // 人台锚定色名（"红衣"）：参考图颜色块 + prompt 颜色锚定，锁定站位/朝向
 }
 export interface DirectorShot {
   id: string

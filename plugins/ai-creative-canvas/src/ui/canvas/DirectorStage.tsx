@@ -29,6 +29,17 @@ const FACINGS: { k: string; r: number }[] = [
   { k: '朝右', r: -Math.PI / 2 }
 ]
 
+// 人台锚定色：按添加顺序分配。参考图里的颜色块是模型最易锁定的特征，
+// prompt 里用「颜色+方位+占比+朝向」四重锚定对应角色（note 声明忽略材质与颜色，只取几何）
+const MANNEQUIN_COLORS: { hex: number; name: string }[] = [
+  { hex: 0xd95f4b, name: '红衣' },
+  { hex: 0x4b7fd9, name: '蓝衣' },
+  { hex: 0x53b96a, name: '绿衣' },
+  { hex: 0xd9b84b, name: '黄衣' },
+  { hex: 0x9b5fd9, name: '紫衣' },
+  { hex: 0x4bbfd9, name: '青衣' }
+]
+
 // 出图画幅预设：宿主 images.edit 不支持尺寸参数，模型自己定画幅——所以抓帧按选定画幅居中裁剪，
 // 视口内用 letterbox 画框标示真实出图范围（所见即所得）；ar=0 表示不裁剪（跟随视口）
 const ASPECTS: { k: string; ar: number }[] = [
@@ -208,7 +219,7 @@ function Inner() {
           pipMount.appendChild(pip.domElement)
         }
 
-        interface Subj { obj: any; kind: string; id: string; name: string; desc?: string }
+        interface Subj { obj: any; kind: string; id: string; name: string; desc?: string; colorName?: string }
         const subjects: Subj[] = []
         const raycaster = new THREE.Raycaster()
         const ndc = new THREE.Vector2()
@@ -306,21 +317,23 @@ function Inner() {
             setSelKind(root ? root.userData.kind || '' : null)
           }
         }
-        const addSubject = (obj: any, kind: string, desc?: string) => {
+        const addSubject = (obj: any, kind: string, desc?: string, colorName?: string) => {
           const id = uid('obj')
           const name = nextName(kind)
           obj.userData.kind = kind
           scene.add(obj)
-          subjects.push({ obj, kind, id, name, desc })
+          subjects.push({ obj, kind, id, name, desc, colorName })
           sync()
           select(obj)
           commit()
           return id
         }
         const addMannequin = () => {
-          const g = makeMannequin(0xc7ccd6)
+          // 按现有人台数分配锚定色（人台1=红衣、人台2=蓝衣…）
+          const c = MANNEQUIN_COLORS[subjects.filter((s) => s.kind === '人台').length % MANNEQUIN_COLORS.length]
+          const g = makeMannequin(c.hex)
           g.position.set((subjects.length % 3) * 0.9 - 0.9, 0, 0)
-          addSubject(g, '人台')
+          addSubject(g, '人台', undefined, c.name)
         }
         const addProp = () => {
           const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
@@ -633,7 +646,9 @@ function Inner() {
         const captureThumb = (): string => {
           tcontrol.detach()
           const chv = camHelper.visible
+          const gv = grid.visible
           camHelper.visible = false
+          grid.visible = false // 网格线不进缩略图
           renderer.render(scene, outCam())
           const src = renderer.domElement
           const tw = 96
@@ -643,6 +658,7 @@ function Inner() {
           c.height = th
           c.getContext('2d')!.drawImage(src, 0, 0, tw, th)
           camHelper.visible = chv
+          grid.visible = gv
           attachByMode()
           return cropCanvas(c).toDataURL('image/jpeg', 0.7)
         }
@@ -657,14 +673,14 @@ function Inner() {
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
         const stagePreset = (key: string) => {
           if (key === '双人对话') {
-            const a = makeMannequin(0xc7ccd6)
+            const a = makeMannequin(MANNEQUIN_COLORS[0].hex)
             a.position.set(-0.6, 0, 0)
             a.rotation.y = Math.PI / 2
-            addSubject(a, '人台')
-            const b = makeMannequin(0xaab4c8)
+            addSubject(a, '人台', undefined, MANNEQUIN_COLORS[0].name)
+            const b = makeMannequin(MANNEQUIN_COLORS[1].hex)
             b.position.set(0.6, 0, 0)
             b.rotation.y = -Math.PI / 2
-            addSubject(b, '人台')
+            addSubject(b, '人台', undefined, MANNEQUIN_COLORS[1].name)
           } else if (key === '产品展示') {
             const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
             m.position.set(0, 0.25, 0)
@@ -680,7 +696,7 @@ function Inner() {
           if (st.kind !== '人台' && st.kind !== '道具') return
           const obj: any = st.kind === '道具'
             ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-            : makeMannequin(0xc7ccd6)
+            : makeMannequin(MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex ?? 0xc7ccd6)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
@@ -689,7 +705,7 @@ function Inner() {
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
           scene.add(obj)
-          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc })
+          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName: st.colorName })
         }
         const serializeSceneOnly = () => ({
           // 人台/道具 + 已存字节的导入模型；导入模型为空 assetId（存储失败）则不持久化
@@ -705,6 +721,7 @@ function Inner() {
                 assetId: s.kind === '模型' ? o.userData.assetId : undefined,
                 name: s.name,
                 desc: s.desc || undefined,
+                colorName: s.colorName || undefined,
                 pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
                 rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number],
                 scale: [o.scale.x, o.scale.y, o.scale.z] as [number, number, number],
@@ -885,16 +902,30 @@ function Inner() {
             if (!isFinite(ty)) return 0
             return (Math.abs(ty - by) / 2) * ky
           }
+          // 角色相对镜头的朝向：人台 forward=+Z，与「角色→相机」的水平夹角判定（面朝/背对/侧向）
+          const facingOf = (s: Subj): string => {
+            const fw = new THREE.Vector3(0, 0, 1).applyQuaternion(s.obj.quaternion)
+            const toCam = C.position.clone().sub(s.obj.getWorldPosition(new THREE.Vector3()))
+            fw.y = 0
+            toCam.y = 0
+            if (!fw.lengthSq() || !toCam.lengthSq()) return ''
+            const dot = fw.normalize().dot(toCam.normalize())
+            if (dot > 0.7) return '面向镜头'
+            if (dot < -0.7) return '背对镜头'
+            const crossY = fw.z * toCam.x - fw.x * toCam.z
+            return crossY > 0 ? '右侧身对镜头' : '左侧身对镜头'
+          }
           const layout = people
             .map((s, i) => {
               const where = whereOf(s)
               if (!where) return ''
               const pose = (s.obj as any).userData?.poseName
-              // 优先用对象语义描述（场景即提示词）；其次用户改名；否则回落「角色N」
-              const nm = s.desc || (s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`)
+              // 优先用对象语义描述（场景即提示词）；其次用户改名；否则回落「角色N」；颜色锚点前置
+              const nm = (s.colorName ? s.colorName : '') + (s.desc || (s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`))
               const frac = heightFracOf(s)
               const sizeTxt = frac > 0.01 ? `，约占画面高度 ${Math.round(frac * 100)}%` : ''
-              return `${nm}${where}${sizeTxt}${pose ? `(${pose})` : ''}`
+              const facing = facingOf(s)
+              return `${nm}${where}${sizeTxt}${facing ? `，${facing}` : ''}${pose ? `(${pose})` : ''}`
             })
             .filter(Boolean)
             .join('，')
@@ -967,7 +998,9 @@ function Inner() {
           capture: (): string => {
             tcontrol.detach()
             const chv = camHelper.visible
+            const gv = grid.visible
             camHelper.visible = false // 取景框不进成片参考图
+            grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
             renderer.render(scene, outCam())
             const src = renderer.domElement
             const c = document.createElement('canvas')
@@ -976,6 +1009,7 @@ function Inner() {
             c.getContext('2d')!.drawImage(src, 0, 0)
             const url = cropCanvas(c).toDataURL('image/png')
             camHelper.visible = chv
+            grid.visible = gv
             attachByMode()
             return url
           },
@@ -1122,9 +1156,12 @@ function Inner() {
         ? '【输入为 OpenPose 骨架控制图：请严格按骨架表达的人物姿态与站位渲染为成片画面。】'
         : useControl
           ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
-          : '【以上为 3D 导演台的机位/构图参考（灰色人台=角色站位/姿态），请据此构图与镜头渲染成片，忽略灰模材质。】'
-      // 构图指令前置：镜头描述 + 控制图说明放最前（导演台的核心诉求就是构图），用户场景描述在后
-      const full = `${note}${api.current.shotFragment()}\n\n${prompt.trim()}`
+          : '【以上为 3D 导演台的机位/构图参考（彩色人台=角色站位/姿态/朝向，颜色仅用于区分角色），请据此构图与镜头渲染成片，忽略人台材质与颜色。】'
+      // 构图指令前置（导演台的核心诉求就是构图）+ cookbook preserve-list：保留项英文写死（模型服从度更好）
+      const preserve =
+        'Preserve exactly: camera angle, framing, character positions, facing directions, character count and poses. ' +
+        'Change only: materials, textures, lighting, environment and style. Do not re-frame, zoom, crop or move any subject.'
+      const full = `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
