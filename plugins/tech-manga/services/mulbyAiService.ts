@@ -28,7 +28,9 @@ const getAi = () => {
 // 纪元（epoch）机制：每次 abortAllAiTasks() 递增纪元；
 // - 每个任务在开始时捕获当前纪元，跨 await 后发现纪元已变则抛 AbortError（丢弃结果）；
 // - 文本流式调用额外登记 requestId，中止时通过 ai.abort(requestId) 真正杀掉请求；
-// - 图像请求受 Electron contextBridge 限制无法从插件 UI 侧真正中止，
+// - 图像 edit 路径由插件自生成 requestId 随 input 传入并登记（第 6 章宿主分支支持真中止；
+//   老宿主安全忽略该字段，abort 未知 id 仅产生 warn 日志，行为退化为"结果作废不写界面"）；
+// - 图像 generate 路径暂无中止句柄（待 5.3 迁移 generateStream 后经 __requestId 获得），
 //   在途请求会继续在服务端完成，但结果会被作废，不会写入界面。
 // 中止后新发起的任务捕获的是新纪元，无需任何重置即可正常运行。
 
@@ -38,7 +40,7 @@ const activeTextRequestIds = new Set<string>();
 /** 当前中止纪元；队列型调用方（如资产连续生成循环）可在循环中比对以停止推进 */
 export const getAbortEpoch = () => abortEpoch;
 
-/** 一键中止：杀掉在途文本流请求，并作废所有在途任务的结果 */
+/** 一键中止：杀掉在途文本流请求与已登记 requestId 的图像 edit 请求，并作废所有在途任务的结果 */
 export const abortAllAiTasks = () => {
   abortEpoch += 1;
   const ai = (window as Window).mulby?.ai;
@@ -88,23 +90,75 @@ const dataUrlToBuffer = (dataUrl: string): { mimeType: string; buffer: ArrayBuff
   return { mimeType, buffer: bytes.buffer };
 };
 
-/** 宽高比 → 尺寸字符串（images.generate 的 size 参数），并附带用于 prompt 的比例提示 */
-const aspectRatioToSize = (aspectRatio: string): { size: string; hint: string } => {
-  let ratio = aspectRatio;
-  if (ratio === '2:3') ratio = '3:4'; // 与原实现保持一致：2:3 归一化为 3:4
-  switch (ratio) {
-    case '1:1': return { size: '1024x1024', hint: 'square 1:1' };
-    case '4:3': return { size: '1536x1024', hint: 'landscape 4:3' };
-    case '16:9': return { size: '1536x1024', hint: 'wide landscape 16:9' };
-    case '9:16': return { size: '1024x1536', hint: 'tall portrait 9:16' };
-    case '3:4':
-    default: return { size: '1024x1536', hint: 'portrait 3:4 (manga page)' };
+// ================= 参考图附件缓存（方案 4.1，遵守 D3） =================
+// 同一张参考图整轮会话只上传一次：key = dataUrl 前 256 字符 + 长度，
+// value 为 Promise 化 attachmentId（并发页同时 miss 时也只上传一次）。
+// 宿主 AttachmentStore 无 TTL、消费后不删除，跨页复用安全；命中后仍以
+// attachments.get 校验失效（宿主重启等），失效即重传。
+
+const attachmentCache = new Map<string, Promise<string>>();
+const cacheKeyOf = (dataUrl: string) => `${dataUrl.slice(0, 256)}:${dataUrl.length}`;
+
+const uploadRefCached = (ai: ReturnType<typeof getAi>, dataUrl: string): Promise<string> => {
+  const key = cacheKeyOf(dataUrl);
+  const hit = attachmentCache.get(key);
+  if (hit) {
+    // 命中失效校验：attachments.get 为 null 则重传（D3）
+    return hit.then(async (id) => {
+      const meta = await ai.attachments.get(id).catch(() => null);
+      if (meta) return id;
+      attachmentCache.delete(key);
+      return uploadRefCached(ai, dataUrl);
+    });
+  }
+  const p = (async () => {
+    const { mimeType, buffer } = dataUrlToBuffer(dataUrl);
+    const att = await ai.attachments.upload({ buffer, mimeType, purpose: 'vision' });
+    return att.attachmentId;
+  })();
+  p.catch(() => attachmentCache.delete(key)); // 上传失败不留脏缓存
+  attachmentCache.set(key, p);
+  return p;
+};
+
+/**
+ * 删除全部已缓存附件并清空缓存；新剧本生成成功与 Start Over 确认丢弃时调用（D3）。
+ * 宿主对附件无 TTL / 会话清理任务，批量 delete 属必要清理而非锦上添花。
+ */
+export const clearReferenceAttachmentCache = () => {
+  const ai = (window as Window).mulby?.ai;
+  attachmentCache.forEach((p) =>
+    p.then((id) => ai?.attachments.delete(id)).catch(() => { /* ignore */ })
+  );
+  attachmentCache.clear();
+};
+
+/**
+ * 宽高比 → 尺寸字符串与 prompt 比例提示（方案 4.7）。
+ * - canvasHint：generate 路径用，必须与 size 画布数学一致（否则模型自行留白/加边框凑比例）；
+ * - requestedHint：edit 路径用（无 size 画布时忠实用户所选比例；第 6 章宿主分支落地后
+ *   size/aspectRatio 随 edit 入参透传，hint 退化为辅助提示）。
+ */
+const aspectRatioToSize = (aspectRatio: string): {
+  size: string; canvasHint: string; requestedHint: string;
+} => {
+  switch (aspectRatio) {
+    case '1:1':  return { size: '1024x1024', canvasHint: 'square 1:1', requestedHint: 'square 1:1' };
+    case '4:3':  return { size: '1536x1024', canvasHint: 'landscape 3:2', requestedHint: 'landscape 4:3' };
+    case '16:9': return { size: '1536x1024', canvasHint: 'landscape 3:2', requestedHint: 'wide landscape 16:9' };
+    case '9:16': return { size: '1024x1536', canvasHint: 'tall portrait 2:3', requestedHint: 'tall portrait 9:16' };
+    case '3:4':  return { size: '1024x1536', canvasHint: 'portrait 2:3', requestedHint: 'portrait 3:4' };
+    case '2:3':
+    default:     return { size: '1024x1536', canvasHint: 'portrait 2:3 (manga page)', requestedHint: 'portrait 2:3 (manga page)' };
   }
 };
 
-// Helper to strip markdown json blocks if they appear
-const cleanJson = (text: string) => {
-  return text.replace(/```json/g, '').replace(/```/g, '').trim();
+// 方案 4.6：本地 JSON 提取（大小写不敏感围栏剥离 + 首尾大括号截取，救回前置说明文字等脏输出）
+const extractJson = (text: string): string => {
+  const stripped = text.replace(/```(?:json)?/gi, '').trim();
+  const start = stripped.indexOf('{');
+  const end = stripped.lastIndexOf('}');
+  return start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
 };
 
 // Helper for approximate token counting when metadata is missing
@@ -294,6 +348,211 @@ const getJsonSchemaString = () => `
     ALL fields above are REQUIRED.
 `;
 
+// ================= 剧本 JSON 可靠性（方案 4.6） =================
+// API 级结构化输出约束（responseFormat: 'json_schema'）。文字版 getJsonSchemaString()
+// 保留在静态 system 段作跨 provider 兜底（Anthropic 原生端点宿主暂不注入 schema）。
+// strict 必须显式 false：宿主默认 true，复杂嵌套 schema 在 OpenAI strict 模式下会被拒。
+const COMIC_JSON_SCHEMA = {
+  type: 'object',
+  required: ['analysis', 'title', 'global_art_style', 'character_sheet',
+             'prop_sheet', 'cover_image_prompt', 'pages'],
+  properties: {
+    analysis: { type: 'string' },
+    title: { type: 'string' },
+    global_art_style: { type: 'string' },
+    character_sheet: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'description'],
+        properties: { name: { type: 'string' }, description: { type: 'string' } },
+      },
+    },
+    prop_sheet: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'description'],
+        properties: { name: { type: 'string' }, description: { type: 'string' } },
+      },
+    },
+    cover_image_prompt: { type: 'string' },
+    pages: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['page_number', 'characters_in_scene', 'props_in_scene',
+                   'layout_description', 'persistent_states',
+                   'state_changes_this_page', 'image_prompt'],
+        properties: {
+          page_number: { type: 'integer' },
+          characters_in_scene: { type: 'array', items: { type: 'string' } },
+          props_in_scene: { type: 'array', items: { type: 'string' } },
+          layout_description: { type: 'string' },
+          persistent_states: {
+            type: 'object',
+            required: ['characters', 'environment'],
+            properties: {
+              characters: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['name', 'state'],
+                  properties: {
+                    name: { type: 'string' },
+                    state: {
+                      type: 'object',
+                      properties: {
+                        position: { type: 'string' },
+                        pose: { type: 'string' },
+                        appearance_changes: { type: 'array', items: { type: 'string' } },
+                        injuries: { type: 'array', items: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+              environment: {
+                type: 'object',
+                properties: {
+                  lighting: { type: 'string' },
+                  notable_changes: { type: 'array', items: { type: 'string' } },
+                },
+              },
+            },
+          },
+          state_changes_this_page: { type: 'array', items: { type: 'string' } },
+          image_prompt: { type: 'string' },
+        },
+      },
+    },
+  },
+} as const;
+
+/**
+ * 解析容错三级递进（方案 4.6）：本地提取 → 一次自动修复重试（低成本非流式回喂）→ 保留原文抛错。
+ * 修复调用不注册 requestId（不可中止），调用方在返回后须补一次纪元检查（D1）。
+ */
+const parseScriptWithRepair = async (
+  raw: string,
+  onUsage?: (stat: UsageStat) => void
+): Promise<ComicResponse> => {
+  try {
+    return JSON.parse(extractJson(raw)) as ComicResponse;
+  } catch (parseError) {
+    // 自动重试一次：原文 + 错误信息回喂做修复（非流式）
+    try {
+      const fixed = await getAi().call({
+        ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
+        messages: [
+          { role: 'system', content: 'You are a JSON repair tool. Return ONLY the corrected, complete JSON object. No markdown, no commentary.' },
+          { role: 'user', content: `This text should be one JSON object but fails to parse (${String(parseError)}). Fix and return it:\n\n${raw}` },
+        ],
+        params: { responseFormat: 'json_object' },
+        ...NO_TOOLS,
+      });
+      const fixedText = typeof fixed?.content === 'string' ? fixed.content : '';
+      // 修复调用同样计费，记入 TokenMonitor
+      onUsage?.({
+        inputTokens: fixed?.usage?.inputTokens ?? estimateTokens(raw),
+        outputTokens: fixed?.usage?.outputTokens ?? estimateTokens(fixedText),
+        imagesGenerated: 0,
+        modelType: 'GEMINI_3_PRO',
+      });
+      return JSON.parse(extractJson(fixedText)) as ComicResponse;
+    } catch {
+      const err = new Error('剧本 JSON 解析失败（已自动修复重试一次）。原始输出已保留在右侧日志面板，可复制后手动修复重用。');
+      (err as Error & { rawText?: string }).rawText = raw;
+      throw err;
+    }
+  }
+};
+
+// ================= 剧本 systemPrompt 静态前缀（方案 4.5） =================
+// system 段完全静态（模块加载时求值一次，字节稳定），命中 OpenAI/Gemini/DeepSeek 类
+// 隐式 prompt caching；全部变量（源文本 / castingPhase / 画风 / 页数 / 叙事指令）集中到
+// user 消息，且会话内稳定的 Source Material 放最前、可调变量放最后。
+const STATIC_SYSTEM_PROMPT = `
+    Role: Professional Tech Manga Director and Storyteller.
+
+    Target Art Style: Specified in the user message as "Target Art Style" (CRITICAL: All visual descriptions must match that style).
+
+    Task: Adapt the provided Source Material into a suspenseful, engaging sequential Manga/Comic script.
+
+    ================================================================
+    PHASE 1: SOURCE MATERIAL ANALYSIS (INTERNAL)
+    ================================================================
+    Before writing the script, you must ANALYZE the 'Source Material' provided in the user message.
+    Determine its nature:
+    - **Technical Guide**? (Linear progress)
+    - **Bug Report**? (Mystery/Crisis)
+    - **Historical Event**? (Chronological Drama)
+    - **Biography**? (Character Study)
+
+    **ADAPT THE PLOT BASED ON THIS ANALYSIS.**
+    The story structure must mirror the content's structure.
+
+    ================================================================
+    PHASE 2: UNIVERSE & WORLD IMMERSION
+    ================================================================
+    - **IMMERSION RULE**: The script MUST feel like a legitimate episode.
+    - **LORE ADAPTATION**:
+       - **IF** Technical/Sci-Fi: Use precise technical jargon.
+       - **IF** Historical (Serious): Use period-accurate language and setting. No modern tech unless specified.
+       - **IF** Historical (Parody): Mix historical setting with the character's modern quirks (anachronistic humor).
+
+    (PHASE 3 casting rules are provided in the user message.)
+
+    ================================================================
+    PHASE 4: DIALOGUE & NARRATIVE DENSITY (CRITICAL)
+    ================================================================
+    - **HIGH VERBOSITY REQUIRED**:
+      - Do NOT write sparse or minimal dialogue.
+      - **Explain Everything**: The characters must explain the concepts/events thoroughly through their conversation.
+      - **Educational Goal**: The user must understand the metadata/principles/history purely by reading the dialogue.
+    - **NO SUMMARIES**: NEVER write "He explains the algorithm." -> **WRITE THE ACTUAL EXPLANATION**.
+    - **CHARACTER VOICE**:
+      - Characters MUST speak exactly like they do in canon (or history).
+    - **Language**: All dialogue must be in natural, high-quality **Simplified Chinese (简体中文)**.
+
+    ================================================================
+    PHASE 5: VISUAL CONTINUITY & CINEMATOGRAPHY (CRITICAL)
+    ================================================================
+    - **NO TELEPORTATION**: Characters cannot jump locations instantly.
+    - **PANEL-TO-PANEL FLOW**:
+      - The 'image_prompt' must describe a FLUID sequence.
+      - **Action Continuity**: If Panel 1 is "Character raises hand", Panel 2 MUST be "Hand slams on table".
+
+    ================================================================
+    PHASE 6: LENGTH & STRUCTURE
+    ================================================================
+    - Follow the "Total Pages" and "Panels per Page" constraints specified in the user message.
+
+    ================================================================
+    PHASE 7: VISUALS, CHARACTERS & PROPS
+    ================================================================
+    **Dynamic Asset Design**:
+    1. **Characters**: Identify the Protagonist, Sidekicks, and Antagonists. Create a 'character_sheet'.
+       - **DESCRIPTION FORMAT**: "**[Character Name]**. [Visual Details...]"
+
+    2. **Props/Items**: Identify KEY OBJECTS or WEAPONS that appear frequently.
+       - Create a 'prop_sheet'.
+
+    **Page Layout Enforcement**:
+    - The 'image_prompt' MUST describe the **FULL PAGE LAYOUT**.
+    - **MANDATORY STATE PREAMBLE**: Every image_prompt MUST begin with a "[VISUAL STATE]" block.
+
+    **Art Style Consistency**:
+    - The 'global_art_style' field in JSON must describe the Target Art Style (specified in the user message) in detail.
+
+    **Spatial Anchoring & Text Embedding (STRICT)**:
+    - **Mandatory Format**: "Includes speech bubble located [POSITION] pointing to [CHARACTER] with text: '[CHINESE DIALOGUE]'"
+    - **NO SPEAKER PREFIX**: Do NOT include "Name:" inside the quote.
+    - **NO TRANSLATIONS**: Do NOT include English translation.
+
+    ${getJsonSchemaString()}
+`;
+
 export const generateComicScript = async (
   text: string,
   style: string,
@@ -372,98 +631,20 @@ export const generateComicScript = async (
       `;
   }
 
-  const systemPrompt = `
-    Role: Professional Tech Manga Director and Storyteller.
+  // 方案 4.5：system 完全静态（STATIC_SYSTEM_PROMPT 模块级常量），变量集中到 user 消息；
+  // 会话内稳定的 Source Material 放最前（调 style/页数不使源文本段的缓存前缀失效），可调变量放最后。
+  const userPrompt = [
+    `Source Material:\n"""\n${text}\n"""`,
+    castingPhase,
+    `Target Art Style: "${style}"`,
+    pageCountInstruction,
+    `Panels per Page: ${panelsPerPage}.`,
+    `Directives for Plot & Narrative (Style Lens):\n${specificNarrativeInstructions}`,
+  ].join('\n\n');
 
-    Target Art Style: "${style}" (CRITICAL: All visual descriptions must match this style).
-
-    Task: Adapt the provided Source Material into a suspenseful, engaging sequential Manga/Comic script.
-
-    ================================================================
-    PHASE 1: SOURCE MATERIAL ANALYSIS (INTERNAL)
-    ================================================================
-    Before writing the script, you must ANALYZE the 'Source Material' below.
-    Determine its nature:
-    - **Technical Guide**? (Linear progress)
-    - **Bug Report**? (Mystery/Crisis)
-    - **Historical Event**? (Chronological Drama)
-    - **Biography**? (Character Study)
-
-    **ADAPT THE PLOT BASED ON THIS ANALYSIS.**
-    The story structure must mirror the content's structure.
-
-    ================================================================
-    PHASE 2: UNIVERSE & WORLD IMMERSION
-    ================================================================
-    - **IMMERSION RULE**: The script MUST feel like a legitimate episode.
-    - **LORE ADAPTATION**:
-       - **IF** Technical/Sci-Fi: Use precise technical jargon.
-       - **IF** Historical (Serious): Use period-accurate language and setting. No modern tech unless specified.
-       - **IF** Historical (Parody): Mix historical setting with the character's modern quirks (anachronistic humor).
-
-    ${castingPhase}
-
-    ================================================================
-    PHASE 4: DIALOGUE & NARRATIVE DENSITY (CRITICAL)
-    ================================================================
-    - **HIGH VERBOSITY REQUIRED**:
-      - Do NOT write sparse or minimal dialogue.
-      - **Explain Everything**: The characters must explain the concepts/events thoroughly through their conversation.
-      - **Educational Goal**: The user must understand the metadata/principles/history purely by reading the dialogue.
-    - **NO SUMMARIES**: NEVER write "He explains the algorithm." -> **WRITE THE ACTUAL EXPLANATION**.
-    - **CHARACTER VOICE**:
-      - Characters MUST speak exactly like they do in canon (or history).
-    - **Language**: All dialogue must be in natural, high-quality **Simplified Chinese (简体中文)**.
-
-    ================================================================
-    PHASE 5: VISUAL CONTINUITY & CINEMATOGRAPHY (CRITICAL)
-    ================================================================
-    - **NO TELEPORTATION**: Characters cannot jump locations instantly.
-    - **PANEL-TO-PANEL FLOW**:
-      - The 'image_prompt' must describe a FLUID sequence.
-      - **Action Continuity**: If Panel 1 is "Character raises hand", Panel 2 MUST be "Hand slams on table".
-
-    ================================================================
-    PHASE 6: LENGTH & STRUCTURE
-    ================================================================
-    - ${pageCountInstruction}
-    - Panels per Page: ${panelsPerPage}.
-
-    Source Material:
-    """
-    ${text}
-    """
-
-    Directives for Plot & Narrative (Style Lens):
-    ${specificNarrativeInstructions}
-
-    ================================================================
-    PHASE 7: VISUALS, CHARACTERS & PROPS
-    ================================================================
-    **Dynamic Asset Design**:
-    1. **Characters**: Identify the Protagonist, Sidekicks, and Antagonists. Create a 'character_sheet'.
-       - **DESCRIPTION FORMAT**: "**[Character Name]**. [Visual Details...]"
-
-    2. **Props/Items**: Identify KEY OBJECTS or WEAPONS that appear frequently.
-       - Create a 'prop_sheet'.
-
-    **Page Layout Enforcement**:
-    - The 'image_prompt' MUST describe the **FULL PAGE LAYOUT**.
-    - **MANDATORY STATE PREAMBLE**: Every image_prompt MUST begin with a "[VISUAL STATE]" block.
-
-    **Art Style Consistency**:
-    - The 'global_art_style' field in JSON must describe "${style}" in detail.
-
-    **Spatial Anchoring & Text Embedding (STRICT)**:
-    - **Mandatory Format**: "Includes speech bubble located [POSITION] pointing to [CHARACTER] with text: '[CHINESE DIALOGUE]'"
-    - **NO SPEAKER PREFIX**: Do NOT include "Name:" inside the quote.
-    - **NO TRANSLATIONS**: Do NOT include English translation.
-
-    ${getJsonSchemaString()}
-  `;
-
-  // Log the input prompt immediately
-  onLogUpdate('INPUT', systemPrompt);
+  // Log the input prompt immediately（system + user 拼接，日志观感不变）
+  const fullInputText = `${STATIC_SYSTEM_PROMPT}\n\n${userPrompt}`;
+  onLogUpdate('INPUT', fullInputText);
 
   const epoch = abortEpoch;
   let requestId: string | null = null;
@@ -475,8 +656,17 @@ export const generateComicScript = async (
     const req = ai.call(
       {
         ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
-        messages: [{ role: 'user', content: systemPrompt }],
-        params: { responseFormat: 'json_object' },
+        messages: [
+          { role: 'system', content: STATIC_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        // 方案 4.6：API 级 jsonSchema 约束；strict 显式 false（宿主默认 true 会拒复杂嵌套 schema）
+        params: {
+          responseFormat: 'json_schema',
+          jsonSchema: COMIC_JSON_SCHEMA as unknown as Record<string, unknown>,
+          jsonSchemaName: 'comic_script',
+          strict: false,
+        },
         ...NO_TOOLS
       },
       (chunk: any) => {
@@ -512,7 +702,7 @@ export const generateComicScript = async (
 
     if (onUsage) {
       onUsage({
-        inputTokens: finalMsg?.usage?.inputTokens ?? estimateTokens(systemPrompt),
+        inputTokens: finalMsg?.usage?.inputTokens ?? estimateTokens(fullInputText),
         outputTokens: finalMsg?.usage?.outputTokens ?? estimateTokens(fullText),
         imagesGenerated: 0,
         modelType: 'GEMINI_3_PRO'
@@ -523,7 +713,9 @@ export const generateComicScript = async (
       throw new Error(streamError ? `AI 调用失败：${streamError}` : "No response from AI");
     }
 
-    const parsed = JSON.parse(cleanJson(fullText)) as ComicResponse;
+    // 方案 4.6：本地提取 → 修复重试一次 → 保留原文抛错；修复调用耗时较长，返回后补一次纪元检查
+    const parsed = await parseScriptWithRepair(fullText, onUsage);
+    throwIfAborted(epoch);
     // 方案 2.3：不信任模型输出的 page_number，按数组序归一化（封面固定 0，正文 1..N）
     parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
     return parsed;
@@ -570,8 +762,8 @@ export const generateCharacterReference = async (
     - Match the "Target Art Style".
     - **IDENTITY**: Keep the character's canonical facial features, body type, and hair recognizable.
     - **COSTUME**: If the 'Source Material Context' describes a specific costume (e.g. "wearing a spacesuit", "dressed as Napoleon"), you MUST draw them in that costume. Do NOT default to their standard anime outfit if a specific costume is requested.
-    - Output image aspect ratio: portrait 3:4.
-  `.trim();
+    - Output image aspect ratio: portrait 2:3.
+  `.trim(); // 方案 4.7：hint 与下方 size 1024x1536（精确 2:3）一致，不再谎报 3:4
 
   const epoch = abortEpoch;
 
@@ -599,6 +791,9 @@ export const generateCharacterReference = async (
 
     throw new Error("No image generated for character reference.");
   } catch (error) {
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if ((error as any)?.name === 'AbortError') throw error;
     console.error("Character reference generation failed:", error);
     throw error;
   }
@@ -665,6 +860,9 @@ export const generatePropReference = async (
 
     throw new Error("No image generated for prop reference.");
   } catch (error) {
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if ((error as any)?.name === 'AbortError') throw error;
     console.error("Prop reference generation failed:", error);
     throw error;
   }
@@ -678,7 +876,7 @@ export const generatePanelImage = async (
 ): Promise<string> => {
   const ai = getAi();
   const model = await resolveImageModel();
-  const { size, hint } = aspectRatioToSize(aspectRatio);
+  const { size, canvasHint, requestedHint } = aspectRatioToSize(aspectRatio);
 
   const hasRefs = !!(referenceImages && referenceImages.length > 0);
   let finalPrompt = prompt;
@@ -710,30 +908,42 @@ export const generatePanelImage = async (
      `;
   }
 
-  finalPrompt = `${finalPrompt}\n\nOutput image aspect ratio: ${hint}.`;
+  // 方案 4.7：generate 路径用 canvasHint（与 size 画布数学一致，防留白/边框）；
+  // edit 路径无固定画布，用 requestedHint 忠实用户所选比例（与随入参透传的 aspectRatio 一致）。
+  finalPrompt = `${finalPrompt}\n\nOutput image aspect ratio: ${hasRefs ? requestedHint : canvasHint}.`;
 
-  const uploadedAttachmentIds: string[] = [];
+  const refAttachmentIds: string[] = [];
   const epoch = abortEpoch;
 
   try {
     let result: { images: string[]; tokens: { inputTokens: number; outputTokens: number } };
 
     if (hasRefs) {
-      // 带参考图：上传附件后走 images.edit（主图 + 额外参考图，多图一致性）
+      // 带参考图：附件经模块级缓存复用（方案 4.1，同一张图整轮会话只上传一次），走 images.edit
       for (const imgData of referenceImages!) {
         throwIfAborted(epoch);
-        const { mimeType, buffer } = dataUrlToBuffer(imgData);
-        const attachment = await ai.attachments.upload({ buffer, mimeType, purpose: 'vision' });
-        uploadedAttachmentIds.push(attachment.attachmentId);
+        refAttachmentIds.push(await uploadRefCached(ai, imgData));
       }
       throwIfAborted(epoch);
 
-      result = await ai.images.edit({
-        model,
-        imageAttachmentId: uploadedAttachmentIds[0],
-        referenceAttachmentIds: uploadedAttachmentIds.slice(1),
-        prompt: finalPrompt
-      });
+      // 第 6 章对接：自生成 requestId 随 input 传入并登记进中止集合——新宿主
+      // （feat/ai-image-abort-and-size）abortAllAiTasks 即可真杀在途 edit；
+      // 老宿主对多余的 requestId/size/aspectRatio 字段安全忽略，自动退化为现状（D6，无显式探测）。
+      const editRequestId = `techmanga-edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+      activeTextRequestIds.add(editRequestId);
+      try {
+        result = await ai.images.edit({
+          model,
+          imageAttachmentId: refAttachmentIds[0],
+          referenceAttachmentIds: refAttachmentIds.slice(1),
+          prompt: finalPrompt,
+          size,                       // 6.3：输出规格约束，对冲 edit 输出跟随首图分辨率
+          aspectRatio,                // 用户所选比例（与 requestedHint 文案一致）
+          requestId: editRequestId,
+        });
+      } finally {
+        activeTextRequestIds.delete(editRequestId);
+      }
     } else {
       result = await ai.images.generate({
         model,
@@ -768,12 +978,13 @@ export const generatePanelImage = async (
     throw new Error("No image data found in response");
 
   } catch (error) {
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）。
+    // 真被 ai.abort 杀掉的 edit 请求跨 IPC 后 name 恒为 'Error'，必须靠 epoch 识别。
+    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if ((error as any)?.name === 'AbortError') throw error;
     console.error("Image generation failed:", error);
     throw error;
-  } finally {
-    // 清理临时上传的参考图附件（尽力而为）
-    for (const id of uploadedAttachmentIds) {
-      ai.attachments.delete(id).catch(() => { /* ignore */ });
-    }
   }
+  // 注意：不再 finally 删除参考图附件（方案 4.1/D3）——附件由模块级缓存跨页复用，
+  // 统一在新剧本生成成功 / Start Over 时经 clearReferenceAttachmentCache 批量清理。
 };

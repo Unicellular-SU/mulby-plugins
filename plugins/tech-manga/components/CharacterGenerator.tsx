@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CharacterSheetItem, PropSheetItem } from '../types';
 import { generateCharacterReference, generatePropReference, getAbortEpoch } from '../services/mulbyAiService';
+import { asyncPool, withRetryOnce } from '../services/asyncPool';
 
 interface CharacterGeneratorProps {
   characters: CharacterSheetItem[];
@@ -42,60 +43,53 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     propsRef.current = props;
   }, [characters, props]);
 
-  // Auto-generate missing character references on mount, SEQUENTIALLY
+  // Auto-generate missing character references on mount
+  // 方案 4.3：角色/道具互无数据依赖，与绘页阶段共用 asyncPool(limit=2)；删除 800ms 硬睡，
+  // 限流交给并发上限 + 宿主内建退避 + withRetryOnce。
   useEffect(() => {
     const generateSequentially = async () => {
         if (initializedRef.current) return;
         initializedRef.current = true;
 
-        // 捕获当前中止纪元；用户点击「中止全部任务」后纪元变化，队列停止推进
+        // 捕获当前中止纪元；用户点击「中止全部任务」后纪元变化，池停止推进
         const epoch = getAbortEpoch();
 
-        // 1. Characters
         const charIndices = charactersRef.current
             .map((c, i) => (!c.referenceImage ? i : -1))
             .filter(i => i !== -1);
+        const propIndices = (propsRef.current.length > 0 && onUpdateProp)
+            ? propsRef.current.map((p, i) => (!p.referenceImage ? i : -1)).filter(i => i !== -1)
+            : [];
 
-        // 中止时给剩余缺图项标注可见状态（方案 2.6 可选项），避免静默停止
-        const markRemainingAborted = (kind: 'char' | 'prop', remaining: number[]) => {
+        // 生成函数入口有 in-flight 单飞去重（方案 2.6），与手动按钮并发安全
+        const charTasks = charIndices.map((idx) => async () => {
+            if (getAbortEpoch() !== epoch) return;
+            const c = charactersRef.current[idx];
+            if (c && !c.referenceImage) await handleGenerateCharacter(idx, c);
+        });
+        const propTasks = propIndices.map((idx) => async () => {
+            if (getAbortEpoch() !== epoch) return;
+            const p = propsRef.current[idx];
+            if (p && !p.referenceImage) await handleGenerateProp(idx, p);
+        });
+
+        await asyncPool([...charTasks, ...propTasks], 2);
+
+        // 中止时给剩余缺图项标注可见状态（保留方案 2.6 可选项），避免静默停止；
+        // 已有具体错误文案（含在途任务的"已被用户中止"）的项不覆盖
+        if (getAbortEpoch() !== epoch) {
             setErrorStates(prev => {
                 const next = { ...prev };
-                remaining.forEach(i => { next[`${kind}-${i}`] = "已被用户中止"; });
+                charIndices.forEach(i => {
+                    const c = charactersRef.current[i];
+                    if (c && !c.referenceImage && !next[`char-${i}`]) next[`char-${i}`] = "已被用户中止";
+                });
+                propIndices.forEach(i => {
+                    const p = propsRef.current[i];
+                    if (p && !p.referenceImage && !next[`prop-${i}`]) next[`prop-${i}`] = "已被用户中止";
+                });
                 return next;
             });
-        };
-
-        for (let n = 0; n < charIndices.length; n++) {
-             if (getAbortEpoch() !== epoch) {
-                 markRemainingAborted('char', charIndices.slice(n));
-                 return;
-             }
-             const idx = charIndices[n];
-             const currentChar = charactersRef.current[idx];
-             if (currentChar && !currentChar.referenceImage) {
-                 await handleGenerateCharacter(idx, currentChar);
-                 await new Promise(r => setTimeout(r, 800));
-             }
-        }
-
-        // 2. Props (Only if props exist)
-        if (propsRef.current.length > 0 && onUpdateProp) {
-            const propIndices = propsRef.current
-                .map((p, i) => (!p.referenceImage ? i : -1))
-                .filter(i => i !== -1);
-
-            for (let n = 0; n < propIndices.length; n++) {
-                if (getAbortEpoch() !== epoch) {
-                    markRemainingAborted('prop', propIndices.slice(n));
-                    return;
-                }
-                const idx = propIndices[n];
-                const currentProp = propsRef.current[idx];
-                if (currentProp && !currentProp.referenceImage) {
-                    await handleGenerateProp(idx, currentProp);
-                    await new Promise(r => setTimeout(r, 800));
-                }
-            }
         }
     };
 
@@ -114,7 +108,9 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
-      const imageData = await generateCharacterReference(char.name, char.description, style, onUsageCallback);
+      // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
+      const imageData = await withRetryOnce(() =>
+        generateCharacterReference(char.name, char.description, style, onUsageCallback));
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
@@ -134,7 +130,9 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
 
     try {
       // Pass mainCharacterName and storyMode to ensure consistent universe style
-      const imageData = await generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback);
+      // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
+      const imageData = await withRetryOnce(() =>
+        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback));
       onUpdateProp(index, { ...prop, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
@@ -192,7 +190,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                     <h3 className="font-bold text-lg text-white truncate">{char.name}</h3>
                     <span className="text-xs text-slate-500 font-mono">CHAR #{idx + 1}</span>
                 </div>
-                <div className="relative aspect-[3/4] bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
+                {/* 方案 4.7：与立绘实际画布 1024x1536（2:3）一致，消除裁切 */}
+                <div className="relative aspect-[2/3] bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
                     {char.referenceImage ? (
                         <img src={char.referenceImage} alt={char.name} className="w-full h-full object-cover" />
                     ) : (

@@ -127,10 +127,16 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
           {isCover ? 'COVER' : `PAGE ${page.page_number}`}
         </div>
         
-        {/* Error Overlay */}
+        {/* Error Overlay（方案 4.4：浮层内一键重试，用当前 prompt 直接重发，无需展开编辑面板） */}
         {page.error && (
-            <div className="absolute inset-0 flex items-center justify-center bg-red-900/80 p-4 text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-900/80 p-4 text-center space-y-3 z-10">
                 <p className="text-red-200 text-sm font-mono">{page.error}</p>
+                <button
+                  onClick={() => onRegenerate(page.page_number, page.image_prompt)}
+                  className="text-xs bg-red-700 hover:bg-red-600 text-white px-4 py-1.5 rounded font-bold"
+                >
+                  重试本页
+                </button>
             </div>
         )}
 

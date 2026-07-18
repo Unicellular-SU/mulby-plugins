@@ -6,7 +6,8 @@ import LogPanel from './components/LogPanel';
 import CharacterGenerator from './components/CharacterGenerator';
 import ScriptEditor from './components/ScriptEditor';
 import TokenMonitor from './components/TokenMonitor';
-import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels, abortAllAiTasks, getAbortEpoch } from './services/mulbyAiService';
+import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels, abortAllAiTasks, getAbortEpoch, clearReferenceAttachmentCache } from './services/mulbyAiService';
+import { asyncPool, withRetryOnce } from './services/asyncPool';
 import {
   SCHEMA_VERSION,
   PersistedSession,
@@ -213,14 +214,9 @@ const App: React.FC = () => {
     };
   }, []);
 
-  // 排队中的逐页生成定时器（中止时需要清掉）
-  const pendingTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  // 一键中止：杀掉文本流请求、作废在途图像结果、清空排队任务
+  // 一键中止：杀掉文本流请求、作废在途图像结果；排队任务由 asyncPool 的纪元检查自然停止（方案 4.2）
   const handleCancelAll = useCallback(() => {
     abortAllAiTasks();
-    pendingTimersRef.current.forEach(clearTimeout);
-    pendingTimersRef.current = [];
     setIsProcessing(false);
     setPages(prev => prev.map(p =>
       p.isGenerating ? { ...p, isGenerating: false, error: "已被用户中止（可单独重绘）" } : p
@@ -244,7 +240,8 @@ const App: React.FC = () => {
         })).response === 1
       : window.confirm('将丢弃当前剧本与已生成页面，确定重新开始？'); // 老宿主降级
     if (!ok) return;
-    handleCancelAll();      // 停定时器、bump epoch（连带停掉 CharacterGenerator 循环）
+    handleCancelAll();      // bump epoch（连带停掉 CharacterGenerator 循环与 asyncPool 排队）
+    clearReferenceAttachmentCache(); // D3：确认丢弃即删除已上传参考图附件并清缓存（方案 4.1）
     setComicScript(null);
     setCharacterSheet([]);
     setPropSheet([]);
@@ -355,10 +352,10 @@ const App: React.FC = () => {
 
       // 新剧本生成成功 = 唯一确立"新会话"的时刻（方案 3.1 步骤 6）：
       // 清旧会话附件；session 键由快照 effect 在迁移到 STORYBOARDING 时立即覆盖写入。
-      // （D3 参考图上传缓存属第 4 章，落地后在此一并清理。）
       setPendingSession(null);
       persistedRefImagesRef.current.clear();
       void clearSessionAttachments();
+      clearReferenceAttachmentCache(); // D3：旧剧本的参考图上传缓存与 AI 附件一并清理（方案 4.1）
 
       setComicScript(comicData);
       setCharacterSheet(comicData.character_sheet || []);
@@ -528,30 +525,30 @@ const App: React.FC = () => {
       const allPages = [coverPage, ...preparedPages.map(p => p.pageData)];
       setPages(allPages);
 
+      // 方案 4.2（D4）：asyncPool(limit=2) 替代 setTimeout 错峰——任意时刻在途图像请求 ≤2，
+      // 中止时池在取下一个任务前发现纪元已变即停止；未启动页保持 isGenerating: true，
+      // 由 handleCancelAll 的"已被用户中止"标记统一覆盖。
       const coverRefs = mainCharRef ? [mainCharRef] : undefined;
-      const runEpoch = getAbortEpoch();
-      pendingTimersRef.current = [];
-      triggerImageGeneration(coverPage, config.aspectRatio, coverRefs);
-
-      preparedPages.forEach((item, idx) => {
-         const timer = setTimeout(() => {
-            pendingTimersRef.current = pendingTimersRef.current.filter(t => t !== timer);
-            if (isStale(runEpoch)) return;  // 已被中止/替代：排队页不再启动
-            triggerImageGeneration(item.pageData, config.aspectRatio, item.resolvedRefs);
-         }, (idx + 1) * 1200);
-         pendingTimersRef.current.push(timer);
-      });
+      const jobs = [
+        { page: coverPage, refs: coverRefs },
+        ...preparedPages.map((p) => ({ page: p.pageData, refs: p.resolvedRefs as string[] | undefined })),
+      ];
+      void asyncPool(jobs.map((j) => () =>
+        triggerImageGeneration(j.page, config.aspectRatio, j.refs)
+      ), 2);
   };
 
   const triggerImageGeneration = async (page: ComicPageData, ratio: string, references?: string[]) => {
     const runEpoch = getAbortEpoch();   // 本任务的运行代际；迟到回调不得写回新一轮的 pages
     try {
-        const base64Image = await generatePanelImage(
+        // 方案 4.2（D4）：失败自动重试一次（AbortError/鉴权错误/纪元已变除外）；
+        // 重试的 onUsage 会记两笔，属真实计费，正确。
+        const base64Image = await withRetryOnce(() => generatePanelImage(
             page.image_prompt,
             ratio,
             references,
             (stat) => trackUsage(`Draw Page ${page.page_number}`, stat)
-        );
+        ));
         if (isStale(runEpoch)) return;
 
         // 单页成功即增量落盘（方案 3.1 步骤 3）：fire-and-forget，失败不打断生成流程
@@ -583,18 +580,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => {
-      const page = pages.find(p => p.page_number === pageNumber);
-      if (!page) return;
-
-      const activeCharacterNames = newCharactersInScene || page.characters_in_scene || [];
-      const activePropNames = newPropsInScene || page.props_in_scene || [];
-      
+  // 方案 4.4：从 handleRegeneratePage 抽出的纯解析函数——按名字解析参考图 + 重建 context 块，
+  // 与原实现逐字一致；handleRegeneratePage 与批量续绘共用，避免双份漂移。
+  const resolvePageRefs = useCallback((
+      prompt: string,
+      characterNames: string[],
+      propNames: string[]
+  ): { refs: string[]; finalPrompt: string } => {
       const sceneRefs: string[] = [];
       const characterContexts: string[] = [];
 
       // Resolve Characters
-      activeCharacterNames.forEach(name => {
+      characterNames.forEach(name => {
           const charItem = resolveByName(name, characterSheet);
           if (charItem) {
               if (charItem.referenceImage) {
@@ -605,7 +602,7 @@ const App: React.FC = () => {
       });
 
       // Resolve Props
-      activePropNames.forEach(name => {
+      propNames.forEach(name => {
           const propItem = resolveByName(name, propSheet);
           if (propItem) {
               if (propItem.referenceImage) {
@@ -615,40 +612,79 @@ const App: React.FC = () => {
           }
       });
 
-      let finalPromptToUse = newPrompt;
-      if (newPrompt.includes("ACTIVE CHARACTERS & PROPS CONTEXT") || newPrompt.includes("ACTIVE CHARACTERS CONTEXT")) {
+      let finalPrompt = prompt;
+      if (prompt.includes("ACTIVE CHARACTERS & PROPS CONTEXT") || prompt.includes("ACTIVE CHARACTERS CONTEXT")) {
           // Replace legacy context block if present, or new block
-          const contextStart = newPrompt.indexOf("ACTIVE CHARACTERS");
-          const contextEnd = newPrompt.indexOf("SCENE DESCRIPTION");
+          const contextStart = prompt.indexOf("ACTIVE CHARACTERS");
+          const contextEnd = prompt.indexOf("SCENE DESCRIPTION");
           if (contextStart > -1 && contextEnd > -1) {
               const newContextBlock = `ACTIVE CHARACTERS & PROPS CONTEXT (STRICTLY use Reference Images for visual details/clothing):\n${characterContexts.length > 0 ? characterContexts.join("\n") : "No specific characters or props."}\n\n`;
-              finalPromptToUse = newPrompt.substring(0, contextStart) + newContextBlock + newPrompt.substring(contextEnd);
+              finalPrompt = prompt.substring(0, contextStart) + newContextBlock + prompt.substring(contextEnd);
           }
       } else {
-         // Fallback if structure is messed up: append context at top if it doesn't exist? 
+         // Fallback if structure is messed up: append context at top if it doesn't exist?
          // For now, if user edited it heavily, we trust their text, but update Refs.
       }
 
-      setPages(prev => prev.map(p => 
-        p.page_number === pageNumber 
-        ? { 
-            ...p, 
-            image_prompt: finalPromptToUse, 
+      return { refs: sceneRefs, finalPrompt };
+  }, [characterSheet, propSheet]);
+
+  const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => {
+      const page = pages.find(p => p.page_number === pageNumber);
+      if (!page) return;
+
+      const activeCharacterNames = newCharactersInScene || page.characters_in_scene || [];
+      const activePropNames = newPropsInScene || page.props_in_scene || [];
+
+      const { refs: sceneRefs, finalPrompt: finalPromptToUse } =
+          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames);
+
+      setPages(prev => prev.map(p =>
+        p.page_number === pageNumber
+        ? {
+            ...p,
+            image_prompt: finalPromptToUse,
             characters_in_scene: activeCharacterNames,
             props_in_scene: activePropNames,
-            isGenerating: true, 
-            error: undefined 
-          } 
+            isGenerating: true,
+            error: undefined
+          }
         : p
       ));
 
       triggerImageGeneration(
-          { ...page, image_prompt: finalPromptToUse, characters_in_scene: activeCharacterNames, props_in_scene: activePropNames }, 
-          config.aspectRatio, 
+          { ...page, image_prompt: finalPromptToUse, characters_in_scene: activeCharacterNames, props_in_scene: activePropNames },
+          config.aspectRatio,
           sceneRefs
       );
 
-  }, [config.aspectRatio, pages, characterSheet, propSheet, triggerImageGeneration]);
+  }, [config.aspectRatio, pages, resolvePageRefs, triggerImageGeneration]);
+
+  // 方案 4.4：续绘全部未完成页（失败/中止页批量重发，走并发池，自然获得重试与中止响应）。
+  // 与第 3 章恢复路径衔接：恢复到 COMIC_GENERATION 后未完成页带 error 态，可在此一键续绘。
+  const unfinishedPages = pages.filter(p => !p.imageData && !p.isGenerating);
+
+  const handleResumeAll = () => {
+      const targets = pages.filter(p => !p.imageData && !p.isGenerating);
+      if (targets.length === 0) return;
+
+      // 参考图按当前 sheet 重新解析（恢复会话后 D3 缓存为空，重绘自然重传）；
+      // 页面 prompt 保持现状不重建——首轮生成已含 context 块，封面 prompt 无标记也不受影响。
+      const prepared = targets.map(p => ({
+          page: p,
+          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || []).refs,
+      }));
+
+      setPages(prev => prev.map(p =>
+          targets.some(t => t.page_number === p.page_number)
+              ? { ...p, isGenerating: true, error: undefined }
+              : p
+      ));
+
+      void asyncPool(prepared.map(t => () =>
+          triggerImageGeneration(t.page, config.aspectRatio, t.refs)
+      ), 2);
+  };
 
   const handleDownloadAll = async () => {
     const pagesWithImages = pages.filter(p => p.imageData);
@@ -964,9 +1000,20 @@ const App: React.FC = () => {
                         </span>
                     )}
                     </div>
-                    
+
+                    <div className="flex items-center space-x-3">
+                    {unfinishedPages.length > 0 && (
+                    <button
+                        onClick={handleResumeAll}
+                        className="flex items-center space-x-2 bg-amber-700/80 hover:bg-amber-600 text-white px-5 py-2.5 rounded-lg border border-amber-500/40 transition-all text-sm font-bold shadow-lg shadow-amber-500/10"
+                        title="按并发 2 批量重发全部失败/中止页"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        <span>续绘全部未完成页（{unfinishedPages.length}）</span>
+                    </button>
+                    )}
                     {pages.some(p => p.imageData) && (
-                    <button 
+                    <button
                         onClick={handleDownloadAll}
                         className="flex items-center space-x-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-5 py-2.5 rounded-lg border border-white/10 transition-all text-sm font-bold shadow-lg shadow-indigo-500/20"
                     >
@@ -974,6 +1021,7 @@ const App: React.FC = () => {
                         <span>Download Full Comic (.zip)</span>
                     </button>
                     )}
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-12 animate-fade-in-up pb-12">

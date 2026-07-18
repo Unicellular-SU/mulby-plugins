@@ -1691,7 +1691,11 @@ interface MulbyAi {
       input: { model: string; prompt: string; size?: string; count?: number },
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
-    edit(input: { model: string; imageAttachmentId: string; prompt: string; referenceAttachmentIds?: string[] }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    /**
+     * size/aspectRatio/requestId 为宿主 feat/ai-image-abort-and-size 分支新增可选入参
+     * （requestId 供 ai.abort 真中止在途 edit）；老宿主对多余字段安全忽略、自动退化。
+     */
+    edit(input: { model: string; imageAttachmentId: string; prompt: string; referenceAttachmentIds?: string[]; size?: string; aspectRatio?: string; requestId?: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
   }
   models: {
     fetch(input: { providerId: string; baseURL?: string; apiKey?: string }): Promise<{ models: AiModel[]; message?: string }>
