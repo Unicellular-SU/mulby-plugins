@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="55%" stop-color="#020617"/>
+      <stop offset="100%" stop-color="#1a0505"/>
+    </linearGradient>
+    <linearGradient id="blood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dc2626"/>
+      <stop offset="100%" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.6">
+      <stop offset="0%" stop-color="#dc2626" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#dc2626" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- rounded dark card -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#glow)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#7f1d1d" stroke-opacity="0.55" stroke-width="6"/>
+
+  <!-- manga page: tilted panel grid -->
+  <g transform="rotate(-6 256 256)">
+    <rect x="118" y="104" width="276" height="330" rx="18" fill="#f8fafc"/>
+    <rect x="118" y="104" width="276" height="330" rx="18" fill="none" stroke="#0f172a" stroke-width="10"/>
+    <!-- panel dividers -->
+    <line x1="118" y1="218" x2="394" y2="218" stroke="#0f172a" stroke-width="9"/>
+    <line x1="262" y1="218" x2="262" y2="434" stroke="#0f172a" stroke-width="9"/>
+    <!-- top panel: haunted eye -->
+    <g>
+      <path d="M144 166 q112 -62 224 0 q-112 62 -224 0 z" fill="#020617"/>
+      <circle cx="256" cy="164" r="26" fill="#f8fafc"/>
+      <circle cx="256" cy="164" r="12" fill="#dc2626"/>
+      <circle cx="251" cy="159" r="4" fill="#f8fafc"/>
+    </g>
+    <!-- bottom-left panel: screentone hatching -->
+    <g stroke="#0f172a" stroke-width="6" opacity="0.85">
+      <line x1="136" y1="252" x2="244" y2="360"/>
+      <line x1="136" y1="292" x2="244" y2="400"/>
+      <line x1="136" y1="332" x2="230" y2="426"/>
+      <line x1="170" y1="248" x2="248" y2="326"/>
+    </g>
+    <!-- bottom-left: silhouette hand rising -->
+    <path d="M160 434 v-56 q0 -12 9 -12 q9 0 9 12 v22 q0 6 6 6 q6 0 6 -8 v-38 q0 -12 9 -12 q9 0 9 12 v34 q0 6 6 6 q6 0 6 -8 v-20 q0 -11 8 -11 q8 0 8 11 v62 z" fill="#020617"/>
+    <!-- bottom-right panel: jagged scream bubble -->
+    <g>
+      <path d="M286 262 l24 -12 4 16 22 -8 -4 18 22 6 -14 14 16 14 -22 4 6 18 -22 -6 -4 18 -16 -14 -16 12 -2 -18 -20 2 10 -16 -16 -10 18 -8 -6 -16 20 2 z" fill="#020617"/>
+      <text x="299" y="303" font-family="sans-serif" font-size="34" font-weight="bold" fill="#dc2626">啊</text>
+    </g>
+  </g>
+
+  <!-- blood drip from top edge -->
+  <path d="M148 18 h84 q-4 34 -18 34 q-11 0 -13 -20 q-2 22 -12 22 q-12 0 -14 -30 q-3 44 -15 44 q-10 0 -12 -50 z" fill="url(#blood)"/>
+  <path d="M318 18 h64 q-3 26 -14 26 q-9 0 -11 -16 q-2 30 -13 30 q-12 0 -14 -22 q-2 14 -12 -18 z" fill="url(#blood)" opacity="0.9"/>
+  <circle cx="176" cy="94" r="7" fill="#dc2626"/>
+  <circle cx="340" cy="74" r="5" fill="#dc2626"/>
+</svg>
