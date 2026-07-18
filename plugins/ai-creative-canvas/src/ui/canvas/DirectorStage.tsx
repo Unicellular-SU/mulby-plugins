@@ -947,6 +947,33 @@ function Inner() {
             const crossY = fw.z * toCam.x - fw.x * toCam.z
             return crossY > 0 ? '右侧身对镜头' : '左侧身对镜头'
           }
+          // 手动摆姿的粗略文字化：一键预设已有 poseName，手动拖的关节从旋转角推导动作描述
+          const poseDescOf = (s: Subj): string => {
+            if (s.kind !== '人台') return '' // 导入模型关节轴系不同，不瞎猜
+            const j: Record<string, any> = {}
+            s.obj.traverse((c: any) => { const k = c.userData && c.userData.joint; if (k && !j[k]) j[k] = c })
+            const out: string[] = []
+            const arm = (sh: any, el: any, side: string) => {
+              if (!sh) return
+              const up = side === '左' ? -sh.rotation.z : sh.rotation.z // 参照 POSES：T姿/举手预设的符号约定
+              const fwd = -sh.rotation.x // 指向前预设：肩 x=-1.4
+              if (up > 2.2) out.push(`${side}手上举`)
+              else if (up > 0.7) out.push(`${side}手侧举`)
+              if (fwd > 0.7) out.push(`${side}手前伸`)
+              if (el && (Math.abs(el.rotation.z) > 0.5 || Math.abs(el.rotation.x) > 0.5)) out.push(`${side}肘弯曲`)
+            }
+            arm(j['左肩'], j['左肘'], '左')
+            arm(j['右肩'], j['右肘'], '右')
+            const leg = (hp: any, kn: any, side: string) => {
+              if (hp && hp.rotation.x > 0.6) out.push(`${side}腿前抬`)
+              if (kn && kn.rotation.x < -0.6) out.push(`${side}膝弯曲`)
+            }
+            leg(j['左髋'], j['左膝'], '左')
+            leg(j['右髋'], j['右膝'], '右')
+            if (j['头'] && j['头'].rotation.x > 0.4) out.push('低头')
+            else if (j['头'] && j['头'].rotation.x < -0.4) out.push('抬头')
+            return out.join('，')
+          }
           const layout = people
             .map((s, i) => {
               const where = whereOf(s)
@@ -959,7 +986,8 @@ function Inner() {
               const facing = facingOf(s)
               // 纵深 + 悬空 + 朝向：竖排/空中站位也能被模型唯一绑定
               const extras = [depthOf(i), s.obj.getWorldPosition(new THREE.Vector3()).y > 0.3 ? '悬空' : '', facing].filter(Boolean).join('，')
-              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${pose ? `(${pose})` : ''}`
+              const action = pose || poseDescOf(s) // 一键预设有名字，手动摆姿从关节推导
+              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${action ? `(${action})` : ''}`
             })
             .filter(Boolean)
             .join('，')
