@@ -176,7 +176,8 @@ export function CanvasStage() {
     if (assetJson) {
       try {
         const a = JSON.parse(assetJson)
-        const newKind: CardKind = a.kind === 'video' ? 'video' : 'source'
+        // 全景拖出保留 pano 身份（角标 + 360 环视），其余产物落成素材/视频源卡
+        const newKind: CardKind = a.kind === 'video' ? 'video' : a.kind === 'pano' ? 'pano' : 'source'
         useGraph.getState().addCard(newKind, world, { title: a.title || '素材', status: 'done', assetUrl: a.url, assetLocalPath: a.localPath, mime: a.mime })
       } catch {
         /* ignore */
@@ -415,8 +416,8 @@ export function CanvasStage() {
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
       const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
-      if (c?.assetUrl && (c.meta as any)?.pano) {
-        useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视
+      if (c?.assetUrl && (c.kind === 'pano' || (c.meta as any)?.pano)) {
+        useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视（须先于 image/source 分支，与 CardView 同步）
       } else if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
         useUi.getState().setMaskCardId(c.id) // 双击图片节点 → 局部编辑页面
       } else if (c?.assetUrl && c.kind === 'video') {

@@ -26,7 +26,7 @@ export function Gallery() {
       // 排除生成中的卡：流式生成期 assetUrl 存的是半成品预览 dataURL，不是成品。
       // 用「非 running/queued」而非「== done」——保留 idle 的导入素材卡(source)。纳入 audio(TTS/配音成品)。
       const generating = c.status === 'running' || c.status === 'queued'
-      if (!generating && c.assetUrl && (c.kind === 'image' || c.kind === 'video' || c.kind === 'source' || c.kind === 'audio')) {
+      if (!generating && c.assetUrl && (c.kind === 'image' || c.kind === 'pano' || c.kind === 'video' || c.kind === 'source' || c.kind === 'audio')) {
         items.push({ boardId: b.id, boardName: b.name, cardId: c.id, url: c.assetUrl, kind: c.kind, title: c.title || '未命名' })
       }
     }
@@ -37,8 +37,29 @@ export function Gallery() {
     focusCard(it.boardId, it.cardId)
     close()
   }
+  // 卡片是否藏在折叠分组里（CanvasStage 不渲染折叠组后代 → 节点内预览无处挂载）
+  const hiddenByCollapsedGroup = (boardId: string, cardId: string): boolean => {
+    const b = project.boards.find((x) => x.id === boardId)
+    let cur = b?.cards[cardId]
+    while (cur?.parentId) {
+      const p = b?.cards[cur.parentId]
+      if (!p) break
+      if ((p.params as any)?.collapsed) return true
+      cur = p
+    }
+    return false
+  }
+
   const preview = (it: Item) => {
     if (it.kind === 'audio') { focus(it); return } // 音频无 Lightbox，双击直接跳到卡片播放
+    // 全景 → 节点内 360 预览；先定位（预览内嵌在卡片上，跨画布需先切板并居中）。
+    // 折叠分组里的全景卡不渲染、预览无处挂载 → 回退平铺 Lightbox
+    if (it.kind === 'pano' && !hiddenByCollapsedGroup(it.boardId, it.cardId)) {
+      focusCard(it.boardId, it.cardId)
+      useUi.getState().setPanoCardId(it.cardId)
+      close()
+      return
+    }
     useUi.getState().setPreview({ url: it.url, kind: it.kind === 'video' ? 'video' : 'image' })
   }
 

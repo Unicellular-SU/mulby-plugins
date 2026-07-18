@@ -36,7 +36,11 @@ export function getParamSchema(card: Card): ParamField[] {
         { type: 'select', key: 'aspect', width: 78, default: '1:1', options: ASPECTS },
         { type: 'select', key: 'resolution', width: 68, default: '1K', options: [{ value: '1K', label: '1K' }, { value: '2K', label: '2K' }, { value: '4K', label: '4K' }] },
         { type: 'select', key: 'count', width: 62, default: '1', numeric: true, options: [{ value: '1', label: '×1' }, { value: '2', label: '×2' }, { value: '3', label: '×3' }, { value: '4', label: '×4' }] },
-        { type: 'select', key: 'pano', width: 86, default: '', options: [{ value: '', label: '全景·关' }, { value: '1', label: '全景·开 360°' }] },
+        { type: 'seed', key: 'seed' }
+      ]
+    case 'pano': // 360 全景卡：比例强制 2:1、单张，仅暴露分辨率（≥2K）与种子
+      return [
+        { type: 'select', key: 'resolution', width: 68, default: '2K', options: [{ value: '2K', label: '2K' }, { value: '4K', label: '4K' }] },
         { type: 'seed', key: 'seed' }
       ]
     case 'video':

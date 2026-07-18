@@ -1,17 +1,18 @@
-import { Type, Image as ImageIcon, Video, Music } from 'lucide-react'
+import { Type, Image as ImageIcon, Compass, Video, Music } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { KIND_ACCENT, type CardKind } from '../types'
 
 const OPTIONS: Array<{ kind: CardKind; icon: typeof Type; label: string }> = [
   { kind: 'image', icon: ImageIcon, label: '图片' },
+  { kind: 'pano', icon: Compass, label: '360 全景' },
   { kind: 'text', icon: Type, label: '文本' },
   { kind: 'video', icon: Video, label: '视频' },
   { kind: 'audio', icon: Music, label: '音频' }
 ]
 
 const MENU_W = 150
-const MENU_H = 180
+const MENU_H = 210 // 与 OPTIONS 行数联动（约 30px/行 + 标题），加项须同步调大
 
 export function ConnectMenu() {
   const menu = useUi((s) => s.connectMenu)

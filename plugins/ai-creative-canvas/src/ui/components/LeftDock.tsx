@@ -1,4 +1,4 @@
-import { Type, Image as ImageIcon, Video, Music, Package, StickyNote } from 'lucide-react'
+import { Type, Image as ImageIcon, Compass, Video, Music, Package, StickyNote } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from '../canvas/viewport'
@@ -7,6 +7,7 @@ import { KIND_ACCENT, type CardKind } from '../types'
 const ITEMS: Array<{ kind: CardKind; icon: typeof Type; label: string }> = [
   { kind: 'text', icon: Type, label: '文本' },
   { kind: 'image', icon: ImageIcon, label: '图片' },
+  { kind: 'pano', icon: Compass, label: '全景' },
   { kind: 'video', icon: Video, label: '视频' },
   { kind: 'audio', icon: Music, label: '音频' },
   { kind: 'source', icon: Package, label: '素材' },

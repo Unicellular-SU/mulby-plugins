@@ -86,7 +86,7 @@ async function readSharded(manifestKey: string, prefix: string): Promise<{ doc: 
   return { doc: { ...(rest as ProjectDoc), boards }, savedAt: typeof _savedAt === 'number' ? _savedAt : undefined }
 }
 
-const VALID_KINDS = new Set(['image', 'video', 'text', 'audio', 'source', 'group', 'note'])
+const VALID_KINDS = new Set(['image', 'pano', 'video', 'text', 'audio', 'source', 'group', 'note'])
 
 // 修复历史「跨板串卡」bug 残留：异步生成途中切换画布曾把结果以 {...undefined, ...patch}
 // 写到错的画布，产出缺 kind/几何的畸形卡。这里按画布剔除畸形卡并清理悬空连线，
@@ -145,11 +145,45 @@ function sanitizeBoards(d: ProjectDoc): ProjectDoc {
   return changed ? { ...d, boards, activeBoardId } : d
 }
 
-// schemaVersion 迁移脚手架：按版本累进升级（当前 v1，暂无迁移；未来在此追加 if (v < N) {…}）
+// v2：360 全景独立成 pano 卡。旧数据里「图片卡 + params.pano 开关」（未生成）与
+// 「图片卡 + meta.pano 标记」（已生成/接缝修复产物）统一改 kind；params.pano 开关移除。
+// 注意：不能按 schemaVersion 门控——分片持久化下，迁移只发生在内存，随后一次增量保存会写出
+// v2 manifest 但只重写「引用变化」的画布分片；未编辑画布的分片仍是旧卡，若按 v<2 跳过，
+// 这些卡将永远失去迁移机会。故每次加载无条件跑（幂等：v2 起不再有 image+pano 标记的新写入，扫描 O(cards)）。
+function migratePanoCards(d: ProjectDoc): ProjectDoc {
+  if (!Array.isArray(d.boards)) return d
+  const panoDefault = d.defaultPanoModel ?? null
+  let changed = false
+  const boards = d.boards.map((b) => {
+    if (!b?.cards || typeof b.cards !== 'object') return b
+    let boardChanged = false
+    const cards: typeof b.cards = {}
+    for (const [id, c] of Object.entries(b.cards)) {
+      const isPano = c?.kind === 'image' && ((c.meta as any)?.pano || (c.params as any)?.pano)
+      if (isPano) {
+        const { pano: _drop, ...params } = (c.params || {}) as Record<string, unknown>
+        void _drop
+        if (params.resolution === '1K') params.resolution = '2K' // pano 档位仅 2K/4K（v1 生成时也强制过 2K）
+        // v1 全景生成忽略 card.modelId、直用工程「360 专用模型」；迁移后优先级反转为卡片显式优先，
+        // 故有专用模型时钉到卡上以保持 v1 行为，否则保留原 modelId（v1 本就用它兜底）
+        cards[id] = { ...c, kind: 'pano', params, modelId: panoDefault ?? c.modelId, meta: { ...(c.meta || {}), pano: true } }
+        boardChanged = true
+      } else {
+        cards[id] = c
+      }
+    }
+    if (!boardChanged) return b
+    changed = true
+    return { ...b, cards }
+  })
+  return changed ? { ...d, boards } : d
+}
+
+// schemaVersion 迁移脚手架：按版本累进升级（未来在此追加 if (v < N) {…}）
 export function migrateProject(doc: ProjectDoc): ProjectDoc {
   let d = doc
   const v = typeof d.schemaVersion === 'number' ? d.schemaVersion : 0
-  // 示例占位：if (v < 2) { d = { ...d, /* 升级字段 */ } }
+  d = migratePanoCards(d) // 无条件（幂等）：v2 manifest 下可能仍有未重写的 v1 旧分片，见函数头注释
   if (v > SCHEMA_VERSION) {
     // 来自更高版本（如他人较新插件导出）：不要降级 schemaVersion，避免静默丢未知字段；仅告警后按现状清理
     console.warn(`[ai-creative-canvas] 工程 schemaVersion ${v} 高于当前 ${SCHEMA_VERSION}，可能有无法识别的新字段（已保留原数据）`)
@@ -207,7 +241,7 @@ export function metaOf(doc: ProjectDoc): ProjectMeta {
   for (const b of doc.boards || []) {
     for (const c of Object.values(b.cards || {})) {
       cardCount++
-      if (!cover && (c.kind === 'image' || c.kind === 'source') && c.assetUrl) cover = c.assetUrl
+      if (!cover && (c.kind === 'image' || c.kind === 'pano' || c.kind === 'source') && c.assetUrl) cover = c.assetUrl
     }
   }
   return { id: doc.id, name: doc.name, createdAt: doc.createdAt, updatedAt: doc.updatedAt, cardCount, cover }

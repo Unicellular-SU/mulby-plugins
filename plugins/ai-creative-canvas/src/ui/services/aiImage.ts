@@ -20,11 +20,11 @@ const BASE_SIZE: Record<string, [number, number]> = {
 }
 
 // 360 全景提示词（GPT Image 2 社区公认模板）：明确等距柱状(cylindrical equidistant)、2:1、
-// 左右无缝、光照一致、地平线居中、禁鱼眼/小行星。场景描述来自 card.prompt（前置）。
+// 球形 VR 环绕、左右无缝、光照一致、地平线居中、禁鱼眼/小行星。场景描述来自 card.prompt（前置）。
 function panoHint(): string {
   return (
-    '\n\n360 equirectangular panorama, equirectangular (cylindrical equidistant projection), 2:1 aspect ratio, ' +
-    'a seamless 360x180 panoramic view that wraps correctly in a 360 VR viewer, the left and right edges connect seamlessly, ' +
+    '\n\n360-degree equirectangular panorama, spherical panorama for VR viewing, equirectangular (cylindrical equidistant projection), 2:1 aspect ratio, ' +
+    'a seamless 360° wrap-around environment that renders correctly in a 360 VR viewer, the left and right edges connect seamlessly, ' +
     'consistent lighting across the full 360-degree field of view, horizon centered, no fisheye, no tiny planet effect, no visible stitching seam.'
   )
 }
@@ -88,19 +88,21 @@ export async function generateImage(
   onRequestId: (id: string) => void
 ): Promise<ImageGenResult> {
   const params = card.params || {}
-  const pano = !!params.pano
-  // 全景优先用工程配置的「360 专用模型」（出真等距柱状）；否则用卡片所选模型
+  const pano = card.kind === 'pano'
+  // 模型优先级：卡片显式所选 > 工程「360 专用模型」>（generateCard 回填的图像默认）
   const panoModel = useGraph.getState().project.defaultPanoModel || null
-  const model = (pano && panoModel) || card.modelId
+  const model = card.modelId || (pano ? panoModel : null)
   if (!model) throw new Error('请先选择图像模型（面板内"模型"下拉；或在工程设置里配 360 专用模型）')
 
   const inputs = resolveGenInputs(card, board)
   const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
   // 全景看的是 ~60° 一小片（约占贴图宽 1/6），分辨率要够才不糊：至少 2K
-  const resolution = pano && String(params.resolution || '1K') === '1K' ? '2K' : String(params.resolution || '1K')
+  const resolution = pano && ['', '1K'].includes(String(params.resolution || '')) ? '2K' : String(params.resolution || '1K')
   const size = computeSize(aspect, resolution)
   const count = pano ? 1 : Math.max(1, Math.min(4, Number(params.count) || 1)) // 全景单张
-  const prompt = (card.prompt || '') + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint()
+  // 图生图全景：显式告知「以参考图场景重构 360 环绕」，纯文字则直接描述场景
+  const panoRefLead = pano && inputs.images.length > 0 ? '以参考图片的场景与风格为基础，重构为完整的 360 环绕环境。' : ''
+  const prompt = panoRefLead + (card.prompt || '') + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint()
 
   // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []

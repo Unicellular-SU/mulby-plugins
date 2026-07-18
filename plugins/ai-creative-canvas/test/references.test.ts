@@ -64,8 +64,24 @@ function testReplaceMentionOnRename() {
   assert.equal(replaceMentionInPrompt('@旧名,@旧名2', '旧名', '新名'), '@新名,@旧名2')
 }
 
+// 钉住契约：全景卡产物对下游是「图片素材」（matKindOfCard 兜底 image），可作图生图/视频参考
+function testPanoActsAsImageMaterial() {
+  const b = board({
+    p1: card('p1', { kind: 'pano', title: 'AI 全景', assetUrl: 'file:///pano.png', assetLocalPath: '/pano.png' }),
+    me: card('me', { kind: 'image', prompt: '基于全景出一张剧照', refIds: ['p1'] })
+  })
+  const mats = buildMaterials(b.cards.me, b)
+  assert.equal(mats.length, 1)
+  assert.equal(mats[0].kind, 'image')
+  assert.equal(mats[0].label, '图片1') // 默认标题 'AI 全景' → 按素材类型自动编号
+  const inputs = resolveGenInputs(b.cards.me, b)
+  assert.equal(inputs.images.length, 1)
+  assert.equal(inputs.images[0].url, 'file:///pano.png')
+}
+
 testExtractMentions()
 testUnresolved()
 testSelectedGenMaterials()
 testReplaceMentionOnRename()
-console.log('references: 4 tests OK')
+testPanoActsAsImageMaterial()
+console.log('references: 5 tests OK')

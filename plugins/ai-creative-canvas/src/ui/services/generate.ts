@@ -76,7 +76,7 @@ function notifyDone(_cardId: string) {
 }
 
 export function canGenerate(kind: string): boolean {
-  return kind === 'text' || kind === 'image' || kind === 'video' || kind === 'audio'
+  return kind === 'text' || kind === 'image' || kind === 'pano' || kind === 'video' || kind === 'audio'
 }
 
 // 批量生成所有选中的可生成卡片（分镜扇出 → 一键出图）
@@ -111,15 +111,28 @@ export async function generateCard(cardId: string): Promise<void> {
 
   const board0 = g0.getActiveBoard()
   const mats0 = buildMaterials(card0, board0)
+  // 全景卡：纯文字或纯参考图皆可（图生图重构 360 场景无需文字），两者全无才拦。
+  // 参考图须真有产物（与 resolveGenInputs 同判据）——上游空图片卡不算，防止只剩模板样板词也起跑烧额度
+  const hasRealImage = mats0.some((m) => m.kind === 'image' && (m.assetUrl || m.thumbUrl || m.assetLocalPath))
+  if (card0.kind === 'pano' && !card0.prompt?.trim() && !hasRealImage) {
+    g0.updateCard(cardId, { status: 'error', error: '请输入场景描述或添加参考图片' })
+    return
+  }
   const badMentions = findUnresolvedMentions(card0.prompt || '', mats0)
   if (badMentions.length) {
     toast(`提示词中有无效 @ 引用：${badMentions.join('、')}（将忽略，改用全部素材）`, 'info')
   }
 
-  // 默认模型回填：卡片未选 → 工程默认 → 可用列表第一个（让批量/分镜卡无需逐个选模型）
-  if ((card0.kind === 'image' || card0.kind === 'text') && !card0.modelId) {
-    const def = card0.kind === 'image' ? g0.project.defaultImageModel : g0.project.defaultTextModel
-    const resolved = await resolveModelId(card0.kind, null, def ?? null)
+  // 默认模型回填：卡片未选 → 工程默认 → 可用列表第一个（让批量/分镜卡无需逐个选模型）。
+  // 全景卡从图像模型列表解析，优先工程「360 专用模型」；回填写回卡片，后续接缝/天地修复也依赖 card.modelId
+  if ((card0.kind === 'image' || card0.kind === 'pano' || card0.kind === 'text') && !card0.modelId) {
+    const def =
+      card0.kind === 'pano'
+        ? g0.project.defaultPanoModel ?? g0.project.defaultImageModel
+        : card0.kind === 'image'
+          ? g0.project.defaultImageModel
+          : g0.project.defaultTextModel
+    const resolved = await resolveModelId(card0.kind === 'text' ? 'text' : 'image', null, def ?? null)
     if (resolved) g0.updateCard(cardId, { modelId: resolved })
   }
 
@@ -166,7 +179,7 @@ export async function generateCard(cardId: string): Promise<void> {
           (rid) => aborters.set(cardId, rid)
         )
         commit({ status: 'done', progress: 1, text })
-      } else if (card.kind === 'image') {
+      } else if (card.kind === 'image' || card.kind === 'pano') {
         const res = await generateImage(
           card,
           board,
@@ -190,7 +203,7 @@ export async function generateCard(cardId: string): Promise<void> {
           assetUrl: results[0].url,
           assetLocalPath: results[0].localPath,
           mime: res.mime,
-          meta: { ...(base0?.meta || {}), results, ...(card.params?.pano ? { pano: true } : {}) }
+          meta: { ...(base0?.meta || {}), results, ...(card.kind === 'pano' ? { pano: true } : {}) }
         })
       } else if (card.kind === 'audio') {
         const cfg = useProviders.getState().activeFor('audio')

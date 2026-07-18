@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
+import { Image as ImageIcon, Video, Type, Music, Package, StickyNote, Play, Pause, Volume2, VolumeX, Camera, Compass, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import { captureFrame } from '../services/mediaOps'
 import { makeThumbnail } from '../services/mediaImage'
 import { makeVideoPoster } from '../services/mediaVideo'
@@ -10,9 +10,11 @@ import { useUi } from '../store/uiStore'
 import { screenToWorld } from './viewport'
 import { stageEl } from './stageEl'
 import { KIND_ACCENT, type Card, type CardKind } from '../types'
+import { PanoNodePreview } from './PanoNodePreview'
 
 const KIND_ICON: Record<CardKind, typeof ImageIcon> = {
   image: ImageIcon,
+  pano: Compass,
   video: Video,
   text: Type,
   audio: Music,
@@ -157,6 +159,10 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   const [editing, setEditing] = useState(false)
   const connInvalid = useUi((s) => s.connInvalidIds)
   const dimmed = !!connInvalid && connInvalid.has(card.id)
+  // 全景卡节点内预览态（selector 返回布尔：其它卡的 panoCardId 变化不引发本卡重渲）。
+  // 生成中回退平铺图：流式分片逐帧改 assetUrl，若保持预览会每帧重建整套 WebGL 栈（上下文有 ~16 上限）
+  const panoPreviewing =
+    useUi((s) => s.panoCardId === card.id) && card.kind === 'pano' && card.status !== 'running' && card.status !== 'queued'
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null)
   const [resizeBubble, setResizeBubble] = useState<{ w: number; h: number } | null>(null)
 
@@ -173,7 +179,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   // 集中在此覆盖所有来源（生成/导入/工具产出）；全分辨率仍供 Lightbox 预览与局部编辑（读 assetUrl/assetLocalPath）。
   const metaAny = card.meta as Record<string, unknown> | undefined
   const thumbUrl = metaAny?.thumbFor === card.assetUrl ? (metaAny?.thumb as string | undefined) : undefined
-  const isImgKind = card.kind === 'image' || card.kind === 'source'
+  const isImgKind = card.kind === 'image' || card.kind === 'pano' || card.kind === 'source'
   useEffect(() => {
     if (!isImgKind || !card.assetLocalPath || !card.assetUrl) return
     if (metaAny?.thumbFor === card.assetUrl && metaAny?.thumb) return // 已有对应缩略图
@@ -299,7 +305,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     window.addEventListener('contextmenu', onCtx)
   }
 
-  const isImg = (card.kind === 'image' || card.kind === 'source') && !!card.assetUrl
+  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && !!card.assetUrl
   const isVid = card.kind === 'video' && !!card.assetUrl
   const isAud = card.kind === 'audio' && !!card.assetUrl
   const isTxt = card.kind === 'text' && !!card.text
@@ -390,7 +396,8 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       }}
       onDoubleClick={(e) => {
         e.stopPropagation()
-        if ((card.meta as any)?.pano && card.assetUrl) {
+        // 全景分支必须在 image/source 分支之前——否则会进局部编辑毁掉等距柱状投影
+        if ((card.kind === 'pano' || (card.meta as any)?.pano) && card.assetUrl) {
           useUi.getState().setPanoCardId(card.id) // 全景卡 → 360 环视
         } else if ((card.kind === 'image' || card.kind === 'source') && card.assetUrl) {
           useUi.getState().setMaskCardId(card.id) // 双击图片节点 → 进入局部编辑页面
@@ -402,7 +409,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       {(() => {
         const shot = (card.meta as any)?.shot
         const t = (card.title || '').trim()
-        const custom = !!t && !['AI 图片', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'].includes(t)
+        const custom = !!t && !['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'].includes(t)
         if (!shot && !custom) return null
         return (
           <div className="absolute top-1 left-1 z-20 max-w-[88%] truncate px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] leading-none pointer-events-none">
@@ -411,9 +418,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
           </div>
         )
       })()}
-      {(card.meta as any)?.pano && (
-        <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-600/85 text-white text-[10px] leading-none pointer-events-none">
-          360°
+      {card.kind === 'pano' && !panoPreviewing && (
+        <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-600/85 text-white text-[10px] leading-none pointer-events-none">
+          <Compass size={10} /> 360°
         </div>
       )}
       {/* 多结果堆叠背板（露出右下角，暗示有多张） */}
@@ -431,7 +438,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         {(card.meta as any)?.mediaMissing && (
           <div className="absolute top-1 left-1 z-20 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/90 text-white pointer-events-none" title="导入的工程未随附此媒体文件，请重新生成或重新导入含媒体的工程">媒体缺失</div>
         )}
-        {isImg ? (
+        {isImg && panoPreviewing ? (
+          <PanoNodePreview card={card} />
+        ) : isImg ? (
           <img
             src={thumbUrl || (card.assetUrl as string)}
             draggable={false}

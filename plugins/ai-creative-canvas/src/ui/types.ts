@@ -1,6 +1,6 @@
 // 领域模型：卡片 / 连线 / 视口 / 画布(board) / 工程(project)
 
-export type CardKind = 'image' | 'video' | 'text' | 'audio' | 'source' | 'group' | 'note'
+export type CardKind = 'image' | 'pano' | 'video' | 'text' | 'audio' | 'source' | 'group' | 'note'
 export type CardStatus = 'idle' | 'queued' | 'running' | 'done' | 'error'
 
 export interface Card {
@@ -164,11 +164,12 @@ export interface Shot {
   roleImageRefs?: string[] // 角色一致性参考图 id
 }
 
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2 // v2：360 全景独立为 pano 卡（image + params.pano/meta.pano → kind 'pano'）
 
 // 类型色 —— 单一真相：JS 侧用此处，CSS 侧 styles.css 的 --kind-* 须与之同源
 export const KIND_ACCENT: Record<CardKind, string> = {
   image: '#6366f1',
+  pano: '#06b6d4',
   video: '#ec4899',
   text: '#10b981',
   audio: '#f59e0b',
@@ -179,6 +180,7 @@ export const KIND_ACCENT: Record<CardKind, string> = {
 
 export const KIND_LABEL: Record<CardKind, string> = {
   image: '图片',
+  pano: '360 全景',
   video: '视频',
   text: '文本',
   audio: '音频',
@@ -189,6 +191,7 @@ export const KIND_LABEL: Record<CardKind, string> = {
 
 export const CARD_DEFAULT_SIZE: Record<CardKind, { w: number; h: number }> = {
   image: { w: 280, h: 320 },
+  pano: { w: 360, h: 220 }, // 等距柱状 2:1，出图后 fitAspect 收敛到真实比例
   video: { w: 320, h: 280 },
   text: { w: 300, h: 220 },
   audio: { w: 300, h: 140 },

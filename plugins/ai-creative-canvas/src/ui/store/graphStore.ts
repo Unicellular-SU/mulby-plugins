@@ -28,6 +28,7 @@ function pushBoardSnap(
 function defaultTitle(kind: CardKind): string {
   switch (kind) {
     case 'image': return 'AI 图片'
+    case 'pano': return 'AI 全景'
     case 'video': return 'AI 视频'
     case 'text': return 'AI 文本'
     case 'audio': return 'AI 音频'

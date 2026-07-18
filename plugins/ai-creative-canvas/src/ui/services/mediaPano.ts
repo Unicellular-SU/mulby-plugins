@@ -83,7 +83,7 @@ export async function repairEquirectSeam(cardId: string): Promise<void> {
     const projectId = useGraph.getState().project.id
     const saved = await saveBase64(projectId, `${cardId}_seam`, base64, 'png')
     const id = useGraph.getState().addCard(
-      'image',
+      'pano',
       { x: src.x + src.w + 220, y: src.y + src.h / 2 },
       { title: (src.title || '全景') + ' · 接缝修复', status: 'done', modelId: src.modelId, refIds: [src.id], assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png', meta: { pano: true } },
       boardId

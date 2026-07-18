@@ -6,12 +6,30 @@ const PLUGIN_ID = 'ai-creative-canvas'
 const KEY = 'templates:list'
 const storage = () => window.mulby?.storage
 
+// 旧版用户模板兜底迁移：模板存储不走工程 migrateProject，成员里可能残留旧设计的
+// 「图片卡 + params.pano 开关」或「meta.pano 标记」（接缝/天地修复产物）→ 读取时就地转成独立 pano 卡
+function migrateTemplatePano(t: GroupTemplate): GroupTemplate {
+  const legacy = (m: GroupTemplate['members'][number]) =>
+    m?.card?.kind === 'image' && ((m.card.params as any)?.pano || (m.card.meta as any)?.pano)
+  if (!t.members?.some(legacy)) return t
+  return {
+    ...t,
+    members: t.members.map((m) => {
+      if (!legacy(m)) return m
+      const { pano: _drop, ...params } = (m.card.params || {}) as Record<string, unknown>
+      void _drop
+      if (params.resolution === '1K') params.resolution = '2K' // pano 档位仅 2K/4K
+      return { ...m, card: { ...m.card, kind: 'pano' as const, params } }
+    })
+  }
+}
+
 // 内置演示模板置顶，后接用户保存的模板（空模板库不再是死路，新手可一键搭链）
 export async function listTemplates(): Promise<GroupTemplate[]> {
   let user: GroupTemplate[] = []
   try {
     const v = await storage()?.get(KEY, PLUGIN_ID)
-    if (Array.isArray(v)) user = v as GroupTemplate[]
+    if (Array.isArray(v)) user = (v as GroupTemplate[]).map(migrateTemplatePano)
   } catch {
     /* ignore */
   }

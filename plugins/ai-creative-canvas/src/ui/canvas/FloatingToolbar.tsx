@@ -17,7 +17,7 @@ export function FloatingToolbar() {
   const card = board.cards[selectedIds[0]]
   if (!card) return null
   const mime = card.mime || ''
-  const isImg = (card.kind === 'image' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl)) && !!card.assetUrl
+  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl)) && !!card.assetUrl
   const isVid = card.kind === 'video' && !!card.assetLocalPath
   if (!isImg && !isVid) return null
 

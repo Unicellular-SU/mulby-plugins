@@ -10,7 +10,7 @@ function matKindOfCard(c: Card): MaterialKind {
 }
 
 // 默认标题（未重命名）→ 这些用自动编号，重命名后用真实名称
-const DEFAULT_TITLES = new Set(['AI 图片', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'])
+const DEFAULT_TITLES = new Set(['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'])
 
 // 汇总一个节点的素材：上游连线 + 显式引用 + 本节点上传；标签优先用节点真实名称，否则按 kind 自动编号
 export function buildMaterials(card: Card, board: Board): Material[] {

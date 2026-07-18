@@ -25,7 +25,8 @@ export function MediaToolbox({ card }: { card: Card }) {
   const [cropping, setCropping] = useState(false)
 
   const mime = card.mime || ''
-  const isImg = (card.kind === 'image' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl))
+  const isPano = card.kind === 'pano'
+  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl))
   const isVid = card.kind === 'video' && !!card.assetLocalPath
   if (!isImg && !isVid) return null
 
@@ -36,16 +37,23 @@ export function MediaToolbox({ card }: { card: Card }) {
       {isImg && (
         <>
           {canGenerate(card.kind) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
-          {(card.meta as any)?.pano && <IconBtn icon={Compass} title="360 环视" onClick={() => useUi.getState().setPanoCardId(card.id)} />}
-          {(card.meta as any)?.pano && <IconBtn icon={GitMerge} title="修复接缝（实验·偏移+重绘，效果依赖模型，可能需多次）" onClick={() => void repairEquirectSeam(card.id)} />}
-          {(card.meta as any)?.pano && <IconBtn icon={ArrowUpDown} title="天/地修复（实验·锚定重绘天花板/地板，效果依赖模型，可能需多次）" onClick={() => void repairEquirectPoles(card.id)} />}
-          <IconBtn icon={Crop} title="裁剪" onClick={() => setCropping(true)} />
-          <IconBtn icon={Brush} title="局部编辑（重绘/擦除）" onClick={() => useUi.getState().setMaskCardId(card.id)} />
-          <IconBtn icon={Maximize2} title="扩图" onClick={() => runImageTool(card.id, 'outpaint')} />
+          {isPano && (
+            <IconBtn
+              icon={Compass}
+              title="360 预览（节点内拖动环视，可截图；再点退出）"
+              onClick={() => { const s = useUi.getState(); s.setPanoCardId(s.panoCardId === card.id ? null : card.id) }}
+            />
+          )}
+          {isPano && <IconBtn icon={GitMerge} title="修复接缝（实验·偏移+重绘，效果依赖模型，可能需多次）" onClick={() => void repairEquirectSeam(card.id)} />}
+          {isPano && <IconBtn icon={ArrowUpDown} title="天/地修复（实验·锚定重绘天花板/地板，效果依赖模型，可能需多次）" onClick={() => void repairEquirectPoles(card.id)} />}
+          {/* 裁剪/扩图/宫格/抠像/局部编辑会破坏等距柱状 2:1 投影，全景卡不提供 */}
+          {!isPano && <IconBtn icon={Crop} title="裁剪" onClick={() => setCropping(true)} />}
+          {!isPano && <IconBtn icon={Brush} title="局部编辑（重绘/擦除）" onClick={() => useUi.getState().setMaskCardId(card.id)} />}
+          {!isPano && <IconBtn icon={Maximize2} title="扩图" onClick={() => runImageTool(card.id, 'outpaint')} />}
           <IconBtn icon={Sparkles} title="高清放大" onClick={() => runImageTool(card.id, 'upscale')} />
-          <IconBtn icon={Scissors} title="抠像/去背景" onClick={() => runImageTool(card.id, 'removebg')} />
-          <IconBtn icon={Grid2x2} title="宫格 2×2" onClick={() => runGridSlice(card.id, 2, 2)} />
-          <IconBtn icon={Grid2x2} title="宫格 3×3" onClick={() => runGridSlice(card.id, 3, 3)} />
+          {!isPano && <IconBtn icon={Scissors} title="抠像/去背景" onClick={() => runImageTool(card.id, 'removebg')} />}
+          {!isPano && <IconBtn icon={Grid2x2} title="宫格 2×2" onClick={() => runGridSlice(card.id, 2, 2)} />}
+          {!isPano && <IconBtn icon={Grid2x2} title="宫格 3×3" onClick={() => runGridSlice(card.id, 3, 3)} />}
           <IconBtn icon={Download} title="下载" onClick={() => void download()} />
         </>
       )}
