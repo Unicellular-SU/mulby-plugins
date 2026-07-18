@@ -29,6 +29,17 @@ const FACINGS: { k: string; r: number }[] = [
   { k: '朝右', r: -Math.PI / 2 }
 ]
 
+// 出图画幅预设：宿主 images.edit 不支持尺寸参数，模型自己定画幅——所以抓帧按选定画幅居中裁剪，
+// 视口内用 letterbox 画框标示真实出图范围（所见即所得）；ar=0 表示不裁剪（跟随视口）
+const ASPECTS: { k: string; ar: number }[] = [
+  { k: '视口', ar: 0 },
+  { k: '1:1', ar: 1 },
+  { k: '3:2', ar: 1.5 },
+  { k: '2:3', ar: 2 / 3 },
+  { k: '16:9', ar: 16 / 9 },
+  { k: '9:16', ar: 9 / 16 }
+]
+
 // 灯光预设：两盏灯 + 背景色；frag 为追加进提示词的氛围描述（AI 据此渲染对应光线）
 const LIGHTINGS: { k: string; hemiSky: number; hemiGround: number; hemiInt: number; dirColor: number; dirInt: number; dirPos: [number, number, number]; bg: number; frag: string }[] = [
   { k: '默认', hemiSky: 0xffffff, hemiGround: 0x404050, hemiInt: 1.15, dirColor: 0xffffff, dirInt: 1.1, dirPos: [3, 6, 4], bg: 0x1b1d23, frag: '' },
@@ -93,6 +104,8 @@ function Inner() {
   const [editShotName, setEditShotName] = useState('')
   const [showGuides, setShowGuides] = useState(true) // 三分构图线
   const [lighting, setLighting] = useState('默认')
+  const [aspect, setAspectK] = useState('视口') // 出图画幅（ASPECTS 的 k）
+  const curAr = ASPECTS.find((a) => a.k === aspect)?.ar ?? 0
   const [descDraft, setDescDraft] = useState('') // 选中对象的语义描述草稿（blur 提交）
   const [lastTake, setLastTake] = useState<string | null>(null) // 最近一次成片 url（叠图对比）
   const [compareOn, setCompareOn] = useState(false) // 成片叠加对比开关
@@ -103,7 +116,7 @@ function Inner() {
   const saveScene = () => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), lastTake: lastTake || undefined })
+      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect, lastTake: lastTake || undefined })
     } catch { /* ignore */ }
   }
   const close = () => {
@@ -594,6 +607,28 @@ function Inner() {
           dirLight.position.set(L.dirPos[0], L.dirPos[1], L.dirPos[2])
           scene.background = new THREE.Color(L.bg)
         }
+        // 出图画幅：ar=0 不裁剪；kx/ky 为投影修正系数（描述里的方位/占比对应裁剪后画幅）
+        let curAspect = 0
+        const cropScale = (): [number, number] => {
+          if (!curAspect) return [1, 1]
+          const va = cam.aspect || 1 // 视口画幅
+          return curAspect < va ? [va / curAspect, 1] : [1, curAspect / va]
+        }
+        // 居中裁剪 2D 画布到目标画幅（视口内 letterbox 画框显示的就是这个区域）
+        const cropCanvas = (src: HTMLCanvasElement): HTMLCanvasElement => {
+          if (!curAspect) return src
+          const cw = src.width
+          const ch = src.height
+          let tw = cw
+          let th = Math.round(tw / curAspect)
+          if (th > ch) { th = ch; tw = Math.round(th * curAspect) }
+          if (tw === cw && th === ch) return src
+          const c2 = document.createElement('canvas')
+          c2.width = tw
+          c2.height = th
+          c2.getContext('2d')!.drawImage(src, Math.round((cw - tw) / 2), Math.round((ch - th) / 2), tw, th, 0, 0, tw, th)
+          return c2
+        }
         // 机位缩略图：出图相机渲一帧 → 96px 宽 jpeg（记录机位时调用）
         const captureThumb = (): string => {
           tcontrol.detach()
@@ -609,7 +644,7 @@ function Inner() {
           c.getContext('2d')!.drawImage(src, 0, 0, tw, th)
           camHelper.visible = chv
           attachByMode()
-          return c.toDataURL('image/jpeg', 0.7)
+          return cropCanvas(c).toDataURL('image/jpeg', 0.7)
         }
         // 一键落地：包围盒底部贴合地面
         const dropToGround = () => {
@@ -750,7 +785,7 @@ function Inner() {
               ctx.fill()
             })
           }
-          return c.toDataURL('image/png')
+          return cropCanvas(c).toDataURL('image/png')
         }
         const captureDepth = (): string => {
           tcontrol.detach()
@@ -785,7 +820,7 @@ function Inner() {
           // 注意：不要反相。three 的 BasicDepthPacking 输出即「近白远黑」（1.0 - fragCoordZ），
           // 正是 ControlNet 深度模型（MiDaS/Depth Anything）的约定；再反相纵深关系就倒了。
           attachByMode()
-          return c.toDataURL('image/png')
+          return cropCanvas(c).toDataURL('image/png')
         }
 
         // 恢复持久化场景，否则默认一个人台
@@ -807,6 +842,11 @@ function Inner() {
               setLighting(saved0.lighting)
             }
             if (saved0.lastTake) setLastTake(saved0.lastTake)
+            if (saved0.aspect && ASPECTS.some((a) => a.k === saved0.aspect)) {
+              const ar = ASPECTS.find((a) => a.k === saved0.aspect)?.ar ?? 0
+              curAspect = ar
+              setAspectK(saved0.aspect)
+            }
           }
           // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
           void Promise.all(ps).then(() => { restoring = false; if (!disposed) { sync(); commit() } })
@@ -823,15 +863,27 @@ function Inner() {
           const ang = (Math.asin(Math.max(-1, Math.min(1, dy / Math.max(0.001, d)))) * 180) / Math.PI
           const f = C.getFocalLength()
           const lens = f < 28 ? '广角镜头(wide-angle)' : f <= 50 ? '标准镜头(normal)' : f <= 85 ? '中长焦(short telephoto)' : '长焦(telephoto)'
-          const angle = ang > 18 ? '俯拍(high angle)' : ang < -12 ? '仰拍(low angle)' : '平视(eye level)'
+          const angle = ang > 18 ? `俯拍(约 ${Math.round(ang)}° 俯角, high angle looking down)` : ang < -12 ? `仰拍(约 ${Math.round(-ang)}° 仰角, low angle)` : '平视(eye level)'
           const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
           const people = subjects.filter((s) => s.kind === '人台' && s.obj.visible !== false)
           const v = new THREE.Vector3()
+          const [kx, ky] = cropScale() // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
           const whereOf = (s: Subj): string => {
             s.obj.getWorldPosition(v)
             v.project(C)
+            v.x *= kx
             if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
             return v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+          }
+          // 人物在出图画幅中的纵向占比（脚底→头顶投影差），让模型知道人物该画多大
+          const heightFracOf = (s: Subj): number => {
+            s.obj.getWorldPosition(v)
+            const by = v.clone().project(C).y
+            if (!isFinite(by)) return 0
+            v.y += 1.75 * s.obj.scale.y
+            const ty = v.project(C).y
+            if (!isFinite(ty)) return 0
+            return (Math.abs(ty - by) / 2) * ky
           }
           const layout = people
             .map((s, i) => {
@@ -840,7 +892,9 @@ function Inner() {
               const pose = (s.obj as any).userData?.poseName
               // 优先用对象语义描述（场景即提示词）；其次用户改名；否则回落「角色N」
               const nm = s.desc || (s.name && !/^(人台|道具|模型)\d+$/.test(s.name) ? s.name : `角色${i + 1}`)
-              return `${nm}${where}${pose ? `(${pose})` : ''}`
+              const frac = heightFracOf(s)
+              const sizeTxt = frac > 0.01 ? `，约占画面高度 ${Math.round(frac * 100)}%` : ''
+              return `${nm}${where}${sizeTxt}${pose ? `(${pose})` : ''}`
             })
             .filter(Boolean)
             .join('，')
@@ -858,7 +912,8 @@ function Inner() {
             .join('，')
           const propTxt = propLayout ? `场景道具：${propLayout}。` : ''
           const lightTxt = (LIGHTINGS.find((l) => l.k === curLighting) || LIGHTINGS[0]).frag
-          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
+          const aspectTxt = curAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === curAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
+          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
         }
 
         api.current = {
@@ -914,7 +969,12 @@ function Inner() {
             const chv = camHelper.visible
             camHelper.visible = false // 取景框不进成片参考图
             renderer.render(scene, outCam())
-            const url = renderer.domElement.toDataURL('image/png')
+            const src = renderer.domElement
+            const c = document.createElement('canvas')
+            c.width = src.width
+            c.height = src.height
+            c.getContext('2d')!.drawImage(src, 0, 0)
+            const url = cropCanvas(c).toDataURL('image/png')
             camHelper.visible = chv
             attachByMode()
             return url
@@ -939,6 +999,7 @@ function Inner() {
           },
           setLighting: applyLighting,
           getLighting: () => curLighting,
+          setAspect: (ar: number) => { curAspect = ar },
           captureThumb,
           dropToGround,
           stagePreset
@@ -1008,6 +1069,24 @@ function Inner() {
   useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
 
   const onFocal = (mm: number) => { setFocal(mm); api.current.setFocal?.(mm) }
+  const onAspect = (k: string) => { setAspectK(k); api.current.setAspect?.(ASPECTS.find((a) => a.k === k)?.ar ?? 0) }
+
+  // letterbox 画框尺寸：中央可视区（top-16/bottom-24/left-52/right-64）内按画幅取最大内接矩形
+  const [frameRect, setFrameRect] = useState<{ w: number; h: number } | null>(null)
+  useEffect(() => {
+    if (!curAr) { setFrameRect(null); return }
+    const calc = () => {
+      const cw = Math.max(1, window.innerWidth - 208 - 256)
+      const ch = Math.max(1, window.innerHeight - 64 - 96)
+      let w = cw
+      let h = w / curAr
+      if (h > ch) { h = ch; w = h * curAr }
+      setFrameRect({ w: Math.round(w), h: Math.round(h) })
+    }
+    calc()
+    window.addEventListener('resize', calc)
+    return () => window.removeEventListener('resize', calc)
+  }, [curAr])
   const onMode = (m: TMode) => { setMode(m); api.current.setMode?.(m) }
   const onImportClick = () => fileRef.current?.click()
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1180,6 +1259,12 @@ function Inner() {
           </g>
         </svg>
       )}
+      {/* 出图画幅框（选了非「视口」画幅时）：琥珀框内=模型实际看到的构图范围，框外压暗；同样沉在面板之下 */}
+      {frameRect && (
+        <div className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none grid place-items-center">
+          <div style={{ width: frameRect.w, height: frameRect.h }} className="border border-amber-200/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
+        </div>
+      )}
       {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍。
           与构图线同理不带 z-index：沉到面板之下，只覆盖 3D 视口区域 */}
       {compareOn && lastTake && (
@@ -1325,6 +1410,12 @@ function Inner() {
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}</Btn>)}
+          </div>
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-white/40 w-8">画幅</span>
+            {ASPECTS.map((a) => (
+              <Btn key={a.k} on={aspect === a.k} onClick={() => onAspect(a.k)} title={a.ar ? `出图画幅 ${a.k}：抓帧按此居中裁剪，视口画框内即模型所见` : '跟随视口（不裁剪）'}>{a.k}</Btn>
+            ))}
           </div>
           <div className="flex items-center gap-1 flex-wrap">
             <span className="text-white/40 w-8">镜别</span>
