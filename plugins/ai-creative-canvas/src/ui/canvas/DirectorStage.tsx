@@ -1495,15 +1495,15 @@ function Inner() {
           <Btn on={mode === 'translate'} onClick={() => onMode('translate')} title="移动整体 (Q)"><Move size={13} /> 移动</Btn>
           <Btn on={mode === 'rotate'} onClick={() => onMode('rotate')} title="旋转整体 (W)"><Rotate3d size={13} /> 旋转</Btn>
           <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体 (E)"><Maximize size={13} /> 缩放</Btn>
-          <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿：点人台关节后拖动鼠标摆姿 (R)"><Hand size={13} /> 摆姿</Btn>
+          <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿 (R)"><Hand size={13} /> 摆姿</Btn>
           <div className="w-px h-5 bg-white/10" />
           <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
-          <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加最近一次成片对比 (C)：对着上一条调场景/构图' : '尚无成片可对比（先「生成」一条）'}><Layers size={13} /></Btn>
+          <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加成片对比 (C)' : '尚无成片可对比'}><Layers size={13} /></Btn>
           {compareOn && lastTake && (
             <input type="range" min={0.1} max={1} step={0.05} value={compareOpacity} onChange={(e) => setCompareOpacity(Number(e.target.value))} className="w-16 accent-amber-300" title="成片叠加透明度" />
           )}
           <div className="w-px h-5 bg-white/10" />
-          <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景 (L)：冻结出图机位，主视图可自由查看/摆姿；PiP 实时显示出图构图"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
+          <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景 (L)"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
           {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
@@ -1528,8 +1528,8 @@ function Inner() {
           <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
         </div>
         <div className="flex items-center gap-1">
-          <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人面对面站位（追加，不清空场景）"><Users size={12} /> 双人</Btn>
-          <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示台（追加，不清空场景）"><Package size={12} /> 产品</Btn>
+          <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
+          <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
         </div>
         <div className="h-px bg-white/[0.07]" />
         <div className="flex flex-col gap-1 overflow-auto ace-scroll flex-1">
@@ -1619,7 +1619,7 @@ function Inner() {
           <div className="flex items-center gap-1 flex-wrap">
             <span className="text-white/40 w-8">画幅</span>
             {ASPECTS.map((a) => (
-              <Btn key={a.k} on={aspect === a.k} onClick={() => onAspect(a.k)} title={a.ar ? `出图画幅 ${a.k}：抓帧按此居中裁剪，视口画框内即模型所见` : '跟随视口（不裁剪）'}>{a.k}</Btn>
+              <Btn key={a.k} on={aspect === a.k} onClick={() => onAspect(a.k)} title={a.ar ? `出图画幅 ${a.k}` : '跟随视口'}>{a.k}</Btn>
             ))}
           </div>
           <div className="flex items-center gap-1 flex-wrap">
@@ -1637,7 +1637,7 @@ function Inner() {
           <div className="flex items-center gap-1 flex-wrap">
             <span className="text-white/40 w-8">灯光</span>
             {LIGHTINGS.map((l) => (
-              <Btn key={l.k} on={lighting === l.k} onClick={() => { setLighting(l.k); api.current.setLighting?.(l.k) }} title={`灯光预设：${l.k}（写入提示词，影响成片氛围）`}>{l.k}</Btn>
+              <Btn key={l.k} on={lighting === l.k} onClick={() => { setLighting(l.k); api.current.setLighting?.(l.k) }} title={`灯光预设：${l.k}`}>{l.k}</Btn>
             ))}
           </div>
           {hasControlModel && (
@@ -1658,7 +1658,7 @@ function Inner() {
             <div key={s.id} className="flex items-center gap-1.5">
               {(s.take || s.thumb) && (
                 <div className="w-10 shrink-0 flex flex-col items-center gap-0.5">
-                  <img src={s.take || s.thumb} onClick={() => applyShot(s)} className={`w-10 rounded-md ring-1 cursor-pointer transition-shadow hover:ring-amber-200 ${s.take ? 'ring-amber-300/70' : 'ring-white/15'}`} title={s.take ? '切到此机位（亮框=已出成片）' : '切到此机位'} />
+                  <img src={s.take || s.thumb} onClick={() => applyShot(s)} className={`w-10 rounded-md ring-1 cursor-pointer transition-shadow hover:ring-amber-200 ${s.take ? 'ring-amber-300/70' : 'ring-white/15'}`} title="切到此机位" />
                   {(s.takes?.length || 0) > 1 && (
                     <div className="flex items-center gap-0.5 text-[9px] text-white/50">
                       <button onClick={() => cycleTake(i, -1)} className="px-0.5 hover:text-white transition-colors" title="上一条成片">‹</button>
@@ -1682,7 +1682,7 @@ function Inner() {
                   className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
                 />
               ) : (
-                <button onClick={() => applyShot(s)} onDoubleClick={() => { setEditShotId(s.id); setEditShotName(s.name) }} className="flex-1 text-left px-1.5 py-1 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/10 text-white/75 hover:text-white truncate transition-colors" title="切到此机位（双击改名）">{s.name}</button>
+                <button onClick={() => applyShot(s)} onDoubleClick={() => { setEditShotId(s.id); setEditShotName(s.name) }} className="flex-1 text-left px-1.5 py-1 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/10 text-white/75 hover:text-white truncate transition-colors" title="切到此机位">{s.name}</button>
               )}
               <button onClick={() => void genShot(i)} disabled={busy} className="text-white/40 hover:text-amber-200 disabled:opacity-30 transition-colors" title="按此机位生成/重拍"><RefreshCw size={12} /></button>
               <button onClick={() => delShot(s.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
@@ -1694,7 +1694,7 @@ function Inner() {
             </button>
           )}
           {shots.length > 0 && (
-            <button onClick={exportStoryboard} disabled={busy} className="px-2 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors" title="把机位表落为画布上的分镜卡：带成片的直接显示，未出片的带提示词可批量生成">
+            <button onClick={exportStoryboard} disabled={busy} className="px-2 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors" title="导出分镜到画布">
               <Clapperboard size={13} /> 导出分镜到画布
             </button>
           )}
@@ -1725,11 +1725,11 @@ function Inner() {
               })
           }}
           className="h-16 px-3 rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center gap-1 whitespace-nowrap transition-colors"
-          title="复制模型实际收到的完整提示词（角色绑定对不对，一看便知）"
+          title="复制完整提示词"
         >
           <Copy size={14} /> 提示词
         </button>
-        <button onClick={() => void run()} disabled={busy} title="抓当前取景创建参考图节点 + 生图节点（回画布后手动生成）" className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
+        <button onClick={() => void run()} disabled={busy} title="抓当前取景创建参考图节点 + 生图节点" className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
           {busy ? <><Loader2 size={16} className="animate-spin" /> 创建中…</> : <><Film size={16} /> 创建节点</>}
         </button>
       </div>

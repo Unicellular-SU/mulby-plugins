@@ -49,7 +49,7 @@ export function ProjectSettings() {
       <button
         ref={btnRef}
         onClick={() => setOpen((o) => !o)}
-        title="项目设置（默认模型 / 并发）"
+        title="项目设置"
         className={`h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20 ${open ? 'text-indigo-500' : ''}`}
       >
         <SlidersHorizontal size={15} />

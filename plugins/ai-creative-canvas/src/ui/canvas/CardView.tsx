@@ -517,7 +517,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
             e.dataTransfer.setData('application/x-ace-asset', JSON.stringify({ url: card.assetUrl, localPath: card.assetLocalPath, mime: card.mime, title: card.title, kind: card.kind }))
             e.dataTransfer.effectAllowed = 'copy'
           }}
-          title="拖出为素材卡（可作其它节点的输入）"
+          title="拖出为素材卡"
           className={`absolute -left-2.5 top-1/2 -translate-y-1/2 w-5 h-5 grid place-items-center rounded-full border-2 border-white dark:border-neutral-900 bg-neutral-500 text-white cursor-grab z-30 shadow transition-opacity ${
             selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}

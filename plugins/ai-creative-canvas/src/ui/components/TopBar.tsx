@@ -32,7 +32,7 @@ export function TopBar() {
       </div>
       <button
         onClick={() => useUi.getState().setShowProjectLibrary(true)}
-        title="工程库（多工程管理）"
+        title="工程库"
         className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20 shrink-0"
       >
         <FolderOpen size={15} />
@@ -97,10 +97,10 @@ export function TopBar() {
           <ListChecks size={14} className="opacity-70" />
         )}
       </button>
-      <button onClick={() => useUi.getState().setShowDirector(true)} title="3D 导演台（摆机位/人台 → 生成）" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+      <button onClick={() => useUi.getState().setShowDirector(true)} title="3D 导演台" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <Clapperboard size={15} />
       </button>
-      <button onClick={() => useUi.getState().setShowSearch(true)} title="搜索卡片（标题/提示词/文本）" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+      <button onClick={() => useUi.getState().setShowSearch(true)} title="搜索卡片" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <Search size={15} />
       </button>
       <button onClick={() => useUi.getState().setShowGallery(true)} title="作品库" className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
@@ -112,7 +112,7 @@ export function TopBar() {
       <ProjectSettings />
       <button
         onClick={() => useUi.getState().setShowProviderSettings(true)}
-        title="Provider 设置（视频/音频生成）"
+        title="Provider 设置"
         className="h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20"
       >
         <Settings size={15} />
