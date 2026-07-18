@@ -11,7 +11,8 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "@mulby-plugins/types"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

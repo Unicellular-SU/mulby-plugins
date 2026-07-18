@@ -1,6 +1,15 @@
 import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL } from "../types";
 import { STORY_MODE_PROMPTS } from "../constants";
-import { sniffImageMime } from "../utils/imageMime";
+import {
+  createAbortScope,
+  safeAbort,
+  createAttachmentCache,
+  NO_TOOLS,
+  dataUrlToBuffer,
+  aspectRatioToSize,
+  extractJson,
+  toDataUrl,
+} from '@mulby-plugins/manga-kit';
 
 // ================= MULBY AI BRIDGE =================
 // 所有 AI 能力通过 Mulby 宿主提供的 window.mulby.ai 完成，
@@ -36,32 +45,22 @@ const getAi = () => {
 //   但结果会被作废，不会写入界面。
 // 中止后新发起的任务捕获的是新纪元，无需任何重置即可正常运行。
 
-let abortEpoch = 0;
-const activeTextRequestIds = new Set<string>();
+// 方案 7.3：中止纪元五件套收编为 manga-kit 的 createAbortScope 工厂——模块级默认实例
+// 即"每窗口一份"的现语义；对外导出签名保持不变（App 与各组件零改动）。
+const scope = createAbortScope(() => (window as Window).mulby?.ai);
 
 /** 当前中止纪元；队列型调用方（如资产连续生成循环）可在循环中比对以停止推进 */
-export const getAbortEpoch = () => abortEpoch;
+export const getAbortEpoch = () => scope.epoch();
+
+/** 本轮运行的回调是否已过期（用户中止过 / 新一轮已开始）——方案 2.1 的运行代际检查 */
+export const isStale = (runEpoch: number) => !scope.isCurrent(runEpoch);
 
 /** 一键中止：杀掉在途文本流请求与已登记 requestId 的图像 edit 请求，并作废所有在途任务的结果 */
-export const abortAllAiTasks = () => {
-  abortEpoch += 1;
-  const ai = (window as Window).mulby?.ai;
-  if (ai) {
-    activeTextRequestIds.forEach(id => safeAbort(ai, id));
-  }
-  activeTextRequestIds.clear();
-};
+export const abortAllAiTasks = () => scope.abortAll();
 
 const ABORT_ERROR = () => new DOMException('Aborted', 'AbortError');
 
-const throwIfAborted = (epoch: number) => {
-  if (epoch !== abortEpoch) throw ABORT_ERROR();
-};
-
-/** ai.abort 是 IPC Promise，需同时防同步抛与 Promise 拒绝（老宿主返回 void 时 ?.catch?. 安全跳过） */
-const safeAbort = (ai: { abort: (id: string) => unknown }, id: string) => {
-  try { (ai.abort(id) as Promise<void> | undefined)?.catch?.(() => { /* ignore */ }); } catch { /* ignore */ }
-};
+const throwIfAborted = (epoch: number) => scope.throwIfAborted(epoch);
 
 /** 解析图像模型：优先用配置面板选择的模型，否则回退到第一个可用的图像生成模型 */
 const resolveImageModel = async (): Promise<string> => {
@@ -73,95 +72,23 @@ const resolveImageModel = async (): Promise<string> => {
   return models[0].id;
 };
 
-/** 纯文本创作调用的公共选项：关闭一切工具注入，防止 prompt 注入触发内部工具 */
-const NO_TOOLS = {
-  capabilities: [] as string[],
-  toolingPolicy: { enableInternalTools: false },
-  mcp: { mode: 'off' as const },
-  skills: { mode: 'off' as const }
-};
-
-/** 把 data URL 拆成 mimeType + ArrayBuffer，用于上传 AI 附件 */
-const dataUrlToBuffer = (dataUrl: string): { mimeType: string; buffer: ArrayBuffer } => {
-  const match = dataUrl.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
-  const mimeType = match ? match[1] : 'image/png';
-  const base64 = match ? match[2] : (dataUrl.split(',')[1] || dataUrl);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return { mimeType, buffer: bytes.buffer };
-};
-
 // ================= 参考图附件缓存（方案 4.1，遵守 D3） =================
 // 同一张参考图整轮会话只上传一次：key = dataUrl 前 256 字符 + 长度，
 // value 为 Promise 化 attachmentId（并发页同时 miss 时也只上传一次）。
 // 宿主 AttachmentStore 无 TTL、消费后不删除，跨页复用安全；命中后仍以
 // attachments.get 校验失效（宿主重启等），失效即重传。
 
-const attachmentCache = new Map<string, Promise<string>>();
-const cacheKeyOf = (dataUrl: string) => `${dataUrl.slice(0, 256)}:${dataUrl.length}`;
+// 缓存实现收编进 manga-kit（方案 7.1，D3 语义原样平移）；此处保留模块级默认实例。
+const attachmentCache = createAttachmentCache(() => (window as Window).mulby?.ai);
 
-const uploadRefCached = (ai: ReturnType<typeof getAi>, dataUrl: string): Promise<string> => {
-  const key = cacheKeyOf(dataUrl);
-  const hit = attachmentCache.get(key);
-  if (hit) {
-    // 命中失效校验：attachments.get 为 null 则重传（D3）
-    return hit.then(async (id) => {
-      const meta = await ai.attachments.get(id).catch(() => null);
-      if (meta) return id;
-      attachmentCache.delete(key);
-      return uploadRefCached(ai, dataUrl);
-    });
-  }
-  const p = (async () => {
-    const { mimeType, buffer } = dataUrlToBuffer(dataUrl);
-    const att = await ai.attachments.upload({ buffer, mimeType, purpose: 'vision' });
-    return att.attachmentId;
-  })();
-  p.catch(() => attachmentCache.delete(key)); // 上传失败不留脏缓存
-  attachmentCache.set(key, p);
-  return p;
-};
+const uploadRefCached = (ai: ReturnType<typeof getAi>, dataUrl: string): Promise<string> =>
+  attachmentCache.upload(ai, dataUrl);
 
 /**
  * 删除全部已缓存附件并清空缓存；新剧本生成成功与 Start Over 确认丢弃时调用（D3）。
  * 宿主对附件无 TTL / 会话清理任务，批量 delete 属必要清理而非锦上添花。
  */
-export const clearReferenceAttachmentCache = () => {
-  const ai = (window as Window).mulby?.ai;
-  attachmentCache.forEach((p) =>
-    p.then((id) => ai?.attachments.delete(id)).catch(() => { /* ignore */ })
-  );
-  attachmentCache.clear();
-};
-
-/**
- * 宽高比 → 尺寸字符串与 prompt 比例提示（方案 4.7）。
- * - canvasHint：generate 路径用，必须与 size 画布数学一致（否则模型自行留白/加边框凑比例）；
- * - requestedHint：edit 路径用（无 size 画布时忠实用户所选比例；第 6 章宿主分支落地后
- *   size/aspectRatio 随 edit 入参透传，hint 退化为辅助提示）。
- */
-const aspectRatioToSize = (aspectRatio: string): {
-  size: string; canvasHint: string; requestedHint: string;
-} => {
-  switch (aspectRatio) {
-    case '1:1':  return { size: '1024x1024', canvasHint: 'square 1:1', requestedHint: 'square 1:1' };
-    case '4:3':  return { size: '1536x1024', canvasHint: 'landscape 3:2', requestedHint: 'landscape 4:3' };
-    case '16:9': return { size: '1536x1024', canvasHint: 'landscape 3:2', requestedHint: 'wide landscape 16:9' };
-    case '9:16': return { size: '1024x1536', canvasHint: 'tall portrait 2:3', requestedHint: 'tall portrait 9:16' };
-    case '3:4':  return { size: '1024x1536', canvasHint: 'portrait 2:3', requestedHint: 'portrait 3:4' };
-    case '2:3':
-    default:     return { size: '1024x1536', canvasHint: 'portrait 2:3 (manga page)', requestedHint: 'portrait 2:3 (manga page)' };
-  }
-};
-
-// 方案 4.6：本地 JSON 提取（大小写不敏感围栏剥离 + 首尾大括号截取，救回前置说明文字等脏输出）
-const extractJson = (text: string): string => {
-  const stripped = text.replace(/```(?:json)?/gi, '').trim();
-  const start = stripped.indexOf('{');
-  const end = stripped.lastIndexOf('}');
-  return start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
-};
+export const clearReferenceAttachmentCache = () => attachmentCache.clear();
 
 // ================= 费用统计如实上报（方案 5.2） =================
 
@@ -223,14 +150,10 @@ const imageStat = (
   estimated: false,
 });
 
-/** 图像结果 → data URL（Mulby 返回纯 base64；mime 按魔数探测，方案 5.6） */
-const toDataUrl = (image: string) =>
-  image.startsWith('data:') ? image : `data:${sniffImageMime(image)};base64,${image}`;
-
 // ================= 图像流式进度统一封装（方案 5.3，维持 D1 epoch） =================
 // 仅无参考图路径（generate）走流式；带参考图的 edit 无 stream 变体，保持现状。
 // chunk.__requestId 为第 6 章宿主分支（feat/ai-image-abort-and-size）新增：登记进
-// activeTextRequestIds 集合，abortAllAiTasks 即可真杀在途请求；老宿主永不发该
+// abort scope 的 requestId 集合，abortAllAiTasks 即可真杀在途请求；老宿主永不发该
 // chunk，自然退化为"结果作废不写界面"（D6，无需显式探测）。
 
 const generateImageWithProgress = async (
@@ -247,14 +170,12 @@ const generateImageWithProgress = async (
     return await ai.images.generateStream(input, (chunk: any) => {
       if (chunk?.__requestId) {
         requestId = chunk.__requestId;
-        if (epoch === abortEpoch) {
-          activeTextRequestIds.add(chunk.__requestId);
-        } else {
+        if (!scope.trackIfCurrent(epoch, chunk.__requestId)) {
           safeAbort(ai, chunk.__requestId); // 捕获到句柄时已被中止：立即杀掉
         }
         return;
       }
-      if (epoch !== abortEpoch || !onProgress) return; // 中止后迟到 chunk 丢弃（D1）
+      if (!scope.isCurrent(epoch) || !onProgress) return; // 中止后迟到 chunk 丢弃（D1）
       onProgress({
         stage: chunk?.stage,
         message: chunk?.message,
@@ -264,7 +185,7 @@ const generateImageWithProgress = async (
       });
     });
   } finally {
-    if (requestId) activeTextRequestIds.delete(requestId);
+    if (requestId) scope.untrack(requestId);
   }
 };
 
@@ -299,7 +220,7 @@ export const refineText = async (
     Output: Return ONLY the refined text. Do not include markdown formatting or explanations.
   `;
 
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
 
   try {
     const res = await ai.call({
@@ -370,7 +291,7 @@ export const refineImagePrompt = async (
     Return ONLY the updated prompt text. Do not add markdown formatting, quotes, or explanations.
   `;
 
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
 
   try {
     const result = await ai.call({
@@ -805,7 +726,7 @@ export const generateComicScript = async (
   const fullInputText = `${STATIC_SYSTEM_PROMPT}\n\n${userPrompt}`;
   onLogUpdate('INPUT', fullInputText);
 
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
   let requestId: string | null = null;
 
   try {
@@ -831,15 +752,13 @@ export const generateComicScript = async (
       (chunk: any) => {
         if (chunk.__requestId) {
           requestId = chunk.__requestId;
-          if (epoch === abortEpoch) {
-            activeTextRequestIds.add(chunk.__requestId);
-          } else {
+          if (!scope.trackIfCurrent(epoch, chunk.__requestId)) {
             // 捕获到 requestId 时已被中止：立即杀掉请求
             safeAbort(ai, chunk.__requestId);
           }
           return;
         }
-        if (epoch !== abortEpoch) return; // 已中止：忽略后续 chunk
+        if (!scope.isCurrent(epoch)) return; // 已中止：忽略后续 chunk
         if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
           fullText += chunk.content;
           onLogUpdate('OUTPUT', fullText);
@@ -882,12 +801,12 @@ export const generateComicScript = async (
 
   } catch (error) {
     // 方案 2.5："是否用户中止"由 epoch 权威判定，不再猜错误文本（含 'abort' 的网关错误应正常上报 UI）
-    if (epoch !== abortEpoch) throw ABORT_ERROR();            // 本轮已被用户中止：按中止收敛
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();            // 本轮已被用户中止：按中止收敛
     if ((error as any)?.name === 'AbortError') throw error;   // 本地抛出的原生中止（防御性保留）
     console.error("Script generation failed:", error);
     throw error;                                              // 真实失败：原样上报 UI
   } finally {
-    if (requestId) activeTextRequestIds.delete(requestId);
+    if (requestId) scope.untrack(requestId);
   }
 };
 
@@ -926,7 +845,7 @@ export const generateCharacterReference = async (
     - Output image aspect ratio: portrait 2:3.
   `.trim(); // 方案 4.7：hint 与下方 size 1024x1536（精确 2:3）一致，不再谎报 3:4
 
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
 
   try {
     // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
@@ -947,7 +866,7 @@ export const generateCharacterReference = async (
     throw new Error("No image generated for character reference.");
   } catch (error) {
     // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
-    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Character reference generation failed:", error);
     throw error;
@@ -990,7 +909,7 @@ export const generatePropReference = async (
     - Output image aspect ratio: square 1:1.
   `.trim();
 
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
 
   try {
     // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
@@ -1011,7 +930,7 @@ export const generatePropReference = async (
     throw new Error("No image generated for prop reference.");
   } catch (error) {
     // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
-    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Prop reference generation failed:", error);
     throw error;
@@ -1064,7 +983,7 @@ export const generatePanelImage = async (
   finalPrompt = `${finalPrompt}\n\nOutput image aspect ratio: ${hasRefs ? requestedHint : canvasHint}.`;
 
   const refAttachmentIds: string[] = [];
-  const epoch = abortEpoch;
+  const epoch = scope.epoch();
 
   try {
     let result: { images: string[]; tokens: { inputTokens: number; outputTokens: number } };
@@ -1084,7 +1003,7 @@ export const generatePanelImage = async (
       // （feat/ai-image-abort-and-size）abortAllAiTasks 即可真杀在途 edit；
       // 老宿主对多余的 requestId/size/aspectRatio 字段安全忽略，自动退化为现状（D6，无显式探测）。
       const editRequestId = `techmanga-edit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-      activeTextRequestIds.add(editRequestId);
+      scope.trackIfCurrent(epoch, editRequestId);
       try {
         result = await ai.images.edit({
           model,
@@ -1096,7 +1015,7 @@ export const generatePanelImage = async (
           requestId: editRequestId,
         });
       } finally {
-        activeTextRequestIds.delete(editRequestId);
+        scope.untrack(editRequestId);
       }
     } else {
       // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
@@ -1121,7 +1040,7 @@ export const generatePanelImage = async (
   } catch (error) {
     // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）。
     // 真被 ai.abort 杀掉的 edit 请求跨 IPC 后 name 恒为 'Error'，必须靠 epoch 识别。
-    if (epoch !== abortEpoch) throw ABORT_ERROR();
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Image generation failed:", error);
     throw error;

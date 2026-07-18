@@ -6,6 +6,8 @@ import {
   TokenUsage,
   WorkflowStep,
 } from '../types';
+// dataURL ↔ 二进制：与 mulbyAiService 共用 manga-kit 的同一实现（方案 7.1，兑现第 3 章"统一抽到共享模块"的注记）
+import { dataUrlToBuffer } from '@mulby-plugins/manga-kit';
 
 // ================= 会话持久化（方案 3.1 / 3.2，遵守 D5） =================
 // 结构化数据走 storage.set('config') / storage.set('session') 两个 KV 键；
@@ -64,19 +66,6 @@ const sanitizeAttachmentId = (raw: string): string => {
 export const attIdForPage = (n: number) => `page-${n}`;
 export const attIdForChar = (name: string) => `char-${sanitizeAttachmentId(name)}`;
 export const attIdForProp = (name: string) => `prop-${sanitizeAttachmentId(name)}`;
-
-// ---- dataURL ↔ 二进制 ----
-// 与 mulbyAiService.ts 的同名 helper 同构；为遵守「第 3 章不动 mulbyAiService」的边界
-// 本地保留一份（第 4 章重构上传缓存时统一抽到共享模块）。
-const dataUrlToBuffer = (dataUrl: string): { mimeType: string; buffer: ArrayBuffer } => {
-  const match = dataUrl.match(/^data:(image\/[a-z+.-]+);base64,(.+)$/i);
-  const mimeType = match ? match[1] : 'image/png';
-  const base64 = match ? match[2] : (dataUrl.split(',')[1] || dataUrl);
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return { mimeType, buffer: bytes.buffer };
-};
 
 /** dataURL → 附件；失败仅告警，不打断生成流程 */
 export const putImageAttachment = async (id: string, dataUrl: string): Promise<boolean> => {

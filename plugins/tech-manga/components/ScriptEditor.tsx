@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem, UsageStat } from '../types';
 import { refineText } from '../services/mulbyAiService';
-import { resolveByName } from '../utils/nameMatch';
+import { resolveByName } from '@mulby-plugins/manga-kit';
 import { S } from '../strings';
 
 interface ScriptEditorProps {

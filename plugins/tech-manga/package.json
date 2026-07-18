@@ -11,12 +11,14 @@
   },
   "dependencies": {
     "@fontsource/space-grotesk": "^5.2.5",
+    "@mulby-plugins/manga-kit": "workspace:*",
     "jspdf": "^4.2.1",
     "jszip": "3.10.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@mulby-plugins/types": "workspace:*",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.19",

@@ -1,0 +1,12 @@
+{
+  "name": "@mulby-plugins/types",
+  "private": true,
+  "version": "0.1.0",
+  "description": "window.mulby 宿主 API 的单点类型分发（方案 7.2）。基线取自 feat/tech-manga 的 tech-manga 拷贝（经第 2-5 章逐 API 核对），并施加唯一语义修正：window 表面的 AiPromiseLike<T> 降级为纯 Promise<T>（contextBridge 剥离附加属性）。新插件不要再拷贝 mulby.d.ts，改为 devDependencies 依赖本包并在 tsconfig compilerOptions.types 中声明。与宿主的同步/漂移检查见 scripts/sync-mulby-types.mjs。",
+  "types": "./mulby.d.ts",
+  "exports": {
+    ".": {
+      "types": "./mulby.d.ts"
+    }
+  }
+}

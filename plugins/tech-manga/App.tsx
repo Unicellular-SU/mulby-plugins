@@ -6,33 +6,18 @@ import LogPanel from './components/LogPanel';
 import CharacterGenerator from './components/CharacterGenerator';
 import ScriptEditor from './components/ScriptEditor';
 import TokenMonitor from './components/TokenMonitor';
-import { generateComicScript, generatePanelImage, setActiveModels, abortAllAiTasks, getAbortEpoch, clearReferenceAttachmentCache } from './services/mulbyAiService';
-import { asyncPool, withRetryOnce } from './services/asyncPool';
-import { priceTextCall, priceImageCall } from './services/pricing';
+import { generateComicScript, setActiveModels, getAbortEpoch, isStale, clearReferenceAttachmentCache } from './services/mulbyAiService';
+import { useUsageTracker, INITIAL_USAGE } from './hooks/useUsageTracker';
+import { useImageQueue } from './hooks/useImageQueue';
+import { useComicWorkflow } from './hooks/useComicWorkflow';
 import { saveBinary, buildZipArchive, buildPdfDocument, buildLongImages, revealInFolder } from './services/exportService';
 import ReaderOverlay from './components/ReaderOverlay';
-import {
-  SCHEMA_VERSION,
-  PersistedSession,
-  stripSheetImages,
-  attIdForPage,
-  attIdForChar,
-  attIdForProp,
-  putImageAttachment,
-  getImageAttachment,
-  clearSessionAttachments,
-  saveSessionDebounced,
-  flushSession,
-  discardPersistedSession,
-  isRestorableSession,
-  loadConfigFromStorage,
-  loadSessionFromStorage,
-  saveConfigToStorage,
-} from './services/persistenceService';
-import { resolveByName } from './utils/nameMatch';
-import { AppConfig, ComicPageData, ComicStyle, AspectRatio, StoryMode, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse, TokenUsage, UsageStat, ImageProgress, ModelUsageBreakdown } from './types';
+import { attIdForChar, attIdForProp } from './services/persistenceService';
+import { useSessionPersistence } from './hooks/useSessionPersistence';
+import { getCharacterReference, buildCoverPage, prepareScenePages, resolvePageRefs } from './utils/promptBuilder';
+import { AppConfig, ComicPageData, ComicStyle, AspectRatio, StoryMode, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse } from './types';
 import { PRESET_CHARACTERS } from './constants';
-import { S } from './strings';
+import { S, trimErr } from './strings';
 
 // Initial Config State
 const INITIAL_CONFIG: AppConfig = {
@@ -46,56 +31,12 @@ const INITIAL_CONFIG: AppConfig = {
   totalPages: 'Short', // Default to short
 };
 
-/** 本轮运行的回调是否已过期（用户中止过 / 新一轮已开始）——方案 2.1 的运行代际检查 */
-const isStale = (runEpoch: number) => runEpoch !== getAbortEpoch();
-
-const INITIAL_USAGE: TokenUsage = {
-    totalInputTokens: 0,
-    totalOutputTokens: 0,
-    totalImages: 0,
-    estimatedCost: 0,
-    unpricedCalls: 0,
-    breakdown: {},
-    history: []
-};
-
-/** 错误摘要截断（方案 5.4）：防错误层溢出 PanelCard 浮层 */
-const trimErr = (msg: unknown): string => {
-  const s = String(msg ?? '').trim() || '未知错误';
-  return s.length > 140 ? `${s.slice(0, 140)}…` : s;
-};
-
-/**
- * 持久化会话里的 tokenUsage 是否符合 5.2 新 schema（breakdown 为 Record<modelId, 对象>、
- * history 条目带 stat.modelId）。5.2 改了 TokenUsage 形状而 session SCHEMA_VERSION 未 bump
- * （避免整个会话被丢弃），旧快照的 usage 部分单独降级重置。
- */
-const sanitizePersistedUsage = (u: unknown): TokenUsage => {
-  if (!u || typeof u !== 'object') return INITIAL_USAGE;
-  const usage = u as Partial<TokenUsage> & { breakdown?: unknown; history?: unknown };
-  const breakdownOk = !!usage.breakdown && typeof usage.breakdown === 'object'
-    && Object.values(usage.breakdown as Record<string, unknown>).every(
-      (v) => !!v && typeof v === 'object' && typeof (v as ModelUsageBreakdown).inputTokens === 'number'
-    );
-  const historyOk = Array.isArray(usage.history)
-    && usage.history.every((h) => h && typeof h === 'object' && typeof (h as { stat?: { modelId?: unknown } }).stat?.modelId === 'string');
-  if (!breakdownOk || !historyOk || typeof usage.unpricedCalls !== 'number') return INITIAL_USAGE;
-  return {
-    ...INITIAL_USAGE,
-    ...usage,
-    breakdown: usage.breakdown as Record<string, ModelUsageBreakdown>,
-    history: usage.history as TokenUsage['history'],
-  };
-};
-
 // 方案 5.7：onPluginInit 缓冲重放 / React StrictMode 双挂载去重表——
 // 必须放模块级（组件外），effect 内闭包在重挂载时重置，挡不住缓冲重放
 const lastInitNonce = { v: -1 as number | string };
 
 const App: React.FC = () => {
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
-  const [workflowStep, setWorkflowStep] = useState<WorkflowStep>(WorkflowStep.CONFIG);
-  
   // Data State
   const [comicScript, setComicScript] = useState<ComicResponse | null>(null);
   const [characterSheet, setCharacterSheet] = useState<CharacterSheetItem[]>([]);
@@ -105,40 +46,56 @@ const App: React.FC = () => {
   // Storyboarding Phase State
   const [storyboardTab, setStoryboardTab] = useState<'SCRIPT' | 'CHARACTERS'>('CHARACTERS');
 
-  const [isProcessing, setIsProcessing] = useState(false);
-  
   // Log States
   const [inputLog, setInputLog] = useState<string>('');
   const [outputLog, setOutputLog] = useState<string>('');
-  
-  const [globalError, setGlobalError] = useState<string | null>(null);
 
-  // Token Usage State
-  const [tokenUsage, setTokenUsage] = useState<TokenUsage>(INITIAL_USAGE);
+  // Token Usage State（方案 7.4 步骤 4：计价器收敛进 hooks/useUsageTracker）
+  const { tokenUsage, setTokenUsage, trackUsage } = useUsageTracker();
 
   // Mulby AI 可用性检查（替代原 AI Studio API Key 检查）
   const [mulbyReady, setMulbyReady] = useState(false);
   const [checkingMulby, setCheckingMulby] = useState(true);
 
-  // 会话持久化（方案 3.1）：启动探测到的可恢复会话与恢复进行中标记
-  const [pendingSession, setPendingSession] = useState<PersistedSession | null>(null);
-  const [isRestoring, setIsRestoring] = useState(false);
-  // config 读回完成前不允许写回，避免 INITIAL_CONFIG 默认值抢写（方案 3.2）
-  const configHydratedRef = useRef(false);
-  // 快照 effect 用于识别 workflowStep 迁移（迁移点 delay=0 立即写盘）
-  const lastSnapshotStepRef = useRef<WorkflowStep | null>(null);
-  // 已落盘的参考图（attachmentId → dataUrl），避免描述逐键编辑时重复 put 附件
-  const persistedRefImagesRef = useRef<Map<string, string>>(new Map());
-
   // 方案 5.1：批次通知一次性标志（active）+ 运行代际（epoch）双保险防噪；
-  // pagesRef 供长批次结束后读取最新页数组（闭包里的 pages 是旧值）
+  // App 持有并同时传给 useImageQueue（批次消费）与 handleCancelAll（中止关标志）
   const batchRef = useRef<{ active: boolean; epoch: number }>({ active: false, epoch: 0 });
-  const pagesRef = useRef<ComicPageData[]>([]);
-  useEffect(() => { pagesRef.current = pages; }, [pages]);
+
+  // 工作流状态机（方案 7.4 步骤 1：step/isProcessing/globalError + 统一中止入口收敛进 hook）
+  const {
+    workflowStep, setWorkflowStep,
+    isProcessing, setIsProcessing,
+    globalError, setGlobalError,
+    handleCancelAll,
+    handlePermissionError,
+  } = useComicWorkflow({ setPages, batchRef });
 
   // 方案 5.7：onPluginInit 回调闭包只建一次，经 ref 读取当前工作流位置
   const workflowStepRef = useRef(workflowStep);
   useEffect(() => { workflowStepRef.current = workflowStep; }, [workflowStep]);
+
+  // 会话持久化（方案 3.1/3.2 接线收敛进 hooks/useSessionPersistence，7.4 收尾）：
+  // 启动读回 + config 防抖写回 + 快照防抖落盘 + 三通道兜底 flush + 恢复/放弃
+  const {
+    pendingSession,
+    isRestoring,
+    persistReferenceImage,
+    beginNewSession,
+    discardSessionData,
+    handleRestoreSession,
+    handleDiscardSession,
+  } = useSessionPersistence({
+    mulbyReady,
+    config, setConfig,
+    workflowStep, setWorkflowStep,
+    storyboardTab, setStoryboardTab,
+    comicScript, setComicScript,
+    characterSheet, setCharacterSheet,
+    propSheet, setPropSheet,
+    pages, setPages,
+    tokenUsage, setTokenUsage,
+    setGlobalError,
+  });
 
   // 方案 5.6：全屏阅读模式（当前阅读页在"有图页序列"中的下标；null = 关闭）
   const [readerIndex, setReaderIndex] = useState<number | null>(null);
@@ -179,111 +136,6 @@ const App: React.FC = () => {
     setActiveModels({ textModel: config.textModel, imageModel: config.imageModel });
   }, [config.textModel, config.imageModel]);
 
-  // 启动恢复（方案 3.1 步骤 5 + 3.2 步骤 1）：并行读回 config 与 session；
-  // session 可恢复则显示「恢复上次创作」条幅（不自动跳转）；不可恢复/缺失则做清理。
-  useEffect(() => {
-    if (!mulbyReady) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [savedConfig, savedSession] = await Promise.all([
-          loadConfigFromStorage(),
-          loadSessionFromStorage(),
-        ]);
-        if (cancelled) return;
-
-        // config 读回：sourceText 属会话内容，明确不随 config 恢复
-        const cfg = savedConfig as ({ v?: number; savedAt?: number } & Partial<AppConfig>) | null;
-        if (cfg && cfg.v === SCHEMA_VERSION) {
-          const { v, savedAt, ...rest } = cfg;
-          setConfig(prev => ({ ...prev, ...rest, sourceText: prev.sourceText }));
-        }
-
-        if (isRestorableSession(savedSession)) {
-          setPendingSession(savedSession);
-        } else if (savedSession != null) {
-          // 版本不匹配 / 结构不完整：视为不可恢复，静默丢弃（宁可丢弃不可崩溃）
-          void discardPersistedSession();
-        } else {
-          // 孤儿清理：session 不存在但 page-/char-/prop- 附件残留（上次放弃中途崩溃等）
-          void clearSessionAttachments();
-        }
-      } catch (e) {
-        console.warn('[persist] startup hydrate failed:', e);
-      } finally {
-        configHydratedRef.current = true;
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [mulbyReady]);
-
-  // config 变化写回（方案 3.2）：排除 sourceText，debounce 500ms；读回完成前不写
-  useEffect(() => {
-    if (!mulbyReady || !configHydratedRef.current) return;
-    const { sourceText, ...persistable } = config;
-    const t = setTimeout(() => {
-      void saveConfigToStorage({ v: SCHEMA_VERSION, savedAt: Date.now(), ...persistable });
-    }, 500);
-    return () => clearTimeout(t);
-  }, [mulbyReady, config]);
-
-  // 会话快照（方案 3.1 步骤 2）：任一会话状态变化即防抖落盘（base64 全部剥离）。
-  // CONFIG 未开始创作不写；SCRIPT_GENERATION 是过渡态（comicScript 仍是上一轮、pages 已清空），
-  // 写入会用残缺快照覆盖最后一份完整会话，同样跳过（偏差记录见方案 1.5）。
-  useEffect(() => {
-    if (!mulbyReady) return;
-    if (workflowStep === WorkflowStep.CONFIG || workflowStep === WorkflowStep.SCRIPT_GENERATION) {
-      lastSnapshotStepRef.current = workflowStep;
-      return;
-    }
-    const stepChanged = lastSnapshotStepRef.current !== workflowStep;
-    lastSnapshotStepRef.current = workflowStep;
-    saveSessionDebounced({
-      v: SCHEMA_VERSION,
-      savedAt: Date.now(),
-      workflowStep,
-      storyboardTab,
-      sourceText: config.sourceText,
-      comicScript: stripSheetImages(comicScript), // 剥离 sheet 内 referenceImage
-      characterSheet: characterSheet.map(({ referenceImage, ...rest }) =>
-        ({ ...rest, hasReference: !!referenceImage })),
-      propSheet: propSheet.map(({ referenceImage, ...rest }) =>
-        ({ ...rest, hasReference: !!referenceImage })),
-      pages: pages.map(({ imageData, isGenerating, progress, ...rest }) =>
-        ({ ...rest, hasImage: !!imageData })),
-      tokenUsage: { ...tokenUsage, history: tokenUsage.history.slice(-200) },
-    }, stepChanged ? 0 : undefined); // 工作流迁移属关键节点：立即写盘
-  }, [mulbyReady, workflowStep, storyboardTab, comicScript,
-      characterSheet, propSheet, pages, tokenUsage, config.sourceText]);
-
-  // 兜底保存（方案 3.1 步骤 4）：onPluginOut 覆盖 Esc/outPlugin 路径；
-  // pagehide 覆盖独立窗口 X 关闭（该路径宿主不发 plugin:out）；beforeunload 覆盖 Reload。
-  useEffect(() => {
-    // 返回值按宿主实际行为是取消订阅函数；项目未装 @types/react 且 @types/node 的全局
-    // Disposable 覆盖了 mulby.d.ts 的同名别名，这里显式断言为函数类型
-    const unsub = (window as Window).mulby?.onPluginOut?.(() => { void flushSession(); }) as unknown as (() => void) | undefined;
-    const onTeardown = () => { void flushSession(); }; // fire-and-forget IPC，尽力而为
-    window.addEventListener('pagehide', onTeardown);
-    window.addEventListener('beforeunload', onTeardown);
-    return () => {
-      unsub?.();
-      window.removeEventListener('pagehide', onTeardown);
-      window.removeEventListener('beforeunload', onTeardown);
-    };
-  }, []);
-
-  // 一键中止：杀掉文本流请求、作废在途图像结果；排队任务由 asyncPool 的纪元检查自然停止（方案 4.2）
-  const handleCancelAll = useCallback(() => {
-    abortAllAiTasks();
-    batchRef.current.active = false;   // 方案 5.1：中止场景不弹批次通知
-    setIsProcessing(false);
-    setPages(prev => prev.map(p =>
-      p.isGenerating ? { ...p, isGenerating: false, progress: undefined, error: S.pageAborted } : p
-    ));
-    // 中止剧本生成的"回到配置页"语义统一收敛在此（方案 2.1 步骤 4）
-    setWorkflowStep(prev => prev === WorkflowStep.SCRIPT_GENERATION ? WorkflowStep.CONFIG : prev);
-  }, []);
-
   // 丢弃当前创作并回到配置页：Start Over 与 5.7「载入新素材」共用（确认后调用）
   const discardCurrentWork = useCallback(() => {
     handleCancelAll();      // bump epoch（连带停掉 CharacterGenerator 循环与 asyncPool 排队）
@@ -300,10 +152,8 @@ const App: React.FC = () => {
     setWorkflowStep(WorkflowStep.CONFIG);
     // 确认丢弃即同步清理持久化会话（session 键 + 附件；config 保留）——
     // 第 2 章把 Start Over 改成了「确认 + 真正重置」，保留持久化会跟"不可恢复"的确认语义冲突
-    setPendingSession(null);
-    persistedRefImagesRef.current.clear();
-    void discardPersistedSession();
-  }, [handleCancelAll]);
+    discardSessionData();
+  }, [handleCancelAll, discardSessionData]);
 
   // 方案 5.7：启动器入口——选中文本（over）/ 文件（files）payload 一键预填源素材。
   // 宿主 onPluginInit 自带缓冲重放（专治 React 晚注册）；nonce 去重表在模块级。
@@ -369,54 +219,15 @@ const App: React.FC = () => {
     discardCurrentWork();
   };
 
-  const handlePermissionError = (error: any) => {
-    const msg = error.message || JSON.stringify(error);
-    if (msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("permission") || msg.includes("Unauthorized") || msg.includes("401")) {
-       setGlobalError("模型调用被拒绝（鉴权失败）。请到 Mulby 设置 → AI 中检查所选模型的 Provider 与 API Key 配置。");
-       return true;
-    }
-    return false;
-  };
-
-  // 方案 5.2：按实际模型 id 查价表计价（图像按张、文本按 MTok）；
-  // 未收录模型 cost = null——该次调用只显 token/张数，计入 unpricedCalls，不虚构美元
-  const trackUsage = useCallback((action: string, stat: UsageStat) => {
-     const cost = stat.kind === 'image'
-        ? priceImageCall(stat.modelId, stat.imagesGenerated)
-        : priceTextCall(stat.modelId, stat.inputTokens, stat.outputTokens);
-
-     setTokenUsage(prev => {
-        const key = stat.modelId || '(未知模型)';
-        const prevB = prev.breakdown[key] || { cost: null, inputTokens: 0, outputTokens: 0, images: 0 };
-        return {
-            totalInputTokens: prev.totalInputTokens + stat.inputTokens,
-            totalOutputTokens: prev.totalOutputTokens + stat.outputTokens,
-            totalImages: prev.totalImages + stat.imagesGenerated,
-            estimatedCost: prev.estimatedCost + (cost ?? 0),
-            unpricedCalls: prev.unpricedCalls + (cost == null ? 1 : 0),
-            breakdown: {
-                ...prev.breakdown,
-                [key]: {
-                    cost: cost == null ? prevB.cost : (prevB.cost ?? 0) + cost,
-                    inputTokens: prevB.inputTokens + stat.inputTokens,
-                    outputTokens: prevB.outputTokens + stat.outputTokens,
-                    images: prevB.images + stat.imagesGenerated,
-                },
-            },
-            history: [...prev.history, {
-                action,
-                stat,
-                cost,
-                timestamp: Date.now()
-            }]
-        };
-     });
-  }, []);
-
-  // Helper to find character reference image (统一名字解析口径，方案 2.4)
-  const getCharacterReference = useCallback((name: string, sheet: CharacterSheetItem[]): string | undefined => {
-     return resolveByName(name, sheet)?.referenceImage;
-  }, []);
+  // 图像生成队列（方案 7.4 步骤 2：triggerImageGeneration / 批量调度收敛进 hooks/useImageQueue）
+  const { triggerImageGeneration, runBatch } = useImageQueue({
+    pages,
+    setPages,
+    batchRef,
+    trackUsage,
+    handlePermissionError,
+    notify,
+  });
 
   // STEP 1: Generate Script
   const handleGenerateScript = async () => {
@@ -451,9 +262,7 @@ const App: React.FC = () => {
 
       // 新剧本生成成功 = 唯一确立"新会话"的时刻（方案 3.1 步骤 6）：
       // 清旧会话附件；session 键由快照 effect 在迁移到 STORYBOARDING 时立即覆盖写入。
-      setPendingSession(null);
-      persistedRefImagesRef.current.clear();
-      void clearSessionAttachments();
+      beginNewSession();
       clearReferenceAttachmentCache(); // D3：旧剧本的参考图上传缓存与 AI 附件一并清理（方案 4.1）
 
       setComicScript(comicData);
@@ -500,15 +309,6 @@ const App: React.FC = () => {
     }
   };
 
-  // 设定图增量落盘（方案 3.1 步骤 3）：仅在拿到新图时写附件；
-  // 描述逐键编辑也会带着旧 referenceImage 走同一回调，用 ref 去重避免重复 put。
-  const persistReferenceImage = useCallback((attachmentId: string, image?: string) => {
-     if (!image) return;
-     if (persistedRefImagesRef.current.get(attachmentId) === image) return;
-     persistedRefImagesRef.current.set(attachmentId, image);
-     void putImageAttachment(attachmentId, image);
-  }, []);
-
   // Handle updates from CharacterGenerator (Assets)
   const handleCharacterUpdate = useCallback((index: number, updatedChar: CharacterSheetItem) => {
      persistReferenceImage(attIdForChar(updatedChar.name), updatedChar.referenceImage);
@@ -545,84 +345,12 @@ const App: React.FC = () => {
       if (!comicScript) return;
       
       setWorkflowStep(WorkflowStep.COMIC_GENERATION);
-      
-      // Cover Page
-      const coverPrompt = `Art Style: ${config.style} (Master Style). ${comicScript.cover_image_prompt}. Text in image must be Simplified Chinese: "${comicScript.title}". Masterpiece, Title Page.`;
+
+      // Cover Page + PRE-CALCULATE PAGES（方案 7.4 步骤 3：拼装逻辑移至 utils/promptBuilder，逐字节等价）
       const mainCharRef = getCharacterReference(config.character.name, characterSheet);
       const coverCharacters = mainCharRef ? [config.character.name] : [];
-
-      const coverPage: ComicPageData = {
-        page_number: 0,
-        layout_description: "Cover Art",
-        title: comicScript.title,
-        image_prompt: coverPrompt,
-        characters_in_scene: coverCharacters, 
-        props_in_scene: [],
-        isGenerating: true,
-        persistent_states: { characters: [], environment: { lighting: 'default', notable_changes: [] } },
-        state_changes_this_page: []
-      };
-
-      // PRE-CALCULATE PAGES
-      const preparedPages = comicScript.pages.map(s => {
-          const presentCharacters = s.characters_in_scene || [];
-          const presentProps = s.props_in_scene || [];
-          
-          const sceneRefs: string[] = [];
-          const characterContexts: string[] = [];
-
-          // 1. Resolve Characters
-          presentCharacters.forEach(name => {
-              const charItem = resolveByName(name, characterSheet);
-
-              if (charItem) {
-                  if (charItem.referenceImage) {
-                      sceneRefs.push(charItem.referenceImage);
-                  }
-                  
-                  const charState = s.persistent_states?.characters?.find(c => c.name === name || c.name === charItem.name);
-                  let stateDescription = "";
-                  if (charState?.state) {
-                      const appearance = charState.state.appearance_changes?.join(", ");
-                      const injuries = charState.state.injuries?.join(", ");
-                      const states = [appearance, injuries].filter(x => x).join(", ");
-                      if (states) stateDescription = `[ACTION STATE OVERRIDE: ${states}]`;
-                  }
-                  
-                  characterContexts.push(`Identity: ${charItem.name} (Canonical Character). ${stateDescription}`);
-              }
-          });
-
-          // 2. Resolve Props
-          presentProps.forEach(name => {
-              const propItem = resolveByName(name, propSheet);
-              if (propItem) {
-                  if (propItem.referenceImage) {
-                      sceneRefs.push(propItem.referenceImage);
-                  }
-                  characterContexts.push(`Prop: ${propItem.name} (Visual Reference Provided).`);
-              }
-          });
-
-          const finalPrompt = `
-            Art Style: ${config.style} (Master Style). ${comicScript.global_art_style} (Style Description).
-            
-            ACTIVE CHARACTERS & PROPS CONTEXT (STRICTLY use Reference Images for visual details/clothing):
-            ${characterContexts.length > 0 ? characterContexts.join("\n") : "No specific characters or props."}
-
-            SCENE DESCRIPTION:
-            ${s.image_prompt}
-          `.trim();
-
-          return {
-              pageData: {
-                  ...s,
-                  image_prompt: finalPrompt,
-                  isGenerating: true
-              } as ComicPageData,
-              resolvedRefs: sceneRefs
-          };
-      });
+      const coverPage = buildCoverPage(comicScript, config.style, coverCharacters);
+      const preparedPages = prepareScenePages(comicScript, config.style, characterSheet, propSheet);
 
       const allPages = [coverPage, ...preparedPages.map(p => p.pageData)];
       setPages(allPages);
@@ -636,146 +364,9 @@ const App: React.FC = () => {
         ...preparedPages.map((p) => ({ page: p.pageData, refs: p.resolvedRefs as string[] | undefined })),
       ];
 
-      // 方案 5.1：批次收尾通知挂在池全部 settle 之后；一次性标志 + epoch 双保险防噪
-      const batchEpoch = getAbortEpoch();
-      batchRef.current = { active: true, epoch: batchEpoch };
-      await asyncPool(jobs.map((j) => () =>
-        triggerImageGeneration(j.page, config.aspectRatio, j.refs)
-      ), 2);
-      notifyBatchSettled(batchEpoch, comicScript.title);
+      // 方案 5.1：批次收尾通知挂在池全部 settle 之后（runBatch 内一次性标志 + epoch 双保险防噪）
+      await runBatch(jobs, config.aspectRatio, comicScript.title);
   };
-
-  /**
-   * 批次收尾通知（方案 5.1）：中止不弹（handleCancelAll 关标志 + epoch 校验）、
-   * 单页重绘不弹（handleRegeneratePage 不开标志）、标志一次性消费防重复。
-   * runEpoch 为本批次启动时捕获的纪元：中止后立即续绘时，旧批次迟到的 settle
-   * 因纪元不匹配直接返回，不会误消费新批次的标志（运行代际检查，D1）。
-   * 有失败恒弹 error（带声）；全部成功仅在用户切走时弹（静音）。
-   */
-  const notifyBatchSettled = (runEpoch: number, title?: string) => {
-      const batch = batchRef.current;
-      if (!batch.active || batch.epoch !== runEpoch || isStale(runEpoch)) return;
-      batch.active = false;                       // 一次性消费
-      const latest = pagesRef.current;            // 闭包里的 pages 是旧值，走 ref 取最新
-      const done = latest.filter(p => !!p.imageData).length;
-      const failed = latest.filter(p => !!p.error).length;
-      const name = title || latest[0]?.title || S.untitled;
-      if (failed > 0) notify(S.notifyBatchFailed(name, done, failed), 'error');
-      else if (document.hidden) notify(S.notifyBatchDone(name, done));
-  };
-
-  const triggerImageGeneration = async (page: ComicPageData, ratio: string, references?: string[]) => {
-    const runEpoch = getAbortEpoch();   // 本任务的运行代际；迟到回调不得写回新一轮的 pages
-
-    // 方案 5.3：流式进度写入该页（150ms 节流；带预览的 chunk 不节流；epoch 变更即丢弃）
-    let lastProgressAt = 0;
-    const onProgress = (p: ImageProgress) => {
-        if (isStale(runEpoch)) return;
-        const now = Date.now();
-        if (!p.preview && now - lastProgressAt < 150) return;
-        lastProgressAt = now;
-        setPages(prev => prev.map(pg =>
-            pg.page_number === page.page_number && pg.isGenerating
-            ? { ...pg, progress: { ...pg.progress, ...p, preview: p.preview ?? pg.progress?.preview } }
-            : pg
-        ));
-    };
-
-    try {
-        // 方案 4.2（D4）：失败自动重试一次（AbortError/鉴权错误/纪元已变除外）；
-        // 重试的 onUsage 会记两笔，属真实计费，正确。
-        const base64Image = await withRetryOnce(() => generatePanelImage(
-            page.image_prompt,
-            ratio,
-            references,
-            (stat) => trackUsage(`Draw Page ${page.page_number}`, stat),
-            onProgress
-        ));
-        if (isStale(runEpoch)) return;
-
-        // 单页成功即增量落盘（方案 3.1 步骤 3）：fire-and-forget，失败不打断生成流程
-        void putImageAttachment(attIdForPage(page.page_number), base64Image);
-
-        setPages(prev => prev.map(p =>
-            p.page_number === page.page_number
-            ? { ...p, imageData: base64Image, isGenerating: false, error: undefined, progress: undefined }
-            : p
-        ));
-    } catch (error: any) {
-        if (isStale(runEpoch)) return;  // 中止/新一轮开始后迟到的错误：丢弃（页面状态已由 handleCancelAll 统一标记）
-        if (error?.name === 'AbortError') {
-           setPages(prev => prev.map(p =>
-               p.page_number === page.page_number
-               ? { ...p, isGenerating: false, error: S.pageAborted, progress: undefined }
-               : p
-           ));
-           return;
-        }
-        if (handlePermissionError(error)) {
-           setPages(prev => prev.map(p =>
-               p.page_number === page.page_number
-               ? { ...p, isGenerating: false, progress: undefined }
-               : p
-           ));
-           return;
-        }
-        // 方案 5.4：透出真实原因摘要与行动建议，不再吞成固定英文文案
-        setPages(prev => prev.map(p =>
-            p.page_number === page.page_number
-            ? { ...p, isGenerating: false, error: S.pageDrawFailed(trimErr(error?.message)), progress: undefined }
-            : p
-        ));
-    }
-  };
-
-  // 方案 4.4：从 handleRegeneratePage 抽出的纯解析函数——按名字解析参考图 + 重建 context 块，
-  // 与原实现逐字一致；handleRegeneratePage 与批量续绘共用，避免双份漂移。
-  const resolvePageRefs = useCallback((
-      prompt: string,
-      characterNames: string[],
-      propNames: string[]
-  ): { refs: string[]; finalPrompt: string } => {
-      const sceneRefs: string[] = [];
-      const characterContexts: string[] = [];
-
-      // Resolve Characters
-      characterNames.forEach(name => {
-          const charItem = resolveByName(name, characterSheet);
-          if (charItem) {
-              if (charItem.referenceImage) {
-                  sceneRefs.push(charItem.referenceImage);
-              }
-              characterContexts.push(`Identity: ${charItem.name} (Canonical Character).`);
-          }
-      });
-
-      // Resolve Props
-      propNames.forEach(name => {
-          const propItem = resolveByName(name, propSheet);
-          if (propItem) {
-              if (propItem.referenceImage) {
-                  sceneRefs.push(propItem.referenceImage);
-              }
-              characterContexts.push(`Prop: ${propItem.name} (Visual Reference Provided).`);
-          }
-      });
-
-      let finalPrompt = prompt;
-      if (prompt.includes("ACTIVE CHARACTERS & PROPS CONTEXT") || prompt.includes("ACTIVE CHARACTERS CONTEXT")) {
-          // Replace legacy context block if present, or new block
-          const contextStart = prompt.indexOf("ACTIVE CHARACTERS");
-          const contextEnd = prompt.indexOf("SCENE DESCRIPTION");
-          if (contextStart > -1 && contextEnd > -1) {
-              const newContextBlock = `ACTIVE CHARACTERS & PROPS CONTEXT (STRICTLY use Reference Images for visual details/clothing):\n${characterContexts.length > 0 ? characterContexts.join("\n") : "No specific characters or props."}\n\n`;
-              finalPrompt = prompt.substring(0, contextStart) + newContextBlock + prompt.substring(contextEnd);
-          }
-      } else {
-         // Fallback if structure is messed up: append context at top if it doesn't exist?
-         // For now, if user edited it heavily, we trust their text, but update Refs.
-      }
-
-      return { refs: sceneRefs, finalPrompt };
-  }, [characterSheet, propSheet]);
 
   const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => {
       const page = pages.find(p => p.page_number === pageNumber);
@@ -785,7 +376,7 @@ const App: React.FC = () => {
       const activePropNames = newPropsInScene || page.props_in_scene || [];
 
       const { refs: sceneRefs, finalPrompt: finalPromptToUse } =
-          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames);
+          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames, characterSheet, propSheet);
 
       setPages(prev => prev.map(p =>
         p.page_number === pageNumber
@@ -806,7 +397,7 @@ const App: React.FC = () => {
           sceneRefs
       );
 
-  }, [config.aspectRatio, pages, resolvePageRefs, triggerImageGeneration]);
+  }, [config.aspectRatio, pages, characterSheet, propSheet, triggerImageGeneration]);
 
   // 方案 4.4：续绘全部未完成页（失败/中止页批量重发，走并发池，自然获得重试与中止响应）。
   // 与第 3 章恢复路径衔接：恢复到 COMIC_GENERATION 后未完成页带 error 态，可在此一键续绘。
@@ -820,7 +411,7 @@ const App: React.FC = () => {
       // 页面 prompt 保持现状不重建——首轮生成已含 context 块，封面 prompt 无标记也不受影响。
       const prepared = targets.map(p => ({
           page: p,
-          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || []).refs,
+          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || [], characterSheet, propSheet).refs,
       }));
 
       setPages(prev => prev.map(p =>
@@ -830,12 +421,7 @@ const App: React.FC = () => {
       ));
 
       // 方案 5.1：续绘同为批量操作，收尾通知同批次口径（单页重绘不在此列）
-      const batchEpoch = getAbortEpoch();
-      batchRef.current = { active: true, epoch: batchEpoch };
-      await asyncPool(prepared.map(t => () =>
-          triggerImageGeneration(t.page, config.aspectRatio, t.refs)
-      ), 2);
-      notifyBatchSettled(batchEpoch, comicScript?.title);
+      await runBatch(prepared, config.aspectRatio, comicScript?.title);
   };
 
   // \u65b9\u6848 5.5/5.6\uff1a\u5bfc\u51fa\u7edf\u4e00\u8d70\u539f\u751f\u4fdd\u5b58\u6d41\uff08saveBinary\uff09\uff0c\u683c\u5f0f\u4e09\u9009\u4e00\uff1aZIP \u6563\u56fe / PDF / \u7ad6\u5411\u957f\u56fe\u3002
@@ -882,87 +468,6 @@ const App: React.FC = () => {
     } finally {
         setIsExporting(false);
     }
-  };
-
-  // 恢复上次创作（方案 3.1 步骤 5.3/5.4）：按 hasReference/hasImage 标记读回附件并转 dataURL，
-  // 同时把设定图重新注入 comicScript，维持 characterSheet ↔ comicScript 双向同步不变量。
-  const handleRestoreSession = async () => {
-    const saved: PersistedSession | null = pendingSession;
-    if (!saved || isRestoring) return;
-    setIsRestoring(true);
-    try {
-      const restoredChars: CharacterSheetItem[] = await Promise.all(
-        saved.characterSheet.map(async ({ hasReference, ...rest }) => {
-          if (!hasReference) return { ...rest };
-          const img = await getImageAttachment(attIdForChar(rest.name));
-          return img ? { ...rest, referenceImage: img } : { ...rest };
-        })
-      );
-      const restoredProps: PropSheetItem[] = await Promise.all(
-        saved.propSheet.map(async ({ hasReference, ...rest }) => {
-          if (!hasReference) return { ...rest };
-          const img = await getImageAttachment(attIdForProp(rest.name));
-          return img ? { ...rest, referenceImage: img } : { ...rest };
-        })
-      );
-      const restoredPages: ComicPageData[] = await Promise.all(
-        saved.pages.map(async ({ hasImage, ...rest }) => {
-          const base: ComicPageData = { ...rest, isGenerating: false }; // 上次中断的未完成页保留其 error 态
-          if (!hasImage) return base;
-          const img = await getImageAttachment(attIdForPage(base.page_number));
-          return img
-            ? { ...base, imageData: img, error: undefined }
-            : { ...base, error: '图像附件丢失，可单独重绘' }; // 标记有图但附件读不回（命中失效）
-        })
-      );
-
-      // 设定图重新注入 comicScript.character_sheet / prop_sheet（双向同步不变量）
-      let script = saved.comicScript;
-      if (script) {
-        script = {
-          ...script,
-          character_sheet: (script.character_sheet || []).map(item => {
-            const m = restoredChars.find(c => c.name === item.name);
-            return m?.referenceImage ? { ...item, referenceImage: m.referenceImage } : item;
-          }),
-          prop_sheet: (script.prop_sheet || []).map(item => {
-            const m = restoredProps.find(p => p.name === item.name);
-            return m?.referenceImage ? { ...item, referenceImage: m.referenceImage } : item;
-          }),
-        };
-      }
-
-      // 已在盘上的图登记进去重表，避免恢复后的编辑回调重复 put 附件
-      persistedRefImagesRef.current.clear();
-      restoredChars.forEach(c => { if (c.referenceImage) persistedRefImagesRef.current.set(attIdForChar(c.name), c.referenceImage); });
-      restoredProps.forEach(p => { if (p.referenceImage) persistedRefImagesRef.current.set(attIdForProp(p.name), p.referenceImage); });
-
-      setConfig(prev => ({ ...prev, sourceText: saved.sourceText })); // 源文本随会话回填
-      setComicScript(script);
-      setCharacterSheet(restoredChars);
-      setPropSheet(restoredProps);
-      setPages(restoredPages);
-      // 方案 5.2：TokenUsage 形状已改（Record breakdown + modelId history），
-      // 旧快照的 usage 部分单独校验降级，不牵连整个会话的可恢复性
-      setTokenUsage(sanitizePersistedUsage(saved.tokenUsage));
-      setStoryboardTab(saved.storyboardTab === 'SCRIPT' ? 'SCRIPT' : 'CHARACTERS');
-      setGlobalError(null);
-      setWorkflowStep(saved.workflowStep);
-      setPendingSession(null);
-    } catch (e: any) {
-      console.warn('[persist] restore failed:', e);
-      setGlobalError('恢复上次创作失败，可重试或选择放弃。');
-    } finally {
-      setIsRestoring(false);
-    }
-  };
-
-  // 放弃恢复（方案 3.1 步骤 5.5）：清 session 键与全部会话附件；config 保留
-  const handleDiscardSession = () => {
-    if (isRestoring) return;
-    setPendingSession(null);
-    persistedRefImagesRef.current.clear();
-    void discardPersistedSession();
   };
 
   // --- RENDERING ---

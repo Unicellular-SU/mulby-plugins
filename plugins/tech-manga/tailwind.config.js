@@ -1,8 +1,4 @@
+import { createMulbyTailwindConfig } from '@mulby-plugins/manga-kit/configs/tailwind';
+
 /** @type {import('tailwindcss').Config} */
-export default {
-  content: ['./index.html', './App.tsx', './components/**/*.tsx'],
-  theme: {
-    extend: {}
-  },
-  plugins: []
-};
+export default createMulbyTailwindConfig();

@@ -89,6 +89,27 @@ function extractPluginNames(files) {
   return [...names];
 }
 
+/**
+ * workspace 公共包（packages/，如 @mulby-plugins/manga-kit）有变更时，
+ * 将声明了 @mulby-plugins/* 依赖的插件全部视为 changed（方案 7.1 步骤 5：
+ * 按依赖精准标记，而非把 packages/ 加进 INFRA_PATTERNS 触发全量重建）。
+ */
+function pluginsDependingOnWorkspacePackages() {
+  const names = [];
+  for (const name of getAllPlugins()) {
+    try {
+      const pkg = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'plugins', name, 'package.json'), 'utf-8')
+      );
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (Object.keys(deps).some((d) => d.startsWith('@mulby-plugins/'))) names.push(name);
+    } catch {
+      /* ignore unreadable package.json */
+    }
+  }
+  return names;
+}
+
 function hasInfraChanges(files) {
   return files.some((f) => INFRA_PATTERNS.some((p) => p.test(f)));
 }
@@ -135,6 +156,11 @@ function main() {
 
   const infraChanged = hasInfraChanges(files);
   const changedPlugins = extractPluginNames(files);
+  if (files.some((f) => /^packages\//.test(f))) {
+    for (const name of pluginsDependingOnWorkspacePackages()) {
+      if (!changedPlugins.includes(name)) changedPlugins.push(name);
+    }
+  }
 
   if (infraChanged && opts.allOnInfra) {
     const allPlugins = getAllPlugins();

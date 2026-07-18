@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { ComicPageData } from '../types';
-import { sniffImageMime, mimeToExt } from '../utils/imageMime';
+import { sniffImageMime, mimeToExt } from '@mulby-plugins/manga-kit';
 
 // ================= 导出与原生保存流（方案 5.5 / 5.6） =================
 // 保存统一走 dialog.showSaveDialog + filesystem.writeFile（可拿到落盘路径，

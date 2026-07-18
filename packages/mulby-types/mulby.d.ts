@@ -1646,7 +1646,13 @@ type AiImageGenerateProgressChunk = {
   received?: number
   total?: number
 }
-type AiPromiseLike<T> = Promise<T> & { abort: () => void }
+/**
+ * 注意：宿主自身代码（preload/主进程侧）中此类型带 abort()（见宿主 src/shared/types/ai.ts 的
+ * AiPromiseLike 与 preload/apis/ai.ts 的 toAbortablePromise 构造），但 Electron contextBridge
+ * 会剥离 Promise 上的附加属性（宿主 docs/apis/ai.md），插件 UI 侧 abort 不可用。
+ * 中止请使用 ai.abort(requestId)（requestId 经流式 chunk 的 __requestId 获取）。
+ */
+type AiPromiseLike<T> = Promise<T>
 
 interface MulbyAi {
   call(option: AiOption, onChunk?: (chunk: AiMessage) => void): AiPromiseLike<AiMessage>
