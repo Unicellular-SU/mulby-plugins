@@ -339,9 +339,13 @@ function Inner() {
           commit()
           return id
         }
+        // 取第一个未被占用的锚定色（删过人台后按数量取模会撞车——两个人台同色=角色绑定必乱）
+        const nextMannequinColor = () => {
+          const used = new Set(subjects.filter((s) => s.kind === '人台').map((s) => s.colorName))
+          return MANNEQUIN_COLORS.find((c) => !used.has(c.name)) || MANNEQUIN_COLORS[used.size % MANNEQUIN_COLORS.length]
+        }
         const addMannequin = () => {
-          // 按现有人台数分配锚定色（人台1=红衣、人台2=蓝衣…）
-          const c = MANNEQUIN_COLORS[subjects.filter((s) => s.kind === '人台').length % MANNEQUIN_COLORS.length]
+          const c = nextMannequinColor()
           const g = makeMannequin(c.hex)
           g.position.set((subjects.length % 3) * 0.9 - 0.9, 0, 0)
           addSubject(g, '人台', undefined, c.name)
@@ -476,6 +480,26 @@ function Inner() {
           if (!sub) return
           const clone = sub.obj.clone(true)
           clone.position.x += 0.7
+          if (sub.kind === '人台') {
+            // 克隆必须换新锚定色：clone 的材质是共享引用，先按 旧材质→新材质 映射深拷贝，再把身体材质（非深色面部）染成新色
+            const c = nextMannequinColor()
+            const matMap = new Map<any, any>()
+            clone.traverse((m: any) => {
+              if (!m.material) return
+              const ms = Array.isArray(m.material) ? m.material : [m.material]
+              const ns = ms.map((mm: any) => {
+                if (!matMap.has(mm)) {
+                  const cl = mm.clone()
+                  if (cl.color && cl.color.getHex() !== 0x2a2d33) cl.color.setHex(c.hex)
+                  matMap.set(mm, cl)
+                }
+                return matMap.get(mm)
+              })
+              m.material = Array.isArray(m.material) ? ns : ns[0]
+            })
+            addSubject(clone, sub.kind, sub.desc, c.name)
+            return
+          }
           addSubject(clone, sub.kind, sub.desc)
         }
         const toggleVisById = (id: string) => {
@@ -684,14 +708,16 @@ function Inner() {
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
         const stagePreset = (key: string) => {
           if (key === '双人对话') {
-            const a = makeMannequin(MANNEQUIN_COLORS[0].hex)
+            const ca = nextMannequinColor()
+            const a = makeMannequin(ca.hex)
             a.position.set(-0.6, 0, 0)
             a.rotation.y = Math.PI / 2
-            addSubject(a, '人台', undefined, MANNEQUIN_COLORS[0].name)
-            const b = makeMannequin(MANNEQUIN_COLORS[1].hex)
+            addSubject(a, '人台', undefined, ca.name)
+            const cb = nextMannequinColor()
+            const b = makeMannequin(cb.hex)
             b.position.set(0.6, 0, 0)
             b.rotation.y = -Math.PI / 2
-            addSubject(b, '人台', undefined, MANNEQUIN_COLORS[1].name)
+            addSubject(b, '人台', undefined, cb.name)
           } else if (key === '产品展示') {
             const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
             m.position.set(0, 0.25, 0)
@@ -705,10 +731,8 @@ function Inner() {
         // 重建程序生成的人台/道具（导入模型走 buildModelFromState）
         const buildFromState = (st: any) => {
           if (st.kind !== '人台' && st.kind !== '道具') return
-          // 旧工程的无色人台：按现有人台数补分配色（颜色锚定才有基础），下次保存即固化
-          const assigned = st.kind === '人台' && !st.colorName
-            ? MANNEQUIN_COLORS[subjects.filter((s) => s.kind === '人台').length % MANNEQUIN_COLORS.length]
-            : null
+          // 旧工程的无色人台：补第一个未占用的锚定色（颜色锚定才有基础），下次保存即固化
+          const assigned = st.kind === '人台' && !st.colorName ? nextMannequinColor() : null
           // 旧标签（红衣…）迁移为新名（红标…），同序号同色
           const legacyIdx = st.colorName ? LEGACY_COLOR_NAMES.indexOf(st.colorName) : -1
           const colorName = legacyIdx >= 0 ? MANNEQUIN_COLORS[legacyIdx].name : st.colorName || assigned?.name
@@ -1192,6 +1216,24 @@ function Inner() {
     api.current.importFile?.(await f.arrayBuffer(), f.name)
   }
 
+  // 组装完整提示词（生成与「复制提示词」诊断共用同一出口，保证你看到的就是模型收到的）
+  const buildFullPrompt = () => {
+    const proj = useGraph.getState().project
+    const useControl = !!proj.defaultControlModel
+    const usePose = useControl && ctrlType === 'pose'
+    const note = usePose
+      ? '【输入为 OpenPose 骨架控制图：请严格按骨架表达的人物姿态与站位渲染为成片画面。】'
+      : useControl
+        ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
+        : '【以上为 3D 导演台的机位/构图参考（彩色人台=角色站位/姿态/朝向，颜色只是区分角色的标记），请据此构图与镜头渲染成片。人台颜色仅为站位标记，严禁用于角色的服装或外观配色；忽略人台材质。】'
+    // 构图指令前置（导演台的核心诉求就是构图）+ cookbook preserve-list：保留项英文写死（模型服从度更好）
+    const preserve =
+      'Preserve exactly: camera angle, framing, character positions, facing directions, character count and poses. ' +
+      'Change only: materials, textures, lighting, environment and style. Do not re-frame, zoom, crop or move any subject. ' +
+      'The mannequin colors are position markers only; never use them for clothing, skin or any appearance color.'
+    return { useControl, usePose, full: `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}` }
+  }
+
   const doGenerate = async (placeIndex: number): Promise<string | null> => {
     const proj = useGraph.getState().project
     const controlModel = proj.defaultControlModel
@@ -1202,8 +1244,7 @@ function Inner() {
     }
     try {
       const ai = window.mulby.ai
-      const useControl = !!controlModel
-      const usePose = useControl && ctrlType === 'pose'
+      const { useControl, usePose, full } = buildFullPrompt()
       if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
         toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
         return null
@@ -1214,17 +1255,6 @@ function Inner() {
       const buf = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
-      const note = usePose
-        ? '【输入为 OpenPose 骨架控制图：请严格按骨架表达的人物姿态与站位渲染为成片画面。】'
-        : useControl
-          ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
-          : '【以上为 3D 导演台的机位/构图参考（彩色人台=角色站位/姿态/朝向，颜色只是区分角色的标记），请据此构图与镜头渲染成片。人台颜色仅为站位标记，严禁用于角色的服装或外观配色；忽略人台材质。】'
-      // 构图指令前置（导演台的核心诉求就是构图）+ cookbook preserve-list：保留项英文写死（模型服从度更好）
-      const preserve =
-        'Preserve exactly: camera angle, framing, character positions, facing directions, character count and poses. ' +
-        'Change only: materials, textures, lighting, environment and style. Do not re-frame, zoom, crop or move any subject. ' +
-        'The mannequin colors are position markers only; never use them for clothing, skin or any appearance color.'
-      const full = `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
@@ -1604,6 +1634,16 @@ function Inner() {
           placeholder="场景/角色描述（如：中式书房，一位穿长衫的老者站在书桌前…）"
           className={`flex-1 h-16 resize-none ${panelCls} text-sm px-3 py-2 outline-none placeholder:text-white/30 focus:border-amber-300/40 transition-colors`}
         />
+        <button
+          onClick={() => {
+            const { full } = buildFullPrompt()
+            void navigator.clipboard.writeText(full).then(() => toast('已复制完整提示词（即模型实际收到的文本）', 'success'), () => toast('复制失败', 'error'))
+          }}
+          className="h-16 px-3 rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center gap-1 whitespace-nowrap transition-colors"
+          title="复制模型实际收到的完整提示词（角色绑定对不对，一看便知）"
+        >
+          <Copy size={14} /> 提示词
+        </button>
         <button onClick={() => void run()} disabled={busy} className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
           {busy ? <><Loader2 size={16} className="animate-spin" /> 生成中…</> : <><Film size={16} /> 生成</>}
         </button>
