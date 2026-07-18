@@ -1304,11 +1304,13 @@ function Inner() {
       const vp = g.getActiveBoard().viewport
       const wx = (-vp.x + 360) / vp.zoom
       const wy = (-vp.y + 320) / vp.zoom
+      // 两张卡并排共 600×320，避开现有节点（不能压在已有卡片上）
+      const spot = findFreeSpot(g.getActiveBoard(), 600, 320, wx + 300, wy)
       const refTitle = usePose ? '导演台·骨架控制图' : useControl ? '导演台·深度控制图' : '导演台·参考图'
-      const refId = g.addCard('image', { x: wx, y: wy }, { title: refTitle, status: 'done', assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
+      const refId = g.addCard('image', { x: spot.x - 160, y: spot.y }, { title: refTitle, status: 'done', assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
       const genId = g.addCard(
         'image',
-        { x: wx + 340, y: wy },
+        { x: spot.x + 160, y: spot.y },
         { title: '导演台成片', status: 'idle', modelId: model, prompt: full, params: aspect !== '视口' ? { aspect } : {} },
         boardId
       )
@@ -1359,6 +1361,30 @@ function Inner() {
   const applyShot = (sh: { cam: any }) => { api.current.applyCam?.(sh.cam); setFocal(Math.round(sh.cam?.focal || 35)) }
   const delShot = (id: string) => setShots((s) => s.filter((x) => x.id !== id))
 
+  // 避障落位：从首选点向右/向下扫描，找一块 w×h（中心坐标，含边距）不与现有卡片重叠的空位；
+  // 视口内全满则放到最低卡片下方
+  const findFreeSpot = (
+    board: { cards: Record<string, { x: number; y: number; w: number; h: number }> },
+    w: number,
+    h: number,
+    startX: number,
+    startY: number
+  ): { x: number; y: number } => {
+    const M = 24
+    const cards = Object.values(board.cards)
+    const hit = (cx: number, cy: number) =>
+      cards.some((c) => Math.abs(cx - (c.x + c.w / 2)) < (w + c.w) / 2 + M && Math.abs(cy - (c.y + c.h / 2)) < (h + c.h) / 2 + M)
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const cx = startX + col * 120
+        const cy = startY + row * 120
+        if (!hit(cx, cy)) return { x: cx, y: cy }
+      }
+    }
+    const maxY = cards.reduce((m, c) => Math.max(m, c.y + c.h), startY)
+    return { x: startX, y: maxY + M + h / 2 }
+  }
+
   // 分镜导出：机位表 → 画布分镜卡（4 列网格）。有 take 的直接带成片(status=done)，
   // 没出片的带装配好的提示词(status=idle) 可「生成选中」；meta.shot 兼容分镜生态（shotToVideo 等）。
   const exportStoryboard = () => {
@@ -1371,13 +1397,18 @@ function Inner() {
     const cols = 4
     const gapX = 40
     const gapY = 48
-    const baseX = (-vp.x + 360) / vp.zoom
-    const baseY = (-vp.y + 200) / vp.zoom
+    const rows = Math.ceil(shots.length / cols)
+    const totalW = cols * W + (cols - 1) * gapX
+    const totalH = rows * H + (rows - 1) * gapY
+    // 整个网格找空位，避免压到现有节点
+    const spot = findFreeSpot(g.getActiveBoard(), totalW, totalH, (-vp.x + 360) / vp.zoom + totalW / 2, (-vp.y + 200) / vp.zoom + totalH / 2)
+    const left = spot.x - totalW / 2
+    const top = spot.y - totalH / 2
     const ids: string[] = []
     shots.forEach((s, i) => {
       const col = i % cols
       const row = Math.floor(i / cols)
-      const center = { x: baseX + col * (W + gapX) + W / 2, y: baseY + row * (H + gapY) + H / 2 }
+      const center = { x: left + col * (W + gapX) + W / 2, y: top + row * (H + gapY) + H / 2 }
       const frag = (api.current.fragmentFor?.(s.cam) as string) || ''
       const full = `${prompt.trim()}\n\n${frag}`.trim()
       const id = g.addCard('image', center, {
