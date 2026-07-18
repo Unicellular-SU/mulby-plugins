@@ -41,7 +41,7 @@ export function LeftDock() {
               e.dataTransfer.effectAllowed = 'copy'
             }}
             onClick={() => addAtViewCenter(it.kind)}
-            data-tip={`点击或拖到画布添加${it.label}卡片`}
+            data-tip={`${it.label}卡片`}
             className="w-11 h-11 grid place-items-center gap-0.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 group cursor-grab active:cursor-grabbing"
           >
             <Icon size={18} style={{ color: KIND_ACCENT[it.kind] }} className="group-hover:scale-110 transition-transform" />
