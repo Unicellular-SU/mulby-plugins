@@ -285,6 +285,14 @@ function Inner() {
           chest.add(mesh(new THREE.CapsuleGeometry(0.17, 0.4, 4, 10), 0.22))
           const head = joint('头', 0, 0.5, 0); chest.add(head)
           head.add(mesh(new THREE.SphereGeometry(0.13, 18, 16), 0.13))
+          // 面部指示（深色鼻 + 双眼）：人台前/后一眼可辨，摆朝向不再靠猜
+          const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 })
+          const nose = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.06, 8), faceMat)
+          nose.rotation.x = Math.PI / 2 // 锥尖朝 +Z（人台正面）
+          nose.position.set(0, 0.12, 0.13)
+          head.add(nose)
+          const eye = (x: number) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), faceMat); e.position.set(x, 0.16, 0.105); head.add(e) }
+          eye(-0.05); eye(0.05)
           const arm = (side: 'L' | 'R') => {
             const sh = joint(side === 'L' ? '左肩' : '右肩', side === 'L' ? -0.22 : 0.22, 0.42, 0); chest.add(sh)
             sh.add(mesh(new THREE.CapsuleGeometry(0.055, 0.26, 4, 8), -0.17))
