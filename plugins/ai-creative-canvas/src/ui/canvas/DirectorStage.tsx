@@ -702,9 +702,13 @@ function Inner() {
         // 重建程序生成的人台/道具（导入模型走 buildModelFromState）
         const buildFromState = (st: any) => {
           if (st.kind !== '人台' && st.kind !== '道具') return
+          // 旧工程的无色人台：按现有人台数补分配色（颜色锚定才有基础），下次保存即固化
+          const assigned = st.kind === '人台' && !st.colorName
+            ? MANNEQUIN_COLORS[subjects.filter((s) => s.kind === '人台').length % MANNEQUIN_COLORS.length]
+            : null
           const obj: any = st.kind === '道具'
             ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-            : makeMannequin(MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex ?? 0xc7ccd6)
+            : makeMannequin(assigned?.hex ?? MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex ?? 0xc7ccd6)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
@@ -713,7 +717,7 @@ function Inner() {
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
           scene.add(obj)
-          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName: st.colorName })
+          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName: st.colorName || assigned?.name })
         }
         const serializeSceneOnly = () => ({
           // 人台/道具 + 已存字节的导入模型；导入模型为空 assetId（存储失败）则不持久化
@@ -893,12 +897,16 @@ function Inner() {
           const people = subjects.filter((s) => s.kind === '人台' && s.obj.visible !== false)
           const v = new THREE.Vector3()
           const [kx, ky] = cropScale() // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
+          // 水平 + 垂直方位（只写水平会让竖排站位无法区分，角色绑定必错）
           const whereOf = (s: Subj): string => {
             s.obj.getWorldPosition(v)
             v.project(C)
             v.x *= kx
-            if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3) return ''
-            return v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+            v.y *= ky
+            if (!isFinite(v.x) || v.z > 1 || Math.abs(v.x) > 1.3 || Math.abs(v.y) > 1.3) return ''
+            const h = v.x < -0.25 ? '居左' : v.x > 0.25 ? '居右' : '居中'
+            const vt = v.y > 0.25 ? '偏上' : v.y < -0.25 ? '偏下' : ''
+            return h + vt
           }
           // 人物在出图画幅中的纵向占比（脚底→头顶投影差），让模型知道人物该画多大
           const heightFracOf = (s: Subj): number => {
@@ -909,6 +917,15 @@ function Inner() {
             const ty = v.project(C).y
             if (!isFinite(ty)) return 0
             return (Math.abs(ty - by) / 2) * ky
+          }
+          // 纵深顺序：按角色到相机距离排名（近→远），多角色时给 最前/中间/最后 标记
+          const dists = people.map((s) => s.obj.getWorldPosition(new THREE.Vector3()).distanceTo(C.position))
+          const nearOrder = dists.map((_, i) => i).sort((a, b) => dists[a] - dists[b])
+          const depthOf = (i: number): string => {
+            if (people.length < 2) return ''
+            const rank = nearOrder.indexOf(i)
+            if (people.length === 2) return rank === 0 ? '前景' : '背景'
+            return rank === 0 ? '最前' : rank === people.length - 1 ? '最后' : '中间'
           }
           // 角色相对镜头的朝向：人台 forward=+Z，与「角色→相机」的水平夹角判定（面朝/背对/侧向）
           const facingOf = (s: Subj): string => {
@@ -933,7 +950,9 @@ function Inner() {
               const frac = heightFracOf(s)
               const sizeTxt = frac > 0.01 ? `，约占画面高度 ${Math.round(frac * 100)}%` : ''
               const facing = facingOf(s)
-              return `${nm}${where}${sizeTxt}${facing ? `，${facing}` : ''}${pose ? `(${pose})` : ''}`
+              // 纵深 + 悬空 + 朝向：竖排/空中站位也能被模型唯一绑定
+              const extras = [depthOf(i), s.obj.getWorldPosition(new THREE.Vector3()).y > 0.3 ? '悬空' : '', facing].filter(Boolean).join('，')
+              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${pose ? `(${pose})` : ''}`
             })
             .filter(Boolean)
             .join('，')
