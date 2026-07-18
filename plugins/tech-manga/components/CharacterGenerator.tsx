@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { CharacterSheetItem, PropSheetItem } from '../types';
-import { generateCharacterReference, generatePropReference } from '../services/mulbyAiService';
+import { generateCharacterReference, generatePropReference, getAbortEpoch } from '../services/mulbyAiService';
 
 interface CharacterGeneratorProps {
   characters: CharacterSheetItem[];
@@ -46,26 +46,31 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
         if (initializedRef.current) return;
         initializedRef.current = true;
 
+        // 捕获当前中止纪元；用户点击「中止全部任务」后纪元变化，队列停止推进
+        const epoch = getAbortEpoch();
+
         // 1. Characters
         const charIndices = charactersRef.current
             .map((c, i) => (!c.referenceImage ? i : -1))
             .filter(i => i !== -1);
 
         for (const idx of charIndices) {
+             if (getAbortEpoch() !== epoch) return;
              const currentChar = charactersRef.current[idx];
              if (currentChar && !currentChar.referenceImage) {
                  await handleGenerateCharacter(idx, currentChar);
                  await new Promise(r => setTimeout(r, 800));
              }
         }
-        
+
         // 2. Props (Only if props exist)
         if (propsRef.current.length > 0 && onUpdateProp) {
             const propIndices = propsRef.current
                 .map((p, i) => (!p.referenceImage ? i : -1))
                 .filter(i => i !== -1);
-            
+
             for (const idx of propIndices) {
+                if (getAbortEpoch() !== epoch) return;
                 const currentProp = propsRef.current[idx];
                 if (currentProp && !currentProp.referenceImage) {
                     await handleGenerateProp(idx, currentProp);
@@ -91,7 +96,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
       const imageData = await generateCharacterReference(char.name, char.description, style, onUsageCallback);
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
-      setErrorStates(prev => ({ ...prev, [key]: err.message || "Generation failed" }));
+      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
     } finally {
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
     }
@@ -108,7 +113,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
       const imageData = await generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback);
       onUpdateProp(index, { ...prop, referenceImage: imageData });
     } catch (err: any) {
-      setErrorStates(prev => ({ ...prev, [key]: err.message || "Generation failed" }));
+      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
     } finally {
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
     }

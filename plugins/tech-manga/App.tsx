@@ -1,12 +1,12 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ConfigPanel from './components/ConfigPanel';
 import PanelCard from './components/PanelCard';
 import LogPanel from './components/LogPanel';
 import CharacterGenerator from './components/CharacterGenerator';
 import ScriptEditor from './components/ScriptEditor';
 import TokenMonitor from './components/TokenMonitor';
-import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels } from './services/mulbyAiService';
+import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels, abortAllAiTasks } from './services/mulbyAiService';
 import { AppConfig, ComicPageData, ComicStyle, AspectRatio, StoryMode, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse, TokenUsage, UsageStat } from './types';
 import { PRESET_CHARACTERS } from './constants';
 import JSZip from 'jszip';
@@ -87,6 +87,20 @@ const App: React.FC = () => {
   useEffect(() => {
     setActiveModels({ textModel: config.textModel, imageModel: config.imageModel });
   }, [config.textModel, config.imageModel]);
+
+  // 排队中的逐页生成定时器（中止时需要清掉）
+  const pendingTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // 一键中止：杀掉文本流请求、作废在途图像结果、清空排队任务
+  const handleCancelAll = useCallback(() => {
+    abortAllAiTasks();
+    pendingTimersRef.current.forEach(clearTimeout);
+    pendingTimersRef.current = [];
+    setIsProcessing(false);
+    setPages(prev => prev.map(p =>
+      p.isGenerating ? { ...p, isGenerating: false, error: "已被用户中止（可单独重绘）" } : p
+    ));
+  }, []);
 
   const handlePermissionError = (error: any) => {
     const msg = error.message || JSON.stringify(error);
@@ -192,7 +206,10 @@ const App: React.FC = () => {
       setStoryboardTab('CHARACTERS'); 
 
     } catch (error: any) {
-      if (!handlePermissionError(error)) {
+      if (error?.name === 'AbortError') {
+         // 用户主动中止：静默回到配置页
+         setWorkflowStep(WorkflowStep.CONFIG);
+      } else if (!handlePermissionError(error)) {
          setGlobalError(error.message || "Failed to generate comic script. Please try again.");
          setWorkflowStep(WorkflowStep.CONFIG);
       }
@@ -341,12 +358,15 @@ const App: React.FC = () => {
       setPages(allPages);
 
       const coverRefs = mainCharRef ? [mainCharRef] : undefined;
+      pendingTimersRef.current = [];
       triggerImageGeneration(coverPage, config.aspectRatio, coverRefs);
-      
+
       preparedPages.forEach((item, idx) => {
-         setTimeout(() => {
+         const timer = setTimeout(() => {
+            pendingTimersRef.current = pendingTimersRef.current.filter(t => t !== timer);
             triggerImageGeneration(item.pageData, config.aspectRatio, item.resolvedRefs);
-         }, (idx + 1) * 1200); 
+         }, (idx + 1) * 1200);
+         pendingTimersRef.current.push(timer);
       });
   };
 
@@ -365,12 +385,20 @@ const App: React.FC = () => {
             : p
         ));
     } catch (error: any) {
+        if (error?.name === 'AbortError') {
+           setPages(prev => prev.map(p =>
+               p.page_number === page.page_number
+               ? { ...p, isGenerating: false, error: "已被用户中止（可单独重绘）" }
+               : p
+           ));
+           return;
+        }
         if (handlePermissionError(error)) {
            return;
         }
-        setPages(prev => prev.map(p => 
-            p.page_number === page.page_number 
-            ? { ...p, isGenerating: false, error: "Image generation failed." } 
+        setPages(prev => prev.map(p =>
+            p.page_number === page.page_number
+            ? { ...p, isGenerating: false, error: "Image generation failed." }
             : p
         ));
     }
@@ -532,11 +560,21 @@ const App: React.FC = () => {
           
           <div className="flex items-center space-x-4">
              {workflowStep !== WorkflowStep.CONFIG && (
-                 <button 
+                 <button
                     onClick={() => setWorkflowStep(WorkflowStep.CONFIG)}
                     className="text-xs text-slate-400 hover:text-white underline"
                  >
                     Start Over
+                 </button>
+             )}
+             {(isProcessing || workflowStep === WorkflowStep.STORYBOARDING || pages.some(p => p.isGenerating)) && (
+                 <button
+                    onClick={handleCancelAll}
+                    className="flex items-center space-x-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-200 px-3 py-1.5 rounded-full border border-red-700/60 transition-colors font-bold"
+                    title="中止剧本流式生成、作废在途图像任务并清空排队任务"
+                 >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                    <span>中止全部任务</span>
                  </button>
              )}
           </div>

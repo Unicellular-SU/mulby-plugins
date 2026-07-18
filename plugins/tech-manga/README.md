@@ -7,6 +7,7 @@ AI 技术漫画生成器 Mulby 插件。把技术文档、代码片段、Bug 报
 3. **剧本编辑**（Script & Storyboard）：逐字段编辑剧本，支持 AI 指令润色；
 4. **逐页绘制**：以角色/道具参考图锁定形象一致性，逐页生成含简体中文对白的漫画页（代码与技术术语保留英文），支持单页重绘与提示词润色；
 5. **导出**：一键打包下载全部页面（.zip）；内置 Token 用量与费用监控面板。
+6. **一键中止**：任务运行期间顶栏显示「中止全部任务」按钮，点击后立即中止剧本流式生成、停止资产/页面生成队列并作废所有在途图像结果；之后可随时重新发起任意任务。
 
 > 本插件由 [tech-manga](https://github.com/Unicellular-SU/tech-manga)（Google AI Studio 项目）迁移而来，AI 能力已全部改为 **Mulby AI 接口**（`window.mulby.ai`），不再需要 Google API Key——模型与密钥统一由 Mulby 管理。
 
@@ -57,6 +58,8 @@ pnpm run pack       # 构建并打包 tech-manga-<version>.inplugin
 
 模型选择通过 `services/mulbyAiService.ts` 的 `setActiveModels()` 注入（App 在配置变化时调用），各组件的函数签名与 props 保持不变。
 
+**中止机制**（`abortAllAiTasks()` / `getAbortEpoch()`）：采用全局中止纪元（epoch）——每次中止递增纪元；文本流式请求登记 `requestId` 并通过 `ai.abort(requestId)` 真正杀掉；图像请求受 Electron contextBridge 限制无法从插件 UI 侧中止在途请求，采用"作废"语义（结果返回后被丢弃，不写入界面，费用仍会产生）；排队中的逐页定时器与资产顺序生成队列在中止后立即停止推进。中止后新发起的任务捕获新纪元，无需重置即可正常运行。
+
 已知差异：
 
 - 原实现页面图用 2K 分辨率；Mulby 侧统一按 size 映射（如 `1024x1536`），实际分辨率取决于所选模型。`images.edit` 不支持 size 参数，带参考图页面的宽高比仅由 prompt 提示约束。
@@ -71,4 +74,5 @@ pnpm run pack       # 构建并打包 tech-manga-<version>.inplugin
 5. Script & Storyboard 页可编辑剧本并 AI 润色；
 6. Continue 进入 Comic Pages：封面与各页逐张生成，角色形象与参考图一致，代码术语保留英文；
 7. 单页「重新生成」与提示词润色可用；
-8. Token 监控面板数字随调用增长；Download Full Comic 能导出 zip。
+8. Token 监控面板数字随调用增长；Download Full Comic 能导出 zip；
+9. 剧本生成中点击顶栏「中止全部任务」：日志立刻停止滚动并回到配置页；页面批量绘制中点击：排队页不再开始，绘制中的页标记「已被用户中止（可单独重绘）」，之后单页重绘仍可正常使用。

@@ -24,6 +24,43 @@ const getAi = () => {
   return ai;
 };
 
+// ================= 全局中止（一键暂停所有任务） =================
+// 纪元（epoch）机制：每次 abortAllAiTasks() 递增纪元；
+// - 每个任务在开始时捕获当前纪元，跨 await 后发现纪元已变则抛 AbortError（丢弃结果）；
+// - 文本流式调用额外登记 requestId，中止时通过 ai.abort(requestId) 真正杀掉请求；
+// - 图像请求受 Electron contextBridge 限制无法从插件 UI 侧真正中止，
+//   在途请求会继续在服务端完成，但结果会被作废，不会写入界面。
+// 中止后新发起的任务捕获的是新纪元，无需任何重置即可正常运行。
+
+let abortEpoch = 0;
+const activeTextRequestIds = new Set<string>();
+
+/** 当前中止纪元；队列型调用方（如资产连续生成循环）可在循环中比对以停止推进 */
+export const getAbortEpoch = () => abortEpoch;
+
+/** 一键中止：杀掉在途文本流请求，并作废所有在途任务的结果 */
+export const abortAllAiTasks = () => {
+  abortEpoch += 1;
+  const ai = (window as Window).mulby?.ai;
+  if (ai) {
+    activeTextRequestIds.forEach(id => {
+      try { void ai.abort(id); } catch { /* ignore */ }
+    });
+  }
+  activeTextRequestIds.clear();
+};
+
+const ABORT_ERROR = () => new DOMException('Aborted', 'AbortError');
+
+const throwIfAborted = (epoch: number) => {
+  if (epoch !== abortEpoch) throw ABORT_ERROR();
+};
+
+const isAbortLike = (error: unknown): boolean => {
+  const e = error as { name?: string; message?: unknown } | null;
+  return e?.name === 'AbortError' || String(e?.message ?? '').toLowerCase().includes('abort');
+};
+
 /** 解析图像模型：优先用配置面板选择的模型，否则回退到第一个可用的图像生成模型 */
 const resolveImageModel = async (): Promise<string> => {
   if (activeModels.imageModel) return activeModels.imageModel;
@@ -110,12 +147,16 @@ export const refineText = async (
     Output: Return ONLY the refined text. Do not include markdown formatting or explanations.
   `;
 
+  const epoch = abortEpoch;
+
   try {
     const res = await ai.call({
         ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
         messages: [{ role: 'user', content: prompt }],
         ...NO_TOOLS
     });
+
+    throwIfAborted(epoch);
 
     if (onUsage) {
       onUsage({
@@ -175,12 +216,16 @@ export const refineImagePrompt = async (
     Return ONLY the updated prompt text. Do not add markdown formatting, quotes, or explanations.
   `;
 
+  const epoch = abortEpoch;
+
   try {
     const result = await ai.call({
       ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
       messages: [{ role: 'user', content: systemPrompt }],
       ...NO_TOOLS
     });
+
+    throwIfAborted(epoch);
 
     if (onUsage) {
       onUsage({
@@ -422,6 +467,9 @@ export const generateComicScript = async (
   // Log the input prompt immediately
   onLogUpdate('INPUT', systemPrompt);
 
+  const epoch = abortEpoch;
+  let requestId: string | null = null;
+
   try {
     let fullText = '';
     let streamError: string | null = null;
@@ -434,7 +482,17 @@ export const generateComicScript = async (
         ...NO_TOOLS
       },
       (chunk: any) => {
-        if (chunk.__requestId) return;
+        if (chunk.__requestId) {
+          requestId = chunk.__requestId;
+          if (epoch === abortEpoch) {
+            activeTextRequestIds.add(chunk.__requestId);
+          } else {
+            // 捕获到 requestId 时已被中止：立即杀掉请求
+            try { void ai.abort(chunk.__requestId); } catch { /* ignore */ }
+          }
+          return;
+        }
+        if (epoch !== abortEpoch) return; // 已中止：忽略后续 chunk
         if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
           fullText += chunk.content;
           onLogUpdate('OUTPUT', fullText);
@@ -445,6 +503,8 @@ export const generateComicScript = async (
     );
 
     const finalMsg = await req;
+
+    throwIfAborted(epoch);
 
     // 非流式兜底：部分 provider 直接返回完整内容
     if (!fullText && typeof finalMsg?.content === 'string') {
@@ -469,8 +529,11 @@ export const generateComicScript = async (
     return parsed as ComicResponse;
 
   } catch (error) {
+    if (epoch !== abortEpoch || isAbortLike(error)) throw ABORT_ERROR();
     console.error("Script generation failed:", error);
     throw error;
+  } finally {
+    if (requestId) activeTextRequestIds.delete(requestId);
   }
 };
 
@@ -508,6 +571,8 @@ export const generateCharacterReference = async (
     - Output image aspect ratio: portrait 3:4.
   `.trim();
 
+  const epoch = abortEpoch;
+
   try {
     const result = await ai.images.generate({
       model,
@@ -515,6 +580,8 @@ export const generateCharacterReference = async (
       size: '1024x1536',
       count: 1
     });
+
+    throwIfAborted(epoch);
 
     if (onUsage) {
        onUsage({
@@ -570,6 +637,8 @@ export const generatePropReference = async (
     - Output image aspect ratio: square 1:1.
   `.trim();
 
+  const epoch = abortEpoch;
+
   try {
     const result = await ai.images.generate({
       model,
@@ -577,6 +646,8 @@ export const generatePropReference = async (
       size: '1024x1024',
       count: 1
     });
+
+    throwIfAborted(epoch);
 
     if (onUsage) {
        onUsage({
@@ -640,6 +711,7 @@ export const generatePanelImage = async (
   finalPrompt = `${finalPrompt}\n\nOutput image aspect ratio: ${hint}.`;
 
   const uploadedAttachmentIds: string[] = [];
+  const epoch = abortEpoch;
 
   try {
     let result: { images: string[]; tokens: { inputTokens: number; outputTokens: number } };
@@ -647,10 +719,12 @@ export const generatePanelImage = async (
     if (hasRefs) {
       // 带参考图：上传附件后走 images.edit（主图 + 额外参考图，多图一致性）
       for (const imgData of referenceImages!) {
+        throwIfAborted(epoch);
         const { mimeType, buffer } = dataUrlToBuffer(imgData);
         const attachment = await ai.attachments.upload({ buffer, mimeType, purpose: 'vision' });
         uploadedAttachmentIds.push(attachment.attachmentId);
       }
+      throwIfAborted(epoch);
 
       result = await ai.images.edit({
         model,
@@ -666,6 +740,8 @@ export const generatePanelImage = async (
         count: 1
       });
     }
+
+    throwIfAborted(epoch);
 
     if (onUsage) {
         let actualInputTokens = result.tokens?.inputTokens || 0;
