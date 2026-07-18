@@ -1017,7 +1017,8 @@ interface MulbyStorage {
     has(key: string): Promise<boolean>
   }
   attachment: {
-    put(id: string, data: ArrayBuffer | Uint8Array, mimeType: string): Promise<boolean>
+    // 宿主实际返回结构化结果（storage-v2 AttachmentPutResult）；旧宿主可能仍返回 boolean，调用方需运行时兼容
+    put(id: string, data: ArrayBuffer | Uint8Array, mimeType: string): Promise<{ ok: boolean; error?: 'E_TOO_LARGE' | 'E_INVALID_ID' | 'E_IO' | 'E_META' }>
     get(id: string): Promise<Uint8Array | null>
     getType(id: string): Promise<string | null>
     remove(id: string): Promise<boolean>

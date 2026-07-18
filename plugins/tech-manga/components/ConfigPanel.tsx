@@ -52,6 +52,21 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 方案 3.2 步骤 2：模型列表加载完成后校验持久化的模型是否仍存在，失效则回退并提示。
+  // App 恢复 config 与本组件拉模型列表存在先后竞态，依赖数组同时监听两者。
+  const [staleModelNotice, setStaleModelNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (modelsLoading) return;
+    if (config.textModel && !textModels.some(m => m.id === config.textModel)) {
+      setStaleModelNotice(`上次使用的文本模型「${config.textModel}」已不可用，已回退到 Mulby 默认模型`);
+      onChange({ ...config, textModel: '' });
+    } else if (config.imageModel && !imageModels.some(m => m.id === config.imageModel)) {
+      setStaleModelNotice(`上次使用的图像模型「${config.imageModel}」已不可用，已回退到自动选择`);
+      onChange({ ...config, imageModel: '' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelsLoading, config.textModel, config.imageModel, textModels, imageModels]);
+
   // Define the special "Auto-detect" character profile
   const AUTO_DETECT_CHAR: CharacterProfile = {
       name: "Auto-detect (Historical Figures)",
@@ -148,6 +163,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
                     <p className="text-[10px] text-yellow-500">
                         未找到图像生成模型。请在 Mulby 设置 → AI → 模型管理中添加端点类型为「图像生成」的模型。
                     </p>
+                )}
+                {staleModelNotice && (
+                    <p className="text-[10px] text-yellow-500">{staleModelNotice}</p>
                 )}
             </>
         )}
