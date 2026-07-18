@@ -5,6 +5,7 @@ import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
+import { generateCard } from '../services/generate'
 
 // 3D 导演台 v7：v6（场景即提示词/机位即分镜/成片对比）+ take 历史（每机位多条成片可切换）+ 分镜导出（机位表一键落画布）。
 // three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
@@ -1279,12 +1280,50 @@ function Inner() {
     }
   }
 
+  // 生成 = 抓帧落「参考图节点」→ 右侧创建「生图节点」并引边 → 保存场景关台回 2D 画布 →
+  // 画布原生管线 generateCard 接管（排队/进度/并发/可停止/可复跑），参考图经边流入 images.edit
   const run = async () => {
     if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
+    const proj = useGraph.getState().project
+    const model = proj.defaultControlModel || proj.defaultImageModel
+    if (!model) {
+      toast('请在工程设置（顶栏 ⚙）选「默认图像模型」或「ControlNet 控制模型」', 'error')
+      return
+    }
+    const { useControl, usePose, full } = buildFullPrompt()
+    if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
+      toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
+      return
+    }
     setBusy(true)
-    const url = await doGenerate(0)
-    setBusy(false)
-    if (url) { setLastTake(url); toast('已生成（导演台），按 C 叠加成片对比', 'success') }
+    try {
+      const dataUrl = (usePose ? api.current.captureOpenPose() : useControl ? api.current.captureDepth() : api.current.capture()) as string
+      const b64 = dataUrl.split(',')[1]
+      const g = useGraph.getState()
+      const boardId = g.project.activeBoardId
+      const saved = await saveBase64(g.project.id, `director_ref_${Date.now()}`, b64, 'png')
+      const vp = g.getActiveBoard().viewport
+      const wx = (-vp.x + 360) / vp.zoom
+      const wy = (-vp.y + 320) / vp.zoom
+      const refTitle = usePose ? '导演台·骨架控制图' : useControl ? '导演台·深度控制图' : '导演台·参考图'
+      const refId = g.addCard('image', { x: wx, y: wy }, { title: refTitle, status: 'done', assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
+      const genId = g.addCard(
+        'image',
+        { x: wx + 340, y: wy },
+        { title: '导演台成片', status: 'idle', modelId: model, prompt: full, params: aspect !== '视口' ? { aspect } : {} },
+        boardId
+      )
+      g.addEdgeBetween(refId, genId)
+      g.setSelection([genId])
+      saveScene()
+      useUi.getState().setShowDirector(false)
+      void generateCard(genId)
+      toast('已创建参考图节点 + 生图节点，生成中（画布上可停止/复跑）', 'success')
+    } catch (e: any) {
+      toast('创建生成节点失败：' + (e?.message || String(e)), 'error')
+    } finally {
+      setBusy(false)
+    }
   }
   // 生成指定机位并把成片回贴为该 shot 的 take（机位即分镜；takes 保留最近 6 条历史）
   const genShot = async (i: number): Promise<boolean> => {

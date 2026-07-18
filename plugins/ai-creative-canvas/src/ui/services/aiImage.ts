@@ -122,7 +122,9 @@ export async function generateImage(
       model,
       imageAttachmentId: attIds[0],
       referenceAttachmentIds: attIds.slice(1),
-      prompt
+      prompt,
+      size,
+      aspectRatio: aspect // 编辑生成同样吃尺寸/画幅（宿主已支持；OpenAI 系消费 size，Gemini 系消费 aspectRatio）
     })
     images = res.images
     onProgress(1)
