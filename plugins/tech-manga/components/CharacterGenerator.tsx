@@ -18,7 +18,27 @@ interface CharacterGeneratorProps {
   onUsageCallback: (stat: any) => void;
 }
 
-const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({ 
+// ================= 跨挂载在途注册表（修复：标签页切换重挂载导致同一资产重复生成） =================
+// 根因：本组件条件渲染于 storyboardTab（App 侧），切到 Script 标签即卸载、切回重挂载；
+// 原先的在途去重（useRef）随实例销毁归零，重挂载后自动循环把"还没有图"的资产全部重新发起，
+// 而上一个实例的请求仍在服务端进行——旧请求先写入一张图，重复请求随后再覆盖一张（双倍计费）。
+// 修复：在途状态提升为模块级 Map，key 用稳定身份（char:<名字> / prop:<名字>，index 跨剧本编辑不稳定），
+// value 为在途 Promise。新实例（或同实例的手动按钮）命中在途项时"领养"同一个 Promise——
+// 只等待、不发起第二次请求；完成/失败/中止后 finally 从注册表移除，手动重试永远拿到新请求。
+const assetInFlight = new Map<string, Promise<string>>();
+
+const startOrAdoptFlight = (flightKey: string, start: () => Promise<string>): Promise<string> => {
+  let flight = assetInFlight.get(flightKey);
+  if (!flight) {
+    flight = start();
+    assetInFlight.set(flightKey, flight);
+    // 注册表自身持有的引用不得产生 unhandledrejection（真实错误由领养方 await 处理）
+    flight.finally(() => assetInFlight.delete(flightKey)).catch(() => { /* ignore */ });
+  }
+  return flight;
+};
+
+const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   characters, 
   props = [],
   style, 
@@ -39,8 +59,6 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   const initializedRef = useRef(false);
   const charactersRef = useRef(characters);
   const propsRef = useRef(props);
-  // 方案 2.6：单飞去重——自动循环与手动按钮共享同一在途集合，同一资产至多一个在途请求
-  const inFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     charactersRef.current = characters;
@@ -113,21 +131,20 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   };
 
   const handleGenerateCharacter = async (index: number, char: CharacterSheetItem) => {
-    const key = `char-${index}`;
-    if (inFlightRef.current.has(key)) return;   // 去重：该资产已在生成
-    inFlightRef.current.add(key);
+    const key = `char-${index}`;            // UI 状态 key（spinner/错误/进度，按卡片位置）
+    const flightKey = `char:${char.name}`;  // 在途身份 key（跨组件重挂载稳定）
     setGeneratingStates(prev => ({ ...prev, [key]: true }));
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
-      // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
-      const imageData = await withRetryOnce(() =>
-        generateCharacterReference(char.name, char.description, style, onUsageCallback, makeProgressHandler(key)));
+      // 单飞 + 领养：已有在途请求则等待它，绝不发起第二次；
+      // 方案 4.3 的失败自动重试（AbortError/鉴权/纪元变化除外）包含在同一个在途 Promise 内
+      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
+        generateCharacterReference(char.name, char.description, style, onUsageCallback, makeProgressHandler(key))));
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
     } finally {
-      inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
       setProgressStates(prev => { const next = { ...prev }; delete next[key]; return next; });
     }
@@ -136,21 +153,19 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   const handleGenerateProp = async (index: number, prop: PropSheetItem) => {
     if (!onUpdateProp) return;
     const key = `prop-${index}`;
-    if (inFlightRef.current.has(key)) return;   // 去重：该资产已在生成
-    inFlightRef.current.add(key);
+    const flightKey = `prop:${prop.name}`;
     setGeneratingStates(prev => ({ ...prev, [key]: true }));
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
       // Pass mainCharacterName and storyMode to ensure consistent universe style
-      // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
-      const imageData = await withRetryOnce(() =>
-        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key)));
+      // 单飞 + 领养（同上）；方案 4.3 重试包含在同一个在途 Promise 内
+      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
+        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key))));
       onUpdateProp(index, { ...prop, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
     } finally {
-      inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
       setProgressStates(prev => { const next = { ...prev }; delete next[key]; return next; });
     }
