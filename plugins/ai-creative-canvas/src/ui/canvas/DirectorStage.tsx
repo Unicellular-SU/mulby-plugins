@@ -30,15 +30,18 @@ const FACINGS: { k: string; r: number }[] = [
 ]
 
 // 人台锚定色：按添加顺序分配。参考图里的颜色块是模型最易锁定的特征，
-// prompt 里用「颜色+方位+占比+朝向」四重锚定对应角色（note 声明忽略材质与颜色，只取几何）
+// prompt 里用「颜色标记+方位+占比+朝向」多重锚定对应角色（note 声明颜色只是站位标记）。
+// 注意命名用「红标」不用「红衣」——后者字面=服装颜色，模型会把僵尸画成穿红衣服
 const MANNEQUIN_COLORS: { hex: number; name: string }[] = [
-  { hex: 0xd95f4b, name: '红衣' },
-  { hex: 0x4b7fd9, name: '蓝衣' },
-  { hex: 0x53b96a, name: '绿衣' },
-  { hex: 0xd9b84b, name: '黄衣' },
-  { hex: 0x9b5fd9, name: '紫衣' },
-  { hex: 0x4bbfd9, name: '青衣' }
+  { hex: 0xd95f4b, name: '红标' },
+  { hex: 0x4b7fd9, name: '蓝标' },
+  { hex: 0x53b96a, name: '绿标' },
+  { hex: 0xd9b84b, name: '黄标' },
+  { hex: 0x9b5fd9, name: '紫标' },
+  { hex: 0x4bbfd9, name: '青标' }
 ]
+// 旧工程存的「红衣/蓝衣…」标签 → 新名（同序号同色）
+const LEGACY_COLOR_NAMES = ['红衣', '蓝衣', '绿衣', '黄衣', '紫衣', '青衣']
 
 // 出图画幅预设：宿主 images.edit 不支持尺寸参数，模型自己定画幅——所以抓帧按选定画幅居中裁剪，
 // 视口内用 letterbox 画框标示真实出图范围（所见即所得）；ar=0 表示不裁剪（跟随视口）
@@ -706,9 +709,13 @@ function Inner() {
           const assigned = st.kind === '人台' && !st.colorName
             ? MANNEQUIN_COLORS[subjects.filter((s) => s.kind === '人台').length % MANNEQUIN_COLORS.length]
             : null
+          // 旧标签（红衣…）迁移为新名（红标…），同序号同色
+          const legacyIdx = st.colorName ? LEGACY_COLOR_NAMES.indexOf(st.colorName) : -1
+          const colorName = legacyIdx >= 0 ? MANNEQUIN_COLORS[legacyIdx].name : st.colorName || assigned?.name
+          const colorHex = legacyIdx >= 0 ? MANNEQUIN_COLORS[legacyIdx].hex : MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex
           const obj: any = st.kind === '道具'
             ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-            : makeMannequin(assigned?.hex ?? MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex ?? 0xc7ccd6)
+            : makeMannequin(assigned?.hex ?? colorHex ?? 0xc7ccd6)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
@@ -717,7 +724,7 @@ function Inner() {
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
           scene.add(obj)
-          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName: st.colorName || assigned?.name })
+          subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName })
         }
         const serializeSceneOnly = () => ({
           // 人台/道具 + 已存字节的导入模型；导入模型为空 assetId（存储失败）则不持久化
@@ -1183,11 +1190,12 @@ function Inner() {
         ? '【输入为 OpenPose 骨架控制图：请严格按骨架表达的人物姿态与站位渲染为成片画面。】'
         : useControl
           ? '【输入为 3D 导演台导出的深度控制图：请严格据此构图、机位、人物站位与姿态，渲染为成片画面。】'
-          : '【以上为 3D 导演台的机位/构图参考（彩色人台=角色站位/姿态/朝向，颜色仅用于区分角色），请据此构图与镜头渲染成片，忽略人台材质与颜色。】'
+          : '【以上为 3D 导演台的机位/构图参考（彩色人台=角色站位/姿态/朝向，颜色只是区分角色的标记），请据此构图与镜头渲染成片。人台颜色仅为站位标记，严禁用于角色的服装或外观配色；忽略人台材质。】'
       // 构图指令前置（导演台的核心诉求就是构图）+ cookbook preserve-list：保留项英文写死（模型服从度更好）
       const preserve =
         'Preserve exactly: camera angle, framing, character positions, facing directions, character count and poses. ' +
-        'Change only: materials, textures, lighting, environment and style. Do not re-frame, zoom, crop or move any subject.'
+        'Change only: materials, textures, lighting, environment and style. Do not re-frame, zoom, crop or move any subject. ' +
+        'The mannequin colors are position markers only; never use them for clothing, skin or any appearance color.'
       const full = `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}`
       const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
       const out = res?.images?.[0]
