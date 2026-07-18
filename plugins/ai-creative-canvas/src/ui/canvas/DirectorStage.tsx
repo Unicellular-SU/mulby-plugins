@@ -1637,7 +1637,17 @@ function Inner() {
         <button
           onClick={() => {
             const { full } = buildFullPrompt()
-            void navigator.clipboard.writeText(full).then(() => toast('已复制完整提示词（即模型实际收到的文本）', 'success'), () => toast('复制失败', 'error'))
+            // 宿主剪贴板优先（Electron 里 navigator.clipboard 常因权限静默失败，见 mulby docs/super-panel）；失败打日志便于诊断
+            const write = window.mulby?.clipboard?.writeText
+              ? (window.mulby.clipboard.writeText(full) as Promise<void>)
+              : navigator.clipboard.writeText(full)
+            void write
+              .then(() => toast('已复制完整提示词（即模型实际收到的文本）', 'success'))
+              .catch((e: any) => {
+                console.error('[DirectorStage] 复制提示词失败', e)
+                console.info('[DirectorStage] 完整提示词如下，可手动复制：\n' + full)
+                toast('复制失败：完整提示词已打印到控制台 (DevTools)', 'error')
+              })
           }}
           className="h-16 px-3 rounded-2xl border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center gap-1 whitespace-nowrap transition-colors"
           title="复制模型实际收到的完整提示词（角色绑定对不对，一看便知）"

@@ -10,7 +10,8 @@
   "ui": "ui/index.html",
   "icon": "icon.png",
   "permissions": {
-    "notification": true
+    "notification": true,
+    "clipboard": true
   },
   "pluginSetting": {
     "single": true
