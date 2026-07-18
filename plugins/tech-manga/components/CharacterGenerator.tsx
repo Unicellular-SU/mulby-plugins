@@ -34,6 +34,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   const initializedRef = useRef(false);
   const charactersRef = useRef(characters);
   const propsRef = useRef(props);
+  // 方案 2.6：单飞去重——自动循环与手动按钮共享同一在途集合，同一资产至多一个在途请求
+  const inFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     charactersRef.current = characters;
@@ -54,8 +56,21 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
             .map((c, i) => (!c.referenceImage ? i : -1))
             .filter(i => i !== -1);
 
-        for (const idx of charIndices) {
-             if (getAbortEpoch() !== epoch) return;
+        // 中止时给剩余缺图项标注可见状态（方案 2.6 可选项），避免静默停止
+        const markRemainingAborted = (kind: 'char' | 'prop', remaining: number[]) => {
+            setErrorStates(prev => {
+                const next = { ...prev };
+                remaining.forEach(i => { next[`${kind}-${i}`] = "已被用户中止"; });
+                return next;
+            });
+        };
+
+        for (let n = 0; n < charIndices.length; n++) {
+             if (getAbortEpoch() !== epoch) {
+                 markRemainingAborted('char', charIndices.slice(n));
+                 return;
+             }
+             const idx = charIndices[n];
              const currentChar = charactersRef.current[idx];
              if (currentChar && !currentChar.referenceImage) {
                  await handleGenerateCharacter(idx, currentChar);
@@ -69,8 +84,12 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                 .map((p, i) => (!p.referenceImage ? i : -1))
                 .filter(i => i !== -1);
 
-            for (const idx of propIndices) {
-                if (getAbortEpoch() !== epoch) return;
+            for (let n = 0; n < propIndices.length; n++) {
+                if (getAbortEpoch() !== epoch) {
+                    markRemainingAborted('prop', propIndices.slice(n));
+                    return;
+                }
+                const idx = propIndices[n];
                 const currentProp = propsRef.current[idx];
                 if (currentProp && !currentProp.referenceImage) {
                     await handleGenerateProp(idx, currentProp);
@@ -89,15 +108,18 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
 
   const handleGenerateCharacter = async (index: number, char: CharacterSheetItem) => {
     const key = `char-${index}`;
+    if (inFlightRef.current.has(key)) return;   // 去重：该资产已在生成
+    inFlightRef.current.add(key);
     setGeneratingStates(prev => ({ ...prev, [key]: true }));
     setErrorStates(prev => ({ ...prev, [key]: '' }));
-    
+
     try {
       const imageData = await generateCharacterReference(char.name, char.description, style, onUsageCallback);
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
     } finally {
+      inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
     }
   };
@@ -105,9 +127,11 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   const handleGenerateProp = async (index: number, prop: PropSheetItem) => {
     if (!onUpdateProp) return;
     const key = `prop-${index}`;
+    if (inFlightRef.current.has(key)) return;   // 去重：该资产已在生成
+    inFlightRef.current.add(key);
     setGeneratingStates(prev => ({ ...prev, [key]: true }));
     setErrorStates(prev => ({ ...prev, [key]: '' }));
-    
+
     try {
       // Pass mainCharacterName and storyMode to ensure consistent universe style
       const imageData = await generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback);
@@ -115,6 +139,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
     } finally {
+      inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
     }
   };

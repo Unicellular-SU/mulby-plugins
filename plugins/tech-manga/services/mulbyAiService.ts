@@ -43,9 +43,7 @@ export const abortAllAiTasks = () => {
   abortEpoch += 1;
   const ai = (window as Window).mulby?.ai;
   if (ai) {
-    activeTextRequestIds.forEach(id => {
-      try { void ai.abort(id); } catch { /* ignore */ }
-    });
+    activeTextRequestIds.forEach(id => safeAbort(ai, id));
   }
   activeTextRequestIds.clear();
 };
@@ -56,9 +54,9 @@ const throwIfAborted = (epoch: number) => {
   if (epoch !== abortEpoch) throw ABORT_ERROR();
 };
 
-const isAbortLike = (error: unknown): boolean => {
-  const e = error as { name?: string; message?: unknown } | null;
-  return e?.name === 'AbortError' || String(e?.message ?? '').toLowerCase().includes('abort');
+/** ai.abort 是 IPC Promise，需同时防同步抛与 Promise 拒绝（老宿主返回 void 时 ?.catch?. 安全跳过） */
+const safeAbort = (ai: { abort: (id: string) => unknown }, id: string) => {
+  try { (ai.abort(id) as Promise<void> | undefined)?.catch?.(() => { /* ignore */ }); } catch { /* ignore */ }
 };
 
 /** 解析图像模型：优先用配置面板选择的模型，否则回退到第一个可用的图像生成模型 */
@@ -488,7 +486,7 @@ export const generateComicScript = async (
             activeTextRequestIds.add(chunk.__requestId);
           } else {
             // 捕获到 requestId 时已被中止：立即杀掉请求
-            try { void ai.abort(chunk.__requestId); } catch { /* ignore */ }
+            safeAbort(ai, chunk.__requestId);
           }
           return;
         }
@@ -525,13 +523,17 @@ export const generateComicScript = async (
       throw new Error(streamError ? `AI 调用失败：${streamError}` : "No response from AI");
     }
 
-    const parsed = JSON.parse(cleanJson(fullText));
-    return parsed as ComicResponse;
+    const parsed = JSON.parse(cleanJson(fullText)) as ComicResponse;
+    // 方案 2.3：不信任模型输出的 page_number，按数组序归一化（封面固定 0，正文 1..N）
+    parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
+    return parsed;
 
   } catch (error) {
-    if (epoch !== abortEpoch || isAbortLike(error)) throw ABORT_ERROR();
+    // 方案 2.5："是否用户中止"由 epoch 权威判定，不再猜错误文本（含 'abort' 的网关错误应正常上报 UI）
+    if (epoch !== abortEpoch) throw ABORT_ERROR();            // 本轮已被用户中止：按中止收敛
+    if ((error as any)?.name === 'AbortError') throw error;   // 本地抛出的原生中止（防御性保留）
     console.error("Script generation failed:", error);
-    throw error;
+    throw error;                                              // 真实失败：原样上报 UI
   } finally {
     if (requestId) activeTextRequestIds.delete(requestId);
   }

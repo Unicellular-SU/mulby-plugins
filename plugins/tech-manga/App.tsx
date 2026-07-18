@@ -6,7 +6,8 @@ import LogPanel from './components/LogPanel';
 import CharacterGenerator from './components/CharacterGenerator';
 import ScriptEditor from './components/ScriptEditor';
 import TokenMonitor from './components/TokenMonitor';
-import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels, abortAllAiTasks } from './services/mulbyAiService';
+import { generateComicScript, generatePanelImage, refineImagePrompt, refineText, setActiveModels, abortAllAiTasks, getAbortEpoch } from './services/mulbyAiService';
+import { resolveByName } from './utils/nameMatch';
 import { AppConfig, ComicPageData, ComicStyle, AspectRatio, StoryMode, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse, TokenUsage, UsageStat } from './types';
 import { PRESET_CHARACTERS } from './constants';
 import JSZip from 'jszip';
@@ -22,6 +23,9 @@ const INITIAL_CONFIG: AppConfig = {
   aspectRatio: AspectRatio.MANGA_PAGE,
   totalPages: 'Short', // Default to short
 };
+
+/** 本轮运行的回调是否已过期（用户中止过 / 新一轮已开始）——方案 2.1 的运行代际检查 */
+const isStale = (runEpoch: number) => runEpoch !== getAbortEpoch();
 
 const INITIAL_USAGE: TokenUsage = {
     totalInputTokens: 0,
@@ -100,7 +104,35 @@ const App: React.FC = () => {
     setPages(prev => prev.map(p =>
       p.isGenerating ? { ...p, isGenerating: false, error: "已被用户中止（可单独重绘）" } : p
     ));
+    // 中止剧本生成的"回到配置页"语义统一收敛在此（方案 2.1 步骤 4）
+    setWorkflowStep(prev => prev === WorkflowStep.SCRIPT_GENERATION ? WorkflowStep.CONFIG : prev);
   }, []);
+
+  // Start Over：确认后中止在途任务并真正重置（方案 2.1 步骤 5）
+  const handleStartOver = async () => {
+    const done = pages.filter(p => p.imageData).length;
+    const dlg = (window as any).mulby?.dialog;
+    const ok = dlg?.showMessageBox
+      ? (await dlg.showMessageBox({
+          type: 'warning',
+          message: 'Start Over 将中止所有在途任务，并丢弃当前剧本与已生成页面',
+          detail: done > 0 ? `已生成 ${done} 页图像，此操作不可恢复。` : undefined,
+          buttons: ['取消', '丢弃并重新开始'],
+          defaultId: 0,
+          cancelId: 0,
+        })).response === 1
+      : window.confirm('将丢弃当前剧本与已生成页面，确定重新开始？'); // 老宿主降级
+    if (!ok) return;
+    handleCancelAll();      // 停定时器、bump epoch（连带停掉 CharacterGenerator 循环）
+    setComicScript(null);
+    setCharacterSheet([]);
+    setPropSheet([]);
+    setPages([]);
+    setInputLog('');
+    setOutputLog('');
+    setGlobalError(null);
+    setWorkflowStep(WorkflowStep.CONFIG);
+  };
 
   const handlePermissionError = (error: any) => {
     const msg = error.message || JSON.stringify(error);
@@ -159,27 +191,22 @@ const App: React.FC = () => {
      });
   }, []);
 
-  // Helper to find character reference image with fuzzy matching
+  // Helper to find character reference image (统一名字解析口径，方案 2.4)
   const getCharacterReference = useCallback((name: string, sheet: CharacterSheetItem[]): string | undefined => {
-     if (!sheet || sheet.length === 0) return undefined;
-     const target = name.toLowerCase().trim();
-     let match = sheet.find(c => c.name.toLowerCase().trim() === target);
-     if (match?.referenceImage) return match.referenceImage;
-     match = sheet.find(c => {
-         const sheetName = c.name.toLowerCase().trim();
-         return sheetName.includes(target) || target.includes(sheetName);
-     });
-     return match?.referenceImage;
+     return resolveByName(name, sheet)?.referenceImage;
   }, []);
 
   // STEP 1: Generate Script
   const handleGenerateScript = async () => {
+    handleCancelAll();                  // D2：终止上一轮（bump epoch + 清定时器 + 关 isProcessing）
+    const runEpoch = getAbortEpoch();   // D1：捕获本轮代际，迟到回调据此丢弃
+
     setGlobalError(null);
     setIsProcessing(true);
     setInputLog('');
     setOutputLog('');
-    setPages([]); 
-    
+    setPages([]);
+
     setTokenUsage(INITIAL_USAGE);
 
     try {
@@ -198,23 +225,25 @@ const App: React.FC = () => {
         },
         (stat) => trackUsage('Generate Script', stat)
       );
-      
+      if (isStale(runEpoch)) return;    // 本轮已被中止/替代：不写回任何状态
+
       setComicScript(comicData);
       setCharacterSheet(comicData.character_sheet || []);
       setPropSheet(comicData.prop_sheet || []);
-      setWorkflowStep(WorkflowStep.STORYBOARDING); 
-      setStoryboardTab('CHARACTERS'); 
+      setWorkflowStep(WorkflowStep.STORYBOARDING);
+      setStoryboardTab('CHARACTERS');
 
     } catch (error: any) {
+      if (isStale(runEpoch)) return;    // 迟到的失败/中止：丢弃，不打扰新一轮
       if (error?.name === 'AbortError') {
-         // 用户主动中止：静默回到配置页
+         // 防御性保留；正常中止路径由 handleCancelAll 统一切回配置页
          setWorkflowStep(WorkflowStep.CONFIG);
       } else if (!handlePermissionError(error)) {
          setGlobalError(error.message || "Failed to generate comic script. Please try again.");
          setWorkflowStep(WorkflowStep.CONFIG);
       }
     } finally {
-      setIsProcessing(false);
+      if (!isStale(runEpoch)) setIsProcessing(false);  // 过期回调不许关新一轮的 processing
     }
   };
   
@@ -301,9 +330,8 @@ const App: React.FC = () => {
 
           // 1. Resolve Characters
           presentCharacters.forEach(name => {
-              const charItem = characterSheet.find(c => c.name === name) 
-                            || characterSheet.find(c => c.name.includes(name) || name.includes(c.name));
-              
+              const charItem = resolveByName(name, characterSheet);
+
               if (charItem) {
                   if (charItem.referenceImage) {
                       sceneRefs.push(charItem.referenceImage);
@@ -324,8 +352,7 @@ const App: React.FC = () => {
 
           // 2. Resolve Props
           presentProps.forEach(name => {
-              const propItem = propSheet.find(p => p.name === name) 
-                            || propSheet.find(p => p.name.includes(name) || name.includes(p.name));
+              const propItem = resolveByName(name, propSheet);
               if (propItem) {
                   if (propItem.referenceImage) {
                       sceneRefs.push(propItem.referenceImage);
@@ -358,12 +385,14 @@ const App: React.FC = () => {
       setPages(allPages);
 
       const coverRefs = mainCharRef ? [mainCharRef] : undefined;
+      const runEpoch = getAbortEpoch();
       pendingTimersRef.current = [];
       triggerImageGeneration(coverPage, config.aspectRatio, coverRefs);
 
       preparedPages.forEach((item, idx) => {
          const timer = setTimeout(() => {
             pendingTimersRef.current = pendingTimersRef.current.filter(t => t !== timer);
+            if (isStale(runEpoch)) return;  // 已被中止/替代：排队页不再启动
             triggerImageGeneration(item.pageData, config.aspectRatio, item.resolvedRefs);
          }, (idx + 1) * 1200);
          pendingTimersRef.current.push(timer);
@@ -371,20 +400,23 @@ const App: React.FC = () => {
   };
 
   const triggerImageGeneration = async (page: ComicPageData, ratio: string, references?: string[]) => {
+    const runEpoch = getAbortEpoch();   // 本任务的运行代际；迟到回调不得写回新一轮的 pages
     try {
         const base64Image = await generatePanelImage(
-            page.image_prompt, 
-            ratio, 
+            page.image_prompt,
+            ratio,
             references,
             (stat) => trackUsage(`Draw Page ${page.page_number}`, stat)
         );
-        
-        setPages(prev => prev.map(p => 
-            p.page_number === page.page_number 
-            ? { ...p, imageData: base64Image, isGenerating: false, error: undefined } 
+        if (isStale(runEpoch)) return;
+
+        setPages(prev => prev.map(p =>
+            p.page_number === page.page_number
+            ? { ...p, imageData: base64Image, isGenerating: false, error: undefined }
             : p
         ));
     } catch (error: any) {
+        if (isStale(runEpoch)) return;  // 中止/新一轮开始后迟到的错误：丢弃（页面状态已由 handleCancelAll 统一标记）
         if (error?.name === 'AbortError') {
            setPages(prev => prev.map(p =>
                p.page_number === page.page_number
@@ -416,8 +448,7 @@ const App: React.FC = () => {
 
       // Resolve Characters
       activeCharacterNames.forEach(name => {
-          const charItem = characterSheet.find(c => c.name === name) 
-                        || characterSheet.find(c => c.name.includes(name) || name.includes(c.name));
+          const charItem = resolveByName(name, characterSheet);
           if (charItem) {
               if (charItem.referenceImage) {
                   sceneRefs.push(charItem.referenceImage);
@@ -428,8 +459,7 @@ const App: React.FC = () => {
 
       // Resolve Props
       activePropNames.forEach(name => {
-          const propItem = propSheet.find(p => p.name === name) 
-                        || propSheet.find(p => p.name.includes(name) || name.includes(p.name));
+          const propItem = resolveByName(name, propSheet);
           if (propItem) {
               if (propItem.referenceImage) {
                   sceneRefs.push(propItem.referenceImage);
@@ -561,7 +591,7 @@ const App: React.FC = () => {
           <div className="flex items-center space-x-4">
              {workflowStep !== WorkflowStep.CONFIG && (
                  <button
-                    onClick={() => setWorkflowStep(WorkflowStep.CONFIG)}
+                    onClick={handleStartOver}
                     className="text-xs text-slate-400 hover:text-white underline"
                  >
                     Start Over

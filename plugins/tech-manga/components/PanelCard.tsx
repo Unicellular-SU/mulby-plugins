@@ -23,6 +23,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
   // AI Refine State
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
+  const [refineError, setRefineError] = useState<string | null>(null);
 
   const handleSave = () => {
     onRegenerate(page.page_number, promptDraft, selectedCharacters, selectedProps);
@@ -32,6 +33,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
   const handleRefine = async () => {
     if (!refineInstruction.trim()) return;
     setIsRefining(true);
+    setRefineError(null);
     try {
       const newPrompt = await refineImagePrompt(
         promptDraft,
@@ -42,8 +44,10 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
       );
       setPromptDraft(newPrompt);
       setRefineInstruction(''); // Clear instruction on success
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to refine prompt", error);
+      // 方案 2.2：失败可见，保留输入可重试
+      setRefineError(error?.message || 'AI 润色失败，请重试');
     } finally {
       setIsRefining(false);
     }
@@ -238,6 +242,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                   {isRefining ? '...' : 'Refine'}
                 </button>
              </div>
+             {refineError && <p className="text-[11px] text-red-400 mt-1.5">{refineError}</p>}
           </div>
 
           <div className="flex justify-end space-x-2">

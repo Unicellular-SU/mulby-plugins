@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem } from '../types';
 import { refineText } from '../services/mulbyAiService';
+import { resolveByName } from '../utils/nameMatch';
 
 interface ScriptEditorProps {
   script: ComicResponse;
@@ -14,7 +15,7 @@ interface ScriptEditorProps {
 const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue }) => {
   const [activePageIdx, setActivePageIdx] = useState(0);
   const [refiningField, setRefiningField] = useState<string | null>(null);
-  const [instruction, setInstruction] = useState('');
+  const [refineError, setRefineError] = useState<{ target: string; message: string } | null>(null);
 
   const activePage = script.pages[activePageIdx];
 
@@ -28,48 +29,46 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
     onUpdate({ ...script, pages: newPages });
   };
 
+  // 方案 2.2：instr 由 RefineBox 透传进来（原实现丢弃了该参数导致死按钮）；返回是否成功，成功才清空输入框
   const handleRefine = async (
-    target: 'ANALYSIS' | 'COVER' | 'LAYOUT' | 'PROMPT', 
+    target: 'ANALYSIS' | 'COVER' | 'LAYOUT' | 'PROMPT',
     currentText: string,
+    instr: string,
     pageIdx?: number
-  ) => {
-    if (!instruction.trim()) return;
+  ): Promise<boolean> => {
+    if (!instr.trim()) return false;
     setRefiningField(target);
+    setRefineError(null);
 
     try {
       // Build a richer context that includes Character Universe info
       const context = `
-        Manga Title: ${script.title}. 
-        Style: ${script.global_art_style}. 
-        Universe Characters: ${script.character_sheet?.map(c => c.name).join(', ')}. 
+        Manga Title: ${script.title}.
+        Style: ${script.global_art_style}.
+        Universe Characters: ${script.character_sheet?.map(c => c.name).join(', ')}.
         Story Analysis: ${script.analysis}.
         (IMPORTANT: Ensure all edits conform to the universe/lore of these characters)
       `.trim();
 
-      const refined = await refineText(currentText, instruction, context);
+      const refined = await refineText(currentText, instr, context);
 
       if (target === 'ANALYSIS') handleTextChange('analysis', refined);
       if (target === 'COVER') onUpdate({ ...script, cover_image_prompt: refined });
       if (target === 'LAYOUT' && pageIdx !== undefined) handlePageChange(pageIdx, 'layout_description', refined);
       if (target === 'PROMPT' && pageIdx !== undefined) handlePageChange(pageIdx, 'image_prompt', refined);
-
-      setInstruction('');
-    } catch (e) {
+      return true;
+    } catch (e: any) {
       console.error(e);
+      setRefineError({ target, message: e?.message || 'AI 润色失败，请重试' });
+      return false;
     } finally {
       setRefiningField(null);
     }
   };
 
-  // Helper to find images
-  const getCharImage = (name: string) => {
-     const found = characterSheet?.find(c => c.name.includes(name) || name.includes(c.name));
-     return found?.referenceImage;
-  };
-  const getPropImage = (name: string) => {
-      const found = propSheet?.find(p => p.name.includes(name) || name.includes(p.name));
-      return found?.referenceImage;
-  };
+  // Helper to find images（统一名字解析口径，方案 2.4 顺带项）
+  const getCharImage = (name: string) => resolveByName(name, characterSheet)?.referenceImage;
+  const getPropImage = (name: string) => resolveByName(name, propSheet)?.referenceImage;
 
   return (
     <div className="w-full h-full bg-slate-900 flex flex-col rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
@@ -138,9 +137,10 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                       value={script.analysis}
                       onChange={(e) => handleTextChange('analysis', e.target.value)}
                    />
-                   <RefineBox 
-                     isLoading={refiningField === 'ANALYSIS'} 
-                     onRefine={(instr) => handleRefine('ANALYSIS', script.analysis, -1)} 
+                   <RefineBox
+                     isLoading={refiningField === 'ANALYSIS'}
+                     error={refineError?.target === 'ANALYSIS' ? refineError.message : null}
+                     onRefine={(instr) => handleRefine('ANALYSIS', script.analysis, instr)}
                    />
                 </div>
              </div>
@@ -157,9 +157,10 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                       value={script.cover_image_prompt}
                       onChange={(e) => onUpdate({ ...script, cover_image_prompt: e.target.value })}
                    />
-                   <RefineBox 
-                     isLoading={refiningField === 'COVER'} 
-                     onRefine={(instr) => handleRefine('COVER', script.cover_image_prompt, -1)} 
+                   <RefineBox
+                     isLoading={refiningField === 'COVER'}
+                     error={refineError?.target === 'COVER' ? refineError.message : null}
+                     onRefine={(instr) => handleRefine('COVER', script.cover_image_prompt, instr)}
                    />
                 </div>
              </div>
@@ -182,9 +183,10 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         value={activePage.layout_description}
                         onChange={(e) => handlePageChange(activePageIdx, 'layout_description', e.target.value)}
                     />
-                    <RefineBox 
-                        isLoading={refiningField === 'LAYOUT'} 
-                        onRefine={(instr) => handleRefine('LAYOUT', activePage.layout_description, activePageIdx)} 
+                    <RefineBox
+                        isLoading={refiningField === 'LAYOUT'}
+                        error={refineError?.target === 'LAYOUT' ? refineError.message : null}
+                        onRefine={(instr) => handleRefine('LAYOUT', activePage.layout_description, instr, activePageIdx)}
                     />
                     </div>
 
@@ -198,9 +200,10 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         value={activePage.image_prompt}
                         onChange={(e) => handlePageChange(activePageIdx, 'image_prompt', e.target.value)}
                     />
-                    <RefineBox 
-                        isLoading={refiningField === 'PROMPT'} 
-                        onRefine={(instr) => handleRefine('PROMPT', activePage.image_prompt, activePageIdx)} 
+                    <RefineBox
+                        isLoading={refiningField === 'PROMPT'}
+                        error={refineError?.target === 'PROMPT' ? refineError.message : null}
+                        onRefine={(instr) => handleRefine('PROMPT', activePage.image_prompt, instr, activePageIdx)}
                     />
                     </div>
                 </div>
@@ -261,24 +264,33 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
 };
 
 // Helper Sub-component for Refine Input
-const RefineBox: React.FC<{ isLoading: boolean, onRefine: (instr: string) => void }> = ({ isLoading, onRefine }) => {
+// 方案 2.2：onRefine 返回是否成功；仅成功才清空输入框，失败保留内容可重试并显示错误
+const RefineBox: React.FC<{ isLoading: boolean, error?: string | null, onRefine: (instr: string) => Promise<boolean> }> = ({ isLoading, error, onRefine }) => {
    const [val, setVal] = useState('');
+   const submit = async () => {
+      if (isLoading || !val.trim()) return;
+      const ok = await onRefine(val);
+      if (ok) setVal('');
+   };
    return (
-     <div className="flex gap-2 mt-2 bg-slate-900/50 p-2 rounded border border-slate-700/50">
-        <input 
-           className="flex-grow bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
-           placeholder="Ask AI to refine this text (e.g., 'Make it more dramatic', 'Fix the dialogue')..."
-           value={val}
-           onChange={(e) => setVal(e.target.value)}
-           onKeyDown={(e) => { if(e.key === 'Enter') { onRefine(val); setVal(''); } }}
-        />
-        <button 
-           onClick={() => { onRefine(val); setVal(''); }}
-           disabled={isLoading || !val.trim()}
-           className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 text-white px-3 py-1 rounded"
-        >
-           {isLoading ? 'Refining...' : 'AI Refine'}
-        </button>
+     <div className="mt-2 bg-slate-900/50 p-2 rounded border border-slate-700/50">
+        <div className="flex gap-2">
+           <input
+              className="flex-grow bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
+              placeholder="Ask AI to refine this text (e.g., 'Make it more dramatic', 'Fix the dialogue')..."
+              value={val}
+              onChange={(e) => setVal(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+           />
+           <button
+              onClick={submit}
+              disabled={isLoading || !val.trim()}
+              className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 text-white px-3 py-1 rounded"
+           >
+              {isLoading ? 'Refining...' : 'AI Refine'}
+           </button>
+        </div>
+        {error && <p className="text-[11px] text-red-400 mt-1.5">{error}</p>}
      </div>
    )
 }
