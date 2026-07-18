@@ -1,5 +1,6 @@
-import { ComicResponse, CharacterProfile, StoryMode, UsageStat } from "../types";
+import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL } from "../types";
 import { STORY_MODE_PROMPTS } from "../constants";
+import { sniffImageMime } from "../utils/imageMime";
 
 // ================= MULBY AI BRIDGE =================
 // 所有 AI 能力通过 Mulby 宿主提供的 window.mulby.ai 完成，
@@ -30,8 +31,9 @@ const getAi = () => {
 // - 文本流式调用额外登记 requestId，中止时通过 ai.abort(requestId) 真正杀掉请求；
 // - 图像 edit 路径由插件自生成 requestId 随 input 传入并登记（第 6 章宿主分支支持真中止；
 //   老宿主安全忽略该字段，abort 未知 id 仅产生 warn 日志，行为退化为"结果作废不写界面"）；
-// - 图像 generate 路径暂无中止句柄（待 5.3 迁移 generateStream 后经 __requestId 获得），
-//   在途请求会继续在服务端完成，但结果会被作废，不会写入界面。
+// - 图像 generate 路径已迁移 generateStream（方案 5.3）：新宿主经 chunk.__requestId 登记
+//   进同一集合获得真中止；老宿主不发该 chunk，在途请求继续在服务端完成，
+//   但结果会被作废，不会写入界面。
 // 中止后新发起的任务捕获的是新纪元，无需任何重置即可正常运行。
 
 let abortEpoch = 0;
@@ -161,12 +163,110 @@ const extractJson = (text: string): string => {
   return start >= 0 && end > start ? stripped.slice(start, end + 1) : stripped;
 };
 
-// Helper for approximate token counting when metadata is missing
-const estimateTokens = (text: string) => Math.ceil(text.length / 4);
+// ================= 费用统计如实上报（方案 5.2） =================
 
-/** 图像结果 → data URL（Mulby 返回纯 base64） */
+/** 最后兜底的粗估（中文保守系数 ~2 字符/token；仅在 tokens.estimate 不可用时使用） */
+const roughTokens = (text: string) => Math.ceil(text.length / 2);
+
+/**
+ * 文本 usage 兜底：优先走宿主 ai.tokens.estimate（js-tiktoken 真分词），
+ * 老宿主 / 调用失败回退到中文保守系数（方案 5.2 步骤 3）。
+ */
+const estimateTextUsage = async (
+  model: string | undefined,
+  prompt: string,
+  outputText: string
+): Promise<{ inputTokens: number; outputTokens: number }> => {
+  const est = ((window as Window).mulby?.ai as { tokens?: { estimate?: Function } } | undefined)?.tokens?.estimate;
+  if (typeof est === 'function') {
+    try {
+      const r = await est({
+        ...(model ? { model } : {}),
+        messages: [{ role: 'user', content: prompt }],
+        outputText,
+      });
+      if (typeof r?.inputTokens === 'number' && typeof r?.outputTokens === 'number') {
+        return { inputTokens: r.inputTokens, outputTokens: r.outputTokens };
+      }
+    } catch { /* fall through */ }
+  }
+  return { inputTokens: roughTokens(prompt), outputTokens: roughTokens(outputText) };
+};
+
+/** 文本调用统一构造 UsageStat：modelId 如实取当前选择（留空 = 宿主默认路由，插件不可知） */
+const textStat = (
+  inputTokens: number,
+  outputTokens: number,
+  estimated: boolean
+): UsageStat => ({
+  kind: 'text',
+  modelId: activeModels.textModel || DEFAULT_TEXT_MODEL_LABEL,
+  inputTokens,
+  outputTokens,
+  imagesGenerated: 0,
+  estimated,
+});
+
+/**
+ * 图像调用统一构造 UsageStat：token 记宿主返回的原始值（恒为 0/16 的占位，不用于计价——
+ * 计价在 App 层按张查 services/pricing.ts），不再伪造 560/1120 常数。
+ */
+const imageStat = (
+  modelId: string,
+  tokens: { inputTokens?: number; outputTokens?: number } | undefined
+): UsageStat => ({
+  kind: 'image',
+  modelId,
+  inputTokens: tokens?.inputTokens || 0,
+  outputTokens: tokens?.outputTokens || 0,
+  imagesGenerated: 1,
+  estimated: false,
+});
+
+/** 图像结果 → data URL（Mulby 返回纯 base64；mime 按魔数探测，方案 5.6） */
 const toDataUrl = (image: string) =>
-  image.startsWith('data:') ? image : `data:image/png;base64,${image}`;
+  image.startsWith('data:') ? image : `data:${sniffImageMime(image)};base64,${image}`;
+
+// ================= 图像流式进度统一封装（方案 5.3，维持 D1 epoch） =================
+// 仅无参考图路径（generate）走流式；带参考图的 edit 无 stream 变体，保持现状。
+// chunk.__requestId 为第 6 章宿主分支（feat/ai-image-abort-and-size）新增：登记进
+// activeTextRequestIds 集合，abortAllAiTasks 即可真杀在途请求；老宿主永不发该
+// chunk，自然退化为"结果作废不写界面"（D6，无需显式探测）。
+
+const generateImageWithProgress = async (
+  ai: ReturnType<typeof getAi>,
+  input: { model: string; prompt: string; size: string; count: number },
+  epoch: number,
+  onProgress?: (p: ImageProgress) => void
+): Promise<{ images: string[]; tokens: { inputTokens: number; outputTokens: number } }> => {
+  if (typeof ai.images?.generateStream !== 'function') {
+    return ai.images.generate(input); // 特性探测降级：老宿主走非流式，功能零回归
+  }
+  let requestId: string | null = null;
+  try {
+    return await ai.images.generateStream(input, (chunk: any) => {
+      if (chunk?.__requestId) {
+        requestId = chunk.__requestId;
+        if (epoch === abortEpoch) {
+          activeTextRequestIds.add(chunk.__requestId);
+        } else {
+          safeAbort(ai, chunk.__requestId); // 捕获到句柄时已被中止：立即杀掉
+        }
+        return;
+      }
+      if (epoch !== abortEpoch || !onProgress) return; // 中止后迟到 chunk 丢弃（D1）
+      onProgress({
+        stage: chunk?.stage,
+        message: chunk?.message,
+        preview: chunk?.type === 'preview' && chunk?.image ? toDataUrl(chunk.image) : undefined,
+        received: chunk?.received,
+        total: chunk?.total,
+      });
+    });
+  } finally {
+    if (requestId) activeTextRequestIds.delete(requestId);
+  }
+};
 
 export const refineText = async (
   originalText: string,
@@ -210,16 +310,18 @@ export const refineText = async (
 
     throwIfAborted(epoch);
 
+    const content = typeof res?.content === 'string' ? res.content.trim() : '';
+
     if (onUsage) {
-      onUsage({
-        inputTokens: res?.usage?.inputTokens ?? estimateTokens(prompt),
-        outputTokens: res?.usage?.outputTokens ?? estimateTokens(typeof res?.content === 'string' ? res.content : ''),
-        imagesGenerated: 0,
-        modelType: 'GEMINI_3_PRO'
-      });
+      const u = res?.usage;
+      if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+        onUsage(textStat(u.inputTokens, u.outputTokens, false));
+      } else {
+        const est = await estimateTextUsage(activeModels.textModel || undefined, prompt, content);
+        onUsage(textStat(est.inputTokens, est.outputTokens, true));
+      }
     }
 
-    const content = typeof res?.content === 'string' ? res.content.trim() : '';
     return content || originalText;
   } catch (e) {
     console.error("Text refinement failed", e);
@@ -279,16 +381,18 @@ export const refineImagePrompt = async (
 
     throwIfAborted(epoch);
 
+    const text = typeof result?.content === 'string' ? result.content : '';
+
     if (onUsage) {
-      onUsage({
-        inputTokens: result?.usage?.inputTokens ?? estimateTokens(systemPrompt),
-        outputTokens: result?.usage?.outputTokens ?? estimateTokens(typeof result?.content === 'string' ? result.content : ''),
-        imagesGenerated: 0,
-        modelType: 'GEMINI_3_PRO'
-      });
+      const u = result?.usage;
+      if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+        onUsage(textStat(u.inputTokens, u.outputTokens, false));
+      } else {
+        const est = await estimateTextUsage(activeModels.textModel || undefined, systemPrompt, text);
+        onUsage(textStat(est.inputTokens, est.outputTokens, true));
+      }
     }
 
-    const text = typeof result?.content === 'string' ? result.content : '';
     if (!text) throw new Error("Empty response from AI");
     return text.trim();
   } catch (error) {
@@ -452,16 +556,20 @@ const parseScriptWithRepair = async (
         ...NO_TOOLS,
       });
       const fixedText = typeof fixed?.content === 'string' ? fixed.content : '';
-      // 修复调用同样计费，记入 TokenMonitor
-      onUsage?.({
-        inputTokens: fixed?.usage?.inputTokens ?? estimateTokens(raw),
-        outputTokens: fixed?.usage?.outputTokens ?? estimateTokens(fixedText),
-        imagesGenerated: 0,
-        modelType: 'GEMINI_3_PRO',
-      });
+      // 修复调用同样计费，记入 TokenMonitor（方案 5.2：如实上报模型与估算标记）
+      if (onUsage) {
+        const u = fixed?.usage;
+        if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+          onUsage(textStat(u.inputTokens, u.outputTokens, false));
+        } else {
+          const est = await estimateTextUsage(activeModels.textModel || undefined, raw, fixedText);
+          onUsage(textStat(est.inputTokens, est.outputTokens, true));
+        }
+      }
       return JSON.parse(extractJson(fixedText)) as ComicResponse;
     } catch {
-      const err = new Error('剧本 JSON 解析失败（已自动修复重试一次）。原始输出已保留在右侧日志面板，可复制后手动修复重用。');
+      // 方案 5.4：可行动错误文案（不透传 "Unexpected token…"）
+      const err = new Error('模型返回的剧本不是有效 JSON（已自动修复重试一次仍失败）。建议：① 直接重试；② 更换支持 JSON 输出的文本模型。原始输出已保留在右侧日志面板，可复制后手动修复重用。');
       (err as Error & { rawText?: string }).rawText = raw;
       throw err;
     }
@@ -553,19 +661,19 @@ const STATIC_SYSTEM_PROMPT = `
     ${getJsonSchemaString()}
 `;
 
-export const generateComicScript = async (
+/**
+ * 剧本 user 消息构造（方案 5.2 步骤 6 抽出）：generateComicScript 与
+ * estimateScriptTokens（pre-flight 预估）共用同一函数，保证预估与实发一致。
+ */
+const buildScriptUserPrompt = (
   text: string,
   style: string,
   character: CharacterProfile,
   storyMode: StoryMode,
   customStoryPrompt: string | undefined,
   panelCount: number,
-  totalPages: string, // "Short", "Medium", "Long"
-  onLogUpdate: (logType: 'INPUT' | 'OUTPUT', text: string) => void,
-  onUsage?: (stat: UsageStat) => void
-): Promise<ComicResponse> => {
-  const ai = getAi();
-
+  totalPages: string // "Short", "Medium", "Long"
+): string => {
   // Instruction for panel density per page
   const panelsPerPage = panelCount > 0 ? `Exactly ${panelCount} panels per page` : "Auto-determined (3 to 6 panels)";
 
@@ -633,7 +741,7 @@ export const generateComicScript = async (
 
   // 方案 4.5：system 完全静态（STATIC_SYSTEM_PROMPT 模块级常量），变量集中到 user 消息；
   // 会话内稳定的 Source Material 放最前（调 style/页数不使源文本段的缓存前缀失效），可调变量放最后。
-  const userPrompt = [
+  return [
     `Source Material:\n"""\n${text}\n"""`,
     castingPhase,
     `Target Art Style: "${style}"`,
@@ -641,6 +749,57 @@ export const generateComicScript = async (
     `Panels per Page: ${panelsPerPage}.`,
     `Directives for Plot & Narrative (Style Lens):\n${specificNarrativeInstructions}`,
   ].join('\n\n');
+};
+
+/**
+ * Pre-flight 输入 token 预估（方案 5.2 步骤 6）：宿主 tokens.estimate 不可用返回 null（UI 隐藏）。
+ * 消息构造与 generateComicScript 实发完全一致（同一 buildScriptUserPrompt + STATIC_SYSTEM_PROMPT）。
+ */
+export const estimateScriptTokens = async (input: {
+  sourceText: string;
+  style: string;
+  character: CharacterProfile;
+  storyMode: StoryMode;
+  customStoryPrompt?: string;
+  panelCount: number;
+  totalPages: string;
+}): Promise<number | null> => {
+  const ai = (window as Window).mulby?.ai;
+  const est = (ai as { tokens?: { estimate?: Function } } | undefined)?.tokens?.estimate;
+  if (typeof est !== 'function' || !input.sourceText.trim()) return null;
+  try {
+    const userPrompt = buildScriptUserPrompt(
+      input.sourceText, input.style, input.character, input.storyMode,
+      input.customStoryPrompt, input.panelCount, input.totalPages
+    );
+    const r = await est({
+      ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
+      messages: [
+        { role: 'system', content: STATIC_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+    return typeof r?.inputTokens === 'number' ? r.inputTokens : null;
+  } catch {
+    return null;
+  }
+};
+
+export const generateComicScript = async (
+  text: string,
+  style: string,
+  character: CharacterProfile,
+  storyMode: StoryMode,
+  customStoryPrompt: string | undefined,
+  panelCount: number,
+  totalPages: string, // "Short", "Medium", "Long"
+  onLogUpdate: (logType: 'INPUT' | 'OUTPUT', text: string) => void,
+  onUsage?: (stat: UsageStat) => void
+): Promise<ComicResponse> => {
+  const ai = getAi();
+  const userPrompt = buildScriptUserPrompt(
+    text, style, character, storyMode, customStoryPrompt, panelCount, totalPages
+  );
 
   // Log the input prompt immediately（system + user 拼接，日志观感不变）
   const fullInputText = `${STATIC_SYSTEM_PROMPT}\n\n${userPrompt}`;
@@ -701,12 +860,13 @@ export const generateComicScript = async (
     }
 
     if (onUsage) {
-      onUsage({
-        inputTokens: finalMsg?.usage?.inputTokens ?? estimateTokens(fullInputText),
-        outputTokens: finalMsg?.usage?.outputTokens ?? estimateTokens(fullText),
-        imagesGenerated: 0,
-        modelType: 'GEMINI_3_PRO'
-      });
+      const u = finalMsg?.usage;
+      if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+        onUsage(textStat(u.inputTokens, u.outputTokens, false));
+      } else {
+        const est = await estimateTextUsage(activeModels.textModel || undefined, fullInputText, fullText);
+        onUsage(textStat(est.inputTokens, est.outputTokens, true));
+      }
     }
 
     if (!fullText) {
@@ -738,7 +898,8 @@ export const generateCharacterReference = async (
   name: string,
   description: string,
   style: string,
-  onUsage?: (stat: UsageStat) => void
+  onUsage?: (stat: UsageStat) => void,
+  onProgress?: (p: ImageProgress) => void
 ): Promise<string> => {
   const ai = getAi();
   const model = await resolveImageModel();
@@ -768,23 +929,17 @@ export const generateCharacterReference = async (
   const epoch = abortEpoch;
 
   try {
-    const result = await ai.images.generate({
+    // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
+    const result = await generateImageWithProgress(ai, {
       model,
       prompt,
       size: '1024x1536',
       count: 1
-    });
+    }, epoch, onProgress);
 
     throwIfAborted(epoch);
 
-    if (onUsage) {
-       onUsage({
-          inputTokens: result.tokens?.inputTokens || estimateTokens(prompt),
-          outputTokens: result.tokens?.outputTokens || 1120,
-          imagesGenerated: 1,
-          modelType: 'GEMINI_3_PRO_IMAGE'
-       });
-    }
+    if (onUsage) onUsage(imageStat(model, result.tokens));
 
     const image = result.images?.[0];
     if (image) return toDataUrl(image);
@@ -808,7 +963,8 @@ export const generatePropReference = async (
   style: string,
   mainCharacterName: string,
   storyMode: string,
-  onUsage?: (stat: UsageStat) => void
+  onUsage?: (stat: UsageStat) => void,
+  onProgress?: (p: ImageProgress) => void
 ): Promise<string> => {
   const ai = getAi();
   const model = await resolveImageModel();
@@ -837,23 +993,17 @@ export const generatePropReference = async (
   const epoch = abortEpoch;
 
   try {
-    const result = await ai.images.generate({
+    // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
+    const result = await generateImageWithProgress(ai, {
       model,
       prompt,
       size: '1024x1024',
       count: 1
-    });
+    }, epoch, onProgress);
 
     throwIfAborted(epoch);
 
-    if (onUsage) {
-       onUsage({
-          inputTokens: result.tokens?.inputTokens || estimateTokens(prompt),
-          outputTokens: result.tokens?.outputTokens || 1120,
-          imagesGenerated: 1,
-          modelType: 'GEMINI_3_PRO_IMAGE'
-       });
-    }
+    if (onUsage) onUsage(imageStat(model, result.tokens));
 
     const image = result.images?.[0];
     if (image) return toDataUrl(image);
@@ -872,7 +1022,8 @@ export const generatePanelImage = async (
   prompt: string,
   aspectRatio: string,
   referenceImages?: string[], // Optional array of base64 images
-  onUsage?: (stat: UsageStat) => void
+  onUsage?: (stat: UsageStat) => void,
+  onProgress?: (p: ImageProgress) => void
 ): Promise<string> => {
   const ai = getAi();
   const model = await resolveImageModel();
@@ -919,12 +1070,15 @@ export const generatePanelImage = async (
     let result: { images: string[]; tokens: { inputTokens: number; outputTokens: number } };
 
     if (hasRefs) {
-      // 带参考图：附件经模块级缓存复用（方案 4.1，同一张图整轮会话只上传一次），走 images.edit
+      // 带参考图：附件经模块级缓存复用（方案 4.1，同一张图整轮会话只上传一次），走 images.edit。
+      // edit 无 stream 变体（方案 5.3）：给两段式真实进度——上传参考图 → 绘制中。
+      onProgress?.({ stage: 'start', message: '上传参考图…' });
       for (const imgData of referenceImages!) {
         throwIfAborted(epoch);
         refAttachmentIds.push(await uploadRefCached(ai, imgData));
       }
       throwIfAborted(epoch);
+      onProgress?.({ stage: 'partial', message: '绘制中…' });
 
       // 第 6 章对接：自生成 requestId 随 input 传入并登记进中止集合——新宿主
       // （feat/ai-image-abort-and-size）abortAllAiTasks 即可真杀在途 edit；
@@ -945,32 +1099,19 @@ export const generatePanelImage = async (
         activeTextRequestIds.delete(editRequestId);
       }
     } else {
-      result = await ai.images.generate({
+      // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
+      result = await generateImageWithProgress(ai, {
         model,
         prompt: finalPrompt,
         size,
         count: 1
-      });
+      }, epoch, onProgress);
     }
 
     throwIfAborted(epoch);
 
-    if (onUsage) {
-        let actualInputTokens = result.tokens?.inputTokens || 0;
-        let actualOutputTokens = result.tokens?.outputTokens || 0;
-        if (!actualInputTokens) {
-            const imageInputTokens = (referenceImages?.length || 0) * 560;
-            actualInputTokens = estimateTokens(finalPrompt) + imageInputTokens;
-        }
-        if (!actualOutputTokens) actualOutputTokens = 1120;
-
-        onUsage({
-           inputTokens: actualInputTokens,
-           outputTokens: actualOutputTokens,
-           imagesGenerated: 1,
-           modelType: 'GEMINI_3_PRO_IMAGE'
-        });
-     }
+    // 方案 5.2：token 记宿主原始值（占位 0/16 不用于计价），计价在 App 层按张查价表
+    if (onUsage) onUsage(imageStat(model, result.tokens));
 
     const image = result.images?.[0];
     if (image) return toDataUrl(image);

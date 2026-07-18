@@ -115,11 +115,21 @@ export interface ComicResponse {
   pages: ComicPageScript[];
 }
 
+/** 图像生成实时进度（方案 5.3）：由 images.generateStream 的 chunk 映射而来 */
+export interface ImageProgress {
+  stage?: string;      // start / partial / finalizing / completed / fallback
+  message?: string;    // 宿主或插件给出的阶段文案（优先展示）
+  preview?: string;    // 渐进预览图 dataURL（是否出现取决于 provider）
+  received?: number;
+  total?: number;
+}
+
 export interface ComicPageData extends ComicPageScript {
   title?: string; // Optional title for the cover page
   imageData?: string; // Base64 image of the whole page
   isGenerating: boolean;
   error?: string;
+  progress?: ImageProgress; // 生成期间的实时进度（方案 5.3；不落盘）
 }
 
 export interface AppConfig {
@@ -137,29 +147,40 @@ export interface AppConfig {
   imageModel?: string; // 图像生成模型 ID，留空使用第一个可用的图像生成模型
 }
 
-export type ModelType = 'GEMINI_3_PRO' | 'GEMINI_3_PRO_IMAGE' | 'GEMINI_2_5_FLASH_IMAGE';
+// ================= 费用统计（方案 5.2） =================
+// 不再假设模型恒为 Gemini：按实际 modelId 分组统计；宿主未暴露价目，
+// 美元金额由插件 services/pricing.ts 前缀匹配自维护——匹配不到只显 token/张数。
+
+/** 文本调用未指定模型时的展示占位（宿主路由的实际模型 id 插件不可知） */
+export const DEFAULT_TEXT_MODEL_LABEL = '(Mulby 默认)';
 
 export interface UsageStat {
+  kind: 'text' | 'image';
+  modelId: string;            // 实际所用模型 id；文本留空时记 DEFAULT_TEXT_MODEL_LABEL
   inputTokens: number;
   outputTokens: number;
   imagesGenerated: number;
-  modelType: ModelType; 
+  estimated: boolean;         // usage 来自兜底估算时为 true
+}
+
+export interface ModelUsageBreakdown {
+  cost: number | null;        // null = 未收录价目（一次都没计上价）
+  inputTokens: number;
+  outputTokens: number;
+  images: number;
 }
 
 export interface TokenUsage {
   totalInputTokens: number;
   totalOutputTokens: number;
   totalImages: number;
-  estimatedCost: number;
-  breakdown: {
-    gemini3ProCost: number;
-    gemini3ProImageCost: number;
-    gemini25FlashImageCost: number;
-  };
+  estimatedCost: number;      // 已计价部分的估算总额（USD）
+  unpricedCalls: number;      // 未计价调用次数（模型不在价表内）
+  breakdown: Record<string, ModelUsageBreakdown>; // key = modelId
   history: {
     action: string;
     stat: UsageStat;
-    cost: number;
+    cost: number | null;      // null = 该次调用未计价
     timestamp: number;
   }[];
 }

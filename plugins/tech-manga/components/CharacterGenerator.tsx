@@ -1,8 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { CharacterSheetItem, PropSheetItem } from '../types';
+import { CharacterSheetItem, PropSheetItem, ImageProgress } from '../types';
 import { generateCharacterReference, generatePropReference, getAbortEpoch } from '../services/mulbyAiService';
 import { asyncPool, withRetryOnce } from '../services/asyncPool';
+import { stageText } from '../utils/progressText';
+import { S } from '../strings';
 
 interface CharacterGeneratorProps {
   characters: CharacterSheetItem[];
@@ -31,6 +33,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
 
   const [generatingStates, setGeneratingStates] = useState<Record<string, boolean>>({});
   const [errorStates, setErrorStates] = useState<Record<string, string>>({});
+  // 方案 5.3：资产卡片实时进度（stage 文案 + 渐进预览）
+  const [progressStates, setProgressStates] = useState<Record<string, ImageProgress>>({});
   
   const initializedRef = useRef(false);
   const charactersRef = useRef(characters);
@@ -100,6 +104,14 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     return () => clearTimeout(timer);
   }, []); 
 
+  // 方案 5.3：进度 chunk 写入该资产卡片（epoch 过滤已在 service 层完成）
+  const makeProgressHandler = (key: string) => (p: ImageProgress) => {
+    setProgressStates(prev => ({
+      ...prev,
+      [key]: { ...prev[key], ...p, preview: p.preview ?? prev[key]?.preview },
+    }));
+  };
+
   const handleGenerateCharacter = async (index: number, char: CharacterSheetItem) => {
     const key = `char-${index}`;
     if (inFlightRef.current.has(key)) return;   // 去重：该资产已在生成
@@ -110,13 +122,14 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     try {
       // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
       const imageData = await withRetryOnce(() =>
-        generateCharacterReference(char.name, char.description, style, onUsageCallback));
+        generateCharacterReference(char.name, char.description, style, onUsageCallback, makeProgressHandler(key)));
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
-      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
+      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
     } finally {
       inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
+      setProgressStates(prev => { const next = { ...prev }; delete next[key]; return next; });
     }
   };
 
@@ -132,13 +145,14 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
       // Pass mainCharacterName and storyMode to ensure consistent universe style
       // 方案 4.3：失败自动重试一次（AbortError/鉴权/纪元变化除外，D4）
       const imageData = await withRetryOnce(() =>
-        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback));
+        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key)));
       onUpdateProp(index, { ...prop, referenceImage: imageData });
     } catch (err: any) {
-      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "Generation failed") }));
+      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
     } finally {
       inFlightRef.current.delete(key);
       setGeneratingStates(prev => ({ ...prev, [key]: false }));
+      setProgressStates(prev => { const next = { ...prev }; delete next[key]; return next; });
     }
   };
 
@@ -162,8 +176,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     <div className="w-full space-y-6 animate-fade-in">
       
       <div className="text-center space-y-2 mb-6">
-         <h2 className="text-2xl font-bold text-white">Asset Studio</h2>
-         <p className="text-slate-400 text-sm">Review definitions and generate consistent reference images for characters and items.</p>
+         <h2 className="text-2xl font-bold text-white">{S.assetStudioTitle}</h2>
+         <p className="text-slate-400 text-sm">{S.assetStudioSubtitle}</p>
       </div>
       
       {/* Asset Tabs */}
@@ -172,13 +186,13 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
             onClick={() => setActiveTab('CHARACTERS')}
             className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${activeTab === 'CHARACTERS' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
         >
-            Characters ({characters.length})
+            {S.charactersTab(characters.length)}
         </button>
         <button 
             onClick={() => setActiveTab('PROPS')}
             className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${activeTab === 'PROPS' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
         >
-            Key Props / Items ({props.length})
+            {S.propsTab(props.length)}
         </button>
       </div>
 
@@ -197,13 +211,16 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                     ) : (
                         <div className="w-full h-full flex items-center justify-center flex-col text-slate-500">
                             <span className="text-3xl mb-2">👤</span>
-                            <span className="text-xs">No Reference</span>
+                            <span className="text-xs">{S.noReference}</span>
                         </div>
                     )}
                     {generatingStates[`char-${idx}`] && (
                         <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center flex-col z-10">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-2"></div>
-                            <span className="text-xs text-indigo-300">Generating...</span>
+                            {progressStates[`char-${idx}`]?.preview && (
+                                <img src={progressStates[`char-${idx}`]!.preview} alt="" className="absolute inset-0 w-full h-full object-contain opacity-50" />
+                            )}
+                            <div className="relative animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-2"></div>
+                            <span className="relative text-xs text-indigo-300">{stageText(progressStates[`char-${idx}`]) || S.generatingLabel}</span>
                         </div>
                     )}
                     {errorStates[`char-${idx}`] && (
@@ -216,7 +233,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                 className="w-full h-24 bg-slate-900 border border-slate-700 rounded p-2 text-xs text-slate-300 resize-none focus:outline-none focus:border-indigo-500"
                 value={char.description}
                 onChange={(e) => onUpdateCharacter(idx, { ...char, description: e.target.value })}
-                placeholder="Required: 'From [Series Name]'. e.g. 'From Doraemon, a blue robot cat...'"
+                placeholder={S.charDescPlaceholder}
                 />
                 <div className="flex flex-col space-y-2 pt-2">
                     <button 
@@ -224,11 +241,11 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                     disabled={generatingStates[`char-${idx}`]}
                     className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white text-xs font-bold rounded shadow-lg shadow-indigo-500/20 transition-all"
                     >
-                    {char.referenceImage ? "Regenerate Reference" : "Generate Reference"}
+                    {char.referenceImage ? S.regenerateRef : S.generateRef}
                     </button>
                     <div className="flex justify-center">
                         <label className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 flex items-center space-x-1">
-                            <span>Upload Custom Image</span>
+                            <span>{S.uploadCustomImage}</span>
                             <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload('char', idx, e)} />
                         </label>
                     </div>
@@ -242,8 +259,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
              {props.length === 0 && (
                  <div className="col-span-full text-center py-12 text-slate-500">
-                     <p>No key props identified in the script.</p>
-                     <p className="text-xs mt-2">The AI didn't find specific recurring items needed for consistency.</p>
+                     <p>{S.noPropsFound}</p>
+                     <p className="text-xs mt-2">{S.noPropsHint}</p>
                  </div>
              )}
              {props.map((prop, idx) => (
@@ -258,13 +275,16 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                         ) : (
                             <div className="w-full h-full flex items-center justify-center flex-col text-slate-500">
                                 <span className="text-3xl mb-2">📦</span>
-                                <span className="text-xs">No Reference</span>
+                                <span className="text-xs">{S.noReference}</span>
                             </div>
                         )}
                         {generatingStates[`prop-${idx}`] && (
                             <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center flex-col z-10">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-2"></div>
-                                <span className="text-xs text-indigo-300">Generating...</span>
+                                {progressStates[`prop-${idx}`]?.preview && (
+                                    <img src={progressStates[`prop-${idx}`]!.preview} alt="" className="absolute inset-0 w-full h-full object-contain opacity-50" />
+                                )}
+                                <div className="relative animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mb-2"></div>
+                                <span className="relative text-xs text-indigo-300">{stageText(progressStates[`prop-${idx}`]) || S.generatingLabel}</span>
                             </div>
                         )}
                          {errorStates[`prop-${idx}`] && (
@@ -277,7 +297,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                         className="w-full h-24 bg-slate-900 border border-slate-700 rounded p-2 text-xs text-slate-300 resize-none focus:outline-none focus:border-purple-500"
                         value={prop.description}
                         onChange={(e) => onUpdateProp && onUpdateProp(idx, { ...prop, description: e.target.value })}
-                        placeholder="Prop visual description..."
+                        placeholder={S.propDescPlaceholder}
                     />
                     <div className="flex flex-col space-y-2 pt-2">
                         <button 
@@ -285,11 +305,11 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                             disabled={generatingStates[`prop-${idx}`]}
                             className="w-full py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-700 text-white text-xs font-bold rounded shadow-lg shadow-purple-500/20 transition-all"
                         >
-                        {prop.referenceImage ? "Regenerate Prop" : "Generate Prop"}
+                        {prop.referenceImage ? S.regenerateProp : S.generateProp}
                         </button>
                         <div className="flex justify-center">
                             <label className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 flex items-center space-x-1">
-                                <span>Upload Custom Image</span>
+                                <span>{S.uploadCustomImage}</span>
                                 <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload('prop', idx, e)} />
                             </label>
                         </div>
@@ -304,7 +324,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
             onClick={onConfirm}
             className="px-12 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-lg rounded-xl shadow-lg shadow-indigo-500/20 transform hover:-translate-y-1 transition-all flex items-center"
          >
-            Save & Go to Script Editor →
+            {S.goToScriptEditor}
          </button>
       </div>
 

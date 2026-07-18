@@ -3,6 +3,8 @@
 import React, { ChangeEvent, useRef, useEffect, useState } from 'react';
 import { AppConfig, CharacterProfile, StoryMode } from '../types';
 import { PRESET_CHARACTERS, STYLE_OPTIONS, ASPECT_RATIOS, STORY_MODES, PAGE_LENGTH_OPTIONS } from '../constants';
+import { estimateScriptTokens } from '../services/mulbyAiService';
+import { S } from '../strings';
 
 interface MulbyModelOption {
   id: string;
@@ -112,6 +114,52 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
     reader.readAsText(file);
   };
 
+  // 方案 5.5：上传优先走原生打开对话框（showOpenDialog 返回路径数组，空数组即取消），
+  // 老宿主降级回 <input type=file>
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const handleUploadClick = async () => {
+    const m = (window as Window).mulby;
+    if (!m?.dialog?.showOpenDialog || !m?.filesystem?.readFile) {
+      fileInputRef.current?.click();
+      return;
+    }
+    setUploadError(null);
+    try {
+      const paths = await m.dialog.showOpenDialog({
+        filters: [{ name: '文本', extensions: ['txt', 'md'] }],
+        properties: ['openFile'],
+      });
+      const [path] = paths || [];
+      if (!path) return; // 用户取消
+      const content = await m.filesystem.readFile(path, 'utf-8');
+      if (typeof content === 'string') handleInputChange('sourceText', content);
+      else setUploadError(S.readFileFailed);
+    } catch {
+      setUploadError(S.readFileFailed);
+    }
+  };
+
+  // 方案 5.2 步骤 6：pre-flight 输入 token 预估（debounce 800ms；tokens.estimate 不可用时隐藏）
+  const [estimatedTokens, setEstimatedTokens] = useState<number | null>(null);
+  useEffect(() => {
+    if (!config.sourceText.trim()) { setEstimatedTokens(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const n = await estimateScriptTokens({
+        sourceText: config.sourceText,
+        style: config.style,
+        character: config.character,
+        storyMode: config.storyMode,
+        customStoryPrompt: config.customStoryPrompt,
+        panelCount: config.panelCount,
+        totalPages: config.totalPages,
+      });
+      if (!cancelled) setEstimatedTokens(n);
+    }, 800);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [config.sourceText, config.style, config.character, config.storyMode,
+      config.customStoryPrompt, config.panelCount, config.totalPages, config.textModel]);
+
   const isCustomChar = !PRESET_CHARACTERS.some(c => c.name === config.character.name) && config.character.name !== AUTO_DETECT_CHAR.name;
   const isCustomStory = config.storyMode === StoryMode.CUSTOM;
   const isSeriousHistory = config.storyMode === StoryMode.HISTORY_SERIOUS;
@@ -122,7 +170,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
       {/* Header */}
       <div className="flex items-center space-x-2 border-b border-slate-700 pb-4">
         <span className="text-2xl">⚡</span>
-        <h2 className="text-xl font-bold text-white">Story Configuration</h2>
+        <h2 className="text-xl font-bold text-white">{S.configTitle}</h2>
       </div>
 
       {/* AI 模型选择（由 Mulby 宿主提供模型与密钥） */}
@@ -174,34 +222,37 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
       {/* Input Area */}
       <div className="space-y-2">
         <label className="text-sm font-medium text-slate-400 flex justify-between">
-          <span>Source Content (Text/Code)</span>
-          <button 
-            onClick={() => fileInputRef.current?.click()}
+          <span>{S.sourceLabel}</span>
+          <button
+            onClick={handleUploadClick}
             className="text-indigo-400 hover:text-indigo-300 text-xs underline"
           >
-            Upload .txt/.md
+            {S.uploadSource}
           </button>
         </label>
         <textarea
           className="w-full h-32 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
-          placeholder={isSeriousHistory ? "Paste historical event description or biography..." : "Paste your technical documentation, code snippet, or article here..."}
+          placeholder={isSeriousHistory ? S.sourcePlaceholderHistory : S.sourcePlaceholder}
           value={config.sourceText}
           onChange={(e) => handleInputChange('sourceText', e.target.value)}
         />
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          className="hidden" 
-          accept=".txt,.md" 
+        <input
+          type="file"
+          ref={fileInputRef}
+          className="hidden"
+          accept=".txt,.md"
           onChange={handleFileUpload}
         />
+        {uploadError && (
+          <p className="text-[10px] text-red-400">{uploadError}</p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         
         {/* Style Selection */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-400">Comic Style</label>
+          <label className="text-sm font-medium text-slate-400">{S.styleLabel}</label>
           <select
             className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
             value={config.style}
@@ -210,13 +261,13 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
             {STYLE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
-            <option value="custom">Custom Style...</option>
+            <option value="custom">{S.customStyleOption}</option>
           </select>
         </div>
 
         {/* Story Mode Selection */}
         <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-400">Story Mode</label>
+          <label className="text-sm font-medium text-slate-400">{S.storyModeLabel}</label>
           <select
             className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
             value={config.storyMode}
@@ -233,10 +284,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
       {/* Custom Story Prompt */}
       {isCustomStory && (
         <div className="space-y-2 animate-fade-in">
-          <label className="text-sm font-medium text-indigo-400">Custom Story Rules</label>
+          <label className="text-sm font-medium text-indigo-400">{S.customStoryLabel}</label>
           <textarea
             className="w-full h-24 bg-slate-900 border border-indigo-500/50 rounded-lg p-3 text-sm text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
-            placeholder="Describe your custom narrative rules (e.g. 'A Noir Detective story where bugs are crimes...')"
+            placeholder={S.customStoryPlaceholder}
             value={config.customStoryPrompt || ''}
             onChange={(e) => handleInputChange('customStoryPrompt', e.target.value)}
           />
@@ -245,7 +296,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
 
       {/* Character Selection (Moved to full width below style/mode) */}
       <div className="space-y-2">
-          <label className="text-sm font-medium text-slate-400">Main Character</label>
+          <label className="text-sm font-medium text-slate-400">{S.mainCharacterLabel}</label>
           <div className="relative">
             <select
                 className={`w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500 ${isSeriousHistory ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -254,23 +305,23 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
                 disabled={isSeriousHistory}
             >
                 {/* Special Auto option used for display state */}
-                <option value="auto">👥 Auto-detect Historical Figures</option>
+                <option value="auto">{S.autoDetectOption}</option>
                 
-                <option value="" disabled>Select a Character</option>
+                <option value="" disabled>{S.selectCharacterOption}</option>
                 {PRESET_CHARACTERS.map(c => (
                 <option key={c.name} value={c.name}>{c.name}</option>
                 ))}
-                <option value="custom">Custom Character...</option>
+                <option value="custom">{S.customCharacterOption}</option>
             </select>
             {isSeriousHistory && (
                 <div className="absolute top-0 right-0 h-full flex items-center pr-8 pointer-events-none">
-                     <span className="text-xs text-yellow-500 font-bold bg-yellow-900/40 px-2 py-0.5 rounded">AUTO-CAST ACTIVE</span>
+                     <span className="text-xs text-yellow-500 font-bold bg-yellow-900/40 px-2 py-0.5 rounded">{S.autoCastBadge}</span>
                 </div>
             )}
           </div>
           {isSeriousHistory && (
               <p className="text-[10px] text-slate-500">
-                  * In Serious History mode, characters are automatically extracted from the source text to ensure historical accuracy.
+                  {S.autoCastHint}
               </p>
           )}
         </div>
@@ -279,7 +330,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
       {isCustomChar && !isSeriousHistory && (
         <div className="bg-slate-900/50 p-3 rounded-lg space-y-3 border border-slate-700/50">
            <div>
-             <label className="text-xs text-slate-500">Character Name</label>
+             <label className="text-xs text-slate-500">{S.charNameLabel}</label>
              <input 
                 type="text"
                 className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
@@ -288,7 +339,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
              />
            </div>
            <div>
-             <label className="text-xs text-slate-500">Visual Description (Hair, Clothes, Vibe)</label>
+             <label className="text-xs text-slate-500">{S.charDescLabel}</label>
              <textarea 
                 className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white h-16 resize-none"
                 value={config.character.description}
@@ -302,7 +353,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
       <div className="grid grid-cols-2 gap-4">
          {/* Page Length */}
          <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-400">Page Length</label>
+            <label className="text-sm font-medium text-slate-400">{S.pageLengthLabel}</label>
             <select
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
                 value={config.totalPages}
@@ -316,23 +367,23 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
 
         {/* Panel Density */}
         <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-400">Panels per Page</label>
+            <label className="text-sm font-medium text-slate-400">{S.panelsLabel}</label>
             <select
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
                 value={config.panelCount}
                 onChange={(e) => handleInputChange('panelCount', Number(e.target.value))}
             >
-                <option value={0}>Auto</option>
-                <option value={3}>3 Panels</option>
-                <option value={4}>4 Panels</option>
-                <option value={6}>6 Panels</option>
+                <option value={0}>{S.panelsAuto}</option>
+                <option value={3}>{S.panelsN(3)}</option>
+                <option value={4}>{S.panelsN(4)}</option>
+                <option value={6}>{S.panelsN(6)}</option>
             </select>
         </div>
       </div>
       
       {/* Aspect Ratio */}
       <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-400">Format Ratio</label>
+            <label className="text-sm font-medium text-slate-400">{S.ratioLabel}</label>
             <select
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
                 value={config.aspectRatio}
@@ -343,6 +394,13 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
                 ))}
             </select>
         </div>
+
+      {/* 方案 5.2：pre-flight 输入 token 预估（tokens.estimate 不可用时隐藏） */}
+      {estimatedTokens != null && (
+        <p className="text-[10px] text-slate-500 text-right -mb-3">
+          {S.estimatedInputTokens(estimatedTokens.toLocaleString())}
+        </p>
+      )}
 
       <button
         onClick={onGenerate}
@@ -359,10 +417,10 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>Dreaming up your comic...</span>
+            <span>{S.generating}</span>
           </span>
         ) : (
-          "GENERATE COMIC"
+          S.generateBtn
         )}
       </button>
 

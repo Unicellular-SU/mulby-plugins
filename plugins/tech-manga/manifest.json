@@ -19,6 +19,9 @@
   "pluginSetting": {
     "single": true
   },
+  "permissions": {
+    "notification": true
+  },
   "features": [
     {
       "code": "tech-manga-open",
@@ -27,7 +30,9 @@
       "cmds": [
         { "type": "keyword", "value": "技术漫画" },
         { "type": "keyword", "value": "科技漫画" },
-        { "type": "keyword", "value": "techmanga" }
+        { "type": "keyword", "value": "techmanga" },
+        { "type": "over", "label": "改编成技术漫画", "minLength": 50, "maxLength": 100000 },
+        { "type": "files", "label": "把文档改编成漫画", "exts": ["txt", "md"], "fileType": "file", "maxLength": 1 }
       ]
     }
   ]

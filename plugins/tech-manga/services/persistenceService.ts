@@ -26,7 +26,7 @@ const getStorage = (): MulbyStorage | undefined => (window as Window).mulby?.sto
 
 export type PersistedCharacter = Omit<CharacterSheetItem, 'referenceImage'> & { hasReference: boolean };
 export type PersistedProp = Omit<PropSheetItem, 'referenceImage'> & { hasReference: boolean };
-export type PersistedPage = Omit<ComicPageData, 'imageData' | 'isGenerating'> & { hasImage: boolean };
+export type PersistedPage = Omit<ComicPageData, 'imageData' | 'isGenerating' | 'progress'> & { hasImage: boolean };
 
 export interface PersistedSession {
   v: number;

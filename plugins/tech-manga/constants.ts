@@ -111,17 +111,17 @@ export const STYLE_OPTIONS = [
 ];
 
 export const ASPECT_RATIOS = [
-  { label: '2:3 (Manga Page)', value: AspectRatio.MANGA_PAGE },
-  { label: '3:4 (Portrait)', value: AspectRatio.PORTRAIT },
-  { label: '1:1 (Square)', value: AspectRatio.SQUARE },
-  { label: '4:3 (Landscape)', value: AspectRatio.LANDSCAPE },
-  { label: '16:9 (Cinematic)', value: AspectRatio.WIDE },
+  { label: '2:3（漫画页）', value: AspectRatio.MANGA_PAGE },
+  { label: '3:4（竖版）', value: AspectRatio.PORTRAIT },
+  { label: '1:1（方形）', value: AspectRatio.SQUARE },
+  { label: '4:3（横版）', value: AspectRatio.LANDSCAPE },
+  { label: '16:9（宽银幕）', value: AspectRatio.WIDE },
 ];
 
 export const PAGE_LENGTH_OPTIONS = [
-  { label: 'Short (3-5 Pages)', value: 'Short' },
-  { label: 'Medium (6-10 Pages)', value: 'Medium' },
-  { label: 'Long (11-15 Pages)', value: 'Long' },
+  { label: '短篇（3-5 页）', value: 'Short' },
+  { label: '中篇（6-10 页）', value: 'Medium' },
+  { label: '长篇（11-15 页）', value: 'Long' },
 ];
 
 export const STORY_MODES = [

@@ -1,8 +1,9 @@
 
 import React, { useState } from 'react';
-import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem } from '../types';
+import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem, UsageStat } from '../types';
 import { refineText } from '../services/mulbyAiService';
 import { resolveByName } from '../utils/nameMatch';
+import { S } from '../strings';
 
 interface ScriptEditorProps {
   script: ComicResponse;
@@ -10,9 +11,11 @@ interface ScriptEditorProps {
   propSheet?: PropSheetItem[];
   onUpdate: (updatedScript: ComicResponse) => void;
   onContinue: () => void;
+  /** 方案 5.2：润色调用计费上报（补漏记） */
+  onUsage?: (action: string, stat: UsageStat) => void;
 }
 
-const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue }) => {
+const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue, onUsage }) => {
   const [activePageIdx, setActivePageIdx] = useState(0);
   const [refiningField, setRefiningField] = useState<string | null>(null);
   const [refineError, setRefineError] = useState<{ target: string; message: string } | null>(null);
@@ -50,7 +53,8 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
         (IMPORTANT: Ensure all edits conform to the universe/lore of these characters)
       `.trim();
 
-      const refined = await refineText(currentText, instr, context);
+      const refined = await refineText(currentText, instr, context,
+        (stat) => onUsage?.(`Refine ${target}`, stat)); // 方案 5.2：补漏记
 
       if (target === 'ANALYSIS') handleTextChange('analysis', refined);
       if (target === 'COVER') onUpdate({ ...script, cover_image_prompt: refined });
@@ -59,7 +63,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
       return true;
     } catch (e: any) {
       console.error(e);
-      setRefineError({ target, message: e?.message || 'AI 润色失败，请重试' });
+      setRefineError({ target, message: e?.message || S.refineFailed });
       return false;
     } finally {
       setRefiningField(null);
@@ -75,14 +79,14 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
       {/* Header */}
       <div className="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center">
         <div>
-           <h2 className="text-xl font-bold text-white">Storyboard Editor</h2>
-           <p className="text-xs text-slate-400">Review and refine the AI generated script before production.</p>
+           <h2 className="text-xl font-bold text-white">{S.storyboardTitle}</h2>
+           <p className="text-xs text-slate-400">{S.storyboardSubtitle}</p>
         </div>
         <button 
            onClick={onContinue}
            className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg shadow-lg shadow-green-500/20 text-sm transition-all"
         >
-           Start Comic Production →
+           {S.startProduction}
         </button>
       </div>
 
@@ -90,20 +94,20 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
         
         {/* Sidebar: Navigation */}
         <div className="w-64 bg-slate-800/50 border-r border-slate-700 overflow-y-auto p-2 space-y-2">
-           <div className="text-xs font-bold text-slate-500 uppercase px-2 mt-2">Global</div>
+           <div className="text-xs font-bold text-slate-500 uppercase px-2 mt-2">{S.sidebarGlobal}</div>
            <button 
              onClick={() => setActivePageIdx(-1)}
              className={`w-full text-left px-3 py-2 rounded text-sm ${activePageIdx === -1 ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
            >
-             Overview & Analysis
+             {S.sidebarOverview}
            </button>
            
-           <div className="text-xs font-bold text-slate-500 uppercase px-2 mt-4">Pages</div>
+           <div className="text-xs font-bold text-slate-500 uppercase px-2 mt-4">{S.sidebarPages}</div>
            <button 
              onClick={() => setActivePageIdx(-2)}
              className={`w-full text-left px-3 py-2 rounded text-sm ${activePageIdx === -2 ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
            >
-             00. Cover Art
+             {S.sidebarCover}
            </button>
            {script.pages.map((p, idx) => (
              <button
@@ -111,7 +115,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                onClick={() => setActivePageIdx(idx)}
                className={`w-full text-left px-3 py-2 rounded text-sm ${activePageIdx === idx ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
              >
-               {String(p.page_number).padStart(2, '0')}. Page Layout
+               {S.sidebarPage(String(p.page_number).padStart(2, '0'))}
              </button>
            ))}
         </div>
@@ -123,7 +127,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
            {activePageIdx === -1 && (
              <div className="space-y-6 max-w-3xl mx-auto animate-fade-in">
                 <div className="space-y-2">
-                   <label className="text-sm font-bold text-indigo-400">Comic Title</label>
+                   <label className="text-sm font-bold text-indigo-400">{S.comicTitleLabel}</label>
                    <input 
                       className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold text-lg focus:border-indigo-500 outline-none"
                       value={script.title}
@@ -131,7 +135,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                    />
                 </div>
                 <div className="space-y-2">
-                   <label className="text-sm font-bold text-indigo-400">Story Analysis & Pacing Strategy</label>
+                   <label className="text-sm font-bold text-indigo-400">{S.analysisLabel}</label>
                    <textarea 
                       className="w-full h-96 bg-slate-800 border border-slate-600 rounded p-4 text-slate-300 text-sm leading-relaxed focus:border-indigo-500 outline-none resize-none"
                       value={script.analysis}
@@ -149,9 +153,9 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
            {/* COVER ART VIEW */}
            {activePageIdx === -2 && (
              <div className="space-y-6 max-w-3xl mx-auto animate-fade-in">
-                <h3 className="text-lg font-bold text-white border-b border-slate-700 pb-2">Cover Art Design</h3>
+                <h3 className="text-lg font-bold text-white border-b border-slate-700 pb-2">{S.coverDesignTitle}</h3>
                 <div className="space-y-2">
-                   <label className="text-sm font-bold text-indigo-400">Image Prompt</label>
+                   <label className="text-sm font-bold text-indigo-400">{S.coverPromptLabel}</label>
                    <textarea 
                       className="w-full h-64 bg-slate-800 border border-slate-600 rounded p-4 text-slate-300 text-sm leading-relaxed focus:border-indigo-500 outline-none font-mono"
                       value={script.cover_image_prompt}
@@ -173,11 +177,11 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                 {/* Editor Column */}
                 <div className="lg:col-span-2 space-y-8">
                     <div className="flex justify-between items-end border-b border-slate-700 pb-2">
-                        <h3 className="text-lg font-bold text-white">Page {activePage.page_number}</h3>
+                        <h3 className="text-lg font-bold text-white">{S.pageTitle(activePage.page_number)}</h3>
                     </div>
 
                     <div className="space-y-2">
-                    <label className="text-sm font-bold text-indigo-400">Layout Description</label>
+                    <label className="text-sm font-bold text-indigo-400">{S.layoutLabel}</label>
                     <textarea 
                         className="w-full h-32 bg-slate-800 border border-slate-600 rounded p-3 text-slate-300 text-sm leading-relaxed focus:border-indigo-500 outline-none resize-none"
                         value={activePage.layout_description}
@@ -191,9 +195,9 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                     </div>
 
                     <div className="space-y-2">
-                    <label className="text-sm font-bold text-indigo-400">Full Image Prompt (Includes Visual State & Dialogue)</label>
+                    <label className="text-sm font-bold text-indigo-400">{S.fullPromptLabel}</label>
                     <p className="text-xs text-slate-500 mb-1">
-                        This is the raw instruction sent to the image generator. It includes character states, environment details, and mandatory Chinese dialogue.
+                        {S.fullPromptHint}
                     </p>
                     <textarea 
                         className="w-full h-80 bg-slate-800 border border-slate-600 rounded p-3 text-slate-300 text-xs leading-relaxed focus:border-indigo-500 outline-none font-mono"
@@ -211,7 +215,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                 {/* Info / Visual Column */}
                 <div className="space-y-6">
                     <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Characters in Scene</h4>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">{S.charsInScene}</h4>
                         {activePage.characters_in_scene && activePage.characters_in_scene.length > 0 ? (
                              <div className="space-y-3">
                                 {activePage.characters_in_scene.map((name, i) => (
@@ -228,10 +232,10 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                                 ))}
                              </div>
                         ) : (
-                            <p className="text-xs text-slate-500 italic">No specific characters listed for this scene.</p>
+                            <p className="text-xs text-slate-500 italic">{S.noCharsInScene}</p>
                         )}
                         
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">Props in Scene</h4>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.propsInScene}</h4>
                          {activePage.props_in_scene && activePage.props_in_scene.length > 0 ? (
                              <div className="space-y-3">
                                 {activePage.props_in_scene.map((name, i) => (
@@ -248,7 +252,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                                 ))}
                              </div>
                         ) : (
-                            <p className="text-xs text-slate-500 italic">No key props listed.</p>
+                            <p className="text-xs text-slate-500 italic">{S.noPropsInScene}</p>
                         )}
 
                     </div>
@@ -277,7 +281,7 @@ const RefineBox: React.FC<{ isLoading: boolean, error?: string | null, onRefine:
         <div className="flex gap-2">
            <input
               className="flex-grow bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
-              placeholder="Ask AI to refine this text (e.g., 'Make it more dramatic', 'Fix the dialogue')..."
+              placeholder={S.refinePlaceholder}
               value={val}
               onChange={(e) => setVal(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
@@ -287,7 +291,7 @@ const RefineBox: React.FC<{ isLoading: boolean, error?: string | null, onRefine:
               disabled={isLoading || !val.trim()}
               className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 text-white px-3 py-1 rounded"
            >
-              {isLoading ? 'Refining...' : 'AI Refine'}
+              {isLoading ? S.refining : S.refineBtn}
            </button>
         </div>
         {error && <p className="text-[11px] text-red-400 mt-1.5">{error}</p>}

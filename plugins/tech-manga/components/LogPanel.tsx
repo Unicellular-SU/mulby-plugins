@@ -1,11 +1,14 @@
 import React, { useEffect, useRef } from 'react';
+import { S } from '../strings';
 
 interface LogPanelProps {
   inputLog: string;
   outputLog: string;
+  /** 当前选择的文本模型 id；留空表示宿主默认路由（插件不可知实际模型），显示「Mulby 默认模型」 */
+  textModel?: string;
 }
 
-const LogPanel: React.FC<LogPanelProps> = ({ inputLog, outputLog }) => {
+const LogPanel: React.FC<LogPanelProps> = ({ inputLog, outputLog, textModel }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,8 +26,8 @@ const LogPanel: React.FC<LogPanelProps> = ({ inputLog, outputLog }) => {
           <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
           <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
         </div>
-        <div className="ml-4 text-slate-400 text-xs flex-1 text-center pr-12">
-           AI_AGENT_TERMINAL -- GEMINI-3.0-PRO
+        <div className="ml-4 text-slate-400 text-xs flex-1 text-center pr-12 truncate">
+           {S.terminalTitle(textModel || S.defaultModelLabel)}
         </div>
       </div>
 
@@ -53,8 +56,8 @@ const LogPanel: React.FC<LogPanelProps> = ({ inputLog, outputLog }) => {
         ) : !inputLog && (
            <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2 opacity-50">
               <span className="text-4xl">⌨️</span>
-              <p className="text-xs">System Ready.</p>
-              <p className="text-xs">Waiting for script generation task...</p>
+              <p className="text-xs">{S.terminalReady}</p>
+              <p className="text-xs">{S.terminalWaiting}</p>
            </div>
         )}
         <div ref={bottomRef} />
@@ -63,7 +66,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ inputLog, outputLog }) => {
       {/* Footer */}
       <div className="bg-[#161b22] px-4 py-1.5 border-t border-slate-700 text-xs text-slate-500 flex justify-between shrink-0">
         <span className={outputLog ? "text-green-500" : "text-slate-500"}>
-          {outputLog ? "● PROCESSING STREAM" : "○ IDLE"}
+          {outputLog ? S.terminalStreaming : S.terminalIdle}
         </span>
         <span>JSON MODE :: ENABLED</span>
       </div>

@@ -1,7 +1,16 @@
 
 import React, { useState } from 'react';
-import { ComicPageData, AppConfig, CharacterSheetItem, PropSheetItem } from '../types';
+import { ComicPageData, AppConfig, CharacterSheetItem, PropSheetItem, UsageStat } from '../types';
 import { refineImagePrompt } from '../services/mulbyAiService';
+import { saveImageDataUrl } from '../services/exportService';
+import { stageText } from '../utils/progressText';
+import { S } from '../strings';
+
+// 方案 5.6：容器宽高比跟随 config.aspectRatio（不再写死 2:3），img 改 object-contain 留边不裁切
+const RATIO_CLASS: Record<string, string> = {
+  '2:3': 'aspect-[2/3]', '3:4': 'aspect-[3/4]', '1:1': 'aspect-square',
+  '4:3': 'aspect-[4/3]', '16:9': 'aspect-video', '9:16': 'aspect-[9/16]',
+};
 
 interface PanelCardProps {
   page: ComicPageData;
@@ -10,9 +19,13 @@ interface PanelCardProps {
   characterSheet?: CharacterSheetItem[];
   propSheet?: PropSheetItem[];
   onRegenerate: (pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => void;
+  /** 方案 5.2：润色调用计费上报（补漏记） */
+  onUsage?: (action: string, stat: UsageStat) => void;
+  /** 方案 5.6：点击成品图进入全屏阅读模式 */
+  onOpenReader?: (pageNumber: number) => void;
 }
 
-const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterSheet, propSheet, onRegenerate }) => {
+const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterSheet, propSheet, onRegenerate, onUsage, onOpenReader }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [promptDraft, setPromptDraft] = useState(page.image_prompt);
   
@@ -40,14 +53,15 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
         refineInstruction,
         config.style,
         config.character,
-        config.storyMode
+        config.storyMode,
+        (stat) => onUsage?.(`Refine Page ${page.page_number} Prompt`, stat) // 方案 5.2：补漏记
       );
       setPromptDraft(newPrompt);
       setRefineInstruction(''); // Clear instruction on success
     } catch (error: any) {
       console.error("Failed to refine prompt", error);
       // 方案 2.2：失败可见，保留输入可重试
-      setRefineError(error?.message || 'AI 润色失败，请重试');
+      setRefineError(error?.message || S.refineFailed);
     } finally {
       setIsRefining(false);
     }
@@ -73,14 +87,16 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
     });
 };
 
-  const downloadImage = () => {
+  // 方案 5.5：单页保存走原生保存流（扩展名按真实字节魔数；老宿主自动降级 <a download>）
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const downloadImage = async () => {
       if (!page.imageData) return;
-      const link = document.createElement('a');
-      link.href = page.imageData;
-      link.download = `techmanga-page-${page.page_number}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      setSaveError(null);
+      try {
+          await saveImageDataUrl(`techmanga-page-${page.page_number}`, page.imageData);
+      } catch (e: any) {
+          setSaveError(S.pageSaveFailed(String(e?.message || e).slice(0, 140)));
+      }
   }
 
   // Is this the Cover Page?
@@ -93,38 +109,47 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
   return (
     <div className="flex flex-col h-full space-y-4">
       
-      {/* Visual Container (The Page) */}
-      <div className={`relative w-full overflow-hidden rounded-sm bg-slate-800 border-4 shadow-2xl aspect-[2/3] group ${isCover ? 'border-yellow-500/50' : 'border-white'}`}>
-        
-        {/* Loading State */}
+      {/* Visual Container (The Page)：宽高比跟随配置（方案 5.6） */}
+      <div className={`relative w-full overflow-hidden rounded-sm bg-slate-800 border-4 shadow-2xl ${RATIO_CLASS[config.aspectRatio] || 'aspect-[2/3]'} group ${isCover ? 'border-yellow-500/50' : 'border-white'}`}>
+
+        {/* Loading State（方案 5.3：真实阶段文案 + 渐进预览） */}
         {page.isGenerating && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-900/80 backdrop-blur-sm">
-             <div className="w-24 h-1 bg-slate-700 rounded-full overflow-hidden">
+             {page.progress?.preview && (
+               <img
+                 src={page.progress.preview}
+                 alt=""
+                 className="absolute inset-0 w-full h-full object-contain opacity-50"
+               />
+             )}
+             <div className="relative w-24 h-1 bg-slate-700 rounded-full overflow-hidden">
                 <div className="h-full bg-indigo-500 animate-loading-bar"></div>
              </div>
-             <p className="mt-4 text-xs text-indigo-300 font-mono animate-pulse uppercase tracking-widest">
-               {isCover ? 'Designing Cover...' : `Drawing Page ${page.page_number}...`}
+             <p className="relative mt-4 text-xs text-indigo-300 font-mono animate-pulse tracking-widest">
+               {stageText(page.progress) || (isCover ? S.designingCover : S.drawingPage(page.page_number))}
              </p>
           </div>
         )}
 
-        {/* Image Display */}
+        {/* Image Display：object-contain 留边不裁切（方案 5.6）；点击进入阅读模式 */}
         {page.imageData ? (
-          <img 
-            src={page.imageData} 
+          <img
+            src={page.imageData}
             alt={page.layout_description}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain cursor-zoom-in"
+            title={S.openReader}
+            onClick={() => onOpenReader?.(page.page_number)}
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 bg-slate-100/5">
              <span className="text-4xl opacity-50">{isCover ? '📔' : '📄'}</span>
-             <span className="text-xs mt-2 font-mono opacity-50">{isCover ? 'COVER' : `Page ${page.page_number}`}</span>
+             <span className="text-xs mt-2 font-mono opacity-50">{isCover ? S.coverBadge : S.pageBadge(page.page_number)}</span>
           </div>
         )}
 
         {/* Page Number Badge */}
         <div className={`absolute top-0 left-0 z-10 text-white text-xs font-bold px-3 py-1 shadow-md ${isCover ? 'bg-yellow-600' : 'bg-indigo-600'}`}>
-          {isCover ? 'COVER' : `PAGE ${page.page_number}`}
+          {isCover ? S.coverBadge : S.pageBadge(page.page_number)}
         </div>
         
         {/* Error Overlay（方案 4.4：浮层内一键重试，用当前 prompt 直接重发，无需展开编辑面板） */}
@@ -143,26 +168,34 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
         {/* Hover Actions */}
         <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-2 z-20">
              {page.imageData && (
-                <button 
+                <button
                   onClick={downloadImage}
                   className="bg-black/50 hover:bg-indigo-600 p-2 rounded text-white backdrop-blur border border-white/20 transition-colors"
-                  title="Download Page"
+                  title={S.downloadPage}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                 </button>
              )}
-             <button 
+             <button
                 onClick={() => {
                     setSelectedCharacters(page.characters_in_scene || []);
                     setSelectedProps(page.props_in_scene || []);
                     setIsEditing(!isEditing);
                 }}
                 className="bg-black/50 hover:bg-indigo-600 p-2 rounded text-white backdrop-blur border border-white/20 transition-colors"
-                title={isEditing ? "Close Prompt" : "View/Edit Prompt & Characters"}
+                title={isEditing ? S.closePrompt : S.editPrompt}
              >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
              </button>
         </div>
+
+        {/* 单页保存失败提示（方案 5.5：写盘失败不再静默） */}
+        {saveError && (
+            <div className="absolute bottom-0 left-0 right-0 z-20 bg-red-900/90 text-red-200 text-[11px] px-3 py-1.5 flex justify-between items-center">
+                <span className="truncate">{saveError}</span>
+                <button onClick={() => setSaveError(null)} className="ml-2 shrink-0 hover:text-white">✕</button>
+            </div>
+        )}
       </div>
 
       {/* Editor Panel (Expandable) */}
@@ -172,7 +205,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
           {/* Character Selector */}
           {characterSheet && characterSheet.length > 0 && (
              <div className="mb-3">
-                 <label className="text-xs text-indigo-400 font-bold mb-1 block">INCLUDE CHARACTERS IN SCENE</label>
+                 <label className="text-xs text-indigo-400 font-bold mb-1 block">{S.includeChars}</label>
                  <div className="flex flex-wrap gap-2">
                      {characterSheet.map((char, i) => {
                          const isSelected = selectedCharacters.includes(char.name);
@@ -197,7 +230,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
           {/* Prop Selector */}
           {propSheet && propSheet.length > 0 && (
              <div className="mb-3">
-                 <label className="text-xs text-indigo-400 font-bold mb-1 block">INCLUDE PROPS IN SCENE</label>
+                 <label className="text-xs text-indigo-400 font-bold mb-1 block">{S.includeProps}</label>
                  <div className="flex flex-wrap gap-2">
                      {propSheet.map((prop, i) => {
                          const isSelected = selectedProps.includes(prop.name);
@@ -219,7 +252,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
              </div>
           )}
 
-          <label className="text-xs text-indigo-400 font-bold mb-1 block">FULL IMAGE PROMPT (Includes Text/Dialogue)</label>
+          <label className="text-xs text-indigo-400 font-bold mb-1 block">{S.fullImagePrompt}</label>
           <textarea 
             className="w-full h-48 bg-slate-900 text-xs text-slate-300 p-2 rounded border border-slate-700 focus:border-indigo-500 focus:outline-none mb-3 font-mono leading-tight"
             value={promptDraft}
@@ -229,14 +262,14 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
           {/* AI Refine Section */}
           <div className="bg-slate-900/50 p-2 rounded-md border border-slate-700 mb-3">
              <label className="text-xs text-indigo-300 font-bold mb-1 flex items-center">
-               <span className="mr-1">✨</span> AI Refine Prompt
+               <span className="mr-1">✨</span> {S.aiRefinePrompt}
              </label>
              <div className="flex gap-2">
                 <input 
                   type="text" 
                   value={refineInstruction}
                   onChange={(e) => setRefineInstruction(e.target.value)}
-                  placeholder="e.g. 'Make the background darker' or 'Change layout to...'"
+                  placeholder={S.refineInputPlaceholder}
                   className="flex-grow bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-indigo-500"
                   onKeyDown={(e) => e.key === 'Enter' && handleRefine()}
                 />
@@ -245,7 +278,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                   disabled={isRefining || !refineInstruction.trim()}
                   className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:text-slate-500 text-white px-3 py-1 rounded font-medium transition-colors"
                 >
-                  {isRefining ? '...' : 'Refine'}
+                  {isRefining ? S.refining : S.refineBtn}
                 </button>
              </div>
              {refineError && <p className="text-[11px] text-red-400 mt-1.5">{refineError}</p>}
@@ -256,14 +289,14 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                 onClick={() => setIsEditing(false)}
                 className="text-xs text-slate-400 hover:text-white px-3 py-1"
             >
-                Cancel
+                {S.cancelBtn}
             </button>
             <button 
                 onClick={handleSave}
                 disabled={page.isGenerating || isRefining}
                 className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-3 py-1 rounded font-medium"
             >
-                Redraw Page
+                {S.redrawBtn}
             </button>
           </div>
         </div>
@@ -273,8 +306,8 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
       <div className="bg-slate-800/50 rounded-lg border border-slate-700/50 p-4 flex-grow">
           {isCover ? (
             <div className="text-center py-6">
-                <h3 className="text-xl font-bold text-white mb-2 tracking-wide">{page.title || "Untitled Comic"}</h3>
-                <p className="text-sm text-slate-400">Written by TechManga AI</p>
+                <h3 className="text-xl font-bold text-white mb-2 tracking-wide">{page.title || S.untitled}</h3>
+                <p className="text-sm text-slate-400">{S.writtenBy}</p>
                 <div className="w-12 h-1 bg-gradient-to-r from-indigo-500 to-purple-500 mx-auto mt-4 rounded-full"></div>
             </div>
           ) : (
@@ -282,7 +315,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                <div>
                   <h4 className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider flex items-center">
                     <span className="w-1.5 h-1.5 rounded-full bg-slate-500 mr-2"></span>
-                    Page Layout
+                    {S.pageLayoutLabel}
                   </h4>
                   <p className="text-sm text-slate-300 italic leading-relaxed">
                      {page.layout_description}
@@ -316,7 +349,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                      }}
                      className="text-xs text-indigo-400 hover:text-indigo-300 underline flex items-center"
                   >
-                     <span>View Prompt & Dialogue</span>
+                     <span>{S.viewPromptLink}</span>
                      <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                   </button>
                </div>
