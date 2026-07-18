@@ -5,7 +5,6 @@ import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
-import { generateCard } from '../services/generate'
 
 // 3D 导演台 v7：v6（场景即提示词/机位即分镜/成片对比）+ take 历史（每机位多条成片可切换）+ 分镜导出（机位表一键落画布）。
 // three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
@@ -1280,8 +1279,8 @@ function Inner() {
     }
   }
 
-  // 生成 = 抓帧落「参考图节点」→ 右侧创建「生图节点」并引边 → 保存场景关台回 2D 画布 →
-  // 画布原生管线 generateCard 接管（排队/进度/并发/可停止/可复跑），参考图经边流入 images.edit
+  // 生成 = 抓帧落「参考图节点」→ 右侧创建「生图节点」并引边（含完整提示词与画幅 params）→
+  // 保存场景关台回 2D 画布。不自动生成：由用户在画布上手动触发（生成选中/节点生成按钮，可停止/复跑）
   const run = async () => {
     if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
     const proj = useGraph.getState().project
@@ -1317,8 +1316,7 @@ function Inner() {
       g.setSelection([genId])
       saveScene()
       useUi.getState().setShowDirector(false)
-      void generateCard(genId)
-      toast('已创建参考图节点 + 生图节点，生成中（画布上可停止/复跑）', 'success')
+      toast('已创建参考图节点 + 生图节点，选中后点「生成选中」即可出图', 'success')
     } catch (e: any) {
       toast('创建生成节点失败：' + (e?.message || String(e)), 'error')
     } finally {
@@ -1700,8 +1698,8 @@ function Inner() {
         >
           <Copy size={14} /> 提示词
         </button>
-        <button onClick={() => void run()} disabled={busy} className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
-          {busy ? <><Loader2 size={16} className="animate-spin" /> 生成中…</> : <><Film size={16} /> 生成</>}
+        <button onClick={() => void run()} disabled={busy} title="抓当前取景创建参考图节点 + 生图节点（回画布后手动生成）" className="h-16 px-6 rounded-2xl bg-amber-300 text-zinc-950 hover:bg-amber-200 text-sm font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap transition-colors active:scale-[0.98]">
+          {busy ? <><Loader2 size={16} className="animate-spin" /> 创建中…</> : <><Film size={16} /> 创建节点</>}
         </button>
       </div>
 
