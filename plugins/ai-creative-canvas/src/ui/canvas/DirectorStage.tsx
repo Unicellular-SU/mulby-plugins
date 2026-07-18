@@ -1552,7 +1552,7 @@ function Inner() {
                 <button
                   onClick={() => api.current.selectById?.(o.id)}
                   onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
-                  title="双击改名"
+                  title={o.kind}
                   className="flex-1 flex items-center gap-1.5 text-left truncate"
                 >
                   {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
