@@ -1595,7 +1595,7 @@ interface BackendMulbyAi {
       input: { prompt: string; model: string; size?: string; count?: number },
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
-    edit(input: { imageAttachmentId: string; prompt: string; model: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    edit(input: { imageAttachmentId: string; prompt: string; model: string; referenceAttachmentIds?: string[]; size?: string; aspectRatio?: string; requestId?: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
   }
 }
 

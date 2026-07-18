@@ -1255,7 +1255,14 @@ function Inner() {
       const buf = new Uint8Array(bin.length)
       for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i)
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
-      const res = await ai.images.edit({ model, imageAttachmentId: att.attachmentId, prompt: full })
+      // size/aspectRatio 透传（宿主已支持）：OpenAI 系用 size 定死输出尺寸，Gemini 系用 aspectRatio
+      const editInput: { model: string; imageAttachmentId: string; prompt: string; size?: string; aspectRatio?: string } = { model, imageAttachmentId: att.attachmentId, prompt: full }
+      if (aspect !== '视口') {
+        editInput.aspectRatio = aspect
+        const sz = ({ '1:1': '1024x1024', '3:2': '1536x1024', '2:3': '1024x1536' } as Record<string, string>)[aspect]
+        if (sz) editInput.size = sz // gpt-image 系只支持这三档；16:9/9:16 仅 Gemini 系按 aspectRatio 生效
+      }
+      const res = await ai.images.edit(editInput)
       const out = res?.images?.[0]
       if (!out) throw new Error('模型未返回图像')
       const g = useGraph.getState()
