@@ -801,70 +801,98 @@ export const generateComicScript = async (
   onLogUpdate('INPUT', fullInputText);
 
   const epoch = scope.epoch();
-  let requestId: string | null = null;
 
-  try {
+  // 部分 provider（如 DeepSeek）不支持 json_schema response_format，报 HTTP 400
+  // "This response_format type is unavailable now"。识别后去掉结构化约束重试一次：
+  // prompt 的 JSON 指令 + 本地提取 + parseScriptWithRepair 修复链本就按无约束输出设计。
+  const isResponseFormatUnsupported = (e: unknown): boolean => {
+    const msg = String((e as any)?.message ?? e ?? '');
+    return /response[_-]?format/i.test(msg) && /400|unavailable|unsupported|invalid/i.test(msg);
+  };
+
+  const attempt = async (withSchema: boolean): Promise<string> => {
     let fullText = '';
     let streamError: string | null = null;
+    let requestId: string | null = null;
 
-    const req = ai.call(
-      {
-        ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        // 方案 4.6：API 级 jsonSchema 约束；strict 显式 false（宿主默认 true 会拒复杂嵌套 schema）。
-        // theme.jsonSchema 可整体覆写（配合 buildScriptPrompt 钩子）
-        params: {
-          responseFormat: 'json_schema',
-          jsonSchema: (getTheme().jsonSchema ?? COMIC_JSON_SCHEMA) as unknown as Record<string, unknown>,
-          jsonSchemaName: 'comic_script',
-          strict: false,
+    try {
+      const req = ai.call(
+        {
+          ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          // 方案 4.6：API 级 jsonSchema 约束；strict 显式 false（宿主默认 true 会拒复杂嵌套 schema）。
+          // theme.jsonSchema 可整体覆写（配合 buildScriptPrompt 钩子）
+          ...(withSchema ? {
+            params: {
+              responseFormat: 'json_schema',
+              jsonSchema: (getTheme().jsonSchema ?? COMIC_JSON_SCHEMA) as unknown as Record<string, unknown>,
+              jsonSchemaName: 'comic_script',
+              strict: false,
+            },
+          } : {}),
+          ...NO_TOOLS
         },
-        ...NO_TOOLS
-      },
-      (chunk: any) => {
-        if (chunk.__requestId) {
-          requestId = chunk.__requestId;
-          if (!scope.trackIfCurrent(epoch, chunk.__requestId)) {
-            // 捕获到 requestId 时已被中止：立即杀掉请求
-            safeAbort(ai, chunk.__requestId);
+        (chunk: any) => {
+          if (chunk.__requestId) {
+            requestId = chunk.__requestId;
+            if (!scope.trackIfCurrent(epoch, chunk.__requestId)) {
+              // 捕获到 requestId 时已被中止：立即杀掉请求
+              safeAbort(ai, chunk.__requestId);
+            }
+            return;
           }
-          return;
+          if (!scope.isCurrent(epoch)) return; // 已中止：忽略后续 chunk
+          if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
+            fullText += chunk.content;
+            onLogUpdate('OUTPUT', fullText);
+          } else if (chunk.chunkType === 'error' && chunk.error?.message) {
+            streamError = chunk.error.message;
+          }
         }
-        if (!scope.isCurrent(epoch)) return; // 已中止：忽略后续 chunk
-        if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
-          fullText += chunk.content;
-          onLogUpdate('OUTPUT', fullText);
-        } else if (chunk.chunkType === 'error' && chunk.error?.message) {
-          streamError = chunk.error.message;
+      );
+
+      const finalMsg = await req;
+
+      throwIfAborted(epoch);
+
+      // 非流式兜底：部分 provider 直接返回完整内容
+      if (!fullText && typeof finalMsg?.content === 'string') {
+        fullText = finalMsg.content;
+        if (fullText) onLogUpdate('OUTPUT', fullText);
+      }
+
+      if (onUsage) {
+        const u = finalMsg?.usage;
+        if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+          onUsage(textStat(u.inputTokens, u.outputTokens, false));
+        } else {
+          const est = await estimateTextUsage(activeModels.textModel || undefined, fullInputText, fullText);
+          onUsage(textStat(est.inputTokens, est.outputTokens, true));
         }
       }
-    );
 
-    const finalMsg = await req;
-
-    throwIfAborted(epoch);
-
-    // 非流式兜底：部分 provider 直接返回完整内容
-    if (!fullText && typeof finalMsg?.content === 'string') {
-      fullText = finalMsg.content;
-      if (fullText) onLogUpdate('OUTPUT', fullText);
-    }
-
-    if (onUsage) {
-      const u = finalMsg?.usage;
-      if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
-        onUsage(textStat(u.inputTokens, u.outputTokens, false));
-      } else {
-        const est = await estimateTextUsage(activeModels.textModel || undefined, fullInputText, fullText);
-        onUsage(textStat(est.inputTokens, est.outputTokens, true));
+      if (!fullText) {
+        throw new Error(streamError ? `AI 调用失败：${streamError}` : "No response from AI");
       }
-    }
+      return fullText;
 
-    if (!fullText) {
-      throw new Error(streamError ? `AI 调用失败：${streamError}` : "No response from AI");
+    } finally {
+      if (requestId) scope.untrack(requestId);
+    }
+  };
+
+  try {
+    let fullText: string;
+    try {
+      fullText = await attempt(true);
+    } catch (e) {
+      if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
+      if (!isResponseFormatUnsupported(e)) throw e;
+      console.warn('[script] provider 不支持 json_schema response_format，回退为无结构化约束重试:', e);
+      fullText = await attempt(false);
     }
 
     // 方案 4.6：本地提取 → 修复重试一次 → 保留原文抛错；修复调用耗时较长，返回后补一次纪元检查
@@ -880,8 +908,6 @@ export const generateComicScript = async (
     if ((error as any)?.name === 'AbortError') throw error;   // 本地抛出的原生中止（防御性保留）
     console.error("Script generation failed:", error);
     throw error;                                              // 真实失败：原样上报 UI
-  } finally {
-    if (requestId) scope.untrack(requestId);
   }
 };
 
