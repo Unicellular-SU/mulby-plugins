@@ -701,8 +701,6 @@ const MangaApp: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-100 flex flex-col font-sans selection:bg-[var(--manga-accent)] selection:text-white" style={themeCssVars}>
 
-      <TokenMonitor usage={tokenUsage} />
-
       <header className="sticky top-0 z-50 bg-[#0f172a]/90 backdrop-blur border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -726,6 +724,8 @@ const MangaApp: React.FC = () => {
           </div>
           
           <div className="flex items-center space-x-4">
+             {/* 费用统计：页头内嵌紧凑胶囊，悬停展开明细（原 fixed 悬浮卡片会遮挡内容区按钮） */}
+             <TokenMonitor usage={tokenUsage} />
              {workflowStep !== WorkflowStep.CONFIG && (
                  <button
                     onClick={handleStartOver}

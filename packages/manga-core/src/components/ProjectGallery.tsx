@@ -89,33 +89,35 @@ const ProjectCard: React.FC<{
         </p>
       </div>
 
-      {/* 操作 */}
-      <div className="px-3 pb-3 flex items-center gap-1.5">
+      {/* 操作：纯图标按钮（文字版四键横排空间不足），title 提供完整说明 */}
+      <div className="px-3 pb-3 flex items-center justify-end gap-1.5">
         <button
           onClick={() => onOpen(entry.id)}
           disabled={busy}
-          className="flex-1 text-xs bg-gradient-to-r from-[var(--manga-cta-from)] to-[var(--manga-cta-to)] hover:from-[var(--manga-cta-hover-from)] hover:to-[var(--manga-cta-hover-to)] disabled:from-slate-700 disabled:to-slate-700 text-white py-1.5 rounded font-bold transition-all"
+          title={S.galleryOpen}
+          className="p-2 rounded bg-gradient-to-r from-[var(--manga-cta-from)] to-[var(--manga-cta-to)] hover:from-[var(--manga-cta-hover-from)] hover:to-[var(--manga-cta-hover-to)] disabled:from-slate-700 disabled:to-slate-700 text-white transition-all"
         >
-          {S.galleryOpen}
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
         </button>
         <button
           onClick={() => { setDraft(entry.title); setRenaming(true); }}
-          className="text-xs bg-slate-700/70 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 rounded"
           title={S.galleryRename}
+          className="p-2 rounded bg-slate-700/70 hover:bg-slate-600 text-slate-200 transition-colors"
         >
-          {S.galleryRename}
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
         </button>
         <button
           onClick={() => onExport(entry.id)}
           disabled={exporting}
-          className="text-xs bg-slate-700/70 hover:bg-slate-600 disabled:opacity-50 text-slate-200 px-2.5 py-1.5 rounded"
           title={S.galleryExport}
+          className="p-2 rounded bg-slate-700/70 hover:bg-slate-600 disabled:opacity-50 text-slate-200 transition-colors"
         >
-          {S.galleryExport}
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4"/></svg>
         </button>
         {confirmingDelete ? (
           <button
             onClick={() => onDelete(entry.id)}
+            title={S.galleryDeleteConfirm}
             className="text-xs bg-red-700 hover:bg-red-600 text-white px-2.5 py-1.5 rounded font-bold animate-pulse"
           >
             {S.galleryDeleteConfirm}
@@ -123,10 +125,10 @@ const ProjectCard: React.FC<{
         ) : (
           <button
             onClick={() => setConfirmingDelete(true)}
-            className="text-xs bg-slate-700/70 hover:bg-red-900/70 text-slate-300 hover:text-red-200 px-2.5 py-1.5 rounded"
             title={S.galleryDelete}
+            className="p-2 rounded bg-slate-700/70 hover:bg-red-900/70 text-slate-300 hover:text-red-200 transition-colors"
           >
-            {S.galleryDelete}
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg>
           </button>
         )}
       </div>
