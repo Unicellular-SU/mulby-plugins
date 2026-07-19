@@ -6,7 +6,7 @@
 //   为既有行为，重构不偷改，方案 7.4 步骤 3 注记）。
 
 import { resolveByName } from '@mulby-plugins/manga-kit';
-import { CharacterSheetItem, PropSheetItem, ComicPageData, ComicResponse } from '../engine-types';
+import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ComicPageData, ComicResponse } from '../engine-types';
 
 /** Helper to find character reference image（统一名字解析口径，方案 2.4） */
 export const getCharacterReference = (name: string, sheet: CharacterSheetItem[]): string | undefined => {
@@ -39,11 +39,13 @@ export const prepareScenePages = (
     comicScript: ComicResponse,
     style: string,
     characterSheet: CharacterSheetItem[],
-    propSheet: PropSheetItem[]
+    propSheet: PropSheetItem[],
+    sceneSheet: SceneSheetItem[] = []
 ): Array<{ pageData: ComicPageData; resolvedRefs: string[] }> => {
     return comicScript.pages.map(s => {
           const presentCharacters = s.characters_in_scene || [];
           const presentProps = s.props_in_scene || [];
+          const presentScenes = s.scenes_in_scene || [];
 
           const sceneRefs: string[] = [];
           const characterContexts: string[] = [];
@@ -81,6 +83,17 @@ export const prepareScenePages = (
               }
           });
 
+          // 3. Resolve Scenes（第三类资产：场景参考图注入锁跨页一致性，比照 props）
+          presentScenes.forEach(name => {
+              const sceneItem = resolveByName(name, sceneSheet);
+              if (sceneItem) {
+                  if (sceneItem.referenceImage) {
+                      sceneRefs.push(sceneItem.referenceImage);
+                  }
+                  characterContexts.push(`Scene/Location: ${sceneItem.name} (Visual Reference Provided — backgrounds MUST match it).`);
+              }
+          });
+
           const finalPrompt = `
             Art Style: ${style} (Master Style). ${comicScript.global_art_style} (Style Description).
             
@@ -109,7 +122,9 @@ export const resolvePageRefs = (
     characterNames: string[],
     propNames: string[],
     characterSheet: CharacterSheetItem[],
-    propSheet: PropSheetItem[]
+    propSheet: PropSheetItem[],
+    sceneNames: string[] = [],
+    sceneSheet: SceneSheetItem[] = []
 ): { refs: string[]; finalPrompt: string } => {
     const sceneRefs: string[] = [];
     const characterContexts: string[] = [];
@@ -133,6 +148,17 @@ export const resolvePageRefs = (
                 sceneRefs.push(propItem.referenceImage);
             }
             characterContexts.push(`Prop: ${propItem.name} (Visual Reference Provided).`);
+        }
+    });
+
+    // Resolve Scenes（比照 props 注入）
+    sceneNames.forEach(name => {
+        const sceneItem = resolveByName(name, sceneSheet);
+        if (sceneItem) {
+            if (sceneItem.referenceImage) {
+                sceneRefs.push(sceneItem.referenceImage);
+            }
+            characterContexts.push(`Scene/Location: ${sceneItem.name} (Visual Reference Provided — backgrounds MUST match it).`);
         }
     });
 

@@ -499,7 +499,13 @@ const constructSystemPrompt = (
             - Example: "Panel 3: Close up on her face. [APPEARANCE CHANGE] Her hair has turned completely WHITE due to terror. She is screaming."
             - Logic: This specific description in the prompt will help the image generator understand that the 'black hair' in the base description is now invalid.
 
-    2. **Layout Enforcement**:
+    2. **Scene Design (VISUAL LOCKING)**:
+        - Identify 1-4 KEY LOCATIONS where the haunting mainly happens (the house, the corridor, the shrine) and create a 'scene_sheet'.
+        - **Description**: fixed furnishings, layout, and lighting mood. NO characters.
+        - Every page MUST list the locations it takes place in ('scenes_in_scene', names from 'scene_sheet').
+        - Backgrounds of the same location MUST stay consistent across pages (reference sheets will be provided at draw time).
+
+    3. **Layout Enforcement**:
         - The 'image_prompt' MUST describe the **FULL PAGE LAYOUT**.
         - **Cinematic Flow**: Ensure the panels flow logically (e.g., Wide Shot -> Medium Shot -> Close Up).
         - Start with "A horror manga page divided into X panels...".
@@ -522,7 +528,7 @@ const constructSystemPrompt = (
             - "crawling on ceiling (NOT on floor)"
             - "eyes MISSING (empty sockets)"
 
-    3. **Spatial Anchoring & Text Embedding**:
+    4. **Spatial Anchoring & Text Embedding**:
         - **Problem**: Image models often assign speech bubbles to the wrong character.
         - **Solution**: You MUST define explicit POSITIONS (Left/Right/Center) for characters and bind the speech bubbles to them.
         - **Step A (Character Positioning)**: e.g. "Ghost hovering in top LEFT corner, Victim cowering in bottom RIGHT."
@@ -535,17 +541,20 @@ const constructSystemPrompt = (
           - **GOOD Example**: "text: '快跑'" or "text: '救命'" -> THIS IS CORRECT.
           - **Completeness**: ALL dialogue from the script MUST be included in the 'image_prompt'.
 
-    4. **Character Presence Logic**:
+    5. **Character Presence Logic**:
         - For each page, you MUST identify exactly which characters appear.
         - Only list characters in 'characters_in_scene' if they are physically visible on that page.
+        - **Naming Discipline (STRICT)**: 'characters_in_scene' and 'scenes_in_scene' MUST use the EXACT names from 'character_sheet'/'scene_sheet', character-by-character (逐字一致).
+          - NEVER invent variant names (no role/status suffixes like "Name (the deserter)"). A character's situation belongs in 'image_prompt' and 'persistent_states', NOT in the name.
+          - Each list MUST be a subset of its sheet. If a page needs a new location, add it to 'scene_sheet' FIRST, then reference its exact name.
 
-    5. **Narration Box System (SPARING — see Text Density rules)**:
+    6. **Narration Box System (SPARING — see Text Density rules)**:
         - **Purpose**: RECTANGULAR narration boxes (方形旁白框) exist ONLY for the three allowed cases: time/place transitions, ending closure, and critical information that cannot be shown visually.
         - **Visual Format in image_prompt** (only when a narration box is truly needed):
             - "Rectangular narration box at [TOP-LEFT/TOP-RIGHT/BOTTOM] of Panel X, NO pointer tail, with text: '[CHINESE TEXT]'"
         - **Limits**: At most ONE narration box per page; NO mandatory narration on Page 1 or the final page.
         - **FORBIDDEN**: emotion-explaining narration, internal-monologue narration, or narration that repeats what panels already show. If a panel can show it, never narrate it.
-    6. **Negative Emphasis for Ambiguous States**:
+    7. **Negative Emphasis for Ambiguous States**:
         - Image generators often default to "normal" states (standing, intact, normal appearance).
         - To prevent this, use NEGATIVE EMPHASIS when describing non-default states:
         | 状态 | ❌ 弱描述 | ✅ 强描述（带否定） |
@@ -573,11 +582,15 @@ const getJsonSchemaString = () => `
       "character_sheet": [
          { "name": "String", "description": "String" }
       ],
+      "scene_sheet": [
+         { "name": "String", "description": "String (1-4 key locations; fixed furnishings/layout and lighting mood, NO characters)" }
+      ],
       "cover_image_prompt": "String",
       "pages": [
          {
            "page_number": Integer,
            "characters_in_scene": ["String", "String"],
+           "scenes_in_scene": ["String"],
            "layout_description": "String",
            "image_prompt": "String (Full visual description with [VISUAL STATE] block)",
            "persistent_states": {
@@ -606,12 +619,20 @@ const getJsonSchemaString = () => `
 // API 级 JSON schema 约束（形状与上面的文字版一致；核心包默认 schema 含 prop_sheet，不适用于本题材）
 const HORROR_JSON_SCHEMA = {
   type: 'object',
-  required: ['title', 'global_art_style', 'analysis', 'character_sheet', 'cover_image_prompt', 'pages'],
+  required: ['title', 'global_art_style', 'analysis', 'character_sheet', 'scene_sheet', 'cover_image_prompt', 'pages'],
   properties: {
     title: { type: 'string' },
     global_art_style: { type: 'string' },
     analysis: { type: 'string' },
     character_sheet: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'description'],
+        properties: { name: { type: 'string' }, description: { type: 'string' } },
+      },
+    },
+    scene_sheet: {
       type: 'array',
       items: {
         type: 'object',
@@ -628,6 +649,7 @@ const HORROR_JSON_SCHEMA = {
         properties: {
           page_number: { type: 'integer' },
           characters_in_scene: { type: 'array', items: { type: 'string' } },
+          scenes_in_scene: { type: 'array', items: { type: 'string' } },
           layout_description: { type: 'string' },
           image_prompt: { type: 'string' },
           persistent_states: {
@@ -799,6 +821,12 @@ const horrorTheme: MangaTheme = {
     uploadCustomImage: 'Upload',
     noPropsFound: 'No key props identified.',
     noPropsHint: 'The AI found no recurring items to keep consistent.',
+    scenesTab: (n: number) => `Scenes (${n})`,
+    noScenesFound: 'No key locations identified.',
+    noScenesHint: 'The AI found no recurring places to keep consistent.',
+    generateScene: 'Conjure Scene',
+    regenerateScene: 'Re-Conjure Scene',
+    sceneDescPlaceholder: 'Fixed furnishings, layout and lighting mood...',
     goToScriptEditor: 'ON TO THE SCRIPTURES →',
     charDescPlaceholder: 'Visual Description...',
     propDescPlaceholder: 'Prop appearance...',
@@ -824,6 +852,15 @@ const horrorTheme: MangaTheme = {
     propsInScene: 'Props on This Page',
     noCharsInScene: 'No specific characters on this page.',
     noPropsInScene: 'No key props on this page.',
+    includeScenes: 'Scenes on This Page',
+    scenesInScene: 'Scenes on This Page',
+    noScenesInScene: 'No scenes on this page.',
+
+    // ---- 名单匹配状态 ----
+    unmatchedAssetHint: 'Not in sheet: no reference image can be injected for this name',
+    unmatchedCharsTitle: 'Unregistered Cast',
+    unmatchedCharsHint: 'These names appear in page cast lists but not in the character sheet. Add them, then conjure their visages.',
+    addToSheetBtn: 'ADD',
     refinePlaceholder: 'AI Instruction (e.g. Make it darker)',
     refineBtn: 'AI Refine',
     refining: 'Refining...',

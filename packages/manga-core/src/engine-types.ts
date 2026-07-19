@@ -60,6 +60,7 @@ export interface ComicPageScript {
   image_prompt: string; // Prompt for the entire page image
   characters_in_scene: string[]; // List of character names present in this page
   props_in_scene: string[]; // List of important props present in this page
+  scenes_in_scene?: string[]; // List of scene/location names (from scene_sheet) this page takes place in
   persistent_states: PersistentState; // Tracking visual continuity
   state_changes_this_page: string[]; // High-level changes for debugging/analysis
 }
@@ -76,12 +77,19 @@ export interface PropSheetItem {
   referenceImage?: string;
 }
 
+export interface SceneSheetItem {
+  name: string;
+  description: string; // 固定陈设/布局与光线基调（不含角色）
+  referenceImage?: string;
+}
+
 // New Interface for the full AI response
 export interface ComicResponse {
   title: string; // Comic Title
   global_art_style: string; // Just the art style (colors, lines), NO characters.
   character_sheet: CharacterSheetItem[]; // Array of character descriptions
   prop_sheet: PropSheetItem[]; // Array of prop descriptions
+  scene_sheet: SceneSheetItem[]; // Array of scene/location descriptions
   cover_image_prompt: string; // Specific prompt for the cover
   analysis: string;
   pages: ComicPageScript[];

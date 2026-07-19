@@ -13,6 +13,7 @@ import {
   attIdForPage,
   attIdForChar,
   attIdForProp,
+  attIdForScene,
   putImageAttachment,
   getImageAttachment,
   saveProjectDebounced,
@@ -38,6 +39,7 @@ import {
   ComicPageData,
   ComicResponse,
   PropSheetItem,
+  SceneSheetItem,
   TokenUsage,
   WorkflowStep,
 } from '../engine-types';
@@ -58,6 +60,8 @@ interface UseProjectPersistenceDeps {
   setCharacterSheet: StateSetter<CharacterSheetItem[]>;
   propSheet: PropSheetItem[];
   setPropSheet: StateSetter<PropSheetItem[]>;
+  sceneSheet: SceneSheetItem[];
+  setSceneSheet: StateSetter<SceneSheetItem[]>;
   pages: ComicPageData[];
   setPages: StateSetter<ComicPageData[]>;
   tokenUsage: TokenUsage;
@@ -79,6 +83,8 @@ export const useProjectPersistence = ({
   setCharacterSheet,
   propSheet,
   setPropSheet,
+  sceneSheet,
+  setSceneSheet,
   pages,
   setPages,
   tokenUsage,
@@ -170,6 +176,8 @@ export const useProjectPersistence = ({
         ({ ...rest, hasReference: !!referenceImage })),
       propSheet: propSheet.map(({ referenceImage, ...rest }) =>
         ({ ...rest, hasReference: !!referenceImage })),
+      sceneSheet: sceneSheet.map(({ referenceImage, ...rest }) =>
+        ({ ...rest, hasReference: !!referenceImage })),
       pages: pages.map(({ imageData, isGenerating, progress, ...rest }) =>
         ({ ...rest, hasImage: !!imageData })),
       tokenUsage: { ...tokenUsage, history: tokenUsage.history.slice(-200) },
@@ -192,7 +200,7 @@ export const useProjectPersistence = ({
       return prev.map(e => (e.id === activeProjectIdState ? updated : e));
     });
   }, [mulbyReady, activeProjectIdState, workflowStep, storyboardTab, comicScript,
-      characterSheet, propSheet, pages, tokenUsage, config]);
+      characterSheet, propSheet, sceneSheet, pages, tokenUsage, config]);
 
   // 兜底保存（方案 3.1 步骤 4）：onPluginOut 覆盖 Esc/outPlugin 路径；
   // pagehide 覆盖独立窗口 X 关闭（该路径宿主不发 plugin:out）；beforeunload 覆盖 Reload。
@@ -270,6 +278,14 @@ export const useProjectPersistence = ({
           return img ? { ...rest, referenceImage: img } : { ...rest };
         })
       );
+      // 场景为后加字段：旧快照无 sceneSheet，按 [] 恢复（比照 prop 全链路）
+      const restoredScenes: SceneSheetItem[] = await Promise.all(
+        (saved.sceneSheet || []).map(async ({ hasReference, ...rest }) => {
+          if (!hasReference) return { ...rest };
+          const img = await getImageAttachment(attIdForScene(rest.name));
+          return img ? { ...rest, referenceImage: img } : { ...rest };
+        })
+      );
       const restoredPages: ComicPageData[] = await Promise.all(
         saved.pages.map(async ({ hasImage, ...rest }) => {
           const base: ComicPageData = { ...rest, isGenerating: false }; // 上次中断的未完成页保留其 error 态
@@ -281,7 +297,7 @@ export const useProjectPersistence = ({
         })
       );
 
-      // 设定图重新注入 comicScript.character_sheet / prop_sheet（双向同步不变量）
+      // 设定图重新注入 comicScript.character_sheet / prop_sheet / scene_sheet（双向同步不变量）
       let script = saved.comicScript;
       if (script) {
         script = {
@@ -294,6 +310,10 @@ export const useProjectPersistence = ({
             const m = restoredProps.find(p => p.name === item.name);
             return m?.referenceImage ? { ...item, referenceImage: m.referenceImage } : item;
           }),
+          scene_sheet: (script.scene_sheet || []).map(item => {
+            const m = restoredScenes.find(s => s.name === item.name);
+            return m?.referenceImage ? { ...item, referenceImage: m.referenceImage } : item;
+          }),
         };
       }
 
@@ -301,12 +321,14 @@ export const useProjectPersistence = ({
       persistedRefImagesRef.current.clear();
       restoredChars.forEach(c => { if (c.referenceImage) persistedRefImagesRef.current.set(attIdForChar(c.name), c.referenceImage); });
       restoredProps.forEach(p => { if (p.referenceImage) persistedRefImagesRef.current.set(attIdForProp(p.name), p.referenceImage); });
+      restoredScenes.forEach(s => { if (s.referenceImage) persistedRefImagesRef.current.set(attIdForScene(s.name), s.referenceImage); });
 
       // config 一并恢复为该工程快照（v1 迁移来的工程无 config 快照，回退保留当前值）
       setConfig(prev => ({ ...prev, ...(saved.config || {}), sourceText: saved.sourceText }));
       setComicScript(script);
       setCharacterSheet(restoredChars);
       setPropSheet(restoredProps);
+      setSceneSheet(restoredScenes);
       setPages(restoredPages);
       // 方案 5.2：TokenUsage 形状已改（Record breakdown + modelId history），
       // 旧快照的 usage 部分单独校验降级，不牵连整个会话的可恢复性

@@ -3,6 +3,7 @@ import {
   ComicPageData,
   CharacterSheetItem,
   PropSheetItem,
+  SceneSheetItem,
   TokenUsage,
   WorkflowStep,
   AppConfig,
@@ -38,6 +39,7 @@ const getStorage = (): MulbyStorage | undefined => (window as Window).mulby?.sto
 
 export type PersistedCharacter = Omit<CharacterSheetItem, 'referenceImage'> & { hasReference: boolean };
 export type PersistedProp = Omit<PropSheetItem, 'referenceImage'> & { hasReference: boolean };
+export type PersistedScene = Omit<SceneSheetItem, 'referenceImage'> & { hasReference: boolean };
 export type PersistedPage = Omit<ComicPageData, 'imageData' | 'isGenerating' | 'progress'> & { hasImage: boolean };
 
 /** v1 会话快照（仅迁移路径读取） */
@@ -50,6 +52,7 @@ export interface PersistedSession {
   comicScript: ComicResponse | null;
   characterSheet: PersistedCharacter[];
   propSheet: PersistedProp[];
+  sceneSheet?: PersistedScene[];   // 场景资产（后加字段；旧快照缺省视为 []）
   pages: PersistedPage[];
   tokenUsage: TokenUsage;
 }
@@ -77,6 +80,7 @@ export const stripSheetImages = (script: ComicResponse | null): ComicResponse | 
     ...script,
     character_sheet: (script.character_sheet || []).map(({ referenceImage, ...rest }) => rest),
     prop_sheet: (script.prop_sheet || []).map(({ referenceImage, ...rest }) => rest),
+    scene_sheet: (script.scene_sheet || []).map(({ referenceImage, ...rest }) => rest),
   };
 
 // ---- 工程命名空间（模块级，与 mulbyAiService 的 activeModels 同模式） ----
@@ -114,6 +118,7 @@ const sanitizeAttachmentId = (raw: string): string => {
 export const attIdForPage = (n: number) => `p-${requireProjectId()}-page-${n}`;
 export const attIdForChar = (name: string) => `p-${requireProjectId()}-char-${sanitizeAttachmentId(name)}`;
 export const attIdForProp = (name: string) => `p-${requireProjectId()}-prop-${sanitizeAttachmentId(name)}`;
+export const attIdForScene = (name: string) => `p-${requireProjectId()}-scene-${sanitizeAttachmentId(name)}`;
 
 /** 短随机工程 id（8 位，时间熵 + 随机熵；附件 id 长度预算内） */
 const generateProjectId = (): string =>
@@ -295,6 +300,7 @@ export const isRestorableProject = (s: unknown): s is PersistedProject => {
     && (sess.workflowStep === WorkflowStep.STORYBOARDING || sess.workflowStep === WorkflowStep.COMIC_GENERATION)
     && Array.isArray(sess.characterSheet)
     && Array.isArray(sess.propSheet)
+    && (sess.sceneSheet === undefined || Array.isArray(sess.sceneSheet)) // 场景为后加字段，旧快照缺省容忍
     && Array.isArray(sess.pages)
     && typeof sess.sourceText === 'string';
 };

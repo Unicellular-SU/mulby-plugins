@@ -1,6 +1,7 @@
 import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL, LogUpdateFn } from "../engine-types";
 import { getTheme } from "../theme/registry";
 import type { MangaTheme } from "../theme/types";
+import { normalizeSceneLists, summarizeNormalizeReport } from "../utils/normalizeSceneLists";
 import {
   createAbortScope,
   safeAbort,
@@ -341,12 +342,16 @@ const getJsonSchemaString = () => `
       "prop_sheet": [
          { "name": "String", "description": "String (important items, weapons, or objects that appear multiple times)" }
       ],
+      "scene_sheet": [
+         { "name": "String", "description": "String (1-4 key locations; fixed furnishings/layout and lighting mood, NO characters)" }
+      ],
       "cover_image_prompt": "String",
       "pages": [
          {
            "page_number": Integer,
            "characters_in_scene": ["String"],
            "props_in_scene": ["String"],
+           "scenes_in_scene": ["String"],
            "layout_description": "String",
            "persistent_states": {
               "characters": [
@@ -381,7 +386,7 @@ const getJsonSchemaString = () => `
 const COMIC_JSON_SCHEMA = {
   type: 'object',
   required: ['analysis', 'title', 'global_art_style', 'character_sheet',
-             'prop_sheet', 'cover_image_prompt', 'pages'],
+             'prop_sheet', 'scene_sheet', 'cover_image_prompt', 'pages'],
   properties: {
     analysis: { type: 'string' },
     title: { type: 'string' },
@@ -402,6 +407,14 @@ const COMIC_JSON_SCHEMA = {
         properties: { name: { type: 'string' }, description: { type: 'string' } },
       },
     },
+    scene_sheet: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['name', 'description'],
+        properties: { name: { type: 'string' }, description: { type: 'string' } },
+      },
+    },
     cover_image_prompt: { type: 'string' },
     pages: {
       type: 'array',
@@ -414,6 +427,7 @@ const COMIC_JSON_SCHEMA = {
           page_number: { type: 'integer' },
           characters_in_scene: { type: 'array', items: { type: 'string' } },
           props_in_scene: { type: 'array', items: { type: 'string' } },
+          scenes_in_scene: { type: 'array', items: { type: 'string' } },
           layout_description: { type: 'string' },
           persistent_states: {
             type: 'object',
@@ -570,6 +584,17 @@ ${craftBlock}    ===============================================================
 
     2. **Props/Items**: Identify KEY OBJECTS or WEAPONS that appear frequently.
        - Create a 'prop_sheet'.
+
+    3. **Scenes/Locations**: Identify 1-4 KEY LOCATIONS where the story mainly takes place.
+       - Create a 'scene_sheet'.
+       - **DESCRIPTION FORMAT**: Fixed furnishings/layout and lighting mood (NO characters).
+       - Every page MUST list the locations it takes place in ('scenes_in_scene', names from 'scene_sheet').
+       - Backgrounds of the same location MUST match its scene reference across pages.
+
+    **Naming Discipline (STRICT)**:
+    - 'characters_in_scene', 'props_in_scene' and 'scenes_in_scene' MUST use the EXACT names from the corresponding sheets, character-by-character (逐字一致).
+    - NEVER invent variant names in these lists (no role/status suffixes like "Name (role)"). A character's situation or disguise belongs in 'image_prompt' and 'persistent_states', NOT in the name.
+    - Each list MUST be a subset of its sheet. If a page needs a new prop or location, add it to 'prop_sheet'/'scene_sheet' FIRST, then reference its exact name.
 
     **Page Layout Enforcement**:
     - The 'image_prompt' MUST describe the **FULL PAGE LAYOUT**.
@@ -915,19 +940,29 @@ export const generateComicScript = async (
     // 方案 2.3：不信任模型输出的 page_number，按数组序归一化（封面固定 0，正文 1..N）
     parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
 
+    // B：名单归一化（变体吸附 sheet 原名 / 未匹配道具场景自动补表 / 未匹配角色报告）——
+    // 在审校与快照落盘之前生效，保证持久化的是归一化后的数据
+    const normalized = normalizeSceneLists(parsed);
+    const normalizeLog = summarizeNormalizeReport(normalized.report);
+    const finalScript = normalized.script;
+
     // C：剧本自动审校 pass（autoReview 默认开；失败静默用原稿不阻断流程；用户中止按纪元收敛）
     if (extras.autoReview !== false) {
       try {
-        const { script: reviewed, notes } = await reviewAndReviseScript(parsed, { epoch, onLogUpdate, onUsage });
+        const { script: reviewed, notes } = await reviewAndReviseScript(finalScript, { epoch, onLogUpdate, onUsage });
         throwIfAborted(epoch);
-        if (notes) onLogUpdate('OUTPUT', `${fullText}\n\n===== REVIEW NOTES =====\n${notes}`);
+        const suffix =
+          (normalizeLog ? `\n\n===== NAME NORMALIZATION =====\n${normalizeLog}` : '') +
+          (notes ? `\n\n===== REVIEW NOTES =====\n${notes}` : '');
+        if (suffix) onLogUpdate('OUTPUT', `${fullText}${suffix}`);
         return reviewed;
       } catch (e) {
         if (!scope.isCurrent(epoch)) throw ABORT_ERROR(); // 审校中被中止：按中止收敛
         console.warn('[script] 自动审校失败，静默使用原稿:', e);
       }
     }
-    return parsed;
+    if (normalizeLog) onLogUpdate('OUTPUT', `${fullText}\n\n===== NAME NORMALIZATION =====\n${normalizeLog}`);
+    return finalScript;
 
   } catch (error) {
     // 方案 2.5："是否用户中止"由 epoch 权威判定，不再猜错误文本（含 'abort' 的网关错误应正常上报 UI）
@@ -1060,11 +1095,13 @@ const REVIEW_SYSTEM_PROMPT = `
     4. **Ending Consistency**: The final pages must deliver the ending the story promises. Fix conclusions that feel detached from the buildup.
     5. **Narration Overload**: Narration boxes must not over-explain what the visuals and dialogue already convey. Trim redundant narration; merge or delete narration that repeats the obvious.
     6. **Page-to-Page Continuity**: Page N+1 must directly continue Page N — no teleporting, no repeated panels, no contradictions in state or position.
+    7. **Sheet Consistency**: Names in 'characters_in_scene', 'props_in_scene', and 'scenes_in_scene' must exist in 'character_sheet', 'prop_sheet', and 'scene_sheet' respectively. Variant names (aliases, role/status suffixes like "Name (role)") MUST be merged back to the sheet's exact name. Add missing sheet entries or fix the page lists.
 
     RULES:
     - Fix ONLY the problems listed above. Do NOT change the core premise, the cast, the art style, the tone, or the page count.
     - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
     - Keep the exact same JSON structure and field names as the input script.
+    - Keep 'character_sheet', 'prop_sheet', and 'scene_sheet' entries unless a fix requires changing them.
 
     Output: Return a single valid JSON object (no markdown, no commentary) with EXACTLY this shape:
     { "notes": "String (concise review notes: what was wrong and what you changed)",
@@ -1128,7 +1165,12 @@ export const reviewAndReviseScript = async (
   }
   revised.pages = revised.pages.map((p, i) => ({ ...p, page_number: i + 1 }));
 
-  return { script: revised, notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '' };
+  // B：审校稿同样过名单归一化；变更摘要附进 notes
+  const norm = normalizeSceneLists(revised);
+  const normLog = summarizeNormalizeReport(norm.report);
+  const baseNotes = typeof parsed.notes === 'string' ? parsed.notes.trim() : '';
+
+  return { script: norm.script, notes: baseNotes + (normLog ? `\n[Name normalization]\n${normLog}` : '') };
 };
 
 // ================= D：剧本意见迭代（现剧本 + 用户意见 → 修订版完整 JSON） =================
@@ -1139,7 +1181,7 @@ const REVISE_FEEDBACK_SYSTEM_PROMPT = `
     Task: Revise the provided comic script JSON according to the USER FEEDBACK, then return the complete revised script.
 
     RULES:
-    - Apply the feedback precisely. Keep ALL unaffected pages, layouts, image prompts, character/prop sheets, and descriptions unchanged wherever possible.
+    - Apply the feedback precisely. Keep ALL unaffected pages, layouts, image prompts, character/prop/scene sheets, and descriptions unchanged wherever possible.
     - Do NOT change the core premise, the art style, the tone, or the page count.
     - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
     - Keep the exact same JSON structure and field names as the input script.
@@ -1177,7 +1219,15 @@ export const reviseScriptWithFeedback = async (
   const parsed = await parseScriptWithRepair(raw, opts?.onUsage);
   throwIfAborted(epoch);
   parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
-  return parsed;
+
+  // B：迭代稿同样过名单归一化（摘要写日志与 LogPanel）
+  const norm = normalizeSceneLists(parsed);
+  const normLog = summarizeNormalizeReport(norm.report);
+  if (normLog) {
+    console.warn('[revise] name normalization:\n' + normLog);
+    opts?.onLogUpdate?.('OUTPUT', `${raw}\n\n===== NAME NORMALIZATION =====\n${normLog}`);
+  }
+  return norm.script;
 };
 
 /**
@@ -1307,6 +1357,73 @@ export const generatePropReference = async (
   }
 };
 
+/**
+ * Generates a SCENE/LOCATION reference sheet (Image) based on the description and style.
+ * 比照 generatePropReference：白底设定图、无角色、固定陈设与光线基调，跨页锁场景一致性。
+ */
+export const generateSceneReference = async (
+  name: string,
+  description: string,
+  style: string,
+  mainCharacterName: string,
+  storyMode: string,
+  onUsage?: (stat: UsageStat) => void,
+  onProgress?: (p: ImageProgress) => void
+): Promise<string> => {
+  const ai = getAi();
+  const model = await resolveImageModel();
+
+  // Determine universe instruction（与道具参考图同一世界观判定口径）
+  const universeInstruction = storyMode === 'history_serious'
+     ? "This location is from a Historical Documentary. It must be strictly historically accurate to the era described."
+     : `This location belongs to the fictional universe of "${mainCharacterName}". It must match the design aesthetic of that franchise.`;
+
+  const prompt = `
+    Subject: Official Design of Location/Scene: ${name}.
+
+    INPUT CONTEXT:
+    1. **Setting/Description**: ${description}
+    2. **Universe Context**: ${universeInstruction}
+    3. **Target Art Style**: ${style}
+
+    INSTRUCTIONS:
+    - **VISUAL STYLE**: You MUST draw the location using the "Target Art Style" defined above.
+    - **DESIGN CONSISTENCY**: The location must look like it belongs in the "Universe Context" described above.
+    - **COMPOSITION**: Wide establishing shot of the place. High quality environment concept art.
+    - **NO CHARACTERS**: Empty scene only — no people, no creatures.
+    - **FIXED DETAILS**: Emphasize fixed furnishings, layout, and lighting mood described above (these will anchor all future pages).
+    - White or simple neutral background borders are acceptable, but the location itself must be fully readable.
+    - Output image aspect ratio: square 1:1.
+  `.trim();
+
+  const epoch = scope.epoch();
+
+  try {
+    // 方案 5.3：无参考图路径走流式（真实进度 + 渐进预览；老宿主自动回落非流式）
+    const result = await generateImageWithProgress(ai, {
+      model,
+      prompt,
+      size: '1024x1024',
+      count: 1
+    }, epoch, onProgress);
+
+    throwIfAborted(epoch);
+
+    if (onUsage) onUsage(imageStat(model, result.tokens));
+
+    const image = result.images?.[0];
+    if (image) return toDataUrl(image);
+
+    throw new Error("No image generated for scene reference.");
+  } catch (error) {
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
+    if ((error as any)?.name === 'AbortError') throw error;
+    console.error("Scene reference generation failed:", error);
+    throw error;
+  }
+};
+
 export const generatePanelImage = async (
   prompt: string,
   aspectRatio: string,
@@ -1329,6 +1446,7 @@ export const generatePanelImage = async (
 
       INSTRUCTION FOR REFERENCES (IDENTITY VS ACTION):
       - **IDENTITY (STRICT)**: You MUST strictly maintain the character's Face, Hair, Body Type, and Costume/Clothing details EXACTLY as shown in the reference images.
+      - **SCENE CONSISTENCY**: If scene reference images are provided, the background location MUST match them exactly (layout, furnishings, lighting mood).
       - **ACTION (DYNAMIC)**: **DO NOT COPY THE POSE** from the reference images. The reference images are static character sheets (mugshots).
       - **POSE INSTRUCTION**: You MUST make the character perform the ACTION described in the "TEXT PROMPT" below (e.g., running, fighting, typing, shouting). Make the pose dynamic and dramatic.
 

@@ -129,6 +129,12 @@ export interface UIStrings {
   uploadCustomImage: string;
   noPropsFound: string;
   noPropsHint: string;
+  scenesTab: (n: number) => string;
+  noScenesFound: string;
+  noScenesHint: string;
+  generateScene: string;
+  regenerateScene: string;
+  sceneDescPlaceholder: string;
   goToScriptEditor: string;
   charDescPlaceholder: string;
   propDescPlaceholder: string;
@@ -154,6 +160,15 @@ export interface UIStrings {
   propsInScene: string;
   noCharsInScene: string;
   noPropsInScene: string;
+  includeScenes: string;
+  scenesInScene: string;
+  noScenesInScene: string;
+
+  // ---- 名单匹配状态（未建档警示 + 补建） ----
+  unmatchedAssetHint: string;
+  unmatchedCharsTitle: string;
+  unmatchedCharsHint: string;
+  addToSheetBtn: string;
   refinePlaceholder: string;
   refineBtn: string;
   refining: string;

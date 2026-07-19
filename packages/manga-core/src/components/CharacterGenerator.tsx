@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { CharacterSheetItem, PropSheetItem, ImageProgress } from '../engine-types';
-import { generateCharacterReference, generatePropReference, getAbortEpoch } from '../services/mulbyAiService';
+import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ImageProgress } from '../engine-types';
+import { generateCharacterReference, generatePropReference, generateSceneReference, getAbortEpoch } from '../services/mulbyAiService';
 import { asyncPool, withRetryOnce } from '../services/asyncPool';
 import { stageText } from '../utils/progressText';
 import { getTheme } from '../theme/registry';
@@ -9,11 +9,16 @@ import { getTheme } from '../theme/registry';
 interface CharacterGeneratorProps {
   characters: CharacterSheetItem[];
   props?: PropSheetItem[];
+  scenes?: SceneSheetItem[];
+  /** 剧本页面名单里未建档的角色名（B 层归一化后的漏网名；警示区 + 补建入口） */
+  unmatchedCharacters?: string[];
+  onAddCharacter?: (name: string) => void;
   style: string;
   mainCharacterName: string;
   storyMode: string;
   onUpdateCharacter: (index: number, updatedChar: CharacterSheetItem) => void;
   onUpdateProp?: (index: number, updatedProp: PropSheetItem) => void;
+  onUpdateScene?: (index: number, updatedScene: SceneSheetItem) => void;
   onConfirm: () => void;
   onUsageCallback: (stat: any) => void;
 }
@@ -39,34 +44,40 @@ const startOrAdoptFlight = (flightKey: string, start: () => Promise<string>): Pr
 };
 
 const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
-  characters, 
+  characters,
   props = [],
-  style, 
+  scenes = [],
+  unmatchedCharacters = [],
+  onAddCharacter,
+  style,
   mainCharacterName,
   storyMode,
   onUpdateCharacter,
   onUpdateProp,
+  onUpdateScene,
   onConfirm,
   onUsageCallback
 }) => {
   const theme = getTheme();
   const S = theme.strings;
   const propsEnabled = theme.features.props; // 题材无道具维度时隐藏道具页签并跳过道具生成
-  const [activeTab, setActiveTab] = useState<'CHARACTERS' | 'PROPS'>('CHARACTERS');
+  const [activeTab, setActiveTab] = useState<'CHARACTERS' | 'PROPS' | 'SCENES'>('CHARACTERS');
 
   const [generatingStates, setGeneratingStates] = useState<Record<string, boolean>>({});
   const [errorStates, setErrorStates] = useState<Record<string, string>>({});
   // 方案 5.3：资产卡片实时进度（stage 文案 + 渐进预览）
   const [progressStates, setProgressStates] = useState<Record<string, ImageProgress>>({});
-  
+
   const initializedRef = useRef(false);
   const charactersRef = useRef(characters);
   const propsRef = useRef(props);
+  const scenesRef = useRef(scenes);
 
   useEffect(() => {
     charactersRef.current = characters;
     propsRef.current = props;
-  }, [characters, props]);
+    scenesRef.current = scenes;
+  }, [characters, props, scenes]);
 
   // Auto-generate missing character references on mount
   // 方案 4.3：角色/道具互无数据依赖，与绘页阶段共用 asyncPool(limit=2)；删除 800ms 硬睡，
@@ -85,6 +96,9 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
         const propIndices = (propsEnabled && propsRef.current.length > 0 && onUpdateProp)
             ? propsRef.current.map((p, i) => (!p.referenceImage ? i : -1)).filter(i => i !== -1)
             : [];
+        const sceneIndices = (scenesRef.current.length > 0 && onUpdateScene)
+            ? scenesRef.current.map((s, i) => (!s.referenceImage ? i : -1)).filter(i => i !== -1)
+            : [];
 
         // 生成函数入口有 in-flight 单飞去重（方案 2.6），与手动按钮并发安全
         const charTasks = charIndices.map((idx) => async () => {
@@ -97,8 +111,13 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
             const p = propsRef.current[idx];
             if (p && !p.referenceImage) await handleGenerateProp(idx, p);
         });
+        const sceneTasks = sceneIndices.map((idx) => async () => {
+            if (getAbortEpoch() !== epoch) return;
+            const s = scenesRef.current[idx];
+            if (s && !s.referenceImage) await handleGenerateScene(idx, s);
+        });
 
-        await asyncPool([...charTasks, ...propTasks], 2);
+        await asyncPool([...charTasks, ...propTasks, ...sceneTasks], 2);
 
         // 中止时给剩余缺图项标注可见状态（保留方案 2.6 可选项），避免静默停止；
         // 已有具体错误文案（含在途任务的"已被用户中止"）的项不覆盖
@@ -112,6 +131,10 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                 propIndices.forEach(i => {
                     const p = propsRef.current[i];
                     if (p && !p.referenceImage && !next[`prop-${i}`]) next[`prop-${i}`] = "已被用户中止";
+                });
+                sceneIndices.forEach(i => {
+                    const s = scenesRef.current[i];
+                    if (s && !s.referenceImage && !next[`scene-${i}`]) next[`scene-${i}`] = "已被用户中止";
                 });
                 return next;
             });
@@ -174,10 +197,30 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     }
   };
 
-  const handleFileUpload = (type: 'char' | 'prop', index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  // 场景参考图生成（比照道具：单飞领养 + 重试一次 + 进度/错误态）
+  const handleGenerateScene = async (index: number, scene: SceneSheetItem) => {
+    if (!onUpdateScene) return;
+    const key = `scene-${index}`;
+    const flightKey = `scene:${scene.name}`;
+    setGeneratingStates(prev => ({ ...prev, [key]: true }));
+    setErrorStates(prev => ({ ...prev, [key]: '' }));
+
+    try {
+      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
+        generateSceneReference(scene.name, scene.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key))));
+      onUpdateScene(index, { ...scene, referenceImage: imageData });
+    } catch (err: any) {
+      setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
+    } finally {
+      setGeneratingStates(prev => ({ ...prev, [key]: false }));
+      setProgressStates(prev => { const next = { ...prev }; delete next[key]; return next; });
+    }
+  };
+
+  const handleFileUpload = (type: 'char' | 'prop' | 'scene', index: number, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      
+
       const reader = new FileReader();
       reader.onload = (event) => {
           const result = event.target?.result as string;
@@ -185,6 +228,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
              onUpdateCharacter(index, { ...characters[index], referenceImage: result });
           } else if (type === 'prop' && onUpdateProp) {
              onUpdateProp(index, { ...props[index], referenceImage: result });
+          } else if (type === 'scene' && onUpdateScene) {
+             onUpdateScene(index, { ...scenes[index], referenceImage: result });
           }
       };
       reader.readAsDataURL(file);
@@ -197,6 +242,27 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
          <h2 className="text-2xl font-bold text-white font-[var(--manga-heading-font)]">{S.assetStudioTitle}</h2>
          <p className="text-slate-400 text-sm">{S.assetStudioSubtitle}</p>
       </div>
+
+      {/* 未建档角色警示区（剧本页面名单里有、角色表里没有；补建后可生成定妆并注入参考图） */}
+      {unmatchedCharacters.length > 0 && (
+        <div className="bg-yellow-900/25 border border-yellow-700/50 rounded-lg p-4 space-y-2 animate-fade-in">
+          <p className="text-sm font-bold text-yellow-400">{S.unmatchedCharsTitle}</p>
+          <p className="text-xs text-yellow-200/70">{S.unmatchedCharsHint}</p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {unmatchedCharacters.map(name => (
+              <span key={name} className="flex items-center gap-2 bg-slate-900 border border-yellow-700/40 rounded-full pl-3 pr-1.5 py-1 text-xs text-yellow-200">
+                {name}
+                <button
+                  onClick={() => onAddCharacter?.(name)}
+                  className="text-[10px] bg-yellow-700/70 hover:bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold transition-colors"
+                >
+                  {S.addToSheetBtn}
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Asset Tabs */}
       <div className="flex justify-center space-x-4 mb-8">
@@ -214,6 +280,12 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
             {S.propsTab(props.length)}
         </button>
         )}
+        <button
+            onClick={() => setActiveTab('SCENES')}
+            className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${activeTab === 'SCENES' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+        >
+            {S.scenesTab(scenes.length)}
+        </button>
       </div>
 
       {activeTab === 'CHARACTERS' && (
@@ -331,6 +403,70 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                             <label className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 flex items-center space-x-1">
                                 <span>{S.uploadCustomImage}</span>
                                 <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload('prop', idx, e)} />
+                            </label>
+                        </div>
+                    </div>
+                </div>
+             ))}
+        </div>
+      )}
+
+      {activeTab === 'SCENES' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+             {scenes.length === 0 && (
+                 <div className="col-span-full text-center py-12 text-slate-500">
+                     <p>{S.noScenesFound}</p>
+                     <p className="text-xs mt-2">{S.noScenesHint}</p>
+                 </div>
+             )}
+             {scenes.map((scene, idx) => (
+                <div key={idx} className="bg-slate-800 rounded-lg border border-slate-700 p-4 flex flex-col space-y-4 shadow-lg hover:border-emerald-500/50 transition-colors">
+                    <div className="flex items-center justify-between">
+                        <h3 className="font-bold text-lg text-white truncate">{scene.name}</h3>
+                        <span className="text-xs text-slate-500 font-mono">SCENE #{idx + 1}</span>
+                    </div>
+                    <div className="relative aspect-square bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
+                        {scene.referenceImage ? (
+                            <img src={scene.referenceImage} alt={scene.name} className="w-full h-full object-contain p-2" />
+                        ) : (
+                            <div className="w-full h-full flex items-center justify-center flex-col text-slate-500">
+                                <span className="text-3xl mb-2">🏞️</span>
+                                <span className="text-xs">{S.noReference}</span>
+                            </div>
+                        )}
+                        {generatingStates[`scene-${idx}`] && (
+                            <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center flex-col z-10">
+                                {progressStates[`scene-${idx}`]?.preview && (
+                                    <img src={progressStates[`scene-${idx}`]!.preview} alt="" className="absolute inset-0 w-full h-full object-contain opacity-50" />
+                                )}
+                                <div className="relative animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mb-2"></div>
+                                <span className="relative text-xs text-emerald-300">{stageText(progressStates[`scene-${idx}`]) || S.generatingLabel}</span>
+                            </div>
+                        )}
+                         {errorStates[`scene-${idx}`] && (
+                            <div className="absolute inset-0 bg-red-900/90 flex items-center justify-center p-2 text-center z-10">
+                                <span className="text-xs text-red-200">{errorStates[`scene-${idx}`]}</span>
+                            </div>
+                        )}
+                    </div>
+                    <textarea
+                        className="w-full h-24 bg-slate-900 border border-slate-700 rounded p-2 text-xs text-slate-300 resize-none focus:outline-none focus:border-emerald-500"
+                        value={scene.description}
+                        onChange={(e) => onUpdateScene && onUpdateScene(idx, { ...scene, description: e.target.value })}
+                        placeholder={S.sceneDescPlaceholder}
+                    />
+                    <div className="flex flex-col space-y-2 pt-2">
+                        <button
+                            onClick={() => handleGenerateScene(idx, scene)}
+                            disabled={generatingStates[`scene-${idx}`]}
+                            className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white text-xs font-bold rounded shadow-lg shadow-emerald-500/20 transition-all"
+                        >
+                        {scene.referenceImage ? S.regenerateScene : S.generateScene}
+                        </button>
+                        <div className="flex justify-center">
+                            <label className="cursor-pointer text-xs text-slate-500 hover:text-slate-300 flex items-center space-x-1">
+                                <span>{S.uploadCustomImage}</span>
+                                <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileUpload('scene', idx, e)} />
                             </label>
                         </div>
                     </div>

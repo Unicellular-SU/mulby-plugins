@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem, UsageStat } from '../engine-types';
+import { ComicResponse, ComicPageScript, CharacterSheetItem, PropSheetItem, SceneSheetItem, UsageStat } from '../engine-types';
 import { refineText } from '../services/mulbyAiService';
 import { resolveByName } from '@mulby-plugins/manga-kit';
 import { getTheme } from '../theme/registry';
@@ -9,6 +9,7 @@ interface ScriptEditorProps {
   script: ComicResponse;
   characterSheet: CharacterSheetItem[];
   propSheet?: PropSheetItem[];
+  sceneSheet?: SceneSheetItem[];
   onUpdate: (updatedScript: ComicResponse) => void;
   onContinue: () => void;
   /** 方案 5.2：润色调用计费上报（补漏记） */
@@ -18,7 +19,7 @@ interface ScriptEditorProps {
   isRevising?: boolean;
 }
 
-const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue, onUsage, onRevise, isRevising }) => {
+const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], sceneSheet = [], onUpdate, onContinue, onUsage, onRevise, isRevising }) => {
   const theme = getTheme();
   const S = theme.strings;
   const propsEnabled = theme.features.props;
@@ -87,6 +88,7 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
   // Helper to find images（统一名字解析口径，方案 2.4 顺带项）
   const getCharImage = (name: string) => resolveByName(name, characterSheet)?.referenceImage;
   const getPropImage = (name: string) => resolveByName(name, propSheet)?.referenceImage;
+  const getSceneImage = (name: string) => resolveByName(name, sceneSheet)?.referenceImage;
 
   return (
     <div className="w-full h-full bg-slate-900 flex flex-col rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
@@ -254,7 +256,9 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">{S.charsInScene}</h4>
                         {activePage.characters_in_scene && activePage.characters_in_scene.length > 0 ? (
                              <div className="space-y-3">
-                                {activePage.characters_in_scene.map((name, i) => (
+                                {activePage.characters_in_scene.map((name, i) => {
+                                    const inSheet = characterSheet.some(c => c.name === name);
+                                    return (
                                     <div key={i} className="flex items-center space-x-3">
                                         <div className="w-10 h-10 rounded-full bg-slate-700 overflow-hidden border border-slate-600">
                                             {getCharImage(name) ? (
@@ -263,9 +267,13 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                                                 <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs">?</div>
                                             )}
                                         </div>
-                                        <span className="text-sm text-slate-300 font-medium">{name}</span>
+                                        <span
+                                            className={`text-sm font-medium ${inSheet ? 'text-slate-300' : 'text-yellow-400'}`}
+                                            title={inSheet ? undefined : S.unmatchedAssetHint}
+                                        >{name}</span>
                                     </div>
-                                ))}
+                                    );
+                                })}
                              </div>
                         ) : (
                             <p className="text-xs text-slate-500 italic">{S.noCharsInScene}</p>
@@ -276,7 +284,9 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.propsInScene}</h4>
                          {activePage.props_in_scene && activePage.props_in_scene.length > 0 ? (
                              <div className="space-y-3">
-                                {activePage.props_in_scene.map((name, i) => (
+                                {activePage.props_in_scene.map((name, i) => {
+                                    const inSheet = propSheet.some(p => p.name === name);
+                                    return (
                                     <div key={i} className="flex items-center space-x-3">
                                         <div className="w-10 h-10 rounded bg-slate-700 overflow-hidden border border-slate-600 flex items-center justify-center">
                                             {getPropImage(name) ? (
@@ -285,14 +295,45 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                                                 <div className="text-slate-500 text-xs">📦</div>
                                             )}
                                         </div>
-                                        <span className="text-sm text-slate-300 font-medium">{name}</span>
+                                        <span
+                                            className={`text-sm font-medium ${inSheet ? 'text-slate-300' : 'text-yellow-400'}`}
+                                            title={inSheet ? undefined : S.unmatchedAssetHint}
+                                        >{name}</span>
                                     </div>
-                                ))}
+                                    );
+                                })}
                              </div>
                         ) : (
                             <p className="text-xs text-slate-500 italic">{S.noPropsInScene}</p>
                         )}
                         </>
+                        )}
+
+                        {/* 场景（第三类资产）：本页场景名单与参考图 */}
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.scenesInScene}</h4>
+                         {activePage.scenes_in_scene && activePage.scenes_in_scene.length > 0 ? (
+                             <div className="space-y-3">
+                                {activePage.scenes_in_scene.map((name, i) => {
+                                    const inSheet = sceneSheet.some(s => s.name === name);
+                                    return (
+                                    <div key={i} className="flex items-center space-x-3">
+                                        <div className="w-10 h-10 rounded bg-slate-700 overflow-hidden border border-slate-600 flex items-center justify-center">
+                                            {getSceneImage(name) ? (
+                                                <img src={getSceneImage(name)} alt={name} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="text-slate-500 text-xs">🏞️</div>
+                                            )}
+                                        </div>
+                                        <span
+                                            className={`text-sm font-medium ${inSheet ? 'text-slate-300' : 'text-yellow-400'}`}
+                                            title={inSheet ? undefined : S.unmatchedAssetHint}
+                                        >{name}</span>
+                                    </div>
+                                    );
+                                })}
+                             </div>
+                        ) : (
+                            <p className="text-xs text-slate-500 italic">{S.noScenesInScene}</p>
                         )}
 
                     </div>

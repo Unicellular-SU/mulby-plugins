@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { ComicPageData, AppConfig, CharacterSheetItem, PropSheetItem, UsageStat, WatermarkSettings } from '../engine-types';
+import { ComicPageData, AppConfig, CharacterSheetItem, PropSheetItem, SceneSheetItem, UsageStat, WatermarkSettings } from '../engine-types';
 import { refineImagePrompt } from '../services/mulbyAiService';
 import { saveImageDataUrl } from '../services/exportService';
 import { stageText } from '../utils/progressText';
@@ -18,7 +18,8 @@ interface PanelCardProps {
   config: AppConfig;
   characterSheet?: CharacterSheetItem[];
   propSheet?: PropSheetItem[];
-  onRegenerate: (pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => void;
+  sceneSheet?: SceneSheetItem[];
+  onRegenerate: (pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[], newScenesInScene?: string[]) => void;
   /** 方案 5.2：润色调用计费上报（补漏记） */
   onUsage?: (action: string, stat: UsageStat) => void;
   /** 方案 5.6：点击成品图进入全屏阅读模式 */
@@ -27,7 +28,7 @@ interface PanelCardProps {
   onUpdateWatermark?: (pageNumber: number, settings?: WatermarkSettings) => void;
 }
 
-const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterSheet, propSheet, onRegenerate, onUsage, onOpenReader, onUpdateWatermark }) => {
+const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterSheet, propSheet, sceneSheet, onRegenerate, onUsage, onOpenReader, onUpdateWatermark }) => {
   const theme = getTheme();
   const S = theme.strings;
   const [isEditing, setIsEditing] = useState(false);
@@ -66,14 +67,15 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
   // State for selections in edit mode
   const [selectedCharacters, setSelectedCharacters] = useState<string[]>(page.characters_in_scene || []);
   const [selectedProps, setSelectedProps] = useState<string[]>(page.props_in_scene || []);
-  
+  const [selectedScenes, setSelectedScenes] = useState<string[]>(page.scenes_in_scene || []);
+
   // AI Refine State
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [refineError, setRefineError] = useState<string | null>(null);
 
   const handleSave = () => {
-    onRegenerate(page.page_number, promptDraft, selectedCharacters, selectedProps);
+    onRegenerate(page.page_number, promptDraft, selectedCharacters, selectedProps, selectedScenes);
     setIsEditing(false);
   };
 
@@ -119,7 +121,17 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
             return [...prev, propName];
         }
     });
-};
+  };
+
+  const toggleScene = (sceneName: string) => {
+    setSelectedScenes(prev => {
+        if (prev.includes(sceneName)) {
+            return prev.filter(s => s !== sceneName);
+        } else {
+            return [...prev, sceneName];
+        }
+    });
+  };
 
   // 方案 5.5：单页保存走原生保存流（扩展名按真实字节魔数；老宿主自动降级 <a download>）
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -139,6 +151,15 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
   // Identify characters on this page for display (using current Page data)
   const charsOnPage = characterSheet?.filter(c => page.characters_in_scene?.includes(c.name)) || [];
   const propsOnPage = theme.features.props ? (propSheet?.filter(p => page.props_in_scene?.includes(p.name)) || []) : [];
+  const scenesOnPage = sceneSheet?.filter(s => page.scenes_in_scene?.includes(s.name)) || [];
+  // 名单里未精确建档的名字（警示 chip；B 层归一化后应罕见，主要见于旧工程数据）
+  const unmatchedBadge = (names: string[] | undefined, sheet?: { name: string }[]) =>
+    (names || []).filter(n => !sheet?.some(i => i.name === n));
+  const unmatchedBadges = [
+    ...unmatchedBadge(page.characters_in_scene, characterSheet),
+    ...unmatchedBadge(page.props_in_scene, propSheet),
+    ...unmatchedBadge(page.scenes_in_scene, sceneSheet),
+  ];
 
   return (
     <div className="flex flex-col h-full space-y-4">
@@ -332,6 +353,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                 onClick={() => {
                     setSelectedCharacters(page.characters_in_scene || []);
                     setSelectedProps(page.props_in_scene || []);
+                    setSelectedScenes(page.scenes_in_scene || []);
                     setIsEditing(!isEditing);
                 }}
                 className="bg-black/50 hover:bg-indigo-600 p-2 rounded text-white backdrop-blur border border-white/20 transition-colors"
@@ -396,6 +418,31 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                                      {prop.referenceImage ? <img src={prop.referenceImage} alt="" className="w-full h-full object-cover" /> : <div className="text-[8px]">📦</div>}
                                  </div>
                                  <span className="truncate max-w-[80px]">{prop.name}</span>
+                                 {isSelected && <span>✓</span>}
+                             </button>
+                         )
+                     })}
+                 </div>
+             </div>
+          )}
+
+          {/* Scene Selector（第三类资产：本页场景名单） */}
+          {sceneSheet && sceneSheet.length > 0 && (
+             <div className="mb-3">
+                 <label className="text-xs text-indigo-400 font-bold mb-1 block">{S.includeScenes}</label>
+                 <div className="flex flex-wrap gap-2">
+                     {sceneSheet.map((scene, i) => {
+                         const isSelected = selectedScenes.includes(scene.name);
+                         return (
+                             <button
+                                key={i}
+                                onClick={() => toggleScene(scene.name)}
+                                className={`flex items-center space-x-1 px-2 py-1 rounded-full text-[10px] border transition-all ${isSelected ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                             >
+                                 <div className="w-4 h-4 rounded bg-slate-700 overflow-hidden flex items-center justify-center">
+                                     {scene.referenceImage ? <img src={scene.referenceImage} alt="" className="w-full h-full object-cover" /> : <div className="text-[8px]">🏞️</div>}
+                                 </div>
+                                 <span className="truncate max-w-[80px]">{scene.name}</span>
                                  {isSelected && <span>✓</span>}
                              </button>
                          )
@@ -475,7 +522,7 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                </div>
                
                {/* Characters in Scene Badge */}
-               {(charsOnPage.length > 0 || propsOnPage.length > 0) && (
+               {(charsOnPage.length > 0 || propsOnPage.length > 0 || scenesOnPage.length > 0 || unmatchedBadges.length > 0) && (
                  <div className="mt-3 flex flex-wrap gap-2">
                     {charsOnPage.map((char, i) => (
                       <div key={`c-${i}`} className="flex items-center bg-slate-900 border border-slate-700 rounded-full pr-2 overflow-hidden">
@@ -489,14 +536,27 @@ const PanelCard: React.FC<PanelCardProps> = ({ page, index, config, characterShe
                         <span className="text-[10px] text-slate-300 pl-1">{prop.name}</span>
                       </div>
                     ))}
+                    {scenesOnPage.map((scene, i) => (
+                      <div key={`s-${i}`} className="flex items-center bg-slate-900 border border-slate-700 rounded pr-2 overflow-hidden">
+                        {scene.referenceImage ? <img src={scene.referenceImage} alt="" className="w-5 h-5 object-cover" /> : <span className="w-5 h-5 flex items-center justify-center text-[10px]">🏞️</span>}
+                        <span className="text-[10px] text-slate-300 pl-1">{scene.name}</span>
+                      </div>
+                    ))}
+                    {/* 未建档名单警示 chip（黄色） */}
+                    {unmatchedBadges.map((name, i) => (
+                      <div key={`u-${i}`} title={S.unmatchedAssetHint} className="flex items-center bg-yellow-900/40 border border-yellow-700/50 rounded-full px-2 overflow-hidden">
+                        <span className="text-[10px] text-yellow-300">{name}</span>
+                      </div>
+                    ))}
                  </div>
                )}
 
                <div className="mt-4 pt-3 border-t border-slate-700/50">
-                  <button 
+                  <button
                      onClick={() => {
                         setSelectedCharacters(page.characters_in_scene || []);
                         setSelectedProps(page.props_in_scene || []);
+                        setSelectedScenes(page.scenes_in_scene || []);
                         setIsEditing(!isEditing);
                      }}
                      className="text-xs text-indigo-400 hover:text-indigo-300 underline flex items-center"

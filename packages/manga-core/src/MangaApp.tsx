@@ -13,10 +13,10 @@ import { useComicWorkflow } from './hooks/useComicWorkflow';
 import { saveBinary, buildZipArchive, buildPdfDocument, buildLongImages, revealInFolder } from './services/exportService';
 import ReaderOverlay from './components/ReaderOverlay';
 import ProjectGallery from './components/ProjectGallery';
-import { attIdForChar, attIdForProp, loadProject, isRestorableProject, getImageAttachment } from './services/persistenceService';
+import { attIdForChar, attIdForProp, attIdForScene, loadProject, isRestorableProject, getImageAttachment } from './services/persistenceService';
 import { useProjectPersistence } from './hooks/useProjectPersistence';
 import { getCharacterReference, buildCoverPage, prepareScenePages, resolvePageRefs } from './utils/promptBuilder';
-import { AppConfig, ComicPageData, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse, WatermarkSettings } from './engine-types';
+import { AppConfig, ComicPageData, WorkflowStep, CharacterSheetItem, PropSheetItem, SceneSheetItem, ComicResponse, WatermarkSettings } from './engine-types';
 import { ASPECT_RATIOS, PAGE_LENGTH_OPTIONS } from './constants';
 import { getTheme } from './theme/registry';
 import type { MangaTheme } from './theme/types';
@@ -66,6 +66,7 @@ const MangaApp: React.FC = () => {
   const [comicScript, setComicScript] = useState<ComicResponse | null>(null);
   const [characterSheet, setCharacterSheet] = useState<CharacterSheetItem[]>([]);
   const [propSheet, setPropSheet] = useState<PropSheetItem[]>([]);
+  const [sceneSheet, setSceneSheet] = useState<SceneSheetItem[]>([]);
   const [pages, setPages] = useState<ComicPageData[]>([]);
   
   // Storyboarding Phase State
@@ -129,6 +130,7 @@ const MangaApp: React.FC = () => {
     comicScript, setComicScript,
     characterSheet, setCharacterSheet,
     propSheet, setPropSheet,
+    sceneSheet, setSceneSheet,
     pages, setPages,
     tokenUsage, setTokenUsage,
     setGlobalError,
@@ -180,6 +182,7 @@ const MangaApp: React.FC = () => {
     setComicScript(null);
     setCharacterSheet([]);
     setPropSheet([]);
+    setSceneSheet([]);
     setPages([]);
     setInputLog('');
     setOutputLog('');
@@ -344,6 +347,7 @@ const MangaApp: React.FC = () => {
       setComicScript(comicData);
       setCharacterSheet(comicData.character_sheet || []);
       setPropSheet(comicData.prop_sheet || []);
+      setSceneSheet(comicData.scene_sheet || []);
       setWorkflowStep(WorkflowStep.STORYBOARDING);
       setStoryboardTab('CHARACTERS');
 
@@ -416,6 +420,14 @@ const MangaApp: React.FC = () => {
         });
         setPropSheet(mergedProps);
     }
+    // Sync scene sheet（第三类资产：按名字匹配合并，保留已生成参考图）
+    if (updatedScript.scene_sheet) {
+        const mergedScenes = updatedScript.scene_sheet.map(newItem => {
+            const existing = sceneSheet.find(s => s.name === newItem.name);
+            return existing ? { ...newItem, referenceImage: existing.referenceImage } : newItem;
+        });
+        setSceneSheet(mergedScenes);
+    }
   };
 
   // Handle updates from CharacterGenerator (Assets)
@@ -449,6 +461,35 @@ const MangaApp: React.FC = () => {
     });
  }, [persistReferenceImage]);
 
+  const handleSceneUpdate = useCallback((index: number, updatedScene: SceneSheetItem) => {
+    persistReferenceImage(attIdForScene(updatedScene.name), updatedScene.referenceImage);
+    setSceneSheet(prevSheet => {
+       const newSheet = [...prevSheet];
+       newSheet[index] = updatedScene;
+       return newSheet;
+    });
+    setComicScript(prevScript => {
+       if (!prevScript) return null;
+       const prevSheet = prevScript.scene_sheet || [];
+       const newSheet = prevSheet.map((item, i) => i === index ? updatedScene : item);
+       return { ...prevScript, scene_sheet: newSheet };
+    });
+ }, [persistReferenceImage]);
+
+  // 剧本页面名单里未建档的角色名（B 层归一化保留原名不补建，交给用户决定）；
+  // 与 characterSheet 精确比对，补建/吸附后自动消失
+  const unmatchedCharNames = comicScript
+    ? [...new Set((comicScript.pages || []).flatMap(p => p.characters_in_scene || []))]
+        .filter(n => !characterSheet.some(c => c.name === n))
+    : [];
+
+  // C：补建角色（无参考图，用户在资产工坊随后生成定妆）
+  const handleAddCharacter = (name: string) => {
+    const item: CharacterSheetItem = { name, description: name };
+    setCharacterSheet(prev => [...prev, item]);
+    setComicScript(prev => prev ? { ...prev, character_sheet: [...(prev.character_sheet || []), item] } : prev);
+  };
+
   // STEP 3: Start Comic Generation (Images)
   const handleStartComicGeneration = async () => {
       if (!comicScript) return;
@@ -459,7 +500,7 @@ const MangaApp: React.FC = () => {
       const mainCharRef = getCharacterReference(config.character.name, characterSheet);
       const coverCharacters = mainCharRef ? [config.character.name] : [];
       const coverPage = buildCoverPage(comicScript, effectiveStyle, coverCharacters);
-      const preparedPages = prepareScenePages(comicScript, effectiveStyle, characterSheet, propSheet);
+      const preparedPages = prepareScenePages(comicScript, effectiveStyle, characterSheet, propSheet, sceneSheet);
 
       // 返回上一步后重进（或恢复工程后重进）：按 page_number 匹配现有页——
       // 已有 imageData 的页直接沿用（保留重绘后的 prompt / 图像 / 水印覆盖，不再入队）；
@@ -516,15 +557,16 @@ const MangaApp: React.FC = () => {
     setWorkflowStep(WorkflowStep.STORYBOARDING);
   };
 
-  const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => {
+  const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[], newScenesInScene?: string[]) => {
       const page = pages.find(p => p.page_number === pageNumber);
       if (!page) return;
 
       const activeCharacterNames = newCharactersInScene || page.characters_in_scene || [];
       const activePropNames = newPropsInScene || page.props_in_scene || [];
+      const activeSceneNames = newScenesInScene || page.scenes_in_scene || [];
 
       const { refs: sceneRefs, finalPrompt: finalPromptToUse } =
-          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames, characterSheet, propSheet);
+          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames, characterSheet, propSheet, activeSceneNames, sceneSheet);
 
       setPages(prev => prev.map(p =>
         p.page_number === pageNumber
@@ -533,6 +575,7 @@ const MangaApp: React.FC = () => {
             image_prompt: finalPromptToUse,
             characters_in_scene: activeCharacterNames,
             props_in_scene: activePropNames,
+            scenes_in_scene: activeSceneNames,
             isGenerating: true,
             error: undefined
           }
@@ -540,12 +583,12 @@ const MangaApp: React.FC = () => {
       ));
 
       triggerImageGeneration(
-          { ...page, image_prompt: finalPromptToUse, characters_in_scene: activeCharacterNames, props_in_scene: activePropNames },
+          { ...page, image_prompt: finalPromptToUse, characters_in_scene: activeCharacterNames, props_in_scene: activePropNames, scenes_in_scene: activeSceneNames },
           config.aspectRatio,
           sceneRefs
       );
 
-  }, [config.aspectRatio, pages, characterSheet, propSheet, triggerImageGeneration]);
+  }, [config.aspectRatio, pages, characterSheet, propSheet, sceneSheet, triggerImageGeneration]);
 
   // 方案 4.4：续绘全部未完成页（失败/中止页批量重发，走并发池，自然获得重试与中止响应）。
   // 与第 3 章恢复路径衔接：恢复到 COMIC_GENERATION 后未完成页带 error 态，可在此一键续绘。
@@ -559,7 +602,7 @@ const MangaApp: React.FC = () => {
       // 页面 prompt 保持现状不重建——首轮生成已含 context 块，封面 prompt 无标记也不受影响。
       const prepared = targets.map(p => ({
           page: p,
-          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || [], characterSheet, propSheet).refs,
+          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || [], characterSheet, propSheet, p.scenes_in_scene || [], sceneSheet).refs,
       }));
 
       setPages(prev => prev.map(p =>
@@ -651,6 +694,7 @@ const MangaApp: React.FC = () => {
     setComicScript(null);
     setCharacterSheet([]);
     setPropSheet([]);
+    setSceneSheet([]);
     setPages([]);
     setInputLog('');
     setOutputLog('');
@@ -900,11 +944,15 @@ const MangaApp: React.FC = () => {
                             <CharacterGenerator
                                 characters={characterSheet}
                                 props={propSheet}
+                                scenes={sceneSheet}
+                                unmatchedCharacters={unmatchedCharNames}
+                                onAddCharacter={handleAddCharacter}
                                 style={effectiveStyle}
                                 mainCharacterName={config.character.name}
                                 storyMode={config.storyMode}
                                 onUpdateCharacter={handleCharacterUpdate}
                                 onUpdateProp={handlePropUpdate}
+                                onUpdateScene={handleSceneUpdate}
                                 onConfirm={() => setStoryboardTab('SCRIPT')}
                                 onUsageCallback={(stat) => trackUsage('Asset Gen', stat)}
                             />
@@ -915,6 +963,7 @@ const MangaApp: React.FC = () => {
                             script={comicScript}
                             characterSheet={characterSheet}
                             propSheet={propSheet}
+                            sceneSheet={sceneSheet}
                             onUpdate={handleScriptUpdate}
                             onContinue={handleStartComicGeneration}
                             onUsage={trackUsage}
@@ -990,6 +1039,7 @@ const MangaApp: React.FC = () => {
                         config={config}
                         characterSheet={characterSheet}
                         propSheet={propSheet}
+                        sceneSheet={sceneSheet}
                         onRegenerate={handleRegeneratePage}
                         onUsage={trackUsage}
                         onUpdateWatermark={theme.features.watermark ? handlePageWatermarkUpdate : undefined}
