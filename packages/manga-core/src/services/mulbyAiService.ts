@@ -508,6 +508,10 @@ let staticSystemPromptCache: { theme: MangaTheme; prompt: string } | null = null
 const getStaticSystemPrompt = (): string => {
   const theme = getTheme();
   if (staticSystemPromptCache?.theme === theme) return staticSystemPromptCache.prompt;
+  // 题材可选的"故事架构"段（storyCraftRules）：插在 PHASE 3 注记与 PHASE 4 之间；
+  // 缺省为空串，system prompt 与不填该字段的主题保持逐字节一致
+  const craft = theme.storyCraftRules?.trim();
+  const craftBlock = craft ? `${craft}\n\n` : '';
   const prompt = `
     Role: ${theme.systemRole}
 
@@ -532,7 +536,7 @@ ${theme.sourceAnalysis}
 
     (PHASE 3 casting rules are provided in the user message.)
 
-    ================================================================
+${craftBlock}    ================================================================
     PHASE 4: DIALOGUE & NARRATIVE DENSITY (CRITICAL)
     ================================================================
     - **HIGH VERBOSITY REQUIRED**:
@@ -593,6 +597,7 @@ export interface ScriptExtras {
   secondaryStoryMode?: StoryMode;
   endingType?: string;
   colorMode?: string;
+  autoReview?: boolean; // false 时跳过生成后的自动审校 pass（默认审校）
 }
 
 /**
@@ -779,6 +784,14 @@ export const estimateScriptTokens = async (input: {
   }
 };
 
+// 部分 provider（如 DeepSeek）不支持 json_schema response_format，报 HTTP 400
+// "This response_format type is unavailable now"。识别后去掉结构化约束重试一次：
+// prompt 的 JSON 指令 + 本地提取 + parseScriptWithRepair 修复链本就按无约束输出设计。
+const isResponseFormatUnsupported = (e: unknown): boolean => {
+  const msg = String((e as any)?.message ?? e ?? '');
+  return /response[_-]?format/i.test(msg) && /400|unavailable|unsupported|invalid/i.test(msg);
+};
+
 export const generateComicScript = async (
   text: string,
   style: string,
@@ -802,14 +815,6 @@ export const generateComicScript = async (
 
   const epoch = scope.epoch();
 
-  // 部分 provider（如 DeepSeek）不支持 json_schema response_format，报 HTTP 400
-  // "This response_format type is unavailable now"。识别后去掉结构化约束重试一次：
-  // prompt 的 JSON 指令 + 本地提取 + parseScriptWithRepair 修复链本就按无约束输出设计。
-  const isResponseFormatUnsupported = (e: unknown): boolean => {
-    const msg = String((e as any)?.message ?? e ?? '');
-    return /response[_-]?format/i.test(msg) && /400|unavailable|unsupported|invalid/i.test(msg);
-  };
-
   const attempt = async (withSchema: boolean): Promise<string> => {
     let fullText = '';
     let streamError: string | null = null;
@@ -824,15 +829,17 @@ export const generateComicScript = async (
             { role: 'user', content: userPrompt },
           ],
           // 方案 4.6：API 级 jsonSchema 约束；strict 显式 false（宿主默认 true 会拒复杂嵌套 schema）。
-          // theme.jsonSchema 可整体覆写（配合 buildScriptPrompt 钩子）
-          ...(withSchema ? {
-            params: {
-              responseFormat: 'json_schema',
+          // theme.jsonSchema 可整体覆写（配合 buildScriptPrompt 钩子）。
+          // 温度：AiModelParameters 支持 temperature——剧本生成 0.9 保创造性
+          params: {
+            temperature: 0.9,
+            ...(withSchema ? {
+              responseFormat: 'json_schema' as const,
               jsonSchema: (getTheme().jsonSchema ?? COMIC_JSON_SCHEMA) as unknown as Record<string, unknown>,
               jsonSchemaName: 'comic_script',
               strict: false,
-            },
-          } : {}),
+            } : {}),
+          },
           ...NO_TOOLS
         },
         (chunk: any) => {
@@ -900,6 +907,19 @@ export const generateComicScript = async (
     throwIfAborted(epoch);
     // 方案 2.3：不信任模型输出的 page_number，按数组序归一化（封面固定 0，正文 1..N）
     parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
+
+    // C：剧本自动审校 pass（autoReview 默认开；失败静默用原稿不阻断流程；用户中止按纪元收敛）
+    if (extras.autoReview !== false) {
+      try {
+        const { script: reviewed, notes } = await reviewAndReviseScript(parsed, { epoch, onLogUpdate, onUsage });
+        throwIfAborted(epoch);
+        if (notes) onLogUpdate('OUTPUT', `${fullText}\n\n===== REVIEW NOTES =====\n${notes}`);
+        return reviewed;
+      } catch (e) {
+        if (!scope.isCurrent(epoch)) throw ABORT_ERROR(); // 审校中被中止：按中止收敛
+        console.warn('[script] 自动审校失败，静默使用原稿:', e);
+      }
+    }
     return parsed;
 
   } catch (error) {
@@ -909,6 +929,241 @@ export const generateComicScript = async (
     console.error("Script generation failed:", error);
     throw error;                                              // 真实失败：原样上报 UI
   }
+};
+
+// ================= C/D：结构化文本 JSON 调用（审校 / 意见迭代共用） =================
+// 与 generateComicScript 同款链路：json_schema 约束（不支持时回退无约束）+ 流式 +
+// 纪元中止 + usage 如实上报。epoch 由调用方传入（沿用其运行代际），缺省捕获新纪元。
+
+interface TextJsonCallArgs {
+  system: string;
+  user: string;
+  jsonSchema: Record<string, unknown>;
+  jsonSchemaName: string;
+  temperature: number;
+  epoch?: number;
+  onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+  onUsage?: (stat: UsageStat) => void;
+}
+
+const callTextJson = async ({
+  system, user, jsonSchema, jsonSchemaName, temperature, epoch: epochArg, onLogUpdate, onUsage,
+}: TextJsonCallArgs): Promise<string> => {
+  const ai = getAi();
+  const epoch = epochArg ?? scope.epoch();
+  const fullInputText = `${system}\n\n${user}`;
+  onLogUpdate?.('INPUT', fullInputText);
+
+  const attempt = async (withSchema: boolean): Promise<string> => {
+    let fullText = '';
+    let streamError: string | null = null;
+    let requestId: string | null = null;
+
+    try {
+      const req = ai.call(
+        {
+          ...(activeModels.textModel ? { model: activeModels.textModel } : {}),
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          params: {
+            temperature,
+            ...(withSchema ? {
+              responseFormat: 'json_schema' as const,
+              jsonSchema,
+              jsonSchemaName,
+              strict: false,
+            } : {}),
+          },
+          ...NO_TOOLS
+        },
+        (chunk: any) => {
+          if (chunk.__requestId) {
+            requestId = chunk.__requestId;
+            if (!scope.trackIfCurrent(epoch, chunk.__requestId)) {
+              safeAbort(ai, chunk.__requestId);
+            }
+            return;
+          }
+          if (!scope.isCurrent(epoch)) return;
+          if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
+            fullText += chunk.content;
+            onLogUpdate?.('OUTPUT', fullText);
+          } else if (chunk.chunkType === 'error' && chunk.error?.message) {
+            streamError = chunk.error.message;
+          }
+        }
+      );
+
+      const finalMsg = await req;
+
+      throwIfAborted(epoch);
+
+      if (!fullText && typeof finalMsg?.content === 'string') {
+        fullText = finalMsg.content;
+        if (fullText) onLogUpdate?.('OUTPUT', fullText);
+      }
+
+      if (onUsage) {
+        const u = finalMsg?.usage;
+        if (typeof u?.inputTokens === 'number' && typeof u?.outputTokens === 'number') {
+          onUsage(textStat(u.inputTokens, u.outputTokens, false));
+        } else {
+          const est = await estimateTextUsage(activeModels.textModel || undefined, fullInputText, fullText);
+          onUsage(textStat(est.inputTokens, est.outputTokens, true));
+        }
+      }
+
+      if (!fullText) {
+        throw new Error(streamError ? `AI 调用失败：${streamError}` : "No response from AI");
+      }
+      return fullText;
+
+    } finally {
+      if (requestId) scope.untrack(requestId);
+    }
+  };
+
+  try {
+    return await attempt(true);
+  } catch (e) {
+    if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
+    if (!isResponseFormatUnsupported(e)) throw e;
+    console.warn('[text-json] provider 不支持 json_schema response_format，回退为无结构化约束重试:', e);
+    return await attempt(false);
+  }
+};
+
+// ================= C：剧本自动审校 pass（总编辑 checklist；题材中性） =================
+
+const REVIEW_SYSTEM_PROMPT = `
+    Role: Editor-in-Chief of a manga editorial department.
+
+    Task: Review the provided comic script JSON against the checklist below, then return the REVISED script together with your review notes.
+
+    REVIEW CHECKLIST:
+    1. **Logic Gaps / Causality Breaks**: Every event must have a cause established earlier. Fix outcomes that come out of nowhere.
+    2. **Character Motivation**: Each main character's key actions must have a clear, understandable motive. Fix unmotivated behavior.
+    3. **Setup & Payoff**: Foreshadowed elements (objects, lines, mysteries) must be paid off by the end. Resolve or remove dangling setups.
+    4. **Ending Consistency**: The final pages must deliver the ending the story promises. Fix conclusions that feel detached from the buildup.
+    5. **Narration Overload**: Narration boxes must not over-explain what the visuals and dialogue already convey. Trim redundant narration; merge or delete narration that repeats the obvious.
+    6. **Page-to-Page Continuity**: Page N+1 must directly continue Page N — no teleporting, no repeated panels, no contradictions in state or position.
+
+    RULES:
+    - Fix ONLY the problems listed above. Do NOT change the core premise, the cast, the art style, the tone, or the page count.
+    - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
+    - Keep the exact same JSON structure and field names as the input script.
+
+    Output: Return a single valid JSON object (no markdown, no commentary) with EXACTLY this shape:
+    { "notes": "String (concise review notes: what was wrong and what you changed)",
+      "script": { ...the complete revised script JSON, same structure as the input... } }
+`;
+
+/** 审校输出包装 schema（script 部分用题材自己的剧本 schema） */
+const getReviewWrapperSchema = (): Record<string, unknown> => ({
+  type: 'object',
+  required: ['notes', 'script'],
+  properties: {
+    notes: { type: 'string' },
+    script: (getTheme().jsonSchema ?? COMIC_JSON_SCHEMA) as unknown as Record<string, unknown>,
+  },
+});
+
+export interface ScriptReviewResult {
+  script: ComicResponse;
+  notes: string;
+}
+
+/**
+ * 剧本自动审校：发给文本模型扮演总编辑按 checklist 审校并返回修订后的完整 JSON。
+ * 温度 0.3（审校要稳）；page_number 按数组序归一化后返回。
+ */
+export const reviewAndReviseScript = async (
+  script: ComicResponse,
+  opts?: {
+    epoch?: number;
+    onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+    onUsage?: (stat: UsageStat) => void;
+  }
+): Promise<ScriptReviewResult> => {
+  const epoch = opts?.epoch ?? scope.epoch();
+  const userPrompt = `SCRIPT TO REVIEW (JSON):\n"""\n${JSON.stringify(script)}\n"""`;
+
+  const raw = await callTextJson({
+    system: REVIEW_SYSTEM_PROMPT,
+    user: userPrompt,
+    jsonSchema: getReviewWrapperSchema(),
+    jsonSchemaName: 'comic_script_review',
+    temperature: 0.3,
+    epoch,
+    onLogUpdate: opts?.onLogUpdate,
+    onUsage: opts?.onUsage,
+  });
+
+  // 复用三级解析链（本地提取 → 修复重试一次 → 抛错）；修复结果同样按包装形状解读
+  const parsed = await parseScriptWithRepair(raw, opts?.onUsage) as unknown as {
+    notes?: unknown;
+    script?: ComicResponse;
+  };
+  throwIfAborted(epoch);
+
+  const revised = parsed?.script;
+  if (!revised || !Array.isArray(revised.pages)) {
+    throw new Error('审校返回的剧本结构不完整');
+  }
+  revised.pages = revised.pages.map((p, i) => ({ ...p, page_number: i + 1 }));
+
+  return { script: revised, notes: typeof parsed.notes === 'string' ? parsed.notes.trim() : '' };
+};
+
+// ================= D：剧本意见迭代（现剧本 + 用户意见 → 修订版完整 JSON） =================
+
+const REVISE_FEEDBACK_SYSTEM_PROMPT = `
+    Role: Editor-in-Chief of a manga editorial department.
+
+    Task: Revise the provided comic script JSON according to the USER FEEDBACK, then return the complete revised script.
+
+    RULES:
+    - Apply the feedback precisely. Keep ALL unaffected pages, layouts, image prompts, character/prop sheets, and descriptions unchanged wherever possible.
+    - Do NOT change the core premise, the art style, the tone, or the page count.
+    - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
+    - Keep the exact same JSON structure and field names as the input script.
+
+    Output: Return the COMPLETE revised script as a single valid JSON object (no markdown, no commentary).
+`;
+
+/**
+ * 剧本意见迭代：现剧本 + 用户意见 → 修订版完整 JSON（温度 0.3 的受控修订）。
+ * page_number 按数组序归一化后返回；解析失败经修复链重试一次后抛错。
+ */
+export const reviseScriptWithFeedback = async (
+  script: ComicResponse,
+  feedback: string,
+  opts?: {
+    epoch?: number;
+    onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+    onUsage?: (stat: UsageStat) => void;
+  }
+): Promise<ComicResponse> => {
+  const epoch = opts?.epoch ?? scope.epoch();
+  const userPrompt = `CURRENT SCRIPT (JSON):\n"""\n${JSON.stringify(script)}\n"""\n\nUSER FEEDBACK:\n"${feedback}"`;
+
+  const raw = await callTextJson({
+    system: REVISE_FEEDBACK_SYSTEM_PROMPT,
+    user: userPrompt,
+    jsonSchema: (getTheme().jsonSchema ?? COMIC_JSON_SCHEMA) as unknown as Record<string, unknown>,
+    jsonSchemaName: 'comic_script',
+    temperature: 0.3,
+    epoch,
+    onLogUpdate: opts?.onLogUpdate,
+    onUsage: opts?.onUsage,
+  });
+
+  const parsed = await parseScriptWithRepair(raw, opts?.onUsage);
+  throwIfAborted(epoch);
+  parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
+  return parsed;
 };
 
 /**

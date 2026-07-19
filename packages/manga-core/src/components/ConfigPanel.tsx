@@ -479,6 +479,20 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
             </select>
         </div>
 
+      {/* C：剧本自动审校开关（默认开；config 快照随工程往返） */}
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 pr-3">
+          <label className="text-sm font-medium text-slate-400">{S.autoReviewLabel}</label>
+          <p className="text-[10px] text-slate-500 mt-0.5">{S.autoReviewHint}</p>
+        </div>
+        <div
+            onClick={() => handleInputChange('autoReview', !(config.autoReview !== false))}
+            className={`w-10 h-5 rounded-full cursor-pointer relative transition-colors shrink-0 ${config.autoReview !== false ? 'bg-indigo-600' : 'bg-slate-700'}`}
+        >
+            <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${config.autoReview !== false ? 'left-6' : 'left-1'}`}></div>
+        </div>
+      </div>
+
       {/* Phase 2：水印设置（features.watermark；结构与 horror-manga 现有能力一致，题材默认值由 theme.watermark 提供） */}
       {theme.features.watermark && theme.watermark && config.watermark && (
       <div className="border border-slate-700 rounded-lg bg-slate-900/50 overflow-hidden">

@@ -272,6 +272,15 @@ export interface UIStrings {
   backAbortMessage: string;              // COMIC_GENERATION 有在途页时回退确认的主文案
   backAbortDetail: (done: number) => string; // 确认框 detail：已完成页保留说明
   backAbortConfirm: string;              // 确认框确定按钮（中止并返回）
+
+  // ---- 剧本自动审校（C）与意见迭代（D） ----
+  autoReviewLabel: string;
+  autoReviewHint: string;
+  feedbackPlaceholder: string;
+  feedbackSubmit: string;
+  feedbackSubmitting: string;
+  reviseFailed: string;
+  reviseRedrawHint: string;
 }
 
 /** 视觉 token：MangaApp 根节点展开为 CSS 变量（--manga-*），组件经 var() 消费 */
@@ -325,6 +334,9 @@ export interface MangaTheme {
   buildScriptPrompt?: (input: ScriptPromptInput) => { system: string; user: string };
   /** API 级 JSON schema 约束覆写（配合 buildScriptPrompt 使用；缺省用核心包通用 schema） */
   jsonSchema?: Record<string, unknown>;
+  /** 可选"故事架构"规则段（自洽性/结构变体/反套路/旁白克制等），
+   *  默认路径下插入 system prompt 的 PHASE 3 注记与 PHASE 4 之间；缺省则不插入任何内容 */
+  storyCraftRules?: string;
 
   // —— 文案层 ——
   strings: UIStrings;

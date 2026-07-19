@@ -140,6 +140,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The protagonist realizes they are talking to someone who isn't there.
             b. A familiar room suddenly has different dimensions or doors.
             c. The protagonist wakes up, but the nightmare continues (false awakening).
+        - **Recommended Structure Variant**: V3 (Slow-Burn Slice of Life) — recommendation, not a mandate.
         - **Technique**: Use "Dutch Angles" and impossible geometries to unsettle the viewer.
   `,
   },
@@ -156,6 +157,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The weapon breaks or jams at a critical moment.
             b. The "safe place" (police car, locked room) is already compromised.
             c. The killer is revealed to be someone trusted.
+        - **Recommended Structure Variant**: V1 (Classic Three-Act) — recommendation, not a mandate.
   `,
   },
   {
@@ -172,6 +174,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. An old photograph reveals the ghost was always watching.
             b. The protective charm/talisman is actually what summoned the ghost.
             c. The ghost isn't haunting the house; it's attached to the protagonist.
+        - **Recommended Structure Variant**: V4 (Loop Echo) — recommendation, not a mandate.
   `,
   },
   {
@@ -187,6 +190,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The protagonist tries to cut off the infected part, but it acts defensively.
             b. The "cure" accelerates the mutation.
             c. The protagonist realizes the mutation is an "improvement" or evolution.
+        - **Recommended Structure Variant**: V1 (Classic Three-Act) — recommendation, not a mandate.
   `,
   },
   {
@@ -202,6 +206,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The "stars" in the sky blink.
             b. Translating the ancient text reveals the reader's own name.
             c. The monster doesn't attack; it ignores the protagonist because they are like an ant.
+        - **Recommended Structure Variant**: V3 (Slow-Burn Slice of Life) — recommendation, not a mandate.
   `,
   },
   {
@@ -217,6 +222,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The AI predicts the protagonist's death with 100% accuracy.
             b. The reflection in the screen moves independently.
             c. The "off" switch doesn't work; the device is powered by something else.
+        - **Recommended Structure Variant**: V2 (In Medias Res) — recommendation, not a mandate.
   `,
   },
   {
@@ -232,6 +238,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The "festival food" is revealed to be... something else.
             b. The villagers stop smiling all at once.
             c. The protagonist realizes they are not the guest, but the main course.
+        - **Recommended Structure Variant**: V3 (Slow-Burn Slice of Life) — recommendation, not a mandate.
   `,
   },
   {
@@ -247,6 +254,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. The rescue signal was faked by the enemy.
             b. One of the survivors is hiding a bite/infection.
             c. The barricade holds, but the threat is coming from the floor/ceiling.
+        - **Recommended Structure Variant**: V1 (Classic Three-Act) — recommendation, not a mandate.
   `,
   },
   {
@@ -262,6 +270,7 @@ const STORY_MODE_DATA: StoryModeOption[] = [
             a. It's not one monster; it's a pack/swarm.
             b. The monster is the mother looking for its stolen egg (which the protagonist has).
             c. Conventional weapons make it stronger/larger.
+        - **Recommended Structure Variant**: V1 (Classic Three-Act) — recommendation, not a mandate.
   `
   },
 ];
@@ -395,7 +404,40 @@ const constructSystemPrompt = (
     - **DO NOT** write a generic horror story. Write a story that feels like it was written by the specific author defined in the style.
 
     ================================================================
-    2. DIALOGUE & NARRATIVE RICHNESS (CRITICAL)
+    2. STORY ARCHITECTURE (MANDATORY SELF-COHERENCE)
+    ================================================================
+    Before writing any page, decide the following internally, then state them explicitly in the 'analysis' field.
+
+    **RULE 1 — ONE MYSTERY ONLY**:
+    - The entire story revolves around EXACTLY ONE central mystery/threat.
+    - **FORBIDDEN**: multiple unrelated mysteries, subplot monsters, or a second hidden mastermind. Every strange event traces back to the SAME source.
+
+    **RULE 2 — CAUSAL CHAIN (CAUSE → EFFECT → PAYOFF)**:
+    - Every supernatural event MUST be explained by the ending, OR be a deliberate open residue.
+    - **OPEN RESIDUE LIMIT**: At most ONE unexplained element in the whole story, and it must be the ending's aftertaste (an intentional chill), never a forgotten plot thread.
+    - Every planted detail (object, line, rumor) MUST be paid off. If you plant it, you must cash it.
+
+    **RULE 3 — GOAL & MOTIVE**:
+    - The 'analysis' field MUST state: the protagonist's concrete GOAL (what they want, and why now) and the threat's MOTIVE (why it acts, why these victims).
+    - Every character action must serve that goal or motive. No "because the plot needs it" behavior.
+
+    **RULE 4 — ONE FRESH CORE IMAGE**:
+    - Declare ONE fresh central horror image the story is built around (a specific, unusual image — e.g., a lullaby heard only through the wall pipes).
+    - **FORBIDDEN first-association clichés as the CORE image**: haunted house, girl in red/white with hair covering her face, figure in the mirror, creepy child with a doll. (They may appear as background props, never as the central concept.)
+
+    **RULE 5 — ANTI-CLICHÉ PASS (INTERNAL, BEFORE WRITING)**:
+    - Internally list the 3 MOST clichéd plot developments for the chosen genre/mode, then BAN them from this story. Do not write this list into the script; simply never use them.
+
+    **STRUCTURE VARIANT (choose EXACTLY ONE)**:
+    - Choose the variant that best fits the story mode and the source material, then allocate pages by the percentages below (round to whole pages):
+    - **V1 Classic Three-Act**: Setup & first incident (0-30%) → Escalation & investigation (30-70%) → Climax/confrontation (70-90%) → Resolution or stinger (90-100%).
+    - **V2 In Medias Res**: Cold open at the brink of horror (0-10%) → Rewind: how we got here (10-40%) → Escalation past the opening point (40-80%) → Convergence & climax (80-95%) → Resolution (95-100%).
+    - **V3 Slow-Burn Slice of Life**: Ordinary days with subtle wrongness (0-50%) → Intrusion & acceleration (50-80%) → Reveal/climax (80-95%) → Unsettling aftermath (95-100%).
+    - **V4 Loop Echo**: Frame scene (0-10%) → Main narrative (10-85%) → Return to the frame scene with new meaning (85-95%) → Final echo that re-opens the loop (95-100%).
+    - The chosen variant MUST be named in the 'analysis' field, and the page allocation must be visible in the pacing.
+
+    ================================================================
+    3. DIALOGUE & NARRATIVE RICHNESS (CRITICAL)
     ================================================================
     **PROBLEM**: Previous scripts had dialogue that was too brief, generic, or summary-like (e.g., "Help me.").
     **SOLUTION**: You must write **FULL, SUBSTANTIAL, and NATURAL** dialogue.
@@ -407,7 +449,7 @@ const constructSystemPrompt = (
     - **Chinese Language**: All dialogue must be in natural, high-quality **Simplified Chinese (简体中文)**.
 
     ================================================================
-    3. LENGTH & DENSITY CONSTRAINTS
+    4. LENGTH & DENSITY CONSTRAINTS
     ================================================================
     - ${pageCountInstruction}
     - Panels per Page: ${panelsPerPage}.
@@ -417,22 +459,26 @@ const constructSystemPrompt = (
     ${narrativeInstructions}
     ${endingInstruction}
 
-    4. **Build Tension**:
+    5. **Build Tension**:
         - Focus on atmosphere and dread rather than just explicit violence.
         - Use "Visual Silence" STRATEGICALLY (not excessively).
         - Focus on the "Uncanny Valley" - things that look almost human but not quite.
 
-    5. **Sequential Logic & Continuity (CRITICAL)**:
+    6. **Sequential Logic & Continuity (CRITICAL)**:
        - **Flow**: The transition between Page X and Page X+1 MUST be seamless.
        - **Connection Rule**: Panel 1 of the current page must visually and narratively follow the Last Panel of the previous page immediately.
        - **Avoid Teleporting**: If Page 1 ends with a character reaching for a door, Page 2 Panel 1 MUST show the door opening. Do not skip actions.
 
-    6. **Text Density Rules (ANTI-CONFUSION)**:
-       - **Minimum Density**: Each page MUST have at least ONE of the following:
-        a. 1 narration box, OR
-        b. 2 dialogue exchanges (back-and-forth counts as 2)
-       - **Exception**: A maximum of ONE "pure silent" page is allowed for dramatic effect (e.g., splash page reveal).
-       - **Post-Silence Rule**: After a silent/low-text horror panel, the NEXT panel should include character reaction dialogue or explanatory narration.
+    7. **Text Density & Narration Restraint (CRITICAL)**:
+       - **Dialogue and visuals FIRST**: The story must be carried primarily by what characters SAY and what panels SHOW. No walls of narration.
+       - **Narration boxes are allowed ONLY for**:
+         a. Time/place transitions that visuals cannot make obvious (e.g., "Three days later", "Meanwhile, in the basement").
+         b. Ending closure (at most one final conclusive or echoing line).
+         c. Critical information that genuinely cannot be conveyed visually or in dialogue.
+       - **Limits**: AT MOST ONE narration box per page; many pages need none at all.
+       - **FORBIDDEN**: Emotion-explaining narration ("He was terrified", "She felt something was wrong") — show it through faces, poses, and dialogue instead.
+       - After a silent/low-text panel, prefer a character's reaction LINE over a narration box.
+       - Avoid long stretches of wordless pages: most pages should carry at least one exchange or beat of dialogue, but silence used deliberately for dread is welcome.
 
     Directives for Visuals & Image Generation (CRITICAL):
     1. **Dynamic Character Design (VISUAL LOCKING & EVOLUTION)**:
@@ -493,19 +539,12 @@ const constructSystemPrompt = (
         - For each page, you MUST identify exactly which characters appear.
         - Only list characters in 'characters_in_scene' if they are physically visible on that page.
 
-    5. **Narration Box System (CRITICAL for Story Clarity)**:
-        - **Purpose**: Use RECTANGULAR narration boxes (方形旁白框) to provide context that visuals alone cannot convey.
-        - **Types of Narration Boxes**:
-            a. **Scene-Setting** (场景设定): Establishes time/place. E.g., "三天前..." "那是一个雨夜..."
-            b. **Internal Monologue** (内心独白): Character's thoughts. E.g., "我当时并不知道..." "有什么不对劲..."
-            c. **Transition** (过渡连接): Bridges scenes. E.g., "第二天早上..." "与此同时..."
-            d. **Retrospective** (回顾): Foreshadowing or hindsight. E.g., "如果当时我选择离开..." "那是我最后一次见到她..."
-        - **Visual Format in image_prompt**:
+    5. **Narration Box System (SPARING — see Text Density rules)**:
+        - **Purpose**: RECTANGULAR narration boxes (方形旁白框) exist ONLY for the three allowed cases: time/place transitions, ending closure, and critical information that cannot be shown visually.
+        - **Visual Format in image_prompt** (only when a narration box is truly needed):
             - "Rectangular narration box at [TOP-LEFT/TOP-RIGHT/BOTTOM] of Panel X, NO pointer tail, with text: '[CHINESE TEXT]'"
-        - **MANDATORY USAGE**:
-            - Page 1 MUST have a scene-setting narration box.
-            - Any TIME SKIP or LOCATION CHANGE must be announced via narration box.
-            - The FINAL page should have a retrospective or conclusive narration box.
+        - **Limits**: At most ONE narration box per page; NO mandatory narration on Page 1 or the final page.
+        - **FORBIDDEN**: emotion-explaining narration, internal-monologue narration, or narration that repeats what panels already show. If a panel can show it, never narrate it.
     6. **Negative Emphasis for Ambiguous States**:
         - Image generators often default to "normal" states (standing, intact, normal appearance).
         - To prevent this, use NEGATIVE EMPHASIS when describing non-default states:
@@ -906,6 +945,15 @@ const horrorTheme: MangaTheme = {
     backAbortMessage: 'Going back will abort the pages still being drawn',
     backAbortDetail: (done: number) => `${done} conjured page(s) will be kept. You can resume the ritual later.`,
     backAbortConfirm: 'ABORT & GO BACK',
+
+    // ---- 剧本自动审校（C）与意见迭代（D） ----
+    autoReviewLabel: 'Auto Review',
+    autoReviewHint: 'Editor-in-chief pass after each script: logic, motive, foreshadowing, narration density',
+    feedbackPlaceholder: 'Revision notes, e.g. "Darker twist", "Less narration"...',
+    feedbackSubmit: 'REVISE',
+    feedbackSubmitting: 'REVISING…',
+    reviseFailed: 'Revision failed, please retry',
+    reviseRedrawHint: 'Script updated. Conjured pages will NOT redraw automatically — redraw them page by page.',
   },
 
   // —— 视觉层（红黑配色；Creepster 标题字体 + Space Grotesk 正文，字体文件在 index.css 引入） ——

@@ -134,6 +134,7 @@ export interface AppConfig {
   panelCount: number; // 0 for auto
   aspectRatio: string;
   totalPages: string; // "Short", "Medium", "Long"
+  autoReview: boolean; // 剧本生成后自动审校一遍（总编辑 pass；false 时行为与旧版一致）
   colorMode?: string;           // 色彩模式（theme.colorModes 提供时由 ConfigPanel 写入）
   watermark?: WatermarkSettings;  // 全局水印设置（features.watermark 开启时存在）
 

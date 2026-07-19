@@ -6,7 +6,7 @@ import LogPanel from './components/LogPanel';
 import CharacterGenerator from './components/CharacterGenerator';
 import ScriptEditor from './components/ScriptEditor';
 import TokenMonitor from './components/TokenMonitor';
-import { generateComicScript, setActiveModels, getAbortEpoch, isStale, clearReferenceAttachmentCache } from './services/mulbyAiService';
+import { generateComicScript, reviseScriptWithFeedback, setActiveModels, getAbortEpoch, isStale, clearReferenceAttachmentCache } from './services/mulbyAiService';
 import { useUsageTracker, INITIAL_USAGE } from './hooks/useUsageTracker';
 import { useImageQueue } from './hooks/useImageQueue';
 import { useComicWorkflow } from './hooks/useComicWorkflow';
@@ -34,6 +34,7 @@ const buildInitialConfig = (theme: MangaTheme): AppConfig => {
     panelCount: 0,
     aspectRatio: ASPECT_RATIOS[0].value,
     totalPages: PAGE_LENGTH_OPTIONS[0].value, // Default to short
+    autoReview: true, // 默认开启剧本自动审校
   };
   // Phase 2 可选维度：仅对应 features 开关开启时写入初始值（关闭时 config 保持 Phase 1 形状）
   if (theme.features.endings && theme.endings?.length) {
@@ -320,7 +321,7 @@ const MangaApp: React.FC = () => {
         },
         (stat) => trackUsage('Generate Script', stat),
         // Phase 2 可选维度（结局 / 副模式）；tech 主题开关全关时为 undefined，prompt 不变
-        { secondaryStoryMode: config.secondaryStoryMode, endingType: config.endingType, colorMode: config.colorMode }
+        { secondaryStoryMode: config.secondaryStoryMode, endingType: config.endingType, colorMode: config.colorMode, autoReview: config.autoReview }
       );
       if (isStale(runEpoch)) return;    // 本轮已被中止/替代：不写回任何状态
 
@@ -351,8 +352,44 @@ const MangaApp: React.FC = () => {
       if (!isStale(runEpoch)) setIsProcessing(false);  // 过期回调不许关新一轮的 processing
     }
   };
-  
-  // Handle updates from ScriptEditor
+
+  // D：剧本意见迭代（STORYBOARDING）：现剧本 + 用户意见 → 修订版，经 handleScriptUpdate 回写
+  // （角色表按名字匹配合并，已定妆的 referenceImage 由 merge 逻辑保留）。
+  // 修订不触碰 pages：已进入过 COMIC_GENERATION（有图页）时提示不自动重绘，可逐页重绘。
+  const handleReviseScript = async (feedback: string): Promise<boolean> => {
+    if (!comicScript || !feedback.trim() || isProcessing) return false;
+    handleCancelAll();                  // D2：停在途（STORYBOARDING 一般无在途任务，防御性复用）
+    const runEpoch = getAbortEpoch();
+
+    setGlobalError(null);
+    setIsProcessing(true);
+
+    try {
+      const revised = await reviseScriptWithFeedback(comicScript, feedback, {
+        onLogUpdate: (type, text) => {
+          if (type === 'INPUT') setInputLog(text);
+          else setOutputLog(text);
+        },
+        onUsage: (stat) => trackUsage('Revise Script', stat),
+      });
+      if (isStale(runEpoch)) return false;
+
+      handleScriptUpdate(revised);
+
+      // 已进入过绘制阶段：只提示，不自动清 pages
+      if (pages.some(p => p.imageData)) notify(S.reviseRedrawHint);
+      return true;
+    } catch (error: any) {
+      if (isStale(runEpoch)) return false;
+      if (error?.name === 'AbortError') return false; // 用户中止：静默收敛
+      if (!handlePermissionError(error)) {
+        setGlobalError(error.message || S.reviseFailed);
+      }
+      return false;
+    } finally {
+      if (!isStale(runEpoch)) setIsProcessing(false);
+    }
+  };
   const handleScriptUpdate = (updatedScript: ComicResponse) => {
     setComicScript(updatedScript);
     // Sync character sheet
@@ -869,6 +906,8 @@ const MangaApp: React.FC = () => {
                             onUpdate={handleScriptUpdate}
                             onContinue={handleStartComicGeneration}
                             onUsage={trackUsage}
+                            onRevise={handleReviseScript}
+                            isRevising={isProcessing}
                         />
                     )}
                 </div>

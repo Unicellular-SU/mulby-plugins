@@ -57,6 +57,42 @@ const techTheme: MangaTheme = {
       - **Code, Technical Terms, Log Outputs**: MUST remain in English (do not translate "const", "function", "Error 404", etc.).`,
   refineToneHint: 'Ensure the terminology, tone, and logic fit the specific Universe/Fandom mentioned in the context.',
 
+  // 故事架构段（插入核心包 system prompt 的 PHASE 3 注记与 PHASE 4 之间）：
+  // 改编语境的自洽性硬约束 + 结构变体软引导 + 反套路 + 旁白克制。
+  // 不动核心包既有段落；技术准确性、语言规则、图像规则均不受本段影响。
+  storyCraftRules: `    ================================================================
+    PHASE 3.5: STORY ARCHITECTURE (MANDATORY SELF-COHERENCE)
+    ================================================================
+    Before writing any page, decide the following internally, then state them explicitly in the 'analysis' field.
+
+    **RULE 1 — ONE THREAD ONLY**:
+    - The whole comic delivers EXACTLY ONE core thread: one bug's investigation, one concept's explanation, or one historical storyline.
+    - **FORBIDDEN**: parallel subplots, a second unrelated lesson, or side mysteries. Every scene must serve the same thread.
+
+    **RULE 2 — FIDELITY & CAUSALITY (ADAPTATION DISCIPLINE)**:
+    - Technical facts MUST NOT contradict the Source Material. Dramatization may add personality, stakes, and humor — but never at the cost of technical accuracy.
+    - Every question or mystery raised MUST be answered by the end. Every planted detail (a hint, a warning, a prop) MUST be paid off. If you plant it, you must cash it.
+
+    **RULE 3 — GOAL-DRIVEN CAST**:
+    - The 'analysis' field MUST state: the protagonist's concrete GOAL (what they try to achieve or understand) and what stands in the way.
+    - Every character action must serve that goal. No "because the plot needs it" behavior.
+
+    **RULE 4 — ANTI-CLICHÉ PASS (INTERNAL, BEFORE WRITING)**:
+    - Internally list the 3 MOST clichéd adaptations for the chosen mode (e.g., "the bug is literally a monster villain", "programmers as antisocial stereotypes", "everything becomes a battlefield"), then BAN the ones that add nothing fresh. Do not write this list into the script; simply never use them.
+
+    **RULE 5 — NARRATION RESTRAINT**:
+    - Dialogue and visuals carry the story. Narration boxes are allowed ONLY for: (a) time/place transitions, (b) at most one closing line at the ending, (c) critical information that genuinely cannot be conveyed visually or in dialogue.
+    - AT MOST ONE narration box per page. **FORBIDDEN**: emotion-explaining narration — show it through faces, poses, and dialogue instead.
+
+    **STRUCTURE VARIANT (choose EXACTLY ONE)**:
+    - Choose the variant that best fits the story mode and the source material, then allocate pages by the percentages below (round to whole pages):
+    - **V1 Detective Arc**: Problem surfaces (0-20%) → Investigation & wrong turns (20-70%) → Root cause revealed (70-90%) → Fix & takeaway (90-100%).
+    - **V2 Drama Arc**: Ordinary routine (0-25%) → Conflict escalates (25-70%) → Climax/confrontation (70-90%) → Resolution (90-100%).
+    - **V3 Teaching Arc**: Hook the question (0-15%) → Build intuition step by step (15-70%) → The "aha" moment (70-90%) → Recap & apply (90-100%).
+    - **V4 Chronicle Arc**: Set the era & stakes (0-25%) → Key turning points in order (25-75%) → The decisive moment (75-90%) → Aftermath & legacy (90-100%).
+    - The chosen variant MUST be named in the 'analysis' field, and the page allocation must be visible in the pacing.
+`,
+
   artStyles: [
     { label: '日漫黑白 (Manga B&W)', value: ComicStyle.MANGA_BW },
     { label: '美漫全彩 (American Comic)', value: ComicStyle.AMERICAN_COMIC },
@@ -99,6 +135,7 @@ const techTheme: MangaTheme = {
         - **Opponent**: A canonical villain OR a canonical rival (e.g. Vegeta/Bakugo) representing the problem.
     
     3. **Tone**: High stakes, Shonen Jump style, dramatic speeches about technical details.
+        - **Recommended Structure Variant**: V2 (Drama Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -123,8 +160,9 @@ const techTheme: MangaTheme = {
     3. **Tone**: Educational but entertaining. Break the fourth wall. 
     
     4. **Content Density**:
-        - **Increase Dialogue & Narration**: Each panel/page must have rich dialogue and narration to guide the reader.
+        - **Dialogue First**: Each panel/page should be guided by rich dialogue; narration boxes only for transitions or what cannot be shown (see PHASE 3.5 restraint).
         - **Explanatory**: Ensure the "Why" and "How" are explained in the text bubbles, not just implied.
+        - **Recommended Structure Variant**: V3 (Teaching Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -150,6 +188,7 @@ const techTheme: MangaTheme = {
     4. **Dialogue**: 
         - Use period-appropriate language (Classical Chinese for ancient China, Formal speech for Victorian era).
         - No modern slang.
+        - **Recommended Structure Variant**: V4 (Chronicle Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -168,6 +207,7 @@ const techTheme: MangaTheme = {
     
     3. **Dialogue**: 
         - The character tries to speak the historical lines but keeps their original personality quirks (e.g., Pikachu says "Pika-Napoleon dictates...").
+        - **Recommended Structure Variant**: V4 (Chronicle Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -185,6 +225,7 @@ const techTheme: MangaTheme = {
         - **Student**: A canonical sidekick/younger character (e.g., Nobita, Chopper, Genos).
     
     3. **Tone**: Patient, enlightened, emphasizing "The Why" before "The How".
+        - **Recommended Structure Variant**: V3 (Teaching Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -204,6 +245,7 @@ const techTheme: MangaTheme = {
         - **Party**: Canonical friends as Mage, Warrior, Thief.
     
     3. **Tone**: Epic fantasy, magical circles, over-the-top spell chanting.
+        - **Recommended Structure Variant**: V2 (Drama Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -221,6 +263,7 @@ const techTheme: MangaTheme = {
         - **Suspect/Witness**: Canonical characters behaving suspiciously.
     
     3. **Tone**: Noir, shadowy, internal monologues, "There is only one truth!".
+        - **Recommended Structure Variant**: V1 (Detective Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -239,6 +282,7 @@ const techTheme: MangaTheme = {
         - **Boss/Client**: Canonical authority figure (e.g., Tsunade, Nick Fury).
     
     3. **Tone**: Stressful, coffee-fueled, relatable work struggles, triumphant release.
+        - **Recommended Structure Variant**: V2 (Drama Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -257,6 +301,7 @@ const techTheme: MangaTheme = {
         - **Straight Man**: A canonical smart character reacting with horror.
     
     3. **Tone**: Slapstick, exaggerated facial expressions, fast-paced.
+        - **Recommended Structure Variant**: V2 (Drama Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -275,6 +320,7 @@ const techTheme: MangaTheme = {
         - **The Monster**: The Bug manifested as a canonical horror/shadow.
     
     3. **Tone**: Unsettling, psychological, distorted visuals, "It's not a bug, it's a feature... of hell."
+        - **Recommended Structure Variant**: V1 (Detective Arc) — recommendation, not a mandate.
   `,
     },
     {
@@ -582,6 +628,15 @@ const techTheme: MangaTheme = {
     backAbortMessage: '返回上一步将中止正在生成的页面',
     backAbortDetail: (done: number) => `已完成的 ${done} 页图像会保留，可稍后继续绘制。`,
     backAbortConfirm: '中止并返回',
+
+    // ---- 剧本自动审校（C）与意见迭代（D） ----
+    autoReviewLabel: '剧本自动审校',
+    autoReviewHint: '生成剧本后，由「总编辑」模型按逻辑/动机/伏笔/旁白密度清单自动修订一遍',
+    feedbackPlaceholder: '对剧本的修改意见，如「加强结尾反转」「减少旁白框」…',
+    feedbackSubmit: '按意见修订',
+    feedbackSubmitting: '修订中…',
+    reviseFailed: '剧本修订失败，请重试',
+    reviseRedrawHint: '剧本已更新；已生成的页面不会自动重绘，可在页面卡片上逐页重绘',
   },
 
   // —— 视觉层（从既有样式提取：Space Grotesk 字体、indigo→purple 品牌渐变、#0f172a 深色底） ——

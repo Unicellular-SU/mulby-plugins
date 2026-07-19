@@ -13,15 +13,26 @@ interface ScriptEditorProps {
   onContinue: () => void;
   /** 方案 5.2：润色调用计费上报（补漏记） */
   onUsage?: (action: string, stat: UsageStat) => void;
+  /** D：剧本意见迭代（返回是否成功，成功才清空输入框） */
+  onRevise?: (feedback: string) => Promise<boolean>;
+  isRevising?: boolean;
 }
 
-const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue, onUsage }) => {
+const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, propSheet = [], onUpdate, onContinue, onUsage, onRevise, isRevising }) => {
   const theme = getTheme();
   const S = theme.strings;
   const propsEnabled = theme.features.props;
   const [activePageIdx, setActivePageIdx] = useState(0);
   const [refiningField, setRefiningField] = useState<string | null>(null);
   const [refineError, setRefineError] = useState<{ target: string; message: string } | null>(null);
+  // D：剧本意见迭代输入
+  const [feedback, setFeedback] = useState('');
+
+  const submitFeedback = async () => {
+    if (!onRevise || isRevising || !feedback.trim()) return;
+    const ok = await onRevise(feedback);
+    if (ok) setFeedback('');
+  };
 
   const activePage = script.pages[activePageIdx];
 
@@ -85,13 +96,35 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
            <h2 className="text-xl font-bold text-white font-[var(--manga-heading-font)]">{S.storyboardTitle}</h2>
            <p className="text-xs text-slate-400">{S.storyboardSubtitle}</p>
         </div>
-        <button 
+        <button
            onClick={onContinue}
            className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg shadow-lg shadow-green-500/20 text-sm transition-all"
         >
            {S.startProduction}
         </button>
       </div>
+
+      {/* D：剧本意见迭代栏 */}
+      {onRevise && (
+      <div className="bg-slate-800/70 px-4 py-2 border-b border-slate-700 flex items-center gap-2 shrink-0">
+        <span className="text-xs text-indigo-300 shrink-0">✨</span>
+        <input
+           className="flex-grow bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-xs text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+           placeholder={S.feedbackPlaceholder}
+           value={feedback}
+           onChange={(e) => setFeedback(e.target.value)}
+           onKeyDown={(e) => { if (e.key === 'Enter') void submitFeedback(); }}
+           disabled={isRevising}
+        />
+        <button
+           onClick={() => void submitFeedback()}
+           disabled={isRevising || !feedback.trim()}
+           className="text-xs bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:text-slate-500 text-white px-3 py-1.5 rounded font-bold transition-colors shrink-0"
+        >
+           {isRevising ? S.feedbackSubmitting : S.feedbackSubmit}
+        </button>
+      </div>
+      )}
 
       <div className="flex-grow flex overflow-hidden">
         
