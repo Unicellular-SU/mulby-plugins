@@ -123,6 +123,15 @@ export interface WatermarkSettings {
   opacity: number;
 }
 
+// ================= 流式日志面板（LogPanel） =================
+// 剧本生成/审校/意见迭代统一经该回调把过程推给右侧终端面板：
+// - INPUT：完整 prompt（一次性写入）
+// - OUTPUT：模型回答（累积文本，通常是流式 JSON）
+// - REASONING：推理模型思考流（chunkType==='reasoning'；非推理模型自然恒空不显示）
+// - PHASE：相位切换徽标（如「生成剧本」→「自动审校」），消费方据此重置思考/输出并显示当前相位
+export type LogStreamType = 'INPUT' | 'OUTPUT' | 'REASONING' | 'PHASE';
+export type LogUpdateFn = (logType: LogStreamType, text: string) => void;
+
 export interface AppConfig {
   sourceText: string;
   style: string; // Enum value or custom string

@@ -1,4 +1,4 @@
-import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL } from "../engine-types";
+import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL, LogUpdateFn } from "../engine-types";
 import { getTheme } from "../theme/registry";
 import type { MangaTheme } from "../theme/types";
 import {
@@ -800,7 +800,7 @@ export const generateComicScript = async (
   customStoryPrompt: string | undefined,
   panelCount: number,
   totalPages: string, // "Short", "Medium", "Long"
-  onLogUpdate: (logType: 'INPUT' | 'OUTPUT', text: string) => void,
+  onLogUpdate: LogUpdateFn,
   onUsage?: (stat: UsageStat) => void,
   extras: ScriptExtras = {}
 ): Promise<ComicResponse> => {
@@ -809,6 +809,8 @@ export const generateComicScript = async (
     text, style, character, storyMode, customStoryPrompt, panelCount, totalPages, extras
   );
 
+  // 相位徽标：主创作 pass（后续自动审校 pass 由 reviewAndReviseScript 切到「审校」）
+  onLogUpdate('PHASE', getTheme().strings.phaseScript);
   // Log the input prompt immediately（system + user 拼接，日志观感不变）
   const fullInputText = `${systemPrompt}\n\n${userPrompt}`;
   onLogUpdate('INPUT', fullInputText);
@@ -817,6 +819,7 @@ export const generateComicScript = async (
 
   const attempt = async (withSchema: boolean): Promise<string> => {
     let fullText = '';
+    let fullReasoning = '';
     let streamError: string | null = null;
     let requestId: string | null = null;
 
@@ -855,6 +858,10 @@ export const generateComicScript = async (
           if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
             fullText += chunk.content;
             onLogUpdate('OUTPUT', fullText);
+          } else if (chunk.chunkType === 'reasoning' && typeof chunk.reasoning_content === 'string') {
+            // 推理模型思考流：非推理模型/老宿主永不发该 chunk，功能零回归
+            fullReasoning += chunk.reasoning_content;
+            onLogUpdate('REASONING', fullReasoning);
           } else if (chunk.chunkType === 'error' && chunk.error?.message) {
             streamError = chunk.error.message;
           }
@@ -942,7 +949,7 @@ interface TextJsonCallArgs {
   jsonSchemaName: string;
   temperature: number;
   epoch?: number;
-  onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+  onLogUpdate?: LogUpdateFn;
   onUsage?: (stat: UsageStat) => void;
 }
 
@@ -956,6 +963,7 @@ const callTextJson = async ({
 
   const attempt = async (withSchema: boolean): Promise<string> => {
     let fullText = '';
+    let fullReasoning = '';
     let streamError: string | null = null;
     let requestId: string | null = null;
 
@@ -990,6 +998,9 @@ const callTextJson = async ({
           if (chunk.chunkType === 'text' && typeof chunk.content === 'string') {
             fullText += chunk.content;
             onLogUpdate?.('OUTPUT', fullText);
+          } else if (chunk.chunkType === 'reasoning' && typeof chunk.reasoning_content === 'string') {
+            fullReasoning += chunk.reasoning_content;
+            onLogUpdate?.('REASONING', fullReasoning);
           } else if (chunk.chunkType === 'error' && chunk.error?.message) {
             streamError = chunk.error.message;
           }
@@ -1083,12 +1094,15 @@ export const reviewAndReviseScript = async (
   script: ComicResponse,
   opts?: {
     epoch?: number;
-    onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+    onLogUpdate?: LogUpdateFn;
     onUsage?: (stat: UsageStat) => void;
   }
 ): Promise<ScriptReviewResult> => {
   const epoch = opts?.epoch ?? scope.epoch();
   const userPrompt = `SCRIPT TO REVIEW (JSON):\n"""\n${JSON.stringify(script)}\n"""`;
+
+  // 相位徽标切到「审校」：消费方据此重置思考/输出，避免主创作 pass 的内容与审校 pass 混在一起
+  opts?.onLogUpdate?.('PHASE', getTheme().strings.phaseReview);
 
   const raw = await callTextJson({
     system: REVIEW_SYSTEM_PROMPT,
@@ -1142,7 +1156,7 @@ export const reviseScriptWithFeedback = async (
   feedback: string,
   opts?: {
     epoch?: number;
-    onLogUpdate?: (logType: 'INPUT' | 'OUTPUT', text: string) => void;
+    onLogUpdate?: LogUpdateFn;
     onUsage?: (stat: UsageStat) => void;
   }
 ): Promise<ComicResponse> => {

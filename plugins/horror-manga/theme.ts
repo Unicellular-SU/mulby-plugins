@@ -890,6 +890,8 @@ const horrorTheme: MangaTheme = {
     terminalWaiting: 'Waiting for script generation task...',
     terminalStreaming: '● PROCESSING STREAM',
     terminalIdle: '○ IDLE',
+    phaseScript: '编写剧本',
+    phaseReview: '恐怖审校',
 
     // ---- Token 监控 ----
     taskCost: 'EST. COST',

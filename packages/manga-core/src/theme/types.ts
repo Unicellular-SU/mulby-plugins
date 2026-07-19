@@ -218,6 +218,9 @@ export interface UIStrings {
   terminalWaiting: string;
   terminalStreaming: string;
   terminalIdle: string;
+  /** 剧本流式相位徽标（终端右上角）：主创作 pass 与自动审校 pass 区分 */
+  phaseScript: string;
+  phaseReview: string;
 
   // ---- Token 监控 ----
   taskCost: string;

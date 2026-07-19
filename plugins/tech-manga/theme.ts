@@ -573,6 +573,8 @@ const techTheme: MangaTheme = {
     terminalWaiting: '等待剧本生成任务…',
     terminalStreaming: '● 流式输出中',
     terminalIdle: '○ 空闲',
+    phaseScript: '生成剧本',
+    phaseReview: '自动审校',
 
     // ---- Token 监控 ----
     taskCost: '任务费用',

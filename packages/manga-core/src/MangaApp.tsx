@@ -74,6 +74,16 @@ const MangaApp: React.FC = () => {
   // Log States
   const [inputLog, setInputLog] = useState<string>('');
   const [outputLog, setOutputLog] = useState<string>('');
+  const [reasoningLog, setReasoningLog] = useState<string>(''); // 推理模型思考流（右侧终端「思考」块）
+  const [streamPhase, setStreamPhase] = useState<string>('');   // 流式相位徽标（生成剧本 / 自动审校）
+
+  // 统一处理服务层流式回调（生成/审校/意见迭代共用）：PHASE 切相位并清空上一 pass 的思考与输出
+  const handleLogUpdate = useCallback((type: 'INPUT' | 'OUTPUT' | 'REASONING' | 'PHASE', text: string) => {
+    if (type === 'INPUT') setInputLog(text);
+    else if (type === 'OUTPUT') setOutputLog(text);
+    else if (type === 'REASONING') setReasoningLog(text);
+    else if (type === 'PHASE') { setStreamPhase(text); setReasoningLog(''); setOutputLog(''); }
+  }, []);
 
   // Token Usage State（方案 7.4 步骤 4：计价器收敛进 hooks/useUsageTracker）
   const { tokenUsage, setTokenUsage, trackUsage } = useUsageTracker();
@@ -173,6 +183,8 @@ const MangaApp: React.FC = () => {
     setPages([]);
     setInputLog('');
     setOutputLog('');
+    setReasoningLog('');
+    setStreamPhase('');
     setGlobalError(null);
     setExportedPath(null);
     setReaderIndex(null);
@@ -301,6 +313,8 @@ const MangaApp: React.FC = () => {
     setIsProcessing(true);
     setInputLog('');
     setOutputLog('');
+    setReasoningLog('');
+    setStreamPhase('');
     setPages([]);
 
     setTokenUsage(INITIAL_USAGE);
@@ -315,10 +329,7 @@ const MangaApp: React.FC = () => {
         config.customStoryPrompt,
         config.panelCount,
         config.totalPages,
-        (type, text) => {
-             if (type === 'INPUT') setInputLog(text);
-             if (type === 'OUTPUT') setOutputLog(text);
-        },
+        handleLogUpdate,
         (stat) => trackUsage('Generate Script', stat),
         // Phase 2 可选维度（结局 / 副模式）；tech 主题开关全关时为 undefined，prompt 不变
         { secondaryStoryMode: config.secondaryStoryMode, endingType: config.endingType, colorMode: config.colorMode, autoReview: config.autoReview }
@@ -366,10 +377,7 @@ const MangaApp: React.FC = () => {
 
     try {
       const revised = await reviseScriptWithFeedback(comicScript, feedback, {
-        onLogUpdate: (type, text) => {
-          if (type === 'INPUT') setInputLog(text);
-          else setOutputLog(text);
-        },
+        onLogUpdate: handleLogUpdate,
         onUsage: (stat) => trackUsage('Revise Script', stat),
       });
       if (isStale(runEpoch)) return false;
@@ -628,6 +636,8 @@ const MangaApp: React.FC = () => {
     if (!ok) return;
     setInputLog('');
     setOutputLog('');
+    setReasoningLog('');
+    setStreamPhase('');
     setExportedPath(null);
     setReaderIndex(null);
   }, [handleCancelAll, openProject]);
@@ -644,6 +654,8 @@ const MangaApp: React.FC = () => {
     setPages([]);
     setInputLog('');
     setOutputLog('');
+    setReasoningLog('');
+    setStreamPhase('');
     setGlobalError(null);
     setExportedPath(null);
     setReaderIndex(null);
@@ -857,7 +869,7 @@ const MangaApp: React.FC = () => {
             </div>
             <div className="lg:col-span-8">
                 <div className="h-[600px] sticky top-24">
-                    <LogPanel inputLog={inputLog} outputLog={outputLog} textModel={config.textModel} />
+                    <LogPanel inputLog={inputLog} outputLog={outputLog} reasoningLog={reasoningLog} phase={streamPhase} textModel={config.textModel} />
                 </div>
             </div>
             </div>
