@@ -900,6 +900,12 @@ const horrorTheme: MangaTheme = {
       step === WorkflowStep.COMIC_GENERATION ? 'PRODUCING' : 'REVIEW',
     projectOpenFailed: 'Failed to open project: data missing or corrupted.',
     projectOpenRetry: 'Failed to open project. Please retry.',
+
+    // ---- 返回上一步 ----
+    backButton: 'BACK',
+    backAbortMessage: 'Going back will abort the pages still being drawn',
+    backAbortDetail: (done: number) => `${done} conjured page(s) will be kept. You can resume the ritual later.`,
+    backAbortConfirm: 'ABORT & GO BACK',
   },
 
   // —— 视觉层（红黑配色；Creepster 标题字体 + Space Grotesk 正文，字体文件在 index.css 引入） ——

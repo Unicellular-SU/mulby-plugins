@@ -20,17 +20,23 @@ export const useComicWorkflow = ({ setPages, batchRef }: UseComicWorkflowDeps) =
   const [isProcessing, setIsProcessing] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
-  // 一键中止：杀掉文本流请求、作废在途图像结果；排队任务由 asyncPool 的纪元检查自然停止（方案 4.2）
-  const handleCancelAll = useCallback(() => {
+  // 中止在途任务（不切工作流）：杀掉文本流请求、作废在途图像结果；
+  // 排队任务由 asyncPool 的纪元检查自然停止（方案 4.2）。
+  // 「返回上一步」（COMIC_GENERATION → STORYBOARDING，有在途页时）复用此语义——已完成页保留。
+  const abortInFlightTasks = useCallback(() => {
     abortAllAiTasks();
     batchRef.current.active = false;   // 方案 5.1：中止场景不弹批次通知
     setIsProcessing(false);
     setPages(prev => prev.map(p =>
       p.isGenerating ? { ...p, isGenerating: false, progress: undefined, error: getTheme().strings.pageAborted } : p
     ));
-    // 中止剧本生成的"回到配置页"语义统一收敛在此（方案 2.1 步骤 4）
-    setWorkflowStep(prev => prev === WorkflowStep.SCRIPT_GENERATION ? WorkflowStep.CONFIG : prev);
   }, []);
+
+  // 一键中止：abortInFlightTasks + 中止剧本生成时"回到配置页"的语义（方案 2.1 步骤 4）
+  const handleCancelAll = useCallback(() => {
+    abortInFlightTasks();
+    setWorkflowStep(prev => prev === WorkflowStep.SCRIPT_GENERATION ? WorkflowStep.CONFIG : prev);
+  }, [abortInFlightTasks]);
 
   const handlePermissionError = (error: any) => {
     const msg = error.message || JSON.stringify(error);
@@ -46,6 +52,7 @@ export const useComicWorkflow = ({ setPages, batchRef }: UseComicWorkflowDeps) =
     isProcessing, setIsProcessing,
     globalError, setGlobalError,
     handleCancelAll,
+    abortInFlightTasks,
     handlePermissionError,
   };
 };

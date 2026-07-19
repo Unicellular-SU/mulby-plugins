@@ -266,6 +266,12 @@ export interface UIStrings {
   projectStageLabel: (step: WorkflowStep) => string;
   projectOpenFailed: string;
   projectOpenRetry: string;
+
+  // ---- 返回上一步 ----
+  backButton: string;
+  backAbortMessage: string;              // COMIC_GENERATION 有在途页时回退确认的主文案
+  backAbortDetail: (done: number) => string; // 确认框 detail：已完成页保留说明
+  backAbortConfirm: string;              // 确认框确定按钮（中止并返回）
 }
 
 /** 视觉 token：MangaApp 根节点展开为 CSS 变量（--manga-*），组件经 var() 消费 */

@@ -91,6 +91,7 @@ const MangaApp: React.FC = () => {
     isProcessing, setIsProcessing,
     globalError, setGlobalError,
     handleCancelAll,
+    abortInFlightTasks,
     handlePermissionError,
   } = useComicWorkflow({ setPages, batchRef });
 
@@ -406,7 +407,7 @@ const MangaApp: React.FC = () => {
   // STEP 3: Start Comic Generation (Images)
   const handleStartComicGeneration = async () => {
       if (!comicScript) return;
-      
+
       setWorkflowStep(WorkflowStep.COMIC_GENERATION);
 
       // Cover Page + PRE-CALCULATE PAGES（方案 7.4 步骤 3：拼装逻辑移至 utils/promptBuilder，逐字节等价）
@@ -415,20 +416,59 @@ const MangaApp: React.FC = () => {
       const coverPage = buildCoverPage(comicScript, effectiveStyle, coverCharacters);
       const preparedPages = prepareScenePages(comicScript, effectiveStyle, characterSheet, propSheet);
 
-      const allPages = [coverPage, ...preparedPages.map(p => p.pageData)];
-      setPages(allPages);
+      // 返回上一步后重进（或恢复工程后重进）：按 page_number 匹配现有页——
+      // 已有 imageData 的页直接沿用（保留重绘后的 prompt / 图像 / 水印覆盖，不再入队）；
+      // 无图 / 失败 / 新增页用新拼装的 prompt 与 refs 正常入队。封面页 page_number = 0（现有约定）。
+      const rebuilt = [coverPage, ...preparedPages.map(p => p.pageData)];
+      const jobs: Array<{ page: ComicPageData; refs?: string[] }> = [];
+      const mergedPages = rebuilt.map((fresh, idx) => {
+        const existing = pages.find(p => p.page_number === fresh.page_number);
+        if (existing?.imageData) {
+          return { ...existing, isGenerating: false, error: undefined };
+        }
+        const refs = idx === 0
+          ? (mainCharRef ? [mainCharRef] : undefined)
+          : (preparedPages[idx - 1].resolvedRefs as string[] | undefined);
+        jobs.push({ page: fresh, refs });
+        return { ...fresh, isGenerating: true, error: undefined };
+      });
+      setPages(mergedPages);
 
-      // 方案 4.2（D4）：asyncPool(limit=2) 替代 setTimeout 错峰——任意时刻在途图像请求 ≤2，
-      // 中止时池在取下一个任务前发现纪元已变即停止；未启动页保持 isGenerating: true，
-      // 由 handleCancelAll 的"已被用户中止"标记统一覆盖。
-      const coverRefs = mainCharRef ? [mainCharRef] : undefined;
-      const jobs = [
-        { page: coverPage, refs: coverRefs },
-        ...preparedPages.map((p) => ({ page: p.pageData, refs: p.resolvedRefs as string[] | undefined })),
-      ];
+      // 方案 4.2（D4）：asyncPool(limit=2)——任意时刻在途图像请求 ≤2；
+      // 全部页面已有图时 jobs 为空：不入队、不开批次，直接展示
+      if (jobs.length === 0) return;
 
       // 方案 5.1：批次收尾通知挂在池全部 settle 之后（runBatch 内一次性标志 + epoch 双保险防噪）
       await runBatch(jobs, config.aspectRatio, comicScript.title);
+  };
+
+  // 返回上一步（仅 STORYBOARDING / COMIC_GENERATION 两步显示入口；SCRIPT_GENERATION 用取消按钮回 CONFIG）
+  const handleGoBack = async () => {
+    if (workflowStep === WorkflowStep.STORYBOARDING) {
+      // 纯视图回退：comicScript/characterSheet/propSheet/pages 全部保留在 state
+      // （改完配置重新生成剧本时按现有逻辑新工程建档，旧工程留在画廊）
+      setWorkflowStep(WorkflowStep.CONFIG);
+      return;
+    }
+    if (workflowStep !== WorkflowStep.COMIC_GENERATION) return;
+    if (pages.some(p => p.isGenerating)) {
+      // 有在途页面：确认后按纪元语义中止在途生成，已完成页保留
+      const done = pages.filter(p => p.imageData).length;
+      const dlg = (window as any).mulby?.dialog;
+      const ok = dlg?.showMessageBox
+        ? (await dlg.showMessageBox({
+            type: 'warning',
+            message: S.backAbortMessage,
+            detail: done > 0 ? S.backAbortDetail(done) : undefined,
+            buttons: [S.cancelBtn, S.backAbortConfirm],
+            defaultId: 0,
+            cancelId: 0,
+          })).response === 1
+        : window.confirm(S.backAbortMessage); // 老宿主降级
+      if (!ok) return;
+      abortInFlightTasks(); // 中止在途生成但不切回 CONFIG、不清 pages
+    }
+    setWorkflowStep(WorkflowStep.STORYBOARDING);
   };
 
   const handleRegeneratePage = useCallback((pageNumber: number, newPrompt: string, newCharactersInScene?: string[], newPropsInScene?: string[]) => {
@@ -666,6 +706,17 @@ const MangaApp: React.FC = () => {
       <header className="sticky top-0 z-50 bg-[#0f172a]/90 backdrop-blur border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
+             {/* 返回上一步（仅分镜 / 绘制两步显示；剧本流式生成用右侧取消按钮回 CONFIG） */}
+             {(workflowStep === WorkflowStep.STORYBOARDING || workflowStep === WorkflowStep.COMIC_GENERATION) && (
+                 <button
+                    onClick={handleGoBack}
+                    className="flex items-center space-x-1 text-xs text-slate-400 hover:text-white transition-colors -ml-1 mr-1"
+                    title={S.backButton}
+                 >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>
+                    <span>{S.backButton}</span>
+                 </button>
+             )}
              <div className="w-8 h-8 bg-gradient-to-br from-[var(--manga-accent)] to-[var(--manga-accent-secondary)] rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">
                {S.brandMark}
              </div>

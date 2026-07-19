@@ -576,6 +576,12 @@ const techTheme: MangaTheme = {
       step === WorkflowStep.COMIC_GENERATION ? '绘制阶段' : '分镜阶段',
     projectOpenFailed: '打开工程失败：数据缺失或已损坏。',
     projectOpenRetry: '打开工程失败，可重试。',
+
+    // ---- 返回上一步 ----
+    backButton: '上一步',
+    backAbortMessage: '返回上一步将中止正在生成的页面',
+    backAbortDetail: (done: number) => `已完成的 ${done} 页图像会保留，可稍后继续绘制。`,
+    backAbortConfirm: '中止并返回',
   },
 
   // —— 视觉层（从既有样式提取：Space Grotesk 字体、indigo→purple 品牌渐变、#0f172a 深色底） ——
