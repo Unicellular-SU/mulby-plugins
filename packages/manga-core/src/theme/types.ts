@@ -2,7 +2,7 @@
 // 核心包只定义形状；全部题材数据（prompt 角色/文风、画风与叙事模式、预设角色、
 // 界面文案、视觉 token）由各插件的 theme.ts 提供，经 setTheme() 注入模块级单例。
 
-import type { CharacterProfile, StoryMode, WatermarkSettings, WatermarkType } from '../engine-types';
+import type { CharacterProfile, StoryMode, WatermarkSettings, WatermarkType, WorkflowStep } from '../engine-types';
 
 /** 画风下拉项（label 为界面文案，value 为发给图像模型的英文风格描述） */
 export interface ArtStyleOption {
@@ -248,6 +248,24 @@ export interface UIStrings {
   watermarkModeLabel: string;
   watermarkModeGlobal: string;
   watermarkModeCustom: string;
+
+  // ---- 工程画廊（多工程管理） ----
+  myProjects: string;
+  continueLastProject: string;
+  projectUntitled: (date: string) => string;
+  galleryEmpty: string;
+  galleryOpen: string;
+  galleryRename: string;
+  galleryRenameSave: string;
+  galleryDelete: string;
+  galleryDeleteConfirm: string;
+  galleryExport: string;
+  galleryExportNoPages: string;
+  galleryUpdatedAt: (d: string) => string;
+  projectPages: (done: number, total: number) => string;
+  projectStageLabel: (step: WorkflowStep) => string;
+  projectOpenFailed: string;
+  projectOpenRetry: string;
 }
 
 /** 视觉 token：MangaApp 根节点展开为 CSS 变量（--manga-*），组件经 var() 消费 */

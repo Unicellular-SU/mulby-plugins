@@ -12,8 +12,9 @@ import { useImageQueue } from './hooks/useImageQueue';
 import { useComicWorkflow } from './hooks/useComicWorkflow';
 import { saveBinary, buildZipArchive, buildPdfDocument, buildLongImages, revealInFolder } from './services/exportService';
 import ReaderOverlay from './components/ReaderOverlay';
-import { attIdForChar, attIdForProp } from './services/persistenceService';
-import { useSessionPersistence } from './hooks/useSessionPersistence';
+import ProjectGallery from './components/ProjectGallery';
+import { attIdForChar, attIdForProp, loadProject, isRestorableProject, getImageAttachment } from './services/persistenceService';
+import { useProjectPersistence } from './hooks/useProjectPersistence';
 import { getCharacterReference, buildCoverPage, prepareScenePages, resolvePageRefs } from './utils/promptBuilder';
 import { AppConfig, ComicPageData, WorkflowStep, CharacterSheetItem, PropSheetItem, ComicResponse, WatermarkSettings } from './engine-types';
 import { ASPECT_RATIOS, PAGE_LENGTH_OPTIONS } from './constants';
@@ -97,17 +98,18 @@ const MangaApp: React.FC = () => {
   const workflowStepRef = useRef(workflowStep);
   useEffect(() => { workflowStepRef.current = workflowStep; }, [workflowStep]);
 
-  // 会话持久化（方案 3.1/3.2 接线收敛进 hooks/useSessionPersistence，7.4 收尾）：
-  // 启动读回 + config 防抖写回 + 快照防抖落盘 + 三通道兜底 flush + 恢复/放弃
+  // 多工程持久化：启动读回（全局 config + v1→v2 迁移 + 工程索引）+ config 防抖写回 +
+  // 工程快照防抖落盘 + 三通道兜底 flush + 打开/新建/重命名/删除工程
   const {
-    pendingSession,
+    projects,
     isRestoring,
     persistReferenceImage,
-    beginNewSession,
-    discardSessionData,
-    handleRestoreSession,
-    handleDiscardSession,
-  } = useSessionPersistence({
+    beginNewProject,
+    discardActiveProject,
+    openProject,
+    renameProject,
+    deleteProject,
+  } = useProjectPersistence({
     mulbyReady,
     config, setConfig,
     workflowStep, setWorkflowStep,
@@ -173,10 +175,10 @@ const MangaApp: React.FC = () => {
     setExportedPath(null);
     setReaderIndex(null);
     setWorkflowStep(WorkflowStep.CONFIG);
-    // 确认丢弃即同步清理持久化会话（session 键 + 附件；config 保留）——
+    // 确认丢弃即删除当前工程（KV + 附件 + 索引；config 默认值保留）——
     // 第 2 章把 Start Over 改成了「确认 + 真正重置」，保留持久化会跟"不可恢复"的确认语义冲突
-    discardSessionData();
-  }, [handleCancelAll, discardSessionData]);
+    void discardActiveProject();
+  }, [handleCancelAll, discardActiveProject]);
 
   // 方案 5.7：启动器入口——选中文本（over）/ 文件（files）payload 一键预填源素材。
   // 宿主 onPluginInit 自带缓冲重放（专治 React 晚注册）；nonce 去重表在模块级。
@@ -321,9 +323,9 @@ const MangaApp: React.FC = () => {
       );
       if (isStale(runEpoch)) return;    // 本轮已被中止/替代：不写回任何状态
 
-      // 新剧本生成成功 = 唯一确立"新会话"的时刻（方案 3.1 步骤 6）：
-      // 清旧会话附件；session 键由快照 effect 在迁移到 STORYBOARDING 时立即覆盖写入。
-      beginNewSession();
+      // 新剧本生成成功 = 唯一确立"新工程"的时刻（多工程管理）：
+      // 建档并切换附件命名空间；快照由快照 effect 在迁移到 STORYBOARDING 时立即写入。不清任何旧数据。
+      await beginNewProject(comicData.title || S.projectUntitled(new Date().toLocaleString()));
       clearReferenceAttachmentCache(); // D3：旧剧本的参考图上传缓存与 AI 附件一并清理（方案 4.1）
 
       setComicScript(comicData);
@@ -533,6 +535,86 @@ const MangaApp: React.FC = () => {
 
   // --- RENDERING ---
 
+  // 多工程管理：画廊开关、导出中标记；索引中 updatedAt 最新工程用于「继续上次创作」快捷卡
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryExporting, setGalleryExporting] = useState(false);
+  const latestProject = projects.length > 0
+    ? [...projects].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    : null;
+
+  /** 打开工程（画廊卡片 / 继续上次创作）：hook 内会先 flush 当前工程再按 id 恢复 */
+  const handleOpenProject = useCallback(async (id: string) => {
+    setGalleryOpen(false);
+    handleCancelAll();               // 停在途任务（旧工程状态由快照落盘保留）
+    clearReferenceAttachmentCache(); // AI 参考图附件缓存属旧工程语境
+    const ok = await openProject(id);
+    if (!ok) return;
+    setInputLog('');
+    setOutputLog('');
+    setExportedPath(null);
+    setReaderIndex(null);
+  }, [handleCancelAll, openProject]);
+
+  /** 删除工程；若删的是当前激活工程，工作台一并重置到空 CONFIG（数据已随删除清除） */
+  const handleDeleteProject = useCallback(async (id: string) => {
+    const wasActive = await deleteProject(id);
+    if (!wasActive) return;
+    handleCancelAll();
+    clearReferenceAttachmentCache();
+    setComicScript(null);
+    setCharacterSheet([]);
+    setPropSheet([]);
+    setPages([]);
+    setInputLog('');
+    setOutputLog('');
+    setGlobalError(null);
+    setExportedPath(null);
+    setReaderIndex(null);
+    setWorkflowStep(WorkflowStep.CONFIG);
+    setGalleryOpen(false);
+  }, [deleteProject, handleCancelAll]);
+
+  /** 画廊内导出 ZIP：按 id 直接读快照与附件（不切换激活工程），走 exportService 现有 zip 导出 */
+  const handleExportProject = useCallback(async (id: string) => {
+    if (galleryExporting) return;
+    setGalleryExporting(true);
+    try {
+      const saved = await loadProject(id);
+      if (!isRestorableProject(saved)) {
+        setGlobalError(S.projectOpenFailed);
+        return;
+      }
+      const withImages = saved.pages.filter(p => p.hasImage);
+      if (withImages.length === 0) {
+        setGlobalError(S.galleryExportNoPages);
+        return;
+      }
+      const pagesData: ComicPageData[] = [];
+      for (const p of withImages) {
+        // 附件 id 按工程前缀直接拼接（不切换命名空间）
+        const img = await getImageAttachment(`p-${id}-page-${p.page_number}`);
+        if (img) pagesData.push({ ...p, imageData: img, isGenerating: false } as ComicPageData);
+      }
+      if (pagesData.length === 0) {
+        setGlobalError(S.galleryExportNoPages);
+        return;
+      }
+      const entry = projects.find(e => e.id === id);
+      const title = (entry?.title || saved.comicScript?.title || S.defaultComicFileName)
+        .replace(/[^a-z0-9一-龥]/gi, '_').substring(0, 50);
+      const buf = await buildZipArchive(pagesData, title);
+      const res = await saveBinary(`${title}.zip`, buf, [{ name: 'ZIP 压缩包', extensions: ['zip'] }]);
+      if (res.status === 'saved') {
+        setExportedPath(res.path);
+        notify(S.exportedTo(res.path));
+      }
+    } catch (error: any) {
+      setGlobalError(S.exportFailed(trimErr(error?.message)));
+    } finally {
+      setGalleryExporting(false);
+    }
+  }, [galleryExporting, projects, notify, S]);
+
   // 视觉 token → 根节点 CSS 变量（theme.ui）；组件内品牌色经 var(--manga-*) 消费
   const themeCssVars = {
     '--manga-font-family': theme.ui.fontFamily,
@@ -646,36 +728,31 @@ const MangaApp: React.FC = () => {
           </div>
         )}
 
-        {/* 恢复上次创作条幅（方案 3.1 步骤 5.2）：不自动跳转，由用户决定恢复或放弃 */}
-        {workflowStep === WorkflowStep.CONFIG && pendingSession && (
-            <div className="p-4 bg-indigo-900/40 border border-indigo-600/50 rounded-lg flex flex-col md:flex-row md:items-center md:justify-between gap-3 animate-fade-in">
-                <div className="min-w-0">
-                    <p className="text-sm font-bold text-indigo-200 truncate">
-                        检测到未完成的创作：《{pendingSession.comicScript?.title || '未命名'}》
-                    </p>
-                    <p className="text-xs text-indigo-300/80 mt-1">
-                        保存于 {new Date(pendingSession.savedAt).toLocaleString()}
-                        {pendingSession.pages.length > 0
-                            ? ` · 已完成 ${pendingSession.pages.filter(p => p.hasImage).length}/${pendingSession.pages.length} 页`
-                            : ' · 尚未开始绘制页面'}
-                    </p>
-                </div>
-                <div className="flex items-center space-x-2 shrink-0">
+        {/* 多工程入口（CONFIG）：「我的工程」画廊 + 「继续上次创作」快捷卡（updatedAt 最新工程） */}
+        {workflowStep === WorkflowStep.CONFIG && (
+            <div className="flex flex-col md:flex-row gap-3 animate-fade-in">
+                <button
+                    onClick={() => setGalleryOpen(true)}
+                    className="flex items-center justify-center space-x-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 px-5 py-3 rounded-xl text-sm font-bold transition-colors shrink-0"
+                >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    <span>{S.myProjects}（{projects.length}）</span>
+                </button>
+                {latestProject && (
                     <button
-                        onClick={handleRestoreSession}
+                        onClick={() => void handleOpenProject(latestProject.id)}
                         disabled={isRestoring}
-                        className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-400 text-white px-4 py-2 rounded-lg font-bold transition-colors"
+                        className="flex-grow p-4 bg-indigo-900/40 border border-indigo-600/50 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-left hover:bg-indigo-900/60 disabled:opacity-60 transition-colors"
                     >
-                        {isRestoring ? '正在恢复…' : '恢复上次创作'}
+                        <span className="text-sm font-bold text-indigo-200 truncate">
+                            {S.continueLastProject}：《{latestProject.title}》
+                        </span>
+                        <span className="text-xs text-indigo-300/80 shrink-0">
+                            {S.galleryUpdatedAt(new Date(latestProject.updatedAt).toLocaleString())}
+                            {` · ${S.projectPages(latestProject.donePages, latestProject.pageCount)}`}
+                        </span>
                     </button>
-                    <button
-                        onClick={handleDiscardSession}
-                        disabled={isRestoring}
-                        className="text-xs bg-slate-700/60 hover:bg-slate-700 disabled:opacity-50 text-slate-300 px-4 py-2 rounded-lg font-bold transition-colors"
-                    >
-                        放弃
-                    </button>
-                </div>
+                )}
             </div>
         )}
 
@@ -833,6 +910,20 @@ const MangaApp: React.FC = () => {
             index={readerIndex}
             onNavigate={setReaderIndex}
             onClose={() => setReaderIndex(null)}
+        />
+      )}
+
+      {/* 工程画廊（多工程管理） */}
+      {galleryOpen && (
+        <ProjectGallery
+            projects={projects}
+            busy={isRestoring}
+            exporting={galleryExporting}
+            onOpen={(id) => void handleOpenProject(id)}
+            onRename={(id, title) => void renameProject(id, title)}
+            onDelete={(id) => void handleDeleteProject(id)}
+            onExport={(id) => void handleExportProject(id)}
+            onClose={() => setGalleryOpen(false)}
         />
       )}
       

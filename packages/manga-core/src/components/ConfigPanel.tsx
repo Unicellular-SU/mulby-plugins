@@ -214,7 +214,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
             <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                        <label className="text-xs text-slate-500">文本模型（剧本 / 润色）</label>
+                        <label className="text-xs text-slate-500">文本模型</label>
                         <select
                             className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
                             value={config.textModel || ''}
@@ -227,7 +227,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ config, onChange, onGenerate,
                         </select>
                     </div>
                     <div className="space-y-1">
-                        <label className="text-xs text-slate-500">图像模型（角色 / 道具 / 页面）</label>
+                        <label className="text-xs text-slate-500">图像模型</label>
                         <select
                             className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white focus:ring-2 focus:ring-indigo-500"
                             value={config.imageModel || ''}

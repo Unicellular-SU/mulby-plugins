@@ -7,7 +7,7 @@
 // - strings → 原 strings.ts 的 S 表 + 品牌键（TM / TechManga / 导出文件名前缀）
 // 视觉 token 从既有样式提取（Space Grotesk 字体、indigo→purple 品牌渐变、#0f172a 深色底）。
 
-import { StoryMode } from '@mulby-plugins/manga-core';
+import { StoryMode, WorkflowStep } from '@mulby-plugins/manga-core';
 import type { MangaTheme } from '@mulby-plugins/manga-core';
 
 // 画风枚举（数据随题材走，1:1 平移自原 types.ts 的 ComicStyle）
@@ -557,6 +557,25 @@ const techTheme: MangaTheme = {
     watermarkModeLabel: '模式',
     watermarkModeGlobal: '跟随全局',
     watermarkModeCustom: '本页自定义',
+
+    // ---- 工程画廊（多工程管理） ----
+    myProjects: '我的工程',
+    continueLastProject: '继续上次创作',
+    projectUntitled: (date: string) => `未命名工程 ${date}`,
+    galleryEmpty: '还没有工程。生成一部漫画后，工程会自动出现在这里。',
+    galleryOpen: '打开',
+    galleryRename: '重命名',
+    galleryRenameSave: '保存',
+    galleryDelete: '删除',
+    galleryDeleteConfirm: '确认删除？',
+    galleryExport: '导出 ZIP',
+    galleryExportNoPages: '该工程还没有已生成的页面。',
+    galleryUpdatedAt: (d: string) => `更新于 ${d}`,
+    projectPages: (done: number, total: number) => `${done}/${total} 页`,
+    projectStageLabel: (step: WorkflowStep) =>
+      step === WorkflowStep.COMIC_GENERATION ? '绘制阶段' : '分镜阶段',
+    projectOpenFailed: '打开工程失败：数据缺失或已损坏。',
+    projectOpenRetry: '打开工程失败，可重试。',
   },
 
   // —— 视觉层（从既有样式提取：Space Grotesk 字体、indigo→purple 品牌渐变、#0f172a 深色底） ——

@@ -5,7 +5,7 @@
 // App.tsx / ConfigPanel / PanelCard / ScriptReviewPanel 的界面文案与红黑视觉。
 // 引擎机制（持久化 / 中止纪元 / 附件缓存 / JSON 修复 / 并发池 / 导出三格式）全部由核心包提供。
 
-import { WatermarkType } from '@mulby-plugins/manga-core';
+import { WatermarkType, WorkflowStep } from '@mulby-plugins/manga-core';
 import type { MangaTheme, StoryModeOption, EndingOption, ColorModeOption, LabeledOption } from '@mulby-plugins/manga-core';
 
 // ---------- 14 种大师画风（原 types.ts HorrorStyle，逐字保留大段描述） ----------
@@ -881,6 +881,25 @@ const horrorTheme: MangaTheme = {
     watermarkModeLabel: 'Mode',
     watermarkModeGlobal: 'GLOBAL SYNC',
     watermarkModeCustom: 'CUSTOM',
+
+    // ---- 工程画廊（多工程管理） ----
+    myProjects: 'THE COLLECTION',
+    continueLastProject: 'RESUME LAST RITUAL',
+    projectUntitled: (date: string) => `UNTITLED RITUAL ${date}`,
+    galleryEmpty: 'No grimoires yet. Manifest a horror and it will be bound here.',
+    galleryOpen: 'OPEN',
+    galleryRename: 'RENAME',
+    galleryRenameSave: 'SAVE',
+    galleryDelete: 'DELETE',
+    galleryDeleteConfirm: 'CONFIRM?',
+    galleryExport: 'EXPORT ZIP',
+    galleryExportNoPages: 'No conjured pages in this project yet.',
+    galleryUpdatedAt: (d: string) => `Updated ${d}`,
+    projectPages: (done: number, total: number) => `${done}/${total} Pages`,
+    projectStageLabel: (step: WorkflowStep) =>
+      step === WorkflowStep.COMIC_GENERATION ? 'PRODUCING' : 'REVIEW',
+    projectOpenFailed: 'Failed to open project: data missing or corrupted.',
+    projectOpenRetry: 'Failed to open project. Please retry.',
   },
 
   // —— 视觉层（红黑配色；Creepster 标题字体 + Space Grotesk 正文，字体文件在 index.css 引入） ——
