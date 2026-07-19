@@ -296,8 +296,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                     <h3 className="font-bold text-lg text-white truncate">{char.name}</h3>
                     <span className="text-xs text-slate-500 font-mono">CHAR #{idx + 1}</span>
                 </div>
-                {/* 方案 4.7：与立绘实际画布 1024x1536（2:3）一致，消除裁切 */}
-                <div className="relative aspect-[2/3] bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
+                {/* 多视图定妆照画布 1536x1024（3:2 横版）：三视图+面部特写一排 */}
+                <div className="relative aspect-[3/2] bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
                     {char.referenceImage ? (
                         <img src={char.referenceImage} alt={char.name} className="w-full h-full object-cover" />
                     ) : (
@@ -361,7 +361,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
                         <h3 className="font-bold text-lg text-white truncate">{prop.name}</h3>
                         <span className="text-xs text-slate-500 font-mono">PROP #{idx + 1}</span>
                     </div>
-                    <div className="relative aspect-square bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
+                    {/* 道具多角度设定图画布 1536x1024（3:2 横版） */}
+                    <div className="relative aspect-[3/2] bg-black/40 rounded-md overflow-hidden border border-slate-600 group">
                         {prop.referenceImage ? (
                             <img src={prop.referenceImage} alt={prop.name} className="w-full h-full object-contain p-2" />
                         ) : (

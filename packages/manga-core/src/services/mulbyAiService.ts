@@ -1256,14 +1256,17 @@ export const generateCharacterReference = async (
     4. **IF** the description is historical (e.g. Napoleon), draw the historical figure accurately based on paintings/statues.
 
     Visual Instructions:
-    - Full body shot, neutral pose, front view.
-    - White background.
-    - High quality, detailed character sheet.
-    - Match the "Target Art Style".
+    - A single character turnaround sheet on ONE canvas, white background.
+    - Layout, left to right: (1) full-body front view, (2) full-body side view, (3) full-body back view, (4) face close-up front view, (5) face close-up side/profile view.
+    - All five views depict the SAME character with identical face, hairstyle, body type and costume.
+    - Standing neutral pose for the three full-body views.
+    - **EXPRESSION**: Neutral, relaxed expression in ALL views — calm face, relaxed brows, closed mouth, no strong emotion. This is a reference sheet, not a scene.
+    - High quality, detailed character sheet. Match the "Target Art Style".
     - **IDENTITY**: Keep the character's canonical facial features, body type, and hair recognizable.
     - **COSTUME**: If the 'Source Material Context' describes a specific costume (e.g. "wearing a spacesuit", "dressed as Napoleon"), you MUST draw them in that costume. Do NOT default to their standard anime outfit if a specific costume is requested.
-    - Output image aspect ratio: portrait 2:3.
-  `.trim(); // 方案 4.7：hint 与下方 size 1024x1536（精确 2:3）一致，不再谎报 3:4
+    - **NO TEXT**: No labels, no annotations, no captions.
+    - Output image aspect ratio: landscape 3:2.
+  `.trim(); // hint 与 size 1536x1024（精确 3:2）一致，不谎报（方案 4.7）
 
   const epoch = scope.epoch();
 
@@ -1272,7 +1275,7 @@ export const generateCharacterReference = async (
     const result = await generateImageWithProgress(ai, {
       model,
       prompt,
-      size: '1024x1536',
+      size: '1536x1024',
       count: 1
     }, epoch, onProgress);
 
@@ -1324,9 +1327,9 @@ export const generatePropReference = async (
     INSTRUCTIONS:
     - **VISUAL STYLE**: You MUST draw the item using the "Target Art Style" defined above. If the style is "Manga", it must look like a Manga drawing, NOT a photo.
     - **DESIGN CONSISTENCY**: The item must look like it belongs in the "Universe Context" described above.
-    - **COMPOSITION**: High quality product shot, white background, neutral lighting.
+    - **COMPOSITION**: Multi-angle product reference sheet on ONE canvas: front view, side view, and three-quarter back view of the SAME item arranged in a row, white background, neutral lighting, consistent details across views.
     - **NO TEXT**: Do not include labels.
-    - Output image aspect ratio: square 1:1.
+    - Output image aspect ratio: landscape 3:2.
   `.trim();
 
   const epoch = scope.epoch();
@@ -1336,7 +1339,7 @@ export const generatePropReference = async (
     const result = await generateImageWithProgress(ai, {
       model,
       prompt,
-      size: '1024x1024',
+      size: '1536x1024',
       count: 1
     }, epoch, onProgress);
 
@@ -1449,6 +1452,7 @@ export const generatePanelImage = async (
       - **SCENE CONSISTENCY**: If scene reference images are provided, the background location MUST match them exactly (layout, furnishings, lighting mood).
       - **ACTION (DYNAMIC)**: **DO NOT COPY THE POSE** from the reference images. The reference images are static character sheets (mugshots).
       - **POSE INSTRUCTION**: You MUST make the character perform the ACTION described in the "TEXT PROMPT" below (e.g., running, fighting, typing, shouting). Make the pose dynamic and dramatic.
+      - **EXPRESSION (DYNAMIC)**: Reference faces show a NEUTRAL expression by design. Do NOT copy it — the character's emotion/expression MUST follow the TEXT PROMPT (e.g., terrified, furious, smiling).
 
       INSTRUCTION FOR SCENE:
       - **ART STYLE ENFORCEMENT**: The image MUST be generated in the requested Art Style.
