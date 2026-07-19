@@ -12,11 +12,13 @@
   "dependencies": {
     "@fontsource/creepster": "^5.2.5",
     "@fontsource/space-grotesk": "^5.2.5",
-    "jszip": "3.10.1",
+    "@mulby-plugins/manga-core": "workspace:*",
+    "@mulby-plugins/manga-kit": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@mulby-plugins/types": "workspace:*",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.19",

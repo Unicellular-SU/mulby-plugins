@@ -12,6 +12,28 @@ importers:
         specifier: ^23.0.0
         version: 23.11.1(typescript@5.9.3)
 
+  packages/manga-core:
+    dependencies:
+      '@mulby-plugins/manga-kit':
+        specifier: workspace:*
+        version: link:../manga-kit
+      jspdf:
+        specifier: ^4.2.1
+        version: 4.2.1
+      jszip:
+        specifier: 3.10.1
+        version: 3.10.1
+      react:
+        specifier: ^19.2.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.0
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      typescript:
+        specifier: ~5.8.2
+        version: 5.8.3
+
   packages/manga-kit:
     devDependencies:
       '@types/node':
@@ -770,9 +792,12 @@ importers:
       '@fontsource/space-grotesk':
         specifier: ^5.2.5
         version: 5.2.10
-      jszip:
-        specifier: 3.10.1
-        version: 3.10.1
+      '@mulby-plugins/manga-core':
+        specifier: workspace:*
+        version: link:../../packages/manga-core
+      '@mulby-plugins/manga-kit':
+        specifier: workspace:*
+        version: link:../../packages/manga-kit
       react:
         specifier: ^19.2.0
         version: 19.2.7
@@ -780,6 +805,9 @@ importers:
         specifier: ^19.2.0
         version: 19.2.7(react@19.2.7)
     devDependencies:
+      '@mulby-plugins/types':
+        specifier: workspace:*
+        version: link:../../packages/mulby-types
       '@types/node':
         specifier: ^22.14.0
         version: 22.19.17
@@ -1867,6 +1895,9 @@ importers:
       '@fontsource/space-grotesk':
         specifier: ^5.2.5
         version: 5.2.10
+      '@mulby-plugins/manga-core':
+        specifier: workspace:*
+        version: link:../../packages/manga-core
       '@mulby-plugins/manga-kit':
         specifier: workspace:*
         version: link:../../packages/manga-kit
@@ -11435,7 +11466,7 @@ snapshots:
 
   inherits@2.0.4: {}
 
-  ink-select-input@4.2.2(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2):
+  ink-select-input@4.2.2(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2):
     dependencies:
       arr-rotate: 1.0.0
       figures: 3.2.0
@@ -11443,7 +11474,7 @@ snapshots:
       lodash.isequal: 4.5.0
       react: 17.0.2
 
-  ink-text-input@4.0.3(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2):
+  ink-text-input@4.0.3(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2):
     dependencies:
       chalk: 4.1.2
       ink: 3.2.0(@types/react@18.3.28)(react@17.0.2)
@@ -12256,8 +12287,8 @@ snapshots:
       esbuild: 0.20.2
       fs-extra: 11.3.5
       ink: 3.2.0(@types/react@18.3.28)(react@17.0.2)
-      ink-select-input: 4.2.2(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2)
-      ink-text-input: 4.0.3(ink@3.2.0(@types/react@18.3.28)(react@18.3.1))(react@17.0.2)
+      ink-select-input: 4.2.2(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2)
+      ink-text-input: 4.0.3(ink@3.2.0(@types/react@18.3.28)(react@17.0.2))(react@17.0.2)
       inquirer: 13.4.3(@types/node@25.6.0)
       js-tiktoken: 1.0.21
       openai: 6.38.0(ws@8.20.0)

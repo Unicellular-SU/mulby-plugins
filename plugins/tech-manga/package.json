@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@fontsource/space-grotesk": "^5.2.5",
+    "@mulby-plugins/manga-core": "workspace:*",
     "@mulby-plugins/manga-kit": "workspace:*",
     "jspdf": "^4.2.1",
     "jszip": "3.10.1",

@@ -1,0 +1,22 @@
+{
+  "name": "@mulby-plugins/manga-core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "manga 系插件（tech-manga / horror-manga）的共享引擎：四步工作流、AI 桥接服务、持久化、导出与全部 UI 组件。题材即数据——插件经 setTheme(theme) 注入 MangaTheme 后渲染 <MangaApp/>。以 .ts 源码直接分发，由各插件的 vite/esbuild 全量打包内联，无独立构建步骤（同 manga-kit 分发模式）。",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "dependencies": {
+    "@mulby-plugins/manga-kit": "workspace:*",
+    "jszip": "3.10.1",
+    "jspdf": "^4.2.1"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.2"
+  }
+}

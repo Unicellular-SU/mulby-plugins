@@ -1,7 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import { MangaApp, setTheme } from '@mulby-plugins/manga-core';
+import techTheme from './theme';
 import './index.css';
+
+// 题材即数据：注入 tech 主题后渲染共享引擎（packages/manga-core）
+setTheme(techTheme);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -11,6 +15,6 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <MangaApp />
   </React.StrictMode>
 );
