@@ -517,6 +517,10 @@ const techTheme: MangaTheme = {
     scenesInScene: '本页场景',
     noScenesInScene: '本页未列出场景。',
     pageDialogueLabel: '本页对白（气泡）',
+    dialogueTextPlaceholder: '输入对白…',
+    dialoguePositionAuto: '自动位置',
+    dialogueAdd: '＋ 添加对白',
+    dialogueDelete: '删除本条',
 
     // ---- 名单匹配状态 ----
     unmatchedAssetHint: '未建档：该名字不在对应表中，生成时无法注入参考图',

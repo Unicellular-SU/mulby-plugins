@@ -47,6 +47,24 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
     onUpdate({ ...script, pages: newPages });
   };
 
+  // ---- 本页对白行内编辑（方案 D 后续：结构化 dialogue 可编辑） ----
+  // 改动统一走 handlePageChange → handleScriptUpdate（角色表合并/快照持久化自然生效）；
+  // page.dialogue 不存在时新增即创建数组；空 text 条目由注入段过滤（buildDialogueBlock），不进图像 prompt。
+  const updateDialogueRow = (rowIdx: number, patch: Partial<{ speaker: string; text: string; position?: string }>) => {
+    const list = [...(activePage.dialogue || [])];
+    list[rowIdx] = { ...list[rowIdx], ...patch };
+    handlePageChange(activePageIdx, 'dialogue', list);
+  };
+  const removeDialogueRow = (rowIdx: number) => {
+    handlePageChange(activePageIdx, 'dialogue', (activePage.dialogue || []).filter((_, i) => i !== rowIdx));
+  };
+  const addDialogueRow = () => {
+    handlePageChange(activePageIdx, 'dialogue', [
+      ...(activePage.dialogue || []),
+      { speaker: characterSheet[0]?.name || '', text: '' },
+    ]);
+  };
+
   // 方案 2.2：instr 由 RefineBox 透传进来（原实现丢弃了该参数导致死按钮）；返回是否成功，成功才清空输入框
   const handleRefine = async (
     target: 'ANALYSIS' | 'COVER' | 'LAYOUT' | 'PROMPT',
@@ -336,21 +354,60 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                             <p className="text-xs text-slate-500 italic">{S.noScenesInScene}</p>
                         )}
 
-                        {/* 本页对白（结构化 dialogue，只读；气泡绑定由引擎机械注入） */}
-                        {activePage.dialogue && activePage.dialogue.length > 0 && (
-                        <>
+                        {/* 本页对白（结构化 dialogue，行内编辑；气泡绑定由引擎按当前值机械注入） */}
                         <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.pageDialogueLabel}</h4>
                         <div className="space-y-2">
-                            {activePage.dialogue.map((d, i) => (
-                                <div key={i} className="text-xs bg-slate-900/60 rounded p-2 border border-slate-700/60">
-                                    <span className="font-bold text-indigo-300">{d.speaker}</span>
-                                    {d.position && <span className="text-slate-500 ml-1.5">[{d.position}]</span>}
-                                    <p className="text-slate-300 mt-0.5 leading-relaxed">{d.text}</p>
+                            {(activePage.dialogue || []).map((d, i) => {
+                                const speakerInSheet = characterSheet.some(c => c.name === d.speaker);
+                                return (
+                                <div key={i} className="text-xs bg-slate-900/60 rounded p-2 border border-slate-700/60 flex items-start gap-1.5">
+                                    {/* speaker：下拉（表内原名）；旧数据不在表中的值保留并标黄 */}
+                                    <select
+                                        className={`w-32 shrink-0 bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs ${speakerInSheet ? 'text-indigo-300' : 'text-yellow-400'}`}
+                                        value={d.speaker}
+                                        onChange={(e) => updateDialogueRow(i, { speaker: e.target.value })}
+                                        title={speakerInSheet ? undefined : S.unmatchedAssetHint}
+                                    >
+                                        {!speakerInSheet && <option value={d.speaker}>{d.speaker}</option>}
+                                        {characterSheet.map(c => (
+                                            <option key={c.name} value={c.name}>{c.name}</option>
+                                        ))}
+                                    </select>
+                                    {/* text：单行输入（与其他字段编辑风格一致） */}
+                                    <input
+                                        className="flex-grow min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                                        value={d.text}
+                                        placeholder={S.dialogueTextPlaceholder}
+                                        onChange={(e) => updateDialogueRow(i, { text: e.target.value })}
+                                    />
+                                    {/* position：预设方位词；auto = 清空用缺省回退 */}
+                                    <select
+                                        className="w-28 shrink-0 bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs text-slate-300"
+                                        value={d.position || ''}
+                                        onChange={(e) => updateDialogueRow(i, { position: e.target.value || undefined })}
+                                    >
+                                        <option value="">{S.dialoguePositionAuto}</option>
+                                        <option value="top-left">top-left</option>
+                                        <option value="top-right">top-right</option>
+                                        <option value="bottom-left">bottom-left</option>
+                                        <option value="bottom-right">bottom-right</option>
+                                        <option value="center">center</option>
+                                    </select>
+                                    <button
+                                        onClick={() => removeDialogueRow(i)}
+                                        className="text-slate-500 hover:text-red-400 px-1 shrink-0"
+                                        title={S.dialogueDelete}
+                                    >✕</button>
                                 </div>
-                            ))}
+                                );
+                            })}
+                            <button
+                                onClick={addDialogueRow}
+                                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                            >
+                                {S.dialogueAdd}
+                            </button>
                         </div>
-                        </>
-                        )}
 
                     </div>
                 </div>

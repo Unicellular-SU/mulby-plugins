@@ -869,6 +869,10 @@ const horrorTheme: MangaTheme = {
     scenesInScene: 'Scenes on This Page',
     noScenesInScene: 'No scenes on this page.',
     pageDialogueLabel: 'Dialogue (Bubbles)',
+    dialogueTextPlaceholder: 'Line...',
+    dialoguePositionAuto: 'auto',
+    dialogueAdd: '+ ADD LINE',
+    dialogueDelete: 'Delete line',
 
     // ---- 名单匹配状态 ----
     unmatchedAssetHint: 'Not in sheet: no reference image can be injected for this name',

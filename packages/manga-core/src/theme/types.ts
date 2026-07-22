@@ -164,6 +164,10 @@ export interface UIStrings {
   scenesInScene: string;
   noScenesInScene: string;
   pageDialogueLabel: string;
+  dialogueTextPlaceholder: string;
+  dialoguePositionAuto: string;
+  dialogueAdd: string;
+  dialogueDelete: string;
 
   // ---- 名单匹配状态（未建档警示 + 补建） ----
   unmatchedAssetHint: string;
