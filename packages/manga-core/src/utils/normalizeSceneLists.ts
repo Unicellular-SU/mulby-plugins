@@ -122,6 +122,23 @@ export const normalizeSceneLists = (script: ComicResponse): { script: ComicRespo
       return name;
     });
 
+    // dialogue.speaker：与 characters_in_scene 同一匹配规则吸附到角色表原名；
+    // 吸附不动则保留原名并记入 unmatchedCharacters（不自动补建）
+    if (page.dialogue) {
+      page.dialogue = page.dialogue.map(d => {
+        const name = (d.speaker || '').trim();
+        if (!name) return d;
+        if (out.character_sheet.some(i => i.name === name)) return name === d.speaker ? d : { ...d, speaker: name };
+        const to = matchSheetName(name, out.character_sheet.map(i => i.name));
+        if (to) {
+          if (to !== name) report.corrections.push({ kind: 'character', from: name, to });
+          return { ...d, speaker: to };
+        }
+        if (!report.unmatchedCharacters.includes(name)) report.unmatchedCharacters.push(name);
+        return { ...d, speaker: name };
+      });
+    }
+
     page.props_in_scene = (page.props_in_scene || []).map(raw => {
       const name = (raw || '').trim();
       if (!name) return raw;

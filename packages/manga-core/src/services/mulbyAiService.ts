@@ -352,6 +352,13 @@ const getJsonSchemaString = () => `
            "characters_in_scene": ["String"],
            "props_in_scene": ["String"],
            "scenes_in_scene": ["String"],
+           "dialogue": [
+              {
+                "speaker": "String (EXACT name from character_sheet)",
+                "text": "String (Simplified Chinese dialogue, no speaker prefix, no translation)",
+                "position": "String (optional bubble position: top-left / top-right / bottom-left / bottom-right / center)"
+              }
+           ],
            "layout_description": "String",
            "persistent_states": {
               "characters": [
@@ -428,6 +435,18 @@ const COMIC_JSON_SCHEMA = {
           characters_in_scene: { type: 'array', items: { type: 'string' } },
           props_in_scene: { type: 'array', items: { type: 'string' } },
           scenes_in_scene: { type: 'array', items: { type: 'string' } },
+          dialogue: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['speaker', 'text'],
+              properties: {
+                speaker: { type: 'string' },
+                text: { type: 'string' },
+                position: { type: 'string' },
+              },
+            },
+          },
           layout_description: { type: 'string' },
           persistent_states: {
             type: 'object',
@@ -603,10 +622,12 @@ ${craftBlock}    ===============================================================
     **Art Style Consistency**:
     - The 'global_art_style' field in JSON must describe the Target Art Style (specified in the user message) in detail.
 
-    **Spatial Anchoring & Text Embedding (STRICT)**:
-    - **Mandatory Format**: "Includes speech bubble located [POSITION] pointing to [CHARACTER] with text: '[CHINESE DIALOGUE]'"
-    - **NO SPEAKER PREFIX**: Do NOT include "Name:" inside the quote.
-    - **NO TRANSLATIONS**: Do NOT include English translation.
+    **Dialogue Structure & Bubble Binding (STRICT)**:
+    - Write ALL dialogue ONLY in the 'dialogue' array of each page (speaker / text / optional position).
+    - 'speaker' MUST be an EXACT name from 'character_sheet'; 'text' MUST be natural, high-quality **Simplified Chinese (简体中文)** with NO speaker prefix ("Name:") and NO English translation.
+    - 'position' (optional) uses words like top-left / top-right / bottom-left / bottom-right / center. Bubbles on the same page MUST NOT overlap in position.
+    - One 'dialogue' entry = exactly ONE bubble = exactly ONE speaker. Never address two characters with one bubble.
+    - **FORBIDDEN in 'image_prompt'**: do NOT write any speech bubble descriptions or restate dialogue text there (no "speech bubble", no quoted lines). Narration boxes are exempt (they follow the narration restraint rules).
 
     ${getJsonSchemaString()}
 `;
@@ -1096,12 +1117,14 @@ const REVIEW_SYSTEM_PROMPT = `
     5. **Narration Overload**: Narration boxes must not over-explain what the visuals and dialogue already convey. Trim redundant narration; merge or delete narration that repeats the obvious.
     6. **Page-to-Page Continuity**: Page N+1 must directly continue Page N — no teleporting, no repeated panels, no contradictions in state or position.
     7. **Sheet Consistency**: Names in 'characters_in_scene', 'props_in_scene', and 'scenes_in_scene' must exist in 'character_sheet', 'prop_sheet', and 'scene_sheet' respectively. Variant names (aliases, role/status suffixes like "Name (role)") MUST be merged back to the sheet's exact name. Add missing sheet entries or fix the page lists.
+    8. **Dialogue Binding**: Every 'dialogue' entry's speaker MUST exist in 'character_sheet' (exact name). Every bubble points to exactly one character. 'image_prompt' must NOT contain leftover unbound dialogue text or speech bubble descriptions.
 
     RULES:
     - Fix ONLY the problems listed above. Do NOT change the core premise, the cast, the art style, the tone, or the page count.
     - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
     - Keep the exact same JSON structure and field names as the input script.
     - Keep 'character_sheet', 'prop_sheet', and 'scene_sheet' entries unless a fix requires changing them.
+    - The 'dialogue' array structure and speaker bindings MUST be preserved (repair speakers to exact character_sheet names if broken).
 
     Output: Return a single valid JSON object (no markdown, no commentary) with EXACTLY this shape:
     { "notes": "String (concise review notes: what was wrong and what you changed)",
@@ -1182,6 +1205,7 @@ const REVISE_FEEDBACK_SYSTEM_PROMPT = `
 
     RULES:
     - Apply the feedback precisely. Keep ALL unaffected pages, layouts, image prompts, character/prop/scene sheets, and descriptions unchanged wherever possible.
+    - Keep the 'dialogue' array structure and speaker bindings intact unless the feedback explicitly requires changing them.
     - Do NOT change the core premise, the art style, the tone, or the page count.
     - Keep all dialogue and narration in their original language (Simplified Chinese unless the script says otherwise).
     - Keep the exact same JSON structure and field names as the input script.

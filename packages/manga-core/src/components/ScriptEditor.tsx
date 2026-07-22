@@ -336,6 +336,22 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                             <p className="text-xs text-slate-500 italic">{S.noScenesInScene}</p>
                         )}
 
+                        {/* 本页对白（结构化 dialogue，只读；气泡绑定由引擎机械注入） */}
+                        {activePage.dialogue && activePage.dialogue.length > 0 && (
+                        <>
+                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.pageDialogueLabel}</h4>
+                        <div className="space-y-2">
+                            {activePage.dialogue.map((d, i) => (
+                                <div key={i} className="text-xs bg-slate-900/60 rounded p-2 border border-slate-700/60">
+                                    <span className="font-bold text-indigo-300">{d.speaker}</span>
+                                    {d.position && <span className="text-slate-500 ml-1.5">[{d.position}]</span>}
+                                    <p className="text-slate-300 mt-0.5 leading-relaxed">{d.text}</p>
+                                </div>
+                            ))}
+                        </div>
+                        </>
+                        )}
+
                     </div>
                 </div>
 

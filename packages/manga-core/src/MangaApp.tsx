@@ -566,7 +566,7 @@ const MangaApp: React.FC = () => {
       const activeSceneNames = newScenesInScene || page.scenes_in_scene || [];
 
       const { refs: sceneRefs, finalPrompt: finalPromptToUse } =
-          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames, characterSheet, propSheet, activeSceneNames, sceneSheet);
+          resolvePageRefs(newPrompt, activeCharacterNames, activePropNames, characterSheet, propSheet, activeSceneNames, sceneSheet, page.dialogue);
 
       setPages(prev => prev.map(p =>
         p.page_number === pageNumber
@@ -602,7 +602,7 @@ const MangaApp: React.FC = () => {
       // 页面 prompt 保持现状不重建——首轮生成已含 context 块，封面 prompt 无标记也不受影响。
       const prepared = targets.map(p => ({
           page: p,
-          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || [], characterSheet, propSheet, p.scenes_in_scene || [], sceneSheet).refs,
+          refs: resolvePageRefs(p.image_prompt, p.characters_in_scene || [], p.props_in_scene || [], characterSheet, propSheet, p.scenes_in_scene || [], sceneSheet, p.dialogue).refs,
       }));
 
       setPages(prev => prev.map(p =>

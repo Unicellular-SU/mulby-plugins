@@ -6,11 +6,34 @@
 //   为既有行为，重构不偷改，方案 7.4 步骤 3 注记）。
 
 import { resolveByName } from '@mulby-plugins/manga-kit';
-import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ComicPageData, ComicResponse } from '../engine-types';
+import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ComicPageData, ComicResponse, ComicPageScript } from '../engine-types';
 
 /** Helper to find character reference image（统一名字解析口径，方案 2.4） */
 export const getCharacterReference = (name: string, sheet: CharacterSheetItem[]): string | undefined => {
    return resolveByName(name, sheet)?.referenceImage;
+};
+
+// ---- 对白机械注入（方案 B：绑定确定性由引擎保证，不靠模型自觉） ----
+// 每条 dialogue 生成一行与 Mandatory Format 同风格的绑定句；position 缺省回退文案。
+// 注入块是页 prompt 的结尾段；重绘路径先剥离旧块再按当前 dialogue 重注（防重复）。
+
+export const DIALOGUE_BLOCK_MARKER = '\n\nSPEECH BUBBLES (BINDING';
+
+/** 逐条生成气泡绑定句；无有效对白返回空串 */
+export const buildDialogueBlock = (dialogue?: ComicPageScript['dialogue']): string => {
+  if (!dialogue || dialogue.length === 0) return '';
+  const lines = dialogue
+    .filter(d => d && d.speaker && d.text)
+    .map(d => `Includes speech bubble located ${d.position?.trim() || 'a clear position near the speaker'} pointing to ${d.speaker} with text: '${d.text}'`);
+  return lines.length > 0
+    ? `${DIALOGUE_BLOCK_MARKER} — EXACTLY ONE CHARACTER PER BUBBLE):\n${lines.join('\n')}`
+    : '';
+};
+
+/** 剥离已注入的对白块（重绘/续绘路径的 prompt 可能带着上次注入的块） */
+const stripDialogueBlock = (prompt: string): string => {
+  const idx = prompt.indexOf(DIALOGUE_BLOCK_MARKER);
+  return idx >= 0 ? prompt.slice(0, idx) : prompt;
 };
 
 /** 封面页骨架与 cover prompt（从 handleStartComicGeneration 平移） */
@@ -102,7 +125,7 @@ export const prepareScenePages = (
 
             SCENE DESCRIPTION:
             ${s.image_prompt}
-          `.trim();
+          `.trim() + buildDialogueBlock(s.dialogue); // 结构化对白机械注入（结尾段，无 dialogue 不追加）
 
           return {
               pageData: {
@@ -124,7 +147,8 @@ export const resolvePageRefs = (
     characterSheet: CharacterSheetItem[],
     propSheet: PropSheetItem[],
     sceneNames: string[] = [],
-    sceneSheet: SceneSheetItem[] = []
+    sceneSheet: SceneSheetItem[] = [],
+    dialogue?: ComicPageScript['dialogue']
 ): { refs: string[]; finalPrompt: string } => {
     const sceneRefs: string[] = [];
     const characterContexts: string[] = [];
@@ -162,19 +186,19 @@ export const resolvePageRefs = (
         }
     });
 
-    let finalPrompt = prompt;
-    if (prompt.includes("ACTIVE CHARACTERS & PROPS CONTEXT") || prompt.includes("ACTIVE CHARACTERS CONTEXT")) {
+    let finalPrompt = stripDialogueBlock(prompt); // 先剥离旧注入块，结尾按当前 dialogue 重注
+    if (finalPrompt.includes("ACTIVE CHARACTERS & PROPS CONTEXT") || finalPrompt.includes("ACTIVE CHARACTERS CONTEXT")) {
         // Replace legacy context block if present, or new block
-        const contextStart = prompt.indexOf("ACTIVE CHARACTERS");
-        const contextEnd = prompt.indexOf("SCENE DESCRIPTION");
+        const contextStart = finalPrompt.indexOf("ACTIVE CHARACTERS");
+        const contextEnd = finalPrompt.indexOf("SCENE DESCRIPTION");
         if (contextStart > -1 && contextEnd > -1) {
             const newContextBlock = `ACTIVE CHARACTERS & PROPS CONTEXT (STRICTLY use Reference Images for visual details/clothing):\n${characterContexts.length > 0 ? characterContexts.join("\n") : "No specific characters or props."}\n\n`;
-            finalPrompt = prompt.substring(0, contextStart) + newContextBlock + prompt.substring(contextEnd);
+            finalPrompt = finalPrompt.substring(0, contextStart) + newContextBlock + finalPrompt.substring(contextEnd);
         }
     } else {
        // Fallback if structure is messed up: append context at top if it doesn't exist?
        // For now, if user edited it heavily, we trust their text, but update Refs.
     }
 
-    return { refs: sceneRefs, finalPrompt };
+    return { refs: sceneRefs, finalPrompt: finalPrompt + buildDialogueBlock(dialogue) };
 };

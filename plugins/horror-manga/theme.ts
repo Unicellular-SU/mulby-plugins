@@ -528,18 +528,12 @@ const constructSystemPrompt = (
             - "crawling on ceiling (NOT on floor)"
             - "eyes MISSING (empty sockets)"
 
-    4. **Spatial Anchoring & Text Embedding**:
-        - **Problem**: Image models often assign speech bubbles to the wrong character.
-        - **Solution**: You MUST define explicit POSITIONS (Left/Right/Center) for characters and bind the speech bubbles to them.
-        - **Step A (Character Positioning)**: e.g. "Ghost hovering in top LEFT corner, Victim cowering in bottom RIGHT."
-        - **Step B (Bubble Binding)**: e.g. "A jagged scream bubble on the RIGHT coming from the Victim containing text: '...'"
-        - **Mandatory Format**: "Includes speech bubble located [POSITION] pointing to [CHARACTER] with text: '[CHINESE DIALOGUE]'"
-        - **Language & Text Purity (CRITICAL)**:
-          - The text content inside the quotes MUST be in SIMPLIFIED CHINESE (简体中文).
-          - **STRICT PROHIBITION**: Do NOT include the English translation, original source text, or pronunciation in parentheses.
-          - **BAD Example**: "text: '快跑 (Run)'" or "text: '救命 (Help)'" -> THIS IS FORBIDDEN.
-          - **GOOD Example**: "text: '快跑'" or "text: '救命'" -> THIS IS CORRECT.
-          - **Completeness**: ALL dialogue from the script MUST be included in the 'image_prompt'.
+    4. **Dialogue Structure & Bubble Binding (STRICT)**:
+        - Write ALL dialogue ONLY in the 'dialogue' array of each page (speaker / text / optional position).
+        - 'speaker' MUST be an EXACT name from 'character_sheet'; 'text' MUST be natural SIMPLIFIED CHINESE (简体中文) with NO speaker prefix and NO English translation or pronunciation in parentheses.
+        - 'position' (optional) uses words like top-left / top-right / bottom-left / bottom-right / center. Bubbles on the same page MUST NOT overlap in position.
+        - One 'dialogue' entry = exactly ONE bubble = exactly ONE speaker. Never address two characters with one bubble.
+        - **FORBIDDEN in 'image_prompt'**: do NOT write any speech bubble descriptions or restate dialogue text there (no "speech bubble", no quoted lines). Narration boxes are exempt (see Narration Box System).
 
     5. **Character Presence Logic**:
         - For each page, you MUST identify exactly which characters appear.
@@ -591,6 +585,13 @@ const getJsonSchemaString = () => `
            "page_number": Integer,
            "characters_in_scene": ["String", "String"],
            "scenes_in_scene": ["String"],
+           "dialogue": [
+              {
+                "speaker": "String (EXACT name from character_sheet)",
+                "text": "String (Simplified Chinese dialogue, no speaker prefix, no translation)",
+                "position": "String (optional bubble position: top-left / top-right / bottom-left / bottom-right / center)"
+              }
+           ],
            "layout_description": "String",
            "image_prompt": "String (Full visual description with [VISUAL STATE] block)",
            "persistent_states": {
@@ -650,6 +651,18 @@ const HORROR_JSON_SCHEMA = {
           page_number: { type: 'integer' },
           characters_in_scene: { type: 'array', items: { type: 'string' } },
           scenes_in_scene: { type: 'array', items: { type: 'string' } },
+          dialogue: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['speaker', 'text'],
+              properties: {
+                speaker: { type: 'string' },
+                text: { type: 'string' },
+                position: { type: 'string' },
+              },
+            },
+          },
           layout_description: { type: 'string' },
           image_prompt: { type: 'string' },
           persistent_states: {
@@ -855,6 +868,7 @@ const horrorTheme: MangaTheme = {
     includeScenes: 'Scenes on This Page',
     scenesInScene: 'Scenes on This Page',
     noScenesInScene: 'No scenes on this page.',
+    pageDialogueLabel: 'Dialogue (Bubbles)',
 
     // ---- 名单匹配状态 ----
     unmatchedAssetHint: 'Not in sheet: no reference image can be injected for this name',

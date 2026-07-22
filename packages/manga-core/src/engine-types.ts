@@ -61,6 +61,10 @@ export interface ComicPageScript {
   characters_in_scene: string[]; // List of character names present in this page
   props_in_scene: string[]; // List of important props present in this page
   scenes_in_scene?: string[]; // List of scene/location names (from scene_sheet) this page takes place in
+  /** 结构化对白（气泡）：speaker 必须用 character_sheet 精确原名；text 简体中文；
+   *  position 为气泡方位（top-left/top-right/bottom-left/bottom-right/center 类）。
+   *  旁白框不进此数组（仍在 image_prompt 叙述中，受旁白克制规则约束）。 */
+  dialogue?: Array<{ speaker: string; text: string; position?: string }>;
   persistent_states: PersistentState; // Tracking visual continuity
   state_changes_this_page: string[]; // High-level changes for debugging/analysis
 }

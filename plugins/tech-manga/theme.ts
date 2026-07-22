@@ -516,6 +516,7 @@ const techTheme: MangaTheme = {
     includeScenes: '本页包含场景',
     scenesInScene: '本页场景',
     noScenesInScene: '本页未列出场景。',
+    pageDialogueLabel: '本页对白（气泡）',
 
     // ---- 名单匹配状态 ----
     unmatchedAssetHint: '未建档：该名字不在对应表中，生成时无法注入参考图',

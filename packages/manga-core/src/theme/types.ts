@@ -163,6 +163,7 @@ export interface UIStrings {
   includeScenes: string;
   scenesInScene: string;
   noScenesInScene: string;
+  pageDialogueLabel: string;
 
   // ---- 名单匹配状态（未建档警示 + 补建） ----
   unmatchedAssetHint: string;
