@@ -97,7 +97,6 @@ export interface ComicResponse {
   cover_image_prompt: string; // Specific prompt for the cover
   analysis: string;
   pages: ComicPageScript[];
-  creativeSeed?: string; // 本轮创意骰子种子串（意象1 + 意象2 / 视角；主题启用 creativeDice 时存在，随工程持久化）
 }
 
 /** 图像生成实时进度（方案 5.3）：由 images.generateStream 的 chunk 映射而来 */

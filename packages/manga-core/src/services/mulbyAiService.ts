@@ -1,6 +1,6 @@
 import { ComicResponse, CharacterProfile, StoryMode, UsageStat, ImageProgress, DEFAULT_TEXT_MODEL_LABEL, LogUpdateFn } from "../engine-types";
 import { getTheme } from "../theme/registry";
-import type { MangaTheme, CreativeSeed } from "../theme/types";
+import type { MangaTheme } from "../theme/types";
 import { normalizeSceneLists, summarizeNormalizeReport } from "../utils/normalizeSceneLists";
 import {
   createAbortScope,
@@ -646,43 +646,7 @@ export interface ScriptExtras {
   endingType?: string;
   colorMode?: string;
   autoReview?: boolean; // false 时跳过生成后的自动审校 pass（默认审校）
-  creativeSeed?: CreativeSeed; // 创意骰子本轮种子（generateComicScript 内生成；token 预估路径不传）
 }
-
-// ================= 创意骰子（creativeDice；题材中性视角清单，意象池在主题数据里） =================
-
-/** 叙事视角清单（题材中性）：每轮随机取一 */
-const CREATIVE_PERSPECTIVES = [
-  'Detached observer (an outside watcher who never interferes)',
-  'Object POV (narrated through an inanimate object that witnesses everything)',
-  'Antagonist POV (the threat tells its own side)',
-  'Limited POV (only what ONE character can see, hear, and know)',
-  'Omniscient but indifferent narrator (knows everything, cares about nothing)',
-  'Retrospective narrator (a survivor retelling the events, knowing how it ends)',
-];
-
-/** 摇一轮创意种子：意象池随机抽 2 个不同意象 + 随机 1 个视角；主题未启用或池不足返回 null */
-export const rollCreativeSeed = (): CreativeSeed | null => {
-  const pool = getTheme().creativeDice?.imageryPool;
-  if (!pool || pool.length < 2) return null;
-  const i = Math.floor(Math.random() * pool.length);
-  let j = Math.floor(Math.random() * (pool.length - 1));
-  if (j >= i) j += 1;
-  return {
-    imagery: [pool[i], pool[j]],
-    perspective: CREATIVE_PERSPECTIVES[Math.floor(Math.random() * CREATIVE_PERSPECTIVES.length)],
-  };
-};
-
-/** 种子串（存储/展示口径）：'意象1 + 意象2 / 视角' */
-export const formatCreativeSeed = (seed: CreativeSeed): string =>
-  `${seed.imagery[0]} + ${seed.imagery[1]} / ${seed.perspective}`;
-
-/** CREATIVE SEED prompt 段（两条硬性要求：意象有机入剧情、按指定视角叙述） */
-const buildCreativeSeedSection = (seed: CreativeSeed): string =>
-  `Creative Seed (MANDATORY):
-- Imagery to weave ORGANICALLY into the plot (NOT as mere props): "${seed.imagery[0]}" and "${seed.imagery[1]}". Each MUST play a role in the causal chain.
-- Narrative Perspective: ${seed.perspective}. Tell the whole story from this perspective.`;
 
 /**
  * 剧本 user 消息构造（方案 5.2 步骤 6 抽出）：generateComicScript 与
@@ -791,8 +755,6 @@ const buildScriptUserPrompt = (
     `Target Art Style: "${style}"`,
     pageCountInstruction,
     `Panels per Page: ${panelsPerPage}.`,
-    // 创意骰子（启用时注入；预估路径不传种子，本段不出现）
-    ...(extras.creativeSeed ? [buildCreativeSeedSection(extras.creativeSeed)] : []),
     `Directives for Plot & Narrative (Style Lens):\n${narrativeBody}`,
   ].join('\n\n');
 };
@@ -824,7 +786,6 @@ const resolveScriptPrompts = (
     panelCount,
     totalPages,
     colorMode: extras.colorMode,
-    creativeSeed: extras.creativeSeed,
   });
   if (custom) return custom;
   return {
@@ -892,12 +853,8 @@ export const generateComicScript = async (
   extras: ScriptExtras = {}
 ): Promise<ComicResponse> => {
   const ai = getAi();
-  // 创意骰子：主题启用时每轮一摇（允许调用方经 extras 复现指定种子）；
-  // token 预估路径不经此函数（estimateScriptTokens 不传种子，CREATIVE SEED 段天然不出现）
-  const creativeSeed = extras.creativeSeed ?? rollCreativeSeed();
   const { system: systemPrompt, user: userPrompt } = resolveScriptPrompts(
-    text, style, character, storyMode, customStoryPrompt, panelCount, totalPages,
-    { ...extras, creativeSeed: creativeSeed ?? undefined }
+    text, style, character, storyMode, customStoryPrompt, panelCount, totalPages, extras
   );
 
   // 相位徽标：主创作 pass（后续自动审校 pass 由 reviewAndReviseScript 切到「审校」）
@@ -1011,8 +968,6 @@ export const generateComicScript = async (
     const normalized = normalizeSceneLists(parsed);
     const normalizeLog = summarizeNormalizeReport(normalized.report);
     const finalScript = normalized.script;
-    // 创意骰子种子串随剧本返回（随工程持久化；模型输出不含此字段，由引擎附带）
-    finalScript.creativeSeed = creativeSeed ? formatCreativeSeed(creativeSeed) : undefined;
 
     // C：剧本自动审校 pass（autoReview 默认开；失败静默用原稿不阻断流程；用户中止按纪元收敛）
     if (extras.autoReview !== false) {
@@ -1245,7 +1200,6 @@ export const reviewAndReviseScript = async (
     throw new Error('审校返回的剧本结构不完整');
   }
   revised.pages = revised.pages.map((p, i) => ({ ...p, page_number: i + 1 }));
-  revised.creativeSeed = script.creativeSeed; // 种子串不由模型返回，审校后原样保留
 
   // B：审校稿同样过名单归一化；变更摘要附进 notes
   const norm = normalizeSceneLists(revised);
@@ -1302,7 +1256,6 @@ export const reviseScriptWithFeedback = async (
   const parsed = await parseScriptWithRepair(raw, opts?.onUsage);
   throwIfAborted(epoch);
   parsed.pages = (parsed.pages ?? []).map((p, i) => ({ ...p, page_number: i + 1 }));
-  parsed.creativeSeed = script.creativeSeed; // 种子串迭代后原样保留
 
   // B：迭代稿同样过名单归一化（摘要写日志与 LogPanel）
   const norm = normalizeSceneLists(parsed);

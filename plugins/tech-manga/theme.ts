@@ -57,15 +57,6 @@ const techTheme: MangaTheme = {
       - **Code, Technical Terms, Log Outputs**: MUST remain in English (do not translate "const", "function", "Error 404", etc.).`,
   refineToneHint: 'Ensure the terminology, tone, and logic fit the specific Universe/Fandom mentioned in the context.',
 
-  // 创意骰子意象池（技术/日常物件类；引擎每轮随机抽 2 个 + 1 个视角）
-  creativeDice: {
-    imageryPool: [
-      '回车键', '机械硬盘', '网线', '示波器', '万用表', '烙铁', '服务器机柜', '咖啡杯',
-      '机械键盘', '旧笔记本', '路由器', '打印机', '工牌', '快递箱', '门禁卡', 'U盘',
-      '台灯', '白板笔', '电梯', '消防栓', '订书机', '碎纸机', '电话亭', '自行车',
-    ],
-  },
-
   // 故事架构段（插入核心包 system prompt 的 PHASE 3 注记与 PHASE 4 之间）：
   // 改编语境的自洽性硬约束 + 结构变体软引导 + 反套路 + 旁白克制。
   // 不动核心包既有段落；技术准确性、语言规则、图像规则均不受本段影响。
@@ -511,7 +502,6 @@ const techTheme: MangaTheme = {
     sidebarCover: '00. 封面设计',
     sidebarPage: (n: string) => `${n}. 页面分镜`,
     comicTitleLabel: '漫画标题',
-    creativeSeedLabel: '创意种子',
     analysisLabel: '故事分析与节奏策略',
     coverDesignTitle: '封面设计',
     coverPromptLabel: '封面图像 prompt',
