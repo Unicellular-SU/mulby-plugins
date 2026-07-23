@@ -819,6 +819,15 @@ const MangaApp: React.FC = () => {
           <div className="flex items-center space-x-4">
              {/* 费用统计：页头内嵌紧凑胶囊，悬停展开明细（原 fixed 悬浮卡片会遮挡内容区按钮） */}
              <TokenMonitor usage={tokenUsage} />
+             {/* 我的工程：全步骤可见（原仅 CONFIG 页有入口），画廊为覆盖层，切换前会 flush 当前工程 */}
+             <button
+                onClick={() => setGalleryOpen(true)}
+                className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white transition-colors"
+                title={S.myProjects}
+             >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                <span>{S.myProjects}（{projects.length}）</span>
+             </button>
              {workflowStep !== WorkflowStep.CONFIG && (
                  <button
                     onClick={handleStartOver}
