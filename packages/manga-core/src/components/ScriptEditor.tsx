@@ -266,6 +266,64 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         onRefine={(instr) => handleRefine('PROMPT', activePage.image_prompt, instr, activePageIdx)}
                     />
                     </div>
+
+                    {/* 本页对白（结构化 dialogue，行内编辑；气泡绑定由引擎按当前值机械注入）。
+                        放在中间编辑列而非右侧信息列——四控件行在窄列里挤压严重 */}
+                    <div className="space-y-2">
+                    <label className="text-sm font-bold text-indigo-400">{S.pageDialogueLabel}</label>
+                    <div className="space-y-2">
+                        {(activePage.dialogue || []).map((d, i) => {
+                            const speakerInSheet = characterSheet.some(c => c.name === d.speaker);
+                            return (
+                            <div key={i} className="text-xs bg-slate-800 rounded p-2 border border-slate-600 flex items-start gap-1.5">
+                                {/* speaker：下拉（表内原名）；旧数据不在表中的值保留并标黄 */}
+                                <select
+                                    className={`w-36 shrink-0 bg-slate-900 border border-slate-600 rounded px-1 py-1 text-xs ${speakerInSheet ? 'text-indigo-300' : 'text-yellow-400'}`}
+                                    value={d.speaker}
+                                    onChange={(e) => updateDialogueRow(i, { speaker: e.target.value })}
+                                    title={speakerInSheet ? undefined : S.unmatchedAssetHint}
+                                >
+                                    {!speakerInSheet && <option value={d.speaker}>{d.speaker}</option>}
+                                    {characterSheet.map(c => (
+                                        <option key={c.name} value={c.name}>{c.name}</option>
+                                    ))}
+                                </select>
+                                {/* text：单行输入（与其他字段编辑风格一致） */}
+                                <input
+                                    className="flex-grow min-w-0 bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+                                    value={d.text}
+                                    placeholder={S.dialogueTextPlaceholder}
+                                    onChange={(e) => updateDialogueRow(i, { text: e.target.value })}
+                                />
+                                {/* position：预设方位词；auto = 清空用缺省回退 */}
+                                <select
+                                    className="w-28 shrink-0 bg-slate-900 border border-slate-600 rounded px-1 py-1 text-xs text-slate-300"
+                                    value={d.position || ''}
+                                    onChange={(e) => updateDialogueRow(i, { position: e.target.value || undefined })}
+                                >
+                                    <option value="">{S.dialoguePositionAuto}</option>
+                                    <option value="top-left">top-left</option>
+                                    <option value="top-right">top-right</option>
+                                    <option value="bottom-left">bottom-left</option>
+                                    <option value="bottom-right">bottom-right</option>
+                                    <option value="center">center</option>
+                                </select>
+                                <button
+                                    onClick={() => removeDialogueRow(i)}
+                                    className="text-slate-500 hover:text-red-400 px-1 shrink-0"
+                                    title={S.dialogueDelete}
+                                >✕</button>
+                            </div>
+                            );
+                        })}
+                        <button
+                            onClick={addDialogueRow}
+                            className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                        >
+                            {S.dialogueAdd}
+                        </button>
+                    </div>
+                    </div>
                 </div>
 
                 {/* Info / Visual Column */}
@@ -353,61 +411,6 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
                         ) : (
                             <p className="text-xs text-slate-500 italic">{S.noScenesInScene}</p>
                         )}
-
-                        {/* 本页对白（结构化 dialogue，行内编辑；气泡绑定由引擎按当前值机械注入） */}
-                        <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 mt-6">{S.pageDialogueLabel}</h4>
-                        <div className="space-y-2">
-                            {(activePage.dialogue || []).map((d, i) => {
-                                const speakerInSheet = characterSheet.some(c => c.name === d.speaker);
-                                return (
-                                <div key={i} className="text-xs bg-slate-900/60 rounded p-2 border border-slate-700/60 flex items-start gap-1.5">
-                                    {/* speaker：下拉（表内原名）；旧数据不在表中的值保留并标黄 */}
-                                    <select
-                                        className={`w-32 shrink-0 bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs ${speakerInSheet ? 'text-indigo-300' : 'text-yellow-400'}`}
-                                        value={d.speaker}
-                                        onChange={(e) => updateDialogueRow(i, { speaker: e.target.value })}
-                                        title={speakerInSheet ? undefined : S.unmatchedAssetHint}
-                                    >
-                                        {!speakerInSheet && <option value={d.speaker}>{d.speaker}</option>}
-                                        {characterSheet.map(c => (
-                                            <option key={c.name} value={c.name}>{c.name}</option>
-                                        ))}
-                                    </select>
-                                    {/* text：单行输入（与其他字段编辑风格一致） */}
-                                    <input
-                                        className="flex-grow min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-                                        value={d.text}
-                                        placeholder={S.dialogueTextPlaceholder}
-                                        onChange={(e) => updateDialogueRow(i, { text: e.target.value })}
-                                    />
-                                    {/* position：预设方位词；auto = 清空用缺省回退 */}
-                                    <select
-                                        className="w-28 shrink-0 bg-slate-800 border border-slate-600 rounded px-1 py-1 text-xs text-slate-300"
-                                        value={d.position || ''}
-                                        onChange={(e) => updateDialogueRow(i, { position: e.target.value || undefined })}
-                                    >
-                                        <option value="">{S.dialoguePositionAuto}</option>
-                                        <option value="top-left">top-left</option>
-                                        <option value="top-right">top-right</option>
-                                        <option value="bottom-left">bottom-left</option>
-                                        <option value="bottom-right">bottom-right</option>
-                                        <option value="center">center</option>
-                                    </select>
-                                    <button
-                                        onClick={() => removeDialogueRow(i)}
-                                        className="text-slate-500 hover:text-red-400 px-1 shrink-0"
-                                        title={S.dialogueDelete}
-                                    >✕</button>
-                                </div>
-                                );
-                            })}
-                            <button
-                                onClick={addDialogueRow}
-                                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
-                            >
-                                {S.dialogueAdd}
-                            </button>
-                        </div>
 
                     </div>
                 </div>
