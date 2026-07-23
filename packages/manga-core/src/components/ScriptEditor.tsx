@@ -184,11 +184,17 @@ const ScriptEditor: React.FC<ScriptEditorProps> = ({ script, characterSheet, pro
              <div className="space-y-6 max-w-3xl mx-auto animate-fade-in">
                 <div className="space-y-2">
                    <label className="text-sm font-bold text-indigo-400">{S.comicTitleLabel}</label>
-                   <input 
+                   <input
                       className="w-full bg-slate-800 border border-slate-600 rounded p-2 text-white font-bold text-lg focus:border-indigo-500 outline-none"
                       value={script.title}
                       onChange={(e) => handleTextChange('title', e.target.value)}
                    />
+                   {/* 创意骰子种子（只读展示；引擎在剧本生成时附带，随工程持久化） */}
+                   {script.creativeSeed && (
+                     <p className="text-[11px] text-slate-500">
+                       <span className="font-bold text-slate-400">{S.creativeSeedLabel}:</span> {script.creativeSeed}
+                     </p>
+                   )}
                 </div>
                 <div className="space-y-2">
                    <label className="text-sm font-bold text-indigo-400">{S.analysisLabel}</label>

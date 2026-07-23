@@ -446,6 +446,7 @@ const constructSystemPrompt = (
     - **Emotional Depth**: Characters should stutter, scream, whisper, beg, or rant depending on the situation.
     - **Exposition is Allowed**: If the plot is complex, use meaningful dialogue exchanges to explain it. Do not rely solely on visual ambiguity.
     - **Length**: Speech bubbles can be long if necessary. A panel can have multiple bubbles.
+    - **Subtext Required**: Characters do not always say what they mean. Show key emotions through actions, objects, and expressions rather than stating them outright in lines.
     - **Chinese Language**: All dialogue must be in natural, high-quality **Simplified Chinese (简体中文)**.
 
     ================================================================
@@ -454,6 +455,7 @@ const constructSystemPrompt = (
     - ${pageCountInstruction}
     - Panels per Page: ${panelsPerPage}.
     - Pacing is Key: Use silent panels to build tension, and splash pages for the "Reveal" or "Climax".
+    - **Pacing Variation**: Vary panel density — confrontation/information pages may be dense; atmosphere/transition pages should be sparse; the climax may use a full-page or spread. Avoid the same uniform panel count on every page (unless a fixed panel count is specified).
 
     Directives for Plot & Atmosphere:
     ${narrativeInstructions}
@@ -717,6 +719,14 @@ const horrorTheme: MangaTheme = {
   languageRules: `      LANGUAGE RULE:
       - **Dialogue, Labels, and Sound Effects**: MUST be in Simplified Chinese (简体中文). Do NOT include English translations in parentheses.`,
   refineToneHint: 'Maintain the horror tone.',
+  // 创意骰子意象池（恐怖/民俗意象类；引擎每轮随机抽 2 个 + 1 个视角）
+  creativeDice: {
+    imageryPool: [
+      '纸人', '旧照片', '红嫁衣', '水井', '戏台', '唢呐', '棺材钉', '长明灯',
+      '灵位', '铜镜', '纸钱', '祖屋楼梯', '老式座钟', '搪瓷碗', '黑白电视', '收音机',
+      '旧校服', '祠堂香炉', '绣花鞋', '黄符', '煤油灯', '老式电话', '木鱼', '丧幡',
+    ],
+  },
   artStyles: [
     { label: '伊藤润二风 (Junji Ito - Spirals & Obsession)', value: HorrorStyle.JUNJI_ITO },
     { label: '中山昌亮风 (Masaaki Nakayama - Fuan no Tane/Uncanny)', value: HorrorStyle.MASAAKI_NAKAYAMA },
@@ -751,7 +761,14 @@ const horrorTheme: MangaTheme = {
       input.secondaryStoryMode,
       input.endingType,
       input.colorMode
-    ) + "\n\n" + getJsonSchemaString(),
+    ) + (input.creativeSeed ? `
+
+    ================================================================
+    CREATIVE SEED (MANDATORY)
+    ================================================================
+    - Imagery to weave ORGANICALLY into the haunting (NOT as mere props): "${input.creativeSeed.imagery[0]}" and "${input.creativeSeed.imagery[1]}". Each MUST play a role in the causal chain.
+    - Narrative Perspective: ${input.creativeSeed.perspective}. Tell the whole story from this perspective.
+  ` : '') + "\n\n" + getJsonSchemaString(),
     user: `Source Story:\n"""\n${input.sourceText}\n"""`,
   }),
   jsonSchema: HORROR_JSON_SCHEMA,
@@ -854,6 +871,7 @@ const horrorTheme: MangaTheme = {
     sidebarCover: '00. Cover Art',
     sidebarPage: (n: string) => `${n}. Page`,
     comicTitleLabel: 'Title',
+    creativeSeedLabel: 'CREATIVE SEED',
     analysisLabel: 'Story Analysis & Pacing Strategy',
     coverDesignTitle: 'Cover Art',
     coverPromptLabel: 'Cover Art Prompt',

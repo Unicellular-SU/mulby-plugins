@@ -16,5 +16,7 @@ export type {
   ColorModeOption,
   ScriptPromptInput,
   LabeledOption,
+  CreativeDiceConfig,
+  CreativeSeed,
 } from './theme/types';
 export * from './engine-types';

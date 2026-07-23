@@ -60,12 +60,24 @@ export interface ScriptPromptInput {
   panelCount: number;
   totalPages: string;
   colorMode?: string;
+  creativeSeed?: CreativeSeed; // 创意骰子：本轮种子（主题启用 creativeDice 时由引擎生成）
 }
 
 /** 简单下拉项（页面比例 / 总页数等题材可覆写的选项列表） */
 export interface LabeledOption {
   label: string;
   value: string;
+}
+
+/** 创意骰子配置：存在即启用。意象池（20-30 个题材特色词）每轮随机抽 2 个 */
+export interface CreativeDiceConfig {
+  imageryPool: string[];
+}
+
+/** 一轮剧本生成的创意种子（2 个意象 + 1 个叙事视角） */
+export interface CreativeSeed {
+  imagery: [string, string];
+  perspective: string;
 }
 
 /** 全部界面文案（原 tech-manga strings.ts 的 S 表 + 品牌相关键）；函数键用于带参文案 */
@@ -149,6 +161,7 @@ export interface UIStrings {
   sidebarCover: string;
   sidebarPage: (n: string) => string;
   comicTitleLabel: string;
+  creativeSeedLabel: string;
   analysisLabel: string;
   coverDesignTitle: string;
   coverPromptLabel: string;
@@ -360,6 +373,8 @@ export interface MangaTheme {
   /** 可选"故事架构"规则段（自洽性/结构变体/反套路/旁白克制等），
    *  默认路径下插入 system prompt 的 PHASE 3 注记与 PHASE 4 之间；缺省则不插入任何内容 */
   storyCraftRules?: string;
+  /** 创意骰子：存在即启用——每轮剧本生成随机抽 2 个意象 + 1 个叙事视角注入 prompt */
+  creativeDice?: CreativeDiceConfig;
 
   // —— 文案层 ——
   strings: UIStrings;
