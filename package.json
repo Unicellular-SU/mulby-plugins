@@ -6,9 +6,13 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks",
     "build-all": "node scripts/build-all-plugins.js",
-    "screenshot-plugins": "node scripts/screenshot-plugin-ui.js"
+    "screenshot-plugins": "node scripts/screenshot-plugin-ui.js",
+    "test:manga-image-once": "node --import tsx --test packages/manga-core/src/__tests__/image-submit-once.test.tsx"
   },
   "devDependencies": {
-    "puppeteer": "^23.0.0"
+    "@types/react-test-renderer": "^19.1.0",
+    "puppeteer": "^23.0.0",
+    "react-test-renderer": "^19.2.7",
+    "tsx": "^4.23.4"
   }
 }

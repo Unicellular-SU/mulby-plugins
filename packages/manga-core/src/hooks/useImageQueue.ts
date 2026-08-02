@@ -1,11 +1,11 @@
 // ================= 图像生成队列 hook（方案 7.4 步骤 2，从 App.tsx 机械搬移） =================
-// 收敛：单页绘制 triggerImageGeneration（D1 运行代际检查 + D4 withRetryOnce + D5 增量落盘挂点）
+// 收敛：单页绘制 triggerImageGeneration（D1 运行代际检查 + D5 增量落盘挂点）
 // 与批量调度 runBatch（asyncPool(limit=2) + 方案 5.1 批次收尾通知）。
 // batchRef 由 App 持有并传入：handleCancelAll（中止时关标志、不弹通知）与本 hook（批次消费）共用。
 
 import { useRef, useEffect } from 'react';
 import { generatePanelImage, getAbortEpoch, isStale } from '../services/mulbyAiService';
-import { asyncPool, withRetryOnce } from '../services/asyncPool';
+import { asyncPool } from '../services/asyncPool';
 import { putImageAttachment, attIdForPage } from '../services/persistenceService';
 import { applyWatermark } from '../utils/watermarkUtils';
 import { ComicPageData, ImageProgress, UsageStat, WatermarkSettings } from '../engine-types';
@@ -81,15 +81,14 @@ export const useImageQueue = ({
     };
 
     try {
-        // 方案 4.2（D4）：失败自动重试一次（AbortError/鉴权错误/纪元已变除外）；
-        // 重试的 onUsage 会记两笔，属真实计费，正确。
-        const base64Image = await withRetryOnce(() => generatePanelImage(
+        // 失败由宿主任务中心恢复；插件不重新提交可能已计费的图像请求。
+        const base64Image = await generatePanelImage(
             page.image_prompt,
             ratio,
             references,
             (stat) => trackUsage(`Draw Page ${page.page_number}`, stat),
             onProgress
-        ));
+        );
         if (isStale(runEpoch)) return;
 
         // Phase 2 水印（features.watermark）：rawImageData 存 AI 原图，imageData 存水印版；

@@ -1325,7 +1325,7 @@ export const generateCharacterReference = async (
 
     throw new Error("No image generated for character reference.");
   } catch (error) {
-    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError，供 UI 静默收敛。
     if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Character reference generation failed:", error);
@@ -1389,7 +1389,7 @@ export const generatePropReference = async (
 
     throw new Error("No image generated for prop reference.");
   } catch (error) {
-    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError，供 UI 静默收敛。
     if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Prop reference generation failed:", error);
@@ -1456,7 +1456,7 @@ export const generateSceneReference = async (
 
     throw new Error("No image generated for scene reference.");
   } catch (error) {
-    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError，供 UI 静默收敛。
     if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;
     console.error("Scene reference generation failed:", error);
@@ -1565,7 +1565,7 @@ ${getTheme().languageRules}
     throw new Error("No image data found in response");
 
   } catch (error) {
-    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError（供 withRetryOnce 排除、UI 静默收敛）。
+    // 与 2.5 同款 epoch 权威判定：中止后归一为 AbortError，供 UI 静默收敛。
     // 真被 ai.abort 杀掉的 edit 请求跨 IPC 后 name 恒为 'Error'，必须靠 epoch 识别。
     if (!scope.isCurrent(epoch)) throw ABORT_ERROR();
     if ((error as any)?.name === 'AbortError') throw error;

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ImageProgress } from '../engine-types';
 import { generateCharacterReference, generatePropReference, generateSceneReference, getAbortEpoch } from '../services/mulbyAiService';
-import { asyncPool, withRetryOnce } from '../services/asyncPool';
+import { asyncPool } from '../services/asyncPool';
 import { stageText } from '../utils/progressText';
 import { getTheme } from '../theme/registry';
 
@@ -80,8 +80,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
   }, [characters, props, scenes]);
 
   // Auto-generate missing character references on mount
-  // 方案 4.3：角色/道具互无数据依赖，与绘页阶段共用 asyncPool(limit=2)；删除 800ms 硬睡，
-  // 限流交给并发上限 + 宿主内建退避 + withRetryOnce。
+  // 角色/道具互无数据依赖，与绘页阶段共用 asyncPool(limit=2)；删除 800ms 硬睡，
+  // 限流交给并发上限。失败由宿主任务中心恢复，插件不会创建第二次图像请求。
   useEffect(() => {
     const generateSequentially = async () => {
         if (initializedRef.current) return;
@@ -163,10 +163,10 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
-      // 单飞 + 领养：已有在途请求则等待它，绝不发起第二次；
-      // 方案 4.3 的失败自动重试（AbortError/鉴权/纪元变化除外）包含在同一个在途 Promise 内
-      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
-        generateCharacterReference(char.name, char.description, style, onUsageCallback, makeProgressHandler(key))));
+      // 单飞 + 领养：已有在途请求则等待它，绝不发起第二次；失败由宿主任务中心恢复，
+      // 插件不会重新提交付费图像请求。
+      const imageData = await startOrAdoptFlight(flightKey, () =>
+        generateCharacterReference(char.name, char.description, style, onUsageCallback, makeProgressHandler(key)));
       onUpdateCharacter(index, { ...char, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
@@ -184,10 +184,10 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
-      // Pass mainCharacterName and storyMode to ensure consistent universe style
-      // 单飞 + 领养（同上）；方案 4.3 重试包含在同一个在途 Promise 内
-      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
-        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key))));
+      // Pass mainCharacterName and storyMode to ensure consistent universe style.
+      // 单飞 + 领养（同上）；失败由宿主任务中心恢复，插件不会重新提交图像请求。
+      const imageData = await startOrAdoptFlight(flightKey, () =>
+        generatePropReference(prop.name, prop.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key)));
       onUpdateProp(index, { ...prop, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
@@ -197,7 +197,7 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     }
   };
 
-  // 场景参考图生成（比照道具：单飞领养 + 重试一次 + 进度/错误态）
+  // 场景参考图生成（比照道具：单飞领养 + 宿主任务中心恢复 + 进度/错误态）
   const handleGenerateScene = async (index: number, scene: SceneSheetItem) => {
     if (!onUpdateScene) return;
     const key = `scene-${index}`;
@@ -206,8 +206,8 @@ const CharacterGenerator: React.FC<CharacterGeneratorProps> = ({
     setErrorStates(prev => ({ ...prev, [key]: '' }));
 
     try {
-      const imageData = await startOrAdoptFlight(flightKey, () => withRetryOnce(() =>
-        generateSceneReference(scene.name, scene.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key))));
+      const imageData = await startOrAdoptFlight(flightKey, () =>
+        generateSceneReference(scene.name, scene.description, style, mainCharacterName, storyMode, onUsageCallback, makeProgressHandler(key)));
       onUpdateScene(index, { ...scene, referenceImage: imageData });
     } catch (err: any) {
       setErrorStates(prev => ({ ...prev, [key]: err?.name === 'AbortError' ? "已被用户中止" : (err.message || "生成失败") }));
