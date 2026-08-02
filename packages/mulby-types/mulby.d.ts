@@ -1637,6 +1637,44 @@ type AiSettings = {
 }
 type AiAttachmentRef = { attachmentId: string; mimeType: string; size: number; filename?: string; expiresAt?: string; purpose?: string }
 type AiTokenBreakdown = { inputTokens: number; outputTokens: number }
+type AiImageRecoveryAction =
+  | 'retry_pre_dispatch'
+  | 'resume_poll'
+  | 'resume_download'
+  | 'confirm_regenerate'
+  | 'none'
+type AiImageTaskErrorCode =
+  | 'invalid_request'
+  | 'unsupported_operation'
+  | 'unsupported_parameter'
+  | 'auth_failed'
+  | 'permission_denied'
+  | 'rate_limited'
+  | 'quota_exceeded'
+  | 'content_policy'
+  | 'input_upload_failed'
+  | 'provider_rejected'
+  | 'provider_unavailable'
+  | 'network_policy'
+  | 'submit_ambiguous'
+  | 'provider_task_not_found'
+  | 'poll_failed'
+  | 'download_failed'
+  | 'protocol_response_mismatch'
+  | 'reconcile_failed'
+  | 'legacy_result_too_large'
+  | 'cancelled'
+  | 'timeout'
+  | 'internal_error'
+interface AiImageOperationErrorPayload {
+  message: string
+  code: AiImageTaskErrorCode
+  phase: 'validate' | 'prepare' | 'submit' | 'poll' | 'cancel' | 'download'
+  taskId: string
+  retryable: boolean
+  billed: 'yes' | 'no' | 'unknown'
+  recoveryAction: AiImageRecoveryAction
+}
 type AiImageGenerateProgressChunk = {
   type: 'status' | 'preview'
   stage?: 'start' | 'partial' | 'finalizing' | 'completed' | 'fallback'

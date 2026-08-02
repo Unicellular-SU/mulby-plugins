@@ -386,6 +386,437 @@ export interface AiModelCapability {
   isUserSelected?: boolean
 }
 
+/**
+ * 图像端点 size 字段的格式：像素（'1024x1536'）、比例（'2:3'）或省略（不下发 size）。
+ */
+export type AiImageSizeFormat = 'pixels' | 'ratio' | 'omit'
+
+/**
+ * 图像编辑（参考图）传输方式：multipart（OpenAI 标准 /images/edits，默认）或
+ * uploads（先 POST /uploads/images 上传图床，再以 JSON image_urls 走 /images/generations，
+ * 适配 multipart edits 实现损坏的任务制网关，如 new-api 家族部分二开）。
+ */
+export type AiImageEditTransport = 'multipart' | 'uploads'
+
+export type AiImageOperation = 'generate' | 'edit' | 'inpaint' | 'variation'
+export type AiImageInputRole = 'source' | 'reference' | 'mask'
+export type AiImageResolution = 'auto' | '512' | '1K' | '2K' | '4K'
+export type AiImageOutputFormat = 'png' | 'jpeg' | 'webp'
+export type AiImageBackground = 'auto' | 'opaque' | 'transparent'
+
+export interface AiImageOutputOptions {
+  aspectRatio?: string
+  exactSize?: { width: number; height: number }
+  resolution?: AiImageResolution
+  quality?: string
+  format?: AiImageOutputFormat
+  background?: AiImageBackground
+  count?: number
+}
+
+export interface AiImageRequest {
+  operation: AiImageOperation
+  model: string
+  prompt: string
+  clientTag?: string
+  inputs?: Array<{
+    attachmentId: string
+    role: AiImageInputRole
+  }>
+  output?: AiImageOutputOptions
+  providerOptions?: Record<string, unknown>
+}
+
+export interface AiImageProviderOptionSchema {
+  type: 'string' | 'number' | 'boolean'
+  description?: string
+  enum?: Array<string | number | boolean>
+  minimum?: number
+  maximum?: number
+}
+
+export interface AiImageCapabilities {
+  operations: AiImageOperation[]
+  input: {
+    maxSourceImages: number
+    maxReferenceImages: number
+    supportsMask: boolean
+    acceptedMimeTypes: string[]
+    maxBytesPerImage?: number
+  }
+  output: {
+    sizeMode: 'exact' | 'ratio' | 'resolution' | 'omit'
+    exactSizes?: Array<{ width: number; height: number }>
+    aspectRatios?: string[]
+    resolutions?: AiImageResolution[]
+    formats?: AiImageOutputFormat[]
+    qualities?: string[]
+    backgrounds?: AiImageBackground[]
+    maxCount: number
+  }
+  lifecycle: {
+    mode: 'sync' | 'stream' | 'async'
+    nativePreview: boolean
+    cancellable: boolean
+  }
+  providerOptions?: Record<string, AiImageProviderOptionSchema>
+}
+
+export interface AiImageCapabilityOverrides {
+  operations?: AiImageOperation[]
+  input?: Partial<AiImageCapabilities['input']>
+  output?: Partial<AiImageCapabilities['output']>
+  lifecycle?: Partial<AiImageCapabilities['lifecycle']>
+  providerOptions?: Record<string, AiImageProviderOptionSchema>
+}
+
+export interface AiImageProviderConfig {
+  profileId: string
+  profileVersion?: string
+  /**
+   * 仅允许访问与 Provider baseURL 完全同源的本机 HTTP 地址。
+   * 默认关闭；插件请求不能覆盖此设置。
+   */
+  allowInsecureLocalhost?: boolean
+  endpointOverrides?: {
+    generate?: string
+    edit?: string
+    upload?: string
+    poll?: string
+    cancel?: string
+  }
+  capabilityOverrides?: AiImageCapabilityOverrides
+}
+
+export interface AiImageModelConfig {
+  profileId?: string
+  capabilityOverrides?: AiImageCapabilityOverrides
+}
+
+export type AiImageTaskState =
+  | 'queued'
+  | 'preparing'
+  | 'submitting'
+  | 'submitted'
+  | 'running'
+  | 'cancelling'
+  | 'downloading'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'blocked'
+  | 'unknown'
+  | 'reconciling'
+  | 'safe_to_retry'
+
+export type AiImageSystemTaskGroup =
+  | 'all'
+  | 'active'
+  | 'completed'
+  | 'failed_or_blocked'
+  | 'billing_risk'
+
+export interface AiImageSystemTaskListInput {
+  group?: AiImageSystemTaskGroup
+  query?: string
+  limit?: number
+  cursor?: string
+}
+
+export type AiImageTaskExportScope =
+  | { kind: 'current'; taskId: string }
+  | { kind: 'selected'; taskIds: string[] }
+  | { kind: 'filtered'; group?: AiImageSystemTaskGroup; query?: string }
+  | { kind: 'all' }
+
+export interface AiImageTaskExportContents {
+  prompt: boolean
+  base64: boolean
+  sourceUrls: boolean
+  imageBinary: boolean
+}
+
+export interface AiImageTaskExportSelection {
+  scope: AiImageTaskExportScope
+  contents: AiImageTaskExportContents
+}
+
+export interface AiImageTaskExportPreview {
+  taskCount: number
+  artifactCount: number
+  sourceUrlCount: number
+  unavailableSourceTaskCount: number
+  missingTaskIds: string[]
+  sensitiveKinds: Array<'prompt' | 'base64' | 'sourceUrls' | 'imageBinary'>
+}
+
+export interface AiImageTaskExportRequest
+  extends AiImageTaskExportSelection {
+  confirmSensitive: boolean
+}
+
+export type AiImageTaskExportResult =
+  | { cancelled: true }
+  | {
+      cancelled: false
+      fileName: string
+      taskCount: number
+      artifactCount: number
+      bytesWritten: number
+    }
+
+export interface AiImageRequestSummary {
+  operation: AiImageOperation
+  model: string
+  clientTag?: string
+  inputCount: number
+  output?: AiImageOutputOptions
+}
+
+export interface AiImageArtifact {
+  artifactId: string
+  attachmentId: string
+  mimeType: string
+  size: number
+  width?: number
+  height?: number
+  sha256: string
+  createdAt: string
+}
+
+export interface AiImageUsage {
+  inputTokens?: number
+  outputTokens?: number
+  generatedImages?: number
+  source: 'provider' | 'estimated'
+}
+
+export type AiImageTaskErrorCode =
+  | 'invalid_request'
+  | 'unsupported_operation'
+  | 'unsupported_parameter'
+  | 'auth_failed'
+  | 'permission_denied'
+  | 'rate_limited'
+  | 'quota_exceeded'
+  | 'content_policy'
+  | 'input_upload_failed'
+  | 'provider_rejected'
+  | 'provider_unavailable'
+  | 'network_policy'
+  | 'submit_ambiguous'
+  | 'provider_task_not_found'
+  | 'poll_failed'
+  | 'download_failed'
+  | 'protocol_response_mismatch'
+  | 'reconcile_failed'
+  | 'legacy_result_too_large'
+  | 'cancelled'
+  | 'timeout'
+  | 'internal_error'
+
+export interface AiImageTaskError {
+  code: AiImageTaskErrorCode
+  phase: 'validate' | 'prepare' | 'submit' | 'poll' | 'cancel' | 'download'
+  message: string
+  retryable: boolean
+  billed: 'yes' | 'no' | 'unknown'
+  providerCode?: string
+  httpStatus?: number
+  details?: Record<string, unknown>
+}
+
+export type AiImageRecoveryAction =
+  | 'retry_pre_dispatch'
+  | 'resume_poll'
+  | 'resume_download'
+  | 'confirm_regenerate'
+  | 'none'
+
+export interface AiImageOperationErrorPayload {
+  message: string
+  code: AiImageTaskErrorCode
+  phase: AiImageTaskError['phase']
+  taskId: string
+  retryable: boolean
+  billed: 'yes' | 'no' | 'unknown'
+  recoveryAction: AiImageRecoveryAction
+}
+
+export interface AiImageTask {
+  taskId: string
+  clientTag?: string
+  request: AiImageRequestSummary
+  state: AiImageTaskState
+  revision: number
+  progress?: number
+  artifacts: AiImageArtifact[]
+  error?: AiImageTaskError
+  usage?: AiImageUsage
+  billed: 'yes' | 'no' | 'unknown'
+  downloadAttempt: number
+  recoveryAction: AiImageRecoveryAction
+  retryOf?: string
+  cancellation?: {
+    scope: 'provider' | 'local'
+    remoteMayContinue: boolean
+    requestedAt: string
+  }
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+}
+
+export interface AiImagePreview {
+  image: string
+  index?: number
+  mimeType?: string
+}
+
+export interface AiImageTaskEvent {
+  eventId: string
+  taskId: string
+  revision: number
+  type:
+    | 'state_changed'
+    | 'progress'
+    | 'preview'
+    | 'artifact_ready'
+    | 'warning'
+    | 'output_refreshed'
+    | 'terminal'
+  state: AiImageTaskState
+  progress?: number
+  preview?: AiImagePreview
+  artifact?: AiImageArtifact
+  error?: AiImageTaskError
+  timestamp: number
+}
+
+export interface AiImageSystemTaskSummary extends AiImageTask {
+  ownerPluginId: string
+  providerId: string
+  profileId: string
+  profileVersion: string
+  bindingId?: string
+  adapter: { id: string; version: string }
+  resolution?: ImageProtocolResolutionDiagnostic
+}
+
+export interface AiImageCancellationExpectation {
+  scope: 'provider' | 'local'
+  remoteMayContinue: boolean
+}
+
+export type AiImageSystemTaskUnavailableReason =
+  | 'historical_source_not_retained'
+  | 'provider_returned_no_urls'
+  | 'task_not_completed'
+  | 'decrypt_failed'
+
+export interface AiImageSystemTaskDetail
+  extends AiImageSystemTaskSummary {
+  fullRequest?: AiImageRequest
+  fullRequestUnavailableReason?: 'decrypt_failed'
+  cancelExpectation: AiImageCancellationExpectation
+  lifecycle?: AiImageCapabilities['lifecycle']
+  lifecycleUnavailableReason?:
+    | 'decrypt_failed'
+    | 'historical_profile_not_retained'
+  sourceExport: {
+    available: boolean
+    urlCount: number
+    unavailableReason?: AiImageSystemTaskUnavailableReason
+  }
+}
+
+export interface AiImageSystemTaskEvent {
+  eventId: string
+  taskId: string
+  revision: number
+  type: AiImageTaskEvent['type']
+  state: AiImageTaskState
+  progress?: number
+  preview?: {
+    available: boolean
+    index?: number
+    mimeType?: string
+  }
+  artifact?: AiImageArtifact
+  error?: AiImageTaskError
+  usage?: AiImageUsage
+  timestamp: number
+}
+
+export interface AiImageSystemTaskEventPage {
+  events: AiImageSystemTaskEvent[]
+  nextCursor?: string
+}
+
+export interface AiImageArtifactPreview {
+  artifactId: string
+  mimeType: 'image/webp'
+  width?: number
+  height?: number
+  dataUrl: string
+}
+
+export interface AiImageValidationIssue {
+  code: AiImageTaskErrorCode
+  message: string
+  path?: string
+}
+
+/**
+ * 图片协议运行时解析的公共诊断（跨 IPC 暴露给系统 UI / 插件）。
+ * 所有字段都是结构化 ID、规范化 Origin 与原因码：不含 API Key、prompt、
+ * 完整请求 URL 或内部 specificity 评分，可直接序列化与记录。
+ */
+export interface ImageProtocolResolutionDiagnostic {
+  providerId: string
+  configuredOrigin: string
+  providerModelId: string
+  canonicalModelId?: string
+  modelsDevProviderId?: string
+  matchedBindingId?: string
+  profileId?: string
+  profileVersion?: string
+  capabilitySources: Record<string, string>
+  candidates: Array<{
+    bindingId: string
+    matched: boolean
+    reason: string
+  }>
+  unresolvedReasons: string[]
+}
+
+export interface AiImageProviderDescription {
+  providerId: string
+  model?: string
+  profile: {
+    id: string
+    version: string
+    adapter: string
+  }
+  capabilities: AiImageCapabilities
+  capabilitySources: Record<string, string>
+  warnings: AiImageValidationIssue[]
+  requiresConfirmation: boolean
+  /**
+   * 运行时 binding 解析诊断（describe 与 submit 共用同一 resolver，均无生成探测）。
+   * 仅在走过 catalog binding 匹配时存在；显式/固定 Profile 路径为 undefined。
+   */
+  resolution?: ImageProtocolResolutionDiagnostic
+}
+
+export interface AiImageValidationResult {
+  valid: boolean
+  normalized?: AiImageRequest
+  errors: AiImageValidationIssue[]
+  warnings: AiImageValidationIssue[]
+  provider?: AiImageProviderDescription
+}
+
 export interface AiModel {
   id: string
   label: string
@@ -400,6 +831,43 @@ export interface AiModel {
    * new-api / cherryin 族模型的协议路由类型。
    */
   endpointType?: AiEndpointType
+  /**
+   * 图像尺寸格式（模型级覆盖，优先级最高）。与 endpointType 语义正交：
+   * endpointType 决定协议路由，imageSizeFormat 只决定图像请求 size 字段的形态。
+   * 缺省继承供应商级配置，再缺省按协议方言推导。
+   */
+  imageSizeFormat?: AiImageSizeFormat
+  /**
+   * 图像编辑参考图传输方式（模型级覆盖，优先级最高）。缺省继承供应商级配置，
+   * 再缺省为 multipart（OpenAI 标准，现状默认）。
+   */
+  imageEditTransport?: AiImageEditTransport
+  /**
+   * 图片协议与模型能力覆盖。旧图片字段在迁移期继续保留并双写。
+   */
+  images?: AiImageModelConfig
+  /**
+   * models.dev 目录身份（只读元数据，非协议路由）。仅由非计费 /models 拉取在
+   * 确定性命中（exact / unique-alias）时附加；ambiguous 只保留诊断候选，不附加，
+   * 且绝不因此自动写入 images.profileId。
+   */
+  catalogIdentity?: {
+    source: 'models.dev'
+    providerId?: string
+    providerModelId: string
+    canonicalModelId?: string
+    family?: string
+    match: 'exact-provider-model' | 'unique-alias' | 'ambiguous'
+  }
+  /**
+   * models.dev 输入/输出模态事实（只读元数据）。聊天视觉能力只由 input 含
+   * 'image' 授予；output 含 'image' 只表示可作为图片模型候选，不自动绑定图片
+   * Profile。audio/video 仅为目录事实记录，不创建音视频生成 API 或 UI。
+   */
+  modalities?: {
+    input: Array<'text' | 'image' | 'audio' | 'video' | 'pdf'>
+    output: Array<'text' | 'image' | 'audio' | 'video' | 'pdf'>
+  }
   /**
    * 模型声明支持的 endpoint 类型列表（可选）。
    */
@@ -480,6 +948,27 @@ export interface AiProviderConfig {
   headers?: Record<string, string>
   defaultModel?: string
   defaultParams?: AiModelParameters
+  /**
+   * 图像尺寸格式：图像生成/编辑请求中 size 字段的形态（像素 / 比例 / 省略）。
+   * 缺省（undefined）按协议方言推导：gemini → 比例，其余 → 像素。
+   */
+  imageSizeFormat?: AiImageSizeFormat
+  /**
+   * 图像编辑参考图传输方式：multipart（OpenAI 标准 /images/edits，默认）或
+   * uploads（先上传图床再以 JSON image_urls 走 /images/generations）。
+   * 缺省（undefined）为 multipart，即现状行为。
+   */
+  imageEditTransport?: AiImageEditTransport
+  /**
+   * 自定义图床接口地址（仅 uploads 传输生效）：填写后作为完整上传地址原样使用，
+   * 覆盖「上传与生成不在同一网关」的场景；缺省用 {baseURL}/uploads/images。
+   * 认证仍用本供应商的 headers/Authorization，自定义图床需接受同一套凭据。
+   */
+  imageUploadsURL?: string
+  /**
+   * 图片协议、端点和能力配置。旧图片字段在迁移期继续保留并双写。
+   */
+  images?: AiImageProviderConfig
 }
 
 export interface AiSettings {
@@ -509,13 +998,16 @@ export interface AiTokenBreakdown {
 }
 
 export interface AiImageGenerateProgressChunk {
-  type: 'status' | 'preview'
+  /** 业务 chunk 恒有 type；合成 chunk（仅含 __requestId）不携带 type */
+  type?: 'status' | 'preview'
   stage?: 'start' | 'partial' | 'finalizing' | 'completed' | 'fallback'
   message?: string
   image?: string
   index?: number
   received?: number
   total?: number
+  /** 流建立后首个回调携带；用于 ai.abort(requestId)。该合成 chunk 不含 type 字段 */
+  __requestId?: string
 }
 
 export interface AiPromiseLike<T> extends Promise<T> {
@@ -589,9 +1081,9 @@ export interface AiApi {
     }) => Promise<AiTokenBreakdown>
   }
   images: {
-    generate: (input: { prompt: string; model: string; size?: string; count?: number }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    generate: (input: { prompt: string; model: string; size?: string; aspectRatio?: string; count?: number }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
     generateStream: (
-      input: { prompt: string; model: string; size?: string; count?: number },
+      input: { prompt: string; model: string; size?: string; aspectRatio?: string; count?: number },
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ) => AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
     edit: (input: {
@@ -600,7 +1092,69 @@ export interface AiApi {
       model: string
       /** 额外参考图（按参考图条件生成 / 多图一致性，如 Gemini 多图）；附在主图之后一并传给模型 */
       referenceAttachmentIds?: string[]
+      /** 输出尺寸（如 '1024x1536'）；OpenAI 系消费 size，Gemini 系自动映射为 aspectRatio */
+      size?: string
+      /** 输出宽高比（如 '2:3'）；未传时由 size 推导 */
+      aspectRatio?: string
+      /** 局部重绘遮罩附件：PNG 中完全透明（alpha=0）的区域=待重绘区（OpenAI edits 约定）；不支持的 provider 忽略 */
+      maskAttachmentId?: string
+      /** 调用方自带请求 ID；传入后可用 ai.abort(requestId) 中止本次 edit */
+      requestId?: string
     }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    profiles: {
+      /** System settings UI only; plugin callers are rejected by the main process. */
+      listAvailable: () => Promise<string[]>
+    }
+    providers: {
+      describe: (input: { providerId?: string; model?: string }) => Promise<AiImageProviderDescription>
+    }
+    validateInput: (request: AiImageRequest) => Promise<AiImageValidationResult>
+    systemTasks: {
+      /** Mulby system UI only; plugin and untrusted callers are rejected. */
+      list: (input?: AiImageSystemTaskListInput) => Promise<{
+        tasks: AiImageSystemTaskSummary[]
+        nextCursor?: string
+      }>
+      getDetail: (input: { taskId: string }) =>
+        Promise<AiImageSystemTaskDetail | null>
+      listEvents: (input: {
+        taskId: string
+        cursor?: string
+        limit?: number
+      }) => Promise<AiImageSystemTaskEventPage>
+      getArtifactPreview: (input: {
+        taskId: string
+        artifactId: string
+      }) => Promise<AiImageArtifactPreview>
+      previewExport: (
+        selection: AiImageTaskExportSelection
+      ) => Promise<AiImageTaskExportPreview>
+      exportArchive: (
+        request: AiImageTaskExportRequest
+      ) => Promise<AiImageTaskExportResult>
+    }
+    tasks: {
+      submit: (request: AiImageRequest) => Promise<AiImageTask>
+      get: (input: { taskId: string }) => Promise<AiImageTask | null>
+      list: (input?: {
+        states?: AiImageTaskState[]
+        clientTag?: string
+        limit?: number
+        cursor?: string
+      }) => Promise<{ tasks: AiImageTask[]; nextCursor?: string }>
+      cancel: (input: { taskId: string }) => Promise<AiImageTask>
+      retry: (input: {
+        taskId: string
+        confirmBillableRisk?: boolean
+      }) => Promise<{ task: AiImageTask; createdNewTask: boolean }>
+      subscribe: (input: {
+        taskId?: string
+        clientTag?: string
+        sinceRevision?: number
+      }) => Promise<{ subscriptionId: string; snapshots: AiImageTask[] }>
+      unsubscribe: (input: { subscriptionId: string }) => Promise<void>
+      onEvent: (listener: (event: AiImageTaskEvent) => void) => () => void
+    }
   }
   tooling: {
     webSearch: {
