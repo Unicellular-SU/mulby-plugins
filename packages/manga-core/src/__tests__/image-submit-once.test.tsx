@@ -199,7 +199,39 @@ test('a failed scene reference settles visibly after one host submission', { con
 
 test('a failed referenced panel settles its page state after one images.edit submission', { concurrency: false }, async () => {
   await withIsolatedEnvironment(async addRenderer => {
-    const counter = installFailingHost();
+    const routes = { editCalls: 0, generateCalls: 0, generateStreamCalls: 0 };
+    let attachmentUploads = 0;
+    let editInput: { imageAttachmentId?: string; referenceAttachmentIds?: string[] } | undefined;
+    const unexpectedRoute = async (route: 'generateCalls' | 'generateStreamCalls'): Promise<ImageResult> => {
+      routes[route] += 1;
+      const error = retryableDownloadError();
+      error.message = `download failed: unexpected images.${route === 'generateCalls' ? 'generate' : 'generateStream'} route`;
+      throw error;
+    };
+    (globalThis as any).window = {
+      mulby: {
+        ai: {
+          allModels: async () => [{ id: 'test-image-model' }],
+          call: async () => ({ content: '' }),
+          abort: async () => undefined,
+          tokens: { estimate: async () => ({ inputTokens: 0, outputTokens: 0 }) },
+          attachments: {
+            upload: async () => ({ attachmentId: `reference-attachment-${++attachmentUploads}` }),
+            get: async () => ({ attachmentId: 'reference-attachment' }),
+            delete: async () => undefined,
+          },
+          images: {
+            generate: async () => unexpectedRoute('generateCalls'),
+            generateStream: async (_input: unknown, _onChunk: (chunk: unknown) => void) => unexpectedRoute('generateStreamCalls'),
+            edit: async (input: { imageAttachmentId?: string; referenceAttachmentIds?: string[] }) => {
+              routes.editCalls += 1;
+              editInput = input;
+              throw retryableDownloadError();
+            },
+          },
+        },
+      },
+    };
     let pageState: ComicPageData[] = [{
       page_number: 1,
       layout_description: 'one panel',
@@ -234,9 +266,19 @@ test('a failed referenced panel settles its page state after one images.edit sub
       addRenderer(renderer);
     });
     await waitFor(() => assert.ok(trigger));
-    await act(async () => { await trigger!(pageState[0], '2:3', ['data:image/png;base64,AA==']); });
+    await act(async () => {
+      await trigger!(pageState[0], '2:3', [
+        'data:image/png;base64,AA==',
+        'data:image/png;base64,AQ==',
+      ]);
+    });
     assert.match(pageState[0].error || '', /download failed/);
-    await assertOneCallPastRetryWindow(counter);
+    await act(async () => { await sleep(RETRY_WINDOW_MS); });
+    assert.equal(routes.editCalls, 1);
+    assert.equal(routes.generateCalls, 0);
+    assert.equal(routes.generateStreamCalls, 0);
+    assert.equal(editInput?.imageAttachmentId, 'reference-attachment-1');
+    assert.deepEqual(editInput?.referenceAttachmentIds, ['reference-attachment-2']);
   });
 });
 
