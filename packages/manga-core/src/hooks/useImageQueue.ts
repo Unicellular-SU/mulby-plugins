@@ -11,10 +11,11 @@ import { applyWatermark } from '../utils/watermarkUtils';
 import { ComicPageData, ImageProgress, UsageStat, WatermarkSettings } from '../engine-types';
 import { getTheme } from '../theme/registry';
 import { trimErr } from '../utils/text';
+import type { ImageReferenceInput } from '../services/imageReferencePolicy';
 
 export interface ImageQueueJob {
   page: ComicPageData;
-  refs?: string[];
+  refs?: ImageReferenceInput;
 }
 
 interface UseImageQueueDeps {
@@ -63,7 +64,7 @@ export const useImageQueue = ({
       else if (document.hidden) notify(S.notifyBatchDone(name, done));
   };
 
-  const triggerImageGeneration = async (page: ComicPageData, ratio: string, references?: string[]) => {
+  const triggerImageGeneration = async (page: ComicPageData, ratio: string, references?: ImageReferenceInput) => {
     const runEpoch = getAbortEpoch();   // 本任务的运行代际；迟到回调不得写回新一轮的 pages
 
     // 方案 5.3：流式进度写入该页（150ms 节流；带预览的 chunk 不节流；epoch 变更即丢弃）

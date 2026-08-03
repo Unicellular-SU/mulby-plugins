@@ -9,6 +9,7 @@ import { getActiveProjectId, setActiveProjectId } from '../services/persistenceS
 import { abortAllAiTasks, clearReferenceAttachmentCache } from '../services/mulbyAiService';
 import techTheme from '../../../../plugins/tech-manga/theme';
 import type { ComicPageData } from '../engine-types';
+import type { PageReferenceSet } from '../services/imageReferencePolicy';
 
 const RETRY_WINDOW_MS = 1_650;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -279,6 +280,118 @@ test('a failed referenced panel settles its page state after one images.edit sub
     assert.equal(routes.generateStreamCalls, 0);
     assert.equal(editInput?.imageAttachmentId, 'reference-attachment-1');
     assert.deepEqual(editInput?.referenceAttachmentIds, ['reference-attachment-2']);
+  });
+});
+
+test('limits structured panel references before upload and caches host capabilities per model', { concurrency: false }, async () => {
+  await withIsolatedEnvironment(async addRenderer => {
+    const routes = { describeCalls: 0, editCalls: 0, attachmentUploads: 0 };
+    const editInputs: Array<{ imageAttachmentId?: string; referenceAttachmentIds?: string[] }> = [];
+    (globalThis as any).window = {
+      mulby: {
+        ai: {
+          allModels: async () => [{ id: 'test-image-model' }],
+          call: async () => ({ content: '' }),
+          abort: async () => undefined,
+          tokens: { estimate: async () => ({ inputTokens: 0, outputTokens: 0 }) },
+          attachments: {
+            upload: async () => ({ attachmentId: `reference-attachment-${++routes.attachmentUploads}` }),
+            get: async () => ({ attachmentId: 'reference-attachment' }),
+            delete: async () => undefined,
+          },
+          images: {
+            generate: async () => ({ images: ['aGVsbG8='], tokens: { inputTokens: 0, outputTokens: 0 } }),
+            generateStream: async () => ({ images: ['aGVsbG8='], tokens: { inputTokens: 0, outputTokens: 0 } }),
+            edit: async (input: { imageAttachmentId?: string; referenceAttachmentIds?: string[] }) => {
+              routes.editCalls += 1;
+              editInputs.push(input);
+              return { images: ['aGVsbG8='], tokens: { inputTokens: 0, outputTokens: 0 } };
+            },
+            providers: {
+              describe: async () => {
+                routes.describeCalls += 1;
+                return {
+                  capabilities: {
+                    operations: ['generate', 'edit'],
+                    input: {
+                      maxSourceImages: 1,
+                      maxReferenceImages: 5,
+                      supportsMask: false,
+                      acceptedMimeTypes: ['image/png'],
+                    },
+                    output: { sizeMode: 'ratio', maxCount: 1 },
+                    lifecycle: { mode: 'async', nativePreview: false, cancellable: false },
+                  },
+                };
+              },
+            },
+          },
+        },
+      },
+    };
+    let pageState: ComicPageData[] = [1, 2].map(page_number => ({
+      page_number,
+      layout_description: 'one panel',
+      image_prompt: 'draw a panel',
+      characters_in_scene: [],
+      props_in_scene: [],
+      persistent_states: { characters: [], environment: { lighting: 'day', notable_changes: [] } },
+      state_changes_this_page: [],
+      isGenerating: true,
+    }));
+    let trigger: ((page: ComicPageData, ratio: string, references?: PageReferenceSet) => Promise<void>) | undefined;
+
+    const Harness = () => {
+      const [pages, setPages] = useState(pageState);
+      const queue = useImageQueue({
+        pages,
+        setPages: updater => setPages(previous => {
+          pageState = updater(previous);
+          return pageState;
+        }),
+        batchRef: { current: { active: false, epoch: 0 } },
+        trackUsage: () => undefined,
+        handlePermissionError: () => false,
+        notify: () => undefined,
+      });
+      useEffect(() => { trigger = queue.triggerImageGeneration; }, [queue.triggerImageGeneration]);
+      return null;
+    };
+
+    const ordered = [
+      'data:image/png;base64,AQ==',
+      'data:image/png;base64,Ag==',
+      'data:image/png;base64,Aw==',
+      'data:image/png;base64,BA==',
+      'data:image/png;base64,BQ==',
+      'data:image/png;base64,Bg==',
+      'data:image/png;base64,Bw==',
+      'data:image/png;base64,CA==',
+    ];
+    const references: PageReferenceSet = {
+      ordered,
+      characters: ordered.slice(0, 6),
+      props: [ordered[6]],
+      scenes: [ordered[7]],
+    };
+    Object.assign(references as PageReferenceSet & { length: number; [Symbol.iterator]: () => Iterator<string> }, {
+      length: ordered.length,
+      [Symbol.iterator]: () => ordered[Symbol.iterator](),
+    });
+
+    await act(async () => { addRenderer(TestRenderer.create(<Harness />)); });
+    await waitFor(() => assert.ok(trigger));
+    await act(async () => { await trigger!(pageState[0], '2:3', references); });
+    assert.equal(routes.attachmentUploads, 6);
+    assert.equal(routes.editCalls, 1);
+    assert.equal(routes.describeCalls, 1);
+    assert.equal(
+      [editInputs[0].imageAttachmentId, ...(editInputs[0].referenceAttachmentIds || [])].filter(Boolean).length,
+      6,
+    );
+
+    await act(async () => { await trigger!(pageState[1], '2:3', references); });
+    assert.equal(routes.describeCalls, 1);
   });
 });
 

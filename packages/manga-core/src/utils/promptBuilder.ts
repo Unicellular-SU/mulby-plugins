@@ -7,6 +7,7 @@
 
 import { resolveByName } from '@mulby-plugins/manga-kit';
 import { CharacterSheetItem, PropSheetItem, SceneSheetItem, ComicPageData, ComicResponse, ComicPageScript } from '../engine-types';
+import type { PageReferenceSet } from '../services/imageReferencePolicy';
 
 /** Helper to find character reference image（统一名字解析口径，方案 2.4） */
 export const getCharacterReference = (name: string, sheet: CharacterSheetItem[]): string | undefined => {
@@ -64,13 +65,16 @@ export const prepareScenePages = (
     characterSheet: CharacterSheetItem[],
     propSheet: PropSheetItem[],
     sceneSheet: SceneSheetItem[] = []
-): Array<{ pageData: ComicPageData; resolvedRefs: string[] }> => {
+): Array<{ pageData: ComicPageData; resolvedRefs: PageReferenceSet }> => {
     return comicScript.pages.map(s => {
           const presentCharacters = s.characters_in_scene || [];
           const presentProps = s.props_in_scene || [];
           const presentScenes = s.scenes_in_scene || [];
 
+          const characterRefs: string[] = [];
+          const propRefs: string[] = [];
           const sceneRefs: string[] = [];
+          const orderedRefs: string[] = [];
           const characterContexts: string[] = [];
 
           // 1. Resolve Characters
@@ -79,7 +83,8 @@ export const prepareScenePages = (
 
               if (charItem) {
                   if (charItem.referenceImage) {
-                      sceneRefs.push(charItem.referenceImage);
+                      characterRefs.push(charItem.referenceImage);
+                      orderedRefs.push(charItem.referenceImage);
                   }
 
                   const charState = s.persistent_states?.characters?.find(c => c.name === name || c.name === charItem.name);
@@ -100,7 +105,8 @@ export const prepareScenePages = (
               const propItem = resolveByName(name, propSheet);
               if (propItem) {
                   if (propItem.referenceImage) {
-                      sceneRefs.push(propItem.referenceImage);
+                      propRefs.push(propItem.referenceImage);
+                      orderedRefs.push(propItem.referenceImage);
                   }
                   characterContexts.push(`Prop: ${propItem.name} (Visual Reference Provided).`);
               }
@@ -112,6 +118,7 @@ export const prepareScenePages = (
               if (sceneItem) {
                   if (sceneItem.referenceImage) {
                       sceneRefs.push(sceneItem.referenceImage);
+                      orderedRefs.push(sceneItem.referenceImage);
                   }
                   characterContexts.push(`Scene/Location: ${sceneItem.name} (Visual Reference Provided — backgrounds MUST match it).`);
               }
@@ -133,7 +140,12 @@ export const prepareScenePages = (
                   image_prompt: finalPrompt,
                   isGenerating: true
               } as ComicPageData,
-              resolvedRefs: sceneRefs
+              resolvedRefs: {
+                  ordered: orderedRefs,
+                  characters: characterRefs,
+                  props: propRefs,
+                  scenes: sceneRefs
+              }
           };
       });
 };
@@ -149,8 +161,11 @@ export const resolvePageRefs = (
     sceneNames: string[] = [],
     sceneSheet: SceneSheetItem[] = [],
     dialogue?: ComicPageScript['dialogue']
-): { refs: string[]; finalPrompt: string } => {
+): { refs: PageReferenceSet; finalPrompt: string } => {
+    const characterRefs: string[] = [];
+    const propRefs: string[] = [];
     const sceneRefs: string[] = [];
+    const orderedRefs: string[] = [];
     const characterContexts: string[] = [];
 
     // Resolve Characters
@@ -158,7 +173,8 @@ export const resolvePageRefs = (
         const charItem = resolveByName(name, characterSheet);
         if (charItem) {
             if (charItem.referenceImage) {
-                sceneRefs.push(charItem.referenceImage);
+                characterRefs.push(charItem.referenceImage);
+                orderedRefs.push(charItem.referenceImage);
             }
             characterContexts.push(`Identity: ${charItem.name} (Canonical Character).`);
         }
@@ -169,7 +185,8 @@ export const resolvePageRefs = (
         const propItem = resolveByName(name, propSheet);
         if (propItem) {
             if (propItem.referenceImage) {
-                sceneRefs.push(propItem.referenceImage);
+                propRefs.push(propItem.referenceImage);
+                orderedRefs.push(propItem.referenceImage);
             }
             characterContexts.push(`Prop: ${propItem.name} (Visual Reference Provided).`);
         }
@@ -181,6 +198,7 @@ export const resolvePageRefs = (
         if (sceneItem) {
             if (sceneItem.referenceImage) {
                 sceneRefs.push(sceneItem.referenceImage);
+                orderedRefs.push(sceneItem.referenceImage);
             }
             characterContexts.push(`Scene/Location: ${sceneItem.name} (Visual Reference Provided — backgrounds MUST match it).`);
         }
@@ -200,5 +218,13 @@ export const resolvePageRefs = (
        // For now, if user edited it heavily, we trust their text, but update Refs.
     }
 
-    return { refs: sceneRefs, finalPrompt: finalPrompt + buildDialogueBlock(dialogue) };
+    return {
+        refs: {
+            ordered: orderedRefs,
+            characters: characterRefs,
+            props: propRefs,
+            scenes: sceneRefs
+        },
+        finalPrompt: finalPrompt + buildDialogueBlock(dialogue)
+    };
 };

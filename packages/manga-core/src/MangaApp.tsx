@@ -22,6 +22,7 @@ import { getTheme } from './theme/registry';
 import type { MangaTheme } from './theme/types';
 import { trimErr } from './utils/text';
 import { applyWatermark } from './utils/watermarkUtils';
+import type { ImageReferenceInput } from './services/imageReferencePolicy';
 
 // Initial Config State（默认值取自主题数据首项/default 标记：与题材数据 1:1 对应）
 const buildInitialConfig = (theme: MangaTheme): AppConfig => {
@@ -506,7 +507,7 @@ const MangaApp: React.FC = () => {
       // 已有 imageData 的页直接沿用（保留重绘后的 prompt / 图像 / 水印覆盖，不再入队）；
       // 无图 / 失败 / 新增页用新拼装的 prompt 与 refs 正常入队。封面页 page_number = 0（现有约定）。
       const rebuilt = [coverPage, ...preparedPages.map(p => p.pageData)];
-      const jobs: Array<{ page: ComicPageData; refs?: string[] }> = [];
+      const jobs: Array<{ page: ComicPageData; refs?: ImageReferenceInput }> = [];
       const mergedPages = rebuilt.map((fresh, idx) => {
         const existing = pages.find(p => p.page_number === fresh.page_number);
         if (existing?.imageData) {
@@ -514,7 +515,7 @@ const MangaApp: React.FC = () => {
         }
         const refs = idx === 0
           ? (mainCharRef ? [mainCharRef] : undefined)
-          : (preparedPages[idx - 1].resolvedRefs as string[] | undefined);
+          : preparedPages[idx - 1].resolvedRefs;
         jobs.push({ page: fresh, refs });
         return { ...fresh, isGenerating: true, error: undefined };
       });

@@ -12,6 +12,7 @@ import {
   extractJson,
   toDataUrl,
 } from '@mulby-plugins/manga-kit';
+import { selectImageReferences, type ImageReferenceInput } from './imageReferencePolicy';
 
 // ================= MULBY AI BRIDGE =================
 // 所有 AI 能力通过 Mulby 宿主提供的 window.mulby.ai 完成，
@@ -19,13 +20,16 @@ import {
 // 为了不改动各组件的 props 链，模型选择通过 setActiveModels 注入模块级状态。
 
 let activeModels: { textModel: string; imageModel: string } = { textModel: '', imageModel: '' };
+const imageInputLimitCache = new Map<string, Promise<number | undefined>>();
 
 /** 由 App 在配置变化时调用，注入当前选择的模型 */
 export const setActiveModels = (models: { textModel?: string; imageModel?: string }) => {
+  const previousImageModel = activeModels.imageModel;
   activeModels = {
     textModel: models.textModel || '',
     imageModel: models.imageModel || ''
   };
+  if (activeModels.imageModel !== previousImageModel) imageInputLimitCache.clear();
 };
 
 const getAi = () => {
@@ -34,6 +38,32 @@ const getAi = () => {
     throw new Error("Mulby AI 接口不可用。请在 Mulby 中打开本插件，并确认已在 Mulby 设置中配置 AI 模型。");
   }
   return ai;
+};
+
+export const resolveImageInputLimit = (
+  ai: ReturnType<typeof getAi>,
+  model: string,
+): Promise<number | undefined> => {
+  const describe = (ai.images as (typeof ai.images & {
+    providers?: {
+      describe?: (input: { model: string }) => Promise<{
+        capabilities?: { input?: { maxSourceImages: number; maxReferenceImages: number } };
+      }>;
+    };
+  }) | undefined)?.providers?.describe;
+  if (typeof describe !== 'function') return Promise.resolve(undefined);
+  const existing = imageInputLimitCache.get(model);
+  if (existing) return existing;
+  const pending = Promise.resolve()
+    .then(() => describe({ model }))
+    .then((description) => {
+      const input = description?.capabilities?.input;
+      if (!input || input.maxSourceImages < 1) return undefined;
+      return 1 + Math.max(0, Math.floor(input.maxReferenceImages));
+    })
+    .catch(() => undefined);
+  imageInputLimitCache.set(model, pending);
+  return pending;
 };
 
 // ================= 全局中止（一键暂停所有任务） =================
@@ -90,7 +120,10 @@ const uploadRefCached = (ai: ReturnType<typeof getAi>, dataUrl: string): Promise
  * 删除全部已缓存附件并清空缓存；新剧本生成成功与 Start Over 确认丢弃时调用（D3）。
  * 宿主对附件无 TTL / 会话清理任务，批量 delete 属必要清理而非锦上添花。
  */
-export const clearReferenceAttachmentCache = () => attachmentCache.clear();
+export const clearReferenceAttachmentCache = () => {
+  imageInputLimitCache.clear();
+  return attachmentCache.clear();
+};
 
 // ================= 费用统计如实上报（方案 5.2） =================
 
@@ -1467,7 +1500,7 @@ export const generateSceneReference = async (
 export const generatePanelImage = async (
   prompt: string,
   aspectRatio: string,
-  referenceImages?: string[], // Optional array of base64 images
+  referenceImages?: ImageReferenceInput,
   onUsage?: (stat: UsageStat) => void,
   onProgress?: (p: ImageProgress) => void
 ): Promise<string> => {
@@ -1475,7 +1508,13 @@ export const generatePanelImage = async (
   const model = await resolveImageModel();
   const { size, canvasHint, requestedHint } = aspectRatioToSize(aspectRatio);
 
-  const hasRefs = !!(referenceImages && referenceImages.length > 0);
+  const inputLimit = referenceImages
+    ? await resolveImageInputLimit(ai, model)
+    : undefined;
+  const selectedReferences = referenceImages
+    ? selectImageReferences(referenceImages, inputLimit)
+    : [];
+  const hasRefs = selectedReferences.length > 0;
   let finalPrompt = prompt;
 
   if (hasRefs) {
@@ -1519,7 +1558,7 @@ ${getTheme().languageRules}
       // 带参考图：附件经模块级缓存复用（方案 4.1，同一张图整轮会话只上传一次），走 images.edit。
       // edit 无 stream 变体（方案 5.3）：给两段式真实进度——上传参考图 → 绘制中。
       onProgress?.({ stage: 'start', message: '上传参考图…' });
-      for (const imgData of referenceImages!) {
+      for (const imgData of selectedReferences) {
         throwIfAborted(epoch);
         refAttachmentIds.push(await uploadRefCached(ai, imgData));
       }
