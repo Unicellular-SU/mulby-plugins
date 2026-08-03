@@ -55,6 +55,7 @@ import type {
   PluginStoreInstallFromUrlInput
 } from './plugin-store'
 import type { Task, TaskExecution, TaskSchedulerEvent } from './task'
+import type { SystemPageId } from '../system-page-route'
 
 // 日志条目接口
 export interface LogEntry {
@@ -717,6 +718,7 @@ export interface ElectronAPI {
     onOpenAiMcpSettings: (callback: () => void) => () => void
     onOpenAiToolsSettings: (callback: () => void) => () => void
     onOpenAiSkillsSettings: (callback: () => void) => () => void
+    onOpenAiImageTasks: (callback: () => void) => () => void
     onOpenPluginStore: (callback: (filter?: 'updatable') => void) => () => void
     onOpenPluginManager: (callback: (pluginId?: string) => void) => () => void
     onOpenBackgroundPlugins: (callback: () => void) => () => void
@@ -734,7 +736,7 @@ export interface ElectronAPI {
   }
   systemPage: {
     open: (payload: {
-      page: 'settings' | 'plugin-manager' | 'plugin-store' | 'background-plugins' | 'task-scheduler' | 'log-viewer' | 'ai-settings' | 'ai-mcp-settings' | 'ai-tools-settings' | 'ai-skills-settings' | 'storage-explorer'
+      page: SystemPageId
       settingsSection?: 'dashboard' | 'general' | 'floatingBall' | 'superPanel' | 'shortcuts' | 'commandQuickLaunch' | 'commandAll' | 'permissions' | 'security' | 'openclaw' | 'developer' | 'about'
       shortcutCommandHint?: string
       detailsPluginId?: string

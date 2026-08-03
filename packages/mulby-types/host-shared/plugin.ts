@@ -752,12 +752,35 @@ export interface PluginAPI {
       estimate: (input: { model?: string; messages: AiMessage[]; outputText?: string }) => Promise<AiTokenBreakdown>
     }
     images: {
-      generate: (input: { prompt: string; model: string; size?: string; count?: number }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+      generate: (input: { prompt: string; model: string; size?: string; aspectRatio?: string; count?: number }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+      /**
+       * 流式生成图片。
+       *
+       * 插件后端（utilityProcess 隔离进程）限制：参数经 postMessage 序列化，
+       * `onChunk` 回调会被剥为 null（不会收到任何进度/预览片段）；返回值是回投的
+       * 普通数据，其上的 `AiPromiseLike.abort` 亦不可用。后端如需图像生成请优先用
+       * `generate` / `edit`；中止请配合 `ai.abort(requestId)` 显式闭环。
+       * Renderer（window.mulby）侧不受此限制。
+       */
       generateStream: (
-        input: { prompt: string; model: string; size?: string; count?: number },
+        input: { prompt: string; model: string; size?: string; aspectRatio?: string; count?: number },
         onChunk: (chunk: AiImageGenerateProgressChunk) => void
       ) => AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
-      edit: (input: { imageAttachmentId: string; prompt: string; model: string }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+      edit: (input: {
+        imageAttachmentId: string
+        prompt: string
+        model: string
+        /** 额外参考图（按参考图条件生成 / 多图一致性，如 Gemini 多图）；附在主图之后一并传给模型 */
+        referenceAttachmentIds?: string[]
+        /** 输出尺寸（如 '1024x1536'）；OpenAI 系消费 size，Gemini 系自动映射为 aspectRatio */
+        size?: string
+        /** 输出宽高比（如 '2:3'）；未传时由 size 推导 */
+        aspectRatio?: string
+        /** 局部重绘遮罩附件：PNG 中完全透明（alpha=0）的区域=待重绘区（OpenAI edits 约定）；不支持的 provider 忽略 */
+        maskAttachmentId?: string
+        /** 调用方自带请求 ID；传入后可用 ai.abort(requestId) 中止本次 edit */
+        requestId?: string
+      }) => Promise<{ images: string[]; tokens: AiTokenBreakdown }>
     }
   }
   inputMonitor: {

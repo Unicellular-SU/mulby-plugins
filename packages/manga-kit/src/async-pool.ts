@@ -46,6 +46,9 @@ export async function withRetryOnce<T>(
     if ((e as { name?: string })?.name === 'AbortError') throw e;
     if (getEpoch() !== epoch) throw e; // 本轮已被中止/替代：重试只会白花钱
     if (/403|401|PERMISSION_DENIED|Unauthorized/i.test(msg)) throw e; // 鉴权错误重试无意义
+    // 永久性错误（4xx 参数/路由/格式拒绝、schema 不匹配）重试只会再烧一次费——
+    // 任务制网关上每次 POST 都计费，重试必须仅限 5xx/网络/超时类瞬时错误
+    if (/\b(400|404|409|422)\b|invalid_request|Invalid JSON|Bad Request/i.test(msg)) throw e;
     await new Promise((r) => setTimeout(r, delayMs));
     return fn();
   }
