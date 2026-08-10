@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Layers, RefreshCw, Clapperboard } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Layers, RefreshCw, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
 
-// 3D 导演台 v7：v6（场景即提示词/机位即分镜/成片对比）+ take 历史（每机位多条成片可切换）+ 分镜导出（机位表一键落画布）。
+// 3D 导演台 v8：v7（场景即提示词/机位即分镜/take 历史/分镜导出）+ 导演/机位双视角 + 可搜索锁定的对象树 + 精确变换 + 专注取景。
 // three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
@@ -93,6 +93,13 @@ interface ObjRow {
   name: string
   kind: string
   visible: boolean
+  locked: boolean
+}
+
+interface TransformDraft {
+  position: [number, number, number]
+  rotation: [number, number, number]
+  scale: [number, number, number]
 }
 
 function Inner() {
@@ -109,8 +116,11 @@ function Inner() {
   const [objs, setObjs] = useState<ObjRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [selKind, setSelKind] = useState<string | null>(null)
+  const [transformDraft, setTransformDraft] = useState<TransformDraft | null>(null)
   const [editId, setEditId] = useState<string | null>(null) // Outliner 行内改名中的对象 id
   const [editName, setEditName] = useState('')
+  const [objectQuery, setObjectQuery] = useState('')
+  const [panelsCollapsed, setPanelsCollapsed] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [shots, setShots] = useState<{ id: string; name: string; cam: any; thumb?: string; take?: string; takes?: string[] }[]>([])
@@ -230,7 +240,17 @@ function Inner() {
         const counters: Record<string, number> = {}
         const nextName = (kind: string) => { counters[kind] = (counters[kind] || 0) + 1; return `${kind}${counters[kind]}` }
 
-        const sync = () => { if (!disposed) setObjs(subjects.map((s) => ({ id: s.id, name: s.name, kind: s.kind, visible: s.obj.visible !== false }))) }
+        const sync = () => {
+          if (!disposed) {
+            setObjs(subjects.map((s) => ({
+              id: s.id,
+              name: s.name,
+              kind: s.kind,
+              visible: s.obj.visible !== false,
+              locked: !!s.obj.userData.locked
+            })))
+          }
+        }
 
         // ── 撤销/重做：栈顶=当前态，快照 serializeSceneOnly()（含导入模型 assetId/姿势）──
         const history: any[] = []
@@ -258,7 +278,7 @@ function Inner() {
           for (const st of state.subjects || []) { if (st.kind === '模型') ps.push(buildModelFromState(st)); else buildFromState(st) }
           if (state.cam) applyCam(state.cam)
           sync()
-          if (!disposed) { setSelId(null); setSelKind(null); if (state.cam) setFocal(Math.round(state.cam.focal || 35)) }
+          if (!disposed) { setSelId(null); setSelKind(null); setTransformDraft(null); if (state.cam) setFocal(Math.round(state.cam.focal || 35)) }
           // 异步模型到齐后才解除 restoring（期间抑制 commit，避免快照漏模型 / 与现场脱节）
           void Promise.all(ps).then(() => { restoring = false; if (!disposed) sync() })
         }
@@ -314,14 +334,30 @@ function Inner() {
         }
 
         let curRoot: any = null
+        const roundTransform = (value: number) => Number(value.toFixed(3))
+        const readTransform = (root: any): TransformDraft => ({
+          position: [roundTransform(root.position.x), roundTransform(root.position.y), roundTransform(root.position.z)],
+          rotation: [
+            roundTransform((root.rotation.x * 180) / Math.PI),
+            roundTransform((root.rotation.y * 180) / Math.PI),
+            roundTransform((root.rotation.z * 180) / Math.PI)
+          ],
+          scale: [roundTransform(root.scale.x), roundTransform(root.scale.y), roundTransform(root.scale.z)]
+        })
+        const emitTransform = () => {
+          if (!disposed) setTransformDraft(curRoot ? readTransform(curRoot) : null)
+        }
         const attachByMode = () => {
-          if (!curRoot || curMode === 'pose') { tcontrol.detach(); return }
+          if (!curRoot || curMode === 'pose' || curRoot.userData.locked) { tcontrol.detach(); return }
           tcontrol.setMode(curMode)
           tcontrol.attach(curRoot)
         }
+        const onTransformObjectChange = () => emitTransform()
+        tcontrol.addEventListener('objectChange', onTransformObjectChange)
         const select = (root: any | null) => {
           curRoot = root
           attachByMode()
+          emitTransform()
           if (!disposed) {
             const sub = subjects.find((s) => s.obj === root)
             setSelId(sub ? sub.id : null)
@@ -332,6 +368,7 @@ function Inner() {
           const id = uid('obj')
           const name = nextName(kind)
           obj.userData.kind = kind
+          obj.userData.locked = false
           scene.add(obj)
           subjects.push({ obj, kind, id, name, desc, colorName })
           sync()
@@ -445,6 +482,8 @@ function Inner() {
                     (obj: any) => {
                       if (disposed || gen !== sceneGen) { disposeTree(obj); resolve(); return }
                       obj.userData.assetId = st.assetId
+                      obj.userData.locked = !!st.locked
+                      obj.visible = st.visible !== false
                       obj.position.set(st.pos[0], st.pos[1], st.pos[2])
                       obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
                       applyScale(obj, st.scale)
@@ -473,6 +512,7 @@ function Inner() {
           subjects.splice(subjects.indexOf(sub), 1)
           sync()
           if (curRoot === null && !disposed) { setSelId(null); setSelKind(null) }
+          if (curRoot === null && !disposed) setTransformDraft(null)
           commit()
         }
         const duplicateById = (id: string) => {
@@ -480,6 +520,7 @@ function Inner() {
           if (!sub) return
           const clone = sub.obj.clone(true)
           clone.position.x += 0.7
+          clone.userData.locked = false
           if (sub.kind === '人台') {
             // 克隆必须换新锚定色：clone 的材质是共享引用，先按 旧材质→新材质 映射深拷贝，再把身体材质（非深色面部）染成新色
             const c = nextMannequinColor()
@@ -507,6 +548,15 @@ function Inner() {
           if (!sub) return
           sub.obj.visible = !sub.obj.visible
           sync()
+          commit()
+        }
+        const toggleLockById = (id: string) => {
+          const sub = findById(id)
+          if (!sub) return
+          sub.obj.userData.locked = !sub.obj.userData.locked
+          if (curRoot === sub.obj) attachByMode()
+          sync()
+          commit()
         }
         const lookAtSelected = () => {
           if (!curRoot) return
@@ -536,6 +586,7 @@ function Inner() {
           }
           if (!root) return
           select(root)
+          if (root.userData.locked) return
           // 导入 rigged 模型：蒙皮网格命中点找不到关节祖先 → 取最近的已标记骨骼
           if (curMode === 'pose' && !jnt && root.userData.rigged && hits[0].point) {
             let best: any = null
@@ -642,6 +693,41 @@ function Inner() {
             cam.updateProjectionMatrix()
           }
         }
+        // 参考传统 3D 工具的两态视图：机位视角直接编辑出图相机；导演视角冻结机位，
+        // 主视口可自由绕场查看。回到机位视角时先恢复冻结机位，避免把导演观察角度误当成出图构图。
+        const setViewMode = (next: 'director' | 'camera') => {
+          if (next === 'director') {
+            if (!shotLocked) {
+              shotCam.copy(cam)
+              shotTarget.copy(orbit.target)
+              shotCam.updateProjectionMatrix()
+              shotCam.updateMatrixWorld(true)
+            }
+            shotLocked = true
+            return
+          }
+          if (shotLocked) {
+            cam.copy(shotCam)
+            orbit.target.copy(shotTarget)
+            cam.lookAt(orbit.target)
+            cam.updateProjectionMatrix()
+            cam.updateMatrixWorld(true)
+          }
+          shotLocked = false
+        }
+        const setSelectedTransform = (part: keyof TransformDraft, axis: 0 | 1 | 2, value: number) => {
+          if (!curRoot || curRoot.userData.locked || !Number.isFinite(value)) return
+          if (part === 'position') curRoot.position.setComponent(axis, value)
+          else if (part === 'rotation') {
+            const rad = (value * Math.PI) / 180
+            if (axis === 0) curRoot.rotation.x = rad
+            else if (axis === 1) curRoot.rotation.y = rad
+            else curRoot.rotation.z = rad
+          }
+          else curRoot.scale.setComponent(axis, Math.max(0.01, value))
+          curRoot.updateMatrixWorld(true)
+          emitTransform()
+        }
         // ── 灯光预设：只调两盏灯 + 背景色；不进 undo 快照（与视图操作同类）──
         let curLighting = '默认'
         const applyLighting = (k: string) => {
@@ -699,10 +785,11 @@ function Inner() {
         }
         // 一键落地：包围盒底部贴合地面
         const dropToGround = () => {
-          if (!curRoot) return
+          if (!curRoot || curRoot.userData.locked) return
           const box = new THREE.Box3().setFromObject(curRoot)
           if (box.isEmpty() || !isFinite(box.min.y)) return
           curRoot.position.y -= box.min.y
+          emitTransform()
           commit()
         }
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
@@ -744,6 +831,8 @@ function Inner() {
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
           obj.userData.kind = st.kind
+          obj.userData.locked = !!st.locked
+          obj.visible = st.visible !== false
           if (st.poseName) obj.userData.poseName = st.poseName
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
           const id = uid('obj')
@@ -765,6 +854,8 @@ function Inner() {
                 name: s.name,
                 desc: s.desc || undefined,
                 colorName: s.colorName || undefined,
+                locked: !!o.userData.locked,
+                visible: o.visible !== false,
                 pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
                 rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number],
                 scale: [o.scale.x, o.scale.y, o.scale.z] as [number, number, number],
@@ -1044,8 +1135,11 @@ function Inner() {
           removeById,
           duplicateById,
           toggleVisById,
+          toggleLockById,
           lookAtSelected,
           setMode: (m: TMode) => { curMode = m; attachByMode() },
+          setSelectedTransform,
+          commitTransform: commit,
           setFocal: (mm: number) => { const C = outCam(); C.setFocalLength(mm); C.updateProjectionMatrix() },
           shotSize: (kind: 'cu' | 'ms' | 'fs') => {
             const C = outCam(); const T = outTarget()
@@ -1063,10 +1157,8 @@ function Inner() {
             if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
           // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
-          setLock: (v: boolean) => {
-            if (v && !shotLocked) { shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true) }
-            shotLocked = v
-          },
+          setViewMode,
+          setLock: (v: boolean) => setViewMode(v ? 'director' : 'camera'),
           // 把出图机位设为当前视图（锁定状态下重新取景）
           setShotFromView: () => {
             shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true)
@@ -1074,13 +1166,15 @@ function Inner() {
           undo,
           redo: redoFn,
           applyPose: (name: string, map: Record<string, [number, number, number]>) => {
-            if (!curRoot || curRoot.userData.kind !== '人台') return
+            if (!curRoot || curRoot.userData.kind !== '人台' || curRoot.userData.locked) return
             curRoot.traverse((c: any) => { if (c.userData && c.userData.joint) c.rotation.set(0, 0, 0) })
             curRoot.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && map[j]) c.rotation.set(map[j][0], map[j][1], map[j][2]) })
             curRoot.userData.poseName = name === '站立' ? '' : name
             commit()
           },
-          setFacing: (rad: number) => { if (curRoot) { curRoot.rotation.y = rad; commit() } },
+          setFacing: (rad: number) => {
+            if (curRoot && !curRoot.userData.locked) { curRoot.rotation.y = rad; emitTransform(); commit() }
+          },
           capture: (): string => {
             tcontrol.detach()
             const chv = camHelper.visible
@@ -1138,6 +1232,7 @@ function Inner() {
           safe(() => renderer.domElement.removeEventListener('webglcontextlost', onCtxLost))
           safe(() => renderer.domElement.removeEventListener('webglcontextrestored', onCtxRestored))
           safe(() => tcontrol.detach())
+          safe(() => tcontrol.removeEventListener('objectChange', onTransformObjectChange))
           safe(() => scene.remove(tHelper))
           safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
           safe(() => tcontrol.dispose())
@@ -1175,7 +1270,7 @@ function Inner() {
     else if (k === 'e') onMode('scale')
     else if (k === 'r') onMode('pose')
     else if (k === 'f') { if (selId) api.current.lookAtSelected?.() }
-    else if (k === 'l') { const v = !locked; setLocked(v); api.current.setLock?.(v) }
+    else if (k === 'l') onViewMode(locked ? 'camera' : 'director')
     else if (k === 'c') { if (lastTake) setCompareOn((v) => !v) }
     else if (e.key === 'Delete' || e.key === 'Backspace') { if (selId) api.current.removeById?.(selId) }
   }
@@ -1191,12 +1286,18 @@ function Inner() {
   const onFocal = (mm: number) => { setFocal(mm); api.current.setFocal?.(mm) }
   const onAspect = (k: string) => { setAspectK(k); api.current.setAspect?.(ASPECTS.find((a) => a.k === k)?.ar ?? 0) }
 
-  // letterbox 画框尺寸：中央可视区（top-16/bottom-24/left-52/right-64）内按画幅取最大内接矩形
+  const onViewMode = (next: 'director' | 'camera') => {
+    const director = next === 'director'
+    setLocked(director)
+    api.current.setViewMode?.(next)
+  }
+
+  // letterbox 画框尺寸：中央可视区内按画幅取最大内接矩形；收起侧栏时随视口扩展。
   const [frameRect, setFrameRect] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => {
     if (!curAr) { setFrameRect(null); return }
     const calc = () => {
-      const cw = Math.max(1, window.innerWidth - 208 - 256)
+      const cw = Math.max(1, window.innerWidth - (panelsCollapsed ? 24 : 224 + 304))
       const ch = Math.max(1, window.innerHeight - 64 - 96)
       let w = cw
       let h = w / curAr
@@ -1206,7 +1307,7 @@ function Inner() {
     calc()
     window.addEventListener('resize', calc)
     return () => window.removeEventListener('resize', calc)
-  }, [curAr])
+  }, [curAr, panelsCollapsed])
   const onMode = (m: TMode) => { setMode(m); api.current.setMode?.(m) }
   const onImportClick = () => fileRef.current?.click()
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1434,7 +1535,7 @@ function Inner() {
     <button
       onClick={onClick}
       title={title}
-      className={`px-2 py-1 rounded-lg text-xs flex items-center gap-1 border transition-colors duration-150 active:scale-[0.97] ${
+      className={`px-1.5 py-1 rounded-lg text-xs flex items-center gap-1 border whitespace-nowrap transition-colors duration-150 active:scale-[0.97] ${
         on ? 'border-amber-300/50 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
       }`}
     >
@@ -1443,6 +1544,43 @@ function Inner() {
   )
 
   const kindIcon = (k: string) => (k === '人台' ? <User size={12} /> : k === '道具' ? <BoxIcon size={12} /> : <Upload size={12} />)
+  const query = objectQuery.trim().toLocaleLowerCase()
+  const filteredObjs = query
+    ? objs.filter((o) => `${o.name} ${o.kind}`.toLocaleLowerCase().includes(query))
+    : objs
+  const objectGroups = ['人台', '道具', '模型']
+    .map((kind) => ({ kind, items: filteredObjs.filter((o) => o.kind === kind) }))
+    .filter((group) => group.items.length > 0)
+  const selectedObj = objs.find((o) => o.id === selId)
+  const viewportInsetCls = panelsCollapsed ? 'left-3 right-3' : 'left-56 right-[19rem]'
+  const setTransformAxis = (part: keyof TransformDraft, axis: 0 | 1 | 2, raw: string) => {
+    const value = Number(raw)
+    if (!Number.isFinite(value)) return
+    api.current.setSelectedTransform?.(part, axis, value)
+  }
+  const renderAxisEditor = (label: string, part: keyof TransformDraft, step: number) => {
+    if (!transformDraft) return null
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="w-8 shrink-0 text-white/40">{label}</span>
+        {(['X', 'Y', 'Z'] as const).map((axisLabel, axis) => (
+          <label key={axisLabel} className="min-w-0 flex-1 flex items-center rounded-lg border border-white/10 bg-white/[0.04] focus-within:border-amber-300/50 transition-colors">
+            <span className="pl-1.5 text-[9px] font-semibold text-white/30">{axisLabel}</span>
+            <input
+              aria-label={`${label} ${axisLabel}`}
+              type="number"
+              step={step}
+              value={transformDraft[part][axis]}
+              disabled={selectedObj?.locked}
+              onChange={(e) => setTransformAxis(part, axis as 0 | 1 | 2, e.target.value)}
+              onBlur={() => api.current.commitTransform?.()}
+              className="w-full min-w-0 bg-transparent px-1 py-1 text-right text-[10px] tabular-nums outline-none disabled:opacity-35"
+            />
+          </label>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-[90] bg-zinc-950 flex flex-col text-white overscroll-none" data-interactive>
@@ -1451,7 +1589,7 @@ function Inner() {
       {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染）。
           范围限制在中央可视取景区内；不带 z-index——按 DOM 顺序沉到左右面板/顶栏/底栏之下，只盖 3D 视口 */}
       {showGuides && ready && (
-        <svg className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none" viewBox="0 0 3 3" preserveAspectRatio="none">
+        <svg className={`absolute top-16 bottom-24 ${viewportInsetCls} pointer-events-none`} viewBox="0 0 3 3" preserveAspectRatio="none">
           {[1, 2].map((n) => (
             <g key={n} stroke="#fff" strokeOpacity="0.28" strokeWidth="1" vectorEffect="non-scaling-stroke">
               <line x1={n} y1="0" x2={n} y2="3" vectorEffect="non-scaling-stroke" />
@@ -1466,7 +1604,7 @@ function Inner() {
       )}
       {/* 出图画幅框（选了非「视口」画幅时）：琥珀框内=模型实际看到的构图范围，框外压暗；同样沉在面板之下 */}
       {frameRect && (
-        <div className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none grid place-items-center">
+        <div className={`absolute top-16 bottom-24 ${viewportInsetCls} pointer-events-none grid place-items-center`}>
           <div style={{ width: frameRect.w, height: frameRect.h }} className="border border-amber-200/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
         </div>
       )}
@@ -1497,14 +1635,19 @@ function Inner() {
           <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体 (E)"><Maximize size={13} /> 缩放</Btn>
           <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿 (R)"><Hand size={13} /> 摆姿</Btn>
           <div className="w-px h-5 bg-white/10" />
+          <Btn on={!locked} onClick={() => onViewMode('camera')} title="机位视角：直接调整最终出图相机"><Camera size={13} /> 机位视角</Btn>
+          <Btn on={locked} onClick={() => onViewMode('director')} title="导演视角：冻结出图机位，自由绕场查看"><Clapperboard size={13} /> 导演视角</Btn>
+          {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把当前导演观察角度更新为出图机位"><Crosshair size={13} /> 更新机位</Btn>}
+          <div className="w-px h-5 bg-white/10" />
           <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
           <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加成片对比 (C)' : '尚无成片可对比'}><Layers size={13} /></Btn>
+          <Btn on={panelsCollapsed} onClick={() => setPanelsCollapsed((v) => !v)} title={panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}>
+            {panelsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+            <span className="sr-only">{panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}</span>
+          </Btn>
           {compareOn && lastTake && (
             <input type="range" min={0.1} max={1} step={0.05} value={compareOpacity} onChange={(e) => setCompareOpacity(Number(e.target.value))} className="w-16 accent-amber-300" title="成片叠加透明度" />
           )}
-          <div className="w-px h-5 bg-white/10" />
-          <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景 (L)"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
-          {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
           <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
@@ -1514,71 +1657,111 @@ function Inner() {
       </div>
 
       {/* PiP：出图取景预览（仅锁定取景时显示） */}
-      <div className={`absolute top-16 right-[17rem] z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
+      <div className={`absolute top-16 ${panelsCollapsed ? 'right-3' : 'right-[19rem]'} z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
         <div ref={pipRef} />
         <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-zinc-950/70 text-amber-200/90 rounded-br-lg">出图取景</div>
       </div>
 
       {/* 左：Outliner */}
-      <div className={`absolute top-16 left-3 bottom-24 w-48 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
-        <span className={secCls}>场景对象</span>
-        <div className="flex items-center gap-1">
-          <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={12} /> 人台</Btn>
-          <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={12} /> 道具</Btn>
-          <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
+      {!panelsCollapsed && (
+        <div className={`absolute top-16 left-3 bottom-24 w-52 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
+          <div className="flex items-center justify-between">
+            <span className={secCls}>场景对象</span>
+            <span className="text-[10px] tabular-nums text-white/30">{filteredObjs.length}/{objs.length}</span>
+          </div>
+          <div className="relative">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
+            <input
+              value={objectQuery}
+              onChange={(e) => setObjectQuery(e.target.value)}
+              placeholder="搜索对象"
+              aria-label="搜索场景对象"
+              className="w-full rounded-lg border border-white/10 bg-black/20 py-1.5 pl-7 pr-2 text-[11px] outline-none placeholder:text-white/25 focus:border-amber-300/45 transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={12} /> 人台</Btn>
+            <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={12} /> 道具</Btn>
+            <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
+          </div>
+          <div className="flex items-center gap-1">
+            <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
+            <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
+          </div>
+          <div className="h-px bg-white/[0.07]" />
+          <div className="flex flex-col gap-2 overflow-auto ace-scroll flex-1">
+            {objectGroups.map((group) => (
+              <section key={group.kind} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/25">
+                  <span>{group.kind}</span><span className="h-px flex-1 bg-white/[0.06]" /><span>{group.items.length}</span>
+                </div>
+                {group.items.map((o) => (
+                  <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors ${selId === o.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/75'}`}>
+                    {editId === o.id ? (
+                      <input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
+                        onKeyDown={(e) => {
+                          if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
+                          if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
+                          else if (e.key === 'Escape') setEditId(null)
+                        }}
+                        className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => api.current.selectById?.(o.id)}
+                        onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
+                        title={`${o.kind} · 双击改名`}
+                        className="flex-1 min-w-0 flex items-center gap-1.5 rounded text-left outline-none focus-visible:ring-1 focus-visible:ring-amber-300/50"
+                      >
+                        {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
+                      </button>
+                    )}
+                    <button onClick={() => api.current.toggleVisById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title={o.visible ? '隐藏' : '显示'}>{o.visible ? <Eye size={11} /> : <EyeOff size={11} />}</button>
+                    <button onClick={() => api.current.toggleLockById?.(o.id)} className={`shrink-0 transition-colors ${o.locked ? 'text-amber-200' : 'text-white/35 hover:text-white'}`} title={o.locked ? '解锁变换' : '锁定变换'}>{o.locked ? <Lock size={11} /> : <Unlock size={11} />}</button>
+                    <button onClick={() => api.current.duplicateById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title="复制"><Copy size={11} /></button>
+                    <button onClick={() => api.current.removeById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title="删除"><Trash2 size={11} /></button>
+                  </div>
+                ))}
+              </section>
+            ))}
+            {!objs.length && <span className="text-white/35">用上面按钮添加/导入对象</span>}
+            {!!objs.length && !filteredObjs.length && <span className="text-white/35">没有匹配“{objectQuery.trim()}”的对象</span>}
+          </div>
+          <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
         </div>
-        <div className="flex items-center gap-1">
-          <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
-          <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
-        </div>
-        <div className="h-px bg-white/[0.07]" />
-        <div className="flex flex-col gap-1 overflow-auto ace-scroll flex-1">
-          {objs.map((o) => (
-            <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors ${selId === o.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/75'}`}>
-              {editId === o.id ? (
-                <input
-                  autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
-                    if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
-                    else if (e.key === 'Escape') setEditId(null)
-                  }}
-                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
-                />
-              ) : (
-                <button
-                  onClick={() => api.current.selectById?.(o.id)}
-                  onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
-                  title={o.kind}
-                  className="flex-1 flex items-center gap-1.5 text-left truncate"
-                >
-                  {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
-                </button>
-              )}
-              <button onClick={() => api.current.toggleVisById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="显隐">{o.visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
-              <button onClick={() => api.current.duplicateById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="复制"><Copy size={12} /></button>
-              <button onClick={() => api.current.removeById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
-            </div>
-          ))}
-          {!objs.length && <span className="text-white/35">用上面按钮添加/导入对象</span>}
-        </div>
-        <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
-      </div>
+      )}
 
       {/* 右：Inspector + 镜头 + 机位 */}
-      <div className={`absolute top-16 right-3 bottom-24 w-60 flex flex-col gap-3 p-3 ${panelCls} text-xs overflow-auto ace-scroll`}>
+      {!panelsCollapsed && (
+      <div className={`absolute top-16 right-3 bottom-24 w-72 flex flex-col gap-3 p-3 ${panelCls} text-xs overflow-auto ace-scroll`}>
         {selId && (
           <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
-            <span className={secCls}>选中：{objs.find((o) => o.id === selId)?.name}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className={`${secCls} truncate`}>选中：{selectedObj?.name}</span>
+              {selectedObj?.locked && <span className="rounded-full bg-amber-300/10 px-1.5 py-0.5 text-[9px] text-amber-200">已锁定</span>}
+            </div>
             <div className="flex items-center gap-1 flex-wrap">
               <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
               <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
               <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
+              <Btn on={selectedObj?.locked} onClick={() => selId && api.current.toggleLockById?.(selId)} title={selectedObj?.locked ? '解锁变换' : '锁定变换'}>{selectedObj?.locked ? <Unlock size={12} /> : <Lock size={12} />} {selectedObj?.locked ? '解锁' : '锁定'}</Btn>
               <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
             </div>
+            {transformDraft && (
+              <div className="flex flex-col gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
+                <div className="mb-0.5 flex items-center justify-between">
+                  <span className={secCls}>精确变换</span>
+                  <span className="text-[9px] text-white/25">旋转单位 °</span>
+                </div>
+                {renderAxisEditor('位置', 'position', 0.1)}
+                {renderAxisEditor('旋转', 'rotation', 1)}
+                {renderAxisEditor('缩放', 'scale', 0.1)}
+              </div>
+            )}
             <div className="flex items-start gap-1">
               <span className="text-white/40 w-8 mt-1">描述</span>
               <textarea
@@ -1700,9 +1883,10 @@ function Inner() {
           )}
         </div>
       </div>
+      )}
 
       {/* 底：场景描述 + 生成 */}
-      <div className="absolute bottom-3 left-52 right-64 flex items-end gap-2">
+      <div className={`absolute bottom-3 ${viewportInsetCls} flex items-end gap-2`}>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
