@@ -5,23 +5,18 @@ import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
+import {
+  DIRECTOR_BODY_PRESETS,
+  DIRECTOR_POSES as POSES,
+  getDirectorBodyPreset,
+  type DirectorBodyType
+} from './directorMannequin'
 
-// 3D 导演台 v8：v7（场景即提示词/机位即分镜/take 历史/分镜导出）+ 导演/机位双视角 + 可搜索锁定的对象树 + 精确变换 + 专注取景。
-// three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
+// 3D 导演台 v9：v8（场景即提示词/机位即分镜/导演与机位双视角/对象树/精确变换）
+// + 8 种体型、20 种姿势和精细程序化人台。three 动态分割，零内置模型资源；仍可导入 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
 
-// 一键姿势预设（关节名→欧拉角；粗摆即可，AI 据深度/截图 + 姿势名渲染）
-const POSES: { k: string; m: Record<string, [number, number, number]> }[] = [
-  { k: '站立', m: {} },
-  { k: 'T姿', m: { 左肩: [0, 0, -1.45], 右肩: [0, 0, 1.45] } },
-  { k: '叉腰', m: { 左肩: [0, 0, -0.5], 左肘: [0, 0, -1.6], 右肩: [0, 0, 0.5], 右肘: [0, 0, 1.6] } },
-  { k: '举双手', m: { 左肩: [0, 0, -2.9], 右肩: [0, 0, 2.9] } },
-  { k: '招手', m: { 右肩: [0, 0, 2.5], 右肘: [0, 0, 0.6] } },
-  { k: '行走', m: { 左髋: [0.5, 0, 0], 右髋: [-0.5, 0, 0], 左肩: [-0.4, 0, 0], 右肩: [0.4, 0, 0], 左膝: [-0.3, 0, 0] } },
-  { k: '坐', m: { 左髋: [1.5, 0, 0], 右髋: [1.5, 0, 0], 左膝: [-1.5, 0, 0], 右膝: [-1.5, 0, 0] } },
-  { k: '指向前', m: { 右肩: [-1.4, 0, 0] } }
-]
 const FACINGS: { k: string; r: number }[] = [
   { k: '面向', r: 0 },
   { k: '背向', r: Math.PI },
@@ -94,6 +89,8 @@ interface ObjRow {
   kind: string
   visible: boolean
   locked: boolean
+  bodyType?: DirectorBodyType
+  poseName?: string
 }
 
 interface TransformDraft {
@@ -247,7 +244,9 @@ function Inner() {
               name: s.name,
               kind: s.kind,
               visible: s.obj.visible !== false,
-              locked: !!s.obj.userData.locked
+              locked: !!s.obj.userData.locked,
+              bodyType: s.kind === '人台' ? getDirectorBodyPreset(s.obj.userData.bodyType).bodyType : undefined,
+              poseName: s.kind === '人台' ? s.obj.userData.poseName || '' : undefined
             })))
           }
         }
@@ -297,39 +296,147 @@ function Inner() {
           syncHistoryUi()
         }
 
-        const makeMannequin = (color: number) => {
-          const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
-          const mesh = (geo: any, y = 0) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; return m }
-          const joint = (name: string, x: number, y: number, z: number) => { const g = new THREE.Group(); g.position.set(x, y, z); g.userData.joint = name; return g }
+        const makeMannequin = (color: number, bodyType: DirectorBodyType = 'mannequin') => {
+          const preset = getDirectorBodyPreset(bodyType)
+          const p = preset.proportions
+          const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.04, roughness: 0.72 })
+          const detailMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, metalness: 0.02, roughness: 0.82 })
           const root = new THREE.Group()
           root.userData.kind = '人台'
-          const hips = new THREE.Group(); hips.position.set(0, 0.9, 0); root.add(hips)
-          const chest = new THREE.Group(); chest.position.set(0, 0.02, 0); hips.add(chest)
-          chest.add(mesh(new THREE.CapsuleGeometry(0.17, 0.4, 4, 10), 0.22))
-          const head = joint('头', 0, 0.5, 0); chest.add(head)
-          head.add(mesh(new THREE.SphereGeometry(0.13, 18, 16), 0.13))
-          // 面部指示（深色鼻 + 双眼）：人台前/后一眼可辨，摆朝向不再靠猜
-          const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 })
-          const nose = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.06, 8), faceMat)
-          nose.rotation.x = Math.PI / 2 // 锥尖朝 +Z（人台正面）
-          nose.position.set(0, 0.12, 0.13)
+          root.userData.bodyType = preset.bodyType
+          root.userData.poseOffsetY = 0
+          root.userData.bodyUnitScale = 0.78 // 保持成人素体约 1.8m，兼容现有 35mm 默认机位与镜别预设
+
+          const mesh = (
+            geo: any,
+            position: [number, number, number] = [0, 0, 0],
+            scale: [number, number, number] = [1, 1, 1],
+            material: any = mat
+          ) => {
+            const m = new THREE.Mesh(geo, material)
+            m.position.set(position[0], position[1], position[2])
+            m.scale.set(scale[0], scale[1], scale[2])
+            return m
+          }
+          const joint = (name: string, x: number, y: number, z: number) => {
+            const g = new THREE.Group()
+            g.position.set(x, y, z)
+            g.userData.joint = name
+            return g
+          }
+          const addJointBall = (g: any, radius: number) => {
+            g.add(mesh(new THREE.SphereGeometry(radius, 16, 14), [0, 0, 0], [p.jointRadiusScale, p.jointRadiusScale, p.jointRadiusScale]))
+          }
+          const addSegment = (g: any, radius: number, length: number) => {
+            g.add(mesh(new THREE.CapsuleGeometry(radius, length, 8, 14), [0, -(length * 0.5 + radius), 0]))
+          }
+
+          // rigRoot 负责姿势预设的整体俯仰/偏移；restY 在构建末尾按包围盒自动贴地。
+          const rigRoot = joint('骨盆', 0, 0, 0)
+          rigRoot.userData.rigRoot = true
+          rigRoot.scale.setScalar(root.userData.bodyUnitScale)
+          root.add(rigRoot)
+
+          const pelvis = mesh(new THREE.SphereGeometry(p.pelvisRadius, 22, 18), [0, p.hipY, 0], p.pelvisScale)
+          rigRoot.add(pelvis)
+
+          // 胸腹分成两个体块，以髋部为旋转枢轴；比旧版单胶囊更能表达弯腰和体型差异。
+          const torso = joint('胸', 0, p.hipY, 0)
+          rigRoot.add(torso)
+          const abdomenY = p.pelvisRadius * 0.55 + p.torsoLowerHeight * 0.5
+          const chestY = abdomenY + p.torsoLowerHeight * 0.5 + p.torsoUpperHeight * 0.5 + p.torsoUpperRadius * 0.12
+          torso.add(mesh(new THREE.CapsuleGeometry(p.torsoLowerRadius, p.torsoLowerHeight, 10, 18), [0, abdomenY, 0], p.torsoLowerScale))
+          torso.add(mesh(new THREE.CapsuleGeometry(p.torsoUpperRadius, p.torsoUpperHeight, 12, 20), [0, chestY, 0], p.torsoUpperScale))
+          const chestRing = mesh(
+            new THREE.TorusGeometry(p.torsoUpperRadius * p.torsoUpperScale[0] * 0.77, Math.max(0.005, p.torsoUpperRadius * 0.026), 8, 32),
+            [0, chestY - p.torsoUpperHeight * 0.38, 0],
+            [1, p.torsoUpperScale[2] / p.torsoUpperScale[0], 1],
+            detailMat
+          )
+          chestRing.rotation.x = Math.PI / 2
+          torso.add(chestRing)
+
+          const neckY = chestY + p.torsoUpperHeight * 0.5 + p.neckHeight * 0.5 + p.torsoUpperRadius * 0.18
+          const neck = joint('颈', 0, neckY, 0)
+          torso.add(neck)
+          neck.add(mesh(new THREE.CylinderGeometry(p.neckRadius * 0.9, p.neckRadius, p.neckHeight, 16)))
+          const headY = p.neckHeight * 0.5 + p.headRadius * 0.78
+          const head = joint('头', 0, headY, 0)
+          neck.add(head)
+          head.add(mesh(new THREE.SphereGeometry(p.headRadius, 24, 20), [0, 0, 0], p.headScale))
+          head.add(mesh(new THREE.SphereGeometry(p.headRadius * 0.36, 14, 10), [0, -p.headRadius * 0.08, p.faceOffsetZ], [0.72, 0.52, 0.26]))
+          const eyeY = p.headRadius * 0.15
+          const eyeX = p.headRadius * 0.25
+          const eyeZ = p.faceOffsetZ + p.headRadius * 0.08
+          head.add(mesh(new THREE.SphereGeometry(p.eyeRadius, 9, 7), [-eyeX, eyeY, eyeZ], [1, 0.62, 0.36], detailMat))
+          head.add(mesh(new THREE.SphereGeometry(p.eyeRadius, 9, 7), [eyeX, eyeY, eyeZ], [1, 0.62, 0.36], detailMat))
+          const nose = mesh(new THREE.ConeGeometry(p.headRadius * 0.075, p.headRadius * 0.24, 8), [0, -p.headRadius * 0.02, eyeZ + p.headRadius * 0.08], [0.75, 1, 0.75], detailMat)
+          nose.rotation.x = Math.PI / 2
           head.add(nose)
-          const eye = (x: number) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), faceMat); e.position.set(x, 0.16, 0.105); head.add(e) }
-          eye(-0.05); eye(0.05)
+          head.add(mesh(new THREE.BoxGeometry(p.headRadius * 0.34, p.headRadius * 0.035, p.headRadius * 0.025), [0, -p.headRadius * 0.2, eyeZ + p.headRadius * 0.035], [1, 1, 1], detailMat))
+
+          const shoulderY = chestY + p.torsoUpperHeight * 0.16
           const arm = (side: 'L' | 'R') => {
-            const sh = joint(side === 'L' ? '左肩' : '右肩', side === 'L' ? -0.22 : 0.22, 0.42, 0); chest.add(sh)
-            sh.add(mesh(new THREE.CapsuleGeometry(0.055, 0.26, 4, 8), -0.17))
-            const el = joint(side === 'L' ? '左肘' : '右肘', 0, -0.34, 0); sh.add(el)
-            el.add(mesh(new THREE.CapsuleGeometry(0.05, 0.24, 4, 8), -0.16))
+            const isLeft = side === 'L'
+            const sh = joint(isLeft ? '左肩' : '右肩', isLeft ? -p.shoulderWidth : p.shoulderWidth, shoulderY, 0)
+            torso.add(sh)
+            addJointBall(sh, p.shoulderRadius)
+            addSegment(sh, p.upperArmRadius, p.upperArmLength)
+            const elbowY = -(p.upperArmLength + p.upperArmRadius + p.elbowRadius)
+            const elbow = joint(isLeft ? '左肘' : '右肘', 0, elbowY, 0)
+            sh.add(elbow)
+            addJointBall(elbow, p.elbowRadius)
+            addSegment(elbow, p.forearmRadius, p.forearmLength)
+            const wristY = -(p.forearmLength + p.forearmRadius + p.wristRadius)
+            const wrist = joint(isLeft ? '左腕' : '右腕', 0, wristY, 0)
+            elbow.add(wrist)
+            addJointBall(wrist, p.wristRadius)
+            const palm = mesh(new THREE.SphereGeometry(p.handRadius, 14, 12), [0, -p.handRadius * 1.05, 0.015], p.handScale)
+            wrist.add(palm)
+            const thumb = mesh(
+              new THREE.CapsuleGeometry(p.handRadius * 0.24, p.handRadius * 0.5, 6, 8),
+              [isLeft ? -p.handRadius * 0.62 : p.handRadius * 0.62, -p.handRadius * 0.95, p.handRadius * 0.28],
+              [0.58, 0.82, 0.52]
+            )
+            thumb.rotation.z = isLeft ? 0.68 : -0.68
+            wrist.add(thumb)
           }
-          arm('L'); arm('R')
+          arm('L')
+          arm('R')
+
           const leg = (side: 'L' | 'R') => {
-            const hp = joint(side === 'L' ? '左髋' : '右髋', side === 'L' ? -0.1 : 0.1, 0, 0); hips.add(hp)
-            hp.add(mesh(new THREE.CapsuleGeometry(0.075, 0.32, 4, 8), -0.22))
-            const kn = joint(side === 'L' ? '左膝' : '右膝', 0, -0.44, 0); hp.add(kn)
-            kn.add(mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), -0.2))
+            const isLeft = side === 'L'
+            const hip = joint(isLeft ? '左髋' : '右髋', isLeft ? -p.legSpread : p.legSpread, p.hipY - p.pelvisRadius * 0.22, 0)
+            rigRoot.add(hip)
+            addJointBall(hip, p.thighRadius * 1.08)
+            addSegment(hip, p.thighRadius, p.thighLength)
+            const kneeY = -(p.thighLength + p.thighRadius + p.kneeRadius)
+            const knee = joint(isLeft ? '左膝' : '右膝', 0, kneeY, 0)
+            hip.add(knee)
+            addJointBall(knee, p.kneeRadius)
+            addSegment(knee, p.calfRadius, p.calfLength)
+            const ankleY = -(p.calfLength + p.calfRadius + p.ankleRadius)
+            const ankle = joint(isLeft ? '左踝' : '右踝', 0, ankleY, 0)
+            knee.add(ankle)
+            addJointBall(ankle, p.ankleRadius)
+            const foot = mesh(
+              new THREE.CapsuleGeometry(p.footRadius, p.footLength, 8, 14),
+              [0, -p.footRadius * 0.72, p.footLength * 0.5],
+              p.footScale
+            )
+            foot.rotation.x = Math.PI / 2
+            ankle.add(foot)
+            ankle.add(mesh(new THREE.SphereGeometry(p.footRadius, 14, 10), [0, -p.footRadius * 0.72, p.footLength * 1.18], [p.footScale[0] * 0.92, p.footScale[1] * 0.72, p.footScale[2] * 0.48]))
           }
-          leg('L'); leg('R')
+          leg('L')
+          leg('R')
+
+          root.updateMatrixWorld(true)
+          const bounds = new THREE.Box3().setFromObject(root)
+          const restY = bounds.isEmpty() || !isFinite(bounds.min.y) ? 0 : -bounds.min.y
+          rigRoot.position.y = restY
+          rigRoot.userData.restY = restY
+          root.updateMatrixWorld(true)
           return root
         }
 
@@ -383,9 +490,88 @@ function Inner() {
         }
         const addMannequin = () => {
           const c = nextMannequinColor()
-          const g = makeMannequin(c.hex)
+          const g = makeMannequin(c.hex, 'mannequin')
           g.position.set((subjects.length % 3) * 0.9 - 0.9, 0, 0)
           addSubject(g, '人台', undefined, c.name)
+        }
+        const findRigRoot = (root: any) => {
+          let rig: any = null
+          root?.traverse?.((c: any) => { if (!rig && c.userData?.rigRoot) rig = c })
+          return rig
+        }
+        const groundMannequinRig = (root: any) => {
+          const rig = findRigRoot(root)
+          if (!rig) return
+          root.updateMatrixWorld(true)
+          const inverseRoot = root.matrixWorld.clone().invert()
+          const localBounds = new THREE.Box3()
+          root.traverse((c: any) => {
+            if (!c.isMesh || !c.geometry) return
+            if (!c.geometry.boundingBox) c.geometry.computeBoundingBox?.()
+            if (!c.geometry.boundingBox) return
+            const relative = inverseRoot.clone().multiply(c.matrixWorld)
+            localBounds.union(c.geometry.boundingBox.clone().applyMatrix4(relative))
+          })
+          if (localBounds.isEmpty() || !isFinite(localBounds.min.y)) return
+          rig.position.y -= localBounds.min.y
+          root.userData.poseOffsetY = rig.position.y - Number(rig.userData.restY || 0)
+          root.updateMatrixWorld(true)
+        }
+        const applyMannequinPose = (root: any, name: string, map: Record<string, [number, number, number]>, offsetY = 0) => {
+          if (!root || root.userData.kind !== '人台') return
+          root.traverse((c: any) => { if (c.userData?.joint) c.rotation.set(0, 0, 0) })
+          const rig = findRigRoot(root)
+          const preset = getDirectorBodyPreset(root.userData.bodyType)
+          const scaledOffset = offsetY * Number(root.userData.bodyUnitScale || 1) * (preset.proportions.hipY / getDirectorBodyPreset('mannequin').proportions.hipY)
+          if (rig) rig.position.y = Number(rig.userData.restY || 0) + scaledOffset
+          root.userData.poseOffsetY = scaledOffset
+          root.traverse((c: any) => {
+            const jointName = c.userData?.joint
+            if (jointName && map[jointName]) c.rotation.set(map[jointName][0], map[jointName][1], map[jointName][2])
+          })
+          root.userData.poseName = name === '站立' ? '' : name
+          groundMannequinRig(root)
+        }
+        const setSelectedBodyType = (bodyType: DirectorBodyType) => {
+          const sub = subjects.find((s) => s.obj === curRoot)
+          if (!sub || sub.kind !== '人台' || sub.obj.userData.locked) return
+          const old = sub.obj
+          if (getDirectorBodyPreset(old.userData.bodyType).bodyType === bodyType) return
+          const joints: Record<string, [number, number, number]> = {}
+          old.traverse((c: any) => {
+            const jointName = c.userData?.joint
+            if (jointName) joints[jointName] = [c.rotation.x, c.rotation.y, c.rotation.z]
+          })
+          let color = MANNEQUIN_COLORS.find((c) => c.name === sub.colorName)?.hex
+          if (color == null) {
+            old.traverse((c: any) => {
+              const hex = c.material?.color?.getHex?.()
+              if (color == null && typeof hex === 'number' && hex !== 0x2a2d33) color = hex
+            })
+          }
+          const replacement = makeMannequin(color ?? 0xc7ccd6, bodyType)
+          replacement.position.copy(old.position)
+          replacement.rotation.copy(old.rotation)
+          replacement.scale.copy(old.scale)
+          replacement.visible = old.visible
+          replacement.userData.locked = !!old.userData.locked
+          replacement.userData.poseName = old.userData.poseName || ''
+          replacement.userData.poseOffsetY = Number(old.userData.poseOffsetY || 0)
+          const nextRig = findRigRoot(replacement)
+          if (nextRig) nextRig.position.y = Number(nextRig.userData.restY || 0) + replacement.userData.poseOffsetY
+          replacement.traverse((c: any) => {
+            const jointName = c.userData?.joint
+            if (jointName && joints[jointName]) c.rotation.set(joints[jointName][0], joints[jointName][1], joints[jointName][2])
+          })
+          groundMannequinRig(replacement)
+          tcontrol.detach()
+          scene.remove(old)
+          scene.add(replacement)
+          sub.obj = replacement
+          disposeTree(old)
+          select(replacement)
+          sync()
+          commit()
         }
         const addProp = () => {
           const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
@@ -526,6 +712,7 @@ function Inner() {
             const c = nextMannequinColor()
             const matMap = new Map<any, any>()
             clone.traverse((m: any) => {
+              if (m.geometry) m.geometry = m.geometry.clone() // 副本人台独占几何；原件换体型/删除时不会把共享 GPU buffer 一并释放
               if (!m.material) return
               const ms = Array.isArray(m.material) ? m.material : [m.material]
               const ns = ms.map((mm: any) => {
@@ -796,12 +983,12 @@ function Inner() {
         const stagePreset = (key: string) => {
           if (key === '双人对话') {
             const ca = nextMannequinColor()
-            const a = makeMannequin(ca.hex)
+            const a = makeMannequin(ca.hex, 'mannequin')
             a.position.set(-0.6, 0, 0)
             a.rotation.y = Math.PI / 2
             addSubject(a, '人台', undefined, ca.name)
             const cb = nextMannequinColor()
-            const b = makeMannequin(cb.hex)
+            const b = makeMannequin(cb.hex, 'female')
             b.position.set(0.6, 0, 0)
             b.rotation.y = -Math.PI / 2
             addSubject(b, '人台', undefined, cb.name)
@@ -826,7 +1013,7 @@ function Inner() {
           const colorHex = legacyIdx >= 0 ? MANNEQUIN_COLORS[legacyIdx].hex : MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex
           const obj: any = st.kind === '道具'
             ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-            : makeMannequin(assigned?.hex ?? colorHex ?? 0xc7ccd6)
+            : makeMannequin(assigned?.hex ?? colorHex ?? 0xc7ccd6, getDirectorBodyPreset(st.bodyType).bodyType)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
@@ -834,7 +1021,14 @@ function Inner() {
           obj.userData.locked = !!st.locked
           obj.visible = st.visible !== false
           if (st.poseName) obj.userData.poseName = st.poseName
+          if (st.kind === '人台') {
+            obj.userData.poseOffsetY = Number(st.poseOffsetY || 0)
+            const rig = findRigRoot(obj)
+            if (rig) rig.position.y = Number(rig.userData.restY || 0) + obj.userData.poseOffsetY
+          }
           if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
+          // v8 及更早存档没有内部落地偏移；沿用旧关节角后按新几何自动补齐，避免迁移后悬空。
+          if (st.kind === '人台' && st.poseOffsetY == null) groundMannequinRig(obj)
           const id = uid('obj')
           scene.add(obj)
           subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName })
@@ -854,6 +1048,8 @@ function Inner() {
                 name: s.name,
                 desc: s.desc || undefined,
                 colorName: s.colorName || undefined,
+                bodyType: s.kind === '人台' ? getDirectorBodyPreset(o.userData.bodyType).bodyType : undefined,
+                poseOffsetY: s.kind === '人台' ? Number(o.userData.poseOffsetY || 0) : undefined,
                 locked: !!o.userData.locked,
                 visible: o.visible !== false,
                 pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
@@ -1030,15 +1226,17 @@ function Inner() {
             const vt = v.y > 0.25 ? '偏上' : v.y < -0.25 ? '偏下' : ''
             return h + vt
           }
-          // 人物在出图画幅中的纵向占比（脚底→头顶投影差），让模型知道人物该画多大
+          // 人物在出图画幅中的纵向占比：按实际包围盒投影，儿童/二头身/蹲姿都不再套成人固定身高。
           const heightFracOf = (s: Subj): number => {
-            s.obj.getWorldPosition(v)
-            const by = v.clone().project(C).y
-            if (!isFinite(by)) return 0
-            v.y += 1.75 * s.obj.scale.y
-            const ty = v.project(C).y
-            if (!isFinite(ty)) return 0
-            return (Math.abs(ty - by) / 2) * ky
+            const box = new THREE.Box3().setFromObject(s.obj)
+            if (box.isEmpty()) return 0
+            const ys: number[] = []
+            for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+              const projected = new THREE.Vector3(x, y, z).project(C)
+              if (isFinite(projected.y)) ys.push(projected.y)
+            }
+            if (!ys.length) return 0
+            return ((Math.max(...ys) - Math.min(...ys)) / 2) * ky
           }
           // 纵深顺序：按角色到相机距离排名（近→远），多角色时给 最前/中间/最后 标记
           const dists = people.map((s) => s.obj.getWorldPosition(new THREE.Vector3()).distanceTo(C.position))
@@ -1102,7 +1300,9 @@ function Inner() {
               // 纵深 + 悬空 + 朝向：竖排/空中站位也能被模型唯一绑定
               const extras = [depthOf(i), s.obj.getWorldPosition(new THREE.Vector3()).y > 0.3 ? '悬空' : '', facing].filter(Boolean).join('，')
               const action = pose || poseDescOf(s) // 一键预设有名字，手动摆姿从关节推导
-              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${action ? `(${action})` : ''}`
+              const bodyLabel = getDirectorBodyPreset(s.obj.userData.bodyType).promptLabel
+              const traits = [bodyLabel, action].filter(Boolean).join('，')
+              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${traits ? `(${traits})` : ''}`
             })
             .filter(Boolean)
             .join('，')
@@ -1138,6 +1338,7 @@ function Inner() {
           toggleLockById,
           lookAtSelected,
           setMode: (m: TMode) => { curMode = m; attachByMode() },
+          setBodyType: setSelectedBodyType,
           setSelectedTransform,
           commitTransform: commit,
           setFocal: (mm: number) => { const C = outCam(); C.setFocalLength(mm); C.updateProjectionMatrix() },
@@ -1165,11 +1366,10 @@ function Inner() {
           },
           undo,
           redo: redoFn,
-          applyPose: (name: string, map: Record<string, [number, number, number]>) => {
+          applyPose: (name: string, map: Record<string, [number, number, number]>, offsetY = 0) => {
             if (!curRoot || curRoot.userData.kind !== '人台' || curRoot.userData.locked) return
-            curRoot.traverse((c: any) => { if (c.userData && c.userData.joint) c.rotation.set(0, 0, 0) })
-            curRoot.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && map[j]) c.rotation.set(map[j][0], map[j][1], map[j][2]) })
-            curRoot.userData.poseName = name === '站立' ? '' : name
+            applyMannequinPose(curRoot, name, map, offsetY)
+            sync()
             commit()
           },
           setFacing: (rad: number) => {
@@ -1776,14 +1976,40 @@ function Inner() {
             {selKind === '人台' && (
               <>
                 <div className="flex items-start gap-1">
+                  <span className="text-white/40 w-8 mt-1">体型</span>
+                  <div className="flex-1 grid grid-cols-4 gap-1">
+                    {DIRECTOR_BODY_PRESETS.map((body) => (
+                      <Btn
+                        key={body.bodyType}
+                        on={selectedObj?.bodyType === body.bodyType}
+                        onClick={() => api.current.setBodyType?.(body.bodyType)}
+                        title={`切换为${body.label}素体`}
+                      >
+                        {body.label}
+                      </Btn>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-start gap-1">
                   <span className="text-white/40 w-8 mt-1">姿势</span>
-                  <div className="flex-1 flex flex-wrap gap-1">{POSES.map((p) => <Btn key={p.k} onClick={() => api.current.applyPose?.(p.k, p.m)} title={`一键姿势：${p.k}`}>{p.k}</Btn>)}</div>
+                  <div className="flex-1 grid grid-cols-4 gap-1 max-h-36 overflow-y-auto pr-0.5 ace-scroll">
+                    {POSES.map((p) => (
+                      <Btn
+                        key={p.k}
+                        on={(selectedObj?.poseName || '站立') === p.k}
+                        onClick={() => api.current.applyPose?.(p.k, p.m, p.offsetY || 0)}
+                        title={`一键姿势：${p.k}`}
+                      >
+                        {p.k}
+                      </Btn>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   <span className="text-white/40 w-8">朝向</span>
                   {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
                 </div>
-                <div className={hintCls}>一键姿势最省事；微调用顶栏「摆姿」点关节后拖动鼠标。</div>
+                <div className={hintCls}>体型与姿势会写进生成提示；微调用顶栏「摆姿」点关节、手腕或脚踝后拖动。</div>
               </>
             )}
           </div>
