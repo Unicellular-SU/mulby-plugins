@@ -114,5 +114,6 @@ npm run pack  # = npm run build && mulby pack
 ## 已知限制
 
 - Mulby 内置 AI 无视频生成、TTS 仅即时播放（不产文件），故**视频生成与配音文件依赖外部 Provider**（已做成可插拔）。
+- 为控制 host-worker 内存峰值，远程生成媒体单文件下载上限为 **256MB**，图生视频的图床上传单图上限为 **50MB**。
 - 镜头检测输出的是每个切点的代表帧（用于快速搭分镜），不直接产出按时间切好的片段。
 - 360 全景是独立 pano 卡（v2 迁移自图片卡开关）；渐进式 outpaint 已废弃，见 `docs/360-current-route.md`。

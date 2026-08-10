@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "mulby dev",
-    "test": "npm run test:compile && npm run test:refs && npm run test:persist && npm run test:viewport && npm run test:studio && npm run test:graph && npm run test:engine",
+    "test": "npm run test:compile && npm run test:refs && npm run test:persist && npm run test:viewport && npm run test:studio && npm run test:graph && npm run test:engine && npm run test:guards",
     "test:compile": "esbuild test/videoEdit/run-compile.test.ts --bundle --platform=node --format=esm --outfile=dist/run-compile.test.mjs && node dist/run-compile.test.mjs",
     "test:refs": "esbuild test/references.test.ts --bundle --platform=node --format=esm --outfile=dist/references.test.mjs && node dist/references.test.mjs",
     "test:persist": "esbuild test/persistence.test.ts --bundle --platform=node --format=esm --outfile=dist/persistence.test.mjs && node dist/persistence.test.mjs",
@@ -12,6 +12,7 @@
     "test:studio": "esbuild test/store/studioStore.test.ts --bundle --platform=node --format=esm --outfile=dist/studioStore.test.mjs && node dist/studioStore.test.mjs",
     "test:graph": "esbuild test/store/graphStore.test.ts --bundle --platform=node --format=esm --outfile=dist/graphStore.test.mjs && node dist/graphStore.test.mjs",
     "test:engine": "esbuild test/providers/engine.test.ts --bundle --platform=node --format=esm --outfile=dist/engine.test.mjs && node dist/engine.test.mjs",
+    "test:guards": "esbuild test/inputGuards.test.ts --bundle --platform=node --format=esm --outfile=dist/inputGuards.test.mjs && node dist/inputGuards.test.mjs",
     "test:export": "esbuild src/ui/services/videoEdit/compile.ts --bundle --platform=node --format=esm --outfile=dist/compile.mjs && node test/videoEdit/run-export.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.test.json",
     "build": "npm run typecheck && npm run build:backend && npm run build:ui",

@@ -1279,9 +1279,9 @@ interface MulbyAi {
     }): Promise<{ providerId: string; fileId: string; uri?: string }>
   }
   images: {
-    generate(input: { model: string; prompt: string; size?: string; count?: number }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    generate(input: { model: string; prompt: string; size?: string; aspectRatio?: string; count?: number }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
     generateStream(
-      input: { model: string; prompt: string; size?: string; count?: number },
+      input: { model: string; prompt: string; size?: string; aspectRatio?: string; count?: number },
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
     edit(input: {

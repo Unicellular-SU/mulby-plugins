@@ -1,4 +1,10 @@
 /// <reference path="./types/mulby.d.ts" />
+import {
+  MAX_REMOTE_MEDIA_BYTES,
+  MAX_UPLOAD_IMAGE_BYTES,
+  decodedBase64ByteLength,
+  normalizeRemoteHttpUrl
+} from './backendGuards'
 // AI 创意画布 — 插件后端入口
 // 职责：生命周期；以及渲染进程不便/易截断的活：远程媒体落盘、图床 multipart 上传、TTS 二进制合成、导出落盘。
 // 画布/工程状态由前端通过 storage 持久化；生成请求与轮询走前端 mulby.http（无 CORS）。
@@ -48,13 +54,15 @@ const MB = 1024 * 1024
 
 // 受控二进制拉取：整体超时（AbortSignal.timeout 覆盖含响应体读取的全程）+ 内容类型前缀校验
 // （签名 URL 过期常回 200+HTML 错误页，不校验会把 HTML 当媒体落盘）+ 大小上限
-// （Content-Length 预检；无声明或声明不实时流式计数兜底，防大文件把 base64 撑爆 RPC）。
+// （Content-Length 预检；无声明或声明不实时流式计数兜底，防大文件撑爆 host-worker 内存）。
 async function fetchBinaryGuarded(
   url: string,
   init: RequestInit | undefined,
-  guard: { timeoutMs: number; maxBytes: number; typePattern?: RegExp; typeLabel?: string }
+  guard: { timeoutMs: number; maxBytes: number; typePattern?: RegExp; typeLabel?: string; urlLabel?: string }
 ): Promise<{ ok: true; buf: Buffer; contentType: string } | { ok: false; error: string }> {
-  const resp = await fetch(url, { ...(init || {}), signal: AbortSignal.timeout(guard.timeoutMs) })
+  const safeUrl = normalizeRemoteHttpUrl(url, guard.urlLabel)
+  const resp = await fetch(safeUrl, { ...(init || {}), signal: AbortSignal.timeout(guard.timeoutMs) })
+  if (resp.url) normalizeRemoteHttpUrl(resp.url, `${guard.urlLabel || '远程地址'}的重定向结果`)
   if (!resp.ok) {
     let detail = ''
     try { detail = (await resp.text()).slice(0, 300) } catch { /* ignore */ }
@@ -64,7 +72,8 @@ async function fetchBinaryGuarded(
   if (guard.typePattern && ct && !guard.typePattern.test(ct)) {
     return { ok: false, error: `${guard.typeLabel || '响应'}类型不符（${ct}）——地址可能已过期或返回了错误页` }
   }
-  const declared = Number(resp.headers.get('content-length') || 0)
+  const declaredRaw = resp.headers.get('content-length') || ''
+  const declared = /^\d+$/.test(declaredRaw) ? Number(declaredRaw) : 0
   if (declared > guard.maxBytes) {
     return { ok: false, error: `文件过大（${Math.round(declared / MB)}MB，上限 ${Math.round(guard.maxBytes / MB)}MB）` }
   }
@@ -74,19 +83,32 @@ async function fetchBinaryGuarded(
     return { ok: true, buf: Buffer.from(ab), contentType: ct }
   }
   const reader = resp.body.getReader()
+  // Content-Length 可信时直接分配最终 Buffer，避免 chunks + Buffer.concat 同时驻留造成近 2 倍峰值。
+  // 无 Content-Length 时仍逐块计数；256MB 硬上限确保最坏情况下也不会再出现 500MB→Base64 的超大峰值。
+  let target = declared > 0 ? Buffer.allocUnsafe(declared) : null
   const chunks: Buffer[] = []
   let total = 0
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
-    total += value.byteLength
-    if (total > guard.maxBytes) {
+    const nextTotal = total + value.byteLength
+    if (nextTotal > guard.maxBytes) {
       try { await reader.cancel() } catch { /* ignore */ }
       return { ok: false, error: `文件过大（超过上限 ${Math.round(guard.maxBytes / MB)}MB），已中止下载` }
     }
-    chunks.push(Buffer.from(value))
+    if (target && nextTotal <= target.length) {
+      Buffer.from(value.buffer, value.byteOffset, value.byteLength).copy(target, total)
+    } else {
+      // 服务端低报 Content-Length 时退回 chunks，仍保留实时上限保护。
+      if (target) {
+        if (total) chunks.push(target.subarray(0, total))
+        target = null
+      }
+      chunks.push(Buffer.from(value))
+    }
+    total = nextTotal
   }
-  return { ok: true, buf: Buffer.concat(chunks), contentType: ct }
+  return { ok: true, buf: target ? target.subarray(0, total) : Buffer.concat(chunks, total), contentType: ct }
 }
 
 // 递归删除目录下全部文件（宿主 filesystem 只有 unlink 无 rmdir——空目录骨架会残留，零体积可接受）
@@ -143,8 +165,8 @@ function sanitizeName(name: string, fallback: string): string {
 
 // ---- Host RPC（前端 window.mulby.host.call('ai-creative-canvas', method, args) 调用）----
 export const rpc = {
-  // 远程媒体落盘：主进程 fetch（规避渲染进程 CORS）→ base64 写入 {base}/ai-creative-canvas/media/<projectId>/
-  // 二进制经 base64 落盘避免截断。落盘路径完全由后端拼接，不接受任何路径型入参（杜绝 ../ 目录逃逸）；
+  // 远程媒体落盘：主进程 fetch（规避渲染进程 CORS）→ Buffer 直写 {base}/ai-creative-canvas/media/<projectId>/
+  // 落盘路径完全由后端拼接，不接受任何路径型入参（杜绝 ../ 目录逃逸）；
   // 目录布局与 UI 端 media.ts / README 约定一致（media/<projectId> 两级）。host.call 可被其他插件指名调用，入参按不可信处理。
   async downloadMedia(input: { url: string; name?: string; projectId?: string }) {
     try {
@@ -158,9 +180,10 @@ export const rpc = {
       await ensureDir(dir)
       const r = await fetchBinaryGuarded(input.url, undefined, {
         timeoutMs: 10 * 60_000, // 生成的长视频可达数百 MB，给足 10 分钟
-        maxBytes: 500 * MB,
+        maxBytes: MAX_REMOTE_MEDIA_BYTES,
         typePattern: /^(image|video|audio)\//,
-        typeLabel: '媒体'
+        typeLabel: '媒体',
+        urlLabel: '媒体地址'
       })
       if (!r.ok) return { ok: false, error: `下载失败 ${r.error}` }
       const ct = r.contentType
@@ -170,7 +193,8 @@ export const rpc = {
       let fname = sanitizeName(input.name || `media_${Date.now()}`, `media_${Date.now()}`)
       if (!/\.[a-z0-9]{2,4}$/i.test(fname)) fname = `${fname}.${guessedExt || 'bin'}`
       const filePath = `${dir}/${fname}`
-      await mulby.filesystem.writeFile(filePath, r.buf.toString('base64'), 'base64')
+      // 后端 API 支持 Buffer：避免转成体积再膨胀 1/3 的 Base64 字符串。
+      await mulby.filesystem.writeFile(filePath, r.buf)
       return { ok: true, path: filePath, mime: ct || undefined }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -202,15 +226,27 @@ export const rpc = {
       if (!input?.base64) return { ok: false, error: '缺少图片数据' }
       if (typeof fetch === 'undefined' || typeof FormData === 'undefined') return { ok: false, error: '后端环境不支持 fetch/FormData' }
       const mime = input.mime || 'image/png'
+      if (!/^image\//i.test(mime)) return { ok: false, error: '上传内容必须是图片' }
+      const estimated = decodedBase64ByteLength(input.base64)
+      if (estimated > MAX_UPLOAD_IMAGE_BYTES) {
+        return { ok: false, error: `图片过大（上限 ${Math.round(MAX_UPLOAD_IMAGE_BYTES / MB)}MB）` }
+      }
       const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : mime.includes('gif') ? 'gif' : 'jpg'
       const buf = Buffer.from(input.base64, 'base64')
+      if (!buf.length) return { ok: false, error: '图片数据无效' }
+      if (buf.byteLength > MAX_UPLOAD_IMAGE_BYTES) {
+        return { ok: false, error: `图片过大（上限 ${Math.round(MAX_UPLOAD_IMAGE_BYTES / MB)}MB）` }
+      }
       const form = new FormData()
       form.append(input.field || 'file', new Blob([buf], { type: mime }), `frame.${ext}`)
-      const resp = await fetch(input.uploadUrl, {
+      const uploadUrl = normalizeRemoteHttpUrl(input.uploadUrl, '图片上传地址')
+      const resp = await fetch(uploadUrl, {
         method: 'POST',
         headers: input.apiKey ? { Authorization: `Bearer ${input.apiKey}` } : {},
-        body: form as any
+        body: form as any,
+        signal: AbortSignal.timeout(120_000)
       })
+      if (resp.url) normalizeRemoteHttpUrl(resp.url, '图片上传地址的重定向结果')
       if (!resp.ok) {
         let detail = ''
         try { detail = (await resp.text()).slice(0, 300) } catch { /* ignore */ }
@@ -223,7 +259,7 @@ export const rpc = {
         getJsonPath(json, 'data.0.url') ||
         getJsonPath(json, 'data.image_url')
       if (!url || typeof url !== 'string') return { ok: false, error: '上传成功但未解析到图片 URL（可配置 urlPath）' }
-      return { ok: true, url }
+      return { ok: true, url: normalizeRemoteHttpUrl(url, '图片结果地址') }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
@@ -258,7 +294,8 @@ export const rpc = {
           timeoutMs: 120_000,
           maxBytes: 50 * MB,
           typePattern: /^(audio\/|application\/octet-stream)/, // 部分兼容服务以 octet-stream 回二进制
-          typeLabel: '音频'
+          typeLabel: '音频',
+          urlLabel: '配音服务地址'
         }
       )
       if (!r.ok) return { ok: false, error: `配音请求失败 ${r.error}` }
@@ -268,10 +305,9 @@ export const rpc = {
       // 按工程归档到 media/<projectId>（与其他媒体一致，随工程删除清理）；无 projectId 时退回旧共享目录
       const dir = input.projectId ? `${root}/media/${sanitizeName(input.projectId, 'proj')}` : `${root}/audio`
       await ensureDir(dir)
-      const b64 = r.buf.toString('base64')
       const ext = format === 'aac' ? 'aac' : format === 'wav' ? 'wav' : format === 'opus' ? 'opus' : 'mp3'
       const filePath = `${dir}/tts_${Date.now()}.${ext}`
-      await mulby.filesystem.writeFile(filePath, b64, 'base64')
+      await mulby.filesystem.writeFile(filePath, r.buf)
       // 只回 path/mime：音频已落盘，无需再把整段 base64 跨 IPC 传回渲染进程（长音频负载翻倍，F13）
       return { ok: true, path: filePath, mime }
     } catch (e) {

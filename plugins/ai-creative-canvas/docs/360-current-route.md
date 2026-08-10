@@ -1,6 +1,6 @@
 # 360 全景 · 当前路线说明
 
-> 更新：2026-07-18（独立 pano 卡片类型；schemaVersion v2）
+> 更新：2026-08-10（独立 pano 卡片类型；schemaVersion v2）
 
 ## 当前路线（在用）
 
@@ -37,12 +37,14 @@
 | 文生 360，简单户外 | 2:1 等距柱状，环视无明显接缝 |
 | 文生 360，复杂室内 | 专用模型可接受；必要时用手动接缝/天地修复 |
 | 图生 360 | 参考图语义保留，比例正确 |
-| 非 2:1 出图 | 查看器容错或提示用户 |
-| 4K+ 大图 | 查看器内存可接受，不崩溃 |
+| 非 2:1 出图 | 节点内预览器容错或提示用户 |
+| 4K+ 大图 | 节点内预览器内存可接受，不崩溃 |
 
 ## 相关文件
 
-- `src/ui/canvas/PanoViewer.tsx` — 查看器
+- `src/ui/canvas/PanoNodePreview.tsx` — 节点内 360 环视预览与视角截图
+- `src/ui/canvas/CardView.tsx` — pano 卡预览入口与卡面切换
 - `src/ui/services/mediaPano.ts` — 接缝修复
 - `src/ui/services/panoOutpaint.ts` — 投影工具 + 天地修复
-- `src/ui/services/generate.ts` — `params.pano` → `meta.pano`
+- `src/ui/services/generate.ts` — 按 `card.kind === 'pano'` 选择全景生成链路
+- `src/ui/services/persistence.ts` — v1 图片卡全景标记迁移为独立 pano 卡

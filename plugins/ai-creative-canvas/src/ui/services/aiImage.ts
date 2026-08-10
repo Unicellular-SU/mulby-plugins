@@ -136,7 +136,13 @@ export async function generateImage(
     let lastErr: any = null
     for (let k = 0; k < count; k++) {
       try {
-        const genReq: { model: string; prompt: string; size?: string; count?: number; seed?: number } = { model, prompt, size, count: 1 }
+        const genReq: { model: string; prompt: string; size?: string; aspectRatio?: string; count?: number; seed?: number } = {
+          model,
+          prompt,
+          size,
+          aspectRatio: aspect,
+          count: 1
+        }
         if (params.seed) genReq.seed = Number(params.seed) + k // 多张时按 k 偏移，既可复现又不重复
         const req = ai().images.generateStream(
           genReq,
