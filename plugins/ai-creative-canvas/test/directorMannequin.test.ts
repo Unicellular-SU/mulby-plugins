@@ -10,6 +10,14 @@ import {
   getDirectorPose,
   isDirectorNeutralBodyType
 } from '../src/ui/canvas/directorMannequin.ts'
+import { DirectorAsyncResourceCache } from '../src/ui/canvas/directorAssetCache.ts'
+import {
+  classifyDirectorShot,
+  createDirectorShotSnapshot,
+  inferDirectorInspectorTab,
+  reorderDirectorShots
+} from '../src/ui/canvas/directorWorkflow.ts'
+import type { DirectorCam } from '../src/ui/types.ts'
 
 function testBodyPresets() {
   assert.equal(DIRECTOR_BODY_PRESETS.length, 13)
@@ -80,7 +88,54 @@ function testPosePresets() {
   assert.ok(detailed['右膝'][0] > 0, '高精 humanoid 左右膝的世界轴规则必须一致')
 }
 
+async function testDirectorAssetCache() {
+  const cache = new DirectorAsyncResourceCache<string, { id: string }>()
+  let calls = 0
+  const loader = async () => {
+    calls++
+    await Promise.resolve()
+    return { id: 'adult-male' }
+  }
+  const [first, second] = await Promise.all([cache.load('mannequin', loader), cache.load('mannequin', loader)])
+  assert.equal(calls, 1, '并发选择同一素体时只应发起一次资源请求')
+  assert.equal(first, second, '并发请求应复用同一个模板对象')
+  assert.equal(cache.peek('mannequin'), first)
+  await cache.load('mannequin', loader)
+  assert.equal(calls, 1, '成功资源应在当前会话持续复用')
+
+  let retries = 0
+  const retryCache = new DirectorAsyncResourceCache<string, string>()
+  assert.equal(await retryCache.load('female', async () => { retries++; throw new Error('temporary') }), null)
+  assert.equal(await retryCache.load('female', async () => { retries++; return 'loaded' }), 'loaded')
+  assert.equal(retries, 2, '失败请求不能被永久缓存，应允许下次选择重试')
+}
+
+function testDirectorWorkflow() {
+  assert.equal(inferDirectorInspectorTab(null), 'camera')
+  assert.equal(inferDirectorInspectorTab('人台'), 'character')
+  assert.equal(inferDirectorInspectorTab('道具'), 'object')
+  assert.equal(inferDirectorInspectorTab('模型'), 'object')
+
+  const cam: DirectorCam = { pos: [0, 1.5, 2.6], target: [0, 1, 0], focal: 35 }
+  assert.equal(classifyDirectorShot(cam), '中景')
+  const shot = createDirectorShotSnapshot({ id: 'a', name: '机位1', cam, aspect: '16:9', lighting: '夜景冷调' })
+  assert.equal(shot.shotType, '中景')
+  assert.equal(shot.aspect, '16:9')
+  assert.equal(shot.lighting, '夜景冷调')
+
+  const shots = [
+    shot,
+    { ...shot, id: 'b', name: '机位2' },
+    { ...shot, id: 'c', name: '机位3' }
+  ]
+  assert.deepEqual(reorderDirectorShots(shots, 'b', 'c').map((item) => item.id), ['a', 'c', 'b'])
+  assert.deepEqual(reorderDirectorShots(shots, 'c', 'a').map((item) => item.id), ['c', 'a', 'b'])
+  assert.equal(reorderDirectorShots(shots, 'missing', 'a'), shots, '非法拖动不应制造无意义的新数组')
+}
+
 testBodyPresets()
 testNativeBodyAssets()
 testPosePresets()
-console.log('director mannequin: 13 native body meshes / 20 semantic poses / facing rules OK')
+testDirectorWorkflow()
+await testDirectorAssetCache()
+console.log('director mannequin: 13 native body meshes / 20 semantic poses / lazy assets / shot workflow OK')

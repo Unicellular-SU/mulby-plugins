@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, RefreshCw, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -15,11 +15,42 @@ import {
   isDirectorNeutralBodyType,
   type DirectorBodyType
 } from './directorMannequin'
+import { DirectorAsyncResourceCache } from './directorAssetCache'
+import { DirectorShotStrip } from './DirectorShotStrip'
+import {
+  classifyDirectorShot,
+  createDirectorShotSnapshot,
+  inferDirectorInspectorTab,
+  reorderDirectorShots,
+  type DirectorInspectorTab
+} from './directorWorkflow'
+import type { DirectorShot } from '../types'
 
 // 3D 导演台 v11：13 套独立人物网格、20 种语义姿势 + CC0 humanoid 人台；
 // 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
+const directorTemplateCache = new DirectorAsyncResourceCache<DirectorBodyType, any>()
+
+const readDirectorPanelWidth = (key: string, fallback: number, min: number, max: number) => {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const stored = window.localStorage.getItem(key)
+    if (stored === null) return fallback
+    const value = Number(stored)
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeDirectorPanelWidth = (key: string, value: number) => {
+  try {
+    window.localStorage.setItem(key, String(value))
+  } catch {
+    // 宿主禁用持久化时仅退化为当前会话宽度，不影响导演台启动。
+  }
+}
 
 const FACINGS: { k: string; r: number }[] = [
   { k: '面向', r: 0 },
@@ -124,9 +155,13 @@ function Inner() {
   const [panelsCollapsed, setPanelsCollapsed] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
-  const [shots, setShots] = useState<{ id: string; name: string; cam: any; thumb?: string; take?: string; takes?: string[] }[]>([])
-  const [editShotId, setEditShotId] = useState<string | null>(null) // 机位行内改名中
-  const [editShotName, setEditShotName] = useState('')
+  const [shots, setShots] = useState<DirectorShot[]>([])
+  const [activeShotId, setActiveShotId] = useState<string | null>(null)
+  const [shotStripExpanded, setShotStripExpanded] = useState(true)
+  const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
+  const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => readDirectorPanelWidth('director.leftPanelWidth', 208, 184, 320))
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => readDirectorPanelWidth('director.rightPanelWidth', 288, 280, 420))
   const [showGuides, setShowGuides] = useState(true) // 三分构图线
   const [lighting, setLighting] = useState('默认')
   const [aspect, setAspectK] = useState('视口') // 出图画幅（ASPECTS 的 k）
@@ -138,7 +173,7 @@ function Inner() {
   const saveScene = () => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect })
+      if (only) useGraph.getState().setDirectorScene({ schemaVersion: 2, subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect })
     } catch { /* ignore */ }
   }
   const close = () => {
@@ -299,15 +334,24 @@ function Inner() {
           syncHistoryUi()
         }
 
-        const directorTemplates: Partial<Record<DirectorBodyType, any>> = {}
         const directorAssetUrl = (file: string) => new URL(`./models/director/${file}`, window.location.href).href
         const directorLoader = new GLTFLoader()
-        const directorTemplateResults = await Promise.allSettled(
-          DIRECTOR_BODY_PRESETS.map((preset) => directorLoader.loadAsync(directorAssetUrl(preset.assetFile)))
-        )
-        directorTemplateResults.forEach((result, index) => {
-          if (result.status === 'fulfilled') directorTemplates[DIRECTOR_BODY_PRESETS[index].bodyType] = result.value.scene
-        })
+        const ensureDirectorTemplate = (bodyType: DirectorBodyType) => {
+          const preset = getDirectorBodyPreset(bodyType)
+          return directorTemplateCache.load(preset.bodyType, async () => {
+            const loaded = await directorLoader.loadAsync(directorAssetUrl(preset.assetFile))
+            return loaded.scene
+          })
+        }
+        // 默认只加载基础人物；恢复旧工程时额外加载场景实际使用的素体。
+        // 其余 12 套在用户首次选择时请求并进入会话缓存，避免每次打开先下载约 16MB。
+        const saved0 = useGraph.getState().project.director
+        const initialBodyTypes = new Set<DirectorBodyType>(['mannequin'])
+        for (const subject of saved0?.subjects || []) {
+          if (subject.kind === '人台') initialBodyTypes.add(getDirectorBodyPreset(subject.bodyType).bodyType)
+        }
+        await Promise.all(Array.from(initialBodyTypes, (bodyType) => ensureDirectorTemplate(bodyType)))
+        if (disposed) return
 
         const DETAILED_BONE_MAP: Record<string, string> = {
           pelvis: '骨盆',
@@ -330,7 +374,7 @@ function Inner() {
         }
         const makeDetailedMannequin = (color: number, bodyType: DirectorBodyType) => {
           const preset = getDirectorBodyPreset(bodyType)
-          const template = directorTemplates[preset.bodyType]
+          const template = directorTemplateCache.peek(preset.bodyType)
           if (!template) return null
           const neutralPresentation = isDirectorNeutralBodyType(bodyType)
 
@@ -769,11 +813,19 @@ function Inner() {
           root.userData.poseSchemaVersion = 2
           groundMannequinRig(root)
         }
-        const setSelectedBodyType = (bodyType: DirectorBodyType) => {
+        let bodySwitchRequest = 0
+        const setSelectedBodyType = async (bodyType: DirectorBodyType) => {
           const sub = subjects.find((s) => s.obj === curRoot)
           if (!sub || sub.kind !== '人台' || sub.obj.userData.locked) return
           const old = sub.obj
           if (getDirectorBodyPreset(old.userData.bodyType).bodyType === bodyType) return
+          const request = ++bodySwitchRequest
+          if (!disposed) setBodyLoading(bodyType)
+          await ensureDirectorTemplate(bodyType)
+          if (disposed || request !== bodySwitchRequest || !subjects.includes(sub) || sub.obj !== old) {
+            if (!disposed && request === bodySwitchRequest) setBodyLoading(null)
+            return
+          }
           const joints: Record<string, [number, number, number]> = {}
           old.traverse((c: any) => {
             const jointName = c.userData?.joint
@@ -814,6 +866,7 @@ function Inner() {
           select(replacement)
           sync()
           commit()
+          if (!disposed && request === bodySwitchRequest) setBodyLoading(null)
         }
         const addProp = () => {
           const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
@@ -1179,10 +1232,10 @@ function Inner() {
         }
         // 出图画幅：ar=0 不裁剪；kx/ky 为投影修正系数（描述里的方位/占比对应裁剪后画幅）
         let curAspect = 0
-        const cropScale = (): [number, number] => {
-          if (!curAspect) return [1, 1]
+        const cropScale = (aspectOverride = curAspect): [number, number] => {
+          if (!aspectOverride) return [1, 1]
           const va = cam.aspect || 1 // 视口画幅
-          return curAspect < va ? [va / curAspect, 1] : [1, curAspect / va]
+          return aspectOverride < va ? [va / aspectOverride, 1] : [1, aspectOverride / va]
         }
         // 居中裁剪 2D 画布到目标画幅（视口内 letterbox 画框显示的就是这个区域）
         const cropCanvas = (src: HTMLCanvasElement): HTMLCanvasElement => {
@@ -1229,8 +1282,10 @@ function Inner() {
           commit()
         }
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
-        const stagePreset = (key: string) => {
+        const stagePreset = async (key: string) => {
           if (key === '双人对话') {
+            await ensureDirectorTemplate('female')
+            if (disposed) return
             const ca = nextMannequinColor()
             const a = makeMannequin(ca.hex, 'mannequin')
             a.position.set(-0.6, 0, 0)
@@ -1427,7 +1482,6 @@ function Inner() {
         }
 
         // 恢复持久化场景，否则默认一个人台
-        const saved0 = useGraph.getState().project.director
         if (saved0 && Array.isArray(saved0.subjects) && saved0.subjects.length) {
           restoring = true
           sceneGen++
@@ -1437,7 +1491,10 @@ function Inner() {
           if (saved0.cam) applyCam(saved0.cam)
           select(null)
           if (!disposed) {
-            setShots(saved0.shots || [])
+            setShots((saved0.shots || []).map((shot) => ({
+              ...shot,
+              shotType: shot.shotType || classifyDirectorShot(shot.cam)
+            })))
             if (saved0.prompt) setPrompt(saved0.prompt)
             setFocal(Math.round((saved0.cam && saved0.cam.focal) || 35))
             if (saved0.lighting && LIGHTINGS.some((l) => l.k === saved0.lighting)) {
@@ -1457,9 +1514,15 @@ function Inner() {
         }
 
         // 可传入任意相机/目标点（默认=出图相机）：分镜导出时按各机位相机离线算描述
-        const shotFragment = (C?: any, target?: any): string => {
+        const shotFragment = (C?: any, target?: any, settings?: { aspect?: string; lighting?: string }): string => {
           C = C || outCam()
           target = target || outTarget()
+          const fragmentAspect = settings?.aspect && ASPECTS.some((item) => item.k === settings.aspect)
+            ? ASPECTS.find((item) => item.k === settings.aspect)?.ar || 0
+            : curAspect
+          const fragmentLighting = settings?.lighting && LIGHTINGS.some((item) => item.k === settings.lighting)
+            ? settings.lighting
+            : curLighting
           const d = C.position.distanceTo(target)
           const dy = C.position.y - target.y
           const ang = (Math.asin(Math.max(-1, Math.min(1, dy / Math.max(0.001, d)))) * 180) / Math.PI
@@ -1469,7 +1532,7 @@ function Inner() {
           const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
           const people = subjects.filter((s) => s.kind === '人台' && s.obj.visible !== false)
           const v = new THREE.Vector3()
-          const [kx, ky] = cropScale() // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
+          const [kx, ky] = cropScale(fragmentAspect) // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
           // 水平 + 垂直方位（只写水平会让竖排站位无法区分，角色绑定必错）
           const whereOf = (s: Subj): string => {
             s.obj.getWorldPosition(v)
@@ -1574,8 +1637,8 @@ function Inner() {
             .filter(Boolean)
             .join('，')
           const propTxt = propLayout ? `场景道具：${propLayout}。` : ''
-          const lightTxt = (LIGHTINGS.find((l) => l.k === curLighting) || LIGHTINGS[0]).frag
-          const aspectTxt = curAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === curAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
+          const lightTxt = (LIGHTINGS.find((l) => l.k === fragmentLighting) || LIGHTINGS[0]).frag
+          const aspectTxt = fragmentAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === fragmentAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
           return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
         }
 
@@ -1656,7 +1719,7 @@ function Inner() {
           serializeSceneOnly,
           shotFragment,
           // 按给定机位相机离线算镜头描述（分镜导出用；不碰主视图/出图相机）
-          fragmentFor: (c: any) => {
+          fragmentFor: (c: any, settings?: { aspect?: string; lighting?: string }) => {
             const tc = new THREE.PerspectiveCamera(50, cam.aspect, 0.05, 1000)
             tc.filmGauge = FILM_GAUGE
             tc.position.set(c.pos[0], c.pos[1], c.pos[2])
@@ -1664,7 +1727,7 @@ function Inner() {
             const tv = new THREE.Vector3(c.target[0], c.target[1], c.target[2])
             tc.lookAt(tv)
             tc.updateMatrixWorld(true)
-            return shotFragment(tc, tv)
+            return shotFragment(tc, tv, settings)
           },
           setLighting: applyLighting,
           getLighting: () => curLighting,
@@ -1736,6 +1799,26 @@ function Inner() {
 
   // 切换选中 → 拉取该对象的语义描述进草稿
   useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
+  useEffect(() => { setInspectorTab(inferDirectorInspectorTab(selKind)) }, [selId, selKind])
+  useEffect(() => { writeDirectorPanelWidth('director.leftPanelWidth', leftPanelWidth) }, [leftPanelWidth])
+  useEffect(() => { writeDirectorPanelWidth('director.rightPanelWidth', rightPanelWidth) }, [rightPanelWidth])
+
+  const beginPanelResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth
+    const onMove = (move: PointerEvent) => {
+      const delta = move.clientX - startX
+      if (side === 'left') setLeftPanelWidth(Math.max(184, Math.min(320, startWidth + delta)))
+      else setRightPanelWidth(Math.max(280, Math.min(420, startWidth - delta)))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   const onFocal = (mm: number) => { setFocal(mm); api.current.setFocal?.(mm) }
   const onAspect = (k: string) => { setAspectK(k); api.current.setAspect?.(ASPECTS.find((a) => a.k === k)?.ar ?? 0) }
@@ -1746,13 +1829,19 @@ function Inner() {
     api.current.setViewMode?.(next)
   }
 
+  const shotStripHeight = shotStripExpanded ? 128 : 40
+  const bottomUiInset = 84 + shotStripHeight + 8
+  const viewportLeft = panelsCollapsed ? 12 : leftPanelWidth + 16
+  const viewportRight = panelsCollapsed ? 12 : rightPanelWidth + 16
+  const viewportStyle = { left: viewportLeft, right: viewportRight }
+
   // letterbox 画框尺寸：中央可视区内按画幅取最大内接矩形；收起侧栏时随视口扩展。
   const [frameRect, setFrameRect] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => {
     if (!curAr) { setFrameRect(null); return }
     const calc = () => {
-      const cw = Math.max(1, window.innerWidth - (panelsCollapsed ? 24 : 224 + 304))
-      const ch = Math.max(1, window.innerHeight - 64 - 96)
+      const cw = Math.max(1, window.innerWidth - viewportLeft - viewportRight)
+      const ch = Math.max(1, window.innerHeight - 64 - bottomUiInset)
       let w = cw
       let h = w / curAr
       if (h > ch) { h = ch; w = h * curAr }
@@ -1761,7 +1850,7 @@ function Inner() {
     calc()
     window.addEventListener('resize', calc)
     return () => window.removeEventListener('resize', calc)
-  }, [curAr, panelsCollapsed])
+  }, [curAr, viewportLeft, viewportRight, bottomUiInset])
   const onMode = (m: TMode) => { setMode(m); api.current.setMode?.(m) }
   const onImportClick = () => fileRef.current?.click()
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1789,7 +1878,7 @@ function Inner() {
     return { useControl, usePose, full: `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}` }
   }
 
-  const doGenerate = async (placeIndex: number): Promise<string | null> => {
+  const doGenerate = async (placeIndex: number, outputAspect = aspect): Promise<string | null> => {
     const proj = useGraph.getState().project
     const controlModel = proj.defaultControlModel
     const model = controlModel || proj.defaultImageModel
@@ -1812,9 +1901,9 @@ function Inner() {
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
       // size/aspectRatio 透传（宿主已支持）：OpenAI 系用 size 定死输出尺寸，Gemini 系用 aspectRatio
       const editInput: { model: string; imageAttachmentId: string; prompt: string; size?: string; aspectRatio?: string } = { model, imageAttachmentId: att.attachmentId, prompt: full }
-      if (aspect !== '视口') {
-        editInput.aspectRatio = aspect
-        const sz = ({ '1:1': '1024x1024', '3:2': '1536x1024', '2:3': '1024x1536' } as Record<string, string>)[aspect]
+      if (outputAspect !== '视口') {
+        editInput.aspectRatio = outputAspect
+        const sz = ({ '1:1': '1024x1024', '3:2': '1536x1024', '2:3': '1024x1536' } as Record<string, string>)[outputAspect]
         if (sz) editInput.size = sz // gpt-image 系只支持这三档；16:9/9:16 仅 Gemini 系按 aspectRatio 生效
       }
       const res = await ai.images.edit(editInput)
@@ -1882,8 +1971,10 @@ function Inner() {
   }
   // 生成指定机位并把成片回贴为该 shot 的 take（机位即分镜；takes 保留最近 6 条历史）
   const genShot = async (i: number): Promise<boolean> => {
-    api.current.applyCam?.(shots[i].cam)
-    const url = await doGenerate(i)
+    const shot = shots[i]
+    if (!shot) return false
+    applyShot(shot)
+    const url = await doGenerate(i, shot.aspect || aspect)
     if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
     return false
   }
@@ -1911,10 +2002,40 @@ function Inner() {
     const cam = api.current.getCam?.()
     if (!cam) return
     const thumb = api.current.captureThumb?.()
-    setShots((s) => [...s, { id: 'shot_' + Date.now().toString(36), name: `机位${s.length + 1}`, cam, thumb }])
+    const id = uid('shot')
+    setShots((current) => [
+      ...current,
+      createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting })
+    ])
+    setActiveShotId(id)
   }
-  const applyShot = (sh: { cam: any }) => { api.current.applyCam?.(sh.cam); setFocal(Math.round(sh.cam?.focal || 35)) }
-  const delShot = (id: string) => setShots((s) => s.filter((x) => x.id !== id))
+  const applyShot = (shot: DirectorShot) => {
+    api.current.applyCam?.(shot.cam)
+    setFocal(Math.round(shot.cam?.focal || 35))
+    if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
+    if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
+      setLighting(shot.lighting)
+      api.current.setLighting?.(shot.lighting)
+    }
+    setActiveShotId(shot.id)
+  }
+  const duplicateShot = (id: string) => {
+    setShots((current) => {
+      const index = current.findIndex((shot) => shot.id === id)
+      if (index < 0) return current
+      const source = current[index]
+      const copy = { ...source, id: uid('shot'), name: `${source.name} 副本`, takes: source.takes ? [...source.takes] : undefined }
+      const next = current.slice()
+      next.splice(index + 1, 0, copy)
+      return next
+    })
+  }
+  const renameShot = (id: string, name: string) => setShots((current) => current.map((shot) => (shot.id === id ? { ...shot, name } : shot)))
+  const reorderShots = (draggedId: string, targetId: string) => setShots((current) => reorderDirectorShots(current, draggedId, targetId))
+  const delShot = (id: string) => {
+    setShots((current) => current.filter((shot) => shot.id !== id))
+    if (activeShotId === id) setActiveShotId(null)
+  }
 
   // 避障落位：从首选点向右/向下扫描，找一块 w×h（中心坐标，含边距）不与现有卡片重叠的空位；
   // 视口内全满则放到最低卡片下方
@@ -1964,11 +2085,12 @@ function Inner() {
       const col = i % cols
       const row = Math.floor(i / cols)
       const center = { x: left + col * (W + gapX) + W / 2, y: top + row * (H + gapY) + H / 2 }
-      const frag = (api.current.fragmentFor?.(s.cam) as string) || ''
+      const frag = (api.current.fragmentFor?.(s.cam, { aspect: s.aspect, lighting: s.lighting }) as string) || ''
       const full = `${prompt.trim()}\n\n${frag}`.trim()
       const id = g.addCard('image', center, {
         title: s.name,
         prompt: full,
+        params: s.aspect && s.aspect !== '视口' ? { aspect: s.aspect } : {},
         status: s.take ? 'done' : 'idle',
         assetUrl: s.take || null,
         mime: s.take ? 'image/png' : null,
@@ -1985,11 +2107,12 @@ function Inner() {
   const panelCls = 'rounded-2xl border border-white/10 bg-zinc-950/80 shadow-[0_12px_40px_rgba(0,0,0,0.45)]'
   const secCls = 'text-[11px] font-medium text-white/50' // 面板分区小标题
   const hintCls = 'text-white/35 leading-snug text-[11px]'
-  const Btn = ({ on, onClick, children, title }: { on?: boolean; onClick: () => void; children: any; title: string }) => (
+  const Btn = ({ on, onClick, children, title, disabled }: { on?: boolean; onClick: () => void; children: any; title: string; disabled?: boolean }) => (
     <button
       onClick={onClick}
       title={title}
-      className={`px-1.5 py-1 rounded-lg text-xs flex items-center gap-1 border whitespace-nowrap transition-colors duration-150 active:scale-[0.97] ${
+      disabled={disabled}
+      className={`px-1.5 py-1 rounded-lg text-xs flex items-center gap-1 border whitespace-nowrap transition-colors duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ${
         on ? 'border-amber-300/50 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
       }`}
     >
@@ -2006,7 +2129,6 @@ function Inner() {
     .map((kind) => ({ kind, items: filteredObjs.filter((o) => o.kind === kind) }))
     .filter((group) => group.items.length > 0)
   const selectedObj = objs.find((o) => o.id === selId)
-  const viewportInsetCls = panelsCollapsed ? 'left-3 right-3' : 'left-56 right-[19rem]'
   const setTransformAxis = (part: keyof TransformDraft, axis: 0 | 1 | 2, raw: string) => {
     const value = Number(raw)
     if (!Number.isFinite(value)) return
@@ -2043,7 +2165,7 @@ function Inner() {
       {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染）。
           范围限制在中央可视取景区内；不带 z-index——按 DOM 顺序沉到左右面板/顶栏/底栏之下，只盖 3D 视口 */}
       {showGuides && ready && (
-        <svg className={`absolute top-16 bottom-24 ${viewportInsetCls} pointer-events-none`} viewBox="0 0 3 3" preserveAspectRatio="none">
+        <svg className="absolute top-16 pointer-events-none" style={{ ...viewportStyle, bottom: bottomUiInset }} viewBox="0 0 3 3" preserveAspectRatio="none">
           {[1, 2].map((n) => (
             <g key={n} stroke="#fff" strokeOpacity="0.28" strokeWidth="1" vectorEffect="non-scaling-stroke">
               <line x1={n} y1="0" x2={n} y2="3" vectorEffect="non-scaling-stroke" />
@@ -2058,7 +2180,7 @@ function Inner() {
       )}
       {/* 出图画幅框（选了非「视口」画幅时）：琥珀框内=模型实际看到的构图范围，框外压暗；同样沉在面板之下 */}
       {frameRect && (
-        <div className={`absolute top-16 bottom-24 ${viewportInsetCls} pointer-events-none grid place-items-center`}>
+        <div className="absolute top-16 pointer-events-none grid place-items-center" style={{ ...viewportStyle, bottom: bottomUiInset }}>
           <div style={{ width: frameRect.w, height: frameRect.h }} className="border border-amber-200/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
         </div>
       )}
@@ -2100,14 +2222,15 @@ function Inner() {
       </div>
 
       {/* PiP：出图取景预览（仅锁定取景时显示） */}
-      <div className={`absolute top-16 ${panelsCollapsed ? 'right-3' : 'right-[19rem]'} z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
+      <div style={{ right: viewportRight }} className={`absolute top-16 z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
         <div ref={pipRef} />
         <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-zinc-950/70 text-amber-200/90 rounded-br-lg">出图取景</div>
       </div>
 
       {/* 左：Outliner */}
       {!panelsCollapsed && (
-        <div className={`absolute top-16 left-3 bottom-24 w-52 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
+        <div style={{ width: leftPanelWidth, bottom: bottomUiInset }} className={`absolute top-16 left-3 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
+          <div onPointerDown={(event) => beginPanelResize('left', event)} className="absolute -right-1 top-4 bottom-4 z-10 w-2 cursor-col-resize" title="拖动调整对象树宽度" />
           <div className="flex items-center justify-between">
             <span className={secCls}>场景对象</span>
             <span className="text-[10px] tabular-nums text-white/30">{filteredObjs.length}/{objs.length}</span>
@@ -2128,8 +2251,8 @@ function Inner() {
             <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
           </div>
           <div className="flex items-center gap-1">
-            <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
-            <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
+            <Btn onClick={() => { void api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
+            <Btn onClick={() => { void api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
           </div>
           <div className="h-px bg-white/[0.07]" />
           <div className="flex flex-col gap-2 overflow-auto ace-scroll flex-1">
@@ -2178,191 +2301,221 @@ function Inner() {
         </div>
       )}
 
-      {/* 右：Inspector + 镜头 + 机位 */}
+      {/* 右：按上下文分离对象、角色与镜头，避免所有控制堆在一条长滚动区。 */}
       {!panelsCollapsed && (
-      <div className={`absolute top-16 right-3 bottom-24 w-72 flex flex-col gap-3 p-3 ${panelCls} text-xs overflow-auto ace-scroll`}>
-        {selId && (
-          <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
-            <div className="flex items-center justify-between gap-2">
-              <span className={`${secCls} truncate`}>选中：{selectedObj?.name}</span>
-              {selectedObj?.locked && <span className="rounded-full bg-amber-300/10 px-1.5 py-0.5 text-[9px] text-amber-200">已锁定</span>}
-            </div>
-            <div className="flex items-center gap-1 flex-wrap">
-              <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
-              <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
-              <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
-              <Btn on={selectedObj?.locked} onClick={() => selId && api.current.toggleLockById?.(selId)} title={selectedObj?.locked ? '解锁变换' : '锁定变换'}>{selectedObj?.locked ? <Unlock size={12} /> : <Lock size={12} />} {selectedObj?.locked ? '解锁' : '锁定'}</Btn>
-              <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
-            </div>
-            {transformDraft && (
-              <div className="flex flex-col gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
-                <div className="mb-0.5 flex items-center justify-between">
-                  <span className={secCls}>精确变换</span>
-                  <span className="text-[9px] text-white/25">旋转单位 °</span>
-                </div>
-                {renderAxisEditor('位置', 'position', 0.1)}
-                {renderAxisEditor('旋转', 'rotation', 1)}
-                {renderAxisEditor('缩放', 'scale', 0.1)}
-              </div>
-            )}
-            <div className="flex items-start gap-1">
-              <span className="text-white/40 w-8 mt-1">描述</span>
-              <textarea
-                value={descDraft}
-                onChange={(e) => setDescDraft(e.target.value)}
-                onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
-                placeholder={selKind === '人台' ? '如：穿长衫的老者，白发拄拐' : selKind === '模型' ? '如：红色跑车' : '如：红木书桌，上有一盏台灯'}
-                className="flex-1 h-12 resize-none rounded-lg bg-white/[0.04] border border-white/10 p-1.5 outline-none placeholder:text-white/25 focus:border-amber-300/50 transition-colors"
-              />
-            </div>
-            <div className={hintCls}>描述会按画面方位自动装配进提示词，场景即提示词。</div>
-            {selKind === '人台' && (
-              <>
-                <div className="flex items-start gap-1">
-                  <span className="text-white/40 w-8 mt-1">素体</span>
-                  <div className="flex-1 space-y-1.5">
-                    {DIRECTOR_BODY_GROUPS.map((group) => (
-                      <div key={group.key} className="flex items-start gap-1">
-                        <span className="w-7 pt-1 text-[9px] text-white/30">{group.label}</span>
-                        <div className="flex-1 grid grid-cols-4 gap-1">
-                          {DIRECTOR_BODY_PRESETS.filter((body) => body.group === group.key).map((body) => (
-                            <Btn
-                              key={body.bodyType}
-                              on={selectedObj?.bodyType === body.bodyType}
-                              onClick={() => api.current.setBodyType?.(body.bodyType)}
-                              title={`独立 CC0 素体：${body.label}`}
-                            >
-                              {body.label}
-                            </Btn>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+        <div style={{ width: rightPanelWidth, bottom: bottomUiInset }} className={`absolute top-16 right-3 flex flex-col overflow-hidden ${panelCls} text-xs`}>
+          <div onPointerDown={(event) => beginPanelResize('right', event)} className="absolute -left-1 top-4 bottom-4 z-10 w-2 cursor-col-resize" title="拖动调整检查器宽度" />
+          <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-white/[0.07] p-2">
+            {([
+              { id: 'object' as const, label: '对象', icon: <BoxIcon size={12} /> },
+              { id: 'character' as const, label: '角色', icon: <User size={12} /> },
+              { id: 'camera' as const, label: '镜头', icon: <Camera size={12} /> }
+            ]).map((tab) => {
+              const disabled = tab.id === 'character' && selKind !== '人台'
+              return (
+                <button
+                  key={tab.id}
+                  disabled={disabled}
+                  aria-selected={inspectorTab === tab.id}
+                  onClick={() => setInspectorTab(tab.id)}
+                  className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                    inspectorTab === tab.id
+                      ? 'border-amber-300/45 bg-amber-300/15 text-amber-100'
+                      : 'border-transparent text-white/45 hover:border-white/10 hover:bg-white/[0.06] hover:text-white/80'
+                  }`}
+                >
+                  {tab.icon}{tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto p-3 ace-scroll">
+            {inspectorTab === 'object' && (
+              selId ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-white/80">{selectedObj?.name}</span>
+                    {selectedObj?.locked && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[9px] text-amber-200">已锁定</span>}
                   </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
+                    <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
+                    <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
+                    <Btn on={selectedObj?.locked} onClick={() => selId && api.current.toggleLockById?.(selId)} title={selectedObj?.locked ? '解锁变换' : '锁定变换'}>{selectedObj?.locked ? <Unlock size={12} /> : <Lock size={12} />} {selectedObj?.locked ? '解锁' : '锁定'}</Btn>
+                    <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
+                  </div>
+                  {transformDraft && (
+                    <div className="flex flex-col gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
+                      <div className="mb-0.5 flex items-center justify-between">
+                        <span className={secCls}>精确变换</span>
+                        <span className="text-[9px] text-white/30">旋转单位 °</span>
+                      </div>
+                      {renderAxisEditor('位置', 'position', 0.1)}
+                      {renderAxisEditor('旋转', 'rotation', 1)}
+                      {renderAxisEditor('缩放', 'scale', 0.1)}
+                    </div>
+                  )}
+                  <label className="flex flex-col gap-1.5 text-[11px] text-white/50">
+                    对象描述
+                    <textarea
+                      value={descDraft}
+                      onChange={(event) => setDescDraft(event.target.value)}
+                      onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
+                      placeholder={selKind === '人台' ? '如：穿长衫的老者，白发拄拐' : selKind === '模型' ? '如：红色跑车' : '如：红木书桌，上有一盏台灯'}
+                      className="h-16 resize-none rounded-lg border border-white/10 bg-white/[0.04] p-2 text-xs text-white/80 outline-none placeholder:text-white/30 focus:border-amber-300/50"
+                    />
+                  </label>
+                  <div className={hintCls}>描述会按画面方位自动装配进提示词。</div>
                 </div>
-                <div className="flex items-start gap-1">
-                  <span className="text-white/40 w-8 mt-1">姿势</span>
-                  <div className="flex-1 grid grid-cols-4 gap-1 max-h-36 overflow-y-auto pr-0.5 ace-scroll">
-                    {POSES.map((p) => (
+              ) : (
+                <div className="grid min-h-32 place-items-center rounded-xl border border-dashed border-white/10 px-4 text-center text-[11px] leading-relaxed text-white/35">在场景中选择人物、道具或导入模型，编辑其位置与描述。</div>
+              )
+            )}
+
+            {inspectorTab === 'character' && selKind === '人台' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-white/80">{selectedObj?.name}</span>
+                  <Btn onClick={() => setInspectorTab('object')} title="打开对象变换">变换</Btn>
+                </div>
+                <label className="flex flex-col gap-1.5 text-[11px] text-white/50">
+                  角色描述
+                  <textarea
+                    value={descDraft}
+                    onChange={(event) => setDescDraft(event.target.value)}
+                    onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
+                    placeholder="如：穿长衫的老者，白发拄拐"
+                    className="h-14 resize-none rounded-lg border border-white/10 bg-white/[0.04] p-2 text-xs text-white/80 outline-none placeholder:text-white/30 focus:border-amber-300/50"
+                  />
+                </label>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>人物类型</span>
+                  {DIRECTOR_BODY_GROUPS.map((group) => (
+                    <div key={group.key} className="flex items-start gap-2">
+                      <span className="w-7 shrink-0 pt-1.5 text-[10px] text-white/35">{group.label}</span>
+                      <div className="grid min-w-0 flex-1 grid-cols-4 gap-1">
+                        {DIRECTOR_BODY_PRESETS.filter((body) => body.group === group.key).map((body) => (
+                          <Btn
+                            key={body.bodyType}
+                            on={selectedObj?.bodyType === body.bodyType}
+                            disabled={bodyLoading !== null || selectedObj?.locked}
+                            onClick={() => { void api.current.setBodyType?.(body.bodyType) }}
+                            title={`独立 CC0 素体：${body.label}`}
+                          >
+                            {bodyLoading === body.bodyType && <Loader2 size={10} className="animate-spin" />}{body.label}
+                          </Btn>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>姿势</span>
+                  <div className="grid max-h-52 grid-cols-4 gap-1 overflow-y-auto pr-0.5 ace-scroll">
+                    {POSES.map((pose) => (
                       <Btn
-                        key={p.k}
-                        on={(selectedObj?.poseName || '站立') === p.k}
-                        onClick={() => api.current.applyPose?.(p.k, p.m, p.offsetY || 0, p.controls)}
-                        title={`一键姿势：${p.k}`}
+                        key={pose.k}
+                        on={(selectedObj?.poseName || '站立') === pose.k}
+                        disabled={selectedObj?.locked}
+                        onClick={() => api.current.applyPose?.(pose.k, pose.m, pose.offsetY || 0, pose.controls)}
+                        title={`一键姿势：${pose.k}`}
                       >
-                        {p.k}
+                        {pose.k}
                       </Btn>
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-wrap">
-                  <span className="text-white/40 w-8">朝向</span>
-                  {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>朝向</span>
+                  <div className="flex flex-wrap gap-1">
+                    {FACINGS.map((facing) => <Btn key={facing.k} disabled={selectedObj?.locked} onClick={() => api.current.setFacing?.(facing.r)} title={`朝向：${facing.k}`}>{facing.k}</Btn>)}
+                  </div>
                 </div>
-                <div className={hintCls}>每个素体都是独立网格，不靠拉宽或压扁改体型；女性素体采用中性人台轮廓，降低 NSFW 风险。</div>
-              </>
+                <div className={hintCls}>每种体态使用独立中性网格。首次选择时按需加载，之后在当前会话复用。</div>
+              </div>
+            )}
+
+            {inspectorTab === 'camera' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-white/80">出图镜头</span>
+                  <span className="text-[10px] tabular-nums text-amber-200">{focal}mm</span>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
+                  <label className="flex items-center gap-2 text-[11px] text-white/50">
+                    焦段
+                    <input aria-label="镜头焦段" type="range" min={18} max={135} value={focal} onChange={(event) => onFocal(Number(event.target.value))} className="min-w-0 flex-1 accent-amber-300" />
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}mm</Btn>)}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>画幅</span>
+                  <div className="flex flex-wrap gap-1">
+                    {ASPECTS.map((item) => <Btn key={item.k} on={aspect === item.k} onClick={() => onAspect(item.k)} title={item.ar ? `出图画幅 ${item.k}` : '跟随视口'}>{item.k}</Btn>)}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>镜别</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
+                    <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
+                    <Btn onClick={() => api.current.shotSize?.('fs')} title="全景">全景</Btn>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>机位高度</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Btn onClick={() => api.current.angle?.('low')} title="仰拍">仰拍</Btn>
+                    <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
+                    <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>灯光</span>
+                  <div className="flex flex-wrap gap-1">
+                    {LIGHTINGS.map((item) => <Btn key={item.k} on={lighting === item.k} onClick={() => { setLighting(item.k); api.current.setLighting?.(item.k) }} title={`灯光预设：${item.k}`}>{item.k}</Btn>)}
+                  </div>
+                </div>
+                {hasControlModel && (
+                  <div className="flex flex-col gap-2">
+                    <span className={secCls}>控制图</span>
+                    <div className="flex gap-1">
+                      <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
+                      <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-        )}
-        {/* 镜头 */}
-        <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
-          <span className={secCls}>镜头</span>
-          <div className="flex items-center gap-2">
-            <span className="text-white/40 w-8">焦段</span>
-            <input type="range" min={18} max={135} value={focal} onChange={(e) => onFocal(Number(e.target.value))} className="flex-1 accent-amber-300" />
-            <span className="w-9 text-right tabular-nums text-amber-200">{focal}</span>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}</Btn>)}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">画幅</span>
-            {ASPECTS.map((a) => (
-              <Btn key={a.k} on={aspect === a.k} onClick={() => onAspect(a.k)} title={a.ar ? `出图画幅 ${a.k}` : '跟随视口'}>{a.k}</Btn>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">镜别</span>
-            <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
-            <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
-            <Btn onClick={() => api.current.shotSize?.('fs')} title="全景">全景</Btn>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">角度</span>
-            <Btn onClick={() => api.current.angle?.('low')} title="仰拍">仰拍</Btn>
-            <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
-            <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">灯光</span>
-            {LIGHTINGS.map((l) => (
-              <Btn key={l.k} on={lighting === l.k} onClick={() => { setLighting(l.k); api.current.setLighting?.(l.k) }} title={`灯光预设：${l.k}`}>{l.k}</Btn>
-            ))}
-          </div>
-          {hasControlModel && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-white/40 w-8">控制</span>
-              <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
-              <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
-            </div>
-          )}
         </div>
-        {/* 机位 */}
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className={secCls}>机位（{shots.length}）</span>
-            <Btn onClick={addShot} title="记录当前机位">+记录</Btn>
-          </div>
-          {shots.map((s, i) => (
-            <div key={s.id} className="flex items-center gap-1.5">
-              {(s.take || s.thumb) && (
-                <div className="w-10 shrink-0 flex flex-col items-center gap-0.5">
-                  <img src={s.take || s.thumb} onClick={() => applyShot(s)} className={`w-10 rounded-md ring-1 cursor-pointer transition-shadow hover:ring-amber-200 ${s.take ? 'ring-amber-300/70' : 'ring-white/15'}`} title="切到此机位" />
-                  {(s.takes?.length || 0) > 1 && (
-                    <div className="flex items-center gap-0.5 text-[9px] text-white/50">
-                      <button onClick={() => cycleTake(i, -1)} className="px-0.5 hover:text-white transition-colors" title="上一条成片">‹</button>
-                      <span className="tabular-nums">{(s.takes!.indexOf(s.take || '') + 1) || 1}/{s.takes!.length}</span>
-                      <button onClick={() => cycleTake(i, 1)} className="px-0.5 hover:text-white transition-colors" title="下一条成片">›</button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {editShotId === s.id ? (
-                <input
-                  autoFocus
-                  value={editShotName}
-                  onChange={(e) => setEditShotName(e.target.value)}
-                  onBlur={() => { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
-                    if (e.key === 'Enter') { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }
-                    else if (e.key === 'Escape') setEditShotId(null)
-                  }}
-                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
-                />
-              ) : (
-                <button onClick={() => applyShot(s)} onDoubleClick={() => { setEditShotId(s.id); setEditShotName(s.name) }} className="flex-1 text-left px-1.5 py-1 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/10 text-white/75 hover:text-white truncate transition-colors" title="切到此机位">{s.name}</button>
-              )}
-              <button onClick={() => void genShot(i)} disabled={busy} className="text-white/40 hover:text-amber-200 disabled:opacity-30 transition-colors" title="按此机位生成/重拍"><RefreshCw size={12} /></button>
-              <button onClick={() => delShot(s.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
-            </div>
-          ))}
-          {shots.length > 0 && (
-            <button onClick={() => void batchGenerate()} disabled={busy} className="mt-1 px-2 py-1.5 rounded-lg border border-amber-300/50 bg-amber-300/15 text-amber-200 hover:bg-amber-300/25 text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors active:scale-[0.98]">
-              <Film size={13} /> 批量生成 {shots.length} 机位
-            </button>
-          )}
-          {shots.length > 0 && (
-            <button onClick={exportStoryboard} disabled={busy} className="px-2 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors" title="导出分镜到画布">
-              <Clapperboard size={13} /> 导出分镜到画布
-            </button>
-          )}
-        </div>
-      </div>
       )}
 
+      <div className="absolute z-[3]" style={{ ...viewportStyle, bottom: 84, height: shotStripHeight }}>
+        <DirectorShotStrip
+          shots={shots}
+          activeShotId={activeShotId}
+          expanded={shotStripExpanded}
+          busy={busy}
+          onToggle={() => setShotStripExpanded((value) => !value)}
+          onAdd={addShot}
+          onApply={applyShot}
+          onGenerate={(index) => { void genShot(index) }}
+          onDuplicate={duplicateShot}
+          onDelete={delShot}
+          onRename={renameShot}
+          onCycleTake={cycleTake}
+          onReorder={reorderShots}
+          onBatchGenerate={() => { void batchGenerate() }}
+          onExport={exportStoryboard}
+        />
+      </div>
+
       {/* 底：场景描述 + 生成 */}
-      <div className={`absolute bottom-3 ${viewportInsetCls} flex items-end gap-2`}>
+      <div className="absolute bottom-3 flex items-end gap-2" style={viewportStyle}>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
