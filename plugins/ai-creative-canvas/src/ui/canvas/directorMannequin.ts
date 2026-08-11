@@ -117,6 +117,18 @@ export const DIRECTOR_BODY_GROUPS: { key: DirectorBodyGroup; label: string }[] =
   { key: 'build', label: '体态' }
 ]
 
+const NEUTRAL_PRESENTATION_BODY_TYPES = new Set<DirectorBodyType>([
+  'female',
+  'slim',
+  'teenFemale',
+  'childFemale',
+  'seniorFemale',
+  'heavyFemale'
+])
+
+export const isDirectorNeutralBodyType = (bodyType: DirectorBodyType): boolean =>
+  NEUTRAL_PRESENTATION_BODY_TYPES.has(bodyType)
+
 // Proportion presets are adapted from storyai-3d-director-desk's MIT-licensed
 // procedural mannequin. See THIRD_PARTY_NOTICES.md at the plugin root.
 export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [

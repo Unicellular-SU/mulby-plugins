@@ -12,6 +12,7 @@ import {
   getDirectorDetailedJointDegrees,
   getDirectorBodyPreset,
   getDirectorPose,
+  isDirectorNeutralBodyType,
   type DirectorBodyType
 } from './directorMannequin'
 
@@ -334,6 +335,7 @@ function Inner() {
           const preset = getDirectorBodyPreset(bodyType)
           const template = directorTemplates[preset.bodyType]
           if (!template) return null
+          const neutralPresentation = isDirectorNeutralBodyType(bodyType)
 
           const model = cloneSkeleton(template)
           const root = new THREE.Group()
@@ -354,12 +356,24 @@ function Inner() {
               object.frustumCulled = false
               object.userData.directorSharedAssets = true
               const materials = (Array.isArray(object.material) ? object.material : [object.material]).map((source: any) => {
+                const sourceName = source.name || ''
+                const isEyeMaterial = /(?:eye|high-poly)/i.test(sourceName)
+                const isBodyMaterial = !isEyeMaterial && sourceName !== 'Director_Brow'
+                // 中性女性人台用高粗糙、低对比的自发光材质弱化胸腹等裸模明暗细节；
+                // 网格、骨架、轮廓和姿势精度保持不变。
                 const material = source.clone()
-                const isEyeMaterial = /(?:eye|high-poly)/i.test(material.name || '')
-                if (!isEyeMaterial && material.name !== 'Director_Brow') {
+                material.name = sourceName
+                if (isBodyMaterial) {
                   material.color.setHex(color)
-                  material.metalness = 0.02
-                  material.roughness = 0.7
+                  if (neutralPresentation && material.emissive?.setHex) {
+                    material.emissive.setHex(color)
+                    material.emissiveIntensity = 0.45
+                    material.metalness = 0
+                    material.roughness = 1
+                  } else {
+                    material.metalness = 0.02
+                    material.roughness = 0.7
+                  }
                 } else if (material.name === 'Director_Brow') {
                   material.color.setHex(0x17191e)
                 } else if (isEyeMaterial) {
@@ -2261,7 +2275,7 @@ function Inner() {
                   <span className="text-white/40 w-8">朝向</span>
                   {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
                 </div>
-                <div className={hintCls}>每个素体都是独立网格，不靠拉宽或压扁改体型；素体与姿势会写进生成提示。</div>
+                <div className={hintCls}>每个素体都是独立网格，不靠拉宽或压扁改体型；女性素体采用中性人台轮廓，降低 NSFW 风险。</div>
               </>
             )}
           </div>

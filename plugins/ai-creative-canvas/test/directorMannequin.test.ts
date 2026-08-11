@@ -7,7 +7,8 @@ import {
   getDirectorBodyPreset,
   getDirectorDetailedJointDegrees,
   getDirectorProceduralJointDegrees,
-  getDirectorPose
+  getDirectorPose,
+  isDirectorNeutralBodyType
 } from '../src/ui/canvas/directorMannequin.ts'
 
 function testBodyPresets() {
@@ -21,6 +22,10 @@ function testBodyPresets() {
   assert.ok(getDirectorBodyPreset('chibi').proportions.headRadius > getDirectorBodyPreset('mannequin').proportions.headRadius)
   assert.match(getDirectorBodyPreset('seniorFemale').promptLabel, /老年女性/)
   assert.match(getDirectorBodyPreset('heavyFemale').promptLabel, /丰腴女性/)
+  assert.deepEqual(
+    DIRECTOR_BODY_PRESETS.filter((preset) => isDirectorNeutralBodyType(preset.bodyType)).map((preset) => preset.bodyType),
+    ['female', 'slim', 'teenFemale', 'childFemale', 'seniorFemale', 'heavyFemale']
+  )
 }
 
 function testNativeBodyAssets() {
