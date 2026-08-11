@@ -1,4 +1,19 @@
-export type DirectorBodyType = 'mannequin' | 'female' | 'broad' | 'muscular' | 'slim' | 'teen' | 'child' | 'chibi'
+export type DirectorBodyType =
+  | 'mannequin'
+  | 'female'
+  | 'broad'
+  | 'muscular'
+  | 'slim'
+  | 'teen'
+  | 'teenFemale'
+  | 'child'
+  | 'childFemale'
+  | 'chibi'
+  | 'senior'
+  | 'seniorFemale'
+  | 'heavyFemale'
+
+export type DirectorBodyGroup = 'adult' | 'age' | 'build'
 
 export interface DirectorBodyProportions {
   hipY: number
@@ -43,6 +58,8 @@ export interface DirectorBodyPreset {
   bodyType: DirectorBodyType
   label: string
   promptLabel: string
+  group: DirectorBodyGroup
+  assetFile: string
   proportions: DirectorBodyProportions
 }
 
@@ -89,14 +106,22 @@ const bodyPreset = (
   bodyType: DirectorBodyType,
   label: string,
   promptLabel: string,
+  group: DirectorBodyGroup,
+  assetFile: string,
   patch: Partial<DirectorBodyProportions> = {}
-): DirectorBodyPreset => ({ bodyType, label, promptLabel, proportions: { ...BASE_PROPORTIONS, ...patch } })
+): DirectorBodyPreset => ({ bodyType, label, promptLabel, group, assetFile, proportions: { ...BASE_PROPORTIONS, ...patch } })
+
+export const DIRECTOR_BODY_GROUPS: { key: DirectorBodyGroup; label: string }[] = [
+  { key: 'adult', label: '成人' },
+  { key: 'age', label: '年龄' },
+  { key: 'build', label: '体态' }
+]
 
 // Proportion presets are adapted from storyai-3d-director-desk's MIT-licensed
 // procedural mannequin. See THIRD_PARTY_NOTICES.md at the plugin root.
 export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
-  bodyPreset('mannequin', '男性', '成年男性体型'),
-  bodyPreset('female', '女性', '成年女性体型', {
+  bodyPreset('mannequin', '成年男', '成年男性体型', 'adult', 'adult-male.gltf'),
+  bodyPreset('female', '成年女', '成年女性体型', 'adult', 'adult-female.gltf', {
     pelvisScale: [1.42, 0.64, 0.8],
     torsoLowerRadius: 0.14,
     torsoUpperRadius: 0.175,
@@ -110,7 +135,7 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     calfRadius: 0.066,
     headScale: [0.78, 1, 0.72]
   }),
-  bodyPreset('broad', '宽厚', '宽厚魁梧体型', {
+  bodyPreset('broad', '宽厚男', '宽厚魁梧男性体型', 'build', 'broad-male.gltf', {
     pelvisScale: [1.42, 0.72, 0.9],
     torsoLowerScale: [1.06, 1, 0.86],
     torsoUpperScale: [1.54, 1.08, 0.96],
@@ -124,7 +149,7 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     calfRadius: 0.086,
     headRadius: 0.195
   }),
-  bodyPreset('muscular', '健壮', '肌肉健壮体型', {
+  bodyPreset('muscular', '健壮男', '肌肉健壮男性体型', 'build', 'muscular-male.gltf', {
     pelvisScale: [1.22, 0.66, 0.82],
     torsoLowerRadius: 0.145,
     torsoUpperRadius: 0.235,
@@ -136,7 +161,7 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     thighRadius: 0.104,
     calfRadius: 0.088
   }),
-  bodyPreset('slim', '纤细', '高挑纤细体型', {
+  bodyPreset('slim', '纤细女', '高挑纤细女性体型', 'build', 'slim-female.gltf', {
     pelvisScale: [1.08, 0.58, 0.72],
     torsoLowerRadius: 0.12,
     torsoUpperRadius: 0.145,
@@ -150,7 +175,7 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     calfRadius: 0.055,
     headRadius: 0.18
   }),
-  bodyPreset('teen', '少年', '少年体型', {
+  bodyPreset('teen', '少年', '少年男性体型', 'age', 'teen-male.gltf', {
     hipY: 0.68,
     pelvisRadius: 0.18,
     pelvisScale: [1.18, 0.6, 0.76],
@@ -174,7 +199,26 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     headRadius: 0.185,
     headScale: [0.83, 1.06, 0.77]
   }),
-  bodyPreset('child', '儿童', '儿童体型', {
+  bodyPreset('teenFemale', '少女', '少女女性体型', 'age', 'teen-female.gltf', {
+    hipY: 0.66,
+    pelvisRadius: 0.18,
+    pelvisScale: [1.3, 0.58, 0.74],
+    legSpread: 0.105,
+    torsoLowerRadius: 0.12,
+    torsoUpperRadius: 0.14,
+    torsoLowerHeight: 0.18,
+    torsoUpperHeight: 0.3,
+    torsoLowerScale: [0.82, 0.96, 0.68],
+    torsoUpperScale: [1.02, 1, 0.72],
+    shoulderWidth: 0.235,
+    upperArmRadius: 0.047,
+    forearmRadius: 0.04,
+    thighRadius: 0.068,
+    calfRadius: 0.057,
+    headRadius: 0.185,
+    headScale: [0.83, 1.06, 0.77]
+  }),
+  bodyPreset('child', '男童', '男童体型', 'age', 'child-male.gltf', {
     hipY: 0.5,
     pelvisRadius: 0.145,
     pelvisScale: [1.06, 0.56, 0.74],
@@ -207,7 +251,30 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     headRadius: 0.2,
     headScale: [0.9, 1.08, 0.82]
   }),
-  bodyPreset('chibi', '二头身', '二头身卡通体型', {
+  bodyPreset('childFemale', '女童', '女童体型', 'age', 'child-female.gltf', {
+    hipY: 0.49,
+    pelvisRadius: 0.145,
+    pelvisScale: [1.16, 0.55, 0.72],
+    legSpread: 0.082,
+    torsoLowerRadius: 0.102,
+    torsoLowerHeight: 0.14,
+    torsoUpperRadius: 0.116,
+    torsoUpperHeight: 0.225,
+    torsoLowerScale: [0.76, 0.92, 0.66],
+    torsoUpperScale: [0.94, 0.98, 0.7],
+    shoulderWidth: 0.195,
+    upperArmRadius: 0.038,
+    upperArmLength: 0.15,
+    forearmRadius: 0.033,
+    forearmLength: 0.135,
+    thighRadius: 0.052,
+    thighLength: 0.19,
+    calfRadius: 0.045,
+    calfLength: 0.165,
+    headRadius: 0.2,
+    headScale: [0.9, 1.08, 0.82]
+  }),
+  bodyPreset('chibi', '幼儿', '幼儿体型', 'age', 'toddler.gltf', {
     hipY: 0.34,
     pelvisRadius: 0.12,
     pelvisScale: [1.05, 0.56, 0.8],
@@ -243,6 +310,43 @@ export const DIRECTOR_BODY_PRESETS: DirectorBodyPreset[] = [
     faceOffsetZ: 0.19,
     eyeRadius: 0.021,
     jointRadiusScale: 0.9
+  }),
+  bodyPreset('senior', '老年男', '老年男性体型', 'age', 'senior-male.gltf', {
+    hipY: 0.78,
+    torsoUpperHeight: 0.36,
+    torsoUpperScale: [1.24, 0.98, 0.9],
+    shoulderWidth: 0.285,
+    upperArmRadius: 0.058,
+    forearmRadius: 0.052,
+    thighRadius: 0.082,
+    calfRadius: 0.07,
+    neckHeight: 0.105,
+    headRadius: 0.195
+  }),
+  bodyPreset('seniorFemale', '老年女', '老年女性体型', 'age', 'senior-female.gltf', {
+    hipY: 0.75,
+    pelvisScale: [1.38, 0.66, 0.84],
+    torsoUpperHeight: 0.35,
+    torsoUpperScale: [1.08, 0.98, 0.82],
+    shoulderWidth: 0.25,
+    upperArmRadius: 0.052,
+    forearmRadius: 0.047,
+    thighRadius: 0.078,
+    calfRadius: 0.064,
+    neckHeight: 0.1,
+    headRadius: 0.195
+  }),
+  bodyPreset('heavyFemale', '丰腴女', '丰腴女性体型', 'build', 'heavy-female.gltf', {
+    pelvisScale: [1.64, 0.78, 0.98],
+    torsoLowerRadius: 0.19,
+    torsoUpperRadius: 0.22,
+    torsoLowerScale: [1.08, 1, 0.92],
+    torsoUpperScale: [1.34, 1.04, 1.02],
+    shoulderWidth: 0.31,
+    upperArmRadius: 0.078,
+    forearmRadius: 0.068,
+    thighRadius: 0.112,
+    calfRadius: 0.086
   })
 ]
 

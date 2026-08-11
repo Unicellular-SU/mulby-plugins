@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import {
   DIRECTOR_BODY_PRESETS,
   DIRECTOR_POSES,
@@ -9,12 +11,33 @@ import {
 } from '../src/ui/canvas/directorMannequin.ts'
 
 function testBodyPresets() {
-  assert.equal(DIRECTOR_BODY_PRESETS.length, 8)
-  assert.equal(new Set(DIRECTOR_BODY_PRESETS.map((preset) => preset.bodyType)).size, 8)
+  assert.equal(DIRECTOR_BODY_PRESETS.length, 13)
+  assert.equal(new Set(DIRECTOR_BODY_PRESETS.map((preset) => preset.bodyType)).size, 13)
+  assert.equal(new Set(DIRECTOR_BODY_PRESETS.map((preset) => preset.assetFile)).size, 13, '每种素体必须使用独立模型文件')
+  assert.deepEqual(new Set(DIRECTOR_BODY_PRESETS.map((preset) => preset.group)), new Set(['adult', 'age', 'build']))
   assert.equal(getDirectorBodyPreset('unknown').bodyType, 'mannequin')
   assert.ok(getDirectorBodyPreset('child').proportions.hipY < getDirectorBodyPreset('mannequin').proportions.hipY)
   assert.ok(getDirectorBodyPreset('broad').proportions.shoulderWidth > getDirectorBodyPreset('slim').proportions.shoulderWidth)
   assert.ok(getDirectorBodyPreset('chibi').proportions.headRadius > getDirectorBodyPreset('mannequin').proportions.headRadius)
+  assert.match(getDirectorBodyPreset('seniorFemale').promptLabel, /老年女性/)
+  assert.match(getDirectorBodyPreset('heavyFemale').promptLabel, /丰腴女性/)
+}
+
+function testNativeBodyAssets() {
+  const assetDir = new URL('../src/ui/public/models/director/', import.meta.url)
+  for (const preset of DIRECTOR_BODY_PRESETS) {
+    const gltfUrl = new URL(preset.assetFile, assetDir)
+    assert.ok(existsSync(gltfUrl), `${preset.assetFile} should exist`)
+    const gltf = JSON.parse(readFileSync(gltfUrl, 'utf8'))
+    const nodeNames = new Set((gltf.nodes || []).map((node: { name?: string }) => node.name))
+    assert.ok(nodeNames.has('pelvis') && nodeNames.has('head'), `${preset.assetFile} should use the shared humanoid rig`)
+    assert.ok(Array.isArray(gltf.skins) && gltf.skins.length > 0, `${preset.assetFile} should contain skinning data`)
+    const bufferFile = gltf.buffers?.[0]?.uri
+    assert.equal(typeof bufferFile, 'string', `${preset.assetFile} should reference an external mesh buffer`)
+    const bufferUrl = new URL(bufferFile, assetDir)
+    assert.ok(existsSync(bufferUrl), `${bufferFile} should exist`)
+    assert.ok(statSync(fileURLToPath(bufferUrl)).size > 500_000, `${bufferFile} should contain the detailed body mesh`)
+  }
 }
 
 function testPosePresets() {
@@ -53,5 +76,6 @@ function testPosePresets() {
 }
 
 testBodyPresets()
+testNativeBodyAssets()
 testPosePresets()
-console.log('director mannequin: 8 body types / 20 semantic poses / facing rules OK')
+console.log('director mannequin: 13 native body meshes / 20 semantic poses / facing rules OK')

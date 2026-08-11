@@ -6,6 +6,7 @@ import { toast } from '../store/toastStore'
 import { saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
 import {
+  DIRECTOR_BODY_GROUPS,
   DIRECTOR_BODY_PRESETS,
   DIRECTOR_POSES as POSES,
   getDirectorDetailedJointDegrees,
@@ -14,7 +15,7 @@ import {
   type DirectorBodyType
 } from './directorMannequin'
 
-// 3D 导演台 v10：8 种体型、20 种语义姿势 + CC0 高精度 humanoid 人台；
+// 3D 导演台 v11：13 套独立人物网格、20 种语义姿势 + CC0 humanoid 人台；
 // 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
@@ -300,21 +301,22 @@ function Inner() {
           syncHistoryUi()
         }
 
-        const directorTemplates: Partial<Record<'male' | 'female', any>> = {}
+        const directorTemplates: Partial<Record<DirectorBodyType, any>> = {}
         const directorAssetUrl = (file: string) => new URL(`./models/director/${file}`, window.location.href).href
         const directorLoader = new GLTFLoader()
-        const [maleTemplate, femaleTemplate] = await Promise.allSettled([
-          directorLoader.loadAsync(directorAssetUrl('director-male.gltf')),
-          directorLoader.loadAsync(directorAssetUrl('director-female.gltf'))
-        ])
-        if (maleTemplate.status === 'fulfilled') directorTemplates.male = maleTemplate.value.scene
-        if (femaleTemplate.status === 'fulfilled') directorTemplates.female = femaleTemplate.value.scene
+        const directorTemplateResults = await Promise.allSettled(
+          DIRECTOR_BODY_PRESETS.map((preset) => directorLoader.loadAsync(directorAssetUrl(preset.assetFile)))
+        )
+        directorTemplateResults.forEach((result, index) => {
+          if (result.status === 'fulfilled') directorTemplates[DIRECTOR_BODY_PRESETS[index].bodyType] = result.value.scene
+        })
 
         const DETAILED_BONE_MAP: Record<string, string> = {
           pelvis: '骨盆',
           spine_03: '胸',
           neck_01: '颈',
           Head: '头',
+          head: '头',
           upperarm_l: '左肩',
           lowerarm_l: '左肘',
           hand_l: '左腕',
@@ -328,20 +330,9 @@ function Inner() {
           calf_r: '右膝',
           foot_r: '右踝'
         }
-        const detailedProfiles: Record<DirectorBodyType, { template: 'male' | 'female'; height: number; width: number; depth: number; head: number }> = {
-          mannequin: { template: 'male', height: 1.82, width: 1, depth: 1, head: 1 },
-          female: { template: 'female', height: 1.76, width: 1, depth: 1, head: 1 },
-          broad: { template: 'male', height: 1.86, width: 1.14, depth: 1.08, head: 1 },
-          muscular: { template: 'male', height: 1.84, width: 1.08, depth: 1.05, head: 1 },
-          slim: { template: 'male', height: 1.82, width: 0.88, depth: 0.92, head: 1.02 },
-          teen: { template: 'male', height: 1.62, width: 0.92, depth: 0.94, head: 1.12 },
-          child: { template: 'male', height: 1.28, width: 0.86, depth: 0.9, head: 1.32 },
-          chibi: { template: 'male', height: 0.98, width: 0.9, depth: 0.94, head: 1.85 }
-        }
-
         const makeDetailedMannequin = (color: number, bodyType: DirectorBodyType) => {
-          const profile = detailedProfiles[bodyType]
-          const template = directorTemplates[profile.template]
+          const preset = getDirectorBodyPreset(bodyType)
+          const template = directorTemplates[preset.bodyType]
           if (!template) return null
 
           const model = cloneSkeleton(template)
@@ -352,8 +343,8 @@ function Inner() {
           rigRoot.add(model)
           root.userData.kind = '人台'
           root.userData.bodyType = bodyType
+          root.userData.bodyAssetFile = preset.assetFile
           root.userData.poseOffsetY = 0
-          root.userData.bodyUnitScale = profile.height / 1.82
           root.userData.detailedMannequin = true
           root.userData.rigged = true
           root.userData.poseSchemaVersion = 2
@@ -364,14 +355,17 @@ function Inner() {
               object.userData.directorSharedAssets = true
               const materials = (Array.isArray(object.material) ? object.material : [object.material]).map((source: any) => {
                 const material = source.clone()
-                if (material.name === 'Director_Body') {
+                const isEyeMaterial = /(?:eye|high-poly)/i.test(material.name || '')
+                if (!isEyeMaterial && material.name !== 'Director_Brow') {
                   material.color.setHex(color)
                   material.metalness = 0.02
                   material.roughness = 0.7
                 } else if (material.name === 'Director_Brow') {
                   material.color.setHex(0x17191e)
-                } else if (material.name === 'Director_Eyes') {
+                } else if (isEyeMaterial) {
                   material.color.setHex(0xffffff)
+                  material.metalness = 0
+                  material.roughness = 0.32
                 }
                 material.needsUpdate = true
                 return material
@@ -382,17 +376,26 @@ function Inner() {
             const jointName = DETAILED_BONE_MAP[object.name]
             if (jointName) object.userData.joint = jointName
 
-            if (object.name === 'Head' && profile.head !== 1) object.scale.multiplyScalar(profile.head)
           })
 
-          // 原模型是 T pose。根据骨骼当前世界轴动态求出“手臂朝下”的局部旋转，
-          // 不假设左右上臂的本地 XYZ 朝向，避免换模型后再次出现正反面/轴向颠倒。
+          // 原模型是 T pose。直接用“肩 → 肘”的世界方向求落臂旋转，
+          // 不假设骨骼局部 +Y（不同导出器的局部轴并不一致）。
           model.updateMatrixWorld(true)
           model.traverse((object: any) => {
             if (object.name !== 'upperarm_l' && object.name !== 'upperarm_r') return
+            const lowerArmName = object.name === 'upperarm_l' ? 'lowerarm_l' : 'lowerarm_r'
+            const lowerArm = object.children.find((child: any) => child.name === lowerArmName)
+            if (!lowerArm) return
+            const shoulderPosition = object.getWorldPosition(new THREE.Vector3())
+            const elbowPosition = lowerArm.getWorldPosition(new THREE.Vector3())
+            const armDirection = elbowPosition.sub(shoulderPosition).normalize()
+            if (armDirection.lengthSq() < 0.5) return
             const worldRotation = object.getWorldQuaternion(new THREE.Quaternion())
-            const downInBoneSpace = new THREE.Vector3(0, -1, 0).applyQuaternion(worldRotation.clone().invert()).normalize()
-            object.quaternion.multiply(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), downInBoneSpace))
+            const targetWorld = new THREE.Quaternion()
+              .setFromUnitVectors(armDirection, new THREE.Vector3(0, -1, 0))
+              .multiply(worldRotation)
+            const parentWorld = object.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
+            object.quaternion.copy(parentWorld.invert().multiply(targetWorld))
           })
           model.updateMatrixWorld(true)
           model.traverse((object: any) => {
@@ -415,8 +418,12 @@ function Inner() {
           model.updateMatrixWorld(true)
           const unscaledBounds = new THREE.Box3().setFromObject(model, true)
           const sourceHeight = Math.max(0.001, unscaledBounds.max.y - unscaledBounds.min.y)
-          const scale = profile.height / sourceHeight
-          rigRoot.scale.set(scale * profile.width, scale, scale * profile.depth)
+          // FBX 导出器以厘米级父节点保存同一套模型，因此这里只做整个人体的等比单位换算。
+          // 三轴始终使用同一个数值；体宽、厚度、头身比和年龄差异全部来自各自独立网格。
+          const assetUnitScale = sourceHeight > 5 ? 0.1 : 1
+          rigRoot.scale.setScalar(assetUnitScale)
+          root.userData.bodyUnitScale = sourceHeight * assetUnitScale / 1.82
+          root.userData.sourceHeight = sourceHeight
           root.updateMatrixWorld(true)
           const bounds = new THREE.Box3().setFromObject(root, true)
           const restY = bounds.isEmpty() || !isFinite(bounds.min.y) ? 0 : -bounds.min.y
@@ -674,8 +681,7 @@ function Inner() {
             }
           })
           const rig = findRigRoot(root)
-          const preset = getDirectorBodyPreset(root.userData.bodyType)
-          const scaledOffset = offsetY * Number(root.userData.bodyUnitScale || 1) * (preset.proportions.hipY / getDirectorBodyPreset('mannequin').proportions.hipY)
+          const scaledOffset = offsetY * Number(root.userData.bodyUnitScale || 1)
           if (rig) rig.position.y = Number(rig.userData.restY || 0) + scaledOffset
           root.userData.poseOffsetY = scaledOffset
           const detailedDegrees = root.userData.detailedMannequin ? getDirectorDetailedJointDegrees(controls) : null
@@ -1465,7 +1471,7 @@ function Inner() {
             const vt = v.y > 0.25 ? '偏上' : v.y < -0.25 ? '偏下' : ''
             return h + vt
           }
-          // 人物在出图画幅中的纵向占比：按实际包围盒投影，儿童/二头身/蹲姿都不再套成人固定身高。
+          // 人物在出图画幅中的纵向占比：按实际包围盒投影，儿童/幼儿/蹲姿都不再套成人固定身高。
           const heightFracOf = (s: Subj): number => {
             const box = new THREE.Box3().setFromObject(s.obj)
             if (box.isEmpty()) return 0
@@ -2215,17 +2221,24 @@ function Inner() {
             {selKind === '人台' && (
               <>
                 <div className="flex items-start gap-1">
-                  <span className="text-white/40 w-8 mt-1">体型</span>
-                  <div className="flex-1 grid grid-cols-4 gap-1">
-                    {DIRECTOR_BODY_PRESETS.map((body) => (
-                      <Btn
-                        key={body.bodyType}
-                        on={selectedObj?.bodyType === body.bodyType}
-                        onClick={() => api.current.setBodyType?.(body.bodyType)}
-                        title={`切换为${body.label}素体`}
-                      >
-                        {body.label}
-                      </Btn>
+                  <span className="text-white/40 w-8 mt-1">素体</span>
+                  <div className="flex-1 space-y-1.5">
+                    {DIRECTOR_BODY_GROUPS.map((group) => (
+                      <div key={group.key} className="flex items-start gap-1">
+                        <span className="w-7 pt-1 text-[9px] text-white/30">{group.label}</span>
+                        <div className="flex-1 grid grid-cols-4 gap-1">
+                          {DIRECTOR_BODY_PRESETS.filter((body) => body.group === group.key).map((body) => (
+                            <Btn
+                              key={body.bodyType}
+                              on={selectedObj?.bodyType === body.bodyType}
+                              onClick={() => api.current.setBodyType?.(body.bodyType)}
+                              title={`独立 CC0 素体：${body.label}`}
+                            >
+                              {body.label}
+                            </Btn>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -2248,7 +2261,7 @@ function Inner() {
                   <span className="text-white/40 w-8">朝向</span>
                   {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
                 </div>
-                <div className={hintCls}>体型与姿势会写进生成提示；微调用顶栏「摆姿」点关节、手腕或脚踝后拖动。</div>
+                <div className={hintCls}>每个素体都是独立网格，不靠拉宽或压扁改体型；素体与姿势会写进生成提示。</div>
               </>
             )}
           </div>

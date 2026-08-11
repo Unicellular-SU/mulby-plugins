@@ -31,15 +31,23 @@ SOFTWARE.
 
 No binary 3D model from that repository is bundled with this plugin.
 
-## Universal Base Characters (Standard)
+## MakeHuman 1.3 core assets
 
-The built-in detailed male and female director mannequins are optimized from
-the Universal Base Characters Standard pack by Quaternius:
+The 13 built-in Director Desk body meshes were generated and baked from the
+MakeHuman 1.3 core mesh, macro targets, body-shape targets, eye asset, and
+game-engine humanoid rig:
 
-https://quaternius.com/packs/universalbasecharacters.html
+https://github.com/makehumancommunity/makehuman
 
-Models by @Quaternius. The bundled meshes, humanoid rigs, eye textures, and
-downscaled normal/roughness textures are dedicated to the public domain under
-CC0 1.0 Universal:
+The body variants represent adult men and women, teens, children, a toddler,
+senior men and women, and broad, muscular, slim, and heavy builds. Each variant
+is stored as an independent mesh. The plugin does not create these differences
+with runtime non-uniform scaling.
+
+MakeHuman core graphical assets and exported models are dedicated to the
+public domain under CC0 1.0 Universal. MakeHuman's application source is AGPL;
+no MakeHuman application source is bundled with this plugin.
+
+https://static.makehumancommunity.org/about/license.html
 
 https://creativecommons.org/publicdomain/zero/1.0/

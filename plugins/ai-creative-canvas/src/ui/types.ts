@@ -103,7 +103,7 @@ export interface DirectorSubject {
   scale: number | [number, number, number] // 旧数据=均匀(number)；新数据=三轴(非均匀缩放)
   joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台/rigged 模型摆姿）
   poseName?: string // 一键姿势名（供生成提示）
-  bodyType?: 'mannequin' | 'female' | 'broad' | 'muscular' | 'slim' | 'teen' | 'child' | 'chibi' // 程序化人台体型（旧工程缺省=mannequin）
+  bodyType?: 'mannequin' | 'female' | 'broad' | 'muscular' | 'slim' | 'teen' | 'teenFemale' | 'child' | 'childFemale' | 'chibi' | 'senior' | 'seniorFemale' | 'heavyFemale' // 独立人台素体（旧工程缺省=mannequin）
   poseOffsetY?: number // 下蹲/跪姿等预设的内部垂直偏移；不改对象世界坐标
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
