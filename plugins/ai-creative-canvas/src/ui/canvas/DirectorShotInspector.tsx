@@ -14,7 +14,9 @@ interface Props {
   totalDurationMs: number
   issues: DirectorContinuityIssue[]
   showCameraHelpers: boolean
+  targetSubjects: Array<{ id: string; name: string; kind: string }>
   onChange: (patch: Partial<DirectorShot>) => void
+  onTargetChange: (targetSubjectId: string | null) => void
   onRefresh: () => void
   onToggleCameraHelpers: () => void
 }
@@ -26,7 +28,9 @@ export function DirectorShotInspector({
   totalDurationMs,
   issues,
   showCameraHelpers,
+  targetSubjects,
   onChange,
+  onTargetChange,
   onRefresh,
   onToggleCameraHelpers
 }: Props) {
@@ -126,6 +130,21 @@ export function DirectorShotInspector({
               </button>
             </div>
           </div>
+
+          <label className="flex flex-col gap-1 text-[10px] text-white/45">
+            跟随目标
+            <select
+              value={targetSubjects.some((subject) => subject.id === shot.targetSubjectId) ? shot.targetSubjectId : ''}
+              onChange={(event) => onTargetChange(event.target.value || null)}
+              className="h-7 rounded-lg border border-white/10 bg-zinc-900 px-2 text-[11px] text-white/80 outline-none focus:border-amber-300/50"
+            >
+              <option value="">固定机位</option>
+              {targetSubjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>{subject.name} · {subject.kind}</option>
+              ))}
+            </select>
+            <span className="text-[9px] leading-relaxed text-white/30">绑定后移动对象，机位会保持原构图一起跟随。</span>
+          </label>
 
           <label className="flex flex-col gap-1 text-[10px] text-white/45">
             导演备注

@@ -97,18 +97,22 @@ export interface DirectorCam {
   focal: number
 }
 export interface DirectorSubject {
+  id?: string // 稳定对象 id；旧工程缺省时首次载入补齐
   kind: string // 人台 / 道具 / 模型
   pos: [number, number, number]
   rot: [number, number, number]
   scale: number | [number, number, number] // 旧数据=均匀(number)；新数据=三轴(非均匀缩放)
   joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台/rigged 模型摆姿）
   poseName?: string // 一键姿势名（供生成提示）
+  poseSchemaVersion?: number
   bodyType?: 'mannequin' | 'female' | 'broad' | 'muscular' | 'slim' | 'teen' | 'teenFemale' | 'child' | 'childFemale' | 'chibi' | 'senior' | 'seniorFemale' | 'heavyFemale' // 独立人台素体（旧工程缺省=mannequin）
   poseOffsetY?: number // 下蹲/跪姿等预设的内部垂直偏移；不改对象世界坐标
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
   desc?: string // 对象语义描述（"穿长衫的老者"）：场景即提示词，生成时按画面方位装配
   colorName?: string // 人台锚定色名（"红标"）：参考图颜色块 + prompt 颜色锚定，锁定站位/朝向
+  visible?: boolean
+  locked?: boolean
 }
 export interface DirectorShot {
   id: string
@@ -119,9 +123,19 @@ export interface DirectorShot {
   shotType?: string // 特写 / 中景 / 全景 / 远景，供分镜条快速识别
   durationMs?: number // 分镜时长元数据，用于总时长、导出和后续剪辑节奏
   notes?: string // 导演备注，逐镜生成与分镜导出时追加到提示词
+  targetSubjectId?: string // 可选跟随目标；应用机位时按目标当前位置解析相机
+  targetOffset?: [number, number, number] // 目标点相对跟随对象原点的偏移
+  cameraOffset?: [number, number, number] // 相机相对跟随对象原点的偏移
   thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
   take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
   takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
+}
+export interface DirectorEnvironment {
+  assetId: string // 全景背景附件 id
+  name?: string
+  mimeType?: string
+  description?: string // 追加进镜头提示词的环境描述
+  rotation?: number // 水平旋转角度，单位为度
 }
 export interface DirectorScene {
   schemaVersion?: 2
@@ -131,6 +145,7 @@ export interface DirectorScene {
   prompt?: string
   lighting?: string // 灯光预设 key（DirectorStage LIGHTINGS）
   aspect?: string // 出图画幅 key（DirectorStage ASPECTS，默认视口=不裁剪）
+  environment?: DirectorEnvironment | null // 可选等距柱状全景背景
 }
 
 export interface ProjectDoc {

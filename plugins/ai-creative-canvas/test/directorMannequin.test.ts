@@ -15,13 +15,24 @@ import {
   analyzeDirectorShotContinuity,
   classifyDirectorShot,
   createDirectorShotSnapshot,
+  createDirectorShotTargetBinding,
   formatDirectorDuration,
   getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
   normalizeDirectorShotDuration,
-  reorderDirectorShots
+  reorderDirectorShots,
+  resolveDirectorShotCamera
 } from '../src/ui/canvas/directorWorkflow.ts'
-import type { DirectorCam } from '../src/ui/types.ts'
+import type { DirectorCam, DirectorScene } from '../src/ui/types.ts'
+import {
+  collectDirectorSceneAssetIds,
+  createDirectorSceneExchangeBundle,
+  decodeDirectorSceneBase64,
+  encodeDirectorSceneBytes,
+  normalizeDirectorScene,
+  parseDirectorSceneExchange,
+  remapDirectorSceneAssetIds
+} from '../src/ui/canvas/directorSceneExchange.ts'
 import { Object3D, Vector3 } from 'three'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from '../src/ui/canvas/directorCameraPresets.ts'
 import { solveDirectorCcdIk } from '../src/ui/canvas/directorIk.ts'
@@ -176,6 +187,67 @@ function testDirectorWorkflow() {
   assert.ok(reversal.some((issue) => issue.code === 'axis-reversal'))
   assert.ok(reversal.some((issue) => issue.code === 'aspect-change'))
   assert.ok(reversal.some((issue) => issue.code === 'lighting-change'))
+
+  const binding = createDirectorShotTargetBinding(cam, 'hero', [1, 0, 2])
+  assert.deepEqual(binding.targetOffset, [-1, 1, -2])
+  assert.deepEqual(binding.cameraOffset?.map((value) => Number(value.toFixed(6))), [-1, 1.5, 0.6])
+  const followed = resolveDirectorShotCamera({ cam, ...binding }, [3, 0.5, -1])
+  assert.deepEqual(followed.pos.map((value) => Number(value.toFixed(6))), [2, 2, -0.4])
+  assert.deepEqual(followed.target, [2, 1.5, -3])
+  assert.deepEqual(
+    followed.pos.map((value, index) => Number((value - followed.target[index]).toFixed(6))),
+    cam.pos.map((value, index) => Number((value - cam.target[index]).toFixed(6))),
+    '跟随目标移动后必须保持相机与目标点的相对构图'
+  )
+  assert.deepEqual(resolveDirectorShotCamera({ cam }, null), cam)
+}
+
+function testDirectorSceneExchange() {
+  const bytes = new Uint8Array([0, 1, 2, 127, 128, 254, 255])
+  const encoded = encodeDirectorSceneBytes(bytes)
+  assert.deepEqual([...decodeDirectorSceneBase64(encoded)], [...bytes])
+  assert.throws(() => decodeDirectorSceneBase64('not base64'))
+  assert.throws(() => decodeDirectorSceneBase64('AAAA', 2), /超过/)
+
+  const raw = {
+    subjects: [
+      { id: 'hero', kind: '人台', pos: [1, 0, 2], rot: [0, 0, 0], scale: 1, name: '主角' },
+      { id: 'hero', kind: '道具', pos: [0, 0, 0], rot: [0, 0, 0], scale: [1, 1, 1], name: '桌子' },
+      { kind: '道具', pos: [2, 0, 0], rot: [0, 0, 0], scale: 1 }
+    ],
+    cam: { pos: [0, 1.5, 4], target: [0, 1, 0], focal: 35 },
+    shots: [{
+      id: 'shot',
+      name: '跟随镜头',
+      cam: { pos: [0, 1.5, 4], target: [0, 1, 0], focal: 35 },
+      targetSubjectId: 'hero',
+      targetOffset: [-1, 1, -2],
+      cameraOffset: [-1, 1.5, 2]
+    }],
+    environment: { assetId: 'pano', description: '雨夜街道', rotation: 999 }
+  }
+  const scene = normalizeDirectorScene(raw)
+  assert.deepEqual(scene.subjects.map((subject) => subject.id), ['hero', 'hero-2', 'subject-3'])
+  assert.equal(scene.shots[0].targetSubjectId, 'hero')
+  assert.equal(scene.environment?.rotation, 180)
+  assert.equal(scene.schemaVersion, 2)
+
+  const withAssets: DirectorScene = {
+    ...scene,
+    subjects: scene.subjects.map((subject, index) => index === 1 ? { ...subject, assetId: 'model' } : subject)
+  }
+  assert.deepEqual(collectDirectorSceneAssetIds(withAssets), ['model', 'pano'])
+  const remapped = remapDirectorSceneAssetIds(withAssets, new Map([['model', 'new-model'], ['pano', 'new-pano']]))
+  assert.equal(remapped.subjects[1].assetId, 'new-model')
+  assert.equal(remapped.environment?.assetId, 'new-pano')
+
+  const assets = [{ id: 'pano', mimeType: 'image/jpeg', dataBase64: encoded }]
+  const bundle = createDirectorSceneExchangeBundle(scene, assets, 123)
+  assert.equal(bundle.exportedAt, 123)
+  assert.equal(parseDirectorSceneExchange(bundle).scene.subjects[0].id, 'hero')
+  assert.equal(parseDirectorSceneExchange(raw).assets.length, 0, '旧版裸场景 JSON 应继续可导入')
+  assert.throws(() => createDirectorSceneExchangeBundle(scene, [...assets, ...assets]), /重复/)
+  assert.throws(() => normalizeDirectorScene({ ...raw, subjects: [{ kind: '灯光' }] }), /类型无效/)
 }
 
 function testDirectorPoseTools() {
@@ -240,8 +312,9 @@ testBodyPresets()
 testNativeBodyAssets()
 testPosePresets()
 testDirectorWorkflow()
+testDirectorSceneExchange()
 testDirectorPoseTools()
 testDirectorCameraPresets()
 testDirectorIk()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 bodies / 20 poses / shot planning / continuity / camera helpers / safety / IK OK')
+console.log('director mannequin: 13 bodies / 20 poses / shot tracking / portable scenes / continuity / safety / IK OK')

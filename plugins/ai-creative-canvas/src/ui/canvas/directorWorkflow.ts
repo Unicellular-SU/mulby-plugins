@@ -150,6 +150,44 @@ export function createDirectorShotSnapshot(input: {
   }
 }
 
+const addVector = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [
+  a[0] + b[0],
+  a[1] + b[1],
+  a[2] + b[2]
+]
+
+const subtractVector = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [
+  a[0] - b[0],
+  a[1] - b[1],
+  a[2] - b[2]
+]
+
+export function createDirectorShotTargetBinding(
+  cam: DirectorCam,
+  targetSubjectId: string,
+  subjectPosition: [number, number, number]
+): Pick<DirectorShot, 'targetSubjectId' | 'targetOffset' | 'cameraOffset'> {
+  return {
+    targetSubjectId,
+    targetOffset: subtractVector(cam.target, subjectPosition),
+    cameraOffset: subtractVector(cam.pos, subjectPosition)
+  }
+}
+
+export function resolveDirectorShotCamera(
+  shot: Pick<DirectorShot, 'cam' | 'targetSubjectId' | 'targetOffset' | 'cameraOffset'>,
+  subjectPosition?: [number, number, number] | null
+): DirectorCam {
+  if (!shot.targetSubjectId || !subjectPosition || !shot.targetOffset || !shot.cameraOffset) {
+    return { pos: [...shot.cam.pos], target: [...shot.cam.target], focal: shot.cam.focal }
+  }
+  return {
+    pos: addVector(subjectPosition, shot.cameraOffset),
+    target: addVector(subjectPosition, shot.targetOffset),
+    focal: shot.cam.focal
+  }
+}
+
 export function reorderDirectorShots(shots: DirectorShot[], draggedId: string, targetId: string): DirectorShot[] {
   if (!draggedId || draggedId === targetId) return shots
   const from = shots.findIndex((shot) => shot.id === draggedId)

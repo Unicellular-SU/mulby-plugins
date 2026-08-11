@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Clapperboard, Search, PanelLeftClose, PanelLeftOpen, Download, FileUp } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -20,6 +20,7 @@ import { DirectorShotStrip } from './DirectorShotStrip'
 import { DirectorShotInspector } from './DirectorShotInspector'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
+import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
 import { solveDirectorCcdIk } from './directorIk'
 import {
@@ -32,13 +33,24 @@ import {
   analyzeDirectorShotContinuity,
   classifyDirectorShot,
   createDirectorShotSnapshot,
+  createDirectorShotTargetBinding,
   getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
   normalizeDirectorShotDuration,
   reorderDirectorShots,
+  resolveDirectorShotCamera,
   type DirectorInspectorTab
 } from './directorWorkflow'
-import type { DirectorShot } from '../types'
+import {
+  collectDirectorSceneAssetIds,
+  createDirectorSceneExchangeBundle,
+  decodeDirectorSceneBase64,
+  encodeDirectorSceneBytes,
+  parseDirectorSceneExchange,
+  remapDirectorSceneAssetIds
+} from './directorSceneExchange'
+import { confirmDialog } from '../store/dialogStore'
+import type { DirectorEnvironment, DirectorScene, DirectorShot } from '../types'
 
 // 3D 导演台 v11：13 套独立人物网格、20 种语义姿势 + CC0 humanoid 人台；
 // 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
@@ -129,8 +141,9 @@ type TMode = 'translate' | 'rotate' | 'scale' | 'pose'
 
 export function DirectorStage() {
   const show = useUi((s) => s.showDirector)
+  const [revision, setRevision] = useState(0)
   if (!show) return null
-  return <Inner />
+  return <Inner key={revision} onReload={() => setRevision((value) => value + 1)} />
 }
 
 interface ObjRow {
@@ -149,10 +162,12 @@ interface TransformDraft {
   scale: [number, number, number]
 }
 
-function Inner() {
+function Inner({ onReload }: { onReload: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null)
   const pipRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const environmentFileRef = useRef<HTMLInputElement>(null)
+  const sceneFileRef = useRef<HTMLInputElement>(null)
   const api = useRef<any>({})
   const [ready, setReady] = useState(false)
   const [focal, setFocal] = useState(35)
@@ -160,6 +175,7 @@ function Inner() {
   const [locked, setLocked] = useState(false) // 取景锁定（出图相机冻结）
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
+  const [sceneRevision, setSceneRevision] = useState(0)
   const [objs, setObjs] = useState<ObjRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [selKind, setSelKind] = useState<string | null>(null)
@@ -174,6 +190,8 @@ function Inner() {
   const [activeShotId, setActiveShotId] = useState<string | null>(null)
   const [shotStripExpanded, setShotStripExpanded] = useState(true)
   const [showShotCameras, setShowShotCameras] = useState(true)
+  const [environment, setEnvironment] = useState<DirectorEnvironment | null>(null)
+  const [sceneIoBusy, setSceneIoBusy] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
   const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
   const [posePreviews, setPosePreviews] = useState<Record<string, string>>({})
@@ -191,14 +209,30 @@ function Inner() {
   const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
   const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
 
-  const saveScene = () => {
+  const buildSceneSnapshot = (): DirectorScene | null => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ schemaVersion: 2, subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect })
-    } catch { /* ignore */ }
+      if (!only) return null
+      return {
+        schemaVersion: 2,
+        subjects: only.subjects,
+        cam: only.cam,
+        shots,
+        prompt,
+        lighting: api.current.getLighting?.(),
+        aspect,
+        environment: only.environment || null
+      }
+    } catch {
+      return null
+    }
+  }
+  const saveScene = () => {
+    const scene = buildSceneSnapshot()
+    if (scene) useGraph.getState().setDirectorScene(scene)
   }
   const close = () => {
-    if (busy) return
+    if (busy || sceneIoBusy) return
     saveScene()
     useUi.getState().setShowDirector(false)
   }
@@ -238,6 +272,9 @@ function Inner() {
 
         const scene = new THREE.Scene()
         scene.background = new THREE.Color(0x1b1d23)
+        let curEnvironment: DirectorEnvironment | null = null
+        let environmentTexture: any = null
+        let environmentObjectUrl: string | null = null
         const cam = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
         cam.filmGauge = FILM_GAUGE
         cam.position.set(0, 1.5, 4)
@@ -288,6 +325,7 @@ function Inner() {
         recordedCameraHelpers.visible = false
         scene.add(recordedCameraHelpers)
         let recordedCamerasVisible = true
+        let resolveRecordedShotCam = (shot: DirectorShot) => resolveDirectorShotCamera(shot)
         const clearRecordedCameraHelpers = () => {
           for (const child of [...recordedCameraHelpers.children]) {
             recordedCameraHelpers.remove(child)
@@ -299,17 +337,18 @@ function Inner() {
           clearRecordedCameraHelpers()
           for (const shot of recordedShots) {
             if (!shot.cam) continue
+            const resolvedCam = resolveRecordedShotCam(shot)
             const helperAspect = ASPECTS.find((item) => item.k === shot.aspect)?.ar || cam.aspect || 1
             const helperDistance = Math.max(0.5, Math.hypot(
-              shot.cam.pos[0] - shot.cam.target[0],
-              shot.cam.pos[1] - shot.cam.target[1],
-              shot.cam.pos[2] - shot.cam.target[2]
+              resolvedCam.pos[0] - resolvedCam.target[0],
+              resolvedCam.pos[1] - resolvedCam.target[1],
+              resolvedCam.pos[2] - resolvedCam.target[2]
             ))
             const helperCamera = new THREE.PerspectiveCamera(50, helperAspect, 0.05, helperDistance)
             helperCamera.filmGauge = FILM_GAUGE
-            helperCamera.position.set(shot.cam.pos[0], shot.cam.pos[1], shot.cam.pos[2])
-            helperCamera.setFocalLength(shot.cam.focal || 35)
-            helperCamera.lookAt(shot.cam.target[0], shot.cam.target[1], shot.cam.target[2])
+            helperCamera.position.set(resolvedCam.pos[0], resolvedCam.pos[1], resolvedCam.pos[2])
+            helperCamera.setFocalLength(resolvedCam.focal || 35)
+            helperCamera.lookAt(resolvedCam.target[0], resolvedCam.target[1], resolvedCam.target[2])
             helperCamera.updateProjectionMatrix()
             helperCamera.updateMatrixWorld(true)
             const helper = new THREE.CameraHelper(helperCamera)
@@ -374,6 +413,7 @@ function Inner() {
           if (history.length > 60) history.shift()
           redoStack.length = 0
           syncHistoryUi()
+          if (!disposed) setSceneRevision((value) => value + 1)
         }
         const applyState = (state: any) => {
           if (!state) return
@@ -386,7 +426,13 @@ function Inner() {
           for (const st of state.subjects || []) { if (st.kind === '模型') ps.push(buildModelFromState(st)); else buildFromState(st) }
           if (state.cam) applyCam(state.cam)
           sync()
-          if (!disposed) { setSelId(null); setSelKind(null); setTransformDraft(null); if (state.cam) setFocal(Math.round(state.cam.focal || 35)) }
+          if (!disposed) {
+            setSelId(null)
+            setSelKind(null)
+            setTransformDraft(null)
+            setSceneRevision((value) => value + 1)
+            if (state.cam) setFocal(Math.round(state.cam.focal || 35))
+          }
           // 异步模型到齐后才解除 restoring（期间抑制 commit，避免快照漏模型 / 与现场脱节）
           void Promise.all(ps).then(() => { restoring = false; if (!disposed) sync() })
         }
@@ -1118,6 +1164,76 @@ function Inner() {
           }, (err: any) => onErr?.(err))
         }
         const attachStore = () => window.mulby?.storage?.attachment
+        const setEnvironmentRotation = (rotation: number) => {
+          const value = Math.max(-180, Math.min(180, Number(rotation) || 0))
+          if (curEnvironment) curEnvironment = { ...curEnvironment, rotation: value }
+          const backgroundRotation = (scene as any).backgroundRotation
+          if (backgroundRotation) backgroundRotation.y = THREE.MathUtils.degToRad(value)
+          if (!disposed) setEnvironment(curEnvironment ? { ...curEnvironment } : null)
+        }
+        const disposeEnvironmentTexture = () => {
+          environmentTexture?.dispose?.()
+          environmentTexture = null
+          if (environmentObjectUrl) URL.revokeObjectURL(environmentObjectUrl)
+          environmentObjectUrl = null
+        }
+        const lightingBackground = () => new THREE.Color((LIGHTINGS.find((item) => item.k === curLighting) || LIGHTINGS[0]).bg)
+        const loadEnvironmentState = async (next: DirectorEnvironment | null, warnAspect = false) => {
+          if (!next) {
+            disposeEnvironmentTexture()
+            curEnvironment = null
+            scene.background = lightingBackground()
+            if (!disposed) setEnvironment(null)
+            return
+          }
+          const bytes: any = await attachStore()?.get?.(next.assetId)
+          if (!bytes) throw new Error(`环境附件缺失：${next.name || next.assetId}`)
+          const mimeType = next.mimeType || await attachStore()?.getType?.(next.assetId) || 'image/jpeg'
+          const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+          const blob = new Blob([view], { type: mimeType })
+          const objectUrl = URL.createObjectURL(blob)
+          let texture: any
+          try {
+            texture = await new THREE.TextureLoader().loadAsync(objectUrl)
+          } catch (error) {
+            URL.revokeObjectURL(objectUrl)
+            throw error
+          }
+          if (disposed) {
+            texture.dispose?.()
+            URL.revokeObjectURL(objectUrl)
+            return
+          }
+          if (warnAspect) {
+            const width = Number(texture.image?.naturalWidth || texture.image?.width || 0)
+            const height = Number(texture.image?.naturalHeight || texture.image?.height || 0)
+            if (width && height && Math.abs(width / height - 2) > 0.15) toast('全景图不是标准 2:1 画幅，背景可能出现拉伸', 'warning')
+          }
+          disposeEnvironmentTexture()
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          texture.colorSpace = THREE.SRGBColorSpace
+          texture.needsUpdate = true
+          environmentTexture = texture
+          environmentObjectUrl = objectUrl
+          curEnvironment = { ...next, mimeType }
+          scene.background = texture
+          setEnvironmentRotation(curEnvironment.rotation || 0)
+        }
+        const importEnvironmentFile = async (arrayBuffer: ArrayBuffer, name: string, mimeType: string) => {
+          if (!/^image\/(jpe?g|png|webp)$/i.test(mimeType)) throw new Error('仅支持 JPG、PNG 或 WebP 全景图')
+          const assetId = uid('director-env')
+          const result = await attachStore()?.put?.(assetId, arrayBuffer, mimeType)
+          const stored = result === true || !!(result && (result as any).ok)
+          if (!stored) throw new Error('全景图存储失败，文件可能超过 50MB')
+          const previousId = curEnvironment?.assetId
+          try {
+            await loadEnvironmentState({ assetId, name: name.slice(0, 160), mimeType, rotation: 0 }, true)
+            if (previousId && previousId !== assetId) await attachStore()?.remove?.(previousId)
+          } catch (error) {
+            try { await attachStore()?.remove?.(assetId) } catch { /* ignore cleanup failure */ }
+            throw error
+          }
+        }
         // 用户导入：解析 → 归一化 → GLB 字节存 attachment（据此随工程持久化）→ 落场景
         const importGLTF = (arrayBuffer: ArrayBuffer, fname: string) => {
           const gen = sceneGen // 导入异步期间若发生整体重建(undo)则丢弃本次结果
@@ -1184,7 +1300,7 @@ function Inner() {
                       applyScale(obj, st.scale)
                       if (st.poseName) obj.userData.poseName = st.poseName
                       if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
-                      const id = uid('obj')
+                      const id = st.id || uid('obj')
                       scene.add(obj)
                       subjects.push({ obj, kind: '模型', id, name: st.name || '模型', desc: st.desc })
                       sync()
@@ -1198,6 +1314,17 @@ function Inner() {
         }
 
         const findById = (id: string) => subjects.find((s) => s.id === id)
+        const getSubjectPosition = (id: string): [number, number, number] | null => {
+          const subject = findById(id)
+          if (!subject) return null
+          const position = subject.obj.getWorldPosition(new THREE.Vector3())
+          return [position.x, position.y, position.z]
+        }
+        const resolveShotCam = (shot: DirectorShot) => resolveDirectorShotCamera(
+          shot,
+          shot.targetSubjectId ? getSubjectPosition(shot.targetSubjectId) : null
+        )
+        resolveRecordedShotCam = resolveShotCam
         const removeById = (id: string) => {
           const sub = findById(id)
           if (!sub) return
@@ -1490,7 +1617,7 @@ function Inner() {
           dirLight.color.setHex(L.dirColor)
           dirLight.intensity = L.dirInt
           dirLight.position.set(L.dirPos[0], L.dirPos[1], L.dirPos[2])
-          scene.background = new THREE.Color(L.bg)
+          if (!environmentTexture) scene.background = new THREE.Color(L.bg)
         }
         // 出图画幅：ar=0 不裁剪；kx/ky 为投影修正系数（描述里的方位/占比对应裁剪后画幅）
         let curAspect = 0
@@ -1637,7 +1764,7 @@ function Inner() {
             if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
             if (st.kind === '人台' && st.poseOffsetY == null) groundMannequinRig(obj)
           }
-          const id = uid('obj')
+          const id = st.id || uid('obj')
           scene.add(obj)
           subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName })
         }
@@ -1651,6 +1778,7 @@ function Inner() {
               const joints: Record<string, [number, number, number]> = {}
               if (posed) o.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j) joints[j] = [c.rotation.x, c.rotation.y, c.rotation.z] })
               return {
+                id: s.id,
                 kind: s.kind,
                 assetId: s.kind === '模型' ? o.userData.assetId : undefined,
                 name: s.name,
@@ -1668,7 +1796,8 @@ function Inner() {
                 poseName: o.userData.poseName
               }
             }),
-          cam: getCam()
+          cam: getCam(),
+          environment: curEnvironment ? { ...curEnvironment } : null
         })
         // 采集一个主体的 OpenPose 关键点（世界坐标）。人台从关节组推导；rigged 模型读已标记骨骼。
         const collectKeypoints = (obj: any): Record<string, any> => {
@@ -1786,7 +1915,7 @@ function Inner() {
         }
 
         // 恢复持久化场景，否则默认一个人台
-        if (saved0 && Array.isArray(saved0.subjects) && saved0.subjects.length) {
+        if (saved0 && Array.isArray(saved0.subjects)) {
           restoring = true
           sceneGen++
           const ps: Promise<void>[] = []
@@ -1810,6 +1939,13 @@ function Inner() {
               const ar = ASPECTS.find((a) => a.k === saved0.aspect)?.ar ?? 0
               curAspect = ar
               setAspectK(saved0.aspect)
+            }
+            if (saved0.environment?.assetId) {
+              void loadEnvironmentState(saved0.environment).catch((error: any) => {
+                toast('环境背景恢复失败：' + (error?.message || String(error)), 'warning')
+                curEnvironment = null
+                setEnvironment(null)
+              })
             }
           }
           // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
@@ -1944,7 +2080,8 @@ function Inner() {
           const propTxt = propLayout ? `场景道具：${propLayout}。` : ''
           const lightTxt = (LIGHTINGS.find((l) => l.k === fragmentLighting) || LIGHTINGS[0]).frag
           const aspectTxt = fragmentAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === fragmentAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
-          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
+          const environmentTxt = curEnvironment?.description ? `环境：${curEnvironment.description}。` : ''
+          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${environmentTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
         }
 
         api.current = {
@@ -2035,6 +2172,11 @@ function Inner() {
           poseTargetCount: () => subjects.filter((s) => s.kind === '人台' || (s.kind === '模型' && s.obj.userData.rigged)).length,
           getCam,
           applyCam,
+          resolveShotCamera: resolveShotCam,
+          createShotTargetBinding: (targetSubjectId: string, cameraState: any = getCam()) => {
+            const position = getSubjectPosition(targetSubjectId)
+            return position ? createDirectorShotTargetBinding(cameraState, targetSubjectId, position) : null
+          },
           serializeSceneOnly,
           shotFragment,
           // 按给定机位相机离线算镜头描述（分镜导出用；不碰主视图/出图相机）
@@ -2050,6 +2192,20 @@ function Inner() {
           },
           setLighting: applyLighting,
           getLighting: () => curLighting,
+          importEnvironmentFile,
+          clearEnvironment: async () => {
+            const previousId = curEnvironment?.assetId
+            await loadEnvironmentState(null)
+            if (previousId) {
+              try { await attachStore()?.remove?.(previousId) } catch { /* keep UI usable when cleanup fails */ }
+            }
+          },
+          setEnvironmentDescription: (description: string) => {
+            if (!curEnvironment) return
+            curEnvironment = { ...curEnvironment, description: description || undefined }
+            if (!disposed) setEnvironment({ ...curEnvironment })
+          },
+          setEnvironmentRotation,
           setAspect: (ar: number) => { curAspect = ar },
           captureThumb,
           dropToGround,
@@ -2073,6 +2229,7 @@ function Inner() {
           safe(() => scene.remove(tHelper))
           safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
           safe(() => { clearRecordedCameraHelpers(); scene.remove(recordedCameraHelpers) })
+          safe(() => disposeEnvironmentTexture())
           safe(() => tcontrol.dispose())
           safe(() => orbit.dispose())
           safe(() => scene.traverse((o: any) => disposeTree(o))) // 释放各 mesh 的 geometry/material/texture
@@ -2121,7 +2278,10 @@ function Inner() {
   const selectedObj = objs.find((o) => o.id === selId)
   const activeShotIndex = shots.findIndex((shot) => shot.id === activeShotId)
   const activeShot = activeShotIndex >= 0 ? shots[activeShotIndex] : null
-  const shotContinuityIssues = analyzeDirectorShotContinuity(shots)
+  const resolvedShots = ready
+    ? shots.map((shot) => ({ ...shot, cam: api.current.resolveShotCamera?.(shot) || shot.cam }))
+    : shots
+  const shotContinuityIssues = analyzeDirectorShotContinuity(resolvedShots)
   const activeShotIssues = activeShot
     ? shotContinuityIssues.filter((issue) => issue.fromId === activeShot.id || issue.toId === activeShot.id)
     : []
@@ -2132,7 +2292,14 @@ function Inner() {
   useEffect(() => { writeDirectorPanelWidth('director.rightPanelWidth', rightPanelWidth) }, [rightPanelWidth])
   useEffect(() => {
     if (ready) api.current.setRecordedCameraHelpers?.(shots, activeShotId, showShotCameras)
-  }, [ready, shots, activeShotId, showShotCameras])
+  }, [ready, shots, activeShotId, showShotCameras, sceneRevision])
+  useEffect(() => {
+    if (!ready || !activeShot?.targetSubjectId) return
+    const resolvedCam = api.current.resolveShotCamera?.(activeShot)
+    if (!resolvedCam) return
+    api.current.applyCam?.(resolvedCam)
+    setFocal(Math.round(resolvedCam.focal || 35))
+  }, [ready, sceneRevision, activeShotId])
   useEffect(() => {
     const bodyType = selectedObj?.bodyType
     if (!ready || selKind !== '人台' || !bodyType) {
@@ -2212,6 +2379,105 @@ function Inner() {
     e.target.value = ''
     if (!f) return
     api.current.importFile?.(await f.arrayBuffer(), f.name)
+  }
+  const onEnvironmentFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setSceneIoBusy(true)
+    try {
+      const extensionMime = /\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg'
+      await api.current.importEnvironmentFile?.(await file.arrayBuffer(), file.name, file.type || extensionMime)
+      saveScene()
+      toast('全景环境已载入', 'success')
+    } catch (error: any) {
+      toast('全景环境导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
+  }
+  const downloadJson = (value: unknown, fileName: string) => {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+  const exportDirectorScene = async () => {
+    const scene = buildSceneSnapshot()
+    if (!scene) { toast('导演场景尚未就绪', 'error'); return }
+    setSceneIoBusy(true)
+    try {
+      const store = window.mulby?.storage?.attachment
+      const assets = []
+      const missing: string[] = []
+      for (const id of collectDirectorSceneAssetIds(scene)) {
+        const bytes: any = await store?.get?.(id)
+        if (!bytes) { missing.push(id); continue }
+        const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+        assets.push({
+          id,
+          mimeType: await store?.getType?.(id) || 'application/octet-stream',
+          dataBase64: encodeDirectorSceneBytes(view)
+        })
+      }
+      const bundle = createDirectorSceneExchangeBundle(scene, assets)
+      const projectName = (useGraph.getState().project.name || 'director-scene').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80)
+      downloadJson(bundle, `${projectName}.director.json`)
+      if (missing.length) toast(`工程已导出，但有 ${missing.length} 个缺失附件未能打包`, 'warning')
+      else toast(`导演工程已导出，包含 ${assets.length} 个附件`, 'success')
+    } catch (error: any) {
+      toast('导演工程导出失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
+  }
+  const onDirectorSceneFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 120 * 1024 * 1024) { toast('导演工程文件超过 120MB 上限', 'error'); return }
+    setSceneIoBusy(true)
+    const createdIds: string[] = []
+    try {
+      const bundle = parseDirectorSceneExchange(JSON.parse(await file.text()))
+      const confirmed = await confirmDialog({
+        title: '替换当前导演场景？',
+        message: `将导入 ${bundle.scene.subjects.length} 个对象和 ${bundle.scene.shots.length} 个机位。当前导演场景会被替换。`,
+        confirmLabel: '替换并导入',
+        cancelLabel: '取消',
+        danger: true
+      })
+      if (!confirmed) return
+      const store = window.mulby?.storage?.attachment
+      if (bundle.assets.length && (!store?.put || !store?.remove)) throw new Error('当前宿主不支持导演工程附件导入')
+      const idMap = new Map<string, string>()
+      for (const asset of bundle.assets) {
+        const nextId = uid('director-asset')
+        const bytes = decodeDirectorSceneBase64(asset.dataBase64)
+        const result = await store?.put?.(nextId, bytes, asset.mimeType)
+        const stored = result === true || !!(result && (result as any).ok)
+        if (!stored) throw new Error(`附件写入失败：${asset.id}`)
+        createdIds.push(nextId)
+        idMap.set(asset.id, nextId)
+      }
+      const nextScene = remapDirectorSceneAssetIds(bundle.scene, idMap)
+      const unresolved = collectDirectorSceneAssetIds(bundle.scene).filter((id) => !idMap.has(id))
+      useGraph.getState().setDirectorScene(nextScene)
+      if (unresolved.length) toast(`场景已导入，但有 ${unresolved.length} 个外部附件未包含在文件中`, 'warning')
+      else toast(`导演工程已导入，恢复 ${bundle.assets.length} 个附件`, 'success')
+      onReload()
+    } catch (error: any) {
+      const store = window.mulby?.storage?.attachment
+      for (const id of createdIds) {
+        try { await store?.remove?.(id) } catch { /* ignore cleanup failure */ }
+      }
+      toast('导演工程导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
   }
 
   // 组装完整提示词（生成与「复制提示词」诊断共用同一出口，保证你看到的就是模型收到的）
@@ -2358,17 +2624,22 @@ function Inner() {
     if (!cam) return
     const thumb = api.current.captureThumb?.()
     const id = uid('shot')
+    const targetBinding = selId ? api.current.createShotTargetBinding?.(selId, cam) : null
     setShots((current) => [
       ...current,
-      createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting })
+      {
+        ...createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting }),
+        ...(targetBinding || {})
+      }
     ])
     setActiveShotId(id)
     setInspectorTab('camera')
   }
   const applyShot = (shot: DirectorShot) => {
+    const resolvedCam = api.current.resolveShotCamera?.(shot) || shot.cam
     api.current.clearSelection?.()
-    api.current.applyCam?.(shot.cam)
-    setFocal(Math.round(shot.cam?.focal || 35))
+    api.current.applyCam?.(resolvedCam)
+    setFocal(Math.round(resolvedCam?.focal || 35))
     if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
     if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
       setLighting(shot.lighting)
@@ -2393,21 +2664,34 @@ function Inner() {
     if (!activeShotId) return
     setShots((current) => current.map((shot) => (shot.id === activeShotId ? { ...shot, ...patch } : shot)))
   }
+  const setActiveShotTarget = (targetSubjectId: string | null) => {
+    if (!activeShotId) return
+    setShots((current) => current.map((shot) => {
+      if (shot.id !== activeShotId) return shot
+      if (!targetSubjectId) return { ...shot, targetSubjectId: undefined, targetOffset: undefined, cameraOffset: undefined }
+      const resolvedCam = api.current.resolveShotCamera?.(shot) || shot.cam
+      const binding = api.current.createShotTargetBinding?.(targetSubjectId, resolvedCam)
+      return binding ? { ...shot, cam: resolvedCam, ...binding } : shot
+    }))
+  }
   const refreshActiveShot = () => {
     if (!activeShotId) return
     const cam = api.current.getCam?.()
     if (!cam) return
     const thumb = api.current.captureThumb?.()
-    setShots((current) => current.map((shot) => shot.id === activeShotId
-      ? {
+    setShots((current) => current.map((shot) => {
+      if (shot.id !== activeShotId) return shot
+      const binding = shot.targetSubjectId ? api.current.createShotTargetBinding?.(shot.targetSubjectId, cam) : null
+      return {
           ...shot,
           cam,
           thumb,
           aspect,
           lighting: api.current.getLighting?.() || lighting,
-          shotType: classifyDirectorShot(cam)
+          shotType: classifyDirectorShot(cam),
+          ...(binding || {})
         }
-      : shot))
+    }))
     toast('已用当前构图更新机位', 'success')
   }
   const reorderShots = (draggedId: string, targetId: string) => setShots((current) => reorderDirectorShots(current, draggedId, targetId))
@@ -2464,7 +2748,8 @@ function Inner() {
       const col = i % cols
       const row = Math.floor(i / cols)
       const center = { x: left + col * (W + gapX) + W / 2, y: top + row * (H + gapY) + H / 2 }
-      const frag = (api.current.fragmentFor?.(s.cam, { aspect: s.aspect, lighting: s.lighting }) as string) || ''
+      const resolvedCam = api.current.resolveShotCamera?.(s) || s.cam
+      const frag = (api.current.fragmentFor?.(resolvedCam, { aspect: s.aspect, lighting: s.lighting }) as string) || ''
       const note = s.notes?.trim() ? `镜头执行备注：${s.notes.trim()}` : ''
       const full = `${prompt.trim()}\n\n${frag}${note ? `\n\n${note}` : ''}`.trim()
       const id = g.addCard('image', center, {
@@ -2580,6 +2865,8 @@ function Inner() {
         </div>
       )}
       <input ref={fileRef} type="file" accept=".glb,.gltf" className="hidden" onChange={onFile} />
+      <input ref={environmentFileRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" className="hidden" onChange={onEnvironmentFile} />
+      <input ref={sceneFileRef} type="file" accept=".json,.director.json,application/json" className="hidden" onChange={onDirectorSceneFile} />
 
       {/* 顶栏：一体化玻璃工具条（品牌 / 变换模式 / 视图 / 取景 / 撤销重做 / 关闭） */}
       <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none z-[3]">
@@ -2603,6 +2890,9 @@ function Inner() {
             {panelsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
             <span className="sr-only">{panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}</span>
           </Btn>
+          <div className="w-px h-5 bg-white/10" />
+          <Btn onClick={() => sceneFileRef.current?.click()} disabled={sceneIoBusy || busy} title="导入便携导演工程 JSON"><FileUp size={13} /> 导入</Btn>
+          <Btn onClick={() => { void exportDirectorScene() }} disabled={sceneIoBusy || busy} title="导出便携导演工程 JSON，包含模型与全景附件"><Download size={13} /> 导出</Btn>
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
           <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
@@ -2861,7 +3151,9 @@ function Inner() {
                   totalDurationMs={shotsDurationMs}
                   issues={activeShotIssues}
                   showCameraHelpers={showShotCameras}
+                  targetSubjects={objs.map((item) => ({ id: item.id, name: item.name, kind: item.kind }))}
                   onChange={updateActiveShot}
+                  onTargetChange={setActiveShotTarget}
                   onRefresh={refreshActiveShot}
                   onToggleCameraHelpers={() => setShowShotCameras((value) => !value)}
                 />
@@ -2911,6 +3203,28 @@ function Inner() {
                     {LIGHTINGS.map((item) => <Btn key={item.k} on={lighting === item.k} onClick={() => { setLighting(item.k); api.current.setLighting?.(item.k) }} title={`灯光预设：${item.k}`}>{item.k}</Btn>)}
                   </div>
                 </div>
+                <DirectorEnvironmentPanel
+                  environment={environment}
+                  busy={sceneIoBusy}
+                  onImport={() => environmentFileRef.current?.click()}
+                  onClear={() => {
+                    setSceneIoBusy(true)
+                    void Promise.resolve(api.current.clearEnvironment?.()).then(() => {
+                      saveScene()
+                      toast('环境背景已移除', 'success')
+                    }).catch((error: any) => {
+                      toast('环境背景移除失败：' + (error?.message || String(error)), 'error')
+                    }).finally(() => setSceneIoBusy(false))
+                  }}
+                  onDescriptionChange={(description) => {
+                    api.current.setEnvironmentDescription?.(description)
+                    saveScene()
+                  }}
+                  onRotationChange={(rotation, commitChange) => {
+                    api.current.setEnvironmentRotation?.(rotation)
+                    if (commitChange) saveScene()
+                  }}
+                />
                 {hasControlModel && (
                   <div className="flex flex-col gap-2">
                     <span className={secCls}>控制图</span>
