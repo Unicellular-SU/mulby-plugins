@@ -18,6 +18,16 @@ import {
   reorderDirectorShots
 } from '../src/ui/canvas/directorWorkflow.ts'
 import type { DirectorCam } from '../src/ui/types.ts'
+import { Object3D, Vector3 } from 'three'
+import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from '../src/ui/canvas/directorCameraPresets.ts'
+import { solveDirectorCcdIk } from '../src/ui/canvas/directorIk.ts'
+import {
+  clampDirectorJointDegrees,
+  DIRECTOR_JOINT_NAMES,
+  DIRECTOR_POSE_GROUPS,
+  validateDirectorJointRotations,
+  validateDirectorPoseControls
+} from '../src/ui/canvas/directorPoseTools.ts'
 
 function testBodyPresets() {
   assert.equal(DIRECTOR_BODY_PRESETS.length, 13)
@@ -133,9 +143,70 @@ function testDirectorWorkflow() {
   assert.equal(reorderDirectorShots(shots, 'missing', 'a'), shots, '非法拖动不应制造无意义的新数组')
 }
 
+function testDirectorPoseTools() {
+  assert.equal(DIRECTOR_JOINT_NAMES.length, 16)
+  assert.equal(new Set(DIRECTOR_POSE_GROUPS.flatMap((group) => group.poses)).size, DIRECTOR_POSES.length)
+  for (const preset of DIRECTOR_POSES) {
+    assert.equal(validateDirectorPoseControls(preset.controls).level, 'safe', `${preset.k} 应通过姿势控制安全校验`)
+  }
+
+  assert.equal(clampDirectorJointDegrees('左膝', 1, 80), 25, '膝关节侧向扭转必须钳到安全范围')
+  assert.equal(clampDirectorJointDegrees('头', 0, Number.NaN), 0)
+  const warning = validateDirectorJointRotations({ 头: [58, 0, 0] })
+  assert.equal(warning.level, 'warning')
+  assert.match(warning.issues[0].message, /接近活动上限/)
+  const error = validateDirectorJointRotations({ 左肘: [0, 42, 0] })
+  assert.equal(error.level, 'error')
+  assert.match(error.issues[0].message, /超出安全范围/)
+}
+
+function testDirectorCameraPresets() {
+  assert.equal(DIRECTOR_CAMERA_PRESETS.length, 8)
+  assert.equal(new Set(DIRECTOR_CAMERA_PRESETS.map((preset) => preset.id)).size, 8)
+  const context = {
+    target: [1, 1, 2] as [number, number, number],
+    forward: [0, 0, 1] as [number, number, number],
+    right: [1, 0, 0] as [number, number, number],
+    scale: 1
+  }
+  const front = createDirectorPresetCamera('medium-front', context)
+  assert.deepEqual(front.target, [1, 1.08, 2])
+  assert.ok(Math.abs(front.pos[0] - 1) < 1e-9 && Math.abs(front.pos[1] - 1.2) < 1e-9 && Math.abs(front.pos[2] - 4.35) < 1e-9)
+  assert.equal(front.focal, 50)
+  const profile = createDirectorPresetCamera('profile-left', context)
+  assert.ok(profile.pos[0] < context.target[0], '左侧面机位必须位于人物左侧')
+  assert.ok(profile.pos[2] > context.target[2], '侧面机位保留少量正面偏角，避免完全扁平')
+}
+
+function testDirectorIk() {
+  const root = new Object3D()
+  const shoulder = new Object3D()
+  const elbow = new Object3D()
+  const wrist = new Object3D()
+  shoulder.add(elbow)
+  elbow.position.set(0, -1, 0)
+  elbow.userData.poseBendAxisLocal = [-1, 0, 0]
+  elbow.add(wrist)
+  wrist.position.set(0, -1, 0)
+  root.add(shoulder)
+  root.updateMatrixWorld(true)
+
+  const target = new Vector3(0.55, -1.35, 0.45)
+  const solved = solveDirectorCcdIk({ root, joints: [elbow, shoulder], effector: wrist, target, iterations: 16 })
+  assert.ok(solved.error < 0.025, `IK 末端应接近目标，当前误差 ${solved.error}`)
+  assert.ok(wrist.getWorldPosition(new Vector3()).distanceTo(target) < 0.025)
+
+  const unreachable = solveDirectorCcdIk({ root, joints: [elbow, shoulder], effector: wrist, target: new Vector3(20, 0, 0) })
+  assert.equal(unreachable.clamped, true)
+  assert.ok(unreachable.target.length() < 2, '超出骨长的目标必须钳在可达范围内')
+}
+
 testBodyPresets()
 testNativeBodyAssets()
 testPosePresets()
 testDirectorWorkflow()
+testDirectorPoseTools()
+testDirectorCameraPresets()
+testDirectorIk()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 native body meshes / 20 semantic poses / lazy assets / shot workflow OK')
+console.log('director mannequin: 13 bodies / 20 poses / lazy assets / shot workflow / safety / camera presets / IK OK')

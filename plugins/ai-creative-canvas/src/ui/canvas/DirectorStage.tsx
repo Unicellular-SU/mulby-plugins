@@ -17,6 +17,16 @@ import {
 } from './directorMannequin'
 import { DirectorAsyncResourceCache } from './directorAssetCache'
 import { DirectorShotStrip } from './DirectorShotStrip'
+import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
+import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
+import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
+import { solveDirectorCcdIk } from './directorIk'
+import {
+  clampDirectorJointDegrees,
+  validateDirectorJointRotations,
+  type DirectorJointAxis,
+  type DirectorPoseSafetySummary
+} from './directorPoseTools'
 import {
   classifyDirectorShot,
   createDirectorShotSnapshot,
@@ -31,6 +41,7 @@ import type { DirectorShot } from '../types'
 
 const FILM_GAUGE = 36 // 35mm 全画幅
 const directorTemplateCache = new DirectorAsyncResourceCache<DirectorBodyType, any>()
+const directorPosePreviewCache = new DirectorAsyncResourceCache<DirectorBodyType, Record<string, string>>()
 
 const readDirectorPanelWidth = (key: string, fallback: number, min: number, max: number) => {
   if (typeof window === 'undefined') return fallback
@@ -160,6 +171,11 @@ function Inner() {
   const [shotStripExpanded, setShotStripExpanded] = useState(true)
   const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
   const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
+  const [posePreviews, setPosePreviews] = useState<Record<string, string>>({})
+  const [posePreviewStatus, setPosePreviewStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [posePreviewNonce, setPosePreviewNonce] = useState(0)
+  const [jointEditor, setJointEditor] = useState<DirectorJointEditorState | null>(null)
+  const [poseSafety, setPoseSafety] = useState<DirectorPoseSafetySummary>({ level: 'safe', issues: [] })
   const [leftPanelWidth, setLeftPanelWidth] = useState(() => readDirectorPanelWidth('director.leftPanelWidth', 208, 184, 320))
   const [rightPanelWidth, setRightPanelWidth] = useState(() => readDirectorPanelWidth('director.rightPanelWidth', 288, 280, 420))
   const [showGuides, setShowGuides] = useState(true) // 三分构图线
@@ -242,6 +258,13 @@ function Inner() {
         tcontrol.addEventListener('dragging-changed', (e: any) => { orbit.enabled = !e.value; if (!e.value) commit() })
         const tHelper = typeof tcontrol.getHelper === 'function' ? tcontrol.getHelper() : tcontrol
         scene.add(tHelper)
+        const jointMarker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.045, 14, 10),
+          new THREE.MeshBasicMaterial({ color: 0xfcd34d, depthTest: false, transparent: true, opacity: 0.92 })
+        )
+        jointMarker.visible = false
+        jointMarker.renderOrder = 1000
+        scene.add(jointMarker)
 
         // 取景双相机：cam=视图(轨道自由查看)；shotCam=出图相机(PiP/取景框/生成都用它)。
         // 默认 shotLocked=false → shotCam 每帧跟随 cam（与单相机行为一致，零回归）；锁定后冻结，
@@ -578,6 +601,7 @@ function Inner() {
             addSegment(sh, p.upperArmRadius, p.upperArmLength)
             const elbowY = -(p.upperArmLength + p.upperArmRadius + p.elbowRadius)
             const elbow = joint(isLeft ? '左肘' : '右肘', 0, elbowY, 0)
+            elbow.userData.poseBendAxisLocal = [-1, 0, 0]
             sh.add(elbow)
             addJointBall(elbow, p.elbowRadius)
             addSegment(elbow, p.forearmRadius, p.forearmLength)
@@ -606,6 +630,7 @@ function Inner() {
             addSegment(hip, p.thighRadius, p.thighLength)
             const kneeY = -(p.thighLength + p.thighRadius + p.kneeRadius)
             const knee = joint(isLeft ? '左膝' : '右膝', 0, kneeY, 0)
+            knee.userData.poseBendAxisLocal = [1, 0, 0]
             hip.add(knee)
             addJointBall(knee, p.kneeRadius)
             addSegment(knee, p.calfRadius, p.calfLength)
@@ -635,6 +660,7 @@ function Inner() {
         }
 
         let curRoot: any = null
+        let curJoint: any = null
         const roundTransform = (value: number) => Number(value.toFixed(3))
         const readTransform = (root: any): TransformDraft => ({
           position: [roundTransform(root.position.x), roundTransform(root.position.y), roundTransform(root.position.z)],
@@ -648,6 +674,60 @@ function Inner() {
         const emitTransform = () => {
           if (!disposed) setTransformDraft(curRoot ? readTransform(curRoot) : null)
         }
+        const baseJointQuaternion = (joint: any) => {
+          const value = joint?.userData?.poseBaseQuaternion
+          return Array.isArray(value)
+            ? new THREE.Quaternion(value[0], value[1], value[2], value[3])
+            : new THREE.Quaternion()
+        }
+        const readJointDeltaDegrees = (joint: any): [number, number, number] => {
+          if (!joint) return [0, 0, 0]
+          // applyMannequinPose 的局部关系为 current = delta * base。
+          const delta = joint.quaternion.clone().multiply(baseJointQuaternion(joint).invert())
+          const euler = new THREE.Euler().setFromQuaternion(delta, 'XYZ')
+          return [euler.x, euler.y, euler.z].map((value) => roundTransform(THREE.MathUtils.radToDeg(value))) as [number, number, number]
+        }
+        const writeJointDeltaDegrees = (joint: any, rotation: [number, number, number]) => {
+          const euler = new THREE.Euler(
+            THREE.MathUtils.degToRad(rotation[0]),
+            THREE.MathUtils.degToRad(rotation[1]),
+            THREE.MathUtils.degToRad(rotation[2]),
+            'XYZ'
+          )
+          const delta = new THREE.Quaternion().setFromEuler(euler)
+          joint.quaternion.copy(delta.multiply(baseJointQuaternion(joint)))
+        }
+        const clampJointObject = (joint: any) => {
+          const name = String(joint?.userData?.joint || '')
+          const rotation = readJointDeltaDegrees(joint).map((value, axis) =>
+            clampDirectorJointDegrees(name, axis as DirectorJointAxis, value)
+          ) as [number, number, number]
+          writeJointDeltaDegrees(joint, rotation)
+        }
+        const collectJointDeltaDegrees = (root: any): Record<string, [number, number, number]> => {
+          const rotations: Record<string, [number, number, number]> = {}
+          root?.traverse?.((joint: any) => {
+            const name = joint.userData?.joint
+            if (name && !rotations[name]) rotations[name] = readJointDeltaDegrees(joint)
+          })
+          return rotations
+        }
+        const emitPoseEditor = () => {
+          if (disposed) return
+          const isPoseTarget = curRoot && (curRoot.userData.kind === '人台' || curRoot.userData.rigged)
+          if (!isPoseTarget) {
+            setJointEditor(null)
+            setPoseSafety({ level: 'safe', issues: [] })
+            return
+          }
+          setJointEditor(curJoint ? { name: curJoint.userData.joint, rotation: readJointDeltaDegrees(curJoint) } : null)
+          setPoseSafety(validateDirectorJointRotations(collectJointDeltaDegrees(curRoot)))
+        }
+        const findJointByName = (root: any, name: string) => {
+          let found: any = null
+          root?.traverse?.((joint: any) => { if (!found && joint.userData?.joint === name) found = joint })
+          return found
+        }
         const attachByMode = () => {
           if (!curRoot || curMode === 'pose' || curRoot.userData.locked) { tcontrol.detach(); return }
           tcontrol.setMode(curMode)
@@ -656,9 +736,11 @@ function Inner() {
         const onTransformObjectChange = () => emitTransform()
         tcontrol.addEventListener('objectChange', onTransformObjectChange)
         const select = (root: any | null) => {
+          if (curRoot !== root) curJoint = null
           curRoot = root
           attachByMode()
           emitTransform()
+          emitPoseEditor()
           if (!disposed) {
             const sub = subjects.find((s) => s.obj === root)
             setSelId(sub ? sub.id : null)
@@ -812,6 +894,38 @@ function Inner() {
           root.userData.poseName = name === '站立' ? '' : name
           root.userData.poseSchemaVersion = 2
           groundMannequinRig(root)
+          if (root === curRoot) emitPoseEditor()
+        }
+        const selectJointByName = (name: string) => {
+          if (!curRoot || curRoot.userData.locked || (curRoot.userData.kind !== '人台' && !curRoot.userData.rigged)) return
+          curJoint = findJointByName(curRoot, name)
+          emitPoseEditor()
+        }
+        const setSelectedJointAxis = (axis: DirectorJointAxis, raw: number) => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          const rotation = readJointDeltaDegrees(curJoint)
+          rotation[axis] = clampDirectorJointDegrees(curJoint.userData.joint || '', axis, raw)
+          writeJointDeltaDegrees(curJoint, rotation)
+          curRoot.userData.poseName = '自定义'
+          curRoot.updateMatrixWorld(true)
+          sync()
+          emitPoseEditor()
+        }
+        const commitJointEdit = () => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          curRoot.userData.poseName = '自定义'
+          sync()
+          emitPoseEditor()
+          commit()
+        }
+        const resetSelectedJoint = () => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          curJoint.quaternion.copy(baseJointQuaternion(curJoint))
+          curRoot.userData.poseName = '自定义'
+          curRoot.updateMatrixWorld(true)
+          sync()
+          emitPoseEditor()
+          commit()
         }
         let bodySwitchRequest = 0
         const setSelectedBodyType = async (bodyType: DirectorBodyType) => {
@@ -887,6 +1001,55 @@ function Inner() {
             })
           })
         }
+        const getPosePreviews = (bodyType: DirectorBodyType) => directorPosePreviewCache.load(bodyType, async () => {
+          await ensureDirectorTemplate(bodyType)
+          if (disposed) throw new Error('director disposed')
+          const canvas = document.createElement('canvas')
+          const width = 120
+          const height = 90
+          const previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'low-power' })
+          previewRenderer.setPixelRatio(1)
+          previewRenderer.setSize(width, height, false)
+          const previewScene = new THREE.Scene()
+          previewScene.background = new THREE.Color(0x202126)
+          previewScene.add(new THREE.HemisphereLight(0xffffff, 0x30323a, 1.55))
+          const previewKey = new THREE.DirectionalLight(0xfff2dc, 1.2)
+          previewKey.position.set(2.5, 4, 3.5)
+          previewScene.add(previewKey)
+          const previewCamera = new THREE.PerspectiveCamera(30, width / height, 0.01, 100)
+          const model = makeMannequin(0xb9aa8d, bodyType)
+          previewScene.add(model)
+          const result: Record<string, string> = {}
+          try {
+            for (let index = 0; index < POSES.length; index++) {
+              if (index > 0 && index % 4 === 0) {
+                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+                if (disposed) throw new Error('director disposed')
+              }
+              const pose = POSES[index]
+              applyMannequinPose(model, pose.k, pose.m, pose.offsetY || 0, pose.controls)
+              model.updateMatrixWorld(true)
+              const bounds = new THREE.Box3().setFromObject(model, true)
+              const size = bounds.getSize(new THREE.Vector3())
+              const center = bounds.getCenter(new THREE.Vector3())
+              const halfFov = Math.tan(THREE.MathUtils.degToRad(previewCamera.fov / 2))
+              const verticalFit = Math.max(0.2, size.y) / (2 * halfFov)
+              const horizontalFit = Math.max(0.2, size.x) / (2 * halfFov * previewCamera.aspect)
+              const distance = Math.max(verticalFit, horizontalFit) * 1.16
+              previewCamera.position.set(center.x, center.y + size.y * 0.02, center.z + distance)
+              previewCamera.lookAt(center)
+              previewCamera.updateProjectionMatrix()
+              previewRenderer.render(previewScene, previewCamera)
+              result[pose.k] = canvas.toDataURL('image/jpeg', 0.76)
+            }
+            return result
+          } finally {
+            previewScene.remove(model)
+            disposeTree(model)
+            previewRenderer.dispose()
+            previewRenderer.forceContextLoss()
+          }
+        })
         // 还原缩放：兼容旧数据(number=均匀)与新数据([x,y,z]=非均匀)
         const applyScale = (o: any, s: any) => { if (Array.isArray(s)) o.scale.set(s[0], s[1], s[2]); else o.scale.setScalar(s || 1) }
         // 解析 GLB/GLTF → 标记 Mixamo 骨骼 + rigged + kind=模型（不归一化/不落场景，由调用方决定）
@@ -1054,8 +1217,11 @@ function Inner() {
           orbit.target.set(p.x, p.y + 0.9, p.z)
         }
 
-        // ── 拖拽摆姿（摆姿模式）：点关节 → 拖动鼠标按相机方向旋转该关节 ──
-        let posing: { joint: any; sx: number; sy: number; startQ: any; parentInv: any } | null = null
+        // ── 拖拽摆姿：普通拖动旋转关节；Shift 拖手腕/脚踝时用两骨骼 IK 移动末端。 ──
+        type PoseDrag =
+          | { kind: 'rotate'; root: any; joint: any; sx: number; sy: number; startQ: any; parentInv: any }
+          | { kind: 'ik'; root: any; joint: any; chain: any[]; plane: any }
+        let posing: PoseDrag | null = null
         const camAxis = (col: number) => new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, col).normalize()
 
         const onPointerDown = (e: PointerEvent) => {
@@ -1090,14 +1256,41 @@ function Inner() {
             jnt = best
           }
           if (curMode === 'pose' && jnt && jnt.parent) {
-            const parentWorld = jnt.parent.getWorldQuaternion(new THREE.Quaternion())
-            posing = { joint: jnt, sx: e.clientX, sy: e.clientY, startQ: jnt.quaternion.clone(), parentInv: parentWorld.clone().invert() }
+            curJoint = jnt
+            emitPoseEditor()
+            const name = String(jnt.userData.joint || '')
+            const ikNames: Record<string, [string, string]> = {
+              左腕: ['左肘', '左肩'], 右腕: ['右肘', '右肩'],
+              左踝: ['左膝', '左髋'], 右踝: ['右膝', '右髋']
+            }
+            const chainNames = e.shiftKey ? ikNames[name] : undefined
+            const chain = chainNames?.map((jointName) => findJointByName(root, jointName)).filter(Boolean) || []
+            if (chain.length === 2) {
+              const normal = cam.getWorldDirection(new THREE.Vector3()).normalize()
+              const point = jnt.getWorldPosition(new THREE.Vector3())
+              posing = { kind: 'ik', root, joint: jnt, chain, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point) }
+            } else {
+              const parentWorld = jnt.parent.getWorldQuaternion(new THREE.Quaternion())
+              posing = { kind: 'rotate', root, joint: jnt, sx: e.clientX, sy: e.clientY, startQ: jnt.quaternion.clone(), parentInv: parentWorld.clone().invert() }
+            }
             orbit.enabled = false
             try { renderer.domElement.setPointerCapture(e.pointerId) } catch { /* ignore */ }
           }
         }
         const onPointerMove = (e: PointerEvent) => {
           if (!posing) return
+          if (posing.kind === 'ik') {
+            const rect = renderer.domElement.getBoundingClientRect()
+            ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+            raycaster.setFromCamera(ndc, cam)
+            const target = raycaster.ray.intersectPlane(posing.plane, new THREE.Vector3())
+            if (target) {
+              solveDirectorCcdIk({ root: posing.root, joints: posing.chain, effector: posing.joint, target })
+              posing.chain.forEach(clampJointObject)
+              posing.root.updateMatrixWorld(true)
+            }
+            return
+          }
           const dx = (e.clientX - posing.sx) * 0.012
           const dy = (e.clientY - posing.sy) * 0.012
           const right = camAxis(0)
@@ -1110,9 +1303,14 @@ function Inner() {
         }
         const onPointerUp = (e: PointerEvent) => {
           if (!posing) return
+          const root = posing.root
+          if (posing.kind === 'rotate') clampJointObject(posing.joint)
           posing = null
           orbit.enabled = true
           try { renderer.domElement.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+          root.userData.poseName = '自定义'
+          sync()
+          emitPoseEditor()
           commit()
         }
         renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -1143,8 +1341,20 @@ function Inner() {
           shotCam.updateMatrixWorld(true)
           camHelper.update()
           camHelper.visible = shotLocked // 锁定时主视图显示出图取景框
+          jointMarker.visible = curMode === 'pose' && !!curJoint && curRoot?.visible !== false
+          if (jointMarker.visible) {
+            curJoint.getWorldPosition(jointMarker.position)
+            const markerScale = Math.max(0.65, Math.min(2.2, jointMarker.position.distanceTo(cam.position) * 0.16))
+            jointMarker.scale.setScalar(markerScale)
+          }
           renderer.render(scene, cam)
-          if (pip && shotLocked) { camHelper.visible = false; pip.render(scene, shotCam) } // PiP 出图预览（不含取景框线）
+          if (pip && shotLocked) {
+            camHelper.visible = false
+            const markerVisible = jointMarker.visible
+            jointMarker.visible = false
+            pip.render(scene, shotCam)
+            jointMarker.visible = markerVisible
+          } // PiP 出图预览（不含取景框线和关节定位点）
         }
         animate()
         const ro = new ResizeObserver(() => {
@@ -1257,8 +1467,10 @@ function Inner() {
           tcontrol.detach()
           const chv = camHelper.visible
           const gv = grid.visible
+          const jmv = jointMarker.visible
           camHelper.visible = false
           grid.visible = false // 网格线不进缩略图
+          jointMarker.visible = false
           renderer.render(scene, outCam())
           const src = renderer.domElement
           const tw = 96
@@ -1269,6 +1481,7 @@ function Inner() {
           c.getContext('2d')!.drawImage(src, 0, 0, tw, th)
           camHelper.visible = chv
           grid.visible = gv
+          jointMarker.visible = jmv
           attachByMode()
           return cropCanvas(c).toDataURL('image/jpeg', 0.7)
         }
@@ -1280,6 +1493,36 @@ function Inner() {
           curRoot.position.y -= box.min.y
           emitTransform()
           commit()
+        }
+        const applyCameraPresetById = (presetId: string) => {
+          const preset = DIRECTOR_CAMERA_PRESETS.find((item) => item.id === presetId)
+          if (!preset) return
+          const candidates = preset.scope === 'subject' && curRoot && curRoot.visible !== false
+            ? [curRoot]
+            : subjects.filter((subject) => subject.obj.visible !== false).map((subject) => subject.obj)
+          const bounds = new THREE.Box3()
+          for (const object of candidates) bounds.union(new THREE.Box3().setFromObject(object, true))
+          const target = bounds.isEmpty() ? outTarget().clone() : bounds.getCenter(new THREE.Vector3())
+          const size = bounds.isEmpty() ? new THREE.Vector3(1.2, 1.8, 1.2) : bounds.getSize(new THREE.Vector3())
+          const scale = Math.max(0.55, size.y / 1.8, size.x / 2.2, size.z / 2.2)
+          const orientationRoot = preset.scope === 'subject' ? curRoot : null
+          const orientation = orientationRoot?.getWorldQuaternion?.(new THREE.Quaternion()) || new THREE.Quaternion()
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orientation)
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(orientation)
+          forward.y = 0
+          right.y = 0
+          if (forward.lengthSq() < 0.01) forward.set(0, 0, 1)
+          if (right.lengthSq() < 0.01) right.set(1, 0, 0)
+          forward.normalize()
+          right.normalize()
+          const next = createDirectorPresetCamera(presetId, {
+            target: [target.x, target.y, target.z],
+            forward: [forward.x, forward.y, forward.z],
+            right: [right.x, right.y, right.z],
+            scale
+          })
+          applyCam(next)
+          if (!disposed) setFocal(next.focal)
         }
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
         const stagePreset = async (key: string) => {
@@ -1456,15 +1699,18 @@ function Inner() {
           const gv = grid.visible
           const gdv = ground.visible
           const chv = camHelper.visible
+          const jmv = jointMarker.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
           camHelper.visible = false // 取景框不进深度图
+          jointMarker.visible = false
           scene.overrideMaterial = depthMat
           renderer.render(scene, C)
           scene.overrideMaterial = null as any
           grid.visible = gv
           ground.visible = gdv
           camHelper.visible = chv
+          jointMarker.visible = jmv
           scene.background = pbg
           C.far = pf
           C.updateProjectionMatrix()
@@ -1657,6 +1903,11 @@ function Inner() {
           lookAtSelected,
           setMode: (m: TMode) => { curMode = m; attachByMode() },
           setBodyType: setSelectedBodyType,
+          getPosePreviews,
+          selectJointByName,
+          setSelectedJointAxis,
+          commitJointEdit,
+          resetSelectedJoint,
           setSelectedTransform,
           commitTransform: commit,
           setFocal: (mm: number) => { const C = outCam(); C.setFocalLength(mm); C.updateProjectionMatrix() },
@@ -1675,6 +1926,7 @@ function Inner() {
             C.position.set(T.x + flat.x, y, T.z + flat.z)
             if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
+          applyCameraPreset: applyCameraPresetById,
           // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
           setViewMode,
           setLock: (v: boolean) => setViewMode(v ? 'director' : 'camera'),
@@ -1697,8 +1949,10 @@ function Inner() {
             tcontrol.detach()
             const chv = camHelper.visible
             const gv = grid.visible
+            const jmv = jointMarker.visible
             camHelper.visible = false // 取景框不进成片参考图
             grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
+            jointMarker.visible = false
             renderer.render(scene, outCam())
             const src = renderer.domElement
             const c = document.createElement('canvas')
@@ -1708,6 +1962,7 @@ function Inner() {
             const url = cropCanvas(c).toDataURL('image/png')
             camHelper.visible = chv
             grid.visible = gv
+            jointMarker.visible = jmv
             attachByMode()
             return url
           },
@@ -1798,10 +2053,34 @@ function Inner() {
   }, [])
 
   // 切换选中 → 拉取该对象的语义描述进草稿
+  const selectedObj = objs.find((o) => o.id === selId)
   useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
   useEffect(() => { setInspectorTab(inferDirectorInspectorTab(selKind)) }, [selId, selKind])
   useEffect(() => { writeDirectorPanelWidth('director.leftPanelWidth', leftPanelWidth) }, [leftPanelWidth])
   useEffect(() => { writeDirectorPanelWidth('director.rightPanelWidth', rightPanelWidth) }, [rightPanelWidth])
+  useEffect(() => {
+    const bodyType = selectedObj?.bodyType
+    if (!ready || selKind !== '人台' || !bodyType) {
+      setPosePreviews({})
+      setPosePreviewStatus('idle')
+      return
+    }
+    let cancelled = false
+    setPosePreviews({})
+    setPosePreviewStatus('loading')
+    void Promise.resolve(api.current.getPosePreviews?.(bodyType)).then((result) => {
+      if (cancelled) return
+      if (result && Object.keys(result).length) {
+        setPosePreviews(result)
+        setPosePreviewStatus('ready')
+      } else {
+        setPosePreviewStatus('error')
+      }
+    }).catch(() => {
+      if (!cancelled) setPosePreviewStatus('error')
+    })
+    return () => { cancelled = true }
+  }, [ready, selKind, selectedObj?.bodyType, posePreviewNonce])
 
   const beginPanelResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -2128,7 +2407,6 @@ function Inner() {
   const objectGroups = ['人台', '道具', '模型']
     .map((kind) => ({ kind, items: filteredObjs.filter((o) => o.kind === kind) }))
     .filter((group) => group.items.length > 0)
-  const selectedObj = objs.find((o) => o.id === selId)
   const setTransformAxis = (part: keyof TransformDraft, axis: 0 | 1 | 2, raw: string) => {
     const value = Number(raw)
     if (!Number.isFinite(value)) return
@@ -2411,27 +2689,31 @@ function Inner() {
                   ))}
                 </div>
                 <div className="flex flex-col gap-2">
-                  <span className={secCls}>姿势</span>
-                  <div className="grid max-h-52 grid-cols-4 gap-1 overflow-y-auto pr-0.5 ace-scroll">
-                    {POSES.map((pose) => (
-                      <Btn
-                        key={pose.k}
-                        on={(selectedObj?.poseName || '站立') === pose.k}
-                        disabled={selectedObj?.locked}
-                        onClick={() => api.current.applyPose?.(pose.k, pose.m, pose.offsetY || 0, pose.controls)}
-                        title={`一键姿势：${pose.k}`}
-                      >
-                        {pose.k}
-                      </Btn>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
                   <span className={secCls}>朝向</span>
                   <div className="flex flex-wrap gap-1">
                     {FACINGS.map((facing) => <Btn key={facing.k} disabled={selectedObj?.locked} onClick={() => api.current.setFacing?.(facing.r)} title={`朝向：${facing.k}`}>{facing.k}</Btn>)}
                   </div>
                 </div>
+                <DirectorPosePanel
+                  activePose={selectedObj?.poseName || '站立'}
+                  locked={selectedObj?.locked}
+                  previews={posePreviews}
+                  previewStatus={posePreviewStatus}
+                  joint={jointEditor}
+                  safety={poseSafety}
+                  onApplyPose={(pose) => {
+                    onMode('pose')
+                    api.current.applyPose?.(pose.k, pose.m, pose.offsetY || 0, pose.controls)
+                  }}
+                  onRetryPreviews={() => setPosePreviewNonce((value) => value + 1)}
+                  onSelectJoint={(name) => {
+                    onMode('pose')
+                    api.current.selectJointByName?.(name)
+                  }}
+                  onSetJointAxis={(axis, value) => api.current.setSelectedJointAxis?.(axis, value)}
+                  onCommitJoint={() => api.current.commitJointEdit?.()}
+                  onResetJoint={() => api.current.resetSelectedJoint?.()}
+                />
                 <div className={hintCls}>每种体态使用独立中性网格。首次选择时按需加载，之后在当前会话复用。</div>
               </div>
             )}
@@ -2441,6 +2723,11 @@ function Inner() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-white/80">出图镜头</span>
                   <span className="text-[10px] tabular-nums text-amber-200">{focal}mm</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>语义机位</span>
+                  <DirectorCameraPresetGrid onApply={(presetId) => api.current.applyCameraPreset?.(presetId)} />
+                  <div className={hintCls}>人物类机位跟随所选角色朝向；场景类机位覆盖当前可见对象。</div>
                 </div>
                 <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
                   <label className="flex items-center gap-2 text-[11px] text-white/50">
