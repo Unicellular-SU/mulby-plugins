@@ -12,9 +12,13 @@ import {
 } from '../src/ui/canvas/directorMannequin.ts'
 import { DirectorAsyncResourceCache } from '../src/ui/canvas/directorAssetCache.ts'
 import {
+  analyzeDirectorShotContinuity,
   classifyDirectorShot,
   createDirectorShotSnapshot,
+  formatDirectorDuration,
+  getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
+  normalizeDirectorShotDuration,
   reorderDirectorShots
 } from '../src/ui/canvas/directorWorkflow.ts'
 import type { DirectorCam } from '../src/ui/types.ts'
@@ -132,6 +136,8 @@ function testDirectorWorkflow() {
   assert.equal(shot.shotType, '中景')
   assert.equal(shot.aspect, '16:9')
   assert.equal(shot.lighting, '夜景冷调')
+  assert.equal(shot.durationMs, 4000)
+  assert.equal(createDirectorShotSnapshot({ id: 'note', name: '备注镜头', cam, durationMs: 2500, notes: '  停顿后转身  ' }).notes, '停顿后转身')
 
   const shots = [
     shot,
@@ -141,6 +147,35 @@ function testDirectorWorkflow() {
   assert.deepEqual(reorderDirectorShots(shots, 'b', 'c').map((item) => item.id), ['a', 'c', 'b'])
   assert.deepEqual(reorderDirectorShots(shots, 'c', 'a').map((item) => item.id), ['c', 'a', 'b'])
   assert.equal(reorderDirectorShots(shots, 'missing', 'a'), shots, '非法拖动不应制造无意义的新数组')
+
+  assert.equal(normalizeDirectorShotDuration(undefined), 4000)
+  assert.equal(normalizeDirectorShotDuration(100), 500)
+  assert.equal(normalizeDirectorShotDuration(200000), 120000)
+  assert.equal(normalizeDirectorShotDuration(3456), 3500)
+  assert.equal(getDirectorShotsDurationMs([{ ...shot, durationMs: 2500 }, { ...shot, id: 'd', durationMs: 5000 }]), 7500)
+  assert.equal(formatDirectorDuration(7500), '0:08')
+
+  const jumpCut = analyzeDirectorShotContinuity([shot, { ...shot, id: 'near', cam: { ...cam, pos: [0.05, 1.5, 2.55] } }])
+  assert.ok(jumpCut.some((issue) => issue.code === 'jump-cut' && issue.severity === 'warning'))
+
+  const focalJump = analyzeDirectorShotContinuity([shot, { ...shot, id: 'tele', cam: { ...cam, focal: 85 } }])
+  assert.ok(focalJump.some((issue) => issue.code === 'focal-jump' && issue.severity === 'info'))
+
+  const cleanCut = analyzeDirectorShotContinuity([shot, {
+    ...shot,
+    id: 'clean',
+    cam: { pos: [2.6, 1.5, 2.6], target: [0, 1, 0], focal: 35 }
+  }])
+  assert.equal(cleanCut.length, 0, '有足够角度变化且画幅灯光一致的切换不应误报')
+
+  const reverseCam: DirectorCam = { pos: [0, 1, -2.6], target: [0, 1, 0], focal: 85 }
+  const reversal = analyzeDirectorShotContinuity([
+    { ...shot, cam, aspect: '16:9', lighting: '默认' },
+    { ...shot, id: 'reverse', cam: reverseCam, aspect: '9:16', lighting: '夜景冷调' }
+  ])
+  assert.ok(reversal.some((issue) => issue.code === 'axis-reversal'))
+  assert.ok(reversal.some((issue) => issue.code === 'aspect-change'))
+  assert.ok(reversal.some((issue) => issue.code === 'lighting-change'))
 }
 
 function testDirectorPoseTools() {
@@ -209,4 +244,4 @@ testDirectorPoseTools()
 testDirectorCameraPresets()
 testDirectorIk()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 bodies / 20 poses / lazy assets / shot workflow / safety / camera presets / IK OK')
+console.log('director mannequin: 13 bodies / 20 poses / shot planning / continuity / camera helpers / safety / IK OK')

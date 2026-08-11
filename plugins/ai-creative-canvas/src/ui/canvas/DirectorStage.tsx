@@ -17,6 +17,7 @@ import {
 } from './directorMannequin'
 import { DirectorAsyncResourceCache } from './directorAssetCache'
 import { DirectorShotStrip } from './DirectorShotStrip'
+import { DirectorShotInspector } from './DirectorShotInspector'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
@@ -28,9 +29,12 @@ import {
   type DirectorPoseSafetySummary
 } from './directorPoseTools'
 import {
+  analyzeDirectorShotContinuity,
   classifyDirectorShot,
   createDirectorShotSnapshot,
+  getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
+  normalizeDirectorShotDuration,
   reorderDirectorShots,
   type DirectorInspectorTab
 } from './directorWorkflow'
@@ -169,6 +173,7 @@ function Inner() {
   const [shots, setShots] = useState<DirectorShot[]>([])
   const [activeShotId, setActiveShotId] = useState<string | null>(null)
   const [shotStripExpanded, setShotStripExpanded] = useState(true)
+  const [showShotCameras, setShowShotCameras] = useState(true)
   const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
   const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
   const [posePreviews, setPosePreviews] = useState<Record<string, string>>({})
@@ -278,6 +283,49 @@ function Inner() {
         const camHelper = new THREE.CameraHelper(shotCam)
         camHelper.visible = false
         scene.add(camHelper)
+        const recordedCameraHelpers = new THREE.Group()
+        recordedCameraHelpers.name = '已记录机位辅助框'
+        recordedCameraHelpers.visible = false
+        scene.add(recordedCameraHelpers)
+        let recordedCamerasVisible = true
+        const clearRecordedCameraHelpers = () => {
+          for (const child of [...recordedCameraHelpers.children]) {
+            recordedCameraHelpers.remove(child)
+            ;(child as any).dispose?.()
+          }
+        }
+        const setRecordedCameraHelpers = (recordedShots: DirectorShot[], activeId: string | null, visible: boolean) => {
+          recordedCamerasVisible = visible
+          clearRecordedCameraHelpers()
+          for (const shot of recordedShots) {
+            if (!shot.cam) continue
+            const helperAspect = ASPECTS.find((item) => item.k === shot.aspect)?.ar || cam.aspect || 1
+            const helperDistance = Math.max(0.5, Math.hypot(
+              shot.cam.pos[0] - shot.cam.target[0],
+              shot.cam.pos[1] - shot.cam.target[1],
+              shot.cam.pos[2] - shot.cam.target[2]
+            ))
+            const helperCamera = new THREE.PerspectiveCamera(50, helperAspect, 0.05, helperDistance)
+            helperCamera.filmGauge = FILM_GAUGE
+            helperCamera.position.set(shot.cam.pos[0], shot.cam.pos[1], shot.cam.pos[2])
+            helperCamera.setFocalLength(shot.cam.focal || 35)
+            helperCamera.lookAt(shot.cam.target[0], shot.cam.target[1], shot.cam.target[2])
+            helperCamera.updateProjectionMatrix()
+            helperCamera.updateMatrixWorld(true)
+            const helper = new THREE.CameraHelper(helperCamera)
+            const active = shot.id === activeId
+            helper.name = `机位辅助框 ${shot.name}`
+            helper.userData.shotId = shot.id
+            helper.setColors?.(
+              new THREE.Color(active ? 0xfcd34d : 0x77808f),
+              new THREE.Color(active ? 0xf5b942 : 0x596270),
+              new THREE.Color(active ? 0xffe4a3 : 0x818897),
+              new THREE.Color(active ? 0xfcd34d : 0x77808f),
+              new THREE.Color(active ? 0xfff1c2 : 0x9aa1ad)
+            )
+            recordedCameraHelpers.add(helper)
+          }
+        }
         const outCam = () => (shotLocked ? shotCam : cam)
         const outTarget = () => (shotLocked ? shotTarget : orbit.target)
         // PiP：角落小渲染器，实时显示 shotCam 取景（出图构图预览）
@@ -1341,6 +1389,7 @@ function Inner() {
           shotCam.updateMatrixWorld(true)
           camHelper.update()
           camHelper.visible = shotLocked // 锁定时主视图显示出图取景框
+          recordedCameraHelpers.visible = shotLocked && recordedCamerasVisible && recordedCameraHelpers.children.length > 0
           jointMarker.visible = curMode === 'pose' && !!curJoint && curRoot?.visible !== false
           if (jointMarker.visible) {
             curJoint.getWorldPosition(jointMarker.position)
@@ -1351,9 +1400,12 @@ function Inner() {
           if (pip && shotLocked) {
             camHelper.visible = false
             const markerVisible = jointMarker.visible
+            const recordedHelpersVisible = recordedCameraHelpers.visible
             jointMarker.visible = false
+            recordedCameraHelpers.visible = false
             pip.render(scene, shotCam)
             jointMarker.visible = markerVisible
+            recordedCameraHelpers.visible = recordedHelpersVisible
           } // PiP 出图预览（不含取景框线和关节定位点）
         }
         animate()
@@ -1468,9 +1520,11 @@ function Inner() {
           const chv = camHelper.visible
           const gv = grid.visible
           const jmv = jointMarker.visible
+          const rhv = recordedCameraHelpers.visible
           camHelper.visible = false
           grid.visible = false // 网格线不进缩略图
           jointMarker.visible = false
+          recordedCameraHelpers.visible = false
           renderer.render(scene, outCam())
           const src = renderer.domElement
           const tw = 96
@@ -1482,6 +1536,7 @@ function Inner() {
           camHelper.visible = chv
           grid.visible = gv
           jointMarker.visible = jmv
+          recordedCameraHelpers.visible = rhv
           attachByMode()
           return cropCanvas(c).toDataURL('image/jpeg', 0.7)
         }
@@ -1700,10 +1755,12 @@ function Inner() {
           const gdv = ground.visible
           const chv = camHelper.visible
           const jmv = jointMarker.visible
+          const rhv = recordedCameraHelpers.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
           camHelper.visible = false // 取景框不进深度图
           jointMarker.visible = false
+          recordedCameraHelpers.visible = false
           scene.overrideMaterial = depthMat
           renderer.render(scene, C)
           scene.overrideMaterial = null as any
@@ -1711,6 +1768,7 @@ function Inner() {
           ground.visible = gdv
           camHelper.visible = chv
           jointMarker.visible = jmv
+          recordedCameraHelpers.visible = rhv
           scene.background = pbg
           C.far = pf
           C.updateProjectionMatrix()
@@ -1739,6 +1797,7 @@ function Inner() {
           if (!disposed) {
             setShots((saved0.shots || []).map((shot) => ({
               ...shot,
+              durationMs: normalizeDirectorShotDuration(shot.durationMs),
               shotType: shot.shotType || classifyDirectorShot(shot.cam)
             })))
             if (saved0.prompt) setPrompt(saved0.prompt)
@@ -1893,6 +1952,7 @@ function Inner() {
           addProp,
           importFile: (ab: ArrayBuffer, name: string) => importGLTF(ab, name),
           selectById: (id: string) => { const s = findById(id); if (s) select(s.obj) },
+          clearSelection: () => select(null),
           renameById: (id: string, name: string) => { const s = findById(id); if (s) { s.name = name; sync() } },
           getDescById: (id: string) => findById(id)?.desc || '',
           setDescById: (id: string, desc: string) => { const s = findById(id); if (s && (s.desc || '') !== desc) { s.desc = desc || undefined; commit() } },
@@ -1945,14 +2005,17 @@ function Inner() {
           setFacing: (rad: number) => {
             if (curRoot && !curRoot.userData.locked) { curRoot.rotation.y = rad; emitTransform(); commit() }
           },
+          setRecordedCameraHelpers,
           capture: (): string => {
             tcontrol.detach()
             const chv = camHelper.visible
             const gv = grid.visible
             const jmv = jointMarker.visible
+            const rhv = recordedCameraHelpers.visible
             camHelper.visible = false // 取景框不进成片参考图
             grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
             jointMarker.visible = false
+            recordedCameraHelpers.visible = false
             renderer.render(scene, outCam())
             const src = renderer.domElement
             const c = document.createElement('canvas')
@@ -1963,6 +2026,7 @@ function Inner() {
             camHelper.visible = chv
             grid.visible = gv
             jointMarker.visible = jmv
+            recordedCameraHelpers.visible = rhv
             attachByMode()
             return url
           },
@@ -2008,6 +2072,7 @@ function Inner() {
           safe(() => tcontrol.removeEventListener('objectChange', onTransformObjectChange))
           safe(() => scene.remove(tHelper))
           safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
+          safe(() => { clearRecordedCameraHelpers(); scene.remove(recordedCameraHelpers) })
           safe(() => tcontrol.dispose())
           safe(() => orbit.dispose())
           safe(() => scene.traverse((o: any) => disposeTree(o))) // 释放各 mesh 的 geometry/material/texture
@@ -2054,10 +2119,20 @@ function Inner() {
 
   // 切换选中 → 拉取该对象的语义描述进草稿
   const selectedObj = objs.find((o) => o.id === selId)
+  const activeShotIndex = shots.findIndex((shot) => shot.id === activeShotId)
+  const activeShot = activeShotIndex >= 0 ? shots[activeShotIndex] : null
+  const shotContinuityIssues = analyzeDirectorShotContinuity(shots)
+  const activeShotIssues = activeShot
+    ? shotContinuityIssues.filter((issue) => issue.fromId === activeShot.id || issue.toId === activeShot.id)
+    : []
+  const shotsDurationMs = getDirectorShotsDurationMs(shots)
   useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
   useEffect(() => { setInspectorTab(inferDirectorInspectorTab(selKind)) }, [selId, selKind])
   useEffect(() => { writeDirectorPanelWidth('director.leftPanelWidth', leftPanelWidth) }, [leftPanelWidth])
   useEffect(() => { writeDirectorPanelWidth('director.rightPanelWidth', rightPanelWidth) }, [rightPanelWidth])
+  useEffect(() => {
+    if (ready) api.current.setRecordedCameraHelpers?.(shots, activeShotId, showShotCameras)
+  }, [ready, shots, activeShotId, showShotCameras])
   useEffect(() => {
     const bodyType = selectedObj?.bodyType
     if (!ready || selKind !== '人台' || !bodyType) {
@@ -2157,7 +2232,7 @@ function Inner() {
     return { useControl, usePose, full: `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}` }
   }
 
-  const doGenerate = async (placeIndex: number, outputAspect = aspect): Promise<string | null> => {
+  const doGenerate = async (placeIndex: number, outputAspect = aspect, shotNotes = ''): Promise<string | null> => {
     const proj = useGraph.getState().project
     const controlModel = proj.defaultControlModel
     const model = controlModel || proj.defaultImageModel
@@ -2167,7 +2242,8 @@ function Inner() {
     }
     try {
       const ai = window.mulby.ai
-      const { useControl, usePose, full } = buildFullPrompt()
+      const { useControl, usePose, full: basePrompt } = buildFullPrompt()
+      const full = shotNotes.trim() ? `${basePrompt}\n\n镜头执行备注：${shotNotes.trim()}` : basePrompt
       if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
         toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
         return null
@@ -2253,7 +2329,7 @@ function Inner() {
     const shot = shots[i]
     if (!shot) return false
     applyShot(shot)
-    const url = await doGenerate(i, shot.aspect || aspect)
+    const url = await doGenerate(i, shot.aspect || aspect, shot.notes || '')
     if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
     return false
   }
@@ -2287,8 +2363,10 @@ function Inner() {
       createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting })
     ])
     setActiveShotId(id)
+    setInspectorTab('camera')
   }
   const applyShot = (shot: DirectorShot) => {
+    api.current.clearSelection?.()
     api.current.applyCam?.(shot.cam)
     setFocal(Math.round(shot.cam?.focal || 35))
     if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
@@ -2297,6 +2375,7 @@ function Inner() {
       api.current.setLighting?.(shot.lighting)
     }
     setActiveShotId(shot.id)
+    setInspectorTab('camera')
   }
   const duplicateShot = (id: string) => {
     setShots((current) => {
@@ -2310,6 +2389,27 @@ function Inner() {
     })
   }
   const renameShot = (id: string, name: string) => setShots((current) => current.map((shot) => (shot.id === id ? { ...shot, name } : shot)))
+  const updateActiveShot = (patch: Partial<DirectorShot>) => {
+    if (!activeShotId) return
+    setShots((current) => current.map((shot) => (shot.id === activeShotId ? { ...shot, ...patch } : shot)))
+  }
+  const refreshActiveShot = () => {
+    if (!activeShotId) return
+    const cam = api.current.getCam?.()
+    if (!cam) return
+    const thumb = api.current.captureThumb?.()
+    setShots((current) => current.map((shot) => shot.id === activeShotId
+      ? {
+          ...shot,
+          cam,
+          thumb,
+          aspect,
+          lighting: api.current.getLighting?.() || lighting,
+          shotType: classifyDirectorShot(cam)
+        }
+      : shot))
+    toast('已用当前构图更新机位', 'success')
+  }
   const reorderShots = (draggedId: string, targetId: string) => setShots((current) => reorderDirectorShots(current, draggedId, targetId))
   const delShot = (id: string) => {
     setShots((current) => current.filter((shot) => shot.id !== id))
@@ -2365,7 +2465,8 @@ function Inner() {
       const row = Math.floor(i / cols)
       const center = { x: left + col * (W + gapX) + W / 2, y: top + row * (H + gapY) + H / 2 }
       const frag = (api.current.fragmentFor?.(s.cam, { aspect: s.aspect, lighting: s.lighting }) as string) || ''
-      const full = `${prompt.trim()}\n\n${frag}`.trim()
+      const note = s.notes?.trim() ? `镜头执行备注：${s.notes.trim()}` : ''
+      const full = `${prompt.trim()}\n\n${frag}${note ? `\n\n${note}` : ''}`.trim()
       const id = g.addCard('image', center, {
         title: s.name,
         prompt: full,
@@ -2373,7 +2474,15 @@ function Inner() {
         status: s.take ? 'done' : 'idle',
         assetUrl: s.take || null,
         mime: s.take ? 'image/png' : null,
-        meta: { shot: { shotNumber: i + 1, desc: s.name, imagePrompt: full, camera: frag } }
+        meta: {
+          shot: {
+            shotNumber: i + 1,
+            desc: s.notes?.trim() ? `${s.name}：${s.notes.trim()}` : s.name,
+            imagePrompt: full,
+            camera: frag,
+            duration: normalizeDirectorShotDuration(s.durationMs) / 1000
+          }
+        }
       }, boardId)
       ids.push(id)
     })
@@ -2404,6 +2513,9 @@ function Inner() {
   const filteredObjs = query
     ? objs.filter((o) => `${o.name} ${o.kind}`.toLocaleLowerCase().includes(query))
     : objs
+  const filteredShots = query
+    ? shots.filter((shot) => `${shot.name} 机位 镜头 ${shot.shotType || ''}`.toLocaleLowerCase().includes(query))
+    : shots
   const objectGroups = ['人台', '道具', '模型']
     .map((kind) => ({ kind, items: filteredObjs.filter((o) => o.kind === kind) }))
     .filter((group) => group.items.length > 0)
@@ -2510,8 +2622,8 @@ function Inner() {
         <div style={{ width: leftPanelWidth, bottom: bottomUiInset }} className={`absolute top-16 left-3 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
           <div onPointerDown={(event) => beginPanelResize('left', event)} className="absolute -right-1 top-4 bottom-4 z-10 w-2 cursor-col-resize" title="拖动调整对象树宽度" />
           <div className="flex items-center justify-between">
-            <span className={secCls}>场景对象</span>
-            <span className="text-[10px] tabular-nums text-white/30">{filteredObjs.length}/{objs.length}</span>
+            <span className={secCls}>场景层级</span>
+            <span className="text-[10px] tabular-nums text-white/30">{filteredObjs.length + filteredShots.length}/{objs.length + shots.length}</span>
           </div>
           <div className="relative">
             <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
@@ -2572,8 +2684,30 @@ function Inner() {
                 ))}
               </section>
             ))}
-            {!objs.length && <span className="text-white/35">用上面按钮添加/导入对象</span>}
-            {!!objs.length && !filteredObjs.length && <span className="text-white/35">没有匹配“{objectQuery.trim()}”的对象</span>}
+            {!!filteredShots.length && (
+              <section className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/25">
+                  <span>机位</span><span className="h-px flex-1 bg-white/[0.06]" /><span>{filteredShots.length}</span>
+                </div>
+                {filteredShots.map((shot) => (
+                  <div key={shot.id} className={`flex items-center gap-1 rounded-lg px-1.5 py-1 transition-colors ${activeShotId === shot.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] text-white/75 hover:bg-white/[0.08]'}`}>
+                    <button
+                      onClick={() => applyShot(shot)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left outline-none focus-visible:ring-1 focus-visible:ring-amber-300/50"
+                      title="切换到此机位"
+                    >
+                      <Camera size={12} />
+                      <span className="min-w-0 flex-1 truncate">{shot.name}</span>
+                      <span className="shrink-0 text-[9px] tabular-nums text-white/30">{Math.round(shot.cam?.focal || 35)}mm</span>
+                    </button>
+                    <button onClick={() => duplicateShot(shot.id)} className="shrink-0 text-white/35 transition-colors hover:text-white" title="复制机位"><Copy size={11} /></button>
+                    <button onClick={() => delShot(shot.id)} className="shrink-0 text-white/35 transition-colors hover:text-white" title="删除机位"><Trash2 size={11} /></button>
+                  </div>
+                ))}
+              </section>
+            )}
+            {!objs.length && !shots.length && <span className="text-white/35">用上面按钮添加对象，或记录一个机位</span>}
+            {!!query && !filteredObjs.length && !filteredShots.length && <span className="text-white/35">没有匹配“{objectQuery.trim()}”的对象或机位</span>}
           </div>
           <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
         </div>
@@ -2720,6 +2854,17 @@ function Inner() {
 
             {inspectorTab === 'camera' && (
               <div className="flex flex-col gap-3">
+                <DirectorShotInspector
+                  shot={activeShot}
+                  index={activeShotIndex}
+                  total={shots.length}
+                  totalDurationMs={shotsDurationMs}
+                  issues={activeShotIssues}
+                  showCameraHelpers={showShotCameras}
+                  onChange={updateActiveShot}
+                  onRefresh={refreshActiveShot}
+                  onToggleCameraHelpers={() => setShowShotCameras((value) => !value)}
+                />
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-white/80">出图镜头</span>
                   <span className="text-[10px] tabular-nums text-amber-200">{focal}mm</span>
@@ -2787,6 +2932,8 @@ function Inner() {
           activeShotId={activeShotId}
           expanded={shotStripExpanded}
           busy={busy}
+          totalDurationMs={shotsDurationMs}
+          continuityIssues={shotContinuityIssues}
           onToggle={() => setShotStripExpanded((value) => !value)}
           onAdd={addShot}
           onApply={applyShot}

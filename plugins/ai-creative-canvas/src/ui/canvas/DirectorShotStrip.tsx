@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react'
 import {
+  AlertTriangle,
   Camera,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
   Clapperboard,
+  Clock3,
   Copy,
   Film,
   GripVertical,
@@ -15,12 +17,15 @@ import {
 } from 'lucide-react'
 import type { DirectorShot } from '../types'
 import { isImeComposing } from '../util'
+import { formatDirectorDuration, normalizeDirectorShotDuration, type DirectorContinuityIssue } from './directorWorkflow'
 
 interface Props {
   shots: DirectorShot[]
   activeShotId: string | null
   expanded: boolean
   busy: boolean
+  totalDurationMs: number
+  continuityIssues: DirectorContinuityIssue[]
   onToggle: () => void
   onAdd: () => void
   onApply: (shot: DirectorShot) => void
@@ -41,6 +46,8 @@ export function DirectorShotStrip({
   activeShotId,
   expanded,
   busy,
+  totalDurationMs,
+  continuityIssues,
   onToggle,
   onAdd,
   onApply,
@@ -86,6 +93,16 @@ export function DirectorShotStrip({
           <Plus size={13} />
         </button>
         <span className="hidden text-[11px] text-white/35 sm:inline">记录当前机位</span>
+        {!!shots.length && (
+          <span className="hidden items-center gap-1 text-[10px] tabular-nums text-white/35 md:flex" title="分镜总时长">
+            <Clock3 size={10} /> {formatDirectorDuration(totalDurationMs)}
+          </span>
+        )}
+        {continuityIssues.some((issue) => issue.severity === 'warning') && (
+          <span className="flex items-center gap-1 text-[9px] text-amber-200/75" title="存在需要检查的镜头连续性提醒">
+            <AlertTriangle size={10} /> {continuityIssues.filter((issue) => issue.severity === 'warning').length}
+          </span>
+        )}
         <div className="flex-1" />
         {shots.length > 0 && (
           <>
@@ -118,6 +135,8 @@ export function DirectorShotStrip({
               {shots.map((shot, index) => {
                 const selected = shot.id === activeShotId
                 const takeIndex = shot.takes?.indexOf(shot.take || '') ?? -1
+                const incomingIssues = continuityIssues.filter((issue) => issue.toId === shot.id)
+                const incomingWarning = incomingIssues.some((issue) => issue.severity === 'warning')
                 return (
                   <article
                     key={shot.id}
@@ -175,9 +194,11 @@ export function DirectorShotStrip({
                           {shot.name}
                         </button>
                       )}
-                      <span className="mt-0.5 truncate text-[9px] tabular-nums text-white/35" title={`灯光：${shot.lighting || '沿用场景'}`}>
-                        {shot.shotType || '镜头'} / {Math.round(shot.cam?.focal || 35)}mm {shot.aspect && shot.aspect !== '视口' ? `/ ${shot.aspect}` : ''}
+                      <span className="mt-0.5 flex min-w-0 items-center gap-1 truncate text-[9px] tabular-nums text-white/35" title={incomingIssues.length ? incomingIssues.map((issue) => issue.message).join('\n') : `灯光：${shot.lighting || '沿用场景'}`}>
+                        {incomingWarning && <AlertTriangle size={9} className="shrink-0 text-amber-200/80" />}
+                        <span className="truncate">{shot.shotType || '镜头'} / {Math.round(shot.cam?.focal || 35)}mm {shot.aspect && shot.aspect !== '视口' ? `/ ${shot.aspect}` : ''}</span>
                       </span>
+                      <span className="text-[9px] tabular-nums text-white/30">{normalizeDirectorShotDuration(shot.durationMs) / 1000}s</span>
                       <div className="mt-auto flex items-center gap-1">
                         <button onClick={() => onGenerate(index)} disabled={busy} className="text-white/35 transition-colors hover:text-amber-200 disabled:opacity-30" title="按此机位生成或重拍"><RefreshCw size={11} /></button>
                         <button onClick={() => onDuplicate(shot.id)} className="text-white/35 transition-colors hover:text-white" title="复制机位"><Copy size={11} /></button>
