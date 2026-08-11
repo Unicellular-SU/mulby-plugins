@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Layers, RefreshCw, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, RefreshCw, Clapperboard, Search, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
@@ -132,16 +132,13 @@ function Inner() {
   const [aspect, setAspectK] = useState('视口') // 出图画幅（ASPECTS 的 k）
   const curAr = ASPECTS.find((a) => a.k === aspect)?.ar ?? 0
   const [descDraft, setDescDraft] = useState('') // 选中对象的语义描述草稿（blur 提交）
-  const [lastTake, setLastTake] = useState<string | null>(null) // 最近一次成片 url（叠图对比）
-  const [compareOn, setCompareOn] = useState(false) // 成片叠加对比开关
-  const [compareOpacity, setCompareOpacity] = useState(0.45)
   const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
   const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
 
   const saveScene = () => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect, lastTake: lastTake || undefined })
+      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect })
     } catch { /* ignore */ }
   }
   const close = () => {
@@ -1447,7 +1444,6 @@ function Inner() {
               applyLighting(saved0.lighting)
               setLighting(saved0.lighting)
             }
-            if (saved0.lastTake) setLastTake(saved0.lastTake)
             if (saved0.aspect && ASPECTS.some((a) => a.k === saved0.aspect)) {
               const ar = ASPECTS.find((a) => a.k === saved0.aspect)?.ar ?? 0
               curAspect = ar
@@ -1730,7 +1726,6 @@ function Inner() {
     else if (k === 'r') onMode('pose')
     else if (k === 'f') { if (selId) api.current.lookAtSelected?.() }
     else if (k === 'l') onViewMode(locked ? 'camera' : 'director')
-    else if (k === 'c') { if (lastTake) setCompareOn((v) => !v) }
     else if (e.key === 'Delete' || e.key === 'Backspace') { if (selId) api.current.removeById?.(selId) }
   }
   useEffect(() => {
@@ -1889,7 +1884,7 @@ function Inner() {
   const genShot = async (i: number): Promise<boolean> => {
     api.current.applyCam?.(shots[i].cam)
     const url = await doGenerate(i)
-    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); setLastTake(url); return true }
+    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
     return false
   }
   // 在 takes 历史里切换当前成片（循环）
@@ -2067,13 +2062,6 @@ function Inner() {
           <div style={{ width: frameRect.w, height: frameRect.h }} className="border border-amber-200/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
         </div>
       )}
-      {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍。
-          与构图线同理不带 z-index：沉到面板之下，只覆盖 3D 视口区域 */}
-      {compareOn && lastTake && (
-        <div className="absolute inset-0 pointer-events-none grid place-items-center">
-          <img src={lastTake} className="max-w-full max-h-full object-contain" style={{ opacity: compareOpacity }} />
-        </div>
-      )}
       {!ready && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
           <span className={`${panelCls} px-4 py-2 text-sm text-white/70 flex items-center gap-2`}><Loader2 size={15} className="animate-spin text-amber-300" /> 正在加载 3D 导演台…</span>
@@ -2099,14 +2087,10 @@ function Inner() {
           {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把当前导演观察角度更新为出图机位"><Crosshair size={13} /> 更新机位</Btn>}
           <div className="w-px h-5 bg-white/10" />
           <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
-          <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加成片对比 (C)' : '尚无成片可对比'}><Layers size={13} /></Btn>
           <Btn on={panelsCollapsed} onClick={() => setPanelsCollapsed((v) => !v)} title={panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}>
             {panelsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
             <span className="sr-only">{panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}</span>
           </Btn>
-          {compareOn && lastTake && (
-            <input type="range" min={0.1} max={1} step={0.05} value={compareOpacity} onChange={(e) => setCompareOpacity(Number(e.target.value))} className="w-16 accent-amber-300" title="成片叠加透明度" />
-          )}
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
           <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>

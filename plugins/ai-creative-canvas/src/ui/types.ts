@@ -125,7 +125,6 @@ export interface DirectorScene {
   prompt?: string
   lighting?: string // 灯光预设 key（DirectorStage LIGHTINGS）
   aspect?: string // 出图画幅 key（DirectorStage ASPECTS，默认视口=不裁剪）
-  lastTake?: string // 最近一次成片 url（重开后可继续叠图对比）
 }
 
 export interface ProjectDoc {
