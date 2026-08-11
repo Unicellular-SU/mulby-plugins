@@ -30,3 +30,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 No binary 3D model from that repository is bundled with this plugin.
+
+## Universal Base Characters (Standard)
+
+The built-in detailed male and female director mannequins are optimized from
+the Universal Base Characters Standard pack by Quaternius:
+
+https://quaternius.com/packs/universalbasecharacters.html
+
+Models by @Quaternius. The bundled meshes, humanoid rigs, eye textures, and
+downscaled normal/roughness textures are dedicated to the public domain under
+CC0 1.0 Universal:
+
+https://creativecommons.org/publicdomain/zero/1.0/

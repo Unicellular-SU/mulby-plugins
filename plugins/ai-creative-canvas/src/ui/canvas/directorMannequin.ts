@@ -251,40 +251,100 @@ export const getDirectorBodyPreset = (value?: string | null): DirectorBodyPreset
 
 export interface DirectorPosePreset {
   k: string
+  controls: DirectorPoseControls
   m: Record<string, [number, number, number]>
   offsetY?: number
 }
 
+export type DirectorPoseControls = Record<string, number>
+
 const rad = (degree: number) => (degree * Math.PI) / 180
-const pose = (k: string, degrees: Record<string, [number, number, number]>, offsetY = 0): DirectorPosePreset => ({
+
+const value = (controls: DirectorPoseControls, key: string) => controls[key] || 0
+const tuple = (x: number, y: number, z: number): [number, number, number] => [x, y, z]
+
+/**
+ * 程序化人台统一约定：人物正面恒为 +Z，四肢静止时沿 -Y。
+ * 姿势只描述“前抬/后屈/外展”等人体语义，所有坐标轴正负号集中在这里转换，
+ * 避免单个预设再次把膝盖折到人物正面、把脸转向脚尖。
+ */
+export function getDirectorProceduralJointDegrees(controls: DirectorPoseControls) {
+  const result: Record<string, [number, number, number]> = {
+    骨盆: tuple(-value(controls, 'body.pitch'), value(controls, 'body.yaw'), value(controls, 'body.roll')),
+    胸: tuple(-value(controls, 'torso.pitch'), value(controls, 'torso.yaw'), value(controls, 'torso.roll')),
+    头: tuple(value(controls, 'head.pitch'), value(controls, 'head.yaw'), value(controls, 'head.roll')),
+    左肩: tuple(-value(controls, 'leftShoulder.pitch'), value(controls, 'leftShoulder.twist'), value(controls, 'leftShoulder.spread')),
+    右肩: tuple(-value(controls, 'rightShoulder.pitch'), value(controls, 'rightShoulder.twist'), value(controls, 'rightShoulder.spread')),
+    左肘: tuple(-value(controls, 'leftElbow.bend'), 0, 0),
+    右肘: tuple(-value(controls, 'rightElbow.bend'), 0, 0),
+    左腕: tuple(-value(controls, 'leftHand.pitch'), value(controls, 'leftHand.twist'), value(controls, 'leftHand.roll')),
+    右腕: tuple(-value(controls, 'rightHand.pitch'), value(controls, 'rightHand.twist'), value(controls, 'rightHand.roll')),
+    左髋: tuple(-value(controls, 'leftHip.pitch'), value(controls, 'leftHip.twist'), value(controls, 'leftHip.spread')),
+    右髋: tuple(-value(controls, 'rightHip.pitch'), value(controls, 'rightHip.twist'), value(controls, 'rightHip.spread')),
+    左膝: tuple(value(controls, 'leftKnee.bend'), 0, 0),
+    右膝: tuple(value(controls, 'rightKnee.bend'), 0, 0),
+    左踝: tuple(value(controls, 'leftFoot.pitch'), value(controls, 'leftFoot.twist'), value(controls, 'leftFoot.roll')),
+    右踝: tuple(value(controls, 'rightFoot.pitch'), value(controls, 'rightFoot.twist'), value(controls, 'rightFoot.roll'))
+  }
+  return Object.fromEntries(Object.entries(result).filter(([, xyz]) => xyz.some(Boolean)))
+}
+
+/**
+ * 高精 humanoid 使用人物空间（+X 右、+Y 上、+Z 正面）的世界轴旋转；
+ * 运行时再换算到每根骨骼的父空间，因此不依赖模型自身杂乱的局部轴。
+ */
+export function getDirectorDetailedJointDegrees(controls: DirectorPoseControls) {
+  const result: Record<string, [number, number, number]> = {
+    骨盆: tuple(-value(controls, 'body.pitch'), value(controls, 'body.yaw'), value(controls, 'body.roll')),
+    胸: tuple(-value(controls, 'torso.pitch'), value(controls, 'torso.yaw'), value(controls, 'torso.roll')),
+    头: tuple(value(controls, 'head.pitch'), value(controls, 'head.yaw'), value(controls, 'head.roll')),
+    左肩: tuple(-value(controls, 'leftShoulder.pitch'), 0, -value(controls, 'leftShoulder.spread')),
+    右肩: tuple(-value(controls, 'rightShoulder.pitch'), 0, -value(controls, 'rightShoulder.spread')),
+    左肘: tuple(-value(controls, 'leftElbow.bend'), 0, 0),
+    右肘: tuple(-value(controls, 'rightElbow.bend'), 0, 0),
+    左腕: tuple(-value(controls, 'leftHand.pitch'), 0, value(controls, 'leftHand.roll')),
+    右腕: tuple(-value(controls, 'rightHand.pitch'), 0, value(controls, 'rightHand.roll')),
+    左髋: tuple(-value(controls, 'leftHip.pitch'), 0, -value(controls, 'leftHip.spread')),
+    右髋: tuple(-value(controls, 'rightHip.pitch'), 0, -value(controls, 'rightHip.spread')),
+    左膝: tuple(value(controls, 'leftKnee.bend'), 0, 0),
+    右膝: tuple(value(controls, 'rightKnee.bend'), 0, 0),
+    左踝: tuple(value(controls, 'leftFoot.pitch'), 0, value(controls, 'leftFoot.roll')),
+    右踝: tuple(value(controls, 'rightFoot.pitch'), 0, value(controls, 'rightFoot.roll'))
+  }
+  return Object.fromEntries(Object.entries(result).filter(([, xyz]) => xyz.some(Boolean)))
+}
+
+const pose = (k: string, controls: DirectorPoseControls): DirectorPosePreset => ({
   k,
-  m: Object.fromEntries(Object.entries(degrees).map(([joint, xyz]) => [joint, xyz.map(rad) as [number, number, number]])),
-  ...(offsetY ? { offsetY } : {})
+  controls,
+  m: Object.fromEntries(
+    Object.entries(getDirectorProceduralJointDegrees(controls)).map(([joint, xyz]) => [joint, xyz.map(rad) as [number, number, number]])
+  ),
+  ...(value(controls, 'body.offsetY') ? { offsetY: value(controls, 'body.offsetY') } : {})
 })
 
-// The expanded action set follows the MIT-licensed reference project's preset
-// vocabulary, translated to this director desk's joint axes and hierarchy.
+// 动作语义与参考项目的 MIT 姿势词汇保持一致；轴向由上面的两个转换器统一处理。
 export const DIRECTOR_POSES: DirectorPosePreset[] = [
   pose('站立', {}),
-  pose('T型', { 左肩: [12, 0, -82], 右肩: [12, 0, 82], 左肘: [8, 0, 0], 右肘: [8, 0, 0] }),
-  pose('行走', { 左肩: [-24, 0, -5], 右肩: [24, 0, 5], 左髋: [28, 0, 0], 右髋: [-28, 0, 0], 左膝: [-20, 0, 0], 右膝: [-5, 0, 0] }),
-  pose('跑步', { 骨盆: [-8, 8, 0], 胸: [-10, -8, 0], 左肩: [-48, 0, -8], 右肩: [48, 0, 8], 左肘: [65, 0, 0], 右肘: [72, 0, 0], 左髋: [44, 0, 0], 右髋: [-50, 0, 0], 左膝: [-56, 0, 0], 右膝: [-26, 0, 0] }, -0.06),
-  pose('坐姿', { 胸: [-10, 0, 0], 左髋: [84, 0, 0], 右髋: [84, 0, 0], 左膝: [-88, 0, 0], 右膝: [-88, 0, 0], 左踝: [6, 0, 0], 右踝: [6, 0, 0] }, -0.05),
-  pose('蹲下', { 骨盆: [-18, 0, 0], 胸: [-18, 0, 0], 头: [16, 0, 0], 左髋: [74, 0, -8], 右髋: [74, 0, 8], 左膝: [-105, 0, 0], 右膝: [-105, 0, 0], 左肩: [-34, 0, -12], 右肩: [-34, 0, 12], 左肘: [72, 0, 0], 右肘: [72, 0, 0] }, -0.34),
-  pose('单膝跪', { 骨盆: [-10, 0, 0], 胸: [-8, 0, 0], 头: [10, 0, 0], 左髋: [58, 0, -8], 左膝: [-78, 0, 0], 左踝: [18, 0, 0], 右髋: [-12, 0, 8], 右膝: [-90, 0, 0], 右踝: [48, 0, 0], 左肩: [-8, -8, -8], 左肘: [28, 0, 0], 右肩: [18, 0, 8], 右肘: [18, 0, 0] }, -0.32),
-  pose('双膝跪', { 骨盆: [3, 0, 0], 胸: [8, 0, 0], 左髋: [-8, 0, -4], 右髋: [-8, 0, 4], 左膝: [-112, 0, 0], 右膝: [-112, 0, 0], 左踝: [-18, 0, 0], 右踝: [-18, 0, 0], 左肩: [10, 0, -5], 右肩: [10, 0, 5] }, -0.36),
-  pose('叉腰', { 左肩: [-34, 75, -8], 右肩: [-34, -75, 8], 左肘: [78, 0, -28], 右肘: [78, 0, 28], 左腕: [0, 0, -28], 右腕: [0, 0, 28] }),
-  pose('倚靠', { 骨盆: [0, 0, -10], 头: [0, 0, 6], 左髋: [0, 0, -8], 右髋: [0, 0, 8], 左膝: [-12, 0, 0] }),
-  pose('鞠躬', { 骨盆: [-42, 0, 0], 胸: [-12, 0, 0], 头: [22, 0, 0], 左髋: [38, 0, 0], 右髋: [38, 0, 0], 左肩: [-4, 0, -10], 右肩: [-4, 0, 10], 左肘: [12, 0, 0], 右肘: [12, 0, 0] }, -0.05),
-  pose('思考', { 头: [8, -12, 5], 右肩: [-18, -38, 8], 右肘: [82, 0, 28], 右腕: [12, -10, -35], 左肩: [-8, 28, -6], 左肘: [72, 0, -18] }),
-  pose('格斗', { 骨盆: [5, -10, 0], 胸: [0, 12, 0], 头: [0, 8, 0], 左肩: [-42, 20, -18], 右肩: [-28, -20, 12], 左肘: [82, 0, -22], 右肘: [78, 0, 22], 左髋: [4, 0, -18], 右髋: [-6, 0, 22], 左膝: [-12, 0, 0], 右膝: [-18, 0, 0] }, -0.08),
-  pose('踢球', { 骨盆: [-8, 0, 0], 左髋: [8, 0, -5], 右髋: [-68, 0, 8], 右膝: [-28, 0, 0], 左肩: [-18, 0, -12], 右肩: [24, 0, 16] }),
-  pose('投掷', { 骨盆: [5, 14, 0], 胸: [0, -12, 0], 头: [0, 8, 0], 右肩: [38, 28, 68], 右肘: [82, 0, 24], 右腕: [-12, 0, 18], 左肩: [-32, 8, -12], 左肘: [50, 0, -12], 左髋: [22, 0, -12], 右髋: [-12, 0, 18], 左膝: [-30, 0, 0], 右膝: [-12, 0, 0] }, -0.08),
-  pose('推进', { 骨盆: [5, 35, 0], 胸: [-6, 0, 0], 头: [6, 0, 0], 左肩: [-88, 6, -11], 右肩: [-88, -6, 11], 左肘: [8, 0, 0], 右肘: [8, 0, 0], 左腕: [-12, 0, 0], 右腕: [-12, 0, 0], 左髋: [38, 0, -12], 右髋: [-20, 0, 14], 左膝: [-42, 0, 0], 右膝: [-20, 0, 0] }, -0.12),
-  pose('招手', { 右肩: [-26, 28, 72], 右肘: [82, 0, 24], 右腕: [12, 10, -20], 左肩: [10, 0, -8], 左肘: [16, 0, 0] }),
-  pose('伸手', { 右肩: [-72, 0, 6], 右肘: [12, 0, 0], 右腕: [-8, 0, 0], 胸: [-4, 0, 0] }),
-  pose('抱臂', { 左肩: [-48, 65, -48], 左肘: [58, 0, -38], 左腕: [-10, 0, 0], 右肩: [-68, -45, 48], 右肘: [58, 0, 38], 右腕: [-10, 0, 18] }),
-  pose('看手机', { 头: [18, 0, 0], 右肩: [-24, -28, -6], 右肘: [78, 0, 24], 右腕: [14, 58, -30], 左肩: [10, 0, -8], 左肘: [18, 0, 0] })
+  pose('T型', { 'leftShoulder.spread': -70, 'rightShoulder.spread': 70, 'leftShoulder.pitch': 15, 'rightShoulder.pitch': 15, 'leftElbow.bend': 10, 'rightElbow.bend': 10 }),
+  pose('行走', { 'leftShoulder.pitch': 20, 'rightShoulder.pitch': -20, 'leftHip.pitch': -20, 'rightHip.pitch': 20, 'leftKnee.bend': 12, 'rightKnee.bend': 4 }),
+  pose('跑步', { 'body.pitch': -8, 'torso.pitch': -10, 'leftShoulder.pitch': 42, 'rightShoulder.pitch': -42, 'leftElbow.bend': 65, 'rightElbow.bend': 72, 'leftHip.pitch': -35, 'rightHip.pitch': 40, 'leftKnee.bend': 56, 'rightKnee.bend': 26, 'body.offsetY': -0.06 }),
+  pose('坐姿', { 'torso.pitch': -10, 'leftHip.pitch': 80, 'rightHip.pitch': 80, 'leftKnee.bend': 90, 'rightKnee.bend': 90 }),
+  pose('蹲下', { 'body.offsetY': -0.43, 'body.pitch': -26, 'torso.pitch': -24, 'head.pitch': 22, 'leftHip.pitch': 92, 'rightHip.pitch': 92, 'leftKnee.bend': 112, 'rightKnee.bend': 112, 'leftShoulder.pitch': 52, 'rightShoulder.pitch': 50, 'leftShoulder.spread': -10, 'rightShoulder.spread': 10, 'leftElbow.bend': 80, 'rightElbow.bend': 76 }),
+  pose('单膝跪', { 'body.offsetY': -0.42, 'body.pitch': -16, 'torso.pitch': -10, 'head.pitch': 12, 'leftHip.pitch': 68, 'leftKnee.bend': 86, 'leftFoot.pitch': 20, 'rightHip.pitch': -15, 'rightKnee.bend': 80, 'rightFoot.pitch': 60, 'leftShoulder.pitch': 5, 'leftShoulder.spread': 10, 'leftShoulder.twist': -10, 'leftElbow.bend': 30, 'rightShoulder.pitch': -18, 'rightShoulder.spread': 10, 'rightElbow.bend': 18 }),
+  pose('双膝跪', { 'body.offsetY': -0.4, 'body.pitch': 2, 'torso.pitch': 8, 'head.pitch': -2, 'leftShoulder.pitch': -10, 'rightShoulder.pitch': -10, 'leftShoulder.spread': -5, 'rightShoulder.spread': 5, 'leftElbow.bend': 8, 'rightElbow.bend': 8, 'leftHip.pitch': -8, 'rightHip.pitch': -8, 'leftKnee.bend': 126, 'rightKnee.bend': 126, 'leftFoot.pitch': -20, 'rightFoot.pitch': -20 }),
+  pose('叉腰', { 'leftShoulder.pitch': -10, 'rightShoulder.pitch': -10, 'leftShoulder.spread': -35, 'rightShoulder.spread': 35, 'leftShoulder.twist': 30, 'rightShoulder.twist': -30, 'leftElbow.bend': 105, 'rightElbow.bend': 105, 'leftHand.roll': -25, 'rightHand.roll': 25 }),
+  pose('倚靠', { 'body.roll': -10, 'leftHip.spread': -8, 'rightHip.spread': 8, 'head.roll': 6 }),
+  pose('鞠躬', { 'body.pitch': -46, 'torso.pitch': -10, 'head.pitch': 20, 'leftHip.pitch': 49, 'rightHip.pitch': 49, 'leftShoulder.pitch': 5, 'rightShoulder.pitch': 5, 'leftShoulder.spread': 10, 'rightShoulder.spread': -10, 'leftElbow.bend': 12, 'rightElbow.bend': 12 }),
+  pose('思考', { 'rightShoulder.pitch': 8, 'rightShoulder.twist': -40, 'rightElbow.bend': 90, 'rightHand.roll': -40, 'rightHand.pitch': 15, 'rightHand.twist': -10, 'leftShoulder.pitch': 8, 'leftShoulder.twist': 40, 'leftElbow.bend': 90 }),
+  pose('格斗', { 'body.yaw': -10, 'body.pitch': 5, 'torso.yaw': 8, 'head.yaw': 8, 'leftShoulder.pitch': 48, 'leftShoulder.spread': -16, 'leftShoulder.twist': 22, 'rightShoulder.pitch': 30, 'rightShoulder.twist': -22, 'leftElbow.bend': 86, 'rightElbow.bend': 84, 'leftHip.spread': -18, 'rightHip.spread': 22, 'leftHip.pitch': 4, 'rightHip.pitch': -6, 'leftKnee.bend': 12, 'rightKnee.bend': 18 }),
+  pose('踢球', { 'leftHip.pitch': -8, 'rightHip.pitch': 58, 'rightKnee.bend': 35, 'leftShoulder.pitch': 18, 'rightShoulder.pitch': -24 }),
+  pose('投掷', { 'body.offsetY': -0.12, 'body.pitch': 5, 'body.yaw': 14, 'torso.yaw': -10, 'head.yaw': 8, 'rightShoulder.pitch': 76, 'rightShoulder.spread': -14, 'rightShoulder.twist': 28, 'rightElbow.bend': 86, 'rightHand.roll': 18, 'rightHand.pitch': -12, 'leftShoulder.pitch': 34, 'leftShoulder.spread': 10, 'leftShoulder.twist': 8, 'leftElbow.bend': 54, 'leftHand.pitch': -10, 'leftHip.spread': -12, 'rightHip.spread': 18, 'leftHip.pitch': 24, 'rightHip.pitch': -10, 'leftKnee.bend': 30, 'rightKnee.bend': 14, 'leftFoot.pitch': -8, 'rightFoot.roll': 6 }),
+  pose('推进', { 'body.offsetY': -0.16, 'body.pitch': 5, 'body.yaw': 38, 'torso.pitch': -4, 'head.pitch': 6, 'leftShoulder.pitch': 92, 'rightShoulder.pitch': 92, 'leftShoulder.spread': -11, 'rightShoulder.spread': 11, 'leftShoulder.twist': 6, 'rightShoulder.twist': -6, 'leftElbow.bend': 6, 'rightElbow.bend': 6, 'leftHand.pitch': -14, 'rightHand.pitch': -14, 'leftHip.spread': -12, 'rightHip.spread': 14, 'leftHip.pitch': 38, 'rightHip.pitch': -20, 'leftKnee.bend': 42, 'rightKnee.bend': 20, 'leftFoot.pitch': -6, 'rightFoot.roll': 8 }),
+  pose('招手', { 'rightShoulder.pitch': 60, 'rightShoulder.twist': 30, 'rightElbow.bend': 90, 'rightHand.roll': -20, 'rightHand.pitch': 12, 'rightHand.twist': 10, 'leftShoulder.pitch': -10, 'leftShoulder.spread': 8, 'leftElbow.bend': 18, 'leftHand.pitch': -8 }),
+  pose('伸手', { 'rightShoulder.pitch': 50, 'rightElbow.bend': 12 }),
+  pose('抱臂', { 'leftShoulder.pitch': 10, 'leftShoulder.spread': -55, 'leftShoulder.twist': 30, 'leftElbow.bend': 115, 'leftHand.roll': -15, 'rightShoulder.pitch': 12, 'rightShoulder.spread': 55, 'rightShoulder.twist': -30, 'rightElbow.bend': 115, 'rightHand.roll': 15 }),
+  pose('看手机', { 'head.pitch': 18, 'rightShoulder.pitch': 20, 'rightShoulder.spread': -4, 'rightShoulder.twist': -30, 'rightElbow.bend': 82, 'rightHand.roll': -30, 'rightHand.pitch': 14, 'rightHand.twist': 60, 'leftShoulder.pitch': -10, 'leftShoulder.spread': 8, 'leftElbow.bend': 16, 'leftHand.pitch': -8 })
 ]
 
 export const getDirectorPose = (name?: string | null): DirectorPosePreset | undefined =>
