@@ -206,13 +206,23 @@ export async function generateCard(cardId: string): Promise<void> {
         // 已取消：底层出图作废，不落盘、不写卡（避免为死卡产生孤儿媒体）
         if (!isCurrentRun(cardId, runId)) throw new DOMException('已取消', 'AbortError')
         const projectId = useGraph.getState().project.id
-        const ext = mimeToExt(res.mime)
         // 多图：全部存进本卡的 meta.results（堆叠展示），主图 = 第一张
         const results: Array<{ url: string; localPath: string; mime: string }> = []
-        for (let i = 0; i < res.images.length; i++) {
-          const s = await saveBase64(projectId, `${cardId}_${i}`, res.images[i], ext)
-          results.push({ url: s.url, localPath: s.path, mime: res.mime })
+        for (let i = 0; i < res.outputs.length; i++) {
+          const output = res.outputs[i]
+          if (output.localPath) {
+            results.push({
+              url: output.url || toFileUrl(output.localPath),
+              localPath: output.localPath,
+              mime: output.mime
+            })
+            continue
+          }
+          if (!output.base64) continue
+          const s = await saveBase64(projectId, `${cardId}_${i}`, output.base64, mimeToExt(output.mime))
+          results.push({ url: s.url, localPath: s.path, mime: output.mime })
         }
+        if (!results.length) throw new Error('模型未返回可保存的图像')
         const base0 = useGraph.getState().getCard(cardId)
         const maxSavedPrompt = 4000
         const sentPrompt = res.trace.sentPrompt.slice(0, maxSavedPrompt)
@@ -221,7 +231,7 @@ export async function generateCard(cardId: string): Promise<void> {
           progress: 1,
           assetUrl: results[0].url,
           assetLocalPath: results[0].localPath,
-          mime: res.mime,
+          mime: results[0].mime,
           meta: {
             ...(base0?.meta || {}),
             results,

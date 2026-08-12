@@ -1,12 +1,15 @@
 /// <reference path="./types/mulby.d.ts" />
 import {
   MAX_REMOTE_MEDIA_BYTES,
+  MAX_AI_IMAGE_ARTIFACTS,
   MAX_LOCAL_IMPORT_FILES,
   MAX_TEXT_IMPORT_BYTES,
   MAX_UPLOAD_IMAGE_BYTES,
+  aiImageArtifactExtension,
   decodedBase64ByteLength,
   isTextImportName,
   localImportMime,
+  normalizeAiAttachmentId,
   normalizeRemoteHttpUrl
 } from './backendGuards'
 // AI 创意画布 — 插件后端入口
@@ -369,6 +372,57 @@ export const rpc = {
       return { ok: items.length > 0, items, failures, error: items.length ? undefined : '没有成功导入的文件' }
     } catch (error) {
       return { ok: false, items, failures, error: error instanceof Error ? error.message : String(error) }
+    }
+  },
+
+  // 新图片任务会先把完整产物持久化到 <userData>/ai/attachments；旧 images.generate/edit
+  // 为兼容历史插件仍尝试把结果转回 Base64，单图超过 16MB（常见于 4K PNG）会主动报
+  // legacy_result_too_large。这里按 owner 隔离的 taskId 重新核验任务，再以内核文件复制
+  // 方式落入本插件受管媒体目录，避免大二进制跨 UtilityProcess / IPC 往返和 Base64 膨胀。
+  async importAiImageTaskArtifacts(input: { taskId: string; projectId: string; cardId?: string }) {
+    const items: Array<{ path: string; mime: string; size: number }> = []
+    try {
+      const taskId = typeof input?.taskId === 'string' ? input.taskId.trim() : ''
+      if (!taskId || taskId.length > 160) return { ok: false, items, error: '无效的图片任务 ID' }
+      const task = await mulby.ai.images.tasks.get({ taskId })
+      if (!task || task.taskId !== taskId) return { ok: false, items, error: '图片任务不存在或不属于当前插件' }
+      if (task.state !== 'completed') return { ok: false, items, error: `图片任务尚未完成（${task.state}）` }
+      const artifacts = Array.isArray(task.artifacts) ? task.artifacts.slice(0, MAX_AI_IMAGE_ARTIFACTS) : []
+      if (!artifacts.length) return { ok: false, items, error: '图片任务没有可用产物' }
+
+      const base = await resolveBaseDir()
+      if (!base) return { ok: false, items, error: '无法确定存储目录' }
+      const projectId = sanitizeName(String(input?.projectId || ''), 'proj')
+      const cardId = sanitizeName(String(input?.cardId || ''), 'image')
+      const dir = `${base}/${ROOT_DIR}/media/${projectId}`
+      await ensureDir(dir)
+
+      for (let i = 0; i < artifacts.length; i++) {
+        const artifact = artifacts[i]
+        const attachmentId = normalizeAiAttachmentId(artifact?.attachmentId)
+        const ext = aiImageArtifactExtension(artifact?.mimeType)
+        const declaredSize = Number(artifact?.size || 0)
+        if (!attachmentId || !ext) throw new Error('图片任务产物元数据无效')
+        if (!Number.isFinite(declaredSize) || declaredSize <= 0 || declaredSize > MAX_REMOTE_MEDIA_BYTES) {
+          throw new Error(`图片产物大小无效或超过 ${Math.round(MAX_REMOTE_MEDIA_BYTES / MB)}MB 上限`)
+        }
+        // 当前 Mulby AttachmentStore 的受控落盘契约：relativePath = attachmentId。
+        const sourcePath = `${base}/ai/attachments/${attachmentId}`
+        const stat = await mulby.filesystem.stat(sourcePath)
+        if (!stat?.isFile || stat.isDirectory) throw new Error('图片任务产物文件不存在')
+        if (Number(stat.size) !== declaredSize) throw new Error('图片任务产物大小校验失败')
+        const targetPath = `${dir}/${cardId}_${Date.now()}_${i}.${ext}`
+        await mulby.filesystem.copy(sourcePath, targetPath)
+        items.push({ path: targetPath, mime: artifact.mimeType, size: declaredSize })
+      }
+      return { ok: items.length > 0, items }
+    } catch (error) {
+      // 本次恢复产生的半成品由本方法负责回滚；AI 任务原始附件不动，仍可再次恢复。
+      for (const item of items) {
+        try { await mulby.filesystem.unlink(item.path) } catch { /* best-effort */ }
+      }
+      items.length = 0
+      return { ok: false, items, error: error instanceof Error ? error.message : String(error) }
     }
   },
 

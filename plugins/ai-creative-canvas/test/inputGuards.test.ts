@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import {
   MAX_REMOTE_MEDIA_BYTES,
+  MAX_AI_IMAGE_ARTIFACTS,
   MAX_LOCAL_IMPORT_FILES,
   MAX_TEXT_IMPORT_BYTES,
   MAX_UPLOAD_IMAGE_BYTES,
+  aiImageArtifactExtension,
   decodedBase64ByteLength,
   isTextImportName,
   localImportExtension,
   localImportMime,
+  normalizeAiAttachmentId,
   normalizeRemoteHttpUrl
 } from '../src/backendGuards.ts'
 import { extensionOf, guessMimeByExt, isSupportedImportMime, kindForMime, normalizeOpenDialogPaths, parseDroppedPathText, parseDroppedPlainPathText, resolveImportMime } from '../src/ui/services/importMediaTypes.ts'
@@ -70,8 +73,19 @@ function testSizeGuards() {
   assert.equal(MAX_TEXT_IMPORT_BYTES, 5 * 1024 * 1024)
 }
 
+function testAiImageArtifactGuards() {
+  assert.equal(normalizeAiAttachmentId('550e8400-e29b-41d4-a716-446655440000'), '550e8400-e29b-41d4-a716-446655440000')
+  assert.equal(normalizeAiAttachmentId('../ai/attachments/secret'), '')
+  assert.equal(normalizeAiAttachmentId('short'), '')
+  assert.equal(aiImageArtifactExtension('image/PNG'), 'png')
+  assert.equal(aiImageArtifactExtension('image/jpeg'), 'jpg')
+  assert.equal(aiImageArtifactExtension('image/svg+xml'), '')
+  assert.equal(MAX_AI_IMAGE_ARTIFACTS, 4)
+}
+
 testImportMimeFallbacks()
 testDroppedPathParsing()
 testRemoteUrlBoundary()
 testSizeGuards()
-console.log('input/backend guards: 35 assertions OK')
+testAiImageArtifactGuards()
+console.log('input/backend guards: 42 assertions OK')

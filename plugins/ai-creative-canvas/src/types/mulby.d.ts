@@ -1241,6 +1241,32 @@ type AiImageGenerateProgressChunk = {
   received?: number
   total?: number
 }
+type AiImageTaskState =
+  | 'queued' | 'preparing' | 'submitting' | 'submitted' | 'running'
+  | 'cancelling' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+  | 'blocked' | 'unknown' | 'reconciling' | 'safe_to_retry'
+type AiImageArtifact = {
+  artifactId: string
+  attachmentId: string
+  mimeType: string
+  size: number
+  width?: number
+  height?: number
+  sha256: string
+  createdAt: string
+}
+type AiImageTask = {
+  taskId: string
+  clientTag?: string
+  state: AiImageTaskState
+  revision: number
+  artifacts: AiImageArtifact[]
+  error?: { code: string; message: string; retryable: boolean }
+  billed: 'yes' | 'no' | 'unknown'
+  createdAt: string
+  updatedAt: string
+  completedAt?: string
+}
 type AiPromiseLike<T> = Promise<T> & { abort: () => void }
 
 interface MulbyAi {
@@ -1301,6 +1327,11 @@ interface MulbyAi {
       /** 调用方自带请求 ID；传入后可用 ai.abort(requestId) 中止本次 edit */
       requestId?: string
     }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    tasks: {
+      get(input: { taskId: string }): Promise<AiImageTask | null>
+      list(input?: { states?: AiImageTaskState[]; clientTag?: string; limit?: number; cursor?: string }): Promise<{ tasks: AiImageTask[]; nextCursor?: string }>
+      cancel(input: { taskId: string }): Promise<AiImageTask>
+    }
   }
   models: {
     fetch(input: { providerId: string; baseURL?: string; apiKey?: string }): Promise<{ models: AiModel[]; message?: string }>
@@ -1606,6 +1637,11 @@ interface BackendMulbyAi {
       onChunk: (chunk: AiImageGenerateProgressChunk) => void
     ): AiPromiseLike<{ images: string[]; tokens: AiTokenBreakdown }>
     edit(input: { imageAttachmentId: string; prompt: string; model: string; referenceAttachmentIds?: string[]; size?: string; aspectRatio?: string; maskAttachmentId?: string; requestId?: string }): Promise<{ images: string[]; tokens: AiTokenBreakdown }>
+    tasks: {
+      get(input: { taskId: string }): Promise<AiImageTask | null>
+      list(input?: { states?: AiImageTaskState[]; clientTag?: string; limit?: number; cursor?: string }): Promise<{ tasks: AiImageTask[]; nextCursor?: string }>
+      cancel(input: { taskId: string }): Promise<AiImageTask>
+    }
   }
 }
 

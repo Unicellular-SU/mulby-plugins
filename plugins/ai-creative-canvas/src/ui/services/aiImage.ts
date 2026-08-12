@@ -1,9 +1,10 @@
 import type { Board, Card } from '../types'
 import { resolveGenerationPrompt } from './references'
-import { loadImageInput } from './media'
+import { loadImageInput, toFileUrl } from './media'
 import { useGraph } from '../store/graphStore'
 import { getStylePack, applyStylePack } from './stylePacks'
 import { toast } from '../store/toastStore'
+import { PLUGIN_ID } from './persistence'
 
 function ai() {
   return window.mulby.ai
@@ -76,8 +77,7 @@ function styleHint(board: Board): string {
 }
 
 export interface ImageGenResult {
-  images: string[]
-  mime: string
+  outputs: Array<{ base64?: string; localPath?: string; url?: string; mime: string }>
   trace: ImageGenerationTrace
 }
 
@@ -149,6 +149,46 @@ async function taskIdsFor(requestIds: string[]): Promise<string[]> {
   return unique(ids)
 }
 
+type ImageOperationError = Error & { code?: string; taskId?: string }
+
+/**
+ * Mulby 新图片任务已把完整产物落盘；旧 generate/edit facade 只是在把大图转回 Base64 时失败。
+ * 用 owner 隔离的 taskId 让插件后端核验并复制同一产物，不重新请求模型、不产生二次计费。
+ */
+async function recoverOversizedLegacyResult(
+  error: unknown,
+  projectId: string,
+  cardId: string
+): Promise<{ taskId: string; outputs: Array<{ localPath: string; url: string; mime: string }> } | null> {
+  const operationError = error as ImageOperationError
+  if (operationError?.code !== 'legacy_result_too_large') return null
+  const taskId = typeof operationError.taskId === 'string' ? operationError.taskId.trim() : ''
+  if (!taskId) throw new Error('4K 图片已生成，但宿主未返回可恢复的任务 ID；请升级 Mulby 后重试')
+  const host = window.mulby?.host
+  if (!host?.call) throw new Error('4K 图片已生成，但当前 Mulby 后端桥接不可用')
+  const result = await host.call(PLUGIN_ID, 'importAiImageTaskArtifacts', { taskId, projectId, cardId }) as {
+    data?: {
+      ok?: boolean
+      items?: Array<{ path?: string; mime?: string; size?: number }>
+      error?: string
+    }
+  }
+  const items = result?.data?.ok === true && Array.isArray(result.data.items)
+    ? result.data.items.filter((item): item is { path: string; mime?: string; size?: number } => typeof item?.path === 'string' && !!item.path)
+    : []
+  if (!items.length) {
+    throw new Error(`4K 图片已生成，但保存到工程失败：${result?.data?.error || '未找到任务产物'}`)
+  }
+  return {
+    taskId,
+    outputs: items.map((item) => ({
+      localPath: item.path,
+      url: toFileUrl(item.path),
+      mime: item.mime || 'image/png'
+    }))
+  }
+}
+
 export async function generateImage(
   card: Card,
   board: Board,
@@ -175,6 +215,7 @@ export async function generateImage(
   const panoRefLead = pano && inputs.images.length > 0 ? '以参考图片的场景与风格为基础，重构为完整的 360 环绕环境。' : ''
   const prompt = panoRefLead + resolved.text + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint(board)
   const requestIds: string[] = []
+  const recoveredTaskIds: string[] = []
   const rememberRequestId = (requestId: string) => {
     if (!requestIds.includes(requestId)) requestIds.push(requestId)
     onRequestId(requestId)
@@ -193,25 +234,31 @@ export async function generateImage(
     }
   }
 
-  let images: string[] | undefined
+  const outputs: ImageGenResult['outputs'] = []
   if (attIds.length > 0) {
     onProgress(0.3)
     const requestId = requestIdFor(card.id)
     rememberRequestId(requestId)
-    const res = await ai().images.edit({
-      model,
-      imageAttachmentId: attIds[0],
-      referenceAttachmentIds: attIds.slice(1),
-      prompt,
-      size,
-      aspectRatio: aspect, // 编辑生成同样吃尺寸/画幅（宿主已支持；OpenAI 系消费 size，Gemini 系消费 aspectRatio）
-      requestId
-    })
-    images = res.images
+    try {
+      const res = await ai().images.edit({
+        model,
+        imageAttachmentId: attIds[0],
+        referenceAttachmentIds: attIds.slice(1),
+        prompt,
+        size,
+        aspectRatio: aspect, // 编辑生成同样吃尺寸/画幅（宿主已支持；OpenAI 系消费 size，Gemini 系消费 aspectRatio）
+        requestId
+      })
+      for (const base64 of res.images || []) outputs.push({ base64, mime: 'image/png' })
+    } catch (error) {
+      const recovered = await recoverOversizedLegacyResult(error, useGraph.getState().project.id, card.id)
+      if (!recovered) throw error
+      recoveredTaskIds.push(recovered.taskId)
+      outputs.push(...recovered.outputs)
+    }
     onProgress(1)
   } else {
     // 多图：逐张以 count=1 调用，避免向不支持 n>1 的模型（如 gpt-image-2）传 n 而报错
-    const collected: string[] = []
     let lastErr: any = null
     for (let k = 0; k < count; k++) {
       try {
@@ -239,23 +286,31 @@ export async function generateImage(
           }
         )
         const res = await req
-        if (res.images?.length) collected.push(res.images[0])
+        if (res.images?.length) outputs.push({ base64: res.images[0], mime: 'image/png' })
       } catch (e) {
-        lastErr = e // 多图：单张失败不拖垮其余，已得结果照常返回；全失败才抛
+        try {
+          const recovered = await recoverOversizedLegacyResult(e, useGraph.getState().project.id, `${card.id}_${k}`)
+          if (recovered) {
+            recoveredTaskIds.push(recovered.taskId)
+            outputs.push(...recovered.outputs)
+          } else {
+            lastErr = e
+          }
+        } catch (recoveryError) {
+          lastErr = recoveryError
+        }
       }
     }
-    if (!collected.length && lastErr) throw lastErr
-    if (lastErr && collected.length < count) toast(`部分图片生成失败（成功 ${collected.length}/${count}）`, 'warning') // 部分成功不再静默
-    images = collected
+    if (!outputs.length && lastErr) throw lastErr
+    if (lastErr && outputs.length < count) toast(`部分图片生成失败（成功 ${outputs.length}/${count}）`, 'warning') // 部分成功不再静默
     onProgress(1)
   }
 
-  if (!images || images.length === 0) throw new Error('模型未返回图像')
-  const taskIds = await taskIdsFor(requestIds)
+  if (!outputs.length) throw new Error('模型未返回图像')
+  const taskIds = unique([...await taskIdsFor(requestIds), ...recoveredTaskIds])
   // 接缝不再做羽化（效果差）——改由「修复接缝」走偏移+生成式重绘（mediaPano.repairEquirectSeam）
   return {
-    images,
-    mime: 'image/png',
+    outputs,
     trace: {
       modelId: model,
       ...providerTrace,

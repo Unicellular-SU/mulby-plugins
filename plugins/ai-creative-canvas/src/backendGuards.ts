@@ -5,6 +5,7 @@ export const MAX_REMOTE_MEDIA_BYTES = 256 * MB
 export const MAX_UPLOAD_IMAGE_BYTES = 50 * MB
 export const MAX_LOCAL_IMPORT_FILES = 64
 export const MAX_TEXT_IMPORT_BYTES = 5 * MB
+export const MAX_AI_IMAGE_ARTIFACTS = 4
 
 const IMPORT_MIME_BY_EXT: Record<string, string> = {
   png: 'image/png',
@@ -42,6 +43,24 @@ export function localImportMime(name: string): string {
 
 export function isTextImportName(name: string): boolean {
   return ['txt', 'md', 'json', 'srt'].includes(localImportExtension(name))
+}
+
+const AI_IMAGE_EXT_BY_MIME: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/avif': 'avif'
+}
+
+/** AI 任务附件在宿主中以 ID 作为文件名；只接受宿主 UUID/安全 ID 字符集。 */
+export function normalizeAiAttachmentId(value: unknown): string {
+  const id = typeof value === 'string' ? value.trim() : ''
+  return id && /^[A-Za-z0-9_-]{8,128}$/.test(id) ? id : ''
+}
+
+export function aiImageArtifactExtension(mime: unknown): string {
+  return AI_IMAGE_EXT_BY_MIME[String(mime || '').trim().toLowerCase()] || ''
 }
 
 /** 远程 RPC 只允许 HTTP(S)，避免 data:/file:/ftp: 等协议把 host-worker 变成通用读取器。 */
