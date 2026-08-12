@@ -1,27 +1,100 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Layers, RefreshCw, Clapperboard } from 'lucide-react'
+import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand, Trash2, Copy, Crosshair, Upload, Eye, EyeOff, Lock, Unlock, Camera, Undo2, Redo2, Grid3x3, ArrowDownToLine, Users, Package, Clapperboard, Search, PanelLeftClose, PanelLeftOpen, Download, FileUp } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
-import { saveBase64 } from '../services/media'
+import { loadImageInput, saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
+import {
+  DIRECTOR_BODY_GROUPS,
+  DIRECTOR_BODY_PRESETS,
+  DIRECTOR_POSES as POSES,
+  getDirectorDetailedJointDegrees,
+  getDirectorBodyPreset,
+  getDirectorPose,
+  isDirectorNeutralBodyType,
+  type DirectorBodyType
+} from './directorMannequin'
+import { DirectorAsyncResourceCache } from './directorAssetCache'
+import { DirectorShotStrip } from './DirectorShotStrip'
+import { DirectorShotInspector } from './DirectorShotInspector'
+import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
+import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
+import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
+import {
+  assessDirectorPanoramaQuality,
+  assessDirectorPanoramaCamera,
+  fitDirectorCameraToCoverage,
+  getDirectorBackgroundFov,
+  getDirectorPanoramaCaptureOrigin,
+  normalizeDirectorEnvironmentControls,
+  returnDirectorCameraToPanoramaOrigin,
+  type DirectorPanoramaCameraStatus,
+  withDirectorEnvironmentDefaults
+} from './directorEnvironment'
+import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from './directorCanvasPanorama'
+import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
+import { solveDirectorCcdIk } from './directorIk'
+import {
+  clampDirectorJointDegrees,
+  validateDirectorJointRotations,
+  type DirectorJointAxis,
+  type DirectorPoseSafetySummary
+} from './directorPoseTools'
+import {
+  analyzeDirectorShotContinuity,
+  applyDirectorShotSceneState,
+  classifyDirectorShot,
+  createDirectorShotSceneState,
+  createDirectorShotSnapshot,
+  createDirectorShotTargetBinding,
+  getDirectorShotsDurationMs,
+  inferDirectorInspectorTab,
+  normalizeDirectorShotDuration,
+  removeDirectorSubjectFromShots,
+  reorderDirectorShots,
+  resolveDirectorShotCamera,
+  type DirectorInspectorTab
+} from './directorWorkflow'
+import {
+  collectDirectorSceneAssetIds,
+  createDirectorSceneExchangeBundle,
+  decodeDirectorSceneBase64,
+  DIRECTOR_SCENE_ASSET_LIMIT_BYTES,
+  encodeDirectorSceneBytes,
+  parseDirectorSceneExchange,
+  remapDirectorSceneAssetIds
+} from './directorSceneExchange'
+import { confirmDialog } from '../store/dialogStore'
+import type { DirectorEnvironment, DirectorScene, DirectorShot } from '../types'
 
-// 3D 导演台 v7：v6（场景即提示词/机位即分镜/成片对比）+ take 历史（每机位多条成片可切换）+ 分镜导出（机位表一键落画布）。
-// three 动态分割，主包不增。默认人台=程序化骨架人形（零资源、有关节、可摆姿/缩放）；可导入 GLB/GLTF。
+// 3D 导演台 v12：13 套独立人物网格、20 种语义姿势、全景环境融合 + CC0 humanoid 人台；
+// 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
+const directorTemplateCache = new DirectorAsyncResourceCache<DirectorBodyType, any>()
+const directorPosePreviewCache = new DirectorAsyncResourceCache<DirectorBodyType, Record<string, string>>()
 
-// 一键姿势预设（关节名→欧拉角；粗摆即可，AI 据深度/截图 + 姿势名渲染）
-const POSES: { k: string; m: Record<string, [number, number, number]> }[] = [
-  { k: '站立', m: {} },
-  { k: 'T姿', m: { 左肩: [0, 0, -1.45], 右肩: [0, 0, 1.45] } },
-  { k: '叉腰', m: { 左肩: [0, 0, -0.5], 左肘: [0, 0, -1.6], 右肩: [0, 0, 0.5], 右肘: [0, 0, 1.6] } },
-  { k: '举双手', m: { 左肩: [0, 0, -2.9], 右肩: [0, 0, 2.9] } },
-  { k: '招手', m: { 右肩: [0, 0, 2.5], 右肘: [0, 0, 0.6] } },
-  { k: '行走', m: { 左髋: [0.5, 0, 0], 右髋: [-0.5, 0, 0], 左肩: [-0.4, 0, 0], 右肩: [0.4, 0, 0], 左膝: [-0.3, 0, 0] } },
-  { k: '坐', m: { 左髋: [1.5, 0, 0], 右髋: [1.5, 0, 0], 左膝: [-1.5, 0, 0], 右膝: [-1.5, 0, 0] } },
-  { k: '指向前', m: { 右肩: [-1.4, 0, 0] } }
-]
+const readDirectorPanelWidth = (key: string, fallback: number, min: number, max: number) => {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const stored = window.localStorage.getItem(key)
+    if (stored === null) return fallback
+    const value = Number(stored)
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const writeDirectorPanelWidth = (key: string, value: number) => {
+  try {
+    window.localStorage.setItem(key, String(value))
+  } catch {
+    // 宿主禁用持久化时仅退化为当前会话宽度，不影响导演台启动。
+  }
+}
+
 const FACINGS: { k: string; r: number }[] = [
   { k: '面向', r: 0 },
   { k: '背向', r: Math.PI },
@@ -81,11 +154,13 @@ const MIXAMO_MAP: { suf: string; joint: string }[] = [
 ]
 
 type TMode = 'translate' | 'rotate' | 'scale' | 'pose'
+type ShotApplyMode = 'full' | 'camera'
 
 export function DirectorStage() {
   const show = useUi((s) => s.showDirector)
+  const [revision, setRevision] = useState(0)
   if (!show) return null
-  return <Inner />
+  return <Inner key={revision} onReload={() => setRevision((value) => value + 1)} />
 }
 
 interface ObjRow {
@@ -93,12 +168,24 @@ interface ObjRow {
   name: string
   kind: string
   visible: boolean
+  locked: boolean
+  bodyType?: DirectorBodyType
+  poseName?: string
 }
 
-function Inner() {
+interface TransformDraft {
+  position: [number, number, number]
+  rotation: [number, number, number]
+  scale: [number, number, number]
+}
+
+function Inner({ onReload }: { onReload: () => void }) {
   const mountRef = useRef<HTMLDivElement>(null)
   const pipRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const environmentFileRef = useRef<HTMLInputElement>(null)
+  const sceneFileRef = useRef<HTMLInputElement>(null)
+  const shotApplyLockRef = useRef(false)
   const api = useRef<any>({})
   const [ready, setReady] = useState(false)
   const [focal, setFocal] = useState(35)
@@ -106,35 +193,69 @@ function Inner() {
   const [locked, setLocked] = useState(false) // 取景锁定（出图相机冻结）
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
+  const [sceneRevision, setSceneRevision] = useState(0)
   const [objs, setObjs] = useState<ObjRow[]>([])
   const [selId, setSelId] = useState<string | null>(null)
   const [selKind, setSelKind] = useState<string | null>(null)
+  const [transformDraft, setTransformDraft] = useState<TransformDraft | null>(null)
   const [editId, setEditId] = useState<string | null>(null) // Outliner 行内改名中的对象 id
   const [editName, setEditName] = useState('')
+  const [objectQuery, setObjectQuery] = useState('')
+  const [panelsCollapsed, setPanelsCollapsed] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
-  const [shots, setShots] = useState<{ id: string; name: string; cam: any; thumb?: string; take?: string; takes?: string[] }[]>([])
-  const [editShotId, setEditShotId] = useState<string | null>(null) // 机位行内改名中
-  const [editShotName, setEditShotName] = useState('')
+  const [shots, setShots] = useState<DirectorShot[]>([])
+  const [activeShotId, setActiveShotId] = useState<string | null>(null)
+  const [shotStripExpanded, setShotStripExpanded] = useState(true)
+  const [showShotCameras, setShowShotCameras] = useState(true)
+  const [environment, setEnvironment] = useState<DirectorEnvironment | null>(null)
+  const [panoramaCameraStatus, setPanoramaCameraStatus] = useState<DirectorPanoramaCameraStatus | null>(null)
+  const [sceneIoBusy, setSceneIoBusy] = useState(false)
+  const [canvasPanoramaLoadingId, setCanvasPanoramaLoadingId] = useState<string | null>(null)
+  const [shotApplyingId, setShotApplyingId] = useState<string | null>(null)
+  const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
+  const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
+  const [posePreviews, setPosePreviews] = useState<Record<string, string>>({})
+  const [posePreviewStatus, setPosePreviewStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [posePreviewNonce, setPosePreviewNonce] = useState(0)
+  const [jointEditor, setJointEditor] = useState<DirectorJointEditorState | null>(null)
+  const [poseSafety, setPoseSafety] = useState<DirectorPoseSafetySummary>({ level: 'safe', issues: [] })
+  const [leftPanelWidth, setLeftPanelWidth] = useState(() => readDirectorPanelWidth('director.leftPanelWidth', 208, 184, 320))
+  const [rightPanelWidth, setRightPanelWidth] = useState(() => readDirectorPanelWidth('director.rightPanelWidth', 288, 280, 420))
   const [showGuides, setShowGuides] = useState(true) // 三分构图线
   const [lighting, setLighting] = useState('默认')
   const [aspect, setAspectK] = useState('视口') // 出图画幅（ASPECTS 的 k）
   const curAr = ASPECTS.find((a) => a.k === aspect)?.ar ?? 0
   const [descDraft, setDescDraft] = useState('') // 选中对象的语义描述草稿（blur 提交）
-  const [lastTake, setLastTake] = useState<string | null>(null) // 最近一次成片 url（叠图对比）
-  const [compareOn, setCompareOn] = useState(false) // 成片叠加对比开关
-  const [compareOpacity, setCompareOpacity] = useState(0.45)
   const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
   const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
+  const activeBoard = useGraph((s) => s.project.boards.find((board) => board.id === s.project.activeBoardId))
+  const canvasPanoramas = listDirectorCanvasPanoramas(activeBoard)
 
-  const saveScene = () => {
+  const buildSceneSnapshot = (): DirectorScene | null => {
     try {
       const only = api.current.serializeSceneOnly?.()
-      if (only) useGraph.getState().setDirectorScene({ subjects: only.subjects, cam: only.cam, shots, prompt, lighting: api.current.getLighting?.(), aspect, lastTake: lastTake || undefined })
-    } catch { /* ignore */ }
+      if (!only) return null
+      return {
+        schemaVersion: 2,
+        subjects: only.subjects,
+        cam: only.cam,
+        shots,
+        prompt,
+        lighting: api.current.getLighting?.(),
+        aspect,
+        environment: only.environment || null
+      }
+    } catch {
+      return null
+    }
+  }
+  const saveScene = () => {
+    const scene = buildSceneSnapshot()
+    if (scene) useGraph.getState().setDirectorScene(scene)
   }
   const close = () => {
-    if (busy) return
+    if (busy || sceneIoBusy || shotApplyingId || shotApplyLockRef.current) return
     saveScene()
     useUi.getState().setShowDirector(false)
   }
@@ -149,11 +270,15 @@ function Inner() {
       let OrbitControls: any
       let TransformControls: any
       let GLTFLoader: any
+      let cloneSkeleton: any
+      let GroundedSkybox: any
       try {
         THREE = await import('three')
         OrbitControls = (await import('three/examples/jsm/controls/OrbitControls.js')).OrbitControls
         TransformControls = (await import('three/examples/jsm/controls/TransformControls.js')).TransformControls
         GLTFLoader = (await import('three/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader
+        cloneSkeleton = (await import('three/examples/jsm/utils/SkeletonUtils.js')).clone
+        GroundedSkybox = (await import('three/examples/jsm/objects/GroundedSkybox.js')).GroundedSkybox
       } catch {
         return
       }
@@ -168,26 +293,75 @@ function Inner() {
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
         renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
         renderer.setSize(W, H)
+        renderer.outputColorSpace = THREE.SRGBColorSpace
+        renderer.toneMapping = THREE.ACESFilmicToneMapping
+        renderer.toneMappingExposure = 1
+        renderer.shadowMap.enabled = true
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap
         mount.appendChild(renderer.domElement)
 
         const scene = new THREE.Scene()
+        const environmentScene = new THREE.Scene()
         scene.background = new THREE.Color(0x1b1d23)
+        let curEnvironment: DirectorEnvironment | null = null
+        let environmentTexture: any = null // 原始等距柱状纹理，供 PMREM 与无柔化显示
+        let environmentDisplayTexture: any = null // 柔化后的可见背景；无柔化时与原纹理相同
+        let environmentRenderTarget: any = null // PMREM cubeUV 环境光
+        let pipEnvironmentRenderTarget: any = null // PiP 独立 WebGL 上下文需要自己的 PMREM 纹理
+        let groundedSkybox: any = null
+        let environmentObjectUrl: string | null = null
         const cam = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
         cam.filmGauge = FILM_GAUGE
         cam.position.set(0, 1.5, 4)
         cam.setFocalLength(35)
+        const environmentCamera = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
 
         const hemi = new THREE.HemisphereLight(0xffffff, 0x404050, 1.15)
         scene.add(hemi)
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.1)
         dirLight.position.set(3, 6, 4)
+        dirLight.castShadow = true
+        dirLight.shadow.mapSize.set(2048, 2048)
+        dirLight.shadow.camera.near = 0.1
+        dirLight.shadow.camera.far = 40
+        dirLight.shadow.camera.left = -8
+        dirLight.shadow.camera.right = 8
+        dirLight.shadow.camera.top = 8
+        dirLight.shadow.camera.bottom = -8
+        dirLight.shadow.bias = -0.0004
+        dirLight.shadow.normalBias = 0.025
         scene.add(dirLight)
         const grid = new THREE.GridHelper(20, 20, 0x445566, 0x2a3340)
         scene.add(grid)
+        const panoramaOriginMarker = new THREE.Group()
+        panoramaOriginMarker.name = '全景拍摄原点'
+        const panoramaOriginDot = new THREE.Mesh(
+          new THREE.SphereGeometry(0.055, 16, 12),
+          new THREE.MeshBasicMaterial({ color: 0xfcd34d, depthTest: false })
+        )
+        const panoramaOriginRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.13, 0.012, 8, 32),
+          new THREE.MeshBasicMaterial({ color: 0xfbbf24, depthTest: false, transparent: true, opacity: 0.8 })
+        )
+        panoramaOriginDot.renderOrder = 900
+        panoramaOriginRing.renderOrder = 900
+        panoramaOriginMarker.add(panoramaOriginDot, panoramaOriginRing)
+        panoramaOriginMarker.visible = false
+        scene.add(panoramaOriginMarker)
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x23272f, roughness: 1 }))
         ground.rotation.x = -Math.PI / 2
         ground.position.y = -0.001
+        ground.receiveShadow = true
         scene.add(ground)
+        const shadowMaterial = new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.32, transparent: true })
+        shadowMaterial.depthWrite = false
+        const shadowGround = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), shadowMaterial)
+        shadowGround.rotation.x = -Math.PI / 2
+        shadowGround.position.y = 0.002
+        shadowGround.receiveShadow = true
+        shadowGround.visible = false
+        shadowGround.renderOrder = 2
+        scene.add(shadowGround)
         const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking })
 
         const orbit = new OrbitControls(cam, renderer.domElement)
@@ -197,6 +371,13 @@ function Inner() {
         tcontrol.addEventListener('dragging-changed', (e: any) => { orbit.enabled = !e.value; if (!e.value) commit() })
         const tHelper = typeof tcontrol.getHelper === 'function' ? tcontrol.getHelper() : tcontrol
         scene.add(tHelper)
+        const jointMarker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.045, 14, 10),
+          new THREE.MeshBasicMaterial({ color: 0xfcd34d, depthTest: false, transparent: true, opacity: 0.92 })
+        )
+        jointMarker.visible = false
+        jointMarker.renderOrder = 1000
+        scene.add(jointMarker)
 
         // 取景双相机：cam=视图(轨道自由查看)；shotCam=出图相机(PiP/取景框/生成都用它)。
         // 默认 shotLocked=false → shotCam 每帧跟随 cam（与单相机行为一致，零回归）；锁定后冻结，
@@ -210,6 +391,51 @@ function Inner() {
         const camHelper = new THREE.CameraHelper(shotCam)
         camHelper.visible = false
         scene.add(camHelper)
+        const recordedCameraHelpers = new THREE.Group()
+        recordedCameraHelpers.name = '已记录机位辅助框'
+        recordedCameraHelpers.visible = false
+        scene.add(recordedCameraHelpers)
+        let recordedCamerasVisible = true
+        let resolveRecordedShotCam = (shot: DirectorShot) => resolveDirectorShotCamera(shot)
+        const clearRecordedCameraHelpers = () => {
+          for (const child of [...recordedCameraHelpers.children]) {
+            recordedCameraHelpers.remove(child)
+            ;(child as any).dispose?.()
+          }
+        }
+        const setRecordedCameraHelpers = (recordedShots: DirectorShot[], activeId: string | null, visible: boolean) => {
+          recordedCamerasVisible = visible
+          clearRecordedCameraHelpers()
+          for (const shot of recordedShots) {
+            if (!shot.cam) continue
+            const resolvedCam = resolveRecordedShotCam(shot)
+            const helperAspect = ASPECTS.find((item) => item.k === shot.aspect)?.ar || cam.aspect || 1
+            const helperDistance = Math.max(0.5, Math.hypot(
+              resolvedCam.pos[0] - resolvedCam.target[0],
+              resolvedCam.pos[1] - resolvedCam.target[1],
+              resolvedCam.pos[2] - resolvedCam.target[2]
+            ))
+            const helperCamera = new THREE.PerspectiveCamera(50, helperAspect, 0.05, helperDistance)
+            helperCamera.filmGauge = FILM_GAUGE
+            helperCamera.position.set(resolvedCam.pos[0], resolvedCam.pos[1], resolvedCam.pos[2])
+            helperCamera.setFocalLength(resolvedCam.focal || 35)
+            helperCamera.lookAt(resolvedCam.target[0], resolvedCam.target[1], resolvedCam.target[2])
+            helperCamera.updateProjectionMatrix()
+            helperCamera.updateMatrixWorld(true)
+            const helper = new THREE.CameraHelper(helperCamera)
+            const active = shot.id === activeId
+            helper.name = `机位辅助框 ${shot.name}`
+            helper.userData.shotId = shot.id
+            helper.setColors?.(
+              new THREE.Color(active ? 0xfcd34d : 0x77808f),
+              new THREE.Color(active ? 0xf5b942 : 0x596270),
+              new THREE.Color(active ? 0xffe4a3 : 0x818897),
+              new THREE.Color(active ? 0xfcd34d : 0x77808f),
+              new THREE.Color(active ? 0xfff1c2 : 0x9aa1ad)
+            )
+            recordedCameraHelpers.add(helper)
+          }
+        }
         const outCam = () => (shotLocked ? shotCam : cam)
         const outTarget = () => (shotLocked ? shotTarget : orbit.target)
         // PiP：角落小渲染器，实时显示 shotCam 取景（出图构图预览）
@@ -219,7 +445,46 @@ function Inner() {
           pip = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
           pip.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
           pip.setSize(240, Math.round(240 / (W / H)))
+          pip.outputColorSpace = THREE.SRGBColorSpace
+          pip.toneMapping = THREE.ACESFilmicToneMapping
+          pip.toneMappingExposure = renderer.toneMappingExposure
+          pip.shadowMap.enabled = true
+          pip.shadowMap.type = THREE.PCFSoftShadowMap
           pipMount.appendChild(pip.domElement)
+        }
+
+        // 全景环境与主体分层渲染：环境相机可拥有独立 FOV，主体相机及其焦段保持不变。
+        // 两层在同一 WebGL 画布内顺序合成，因此主视口、PiP、缩略图和参考图能共享同一结果。
+        const syncEnvironmentCamera = (sourceCamera: any) => {
+          environmentCamera.copy(sourceCamera)
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          environmentCamera.zoom = 1
+          environmentCamera.fov = getDirectorBackgroundFov(
+            sourceCamera.getEffectiveFOV?.() || sourceCamera.fov || 50,
+            controls.compositionMode,
+            controls.backgroundScale
+          )
+          environmentCamera.aspect = sourceCamera.aspect || 1
+          environmentCamera.updateProjectionMatrix()
+          environmentCamera.updateMatrixWorld(true)
+          if (groundedSkybox && controls.mode === 'infinite') groundedSkybox.position.copy(environmentCamera.position)
+        }
+        const renderComposite = (targetRenderer: any, sourceCamera: any) => {
+          if (!curEnvironment || !environmentTexture || !groundedSkybox) {
+            targetRenderer.render(scene, sourceCamera)
+            return
+          }
+          syncEnvironmentCamera(sourceCamera)
+          const previousAutoClear = targetRenderer.autoClear
+          const previousEnvironment = scene.environment
+          targetRenderer.autoClear = false
+          targetRenderer.clear(true, true, true)
+          targetRenderer.render(environmentScene, environmentCamera)
+          targetRenderer.clearDepth()
+          scene.environment = targetRenderer === pip ? pipEnvironmentRenderTarget?.texture || null : environmentRenderTarget?.texture || null
+          targetRenderer.render(scene, sourceCamera)
+          scene.environment = previousEnvironment
+          targetRenderer.autoClear = previousAutoClear
         }
 
         interface Subj { obj: any; kind: string; id: string; name: string; desc?: string; colorName?: string }
@@ -230,7 +495,19 @@ function Inner() {
         const counters: Record<string, number> = {}
         const nextName = (kind: string) => { counters[kind] = (counters[kind] || 0) + 1; return `${kind}${counters[kind]}` }
 
-        const sync = () => { if (!disposed) setObjs(subjects.map((s) => ({ id: s.id, name: s.name, kind: s.kind, visible: s.obj.visible !== false }))) }
+        const sync = () => {
+          if (!disposed) {
+            setObjs(subjects.map((s) => ({
+              id: s.id,
+              name: s.name,
+              kind: s.kind,
+              visible: s.obj.visible !== false,
+              locked: !!s.obj.userData.locked,
+              bodyType: s.kind === '人台' ? getDirectorBodyPreset(s.obj.userData.bodyType).bodyType : undefined,
+              poseName: s.kind === '人台' ? s.obj.userData.poseName || '' : undefined
+            })))
+          }
+        }
 
         // ── 撤销/重做：栈顶=当前态，快照 serializeSceneOnly()（含导入模型 assetId/姿势）──
         const history: any[] = []
@@ -246,9 +523,10 @@ function Inner() {
           if (history.length > 60) history.shift()
           redoStack.length = 0
           syncHistoryUi()
+          if (!disposed) setSceneRevision((value) => value + 1)
         }
-        const applyState = (state: any) => {
-          if (!state) return
+        const applyState = (state: any): Promise<void> => {
+          if (!state) return Promise.resolve()
           restoring = true
           sceneGen++
           tcontrol.detach(); curRoot = null
@@ -258,14 +536,22 @@ function Inner() {
           for (const st of state.subjects || []) { if (st.kind === '模型') ps.push(buildModelFromState(st)); else buildFromState(st) }
           if (state.cam) applyCam(state.cam)
           sync()
-          if (!disposed) { setSelId(null); setSelKind(null); if (state.cam) setFocal(Math.round(state.cam.focal || 35)) }
+          if (!disposed) {
+            setSelId(null)
+            setSelKind(null)
+            setTransformDraft(null)
+            setSceneRevision((value) => value + 1)
+            if (state.cam) setFocal(Math.round(state.cam.focal || 35))
+          }
           // 异步模型到齐后才解除 restoring（期间抑制 commit，避免快照漏模型 / 与现场脱节）
-          void Promise.all(ps).then(() => { restoring = false; if (!disposed) sync() })
+          return Promise.all(ps)
+            .then(() => { if (!disposed) sync() })
+            .finally(() => { restoring = false })
         }
         const undo = () => {
           if (restoring || history.length <= 1) return
           redoStack.push(history.pop())
-          applyState(history[history.length - 1])
+          void applyState(history[history.length - 1])
           syncHistoryUi()
         }
         const redoFn = () => {
@@ -273,65 +559,413 @@ function Inner() {
           const s = redoStack.pop()
           if (!s) return
           history.push(s)
-          applyState(s)
+          void applyState(s)
           syncHistoryUi()
         }
 
-        const makeMannequin = (color: number) => {
-          const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
-          const mesh = (geo: any, y = 0) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; return m }
-          const joint = (name: string, x: number, y: number, z: number) => { const g = new THREE.Group(); g.position.set(x, y, z); g.userData.joint = name; return g }
+        const directorAssetUrl = (file: string) => new URL(`./models/director/${file}`, window.location.href).href
+        const directorLoader = new GLTFLoader()
+        const ensureDirectorTemplate = (bodyType: DirectorBodyType) => {
+          const preset = getDirectorBodyPreset(bodyType)
+          return directorTemplateCache.load(preset.bodyType, async () => {
+            const loaded = await directorLoader.loadAsync(directorAssetUrl(preset.assetFile))
+            return loaded.scene
+          })
+        }
+        // 默认只加载基础人物；恢复旧工程时额外加载场景实际使用的素体。
+        // 其余 12 套在用户首次选择时请求并进入会话缓存，避免每次打开先下载约 16MB。
+        const saved0 = useGraph.getState().project.director
+        const initialBodyTypes = new Set<DirectorBodyType>(['mannequin'])
+        for (const subject of saved0?.subjects || []) {
+          if (subject.kind === '人台') initialBodyTypes.add(getDirectorBodyPreset(subject.bodyType).bodyType)
+        }
+        await Promise.all(Array.from(initialBodyTypes, (bodyType) => ensureDirectorTemplate(bodyType)))
+        if (disposed) return
+
+        const DETAILED_BONE_MAP: Record<string, string> = {
+          pelvis: '骨盆',
+          spine_03: '胸',
+          neck_01: '颈',
+          Head: '头',
+          head: '头',
+          upperarm_l: '左肩',
+          lowerarm_l: '左肘',
+          hand_l: '左腕',
+          upperarm_r: '右肩',
+          lowerarm_r: '右肘',
+          hand_r: '右腕',
+          thigh_l: '左髋',
+          calf_l: '左膝',
+          foot_l: '左踝',
+          thigh_r: '右髋',
+          calf_r: '右膝',
+          foot_r: '右踝'
+        }
+        const makeDetailedMannequin = (color: number, bodyType: DirectorBodyType) => {
+          const preset = getDirectorBodyPreset(bodyType)
+          const template = directorTemplateCache.peek(preset.bodyType)
+          if (!template) return null
+          const neutralPresentation = isDirectorNeutralBodyType(bodyType)
+
+          const model = cloneSkeleton(template)
+          const root = new THREE.Group()
+          const rigRoot = new THREE.Group()
+          rigRoot.userData.rigRoot = true
+          root.add(rigRoot)
+          rigRoot.add(model)
+          root.userData.kind = '人台'
+          root.userData.bodyType = bodyType
+          root.userData.bodyAssetFile = preset.assetFile
+          root.userData.poseOffsetY = 0
+          root.userData.detailedMannequin = true
+          root.userData.rigged = true
+          root.userData.poseSchemaVersion = 2
+
+          model.traverse((object: any) => {
+            if (object.isMesh) {
+              object.frustumCulled = false
+              object.userData.directorSharedAssets = true
+              const materials = (Array.isArray(object.material) ? object.material : [object.material]).map((source: any) => {
+                const sourceName = source.name || ''
+                const isEyeMaterial = /(?:eye|high-poly)/i.test(sourceName)
+                const isBodyMaterial = !isEyeMaterial && sourceName !== 'Director_Brow'
+                // 中性女性人台用高粗糙、低对比的自发光材质弱化胸腹等裸模明暗细节；
+                // 网格、骨架、轮廓和姿势精度保持不变。
+                const material = source.clone()
+                material.name = sourceName
+                if (isBodyMaterial) {
+                  material.color.setHex(color)
+                  if (neutralPresentation && material.emissive?.setHex) {
+                    material.emissive.setHex(color)
+                    material.emissiveIntensity = 0.45
+                    material.metalness = 0
+                    material.roughness = 1
+                  } else {
+                    material.metalness = 0.02
+                    material.roughness = 0.7
+                  }
+                } else if (material.name === 'Director_Brow') {
+                  material.color.setHex(0x17191e)
+                } else if (isEyeMaterial) {
+                  material.color.setHex(0xffffff)
+                  material.metalness = 0
+                  material.roughness = 0.32
+                }
+                material.needsUpdate = true
+                return material
+              })
+              object.material = Array.isArray(object.material) ? materials : materials[0]
+            }
+            if (!object.isBone) return
+            const jointName = DETAILED_BONE_MAP[object.name]
+            if (jointName) object.userData.joint = jointName
+
+          })
+
+          // 原模型是 T pose。直接用“肩 → 肘”的世界方向求落臂旋转，
+          // 不假设骨骼局部 +Y（不同导出器的局部轴并不一致）。
+          model.updateMatrixWorld(true)
+          model.traverse((object: any) => {
+            if (object.name !== 'upperarm_l' && object.name !== 'upperarm_r') return
+            const lowerArmName = object.name === 'upperarm_l' ? 'lowerarm_l' : 'lowerarm_r'
+            const lowerArm = object.children.find((child: any) => child.name === lowerArmName)
+            if (!lowerArm) return
+            const shoulderPosition = object.getWorldPosition(new THREE.Vector3())
+            const elbowPosition = lowerArm.getWorldPosition(new THREE.Vector3())
+            const armDirection = elbowPosition.sub(shoulderPosition).normalize()
+            if (armDirection.lengthSq() < 0.5) return
+            const worldRotation = object.getWorldQuaternion(new THREE.Quaternion())
+            const targetWorld = new THREE.Quaternion()
+              .setFromUnitVectors(armDirection, new THREE.Vector3(0, -1, 0))
+              .multiply(worldRotation)
+            const parentWorld = object.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
+            object.quaternion.copy(parentWorld.invert().multiply(targetWorld))
+          })
+          model.updateMatrixWorld(true)
+          model.traverse((object: any) => {
+            if (!object.isBone) return
+            if (object.parent?.isBone && (object.name.startsWith('lowerarm_') || object.name.startsWith('calf_'))) {
+              // 肘向人物正面屈、膝向人物背面屈；轴先存到父骨骼局部空间，
+              // 摆姿时会随上臂/大腿的 pitch、spread、twist 一起转动。
+              const characterAxis = object.name.startsWith('lowerarm_')
+                ? new THREE.Vector3(-1, 0, 0)
+                : new THREE.Vector3(1, 0, 0)
+              const parentWorld = object.parent.getWorldQuaternion(new THREE.Quaternion())
+              const localBendAxis = characterAxis.applyQuaternion(parentWorld.invert()).normalize()
+              object.userData.poseBendAxisLocal = [localBendAxis.x, localBendAxis.y, localBendAxis.z]
+            }
+            object.userData.poseBasePosition = [object.position.x, object.position.y, object.position.z]
+            object.userData.poseBaseQuaternion = [object.quaternion.x, object.quaternion.y, object.quaternion.z, object.quaternion.w]
+            object.userData.poseBaseScale = [object.scale.x, object.scale.y, object.scale.z]
+          })
+
+          model.updateMatrixWorld(true)
+          const unscaledBounds = new THREE.Box3().setFromObject(model, true)
+          const sourceHeight = Math.max(0.001, unscaledBounds.max.y - unscaledBounds.min.y)
+          // FBX 导出器以厘米级父节点保存同一套模型，因此这里只做整个人体的等比单位换算。
+          // 三轴始终使用同一个数值；体宽、厚度、头身比和年龄差异全部来自各自独立网格。
+          const assetUnitScale = sourceHeight > 5 ? 0.1 : 1
+          rigRoot.scale.setScalar(assetUnitScale)
+          root.userData.bodyUnitScale = sourceHeight * assetUnitScale / 1.82
+          root.userData.sourceHeight = sourceHeight
+          root.updateMatrixWorld(true)
+          const bounds = new THREE.Box3().setFromObject(root, true)
+          const restY = bounds.isEmpty() || !isFinite(bounds.min.y) ? 0 : -bounds.min.y
+          rigRoot.position.y = restY
+          rigRoot.userData.restY = restY
+          root.updateMatrixWorld(true)
+          return root
+        }
+
+        const makeMannequin = (color: number, bodyType: DirectorBodyType = 'mannequin') => {
+          const detailed = makeDetailedMannequin(color, bodyType)
+          if (detailed) return detailed
+          const preset = getDirectorBodyPreset(bodyType)
+          const p = preset.proportions
+          const mat = new THREE.MeshStandardMaterial({ color, metalness: 0.04, roughness: 0.72 })
+          const detailMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, metalness: 0.02, roughness: 0.82 })
           const root = new THREE.Group()
           root.userData.kind = '人台'
-          const hips = new THREE.Group(); hips.position.set(0, 0.9, 0); root.add(hips)
-          const chest = new THREE.Group(); chest.position.set(0, 0.02, 0); hips.add(chest)
-          chest.add(mesh(new THREE.CapsuleGeometry(0.17, 0.4, 4, 10), 0.22))
-          const head = joint('头', 0, 0.5, 0); chest.add(head)
-          head.add(mesh(new THREE.SphereGeometry(0.13, 18, 16), 0.13))
-          // 面部指示（深色鼻 + 双眼）：人台前/后一眼可辨，摆朝向不再靠猜
-          const faceMat = new THREE.MeshStandardMaterial({ color: 0x2a2d33, roughness: 0.7 })
-          const nose = new THREE.Mesh(new THREE.ConeGeometry(0.028, 0.06, 8), faceMat)
-          nose.rotation.x = Math.PI / 2 // 锥尖朝 +Z（人台正面）
-          nose.position.set(0, 0.12, 0.13)
+          root.userData.bodyType = preset.bodyType
+          root.userData.poseOffsetY = 0
+          root.userData.bodyUnitScale = 0.78 // 保持成人素体约 1.8m，兼容现有 35mm 默认机位与镜别预设
+
+          const mesh = (
+            geo: any,
+            position: [number, number, number] = [0, 0, 0],
+            scale: [number, number, number] = [1, 1, 1],
+            material: any = mat
+          ) => {
+            const m = new THREE.Mesh(geo, material)
+            m.position.set(position[0], position[1], position[2])
+            m.scale.set(scale[0], scale[1], scale[2])
+            return m
+          }
+          const joint = (name: string, x: number, y: number, z: number) => {
+            const g = new THREE.Group()
+            g.position.set(x, y, z)
+            g.userData.joint = name
+            return g
+          }
+          const addJointBall = (g: any, radius: number) => {
+            g.add(mesh(new THREE.SphereGeometry(radius, 16, 14), [0, 0, 0], [p.jointRadiusScale, p.jointRadiusScale, p.jointRadiusScale]))
+          }
+          const addSegment = (g: any, radius: number, length: number) => {
+            g.add(mesh(new THREE.CapsuleGeometry(radius, length, 8, 14), [0, -(length * 0.5 + radius), 0]))
+          }
+
+          // rigRoot 负责姿势预设的整体俯仰/偏移；restY 在构建末尾按包围盒自动贴地。
+          const rigRoot = joint('骨盆', 0, 0, 0)
+          rigRoot.userData.rigRoot = true
+          rigRoot.scale.setScalar(root.userData.bodyUnitScale)
+          root.add(rigRoot)
+
+          const pelvis = mesh(new THREE.SphereGeometry(p.pelvisRadius, 22, 18), [0, p.hipY, 0], p.pelvisScale)
+          rigRoot.add(pelvis)
+
+          // 胸腹分成两个体块，以髋部为旋转枢轴；比旧版单胶囊更能表达弯腰和体型差异。
+          const torso = joint('胸', 0, p.hipY, 0)
+          rigRoot.add(torso)
+          const abdomenY = p.pelvisRadius * 0.55 + p.torsoLowerHeight * 0.5
+          const chestY = abdomenY + p.torsoLowerHeight * 0.5 + p.torsoUpperHeight * 0.5 + p.torsoUpperRadius * 0.12
+          torso.add(mesh(new THREE.CapsuleGeometry(p.torsoLowerRadius, p.torsoLowerHeight, 10, 18), [0, abdomenY, 0], p.torsoLowerScale))
+          torso.add(mesh(new THREE.CapsuleGeometry(p.torsoUpperRadius, p.torsoUpperHeight, 12, 20), [0, chestY, 0], p.torsoUpperScale))
+          const chestRing = mesh(
+            new THREE.TorusGeometry(p.torsoUpperRadius * p.torsoUpperScale[0] * 0.77, Math.max(0.005, p.torsoUpperRadius * 0.026), 8, 32),
+            [0, chestY - p.torsoUpperHeight * 0.38, 0],
+            [1, p.torsoUpperScale[2] / p.torsoUpperScale[0], 1],
+            detailMat
+          )
+          chestRing.rotation.x = Math.PI / 2
+          torso.add(chestRing)
+
+          const neckY = chestY + p.torsoUpperHeight * 0.5 + p.neckHeight * 0.5 + p.torsoUpperRadius * 0.18
+          const neck = joint('颈', 0, neckY, 0)
+          torso.add(neck)
+          neck.add(mesh(new THREE.CylinderGeometry(p.neckRadius * 0.9, p.neckRadius, p.neckHeight, 16)))
+          const headY = p.neckHeight * 0.5 + p.headRadius * 0.78
+          const head = joint('头', 0, headY, 0)
+          neck.add(head)
+          head.add(mesh(new THREE.SphereGeometry(p.headRadius, 24, 20), [0, 0, 0], p.headScale))
+          head.add(mesh(new THREE.SphereGeometry(p.headRadius * 0.36, 14, 10), [0, -p.headRadius * 0.08, p.faceOffsetZ], [0.72, 0.52, 0.26]))
+          const eyeY = p.headRadius * 0.15
+          const eyeX = p.headRadius * 0.25
+          const eyeZ = p.faceOffsetZ + p.headRadius * 0.08
+          head.add(mesh(new THREE.SphereGeometry(p.eyeRadius, 9, 7), [-eyeX, eyeY, eyeZ], [1, 0.62, 0.36], detailMat))
+          head.add(mesh(new THREE.SphereGeometry(p.eyeRadius, 9, 7), [eyeX, eyeY, eyeZ], [1, 0.62, 0.36], detailMat))
+          const nose = mesh(new THREE.ConeGeometry(p.headRadius * 0.075, p.headRadius * 0.24, 8), [0, -p.headRadius * 0.02, eyeZ + p.headRadius * 0.08], [0.75, 1, 0.75], detailMat)
+          nose.rotation.x = Math.PI / 2
           head.add(nose)
-          const eye = (x: number) => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 8), faceMat); e.position.set(x, 0.16, 0.105); head.add(e) }
-          eye(-0.05); eye(0.05)
+          head.add(mesh(new THREE.BoxGeometry(p.headRadius * 0.34, p.headRadius * 0.035, p.headRadius * 0.025), [0, -p.headRadius * 0.2, eyeZ + p.headRadius * 0.035], [1, 1, 1], detailMat))
+
+          const shoulderY = chestY + p.torsoUpperHeight * 0.16
           const arm = (side: 'L' | 'R') => {
-            const sh = joint(side === 'L' ? '左肩' : '右肩', side === 'L' ? -0.22 : 0.22, 0.42, 0); chest.add(sh)
-            sh.add(mesh(new THREE.CapsuleGeometry(0.055, 0.26, 4, 8), -0.17))
-            const el = joint(side === 'L' ? '左肘' : '右肘', 0, -0.34, 0); sh.add(el)
-            el.add(mesh(new THREE.CapsuleGeometry(0.05, 0.24, 4, 8), -0.16))
+            const isLeft = side === 'L'
+            const sh = joint(isLeft ? '左肩' : '右肩', isLeft ? -p.shoulderWidth : p.shoulderWidth, shoulderY, 0)
+            torso.add(sh)
+            addJointBall(sh, p.shoulderRadius)
+            addSegment(sh, p.upperArmRadius, p.upperArmLength)
+            const elbowY = -(p.upperArmLength + p.upperArmRadius + p.elbowRadius)
+            const elbow = joint(isLeft ? '左肘' : '右肘', 0, elbowY, 0)
+            elbow.userData.poseBendAxisLocal = [-1, 0, 0]
+            sh.add(elbow)
+            addJointBall(elbow, p.elbowRadius)
+            addSegment(elbow, p.forearmRadius, p.forearmLength)
+            const wristY = -(p.forearmLength + p.forearmRadius + p.wristRadius)
+            const wrist = joint(isLeft ? '左腕' : '右腕', 0, wristY, 0)
+            elbow.add(wrist)
+            addJointBall(wrist, p.wristRadius)
+            const palm = mesh(new THREE.SphereGeometry(p.handRadius, 14, 12), [0, -p.handRadius * 1.05, 0.015], p.handScale)
+            wrist.add(palm)
+            const thumb = mesh(
+              new THREE.CapsuleGeometry(p.handRadius * 0.24, p.handRadius * 0.5, 6, 8),
+              [isLeft ? -p.handRadius * 0.62 : p.handRadius * 0.62, -p.handRadius * 0.95, p.handRadius * 0.28],
+              [0.58, 0.82, 0.52]
+            )
+            thumb.rotation.z = isLeft ? 0.68 : -0.68
+            wrist.add(thumb)
           }
-          arm('L'); arm('R')
+          arm('L')
+          arm('R')
+
           const leg = (side: 'L' | 'R') => {
-            const hp = joint(side === 'L' ? '左髋' : '右髋', side === 'L' ? -0.1 : 0.1, 0, 0); hips.add(hp)
-            hp.add(mesh(new THREE.CapsuleGeometry(0.075, 0.32, 4, 8), -0.22))
-            const kn = joint(side === 'L' ? '左膝' : '右膝', 0, -0.44, 0); hp.add(kn)
-            kn.add(mesh(new THREE.CapsuleGeometry(0.07, 0.3, 4, 8), -0.2))
+            const isLeft = side === 'L'
+            const hip = joint(isLeft ? '左髋' : '右髋', isLeft ? -p.legSpread : p.legSpread, p.hipY - p.pelvisRadius * 0.22, 0)
+            rigRoot.add(hip)
+            addJointBall(hip, p.thighRadius * 1.08)
+            addSegment(hip, p.thighRadius, p.thighLength)
+            const kneeY = -(p.thighLength + p.thighRadius + p.kneeRadius)
+            const knee = joint(isLeft ? '左膝' : '右膝', 0, kneeY, 0)
+            knee.userData.poseBendAxisLocal = [1, 0, 0]
+            hip.add(knee)
+            addJointBall(knee, p.kneeRadius)
+            addSegment(knee, p.calfRadius, p.calfLength)
+            const ankleY = -(p.calfLength + p.calfRadius + p.ankleRadius)
+            const ankle = joint(isLeft ? '左踝' : '右踝', 0, ankleY, 0)
+            knee.add(ankle)
+            addJointBall(ankle, p.ankleRadius)
+            const foot = mesh(
+              new THREE.CapsuleGeometry(p.footRadius, p.footLength, 8, 14),
+              [0, -p.footRadius * 0.72, p.footLength * 0.5],
+              p.footScale
+            )
+            foot.rotation.x = Math.PI / 2
+            ankle.add(foot)
+            ankle.add(mesh(new THREE.SphereGeometry(p.footRadius, 14, 10), [0, -p.footRadius * 0.72, p.footLength * 1.18], [p.footScale[0] * 0.92, p.footScale[1] * 0.72, p.footScale[2] * 0.48]))
           }
-          leg('L'); leg('R')
+          leg('L')
+          leg('R')
+
+          root.updateMatrixWorld(true)
+          const bounds = new THREE.Box3().setFromObject(root)
+          const restY = bounds.isEmpty() || !isFinite(bounds.min.y) ? 0 : -bounds.min.y
+          rigRoot.position.y = restY
+          rigRoot.userData.restY = restY
+          root.updateMatrixWorld(true)
           return root
         }
 
         let curRoot: any = null
+        let curJoint: any = null
+        const roundTransform = (value: number) => Number(value.toFixed(3))
+        const readTransform = (root: any): TransformDraft => ({
+          position: [roundTransform(root.position.x), roundTransform(root.position.y), roundTransform(root.position.z)],
+          rotation: [
+            roundTransform((root.rotation.x * 180) / Math.PI),
+            roundTransform((root.rotation.y * 180) / Math.PI),
+            roundTransform((root.rotation.z * 180) / Math.PI)
+          ],
+          scale: [roundTransform(root.scale.x), roundTransform(root.scale.y), roundTransform(root.scale.z)]
+        })
+        const emitTransform = () => {
+          if (!disposed) setTransformDraft(curRoot ? readTransform(curRoot) : null)
+        }
+        const baseJointQuaternion = (joint: any) => {
+          const value = joint?.userData?.poseBaseQuaternion
+          return Array.isArray(value)
+            ? new THREE.Quaternion(value[0], value[1], value[2], value[3])
+            : new THREE.Quaternion()
+        }
+        const readJointDeltaDegrees = (joint: any): [number, number, number] => {
+          if (!joint) return [0, 0, 0]
+          // applyMannequinPose 的局部关系为 current = delta * base。
+          const delta = joint.quaternion.clone().multiply(baseJointQuaternion(joint).invert())
+          const euler = new THREE.Euler().setFromQuaternion(delta, 'XYZ')
+          return [euler.x, euler.y, euler.z].map((value) => roundTransform(THREE.MathUtils.radToDeg(value))) as [number, number, number]
+        }
+        const writeJointDeltaDegrees = (joint: any, rotation: [number, number, number]) => {
+          const euler = new THREE.Euler(
+            THREE.MathUtils.degToRad(rotation[0]),
+            THREE.MathUtils.degToRad(rotation[1]),
+            THREE.MathUtils.degToRad(rotation[2]),
+            'XYZ'
+          )
+          const delta = new THREE.Quaternion().setFromEuler(euler)
+          joint.quaternion.copy(delta.multiply(baseJointQuaternion(joint)))
+        }
+        const clampJointObject = (joint: any) => {
+          const name = String(joint?.userData?.joint || '')
+          const rotation = readJointDeltaDegrees(joint).map((value, axis) =>
+            clampDirectorJointDegrees(name, axis as DirectorJointAxis, value)
+          ) as [number, number, number]
+          writeJointDeltaDegrees(joint, rotation)
+        }
+        const collectJointDeltaDegrees = (root: any): Record<string, [number, number, number]> => {
+          const rotations: Record<string, [number, number, number]> = {}
+          root?.traverse?.((joint: any) => {
+            const name = joint.userData?.joint
+            if (name && !rotations[name]) rotations[name] = readJointDeltaDegrees(joint)
+          })
+          return rotations
+        }
+        const emitPoseEditor = () => {
+          if (disposed) return
+          const isPoseTarget = curRoot && (curRoot.userData.kind === '人台' || curRoot.userData.rigged)
+          if (!isPoseTarget) {
+            setJointEditor(null)
+            setPoseSafety({ level: 'safe', issues: [] })
+            return
+          }
+          setJointEditor(curJoint ? { name: curJoint.userData.joint, rotation: readJointDeltaDegrees(curJoint) } : null)
+          setPoseSafety(validateDirectorJointRotations(collectJointDeltaDegrees(curRoot)))
+        }
+        const findJointByName = (root: any, name: string) => {
+          let found: any = null
+          root?.traverse?.((joint: any) => { if (!found && joint.userData?.joint === name) found = joint })
+          return found
+        }
         const attachByMode = () => {
-          if (!curRoot || curMode === 'pose') { tcontrol.detach(); return }
+          if (!curRoot || curMode === 'pose' || curRoot.userData.locked) { tcontrol.detach(); return }
           tcontrol.setMode(curMode)
           tcontrol.attach(curRoot)
         }
+        const onTransformObjectChange = () => emitTransform()
+        tcontrol.addEventListener('objectChange', onTransformObjectChange)
         const select = (root: any | null) => {
+          if (curRoot !== root) curJoint = null
           curRoot = root
           attachByMode()
+          emitTransform()
+          emitPoseEditor()
           if (!disposed) {
             const sub = subjects.find((s) => s.obj === root)
             setSelId(sub ? sub.id : null)
             setSelKind(root ? root.userData.kind || '' : null)
           }
         }
+        const configureSubjectShadows = (obj: any) => {
+          obj.traverse?.((child: any) => {
+            if (!child.isMesh) return
+            child.castShadow = true
+            child.receiveShadow = true
+          })
+        }
         const addSubject = (obj: any, kind: string, desc?: string, colorName?: string) => {
           const id = uid('obj')
           const name = nextName(kind)
           obj.userData.kind = kind
+          obj.userData.locked = false
+          configureSubjectShadows(obj)
           scene.add(obj)
           subjects.push({ obj, kind, id, name, desc, colorName })
           sync()
@@ -346,9 +980,222 @@ function Inner() {
         }
         const addMannequin = () => {
           const c = nextMannequinColor()
-          const g = makeMannequin(c.hex)
+          const g = makeMannequin(c.hex, 'mannequin')
           g.position.set((subjects.length % 3) * 0.9 - 0.9, 0, 0)
           addSubject(g, '人台', undefined, c.name)
+        }
+        const findRigRoot = (root: any) => {
+          let rig: any = null
+          root?.traverse?.((c: any) => { if (!rig && c.userData?.rigRoot) rig = c })
+          return rig
+        }
+        const groundMannequinRig = (root: any) => {
+          const rig = findRigRoot(root)
+          if (!rig) return
+          root.updateMatrixWorld(true)
+          const inverseRoot = root.matrixWorld.clone().invert()
+          const localBounds = new THREE.Box3()
+          root.traverse((c: any) => {
+            if (!c.isMesh || !c.geometry) return
+            // SkinnedMesh 的 geometry.boundingBox 是绑定姿势；每次姿势变化后必须重算蒙皮顶点包围盒，
+            // 否则跪/坐时仍按站立脚底落地，视觉上会整个人悬空。
+            if (c.isSkinnedMesh) c.computeBoundingBox?.()
+            else if (!c.geometry.boundingBox) c.geometry.computeBoundingBox?.()
+            const boundingBox = c.isSkinnedMesh ? c.boundingBox : c.geometry.boundingBox
+            if (!boundingBox) return
+            const relative = inverseRoot.clone().multiply(c.matrixWorld)
+            localBounds.union(boundingBox.clone().applyMatrix4(relative))
+          })
+          if (localBounds.isEmpty() || !isFinite(localBounds.min.y)) return
+          rig.position.y -= localBounds.min.y
+          root.userData.poseOffsetY = rig.position.y - Number(rig.userData.restY || 0)
+          root.updateMatrixWorld(true)
+        }
+        const applyMannequinPose = (
+          root: any,
+          name: string,
+          map: Record<string, [number, number, number]>,
+          offsetY = 0,
+          controls: Record<string, number> = {}
+        ) => {
+          if (!root || root.userData.kind !== '人台') return
+          root.traverse((c: any) => {
+            if (c.userData?.poseBaseQuaternion) {
+              const position = c.userData.poseBasePosition
+              const quaternion = c.userData.poseBaseQuaternion
+              const scale = c.userData.poseBaseScale
+              c.position.set(position[0], position[1], position[2])
+              c.quaternion.set(quaternion[0], quaternion[1], quaternion[2], quaternion[3])
+              c.scale.set(scale[0], scale[1], scale[2])
+            } else if (c.userData?.joint) {
+              c.rotation.set(0, 0, 0)
+            }
+          })
+          const rig = findRigRoot(root)
+          const scaledOffset = offsetY * Number(root.userData.bodyUnitScale || 1)
+          if (rig) rig.position.y = Number(rig.userData.restY || 0) + scaledOffset
+          root.userData.poseOffsetY = scaledOffset
+          const detailedDegrees = root.userData.detailedMannequin ? getDirectorDetailedJointDegrees(controls) : null
+          if (detailedDegrees) {
+            const joints: Record<string, any> = {}
+            root.traverse((c: any) => { if (c.userData?.joint) joints[c.userData.joint] = c })
+            root.updateMatrixWorld(true)
+            const characterRotation = root.getWorldQuaternion(new THREE.Quaternion())
+            const axes = [
+              new THREE.Vector3(1, 0, 0).applyQuaternion(characterRotation).normalize(),
+              new THREE.Vector3(0, 1, 0).applyQuaternion(characterRotation).normalize(),
+              new THREE.Vector3(0, 0, 1).applyQuaternion(characterRotation).normalize()
+            ]
+            const rotateWorld = (object: any, axis: any, degrees: number) => {
+              if (!object || !degrees) return
+              root.updateMatrixWorld(true)
+              const worldRotation = object.getWorldQuaternion(new THREE.Quaternion())
+              const targetWorld = new THREE.Quaternion()
+                .setFromAxisAngle(axis, THREE.MathUtils.degToRad(degrees))
+                .multiply(worldRotation)
+              const parentWorld = object.parent?.getWorldQuaternion(new THREE.Quaternion()) || new THREE.Quaternion()
+              object.quaternion.copy(parentWorld.invert().multiply(targetWorld))
+            }
+            const twistKeys: Record<string, string> = {
+              左肩: 'leftShoulder.twist', 右肩: 'rightShoulder.twist',
+              左腕: 'leftHand.twist', 右腕: 'rightHand.twist',
+              左髋: 'leftHip.twist', 右髋: 'rightHip.twist',
+              左踝: 'leftFoot.twist', 右踝: 'rightFoot.twist'
+            }
+            const bendKeys: Record<string, string> = {
+              左肘: 'leftElbow.bend', 右肘: 'rightElbow.bend',
+              左膝: 'leftKnee.bend', 右膝: 'rightKnee.bend'
+            }
+            const order = ['骨盆', '胸', '头', '左肩', '右肩', '左肘', '右肘', '左腕', '右腕', '左髋', '右髋', '左膝', '右膝', '左踝', '右踝']
+            for (const jointName of order) {
+              const object = joints[jointName]
+              const degrees = detailedDegrees[jointName]
+              if (!object || !degrees) continue
+              const bendKey = bendKeys[jointName]
+              if (bendKey && object.userData.poseBendAxisLocal && object.parent) {
+                root.updateMatrixWorld(true)
+                const local = object.userData.poseBendAxisLocal
+                const bendAxis = new THREE.Vector3(local[0], local[1], local[2])
+                  .applyQuaternion(object.parent.getWorldQuaternion(new THREE.Quaternion()))
+                  .normalize()
+                rotateWorld(object, bendAxis, Number(controls[bendKey] || 0))
+              } else {
+                const isBallJoint = jointName.endsWith('肩') || jointName.endsWith('髋')
+                if (isBallJoint) {
+                  // 球窝关节先前后抬、再内外展；反过来会让 T 型/抱臂里的 pitch 在手臂水平后失效。
+                  rotateWorld(object, axes[0], degrees[0])
+                  rotateWorld(object, axes[2], degrees[2])
+                } else {
+                  rotateWorld(object, axes[1], degrees[1])
+                  rotateWorld(object, axes[2], degrees[2])
+                  rotateWorld(object, axes[0], degrees[0])
+                }
+              }
+              const twistKey = twistKeys[jointName]
+              const twist = twistKey ? Number(controls[twistKey] || 0) : 0
+              if (twist) {
+                root.updateMatrixWorld(true)
+                const limbAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(object.getWorldQuaternion(new THREE.Quaternion())).normalize()
+                rotateWorld(object, limbAxis, twist)
+              }
+            }
+          } else {
+            root.traverse((c: any) => {
+              const jointName = c.userData?.joint
+              if (jointName && map[jointName]) c.rotation.set(map[jointName][0], map[jointName][1], map[jointName][2])
+            })
+          }
+          root.userData.poseName = name === '站立' ? '' : name
+          root.userData.poseSchemaVersion = 2
+          groundMannequinRig(root)
+          if (root === curRoot) emitPoseEditor()
+        }
+        const selectJointByName = (name: string) => {
+          if (!curRoot || curRoot.userData.locked || (curRoot.userData.kind !== '人台' && !curRoot.userData.rigged)) return
+          curJoint = findJointByName(curRoot, name)
+          emitPoseEditor()
+        }
+        const setSelectedJointAxis = (axis: DirectorJointAxis, raw: number) => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          const rotation = readJointDeltaDegrees(curJoint)
+          rotation[axis] = clampDirectorJointDegrees(curJoint.userData.joint || '', axis, raw)
+          writeJointDeltaDegrees(curJoint, rotation)
+          curRoot.userData.poseName = '自定义'
+          curRoot.updateMatrixWorld(true)
+          sync()
+          emitPoseEditor()
+        }
+        const commitJointEdit = () => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          curRoot.userData.poseName = '自定义'
+          sync()
+          emitPoseEditor()
+          commit()
+        }
+        const resetSelectedJoint = () => {
+          if (!curRoot || !curJoint || curRoot.userData.locked) return
+          curJoint.quaternion.copy(baseJointQuaternion(curJoint))
+          curRoot.userData.poseName = '自定义'
+          curRoot.updateMatrixWorld(true)
+          sync()
+          emitPoseEditor()
+          commit()
+        }
+        let bodySwitchRequest = 0
+        const setSelectedBodyType = async (bodyType: DirectorBodyType) => {
+          const sub = subjects.find((s) => s.obj === curRoot)
+          if (!sub || sub.kind !== '人台' || sub.obj.userData.locked) return
+          const old = sub.obj
+          if (getDirectorBodyPreset(old.userData.bodyType).bodyType === bodyType) return
+          const request = ++bodySwitchRequest
+          if (!disposed) setBodyLoading(bodyType)
+          await ensureDirectorTemplate(bodyType)
+          if (disposed || request !== bodySwitchRequest || !subjects.includes(sub) || sub.obj !== old) {
+            if (!disposed && request === bodySwitchRequest) setBodyLoading(null)
+            return
+          }
+          const joints: Record<string, [number, number, number]> = {}
+          old.traverse((c: any) => {
+            const jointName = c.userData?.joint
+            if (jointName) joints[jointName] = [c.rotation.x, c.rotation.y, c.rotation.z]
+          })
+          let color = MANNEQUIN_COLORS.find((c) => c.name === sub.colorName)?.hex
+          if (color == null) {
+            old.traverse((c: any) => {
+              const hex = c.material?.color?.getHex?.()
+              if (color == null && typeof hex === 'number' && hex !== 0x2a2d33) color = hex
+            })
+          }
+          const replacement = makeMannequin(color ?? 0xc7ccd6, bodyType)
+          replacement.position.copy(old.position)
+          replacement.rotation.copy(old.rotation)
+          replacement.scale.copy(old.scale)
+          replacement.visible = old.visible
+          replacement.userData.locked = !!old.userData.locked
+          const presetPose = getDirectorPose(old.userData.poseName || '站立')
+          if (presetPose) {
+            applyMannequinPose(replacement, presetPose.k, presetPose.m, presetPose.offsetY || 0, presetPose.controls)
+          } else {
+            replacement.userData.poseName = old.userData.poseName || ''
+            replacement.userData.poseOffsetY = Number(old.userData.poseOffsetY || 0)
+            const nextRig = findRigRoot(replacement)
+            if (nextRig) nextRig.position.y = Number(nextRig.userData.restY || 0) + replacement.userData.poseOffsetY
+            replacement.traverse((c: any) => {
+              const jointName = c.userData?.joint
+              if (jointName && joints[jointName]) c.rotation.set(joints[jointName][0], joints[jointName][1], joints[jointName][2])
+            })
+            groundMannequinRig(replacement)
+          }
+          tcontrol.detach()
+          scene.remove(old)
+          configureSubjectShadows(replacement)
+          scene.add(replacement)
+          sub.obj = replacement
+          disposeTree(old)
+          select(replacement)
+          sync()
+          commit()
+          if (!disposed && request === bodySwitchRequest) setBodyLoading(null)
         }
         const addProp = () => {
           const m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
@@ -357,15 +1204,67 @@ function Inner() {
         }
         const disposeTree = (o: any) => {
           o.traverse?.((c: any) => {
-            c.geometry?.dispose?.()
+            const sharedDirectorAsset = !!c.userData?.directorSharedAssets
+            if (!sharedDirectorAsset) c.geometry?.dispose?.()
             const m = c.material
             ;(Array.isArray(m) ? m : [m]).forEach((mm: any) => {
               if (!mm) return
-              ;['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'].forEach((k) => mm[k]?.dispose?.())
+              if (!sharedDirectorAsset) {
+                ;['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap'].forEach((k) => mm[k]?.dispose?.())
+              }
               mm.dispose?.()
             })
           })
         }
+        const getPosePreviews = (bodyType: DirectorBodyType) => directorPosePreviewCache.load(bodyType, async () => {
+          await ensureDirectorTemplate(bodyType)
+          if (disposed) throw new Error('director disposed')
+          const canvas = document.createElement('canvas')
+          const width = 120
+          const height = 90
+          const previewRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'low-power' })
+          previewRenderer.setPixelRatio(1)
+          previewRenderer.setSize(width, height, false)
+          const previewScene = new THREE.Scene()
+          previewScene.background = new THREE.Color(0x202126)
+          previewScene.add(new THREE.HemisphereLight(0xffffff, 0x30323a, 1.55))
+          const previewKey = new THREE.DirectionalLight(0xfff2dc, 1.2)
+          previewKey.position.set(2.5, 4, 3.5)
+          previewScene.add(previewKey)
+          const previewCamera = new THREE.PerspectiveCamera(30, width / height, 0.01, 100)
+          const model = makeMannequin(0xb9aa8d, bodyType)
+          previewScene.add(model)
+          const result: Record<string, string> = {}
+          try {
+            for (let index = 0; index < POSES.length; index++) {
+              if (index > 0 && index % 4 === 0) {
+                await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+                if (disposed) throw new Error('director disposed')
+              }
+              const pose = POSES[index]
+              applyMannequinPose(model, pose.k, pose.m, pose.offsetY || 0, pose.controls)
+              model.updateMatrixWorld(true)
+              const bounds = new THREE.Box3().setFromObject(model, true)
+              const size = bounds.getSize(new THREE.Vector3())
+              const center = bounds.getCenter(new THREE.Vector3())
+              const halfFov = Math.tan(THREE.MathUtils.degToRad(previewCamera.fov / 2))
+              const verticalFit = Math.max(0.2, size.y) / (2 * halfFov)
+              const horizontalFit = Math.max(0.2, size.x) / (2 * halfFov * previewCamera.aspect)
+              const distance = Math.max(verticalFit, horizontalFit) * 1.16
+              previewCamera.position.set(center.x, center.y + size.y * 0.02, center.z + distance)
+              previewCamera.lookAt(center)
+              previewCamera.updateProjectionMatrix()
+              previewRenderer.render(previewScene, previewCamera)
+              result[pose.k] = canvas.toDataURL('image/jpeg', 0.76)
+            }
+            return result
+          } finally {
+            previewScene.remove(model)
+            disposeTree(model)
+            previewRenderer.dispose()
+            previewRenderer.forceContextLoss()
+          }
+        })
         // 还原缩放：兼容旧数据(number=均匀)与新数据([x,y,z]=非均匀)
         const applyScale = (o: any, s: any) => { if (Array.isArray(s)) o.scale.set(s[0], s[1], s[2]); else o.scale.setScalar(s || 1) }
         // 解析 GLB/GLTF → 标记 Mixamo 骨骼 + rigged + kind=模型（不归一化/不落场景，由调用方决定）
@@ -386,6 +1285,229 @@ function Inner() {
           }, (err: any) => onErr?.(err))
         }
         const attachStore = () => window.mulby?.storage?.attachment
+        const disposeEnvironmentBackdrop = () => {
+          if (!groundedSkybox) return
+          environmentScene.remove(groundedSkybox)
+          groundedSkybox.geometry?.dispose?.()
+          const materials = Array.isArray(groundedSkybox.material) ? groundedSkybox.material : [groundedSkybox.material]
+          materials.forEach((material: any) => material?.dispose?.())
+          groundedSkybox = null
+        }
+        const createEnvironmentDisplayTexture = (source: any, blur: number, horizon: number) => {
+          const image = source.image
+          const width = Number(image?.naturalWidth || image?.width || 0)
+          const height = Number(image?.naturalHeight || image?.height || 0)
+          let display: any
+          if (blur > 0.001 && width && height) {
+            const targetWidth = Math.max(512, Math.min(4096, Math.round(width / (1 + blur * 12))))
+            const targetHeight = Math.max(256, Math.round(targetWidth * height / width))
+            const canvas = document.createElement('canvas')
+            canvas.width = targetWidth
+            canvas.height = targetHeight
+            const context = canvas.getContext('2d')
+            context?.drawImage(image, 0, 0, targetWidth, targetHeight)
+            display = new THREE.CanvasTexture(canvas)
+          } else {
+            display = source.clone()
+          }
+          display.mapping = THREE.EquirectangularReflectionMapping
+          display.colorSpace = THREE.SRGBColorSpace
+          display.anisotropy = renderer.capabilities.getMaxAnisotropy()
+          display.wrapS = THREE.RepeatWrapping
+          display.wrapT = THREE.ClampToEdgeWrapping
+          display.offset.y = -horizon / 180
+          display.needsUpdate = true
+          return display
+        }
+        const rebuildEnvironmentDisplay = () => {
+          if (!environmentTexture || !curEnvironment) return
+          environmentDisplayTexture?.dispose?.()
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          environmentDisplayTexture = createEnvironmentDisplayTexture(environmentTexture, controls.backgroundBlur, controls.horizon)
+        }
+        const rebuildEnvironmentBackdrop = () => {
+          disposeEnvironmentBackdrop()
+          if (!environmentDisplayTexture || !curEnvironment) return
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          if (controls.mode === 'grounded') {
+            groundedSkybox = new GroundedSkybox(environmentDisplayTexture, controls.cameraHeight, 100, 96)
+            const origin = getDirectorPanoramaCaptureOrigin(curEnvironment)
+            groundedSkybox.position.set(origin[0], origin[1], origin[2])
+          } else {
+            const geometry = new THREE.SphereGeometry(100, 96, 64)
+            geometry.scale(1, 1, -1)
+            groundedSkybox = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: environmentDisplayTexture, depthWrite: false }))
+            groundedSkybox.position.copy(outCam().position)
+          }
+          groundedSkybox.name = controls.mode === 'grounded' ? '全景落地环境' : '全景无限背景'
+          groundedSkybox.renderOrder = -1000
+          groundedSkybox.frustumCulled = false
+          environmentScene.add(groundedSkybox)
+        }
+        const applyEnvironmentRendering = () => {
+          if (!curEnvironment || !environmentTexture) return
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          const rotation = Math.max(-180, Math.min(180, Number(curEnvironment.rotation) || 0))
+          renderer.toneMappingExposure = controls.exposure
+          if (pip) pip.toneMappingExposure = controls.exposure
+          scene.environment = environmentRenderTarget?.texture || null
+          ;(scene as any).environmentIntensity = controls.environmentIntensity
+          const environmentRotation = (scene as any).environmentRotation
+          if (environmentRotation) {
+            environmentRotation.x = THREE.MathUtils.degToRad(controls.horizon)
+            environmentRotation.y = THREE.MathUtils.degToRad(rotation)
+          }
+          if (groundedSkybox) groundedSkybox.rotation.y = THREE.MathUtils.degToRad(rotation)
+          const origin = getDirectorPanoramaCaptureOrigin(curEnvironment)
+          panoramaOriginMarker.position.set(origin[0], origin[1], origin[2])
+          panoramaOriginMarker.visible = true
+          ground.visible = false
+          shadowMaterial.opacity = controls.shadowOpacity
+          shadowGround.visible = controls.shadowOpacity > 0.001
+          applyLighting(curLighting)
+        }
+        const setEnvironmentSettings = (patch: Partial<DirectorEnvironment>, commitChange = false) => {
+          if (!curEnvironment) return
+          const previous = withDirectorEnvironmentDefaults(curEnvironment)
+          const next = withDirectorEnvironmentDefaults({ ...curEnvironment, ...patch })
+          next.rotation = Math.max(-180, Math.min(180, Number(next.rotation) || 0))
+          if ('cameraHeight' in patch && next.captureOrigin) next.captureOrigin = [next.captureOrigin[0], next.cameraHeight, next.captureOrigin[2]]
+          curEnvironment = next
+          const displayChanged = previous.backgroundBlur !== next.backgroundBlur || previous.horizon !== next.horizon
+          const deferredDisplayPatch = 'backgroundBlur' in patch || 'horizon' in patch
+          const rebuildDisplay = (displayChanged && !deferredDisplayPatch) || (commitChange && deferredDisplayPatch)
+          const heightPatch = 'cameraHeight' in patch
+          const rebuildBackdrop = rebuildDisplay || previous.mode !== next.mode || (previous.cameraHeight !== next.cameraHeight && !heightPatch) || (commitChange && heightPatch)
+          if (rebuildDisplay) rebuildEnvironmentDisplay()
+          if (rebuildBackdrop) rebuildEnvironmentBackdrop()
+          applyEnvironmentRendering()
+          if (!disposed) setEnvironment({ ...curEnvironment })
+        }
+        const disposeEnvironmentTexture = () => {
+          disposeEnvironmentBackdrop()
+          environmentDisplayTexture?.dispose?.()
+          environmentDisplayTexture = null
+          environmentTexture?.dispose?.()
+          environmentTexture = null
+          environmentRenderTarget?.dispose?.()
+          environmentRenderTarget = null
+          pipEnvironmentRenderTarget?.dispose?.()
+          pipEnvironmentRenderTarget = null
+          scene.environment = null
+          if (environmentObjectUrl) URL.revokeObjectURL(environmentObjectUrl)
+          environmentObjectUrl = null
+        }
+        const lightingBackground = () => new THREE.Color((LIGHTINGS.find((item) => item.k === curLighting) || LIGHTINGS[0]).bg)
+        const loadEnvironmentState = async (next: DirectorEnvironment | null, warnAspect = false) => {
+          if (!next) {
+            disposeEnvironmentTexture()
+            curEnvironment = null
+            scene.background = lightingBackground()
+            renderer.toneMappingExposure = 1
+            if (pip) pip.toneMappingExposure = 1
+            ;(scene as any).environmentIntensity = 1
+            ground.visible = true
+            shadowGround.visible = false
+            panoramaOriginMarker.visible = false
+            applyLighting(curLighting)
+            if (!disposed) setEnvironment(null)
+            return
+          }
+          const bytes: any = await attachStore()?.get?.(next.assetId)
+          if (!bytes) throw new Error(`环境附件缺失：${next.name || next.assetId}`)
+          const mimeType = next.mimeType || await attachStore()?.getType?.(next.assetId) || 'image/jpeg'
+          const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+          const blob = new Blob([view], { type: mimeType })
+          const objectUrl = URL.createObjectURL(blob)
+          let texture: any
+          try {
+            texture = await new THREE.TextureLoader().loadAsync(objectUrl)
+          } catch (error) {
+            URL.revokeObjectURL(objectUrl)
+            throw error
+          }
+          if (disposed) {
+            texture.dispose?.()
+            URL.revokeObjectURL(objectUrl)
+            return
+          }
+          const width = Number(texture.image?.naturalWidth || texture.image?.width || 0)
+          const height = Number(texture.image?.naturalHeight || texture.image?.height || 0)
+          if (warnAspect) {
+            const quality = assessDirectorPanoramaQuality(width, height)
+            if (quality?.level === 'invalid') toast('全景图不是标准 2:1 画幅，背景可能出现拉伸', 'warning')
+            else if (quality?.level === 'preview') toast('全景分辨率低于 4096×2048，仅建议用于预览', 'warning')
+          }
+          disposeEnvironmentTexture()
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          texture.colorSpace = THREE.SRGBColorSpace
+          texture.anisotropy = renderer.capabilities.getMaxAnisotropy()
+          texture.needsUpdate = true
+          environmentTexture = texture
+          environmentObjectUrl = objectUrl
+          curEnvironment = withDirectorEnvironmentDefaults({ ...next, mimeType, width: width || undefined, height: height || undefined })
+          if (curEnvironment.captureOrigin) curEnvironment.captureOrigin = getDirectorPanoramaCaptureOrigin(curEnvironment)
+          const pmrem = new THREE.PMREMGenerator(renderer)
+          try {
+            pmrem.compileEquirectangularShader()
+            environmentRenderTarget = pmrem.fromEquirectangular(texture)
+          } catch {
+            environmentRenderTarget = null
+            if (warnAspect) toast('环境光预计算失败，背景仍可使用', 'warning')
+          } finally {
+            pmrem.dispose()
+          }
+          if (pip) {
+            const pipPmrem = new THREE.PMREMGenerator(pip)
+            try {
+              pipPmrem.compileEquirectangularShader()
+              pipEnvironmentRenderTarget = pipPmrem.fromEquirectangular(texture)
+            } catch {
+              pipEnvironmentRenderTarget = null
+            } finally {
+              pipPmrem.dispose()
+            }
+          }
+          scene.background = null
+          rebuildEnvironmentDisplay()
+          rebuildEnvironmentBackdrop()
+          applyEnvironmentRendering()
+          if (!disposed) setEnvironment({ ...curEnvironment })
+        }
+        const importEnvironmentFile = async (
+          arrayBuffer: ArrayBuffer,
+          name: string,
+          mimeType: string,
+          metadata: Pick<DirectorEnvironment, 'description' | 'source' | 'sourceCardId'> = {}
+        ) => {
+          if (!/^image\/(jpe?g|png|webp)$/i.test(mimeType)) throw new Error('仅支持 JPG、PNG 或 WebP 全景图')
+          const assetId = uid('director-env')
+          const result = await attachStore()?.put?.(assetId, arrayBuffer, mimeType)
+          const stored = result === true || !!(result && (result as any).ok)
+          if (!stored) throw new Error('全景图存储失败，文件可能超过 50MB')
+          const previousId = curEnvironment?.assetId
+          const safeMetadata: Pick<DirectorEnvironment, 'description' | 'source' | 'sourceCardId'> = {
+            source: metadata.source,
+            sourceCardId: metadata.sourceCardId?.slice(0, 160),
+            description: metadata.description?.trim().slice(0, 1000) || undefined
+          }
+          try {
+            const C = outCam()
+            await loadEnvironmentState({
+              assetId,
+              name: name.slice(0, 160),
+              mimeType,
+              rotation: 0,
+              cameraHeight: C.position.y,
+              captureOrigin: [C.position.x, C.position.y, C.position.z],
+              ...safeMetadata
+            }, true)
+            if (previousId && previousId !== assetId) await attachStore()?.remove?.(previousId)
+          } catch (error) {
+            try { await attachStore()?.remove?.(assetId) } catch { /* ignore cleanup failure */ }
+            throw error
+          }
+        }
         // 用户导入：解析 → 归一化 → GLB 字节存 attachment（据此随工程持久化）→ 落场景
         const importGLTF = (arrayBuffer: ArrayBuffer, fname: string) => {
           const gen = sceneGen // 导入异步期间若发生整体重建(undo)则丢弃本次结果
@@ -418,6 +1540,7 @@ function Inner() {
               if (disposed || gen !== sceneGen) { disposeTree(obj); return }
               if (!stored) { obj.userData.assetId = undefined; toast('模型较大或存储不可用：本次可用，但不会随工程保存', 'warning') }
               const id = uid('obj')
+              configureSubjectShadows(obj)
               scene.add(obj)
               subjects.push({ obj, kind: '模型', id, name: k })
               sync()
@@ -445,12 +1568,15 @@ function Inner() {
                     (obj: any) => {
                       if (disposed || gen !== sceneGen) { disposeTree(obj); resolve(); return }
                       obj.userData.assetId = st.assetId
+                      obj.userData.locked = !!st.locked
+                      obj.visible = st.visible !== false
                       obj.position.set(st.pos[0], st.pos[1], st.pos[2])
                       obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
                       applyScale(obj, st.scale)
                       if (st.poseName) obj.userData.poseName = st.poseName
                       if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
-                      const id = uid('obj')
+                      const id = st.id || uid('obj')
+                      configureSubjectShadows(obj)
                       scene.add(obj)
                       subjects.push({ obj, kind: '模型', id, name: st.name || '模型', desc: st.desc })
                       sync()
@@ -464,6 +1590,23 @@ function Inner() {
         }
 
         const findById = (id: string) => subjects.find((s) => s.id === id)
+        const getSubjectPosition = (id: string): [number, number, number] | null => {
+          const subject = findById(id)
+          if (!subject) return null
+          const position = subject.obj.getWorldPosition(new THREE.Vector3())
+          return [position.x, position.y, position.z]
+        }
+        const resolveShotCam = (shot: DirectorShot) => resolveDirectorShotCamera(
+          shot,
+          shot.targetSubjectId
+            ? shot.sceneState?.subjects.find((state) => state.subjectId === shot.targetSubjectId)?.pos || getSubjectPosition(shot.targetSubjectId)
+            : null
+        )
+        const resolveShotCamAgainstCurrentScene = (shot: DirectorShot) => resolveDirectorShotCamera(
+          shot,
+          shot.targetSubjectId ? getSubjectPosition(shot.targetSubjectId) : null
+        )
+        resolveRecordedShotCam = resolveShotCam
         const removeById = (id: string) => {
           const sub = findById(id)
           if (!sub) return
@@ -471,35 +1614,43 @@ function Inner() {
           scene.remove(sub.obj)
           disposeTree(sub.obj)
           subjects.splice(subjects.indexOf(sub), 1)
+          if (!disposed) setShots((current) => removeDirectorSubjectFromShots(current, id))
           sync()
           if (curRoot === null && !disposed) { setSelId(null); setSelKind(null) }
+          if (curRoot === null && !disposed) setTransformDraft(null)
           commit()
         }
         const duplicateById = (id: string) => {
           const sub = findById(id)
           if (!sub) return
-          const clone = sub.obj.clone(true)
-          clone.position.x += 0.7
           if (sub.kind === '人台') {
-            // 克隆必须换新锚定色：clone 的材质是共享引用，先按 旧材质→新材质 映射深拷贝，再把身体材质（非深色面部）染成新色
             const c = nextMannequinColor()
-            const matMap = new Map<any, any>()
-            clone.traverse((m: any) => {
-              if (!m.material) return
-              const ms = Array.isArray(m.material) ? m.material : [m.material]
-              const ns = ms.map((mm: any) => {
-                if (!matMap.has(mm)) {
-                  const cl = mm.clone()
-                  if (cl.color && cl.color.getHex() !== 0x2a2d33) cl.color.setHex(c.hex)
-                  matMap.set(mm, cl)
-                }
-                return matMap.get(mm)
+            const clone = makeMannequin(c.hex, getDirectorBodyPreset(sub.obj.userData.bodyType).bodyType)
+            clone.position.copy(sub.obj.position)
+            clone.position.x += 0.7
+            clone.rotation.copy(sub.obj.rotation)
+            clone.scale.copy(sub.obj.scale)
+            clone.visible = sub.obj.visible
+            clone.userData.locked = false
+            const presetPose = getDirectorPose(sub.obj.userData.poseName || '站立')
+            if (presetPose) {
+              applyMannequinPose(clone, presetPose.k, presetPose.m, presetPose.offsetY || 0, presetPose.controls)
+            } else {
+              const joints: Record<string, [number, number, number]> = {}
+              sub.obj.traverse((joint: any) => {
+                if (joint.userData?.joint) joints[joint.userData.joint] = [joint.rotation.x, joint.rotation.y, joint.rotation.z]
               })
-              m.material = Array.isArray(m.material) ? ns : ns[0]
-            })
+              clone.traverse((joint: any) => {
+                const saved = joints[joint.userData?.joint]
+                if (saved) joint.rotation.set(saved[0], saved[1], saved[2])
+              })
+            }
             addSubject(clone, sub.kind, sub.desc, c.name)
             return
           }
+          const clone = sub.obj.clone(true)
+          clone.position.x += 0.7
+          clone.userData.locked = false
           addSubject(clone, sub.kind, sub.desc)
         }
         const toggleVisById = (id: string) => {
@@ -507,6 +1658,15 @@ function Inner() {
           if (!sub) return
           sub.obj.visible = !sub.obj.visible
           sync()
+          commit()
+        }
+        const toggleLockById = (id: string) => {
+          const sub = findById(id)
+          if (!sub) return
+          sub.obj.userData.locked = !sub.obj.userData.locked
+          if (curRoot === sub.obj) attachByMode()
+          sync()
+          commit()
         }
         const lookAtSelected = () => {
           if (!curRoot) return
@@ -515,8 +1675,11 @@ function Inner() {
           orbit.target.set(p.x, p.y + 0.9, p.z)
         }
 
-        // ── 拖拽摆姿（摆姿模式）：点关节 → 拖动鼠标按相机方向旋转该关节 ──
-        let posing: { joint: any; sx: number; sy: number; startQ: any; parentInv: any } | null = null
+        // ── 拖拽摆姿：普通拖动旋转关节；Shift 拖手腕/脚踝时用两骨骼 IK 移动末端。 ──
+        type PoseDrag =
+          | { kind: 'rotate'; root: any; joint: any; sx: number; sy: number; startQ: any; parentInv: any }
+          | { kind: 'ik'; root: any; joint: any; chain: any[]; plane: any }
+        let posing: PoseDrag | null = null
         const camAxis = (col: number) => new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, col).normalize()
 
         const onPointerDown = (e: PointerEvent) => {
@@ -536,6 +1699,7 @@ function Inner() {
           }
           if (!root) return
           select(root)
+          if (root.userData.locked) return
           // 导入 rigged 模型：蒙皮网格命中点找不到关节祖先 → 取最近的已标记骨骼
           if (curMode === 'pose' && !jnt && root.userData.rigged && hits[0].point) {
             let best: any = null
@@ -550,14 +1714,41 @@ function Inner() {
             jnt = best
           }
           if (curMode === 'pose' && jnt && jnt.parent) {
-            const parentWorld = jnt.parent.getWorldQuaternion(new THREE.Quaternion())
-            posing = { joint: jnt, sx: e.clientX, sy: e.clientY, startQ: jnt.quaternion.clone(), parentInv: parentWorld.clone().invert() }
+            curJoint = jnt
+            emitPoseEditor()
+            const name = String(jnt.userData.joint || '')
+            const ikNames: Record<string, [string, string]> = {
+              左腕: ['左肘', '左肩'], 右腕: ['右肘', '右肩'],
+              左踝: ['左膝', '左髋'], 右踝: ['右膝', '右髋']
+            }
+            const chainNames = e.shiftKey ? ikNames[name] : undefined
+            const chain = chainNames?.map((jointName) => findJointByName(root, jointName)).filter(Boolean) || []
+            if (chain.length === 2) {
+              const normal = cam.getWorldDirection(new THREE.Vector3()).normalize()
+              const point = jnt.getWorldPosition(new THREE.Vector3())
+              posing = { kind: 'ik', root, joint: jnt, chain, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, point) }
+            } else {
+              const parentWorld = jnt.parent.getWorldQuaternion(new THREE.Quaternion())
+              posing = { kind: 'rotate', root, joint: jnt, sx: e.clientX, sy: e.clientY, startQ: jnt.quaternion.clone(), parentInv: parentWorld.clone().invert() }
+            }
             orbit.enabled = false
             try { renderer.domElement.setPointerCapture(e.pointerId) } catch { /* ignore */ }
           }
         }
         const onPointerMove = (e: PointerEvent) => {
           if (!posing) return
+          if (posing.kind === 'ik') {
+            const rect = renderer.domElement.getBoundingClientRect()
+            ndc.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1)
+            raycaster.setFromCamera(ndc, cam)
+            const target = raycaster.ray.intersectPlane(posing.plane, new THREE.Vector3())
+            if (target) {
+              solveDirectorCcdIk({ root: posing.root, joints: posing.chain, effector: posing.joint, target })
+              posing.chain.forEach(clampJointObject)
+              posing.root.updateMatrixWorld(true)
+            }
+            return
+          }
           const dx = (e.clientX - posing.sx) * 0.012
           const dy = (e.clientY - posing.sy) * 0.012
           const right = camAxis(0)
@@ -570,9 +1761,14 @@ function Inner() {
         }
         const onPointerUp = (e: PointerEvent) => {
           if (!posing) return
+          const root = posing.root
+          if (posing.kind === 'rotate') clampJointObject(posing.joint)
           posing = null
           orbit.enabled = true
           try { renderer.domElement.releasePointerCapture(e.pointerId) } catch { /* ignore */ }
+          root.userData.poseName = '自定义'
+          sync()
+          emitPoseEditor()
           commit()
         }
         renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -591,11 +1787,12 @@ function Inner() {
 
         // WebGL 上下文丢失/恢复：preventDefault 才允许浏览器恢复上下文；恢复后立刻补渲一帧（mac GPU 切换/内存压力会触发）
         const onCtxLost = (e: Event) => { e.preventDefault() }
-        const onCtxRestored = () => { renderer.render(scene, cam) }
+        const onCtxRestored = () => { renderComposite(renderer, cam) }
         renderer.domElement.addEventListener('webglcontextlost', onCtxLost)
         renderer.domElement.addEventListener('webglcontextrestored', onCtxRestored)
 
         let raf = 0
+        let lastPanoramaStatusKey = ''
         const animate = () => {
           raf = requestAnimationFrame(animate)
           orbit.update()
@@ -603,8 +1800,39 @@ function Inner() {
           shotCam.updateMatrixWorld(true)
           camHelper.update()
           camHelper.visible = shotLocked // 锁定时主视图显示出图取景框
-          renderer.render(scene, cam)
-          if (pip && shotLocked) { camHelper.visible = false; pip.render(scene, shotCam) } // PiP 出图预览（不含取景框线）
+          recordedCameraHelpers.visible = shotLocked && recordedCamerasVisible && recordedCameraHelpers.children.length > 0
+          panoramaOriginMarker.visible = !!curEnvironment && shotLocked
+          jointMarker.visible = curMode === 'pose' && !!curJoint && curRoot?.visible !== false
+          if (jointMarker.visible) {
+            curJoint.getWorldPosition(jointMarker.position)
+            const markerScale = Math.max(0.65, Math.min(2.2, jointMarker.position.distanceTo(cam.position) * 0.16))
+            jointMarker.scale.setScalar(markerScale)
+          }
+          const panoramaStatusCamera = outCam()
+          const nextPanoramaStatus = assessDirectorPanoramaCamera({
+            pos: [panoramaStatusCamera.position.x, panoramaStatusCamera.position.y, panoramaStatusCamera.position.z]
+          }, curEnvironment)
+          const nextPanoramaStatusKey = nextPanoramaStatus
+            ? `${nextPanoramaStatus.level}:${nextPanoramaStatus.approximate}:${(Math.round(nextPanoramaStatus.distance * 20) / 20).toFixed(2)}`
+            : ''
+          if (nextPanoramaStatusKey !== lastPanoramaStatusKey) {
+            lastPanoramaStatusKey = nextPanoramaStatusKey
+            if (!disposed) setPanoramaCameraStatus(nextPanoramaStatus)
+          }
+          renderComposite(renderer, cam)
+          if (pip && shotLocked) {
+            camHelper.visible = false
+            const markerVisible = jointMarker.visible
+            const panoramaMarkerVisible = panoramaOriginMarker.visible
+            const recordedHelpersVisible = recordedCameraHelpers.visible
+            jointMarker.visible = false
+            panoramaOriginMarker.visible = false
+            recordedCameraHelpers.visible = false
+            renderComposite(pip, shotCam)
+            jointMarker.visible = markerVisible
+            panoramaOriginMarker.visible = panoramaMarkerVisible
+            recordedCameraHelpers.visible = recordedHelpersVisible
+          } // PiP 出图预览（不含取景框线和关节定位点）
         }
         animate()
         const ro = new ResizeObserver(() => {
@@ -642,25 +1870,61 @@ function Inner() {
             cam.updateProjectionMatrix()
           }
         }
-        // ── 灯光预设：只调两盏灯 + 背景色；不进 undo 快照（与视图操作同类）──
+        // 参考传统 3D 工具的两态视图：机位视角直接编辑出图相机；导演视角冻结机位，
+        // 主视口可自由绕场查看。回到机位视角时先恢复冻结机位，避免把导演观察角度误当成出图构图。
+        const setViewMode = (next: 'director' | 'camera') => {
+          if (next === 'director') {
+            if (!shotLocked) {
+              shotCam.copy(cam)
+              shotTarget.copy(orbit.target)
+              shotCam.updateProjectionMatrix()
+              shotCam.updateMatrixWorld(true)
+            }
+            shotLocked = true
+            return
+          }
+          if (shotLocked) {
+            cam.copy(shotCam)
+            orbit.target.copy(shotTarget)
+            cam.lookAt(orbit.target)
+            cam.updateProjectionMatrix()
+            cam.updateMatrixWorld(true)
+          }
+          shotLocked = false
+        }
+        const setSelectedTransform = (part: keyof TransformDraft, axis: 0 | 1 | 2, value: number) => {
+          if (!curRoot || curRoot.userData.locked || !Number.isFinite(value)) return
+          if (part === 'position') curRoot.position.setComponent(axis, value)
+          else if (part === 'rotation') {
+            const rad = (value * Math.PI) / 180
+            if (axis === 0) curRoot.rotation.x = rad
+            else if (axis === 1) curRoot.rotation.y = rad
+            else curRoot.rotation.z = rad
+          }
+          else curRoot.scale.setComponent(axis, Math.max(0.01, value))
+          curRoot.updateMatrixWorld(true)
+          emitTransform()
+        }
+        // 灯光预设作为人工主光。全景启用时降低旧的棚灯底光，让 PMREM 环境光承担空间融合。
         let curLighting = '默认'
         const applyLighting = (k: string) => {
           const L = LIGHTINGS.find((l) => l.k === k) || LIGHTINGS[0]
+          const environmentActive = !!environmentTexture
           curLighting = L.k
           hemi.color.setHex(L.hemiSky)
           ;(hemi.groundColor as any).setHex(L.hemiGround)
-          hemi.intensity = L.hemiInt
+          hemi.intensity = L.hemiInt * (environmentActive ? 0.22 : 1)
           dirLight.color.setHex(L.dirColor)
-          dirLight.intensity = L.dirInt
+          dirLight.intensity = L.dirInt * (environmentActive ? 0.72 : 1)
           dirLight.position.set(L.dirPos[0], L.dirPos[1], L.dirPos[2])
-          scene.background = new THREE.Color(L.bg)
+          if (!environmentTexture) scene.background = new THREE.Color(L.bg)
         }
         // 出图画幅：ar=0 不裁剪；kx/ky 为投影修正系数（描述里的方位/占比对应裁剪后画幅）
         let curAspect = 0
-        const cropScale = (): [number, number] => {
-          if (!curAspect) return [1, 1]
+        const cropScale = (aspectOverride = curAspect): [number, number] => {
+          if (!aspectOverride) return [1, 1]
           const va = cam.aspect || 1 // 视口画幅
-          return curAspect < va ? [va / curAspect, 1] : [1, curAspect / va]
+          return aspectOverride < va ? [va / aspectOverride, 1] : [1, aspectOverride / va]
         }
         // 居中裁剪 2D 画布到目标画幅（视口内 letterbox 画框显示的就是这个区域）
         const cropCanvas = (src: HTMLCanvasElement): HTMLCanvasElement => {
@@ -682,9 +1946,16 @@ function Inner() {
           tcontrol.detach()
           const chv = camHelper.visible
           const gv = grid.visible
+          const jmv = jointMarker.visible
+          const pov = panoramaOriginMarker.visible
+          const rhv = recordedCameraHelpers.visible
           camHelper.visible = false
           grid.visible = false // 网格线不进缩略图
-          renderer.render(scene, outCam())
+          jointMarker.visible = false
+          panoramaOriginMarker.visible = false
+          recordedCameraHelpers.visible = false
+          const captureCamera = outCam()
+          renderComposite(renderer, captureCamera)
           const src = renderer.domElement
           const tw = 96
           const th = Math.max(1, Math.round((tw * src.height) / src.width))
@@ -694,27 +1965,87 @@ function Inner() {
           c.getContext('2d')!.drawImage(src, 0, 0, tw, th)
           camHelper.visible = chv
           grid.visible = gv
+          jointMarker.visible = jmv
+          panoramaOriginMarker.visible = pov
+          recordedCameraHelpers.visible = rhv
           attachByMode()
           return cropCanvas(c).toDataURL('image/jpeg', 0.7)
         }
         // 一键落地：包围盒底部贴合地面
         const dropToGround = () => {
-          if (!curRoot) return
+          if (!curRoot || curRoot.userData.locked) return
           const box = new THREE.Box3().setFromObject(curRoot)
           if (box.isEmpty() || !isFinite(box.min.y)) return
           curRoot.position.y -= box.min.y
+          emitTransform()
           commit()
         }
+        const applyCameraPresetById = (presetId: string) => {
+          const preset = DIRECTOR_CAMERA_PRESETS.find((item) => item.id === presetId)
+          if (!preset) return
+          const candidates = preset.scope === 'subject' && curRoot && curRoot.visible !== false
+            ? [curRoot]
+            : subjects.filter((subject) => subject.obj.visible !== false).map((subject) => subject.obj)
+          const bounds = new THREE.Box3()
+          for (const object of candidates) bounds.union(new THREE.Box3().setFromObject(object, true))
+          const target = bounds.isEmpty() ? outTarget().clone() : bounds.getCenter(new THREE.Vector3())
+          const size = bounds.isEmpty() ? new THREE.Vector3(1.2, 1.8, 1.2) : bounds.getSize(new THREE.Vector3())
+          const scale = Math.max(0.55, size.y / 1.8, size.x / 2.2, size.z / 2.2)
+          const orientationRoot = preset.scope === 'subject' ? curRoot : null
+          const orientation = orientationRoot?.getWorldQuaternion?.(new THREE.Quaternion()) || new THREE.Quaternion()
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(orientation)
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(orientation)
+          forward.y = 0
+          right.y = 0
+          if (forward.lengthSq() < 0.01) forward.set(0, 0, 1)
+          if (right.lengthSq() < 0.01) right.set(1, 0, 0)
+          forward.normalize()
+          right.normalize()
+          const next = createDirectorPresetCamera(presetId, {
+            target: [target.x, target.y, target.z],
+            forward: [forward.x, forward.y, forward.z],
+            right: [right.x, right.y, right.z],
+            scale
+          })
+          applyCam(next)
+          if (!disposed) setFocal(next.focal)
+        }
+        const frameSubjectCoverage = (coverage: number) => {
+          const candidates = curRoot && curRoot.visible !== false
+            ? [curRoot]
+            : subjects.filter((subject) => subject.obj.visible !== false).map((subject) => subject.obj)
+          const bounds = new THREE.Box3()
+          for (const object of candidates) bounds.union(new THREE.Box3().setFromObject(object, true))
+          if (bounds.isEmpty()) return false
+          const center = bounds.getCenter(new THREE.Vector3())
+          const size = bounds.getSize(new THREE.Vector3())
+          const C = outCam()
+          let tanHalfVertical = Math.tan(THREE.MathUtils.degToRad(C.getEffectiveFOV()) / 2)
+          const outputAspect = curAspect || C.aspect || 1
+          if (curAspect && curAspect > C.aspect) tanHalfVertical *= C.aspect / curAspect
+          const outputVerticalFov = THREE.MathUtils.radToDeg(2 * Math.atan(tanHalfVertical))
+          const next = fitDirectorCameraToCoverage(getCam(), {
+            center: [center.x, center.y, center.z],
+            size: [size.x, size.y, size.z],
+            verticalFov: outputVerticalFov,
+            aspect: outputAspect,
+            coverage
+          })
+          applyCam(next)
+          return true
+        }
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
-        const stagePreset = (key: string) => {
+        const stagePreset = async (key: string) => {
           if (key === '双人对话') {
+            await ensureDirectorTemplate('female')
+            if (disposed) return
             const ca = nextMannequinColor()
-            const a = makeMannequin(ca.hex)
+            const a = makeMannequin(ca.hex, 'mannequin')
             a.position.set(-0.6, 0, 0)
             a.rotation.y = Math.PI / 2
             addSubject(a, '人台', undefined, ca.name)
             const cb = nextMannequinColor()
-            const b = makeMannequin(cb.hex)
+            const b = makeMannequin(cb.hex, 'female')
             b.position.set(0.6, 0, 0)
             b.rotation.y = -Math.PI / 2
             addSubject(b, '人台', undefined, cb.name)
@@ -739,14 +2070,30 @@ function Inner() {
           const colorHex = legacyIdx >= 0 ? MANNEQUIN_COLORS[legacyIdx].hex : MANNEQUIN_COLORS.find((c) => c.name === st.colorName)?.hex
           const obj: any = st.kind === '道具'
             ? new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ color: 0x8a93a6, roughness: 0.8 }))
-            : makeMannequin(assigned?.hex ?? colorHex ?? 0xc7ccd6)
+            : makeMannequin(assigned?.hex ?? colorHex ?? 0xc7ccd6, getDirectorBodyPreset(st.bodyType).bodyType)
           obj.position.set(st.pos[0], st.pos[1], st.pos[2])
           obj.rotation.set(st.rot[0], st.rot[1], st.rot[2])
           applyScale(obj, st.scale)
           obj.userData.kind = st.kind
-          if (st.poseName) obj.userData.poseName = st.poseName
-          if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
-          const id = uid('obj')
+          obj.userData.locked = !!st.locked
+          obj.visible = st.visible !== false
+          if (st.kind === '人台' && st.poseSchemaVersion !== 2) {
+            // v9 直接保存程序化骨架的 XYZ，正反面符号也存在错误；高精骨架不能复用这些绝对角。
+            // 迁移时按已命名预设重新计算，未命名旧姿势回到安全的正面站姿。
+            const migratedPose = getDirectorPose(st.poseName || '站立') || POSES[0]
+            applyMannequinPose(obj, migratedPose.k, migratedPose.m, migratedPose.offsetY || 0, migratedPose.controls)
+          } else {
+            if (st.poseName) obj.userData.poseName = st.poseName
+            if (st.kind === '人台') {
+              obj.userData.poseOffsetY = Number(st.poseOffsetY || 0)
+              const rig = findRigRoot(obj)
+              if (rig) rig.position.y = Number(rig.userData.restY || 0) + obj.userData.poseOffsetY
+            }
+            if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
+            if (st.kind === '人台' && st.poseOffsetY == null) groundMannequinRig(obj)
+          }
+          const id = st.id || uid('obj')
+          configureSubjectShadows(obj)
           scene.add(obj)
           subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName })
         }
@@ -760,11 +2107,17 @@ function Inner() {
               const joints: Record<string, [number, number, number]> = {}
               if (posed) o.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j) joints[j] = [c.rotation.x, c.rotation.y, c.rotation.z] })
               return {
+                id: s.id,
                 kind: s.kind,
                 assetId: s.kind === '模型' ? o.userData.assetId : undefined,
                 name: s.name,
                 desc: s.desc || undefined,
                 colorName: s.colorName || undefined,
+                bodyType: s.kind === '人台' ? getDirectorBodyPreset(o.userData.bodyType).bodyType : undefined,
+                poseSchemaVersion: s.kind === '人台' ? 2 : undefined,
+                poseOffsetY: s.kind === '人台' ? Number(o.userData.poseOffsetY || 0) : undefined,
+                locked: !!o.userData.locked,
+                visible: o.visible !== false,
                 pos: [o.position.x, o.position.y, o.position.z] as [number, number, number],
                 rot: [o.rotation.x, o.rotation.y, o.rotation.z] as [number, number, number],
                 scale: [o.scale.x, o.scale.y, o.scale.z] as [number, number, number],
@@ -772,7 +2125,8 @@ function Inner() {
                 poseName: o.userData.poseName
               }
             }),
-          cam: getCam()
+          cam: getCam(),
+          environment: curEnvironment ? { ...curEnvironment } : null
         })
         // 采集一个主体的 OpenPose 关键点（世界坐标）。人台从关节组推导；rigged 模型读已标记骨骼。
         const collectKeypoints = (obj: any): Record<string, any> => {
@@ -857,16 +2211,31 @@ function Inner() {
           scene.background = new THREE.Color(0x000000)
           const gv = grid.visible
           const gdv = ground.visible
+          const sgv = shadowGround.visible
+          const ebv = groundedSkybox?.visible
           const chv = camHelper.visible
+          const jmv = jointMarker.visible
+          const pov = panoramaOriginMarker.visible
+          const rhv = recordedCameraHelpers.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
+          shadowGround.visible = false
+          if (groundedSkybox) groundedSkybox.visible = false
           camHelper.visible = false // 取景框不进深度图
+          jointMarker.visible = false
+          panoramaOriginMarker.visible = false
+          recordedCameraHelpers.visible = false
           scene.overrideMaterial = depthMat
           renderer.render(scene, C)
           scene.overrideMaterial = null as any
           grid.visible = gv
           ground.visible = gdv
+          shadowGround.visible = sgv
+          if (groundedSkybox) groundedSkybox.visible = ebv
           camHelper.visible = chv
+          jointMarker.visible = jmv
+          panoramaOriginMarker.visible = pov
+          recordedCameraHelpers.visible = rhv
           scene.background = pbg
           C.far = pf
           C.updateProjectionMatrix()
@@ -884,8 +2253,7 @@ function Inner() {
         }
 
         // 恢复持久化场景，否则默认一个人台
-        const saved0 = useGraph.getState().project.director
-        if (saved0 && Array.isArray(saved0.subjects) && saved0.subjects.length) {
+        if (saved0 && Array.isArray(saved0.subjects)) {
           restoring = true
           sceneGen++
           const ps: Promise<void>[] = []
@@ -894,30 +2262,48 @@ function Inner() {
           if (saved0.cam) applyCam(saved0.cam)
           select(null)
           if (!disposed) {
-            setShots(saved0.shots || [])
+            setShots((saved0.shots || []).map((shot) => ({
+              ...shot,
+              durationMs: normalizeDirectorShotDuration(shot.durationMs),
+              shotType: shot.shotType || classifyDirectorShot(shot.cam)
+            })))
             if (saved0.prompt) setPrompt(saved0.prompt)
             setFocal(Math.round((saved0.cam && saved0.cam.focal) || 35))
             if (saved0.lighting && LIGHTINGS.some((l) => l.k === saved0.lighting)) {
               applyLighting(saved0.lighting)
               setLighting(saved0.lighting)
             }
-            if (saved0.lastTake) setLastTake(saved0.lastTake)
             if (saved0.aspect && ASPECTS.some((a) => a.k === saved0.aspect)) {
               const ar = ASPECTS.find((a) => a.k === saved0.aspect)?.ar ?? 0
               curAspect = ar
               setAspectK(saved0.aspect)
             }
+            if (saved0.environment?.assetId) {
+              void loadEnvironmentState(saved0.environment).catch((error: any) => {
+                toast('环境背景恢复失败：' + (error?.message || String(error)), 'warning')
+                curEnvironment = null
+                setEnvironment(null)
+              })
+            }
           }
           // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
-          void Promise.all(ps).then(() => { restoring = false; if (!disposed) { sync(); commit() } })
+          void Promise.all(ps)
+            .then(() => { if (!disposed) { sync(); commit() } })
+            .finally(() => { restoring = false })
         } else {
           addMannequin() // addSubject 内已 commit 种子
         }
 
         // 可传入任意相机/目标点（默认=出图相机）：分镜导出时按各机位相机离线算描述
-        const shotFragment = (C?: any, target?: any): string => {
+        const shotFragment = (C?: any, target?: any, settings?: { aspect?: string; lighting?: string }): string => {
           C = C || outCam()
           target = target || outTarget()
+          const fragmentAspect = settings?.aspect && ASPECTS.some((item) => item.k === settings.aspect)
+            ? ASPECTS.find((item) => item.k === settings.aspect)?.ar || 0
+            : curAspect
+          const fragmentLighting = settings?.lighting && LIGHTINGS.some((item) => item.k === settings.lighting)
+            ? settings.lighting
+            : curLighting
           const d = C.position.distanceTo(target)
           const dy = C.position.y - target.y
           const ang = (Math.asin(Math.max(-1, Math.min(1, dy / Math.max(0.001, d)))) * 180) / Math.PI
@@ -927,7 +2313,7 @@ function Inner() {
           const shot = d < 1.6 ? '特写(close-up)' : d < 3.2 ? '中景(medium shot)' : d < 6 ? '全景(full shot)' : '远景(wide shot)'
           const people = subjects.filter((s) => s.kind === '人台' && s.obj.visible !== false)
           const v = new THREE.Vector3()
-          const [kx, ky] = cropScale() // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
+          const [kx, ky] = cropScale(fragmentAspect) // 画幅裁剪修正：方位/占比对应裁剪后的出图画幅
           // 水平 + 垂直方位（只写水平会让竖排站位无法区分，角色绑定必错）
           const whereOf = (s: Subj): string => {
             s.obj.getWorldPosition(v)
@@ -939,15 +2325,17 @@ function Inner() {
             const vt = v.y > 0.25 ? '偏上' : v.y < -0.25 ? '偏下' : ''
             return h + vt
           }
-          // 人物在出图画幅中的纵向占比（脚底→头顶投影差），让模型知道人物该画多大
+          // 人物在出图画幅中的纵向占比：按实际包围盒投影，儿童/幼儿/蹲姿都不再套成人固定身高。
           const heightFracOf = (s: Subj): number => {
-            s.obj.getWorldPosition(v)
-            const by = v.clone().project(C).y
-            if (!isFinite(by)) return 0
-            v.y += 1.75 * s.obj.scale.y
-            const ty = v.project(C).y
-            if (!isFinite(ty)) return 0
-            return (Math.abs(ty - by) / 2) * ky
+            const box = new THREE.Box3().setFromObject(s.obj)
+            if (box.isEmpty()) return 0
+            const ys: number[] = []
+            for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) {
+              const projected = new THREE.Vector3(x, y, z).project(C)
+              if (isFinite(projected.y)) ys.push(projected.y)
+            }
+            if (!ys.length) return 0
+            return ((Math.max(...ys) - Math.min(...ys)) / 2) * ky
           }
           // 纵深顺序：按角色到相机距离排名（近→远），多角色时给 最前/中间/最后 标记
           const dists = people.map((s) => s.obj.getWorldPosition(new THREE.Vector3()).distanceTo(C.position))
@@ -1011,7 +2399,9 @@ function Inner() {
               // 纵深 + 悬空 + 朝向：竖排/空中站位也能被模型唯一绑定
               const extras = [depthOf(i), s.obj.getWorldPosition(new THREE.Vector3()).y > 0.3 ? '悬空' : '', facing].filter(Boolean).join('，')
               const action = pose || poseDescOf(s) // 一键预设有名字，手动摆姿从关节推导
-              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${action ? `(${action})` : ''}`
+              const bodyLabel = getDirectorBodyPreset(s.obj.userData.bodyType).promptLabel
+              const traits = [bodyLabel, action].filter(Boolean).join('，')
+              return `${nm}${where}${sizeTxt}${extras ? `，${extras}` : ''}${traits ? `(${traits})` : ''}`
             })
             .filter(Boolean)
             .join('，')
@@ -1028,9 +2418,10 @@ function Inner() {
             .filter(Boolean)
             .join('，')
           const propTxt = propLayout ? `场景道具：${propLayout}。` : ''
-          const lightTxt = (LIGHTINGS.find((l) => l.k === curLighting) || LIGHTINGS[0]).frag
-          const aspectTxt = curAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === curAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
-          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
+          const lightTxt = (LIGHTINGS.find((l) => l.k === fragmentLighting) || LIGHTINGS[0]).frag
+          const aspectTxt = fragmentAspect ? `画幅比例 ${ASPECTS.find((a) => a.ar === fragmentAspect)?.k || ''}，请严格保持这个宽高比构图。` : ''
+          const environmentTxt = curEnvironment?.description ? `环境：${curEnvironment.description}。` : ''
+          return `镜头：${lens}，${Math.round(f)}mm，${angle}，${shot}。${aspectTxt}${count}${propTxt}${environmentTxt}${lightTxt ? `灯光：${lightTxt}。` : ''}`
         }
 
         api.current = {
@@ -1038,14 +2429,24 @@ function Inner() {
           addProp,
           importFile: (ab: ArrayBuffer, name: string) => importGLTF(ab, name),
           selectById: (id: string) => { const s = findById(id); if (s) select(s.obj) },
+          clearSelection: () => select(null),
           renameById: (id: string, name: string) => { const s = findById(id); if (s) { s.name = name; sync() } },
           getDescById: (id: string) => findById(id)?.desc || '',
           setDescById: (id: string, desc: string) => { const s = findById(id); if (s && (s.desc || '') !== desc) { s.desc = desc || undefined; commit() } },
           removeById,
           duplicateById,
           toggleVisById,
+          toggleLockById,
           lookAtSelected,
           setMode: (m: TMode) => { curMode = m; attachByMode() },
+          setBodyType: setSelectedBodyType,
+          getPosePreviews,
+          selectJointByName,
+          setSelectedJointAxis,
+          commitJointEdit,
+          resetSelectedJoint,
+          setSelectedTransform,
+          commitTransform: commit,
           setFocal: (mm: number) => { const C = outCam(); C.setFocalLength(mm); C.updateProjectionMatrix() },
           shotSize: (kind: 'cu' | 'ms' | 'fs') => {
             const C = outCam(); const T = outTarget()
@@ -1062,32 +2463,46 @@ function Inner() {
             C.position.set(T.x + flat.x, y, T.z + flat.z)
             if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
-          // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
-          setLock: (v: boolean) => {
-            if (v && !shotLocked) { shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true) }
-            shotLocked = v
+          applyCameraPreset: applyCameraPresetById,
+          frameSubjectCoverage,
+          returnToPanoramaOrigin: () => {
+            if (!curEnvironment) return false
+            applyCam(returnDirectorCameraToPanoramaOrigin(getCam(), curEnvironment))
+            return true
           },
+          // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
+          setViewMode,
+          setLock: (v: boolean) => setViewMode(v ? 'director' : 'camera'),
           // 把出图机位设为当前视图（锁定状态下重新取景）
           setShotFromView: () => {
             shotCam.copy(cam); shotTarget.copy(orbit.target); shotCam.updateProjectionMatrix(); shotCam.updateMatrixWorld(true)
           },
           undo,
           redo: redoFn,
-          applyPose: (name: string, map: Record<string, [number, number, number]>) => {
-            if (!curRoot || curRoot.userData.kind !== '人台') return
-            curRoot.traverse((c: any) => { if (c.userData && c.userData.joint) c.rotation.set(0, 0, 0) })
-            curRoot.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && map[j]) c.rotation.set(map[j][0], map[j][1], map[j][2]) })
-            curRoot.userData.poseName = name === '站立' ? '' : name
+          applyPose: (name: string, map: Record<string, [number, number, number]>, offsetY = 0, controls: Record<string, number> = {}) => {
+            if (!curRoot || curRoot.userData.kind !== '人台' || curRoot.userData.locked) return
+            applyMannequinPose(curRoot, name, map, offsetY, controls)
+            sync()
             commit()
           },
-          setFacing: (rad: number) => { if (curRoot) { curRoot.rotation.y = rad; commit() } },
+          setFacing: (rad: number) => {
+            if (curRoot && !curRoot.userData.locked) { curRoot.rotation.y = rad; emitTransform(); commit() }
+          },
+          setRecordedCameraHelpers,
           capture: (): string => {
             tcontrol.detach()
             const chv = camHelper.visible
             const gv = grid.visible
+            const jmv = jointMarker.visible
+            const pov = panoramaOriginMarker.visible
+            const rhv = recordedCameraHelpers.visible
             camHelper.visible = false // 取景框不进成片参考图
             grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
-            renderer.render(scene, outCam())
+            jointMarker.visible = false
+            panoramaOriginMarker.visible = false
+            recordedCameraHelpers.visible = false
+            const captureCamera = outCam()
+            renderComposite(renderer, captureCamera)
             const src = renderer.domElement
             const c = document.createElement('canvas')
             c.width = src.width
@@ -1096,6 +2511,9 @@ function Inner() {
             const url = cropCanvas(c).toDataURL('image/png')
             camHelper.visible = chv
             grid.visible = gv
+            jointMarker.visible = jmv
+            panoramaOriginMarker.visible = pov
+            recordedCameraHelpers.visible = rhv
             attachByMode()
             return url
           },
@@ -1104,10 +2522,37 @@ function Inner() {
           poseTargetCount: () => subjects.filter((s) => s.kind === '人台' || (s.kind === '模型' && s.obj.userData.rigged)).length,
           getCam,
           applyCam,
+          resolveShotCamera: resolveShotCam,
+          resolveShotCameraAgainstCurrentScene: resolveShotCamAgainstCurrentScene,
+          createShotTargetBinding: (targetSubjectId: string, cameraState: any = getCam(), positionOverride?: [number, number, number]) => {
+            const position = positionOverride || getSubjectPosition(targetSubjectId)
+            return position ? createDirectorShotTargetBinding(cameraState, targetSubjectId, position) : null
+          },
+          captureShotSceneState: () => createDirectorShotSceneState(serializeSceneOnly().subjects),
+          captureShotEnvironmentState: () => curEnvironment ? {
+            mode: normalizeDirectorEnvironmentControls(curEnvironment).mode,
+            compositionMode: normalizeDirectorEnvironmentControls(curEnvironment).compositionMode,
+            backgroundScale: normalizeDirectorEnvironmentControls(curEnvironment).backgroundScale
+          } : undefined,
+          applyShotSceneState: async (sceneState: DirectorShot['sceneState'], cameraState: any) => {
+            if (!sceneState) { applyCam(cameraState); return }
+            const bodyTypes = new Set<DirectorBodyType>()
+            for (const state of sceneState.subjects) {
+              if (state.kind === '人台' && state.bodyType) bodyTypes.add(getDirectorBodyPreset(state.bodyType).bodyType)
+            }
+            await Promise.all([...bodyTypes].map((bodyType) => ensureDirectorTemplate(bodyType)))
+            if (disposed) return
+            const current = serializeSceneOnly()
+            await applyState({
+              subjects: applyDirectorShotSceneState(current.subjects, sceneState),
+              cam: cameraState
+            })
+            if (!disposed) commit()
+          },
           serializeSceneOnly,
           shotFragment,
           // 按给定机位相机离线算镜头描述（分镜导出用；不碰主视图/出图相机）
-          fragmentFor: (c: any) => {
+          fragmentFor: (c: any, settings?: { aspect?: string; lighting?: string }) => {
             const tc = new THREE.PerspectiveCamera(50, cam.aspect, 0.05, 1000)
             tc.filmGauge = FILM_GAUGE
             tc.position.set(c.pos[0], c.pos[1], c.pos[2])
@@ -1115,10 +2560,24 @@ function Inner() {
             const tv = new THREE.Vector3(c.target[0], c.target[1], c.target[2])
             tc.lookAt(tv)
             tc.updateMatrixWorld(true)
-            return shotFragment(tc, tv)
+            return shotFragment(tc, tv, settings)
           },
           setLighting: applyLighting,
           getLighting: () => curLighting,
+          importEnvironmentFile,
+          clearEnvironment: async () => {
+            const previousId = curEnvironment?.assetId
+            await loadEnvironmentState(null)
+            if (previousId) {
+              try { await attachStore()?.remove?.(previousId) } catch { /* keep UI usable when cleanup fails */ }
+            }
+          },
+          setEnvironmentDescription: (description: string) => {
+            if (!curEnvironment) return
+            curEnvironment = { ...curEnvironment, description: description || undefined }
+            if (!disposed) setEnvironment({ ...curEnvironment })
+          },
+          setEnvironmentSettings,
           setAspect: (ar: number) => { curAspect = ar },
           captureThumb,
           dropToGround,
@@ -1138,8 +2597,11 @@ function Inner() {
           safe(() => renderer.domElement.removeEventListener('webglcontextlost', onCtxLost))
           safe(() => renderer.domElement.removeEventListener('webglcontextrestored', onCtxRestored))
           safe(() => tcontrol.detach())
+          safe(() => tcontrol.removeEventListener('objectChange', onTransformObjectChange))
           safe(() => scene.remove(tHelper))
           safe(() => { scene.remove(camHelper); camHelper.dispose?.() })
+          safe(() => { clearRecordedCameraHelpers(); scene.remove(recordedCameraHelpers) })
+          safe(() => disposeEnvironmentTexture())
           safe(() => tcontrol.dispose())
           safe(() => orbit.dispose())
           safe(() => scene.traverse((o: any) => disposeTree(o))) // 释放各 mesh 的 geometry/material/texture
@@ -1175,8 +2637,7 @@ function Inner() {
     else if (k === 'e') onMode('scale')
     else if (k === 'r') onMode('pose')
     else if (k === 'f') { if (selId) api.current.lookAtSelected?.() }
-    else if (k === 'l') { const v = !locked; setLocked(v); api.current.setLock?.(v) }
-    else if (k === 'c') { if (lastTake) setCompareOn((v) => !v) }
+    else if (k === 'l') onViewMode(locked ? 'camera' : 'director')
     else if (e.key === 'Delete' || e.key === 'Backspace') { if (selId) api.current.removeById?.(selId) }
   }
   useEffect(() => {
@@ -1186,18 +2647,94 @@ function Inner() {
   }, [])
 
   // 切换选中 → 拉取该对象的语义描述进草稿
+  const selectedObj = objs.find((o) => o.id === selId)
+  const activeShotIndex = shots.findIndex((shot) => shot.id === activeShotId)
+  const activeShot = activeShotIndex >= 0 ? shots[activeShotIndex] : null
+  const resolvedShots = ready
+    ? shots.map((shot) => ({ ...shot, cam: api.current.resolveShotCamera?.(shot) || shot.cam }))
+    : shots
+  const shotContinuityIssues = analyzeDirectorShotContinuity(resolvedShots)
+  const activeShotIssues = activeShot
+    ? shotContinuityIssues.filter((issue) => issue.fromId === activeShot.id || issue.toId === activeShot.id)
+    : []
+  const shotsDurationMs = getDirectorShotsDurationMs(shots)
   useEffect(() => { setDescDraft(selId ? api.current.getDescById?.(selId) || '' : '') }, [selId])
+  useEffect(() => { setInspectorTab(inferDirectorInspectorTab(selKind)) }, [selId, selKind])
+  useEffect(() => { writeDirectorPanelWidth('director.leftPanelWidth', leftPanelWidth) }, [leftPanelWidth])
+  useEffect(() => { writeDirectorPanelWidth('director.rightPanelWidth', rightPanelWidth) }, [rightPanelWidth])
+  useEffect(() => {
+    if (ready) api.current.setRecordedCameraHelpers?.(shots, activeShotId, showShotCameras)
+  }, [ready, shots, activeShotId, showShotCameras, sceneRevision])
+  useEffect(() => {
+    if (!ready || !activeShot?.targetSubjectId) return
+    const resolvedCam = api.current.resolveShotCameraAgainstCurrentScene?.(activeShot)
+    if (!resolvedCam) return
+    api.current.applyCam?.(resolvedCam)
+    setFocal(Math.round(resolvedCam.focal || 35))
+  }, [ready, sceneRevision, activeShotId])
+  useEffect(() => {
+    const bodyType = selectedObj?.bodyType
+    if (!ready || selKind !== '人台' || !bodyType) {
+      setPosePreviews({})
+      setPosePreviewStatus('idle')
+      return
+    }
+    let cancelled = false
+    setPosePreviews({})
+    setPosePreviewStatus('loading')
+    void Promise.resolve(api.current.getPosePreviews?.(bodyType)).then((result) => {
+      if (cancelled) return
+      if (result && Object.keys(result).length) {
+        setPosePreviews(result)
+        setPosePreviewStatus('ready')
+      } else {
+        setPosePreviewStatus('error')
+      }
+    }).catch(() => {
+      if (!cancelled) setPosePreviewStatus('error')
+    })
+    return () => { cancelled = true }
+  }, [ready, selKind, selectedObj?.bodyType, posePreviewNonce])
+
+  const beginPanelResize = (side: 'left' | 'right', event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = side === 'left' ? leftPanelWidth : rightPanelWidth
+    const onMove = (move: PointerEvent) => {
+      const delta = move.clientX - startX
+      if (side === 'left') setLeftPanelWidth(Math.max(184, Math.min(320, startWidth + delta)))
+      else setRightPanelWidth(Math.max(280, Math.min(420, startWidth - delta)))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   const onFocal = (mm: number) => { setFocal(mm); api.current.setFocal?.(mm) }
   const onAspect = (k: string) => { setAspectK(k); api.current.setAspect?.(ASPECTS.find((a) => a.k === k)?.ar ?? 0) }
 
-  // letterbox 画框尺寸：中央可视区（top-16/bottom-24/left-52/right-64）内按画幅取最大内接矩形
+  const onViewMode = (next: 'director' | 'camera') => {
+    const director = next === 'director'
+    setLocked(director)
+    api.current.setViewMode?.(next)
+  }
+
+  const shotStripHeight = shotStripExpanded ? 136 : 40
+  const bottomUiInset = 84 + shotStripHeight + 8
+  const viewportLeft = panelsCollapsed ? 12 : leftPanelWidth + 16
+  const viewportRight = panelsCollapsed ? 12 : rightPanelWidth + 16
+  const viewportStyle = { left: viewportLeft, right: viewportRight }
+
+  // letterbox 画框尺寸：中央可视区内按画幅取最大内接矩形；收起侧栏时随视口扩展。
   const [frameRect, setFrameRect] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => {
     if (!curAr) { setFrameRect(null); return }
     const calc = () => {
-      const cw = Math.max(1, window.innerWidth - 208 - 256)
-      const ch = Math.max(1, window.innerHeight - 64 - 96)
+      const cw = Math.max(1, window.innerWidth - viewportLeft - viewportRight)
+      const ch = Math.max(1, window.innerHeight - 64 - bottomUiInset)
       let w = cw
       let h = w / curAr
       if (h > ch) { h = ch; w = h * curAr }
@@ -1206,7 +2743,7 @@ function Inner() {
     calc()
     window.addEventListener('resize', calc)
     return () => window.removeEventListener('resize', calc)
-  }, [curAr])
+  }, [curAr, viewportLeft, viewportRight, bottomUiInset])
   const onMode = (m: TMode) => { setMode(m); api.current.setMode?.(m) }
   const onImportClick = () => fileRef.current?.click()
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1214,6 +2751,129 @@ function Inner() {
     e.target.value = ''
     if (!f) return
     api.current.importFile?.(await f.arrayBuffer(), f.name)
+  }
+  const onEnvironmentFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > DIRECTOR_SCENE_ASSET_LIMIT_BYTES) { toast('全景图超过 50MB 上限', 'error'); return }
+    setSceneIoBusy(true)
+    try {
+      const extensionMime = /\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg'
+      await api.current.importEnvironmentFile?.(await file.arrayBuffer(), file.name, file.type || extensionMime, { source: 'local' })
+      saveScene()
+      toast('全景环境已载入', 'success')
+    } catch (error: any) {
+      toast('全景环境导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
+  }
+  const importCanvasPanorama = async (cardId: string) => {
+    const source = canvasPanoramas.find((item) => item.id === cardId)
+    if (!source) { toast('所选 AI 全景已不在当前画布', 'error'); return }
+    setCanvasPanoramaLoadingId(cardId)
+    setSceneIoBusy(true)
+    try {
+      const bytes = await loadImageInput({ url: source.assetUrl, localPath: source.assetLocalPath })
+      if (!bytes) throw new Error('无法读取全景媒体，请确认源卡片文件仍然存在')
+      if (bytes.byteLength > DIRECTOR_SCENE_ASSET_LIMIT_BYTES) throw new Error('全景图超过 50MB 上限')
+      await api.current.importEnvironmentFile?.(bytes, source.title, inferDirectorPanoramaMime(source), {
+        source: 'canvas',
+        sourceCardId: source.id,
+        description: source.description
+      })
+      saveScene()
+      toast(`已从当前画布载入全景：${source.title}`, 'success')
+    } catch (error: any) {
+      toast('画布全景导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setCanvasPanoramaLoadingId(null)
+      setSceneIoBusy(false)
+    }
+  }
+  const downloadJson = (value: unknown, fileName: string) => {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+  const exportDirectorScene = async () => {
+    const scene = buildSceneSnapshot()
+    if (!scene) { toast('导演场景尚未就绪', 'error'); return }
+    setSceneIoBusy(true)
+    try {
+      const store = window.mulby?.storage?.attachment
+      const assets = []
+      const missing: string[] = []
+      for (const id of collectDirectorSceneAssetIds(scene)) {
+        const bytes: any = await store?.get?.(id)
+        if (!bytes) { missing.push(id); continue }
+        const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
+        assets.push({
+          id,
+          mimeType: await store?.getType?.(id) || 'application/octet-stream',
+          dataBase64: encodeDirectorSceneBytes(view)
+        })
+      }
+      const bundle = createDirectorSceneExchangeBundle(scene, assets)
+      const projectName = (useGraph.getState().project.name || 'director-scene').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80)
+      downloadJson(bundle, `${projectName}.director.json`)
+      if (missing.length) toast(`工程已导出，但有 ${missing.length} 个缺失附件未能打包`, 'warning')
+      else toast(`导演工程已导出，包含 ${assets.length} 个附件`, 'success')
+    } catch (error: any) {
+      toast('导演工程导出失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
+  }
+  const onDirectorSceneFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (file.size > 120 * 1024 * 1024) { toast('导演工程文件超过 120MB 上限', 'error'); return }
+    setSceneIoBusy(true)
+    const createdIds: string[] = []
+    try {
+      const bundle = parseDirectorSceneExchange(JSON.parse(await file.text()))
+      const confirmed = await confirmDialog({
+        title: '替换当前导演场景？',
+        message: `将导入 ${bundle.scene.subjects.length} 个对象和 ${bundle.scene.shots.length} 个机位。当前导演场景会被替换。`,
+        confirmLabel: '替换并导入',
+        cancelLabel: '取消',
+        danger: true
+      })
+      if (!confirmed) return
+      const store = window.mulby?.storage?.attachment
+      if (bundle.assets.length && (!store?.put || !store?.remove)) throw new Error('当前宿主不支持导演工程附件导入')
+      const idMap = new Map<string, string>()
+      for (const asset of bundle.assets) {
+        const nextId = uid('director-asset')
+        const bytes = decodeDirectorSceneBase64(asset.dataBase64)
+        const result = await store?.put?.(nextId, bytes, asset.mimeType)
+        const stored = result === true || !!(result && (result as any).ok)
+        if (!stored) throw new Error(`附件写入失败：${asset.id}`)
+        createdIds.push(nextId)
+        idMap.set(asset.id, nextId)
+      }
+      const nextScene = remapDirectorSceneAssetIds(bundle.scene, idMap)
+      const unresolved = collectDirectorSceneAssetIds(bundle.scene).filter((id) => !idMap.has(id))
+      useGraph.getState().setDirectorScene(nextScene)
+      if (unresolved.length) toast(`场景已导入，但有 ${unresolved.length} 个外部附件未包含在文件中`, 'warning')
+      else toast(`导演工程已导入，恢复 ${bundle.assets.length} 个附件`, 'success')
+      onReload()
+    } catch (error: any) {
+      const store = window.mulby?.storage?.attachment
+      for (const id of createdIds) {
+        try { await store?.remove?.(id) } catch { /* ignore cleanup failure */ }
+      }
+      toast('导演工程导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setSceneIoBusy(false)
+    }
   }
 
   // 组装完整提示词（生成与「复制提示词」诊断共用同一出口，保证你看到的就是模型收到的）
@@ -1234,7 +2894,7 @@ function Inner() {
     return { useControl, usePose, full: `${note}${api.current.shotFragment()}\n\n${prompt.trim()}\n\n${preserve}` }
   }
 
-  const doGenerate = async (placeIndex: number): Promise<string | null> => {
+  const doGenerate = async (placeIndex: number, outputAspect = aspect, shotNotes = ''): Promise<string | null> => {
     const proj = useGraph.getState().project
     const controlModel = proj.defaultControlModel
     const model = controlModel || proj.defaultImageModel
@@ -1244,7 +2904,8 @@ function Inner() {
     }
     try {
       const ai = window.mulby.ai
-      const { useControl, usePose, full } = buildFullPrompt()
+      const { useControl, usePose, full: basePrompt } = buildFullPrompt()
+      const full = shotNotes.trim() ? `${basePrompt}\n\n镜头执行备注：${shotNotes.trim()}` : basePrompt
       if (usePose && (api.current.poseTargetCount?.() || 0) === 0) {
         toast('骨架控制需要至少一个人台或带骨骼的导入模型', 'error')
         return null
@@ -1257,9 +2918,9 @@ function Inner() {
       const att = await ai.attachments.upload({ buffer: buf.buffer, mimeType: 'image/png', purpose: 'image' })
       // size/aspectRatio 透传（宿主已支持）：OpenAI 系用 size 定死输出尺寸，Gemini 系用 aspectRatio
       const editInput: { model: string; imageAttachmentId: string; prompt: string; size?: string; aspectRatio?: string } = { model, imageAttachmentId: att.attachmentId, prompt: full }
-      if (aspect !== '视口') {
-        editInput.aspectRatio = aspect
-        const sz = ({ '1:1': '1024x1024', '3:2': '1536x1024', '2:3': '1024x1536' } as Record<string, string>)[aspect]
+      if (outputAspect !== '视口') {
+        editInput.aspectRatio = outputAspect
+        const sz = ({ '1:1': '1024x1024', '3:2': '1536x1024', '2:3': '1024x1536' } as Record<string, string>)[outputAspect]
         if (sz) editInput.size = sz // gpt-image 系只支持这三档；16:9/9:16 仅 Gemini 系按 aspectRatio 生效
       }
       const res = await ai.images.edit(editInput)
@@ -1327,9 +2988,11 @@ function Inner() {
   }
   // 生成指定机位并把成片回贴为该 shot 的 take（机位即分镜；takes 保留最近 6 条历史）
   const genShot = async (i: number): Promise<boolean> => {
-    api.current.applyCam?.(shots[i].cam)
-    const url = await doGenerate(i)
-    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); setLastTake(url); return true }
+    const shot = shots[i]
+    if (!shot) return false
+    if (!(await applyShot(shot, 'full'))) return false
+    const url = await doGenerate(i, shot.aspect || aspect, shot.notes || '')
+    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
     return false
   }
   // 在 takes 历史里切换当前成片（循环）
@@ -1356,10 +3019,107 @@ function Inner() {
     const cam = api.current.getCam?.()
     if (!cam) return
     const thumb = api.current.captureThumb?.()
-    setShots((s) => [...s, { id: 'shot_' + Date.now().toString(36), name: `机位${s.length + 1}`, cam, thumb }])
+    const id = uid('shot')
+    const targetBinding = selId ? api.current.createShotTargetBinding?.(selId, cam) : null
+    const sceneState = api.current.captureShotSceneState?.()
+    const environmentState = api.current.captureShotEnvironmentState?.()
+    setShots((current) => [
+      ...current,
+      {
+        ...createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting }),
+        sceneState,
+        environmentState,
+        ...(targetBinding || {})
+      }
+    ])
+    setActiveShotId(id)
+    setInspectorTab('camera')
   }
-  const applyShot = (sh: { cam: any }) => { api.current.applyCam?.(sh.cam); setFocal(Math.round(sh.cam?.focal || 35)) }
-  const delShot = (id: string) => setShots((s) => s.filter((x) => x.id !== id))
+  const applyShot = async (shot: DirectorShot, applyMode: ShotApplyMode = 'full'): Promise<boolean> => {
+    if (shotApplyLockRef.current) return false
+    shotApplyLockRef.current = true
+    setShotApplyingId(shot.id)
+    setActiveShotId(shot.id)
+    setInspectorTab('camera')
+    try {
+      const resolvedCam = applyMode === 'full'
+        ? api.current.resolveShotCamera?.(shot) || shot.cam
+        : api.current.resolveShotCameraAgainstCurrentScene?.(shot) || shot.cam
+      api.current.clearSelection?.()
+      if (applyMode === 'full' && shot.sceneState) await api.current.applyShotSceneState?.(shot.sceneState, resolvedCam)
+      else api.current.applyCam?.(resolvedCam)
+      setFocal(Math.round(resolvedCam?.focal || 35))
+      if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
+      if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
+        setLighting(shot.lighting)
+        api.current.setLighting?.(shot.lighting)
+      }
+      if (shot.environmentState && environment) {
+        api.current.setEnvironmentSettings?.(shot.environmentState, true)
+      }
+      return true
+    } catch (error: any) {
+      toast('镜头状态应用失败：' + (error?.message || String(error)), 'error')
+      return false
+    } finally {
+      shotApplyLockRef.current = false
+      setShotApplyingId(null)
+    }
+  }
+  const duplicateShot = (id: string) => {
+    setShots((current) => {
+      const index = current.findIndex((shot) => shot.id === id)
+      if (index < 0) return current
+      const source = current[index]
+      const copy = { ...source, id: uid('shot'), name: `${source.name} 副本`, takes: source.takes ? [...source.takes] : undefined }
+      const next = current.slice()
+      next.splice(index + 1, 0, copy)
+      return next
+    })
+  }
+  const renameShot = (id: string, name: string) => setShots((current) => current.map((shot) => (shot.id === id ? { ...shot, name } : shot)))
+  const updateActiveShot = (patch: Partial<DirectorShot>) => {
+    if (!activeShotId) return
+    setShots((current) => current.map((shot) => (shot.id === activeShotId ? { ...shot, ...patch } : shot)))
+  }
+  const setActiveShotTarget = (targetSubjectId: string | null) => {
+    if (!activeShotId) return
+    setShots((current) => current.map((shot) => {
+      if (shot.id !== activeShotId) return shot
+      if (!targetSubjectId) return { ...shot, targetSubjectId: undefined, targetOffset: undefined, cameraOffset: undefined }
+      const resolvedCam = api.current.resolveShotCamera?.(shot) || shot.cam
+      const targetStatePosition = shot.sceneState?.subjects.find((state) => state.subjectId === targetSubjectId)?.pos
+      const binding = api.current.createShotTargetBinding?.(targetSubjectId, resolvedCam, targetStatePosition)
+      return binding ? { ...shot, cam: resolvedCam, ...binding } : shot
+    }))
+  }
+  const refreshActiveShot = (refreshMode: ShotApplyMode = 'full') => {
+    if (!activeShotId) return
+    const cam = api.current.getCam?.()
+    if (!cam) return
+    const thumb = api.current.captureThumb?.()
+    setShots((current) => current.map((shot) => {
+      if (shot.id !== activeShotId) return shot
+      const binding = shot.targetSubjectId ? api.current.createShotTargetBinding?.(shot.targetSubjectId, cam) : null
+      return {
+          ...shot,
+          cam,
+          thumb,
+          aspect,
+          lighting: api.current.getLighting?.() || lighting,
+          shotType: classifyDirectorShot(cam),
+          sceneState: refreshMode === 'full' ? api.current.captureShotSceneState?.() : shot.sceneState,
+          environmentState: api.current.captureShotEnvironmentState?.(),
+          ...(binding || {})
+        }
+    }))
+    toast(refreshMode === 'full' ? '已更新机位和演员调度' : '已更新机位，保留原演员调度', 'success')
+  }
+  const reorderShots = (draggedId: string, targetId: string) => setShots((current) => reorderDirectorShots(current, draggedId, targetId))
+  const delShot = (id: string) => {
+    setShots((current) => current.filter((shot) => shot.id !== id))
+    if (activeShotId === id) setActiveShotId(null)
+  }
 
   // 避障落位：从首选点向右/向下扫描，找一块 w×h（中心坐标，含边距）不与现有卡片重叠的空位；
   // 视口内全满则放到最低卡片下方
@@ -1409,15 +3169,26 @@ function Inner() {
       const col = i % cols
       const row = Math.floor(i / cols)
       const center = { x: left + col * (W + gapX) + W / 2, y: top + row * (H + gapY) + H / 2 }
-      const frag = (api.current.fragmentFor?.(s.cam) as string) || ''
-      const full = `${prompt.trim()}\n\n${frag}`.trim()
+      const resolvedCam = api.current.resolveShotCamera?.(s) || s.cam
+      const frag = (api.current.fragmentFor?.(resolvedCam, { aspect: s.aspect, lighting: s.lighting }) as string) || ''
+      const note = s.notes?.trim() ? `镜头执行备注：${s.notes.trim()}` : ''
+      const full = `${prompt.trim()}\n\n${frag}${note ? `\n\n${note}` : ''}`.trim()
       const id = g.addCard('image', center, {
         title: s.name,
         prompt: full,
+        params: s.aspect && s.aspect !== '视口' ? { aspect: s.aspect } : {},
         status: s.take ? 'done' : 'idle',
         assetUrl: s.take || null,
         mime: s.take ? 'image/png' : null,
-        meta: { shot: { shotNumber: i + 1, desc: s.name, imagePrompt: full, camera: frag } }
+        meta: {
+          shot: {
+            shotNumber: i + 1,
+            desc: s.notes?.trim() ? `${s.name}：${s.notes.trim()}` : s.name,
+            imagePrompt: full,
+            camera: frag,
+            duration: normalizeDirectorShotDuration(s.durationMs) / 1000
+          }
+        }
       }, boardId)
       ids.push(id)
     })
@@ -1430,11 +3201,12 @@ function Inner() {
   const panelCls = 'rounded-2xl border border-white/10 bg-zinc-950/80 shadow-[0_12px_40px_rgba(0,0,0,0.45)]'
   const secCls = 'text-[11px] font-medium text-white/50' // 面板分区小标题
   const hintCls = 'text-white/35 leading-snug text-[11px]'
-  const Btn = ({ on, onClick, children, title }: { on?: boolean; onClick: () => void; children: any; title: string }) => (
+  const Btn = ({ on, onClick, children, title, disabled }: { on?: boolean; onClick: () => void; children: any; title: string; disabled?: boolean }) => (
     <button
       onClick={onClick}
       title={title}
-      className={`px-2 py-1 rounded-lg text-xs flex items-center gap-1 border transition-colors duration-150 active:scale-[0.97] ${
+      disabled={disabled}
+      className={`px-1.5 py-1 rounded-lg text-xs flex items-center gap-1 border whitespace-nowrap transition-colors duration-150 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ${
         on ? 'border-amber-300/50 bg-amber-300/15 text-amber-200' : 'border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white'
       }`}
     >
@@ -1443,6 +3215,44 @@ function Inner() {
   )
 
   const kindIcon = (k: string) => (k === '人台' ? <User size={12} /> : k === '道具' ? <BoxIcon size={12} /> : <Upload size={12} />)
+  const query = objectQuery.trim().toLocaleLowerCase()
+  const filteredObjs = query
+    ? objs.filter((o) => `${o.name} ${o.kind}`.toLocaleLowerCase().includes(query))
+    : objs
+  const filteredShots = query
+    ? shots.filter((shot) => `${shot.name} 机位 镜头 ${shot.shotType || ''}`.toLocaleLowerCase().includes(query))
+    : shots
+  const objectGroups = ['人台', '道具', '模型']
+    .map((kind) => ({ kind, items: filteredObjs.filter((o) => o.kind === kind) }))
+    .filter((group) => group.items.length > 0)
+  const setTransformAxis = (part: keyof TransformDraft, axis: 0 | 1 | 2, raw: string) => {
+    const value = Number(raw)
+    if (!Number.isFinite(value)) return
+    api.current.setSelectedTransform?.(part, axis, value)
+  }
+  const renderAxisEditor = (label: string, part: keyof TransformDraft, step: number) => {
+    if (!transformDraft) return null
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="w-8 shrink-0 text-white/40">{label}</span>
+        {(['X', 'Y', 'Z'] as const).map((axisLabel, axis) => (
+          <label key={axisLabel} className="min-w-0 flex-1 flex items-center rounded-lg border border-white/10 bg-white/[0.04] focus-within:border-amber-300/50 transition-colors">
+            <span className="pl-1.5 text-[9px] font-semibold text-white/30">{axisLabel}</span>
+            <input
+              aria-label={`${label} ${axisLabel}`}
+              type="number"
+              step={step}
+              value={transformDraft[part][axis]}
+              disabled={selectedObj?.locked}
+              onChange={(e) => setTransformAxis(part, axis as 0 | 1 | 2, e.target.value)}
+              onBlur={() => api.current.commitTransform?.()}
+              className="w-full min-w-0 bg-transparent px-1 py-1 text-right text-[10px] tabular-nums outline-none disabled:opacity-35"
+            />
+          </label>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-[90] bg-zinc-950 flex flex-col text-white overscroll-none" data-interactive>
@@ -1451,7 +3261,7 @@ function Inner() {
       {/* 三分构图线 + 中心十字（DOM overlay，不进 WebGL 渲染，出图/深度图不受污染）。
           范围限制在中央可视取景区内；不带 z-index——按 DOM 顺序沉到左右面板/顶栏/底栏之下，只盖 3D 视口 */}
       {showGuides && ready && (
-        <svg className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none" viewBox="0 0 3 3" preserveAspectRatio="none">
+        <svg className="absolute top-16 pointer-events-none" style={{ ...viewportStyle, bottom: bottomUiInset }} viewBox="0 0 3 3" preserveAspectRatio="none">
           {[1, 2].map((n) => (
             <g key={n} stroke="#fff" strokeOpacity="0.28" strokeWidth="1" vectorEffect="non-scaling-stroke">
               <line x1={n} y1="0" x2={n} y2="3" vectorEffect="non-scaling-stroke" />
@@ -1466,15 +3276,8 @@ function Inner() {
       )}
       {/* 出图画幅框（选了非「视口」画幅时）：琥珀框内=模型实际看到的构图范围，框外压暗；同样沉在面板之下 */}
       {frameRect && (
-        <div className="absolute top-16 bottom-24 left-52 right-64 pointer-events-none grid place-items-center">
+        <div className="absolute top-16 pointer-events-none grid place-items-center" style={{ ...viewportStyle, bottom: bottomUiInset }}>
           <div style={{ width: frameRect.w, height: frameRect.h }} className="border border-amber-200/70 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" />
-        </div>
-      )}
-      {/* 成片叠加对比：最近一次成片半透明盖在视口上，直接对着它调摆姿/构图/焦段再重拍。
-          与构图线同理不带 z-index：沉到面板之下，只覆盖 3D 视口区域 */}
-      {compareOn && lastTake && (
-        <div className="absolute inset-0 pointer-events-none grid place-items-center">
-          <img src={lastTake} className="max-w-full max-h-full object-contain" style={{ opacity: compareOpacity }} />
         </div>
       )}
       {!ready && (
@@ -1483,6 +3286,8 @@ function Inner() {
         </div>
       )}
       <input ref={fileRef} type="file" accept=".glb,.gltf" className="hidden" onChange={onFile} />
+      <input ref={environmentFileRef} type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" className="hidden" onChange={onEnvironmentFile} />
+      <input ref={sceneFileRef} type="file" accept=".json,.director.json,application/json" className="hidden" onChange={onDirectorSceneFile} />
 
       {/* 顶栏：一体化玻璃工具条（品牌 / 变换模式 / 视图 / 取景 / 撤销重做 / 关闭） */}
       <div className="absolute top-3 left-3 right-3 flex justify-center pointer-events-none z-[3]">
@@ -1497,14 +3302,18 @@ function Inner() {
           <Btn on={mode === 'scale'} onClick={() => onMode('scale')} title="缩放整体 (E)"><Maximize size={13} /> 缩放</Btn>
           <Btn on={mode === 'pose'} onClick={() => onMode('pose')} title="摆姿 (R)"><Hand size={13} /> 摆姿</Btn>
           <div className="w-px h-5 bg-white/10" />
-          <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
-          <Btn on={compareOn} onClick={() => lastTake && setCompareOn((v) => !v)} title={lastTake ? '叠加成片对比 (C)' : '尚无成片可对比'}><Layers size={13} /></Btn>
-          {compareOn && lastTake && (
-            <input type="range" min={0.1} max={1} step={0.05} value={compareOpacity} onChange={(e) => setCompareOpacity(Number(e.target.value))} className="w-16 accent-amber-300" title="成片叠加透明度" />
-          )}
+          <Btn on={!locked} onClick={() => onViewMode('camera')} title="机位视角：直接调整最终出图相机"><Camera size={13} /> 机位视角</Btn>
+          <Btn on={locked} onClick={() => onViewMode('director')} title="导演视角：冻结出图机位，自由绕场查看"><Clapperboard size={13} /> 导演视角</Btn>
+          {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把当前导演观察角度更新为出图机位"><Crosshair size={13} /> 更新机位</Btn>}
           <div className="w-px h-5 bg-white/10" />
-          <Btn on={locked} onClick={() => { const v = !locked; setLocked(v); api.current.setLock?.(v) }} title="锁定取景 (L)"><Lock size={13} /> {locked ? '取景已锁' : '锁定取景'}</Btn>
-          {locked && <Btn onClick={() => api.current.setShotFromView?.()} title="把出图机位设为当前视图"><Camera size={13} /> 设为机位</Btn>}
+          <Btn on={showGuides} onClick={() => setShowGuides((v) => !v)} title="三分构图线开关"><Grid3x3 size={13} /></Btn>
+          <Btn on={panelsCollapsed} onClick={() => setPanelsCollapsed((v) => !v)} title={panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}>
+            {panelsCollapsed ? <PanelLeftOpen size={13} /> : <PanelLeftClose size={13} />}
+            <span className="sr-only">{panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}</span>
+          </Btn>
+          <div className="w-px h-5 bg-white/10" />
+          <Btn onClick={() => sceneFileRef.current?.click()} disabled={sceneIoBusy || busy || !!shotApplyingId} title="导入便携导演工程 JSON"><FileUp size={13} /> 导入</Btn>
+          <Btn onClick={() => { void exportDirectorScene() }} disabled={sceneIoBusy || busy || !!shotApplyingId} title="导出便携导演工程 JSON，包含模型与全景附件"><Download size={13} /> 导出</Btn>
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
           <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
@@ -1514,195 +3323,399 @@ function Inner() {
       </div>
 
       {/* PiP：出图取景预览（仅锁定取景时显示） */}
-      <div className={`absolute top-16 right-[17rem] z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
+      <div style={{ right: viewportRight }} className={`absolute top-16 z-[2] rounded-xl overflow-hidden ring-1 ring-amber-300/50 shadow-[0_8px_30px_rgba(0,0,0,0.5)] ${locked ? '' : 'hidden'}`}>
         <div ref={pipRef} />
         <div className="absolute top-0 left-0 px-1.5 py-0.5 text-[10px] bg-zinc-950/70 text-amber-200/90 rounded-br-lg">出图取景</div>
       </div>
 
       {/* 左：Outliner */}
-      <div className={`absolute top-16 left-3 bottom-24 w-48 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
-        <span className={secCls}>场景对象</span>
-        <div className="flex items-center gap-1">
-          <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={12} /> 人台</Btn>
-          <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={12} /> 道具</Btn>
-          <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
-        </div>
-        <div className="flex items-center gap-1">
-          <Btn onClick={() => { api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
-          <Btn onClick={() => { api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
-        </div>
-        <div className="h-px bg-white/[0.07]" />
-        <div className="flex flex-col gap-1 overflow-auto ace-scroll flex-1">
-          {objs.map((o) => (
-            <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors ${selId === o.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/75'}`}>
-              {editId === o.id ? (
-                <input
-                  autoFocus
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
-                    if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
-                    else if (e.key === 'Escape') setEditId(null)
-                  }}
-                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
-                />
-              ) : (
-                <button
-                  onClick={() => api.current.selectById?.(o.id)}
-                  onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
-                  title={o.kind}
-                  className="flex-1 flex items-center gap-1.5 text-left truncate"
-                >
-                  {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
-                </button>
-              )}
-              <button onClick={() => api.current.toggleVisById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="显隐">{o.visible ? <Eye size={12} /> : <EyeOff size={12} />}</button>
-              <button onClick={() => api.current.duplicateById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="复制"><Copy size={12} /></button>
-              <button onClick={() => api.current.removeById?.(o.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
-            </div>
-          ))}
-          {!objs.length && <span className="text-white/35">用上面按钮添加/导入对象</span>}
-        </div>
-        <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
-      </div>
-
-      {/* 右：Inspector + 镜头 + 机位 */}
-      <div className={`absolute top-16 right-3 bottom-24 w-60 flex flex-col gap-3 p-3 ${panelCls} text-xs overflow-auto ace-scroll`}>
-        {selId && (
-          <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
-            <span className={secCls}>选中：{objs.find((o) => o.id === selId)?.name}</span>
-            <div className="flex items-center gap-1 flex-wrap">
-              <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
-              <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
-              <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
-              <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
-            </div>
-            <div className="flex items-start gap-1">
-              <span className="text-white/40 w-8 mt-1">描述</span>
-              <textarea
-                value={descDraft}
-                onChange={(e) => setDescDraft(e.target.value)}
-                onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
-                placeholder={selKind === '人台' ? '如：穿长衫的老者，白发拄拐' : selKind === '模型' ? '如：红色跑车' : '如：红木书桌，上有一盏台灯'}
-                className="flex-1 h-12 resize-none rounded-lg bg-white/[0.04] border border-white/10 p-1.5 outline-none placeholder:text-white/25 focus:border-amber-300/50 transition-colors"
-              />
-            </div>
-            <div className={hintCls}>描述会按画面方位自动装配进提示词，场景即提示词。</div>
-            {selKind === '人台' && (
-              <>
-                <div className="flex items-start gap-1">
-                  <span className="text-white/40 w-8 mt-1">姿势</span>
-                  <div className="flex-1 flex flex-wrap gap-1">{POSES.map((p) => <Btn key={p.k} onClick={() => api.current.applyPose?.(p.k, p.m)} title={`一键姿势：${p.k}`}>{p.k}</Btn>)}</div>
-                </div>
-                <div className="flex items-center gap-1 flex-wrap">
-                  <span className="text-white/40 w-8">朝向</span>
-                  {FACINGS.map((f) => <Btn key={f.k} onClick={() => api.current.setFacing?.(f.r)} title={`朝向：${f.k}`}>{f.k}</Btn>)}
-                </div>
-                <div className={hintCls}>一键姿势最省事；微调用顶栏「摆姿」点关节后拖动鼠标。</div>
-              </>
-            )}
-          </div>
-        )}
-        {/* 镜头 */}
-        <div className="flex flex-col gap-2 pb-3 border-b border-white/[0.07]">
-          <span className={secCls}>镜头</span>
-          <div className="flex items-center gap-2">
-            <span className="text-white/40 w-8">焦段</span>
-            <input type="range" min={18} max={135} value={focal} onChange={(e) => onFocal(Number(e.target.value))} className="flex-1 accent-amber-300" />
-            <span className="w-9 text-right tabular-nums text-amber-200">{focal}</span>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}</Btn>)}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">画幅</span>
-            {ASPECTS.map((a) => (
-              <Btn key={a.k} on={aspect === a.k} onClick={() => onAspect(a.k)} title={a.ar ? `出图画幅 ${a.k}` : '跟随视口'}>{a.k}</Btn>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">镜别</span>
-            <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
-            <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
-            <Btn onClick={() => api.current.shotSize?.('fs')} title="全景">全景</Btn>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">角度</span>
-            <Btn onClick={() => api.current.angle?.('low')} title="仰拍">仰拍</Btn>
-            <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
-            <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
-          </div>
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="text-white/40 w-8">灯光</span>
-            {LIGHTINGS.map((l) => (
-              <Btn key={l.k} on={lighting === l.k} onClick={() => { setLighting(l.k); api.current.setLighting?.(l.k) }} title={`灯光预设：${l.k}`}>{l.k}</Btn>
-            ))}
-          </div>
-          {hasControlModel && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-white/40 w-8">控制</span>
-              <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
-              <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
-            </div>
-          )}
-        </div>
-        {/* 机位 */}
-        <div className="flex flex-col gap-1.5">
+      {!panelsCollapsed && (
+        <div style={{ width: leftPanelWidth, bottom: bottomUiInset }} className={`absolute top-16 left-3 flex flex-col gap-2 p-3 ${panelCls} text-xs`}>
+          <div onPointerDown={(event) => beginPanelResize('left', event)} className="absolute -right-1 top-4 bottom-4 z-10 w-2 cursor-col-resize" title="拖动调整对象树宽度" />
           <div className="flex items-center justify-between">
-            <span className={secCls}>机位（{shots.length}）</span>
-            <Btn onClick={addShot} title="记录当前机位">+记录</Btn>
+            <span className={secCls}>场景层级</span>
+            <span className="text-[10px] tabular-nums text-white/30">{filteredObjs.length + filteredShots.length}/{objs.length + shots.length}</span>
           </div>
-          {shots.map((s, i) => (
-            <div key={s.id} className="flex items-center gap-1.5">
-              {(s.take || s.thumb) && (
-                <div className="w-10 shrink-0 flex flex-col items-center gap-0.5">
-                  <img src={s.take || s.thumb} onClick={() => applyShot(s)} className={`w-10 rounded-md ring-1 cursor-pointer transition-shadow hover:ring-amber-200 ${s.take ? 'ring-amber-300/70' : 'ring-white/15'}`} title="切到此机位" />
-                  {(s.takes?.length || 0) > 1 && (
-                    <div className="flex items-center gap-0.5 text-[9px] text-white/50">
-                      <button onClick={() => cycleTake(i, -1)} className="px-0.5 hover:text-white transition-colors" title="上一条成片">‹</button>
-                      <span className="tabular-nums">{(s.takes!.indexOf(s.take || '') + 1) || 1}/{s.takes!.length}</span>
-                      <button onClick={() => cycleTake(i, 1)} className="px-0.5 hover:text-white transition-colors" title="下一条成片">›</button>
+          <div className="relative">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
+            <input
+              value={objectQuery}
+              onChange={(e) => setObjectQuery(e.target.value)}
+              placeholder="搜索对象"
+              aria-label="搜索场景对象"
+              className="w-full rounded-lg border border-white/10 bg-black/20 py-1.5 pl-7 pr-2 text-[11px] outline-none placeholder:text-white/25 focus:border-amber-300/45 transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-1">
+            <Btn onClick={() => api.current.addMannequin?.()} title="添加人台"><User size={12} /> 人台</Btn>
+            <Btn onClick={() => api.current.addProp?.()} title="添加道具"><BoxIcon size={12} /> 道具</Btn>
+            <Btn onClick={onImportClick} title="导入 GLB/GLTF"><Upload size={12} /> 导入</Btn>
+          </div>
+          <div className="flex items-center gap-1">
+            <Btn onClick={() => { void api.current.stagePreset?.('双人对话'); setFocal(35) }} title="布景预设：双人对话"><Users size={12} /> 双人</Btn>
+            <Btn onClick={() => { void api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
+          </div>
+          <div className="h-px bg-white/[0.07]" />
+          <div className="flex flex-col gap-2 overflow-auto ace-noscroll flex-1">
+            {objectGroups.map((group) => (
+              <section key={group.kind} className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/25">
+                  <span>{group.kind}</span><span className="h-px flex-1 bg-white/[0.06]" /><span>{group.items.length}</span>
+                </div>
+                {group.items.map((o) => (
+                  <div key={o.id} className={`flex items-center gap-1 px-1.5 py-1 rounded-lg transition-colors ${selId === o.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] hover:bg-white/[0.08] text-white/75'}`}>
+                    {editId === o.id ? (
+                      <input
+                        autoFocus
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onBlur={() => { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }}
+                        onKeyDown={(e) => {
+                          if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
+                          if (e.key === 'Enter') { api.current.renameById?.(o.id, editName.trim() || o.name); setEditId(null) }
+                          else if (e.key === 'Escape') setEditId(null)
+                        }}
+                        className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => api.current.selectById?.(o.id)}
+                        onDoubleClick={() => { setEditId(o.id); setEditName(o.name) }}
+                        title={`${o.kind} · 双击改名`}
+                        className="flex-1 min-w-0 flex items-center gap-1.5 rounded text-left outline-none focus-visible:ring-1 focus-visible:ring-amber-300/50"
+                      >
+                        {kindIcon(o.kind)} <span className="truncate">{o.name}</span>
+                      </button>
+                    )}
+                    <button onClick={() => api.current.toggleVisById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title={o.visible ? '隐藏' : '显示'}>{o.visible ? <Eye size={11} /> : <EyeOff size={11} />}</button>
+                    <button onClick={() => api.current.toggleLockById?.(o.id)} className={`shrink-0 transition-colors ${o.locked ? 'text-amber-200' : 'text-white/35 hover:text-white'}`} title={o.locked ? '解锁变换' : '锁定变换'}>{o.locked ? <Lock size={11} /> : <Unlock size={11} />}</button>
+                    <button onClick={() => api.current.duplicateById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title="复制"><Copy size={11} /></button>
+                    <button onClick={() => api.current.removeById?.(o.id)} className="shrink-0 text-white/35 hover:text-white transition-colors" title="删除"><Trash2 size={11} /></button>
+                  </div>
+                ))}
+              </section>
+            ))}
+            {!!filteredShots.length && (
+              <section className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/25">
+                  <span>机位</span><span className="h-px flex-1 bg-white/[0.06]" /><span>{filteredShots.length}</span>
+                </div>
+                {filteredShots.map((shot) => (
+                  <div key={shot.id} className={`flex items-center gap-1 rounded-lg px-1.5 py-1 transition-colors ${activeShotId === shot.id ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.03] text-white/75 hover:bg-white/[0.08]'}`}>
+                    <button
+                      onClick={() => applyShot(shot)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded text-left outline-none focus-visible:ring-1 focus-visible:ring-amber-300/50"
+                      title="切换到此机位"
+                    >
+                      <Camera size={12} />
+                      <span className="min-w-0 flex-1 truncate">{shot.name}</span>
+                      <span className="shrink-0 text-[9px] tabular-nums text-white/30">{Math.round(shot.cam?.focal || 35)}mm</span>
+                    </button>
+                    <button onClick={() => duplicateShot(shot.id)} className="shrink-0 text-white/35 transition-colors hover:text-white" title="复制机位"><Copy size={11} /></button>
+                    <button onClick={() => delShot(shot.id)} className="shrink-0 text-white/35 transition-colors hover:text-white" title="删除机位"><Trash2 size={11} /></button>
+                  </div>
+                ))}
+              </section>
+            )}
+            {!objs.length && !shots.length && <span className="text-white/35">用上面按钮添加对象，或记录一个机位</span>}
+            {!!query && !filteredObjs.length && !filteredShots.length && <span className="text-white/35">没有匹配“{objectQuery.trim()}”的对象或机位</span>}
+          </div>
+          <div className={hintCls}>拖 .glb/.gltf 到画面也可导入</div>
+        </div>
+      )}
+
+      {/* 右：按上下文分离对象、角色与镜头，避免所有控制堆在一条长滚动区。 */}
+      {!panelsCollapsed && (
+        <div style={{ width: rightPanelWidth, bottom: bottomUiInset }} className={`absolute top-16 right-3 flex flex-col overflow-hidden ${panelCls} text-xs`}>
+          <div onPointerDown={(event) => beginPanelResize('right', event)} className="absolute -left-1 top-4 bottom-4 z-10 w-2 cursor-col-resize" title="拖动调整检查器宽度" />
+          <div className="grid shrink-0 grid-cols-3 gap-1 border-b border-white/[0.07] p-2">
+            {([
+              { id: 'object' as const, label: '对象', icon: <BoxIcon size={12} /> },
+              { id: 'character' as const, label: '角色', icon: <User size={12} /> },
+              { id: 'camera' as const, label: '镜头', icon: <Camera size={12} /> }
+            ]).map((tab) => {
+              const disabled = tab.id === 'character' && selKind !== '人台'
+              return (
+                <button
+                  key={tab.id}
+                  disabled={disabled}
+                  aria-selected={inspectorTab === tab.id}
+                  onClick={() => setInspectorTab(tab.id)}
+                  className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
+                    inspectorTab === tab.id
+                      ? 'border-amber-300/45 bg-amber-300/15 text-amber-100'
+                      : 'border-transparent text-white/45 hover:border-white/10 hover:bg-white/[0.06] hover:text-white/80'
+                  }`}
+                >
+                  {tab.icon}{tab.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-auto p-3 ace-noscroll">
+            {inspectorTab === 'object' && (
+              selId ? (
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-xs font-medium text-white/80">{selectedObj?.name}</span>
+                    {selectedObj?.locked && <span className="rounded-md bg-amber-300/10 px-1.5 py-0.5 text-[9px] text-amber-200">已锁定</span>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Btn onClick={() => selId && api.current.duplicateById?.(selId)} title="复制"><Copy size={12} /> 复制</Btn>
+                    <Btn onClick={() => api.current.lookAtSelected?.()} title="相机看向 (F)"><Crosshair size={12} /> 看向</Btn>
+                    <Btn onClick={() => api.current.dropToGround?.()} title="物体底部贴合地面"><ArrowDownToLine size={12} /> 落地</Btn>
+                    <Btn on={selectedObj?.locked} onClick={() => selId && api.current.toggleLockById?.(selId)} title={selectedObj?.locked ? '解锁变换' : '锁定变换'}>{selectedObj?.locked ? <Unlock size={12} /> : <Lock size={12} />} {selectedObj?.locked ? '解锁' : '锁定'}</Btn>
+                    <Btn onClick={() => selId && api.current.removeById?.(selId)} title="删除 (Delete)"><Trash2 size={12} /> 删除</Btn>
+                  </div>
+                  {transformDraft && (
+                    <div className="flex flex-col gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
+                      <div className="mb-0.5 flex items-center justify-between">
+                        <span className={secCls}>精确变换</span>
+                        <span className="text-[9px] text-white/30">旋转单位 °</span>
+                      </div>
+                      {renderAxisEditor('位置', 'position', 0.1)}
+                      {renderAxisEditor('旋转', 'rotation', 1)}
+                      {renderAxisEditor('缩放', 'scale', 0.1)}
                     </div>
                   )}
+                  <label className="flex flex-col gap-1.5 text-[11px] text-white/50">
+                    对象描述
+                    <textarea
+                      value={descDraft}
+                      onChange={(event) => setDescDraft(event.target.value)}
+                      onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
+                      placeholder={selKind === '人台' ? '如：穿长衫的老者，白发拄拐' : selKind === '模型' ? '如：红色跑车' : '如：红木书桌，上有一盏台灯'}
+                      className="h-16 resize-none rounded-lg border border-white/10 bg-white/[0.04] p-2 text-xs text-white/80 outline-none placeholder:text-white/30 focus:border-amber-300/50"
+                    />
+                  </label>
+                  <div className={hintCls}>描述会按画面方位自动装配进提示词。</div>
                 </div>
-              )}
-              {editShotId === s.id ? (
-                <input
-                  autoFocus
-                  value={editShotName}
-                  onChange={(e) => setEditShotName(e.target.value)}
-                  onBlur={() => { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }}
-                  onKeyDown={(e) => {
-                    if (isImeComposing(e)) return // 组合期回车=确认候选，别当重命名提交
-                    if (e.key === 'Enter') { setShots((ss) => ss.map((x) => (x.id === s.id ? { ...x, name: editShotName.trim() || x.name } : x))); setEditShotId(null) }
-                    else if (e.key === 'Escape') setEditShotId(null)
-                  }}
-                  className="flex-1 min-w-0 bg-zinc-900/80 rounded-md px-1 outline-none ring-1 ring-amber-300/60"
-                />
               ) : (
-                <button onClick={() => applyShot(s)} onDoubleClick={() => { setEditShotId(s.id); setEditShotName(s.name) }} className="flex-1 text-left px-1.5 py-1 rounded-lg border border-white/[0.06] bg-white/[0.04] hover:bg-white/10 text-white/75 hover:text-white truncate transition-colors" title="切到此机位">{s.name}</button>
-              )}
-              <button onClick={() => void genShot(i)} disabled={busy} className="text-white/40 hover:text-amber-200 disabled:opacity-30 transition-colors" title="按此机位生成/重拍"><RefreshCw size={12} /></button>
-              <button onClick={() => delShot(s.id)} className="text-white/40 hover:text-white transition-colors" title="删除"><Trash2 size={12} /></button>
-            </div>
-          ))}
-          {shots.length > 0 && (
-            <button onClick={() => void batchGenerate()} disabled={busy} className="mt-1 px-2 py-1.5 rounded-lg border border-amber-300/50 bg-amber-300/15 text-amber-200 hover:bg-amber-300/25 text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors active:scale-[0.98]">
-              <Film size={13} /> 批量生成 {shots.length} 机位
-            </button>
-          )}
-          {shots.length > 0 && (
-            <button onClick={exportStoryboard} disabled={busy} className="px-2 py-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white text-xs flex items-center justify-center gap-1 disabled:opacity-50 transition-colors" title="导出分镜到画布">
-              <Clapperboard size={13} /> 导出分镜到画布
-            </button>
-          )}
+                <div className="grid min-h-32 place-items-center rounded-xl border border-dashed border-white/10 px-4 text-center text-[11px] leading-relaxed text-white/35">在场景中选择人物、道具或导入模型，编辑其位置与描述。</div>
+              )
+            )}
+
+            {inspectorTab === 'character' && selKind === '人台' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium text-white/80">{selectedObj?.name}</span>
+                  <Btn onClick={() => setInspectorTab('object')} title="打开对象变换">变换</Btn>
+                </div>
+                <label className="flex flex-col gap-1.5 text-[11px] text-white/50">
+                  角色描述
+                  <textarea
+                    value={descDraft}
+                    onChange={(event) => setDescDraft(event.target.value)}
+                    onBlur={() => selId && api.current.setDescById?.(selId, descDraft.trim())}
+                    placeholder="如：穿长衫的老者，白发拄拐"
+                    className="h-14 resize-none rounded-lg border border-white/10 bg-white/[0.04] p-2 text-xs text-white/80 outline-none placeholder:text-white/30 focus:border-amber-300/50"
+                  />
+                </label>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>人物类型</span>
+                  {DIRECTOR_BODY_GROUPS.map((group) => (
+                    <div key={group.key} className="flex items-start gap-2">
+                      <span className="w-7 shrink-0 pt-1.5 text-[10px] text-white/35">{group.label}</span>
+                      <div className="grid min-w-0 flex-1 grid-cols-4 gap-1">
+                        {DIRECTOR_BODY_PRESETS.filter((body) => body.group === group.key).map((body) => (
+                          <Btn
+                            key={body.bodyType}
+                            on={selectedObj?.bodyType === body.bodyType}
+                            disabled={bodyLoading !== null || selectedObj?.locked}
+                            onClick={() => { void api.current.setBodyType?.(body.bodyType) }}
+                            title={`独立 CC0 素体：${body.label}`}
+                          >
+                            {bodyLoading === body.bodyType && <Loader2 size={10} className="animate-spin" />}{body.label}
+                          </Btn>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>朝向</span>
+                  <div className="flex flex-wrap gap-1">
+                    {FACINGS.map((facing) => <Btn key={facing.k} disabled={selectedObj?.locked} onClick={() => api.current.setFacing?.(facing.r)} title={`朝向：${facing.k}`}>{facing.k}</Btn>)}
+                  </div>
+                </div>
+                <DirectorPosePanel
+                  activePose={selectedObj?.poseName || '站立'}
+                  locked={selectedObj?.locked}
+                  previews={posePreviews}
+                  previewStatus={posePreviewStatus}
+                  joint={jointEditor}
+                  safety={poseSafety}
+                  onApplyPose={(pose) => {
+                    onMode('pose')
+                    api.current.applyPose?.(pose.k, pose.m, pose.offsetY || 0, pose.controls)
+                  }}
+                  onRetryPreviews={() => setPosePreviewNonce((value) => value + 1)}
+                  onSelectJoint={(name) => {
+                    onMode('pose')
+                    api.current.selectJointByName?.(name)
+                  }}
+                  onSetJointAxis={(axis, value) => api.current.setSelectedJointAxis?.(axis, value)}
+                  onCommitJoint={() => api.current.commitJointEdit?.()}
+                  onResetJoint={() => api.current.resetSelectedJoint?.()}
+                />
+                <div className={hintCls}>每种体态使用独立中性网格。首次选择时按需加载，之后在当前会话复用。</div>
+              </div>
+            )}
+
+            {inspectorTab === 'camera' && (
+              <div className="flex flex-col gap-3">
+                <DirectorShotInspector
+                  shot={activeShot}
+                  index={activeShotIndex}
+                  total={shots.length}
+                  totalDurationMs={shotsDurationMs}
+                  issues={activeShotIssues}
+                  showCameraHelpers={showShotCameras}
+                  targetSubjects={objs.map((item) => ({ id: item.id, name: item.name, kind: item.kind }))}
+                  applying={shotApplyingId === activeShot?.id}
+                  onChange={updateActiveShot}
+                  onTargetChange={setActiveShotTarget}
+                  onApplyFull={() => { if (activeShot) void applyShot(activeShot, 'full') }}
+                  onApplyCamera={() => { if (activeShot) void applyShot(activeShot, 'camera') }}
+                  onRefreshFull={() => refreshActiveShot('full')}
+                  onRefreshCamera={() => refreshActiveShot('camera')}
+                  onToggleCameraHelpers={() => setShowShotCameras((value) => !value)}
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-white/80">出图镜头</span>
+                  <span className="text-[10px] tabular-nums text-amber-200">{focal}mm</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>语义机位</span>
+                  <DirectorCameraPresetGrid onApply={(presetId) => api.current.applyCameraPreset?.(presetId)} />
+                  <div className={hintCls}>人物类机位跟随所选角色朝向；场景类机位覆盖当前可见对象。</div>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
+                  <span className={secCls}>主体占画面</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[30, 50, 70].map((percent) => (
+                      <Btn
+                        key={percent}
+                        onClick={() => {
+                          const framed = api.current.frameSubjectCoverage?.(percent / 100)
+                          if (framed === false) toast('当前没有可构图的可见对象', 'warning')
+                        }}
+                        title={`主体约占画面 ${percent}%`}
+                      >
+                        {percent}%
+                      </Btn>
+                    ))}
+                  </div>
+                  <div className={hintCls}>优先构图所选对象，否则覆盖全部可见对象。只沿视线推拉相机，不缩放人物，也不改变焦段。</div>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
+                  <label className="flex items-center gap-2 text-[11px] text-white/50">
+                    焦段
+                    <input aria-label="镜头焦段" type="range" min={18} max={135} value={focal} onChange={(event) => onFocal(Number(event.target.value))} className="min-w-0 flex-1 accent-amber-300" />
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {[24, 35, 50, 85].map((mm) => <Btn key={mm} on={focal === mm} onClick={() => onFocal(mm)} title={`${mm}mm`}>{mm}mm</Btn>)}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>画幅</span>
+                  <div className="flex flex-wrap gap-1">
+                    {ASPECTS.map((item) => <Btn key={item.k} on={aspect === item.k} onClick={() => onAspect(item.k)} title={item.ar ? `出图画幅 ${item.k}` : '跟随视口'}>{item.k}</Btn>)}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>镜别</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Btn onClick={() => api.current.shotSize?.('cu')} title="特写">特写</Btn>
+                    <Btn onClick={() => api.current.shotSize?.('ms')} title="中景">中景</Btn>
+                    <Btn onClick={() => api.current.shotSize?.('fs')} title="全景">全景</Btn>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>机位高度</span>
+                  <div className="flex flex-wrap gap-1">
+                    <Btn onClick={() => api.current.angle?.('low')} title="仰拍">仰拍</Btn>
+                    <Btn onClick={() => api.current.angle?.('eye')} title="平视">平视</Btn>
+                    <Btn onClick={() => api.current.angle?.('high')} title="俯拍">俯拍</Btn>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className={secCls}>灯光</span>
+                  <div className="flex flex-wrap gap-1">
+                    {LIGHTINGS.map((item) => <Btn key={item.k} on={lighting === item.k} onClick={() => { setLighting(item.k); api.current.setLighting?.(item.k) }} title={`灯光预设：${item.k}`}>{item.k}</Btn>)}
+                  </div>
+                </div>
+                <DirectorEnvironmentPanel
+                  environment={environment}
+                  busy={sceneIoBusy || !!shotApplyingId}
+                  canvasPanoramas={canvasPanoramas}
+                  canvasLoadingId={canvasPanoramaLoadingId}
+                  cameraStatus={panoramaCameraStatus}
+                  onImport={() => environmentFileRef.current?.click()}
+                  onImportCanvas={(cardId) => { void importCanvasPanorama(cardId) }}
+                  onClear={() => {
+                    setSceneIoBusy(true)
+                    void Promise.resolve(api.current.clearEnvironment?.()).then(() => {
+                      saveScene()
+                      toast('环境背景已移除', 'success')
+                    }).catch((error: any) => {
+                      toast('环境背景移除失败：' + (error?.message || String(error)), 'error')
+                    }).finally(() => setSceneIoBusy(false))
+                  }}
+                  onReturnToOrigin={() => {
+                    if (api.current.returnToPanoramaOrigin?.()) toast('出图相机已回到全景拍摄点', 'success')
+                  }}
+                  onDescriptionChange={(description) => {
+                    api.current.setEnvironmentDescription?.(description)
+                    saveScene()
+                  }}
+                  onSettingsChange={(patch, commitChange) => {
+                    api.current.setEnvironmentSettings?.(patch, commitChange)
+                    if (commitChange) saveScene()
+                  }}
+                />
+                {hasControlModel && (
+                  <div className="flex flex-col gap-2">
+                    <span className={secCls}>控制图</span>
+                    <div className="flex gap-1">
+                      <Btn on={ctrlType === 'depth'} onClick={() => setCtrlType('depth')} title="深度控制图">深度</Btn>
+                      <Btn on={ctrlType === 'pose'} onClick={() => setCtrlType('pose')} title="OpenPose 骨架控制图">骨架</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      <div className="absolute z-[3]" style={{ ...viewportStyle, bottom: 84, height: shotStripHeight }}>
+        <DirectorShotStrip
+          shots={shots}
+          activeShotId={activeShotId}
+          expanded={shotStripExpanded}
+          busy={busy || !!shotApplyingId}
+          applyingShotId={shotApplyingId}
+          totalDurationMs={shotsDurationMs}
+          continuityIssues={shotContinuityIssues}
+          environment={environment}
+          onToggle={() => setShotStripExpanded((value) => !value)}
+          onAdd={addShot}
+          onApply={applyShot}
+          onGenerate={(index) => { void genShot(index) }}
+          onDuplicate={duplicateShot}
+          onDelete={delShot}
+          onRename={renameShot}
+          onCycleTake={cycleTake}
+          onReorder={reorderShots}
+          onBatchGenerate={() => { void batchGenerate() }}
+          onExport={exportStoryboard}
+        />
       </div>
 
       {/* 底：场景描述 + 生成 */}
-      <div className="absolute bottom-3 left-52 right-64 flex items-end gap-2">
+      <div className="absolute bottom-3 flex items-end gap-2" style={viewportStyle}>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}

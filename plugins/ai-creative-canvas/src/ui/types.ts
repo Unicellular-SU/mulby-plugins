@@ -97,33 +97,93 @@ export interface DirectorCam {
   focal: number
 }
 export interface DirectorSubject {
+  id?: string // 稳定对象 id；旧工程缺省时首次载入补齐
   kind: string // 人台 / 道具 / 模型
   pos: [number, number, number]
   rot: [number, number, number]
   scale: number | [number, number, number] // 旧数据=均匀(number)；新数据=三轴(非均匀缩放)
   joints?: Record<string, [number, number, number]> // 关节名 → 欧拉角（人台/rigged 模型摆姿）
   poseName?: string // 一键姿势名（供生成提示）
+  poseSchemaVersion?: number
+  bodyType?: 'mannequin' | 'female' | 'broad' | 'muscular' | 'slim' | 'teen' | 'teenFemale' | 'child' | 'childFemale' | 'chibi' | 'senior' | 'seniorFemale' | 'heavyFemale' // 独立人台素体（旧工程缺省=mannequin）
+  poseOffsetY?: number // 下蹲/跪姿等预设的内部垂直偏移；不改对象世界坐标
   assetId?: string // 导入模型(GLB)的 storage.attachment id —— 据此重开时重建
   name?: string // 对象显示名（Outliner 改名后持久化）
   desc?: string // 对象语义描述（"穿长衫的老者"）：场景即提示词，生成时按画面方位装配
-  colorName?: string // 人台锚定色名（"红衣"）：参考图颜色块 + prompt 颜色锚定，锁定站位/朝向
+  colorName?: string // 人台锚定色名（"红标"）：参考图颜色块 + prompt 颜色锚定，锁定站位/朝向
+  visible?: boolean
+  locked?: boolean
 }
 export interface DirectorShot {
   id: string
   name: string
   cam: DirectorCam
+  aspect?: string // 记录机位时的出图画幅；旧工程缺省时沿用场景当前画幅
+  lighting?: string // 记录机位时的灯光预设；旧工程缺省时沿用场景当前灯光
+  shotType?: string // 特写 / 中景 / 全景 / 远景，供分镜条快速识别
+  durationMs?: number // 分镜时长元数据，用于总时长、导出和后续剪辑节奏
+  notes?: string // 导演备注，逐镜生成与分镜导出时追加到提示词
+  targetSubjectId?: string // 可选跟随目标；应用机位时按目标当前位置解析相机
+  targetOffset?: [number, number, number] // 目标点相对跟随对象原点的偏移
+  cameraOffset?: [number, number, number] // 相机相对跟随对象原点的偏移
+  sceneState?: DirectorShotSceneState // 可选逐镜头调度快照；旧工程缺省时仅应用相机
+  environmentState?: DirectorShotEnvironmentState // 可选逐镜头全景构图快照；旧机位缺省时沿用当前环境
   thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
   take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
   takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
 }
+export interface DirectorShotEnvironmentState {
+  mode: 'grounded' | 'infinite'
+  compositionMode: 'physical' | 'adapted'
+  backgroundScale: number
+}
+export interface DirectorShotSubjectState {
+  subjectId: string
+  name?: string
+  kind?: string
+  pos: [number, number, number]
+  rot: [number, number, number]
+  scale: number | [number, number, number]
+  joints?: Record<string, [number, number, number]>
+  poseName?: string
+  poseSchemaVersion?: number
+  poseOffsetY?: number
+  bodyType?: DirectorSubject['bodyType']
+  visible?: boolean
+}
+export interface DirectorShotSceneState {
+  subjects: DirectorShotSubjectState[]
+}
+export interface DirectorEnvironment {
+  assetId: string // 全景背景附件 id
+  name?: string
+  mimeType?: string
+  description?: string // 追加进镜头提示词的环境描述
+  rotation?: number // 水平旋转角度，单位为度
+  mode?: 'grounded' | 'infinite' // 落地环境用于小范围移机；无限背景只随视角旋转
+  compositionMode?: 'physical' | 'adapted' // 物理一致共用镜头；构图适配允许背景使用独立视野
+  backgroundScale?: number // 构图适配下的背景视觉尺寸，范围 0.5-2
+  captureOrigin?: [number, number, number] // 全景拍摄光心在导演场景中的位置
+  cameraHeight?: number // 全景拍摄点离地高度，单位为米
+  horizon?: number // 地平线垂直校准，单位为度
+  exposure?: number // ACES 画面曝光
+  environmentIntensity?: number // PBR 材质使用的全景环境光强度
+  backgroundBlur?: number // 背景柔化，范围 0-1
+  shadowOpacity?: number // 透明接影面的阴影强度，范围 0-1
+  width?: number // 原始全景像素尺寸，用于质量提示
+  height?: number
+  source?: 'local' | 'canvas' // 仅用于说明来源；附件始终复制到导演工程独立存储
+  sourceCardId?: string // 来自当前画布时记录源 360 全景卡 id
+}
 export interface DirectorScene {
+  schemaVersion?: 2
   subjects: DirectorSubject[]
   cam: DirectorCam
   shots: DirectorShot[]
   prompt?: string
   lighting?: string // 灯光预设 key（DirectorStage LIGHTINGS）
   aspect?: string // 出图画幅 key（DirectorStage ASPECTS，默认视口=不裁剪）
-  lastTake?: string // 最近一次成片 url（重开后可继续叠图对比）
+  environment?: DirectorEnvironment | null // 可选等距柱状全景背景
 }
 
 export interface ProjectDoc {

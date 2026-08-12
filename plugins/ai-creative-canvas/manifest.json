@@ -9,6 +9,7 @@
   "main": "dist/main.js",
   "ui": "ui/index.html",
   "icon": "icon.png",
+  "assets": ["THIRD_PARTY_NOTICES.md"],
   "permissions": {
     "notification": true,
     "clipboard": true

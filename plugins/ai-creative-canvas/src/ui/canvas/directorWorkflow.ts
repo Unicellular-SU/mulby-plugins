@@ -1,0 +1,345 @@
+import type {
+  DirectorCam,
+  DirectorShot,
+  DirectorShotSceneState,
+  DirectorShotSubjectState,
+  DirectorSubject
+} from '../types'
+
+export type DirectorInspectorTab = 'object' | 'character' | 'camera'
+
+export const DIRECTOR_DEFAULT_SHOT_DURATION_MS = 4000
+export const DIRECTOR_MIN_SHOT_DURATION_MS = 500
+export const DIRECTOR_MAX_SHOT_DURATION_MS = 120000
+
+export type DirectorContinuityIssueCode =
+  | 'jump-cut'
+  | 'axis-reversal'
+  | 'focal-jump'
+  | 'aspect-change'
+  | 'lighting-change'
+  | 'subject-position'
+  | 'subject-facing'
+  | 'subject-pose'
+  | 'subject-visibility'
+
+export interface DirectorContinuityIssue {
+  code: DirectorContinuityIssueCode
+  severity: 'warning' | 'info'
+  fromId: string
+  toId: string
+  message: string
+}
+
+export function normalizeDirectorShotDuration(durationMs?: number | null): number {
+  if (!Number.isFinite(durationMs)) return DIRECTOR_DEFAULT_SHOT_DURATION_MS
+  return Math.round(Math.max(DIRECTOR_MIN_SHOT_DURATION_MS, Math.min(DIRECTOR_MAX_SHOT_DURATION_MS, Number(durationMs))) / 100) * 100
+}
+
+export function getDirectorShotsDurationMs(shots: DirectorShot[]): number {
+  return shots.reduce((total, shot) => total + normalizeDirectorShotDuration(shot.durationMs), 0)
+}
+
+export function formatDirectorDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+const vectorLength = (value: [number, number, number]) => Math.hypot(value[0], value[1], value[2])
+const vectorBetween = (from: [number, number, number], to: [number, number, number]): [number, number, number] => [
+  to[0] - from[0],
+  to[1] - from[1],
+  to[2] - from[2]
+]
+const vectorDistance = (a: [number, number, number], b: [number, number, number]) => vectorLength(vectorBetween(a, b))
+const angleBetweenDegrees = (a: [number, number, number], b: [number, number, number]) => {
+  const aLength = vectorLength(a)
+  const bLength = vectorLength(b)
+  if (aLength < 1e-6 || bLength < 1e-6) return 0
+  const cosine = Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (aLength * bLength)))
+  return Math.acos(cosine) * 180 / Math.PI
+}
+
+const angleDeltaDegrees = (a: number, b: number) => {
+  const delta = Math.abs((a - b) * 180 / Math.PI) % 360
+  return delta > 180 ? 360 - delta : delta
+}
+
+const stateLabel = (state: DirectorShotSubjectState) => state.name?.trim() || state.subjectId
+
+function analyzeDirectorSubjectContinuity(previous: DirectorShot, current: DirectorShot): DirectorContinuityIssue[] {
+  if (!previous.sceneState?.subjects.length || !current.sceneState?.subjects.length) return []
+  const issues: DirectorContinuityIssue[] = []
+  const previousById = new Map(previous.sceneState.subjects.map((state) => [state.subjectId, state]))
+  for (const state of current.sceneState.subjects) {
+    const before = previousById.get(state.subjectId)
+    if (!before) continue
+    const label = stateLabel(state)
+    const positionDelta = vectorDistance(before.pos, state.pos)
+    if (positionDelta >= 1.5) {
+      issues.push({
+        code: 'subject-position',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的位置变化 ${positionDelta.toFixed(1)}m，检查走位是否连续`
+      })
+    }
+    const facingDelta = angleDeltaDegrees(before.rot[1], state.rot[1])
+    if (facingDelta >= 120) {
+      issues.push({
+        code: 'subject-facing',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的朝向变化约 ${Math.round(facingDelta)}°，检查视线和动作衔接`
+      })
+    }
+    if (before.poseName && state.poseName && before.poseName !== state.poseName) {
+      issues.push({
+        code: 'subject-pose',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的姿势从“${before.poseName}”变为“${state.poseName}”`
+      })
+    }
+    if ((before.visible !== false) !== (state.visible !== false)) {
+      issues.push({
+        code: 'subject-visibility',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 在相邻镜头间${state.visible === false ? '离场' : '入场'}`
+      })
+    }
+  }
+  return issues
+}
+
+export function analyzeDirectorShotContinuity(shots: DirectorShot[]): DirectorContinuityIssue[] {
+  const issues: DirectorContinuityIssue[] = []
+  for (let index = 1; index < shots.length; index++) {
+    const previous = shots[index - 1]
+    const current = shots[index]
+    if (!previous.cam || !current.cam) continue
+    const previousDirection = vectorBetween(previous.cam.pos, previous.cam.target)
+    const currentDirection = vectorBetween(current.cam.pos, current.cam.target)
+    const directionAngle = angleBetweenDegrees(previousDirection, currentDirection)
+    const positionDelta = vectorDistance(previous.cam.pos, current.cam.pos)
+    const targetDelta = vectorDistance(previous.cam.target, current.cam.target)
+    const previousDistance = Math.max(0.01, vectorLength(previousDirection))
+    const currentDistance = Math.max(0.01, vectorLength(currentDirection))
+    const distanceRatio = Math.max(previousDistance, currentDistance) / Math.min(previousDistance, currentDistance)
+    const previousFocal = Math.max(1, previous.cam.focal || 35)
+    const currentFocal = Math.max(1, current.cam.focal || 35)
+    const focalRatio = Math.max(previousFocal, currentFocal) / Math.min(previousFocal, currentFocal)
+
+    if (directionAngle < 15 && positionDelta < 0.65 && targetDelta < 0.45 && distanceRatio < 1.25 && focalRatio < 1.25) {
+      issues.push({
+        code: 'jump-cut',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: '与上一镜头的机位和景别过近，检查是否会形成跳切'
+      })
+    } else if (directionAngle > 150) {
+      issues.push({
+        code: 'axis-reversal',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: '机位方向大幅反转，检查人物视线和空间轴线'
+      })
+    }
+
+    if (focalRatio >= 2 && directionAngle < 45) {
+      issues.push({
+        code: 'focal-jump',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `焦段从 ${Math.round(previousFocal)}mm 变为 ${Math.round(currentFocal)}mm，透视变化明显`
+      })
+    }
+    if (previous.aspect && current.aspect && previous.aspect !== current.aspect) {
+      issues.push({
+        code: 'aspect-change',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `画幅从 ${previous.aspect} 变为 ${current.aspect}`
+      })
+    }
+    if (previous.lighting && current.lighting && previous.lighting !== current.lighting) {
+      issues.push({
+        code: 'lighting-change',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `灯光从“${previous.lighting}”变为“${current.lighting}”`
+      })
+    }
+    issues.push(...analyzeDirectorSubjectContinuity(previous, current))
+  }
+  return issues
+}
+
+export function inferDirectorInspectorTab(kind?: string | null): DirectorInspectorTab {
+  if (kind === '人台') return 'character'
+  if (kind) return 'object'
+  return 'camera'
+}
+
+export function classifyDirectorShot(cam?: DirectorCam | null): string {
+  if (!cam) return '镜头'
+  const dx = cam.pos[0] - cam.target[0]
+  const dy = cam.pos[1] - cam.target[1]
+  const dz = cam.pos[2] - cam.target[2]
+  const distance = Math.hypot(dx, dy, dz)
+  if (distance < 1.6) return '特写'
+  if (distance < 3.2) return '中景'
+  if (distance < 6) return '全景'
+  return '远景'
+}
+
+export function createDirectorShotSnapshot(input: {
+  id: string
+  name: string
+  cam: DirectorCam
+  thumb?: string
+  aspect?: string
+  lighting?: string
+  durationMs?: number
+  notes?: string
+}): DirectorShot {
+  return {
+    ...input,
+    durationMs: normalizeDirectorShotDuration(input.durationMs),
+    notes: input.notes?.trim() || undefined,
+    shotType: classifyDirectorShot(input.cam)
+  }
+}
+
+const addVector = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [
+  a[0] + b[0],
+  a[1] + b[1],
+  a[2] + b[2]
+]
+
+const subtractVector = (a: [number, number, number], b: [number, number, number]): [number, number, number] => [
+  a[0] - b[0],
+  a[1] - b[1],
+  a[2] - b[2]
+]
+
+export function createDirectorShotTargetBinding(
+  cam: DirectorCam,
+  targetSubjectId: string,
+  subjectPosition: [number, number, number]
+): Pick<DirectorShot, 'targetSubjectId' | 'targetOffset' | 'cameraOffset'> {
+  return {
+    targetSubjectId,
+    targetOffset: subtractVector(cam.target, subjectPosition),
+    cameraOffset: subtractVector(cam.pos, subjectPosition)
+  }
+}
+
+export function resolveDirectorShotCamera(
+  shot: Pick<DirectorShot, 'cam' | 'targetSubjectId' | 'targetOffset' | 'cameraOffset'>,
+  subjectPosition?: [number, number, number] | null
+): DirectorCam {
+  if (!shot.targetSubjectId || !subjectPosition || !shot.targetOffset || !shot.cameraOffset) {
+    return { pos: [...shot.cam.pos], target: [...shot.cam.target], focal: shot.cam.focal }
+  }
+  return {
+    pos: addVector(subjectPosition, shot.cameraOffset),
+    target: addVector(subjectPosition, shot.targetOffset),
+    focal: shot.cam.focal
+  }
+}
+
+const cloneTuple = (value: [number, number, number]): [number, number, number] => [...value]
+const cloneScale = (value: number | [number, number, number]): number | [number, number, number] =>
+  Array.isArray(value) ? [...value] : value
+const cloneJoints = (joints?: Record<string, [number, number, number]>) => joints
+  ? Object.fromEntries(Object.entries(joints).map(([name, rotation]) => [name, cloneTuple(rotation)]))
+  : undefined
+
+export function createDirectorShotSceneState(subjects: DirectorSubject[]): DirectorShotSceneState {
+  return {
+    subjects: subjects.flatMap((subject): DirectorShotSubjectState[] => {
+      if (!subject.id) return []
+      return [{
+        subjectId: subject.id,
+        name: subject.name,
+        kind: subject.kind,
+        pos: cloneTuple(subject.pos),
+        rot: cloneTuple(subject.rot),
+        scale: cloneScale(subject.scale),
+        joints: cloneJoints(subject.joints),
+        poseName: subject.poseName,
+        poseSchemaVersion: subject.poseSchemaVersion,
+        poseOffsetY: subject.poseOffsetY,
+        bodyType: subject.bodyType,
+        visible: subject.visible !== false
+      }]
+    })
+  }
+}
+
+export function applyDirectorShotSceneState(
+  subjects: DirectorSubject[],
+  sceneState?: DirectorShotSceneState | null
+): DirectorSubject[] {
+  if (!sceneState) return subjects.map((subject) => ({ ...subject }))
+  const states = new Map(sceneState.subjects.map((state) => [state.subjectId, state]))
+  return subjects.map((subject) => {
+    const state = subject.id ? states.get(subject.id) : undefined
+    if (!state) return { ...subject }
+    return {
+      ...subject,
+      pos: cloneTuple(state.pos),
+      rot: cloneTuple(state.rot),
+      scale: cloneScale(state.scale),
+      joints: cloneJoints(state.joints),
+      poseName: state.poseName,
+      poseSchemaVersion: state.poseSchemaVersion,
+      poseOffsetY: state.poseOffsetY,
+      bodyType: state.bodyType || subject.bodyType,
+      visible: state.visible !== false
+    }
+  })
+}
+
+export function removeDirectorSubjectFromShots(shots: DirectorShot[], subjectId: string): DirectorShot[] {
+  let changed = false
+  const next = shots.map((shot) => {
+    const clearsTarget = shot.targetSubjectId === subjectId
+    const subjects = shot.sceneState?.subjects.filter((state) => state.subjectId !== subjectId)
+    const removesState = !!shot.sceneState && subjects!.length !== shot.sceneState.subjects.length
+    if (!clearsTarget && !removesState) return shot
+    changed = true
+    return {
+      ...shot,
+      targetSubjectId: clearsTarget ? undefined : shot.targetSubjectId,
+      targetOffset: clearsTarget ? undefined : shot.targetOffset,
+      cameraOffset: clearsTarget ? undefined : shot.cameraOffset,
+      sceneState: shot.sceneState ? { subjects: subjects! } : undefined
+    }
+  })
+  return changed ? next : shots
+}
+
+export function reorderDirectorShots(shots: DirectorShot[], draggedId: string, targetId: string): DirectorShot[] {
+  if (!draggedId || draggedId === targetId) return shots
+  const from = shots.findIndex((shot) => shot.id === draggedId)
+  const to = shots.findIndex((shot) => shot.id === targetId)
+  if (from < 0 || to < 0) return shots
+  const next = shots.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}
