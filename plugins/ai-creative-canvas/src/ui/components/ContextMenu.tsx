@@ -1,7 +1,26 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../zlayers'
-import { Sparkles, Film, Grid2x2, Boxes, Compass, LayoutTemplate, Link2, Copy, ClipboardPaste, AlignCenter, Download, Trash2, Plus } from 'lucide-react'
+import {
+  Sparkles,
+  Film,
+  Grid2x2,
+  Boxes,
+  Compass,
+  LayoutTemplate,
+  Link2,
+  Copy,
+  ClipboardPaste,
+  AlignCenter,
+  Download,
+  Trash2,
+  Type,
+  Image as ImageIcon,
+  Video,
+  Music,
+  StickyNote,
+  type LucideIcon
+} from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { generateCard, generateSelected, canGenerate } from '../services/generate'
@@ -15,9 +34,9 @@ import { promptDialog } from '../store/dialogStore'
 import { runCollage } from '../services/mediaOps'
 import { normalizeOpenDialogPaths } from '../services/importMediaTypes'
 
-type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true } | { header: string }
+type Item = { label: string; onClick: () => void; danger?: boolean; icon?: LucideIcon } | { sep: true } | { header: string }
 
-// 按关键词给菜单项配 lucide 图标（无需逐项声明）
+// 卡片操作保留关键词兜底；节点创建使用下方显式映射，避免文案命中错误图标。
 function iconFor(label: string): typeof Sparkles | null {
   if (label.includes('全景')) return Compass
   if (label.includes('生成')) return Sparkles
@@ -31,11 +50,17 @@ function iconFor(label: string): typeof Sparkles | null {
   if (label.includes('对齐') || label.includes('分布') || label.includes('居中')) return AlignCenter
   if (label.includes('导出')) return Download
   if (label.includes('删除')) return Trash2
-  if (label.includes('新建')) return Plus
   return null
 }
 
-const NEW_LABEL: Record<string, string> = { text: '文本', image: '图片', pano: '360 全景', video: '视频', audio: '音频', source: '素材', note: '便签' }
+const NEW_NODE_ITEMS: ReadonlyArray<{ kind: CardKind; label: string; icon: LucideIcon }> = [
+  { kind: 'text', label: '新建文本', icon: Type },
+  { kind: 'image', label: '新建图片', icon: ImageIcon },
+  { kind: 'pano', label: '新建 360 全景', icon: Compass },
+  { kind: 'video', label: '新建视频', icon: Video },
+  { kind: 'audio', label: '新建音频', icon: Music },
+  { kind: 'note', label: '新建便签', icon: StickyNote }
+]
 
 export function ContextMenu() {
   const ctx = useUi((s) => s.ctxMenu)
@@ -249,12 +274,12 @@ export function ContextMenu() {
   } else {
     const rect = stageEl.current?.getBoundingClientRect()
     const world = screenToWorld(ctx.x - (rect?.left || 0), ctx.y - (rect?.top || 0), board.viewport)
-    ;(['text', 'image', 'pano', 'video', 'audio', 'note'] as CardKind[]).forEach((k) => {
-      items.push({ label: '新建' + NEW_LABEL[k], onClick: () => run(() => g.addCard(k, world)) })
+    NEW_NODE_ITEMS.forEach(({ kind, label, icon }) => {
+      items.push({ label, icon, onClick: () => run(() => g.addCard(kind, world)) })
     })
     if (g.clipboard?.cards.length) {
       items.push({ sep: true })
-      items.push({ label: '粘贴', onClick: () => run(() => g.paste(40, 40)) })
+      items.push({ label: '粘贴', icon: ClipboardPaste, onClick: () => run(() => g.paste(40, 40)) })
     }
   }
 
@@ -278,7 +303,7 @@ export function ContextMenu() {
       {items.map((it, i) => {
         if ('sep' in it) return <div key={i} className="my-1 h-px bg-black/10 dark:bg-white/10" />
         if ('header' in it) return <div key={i} className="px-3 pt-2 pb-0.5 text-[10px] uppercase tracking-wide opacity-40">{it.header}</div>
-        const Icon = iconFor(it.label)
+        const Icon = it.icon || iconFor(it.label)
         return (
           <button
             key={i}
