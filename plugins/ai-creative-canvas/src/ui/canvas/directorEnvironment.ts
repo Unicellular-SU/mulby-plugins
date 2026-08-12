@@ -38,6 +38,87 @@ export function withDirectorEnvironmentDefaults<T extends DirectorEnvironment>(e
   return { ...environment, ...normalizeDirectorEnvironmentControls(environment) }
 }
 
+export function getDirectorPanoramaCaptureOrigin(environment: Partial<DirectorEnvironment> | null | undefined): [number, number, number] {
+  const controls = normalizeDirectorEnvironmentControls(environment)
+  const raw = environment?.captureOrigin
+  if (!Array.isArray(raw) || raw.length < 3) return [0, controls.cameraHeight, 0]
+  return [finite(raw[0], 0), controls.cameraHeight, finite(raw[2], 0)]
+}
+
+export type DirectorPanoramaCameraRiskLevel = 'safe' | 'caution' | 'high'
+
+export interface DirectorPanoramaCameraStatus {
+  origin: [number, number, number]
+  distance: number
+  horizontalDistance: number
+  verticalDistance: number
+  level: DirectorPanoramaCameraRiskLevel
+  approximate: boolean
+  label: string
+  detail: string
+}
+
+export function assessDirectorPanoramaCamera(
+  cam: Pick<DirectorCam, 'pos'>,
+  environment: Partial<DirectorEnvironment> | null | undefined
+): DirectorPanoramaCameraStatus | null {
+  if (!environment?.assetId) return null
+  const controls = normalizeDirectorEnvironmentControls(environment)
+  const origin = getDirectorPanoramaCaptureOrigin(environment)
+  const dx = finite(cam.pos?.[0], origin[0]) - origin[0]
+  const dy = finite(cam.pos?.[1], origin[1]) - origin[1]
+  const dz = finite(cam.pos?.[2], origin[2]) - origin[2]
+  const horizontalDistance = Math.hypot(dx, dz)
+  const verticalDistance = Math.abs(dy)
+  const distance = Math.hypot(dx, dy, dz)
+  const level: DirectorPanoramaCameraRiskLevel = distance > 1.5 ? 'high' : distance > 0.5 ? 'caution' : 'safe'
+  const approximate = controls.compositionMode === 'adapted' || controls.mode === 'infinite' || level !== 'safe'
+  return {
+    origin,
+    distance,
+    horizontalDistance,
+    verticalDistance,
+    level,
+    approximate,
+    label: level === 'high' ? '高视差风险' : level === 'caution' ? '注意视差' : approximate ? '近似透视' : '安全范围',
+    detail: level === 'high'
+      ? '相机已明显离开全景拍摄点，地面、遮挡和空间尺度可能失真。'
+      : level === 'caution'
+        ? '单张全景没有真实深度，继续横移或推拉会增加视差误差。'
+        : controls.compositionMode === 'adapted'
+          ? '相机仍在拍摄点附近，但背景使用独立视野，地面透视为近似。'
+          : controls.mode === 'infinite'
+            ? '无限背景不产生地面视差，适合作为远景方向参考。'
+            : '相机位于全景拍摄点附近，当前地面与接影关系较可靠。'
+  }
+}
+
+export function returnDirectorCameraToPanoramaOrigin(
+  cam: DirectorCam,
+  environment: Partial<DirectorEnvironment> | null | undefined
+): DirectorCam {
+  const origin = getDirectorPanoramaCaptureOrigin(environment)
+  let dx = finite(cam.target[0], 0) - finite(cam.pos[0], 0)
+  let dy = finite(cam.target[1], 0) - finite(cam.pos[1], 0)
+  let dz = finite(cam.target[2], -1) - finite(cam.pos[2], 0)
+  const distance = Math.hypot(dx, dy, dz)
+  if (distance < 1e-6) {
+    dx = 0
+    dy = 0
+    dz = -1
+  } else {
+    dx /= distance
+    dy /= distance
+    dz /= distance
+  }
+  const targetDistance = Math.max(0.5, distance)
+  return {
+    pos: origin,
+    target: [origin[0] + dx * targetDistance, origin[1] + dy * targetDistance, origin[2] + dz * targetDistance],
+    focal: clamp(finite(cam.focal, 35), 1, 300)
+  }
+}
+
 /**
  * 将背景视觉尺寸换算成独立环境相机的垂直视角。
  * physical 模式始终返回主体相机视角，确保全景地面与接影透视一致。

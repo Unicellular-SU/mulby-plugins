@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Compass, Image, Loader2, SlidersHorizontal, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Compass, Image, Loader2, LocateFixed, SlidersHorizontal, Trash2, Upload } from 'lucide-react'
 import type { DirectorEnvironment } from '../types'
-import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls } from './directorEnvironment'
+import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls, type DirectorPanoramaCameraStatus } from './directorEnvironment'
 
 interface Props {
   environment: DirectorEnvironment | null
   busy: boolean
   canvasPanoramas: Array<{ id: string; title: string }>
   canvasLoadingId: string | null
+  cameraStatus: DirectorPanoramaCameraStatus | null
   onImport: () => void
   onImportCanvas: (cardId: string) => void
   onClear: () => void
+  onReturnToOrigin: () => void
   onDescriptionChange: (description: string) => void
   onSettingsChange: (patch: Partial<DirectorEnvironment>, commit: boolean) => void
 }
@@ -58,9 +60,11 @@ export function DirectorEnvironmentPanel({
   busy,
   canvasPanoramas,
   canvasLoadingId,
+  cameraStatus,
   onImport,
   onImportCanvas,
   onClear,
+  onReturnToOrigin,
   onDescriptionChange,
   onSettingsChange
 }: Props) {
@@ -132,6 +136,36 @@ export function DirectorEnvironmentPanel({
               <SlidersHorizontal size={11} />
               <span>环境校准</span>
             </div>
+            {cameraStatus && (
+              <div className={`flex flex-col gap-1.5 rounded-lg border px-2 py-2 ${
+                cameraStatus.level === 'high'
+                  ? 'border-amber-300/30 bg-amber-300/[0.08]'
+                  : cameraStatus.level === 'caution' || cameraStatus.approximate
+                    ? 'border-amber-300/15 bg-amber-300/[0.04]'
+                    : 'border-white/[0.07] bg-white/[0.025]'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`flex items-center gap-1.5 text-[10px] font-medium ${cameraStatus.level === 'safe' && !cameraStatus.approximate ? 'text-white/60' : 'text-amber-100/80'}`}>
+                    {cameraStatus.level === 'safe' && !cameraStatus.approximate ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
+                    {cameraStatus.label}
+                  </span>
+                  <span className="font-mono text-[9px] tabular-nums text-white/35">偏移 {cameraStatus.distance.toFixed(2)}m</span>
+                </div>
+                <div className="text-[9px] leading-relaxed text-white/38">{cameraStatus.detail}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-[9px] tabular-nums text-white/28">水平 {cameraStatus.horizontalDistance.toFixed(2)}m / 垂直 {cameraStatus.verticalDistance.toFixed(2)}m</span>
+                  <button
+                    type="button"
+                    disabled={busy || cameraStatus.distance < 0.01}
+                    onClick={onReturnToOrigin}
+                    className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-1.5 text-[9px] text-white/55 transition-colors hover:bg-white/[0.09] hover:text-white disabled:opacity-30 active:scale-[0.98]"
+                    title="保持当前朝向和焦段，把出图相机移回全景拍摄点"
+                  >
+                    <LocateFixed size={10} /> 回拍摄点
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.035] p-1">
               {(['grounded', 'infinite'] as const).map((mode) => (
                 <button

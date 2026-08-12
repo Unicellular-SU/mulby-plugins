@@ -23,9 +23,13 @@ import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
 import {
   assessDirectorPanoramaQuality,
+  assessDirectorPanoramaCamera,
   fitDirectorCameraToCoverage,
   getDirectorBackgroundFov,
+  getDirectorPanoramaCaptureOrigin,
   normalizeDirectorEnvironmentControls,
+  returnDirectorCameraToPanoramaOrigin,
+  type DirectorPanoramaCameraStatus,
   withDirectorEnvironmentDefaults
 } from './directorEnvironment'
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from './directorCanvasPanorama'
@@ -205,6 +209,7 @@ function Inner({ onReload }: { onReload: () => void }) {
   const [shotStripExpanded, setShotStripExpanded] = useState(true)
   const [showShotCameras, setShowShotCameras] = useState(true)
   const [environment, setEnvironment] = useState<DirectorEnvironment | null>(null)
+  const [panoramaCameraStatus, setPanoramaCameraStatus] = useState<DirectorPanoramaCameraStatus | null>(null)
   const [sceneIoBusy, setSceneIoBusy] = useState(false)
   const [canvasPanoramaLoadingId, setCanvasPanoramaLoadingId] = useState<string | null>(null)
   const [shotApplyingId, setShotApplyingId] = useState<string | null>(null)
@@ -328,6 +333,21 @@ function Inner({ onReload }: { onReload: () => void }) {
         scene.add(dirLight)
         const grid = new THREE.GridHelper(20, 20, 0x445566, 0x2a3340)
         scene.add(grid)
+        const panoramaOriginMarker = new THREE.Group()
+        panoramaOriginMarker.name = '全景拍摄原点'
+        const panoramaOriginDot = new THREE.Mesh(
+          new THREE.SphereGeometry(0.055, 16, 12),
+          new THREE.MeshBasicMaterial({ color: 0xfcd34d, depthTest: false })
+        )
+        const panoramaOriginRing = new THREE.Mesh(
+          new THREE.TorusGeometry(0.13, 0.012, 8, 32),
+          new THREE.MeshBasicMaterial({ color: 0xfbbf24, depthTest: false, transparent: true, opacity: 0.8 })
+        )
+        panoramaOriginDot.renderOrder = 900
+        panoramaOriginRing.renderOrder = 900
+        panoramaOriginMarker.add(panoramaOriginDot, panoramaOriginRing)
+        panoramaOriginMarker.visible = false
+        scene.add(panoramaOriginMarker)
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x23272f, roughness: 1 }))
         ground.rotation.x = -Math.PI / 2
         ground.position.y = -0.001
@@ -1311,7 +1331,8 @@ function Inner({ onReload }: { onReload: () => void }) {
           const controls = normalizeDirectorEnvironmentControls(curEnvironment)
           if (controls.mode === 'grounded') {
             groundedSkybox = new GroundedSkybox(environmentDisplayTexture, controls.cameraHeight, 100, 96)
-            groundedSkybox.position.y = controls.cameraHeight
+            const origin = getDirectorPanoramaCaptureOrigin(curEnvironment)
+            groundedSkybox.position.set(origin[0], origin[1], origin[2])
           } else {
             const geometry = new THREE.SphereGeometry(100, 96, 64)
             geometry.scale(1, 1, -1)
@@ -1337,6 +1358,9 @@ function Inner({ onReload }: { onReload: () => void }) {
             environmentRotation.y = THREE.MathUtils.degToRad(rotation)
           }
           if (groundedSkybox) groundedSkybox.rotation.y = THREE.MathUtils.degToRad(rotation)
+          const origin = getDirectorPanoramaCaptureOrigin(curEnvironment)
+          panoramaOriginMarker.position.set(origin[0], origin[1], origin[2])
+          panoramaOriginMarker.visible = true
           ground.visible = false
           shadowMaterial.opacity = controls.shadowOpacity
           shadowGround.visible = controls.shadowOpacity > 0.001
@@ -1347,6 +1371,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           const previous = withDirectorEnvironmentDefaults(curEnvironment)
           const next = withDirectorEnvironmentDefaults({ ...curEnvironment, ...patch })
           next.rotation = Math.max(-180, Math.min(180, Number(next.rotation) || 0))
+          if ('cameraHeight' in patch && next.captureOrigin) next.captureOrigin = [next.captureOrigin[0], next.cameraHeight, next.captureOrigin[2]]
           curEnvironment = next
           const displayChanged = previous.backgroundBlur !== next.backgroundBlur || previous.horizon !== next.horizon
           const deferredDisplayPatch = 'backgroundBlur' in patch || 'horizon' in patch
@@ -1383,6 +1408,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             ;(scene as any).environmentIntensity = 1
             ground.visible = true
             shadowGround.visible = false
+            panoramaOriginMarker.visible = false
             applyLighting(curLighting)
             if (!disposed) setEnvironment(null)
             return
@@ -1420,6 +1446,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           environmentTexture = texture
           environmentObjectUrl = objectUrl
           curEnvironment = withDirectorEnvironmentDefaults({ ...next, mimeType, width: width || undefined, height: height || undefined })
+          if (curEnvironment.captureOrigin) curEnvironment.captureOrigin = getDirectorPanoramaCaptureOrigin(curEnvironment)
           const pmrem = new THREE.PMREMGenerator(renderer)
           try {
             pmrem.compileEquirectangularShader()
@@ -1465,7 +1492,16 @@ function Inner({ onReload }: { onReload: () => void }) {
             description: metadata.description?.trim().slice(0, 1000) || undefined
           }
           try {
-            await loadEnvironmentState({ assetId, name: name.slice(0, 160), mimeType, rotation: 0, ...safeMetadata }, true)
+            const C = outCam()
+            await loadEnvironmentState({
+              assetId,
+              name: name.slice(0, 160),
+              mimeType,
+              rotation: 0,
+              cameraHeight: C.position.y,
+              captureOrigin: [C.position.x, C.position.y, C.position.z],
+              ...safeMetadata
+            }, true)
             if (previousId && previousId !== assetId) await attachStore()?.remove?.(previousId)
           } catch (error) {
             try { await attachStore()?.remove?.(assetId) } catch { /* ignore cleanup failure */ }
@@ -1756,6 +1792,7 @@ function Inner({ onReload }: { onReload: () => void }) {
         renderer.domElement.addEventListener('webglcontextrestored', onCtxRestored)
 
         let raf = 0
+        let lastPanoramaStatusKey = ''
         const animate = () => {
           raf = requestAnimationFrame(animate)
           orbit.update()
@@ -1764,21 +1801,36 @@ function Inner({ onReload }: { onReload: () => void }) {
           camHelper.update()
           camHelper.visible = shotLocked // 锁定时主视图显示出图取景框
           recordedCameraHelpers.visible = shotLocked && recordedCamerasVisible && recordedCameraHelpers.children.length > 0
+          panoramaOriginMarker.visible = !!curEnvironment && shotLocked
           jointMarker.visible = curMode === 'pose' && !!curJoint && curRoot?.visible !== false
           if (jointMarker.visible) {
             curJoint.getWorldPosition(jointMarker.position)
             const markerScale = Math.max(0.65, Math.min(2.2, jointMarker.position.distanceTo(cam.position) * 0.16))
             jointMarker.scale.setScalar(markerScale)
           }
+          const panoramaStatusCamera = outCam()
+          const nextPanoramaStatus = assessDirectorPanoramaCamera({
+            pos: [panoramaStatusCamera.position.x, panoramaStatusCamera.position.y, panoramaStatusCamera.position.z]
+          }, curEnvironment)
+          const nextPanoramaStatusKey = nextPanoramaStatus
+            ? `${nextPanoramaStatus.level}:${nextPanoramaStatus.approximate}:${(Math.round(nextPanoramaStatus.distance * 20) / 20).toFixed(2)}`
+            : ''
+          if (nextPanoramaStatusKey !== lastPanoramaStatusKey) {
+            lastPanoramaStatusKey = nextPanoramaStatusKey
+            if (!disposed) setPanoramaCameraStatus(nextPanoramaStatus)
+          }
           renderComposite(renderer, cam)
           if (pip && shotLocked) {
             camHelper.visible = false
             const markerVisible = jointMarker.visible
+            const panoramaMarkerVisible = panoramaOriginMarker.visible
             const recordedHelpersVisible = recordedCameraHelpers.visible
             jointMarker.visible = false
+            panoramaOriginMarker.visible = false
             recordedCameraHelpers.visible = false
             renderComposite(pip, shotCam)
             jointMarker.visible = markerVisible
+            panoramaOriginMarker.visible = panoramaMarkerVisible
             recordedCameraHelpers.visible = recordedHelpersVisible
           } // PiP 出图预览（不含取景框线和关节定位点）
         }
@@ -1895,10 +1947,12 @@ function Inner({ onReload }: { onReload: () => void }) {
           const chv = camHelper.visible
           const gv = grid.visible
           const jmv = jointMarker.visible
+          const pov = panoramaOriginMarker.visible
           const rhv = recordedCameraHelpers.visible
           camHelper.visible = false
           grid.visible = false // 网格线不进缩略图
           jointMarker.visible = false
+          panoramaOriginMarker.visible = false
           recordedCameraHelpers.visible = false
           const captureCamera = outCam()
           renderComposite(renderer, captureCamera)
@@ -1912,6 +1966,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           camHelper.visible = chv
           grid.visible = gv
           jointMarker.visible = jmv
+          panoramaOriginMarker.visible = pov
           recordedCameraHelpers.visible = rhv
           attachByMode()
           return cropCanvas(c).toDataURL('image/jpeg', 0.7)
@@ -2160,6 +2215,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           const ebv = groundedSkybox?.visible
           const chv = camHelper.visible
           const jmv = jointMarker.visible
+          const pov = panoramaOriginMarker.visible
           const rhv = recordedCameraHelpers.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
@@ -2167,6 +2223,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           if (groundedSkybox) groundedSkybox.visible = false
           camHelper.visible = false // 取景框不进深度图
           jointMarker.visible = false
+          panoramaOriginMarker.visible = false
           recordedCameraHelpers.visible = false
           scene.overrideMaterial = depthMat
           renderer.render(scene, C)
@@ -2177,6 +2234,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           if (groundedSkybox) groundedSkybox.visible = ebv
           camHelper.visible = chv
           jointMarker.visible = jmv
+          panoramaOriginMarker.visible = pov
           recordedCameraHelpers.visible = rhv
           scene.background = pbg
           C.far = pf
@@ -2407,6 +2465,11 @@ function Inner({ onReload }: { onReload: () => void }) {
           },
           applyCameraPreset: applyCameraPresetById,
           frameSubjectCoverage,
+          returnToPanoramaOrigin: () => {
+            if (!curEnvironment) return false
+            applyCam(returnDirectorCameraToPanoramaOrigin(getCam(), curEnvironment))
+            return true
+          },
           // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
           setViewMode,
           setLock: (v: boolean) => setViewMode(v ? 'director' : 'camera'),
@@ -2431,10 +2494,12 @@ function Inner({ onReload }: { onReload: () => void }) {
             const chv = camHelper.visible
             const gv = grid.visible
             const jmv = jointMarker.visible
+            const pov = panoramaOriginMarker.visible
             const rhv = recordedCameraHelpers.visible
             camHelper.visible = false // 取景框不进成片参考图
             grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
             jointMarker.visible = false
+            panoramaOriginMarker.visible = false
             recordedCameraHelpers.visible = false
             const captureCamera = outCam()
             renderComposite(renderer, captureCamera)
@@ -2447,6 +2512,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             camHelper.visible = chv
             grid.visible = gv
             jointMarker.visible = jmv
+            panoramaOriginMarker.visible = pov
             recordedCameraHelpers.visible = rhv
             attachByMode()
             return url
@@ -2463,6 +2529,11 @@ function Inner({ onReload }: { onReload: () => void }) {
             return position ? createDirectorShotTargetBinding(cameraState, targetSubjectId, position) : null
           },
           captureShotSceneState: () => createDirectorShotSceneState(serializeSceneOnly().subjects),
+          captureShotEnvironmentState: () => curEnvironment ? {
+            mode: normalizeDirectorEnvironmentControls(curEnvironment).mode,
+            compositionMode: normalizeDirectorEnvironmentControls(curEnvironment).compositionMode,
+            backgroundScale: normalizeDirectorEnvironmentControls(curEnvironment).backgroundScale
+          } : undefined,
           applyShotSceneState: async (sceneState: DirectorShot['sceneState'], cameraState: any) => {
             if (!sceneState) { applyCam(cameraState); return }
             const bodyTypes = new Set<DirectorBodyType>()
@@ -2951,11 +3022,13 @@ function Inner({ onReload }: { onReload: () => void }) {
     const id = uid('shot')
     const targetBinding = selId ? api.current.createShotTargetBinding?.(selId, cam) : null
     const sceneState = api.current.captureShotSceneState?.()
+    const environmentState = api.current.captureShotEnvironmentState?.()
     setShots((current) => [
       ...current,
       {
         ...createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting }),
         sceneState,
+        environmentState,
         ...(targetBinding || {})
       }
     ])
@@ -2980,6 +3053,9 @@ function Inner({ onReload }: { onReload: () => void }) {
       if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
         setLighting(shot.lighting)
         api.current.setLighting?.(shot.lighting)
+      }
+      if (shot.environmentState && environment) {
+        api.current.setEnvironmentSettings?.(shot.environmentState, true)
       }
       return true
     } catch (error: any) {
@@ -3033,6 +3109,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           lighting: api.current.getLighting?.() || lighting,
           shotType: classifyDirectorShot(cam),
           sceneState: refreshMode === 'full' ? api.current.captureShotSceneState?.() : shot.sceneState,
+          environmentState: api.current.captureShotEnvironmentState?.(),
           ...(binding || {})
         }
     }))
@@ -3279,7 +3356,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             <Btn onClick={() => { void api.current.stagePreset?.('产品展示'); setFocal(35) }} title="布景预设：产品展示"><Package size={12} /> 产品</Btn>
           </div>
           <div className="h-px bg-white/[0.07]" />
-          <div className="flex flex-col gap-2 overflow-auto ace-scroll flex-1">
+          <div className="flex flex-col gap-2 overflow-auto ace-noscroll flex-1">
             {objectGroups.map((group) => (
               <section key={group.kind} className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 px-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/25">
@@ -3376,7 +3453,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             })}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-auto p-3 ace-scroll">
+          <div className="min-h-0 flex-1 overflow-auto p-3 ace-noscroll">
             {inspectorTab === 'object' && (
               selId ? (
                 <div className="flex flex-col gap-3">
@@ -3574,6 +3651,7 @@ function Inner({ onReload }: { onReload: () => void }) {
                   busy={sceneIoBusy || !!shotApplyingId}
                   canvasPanoramas={canvasPanoramas}
                   canvasLoadingId={canvasPanoramaLoadingId}
+                  cameraStatus={panoramaCameraStatus}
                   onImport={() => environmentFileRef.current?.click()}
                   onImportCanvas={(cardId) => { void importCanvasPanorama(cardId) }}
                   onClear={() => {
@@ -3584,6 +3662,9 @@ function Inner({ onReload }: { onReload: () => void }) {
                     }).catch((error: any) => {
                       toast('环境背景移除失败：' + (error?.message || String(error)), 'error')
                     }).finally(() => setSceneIoBusy(false))
+                  }}
+                  onReturnToOrigin={() => {
+                    if (api.current.returnToPanoramaOrigin?.()) toast('出图相机已回到全景拍摄点', 'success')
                   }}
                   onDescriptionChange={(description) => {
                     api.current.setEnvironmentDescription?.(description)
@@ -3618,6 +3699,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           applyingShotId={shotApplyingId}
           totalDurationMs={shotsDurationMs}
           continuityIssues={shotContinuityIssues}
+          environment={environment}
           onToggle={() => setShotStripExpanded((value) => !value)}
           onAdd={addShot}
           onApply={applyShot}

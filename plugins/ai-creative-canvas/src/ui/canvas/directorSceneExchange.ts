@@ -101,6 +101,7 @@ const normalizeEnvironment = (raw: any): DirectorEnvironment | null => {
   const assetId = text(raw?.assetId, 160)
   if (!assetId) return null
   const controls = normalizeDirectorEnvironmentControls(raw)
+  const rawCaptureOrigin = Array.isArray(raw?.captureOrigin) ? tuple3(raw.captureOrigin, [0, controls.cameraHeight, 0]) : null
   return {
     assetId,
     name: text(raw?.name, 160) || undefined,
@@ -108,6 +109,7 @@ const normalizeEnvironment = (raw: any): DirectorEnvironment | null => {
     description: text(raw?.description, 1000) || undefined,
     rotation: clamp(finite(raw?.rotation, 0), -180, 180),
     ...controls,
+    captureOrigin: rawCaptureOrigin ? [rawCaptureOrigin[0], controls.cameraHeight, rawCaptureOrigin[2]] : undefined,
     width: Math.round(clamp(finite(raw?.width, 0), 0, 65_536)) || undefined,
     height: Math.round(clamp(finite(raw?.height, 0), 0, 32_768)) || undefined,
     source: raw?.source === 'canvas' ? 'canvas' : raw?.source === 'local' ? 'local' : undefined,
@@ -215,6 +217,13 @@ export function normalizeDirectorScene(raw: any): DirectorScene {
       targetOffset: hasBinding ? tuple3(shot.targetOffset, [0, 0, 0]) : undefined,
       cameraOffset: hasBinding ? tuple3(shot.cameraOffset, [0, 0, 0]) : undefined,
       sceneState: sceneSubjects.length ? { subjects: sceneSubjects } : undefined,
+      environmentState: shot?.environmentState && typeof shot.environmentState === 'object'
+        ? {
+            mode: shot.environmentState.mode === 'infinite' ? 'infinite' : 'grounded',
+            compositionMode: shot.environmentState.compositionMode === 'adapted' ? 'adapted' : 'physical',
+            backgroundScale: clamp(finite(shot.environmentState.backgroundScale, 1), 0.5, 2)
+          }
+        : undefined,
       thumb: mediaReference(shot?.thumb),
       take: mediaReference(shot?.take),
       takes: Array.isArray(shot?.takes)

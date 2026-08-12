@@ -129,7 +129,10 @@ export function DirectorShotInspector({
             <div className="flex flex-col gap-1 text-[10px] text-white/45">
               镜头状态
               <div className="flex h-7 items-center rounded-lg border border-white/[0.07] bg-black/15 px-2 text-[10px] text-white/55">
-                {shot.sceneState ? `已保存 ${shot.sceneState.subjects.length} 个对象` : '旧机位，仅含相机'}
+                <span className="truncate">
+                  {shot.sceneState ? `已保存 ${shot.sceneState.subjects.length} 个对象` : '旧机位，仅含相机'}
+                  {shot.environmentState ? ` / 背景 ${shot.environmentState.compositionMode === 'adapted' ? `${Math.round(shot.environmentState.backgroundScale * 100)}%` : '物理一致'}` : ''}
+                </span>
               </div>
             </div>
           </div>

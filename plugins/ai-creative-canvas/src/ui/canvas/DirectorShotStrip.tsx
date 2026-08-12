@@ -16,8 +16,9 @@ import {
   RefreshCw,
   Trash2
 } from 'lucide-react'
-import type { DirectorShot } from '../types'
+import type { DirectorEnvironment, DirectorShot } from '../types'
 import { isImeComposing } from '../util'
+import { assessDirectorPanoramaCamera } from './directorEnvironment'
 import { formatDirectorDuration, normalizeDirectorShotDuration, type DirectorContinuityIssue } from './directorWorkflow'
 
 interface Props {
@@ -28,6 +29,7 @@ interface Props {
   applyingShotId: string | null
   totalDurationMs: number
   continuityIssues: DirectorContinuityIssue[]
+  environment: DirectorEnvironment | null
   onToggle: () => void
   onAdd: () => void
   onApply: (shot: DirectorShot) => void
@@ -51,6 +53,7 @@ export function DirectorShotStrip({
   applyingShotId,
   totalDurationMs,
   continuityIssues,
+  environment,
   onToggle,
   onAdd,
   onApply,
@@ -140,6 +143,11 @@ export function DirectorShotStrip({
                 const takeIndex = shot.takes?.indexOf(shot.take || '') ?? -1
                 const incomingIssues = continuityIssues.filter((issue) => issue.toId === shot.id)
                 const incomingWarning = incomingIssues.some((issue) => issue.severity === 'warning')
+                const shotEnvironment = shot.environmentState && environment
+                  ? { ...environment, ...shot.environmentState }
+                  : environment
+                const panoramaStatus = assessDirectorPanoramaCamera(shot.cam, shotEnvironment)
+                const approximatePanorama = !!panoramaStatus?.approximate
                 return (
                   <article
                     key={shot.id}
@@ -206,6 +214,14 @@ export function DirectorShotStrip({
                       <span className="flex items-center gap-1 text-[9px] tabular-nums text-white/30">
                         {normalizeDirectorShotDuration(shot.durationMs) / 1000}s
                         {shot.sceneState && <span className="flex items-center gap-0.5 text-amber-200/55" title={`保存了 ${shot.sceneState.subjects.length} 个对象的演员调度`}><Clapperboard size={9} />{shot.sceneState.subjects.length}</span>}
+                        {approximatePanorama && (
+                          <span
+                            className={`rounded px-1 py-0.5 text-[8px] ${panoramaStatus?.level === 'high' ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.05] text-amber-200/65'}`}
+                            title={`${panoramaStatus?.label}：${panoramaStatus?.detail}`}
+                          >
+                            近似
+                          </span>
+                        )}
                       </span>
                       <div className="mt-auto flex items-center gap-1">
                         <button onClick={() => onGenerate(index)} disabled={busy} className="text-white/35 transition-colors hover:text-amber-200 disabled:opacity-30" title="按此机位生成或重拍"><RefreshCw size={11} /></button>

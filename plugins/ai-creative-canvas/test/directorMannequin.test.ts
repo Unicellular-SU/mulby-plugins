@@ -39,9 +39,12 @@ import {
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from '../src/ui/canvas/directorCanvasPanorama.ts'
 import {
   assessDirectorPanoramaQuality,
+  assessDirectorPanoramaCamera,
   fitDirectorCameraToCoverage,
   getDirectorBackgroundFov,
+  getDirectorPanoramaCaptureOrigin,
   normalizeDirectorEnvironmentControls,
+  returnDirectorCameraToPanoramaOrigin,
   withDirectorEnvironmentDefaults
 } from '../src/ui/canvas/directorEnvironment.ts'
 import { Object3D, Vector3 } from 'three'
@@ -234,6 +237,7 @@ function testDirectorSceneExchange() {
       targetSubjectId: 'hero',
       targetOffset: [-1, 1, -2],
       cameraOffset: [-1, 1.5, 2],
+      environmentState: { mode: 'infinite', compositionMode: 'adapted', backgroundScale: 99 },
       sceneState: {
         subjects: [{
           subjectId: 'hero',
@@ -264,7 +268,8 @@ function testDirectorSceneExchange() {
       width: 8192,
       height: 4096,
       source: 'canvas',
-      sourceCardId: 'pano-card'
+      sourceCardId: 'pano-card',
+      captureOrigin: [2, 1.8, -3]
     }
   }
   const scene = normalizeDirectorScene(raw)
@@ -286,6 +291,8 @@ function testDirectorSceneExchange() {
   assert.equal(scene.environment?.height, 4096)
   assert.equal(scene.environment?.source, 'canvas')
   assert.equal(scene.environment?.sourceCardId, 'pano-card')
+  assert.deepEqual(scene.environment?.captureOrigin, [2, 5, -3])
+  assert.deepEqual(scene.shots[0].environmentState, { mode: 'infinite', compositionMode: 'adapted', backgroundScale: 2 })
   assert.equal(scene.schemaVersion, 2)
 
   const withAssets: DirectorScene = {
@@ -307,6 +314,12 @@ function testDirectorSceneExchange() {
   assert.equal(legacyEnvironment?.mode, 'grounded')
   assert.equal(legacyEnvironment?.compositionMode, 'physical')
   assert.equal(legacyEnvironment?.backgroundScale, 1)
+  assert.deepEqual(getDirectorPanoramaCaptureOrigin(legacyEnvironment), [0, 1.6, 0])
+  const legacyShot = normalizeDirectorScene({
+    ...raw,
+    shots: [{ ...raw.shots[0], environmentState: undefined }]
+  }).shots[0]
+  assert.equal(legacyShot.environmentState, undefined)
   assert.equal(legacyEnvironment?.cameraHeight, 1.6)
   assert.equal(legacyEnvironment?.environmentIntensity, 0.9)
   assert.equal(parseDirectorSceneExchange(raw).assets.length, 0, '旧版裸场景 JSON 应继续可导入')
@@ -357,6 +370,20 @@ function testDirectorEnvironmentCalibration() {
   assert.deepEqual(close.target, [1, 1, 0])
   assert.equal(close.focal, 50, '主体占画面只允许推拉相机，不能改变焦段')
   assert.ok(Math.hypot(close.pos[0] - 1, close.pos[1] - 1, close.pos[2]) < Math.hypot(wide.pos[0] - 1, wide.pos[1] - 1, wide.pos[2]), '70% 构图应比 30% 构图更靠近主体')
+
+  const environment = withDirectorEnvironmentDefaults({
+    assetId: 'pano',
+    captureOrigin: [2, 1.6, -1] as [number, number, number]
+  })
+  assert.equal(assessDirectorPanoramaCamera({ pos: [2.2, 1.6, -1] }, environment)?.level, 'safe')
+  assert.equal(assessDirectorPanoramaCamera({ pos: [2.6, 1.6, -1] }, environment)?.level, 'caution')
+  assert.equal(assessDirectorPanoramaCamera({ pos: [4, 1.6, -1] }, environment)?.level, 'high')
+  assert.equal(assessDirectorPanoramaCamera({ pos: [2.2, 1.6, -1] }, { ...environment, compositionMode: 'adapted' })?.approximate, true)
+  assert.equal(assessDirectorPanoramaCamera({ pos: [2.2, 1.6, -1] }, { ...environment, mode: 'infinite' })?.approximate, true)
+  const returned = returnDirectorCameraToPanoramaOrigin({ pos: [5, 2, 4], target: [4, 2, 3], focal: 85 }, environment)
+  assert.deepEqual(returned.pos, [2, 1.6, -1])
+  assert.equal(returned.focal, 85)
+  assert.ok(Math.abs(Math.hypot(returned.target[0] - returned.pos[0], returned.target[1] - returned.pos[1], returned.target[2] - returned.pos[2]) - Math.sqrt(2)) < 1e-9, '回拍摄点必须保持原视线距离')
 
   assert.equal(assessDirectorPanoramaQuality(3000, 1500)?.level, 'preview')
   assert.equal(assessDirectorPanoramaQuality(4096, 2048)?.level, 'standard')

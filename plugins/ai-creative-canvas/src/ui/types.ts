@@ -127,9 +127,15 @@ export interface DirectorShot {
   targetOffset?: [number, number, number] // 目标点相对跟随对象原点的偏移
   cameraOffset?: [number, number, number] // 相机相对跟随对象原点的偏移
   sceneState?: DirectorShotSceneState // 可选逐镜头调度快照；旧工程缺省时仅应用相机
+  environmentState?: DirectorShotEnvironmentState // 可选逐镜头全景构图快照；旧机位缺省时沿用当前环境
   thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
   take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
   takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
+}
+export interface DirectorShotEnvironmentState {
+  mode: 'grounded' | 'infinite'
+  compositionMode: 'physical' | 'adapted'
+  backgroundScale: number
 }
 export interface DirectorShotSubjectState {
   subjectId: string
@@ -157,6 +163,7 @@ export interface DirectorEnvironment {
   mode?: 'grounded' | 'infinite' // 落地环境用于小范围移机；无限背景只随视角旋转
   compositionMode?: 'physical' | 'adapted' // 物理一致共用镜头；构图适配允许背景使用独立视野
   backgroundScale?: number // 构图适配下的背景视觉尺寸，范围 0.5-2
+  captureOrigin?: [number, number, number] // 全景拍摄光心在导演场景中的位置
   cameraHeight?: number // 全景拍摄点离地高度，单位为米
   horizon?: number // 地平线垂直校准，单位为度
   exposure?: number // ACES 画面曝光
