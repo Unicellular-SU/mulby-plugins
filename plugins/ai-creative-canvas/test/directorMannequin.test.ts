@@ -37,6 +37,7 @@ import {
   remapDirectorSceneAssetIds
 } from '../src/ui/canvas/directorSceneExchange.ts'
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from '../src/ui/canvas/directorCanvasPanorama.ts'
+import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls, withDirectorEnvironmentDefaults } from '../src/ui/canvas/directorEnvironment.ts'
 import { Object3D, Vector3 } from 'three'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from '../src/ui/canvas/directorCameraPresets.ts'
 import { solveDirectorCcdIk } from '../src/ui/canvas/directorIk.ts'
@@ -241,7 +242,22 @@ function testDirectorSceneExchange() {
         }]
       }
     }],
-    environment: { assetId: 'pano', description: '雨夜街道', rotation: 999, source: 'canvas', sourceCardId: 'pano-card' }
+    environment: {
+      assetId: 'pano',
+      description: '雨夜街道',
+      rotation: 999,
+      mode: 'grounded',
+      cameraHeight: 99,
+      horizon: -99,
+      exposure: 99,
+      environmentIntensity: -2,
+      backgroundBlur: 2,
+      shadowOpacity: -1,
+      width: 8192,
+      height: 4096,
+      source: 'canvas',
+      sourceCardId: 'pano-card'
+    }
   }
   const scene = normalizeDirectorScene(raw)
   assert.deepEqual(scene.subjects.map((subject) => subject.id), ['hero', 'hero-2', 'subject-3'])
@@ -249,6 +265,15 @@ function testDirectorSceneExchange() {
   assert.equal(scene.shots[0].sceneState?.subjects[0].bodyType, 'female')
   assert.equal(scene.shots[0].sceneState?.subjects[0].poseName, '双膝跪')
   assert.equal(scene.environment?.rotation, 180)
+  assert.equal(scene.environment?.mode, 'grounded')
+  assert.equal(scene.environment?.cameraHeight, 5)
+  assert.equal(scene.environment?.horizon, -20)
+  assert.equal(scene.environment?.exposure, 3)
+  assert.equal(scene.environment?.environmentIntensity, 0)
+  assert.equal(scene.environment?.backgroundBlur, 1)
+  assert.equal(scene.environment?.shadowOpacity, 0)
+  assert.equal(scene.environment?.width, 8192)
+  assert.equal(scene.environment?.height, 4096)
   assert.equal(scene.environment?.source, 'canvas')
   assert.equal(scene.environment?.sourceCardId, 'pano-card')
   assert.equal(scene.schemaVersion, 2)
@@ -266,6 +291,12 @@ function testDirectorSceneExchange() {
   const bundle = createDirectorSceneExchangeBundle(scene, assets, 123)
   assert.equal(bundle.exportedAt, 123)
   assert.equal(parseDirectorSceneExchange(bundle).scene.subjects[0].id, 'hero')
+  assert.equal(parseDirectorSceneExchange(bundle).scene.environment?.cameraHeight, 5)
+  assert.equal(parseDirectorSceneExchange(bundle).scene.environment?.exposure, 3)
+  const legacyEnvironment = normalizeDirectorScene({ ...raw, environment: { assetId: 'legacy-pano' } }).environment
+  assert.equal(legacyEnvironment?.mode, 'grounded')
+  assert.equal(legacyEnvironment?.cameraHeight, 1.6)
+  assert.equal(legacyEnvironment?.environmentIntensity, 0.9)
   assert.equal(parseDirectorSceneExchange(raw).assets.length, 0, '旧版裸场景 JSON 应继续可导入')
   assert.throws(() => createDirectorSceneExchangeBundle(scene, [...assets, ...assets]), /重复/)
   assert.throws(() => normalizeDirectorScene({ ...raw, subjects: [{ kind: '灯光' }] }), /类型无效/)
@@ -273,6 +304,36 @@ function testDirectorSceneExchange() {
     ...raw,
     shots: [{ ...raw.shots[0], sceneState: { subjects: Array.from({ length: 201 }, () => raw.shots[0].sceneState.subjects[0]) } }]
   }), /对象调度超过 200/)
+}
+
+function testDirectorEnvironmentCalibration() {
+  assert.deepEqual(normalizeDirectorEnvironmentControls(null), {
+    mode: 'grounded',
+    cameraHeight: 1.6,
+    horizon: 0,
+    exposure: 1,
+    environmentIntensity: 0.9,
+    backgroundBlur: 0,
+    shadowOpacity: 0.32
+  })
+  const calibrated = withDirectorEnvironmentDefaults({
+    assetId: 'pano',
+    mode: 'infinite',
+    cameraHeight: 1.75,
+    exposure: 1.2,
+    backgroundBlur: 0.25
+  })
+  assert.equal(calibrated.mode, 'infinite')
+  assert.equal(calibrated.cameraHeight, 1.75)
+  assert.equal(calibrated.exposure, 1.2)
+  assert.equal(calibrated.backgroundBlur, 0.25)
+  assert.equal(calibrated.environmentIntensity, 0.9, '缺失的新参数应使用稳定默认值，保证旧工程兼容')
+
+  assert.equal(assessDirectorPanoramaQuality(3000, 1500)?.level, 'preview')
+  assert.equal(assessDirectorPanoramaQuality(4096, 2048)?.level, 'standard')
+  assert.equal(assessDirectorPanoramaQuality(8192, 4096)?.level, 'high')
+  assert.equal(assessDirectorPanoramaQuality(4096, 3000)?.level, 'invalid')
+  assert.equal(assessDirectorPanoramaQuality(0, 0), null)
 }
 
 function testDirectorShotSceneState() {
@@ -427,8 +488,9 @@ testDirectorWorkflow()
 testDirectorSceneExchange()
 testDirectorShotSceneState()
 testDirectorCanvasPanoramas()
+testDirectorEnvironmentCalibration()
 testDirectorPoseTools()
 testDirectorCameraPresets()
 testDirectorIk()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 bodies / 20 poses / per-shot blocking / canvas panoramas / continuity / safety / IK OK')
+console.log('director mannequin: 13 bodies / 20 poses / per-shot blocking / grounded panoramas / continuity / safety / IK OK')

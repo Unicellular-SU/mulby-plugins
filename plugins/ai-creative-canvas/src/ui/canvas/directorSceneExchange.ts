@@ -6,6 +6,7 @@ import type {
   DirectorSubject
 } from '../types'
 import { normalizeDirectorShotDuration } from './directorWorkflow'
+import { normalizeDirectorEnvironmentControls } from './directorEnvironment'
 
 export const DIRECTOR_SCENE_EXCHANGE_FORMAT = 'mulby-ai-creative-canvas/director-scene'
 export const DIRECTOR_SCENE_EXCHANGE_VERSION = 1
@@ -99,12 +100,16 @@ const normalizeCam = (raw: any): DirectorCam => ({
 const normalizeEnvironment = (raw: any): DirectorEnvironment | null => {
   const assetId = text(raw?.assetId, 160)
   if (!assetId) return null
+  const controls = normalizeDirectorEnvironmentControls(raw)
   return {
     assetId,
     name: text(raw?.name, 160) || undefined,
     mimeType: text(raw?.mimeType, 120) || undefined,
     description: text(raw?.description, 1000) || undefined,
     rotation: clamp(finite(raw?.rotation, 0), -180, 180),
+    ...controls,
+    width: Math.round(clamp(finite(raw?.width, 0), 0, 65_536)) || undefined,
+    height: Math.round(clamp(finite(raw?.height, 0), 0, 32_768)) || undefined,
     source: raw?.source === 'canvas' ? 'canvas' : raw?.source === 'local' ? 'local' : undefined,
     sourceCardId: text(raw?.sourceCardId, 160) || undefined
   }

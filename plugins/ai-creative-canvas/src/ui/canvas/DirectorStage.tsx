@@ -21,6 +21,7 @@ import { DirectorShotInspector } from './DirectorShotInspector'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
+import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls, withDirectorEnvironmentDefaults } from './directorEnvironment'
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from './directorCanvasPanorama'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
 import { solveDirectorCcdIk } from './directorIk'
@@ -57,7 +58,7 @@ import {
 import { confirmDialog } from '../store/dialogStore'
 import type { DirectorEnvironment, DirectorScene, DirectorShot } from '../types'
 
-// 3D 导演台 v11：13 套独立人物网格、20 种语义姿势 + CC0 humanoid 人台；
+// 3D 导演台 v12：13 套独立人物网格、20 种语义姿势、全景环境融合 + CC0 humanoid 人台；
 // 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
 
 const FILM_GAUGE = 36 // 35mm 全画幅
@@ -259,12 +260,14 @@ function Inner({ onReload }: { onReload: () => void }) {
       let TransformControls: any
       let GLTFLoader: any
       let cloneSkeleton: any
+      let GroundedSkybox: any
       try {
         THREE = await import('three')
         OrbitControls = (await import('three/examples/jsm/controls/OrbitControls.js')).OrbitControls
         TransformControls = (await import('three/examples/jsm/controls/TransformControls.js')).TransformControls
         GLTFLoader = (await import('three/examples/jsm/loaders/GLTFLoader.js')).GLTFLoader
         cloneSkeleton = (await import('three/examples/jsm/utils/SkeletonUtils.js')).clone
+        GroundedSkybox = (await import('three/examples/jsm/objects/GroundedSkybox.js')).GroundedSkybox
       } catch {
         return
       }
@@ -279,12 +282,21 @@ function Inner({ onReload }: { onReload: () => void }) {
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
         renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
         renderer.setSize(W, H)
+        renderer.outputColorSpace = THREE.SRGBColorSpace
+        renderer.toneMapping = THREE.ACESFilmicToneMapping
+        renderer.toneMappingExposure = 1
+        renderer.shadowMap.enabled = true
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap
         mount.appendChild(renderer.domElement)
 
         const scene = new THREE.Scene()
         scene.background = new THREE.Color(0x1b1d23)
         let curEnvironment: DirectorEnvironment | null = null
-        let environmentTexture: any = null
+        let environmentTexture: any = null // 原始等距柱状纹理，供 PMREM 与无柔化显示
+        let environmentDisplayTexture: any = null // 柔化后的可见背景；无柔化时与原纹理相同
+        let environmentRenderTarget: any = null // PMREM cubeUV 环境光
+        let pipEnvironmentRenderTarget: any = null // PiP 独立 WebGL 上下文需要自己的 PMREM 纹理
+        let groundedSkybox: any = null
         let environmentObjectUrl: string | null = null
         const cam = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
         cam.filmGauge = FILM_GAUGE
@@ -295,13 +307,33 @@ function Inner({ onReload }: { onReload: () => void }) {
         scene.add(hemi)
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.1)
         dirLight.position.set(3, 6, 4)
+        dirLight.castShadow = true
+        dirLight.shadow.mapSize.set(2048, 2048)
+        dirLight.shadow.camera.near = 0.1
+        dirLight.shadow.camera.far = 40
+        dirLight.shadow.camera.left = -8
+        dirLight.shadow.camera.right = 8
+        dirLight.shadow.camera.top = 8
+        dirLight.shadow.camera.bottom = -8
+        dirLight.shadow.bias = -0.0004
+        dirLight.shadow.normalBias = 0.025
         scene.add(dirLight)
         const grid = new THREE.GridHelper(20, 20, 0x445566, 0x2a3340)
         scene.add(grid)
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: 0x23272f, roughness: 1 }))
         ground.rotation.x = -Math.PI / 2
         ground.position.y = -0.001
+        ground.receiveShadow = true
         scene.add(ground)
+        const shadowMaterial = new THREE.ShadowMaterial({ color: 0x000000, opacity: 0.32, transparent: true })
+        shadowMaterial.depthWrite = false
+        const shadowGround = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), shadowMaterial)
+        shadowGround.rotation.x = -Math.PI / 2
+        shadowGround.position.y = 0.002
+        shadowGround.receiveShadow = true
+        shadowGround.visible = false
+        shadowGround.renderOrder = 2
+        scene.add(shadowGround)
         const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.BasicDepthPacking })
 
         const orbit = new OrbitControls(cam, renderer.domElement)
@@ -385,6 +417,11 @@ function Inner({ onReload }: { onReload: () => void }) {
           pip = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
           pip.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
           pip.setSize(240, Math.round(240 / (W / H)))
+          pip.outputColorSpace = THREE.SRGBColorSpace
+          pip.toneMapping = THREE.ACESFilmicToneMapping
+          pip.toneMappingExposure = renderer.toneMappingExposure
+          pip.shadowMap.enabled = true
+          pip.shadowMap.type = THREE.PCFSoftShadowMap
           pipMount.appendChild(pip.domElement)
         }
 
@@ -854,11 +891,19 @@ function Inner({ onReload }: { onReload: () => void }) {
             setSelKind(root ? root.userData.kind || '' : null)
           }
         }
+        const configureSubjectShadows = (obj: any) => {
+          obj.traverse?.((child: any) => {
+            if (!child.isMesh) return
+            child.castShadow = true
+            child.receiveShadow = true
+          })
+        }
         const addSubject = (obj: any, kind: string, desc?: string, colorName?: string) => {
           const id = uid('obj')
           const name = nextName(kind)
           obj.userData.kind = kind
           obj.userData.locked = false
+          configureSubjectShadows(obj)
           scene.add(obj)
           subjects.push({ obj, kind, id, name, desc, colorName })
           sync()
@@ -1081,6 +1126,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           }
           tcontrol.detach()
           scene.remove(old)
+          configureSubjectShadows(replacement)
           scene.add(replacement)
           sub.obj = replacement
           disposeTree(old)
@@ -1177,16 +1223,110 @@ function Inner({ onReload }: { onReload: () => void }) {
           }, (err: any) => onErr?.(err))
         }
         const attachStore = () => window.mulby?.storage?.attachment
-        const setEnvironmentRotation = (rotation: number) => {
-          const value = Math.max(-180, Math.min(180, Number(rotation) || 0))
-          if (curEnvironment) curEnvironment = { ...curEnvironment, rotation: value }
-          const backgroundRotation = (scene as any).backgroundRotation
-          if (backgroundRotation) backgroundRotation.y = THREE.MathUtils.degToRad(value)
-          if (!disposed) setEnvironment(curEnvironment ? { ...curEnvironment } : null)
+        const disposeEnvironmentBackdrop = () => {
+          if (!groundedSkybox) return
+          scene.remove(groundedSkybox)
+          groundedSkybox.geometry?.dispose?.()
+          const materials = Array.isArray(groundedSkybox.material) ? groundedSkybox.material : [groundedSkybox.material]
+          materials.forEach((material: any) => material?.dispose?.())
+          groundedSkybox = null
+        }
+        const createEnvironmentDisplayTexture = (source: any, blur: number, horizon: number) => {
+          const image = source.image
+          const width = Number(image?.naturalWidth || image?.width || 0)
+          const height = Number(image?.naturalHeight || image?.height || 0)
+          let display: any
+          if (blur > 0.001 && width && height) {
+            const targetWidth = Math.max(512, Math.min(4096, Math.round(width / (1 + blur * 12))))
+            const targetHeight = Math.max(256, Math.round(targetWidth * height / width))
+            const canvas = document.createElement('canvas')
+            canvas.width = targetWidth
+            canvas.height = targetHeight
+            const context = canvas.getContext('2d')
+            context?.drawImage(image, 0, 0, targetWidth, targetHeight)
+            display = new THREE.CanvasTexture(canvas)
+          } else {
+            display = source.clone()
+          }
+          display.mapping = THREE.EquirectangularReflectionMapping
+          display.colorSpace = THREE.SRGBColorSpace
+          display.anisotropy = renderer.capabilities.getMaxAnisotropy()
+          display.wrapS = THREE.RepeatWrapping
+          display.wrapT = THREE.ClampToEdgeWrapping
+          display.offset.y = -horizon / 180
+          display.needsUpdate = true
+          return display
+        }
+        const rebuildEnvironmentDisplay = () => {
+          if (!environmentTexture || !curEnvironment) return
+          environmentDisplayTexture?.dispose?.()
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          environmentDisplayTexture = createEnvironmentDisplayTexture(environmentTexture, controls.backgroundBlur, controls.horizon)
+        }
+        const rebuildEnvironmentBackdrop = () => {
+          disposeEnvironmentBackdrop()
+          if (!environmentDisplayTexture || !curEnvironment) return
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          if (controls.mode === 'grounded') {
+            groundedSkybox = new GroundedSkybox(environmentDisplayTexture, controls.cameraHeight, 100, 96)
+            groundedSkybox.position.y = controls.cameraHeight
+          } else {
+            const geometry = new THREE.SphereGeometry(100, 96, 64)
+            geometry.scale(1, 1, -1)
+            groundedSkybox = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ map: environmentDisplayTexture, depthWrite: false }))
+            groundedSkybox.position.copy(outCam().position)
+          }
+          groundedSkybox.name = controls.mode === 'grounded' ? '全景落地环境' : '全景无限背景'
+          groundedSkybox.renderOrder = -1000
+          groundedSkybox.frustumCulled = false
+          scene.add(groundedSkybox)
+        }
+        const applyEnvironmentRendering = () => {
+          if (!curEnvironment || !environmentTexture) return
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          const rotation = Math.max(-180, Math.min(180, Number(curEnvironment.rotation) || 0))
+          renderer.toneMappingExposure = controls.exposure
+          if (pip) pip.toneMappingExposure = controls.exposure
+          scene.environment = environmentRenderTarget?.texture || null
+          ;(scene as any).environmentIntensity = controls.environmentIntensity
+          const environmentRotation = (scene as any).environmentRotation
+          if (environmentRotation) {
+            environmentRotation.x = THREE.MathUtils.degToRad(controls.horizon)
+            environmentRotation.y = THREE.MathUtils.degToRad(rotation)
+          }
+          if (groundedSkybox) groundedSkybox.rotation.y = THREE.MathUtils.degToRad(rotation)
+          ground.visible = false
+          shadowMaterial.opacity = controls.shadowOpacity
+          shadowGround.visible = controls.shadowOpacity > 0.001
+          applyLighting(curLighting)
+        }
+        const setEnvironmentSettings = (patch: Partial<DirectorEnvironment>, commitChange = false) => {
+          if (!curEnvironment) return
+          const previous = withDirectorEnvironmentDefaults(curEnvironment)
+          const next = withDirectorEnvironmentDefaults({ ...curEnvironment, ...patch })
+          next.rotation = Math.max(-180, Math.min(180, Number(next.rotation) || 0))
+          curEnvironment = next
+          const displayChanged = previous.backgroundBlur !== next.backgroundBlur || previous.horizon !== next.horizon
+          const deferredDisplayPatch = 'backgroundBlur' in patch || 'horizon' in patch
+          const rebuildDisplay = (displayChanged && !deferredDisplayPatch) || (commitChange && deferredDisplayPatch)
+          const heightPatch = 'cameraHeight' in patch
+          const rebuildBackdrop = rebuildDisplay || previous.mode !== next.mode || (previous.cameraHeight !== next.cameraHeight && !heightPatch) || (commitChange && heightPatch)
+          if (rebuildDisplay) rebuildEnvironmentDisplay()
+          if (rebuildBackdrop) rebuildEnvironmentBackdrop()
+          applyEnvironmentRendering()
+          if (!disposed) setEnvironment({ ...curEnvironment })
         }
         const disposeEnvironmentTexture = () => {
+          disposeEnvironmentBackdrop()
+          environmentDisplayTexture?.dispose?.()
+          environmentDisplayTexture = null
           environmentTexture?.dispose?.()
           environmentTexture = null
+          environmentRenderTarget?.dispose?.()
+          environmentRenderTarget = null
+          pipEnvironmentRenderTarget?.dispose?.()
+          pipEnvironmentRenderTarget = null
+          scene.environment = null
           if (environmentObjectUrl) URL.revokeObjectURL(environmentObjectUrl)
           environmentObjectUrl = null
         }
@@ -1196,6 +1336,12 @@ function Inner({ onReload }: { onReload: () => void }) {
             disposeEnvironmentTexture()
             curEnvironment = null
             scene.background = lightingBackground()
+            renderer.toneMappingExposure = 1
+            if (pip) pip.toneMappingExposure = 1
+            ;(scene as any).environmentIntensity = 1
+            ground.visible = true
+            shadowGround.visible = false
+            applyLighting(curLighting)
             if (!disposed) setEnvironment(null)
             return
           }
@@ -1217,20 +1363,47 @@ function Inner({ onReload }: { onReload: () => void }) {
             URL.revokeObjectURL(objectUrl)
             return
           }
+          const width = Number(texture.image?.naturalWidth || texture.image?.width || 0)
+          const height = Number(texture.image?.naturalHeight || texture.image?.height || 0)
           if (warnAspect) {
-            const width = Number(texture.image?.naturalWidth || texture.image?.width || 0)
-            const height = Number(texture.image?.naturalHeight || texture.image?.height || 0)
-            if (width && height && Math.abs(width / height - 2) > 0.15) toast('全景图不是标准 2:1 画幅，背景可能出现拉伸', 'warning')
+            const quality = assessDirectorPanoramaQuality(width, height)
+            if (quality?.level === 'invalid') toast('全景图不是标准 2:1 画幅，背景可能出现拉伸', 'warning')
+            else if (quality?.level === 'preview') toast('全景分辨率低于 4096×2048，仅建议用于预览', 'warning')
           }
           disposeEnvironmentTexture()
           texture.mapping = THREE.EquirectangularReflectionMapping
           texture.colorSpace = THREE.SRGBColorSpace
+          texture.anisotropy = renderer.capabilities.getMaxAnisotropy()
           texture.needsUpdate = true
           environmentTexture = texture
           environmentObjectUrl = objectUrl
-          curEnvironment = { ...next, mimeType }
-          scene.background = texture
-          setEnvironmentRotation(curEnvironment.rotation || 0)
+          curEnvironment = withDirectorEnvironmentDefaults({ ...next, mimeType, width: width || undefined, height: height || undefined })
+          const pmrem = new THREE.PMREMGenerator(renderer)
+          try {
+            pmrem.compileEquirectangularShader()
+            environmentRenderTarget = pmrem.fromEquirectangular(texture)
+          } catch {
+            environmentRenderTarget = null
+            if (warnAspect) toast('环境光预计算失败，背景仍可使用', 'warning')
+          } finally {
+            pmrem.dispose()
+          }
+          if (pip) {
+            const pipPmrem = new THREE.PMREMGenerator(pip)
+            try {
+              pipPmrem.compileEquirectangularShader()
+              pipEnvironmentRenderTarget = pipPmrem.fromEquirectangular(texture)
+            } catch {
+              pipEnvironmentRenderTarget = null
+            } finally {
+              pipPmrem.dispose()
+            }
+          }
+          scene.background = lightingBackground()
+          rebuildEnvironmentDisplay()
+          rebuildEnvironmentBackdrop()
+          applyEnvironmentRendering()
+          if (!disposed) setEnvironment({ ...curEnvironment })
         }
         const importEnvironmentFile = async (
           arrayBuffer: ArrayBuffer,
@@ -1289,6 +1462,7 @@ function Inner({ onReload }: { onReload: () => void }) {
               if (disposed || gen !== sceneGen) { disposeTree(obj); return }
               if (!stored) { obj.userData.assetId = undefined; toast('模型较大或存储不可用：本次可用，但不会随工程保存', 'warning') }
               const id = uid('obj')
+              configureSubjectShadows(obj)
               scene.add(obj)
               subjects.push({ obj, kind: '模型', id, name: k })
               sync()
@@ -1324,6 +1498,7 @@ function Inner({ onReload }: { onReload: () => void }) {
                       if (st.poseName) obj.userData.poseName = st.poseName
                       if (st.joints) obj.traverse((c: any) => { const j = c.userData && c.userData.joint; if (j && st.joints[j]) c.rotation.set(st.joints[j][0], st.joints[j][1], st.joints[j][2]) })
                       const id = st.id || uid('obj')
+                      configureSubjectShadows(obj)
                       scene.add(obj)
                       subjects.push({ obj, kind: '模型', id, name: st.name || '模型', desc: st.desc })
                       sync()
@@ -1553,6 +1728,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             const markerScale = Math.max(0.65, Math.min(2.2, jointMarker.position.distanceTo(cam.position) * 0.16))
             jointMarker.scale.setScalar(markerScale)
           }
+          if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(cam.position)
           renderer.render(scene, cam)
           if (pip && shotLocked) {
             camHelper.visible = false
@@ -1560,7 +1736,11 @@ function Inner({ onReload }: { onReload: () => void }) {
             const recordedHelpersVisible = recordedCameraHelpers.visible
             jointMarker.visible = false
             recordedCameraHelpers.visible = false
+            if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(shotCam.position)
+            const mainEnvironment = scene.environment
+            scene.environment = pipEnvironmentRenderTarget?.texture || null
             pip.render(scene, shotCam)
+            scene.environment = mainEnvironment
             jointMarker.visible = markerVisible
             recordedCameraHelpers.visible = recordedHelpersVisible
           } // PiP 出图预览（不含取景框线和关节定位点）
@@ -1636,16 +1816,17 @@ function Inner({ onReload }: { onReload: () => void }) {
           curRoot.updateMatrixWorld(true)
           emitTransform()
         }
-        // ── 灯光预设：只调两盏灯 + 背景色；不进 undo 快照（与视图操作同类）──
+        // 灯光预设作为人工主光。全景启用时降低旧的棚灯底光，让 PMREM 环境光承担空间融合。
         let curLighting = '默认'
         const applyLighting = (k: string) => {
           const L = LIGHTINGS.find((l) => l.k === k) || LIGHTINGS[0]
+          const environmentActive = !!environmentTexture
           curLighting = L.k
           hemi.color.setHex(L.hemiSky)
           ;(hemi.groundColor as any).setHex(L.hemiGround)
-          hemi.intensity = L.hemiInt
+          hemi.intensity = L.hemiInt * (environmentActive ? 0.22 : 1)
           dirLight.color.setHex(L.dirColor)
-          dirLight.intensity = L.dirInt
+          dirLight.intensity = L.dirInt * (environmentActive ? 0.72 : 1)
           dirLight.position.set(L.dirPos[0], L.dirPos[1], L.dirPos[2])
           if (!environmentTexture) scene.background = new THREE.Color(L.bg)
         }
@@ -1682,7 +1863,9 @@ function Inner({ onReload }: { onReload: () => void }) {
           grid.visible = false // 网格线不进缩略图
           jointMarker.visible = false
           recordedCameraHelpers.visible = false
-          renderer.render(scene, outCam())
+          const captureCamera = outCam()
+          if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(captureCamera.position)
+          renderer.render(scene, captureCamera)
           const src = renderer.domElement
           const tw = 96
           const th = Math.max(1, Math.round((tw * src.height) / src.width))
@@ -1795,6 +1978,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             if (st.kind === '人台' && st.poseOffsetY == null) groundMannequinRig(obj)
           }
           const id = st.id || uid('obj')
+          configureSubjectShadows(obj)
           scene.add(obj)
           subjects.push({ obj, kind: st.kind, id, name: st.name || nextName(st.kind), desc: st.desc, colorName })
         }
@@ -1912,11 +2096,15 @@ function Inner({ onReload }: { onReload: () => void }) {
           scene.background = new THREE.Color(0x000000)
           const gv = grid.visible
           const gdv = ground.visible
+          const sgv = shadowGround.visible
+          const ebv = groundedSkybox?.visible
           const chv = camHelper.visible
           const jmv = jointMarker.visible
           const rhv = recordedCameraHelpers.visible
           grid.visible = false
           ground.visible = false // 网格/地面会污染深度图（底部强梯度+网格线），主体专注
+          shadowGround.visible = false
+          if (groundedSkybox) groundedSkybox.visible = false
           camHelper.visible = false // 取景框不进深度图
           jointMarker.visible = false
           recordedCameraHelpers.visible = false
@@ -1925,6 +2113,8 @@ function Inner({ onReload }: { onReload: () => void }) {
           scene.overrideMaterial = null as any
           grid.visible = gv
           ground.visible = gdv
+          shadowGround.visible = sgv
+          if (groundedSkybox) groundedSkybox.visible = ebv
           camHelper.visible = chv
           jointMarker.visible = jmv
           recordedCameraHelpers.visible = rhv
@@ -2185,7 +2375,9 @@ function Inner({ onReload }: { onReload: () => void }) {
             grid.visible = false // 网格线是编辑器辅助，不进参考图（地面保留作地面参考）
             jointMarker.visible = false
             recordedCameraHelpers.visible = false
-            renderer.render(scene, outCam())
+            const captureCamera = outCam()
+            if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(captureCamera.position)
+            renderer.render(scene, captureCamera)
             const src = renderer.domElement
             const c = document.createElement('canvas')
             c.width = src.width
@@ -2254,7 +2446,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             curEnvironment = { ...curEnvironment, description: description || undefined }
             if (!disposed) setEnvironment({ ...curEnvironment })
           },
-          setEnvironmentRotation,
+          setEnvironmentSettings,
           setAspect: (ar: number) => { curAspect = ar },
           captureThumb,
           dropToGround,
@@ -3319,8 +3511,8 @@ function Inner({ onReload }: { onReload: () => void }) {
                     api.current.setEnvironmentDescription?.(description)
                     saveScene()
                   }}
-                  onRotationChange={(rotation, commitChange) => {
-                    api.current.setEnvironmentRotation?.(rotation)
+                  onSettingsChange={(patch, commitChange) => {
+                    api.current.setEnvironmentSettings?.(patch, commitChange)
                     if (commitChange) saveScene()
                   }}
                 />

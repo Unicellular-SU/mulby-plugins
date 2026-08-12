@@ -154,6 +154,15 @@ export interface DirectorEnvironment {
   mimeType?: string
   description?: string // 追加进镜头提示词的环境描述
   rotation?: number // 水平旋转角度，单位为度
+  mode?: 'grounded' | 'infinite' // 落地环境用于小范围移机；无限背景只随视角旋转
+  cameraHeight?: number // 全景拍摄点离地高度，单位为米
+  horizon?: number // 地平线垂直校准，单位为度
+  exposure?: number // ACES 画面曝光
+  environmentIntensity?: number // PBR 材质使用的全景环境光强度
+  backgroundBlur?: number // 背景柔化，范围 0-1
+  shadowOpacity?: number // 透明接影面的阴影强度，范围 0-1
+  width?: number // 原始全景像素尺寸，用于质量提示
+  height?: number
   source?: 'local' | 'canvas' // 仅用于说明来源；附件始终复制到导演工程独立存储
   sourceCardId?: string // 来自当前画布时记录源 360 全景卡 id
 }

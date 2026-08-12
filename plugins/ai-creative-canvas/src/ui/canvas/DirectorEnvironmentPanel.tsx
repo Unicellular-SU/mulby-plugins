@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Compass, Image, Loader2, Trash2, Upload } from 'lucide-react'
+import { Compass, Image, Loader2, SlidersHorizontal, Trash2, Upload } from 'lucide-react'
 import type { DirectorEnvironment } from '../types'
+import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls } from './directorEnvironment'
 
 interface Props {
   environment: DirectorEnvironment | null
@@ -11,7 +12,45 @@ interface Props {
   onImportCanvas: (cardId: string) => void
   onClear: () => void
   onDescriptionChange: (description: string) => void
-  onRotationChange: (rotation: number, commit: boolean) => void
+  onSettingsChange: (patch: Partial<DirectorEnvironment>, commit: boolean) => void
+}
+
+interface CalibrationRangeProps {
+  label: string
+  value: number
+  display: string
+  min: number
+  max: number
+  step: number
+  disabled?: boolean
+  onChange: (value: number, commit: boolean) => void
+}
+
+function CalibrationRange({ label, value, display, min, max, step, disabled, onChange }: CalibrationRangeProps) {
+  const commitOnKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') onChange(Number(event.currentTarget.value), true)
+  }
+  return (
+    <label className={`flex flex-col gap-1 text-[10px] ${disabled ? 'text-white/25' : 'text-white/45'}`}>
+      <span className="flex items-center justify-between gap-2">
+        <span>{label}</span>
+        <span className="font-mono tabular-nums text-white/35">{display}</span>
+      </span>
+      <input
+        aria-label={label}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(Number(event.target.value), false)}
+        onPointerUp={(event) => onChange(Number(event.currentTarget.value), true)}
+        onKeyUp={commitOnKey}
+        className="w-full accent-amber-300 disabled:opacity-35"
+      />
+    </label>
+  )
 }
 
 export function DirectorEnvironmentPanel({
@@ -23,10 +62,12 @@ export function DirectorEnvironmentPanel({
   onImportCanvas,
   onClear,
   onDescriptionChange,
-  onRotationChange
+  onSettingsChange
 }: Props) {
   const [description, setDescription] = useState('')
+  const controls = normalizeDirectorEnvironmentControls(environment)
   const rotation = Math.round(environment?.rotation || 0)
+  const quality = assessDirectorPanoramaQuality(environment?.width, environment?.height)
 
   useEffect(() => setDescription(environment?.description || ''), [environment?.assetId, environment?.description])
 
@@ -67,24 +108,56 @@ export function DirectorEnvironmentPanel({
         </div>
       ) : (
         <>
-          <div className="truncate text-[10px] text-white/45" title={environment.name}>{environment.name || '全景背景'}</div>
-          <label className="flex flex-col gap-1 text-[10px] text-white/45">
-            水平旋转 <span className="tabular-nums text-white/30">{rotation}°</span>
-            <input
-              aria-label="环境水平旋转"
-              type="range"
-              min={-180}
-              max={180}
-              step={1}
-              value={rotation}
-              onChange={(event) => onRotationChange(Number(event.target.value), false)}
-              onPointerUp={(event) => onRotationChange(Number(event.currentTarget.value), true)}
-              onKeyUp={(event) => {
-                if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') onRotationChange(Number(event.currentTarget.value), true)
-              }}
-              className="w-full accent-amber-300"
-            />
-          </label>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="truncate text-[10px] text-white/55" title={environment.name}>{environment.name || '全景背景'}</div>
+              {environment.width && environment.height && <div className="mt-0.5 font-mono text-[9px] text-white/30">{environment.width}×{environment.height}</div>}
+            </div>
+            {quality && (
+              <span
+                title={quality.detail}
+                className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] ${
+                  quality.level === 'high' || quality.level === 'standard'
+                    ? 'border-white/10 bg-white/[0.05] text-white/65'
+                    : 'border-amber-300/20 bg-amber-300/10 text-amber-200/75'
+                }`}
+              >
+                {quality.label}
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-white/[0.06] pt-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-white/45">
+              <SlidersHorizontal size={11} />
+              <span>环境校准</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.035] p-1">
+              {(['grounded', 'infinite'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onSettingsChange({ mode }, true)}
+                  className={`h-7 rounded-md text-[10px] transition-colors active:scale-[0.98] ${controls.mode === mode ? 'bg-amber-300/15 text-amber-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/65'} disabled:opacity-40`}
+                  title={mode === 'grounded' ? '投影下半球地面，适合固定机位和小范围移机' : '无限远背景，只随视角旋转'}
+                >
+                  {mode === 'grounded' ? '落地环境' : '无限背景'}
+                </button>
+              ))}
+            </div>
+            <CalibrationRange label="水平旋转" value={rotation} display={`${rotation}°`} min={-180} max={180} step={1} disabled={busy} onChange={(value, commit) => onSettingsChange({ rotation: value }, commit)} />
+            <CalibrationRange label="拍摄高度" value={controls.cameraHeight} display={`${controls.cameraHeight.toFixed(1)}m`} min={0.3} max={5} step={0.1} disabled={busy || controls.mode !== 'grounded'} onChange={(value, commit) => onSettingsChange({ cameraHeight: value }, commit)} />
+            <CalibrationRange label="地平线校准" value={controls.horizon} display={`${Math.round(controls.horizon)}°`} min={-20} max={20} step={1} disabled={busy} onChange={(value, commit) => onSettingsChange({ horizon: value }, commit)} />
+            <CalibrationRange label="画面曝光" value={controls.exposure} display={controls.exposure.toFixed(2)} min={0.25} max={3} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ exposure: value }, commit)} />
+            <CalibrationRange label="环境光" value={controls.environmentIntensity} display={controls.environmentIntensity.toFixed(2)} min={0} max={3} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ environmentIntensity: value }, commit)} />
+            <CalibrationRange label="背景柔化" value={controls.backgroundBlur} display={`${Math.round(controls.backgroundBlur * 100)}%`} min={0} max={1} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ backgroundBlur: value }, commit)} />
+            <CalibrationRange label="接影强度" value={controls.shadowOpacity} display={`${Math.round(controls.shadowOpacity * 100)}%`} min={0} max={1} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ shadowOpacity: value }, commit)} />
+            <div className="rounded-md border border-amber-300/10 bg-amber-300/[0.04] px-2 py-1.5 text-[9px] leading-relaxed text-amber-100/45">
+              {controls.mode === 'grounded' ? '适合旋转镜头和小范围移机。大幅横移仍会暴露单张全景没有真实深度。' : '背景始终位于无限远，不产生地面视差。'}
+            </div>
+          </div>
+
           <label className="flex flex-col gap-1 text-[10px] text-white/45">
             环境描述
             <textarea
