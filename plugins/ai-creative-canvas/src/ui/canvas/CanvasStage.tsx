@@ -693,7 +693,11 @@ export function CanvasStage() {
       )}
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
-          <div className="ace-glass ace-anim-fade pointer-events-auto px-6 py-5 text-center max-w-xs">
+          <div
+            data-interactive
+            onPointerDown={(e) => e.stopPropagation()}
+            className="ace-glass ace-anim-fade pointer-events-auto px-6 py-5 text-center max-w-xs"
+          >
             <Sparkles size={26} className="mx-auto text-indigo-400 mb-2" />
             <div className="text-base font-medium mb-1">空白画布</div>
             <div className="text-xs opacity-60 mb-3">从这里开始创作</div>
