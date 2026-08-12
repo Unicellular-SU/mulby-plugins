@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Compass, Film, Wand2, ScanText, Loader2, Brush, Maximize2 } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Compass, Film, Wand2, ScanText, Loader2, Brush, Maximize2, FolderOpen, RefreshCcw } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
@@ -8,18 +8,28 @@ import { generateCard, stopCard, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
 import { enhancePrompt, describeImage } from '../services/promptTools'
 import { PROMPT_PRESETS, PRESET_GROUPS, type Preset } from '../services/presets'
-import { saveBase64 } from '../services/media'
-import { arrayBufferToBase64, uid, isImeComposing } from '../util'
+import { isImeComposing } from '../util'
 import { worldToScreen } from './viewport'
 import { stageEl } from './stageEl'
 import { ModelPicker } from '../components/ModelPicker'
 import { ParamControls } from '../components/ParamControls'
 import { Select } from '../components/Select'
-import { KIND_ACCENT, type Material, type MaterialKind, type NodeAsset } from '../types'
+import { KIND_ACCENT, KIND_LABEL, type Material, type MaterialKind } from '../types'
 import { toast } from '../store/toastStore'
+import { loadImportedResources, pickImportPaths, resourcesToNodeAssets } from '../services/importMedia'
+import { parseDroppedPathText } from '../services/importMediaTypes'
 
 const MAT_ICON: Record<MaterialKind, typeof ImageIcon> = { image: ImageIcon, video: Video, audio: Music, text: TypeIcon }
 const PANEL_W = 480
+
+function formatBytes(value: unknown): string {
+  const bytes = Number(value || 0)
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
 
 interface MentionState {
   mode: 'ref' | 'preset'
@@ -68,8 +78,12 @@ export function NodeEditor() {
   const removeCards = useGraph((s) => s.removeCards)
   const removeEdge = useGraph((s) => s.removeEdge)
   const fileRef = useRef<HTMLInputElement>(null)
+  const replaceRef = useRef<HTMLInputElement>(null)
+  const outputEditArmed = useRef(false)
   const [mention, setMention] = useState<MentionState | null>(null)
   const [toolBusy, setToolBusy] = useState(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [draggingAssets, setDraggingAssets] = useState(false)
   const [expand, setExpand] = useState(false)
 
   if (selectedIds.length !== 1) return null
@@ -95,31 +109,80 @@ export function NodeEditor() {
   const posBottom = placeBelow ? undefined : Math.max(8, ss.h - (topS.y - 8))
   const maxH = placeBelow ? Math.max(160, ss.h - (bottom.y + 8) - 8) : Math.max(160, topS.y - 8 - 8)
 
-  const onUpload = async (files: FileList | null) => {
-    if (!files || files.length === 0) return
-    const projectId = useGraph.getState().project.id
-    const added: NodeAsset[] = []
-    for (const file of Array.from(files)) {
-      const mime = file.type || ''
-      const kind: MaterialKind = mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'image'
-      try {
-        const buf = await file.arrayBuffer()
-        const b64 = arrayBufferToBase64(buf)
-        const ext = (file.name.split('.').pop() || 'bin').toLowerCase()
-        const saved = await saveBase64(projectId, 'upload', b64, ext)
-        added.push({ id: uid('a'), kind, url: saved.url, localPath: saved.path, mime, name: file.name })
-      } catch {
-        /* skip */
-      }
+  const appendResources = async (files: File[] | FileList, paths: string[] = []) => {
+    setImportBusy(true)
+    try {
+      const resources = await loadImportedResources(files, paths)
+      if (!resources.length) return
+      const current = useGraph.getState().getCard(card.id)
+      if (!current) return
+      useGraph.getState().pushHistory()
+      updateCard(card.id, { assets: [...(current.assets || []), ...resourcesToNodeAssets(resources)] })
+      toast(`已添加 ${resources.length} 个节点素材`, 'success')
+    } finally {
+      setImportBusy(false)
+      if (fileRef.current) fileRef.current.value = ''
     }
-    if (added.length) updateCard(card.id, { assets: [...card.assets, ...added] })
-    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  const pickAssets = async () => {
+    if (!window.mulby?.dialog?.showOpenDialog) {
+      fileRef.current?.click()
+      return
+    }
+    const paths = await pickImportPaths()
+    if (paths.length) await appendResources([], paths)
+  }
+
+  const replaceSource = async (files: File[] | FileList, paths: string[] = []) => {
+    setImportBusy(true)
+    try {
+      const resources = await loadImportedResources(Array.from(files).slice(0, 1), paths.slice(0, 1))
+      const resource = resources.find((item) => item.kind === 'image')
+      if (!resource) {
+        if (resources.length) toast('素材节点当前只支持替换为图片', 'error')
+        return
+      }
+      useGraph.getState().pushHistory()
+      updateCard(card.id, {
+        title: resource.name || card.title,
+        assetUrl: resource.url || null,
+        assetLocalPath: resource.localPath || null,
+        attachmentId: null,
+        mime: resource.mime,
+        status: 'done',
+        error: null,
+        meta: { ...(card.meta || {}), importSize: resource.size, fittedFor: undefined, thumb: undefined, thumbFor: undefined }
+      })
+      toast('主素材已替换', 'success')
+    } finally {
+      setImportBusy(false)
+      if (replaceRef.current) replaceRef.current.value = ''
+    }
+  }
+
+  const collectDrop = (dataTransfer: DataTransfer): { files: File[]; paths: string[] } => {
+    const files = Array.from(dataTransfer.files || [])
+    const paths = new Set<string>()
+    for (const file of files) {
+      const path = (file as File & { path?: string }).path
+      if (path) paths.add(path)
+    }
+    for (const path of parseDroppedPathText(dataTransfer.getData('text/uri-list'))) paths.add(path)
+    for (const path of parseDroppedPathText(dataTransfer.getData('text/plain'))) paths.add(path)
+    return { files, paths: [...paths] }
   }
 
   const removeMaterial = (m: Material) => {
-    if (m.origin === 'upload') updateCard(card.id, { assets: card.assets.filter((a) => 'upload:' + a.id !== m.matId) })
-    else if (m.origin === 'card') updateCard(card.id, { refIds: card.refIds.filter((id) => 'card:' + id !== m.matId) })
-    else for (const e of Object.values(board.edges)) if (e.target === card.id && e.source === m.cardId) removeEdge(e.id)
+    if (m.origin === 'upload') {
+      useGraph.getState().pushHistory()
+      updateCard(card.id, { assets: (card.assets || []).filter((a) => 'upload:' + a.id !== m.matId) })
+    } else if (m.origin === 'card') {
+      useGraph.getState().pushHistory()
+      updateCard(card.id, { refIds: card.refIds.filter((id) => 'card:' + id !== m.matId) })
+    } else {
+      for (const e of Object.values(board.edges)) if (e.target === card.id && e.source === m.cardId) removeEdge(e.id)
+    }
   }
 
   const insertToken = (label: string, start: number, end: number) => {
@@ -220,16 +283,60 @@ export function NodeEditor() {
       <div
         data-interactive
         onWheel={(e) => e.stopPropagation()}
+        onDragEnter={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          if (Array.from(e.dataTransfer.types || []).includes('Files')) setDraggingAssets(true)
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={(e) => {
+          e.stopPropagation()
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDraggingAssets(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          setDraggingAssets(false)
+          const snapshot = collectDrop(e.dataTransfer)
+          if (card.kind === 'source') void replaceSource(snapshot.files, snapshot.paths)
+          else if (generatable) void appendResources(snapshot.files, snapshot.paths)
+        }}
         className="absolute z-30 rounded-xl border overflow-hidden text-neutral-800 dark:text-neutral-200"
         style={{ left, top: posTop, bottom: posBottom, width: PANEL_W, borderColor: accent + '55', background: 'var(--surface-glass)', backdropFilter: 'var(--blur-glass)', WebkitBackdropFilter: 'var(--blur-glass)', boxShadow: 'var(--shadow-menu)' }}
       >
         <div className="flex flex-col gap-1.5 p-2 overflow-y-auto ace-noscroll" style={{ maxHeight: maxH }}>
-          <input
-            value={card.title}
-            onChange={(e) => updateCard(card.id, { title: e.target.value })}
-            placeholder="节点名称（@ 引用时显示此名）"
-            className="w-full bg-transparent text-sm font-semibold outline-none placeholder:opacity-40 px-0.5"
-          />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-white" style={{ background: accent }}>{KIND_LABEL[card.kind]}</span>
+            <input
+              key={`${card.id}:${card.title}`}
+              defaultValue={card.title}
+              onBlur={(e) => {
+                const next = e.currentTarget.value.trim() || card.title
+                if (next !== card.title) {
+                  useGraph.getState().pushHistory()
+                  updateCard(card.id, { title: next })
+                }
+              }}
+              onKeyDown={(e) => {
+                if (isImeComposing(e)) return
+                if (e.key === 'Enter') e.currentTarget.blur()
+                else if (e.key === 'Escape') {
+                  e.currentTarget.value = card.title
+                  e.currentTarget.blur()
+                }
+              }}
+              placeholder="节点名称（@ 引用时显示此名）"
+              className="flex-1 min-w-0 bg-transparent text-sm font-semibold outline-none placeholder:opacity-40 px-0.5"
+            />
+            {busy && <span className="shrink-0 text-[10px] opacity-55">{card.status === 'queued' ? '排队中' : '生成中'}</span>}
+            <button onClick={() => useGraph.getState().clearSelection()} title="关闭编辑框" className="shrink-0 p-1 rounded opacity-55 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10">
+              <X size={13} />
+            </button>
+          </div>
           {/* 顶行：素材条 + 操作 */}
           <div className="flex items-center gap-1.5">
             <div className="flex-1 flex items-center gap-1 overflow-x-auto ace-noscroll min-w-0">
@@ -262,15 +369,17 @@ export function NodeEditor() {
                 })}
               {generatable && (
                 <button
-                  onClick={() => fileRef.current?.click()}
-                  title="上传素材"
+                  onClick={() => void pickAssets()}
+                  disabled={importBusy}
+                  title="添加节点素材（也可直接拖到编辑框）"
                   className="shrink-0 w-9 h-9 rounded-md border border-dashed grid place-items-center opacity-60 hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/10"
                   style={{ borderColor: 'var(--ace-border)' }}
                 >
-                  <Plus size={15} />
+                  {importBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={15} />}
                 </button>
               )}
-              <input ref={fileRef} type="file" accept="image/*,video/*,audio/*" multiple className="hidden" onChange={(e) => onUpload(e.target.files)} />
+              <input ref={fileRef} type="file" accept="image/*,video/*,audio/*,.txt,.md,.json,.srt" multiple className="hidden" onChange={(e) => void appendResources(e.target.files || [])} />
+              <input ref={replaceRef} type="file" accept="image/*" className="hidden" onChange={(e) => void replaceSource(e.target.files || [])} />
             </div>
             {card.assetLocalPath && (
               <button onClick={exportCard} title="导出/下载" className="shrink-0 opacity-60 hover:opacity-100 p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
@@ -281,6 +390,24 @@ export function NodeEditor() {
               <Trash2 size={14} />
             </button>
           </div>
+
+          {card.kind === 'source' && (
+            <div className="rounded-lg border px-2.5 py-2 flex items-center gap-2 text-[11px]" style={{ borderColor: 'var(--ace-border)' }}>
+              <ImageIcon size={16} style={{ color: accent }} className="shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate">{card.assetLocalPath?.split(/[\\/]/).pop() || card.title || '未选择素材'}</div>
+                <div className="opacity-50 truncate">{[card.mime || '未知类型', formatBytes((card.meta as any)?.importSize)].filter(Boolean).join(' · ')}</div>
+              </div>
+              {card.assetLocalPath && (
+                <button onClick={() => void window.mulby?.shell?.showItemInFolder(card.assetLocalPath as string)} title="在文件夹中显示" className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10">
+                  <FolderOpen size={14} />
+                </button>
+              )}
+              <button onClick={() => replaceRef.current?.click()} disabled={importBusy} title="替换主素材" className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40">
+                {importBusy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+              </button>
+            </div>
+          )}
 
           {/* 视频参考形式 */}
           {card.kind === 'video' && (
@@ -394,6 +521,31 @@ export function NodeEditor() {
             </>
           )}
 
+          {card.kind === 'text' && card.text !== null && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between text-[10px] opacity-55">
+                <span>文本结果</span>
+                <span>可直接修订，提示词与结果分开保存</span>
+              </div>
+              <textarea
+                value={card.text || ''}
+                onFocus={() => { outputEditArmed.current = true }}
+                onBlur={() => { outputEditArmed.current = false }}
+                onChange={(e) => {
+                  if (outputEditArmed.current) {
+                    useGraph.getState().pushHistory()
+                    outputEditArmed.current = false
+                  }
+                  updateCard(card.id, { text: e.target.value })
+                }}
+                rows={4}
+                placeholder="生成结果会显示在这里，也可手动编辑…"
+                className="ace-input ace-scroll resize-y w-full block text-[12px]"
+                style={{ minHeight: 72, maxHeight: 220 }}
+              />
+            </div>
+          )}
+
           {/* 模型/Provider + 参数 */}
           {generatable && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -421,6 +573,11 @@ export function NodeEditor() {
 
         {card.error && <div className="text-[11px] text-red-500 bg-red-500/10 rounded px-2 py-1">{card.error}</div>}
         </div>
+        {draggingAssets && (
+          <div className="absolute inset-1 z-40 rounded-lg border-2 border-dashed border-indigo-400 bg-indigo-500/15 pointer-events-none grid place-items-center">
+            <div className="rounded-lg bg-neutral-900/80 px-3 py-2 text-xs text-white shadow">{card.kind === 'source' ? '释放以替换主素材' : '释放以添加为节点素材'}</div>
+          </div>
+        )}
       </div>
 
       {/* @素材 / /预设 菜单：屏幕坐标浮层，不受面板裁剪 */}

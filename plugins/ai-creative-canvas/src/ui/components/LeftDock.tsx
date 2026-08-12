@@ -1,8 +1,10 @@
-import { Type, Image as ImageIcon, Compass, Video, Music, Package, StickyNote } from 'lucide-react'
+import { useState } from 'react'
+import { Type, Image as ImageIcon, Compass, Video, Music, Package, StickyNote, Upload, Loader2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from '../canvas/viewport'
 import { KIND_ACCENT, type CardKind } from '../types'
+import { importPaths, pickImportPaths } from '../services/importMedia'
 
 const ITEMS: Array<{ kind: CardKind; icon: typeof Type; label: string }> = [
   { kind: 'text', icon: Type, label: '文本' },
@@ -15,16 +17,30 @@ const ITEMS: Array<{ kind: CardKind; icon: typeof Type; label: string }> = [
 ]
 
 function addAtViewCenter(kind: CardKind) {
-  const { stageSize } = useUi.getState()
-  const vp = useGraph.getState().getActiveBoard().viewport
-  const c = screenToWorld(stageSize.w / 2, stageSize.h / 2, vp)
+  const c = viewCenter()
   useGraph.getState().addCard(kind, {
     x: c.x + (Math.random() * 60 - 30),
     y: c.y + (Math.random() * 60 - 30)
   })
 }
 
+function viewCenter() {
+  const { stageSize } = useUi.getState()
+  const vp = useGraph.getState().getActiveBoard().viewport
+  return screenToWorld(stageSize.w / 2, stageSize.h / 2, vp)
+}
+
 export function LeftDock() {
+  const [importing, setImporting] = useState(false)
+  const chooseResources = async () => {
+    setImporting(true)
+    try {
+      const paths = await pickImportPaths()
+      if (paths.length) await importPaths(paths, viewCenter())
+    } finally {
+      setImporting(false)
+    }
+  }
   return (
     <div
       data-interactive
@@ -48,6 +64,16 @@ export function LeftDock() {
           </button>
         )
       })}
+      <div className="w-8 border-t my-0.5" style={{ borderColor: 'var(--ace-border)' }} />
+      <button
+        onClick={() => void chooseResources()}
+        disabled={importing}
+        title="从本地导入图片、视频、音频或文本"
+        className="w-11 h-11 grid place-items-center gap-0.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-50"
+      >
+        {importing ? <Loader2 size={18} className="animate-spin text-indigo-500" /> : <Upload size={18} className="text-indigo-500" />}
+        <span className="text-[10px] opacity-70">导入</span>
+      </button>
     </div>
   )
 }

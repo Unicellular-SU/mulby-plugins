@@ -43,10 +43,11 @@ export type MaterialKind = 'image' | 'video' | 'audio' | 'text'
 export interface NodeAsset {
   id: string
   kind: MaterialKind
-  url: string
+  url?: string
   localPath?: string
   mime?: string
   name?: string
+  text?: string
 }
 
 // 统一"素材"：来自上游连线 / 显式引用 / 本节点上传

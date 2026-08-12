@@ -65,6 +65,7 @@ export function buildMaterials(card: Card, board: Board): Material[] {
       kind: a.kind,
       label,
       thumbUrl: a.kind === 'image' ? a.url : undefined,
+      text: a.kind === 'text' ? a.text : undefined,
       assetUrl: a.url,
       assetLocalPath: a.localPath,
       mime: a.mime

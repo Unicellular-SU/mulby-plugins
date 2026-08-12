@@ -3,6 +3,46 @@ const MB = 1024 * 1024
 // host-worker 只能整块写文件，无法把 fetch body 直接 pipe 到磁盘；因此必须在进入 Buffer 前设硬上限。
 export const MAX_REMOTE_MEDIA_BYTES = 256 * MB
 export const MAX_UPLOAD_IMAGE_BYTES = 50 * MB
+export const MAX_LOCAL_IMPORT_FILES = 64
+export const MAX_TEXT_IMPORT_BYTES = 5 * MB
+
+const IMPORT_MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  avif: 'image/avif',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  aac: 'audio/aac',
+  opus: 'audio/opus',
+  m4a: 'audio/mp4',
+  flac: 'audio/flac',
+  ogg: 'audio/ogg',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  json: 'application/json',
+  srt: 'application/x-subrip'
+}
+
+/** 只从最后一个路径段取扩展名；不把隐藏文件或末尾点误判成扩展名。 */
+export function localImportExtension(name: string): string {
+  const base = String(name || '').split(/[\\/]/).pop() || ''
+  const dot = base.lastIndexOf('.')
+  return dot > 0 && dot < base.length - 1 ? base.slice(dot + 1).toLowerCase() : ''
+}
+
+export function localImportMime(name: string): string {
+  return IMPORT_MIME_BY_EXT[localImportExtension(name)] || ''
+}
+
+export function isTextImportName(name: string): boolean {
+  return ['txt', 'md', 'json', 'srt'].includes(localImportExtension(name))
+}
 
 /** 远程 RPC 只允许 HTTP(S)，避免 data:/file:/ftp: 等协议把 host-worker 变成通用读取器。 */
 export function normalizeRemoteHttpUrl(raw: string, label = '远程地址'): string {

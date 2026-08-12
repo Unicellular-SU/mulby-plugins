@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type DragEvent as RDragEvent, type MouseEvent as RMouseEvent } from 'react'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Upload } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useInteraction } from '../store/interactionStore'
 import { useUi } from '../store/uiStore'
@@ -29,6 +29,7 @@ import { isCardInsideGroup } from '../types'
 import { classifyWheel, fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
 import { buildGridIndex, type RectItem } from './spatialIndex'
 import { importFiles } from '../services/importMedia'
+import { parseDroppedPathText } from '../services/importMediaTypes'
 import { stageEl } from './stageEl'
 
 type Interaction =
@@ -51,6 +52,7 @@ export function CanvasStage() {
 
   const [cursor, setCursor] = useState<'default' | 'grab' | 'grabbing'>('default')
   const [marquee, setMarquee] = useState<ScreenRect | null>(null)
+  const [draggingFiles, setDraggingFiles] = useState(false)
 
   const board = useGraph((s) => s.getActiveBoard())
   const selectedIds = useGraph((s) => s.selectedIds)
@@ -169,10 +171,22 @@ export function CanvasStage() {
 
   const onDrop = (e: RDragEvent<HTMLDivElement>) => {
     e.preventDefault()
+    e.stopPropagation()
+    setDraggingFiles(false)
     const rect = getRect()
     const world = screenToWorld(e.clientX - rect.left, e.clientY - rect.top, useGraph.getState().getActiveBoard().viewport)
+    // dataTransfer 在事件同步阶段结束后可能被 Chromium 清空：所有格式与 FileList 必须先快照，再启动异步导入。
+    const dataTransfer = e.dataTransfer
+    const files = Array.from(dataTransfer?.files || [])
+    const pathCandidates = new Set<string>()
+    for (const file of files) {
+      const path = (file as File & { path?: string }).path
+      if (path) pathCandidates.add(path)
+    }
+    for (const path of parseDroppedPathText(dataTransfer?.getData('text/uri-list') || '')) pathCandidates.add(path)
+    for (const path of parseDroppedPathText(dataTransfer?.getData('text/plain') || '')) pathCandidates.add(path)
     // 从卡片拖出的产物 → 新建素材/视频源卡
-    const assetJson = e.dataTransfer?.getData('application/x-ace-asset')
+    const assetJson = dataTransfer?.getData('application/x-ace-asset')
     if (assetJson) {
       try {
         const a = JSON.parse(assetJson)
@@ -185,13 +199,12 @@ export function CanvasStage() {
       return
     }
     // 从左侧拖组件 → 新建对应卡片
-    const kind = e.dataTransfer?.getData('application/x-ace-kind')
+    const kind = dataTransfer?.getData('application/x-ace-kind')
     if (kind) {
       useGraph.getState().addCard(kind as CardKind, world)
       return
     }
-    const files = e.dataTransfer?.files
-    if (files && files.length) void importFiles(files, world)
+    if (files.length || pathCandidates.size) void importFiles(files, world, [...pathCandidates])
   }
 
   const flush = () => {
@@ -609,7 +622,19 @@ export function CanvasStage() {
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
+      onDragEnter={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (Array.from(e.dataTransfer?.types || []).includes('Files')) setDraggingFiles(true)
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDraggingFiles(false)
+      }}
     >
       {showGrid && <GridLayer viewport={vp} />}
       <EdgeLayer board={board} temp={connectTemp} selected={selSet} cull={viewRect} edgeIds={visibleEdgeIds} />
@@ -645,6 +670,15 @@ export function CanvasStage() {
       <MultiConnectHandle />
       <Lightbox />
       <ContextMenu />
+      {draggingFiles && (
+        <div className="absolute inset-3 z-[70] rounded-2xl border-2 border-dashed border-indigo-400 bg-indigo-500/10 pointer-events-none grid place-items-center">
+          <div className="ace-glass px-5 py-4 flex flex-col items-center gap-2 text-indigo-600 dark:text-indigo-300 shadow-lg">
+            <Upload size={24} />
+            <div className="text-sm font-medium">释放以导入画布资源</div>
+            <div className="text-[11px] opacity-65">图片、视频、音频与文本会自动创建对应节点</div>
+          </div>
+        </div>
+      )}
       {Object.keys(board.cards).length === 0 && (
         <div className="absolute inset-0 grid place-items-center pointer-events-none">
           <div className="ace-glass ace-anim-fade pointer-events-auto px-6 py-5 text-center max-w-xs">

@@ -1,8 +1,12 @@
 /// <reference path="./types/mulby.d.ts" />
 import {
   MAX_REMOTE_MEDIA_BYTES,
+  MAX_LOCAL_IMPORT_FILES,
+  MAX_TEXT_IMPORT_BYTES,
   MAX_UPLOAD_IMAGE_BYTES,
   decodedBase64ByteLength,
+  isTextImportName,
+  localImportMime,
   normalizeRemoteHttpUrl
 } from './backendGuards'
 // AI 创意画布 — 插件后端入口
@@ -214,6 +218,60 @@ export const rpc = {
       return { ok: true, removed }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+
+  // 系统拖拽 / 打开文件对话框导入：前端只负责同步提取路径，实际读取与复制放在后端，
+  // 避免渲染沙箱拒绝路径访问，也避免大媒体在 ArrayBuffer → Base64 → RPC 间多次膨胀。
+  // 仅接受画布支持的白名单扩展名；目标目录与文件名均由后端决定。
+  async importLocalResources(input: { projectId: string; paths: string[] }) {
+    const items: Array<{ name: string; mime: string; path?: string; text?: string; size: number }> = []
+    const failures: Array<{ name: string; reason: string }> = []
+    try {
+      const rawPaths = Array.isArray(input?.paths) ? input.paths : []
+      const paths = [...new Set(rawPaths.map((p) => String(p || '').trim()).filter(Boolean))]
+      if (!paths.length) return { ok: false, items, failures, error: '没有可导入的本地路径' }
+      if (paths.length > MAX_LOCAL_IMPORT_FILES) {
+        return { ok: false, items, failures, error: `一次最多导入 ${MAX_LOCAL_IMPORT_FILES} 个文件` }
+      }
+      const base = await resolveBaseDir()
+      if (!base) return { ok: false, items, failures, error: '无法确定存储目录' }
+      const projectId = sanitizeName(String(input?.projectId || ''), 'proj')
+      const dir = `${base}/${ROOT_DIR}/media/${projectId}`
+      await ensureDir(dir)
+
+      for (let i = 0; i < paths.length; i++) {
+        const sourcePath = paths[i]
+        const name = mulby.filesystem.basename(sourcePath) || `resource_${i + 1}`
+        const mime = localImportMime(name)
+        if (!mime) {
+          failures.push({ name, reason: '不支持的文件类型' })
+          continue
+        }
+        try {
+          const stat = await mulby.filesystem.stat(sourcePath)
+          if (!stat || stat.isDirectory || stat.isFile === false) throw new Error('不是可读取的文件')
+          const size = Number(stat.size || 0)
+          if (isTextImportName(name)) {
+            if (size > MAX_TEXT_IMPORT_BYTES) {
+              throw new Error(`文本过大（上限 ${Math.round(MAX_TEXT_IMPORT_BYTES / MB)}MB）`)
+            }
+            const content = await mulby.filesystem.readFile(sourcePath, 'utf-8')
+            if (typeof content !== 'string') throw new Error('文本编码无法识别')
+            items.push({ name, mime, text: content, size })
+            continue
+          }
+          const safeName = sanitizeName(name, `resource_${i + 1}`)
+          const targetPath = `${dir}/import_${Date.now()}_${i}_${safeName}`
+          await mulby.filesystem.copy(sourcePath, targetPath)
+          items.push({ name, mime, path: targetPath, size })
+        } catch (error) {
+          failures.push({ name, reason: error instanceof Error ? error.message : String(error) })
+        }
+      }
+      return { ok: items.length > 0, items, failures, error: items.length ? undefined : '没有成功导入的文件' }
+    } catch (error) {
+      return { ok: false, items, failures, error: error instanceof Error ? error.message : String(error) }
     }
   },
 

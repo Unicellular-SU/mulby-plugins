@@ -33,8 +33,9 @@ export default function App() {
   useEffect(() => {
     const mulby = window.mulby
 
-    void useProject.getState().init()
+    const initProject = useProject.getState().init()
     void useProviders.getState().load()
+    let alive = true
 
     const applyTheme = (t: 'light' | 'dark') => {
       document.documentElement.classList.toggle('dark', t === 'dark')
@@ -54,14 +55,20 @@ export default function App() {
     const offInit = mulby?.onPluginInit?.((data: any) => {
       const atts = data?.attachments
       if (Array.isArray(atts) && atts.length) {
-        const vp = useGraph.getState().getActiveBoard().viewport
-        const ss = useUi.getState().stageSize
-        const world = screenToWorld(ss.w / 2, ss.h / 2, vp)
-        void importAttachments(atts, world)
+        // 工程注册表/恢复快照尚未载入时直接加卡，随后 init() 会用已存工程覆盖掉刚导入的资源。
+        // 等初始化完成再取活动画布与视口，确保 Mulby 的 img/files 启动附件不会静默丢失。
+        void initProject.then(() => {
+          if (!alive) return
+          const vp = useGraph.getState().getActiveBoard().viewport
+          const ss = useUi.getState().stageSize
+          const world = screenToWorld(ss.w / 2, ss.h / 2, vp)
+          return importAttachments(atts, world)
+        })
       }
     })
 
     return () => {
+      alive = false
       try { off?.() } catch { /* ignore */ }
       try { offInit?.() } catch { /* ignore */ }
     }

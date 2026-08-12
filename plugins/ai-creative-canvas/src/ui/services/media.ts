@@ -17,10 +17,16 @@ function mimeToExt(mime: string): string {
   if (mime.includes('webp')) return 'webp'
   if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
   if (mime.includes('gif')) return 'gif'
+  if (mime.includes('audio/mp4')) return 'm4a'
   if (mime.includes('mp4')) return 'mp4'
   if (mime.includes('webm')) return 'webm'
   if (mime.includes('mpeg') || mime.includes('mp3')) return 'mp3'
   if (mime.includes('wav')) return 'wav'
+  if (mime.includes('aac')) return 'aac'
+  if (mime.includes('opus')) return 'opus'
+  if (mime.includes('flac')) return 'flac'
+  if (mime.includes('ogg')) return 'ogg'
+  if (mime.includes('avif')) return 'avif'
   return 'png'
 }
 

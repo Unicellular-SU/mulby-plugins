@@ -79,9 +79,25 @@ function testPanoActsAsImageMaterial() {
   assert.equal(inputs.images[0].url, 'file:///pano.png')
 }
 
+function testUploadedTextMaterial() {
+  const b = board({
+    me: card('me', {
+      kind: 'image',
+      prompt: '@角色设定',
+      assets: [{ id: 'a1', kind: 'text', name: '角色设定.md', mime: 'text/markdown', text: '白发剑客，黑色长衣' }]
+    })
+  })
+  const mats = buildMaterials(b.cards.me, b)
+  assert.equal(mats[0].label, '角色设定')
+  assert.equal(mats[0].text, '白发剑客，黑色长衣')
+  const inputs = resolveGenInputs(b.cards.me, b)
+  assert.deepEqual(inputs.texts, [{ label: '角色设定', text: '白发剑客，黑色长衣' }])
+}
+
 testExtractMentions()
 testUnresolved()
 testSelectedGenMaterials()
 testReplaceMentionOnRename()
 testPanoActsAsImageMaterial()
-console.log('references: 5 tests OK')
+testUploadedTextMaterial()
+console.log('references: 6 tests OK')
