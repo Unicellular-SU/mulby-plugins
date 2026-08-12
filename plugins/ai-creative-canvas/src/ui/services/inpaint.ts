@@ -1,6 +1,8 @@
 import { useGraph } from '../store/graphStore'
 import { saveBase64, mimeToExt } from './media'
 import { aiLimiter } from './limiter'
+import { editImageWithMaskCompatibility, type ImageEditApi } from './imageEditCompat'
+import { toast } from '../store/toastStore'
 
 function ai() {
   return window.mulby.ai
@@ -17,7 +19,8 @@ function dataUrlToArrayBuffer(d: string): ArrayBuffer {
 export type InpaintOp = 'repaint' | 'remove'
 
 // 局部重绘双保险范式：主图=挖透明洞(repaint)/填绿(remove)的合成图（不支持 mask 的 provider 也能看懂），
-// 同时上传真遮罩附件走 maskAttachmentId（涂抹区 alpha=0，OpenAI edits 约定）；
+// 同时上传真遮罩附件走 maskAttachmentId（涂抹区 alpha=0，OpenAI edits 约定）；宿主现在会把它
+// 严格规范化为 inpaint 并校验 Profile 能力，不支持时按 imageEditCompat 安全降级为合成图普通 edit；
 // 结果落「新卡」（非破坏式，可与原图对比）。
 export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl: string, prompt: string, maskPngDataUrl?: string): Promise<void> {
   const g = useGraph.getState()
@@ -43,9 +46,17 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
         // 遮罩上传失败降级为无遮罩（合成图本身仍含挖洞/填绿信息）
       }
     }
-    return ai().images.edit({ model, imageAttachmentId: att.attachmentId, prompt: instruction, maskAttachmentId })
+    return editImageWithMaskCompatibility(ai().images as ImageEditApi, {
+      model,
+      imageAttachmentId: att.attachmentId,
+      prompt: instruction,
+      maskAttachmentId
+    })
   })
-  const img = res.images?.[0]
+  if (res.mode === 'composite-fallback') {
+    toast('当前模型不支持原生遮罩，已改用合成图编辑', 'warning')
+  }
+  const img = res.result.images?.[0]
   if (!img) throw new Error('模型未返回结果')
 
   const projectId = g.project.id
