@@ -1,4 +1,4 @@
-import type { Episode, ProjectAssetLibraryLink, ProjectDoc } from '../../domain/types'
+import type { AssetVariant, Episode, ProjectAssetLibraryLink, ProjectDoc } from '../../domain/types'
 import { buildSrt, type SrtClip } from '../../services/subtitles'
 import { buildContinuityReport, type ContinuityIssue } from './continuityReport'
 
@@ -85,11 +85,10 @@ export interface EpisodeDeliveryAssetReference {
   librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   variantId?: string
   variantLabel?: string
-  variantKind?: ContinuityIssue['variantKind']
+  variantKind?: AssetVariant['variantKind']
   libraryVariantId?: string
   label: string
   refImageId?: string
-  appliesToEpisode: boolean
 }
 
 export interface EpisodeDeliveryIssue extends ContinuityIssue {
@@ -327,8 +326,6 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
       return {
         ...issue,
         ...lineage,
-        libraryEntityId: issue.libraryEntityId ?? lineage.libraryEntityId,
-        variantKind: issue.variantKind ?? lineage.variantKind,
         episodeIndex: episode?.index,
         episodeTitle: episode?.title,
       }
@@ -352,11 +349,10 @@ export function buildEpisodeDeliveryReport(doc: ProjectDoc, episodeIds?: Set<str
           librarySyncPolicy: lineage.librarySyncPolicy,
           variantId: use.variantId,
           variantLabel: use.variantLabel,
-          variantKind: use.variantKind,
+          variantKind: lineage.variantKind,
           libraryVariantId: lineage.libraryVariantId,
           label: use.label,
           refImageId: use.refImageId,
-          appliesToEpisode: use.appliesToEpisode,
         }
       }),
     )

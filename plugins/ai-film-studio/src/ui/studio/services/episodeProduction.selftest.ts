@@ -1,4 +1,4 @@
-import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from './episodeProduction'
+import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, currentEpisodeUsesCastRef, episodeComposeReadiness, episodeProductionContinuityBlockers, episodeSeriesQueueState, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope, syncCastRefsToLedger } from './episodeProduction'
 import type { Asset, Episode, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
@@ -227,13 +227,14 @@ partialComposeDoc.track[1].selectClipId = 'clip-missing'
 const completeComposeReadiness = episodeComposeReadiness(partialComposeDoc)
 check('allows composing only after every storyboard has a usable selected clip', completeComposeReadiness.ready && completeComposeReadiness.readyCount === 2, JSON.stringify(completeComposeReadiness))
 
+// —— 承接（台账版）：进入本集时每个资产处于什么形态，以及缺哪些图 ——
 const handoffAssets: Asset[] = [
   {
     ...assets[0],
     elementId: 'el-hero',
     libraryLink: { entityId: 'el-hero', entityVersion: 2, syncPolicy: 'snapshot', variantMap: { gala: 'lib-gala', battle: 'lib-battle' } },
     variants: [
-      { id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep3'] },
+      { id: 'gala', label: 'Gala', libraryVariantId: 'lib-gala', variantKind: 'makeup' },
       { id: 'battle', label: 'Battle', libraryVariantId: 'lib-battle', variantKind: 'injury', refImageId: 'hero-battle' },
     ],
   },
@@ -242,272 +243,110 @@ const handoffAssets: Asset[] = [
 const handoffDoc = doc({
   currentEpisodeId: 'ep2',
   assets: handoffAssets,
-  storyboards: [storyboard('ep2-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
+  storyboards: [storyboard('ep2-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
   episodes: [
     episode('ep1', 0, {
       title: 'Setup',
       productionRecap: 'Hero stayed in Battle look after the chase.',
-      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
+      storyboards: [
+        {
+          ...storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }]),
+          stateChanges: [{ assetId: 'hero', toVariantId: 'battle', reason: '追车戏受伤' }],
+        },
+      ],
     }),
-    episode('ep2', 1, { title: 'Gala', plan: { requiredAssetIds: ['hero', 'prop'], requiredVariantIds: ['gala'] } }),
-    episode('ep3', 2, {
-      title: 'Aftermath',
-      storyboards: [storyboard('ep3-shot', 0, [{ assetId: 'hero', variantId: 'gala' }, { assetId: 'prop' }])],
-    }),
+    episode('ep2', 1, { title: 'Gala' }),
+    episode('ep3', 2, { title: 'Aftermath', storyboards: [storyboard('ep3-shot', 0, [{ assetId: 'hero', variantId: 'battle' }])] }),
   ],
 })
 const handoff = buildEpisodeProductionHandoff(handoffDoc, handoffDoc.episodes![1])
-const heroCue = handoff.sharedAssets.find((cue) => cue.assetId === 'hero')
+const heroCue = handoff.carriedState.find((cue) => cue.assetId === 'hero')
 check('builds cross-episode handoff recaps from prior produced episodes', handoff.recaps.length === 1 && handoff.recaps[0].episodeId === 'ep1' && handoff.recaps[0].recap.includes('Battle'), JSON.stringify(handoff.recaps))
-check(
-  'includes episode plan assets and variants in production handoff',
-  handoff.plannedAssets.some((item) => item.assetId === 'hero' && item.requiredVariantIds.includes('gala') && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 2 && item.librarySyncPolicy === 'snapshot') &&
-    handoff.plannedAssets.some((item) => item.assetId === 'prop') &&
-    handoff.plannedVariants.some((item) => item.assetId === 'hero' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala' && item.scopeAppliesToEpisode === false && item.appliesToEpisodeIds?.includes('ep3')),
-  JSON.stringify({ plannedAssets: handoff.plannedAssets, plannedVariants: handoff.plannedVariants }),
-)
-check(
-  'builds shared asset handoff cues for current episode refs',
-  !!heroCue &&
-    heroCue.label === 'Hero-Gala' &&
-    heroCue.variantId === 'gala' &&
-    heroCue.variantKind === 'makeup' &&
-    heroCue.libraryEntityId === 'el-hero' &&
-    heroCue.libraryEntityVersion === 2 &&
-    heroCue.librarySyncPolicy === 'snapshot' &&
-    heroCue.libraryVariantId === 'lib-gala' &&
-    heroCue.appearances.map((item) => item.episodeId).join(',') === 'ep1,ep3' &&
-    heroCue.appearances.some((item) => item.variantDetails?.some((variant) => variant.variantId === 'battle' && variant.variantKind === 'injury' && variant.libraryVariantId === 'lib-battle')),
-  JSON.stringify(heroCue),
-)
-check(
-  'suggests handoff fixes with asset-center lineage',
-  handoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryEntityVersion === 2 && item.librarySyncPolicy === 'snapshot' && item.libraryVariantId === 'lib-gala') &&
-    handoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.variantId === 'gala' && item.variantKind === 'makeup' && item.libraryEntityId === 'el-hero' && item.libraryVariantId === 'lib-gala'),
-  JSON.stringify(handoff.suggestions),
-)
-check('suggests creating an episode-specific variant for reused main refs', handoff.suggestions.some((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop'), JSON.stringify(handoff.suggestions))
-const propVariantSuggestion = handoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'prop')
-check('seeds episode variant prompt from previous appearance', !!propVariantSuggestion?.autoRepairable && propVariantSuggestion.variantLabel === 'E2 Gala形态' && !!propVariantSuggestion.variantPrompt?.includes('E1') && propVariantSuggestion.variantPrompt.includes('Key'), JSON.stringify(propVariantSuggestion))
+check('carried state reports the inherited appearance', heroCue?.variantId === 'battle' && heroCue.label === 'Hero-Battle', JSON.stringify(heroCue))
+check('carried state explains where the look came from', heroCue?.reason === '追车戏受伤' && heroCue.sinceEpisodeIndex === 0 && heroCue.sinceStoryboardIndex === 0, JSON.stringify(heroCue))
+check('carried state covers every tracked asset', handoff.carriedState.map((cue) => cue.assetId).sort().join(',') === 'hero,prop', JSON.stringify(handoff.carriedState.map((c) => c.assetId)))
+check('handoff no longer emits scope suggestions', handoff.suggestions.every((item) => item.kind === 'generate_asset_ref_image' || item.kind === 'generate_variant_ref_image'), JSON.stringify(handoff.suggestions.map((s) => s.kind)))
 
-const plannedOnlyHandoffDoc = doc({
-  currentEpisodeId: 'ep2',
-  assets: [
-    { ...assets[0], variants: [{ id: 'gala', label: 'Gala', appliesToEpisodeIds: ['ep3'] }] },
-    { id: 'hall', type: 'scene', name: 'Hall', state: 'done' },
-  ],
-  storyboards: [],
-  episodes: [
-    episode('ep1', 0, { title: 'Setup' }),
-    episode('ep2', 1, { title: 'Planned', plan: { requiredAssetIds: ['hero', 'hall'], requiredVariantIds: ['gala'] } }),
-    episode('ep3', 2, { title: 'Later' }),
-  ],
+// 首次出场且没有主图 → 补图建议
+const missingRefDoc = doc({
+  currentEpisodeId: 'ep1',
+  assets: [{ id: 'newcomer', type: 'role', name: 'Newcomer', state: 'idle' }],
+  storyboards: [storyboard('ep1-newcomer', 0, [{ assetId: 'newcomer' }])],
+  episodes: [episode('ep1', 0, { title: 'Debut' })],
 })
-const plannedOnlyHandoff = buildEpisodeProductionHandoff(plannedOnlyHandoffDoc, plannedOnlyHandoffDoc.episodes![1])
+const missingRefHandoff = buildEpisodeProductionHandoff(missingRefDoc, missingRefDoc.episodes![0])
 check(
-  'suggests planned asset and variant repairs before storyboards exist',
-  plannedOnlyHandoff.suggestions.some((item) => item.kind === 'generate_asset_ref_image' && item.assetId === 'hall') &&
-    plannedOnlyHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.assetId === 'hero' && item.variantId === 'gala' && item.scopeKind === 'episode' && !item.storyboardId) &&
-    plannedOnlyHandoff.suggestions.some((item) => item.kind === 'generate_variant_ref_image' && item.assetId === 'hero' && item.variantId === 'gala' && !item.disabledReason),
-  JSON.stringify(plannedOnlyHandoff.suggestions),
+  'first appearance without a main image yields a generate suggestion',
+  missingRefHandoff.suggestions.some((item) => item.kind === 'generate_asset_ref_image' && item.assetId === 'newcomer'),
+  JSON.stringify(missingRefHandoff.suggestions),
 )
 
-const emptyNextEpisodeHandoffDoc = doc({
+// 承接的形态缺图，且主图也没有 → 建议被禁用并说明先后顺序
+const variantRefDoc = doc({
   currentEpisodeId: 'ep2',
-  assets: handoffAssets,
+  assets: [{ id: 'hero', type: 'role', name: 'Hero', state: 'idle', variants: [{ id: 'gala', label: 'Gala' }] }],
   storyboards: [],
   episodes: [
     episode('ep1', 0, {
       title: 'Setup',
-      productionRecap: 'Hero stayed in Battle look after the chase.',
-      storyboards: [storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'battle' }, { assetId: 'prop' }])],
+      storyboards: [
+        {
+          ...storyboard('ep1-shot', 0, [{ assetId: 'hero', variantId: 'gala' }]),
+          stateChanges: [{ assetId: 'hero', toVariantId: 'gala', reason: '换上礼服' }],
+        },
+      ],
     }),
-    episode('ep2', 1, { title: 'Gala' }),
+    episode('ep2', 1, { title: 'Next' }),
   ],
 })
-const emptyNextEpisodeHandoff = buildEpisodeProductionHandoff(emptyNextEpisodeHandoffDoc, emptyNextEpisodeHandoffDoc.episodes![1])
-const carriedHeroCue = emptyNextEpisodeHandoff.sharedAssets.find((cue) => cue.assetId === 'hero')
+const variantRefHandoff = buildEpisodeProductionHandoff(variantRefDoc, variantRefDoc.episodes![1])
+const variantSuggestion = variantRefHandoff.suggestions.find((item) => item.kind === 'generate_variant_ref_image')
+check('carried variant without an image yields a suggestion', !!variantSuggestion && variantSuggestion.variantId === 'gala', JSON.stringify(variantRefHandoff.suggestions))
+check('variant image suggestion waits for the main image', variantSuggestion?.disabledReason === '先生成主参考图，再派生形态图。', JSON.stringify(variantSuggestion))
+
+// 空白新集：从上一集结束状态承接
+const emptyEpisodeHandoff = buildEpisodeProductionHandoff(handoffDoc, handoffDoc.episodes![2])
 check(
-  'carries prior episode cast cues into empty next episode handoff',
-  !!carriedHeroCue?.carryForward && carriedHeroCue.label === 'Hero-Battle' && !!carriedHeroCue.detail?.includes('E1') && emptyNextEpisodeHandoff.suggestions.length === 0,
-  JSON.stringify(emptyNextEpisodeHandoff),
+  'an episode with no shots still carries the previous state forward',
+  emptyEpisodeHandoff.carriedState.find((cue) => cue.assetId === 'hero')?.variantId === 'battle',
+  JSON.stringify(emptyEpisodeHandoff.carriedState),
 )
 
-const stateRegressionHandoffDoc = doc({
-  currentEpisodeId: 'ep2',
-  assets: handoffAssets,
-  storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
-  episodes: [
-    episode('ep1', 0, {
-      title: 'Setup',
-      productionRecap: 'Hero stayed wounded after the chase.',
-      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
-    }),
-    episode('ep2', 1, { title: 'Gala' }),
+// syncCastRefsToLedger：未声明变更点的 castRef 回落到继承形态
+const driftDoc = doc({
+  currentEpisodeId: 'ep1',
+  assets: [{ id: 'hero', type: 'role', name: 'Hero', refImageId: 'hero-main', state: 'done', variants: [{ id: 'gala', label: 'Gala', refImageId: 'g' }] }],
+  storyboards: [
+    { ...storyboard('s1', 0, [{ assetId: 'hero', variantId: 'gala' }]), stateChanges: [{ assetId: 'hero', toVariantId: 'gala', reason: '换装' }] },
+    storyboard('s2', 1, [{ assetId: 'hero' }]),
   ],
+  episodes: [episode('ep1', 0, { title: 'One' })],
 })
-const stateRegressionHandoff = buildEpisodeProductionHandoff(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
-const heroStateSuggestion = stateRegressionHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
-check('turns state regression into specific handoff suggestion', !!heroStateSuggestion?.detail.includes('当前集仍用主形象') && !!heroStateSuggestion.variantPrompt?.includes('Hero-Battle'), JSON.stringify(heroStateSuggestion))
-const stateRegressionBlockers = episodeProductionContinuityBlockers(stateRegressionHandoffDoc, stateRegressionHandoffDoc.episodes![1])
-const stateRegressionBlockerError = formatEpisodeProductionContinuityError(stateRegressionHandoffDoc.episodes![1], stateRegressionBlockers, { suggestions: stateRegressionHandoff.suggestions })
-check(
-  'blocks series production on unresolved cross-episode state regression',
-  stateRegressionBlockers.some((item) => item.code === 'asset_state_regressed_to_main') && stateRegressionBlockerError.includes('E2') && stateRegressionBlockerError.includes('handoff') && stateRegressionBlockerError.includes('create-variant:hero:ep2'),
-  JSON.stringify({ stateRegressionBlockers, stateRegressionBlockerError }),
-)
+const synced = syncCastRefsToLedger(driftDoc)
+check('syncCastRefsToLedger backfills inherited variants', synced === 1 && driftDoc.storyboards[1].castRefs?.[0].variantId === 'gala', JSON.stringify(driftDoc.storyboards.map((s) => s.castRefs)))
+check('syncCastRefsToLedger leaves declared change points alone', driftDoc.storyboards[0].castRefs?.[0].variantId === 'gala', JSON.stringify(driftDoc.storyboards[0]))
 
-const episodePlanBlockerDoc = doc({
+// —— 阻断门：只有缺图/悬空引用会拦住整季生产，形态告警不会 ——
+const blockerDoc = doc({
   currentEpisodeId: 'ep1',
   assets: [
-    {
-      ...assets[0],
-      variants: [{ id: 'gala', label: 'Gala', refImageId: 'hero-gala', appliesToEpisodeIds: ['ep2'] }],
-    },
-    { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-main', state: 'done' },
+    { id: 'hero', type: 'role', name: 'Hero', state: 'idle', variants: [{ id: 'gala', label: 'Gala', refImageId: 'g' }] },
+    { id: 'prop', type: 'prop', name: 'Key', refImageId: 'key', state: 'done' },
   ],
-  storyboards: [storyboard('ep1-plan-shot', 0, [{ assetId: 'hero' }])],
-  episodes: [
-    episode('ep1', 0, { title: 'Pilot', plan: { requiredAssetIds: ['hero', 'hall'], requiredVariantIds: ['gala'] } }),
-    episode('ep2', 1, { title: 'Gala' }),
-  ],
+  storyboards: [storyboard('s1', 0, [{ assetId: 'hero' }, { assetId: 'prop' }]), storyboard('s2', 1, [{ assetId: 'hero', variantId: 'gala' }])],
+  episodes: [episode('ep1', 0, { title: 'One' })],
 })
-const episodePlanBlockers = episodeProductionContinuityBlockers(episodePlanBlockerDoc, episodePlanBlockerDoc.episodes![0])
-const episodePlanHandoff = buildEpisodeProductionHandoff(episodePlanBlockerDoc, episodePlanBlockerDoc.episodes![0])
-const episodePlanBlockerError = formatEpisodeProductionContinuityError(episodePlanBlockerDoc.episodes![0], episodePlanBlockers, { suggestions: episodePlanHandoff.suggestions })
+const blockers = episodeProductionContinuityBlockers(blockerDoc, blockerDoc.episodes![0])
+check('only missing images block production', blockers.length === 1 && blockers[0].code === 'missing_ref_image' && blockers[0].assetId === 'hero', JSON.stringify(blockers.map((b) => b.code)))
 check(
-  'blocks production on unresolved episode plan asset and variant scope requirements',
-  episodePlanBlockers.some((item) => item.code === 'episode_plan_missing_asset' && item.assetId === 'hall') &&
-    episodePlanBlockers.some((item) => item.code === 'episode_plan_variant_scope_mismatch' && item.variantId === 'gala') &&
-    episodePlanBlockerError.includes('E1') &&
-    episodePlanBlockerError.includes('variant-scope:hero:gala:ep1:episode'),
-  JSON.stringify({ episodePlanBlockers, episodePlanBlockerError }),
+  'undeclared appearance change does not block production',
+  !blockers.some((issue) => issue.code === 'unexplained_appearance_change'),
+  JSON.stringify(blockers.map((b) => b.code)),
 )
-
-const mainResetHandoffDoc = doc({
-  currentEpisodeId: 'ep3',
-  assets: handoffAssets,
-  storyboards: [storyboard('ep3-main-hero', 0, [{ assetId: 'hero' }])],
-  episodes: [
-    episode('ep1', 0, {
-      title: 'Setup',
-      productionRecap: 'Hero stayed wounded after the chase.',
-      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
-    }),
-    episode('ep2', 1, {
-      title: 'Recovery',
-      productionRecap: 'Hero recovered to the default look.',
-      storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
-    }),
-    episode('ep3', 2, { title: 'Aftermath' }),
-  ],
+const blockerMessage = formatEpisodeProductionContinuityError(blockerDoc.episodes![0], blockers, {
+  suggestions: buildEpisodeProductionHandoff(blockerDoc, blockerDoc.episodes![0]).suggestions,
 })
-const mainResetHandoff = buildEpisodeProductionHandoff(mainResetHandoffDoc, mainResetHandoffDoc.episodes![2])
-const mainResetSuggestion = mainResetHandoff.suggestions.find((item) => item.kind === 'create_episode_variant' && item.assetId === 'hero')
-check(
-  'handoff stops carrying older variants after a main-image reset',
-  !!mainResetSuggestion &&
-    mainResetSuggestion.label === '新建并应用「Hero」本集形态' &&
-    !mainResetSuggestion.detail.includes('当前集仍用主形象') &&
-    !mainResetSuggestion.variantPrompt?.includes('Hero-Battle'),
-  JSON.stringify(mainResetSuggestion),
-)
-
-const variantSwitchHandoffDoc = doc({
-  currentEpisodeId: 'ep2',
-  assets: [{
-    ...assets[0],
-    variants: [
-      { id: 'battle', label: 'Battle', refImageId: 'hero-battle' },
-      { id: 'gala', label: 'Gala', refImageId: 'hero-gala' },
-    ],
-  }],
-  storyboards: [storyboard('ep2-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
-  episodes: [
-    episode('ep1', 0, {
-      title: 'Setup',
-      productionRecap: 'Hero stayed wounded after the chase.',
-      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
-    }),
-    episode('ep2', 1, { title: 'Gala' }),
-  ],
-})
-const variantSwitchHandoff = buildEpisodeProductionHandoff(variantSwitchHandoffDoc, variantSwitchHandoffDoc.episodes![1])
-const variantSwitchSuggestion = variantSwitchHandoff.suggestions.find((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala')
-check(
-  'suggests confirming unscoped cross-episode variant switches',
-  !!variantSwitchSuggestion?.detail.includes('上一相关剧集') && !!variantSwitchSuggestion.detail.includes('Hero-Battle'),
-  JSON.stringify(variantSwitchHandoff.suggestions),
-)
-
-const sceneScopedHandoffDoc = doc({
-  currentEpisodeId: 'ep2',
-  assets: [{
-    ...assets[0],
-    variants: [{ id: 'mask', label: 'Masked', refImageId: 'hero-mask', appliesToSceneIds: ['banquet'] }],
-  }],
-  storyboards: [
-    storyboard('ep2-banquet-hero', 0, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'banquet' }),
-    storyboard('ep2-street-hero', 1, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'street' }),
-  ],
-  episodes: [
-    episode('ep1', 0, { title: 'Banquet', storyboards: [storyboard('ep1-banquet-hero', 0, [{ assetId: 'hero', variantId: 'mask' }], { sceneId: 'banquet' })] }),
-    episode('ep2', 1, { title: 'Street' }),
-  ],
-})
-const sceneScopedHandoff = buildEpisodeProductionHandoff(sceneScopedHandoffDoc, sceneScopedHandoffDoc.episodes![1])
-const sceneScopeSuggestion = sceneScopedHandoff.suggestions.find((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'mask')
-check(
-  'handoff suggestions preserve scene scope for scoped variant fixes',
-  sceneScopeSuggestion?.scopeKind === 'scene' && sceneScopeSuggestion.sceneId === 'street' && sceneScopeSuggestion.storyboardId === 'ep2-street-hero',
-  JSON.stringify(sceneScopedHandoff.suggestions),
-)
-
-const variantSwitchAfterMainResetHandoffDoc = doc({
-  currentEpisodeId: 'ep3',
-  assets: variantSwitchHandoffDoc.assets,
-  storyboards: [storyboard('ep3-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
-  episodes: [
-    episode('ep1', 0, {
-      title: 'Setup',
-      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
-    }),
-    episode('ep2', 1, {
-      title: 'Recovery',
-      storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
-    }),
-    episode('ep3', 2, { title: 'Aftermath' }),
-  ],
-})
-const variantSwitchAfterMainResetHandoff = buildEpisodeProductionHandoff(variantSwitchAfterMainResetHandoffDoc, variantSwitchAfterMainResetHandoffDoc.episodes![2])
-check(
-  'handoff does not compare unscoped variant against older variant after main reset',
-  !variantSwitchAfterMainResetHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala'),
-  JSON.stringify(variantSwitchAfterMainResetHandoff.suggestions),
-)
-
-const variantSwitchAfterSameVariantHandoffDoc = doc({
-  currentEpisodeId: 'ep3',
-  assets: variantSwitchHandoffDoc.assets,
-  storyboards: [storyboard('ep3-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
-  episodes: [
-    episode('ep1', 0, {
-      title: 'Setup',
-      storyboards: [storyboard('ep1-battle-hero', 0, [{ assetId: 'hero', variantId: 'battle' }])],
-    }),
-    episode('ep2', 1, {
-      title: 'Gala',
-      storyboards: [storyboard('ep2-gala-hero', 0, [{ assetId: 'hero', variantId: 'gala' }])],
-    }),
-    episode('ep3', 2, { title: 'Aftermath' }),
-  ],
-})
-const variantSwitchAfterSameVariantHandoff = buildEpisodeProductionHandoff(variantSwitchAfterSameVariantHandoffDoc, variantSwitchAfterSameVariantHandoffDoc.episodes![2])
-check(
-  'handoff does not skip same prior variant to compare older variants',
-  !variantSwitchAfterSameVariantHandoff.suggestions.some((item) => item.kind === 'add_variant_episode_scope' && item.variantId === 'gala'),
-  JSON.stringify(variantSwitchAfterSameVariantHandoff.suggestions),
-)
+check('blocking error names the episode and lists suggestions', blockerMessage.includes('E1「One」') && blockerMessage.includes('可先处理以下建议'), blockerMessage)
 
 if (failures) {
   console.error(`\nepisodeProduction selftest: ${failures} FAILED`)

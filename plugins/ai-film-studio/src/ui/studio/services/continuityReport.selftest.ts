@@ -1,6 +1,24 @@
-import { buildContinuityReport, variantScopePatchForUse } from './continuityReport'
-import type { Asset, AssetVariant, Episode, NovelChapter, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
-import type { LibraryEntity } from '../../services/assetHub'
+/**
+ * 连续性台账 + 新版连续性报告自测。
+ *
+ * 覆盖重点：外观继承推导、唯一的形态告警规则、以及旧版 7 个形态码坍缩后
+ * 那些场景（跨集回退、跨集切换、场景内漂移、有可用形态却用主形象）现在
+ * 都收敛到同一条 unexplained_appearance_change，且**声明了变更点就不再告警**。
+ */
+import {
+  buildContinuityLedger,
+  clearAppearanceChange,
+  declareAppearanceChange,
+  episodeCastRequirements,
+  expectedVariantId,
+  revertToInheritedAppearance,
+  variantDerivationBase,
+  variantBaseUses,
+  ambiguousVariantBases,
+} from '../../domain/continuityLedger'
+import { buildContinuityReport, isProductionBlocking } from './continuityReport'
+import { syncCastRefsToLedger } from './episodeProduction'
+import type { AppearanceChange, Asset, Episode, NovelChapter, ProjectDoc, ProjectMeta, Storyboard } from '../../domain/types'
 
 let failures = 0
 
@@ -20,7 +38,7 @@ function chapter(id: string, index: number): NovelChapter {
   return { id, index, title: `Chapter ${index + 1}`, text: `chapter ${index + 1}` }
 }
 
-function storyboard(id: string, index: number, castRefs: Storyboard['castRefs']): Storyboard {
+function storyboard(id: string, index: number, castRefs: Storyboard['castRefs'], patch: Partial<Storyboard> = {}): Storyboard {
   return {
     id,
     index,
@@ -31,748 +49,450 @@ function storyboard(id: string, index: number, castRefs: Storyboard['castRefs'])
     castRefs,
     shouldGenerateImage: true,
     state: 'idle',
+    ...patch,
   }
 }
 
 function episode(id: string, index: number, patch: Partial<Episode> = {}): Episode {
+  return { id, index, title: `Episode ${index + 1}`, scripts: [], storyboards: [], clips: [], track: [], createdAt: 0, updatedAt: 0, ...patch }
+}
+
+function hero(variantIds: string[] = []): Asset {
   return {
-    id,
-    index,
-    title: `Episode ${index + 1}`,
-    scripts: [],
-    storyboards: [],
-    clips: [],
-    track: [],
-    createdAt: 0,
-    updatedAt: 0,
-    ...patch,
+    id: 'a-hero',
+    type: 'role',
+    name: '女主',
+    refImageId: 'img-hero',
+    state: 'done',
+    variants: variantIds.map((id) => ({ id, label: id, refImageId: `img-${id}`, state: 'done' as const })),
   }
 }
 
 function doc(patch: Partial<ProjectDoc>): ProjectDoc {
-  return {
-    meta: meta(),
-    novel: [],
-    scripts: [],
-    assets: [],
-    storyboards: [],
-    clips: [],
-    track: [],
-    memory: [],
-    ...patch,
-  }
+  return { meta: meta(), novel: [], scripts: [], assets: [], storyboards: [], clips: [], track: [], memory: [], ...patch }
 }
 
-function libraryEntity(patch: Partial<LibraryEntity>): LibraryEntity {
-  return {
-    id: 'el-hero',
-    kind: 'character',
-    name: 'Hero Entity',
-    version: 1,
-    createdAt: 0,
-    updatedAt: 0,
-    ...patch,
-  }
+function change(assetId: string, toVariantId: string | undefined, reason = '剧情变化'): AppearanceChange {
+  return { assetId, toVariantId, reason }
 }
 
-const hero: Asset = {
-  id: 'hero',
-  type: 'role',
-  name: 'Hero',
-  refImageId: 'hero-main',
-  state: 'done',
-  variants: [{ id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'] }],
+const codesOf = (report: ReturnType<typeof buildContinuityReport>) => report.issues.map((issue) => issue.code)
+
+// —— 1. 台账推导：没有变更点时形态一路继承 ——
+{
+  const e1 = episode('ep1', 0, { storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero' }]), storyboard('sb2', 1, [{ assetId: 'a-hero' }])] })
+  const e2 = episode('ep2', 1, { storyboards: [storyboard('sb3', 0, [{ assetId: 'a-hero' }])] })
+  const d = doc({ assets: [hero()], episodes: [e1, e2], currentEpisodeId: 'ep-none' })
+  const ledger = buildContinuityLedger(d)
+  check('ledger flattens all episodes in order', ledger.shots.map((shot) => shot.storyboardId).join(',') === 'sb1,sb2,sb3', JSON.stringify(ledger.shots.map((s) => s.storyboardId)))
+  check('no change point means main appearance everywhere', ledger.shots.every((shot) => expectedVariantId(shot, 'a-hero') === undefined), 'expected all undefined')
+  check('inheritance alone produces no issues', buildContinuityReport(d).issues.length === 0, JSON.stringify(codesOf(buildContinuityReport(d))))
 }
 
-const scoped = doc({
-  assets: [hero],
-  currentEpisodeId: 'ep1',
-  episodes: [
-    episode('ep1', 0),
-    episode('ep2', 1, { storyboards: [storyboard('sb2', 0, [{ assetId: 'hero', variantId: 'v-gala' }])] }),
-  ],
-})
-
-const scopedReport = buildContinuityReport(scoped)
-const ep2 = scopedReport.episodes.find((item) => item.id === 'ep2')
-check('flags variant outside episode scope', !!ep2?.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.variantKind === 'makeup'), JSON.stringify(ep2?.issues))
-check('flags missing variant ref image', !!ep2?.issues.some((issue) => issue.code === 'missing_ref_image' && issue.variantKind === 'makeup'), JSON.stringify(ep2?.issues))
-check('records cast use as not applying to episode', ep2?.castUses[0]?.appliesToEpisode === false && ep2.castUses[0]?.variantKind === 'makeup', JSON.stringify(ep2?.castUses))
-
-const lineageReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      libraryLink: { entityId: 'el-hero', entityVersion: 5, syncPolicy: 'snapshot', variantMap: { 'v-gala': 'lib-gala' } },
-      variants: [{ id: 'v-gala', label: 'Gala', variantKind: 'makeup', refImageId: 'gala-img' }],
-    }],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('lineage-use', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-const lineageUse = lineageReport.episodes[0]?.castUses[0]
-check(
-  'records cast use asset-center lineage',
-  lineageUse?.libraryEntityId === 'el-hero' &&
-    lineageUse.libraryEntityVersion === 5 &&
-    lineageUse.librarySyncPolicy === 'snapshot' &&
-    lineageUse.libraryVariantId === 'lib-gala',
-  JSON.stringify(lineageUse),
-)
-
-const duplicateAssetReport = buildContinuityReport(
-  doc({
-    assets: [
-      hero,
-      { id: 'hero-copy', type: 'role', name: ' hero ', refImageId: 'hero-copy-img', state: 'done' },
-      { id: 'hero-prop', type: 'prop', name: 'Hero', refImageId: 'hero-prop-img', state: 'done' },
-    ],
-  }),
-)
-check('flags duplicate asset names by type', duplicateAssetReport.issues.filter((issue) => issue.code === 'duplicate_asset_name').length === 2, JSON.stringify(duplicateAssetReport.issues))
-
-const duplicateAliasReport = buildContinuityReport(
-  doc({
-    assets: [
-      { ...hero, aliases: ['Captain'] },
-      { id: 'captain-role', type: 'role', name: ' captain ', refImageId: 'captain-img', state: 'done' },
-      { id: 'captain-prop', type: 'prop', name: 'Captain', refImageId: 'captain-prop-img', state: 'done' },
-    ],
-  }),
-)
-check('flags duplicate asset aliases by type', duplicateAliasReport.issues.filter((issue) => issue.code === 'duplicate_asset_alias').length === 2, JSON.stringify(duplicateAliasReport.issues))
-check(
-  'duplicate alias issues expose removable alias metadata',
-  duplicateAliasReport.issues.some((issue) => issue.code === 'duplicate_asset_alias' && issue.assetId === 'hero' && issue.conflictLabel === 'Captain' && issue.conflictSource === 'alias' && issue.relatedAssetIds?.includes('captain-role')) &&
-    duplicateAliasReport.issues.some((issue) => issue.code === 'duplicate_asset_alias' && issue.assetId === 'captain-role' && issue.conflictSource === 'name'),
-  JSON.stringify(duplicateAliasReport.issues),
-)
-check('does not flag alias collisions across asset types', !duplicateAliasReport.issues.some((issue) => issue.assetId === 'captain-prop'), JSON.stringify(duplicateAliasReport.issues))
-
-const crossEpisodeDuplicateCandidateReport = buildContinuityReport(
-  doc({
-    assets: [
-      { ...hero, aliases: ['Captain'] },
-      { id: 'captain-role', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done' },
-    ],
-    currentEpisodeId: 'ep1',
-    episodes: [
-      episode('ep1', 0),
-      episode('ep2', 1, { storyboards: [storyboard('sb-ep2-captain', 0, [{ assetId: 'captain-role' }])] }),
-    ],
-    storyboards: [storyboard('sb-ep1-hero', 0, [{ assetId: 'hero' }])],
-  }),
-)
-check(
-  'flags cross-episode project assets that share a name or alias as merge candidates',
-  crossEpisodeDuplicateCandidateReport.issues.some((issue) => issue.code === 'cross_episode_duplicate_project_asset_candidate' && issue.assetId === 'hero' && issue.relatedAssetIds?.includes('captain-role')),
-  JSON.stringify(crossEpisodeDuplicateCandidateReport.issues),
-)
-
-const linkedCrossEpisodeDuplicateCandidateReport = buildContinuityReport(
-  doc({
-    assets: [
-      { ...hero, aliases: ['Captain'], libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' } },
-      { id: 'captain-role', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done', libraryLink: { entityId: 'el-hero', syncPolicy: 'snapshot' } },
-    ],
-    currentEpisodeId: 'ep1',
-    episodes: [
-      episode('ep1', 0),
-      episode('ep2', 1, { storyboards: [storyboard('sb-ep2-captain-linked', 0, [{ assetId: 'captain-role' }])] }),
-    ],
-    storyboards: [storyboard('sb-ep1-hero-linked', 0, [{ assetId: 'hero' }])],
-  }),
-)
-check(
-  'does not flag cross-episode project duplicates already linked to the same identity',
-  !linkedCrossEpisodeDuplicateCandidateReport.issues.some((issue) => issue.code === 'cross_episode_duplicate_project_asset_candidate'),
-  JSON.stringify(linkedCrossEpisodeDuplicateCandidateReport.issues),
-)
-
-const sceneReuseReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' }],
-    currentEpisodeId: 'ep1',
+// —— 2. 变更点之后的镜头自动继承新形态，跨集也一样 ——
+{
+  const e1 = episode('ep1', 0, {
     storyboards: [
-      { ...storyboard('hall-1', 0, [{ assetId: 'hall' }]), sceneId: 'hallway' },
-      { ...storyboard('hall-2', 1, []), sceneId: 'hallway' },
-    ],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check('flags missing scene asset in reused scene group', !!sceneReuseReport.issues.some((issue) => issue.code === 'scene_group_missing_asset' && issue.storyboardId === 'hall-2'), JSON.stringify(sceneReuseReport.issues))
-
-const sceneMismatchReport = buildContinuityReport(
-  doc({
-    assets: [
-      { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' },
-      { id: 'lobby', type: 'scene', name: 'Lobby', refImageId: 'lobby-img', state: 'done' },
-    ],
-    currentEpisodeId: 'ep1',
-    storyboards: [
-      { ...storyboard('hall-1', 0, [{ assetId: 'hall' }]), sceneId: 'same-space' },
-      { ...storyboard('hall-2', 1, [{ assetId: 'lobby' }]), sceneId: 'same-space' },
-    ],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check('flags mixed scene assets in reused scene group', sceneMismatchReport.issues.filter((issue) => issue.code === 'scene_group_asset_mismatch').length === 2, JSON.stringify(sceneMismatchReport.issues))
-
-const sceneVariantMismatchReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
-    currentEpisodeId: 'ep1',
-    storyboards: [
-      { ...storyboard('hero-main', 0, [{ assetId: 'hero' }]), sceneId: 'same-room' },
-      { ...storyboard('hero-gala', 1, [{ assetId: 'hero', variantId: 'v-gala' }]), sceneId: 'same-room' },
-    ],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check(
-  'flags mixed role variants in reused scene group',
-  sceneVariantMismatchReport.issues.filter((issue) => issue.code === 'scene_group_variant_mismatch' && issue.assetId === 'hero').length === 2,
-  JSON.stringify(sceneVariantMismatchReport.issues),
-)
-check(
-  'includes scene id for scene variant mismatch fixes',
-  sceneVariantMismatchReport.issues.some((issue) => issue.code === 'scene_group_variant_mismatch' && issue.sceneId === 'same-room' && issue.storyboardId === 'hero-gala' && issue.variantId === 'v-gala'),
-  JSON.stringify(sceneVariantMismatchReport.issues),
-)
-
-const unusedAssetReport = buildContinuityReport(
-  doc({
-    assets: [
-      { id: 'hero', type: 'role', name: 'Hero', refImageId: 'hero-img', state: 'done' },
-      { id: 'unused', type: 'role', name: 'Unused Role', refImageId: 'unused-img', state: 'done' },
-    ],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('uses-hero', 0, [{ assetId: 'hero' }])],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check('flags project assets unused by any storyboard', !!unusedAssetReport.issues.some((issue) => issue.code === 'unused_project_asset' && issue.assetId === 'unused'), JSON.stringify(unusedAssetReport.issues))
-
-const emptyStoryboardAssetReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'planned', type: 'role', name: 'Planned Role', refImageId: 'planned-img', state: 'done' }],
-    currentEpisodeId: 'ep1',
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check('does not flag unused assets before storyboards exist', !emptyStoryboardAssetReport.issues.some((issue) => issue.code === 'unused_project_asset'), JSON.stringify(emptyStoryboardAssetReport.issues))
-
-const missingPlannedEpisodesReport = buildContinuityReport(
-  doc({
-    currentEpisodeId: 'ep1',
-    seriesBible: { plannedEpisodeCount: 3, continuityRules: [] },
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check('flags missing planned episodes when series bible exceeds episode list', missingPlannedEpisodesReport.issues.some((issue) => issue.code === 'series_planned_episodes_missing'), JSON.stringify(missingPlannedEpisodesReport.issues))
-
-const completePlannedEpisodesReport = buildContinuityReport(
-  doc({
-    currentEpisodeId: 'ep1',
-    seriesBible: { plannedEpisodeCount: 2, continuityRules: [] },
-    episodes: [episode('ep1', 0), episode('ep2', 1)],
-  }),
-)
-check('does not flag planned episode count when episodes are created', !completePlannedEpisodesReport.issues.some((issue) => issue.code === 'series_planned_episodes_missing'), JSON.stringify(completePlannedEpisodesReport.issues))
-
-const plannedCoverageReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('uses-hero-main', 0, [{ assetId: 'hero' }])],
-    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
-  }),
-)
-check('does not flag planned asset when used by episode storyboards', !plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset'), JSON.stringify(plannedCoverageReport.issues))
-check(
-  'flags planned variant when not bound by episode storyboards',
-  plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_missing_variant' && issue.assetId === 'hero' && issue.variantId === 'v-gala' && issue.candidateVariantLabels?.includes('Gala')),
-  JSON.stringify(plannedCoverageReport.issues),
-)
-check(
-  'does not flag planned variant parent asset when already required',
-  !plannedCoverageReport.issues.some((issue) => issue.code === 'episode_plan_variant_asset_missing'),
-  JSON.stringify(plannedCoverageReport.issues),
-)
-
-const plannedVariantWithoutAssetReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
-    currentEpisodeId: 'ep1',
-    episodes: [episode('ep1', 0, { plan: { requiredVariantIds: ['v-gala'] } })],
-  }),
-)
-check(
-  'flags planned variants whose parent asset is not planned',
-  plannedVariantWithoutAssetReport.issues.some((issue) => issue.code === 'episode_plan_variant_asset_missing' && issue.assetId === 'hero' && issue.variantId === 'v-gala'),
-  JSON.stringify(plannedVariantWithoutAssetReport.issues),
-)
-
-const plannedVariantScopeMismatchReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img', appliesToEpisodeIds: ['ep2'] }] }],
-    currentEpisodeId: 'ep1',
-    episodes: [
-      episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } }),
-      episode('ep2', 1),
-    ],
-  }),
-)
-check(
-  'flags planned variants whose episode scope excludes the planned episode before storyboards exist',
-  plannedVariantScopeMismatchReport.issues.some((issue) => issue.code === 'episode_plan_variant_scope_mismatch' && issue.assetId === 'hero' && issue.variantId === 'v-gala' && issue.scopeKind === 'episode'),
-  JSON.stringify(plannedVariantScopeMismatchReport.issues),
-)
-
-const plannedVariantBoundReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('uses-gala', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
-    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
-  }),
-)
-check(
-  'does not flag planned variant when bound by episode storyboards',
-  !plannedVariantBoundReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' || issue.code === 'episode_plan_missing_variant'),
-  JSON.stringify(plannedVariantBoundReport.issues),
-)
-
-const missingPlannedAssetReport = buildContinuityReport(
-  doc({
-    assets: [
-      { id: 'hero', type: 'role', name: 'Hero', refImageId: 'hero-img', state: 'done' },
-      { id: 'hall', type: 'scene', name: 'Hall', refImageId: 'hall-img', state: 'done' },
-    ],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('uses-hero-only', 0, [{ assetId: 'hero' }])],
-    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hall'] } })],
-  }),
-)
-check('flags planned asset when not used by episode storyboards', missingPlannedAssetReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' && issue.assetId === 'hall'), JSON.stringify(missingPlannedAssetReport.issues))
-
-const invalidPlanRefsReport = buildContinuityReport(
-  doc({
-    assets: [hero],
-    currentEpisodeId: 'ep1',
-    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['deleted-asset'], requiredVariantIds: ['deleted-variant'] } })],
-  }),
-)
-check('flags invalid planned asset references', invalidPlanRefsReport.issues.some((issue) => issue.code === 'episode_plan_invalid_asset' && issue.assetId === 'deleted-asset'), JSON.stringify(invalidPlanRefsReport.issues))
-check('flags invalid planned variant references', invalidPlanRefsReport.issues.some((issue) => issue.code === 'episode_plan_invalid_variant' && issue.variantId === 'deleted-variant'), JSON.stringify(invalidPlanRefsReport.issues))
-
-const plannedBeforeStoryboardReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, variants: [{ id: 'v-gala', label: 'Gala', refImageId: 'gala-img' }] }],
-    currentEpisodeId: 'ep1',
-    episodes: [episode('ep1', 0, { plan: { requiredAssetIds: ['hero'], requiredVariantIds: ['v-gala'] } })],
-  }),
-)
-check(
-  'does not flag missing planned requirements before storyboards exist',
-  !plannedBeforeStoryboardReport.issues.some((issue) => issue.code === 'episode_plan_missing_asset' || issue.code === 'episode_plan_missing_variant'),
-  JSON.stringify(plannedBeforeStoryboardReport.issues),
-)
-
-const linkedAssetReport = buildContinuityReport(
-  doc({
-    assets: [
-      {
-        ...hero,
-        id: 'hero-a',
-        name: 'Hero A',
-        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
-      },
-      {
-        ...hero,
-        id: 'hero-b',
-        name: 'Hero B',
-        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
-      },
-    ],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3, archived: true })] },
-)
-check(
-  'flags archived linked library entities',
-  linkedAssetReport.issues.filter((issue) => issue.code === 'library_entity_archived' && issue.libraryEntityId === 'el-hero').length === 2,
-  JSON.stringify(linkedAssetReport.issues),
-)
-check(
-  'does not suggest syncing archived linked library entities',
-  !linkedAssetReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.libraryEntityId === 'el-hero'),
-  JSON.stringify(linkedAssetReport.issues),
-)
-check(
-  'flags duplicate project assets imported from the same library entity',
-  linkedAssetReport.issues.filter((issue) => issue.code === 'duplicate_library_entity_project_assets' && issue.libraryEntityId === 'el-hero' && issue.relatedAssetIds?.length === 1).length === 2,
-  JSON.stringify(linkedAssetReport.issues),
-)
-
-const outdatedLinkedEntityReport = buildContinuityReport(
-  doc({
-    assets: [
-      {
-        ...hero,
-        id: 'hero-outdated',
-        name: 'Hero Outdated',
-        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
-      },
-    ],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3 })] },
-)
-check(
-  'flags outdated linked library entity versions',
-  outdatedLinkedEntityReport.issues.some((issue) => issue.code === 'library_entity_version_outdated' && issue.assetId === 'hero-outdated' && issue.entityVersion === 1 && issue.currentEntityVersion === 3),
-  JSON.stringify(outdatedLinkedEntityReport.issues),
-)
-
-const forkedLinkedEntityReport = buildContinuityReport(
-  doc({
-    assets: [
-      {
-        ...hero,
-        id: 'hero-forked',
-        name: 'Hero Forked',
-        elementId: 'el-hero',
-        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'forked' },
-      },
-      {
-        ...hero,
-        id: 'hero-active',
-        name: 'Hero Active',
-        libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' },
-      },
-    ],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-hero', name: 'Global Hero', version: 3 })] },
-)
-check(
-  'does not treat forked library links as active continuity links',
-  !forkedLinkedEntityReport.issues.some((issue) => issue.assetId === 'hero-forked' && (issue.code === 'library_entity_version_outdated' || issue.code === 'library_entity_missing' || issue.code === 'library_entity_archived' || issue.code === 'duplicate_library_entity_project_assets')) &&
-    !forkedLinkedEntityReport.issues.some((issue) => issue.code === 'duplicate_library_entity_project_assets' && issue.relatedAssetIds?.includes('hero-forked')),
-  JSON.stringify(forkedLinkedEntityReport.issues),
-)
-
-const missingLinkedEntityReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, libraryLink: { entityId: 'deleted-entity', entityVersion: 1, syncPolicy: 'snapshot' } }],
-  }),
-  { libraryEntities: [] },
-)
-check('flags missing linked library entities when asset hub snapshot is available', missingLinkedEntityReport.issues.some((issue) => issue.code === 'library_entity_missing' && issue.libraryEntityId === 'deleted-entity'), JSON.stringify(missingLinkedEntityReport.issues))
-
-const noHubSnapshotReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, libraryLink: { entityId: 'not-loaded-yet', entityVersion: 1, syncPolicy: 'snapshot' } }],
-  }),
-)
-check('does not flag missing linked library entities before asset hub snapshot is loaded', !noHubSnapshotReport.issues.some((issue) => issue.code === 'library_entity_missing'), JSON.stringify(noHubSnapshotReport.issues))
-
-const linkedAliasConflictReport = buildContinuityReport(
-  doc({
-    assets: [{ ...hero, aliases: ['Captain'], libraryLink: { entityId: 'el-hero', entityVersion: 1, syncPolicy: 'snapshot' } }],
-  }),
-  {
-    libraryEntities: [
-      libraryEntity({ id: 'el-hero', name: 'Hero', aliases: ['Lead'] }),
-      libraryEntity({ id: 'el-captain', name: 'Captain', aliases: ['Commander'] }),
-    ],
-  },
-)
-check(
-  'flags linked project assets whose aliases match another library identity',
-  linkedAliasConflictReport.issues.some((issue) => issue.code === 'library_entity_alias_conflict' && issue.assetId === 'hero' && issue.libraryEntityId === 'el-hero' && issue.candidateLibraryEntityIds?.includes('el-captain')),
-  JSON.stringify(linkedAliasConflictReport.issues),
-)
-
-const unlinkedLibraryMatchReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'local-hero', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done' }],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain' })] },
-)
-check(
-  'flags unlinked project assets that match an asset-center identity',
-  unlinkedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' && issue.assetId === 'local-hero' && issue.candidateLibraryEntityLabels?.includes('Captain')),
-  JSON.stringify(unlinkedLibraryMatchReport.issues),
-)
-
-const rejectedLibraryMatchReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'local-hero', type: 'role', name: 'Captain', refImageId: 'captain-img', state: 'done', rejectedLibraryEntityIds: ['el-captain'] }],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain' })] },
-)
-check(
-  'does not flag rejected asset-center identity candidates',
-  !rejectedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict'),
-  JSON.stringify(rejectedLibraryMatchReport.issues),
-)
-
-const forkedRejectedLibraryMatchReport = buildContinuityReport(
-  doc({
-    assets: [{
-      id: 'forked-captain',
-      type: 'role',
-      name: 'Captain',
-      elementId: 'el-captain',
-      refImageId: 'captain-img',
-      state: 'done',
-      libraryLink: { entityId: 'el-captain', entityVersion: 1, syncPolicy: 'forked' },
-      rejectedLibraryEntityIds: ['el-captain'],
-    }],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-captain', name: 'Captain', version: 3 })] },
-)
-check(
-  'does not re-suggest rejected forked asset-center identity candidates',
-  !forkedRejectedLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict' || issue.code === 'library_entity_version_outdated'),
-  JSON.stringify(forkedRejectedLibraryMatchReport.issues),
-)
-
-const archivedCandidateMatchReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'archived-name', type: 'role', name: 'Archived Hero', refImageId: 'archived-img', state: 'done' }],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-archived', name: 'Archived Hero', archived: true })] },
-)
-check(
-  'does not suggest archived identities as merge candidates',
-  !archivedCandidateMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity'),
-  JSON.stringify(archivedCandidateMatchReport.issues),
-)
-
-const crossTypeLibraryMatchReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'hero-prop', type: 'prop', name: 'Hero', refImageId: 'hero-prop-img', state: 'done' }],
-  }),
-  { libraryEntities: [libraryEntity({ id: 'el-hero', kind: 'character', name: 'Hero' })] },
-)
-check(
-  'does not match project assets to different asset-center identity kinds',
-  !crossTypeLibraryMatchReport.issues.some((issue) => issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict'),
-  JSON.stringify(crossTypeLibraryMatchReport.issues),
-)
-
-const episodeVariantCoverageReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [
-        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
-        { id: 'v-battle', label: 'Battle', variantKind: 'injury', appliesToEpisodeIds: ['ep2'], refImageId: 'battle-img' },
-      ],
-    }],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('main-use', 0, [{ assetId: 'hero' }])],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-const availableVariantIssue = episodeVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
-check(
-  'flags main asset use when episode scoped variant exists',
-  availableVariantIssue?.variantId === 'v-gala' && availableVariantIssue.variantKind === 'makeup' && availableVariantIssue.candidateVariantIds?.[0] === 'v-gala' && availableVariantIssue.candidateVariantKinds?.[0] === 'makeup' && availableVariantIssue.storyboardId === 'main-use',
-  JSON.stringify(episodeVariantCoverageReport.issues),
-)
-
-const multiVariantCoverageReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [
-        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', appliesToEpisodeIds: ['ep1'], refImageId: 'gala-img' },
-        { id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToEpisodeIds: ['ep1'], refImageId: 'mask-img' },
-      ],
-    }],
-    currentEpisodeId: 'ep1',
-    storyboards: [storyboard('main-use-multiple', 0, [{ assetId: 'hero' }])],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-const multiVariantIssue = multiVariantCoverageReport.issues.find((issue) => issue.code === 'episode_variant_available')
-check(
-  'lists candidate variants when multiple scoped variants apply',
-  !multiVariantIssue?.variantId &&
-    multiVariantIssue?.candidateVariantIds?.includes('v-gala') === true &&
-    multiVariantIssue?.candidateVariantIds?.includes('v-mask') === true &&
-    multiVariantIssue?.candidateVariantLabels?.includes('Masked') === true &&
-    multiVariantIssue?.candidateVariantKinds?.includes('makeup') === true &&
-    multiVariantIssue?.candidateVariantKinds?.includes('outfit') === true,
-  JSON.stringify(multiVariantCoverageReport.issues),
-)
-
-const sceneVariantCoverageReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [{ id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
-    }],
-    currentEpisodeId: 'ep1',
-    storyboards: [{ ...storyboard('scene-main-use', 0, [{ assetId: 'hero' }]), sceneId: 'banquet' }],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check(
-  'flags main asset use when scene scoped variant applies',
-  sceneVariantCoverageReport.issues.some((issue) => issue.code === 'episode_variant_available' && issue.variantId === 'v-mask' && issue.variantKind === 'outfit' && issue.sceneId === 'banquet'),
-  JSON.stringify(sceneVariantCoverageReport.issues),
-)
-
-const sceneVariantScopeReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [{ id: 'v-mask', label: 'Masked', variantKind: 'outfit', appliesToSceneIds: ['banquet'], refImageId: 'mask-img' }],
-    }],
-    currentEpisodeId: 'ep1',
-    storyboards: [{ ...storyboard('wrong-scene-use', 0, [{ assetId: 'hero', variantId: 'v-mask' }]), sceneId: 'street' }],
-    episodes: [episode('ep1', 0)],
-  }),
-)
-check(
-  'flags variant use outside scene scope',
-  sceneVariantScopeReport.issues.some((issue) => issue.code === 'variant_out_of_episode_scope' && issue.variantKind === 'outfit' && issue.scopeKind === 'scene' && issue.storyboardId === 'wrong-scene-use'),
-  JSON.stringify(sceneVariantScopeReport.issues),
-)
-
-const sceneScopePatch = variantScopePatchForUse(
-  { id: 'v-mask', label: 'Masked', appliesToSceneIds: ['banquet'] } satisfies AssetVariant,
-  episode('ep2', 1),
-  { ...storyboard('street-use', 0, []), sceneId: 'street' },
-)
-check('builds scene scope patch for reused scoped variants', sceneScopePatch?.appliesToSceneIds?.join(',') === 'banquet,street', JSON.stringify(sceneScopePatch))
-
-const storyboardScopePatch = variantScopePatchForUse(
-  { id: 'v-close', label: 'Closeup', appliesToStoryboardIds: ['sb-prev'] } satisfies AssetVariant,
-  episode('ep2', 1),
-  storyboard('sb-current', 0, []),
-)
-check('builds storyboard scope patch for reused scoped variants', storyboardScopePatch?.appliesToStoryboardIds?.join(',') === 'sb-prev,sb-current', JSON.stringify(storyboardScopePatch))
-
-const stateRegressionReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [{ id: 'v-battle', label: 'Battle', variantKind: 'injury', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] }],
-    }],
-    currentEpisodeId: 'ep2',
-    storyboards: [storyboard('main-after-variant', 0, [{ assetId: 'hero' }])],
-    episodes: [
-      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
-      episode('ep2', 1),
-    ],
-  }),
-)
-check('flags cross-episode state regression to main asset', !!stateRegressionReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-after-variant' && issue.variantKind === 'injury' && issue.previousVariantKind === 'injury'), JSON.stringify(stateRegressionReport.issues))
-
-const variantSwitchReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [
-        { id: 'v-battle', label: 'Battle', variantKind: 'injury', refImageId: 'battle-img' },
-        { id: 'v-gala', label: 'Gala', variantKind: 'makeup', refImageId: 'gala-img' },
-      ],
-    }],
-    currentEpisodeId: 'ep2',
-    storyboards: [storyboard('gala-after-battle', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
-    episodes: [
-      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
-      episode('ep2', 1),
-    ],
-  }),
-)
-check(
-  'flags cross-episode switch to unscoped variant',
-  variantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-battle' && issue.variantId === 'v-gala' && issue.variantKind === 'makeup' && issue.previousVariantId === 'v-battle' && issue.previousVariantKind === 'injury'),
-  JSON.stringify(variantSwitchReport.issues),
-)
-
-const scopedVariantSwitchReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [
-        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img', appliesToEpisodeIds: ['ep1'] },
-        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img', appliesToEpisodeIds: ['ep2'] },
-      ],
-    }],
-    currentEpisodeId: 'ep2',
-    storyboards: [storyboard('scoped-gala-after-battle', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
-    episodes: [
-      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
-      episode('ep2', 1),
-    ],
-  }),
-)
-check(
-  'does not flag scoped cross-episode variant switch',
-  !scopedVariantSwitchReport.issues.some((issue) => issue.code === 'asset_state_changed_variant'),
-  JSON.stringify(scopedVariantSwitchReport.issues),
-)
-
-const variantSwitchAfterMainResetReport = buildContinuityReport(
-  doc({
-    assets: [{
-      ...hero,
-      variants: [
-        { id: 'v-battle', label: 'Battle', refImageId: 'battle-img' },
-        { id: 'v-gala', label: 'Gala', refImageId: 'gala-img' },
-      ],
-    }],
-    currentEpisodeId: 'ep3',
-    storyboards: [storyboard('gala-after-main-reset', 0, [{ assetId: 'hero', variantId: 'v-gala' }])],
-    episodes: [
-      episode('ep1', 0, { storyboards: [storyboard('battle-use', 0, [{ assetId: 'hero', variantId: 'v-battle' }])] }),
-      episode('ep2', 1, { storyboards: [storyboard('main-reset', 0, [{ assetId: 'hero' }])] }),
-      episode('ep3', 2),
-    ],
-  }),
-)
-check(
-  'does not compare new variant against older variant after main reset',
-  variantSwitchAfterMainResetReport.issues.some((issue) => issue.code === 'asset_state_regressed_to_main' && issue.storyboardId === 'main-reset') &&
-    !variantSwitchAfterMainResetReport.issues.some((issue) => issue.code === 'asset_state_changed_variant' && issue.storyboardId === 'gala-after-main-reset'),
-  JSON.stringify(variantSwitchAfterMainResetReport.issues),
-)
-
-const chapters = [chapter('c1', 0), chapter('c2', 1), chapter('c3', 2)]
-const chapterReport = buildContinuityReport(
-  doc({
-    novel: chapters,
-    currentEpisodeId: 'ep1',
-    episodes: [
-      episode('ep1', 0, { novelChapterIds: ['c1', 'c2'] }),
-      episode('ep2', 1, { novelChapterIds: ['c2', 'missing'] }),
+      storyboard('sb1', 0, [{ assetId: 'a-hero' }]),
+      storyboard('sb2', 1, [{ assetId: 'a-hero', variantId: 'injured' }], { stateChanges: [change('a-hero', 'injured', '左脸被划伤')] }),
     ],
   })
-)
-check('flags duplicated chapter assignment per affected episode', chapterReport.issues.filter((issue) => issue.code === 'duplicated_chapter_assignment').length === 2, JSON.stringify(chapterReport.issues))
-check('flags invalid episode chapter reference', !!chapterReport.episodes.find((item) => item.id === 'ep2')?.issues.some((issue) => issue.code === 'invalid_episode_chapter'), JSON.stringify(chapterReport.episodes))
-check('flags unassigned imported chapter', !!chapterReport.issues.some((issue) => issue.code === 'unassigned_chapter'), JSON.stringify(chapterReport.issues))
-
-const currentMirrorReport = buildContinuityReport(
-  doc({
-    assets: [{ id: 'prop', type: 'prop', name: 'Key', refImageId: 'key-img', state: 'done' }],
-    storyboards: [storyboard('current-shot', 0, [{ assetId: 'prop' }])],
-    currentEpisodeId: 'ep1',
-    episodes: [episode('ep1', 0, { storyboards: [] })],
-  })
-)
-check('current episode uses flat storyboard mirror', currentMirrorReport.episodes[0]?.storyboards === 1, JSON.stringify(currentMirrorReport.episodes[0]))
-check('valid main asset ref has no issues', currentMirrorReport.issues.length === 0, JSON.stringify(currentMirrorReport.issues))
-
-if (failures) {
-  console.error(`\ncontinuityReport selftest: ${failures} FAILED`)
-  process.exit(1)
+  const e2 = episode('ep2', 1, { storyboards: [storyboard('sb3', 0, [{ assetId: 'a-hero', variantId: 'injured' }])] })
+  const d = doc({ assets: [hero(['injured'])], episodes: [e1, e2], currentEpisodeId: 'ep-none' })
+  const ledger = buildContinuityLedger(d)
+  check('shot before the change stays on main', expectedVariantId(ledger.byStoryboardId.get('sb1')!, 'a-hero') === undefined, 'sb1 should inherit main')
+  check('change point applies from its own shot', expectedVariantId(ledger.byStoryboardId.get('sb2')!, 'a-hero') === 'injured', 'sb2 should be injured')
+  check('next episode inherits across the boundary', expectedVariantId(ledger.byStoryboardId.get('sb3')!, 'a-hero') === 'injured', 'sb3 should inherit injured')
+  check('declared change produces no warning', buildContinuityReport(d).issues.length === 0, JSON.stringify(codesOf(buildContinuityReport(d))))
 }
 
-console.log('\ncontinuityReport selftest: ALL PASSED')
+// —— 3. 唯一的形态规则：变了但没声明 → 一条告警（旧版这是 asset_state_changed_variant）——
+{
+  const e1 = episode('ep1', 0, { storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero' }])] })
+  const e2 = episode('ep2', 1, { storyboards: [storyboard('sb2', 0, [{ assetId: 'a-hero', variantId: 'gala' }])] })
+  const d = doc({ assets: [hero(['gala'])], episodes: [e1, e2], currentEpisodeId: 'ep-none' })
+  const report = buildContinuityReport(d)
+  const issue = report.issues.find((item) => item.code === 'unexplained_appearance_change')
+  check('undeclared switch raises exactly one appearance warning', report.issues.filter((i) => i.code === 'unexplained_appearance_change').length === 1, JSON.stringify(codesOf(report)))
+  check('warning carries the inherited target for the quick fix', issue?.expectedVariantId === undefined && issue?.variantId === 'gala', JSON.stringify(issue))
+  check('appearance warnings never block production', !report.issues.some(isProductionBlocking), JSON.stringify(codesOf(report)))
+}
+
+// —— 4. 旧版 asset_state_regressed_to_main：用回主形象同样只报这一条 ——
+{
+  const e1 = episode('ep1', 0, {
+    storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero', variantId: 'injured' }], { stateChanges: [change('a-hero', 'injured', '受伤')] })],
+  })
+  const e2 = episode('ep2', 1, { storyboards: [storyboard('sb2', 0, [{ assetId: 'a-hero' }])] })
+  const d = doc({ assets: [hero(['injured'])], episodes: [e1, e2], currentEpisodeId: 'ep-none' })
+  const report = buildContinuityReport(d)
+  const issue = report.issues.find((item) => item.code === 'unexplained_appearance_change')
+  check('regression to main raises the same single code', report.issues.filter((i) => i.code === 'unexplained_appearance_change').length === 1, JSON.stringify(codesOf(report)))
+  check('regression warning knows it should have stayed injured', issue?.expectedVariantId === 'injured', JSON.stringify(issue))
+}
+
+// —— 5. 场景内形态漂移（旧版 scene_group_variant_mismatch）也归到同一条 ——
+{
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('sb1', 0, [{ assetId: 'a-hero' }], { sceneId: 'hall' }),
+      storyboard('sb2', 1, [{ assetId: 'a-hero', variantId: 'gala' }], { sceneId: 'hall' }),
+    ],
+  })
+  const d = doc({ assets: [hero(['gala'])], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const report = buildContinuityReport(d)
+  check('in-scene drift reuses the appearance code', codesOf(report).filter((code) => code === 'unexplained_appearance_change').length === 1, JSON.stringify(codesOf(report)))
+}
+
+// —— 6. 变更点写入/撤销 ——
+{
+  const e1 = episode('ep1', 0, { storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero' }]), storyboard('sb2', 1, [{ assetId: 'a-hero', variantId: 'gala' }])] })
+  const d = doc({ assets: [hero(['gala'])], episodes: [e1], currentEpisodeId: 'ep1', storyboards: e1.storyboards })
+  check('report warns before the change is declared', buildContinuityReport(d).issues.some((i) => i.code === 'unexplained_appearance_change'), 'expected a warning')
+
+  check('declareAppearanceChange reports a write', declareAppearanceChange(d, 'sb2', change('a-hero', 'gala', '换上宴会礼服')), 'expected true')
+  check('declaring silences the warning', !buildContinuityReport(d).issues.some((i) => i.code === 'unexplained_appearance_change'), JSON.stringify(codesOf(buildContinuityReport(d))))
+  check('declaring twice with identical data is a no-op', !declareAppearanceChange(d, 'sb2', change('a-hero', 'gala', '换上宴会礼服')), 'expected false')
+
+  check('clearAppearanceChange removes the point', clearAppearanceChange(d, 'sb2', 'a-hero'), 'expected true')
+  check('warning comes back after clearing', buildContinuityReport(d).issues.some((i) => i.code === 'unexplained_appearance_change'), 'expected the warning again')
+
+  check('revertToInheritedAppearance realigns the castRef', revertToInheritedAppearance(d, 'sb2', 'a-hero'), 'expected true')
+  check('revert clears the variant binding', d.storyboards[1].castRefs?.[0].variantId === undefined, JSON.stringify(d.storyboards[1].castRefs))
+  check('revert silences the warning', !buildContinuityReport(d).issues.some((i) => i.code === 'unexplained_appearance_change'), JSON.stringify(codesOf(buildContinuityReport(d))))
+}
+
+// —— 7. 阻断项只剩两个：悬空引用 + 缺参考图 ——
+{
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('sb1', 0, [{ assetId: 'a-ghost' }]),
+      storyboard('sb2', 1, [{ assetId: 'a-hero', variantId: 'nope' }]),
+      storyboard('sb3', 2, [{ assetId: 'a-noimg' }]),
+    ],
+  })
+  const noImage: Asset = { id: 'a-noimg', type: 'prop', name: '玉佩', state: 'idle' }
+  const d = doc({ assets: [hero(), noImage], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const report = buildContinuityReport(d)
+  const blocking = report.issues.filter(isProductionBlocking)
+  check('dangling asset and variant both map to dangling_ref', blocking.filter((i) => i.code === 'dangling_ref').length === 2, JSON.stringify(blocking.map((i) => i.code)))
+  check('missing reference image blocks', blocking.some((i) => i.code === 'missing_ref_image' && i.assetId === 'a-noimg'), JSON.stringify(blocking.map((i) => i.code)))
+  check('every blocking issue is an error', blocking.every((i) => i.severity === 'error'), JSON.stringify(blocking.map((i) => i.severity)))
+}
+
+// —— 8. 身份重复：一组只报一条，不再每个资产各报一条 ——
+{
+  const a: Asset = { id: 'a1', type: 'role', name: '阿箬', refImageId: 'i1', state: 'done' }
+  const b: Asset = { id: 'a2', type: 'role', name: '小箬', aliases: ['阿箬'], refImageId: 'i2', state: 'done' }
+  const c: Asset = { id: 'a3', type: 'role', name: '阿箬', refImageId: 'i3', state: 'done' }
+  const d = doc({ assets: [a, b, c] })
+  const duplicates = buildContinuityReport(d).issues.filter((issue) => issue.code === 'duplicate_identity')
+  check('one issue per colliding group, not per asset', duplicates.length === 1, JSON.stringify(duplicates.map((i) => [i.assetId, i.relatedAssetIds])))
+  check('duplicate issue lists the other members', (duplicates[0]?.relatedAssetIds?.length ?? 0) === 2, JSON.stringify(duplicates[0]))
+}
+
+// —— 9. 同场景资产：整组一条，附带涉及的分镜 ——
+{
+  const heroAsset = hero()
+  const hall: Asset = { id: 'a-hall', type: 'scene', name: '正殿', refImageId: 'i-hall', state: 'done' }
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('sb1', 0, [{ assetId: 'a-hall' }, { assetId: 'a-hero' }], { sceneId: 'hall' }),
+      storyboard('sb2', 1, [{ assetId: 'a-hero' }], { sceneId: 'hall' }),
+    ],
+  })
+  const d = doc({ assets: [heroAsset, hall], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const sceneIssues = buildContinuityReport(d).issues.filter((issue) => issue.code === 'scene_asset_inconsistent')
+  check('scene group reports once', sceneIssues.length === 1, JSON.stringify(sceneIssues))
+  check('scene issue points at the shots missing the scene asset', sceneIssues[0]?.storyboardIds?.join(',') === 'sb2', JSON.stringify(sceneIssues[0]?.storyboardIds))
+}
+
+// —— 10. 章节覆盖 ——
+{
+  const e1 = episode('ep1', 0, { novelChapterIds: ['c1'], storyboards: [] })
+  const e2 = episode('ep2', 1, { novelChapterIds: ['c1'], storyboards: [] })
+  const e3 = episode('ep3', 2, { storyboards: [] })
+  const d = doc({ novel: [chapter('c1', 0), chapter('c2', 1)], episodes: [e1, e2, e3], currentEpisodeId: 'ep-none' })
+  const coverage = buildContinuityReport(d).issues.filter((issue) => issue.code === 'chapter_coverage')
+  check('unassigned / duplicated / empty all use one code', coverage.length === 3, JSON.stringify(coverage.map((i) => i.message)))
+  check('chapter coverage never blocks', !coverage.some(isProductionBlocking), JSON.stringify(coverage.map((i) => i.category)))
+}
+
+// —— 11. 未引用资产降级为提示 ——
+{
+  const heroAsset = hero()
+  const spare: Asset = { id: 'a-spare', type: 'prop', name: '备用道具', refImageId: 'i-s', state: 'done' }
+  const e1 = episode('ep1', 0, { storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero' }])] })
+  const d = doc({ assets: [heroAsset, spare], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const hints = buildContinuityReport(d).issues.filter((issue) => issue.code === 'unused_project_asset')
+  check('unused asset is an info hint', hints.length === 1 && hints[0].severity === 'info' && hints[0].category === 'hint', JSON.stringify(hints))
+}
+
+// —— 12. 本集出场需求从分镜反推（取代 requiredAssetIds 勾选）——
+{
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('sb1', 0, [{ assetId: 'a-hero' }]),
+      storyboard('sb2', 1, [{ assetId: 'a-hero', variantId: 'gala' }], { stateChanges: [change('a-hero', 'gala', '换装')] }),
+    ],
+  })
+  const d = doc({ assets: [hero(['gala'])], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const requirements = episodeCastRequirements(d, 'ep1')
+  check('requirements derive from storyboards', requirements.length === 1 && requirements[0].assetId === 'a-hero', JSON.stringify(requirements))
+  check('requirements capture both appearances used in the episode', requirements[0].variantIds.length === 2, JSON.stringify(requirements[0].variantIds))
+}
+
+// —— 13. 全部问题码都在收敛后的集合内 ——
+{
+  const ALLOWED = new Set([
+    'dangling_ref',
+    'missing_ref_image',
+    'unexplained_appearance_change',
+    'duplicate_identity',
+    'scene_asset_inconsistent',
+    'chapter_coverage',
+    'unused_project_asset',
+  ])
+  const heroAsset = hero(['gala'])
+  const spare: Asset = { id: 'a-spare', type: 'prop', name: '备用', state: 'idle' }
+  const e1 = episode('ep1', 0, { novelChapterIds: [], storyboards: [storyboard('sb1', 0, [{ assetId: 'a-hero' }, { assetId: 'a-ghost' }], { sceneId: 's' })] })
+  const e2 = episode('ep2', 1, { storyboards: [storyboard('sb2', 0, [{ assetId: 'a-hero', variantId: 'gala' }], { sceneId: 's' })] })
+  const d = doc({ novel: [chapter('c1', 0)], assets: [heroAsset, spare], episodes: [e1, e2], currentEpisodeId: 'ep-none' })
+  const codes = [...new Set(codesOf(buildContinuityReport(d)))]
+  check('no code escapes the 7-code set', codes.every((code) => ALLOWED.has(code)), JSON.stringify(codes))
+}
+
+// —— 14. 回归：一个悬空 variantId 不得沿台账扩散成整集报错 ——
+// 曾经 agentVariantId 用 `?? text` 兜底，Agent 提到一个尚不存在的形态就会写进标签原文当 id。
+// 台账把它继承给后面每一镜，一处笔误变成几十条 dangling_ref。
+{
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('s1', 0, [{ assetId: 'a-hero' }]),
+      // 变更点指向一个不存在的形态 id（模拟旧 bug 落盘的脏数据）
+      storyboard('s2', 1, [{ assetId: 'a-hero', variantId: '受伤' }], { stateChanges: [change('a-hero', '受伤', '被划伤')] }),
+      storyboard('s3', 2, [{ assetId: 'a-hero', variantId: '受伤' }]),
+      storyboard('s4', 3, [{ assetId: 'a-hero', variantId: '受伤' }]),
+    ],
+  })
+  const d = doc({ assets: [hero()], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const dangling = buildContinuityReport(d).issues.filter((issue) => issue.code === 'dangling_ref')
+  check('a dangling variant is reported on the shots that reference it', dangling.length === 3, JSON.stringify(dangling.map((i) => i.storyboardId)))
+  check(
+    'the dangling variant never becomes an inherited state',
+    buildContinuityLedger(d).shots.every((shot) => expectedVariantId(shot, 'a-hero') === undefined || hero(['受伤']).variants?.some((v) => v.id === expectedVariantId(shot, 'a-hero'))),
+    JSON.stringify(buildContinuityLedger(d).shots.map((s) => expectedVariantId(s, 'a-hero'))),
+  )
+}
+
+// —— 15. 自动补建的形态：应报"缺参考图"（可行动）而不是"引用了已删除的形态"（死路）——
+{
+  const heroWithAuto: Asset = {
+    id: 'a-hero',
+    type: 'role',
+    name: '四叔',
+    refImageId: 'img-hero',
+    state: 'done',
+    variants: [{ id: 'v-auto', label: '受伤', state: 'idle' }], // 分镜自动补建，还没出图
+  }
+  const e1 = episode('ep1', 0, {
+    storyboards: [storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-auto' }], { stateChanges: [change('a-hero', 'v-auto', '被划伤')] })],
+  })
+  const d = doc({ assets: [heroWithAuto], episodes: [e1], currentEpisodeId: 'ep-none' })
+  const codes = codesOf(buildContinuityReport(d))
+  check('an auto-created variant is not a dangling ref', !codes.includes('dangling_ref'), JSON.stringify(codes))
+  check('an auto-created variant asks for an image instead', codes.includes('missing_ref_image'), JSON.stringify(codes))
+}
+
+// —— 16. 派生底图：换装应以"当时穿的那身"为底，而不是永远从主图重来 ——
+{
+  const heroWithLooks: Asset = {
+    id: 'a-hero',
+    type: 'role',
+    name: '四叔',
+    refImageId: 'img-main',
+    state: 'done',
+    variants: [
+      { id: 'v-daily', label: '常服', refImageId: 'img-daily', state: 'done' },
+      { id: 'v-hurt', label: '受伤', state: 'idle' },
+      { id: 'v-gala', label: '礼服', state: 'idle' },
+    ],
+  }
+  const e1 = episode('ep1', 0, {
+    storyboards: [
+      storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', '换上常服')] }),
+      storyboard('s2', 1, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '左脸被划伤')] }),
+    ],
+  })
+  const d = doc({ assets: [heroWithLooks], episodes: [e1], currentEpisodeId: 'ep-none' })
+
+  check('a look that follows another derives from that one', variantDerivationBase(d, 'a-hero', 'v-hurt') === 'v-daily', String(variantDerivationBase(d, 'a-hero', 'v-hurt')))
+  check('the first look derives from the main image', variantDerivationBase(d, 'a-hero', 'v-daily') === undefined, String(variantDerivationBase(d, 'a-hero', 'v-daily')))
+  check('a never-used look falls back to the main image', variantDerivationBase(d, 'a-hero', 'v-gala') === undefined, String(variantDerivationBase(d, 'a-hero', 'v-gala')))
+
+  // 手工指定的父形态优先于推导
+  const withExplicit = doc({
+    assets: [{ ...heroWithLooks, variants: heroWithLooks.variants!.map((v) => (v.id === 'v-hurt' ? { ...v, parentVariantId: 'v-gala' } : v)) }],
+    episodes: [e1],
+    currentEpisodeId: 'ep-none',
+  })
+  check('an explicit parentVariantId wins over derivation', variantDerivationBase(withExplicit, 'a-hero', 'v-hurt') === 'v-gala', String(variantDerivationBase(withExplicit, 'a-hero', 'v-hurt')))
+
+  // 指向已删除的父形态时忽略它，退回推导
+  const staleParent = doc({
+    assets: [{ ...heroWithLooks, variants: heroWithLooks.variants!.map((v) => (v.id === 'v-hurt' ? { ...v, parentVariantId: 'gone' } : v)) }],
+    episodes: [e1],
+    currentEpisodeId: 'ep-none',
+  })
+  check('a dangling parentVariantId is ignored', variantDerivationBase(staleParent, 'a-hero', 'v-hurt') === 'v-daily', String(variantDerivationBase(staleParent, 'a-hero', 'v-hurt')))
+
+  // 自我指向不构成底图
+  const selfRef = doc({
+    assets: [heroWithLooks],
+    episodes: [episode('ep1', 0, { storyboards: [storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', 'x')] })] })],
+    currentEpisodeId: 'ep-none',
+  })
+  check('a look that changes into itself falls back to the main image', variantDerivationBase(selfRef, 'a-hero', 'v-hurt') === undefined, String(variantDerivationBase(selfRef, 'a-hero', 'v-hurt')))
+}
+
+// —— 17. 同一形态从多种状态变来 → 提示拆分（一张参考图承载不了两种外观）——
+{
+  const hero4: Asset = {
+    id: 'a-hero',
+    type: 'role',
+    name: '四叔',
+    refImageId: 'img-main',
+    state: 'done',
+    variants: [
+      { id: 'v-daily', label: '常服', refImageId: 'i1', state: 'done' },
+      { id: 'v-gala', label: '礼服', refImageId: 'i2', state: 'done' },
+      { id: 'v-hurt', label: '受伤', refImageId: 'i3', state: 'done' },
+    ],
+  }
+  // 真正的歧义要求两个底图是**兄弟**：常服和礼服都从主形象派生，受伤先后从这两身衣服变来。
+  // 一张「受伤」图没法同时穿常服和礼服。
+  const d = doc({
+    assets: [hero4],
+    currentEpisodeId: 'ep-none',
+    episodes: [
+      episode('ep1', 0, {
+        storyboards: [
+          storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', '换常服')] }),
+          storyboard('s2', 1, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '被划伤')] }),
+        ],
+      }),
+      episode('ep2', 1, {
+        storyboards: [
+          storyboard('s3', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', '伤好了，换回常服')] }),
+          storyboard('s4', 1, [{ assetId: 'a-hero', variantId: 'v-gala' }], { stateChanges: [change('a-hero', 'v-gala', '换礼服赴宴')] }),
+          storyboard('s5', 2, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '宴会上再次挂彩')] }),
+        ],
+      }),
+    ],
+  })
+
+  const uses = variantBaseUses(d, 'a-hero', 'v-hurt')
+  check('base uses record every change into the variant', uses.length === 2, JSON.stringify(uses))
+  check('base uses capture the differing bases', ambiguousVariantBases(d, 'a-hero', 'v-hurt', uses).join(',') === 'v-daily,v-gala', JSON.stringify(ambiguousVariantBases(d, 'a-hero', 'v-hurt', uses)))
+
+  const ambiguous = buildContinuityReport(d).issues.filter((issue) => issue.code === 'ambiguous_variant_base')
+  check('an ambiguous variant is flagged once', ambiguous.length === 1, JSON.stringify(ambiguous.map((i) => i.variantId)))
+  check('the warning names both bases', ambiguous[0]?.baseVariantLabels?.join(',') === '常服,礼服', JSON.stringify(ambiguous[0]?.baseVariantLabels))
+  check('the warning explains which base wins', ambiguous[0].message.includes('按第一次（常服）派生'), ambiguous[0].message)
+  check('an ambiguous variant never blocks production', !ambiguous.some(isProductionBlocking), JSON.stringify(ambiguous.map((i) => i.category)))
+
+  // 单一底图不该报
+  const single = doc({
+    assets: [hero4],
+    currentEpisodeId: 'ep-none',
+    episodes: [episode('ep1', 0, { storyboards: [storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '受伤')] })] })],
+  })
+  check('a single-base variant is not flagged', !codesOf(buildContinuityReport(single)).includes('ambiguous_variant_base'), JSON.stringify(codesOf(buildContinuityReport(single))))
+
+  // 同一底图重复变更（换回来又换过去）不算歧义
+  const repeated = doc({
+    assets: [hero4],
+    currentEpisodeId: 'ep-none',
+    episodes: [
+      episode('ep1', 0, {
+        storyboards: [
+          storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', 'a')] }),
+          storyboard('s2', 1, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', 'b')] }),
+          storyboard('s3', 2, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', 'c')] }),
+          storyboard('s4', 3, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', 'd')] }),
+        ],
+      }),
+    ],
+  })
+  check('changing back and forth from the same base is not ambiguous', !codesOf(buildContinuityReport(repeated)).includes('ambiguous_variant_base'), JSON.stringify(codesOf(buildContinuityReport(repeated))))
+}
+
+// —— 18. 拆分：把歧义形态按底图拆开后，告警消失且下游继承自动重算 ——
+// 这里复刻 store.splitVariantByBase 的核心逻辑（store 依赖宿主，自测里不引），
+// 验证的是"拆完之后台账自洽"这个契约。
+{
+  const hero5: Asset = {
+    id: 'a-hero',
+    type: 'role',
+    name: '四叔',
+    refImageId: 'img-main',
+    state: 'done',
+    variants: [
+      { id: 'v-daily', label: '常服', refImageId: 'i1', state: 'done' },
+      { id: 'v-gala', label: '礼服', refImageId: 'i2', state: 'done' },
+      { id: 'v-hurt', label: '受伤', refImageId: 'i3', state: 'done' },
+    ],
+  }
+  const d = doc({
+    assets: [hero5],
+    currentEpisodeId: 'ep-none',
+    episodes: [
+      episode('ep1', 0, {
+        storyboards: [
+          storyboard('s1', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', '换常服')] }),
+          storyboard('s2', 1, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '被划伤')] }),
+          storyboard('s3', 2, [{ assetId: 'a-hero', variantId: 'v-hurt' }]),
+        ],
+      }),
+      episode('ep2', 1, {
+        storyboards: [
+          storyboard('s4', 0, [{ assetId: 'a-hero', variantId: 'v-daily' }], { stateChanges: [change('a-hero', 'v-daily', '换回常服')] }),
+          storyboard('s5', 1, [{ assetId: 'a-hero', variantId: 'v-gala' }], { stateChanges: [change('a-hero', 'v-gala', '换礼服')] }),
+          storyboard('s6', 2, [{ assetId: 'a-hero', variantId: 'v-hurt' }], { stateChanges: [change('a-hero', 'v-hurt', '再次挂彩')] }),
+          storyboard('s7', 3, [{ assetId: 'a-hero', variantId: 'v-hurt' }]),
+        ],
+      }),
+    ],
+  })
+
+  const uses = variantBaseUses(d, 'a-hero', 'v-hurt')
+  const bases = ambiguousVariantBases(d, 'a-hero', 'v-hurt', uses)
+  const [, ...extra] = bases
+  const newIdByBase = new Map<string, string>()
+  for (const baseId of extra) {
+    const id = `v-hurt-${baseId}`
+    newIdByBase.set(baseId ?? '', id)
+    hero5.variants!.push({ id, label: `受伤（${baseId}）`, state: 'idle', parentVariantId: baseId })
+  }
+  const ambiguousKeys = new Set(bases.map((baseId) => baseId ?? ''))
+  const all = [...(d.episodes ?? []).flatMap((episode) => episode.storyboards)]
+  for (const use of uses) {
+    if (!ambiguousKeys.has(use.baseVariantId ?? '')) continue
+    const nextId = newIdByBase.get(use.baseVariantId ?? '')
+    if (!nextId) continue
+    const change = all.find((item) => item.id === use.storyboardId)?.stateChanges?.find((item) => item.toVariantId === 'v-hurt')
+    if (change) change.toVariantId = nextId
+  }
+  syncCastRefsToLedger(d)
+
+  check('splitting creates one variant per extra base', newIdByBase.size === 1, JSON.stringify([...newIdByBase]))
+  check('the first base keeps the original variant', all.find((s) => s.id === 's2')?.stateChanges?.[0].toVariantId === 'v-hurt', JSON.stringify(all.find((s) => s.id === 's2')?.stateChanges))
+  check('the later base points at the new variant', all.find((s) => s.id === 's6')?.stateChanges?.[0].toVariantId === 'v-hurt-v-gala', JSON.stringify(all.find((s) => s.id === 's6')?.stateChanges))
+  check('downstream shots re-inherit without manual edits', all.find((s) => s.id === 's7')?.castRefs?.[0].variantId === 'v-hurt-v-gala', JSON.stringify(all.find((s) => s.id === 's7')?.castRefs))
+  check('shots under the original base are untouched', all.find((s) => s.id === 's3')?.castRefs?.[0].variantId === 'v-hurt', JSON.stringify(all.find((s) => s.id === 's3')?.castRefs))
+  check('the ambiguity warning is gone after splitting', !codesOf(buildContinuityReport(d)).includes('ambiguous_variant_base'), JSON.stringify(codesOf(buildContinuityReport(d))))
+  check('the new variant now needs its own image', buildContinuityReport(d).issues.some((issue) => issue.code === 'missing_ref_image' && issue.variantId === 'v-hurt-v-gala'), JSON.stringify(codesOf(buildContinuityReport(d))))
+}
+
+console.log(failures ? `\ncontinuityReport selftest: ${failures} FAILED` : '\ncontinuityReport selftest: ALL PASSED')
+if (failures) process.exit(1)

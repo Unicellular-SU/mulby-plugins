@@ -91,8 +91,6 @@ const scopedAsset: Asset = {
     label: '受伤',
     desc: 'forehead bandage',
     refImageId: 'injured-img',
-    appliesToEpisodeIds: ['ep2'],
-    appliesToSceneIds: ['hospital'],
   }],
 }
 const promoted = promoteProjectAssetToEntity(scopedAsset, entity)
@@ -173,7 +171,7 @@ check('resolves canvas project variant lineage', lineageVariant?.assetName === '
 check('formats episode media usage labels', projectEpisodeUsageLabel('分镜 #2', { index: 2, title: '晚宴追凶' }) === 'E3 晚宴追凶 · 分镜 #2')
 check(
   'formats scoped variant media usage labels',
-  projectVariantMediaUsageLabel('女主', { id: 'injured', label: '战损妆', refImageId: 'injured-img', appliesToEpisodeIds: ['ep3'], state: 'done' }, new Map([['ep3', { index: 2, title: '雨夜' }]])) === '女主 / 战损妆（E3 雨夜）'
+  projectVariantMediaUsageLabel('女主', { id: 'injured', label: '战损妆', refImageId: 'injured-img', state: 'done' }, new Map([['ep3', { index: 2, title: '雨夜' }]]), ['ep3']) === '女主 / 战损妆（E3 雨夜）'
 )
 const flowUsageProject = {
   meta: { id: 'p_flow', name: '精修短剧', artStyle: 'cinematic', videoRatio: '16:9', createdAt: 1, updatedAt: 1 },

@@ -15,6 +15,7 @@ import { useProviderStore } from '../../store/providerStore'
 import { logInfo } from '../../services/localLog'
 import { collectStoryboardVideoReferences, supportsVideoReferenceImages } from './videoReferences'
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
+import { buildShotPrompt } from '../../services/shotPromptBuilder'
 import type { Asset, ProjectMeta, Storyboard } from '../../domain/types'
 
 /** 图像模型：项目级优先，否则用全局选中的图像模型 */
@@ -239,7 +240,9 @@ export async function generateKeyframeImage(
   const castHint = castLabels.length ? `, 出场：${castLabels.join('、')}` : ''
   const chaining = sb.chainFromPrev && chainBase
   const shotHint = shotSizeEn(sb.shotSize) // 景别影响静帧构图（运镜只对视频有意义，关键帧不注入）
-  const prompt = [basis + castHint, shotHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
+  // 决策层放在最前：先立观看立场和构图动机，再给景别，产出的画面才有立场而不是标准取景
+  const designHint = buildShotPrompt({ desc: '', design: sb.shotDesign })
+  const prompt = [designHint, basis + castHint, shotHint, chaining ? CONTINUITY_CLAUSE : '', anchor].filter(Boolean).join(', ')
   const size = sizeForRatio(meta.videoRatio)
 
   const canEdit = !!window.mulby?.ai?.images?.edit && !!window.mulby?.ai?.attachments?.upload

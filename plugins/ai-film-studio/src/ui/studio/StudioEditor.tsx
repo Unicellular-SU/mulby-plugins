@@ -3,7 +3,7 @@
  * 阶段2c 骨架：剧本 Tab 已可编辑落盘；资产/分镜/时间线为列表+新增占位，生成与 Agent 在阶段3 接入。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Download, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle, Copy, Search } from 'lucide-react'
+import { ArrowLeft, FileText, Users, Clapperboard, Film, Bot, Plus, Wand2, Loader2, AlertCircle, AlertTriangle, Trash2, Link2, BookOpen, Settings2, Settings, PanelLeft, ChevronUp, ChevronDown, X, Check, Download, Image as ImageIcon, RotateCcw, BookmarkPlus, Pencil, PauseCircle, PlayCircle, Search } from 'lucide-react'
 import { useProjectStore } from '../store/projectStore'
 import { useGraphStore } from '../store/graphStore'
 import { useProviderStore } from '../store/providerStore'
@@ -13,7 +13,7 @@ import { listStylePacks } from '../services/stylePacks'
 import { useMediaUrl } from '../services/mediaUrl'
 import { libraryEntityToElement, projectAssetIdentityUsageFromHub, type IdentityAssetUsage } from '../services/assetHub'
 import { assetHubEntityVersionStatus } from '../services/assetHubDomain'
-import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, EpisodePlan, ProjectDoc } from '../domain/types'
+import type { Asset, AssetVariant, Storyboard, VideoTrack, Clip, Episode, ProjectDoc } from '../domain/types'
 import StudioDock from './StudioDock'
 import AgentPanel from './AgentPanel'
 import Select from '../components/ui/Select'
@@ -29,7 +29,9 @@ import { loadAssetUrl } from '../services/assets'
 import { cleanAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
 import { VARIANT_KIND_OPTIONS, variantKindLabel, variantLabelWithKind } from '../domain/variantKinds'
 import { castRefsForStoryboard, refImageIdForCastRef } from '../domain/castRefs'
-import { buildContinuityReport, variantScopePatchForUse } from './services/continuityReport'
+import { buildContinuityReport, CATEGORY_LABEL, type ContinuityCategory } from './services/continuityReport'
+import { buildContinuityLedger, episodeCastRequirements } from '../domain/continuityLedger'
+import { checkSceneVariation, storyboardToVariationShot, type SceneVariationIssue } from '../services/quality'
 import { buildEpisodeProductionHandoff, episodeComposeReadiness, pendingEpisodesForSeries } from './services/episodeProduction'
 import { applyEpisodeHandoffSuggestion } from './services/episodeHandoffSuggestions'
 import { exportEpisodePackage, exportProducedEpisodes } from './services/episodeExport'
@@ -63,7 +65,8 @@ function useStudioContinuityReport(doc: ProjectDoc) {
   useEffect(() => {
     if (!hubLoaded) void refreshHub()
   }, [hubLoaded, refreshHub])
-  return useMemo(() => buildContinuityReport(doc, hubLoaded ? { libraryEntities: hubEntities } : undefined), [doc, hubLoaded, hubEntities])
+  void hubEntities
+  return useMemo(() => buildContinuityReport(doc), [doc])
 }
 
 function projectAssetLinkStatusLabels(asset: Asset, linkedEntity?: { version: number; archived?: boolean }): string[] {
@@ -109,7 +112,10 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
   const autoProduce = useProjectStore((s) => s.autoProduce)
   const autoProduceSeries = useProjectStore((s) => s.autoProduceSeries)
   const pauseSeriesProduction = useProjectStore((s) => s.pauseSeriesProduction)
-  const busy = batch.running || film.state === 'composing'
+  const pipeline = useProjectStore((s) => s.pipeline)
+  const runNovelPipeline = useProjectStore((s) => s.runNovelPipeline)
+  const abortNovelPipeline = useProjectStore((s) => s.abortNovelPipeline)
+  const busy = batch.running || film.state === 'composing' || pipeline.running
   const seriesRunning = batch.running && batch.kind === 'series'
   const episodes = doc.episodes ?? []
   const canProduceCurrent = doc.storyboards.length > 0
@@ -190,7 +196,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
           <span className="afs-stwb__tbdiv" aria-hidden />
           <StudioModelBar />
         </div>
-        {busy && (
+        {busy && !pipeline.running && (
           <span className="afs-stwb__busy" role="status" aria-live="polite">
             <Loader2 size={14} className="afs-spin" aria-hidden /> {film.state === 'composing' ? film.text || '合成中…' : batch.label}
           </span>
@@ -204,6 +210,29 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
             title="项目设置（Agent 部署 / 记忆）"
             onClick={() => setSettingsOpen(true)}
           />
+          {pipeline.running ? (
+            <Button
+              variant="secondary"
+              size="md"
+              leadingIcon={PauseCircle}
+              disabled={pipeline.abortRequested}
+              title="当前阶段完成后停止；已完成的阶段会保留，下次点「小说→成片」从断点继续"
+              onClick={() => abortNovelPipeline()}
+            >
+              {pipeline.abortRequested ? '停止中' : '停止流水线'}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="md"
+              leadingIcon={Wand2}
+              disabled={busy || doc.novel.length === 0}
+              title={doc.novel.length ? '拆章 → 章节事件 → 分集 → 剧本 → 资产 → 分镜 → 成片；已完成的阶段自动跳过' : '先在「原著」页导入小说正文'}
+              onClick={() => void runNovelPipeline()}
+            >
+              小说→成片
+            </Button>
+          )}
           {episodes.length > 1 && seriesRunning && (
             <Button
               variant="secondary"
@@ -274,6 +303,7 @@ export default function StudioEditor({ onHome }: { onHome: () => void }) {
         />
       </div>
 
+      {(pipeline.running || pipeline.stages.some((stage) => stage.state !== 'pending')) && <PipelineStrip />}
       <div className="afs-stwb__work">
         {dockOpen && <StudioDock />}
         <div className="afs-stwb__stage">
@@ -474,30 +504,18 @@ function handoffAssetTypeLabel(type: ProjectDoc['assets'][number]['type']): stri
   return '片段'
 }
 
-function handoffEpisodeLabel(doc: ProjectDoc, episodeId: string): string {
-  const episode = doc.episodes?.find((item) => item.id === episodeId)
-  return episode ? `E${episode.index + 1}` : episodeId
-}
-
 function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Episode }) {
   const actionBusy = useProjectStore((s) => s.batch.running || s.film.state === 'composing')
   const generateAsset = useProjectStore((s) => s.generateAsset)
-  const addAssetVariant = useProjectStore((s) => s.addAssetVariant)
-  const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
-  const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
-  const plannedCount = handoff.plannedAssets.length + handoff.plannedVariants.length
-  const hasHints = plannedCount > 0 || handoff.recaps.length > 0 || handoff.sharedAssets.length > 0 || handoff.suggestions.length > 0
+  const hasHints = handoff.carriedState.length > 0 || handoff.recaps.length > 0 || handoff.suggestions.length > 0
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
   const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]) => {
-    await applyEpisodeHandoffSuggestion(episode, suggestion, {
+    await applyEpisodeHandoffSuggestion(suggestion, {
       getDoc: () => useProjectStore.getState().doc,
       generateAsset,
       generateAssetVariant,
-      updateAssetVariant,
-      addAssetVariant,
-      setStoryboardCastVariant,
     })
   }
   const runAutoSuggestions = async () => {
@@ -506,7 +524,9 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       const latestDoc = useProjectStore.getState().doc
       const latestEpisode = latestDoc?.episodes?.find((item) => item.id === episode.id)
       if (!latestDoc || !latestEpisode) break
-      const suggestion = buildEpisodeProductionHandoff(latestDoc, latestEpisode).suggestions.find((item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id))
+      const suggestion = buildEpisodeProductionHandoff(latestDoc, latestEpisode).suggestions.find(
+        (item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id),
+      )
       if (!suggestion) break
       attempted.add(suggestion.id)
       await runSuggestion(suggestion)
@@ -517,75 +537,56 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
       side="bottom"
       align="start"
       className="afs-stwb__handoff-pop"
-      ariaLabel="跨集承接线索"
+      ariaLabel="本集承接状态"
       trigger={
         <IconButton
           size="sm"
           variant="ghost"
           className={hasHints ? 'afs-stwb__handoff-trigger is-active' : 'afs-stwb__handoff-trigger'}
-          aria-label="查看跨集承接线索"
-          title={hasHints ? '查看本集计划输入、制作回顾和复用资产线索' : '暂无跨集承接线索'}
+          aria-label="查看本集承接状态"
+          title={hasHints ? '查看本集开拍时各资产的形态状态' : '暂无承接状态'}
           icon={<BookmarkPlus size={16} />}
         />
       }
     >
       <div className="afs-stwb__handoff">
         <div className="afs-stwb__handoff-head">
-          <b>E{episode.index + 1} 跨集承接</b>
-          <span>{plannedCount} 个计划输入 · {handoff.recaps.length} 条回顾 · {handoff.sharedAssets.length} 个复用资产 · {handoff.suggestions.length} 条建议</span>
+          <b>E{episode.index + 1} 开拍状态</b>
+          <span>{handoff.carriedState.length} 个资产 · {handoff.recaps.length} 条回顾 · {handoff.suggestions.length} 条待补图</span>
         </div>
-        {!hasHints && <p className="afs-stwb__handoff-empty">当前集还没有计划输入、制作回顾或跨集复用资产。</p>}
-        {plannedCount > 0 && (
+        {!hasHints && <p className="afs-stwb__handoff-empty">本集之前没有任何分镜，没有需要承接的形态。</p>}
+        {handoff.carriedState.length > 0 && (
           <section className="afs-stwb__handoff-sec">
-            <h4>本集计划输入</h4>
+            <h4>进入本集时的形态</h4>
             <div className="afs-stwb__handoff-list">
-              {handoff.plannedAssets.map((asset) => (
-                <article key={`planned-asset-${asset.assetId}`} className={`afs-stwb__handoff-item afs-stwb__handoff-plan${asset.refImageId ? '' : ' is-warning'}`}>
-                  <strong>{asset.assetName}</strong>
+              {handoff.carriedState.map((cue) => (
+                <article key={cue.assetId} className={`afs-stwb__handoff-item${cue.refImageId ? '' : ' is-warning'}`}>
+                  <strong>{cue.label}</strong>
                   <p>
-                    {handoffAssetTypeLabel(asset.assetType)}
-                    {' · '}
-                    {asset.refImageId ? '已有主参考图' : '缺主参考图'}
-                    {asset.requiredVariantIds.length > 0 ? ` · 要求 ${asset.requiredVariantIds.length} 个形态` : ''}
+                    {handoffAssetTypeLabel(cue.assetType)}
+                    {cue.reason
+                      ? ` · 自 E${(cue.sinceEpisodeIndex ?? 0) + 1} #${(cue.sinceStoryboardIndex ?? 0) + 1} 起：${cue.reason}`
+                      : ' · 一直是主形象'}
+                    {cue.refImageId ? '' : ' · 缺参考图'}
                   </p>
                 </article>
               ))}
-              {handoff.plannedVariants.map((variant) => {
-                const scopeLabels = variant.appliesToEpisodeIds?.map((episodeId) => handoffEpisodeLabel(doc, episodeId)) ?? []
-                return (
-                  <article key={`planned-variant-${variant.assetId}-${variant.variantId}`} className={`afs-stwb__handoff-item afs-stwb__handoff-plan${variant.refImageId && variant.scopeAppliesToEpisode ? '' : ' is-warning'}`}>
-                    <strong>{variant.assetName}-{variant.variantLabel}</strong>
-                    <p>
-                      计划形态
-                      {' · '}
-                      {variant.refImageId ? '已有形态图' : '缺形态图'}
-                      {' · '}
-                      {variant.scopeAppliesToEpisode ? '已适用本集' : '未标记适用本集'}
-                    </p>
-                    {scopeLabels.length > 0 && (
-                      <div className="afs-stwb__handoff-chips">
-                        {scopeLabels.map((label) => <span key={label}>作用域 {label}</span>)}
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
             </div>
           </section>
         )}
         {handoff.suggestions.length > 0 && (
           <section className="afs-stwb__handoff-sec">
             <div className="afs-stwb__handoff-secbar">
-              <h4>建议处理</h4>
+              <h4>补齐参考图</h4>
               <button
                 type="button"
                 className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk"
                 disabled={actionBusy || autoSuggestions.length === 0}
-                title={autoSuggestions.length ? `顺序执行 ${autoSuggestions.length} 条可自动处理建议` : '没有可自动处理的建议'}
+                title={autoSuggestions.length ? `顺序执行 ${autoSuggestions.length} 条补图` : '没有可自动处理的建议'}
                 onClick={() => void runAutoSuggestions()}
               >
                 <Wand2 size={11} />
-                一键处理
+                一键补齐
               </button>
             </div>
             <div className="afs-stwb__handoff-list">
@@ -600,8 +601,8 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
                     title={suggestion.disabledReason || suggestion.detail}
                     onClick={() => void runSuggestion(suggestion)}
                   >
-                    {suggestion.kind === 'create_episode_variant' ? <Plus size={11} /> : <Wand2 size={11} />}
-                    {suggestion.kind === 'add_variant_episode_scope' ? '标记适用' : suggestion.kind === 'create_episode_variant' ? '新建并应用' : '执行'}
+                    <Wand2 size={11} />
+                    生成
                   </button>
                 </article>
               ))}
@@ -621,30 +622,11 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
             </div>
           </section>
         )}
-        {handoff.sharedAssets.length > 0 && (
-          <section className="afs-stwb__handoff-sec">
-            <h4>资产/形态复用</h4>
-            <div className="afs-stwb__handoff-list">
-              {handoff.sharedAssets.map((cue) => (
-                <article key={cue.assetId + cue.label} className="afs-stwb__handoff-item">
-                  <strong>{cue.label}</strong>
-                  {cue.detail && <p>{cue.detail}</p>}
-                  <div className="afs-stwb__handoff-chips">
-                    {cue.appearances.map((item) => (
-                      <span key={item.episodeId} title={item.recap || `${item.episodeTitle} 使用 ${item.variants.join('、')}`}>
-                        E{item.episodeIndex + 1} {item.variants.join('、')}
-                      </span>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
       </div>
     </Popover>
   )
 }
+
 
 function StudioModelBar() {
   const models = useGraphStore((s) => s.models)
@@ -742,217 +724,119 @@ function StudioModelBar() {
   )
 }
 
-const splitRuleLines = (value: string): string[] =>
-  value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-function toggleId(list: string[] | undefined, id: string): string[] {
-  const set = new Set(list ?? [])
-  if (set.has(id)) set.delete(id)
-  else set.add(id)
-  return [...set]
-}
-
-function episodePlanInputCount(plan: EpisodePlan | undefined): number {
-  return (plan?.requiredAssetIds?.length ?? 0) + (plan?.requiredVariantIds?.length ?? 0)
-}
-
-function episodePlanInputPatch(plan: EpisodePlan | undefined): Partial<EpisodePlan> {
-  return {
-    requiredAssetIds: [...(plan?.requiredAssetIds ?? [])],
-    requiredVariantIds: [...(plan?.requiredVariantIds ?? [])],
-  }
-}
-
-type SeriesPlanFilter = 'all' | 'unplanned' | 'risk' | 'ready'
-type AssetMatrixFilter = 'all' | 'planned' | 'unused' | 'unplanned' | 'variant' | 'appeared' | 'drift' | 'issue' | 'duplicate' | 'missingRef' | 'missingVariantRef' | 'library' | 'libraryNewer' | 'libraryArchived' | 'libraryCandidate' | 'unlinked'
+type AssetMatrixFilter = 'all' | 'unused' | 'variant' | 'appeared' | 'issue' | 'duplicate' | 'missingRef' | 'missingVariantRef' | 'library' | 'libraryNewer' | 'libraryArchived' | 'unlinked'
 type AssetMatrixTypeFilter = 'all' | 'role' | 'scene' | 'prop'
 const ASSET_MATRIX_LINK_ATTENTION_LABELS = new Set(['有新版', '已归档', '已分叉', '旧链接'])
-const ASSET_MATRIX_DUPLICATE_ISSUE_CODES = new Set([
-  'duplicate_asset_name',
-  'duplicate_asset_alias',
-  'duplicate_library_entity_project_assets',
-  'cross_episode_duplicate_project_asset_candidate',
-])
-const ASSET_MATRIX_LIBRARY_CANDIDATE_ISSUE_CODES = new Set([
-  'asset_matches_unlinked_library_entity',
-  'library_entity_alias_conflict',
-])
+
+/**
+ * 系列页 = 系列圣经（4 个字段）+ 形态时间轴。
+ *
+ * 旧版这里是「每集 3 个文本框 + N 个资产复选 + M 个形态复选」的网格：20 集 × 15 资产 × 30 形态
+ * 会渲染近千个控件，而这些勾选本身并不生产任何东西，只是给一致性检查提供另一份可能对不上的声明。
+ * 现在勾选全部删掉——本集用到什么由分镜决定；这一页只回答一个问题：
+ * **每个角色在每一集长什么样，以及是在哪一镜、因为什么变的。**
+ */
+/**
+ * 主线流水线进度条：7 个阶段横向排开，显示每段的状态、进度和失败原因。
+ * 阶段状态是从文档推导出来的，所以关掉重开、手工改内容之后再跑都能自洽。
+ */
+function PipelineStrip() {
+  const pipeline = useProjectStore((s) => s.pipeline)
+  const runNovelPipeline = useProjectStore((s) => s.runNovelPipeline)
+  const failed = pipeline.stages.find((stage) => stage.state === 'failed')
+  return (
+    <div className="afs-stwb__pipeline" role="status" aria-live="polite" aria-label="小说到成片流水线进度">
+      <ol className="afs-stwb__pipeline-steps">
+        {pipeline.stages.map((stage) => (
+          <li key={stage.id} className={`afs-stwb__pipeline-step is-${stage.state}`} title={stage.error || stage.detail || stage.label}>
+            <span className="afs-stwb__pipeline-dot" aria-hidden>
+              {stage.state === 'running' ? <Loader2 size={11} className="afs-spin" /> : stage.state === 'done' ? <Check size={11} /> : stage.state === 'failed' ? <AlertCircle size={11} /> : null}
+            </span>
+            <b>{stage.label}</b>
+            {stage.progress && stage.state === 'running' && <i>{stage.progress.done}/{stage.progress.total}</i>}
+            {stage.state === 'skipped' && <i>跳过</i>}
+          </li>
+        ))}
+      </ol>
+      {(pipeline.stages.find((stage) => stage.state === 'running')?.detail || failed?.error) && (
+        <p className={failed ? 'afs-stwb__pipeline-detail is-error' : 'afs-stwb__pipeline-detail'}>
+          {failed?.error ?? pipeline.stages.find((stage) => stage.state === 'running')?.detail}
+        </p>
+      )}
+      {failed && !pipeline.running && (
+        <button type="button" className="afs-stwb__pipeline-retry" onClick={() => void runNovelPipeline()}>
+          修好后从这一步继续
+        </button>
+      )}
+    </div>
+  )
+}
+
+function AssetThumb({ assetId }: { assetId: string }) {
+  const url = useMediaUrl({ assetId })
+  return <span className="afs-series__timeline-thumb">{url ? <img src={url} alt="" /> : null}</span>
+}
 
 function SeriesTab() {
   const doc = useProjectStore((s) => s.doc)!
   const updateSeriesBible = useProjectStore((s) => s.updateSeriesBible)
   const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
   const createEpisodes = useProjectStore((s) => s.createEpisodes)
-  const hubLoaded = useAssetHubStore((s) => s.loaded)
-  const usageByEntity = useAssetHubStore((s) => s.usageByEntity)
-  const refreshHub = useAssetHubStore((s) => s.refresh)
-  const [seriesPlanFilter, setSeriesPlanFilter] = useState<SeriesPlanFilter>('all')
-  useEffect(() => {
-    if (!hubLoaded) void refreshHub()
-  }, [hubLoaded, refreshHub])
+  const switchEpisode = useProjectStore((s) => s.switchEpisode)
+  const revertAppearance = useProjectStore((s) => s.revertAppearanceToInherited)
+  const [typeFilter, setTypeFilter] = useState<AssetMatrixTypeFilter>('role')
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
-  const bible = doc.seriesBible ?? { continuityRules: [], plannedEpisodeCount: episodes.length || 1 }
+  const bible = doc.seriesBible ?? { plannedEpisodeCount: episodes.length || 1 }
   const plannedCount = bible.plannedEpisodeCount ?? (episodes.length || 1)
-  const assetOptions = doc.assets
-    .filter((asset) => (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop') && !asset.parentAssetId)
-    .map((asset) => {
-      const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
-      return { asset, hasRefImage: !!asset.refImageId, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage) }
-    })
-  const variantOptions = assetOptions.flatMap((asset) =>
-    (asset.asset.variants ?? []).map((variant) => ({
-      id: variant.id,
-      assetId: asset.asset.id,
-      label: `${asset.asset.name} / ${variantLabelWithKind(variant.label, variant.variantKind)}`,
-      title: [variantKindLabel(variant.variantKind) ? `类型：${variantKindLabel(variant.variantKind)}` : '', variant.desc].filter(Boolean).join(' · '),
-      hasRefImage: !!variant.refImageId,
-      appliesToEpisodeIds: variant.appliesToEpisodeIds ?? [],
-      assetCenterUsage: asset.assetCenterUsage,
-      assetCenterChips: asset.assetCenterChips,
-    }))
-  )
-  const assetOptionById = new Map(assetOptions.map((option) => [option.asset.id, option]))
-  const variantOptionById = new Map(variantOptions.map((option) => [option.id, option]))
+
+  const ledger = useMemo(() => buildContinuityLedger(doc), [doc])
+  const assetsById = useMemo(() => new Map(doc.assets.map((asset) => [asset.id, asset])), [doc.assets])
+
+  /** 每个资产 × 每一集：进入该集时的形态 + 该集内发生的变更点 */
+  const timeline = useMemo(() => {
+    const tracked = doc.assets.filter(
+      (asset) => !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop'),
+    )
+    const shotsByEpisode = new Map<string, typeof ledger.shots>()
+    for (const shot of ledger.shots) shotsByEpisode.set(shot.episodeId, [...(shotsByEpisode.get(shot.episodeId) ?? []), shot])
+
+    return tracked
+      .filter((asset) => typeFilter === 'all' || asset.type === typeFilter)
+      .map((asset) => {
+        const cells = episodes.map((episode) => {
+          const shots = shotsByEpisode.get(episode.id) ?? []
+          const appears = shots.some((shot) => castRefsForStoryboard(shot.storyboard).some((ref) => ref.assetId === asset.id))
+          const entryVariantId = shots.length ? shots[0].inherited.get(asset.id) : undefined
+          const changes = shots.flatMap((shot) =>
+            shot.changes
+              .filter((change) => change.assetId === asset.id)
+              .map((change) => ({ shot, change })),
+          )
+          const exitVariantId = changes.length ? changes[changes.length - 1].change.toVariantId : entryVariantId
+          return { episode, appears, entryVariantId, exitVariantId, changes }
+        })
+        return { asset, cells, everAppears: cells.some((cell) => cell.appears) }
+      })
+      .filter((row) => row.everAppears || row.asset.type === 'role')
+  }, [doc.assets, episodes, ledger, typeFilter])
+
+  const variantLabel = (asset: Asset, variantId: string | undefined) =>
+    variantId ? asset.variants?.find((item) => item.id === variantId)?.label ?? variantId : '主形象'
+
   const fillEpisodes = () => {
-    const missing = Math.max(0, plannedCount - episodes.length)
+    const missing = plannedCount - episodes.length
     if (missing > 0) createEpisodes(missing)
   }
-  const patchPlan = (episode: Episode, patch: Partial<EpisodePlan>) => updateEpisodePlan(episode.id, patch)
-  const copyPreviousPlanInputs = (episode: Episode, previousEpisode: Episode) => {
-    patchPlan(episode, episodePlanInputPatch(previousEpisode.plan))
-  }
-  const countSeedableUnplannedEpisodes = () => {
-    let carryInputs: Partial<EpisodePlan> | undefined
-    let count = 0
-    for (const episode of episodes) {
-      if (episodePlanInputCount(episode.plan) > 0) {
-        carryInputs = episodePlanInputPatch(episode.plan)
-        continue
-      }
-      if (episodePlanInputCount(carryInputs) > 0) count += 1
-      else carryInputs = undefined
-    }
-    return count
-  }
-  const seedUnplannedPlanInputsFromPrevious = () => {
-    let carryInputs: Partial<EpisodePlan> | undefined
-    for (const episode of episodes) {
-      if (episodePlanInputCount(episode.plan) > 0) {
-        carryInputs = episodePlanInputPatch(episode.plan)
-        continue
-      }
-      if (!carryInputs || episodePlanInputCount(carryInputs) <= 0) {
-        carryInputs = undefined
-        continue
-      }
-      patchPlan(episode, carryInputs)
-    }
-  }
-  const togglePlanAsset = (episode: Episode, plan: EpisodePlan, assetId: string) => {
-    if (!(plan.requiredAssetIds ?? []).includes(assetId)) {
-      patchPlan(episode, { requiredAssetIds: toggleId(plan.requiredAssetIds, assetId) })
-      return
-    }
-    const childVariantIds = new Set(variantOptions.filter((variant) => variant.assetId === assetId).map((variant) => variant.id))
-    patchPlan(episode, {
-      requiredAssetIds: (plan.requiredAssetIds ?? []).filter((id) => id !== assetId),
-      requiredVariantIds: (plan.requiredVariantIds ?? []).filter((id) => !childVariantIds.has(id)),
-    })
-  }
-  const togglePlanVariant = (episode: Episode, plan: EpisodePlan, variantId: string, assetId: string) => {
-    if ((plan.requiredVariantIds ?? []).includes(variantId)) {
-      patchPlan(episode, { requiredVariantIds: toggleId(plan.requiredVariantIds, variantId) })
-      return
-    }
-    patchPlan(episode, {
-      requiredVariantIds: toggleId(plan.requiredVariantIds, variantId),
-      requiredAssetIds: (plan.requiredAssetIds ?? []).includes(assetId)
-        ? plan.requiredAssetIds
-        : [...new Set([...(plan.requiredAssetIds ?? []), assetId])],
-    })
-  }
-  const readinessForEpisode = (episode: Episode) => {
-    const plan = episode.plan ?? {}
-    const requiredAssetIds = new Set(plan.requiredAssetIds ?? [])
-    const requiredVariantIds = new Set(plan.requiredVariantIds ?? [])
-    const plannedAssetIds = plan.requiredAssetIds ?? []
-    const plannedVariantIds = plan.requiredVariantIds ?? []
-    const missingAssetRefs = plannedAssetIds.filter((id) => assetOptionById.get(id)?.hasRefImage === false).length
-    const invalidAssetRefs = plannedAssetIds.filter((id) => !assetOptionById.has(id)).length
-    const plannedVariantOptions = plannedVariantIds.map((id) => variantOptionById.get(id))
-    const missingVariantRefs = plannedVariantOptions.filter((variant) => variant && !variant.hasRefImage).length
-    const scopedOutsideEpisode = plannedVariantOptions.filter((variant) => variant && variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)).length
-    const parentAssetMissing = plannedVariantOptions.filter((variant) => variant && !requiredAssetIds.has(variant.assetId)).length
-    const invalidVariantRefs = plannedVariantIds.filter((id) => !variantOptionById.has(id)).length
-    const plannedInputCount = plannedAssetIds.length + plannedVariantIds.length
-    const readinessIssueCount = missingAssetRefs + invalidAssetRefs + missingVariantRefs + scopedOutsideEpisode + parentAssetMissing + invalidVariantRefs
-    const readinessSummary = [
-      missingAssetRefs ? `缺主图 ${missingAssetRefs}` : '',
-      missingVariantRefs ? `缺形态图 ${missingVariantRefs}` : '',
-      scopedOutsideEpisode ? `作用域 ${scopedOutsideEpisode}` : '',
-      parentAssetMissing ? `父资产 ${parentAssetMissing}` : '',
-      invalidAssetRefs || invalidVariantRefs ? `无效引用 ${invalidAssetRefs + invalidVariantRefs}` : '',
-    ].filter(Boolean)
-    const summaryTitle = [
-      `计划资产 ${plannedAssetIds.length}`,
-      `计划形态 ${plannedVariantIds.length}`,
-      readinessSummary.length ? `风险：${readinessSummary.join(' · ')}` : plannedInputCount ? '生产输入就绪' : '还没有规划必需项目资产或形态',
-    ].join('\n')
-    return {
-      plan,
-      requiredAssetIds,
-      requiredVariantIds,
-      plannedInputCount,
-      readinessIssueCount,
-      summaryTitle,
-    }
-  }
-  const episodeReadiness = episodes.map((episode) => ({ episode, readiness: readinessForEpisode(episode) }))
-  const episodeIndexById = new Map(episodes.map((episode, index) => [episode.id, index]))
-  const unplannedEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount === 0).length
-  const riskyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.readinessIssueCount > 0).length
-  const readyEpisodeCount = episodeReadiness.filter(({ readiness }) => readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0).length
-  const missingEpisodeCount = Math.max(0, plannedCount - episodes.length)
-  const seedableUnplannedEpisodeCount = countSeedableUnplannedEpisodes()
-  const filteredEpisodeReadiness = episodeReadiness.filter(({ readiness }) => {
-    if (seriesPlanFilter === 'unplanned') return readiness.plannedInputCount === 0
-    if (seriesPlanFilter === 'risk') return readiness.readinessIssueCount > 0
-    if (seriesPlanFilter === 'ready') return readiness.plannedInputCount > 0 && readiness.readinessIssueCount === 0
-    return true
-  })
-  const seriesFilterOptions: { id: SeriesPlanFilter; label: string; count: number }[] = [
-    { id: 'all', label: '全部', count: episodes.length },
-    { id: 'unplanned', label: '未规划', count: unplannedEpisodeCount },
-    { id: 'risk', label: '风险', count: riskyEpisodeCount },
-    { id: 'ready', label: '就绪', count: readyEpisodeCount },
-  ]
-  const seriesReadinessTitle = [
-    `已建剧集 ${episodes.length}`,
-    `计划集数 ${plannedCount}`,
-    missingEpisodeCount ? `缺少剧集 ${missingEpisodeCount}` : '',
-    unplannedEpisodeCount ? `未规划剧集 ${unplannedEpisodeCount}` : '',
-    riskyEpisodeCount ? `存在风险剧集 ${riskyEpisodeCount}` : '',
-    readyEpisodeCount ? `生产输入就绪剧集 ${readyEpisodeCount}` : '',
-  ].filter(Boolean).join('\n')
+
   return (
     <div className="afs-series">
       <section className="afs-series__bible">
         <div className="afs-studio__tabbar">
           <b>系列圣经</b>
-          <span className="afs-studio__hint">整季生产蓝图，不直接生成媒体</span>
+          <span className="afs-studio__hint">整季基调，注入各 Agent；不直接生成媒体</span>
           <span className="afs-series__spacer" />
           <span className="afs-studio__hint">计划集数</span>
-          <NumberStepper
-            size="sm"
-            min={1}
-            max={100}
-            value={plannedCount}
-            onChange={(n) => updateSeriesBible({ plannedEpisodeCount: n })}
-            ariaLabel="计划集数"
-          />
+          <NumberStepper size="sm" min={1} max={100} value={plannedCount} onChange={(n) => updateSeriesBible({ plannedEpisodeCount: n })} ariaLabel="计划集数" />
           <button className="afs-btn afs-btn--sm" disabled={plannedCount <= episodes.length} onClick={fillEpisodes}>
             <Plus size={13} /> 补齐剧集
           </button>
@@ -960,265 +844,170 @@ function SeriesTab() {
         <div className="afs-series__bible-grid">
           <label className="afs-series__field">
             <span>一句话钩子</span>
-            <input
-              className="afs-field__input"
-              value={bible.logline ?? ''}
-              placeholder="整季核心卖点 / 第一眼吸引力"
-              onChange={(e) => updateSeriesBible({ logline: e.target.value })}
-            />
+            <input className="afs-field__input" value={bible.logline ?? ''} placeholder="整季核心卖点 / 第一眼吸引力" onChange={(e) => updateSeriesBible({ logline: e.target.value })} />
           </label>
           <label className="afs-series__field">
             <span>主题</span>
-            <input
-              className="afs-field__input"
-              value={bible.theme ?? ''}
-              placeholder="复仇、成长、悬疑、爽感节奏等"
-              onChange={(e) => updateSeriesBible({ theme: e.target.value })}
-            />
+            <input className="afs-field__input" value={bible.theme ?? ''} placeholder="复仇、成长、悬疑、爽感节奏等" onChange={(e) => updateSeriesBible({ theme: e.target.value })} />
           </label>
           <label className="afs-series__field afs-series__field--wide">
             <span>整季梗概</span>
-            <textarea
-              className="afs-field__input"
-              rows={4}
-              value={bible.synopsis ?? ''}
-              placeholder="整季故事主线、主角目标、核心反转和结局方向"
-              onChange={(e) => updateSeriesBible({ synopsis: e.target.value })}
-            />
+            <textarea className="afs-field__input" rows={3} value={bible.synopsis ?? ''} placeholder="整季故事主线、主角目标、核心反转和结局方向" onChange={(e) => updateSeriesBible({ synopsis: e.target.value })} />
           </label>
           <label className="afs-series__field afs-series__field--wide">
             <span>世界规则</span>
-            <textarea
-              className="afs-field__input"
-              rows={3}
-              value={bible.worldRules ?? ''}
-              placeholder="时代背景、空间规则、能力边界、视觉基调等"
-              onChange={(e) => updateSeriesBible({ worldRules: e.target.value })}
-            />
-          </label>
-          <label className="afs-series__field afs-series__field--wide">
-            <span>连续性规则</span>
-            <textarea
-              className="afs-field__input"
-              rows={4}
-              value={(bible.continuityRules ?? []).join('\n')}
-              placeholder={'每行一条，例如：\nE3 起女主左脸有伤疤\nE5 宴会前不能使用晚宴妆'}
-              onChange={(e) => updateSeriesBible({ continuityRules: splitRuleLines(e.target.value) })}
-            />
+            <textarea className="afs-field__input" rows={2} value={bible.worldRules ?? ''} placeholder="时代背景、空间规则、能力边界、视觉基调等" onChange={(e) => updateSeriesBible({ worldRules: e.target.value })} />
           </label>
         </div>
       </section>
+
       <section className="afs-series__episodes">
         <div className="afs-studio__tabbar">
-          <b>剧集规划</b>
+          <b>形态时间轴</b>
           <span className="afs-studio__hint">
-            当前 {episodes.length} 集，计划 {plannedCount} 集
+            外观自动沿用上一镜，只在真的变化时登记一次。共 {ledger.shots.length} 镜
           </span>
           <span className="afs-series__spacer" />
-          <span className="afs-series__rollup" title={seriesReadinessTitle} aria-label="整季规划摘要">
-            {missingEpisodeCount > 0 && (
-              <button
-                type="button"
-                className="is-warning"
-                title="补齐缺少的剧集，并显示未规划剧集"
-                onClick={() => {
-                  setSeriesPlanFilter('unplanned')
-                  fillEpisodes()
-                }}
-              >
-                缺集 {missingEpisodeCount}
-              </button>
-            )}
-            {unplannedEpisodeCount > 0 && (
-              <button type="button" className={seriesPlanFilter === 'unplanned' ? 'is-on' : ''} onClick={() => setSeriesPlanFilter('unplanned')}>
-                未规划 {unplannedEpisodeCount}
-              </button>
-            )}
-            {riskyEpisodeCount > 0 && (
-              <button type="button" className={seriesPlanFilter === 'risk' ? 'is-warning is-on' : 'is-warning'} onClick={() => setSeriesPlanFilter('risk')}>
-                风险 {riskyEpisodeCount}
-              </button>
-            )}
-            {readyEpisodeCount > 0 && (
-              <button type="button" className={seriesPlanFilter === 'ready' ? 'is-ready is-on' : 'is-ready'} onClick={() => setSeriesPlanFilter('ready')}>
-                就绪 {readyEpisodeCount}
-              </button>
-            )}
-          </span>
-          {seedableUnplannedEpisodeCount > 0 && (
-            <button
-              type="button"
-              className="afs-series__bulk-copy"
-              title="把每个未规划剧集的生产输入复制自上一集；只复制资产和形态，不覆盖钩子、冲突或结尾"
-              onClick={seedUnplannedPlanInputsFromPrevious}
-            >
-              <Copy size={12} /> 沿用上集 {seedableUnplannedEpisodeCount}
-            </button>
-          )}
-          <span className="afs-series__filters" aria-label="剧集规划筛选">
-            {seriesFilterOptions.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className={seriesPlanFilter === option.id ? 'is-on' : ''}
-                aria-pressed={seriesPlanFilter === option.id}
-                onClick={() => setSeriesPlanFilter(option.id)}
-              >
-                {option.label} {option.count}
+          <span className="afs-series__filters" aria-label="资产类型筛选">
+            {([['role', '角色'], ['scene', '场景'], ['prop', '道具'], ['all', '全部']] as const).map(([id, label]) => (
+              <button key={id} type="button" className={typeFilter === id ? 'is-on' : ''} aria-pressed={typeFilter === id} onClick={() => setTypeFilter(id)}>
+                {label}
               </button>
             ))}
           </span>
         </div>
-        {filteredEpisodeReadiness.length ? (
-          <div className="afs-series__episode-grid">
-            {filteredEpisodeReadiness.map(({ episode, readiness }) => {
-            const { plan, requiredAssetIds, requiredVariantIds, plannedInputCount, readinessIssueCount, summaryTitle } = readiness
-            const previousEpisode = episodes[(episodeIndexById.get(episode.id) ?? 0) - 1]
-            const previousPlanInputCount = episodePlanInputCount(previousEpisode?.plan)
-            const canCopyPreviousInputs = !!previousEpisode && previousPlanInputCount > 0
+
+        {episodes.length === 0 ? (
+          <p className="afs-series__empty">还没有剧集。先在上面设定计划集数并「补齐剧集」。</p>
+        ) : timeline.length === 0 ? (
+          <p className="afs-series__empty">当前筛选下没有资产。</p>
+        ) : (
+          <div className="afs-series__timeline" role="table" aria-label="资产形态时间轴">
+            <div className="afs-series__timeline-head" role="row">
+              <span role="columnheader">资产</span>
+              {episodes.map((episode) => (
+                <button
+                  key={episode.id}
+                  type="button"
+                  role="columnheader"
+                  className={episode.id === doc.currentEpisodeId ? 'is-current' : ''}
+                  title={`切换到 E${episode.index + 1}「${episode.title}」`}
+                  onClick={() => switchEpisode(episode.id)}
+                >
+                  E{episode.index + 1}
+                </button>
+              ))}
+            </div>
+            {timeline.map(({ asset, cells }) => (
+              <div key={asset.id} className="afs-series__timeline-row" role="row">
+                <span className="afs-series__timeline-asset" role="rowheader" title={asset.name}>
+                  {asset.refImageId && <AssetThumb assetId={asset.refImageId} />}
+                  <b>{asset.name}</b>
+                </span>
+                {cells.map((cell) => {
+                  const label = variantLabel(asset, cell.exitVariantId)
+                  const changed = cell.changes.length > 0
+                  const title = changed
+                    ? cell.changes
+                        .map(({ shot, change }) => `#${shot.storyboardIndex + 1} → ${variantLabel(asset, change.toVariantId)}：${change.reason}`)
+                        .join('\n')
+                    : cell.appears
+                      ? `沿用${label}`
+                      : '本集未出场'
+                  return (
+                    <span
+                      key={cell.episode.id}
+                      role="cell"
+                      className={`afs-series__timeline-cell${cell.appears ? '' : ' is-absent'}${changed ? ' is-changed' : ''}`}
+                      title={title}
+                    >
+                      {cell.appears ? (
+                        <>
+                          <i className="afs-series__timeline-label">{label}</i>
+                          {changed && (
+                            <button
+                              type="button"
+                              className="afs-series__timeline-undo"
+                              title={`撤销 E${cell.episode.index + 1} 的形态变更，沿用上一镜`}
+                              aria-label={`撤销 ${asset.name} 在 E${cell.episode.index + 1} 的形态变更`}
+                              onClick={() => {
+                                for (const { shot } of cell.changes) revertAppearance(shot.storyboardId, asset.id)
+                              }}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <i className="afs-series__timeline-label">—</i>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="afs-series__episodes">
+        <div className="afs-studio__tabbar">
+          <b>剧集叙事</b>
+          <span className="afs-studio__hint">每集的钩子与冲突；出场资产由分镜决定，无需在此勾选</span>
+        </div>
+        <div className="afs-series__episode-grid">
+          {episodes.map((episode) => {
+            const plan = episode.plan ?? {}
+            const cast = episodeCastRequirements(doc, episode.id)
             return (
               <article key={episode.id} className="afs-series__episode">
                 <div className="afs-series__episode-head">
                   <b>E{episode.index + 1}</b>
                   <span className="afs-series__episode-title" title={episode.title}>{episode.title}</span>
-                  {previousEpisode && (
-                    <button
-                      type="button"
-                      className="afs-series__episode-copy"
-                      disabled={!canCopyPreviousInputs}
-                      title={canCopyPreviousInputs ? `复用 E${previousEpisode.index + 1} 的 ${previousPlanInputCount} 个生产输入` : `E${previousEpisode.index + 1} 还没有生产输入`}
-                      aria-label={`复用上一集生产输入到 E${episode.index + 1}`}
-                      onClick={() => copyPreviousPlanInputs(episode, previousEpisode)}
-                    >
-                      <Copy size={12} />
-                    </button>
-                  )}
-                  <div className="afs-series__episode-summary" title={summaryTitle} aria-label={`E${episode.index + 1} 计划摘要`}>
-                    <i>{plannedInputCount ? `计划 ${plannedInputCount}` : '未规划'}</i>
-                    {readinessIssueCount > 0 ? <i className="is-warning">风险 {readinessIssueCount}</i> : plannedInputCount > 0 ? <i className="is-ready">就绪</i> : null}
+                  <div className="afs-series__episode-summary">
+                    <i>{cast.length ? `${cast.length} 个出场资产` : '尚无分镜'}</i>
                   </div>
                 </div>
                 <div className="afs-series__plan-grid">
                   <label className="afs-series__field">
                     <span>开场钩子</span>
-                    <textarea
-                      className="afs-field__input"
-                      rows={2}
-                      value={plan.hook ?? ''}
-                      onChange={(e) => patchPlan(episode, { hook: e.target.value })}
-                    />
+                    <textarea className="afs-field__input" rows={2} value={plan.hook ?? ''} onChange={(e) => updateEpisodePlan(episode.id, { hook: e.target.value })} />
                   </label>
                   <label className="afs-series__field">
                     <span>本集冲突</span>
-                    <textarea
-                      className="afs-field__input"
-                      rows={2}
-                      value={plan.conflict ?? ''}
-                      onChange={(e) => patchPlan(episode, { conflict: e.target.value })}
-                    />
+                    <textarea className="afs-field__input" rows={2} value={plan.conflict ?? ''} onChange={(e) => updateEpisodePlan(episode.id, { conflict: e.target.value })} />
                   </label>
                   <label className="afs-series__field afs-series__field--wide">
                     <span>结尾钩子</span>
-                    <textarea
-                      className="afs-field__input"
-                      rows={2}
-                      value={plan.cliffhanger ?? ''}
-                      onChange={(e) => patchPlan(episode, { cliffhanger: e.target.value })}
-                    />
+                    <textarea className="afs-field__input" rows={2} value={plan.cliffhanger ?? ''} onChange={(e) => updateEpisodePlan(episode.id, { cliffhanger: e.target.value })} />
                   </label>
                 </div>
-                <div className="afs-series__requirements">
-                  <span>必需项目资产</span>
-                  {assetOptions.length ? (
+                {cast.length > 0 && (
+                  <div className="afs-series__requirements">
+                    <span>本集出场（来自分镜）</span>
                     <div className="afs-series__checks">
-                      {assetOptions.map(({ asset, hasRefImage, assetCenterUsage, assetCenterChips }) => {
-                        const readinessWarnings = hasRefImage ? [] : ['缺主参考图']
-                        const title = [
-                          readinessWarnings.length ? `提示：${readinessWarnings.join(' · ')}` : '',
-                          assetCenterChips.length ? assetCenterUsageTitle(assetCenterUsage) : '',
-                        ].filter(Boolean).join('\n') || asset.name
+                      {cast.map((item) => {
+                        const asset = assetsById.get(item.assetId)
+                        if (!asset) return null
+                        const labels = item.variantIds.map((id) => variantLabel(asset, id))
                         return (
-                          <label
-                            key={asset.id}
-                            className={`afs-series__check${requiredAssetIds.has(asset.id) ? ' is-on' : ''}${readinessWarnings.length ? ' is-warning' : ''}`}
-                            title={title}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={requiredAssetIds.has(asset.id)}
-                              onChange={() => togglePlanAsset(episode, plan, asset.id)}
-                            />
+                          <span key={item.assetId} className="afs-series__check is-on" title={`形态：${labels.join('、')}`}>
                             <span className="afs-series__checktext">{asset.name}</span>
-                            {readinessWarnings.length > 0 && (
-                              <span className="afs-series__warnchips" aria-label={`${asset.name} 就绪提示`}>
-                                {readinessWarnings.map((chip) => <i key={chip}>{chip}</i>)}
+                            {labels.length > 1 && (
+                              <span className="afs-series__warnchips">
+                                <i>{labels.length} 种形态</i>
                               </span>
                             )}
-                            {assetCenterChips.length > 0 && (
-                              <span className="afs-series__usagechips" aria-label={`${asset.name} 资产中心图谱`}>
-                                {assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
-                              </span>
-                            )}
-                          </label>
+                          </span>
                         )
                       })}
                     </div>
-                  ) : (
-                    <p className="afs-studio__hint">项目资产页还没有角色、场景或道具。</p>
-                  )}
-                  {variantOptions.length ? (
-                    <>
-                      <span>必需形态/妆容</span>
-                      <div className="afs-series__checks">
-                        {variantOptions.map((variant) => {
-                          const scopedToOtherEpisodes = variant.appliesToEpisodeIds.length > 0 && !variant.appliesToEpisodeIds.includes(episode.id)
-                          const parentAssetMissing = requiredVariantIds.has(variant.id) && !requiredAssetIds.has(variant.assetId)
-                          const readinessWarnings = [
-                            parentAssetMissing ? '未规划父资产' : '',
-                            variant.hasRefImage ? '' : '缺形态图',
-                            scopedToOtherEpisodes ? '未适用本集' : '',
-                          ].filter(Boolean)
-                          const title = [
-                            variant.title,
-                            readinessWarnings.length ? `提示：${readinessWarnings.join(' · ')}` : '',
-                            variant.assetCenterChips.length ? assetCenterUsageTitle(variant.assetCenterUsage) : '',
-                          ].filter(Boolean).join('\n') || variant.label
-                          return (
-                            <label
-                              key={variant.id}
-                              className={`afs-series__check${requiredVariantIds.has(variant.id) ? ' is-on' : ''}${readinessWarnings.length ? ' is-warning' : ''}`}
-                              title={title}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={requiredVariantIds.has(variant.id)}
-                                onChange={() => togglePlanVariant(episode, plan, variant.id, variant.assetId)}
-                              />
-                              <span className="afs-series__checktext">{variant.label}</span>
-                              {readinessWarnings.length > 0 && (
-                                <span className="afs-series__warnchips" aria-label={`${variant.label} 就绪提示`}>
-                                  {readinessWarnings.map((chip) => <i key={chip}>{chip}</i>)}
-                                </span>
-                              )}
-                              {variant.assetCenterChips.length > 0 && (
-                                <span className="afs-series__usagechips" aria-label={`${variant.label} 资产中心图谱`}>
-                                  {variant.assetCenterChips.slice(0, 2).map((chip) => <i key={chip}>{chip}</i>)}
-                                </span>
-                              )}
-                            </label>
-                          )
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
+                  </div>
+                )}
               </article>
             )
-            })}
-          </div>
-        ) : (
-          <p className="afs-series__empty">当前筛选下没有剧集。</p>
-        )}
+          })}
+        </div>
       </section>
     </div>
   )
@@ -1578,7 +1367,6 @@ function AssetContinuityPanel() {
   const [assetMatrixTypeFilter, setAssetMatrixTypeFilter] = useState<AssetMatrixTypeFilter>('all')
   const [assetMatrixEpisodeFilter, setAssetMatrixEpisodeFilter] = useState('all')
   const [assetMatrixSearch, setAssetMatrixSearch] = useState('')
-  const hasAnyEpisodePlan = (doc.episodes ?? []).some((episode) => episodePlanInputCount(episode.plan) > 0)
   const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   const rows = doc.assets
     .filter((asset) => !asset.parentAssetId && asset.type !== 'audio' && asset.type !== 'clip')
@@ -1593,144 +1381,61 @@ function AssetContinuityPanel() {
       const variantLabels = [...new Set(variantEntries.map(({ label }) => label))]
       const variantById = new Map((asset.variants ?? []).map((variant) => [variant.id, variant]))
       const variantIds = new Set(variantById.keys())
-      const plannedEpisodes = (doc.episodes ?? []).filter((episode) => {
-        const plan = episode.plan
-        return (plan?.requiredAssetIds ?? []).includes(asset.id) || (plan?.requiredVariantIds ?? []).some((id) => variantIds.has(id))
-      })
-      const planEpisodeEntries = plannedEpisodes.map((episode) => ({ episodeId: episode.id, label: `E${episode.index + 1}` }))
-      const planEpisodeLabels = planEpisodeEntries.map(({ label }) => label)
       const actualEpisodeIds = new Set(uses.map(({ episode }) => episode.id))
-      const plannedEpisodeIds = new Set(plannedEpisodes.map((episode) => episode.id))
-      const plannedUnusedEntries = plannedEpisodes.filter((episode) => !actualEpisodeIds.has(episode.id)).map((episode) => ({ episodeId: episode.id, label: `E${episode.index + 1}` }))
-      const plannedUnusedLabels = plannedUnusedEntries.map(({ label }) => label)
-      const unplannedUseEntries = hasAnyEpisodePlan
-        ? [...new Map(uses.filter(({ episode }) => !plannedEpisodeIds.has(episode.id)).map(({ episode }) => [episode.id, { episodeId: episode.id, label: `E${episode.index + 1}` }])).values()]
-        : []
-      const unplannedUseLabels = unplannedUseEntries.map(({ label }) => label)
-      const plannedVariantUses = (doc.episodes ?? []).flatMap((episode) =>
-        (episode.plan?.requiredVariantIds ?? [])
-          .filter((variantId) => variantIds.has(variantId))
-          .map((variantId) => ({ episode, variantId }))
-      )
-      const actualVariantUses = uses.flatMap(({ episode, use }) => use.variantId && variantIds.has(use.variantId) ? [{ episode, use, variantId: use.variantId }] : [])
-      const plannedVariantUseKeys = new Set(plannedVariantUses.map(({ episode, variantId }) => `${episode.id}:${variantId}`))
-      const actualVariantUseKeys = new Set(actualVariantUses.map(({ episode, variantId }) => `${episode.id}:${variantId}`))
-      const planVariantEntries = plannedVariantUses.map(({ episode, variantId }) => {
-        const variant = variantById.get(variantId)
-        return { episodeId: episode.id, label: variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind) }
-      })
-      const missingVariantRefEntries = [
-        ...plannedVariantUses.map(({ episode, variantId }) => {
-          const variant = variantById.get(variantId)
-          const variantLabel = variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)
-          return { episodeId: episode.id, variantId, label: `E${episode.index + 1}/${variantLabel}`, variantLabel, state: variant?.state, refImageId: variant?.refImageId }
-        }),
-        ...actualVariantUses.map(({ episode, use, variantId }) => {
+      const actualVariantUses = uses.flatMap(({ episode, use }) => (use.variantId && variantIds.has(use.variantId) ? [{ episode, use, variantId: use.variantId }] : []))
+      const missingVariantRefEntries = actualVariantUses
+        .map(({ episode, use, variantId }) => {
           const variant = variantById.get(variantId)
           const variantLabel = use.variantLabel ?? variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)
           return { episodeId: episode.id, variantId, label: `E${episode.index + 1}/${variantLabel}`, variantLabel, state: variant?.state, refImageId: variant?.refImageId }
-        }),
-      ].filter((entry) => !entry.refImageId)
-      const plannedVariantUnusedEntries = plannedVariantUses
-        .filter(({ episode, variantId }) => !actualVariantUseKeys.has(`${episode.id}:${variantId}`))
-        .map(({ episode, variantId }) => {
-          const variant = variantById.get(variantId)
-          return { episodeId: episode.id, label: `E${episode.index + 1}/${variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)}` }
         })
-      const plannedVariantUnusedLabels = plannedVariantUnusedEntries.map(({ label }) => label)
-      const unplannedVariantUseEntries = hasAnyEpisodePlan
-        ? actualVariantUses
-            .filter(({ episode, variantId }) => !plannedVariantUseKeys.has(`${episode.id}:${variantId}`))
-            .map(({ episode, use, variantId }) => {
-              const variant = variantById.get(variantId)
-              return { episodeId: episode.id, label: `E${episode.index + 1}/${use.variantLabel ?? variantLabelWithKind(variant?.label ?? variantId, variant?.variantKind)}` }
-            })
-        : []
-      const unplannedVariantUseLabels = unplannedVariantUseEntries.map(({ label }) => label)
-      const planVariantLabels = [...new Set(planVariantEntries.map(({ label }) => label))]
+        .filter((entry) => !entry.refImageId)
       const issues = continuity.issues.filter((issue) => issue.assetId === asset.id)
       const assetCenterUsage = hubLoaded ? projectAssetIdentityUsageFromHub(doc, asset, usageByEntity) : undefined
       const linkedEntityId = asset.libraryLink?.entityId ?? asset.elementId
       const linkedEntity = linkedEntityId ? hubEntities.find((entity) => entity.id === linkedEntityId) : undefined
       const linkStatusLabels = projectAssetLinkStatusLabels(asset, linkedEntity)
-      return { asset, episodeIds: [...actualEpisodeIds], planEpisodeIds: [...plannedEpisodeIds], episodeEntries, planEpisodeEntries, variantEntries, planVariantEntries, missingVariantRefEntries, episodeLabels, variantLabels, planEpisodeLabels, planVariantLabels, plannedUnusedEntries, unplannedUseEntries, plannedVariantUnusedEntries, unplannedVariantUseEntries, plannedUnusedLabels, unplannedUseLabels, plannedVariantUnusedLabels, unplannedVariantUseLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkedEntity, linkStatusLabels, issues }
+      return { asset, episodeIds: [...actualEpisodeIds], episodeEntries, variantEntries, missingVariantRefEntries, episodeLabels, variantLabels, assetCenterUsage, assetCenterChips: assetCenterUsageChips(assetCenterUsage), linkedEntity, linkStatusLabels, issues }
     })
-    .filter((row) => row.episodeLabels.length > 0 || row.planEpisodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
+    .filter((row) => row.episodeLabels.length > 0 || row.issues.length > 0 || row.asset.type === 'role')
   const labelsForEpisodeFilter = (entries: { episodeId: string; label: string }[], episodeFilter = assetMatrixEpisodeFilter) =>
     [...new Set((episodeFilter === 'all' ? entries : entries.filter((entry) => entry.episodeId === episodeFilter)).map((entry) => entry.label))]
   const rowVisibleEpisodeLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.episodeEntries, episodeFilter)
-  const rowVisiblePlanEpisodeLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.planEpisodeEntries, episodeFilter)
   const rowVisibleVariantLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.variantEntries, episodeFilter)
-  const rowVisiblePlanVariantLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.planVariantEntries, episodeFilter)
-  const rowVisiblePlannedUnusedLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.plannedUnusedEntries, episodeFilter)
-  const rowVisibleUnplannedUseLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.unplannedUseEntries, episodeFilter)
-  const rowVisiblePlannedVariantUnusedLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.plannedVariantUnusedEntries, episodeFilter)
-  const rowVisibleUnplannedVariantUseLabels = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => labelsForEpisodeFilter(row.unplannedVariantUseEntries, episodeFilter)
   const rowVisibleMissingVariantRefs = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => {
     const entries = episodeFilter === 'all' ? row.missingVariantRefEntries : row.missingVariantRefEntries.filter((entry) => entry.episodeId === episodeFilter)
     return [...new Map(entries.map((entry) => [`${entry.episodeId}:${entry.variantId}`, entry])).values()]
   }
-  const rowHasPlanDrift = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisiblePlannedUnusedLabels(row, episodeFilter).length > 0 ||
-    rowVisibleUnplannedUseLabels(row, episodeFilter).length > 0 ||
-    rowVisiblePlannedVariantUnusedLabels(row, episodeFilter).length > 0 ||
-    rowVisibleUnplannedVariantUseLabels(row, episodeFilter).length > 0
-  const rowHasPlannedUnused = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisiblePlannedUnusedLabels(row, episodeFilter).length > 0 ||
-    rowVisiblePlannedVariantUnusedLabels(row, episodeFilter).length > 0
-  const rowHasUnplannedUse = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisibleUnplannedUseLabels(row, episodeFilter).length > 0 ||
-    rowVisibleUnplannedVariantUseLabels(row, episodeFilter).length > 0
-  const rowHasVariantDrift = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisiblePlannedVariantUnusedLabels(row, episodeFilter).length > 0 ||
-    rowVisibleUnplannedVariantUseLabels(row, episodeFilter).length > 0
   const issueMatchesEpisodeFilter = (issue: (typeof rows)[number]['issues'][number], episodeFilter = assetMatrixEpisodeFilter) =>
-    episodeFilter === 'all' ||
-    issue.episodeId === episodeFilter ||
-    issue.previousEpisodeId === episodeFilter ||
-    (!issue.episodeId && !issue.previousEpisodeId)
+    episodeFilter === 'all' || issue.episodeId === episodeFilter || !issue.episodeId
   const rowVisibleIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => row.issues.filter((issue) => issueMatchesEpisodeFilter(issue, episodeFilter))
   const rowHasVisibleIssue = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleIssues(row, episodeFilter).length > 0
   const rowVisibleDuplicateIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisibleIssues(row, episodeFilter).filter((issue) => ASSET_MATRIX_DUPLICATE_ISSUE_CODES.has(issue.code))
+    rowVisibleIssues(row, episodeFilter).filter((issue) => issue.code === 'duplicate_identity')
   const rowHasDuplicateRisk = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleDuplicateIssues(row, episodeFilter).length > 0
-  const rowVisibleLibraryCandidateIssues = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    rowVisibleIssues(row, episodeFilter).filter((issue) => ASSET_MATRIX_LIBRARY_CANDIDATE_ISSUE_CODES.has(issue.code) && (issue.candidateLibraryEntityIds?.length ?? 0) > 0)
-  const rowHasLibraryCandidate = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleLibraryCandidateIssues(row, episodeFilter).length > 0
   const rowHasNewerLibraryVersion = (row: (typeof rows)[number]) => row.linkStatusLabels.includes('有新版')
   const rowHasArchivedLibraryLink = (row: (typeof rows)[number]) => row.linkStatusLabels.includes('已归档')
   const rowMissingAssetCenter = (row: (typeof rows)[number]) => hubLoaded && row.assetCenterChips.length === 0
   const rowNeedsMainReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) =>
-    !row.asset.refImageId && (rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0 || rowVisibleEpisodeLabels(row, episodeFilter).length > 0)
+    !row.asset.refImageId && rowVisibleEpisodeLabels(row, episodeFilter).length > 0
   const rowNeedsVariantReference = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => rowVisibleMissingVariantRefs(row, episodeFilter).length > 0
   const rowHasLibraryStatusAttention = (row: (typeof rows)[number]) => row.linkStatusLabels.some((label) => ASSET_MATRIX_LINK_ATTENTION_LABELS.has(label))
-  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowHasPlanDrift(row) || rowNeedsMainReference(row) || rowNeedsVariantReference(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
+  const rowHasStatusWarning = (row: (typeof rows)[number]) => rowHasVisibleIssue(row) || rowNeedsMainReference(row) || rowNeedsVariantReference(row) || rowMissingAssetCenter(row) || rowHasLibraryStatusAttention(row)
   const rowMatchesEpisode = (row: (typeof rows)[number], episodeId: string) =>
-    row.episodeIds.includes(episodeId) ||
-    row.planEpisodeIds.includes(episodeId) ||
-    row.issues.some((issue) => issue.episodeId === episodeId || issue.previousEpisodeId === episodeId || (!issue.episodeId && !issue.previousEpisodeId))
-  const rowPlanDriftItemCount = (row: (typeof rows)[number]) =>
-    rowVisiblePlannedUnusedLabels(row).length +
-    rowVisibleUnplannedUseLabels(row).length +
-    rowVisiblePlannedVariantUnusedLabels(row).length +
-    rowVisibleUnplannedVariantUseLabels(row).length
+    row.episodeIds.includes(episodeId) || row.issues.some((issue) => issue.episodeId === episodeId || !issue.episodeId)
   const rowPriority = (row: (typeof rows)[number]) => {
     if (rowHasVisibleIssue(row)) return 0
-    if (rowHasPlanDrift(row)) return 1
-    if (rowNeedsMainReference(row)) return 2
-    if (rowNeedsVariantReference(row)) return 3
-    if (rowHasLibraryStatusAttention(row)) return 4
-    if (rowMissingAssetCenter(row)) return 5
-    if (rowVisiblePlanEpisodeLabels(row).length > 0) return 6
-    if (rowVisibleEpisodeLabels(row).length > 0) return 7
-    return 8
+    if (rowNeedsMainReference(row)) return 1
+    if (rowNeedsVariantReference(row)) return 2
+    if (rowHasLibraryStatusAttention(row)) return 3
+    if (rowMissingAssetCenter(row)) return 4
+    if (rowVisibleEpisodeLabels(row).length > 0) return 5
+    return 6
   }
   if (!rows.length) return null
   const sortedRows = [...rows].sort((a, b) =>
     rowPriority(a) - rowPriority(b) ||
     rowVisibleIssues(b).length - rowVisibleIssues(a).length ||
-    rowPlanDriftItemCount(b) - rowPlanDriftItemCount(a) ||
-    rowVisiblePlanEpisodeLabels(b).length - rowVisiblePlanEpisodeLabels(a).length ||
     rowVisibleEpisodeLabels(b).length - rowVisibleEpisodeLabels(a).length ||
     a.asset.name.localeCompare(b.asset.name, 'zh-Hans') ||
     a.asset.id.localeCompare(b.asset.id)
@@ -1742,12 +1447,9 @@ function AssetContinuityPanel() {
   const episodeOptionRows = searchFilteredRows.filter((row) => assetMatrixTypeFilter === 'all' || row.asset.type === assetMatrixTypeFilter)
   const episodeFilteredRows = searchFilteredRows.filter((row) => assetMatrixEpisodeFilter === 'all' || rowMatchesEpisode(row, assetMatrixEpisodeFilter))
   const rowMatchesAssetMatrixFilter = (row: (typeof rows)[number], episodeFilter = assetMatrixEpisodeFilter) => {
-    if (assetMatrixFilter === 'planned') return rowVisiblePlanEpisodeLabels(row, episodeFilter).length > 0
-    if (assetMatrixFilter === 'unused') return rowHasPlannedUnused(row, episodeFilter)
-    if (assetMatrixFilter === 'unplanned') return rowHasUnplannedUse(row, episodeFilter)
-    if (assetMatrixFilter === 'variant') return rowHasVariantDrift(row, episodeFilter)
+    if (assetMatrixFilter === 'unused') return rowVisibleEpisodeLabels(row, episodeFilter).length === 0
+    if (assetMatrixFilter === 'variant') return rowVisibleVariantLabels(row, episodeFilter).length > 1
     if (assetMatrixFilter === 'appeared') return rowVisibleEpisodeLabels(row, episodeFilter).length > 0
-    if (assetMatrixFilter === 'drift') return rowHasPlanDrift(row, episodeFilter)
     if (assetMatrixFilter === 'issue') return rowHasVisibleIssue(row, episodeFilter)
     if (assetMatrixFilter === 'duplicate') return rowHasDuplicateRisk(row, episodeFilter)
     if (assetMatrixFilter === 'missingRef') return rowNeedsMainReference(row, episodeFilter)
@@ -1755,7 +1457,6 @@ function AssetContinuityPanel() {
     if (assetMatrixFilter === 'library') return rowHasLibraryStatusAttention(row)
     if (assetMatrixFilter === 'libraryNewer') return rowHasNewerLibraryVersion(row)
     if (assetMatrixFilter === 'libraryArchived') return rowHasArchivedLibraryLink(row)
-    if (assetMatrixFilter === 'libraryCandidate') return rowHasLibraryCandidate(row, episodeFilter)
     if (assetMatrixFilter === 'unlinked') return rowMissingAssetCenter(row)
     return true
   }
@@ -1764,12 +1465,9 @@ function AssetContinuityPanel() {
   const issueCount = typeFilteredRows.reduce((sum, row) => sum + rowVisibleIssues(row).length, 0)
   const assetCenterUsageCount = typeFilteredRows.filter((row) => row.assetCenterChips.length > 0).length
   const missingAssetCenterCount = hubLoaded ? typeFilteredRows.filter(rowMissingAssetCenter).length : 0
-  const plannedAssetCount = typeFilteredRows.filter((row) => rowVisiblePlanEpisodeLabels(row).length > 0).length
-  const plannedUnusedCount = typeFilteredRows.filter((row) => rowHasPlannedUnused(row)).length
-  const unplannedUseCount = typeFilteredRows.filter((row) => rowHasUnplannedUse(row)).length
-  const variantDriftCount = typeFilteredRows.filter((row) => rowHasVariantDrift(row)).length
+  const unusedAssetCount = typeFilteredRows.filter((row) => rowVisibleEpisodeLabels(row).length === 0).length
+  const variantAssetCount = typeFilteredRows.filter((row) => rowVisibleVariantLabels(row).length > 1).length
   const appearedAssetCount = typeFilteredRows.filter((row) => rowVisibleEpisodeLabels(row).length > 0).length
-  const planDriftCount = typeFilteredRows.filter((row) => rowHasPlanDrift(row)).length
   const issueAssetCount = typeFilteredRows.filter((row) => rowHasVisibleIssue(row)).length
   const duplicateRiskCount = typeFilteredRows.filter((row) => rowHasDuplicateRisk(row)).length
   const missingMainReferenceCount = typeFilteredRows.filter((row) => rowNeedsMainReference(row)).length
@@ -1777,7 +1475,6 @@ function AssetContinuityPanel() {
   const libraryStatusCount = typeFilteredRows.filter((row) => rowHasLibraryStatusAttention(row)).length
   const libraryNewerCount = typeFilteredRows.filter((row) => rowHasNewerLibraryVersion(row)).length
   const libraryArchivedCount = typeFilteredRows.filter((row) => rowHasArchivedLibraryLink(row)).length
-  const libraryCandidateCount = typeFilteredRows.filter((row) => rowHasLibraryCandidate(row)).length
   const filteredRows = typeFilteredRows.filter((row) => rowMatchesAssetMatrixFilter(row))
   const assetMatrixScopeTotal = assetMatrixFilter === 'all' ? rows.length : typeFilteredRows.length
   const assetMatrixTypeOptions: { id: AssetMatrixTypeFilter; label: string; count: number }[] = [
@@ -1799,17 +1496,14 @@ function AssetContinuityPanel() {
       label: '范围',
       options: [
         { id: 'all', label: '全部', count: typeFilteredRows.length },
-        { id: 'planned', label: '已规划', count: plannedAssetCount },
         { id: 'appeared', label: '已出场', count: appearedAssetCount },
       ],
     },
     {
-      label: '差异',
+      label: '出场',
       options: [
-        { id: 'unused', label: '待落分镜', count: plannedUnusedCount },
-        { id: 'unplanned', label: '计划外', count: unplannedUseCount },
-        { id: 'variant', label: '形态差异', count: variantDriftCount },
-        { id: 'drift', label: '计划差异', count: planDriftCount },
+        { id: 'unused', label: '未出场', count: unusedAssetCount },
+        { id: 'variant', label: '多形态', count: variantAssetCount },
       ],
     },
     {
@@ -1826,7 +1520,6 @@ function AssetContinuityPanel() {
         { id: 'library', label: '身份状态', count: libraryStatusCount },
         { id: 'libraryNewer', label: '有新版', count: libraryNewerCount },
         { id: 'libraryArchived', label: '已归档', count: libraryArchivedCount },
-        { id: 'libraryCandidate', label: '候选身份', count: libraryCandidateCount },
         { id: 'duplicate', label: '重复身份', count: duplicateRiskCount },
       ],
     },
@@ -1892,17 +1585,8 @@ function AssetContinuityPanel() {
     if (!window.confirm(`把「${row.asset.name}」合并到「${target.name}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
     if (mergeProjectAssetInto(row.asset.id, target.id)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
   }
-  const rowLibraryCandidateEntries = (row: (typeof rows)[number]) => {
-    const entries = new Map<string, { id: string; label: string }>()
-    for (const issue of rowVisibleLibraryCandidateIssues(row)) {
-      const ids = issue.candidateLibraryEntityIds ?? []
-      const labels = issue.candidateLibraryEntityLabels ?? []
-      ids.forEach((id, index) => {
-        if (!entries.has(id)) entries.set(id, { id, label: labels[index] ?? hubEntities.find((entity) => entity.id === id)?.name ?? id })
-      })
-    }
-    return [...entries.values()]
-  }
+  // 「疑似同一身份」现在只在项目资产之间比对；与资产中心身份的撞名提示挪到资产卡角标，不再进一致性报告
+  const rowLibraryCandidateEntries = (_row: (typeof rows)[number]): { id: string; label: string }[] => []
   const linkAssetMatrixCandidateIdentity = (row: (typeof rows)[number]) => {
     const candidates = rowLibraryCandidateEntries(row)
     if (!candidates.length) return
@@ -1941,12 +1625,9 @@ function AssetContinuityPanel() {
       <div className="afs-studio__assetmatrix-head">
         <b>跨集资产一致性</b>
         <span>{rows.length} 个资产</span>
-        {plannedAssetCount > 0 && <span>{plannedAssetCount} 个进入剧集计划</span>}
         {appearedAssetCount > 0 && <span>{appearedAssetCount} 个已有分镜出场</span>}
-        {plannedUnusedCount > 0 && <span className="is-warning">{plannedUnusedCount} 个计划待落分镜</span>}
-        {unplannedUseCount > 0 && <span className="is-warning">{unplannedUseCount} 个计划外出场</span>}
-        {variantDriftCount > 0 && <span className="is-warning">{variantDriftCount} 个形态差异</span>}
-        {planDriftCount > 0 && <span className="is-warning">{planDriftCount} 个计划/出场差异</span>}
+        {unusedAssetCount > 0 && <span>{unusedAssetCount} 个尚未出场</span>}
+        {variantAssetCount > 0 && <span>{variantAssetCount} 个用到多种形态</span>}
         {hubLoaded && assetCenterUsageCount > 0 && <span>{assetCenterUsageCount} 个有资产中心图谱</span>}
         {missingAssetCenterCount > 0 && <span className="is-warning">{missingAssetCenterCount} 个未入图谱</span>}
         {missingMainReferenceCount > 0 && <span className="is-warning">{missingMainReferenceCount} 个缺主图</span>}
@@ -2034,13 +1715,7 @@ function AssetContinuityPanel() {
         )}
         {filteredRows.map((row) => {
           const visibleEpisodeLabels = rowVisibleEpisodeLabels(row)
-          const visiblePlanEpisodeLabels = rowVisiblePlanEpisodeLabels(row)
           const visibleVariantLabels = rowVisibleVariantLabels(row)
-          const visiblePlanVariantLabels = rowVisiblePlanVariantLabels(row)
-          const visiblePlannedUnusedLabels = rowVisiblePlannedUnusedLabels(row)
-          const visibleUnplannedUseLabels = rowVisibleUnplannedUseLabels(row)
-          const visiblePlannedVariantUnusedLabels = rowVisiblePlannedVariantUnusedLabels(row)
-          const visibleUnplannedVariantUseLabels = rowVisibleUnplannedVariantUseLabels(row)
           const visibleMissingVariantRefs = rowVisibleMissingVariantRefs(row)
           const visibleMissingVariantRefLabels = visibleMissingVariantRefs.map((entry) => entry.label)
           const firstGeneratableMissingVariantRef = visibleMissingVariantRefs.find((entry) => entry.state !== 'generating' && !!row.asset.refImageId)
@@ -2053,7 +1728,7 @@ function AssetContinuityPanel() {
             .filter((asset): asset is Asset => !!asset && asset.type === row.asset.type && !asset.parentAssetId)
           const libraryCandidateEntries = rowLibraryCandidateEntries(row)
           const duplicateRelatedAssetCount = duplicateRelatedAssetIds.length
-          const duplicateIdentityCount = new Set(visibleDuplicateIssues.flatMap((issue) => issue.libraryEntityId ? [issue.libraryEntityId] : [])).size
+          const duplicateIdentityCount = duplicateRelatedAssetCount
           return (
             <div key={row.asset.id} className={`afs-studio__assetmatrix-row${rowHasStatusWarning(row) ? ' is-warning' : ''}`}>
               <span className="afs-studio__assetmatrix-name" title={[row.asset.name, row.asset.aliases?.length ? `别名：${row.asset.aliases.join('、')}` : undefined].filter(Boolean).join('\n')}>
@@ -2074,17 +1749,9 @@ function AssetContinuityPanel() {
                 {visibleEpisodeLabels.length ? visibleEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未出场</i>}
                 {visibleEpisodeLabels.length > 8 && <i>+{visibleEpisodeLabels.length - 8}</i>}
               </span>
-              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划剧集`} title={assetMatrixChipsetTitle('计划剧集', visiblePlanEpisodeLabels, '未计划')}>
-                {visiblePlanEpisodeLabels.length ? visiblePlanEpisodeLabels.slice(0, 8).map((label) => <i key={label}>{label}</i>) : <i>未计划</i>}
-                {visiblePlanEpisodeLabels.length > 8 && <i>+{visiblePlanEpisodeLabels.length - 8}</i>}
-              </span>
               <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 使用形态`} title={assetMatrixChipsetTitle('使用形态', visibleVariantLabels, '未绑定形态')}>
                 {visibleVariantLabels.length ? visibleVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未绑定形态</i>}
                 {visibleVariantLabels.length > 4 && <i>+{visibleVariantLabels.length - 4}</i>}
-              </span>
-              <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 计划形态`} title={assetMatrixChipsetTitle('计划形态', visiblePlanVariantLabels, '未计划形态')}>
-                {visiblePlanVariantLabels.length ? visiblePlanVariantLabels.slice(0, 4).map((label) => <i key={label}>{label}</i>) : <i>未计划形态</i>}
-                {visiblePlanVariantLabels.length > 4 && <i>+{visiblePlanVariantLabels.length - 4}</i>}
               </span>
               <span className="afs-studio__assetmatrix-chipset" aria-label={`${row.asset.name} 资产中心图谱`} title={[row.linkStatusLabels.length ? `身份状态：${row.linkStatusLabels.join('、')}` : undefined, assetCenterUsageTitle(row.assetCenterUsage)].filter(Boolean).join('\n')}>
                 {row.linkStatusLabels.map((label) => (
@@ -2097,26 +1764,6 @@ function AssetContinuityPanel() {
                 {rowMissingAssetCenter(row) && (
                   <i className="afs-studio__assetmatrix-drift" title={`${row.asset.name} 尚未进入资产中心图谱`}>
                     未入图谱
-                  </i>
-                )}
-                {visiblePlannedUnusedLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`计划未进入分镜：${visiblePlannedUnusedLabels.join('、')}`}>
-                    计划未用 {visiblePlannedUnusedLabels.length}
-                  </i>
-                )}
-                {visibleUnplannedUseLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`出场但未进入剧集计划：${visibleUnplannedUseLabels.join('、')}`}>
-                    未计划 {visibleUnplannedUseLabels.length}
-                  </i>
-                )}
-                {visiblePlannedVariantUnusedLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`计划形态未进入分镜：${visiblePlannedVariantUnusedLabels.join('、')}`}>
-                    形态未用 {visiblePlannedVariantUnusedLabels.length}
-                  </i>
-                )}
-                {visibleUnplannedVariantUseLabels.length > 0 && (
-                  <i className="afs-studio__assetmatrix-drift" title={`分镜形态未进入剧集计划：${visibleUnplannedVariantUseLabels.join('、')}`}>
-                    形态未计划 {visibleUnplannedVariantUseLabels.length}
                   </i>
                 )}
                 {visibleIssues.length > 0 && (
@@ -2201,7 +1848,7 @@ function AssetContinuityPanel() {
                     发布
                   </button>
                 )}
-                {!row.asset.refImageId && row.asset.state !== 'generating' && (visiblePlanEpisodeLabels.length > 0 || visibleEpisodeLabels.length > 0) && (
+                {!row.asset.refImageId && row.asset.state !== 'generating' && visibleEpisodeLabels.length > 0 && (
                   <button
                     type="button"
                     className="afs-studio__assetmatrix-action"
@@ -2488,23 +2135,23 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
   const deleteAssetVariant = useProjectStore((s) => s.deleteAssetVariant)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const url = useMediaUrl(variant.refImageId ? { assetId: variant.refImageId } : null)
-  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
-  const selectedEpisodeIds = new Set(variant.appliesToEpisodeIds ?? [])
-  const plannedEpisodes = episodes.filter((episode) => (episode.plan?.requiredVariantIds ?? []).includes(variant.id))
-  const plannedEpisodeIds = plannedEpisodes.map((episode) => episode.id)
-  const plannedEpisodeLabels = plannedEpisodes.map((episode) => `E${episode.index + 1}`)
-  const scopeMatchesPlan = plannedEpisodeIds.length > 0 && (
-    selectedEpisodeIds.size === 0
-      ? plannedEpisodeIds.length === episodes.length
-      : selectedEpisodeIds.size === plannedEpisodeIds.length && plannedEpisodeIds.every((id) => selectedEpisodeIds.has(id))
-  )
-  const setEpisodeScope = (ids: string[]) => updateAssetVariant(asset.id, variant.id, { appliesToEpisodeIds: ids.length ? ids : undefined })
-  const toggleEpisodeScope = (episodeId: string) => {
-    const next = new Set(selectedEpisodeIds)
-    if (next.has(episodeId)) next.delete(episodeId)
-    else next.add(episodeId)
-    setEpisodeScope([...next])
-  }
+  // 形态没有"适用范围"了——它在哪些集生效由分镜上的变更点决定，这里只展示实际使用情况
+  const usedInEpisodes = useMemo(() => {
+    const labels = new Set<string>()
+    const scan = (episode: Episode | undefined, storyboards: Storyboard[]) => {
+      for (const storyboard of storyboards) {
+        if (castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && ref.variantId === variant.id)) {
+          if (episode) labels.add(`E${episode.index + 1}`)
+        }
+      }
+    }
+    for (const episode of doc.episodes ?? []) {
+      if (episode.id === doc.currentEpisodeId) continue
+      scan(episode, episode.storyboards ?? [])
+    }
+    scan((doc.episodes ?? []).find((episode) => episode.id === doc.currentEpisodeId), doc.storyboards)
+    return [...labels]
+  }, [asset.id, variant.id, doc.episodes, doc.storyboards, doc.currentEpisodeId])
   return (
     <div className="afs-studio__deriv afs-studio__variantcard">
       <div className="afs-studio__derivthumb">
@@ -2538,50 +2185,12 @@ function AssetVariantCard({ asset, variant }: { asset: Asset; variant: AssetVari
         value={variant.prompt ?? ''}
         onChange={(e) => updateAssetVariant(asset.id, variant.id, { prompt: e.target.value })}
       />
-      {episodes.length > 1 && (
-        <div className="afs-studio__variantplan" title={plannedEpisodeLabels.length ? `剧集计划要求：${plannedEpisodeLabels.join('、')}` : '还没有剧集计划要求该形态'}>
-          <span className="afs-studio__variantlabel">计划</span>
+      {usedInEpisodes.length > 0 && (
+        <div className="afs-studio__variantepisodes" aria-label="实际出现剧集">
+          <span className="afs-studio__variantlabel">出现于</span>
           <div className="afs-studio__variantchips">
-            {plannedEpisodeLabels.length ? plannedEpisodeLabels.slice(0, 5).map((label) => <i key={label}>{label}</i>) : <i>未纳入</i>}
-            {plannedEpisodeLabels.length > 5 && <i>+{plannedEpisodeLabels.length - 5}</i>}
-            {plannedEpisodeIds.length > 0 && (
-              <button
-                type="button"
-                className="afs-studio__variantchip afs-studio__variantchip--action"
-                disabled={scopeMatchesPlan}
-                title={scopeMatchesPlan ? '当前适用范围已覆盖计划剧集' : '将适用剧集同步为剧集计划中要求该形态的集数'}
-                onClick={() => setEpisodeScope(plannedEpisodeIds)}
-              >
-                按计划适用
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-      {episodes.length > 1 && (
-        <div className="afs-studio__variantepisodes" aria-label="适用剧集">
-          <span className="afs-studio__variantlabel">适用</span>
-          <div className="afs-studio__variantchips">
-            <button
-              type="button"
-              className={`afs-studio__variantchip${selectedEpisodeIds.size === 0 ? ' is-on' : ''}`}
-              title="适用于全部剧集"
-              onClick={() => setEpisodeScope([])}
-            >
-              全剧
-            </button>
-            {episodes.map((episode) => (
-              <button
-                key={episode.id}
-                type="button"
-                className={`afs-studio__variantchip${selectedEpisodeIds.has(episode.id) ? ' is-on' : ''}`}
-                title={`${episode.title} · ${selectedEpisodeIds.has(episode.id) ? '已适用' : '点击设为适用'}`}
-                onClick={() => toggleEpisodeScope(episode.id)}
-              >
-                {selectedEpisodeIds.has(episode.id) && <Check size={10} />}
-                E{episode.index + 1}
-              </button>
-            ))}
+            {usedInEpisodes.slice(0, 8).map((label) => <i key={label}>{label}</i>)}
+            {usedInEpisodes.length > 8 && <i>+{usedInEpisodes.length - 8}</i>}
           </div>
         </div>
       )}
@@ -2760,6 +2369,8 @@ function StoryboardTab() {
   const batch = useProjectStore((s) => s.batch)
   const hasKeyframes = doc.storyboards.some((s) => s.keyframeImageId)
   const continuity = useStudioContinuityReport(doc)
+  // 场景组变化度：抓"每镜单看都对、整组放一起像同一张图"这类同质化，现有护栏覆盖不到
+  const variation = useMemo(() => checkSceneVariation(doc.storyboards.map(storyboardToVariationShot)), [doc.storyboards])
   const [showWall, setShowWall] = useState(false)
   const [showContinuity, setShowContinuity] = useState(false)
   return (
@@ -2783,6 +2394,7 @@ function StoryboardTab() {
         </button>
       </div>
       <ContinuityNotice report={continuity} onOpen={() => setShowContinuity(true)} />
+      <SceneVariationNotice issues={variation.issues} />
       {showWall && <StoryboardWall onClose={() => setShowWall(false)} />}
       {showContinuity && <ContinuityDetailsDrawer report={continuity} onClose={() => setShowContinuity(false)} />}
       <div className="afs-studio__sblist">
@@ -2793,6 +2405,40 @@ function StoryboardTab() {
             <StoryboardItem key={s.id} sb={s} index={i} total={arr.length} />
           ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * 场景组同质化提醒。不进连续性报告——那份报告管的是"资产是不是同一个人"，
+ * 这里管的是"这一组镜头值不值得分开拍"，是两类问题，混在一起会让两边都变模糊。
+ */
+function SceneVariationNotice({ issues }: { issues: SceneVariationIssue[] }) {
+  const [open, setOpen] = useState(false)
+  if (!issues.length) return null
+  const high = issues.filter((issue) => issue.severity === 'high').length
+  return (
+    <div className={`afs-studio__variation${high ? ' is-warning' : ''}`}>
+      <div className="afs-studio__variation-head">
+        <AlertTriangle size={13} aria-hidden />
+        <b>{issues.length} 个场景组镜头同质</b>
+        <span className="afs-studio__hint">整组景别/机位/构图机制变化不足，成片会像同一张图配不同台词</span>
+        <span className="afs-series__spacer" />
+        <button type="button" className="afs-studio__continuityopen" onClick={() => setOpen((value) => !value)}>
+          {open ? '收起' : '查看'}
+        </button>
+      </div>
+      {open && (
+        <ul className="afs-studio__variation-list">
+          {issues.map((issue) => (
+            <li key={`${issue.sceneId}-${issue.shotIndexes.join('-')}`}>
+              <b>#{issue.shotIndexes.join(' #')}</b>
+              <span>{issue.message}</span>
+              <em>{issue.suggestion}</em>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -2827,643 +2473,250 @@ function ContinuityNotice({ report, onOpen }: { report: ContinuityReportView; on
 }
 
 function continuityIssueVariantKindChips(issue: ContinuityReportView['issues'][number]): string[] {
-  const chips: string[] = []
-  const seen = new Set<string>()
-  const push = (text: string) => {
-    if (!text || seen.has(text)) return
-    seen.add(text)
-    chips.push(text)
-  }
-  const pushKind = (prefix: string, kind: typeof issue.variantKind) => {
-    const label = variantKindLabel(kind)
-    if (label) push(`${prefix}：${label}`)
-  }
-
-  pushKind('形态', issue.variantKind)
-  const candidateKinds = [...new Set(issue.candidateVariantKinds ?? [])]
-    .map((kind) => variantKindLabel(kind))
-    .filter(Boolean)
-  if (candidateKinds.length === 1) push(`候选：${candidateKinds[0]}`)
-  else if (candidateKinds.length > 1) push(`候选：${candidateKinds.join('、')}`)
-  pushKind('上一形态', issue.previousVariantKind)
-
-  return chips
+  return issue.expectedVariantLabel ? [`应为 ${issue.expectedVariantLabel}`] : []
 }
 
+const CATEGORY_ORDER: ContinuityCategory[] = ['blocking', 'appearance', 'identity', 'scene', 'coverage', 'hint']
+/** 每类默认只展开这么多条：一个根因常常产出几十条同形状的问题，全列出来没人看得下去 */
+const COLLAPSED_ISSUE_COUNT = 5
+
+/**
+ * 一致性抽屉：按 6 个分类分组，每类最多两个修复动作。
+ *
+ * 旧版是 619 行、31 个问题码各配一套按钮的巨型 switch。问题码收敛之后，
+ * 真正需要人做的决定只剩三种：补图 / 这算不算剧情变化 / 这两个资产是不是同一个人。
+ */
 function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReportView; onClose: () => void }) {
   const doc = useProjectStore((s) => s.doc)!
   const upsertAsset = useProjectStore((s) => s.upsertAsset)
-  const upsertStoryboard = useProjectStore((s) => s.upsertStoryboard)
-  const updateAssetVariant = useProjectStore((s) => s.updateAssetVariant)
-  const updateEpisodePlan = useProjectStore((s) => s.updateEpisodePlan)
-  const createEpisodes = useProjectStore((s) => s.createEpisodes)
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
+  const setAppearanceChange = useProjectStore((s) => s.setAppearanceChange)
+  const revertAppearanceToInherited = useProjectStore((s) => s.revertAppearanceToInherited)
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
-  const linkAssetToLibraryEntity = useProjectStore((s) => s.linkAssetToLibraryEntity)
-  const markAssetAsDistinctIdentity = useProjectStore((s) => s.markAssetAsDistinctIdentity)
+  const splitVariantByBase = useProjectStore((s) => s.splitVariantByBase)
   const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
-  const syncAssetFromLibraryEntity = useProjectStore((s) => s.syncAssetFromLibraryEntity)
-  const promoteAssetToElement = useProjectStore((s) => s.promoteAssetToElement)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
-  const hubEntities = useAssetHubStore((s) => s.entities)
-  const refreshAssetHub = useAssetHubStore((s) => s.refresh)
-  const errors = report.issues.filter((issue) => issue.severity === 'error')
-  const warnings = report.issues.filter((issue) => issue.severity === 'warning')
-  const chapterIssueCodes = new Set(['episode_without_chapters', 'invalid_episode_chapter', 'unassigned_chapter', 'duplicated_chapter_assignment'])
-  const chapterIssueCount = report.issues.filter((issue) => chapterIssueCodes.has(issue.code)).length
-  const canRedistributeChapters = chapterIssueCount > 0 && doc.novel.length > 0 && (doc.episodes?.length ?? 0) > 1
-  const storyboardEntries = useMemo(() => {
-    const seen = new Set<string>()
-    const entries: { storyboard: Storyboard; episodeId?: string }[] = []
-    for (const storyboard of doc.storyboards) {
-      seen.add(storyboard.id)
-      entries.push({ storyboard, episodeId: storyboard.episodeId ?? doc.currentEpisodeId })
+  const busy = useProjectStore((s) => s.batch.running || s.film.state === 'composing')
+  const [expandedCategories, setExpandedCategories] = useState<Set<ContinuityCategory>>(new Set())
+
+  const grouped = useMemo(() => {
+    const map = new Map<ContinuityCategory, ContinuityReportView['issues']>()
+    for (const issue of report.issues) map.set(issue.category, [...(map.get(issue.category) ?? []), issue])
+    return CATEGORY_ORDER.filter((category) => map.has(category)).map((category) => ({ category, issues: map.get(category)! }))
+  }, [report.issues])
+
+  const errorCount = report.issues.filter((issue) => issue.severity === 'error').length
+  const warningCount = report.issues.filter((issue) => issue.severity === 'warning').length
+  const canRedistributeChapters = doc.novel.length > 0 && (doc.episodes?.length ?? 0) > 1
+
+  const assetOf = (assetId?: string) => (assetId ? doc.assets.find((item) => item.id === assetId) : undefined)
+
+  /** 承认这是剧情里的变化：把当前形态登记为变更点，后续镜头一起沿用 */
+  const confirmChange = (issue: ContinuityReportView['issues'][number]) => {
+    if (!issue.storyboardId || !issue.assetId) return
+    const asset = assetOf(issue.assetId)
+    const label = issue.variantId ? asset?.variants?.find((item) => item.id === issue.variantId)?.label ?? issue.variantId : '主形象'
+    const reason = window.prompt(`「${asset?.name ?? issue.assetId}」从这一镜起变成「${label}」，原因是？`, '剧情中的换装/状态变化')
+    if (!reason?.trim()) return
+    setAppearanceChange(issue.storyboardId, { assetId: issue.assetId, toVariantId: issue.variantId, reason: reason.trim() })
+  }
+
+  /** 否认变化：回到台账推导的继承形态 */
+  const keepInherited = (issue: ContinuityReportView['issues'][number]) => {
+    if (!issue.storyboardId || !issue.assetId) return
+    revertAppearanceToInherited(issue.storyboardId, issue.assetId)
+  }
+
+  const mergeIdentity = (issue: ContinuityReportView['issues'][number]) => {
+    const target = assetOf(issue.assetId)
+    const sources = (issue.relatedAssetIds ?? []).map(assetOf).filter((item): item is Asset => !!item)
+    if (!target || !sources.length) return
+    if (!window.confirm(`把 ${sources.map((item) => item.name).join('、')} 合并进「${target.name}」？分镜引用会一并改写。`)) return
+    for (const source of sources) mergeProjectAssetInto(source.id, target.id)
+  }
+
+  const renameAsset = (issue: ContinuityReportView['issues'][number]) => {
+    const asset = assetOf(issue.assetId)
+    if (!asset) return
+    const name = window.prompt(`给「${asset.name}」改一个不冲突的名字`, asset.name)
+    if (!name?.trim() || name.trim() === asset.name) return
+    upsertAsset({ id: asset.id, type: asset.type, name: name.trim() })
+  }
+
+  /** 把整个场景组统一到同一个场景资产 */
+  const unifyScene = (issue: ContinuityReportView['issues'][number]) => {
+    if (!issue.assetId || !issue.storyboardIds?.length) return
+    for (const storyboardId of issue.storyboardIds) setStoryboardCastVariant(storyboardId, issue.assetId, undefined)
+  }
+
+  const fixesFor = (issue: ContinuityReportView['issues'][number]) => {
+    if (issue.code === 'missing_ref_image' && issue.assetId) {
+      return [
+        issue.variantId
+          ? { label: '生成形态图', run: () => void generateAssetVariant(issue.assetId!, issue.variantId!) }
+          : { label: '生成参考图', run: () => void generateAsset(issue.assetId!) },
+      ]
     }
-    for (const episode of doc.episodes ?? []) {
-      for (const storyboard of episode.storyboards ?? []) {
-        if (seen.has(storyboard.id)) continue
-        seen.add(storyboard.id)
-        entries.push({ storyboard, episodeId: storyboard.episodeId ?? episode.id })
+    if (issue.code === 'unexplained_appearance_change') {
+      return [
+        { label: '确认是剧情变化', run: () => confirmChange(issue) },
+        { label: `沿用${issue.expectedVariantLabel ?? '上一形态'}`, run: () => keepInherited(issue) },
+      ]
+    }
+    if (issue.code === 'ambiguous_variant_base' && issue.assetId && issue.variantId) {
+      const labels = issue.baseVariantLabels ?? []
+      return [
+        {
+          label: `拆成 ${labels.length} 个形态`,
+          run: () => {
+            if (!window.confirm(`把这个形态按 ${labels.join('、')} 拆成 ${labels.length} 个独立形态？\n第一种保留原形态和它的参考图，其余会新建并需要重新出图。`)) return
+            const created = splitVariantByBase(issue.assetId!, issue.variantId!)
+            if (created) window.mulby?.notification?.show(`已拆出 ${created} 个新形态，记得补参考图`, 'success')
+          },
+        },
+      ]
+    }
+    if (issue.code === 'duplicate_identity') {
+      return [
+        { label: '合并为同一资产', run: () => mergeIdentity(issue) },
+        { label: '改名区分', run: () => renameAsset(issue) },
+      ]
+    }
+    if (issue.code === 'scene_asset_inconsistent') {
+      return [{ label: '统一场景资产', run: () => unifyScene(issue) }]
+    }
+    if (issue.code === 'chapter_coverage' && canRedistributeChapters) {
+      return [
+        {
+          label: '重新均分章节',
+          run: () => {
+            if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
+          },
+        },
+      ]
+    }
+    return []
+  }
+
+  /**
+   * 整类批量修复。一个根因常常产出几十条同形状的问题（比如一批资产都没出图），
+   * 让用户点四十次「生成参考图」是没有道理的。
+   */
+  const bulkFixFor = (category: ContinuityCategory, issues: ContinuityReportView['issues']) => {
+    if (category === 'blocking') {
+      const missing = issues.filter((issue) => issue.code === 'missing_ref_image' && issue.assetId)
+      if (!missing.length) return undefined
+      return {
+        label: `生成全部缺失参考图（${missing.length}）`,
+        run: async () => {
+          // 先补主图再补形态图：形态是从主图 img2img 派生的，顺序反了会失败
+          const mains = [...new Set(missing.filter((issue) => !issue.variantId).map((issue) => issue.assetId!))]
+          for (const assetId of mains) await generateAsset(assetId)
+          const variants = missing.filter((issue) => issue.variantId)
+          for (const issue of variants) await generateAssetVariant(issue.assetId!, issue.variantId!)
+        },
       }
     }
-    return entries
-  }, [doc.currentEpisodeId, doc.episodes, doc.storyboards])
-  const redistributeChapters = () => {
-    if (!canRedistributeChapters) return
-    if (window.confirm('按章节顺序重新均分到现有剧集？这会覆盖当前拆章。')) distributeNovelChaptersAcrossEpisodes()
-  }
-  const createMissingPlannedEpisodes = () => {
-    const plannedCount = doc.seriesBible?.plannedEpisodeCount ?? 0
-    const currentCount = doc.episodes?.length || report.episodes.length
-    const missingCount = Math.max(0, plannedCount - currentCount)
-    if (missingCount > 0) createEpisodes(missingCount)
-  }
-  const storyboardsForIssueEpisode = (episodeId?: string) => {
-    if (!episodeId || episodeId === doc.currentEpisodeId) return doc.storyboards
-    return doc.episodes?.find((episode) => episode.id === episodeId)?.storyboards ?? []
-  }
-  const findIssueStoryboard = (issue: ContinuityReportView['issues'][number]) => {
-    if (!issue.storyboardId) return undefined
-    return storyboardsForIssueEpisode(issue.episodeId).find((storyboard) => storyboard.id === issue.storyboardId)
-  }
-  const addVariantScope = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'variant_out_of_episode_scope' && issue.code !== 'asset_state_changed_variant' && issue.code !== 'episode_plan_variant_scope_mismatch') || !issue.assetId || !issue.variantId || !issue.episodeId) return
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
-    if (!asset || !variant) return
-    const storyboard = findIssueStoryboard(issue)
-    const storyboardId = issue.storyboardId ?? storyboard?.id
-    if (!storyboardId && issue.scopeKind !== 'episode') return
-    const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, { id: storyboardId ?? '', sceneId: issue.sceneId ?? storyboard?.sceneId }, issue.scopeKind)
-    if (patch) updateAssetVariant(asset.id, variant.id, patch)
-  }
-  const missingRefAction = (issue: ContinuityReportView['issues'][number]): { label: string; run: () => void } | null => {
-    if (issue.code !== 'missing_ref_image' || !issue.assetId) return null
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    if (!asset || asset.type === 'audio' || asset.type === 'clip') return null
-    if (!issue.variantId) return { label: '生成主形象参考图', run: () => void generateAsset(asset.id) }
-    const variant = asset.variants?.find((item) => item.id === issue.variantId)
-    if (!variant) return null
-    if (!asset.refImageId) return { label: '先生成主形象参考图', run: () => void generateAsset(asset.id) }
-    return { label: '生成该变体参考图', run: () => void generateAssetVariant(asset.id, variant.id) }
-  }
-  const bindEpisodeVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'episode_variant_available' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    const candidates = (issue.candidateVariantIds ?? []).flatMap((id) => {
-      const variant = asset?.variants?.find((item) => item.id === id)
-      return variant ? [variant] : []
-    })
-    const directVariant = issue.variantId ? asset?.variants?.find((variant) => variant.id === issue.variantId) : undefined
-    let variantId = directVariant?.id
-    if (!variantId && candidates.length === 1) variantId = candidates[0].id
-    if (!variantId && candidates.length > 1) {
-      const options = candidates.map((variant, index) => `${index + 1}. ${variant.label} (${variant.id})`).join('\n')
-      const raw = window.prompt(`选择要绑定的形态序号：\n${options}`, '1')?.trim()
-      if (!raw) return
-      const byIndex = Number(raw)
-      const selected = Number.isFinite(byIndex)
-        ? candidates[Math.max(0, Math.floor(byIndex) - 1)]
-        : candidates.find((variant) => variant.id === raw || variant.label.toLowerCase() === raw.toLowerCase())
-      variantId = selected?.id
+    if (category === 'appearance') {
+      // 只对"未说明的形态变化"批量回退；ambiguous_variant_base 要逐个决定拆不拆
+      const fixable = issues.filter((issue) => issue.code === 'unexplained_appearance_change' && issue.storyboardId && issue.assetId)
+      if (!fixable.length) return undefined
+      return {
+        label: `全部沿用上一形态（${fixable.length}）`,
+        run: async () => {
+          if (!window.confirm(`把这 ${fixable.length} 处形态变化都当作"不是剧情变化"，回退为沿用上一镜？`)) return
+          for (const issue of fixable) revertAppearanceToInherited(issue.storyboardId!, issue.assetId!)
+        },
+      }
     }
-    if (!variantId) return
-    setStoryboardCastVariant(issue.storyboardId, issue.assetId, variantId)
+    return undefined
   }
-  const carryPreviousVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'asset_state_regressed_to_main' && issue.code !== 'asset_state_changed_variant') || !issue.episodeId || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
-    const targetVariantId = issue.previousVariantId ?? issue.variantId
-    if (!targetVariantId) return
-    const episodeId = issue.episodeId
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    const variant = asset?.variants?.find((item) => item.id === targetVariantId)
-    if (!asset || !variant) return
-    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
-    const scopePatch = storyboard ? variantScopePatchForUse(variant, { id: episodeId }, storyboard) : undefined
-    if (scopePatch) updateAssetVariant(asset.id, variant.id, scopePatch)
-    setStoryboardCastVariant(issue.storyboardId, asset.id, variant.id)
-  }
-  const unifySceneVariant = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'scene_group_variant_mismatch' || issue.episodeId !== doc.currentEpisodeId || !issue.sceneId || !issue.assetId) return
-    const sceneId = issue.sceneId.trim()
-    if (!sceneId) return
-    for (const storyboard of doc.storyboards) {
-      if (storyboard.sceneId?.trim() !== sceneId) continue
-      if (!castRefsForStoryboard(storyboard).some((ref) => ref.assetId === issue.assetId)) continue
-      setStoryboardCastVariant(storyboard.id, issue.assetId, issue.variantId)
-    }
-  }
-  const patchStoryboardSceneAsset = (storyboard: Storyboard, sceneAssetId: string, replaceOtherSceneAssets: boolean) => {
-    const refs = castRefsForStoryboard(storyboard)
-    const nextRefs = replaceOtherSceneAssets
-      ? refs.filter((ref) => ref.assetId === sceneAssetId || doc.assets.find((asset) => asset.id === ref.assetId)?.type !== 'scene')
-      : refs
-    if (!nextRefs.some((ref) => ref.assetId === sceneAssetId)) nextRefs.push({ assetId: sceneAssetId })
-    upsertStoryboard({
-      id: storyboard.id,
-      videoDesc: storyboard.videoDesc,
-      associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
-      castRefs: nextRefs,
-    })
-  }
-  const patchStoryboardAssetRef = (storyboard: Storyboard, assetId: string) => {
-    const refs = castRefsForStoryboard(storyboard)
-    if (refs.some((ref) => ref.assetId === assetId)) return
-    const nextRefs = [...refs, { assetId }]
-    upsertStoryboard({
-      id: storyboard.id,
-      videoDesc: storyboard.videoDesc,
-      associateAssetIds: [...new Set(nextRefs.map((ref) => ref.assetId))],
-      castRefs: nextRefs,
-    })
-  }
-  const selectStoryboardForEpisodeIssue = (issue: ContinuityReportView['issues'][number], label: string): Storyboard | undefined => {
-    const storyboards = [...storyboardsForIssueEpisode(issue.episodeId)].sort((a, b) => a.index - b.index)
-    if (!storyboards.length) return undefined
-    if (issue.storyboardId) return storyboards.find((storyboard) => storyboard.id === issue.storyboardId)
-    const episode = issue.episodeId ? report.episodes.find((item) => item.id === issue.episodeId) : undefined
-    const episodeLabel = episode ? `E${episode.index} ${episode.title}` : issue.episodeId ?? '当前集'
-    const options = storyboards
-      .slice(0, 12)
-      .map((storyboard, index) => `${index + 1}. #${storyboard.index + 1} ${(storyboard.videoDesc || storyboard.prompt || '').slice(0, 60)}`)
-      .join('\n')
-    const raw = window.prompt(`${label}：${episodeLabel}\n${options}\n输入分镜序号`, '1')?.trim()
-    if (!raw) return undefined
-    const index = Number(raw)
-    if (!Number.isFinite(index)) return undefined
-    return storyboards[Math.max(0, Math.min(storyboards.length - 1, Math.floor(index) - 1))]
-  }
-  const addPlannedAssetToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'episode_plan_missing_asset' || !issue.assetId) return
-    const storyboard = selectStoryboardForEpisodeIssue(issue, '选择要加入计划资产的分镜')
-    if (!storyboard) return
-    setStoryboardCastVariant(storyboard.id, issue.assetId, undefined)
-  }
-  const bindPlannedVariantToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'episode_plan_missing_variant' || !issue.assetId || !issue.variantId || !issue.episodeId) return
-    const storyboard = selectStoryboardForEpisodeIssue(issue, '选择要绑定计划形态的分镜')
-    if (!storyboard) return
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    const variant = asset?.variants?.find((item) => item.id === issue.variantId)
-    if (!asset || !variant) return
-    const patch = variantScopePatchForUse(variant, { id: issue.episodeId }, storyboard)
-    if (patch) updateAssetVariant(asset.id, variant.id, patch)
-    setStoryboardCastVariant(storyboard.id, asset.id, variant.id)
-  }
-  const addVariantParentToEpisodePlan = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'episode_plan_variant_asset_missing' || !issue.episodeId || !issue.assetId) return
-    const episode = doc.episodes?.find((item) => item.id === issue.episodeId)
-    const requiredAssetIds = [...new Set([...(episode?.plan?.requiredAssetIds ?? []), issue.assetId])]
-    updateEpisodePlan(issue.episodeId, { requiredAssetIds })
-  }
-  const removeInvalidEpisodePlanRef = (issue: ContinuityReportView['issues'][number]) => {
-    if (!issue.episodeId) return
-    const episode = doc.episodes?.find((item) => item.id === issue.episodeId)
-    const plan = episode?.plan
-    if (issue.code === 'episode_plan_invalid_asset' && issue.assetId) {
-      updateEpisodePlan(issue.episodeId, { requiredAssetIds: (plan?.requiredAssetIds ?? []).filter((id) => id !== issue.assetId) })
-      return
-    }
-    if (issue.code === 'episode_plan_invalid_variant' && issue.variantId) {
-      updateEpisodePlan(issue.episodeId, { requiredVariantIds: (plan?.requiredVariantIds ?? []).filter((id) => id !== issue.variantId) })
-    }
-  }
-  const bindSceneAsset = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'scene_group_missing_asset' || issue.episodeId !== doc.currentEpisodeId || !issue.storyboardId || !issue.assetId) return
-    const storyboard = doc.storyboards.find((item) => item.id === issue.storyboardId)
-    if (!storyboard) return
-    patchStoryboardSceneAsset(storyboard, issue.assetId, false)
-  }
-  const unifySceneAsset = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'scene_group_asset_mismatch' || issue.episodeId !== doc.currentEpisodeId || !issue.sceneId || !issue.assetId) return
-    const sceneId = issue.sceneId.trim()
-    if (!sceneId) return
-    for (const storyboard of doc.storyboards) {
-      if (storyboard.sceneId?.trim() !== sceneId) continue
-      patchStoryboardSceneAsset(storyboard, issue.assetId, true)
-    }
-  }
-  const removeDuplicateAlias = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'duplicate_asset_alias' || !issue.assetId || !issue.conflictLabel) return
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    if (!asset) return
-    const conflictKey = normalizeAssetLookup(issue.conflictLabel)
-    const aliases = asset.aliases ?? []
-    const nextAliases = aliases.filter((alias) => normalizeAssetLookup(alias) !== conflictKey)
-    if (nextAliases.length === aliases.length) return
-    upsertAsset({ id: asset.id, type: asset.type, name: asset.name, aliases: nextAliases })
-  }
-  const renameConflictAsset = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'duplicate_asset_name' && issue.code !== 'duplicate_asset_alias') || !issue.assetId) return
-    const asset = doc.assets.find((item) => item.id === issue.assetId)
-    if (!asset) return
-    const nextName = window.prompt('输入新的资产名称', asset.name)?.trim()
-    if (!nextName || normalizeAssetLookup(nextName) === normalizeAssetLookup(asset.name)) return
-    upsertAsset({ id: asset.id, type: asset.type, name: nextName })
-  }
-  const addUnusedAssetToStoryboard = (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'unused_project_asset' || !issue.assetId || !doc.storyboards.length) return
-    const raw = window.prompt('输入要加入的当前集分镜序号', '1')?.trim()
-    if (!raw) return
-    const index = Number(raw)
-    if (!Number.isFinite(index)) return
-    const storyboard = [...doc.storyboards].sort((a, b) => a.index - b.index)[Math.max(0, Math.floor(index) - 1)]
-    if (!storyboard) return
-    patchStoryboardAssetRef(storyboard, issue.assetId)
-  }
-  const selectCandidateLibraryEntityId = (issue: ContinuityReportView['issues'][number]) => {
-    const ids = issue.candidateLibraryEntityIds ?? []
-    if (!ids.length) return undefined
-    if (ids.length === 1) return ids[0]
-    const labels = issue.candidateLibraryEntityLabels ?? []
-    const options = ids.map((id, index) => `${index + 1}. ${labels[index] ?? id} (${id})`).join('\n')
-    const raw = window.prompt(`选择身份资产序号：\n${options}`, '1')?.trim()
-    if (!raw) return undefined
-    const byIndex = Number(raw)
-    if (Number.isFinite(byIndex)) return ids[Math.max(0, Math.floor(byIndex) - 1)]
-    return ids.find((id, index) => id === raw || labels[index]?.toLowerCase() === raw.toLowerCase())
-  }
-  const linkCandidateLibraryEntity = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'asset_matches_unlinked_library_entity' && issue.code !== 'library_entity_alias_conflict') || !issue.assetId) return
-    const entityId = selectCandidateLibraryEntityId(issue)
-    if (!entityId) return
-    const entity = hubEntities.find((item) => item.id === entityId)
-    const linked = linkAssetToLibraryEntity(issue.assetId, {
-      id: entityId,
-      name: entity?.name,
-      version: entity?.version,
-      archived: entity?.archived,
-      variants: entity?.variants?.map((variant) => ({ id: variant.id, label: variant.label })),
-    })
-    if (linked) window.mulby?.notification?.show('已关联身份资产快照', 'success')
-  }
-  const markDistinctLibraryIdentity = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'asset_matches_unlinked_library_entity' && issue.code !== 'library_entity_alias_conflict') || !issue.assetId) return
-    const ids = issue.candidateLibraryEntityIds ?? []
-    if (!ids.length) return
-    if (markAssetAsDistinctIdentity(issue.assetId, ids)) window.mulby?.notification?.show('已标记为不同身份', 'success')
-  }
-  const selectMergeTargetAssetId = (issue: ContinuityReportView['issues'][number]) => {
-    const ids = issue.relatedAssetIds ?? []
-    if (!ids.length) return undefined
-    if (ids.length === 1) return ids[0]
-    const options = ids
-      .map((id, index) => {
-        const asset = doc.assets.find((item) => item.id === id)
-        return `${index + 1}. ${asset?.name ?? id} (${id})`
-      })
-      .join('\n')
-    const raw = window.prompt(`选择要合并到的目标项目资产：\n${options}`, '1')?.trim()
-    if (!raw) return undefined
-    const byIndex = Number(raw)
-    if (Number.isFinite(byIndex)) return ids[Math.max(0, Math.floor(byIndex) - 1)]
-    return ids.find((id) => id === raw || doc.assets.find((asset) => asset.id === id)?.name.toLowerCase() === raw.toLowerCase())
-  }
-  const mergeDuplicateProjectAsset = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'duplicate_library_entity_project_assets' && issue.code !== 'cross_episode_duplicate_project_asset_candidate') || !issue.assetId) return
-    const targetId = selectMergeTargetAssetId(issue)
-    if (!targetId) return
-    const source = doc.assets.find((item) => item.id === issue.assetId)
-    const target = doc.assets.find((item) => item.id === targetId)
-    if (!window.confirm(`把「${source?.name ?? issue.assetId}」合并到「${target?.name ?? targetId}」？分镜和每集计划引用会迁移到目标资产，源资产会从项目资产中移除。`)) return
-    if (mergeProjectAssetInto(issue.assetId, targetId)) window.mulby?.notification?.show('已合并重复项目资产', 'success')
-  }
-  const syncLinkedLibraryEntity = async (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'library_entity_version_outdated' || !issue.assetId || !issue.libraryEntityId) return
-    const entity = hubEntities.find((item) => item.id === issue.libraryEntityId)
-    if (!entity) return
-    if (syncAssetFromLibraryEntity(issue.assetId, entity)) window.mulby?.notification?.show('已同步资产中心新版快照', 'success')
-  }
-  const publishMissingLibraryEntity = async (issue: ContinuityReportView['issues'][number]) => {
-    if (issue.code !== 'library_entity_missing' || !issue.assetId) return
-    await promoteAssetToElement(issue.assetId)
-    await refreshAssetHub()
-  }
-  const episodeName = (episodeId?: string) => {
-    if (!episodeId) return ''
-    const episode = report.episodes.find((item) => item.id === episodeId)
-    return episode ? `E${episode.index} ${episode.title}` : episodeId
-  }
-  const assetTypeLabel = (type: Asset['type']) => (type === 'role' ? '人物' : type === 'scene' ? '场景' : type === 'prop' ? '物品' : type === 'audio' ? '音色' : '片段')
-  const mergeAssetUsage = (assetId: string) => {
-    const episodeIds = new Set<string>()
-    let storyboardCount = 0
-    let variantRefCount = 0
-    for (const entry of storyboardEntries) {
-      const refs = castRefsForStoryboard(entry.storyboard)
-      const inCastRefs = refs.some((ref) => ref.assetId === assetId)
-      const inLegacyRefs = entry.storyboard.associateAssetIds.includes(assetId)
-      if (!inCastRefs && !inLegacyRefs) continue
-      storyboardCount += 1
-      if (entry.episodeId) episodeIds.add(entry.episodeId)
-      variantRefCount += refs.filter((ref) => ref.assetId === assetId && !!ref.variantId).length
-    }
-    const planCount = (doc.episodes ?? []).filter((episode) => episode.plan?.requiredAssetIds?.includes(assetId)).length
-    const episodeLabels = [...episodeIds].map(episodeName).filter(Boolean).slice(0, 3)
-    return { storyboardCount, variantRefCount, planCount, episodeLabels, moreEpisodes: Math.max(0, episodeIds.size - 3) }
-  }
-  const mergeAssetFacts = (asset: Asset) => {
-    const usage = mergeAssetUsage(asset.id)
-    const variants = asset.variants ?? []
-    const scopedVariants = variants.filter(
-      (variant) =>
-        (variant.appliesToEpisodeIds?.length ?? 0) > 0 ||
-        (variant.appliesToSceneIds?.length ?? 0) > 0 ||
-        (variant.appliesToStoryboardIds?.length ?? 0) > 0,
-    ).length
-    const imageCount = asset.images?.length ?? (asset.refImageId ? 1 : 0)
-    return [
-      assetTypeLabel(asset.type),
-      `${asset.aliases?.length ?? 0} 别名`,
-      `${variants.length} 形态`,
-      scopedVariants ? `${scopedVariants} 个作用域形态` : '无作用域形态',
-      `${imageCount} 图`,
-      usage.storyboardCount ? `${usage.storyboardCount} 分镜` : '未进分镜',
-      usage.variantRefCount ? `${usage.variantRefCount} 形态绑定` : '',
-      usage.planCount ? `${usage.planCount} 集计划` : '',
-      usage.episodeLabels.length ? `${usage.episodeLabels.join(' / ')}${usage.moreEpisodes ? ` +${usage.moreEpisodes}` : ''}` : '',
-      asset.libraryLink?.entityId ? `身份 v${asset.libraryLink.entityVersion ?? '-'}` : '未链身份',
-    ].filter(Boolean)
-  }
-  const mergeAssetVariantLabels = (asset: Asset) => {
-    const labels = (asset.variants ?? []).map((variant) => variant.label).filter(Boolean)
-    if (!labels.length) return ''
-    const shown = labels.slice(0, 4).join('、')
-    return labels.length > 4 ? `${shown} 等 ${labels.length} 个` : shown
-  }
-  const renderMergeAssetPreviewRow = (role: string, asset: Asset) => {
-    const variants = mergeAssetVariantLabels(asset)
-    return (
-      <div className="afs-studio__mergepreview-row">
-        <span className="afs-studio__mergepreview-role">{role}</span>
-        <div className="afs-studio__mergepreview-main">
-          <strong>{asset.name}</strong>
-          <span className="afs-studio__mergepreview-tags">
-            {mergeAssetFacts(asset).map((fact) => (
-              <span key={fact}>{fact}</span>
-            ))}
-          </span>
-          {variants && <span className="afs-studio__mergepreview-variants">形态：{variants}</span>}
-        </div>
-      </div>
-    )
-  }
-  const renderMergePreview = (issue: ContinuityReportView['issues'][number]) => {
-    if ((issue.code !== 'duplicate_library_entity_project_assets' && issue.code !== 'cross_episode_duplicate_project_asset_candidate') || !issue.assetId) return null
-    const source = doc.assets.find((asset) => asset.id === issue.assetId)
-    const targets = (issue.relatedAssetIds ?? []).map((id) => doc.assets.find((asset) => asset.id === id)).filter((asset): asset is Asset => !!asset)
-    if (!source || !targets.length) return null
-    return (
-      <div className="afs-studio__mergepreview" aria-label="资产合并差异预览">
-        <div className="afs-studio__mergepreview-title">
-          <span>合并预览</span>
-          {issue.conflictLabel && <code>命中：{issue.conflictLabel}</code>}
-        </div>
-        {renderMergeAssetPreviewRow('源', source)}
-        {targets.map((target, index) => renderMergeAssetPreviewRow(targets.length > 1 ? `目标 ${index + 1}` : '目标', target))}
-      </div>
-    )
-  }
-  const renderIssues = (items: ContinuityReportView['issues']) => (
-    <div className="afs-studio__continuityissues">
-      {items.map((issue, index) => {
-        const loc = [episodeName(issue.episodeId), issue.storyboardIndex ? `分镜 #${issue.storyboardIndex}` : '', issue.assetId ? `资产 ${issue.assetId}` : ''].filter(Boolean).join(' · ')
-        const variantKindChips = continuityIssueVariantKindChips(issue)
-        const issueStoryboard = findIssueStoryboard(issue)
-        const variantScopeNeedsStoryboard = issue.scopeKind === 'scene' || issue.scopeKind === 'storyboard'
-        const canAddVariantScope =
-          (issue.code === 'variant_out_of_episode_scope' || issue.code === 'asset_state_changed_variant' || issue.code === 'episode_plan_variant_scope_mismatch') &&
-          !!issue.assetId &&
-          !!issue.variantId &&
-          !!issue.episodeId &&
-          (!variantScopeNeedsStoryboard || !!issueStoryboard)
-        const addVariantScopeLabel =
-          issue.code === 'episode_plan_variant_scope_mismatch'
-            ? '标记计划形态适用于本集'
-            : issue.code === 'asset_state_changed_variant'
-            ? '标记当前形态适用于本集'
-            : issue.scopeKind === 'scene'
-              ? '标记变体适用于本场景'
-              : issue.scopeKind === 'storyboard'
-                ? '标记变体适用于本分镜'
-                : '标记变体适用于本集'
-        const canBindEpisodeVariant =
-          issue.code === 'episode_variant_available' &&
-          issue.episodeId === doc.currentEpisodeId &&
-          !!issue.storyboardId &&
-          !!issue.assetId &&
-          (!!issue.variantId || (issue.candidateVariantIds?.length ?? 0) > 0)
-        const canCarryPreviousVariant =
-          (issue.code === 'asset_state_regressed_to_main' || issue.code === 'asset_state_changed_variant') &&
-          issue.episodeId === doc.currentEpisodeId &&
-          !!issue.storyboardId &&
-          !!issue.assetId &&
-          (!!issue.previousVariantId || !!issue.variantId)
-        const canUnifySceneVariant = issue.code === 'scene_group_variant_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
-        const canBindSceneAsset = issue.code === 'scene_group_missing_asset' && issue.episodeId === doc.currentEpisodeId && !!issue.storyboardId && !!issue.assetId
-        const canUnifySceneAsset = issue.code === 'scene_group_asset_mismatch' && issue.episodeId === doc.currentEpisodeId && !!issue.sceneId && !!issue.assetId
-        const canAddPlannedAsset = issue.code === 'episode_plan_missing_asset' && !!issue.assetId && storyboardsForIssueEpisode(issue.episodeId).length > 0
-        const canBindPlannedVariant =
-          issue.code === 'episode_plan_missing_variant' &&
-          !!issue.assetId &&
-          !!issue.variantId &&
-          !!issue.episodeId &&
-          storyboardsForIssueEpisode(issue.episodeId).length > 0
-        const canAddVariantParentToPlan = issue.code === 'episode_plan_variant_asset_missing' && !!issue.episodeId && !!issue.assetId
-        const canCreateMissingPlannedEpisodes = issue.code === 'series_planned_episodes_missing' && (doc.seriesBible?.plannedEpisodeCount ?? 0) > (doc.episodes?.length || report.episodes.length)
-        const canRemoveInvalidPlanRef =
-          !!issue.episodeId &&
-          ((issue.code === 'episode_plan_invalid_asset' && !!issue.assetId) || (issue.code === 'episode_plan_invalid_variant' && !!issue.variantId))
-        const issueAsset = issue.assetId ? doc.assets.find((item) => item.id === issue.assetId) : undefined
-        const canRemoveDuplicateAlias =
-          issue.code === 'duplicate_asset_alias' &&
-          !!issue.conflictLabel &&
-          !!issueAsset?.aliases?.some((alias) => normalizeAssetLookup(alias) === normalizeAssetLookup(issue.conflictLabel))
-        const canRenameConflictAsset =
-          !!issueAsset &&
-          (issue.code === 'duplicate_asset_name' || (issue.code === 'duplicate_asset_alias' && issue.conflictSource === 'name'))
-        const canAddUnusedAsset = issue.code === 'unused_project_asset' && !!issue.assetId && doc.storyboards.length > 0
-        const canResolveLibraryCandidate =
-          (issue.code === 'asset_matches_unlinked_library_entity' || issue.code === 'library_entity_alias_conflict') &&
-          !!issue.assetId &&
-          (issue.candidateLibraryEntityIds?.length ?? 0) > 0
-        const canMergeDuplicateLibraryAsset = (issue.code === 'duplicate_library_entity_project_assets' || issue.code === 'cross_episode_duplicate_project_asset_candidate') && !!issue.assetId && (issue.relatedAssetIds?.length ?? 0) > 0
-        const canSyncLibraryEntity = issue.code === 'library_entity_version_outdated' && !!issue.assetId && !!issue.libraryEntityId && hubEntities.some((entity) => entity.id === issue.libraryEntityId && !entity.archived)
-        const canPublishMissingLibraryEntity = issue.code === 'library_entity_missing' && !!issue.assetId
-        const refAction = missingRefAction(issue)
-        return (
-          <div key={`${issue.code}-${index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
-            <div className="afs-studio__continuityissue-top">
-              <span>{issue.severity === 'error' ? '错误' : '警告'}</span>
-              <code>{issue.code}</code>
-            </div>
-            <p>{issue.message}</p>
-            {variantKindChips.length > 0 && (
-              <div className="afs-studio__continuitymeta" aria-label="形态类型">
-                {variantKindChips.map((chip) => <span key={chip}>{chip}</span>)}
-              </div>
-            )}
-            {loc && <small>{loc}</small>}
-            {canMergeDuplicateLibraryAsset && renderMergePreview(issue)}
-            {canAddVariantScope && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantScope(issue)}>
-                {addVariantScopeLabel}
-              </button>
-            )}
-            {canBindEpisodeVariant && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => bindEpisodeVariant(issue)}>
-                {(issue.candidateVariantIds?.length ?? 0) > 1 ? '选择并绑定形态' : '绑定本集形态'}
-              </button>
-            )}
-            {canCarryPreviousVariant && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => carryPreviousVariant(issue)}>
-                沿用上一形态
-              </button>
-            )}
-            {canUnifySceneVariant && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneVariant(issue)}>
-                统一为此形态
-              </button>
-            )}
-            {canBindSceneAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => bindSceneAsset(issue)}>
-                补场景资产
-              </button>
-            )}
-            {canUnifySceneAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => unifySceneAsset(issue)}>
-                统一为此场景
-              </button>
-            )}
-            {canAddPlannedAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => addPlannedAssetToStoryboard(issue)}>
-                加入计划资产到分镜
-              </button>
-            )}
-            {canBindPlannedVariant && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => bindPlannedVariantToStoryboard(issue)}>
-                绑定计划形态到分镜
-              </button>
-            )}
-            {canAddVariantParentToPlan && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => addVariantParentToEpisodePlan(issue)}>
-                补入本集计划资产
-              </button>
-            )}
-            {canCreateMissingPlannedEpisodes && (
-              <button type="button" className="afs-studio__continuityfix" onClick={createMissingPlannedEpisodes}>
-                补齐计划剧集
-              </button>
-            )}
-            {canRemoveInvalidPlanRef && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => removeInvalidEpisodePlanRef(issue)}>
-                从剧集计划移除
-              </button>
-            )}
-            {canRemoveDuplicateAlias && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => removeDuplicateAlias(issue)}>
-                移除此别名
-              </button>
-            )}
-            {canRenameConflictAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => renameConflictAsset(issue)}>
-                重命名资产
-              </button>
-            )}
-            {canAddUnusedAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => addUnusedAssetToStoryboard(issue)}>
-                加入当前集分镜
-              </button>
-            )}
-            {canResolveLibraryCandidate && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => linkCandidateLibraryEntity(issue)}>
-                {issue.code === 'library_entity_alias_conflict' ? '改关联候选身份' : '关联候选身份'}
-              </button>
-            )}
-            {canResolveLibraryCandidate && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => markDistinctLibraryIdentity(issue)}>
-                {(issue.candidateLibraryEntityIds?.length ?? 0) > 1 ? '候选均为不同身份' : '标记为不同身份'}
-              </button>
-            )}
-            {canMergeDuplicateLibraryAsset && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => mergeDuplicateProjectAsset(issue)}>
-                合并到同身份项目资产
-              </button>
-            )}
-            {canSyncLibraryEntity && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => void syncLinkedLibraryEntity(issue)}>
-                同步资产中心新版
-              </button>
-            )}
-            {canPublishMissingLibraryEntity && (
-              <button type="button" className="afs-studio__continuityfix" onClick={() => void publishMissingLibraryEntity(issue)}>
-                重新发布为身份资产
-              </button>
-            )}
-            {refAction && (
-              <button type="button" className="afs-studio__continuityfix" onClick={refAction.run}>
-                {refAction.label}
-              </button>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
+
   return (
-    <div className="afs-studio__drawer-scrim" onClick={onClose}>
-      <div className="afs-studio__drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="afs-studio__drawer-head">
-          <span>一致性检查详情</span>
-          <button className="afs-btn afs-btn--ghost afs-btn--sm" onClick={onClose} title="关闭">
-            <X size={16} />
-          </button>
+    <div className="afs-studio__lightbox" onClick={onClose}>
+      <div className="afs-studio__continuitymodal" onClick={(e) => e.stopPropagation()}>
+        <div className="afs-studio__continuityhead">
+          <b>连续性检查</b>
+          <span className="afs-studio__hint">
+            {errorCount > 0 ? `${errorCount} 个阻断项` : '无阻断项'}
+            {warningCount > 0 ? ` · ${warningCount} 个提醒` : ''}
+          </span>
+          <span className="afs-series__spacer" />
+          <IconButton size="sm" variant="ghost" aria-label="关闭" icon={<X size={16} />} onClick={onClose} />
         </div>
-        <div className="afs-studio__drawer-body afs-studio__continuitydrawer">
-          <div className="afs-studio__continuitysummary">
-            <span>{report.episodes.length} 集</span>
-            <span>{errors.length} 错误</span>
-            <span>{warnings.length} 警告</span>
-            {canRedistributeChapters && (
-              <button type="button" className="afs-studio__continuityfix" onClick={redistributeChapters}>
-                重新均分原著章节
-              </button>
-            )}
+
+        {report.issues.length === 0 ? (
+          <p className="afs-stwb__handoff-empty">没有发现连续性问题。</p>
+        ) : (
+          <div className="afs-studio__continuitybody">
+            {grouped.map(({ category, issues }) => {
+              const bulk = bulkFixFor(category, issues)
+              const expanded = expandedCategories.has(category)
+              const shown = expanded ? issues : issues.slice(0, COLLAPSED_ISSUE_COUNT)
+              const hidden = issues.length - shown.length
+              return (
+              <section key={category} className="afs-studio__continuitysection">
+                <h4>
+                  {CATEGORY_LABEL[category]}
+                  <i>{issues.length}</i>
+                  {category === 'blocking' && <em>生成前必须解决</em>}
+                  {category === 'appearance' && <em>形态默认沿用上一镜，这些镜头变了但没说明原因</em>}
+                  {category === 'hint' && <em>不影响生成</em>}
+                  <span className="afs-series__spacer" />
+                  {bulk && (
+                    <button type="button" className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk" disabled={busy} onClick={() => void bulk.run()}>
+                      <Wand2 size={11} /> {bulk.label}
+                    </button>
+                  )}
+                </h4>
+                <div className="afs-studio__continuityissues">
+                  {shown.map((issue, index) => {
+                    const fixes = fixesFor(issue)
+                    return (
+                      <article key={`${issue.code}-${issue.storyboardId ?? issue.assetId ?? index}`} className={`afs-studio__continuityissue is-${issue.severity}`}>
+                        <p>{issue.message}</p>
+                        {continuityIssueVariantKindChips(issue).length > 0 && (
+                          <div className="afs-stwb__handoff-chips">
+                            {continuityIssueVariantKindChips(issue).map((chip) => <span key={chip}>{chip}</span>)}
+                          </div>
+                        )}
+                        {fixes.length > 0 && (
+                          <div className="afs-studio__continuityactions">
+                            {fixes.map((fix) => (
+                              <button key={fix.label} type="button" className="afs-stwb__handoff-action" disabled={busy} onClick={fix.run}>
+                                {fix.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </article>
+                    )
+                  })}
+                  {hidden > 0 && (
+                    <button
+                      type="button"
+                      className="afs-studio__continuitymore"
+                      onClick={() => setExpandedCategories((prev) => new Set([...prev, category]))}
+                    >
+                      展开另外 {hidden} 条同类问题
+                    </button>
+                  )}
+                  {expanded && issues.length > COLLAPSED_ISSUE_COUNT && (
+                    <button
+                      type="button"
+                      className="afs-studio__continuitymore"
+                      onClick={() => setExpandedCategories((prev) => new Set([...prev].filter((item) => item !== category)))}
+                    >
+                      收起
+                    </button>
+                  )}
+                </div>
+              </section>
+              )
+            })}
           </div>
-          {errors.length > 0 && (
-            <section className="afs-studio__continuitysection">
-              <h3>错误</h3>
-              {renderIssues(errors)}
-            </section>
-          )}
-          {warnings.length > 0 && (
-            <section className="afs-studio__continuitysection">
-              <h3>警告</h3>
-              {renderIssues(warnings)}
-            </section>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )
@@ -3479,6 +2732,7 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const setStoryboardCastVariant = useProjectStore((s) => s.setStoryboardCastVariant)
   const [showFlow, setShowFlow] = useState(false)
   const [viewer, setViewer] = useState(false)
+  const [gridViewer, setGridViewer] = useState(false)
   const url = useMediaUrl(sb.keyframeImageId ? { assetId: sb.keyframeImageId } : null)
   // 取该分镜所属段的「选用/最新」候选片段，反映状态（一镜多生后不再是唯一片段）
   const track = doc.track.find((t) => t.storyboardIds.includes(sb.id))
@@ -3489,17 +2743,8 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const charAssets = doc.assets.filter((a) => a.type === 'role' && !a.parentAssetId) // 说话人候选：仅角色（+旁白）
   const dialogues = sb.dialogues ?? []
   const castRefs = castRefsForStoryboard(sb)
-  const currentEpisodeId = doc.currentEpisodeId
-  const episodeName = (id: string) => {
-    const episode = doc.episodes?.find((item) => item.id === id)
-    return episode ? `E${episode.index + 1} ${episode.title}` : id
-  }
-  const variantScope = (variant: AssetVariant) => {
-    const ids = variant.appliesToEpisodeIds ?? []
-    if (!ids.length) return { current: true, label: '全剧', title: '适用于全部剧集' }
-    const current = !!currentEpisodeId && ids.includes(currentEpisodeId)
-    return { current, label: current ? '当前集' : '其他集', title: `适用于：${ids.map(episodeName).join('、')}` }
-  }
+  // 所有形态都可选：某一镜用哪个由变更点决定，不再按"适用范围"筛掉选项
+  const variantScope = (_variant: AssetVariant) => ({ current: true, label: '可用', title: '选中后会成为本镜的形态；若与上一镜不同会提示登记变更原因' })
   const variantGroupsForAsset = (asset: Asset) => {
     const currentOptions = [
       { value: '', label: '主形象', title: '不使用妆容/服装/时期变体' },
@@ -3547,6 +2792,16 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
   const variantForAsset = (assetId: string) => castRefs.find((ref) => ref.assetId === assetId)?.variantId ?? ''
   return (
     <div className="afs-studio__sbcard">
+      {gridViewer && sb.gridImageId && (
+        <StudioImageViewer
+          assetId={sb.gridImageId}
+          prompt={sb.gridError ? `宫格失败：${sb.gridError}` : '宫格分镜板原图（本组关键帧从这张切出）'}
+          onPromptChange={() => {}}
+          onRegenerate={() => setGridViewer(false)}
+          generating={false}
+          onClose={() => setGridViewer(false)}
+        />
+      )}
       {viewer && sb.keyframeImageId && (
         <StudioImageViewer
           assetId={sb.keyframeImageId}
@@ -3567,6 +2822,20 @@ function StoryboardItem({ sb, index, total }: { sb: Storyboard; index: number; t
             onDoubleClick={sb.keyframeImageId ? () => setViewer(true) : undefined}
           >
             {sb.state === 'generating' ? <Loader2 size={22} className="afs-spin" /> : url ? <img src={url} alt="" /> : <Clapperboard size={24} opacity={0.3} />}
+            {sb.gridImageId && (
+              <button
+                type="button"
+                className={`afs-studio__sbgrid${sb.gridError ? ' is-error' : ''}`}
+                title={sb.gridError ? `宫格失败，已回退逐镜：${sb.gridError}\n点击查看模型实际画出的原图` : '查看本组宫格分镜板原图'}
+                aria-label="查看宫格原图"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setGridViewer(true)
+                }}
+              >
+                {sb.gridError ? <AlertTriangle size={11} /> : <Clapperboard size={11} />} 宫格
+              </button>
+            )}
             <span className="afs-studio__sbnum">{index + 1}</span>
             {sb.state === 'failed' && (
               <span className="afs-studio__err" title={sb.error}>

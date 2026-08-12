@@ -7,15 +7,19 @@
  */
 import { create } from 'zustand'
 import * as P from '../domain/persistence'
-import type { AgentStep, Asset, AssetImage, AssetVariant, Clip, Episode, EpisodePlan, ProjectCard, ProjectDoc, ProjectMeta, Script, SeriesBible, Storyboard, StoryboardCastRef } from '../domain/types'
+import type { AgentStep, AppearanceChange, Asset, ShotDesign, AssetImage, AssetVariant, Clip, Episode, EpisodePlan, ProjectCard, ProjectDoc, ProjectMeta, Script, SeriesBible, Storyboard, StoryboardCastRef } from '../domain/types'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, mergeAssetAliases, normalizeAssetLookup } from '../domain/assetAliases'
-import { removeVariantScopeReferences } from '../domain/variantScopes'
+import { ambiguousVariantBases, declareAppearanceChange, revertToInheritedAppearance, variantBaseUses, variantDerivationBase } from '../domain/continuityLedger'
+import { syncCastRefsToLedger } from '../studio/services/episodeProduction'
 import type { AgentPlan, PipelineEvent } from '../studio/agent/agent'
 import { generateAssetImage, generateDerivativeImage, generateKeyframeImage, generateClipVideo, loadImageBase64, clipLastFrameDataUrl } from '../studio/services/generate'
 import { polishAssetPrompt } from '../studio/services/polish'
 import { runFlowImage } from '../studio/services/imageFlow'
 import { synthVoiceSample, matchRoleVoices } from '../studio/services/audio'
 import { maybeSummarize, getMemoryConfig, recallContext } from '../studio/agent/memory'
+import { PIPELINE_STAGES, runNovelToFilmPipeline, type PipelineOptions, type PipelineStageStatus } from '../studio/services/pipeline'
+import { buildStoryBible, storyBibleIsStale } from '../studio/services/storyBible'
+import { planEpisodeBreaks } from '../studio/services/novel'
 import { deleteAsset } from '../services/assets'
 import { runAgentPipeline, buildToolLoopSystem } from '../studio/agent/agent'
 import type { PipelineStage, PipelineStagePlan } from '../studio/agent/agent'
@@ -31,10 +35,11 @@ import { splitNovelChapters, extractEvents } from '../studio/services/novel'
 import { composeProject } from '../studio/services/compose'
 import { syncTracksFromStoryboards, selectedClipId } from '../studio/services/track'
 import { mapPool } from '../studio/services/concurrency'
+import { chainTasks, independentTasks, limitsFromConcurrency, runTaskQueue } from '../studio/services/taskQueue'
+import { generateGridKeyframes, gridSupported, planGridGroups } from '../studio/services/gridKeyframes'
 import { generateTrackVideoPrompt } from '../studio/services/videoPrompt'
 import { assertPreflight, preflightClipGeneration, preflightKeyframeGeneration, type GenerationPreflightIssue } from '../studio/services/generationPreflight'
 import { supportsVideoReferenceImages } from '../studio/services/videoReferences'
-import { variantScopePatchForUse } from '../studio/services/continuityReport'
 import { buildEpisodeProductionHandoff, buildEpisodeProductionRecap, episodeComposeReadiness, episodeProductionContinuityBlockers, formatEpisodeProductionContinuityError, hasEpisodeProductionState, invalidateCurrentEpisodeProduction, invalidateEpisodesUsingAsset, invalidateEpisodesUsingCastRef, invalidateProductionScope, missingReferencedVariantImages, pendingEpisodesForSeries, productionScopeForStoryboard, productionScopeForTrack, projectDocForProductionScope, setStoryboardCastVariantForScope } from '../studio/services/episodeProduction'
 import { flushLogs, logError, logInfo } from '../services/localLog'
 import { useProviderStore } from './providerStore'
@@ -132,6 +137,12 @@ export interface ProjectState {
   generateAssetVariant: (assetId: string, variantId: string) => Promise<void>
   promoteCanvasImageToProjectAsset: (target: { assetId: string; refImageId: string; variantId?: string }) => boolean
   setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => void
+  /** 在某镜登记形态变更点：从这一镜起该资产切换形态，后续镜头自动沿用 */
+  setAppearanceChange: (storyboardId: string, change: AppearanceChange) => boolean
+  /** 把"从多种状态变来"的形态按底图拆成多个独立形态；返回新建的形态数 */
+  splitVariantByBase: (assetId: string, variantId: string) => number
+  /** 撤销某镜上某资产的变更点，让它回到沿用上一镜的状态 */
+  revertAppearanceToInherited: (storyboardId: string, assetId: string) => boolean
   // 一资产多图历史（§3.3）
   selectAssetImage: (assetId: string, imageId: string) => void
   deleteAssetImage: (assetId: string, imageId: string) => Promise<void>
@@ -151,6 +162,8 @@ export interface ProjectState {
   batch: { running: boolean; label?: string; kind?: 'series'; pauseRequested?: boolean }
   generateAllAssets: () => Promise<void>
   generateAllKeyframes: () => Promise<void>
+  /** 宫格关键帧：同场景连续镜头合成一张分镜板再切开；返回实际用宫格覆盖的分镜数 */
+  generateGridKeyframesForPending: (onLabel?: (text: string) => void) => Promise<number>
   generateAllClips: () => Promise<void>
   /** 一键成片：资产 → 关键帧 → 视频 → 合成 一条龙 */
   autoProduce: () => Promise<void>
@@ -164,8 +177,13 @@ export interface ProjectState {
   extractChapterEvents: (chapterId: string) => Promise<void>
   extractAllEvents: () => Promise<void>
 
+  // 小说 → 成片主线流水线（确定性阶段机，可从任意阶段进入 / 中断恢复）
+  pipeline: { running: boolean; stages: PipelineStageStatus[]; abortRequested?: boolean }
+  runNovelPipeline: (options?: PipelineOptions) => Promise<void>
+  abortNovelPipeline: () => void
+
   // 制片 Agent（结构化方案：一句话/故事 → 剧本+资产+分镜）
-  runAgent: (userText: string) => Promise<void>
+  runAgent: (userText: string, options?: { stages?: ('script' | 'assets' | 'storyboard')[] }) => Promise<void>
   /** 工具增强 Agent（§6.1）：可按需读取真实项目状态并调用工具写入；jsonMode 管线保留为兜底 */
   runAgentToolLoop: (userText: string) => Promise<void>
   /** 中断进行中的 Agent（管线 runText 与工具循环均尽力中断） */
@@ -301,23 +319,27 @@ function rewriteStoryboardAssetRefs(storyboards: Storyboard[], removedIds: Set<s
   return changed
 }
 
-function rewriteEpisodePlanAssetRefs(episode: Episode, removedIds: Set<string>, targetAssetId: string, sourceVariantIds: Set<string>, variantMap: Record<string, string>): boolean {
-  const plan = episode.plan
-  if (!plan) return false
+/** 合并资产时改写分镜上的形态变更点，让台账不指向被删掉的资产/形态 */
+function rewriteStateChangeRefs(storyboards: Storyboard[], removedIds: Set<string>, targetAssetId: string, sourceVariantIds: Set<string>, variantMap: Record<string, string>): boolean {
   let changed = false
-  if (plan.requiredAssetIds?.some((id) => removedIds.has(id))) {
-    plan.requiredAssetIds = [...new Set(plan.requiredAssetIds.map((id) => (removedIds.has(id) ? targetAssetId : id)))]
-    changed = true
-  }
-  if (plan.requiredVariantIds?.some((id) => sourceVariantIds.has(id))) {
-    plan.requiredVariantIds = [
-      ...new Set(
-        plan.requiredVariantIds
-          .map((id) => (sourceVariantIds.has(id) ? variantMap[id] : id))
-          .filter((id): id is string => !!id),
-      ),
-    ]
-    changed = true
+  for (const storyboard of storyboards) {
+    const current = storyboard.stateChanges
+    if (!current?.length) continue
+    const next = current.map((change) => {
+      const assetId = removedIds.has(change.assetId) ? targetAssetId : change.assetId
+      const toVariantId = change.toVariantId && sourceVariantIds.has(change.toVariantId) ? variantMap[change.toVariantId] : change.toVariantId
+      return { ...change, assetId, toVariantId }
+    })
+    const deduped: typeof next = []
+    for (const change of next) {
+      const index = deduped.findIndex((item) => item.assetId === change.assetId)
+      if (index >= 0) deduped[index] = change
+      else deduped.push(change)
+    }
+    if (JSON.stringify(deduped) !== JSON.stringify(current)) {
+      storyboard.stateChanges = deduped
+      changed = true
+    }
   }
   return changed
 }
@@ -332,13 +354,7 @@ function syncedProjectAssetFromEntity(current: Asset, entity: LibraryEntity, fie
         const existing =
           currentVariants.find((item) => item.libraryVariantId && item.libraryVariantId === variant.libraryVariantId) ??
           currentVariants.find((item) => normalizeAssetLookup(item.label) === normalizeAssetLookup(variant.label))
-        return {
-          ...variant,
-          id: existing?.id ?? variant.id,
-          appliesToEpisodeIds: existing?.appliesToEpisodeIds,
-          appliesToSceneIds: existing?.appliesToSceneIds,
-          appliesToStoryboardIds: existing?.appliesToStoryboardIds,
-        }
+        return { ...variant, id: existing?.id ?? variant.id }
       })
     : currentVariants
   const variantMap = nextVariants.reduce<Record<string, string>>((acc, variant) => {
@@ -401,33 +417,16 @@ function compactText(value: string | undefined): string | undefined {
   return text || undefined
 }
 
-function uniqueStrings(items: unknown[] | undefined): string[] | undefined {
-  if (!Array.isArray(items)) return undefined
-  const values = items.filter((item): item is string => typeof item === 'string' && !!item.trim()).map((item) => item.trim())
-  return values.length ? [...new Set(values)] : undefined
-}
-
-function cleanEpisodePlanPatch(doc: ProjectDoc, patch: Partial<EpisodePlan>): Partial<EpisodePlan> {
-  const assetIds = new Set(doc.assets.filter((asset) => asset.type !== 'audio' && asset.type !== 'clip').map((asset) => asset.id))
-  const variantIds = new Set(doc.assets.flatMap((asset) => (asset.variants ?? []).map((variant) => variant.id)))
+function cleanEpisodePlanPatch(patch: Partial<EpisodePlan>): Partial<EpisodePlan> {
   return {
-    ...patch,
     hook: 'hook' in patch ? compactText(patch.hook) : patch.hook,
     conflict: 'conflict' in patch ? compactText(patch.conflict) : patch.conflict,
     cliffhanger: 'cliffhanger' in patch ? compactText(patch.cliffhanger) : patch.cliffhanger,
-    requiredAssetIds: 'requiredAssetIds' in patch ? uniqueStrings(patch.requiredAssetIds)?.filter((id) => assetIds.has(id)) : patch.requiredAssetIds,
-    requiredVariantIds: 'requiredVariantIds' in patch ? uniqueStrings(patch.requiredVariantIds)?.filter((id) => variantIds.has(id)) : patch.requiredVariantIds,
   }
 }
 
 function episodePlanHasContent(plan: EpisodePlan | undefined): boolean {
-  return !!(
-    plan?.hook ||
-    plan?.conflict ||
-    plan?.cliffhanger ||
-    plan?.requiredAssetIds?.length ||
-    plan?.requiredVariantIds?.length
-  )
+  return !!(plan?.hook || plan?.conflict || plan?.cliffhanger)
 }
 
 /** 把一条新资产写进指定项目：打开中的项目走 mutate（防抖落盘），未打开的直接读写其持久化 doc。返回资产 id。 */
@@ -527,22 +526,28 @@ async function produceCurrentEpisode(
     if (doc.storyboards.length === 0) return
     setCurrentEpisodeProductionState(get, { status: 'generating', filmError: undefined })
 
+    const assetQueueLimits = limitsFromConcurrency(get().doc!.meta.concurrency)
+
     const assetIds = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.refImageId).map((a) => a.id)
     if (assetIds.length) {
-      const c = get().doc!.meta.concurrency ?? 3
       setLabel(`生成资产 0/${assetIds.length}`)
-      await mapPool(assetIds, c, (id) => get().generateAsset(id), (done, total) => setLabel(`生成资产 ${done}/${total}`))
+      await runTaskQueue(independentTasks(assetIds.map((id) => ({ id })), 'image', (item) => get().generateAsset(item.id), (item) => item.id), {
+        limits: assetQueueLimits,
+        onProgress: (p) => setLabel(`生成资产 ${p.done}/${p.total}`),
+      })
     }
 
     const variantRefs = missingReferencedVariantImages(get().doc!)
     if (variantRefs.length) {
-      const c = get().doc!.meta.concurrency ?? 3
       setLabel(`生成形态参考图 0/${variantRefs.length}`)
-      await mapPool(
-        variantRefs,
-        c,
-        ({ assetId, variantId }) => get().generateAssetVariant(assetId, variantId),
-        (done, total) => setLabel(`生成形态参考图 ${done}/${total}`),
+      await runTaskQueue(
+        independentTasks(
+          variantRefs.map((ref) => ({ id: `${ref.assetId}:${ref.variantId}`, ...ref })),
+          'image',
+          (item) => get().generateAssetVariant(item.assetId, item.variantId),
+          (item) => item.id,
+        ),
+        { limits: assetQueueLimits, onProgress: (p) => setLabel(`生成形态参考图 ${p.done}/${p.total}`) },
       )
     }
 
@@ -555,28 +560,28 @@ async function produceCurrentEpisode(
       }
     }
 
-    const keyframeIds = [...(get().doc?.storyboards ?? [])]
-      .sort((a, b) => a.index - b.index)
-      .filter((s) => !s.keyframeImageId)
-      .map((s) => s.id)
-    if (keyframeIds.length) {
-      const current = get().doc!
-      const chained = current.storyboards.some((s) => s.chainFromPrev)
-      const c = chained ? 1 : (current.meta.concurrency ?? 3)
-      setLabel(`生成关键帧 0/${keyframeIds.length}`)
-      await mapPool(keyframeIds, c, (id) => get().generateKeyframe(id), (done, total) => setLabel(`生成关键帧 ${done}/${total}`))
+    const limits = limitsFromConcurrency(get().doc!.meta.concurrency)
+
+    // 先用宫格覆盖同场景连续镜（组内一致性最强 + 省调用），剩下的再逐镜生成
+    if (get().doc?.meta.gridKeyframes) {
+      setLabel('宫格分镜板…')
+      await get().generateGridKeyframesForPending(setLabel)
     }
 
-    const clipIds = [...(get().doc?.storyboards ?? [])]
+    const pendingKeyframes = [...(get().doc?.storyboards ?? [])].sort((a, b) => a.index - b.index).filter((s) => !s.keyframeImageId)
+    if (pendingKeyframes.length) {
+      const tasks = chainTasks(pendingKeyframes, 'image', (sb) => get().generateKeyframe(sb.id), (sb) => `#${sb.index + 1}`)
+      setLabel(`生成关键帧 0/${tasks.length}`)
+      await runTaskQueue(tasks, { limits, onProgress: (p) => setLabel(`生成关键帧 ${p.done}/${p.total}`) })
+    }
+
+    const pendingClips = [...(get().doc?.storyboards ?? [])]
       .sort((a, b) => a.index - b.index)
       .filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
-      .map((s) => s.id)
-    if (clipIds.length) {
-      const current = get().doc!
-      const chained = current.storyboards.some((s) => s.chainFromPrev)
-      const c = chained ? 1 : (current.meta.concurrency ?? 3)
-      setLabel(`生成视频 0/${clipIds.length}`)
-      await mapPool(clipIds, c, (id) => get().generateClip(id), (done, total) => setLabel(`生成视频 ${done}/${total}`))
+    if (pendingClips.length) {
+      const tasks = chainTasks(pendingClips, 'video', (sb) => get().generateClip(sb.id), (sb) => `#${sb.index + 1}`)
+      setLabel(`生成视频 0/${tasks.length}`)
+      await runTaskQueue(tasks, { limits, onProgress: (p) => setLabel(`生成视频 ${p.done}/${p.total}`) })
     }
 
     const latest = get().doc
@@ -667,19 +672,59 @@ function assetLookupLength(asset: Asset): number {
   return Math.max(...[asset.name, ...(asset.aliases ?? [])].map((name) => name.length))
 }
 
+/** Agent 用来表示"就是主形象"的各种说法；命中这些不建形态 */
+const MAIN_APPEARANCE_TOKENS = new Set(['主形象', '主形态', '默认', '默认形象', '原样', '无', 'none', 'default', 'main', 'normal'])
+
+/**
+ * 严格查找已有形态。**找不到就返回 undefined，绝不把标签原文当 id 用**。
+ *
+ * 曾经这里以 `?? text` 兜底，于是 Agent 提到一个尚不存在的形态（"受伤"）就会写进一个
+ * 指向空气的 variantId。P0 之后台账会把这个坏值继承给后面所有镜头，一个坏点扩散成整集报错。
+ */
 function agentVariantId(asset: Asset, token: unknown): string | undefined {
   const text = cleanString(token)
   if (!text) return undefined
   const lower = text.toLowerCase()
-  return asset.variants?.find((variant) => variant.id === text)?.id ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)?.id ?? text
+  return asset.variants?.find((variant) => variant.id === text)?.id ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)?.id
+}
+
+/**
+ * 解析 Agent 引用的形态；不存在就**就地补建**一个空形态。
+ *
+ * Agent 在分镜阶段说"四叔这一镜变成受伤状态"，是在陈述剧情需求——美术阶段没预建这个形态
+ * 是上游的疏漏，不是分镜写错了。三种处理里：
+ *   - 返回 undefined → 换装被静默丢弃，剧情要求消失，最糟；
+ *   - 返回标签原文 → 悬空引用，报一个和根因无关的错，就是这次的 bug；
+ *   - 补建空形态 → 缺参考图，于是 missing_ref_image 精确指出"该给四叔-受伤出图"，
+ *     承接面板的「一键补齐」直接能修。这条才是可行动的。
+ */
+function resolveAgentVariant(d: ProjectDoc, asset: Asset, token: unknown, reason?: string): string | undefined {
+  const text = cleanString(token)
+  if (!text) return undefined
+  if (MAIN_APPEARANCE_TOKENS.has(text.toLowerCase())) return undefined
+  const existing = agentVariantId(asset, text)
+  if (existing) return existing
+  const target = d.assets.find((item) => item.id === asset.id)
+  if (!target || target.type === 'audio' || target.type === 'clip') return undefined
+  const id = P.newId('v_')
+  target.variants = [
+    ...(target.variants ?? []),
+    {
+      id,
+      label: text,
+      // desc 会作为 img2img 的画面基底喂给图像模型，所以这里只能写**这个形态长什么样**。
+      // 变更点的 reason 正好是剧情给出的外观依据（"左脸被划伤"），比标签本身信息量大。
+      desc: reason?.trim() ? `${text}：${reason.trim()}` : text,
+      // 标记来源用 tags，不要污染 desc——否则元信息会被当成画面描述画进图里
+      tags: ['auto'],
+      state: 'idle',
+    },
+  ]
+  return id
 }
 
 function agentRoleInShot(value: unknown): StoryboardCastRef['roleInShot'] | undefined {
   return value === 'lead' || value === 'supporting' || value === 'background' ? value : undefined
-}
-
-function agentScopeKind(value: unknown): 'episode' | 'scene' | 'storyboard' | undefined {
-  return value === 'episode' || value === 'scene' || value === 'storyboard' ? value : undefined
 }
 
 function agentCastRefFromString(d: ProjectDoc, raw: unknown): StoryboardCastRef | undefined {
@@ -694,7 +739,7 @@ function agentCastRefFromString(d: ProjectDoc, raw: unknown): StoryboardCastRef 
     let variantToken = text.slice(prefix.length).trim()
     variantToken = variantToken.replace(/^[\s\-—–_:：/|·]+/, '').trim()
     variantToken = variantToken.replace(/^[（(\[]/, '').replace(/[）)\]]$/, '').trim()
-    return variantToken ? { assetId: asset.id, variantId: agentVariantId(asset, variantToken) } : { assetId: asset.id }
+    return variantToken ? { assetId: asset.id, variantId: resolveAgentVariant(d, asset, variantToken) } : { assetId: asset.id }
   }
   return undefined
 }
@@ -704,7 +749,7 @@ function agentCastRefFromObject(d: ProjectDoc, value: Record<string, unknown>): 
   if (!asset) return agentCastRefFromString(d, value.name ?? value.assetName)
   return {
     assetId: asset.id,
-    variantId: agentVariantId(asset, value.variantId ?? value.variantLabel ?? value.variant ?? value.label),
+    variantId: resolveAgentVariant(d, asset, value.variantId ?? value.variantLabel ?? value.variant ?? value.label),
     roleInShot: agentRoleInShot(value.roleInShot),
     note: cleanString(value.note),
   }
@@ -723,28 +768,54 @@ function agentStoryboardCastRefs(d: ProjectDoc, sb: NonNullable<AgentPlan['story
   return [...refs.values()]
 }
 
-function scopeAgentStoryboardVariants(d: ProjectDoc, episode: Episode | undefined, storyboard: Storyboard, refs: StoryboardCastRef[], scopeKind?: 'episode' | 'scene' | 'storyboard'): void {
-  if (!episode) return
-  for (const ref of refs) {
-    if (!ref.variantId) continue
-    const asset = d.assets.find((item) => item.id === ref.assetId)
-    const variant = asset?.variants?.find((item) => item.id === ref.variantId)
-    const patch = variant ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
-    if (asset && variant && patch) {
-      asset.variants = asset.variants?.map((item) => (item.id === variant.id ? { ...item, ...patch } : item))
-    }
+/** 解析 Agent 输出的镜头设计决策层；全部字段可选，空串一律丢弃 */
+function agentShotDesign(sb: NonNullable<AgentPlan['storyboards']>[number]): ShotDesign | undefined {
+  const raw = sb.shotDesign
+  if (!raw || typeof raw !== 'object') return undefined
+  const design: ShotDesign = {
+    unresolvedState: cleanString(raw.unresolvedState),
+    viewerPosition: cleanString(raw.viewerPosition),
+    gazeFlow: cleanString(raw.gazeFlow),
+    compositionMechanism: cleanString(raw.compositionMechanism),
+    colorThesis: cleanString(raw.colorThesis),
+    imagingBase: cleanString(raw.imagingBase),
   }
+  return Object.values(design).some(Boolean) ? design : undefined
+}
+
+/**
+ * 解析 Agent 输出的形态变更点。取代旧的 ensureScope/scopeKind——
+ * Agent 不再声明"这个形态适用于哪几集"，只声明"这一镜里谁变成了什么，为什么"。
+ */
+function agentStateChanges(d: ProjectDoc, sb: NonNullable<AgentPlan['storyboards']>[number]): AppearanceChange[] | undefined {
+  const raw = Array.isArray(sb.stateChanges) ? sb.stateChanges : undefined
+  if (!raw) return undefined
+  const changes: AppearanceChange[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const value = item as Record<string, unknown>
+    const asset = agentCastAsset(d, value.assetId) ?? agentCastAsset(d, value.assetName) ?? agentCastAsset(d, value.name)
+    if (!asset) continue
+    const reason = cleanString(value.reason) ?? cleanString(value.note)
+    if (!reason) continue // 无理由的变更点等于没解释，交给一致性检查提示
+    const toVariantId = resolveAgentVariant(d, asset, value.toVariantId ?? value.variantId ?? value.toVariantLabel ?? value.variantLabel, reason)
+    const index = changes.findIndex((change) => change.assetId === asset.id)
+    const change: AppearanceChange = { assetId: asset.id, toVariantId, reason }
+    if (index >= 0) changes[index] = change
+    else changes.push(change)
+  }
+  return changes.length ? changes : undefined
 }
 
 function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboards'] | undefined, applied: AgentApplySummary): void {
-  const currentEpisode = d.episodes?.find((item) => item.id === d.currentEpisodeId)
   for (const sb of storyboards ?? []) {
     if (!sb?.videoDesc) continue
     const castRefs = agentStoryboardCastRefs(d, sb)
     const cast = [...new Set(castRefs.map((ref) => ref.assetId))]
     const hasCastInput = (Array.isArray(sb.cast) && sb.cast.length > 0) || (Array.isArray(sb.castRefs) && sb.castRefs.length > 0)
     const sceneId = cleanString(sb.sceneId)
-    const scopeKind = agentScopeKind(sb.scopeKind)
+    const shotDesign = agentShotDesign(sb)
+    const stateChanges = agentStateChanges(d, sb)
     const dlgs = Array.isArray(sb.dialogues)
       ? sb.dialogues
           .filter((x) => x && typeof x.line === 'string' && x.line.trim())
@@ -761,12 +832,13 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
         target.castRefs = castRefs
       }
       if ('sceneId' in sb) target.sceneId = sceneId
+      if (shotDesign) target.shotDesign = shotDesign
       if (dlgs) target.dialogues = dlgs
       if (typeof sb.chainFromPrev === 'boolean') target.chainFromPrev = sb.chainFromPrev
+      if ('stateChanges' in sb) target.stateChanges = stateChanges
       target.keyframeImageId = undefined
       target.state = 'idle'
       target.error = undefined
-      if (sb.ensureScope === true || scopeKind) scopeAgentStoryboardVariants(d, currentEpisode, target, castRefs, scopeKind)
       applied.storyboardsReplaced.push({ id: target.id, index: target.index + 1, desc: target.videoDesc.slice(0, 120) })
       continue
     }
@@ -782,17 +854,19 @@ function applyAgentStoryboards(d: ProjectDoc, storyboards: AgentPlan['storyboard
       associateAssetIds: cast,
       castRefs,
       sceneId,
+      shotDesign,
+      stateChanges,
       dialogues: dlgs ?? [],
       shouldGenerateImage: true,
       chainFromPrev: sb.chainFromPrev === true,
       state: 'idle',
     })
-    const added = d.storyboards[d.storyboards.length - 1]
-    if (sb.ensureScope === true || scopeKind) scopeAgentStoryboardVariants(d, currentEpisode, added, castRefs, scopeKind)
     applied.storyboardsAdded.push({ id, index: index + 1, desc: sb.videoDesc.slice(0, 120) })
   }
   if ((storyboards ?? []).some((sb) => sb?.videoDesc)) {
     syncTracksFromStoryboards(d)
+    // 未声明变更点的 castRefs 一律回落到台账推导的继承形态，避免 Agent 漏写导致静默漂移
+    syncCastRefsToLedger(d)
     invalidateCurrentEpisodeProduction(d)
   }
 }
@@ -909,6 +983,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   agentBusy: false,
   film: { state: 'idle' },
   batch: { running: false },
+  pipeline: { running: false, stages: PIPELINE_STAGES.map((stage) => ({ ...stage, state: 'pending' as const })) },
 
   init: async () => {
     set({ loading: true })
@@ -982,15 +1057,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   updateSeriesBible: (patch) =>
     get().mutate((d) => {
-      const current = d.seriesBible ?? { continuityRules: [], plannedEpisodeCount: d.episodes?.length || 1 }
+      const current: SeriesBible = d.seriesBible ?? { plannedEpisodeCount: d.episodes?.length || 1 }
       d.seriesBible = {
-        ...current,
-        ...patch,
         logline: 'logline' in patch ? compactText(patch.logline) : current.logline,
         synopsis: 'synopsis' in patch ? compactText(patch.synopsis) : current.synopsis,
         theme: 'theme' in patch ? compactText(patch.theme) : current.theme,
         worldRules: 'worldRules' in patch ? compactText(patch.worldRules) : current.worldRules,
-        continuityRules: 'continuityRules' in patch ? uniqueStrings(patch.continuityRules) ?? [] : current.continuityRules ?? [],
         plannedEpisodeCount:
           typeof patch.plannedEpisodeCount === 'number' && Number.isFinite(patch.plannedEpisodeCount)
             ? Math.max(1, Math.floor(patch.plannedEpisodeCount))
@@ -1002,7 +1074,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       const episode = d.episodes?.find((item) => item.id === episodeId)
       if (!episode) return
-      const next = { ...(episode.plan ?? {}), ...cleanEpisodePlanPatch(d, patch) }
+      const next = { ...(episode.plan ?? {}), ...cleanEpisodePlanPatch(patch) }
       episode.plan = episodePlanHasContent(next) ? next : undefined
       episode.updatedAt = Date.now()
     }),
@@ -1068,11 +1140,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (episodes.length <= 1) return
       const deleteIndex = episodes.findIndex((e) => e.id === id)
       if (deleteIndex < 0) return
-      const deleted = episodes[deleteIndex]
-      const deletedStoryboardIds = deleted.storyboards.map((storyboard) => storyboard.id)
       const deletingCurrent = d.currentEpisodeId === id
       d.episodes = episodes.filter((e) => e.id !== id)
-      removeVariantScopeReferences(d, { episodeIds: [id], storyboardIds: deletedStoryboardIds })
       reindexEpisodes(d.episodes)
       if (deletingCurrent || !d.episodes.some((e) => e.id === d.currentEpisodeId)) {
         const next = d.episodes[Math.min(deleteIndex, d.episodes.length - 1)]
@@ -1267,9 +1336,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!target.rejectedLibraryEntityIds.length) target.rejectedLibraryEntityIds = undefined
 
       let refsChanged = rewriteStoryboardAssetRefs(d.storyboards, removedIds, target.id, variantMap)
+      refsChanged = rewriteStateChangeRefs(d.storyboards, removedIds, target.id, sourceVariantIds, variantMap) || refsChanged
       for (const episode of d.episodes ?? []) {
-        if (episode.id !== d.currentEpisodeId) refsChanged = rewriteStoryboardAssetRefs(episode.storyboards, removedIds, target.id, variantMap) || refsChanged
-        if (rewriteEpisodePlanAssetRefs(episode, removedIds, target.id, sourceVariantIds, variantMap)) refsChanged = true
+        if (episode.id === d.currentEpisodeId) continue
+        refsChanged = rewriteStoryboardAssetRefs(episode.storyboards, removedIds, target.id, variantMap) || refsChanged
+        refsChanged = rewriteStateChangeRefs(episode.storyboards, removedIds, target.id, sourceVariantIds, variantMap) || refsChanged
       }
       d.assets = d.assets.filter((asset) => !removedIds.has(asset.id))
       if (refsChanged) invalidateEpisodesUsingAsset(d, target.id)
@@ -1386,10 +1457,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       d.storyboards = d.storyboards.filter((x) => x.id !== id)
       d.clips = d.clips.filter((c) => c.storyboardId !== id)
-      removeVariantScopeReferences(d, { storyboardIds: [id] })
       // 删除后重排 index 保持连续：否则 index 出现空洞，新建分镜会与现有撞 index → 排序/承接取错相邻镜
       d.storyboards.sort((a, b) => a.index - b.index).forEach((s, i) => (s.index = i))
       syncTracksFromStoryboards(d) // 段内去该分镜 + 空段删除 + order 重排
+      // 删掉的这一镜可能带着变更点，后续镜的继承状态要重算
+      syncCastRefsToLedger(d)
       invalidateCurrentEpisodeProduction(d)
     }),
   reorderStoryboards: (orderedIds) =>
@@ -1622,9 +1694,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       prompt: variant.prompt,
       state: 'idle',
     }
+    // 底图从时间轴推导：这个形态是在角色处于什么状态时发生的，就以那个状态为底。
+    // 一直用主图会让"常服 → 受伤"变成"默认造型 + 伤口"，把中间的换装丢掉。
+    const baseVariantId = variantDerivationBase(doc, assetId, variantId)
+    const baseVariant = baseVariantId ? asset.variants?.find((item) => item.id === baseVariantId) : undefined
+    const base: Asset = baseVariant?.refImageId
+      ? { ...asset, refImageId: baseVariant.refImageId, desc: baseVariant.desc || asset.desc, prompt: baseVariant.prompt || asset.prompt }
+      : asset
     setAssetVariantState(get, assetId, variantId, { state: 'generating', error: undefined })
     try {
-      const refImageId = await generateDerivativeImage(child, asset, doc.meta)
+      const refImageId = await generateDerivativeImage(child, base, doc.meta)
       setAssetVariantState(get, assetId, variantId, { refImageId, state: 'done', error: undefined })
     } catch (e) {
       setAssetVariantState(get, assetId, variantId, { state: 'failed', error: e instanceof Error ? e.message : String(e) })
@@ -1661,6 +1740,90 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().mutate((d) => {
       setStoryboardCastVariantForScope(d, storyboardId, assetId, variantId)
     }),
+  /**
+   * 按派生底图拆分形态。
+   *
+   * 第一种底图保留在原形态上（它的参考图如果已经生成过，就是按这个底来的，不该作废）；
+   * 之后每出现一种新底图就复制出一个新形态，并把那个变更点改指过去。
+   * 下游镜头的 castRefs 不用手工改——syncCastRefsToLedger 会按新的变更点重算继承。
+   */
+  splitVariantByBase: (assetId, variantId) => {
+    let created = 0
+    get().mutate((d) => {
+      const asset = d.assets.find((item) => item.id === assetId)
+      const origin = asset?.variants?.find((item) => item.id === variantId)
+      if (!asset || !origin) return
+      const uses = variantBaseUses(d, assetId, variantId)
+      const bases = ambiguousVariantBases(d, assetId, variantId, uses)
+      if (bases.length < 2) return
+
+      const labelOf = (baseId: string | undefined) =>
+        baseId ? asset.variants?.find((item) => item.id === baseId)?.label ?? baseId : '主形象'
+      // 第一种底图留给原形态
+      const [, ...extraBases] = bases
+      const newIdByBase = new Map<string, string>()
+      for (const baseId of extraBases) {
+        const id = P.newId('v_')
+        newIdByBase.set(baseId ?? '', id)
+        asset.variants = [
+          ...(asset.variants ?? []),
+          {
+            ...origin,
+            id,
+            label: `${origin.label}（${labelOf(baseId)}）`,
+            // 参考图不复制：底图不同，图必须重新派生，否则拆分没有意义
+            refImageId: undefined,
+            state: 'idle',
+            error: undefined,
+            parentVariantId: baseId,
+            tags: [...new Set([...(origin.tags ?? []), 'split'])],
+          },
+        ]
+        created += 1
+      }
+
+      const allStoryboards = [d.storyboards, ...(d.episodes ?? []).map((episode) => episode.storyboards)]
+      const ambiguousKeys = new Set(bases.map((baseId) => baseId ?? ''))
+      for (const use of uses) {
+        // 环形返回（换回原样）不参与拆分，它的底图不在 bases 里
+        if (!ambiguousKeys.has(use.baseVariantId ?? '')) continue
+        const nextId = newIdByBase.get(use.baseVariantId ?? '')
+        if (!nextId) continue
+        for (const storyboards of allStoryboards) {
+          const storyboard = storyboards?.find((item) => item.id === use.storyboardId)
+          const change = storyboard?.stateChanges?.find((item) => item.assetId === assetId && item.toVariantId === variantId)
+          if (change) change.toVariantId = nextId
+        }
+      }
+      if (created) {
+        syncCastRefsToLedger(d)
+        invalidateEpisodesUsingAsset(d, assetId)
+      }
+    })
+    return created
+  },
+
+  setAppearanceChange: (storyboardId, change) => {
+    let ok = false
+    get().mutate((d) => {
+      ok = declareAppearanceChange(d, storyboardId, change)
+      if (!ok) return
+      // 变更点会改变后续所有镜头的继承状态，这些镜头的关键帧/成片随之失效
+      syncCastRefsToLedger(d)
+      invalidateEpisodesUsingAsset(d, change.assetId)
+    })
+    return ok
+  },
+  revertAppearanceToInherited: (storyboardId, assetId) => {
+    let ok = false
+    get().mutate((d) => {
+      ok = revertToInheritedAppearance(d, storyboardId, assetId)
+      if (!ok) return
+      syncCastRefsToLedger(d)
+      invalidateEpisodesUsingAsset(d, assetId)
+    })
+    return ok
+  },
   selectAssetImage: (assetId, imageId) =>
     get().mutate((d) => {
       const a = d.assets.find((x) => x.id === assetId)
@@ -1903,7 +2066,64 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  runAgent: async (userText) => {
+  abortNovelPipeline: () => {
+    const pipeline = get().pipeline
+    if (!pipeline.running || pipeline.abortRequested) return
+    set({ pipeline: { ...pipeline, abortRequested: true } })
+  },
+
+  /**
+   * 小说 → 成片一键跑通。阶段产物已存在就跳过，所以「继续上次」和「从头跑」是同一个入口；
+   * force 时才重跑。中断只在阶段边界生效——半路砍断正在写的剧本没有意义。
+   */
+  runNovelPipeline: async (options) => {
+    if (get().pipeline.running || get().batch.running || get().agentBusy) return
+    const doc = get().doc
+    if (!doc) return
+    set({ pipeline: { running: true, stages: get().pipeline.stages, abortRequested: false } })
+    try {
+      await runNovelToFilmPipeline(
+        {
+          getDoc: () => get().doc,
+          isAborted: () => get().pipeline.abortRequested === true,
+          onStatus: (stages) => set({ pipeline: { ...get().pipeline, stages } }),
+          extractAllEvents: () => get().extractAllEvents(),
+          createEpisodes: (count) => get().createEpisodes(count),
+          setEpisodeNovelChapters: (episodeId, chapterIds) => get().setEpisodeNovelChapters(episodeId, chapterIds),
+          renameEpisode: (episodeId, title) => get().renameEpisode(episodeId, title),
+          updateEpisodePlan: (episodeId, patch) => get().updateEpisodePlan(episodeId, patch),
+          switchEpisode: (episodeId) => get().switchEpisode(episodeId),
+          generateAllAssets: () => get().generateAllAssets(),
+          produceCurrentEpisode: () => produceCurrentEpisode(get, set, { manageBatch: true, enforceContinuity: true }),
+          runAgentStage: (stage, userText) => get().runAgent(userText, { stages: [stage] }),
+          planEpisodeBreaks: async (targetCount) => {
+            const current = get().doc
+            const model = useGraphStore.getState().selectedModel
+            if (!current?.novel.length || !model) return []
+            return planEpisodeBreaks(current.novel, targetCount, { model })
+          },
+          ensureStoryBible: async (onProgress) => {
+            const current = get().doc
+            const model = useGraphStore.getState().selectedModel
+            if (!current || !model || !storyBibleIsStale(current.storyBible, current.novel.length)) return
+            const bible = await buildStoryBible(current.novel, { model }, onProgress)
+            get().mutate((d) => {
+              d.storyBible = bible
+            })
+          },
+        },
+        options,
+      )
+    } catch (e) {
+      logError('pipeline', 'run.error', e, { projectId: doc.meta.id })
+    } finally {
+      set({ pipeline: { ...get().pipeline, running: false, abortRequested: false } })
+      await get().flush()
+      await flushLogs()
+    }
+  },
+
+  runAgent: async (userText, agentOptions) => {
     const doc0 = get().doc
     if (!doc0 || !userText.trim() || get().agentBusy) return
     const runId = P.newId('run_')
@@ -1963,7 +2183,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (relativeTargetError) throw new Error(relativeTargetError)
       const plan = await runAgentPipeline(() => get().doc, userText, onPipeline, (stage, fragment) => {
         applyStagePlan(stage, fragment)
-      }, { episodeId: writeEpisodeId })
+      }, { episodeId: writeEpisodeId, stages: agentOptions?.stages })
       logInfo('agent', 'plan.result', { ...logCtx, plan: planForLog(plan) })
       if (plan.script?.content && !appliedStages.has('script')) applyStagePlan('script', { script: plan.script })
       if (plan.assets?.length && !appliedStages.has('assets')) applyStagePlan('assets', { assets: plan.assets })
@@ -2074,28 +2294,88 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 只批量出图类资产（角色/场景/物品），跳过 audio/clip + 已出图的
     const ids = get().doc!.assets.filter((a) => (a.type === 'role' || a.type === 'scene' || a.type === 'prop') && !a.refImageId).map((a) => a.id)
     if (!ids.length) return
-    const c = get().doc!.meta.concurrency ?? 3 // 资产相互独立 → 并发
     set({ batch: { running: true, label: `生成资产 0/${ids.length}` } })
     try {
-      await mapPool(ids, c, (id) => get().generateAsset(id), (done, total) => set({ batch: { running: true, label: `生成资产 ${done}/${total}` } }))
+      await runTaskQueue(independentTasks(ids.map((id) => ({ id })), 'image', (item) => get().generateAsset(item.id), (item) => item.id), {
+        limits: limitsFromConcurrency(get().doc!.meta.concurrency),
+        onProgress: (p) => set({ batch: { running: true, label: `生成资产 ${p.done}/${p.total}` } }),
+      })
     } finally {
       set({ batch: { running: false } })
     }
   },
 
+  /**
+   * 宫格关键帧：把同一 sceneId 的连续待生成镜头合成一张分镜板，生成后切成单帧回写。
+   * 组内一致性由"同一次生成"保证；组间仍靠资产参考图。失败的组静默退回逐镜生成
+   * ——宫格是优化不是前提，不该因为它挂掉就产不出片。
+   */
+  generateGridKeyframesForPending: async (onLabel) => {
+    const doc = get().doc
+    if (!doc || !doc.meta.gridKeyframes || !gridSupported()) return 0
+    const model = doc.meta.imageModel || useGraphStore.getState().selectedImageModel
+    if (!model) return 0
+    // 承接镜要用上一镜成品作参考，语义与宫格冲突，交给逐镜路径
+    const pending = doc.storyboards.filter((sb) => !sb.keyframeImageId && !sb.chainFromPrev)
+    const { groups } = planGridGroups(pending.map((sb) => ({ id: sb.id, index: sb.index, sceneId: sb.sceneId })))
+    if (!groups.length) return 0
+
+    let covered = 0
+    for (let i = 0; i < groups.length; i += 1) {
+      const group = groups[i]
+      const latest = get().doc
+      if (!latest) break
+      onLabel?.(`宫格分镜板 ${i + 1}/${groups.length}（${group.shots.length} 镜）`)
+      try {
+        const result = await generateGridKeyframes(group, latest.storyboards, latest.assets, latest.meta, model, (text) => onLabel?.(text))
+        get().mutate((d) => {
+          for (const [storyboardId, imageId] of Object.entries(result.cellImageIds)) {
+            const sb = d.storyboards.find((item) => item.id === storyboardId)
+            if (!sb) continue
+            sb.keyframeImageId = imageId
+            sb.gridImageId = result.gridImageId
+            sb.state = 'done'
+            sb.error = undefined
+          }
+        })
+        covered += Object.keys(result.cellImageIds).length
+      } catch (e) {
+        logError('grid', 'generate.failed', e, { sceneId: group.sceneId, shots: group.shots.length })
+        // 宫格失败会静默退回逐镜，用户看不到任何痕迹。把原因写到组内第一个分镜上，
+        // 并保留已落盘的宫格原图 id——排查时要能肉眼看到模型实际画了什么。
+        const failedGridImageId = (e as Error & { gridImageId?: string }).gridImageId
+        const reason = e instanceof Error ? e.message : String(e)
+        get().mutate((d) => {
+          const sb = d.storyboards.find((item) => item.id === group.shots[0].id)
+          if (!sb) return
+          sb.gridError = reason
+          if (failedGridImageId) sb.gridImageId = failedGridImageId
+        })
+      }
+    }
+    return covered
+  },
+
   generateAllKeyframes: async () => {
     if (get().batch.running || !get().doc) return
-    const ids = [...get().doc!.storyboards]
-      .sort((a, b) => a.index - b.index)
-      .filter((s) => !s.keyframeImageId)
-      .map((s) => s.id)
-    if (!ids.length) return
-    // 有承接镜头 → 串行(concurrency=1)保连贯(承接需上一镜关键帧)；全无承接 → 并发提速
-    const chained = get().doc!.storyboards.some((s) => s.chainFromPrev)
-    const c = chained ? 1 : (get().doc!.meta.concurrency ?? 3)
-    set({ batch: { running: true, label: `生成关键帧 0/${ids.length}` } })
+    if (![...get().doc!.storyboards].some((s) => !s.keyframeImageId)) return
+    set({ batch: { running: true, label: '准备关键帧…' } })
     try {
-      await mapPool(ids, c, (id) => get().generateKeyframe(id), (done, total) => set({ batch: { running: true, label: `生成关键帧 ${done}/${total}` } }))
+      await get().generateGridKeyframesForPending((label) => set({ batch: { running: true, label } }))
+    } finally {
+      set({ batch: { running: false } })
+    }
+    const pending = [...get().doc!.storyboards].sort((a, b) => a.index - b.index).filter((s) => !s.keyframeImageId)
+    if (!pending.length) return
+    // 承接链内部必须顺序（后一镜要用前一镜关键帧作参考），链与链之间没有依赖 → 并发。
+    // 旧写法是"只要有任意承接镜就整批串行"，40 镜里 3 个承接会拖垮另外 37 个。
+    const tasks = chainTasks(pending, 'image', (sb) => get().generateKeyframe(sb.id), (sb) => `#${sb.index + 1}`)
+    set({ batch: { running: true, label: `生成关键帧 0/${tasks.length}` } })
+    try {
+      await runTaskQueue(tasks, {
+        limits: limitsFromConcurrency(get().doc!.meta.concurrency),
+        onProgress: (p) => set({ batch: { running: true, label: `生成关键帧 ${p.done}/${p.total}${p.failed ? `（${p.label} 失败）` : ''}` } }),
+      })
     } finally {
       set({ batch: { running: false } })
     }
@@ -2103,17 +2383,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   generateAllClips: async () => {
     if (get().batch.running || !get().doc) return
-    const ids = [...get().doc!.storyboards]
+    const pending = [...get().doc!.storyboards]
       .sort((a, b) => a.index - b.index)
       .filter((s) => s.keyframeImageId && !get().doc!.clips.some((c) => c.storyboardId === s.id && c.state === 'done'))
-      .map((s) => s.id)
-    if (!ids.length) return
-    // 有承接镜头 → 串行保顺接(承接片段需上一片段尾帧)；全无承接 → 并发提速
-    const chained = get().doc!.storyboards.some((s) => s.chainFromPrev)
-    const c = chained ? 1 : (get().doc!.meta.concurrency ?? 3)
-    set({ batch: { running: true, label: `生成视频 0/${ids.length}` } })
+    if (!pending.length) return
+    // 同关键帧：承接片段需要上一片段的真实尾帧，链内串行、链间并发；视频走独立通道和更严的 RPM
+    const tasks = chainTasks(pending, 'video', (sb) => get().generateClip(sb.id), (sb) => `#${sb.index + 1}`)
+    set({ batch: { running: true, label: `生成视频 0/${tasks.length}` } })
     try {
-      await mapPool(ids, c, (id) => get().generateClip(id), (done, total) => set({ batch: { running: true, label: `生成视频 ${done}/${total}` } }))
+      await runTaskQueue(tasks, {
+        limits: limitsFromConcurrency(get().doc!.meta.concurrency),
+        onProgress: (p) => set({ batch: { running: true, label: `生成视频 ${p.done}/${p.total}${p.failed ? `（${p.label} 失败）` : ''}` } }),
+      })
     } finally {
       set({ batch: { running: false } })
     }

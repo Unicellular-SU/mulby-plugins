@@ -105,7 +105,7 @@ check(
   ),
   JSON.stringify(manifest.delivery.assetReferences),
 )
-check('adds missing item report to season manifest', manifest.delivery.missingItems.some((item) => item.code === 'missing_asset' && item.episodeId === 'ep2'), JSON.stringify(manifest.delivery.missingItems))
+check('adds missing item report to season manifest', manifest.delivery.missingItems.some((item) => item.code === 'dangling_ref' && item.episodeId === 'ep2'), JSON.stringify(manifest.delivery.missingItems))
 check('adds subtitle metadata to season manifest', manifest.episodes[0].subtitles?.[0]?.fileName === 'E1_Pilot_subtitles.srt' && manifest.episodes[0].subtitles?.[0]?.cueCount === 1, JSON.stringify(manifest.episodes[0].subtitles))
 
 const missingVariantProject = doc({
@@ -132,13 +132,8 @@ check(
     item.assetId === 'hero' &&
     item.assetName === 'Hero' &&
     item.assetType === 'role' &&
-    item.libraryEntityId === 'el-hero' &&
-    item.libraryEntityVersion === 3 &&
-    item.librarySyncPolicy === 'snapshot' &&
     item.variantId === 'gala' &&
-    item.variantLabel === 'Gala' &&
-    item.variantKind === 'makeup' &&
-    item.libraryVariantId === 'lib-gala',
+    item.variantLabel === 'Gala',
   ),
   JSON.stringify(missingVariantManifest.delivery.missingItems),
 )

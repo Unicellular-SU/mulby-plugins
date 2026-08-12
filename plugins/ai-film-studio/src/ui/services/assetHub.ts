@@ -507,19 +507,19 @@ export function projectEpisodeUsageLabel(label: string, episode?: EpisodeUsageSo
   return prefix ? `${prefix} · ${label}` : label
 }
 
-function variantEpisodeScopeLabel(variant: AssetVariant, episodesById: ReadonlyMap<string, EpisodeUsageSource>): string {
-  const labels = [
-    ...new Set(
-      (variant.appliesToEpisodeIds ?? [])
-        .map((episodeId) => episodeUsagePrefix(episodesById.get(episodeId)))
-        .filter(Boolean),
-    ),
-  ]
+/** 形态素材的剧集标注：来自实际出场的剧集集合（调用方从分镜反查后传入） */
+function variantEpisodeScopeLabel(episodeIds: readonly string[], episodesById: ReadonlyMap<string, EpisodeUsageSource>): string {
+  const labels = [...new Set(episodeIds.map((episodeId) => episodeUsagePrefix(episodesById.get(episodeId))).filter(Boolean))]
   return labels.length ? `（${labels.join('、')}）` : ''
 }
 
-export function projectVariantMediaUsageLabel(assetName: string, variant: AssetVariant, episodesById: ReadonlyMap<string, EpisodeUsageSource> = new Map()): string {
-  const scope = variantEpisodeScopeLabel(variant, episodesById)
+export function projectVariantMediaUsageLabel(
+  assetName: string,
+  variant: AssetVariant,
+  episodesById: ReadonlyMap<string, EpisodeUsageSource> = new Map(),
+  usedInEpisodeIds: readonly string[] = [],
+): string {
+  const scope = variantEpisodeScopeLabel(usedInEpisodeIds, episodesById)
   return `${assetName} / ${variant.label}${scope}`
 }
 
@@ -892,6 +892,28 @@ function collectEpisodeClips(doc: ProjectDoc, currentEpisode: Episode | undefine
   })
 }
 
+/** 形态 id → 用到它的剧集 id 集合（由分镜反查，取代已删除的 appliesToEpisodeIds 声明） */
+function variantEpisodeUsage(doc: ProjectDoc): Map<string, Set<string>> {
+  const usage = new Map<string, Set<string>>()
+  const scan = (episodeId: string | undefined, storyboards: ProjectDoc['storyboards']) => {
+    if (!episodeId) return
+    for (const storyboard of storyboards ?? []) {
+      for (const ref of castRefsForStoryboard(storyboard)) {
+        if (!ref.variantId) continue
+        const set = usage.get(ref.variantId) ?? new Set<string>()
+        set.add(episodeId)
+        usage.set(ref.variantId, set)
+      }
+    }
+  }
+  for (const episode of doc.episodes ?? []) {
+    if (episode.id === doc.currentEpisodeId) continue
+    scan(episode.id, episode.storyboards)
+  }
+  scan(doc.currentEpisodeId, doc.storyboards)
+  return usage
+}
+
 function collectEpisodeTracks(doc: ProjectDoc, currentEpisode: Episode | undefined): Array<{ track: VideoTrack; episode?: Episode }> {
   const sources: Array<{ track: VideoTrack; episode?: Episode }> = [
     ...(doc.track ?? []).map((track) => ({ track, episode: currentEpisode })),
@@ -916,10 +938,19 @@ export async function loadMediaAssetUsages(entities: LibraryEntity[]): Promise<R
     const currentEpisode = doc.currentEpisodeId ? episodesById.get(doc.currentEpisodeId) : undefined
     projectDocs.set(card.id, doc)
     projectDocs.set(doc.meta.id, doc)
+    const variantEpisodeUse = variantEpisodeUsage(doc)
     for (const asset of doc.assets ?? []) {
       addMediaProjectAssetUsage(usages, mediaKey({ assetId: asset.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
       for (const image of asset.images ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: image.refImageId }), doc.meta.id, doc.meta.name, asset.id, asset.name)
-      for (const variant of asset.variants ?? []) addMediaProjectAssetUsage(usages, mediaKey({ assetId: variant.refImageId }), doc.meta.id, doc.meta.name, asset.id, projectVariantMediaUsageLabel(asset.name, variant, episodesById))
+      for (const variant of asset.variants ?? [])
+        addMediaProjectAssetUsage(
+          usages,
+          mediaKey({ assetId: variant.refImageId }),
+          doc.meta.id,
+          doc.meta.name,
+          asset.id,
+          projectVariantMediaUsageLabel(asset.name, variant, episodesById, [...(variantEpisodeUse.get(variant.id) ?? [])]),
+        )
       addMediaProjectAssetUsage(usages, mediaKey({ localPath: asset.audioFilePath, url: asset.audioUrl }), doc.meta.id, doc.meta.name, asset.id, asset.name)
     }
     const storyboards = collectEpisodeStoryboards(doc, episodesById, currentEpisode)

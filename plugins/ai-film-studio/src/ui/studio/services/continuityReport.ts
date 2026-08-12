@@ -1,43 +1,86 @@
+/**
+ * 连续性报告（台账版）。
+ *
+ * 旧版有 31 个问题码，其中 16 个阻断生产——因为它把「用户声明的适用范围/必需资产」
+ * 和「分镜实际用法」当成两套数据反复交叉校验，每多一种不匹配方式就多一个码。
+ *
+ * 新版只有 7 个码 / 6 个分类，全部从数据推导，不校验任何声明：
+ *
+ *   blocking   dangling_ref                    引用了已删除的资产或形态          （阻断）
+ *   blocking   missing_ref_image               出场资产/形态没有参考图            （阻断）
+ *   appearance unexplained_appearance_change   形态与继承状态不符且未声明变更点
+ *   identity   duplicate_identity              多个资产疑似同一身份
+ *   scene      scene_asset_inconsistent        同场景组的场景资产漏挂或混用
+ *   coverage   chapter_coverage                原著章节未分配 / 重复分配 / 引用失效
+ *   hint       unused_project_asset            资产未被任何分镜引用（仅提示）
+ *
+ * 身份资产（资产中心）的版本落后/归档/别名撞库不再进本报告——那是资产面板的角标，
+ * 不该拦住整季生产。
+ */
 import { castRefsForStoryboard, labelForCastRef, refImageIdForCastRef } from '../../domain/castRefs'
 import { normalizeAssetLookup } from '../../domain/assetAliases'
-import type { Asset, Episode, ProjectAssetLibraryLink, ProjectDoc, Storyboard } from '../../domain/types'
-import type { LibraryEntity } from '../../services/assetHub'
+import {
+  buildContinuityLedger,
+  ambiguousVariantBases,
+  expectedVariantId,
+  storyboardsOf,
+  variantBaseUses,
+  type ContinuityLedger,
+  type LedgerEntry,
+} from '../../domain/continuityLedger'
+import type { Asset, Episode, ProjectDoc } from '../../domain/types'
 
-type VariantKind = NonNullable<Asset['variants']>[number]['variantKind']
+export type ContinuityCategory = 'blocking' | 'appearance' | 'identity' | 'scene' | 'coverage' | 'hint'
+
+export type ContinuityCode =
+  | 'dangling_ref'
+  | 'missing_ref_image'
+  | 'unexplained_appearance_change'
+  | 'ambiguous_variant_base'
+  | 'duplicate_identity'
+  | 'scene_asset_inconsistent'
+  | 'chapter_coverage'
+  | 'unused_project_asset'
 
 export interface ContinuityIssue {
-  severity: 'error' | 'warning'
-  code: string
+  category: ContinuityCategory
+  severity: 'error' | 'warning' | 'info'
+  code: ContinuityCode
   message: string
   episodeId?: string
   storyboardId?: string
   storyboardIndex?: number
+  storyboardIds?: string[]
   sceneId?: string
   assetId?: string
+  /** 本镜实际绑定的形态 */
   variantId?: string
-  variantKind?: VariantKind
-  candidateVariantIds?: string[]
-  candidateVariantLabels?: string[]
-  candidateVariantKinds?: VariantKind[]
-  candidateLibraryEntityIds?: string[]
-  candidateLibraryEntityLabels?: string[]
-  previousEpisodeId?: string
-  previousEpisodeIndex?: number
-  previousEpisodeTitle?: string
-  previousVariantId?: string
-  previousVariantLabel?: string
-  previousVariantKind?: VariantKind
-  conflictLabel?: string
-  conflictSource?: 'name' | 'alias'
+  /** 台账推导出的继承形态（undefined = 主形象）——「沿用上一形态」快速修复的目标值 */
+  expectedVariantId?: string
+  expectedVariantLabel?: string
+  /** 上一次变更点的位置，用于说明「上一次换装发生在哪」 */
+  changedAtEpisodeIndex?: number
+  changedAtStoryboardIndex?: number
   relatedAssetIds?: string[]
-  libraryEntityId?: string
-  entityVersion?: number
-  currentEntityVersion?: number
-  scopeKind?: 'episode' | 'scene' | 'storyboard'
+  conflictLabel?: string
+  chapterId?: string
+  /** ambiguous_variant_base：该形态被从这几种不同状态变来过（undefined 项 = 主形象） */
+  baseVariantIds?: (string | undefined)[]
+  baseVariantLabels?: string[]
 }
 
-export interface ContinuityReportOptions {
-  libraryEntities?: readonly LibraryEntity[]
+export const CATEGORY_LABEL: Record<ContinuityCategory, string> = {
+  blocking: '生成前置检查',
+  appearance: '形态连续性',
+  identity: '资产身份',
+  scene: '同场景一致性',
+  coverage: '章节覆盖',
+  hint: '提示',
+}
+
+/** 只有 blocking 分类会拦住生产。旧版有 16 个阻断码，绝大多数只是"你没勾选"。 */
+export function isProductionBlocking(issue: ContinuityIssue): boolean {
+  return issue.category === 'blocking'
 }
 
 export interface ContinuityCastUse {
@@ -46,16 +89,10 @@ export interface ContinuityCastUse {
   assetId: string
   assetName: string
   assetType: Asset['type']
-  libraryEntityId?: string
-  libraryEntityVersion?: number
-  librarySyncPolicy?: ProjectAssetLibraryLink['syncPolicy']
   variantId?: string
   variantLabel?: string
-  variantKind?: VariantKind
-  libraryVariantId?: string
   label: string
   refImageId?: string
-  appliesToEpisode: boolean
 }
 
 export interface ContinuityEpisodeReport {
@@ -72,18 +109,26 @@ export interface ContinuityReport {
   currentEpisodeId?: string
   episodes: ContinuityEpisodeReport[]
   issues: ContinuityIssue[]
+  ledger: ContinuityLedger
 }
 
-function sortedEpisodes(doc: ProjectDoc): Episode[] {
-  return [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
+const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
+  role: '角色',
+  scene: '场景',
+  prop: '道具',
+  audio: '音色',
+  clip: '素材片段',
 }
 
-function episodeStoryboards(doc: ProjectDoc, episode: Episode): Storyboard[] {
-  return episode.id === doc.currentEpisodeId ? doc.storyboards : episode.storyboards
+const CAST_TYPES: Asset['type'][] = ['role', 'scene', 'prop']
+
+function variantLabelOf(asset: Asset | undefined, variantId: string | undefined): string {
+  if (!variantId) return '主形象'
+  return asset?.variants?.find((item) => item.id === variantId)?.label ?? variantId
 }
 
 function episodeList(doc: ProjectDoc): Episode[] {
-  const episodes = sortedEpisodes(doc)
+  const episodes = [...(doc.episodes ?? [])].sort((a, b) => a.index - b.index)
   if (episodes.length) return episodes
   return [
     {
@@ -101,820 +146,351 @@ function episodeList(doc: ProjectDoc): Episode[] {
   ]
 }
 
-export function variantScopeIssue(variant: NonNullable<Asset['variants']>[number] | undefined, episode: Episode, storyboard: Storyboard): ContinuityIssue['scopeKind'] | undefined {
-  if (!variant) return undefined
-  const episodeIds = variant.appliesToEpisodeIds ?? []
-  if (episodeIds.length && !episodeIds.includes(episode.id)) return 'episode'
-  const sceneIds = variant.appliesToSceneIds ?? []
-  if (sceneIds.length && (!storyboard.sceneId || !sceneIds.includes(storyboard.sceneId))) return 'scene'
-  const storyboardIds = variant.appliesToStoryboardIds ?? []
-  if (storyboardIds.length && !storyboardIds.includes(storyboard.id)) return 'storyboard'
-  return undefined
+// —— identity：一组疑似同身份的资产只报一条，不再每个资产各报一条 ——
+
+function identityKeysOf(asset: Asset): string[] {
+  const keys = [asset.name, ...(asset.aliases ?? [])]
+    .map((label) => normalizeAssetLookup(label))
+    .filter(Boolean)
+  return [...new Set(keys)]
 }
 
-function variantHasScope(variant: NonNullable<Asset['variants']>[number] | undefined): boolean {
-  return !!variant && (!!variant.appliesToEpisodeIds?.length || !!variant.appliesToSceneIds?.length || !!variant.appliesToStoryboardIds?.length)
-}
-
-function withScopeId(ids: string[] | undefined, id: string): string[] {
-  return [...new Set([...(ids ?? []), id].filter(Boolean))]
-}
-
-export function variantScopePatchForUse(
-  variant: NonNullable<Asset['variants']>[number],
-  episode: Pick<Episode, 'id'>,
-  storyboard: Pick<Storyboard, 'id' | 'sceneId'>,
-  preferredScope?: ContinuityIssue['scopeKind'],
-): Partial<NonNullable<Asset['variants']>[number]> | undefined {
-  const scope =
-    preferredScope ??
-    ((variant.appliesToStoryboardIds?.length ?? 0) > 0
-      ? 'storyboard'
-      : (variant.appliesToSceneIds?.length ?? 0) > 0
-        ? 'scene'
-        : (variant.appliesToEpisodeIds?.length ?? 0) > 0
-          ? 'episode'
-          : undefined)
-  if (!scope) return undefined
-  if (scope === 'storyboard') return { appliesToStoryboardIds: withScopeId(variant.appliesToStoryboardIds, storyboard.id) }
-  if (scope === 'scene') {
-    if (storyboard.sceneId) return { appliesToSceneIds: withScopeId(variant.appliesToSceneIds, storyboard.sceneId) }
-    return { appliesToStoryboardIds: withScopeId(variant.appliesToStoryboardIds, storyboard.id) }
-  }
-  return { appliesToEpisodeIds: withScopeId(variant.appliesToEpisodeIds, episode.id) }
-}
-
-function variantsScopedToStoryboard(asset: Asset, episode: Episode, storyboard: Storyboard): NonNullable<Asset['variants']> {
-  return (asset.variants ?? []).filter((variant) => {
-    return variantHasScope(variant) && !variantScopeIssue(variant, episode, storyboard)
-  })
-}
-
-const ASSET_TYPE_LABEL: Record<Asset['type'], string> = {
-  role: '角色',
-  scene: '场景',
-  prop: '道具',
-  audio: '音色',
-  clip: '素材片段',
-}
-
-function addDuplicateAssetNameIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
-  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
-  const groups = new Map<string, Asset[]>()
-  for (const asset of doc.assets) {
-    if (!checkedTypes.includes(asset.type)) continue
-    const name = normalizeAssetLookup(asset.name)
-    if (!name) continue
-    const key = `${asset.type}:${name}`
-    groups.set(key, [...(groups.get(key) ?? []), asset])
-  }
-  for (const group of groups.values()) {
-    if (group.length < 2) continue
-    const typeLabel = ASSET_TYPE_LABEL[group[0].type]
-    const ids = group.map((asset) => asset.id).join('、')
-    for (const asset of group) {
-      allIssues.push({
-        severity: 'warning',
-        code: 'duplicate_asset_name',
-        assetId: asset.id,
-        message: `项目中存在多个同名${typeLabel}资产「${asset.name}」（${ids}），多集生成前建议合并或改名，避免同一角色/场景被当成不同资产。`,
-      })
-    }
-  }
-}
-
-interface AssetLookupEntry {
-  asset: Asset
-  label: string
-  source: 'name' | 'alias'
-}
-
-interface EntityLookupEntry {
-  entity: LibraryEntity
-  label: string
-  source: 'name' | 'alias'
-}
-
-interface LastAppearanceUse {
-  episodeId: string
-  episodeIndex: number
-  episodeTitle: string
-  variantId?: string
-  variantLabel?: string
-  variantKind?: VariantKind
-}
-
-function addDuplicateAssetAliasIssues(doc: ProjectDoc, allIssues: ContinuityIssue[]): void {
-  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
-  const groups = new Map<string, AssetLookupEntry[]>()
-  for (const asset of doc.assets) {
-    if (!checkedTypes.includes(asset.type)) continue
-    const entries: AssetLookupEntry[] = [
-      { asset, label: asset.name, source: 'name' },
-      ...(asset.aliases ?? []).map((alias): AssetLookupEntry => ({ asset, label: alias, source: 'alias' })),
-    ]
-    const seenForAsset = new Set<string>()
-    for (const entry of entries) {
-      const lookup = normalizeAssetLookup(entry.label)
-      if (!lookup || seenForAsset.has(lookup)) continue
-      seenForAsset.add(lookup)
-      const key = `${asset.type}:${lookup}`
-      groups.set(key, [...(groups.get(key) ?? []), entry])
-    }
-  }
-  for (const [key, entries] of groups.entries()) {
-    const assetIds = new Set(entries.map((entry) => entry.asset.id))
-    if (assetIds.size < 2 || !entries.some((entry) => entry.source === 'alias')) continue
-    const lookup = key.slice(key.indexOf(':') + 1)
-    const assets = [...assetIds].map((id) => entries.find((entry) => entry.asset.id === id)?.asset).filter((asset): asset is Asset => !!asset)
-    const typeLabel = ASSET_TYPE_LABEL[assets[0].type]
-    const labels = [...new Set(entries.map((entry) => entry.label.trim()).filter(Boolean))]
-    const sharedLabel = labels.length === 1 ? labels[0] : labels.join(' / ')
-    const ids = assets.map((asset) => asset.id).join('、')
-    for (const asset of assets) {
-      const currentEntry =
-        entries.find((entry) => entry.asset.id === asset.id && entry.source === 'alias' && normalizeAssetLookup(entry.label) === lookup) ??
-        entries.find((entry) => entry.asset.id === asset.id && normalizeAssetLookup(entry.label) === lookup)
-      allIssues.push({
-        severity: 'warning',
-        code: 'duplicate_asset_alias',
-        assetId: asset.id,
-        conflictLabel: currentEntry?.label.trim() || sharedLabel,
-        conflictSource: currentEntry?.source,
-        relatedAssetIds: assets.map((item) => item.id).filter((id) => id !== asset.id),
-        message: `项目中多个${typeLabel}资产共享名称/别名「${sharedLabel}」（${ids}），多集生成前建议合并资产或调整别名，避免 Agent 把同一称呼解析到不同资产。`,
-      })
-    }
-  }
-}
-
-function sceneAssetIdsForStoryboard(storyboard: Storyboard, assets: Map<string, Asset>): string[] {
-  const ids = new Set<string>()
-  for (const ref of castRefsForStoryboard(storyboard)) {
-    const asset = assets.get(ref.assetId)
-    if (asset?.type === 'scene') ids.add(asset.id)
-  }
-  return [...ids]
-}
-
-function roleVariantLabel(asset: Asset, variantId: string | undefined): string {
-  if (!variantId) return '主形象'
-  return asset.variants?.find((variant) => variant.id === variantId)?.label ?? variantId
-}
-
-function addSceneRoleVariantIssues(
-  episode: Episode,
-  sceneId: string,
-  group: Storyboard[],
-  assets: Map<string, Asset>,
-  addIssue: (issue: ContinuityIssue) => void,
-): void {
-  const roleVariantUses = new Map<string, { storyboard: Storyboard; variantId?: string; label: string }[]>()
-  for (const storyboard of group) {
-    for (const ref of castRefsForStoryboard(storyboard)) {
-      const asset = assets.get(ref.assetId)
-      if (asset?.type !== 'role') continue
-      const uses = roleVariantUses.get(asset.id) ?? []
-      uses.push({ storyboard, variantId: ref.variantId, label: roleVariantLabel(asset, ref.variantId) })
-      roleVariantUses.set(asset.id, uses)
-    }
-  }
-  for (const [assetId, uses] of roleVariantUses) {
-    const labels = [...new Set(uses.map((use) => use.label).filter(Boolean))]
-    if (labels.length < 2) continue
-    const asset = assets.get(assetId)
-    const seenStoryboards = new Set<string>()
-    for (const use of uses) {
-      if (seenStoryboards.has(use.storyboard.id)) continue
-      seenStoryboards.add(use.storyboard.id)
-      addIssue({
-        severity: 'warning',
-        code: 'scene_group_variant_mismatch',
-        episodeId: episode.id,
-        storyboardId: use.storyboard.id,
-        storyboardIndex: use.storyboard.index + 1,
-        sceneId,
-        assetId,
-        variantId: use.variantId,
-        message: `E${episode.index + 1} 场景组「${sceneId}」中「${asset?.name ?? assetId}」混用了 ${labels.join('、')}。连续场景建议统一绑定同一角色形态，除非镜头内明确发生换装或状态变化。`,
-      })
-    }
-  }
-}
-
-function addSceneReuseIssues(
-  episode: Episode,
-  storyboards: Storyboard[],
-  assets: Map<string, Asset>,
-  addIssue: (issue: ContinuityIssue) => void,
-): void {
-  const groups = new Map<string, Storyboard[]>()
-  for (const storyboard of storyboards) {
-    const sceneId = storyboard.sceneId?.trim()
-    if (!sceneId) continue
-    groups.set(sceneId, [...(groups.get(sceneId) ?? []), storyboard])
-  }
-  for (const [sceneId, group] of groups) {
-    if (group.length < 2) continue
-    addSceneRoleVariantIssues(episode, sceneId, group, assets, addIssue)
-    const sceneRefsByStoryboard = new Map(group.map((storyboard) => [storyboard.id, sceneAssetIdsForStoryboard(storyboard, assets)]))
-    const sceneAssetIds = [...new Set([...sceneRefsByStoryboard.values()].flat())]
-    if (!sceneAssetIds.length) continue
-    const sceneLabels = sceneAssetIds.map((id) => assets.get(id)?.name ?? id).join('、')
-    if (sceneAssetIds.length > 1) {
-      for (const storyboard of group) {
-        const refs = sceneRefsByStoryboard.get(storyboard.id) ?? []
-        addIssue({
-          severity: 'warning',
-          code: 'scene_group_asset_mismatch',
-          episodeId: episode.id,
-          storyboardId: storyboard.id,
-          storyboardIndex: storyboard.index + 1,
-          sceneId,
-          assetId: refs[0],
-          message: `E${episode.index + 1} 场景组「${sceneId}」混用了多个场景资产：${sceneLabels}。连续场景建议统一复用同一个场景资产，避免跨镜环境漂移。`,
-        })
-      }
-      continue
-    }
-    const sceneAssetId = sceneAssetIds[0]
-    const sceneLabel = assets.get(sceneAssetId)?.name ?? sceneAssetId
-    for (const storyboard of group) {
-      const refs = sceneRefsByStoryboard.get(storyboard.id) ?? []
-      if (refs.length) continue
-      addIssue({
-        severity: 'warning',
-        code: 'scene_group_missing_asset',
-        episodeId: episode.id,
-        storyboardId: storyboard.id,
-        storyboardIndex: storyboard.index + 1,
-        sceneId,
-        assetId: sceneAssetId,
-        message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 属于场景组「${sceneId}」，但没有引用场景资产「${sceneLabel}」。建议绑定同一场景资产以保持连续场景复用。`,
-      })
-    }
-  }
-}
-
-function isPlanCastAsset(asset: Asset): boolean {
-  return !asset.parentAssetId && (asset.type === 'role' || asset.type === 'scene' || asset.type === 'prop')
-}
-
-function findVariantOwner(assets: Map<string, Asset>, variantId: string): { asset: Asset; variant: NonNullable<Asset['variants']>[number] } | undefined {
-  for (const asset of assets.values()) {
-    const variant = asset.variants?.find((item) => item.id === variantId)
-    if (variant) return { asset, variant }
-  }
-  return undefined
-}
-
-function addEpisodePlanIssues(
-  episode: Episode,
-  storyboards: Storyboard[],
-  assets: Map<string, Asset>,
-  castUses: ContinuityCastUse[],
-  addIssue: (issue: ContinuityIssue) => void,
-): void {
-  const plan = episode.plan
-  const requiredAssetIds = [...new Set(plan?.requiredAssetIds ?? [])]
-  const requiredVariantIds = [...new Set(plan?.requiredVariantIds ?? [])]
-  if (!requiredAssetIds.length && !requiredVariantIds.length) return
-
-  const hasStoryboards = storyboards.length > 0
-  const usedAssetIds = new Set(castUses.map((use) => use.assetId))
-  const validVariantUses = new Set(castUses.filter((use) => use.variantId && use.appliesToEpisode).map((use) => `${use.assetId}:${use.variantId}`))
-
-  for (const assetId of requiredAssetIds) {
-    const asset = assets.get(assetId)
-    if (!asset || !isPlanCastAsset(asset)) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_invalid_asset',
-        episodeId: episode.id,
-        assetId,
-        message: `E${episode.index + 1}「${episode.title}」计划要求的项目资产 ${assetId} 已不存在或不是可用于分镜的角色/场景/道具。`,
-      })
-      continue
-    }
-    if (hasStoryboards && !usedAssetIds.has(asset.id)) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_missing_asset',
-        episodeId: episode.id,
-        assetId: asset.id,
-        message: `E${episode.index + 1}「${episode.title}」计划要求项目资产「${asset.name}」，但本集分镜尚未引用。`,
-      })
-    }
-  }
-
-  for (const variantId of requiredVariantIds) {
-    const owner = findVariantOwner(assets, variantId)
-    if (!owner || !isPlanCastAsset(owner.asset)) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_invalid_variant',
-        episodeId: episode.id,
-        variantId,
-        message: `E${episode.index + 1}「${episode.title}」计划要求的形态/妆容 ${variantId} 已不存在或不属于可用于分镜的项目资产。`,
-      })
-      continue
-    }
-    if (!requiredAssetIds.includes(owner.asset.id)) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_variant_asset_missing',
-        episodeId: episode.id,
-        assetId: owner.asset.id,
-        variantId: owner.variant.id,
-        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但未把父项目资产「${owner.asset.name}」列入本集必需资产。建议补入 requiredAssetIds，保证系列资产矩阵能按资产和形态两层追踪。`,
-      })
-    }
-    const scopedEpisodeIds = owner.variant.appliesToEpisodeIds ?? []
-    const variantScopeExcludesEpisode = scopedEpisodeIds.length > 0 && !scopedEpisodeIds.includes(episode.id)
-    if (variantScopeExcludesEpisode) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_variant_scope_mismatch',
-        episodeId: episode.id,
-        assetId: owner.asset.id,
-        variantId: owner.variant.id,
-        scopeKind: 'episode',
-        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但该形态只标记适用于其他剧集（${scopedEpisodeIds.join('、')}）。生成本集前请把本集加入该形态适用范围，或从本集计划移除该形态。`,
-      })
-    }
-    if (hasStoryboards && !variantScopeExcludesEpisode && !validVariantUses.has(`${owner.asset.id}:${owner.variant.id}`)) {
-      addIssue({
-        severity: 'warning',
-        code: 'episode_plan_missing_variant',
-        episodeId: episode.id,
-        assetId: owner.asset.id,
-        variantId: owner.variant.id,
-        candidateVariantIds: owner.asset.variants?.map((item) => item.id),
-        candidateVariantLabels: owner.asset.variants?.map((item) => item.label),
-        message: `E${episode.index + 1}「${episode.title}」计划要求形态「${owner.asset.name}-${owner.variant.label}」，但本集分镜尚未有效绑定该变体。`,
-      })
-    }
-  }
-}
-
-function addUnusedProjectAssetIssues(doc: ProjectDoc, episodes: Episode[], allIssues: ContinuityIssue[]): void {
-  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
-  const usedAssetIds = new Set<string>()
-  let storyboardCount = 0
-  for (const episode of episodes) {
-    const storyboards = episodeStoryboards(doc, episode)
-    storyboardCount += storyboards.length
-    for (const storyboard of storyboards) {
-      for (const ref of castRefsForStoryboard(storyboard)) {
-        if (ref.assetId) usedAssetIds.add(ref.assetId)
-      }
-    }
-  }
-  if (!storyboardCount) return
-  for (const asset of doc.assets) {
-    if (asset.parentAssetId || !checkedTypes.includes(asset.type) || usedAssetIds.has(asset.id)) continue
-    const typeLabel = ASSET_TYPE_LABEL[asset.type]
-    allIssues.push({
-      severity: 'warning',
-      code: 'unused_project_asset',
-      assetId: asset.id,
-      message: `项目级${typeLabel}资产「${asset.name}」还没有被任何分镜引用。若它属于后续剧集，建议在对应分镜中复用；否则可合并、改名或移出当前资产池，避免资产池膨胀影响 Agent 选择。`,
-    })
-  }
-}
-
-function addSeriesPlanIssues(doc: ProjectDoc, episodes: Episode[], allIssues: ContinuityIssue[]): void {
-  const plannedEpisodeCount = doc.seriesBible?.plannedEpisodeCount
-  if (!Number.isFinite(plannedEpisodeCount) || !plannedEpisodeCount || plannedEpisodeCount <= episodes.length) return
-  const missingCount = plannedEpisodeCount - episodes.length
-  allIssues.push({
-    severity: 'warning',
-    code: 'series_planned_episodes_missing',
-    message: `系列圣经计划 ${plannedEpisodeCount} 集，但当前只创建了 ${episodes.length} 集，还缺 ${missingCount} 集。建议补齐剧集后再进行整季生产。`,
-  })
-}
-
-function addCrossEpisodeDuplicateAssetIssues(doc: ProjectDoc, episodeReports: ContinuityEpisodeReport[], allIssues: ContinuityIssue[]): void {
-  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
-  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
-  const episodeUsesByAsset = new Map<string, Set<string>>()
-  const episodeLabelsByAsset = new Map<string, Set<string>>()
-  for (const report of episodeReports) {
-    for (const use of report.castUses) {
-      const asset = assets.get(use.assetId)
-      if (!asset || asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
-      const episodes = episodeUsesByAsset.get(asset.id) ?? new Set<string>()
-      episodes.add(report.id)
-      episodeUsesByAsset.set(asset.id, episodes)
-      const labels = episodeLabelsByAsset.get(asset.id) ?? new Set<string>()
-      labels.add(`E${report.index}「${report.title}」`)
-      episodeLabelsByAsset.set(asset.id, labels)
-    }
-  }
-  const groups = new Map<string, AssetLookupEntry[]>()
-  for (const asset of doc.assets) {
-    if (asset.parentAssetId || !checkedTypes.includes(asset.type) || !episodeUsesByAsset.has(asset.id)) continue
-    const entries: AssetLookupEntry[] = [
-      { asset, label: asset.name, source: 'name' },
-      ...(asset.aliases ?? []).map((alias): AssetLookupEntry => ({ asset, label: alias, source: 'alias' })),
-    ]
-    const seenForAsset = new Set<string>()
-    for (const entry of entries) {
-      const lookup = normalizeAssetLookup(entry.label)
-      if (!lookup || seenForAsset.has(lookup)) continue
-      seenForAsset.add(lookup)
-      const key = `${asset.type}:${lookup}`
-      groups.set(key, [...(groups.get(key) ?? []), entry])
-    }
-  }
-  const emitted = new Set<string>()
-  for (const [key, entries] of groups) {
-    const assetIds = [...new Set(entries.map((entry) => entry.asset.id))]
-    if (assetIds.length < 2) continue
-    const assetsInGroup = assetIds.map((id) => assets.get(id)).filter((asset): asset is Asset => !!asset)
-    const linkedValues = assetsInGroup.map(linkedLibraryEntityId)
-    if (linkedValues.every(Boolean) && new Set(linkedValues).size === 1) continue
-    const lookup = key.slice(key.indexOf(':') + 1)
-    const labels = [...new Set(entries.map((entry) => entry.label.trim()).filter(Boolean))]
-    const sharedLabel = labels.length === 1 ? labels[0] : labels.join(' / ')
-    for (const asset of assetsInGroup) {
-      const assetEpisodes = episodeUsesByAsset.get(asset.id) ?? new Set<string>()
-      const related = assetsInGroup.filter((candidate) => {
-        if (candidate.id === asset.id) return false
-        const candidateEpisodes = episodeUsesByAsset.get(candidate.id) ?? new Set<string>()
-        return [...assetEpisodes].some((episodeId) => !candidateEpisodes.has(episodeId)) || [...candidateEpisodes].some((episodeId) => !assetEpisodes.has(episodeId))
-      })
-      if (!related.length) continue
-      const emitKey = `${asset.id}:${lookup}`
-      if (emitted.has(emitKey)) continue
-      emitted.add(emitKey)
-      const typeLabel = ASSET_TYPE_LABEL[asset.type]
-      const currentEntry =
-        entries.find((entry) => entry.asset.id === asset.id && entry.source === 'alias' && normalizeAssetLookup(entry.label) === lookup) ??
-        entries.find((entry) => entry.asset.id === asset.id && normalizeAssetLookup(entry.label) === lookup)
-      const appearanceLabels = [...(episodeLabelsByAsset.get(asset.id) ?? [])].join('、')
-      const relatedLabels = related.map((item) => `${item.name}（${[...(episodeLabelsByAsset.get(item.id) ?? [])].join('、') || item.id}）`).join('、')
-      allIssues.push({
-        severity: 'warning',
-        code: 'cross_episode_duplicate_project_asset_candidate',
-        assetId: asset.id,
-        conflictLabel: currentEntry?.label.trim() || sharedLabel,
-        conflictSource: currentEntry?.source,
-        relatedAssetIds: related.map((item) => item.id),
-        message: `项目${typeLabel}资产「${asset.name}」在 ${appearanceLabels} 出现，且名称/别名「${sharedLabel}」与其他跨集项目资产重叠：${relatedLabels}。如果它们是同一对象，建议合并到同一个项目资产；如果不是，请调整名称或别名以降低 Agent 误选风险。`,
-      })
-    }
-  }
-}
-
-function linkedLibraryEntityId(asset: Asset): string | undefined {
+function linkedEntityId(asset: Asset): string | undefined {
   if (asset.libraryLink?.syncPolicy === 'forked') return undefined
   return asset.libraryLink?.entityId || asset.elementId
 }
 
-function entityKindForAsset(asset: Asset): LibraryEntity['kind'] | undefined {
-  if (asset.type === 'role') return 'character'
-  if (asset.type === 'scene') return 'scene'
-  if (asset.type === 'prop') return 'prop'
-  return undefined
-}
+function addDuplicateIdentityIssues(doc: ProjectDoc, issues: ContinuityIssue[]): void {
+  const candidates = doc.assets.filter((asset) => !asset.parentAssetId && CAST_TYPES.includes(asset.type))
+  const groups = new Map<string, { label: string; assets: Asset[] }>()
 
-function entityLookupEntries(entity: LibraryEntity): EntityLookupEntry[] {
-  return [
-    { entity, label: entity.name, source: 'name' },
-    ...(entity.aliases ?? []).map((alias): EntityLookupEntry => ({ entity, label: alias, source: 'alias' })),
-  ]
-}
-
-function assetLookupEntries(asset: Asset): Array<{ label: string; source: 'name' | 'alias' }> {
-  return [
-    { label: asset.name, source: 'name' },
-    ...(asset.aliases ?? []).map((alias) => ({ label: alias, source: 'alias' }) as const),
-  ]
-}
-
-function entityDisplayName(entry: EntityLookupEntry): string {
-  return entry.source === 'alias' ? `${entry.entity.name}（别名：${entry.label}）` : entry.entity.name
-}
-
-function addAssetHubIssues(doc: ProjectDoc, options: ContinuityReportOptions | undefined, allIssues: ContinuityIssue[]): void {
-  const checkedTypes: Asset['type'][] = ['role', 'scene', 'prop']
-  const entitiesProvided = !!options?.libraryEntities
-  const entities = new Map((options?.libraryEntities ?? []).map((entity) => [entity.id, entity]))
-  const linkedAssetsByEntity = new Map<string, Asset[]>()
-  const entityLookup = new Map<string, EntityLookupEntry[]>()
-  for (const entity of options?.libraryEntities ?? []) {
-    if (entity.archived) continue
-    for (const entry of entityLookupEntries(entity)) {
-      const lookup = normalizeAssetLookup(entry.label)
-      if (!lookup) continue
-      const key = `${entity.kind}:${lookup}`
-      entityLookup.set(key, [...(entityLookup.get(key) ?? []), entry])
-    }
+  const push = (key: string, label: string, asset: Asset) => {
+    const group = groups.get(key) ?? { label, assets: [] }
+    if (!group.assets.some((item) => item.id === asset.id)) group.assets.push(asset)
+    groups.set(key, group)
   }
 
-  for (const asset of doc.assets) {
-    if (asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
-    const entityId = linkedLibraryEntityId(asset)
-    if (!entityId) continue
-    linkedAssetsByEntity.set(entityId, [...(linkedAssetsByEntity.get(entityId) ?? []), asset])
+  for (const asset of candidates) {
+    for (const key of identityKeysOf(asset)) push(`${asset.type}:name:${key}`, key, asset)
+    const entityId = linkedEntityId(asset)
+    if (entityId) push(`entity:${entityId}`, entityId, asset)
+  }
 
-    if (!entitiesProvided) continue
-    const entity = entities.get(entityId)
-    if (!entity) {
-      allIssues.push({
+  const reported = new Set<string>()
+  for (const group of groups.values()) {
+    if (group.assets.length < 2) continue
+    // 已经明确关联到同一个身份资产的，视为用户有意为之，不再报名称重复
+    const entityIds = group.assets.map(linkedEntityId)
+    const sameEntity = entityIds.every(Boolean) && new Set(entityIds).size === 1
+    const groupKey = [...group.assets.map((asset) => asset.id)].sort().join('|')
+    if (reported.has(groupKey)) continue
+    reported.add(groupKey)
+    const typeLabel = ASSET_TYPE_LABEL[group.assets[0].type]
+    const names = group.assets.map((asset) => asset.name).join('、')
+    issues.push({
+      category: 'identity',
+      severity: 'warning',
+      code: 'duplicate_identity',
+      assetId: group.assets[0].id,
+      relatedAssetIds: group.assets.slice(1).map((asset) => asset.id),
+      conflictLabel: group.label,
+      message: sameEntity
+        ? `${typeLabel}「${names}」都指向同一个身份资产，建议合并成一个项目资产，避免同一对象被当成两个。`
+        : `${typeLabel}「${names}」共用名称/别名「${group.label}」。如果是同一对象请合并，否则改名以免 Agent 选错。`,
+    })
+  }
+}
+
+// —— scene：同 sceneId 的连续镜头应复用同一个场景资产，一组只报一条 ——
+
+function addSceneIssues(ledger: ContinuityLedger, assets: Map<string, Asset>, issues: ContinuityIssue[]): void {
+  const groups = new Map<string, LedgerEntry[]>()
+  for (const shot of ledger.shots) {
+    if (!shot.sceneId) continue
+    const key = `${shot.episodeId}:${shot.sceneId}`
+    groups.set(key, [...(groups.get(key) ?? []), shot])
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    const sceneIdsPerShot = group.map((shot) => {
+      const ids = castRefsForStoryboard(shot.storyboard)
+        .filter((ref) => assets.get(ref.assetId)?.type === 'scene')
+        .map((ref) => ref.assetId)
+      return { shot, ids: [...new Set(ids)] }
+    })
+    const allSceneIds = [...new Set(sceneIdsPerShot.flatMap((item) => item.ids))]
+    if (!allSceneIds.length) continue
+
+    const head = group[0]
+    if (allSceneIds.length > 1) {
+      const names = allSceneIds.map((id) => assets.get(id)?.name ?? id).join('、')
+      issues.push({
+        category: 'scene',
         severity: 'warning',
-        code: 'library_entity_missing',
-        assetId: asset.id,
-        libraryEntityId: entityId,
-        entityVersion: asset.libraryLink?.entityVersion,
-        message: `项目资产「${asset.name}」链接的身份资产 ${entityId} 已不存在。生产仍会使用项目快照，但建议确认是否另存为新身份或重新关联资产中心。`,
+        code: 'scene_asset_inconsistent',
+        episodeId: head.episodeId,
+        sceneId: head.sceneId,
+        storyboardIds: group.map((shot) => shot.storyboardId),
+        storyboardId: head.storyboardId,
+        assetId: allSceneIds[0],
+        relatedAssetIds: allSceneIds.slice(1),
+        message: `E${head.episodeIndex + 1} 场景组「${head.sceneId}」混用了 ${allSceneIds.length} 个场景资产：${names}。连续场景应复用同一个，避免跨镜环境漂移。`,
       })
       continue
     }
-    if (entity.archived) {
-      allIssues.push({
-        severity: 'warning',
-        code: 'library_entity_archived',
-        assetId: asset.id,
-        libraryEntityId: entity.id,
-        entityVersion: asset.libraryLink?.entityVersion,
-        currentEntityVersion: entity.version,
-        message: `项目资产「${asset.name}」链接的身份资产「${entity.name}」已归档。生产仍会使用项目快照，但多集继续制作前建议确认是否保留、解除关联或改用新的身份资产。`,
-      })
-      continue
-    }
-    const linkedVersion = asset.libraryLink?.entityVersion
-    if (typeof linkedVersion === 'number' && entity.version > linkedVersion) {
-      allIssues.push({
-        severity: 'warning',
-        code: 'library_entity_version_outdated',
-        assetId: asset.id,
-        libraryEntityId: entity.id,
-        entityVersion: linkedVersion,
-        currentEntityVersion: entity.version,
-        message: `项目资产「${asset.name}」来自身份资产「${entity.name}」v${linkedVersion}，资产中心已有 v${entity.version}。建议确认继续使用项目快照，或手动同步新版身份资产。`,
-      })
-    }
-  }
 
-  if (entitiesProvided) {
-    for (const asset of doc.assets) {
-      if (asset.parentAssetId || !checkedTypes.includes(asset.type)) continue
-      const kind = entityKindForAsset(asset)
-      if (!kind) continue
-      const linkedEntityId = linkedLibraryEntityId(asset)
-      const rejectedEntityIds = new Set(asset.rejectedLibraryEntityIds ?? [])
-      const matches = new Map<string, EntityLookupEntry>()
-      let conflictLabel = ''
-      let conflictSource: ContinuityIssue['conflictSource'] | undefined
-      for (const entry of assetLookupEntries(asset)) {
-        const lookup = normalizeAssetLookup(entry.label)
-        if (!lookup) continue
-        const candidates = entityLookup.get(`${kind}:${lookup}`) ?? []
-        for (const candidate of candidates) {
-          if (candidate.entity.id === linkedEntityId) continue
-          if (rejectedEntityIds.has(candidate.entity.id)) continue
-          if (!matches.has(candidate.entity.id)) matches.set(candidate.entity.id, candidate)
-          if (!conflictLabel) {
-            conflictLabel = entry.label.trim() || candidate.label
-            conflictSource = entry.source
-          }
-        }
-      }
-      if (!matches.size) continue
-      const candidateEntries = [...matches.values()]
-      const candidateIds = candidateEntries.map((entry) => entry.entity.id)
-      const candidateLabels = candidateEntries.map(entityDisplayName)
-      if (linkedEntityId) {
-        allIssues.push({
-          severity: 'warning',
-          code: 'library_entity_alias_conflict',
-          assetId: asset.id,
-          libraryEntityId: linkedEntityId,
-          candidateLibraryEntityIds: candidateIds,
-          candidateLibraryEntityLabels: candidateLabels,
-          conflictLabel,
-          conflictSource,
-          message: `项目资产「${asset.name}」已关联身份资产 ${linkedEntityId}，但名称/别名「${conflictLabel}」也命中了资产中心的其他身份：${candidateLabels.join('、')}。建议确认是否关联错身份，或调整别名避免 Agent 选错对象。`,
-        })
-      } else {
-        allIssues.push({
-          severity: 'warning',
-          code: 'asset_matches_unlinked_library_entity',
-          assetId: asset.id,
-          candidateLibraryEntityIds: candidateIds,
-          candidateLibraryEntityLabels: candidateLabels,
-          conflictLabel,
-          conflictSource,
-          message: `项目资产「${asset.name}」尚未关联身份资产，但名称/别名「${conflictLabel}」命中了资产中心身份：${candidateLabels.join('、')}。若这是同一对象，建议改为从资产中心快照导入或手动关联；否则请改名或标记为不同身份。`,
-        })
-      }
-    }
+    const sceneAssetId = allSceneIds[0]
+    const missing = sceneIdsPerShot.filter((item) => !item.ids.length)
+    if (!missing.length) continue
+    const name = assets.get(sceneAssetId)?.name ?? sceneAssetId
+    issues.push({
+      category: 'scene',
+      severity: 'warning',
+      code: 'scene_asset_inconsistent',
+      episodeId: head.episodeId,
+      sceneId: head.sceneId,
+      storyboardIds: missing.map((item) => item.shot.storyboardId),
+      storyboardId: missing[0].shot.storyboardId,
+      assetId: sceneAssetId,
+      message: `E${head.episodeIndex + 1} 场景组「${head.sceneId}」有 ${missing.length} 个分镜（#${missing
+        .map((item) => item.shot.storyboardIndex + 1)
+        .join(' #')}）没有引用场景资产「${name}」。`,
+    })
   }
+}
 
-  for (const [entityId, linkedAssets] of linkedAssetsByEntity.entries()) {
-    if (linkedAssets.length < 2) continue
-    const entityName = entities.get(entityId)?.name
-    const label = entityName ? `「${entityName}」` : entityId
-    const ids = linkedAssets.map((asset) => asset.id).join('、')
-    for (const asset of linkedAssets) {
-      allIssues.push({
+/**
+ * 同一形态从多种状态变来 → 它其实承载了多种外观，但只有一张参考图。
+ *
+ * 「受伤」在 E1 从常服变来、E5 从礼服变来，派生底图只会取第一次（常服），
+ * E5 的礼服就丢了。图能生成、流程不会停，所以这只是提醒——但不提醒的话，
+ * 用户要到看成片时才发现衣服换错了，那时候重做代价大得多。
+ */
+function addAmbiguousVariantBaseIssues(doc: ProjectDoc, assets: Map<string, Asset>, issues: ContinuityIssue[]): void {
+  const seen = new Set<string>()
+  for (const asset of assets.values()) {
+    if (asset.parentAssetId || !CAST_TYPES.includes(asset.type)) continue
+    for (const variant of asset.variants ?? []) {
+      const key = `${asset.id}:${variant.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const uses = variantBaseUses(doc, asset.id, variant.id)
+      const bases = ambiguousVariantBases(doc, asset.id, variant.id, uses)
+      if (bases.length < 2) continue
+      const labels = bases.map((baseId) => variantLabelOf(asset, baseId))
+      const where = uses
+        .map((use) => `E${use.episodeIndex + 1} #${use.storyboardIndex + 1}（从${variantLabelOf(asset, use.baseVariantId)}）`)
+        .join('、')
+      issues.push({
+        category: 'appearance',
         severity: 'warning',
-        code: 'duplicate_library_entity_project_assets',
+        code: 'ambiguous_variant_base',
         assetId: asset.id,
-        libraryEntityId: entityId,
-        relatedAssetIds: linkedAssets.map((item) => item.id).filter((id) => id !== asset.id),
-        message: `同一个身份资产${label}被导入成多个项目资产（${ids}）。多集生产前建议合并到同一个项目资产，避免同一角色/场景被 Agent 当成不同对象。`,
+        variantId: variant.id,
+        baseVariantIds: bases,
+        baseVariantLabels: labels,
+        storyboardIds: uses.map((use) => use.storyboardId),
+        episodeId: uses[0]?.episodeId,
+        message: `「${asset.name}-${variant.label}」被从 ${labels.join('、')} 这 ${bases.length} 种状态变来过（${where}）。一个形态只有一张参考图，会按第一次（${labels[0]}）派生，其余场合的服装会丢。如果这几处外观本该不同，拆成不同形态。`,
       })
     }
   }
 }
 
-export function buildContinuityReport(doc: ProjectDoc, options?: ContinuityReportOptions): ContinuityReport {
-  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
-  const episodes = episodeList(doc)
-  const episodeReports: ContinuityEpisodeReport[] = []
-  const allIssues: ContinuityIssue[] = []
+// —— coverage：原著章节分配 ——
+
+function addChapterCoverageIssues(doc: ProjectDoc, episodes: Episode[], issues: ContinuityIssue[]): void {
+  if (!doc.novel.length || episodes.length <= 1) return
   const chapterIds = new Set(doc.novel.map((chapter) => chapter.id))
-  const assignedChapterIds = new Set<string>()
-  const chapterEpisodeRefs = new Map<string, { id: string; index: number; title: string; report: ContinuityEpisodeReport }[]>()
-  const lastAppearanceUseByAsset = new Map<string, LastAppearanceUse>()
-  const stateRegressionWarnings = new Set<string>()
-  addDuplicateAssetNameIssues(doc, allIssues)
-  addDuplicateAssetAliasIssues(doc, allIssues)
-  addSeriesPlanIssues(doc, episodes, allIssues)
-  addUnusedProjectAssetIssues(doc, episodes, allIssues)
-  addAssetHubIssues(doc, options, allIssues)
+  const owners = new Map<string, Episode[]>()
 
   for (const episode of episodes) {
-    const storyboards = episodeStoryboards(doc, episode)
-    const report: ContinuityEpisodeReport = {
-      id: episode.id,
-      index: episode.index + 1,
-      title: episode.title,
-      current: episode.id === doc.currentEpisodeId,
-      storyboards: storyboards.length,
-      castUses: [],
-      issues: [],
+    const assigned = episode.novelChapterIds ?? []
+    if (!assigned.length) {
+      issues.push({
+        category: 'coverage',
+        severity: 'warning',
+        code: 'chapter_coverage',
+        episodeId: episode.id,
+        message: `E${episode.index + 1}「${episode.title}」还没有分配原著章节。`,
+      })
+      continue
     }
-    const addIssue = (issue: ContinuityIssue) => {
-      report.issues.push(issue)
-      allIssues.push(issue)
-    }
-
-    if (doc.novel.length > 0 && episodes.length > 1) {
-      const assigned = episode.novelChapterIds ?? []
-      if (!assigned.length) {
-        addIssue({ severity: 'warning', code: 'episode_without_chapters', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」还没有分配原著章节` })
-      }
-      for (const chapterId of assigned) {
-        if (chapterIds.has(chapterId)) {
-          assignedChapterIds.add(chapterId)
-          const refs = chapterEpisodeRefs.get(chapterId) ?? []
-          refs.push({ id: episode.id, index: episode.index + 1, title: episode.title, report })
-          chapterEpisodeRefs.set(chapterId, refs)
-        } else addIssue({ severity: 'warning', code: 'invalid_episode_chapter', episodeId: episode.id, message: `E${episode.index + 1}「${episode.title}」引用了不存在的原著章节 ${chapterId}` })
-      }
-    }
-
-    const sortedStoryboards = [...storyboards].sort((a, b) => a.index - b.index)
-    for (const storyboard of sortedStoryboards) {
-      for (const ref of castRefsForStoryboard(storyboard)) {
-        const base = { episodeId: episode.id, storyboardId: storyboard.id, storyboardIndex: storyboard.index + 1, assetId: ref.assetId, variantId: ref.variantId }
-        const asset = assets.get(ref.assetId)
-        if (!asset) {
-          addIssue({ ...base, severity: 'error', code: 'missing_asset', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 引用了不存在的资产 ${ref.assetId}` })
-          continue
-        }
-        const variant = ref.variantId ? asset.variants?.find((item) => item.id === ref.variantId) : undefined
-        if (ref.variantId && !variant) {
-          addIssue({ ...base, severity: 'error', code: 'missing_variant', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 引用了「${asset.name}」不存在的变体 ${ref.variantId}` })
-          continue
-        }
-        const scopeIssue = variantScopeIssue(variant, episode, storyboard)
-        const appliesToEpisode = !scopeIssue
-        if (scopeIssue) {
-          const scopeLabel = scopeIssue === 'episode' ? '本集' : scopeIssue === 'scene' ? '本场景' : '本分镜'
-          addIssue({ ...base, variantKind: variant?.variantKind, severity: 'warning', code: 'variant_out_of_episode_scope', scopeKind: scopeIssue, sceneId: storyboard.sceneId, message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了未标记适用于${scopeLabel}的「${labelForCastRef(asset, ref)}」` })
-        }
-        if (variant && !scopeIssue && !variantHasScope(variant)) {
-          const previous = lastAppearanceUseByAsset.get(asset.id)
-          const key = `${episode.id}:${storyboard.id}:${asset.id}:${variant.id}`
-          if (previous?.variantId && previous.episodeId !== episode.id && previous.variantId !== variant.id && !stateRegressionWarnings.has(key)) {
-            stateRegressionWarnings.add(key)
-            addIssue({
-              ...base,
-              previousEpisodeId: previous.episodeId,
-              previousEpisodeIndex: previous.episodeIndex,
-              previousEpisodeTitle: previous.episodeTitle,
-              previousVariantId: previous.variantId,
-              previousVariantLabel: previous.variantLabel,
-              previousVariantKind: previous.variantKind,
-              variantKind: variant.variantKind,
-              severity: 'warning',
-              code: 'asset_state_changed_variant',
-              scopeKind: 'episode',
-              sceneId: storyboard.sceneId,
-              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}-${variant.label}」，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel ?? previous.variantId}」。若这是剧情中的换装/妆容变化，建议把当前形态标记适用于本集；否则建议沿用上一形态。`,
-            })
-          }
-        }
-        if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
-          const scopedVariants = variantsScopedToStoryboard(asset, episode, storyboard)
-          if (scopedVariants.length) {
-            const labels = scopedVariants.map((item) => item.label).join('、')
-            addIssue({
-              ...base,
-              variantId: scopedVariants.length === 1 ? scopedVariants[0].id : undefined,
-              variantKind: scopedVariants.length === 1 ? scopedVariants[0].variantKind : undefined,
-              candidateVariantIds: scopedVariants.map((item) => item.id),
-              candidateVariantLabels: scopedVariants.map((item) => item.label),
-              candidateVariantKinds: scopedVariants.map((item) => item.variantKind).filter((kind): kind is VariantKind => !!kind),
-              severity: 'warning',
-              code: 'episode_variant_available',
-              sceneId: storyboard.sceneId,
-              message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但当前分镜已有适用形态：${labels}。建议绑定具体形态，避免妆容/服装状态回退到主图。`,
-            })
-          } else {
-            const previous = lastAppearanceUseByAsset.get(asset.id)
-            const key = `${episode.id}:${storyboard.id}:${asset.id}`
-            if (previous?.variantId && previous.episodeId !== episode.id && !stateRegressionWarnings.has(key)) {
-              stateRegressionWarnings.add(key)
-              addIssue({
-                ...base,
-                variantId: previous.variantId,
-                variantKind: previous.variantKind,
-                previousVariantKind: previous.variantKind,
-                severity: 'warning',
-                code: 'asset_state_regressed_to_main',
-                message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 使用了「${asset.name}」主形象，但上一相关剧集 E${previous.episodeIndex}「${previous.episodeTitle}」使用过「${asset.name}-${previous.variantLabel ?? previous.variantId}」。如果状态延续，建议创建或绑定本集形态；如果剧情已恢复默认状态，可忽略。`,
-              })
-            }
-          }
-        }
-        const refImageId = refImageIdForCastRef(asset, ref)
-        if (!refImageId) {
-          addIssue({ ...base, variantKind: variant?.variantKind, severity: 'error', code: 'missing_ref_image', message: `E${episode.index + 1} 分镜 #${storyboard.index + 1} 的「${labelForCastRef(asset, ref)}」没有参考图` })
-        }
-        report.castUses.push({
-          storyboardId: storyboard.id,
-          storyboardIndex: storyboard.index + 1,
-          assetId: asset.id,
-          assetName: asset.name,
-          assetType: asset.type,
-          libraryEntityId: asset.libraryLink?.entityId ?? asset.elementId,
-          libraryEntityVersion: asset.libraryLink?.entityVersion,
-          librarySyncPolicy: asset.libraryLink?.syncPolicy,
-          variantId: ref.variantId,
-          variantLabel: variant?.label,
-          variantKind: variant?.variantKind,
-          libraryVariantId: variant?.libraryVariantId ?? (ref.variantId ? asset.libraryLink?.variantMap?.[ref.variantId] : undefined),
-          label: labelForCastRef(asset, ref),
-          refImageId,
-          appliesToEpisode,
+    for (const chapterId of assigned) {
+      if (!chapterIds.has(chapterId)) {
+        issues.push({
+          category: 'coverage',
+          severity: 'warning',
+          code: 'chapter_coverage',
+          episodeId: episode.id,
+          chapterId,
+          message: `E${episode.index + 1}「${episode.title}」引用了已不存在的原著章节。`,
         })
-        if (variant) {
-          lastAppearanceUseByAsset.set(asset.id, {
-            episodeId: episode.id,
-            episodeIndex: episode.index + 1,
-            episodeTitle: episode.title,
-            variantId: variant.id,
-            variantLabel: variant.label,
-            variantKind: variant.variantKind,
-          })
-        } else if (!ref.variantId && asset.type !== 'audio' && asset.type !== 'clip') {
-          lastAppearanceUseByAsset.set(asset.id, {
-            episodeId: episode.id,
-            episodeIndex: episode.index + 1,
-            episodeTitle: episode.title,
-          })
-        }
+        continue
       }
-    }
-    addEpisodePlanIssues(episode, sortedStoryboards, assets, report.castUses, addIssue)
-    addSceneReuseIssues(episode, sortedStoryboards, assets, addIssue)
-    episodeReports.push(report)
-  }
-
-  addCrossEpisodeDuplicateAssetIssues(doc, episodeReports, allIssues)
-
-  if (doc.novel.length > 0 && episodes.length > 1) {
-    for (const chapter of doc.novel) {
-      if (!assignedChapterIds.has(chapter.id)) {
-        allIssues.push({ severity: 'warning', code: 'unassigned_chapter', message: `原著章节「${chapter.title}」还没有分配到任何剧集` })
-      }
-      const refs = chapterEpisodeRefs.get(chapter.id) ?? []
-      if (refs.length > 1) {
-        const labels = refs.map((ref) => `E${ref.index}「${ref.title}」`).join('、')
-        for (const ref of refs) {
-          const issue: ContinuityIssue = { severity: 'warning', code: 'duplicated_chapter_assignment', episodeId: ref.id, message: `原著章节「${chapter.title}」同时分配给 ${labels}` }
-          ref.report.issues.push(issue)
-          allIssues.push(issue)
-        }
-      }
+      owners.set(chapterId, [...(owners.get(chapterId) ?? []), episode])
     }
   }
 
-  return { currentEpisodeId: doc.currentEpisodeId, episodes: episodeReports, issues: allIssues }
+  for (const chapter of doc.novel) {
+    const holders = owners.get(chapter.id) ?? []
+    if (!holders.length) {
+      issues.push({
+        category: 'coverage',
+        severity: 'warning',
+        code: 'chapter_coverage',
+        chapterId: chapter.id,
+        message: `原著章节「${chapter.title}」还没有分配到任何剧集。`,
+      })
+    } else if (holders.length > 1) {
+      const labels = holders.map((episode) => `E${episode.index + 1}`).join('、')
+      issues.push({
+        category: 'coverage',
+        severity: 'warning',
+        code: 'chapter_coverage',
+        chapterId: chapter.id,
+        episodeId: holders[0].id,
+        message: `原著章节「${chapter.title}」同时分配给了 ${labels}。`,
+      })
+    }
+  }
+}
+
+export function buildContinuityReport(doc: ProjectDoc): ContinuityReport {
+  const assets = new Map(doc.assets.map((asset) => [asset.id, asset]))
+  const episodes = episodeList(doc)
+  const ledger = buildContinuityLedger(doc)
+  const allIssues: ContinuityIssue[] = []
+  const usedAssetIds = new Set<string>()
+
+  addDuplicateIdentityIssues(doc, allIssues)
+
+  const episodeReports: ContinuityEpisodeReport[] = episodes.map((episode) => ({
+    id: episode.id,
+    index: episode.index + 1,
+    title: episode.title,
+    current: episode.id === doc.currentEpisodeId,
+    storyboards: storyboardsOf(doc, episode).length,
+    castUses: [],
+    issues: [],
+  }))
+  const reportById = new Map(episodeReports.map((report) => [report.id, report]))
+
+  const addIssue = (issue: ContinuityIssue) => {
+    allIssues.push(issue)
+    if (issue.episodeId) reportById.get(issue.episodeId)?.issues.push(issue)
+  }
+
+  for (const shot of ledger.shots) {
+    const report = reportById.get(shot.episodeId)
+    const base = {
+      episodeId: shot.episodeId,
+      storyboardId: shot.storyboardId,
+      storyboardIndex: shot.storyboardIndex + 1,
+      sceneId: shot.sceneId,
+    }
+
+    for (const ref of castRefsForStoryboard(shot.storyboard)) {
+      const asset = assets.get(ref.assetId)
+      if (!asset) {
+        addIssue({
+          ...base,
+          category: 'blocking',
+          severity: 'error',
+          code: 'dangling_ref',
+          assetId: ref.assetId,
+          message: `E${shot.episodeIndex + 1} 分镜 #${shot.storyboardIndex + 1} 引用了已删除的资产。`,
+        })
+        continue
+      }
+      usedAssetIds.add(asset.id)
+
+      const variant = ref.variantId ? asset.variants?.find((item) => item.id === ref.variantId) : undefined
+      if (ref.variantId && !variant) {
+        addIssue({
+          ...base,
+          category: 'blocking',
+          severity: 'error',
+          code: 'dangling_ref',
+          assetId: asset.id,
+          variantId: ref.variantId,
+          message: `E${shot.episodeIndex + 1} 分镜 #${shot.storyboardIndex + 1} 引用了「${asset.name}」已删除的形态。`,
+        })
+        continue
+      }
+
+      // 唯一的形态连续性规则：实际形态 ≠ 继承形态，且本镜没有声明变更点。
+      // 旧版这一件事散在 7 个码里（作用域越界/有可用形态/回退主形象/跨集切换/场景内漂移/计划范围不符/计划未绑定）。
+      if (asset.type !== 'audio' && asset.type !== 'clip') {
+        const expected = expectedVariantId(shot, ref.assetId)
+        if (ref.variantId !== expected) {
+          const from = variantLabelOf(asset, expected)
+          const to = variantLabelOf(asset, ref.variantId)
+          addIssue({
+            ...base,
+            category: 'appearance',
+            severity: 'warning',
+            code: 'unexplained_appearance_change',
+            assetId: asset.id,
+            variantId: ref.variantId,
+            expectedVariantId: expected,
+            expectedVariantLabel: from,
+            message: `E${shot.episodeIndex + 1} 分镜 #${shot.storyboardIndex + 1}「${asset.name}」从${from}变成${to}，但没有说明原因。确认是剧情里的变化就登记一次变更，否则沿用上一形态。`,
+          })
+        }
+      }
+
+      const refImageId = refImageIdForCastRef(asset, ref)
+      if (!refImageId && asset.type !== 'audio' && asset.type !== 'clip') {
+        addIssue({
+          ...base,
+          category: 'blocking',
+          severity: 'error',
+          code: 'missing_ref_image',
+          assetId: asset.id,
+          variantId: ref.variantId,
+          message: `E${shot.episodeIndex + 1} 分镜 #${shot.storyboardIndex + 1} 的「${labelForCastRef(asset, ref)}」还没有参考图。`,
+        })
+      }
+
+      report?.castUses.push({
+        storyboardId: shot.storyboardId,
+        storyboardIndex: shot.storyboardIndex + 1,
+        assetId: asset.id,
+        assetName: asset.name,
+        assetType: asset.type,
+        variantId: ref.variantId,
+        variantLabel: variant?.label,
+        label: labelForCastRef(asset, ref),
+        refImageId,
+      })
+    }
+  }
+
+  addAmbiguousVariantBaseIssues(doc, assets, allIssues)
+  addSceneIssues(ledger, assets, allIssues)
+  addChapterCoverageIssues(doc, episodes, allIssues)
+
+  if (ledger.shots.length) {
+    for (const asset of doc.assets) {
+      if (asset.parentAssetId || !CAST_TYPES.includes(asset.type) || usedAssetIds.has(asset.id)) continue
+      allIssues.push({
+        category: 'hint',
+        severity: 'info',
+        code: 'unused_project_asset',
+        assetId: asset.id,
+        message: `${ASSET_TYPE_LABEL[asset.type]}「${asset.name}」还没有出现在任何分镜里。`,
+      })
+    }
+  }
+
+  // scene / coverage / identity / hint 是跨镜或跨集的，回填到对应集报告
+  for (const issue of allIssues) {
+    if (!issue.episodeId) continue
+    const report = reportById.get(issue.episodeId)
+    if (report && !report.issues.includes(issue)) report.issues.push(issue)
+  }
+
+  return { currentEpisodeId: doc.currentEpisodeId, episodes: episodeReports, issues: allIssues, ledger }
 }

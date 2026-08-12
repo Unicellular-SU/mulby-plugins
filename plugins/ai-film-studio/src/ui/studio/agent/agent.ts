@@ -12,7 +12,8 @@ import { useGraphStore } from '../../store/graphStore'
 import { recallContext, getMemoryConfig } from './memory'
 import { makeProjectReadTools } from './agentTools'
 import { resolveAgentEpisodeTarget } from './episodeTarget'
-import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
+import { CONTINUITY_STORYBOARD_RULE } from './policy'
+import { formatStoryBible } from '../services/storyBible'
 import type { ProjectDoc } from '../../domain/types'
 import { cleanAssetAliases } from '../../domain/assetAliases'
 
@@ -25,8 +26,6 @@ export interface AgentPlan {
     prompt?: string
     duration?: number
     sceneId?: string
-    ensureScope?: boolean
-    scopeKind?: 'episode' | 'scene' | 'storyboard'
     cast?: string[]
     castRefs?: {
       assetId?: string
@@ -35,6 +34,26 @@ export interface AgentPlan {
       variantId?: string
       variantLabel?: string
       roleInShot?: 'lead' | 'supporting' | 'background'
+      note?: string
+    }[]
+    shotDesign?: {
+      unresolvedState?: string
+      viewerPosition?: string
+      gazeFlow?: string
+      compositionMechanism?: string
+      colorThesis?: string
+      imagingBase?: string
+    }
+    /** 本镜发生的形态变更点：谁、变成什么、为什么。不写 = 全部沿用上一镜 */
+    stateChanges?: {
+      assetId?: string
+      assetName?: string
+      name?: string
+      toVariantId?: string
+      toVariantLabel?: string
+      variantId?: string
+      variantLabel?: string
+      reason?: string
       note?: string
     }[]
     dialogues?: { character: string; line: string; emotion?: string }[]
@@ -51,16 +70,17 @@ const CONTRACT = `
   "reply": "给用户的简短中文说明（你做了什么、下一步建议）",
   "script": { "name": "剧本名", "content": "剧本正文（分场/对白/动作）" },
   "assets": [ { "type": "role|scene|prop", "name": "名称", "aliases": ["别名/称谓"], "desc": "中文外貌/特征描述", "prompt": "英文图像生成提示词" } ],
-  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "sceneId": "同一空间/连续动作的稳定场景组ID(可选)", "ensureScope": false, "scopeKind": "episode|scene|storyboard(可选)", "cast": ["出场资产名"], "castRefs": [{"assetName":"资产名","variantLabel":"妆容/服装/时期(可选)","roleInShot":"lead|supporting|background","note":"可选说明"}], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
+  "storyboards": [ { "videoDesc": "中文画面描述：主体+动作+环境+情绪+光影", "prompt": "英文关键帧提示词", "duration": 5, "shotDesign": {"unresolvedState":"人物此刻无法立刻解决的问题","viewerPosition":"观众站在哪看","gazeFlow":"视线从A进入被B放慢落到C最后被D带走","compositionMechanism":"被观察|被困住|关系疏离|权力不对等|心理失衡|事后状态|感官插入","colorThesis":"主色域+唯一强调色+颜色来自哪里","imagingBase":"成像基底"}, "sceneId": "同一空间/连续动作的稳定场景组ID(可选)", "cast": ["出场资产名"], "castRefs": [{"assetName":"资产名","roleInShot":"lead|supporting|background"}], "stateChanges": [{"assetName":"资产名","toVariantLabel":"新形态标签（省略=恢复主形象）","reason":"为什么在这一镜发生变化"}], "dialogues": [{"character":"出场角色名 或 旁白", "line":"台词原文", "emotion":"情绪(可选)"}], "chainFromPrev": false, "replaceIndex": 0 } ],
   "autoGenerate": false   // 仅当用户明确要求「出图/生成/直接成片」时设 true，自动一键成片
 }
 规则：
 - 字段都可选；本轮只产出用户要求的部分，**已存在的内容不要重复**（按名字去重）。
-- assets 的 name 要与 storyboards 的 cast 名字一致，便于关联；同一个人/场景有昵称、称谓或原著别称时写入 aliases，后续分镜可用别名匹配同一资产；同一角色有妆容/服装/年龄/时期变体时，在 castRefs 里写 assetName + variantLabel，不要只写进画面描述。
-- 如果上下文、连续性报告或跨集承接线索显示某角色在上一相关剧集使用过具体变体，或本集已有适用变体，分镜必须用 castRefs 绑定 variantLabel/variantId；除非剧情明确恢复默认状态，不要只写 cast 让它回到主形象。
-- 当分镜为了沿用上一形态或使用场景/分镜级形态而绑定了已有 variant 时，设置 ensureScope=true；若已写 sceneId，优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集都适用时用 "episode"。
+- assets 的 name 要与 storyboards 的 cast 名字一致；昵称、称谓、原著别称写进 aliases，后续分镜可用别名匹配到同一资产。
+- **形态连续性**：角色/场景/道具的外观默认**自动沿用上一镜**，你不需要为每一镜重复标注形态，也不需要声明"这个形态适用于哪几集"。
+  只有当剧情在**某一镜**真的发生换装、化妆、受伤、年龄或时期变化时，才在那一镜写一条 stateChanges，并说明 reason。
+  从那一镜起直到下一条 stateChanges 之前，该资产都保持新形态。恢复原样也要写一条 stateChanges（省略 toVariantLabel）。
 - **对白**：把该镜涉及的台词逐句填进 dialogues；character 必须是出场角色名（与 cast/资产名一致）或"旁白"；line 为台词原文，emotion 可选；该镜无台词则省略 dialogues 或给空数组。
-- 分镜按叙事顺序排列；同一空间或连续动作的镜头写稳定 sceneId，用于同场景资产和角色形态一致性检查；替换已有分镜且发生换场时必须写新的 sceneId，确实不属于任何场景组时可写空字符串清除旧 sceneId；紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true（关键帧会承接上一帧保持连贯），真正硬切/换场=false。
+- 分镜按叙事顺序排列；同一空间或连续动作的镜头写稳定 sceneId；替换已有分镜且发生换场时写新的 sceneId，不属于任何场景组时写空字符串清除。紧接上一镜「同一连贯动作/同场不切」的镜头 chainFromPrev=true，真正硬切/换场=false。
 - **修改已有分镜**：要改第 N 个已有分镜，就在该 storyboard 里带 replaceIndex=N（用上面「已有分镜」列表里的编号，从 1 开始），它会就地替换（关键帧会失效需重生）；新增镜头不要带 replaceIndex。
 - 全程使用项目设定的画风与对白语言。`
 
@@ -250,12 +270,18 @@ function formatSeriesBibleContext(doc: ProjectDoc): string {
     bible.theme ? `主题：${bible.theme}` : '',
     bible.synopsis ? `整季梗概：${bible.synopsis.slice(0, 800)}` : '',
     bible.worldRules ? `世界规则：${bible.worldRules.slice(0, 500)}` : '',
-    bible.continuityRules?.length ? `连续性规则：\n${bible.continuityRules.map((rule, index) => `${index + 1}. ${rule}`).join('\n').slice(0, 1000)}` : '',
     bible.plannedEpisodeCount ? `计划集数：${bible.plannedEpisodeCount}` : '',
   ].filter(Boolean)
   return parts.length ? `## 系列圣经\n${parts.join('\n')}` : ''
 }
 
+/**
+ * 当前集的原著窗口：只带**本集分配到的章节正文**。
+ *
+ * 这是两层上下文的下层。上层是 `formatStoryBible`（全书人物/场景/道具总表，一次提取）。
+ * 两者相加是常数量级，不随小说总长度增长——旧版把整本书截到 8000 字塞进每次调用，
+ * 十万字的小说后半部分模型根本没见过，才会在后面的集里把同一个人当成新角色。
+ */
 function formatCurrentEpisodeNovelContext(doc: ProjectDoc): string {
   const current = doc.episodes?.find((episode) => episode.id === doc.currentEpisodeId)
   const ids = current?.novelChapterIds ?? []
@@ -263,10 +289,26 @@ function formatCurrentEpisodeNovelContext(doc: ProjectDoc): string {
   const wanted = new Set(ids)
   const chapters = doc.novel.filter((chapter) => wanted.has(chapter.id))
   if (!chapters.length) return ''
-  return `## 当前剧集原著范围\n第 ${current.index + 1} 集「${current.title}」已分配 ${chapters.length} 个原著章节，改编当前集时优先使用这些章节，不要串到未分配章节：\n${chapters
-    .map((chapter) => (chapter.event ? `【${chapter.title}】事件：${chapter.event}` : `【${chapter.title}】\n${chapter.text.slice(0, 1200)}`))
+  // 本集章节给正文（改编需要细节），字数预算比旧版整书窗口更大
+  return `## 当前剧集原著范围\n第 ${current.index + 1} 集「${current.title}」已分配 ${chapters.length} 个原著章节，改编当前集只能用这些章节，不要串到其他集：\n${chapters
+    .map((chapter) => `【${chapter.title}】\n${chapter.text.slice(0, 4000)}${chapter.event ? `\n（事件要点：${chapter.event}）` : ''}`)
     .join('\n\n')
-    .slice(0, 6000)}`
+    .slice(0, 16000)}`
+}
+
+/**
+ * 没有分集时的原著兜底：只给章节事件摘要，不给正文。
+ * 正文由 formatCurrentEpisodeNovelContext 在分集之后按集提供。
+ */
+function formatNovelDigest(doc: ProjectDoc): string {
+  if (!doc.novel.length) return ''
+  const assigned = doc.episodes?.some((episode) => (episode.novelChapterIds ?? []).length > 0)
+  if (assigned) return '' // 已分集：正文走本集窗口，这里不再重复整书
+  const digest = doc.novel
+    .map((chapter, index) => `${index + 1}. 【${chapter.title}】${(chapter.event?.trim() || chapter.text).slice(0, 200)}`)
+    .join('\n')
+    .slice(0, 6000)
+  return `## 原著概览（${doc.novel.length} 章，尚未分集；每章仅摘要，改编前请先分集）\n${digest}`
 }
 
 /** 当前项目上下文（决策层 + 各执行子 Agent 共用）。memoryText 给定时替代默认近期对话（§6.6 召回） */
@@ -293,13 +335,10 @@ function buildContext(doc: ProjectDoc, memoryText?: string): string {
           .join('\n')}`
       : '尚无分镜',
     doc.scripts[0]?.content ? `已有剧本：\n${doc.scripts[0].content.slice(0, 2000)}` : '尚无剧本',
+    // 两层原著上下文：全书总表（常数大小）+ 本集章节正文；未分集时退化为整书摘要
+    formatStoryBible(doc.storyBible),
     formatCurrentEpisodeNovelContext(doc),
-    doc.novel.length
-      ? `## 原著（${doc.novel.length} 章，按此改编剧本，可分集/分段，不丢关键信息）\n${doc.novel
-          .map((c) => (c.event ? `【${c.title}】事件：${c.event}` : `【${c.title}】\n${c.text}`))
-          .join('\n\n')
-          .slice(0, 8000)}`
-      : '',
+    formatNovelDigest(doc),
     recent,
   ]
     .filter(Boolean)
@@ -331,19 +370,13 @@ export function buildToolLoopSystem(doc: ProjectDoc, memoryText?: string): strin
   const TOOL_GUIDE =
     '你是 AI 制片。工具返回的是当前项目的实时状态；凡是用户要求续写、修改、对齐已有内容、查询当前状态，先调用读取工具核对，不要只凭摘要猜测。' +
     '多集项目先用 get_series_bible/get_episodes/get_project_overview 确认整季蓝图和当前剧集；用户指定第几集或新一集时，先 switch_episode 或 create_episode 再写入。' +
-    '只读工具：get_project_overview/get_workspace（项目概览）、get_series_bible（系列圣经和每集计划）、get_episodes（剧集列表）、get_continuity_report（跨集资产/变体一致性审计）、get_episode_handoff（当前集跨集承接线索）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
+    '只读工具：get_project_overview/get_workspace（项目概览）、get_series_bible（系列圣经）、get_episodes（剧集列表）、get_continuity_report（连续性审计）、get_episode_handoff（本集开拍时的资产形态状态）、get_script（完整剧本）、get_storyboards（完整分镜）、get_assets（完整资产）、' +
     'get_novel（原著/章节事件）、get_storyboard_table（设计层大纲/分镜表）、get_timeline（时间线/视频段）、search_project（关键词搜索）。' +
-    '写入/生成工具：update_series_bible（更新整季蓝图）、upsert_episode_plan（更新单集 hook/冲突/结尾钩子和必需资产/变体）、apply_episode_handoff_suggestion（执行当前集 handoff 可自动处理建议）、create_episode（新建并切换剧集）、create_episodes（批量新建空剧集）、switch_episode（切换剧集）、rename_episode（改剧集名）、assign_episode_chapters（把原著章节分配到剧集）、distribute_episode_chapters（按顺序均分原著章节到现有剧集）、upsert_script（写剧本）、add_asset（加项目级共享资产）、update_asset（改已有资产名称/别名/描述/提示词）、upsert_asset_variant（创建/更新资产变体）、set_asset_variant_scope（增量标记变体适用分镜/场景/剧集）、generate_asset_variant（生成变体参考图）、add_storyboard（加当前剧集分镜）、set_storyboard_asset_ref（修正既有分镜出场资产引用）、set_storyboard_cast_variant（修正既有分镜变体绑定）、set_storyboard_scene_asset（修正连续场景资产绑定）、generate_asset、generate_keyframe、generate_clip。' +
-    '用户要求规划整季、拆多集、维护角色弧光或只做大纲时，优先 update_series_bible/upsert_episode_plan，不要直接重写已有剧本；生成单集剧本/分镜时必须遵守对应 Episode.plan 的 requiredAssetIds 和 requiredVariantIds。' +
-    PLANNED_HANDOFF_STORYBOARD_RULE +
-    '续写下一集、处理换装妆容或承接上一集状态时，先读取 get_episode_handoff；如果 handoff/continuity 指出上一相关剧集使用过具体形态，或当前分镜/场景/剧集已有适用变体，分镜必须通过 castRefs 绑定 variantLabel/variantId，除非剧情明确恢复默认状态。' +
-    '连续场景里的同一角色默认保持同一形态；get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，用 set_storyboard_scene_asset 补齐或统一同一 sceneId 的场景资产；返回 scene_group_variant_mismatch 时，除非剧情明确发生换装/状态变化，否则用 set_storyboard_cast_variant 统一同一 sceneId 里的角色变体。' +
-    'get_continuity_report 返回 episode_variant_available 且有多个 candidateVariantIds 时，先按剧情选择正确形态，再用 set_storyboard_cast_variant 绑定；不要继续让分镜使用主形象。' +
-    'get_continuity_report 返回 variant_out_of_episode_scope 时，用 set_asset_variant_scope 追加对应分镜/场景/剧集适用范围，不要用 upsert_asset_variant 重写已有范围数组。' +
-    'get_continuity_report 返回 asset_state_changed_variant 时，若剧情明确换装/妆容/受伤/时期变化，用 set_asset_variant_scope 标记当前 variantId 适用于本集；否则用 set_storyboard_cast_variant 绑定 previousVariantId 沿用上一形态，并传 ensureScope=true 补当前使用范围。' +
-    'get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要调整名称或 aliases 用 update_asset，不要用 add_asset 再创建同名/同别名资产。' +
-    'get_continuity_report 返回 unused_project_asset 时，如果资产应在当前或指定剧集出场，用 set_storyboard_asset_ref 加入合适分镜；不要只口头说明复用。' +
-    '分镜需要指定同一角色的妆容/服装/时期时，先 get_assets 查看 variants，再给 add_storyboard 传 castRefs（assetName 或 assetId + variantLabel 或 variantId）；同一空间/连续动作传稳定 sceneId，承接上一形态或场景/分镜级形态时传 ensureScope=true 和合适 scopeKind。' +
+    '写入/生成工具：update_series_bible、upsert_episode_plan（本集 hook/冲突/结尾钩子）、apply_episode_handoff_suggestion（执行补图建议）、create_episode、create_episodes、switch_episode、rename_episode、assign_episode_chapters、distribute_episode_chapters、upsert_script、add_asset、update_asset、upsert_asset_variant、generate_asset_variant、add_storyboard、set_storyboard_asset_ref、set_storyboard_scene_asset、set_appearance_change（登记某镜的形态变更点）、clear_appearance_change（撤销变更点，让该资产沿用上一镜）、generate_asset、generate_keyframe、generate_clip。' +
+    '用户要求规划整季、拆多集或只做大纲时，优先 update_series_bible/upsert_episode_plan，不要直接重写已有剧本。' +
+    CONTINUITY_STORYBOARD_RULE +
+    'get_continuity_report 只会返回 6 类问题：missing_ref_image/dangling_ref（补图或修引用后才能生成）、unexplained_appearance_change（形态变了但没说明原因——确认是剧情变化就 set_appearance_change 登记，否则 clear_appearance_change 沿用上一镜）、' +
+    'duplicate_identity（多个资产疑似同一对象，用 update_asset 改名或合并）、scene_asset_inconsistent（同 sceneId 场景资产漏挂/混用，用 set_storyboard_scene_asset 统一）、chapter_coverage（章节分配，用 assign_episode_chapters/distribute_episode_chapters）、unused_project_asset（仅提示）。' +
     '执行复杂任务时先规划，再按需读取真实状态，最后调用写入/生成工具完成用户需求；资产名要与分镜 cast 一致，昵称/称谓写 aliases 以便后续复用同一资产。全部做完后用一句中文说明你做了什么。'
   return [getAgentSkill('production_agent_decision'), buildContext(doc, memoryText), TOOL_GUIDE].filter(Boolean).join('\n\n')
 }
@@ -378,14 +411,9 @@ const STORYBOARD_SKILL =
   '你是「导演/分镜师」。把剧本拆成可执行镜头表：每镜画面描述 videoDesc（主体+动作+环境+情绪+光影）、英文关键帧 prompt、时长 duration(4-15)、' +
   '出场资产名 cast（与资产名一致）、对白 dialogues（把该镜台词逐句填入：character 为出场角色名或"旁白"，line 为台词原文，emotion 可选；无台词则空数组）。' +
   '同一空间、同一连续动作或同一场景段落的镜头必须写相同 sceneId；换场时更换 sceneId，替换已有分镜且不再属于任何场景组时可写 sceneId="" 清除旧值。sceneId 用稳定短标识，不要每镜都新造。' +
-  '同一角色有妆容/服装/年龄/时期差异时，额外输出 castRefs：[{"assetName":"资产名","variantLabel":"变体标签","roleInShot":"lead"}]，让分镜绑定到具体变体。' +
-  PLANNED_HANDOFF_STORYBOARD_RULE +
-  '如果上下文里的 get_episode_handoff、get_continuity_report 或已有资产 variants 显示上一相关剧集使用过某角色具体形态，或本集已有适用形态，相关分镜必须在 castRefs 写 variantLabel/variantId；除非剧本明确写出恢复默认形象，不要只写 cast 或把变体只放进画面描述。' +
-  '当你为了承接上一形态或使用已有场景/分镜级形态而绑定 variant 时，给该分镜写 ensureScope=true；有 sceneId 时优先 scopeKind="scene"，只适用于单镜时用 "storyboard"，整集适用才用 "episode"。' +
-  '当连续性报告出现 episode_variant_available、asset_state_regressed_to_main 或 asset_state_changed_variant 时，优先把分镜输出为绑定候选/上一形态/新形态的 castRefs，避免生成后再回退或漂移到错误形态。' +
-  '同一 sceneId 的连续分镜里，同一角色默认保持同一 castRefs 形态；只有镜头内明确发生换装、化妆、受伤或状态转变时，才切换 variantLabel/variantId。' +
+  CONTINUITY_STORYBOARD_RULE +
   '紧接同一连贯动作/同场不切的镜头 chainFromPrev=true。要改已有第 N 镜用 replaceIndex=N(1-based)。' +
-  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"sceneId":"","ensureScope":false,"scopeKind":"scene","cast":[],"castRefs":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
+  '只输出 JSON：{"storyboards":[{"videoDesc":"","prompt":"","duration":5,"sceneId":"","cast":[],"stateChanges":[],"dialogues":[{"character":"","line":"","emotion":""}],"chainFromPrev":false}]}'
 
 function parseDecision(raw: string): { reply: string; tasks: StageTask[]; autoGenerate: boolean } {
   const fallback = { reply: '已处理。', tasks: ['script', 'assets', 'storyboard'] as StageTask[], autoGenerate: false }
@@ -457,7 +485,7 @@ const TOOL_CONTEXT_CAP = 24000
 const PIPELINE_TOOL_GUIDE =
   '## 子 Agent 工具上下文\n' +
   '下面内容由本地项目读取工具在当前回合实时返回。它是事实来源：续写、修改、补分镜、补资产时优先以这些读取结果为准；前序子 Agent 产出的剧本/资产会先写入项目，后续子 Agent 应直接读取最新状态。\n' +
-  `${PLANNED_HANDOFF_STORYBOARD_RULE}\n` +
+  `${CONTINUITY_STORYBOARD_RULE}\n` +
   '多集续写、换装、妆容、受伤状态或时期变化要以 get_episode_handoff 和 get_continuity_report 为准；分镜子 Agent 看到上一相关剧集形态、本集适用变体、episode_variant_available、asset_state_regressed_to_main 或 asset_state_changed_variant 时，必须输出带 variantLabel/variantId 的 castRefs，除非剧本明确恢复默认状态。\n' +
   '如果 continuity 出现 scene_group_variant_mismatch，同一 sceneId 的连续分镜应统一同一角色形态，除非剧本明确描述该场内发生换装、化妆、受伤或状态转变。'
 
@@ -577,7 +605,7 @@ export async function runAgentPipeline(
   userText: string,
   onEvent?: (e: PipelineEvent) => void,
   onStagePlan?: (stage: PipelineStage, plan: PipelineStagePlan) => void | Promise<void>,
-  options?: { episodeId?: string },
+  options?: { episodeId?: string; stages?: StageTask[] },
 ): Promise<AgentPlan> {
   const model = ensureModel()
   const cfg = await getMemoryConfig()
@@ -600,6 +628,121 @@ export async function runAgentPipeline(
   }
   const emit = onEvent ?? (() => {})
   const reasoner = (agent: PipelineAgentId) => (delta: string) => emit({ type: 'reasoning', agent, delta })
+
+  const runStageAgent = async (task: StageTask, plan: AgentPlan): Promise<void> => {
+    if (task === 'script') {
+      emit({ type: 'start', agent: 'script', title: AGENT_TITLES.script })
+      const scriptToolCtx = await readPipelineToolContext(
+        getDoc,
+        'script',
+        [
+          { name: 'get_project_overview', limit: 12000 },
+          { name: 'get_episodes', limit: 12000 },
+          { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
+          { name: 'get_novel', args: { includeText: true, textLimit: 6000 }, limit: 30000 },
+          { name: 'get_storyboard_table', args: targetEpisodeArgs(), limit: 18000 },
+        ],
+        emit,
+      )
+      const scriptCtx = [makeBaseCtx(), scriptToolCtx].filter(Boolean).join('\n\n')
+      const scriptRaw = await runText({
+        model,
+        system: [SCRIPT_SKILL, scriptCtx].filter(Boolean).join('\n\n'),
+        user: userText,
+        jsonMode: true,
+        onReasoning: reasoner('script'),
+      })
+      plan.script = parseScriptOutput(scriptRaw.content)
+      emit({
+        type: 'output',
+        agent: 'script',
+        summary: plan.script?.content
+          ? `已产出剧本${plan.script.name ? ` **《${plan.script.name}》**` : ''}（约 ${plan.script.content.length} 字）。`
+          : '未产出剧本内容。',
+      })
+      await stageApplied('script', { script: plan.script })
+      emit({ type: 'done', agent: 'script' })
+      return
+    }
+    if (task === 'assets') {
+      emit({ type: 'start', agent: 'assets', title: AGENT_TITLES.assets })
+      const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
+      const assetsToolCtx = await readPipelineToolContext(
+        getDoc,
+        'assets',
+        [
+          { name: 'get_project_overview', limit: 12000 },
+          { name: 'get_episodes', limit: 12000 },
+          { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
+          { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
+        ],
+        emit,
+      )
+      const aCtx = [
+        makeBaseCtx(),
+        assetsToolCtx,
+        scriptSource ? `## 当前剧本正文（美术资产提炼的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
+        plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      plan.assets = cleanAssets((await callJson(model, ASSETS_SKILL, aCtx, '', userText, reasoner('assets'))).assets)
+      if (!plan.assets.length && scriptSource) {
+        const retrySkill =
+          ASSETS_SKILL +
+          '\n\n你上一次没有返回可写入资产，但当前任务明确需要资产。请只基于「当前剧本正文」提炼缺失资产；已有资产为空或缺失时，必须返回角色、主要场景和关键道具，不允许返回空数组。'
+        const retryUser = `${userText}\n\n请从当前剧本正文中提炼并生成缺失资产数据；只输出 assets JSON。`
+        plan.assets = cleanAssets((await callJson(model, retrySkill, aCtx, '', retryUser, reasoner('assets'))).assets)
+      }
+      emit({ type: 'output', agent: 'assets', summary: summarizeAssets(plan.assets) })
+      await stageApplied('assets', { assets: plan.assets })
+      emit({ type: 'done', agent: 'assets' })
+      return
+    }
+    emit({ type: 'start', agent: 'storyboard', title: AGENT_TITLES.storyboard })
+    const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
+    const storyboardToolCtx = await readPipelineToolContext(
+      getDoc,
+      'storyboard',
+      [
+        { name: 'get_project_overview', limit: 12000 },
+        { name: 'get_episodes', limit: 12000 },
+        { name: 'get_continuity_report', limit: 20000 },
+        { name: 'get_episode_handoff', args: targetEpisodeArgs(), limit: 24000 },
+        { name: 'get_storyboards', args: { ...targetEpisodeArgs(), count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
+        { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
+        { name: 'get_timeline', args: { ...targetEpisodeArgs(), includeClips: false }, limit: 18000 },
+        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
+      ],
+      emit,
+    )
+    const newAssets = plan.assets?.length ? JSON.stringify(plan.assets, null, 2).slice(0, 16000) : ''
+    const sCtx = [
+      makeBaseCtx(),
+      storyboardToolCtx,
+      scriptSource ? `## 当前剧本正文（分镜拆解的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
+      plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
+      newAssets ? `## 本轮新增资产（与已有资产合并使用，cast 名称必须匹配）\n${newAssets}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n\n')
+    plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText, reasoner('storyboard'))).storyboards
+    emit({ type: 'output', agent: 'storyboard', summary: summarizeStoryboards(plan.storyboards) })
+    await stageApplied('storyboard', { storyboards: plan.storyboards })
+    emit({ type: 'done', agent: 'storyboard' })
+  }
+
+  // 主线流水线直接指定阶段时跳过决策层：调用方已经知道这一步要做什么，
+  // 再问一次模型只是多花一次调用和一次误判的机会
+  if (options?.stages?.length) {
+    const forced = TASK_ORDER.filter((task) => options.stages!.includes(task))
+    const plan: AgentPlan = { reply: '' }
+    for (const task of forced) {
+      await runStageAgent(task, plan)
+    }
+    plan.reply = summarizePlanResult(plan, forced)
+    return plan
+  }
 
   // 决策层
   emit({ type: 'start', agent: 'decision', title: AGENT_TITLES.decision })
@@ -633,105 +776,8 @@ export async function runAgentPipeline(
   })
   emit({ type: 'done', agent: 'decision' })
 
-  if (decision.tasks.includes('script')) {
-    emit({ type: 'start', agent: 'script', title: AGENT_TITLES.script })
-    const scriptToolCtx = await readPipelineToolContext(
-      getDoc,
-      'script',
-      [
-        { name: 'get_project_overview', limit: 12000 },
-        { name: 'get_episodes', limit: 12000 },
-        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
-        { name: 'get_novel', args: { includeText: true, textLimit: 6000 }, limit: 30000 },
-        { name: 'get_storyboard_table', args: targetEpisodeArgs(), limit: 18000 },
-      ],
-      emit,
-    )
-    const scriptCtx = [makeBaseCtx(), scriptToolCtx].filter(Boolean).join('\n\n')
-    const scriptRaw = await runText({
-      model,
-      system: [SCRIPT_SKILL, scriptCtx].filter(Boolean).join('\n\n'),
-      user: userText,
-      jsonMode: true,
-      onReasoning: reasoner('script'),
-    })
-    plan.script = parseScriptOutput(scriptRaw.content)
-    emit({
-      type: 'output',
-      agent: 'script',
-      summary: plan.script?.content
-        ? `已产出剧本${plan.script.name ? ` **《${plan.script.name}》**` : ''}（约 ${plan.script.content.length} 字）。`
-        : '未产出剧本内容。',
-    })
-    await stageApplied('script', { script: plan.script })
-    emit({ type: 'done', agent: 'script' })
-  }
-  if (decision.tasks.includes('assets')) {
-    emit({ type: 'start', agent: 'assets', title: AGENT_TITLES.assets })
-    const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
-    const assetsToolCtx = await readPipelineToolContext(
-      getDoc,
-      'assets',
-      [
-        { name: 'get_project_overview', limit: 12000 },
-        { name: 'get_episodes', limit: 12000 },
-        { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
-        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
-      ],
-      emit,
-    )
-    const aCtx = [
-      makeBaseCtx(),
-      assetsToolCtx,
-      scriptSource ? `## 当前剧本正文（美术资产提炼的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
-      plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-    plan.assets = cleanAssets((await callJson(model, ASSETS_SKILL, aCtx, '', userText, reasoner('assets'))).assets)
-    if (!plan.assets.length && scriptSource) {
-      const retrySkill =
-        ASSETS_SKILL +
-        '\n\n你上一次没有返回可写入资产，但当前任务明确需要资产。请只基于「当前剧本正文」提炼缺失资产；已有资产为空或缺失时，必须返回角色、主要场景和关键道具，不允许返回空数组。'
-      const retryUser = `${userText}\n\n请从当前剧本正文中提炼并生成缺失资产数据；只输出 assets JSON。`
-      plan.assets = cleanAssets((await callJson(model, retrySkill, aCtx, '', retryUser, reasoner('assets'))).assets)
-    }
-    emit({ type: 'output', agent: 'assets', summary: summarizeAssets(plan.assets) })
-    await stageApplied('assets', { assets: plan.assets })
-    emit({ type: 'done', agent: 'assets' })
-  }
-  if (decision.tasks.includes('storyboard')) {
-    emit({ type: 'start', agent: 'storyboard', title: AGENT_TITLES.storyboard })
-    const scriptSource = currentScriptContent(getDoc(), plan, targetEpisodeId())
-    const storyboardToolCtx = await readPipelineToolContext(
-      getDoc,
-      'storyboard',
-      [
-        { name: 'get_project_overview', limit: 12000 },
-        { name: 'get_episodes', limit: 12000 },
-        { name: 'get_continuity_report', limit: 20000 },
-        { name: 'get_episode_handoff', args: targetEpisodeArgs(), limit: 24000 },
-        { name: 'get_storyboards', args: { ...targetEpisodeArgs(), count: 200, includePrompt: true, includeDialogues: true, includeAssets: true }, limit: 36000 },
-        { name: 'get_assets', args: { includeImages: false }, limit: 30000 },
-        { name: 'get_timeline', args: { ...targetEpisodeArgs(), includeClips: false }, limit: 18000 },
-        { name: 'get_script', args: { ...targetEpisodeArgs(), contentLimit: 50000 }, limit: 30000 },
-      ],
-      emit,
-    )
-    const newAssets = plan.assets?.length ? JSON.stringify(plan.assets, null, 2).slice(0, 16000) : ''
-    const sCtx = [
-      makeBaseCtx(),
-      storyboardToolCtx,
-      scriptSource ? `## 当前剧本正文（分镜拆解的主要来源）\n${scriptSource.slice(0, 30000)}` : '',
-      plan.script ? `## 本轮新剧本（优先于工具中的旧剧本）\n${plan.script.content.slice(0, 30000)}` : '',
-      newAssets ? `## 本轮新增资产（与已有资产合并使用，cast 名称必须匹配）\n${newAssets}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-    plan.storyboards = (await callJson(model, STORYBOARD_SKILL, sCtx, '', userText, reasoner('storyboard'))).storyboards
-    emit({ type: 'output', agent: 'storyboard', summary: summarizeStoryboards(plan.storyboards) })
-    await stageApplied('storyboard', { storyboards: plan.storyboards })
-    emit({ type: 'done', agent: 'storyboard' })
+  for (const task of decision.tasks) {
+    await runStageAgent(task, plan)
   }
   plan.reply = summarizePlanResult(plan, decision.tasks)
   return plan

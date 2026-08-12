@@ -160,19 +160,15 @@ export function assetHubSelectedFieldDiffs(
 export interface AssetHubSyncImpact {
   episodeLabels: string[]
   storyboardCount: number
-  planEpisodeLabels: string[]
   summary: string
 }
 
 /**
  * 估算同步某项目资产后会影响哪些剧集/分镜（只读，不改文档）。
- * 出场来自 castRefs；计划来自 Episode.plan。
+ * 影响面完全来自分镜 castRefs 的实际出场——不再有"计划剧集"这条平行声明。
  */
 export function assetHubSyncImpactSummary(doc: ProjectDoc, assetId: string): AssetHubSyncImpact {
-  const asset = doc.assets?.find((item) => item.id === assetId)
-  const variantIds = new Set((asset?.variants ?? []).map((variant) => variant.id))
   const episodeLabels = new Set<string>()
-  const planEpisodeLabels = new Set<string>()
   let storyboardCount = 0
 
   const considerStoryboards = (episode: Pick<Episode, 'id' | 'index' | 'title'> | undefined, storyboards: NonNullable<ProjectDoc['storyboards']>) => {
@@ -186,27 +182,20 @@ export function assetHubSyncImpactSummary(doc: ProjectDoc, assetId: string): Ass
   }
 
   for (const episode of doc.episodes ?? []) {
-    const plan = episode.plan
-    if ((plan?.requiredAssetIds ?? []).includes(assetId) || (plan?.requiredVariantIds ?? []).some((id) => variantIds.has(id))) {
-      const label = episodeScopeLabel(episode)
-      if (label) planEpisodeLabels.add(label)
-    }
+    if (episode.id === doc.currentEpisodeId) continue
     considerStoryboards(episode, episode.storyboards ?? [])
   }
   const currentEpisode = doc.currentEpisodeId ? (doc.episodes ?? []).find((episode) => episode.id === doc.currentEpisodeId) : undefined
   considerStoryboards(currentEpisode, doc.storyboards ?? [])
 
   const episodeList = [...episodeLabels]
-  const planList = [...planEpisodeLabels]
   const parts: string[] = []
   if (episodeList.length) parts.push(`出场剧集：${episodeList.join('、')}`)
-  if (planList.length) parts.push(`计划剧集：${planList.join('、')}`)
   if (storyboardCount) parts.push(`${storyboardCount} 个分镜引用`)
   return {
     episodeLabels: episodeList,
     storyboardCount,
-    planEpisodeLabels: planList,
-    summary: parts.length ? parts.join('；') : '当前项目暂无分镜或计划引用该资产',
+    summary: parts.length ? parts.join('；') : '当前项目暂无分镜引用该资产',
   }
 }
 
@@ -286,10 +275,9 @@ export function assetHubAdoptionTargetForCanvasOutput(
 }
 
 export interface AssetHubVariantScopeSummary {
-  scoped: boolean
+  /** 该形态是否真的被分镜用过 */
+  used: boolean
   episodeLabels: string[]
-  unknownEpisodeCount: number
-  sceneCount: number
   storyboardCount: number
   label: string
 }
@@ -302,21 +290,30 @@ function episodeScopeLabel(episode: Pick<Episode, 'index' | 'title'> | undefined
 }
 
 /**
- * 汇总某个项目资产变体的作用域，供矩阵、系列页和同步确认展示。
+ * 汇总某个形态在项目里的**实际使用范围**（由分镜反查，不再读已删除的 appliesTo* 声明）。
+ * 一个形态"适用于哪里"不需要标注——它出现在哪些分镜里，就适用于哪里。
  */
-export function assetHubVariantScopeSummary(asset: Asset, variant: AssetVariant, episodes: Episode[] = []): AssetHubVariantScopeSummary {
-  const episodesById = new Map(episodes.map((episode) => [episode.id, episode]))
-  const episodeIds = [...new Set(variant.appliesToEpisodeIds ?? [])]
-  const episodeLabels = episodeIds.map((episodeId) => episodeScopeLabel(episodesById.get(episodeId))).filter(Boolean)
-  const unknownEpisodeCount = episodeIds.length - episodeLabels.length
-  const sceneCount = new Set(variant.appliesToSceneIds ?? []).size
-  const storyboardCount = new Set(variant.appliesToStoryboardIds ?? []).size
-  const scoped = episodeIds.length > 0 || sceneCount > 0 || storyboardCount > 0
-  const parts: string[] = []
-  if (episodeLabels.length) parts.push(`适用：${episodeLabels.join('、')}`)
-  if (unknownEpisodeCount > 0) parts.push(`${unknownEpisodeCount} 个未知剧集`)
-  if (sceneCount) parts.push(`${sceneCount} 个场景`)
-  if (storyboardCount) parts.push(`${storyboardCount} 个分镜`)
-  const label = scoped ? `${asset.name} / ${variant.label}：${parts.join('；')}` : `${asset.name} / ${variant.label}：全剧通用`
-  return { scoped, episodeLabels, unknownEpisodeCount, sceneCount, storyboardCount, label }
+export function assetHubVariantScopeSummary(doc: ProjectDoc, asset: Asset, variant: AssetVariant): AssetHubVariantScopeSummary {
+  const episodeLabels = new Set<string>()
+  let storyboardCount = 0
+
+  const scan = (episode: Pick<Episode, 'index' | 'title'> | undefined, storyboards: ProjectDoc['storyboards']) => {
+    for (const storyboard of storyboards) {
+      if (!castRefsForStoryboard(storyboard).some((ref) => ref.assetId === asset.id && ref.variantId === variant.id)) continue
+      storyboardCount += 1
+      const label = episodeScopeLabel(episode)
+      if (label) episodeLabels.add(label)
+    }
+  }
+  for (const episode of doc.episodes ?? []) {
+    if (episode.id === doc.currentEpisodeId) continue
+    scan(episode, episode.storyboards ?? [])
+  }
+  scan((doc.episodes ?? []).find((episode) => episode.id === doc.currentEpisodeId), doc.storyboards ?? [])
+
+  const labels = [...episodeLabels]
+  const label = storyboardCount
+    ? `${asset.name} / ${variant.label}：${labels.length ? `${labels.join('、')}，` : ''}${storyboardCount} 个分镜`
+    : `${asset.name} / ${variant.label}：尚未被任何分镜使用`
+  return { used: storyboardCount > 0, episodeLabels: labels, storyboardCount, label }
 }

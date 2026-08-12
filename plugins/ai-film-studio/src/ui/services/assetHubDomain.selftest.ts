@@ -51,7 +51,7 @@ const snapshotAsset: Asset = {
   elementId: 'el_hero',
   libraryLink: { entityId: 'el_hero', entityVersion: 3, syncPolicy: 'snapshot', variantMap: { 'v-gala': 'lv-gala' } },
   variants: [
-    { id: 'v-gala', libraryVariantId: 'lv-gala', label: '晚宴妆', variantKind: 'makeup', appliesToEpisodeIds: ['ep5'] },
+    { id: 'v-gala', libraryVariantId: 'lv-gala', label: '晚宴妆', variantKind: 'makeup' },
     { id: 'v-local', label: '雨夜湿发', variantKind: 'state' },
   ],
   voiceAssetId: 'voice-1',
@@ -133,14 +133,13 @@ const impactDoc = {
       id: 'ep5',
       index: 4,
       title: '晚宴',
-      plan: { requiredAssetIds: ['a_hero'], requiredVariantIds: ['v-gala'] },
       storyboards: [{ id: 'sb1', index: 0, associateAssetIds: ['a_hero'], castRefs: [{ assetId: 'a_hero', variantId: 'v-gala' }] }],
     },
   ],
   storyboards: [],
 } as never
 const impact = assetHubSyncImpactSummary(impactDoc, 'a_hero')
-check('sync impact lists episode and storyboard usage', impact.episodeLabels.includes('E5 晚宴') && impact.storyboardCount === 1 && impact.planEpisodeLabels.includes('E5 晚宴'), JSON.stringify(impact))
+check('sync impact lists episode and storyboard usage', impact.episodeLabels.includes('E5 晚宴') && impact.storyboardCount === 1, JSON.stringify(impact))
 check('sync impact summary is readable', impact.summary.includes('出场剧集') && impact.summary.includes('分镜引用'), impact.summary)
 
 // —— assetHubAdoptionTargetForCanvasOutput ——
@@ -189,23 +188,14 @@ const episodes: Episode[] = [
   { id: 'ep6', index: 5, title: '追凶', status: 'planned' } as Episode,
 ]
 
-const scoped = assetHubVariantScopeSummary(snapshotAsset, snapshotAsset.variants![0], episodes)
-check('variant scope summary resolves episode labels', scoped.scoped && scoped.episodeLabels.join() === 'E5 晚宴', JSON.stringify(scoped))
-check('variant scope summary label is readable', scoped.label === '女主 / 晚宴妆：适用：E5 晚宴', scoped.label)
+void episodes
+// 形态没有"适用范围"了：这里验证 summary 报的是**实际出场**，不是声明
+const used = assetHubVariantScopeSummary(impactDoc, snapshotAsset, snapshotAsset.variants![0])
+check('variant summary reports real usage', used.used && used.episodeLabels.join() === 'E5 晚宴' && used.storyboardCount === 1, JSON.stringify(used))
+check('variant summary label is readable', used.label === '女主 / 晚宴妆：E5 晚宴，1 个分镜', used.label)
 
-const global = assetHubVariantScopeSummary(snapshotAsset, snapshotAsset.variants![1], episodes)
-check('unscoped variant is 全剧通用', !global.scoped && global.label.endsWith('全剧通用'), global.label)
-
-const mixed = assetHubVariantScopeSummary(
-  snapshotAsset,
-  { id: 'v-m', label: '混合', appliesToEpisodeIds: ['ep5', 'ep-gone'], appliesToSceneIds: ['s1'], appliesToStoryboardIds: ['sb1', 'sb2'] },
-  episodes,
-)
-check(
-  'variant scope summary counts unknown episodes, scenes and storyboards',
-  mixed.unknownEpisodeCount === 1 && mixed.sceneCount === 1 && mixed.storyboardCount === 2 && mixed.label.includes('1 个未知剧集'),
-  JSON.stringify(mixed),
-)
+const unused = assetHubVariantScopeSummary(impactDoc, snapshotAsset, snapshotAsset.variants![1])
+check('variant never bound to a shot reports unused', !unused.used && unused.label.endsWith('尚未被任何分镜使用'), unused.label)
 
 if (failures) {
   console.error(`assetHubDomain selftest failed: ${failures} checks`)

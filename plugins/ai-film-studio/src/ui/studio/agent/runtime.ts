@@ -7,7 +7,7 @@
  *
  * §6.1.1：每次 ai.call 用传入的 abortSignal，不复用 textEngine 全局单例，支持嵌套子 Agent / 并发取消。
  */
-import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
+import { CONTINUITY_STORYBOARD_RULE } from './policy'
 
 export interface AgentTool {
   name: string
@@ -83,19 +83,17 @@ ${toolSchemaText(tools)}
 - 需要确认当前剧本、分镜、资产、原著或时间线时，先请求读取工具。
 - 多集项目中，用户指定第几集、下一集或新一集时，先用 get_episodes 确认剧集，再用 switch_episode 或 create_episode 选中目标剧集；剧本、分镜和视频片段都写入当前剧集，资产是项目级共享。
 - 用户要求规划多集、按原著拆集或指定每集覆盖内容时，先用 get_novel/get_episodes 查看章节和剧集；剧集数量不足时先用 create_episodes 补空剧集；粗略初始化可用 distribute_episode_chapters 顺序均分，精确拆集用 assign_episode_chapters 写入章节归属。
-- ${PLANNED_HANDOFF_STORYBOARD_RULE}
-- 续写下一集、承接上一集状态、处理换装/妆容/受伤/时期变化时，先调用 get_episode_handoff 读取最近制作回顾、共享资产出场记录和承接建议；看到上一相关剧集使用过具体形态或本集已有适用变体时，分镜写入必须用 castRefs/variant 精确绑定。
-- 检查跨集角色一致性、妆容/服装绑定或缺图问题时，优先调用 get_continuity_report，再决定是否补资产、补变体或修正分镜绑定。
-- get_continuity_report 返回 duplicate_asset_name 或 duplicate_asset_alias 时，优先复用已有资产；需要改名、补充或移除 aliases 时调用 update_asset，确认是真重复且引用复杂时再建议合并资产；不要继续用同一称呼创建新角色、场景或道具。
-- get_continuity_report 返回 unused_project_asset 时，先判断该资产是否属于当前或后续剧集；需要出场就调用 set_storyboard_asset_ref 把它加入相应分镜 castRefs，不需要就建议合并或移出资产池，避免继续堆积未使用资产。
-- get_continuity_report 返回 scene_group_missing_asset 或 scene_group_asset_mismatch 时，优先调用 set_storyboard_scene_asset，让同一 sceneId 的连续分镜复用同一个场景资产；不要为同一空间重复创建新场景。
-- get_continuity_report 返回 scene_group_variant_mismatch 时，先判断是否有明确换装/状态变化；没有明确变化时，优先用 set_storyboard_cast_variant 让同一 sceneId 连续分镜里的同一角色使用同一形态。
-- get_continuity_report 返回 episode_variant_available 且带 variantId 或 candidateVariantIds 时，先按剧情选择正确形态，再调用 set_storyboard_cast_variant 把该分镜资产绑定到当前分镜/场景/剧集适用形态；不要继续让分镜使用主形象。
-- get_continuity_report 返回 variant_out_of_episode_scope 且带 assetId/variantId/scopeKind 时，优先调用 set_asset_variant_scope 把该变体标记为适用于对应分镜、场景或剧集；不要用 upsert_asset_variant 覆盖已有适用范围数组。
-- get_continuity_report 返回 asset_state_regressed_to_main 时，先判断剧情是否确实恢复默认状态；如果状态应延续或变化，调用 upsert_asset_variant 创建本集形态并用 set_storyboard_cast_variant 绑定。
-- get_continuity_report 返回 asset_state_changed_variant 时，先判断剧情是否明确换装/妆容/受伤/时期变化；若是明确变化，调用 set_asset_variant_scope 把当前 variantId 标记适用于本集；否则用 set_storyboard_cast_variant 绑定 previousVariantId 沿用上一形态，并传 ensureScope=true 让场景/分镜级上一形态补当前使用范围。
-- 同一角色有妆容、服装、年龄或时期差异时，先用 get_assets 查看 variants；缺少变体就调用 upsert_asset_variant 创建/更新，再在 add_storyboard 或 set_storyboard_cast_variant 里传 castRefs/variant 精确绑定。不要只把变体写进画面描述。
-- 新增或续写分镜时，同一空间、同一连续动作或同一场景段落要给 add_storyboard 传稳定 sceneId；如果 add_storyboard 用 castRefs 绑定上一形态或场景/分镜级形态，传 ensureScope=true，并按需要传 scopeKind=scene/storyboard/episode。
+- ${CONTINUITY_STORYBOARD_RULE}
+- 续写下一集或处理换装/妆容/受伤/时期变化时，先调用 get_episode_handoff 读取 carriedState——它就是本集开拍时每个资产的当前形态，直接照着用。
+- get_continuity_report 只有 6 类问题，对应处理方式：
+  · missing_ref_image / dangling_ref（阻断生成）→ generate_asset / generate_asset_variant 补图，或修正分镜引用。
+  · unexplained_appearance_change → 剧情里确实变了就 set_appearance_change 登记（必须给 reason），否则 clear_appearance_change 沿用上一镜。
+  · duplicate_identity → 用 update_asset 改名或别名区分；确认是同一对象再建议合并。
+  · scene_asset_inconsistent → set_storyboard_scene_asset 让同一 sceneId 的连续分镜复用同一场景资产。
+  · chapter_coverage → distribute_episode_chapters 粗分或 assign_episode_chapters 精确指派。
+  · unused_project_asset → 仅提示；需要出场就 set_storyboard_asset_ref 加入分镜。
+- 同一角色有妆容、服装、年龄或时期差异时，先用 get_assets 查看 variants；缺少形态就调用 upsert_asset_variant 创建，再用 set_appearance_change 在发生变化的那一镜登记。形态不需要标注"适用于哪几集"。
+- 新增或续写分镜时，同一空间、同一连续动作或同一场景段落要给 add_storyboard 传稳定 sceneId。
 - 用户要求生成、新增、续写或修改项目内容时，最终回复前必须调用对应写入/生成工具：剧本用 upsert_script，新资产用 add_asset，修改既有资产用 update_asset，分镜用 add_storyboard，出图/关键帧/视频用 generate_*。不要只描述计划。
 - 写入后如需确认结果，再调用读取工具核对；确认完成后再给最终回复。
 - 工具返回后，再根据结果继续请求工具或给最终回复。

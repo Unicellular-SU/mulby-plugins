@@ -28,6 +28,11 @@ export interface ProjectMeta {
   directorManual?: string // 导演手册：全局风格/节奏意图，注入各 Agent
   audioReferenceCount?: number // [阶段2] 每段注入配音上限（对标 audioReference:N）
   concurrency?: number // [阶段2] 批量并发数（默认 3）
+  /**
+   * 宫格关键帧：同一场景组的连续镜头合成一张分镜板再切开。
+   * 组内一致性由"同一次生成"保证，比任何提示词约束都强，且把 N 次图像调用压成 1 次。
+   */
+  gridKeyframes?: boolean
   transition?: 'none' | 'fade' | 'xfade' // [阶段2] 整片转场
   createdAt: number
   updatedAt: number
@@ -43,6 +48,30 @@ export interface NovelChapter {
   eventState?: GenState
 }
 
+/**
+ * 故事圣经：对**整本原著**只跑一次的全局提取结果。
+ *
+ * 存在的理由是上下文预算：旧版每个子 Agent 调用都把原著正文截断塞进 system
+ * （8000 字），长篇必然溢出且丢关键信息。改成"全局提取一次 + 每集只带本集章节"
+ * 之后，单集调用的上下文与小说总长度解耦。
+ */
+export interface StoryBible {
+  characters: { name: string; aliases?: string[]; desc: string }[]
+  locations: { name: string; desc: string }[]
+  props: { name: string; desc: string }[]
+  worldRules?: string
+  /** 提取时覆盖的章节数；小于当前章节数说明导入了新内容需要重跑 */
+  sourceChapterCount: number
+  extractedAt: number
+}
+
+/** 分集规划的一个断点建议：把 chapterIds 这几章合成一集 */
+export interface EpisodeBreak {
+  title: string
+  summary: string
+  chapterIds: string[]
+}
+
 /** 剧本 */
 export interface Script {
   id: string
@@ -52,7 +81,13 @@ export interface Script {
   updatedAt: number
 }
 
-/** 资产变体（时期/状态/换装） */
+/**
+ * 资产变体（时期/状态/换装）。
+ *
+ * 变体**不再声明适用范围**。一个变体只是「这个角色/场景/道具的另一种样子」，
+ * 它在哪几集、哪几场、哪几镜生效，完全由分镜上的 `Storyboard.stateChanges`
+ * 变更点沿时间轴推导（见 `domain/continuityLedger.ts`）。
+ */
 export interface AssetVariant {
   id: string
   label: string
@@ -62,13 +97,22 @@ export interface AssetVariant {
   libraryVariantId?: string // 来源身份资产变体 id；本地 id 可独立演进
   variantKind?: 'age' | 'outfit' | 'makeup' | 'injury' | 'state' | 'time' | 'weather' | 'custom'
   parentVariantId?: string
-  appliesTo?: string[] // 对齐节拍/段落关键字
-  appliesToEpisodeIds?: string[]
-  appliesToSceneIds?: string[]
-  appliesToStoryboardIds?: string[]
   tags?: string[]
   state?: GenState // [阶段2]
   error?: string // [阶段2]
+}
+
+/**
+ * 形态变更点（连续性台账的唯一写入口）。
+ *
+ * 语义：从**本分镜起**，`assetId` 的形态切换为 `toVariantId`（缺省 = 回到主形象），
+ * 一直延续到下一个变更点。没有变更点的资产永远继承上一次的状态——这正是场记
+ * 连续性记录的工作方式，也让「适用范围」不再需要人工声明。
+ */
+export interface AppearanceChange {
+  assetId: string
+  toVariantId?: string // undefined = 恢复主形象
+  reason: string // 换装/受伤/时间跳跃…—— 必填，因为无理由的形态跳变就是连续性事故
 }
 
 export interface ProjectAssetLibraryLink {
@@ -134,17 +178,45 @@ export interface Storyboard {
   prompt?: string // 英文关键帧提示词
   shotSize?: string // 景别（远景/全景/中景/近景/特写…）—注入关键帧+视频提示词
   cameraMove?: string // 运镜（固定/推/拉/摇/移/跟…）—注入视频提示词
+  shotDesign?: ShotDesign // 镜头设计决策层：构图动机，注入关键帧提示词
   duration: number // 推荐视频时长(秒)
   associateAssetIds: string[] // 出场资产
-  castRefs?: StoryboardCastRef[] // 精确出场资产引用（支持同一角色的妆容/服装/年龄变体）
+  castRefs?: StoryboardCastRef[] // 精确出场资产引用；variantId 为本镜实际形态（默认由台账推导回填）
+  stateChanges?: AppearanceChange[] // 本镜发生的形态变更点；空 = 全部资产沿用上一镜状态
   shouldGenerateImage: boolean
   keyframeImageId?: string // 关键帧图（资产库 assetId）
+  gridImageId?: string // 该关键帧来自哪张宫格分镜板；留档便于复查与整组重切
+  gridError?: string // 宫格失败原因（已回退逐镜生成）；留痕以免失败被静默吞掉
   chainFromPrev?: boolean // 承接上一镜（关键帧链式/尾帧接龙）
   sceneId?: string // 同场判断
   dialogues?: { character: string; line: string; emotion?: string }[]
   flowId?: string // [阶段2] 关键帧精修画布引用（§4.4）
   state: GenState
   error?: string
+}
+
+/**
+ * 镜头设计决策（借鉴 cinema-dna 的「先判断、后取景」）。
+ *
+ * 为什么单列这几个字段：`shotSize` / `cameraMove` / `lens` 这类是**机械层**——它们描述
+ * 摄影机怎么摆，但不回答"为什么摆在这里"。只喂机械层，模型只能产出正确但模板化的画面
+ * （每组都是"远景 → 中景 → 特写"）。决策层回答的是构图的动机，是画面之间拉开差异的来源。
+ *
+ * 全部可选：没有就退回原来的机械层拼装，不影响既有项目。
+ */
+export interface ShotDesign {
+  /** 不可解决的状态：人物此刻无法立刻解决的问题（不是"孤独/忧郁"这类形容词） */
+  unresolvedState?: string
+  /** 观众位置：同处现场 / 隔玻璃 / 肩后 / 高处监视 / 倒地视角… */
+  viewerPosition?: string
+  /** 视线流量：从 A 进入，被 B 放慢，落到 C，最后被 D 带走 */
+  gazeFlow?: string
+  /** 主要构图机制（一镜只用一个）：被观察 / 被困住 / 关系疏离 / 权力不对等 / 心理失衡 / 事后状态 / 感官插入 */
+  compositionMechanism?: string
+  /** 色彩命题：主色域 + 唯一强调色 + 颜色来自哪里 */
+  colorThesis?: string
+  /** 成像基底：35mm release print / 16mm television transfer / 手持纪录式… */
+  imagingBase?: string
 }
 
 export interface StoryboardCastRef {
@@ -267,18 +339,19 @@ export interface SeriesBible {
   synopsis?: string
   theme?: string
   worldRules?: string
-  continuityRules?: string[]
   plannedEpisodeCount?: number
-  characterArcNotes?: Record<string, string>
-  locationNotes?: Record<string, string>
 }
 
+/**
+ * 单集计划：只留叙事意图。
+ *
+ * 「本集需要哪些资产/形态」不再手工勾选——那是分镜的事实，由 `episodeCastRequirements()`
+ * 从分镜反推，避免声明与实际用法两套数据互相打架。
+ */
 export interface EpisodePlan {
   hook?: string
   conflict?: string
   cliffhanger?: string
-  requiredAssetIds?: string[]
-  requiredVariantIds?: string[]
 }
 
 /** 单集生产线。项目级资产仍保留在 ProjectDoc.assets 中跨集共享。 */
@@ -309,6 +382,8 @@ export interface ProjectDoc {
   meta: ProjectMeta
   novel: NovelChapter[]
   seriesBible?: SeriesBible
+  /** 全局提取一次的人物/场景/道具表，供各子 Agent 代替原著正文 */
+  storyBible?: StoryBible
   /** 多集迁移期的当前集兼容镜像。 */
   scripts: Script[]
   assets: Asset[]

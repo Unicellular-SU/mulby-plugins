@@ -4,14 +4,15 @@
  */
 import type { AgentTool } from './runtime'
 import type { ProjectState } from '../../store/projectStore'
-import type { Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
+import type { AppearanceChange, Asset, AssetVariant, Clip, Episode, EpisodePlan, ProjectDoc, Script, Storyboard, StoryboardCastRef, StoryboardTableScene, VideoTrack } from '../../domain/types'
 import { castRefsForStoryboard, labelForCastRef } from '../../domain/castRefs'
 import { assetPrefixLookup, cleanAssetAliases, findAssetByNameOrAlias, normalizeAssetLookup } from '../../domain/assetAliases'
-import { buildContinuityReport, variantScopePatchForUse, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
+import { buildContinuityReport, type ContinuityIssue, type ContinuityReport } from '../services/continuityReport'
+import { episodeCastRequirements } from '../../domain/continuityLedger'
 import { buildEpisodeProductionHandoff, episodeSeriesQueueState, type EpisodeHandoffSuggestion, type EpisodeProductionHandoff } from '../services/episodeProduction'
 import { applyEpisodeHandoffSuggestion, type EpisodeHandoffSuggestionApplyResult } from '../services/episodeHandoffSuggestions'
 import { loadAssetHub, projectAssetIdentityAppearanceLabels, projectAssetIdentityEntityId, projectAssetIdentityEpisodeLabels, projectAssetIdentityUsageEntityId, type IdentityAssetUsage, type LibraryEntity } from '../../services/assetHub'
-import { PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
+import { CONTINUITY_STORYBOARD_RULE } from './policy'
 
 type ProjectDocGetter = () => ProjectDoc | null
 type LinkableLibraryEntity = {
@@ -182,7 +183,6 @@ function projectAssetNameUsageView(doc: ProjectDoc, name: string, usageByEntity?
       variantKind: variant.variantKind,
       libraryVariantId: variantLibraryIdView(asset, variant),
       refImageId: variant.refImageId,
-      appliesToEpisodeIds: variant.appliesToEpisodeIds,
     })),
     assetCenterUsage: asset ? assetCenterUsageView(doc, asset, usageByEntity) : undefined,
   }
@@ -233,9 +233,7 @@ function handoffAssetCenterUsageView(doc: ProjectDoc, assetId: string, usageByEn
 function episodeHandoffView(doc: ProjectDoc, handoff: EpisodeProductionHandoff, usageByEntity?: Record<string, IdentityAssetUsage>) {
   return {
     ...handoff,
-    plannedAssets: handoff.plannedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
-    plannedVariants: handoff.plannedVariants.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
-    sharedAssets: handoff.sharedAssets.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
+    carriedState: handoff.carriedState.map((item) => ({ ...item, assetCenterUsage: handoffAssetCenterUsageView(doc, item.assetId, usageByEntity) })),
     suggestions: handoff.suggestions.map((item) => handoffSuggestionRef(item, doc, usageByEntity)),
   }
 }
@@ -308,23 +306,23 @@ function variantOptions(doc: ProjectDoc, usageByEntity?: Record<string, Identity
     )
 }
 
-function planView(doc: ProjectDoc, plan: EpisodePlan | undefined, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  const requiredAssets = (plan?.requiredAssetIds ?? [])
-    .map((id) => doc.assets.find((asset) => asset.id === id))
-    .filter((asset): asset is Asset => !!asset)
-    .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(doc, asset, usageByEntity) }))
-  const requiredVariants = (plan?.requiredVariantIds ?? [])
-    .map((variantId) => variantOptions(doc, usageByEntity).find((variant) => variant.id === variantId))
-    .filter((variant): variant is NonNullable<ReturnType<typeof variantOptions>[number]> => !!variant)
-  return {
-    hook: plan?.hook,
-    conflict: plan?.conflict,
-    cliffhanger: plan?.cliffhanger,
-    requiredAssetIds: plan?.requiredAssetIds,
-    requiredAssets,
-    requiredVariantIds: plan?.requiredVariantIds,
-    requiredVariants,
-  }
+/** 单集计划只剩叙事意图；「本集要用哪些资产/形态」由 episodeCastRequirements 从分镜反推 */
+function planView(doc: ProjectDoc, episodeId: string | undefined, plan: EpisodePlan | undefined, usageByEntity?: Record<string, IdentityAssetUsage>) {
+  const cast = episodeId
+    ? episodeCastRequirements(doc, episodeId).flatMap((item) => {
+        const asset = doc.assets.find((candidate) => candidate.id === item.assetId)
+        if (!asset) return []
+        return [{
+          id: asset.id,
+          name: asset.name,
+          type: asset.type,
+          variantLabels: item.variantIds.map((variantId) => (variantId ? asset.variants?.find((v) => v.id === variantId)?.label ?? variantId : '主形象')),
+          ...assetLineageView(asset),
+          assetCenterUsage: assetCenterUsageView(doc, asset, usageByEntity),
+        }]
+      })
+    : []
+  return { hook: plan?.hook, conflict: plan?.conflict, cliffhanger: plan?.cliffhanger, castFromStoryboards: cast }
 }
 
 function sortedEpisodes(doc: ProjectDoc): Episode[] {
@@ -355,11 +353,11 @@ function episodeInfo(doc: ProjectDoc, episode: Episode) {
 }
 
 function episodeInfoWithPlan(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  return { ...episodeInfo(doc, episode), plan: planView(doc, episode.plan, usageByEntity) }
+  return { ...episodeInfo(doc, episode), plan: planView(doc, episode.id, episode.plan, usageByEntity) }
 }
 
 function scriptEpisodeContext(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  return { ...episodeInfo(doc, episode), episodePlan: planView(doc, episode.plan, usageByEntity) }
+  return { ...episodeInfo(doc, episode), episodePlan: planView(doc, episode.id, episode.plan, usageByEntity) }
 }
 
 function scriptsForEpisode(doc: ProjectDoc, episode: Episode): Script[] {
@@ -383,12 +381,10 @@ function trackForEpisode(doc: ProjectDoc, episode: Episode): VideoTrack[] {
 }
 
 function episodeHandoffSummary(doc: ProjectDoc, episode: Episode, usageByEntity?: Record<string, IdentityAssetUsage>) {
-  const handoff = buildEpisodeProductionHandoff(doc, episode, { maxRecaps: 1, maxAssets: 4, maxAppearances: 2 })
+  const handoff = buildEpisodeProductionHandoff(doc, episode, { maxRecaps: 1, maxAssets: 4 })
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
   return {
-    plannedAssetCount: handoff.plannedAssets.length,
-    plannedVariantCount: handoff.plannedVariants.length,
-    sharedAssetCount: handoff.sharedAssets.length,
+    carriedStateCount: handoff.carriedState.length,
     suggestionCount: handoff.suggestions.length,
     autoRepairableSuggestionCount: autoSuggestions.length,
     suggestions: handoff.suggestions.slice(0, 6).map((suggestion) => handoffSuggestionRef(suggestion, doc, usageByEntity)),
@@ -410,7 +406,7 @@ function episodeView(doc: ProjectDoc, episode: Episode, opts?: { usageByEntity?:
     status: episode.status,
     seriesSkip: episode.seriesSkip === true,
     seriesQueueState: episodeSeriesQueueState(doc, episode),
-    plan: planView(doc, episode.plan, opts?.usageByEntity),
+    plan: planView(doc, episode.id, episode.plan, opts?.usageByEntity),
     handoff: episodeHandoffSummary(doc, episode, opts?.usageByEntity),
     current,
     production: {
@@ -452,7 +448,6 @@ function overview(doc: ProjectDoc, opts?: { usageByEntity?: Record<string, Ident
     seriesBible: {
       ...(doc.seriesBible ?? {}),
       plannedEpisodeCount: doc.seriesBible?.plannedEpisodeCount ?? episodes.length,
-      continuityRules: doc.seriesBible?.continuityRules ?? [],
     },
     counts: {
       episodes: episodes.length,
@@ -553,7 +548,7 @@ function chapterEpisodeRefs(doc: ProjectDoc, chapterId: string, usageByEntity?: 
       title: episode.title,
       current: episode.id === doc.currentEpisodeId,
       seriesQueueState: episodeSeriesQueueState(doc, episode),
-      plan: planView(doc, episode.plan, usageByEntity),
+      plan: planView(doc, episode.id, episode.plan, usageByEntity),
     }))
 }
 
@@ -606,52 +601,6 @@ function findAssetVariant(asset: Asset, token: unknown) {
   if (!text) return undefined
   const lower = text.toLowerCase()
   return asset.variants?.find((variant) => variant.id === text) ?? asset.variants?.find((variant) => variant.label.toLowerCase() === lower)
-}
-
-type VariantScopeKind = 'episode' | 'scene' | 'storyboard'
-type VariantScopeKey = 'appliesToEpisodeIds' | 'appliesToSceneIds' | 'appliesToStoryboardIds'
-
-function variantScopeKind(value: unknown): VariantScopeKind | undefined {
-  return value === 'episode' || value === 'scene' || value === 'storyboard' ? value : undefined
-}
-
-function inferVariantScopeKind(args: Record<string, unknown>): VariantScopeKind | undefined {
-  return (
-    variantScopeKind(args.scopeKind) ??
-    (stringArg(args.storyboardId) || typeof args.storyboardIndex === 'number' ? 'storyboard' : undefined) ??
-    (stringArg(args.sceneId) ? 'scene' : undefined) ??
-    (stringArg(args.episodeId) || typeof args.episodeIndex === 'number' || stringArg(args.episodeTitle) ? 'episode' : undefined)
-  )
-}
-
-function variantScopeKey(kind: VariantScopeKind): VariantScopeKey {
-  if (kind === 'scene') return 'appliesToSceneIds'
-  if (kind === 'storyboard') return 'appliesToStoryboardIds'
-  return 'appliesToEpisodeIds'
-}
-
-function resolveVariantScopeId(doc: ProjectDoc, args: Record<string, unknown>, kind: VariantScopeKind): string | undefined {
-  const scopeId = stringArg(args.scopeId)
-  if (scopeId) return scopeId
-  if (kind === 'scene') return stringArg(args.sceneId)
-  if (kind === 'storyboard') {
-    const storyboardId = stringArg(args.storyboardId)
-    if (storyboardId) return storyboardId
-    const index = typeof args.storyboardIndex === 'number' ? args.storyboardIndex : undefined
-    if (index === undefined || !Number.isFinite(index)) return undefined
-    const episode = resolveEpisodeSelector(doc, args)
-    const storyboards = episode ? [...storyboardsForEpisode(doc, episode)].sort((a, b) => a.index - b.index) : []
-    const storyboardIndex = oneBasedIndex(index, storyboards.length)
-    return storyboardIndex === undefined ? undefined : storyboards[storyboardIndex]?.id
-  }
-  if (hasEpisodeSelector(args)) return resolveEpisode(doc, { episodeId: args.episodeId, index: args.episodeIndex, title: args.episodeTitle })?.id
-  return currentEpisode(doc)?.id
-}
-
-function nextVariantScopeIds(variant: AssetVariant, key: VariantScopeKey, scopeId: string, remove: boolean): string[] | undefined {
-  const existing = variant[key] ?? []
-  const ids = remove ? existing.filter((id) => id !== scopeId) : [...new Set([...existing, scopeId])]
-  return ids.length ? ids : undefined
 }
 
 function roleInShot(value: unknown): StoryboardCastRef['roleInShot'] | undefined {
@@ -732,88 +681,26 @@ function storyboardCastRefsFromArgs(doc: ProjectDoc, args: Record<string, unknow
   return { refs: [...byKey.values()], unresolved }
 }
 
+/** 解析 add_storyboard 的 stateChanges 入参；没写 reason 的一律丢弃，交给一致性检查提示 */
+function storyboardStateChangesFromArgs(doc: ProjectDoc, args: Record<string, unknown>): AppearanceChange[] {
+  const raw = Array.isArray(args.stateChanges) ? args.stateChanges : []
+  const byAsset = new Map<string, AppearanceChange>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const value = item as Record<string, unknown>
+    const asset = findCastableAsset(doc, value.assetId) ?? findCastableAsset(doc, value.assetName) ?? findCastableAsset(doc, value.name)
+    const reason = stringArg(value.reason)
+    if (!asset || !reason) continue
+    const token = value.toVariantId ?? value.variantId ?? value.toVariantLabel ?? value.variantLabel
+    byAsset.set(asset.id, { assetId: asset.id, toVariantId: token ? findAssetVariant(asset, token)?.id : undefined, reason })
+  }
+  return [...byAsset.values()]
+}
+
 function stringArrayArg(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const items = value.map((item) => stringArg(item)).filter((item): item is string => !!item)
   return items.length ? items : undefined
-}
-
-function mergeIdList(existing: string[] | undefined, incoming: string[], mode: unknown): string[] | undefined {
-  const current = existing ?? []
-  const clean = [...new Set(incoming)]
-  if (mode === 'add') return [...new Set([...current, ...clean])]
-  if (mode === 'remove') {
-    const removing = new Set(clean)
-    const next = current.filter((id) => !removing.has(id))
-    return next.length ? next : undefined
-  }
-  return clean.length ? clean : undefined
-}
-
-function resolvePlanAssetIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; unresolved: unknown[] } {
-  const ids: string[] = []
-  const unresolved: unknown[] = []
-  const valid = new Set(doc.assets.filter(isCastableAsset).map((asset) => asset.id))
-  for (const value of Array.isArray(args.requiredAssetIds) ? args.requiredAssetIds : []) {
-    const id = stringArg(value)
-    if (!id) continue
-    if (valid.has(id)) ids.push(id)
-    else unresolved.push(value)
-  }
-  const names = [...(Array.isArray(args.requiredAssetNames) ? args.requiredAssetNames : []), ...(Array.isArray(args.assetNames) ? args.assetNames : [])]
-  for (const value of names) {
-    const asset = findCastableAsset(doc, value)
-    if (asset) ids.push(asset.id)
-    else if (value != null) unresolved.push(value)
-  }
-  return { ids: [...new Set(ids)], unresolved }
-}
-
-function findVariantOption(doc: ProjectDoc, value: unknown) {
-  const text = stringArg(value)
-  if (!text) return undefined
-  const variants = variantOptions(doc)
-  return variants.find((variant) => variant.id === text) ?? variants.find((variant) => variant.label.toLowerCase() === text.toLowerCase())
-}
-
-function resolvePlanVariantIds(doc: ProjectDoc, args: Record<string, unknown>): { ids: string[]; assetIds: string[]; unresolved: unknown[] } {
-  const ids: string[] = []
-  const assetIds: string[] = []
-  const unresolved: unknown[] = []
-  const variantsById = new Map(variantOptions(doc).map((variant) => [variant.id, variant]))
-  for (const value of Array.isArray(args.requiredVariantIds) ? args.requiredVariantIds : []) {
-    const id = stringArg(value)
-    if (!id) continue
-    const variant = variantsById.get(id)
-    if (variant) {
-      ids.push(id)
-      assetIds.push(variant.assetId)
-    }
-    else unresolved.push(value)
-  }
-  const variants = Array.isArray(args.requiredVariants) ? args.requiredVariants : []
-  for (const value of variants) {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const record = value as Record<string, unknown>
-      const asset = findCastableAsset(doc, record.assetId) ?? findCastableAsset(doc, record.assetName) ?? findCastableAsset(doc, record.name)
-      const variantOption = asset ? undefined : findVariantOption(doc, record.variantId ?? record.variantLabel ?? record.label)
-      const variant = asset ? findAssetVariant(asset, record.variantId ?? record.variantLabel ?? record.label) : variantOption
-      if (variant) {
-        ids.push(variant.id)
-        const assetId = asset?.id ?? variantOption?.assetId
-        if (assetId) assetIds.push(assetId)
-      }
-      else unresolved.push(value)
-      continue
-    }
-    const variant = findVariantOption(doc, value)
-    if (variant) {
-      ids.push(variant.id)
-      assetIds.push(variant.assetId)
-    }
-    else if (value != null) unresolved.push(value)
-  }
-  return { ids: [...new Set(ids)], assetIds: [...new Set(assetIds)], unresolved }
 }
 
 function variantView(asset: Asset, variantId: string, opts?: { doc?: ProjectDoc; usageByEntity?: Record<string, IdentityAssetUsage> }) {
@@ -1102,15 +989,8 @@ function handoffSuggestionRef(suggestion: EpisodeHandoffSuggestion, doc?: Projec
     kind: suggestion.kind,
     assetId: suggestion.assetId,
     variantId: suggestion.variantId,
-    variantKind: suggestion.variantKind,
-    libraryEntityId: suggestion.libraryEntityId,
-    libraryEntityVersion: suggestion.libraryEntityVersion,
-    librarySyncPolicy: suggestion.librarySyncPolicy,
-    libraryVariantId: suggestion.libraryVariantId,
-    scopeKind: suggestion.scopeKind,
-    storyboardId: suggestion.storyboardId,
-    sceneId: suggestion.sceneId,
     label: suggestion.label,
+    detail: suggestion.detail,
     disabledReason: suggestion.disabledReason,
     autoRepairable: suggestion.autoRepairable,
     assetCenterUsage: handoffSuggestionAssetCenterUsage(doc, suggestion, usageByEntity),
@@ -1178,9 +1058,8 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
           seriesBible: {
             ...(d.seriesBible ?? {}),
             plannedEpisodeCount: d.seriesBible?.plannedEpisodeCount ?? sortedEpisodes(d).length,
-            continuityRules: d.seriesBible?.continuityRules ?? [],
           },
-          episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.plan, usageByEntity) })),
+          episodes: sortedEpisodes(d).map((episode) => ({ ...episodeInfo(d, episode), plan: planView(d, episode.id, episode.plan, usageByEntity) })),
           availableAssets: d.assets
             .filter(isCastableAsset)
             .map((asset) => ({ id: asset.id, name: asset.name, type: asset.type, aliases: asset.aliases, ...assetLineageView(asset), assetCenterUsage: assetCenterUsageView(d, asset, usageByEntity) })),
@@ -1197,7 +1076,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
         if (!d) return '无打开的项目'
         try {
           const hub = await loadAssetHub()
-          return json(continuityReportView(d, buildContinuityReport(d, { libraryEntities: hub.entities }), hub.usageByEntity))
+          return json(continuityReportView(d, buildContinuityReport(d), hub.usageByEntity))
         } catch {
           return json(buildContinuityReport(d))
         }
@@ -1205,7 +1084,7 @@ export function makeProjectReadTools(getDoc: ProjectDocGetter): AgentTool[] {
     },
     {
       name: 'get_episode_handoff',
-      description: `读取某集的跨集承接线索：最近已制作剧集回顾、plannedAssets/plannedVariants 本集计划输入、当前集资产/形态在其他剧集中的出现记录，以及可执行承接建议。${PLANNED_HANDOFF_STORYBOARD_RULE}`,
+      description: `读取某集开拍时的承接状态：carriedState 是每个资产进入本集时的当前形态（含它是在哪一镜、因为什么原因变成这样的），外加最近剧集回顾和补图建议。${CONTINUITY_STORYBOARD_RULE}`,
       parameters: {
         type: 'object',
         properties: {
@@ -1552,13 +1431,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     const d = doc()
     const episode = d?.episodes?.find((item) => item.id === episodeId) ?? (d ? currentEpisode(d) : undefined)
     if (!episode) return { id: suggestion.id, kind: suggestion.kind, skipped: true, reason: '未找到剧集' }
-    return applyEpisodeHandoffSuggestion(episode, suggestion, {
+    return applyEpisodeHandoffSuggestion(suggestion, {
       getDoc: doc,
-      generateAsset: (assetId) => get().generateAsset(assetId),
-      generateAssetVariant: (assetId, variantId) => get().generateAssetVariant(assetId, variantId),
-      updateAssetVariant: (assetId, variantId, patch) => get().updateAssetVariant(assetId, variantId, patch),
-      addAssetVariant: (assetId, init) => get().addAssetVariant(assetId, init),
-      setStoryboardCastVariant: (storyboardId, assetId, variantId) => get().setStoryboardCastVariant(storyboardId, assetId, variantId),
+      generateAsset: (assetId: string) => get().generateAsset(assetId),
+      generateAssetVariant: (assetId: string, variantId: string) => get().generateAssetVariant(assetId, variantId),
     })
   }
 
@@ -1566,7 +1442,7 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     ...makeProjectReadTools(doc),
     {
       name: 'apply_episode_handoff_suggestion',
-      description: '执行 get_episode_handoff 返回的可自动处理建议。可传 suggestionId/suggestionIds，或 allAuto=true 顺序执行当前集所有未禁用的 handoff.suggestions；用于先补齐计划资产主图、计划形态图和 plannedVariants 的 episode 作用域，再生成分镜、关键帧或视频。',
+      description: '执行 get_episode_handoff 返回的补图建议。可传 suggestionId/suggestionIds，或 allAuto=true 顺序执行当前集所有未禁用建议；用于在生成关键帧/视频前补齐缺失的主参考图和形态图。',
       parameters: {
         type: 'object',
         properties: {
@@ -1717,28 +1593,17 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           synopsis: { type: 'string' },
           theme: { type: 'string' },
           worldRules: { type: 'string' },
-          continuityRules: { type: 'array', items: { type: 'string' } },
-          continuityRulesText: { type: 'string', description: '多行连续性规则；continuityRules 为空时可用。' },
           plannedEpisodeCount: { type: 'number' },
         },
       },
       execute: async (a) => {
         const d = doc()
         if (!d) return '无打开的项目'
-        const continuityRules =
-          stringArrayArg(a.continuityRules) ??
-          (typeof a.continuityRulesText === 'string'
-            ? a.continuityRulesText
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-            : undefined)
         const patch: Parameters<ProjectState['updateSeriesBible']>[0] = {}
         if (hasArg(a, 'logline')) patch.logline = stringArg(a.logline)
         if (hasArg(a, 'synopsis')) patch.synopsis = stringArg(a.synopsis)
         if (hasArg(a, 'theme')) patch.theme = stringArg(a.theme)
         if (hasArg(a, 'worldRules')) patch.worldRules = stringArg(a.worldRules)
-        if (hasArg(a, 'continuityRules') || hasArg(a, 'continuityRulesText')) patch.continuityRules = continuityRules ?? []
         if (typeof a.plannedEpisodeCount === 'number') patch.plannedEpisodeCount = a.plannedEpisodeCount
         get().updateSeriesBible(patch)
         const next = doc() ?? d
@@ -1746,14 +1611,15 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           seriesBible: {
             ...(next.seriesBible ?? {}),
             plannedEpisodeCount: next.seriesBible?.plannedEpisodeCount ?? sortedEpisodes(next).length,
-            continuityRules: next.seriesBible?.continuityRules ?? [],
           },
         })
       },
     },
     {
       name: 'upsert_episode_plan',
-      description: '创建或更新某集规划：开场钩子、核心冲突、结尾钩子，以及本集必须出现的项目资产和妆容/形态。默认当前集；可用 episodeId/episodeIndex/episodeTitle 指定。',
+      description:
+        '创建或更新某集的叙事规划：开场钩子、核心冲突、结尾钩子。默认当前集；可用 episodeId/episodeIndex/episodeTitle 指定。' +
+        '不需要（也无法）在这里勾选"本集必需资产/形态"——那是从分镜反推的事实，见 planView.castFromStoryboards。',
       parameters: {
         type: 'object',
         properties: {
@@ -1763,16 +1629,6 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           hook: { type: 'string' },
           conflict: { type: 'string' },
           cliffhanger: { type: 'string' },
-          requiredAssetIds: { type: 'array', items: { type: 'string' } },
-          requiredAssetNames: { type: 'array', items: { type: 'string' } },
-          assetNames: { type: 'array', items: { type: 'string' }, description: 'requiredAssetNames 的别名。' },
-          requiredVariantIds: { type: 'array', items: { type: 'string' } },
-          requiredVariants: {
-            type: 'array',
-            description: '可传变体 id/label 字符串，或 {assetId/assetName/name, variantId/variantLabel/label} 对象。',
-            items: { type: 'object' },
-          },
-          mode: { type: 'string', enum: ['replace', 'add', 'remove'], description: '仅作用于本次传入的 requiredAsset/requiredVariant 列表；默认 replace。' },
         },
       },
       execute: async (a) => {
@@ -1784,26 +1640,13 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         if (hasArg(a, 'hook')) patch.hook = stringArg(a.hook)
         if (hasArg(a, 'conflict')) patch.conflict = stringArg(a.conflict)
         if (hasArg(a, 'cliffhanger')) patch.cliffhanger = stringArg(a.cliffhanger)
-        const assets = resolvePlanAssetIds(d, a)
-        const variants = resolvePlanVariantIds(d, a)
-        const hasAssetArgs = hasArg(a, 'requiredAssetIds') || hasArg(a, 'requiredAssetNames') || hasArg(a, 'assetNames')
-        const hasVariantArgs = hasArg(a, 'requiredVariantIds') || hasArg(a, 'requiredVariants')
-        const requiredAssetIds = a.mode === 'remove' ? assets.ids : [...new Set([...assets.ids, ...variants.assetIds])]
-        if (hasAssetArgs || (hasVariantArgs && variants.assetIds.length && a.mode !== 'remove')) {
-          patch.requiredAssetIds = mergeIdList(episode.plan?.requiredAssetIds, requiredAssetIds, hasAssetArgs ? a.mode : 'add')
-        }
-        if (hasVariantArgs) {
-          patch.requiredVariantIds = mergeIdList(episode.plan?.requiredVariantIds, variants.ids, a.mode)
-        }
         get().updateEpisodePlan(episode.id, patch)
         const next = doc() ?? d
         const updated = next.episodes?.find((item) => item.id === episode.id) ?? episode
         const usageByEntity = await loadIdentityUsageSafe()
         return json({
           episode: episodeInfoWithPlan(next, updated, usageByEntity),
-          plan: planView(next, updated.plan, usageByEntity),
-          unresolvedAssets: assets.unresolved,
-          unresolvedVariants: variants.unresolved,
+          plan: planView(next, updated.id, updated.plan, usageByEntity),
         })
       },
     },
@@ -2224,9 +2067,6 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           desc: { type: 'string' },
           prompt: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
-          appliesToEpisodeIds: { type: 'array', items: { type: 'string' } },
-          appliesToSceneIds: { type: 'array', items: { type: 'string' } },
-          appliesToStoryboardIds: { type: 'array', items: { type: 'string' } },
         },
       },
       execute: async (a) => {
@@ -2254,9 +2094,6 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           desc: stringArg(a.desc),
           prompt: stringArg(a.prompt),
           tags: stringArrayArg(a.tags),
-          appliesToEpisodeIds: stringArrayArg(a.appliesToEpisodeIds),
-          appliesToSceneIds: stringArrayArg(a.appliesToSceneIds),
-          appliesToStoryboardIds: stringArrayArg(a.appliesToStoryboardIds),
         }
         get().updateAssetVariant(asset.id, variantId, Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)))
         const nextDoc = get().doc ?? d
@@ -2266,50 +2103,96 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
       },
     },
     {
-      name: 'set_asset_variant_scope',
-      description: '增量标记或移除资产变体适用范围，不会覆盖其它 episode/scene/storyboard 适用范围；用于修正 variant_out_of_episode_scope 和 episode_plan_variant_scope_mismatch。',
+      name: 'set_appearance_change',
+      description:
+        '在某一镜登记形态变更点：从这一镜起该资产切换到指定形态，一直延续到下一个变更点。' +
+        '用于剧情里真实发生的换装/化妆/受伤/年龄变化，也用于修复 unexplained_appearance_change。' +
+        '省略 variantLabel/variantId 表示恢复主形象。reason 必填——没有理由的形态跳变就是连续性事故。',
       parameters: {
         type: 'object',
         properties: {
+          storyboardId: { type: 'string' },
+          index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空时使用。' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
           assetId: { type: 'string' },
           assetName: { type: 'string' },
           name: { type: 'string' },
           variantId: { type: 'string' },
-          variantLabel: { type: 'string' },
-          label: { type: 'string' },
-          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'] },
-          scopeId: { type: 'string', description: '直接指定要追加/移除的 episodeId、sceneId 或 storyboardId。' },
-          episodeId: { type: 'string' },
-          episodeIndex: { type: 'number', description: '1-based 剧集序号；scopeKind=episode 时可作为目标范围。' },
-          episodeTitle: { type: 'string' },
-          sceneId: { type: 'string' },
+          variantLabel: { type: 'string', description: '省略表示恢复主形象。' },
+          reason: { type: 'string', description: '为什么在这一镜发生变化，例如「换上宴会礼服」「左脸被划伤」。' },
+        },
+        required: ['reason'],
+      },
+      execute: async (a) => {
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
+        const d = target.doc
+        if (!d) return '无项目'
+        const storyboard = resolveStoryboard(d, a)
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: await storyboardCandidateListWithUsage(d) })
+        const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
+        if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
+        const reason = stringArg(a.reason)
+        if (!reason) return json({ error: 'reason 必填：说明这一镜为什么发生形态变化' })
+        const variantToken = a.variantId ?? a.variantLabel
+        const variant = variantToken ? findAssetVariant(asset, variantToken) : undefined
+        if (variantToken && !variant) {
+          return json({ error: '未找到形态', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
+        }
+        if (!get().setAppearanceChange(storyboard.id, { assetId: asset.id, toVariantId: variant?.id, reason })) {
+          return json({ error: '写入变更点失败' })
+        }
+        const next = doc() ?? d
+        const usageByEntity = await loadIdentityUsageSafe()
+        return json({
+          storyboardId: storyboard.id,
+          storyboardIndex: storyboard.index + 1,
+          assetId: asset.id,
+          assetName: asset.name,
+          toVariantId: variant?.id,
+          toVariantLabel: variant?.label ?? '主形象',
+          reason,
+          continuity: continuityReportView(next, buildContinuityReport(next), usageByEntity),
+        })
+      },
+    },
+    {
+      name: 'clear_appearance_change',
+      description: '撤销某镜上某资产的形态变更点，让它回到沿用上一镜的状态；用于「这不是剧情变化，是搞错了」的修复。',
+      parameters: {
+        type: 'object',
+        properties: {
           storyboardId: { type: 'string' },
-          storyboardIndex: { type: 'number', description: '1-based 分镜序号；scopeKind=storyboard 且 storyboardId 为空时使用。' },
-          remove: { type: 'boolean', description: 'true 时从该层级适用范围中移除目标 ID。' },
+          index: { type: 'number', description: '1-based 分镜序号，storyboardId 为空时使用。' },
+          episodeId: { type: 'string' },
+          episodeIndex: { type: 'number' },
+          episodeTitle: { type: 'string' },
+          assetId: { type: 'string' },
+          assetName: { type: 'string' },
+          name: { type: 'string' },
         },
       },
       execute: async (a) => {
-        const d = doc()
+        const target = switchToEpisodeForWrite(get, a)
+        if (target.error) return json(await episodeWriteTargetErrorView(target))
+        const d = target.doc
         if (!d) return '无项目'
+        const storyboard = resolveStoryboard(d, a)
+        if (!storyboard) return json({ error: '未找到分镜', storyboards: await storyboardCandidateListWithUsage(d) })
         const asset = findCastableAsset(d, a.assetId) ?? findCastableAsset(d, a.assetName) ?? findCastableAsset(d, a.name)
         if (!asset) return json({ error: '未找到资产', assets: await assetCandidateListWithUsage(d) })
-        const variant = findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
-        if (!variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
-        const scopeKind = inferVariantScopeKind(a)
-        if (!scopeKind) return json({ error: '未指定适用范围层级', expected: ['episode', 'scene', 'storyboard'] })
-        const scopeId = resolveVariantScopeId(d, a, scopeKind)
-        if (!scopeId) return json({ error: '未找到适用范围 ID', scopeKind, episodes: scopeKind === 'episode' ? await episodeListWithUsage(d) : undefined })
-        const key = variantScopeKey(scopeKind)
-        const patch: Partial<AssetVariant> = { [key]: nextVariantScopeIds(variant, key, scopeId, a.remove === true) }
-        get().updateAssetVariant(asset.id, variant.id, patch)
-        const nextDoc = get().doc ?? d
-        const nextAsset = nextDoc.assets.find((item) => item.id === asset.id) ?? asset
+        const changed = get().revertAppearanceToInherited(storyboard.id, asset.id)
+        const next = doc() ?? d
         const usageByEntity = await loadIdentityUsageSafe()
         return json({
-          scopeKind,
-          scopeId,
-          action: a.remove === true ? 'remove' : 'add',
-          result: variantView(nextAsset, variant.id, { doc: nextDoc, usageByEntity }),
+          changed,
+          storyboardId: storyboard.id,
+          storyboardIndex: storyboard.index + 1,
+          assetId: asset.id,
+          assetName: asset.name,
+          continuity: continuityReportView(next, buildContinuityReport(next), usageByEntity),
         })
       },
     },
@@ -2344,7 +2227,9 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'set_storyboard_cast_variant',
-      description: '给已有分镜里的某个出场资产绑定或清除指定变体，用于修正同一角色的妆容/服装/时期一致性；可选 ensureScope/scopeKind 在绑定时补当前剧集/场景/分镜适用范围。',
+      description:
+        '直接改写某镜上某资产的形态绑定（不登记变更点）。多数情况下你应该用 set_appearance_change——它会让后续镜头一起沿用新形态；' +
+        '本工具只适合"单镜画错了、其余镜不受影响"的局部纠正。',
       parameters: {
         type: 'object',
         properties: {
@@ -2359,8 +2244,6 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           variantId: { type: 'string' },
           variantLabel: { type: 'string' },
           label: { type: 'string' },
-          ensureScope: { type: 'boolean', description: 'true 时按该变体已有作用域层级，或 scopeKind 指定层级，把当前使用位置加入适用范围。' },
-          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'], description: 'ensureScope 时可指定补剧集/场景/分镜范围。' },
           clear: { type: 'boolean', description: 'true 时清除该资产在此分镜上的变体绑定。' },
         },
       },
@@ -2376,12 +2259,6 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
         const variant = a.clear === true ? undefined : findAssetVariant(asset, a.variantId ?? a.variantLabel ?? a.label)
         if (a.clear !== true && !variant) return json({ error: '未找到变体', asset: await assetViewWithUsage(d, asset, { includeImages: false }), variants: await variantCandidateListWithUsage(d, asset) })
         get().setStoryboardCastVariant(storyboard.id, asset.id, variant?.id)
-        const scopeKind = variantScopeKind(a.scopeKind)
-        if (variant && (a.ensureScope === true || scopeKind)) {
-          const episode = target.episode ?? currentEpisode(d)
-          const patch = episode ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
-          if (patch) get().updateAssetVariant(asset.id, variant.id, patch)
-        }
         const next = doc()
         const updated = next?.storyboards.find((s) => s.id === storyboard.id)
         const nextAsset = next?.assets.find((item) => item.id === asset.id)
@@ -2497,7 +2374,10 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
     },
     {
       name: 'add_storyboard',
-      description: '新增当前剧集的分镜面板。cast 可用资产名或“资产名-变体标签”；需要精确妆容/服装时优先传 castRefs。可传 sceneId 支撑同场连续性检查，也可用 ensureScope/scopeKind 在绑定变体时补当前使用范围。',
+      description:
+        '新增当前剧集的分镜面板。cast 直接写资产名即可——角色/场景/道具的外观会自动沿用上一镜，不需要每镜标注形态。' +
+        '只有当剧情在这一镜真的发生换装/化妆/受伤/年龄变化时，才用 stateChanges 登记一次（或事后调 set_appearance_change）。' +
+        '同一空间或连续动作的镜头复用同一个 sceneId。',
       parameters: {
         type: 'object',
         properties: {
@@ -2529,8 +2409,20 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
             type: 'array',
             items: { type: 'object', properties: { character: { type: 'string' }, line: { type: 'string' }, emotion: { type: 'string' } } },
           },
-          ensureScope: { type: 'boolean', description: 'true 时按变体已有作用域层级，或 scopeKind 指定层级，把当前使用位置加入适用范围。' },
-          scopeKind: { type: 'string', enum: ['episode', 'scene', 'storyboard'], description: 'ensureScope 时可指定补剧集/场景/分镜范围。' },
+          stateChanges: {
+            type: 'array',
+            description: '本镜发生的形态变更点；不写 = 全部资产沿用上一镜。',
+            items: {
+              type: 'object',
+              properties: {
+                assetId: { type: 'string' },
+                assetName: { type: 'string' },
+                toVariantId: { type: 'string' },
+                toVariantLabel: { type: 'string', description: '省略表示恢复主形象。' },
+                reason: { type: 'string', description: '必填：为什么在这一镜发生变化。' },
+              },
+            },
+          },
           chainFromPrev: { type: 'boolean' },
         },
         required: ['videoDesc'],
@@ -2557,22 +2449,8 @@ export function makeAgentTools(get: () => ProjectState): AgentTool[] {
           dialogues,
           chainFromPrev: a.chainFromPrev === true,
         })
-        let next = doc()
-        const storyboard = next?.storyboards.find((s) => s.id === id)
-        const scopeKind = variantScopeKind(a.scopeKind)
-        if (storyboard && (a.ensureScope === true || scopeKind)) {
-          const episode = target.episode ?? (next ? currentEpisode(next) : currentEpisode(d))
-          if (episode) {
-            for (const ref of cast.refs) {
-              if (!ref.variantId) continue
-              const asset = next?.assets.find((item) => item.id === ref.assetId)
-              const variant = asset?.variants?.find((item) => item.id === ref.variantId)
-              const patch = variant ? variantScopePatchForUse(variant, episode, storyboard, scopeKind) : undefined
-              if (asset && variant && patch) get().updateAssetVariant(asset.id, variant.id, patch)
-            }
-            next = doc()
-          }
-        }
+        for (const change of storyboardStateChangesFromArgs(d, a)) get().setAppearanceChange(id, change)
+        const next = doc()
         const updatedStoryboard = next?.storyboards.find((s) => s.id === id)
         const usageByEntity = next ? await loadIdentityUsageSafe() : undefined
         return json({

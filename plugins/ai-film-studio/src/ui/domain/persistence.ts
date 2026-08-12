@@ -7,7 +7,7 @@
  *
  * 不考虑老节点图数据兼容（独立命名空间）。资产二进制仍走现有资产库（assetStore/saveAsset）。
  */
-import type { Episode, EpisodePlan, GenState, ProjectCard, ProjectDoc, ProjectMeta, SeriesBible, VideoTrack } from './types'
+import type { Episode, EpisodePlan, GenState, ProjectCard, ProjectDoc, ProjectMeta, SeriesBible, Storyboard, VideoTrack } from './types'
 
 const PLUGIN_ID = 'ai-film-studio'
 const INDEX_KEY = 'studio:index'
@@ -85,7 +85,7 @@ export function emptyProjectDoc(meta: Pick<ProjectMeta, 'name'> & Partial<Projec
       updatedAt: now,
     },
     novel: [],
-    seriesBible: { continuityRules: [], plannedEpisodeCount: 1 },
+    seriesBible: { plannedEpisodeCount: 1 },
     scripts: [],
     assets: [],
     storyboards: [],
@@ -149,12 +149,6 @@ function syncTracksForStoryboards(storyboards: ProjectDoc['storyboards'], track:
     .map(({ item }, order) => ({ ...item, order }))
 }
 
-function stringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const items = value.filter((item): item is string => typeof item === 'string' && !!item.trim()).map((item) => item.trim())
-  return items.length ? [...new Set(items)] : undefined
-}
-
 function normalizeSeriesBible(raw: unknown, episodeCount: number): SeriesBible {
   const source = raw && typeof raw === 'object' ? (raw as SeriesBible) : {}
   const planned =
@@ -162,11 +156,11 @@ function normalizeSeriesBible(raw: unknown, episodeCount: number): SeriesBible {
       ? Math.max(1, Math.floor(source.plannedEpisodeCount))
       : Math.max(1, episodeCount || 1)
   return {
-    ...source,
-    continuityRules: stringArray(source.continuityRules) ?? [],
+    logline: source.logline,
+    synopsis: source.synopsis,
+    theme: source.theme,
+    worldRules: source.worldRules,
     plannedEpisodeCount: planned,
-    characterArcNotes: source.characterArcNotes && typeof source.characterArcNotes === 'object' ? source.characterArcNotes : undefined,
-    locationNotes: source.locationNotes && typeof source.locationNotes === 'object' ? source.locationNotes : undefined,
   }
 }
 
@@ -174,20 +168,11 @@ function normalizeEpisodePlan(raw: unknown): EpisodePlan | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const source = raw as EpisodePlan
   const plan: EpisodePlan = {
-    ...source,
     hook: typeof source.hook === 'string' && source.hook.trim() ? source.hook.trim() : undefined,
     conflict: typeof source.conflict === 'string' && source.conflict.trim() ? source.conflict.trim() : undefined,
     cliffhanger: typeof source.cliffhanger === 'string' && source.cliffhanger.trim() ? source.cliffhanger.trim() : undefined,
-    requiredAssetIds: stringArray(source.requiredAssetIds),
-    requiredVariantIds: stringArray(source.requiredVariantIds),
   }
-  const hasContent =
-    !!plan.hook?.trim() ||
-    !!plan.conflict?.trim() ||
-    !!plan.cliffhanger?.trim() ||
-    !!plan.requiredAssetIds?.length ||
-    !!plan.requiredVariantIds?.length
-  return hasContent ? plan : undefined
+  return plan.hook || plan.conflict || plan.cliffhanger ? plan : undefined
 }
 
 function episodeFromFlat(doc: ProjectDoc, now = Date.now()): Episode {
@@ -336,8 +321,46 @@ function normalizeDoc(raw: ProjectDoc): ProjectDoc {
   if (!flatHasContent && current) applyEpisodeToFlat(doc, current)
   else syncCurrentEpisodeFromFlat(doc)
   if (doc.meta && !doc.meta.videoRatio) doc.meta.videoRatio = '16:9' // 旧/空画幅 doc 兜底，避免视频出竖屏
+  dropDanglingVariantRefs(doc)
   recoverInterruptedGenerationState(doc)
   return doc
+}
+
+/**
+ * 清掉指向不存在形态的引用（castRefs.variantId / stateChanges.toVariantId）。
+ *
+ * 这类脏数据会让生产直接停摆，而且因为台账会把形态继承给后面所有镜头，一个坏值能扩散成整集报错。
+ * 载入时静默清理比让用户逐条点"沿用上一形态"划算——清掉之后退回主形象，
+ * 真需要那个形态时一致性检查会重新提示，是可恢复的。
+ */
+function dropDanglingVariantRefs(doc: ProjectDoc): number {
+  const validVariantIds = new Set((doc.assets ?? []).flatMap((asset) => (asset.variants ?? []).map((variant) => variant.id)))
+  const assetIds = new Set((doc.assets ?? []).map((asset) => asset.id))
+  let dropped = 0
+
+  const clean = (storyboards: Storyboard[] | undefined) => {
+    for (const storyboard of storyboards ?? []) {
+      for (const ref of storyboard.castRefs ?? []) {
+        if (ref.variantId && !validVariantIds.has(ref.variantId)) {
+          delete ref.variantId
+          dropped += 1
+        }
+      }
+      const changes = storyboard.stateChanges
+      if (!changes?.length) continue
+      const kept = changes.filter(
+        (change) => assetIds.has(change.assetId) && (!change.toVariantId || validVariantIds.has(change.toVariantId)),
+      )
+      if (kept.length !== changes.length) {
+        dropped += changes.length - kept.length
+        storyboard.stateChanges = kept.length ? kept : undefined
+      }
+    }
+  }
+
+  clean(doc.storyboards)
+  for (const episode of doc.episodes ?? []) clean(episode.storyboards)
+  return dropped
 }
 
 export async function loadIndex(): Promise<ProjectCard[]> {

@@ -70,25 +70,25 @@ const hero: Asset = {
   elementId: 'el-hero',
   libraryLink: { entityId: 'el-hero', entityVersion: 3, syncPolicy: 'snapshot', variantMap: { cloak: 'lib-cloak' } },
   state: 'idle',
-  variants: [
-    { id: 'cloak', label: 'Cloak', libraryVariantId: 'lib-cloak', variantKind: 'outfit', appliesToEpisodeIds: ['ep1'] },
-  ],
+  variants: [{ id: 'cloak', label: 'Cloak', libraryVariantId: 'lib-cloak', variantKind: 'outfit' }],
 }
-
-const heroLineage = { libraryEntityId: 'el-hero', libraryEntityVersion: 3, librarySyncPolicy: 'snapshot' as const }
-const cloakLineage = { ...heroLineage, libraryVariantId: 'lib-cloak', variantKind: 'outfit' as const }
 
 const sharedDoc = doc({
   currentEpisodeId: 'ep2',
   assets: [hero],
   storyboards: [storyboard('ep2-main-hero', 0, [{ assetId: 'hero' }])],
   episodes: [
-    episode('ep1', 0, { title: 'Setup', storyboards: [storyboard('ep1-cloak-hero', 0, [{ assetId: 'hero', variantId: 'cloak' }])] }),
+    episode('ep1', 0, {
+      title: 'Setup',
+      storyboards: [
+        storyboard('ep1-cloak-hero', 0, [{ assetId: 'hero', variantId: 'cloak' }], {
+          stateChanges: [{ assetId: 'hero', toVariantId: 'cloak', reason: '披上斗篷' }],
+        }),
+      ],
+    }),
     episode('ep2', 1, { title: 'Reveal' }),
   ],
 })
-const targetEpisode = sharedDoc.episodes![1]
-let nextVariant = 1
 
 const actions = {
   getDoc: () => sharedDoc,
@@ -103,103 +103,45 @@ const actions = {
       variant.state = 'done' as const
     }
   },
-  updateAssetVariant: (assetId: string, variantId: string, patch: Partial<AssetVariant>) => {
-    const variant = findVariant(sharedDoc, assetId, variantId)
-    if (variant) Object.assign(variant, patch)
-  },
-  addAssetVariant: (assetId: string, init?: { label?: string; desc?: string; prompt?: string }) => {
-    const asset = sharedDoc.assets.find((item) => item.id === assetId)
-    if (!asset) return ''
-    const id = `variant-${nextVariant++}`
-    asset.variants = [...(asset.variants ?? []), { id, label: init?.label ?? id, desc: init?.desc, prompt: init?.prompt, state: 'idle' }]
-    return id
-  },
-  setStoryboardCastVariant: (storyboardId: string, assetId: string, variantId: string | undefined) => {
-    const storyboard = [...sharedDoc.storyboards, ...(sharedDoc.episodes ?? []).flatMap((item) => item.storyboards)].find((item) => item.id === storyboardId)
-    if (!storyboard) return
-    storyboard.castRefs = (storyboard.castRefs ?? []).map((ref) => (ref.assetId === assetId ? { ...ref, variantId } : ref))
-  },
 }
 
-const generatedMain = await applyEpisodeHandoffSuggestion(targetEpisode, {
-  id: 'asset-main',
-  kind: 'generate_asset_ref_image',
-  assetId: 'hero',
-  label: 'Generate Hero',
-  detail: 'missing main image',
-  ...heroLineage,
-}, actions)
+const generatedMain = await applyEpisodeHandoffSuggestion(
+  { id: 'asset-main', kind: 'generate_asset_ref_image', assetId: 'hero', label: 'Generate Hero', detail: 'missing main image' },
+  actions,
+)
 check(
-  'generates planned asset main image',
-  generatedMain.applied === true &&
-    sharedDoc.assets[0].refImageId === 'generated-hero' &&
-    generatedMain.libraryEntityId === 'el-hero' &&
-    generatedMain.libraryEntityVersion === 3 &&
-    generatedMain.librarySyncPolicy === 'snapshot',
+  'generates the missing main reference image',
+  generatedMain.applied === true && sharedDoc.assets[0].refImageId === 'generated-hero',
   JSON.stringify({ generatedMain, asset: sharedDoc.assets[0] }),
 )
 
-const scopedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
-  id: 'scope-cloak',
-  kind: 'add_variant_episode_scope',
-  assetId: 'hero',
-  variantId: 'cloak',
-  scopeKind: 'episode',
-  label: 'Scope Cloak',
-  detail: 'missing episode scope',
-  ...cloakLineage,
-}, actions)
-check(
-  'adds planned variant episode scope',
-  scopedVariant.applied === true &&
-    findVariant(sharedDoc, 'hero', 'cloak')?.appliesToEpisodeIds?.includes('ep2') === true &&
-    scopedVariant.variantKind === 'outfit' &&
-    scopedVariant.libraryEntityId === 'el-hero' &&
-    scopedVariant.libraryVariantId === 'lib-cloak',
-  JSON.stringify({ scopedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }),
+const generatedVariant = await applyEpisodeHandoffSuggestion(
+  { id: 'variant-ref', kind: 'generate_variant_ref_image', assetId: 'hero', variantId: 'cloak', label: 'Generate Cloak', detail: 'missing variant image' },
+  actions,
 )
-
-const generatedVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
-  id: 'variant-ref',
-  kind: 'generate_variant_ref_image',
-  assetId: 'hero',
-  variantId: 'cloak',
-  label: 'Generate Cloak',
-  detail: 'missing variant image',
-  ...cloakLineage,
-}, actions)
 check(
-  'generates planned variant reference image',
-  generatedVariant.applied === true &&
-    findVariant(sharedDoc, 'hero', 'cloak')?.refImageId === 'generated-hero-cloak' &&
-    generatedVariant.variantKind === 'outfit' &&
-    generatedVariant.libraryEntityId === 'el-hero' &&
-    generatedVariant.libraryVariantId === 'lib-cloak',
+  'generates the carried variant reference image',
+  generatedVariant.applied === true && findVariant(sharedDoc, 'hero', 'cloak')?.refImageId === 'generated-hero-cloak',
   JSON.stringify({ generatedVariant, variant: findVariant(sharedDoc, 'hero', 'cloak') }),
 )
 
-const createdVariant = await applyEpisodeHandoffSuggestion(targetEpisode, {
-  id: 'create-episode-variant',
-  kind: 'create_episode_variant',
-  assetId: 'hero',
-  label: 'Create Reveal',
-  detail: 'main image reused after prior state',
-  variantLabel: 'Reveal makeup',
-  variantPrompt: 'Hero with reveal makeup',
-  ...heroLineage,
-}, actions)
-const newVariant = sharedDoc.assets[0].variants?.find((variant) => variant.id === createdVariant.variantId)
-check(
-  'creates episode variant and binds current storyboards',
-  createdVariant.applied === true &&
-    !!newVariant &&
-    createdVariant.libraryEntityId === 'el-hero' &&
-    createdVariant.librarySyncPolicy === 'snapshot' &&
-    !createdVariant.libraryVariantId &&
-    newVariant.appliesToEpisodeIds?.includes('ep2') === true &&
-    sharedDoc.storyboards[0].castRefs?.some((ref) => ref.assetId === 'hero' && ref.variantId === newVariant.id) === true,
-  JSON.stringify({ createdVariant, newVariant, storyboard: sharedDoc.storyboards[0] }),
+const disabled = await applyEpisodeHandoffSuggestion(
+  { id: 'blocked', kind: 'generate_variant_ref_image', assetId: 'hero', variantId: 'cloak', label: 'x', detail: 'x', disabledReason: '先生成主参考图，再派生形态图。' },
+  actions,
 )
+check('respects disabledReason', disabled.skipped === true && disabled.reason === '先生成主参考图，再派生形态图。', JSON.stringify(disabled))
+
+const unknownAsset = await applyEpisodeHandoffSuggestion(
+  { id: 'gone', kind: 'generate_asset_ref_image', assetId: 'ghost', label: 'x', detail: 'x' },
+  actions,
+)
+check('skips suggestions for deleted assets', unknownAsset.skipped === true && unknownAsset.reason === '资产已不存在', JSON.stringify(unknownAsset))
+
+const unknownVariant = await applyEpisodeHandoffSuggestion(
+  { id: 'gone-variant', kind: 'generate_variant_ref_image', assetId: 'hero', variantId: 'ghost', label: 'x', detail: 'x' },
+  actions,
+)
+check('skips suggestions for deleted variants', unknownVariant.skipped === true && unknownVariant.reason === '形态已不存在', JSON.stringify(unknownVariant))
 
 if (failures) {
   console.error(`\nepisodeHandoffSuggestions selftest: ${failures} FAILED`)

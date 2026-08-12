@@ -9,3 +9,5 @@ export { evaluateComposeGate, auditComposed, projectToShots, projectToCuts } fro
 export type { ComposeGateResult, ComposeAudit } from './composeGate'
 export { styleLint } from './styleLint'
 export type { StyleLintViolation, StyleLintResult } from './styleLint'
+export { checkSceneVariation, storyboardToVariationShot } from './sceneVariation'
+export type { SceneVariationIssue, SceneVariationResult, SceneVariationShot } from './sceneVariation'

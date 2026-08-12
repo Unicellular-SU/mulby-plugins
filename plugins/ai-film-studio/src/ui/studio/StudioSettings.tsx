@@ -5,6 +5,8 @@
 import { useEffect, useState } from 'react'
 import { useAgentDeployStore, AGENT_KEYS } from '../store/agentDeployStore'
 import { useGraphStore } from '../store/graphStore'
+import { useProjectStore } from '../store/projectStore'
+import { gridSupported } from './services/gridKeyframes'
 import { getMemoryConfig } from './agent/memory'
 import { kvSet, STUDIO_KV, DEFAULT_MEMORY_CONFIG, type AgentKey, type MemoryConfig } from '../domain/studioKv'
 import Select from '../components/ui/Select'
@@ -22,9 +24,48 @@ const AGENT_LABEL: Record<AgentKey, string> = {
 export default function StudioSettings() {
   return (
     <div className="afs-studio__settings">
+      <ProductionPanel />
       <AgentDeployPanel />
       <MemoryConfigPanel />
     </div>
+  )
+}
+
+/** 生产设置：并发强度 + 宫格关键帧 */
+function ProductionPanel() {
+  const doc = useProjectStore((s) => s.doc)
+  const updateMeta = useProjectStore((s) => s.updateMeta)
+  if (!doc) return null
+  const supported = gridSupported()
+  return (
+    <section className="afs-studio__setsec">
+      <h4>生产</h4>
+      <div className="afs-studio__setrow">
+        <Switch
+          checked={doc.meta.gridKeyframes === true && supported}
+          disabled={!supported}
+          onChange={(checked) => updateMeta({ gridKeyframes: checked })}
+          label="宫格关键帧（同场景连续镜合成一张分镜板）"
+        />
+      </div>
+      <p className="afs-studio__hint">
+        {supported
+          ? '同一 sceneId 的连续镜头合成 2×2 / 3×2 / 3×3 分镜板后切开。组内人物长相、光线和色调由同一次生成保证，比提示词约束更稳，同时把 N 次图像调用压成 1 次。承接镜（chainFromPrev）仍走逐镜生成。'
+          : '当前运行环境缺少 OffscreenCanvas，无法切割宫格，已停用。'}
+      </p>
+      <div className="afs-studio__setrow">
+        <label>并发强度</label>
+        <input
+          className="afs-field__input afs-studio__deploytemp"
+          type="number"
+          min={1}
+          max={8}
+          value={doc.meta.concurrency ?? 3}
+          onChange={(e) => updateMeta({ concurrency: Math.max(1, Math.min(8, Number(e.target.value) || 3)) })}
+        />
+      </div>
+      <p className="afs-studio__hint">图像与视频走各自的并发通道和每分钟请求上限（视频更保守）。承接链内部始终顺序执行，链与链之间并发。</p>
+    </section>
   )
 }
 

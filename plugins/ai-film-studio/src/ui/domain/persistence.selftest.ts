@@ -112,11 +112,7 @@ const legacyProject: ProjectDoc = {
   episodes: [
     episode('ep1', 0, { storyboards: [], track: [] }),
     episode('ep2', 1, {
-      plan: {
-        hook: '  open on a reversal  ',
-        requiredAssetIds: ['hero', '', 'hero', 7 as unknown as string],
-        requiredVariantIds: ['gala', 'gala', null as unknown as string],
-      },
+      plan: { hook: '  open on a reversal  ', conflict: '   ' },
       storyboards: [storyboard('ep2-second', 1), storyboard('ep2-first', 0)],
       track: [
         { id: 'stale-track', storyboardIds: ['deleted-sb'], clipIds: [], order: 0 },
@@ -137,7 +133,7 @@ const normalizedProject = await loadProject('legacy')
 const normalizedEp2 = normalizedProject?.episodes?.find((episode) => episode.id === 'ep2')
 check('normalizes missing flat tracks while loading legacy projects', normalizedProject?.track.length === 1 && normalizedProject.track[0].storyboardIds.join(',') === 'flat-sb', JSON.stringify(normalizedProject?.track))
 check('sanitizes malformed flat track fields while loading legacy projects', Array.isArray(normalizedProject?.track[0]?.clipIds) && normalizedProject.track[0].clipIds.length === 0 && normalizedProject.track[0].selectClipId === undefined && normalizedProject.track[0].order === 0, JSON.stringify(normalizedProject?.track[0]))
-check('normalizes missing series bible while loading legacy projects', normalizedProject?.seriesBible?.plannedEpisodeCount === 2 && normalizedProject.seriesBible.continuityRules?.length === 0, JSON.stringify(normalizedProject?.seriesBible))
+check('normalizes missing series bible while loading legacy projects', normalizedProject?.seriesBible?.plannedEpisodeCount === 2 && !!normalizedProject.seriesBible, JSON.stringify(normalizedProject?.seriesBible))
 check(
   'normalizes non-current episode tracks while loading legacy projects',
   normalizedEp2?.track.length === 2 &&
@@ -147,7 +143,53 @@ check(
   JSON.stringify(normalizedEp2?.track),
 )
 check('sanitizes malformed non-current episode track fields while loading legacy projects', Array.isArray(normalizedEp2?.track[1]?.clipIds) && normalizedEp2.track[1].clipIds.length === 0 && normalizedEp2.track[1].selectClipId === undefined && normalizedEp2.track[1].order === 1, JSON.stringify(normalizedEp2?.track[1]))
-check('normalizes episode plans while loading legacy projects', normalizedEp2?.plan?.hook === 'open on a reversal' && normalizedEp2.plan.requiredAssetIds?.join(',') === 'hero' && normalizedEp2.plan.requiredVariantIds?.join(',') === 'gala', JSON.stringify(normalizedEp2?.plan))
+check('normalizes episode plans while loading legacy projects', normalizedEp2?.plan?.hook === 'open on a reversal' && normalizedEp2.plan.conflict === undefined, JSON.stringify(normalizedEp2?.plan))
+
+// —— 载入时自愈：清掉指向不存在形态的引用 ——
+// 旧版把标签原文当 variantId 写盘，这类脏数据会让整集生产停摆且无法自行恢复。
+{
+  const dirtyProject = {
+    meta: { id: 'dirty', name: 'dirty', artStyle: 'x', videoRatio: '16:9', createdAt: 0, updatedAt: 0 },
+    novel: [],
+    scripts: [],
+    assets: [{ id: 'hero', type: 'role', name: '四叔', state: 'done', variants: [{ id: 'v-real', label: '常服' }] }],
+    storyboards: [
+      {
+        id: 'sb1',
+        index: 0,
+        track: 'main',
+        videoDesc: 'x',
+        duration: 4,
+        associateAssetIds: ['hero'],
+        castRefs: [{ assetId: 'hero', variantId: '受伤' }],
+        stateChanges: [{ assetId: 'hero', toVariantId: '受伤', reason: '被划伤' }],
+        shouldGenerateImage: true,
+        state: 'idle',
+      },
+      {
+        id: 'sb2',
+        index: 1,
+        track: 'main',
+        videoDesc: 'y',
+        duration: 4,
+        associateAssetIds: ['hero'],
+        castRefs: [{ assetId: 'hero', variantId: 'v-real' }],
+        shouldGenerateImage: true,
+        state: 'idle',
+      },
+    ],
+    clips: [],
+    track: [],
+    memory: [],
+  }
+  ;(globalThis as unknown as { window: { mulby: unknown } }).window = { mulby: { storage: { get: async () => dirtyProject } } }
+  const healed = await loadProject('dirty')
+  const sb1 = healed?.storyboards.find((item) => item.id === 'sb1')
+  const sb2 = healed?.storyboards.find((item) => item.id === 'sb2')
+  check('drops castRef variantIds that point at no existing variant', sb1?.castRefs?.[0].variantId === undefined, JSON.stringify(sb1?.castRefs))
+  check('drops stateChanges that point at no existing variant', !sb1?.stateChanges?.length, JSON.stringify(sb1?.stateChanges))
+  check('keeps variant references that do resolve', sb2?.castRefs?.[0].variantId === 'v-real', JSON.stringify(sb2?.castRefs))
+}
 
 if (failures) {
   console.error(`\npersistence selftest: ${failures} FAILED`)

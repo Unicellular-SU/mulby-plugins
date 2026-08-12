@@ -287,6 +287,25 @@ export function getStylePack(id?: string | null): StylePack | null {
 }
 
 /** 把风格包组合成可追加到生成 prompt 的后缀：全局锚定 + 角色锚定 + 一致性锚 + 质量规则 + 软避免。 */
+/**
+ * 反 AI 腻感负面词表（借鉴 cinema-dna §9.1 / §11.5）。
+ *
+ * 这些是**跨风格**的失败模式，不是某个画风的偏好：图像模型默认会往"游戏宣传图 / AI 壁纸"
+ * 那个方向漂——史诗云层、到处发光、玻璃皮肤、全画面锐利、青橙调色。风格包自己的 `negative`
+ * 处理的是"别画成别的画风"，这一条处理的是"别画成 AI 味"，两者叠加。
+ *
+ * 只在写实向风格包生效——二次元/插画风的"干净、无颗粒、高饱和"是特征而不是缺陷。
+ */
+const ANTI_AI_NEGATIVE =
+  'no game key art, no glossy AI rendering, no plastic skin, no HDR clarity, ' +
+  'no artificial rim light, no volumetric god rays everywhere, no floating particles, ' +
+  'no teal-orange grading, no commercial beauty lighting, no razor-sharp everything'
+
+/** 写实向风格才套用反 AI 负面词；二次元/插画的"干净发光"是风格特征 */
+function wantsAntiAiPatch(pack: StylePack): boolean {
+  return /real|cinema|photo|film|写实|电影/i.test(`${pack.id} ${pack.label}`)
+}
+
 export function applyStylePack(pack: StylePack, role: StyleRole): string {
   const roleAnchor =
     role === 'character' ? pack.anchors.character : role === 'scene' ? pack.anchors.scene : role === 'prop' ? pack.anchors.prop : undefined
@@ -299,6 +318,7 @@ export function applyStylePack(pack: StylePack, role: StyleRole): string {
   if (role === 'video' && pack.videoTag) parts.push(pack.videoTag)
   let s = parts.join(', ')
   if (pack.negative && role !== 'video') s += `, ${pack.negative}`
+  if (role !== 'video' && wantsAntiAiPatch(pack)) s += `, ${ANTI_AI_NEGATIVE}`
   return s
 }
 

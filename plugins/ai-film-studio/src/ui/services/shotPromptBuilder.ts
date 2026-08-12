@@ -78,9 +78,24 @@ export const COLOR_TEMP_PHRASE: Record<ColorTempKey, string> = {
   cool: 'cool color temperature', mixed: 'mixed warm-cool lighting contrast',
 }
 
+/**
+ * 镜头设计决策层（借鉴 cinema-dna）。机械层（焦段/景别/运镜/布光）描述摄影机怎么摆，
+ * 决策层回答**为什么摆在这里**——这是画面之间拉开差异、避免"每组都是远景→中景→特写"的来源。
+ */
+export interface ShotDesignInput {
+  unresolvedState?: string
+  viewerPosition?: string
+  gazeFlow?: string
+  compositionMechanism?: string
+  colorThesis?: string
+  imagingBase?: string
+}
+
 export interface ShotPromptInput {
   /** 画面描述（核心；中/英皆可，原样保留） */
   desc: string
+  /** 决策层；缺省时退回纯机械层拼装 */
+  design?: ShotDesignInput
   /** 景别（中文「近景」或英文枚举 'close'），经归一 */
   shotSize?: string
   /** 运镜（中文「推」或英文枚举 'dolly-in'），经归一；static 省略运镜短语 */
@@ -103,9 +118,30 @@ export interface ShotPromptInput {
   styleHint?: string
 }
 
-/** 把分镜结构化字段编译成 5 层英文提示词；空层自动省略。 */
+/**
+ * 决策层 → 提示词片段。放在机械层**之前**：先告诉模型这一镜的观看立场和构图动机，
+ * 再给焦段景别，比反过来更容易得到有立场的画面而不是标准取景。
+ */
+function designLayer(design: ShotDesignInput | undefined): string {
+  if (!design) return ''
+  return [
+    design.imagingBase?.trim(),
+    design.viewerPosition?.trim() && `viewpoint — ${design.viewerPosition.trim()}`,
+    design.compositionMechanism?.trim() && `composition driven by ${design.compositionMechanism.trim()}`,
+    design.gazeFlow?.trim() && `eye travel — ${design.gazeFlow.trim()}`,
+    design.unresolvedState?.trim() && `unresolved situation — ${design.unresolvedState.trim()}`,
+  ]
+    .filter(Boolean)
+    .join(', ')
+}
+
+/** 把分镜结构化字段编译成分层英文提示词；空层自动省略。 */
 export function buildShotPrompt(input: ShotPromptInput): string {
   const layers: string[] = []
+
+  // 0 Design：观看立场 / 构图机制 / 视线流量 / 不可解决的状态（cinema-dna 决策层）
+  const design = designLayer(input.design)
+  if (design) layers.push(design)
 
   // 1 Camera：焦段 + 景深
   const camera = [input.lens && LENS_PHRASE[input.lens], input.dof && DOF_PHRASE[input.dof]].filter(Boolean).join(', ')
@@ -129,11 +165,18 @@ export function buildShotPrompt(input: ShotPromptInput): string {
   if (input.setting?.trim()) subj.push(`setting — ${input.setting.trim()}`)
   if (subj.length) layers.push(subj.join('; '))
 
-  // 4 Lighting：布光 + 色温 + 情绪
+  // 4 Lighting：布光 + 色温 + 色彩命题 + 情绪
   const light = [input.lighting && LIGHTING_PHRASE[input.lighting], input.colorTemp && COLOR_TEMP_PHRASE[input.colorTemp]]
     .filter(Boolean)
     .join(', ')
-  const lightMood = [light, input.mood?.trim() && `mood — ${input.mood.trim()}`].filter(Boolean).join('; ')
+  const lightMood = [
+    light,
+    // 色彩命题属于决策层但归到布光层输出，避免和色温分开太远导致模型只认后者
+    input.design?.colorThesis?.trim() && `color thesis — ${input.design.colorThesis.trim()}`,
+    input.mood?.trim() && `mood — ${input.mood.trim()}`,
+  ]
+    .filter(Boolean)
+    .join('; ')
   if (lightMood) layers.push(lightMood)
 
   // 5 Style：短 hint

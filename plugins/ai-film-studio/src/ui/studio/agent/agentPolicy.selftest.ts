@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { makeProjectReadTools } from './agentTools'
-import { PLANNED_HANDOFF_FIELD_NAMES, PLANNED_HANDOFF_STORYBOARD_RULE } from './policy'
+import { CONTINUITY_STORYBOARD_RULE } from './policy'
 import { protocolSystem } from './runtime'
 import type { ProjectDoc } from '../../domain/types'
 
@@ -31,16 +31,17 @@ const tools = makeProjectReadTools(() => doc)
 const handoffTool = tools.find((tool) => tool.name === 'get_episode_handoff')
 const localProtocolSystem = protocolSystem('base system', tools)
 const agentSource = readFileSync('src/ui/studio/agent/agent.ts', 'utf8')
-const agentPolicyUseCount = agentSource.match(/PLANNED_HANDOFF_STORYBOARD_RULE/g)?.length ?? 0
+const agentPolicyUseCount = agentSource.match(/CONTINUITY_STORYBOARD_RULE/g)?.length ?? 0
 
-for (const field of PLANNED_HANDOFF_FIELD_NAMES) {
+for (const field of ['carriedState']) {
   check(`get_episode_handoff description names ${field}`, !!handoffTool?.description.includes(field), handoffTool?.description ?? '')
   check(`local tool protocol names ${field}`, localProtocolSystem.includes(field), localProtocolSystem)
 }
 
-check('get_episode_handoff description includes planned handoff storyboard rule', !!handoffTool?.description.includes(PLANNED_HANDOFF_STORYBOARD_RULE), handoffTool?.description ?? '')
-check('local tool protocol includes planned handoff storyboard rule', localProtocolSystem.includes(PLANNED_HANDOFF_STORYBOARD_RULE), localProtocolSystem)
-check('agent prompts reuse planned handoff storyboard rule', agentPolicyUseCount >= 4, `uses=${agentPolicyUseCount}\n${agentSource}`)
+check('get_episode_handoff description includes the continuity rule', !!handoffTool?.description.includes(CONTINUITY_STORYBOARD_RULE), handoffTool?.description ?? '')
+check('local tool protocol includes the continuity rule', localProtocolSystem.includes(CONTINUITY_STORYBOARD_RULE), localProtocolSystem)
+check('agent prompts reuse the continuity rule', agentPolicyUseCount >= 4, `uses=${agentPolicyUseCount}`)
+check('scope vocabulary is gone from agent prompts', !/ensureScope|scopeKind|appliesTo|requiredAssetIds|requiredVariantIds/.test(agentSource), 'agent.ts still mentions scope declarations')
 
 if (failures) {
   console.error(`\nagentPolicy selftest: ${failures} FAILED`)
