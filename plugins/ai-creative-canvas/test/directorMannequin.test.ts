@@ -37,7 +37,13 @@ import {
   remapDirectorSceneAssetIds
 } from '../src/ui/canvas/directorSceneExchange.ts'
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from '../src/ui/canvas/directorCanvasPanorama.ts'
-import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls, withDirectorEnvironmentDefaults } from '../src/ui/canvas/directorEnvironment.ts'
+import {
+  assessDirectorPanoramaQuality,
+  fitDirectorCameraToCoverage,
+  getDirectorBackgroundFov,
+  normalizeDirectorEnvironmentControls,
+  withDirectorEnvironmentDefaults
+} from '../src/ui/canvas/directorEnvironment.ts'
 import { Object3D, Vector3 } from 'three'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from '../src/ui/canvas/directorCameraPresets.ts'
 import { solveDirectorCcdIk } from '../src/ui/canvas/directorIk.ts'
@@ -247,6 +253,8 @@ function testDirectorSceneExchange() {
       description: '雨夜街道',
       rotation: 999,
       mode: 'grounded',
+      compositionMode: 'adapted',
+      backgroundScale: 99,
       cameraHeight: 99,
       horizon: -99,
       exposure: 99,
@@ -266,6 +274,8 @@ function testDirectorSceneExchange() {
   assert.equal(scene.shots[0].sceneState?.subjects[0].poseName, '双膝跪')
   assert.equal(scene.environment?.rotation, 180)
   assert.equal(scene.environment?.mode, 'grounded')
+  assert.equal(scene.environment?.compositionMode, 'adapted')
+  assert.equal(scene.environment?.backgroundScale, 2)
   assert.equal(scene.environment?.cameraHeight, 5)
   assert.equal(scene.environment?.horizon, -20)
   assert.equal(scene.environment?.exposure, 3)
@@ -295,6 +305,8 @@ function testDirectorSceneExchange() {
   assert.equal(parseDirectorSceneExchange(bundle).scene.environment?.exposure, 3)
   const legacyEnvironment = normalizeDirectorScene({ ...raw, environment: { assetId: 'legacy-pano' } }).environment
   assert.equal(legacyEnvironment?.mode, 'grounded')
+  assert.equal(legacyEnvironment?.compositionMode, 'physical')
+  assert.equal(legacyEnvironment?.backgroundScale, 1)
   assert.equal(legacyEnvironment?.cameraHeight, 1.6)
   assert.equal(legacyEnvironment?.environmentIntensity, 0.9)
   assert.equal(parseDirectorSceneExchange(raw).assets.length, 0, '旧版裸场景 JSON 应继续可导入')
@@ -309,6 +321,8 @@ function testDirectorSceneExchange() {
 function testDirectorEnvironmentCalibration() {
   assert.deepEqual(normalizeDirectorEnvironmentControls(null), {
     mode: 'grounded',
+    compositionMode: 'physical',
+    backgroundScale: 1,
     cameraHeight: 1.6,
     horizon: 0,
     exposure: 1,
@@ -328,6 +342,21 @@ function testDirectorEnvironmentCalibration() {
   assert.equal(calibrated.exposure, 1.2)
   assert.equal(calibrated.backgroundBlur, 0.25)
   assert.equal(calibrated.environmentIntensity, 0.9, '缺失的新参数应使用稳定默认值，保证旧工程兼容')
+
+  assert.equal(getDirectorBackgroundFov(50, 'physical', 0.5), 50, '物理一致模式不能改变背景视角')
+  assert.ok(getDirectorBackgroundFov(50, 'adapted', 0.5) > 50, '缩小背景应扩大环境相机视角')
+  assert.ok(getDirectorBackgroundFov(50, 'adapted', 2) < 50, '放大背景应缩小环境相机视角')
+
+  const baseCam: DirectorCam = { pos: [0, 1, 6], target: [0, 1, 0], focal: 50 }
+  const wide = fitDirectorCameraToCoverage(baseCam, {
+    center: [1, 1, 0], size: [1, 2, 0.5], verticalFov: 40, aspect: 16 / 9, coverage: 0.3
+  })
+  const close = fitDirectorCameraToCoverage(baseCam, {
+    center: [1, 1, 0], size: [1, 2, 0.5], verticalFov: 40, aspect: 16 / 9, coverage: 0.7
+  })
+  assert.deepEqual(close.target, [1, 1, 0])
+  assert.equal(close.focal, 50, '主体占画面只允许推拉相机，不能改变焦段')
+  assert.ok(Math.hypot(close.pos[0] - 1, close.pos[1] - 1, close.pos[2]) < Math.hypot(wide.pos[0] - 1, wide.pos[1] - 1, wide.pos[2]), '70% 构图应比 30% 构图更靠近主体')
 
   assert.equal(assessDirectorPanoramaQuality(3000, 1500)?.level, 'preview')
   assert.equal(assessDirectorPanoramaQuality(4096, 2048)?.level, 'standard')

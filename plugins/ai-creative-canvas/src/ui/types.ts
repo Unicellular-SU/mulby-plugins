@@ -155,6 +155,8 @@ export interface DirectorEnvironment {
   description?: string // 追加进镜头提示词的环境描述
   rotation?: number // 水平旋转角度，单位为度
   mode?: 'grounded' | 'infinite' // 落地环境用于小范围移机；无限背景只随视角旋转
+  compositionMode?: 'physical' | 'adapted' // 物理一致共用镜头；构图适配允许背景使用独立视野
+  backgroundScale?: number // 构图适配下的背景视觉尺寸，范围 0.5-2
   cameraHeight?: number // 全景拍摄点离地高度，单位为米
   horizon?: number // 地平线垂直校准，单位为度
   exposure?: number // ACES 画面曝光

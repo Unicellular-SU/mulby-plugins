@@ -1,7 +1,9 @@
-import type { DirectorEnvironment } from '../types'
+import type { DirectorCam, DirectorEnvironment } from '../types'
 
 export const DIRECTOR_ENVIRONMENT_DEFAULTS = {
   mode: 'grounded' as const,
+  compositionMode: 'physical' as const,
+  backgroundScale: 1,
   cameraHeight: 1.6,
   horizon: 0,
   exposure: 1,
@@ -15,12 +17,14 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 
 export type DirectorEnvironmentControls = Pick<
   Required<DirectorEnvironment>,
-  'mode' | 'cameraHeight' | 'horizon' | 'exposure' | 'environmentIntensity' | 'backgroundBlur' | 'shadowOpacity'
+  'mode' | 'compositionMode' | 'backgroundScale' | 'cameraHeight' | 'horizon' | 'exposure' | 'environmentIntensity' | 'backgroundBlur' | 'shadowOpacity'
 >
 
 export function normalizeDirectorEnvironmentControls(raw: Partial<DirectorEnvironment> | null | undefined): DirectorEnvironmentControls {
   return {
     mode: raw?.mode === 'infinite' ? 'infinite' : 'grounded',
+    compositionMode: raw?.compositionMode === 'adapted' ? 'adapted' : 'physical',
+    backgroundScale: clamp(finite(raw?.backgroundScale, DIRECTOR_ENVIRONMENT_DEFAULTS.backgroundScale), 0.5, 2),
     cameraHeight: clamp(finite(raw?.cameraHeight, DIRECTOR_ENVIRONMENT_DEFAULTS.cameraHeight), 0.3, 5),
     horizon: clamp(finite(raw?.horizon, DIRECTOR_ENVIRONMENT_DEFAULTS.horizon), -20, 20),
     exposure: clamp(finite(raw?.exposure, DIRECTOR_ENVIRONMENT_DEFAULTS.exposure), 0.25, 3),
@@ -32,6 +36,68 @@ export function normalizeDirectorEnvironmentControls(raw: Partial<DirectorEnviro
 
 export function withDirectorEnvironmentDefaults<T extends DirectorEnvironment>(environment: T): T & DirectorEnvironmentControls {
   return { ...environment, ...normalizeDirectorEnvironmentControls(environment) }
+}
+
+/**
+ * 将背景视觉尺寸换算成独立环境相机的垂直视角。
+ * physical 模式始终返回主体相机视角，确保全景地面与接影透视一致。
+ */
+export function getDirectorBackgroundFov(
+  foregroundFov: number,
+  compositionMode: DirectorEnvironmentControls['compositionMode'],
+  backgroundScale: number
+): number {
+  const safeFov = clamp(finite(foregroundFov, 50), 1, 140)
+  if (compositionMode === 'physical') return safeFov
+  const scale = clamp(finite(backgroundScale, 1), 0.5, 2)
+  const halfFov = Math.tan((safeFov * Math.PI) / 360) / scale
+  return clamp((Math.atan(halfFov) * 360) / Math.PI, 1, 140)
+}
+
+export interface DirectorSubjectCoverageOptions {
+  center: [number, number, number]
+  size: [number, number, number]
+  verticalFov: number
+  aspect: number
+  coverage: number
+}
+
+/** 沿当前视线推拉相机，让对象包围盒约占输出画幅指定比例，不改变对象缩放和镜头焦段。 */
+export function fitDirectorCameraToCoverage(cam: DirectorCam, options: DirectorSubjectCoverageOptions): DirectorCam {
+  const verticalFov = clamp(finite(options.verticalFov, 50), 1, 140)
+  const aspect = clamp(finite(options.aspect, 1), 0.1, 10)
+  const coverage = clamp(finite(options.coverage, 0.5), 0.1, 0.95)
+  const width = Math.max(0.01, finite(options.size[0], 1))
+  const height = Math.max(0.01, finite(options.size[1], 1))
+  const depth = Math.max(0, finite(options.size[2], 0))
+  const tanHalfVertical = Math.tan((verticalFov * Math.PI) / 360)
+  const fitDistance = Math.max(
+    (height * 0.5) / (coverage * tanHalfVertical),
+    (width * 0.5) / (coverage * tanHalfVertical * aspect)
+  ) + depth * 0.5
+  let dx = finite(cam.pos[0], 0) - finite(cam.target[0], 0)
+  let dy = finite(cam.pos[1], 0) - finite(cam.target[1], 0)
+  let dz = finite(cam.pos[2], 1) - finite(cam.target[2], 0)
+  const directionLength = Math.hypot(dx, dy, dz)
+  if (directionLength < 1e-6) {
+    dx = 0
+    dy = 0
+    dz = 1
+  } else {
+    dx /= directionLength
+    dy /= directionLength
+    dz /= directionLength
+  }
+  const center: [number, number, number] = [
+    finite(options.center[0], 0),
+    finite(options.center[1], 0),
+    finite(options.center[2], 0)
+  ]
+  return {
+    pos: [center[0] + dx * fitDistance, center[1] + dy * fitDistance, center[2] + dz * fitDistance],
+    target: center,
+    focal: clamp(finite(cam.focal, 35), 1, 300)
+  }
 }
 
 export type DirectorPanoramaQualityLevel = 'invalid' | 'preview' | 'standard' | 'high'

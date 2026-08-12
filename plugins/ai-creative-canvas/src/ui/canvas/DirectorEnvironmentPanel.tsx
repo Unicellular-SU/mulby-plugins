@@ -146,6 +146,30 @@ export function DirectorEnvironmentPanel({
                 </button>
               ))}
             </div>
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.035] p-1">
+              {(['physical', 'adapted'] as const).map((compositionMode) => (
+                <button
+                  key={compositionMode}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onSettingsChange({ compositionMode }, true)}
+                  className={`h-7 rounded-md text-[10px] transition-colors active:scale-[0.98] ${controls.compositionMode === compositionMode ? 'bg-amber-300/15 text-amber-100' : 'text-white/40 hover:bg-white/[0.05] hover:text-white/65'} disabled:opacity-40`}
+                  title={compositionMode === 'physical' ? '背景与主体使用同一个镜头视野，透视和接影更可靠' : '背景使用独立镜头视野，可单独调整视觉尺寸'}
+                >
+                  {compositionMode === 'physical' ? '物理一致' : '构图适配'}
+                </button>
+              ))}
+            </div>
+            <CalibrationRange
+              label="背景尺寸"
+              value={controls.backgroundScale}
+              display={`${Math.round(controls.backgroundScale * 100)}%`}
+              min={0.5}
+              max={2}
+              step={0.05}
+              disabled={busy || controls.compositionMode !== 'adapted'}
+              onChange={(value, commit) => onSettingsChange({ backgroundScale: value }, commit)}
+            />
             <CalibrationRange label="水平旋转" value={rotation} display={`${rotation}°`} min={-180} max={180} step={1} disabled={busy} onChange={(value, commit) => onSettingsChange({ rotation: value }, commit)} />
             <CalibrationRange label="拍摄高度" value={controls.cameraHeight} display={`${controls.cameraHeight.toFixed(1)}m`} min={0.3} max={5} step={0.1} disabled={busy || controls.mode !== 'grounded'} onChange={(value, commit) => onSettingsChange({ cameraHeight: value }, commit)} />
             <CalibrationRange label="地平线校准" value={controls.horizon} display={`${Math.round(controls.horizon)}°`} min={-20} max={20} step={1} disabled={busy} onChange={(value, commit) => onSettingsChange({ horizon: value }, commit)} />
@@ -154,7 +178,9 @@ export function DirectorEnvironmentPanel({
             <CalibrationRange label="背景柔化" value={controls.backgroundBlur} display={`${Math.round(controls.backgroundBlur * 100)}%`} min={0} max={1} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ backgroundBlur: value }, commit)} />
             <CalibrationRange label="接影强度" value={controls.shadowOpacity} display={`${Math.round(controls.shadowOpacity * 100)}%`} min={0} max={1} step={0.05} disabled={busy} onChange={(value, commit) => onSettingsChange({ shadowOpacity: value }, commit)} />
             <div className="rounded-md border border-amber-300/10 bg-amber-300/[0.04] px-2 py-1.5 text-[9px] leading-relaxed text-amber-100/45">
-              {controls.mode === 'grounded' ? '适合旋转镜头和小范围移机。大幅横移仍会暴露单张全景没有真实深度。' : '背景始终位于无限远，不产生地面视差。'}
+              {controls.compositionMode === 'physical'
+                ? '背景与主体共用镜头视野，地面和接影最可靠。'
+                : '背景独立构图。调整背景尺寸不会改变人物，但地面透视为近似。'}
             </div>
           </div>
 

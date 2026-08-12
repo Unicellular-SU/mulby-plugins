@@ -21,7 +21,13 @@ import { DirectorShotInspector } from './DirectorShotInspector'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
-import { assessDirectorPanoramaQuality, normalizeDirectorEnvironmentControls, withDirectorEnvironmentDefaults } from './directorEnvironment'
+import {
+  assessDirectorPanoramaQuality,
+  fitDirectorCameraToCoverage,
+  getDirectorBackgroundFov,
+  normalizeDirectorEnvironmentControls,
+  withDirectorEnvironmentDefaults
+} from './directorEnvironment'
 import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from './directorCanvasPanorama'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
 import { solveDirectorCcdIk } from './directorIk'
@@ -290,6 +296,7 @@ function Inner({ onReload }: { onReload: () => void }) {
         mount.appendChild(renderer.domElement)
 
         const scene = new THREE.Scene()
+        const environmentScene = new THREE.Scene()
         scene.background = new THREE.Color(0x1b1d23)
         let curEnvironment: DirectorEnvironment | null = null
         let environmentTexture: any = null // 原始等距柱状纹理，供 PMREM 与无柔化显示
@@ -302,6 +309,7 @@ function Inner({ onReload }: { onReload: () => void }) {
         cam.filmGauge = FILM_GAUGE
         cam.position.set(0, 1.5, 4)
         cam.setFocalLength(35)
+        const environmentCamera = new THREE.PerspectiveCamera(50, W / H, 0.05, 1000)
 
         const hemi = new THREE.HemisphereLight(0xffffff, 0x404050, 1.15)
         scene.add(hemi)
@@ -423,6 +431,40 @@ function Inner({ onReload }: { onReload: () => void }) {
           pip.shadowMap.enabled = true
           pip.shadowMap.type = THREE.PCFSoftShadowMap
           pipMount.appendChild(pip.domElement)
+        }
+
+        // 全景环境与主体分层渲染：环境相机可拥有独立 FOV，主体相机及其焦段保持不变。
+        // 两层在同一 WebGL 画布内顺序合成，因此主视口、PiP、缩略图和参考图能共享同一结果。
+        const syncEnvironmentCamera = (sourceCamera: any) => {
+          environmentCamera.copy(sourceCamera)
+          const controls = normalizeDirectorEnvironmentControls(curEnvironment)
+          environmentCamera.zoom = 1
+          environmentCamera.fov = getDirectorBackgroundFov(
+            sourceCamera.getEffectiveFOV?.() || sourceCamera.fov || 50,
+            controls.compositionMode,
+            controls.backgroundScale
+          )
+          environmentCamera.aspect = sourceCamera.aspect || 1
+          environmentCamera.updateProjectionMatrix()
+          environmentCamera.updateMatrixWorld(true)
+          if (groundedSkybox && controls.mode === 'infinite') groundedSkybox.position.copy(environmentCamera.position)
+        }
+        const renderComposite = (targetRenderer: any, sourceCamera: any) => {
+          if (!curEnvironment || !environmentTexture || !groundedSkybox) {
+            targetRenderer.render(scene, sourceCamera)
+            return
+          }
+          syncEnvironmentCamera(sourceCamera)
+          const previousAutoClear = targetRenderer.autoClear
+          const previousEnvironment = scene.environment
+          targetRenderer.autoClear = false
+          targetRenderer.clear(true, true, true)
+          targetRenderer.render(environmentScene, environmentCamera)
+          targetRenderer.clearDepth()
+          scene.environment = targetRenderer === pip ? pipEnvironmentRenderTarget?.texture || null : environmentRenderTarget?.texture || null
+          targetRenderer.render(scene, sourceCamera)
+          scene.environment = previousEnvironment
+          targetRenderer.autoClear = previousAutoClear
         }
 
         interface Subj { obj: any; kind: string; id: string; name: string; desc?: string; colorName?: string }
@@ -1225,7 +1267,7 @@ function Inner({ onReload }: { onReload: () => void }) {
         const attachStore = () => window.mulby?.storage?.attachment
         const disposeEnvironmentBackdrop = () => {
           if (!groundedSkybox) return
-          scene.remove(groundedSkybox)
+          environmentScene.remove(groundedSkybox)
           groundedSkybox.geometry?.dispose?.()
           const materials = Array.isArray(groundedSkybox.material) ? groundedSkybox.material : [groundedSkybox.material]
           materials.forEach((material: any) => material?.dispose?.())
@@ -1279,7 +1321,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           groundedSkybox.name = controls.mode === 'grounded' ? '全景落地环境' : '全景无限背景'
           groundedSkybox.renderOrder = -1000
           groundedSkybox.frustumCulled = false
-          scene.add(groundedSkybox)
+          environmentScene.add(groundedSkybox)
         }
         const applyEnvironmentRendering = () => {
           if (!curEnvironment || !environmentTexture) return
@@ -1399,7 +1441,7 @@ function Inner({ onReload }: { onReload: () => void }) {
               pipPmrem.dispose()
             }
           }
-          scene.background = lightingBackground()
+          scene.background = null
           rebuildEnvironmentDisplay()
           rebuildEnvironmentBackdrop()
           applyEnvironmentRendering()
@@ -1709,7 +1751,7 @@ function Inner({ onReload }: { onReload: () => void }) {
 
         // WebGL 上下文丢失/恢复：preventDefault 才允许浏览器恢复上下文；恢复后立刻补渲一帧（mac GPU 切换/内存压力会触发）
         const onCtxLost = (e: Event) => { e.preventDefault() }
-        const onCtxRestored = () => { renderer.render(scene, cam) }
+        const onCtxRestored = () => { renderComposite(renderer, cam) }
         renderer.domElement.addEventListener('webglcontextlost', onCtxLost)
         renderer.domElement.addEventListener('webglcontextrestored', onCtxRestored)
 
@@ -1728,19 +1770,14 @@ function Inner({ onReload }: { onReload: () => void }) {
             const markerScale = Math.max(0.65, Math.min(2.2, jointMarker.position.distanceTo(cam.position) * 0.16))
             jointMarker.scale.setScalar(markerScale)
           }
-          if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(cam.position)
-          renderer.render(scene, cam)
+          renderComposite(renderer, cam)
           if (pip && shotLocked) {
             camHelper.visible = false
             const markerVisible = jointMarker.visible
             const recordedHelpersVisible = recordedCameraHelpers.visible
             jointMarker.visible = false
             recordedCameraHelpers.visible = false
-            if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(shotCam.position)
-            const mainEnvironment = scene.environment
-            scene.environment = pipEnvironmentRenderTarget?.texture || null
-            pip.render(scene, shotCam)
-            scene.environment = mainEnvironment
+            renderComposite(pip, shotCam)
             jointMarker.visible = markerVisible
             recordedCameraHelpers.visible = recordedHelpersVisible
           } // PiP 出图预览（不含取景框线和关节定位点）
@@ -1864,8 +1901,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           jointMarker.visible = false
           recordedCameraHelpers.visible = false
           const captureCamera = outCam()
-          if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(captureCamera.position)
-          renderer.render(scene, captureCamera)
+          renderComposite(renderer, captureCamera)
           const src = renderer.domElement
           const tw = 96
           const th = Math.max(1, Math.round((tw * src.height) / src.width))
@@ -1918,6 +1954,30 @@ function Inner({ onReload }: { onReload: () => void }) {
           })
           applyCam(next)
           if (!disposed) setFocal(next.focal)
+        }
+        const frameSubjectCoverage = (coverage: number) => {
+          const candidates = curRoot && curRoot.visible !== false
+            ? [curRoot]
+            : subjects.filter((subject) => subject.obj.visible !== false).map((subject) => subject.obj)
+          const bounds = new THREE.Box3()
+          for (const object of candidates) bounds.union(new THREE.Box3().setFromObject(object, true))
+          if (bounds.isEmpty()) return false
+          const center = bounds.getCenter(new THREE.Vector3())
+          const size = bounds.getSize(new THREE.Vector3())
+          const C = outCam()
+          let tanHalfVertical = Math.tan(THREE.MathUtils.degToRad(C.getEffectiveFOV()) / 2)
+          const outputAspect = curAspect || C.aspect || 1
+          if (curAspect && curAspect > C.aspect) tanHalfVertical *= C.aspect / curAspect
+          const outputVerticalFov = THREE.MathUtils.radToDeg(2 * Math.atan(tanHalfVertical))
+          const next = fitDirectorCameraToCoverage(getCam(), {
+            center: [center.x, center.y, center.z],
+            size: [size.x, size.y, size.z],
+            verticalFov: outputVerticalFov,
+            aspect: outputAspect,
+            coverage
+          })
+          applyCam(next)
+          return true
         }
         // 布景预设：追加一组对象并拉一个中景平视机位（不清空现有对象；undo 可逐个回退）
         const stagePreset = async (key: string) => {
@@ -2346,6 +2406,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             if (shotLocked) { shotCam.lookAt(shotTarget); shotCam.updateProjectionMatrix() }
           },
           applyCameraPreset: applyCameraPresetById,
+          frameSubjectCoverage,
           // 锁定取景：冻结当前视图为出图机位（PiP/取景框/生成都用它），主视图可继续自由轨道查看
           setViewMode,
           setLock: (v: boolean) => setViewMode(v ? 'director' : 'camera'),
@@ -2376,8 +2437,7 @@ function Inner({ onReload }: { onReload: () => void }) {
             jointMarker.visible = false
             recordedCameraHelpers.visible = false
             const captureCamera = outCam()
-            if (groundedSkybox && curEnvironment && normalizeDirectorEnvironmentControls(curEnvironment).mode === 'infinite') groundedSkybox.position.copy(captureCamera.position)
-            renderer.render(scene, captureCamera)
+            renderComposite(renderer, captureCamera)
             const src = renderer.domElement
             const c = document.createElement('canvas')
             c.width = src.width
@@ -3453,6 +3513,24 @@ function Inner({ onReload }: { onReload: () => void }) {
                   <span className={secCls}>语义机位</span>
                   <DirectorCameraPresetGrid onApply={(presetId) => api.current.applyCameraPreset?.(presetId)} />
                   <div className={hintCls}>人物类机位跟随所选角色朝向；场景类机位覆盖当前可见对象。</div>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
+                  <span className={secCls}>主体占画面</span>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[30, 50, 70].map((percent) => (
+                      <Btn
+                        key={percent}
+                        onClick={() => {
+                          const framed = api.current.frameSubjectCoverage?.(percent / 100)
+                          if (framed === false) toast('当前没有可构图的可见对象', 'warning')
+                        }}
+                        title={`主体约占画面 ${percent}%`}
+                      >
+                        {percent}%
+                      </Btn>
+                    ))}
+                  </div>
+                  <div className={hintCls}>优先构图所选对象，否则覆盖全部可见对象。只沿视线推拉相机，不缩放人物，也不改变焦段。</div>
                 </div>
                 <div className="flex flex-col gap-2 rounded-xl border border-white/[0.07] bg-black/15 p-2.5">
                   <label className="flex items-center gap-2 text-[11px] text-white/50">
