@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "mulby dev",
-    "test": "npm run test:compile && npm run test:refs && npm run test:project-media && npm run test:persist && npm run test:viewport && npm run test:director && npm run test:studio && npm run test:graph && npm run test:engine && npm run test:guards && npm run test:image-edit && npm run test:inpaint-guidance",
+    "test": "npm run test:compile && npm run test:refs && npm run test:project-media && npm run test:persist && npm run test:viewport && npm run test:director && npm run test:studio && npm run test:graph && npm run test:engine && npm run test:provider-config && npm run test:guards && npm run test:image-edit && npm run test:inpaint-guidance",
     "test:compile": "esbuild test/videoEdit/run-compile.test.ts --bundle --platform=node --format=esm --outfile=dist/run-compile.test.mjs && node dist/run-compile.test.mjs",
     "test:refs": "esbuild test/references.test.ts --bundle --platform=node --format=esm --outfile=dist/references.test.mjs && node dist/references.test.mjs",
     "test:project-media": "esbuild test/projectMedia.test.ts --bundle --platform=node --format=esm --outfile=dist/projectMedia.test.mjs && node dist/projectMedia.test.mjs",
@@ -14,6 +14,7 @@
     "test:studio": "esbuild test/store/studioStore.test.ts --bundle --platform=node --format=esm --outfile=dist/studioStore.test.mjs && node dist/studioStore.test.mjs",
     "test:graph": "esbuild test/store/graphStore.test.ts --bundle --platform=node --format=esm --outfile=dist/graphStore.test.mjs && node dist/graphStore.test.mjs",
     "test:engine": "esbuild test/providers/engine.test.ts --bundle --platform=node --format=esm --outfile=dist/engine.test.mjs && node dist/engine.test.mjs",
+    "test:provider-config": "esbuild test/providers/config.test.ts --bundle --platform=node --format=esm --outfile=dist/providerConfig.test.mjs && node dist/providerConfig.test.mjs",
     "test:guards": "esbuild test/inputGuards.test.ts --bundle --platform=node --format=esm --outfile=dist/inputGuards.test.mjs && node dist/inputGuards.test.mjs",
     "test:image-edit": "esbuild test/imageEditCompat.test.ts --bundle --platform=node --format=esm --outfile=dist/imageEditCompat.test.mjs && node dist/imageEditCompat.test.mjs",
     "test:inpaint-guidance": "esbuild test/inpaintGuidance.test.ts --bundle --platform=node --format=esm --outfile=dist/inpaintGuidance.test.mjs && node dist/inpaintGuidance.test.mjs",

@@ -3,13 +3,16 @@
 // 从而保证 generate.ts 能在拿到 taskId 后即释放并发槽、把轮询挪到池外（长视频不再饿死文/图队列）。
 import assert from 'node:assert/strict'
 import type { ProviderConfig } from '../../src/ui/services/providers/types.ts'
-import { submitVideoJob, runVideoJob, resumeVideoJob } from '../../src/ui/services/providers/engine.ts'
+import { submitVideoJob, runVideoJob, resumeVideoJob, testProvider } from '../../src/ui/services/providers/engine.ts'
 
 const cfg = {
   id: 'p1',
   label: 'Test Video',
+  kind: 'video',
+  type: 'custom-video',
   baseURL: 'https://api.test',
   submitPath: '/v1/submit',
+  promptField: 'prompt',
   statusPath: '/v1/status/{id}',
   idPath: 'id',
   resultPath: 'video_url',
@@ -102,13 +105,77 @@ async function testResumePollsWithoutSubmit() {
   )
 }
 
+async function testSafeConnectivityIsHonest() {
+  calls = []
+  ;(globalThis as any).window.mulby.http.request = async ({ url, method }: { url: string; method: string }) => {
+    calls.push({ method, url })
+    return { status: 404, data: 'not found' }
+  }
+  const result = await testProvider(cfg, 'KEY')
+  assert.equal(result.ok, true, '服务域名可达不等于配置失败')
+  assert.equal(result.level, 'warning', '未验证鉴权/任务映射时不得谎报完全成功')
+  assert.ok(result.checks.some((check) => check.id === 'auth' && check.status === 'warning'))
+  assert.deepEqual(calls, [{ method: 'GET', url: 'https://api.test' }], '安全测试不得提交真实生成任务')
+  installHttp()
+}
+
+async function testTtsAuthFailure() {
+  calls = []
+  ;(globalThis as any).window.mulby.http.request = async ({ url, method }: { url: string; method: string }) => {
+    calls.push({ method, url })
+    return { status: 401, data: { error: 'unauthorized' } }
+  }
+  const result = await testProvider({
+    id: 'tts-1', label: 'TTS', kind: 'audio', type: 'openai-tts', baseURL: 'https://tts.test/v1',
+    ttsModel: 'tts-1', ttsVoice: 'alloy', ttsFormat: 'mp3'
+  }, 'BAD')
+  assert.equal(result.ok, false)
+  assert.equal(result.summary, '服务可达，但鉴权失败')
+  assert.deepEqual(calls, [{ method: 'GET', url: 'https://tts.test/v1/models' }])
+  installHttp()
+}
+
+async function testDefaultRequestUsesDeclaredFields() {
+  let request: any
+  ;(globalThis as any).window.mulby.http.request = async (value: any) => {
+    request = value
+    return { status: 200, data: { id: 'task-fields' } }
+  }
+  await submitVideoJob({ ...cfg, headers: { 'X-Async': 'enable' }, model: 'provider-default' }, 'KEY', {
+    prompt: 'hi',
+    model: 'node-model',
+    params: { duration: 8, aspect: '9:16' }
+  })
+  assert.equal(request.headers['X-Async'], 'enable', '字段映射请求应携带自定义请求头')
+  assert.equal(request.headers.Authorization, 'Bearer KEY')
+  assert.deepEqual(request.body, { duration: 8, aspect: '9:16', model: 'node-model', prompt: 'hi' })
+  installHttp()
+}
+
+async function testCrossOriginHealthDoesNotLeakCredentials() {
+  let request: any
+  ;(globalThis as any).window.mulby.http.request = async (value: any) => {
+    request = value
+    return { status: 200, data: { ok: true } }
+  }
+  const result = await testProvider({ ...cfg, healthCheckUrl: 'https://health.other.test/ping', headers: { 'X-Secret': 'hidden' } }, 'KEY')
+  assert.deepEqual(request.headers, {}, '跨域健康检查不得携带 API Key 或自定义请求头')
+  assert.equal(result.level, 'warning')
+  assert.match(result.checks.find((check) => check.id === 'auth')?.message || '', /不同域/)
+  installHttp()
+}
+
 async function main() {
   installHttp()
   await testSubmitDoesNotPoll()
   await testSubmitReturnsSyncUrl()
   await testRunVideoJobStillPolls()
   await testResumePollsWithoutSubmit()
-  console.log('engine video split: 4 tests OK')
+  await testSafeConnectivityIsHonest()
+  await testTtsAuthFailure()
+  await testDefaultRequestUsesDeclaredFields()
+  await testCrossOriginHealthDoesNotLeakCredentials()
+  console.log('provider engine: 8 tests OK')
 }
 
 main().catch((e) => {

@@ -477,7 +477,7 @@ export const rpc = {
   // 配音合成：OpenAI 兼容 POST /audio/speech → 二进制音频 base64 落盘
   async synthSpeech(input: {
     baseURL: string; apiKey: string; model: string; voice: string; input: string
-    speed?: number; format?: string; projectId?: string
+    speed?: number; format?: string; projectId?: string; headers?: Record<string, string>
   }) {
     try {
       if (!input?.input?.trim()) return { ok: false, error: '缺少配音文本' }
@@ -486,11 +486,15 @@ export const rpc = {
       const format = (input.format || 'mp3').toLowerCase()
       const mime = format === 'wav' ? 'audio/wav' : format === 'opus' ? 'audio/opus' : format === 'aac' ? 'audio/aac' : 'audio/mpeg'
       const url = `${String(input.baseURL || 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/speech`
+      const customHeaders = input.headers && typeof input.headers === 'object' && !Array.isArray(input.headers)
+        ? Object.fromEntries(Object.entries(input.headers).filter(([key, value]) => key.length <= 128 && typeof value === 'string' && value.length <= 4096))
+        : {}
       const r = await fetchBinaryGuarded(
         url,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
+          // 认证与内容类型始终由受信任字段覆盖，额外请求头不能替换安全存储中的密钥。
+          headers: { ...customHeaders, Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: input.model || 'tts-1',
             voice: input.voice || 'alloy',

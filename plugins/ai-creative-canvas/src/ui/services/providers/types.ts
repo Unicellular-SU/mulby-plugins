@@ -1,12 +1,26 @@
 export type ProviderKind = 'video' | 'audio'
 export type ProviderType = 'openai-tts' | 'custom-video'
 
+export interface VideoProviderCapabilities {
+  textToVideo?: boolean
+  imageToVideo?: boolean
+  lastFrame?: boolean
+  nativeAudio?: boolean
+  aspects?: string[]
+  durations?: number[]
+  resolutions?: string[]
+}
+
 export interface ProviderConfig {
   id: string
   label: string
   kind: ProviderKind
   type: ProviderType
   baseURL: string
+  /** 可选的无计费 GET 探测地址；未配置时只能检查服务域名是否可达。 */
+  healthCheckUrl?: string
+  /** 供节点面板裁剪无效参数；旧配置缺失时由请求模板自动推断。 */
+  capabilities?: VideoProviderCapabilities
 
   // ---- custom-video（异步 submit + poll，字段/路径可配） ----
   submitPath?: string // 例 /v1/video/generations

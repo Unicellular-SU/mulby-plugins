@@ -5,6 +5,8 @@ import { Select } from './Select'
 import type { Card } from '../types'
 import { durationValues } from '../services/videoSpecs'
 import { getParamSchema } from '../services/paramSchema'
+import { useProviders } from '../store/providerStore'
+import { resolveVideoCapabilities } from '../services/providers/config'
 
 function SeedControl({ value, onChange, onCommitStart }: { value: number | undefined; onChange: (v: number | undefined) => void; onCommitStart: () => void }) {
   const editArmed = useRef(false)
@@ -96,16 +98,21 @@ function DurationSlider({ values, value, onChange, onCommitStart }: { values: nu
 // 不同节点类型的生成参数：字段声明在 services/paramSchema，单一渲染器分发（select/seed/duration）
 export function ParamControls({ card }: { card: Card }) {
   const updateCard = useGraph((s) => s.updateCard)
+  const videoProvider = useProviders((s) => s.activeFor('video'))
+  const videoCapabilities = card.kind === 'video' && videoProvider ? resolveVideoCapabilities(videoProvider) : undefined
   const p = card.params || {}
   const set = (k: string, v: unknown) => updateCard(card.id, { params: { ...card.params, [k]: v } })
   const commitStart = () => useGraph.getState().pushHistory()
-  const fields = getParamSchema(card)
+  const fields = getParamSchema(card, videoCapabilities)
   if (!fields.length) return null
   return (
     <>
       {fields.map((f) => {
         if (f.type === 'seed') return <SeedControl key={f.key} value={p[f.key] as number | undefined} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
-        if (f.type === 'duration') return <DurationSlider key={f.key} values={durationValues(card.modelId)} value={Number(p[f.key]) || 5} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
+        if (f.type === 'duration') {
+          const values = videoCapabilities?.durations?.length ? videoCapabilities.durations : durationValues(card.modelId)
+          return <DurationSlider key={f.key} values={values} value={Number(p[f.key]) || values[0] || 5} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
+        }
         const cur = p[f.key] !== undefined && p[f.key] !== null ? String(p[f.key]) : f.default
         return (
           <div key={f.key} className="shrink-0" style={{ width: f.width }}>

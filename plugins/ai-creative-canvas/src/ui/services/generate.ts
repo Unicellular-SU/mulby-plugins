@@ -9,6 +9,7 @@ import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
 import { resolveGenerationPrompt, findUnresolvedMentions, buildMaterials, isUsableMaterial } from './references'
 import { useProviders } from '../store/providerStore'
 import { submitVideoJob, runTts, resumeVideoJob } from './providers/engine'
+import { resolveVideoCapabilities } from './providers/config'
 import { snapDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
@@ -318,9 +319,16 @@ async function generateVideoCard(cardId: string): Promise<void> {
       commit({ status: 'running', progress: 0, error: null })
       const cfg = useProviders.getState().activeFor('video')
       if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
+      const capabilities = resolveVideoCapabilities(cfg)
       const key = await useProviders.getState().getKey(cfg.id)
       const resolved = resolveGenerationPrompt(card, board, 'media')
       const inputs = resolved.inputs
+      if (!inputs.images.length && !capabilities.textToVideo) {
+        throw new Error(`当前 Provider「${cfg.label}」仅支持图生视频，请先连接或上传参考图片`)
+      }
+      if (inputs.images.length && !capabilities.imageToVideo) {
+        throw new Error(`当前 Provider「${cfg.label}」未声明图生视频能力，请移除图片输入或在 Provider 设置中启用`)
+      }
       const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
         const bytes = await loadImageInput(im)
         return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
@@ -329,7 +337,10 @@ async function generateVideoCard(cardId: string): Promise<void> {
       let imageDataUrl: string | undefined
       let lastImageDataUrl: string | undefined
       if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
-      if (refMode === 'keyframe' && inputs.images[1]) lastImageDataUrl = await toDataUrl(inputs.images[1])
+      if (refMode === 'keyframe' && inputs.images[1]) {
+        if (!capabilities.lastFrame) throw new Error(`当前 Provider「${cfg.label}」不支持尾帧输入`)
+        lastImageDataUrl = await toDataUrl(inputs.images[1])
+      }
       const proj = g.project
       const vboard = proj.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
       const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
@@ -338,10 +349,16 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
       const vprompt = resolved.text + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
       // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
+      const configuredDurations = capabilities.durations || []
+      const requestedDuration = Number(card.params?.duration) || configuredDurations[0] || 5
+      const duration = configuredDurations.length
+        ? configuredDurations.reduce((best, value) => Math.abs(value - requestedDuration) < Math.abs(best - requestedDuration) ? value : best, configuredDurations[0])
+        : snapDuration(card.modelId, requestedDuration)
       const sentParams = {
         ...card.params,
-        aspect: (card.params?.aspect as string) || '16:9',
-        duration: snapDuration(card.modelId, Number(card.params?.duration) || 5)
+        aspect: (card.params?.aspect as string) || capabilities.aspects?.[0] || '16:9',
+        ...(capabilities.resolutions?.length ? { resolution: (card.params?.resolution as string) || capabilities.resolutions[0] } : {}),
+        duration
       }
       // videoAborts 在提交前注册（不早于入池）：排队态无取消器 → stopCard 走 canceledCards 早退
       const vctrl = new AbortController()

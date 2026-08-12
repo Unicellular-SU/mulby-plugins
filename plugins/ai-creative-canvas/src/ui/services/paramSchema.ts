@@ -1,4 +1,5 @@
 import type { Card } from '../types'
+import type { VideoProviderCapabilities } from './providers/types'
 
 // 声明式参数字段：image/video/audio/text 共用一套 Field + 单一渲染器（ParamControls）
 export type ParamField =
@@ -29,7 +30,7 @@ const CAMERA = [
   { value: '手持轻微晃动', label: '手持' }
 ]
 
-export function getParamSchema(card: Card): ParamField[] {
+export function getParamSchema(card: Card, videoCapabilities?: VideoProviderCapabilities): ParamField[] {
   switch (card.kind) {
     case 'image':
       return [
@@ -44,14 +45,36 @@ export function getParamSchema(card: Card): ParamField[] {
         { type: 'seed', key: 'seed' }
       ]
     case 'video':
-      return [
-        { type: 'select', key: 'aspect', width: 78, default: '16:9', options: ASPECTS },
+      {
+        // 未配置 Provider 时保留旧版通用参数；只有明确声明能力后才收窄选项。
+        const supportsImages = videoCapabilities ? videoCapabilities.imageToVideo !== false : true
+        const supportsLastFrame = videoCapabilities ? videoCapabilities.lastFrame !== false : true
+        const aspects = videoCapabilities?.aspects?.length
+          ? videoCapabilities.aspects.map((value) => ({ value, label: value }))
+          : ASPECTS
+        const fields: ParamField[] = [
+          { type: 'select', key: 'aspect', width: 78, default: aspects[0]?.value || '16:9', options: aspects },
+          ...(videoCapabilities?.resolutions?.length
+            ? [{ type: 'select' as const, key: 'resolution', width: 82, default: videoCapabilities.resolutions[0], options: videoCapabilities.resolutions.map((value) => ({ value, label: value })) }]
+            : []),
         { type: 'select', key: 'camera', width: 84, default: '', options: CAMERA },
         { type: 'select', key: 'motion', width: 88, default: '适中', options: [{ value: '轻微', label: '运动·轻微' }, { value: '适中', label: '运动·适中' }, { value: '强烈', label: '运动·强烈' }] },
-        { type: 'select', key: 'refMode', width: 100, default: 'omni', options: [{ value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }] },
+        ...(supportsImages
+          ? [{
+              type: 'select' as const,
+              key: 'refMode',
+              width: 100,
+              default: 'omni',
+              options: supportsLastFrame
+                ? [{ value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }]
+                : [{ value: 'omni', label: '参考·首帧' }]
+            }]
+          : []),
         { type: 'seed', key: 'seed' },
         { type: 'duration', key: 'duration' }
-      ]
+        ]
+        return fields
+      }
     case 'audio':
       return [
         { type: 'select', key: 'voice', width: 92, default: 'alloy', options: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].map((v) => ({ value: v, label: v })) },
