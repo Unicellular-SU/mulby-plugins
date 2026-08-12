@@ -7,6 +7,7 @@ import {
   MAX_UPLOAD_IMAGE_BYTES,
   aiImageArtifactExtension,
   decodedBase64ByteLength,
+  isLegacyImageResultTooLarge,
   isTextImportName,
   localImportExtension,
   localImportMime,
@@ -81,6 +82,10 @@ function testAiImageArtifactGuards() {
   assert.equal(aiImageArtifactExtension('image/jpeg'), 'jpg')
   assert.equal(aiImageArtifactExtension('image/svg+xml'), '')
   assert.equal(MAX_AI_IMAGE_ARTIFACTS, 4)
+  assert.equal(isLegacyImageResultTooLarge(Object.assign(new Error('opaque'), { code: 'legacy_result_too_large' })), true)
+  assert.equal(isLegacyImageResultTooLarge(new Error('Legacy Base64 image result exceeds the compatibility size limit')), true)
+  assert.equal(isLegacyImageResultTooLarge('Legacy Base64 image result exceeds the compatibility size limit'), true)
+  assert.equal(isLegacyImageResultTooLarge(new Error('provider failed')), false)
 }
 
 testImportMimeFallbacks()
@@ -88,4 +93,4 @@ testDroppedPathParsing()
 testRemoteUrlBoundary()
 testSizeGuards()
 testAiImageArtifactGuards()
-console.log('input/backend guards: 42 assertions OK')
+console.log('input/backend guards: 46 assertions OK')

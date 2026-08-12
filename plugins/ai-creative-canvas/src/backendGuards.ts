@@ -6,6 +6,7 @@ export const MAX_UPLOAD_IMAGE_BYTES = 50 * MB
 export const MAX_LOCAL_IMPORT_FILES = 64
 export const MAX_TEXT_IMPORT_BYTES = 5 * MB
 export const MAX_AI_IMAGE_ARTIFACTS = 4
+export const LEGACY_IMAGE_RESULT_TOO_LARGE_MESSAGE = 'Legacy Base64 image result exceeds the compatibility size limit'
 
 const IMPORT_MIME_BY_EXT: Record<string, string> = {
   png: 'image/png',
@@ -61,6 +62,18 @@ export function normalizeAiAttachmentId(value: unknown): string {
 
 export function aiImageArtifactExtension(mime: unknown): string {
   return AI_IMAGE_EXT_BY_MIME[String(mime || '').trim().toLowerCase()] || ''
+}
+
+/** contextBridge 可能只保留 Error.message，因此不能只依赖宿主附加的 code 字段。 */
+export function isLegacyImageResultTooLarge(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown } | null
+  if (candidate?.code === 'legacy_result_too_large') return true
+  const message = typeof candidate?.message === 'string'
+    ? candidate.message
+    : typeof error === 'string'
+      ? error
+      : ''
+  return message.includes(LEGACY_IMAGE_RESULT_TOO_LARGE_MESSAGE)
 }
 
 /** 远程 RPC 只允许 HTTP(S)，避免 data:/file:/ftp: 等协议把 host-worker 变成通用读取器。 */

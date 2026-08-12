@@ -5,6 +5,7 @@ import { useGraph } from '../store/graphStore'
 import { getStylePack, applyStylePack } from './stylePacks'
 import { toast } from '../store/toastStore'
 import { PLUGIN_ID } from './persistence'
+import { isLegacyImageResultTooLarge } from '../../backendGuards'
 
 function ai() {
   return window.mulby.ai
@@ -151,18 +152,44 @@ async function taskIdsFor(requestIds: string[]): Promise<string[]> {
 
 type ImageOperationError = Error & { code?: string; taskId?: string }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+/**
+ * 兼容 contextBridge 丢失 Error 自定义字段：用 facade 写入任务的 clientTag 反查 taskId。
+ * 错误事件与任务索引之间可能有极短延迟，因此做一次有界重试。
+ */
+async function taskIdForClientTag(clientTag: string): Promise<string> {
+  const tasks = (ai().images as ImageApiWithDiagnostics).tasks
+  if (!tasks || !clientTag) return ''
+  for (const waitMs of [0, 100, 300, 700]) {
+    if (waitMs) await delay(waitMs)
+    try {
+      const page = await tasks.list({ clientTag, limit: 1 })
+      const taskId = page.tasks?.[0]?.taskId
+      if (typeof taskId === 'string' && taskId.trim()) return taskId.trim()
+    } catch {
+      // 查询可能暂时不可用；继续有限重试，最后给出可理解的恢复错误。
+    }
+  }
+  return ''
+}
+
 /**
  * Mulby 新图片任务已把完整产物落盘；旧 generate/edit facade 只是在把大图转回 Base64 时失败。
  * 用 owner 隔离的 taskId 让插件后端核验并复制同一产物，不重新请求模型、不产生二次计费。
  */
 async function recoverOversizedLegacyResult(
   error: unknown,
+  clientTag: string,
   projectId: string,
   cardId: string
 ): Promise<{ taskId: string; outputs: Array<{ localPath: string; url: string; mime: string }> } | null> {
   const operationError = error as ImageOperationError
-  if (operationError?.code !== 'legacy_result_too_large') return null
-  const taskId = typeof operationError.taskId === 'string' ? operationError.taskId.trim() : ''
+  if (!isLegacyImageResultTooLarge(error)) return null
+  const directTaskId = typeof operationError?.taskId === 'string' ? operationError.taskId.trim() : ''
+  const taskId = directTaskId || await taskIdForClientTag(clientTag)
   if (!taskId) throw new Error('4K 图片已生成，但宿主未返回可恢复的任务 ID；请升级 Mulby 后重试')
   const host = window.mulby?.host
   if (!host?.call) throw new Error('4K 图片已生成，但当前 Mulby 后端桥接不可用')
@@ -251,7 +278,7 @@ export async function generateImage(
       })
       for (const base64 of res.images || []) outputs.push({ base64, mime: 'image/png' })
     } catch (error) {
-      const recovered = await recoverOversizedLegacyResult(error, useGraph.getState().project.id, card.id)
+      const recovered = await recoverOversizedLegacyResult(error, requestId, useGraph.getState().project.id, card.id)
       if (!recovered) throw error
       recoveredTaskIds.push(recovered.taskId)
       outputs.push(...recovered.outputs)
@@ -261,6 +288,7 @@ export async function generateImage(
     // 多图：逐张以 count=1 调用，避免向不支持 n>1 的模型（如 gpt-image-2）传 n 而报错
     let lastErr: any = null
     for (let k = 0; k < count; k++) {
+      let currentRequestId = ''
       try {
         const genReq: { model: string; prompt: string; size?: string; aspectRatio?: string; count?: number; seed?: number } = {
           model,
@@ -274,6 +302,7 @@ export async function generateImage(
           genReq,
           (chunk: any) => {
             if (chunk.__requestId) {
+              currentRequestId = chunk.__requestId
               rememberRequestId(chunk.__requestId)
               return
             }
@@ -289,7 +318,7 @@ export async function generateImage(
         if (res.images?.length) outputs.push({ base64: res.images[0], mime: 'image/png' })
       } catch (e) {
         try {
-          const recovered = await recoverOversizedLegacyResult(e, useGraph.getState().project.id, `${card.id}_${k}`)
+          const recovered = await recoverOversizedLegacyResult(e, currentRequestId, useGraph.getState().project.id, `${card.id}_${k}`)
           if (recovered) {
             recoveredTaskIds.push(recovered.taskId)
             outputs.push(...recovered.outputs)
