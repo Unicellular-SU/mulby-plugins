@@ -1,4 +1,10 @@
-import type { DirectorCam, DirectorShot } from '../types'
+import type {
+  DirectorCam,
+  DirectorShot,
+  DirectorShotSceneState,
+  DirectorShotSubjectState,
+  DirectorSubject
+} from '../types'
 
 export type DirectorInspectorTab = 'object' | 'character' | 'camera'
 
@@ -6,7 +12,16 @@ export const DIRECTOR_DEFAULT_SHOT_DURATION_MS = 4000
 export const DIRECTOR_MIN_SHOT_DURATION_MS = 500
 export const DIRECTOR_MAX_SHOT_DURATION_MS = 120000
 
-export type DirectorContinuityIssueCode = 'jump-cut' | 'axis-reversal' | 'focal-jump' | 'aspect-change' | 'lighting-change'
+export type DirectorContinuityIssueCode =
+  | 'jump-cut'
+  | 'axis-reversal'
+  | 'focal-jump'
+  | 'aspect-change'
+  | 'lighting-change'
+  | 'subject-position'
+  | 'subject-facing'
+  | 'subject-pose'
+  | 'subject-visibility'
 
 export interface DirectorContinuityIssue {
   code: DirectorContinuityIssueCode
@@ -45,6 +60,63 @@ const angleBetweenDegrees = (a: [number, number, number], b: [number, number, nu
   if (aLength < 1e-6 || bLength < 1e-6) return 0
   const cosine = Math.max(-1, Math.min(1, (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (aLength * bLength)))
   return Math.acos(cosine) * 180 / Math.PI
+}
+
+const angleDeltaDegrees = (a: number, b: number) => {
+  const delta = Math.abs((a - b) * 180 / Math.PI) % 360
+  return delta > 180 ? 360 - delta : delta
+}
+
+const stateLabel = (state: DirectorShotSubjectState) => state.name?.trim() || state.subjectId
+
+function analyzeDirectorSubjectContinuity(previous: DirectorShot, current: DirectorShot): DirectorContinuityIssue[] {
+  if (!previous.sceneState?.subjects.length || !current.sceneState?.subjects.length) return []
+  const issues: DirectorContinuityIssue[] = []
+  const previousById = new Map(previous.sceneState.subjects.map((state) => [state.subjectId, state]))
+  for (const state of current.sceneState.subjects) {
+    const before = previousById.get(state.subjectId)
+    if (!before) continue
+    const label = stateLabel(state)
+    const positionDelta = vectorDistance(before.pos, state.pos)
+    if (positionDelta >= 1.5) {
+      issues.push({
+        code: 'subject-position',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的位置变化 ${positionDelta.toFixed(1)}m，检查走位是否连续`
+      })
+    }
+    const facingDelta = angleDeltaDegrees(before.rot[1], state.rot[1])
+    if (facingDelta >= 120) {
+      issues.push({
+        code: 'subject-facing',
+        severity: 'warning',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的朝向变化约 ${Math.round(facingDelta)}°，检查视线和动作衔接`
+      })
+    }
+    if (before.poseName && state.poseName && before.poseName !== state.poseName) {
+      issues.push({
+        code: 'subject-pose',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 的姿势从“${before.poseName}”变为“${state.poseName}”`
+      })
+    }
+    if ((before.visible !== false) !== (state.visible !== false)) {
+      issues.push({
+        code: 'subject-visibility',
+        severity: 'info',
+        fromId: previous.id,
+        toId: current.id,
+        message: `${label} 在相邻镜头间${state.visible === false ? '离场' : '入场'}`
+      })
+    }
+  }
+  return issues
 }
 
 export function analyzeDirectorShotContinuity(shots: DirectorShot[]): DirectorContinuityIssue[] {
@@ -110,6 +182,7 @@ export function analyzeDirectorShotContinuity(shots: DirectorShot[]): DirectorCo
         message: `灯光从“${previous.lighting}”变为“${current.lighting}”`
       })
     }
+    issues.push(...analyzeDirectorSubjectContinuity(previous, current))
   }
   return issues
 }
@@ -186,6 +259,78 @@ export function resolveDirectorShotCamera(
     target: addVector(subjectPosition, shot.targetOffset),
     focal: shot.cam.focal
   }
+}
+
+const cloneTuple = (value: [number, number, number]): [number, number, number] => [...value]
+const cloneScale = (value: number | [number, number, number]): number | [number, number, number] =>
+  Array.isArray(value) ? [...value] : value
+const cloneJoints = (joints?: Record<string, [number, number, number]>) => joints
+  ? Object.fromEntries(Object.entries(joints).map(([name, rotation]) => [name, cloneTuple(rotation)]))
+  : undefined
+
+export function createDirectorShotSceneState(subjects: DirectorSubject[]): DirectorShotSceneState {
+  return {
+    subjects: subjects.flatMap((subject): DirectorShotSubjectState[] => {
+      if (!subject.id) return []
+      return [{
+        subjectId: subject.id,
+        name: subject.name,
+        kind: subject.kind,
+        pos: cloneTuple(subject.pos),
+        rot: cloneTuple(subject.rot),
+        scale: cloneScale(subject.scale),
+        joints: cloneJoints(subject.joints),
+        poseName: subject.poseName,
+        poseSchemaVersion: subject.poseSchemaVersion,
+        poseOffsetY: subject.poseOffsetY,
+        bodyType: subject.bodyType,
+        visible: subject.visible !== false
+      }]
+    })
+  }
+}
+
+export function applyDirectorShotSceneState(
+  subjects: DirectorSubject[],
+  sceneState?: DirectorShotSceneState | null
+): DirectorSubject[] {
+  if (!sceneState) return subjects.map((subject) => ({ ...subject }))
+  const states = new Map(sceneState.subjects.map((state) => [state.subjectId, state]))
+  return subjects.map((subject) => {
+    const state = subject.id ? states.get(subject.id) : undefined
+    if (!state) return { ...subject }
+    return {
+      ...subject,
+      pos: cloneTuple(state.pos),
+      rot: cloneTuple(state.rot),
+      scale: cloneScale(state.scale),
+      joints: cloneJoints(state.joints),
+      poseName: state.poseName,
+      poseSchemaVersion: state.poseSchemaVersion,
+      poseOffsetY: state.poseOffsetY,
+      bodyType: state.bodyType || subject.bodyType,
+      visible: state.visible !== false
+    }
+  })
+}
+
+export function removeDirectorSubjectFromShots(shots: DirectorShot[], subjectId: string): DirectorShot[] {
+  let changed = false
+  const next = shots.map((shot) => {
+    const clearsTarget = shot.targetSubjectId === subjectId
+    const subjects = shot.sceneState?.subjects.filter((state) => state.subjectId !== subjectId)
+    const removesState = !!shot.sceneState && subjects!.length !== shot.sceneState.subjects.length
+    if (!clearsTarget && !removesState) return shot
+    changed = true
+    return {
+      ...shot,
+      targetSubjectId: clearsTarget ? undefined : shot.targetSubjectId,
+      targetOffset: clearsTarget ? undefined : shot.targetOffset,
+      cameraOffset: clearsTarget ? undefined : shot.cameraOffset,
+      sceneState: shot.sceneState ? { subjects: subjects! } : undefined
+    }
+  })
+  return changed ? next : shots
 }
 
 export function reorderDirectorShots(shots: DirectorShot[], draggedId: string, targetId: string): DirectorShot[] {

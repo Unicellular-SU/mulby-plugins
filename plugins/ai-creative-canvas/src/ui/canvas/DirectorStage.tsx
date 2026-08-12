@@ -3,7 +3,7 @@ import { X, Loader2, Film, User, Box as BoxIcon, Move, Rotate3d, Maximize, Hand,
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { toast } from '../store/toastStore'
-import { saveBase64 } from '../services/media'
+import { loadImageInput, saveBase64 } from '../services/media'
 import { uid, isImeComposing } from '../util'
 import {
   DIRECTOR_BODY_GROUPS,
@@ -21,6 +21,7 @@ import { DirectorShotInspector } from './DirectorShotInspector'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
+import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from './directorCanvasPanorama'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from './directorCameraPresets'
 import { solveDirectorCcdIk } from './directorIk'
 import {
@@ -31,12 +32,15 @@ import {
 } from './directorPoseTools'
 import {
   analyzeDirectorShotContinuity,
+  applyDirectorShotSceneState,
   classifyDirectorShot,
+  createDirectorShotSceneState,
   createDirectorShotSnapshot,
   createDirectorShotTargetBinding,
   getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
   normalizeDirectorShotDuration,
+  removeDirectorSubjectFromShots,
   reorderDirectorShots,
   resolveDirectorShotCamera,
   type DirectorInspectorTab
@@ -45,6 +49,7 @@ import {
   collectDirectorSceneAssetIds,
   createDirectorSceneExchangeBundle,
   decodeDirectorSceneBase64,
+  DIRECTOR_SCENE_ASSET_LIMIT_BYTES,
   encodeDirectorSceneBytes,
   parseDirectorSceneExchange,
   remapDirectorSceneAssetIds
@@ -138,6 +143,7 @@ const MIXAMO_MAP: { suf: string; joint: string }[] = [
 ]
 
 type TMode = 'translate' | 'rotate' | 'scale' | 'pose'
+type ShotApplyMode = 'full' | 'camera'
 
 export function DirectorStage() {
   const show = useUi((s) => s.showDirector)
@@ -168,6 +174,7 @@ function Inner({ onReload }: { onReload: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const environmentFileRef = useRef<HTMLInputElement>(null)
   const sceneFileRef = useRef<HTMLInputElement>(null)
+  const shotApplyLockRef = useRef(false)
   const api = useRef<any>({})
   const [ready, setReady] = useState(false)
   const [focal, setFocal] = useState(35)
@@ -192,6 +199,8 @@ function Inner({ onReload }: { onReload: () => void }) {
   const [showShotCameras, setShowShotCameras] = useState(true)
   const [environment, setEnvironment] = useState<DirectorEnvironment | null>(null)
   const [sceneIoBusy, setSceneIoBusy] = useState(false)
+  const [canvasPanoramaLoadingId, setCanvasPanoramaLoadingId] = useState<string | null>(null)
+  const [shotApplyingId, setShotApplyingId] = useState<string | null>(null)
   const [inspectorTab, setInspectorTab] = useState<DirectorInspectorTab>('camera')
   const [bodyLoading, setBodyLoading] = useState<DirectorBodyType | null>(null)
   const [posePreviews, setPosePreviews] = useState<Record<string, string>>({})
@@ -208,6 +217,8 @@ function Inner({ onReload }: { onReload: () => void }) {
   const [descDraft, setDescDraft] = useState('') // 选中对象的语义描述草稿（blur 提交）
   const [ctrlType, setCtrlType] = useState<'depth' | 'pose'>('depth')
   const hasControlModel = useGraph((s) => !!s.project.defaultControlModel)
+  const activeBoard = useGraph((s) => s.project.boards.find((board) => board.id === s.project.activeBoardId))
+  const canvasPanoramas = listDirectorCanvasPanoramas(activeBoard)
 
   const buildSceneSnapshot = (): DirectorScene | null => {
     try {
@@ -232,7 +243,7 @@ function Inner({ onReload }: { onReload: () => void }) {
     if (scene) useGraph.getState().setDirectorScene(scene)
   }
   const close = () => {
-    if (busy || sceneIoBusy) return
+    if (busy || sceneIoBusy || shotApplyingId || shotApplyLockRef.current) return
     saveScene()
     useUi.getState().setShowDirector(false)
   }
@@ -415,8 +426,8 @@ function Inner({ onReload }: { onReload: () => void }) {
           syncHistoryUi()
           if (!disposed) setSceneRevision((value) => value + 1)
         }
-        const applyState = (state: any) => {
-          if (!state) return
+        const applyState = (state: any): Promise<void> => {
+          if (!state) return Promise.resolve()
           restoring = true
           sceneGen++
           tcontrol.detach(); curRoot = null
@@ -434,12 +445,14 @@ function Inner({ onReload }: { onReload: () => void }) {
             if (state.cam) setFocal(Math.round(state.cam.focal || 35))
           }
           // 异步模型到齐后才解除 restoring（期间抑制 commit，避免快照漏模型 / 与现场脱节）
-          void Promise.all(ps).then(() => { restoring = false; if (!disposed) sync() })
+          return Promise.all(ps)
+            .then(() => { if (!disposed) sync() })
+            .finally(() => { restoring = false })
         }
         const undo = () => {
           if (restoring || history.length <= 1) return
           redoStack.push(history.pop())
-          applyState(history[history.length - 1])
+          void applyState(history[history.length - 1])
           syncHistoryUi()
         }
         const redoFn = () => {
@@ -447,7 +460,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           const s = redoStack.pop()
           if (!s) return
           history.push(s)
-          applyState(s)
+          void applyState(s)
           syncHistoryUi()
         }
 
@@ -1219,15 +1232,25 @@ function Inner({ onReload }: { onReload: () => void }) {
           scene.background = texture
           setEnvironmentRotation(curEnvironment.rotation || 0)
         }
-        const importEnvironmentFile = async (arrayBuffer: ArrayBuffer, name: string, mimeType: string) => {
+        const importEnvironmentFile = async (
+          arrayBuffer: ArrayBuffer,
+          name: string,
+          mimeType: string,
+          metadata: Pick<DirectorEnvironment, 'description' | 'source' | 'sourceCardId'> = {}
+        ) => {
           if (!/^image\/(jpe?g|png|webp)$/i.test(mimeType)) throw new Error('仅支持 JPG、PNG 或 WebP 全景图')
           const assetId = uid('director-env')
           const result = await attachStore()?.put?.(assetId, arrayBuffer, mimeType)
           const stored = result === true || !!(result && (result as any).ok)
           if (!stored) throw new Error('全景图存储失败，文件可能超过 50MB')
           const previousId = curEnvironment?.assetId
+          const safeMetadata: Pick<DirectorEnvironment, 'description' | 'source' | 'sourceCardId'> = {
+            source: metadata.source,
+            sourceCardId: metadata.sourceCardId?.slice(0, 160),
+            description: metadata.description?.trim().slice(0, 1000) || undefined
+          }
           try {
-            await loadEnvironmentState({ assetId, name: name.slice(0, 160), mimeType, rotation: 0 }, true)
+            await loadEnvironmentState({ assetId, name: name.slice(0, 160), mimeType, rotation: 0, ...safeMetadata }, true)
             if (previousId && previousId !== assetId) await attachStore()?.remove?.(previousId)
           } catch (error) {
             try { await attachStore()?.remove?.(assetId) } catch { /* ignore cleanup failure */ }
@@ -1322,6 +1345,12 @@ function Inner({ onReload }: { onReload: () => void }) {
         }
         const resolveShotCam = (shot: DirectorShot) => resolveDirectorShotCamera(
           shot,
+          shot.targetSubjectId
+            ? shot.sceneState?.subjects.find((state) => state.subjectId === shot.targetSubjectId)?.pos || getSubjectPosition(shot.targetSubjectId)
+            : null
+        )
+        const resolveShotCamAgainstCurrentScene = (shot: DirectorShot) => resolveDirectorShotCamera(
+          shot,
           shot.targetSubjectId ? getSubjectPosition(shot.targetSubjectId) : null
         )
         resolveRecordedShotCam = resolveShotCam
@@ -1332,6 +1361,7 @@ function Inner({ onReload }: { onReload: () => void }) {
           scene.remove(sub.obj)
           disposeTree(sub.obj)
           subjects.splice(subjects.indexOf(sub), 1)
+          if (!disposed) setShots((current) => removeDirectorSubjectFromShots(current, id))
           sync()
           if (curRoot === null && !disposed) { setSelId(null); setSelKind(null) }
           if (curRoot === null && !disposed) setTransformDraft(null)
@@ -1949,7 +1979,9 @@ function Inner({ onReload }: { onReload: () => void }) {
             }
           }
           // 撤销栈种子：等异步导入模型全部到齐后再快照（否则种子漏模型，undo 回种子会丢模型）
-          void Promise.all(ps).then(() => { restoring = false; if (!disposed) { sync(); commit() } })
+          void Promise.all(ps)
+            .then(() => { if (!disposed) { sync(); commit() } })
+            .finally(() => { restoring = false })
         } else {
           addMannequin() // addSubject 内已 commit 种子
         }
@@ -2173,9 +2205,26 @@ function Inner({ onReload }: { onReload: () => void }) {
           getCam,
           applyCam,
           resolveShotCamera: resolveShotCam,
-          createShotTargetBinding: (targetSubjectId: string, cameraState: any = getCam()) => {
-            const position = getSubjectPosition(targetSubjectId)
+          resolveShotCameraAgainstCurrentScene: resolveShotCamAgainstCurrentScene,
+          createShotTargetBinding: (targetSubjectId: string, cameraState: any = getCam(), positionOverride?: [number, number, number]) => {
+            const position = positionOverride || getSubjectPosition(targetSubjectId)
             return position ? createDirectorShotTargetBinding(cameraState, targetSubjectId, position) : null
+          },
+          captureShotSceneState: () => createDirectorShotSceneState(serializeSceneOnly().subjects),
+          applyShotSceneState: async (sceneState: DirectorShot['sceneState'], cameraState: any) => {
+            if (!sceneState) { applyCam(cameraState); return }
+            const bodyTypes = new Set<DirectorBodyType>()
+            for (const state of sceneState.subjects) {
+              if (state.kind === '人台' && state.bodyType) bodyTypes.add(getDirectorBodyPreset(state.bodyType).bodyType)
+            }
+            await Promise.all([...bodyTypes].map((bodyType) => ensureDirectorTemplate(bodyType)))
+            if (disposed) return
+            const current = serializeSceneOnly()
+            await applyState({
+              subjects: applyDirectorShotSceneState(current.subjects, sceneState),
+              cam: cameraState
+            })
+            if (!disposed) commit()
           },
           serializeSceneOnly,
           shotFragment,
@@ -2295,7 +2344,7 @@ function Inner({ onReload }: { onReload: () => void }) {
   }, [ready, shots, activeShotId, showShotCameras, sceneRevision])
   useEffect(() => {
     if (!ready || !activeShot?.targetSubjectId) return
-    const resolvedCam = api.current.resolveShotCamera?.(activeShot)
+    const resolvedCam = api.current.resolveShotCameraAgainstCurrentScene?.(activeShot)
     if (!resolvedCam) return
     api.current.applyCam?.(resolvedCam)
     setFocal(Math.round(resolvedCam.focal || 35))
@@ -2384,15 +2433,39 @@ function Inner({ onReload }: { onReload: () => void }) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
+    if (file.size > DIRECTOR_SCENE_ASSET_LIMIT_BYTES) { toast('全景图超过 50MB 上限', 'error'); return }
     setSceneIoBusy(true)
     try {
       const extensionMime = /\.png$/i.test(file.name) ? 'image/png' : /\.webp$/i.test(file.name) ? 'image/webp' : 'image/jpeg'
-      await api.current.importEnvironmentFile?.(await file.arrayBuffer(), file.name, file.type || extensionMime)
+      await api.current.importEnvironmentFile?.(await file.arrayBuffer(), file.name, file.type || extensionMime, { source: 'local' })
       saveScene()
       toast('全景环境已载入', 'success')
     } catch (error: any) {
       toast('全景环境导入失败：' + (error?.message || String(error)), 'error')
     } finally {
+      setSceneIoBusy(false)
+    }
+  }
+  const importCanvasPanorama = async (cardId: string) => {
+    const source = canvasPanoramas.find((item) => item.id === cardId)
+    if (!source) { toast('所选 AI 全景已不在当前画布', 'error'); return }
+    setCanvasPanoramaLoadingId(cardId)
+    setSceneIoBusy(true)
+    try {
+      const bytes = await loadImageInput({ url: source.assetUrl, localPath: source.assetLocalPath })
+      if (!bytes) throw new Error('无法读取全景媒体，请确认源卡片文件仍然存在')
+      if (bytes.byteLength > DIRECTOR_SCENE_ASSET_LIMIT_BYTES) throw new Error('全景图超过 50MB 上限')
+      await api.current.importEnvironmentFile?.(bytes, source.title, inferDirectorPanoramaMime(source), {
+        source: 'canvas',
+        sourceCardId: source.id,
+        description: source.description
+      })
+      saveScene()
+      toast(`已从当前画布载入全景：${source.title}`, 'success')
+    } catch (error: any) {
+      toast('画布全景导入失败：' + (error?.message || String(error)), 'error')
+    } finally {
+      setCanvasPanoramaLoadingId(null)
       setSceneIoBusy(false)
     }
   }
@@ -2594,7 +2667,7 @@ function Inner({ onReload }: { onReload: () => void }) {
   const genShot = async (i: number): Promise<boolean> => {
     const shot = shots[i]
     if (!shot) return false
-    applyShot(shot)
+    if (!(await applyShot(shot, 'full'))) return false
     const url = await doGenerate(i, shot.aspect || aspect, shot.notes || '')
     if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
     return false
@@ -2625,28 +2698,45 @@ function Inner({ onReload }: { onReload: () => void }) {
     const thumb = api.current.captureThumb?.()
     const id = uid('shot')
     const targetBinding = selId ? api.current.createShotTargetBinding?.(selId, cam) : null
+    const sceneState = api.current.captureShotSceneState?.()
     setShots((current) => [
       ...current,
       {
         ...createDirectorShotSnapshot({ id, name: `机位${current.length + 1}`, cam, thumb, aspect, lighting: api.current.getLighting?.() || lighting }),
+        sceneState,
         ...(targetBinding || {})
       }
     ])
     setActiveShotId(id)
     setInspectorTab('camera')
   }
-  const applyShot = (shot: DirectorShot) => {
-    const resolvedCam = api.current.resolveShotCamera?.(shot) || shot.cam
-    api.current.clearSelection?.()
-    api.current.applyCam?.(resolvedCam)
-    setFocal(Math.round(resolvedCam?.focal || 35))
-    if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
-    if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
-      setLighting(shot.lighting)
-      api.current.setLighting?.(shot.lighting)
-    }
+  const applyShot = async (shot: DirectorShot, applyMode: ShotApplyMode = 'full'): Promise<boolean> => {
+    if (shotApplyLockRef.current) return false
+    shotApplyLockRef.current = true
+    setShotApplyingId(shot.id)
     setActiveShotId(shot.id)
     setInspectorTab('camera')
+    try {
+      const resolvedCam = applyMode === 'full'
+        ? api.current.resolveShotCamera?.(shot) || shot.cam
+        : api.current.resolveShotCameraAgainstCurrentScene?.(shot) || shot.cam
+      api.current.clearSelection?.()
+      if (applyMode === 'full' && shot.sceneState) await api.current.applyShotSceneState?.(shot.sceneState, resolvedCam)
+      else api.current.applyCam?.(resolvedCam)
+      setFocal(Math.round(resolvedCam?.focal || 35))
+      if (shot.aspect && ASPECTS.some((item) => item.k === shot.aspect)) onAspect(shot.aspect)
+      if (shot.lighting && LIGHTINGS.some((item) => item.k === shot.lighting)) {
+        setLighting(shot.lighting)
+        api.current.setLighting?.(shot.lighting)
+      }
+      return true
+    } catch (error: any) {
+      toast('镜头状态应用失败：' + (error?.message || String(error)), 'error')
+      return false
+    } finally {
+      shotApplyLockRef.current = false
+      setShotApplyingId(null)
+    }
   }
   const duplicateShot = (id: string) => {
     setShots((current) => {
@@ -2670,11 +2760,12 @@ function Inner({ onReload }: { onReload: () => void }) {
       if (shot.id !== activeShotId) return shot
       if (!targetSubjectId) return { ...shot, targetSubjectId: undefined, targetOffset: undefined, cameraOffset: undefined }
       const resolvedCam = api.current.resolveShotCamera?.(shot) || shot.cam
-      const binding = api.current.createShotTargetBinding?.(targetSubjectId, resolvedCam)
+      const targetStatePosition = shot.sceneState?.subjects.find((state) => state.subjectId === targetSubjectId)?.pos
+      const binding = api.current.createShotTargetBinding?.(targetSubjectId, resolvedCam, targetStatePosition)
       return binding ? { ...shot, cam: resolvedCam, ...binding } : shot
     }))
   }
-  const refreshActiveShot = () => {
+  const refreshActiveShot = (refreshMode: ShotApplyMode = 'full') => {
     if (!activeShotId) return
     const cam = api.current.getCam?.()
     if (!cam) return
@@ -2689,10 +2780,11 @@ function Inner({ onReload }: { onReload: () => void }) {
           aspect,
           lighting: api.current.getLighting?.() || lighting,
           shotType: classifyDirectorShot(cam),
+          sceneState: refreshMode === 'full' ? api.current.captureShotSceneState?.() : shot.sceneState,
           ...(binding || {})
         }
     }))
-    toast('已用当前构图更新机位', 'success')
+    toast(refreshMode === 'full' ? '已更新机位和演员调度' : '已更新机位，保留原演员调度', 'success')
   }
   const reorderShots = (draggedId: string, targetId: string) => setShots((current) => reorderDirectorShots(current, draggedId, targetId))
   const delShot = (id: string) => {
@@ -2891,8 +2983,8 @@ function Inner({ onReload }: { onReload: () => void }) {
             <span className="sr-only">{panelsCollapsed ? '展开对象树与检查器' : '收起侧栏，专注取景'}</span>
           </Btn>
           <div className="w-px h-5 bg-white/10" />
-          <Btn onClick={() => sceneFileRef.current?.click()} disabled={sceneIoBusy || busy} title="导入便携导演工程 JSON"><FileUp size={13} /> 导入</Btn>
-          <Btn onClick={() => { void exportDirectorScene() }} disabled={sceneIoBusy || busy} title="导出便携导演工程 JSON，包含模型与全景附件"><Download size={13} /> 导出</Btn>
+          <Btn onClick={() => sceneFileRef.current?.click()} disabled={sceneIoBusy || busy || !!shotApplyingId} title="导入便携导演工程 JSON"><FileUp size={13} /> 导入</Btn>
+          <Btn onClick={() => { void exportDirectorScene() }} disabled={sceneIoBusy || busy || !!shotApplyingId} title="导出便携导演工程 JSON，包含模型与全景附件"><Download size={13} /> 导出</Btn>
           <div className="w-px h-5 bg-white/10" />
           <button onClick={() => api.current.undo?.()} disabled={!canUndo} title="撤销 (Ctrl+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Undo2 size={13} /></button>
           <button onClick={() => api.current.redo?.()} disabled={!canRedo} title="重做 (Ctrl+Shift+Z)" className="p-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-30 transition-colors"><Redo2 size={13} /></button>
@@ -3152,9 +3244,13 @@ function Inner({ onReload }: { onReload: () => void }) {
                   issues={activeShotIssues}
                   showCameraHelpers={showShotCameras}
                   targetSubjects={objs.map((item) => ({ id: item.id, name: item.name, kind: item.kind }))}
+                  applying={shotApplyingId === activeShot?.id}
                   onChange={updateActiveShot}
                   onTargetChange={setActiveShotTarget}
-                  onRefresh={refreshActiveShot}
+                  onApplyFull={() => { if (activeShot) void applyShot(activeShot, 'full') }}
+                  onApplyCamera={() => { if (activeShot) void applyShot(activeShot, 'camera') }}
+                  onRefreshFull={() => refreshActiveShot('full')}
+                  onRefreshCamera={() => refreshActiveShot('camera')}
                   onToggleCameraHelpers={() => setShowShotCameras((value) => !value)}
                 />
                 <div className="flex items-center justify-between">
@@ -3205,8 +3301,11 @@ function Inner({ onReload }: { onReload: () => void }) {
                 </div>
                 <DirectorEnvironmentPanel
                   environment={environment}
-                  busy={sceneIoBusy}
+                  busy={sceneIoBusy || !!shotApplyingId}
+                  canvasPanoramas={canvasPanoramas}
+                  canvasLoadingId={canvasPanoramaLoadingId}
                   onImport={() => environmentFileRef.current?.click()}
+                  onImportCanvas={(cardId) => { void importCanvasPanorama(cardId) }}
                   onClear={() => {
                     setSceneIoBusy(true)
                     void Promise.resolve(api.current.clearEnvironment?.()).then(() => {
@@ -3245,7 +3344,8 @@ function Inner({ onReload }: { onReload: () => void }) {
           shots={shots}
           activeShotId={activeShotId}
           expanded={shotStripExpanded}
-          busy={busy}
+          busy={busy || !!shotApplyingId}
+          applyingShotId={shotApplyingId}
           totalDurationMs={shotsDurationMs}
           continuityIssues={shotContinuityIssues}
           onToggle={() => setShotStripExpanded((value) => !value)}

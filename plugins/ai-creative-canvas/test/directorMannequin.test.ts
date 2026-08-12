@@ -13,17 +13,20 @@ import {
 import { DirectorAsyncResourceCache } from '../src/ui/canvas/directorAssetCache.ts'
 import {
   analyzeDirectorShotContinuity,
+  applyDirectorShotSceneState,
   classifyDirectorShot,
+  createDirectorShotSceneState,
   createDirectorShotSnapshot,
   createDirectorShotTargetBinding,
   formatDirectorDuration,
   getDirectorShotsDurationMs,
   inferDirectorInspectorTab,
   normalizeDirectorShotDuration,
+  removeDirectorSubjectFromShots,
   reorderDirectorShots,
   resolveDirectorShotCamera
 } from '../src/ui/canvas/directorWorkflow.ts'
-import type { DirectorCam, DirectorScene } from '../src/ui/types.ts'
+import type { DirectorCam, DirectorScene, DirectorShot, DirectorSubject } from '../src/ui/types.ts'
 import {
   collectDirectorSceneAssetIds,
   createDirectorSceneExchangeBundle,
@@ -33,6 +36,7 @@ import {
   parseDirectorSceneExchange,
   remapDirectorSceneAssetIds
 } from '../src/ui/canvas/directorSceneExchange.ts'
+import { inferDirectorPanoramaMime, listDirectorCanvasPanoramas } from '../src/ui/canvas/directorCanvasPanorama.ts'
 import { Object3D, Vector3 } from 'three'
 import { createDirectorPresetCamera, DIRECTOR_CAMERA_PRESETS } from '../src/ui/canvas/directorCameraPresets.ts'
 import { solveDirectorCcdIk } from '../src/ui/canvas/directorIk.ts'
@@ -222,14 +226,31 @@ function testDirectorSceneExchange() {
       cam: { pos: [0, 1.5, 4], target: [0, 1, 0], focal: 35 },
       targetSubjectId: 'hero',
       targetOffset: [-1, 1, -2],
-      cameraOffset: [-1, 1.5, 2]
+      cameraOffset: [-1, 1.5, 2],
+      sceneState: {
+        subjects: [{
+          subjectId: 'hero',
+          name: '主角',
+          kind: '人台',
+          pos: [1, 0, 2],
+          rot: [0, Math.PI, 0],
+          scale: [1, 1, 1],
+          bodyType: 'female',
+          poseName: '双膝跪',
+          visible: true
+        }]
+      }
     }],
-    environment: { assetId: 'pano', description: '雨夜街道', rotation: 999 }
+    environment: { assetId: 'pano', description: '雨夜街道', rotation: 999, source: 'canvas', sourceCardId: 'pano-card' }
   }
   const scene = normalizeDirectorScene(raw)
   assert.deepEqual(scene.subjects.map((subject) => subject.id), ['hero', 'hero-2', 'subject-3'])
   assert.equal(scene.shots[0].targetSubjectId, 'hero')
+  assert.equal(scene.shots[0].sceneState?.subjects[0].bodyType, 'female')
+  assert.equal(scene.shots[0].sceneState?.subjects[0].poseName, '双膝跪')
   assert.equal(scene.environment?.rotation, 180)
+  assert.equal(scene.environment?.source, 'canvas')
+  assert.equal(scene.environment?.sourceCardId, 'pano-card')
   assert.equal(scene.schemaVersion, 2)
 
   const withAssets: DirectorScene = {
@@ -248,6 +269,97 @@ function testDirectorSceneExchange() {
   assert.equal(parseDirectorSceneExchange(raw).assets.length, 0, '旧版裸场景 JSON 应继续可导入')
   assert.throws(() => createDirectorSceneExchangeBundle(scene, [...assets, ...assets]), /重复/)
   assert.throws(() => normalizeDirectorScene({ ...raw, subjects: [{ kind: '灯光' }] }), /类型无效/)
+  assert.throws(() => normalizeDirectorScene({
+    ...raw,
+    shots: [{ ...raw.shots[0], sceneState: { subjects: Array.from({ length: 201 }, () => raw.shots[0].sceneState.subjects[0]) } }]
+  }), /对象调度超过 200/)
+}
+
+function testDirectorShotSceneState() {
+  const subjects: DirectorSubject[] = [
+    {
+      id: 'hero',
+      kind: '人台',
+      name: '主角',
+      desc: '穿灰色外套',
+      pos: [0, 0, 0],
+      rot: [0, 0, 0],
+      scale: [1, 1, 1],
+      bodyType: 'female',
+      poseName: '站立',
+      poseSchemaVersion: 2,
+      poseOffsetY: 0,
+      joints: { 头: [0.1, 0, 0] },
+      visible: true,
+      locked: true
+    },
+    { id: 'table', kind: '道具', name: '桌子', pos: [1, 0, 0], rot: [0, 0, 0], scale: 1, visible: true }
+  ]
+  const state = createDirectorShotSceneState(subjects)
+  assert.equal(state.subjects.length, 2)
+  subjects[0].pos[0] = 99
+  subjects[0].joints!.头[0] = 99
+  assert.deepEqual(state.subjects[0].pos, [0, 0, 0], '快照必须与后续运行时变换隔离')
+  assert.deepEqual(state.subjects[0].joints?.头, [0.1, 0, 0], '关节快照必须深拷贝')
+
+  const current: DirectorSubject[] = [
+    { ...subjects[0], pos: [4, 0, 2], rot: [0, Math.PI, 0], desc: '更新后的角色描述', bodyType: 'seniorFemale', locked: false },
+    { ...subjects[1], pos: [8, 0, 0], visible: false },
+    { id: 'new-prop', kind: '道具', name: '后来添加的灯', pos: [0, 2, 0], rot: [0, 0, 0], scale: 1 }
+  ]
+  const restored = applyDirectorShotSceneState(current, state)
+  assert.deepEqual(restored[0].pos, [0, 0, 0])
+  assert.equal(restored[0].bodyType, 'female')
+  assert.equal(restored[0].desc, '更新后的角色描述', '镜头调度不应覆盖全局语义描述')
+  assert.equal(restored[0].locked, false, '镜头调度不应覆盖编辑锁定状态')
+  assert.deepEqual(restored[1].pos, [1, 0, 0])
+  assert.equal(restored[1].visible, true)
+  assert.deepEqual(restored[2], current[2], '拍摄后新增的对象应保留当前状态')
+
+  const cam: DirectorCam = { pos: [0, 1.5, 2.6], target: [0, 1, 0], focal: 35 }
+  const previous: DirectorShot = { id: 'a', name: '前镜头', cam, sceneState: state }
+  const changedState = createDirectorShotSceneState(restored)
+  changedState.subjects[0] = {
+    ...changedState.subjects[0],
+    pos: [3, 0, 0],
+    rot: [0, Math.PI, 0],
+    poseName: '奔跑',
+    visible: false
+  }
+  const currentShot: DirectorShot = { id: 'b', name: '后镜头', cam: { ...cam, pos: [2.5, 1.5, 2.6] }, sceneState: changedState }
+  const issues = analyzeDirectorShotContinuity([previous, currentShot])
+  for (const code of ['subject-position', 'subject-facing', 'subject-pose', 'subject-visibility']) {
+    assert.ok(issues.some((issue) => issue.code === code), `连续性检查应报告 ${code}`)
+  }
+
+  const tracked: DirectorShot = {
+    ...previous,
+    targetSubjectId: 'hero',
+    targetOffset: [0, 1, 0],
+    cameraOffset: [0, 1.5, 3]
+  }
+  const pruned = removeDirectorSubjectFromShots([tracked], 'hero')
+  assert.equal(pruned[0].targetSubjectId, undefined)
+  assert.equal(pruned[0].sceneState?.subjects.some((item) => item.subjectId === 'hero'), false)
+  assert.equal(removeDirectorSubjectFromShots(pruned, 'missing'), pruned, '无匹配对象时应保持数组引用')
+}
+
+function testDirectorCanvasPanoramas() {
+  const board: any = {
+    cards: {
+      later: { id: 'later', kind: 'pano', status: 'done', title: '山谷', prompt: '清晨山谷', assetUrl: 'file:///valley.webp', assetLocalPath: '/valley.webp', mime: 'image/webp', x: 10, y: 20 },
+      first: { id: 'first', kind: 'pano', status: 'done', title: '城市', prompt: '雨夜城市', assetUrl: 'file:///city.png', x: 30, y: 10 },
+      running: { id: 'running', kind: 'pano', status: 'running', title: '生成中', assetUrl: 'blob:preview', x: 0, y: 0 },
+      image: { id: 'image', kind: 'image', status: 'done', title: '普通图片', assetUrl: 'file:///image.png', x: 0, y: 0 }
+    }
+  }
+  const panoramas = listDirectorCanvasPanoramas(board)
+  assert.deepEqual(panoramas.map((item) => item.id), ['first', 'later'])
+  assert.equal(panoramas[0].description, '雨夜城市')
+  assert.equal(inferDirectorPanoramaMime(panoramas[0]), 'image/png')
+  assert.equal(inferDirectorPanoramaMime(panoramas[1]), 'image/webp')
+  assert.equal(inferDirectorPanoramaMime({ assetUrl: 'https://example.com/pano.jpg?token=1' }), 'image/jpeg')
+  assert.deepEqual(listDirectorCanvasPanoramas(null), [])
 }
 
 function testDirectorPoseTools() {
@@ -313,8 +425,10 @@ testNativeBodyAssets()
 testPosePresets()
 testDirectorWorkflow()
 testDirectorSceneExchange()
+testDirectorShotSceneState()
+testDirectorCanvasPanoramas()
 testDirectorPoseTools()
 testDirectorCameraPresets()
 testDirectorIk()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 bodies / 20 poses / shot tracking / portable scenes / continuity / safety / IK OK')
+console.log('director mannequin: 13 bodies / 20 poses / per-shot blocking / canvas panoramas / continuity / safety / IK OK')

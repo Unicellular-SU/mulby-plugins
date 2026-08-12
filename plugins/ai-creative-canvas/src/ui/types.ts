@@ -126,9 +126,27 @@ export interface DirectorShot {
   targetSubjectId?: string // 可选跟随目标；应用机位时按目标当前位置解析相机
   targetOffset?: [number, number, number] // 目标点相对跟随对象原点的偏移
   cameraOffset?: [number, number, number] // 相机相对跟随对象原点的偏移
+  sceneState?: DirectorShotSceneState // 可选逐镜头调度快照；旧工程缺省时仅应用相机
   thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
   take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
   takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
+}
+export interface DirectorShotSubjectState {
+  subjectId: string
+  name?: string
+  kind?: string
+  pos: [number, number, number]
+  rot: [number, number, number]
+  scale: number | [number, number, number]
+  joints?: Record<string, [number, number, number]>
+  poseName?: string
+  poseSchemaVersion?: number
+  poseOffsetY?: number
+  bodyType?: DirectorSubject['bodyType']
+  visible?: boolean
+}
+export interface DirectorShotSceneState {
+  subjects: DirectorShotSubjectState[]
 }
 export interface DirectorEnvironment {
   assetId: string // 全景背景附件 id
@@ -136,6 +154,8 @@ export interface DirectorEnvironment {
   mimeType?: string
   description?: string // 追加进镜头提示词的环境描述
   rotation?: number // 水平旋转角度，单位为度
+  source?: 'local' | 'canvas' // 仅用于说明来源；附件始终复制到导演工程独立存储
+  sourceCardId?: string // 来自当前画布时记录源 360 全景卡 id
 }
 export interface DirectorScene {
   schemaVersion?: 2

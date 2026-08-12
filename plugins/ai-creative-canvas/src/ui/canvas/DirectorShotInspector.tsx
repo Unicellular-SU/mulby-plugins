@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Camera, CheckCircle2, Clock3, Info, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Camera, CheckCircle2, Clapperboard, Clock3, Info, Loader2, RefreshCw } from 'lucide-react'
 import type { DirectorShot } from '../types'
 import {
   formatDirectorDuration,
@@ -15,9 +15,13 @@ interface Props {
   issues: DirectorContinuityIssue[]
   showCameraHelpers: boolean
   targetSubjects: Array<{ id: string; name: string; kind: string }>
+  applying: boolean
   onChange: (patch: Partial<DirectorShot>) => void
   onTargetChange: (targetSubjectId: string | null) => void
-  onRefresh: () => void
+  onApplyFull: () => void
+  onApplyCamera: () => void
+  onRefreshFull: () => void
+  onRefreshCamera: () => void
   onToggleCameraHelpers: () => void
 }
 
@@ -29,9 +33,13 @@ export function DirectorShotInspector({
   issues,
   showCameraHelpers,
   targetSubjects,
+  applying,
   onChange,
   onTargetChange,
-  onRefresh,
+  onApplyFull,
+  onApplyCamera,
+  onRefreshFull,
+  onRefreshCamera,
   onToggleCameraHelpers
 }: Props) {
   const [durationText, setDurationText] = useState('4')
@@ -119,14 +127,54 @@ export function DirectorShotInspector({
               />
             </label>
             <div className="flex flex-col gap-1 text-[10px] text-white/45">
-              当前构图
+              镜头状态
+              <div className="flex h-7 items-center rounded-lg border border-white/[0.07] bg-black/15 px-2 text-[10px] text-white/55">
+                {shot.sceneState ? `已保存 ${shot.sceneState.subjects.length} 个对象` : '旧机位，仅含相机'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5 rounded-xl border border-white/[0.07] bg-black/15 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-white/45">应用与更新</span>
+              {applying && <span className="flex items-center gap-1 text-[9px] text-amber-200/70"><Loader2 size={9} className="animate-spin" /> 恢复调度</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
-                onClick={onRefresh}
-                className="flex h-7 items-center justify-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] text-[10px] text-white/65 transition-colors hover:bg-white/[0.09] hover:text-white active:scale-[0.98]"
-                title="用当前出图相机、画幅、灯光和缩略图覆盖此机位"
+                disabled={applying}
+                onClick={onApplyFull}
+                className="flex h-7 items-center justify-center gap-1 rounded-lg border border-amber-300/35 bg-amber-300/10 text-[10px] text-amber-100 transition-colors hover:bg-amber-300/20 disabled:opacity-40 active:scale-[0.98]"
+                title={shot.sceneState ? '恢复此镜头的相机、演员走位、姿势与显隐' : '此旧机位没有演员调度，将仅应用相机'}
               >
-                <RefreshCw size={10} /> 更新已选机位
+                <Clapperboard size={10} /> {shot.sceneState ? '应用完整镜头' : '应用机位'}
+              </button>
+              <button
+                type="button"
+                disabled={applying}
+                onClick={onApplyCamera}
+                className="flex h-7 items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] text-[10px] text-white/60 transition-colors hover:bg-white/[0.09] hover:text-white disabled:opacity-40 active:scale-[0.98]"
+                title="保留当前演员调度，只切换相机、画幅和灯光"
+              >
+                <Camera size={10} /> 仅应用相机
+              </button>
+              <button
+                type="button"
+                disabled={applying}
+                onClick={onRefreshFull}
+                className="flex h-7 items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] text-[10px] text-white/60 transition-colors hover:bg-white/[0.09] hover:text-white disabled:opacity-40 active:scale-[0.98]"
+                title="用当前相机和演员调度覆盖此镜头"
+              >
+                <RefreshCw size={10} /> 更新完整镜头
+              </button>
+              <button
+                type="button"
+                disabled={applying}
+                onClick={onRefreshCamera}
+                className="flex h-7 items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] text-[10px] text-white/60 transition-colors hover:bg-white/[0.09] hover:text-white disabled:opacity-40 active:scale-[0.98]"
+                title="只更新相机、画幅、灯光和缩略图，保留已保存的演员调度"
+              >
+                <RefreshCw size={10} /> 仅更新相机
               </button>
             </div>
           </div>

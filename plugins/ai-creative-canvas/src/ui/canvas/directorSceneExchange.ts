@@ -104,7 +104,9 @@ const normalizeEnvironment = (raw: any): DirectorEnvironment | null => {
     name: text(raw?.name, 160) || undefined,
     mimeType: text(raw?.mimeType, 120) || undefined,
     description: text(raw?.description, 1000) || undefined,
-    rotation: clamp(finite(raw?.rotation, 0), -180, 180)
+    rotation: clamp(finite(raw?.rotation, 0), -180, 180),
+    source: raw?.source === 'canvas' ? 'canvas' : raw?.source === 'local' ? 'local' : undefined,
+    sourceCardId: text(raw?.sourceCardId, 160) || undefined
   }
 }
 
@@ -161,6 +163,40 @@ export function normalizeDirectorScene(raw: any): DirectorScene {
     const targetIdRaw = text(shot?.targetSubjectId, 120)
     const targetSubjectId = subjectAliases.get(targetIdRaw) || (subjectIds.has(targetIdRaw) ? targetIdRaw : '')
     const hasBinding = !!targetSubjectId && Array.isArray(shot?.targetOffset) && Array.isArray(shot?.cameraOffset)
+    const rawSceneSubjects = Array.isArray(shot?.sceneState?.subjects) ? shot.sceneState.subjects : []
+    if (rawSceneSubjects.length > 200) throw new Error(`第 ${index + 1} 个机位的对象调度超过 200 个上限`)
+    const sceneStateIds = new Set<string>()
+    const sceneSubjects = rawSceneSubjects
+      .flatMap((state: any) => {
+        const stateIdRaw = text(state?.subjectId, 120)
+        const subjectId = subjectAliases.get(stateIdRaw) || (subjectIds.has(stateIdRaw) ? stateIdRaw : '')
+        if (!subjectId || sceneStateIds.has(subjectId)) return []
+        sceneStateIds.add(subjectId)
+        const joints: Record<string, [number, number, number]> = {}
+        if (state?.joints && typeof state.joints === 'object') {
+          for (const [name, rotation] of Object.entries(state.joints).slice(0, 64)) {
+            const jointName = text(name, 80)
+            if (jointName) joints[jointName] = tuple3(rotation, [0, 0, 0])
+          }
+        }
+        const scale = Array.isArray(state?.scale)
+          ? tuple3(state.scale, [1, 1, 1]).map((value) => clamp(value, 0.01, 100)) as [number, number, number]
+          : clamp(finite(state?.scale, 1), 0.01, 100)
+        return [{
+          subjectId,
+          name: text(state?.name, 160) || undefined,
+          kind: text(state?.kind, 20) || undefined,
+          pos: tuple3(state?.pos, [0, 0, 0]),
+          rot: tuple3(state?.rot, [0, 0, 0]),
+          scale,
+          joints: Object.keys(joints).length ? joints : undefined,
+          poseName: text(state?.poseName, 120) || undefined,
+          poseSchemaVersion: finite(state?.poseSchemaVersion, 0) || undefined,
+          poseOffsetY: finite(state?.poseOffsetY, 0),
+          bodyType: text(state?.bodyType, 40) as DirectorSubject['bodyType'] || undefined,
+          visible: state?.visible !== false
+        }]
+      })
     return {
       id,
       name: text(shot?.name, 160) || `机位${index + 1}`,
@@ -173,6 +209,7 @@ export function normalizeDirectorScene(raw: any): DirectorScene {
       targetSubjectId: hasBinding ? targetSubjectId : undefined,
       targetOffset: hasBinding ? tuple3(shot.targetOffset, [0, 0, 0]) : undefined,
       cameraOffset: hasBinding ? tuple3(shot.cameraOffset, [0, 0, 0]) : undefined,
+      sceneState: sceneSubjects.length ? { subjects: sceneSubjects } : undefined,
       thumb: mediaReference(shot?.thumb),
       take: mediaReference(shot?.take),
       takes: Array.isArray(shot?.takes)

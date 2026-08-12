@@ -11,6 +11,7 @@ import {
   Copy,
   Film,
   GripVertical,
+  Loader2,
   Plus,
   RefreshCw,
   Trash2
@@ -24,6 +25,7 @@ interface Props {
   activeShotId: string | null
   expanded: boolean
   busy: boolean
+  applyingShotId: string | null
   totalDurationMs: number
   continuityIssues: DirectorContinuityIssue[]
   onToggle: () => void
@@ -46,6 +48,7 @@ export function DirectorShotStrip({
   activeShotId,
   expanded,
   busy,
+  applyingShotId,
   totalDurationMs,
   continuityIssues,
   onToggle,
@@ -159,13 +162,14 @@ export function DirectorShotStrip({
                     >
                       <GripVertical size={12} />
                     </button>
-                    <button onClick={() => onApply(shot)} className="relative h-14 w-20 shrink-0 overflow-hidden rounded-lg bg-zinc-900 text-left" title="切换到此机位">
+                    <button disabled={busy} onClick={() => onApply(shot)} className="relative h-14 w-20 shrink-0 overflow-hidden rounded-lg bg-zinc-900 text-left disabled:cursor-wait" title={shot.sceneState ? '应用此镜头的相机与演员调度' : '切换到此旧机位'}>
                       {shot.take || shot.thumb ? (
                         <img src={shot.take || shot.thumb} alt="" draggable={false} className="h-full w-full object-cover" />
                       ) : (
                         <span className="grid h-full w-full place-items-center text-white/20"><Camera size={16} /></span>
                       )}
                       {shot.take && <span className="absolute bottom-1 right-1 rounded bg-zinc-950/80 px-1 py-0.5 text-[8px] text-amber-200">TAKE</span>}
+                      {applyingShotId === shot.id && <span className="absolute inset-0 grid place-items-center bg-zinc-950/70 text-amber-200"><Loader2 size={14} className="animate-spin" /></span>}
                     </button>
                     <div className="flex min-w-0 flex-1 flex-col">
                       {editId === shot.id ? (
@@ -186,10 +190,11 @@ export function DirectorShotStrip({
                         />
                       ) : (
                         <button
+                          disabled={busy}
                           onClick={() => onApply(shot)}
                           onDoubleClick={() => { cancelRenameRef.current = false; setEditId(shot.id); setEditName(shot.name) }}
-                          className="truncate text-left text-[11px] font-medium text-white/80 hover:text-white"
-                          title="切换机位，双击改名"
+                          className="truncate text-left text-[11px] font-medium text-white/80 hover:text-white disabled:cursor-wait disabled:opacity-50"
+                          title={shot.sceneState ? '应用完整镜头，双击改名' : '切换机位，双击改名'}
                         >
                           {shot.name}
                         </button>
@@ -198,7 +203,10 @@ export function DirectorShotStrip({
                         {incomingWarning && <AlertTriangle size={9} className="shrink-0 text-amber-200/80" />}
                         <span className="truncate">{shot.shotType || '镜头'} / {Math.round(shot.cam?.focal || 35)}mm {shot.aspect && shot.aspect !== '视口' ? `/ ${shot.aspect}` : ''}</span>
                       </span>
-                      <span className="text-[9px] tabular-nums text-white/30">{normalizeDirectorShotDuration(shot.durationMs) / 1000}s</span>
+                      <span className="flex items-center gap-1 text-[9px] tabular-nums text-white/30">
+                        {normalizeDirectorShotDuration(shot.durationMs) / 1000}s
+                        {shot.sceneState && <span className="flex items-center gap-0.5 text-amber-200/55" title={`保存了 ${shot.sceneState.subjects.length} 个对象的演员调度`}><Clapperboard size={9} />{shot.sceneState.subjects.length}</span>}
+                      </span>
                       <div className="mt-auto flex items-center gap-1">
                         <button onClick={() => onGenerate(index)} disabled={busy} className="text-white/35 transition-colors hover:text-amber-200 disabled:opacity-30" title="按此机位生成或重拍"><RefreshCw size={11} /></button>
                         <button onClick={() => onDuplicate(shot.id)} className="text-white/35 transition-colors hover:text-white" title="复制机位"><Copy size={11} /></button>
