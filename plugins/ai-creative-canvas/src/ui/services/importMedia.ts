@@ -5,11 +5,17 @@ import { base64ToArrayBuffer, uid } from '../util'
 import { saveBytes, toFileUrl } from './media'
 import { PLUGIN_ID } from './persistence'
 import { toast } from '../store/toastStore'
-import { isSupportedImportMime, kindForMime, resolveImportMime } from './importMediaTypes'
+import { isSupportedImportMime, kindForMime, normalizeOpenDialogPaths, resolveImportMime } from './importMediaTypes'
 
 interface ImportFailure {
   name: string
   reason: string
+}
+
+interface ImportRpcData {
+  items?: Array<{ name: string; mime: string; path?: string; text?: string; size?: number }>
+  failures?: ImportFailure[]
+  error?: string
 }
 
 export interface ImportedResource {
@@ -50,8 +56,33 @@ function basename(path: string): string {
   return path.split(/[\\/]/).pop() || path
 }
 
-function uniquePaths(paths: string[]): string[] {
-  return [...new Set(paths.map((path) => String(path || '').trim()).filter(Boolean))]
+function uniquePaths(paths: unknown[]): string[] {
+  return normalizeOpenDialogPaths(paths)
+}
+
+/** 旧 Host 中 basename 漏 await 后会把 Promise 克隆成空对象；识别该特征并热重启后端重试一次。 */
+function hasAsyncFilenameRegression(data: ImportRpcData | undefined): boolean {
+  if (!data || (data.items?.length || 0) > 0 || !Array.isArray(data.failures)) return false
+  return data.failures.some((failure) => {
+    if (!failure || typeof failure !== 'object') return true
+    const name = (failure as { name?: unknown }).name
+    return typeof name !== 'string' || /^\[object (?:Object|Promise)\]$/.test(name)
+  })
+}
+
+function importRpcData(result: unknown): ImportRpcData | undefined {
+  if (!result || typeof result !== 'object') return undefined
+  const data = (result as { data?: unknown }).data
+  return data && typeof data === 'object' ? data as ImportRpcData : undefined
+}
+
+/** Electron 新版不再保证 File.path 可见；在 drop 事件同步阶段通过宿主能力恢复物理路径。 */
+export function resolveDroppedFilePaths(files: File[] | FileList): string[] {
+  try {
+    return uniquePaths(window.mulby?.plugin?.resolveDroppedFilePaths?.(Array.from(files)) || [])
+  } catch {
+    return []
+  }
 }
 
 async function importLocalPaths(projectId: string, paths: string[]): Promise<{ resources: ImportedResource[]; failures: ImportFailure[] }> {
@@ -64,14 +95,16 @@ async function importLocalPaths(projectId: string, paths: string[]): Promise<{ r
   const host = window.mulby?.host
   if (!host?.call) return { resources: [], failures: [...selected.map((path) => ({ name: basename(path), reason: 'Mulby 后端桥接不可用' })), ...overflow] }
   try {
-    const result = (await host.call(PLUGIN_ID, 'importLocalResources', { projectId, paths: selected })) as {
-      data?: {
-        items?: Array<{ name: string; mime: string; path?: string; text?: string; size?: number }>
-        failures?: ImportFailure[]
-        error?: string
-      }
+    const requestImport = async () => importRpcData(
+      await host.call(PLUGIN_ID, 'importLocalResources', { projectId, paths: selected })
+    )
+    let data = await requestImport()
+    // 开发模式下 UI 可热更新、插件 Host 仍可能保留旧 main.js。只对这个明确的旧版故障特征
+    // 自动重启一次，避免每次正常导入都扰动正在运行的后端任务。
+    if (hasAsyncFilenameRegression(data) && host.restart) {
+      await host.restart(PLUGIN_ID)
+      data = await requestImport()
     }
-    const data = result?.data
     const resources = (data?.items || []).map((item) => ({
       name: item.name,
       mime: item.mime,
@@ -169,7 +202,10 @@ function addResourcesAsCards(resources: ImportedResource[], world: { x: number; 
         assetLocalPath: resource.localPath || null,
         mime: resource.mime,
         status: 'done',
-        meta: resource.size ? { importSize: resource.size } : {}
+        meta: {
+          ...(resource.size ? { importSize: resource.size } : {}),
+          ...(resource.kind === 'video' || resource.kind === 'audio' ? { resourceRole: 'source' } : {})
+        }
       })
     }
   })
@@ -190,18 +226,36 @@ export async function importPaths(paths: string[], world: { x: number; y: number
   addResourcesAsCards(result.resources, world)
 }
 
-export async function pickImportPaths(): Promise<string[]> {
+const IMPORT_EXTENSIONS: Record<MaterialKind, string[]> = {
+  image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'],
+  video: ['mp4', 'mov', 'webm'],
+  audio: ['mp3', 'wav', 'aac', 'opus', 'm4a', 'flac', 'ogg'],
+  text: ['txt', 'md', 'json', 'srt']
+}
+
+export async function pickImportPaths(kinds: readonly MaterialKind[] = ['image', 'video', 'audio', 'text']): Promise<string[]> {
   const dialog = window.mulby?.dialog
   if (!dialog?.showOpenDialog) return []
-  return dialog.showOpenDialog({
+  const selectedKinds = [...new Set(kinds)]
+  const extensions = selectedKinds.flatMap((kind) => IMPORT_EXTENSIONS[kind])
+  const label = selectedKinds.map((kind) => kind === 'image' ? '图片' : kind === 'video' ? '视频' : kind === 'audio' ? '音频' : '文本').join('、')
+  const picked: unknown = await dialog.showOpenDialog({
     title: '导入画布资源',
     buttonLabel: '导入',
     properties: ['openFile', 'multiSelections'],
     filters: [{
-      name: '图片、视频、音频与文本',
-      extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'mp4', 'mov', 'webm', 'mp3', 'wav', 'aac', 'opus', 'm4a', 'flac', 'ogg', 'txt', 'md', 'json', 'srt']
+      name: label || '画布资源',
+      extensions
     }]
   })
+  const paths = normalizeOpenDialogPaths(picked)
+  const reportedSelection = Array.isArray(picked)
+    ? picked.length > 0
+    : !!picked && typeof picked === 'object' && (picked as { canceled?: unknown }).canceled !== true
+  if (!paths.length && reportedSelection) {
+    toast('当前 Mulby 版本未返回可读取的文件路径，请升级宿主后重试', 'error')
+  }
+  return paths
 }
 
 export async function importAttachments(atts: AttachmentLike[], world: { x: number; y: number }): Promise<void> {

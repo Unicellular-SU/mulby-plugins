@@ -68,7 +68,8 @@ export function ProjectSettings() {
               <Select
                 value={project.defaultImageModel || ''}
                 onChange={(v) => setDefaultModel('image', v || null)}
-                options={[{ value: '', label: '自动（列表第一个）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label }))]}
+                options={[{ value: '', label: '自动（列表第一个）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))]}
+                showHintInTrigger
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -76,7 +77,8 @@ export function ProjectSettings() {
               <Select
                 value={project.defaultTextModel || ''}
                 onChange={(v) => setDefaultModel('text', v || null)}
-                options={[{ value: '', label: '自动（宿主默认）' }, ...txtModels.map((m) => ({ value: m.id, label: m.label }))]}
+                options={[{ value: '', label: '自动（宿主默认）' }, ...txtModels.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))]}
+                showHintInTrigger
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -84,7 +86,8 @@ export function ProjectSettings() {
               <Select
                 value={project.defaultPanoModel || ''}
                 onChange={(v) => setDefaultModel('pano', v || null)}
-                options={[{ value: '', label: '不用（沿用图像模型）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label }))]}
+                options={[{ value: '', label: '不用（沿用图像模型）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))]}
+                showHintInTrigger
               />
               <span className="text-[11px] opacity-50">全景卡未选模型时优先用它（应选能直接出等距柱状 equirect 的模型/LoRA；卡上显式所选模型优先）。</span>
             </div>
@@ -93,7 +96,8 @@ export function ProjectSettings() {
               <Select
                 value={project.defaultControlModel || ''}
                 onChange={(v) => setDefaultModel('control', v || null)}
-                options={[{ value: '', label: '不用（导演台走截图参考）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label }))]}
+                options={[{ value: '', label: '不用（导演台走截图参考）' }, ...imgModels.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))]}
+                showHintInTrigger
               />
               <span className="text-[11px] opacity-50">3D 导演台「强控制」用：选支持深度/姿态控制图的模型，按控制图严格构图。</span>
             </div>

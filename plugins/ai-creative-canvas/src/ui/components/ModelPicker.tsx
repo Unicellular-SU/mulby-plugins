@@ -41,10 +41,16 @@ export function ModelPicker({
     { value: '', label: loading ? '加载模型…' : kind === 'text' ? '默认文本模型' : '（选择图像模型）' },
     ...models.map((m) => ({ value: m.id, label: m.label, hint: m.provider }))
   ]
+  const selected = models.find((model) => model.id === value)
 
   return (
     <div className="flex flex-col gap-1">
-      <Select value={value || ''} options={opts} onChange={(v) => onChange(v || null)} />
+      <Select value={value || ''} options={opts} onChange={(v) => onChange(v || null)} showHintInTrigger />
+      {!loading && selected?.provider && (
+        <span className="text-[10px] opacity-50 truncate" title={`模型 ID：${selected.id}\nProvider：${selected.provider}`}>
+          模型来源：{selected.provider}
+        </span>
+      )}
       {!loading && kind !== 'text' && models.length === 0 && (
         <span className="text-[11px] text-amber-500">未检测到图像模型，请在 Mulby「AI 设置 → 模型管理」配置 image-generation 模型。</span>
       )}

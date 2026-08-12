@@ -17,9 +17,23 @@ import {
   metaOf,
   migrateProject
 } from '../services/persistence'
-import { removeProjectMediaOnDisk, saveBase64, toFileUrl } from '../services/media'
+import { pruneProjectMediaOnDisk, removeProjectMediaOnDisk, saveBase64, toFileUrl } from '../services/media'
+import {
+  collectCardsMediaPaths,
+  collectProjectMedia,
+  collectProjectMediaPaths,
+  auditProjectMediaAvailability,
+  rewriteProjectMediaPaths,
+  type RestoredProjectMedia
+} from '../services/projectMedia'
 import { confirmDialog } from './dialogStore'
 import { toast } from './toastStore'
+import {
+  collectDirectorSceneAssetIds,
+  decodeDirectorSceneBase64,
+  encodeDirectorSceneBytes,
+  remapDirectorSceneAssetIds
+} from '../canvas/directorSceneExchange'
 
 const MEDIA_EXPORT_CAP = 200 * 1024 * 1024 // 含媒体导出的 base64 总量上限（~150MB 实际），超限拒绝以免撑爆内存
 const fsApi = () => window.mulby?.filesystem
@@ -38,6 +52,70 @@ function downloadJson(filename: string, obj: unknown): void {
 }
 const safeName = (n?: string) => (n || 'project').replace(/[^\w.\-]+/g, '_')
 const extOfPath = (p: string) => (p.split('.').pop() || 'bin').toLowerCase()
+const formatSize = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.round(bytes / 1024)}KB`
+
+interface PackedProjectMedia {
+  b64: string
+  ext: string
+  mime: string | null
+}
+
+interface PackedProjectAttachment {
+  dataBase64: string
+  mimeType: string
+}
+
+interface ProjectMediaEnvelope {
+  __ac?: string
+  version?: number
+  doc?: ProjectDoc
+  media?: Record<string, PackedProjectMedia>
+  mediaIndex?: Record<string, string>
+  attachments?: Record<string, PackedProjectAttachment>
+}
+
+async function collectLiveReferences(items: ProjectMeta[]): Promise<{ paths: string[]; attachmentIds: string[] }> {
+  const paths = new Set<string>()
+  const attachmentIds = new Set<string>()
+  const graph = useGraph.getState()
+  const addDoc = (doc: ProjectDoc | null | undefined) => {
+    if (!doc) return
+    for (const path of collectProjectMediaPaths(doc, { includeDerived: true })) paths.add(path)
+    if (doc.director) for (const id of collectDirectorSceneAssetIds(doc.director)) attachmentIds.add(id)
+  }
+
+  for (const item of items) {
+    addDoc(item.id === graph.project.id ? graph.project : await loadProject(item.id))
+    addDoc((await loadRecovery(item.id))?.doc)
+  }
+  for (const history of Object.values(graph.boardHistories)) {
+    for (const snap of [...history.past, ...history.future]) {
+      for (const path of collectCardsMediaPaths(Object.values(snap.cards), { includeDerived: true })) paths.add(path)
+    }
+  }
+  for (const path of collectCardsMediaPaths(graph.clipboard.cards, { includeDerived: true })) paths.add(path)
+  return { paths: [...paths], attachmentIds: [...attachmentIds] }
+}
+
+async function pruneDirectorAttachments(keepIds: string[]): Promise<number> {
+  const store = window.mulby?.storage?.attachment
+  if (!store?.list || !store?.remove) return 0
+  const keep = new Set(keepIds)
+  const known = new Map<string, { id: string }>()
+  for (const prefix of ['glb_', 'director-env_', 'director-asset_']) {
+    try {
+      for (const item of await store.list(prefix)) known.set(item.id, item)
+    } catch {
+      /* 某一前缀列举失败不阻断其它前缀 */
+    }
+  }
+  let removed = 0
+  for (const id of known.keys()) {
+    if (keep.has(id)) continue
+    try { if (await store.remove(id)) removed++ } catch { /* best-effort */ }
+  }
+  return removed
+}
 
 // 记录"刚载入/新建/导入"的工程引用：App 的保存订阅据此跳过这次（非用户编辑引发的）变更，
 // 避免载入/切换后立刻又把未改动的工程全量写一遍（尤其恢复快照）。任何真实编辑都会产生新引用→照常保存。
@@ -98,6 +176,7 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
   }
   if (doc.id !== pid) doc = { ...doc, id: pid } // 强制 doc.id 与注册表键一致——自动保存按 doc.id 键控（App.tsx），不容分叉
   sanitizeDoc(doc)
+  await auditProjectMediaAvailability(doc)
   if (recovered) {
     // 恢复内容必须先全量写回主存、成功后才能删恢复快照：applyLoaded 会按本 doc 播种增量基线，
     // 若不先落盘，所有画布被判「未改动」而永不重写分片——磁盘主存仍是崩溃前旧数据，
@@ -119,6 +198,7 @@ interface ProjectState {
   renameProject: (id: string, name: string) => Promise<void>
   duplicateProject: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
+  cleanupProjectMedia: (id: string) => Promise<void>
   exportProject: (id: string) => Promise<void>
   exportProjectWithMedia: (id: string) => Promise<void>
   importProject: (raw: unknown) => Promise<void>
@@ -235,6 +315,7 @@ export const useProject = create<ProjectState>((set, get) => ({
       await saveRegistry({ activeId: doc.id, items: next })
       sanitizeDoc(doc)
       applyLoaded(doc.id, doc)
+      void pruneDirectorAttachments([])
       return
     }
     const ok = await confirmDialog({ title: '删除工程', message: '将永久删除该工程及其所有画布/卡片（不可恢复）。确定？', confirmLabel: '删除', cancelLabel: '取消' })
@@ -252,22 +333,32 @@ export const useProject = create<ProjectState>((set, get) => ({
       await saveRegistry({ activeId, items: next })
       await deleteProjectStorage(id)
     }
-    // 磁盘媒体清理（best-effort，后台进行）：duplicateProject 的副本与原工程共享媒体文件路径，
-    // 任一剩余工程引用了本工程的媒体目录（media/<id> 或 A5 前遗留的 media_<id>）则跳过清盘，避免弄裂副本。
+    // 引用感知清理：删除工程拥有的目录中，只回收未被副本/恢复快照/当前历史继续引用的文件。
     void (async () => {
       try {
-        for (const it of next) {
-          const doc = await loadProject(it.id)
-          if (!doc) continue
-          const s = JSON.stringify(doc)
-          if (s.includes(`/media/${id}/`) || s.includes(`/media_${id}/`)) return
-        }
-        await removeProjectMediaOnDisk(id)
+        const refs = await collectLiveReferences(next)
+        await pruneProjectMediaOnDisk(id, refs.paths, 0)
+        await pruneDirectorAttachments(refs.attachmentIds)
       } catch {
         /* best-effort */
       }
     })()
     toast('工程已删除', 'success')
+  },
+
+  cleanupProjectMedia: async (id) => {
+    if (!get().items.some((item) => item.id === id)) return
+    if (id === get().activeId) await get().flushSave()
+    const refs = await collectLiveReferences(get().items)
+    // 全局扫描才能回收已删除原工程遗留、但曾被复制工程共享的旧目录。
+    const result = await pruneProjectMediaOnDisk(id, refs.paths, 5 * 60_000, true)
+    const removedAttachments = await pruneDirectorAttachments(refs.attachmentIds)
+    if (!result.ok) {
+      toast('媒体清理失败：' + (result.error || '宿主清理接口不可用'), 'error')
+      return
+    }
+    const deferred = result.recent ? `，${result.recent} 个新文件暂缓清理` : ''
+    toast(`已清理 ${result.removed} 个媒体文件和 ${removedAttachments} 个导演附件，释放 ${formatSize(result.reclaimedBytes)}${deferred}`, 'success')
   },
 
   exportProject: async (id) => {
@@ -291,29 +382,54 @@ export const useProject = create<ProjectState>((set, get) => ({
       return
     }
     try {
-      // 收集全部画布卡片引用的本地媒体，读为 base64 内嵌信封；超上限则拒绝（避免撑爆内存），提示改用同机 JSON 导出
-      const media: Record<string, { b64: string; ext: string; mime: string | null }> = {}
+      // 主产物、节点素材、多结果、剪辑配方、导演 take 与附件统一去重后写入 v3 信封。
+      const media: Record<string, PackedProjectMedia> = {}
+      const mediaIndex: Record<string, string> = {}
+      const attachments: Record<string, PackedProjectAttachment> = {}
       let total = 0
-      for (const b of doc.boards) {
-        for (const c of Object.values(b.cards)) {
-          if (!c.assetLocalPath) continue
-          try {
-            const b64 = (await fsApi()?.readFile?.(c.assetLocalPath, 'base64')) as string
-            if (typeof b64 !== 'string' || !b64) continue
-            total += b64.length
-            if (total > MEDIA_EXPORT_CAP) {
-              toast(`工程媒体过大（>${Math.round(MEDIA_EXPORT_CAP / 1024 / 1024)}MB），无法打包导出；请改用「导出 JSON」在同机恢复`, 'error')
-              return
-            }
-            media[c.id] = { b64, ext: extOfPath(c.assetLocalPath), mime: c.mime ?? null }
-          } catch {
-            /* 单个文件读失败：跳过，不阻断整体导出 */
+      let unread = 0
+      for (const entry of collectProjectMedia(doc)) {
+        try {
+          const b64 = (await fsApi()?.readFile?.(entry.path, 'base64')) as string
+          if (typeof b64 !== 'string' || !b64) throw new Error('empty media')
+          total += b64.length
+          if (total > MEDIA_EXPORT_CAP) {
+            toast(`工程媒体过大（>${Math.round(MEDIA_EXPORT_CAP / 1024 / 1024)}MB），无法打包导出；请改用「导出 JSON」在同机恢复`, 'error')
+            return
           }
+          media[entry.id] = { b64, ext: extOfPath(entry.path), mime: entry.mime }
+          mediaIndex[entry.path] = entry.id
+        } catch {
+          unread++
         }
       }
-      downloadJson(`${safeName(doc.name)}.acmedia.json`, { __ac: 'project-with-media', doc, media })
+      let attachmentUnread = 0
+      const attachmentStore = window.mulby?.storage?.attachment
+      for (const attachmentId of doc.director ? collectDirectorSceneAssetIds(doc.director) : []) {
+        try {
+          const raw = await attachmentStore?.get?.(attachmentId)
+          if (!raw) throw new Error('missing attachment')
+          const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw)
+          const dataBase64 = encodeDirectorSceneBytes(bytes)
+          total += dataBase64.length
+          if (total > MEDIA_EXPORT_CAP) {
+            toast(`工程媒体过大（>${Math.round(MEDIA_EXPORT_CAP / 1024 / 1024)}MB），无法打包导出；请改用「导出 JSON」在同机恢复`, 'error')
+            return
+          }
+          attachments[attachmentId] = {
+            dataBase64,
+            mimeType: await attachmentStore?.getType?.(attachmentId) || 'application/octet-stream'
+          }
+        } catch {
+          attachmentUnread++
+        }
+      }
+      downloadJson(`${safeName(doc.name)}.acmedia.json`, { __ac: 'project-with-media', version: 3, doc, media, mediaIndex, attachments })
       const n = Object.keys(media).length
-      toast(`已导出含 ${n} 个媒体文件（约 ${Math.round(total / 1024 / 1024)}MB，可跨机恢复）`, 'success')
+      const attachmentCount = Object.keys(attachments).length
+      const failedCount = unread + attachmentUnread
+      const failed = failedCount ? `，${failedCount} 个资源无法读取` : ''
+      toast(`已导出 ${n} 个媒体文件、${attachmentCount} 个导演附件（约 ${Math.round(total / 1024 / 1024)}MB，可跨机恢复）${failed}`, failedCount ? 'warning' : 'success')
     } catch (e: any) {
       toast('导出失败：' + (e?.message || String(e)), 'error')
     }
@@ -321,7 +437,7 @@ export const useProject = create<ProjectState>((set, get) => ({
 
   importProject: async (raw) => {
     // 兼容两种文件：含媒体信封 { __ac:'project-with-media', doc, media } 与裸 ProjectDoc
-    const env = raw as { __ac?: string; doc?: ProjectDoc; media?: Record<string, { b64: string; ext: string; mime: string | null }> }
+    const env = raw as ProjectMediaEnvelope
     const withMedia = env?.__ac === 'project-with-media' && env.doc && Array.isArray(env.doc.boards)
     const doc0 = (withMedia ? env.doc : raw) as ProjectDoc
     if (!doc0 || typeof doc0 !== 'object' || !Array.isArray(doc0.boards)) {
@@ -330,43 +446,106 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
     await get().flushSave()
     const now = Date.now()
-    const doc = migrateProject({ ...doc0, id: uid('proj'), createdAt: doc0.createdAt || now, updatedAt: now, name: doc0.name || '导入的工程' })
+    const sourceDoc = structuredClone(doc0)
+    const createdAttachmentIds: string[] = []
+    let restoredAttachments = 0
+    let missingAttachments = 0
+    if (withMedia && sourceDoc.director) {
+      const packed = env.attachments || {}
+      const attachmentStore = window.mulby?.storage?.attachment
+      const idMap = new Map<string, string>()
+      for (const oldId of collectDirectorSceneAssetIds(sourceDoc.director)) {
+        const attachment = packed[oldId]
+        if (!attachment?.dataBase64) {
+          try {
+            if (await attachmentStore?.get?.(oldId)) continue // 旧包/同机导入：原附件仍可共享
+          } catch { /* 继续按缺失处理 */ }
+          missingAttachments++
+          continue
+        }
+        try {
+          const nextId = uid('director-asset')
+          const result = await attachmentStore?.put?.(nextId, decodeDirectorSceneBase64(attachment.dataBase64), attachment.mimeType)
+          const ok = result === true || !!(result && (result as { ok?: boolean }).ok)
+          if (!ok) throw new Error('attachment write failed')
+          createdAttachmentIds.push(nextId)
+          idMap.set(oldId, nextId)
+          restoredAttachments++
+        } catch {
+          try {
+            if (await attachmentStore?.get?.(oldId)) continue
+          } catch { /* 继续按缺失处理 */ }
+          missingAttachments++
+        }
+      }
+      sourceDoc.director = remapDirectorSceneAssetIds(sourceDoc.director, idMap)
+    }
+    const doc = migrateProject({ ...sourceDoc, id: uid('proj'), createdAt: sourceDoc.createdAt || now, updatedAt: now, name: sourceDoc.name || '导入的工程' })
 
-    // 含媒体：把内嵌 base64 写回新工程的媒体目录，并重写卡片的 assetLocalPath/assetUrl/mime；
-    // 无内嵌媒体（裸 JSON 或某卡缺失）→ 该卡的绝对路径在异机不存在，标注 meta.mediaMissing 以便 UI 提示裂图原因
+    // 含媒体：每个物理文件只写回一次，再统一重写主产物、节点素材与历史结果中的全部引用。
+    // v1 旧信封按 card id 恢复主产物；裸 JSON/缺包文件保留旧路径并显式标注缺失引用。
     const media = withMedia ? env.media || {} : {}
     let restored = 0
-    let missing = 0
-    for (const b of doc.boards) {
-      for (const c of Object.values(b.cards)) {
-        if (!c.assetLocalPath) continue
-        const m = media[c.id]
-        if (m?.b64) {
+    const restoredByOldPath = new Map<string, RestoredProjectMedia>()
+    if (withMedia && Number(env.version || 0) >= 2 && env.mediaIndex) {
+      const expectedPaths = new Set(collectProjectMedia(doc).map((entry) => entry.path))
+      const savedByMediaId = new Map<string, RestoredProjectMedia>()
+      for (const [oldPath, mediaId] of Object.entries(env.mediaIndex)) {
+        const m = media[mediaId]
+        if (!expectedPaths.has(oldPath) || !m?.b64) continue
+        let replacement = savedByMediaId.get(mediaId)
+        if (!replacement) {
           try {
-            const saved = await saveBase64(doc.id, c.id, m.b64, m.ext || 'bin')
-            c.assetLocalPath = saved.path
-            c.assetUrl = toFileUrl(saved.path)
-            if (m.mime) c.mime = m.mime
+            const saved = await saveBase64(doc.id, `import_${mediaId}`, m.b64, m.ext || 'bin')
+            replacement = { path: saved.path, url: saved.url, mime: m.mime }
+            savedByMediaId.set(mediaId, replacement)
             restored++
-            continue
           } catch {
-            /* 写回失败 → 落入缺失分支 */
+            continue
           }
         }
-        // 未随文件携带媒体：路径来自导出机，异机大概率不存在
-        c.meta = { ...(c.meta || {}), mediaMissing: true }
-        missing++
+        restoredByOldPath.set(oldPath, replacement)
+      }
+    } else if (withMedia) {
+      for (const board of doc.boards) {
+        for (const card of Object.values(board.cards)) {
+          if (!card.assetLocalPath) continue
+          const m = media[card.id]
+          if (!m?.b64) continue
+          try {
+            const saved = await saveBase64(doc.id, card.id, m.b64, m.ext || 'bin')
+            restoredByOldPath.set(card.assetLocalPath, { path: saved.path, url: toFileUrl(saved.path), mime: m.mime })
+            restored++
+          } catch {
+            /* 写回失败由统一重写器标为缺失 */
+          }
+        }
       }
     }
+    rewriteProjectMediaPaths(doc, restoredByOldPath, false)
+    const availability = await auditProjectMediaAvailability(doc)
+    const missing = availability.missingReferences
 
-    await saveProject(doc.id, doc)
+    const savedOk = await saveProject(doc.id, doc)
+    if (!savedOk) {
+      for (const attachmentId of createdAttachmentIds) {
+        try { await window.mulby?.storage?.attachment?.remove?.(attachmentId) } catch { /* best-effort */ }
+      }
+      void removeProjectMediaOnDisk(doc.id)
+      toast('导入失败：工程无法写入本地存储', 'error')
+      return
+    }
     const items = [...get().items, metaOf(doc)]
     set({ items, activeId: doc.id })
     await saveRegistry({ activeId: doc.id, items })
     sanitizeDoc(doc)
     applyLoaded(doc.id, doc)
-    if (restored || missing) {
-      toast(`已导入工程（媒体恢复 ${restored}${missing ? `，缺失 ${missing}` : ''}）`, missing ? 'warning' : 'success')
+    if (restored || missing || restoredAttachments || missingAttachments) {
+      const missingTotal = missing + missingAttachments
+      toast(
+        `已导入工程（媒体文件 ${restored}，导演附件 ${restoredAttachments}${missingTotal ? `，缺失引用 ${missingTotal}` : ''}）`,
+        missingTotal ? 'warning' : 'success'
+      )
     } else {
       toast('已导入工程', 'success')
     }

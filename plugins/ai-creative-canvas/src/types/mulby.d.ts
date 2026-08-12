@@ -357,6 +357,8 @@ interface MulbySystemPage {
 }
 
 interface MulbyPlugin {
+  /** Resolve absolute paths for files captured synchronously from a native drop event. */
+  resolveDroppedFilePaths(files: File[]): string[]
   getAll(): Promise<PluginInfo[]>
   listCommands(pluginId?: string): Promise<PluginCommandItem[]>
   search(query: string | InputPayload): Promise<PluginSearchResult[]>
@@ -1635,10 +1637,11 @@ interface BackendPluginAPIDirect {
     stat(path: string): Promise<any>
     copy(src: string, dest: string): Promise<void>
     move(src: string, dest: string): Promise<void>
-    extname(path: string): string
-    join(...paths: string[]): string
-    dirname(path: string): string
-    basename(path: string, ext?: string): string
+    // Backend UtilityProcess 通过消息代理访问这些主进程方法，因此运行态均为 Promise。
+    extname(path: string): Promise<string>
+    join(...paths: string[]): Promise<string>
+    dirname(path: string): Promise<string>
+    basename(path: string, ext?: string): Promise<string>
   }
   http: MulbyHttp
   screen: {

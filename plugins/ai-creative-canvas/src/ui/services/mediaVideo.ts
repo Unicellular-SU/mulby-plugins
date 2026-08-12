@@ -1,5 +1,6 @@
 import { mediaPath, ensureSubDir, toFileUrl } from './media'
 import { base64ToArrayBuffer } from '../util'
+import { makeThumbnail } from './mediaImage'
 
 function ff() {
   return window.mulby.ffmpeg
@@ -112,7 +113,6 @@ export async function makeVideoPoster(projectId: string, cardId: string, localPa
   try {
     if (!(await ff().isAvailable())) return null
     const frame = await frameAt(projectId, localPath, 0)
-    const { makeThumbnail } = await import('./mediaImage') // 动态导入避免与 mediaImage 的潜在环
     const thumb = await makeThumbnail(projectId, `${cardId}_poster`, frame, 640)
     if (thumb) {
       try { await window.mulby?.filesystem?.unlink(frame) } catch { /* ignore */ }

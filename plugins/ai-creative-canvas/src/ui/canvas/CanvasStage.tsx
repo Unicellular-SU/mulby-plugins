@@ -28,9 +28,10 @@ import type { Card, CardKind } from '../types'
 import { isCardInsideGroup } from '../types'
 import { classifyWheel, fitToCards, rectsIntersect, screenToWorld, worldViewRect, zoomAt } from './viewport'
 import { buildGridIndex, type RectItem } from './spatialIndex'
-import { importFiles } from '../services/importMedia'
-import { parseDroppedPathText } from '../services/importMediaTypes'
+import { importFiles, resolveDroppedFilePaths } from '../services/importMedia'
+import { parseDroppedPathText, parseDroppedPlainPathText } from '../services/importMediaTypes'
 import { stageEl } from './stageEl'
+import { hasOpenModal } from '../modalStack'
 
 type Interaction =
   | { mode: 'idle' }
@@ -183,8 +184,9 @@ export function CanvasStage() {
       const path = (file as File & { path?: string }).path
       if (path) pathCandidates.add(path)
     }
+    for (const path of resolveDroppedFilePaths(files)) pathCandidates.add(path)
     for (const path of parseDroppedPathText(dataTransfer?.getData('text/uri-list') || '')) pathCandidates.add(path)
-    for (const path of parseDroppedPathText(dataTransfer?.getData('text/plain') || '')) pathCandidates.add(path)
+    for (const path of parseDroppedPlainPathText(dataTransfer?.getData('text/plain') || '')) pathCandidates.add(path)
     // 从卡片拖出的产物 → 新建素材/视频源卡
     const assetJson = dataTransfer?.getData('application/x-ace-asset')
     if (assetJson) {
@@ -192,7 +194,14 @@ export function CanvasStage() {
         const a = JSON.parse(assetJson)
         // 全景拖出保留 pano 身份（角标 + 360 环视），其余产物落成素材/视频源卡
         const newKind: CardKind = a.kind === 'video' ? 'video' : a.kind === 'pano' ? 'pano' : 'source'
-        useGraph.getState().addCard(newKind, world, { title: a.title || '素材', status: 'done', assetUrl: a.url, assetLocalPath: a.localPath, mime: a.mime })
+        useGraph.getState().addCard(newKind, world, {
+          title: a.title || '素材',
+          status: 'done',
+          assetUrl: a.url,
+          assetLocalPath: a.localPath,
+          mime: a.mime,
+          meta: newKind !== 'source' ? { resourceRole: 'source' } : {}
+        })
       } catch {
         /* ignore */
       }
@@ -429,7 +438,10 @@ export function CanvasStage() {
     const cardEl = el?.closest('[data-card-id]') as HTMLElement | null
     if (cardEl) {
       const c = useGraph.getState().getActiveBoard().cards[cardEl.dataset.cardId as string]
-      if (c?.assetUrl && (c.kind === 'pano' || (c.meta as any)?.pano)) {
+      if (c?.kind === 'note') {
+        useGraph.getState().setSelection([c.id])
+        useUi.getState().setEditingNoteId(c.id)
+      } else if (c?.assetUrl && (c.kind === 'pano' || (c.meta as any)?.pano)) {
         useUi.getState().setPanoCardId(c.id) // 全景卡 → 360 环视（须先于 image/source 分支，与 CardView 同步）
       } else if (c?.assetUrl && (c.kind === 'image' || c.kind === 'source')) {
         useUi.getState().setMaskCardId(c.id) // 双击图片节点 → 局部编辑页面
@@ -545,7 +557,7 @@ export function CanvasStage() {
     }
     const onKeyDown = (e: KeyboardEvent) => {
       // 任意全屏模态/对话框打开时，画布全局快捷键全部让位（防 Del/Ctrl+A/V 误伤背后选中的卡片）。
-      if (useUi.getState().anyModalOpen() || useDialog.getState().current) return
+      if (hasOpenModal() || useUi.getState().anyModalOpen() || useDialog.getState().current) return
       if (e.code === 'Space' && !isTyping()) {
         spaceRef.current = true
         if (inter.current.mode === 'idle') setCursor('grab')

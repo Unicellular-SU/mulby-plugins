@@ -17,8 +17,12 @@ export function FloatingToolbar() {
   const card = board.cards[selectedIds[0]]
   if (!card) return null
   const mime = card.mime || ''
-  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl)) && !!card.assetUrl
-  const isVid = card.kind === 'video' && !!card.assetLocalPath
+  const missingRefs = Array.isArray((card.meta as { missingMediaReferences?: unknown }).missingMediaReferences)
+    ? (card.meta as { missingMediaReferences: string[] }).missingMediaReferences
+    : []
+  const primaryMissing = missingRefs.includes('primary')
+  const isImg = !primaryMissing && (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && (mime.startsWith('image') || (!mime && !!card.assetUrl)) && !!card.assetUrl
+  const isVid = !primaryMissing && card.kind === 'video' && !!card.assetLocalPath
   if (!isImg && !isVid) return null
 
   const vp = board.viewport

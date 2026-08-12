@@ -1485,7 +1485,6 @@ function Inner({ onReload }: { onReload: () => void }) {
           const result = await attachStore()?.put?.(assetId, arrayBuffer, mimeType)
           const stored = result === true || !!(result && (result as any).ok)
           if (!stored) throw new Error('全景图存储失败，文件可能超过 50MB')
-          const previousId = curEnvironment?.assetId
           const safeMetadata: Pick<DirectorEnvironment, 'description' | 'source' | 'sourceCardId'> = {
             source: metadata.source,
             sourceCardId: metadata.sourceCardId?.slice(0, 160),
@@ -1502,7 +1501,7 @@ function Inner({ onReload }: { onReload: () => void }) {
               captureOrigin: [C.position.x, C.position.y, C.position.z],
               ...safeMetadata
             }, true)
-            if (previousId && previousId !== assetId) await attachStore()?.remove?.(previousId)
+            // 旧附件可能仍被复制工程/撤销历史引用，不能立即删除；工程库的引用感知清理会安全回收。
           } catch (error) {
             try { await attachStore()?.remove?.(assetId) } catch { /* ignore cleanup failure */ }
             throw error
@@ -2566,11 +2565,8 @@ function Inner({ onReload }: { onReload: () => void }) {
           getLighting: () => curLighting,
           importEnvironmentFile,
           clearEnvironment: async () => {
-            const previousId = curEnvironment?.assetId
             await loadEnvironmentState(null)
-            if (previousId) {
-              try { await attachStore()?.remove?.(previousId) } catch { /* keep UI usable when cleanup fails */ }
-            }
+            // 不立即删除旧附件：复制工程可能共享同一 assetId，统一交给引用感知 GC。
           },
           setEnvironmentDescription: (description: string) => {
             if (!curEnvironment) return

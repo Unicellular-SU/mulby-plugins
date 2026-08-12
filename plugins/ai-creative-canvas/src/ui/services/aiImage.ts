@@ -1,5 +1,5 @@
 import type { Board, Card } from '../types'
-import { resolveGenInputs } from './references'
+import { resolveGenerationPrompt } from './references'
 import { loadImageInput } from './media'
 import { useGraph } from '../store/graphStore'
 import { getStylePack, applyStylePack } from './stylePacks'
@@ -64,12 +64,11 @@ function aspectHint(aspect: string): string {
   return `\n\n【画幅比例 ${aspect}，${ori}】`
 }
 // 风格包（项目级）注入所有图像提示词；自由画风作为补充叠加
-function styleHint(): string {
+function styleHint(board: Board): string {
   const g = useGraph.getState()
   const proj = g.project
-  const b = g.getActiveBoard()
-  const pack = getStylePack(b.stylePackId ?? proj.stylePackId) // 画布级优先
-  const freeStyle = b.style ?? proj.style
+  const pack = getStylePack(board.stylePackId ?? proj.stylePackId) // 画布级优先
+  const freeStyle = board.style ?? proj.style
   const parts: string[] = []
   if (pack) parts.push(applyStylePack(pack, 'keyframe'))
   if (freeStyle && freeStyle.trim()) parts.push(freeStyle.trim())
@@ -79,6 +78,75 @@ function styleHint(): string {
 export interface ImageGenResult {
   images: string[]
   mime: string
+  trace: ImageGenerationTrace
+}
+
+export interface ImageGenerationTrace {
+  modelId: string
+  providerId?: string
+  profileId?: string
+  profileVersion?: string
+  requestIds: string[]
+  taskIds: string[]
+  sentPrompt: string
+  promptSource: 'local' | 'upstream' | 'mentions' | 'combined' | 'empty'
+  protocolWarnings: string[]
+  startedAt: number
+}
+
+type ImageApiWithDiagnostics = ReturnType<typeof ai>['images'] & {
+  providers?: {
+    describe(input: { providerId?: string; model?: string }): Promise<{
+      providerId?: string
+      profile?: { id?: string; version?: string }
+      warnings?: Array<{ message?: string }>
+      resolution?: { unresolvedReasons?: string[] }
+    }>
+  }
+  tasks?: {
+    list(input?: { clientTag?: string; limit?: number }): Promise<{ tasks?: Array<{ taskId?: string }> }>
+  }
+}
+
+function unique(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => !!value))]
+}
+
+function requestIdFor(cardId: string): string {
+  return `ace-${cardId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+async function imageProviderTrace(model: string): Promise<Pick<ImageGenerationTrace, 'providerId' | 'profileId' | 'profileVersion' | 'protocolWarnings'>> {
+  const api = ai().images as ImageApiWithDiagnostics
+  const fallbackProviderId = model.includes(':') ? model.split(':', 1)[0] : undefined
+  try {
+    const description = await api.providers?.describe({ model })
+    const warningMessages = description?.warnings?.map((warning) => warning.message).filter((message): message is string => !!message) || []
+    const resolutionWarnings = description?.resolution?.unresolvedReasons?.map((reason) => `协议解析：${reason}`) || []
+    return {
+      providerId: description?.providerId || fallbackProviderId,
+      profileId: description?.profile?.id,
+      profileVersion: description?.profile?.version,
+      protocolWarnings: unique([...warningMessages, ...resolutionWarnings])
+    }
+  } catch {
+    return { providerId: fallbackProviderId, protocolWarnings: [] }
+  }
+}
+
+async function taskIdsFor(requestIds: string[]): Promise<string[]> {
+  const tasks = (ai().images as ImageApiWithDiagnostics).tasks
+  if (!tasks) return []
+  const ids: Array<string | undefined> = []
+  for (const clientTag of unique(requestIds)) {
+    try {
+      const page = await tasks.list({ clientTag, limit: 1 })
+      ids.push(page.tasks?.[0]?.taskId)
+    } catch {
+      // 老版本宿主没有持久任务查询能力时仍正常返回图片，只缺少诊断 ID。
+    }
+  }
+  return unique(ids)
 }
 
 export async function generateImage(
@@ -94,7 +162,10 @@ export async function generateImage(
   const model = card.modelId || (pano ? panoModel : null)
   if (!model) throw new Error('请先选择图像模型（面板内"模型"下拉；或在工程设置里配 360 专用模型）')
 
-  const inputs = resolveGenInputs(card, board)
+  const startedAt = Date.now()
+  const providerTrace = await imageProviderTrace(model)
+  const resolved = resolveGenerationPrompt(card, board, 'media')
+  const inputs = resolved.inputs
   const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
   // 全景看的是 ~60° 一小片（约占贴图宽 1/6），分辨率要够才不糊：至少 2K
   const resolution = pano && ['', '1K'].includes(String(params.resolution || '')) ? '2K' : String(params.resolution || '1K')
@@ -102,7 +173,12 @@ export async function generateImage(
   const count = pano ? 1 : Math.max(1, Math.min(4, Number(params.count) || 1)) // 全景单张
   // 图生图全景：显式告知「以参考图场景重构 360 环绕」，纯文字则直接描述场景
   const panoRefLead = pano && inputs.images.length > 0 ? '以参考图片的场景与风格为基础，重构为完整的 360 环绕环境。' : ''
-  const prompt = panoRefLead + (card.prompt || '') + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint()
+  const prompt = panoRefLead + resolved.text + aspectHint(aspect) + (pano ? panoHint() : '') + styleHint(board)
+  const requestIds: string[] = []
+  const rememberRequestId = (requestId: string) => {
+    if (!requestIds.includes(requestId)) requestIds.push(requestId)
+    onRequestId(requestId)
+  }
 
   // 参考图（连入卡片 + 上传素材）→ 附件；首图主图、其余多图参考
   const attIds: string[] = []
@@ -120,13 +196,16 @@ export async function generateImage(
   let images: string[] | undefined
   if (attIds.length > 0) {
     onProgress(0.3)
+    const requestId = requestIdFor(card.id)
+    rememberRequestId(requestId)
     const res = await ai().images.edit({
       model,
       imageAttachmentId: attIds[0],
       referenceAttachmentIds: attIds.slice(1),
       prompt,
       size,
-      aspectRatio: aspect // 编辑生成同样吃尺寸/画幅（宿主已支持；OpenAI 系消费 size，Gemini 系消费 aspectRatio）
+      aspectRatio: aspect, // 编辑生成同样吃尺寸/画幅（宿主已支持；OpenAI 系消费 size，Gemini 系消费 aspectRatio）
+      requestId
     })
     images = res.images
     onProgress(1)
@@ -148,7 +227,7 @@ export async function generateImage(
           genReq,
           (chunk: any) => {
             if (chunk.__requestId) {
-              onRequestId(chunk.__requestId)
+              rememberRequestId(chunk.__requestId)
               return
             }
             if (chunk.type === 'preview' && chunk.image) {
@@ -172,6 +251,19 @@ export async function generateImage(
   }
 
   if (!images || images.length === 0) throw new Error('模型未返回图像')
+  const taskIds = await taskIdsFor(requestIds)
   // 接缝不再做羽化（效果差）——改由「修复接缝」走偏移+生成式重绘（mediaPano.repairEquirectSeam）
-  return { images, mime: 'image/png' }
+  return {
+    images,
+    mime: 'image/png',
+    trace: {
+      modelId: model,
+      ...providerTrace,
+      requestIds: unique(requestIds),
+      taskIds,
+      sentPrompt: prompt,
+      promptSource: resolved.source,
+      startedAt
+    }
+  }
 }

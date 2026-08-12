@@ -39,7 +39,7 @@ function Row({ entry, queueIdx, foreign }: { entry: Entry; queueIdx: number; for
           <Ban size={13} />
         </button>
       ) : (
-        canGenerate(card.kind) && (
+        canGenerate(card) && (
           <button onClick={() => void generateCard(card.id)} title="重试" className="shrink-0 w-6 h-6 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/10">
             <RotateCw size={13} />
           </button>

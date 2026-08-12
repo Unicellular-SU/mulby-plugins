@@ -1,13 +1,7 @@
 import type { Board, Card, Material, MaterialKind } from '../types'
+import { acceptsMaterialKind, consumableMaterials, materialKindOfCard } from './nodeCapabilities'
 
 const KIND_LABEL: Record<MaterialKind, string> = { image: '图片', video: '视频', audio: '音频', text: '文本' }
-
-function matKindOfCard(c: Card): MaterialKind {
-  if (c.kind === 'video') return 'video'
-  if (c.kind === 'audio') return 'audio'
-  if (c.kind === 'text') return 'text'
-  return 'image' // image | source 都视作图片素材
-}
 
 // 默认标题（未重命名）→ 这些用自动编号，重命名后用真实名称
 const DEFAULT_TITLES = new Set(['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'])
@@ -25,6 +19,11 @@ export function buildMaterials(card: Card, board: Board): Material[] {
     return l
   }
   const seen = new Set<string>()
+  const ownMissing = new Set(
+    Array.isArray((card.meta as { missingMediaReferences?: unknown })?.missingMediaReferences)
+      ? ((card.meta as { missingMediaReferences: string[] }).missingMediaReferences)
+      : []
+  )
 
   const edgeSources = Object.values(board.edges)
     .filter((e) => e.target === card.id)
@@ -37,7 +36,10 @@ export function buildMaterials(card: Card, board: Board): Material[] {
     const c = board.cards[id]
     if (!c || c.kind === 'group' || c.kind === 'note') continue
     seen.add('card:' + id)
-    const k = matKindOfCard(c)
+    const k = materialKindOfCard(c)
+    if (!k) continue
+    const sourceMissing = Array.isArray((c.meta as { missingMediaReferences?: unknown })?.missingMediaReferences)
+      && (c.meta as { missingMediaReferences: string[] }).missingMediaReferences.includes('primary')
     counters[k]++
     const t = (c.title || '').trim()
     const label = uniq(t && !DEFAULT_TITLES.has(t) ? t : `${KIND_LABEL[k]}${counters[k]}`)
@@ -46,33 +48,46 @@ export function buildMaterials(card: Card, board: Board): Material[] {
       origin: edgeSet.has(id) ? 'edge' : 'card',
       kind: k,
       label,
-      thumbUrl: c.assetUrl || undefined,
+      thumbUrl: sourceMissing ? undefined : c.assetUrl || undefined,
       text: c.text || undefined,
       cardId: id,
-      assetUrl: c.assetUrl || undefined,
-      assetLocalPath: c.assetLocalPath || undefined,
-      mime: c.mime || undefined
+      assetUrl: sourceMissing ? undefined : c.assetUrl || undefined,
+      assetLocalPath: sourceMissing ? undefined : c.assetLocalPath || undefined,
+      mime: c.mime || undefined,
+      unavailable: !!sourceMissing
     })
   }
 
-  for (const a of card.assets || []) {
+  for (let index = 0; index < (card.assets || []).length; index++) {
+    const a = card.assets[index]
     counters[a.kind]++
     const nm = (a.name || '').replace(/\.[^.]+$/, '').trim()
     const label = uniq(nm || `${KIND_LABEL[a.kind]}${counters[a.kind]}`)
+    const fileMissing = ownMissing.has(`input:${a.id || index}`)
+    // 文本内容已经内嵌在工程 JSON 中，即使其原始文件后来被删除，仍是可用输入。
+    const unavailable = fileMissing && !(a.kind === 'text' && !!a.text?.trim())
     mats.push({
       matId: 'upload:' + a.id,
       origin: 'upload',
       kind: a.kind,
       label,
-      thumbUrl: a.kind === 'image' ? a.url : undefined,
+      thumbUrl: !unavailable && a.kind === 'image' ? a.url : undefined,
       text: a.kind === 'text' ? a.text : undefined,
-      assetUrl: a.url,
-      assetLocalPath: a.localPath,
-      mime: a.mime
+      assetUrl: unavailable ? undefined : a.url,
+      assetLocalPath: unavailable ? undefined : a.localPath,
+      mime: a.mime,
+      unavailable
     })
   }
 
   return mats
+}
+
+/** 只有确实带有可发送内容的素材才能参与 @ 解析和 Provider 输入。 */
+export function isUsableMaterial(material: Material): boolean {
+  if (material.unavailable) return false
+  if (material.kind === 'text') return !!material.text?.trim()
+  return !!(material.assetUrl || material.assetLocalPath || material.thumbUrl)
 }
 
 export interface GenImageInput {
@@ -85,14 +100,31 @@ export interface GenInputs {
   images: GenImageInput[]
 }
 
-// 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
-export function resolveGenInputs(card: Card, board: Board): GenInputs {
-  const mats = buildMaterials(card, board)
-  const selected = selectedGenMaterials(card, board, mats)
+export type GenerationPromptPurpose = 'media' | 'text' | 'speech'
+
+export interface ResolvedGenerationPrompt {
+  /** 真正交给下游模型的内容提示（画幅、风格等模型参数仍由各生成器追加） */
+  text: string
+  inputs: GenInputs
+  /** 有效 @ 命中后只使用点名素材；无命中则使用全部连线/引用/上传素材 */
+  hasExplicitMentions: boolean
+  source: 'empty' | 'local' | 'upstream' | 'combined' | 'mentions'
+}
+
+function mentionPattern(label: string, flags = ''): RegExp {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp('@' + escaped + '(?=$|[\\s,，。、；;@])', flags)
+}
+
+function mentionedMaterials(prompt: string, mats: Material[]): Material[] {
+  return mats.filter((m) => mentionPattern(m.label).test(prompt || ''))
+}
+
+function inputsFromMaterials(selected: Material[]): GenInputs {
   const texts: { label: string; text: string }[] = []
   const images: GenImageInput[] = []
   for (const m of selected) {
-    if (m.kind === 'text' && m.text) texts.push({ label: m.label, text: m.text })
+    if (m.kind === 'text' && m.text?.trim()) texts.push({ label: m.label, text: m.text.trim() })
     else if (m.kind === 'image') {
       const url = m.assetUrl || m.thumbUrl
       if (url || m.assetLocalPath) images.push({ url: url || undefined, localPath: m.assetLocalPath, mime: m.mime })
@@ -101,12 +133,76 @@ export function resolveGenInputs(card: Card, board: Board): GenInputs {
   return { texts, images }
 }
 
+// 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
+export function resolveGenInputs(card: Card, board: Board): GenInputs {
+  const mats = buildMaterials(card, board)
+  const selected = selectedGenMaterials(card, board, mats)
+  return inputsFromMaterials(selected)
+}
+
 /** 本次生成将使用的素材（与 resolveGenInputs 同源） */
 export function selectedGenMaterials(card: Card, board: Board, mats = buildMaterials(card, board)): Material[] {
-  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const refd = mats.filter((m) => new RegExp('@' + esc(m.label) + '(?=$|[\\s,，。、；;@])').test(card.prompt || ''))
-  const picked = refd.length ? refd : mats
-  return picked.filter((m) => m.kind === 'text' || m.kind === 'image')
+  const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+  const refd = mentionedMaterials(card.prompt || '', accepted)
+  const picked = refd.length ? refd : accepted
+  return consumableMaterials(card, picked)
+}
+
+function formatTextInputs(texts: GenInputs['texts']): string {
+  if (texts.length === 1) return texts[0].text
+  return texts.map((t) => `【${t.label}】\n${t.text}`).join('\n\n')
+}
+
+/**
+ * 把画布的“软引用”解析成确定的模型输入：
+ * - 没有有效 @：连线/引用的文本自动成为上游输入；本卡 prompt 是补充要求。
+ * - 有有效 @：只选中被点名素材，文本 @ 原位展开成真实内容，图片 @ 改写为附件语义。
+ * - 无效 @ 从最终提示中移除，避免把内部卡片名当普通提示词发给模型。
+ */
+export function resolveGenerationPrompt(
+  card: Card,
+  board: Board,
+  purpose: GenerationPromptPurpose = 'media'
+): ResolvedGenerationPrompt {
+  const mats = buildMaterials(card, board)
+  const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+  const mentioned = mentionedMaterials(card.prompt || '', accepted)
+  const hasExplicitMentions = mentioned.length > 0
+  const selected = consumableMaterials(card, hasExplicitMentions ? mentioned : accepted)
+  const inputs = inputsFromMaterials(selected)
+  let local = (card.prompt || '').trim()
+
+  // 先清理用户原始输入里的失效 token，再展开有效文本；避免误删上游文本内容本身带有的 @ 字样。
+  for (const token of findUnresolvedMentions(local, accepted)) local = local.replace(mentionPattern(token, 'g'), '')
+
+  if (hasExplicitMentions) {
+    for (const m of mentioned) {
+      const replacement = m.kind === 'text' ? (m.text || '').trim() : m.kind === 'image' ? `参考图「${m.label}」` : ''
+      local = local.replace(mentionPattern(m.label, 'g'), replacement)
+    }
+  }
+  local = local.replace(/[ \t]{2,}/g, ' ').trim()
+
+  if (hasExplicitMentions) {
+    return { text: local, inputs, hasExplicitMentions, source: local ? 'mentions' : 'empty' }
+  }
+
+  const upstream = formatTextInputs(inputs.texts)
+  if (purpose === 'speech') {
+    // 配音节点的文本框也是正文；有上游时按“上游正文 → 本节点追加正文”顺序朗读，不注入会被念出的说明标签。
+    const text = [upstream, local].filter(Boolean).join('\n\n')
+    const source = local && upstream ? 'combined' : local ? 'local' : upstream ? 'upstream' : 'empty'
+    return { text, inputs, hasExplicitMentions, source }
+  }
+  if (purpose === 'text') {
+    const text = [local, upstream && `参考资料：\n${upstream}`].filter(Boolean).join('\n\n')
+    const source = local && upstream ? 'combined' : local ? 'local' : upstream ? 'upstream' : 'empty'
+    return { text, inputs, hasExplicitMentions, source }
+  }
+
+  const text = [upstream, local && upstream ? `本节点补充要求：\n${local}` : local].filter(Boolean).join('\n\n')
+  const source = local && upstream ? 'combined' : local ? 'local' : upstream ? 'upstream' : 'empty'
+  return { text, inputs, hasExplicitMentions, source }
 }
 
 /** 提示词中 @token（不含 @ 符号） */

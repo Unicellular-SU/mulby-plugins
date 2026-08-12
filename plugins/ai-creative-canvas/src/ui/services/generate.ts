@@ -6,7 +6,7 @@ import { aiLimiter } from './limiter'
 import { generateText } from './aiText'
 import { generateImage } from './aiImage'
 import { saveBase64, mimeToExt, toFileUrl, loadImageInput } from './media'
-import { resolveGenInputs, findUnresolvedMentions, buildMaterials } from './references'
+import { resolveGenerationPrompt, findUnresolvedMentions, buildMaterials, isUsableMaterial } from './references'
 import { useProviders } from '../store/providerStore'
 import { submitVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { snapDuration } from './videoSpecs'
@@ -14,6 +14,8 @@ import { videoStyleTag } from './stylePacks'
 import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
 import { toast } from '../store/toastStore'
+import { acceptsMaterialKind, canGenerateCard, canGenerateKind } from './nodeCapabilities'
+import type { Card } from '../types'
 
 const limiter = aiLimiter // 共享并发池（card 生成 + 360/局部修复 共用，统一限流）
 const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
@@ -75,8 +77,8 @@ function notifyDone(_cardId: string) {
   }
 }
 
-export function canGenerate(kind: string): boolean {
-  return kind === 'text' || kind === 'image' || kind === 'pano' || kind === 'video' || kind === 'audio'
+export function canGenerate(value: string | Card): boolean {
+  return typeof value === 'string' ? canGenerateKind(value) : canGenerateCard(value)
 }
 
 // 批量生成所有选中的可生成卡片（分镜扇出 → 一键出图）
@@ -85,7 +87,7 @@ export function generateSelected(): void {
   const board = g.getActiveBoard()
   for (const id of [...g.selectedIds]) {
     const c = board.cards[id]
-    if (c && canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued') {
+    if (c && canGenerate(c) && c.status !== 'running' && c.status !== 'queued') {
       void generateCard(id)
     }
   }
@@ -100,27 +102,42 @@ export async function generateCard(cardId: string): Promise<void> {
   // 未设防的入口有 MediaToolbox「重新生成」、NodeEditor direct 预设等；与 generateSelected 的既有守卫一致。
   if (card0.status === 'running' || card0.status === 'queued') return
   canceledCards.delete(cardId) // 清理上一轮可能残留的取消标记，避免本轮被误早退
-  if (!canGenerate(card0.kind)) {
+  if (!canGenerate(card0)) {
     g0.updateCard(cardId, { status: 'error', error: '该类型卡片不支持生成（素材/分组/便签卡仅用于组织与引用）' })
     return
   }
-  if ((card0.kind === 'text' || card0.kind === 'image') && !card0.prompt?.trim()) {
-    g0.updateCard(cardId, { status: 'error', error: '请先填写提示词' })
-    return
-  }
-
   const board0 = g0.getActiveBoard()
   const mats0 = buildMaterials(card0, board0)
-  // 全景卡：纯文字或纯参考图皆可（图生图重构 360 场景无需文字），两者全无才拦。
-  // 参考图须真有产物（与 resolveGenInputs 同判据）——上游空图片卡不算，防止只剩模板样板词也起跑烧额度
-  const hasRealImage = mats0.some((m) => m.kind === 'image' && (m.assetUrl || m.thumbUrl || m.assetLocalPath))
-  if (card0.kind === 'pano' && !card0.prompt?.trim() && !hasRealImage) {
-    g0.updateCard(cardId, { status: 'error', error: '请输入场景描述或添加参考图片' })
+  const promptPurpose = card0.kind === 'text' ? 'text' : card0.kind === 'audio' ? 'speech' : 'media'
+  const resolved0 = resolveGenerationPrompt(card0, board0, promptPurpose)
+  if (card0.kind === 'text' && !card0.prompt.trim()) {
+    g0.updateCard(cardId, { status: 'error', error: '请填写生成指令；上游文本会作为参考资料' })
     return
   }
-  const badMentions = findUnresolvedMentions(card0.prompt || '', mats0)
+  if (card0.kind === 'image' && !resolved0.text.trim()) {
+    g0.updateCard(cardId, {
+      status: 'error',
+      error: '请填写补充要求或连接包含内容的文本卡片'
+    })
+    return
+  }
+  // 全景卡：纯文字或纯参考图皆可（图生图重构 360 场景无需文字），两者全无才拦。
+  // 参考图须真有产物（与 resolveGenInputs 同判据）——上游空图片卡不算，防止只剩模板样板词也起跑烧额度
+  const hasRealImage = resolved0.inputs.images.length > 0
+  if (card0.kind === 'pano' && !resolved0.text.trim() && !hasRealImage) {
+    g0.updateCard(cardId, { status: 'error', error: '请输入场景描述、连接文本卡片或添加参考图片' })
+    return
+  }
+  if (card0.kind === 'video' && !resolved0.text.trim() && !hasRealImage) {
+    g0.updateCard(cardId, { status: 'error', error: '请输入视频描述、连接文本卡片或添加参考图片' })
+    return
+  }
+  const badMentions = findUnresolvedMentions(
+    card0.prompt || '',
+    mats0.filter((material) => acceptsMaterialKind(card0, material.kind) && isUsableMaterial(material))
+  )
   if (badMentions.length) {
-    toast(`提示词中有无效 @ 引用：${badMentions.join('、')}（将忽略，改用全部素材）`, 'info')
+    toast(`提示词中有无效 @ 引用：${badMentions.join('、')}（无效引用将忽略）`, 'info')
   }
 
   // 默认模型回填：卡片未选 → 工程默认 → 可用列表第一个（让批量/分镜卡无需逐个选模型）。
@@ -197,20 +214,33 @@ export async function generateCard(cardId: string): Promise<void> {
           results.push({ url: s.url, localPath: s.path, mime: res.mime })
         }
         const base0 = useGraph.getState().getCard(cardId)
+        const maxSavedPrompt = 4000
+        const sentPrompt = res.trace.sentPrompt.slice(0, maxSavedPrompt)
         commit({
           status: 'done',
           progress: 1,
           assetUrl: results[0].url,
           assetLocalPath: results[0].localPath,
           mime: res.mime,
-          meta: { ...(base0?.meta || {}), results, ...(card.kind === 'pano' ? { pano: true } : {}) }
+          meta: {
+            ...(base0?.meta || {}),
+            results,
+            ...(card.kind === 'pano' ? { pano: true } : {}),
+            imageGeneration: {
+              ...res.trace,
+              sentPrompt,
+              promptLength: res.trace.sentPrompt.length,
+              promptTruncated: res.trace.sentPrompt.length > maxSavedPrompt,
+              completedAt: Date.now()
+            }
+          }
         })
       } else if (card.kind === 'audio') {
         const cfg = useProviders.getState().activeFor('audio')
         if (!cfg) throw new Error('未配置音频/TTS Provider（右上角“设置”）')
         const key = await useProviders.getState().getKey(cfg.id)
-        const inputs = resolveGenInputs(card, board)
-        const text = (card.prompt && card.prompt.trim()) || inputs.texts.map((t) => t.text).join('\n')
+        const resolved = resolveGenerationPrompt(card, board, 'speech')
+        const text = resolved.text
         if (!text) throw new Error('请填写配音文本（或引用一张文本卡）')
         commit({ progress: 0.4 })
         const pp = card.params || {}
@@ -279,7 +309,8 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const cfg = useProviders.getState().activeFor('video')
       if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
       const key = await useProviders.getState().getKey(cfg.id)
-      const inputs = resolveGenInputs(card, board)
+      const resolved = resolveGenerationPrompt(card, board, 'media')
+      const inputs = resolved.inputs
       const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
         const bytes = await loadImageInput(im)
         return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
@@ -295,7 +326,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const cam = (card.params?.camera as string) || ''
       const mot = (card.params?.motion as string) || ''
       const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
-      const vprompt = card.prompt + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
+      const vprompt = resolved.text + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
       // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
       const sentParams = {
         ...card.params,

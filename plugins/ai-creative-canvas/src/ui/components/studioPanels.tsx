@@ -14,6 +14,7 @@ import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
 import { base64ToArrayBuffer } from '../util'
 import type { EditOp, TrimParams, SpeedParams, TransformParams, ColorParams, AudioParams, ExportParams, OverlayParams, SubtitleCue } from '../services/videoEdit/types'
 import { Row, SliderRow, Toggle, fmt } from './studioControls'
+import { normalizeOpenDialogPaths } from '../services/importMediaTypes'
 
 const RES_OPTIONS = [
   { value: 'follow', label: '跟随原视频' },
@@ -135,7 +136,7 @@ export function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; pla
           <button onClick={async () => {
             const m = window.mulby
             try {
-              const paths = await m?.dialog?.showOpenDialog({ title: '选择 3D LUT', filters: [{ name: 'LUT', extensions: ['cube', '3dl'] }], properties: ['openFile'] })
+              const paths = normalizeOpenDialogPaths(await m?.dialog?.showOpenDialog({ title: '选择 3D LUT', filters: [{ name: 'LUT', extensions: ['cube', '3dl'] }], properties: ['openFile'] }))
               if (paths?.[0]) set({ lutPath: paths[0] })
             } catch { /* ignore */ }
           }} className="px-2 py-1 rounded text-[11px] bg-black/5 dark:bg-white/10 hover:bg-black/10 truncate flex-1 text-left">
@@ -256,7 +257,7 @@ function SubtitlePanel({ op, params, dur, playhead }: { op: EditOp; params: Over
   const importSrt = async () => {
     const m = window.mulby
     try {
-      const paths = await m?.dialog?.showOpenDialog({ title: '导入 .srt 字幕', filters: [{ name: '字幕', extensions: ['srt', 'vtt', 'txt'] }], properties: ['openFile'] })
+      const paths = normalizeOpenDialogPaths(await m?.dialog?.showOpenDialog({ title: '导入 .srt 字幕', filters: [{ name: '字幕', extensions: ['srt', 'vtt', 'txt'] }], properties: ['openFile'] }))
       if (!paths?.[0]) return
       const b64 = (await m.filesystem.readFile(paths[0], 'base64')) as string
       const buf = base64ToArrayBuffer(b64)

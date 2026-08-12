@@ -1,19 +1,22 @@
 import type { Card } from '../types'
-
-// 可作为引用目标（消费上游素材去生成）的卡片类型；与 generate.canGenerate 保持一致
-const GENERATABLE = new Set(['text', 'image', 'pano', 'video', 'audio'])
+import { acceptsMaterialKind, canGenerateCard, materialKindLabel, materialKindOfCard } from './nodeCapabilities'
 
 export interface ConnVerdict {
   ok: boolean
   reason?: string
 }
 
-// 连接合法性（软引用模型：仅拦截无意义连接，不做端口类型门控）
+// 连接合法性：严格与生成链路的真实输入能力一致，避免“线能连、素材能显示、生成却完全不消费”。
 export function canConnect(source: Card, target: Card): ConnVerdict {
   if (source.id === target.id) return { ok: false, reason: '不能连接到自身' }
   if (source.kind === 'group' || target.kind === 'group') return { ok: false, reason: '分组不能作为连线端点' }
   if (source.kind === 'note' || target.kind === 'note') return { ok: false, reason: '便签不参与引用连线' }
-  if (!GENERATABLE.has(target.kind)) return { ok: false, reason: '目标需是可生成卡片（文本/图片/全景/视频/音频）' }
+  if (!canGenerateCard(target)) return { ok: false, reason: '目标需是可生成卡片（导入的只读资源只能作为上游）' }
+  const sourceKind = materialKindOfCard(source)
+  if (!sourceKind) return { ok: false, reason: '该节点没有可引用的素材产物' }
+  if (!acceptsMaterialKind(target, sourceKind)) {
+    return { ok: false, reason: `${target.kind === 'audio' ? '音频' : target.kind === 'video' ? '视频' : target.kind === 'text' ? '文本' : target.kind === 'pano' ? '全景' : '图片'}节点不接受${materialKindLabel(sourceKind)}输入` }
+  }
   return { ok: true }
 }
 

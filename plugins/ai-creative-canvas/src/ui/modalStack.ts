@@ -8,6 +8,11 @@ type Entry = { id: string; onClose: () => void }
 const stack: Entry[] = []
 let installed = false
 
+/** 画布全局快捷键用此查询真实模态栈，避免组件局部 modal 未登记到 uiStore 时误删背后节点。 */
+export function hasOpenModal(): boolean {
+  return stack.length > 0
+}
+
 function onKey(e: KeyboardEvent): void {
   if (e.key !== 'Escape' || isImeComposing(e)) return // 组合期 Esc = 取消 IME 候选，不关模态
   const top = stack[stack.length - 1]

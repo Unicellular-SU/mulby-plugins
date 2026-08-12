@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Type, Image as ImageIcon, Compass, Video, Music, Package, StickyNote, Upload, Loader2 } from 'lucide-react'
+import { Type, Image as ImageIcon, Compass, Video, Music, StickyNote, Upload, Loader2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { screenToWorld } from '../canvas/viewport'
@@ -12,7 +12,6 @@ const ITEMS: Array<{ kind: CardKind; icon: typeof Type; label: string }> = [
   { kind: 'pano', icon: Compass, label: '全景' },
   { kind: 'video', icon: Video, label: '视频' },
   { kind: 'audio', icon: Music, label: '音频' },
-  { kind: 'source', icon: Package, label: '素材' },
   { kind: 'note', icon: StickyNote, label: '便签' }
 ]
 

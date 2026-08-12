@@ -10,7 +10,7 @@ import {
   localImportMime,
   normalizeRemoteHttpUrl
 } from '../src/backendGuards.ts'
-import { extensionOf, guessMimeByExt, isSupportedImportMime, kindForMime, parseDroppedPathText, resolveImportMime } from '../src/ui/services/importMediaTypes.ts'
+import { extensionOf, guessMimeByExt, isSupportedImportMime, kindForMime, normalizeOpenDialogPaths, parseDroppedPathText, parseDroppedPlainPathText, resolveImportMime } from '../src/ui/services/importMediaTypes.ts'
 
 function testImportMimeFallbacks() {
   assert.equal(resolveImportMime('clip.MOV', ''), 'video/quicktime')
@@ -36,6 +36,19 @@ function testDroppedPathParsing() {
     ['/Users/demo/My Shot.mp4', 'C:/Media/a.png']
   )
   assert.deepEqual(parseDroppedPathText('/tmp/a.png\n\n/tmp/b.mp3'), ['/tmp/a.png', '/tmp/b.mp3'])
+  assert.deepEqual(parseDroppedPlainPathText('网页里的一段普通文字\n/tmp/a.png\nC:\\Media\\b.mp4'), ['/tmp/a.png', 'C:\\Media\\b.mp4'])
+  assert.deepEqual(
+    normalizeOpenDialogPaths([
+      '/tmp/a.png',
+      { path: '/tmp/b.mp4' },
+      { filePath: 'C:\\Media\\voice.mp3' },
+      { filePaths: [{ path: '/tmp/c.txt' }] },
+      { data: { files: [{ fullPath: '/tmp/nested.mov' }] } },
+      { url: 'file:///Users/demo/My%20Shot.webp' }
+    ]),
+    ['/tmp/a.png', '/tmp/b.mp4', 'C:\\Media\\voice.mp3', '/tmp/c.txt', '/tmp/nested.mov', '/Users/demo/My Shot.webp']
+  )
+  assert.deepEqual(normalizeOpenDialogPaths({ canceled: true, filePaths: ['/tmp/ignored.png'] }), [])
 }
 
 function testRemoteUrlBoundary() {
@@ -61,4 +74,4 @@ testImportMimeFallbacks()
 testDroppedPathParsing()
 testRemoteUrlBoundary()
 testSizeGuards()
-console.log('input/backend guards: 32 assertions OK')
+console.log('input/backend guards: 35 assertions OK')

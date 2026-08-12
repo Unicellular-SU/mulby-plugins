@@ -6,17 +6,26 @@ import type { Card } from '../types'
 import { durationValues } from '../services/videoSpecs'
 import { getParamSchema } from '../services/paramSchema'
 
-function SeedControl({ value, onChange }: { value: number | undefined; onChange: (v: number | undefined) => void }) {
+function SeedControl({ value, onChange, onCommitStart }: { value: number | undefined; onChange: (v: number | undefined) => void; onCommitStart: () => void }) {
+  const editArmed = useRef(false)
   return (
     <div className="flex items-center gap-0.5 shrink-0">
       <input
         value={value ?? ''}
-        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+        onFocus={() => { editArmed.current = true }}
+        onBlur={() => { editArmed.current = false }}
+        onChange={(e) => {
+          if (editArmed.current) {
+            onCommitStart()
+            editArmed.current = false
+          }
+          onChange(e.target.value ? Number(e.target.value) : undefined)
+        }}
         placeholder="seed"
         title="随机种子"
         className="w-[60px] text-xs rounded-md px-1.5 py-1 bg-black/5 dark:bg-white/10 outline-none focus:ring-1 focus:ring-indigo-400"
       />
-      <button onClick={() => onChange(Math.floor(Math.random() * 1e9))} title="随机种子" className="px-1 py-1 rounded hover:bg-black/10 dark:hover:bg-white/15 grid place-items-center opacity-70 hover:opacity-100">
+      <button onClick={() => { onCommitStart(); onChange(Math.floor(Math.random() * 1e9)) }} title="随机种子" className="px-1 py-1 rounded hover:bg-black/10 dark:hover:bg-white/15 grid place-items-center opacity-70 hover:opacity-100">
         <Dices size={13} />
       </button>
     </div>
@@ -24,7 +33,7 @@ function SeedControl({ value, onChange }: { value: number | undefined; onChange:
 }
 
 // 自定义时长滑块：整行，按所选模型的合法档位吸附
-function DurationSlider({ values, value, onChange }: { values: number[]; value: number; onChange: (v: number) => void }) {
+function DurationSlider({ values, value, onChange, onCommitStart }: { values: number[]; value: number; onChange: (v: number) => void; onCommitStart: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const n = values.length
   const single = n <= 1
@@ -48,6 +57,7 @@ function DurationSlider({ values, value, onChange }: { values: number[]; value: 
     if (single) return
     e.stopPropagation()
     e.preventDefault()
+    onCommitStart()
     setFromX(e.clientX)
     const move = (ev: PointerEvent) => setFromX(ev.clientX)
     const up = () => {
@@ -88,17 +98,18 @@ export function ParamControls({ card }: { card: Card }) {
   const updateCard = useGraph((s) => s.updateCard)
   const p = card.params || {}
   const set = (k: string, v: unknown) => updateCard(card.id, { params: { ...card.params, [k]: v } })
+  const commitStart = () => useGraph.getState().pushHistory()
   const fields = getParamSchema(card)
   if (!fields.length) return null
   return (
     <>
       {fields.map((f) => {
-        if (f.type === 'seed') return <SeedControl key={f.key} value={p[f.key] as number | undefined} onChange={(v) => set(f.key, v)} />
-        if (f.type === 'duration') return <DurationSlider key={f.key} values={durationValues(card.modelId)} value={Number(p[f.key]) || 5} onChange={(v) => set(f.key, v)} />
+        if (f.type === 'seed') return <SeedControl key={f.key} value={p[f.key] as number | undefined} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
+        if (f.type === 'duration') return <DurationSlider key={f.key} values={durationValues(card.modelId)} value={Number(p[f.key]) || 5} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
         const cur = p[f.key] !== undefined && p[f.key] !== null ? String(p[f.key]) : f.default
         return (
           <div key={f.key} className="shrink-0" style={{ width: f.width }}>
-            <Select className="w-full" value={cur} onChange={(v) => set(f.key, f.numeric ? Number(v) : v)} options={f.options} />
+            <Select className="w-full" value={cur} onChange={(v) => { commitStart(); set(f.key, f.numeric ? Number(v) : v) }} options={f.options} />
           </div>
         )
       })}

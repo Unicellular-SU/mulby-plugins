@@ -37,6 +37,48 @@ export function isSupportedImportMime(mime: string): boolean {
   return SUPPORTED_IMPORT_MIMES.has(value)
 }
 
+/**
+ * 兼容 Mulby 不同宿主版本的文件选择结果：公开契约是 string[]，部分运行时会返回
+ * `{ path }[]`、`{ filePath }[]`，或 Electron 风格 `{ filePaths: [...] }`。
+ * 统一在 UI 边界提取真实路径，禁止把对象隐式转成 "[object Object]" 传给后端。
+ */
+export function normalizeOpenDialogPaths(value: unknown): string[] {
+  const paths = new Set<string>()
+  const visited = new Set<object>()
+  const add = (raw: string) => {
+    const value = raw.trim()
+    if (!value) return
+    if (value.startsWith('file://')) {
+      for (const path of parseDroppedPathText(value)) if (path) paths.add(path)
+    } else {
+      paths.add(value)
+    }
+  }
+  const visit = (item: unknown, depth: number) => {
+    if (depth > 6 || item == null) return
+    if (typeof item === 'string') {
+      add(item)
+      return
+    }
+    if (Array.isArray(item)) {
+      for (const child of item) visit(child, depth + 1)
+      return
+    }
+    if (typeof item !== 'object' || visited.has(item)) return
+    visited.add(item)
+    const record = item as Record<string, unknown>
+    if (record.canceled === true) return
+    for (const key of ['path', 'filePath', 'fullPath', 'nativePath', 'url']) {
+      if (typeof record[key] === 'string') add(record[key] as string)
+    }
+    for (const key of ['filePaths', 'paths', 'files', 'data', 'result', 'value', 'selection']) {
+      if (record[key] != null) visit(record[key], depth + 1)
+    }
+  }
+  visit(value, 0)
+  return [...paths]
+}
+
 /** 同步解析拖拽事件里的 URI/纯文本路径；调用方必须在任何 await 之前执行。 */
 export function parseDroppedPathText(raw: string): string[] {
   if (!raw) return []
@@ -55,4 +97,13 @@ export function parseDroppedPathText(raw: string): string[] {
       }
     })
     .filter(Boolean)
+}
+
+/** 纯文本拖拽只接受明确的本地绝对路径，避免把网页文字误送给后端当文件读取。 */
+export function parseDroppedPlainPathText(raw: string): string[] {
+  return parseDroppedPathText(raw).filter((path) => (
+    path.startsWith('/')
+    || path.startsWith('\\\\')
+    || /^[a-zA-Z]:[\\/]/.test(path)
+  ))
 }

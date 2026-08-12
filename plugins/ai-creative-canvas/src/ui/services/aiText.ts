@@ -1,5 +1,5 @@
 import type { Board, Card } from '../types'
-import { resolveGenInputs } from './references'
+import { resolveGenerationPrompt } from './references'
 import { loadImageInput } from './media'
 
 function ai() {
@@ -12,7 +12,8 @@ export async function generateText(
   onChunk: (text: string) => void,
   onRequestId: (id: string) => void
 ): Promise<string> {
-  const inputs = resolveGenInputs(card, board)
+  const resolved = resolveGenerationPrompt(card, board, 'text')
+  const inputs = resolved.inputs
 
   // 参考图片 → vision 附件
   const imageContents: any[] = []
@@ -27,8 +28,7 @@ export async function generateText(
     }
   }
 
-  const refText = inputs.texts.map((t) => `【${t.label}】\n${t.text}`).join('\n\n')
-  const userText = [card.prompt, refText && `\n\n参考资料：\n${refText}`].filter(Boolean).join('')
+  const userText = resolved.text
   const content = imageContents.length ? [{ type: 'text', text: userText }, ...imageContents] : userText
 
   const messages = [

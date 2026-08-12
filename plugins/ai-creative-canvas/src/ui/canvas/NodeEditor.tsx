@@ -1,9 +1,9 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Compass, Film, Wand2, ScanText, Loader2, Brush, Maximize2, FolderOpen, RefreshCcw } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Maximize2, FolderOpen, RefreshCcw, Eye, History } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
-import { buildMaterials, findUnresolvedMentions, selectedGenMaterials } from '../services/references'
+import { buildMaterials, findUnresolvedMentions, isUsableMaterial, resolveGenerationPrompt, selectedGenMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
 import { enhancePrompt, describeImage } from '../services/promptTools'
@@ -16,11 +16,33 @@ import { ParamControls } from '../components/ParamControls'
 import { Select } from '../components/Select'
 import { KIND_ACCENT, KIND_LABEL, type Material, type MaterialKind } from '../types'
 import { toast } from '../store/toastStore'
-import { loadImportedResources, pickImportPaths, resourcesToNodeAssets } from '../services/importMedia'
-import { parseDroppedPathText } from '../services/importMediaTypes'
+import { loadImportedResources, pickImportPaths, resolveDroppedFilePaths, resourcesToNodeAssets } from '../services/importMedia'
+import { parseDroppedPathText, parseDroppedPlainPathText } from '../services/importMediaTypes'
+import { acceptedMaterialKinds, acceptsMaterialKind, materialKindLabel, materialKindOfCard } from '../services/nodeCapabilities'
+import { useModalEsc } from '../modalStack'
 
 const MAT_ICON: Record<MaterialKind, typeof ImageIcon> = { image: ImageIcon, video: Video, audio: Music, text: TypeIcon }
-const PANEL_W = 480
+const PANEL_W = 620
+const ALL_MATERIAL_KINDS: MaterialKind[] = ['image', 'video', 'audio', 'text']
+
+interface ImageGenerationMeta {
+  modelId?: string
+  providerId?: string
+  profileId?: string
+  requestIds?: string[]
+  taskIds?: string[]
+  sentPrompt?: string
+  promptLength?: number
+  promptTruncated?: boolean
+  protocolWarnings?: string[]
+  startedAt?: number
+  completedAt?: number
+}
+
+function imageGenerationMeta(meta: Record<string, unknown>): ImageGenerationMeta | null {
+  const value = meta?.imageGeneration
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as ImageGenerationMeta) : null
+}
 
 function formatBytes(value: unknown): string {
   const bytes = Number(value || 0)
@@ -80,11 +102,16 @@ export function NodeEditor() {
   const fileRef = useRef<HTMLInputElement>(null)
   const replaceRef = useRef<HTMLInputElement>(null)
   const outputEditArmed = useRef(false)
+  const promptEditArmed = useRef(false)
   const [mention, setMention] = useState<MentionState | null>(null)
   const [toolBusy, setToolBusy] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [draggingAssets, setDraggingAssets] = useState(false)
   const [expand, setExpand] = useState(false)
+  const [openInfo, setOpenInfo] = useState<{ cardId: string; panel: 'preview' | 'trace' } | null>(null)
+  const editorCard = selectedIds.length === 1 ? board.cards[selectedIds[0]] : undefined
+  const editorVisible = !!editorCard && editorCard.kind !== 'group' && editorCard.kind !== 'note'
+  useModalEsc(() => setExpand(false), expand && editorVisible)
 
   if (selectedIds.length !== 1) return null
   const card = board.cards[selectedIds[0]]
@@ -94,31 +121,79 @@ export function NodeEditor() {
   const vp = board.viewport
   const accent = KIND_ACCENT[card.kind]
   const materials = buildMaterials(card, board)
+  const acceptedKinds = acceptedMaterialKinds(card)
   const genMaterials = selectedGenMaterials(card, board, materials)
-  const unresolvedMentions = findUnresolvedMentions(card.prompt || '', materials)
-  const generatable = canGenerate(card.kind)
+  const acceptedMaterials = materials.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+  const unresolvedMentions = findUnresolvedMentions(card.prompt || '', acceptedMaterials)
+  const promptPurpose = card.kind === 'text' ? 'text' : card.kind === 'audio' ? 'speech' : 'media'
+  const resolvedPrompt = resolveGenerationPrompt(card, board, promptPurpose)
+  const selectedTextMaterials = genMaterials.filter((m) => m.kind === 'text')
+  const hasUsableUpstreamText = resolvedPrompt.inputs.texts.length > 0
+  const hasEmptyUpstreamText = materials.some((m) => acceptsMaterialKind(card, m.kind) && m.kind === 'text' && !m.unavailable && !m.text?.trim())
+  const showPromptPreview = selectedTextMaterials.length > 0 || hasEmptyUpstreamText || resolvedPrompt.hasExplicitMentions || unresolvedMentions.length > 0
+  const promptLabel = card.kind === 'text' ? '生成指令' : card.kind === 'audio' ? '配音文本' : '本节点补充要求'
+  const generatable = canGenerate(card)
+  const resourceOnly = card.kind === 'source' || (card.meta as { resourceRole?: unknown })?.resourceRole === 'source'
+  const missingMediaRefs = Array.isArray((card.meta as { missingMediaReferences?: unknown }).missingMediaReferences)
+    ? (card.meta as { missingMediaReferences: string[] }).missingMediaReferences
+    : []
+  const primaryMissing = missingMediaRefs.includes('primary')
   const busy = card.status === 'running' || card.status === 'queued'
-  const hasMedia = !!(card.assetUrl || card.assetLocalPath)
+  const hasMedia = !primaryMissing && !!(card.assetUrl || card.assetLocalPath)
+  const lastImageGeneration = imageGenerationMeta(card.meta || {})
+  const traceTaskId = lastImageGeneration?.taskIds?.[0] || lastImageGeneration?.requestIds?.[0]
+  const previewOpen = openInfo?.cardId === card.id && openInfo.panel === 'preview'
+  const traceOpen = openInfo?.cardId === card.id && openInfo.panel === 'trace'
+
+  const copyImageGenerationTrace = async () => {
+    if (!lastImageGeneration) return
+    const diagnostic = JSON.stringify({ cardId: card.id, ...lastImageGeneration }, null, 2)
+    try {
+      const write = window.mulby?.clipboard?.writeText
+        ? window.mulby.clipboard.writeText(diagnostic)
+        : navigator.clipboard.writeText(diagnostic)
+      await write
+      toast('已复制本次图片生成诊断', 'success')
+    } catch {
+      toast('复制失败', 'error')
+    }
+  }
 
   // 定位：节点下方优先，空间不足翻到上方；左右夹取
   const bottom = worldToScreen(card.x + card.w / 2, card.y + card.h, vp)
   const topS = worldToScreen(card.x + card.w / 2, card.y, vp)
-  const left = Math.max(8, Math.min(bottom.x - PANEL_W / 2, ss.w - PANEL_W - 8))
+  const panelW = Math.min(PANEL_W, Math.max(360, ss.w - 16))
+  const left = Math.max(8, Math.min(bottom.x - panelW / 2, ss.w - panelW - 8))
   const placeBelow = ss.h - (bottom.y + 8) >= 170
-  const posTop = placeBelow ? bottom.y + 8 : undefined
-  const posBottom = placeBelow ? undefined : Math.max(8, ss.h - (topS.y - 8))
-  const maxH = placeBelow ? Math.max(160, ss.h - (bottom.y + 8) - 8) : Math.max(160, topS.y - 8 - 8)
+  const toolbarAbove = topS.y - 8 >= 46
+  const hasFloatingMediaTools = !primaryMissing && (
+    ((card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && !!card.assetUrl) ||
+    (card.kind === 'video' && !!card.assetLocalPath)
+  )
+  const toolbarOffset = hasFloatingMediaTools && placeBelow !== toolbarAbove ? 44 : 0
+  const posTop = placeBelow ? bottom.y + 8 + toolbarOffset : undefined
+  const posBottom = placeBelow ? undefined : Math.max(8, ss.h - (topS.y - 8) + toolbarOffset)
+  const maxH = placeBelow
+    ? Math.max(160, ss.h - (bottom.y + 8 + toolbarOffset) - 8)
+    : Math.max(160, topS.y - 8 - toolbarOffset - 8)
 
   const appendResources = async (files: File[] | FileList, paths: string[] = []) => {
     setImportBusy(true)
     try {
       const resources = await loadImportedResources(files, paths)
       if (!resources.length) return
+      const accepted = resources.filter((resource) => acceptsMaterialKind(card, resource.kind))
+      const rejected = resources.filter((resource) => !acceptsMaterialKind(card, resource.kind))
+      if (rejected.length) {
+        const allowed = acceptedKinds.map(materialKindLabel).join('、') || '无'
+        toast(`已忽略 ${rejected.length} 个不兼容素材；${KIND_LABEL[card.kind]}节点可接收：${allowed}`, 'warning')
+      }
+      if (!accepted.length) return
       const current = useGraph.getState().getCard(card.id)
       if (!current) return
       useGraph.getState().pushHistory()
-      updateCard(card.id, { assets: [...(current.assets || []), ...resourcesToNodeAssets(resources)] })
-      toast(`已添加 ${resources.length} 个节点素材`, 'success')
+      updateCard(card.id, { assets: [...(current.assets || []), ...resourcesToNodeAssets(accepted)] })
+      toast(`已添加 ${accepted.length} 个节点素材`, 'success')
     } finally {
       setImportBusy(false)
       if (fileRef.current) fileRef.current.value = ''
@@ -130,35 +205,75 @@ export function NodeEditor() {
       fileRef.current?.click()
       return
     }
-    const paths = await pickImportPaths()
+    const paths = await pickImportPaths(acceptedKinds)
     if (paths.length) await appendResources([], paths)
   }
 
-  const replaceSource = async (files: File[] | FileList, paths: string[] = []) => {
+  const replacePrimaryMedia = async (files: File[] | FileList, paths: string[] = []) => {
     setImportBusy(true)
     try {
       const resources = await loadImportedResources(Array.from(files).slice(0, 1), paths.slice(0, 1))
-      const resource = resources.find((item) => item.kind === 'image')
+      const expectedKind = materialKindOfCard(card) || 'image'
+      const resource = resourceOnly ? resources[0] : resources.find((item) => item.kind === expectedKind)
       if (!resource) {
-        if (resources.length) toast('素材节点当前只支持替换为图片', 'error')
+        if (resources.length) toast(`请选择${materialKindLabel(expectedKind)}文件`, 'error')
         return
       }
+      const oldPath = card.assetLocalPath
+      const meta = { ...(card.meta || {}) } as Record<string, any>
+      const resolvedMissing = new Set<string>(['primary'])
+      if (Array.isArray(meta.results)) {
+        meta.results = meta.results.map((result: any, index: number) => {
+          if (!oldPath || result?.localPath !== oldPath) return result
+          resolvedMissing.add(`result:${index}`)
+          return { ...result, url: resource.url, localPath: resource.localPath, mime: resource.mime }
+        })
+      }
+      const remainingMissing = missingMediaRefs.filter((label) => !resolvedMissing.has(label))
+      if (remainingMissing.length) {
+        meta.mediaMissing = true
+        meta.missingMediaReferences = remainingMissing
+      } else {
+        delete meta.mediaMissing
+        delete meta.missingMediaReferences
+      }
+      delete meta.fittedFor
+      delete meta.thumb
+      delete meta.thumbFor
+      delete meta.poster
+      delete meta.posterFor
+      if (resourceOnly) meta.resourceRole = 'source'
+      if (resource.size) meta.importSize = resource.size
+      const nextKind = resourceOnly
+        ? resource.kind === 'image' ? 'source' : resource.kind
+        : card.kind
       useGraph.getState().pushHistory()
       updateCard(card.id, {
-        title: resource.name || card.title,
+        kind: nextKind,
+        title: resourceOnly ? resource.name || card.title : card.title,
         assetUrl: resource.url || null,
         assetLocalPath: resource.localPath || null,
         attachmentId: null,
         mime: resource.mime,
+        text: resource.kind === 'text' ? resource.text || '' : null,
         status: 'done',
         error: null,
-        meta: { ...(card.meta || {}), importSize: resource.size, fittedFor: undefined, thumb: undefined, thumbFor: undefined }
+        meta
       })
-      toast('主素材已替换', 'success')
+      toast(primaryMissing ? '缺失主资源已重新关联' : resourceOnly ? '素材文件已载入' : '主资源已替换', 'success')
     } finally {
       setImportBusy(false)
       if (replaceRef.current) replaceRef.current.value = ''
     }
+  }
+
+  const pickPrimaryMedia = async () => {
+    if (!window.mulby?.dialog?.showOpenDialog) {
+      replaceRef.current?.click()
+      return
+    }
+    const paths = await pickImportPaths(resourceOnly ? ALL_MATERIAL_KINDS : [materialKindOfCard(card) || 'image'])
+    if (paths.length) await replacePrimaryMedia([], paths)
   }
 
   const collectDrop = (dataTransfer: DataTransfer): { files: File[]; paths: string[] } => {
@@ -168,15 +283,24 @@ export function NodeEditor() {
       const path = (file as File & { path?: string }).path
       if (path) paths.add(path)
     }
+    for (const path of resolveDroppedFilePaths(files)) paths.add(path)
     for (const path of parseDroppedPathText(dataTransfer.getData('text/uri-list'))) paths.add(path)
-    for (const path of parseDroppedPathText(dataTransfer.getData('text/plain'))) paths.add(path)
+    for (const path of parseDroppedPlainPathText(dataTransfer.getData('text/plain'))) paths.add(path)
     return { files, paths: [...paths] }
   }
 
   const removeMaterial = (m: Material) => {
     if (m.origin === 'upload') {
+      const assetId = m.matId.slice('upload:'.length)
+      const nextMissing = missingMediaRefs.filter((label) => label !== `input:${assetId}`)
+      const meta = { ...(card.meta || {}) }
+      if (nextMissing.length) meta.missingMediaReferences = nextMissing
+      else {
+        delete meta.missingMediaReferences
+        delete meta.mediaMissing
+      }
       useGraph.getState().pushHistory()
-      updateCard(card.id, { assets: (card.assets || []).filter((a) => 'upload:' + a.id !== m.matId) })
+      updateCard(card.id, { assets: (card.assets || []).filter((a) => 'upload:' + a.id !== m.matId), meta })
     } else if (m.origin === 'card') {
       useGraph.getState().pushHistory()
       updateCard(card.id, { refIds: card.refIds.filter((id) => 'card:' + id !== m.matId) })
@@ -227,6 +351,10 @@ export function NodeEditor() {
     const ta = e.currentTarget
     const val = ta.value
     const pos = ta.selectionStart ?? val.length
+    if (promptEditArmed.current) {
+      useGraph.getState().pushHistory()
+      promptEditArmed.current = false
+    }
     updateCard(card.id, { prompt: val })
     const before = val.slice(0, pos)
     const at = before.lastIndexOf('@')
@@ -265,8 +393,8 @@ export function NodeEditor() {
     }
   }
 
-  const hasImageInput = materials.some((m) => m.kind === 'image')
-  const refList = mention && mention.mode === 'ref' ? materials.filter((m) => !mention.query || m.label.includes(mention.query)) : []
+  const hasImageInput = genMaterials.some((m) => m.kind === 'image')
+  const refList = mention && mention.mode === 'ref' ? materials.filter((m) => acceptsMaterialKind(card, m.kind) && isUsableMaterial(m) && (!mention.query || m.label.includes(mention.query))) : []
   const presetList = mention && mention.mode === 'preset' ? PROMPT_PRESETS.filter((p) => !mention.query || p.label.includes(mention.query) || p.text.includes(mention.query)) : []
   const listLen = mention?.mode === 'preset' ? presetList.length : refList.length
   const menuW = mention ? Math.max(200, mention.aw) : 200
@@ -302,11 +430,11 @@ export function NodeEditor() {
           e.stopPropagation()
           setDraggingAssets(false)
           const snapshot = collectDrop(e.dataTransfer)
-          if (card.kind === 'source') void replaceSource(snapshot.files, snapshot.paths)
+          if (resourceOnly || primaryMissing) void replacePrimaryMedia(snapshot.files, snapshot.paths)
           else if (generatable) void appendResources(snapshot.files, snapshot.paths)
         }}
         className="absolute z-30 rounded-xl border overflow-hidden text-neutral-800 dark:text-neutral-200"
-        style={{ left, top: posTop, bottom: posBottom, width: PANEL_W, borderColor: accent + '55', background: 'var(--surface-glass)', backdropFilter: 'var(--blur-glass)', WebkitBackdropFilter: 'var(--blur-glass)', boxShadow: 'var(--shadow-menu)' }}
+        style={{ left, top: posTop, bottom: posBottom, width: panelW, borderColor: accent + '55', background: 'var(--surface-glass)', backdropFilter: 'var(--blur-glass)', WebkitBackdropFilter: 'var(--blur-glass)', boxShadow: 'var(--shadow-menu)' }}
       >
         <div className="flex flex-col gap-1.5 p-2 overflow-y-auto ace-noscroll" style={{ maxHeight: maxH }}>
           <div className="flex items-center gap-1.5 min-w-0">
@@ -343,12 +471,18 @@ export function NodeEditor() {
               {generatable &&
                 materials.map((m) => {
                   const Icon = MAT_ICON[m.kind]
+                  const kindAccepted = acceptsMaterialKind(card, m.kind)
+                  const accepted = kindAccepted && isUsableMaterial(m)
                   return (
                     <div
                       key={m.matId}
-                      onClick={() => chipInsert(m)}
-                      title={`点击插入 @${m.label}`}
-                      className="group/chip relative shrink-0 w-9 h-9 rounded-md border bg-black/5 dark:bg-white/5 overflow-hidden cursor-pointer"
+                      onClick={() => { if (accepted) chipInsert(m) }}
+                      title={accepted
+                        ? `点击插入 @${m.label}`
+                        : m.unavailable
+                          ? '本地资源已缺失；请移除该输入后重新添加'
+                          : `${KIND_LABEL[card.kind]}节点不会消费${materialKindLabel(m.kind)}；可移除该旧引用`}
+                      className={`group/chip relative shrink-0 w-9 h-9 rounded-md border bg-black/5 dark:bg-white/5 overflow-hidden ${accepted ? 'cursor-pointer' : 'opacity-45 cursor-not-allowed'}`}
                       style={{ borderColor: 'var(--ace-border)' }}
                     >
                       {m.thumbUrl ? (
@@ -357,7 +491,8 @@ export function NodeEditor() {
                         <div className="w-full h-full grid place-items-center"><Icon size={13} style={{ color: KIND_ACCENT[m.kind] }} /></div>
                       )}
                       <span className="absolute bottom-0 inset-x-0 text-[8px] leading-[10px] text-white bg-black/55 truncate text-center">{m.label}</span>
-                      {m.origin === 'edge' && <Link2 size={8} className="absolute top-0.5 left-0.5 text-white drop-shadow" />}
+                      {m.origin === 'edge' && !m.unavailable && <Link2 size={8} className="absolute top-0.5 left-0.5 text-white drop-shadow" />}
+                      {m.unavailable && <span className="absolute top-0.5 left-0.5 px-1 rounded bg-amber-500 text-[7px] leading-[10px] text-white">缺失</span>}
                       <button
                         onClick={(e) => { e.stopPropagation(); removeMaterial(m) }}
                         className="absolute top-0 right-0 w-3.5 h-3.5 grid place-items-center rounded-bl bg-black/55 text-white opacity-0 group-hover/chip:opacity-100"
@@ -378,10 +513,29 @@ export function NodeEditor() {
                   {importBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={15} />}
                 </button>
               )}
-              <input ref={fileRef} type="file" accept="image/*,video/*,audio/*,.txt,.md,.json,.srt" multiple className="hidden" onChange={(e) => void appendResources(e.target.files || [])} />
-              <input ref={replaceRef} type="file" accept="image/*" className="hidden" onChange={(e) => void replaceSource(e.target.files || [])} />
+              <input
+                ref={fileRef}
+                type="file"
+                accept={acceptedKinds.flatMap((kind) => kind === 'image' ? ['image/*'] : kind === 'video' ? ['video/*'] : kind === 'audio' ? ['audio/*'] : ['.txt', '.md', '.json', '.srt']).join(',')}
+                multiple
+                className="hidden"
+                onChange={(e) => void appendResources(e.target.files || [])}
+              />
+              <input
+                ref={replaceRef}
+                type="file"
+                accept={resourceOnly
+                  ? 'image/*,video/*,audio/*,.txt,.md,.json,.srt'
+                  : (materialKindOfCard(card) || 'image') === 'video'
+                    ? 'video/*'
+                    : (materialKindOfCard(card) || 'image') === 'audio'
+                      ? 'audio/*'
+                      : 'image/*'}
+                className="hidden"
+                onChange={(e) => void replacePrimaryMedia(e.target.files || [])}
+              />
             </div>
-            {card.assetLocalPath && (
+            {card.assetLocalPath && !primaryMissing && (
               <button onClick={exportCard} title="导出/下载" className="shrink-0 opacity-60 hover:opacity-100 p-1 rounded hover:bg-black/5 dark:hover:bg-white/10">
                 <Download size={14} />
               </button>
@@ -391,33 +545,63 @@ export function NodeEditor() {
             </button>
           </div>
 
-          {card.kind === 'source' && (
-            <div className="rounded-lg border px-2.5 py-2 flex items-center gap-2 text-[11px]" style={{ borderColor: 'var(--ace-border)' }}>
-              <ImageIcon size={16} style={{ color: accent }} className="shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{card.assetLocalPath?.split(/[\\/]/).pop() || card.title || '未选择素材'}</div>
-                <div className="opacity-50 truncate">{[card.mime || '未知类型', formatBytes((card.meta as any)?.importSize)].filter(Boolean).join(' · ')}</div>
-              </div>
-              {card.assetLocalPath && (
-                <button onClick={() => void window.mulby?.shell?.showItemInFolder(card.assetLocalPath as string)} title="在文件夹中显示" className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10">
-                  <FolderOpen size={14} />
+          {resourceOnly && (
+            <div className="rounded-lg border px-2.5 py-2 text-[11px]" style={{ borderColor: 'var(--ace-border)' }}>
+              <div className="flex items-center gap-2">
+                {card.kind === 'video'
+                  ? <Video size={17} style={{ color: accent }} className="shrink-0" />
+                  : card.kind === 'audio'
+                    ? <Music size={17} style={{ color: accent }} className="shrink-0" />
+                    : card.kind === 'text'
+                      ? <TypeIcon size={17} style={{ color: accent }} className="shrink-0" />
+                      : <ImageIcon size={17} style={{ color: accent }} className="shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate">{card.assetLocalPath?.split(/[\\/]/).pop() || (card.text ? card.title : '尚未选择素材文件')}</div>
+                  <div className="opacity-50 truncate">{[card.mime || '支持图片、视频、音频和文本', formatBytes((card.meta as any)?.importSize)].filter(Boolean).join(' · ')}</div>
+                </div>
+                {card.assetLocalPath && !primaryMissing && (
+                  <button onClick={() => void window.mulby?.shell?.showItemInFolder(card.assetLocalPath as string)} title="在文件夹中显示" className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10">
+                    <FolderOpen size={14} />
+                  </button>
+                )}
+                <button
+                  onClick={() => void pickPrimaryMedia()}
+                  disabled={importBusy}
+                  title={card.assetUrl || card.assetLocalPath || card.text ? '更换素材文件' : '选择素材文件'}
+                  className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/20 disabled:opacity-40"
+                >
+                  {importBusy ? <Loader2 size={13} className="animate-spin" /> : card.assetUrl || card.assetLocalPath || card.text ? <RefreshCcw size={13} /> : <Plus size={13} />}
+                  {card.assetUrl || card.assetLocalPath || card.text ? '更换文件' : '选择文件'}
                 </button>
-              )}
-              <button onClick={() => replaceRef.current?.click()} disabled={importBusy} title="替换主素材" className="p-1.5 rounded hover:bg-black/5 dark:hover:bg-white/10 disabled:opacity-40">
-                {importBusy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+              </div>
+              <div className="mt-1.5 opacity-55">
+                独立素材用于固定某次产物或本地文件，供下游节点引用；重新生成原节点时不会覆盖这里的内容。
+              </div>
+            </div>
+          )}
+
+          {primaryMissing && !resourceOnly && (
+            <div className="rounded-lg border border-amber-400/50 bg-amber-500/10 px-2.5 py-2 flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-200">
+              <span className="flex-1">主媒体文件不存在；可重新生成，或关联同类型本地文件。</span>
+              <button onClick={() => void pickPrimaryMedia()} disabled={importBusy} className="shrink-0 px-2 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-40">
+                {importBusy ? '读取中…' : '重新关联'}
               </button>
             </div>
           )}
 
           {/* 视频参考形式 */}
-          {card.kind === 'video' && (
+          {card.kind === 'video' && generatable && (
             <div className="flex items-center gap-1 text-[11px]">
               {(['keyframe', 'omni'] as const).map((m) => {
                 const cur = (card.params?.refMode as string) || 'omni'
                 return (
                   <button
                     key={m}
-                    onClick={() => updateCard(card.id, { params: { ...card.params, refMode: m } })}
+                    onClick={() => {
+                      if (((card.params?.refMode as string) || 'omni') === m) return
+                      useGraph.getState().pushHistory()
+                      updateCard(card.id, { params: { ...card.params, refMode: m } })
+                    }}
                     className={`px-2 py-0.5 rounded ${cur === m ? 'bg-indigo-500 text-white' : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20'}`}
                   >
                     {m === 'keyframe' ? '首帧/尾帧' : '全能参考'}
@@ -429,8 +613,20 @@ export function NodeEditor() {
           )}
 
           {/* 提示词工具 + 输入 */}
-          {card.kind !== 'source' && (
+          {!resourceOnly && (
             <>
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="font-medium opacity-70">{promptLabel}</span>
+                <span className="ml-auto opacity-45">
+                  {card.kind === 'text'
+                    ? '描述如何生成或处理文本'
+                    : hasUsableUpstreamText
+                      ? '已接入上游文本，可留空或补充要求'
+                      : card.kind === 'audio'
+                        ? '直接输入，或连接文本卡片'
+                        : '没有上游文本时必填'}
+                </span>
+              </div>
               <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
                 <button onClick={() => runTool(enhancePrompt)} disabled={toolBusy} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100 disabled:opacity-40" title="LLM 改写优化提示词">
                   <Wand2 size={12} /> 增强
@@ -450,21 +646,25 @@ export function NodeEditor() {
                     <Film size={12} /> 转视频
                   </button>
                 )}
-                {card.kind === 'image' && hasMedia && (
-                  <button onClick={() => useUi.getState().setMaskCardId(card.id)} className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100" title="局部重绘 / 擦除">
-                    <Brush size={12} /> 局部编辑
-                  </button>
-                )}
-                {card.kind === 'pano' && hasMedia && (
-                  <button
-                    onClick={() => { const s = useUi.getState(); s.setPanoCardId(s.panoCardId === card.id ? null : card.id) }}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-black/5 dark:hover:bg-white/10 opacity-80 hover:opacity-100"
-                    title="节点内 360 预览：拖动环视、滚轮缩放，相机按钮截取当前视角为新图片卡"
-                  >
-                    <Compass size={12} /> 360 预览
-                  </button>
-                )}
                 {toolBusy && <Loader2 size={12} className="animate-spin opacity-60" />}
+                {showPromptPreview && (
+                  <button
+                    onClick={() => setOpenInfo(previewOpen ? null : { cardId: card.id, panel: 'preview' })}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${previewOpen ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300' : 'hover:bg-black/5 dark:hover:bg-white/10 opacity-70 hover:opacity-100'}`}
+                    title="查看真正发送给模型的内容"
+                  >
+                    <Eye size={12} /> 输入预览
+                  </button>
+                )}
+                {(card.kind === 'image' || card.kind === 'pano') && lastImageGeneration && (
+                  <button
+                    onClick={() => setOpenInfo(traceOpen ? null : { cardId: card.id, panel: 'trace' })}
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${traceOpen ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-300' : lastImageGeneration.protocolWarnings?.length ? 'bg-amber-500/10 text-amber-600 dark:text-amber-300' : 'hover:bg-black/5 dark:hover:bg-white/10 opacity-70 hover:opacity-100'}`}
+                    title="查看上一次生成的 Provider 与任务诊断"
+                  >
+                    <History size={12} /> 上次生成
+                  </button>
+                )}
                 <span className="ml-auto opacity-40">/ 预设 · @ 素材</span>
               </div>
               <div className="relative">
@@ -472,10 +672,11 @@ export function NodeEditor() {
                   ref={(el) => {
                     if (el) {
                       el.style.height = 'auto'
-                      el.style.height = Math.min(220, el.scrollHeight) + 'px'
+                      el.style.height = Math.min(140, el.scrollHeight) + 'px'
                     }
                   }}
                   value={card.prompt}
+                  onFocus={() => { promptEditArmed.current = true }}
                   onChange={onPrompt}
                   onKeyDown={(e) => {
                     if (isImeComposing(e)) return // 组合期不触发生成（避免半截拼音入提示词）
@@ -484,17 +685,25 @@ export function NodeEditor() {
                       generateCard(card.id)
                     }
                   }}
-                  onBlur={() => setTimeout(() => setMention(null), 150)}
+                  onBlur={() => { promptEditArmed.current = false; setTimeout(() => setMention(null), 150) }}
                   rows={2}
                   placeholder={
                     card.kind === 'text'
-                      ? '让 AI 写点什么…（/ 预设，@ 素材）'
+                      ? '例如：把上游故事整理成 8 个分镜；或直接让 AI 写一段文案…'
+                      : card.kind === 'audio'
+                        ? hasUsableUpstreamText
+                          ? '可留空：将朗读上游文本；输入内容则作为配音正文'
+                          : '输入配音正文，或连接一张包含内容的文本卡片'
                       : card.kind === 'pano'
-                        ? '描述 360 场景（自动注入等距柱状全景关键词；接参考图可留空，Ctrl+Enter 生成）'
-                        : '描述画面（/ 预设，@ 素材，Ctrl+Enter 生成）'
+                        ? hasUsableUpstreamText
+                          ? '可留空：上游文本将描述 360 场景；这里可补充构图、光线等要求'
+                          : '描述 360 场景（接文本或参考图后可留空，Ctrl+Enter 生成）'
+                        : hasUsableUpstreamText
+                          ? `可留空：上游文本将作为${card.kind === 'video' ? '视频内容' : '画面描述'}；这里补充镜头、风格等要求`
+                          : `描述${card.kind === 'video' ? '视频内容与运动' : '画面'}（/ 预设，@ 素材，Ctrl+Enter 生成）`
                   }
                   className="ace-input ace-noscroll resize-none w-full block"
-                  style={{ maxHeight: 220 }}
+                  style={{ maxHeight: 140 }}
                 />
                 <button onClick={() => setExpand(true)} title="放大编辑长文" className="absolute bottom-1 right-1 w-5 h-5 grid place-items-center rounded bg-black/40 text-white opacity-70 hover:opacity-100">
                   <Maximize2 size={12} />
@@ -502,12 +711,16 @@ export function NodeEditor() {
               </div>
               {(genMaterials.length > 0 || unresolvedMentions.length > 0) && (
                 <div className="flex flex-wrap items-center gap-1 mt-1 text-[10px]">
-                  {genMaterials.length > 0 && <span className="opacity-50 shrink-0">生成引用：</span>}
+                  {genMaterials.length > 0 && <span className="opacity-50 shrink-0">{resolvedPrompt.hasExplicitMentions ? '@ 选中：' : '本次输入：'}</span>}
                   {genMaterials.map((m) => {
                     const Icon = MAT_ICON[m.kind]
                     return (
-                      <span key={m.matId} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">
-                        <Icon size={10} /> @{m.label}
+                      <span
+                        key={m.matId}
+                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-300"
+                        title={m.origin === 'edge' ? '上游连线输入，生成时自动读取其当前产物' : m.origin === 'card' ? '显式引用的卡片产物' : '上传到本节点的素材'}
+                      >
+                        <Icon size={10} /> {m.label}
                       </span>
                     )
                   })}
@@ -518,14 +731,35 @@ export function NodeEditor() {
                   ))}
                 </div>
               )}
+              {showPromptPreview && previewOpen && (
+                <div className="rounded-md border px-2 py-1.5 text-[10px]" style={{ borderColor: 'var(--ace-border)', background: 'color-mix(in srgb, var(--surface-glass) 70%, transparent)' }}>
+                  <div className="flex items-center justify-between gap-2 opacity-55">
+                    <span>内容输入预览</span>
+                    <span>
+                      {resolvedPrompt.source === 'mentions'
+                        ? '@ 已展开为真实内容'
+                        : resolvedPrompt.source === 'combined'
+                          ? '上游内容 + 本节点要求'
+                          : resolvedPrompt.source === 'upstream'
+                            ? '来自上游文本'
+                            : resolvedPrompt.source === 'local'
+                              ? '仅本节点输入'
+                              : '暂无可用输入'}
+                    </span>
+                  </div>
+                  <div className={`mt-1 whitespace-pre-wrap break-words ${resolvedPrompt.text ? 'opacity-80' : 'text-amber-600 dark:text-amber-300'}`} style={{ maxHeight: 64, overflow: 'hidden' }} title={resolvedPrompt.text || undefined}>
+                    {resolvedPrompt.text || (hasEmptyUpstreamText ? '上游文本卡片还没有“文本内容”，请先生成或手动填写。' : '没有可发送给模型的文本内容。')}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {card.kind === 'text' && card.text !== null && (
+          {card.kind === 'text' && (
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] opacity-55">
-                <span>文本结果</span>
-                <span>可直接修订，提示词与结果分开保存</span>
+                <span>文本内容（下游使用）</span>
+                <span>可手动填写，也可由上方指令生成</span>
               </div>
               <textarea
                 value={card.text || ''}
@@ -539,7 +773,7 @@ export function NodeEditor() {
                   updateCard(card.id, { text: e.target.value })
                 }}
                 rows={4}
-                placeholder="生成结果会显示在这里，也可手动编辑…"
+                placeholder="在这里填写可复用的脚本、设定、文案或提示词；连接到下游后会作为真实输入…"
                 className="ace-input ace-scroll resize-y w-full block text-[12px]"
                 style={{ minHeight: 72, maxHeight: 220 }}
               />
@@ -548,16 +782,41 @@ export function NodeEditor() {
 
           {/* 模型/Provider + 参数 */}
           {generatable && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {card.kind === 'text' || card.kind === 'image' || card.kind === 'pano' ? (
-                <div className="flex-1 min-w-[130px]">
-                  <ModelPicker kind={card.kind as 'text' | 'image' | 'pano'} value={card.modelId} onChange={(id) => updateCard(card.id, { modelId: id })} />
+            <>
+              <div className="flex flex-wrap items-start gap-1.5">
+                {card.kind === 'text' || card.kind === 'image' || card.kind === 'pano' ? (
+                  <div className="flex-1 min-w-[130px]">
+                    <ModelPicker kind={card.kind as 'text' | 'image' | 'pano'} value={card.modelId} onChange={(id) => { if (id !== card.modelId) { useGraph.getState().pushHistory(); updateCard(card.id, { modelId: id }) } }} />
+                  </div>
+                ) : (
+                  <ProviderHintInline kind={card.kind as 'video' | 'audio'} modelId={card.modelId} onModel={(id) => { if (id !== card.modelId) { useGraph.getState().pushHistory(); updateCard(card.id, { modelId: id }) } }} />
+                )}
+                <ParamControls card={card} />
+              </div>
+              {(card.kind === 'image' || card.kind === 'pano') && lastImageGeneration && traceOpen && (
+                <div
+                  className="rounded-md border px-2 py-1.5 text-[10px]"
+                  style={{ borderColor: 'var(--ace-border)', background: 'color-mix(in srgb, var(--surface-glass) 70%, transparent)' }}
+                  title={lastImageGeneration.sentPrompt ? `上次实际发送：\n${lastImageGeneration.sentPrompt}${lastImageGeneration.promptTruncated ? '\n…（节点记录已截断）' : ''}` : undefined}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="opacity-55 shrink-0">上次生成</span>
+                    <span className="truncate">Provider：{lastImageGeneration.providerId || '未知'}</span>
+                    <span className="opacity-45 shrink-0">·</span>
+                    <span className="opacity-70 shrink-0">已发送 {lastImageGeneration.promptLength ?? lastImageGeneration.sentPrompt?.length ?? 0} 字</span>
+                    {traceTaskId && <span className="opacity-55 truncate">· 任务 {traceTaskId.slice(0, 8)}</span>}
+                    <button type="button" onClick={() => void copyImageGenerationTrace()} className="ml-auto text-indigo-500 hover:underline shrink-0" title="复制 Provider、任务 ID 与实际发送内容">
+                      复制诊断
+                    </button>
+                  </div>
+                  {!!lastImageGeneration.protocolWarnings?.length && (
+                    <div className="mt-1 text-amber-600 dark:text-amber-300" title={lastImageGeneration.protocolWarnings.join('\n')}>
+                      当前模型使用兼容协议；若结果与提示词无关，请切换 Provider，并用任务 ID 排查服务端返回。
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <ProviderHintInline kind={card.kind as 'video' | 'audio'} modelId={card.modelId} onModel={(id) => updateCard(card.id, { modelId: id })} />
               )}
-              <ParamControls card={card} />
-            </div>
+            </>
           )}
           {/* 生成：独占一整行、文字居中 */}
           {generatable &&
@@ -575,7 +834,7 @@ export function NodeEditor() {
         </div>
         {draggingAssets && (
           <div className="absolute inset-1 z-40 rounded-lg border-2 border-dashed border-indigo-400 bg-indigo-500/15 pointer-events-none grid place-items-center">
-            <div className="rounded-lg bg-neutral-900/80 px-3 py-2 text-xs text-white shadow">{card.kind === 'source' ? '释放以替换主素材' : '释放以添加为节点素材'}</div>
+            <div className="rounded-lg bg-neutral-900/80 px-3 py-2 text-xs text-white shadow">{resourceOnly || primaryMissing ? '释放以替换主素材' : '释放以添加为节点素材'}</div>
           </div>
         )}
       </div>
@@ -605,11 +864,11 @@ export function NodeEditor() {
       )}
 
       {/* 放大编辑长提示词 */}
-      {expand && card.kind !== 'source' && (
+      {expand && !resourceOnly && (
         <div data-interactive className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-6" onClick={() => setExpand(false)}>
           <div onClick={(e) => e.stopPropagation()} className="ace-dialog ace-anim-scale w-[680px] max-w-full max-h-[80vh] flex flex-col text-neutral-800 dark:text-neutral-200">
             <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--ace-border)' }}>
-              <span className="font-semibold text-sm">编辑提示词</span>
+              <span className="font-semibold text-sm">编辑{promptLabel}</span>
               <button onClick={() => setExpand(false)} className="opacity-60 hover:opacity-100">
                 <X size={18} />
               </button>
@@ -617,8 +876,10 @@ export function NodeEditor() {
             <textarea
               autoFocus
               value={card.prompt}
-              onChange={(e) => updateCard(card.id, { prompt: e.target.value })}
-              placeholder="输入提示词…"
+              onFocus={() => { promptEditArmed.current = true }}
+              onBlur={() => { promptEditArmed.current = false }}
+              onChange={onPrompt}
+              placeholder={card.kind === 'text' ? '输入生成指令…' : hasUsableUpstreamText ? '可留空，或输入本节点补充要求…' : '输入内容…'}
               className="flex-1 m-3 rounded-lg border bg-transparent p-3 text-sm outline-none resize-none ace-scroll"
               style={{ minHeight: '42vh', borderColor: 'var(--ace-border)' }}
             />

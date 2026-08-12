@@ -6,10 +6,19 @@ export interface ModelOption {
   id: string
   label: string
   provider?: string
+  providerId?: string
 }
 
 function toOption(m: any): ModelOption {
-  return { id: m.id, label: m.label || m.id, provider: m.providerLabel }
+  const providerId = typeof m.providerRef === 'string' && m.providerRef.trim()
+    ? m.providerRef.trim()
+    : typeof m.id === 'string' && m.id.includes(':')
+      ? m.id.split(':', 1)[0]
+      : undefined
+  const provider = typeof m.providerLabel === 'string' && m.providerLabel.trim()
+    ? m.providerLabel.trim()
+    : providerId
+  return { id: m.id, label: m.label || m.id, provider, providerId }
 }
 
 export async function listImageModels(): Promise<ModelOption[]> {

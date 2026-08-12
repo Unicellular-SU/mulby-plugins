@@ -56,6 +56,44 @@ export async function removeProjectMediaOnDisk(projectId: string): Promise<void>
   }
 }
 
+export interface ProjectMediaPruneResult {
+  ok: boolean
+  scanned: number
+  removed: number
+  reclaimedBytes: number
+  recent: number
+  error?: string
+}
+
+export async function pruneProjectMediaOnDisk(
+  projectId: string,
+  keepPaths: string[],
+  minAgeMs = 5 * 60_000,
+  allManaged = false
+): Promise<ProjectMediaPruneResult> {
+  try {
+    const response = await window.mulby?.host?.call(PLUGIN_ID, 'pruneProjectMedia', {
+      projectId,
+      keepPaths,
+      minAgeMs,
+      scope: allManaged ? 'all' : 'project'
+    }) as {
+      data?: Partial<ProjectMediaPruneResult>
+    }
+    const data = response?.data
+    return {
+      ok: data?.ok === true,
+      scanned: Number(data?.scanned || 0),
+      removed: Number(data?.removed || 0),
+      reclaimedBytes: Number(data?.reclaimedBytes || 0),
+      recent: Number(data?.recent || 0),
+      error: data?.error
+    }
+  } catch (error) {
+    return { ok: false, scanned: 0, removed: 0, reclaimedBytes: 0, recent: 0, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 export async function saveBase64(
   projectId: string,
   cardId: string,

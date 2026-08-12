@@ -62,6 +62,8 @@ export interface Material {
   assetUrl?: string
   assetLocalPath?: string
   mime?: string
+  /** 工程仍保留引用，但底层本地文件已不可用；可展示/移除，不得发给生成 Provider。 */
+  unavailable?: boolean
 }
 
 export interface Viewport {

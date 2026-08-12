@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 import { Z } from '../zlayers'
+import { useModalEsc } from '../modalStack'
 
 export interface SelectOption {
   value: string
@@ -15,19 +16,23 @@ export function Select({
   options,
   onChange,
   placeholder,
-  className
+  className,
+  showHintInTrigger = false
 }: {
   value: string
   options: SelectOption[]
   onChange: (v: string) => void
   placeholder?: string
   className?: string
+  /** 模型等存在同名选项时，在当前值旁同时显示来源提示，避免只看见模型名而误选 Provider。 */
+  showHintInTrigger?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null)
   const cur = options.find((o) => o.value === value)
+  useModalEsc(() => setOpen(false), open)
 
   const place = () => {
     const b = btnRef.current?.getBoundingClientRect()
@@ -44,17 +49,12 @@ export function Select({
       const t = e.target as Node
       if (!btnRef.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
     const reflow = () => place()
     window.addEventListener('pointerdown', onDown, true)
-    window.addEventListener('keydown', onKey)
     window.addEventListener('resize', reflow)
     window.addEventListener('wheel', reflow, true)
     return () => {
       window.removeEventListener('pointerdown', onDown, true)
-      window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', reflow)
       window.removeEventListener('wheel', reflow, true)
     }
@@ -69,7 +69,10 @@ export function Select({
         onClick={() => setOpen((o) => !o)}
         className="w-full flex items-center justify-between gap-1 rounded-md px-2 py-1.5 text-xs bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 outline-none"
       >
-        <span className="truncate">{cur ? cur.label : placeholder || '选择'}</span>
+        <span className="min-w-0 flex items-center gap-1.5">
+          <span className="truncate">{cur ? cur.label : placeholder || '选择'}</span>
+          {showHintInTrigger && cur?.hint && <span className="opacity-50 shrink-0">· {cur.hint}</span>}
+        </span>
         <ChevronDown size={13} className="opacity-60 shrink-0" />
       </button>
       {open &&

@@ -139,6 +139,51 @@ async function removeDirFiles(dir: string): Promise<number> {
   return n
 }
 
+function comparablePath(path: string): string {
+  const normalized = String(path || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/$/, '')
+  return /^[a-zA-Z]:\//.test(normalized) ? normalized.toLowerCase() : normalized
+}
+
+async function pruneDirFiles(
+  dir: string,
+  keep: ReadonlySet<string>,
+  olderThan: number
+): Promise<{ scanned: number; removed: number; reclaimedBytes: number; recent: number }> {
+  const summary = { scanned: 0, removed: 0, reclaimedBytes: 0, recent: 0 }
+  try {
+    if (!(await mulby.filesystem.exists(dir))) return summary
+    for (const name of await mulby.filesystem.readdir(dir)) {
+      const path = `${dir}/${name}`
+      try {
+        const stat: any = await mulby.filesystem.stat(path)
+        if (stat?.isDirectory) {
+          const nested = await pruneDirFiles(path, keep, olderThan)
+          summary.scanned += nested.scanned
+          summary.removed += nested.removed
+          summary.reclaimedBytes += nested.reclaimedBytes
+          summary.recent += nested.recent
+          continue
+        }
+        summary.scanned++
+        if (keep.has(comparablePath(path))) continue
+        const modifiedAt = Number(stat?.modifiedAt || stat?.createdAt || 0)
+        if (modifiedAt > olderThan) {
+          summary.recent++
+          continue
+        }
+        await mulby.filesystem.unlink(path)
+        summary.removed++
+        summary.reclaimedBytes += Math.max(0, Number(stat?.size || 0))
+      } catch {
+        // 单文件统计/删除失败不阻断其它文件
+      }
+    }
+  } catch {
+    // best-effort
+  }
+  return summary
+}
+
 // 取 JSON 路径（如 data.url / data.0.url）
 function getJsonPath(obj: any, path: string): unknown {
   if (!obj || !path) return undefined
@@ -221,6 +266,52 @@ export const rpc = {
     }
   },
 
+  // 引用感知清理：默认扫描指定工程的受管媒体目录；scope=all 时覆盖整个插件受管 media 根与旧版 media_<pid> 目录，
+  // 以便回收“原工程已删除、复制工程曾继续共享”的遗留目录。始终只删除未出现在 keepPaths 且已过保护期的文件。
+  // keepPaths 来自全部工程、恢复快照、当前 undo/redo 与剪贴板的并集；即使调用方传入恶意外部路径，也只会增加保留项。
+  async pruneProjectMedia(input: { projectId?: string; keepPaths?: string[]; minAgeMs?: number; scope?: 'project' | 'all' }) {
+    try {
+      const pid = sanitizeName(String(input?.projectId || ''), '')
+      const allManaged = input?.scope === 'all'
+      if (!allManaged && !pid) return { ok: false, error: '缺少工程 id' }
+      const rawKeep = Array.isArray(input?.keepPaths) ? input.keepPaths : []
+      if (rawKeep.length > 100_000) return { ok: false, error: '引用路径过多' }
+      const keep = new Set(rawKeep.map((path) => comparablePath(String(path || '').slice(0, 4096))).filter(Boolean))
+      const requestedAge = Number(input?.minAgeMs)
+      const minAgeMs = Number.isFinite(requestedAge)
+        ? Math.max(0, Math.min(7 * 24 * 60 * 60_000, requestedAge))
+        : 5 * 60_000
+      const base = await resolveBaseDir()
+      if (!base) return { ok: false, error: '无法确定存储目录' }
+      const root = `${base}/${ROOT_DIR}`
+      const olderThan = Date.now() - minAgeMs
+      const summaries = allManaged
+        ? [await pruneDirFiles(`${root}/media`, keep, olderThan)]
+        : [await pruneDirFiles(`${root}/media/${pid}`, keep, olderThan), await pruneDirFiles(`${root}/media_${pid}`, keep, olderThan)]
+      if (allManaged) {
+        // A5 修复前，host 下载写入 ROOT_DIR/media_<pid>；只枚举该固定前缀的目录，不触碰工程 JSON 等其它存储。
+        try {
+          for (const name of await mulby.filesystem.readdir(root)) {
+            if (!/^media_[\w.-]+$/.test(name)) continue
+            const path = `${root}/${name}`
+            try {
+              if ((await mulby.filesystem.stat(path))?.isDirectory) summaries.push(await pruneDirFiles(path, keep, olderThan))
+            } catch { /* 单目录失败不阻断其它目录 */ }
+          }
+        } catch { /* 旧目录枚举失败时仍返回当前 media 根的结果 */ }
+      }
+      return summaries.reduce((sum, value) => ({
+        ok: true,
+        scanned: sum.scanned + value.scanned,
+        removed: sum.removed + value.removed,
+        reclaimedBytes: sum.reclaimedBytes + value.reclaimedBytes,
+        recent: sum.recent + value.recent
+      }), { ok: true, scanned: 0, removed: 0, reclaimedBytes: 0, recent: 0 })
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  },
+
   // 系统拖拽 / 打开文件对话框导入：前端只负责同步提取路径，实际读取与复制放在后端，
   // 避免渲染沙箱拒绝路径访问，也避免大媒体在 ArrayBuffer → Base64 → RPC 间多次膨胀。
   // 仅接受画布支持的白名单扩展名；目标目录与文件名均由后端决定。
@@ -229,7 +320,7 @@ export const rpc = {
     const failures: Array<{ name: string; reason: string }> = []
     try {
       const rawPaths = Array.isArray(input?.paths) ? input.paths : []
-      const paths = [...new Set(rawPaths.map((p) => String(p || '').trim()).filter(Boolean))]
+      const paths = [...new Set(rawPaths.map((p) => typeof p === 'string' ? p.trim() : '').filter(Boolean))]
       if (!paths.length) return { ok: false, items, failures, error: '没有可导入的本地路径' }
       if (paths.length > MAX_LOCAL_IMPORT_FILES) {
         return { ok: false, items, failures, error: `一次最多导入 ${MAX_LOCAL_IMPORT_FILES} 个文件` }
@@ -242,7 +333,13 @@ export const rpc = {
 
       for (let i = 0; i < paths.length; i++) {
         const sourcePath = paths[i]
-        const name = mulby.filesystem.basename(sourcePath) || `resource_${i + 1}`
+        // UtilityProcess 中的 mulby API 全部经消息代理调用，即使 basename 在主进程是同步方法，
+        // worker 端拿到的仍是 Promise。漏掉 await 会把 Promise 序列化成 {}，最终在 UI 里显示
+        // 为 "[object Object]"，并因无法识别扩展名而被误报为不支持的文件类型。
+        const resolvedName = await mulby.filesystem.basename(sourcePath)
+        const name = typeof resolvedName === 'string' && resolvedName.trim()
+          ? resolvedName.trim()
+          : `resource_${i + 1}`
         const mime = localImportMime(name)
         if (!mime) {
           failures.push({ name, reason: '不支持的文件类型' })

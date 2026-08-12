@@ -9,7 +9,7 @@ export function BatchActions() {
   const board = useGraph((s) => s.getActiveBoard())
   const targets = selectedIds.filter((id) => {
     const c = board.cards[id]
-    return c && canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued'
+    return c && canGenerate(c) && c.status !== 'running' && c.status !== 'queued'
   })
   const clips = selectedIds.filter((id) => {
     const c = board.cards[id]

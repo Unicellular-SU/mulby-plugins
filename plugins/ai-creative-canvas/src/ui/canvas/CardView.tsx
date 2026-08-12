@@ -65,7 +65,7 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
       .catch(() => thumbGenerating.delete(key))
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.assetLocalPath, card.assetUrl])
+  }, [card.assetLocalPath, card.assetUrl, poster])
 
   const toggle = (e: { stopPropagation: () => void }) => {
     e.stopPropagation()
@@ -112,7 +112,21 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
           className="w-full h-full object-cover"
         />
       ) : poster ? (
-        <img src={poster} draggable={false} onLoad={(e) => onFit(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} className="w-full h-full object-cover" alt="" />
+        <img
+          src={poster}
+          draggable={false}
+          onLoad={(e) => onFit(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
+          onError={() => {
+            const cur = useGraph.getState().getCard(card.id)
+            if (!cur || (cur.meta as any)?.poster !== poster) return
+            const meta = { ...(cur.meta || {}) } as any
+            delete meta.poster
+            delete meta.posterFor
+            useGraph.getState().updateCard(card.id, { meta })
+          }}
+          className="w-full h-full object-cover"
+          alt=""
+        />
       ) : (
         <div className="w-full h-full grid place-items-center"><Video size={26} className="opacity-25 text-white" /></div>
       )}
@@ -156,7 +170,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   const updateCard = useGraph((s) => s.updateCard)
   const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
-  const [editing, setEditing] = useState(false)
+  const editingNote = useUi((s) => s.editingNoteId === card.id)
   const connInvalid = useUi((s) => s.connInvalidIds)
   const dimmed = !!connInvalid && connInvalid.has(card.id)
   // 全景卡节点内预览态（selector 返回布尔：其它卡的 panoCardId 变化不引发本卡重渲）。
@@ -180,8 +194,10 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   const metaAny = card.meta as Record<string, unknown> | undefined
   const thumbUrl = metaAny?.thumbFor === card.assetUrl ? (metaAny?.thumb as string | undefined) : undefined
   const isImgKind = card.kind === 'image' || card.kind === 'pano' || card.kind === 'source'
+  const missingMediaRefs = new Set(Array.isArray(metaAny?.missingMediaReferences) ? metaAny.missingMediaReferences as string[] : [])
+  const primaryMissing = missingMediaRefs.has('primary')
   useEffect(() => {
-    if (!isImgKind || !card.assetLocalPath || !card.assetUrl) return
+    if (!isImgKind || primaryMissing || !card.assetLocalPath || !card.assetUrl) return
     if (metaAny?.thumbFor === card.assetUrl && metaAny?.thumb) return // 已有对应缩略图
     const key = `${card.id}|${card.assetUrl}`
     if (thumbGenerating.has(key)) return
@@ -198,7 +214,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       .catch(() => thumbGenerating.delete(key))
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isImgKind, card.assetLocalPath, card.assetUrl])
+  }, [isImgKind, primaryMissing, card.assetLocalPath, card.assetUrl, thumbUrl])
 
   // 从端口拖出连线：window 级监听，最稳，不依赖合成事件 / 指针捕获 / 事件委托
   const startConnect = (e: ReactPointerEvent) => {
@@ -305,19 +321,28 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     window.addEventListener('contextmenu', onCtx)
   }
 
-  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && !!card.assetUrl
-  const isVid = card.kind === 'video' && !!card.assetUrl
-  const isAud = card.kind === 'audio' && !!card.assetUrl
+  const isImg = (card.kind === 'image' || card.kind === 'pano' || card.kind === 'source') && !!card.assetUrl && !primaryMissing
+  const isVid = card.kind === 'video' && !!card.assetUrl && !primaryMissing
+  const isAud = card.kind === 'audio' && !!card.assetUrl && !primaryMissing
   const isTxt = card.kind === 'text' && !!card.text
 
   // 本次多结果（meta.results）：卡上堆叠展示 + 角标切换主图
-  const results = ((card.meta as any)?.results as Array<{ url: string; localPath: string; mime: string }>) || []
-  const multi = results.length > 1
-  const curIdx = multi ? Math.max(0, results.findIndex((r) => r.url === card.assetUrl)) : 0
+  const allResults = ((card.meta as any)?.results as Array<{ url: string; localPath: string; mime: string }>) || []
+  const results = allResults.filter((_result, index) => !missingMediaRefs.has(`result:${index}`))
+  const foundResultIndex = results.findIndex((result) => result.url === card.assetUrl)
+  const multi = results.length > 1 || (results.length === 1 && foundResultIndex < 0)
+  const curIdx = foundResultIndex
   const cycleResult = () => {
     if (!multi) return
     const n = results[(curIdx + 1) % results.length]
-    updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: { ...card.meta, fittedFor: undefined } })
+    const remainingMissing = [...missingMediaRefs].filter((label) => label !== 'primary')
+    const nextMeta = { ...card.meta, fittedFor: undefined } as Record<string, unknown>
+    if (remainingMissing.length) nextMeta.missingMediaReferences = remainingMissing
+    else {
+      delete nextMeta.missingMediaReferences
+      delete nextMeta.mediaMissing
+    }
+    updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: nextMeta })
   }
 
   // 便签卡：彩色便利贴，双击就地编辑，悬停/选中显示换色
@@ -330,7 +355,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         style={{ left: card.x, top: card.y, width: card.w, height: card.h, ['--tw-ring-color' as any]: meta.accent }}
       >
         <div className="absolute inset-0 rounded-xl overflow-hidden" style={{ background: noteColor, color: '#1f2937', boxShadow: 'var(--shadow-card)' }}>
-          {editing ? (
+          {editingNote ? (
             <textarea
               data-interactive
               autoFocus
@@ -339,8 +364,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
               onBlur={(e) => {
                 if (e.target.value !== (card.text || '')) useGraph.getState().pushHistory() // 文本有变才入撤销栈
                 updateCard(card.id, { text: e.target.value })
-                setEditing(false)
+                useUi.getState().setEditingNoteId(null)
               }}
+              onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.blur() }}
               className="w-full h-full p-2.5 bg-transparent outline-none resize-none text-[13px] leading-relaxed"
               placeholder="输入便签内容…"
             />
@@ -348,7 +374,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
             <div
               onDoubleClick={(e) => {
                 e.stopPropagation()
-                setEditing(true)
+                useUi.getState().setEditingNoteId(card.id)
               }}
               className="w-full h-full p-2.5 text-[13px] leading-relaxed whitespace-pre-wrap overflow-auto ace-scroll"
             >
@@ -436,7 +462,10 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         style={{ borderColor: selected ? meta.accent : 'var(--ace-border)' }}
       >
         {(card.meta as any)?.mediaMissing && (
-          <div className="absolute top-1 left-1 z-20 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/90 text-white pointer-events-none" title="导入的工程未随附此媒体文件，请重新生成或重新导入含媒体的工程">媒体缺失</div>
+          <div
+            className="absolute top-1 left-1 z-20 text-[9px] px-1.5 py-0.5 rounded bg-amber-500/90 text-white pointer-events-none"
+            title={`有 ${Array.isArray((card.meta as any)?.missingMediaReferences) ? (card.meta as any).missingMediaReferences.length : 1} 个本地资源不可用；选中节点可重新关联主资源或移除失效输入`}
+          >资源缺失</div>
         )}
         {isImg && panoPreviewing ? (
           <PanoNodePreview card={card} />
@@ -445,7 +474,16 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
             src={thumbUrl || (card.assetUrl as string)}
             draggable={false}
             onLoad={(e) => fitAspect(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)}
-            onError={(e) => { if (thumbUrl && e.currentTarget.src !== card.assetUrl) e.currentTarget.src = card.assetUrl as string }}
+            onError={(e) => {
+              if (!thumbUrl || e.currentTarget.src === card.assetUrl) return
+              e.currentTarget.src = card.assetUrl as string
+              const cur = useGraph.getState().getCard(card.id)
+              if (!cur || (cur.meta as any)?.thumb !== thumbUrl) return
+              const meta = { ...(cur.meta || {}) } as any
+              delete meta.thumb
+              delete meta.thumbFor
+              useGraph.getState().updateCard(card.id, { meta })
+            }}
             className="w-full h-full object-cover"
             alt=""
           />
@@ -464,7 +502,9 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
           <div className="w-full h-full grid place-items-center p-3 text-center">
             <div className="flex flex-col items-center gap-2 opacity-60">
               <Icon size={24} style={{ color: meta.accent }} />
-              {card.prompt && <span className="text-xs line-clamp-3">{card.prompt}</span>}
+              {primaryMissing
+                ? <span className="text-xs text-amber-600 dark:text-amber-300">主资源缺失<br />选中节点可重新关联</span>
+                : card.prompt && <span className="text-xs line-clamp-3">{card.prompt}</span>}
             </div>
           </div>
         )}
@@ -485,7 +525,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
           title="切换本次生成的其它结果"
           className="absolute top-1.5 right-1.5 z-20 px-1.5 h-5 grid place-items-center rounded-md bg-black/60 text-white text-[10px] leading-none hover:bg-black/80"
         >
-          {curIdx + 1}/{results.length}
+          {Math.max(1, curIdx + 1)}/{results.length}
         </button>
       )}
 

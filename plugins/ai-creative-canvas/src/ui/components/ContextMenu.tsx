@@ -13,6 +13,7 @@ import type { Card, CardKind } from '../types'
 import { toast } from '../store/toastStore'
 import { promptDialog } from '../store/dialogStore'
 import { runCollage } from '../services/mediaOps'
+import { normalizeOpenDialogPaths } from '../services/importMediaTypes'
 
 type Item = { label: string; onClick: () => void; danger?: boolean } | { sep: true } | { header: string }
 
@@ -124,8 +125,8 @@ export function ContextMenu() {
     const withMedia = cs.filter((c) => c.assetLocalPath)
     if (!withMedia.length) return
     try {
-      const picked = await m.dialog.showOpenDialog({ title: '选择导出目录', properties: ['openDirectory'] })
-      const dir = Array.isArray(picked) ? picked[0] : undefined
+      const picked: unknown = await m.dialog.showOpenDialog({ title: '选择导出目录', properties: ['openDirectory'] })
+      const dir = normalizeOpenDialogPaths(picked)[0]
       if (!dir) return
       let ok = 0
       for (let i = 0; i < withMedia.length; i++) {
@@ -157,7 +158,7 @@ export function ContextMenu() {
   }
 
   const items: Item[] = []
-  const genTargets = cards.filter((c) => canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued')
+  const genTargets = cards.filter((c) => canGenerate(c) && c.status !== 'running' && c.status !== 'queued')
   const clips = cards.filter((c) => c.kind === 'video' && c.assetLocalPath)
   const nonGroup = cards.filter((c) => c.kind !== 'group')
 
@@ -172,7 +173,14 @@ export function ContextMenu() {
           run(() => {
             const c = cards[0]
             const newKind = c.kind === 'video' ? 'video' : 'source'
-            g.addCard(newKind, { x: c.x + c.w + 160, y: c.y + c.h / 2 }, { title: c.title || '素材', status: 'done', assetUrl: c.assetUrl, assetLocalPath: c.assetLocalPath, mime: c.mime })
+            g.addCard(newKind, { x: c.x + c.w + 160, y: c.y + c.h / 2 }, {
+              title: c.title || '素材',
+              status: 'done',
+              assetUrl: c.assetUrl,
+              assetLocalPath: c.assetLocalPath,
+              mime: c.mime,
+              meta: newKind === 'video' ? { resourceRole: 'source' } : {}
+            })
           })
       })
     // 手动导入的等距柱状全景（素材/图片卡）→ 一键转独立全景卡，获得 360 环视与接缝/天地修复。
@@ -226,7 +234,7 @@ export function ContextMenu() {
         items.push({ label: '纵向分布', onClick: () => run(() => distribute('v')) })
       }
     }
-    const genSel = cards.filter((c) => canGenerate(c.kind))
+    const genSel = cards.filter((c) => canGenerate(c))
     if (genSel.length === 1) items.push({ label: '复制参数', onClick: () => run(() => useUi.getState().setParamClipboard({ ...(genSel[0].params || {}) })) })
     const pclip = useUi.getState().paramClipboard
     if (pclip && genSel.length >= 1) items.push({ label: `粘贴参数（${genSel.length}）`, onClick: () => run(() => g.applyParamsTo(genSel.map((c) => c.id), pclip)) })
@@ -241,7 +249,7 @@ export function ContextMenu() {
   } else {
     const rect = stageEl.current?.getBoundingClientRect()
     const world = screenToWorld(ctx.x - (rect?.left || 0), ctx.y - (rect?.top || 0), board.viewport)
-    ;(['text', 'image', 'pano', 'video', 'audio', 'source', 'note'] as CardKind[]).forEach((k) => {
+    ;(['text', 'image', 'pano', 'video', 'audio', 'note'] as CardKind[]).forEach((k) => {
       items.push({ label: '新建' + NEW_LABEL[k], onClick: () => run(() => g.addCard(k, world)) })
     })
     if (g.clipboard?.cards.length) {

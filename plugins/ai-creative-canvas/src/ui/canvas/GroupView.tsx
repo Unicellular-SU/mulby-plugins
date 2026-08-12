@@ -67,7 +67,7 @@ function GroupViewImpl({ card, selected }: { card: Card; selected: boolean }) {
   const genGroup = () => {
     for (const id of allDescendants()) {
       const c = useGraph.getState().getActiveBoard().cards[id]
-      if (c && canGenerate(c.kind) && c.status !== 'running' && c.status !== 'queued') void generateCard(id)
+      if (c && canGenerate(c) && c.status !== 'running' && c.status !== 'queued') void generateCard(id)
     }
   }
 

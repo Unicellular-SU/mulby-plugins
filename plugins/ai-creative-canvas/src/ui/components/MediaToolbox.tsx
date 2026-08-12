@@ -36,7 +36,7 @@ export function MediaToolbox({ card }: { card: Card }) {
     <div className="flex items-center gap-0.5 max-w-[92vw] overflow-x-auto ace-noscroll">{/* 单行横向滚动，不再 wrap 成多排挤压卡片 */}
       {isImg && (
         <>
-          {canGenerate(card.kind) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
+          {canGenerate(card) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
           {isPano && (
             <IconBtn
               icon={Compass}

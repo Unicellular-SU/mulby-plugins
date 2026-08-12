@@ -1,9 +1,9 @@
 import { useRef, type ChangeEvent } from 'react'
-import { FolderOpen, Plus, Upload, Download, Package, Copy, Pencil, Trash2, Check, X, Layers } from 'lucide-react'
+import { FolderOpen, Plus, Upload, Download, Package, Copy, Pencil, Trash2, Check, X, Layers, RefreshCcw } from 'lucide-react'
 import { useEscClose } from '../hooks'
 import { useUi } from '../store/uiStore'
 import { useProject } from '../store/projectStore'
-import { promptDialog } from '../store/dialogStore'
+import { confirmDialog, promptDialog } from '../store/dialogStore'
 import { toast } from '../store/toastStore'
 
 const fmtTime = (ts: number) => {
@@ -39,6 +39,15 @@ function Inner() {
   const onRename = async (id: string, cur: string) => {
     const name = await promptDialog({ title: '重命名工程', defaultValue: cur, confirmLabel: '保存' })
     if (name != null && name.trim()) await useProject.getState().renameProject(id, name.trim())
+  }
+  const onCleanup = async (id: string) => {
+    const ok = await confirmDialog({
+      title: '清理未引用媒体',
+      message: '将汇总全部工程、恢复快照、画布撤销历史和剪贴板，清理插件受管目录中已不再引用的媒体。最近 5 分钟创建的文件会保留。',
+      confirmLabel: '开始清理',
+      cancelLabel: '取消'
+    })
+    if (ok) await useProject.getState().cleanupProjectMedia(id)
   }
   const onFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -109,6 +118,7 @@ function Inner() {
                   <IconAct title="复制" onClick={() => void useProject.getState().duplicateProject(p.id)} icon={Copy} />
                   <IconAct title="导出 JSON" onClick={() => void useProject.getState().exportProject(p.id)} icon={Download} />
                   <IconAct title="导出含媒体" onClick={() => void useProject.getState().exportProjectWithMedia(p.id)} icon={Package} />
+                  <IconAct title="清理未引用媒体" onClick={() => void onCleanup(p.id)} icon={RefreshCcw} />
                   <IconAct title="删除" onClick={() => void useProject.getState().deleteProject(p.id)} icon={Trash2} danger />
                 </div>
               </div>
