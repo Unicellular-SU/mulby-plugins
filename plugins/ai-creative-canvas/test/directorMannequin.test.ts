@@ -537,6 +537,14 @@ function testDirectorIk() {
   assert.ok(unreachable.target.length() < 2, '超出骨长的目标必须钳在可达范围内')
 }
 
+function testDirectorShotStripLayout() {
+  const source = readFileSync(new URL('../src/ui/canvas/DirectorShotStrip.tsx', import.meta.url), 'utf8')
+  assert.match(source, /w-\[232px\]/, '分镜卡片应保留稳定宽度，避免信息区被缩窄')
+  assert.match(source, /grid-cols-\[80px_minmax\(0,1fr\)\]/, '缩略图与信息区应使用稳定双列布局')
+  assert.match(source, /absolute inset-y-1 left-1/, '拖拽柄应脱离横向内容流')
+  assert.doesNotMatch(source, /group flex w-44/, '分镜卡片不能回退到拥挤的 176px 横向布局')
+}
+
 testBodyPresets()
 testNativeBodyAssets()
 testPosePresets()
@@ -548,5 +556,6 @@ testDirectorEnvironmentCalibration()
 testDirectorPoseTools()
 testDirectorCameraPresets()
 testDirectorIk()
+testDirectorShotStripLayout()
 await testDirectorAssetCache()
-console.log('director mannequin: 13 bodies / 20 poses / per-shot blocking / grounded panoramas / continuity / safety / IK OK')
+console.log('director mannequin: 13 bodies / 20 poses / shot-card layout / grounded panoramas / continuity / safety / IK OK')

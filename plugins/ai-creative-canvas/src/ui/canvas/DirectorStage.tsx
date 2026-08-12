@@ -2722,7 +2722,7 @@ function Inner({ onReload }: { onReload: () => void }) {
     api.current.setViewMode?.(next)
   }
 
-  const shotStripHeight = shotStripExpanded ? 128 : 40
+  const shotStripHeight = shotStripExpanded ? 136 : 40
   const bottomUiInset = 84 + shotStripHeight + 8
   const viewportLeft = panelsCollapsed ? 12 : leftPanelWidth + 16
   const viewportRight = panelsCollapsed ? 12 : rightPanelWidth + 16

@@ -44,6 +44,7 @@ interface Props {
 }
 
 const iconButtonClass = 'grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.04] text-white/55 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-30 active:scale-[0.96]'
+const shotActionButtonClass = 'grid h-5 w-5 shrink-0 place-items-center rounded-md text-white/35 transition-colors hover:bg-white/[0.07] hover:text-white disabled:opacity-30'
 
 export function DirectorShotStrip({
   shots,
@@ -156,7 +157,7 @@ export function DirectorShotStrip({
                       if (draggedId) onReorder(draggedId, shot.id)
                       setDraggedId(null)
                     }}
-                    className={`group flex w-44 shrink-0 gap-2 rounded-xl border p-1.5 transition-colors ${
+                    className={`group relative grid w-[232px] shrink-0 grid-cols-[80px_minmax(0,1fr)] gap-2 rounded-xl border py-1.5 pl-6 pr-2 transition-colors ${
                       selected ? 'border-amber-300/55 bg-amber-300/10' : 'border-white/[0.08] bg-white/[0.035] hover:border-white/20 hover:bg-white/[0.06]'
                     } ${draggedId === shot.id ? 'opacity-45' : ''}`}
                   >
@@ -164,22 +165,30 @@ export function DirectorShotStrip({
                       draggable={editId !== shot.id}
                       onDragStart={() => setDraggedId(shot.id)}
                       onDragEnd={() => setDraggedId(null)}
-                      className="cursor-grab self-stretch text-white/20 hover:text-white/55 active:cursor-grabbing"
+                      className="absolute inset-y-1 left-1 grid w-4 cursor-grab place-items-center rounded-md text-white/20 transition-colors hover:bg-white/[0.06] hover:text-white/55 active:cursor-grabbing"
                       title="拖动排序"
                       aria-label="拖动排序"
                     >
                       <GripVertical size={12} />
                     </button>
-                    <button disabled={busy} onClick={() => onApply(shot)} className="relative h-14 w-20 shrink-0 overflow-hidden rounded-lg bg-zinc-900 text-left disabled:cursor-wait" title={shot.sceneState ? '应用此镜头的相机与演员调度' : '切换到此旧机位'}>
+                    <button disabled={busy} onClick={() => onApply(shot)} className="relative h-14 w-20 self-center overflow-hidden rounded-lg bg-zinc-900 text-left disabled:cursor-wait" title={shot.sceneState ? '应用此镜头的相机与演员调度' : '切换到此旧机位'}>
                       {shot.take || shot.thumb ? (
                         <img src={shot.take || shot.thumb} alt="" draggable={false} className="h-full w-full object-cover" />
                       ) : (
                         <span className="grid h-full w-full place-items-center text-white/20"><Camera size={16} /></span>
                       )}
+                      {approximatePanorama && (
+                        <span
+                          className={`absolute left-1 top-1 rounded px-1 py-0.5 text-[8px] ${panoramaStatus?.level === 'high' ? 'bg-zinc-950/90 text-amber-100' : 'bg-zinc-950/80 text-amber-200/70'}`}
+                          title={`${panoramaStatus?.label}：${panoramaStatus?.detail}`}
+                        >
+                          近似
+                        </span>
+                      )}
                       {shot.take && <span className="absolute bottom-1 right-1 rounded bg-zinc-950/80 px-1 py-0.5 text-[8px] text-amber-200">TAKE</span>}
                       {applyingShotId === shot.id && <span className="absolute inset-0 grid place-items-center bg-zinc-950/70 text-amber-200"><Loader2 size={14} className="animate-spin" /></span>}
                     </button>
-                    <div className="flex min-w-0 flex-1 flex-col">
+                    <div className="flex min-w-0 flex-col overflow-hidden">
                       {editId === shot.id ? (
                         <input
                           autoFocus
@@ -214,21 +223,13 @@ export function DirectorShotStrip({
                       <span className="flex items-center gap-1 text-[9px] tabular-nums text-white/30">
                         {normalizeDirectorShotDuration(shot.durationMs) / 1000}s
                         {shot.sceneState && <span className="flex items-center gap-0.5 text-amber-200/55" title={`保存了 ${shot.sceneState.subjects.length} 个对象的演员调度`}><Clapperboard size={9} />{shot.sceneState.subjects.length}</span>}
-                        {approximatePanorama && (
-                          <span
-                            className={`rounded px-1 py-0.5 text-[8px] ${panoramaStatus?.level === 'high' ? 'bg-amber-300/15 text-amber-100' : 'bg-white/[0.05] text-amber-200/65'}`}
-                            title={`${panoramaStatus?.label}：${panoramaStatus?.detail}`}
-                          >
-                            近似
-                          </span>
-                        )}
                       </span>
                       <div className="mt-auto flex items-center gap-1">
-                        <button onClick={() => onGenerate(index)} disabled={busy} className="text-white/35 transition-colors hover:text-amber-200 disabled:opacity-30" title="按此机位生成或重拍"><RefreshCw size={11} /></button>
-                        <button onClick={() => onDuplicate(shot.id)} className="text-white/35 transition-colors hover:text-white" title="复制机位"><Copy size={11} /></button>
-                        <button onClick={() => onDelete(shot.id)} className="text-white/35 transition-colors hover:text-white" title="删除机位"><Trash2 size={11} /></button>
+                        <button onClick={() => onGenerate(index)} disabled={busy} className={`${shotActionButtonClass} hover:text-amber-200`} title="按此机位生成或重拍"><RefreshCw size={11} /></button>
+                        <button onClick={() => onDuplicate(shot.id)} className={shotActionButtonClass} title="复制机位"><Copy size={11} /></button>
+                        <button onClick={() => onDelete(shot.id)} className={shotActionButtonClass} title="删除机位"><Trash2 size={11} /></button>
                         {(shot.takes?.length || 0) > 1 && (
-                          <div className="ml-auto flex items-center gap-0.5 text-[9px] tabular-nums text-white/45">
+                          <div className="ml-auto flex shrink-0 items-center gap-0.5 text-[9px] tabular-nums text-white/45">
                             <button onClick={() => onCycleTake(index, -1)} className="hover:text-white" title="上一条成片"><ChevronLeft size={10} /></button>
                             <span>{takeIndex + 1}/{shot.takes!.length}</span>
                             <button onClick={() => onCycleTake(index, 1)} className="hover:text-white" title="下一条成片"><ChevronRight size={10} /></button>
