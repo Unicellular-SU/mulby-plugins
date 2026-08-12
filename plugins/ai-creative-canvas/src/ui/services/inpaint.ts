@@ -3,6 +3,9 @@ import { saveBase64, mimeToExt } from './media'
 import { aiLimiter } from './limiter'
 import { editImageWithMaskCompatibility, type ImageEditApi } from './imageEditCompat'
 import { toast } from '../store/toastStore'
+import { buildInpaintInstruction, normalizedAnnotationTexts, type InpaintOp } from './inpaintGuidance'
+
+export type { InpaintOp } from './inpaintGuidance'
 
 function ai() {
   return window.mulby.ai
@@ -16,13 +19,23 @@ function dataUrlToArrayBuffer(d: string): ArrayBuffer {
   return arr.buffer
 }
 
-export type InpaintOp = 'repaint' | 'remove'
+export interface InpaintAnnotationGuidance {
+  hasAnnotations: boolean
+  annotationTexts?: string[]
+}
 
-// 局部重绘双保险范式：主图=挖透明洞(repaint)/填绿(remove)的合成图（不支持 mask 的 provider 也能看懂），
-// 同时上传真遮罩附件走 maskAttachmentId（涂抹区 alpha=0，OpenAI edits 约定）；宿主现在会把它
+// 局部重绘双保险范式：主图=挖透明洞(repaint)/填绿(remove)+可选箭头文字的合成图（不支持 mask 的 provider 也能看懂），
+// 同时上传真遮罩附件走 maskAttachmentId（涂抹区 alpha=0，OpenAI edits 约定）；没有蒙版时则直接按图上标注普通 edit。宿主会把带蒙版请求
 // 严格规范化为 inpaint 并校验 Profile 能力，不支持时按 imageEditCompat 安全降级为合成图普通 edit；
 // 结果落「新卡」（非破坏式，可与原图对比）。
-export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl: string, prompt: string, maskPngDataUrl?: string): Promise<void> {
+export async function inpaint(
+  cardId: string,
+  op: InpaintOp,
+  compositePngDataUrl: string,
+  prompt: string,
+  maskPngDataUrl?: string,
+  guidance: InpaintAnnotationGuidance = { hasAnnotations: false }
+): Promise<void> {
   const g = useGraph.getState()
   const card = g.getActiveBoard().cards[cardId]
   if (!card || !card.assetUrl) throw new Error('没有底图')
@@ -30,10 +43,14 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
   const model = card.modelId
   if (!model) throw new Error('请先在节点里选择图像模型')
 
-  const instruction =
-    op === 'remove'
-      ? `移除画面中绿色覆盖区域内的物体，用与周围一致、自然连贯的背景无缝填补该区域；其余区域严格保持与原图一致。${prompt ? '补充要求：' + prompt : ''}`
-      : `图中透明（被挖空）的区域请按以下描述重绘，并与周围光影、风格、边缘无缝衔接；其余区域严格保持与原图一致：${prompt}`
+  const annotationTexts = normalizedAnnotationTexts(guidance.annotationTexts)
+  const instruction = buildInpaintInstruction({
+    op,
+    prompt,
+    hasMask: !!maskPngDataUrl,
+    hasAnnotations: guidance.hasAnnotations,
+    annotationTexts
+  })
 
   const res = await aiLimiter(async () => {
     const att = await ai().attachments.upload({ buffer: dataUrlToArrayBuffer(compositePngDataUrl), mimeType: 'image/png', purpose: 'image' })
@@ -69,7 +86,7 @@ export async function inpaint(cardId: string, op: InpaintOp, compositePngDataUrl
       title: (base.title || '图片') + (op === 'remove' ? ' · 擦除' : ' · 重绘'),
       status: 'done',
       modelId: base.modelId,
-      prompt: prompt || (op === 'remove' ? '擦除涂抹区域' : ''),
+      prompt: [prompt.trim(), ...annotationTexts].filter(Boolean).join('；') || (op === 'remove' ? '擦除标注区域' : ''),
       assetUrl: saved.url,
       assetLocalPath: saved.path,
       mime: 'image/png'
