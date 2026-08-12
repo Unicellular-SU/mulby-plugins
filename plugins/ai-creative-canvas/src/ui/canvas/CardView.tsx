@@ -326,7 +326,7 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
   const isAud = card.kind === 'audio' && !!card.assetUrl && !primaryMissing
   const isTxt = card.kind === 'text' && !!card.text
 
-  // 本次多结果（meta.results）：卡上堆叠展示 + 角标切换主图
+  // 本次多结果（meta.results）：通过角标切换主图，不改变卡片的可视边界。
   const allResults = ((card.meta as any)?.results as Array<{ url: string; localPath: string; mime: string }>) || []
   const results = allResults.filter((_result, index) => !missingMediaRefs.has(`result:${index}`))
   const foundResultIndex = results.findIndex((result) => result.url === card.assetUrl)
@@ -448,13 +448,6 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
         <div className="absolute top-1 right-1 z-20 flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-600/85 text-white text-[10px] leading-none pointer-events-none">
           <Compass size={10} /> 360°
         </div>
-      )}
-      {/* 多结果堆叠背板（露出右下角，暗示有多张） */}
-      {isImg && multi && (
-        <>
-          <div className="absolute inset-0 rounded-xl border bg-white dark:bg-neutral-900 translate-x-1.5 translate-y-1.5" style={{ borderColor: 'var(--ace-border)' }} />
-          <div className="absolute inset-0 rounded-xl border bg-white dark:bg-neutral-900 translate-x-3 translate-y-3" style={{ borderColor: 'var(--ace-border)' }} />
-        </>
       )}
       {/* 内容层：承载边框、圆角与裁剪；无标题栏 */}
       <div
