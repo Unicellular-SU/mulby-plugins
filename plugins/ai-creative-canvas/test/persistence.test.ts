@@ -93,8 +93,91 @@ function testPanoSurvivesSanitize() {
   assert.equal(d.boards[0].cards.p?.kind, 'pano')
 }
 
+function testSemanticAssetsMigrationAndSanitization() {
+  const d = doc({
+    source: card('source', { kind: 'image', assetUrl: 'file:///role.png', meta: { semanticAnchorId: 'stale' } }),
+    target: card('target', {
+      kind: 'video',
+      anchorRefs: [
+        { anchorId: 'role', mention: '旧称', acceptedAt: 3 },
+        { anchorId: 'role', mention: '重复', acceptedAt: 4 },
+        { anchorId: 'missing', mention: '不存在', acceptedAt: 5 }
+      ]
+    })
+  }, 2)
+  ;(d as any).assetAnchors = {
+    role: {
+      id: 'role',
+      role: 'character',
+      name: '阿星',
+      aliases: [' 主角 ', '', '主角'],
+      tags: ['红衣'],
+      description: '角色连续性锚点',
+      mediaKind: 'image',
+      source: { boardId: 'b1', cardId: 'source' },
+      revision: 2,
+      locked: false,
+      createdAt: 1,
+      updatedAt: 2
+    },
+    invalid: { id: 'invalid', role: 'unknown', name: '坏数据', mediaKind: 'image' }
+  }
+
+  const migrated = migrateProject(d)
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION)
+  assert.deepEqual(Object.keys(migrated.assetAnchors || {}), ['role'])
+  assert.deepEqual(migrated.assetAnchors?.role.aliases, ['主角'])
+  assert.equal((migrated.boards[0].cards.source.meta as any).semanticAnchorId, 'role')
+  assert.deepEqual(migrated.boards[0].cards.target.anchorRefs, [{ anchorId: 'role', mention: '阿星', acceptedAt: 3 }])
+}
+
+function testLegacyProjectInitializesEmptyAnchorIndex() {
+  const migrated = migrateProject(doc({ source: card('source', { kind: 'image' }) }, 2))
+  assert.deepEqual(migrated.assetAnchors, {})
+}
+
+function testLegacyStoryboardMigratesWithExistingOutputBacklink() {
+  const legacyShot = {
+    shotNumber: 1,
+    shotSize: '中景',
+    duration: 5,
+    desc: '祖父在厨房给孙女盛汤',
+    imagePrompt: '暖色厨房，中景'
+  }
+  const legacy = doc({
+    owner: card('owner', {
+      kind: 'text',
+      title: '短片脚本',
+      text: '祖父在厨房给孙女盛汤',
+      meta: { shots: [legacyShot] }
+    }),
+    image: card('image', {
+      kind: 'image',
+      title: '镜1·中景',
+      meta: { shot: legacyShot }
+    })
+  }, 3)
+  legacy.boards[0].edges = {
+    edge: { id: 'edge', source: 'owner', target: 'image', kind: 'ref' }
+  }
+
+  const migrated = migrateProject(legacy)
+  const ownerMeta = migrated.boards[0].cards.owner.meta as any
+  const imageMeta = migrated.boards[0].cards.image.meta as any
+  assert.equal(migrated.schemaVersion, SCHEMA_VERSION)
+  assert.equal(ownerMeta.shots, undefined)
+  assert.equal(ownerMeta.storyboardV2.version, 2)
+  assert.equal(ownerMeta.storyboardV2.shots[0].imageCardId, 'image')
+  assert.equal(imageMeta.storyboardBacklink.storyboardId, ownerMeta.storyboardV2.id)
+  assert.equal(imageMeta.storyboardBacklink.shotId, ownerMeta.storyboardV2.shots[0].id)
+  assert.equal(imageMeta.storyboardBacklink.stage, 'image')
+}
+
 testPanoMigration()
 testStaleShardUnderV2ManifestStillMigrates()
 testMigrationPinsPanoModel()
 testPanoSurvivesSanitize()
-console.log('persistence: 4 tests OK')
+testSemanticAssetsMigrationAndSanitization()
+testLegacyProjectInitializesEmptyAnchorIndex()
+testLegacyStoryboardMigratesWithExistingOutputBacklink()
+console.log('persistence: 7 tests OK')

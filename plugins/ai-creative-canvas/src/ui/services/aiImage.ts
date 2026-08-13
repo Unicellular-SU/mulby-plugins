@@ -231,7 +231,7 @@ export async function generateImage(
 
   const startedAt = Date.now()
   const providerTrace = await imageProviderTrace(model)
-  const resolved = resolveGenerationPrompt(card, board, 'media')
+  const resolved = resolveGenerationPrompt(card, board, 'media', useGraph.getState().project)
   const inputs = resolved.inputs
   const aspect = pano ? '2:1' : String(params.aspect || '1:1') // 全景强制等距柱状 2:1
   // 全景看的是 ~60° 一小片（约占贴图宽 1/6），分辨率要够才不糊：至少 2K

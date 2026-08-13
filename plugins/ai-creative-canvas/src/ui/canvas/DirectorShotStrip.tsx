@@ -14,6 +14,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  GalleryHorizontalEnd,
   Trash2
 } from 'lucide-react'
 import type { DirectorEnvironment, DirectorShot } from '../types'
@@ -38,6 +39,7 @@ interface Props {
   onDelete: (id: string) => void
   onRename: (id: string, name: string) => void
   onCycleTake: (index: number, direction: number) => void
+  onVersions: (index: number) => void
   onReorder: (draggedId: string, targetId: string) => void
   onBatchGenerate: () => void
   onExport: () => void
@@ -63,6 +65,7 @@ export function DirectorShotStrip({
   onDelete,
   onRename,
   onCycleTake,
+  onVersions,
   onReorder,
   onBatchGenerate,
   onExport
@@ -226,6 +229,7 @@ export function DirectorShotStrip({
                       </span>
                       <div className="mt-auto flex items-center gap-1">
                         <button onClick={() => onGenerate(index)} disabled={busy} className={`${shotActionButtonClass} hover:text-amber-200`} title="按此机位生成或重拍"><RefreshCw size={11} /></button>
+                        {!!shot.take && <button onClick={() => onVersions(index)} className={`${shotActionButtonClass} hover:text-indigo-200`} title="打开 Take 版本工作区"><GalleryHorizontalEnd size={11} /></button>}
                         <button onClick={() => onDuplicate(shot.id)} className={shotActionButtonClass} title="复制机位"><Copy size={11} /></button>
                         <button onClick={() => onDelete(shot.id)} className={shotActionButtonClass} title="删除机位"><Trash2 size={11} /></button>
                         {(shot.takes?.length || 0) > 1 && (

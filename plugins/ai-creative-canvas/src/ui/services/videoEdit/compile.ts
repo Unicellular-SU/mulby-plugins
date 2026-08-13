@@ -14,7 +14,7 @@
 //   afftdn(降噪) → loudnorm → asetrate(变调)
 
 import { mediaPath } from '../media'
-import type { EditOp, EditStack, OpKind, OverlayParams, TransformParams, ColorParams, AudioParams, ExportParams, SpeedParams, TrimParams } from './types'
+import type { EditOp, EditStack, OpKind, OverlayParams, TransformParams, ColorParams, AudioParams, ExportParams, SpeedParams, TrimParams, ReplaceParams } from './types'
 
 export interface OverlayInput {
   kind: 'png' | 'video' | 'subtitle' | 'timecode'
@@ -181,20 +181,82 @@ class Graph {
 
 // ---- 各域 ----
 
+function applyReplace(g: Graph, p: ReplaceParams, baseDuration: number, baseW: number, baseH: number): void {
+  const segments = (p.segments || [])
+    .filter((segment) => segment.replacementPath && segment.end > segment.start)
+    .sort((a, b) => a.start - b.start)
+    .filter((segment, index, all) => index === 0 || segment.start >= all[index - 1].end - 0.001)
+  if (!segments.length) return
+
+  const W = Math.max(2, Math.round(baseW / 2) * 2 || 1920)
+  const H = Math.max(2, Math.round(baseH / 2) * 2 || 1080)
+  const parts: string[] = []
+  let cursor = 0
+  for (const segment of segments) {
+    const start = Math.max(cursor, Math.min(baseDuration, segment.start))
+    const end = Math.max(start, Math.min(baseDuration, segment.end))
+    if (start > cursor + 0.001) {
+      const label = g.freshLabel('orig')
+      g.raw(`[0:v]trim=${cursor.toFixed(3)}:${start.toFixed(3)},setpts=PTS-STARTPTS[${label}]`)
+      parts.push(label)
+    }
+    const duration = Math.max(0.1, end - start)
+    const input = g.addInput(segment.replacementPath)
+    const label = g.freshLabel('repl')
+    g.raw(
+      `[${input}:v]setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+        `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=black,trim=duration=${duration.toFixed(3)},` +
+        `tpad=stop_mode=clone:stop_duration=${duration.toFixed(3)},trim=duration=${duration.toFixed(3)},setpts=PTS-STARTPTS[${label}]`
+    )
+    parts.push(label)
+    cursor = end
+  }
+  if (cursor < baseDuration - 0.001) {
+    const label = g.freshLabel('orig')
+    g.raw(`[0:v]trim=${cursor.toFixed(3)}:${baseDuration.toFixed(3)},setpts=PTS-STARTPTS[${label}]`)
+    parts.push(label)
+  }
+  if (!parts.length) return
+  if (parts.length === 1) {
+    g.setV(parts[0])
+    return
+  }
+  const out = g.freshLabel('replaced')
+  g.raw(`${parts.map((label) => `[${label}]`).join('')}concat=n=${parts.length}:v=1:a=0[${out}]`)
+  g.setV(out)
+  // 音频继续使用原片同区间，避免生成片段无声或时长漂移；后续 trim/audio 操作仍可照常处理。
+}
+
 function applyTrim(g: Graph, p: TrimParams, hasAudio: boolean): void {
   const keeps = (p.segments || []).filter((s) => s.keep !== false && s.out > s.in).sort((a, b) => a.in - b.in)
   if (!keeps.length) return
+  const sourceV = g.v
+  const sourceA = hasAudio ? g.a : null
+  const videoInputs: string[] = []
+  const audioInputs: string[] = []
+  if (keeps.length > 1 && sourceV !== '0:v') {
+    for (let i = 0; i < keeps.length; i++) videoInputs.push(g.freshLabel('trimvsrc'))
+    g.raw(`[${sourceV}]split=${keeps.length}${videoInputs.map((label) => `[${label}]`).join('')}`)
+  } else {
+    for (let i = 0; i < keeps.length; i++) videoInputs.push(sourceV)
+  }
+  if (keeps.length > 1 && sourceA && sourceA !== '0:a') {
+      for (let i = 0; i < keeps.length; i++) audioInputs.push(g.freshLabel('trimasrc'))
+      g.raw(`[${sourceA}]asplit=${keeps.length}${audioInputs.map((label) => `[${label}]`).join('')}`)
+  } else {
+    for (let i = 0; i < keeps.length; i++) if (sourceA) audioInputs.push(sourceA)
+  }
   keeps.forEach((s, i) => {
-    g.raw(`[0:v]trim=${s.in.toFixed(3)}:${s.out.toFixed(3)},setpts=PTS-STARTPTS[tv${i}]`)
-    if (hasAudio) g.raw(`[0:a]atrim=${s.in.toFixed(3)}:${s.out.toFixed(3)},asetpts=PTS-STARTPTS[ta${i}]`)
+    g.raw(`[${videoInputs[i]}]trim=${s.in.toFixed(3)}:${s.out.toFixed(3)},setpts=PTS-STARTPTS[tv${i}]`)
+    if (audioInputs[i]) g.raw(`[${audioInputs[i]}]atrim=${s.in.toFixed(3)}:${s.out.toFixed(3)},asetpts=PTS-STARTPTS[ta${i}]`)
   })
   if (keeps.length === 1) {
     g.setV('tv0')
-    if (hasAudio) g.a = 'ta0'
+    if (sourceA) g.a = 'ta0'
     return
   }
-  const ins = keeps.map((_, i) => (hasAudio ? `[tv${i}][ta${i}]` : `[tv${i}]`)).join('')
-  if (hasAudio) {
+  const ins = keeps.map((_, i) => (sourceA ? `[tv${i}][ta${i}]` : `[tv${i}]`)).join('')
+  if (sourceA) {
     g.raw(`${ins}concat=n=${keeps.length}:v=1:a=1[cv][ca]`)
     g.setV('cv')
     g.a = 'ca'
@@ -528,6 +590,7 @@ export async function compileStack(stack: EditStack, ctx: CompileCtx, opts?: Com
   const g = new Graph(ctx.hasAudio)
 
   // 视频链固定顺序
+  if (single.replace) applyReplace(g, single.replace.params as ReplaceParams, stack.baseDuration, stack.baseW, stack.baseH)
   if (trim) applyTrim(g, trim, ctx.hasAudio)
   if (speed) applySpeed(g, speed, fb)
   if (speed) applyTimeEffects(g, speed)

@@ -114,13 +114,68 @@ function testPerBoardHistorySurvivesSwitch() {
   assert.equal(useGraph.getState().getCard(a)!.w, 280, 'undo on board A still works after switching away and back')
 }
 
+function testSemanticAnchorLifecycle() {
+  reset()
+  const source = useGraph.getState().addCard('image', { x: 0, y: 0 }, {
+    assetUrl: 'file:///role.png',
+    assetLocalPath: '/role.png',
+    mime: 'image/png'
+  })
+  const target = useGraph.getState().addCard('video', { x: 400, y: 0 })
+  const anchorId = useGraph.getState().upsertAssetAnchor(source, { role: 'character', name: '旧名', aliases: ['主角'] })
+  assert.ok(anchorId)
+  assert.equal((useGraph.getState().getCard(source)!.meta as any).semanticAnchorId, anchorId)
+  assert.equal(useGraph.getState().addAnchorReference(target, anchorId!), true)
+  assert.equal(useGraph.getState().getCard(target)!.anchorRefs?.[0].mention, '旧名')
+  useGraph.getState().undo()
+  assert.deepEqual(useGraph.getState().getCard(target)!.anchorRefs, undefined, '接受引用可以一步撤销')
+  useGraph.getState().redo()
+  assert.equal(useGraph.getState().getCard(target)!.anchorRefs?.[0].anchorId, anchorId, '撤销后可以恢复稳定引用')
+
+  useGraph.getState().updateCard(target, { prompt: '保持 @旧名 的服装一致' })
+  useGraph.getState().upsertAssetAnchor(source, { id: anchorId!, role: 'character', name: '新名', aliases: ['主角'] })
+  assert.equal(useGraph.getState().getCard(target)!.anchorRefs?.[0].mention, '新名')
+  assert.equal(useGraph.getState().getCard(target)!.prompt, '保持 @新名 的服装一致', '锚点改名应同步显式 token')
+
+  useGraph.getState().removeAssetAnchor(anchorId!)
+  assert.equal(useGraph.getState().project.assetAnchors?.[anchorId!], undefined)
+  assert.deepEqual(useGraph.getState().getCard(target)!.anchorRefs, [])
+  assert.equal((useGraph.getState().getCard(source)!.meta as any).semanticAnchorId, undefined)
+}
+
+function testAtomicGraphTransactionCreatesOneUndoStep() {
+  reset()
+  const before = useGraph.getState().getActiveBoard()
+  const created = useGraph.getState().applyGraphTransaction('批量创建镜头', (tx) => {
+    const ids: string[] = []
+    for (let index = 0; index < 20; index++) {
+      ids.push(tx.createCard('image', { x: index * 340 + 160, y: 160 }, { title: `镜头 ${index + 1}` }))
+    }
+    for (let index = 1; index < ids.length; index++) assert.ok(tx.ensureEdge(ids[index - 1], ids[index]))
+    tx.select(ids)
+    return ids
+  })
+  assert.equal(created?.length, 20)
+  assert.equal(Object.keys(useGraph.getState().getActiveBoard().cards).length, 20)
+  assert.equal(Object.keys(useGraph.getState().getActiveBoard().edges).length, 19)
+  assert.equal(useGraph.getState().boardHistories[before.id].past.length, 1, '批量事务只产生一条撤销记录')
+
+  useGraph.getState().undo()
+  assert.equal(Object.keys(useGraph.getState().getActiveBoard().cards).length, 0, '一次撤销移除整个批次')
+  assert.equal(Object.keys(useGraph.getState().getActiveBoard().edges).length, 0)
+  useGraph.getState().redo()
+  assert.equal(Object.keys(useGraph.getState().getActiveBoard().cards).length, 20)
+}
+
 function main() {
   testResizeThenUndo()
   testUndoThenEditDoesNotClobberOnRedo()
   testCopyGroupCarriesMembersAndEdges()
   testCreateConnectedNodeSkipsNoteSource()
   testPerBoardHistorySurvivesSwitch()
-  console.log('graphStore: 5 tests OK')
+  testSemanticAnchorLifecycle()
+  testAtomicGraphTransactionCreatesOneUndoStep()
+  console.log('graphStore: 7 tests OK')
 }
 
 main()

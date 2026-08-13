@@ -89,6 +89,11 @@ export function isProviderConfigShape(value: unknown): value is ProviderConfig {
     && (candidate.type === 'custom-video' || candidate.type === 'openai-tts')
     && typeof candidate.baseURL === 'string'
     && (candidate.headers == null || isStringRecord(candidate.headers))
+    && (candidate.pricing == null || (
+      typeof candidate.pricing === 'object'
+      && typeof candidate.pricing.currency === 'string'
+      && [candidate.pricing.perRequest, candidate.pricing.perSecond, candidate.pricing.confirmAbove].every((amount) => amount == null || (Number.isFinite(amount) && amount >= 0))
+    ))
 }
 
 /** 老配置自动从模板/字段推断，新配置的显式声明优先。 */
@@ -124,6 +129,12 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
     }
   }
   if (provider.healthCheckUrl && !httpUrl(provider.healthCheckUrl)) error('healthCheckUrl', '健康检查地址必须是 http/https URL')
+  if (provider.pricing) {
+    if (!provider.pricing.currency?.trim()) error('pricing.currency', '填写费用后必须指定币种')
+    if (provider.pricing.perRequest != null && (!Number.isFinite(provider.pricing.perRequest) || provider.pricing.perRequest < 0)) error('pricing.perRequest', '每次请求费用必须是非负数字')
+    if (provider.pricing.perSecond != null && (!Number.isFinite(provider.pricing.perSecond) || provider.pricing.perSecond < 0)) error('pricing.perSecond', '每秒费用必须是非负数字')
+    if (provider.pricing.confirmAbove != null && (!Number.isFinite(provider.pricing.confirmAbove) || provider.pricing.confirmAbove < 0)) error('pricing.confirmAbove', '确认阈值必须是非负数字')
+  }
 
   if (provider.type === 'openai-tts') {
     if (!httpUrl(provider.baseURL)) error('baseURL', 'Base URL 必须是完整的 http/https 地址')

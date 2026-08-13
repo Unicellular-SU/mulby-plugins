@@ -5,12 +5,13 @@
 
 import { uid } from '../../util'
 
-export type OpKind = 'trim' | 'speed' | 'transform' | 'color' | 'overlay' | 'audio' | 'export'
+export type OpKind = 'replace' | 'trim' | 'speed' | 'transform' | 'color' | 'overlay' | 'audio' | 'export'
 
 // 大类编译顺序（物理正确性钉死，不随 UI 重排打乱）。export 永远置尾。
-export const OP_KIND_ORDER: OpKind[] = ['trim', 'speed', 'transform', 'color', 'overlay', 'audio', 'export']
+export const OP_KIND_ORDER: OpKind[] = ['replace', 'trim', 'speed', 'transform', 'color', 'overlay', 'audio', 'export']
 
 export const OP_KIND_LABEL: Record<OpKind, string> = {
+  replace: '替换片段',
   trim: '裁切',
   speed: '变速',
   transform: '几何',
@@ -18,6 +19,17 @@ export const OP_KIND_LABEL: Record<OpKind, string> = {
   overlay: '叠加',
   audio: '音频',
   export: '导出'
+}
+
+// ---- replace：把源视频时间轴中的区间替换为新片段（原片与替换片均不改写）----
+export interface ReplacementSegment {
+  start: number
+  end: number
+  replacementCardId: string
+  replacementPath: string
+}
+export interface ReplaceParams {
+  segments: ReplacementSegment[]
 }
 
 // ---- trim：多段保留 / 删中段 / 波纹删除（in/out 恒为源时间基秒）----
@@ -150,6 +162,7 @@ interface OpBase {
   enabled: boolean // 旁路开关：false=编译跳过、预览不施加（便于 A/B）
 }
 export type EditOp =
+  | (OpBase & { kind: 'replace'; params: ReplaceParams })
   | (OpBase & { kind: 'trim'; params: TrimParams })
   | (OpBase & { kind: 'speed'; params: SpeedParams })
   | (OpBase & { kind: 'transform'; params: TransformParams })
@@ -178,6 +191,7 @@ export interface EditRecipe {
 
 // ---- 默认参数工厂 ----
 const DEFAULTS: { [K in OpKind]: () => OpParamsOf<K> } = {
+  replace: () => ({ segments: [] }),
   trim: () => ({ segments: [] }),
   speed: () => ({ rate: 1, reverse: false, pitchCompensate: true }),
   transform: () => ({}),

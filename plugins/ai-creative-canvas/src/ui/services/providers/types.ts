@@ -11,6 +11,14 @@ export interface VideoProviderCapabilities {
   resolutions?: string[]
 }
 
+/** 可选费用声明。未填写时生成计划必须明确显示“费用未知”，不得伪造估算。 */
+export interface ProviderPricing {
+  currency: string
+  perRequest?: number
+  perSecond?: number
+  confirmAbove?: number
+}
+
 export interface ProviderConfig {
   id: string
   label: string
@@ -21,6 +29,7 @@ export interface ProviderConfig {
   healthCheckUrl?: string
   /** 供节点面板裁剪无效参数；旧配置缺失时由请求模板自动推断。 */
   capabilities?: VideoProviderCapabilities
+  pricing?: ProviderPricing
 
   // ---- custom-video（异步 submit + poll，字段/路径可配） ----
   submitPath?: string // 例 /v1/video/generations

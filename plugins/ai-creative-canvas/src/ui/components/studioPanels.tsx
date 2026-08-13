@@ -12,7 +12,7 @@ import { runTts } from '../services/providers/engine'
 import { toast } from '../store/toastStore'
 import { PLATFORM_PRESETS } from '../services/videoEdit/exportPresets'
 import { base64ToArrayBuffer } from '../util'
-import type { EditOp, TrimParams, SpeedParams, TransformParams, ColorParams, AudioParams, ExportParams, OverlayParams, SubtitleCue } from '../services/videoEdit/types'
+import type { EditOp, TrimParams, SpeedParams, TransformParams, ColorParams, AudioParams, ExportParams, OverlayParams, SubtitleCue, ReplaceParams } from '../services/videoEdit/types'
 import { Row, SliderRow, Toggle, fmt } from './studioControls'
 import { normalizeOpenDialogPaths } from '../services/importMediaTypes'
 
@@ -41,6 +41,10 @@ export function ParamPanel({ op, dur, playhead }: { op: EditOp; dur: number; pla
   const commit = () => useStudio.getState().commitLive()
   const set = (patch: Record<string, unknown>) => useStudio.getState().updateOp(op.id, patch)
 
+  if (op.kind === 'replace') {
+    const p = op.params as ReplaceParams
+    return <div className="space-y-2 text-[11px]"><div className="font-medium">非破坏式替换片段</div>{p.segments.map((segment, index) => <div key={`${segment.replacementCardId}-${index}`} className="rounded-lg bg-pink-500/10 p-2"><div>{segment.start.toFixed(1)}s – {segment.end.toFixed(1)}s</div><div className="mt-1 truncate opacity-50">来源：{segment.replacementCardId}</div></div>)}<div className="opacity-45">替换范围由局部重拍工作流管理；停用后再次导出可生成未替换分支。</div></div>
+  }
   if (op.kind === 'trim') return <TrimPanel op={op} params={op.params as TrimParams} dur={dur} playhead={playhead} />
   if (op.kind === 'overlay') return <OverlayPanel op={op} params={op.params as OverlayParams} dur={dur} playhead={playhead} />
   if (op.kind === 'speed') {

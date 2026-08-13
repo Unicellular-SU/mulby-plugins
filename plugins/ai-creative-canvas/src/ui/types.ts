@@ -25,9 +25,68 @@ export interface Card {
   mime: string | null
   text: string | null // 文本卡产物
   refIds: string[] // 显式引用的卡片 id
+  anchorRefs?: AnchorReference[] // 工程级语义素材引用（稳定 id，不依赖卡片标题）
   assets: NodeAsset[] // 节点内上传的素材
   meta: Record<string, unknown>
   parentId: string | null // 直接父组 id；null = 顶级
+}
+
+export type MediaVersionDisposition = 'normal' | 'starred' | 'rejected'
+export type MediaVersionSource = 'generation' | 'import' | 'edit' | 'reshoot' | 'director'
+
+/** 图片、视频和导演 Take 共用的非破坏式版本条目。 */
+export interface MediaVersion {
+  id: string
+  kind: 'image' | 'video'
+  url: string
+  localPath?: string
+  mime?: string
+  label: string
+  createdAt: number
+  source: MediaVersionSource
+  disposition: MediaVersionDisposition
+  parentVersionId?: string
+  prompt?: string
+  providerId?: string | null
+  modelId?: string | null
+  metadata?: Record<string, unknown>
+}
+
+export interface MediaVersionState {
+  version: 1
+  currentId: string
+  compareIds?: [string?, string?]
+  items: MediaVersion[]
+}
+
+export interface VideoReshootRequestV1 {
+  version: 1
+  sourceCardId: string
+  sourceBoardId: string
+  range: { start: number; end: number }
+  originalDuration: number
+  boundary: {
+    startCardId: string
+    middleCardId: string
+    endCardId: string
+    startPath: string
+    middlePath: string
+    endPath: string
+  }
+  context: {
+    sourcePrompt: string
+    sentPrompt?: string
+    directorPrompt?: string
+    anchorIds: string[]
+    style?: string
+    stylePackId?: string
+    storyboardId?: string
+    shotId?: string
+  }
+  status: 'awaiting-generation' | 'composing' | 'completed' | 'error'
+  outputCardId?: string
+  error?: string
+  createdAt: number
 }
 
 export interface Edge {
@@ -38,6 +97,41 @@ export interface Edge {
 }
 
 export type MaterialKind = 'image' | 'video' | 'audio' | 'text'
+
+export type AssetRole = 'character' | 'scene' | 'prop' | 'voice' | 'style' | 'music' | 'reference'
+
+export interface PinnedAnchorMedia {
+  assetUrl?: string
+  assetLocalPath?: string
+  mime?: string
+  text?: string
+  thumbUrl?: string
+}
+
+/** 工程级语义素材：角色、场景、道具等身份与具体媒体产物解耦。 */
+export interface AssetAnchor {
+  id: string
+  role: AssetRole
+  name: string
+  aliases: string[]
+  description: string
+  tags: string[]
+  mediaKind: MaterialKind
+  source?: { boardId: string; cardId: string; resultIndex?: number }
+  pinnedMedia?: PinnedAnchorMedia
+  revision: number
+  locked: boolean
+  mediaMissing?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** 节点对语义锚点的稳定绑定；mention 仅供 UI 展示与改名联动。 */
+export interface AnchorReference {
+  anchorId: string
+  mention: string
+  acceptedAt: number
+}
 
 // 节点内上传的素材
 export interface NodeAsset {
@@ -52,8 +146,8 @@ export interface NodeAsset {
 
 // 统一"素材"：来自上游连线 / 显式引用 / 本节点上传
 export interface Material {
-  matId: string // 'card:<id>' | 'upload:<assetId>'
-  origin: 'edge' | 'card' | 'upload'
+  matId: string // 'card:<id>' | 'upload:<assetId>' | 'anchor:<anchorId>'
+  origin: 'edge' | 'card' | 'upload' | 'anchor'
   kind: MaterialKind
   label: string // 自动编号：图片1 / 文本2 ...
   thumbUrl?: string
@@ -62,6 +156,7 @@ export interface Material {
   assetUrl?: string
   assetLocalPath?: string
   mime?: string
+  anchorId?: string
   /** 工程仍保留引用，但底层本地文件已不可用；可展示/移除，不得发给生成 Provider。 */
   unavailable?: boolean
 }
@@ -134,6 +229,8 @@ export interface DirectorShot {
   thumb?: string // 机位缩略图（jpeg dataURL，记录机位时抓取）
   take?: string // 该机位当前成片 url（分镜回贴：缩略图优先显示成片）
   takes?: string[] // 成片历史（新→旧追加，cap 6；take=当前选中那条）
+  takeVersions?: MediaVersion[] // M5：Take 状态/追踪信息；旧工程仍由 takes 自动适配
+  compareTakeIds?: [string?, string?]
 }
 export interface DirectorShotEnvironmentState {
   mode: 'grounded' | 'infinite'
@@ -189,6 +286,77 @@ export interface DirectorScene {
   environment?: DirectorEnvironment | null // 可选等距柱状全景背景
 }
 
+export type WorkflowRecipeId = 'script-to-short-film'
+
+/** Agent 能执行的动作白名单。模型只产出创作规格，不得自行发明命令。 */
+export type AgentCommandName =
+  | 'save_storyboard'
+  | 'materialize_images'
+  | 'generate_images'
+  | 'create_videos'
+  | 'generate_videos'
+  | 'prepare_timeline'
+
+export type WorkflowStatus = 'planned' | 'running' | 'paused' | 'completed' | 'error' | 'canceled' | 'stale'
+export type WorkflowStepStatus = 'pending' | 'running' | 'checkpoint' | 'completed' | 'error' | 'canceled' | 'stale'
+
+export interface WorkflowAnchorSuggestion {
+  role: AssetRole
+  name: string
+  description: string
+}
+
+export interface WorkflowCreativeBrief {
+  title: string
+  summary: string
+  audience: string
+  aspect: string
+  totalDuration: number
+  ending: string
+  anchorSuggestions: WorkflowAnchorSuggestion[]
+  shots: Shot[]
+}
+
+export interface WorkflowStep {
+  id: string
+  command: AgentCommandName
+  title: string
+  description: string
+  status: WorkflowStepStatus
+  requiresApproval: boolean
+  approvedAt?: number
+  startedAt?: number
+  completedAt?: number
+  outputCardIds: string[]
+  error?: string
+}
+
+export interface WorkflowLogEntry {
+  id: string
+  at: number
+  level: 'info' | 'success' | 'warning' | 'error'
+  message: string
+  stepId?: string
+}
+
+/** 工程内持久化的可恢复工作流；二进制结果仍只存在卡片媒体引用中。 */
+export interface WorkflowRun {
+  version: 1
+  id: string
+  recipe: WorkflowRecipeId
+  sourceBoardId: string
+  sourceCardId: string
+  goal: string
+  status: WorkflowStatus
+  sourceFingerprint: string
+  selectedSkillIds: string[]
+  brief: WorkflowCreativeBrief
+  steps: WorkflowStep[]
+  logs: WorkflowLogEntry[]
+  createdAt: number
+  updatedAt: number
+}
+
 export interface ProjectDoc {
   id: string
   name: string
@@ -201,6 +369,8 @@ export interface ProjectDoc {
   defaultTextModel?: string | null
   defaultPanoModel?: string | null // 360 全景专用模型（出真等距柱状）
   defaultControlModel?: string | null // ControlNet 控制模型（深度/姿态 → 强控制）
+  assetAnchors?: Record<string, AssetAnchor> // 工程内角色 / 场景 / 道具等稳定语义素材
+  workflowRuns?: Record<string, WorkflowRun> // Agent 固定配方的计划、检查点与恢复状态
   director?: DirectorScene | null // 3D 导演台场景（持久化）
   concurrency?: number
   createdAt: number
@@ -225,9 +395,86 @@ export interface Shot {
   imagePrompt?: string // 静帧图片提示词
   videoPrompt?: string // 动态视频提示词
   roleImageRefs?: string[] // 角色一致性参考图 id
+  anchorNames?: string[] // Agent 计划阶段的锚点名称；保存故事板时解析为稳定 anchorIds
 }
 
-export const SCHEMA_VERSION = 2 // v2：360 全景独立为 pano 卡（image + params.pano/meta.pano → kind 'pano'）
+export interface StoryboardShotV2 extends Shot {
+  id: string
+  order: number
+  anchorIds: string[]
+  imageCardId?: string
+  videoCardId?: string
+  audioCardId?: string
+  sourceRange?: { start: number; end: number }
+  version: number
+}
+
+export interface StoryboardDocV2 {
+  version: 2
+  id: string
+  ownerCardId: string
+  title: string
+  sourceFingerprint: string
+  shots: StoryboardShotV2[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface StoryboardBacklink {
+  storyboardId: string
+  shotId: string
+  stage: 'image' | 'video' | 'audio'
+  /** 最近一次把故事板输入同步到卡片时的指纹。 */
+  materializedFingerprint?: string
+}
+
+export type VideoAnalysisFrameRole = 'start' | 'middle' | 'end'
+
+export interface VideoAnalysisFrame {
+  role: VideoAnalysisFrameRole
+  time: number
+  path: string
+  url: string
+}
+
+export interface VideoAnalysisShot {
+  id: string
+  index: number
+  start: number
+  end: number
+  frames: VideoAnalysisFrame[]
+  representativeFramePath?: string
+  representativeFrameUrl?: string
+  scene: string
+  shotSize: string
+  composition: string
+  characters: string
+  action: string
+  camera: string
+  color: string
+  mood: string
+  learnablePrompt: string
+  dialogue: string
+  transcriptStatus: 'matched' | 'untranscribed'
+}
+
+/** 视频视觉拉片报告；只保存结构化摘要与本地抽帧引用，不保存 Base64。 */
+export interface VideoAnalysisReport {
+  version: 1
+  id: string
+  sourceCardId: string
+  sourceAssetUrl: string
+  sourcePath: string
+  duration: number
+  threshold: number
+  sampleStrategy: 'start-middle-end'
+  shots: VideoAnalysisShot[]
+  modelId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export const SCHEMA_VERSION = 6 // v6：统一媒体版本 + 视频局部重拍；v5 为可恢复 Agent Workflow
 
 // 类型色 —— 单一真相：JS 侧用此处，CSS 侧 styles.css 的 --kind-* 须与之同源
 export const KIND_ACCENT: Record<CardKind, string> = {

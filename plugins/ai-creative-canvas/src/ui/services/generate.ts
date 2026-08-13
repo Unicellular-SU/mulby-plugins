@@ -10,13 +10,18 @@ import { resolveGenerationPrompt, findUnresolvedMentions, buildMaterials, isUsab
 import { useProviders } from '../store/providerStore'
 import { submitVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { resolveVideoCapabilities } from './providers/config'
-import { snapDuration } from './videoSpecs'
+import { effectiveVideoDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
+import { directorPromptStatus, readDirectorPrompt } from './directorPrompt'
 import { resolveModelId } from './models'
 import { PLUGIN_ID } from './persistence'
 import { toast } from '../store/toastStore'
 import { acceptsMaterialKind, canGenerateCard, canGenerateKind } from './nodeCapabilities'
 import type { Card } from '../types'
+import { buildCardGenerationPlan } from './generationPlan'
+import { useGenerationPlan } from '../store/generationPlanStore'
+import { readCardMediaVersions } from './mediaVersions'
+import { finalizeVideoReshoot } from './videoReshoot'
 
 const limiter = aiLimiter // 共享并发池（card 生成 + 360/局部修复 共用，统一限流）
 const aborters = new Map<string, string>() // cardId -> requestId（文/图：ai.abort）
@@ -86,12 +91,16 @@ export function canGenerate(value: string | Card): boolean {
 export function generateSelected(): void {
   const g = useGraph.getState()
   const board = g.getActiveBoard()
-  for (const id of [...g.selectedIds]) {
+  const ids = [...g.selectedIds].filter((id) => {
     const c = board.cards[id]
-    if (c && canGenerate(c) && c.status !== 'running' && c.status !== 'queued') {
-      void generateCard(id)
-    }
-  }
+    return !!c && canGenerate(c) && c.status !== 'running' && c.status !== 'queued'
+  })
+  if (!ids.length) return
+  void (async () => {
+    const plan = await buildCardGenerationPlan(ids)
+    if (plan.requiresConfirmation && !await useGenerationPlan.getState().present(plan)) return
+    for (const id of ids) void generateCard(id)
+  })()
 }
 
 export async function generateCard(cardId: string): Promise<void> {
@@ -108,9 +117,9 @@ export async function generateCard(cardId: string): Promise<void> {
     return
   }
   const board0 = g0.getActiveBoard()
-  const mats0 = buildMaterials(card0, board0)
+  const mats0 = buildMaterials(card0, board0, g0.project)
   const promptPurpose = card0.kind === 'text' ? 'text' : card0.kind === 'audio' ? 'speech' : 'media'
-  const resolved0 = resolveGenerationPrompt(card0, board0, promptPurpose)
+  const resolved0 = resolveGenerationPrompt(card0, board0, promptPurpose, g0.project)
   if (card0.kind === 'text' && !card0.prompt.trim()) {
     g0.updateCard(cardId, { status: 'error', error: '请填写生成指令；上游文本会作为参考资料' })
     return
@@ -225,32 +234,42 @@ export async function generateCard(cardId: string): Promise<void> {
         }
         if (!results.length) throw new Error('模型未返回可保存的图像')
         const base0 = useGraph.getState().getCard(cardId)
+        const completedMeta = { ...(base0?.meta || {}) } as Record<string, unknown>
+        delete completedMeta.storyboardInputStale
         const maxSavedPrompt = 4000
         const sentPrompt = res.trace.sentPrompt.slice(0, maxSavedPrompt)
+        const nextMeta = {
+          ...completedMeta,
+          results,
+          ...(card.kind === 'pano' ? { pano: true } : {}),
+          imageGeneration: {
+            ...res.trace,
+            sentPrompt,
+            promptLength: res.trace.sentPrompt.length,
+            promptTruncated: res.trace.sentPrompt.length > maxSavedPrompt,
+            completedAt: Date.now()
+          }
+        }
+        const versionDraft = {
+          ...(base0 || card),
+          assetUrl: results[0].url,
+          assetLocalPath: results[0].localPath,
+          mime: results[0].mime,
+          meta: nextMeta
+        } as Card
         commit({
           status: 'done',
           progress: 1,
           assetUrl: results[0].url,
           assetLocalPath: results[0].localPath,
           mime: results[0].mime,
-          meta: {
-            ...(base0?.meta || {}),
-            results,
-            ...(card.kind === 'pano' ? { pano: true } : {}),
-            imageGeneration: {
-              ...res.trace,
-              sentPrompt,
-              promptLength: res.trace.sentPrompt.length,
-              promptTruncated: res.trace.sentPrompt.length > maxSavedPrompt,
-              completedAt: Date.now()
-            }
-          }
+          meta: { ...nextMeta, mediaVersionsV1: readCardMediaVersions(versionDraft, 'generation') }
         })
       } else if (card.kind === 'audio') {
         const cfg = useProviders.getState().activeFor('audio')
         if (!cfg) throw new Error('未配置音频/TTS Provider（右上角“设置”）')
         const key = await useProviders.getState().getKey(cfg.id)
-        const resolved = resolveGenerationPrompt(card, board, 'speech')
+        const resolved = resolveGenerationPrompt(card, board, 'speech', g.project)
         const text = resolved.text
         if (!text) throw new Error('请填写配音文本（或引用一张文本卡）')
         commit({ progress: 0.4 })
@@ -262,12 +281,15 @@ export async function generateCard(cardId: string): Promise<void> {
           projectId: useGraph.getState().project.id
         })
         if (!isCurrentRun(cardId, runId)) throw new DOMException('已取消', 'AbortError') // 已取消：合成结果作废
+        const audioMeta = { ...(useGraph.getState().getCard(cardId)?.meta || {}) } as Record<string, unknown>
+        delete audioMeta.storyboardInputStale
         commit({
           status: 'done',
           progress: 1,
           assetUrl: res.url,
           assetLocalPath: res.path,
-          mime: res.mime
+          mime: res.mime,
+          meta: audioMeta
         })
       }
       if (isCurrentRun(cardId, runId)) notifyDone(cardId)
@@ -321,7 +343,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
       if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
       const capabilities = resolveVideoCapabilities(cfg)
       const key = await useProviders.getState().getKey(cfg.id)
-      const resolved = resolveGenerationPrompt(card, board, 'media')
+      const resolved = resolveGenerationPrompt(card, board, 'media', g.project)
       const inputs = resolved.inputs
       if (!inputs.images.length && !capabilities.textToVideo) {
         throw new Error(`当前 Provider「${cfg.label}」仅支持图生视频，请先连接或上传参考图片`)
@@ -347,13 +369,15 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const cam = (card.params?.camera as string) || ''
       const mot = (card.params?.motion as string) || ''
       const motionHint = [cam && `运镜：${cam}`, mot && `运动幅度：${mot}`].filter(Boolean).join('，')
-      const vprompt = resolved.text + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
+      const directorState = directorPromptStatus(card, vboard, proj, cfg)
+      const directorDraft = directorState.status === 'ready' ? directorState.draft : null
+      if (directorState.status === 'stale') toast('待用的导演方案已过期，本次改用当前实时输入', 'warning')
+      const regularPrompt = resolved.text + (motionHint ? `\n\n${motionHint}` : '') + (vtag && vtag.trim() ? `\n\n风格：${vtag.trim()}` : '')
+      const directorPrompt = directorDraft?.compiledPrompt.trim() || ''
+      const vprompt = directorPrompt || regularPrompt
       // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
       const configuredDurations = capabilities.durations || []
-      const requestedDuration = Number(card.params?.duration) || configuredDurations[0] || 5
-      const duration = configuredDurations.length
-        ? configuredDurations.reduce((best, value) => Math.abs(value - requestedDuration) < Math.abs(best - requestedDuration) ? value : best, configuredDurations[0])
-        : snapDuration(card.modelId, requestedDuration)
+      const duration = effectiveVideoDuration(card.modelId || cfg.model, card.params?.duration, configuredDurations)
       const sentParams = {
         ...card.params,
         aspect: (card.params?.aspect as string) || capabilities.aspects?.[0] || '16:9',
@@ -363,6 +387,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
       // videoAborts 在提交前注册（不早于入池）：排队态无取消器 → stopCard 走 canceledCards 早退
       const vctrl = new AbortController()
       videoAborts.set(cardId, vctrl)
+      const startedAt = Date.now()
       const { url, taskId } = await submitVideoJob(
         cfg,
         key,
@@ -371,10 +396,33 @@ async function generateVideoCard(cardId: string): Promise<void> {
         (tid) => {
           // 持久化 taskId：释放槽位后由池外轮询续跑；切/关工程后也能由 resumeInflightVideos 接管
           const m = useGraph.getState().getCard(cardId)?.meta || {}
-          commit({ meta: { ...m, task: { taskId: tid, provider: cfg.id } } })
+          commit({
+            meta: {
+              ...m,
+              task: {
+                taskId: tid,
+                provider: cfg.id,
+                sentPrompt: vprompt.slice(0, 8000),
+                promptLength: vprompt.length,
+                directorFingerprint: directorPrompt ? directorDraft?.contextFingerprint || null : null,
+                modelId: card.modelId || cfg.model || null,
+                startedAt
+              }
+            }
+          })
         }
       )
-      return { cfg, key, vctrl, url, taskId }
+      return {
+        cfg,
+        key,
+        vctrl,
+        url,
+        taskId,
+        sentPrompt: vprompt,
+        directorFingerprint: directorPrompt ? directorDraft?.contextFingerprint || null : null,
+        modelId: card.modelId || cfg.model || null,
+        startedAt
+      }
     })
     // 槽位在此已释放——以下轮询/下载都在池外
     if (!submit) return // 卡已删除
@@ -401,15 +449,38 @@ async function generateVideoCard(cardId: string): Promise<void> {
     const path = r?.data?.path
     if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
     const mDone = useGraph.getState().getCard(cardId)?.meta || {}
+    const doneMeta = { ...mDone } as Record<string, unknown>
+    delete doneMeta.storyboardInputStale
+    const currentDirector = readDirectorPrompt(doneMeta)
+    if (submit.directorFingerprint && currentDirector?.contextFingerprint === submit.directorFingerprint) delete doneMeta.directorPrompt
     commit({
       status: 'done',
       progress: 1,
       assetUrl: toFileUrl(path),
       assetLocalPath: path,
       mime: (r?.data?.mime as string) || 'video/mp4', // 后端已回真实 content-type，仅缺失时才回退
-      meta: { ...mDone, task: undefined }
+      meta: {
+        ...doneMeta,
+        task: undefined,
+        videoGeneration: {
+          providerId: submit.cfg.id,
+          modelId: submit.modelId,
+          taskIds: submit.taskId ? [submit.taskId] : [],
+          sentPrompt: submit.sentPrompt.slice(0, 8000),
+          promptLength: submit.sentPrompt.length,
+          promptTruncated: submit.sentPrompt.length > 8000,
+          fromDirectorPrompt: !!submit.directorFingerprint,
+          startedAt: submit.startedAt,
+          completedAt: Date.now()
+        }
+      }
     })
-    if (isCurrentRun(cardId, runId)) notifyDone(cardId)
+    if (isCurrentRun(cardId, runId)) {
+      const completed = useGraph.getState().getCard(cardId)
+      if (completed) useGraph.getState().updateCard(cardId, { meta: { ...completed.meta, mediaVersionsV1: readCardMediaVersions(completed, 'generation') } })
+      void finalizeVideoReshoot(cardId)
+      notifyDone(cardId)
+    }
   } catch (e: any) {
     const msg = e?.message || String(e)
     const aborted = canceledCards.has(cardId) || e?.name === 'AbortError' || /\babort(ed)?\b/i.test(msg)
@@ -423,31 +494,68 @@ async function generateVideoCard(cardId: string): Promise<void> {
   }
 }
 
+interface PersistedVideoTask {
+  taskId: string
+  provider: string
+  sentPrompt?: string
+  promptLength?: number
+  directorFingerprint?: string | null
+  modelId?: string | null
+  startedAt?: number
+}
+
 // 断点续跑单个视频卡：仅凭持久化的 taskId 重新轮询（不重新提交），完成后下载落盘
-async function resumeVideoCard(cardId: string, taskId: string, providerId: string): Promise<void> {
+async function resumeVideoCard(cardId: string, task: PersistedVideoTask): Promise<void> {
   if (videoAborts.has(cardId)) return // 已在续跑
   const vctrl = new AbortController()
   videoAborts.set(cardId, vctrl) // 早注册，使「停止」立即可取消
   useTask.getState().inc()
   try {
-    const cfg = useProviders.getState().providers.find((p) => p.id === providerId)
+    const cfg = useProviders.getState().providers.find((p) => p.id === task.provider)
     if (!cfg) {
       const m = useGraph.getState().getCard(cardId)?.meta || {}
       useGraph.getState().updateCard(cardId, { status: 'error', error: '续跑失败：原视频 Provider 已不存在', progress: 0, meta: { ...m, task: undefined } })
       return
     }
-    const key = await useProviders.getState().getKey(providerId)
+    const key = await useProviders.getState().getKey(task.provider)
     useGraph.getState().updateCard(cardId, { status: 'running', error: null, progress: 0.5 })
-    const { url } = await resumeVideoJob(cfg, key, taskId, (p) => useGraph.getState().updateCard(cardId, { progress: p }), vctrl.signal)
+    const { url } = await resumeVideoJob(cfg, key, task.taskId, (p) => useGraph.getState().updateCard(cardId, { progress: p }), vctrl.signal)
     const projectId = useGraph.getState().project.id
     const title = useGraph.getState().getCard(cardId)?.title || 'video'
     const r = (await window.mulby.host.call(PLUGIN_ID, 'downloadMedia', { url, name: `${title}-${cardId}`, projectId })) as { data?: { path?: string; mime?: string; error?: string } }
     const path = r?.data?.path
     if (!path) throw new Error('下载失败：' + (r?.data?.error || ''))
     const mDone = useGraph.getState().getCard(cardId)?.meta || {}
+    const doneMeta = { ...mDone } as Record<string, unknown>
+    delete doneMeta.storyboardInputStale
+    const currentDirector = readDirectorPrompt(doneMeta)
+    if (task.directorFingerprint && currentDirector?.contextFingerprint === task.directorFingerprint) delete doneMeta.directorPrompt
+    const sentPrompt = typeof task.sentPrompt === 'string' ? task.sentPrompt : ''
     useGraph.getState().updateCard(cardId, {
-      status: 'done', progress: 1, assetUrl: toFileUrl(path), assetLocalPath: path, mime: (r?.data?.mime as string) || 'video/mp4', meta: { ...mDone, task: undefined }
+      status: 'done',
+      progress: 1,
+      assetUrl: toFileUrl(path),
+      assetLocalPath: path,
+      mime: (r?.data?.mime as string) || 'video/mp4',
+      meta: {
+        ...doneMeta,
+        task: undefined,
+        videoGeneration: {
+          providerId: cfg.id,
+          modelId: task.modelId || cfg.model || null,
+          taskIds: [task.taskId],
+          sentPrompt,
+          promptLength: task.promptLength ?? sentPrompt.length,
+          promptTruncated: (task.promptLength ?? sentPrompt.length) > sentPrompt.length,
+          fromDirectorPrompt: !!task.directorFingerprint,
+          startedAt: task.startedAt || null,
+          completedAt: Date.now()
+        }
+      }
     })
+    const completed = useGraph.getState().getCard(cardId)
+    if (completed) useGraph.getState().updateCard(cardId, { meta: { ...completed.meta, mediaVersionsV1: readCardMediaVersions(completed, 'generation') } })
+    void finalizeVideoReshoot(cardId)
     notifyDone(cardId)
   } catch (e: any) {
     const msg = e?.message || String(e)
@@ -472,7 +580,15 @@ export async function resumeInflightVideos(): Promise<void> {
     for (const card of Object.values(board.cards)) {
       const task = (card.meta as any)?.task
       if (card.kind === 'video' && card.status === 'running' && task?.taskId && task?.provider && !videoAborts.has(card.id)) {
-        void resumeVideoCard(card.id, String(task.taskId), String(task.provider))
+        void resumeVideoCard(card.id, {
+          taskId: String(task.taskId),
+          provider: String(task.provider),
+          sentPrompt: typeof task.sentPrompt === 'string' ? task.sentPrompt : undefined,
+          promptLength: Number.isFinite(task.promptLength) ? Number(task.promptLength) : undefined,
+          directorFingerprint: typeof task.directorFingerprint === 'string' ? task.directorFingerprint : null,
+          modelId: typeof task.modelId === 'string' ? task.modelId : null,
+          startedAt: Number.isFinite(task.startedAt) ? Number(task.startedAt) : undefined
+        })
       }
     }
   }

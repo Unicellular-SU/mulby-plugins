@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, ArrowUpDown, SlidersHorizontal } from 'lucide-react'
+import { Crop, Maximize2, Sparkles, Scissors, Grid2x2, Film, Images, Clapperboard, Music, VolumeX, Rewind, Minimize2, Brush, Download, Wand2, Compass, GitMerge, ArrowUpDown, SlidersHorizontal, ScanSearch, GalleryHorizontalEnd } from 'lucide-react'
 import type { Card } from '../types'
 import { runImageTool, runGridSlice, runVideoTool } from '../services/mediaOps'
 import { repairEquirectSeam } from '../services/mediaPano'
@@ -36,6 +36,7 @@ export function MediaToolbox({ card }: { card: Card }) {
     <div className="flex items-center gap-0.5 max-w-[92vw] overflow-x-auto ace-noscroll">{/* 单行横向滚动，不再 wrap 成多排挤压卡片 */}
       {isImg && (
         <>
+          <IconBtn icon={GalleryHorizontalEnd} title="版本工作区" onClick={() => useUi.getState().setVersionCardId(card.id)} />
           {canGenerate(card) && <IconBtn icon={Wand2} title="重新生成" onClick={() => void generateCard(card.id)} />}
           {isPano && (
             <IconBtn
@@ -59,12 +60,20 @@ export function MediaToolbox({ card }: { card: Card }) {
       )}
       {isVid && (
         <>
+          <IconBtn icon={GalleryHorizontalEnd} title="版本工作区" onClick={() => useUi.getState().setVersionCardId(card.id)} />
           <button
             onClick={() => useUi.getState().setStudioCardId(card.id)}
             title="剪辑工作台"
             className="shrink-0 h-7 px-2 flex items-center gap-1 rounded-md bg-pink-500/15 text-pink-600 dark:text-pink-300 hover:bg-pink-500/25 text-[11px] font-medium"
           >
             <SlidersHorizontal size={13} /> 工作台
+          </button>
+          <button
+            onClick={() => useUi.getState().setVideoAnalysisCardId(card.id)}
+            title="视觉拉片：场景切分、三帧分析并转为故事板"
+            className="shrink-0 h-7 px-2 flex items-center gap-1 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/25 text-[11px] font-medium"
+          >
+            <ScanSearch size={13} /> 视觉拉片
           </button>
           <IconBtn icon={Scissors} title="快速裁剪片段" onClick={() => useUi.getState().setTrimCardId(card.id)} />
           <IconBtn icon={Film} title="转 GIF" onClick={() => runVideoTool(card.id, 'gif')} />

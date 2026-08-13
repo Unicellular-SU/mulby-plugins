@@ -10,6 +10,7 @@ import { saveToLocal } from '../services/saveLocal'
 import { exportStudio } from '../services/videoEdit/run'
 import { createOp, type EditOp, type EditStack, type OpKind, type ExportParams, type OverlayParams, type EditRecipe } from '../services/videoEdit/types'
 import type { OverlayInput } from '../services/videoEdit/compile'
+import { readCardMediaVersions } from '../services/mediaVersions'
 
 function clone(s: EditStack): EditStack {
   return JSON.parse(JSON.stringify(s))
@@ -203,7 +204,7 @@ export const useStudio = create<StudioState>((set, get) => {
       }
       const boardId = g.boardIdOfCard(cardId)
       const projectId = g.project.id
-      const inPath = src.assetLocalPath
+      const inPath = typeof (src.meta as any)?.sourcePath === 'string' ? String((src.meta as any).sourcePath) : src.assetLocalPath
       const expOp = stack.ops.find((o) => o.kind === 'export' && o.enabled)
       const format = ((expOp?.params as ExportParams)?.format || 'mp4') as ExportParams['format']
       const { kind, mime } = mimeKindFor(format)
@@ -241,6 +242,8 @@ export const useStudio = create<StudioState>((set, get) => {
           mime,
           meta: { editRecipe: recipe, sourcePath: inPath, recipeSource: src.id }
         })
+        const exported = g.getCard(id)
+        if (exported) g.updateCard(id, { meta: { ...exported.meta, mediaVersionsV1: readCardMediaVersions(exported, 'edit') } })
         g.setSelection([id])
         toast('已导出剪辑成片', 'success')
         if (saveLocal) await saveToLocal(finalOut, `${src.title}·剪辑`)

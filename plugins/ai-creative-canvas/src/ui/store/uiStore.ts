@@ -1,6 +1,11 @@
 import { create } from 'zustand'
 
 interface UiState {
+  workspaceView: 'canvas' | 'storyboard'
+  setWorkspaceView: (view: 'canvas' | 'storyboard') => void
+  storyboardSelection: { storyboardId: string; shotId: string | null } | null
+  setStoryboardSelection: (selection: { storyboardId: string; shotId: string | null } | null) => void
+  openStoryboardShot: (storyboardId: string, shotId: string | null) => void
   showGrid: boolean
   showMinimap: boolean
   theme: 'light' | 'dark'
@@ -29,6 +34,12 @@ interface UiState {
   setCtxMenu: (m: { x: number; y: number; cardId: string | null } | null) => void
   storyboardCardId: string | null
   setStoryboardCardId: (id: string | null) => void
+  directorPromptCardId: string | null
+  setDirectorPromptCardId: (id: string | null) => void
+  videoAnalysisCardId: string | null
+  setVideoAnalysisCardId: (id: string | null) => void
+  versionCardId: string | null
+  setVersionCardId: (id: string | null) => void
   showTemplates: boolean
   setShowTemplates: (v: boolean) => void
   snapGrid: boolean
@@ -45,6 +56,10 @@ interface UiState {
   setStudioCardId: (id: string | null) => void
   showTaskCenter: boolean
   setShowTaskCenter: (v: boolean) => void
+  showGenerationPlan: boolean
+  setShowGenerationPlan: (v: boolean) => void
+  showAgent: boolean
+  setShowAgent: (v: boolean) => void
   connInvalidIds: Set<string> | null
   setConnInvalid: (s: Set<string> | null) => void
   notifyDone: boolean
@@ -69,6 +84,15 @@ interface UiState {
 }
 
 export const useUi = create<UiState>((set, get) => ({
+  workspaceView: 'canvas',
+  setWorkspaceView: (workspaceView) => set({ workspaceView }),
+  storyboardSelection: null,
+  setStoryboardSelection: (storyboardSelection) => set({ storyboardSelection }),
+  openStoryboardShot: (storyboardId, shotId) => set({
+    workspaceView: 'storyboard',
+    storyboardSelection: { storyboardId, shotId },
+    storyboardCardId: null
+  }),
   showGrid: true,
   showMinimap: true,
   theme: 'light',
@@ -97,6 +121,12 @@ export const useUi = create<UiState>((set, get) => ({
   setCtxMenu: (ctxMenu) => set({ ctxMenu }),
   storyboardCardId: null,
   setStoryboardCardId: (storyboardCardId) => set({ storyboardCardId }),
+  directorPromptCardId: null,
+  setDirectorPromptCardId: (directorPromptCardId) => set({ directorPromptCardId }),
+  videoAnalysisCardId: null,
+  setVideoAnalysisCardId: (videoAnalysisCardId) => set({ videoAnalysisCardId }),
+  versionCardId: null,
+  setVersionCardId: (versionCardId) => set({ versionCardId }),
   showTemplates: false,
   setShowTemplates: (showTemplates) => set({ showTemplates }),
   snapGrid: false,
@@ -113,6 +143,10 @@ export const useUi = create<UiState>((set, get) => ({
   setStudioCardId: (studioCardId) => set({ studioCardId }),
   showTaskCenter: false,
   setShowTaskCenter: (showTaskCenter) => set({ showTaskCenter }),
+  showGenerationPlan: false,
+  setShowGenerationPlan: (showGenerationPlan) => set({ showGenerationPlan }),
+  showAgent: false,
+  setShowAgent: (showAgent) => set({ showAgent }),
   connInvalidIds: null,
   setConnInvalid: (connInvalidIds) => set({ connInvalidIds }),
   notifyDone: (() => {
@@ -154,12 +188,16 @@ export const useUi = create<UiState>((set, get) => ({
       s.showTimeline ||
       s.showTemplates ||
       s.showTaskCenter ||
+      s.showGenerationPlan ||
       s.showGallery ||
       s.showProjectLibrary ||
       s.showDirector ||
       s.showSearch ||
       s.studioCardId ||
       s.storyboardCardId ||
+      s.directorPromptCardId ||
+      s.videoAnalysisCardId ||
+      s.versionCardId ||
       s.maskCardId ||
       s.trimCardId ||
       // panoCardId 不算模态：360 预览内嵌在卡片节点里，画布快捷键照常；且预览卡在 LOD/切板时会

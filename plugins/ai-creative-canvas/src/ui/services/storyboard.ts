@@ -1,5 +1,13 @@
 import { useGraph } from '../store/graphStore'
-import type { Board, Shot } from '../types'
+import type { AnchorReference, Board, Card, Shot, StoryboardDocV2, StoryboardShotV2 } from '../types'
+import {
+  backlinkFor,
+  createStoryboardDoc,
+  normalizeStoryboardDoc,
+  readStoryboardDoc,
+  storyboardBacklink,
+  storyboardShotFingerprint
+} from './storyboardV2'
 
 function ai() {
   return window.mulby.ai
@@ -126,55 +134,315 @@ function consistencyRefs(textCardId: string, board: Board): string[] {
   return [...ids]
 }
 
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function legacyShot(shot: StoryboardShotV2): Shot {
+  const {
+    id: _id,
+    order: _order,
+    anchorIds: _anchorIds,
+    imageCardId: _imageCardId,
+    videoCardId: _videoCardId,
+    audioCardId: _audioCardId,
+    sourceRange: _sourceRange,
+    version: _version,
+    ...value
+  } = shot
+  void _id
+  void _order
+  void _anchorIds
+  void _imageCardId
+  void _videoCardId
+  void _audioCardId
+  void _sourceRange
+  void _version
+  return value
+}
+
+function validLinkedCard(card: Card | undefined, doc: StoryboardDocV2, shot: StoryboardShotV2, stage: 'image' | 'video' | 'audio'): boolean {
+  if (!card) return false
+  const backlink = storyboardBacklink(card)
+  return !!backlink && backlink.storyboardId === doc.id && backlink.shotId === shot.id && backlink.stage === stage
+}
+
+function anchorReferences(shot: StoryboardShotV2, existing?: Card): AnchorReference[] {
+  const anchors = useGraph.getState().project.assetAnchors || {}
+  const acceptedAt = new Map((existing?.anchorRefs || []).map((ref) => [ref.anchorId, ref.acceptedAt]))
+  return shot.anchorIds.flatMap((anchorId) => {
+    const anchor = anchors[anchorId]
+    return anchor ? [{ anchorId, mention: anchor.name, acceptedAt: acceptedAt.get(anchorId) || Date.now() }] : []
+  })
+}
+
+function writeStoryboardMeta(owner: Card, doc: StoryboardDocV2): Record<string, unknown> {
+  const meta = { ...(owner.meta || {}), storyboardV2: doc } as Record<string, unknown>
+  delete meta.shots
+  return meta
+}
+
+/** 保存故事板并修复失效 cardId；镜头输入变化时只标记已落地卡片，不自动重跑。 */
+export function saveStoryboardDoc(cardId: string, value: StoryboardDocV2): StoryboardDocV2 | null {
+  const g = useGraph.getState()
+  const boardId = g.boardIdOfCard(cardId)
+  if (!boardId) return null
+  const board = g.project.boards.find((item) => item.id === boardId)
+  if (!board) return null
+  let result: StoryboardDocV2 | null = null
+  g.applyGraphTransaction('保存故事板', (tx) => {
+    const owner = tx.getCard(cardId)
+    if (!owner) return
+    let doc = normalizeStoryboardDoc(value, owner)
+    if (!doc) return
+    let repaired = false
+    const shots = doc.shots.map((shot) => {
+      let next = shot
+      for (const [key, stage] of [['imageCardId', 'image'], ['videoCardId', 'video'], ['audioCardId', 'audio']] as const) {
+        const linkedId = next[key]
+        if (!linkedId) continue
+        const linked = tx.getCard(linkedId)
+        if (!validLinkedCard(linked, doc!, next, stage)) {
+          next = { ...next, [key]: undefined }
+          repaired = true
+          continue
+        }
+        const backlink = storyboardBacklink(linked)
+        if (backlink?.materializedFingerprint !== storyboardShotFingerprint(next) && !(linked!.meta as any)?.storyboardInputStale) {
+          tx.updateCard(linkedId, { meta: { ...(linked!.meta || {}), storyboardInputStale: true } })
+        }
+      }
+      return next
+    })
+    if (repaired) doc = { ...doc, shots, updatedAt: Date.now() }
+    const activeShotIds = new Set(doc.shots.map((shot) => shot.id))
+    for (const candidate of Object.values(board.cards)) {
+      const backlink = storyboardBacklink(candidate)
+      if (!backlink || backlink.storyboardId !== doc.id || activeShotIds.has(backlink.shotId)) continue
+      const current = tx.getCard(candidate.id)
+      if (!current) continue
+      const meta = { ...(current.meta || {}) } as Record<string, unknown>
+      delete meta.storyboardBacklink
+      delete meta.storyboardInputStale
+      tx.updateCard(current.id, { meta })
+    }
+    const nextMeta = writeStoryboardMeta(owner, doc)
+    if (!sameJson(owner.meta, nextMeta)) tx.updateCard(owner.id, { meta: nextMeta })
+    result = doc
+  }, boardId)
+  return result
+}
+
+export interface MaterializeStoryboardResult {
+  doc: StoryboardDocV2
+  cardIds: string[]
+  created: number
+  updated: number
+}
+
+export interface LayoutStoryboardResult {
+  cardIds: string[]
+  moved: number
+}
+
+/**
+ * 仅重排当前故事板已有的图片/视频/音频产物卡：每镜一行、各阶段一列。
+ * 不移动故事板所有者和自由画布中的其他节点；整个操作只有一个 undo。
+ */
+export function layoutStoryboardCards(cardId: string, value: StoryboardDocV2): LayoutStoryboardResult | null {
+  const g = useGraph.getState()
+  const boardId = g.boardIdOfCard(cardId)
+  if (!boardId) return null
+  let result: LayoutStoryboardResult | null = null
+  g.applyGraphTransaction('按镜头顺序排版', (tx) => {
+    const owner = tx.getCard(cardId)
+    if (!owner) return
+    const doc = normalizeStoryboardDoc(value, owner)
+    if (!doc) return
+    const ordered = [...doc.shots].sort((a, b) => a.order - b.order)
+    const stageOffsets = { image: 0, video: 360, audio: 720 } as const
+    const baseX = owner.x + owner.w + 120
+    const baseY = owner.y
+    const rowGap = 370
+    let moved = 0
+    const cardIds: string[] = []
+    ordered.forEach((shot, row) => {
+      for (const [key, stage] of [['imageCardId', 'image'], ['videoCardId', 'video'], ['audioCardId', 'audio']] as const) {
+        const linkedId = shot[key]
+        const linked = linkedId ? tx.getCard(linkedId) : undefined
+        if (!linkedId || !validLinkedCard(linked, doc, shot, stage)) continue
+        const x = Math.round(baseX + stageOffsets[stage])
+        const y = Math.round(baseY + row * rowGap)
+        if (linked!.x !== x || linked!.y !== y) {
+          tx.updateCard(linkedId, { x, y })
+          moved++
+        }
+        cardIds.push(linkedId)
+      }
+    })
+    tx.select(cardIds)
+    result = { cardIds, moved }
+  }, boardId)
+  return result
+}
+
+/**
+ * 幂等落地故事板图片卡：已有 backlink 时原位同步，没有时才创建。
+ * 故事板写回、卡片更新、连线与选择在同一图事务中完成。
+ */
+export function materializeStoryboardShots(cardId: string, value: StoryboardDocV2, selectedShotIds?: ReadonlySet<string>): MaterializeStoryboardResult | null {
+  const g = useGraph.getState()
+  const boardId = g.boardIdOfCard(cardId)
+  if (!boardId) return null
+  let result: MaterializeStoryboardResult | null = null
+  g.applyGraphTransaction('同步故事板镜头', (tx) => {
+    const owner = tx.getCard(cardId)
+    if (!owner) return
+    const doc0 = normalizeStoryboardDoc(value, owner)
+    if (!doc0) return
+    const board = g.project.boards.find((item) => item.id === boardId)
+    if (!board) return
+    const refs = consistencyRefs(cardId, board)
+    const W = 280
+    const H = 320
+    const cols = 4
+    const gapX = 40
+    const gapY = 48
+    const baseX = owner.x + owner.w + 140
+    const baseY = owner.y
+    let created = 0
+    let updated = 0
+    const cardIds: string[] = []
+    let linksChanged = false
+    const shots = doc0.shots.map((shot, index) => {
+      if (selectedShotIds && !selectedShotIds.has(shot.id)) return shot
+      const col = index % cols
+      const row = Math.floor(index / cols)
+      const center = { x: baseX + col * (W + gapX) + W / 2, y: baseY + row * (H + gapY) + H / 2 }
+      let imageCardId = shot.imageCardId
+      let imageCard = imageCardId ? tx.getCard(imageCardId) : undefined
+      if (!validLinkedCard(imageCard, doc0, shot, 'image')) {
+        imageCardId = undefined
+        imageCard = undefined
+      }
+      const title = `镜${shot.shotNumber ?? index + 1}${shot.shotSize ? '·' + shot.shotSize : ''}`
+      const prompt = shotPrompt(shot)
+      const anchorRefs = anchorReferences(shot, imageCard)
+      const fingerprint = storyboardShotFingerprint(shot)
+      if (!imageCard) {
+        imageCardId = tx.createCard('image', center, {
+          w: W,
+          h: H,
+          title,
+          prompt,
+          refIds: [...refs],
+          anchorRefs,
+          meta: { shot: legacyShot(shot), storyboardBacklink: backlinkFor(doc0, shot, 'image') }
+        })
+        imageCard = tx.getCard(imageCardId)
+        created++
+        linksChanged = true
+      } else {
+        const oldBacklink = storyboardBacklink(imageCard)
+        const hasOutput = !!(imageCard.assetUrl || imageCard.assetLocalPath)
+        const stale = !!(imageCard.meta as any)?.storyboardInputStale || (hasOutput && oldBacklink?.materializedFingerprint !== fingerprint)
+        const meta = { ...(imageCard.meta || {}), shot: legacyShot(shot), storyboardBacklink: backlinkFor(doc0, shot, 'image') } as Record<string, unknown>
+        if (stale) meta.storyboardInputStale = true
+        else delete meta.storyboardInputStale
+        const needsUpdate = imageCard.title !== title
+          || imageCard.prompt !== prompt
+          || !sameJson(imageCard.refIds, refs)
+          || !sameJson(imageCard.anchorRefs || [], anchorRefs)
+          || !sameJson(imageCard.meta, meta)
+        if (needsUpdate) {
+          tx.updateCard(imageCard.id, { title, prompt, refIds: [...refs], anchorRefs, meta })
+          updated++
+        }
+      }
+      if (imageCardId) {
+        tx.ensureEdge(cardId, imageCardId)
+        cardIds.push(imageCardId)
+      }
+      if (imageCardId !== shot.imageCardId) {
+        linksChanged = true
+        return { ...shot, imageCardId }
+      }
+      return shot
+    })
+    const doc = linksChanged ? { ...doc0, shots, updatedAt: Date.now() } : doc0
+    const ownerNow = tx.getCard(owner.id) || owner
+    const nextMeta = writeStoryboardMeta(ownerNow, doc)
+    if (!sameJson(ownerNow.meta, nextMeta)) tx.updateCard(owner.id, { meta: nextMeta })
+    tx.select(cardIds)
+    result = { doc, cardIds, created, updated }
+  }, boardId)
+  return result
+}
+
 // 把镜头表落地为镜头图卡（每镜一张，带一致性参考、连引用、网格排布）
 export function materializeShots(cardId: string, shots: Shot[]): void {
   const g = useGraph.getState()
-  const board0 = g.getActiveBoard()
-  const base = board0.cards[cardId]
+  const boardId = g.boardIdOfCard(cardId)
+  const board0 = g.project.boards.find((board) => board.id === boardId)
+  const base = board0?.cards[cardId]
   if (!base || !shots.length) return
+  const doc = createStoryboardDoc(base, shots, readStoryboardDoc(base))
+  const materialized = materializeStoryboardShots(cardId, doc)
+  if (!materialized) return
   const refs = consistencyRefs(cardId, board0)
-  const W = 280
-  const H = 320
-  const cols = 4
-  const gapX = 40
-  const gapY = 48
-  const baseX = base.x + base.w + 140
-  const baseY = base.y
-  const ids: string[] = []
-  shots.forEach((shot, i) => {
-    const col = i % cols
-    const row = Math.floor(i / cols)
-    const center = { x: baseX + col * (W + gapX) + W / 2, y: baseY + row * (H + gapY) + H / 2 }
-    const id = useGraph.getState().addCard('image', center, {
-      title: `镜${shot.shotNumber ?? i + 1}${shot.shotSize ? '·' + shot.shotSize : ''}`,
-      prompt: shotPrompt(shot),
-      refIds: [...refs],
-      meta: { shot }
-    })
-    ids.push(id)
-    useGraph.getState().addEdgeBetween(cardId, id)
-  })
-  useGraph.getState().setSelection(ids)
-  notify(`已落地 ${shots.length} 个镜头卡${refs.length ? `，带 ${refs.length} 张一致性参考` : ''}（顶部「生成选中」批量出图）`, 'success')
+  notify(`已同步 ${materialized.cardIds.length} 个镜头卡（新建 ${materialized.created}，更新 ${materialized.updated}）${refs.length ? `，带 ${refs.length} 张一致性参考` : ''}`, 'success')
 }
 
 // 镜头图 → 视频卡（优先用该镜头的视频提示词；以该图为首帧/参考）
-export function shotToVideo(imageCardId: string): void {
+export function shotToVideo(imageCardId: string): string | null {
   const g = useGraph.getState()
-  const c = g.getActiveBoard().cards[imageCardId]
-  if (!c) return
+  const boardId = g.boardIdOfCard(imageCardId)
+  const board = g.project.boards.find((item) => item.id === boardId)
+  const c = board?.cards[imageCardId]
+  if (!c) return null
   const shot = (c.meta as any)?.shot as Shot | undefined
   const motion = (shot?.videoPrompt && shot.videoPrompt.trim()) || ((shot?.camera ? `运镜：${shot.camera}。` : '') + (shot?.desc || ''))
   const prompt = (motion || c.prompt || '').trim()
   const center = { x: c.x + c.w / 2, y: c.y + c.h + 200 }
   const title = (c.title || '镜头').replace(/^镜/, '片')
-  const id = g.addCard('video', center, {
-    title,
-    prompt,
-    refIds: [imageCardId],
-    params: { duration: shot?.duration || 5, aspect: (c.params?.aspect as string) || '16:9' }
-  })
-  g.addEdgeBetween(imageCardId, id)
-  g.setSelection([id])
-  notify('已创建视频卡（以该镜头为首帧），点「生成」出片', 'success')
+  const imageBacklink = storyboardBacklink(c)
+  const owner = imageBacklink && board
+    ? Object.values(board.cards).find((candidate) => readStoryboardDoc(candidate)?.id === imageBacklink.storyboardId)
+    : undefined
+  const doc0 = owner ? readStoryboardDoc(owner) : null
+  const storyboardShot = doc0?.shots.find((item) => item.id === imageBacklink?.shotId)
+  let videoId: string | null = null
+  let created = false
+  g.applyGraphTransaction('创建分镜视频卡', (tx) => {
+    let existing = storyboardShot?.videoCardId ? tx.getCard(storyboardShot.videoCardId) : undefined
+    if (storyboardShot && doc0 && !validLinkedCard(existing, doc0, storyboardShot, 'video')) existing = undefined
+    if (!existing) {
+      videoId = tx.createCard('video', center, {
+        title,
+        prompt,
+        refIds: [imageCardId],
+        params: { duration: shot?.duration || 5, aspect: (c.params?.aspect as string) || '16:9' },
+        meta: storyboardShot && doc0 ? { storyboardBacklink: backlinkFor(doc0, storyboardShot, 'video') } : {}
+      })
+      created = true
+    } else {
+      videoId = existing.id
+      const meta = { ...(existing.meta || {}), storyboardBacklink: backlinkFor(doc0!, storyboardShot!, 'video') } as Record<string, unknown>
+      const hasOutput = !!(existing.assetUrl || existing.assetLocalPath)
+      if (hasOutput && (existing.prompt !== prompt || storyboardBacklink(existing)?.materializedFingerprint !== storyboardShotFingerprint(storyboardShot!))) meta.storyboardInputStale = true
+      const params = { ...existing.params, duration: shot?.duration || 5, aspect: (c.params?.aspect as string) || '16:9' }
+      if (existing.title !== title || existing.prompt !== prompt || !sameJson(existing.refIds, [imageCardId]) || !sameJson(existing.params, params) || !sameJson(existing.meta, meta)) {
+        tx.updateCard(existing.id, { title, prompt, refIds: [imageCardId], params, meta })
+      }
+    }
+    if (!videoId) return
+    tx.ensureEdge(imageCardId, videoId)
+    if (owner && doc0 && storyboardShot && storyboardShot.videoCardId !== videoId) {
+      const doc = { ...doc0, shots: doc0.shots.map((item) => item.id === storyboardShot.id ? { ...item, videoCardId: videoId! } : item), updatedAt: Date.now() }
+      tx.updateCard(owner.id, { meta: writeStoryboardMeta(owner, doc) })
+    }
+    tx.select([videoId])
+  }, boardId)
+  if (videoId) notify(created ? '已创建视频卡（以该镜头为首帧），点「生成」出片' : '已同步并定位已有视频卡', 'success')
+  return videoId
 }

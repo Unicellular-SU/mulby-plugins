@@ -87,6 +87,29 @@ function testStackOutDurationTrimSpeed() {
   assert.equal(stackOutDuration(stack), 3)
 }
 
+async function testNonDestructiveReplacement() {
+  const stack: EditStack = {
+    version: 1,
+    baseDuration: 10,
+    baseW: 1920,
+    baseH: 1080,
+    ops: [
+      { id: 'replace', kind: 'replace', enabled: true, params: { segments: [{ start: 2, end: 4, replacementCardId: 'replacement-card', replacementPath: '/test/replacement.mp4' }] } },
+      { id: 'trim', kind: 'trim', enabled: true, params: { segments: [{ in: 1, out: 8, keep: true }] } },
+      { id: 'export', kind: 'export', enabled: true, params: { format: 'mp4', crf: 23 } }
+    ]
+  }
+  const compiled = await compileStack(stack, { inPath: IN_PATH, projectId: PROJECT_ID, hasAudio: true, resolveOutPath: stableOutPath })
+  const args = compiled.passes[0].args
+  const filter = filterComplexOf(args)
+  assert.ok(args.includes('/test/replacement.mp4'), 'replacement clip must be a second input')
+  assert.ok(filter.includes('concat=n=3:v=1:a=0'), 'original before/replacement/original after must be concatenated')
+  assert.ok(filter.includes('trim=1.000:8.000'), 'later trim must consume the replaced video graph')
+  assert.equal(compiled.outDuration, 7)
+  assert.ok(filter.includes('[0:a]atrim=1.000:8.000'), 'original audio remains the source of the trimmed soundtrack')
+  assert.ok(args.includes('[ta0]'), 'trimmed original audio remains mapped')
+}
+
 async function runRecipeCase(c: RecipeCase) {
   const compiled = await compileStack(
     c.stack,
@@ -148,6 +171,7 @@ async function testAllRecipes() {
 async function main() {
   testBuildAtempoChain()
   testStackOutDurationTrimSpeed()
+  await testNonDestructiveReplacement()
   await testAllRecipes()
   console.log(`videoEdit compile: ${recipes.length} recipes OK`)
 }

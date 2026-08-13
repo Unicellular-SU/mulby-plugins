@@ -1,6 +1,9 @@
 import type { Board, ProjectDoc } from '../types'
 import { SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
+import { isAssetRole, isMaterialKind } from './semanticAssets'
+import { sanitizeStoryboardBoard } from './storyboardV2'
+import { sanitizeWorkflowRuns } from './workflowPlanner'
 
 export const PLUGIN_ID = 'ai-creative-canvas'
 
@@ -179,6 +182,92 @@ function migratePanoCards(d: ProjectDoc): ProjectDoc {
   return changed ? { ...d, boards } : d
 }
 
+// v3：清理工程级语义素材，并把卡片上的稳定引用与锚点当前名称对齐。
+// 可选字段始终幂等清洗，兼容分片工程里“新 manifest + 旧 card shard”的混合状态。
+function sanitizeSemanticAssets(d: ProjectDoc): ProjectDoc {
+  const cleanStrings = (value: unknown): string[] => Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || '').trim()).filter((item): item is string => !!item))].slice(0, 24)
+    : []
+  const rawAnchors = d.assetAnchors && typeof d.assetAnchors === 'object' && !Array.isArray(d.assetAnchors) ? d.assetAnchors : {}
+  const anchors: NonNullable<ProjectDoc['assetAnchors']> = {}
+  const fallbackTime = Number.isFinite(d.updatedAt) ? d.updatedAt : Date.now()
+  for (const [key, value] of Object.entries(rawAnchors as Record<string, any>)) {
+    if (!value || typeof value !== 'object' || !isAssetRole(value.role) || !isMaterialKind(value.mediaKind)) continue
+    const id = typeof value.id === 'string' && value.id.trim() ? value.id.trim() : key.trim()
+    const name = typeof value.name === 'string' ? value.name.trim() : ''
+    if (!id || !name) continue
+    const source = value.source && typeof value.source === 'object' && typeof value.source.cardId === 'string' && value.source.cardId
+      ? {
+          boardId: typeof value.source.boardId === 'string' ? value.source.boardId : '',
+          cardId: value.source.cardId,
+          ...(Number.isInteger(value.source.resultIndex) && value.source.resultIndex >= 0 ? { resultIndex: value.source.resultIndex } : {})
+        }
+      : undefined
+    const rawPinned = value.pinnedMedia && typeof value.pinnedMedia === 'object' ? value.pinnedMedia : null
+    const pinnedMedia = rawPinned
+      ? {
+          ...(typeof rawPinned.assetUrl === 'string' && rawPinned.assetUrl && !rawPinned.assetUrl.startsWith('data:') ? { assetUrl: rawPinned.assetUrl } : {}),
+          ...(typeof rawPinned.assetLocalPath === 'string' && rawPinned.assetLocalPath ? { assetLocalPath: rawPinned.assetLocalPath } : {}),
+          ...(typeof rawPinned.mime === 'string' && rawPinned.mime ? { mime: rawPinned.mime } : {}),
+          ...(typeof rawPinned.text === 'string' && rawPinned.text ? { text: rawPinned.text } : {}),
+          ...(typeof rawPinned.thumbUrl === 'string' && rawPinned.thumbUrl && !rawPinned.thumbUrl.startsWith('data:') ? { thumbUrl: rawPinned.thumbUrl } : {})
+        }
+      : undefined
+    const hasPinned = !!pinnedMedia && Object.keys(pinnedMedia).length > 0
+    anchors[id] = {
+      id,
+      role: value.role,
+      name,
+      aliases: cleanStrings(value.aliases),
+      description: typeof value.description === 'string' ? value.description.trim() : '',
+      tags: cleanStrings(value.tags),
+      mediaKind: value.mediaKind,
+      source,
+      pinnedMedia: hasPinned ? pinnedMedia : undefined,
+      revision: Number.isFinite(value.revision) && value.revision > 0 ? Math.floor(value.revision) : 1,
+      locked: !!value.locked && hasPinned,
+      mediaMissing: !!value.mediaMissing,
+      createdAt: Number.isFinite(value.createdAt) ? value.createdAt : fallbackTime,
+      updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : fallbackTime
+    }
+  }
+
+  const primaryByCard = new Map<string, string>()
+  for (const anchor of Object.values(anchors)) {
+    if (anchor.source?.cardId && !primaryByCard.has(anchor.source.cardId)) primaryByCard.set(anchor.source.cardId, anchor.id)
+  }
+  const boards = d.boards.map((board) => {
+    let changed = false
+    const cards = { ...board.cards }
+    for (const [cardId, card] of Object.entries(board.cards)) {
+      const seen = new Set<string>()
+      const refs = Array.isArray(card.anchorRefs)
+        ? card.anchorRefs.flatMap((raw) => {
+            const anchor = raw && anchors[raw.anchorId]
+            if (!anchor || seen.has(anchor.id)) return []
+            seen.add(anchor.id)
+            return [{ anchorId: anchor.id, mention: anchor.name, acceptedAt: Number.isFinite(raw.acceptedAt) ? raw.acceptedAt : fallbackTime }]
+          })
+        : []
+      const expectedSourceId = primaryByCard.get(cardId)
+      const currentSourceId = typeof (card.meta as any)?.semanticAnchorId === 'string' ? (card.meta as any).semanticAnchorId : undefined
+      const nextSourceId = expectedSourceId || (currentSourceId && anchors[currentSourceId]?.source?.cardId === cardId ? currentSourceId : undefined)
+      const refsChanged = refs.length !== (card.anchorRefs || []).length || refs.some((ref, index) => {
+        const previous = card.anchorRefs?.[index]
+        return !previous || previous.anchorId !== ref.anchorId || previous.mention !== ref.mention || previous.acceptedAt !== ref.acceptedAt
+      })
+      if (!refsChanged && currentSourceId === nextSourceId) continue
+      const meta = { ...(card.meta || {}) } as Record<string, unknown>
+      if (nextSourceId) meta.semanticAnchorId = nextSourceId
+      else delete meta.semanticAnchorId
+      cards[cardId] = { ...card, anchorRefs: refs, meta }
+      changed = true
+    }
+    return changed ? { ...board, cards } : board
+  })
+  return { ...d, assetAnchors: anchors, boards }
+}
+
 // schemaVersion 迁移脚手架：按版本累进升级（未来在此追加 if (v < N) {…}）
 export function migrateProject(doc: ProjectDoc): ProjectDoc {
   let d = doc
@@ -191,6 +280,10 @@ export function migrateProject(doc: ProjectDoc): ProjectDoc {
     d = { ...d, schemaVersion: SCHEMA_VERSION }
   }
   d = sanitizeBoards(d) // 清理跨板串卡 bug 残留的畸形卡
+  d = sanitizeSemanticAssets(d)
+  const storyboardBoards = d.boards.map(sanitizeStoryboardBoard)
+  if (storyboardBoards.some((board, index) => board !== d.boards[index])) d = { ...d, boards: storyboardBoards }
+  d = { ...d, workflowRuns: sanitizeWorkflowRuns(d) }
   // 风格包：工程级 → 画布级迁移（旧工程把全局值复制到各画布，使其各自独立可改）
   if ((d.stylePackId || d.style) && Array.isArray(d.boards) && d.boards.some((b) => b.stylePackId === undefined && b.style === undefined)) {
     d = { ...d, boards: d.boards.map((b) => ({ ...b, stylePackId: b.stylePackId ?? d.stylePackId, style: b.style ?? d.style })) }

@@ -3,7 +3,7 @@ import {
   X, Film, Loader2, Undo2, Redo2, Eye, EyeOff, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
   Scissors, Gauge, Crop, Palette, Music, Download, Plus,
   Play, Pause, SkipBack, SkipForward, Maximize, PanelBottomClose, PanelBottomOpen, Type,
-  Captions, Stamp, Sticker, Grid2x2, Square, RectangleHorizontal, Timer, PictureInPicture2, Settings2, type LucideIcon
+  Captions, Stamp, Sticker, Grid2x2, Square, RectangleHorizontal, Timer, PictureInPicture2, Settings2, Clapperboard, type LucideIcon
 } from 'lucide-react'
 import { useUi } from '../store/uiStore'
 import { useGraph } from '../store/graphStore'
@@ -16,9 +16,10 @@ import { OP_KIND_LABEL, type EditOp, type EditStack, type OpKind, type TrimParam
 import { Z } from '../zlayers'
 import { fmt, IconBtn, TBtn, ToolTile, ToolSection } from './studioControls'
 import { ParamPanel } from './studioPanels'
+import { VideoReshootDialog } from './VideoReshootDialog'
 
 const KIND_ICON: Record<OpKind, typeof Scissors> = {
-  trim: Scissors, speed: Gauge, transform: Crop, color: Palette, overlay: Plus, audio: Music, export: Download
+  replace: Clapperboard, trim: Scissors, speed: Gauge, transform: Crop, color: Palette, overlay: Plus, audio: Music, export: Download
 }
 
 // 左侧工具条（PS 风）：全局工具（单例）+ 叠加工具（多实例）+ 导出
@@ -73,6 +74,7 @@ function Inner({ cardId }: { cardId: string }) {
   const [waveform, setWaveform] = useState<number[] | null>(null)
   const [playing, setPlaying] = useState(false)
   const [tlOpen, setTlOpen] = useState(true)
+  const [reshootOpen, setReshootOpen] = useState(false)
 
   // 播放状态跟随 <video> 的 play/pause 事件（驱动 TransportBar 图标）
   useEffect(() => {
@@ -255,6 +257,7 @@ function Inner({ cardId }: { cardId: string }) {
           <span className="font-semibold text-sm">剪辑工作台</span>
           <span className="text-[11px] opacity-50 truncate max-w-[40%]">· {card.title}</span>
           <div className="ml-auto flex items-center gap-1">
+            <button disabled={!ready || busy || dur <= 0} onClick={() => setReshootOpen(true)} className="mr-1 flex h-8 items-center gap-1.5 rounded-lg bg-pink-600 px-3 text-[11px] font-medium text-white hover:bg-pink-700 disabled:opacity-40" title="选择当前播放头附近的区间进行非破坏式重拍"><Clapperboard size={13} />局部重拍</button>
             <IconBtn icon={Undo2} title="撤销 (Ctrl+Z)" disabled={!useStudio.getState().canUndo()} onClick={() => useStudio.getState().undo()} />
             <IconBtn icon={Redo2} title="重做 (Ctrl+Y)" disabled={!useStudio.getState().canRedo()} onClick={() => useStudio.getState().redo()} />
             <IconBtn icon={tlOpen ? PanelBottomClose : PanelBottomOpen} title="折叠/展开时间轴" onClick={() => setTlOpen((v) => !v)} />
@@ -341,6 +344,7 @@ function Inner({ cardId }: { cardId: string }) {
             </button>
           </div>
         </div>
+        {reshootOpen && <VideoReshootDialog cardId={cardId} duration={dur} playhead={playhead} onClose={() => setReshootOpen(false)} />}
       </div>
     </div>
   )

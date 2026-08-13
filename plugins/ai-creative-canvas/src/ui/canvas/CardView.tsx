@@ -11,6 +11,8 @@ import { screenToWorld } from './viewport'
 import { stageEl } from './stageEl'
 import { KIND_ACCENT, type Card, type CardKind } from '../types'
 import { PanoNodePreview } from './PanoNodePreview'
+import { ASSET_ROLE_LABEL, semanticAnchorIdOfCard } from '../services/semanticAssets'
+import { readCardMediaVersions } from '../services/mediaVersions'
 
 const KIND_ICON: Record<CardKind, typeof ImageIcon> = {
   image: ImageIcon,
@@ -168,6 +170,8 @@ function VideoCardPlayer({ card, onFit }: { card: Card; onFit: (w: number, h: nu
 // CardView 仅订阅 updateCard（稳定 action）与 connInvalidIds（连线拖拽期才变），均不随视口变化。
 function CardViewImpl({ card, selected, related }: { card: Card; selected: boolean; related?: boolean }) {
   const updateCard = useGraph((s) => s.updateCard)
+  const semanticAnchorId = semanticAnchorIdOfCard(card)
+  const semanticAnchor = useGraph((s) => semanticAnchorId ? s.project.assetAnchors?.[semanticAnchorId] : undefined)
   const meta = { icon: KIND_ICON[card.kind], accent: KIND_ACCENT[card.kind] }
   const Icon = meta.icon
   const editingNote = useUi((s) => s.editingNoteId === card.id)
@@ -342,7 +346,8 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
       delete nextMeta.missingMediaReferences
       delete nextMeta.mediaMissing
     }
-    updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: nextMeta })
+    const draft = { ...card, assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: nextMeta }
+    updateCard(card.id, { assetUrl: n.url, assetLocalPath: n.localPath, mime: n.mime, meta: { ...nextMeta, mediaVersionsV1: readCardMediaVersions(draft, 'generation') } })
   }
 
   // 便签卡：彩色便利贴，双击就地编辑，悬停/选中显示换色
@@ -434,13 +439,22 @@ function CardViewImpl({ card, selected, related }: { card: Card; selected: boole
     >
       {(() => {
         const shot = (card.meta as any)?.shot
+        const inputStale = !!(card.meta as any)?.storyboardInputStale
         const t = (card.title || '').trim()
         const custom = !!t && !['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'].includes(t)
-        if (!shot && !custom) return null
+        if (!shot && !custom && !semanticAnchor && !inputStale) return null
+        const anchorLabel = semanticAnchor
+          ? `${ASSET_ROLE_LABEL[semanticAnchor.role]} · ${semanticAnchor.name}`
+          : ''
+        const displayTitle = anchorLabel || t
         return (
-          <div className="absolute top-1 left-1 z-20 max-w-[88%] truncate px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px] leading-none pointer-events-none">
-            {t}
+          <div
+            className={`absolute top-1 left-1 z-20 max-w-[88%] truncate px-1.5 py-0.5 rounded text-white text-[10px] leading-none pointer-events-none ${inputStale ? 'bg-amber-500/90' : 'bg-black/60'}`}
+            title={inputStale ? '故事板输入已变化；同步并重新生成后更新产物' : semanticAnchor ? `语义锚点：${anchorLabel}` : undefined}
+          >
+            {displayTitle}
             {shot?.duration ? ` · ${shot.duration}s` : ''}
+            {inputStale ? ' · 输入已变' : ''}
           </div>
         )
       })()}

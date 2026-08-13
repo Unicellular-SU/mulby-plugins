@@ -101,9 +101,9 @@ export async function extractFrames(projectId: string, inPath: string, fps = 1, 
 }
 
 // 截取某一时刻的单帧 → PNG（用于卡内「截帧」）
-export async function frameAt(projectId: string, inPath: string, atSec: number): Promise<string> {
+export async function frameAt(projectId: string, inPath: string, atSec: number, signal?: AbortSignal): Promise<string> {
   const out = await mediaPath(projectId, 'frame', 'png')
-  await runFf(['-ss', String(Math.max(0, atSec)), '-i', inPath, '-frames:v', '1', '-q:v', '2', out])
+  await runFf(['-ss', String(Math.max(0, atSec)), '-i', inPath, '-frames:v', '1', '-q:v', '2', out], undefined, signal)
   return out
 }
 
@@ -146,6 +146,55 @@ export async function sceneFrames(projectId: string, inPath: string, threshold =
   ])
   const files = await readdir(dir)
   return files.filter((f) => f.endsWith('.png')).sort().map((f) => `${dir}/${f}`)
+}
+
+export interface TimedSceneFrame {
+  path: string
+  time: number
+}
+
+/**
+ * 场景切点代表帧 + 时间。输出文件名直接使用毫秒 PTS，避免 ffmpeg progress 为节流回调、
+ * 长视频快速处理时漏掉中间帧时间；`-enc_time_base 1:1000` 让不同源帧率得到统一时间基。
+ */
+export async function timedSceneFrames(
+  projectId: string,
+  inPath: string,
+  threshold = 0.4,
+  max = 99,
+  signal?: AbortSignal
+): Promise<TimedSceneFrame[]> {
+  const dir = await ensureSubDir(projectId, `analysis_cuts_${Date.now()}`)
+  if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+  const task = ff().run([
+    '-i', inPath,
+    '-vf', `select='gt(scene\\,${threshold})'`,
+    '-vsync', 'vfr',
+    '-enc_time_base', '1:1000',
+    '-frame_pts', '1',
+    '-frames:v', String(max),
+    `${dir}/cut_%012d.png`
+  ])
+  const onAbort = () => { try { task.kill() } catch { /* already done */ } }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    await task.promise
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
+    const files = (await readdir(dir)).filter((file) => file.endsWith('.png')).sort()
+    return files.flatMap((file) => {
+      const match = file.match(/^cut_(-?\d+)\.png$/)
+      if (!match) return []
+      const time = Number(match[1]) / 1000
+      return Number.isFinite(time) ? [{ path: `${dir}/${file}`, time: Math.max(0, time) }] : []
+    })
+  } catch (error) {
+    // 中止或 ffmpeg 失败不把半成品留给媒体 GC；正常返回后由调用方决定是否保留/删除。
+    const files = await readdir(dir).catch(() => [])
+    await Promise.allSettled(files.map((file) => window.mulby.filesystem.unlink(`${dir}/${file}`)))
+    throw error
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+  }
 }
 
 export async function splitAudio(projectId: string, inPath: string): Promise<string> {
@@ -294,8 +343,10 @@ export async function probeDuration(localPath: string, signal?: AbortSignal): Pr
     } finally {
       signal?.removeEventListener('abort', onAbort)
     }
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
     return dur
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw new DOMException('已取消', 'AbortError')
     return undefined
   }
 }

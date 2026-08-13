@@ -9,10 +9,16 @@ import { ProviderSettings } from './components/ProviderSettings'
 import { ComposeModal } from './components/ComposeModal'
 import { TimelineModal } from './components/TimelineModal'
 import { StoryboardModal } from './components/StoryboardModal'
+import { StoryboardWorkspace } from './components/StoryboardWorkspace'
+import { DirectorPromptModal } from './components/DirectorPromptModal'
 import { TemplatePanel } from './components/TemplatePanel'
 import { MaskInpaintModal } from './components/MaskInpaintModal'
 import { VideoTrimModal } from './components/VideoTrimModal'
 import { VideoStudioModal } from './components/VideoStudioModal'
+import { VideoAnalysisModal } from './components/VideoAnalysisModal'
+import { MediaVersionDialog } from './components/MediaVersionDialog'
+import { GenerationPlanDialog } from './components/GenerationPlanDialog'
+import { AgentDrawer } from './components/AgentDrawer'
 import { TaskCenter } from './components/TaskCenter'
 import { Gallery } from './components/Gallery'
 import { CardSearch } from './components/CardSearch'
@@ -126,13 +132,20 @@ export default function App() {
 
   const showProviderSettings = useUi((s) => s.showProviderSettings)
   const showTemplates = useUi((s) => s.showTemplates)
+  const workspaceView = useUi((s) => s.workspaceView)
 
   return (
     <div className="h-full w-full flex flex-col text-neutral-800 dark:text-neutral-200">
       <TopBar />
       <div className="flex-1 relative min-h-0 min-w-0">
-        <CanvasStage />
-        <LeftDock />
+        {workspaceView === 'canvas' ? (
+          <>
+            <CanvasStage />
+            <LeftDock />
+          </>
+        ) : (
+          <StoryboardWorkspace />
+        )}
       </div>
       {showProviderSettings && <ProviderSettings />}
       <ComposeModal />
@@ -141,10 +154,15 @@ export default function App() {
       {/* 360 预览已内嵌到全景卡节点内（PanoNodePreview，随 panoCardId 激活），不再有全屏查看器 */}
       <DirectorStage />
       <StoryboardModal />
+      <DirectorPromptModal />
       <TemplatePanel show={showTemplates} onClose={() => useUi.getState().setShowTemplates(false)} />
       <MaskInpaintModal />
       <VideoTrimModal />
       <VideoStudioModal />
+      <VideoAnalysisModal />
+      <MediaVersionDialog />
+      <GenerationPlanDialog />
+      <AgentDrawer />
       <TaskCenter />
       <Gallery />
       <CardSearch />

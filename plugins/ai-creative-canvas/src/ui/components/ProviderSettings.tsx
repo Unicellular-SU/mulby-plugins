@@ -429,6 +429,17 @@ export function ProviderSettings() {
                     <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.07] p-3 text-[11px] text-amber-700 dark:text-amber-300">高级配置会直接影响实际 HTTP 请求。使用内置模板时通常不需要修改；保存前请在“检查与预览”确认渲染结果。</div>
                     <Row label="无计费健康检查 URL（可选）" hint="GET 请求；用于验证网络和 API Key，不应触发生成任务"><input className="ace-input" value={draft.healthCheckUrl || ''} onChange={(event) => updateDraft({ healthCheckUrl: event.target.value || undefined })} placeholder="https://api.example.com/v1/models" /></Row>
 
+                    <section className="rounded-lg border p-3" style={{ borderColor: 'var(--ace-border)' }}>
+                      <div className="text-xs font-semibold">费用声明（可选）</div>
+                      <div className="mt-1 text-[10px] opacity-50">仅用于生成前估算；请按服务商实际账单填写。留空时会明确显示“费用未知”。</div>
+                      <div className="grid grid-cols-4 gap-3 mt-3">
+                        <Row label="币种"><input className="ace-input" value={draft.pricing?.currency || ''} onChange={(event) => updateDraft({ pricing: event.target.value || draft.pricing?.perRequest != null || draft.pricing?.perSecond != null ? { ...(draft.pricing || {}), currency: event.target.value } : undefined })} placeholder="CNY / USD" /></Row>
+                        <Row label="每次请求"><input className="ace-input" type="number" min="0" step="0.0001" value={draft.pricing?.perRequest ?? ''} onChange={(event) => updateDraft({ pricing: event.target.value === '' && !draft.pricing?.currency && draft.pricing?.perSecond == null && draft.pricing?.confirmAbove == null ? undefined : { ...(draft.pricing || { currency: '' }), perRequest: event.target.value === '' ? undefined : Number(event.target.value) } })} placeholder="0.00" /></Row>
+                        <Row label="每秒费用"><input className="ace-input" type="number" min="0" step="0.0001" value={draft.pricing?.perSecond ?? ''} onChange={(event) => updateDraft({ pricing: event.target.value === '' && !draft.pricing?.currency && draft.pricing?.perRequest == null && draft.pricing?.confirmAbove == null ? undefined : { ...(draft.pricing || { currency: '' }), perSecond: event.target.value === '' ? undefined : Number(event.target.value) } })} placeholder="0.00" /></Row>
+                        <Row label="确认阈值"><input className="ace-input" type="number" min="0" step="0.01" value={draft.pricing?.confirmAbove ?? ''} onChange={(event) => updateDraft({ pricing: event.target.value === '' && !draft.pricing?.currency && draft.pricing?.perRequest == null && draft.pricing?.perSecond == null ? undefined : { ...(draft.pricing || { currency: '' }), ...(event.target.value === '' ? { confirmAbove: undefined } : { confirmAbove: Number(event.target.value) }) } })} placeholder="超过此金额确认" /></Row>
+                      </div>
+                    </section>
+
                     {draft.type === 'openai-tts' && (
                       <div className="text-xs opacity-55">TTS 的请求结构由插件固定为 OpenAI 兼容格式；如需自定义请求体，应新增视频/音频 Provider 类型，而不是修改此处。</div>
                     )}

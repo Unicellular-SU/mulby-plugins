@@ -18,6 +18,8 @@ import {
 import { DirectorAsyncResourceCache } from './directorAssetCache'
 import { DirectorShotStrip } from './DirectorShotStrip'
 import { DirectorShotInspector } from './DirectorShotInspector'
+import { VersionWorkspace } from '../components/MediaVersionDialog'
+import { readDirectorTakeVersions, withDirectorTakeVersions } from '../services/mediaVersions'
 import { DirectorPosePanel, type DirectorJointEditorState } from './DirectorPosePanel'
 import { DirectorCameraPresetGrid } from './DirectorCameraPresetGrid'
 import { DirectorEnvironmentPanel } from './DirectorEnvironmentPanel'
@@ -207,6 +209,7 @@ function Inner({ onReload }: { onReload: () => void }) {
   const [shots, setShots] = useState<DirectorShot[]>([])
   const [activeShotId, setActiveShotId] = useState<string | null>(null)
   const [shotStripExpanded, setShotStripExpanded] = useState(true)
+  const [versionShotIndex, setVersionShotIndex] = useState<number | null>(null)
   const [showShotCameras, setShowShotCameras] = useState(true)
   const [environment, setEnvironment] = useState<DirectorEnvironment | null>(null)
   const [panoramaCameraStatus, setPanoramaCameraStatus] = useState<DirectorPanoramaCameraStatus | null>(null)
@@ -2988,7 +2991,12 @@ function Inner({ onReload }: { onReload: () => void }) {
     if (!shot) return false
     if (!(await applyShot(shot, 'full'))) return false
     const url = await doGenerate(i, shot.aspect || aspect, shot.notes || '')
-    if (url) { setShots((ss) => ss.map((x, xi) => (xi === i ? { ...x, take: url, takes: [...(x.takes || []), url].slice(-6) } : x))); return true }
+    if (url) {
+      setShots((ss) => ss.map((x, xi) => xi === i
+        ? withDirectorTakeVersions({ ...x, take: url, takes: [...(x.takes || []), url].slice(-12) })
+        : x))
+      return true
+    }
     return false
   }
   // 在 takes 历史里切换当前成片（循环）
@@ -2999,6 +3007,44 @@ function Inner({ onReload }: { onReload: () => void }) {
       const next = x.takes[(cur + dir + x.takes.length) % x.takes.length]
       return { ...x, take: next }
     }))
+  }
+  const adoptDirectorTake = (i: number, id: string) => setShots((ss) => ss.map((shot, index) => {
+    if (index !== i) return shot
+    const state = readDirectorTakeVersions(shot)
+    const item = state.items.find((version) => version.id === id)
+    return item ? { ...shot, take: item.url, takeVersions: state.items } : shot
+  }))
+  const setDirectorTakeDisposition = (i: number, id: string, disposition: 'normal' | 'starred' | 'rejected') => setShots((ss) => ss.map((shot, index) => {
+    if (index !== i) return shot
+    const state = readDirectorTakeVersions(shot)
+    return { ...shot, takeVersions: state.items.map((item) => item.id === id ? { ...item, disposition } : item) }
+  }))
+  const setDirectorTakeCompare = (i: number, id: string, slot: 0 | 1) => setShots((ss) => ss.map((shot, index) => {
+    if (index !== i) return shot
+    const state = readDirectorTakeVersions(shot)
+    const compareTakeIds: [string?, string?] = [...(state.compareIds || [])]
+    compareTakeIds[slot] = id
+    return { ...shot, takeVersions: state.items, compareTakeIds }
+  }))
+  const branchDirectorTake = (i: number, versionId: string) => {
+    const shot = shots[i]
+    const item = shot ? readDirectorTakeVersions(shot).items.find((version) => version.id === versionId) : undefined
+    if (!shot || !item) return
+    const g = useGraph.getState()
+    const board = g.getActiveBoard()
+    const id = g.addCard('image', { x: -board.viewport.x / board.viewport.zoom + 160, y: -board.viewport.y / board.viewport.zoom + 160 }, {
+      title: `${shot.name} · ${item.label}`,
+      status: 'done', progress: 1, assetUrl: item.url, assetLocalPath: item.localPath || null, mime: item.mime || 'image/png',
+      prompt: item.prompt || prompt,
+      meta: {
+        directorTakeBranchV1: { shotId: shot.id, versionId: item.id, createdAt: Date.now() },
+        mediaVersionsV1: { version: 1, currentId: item.id, compareIds: [], items: [{ ...item }] }
+      }
+    })
+    g.setSelection([id])
+    setVersionShotIndex(null)
+    useUi.getState().setShowDirector(false)
+    toast('已把该 Take 作为图片卡分支放到画布，可继续引用或生成', 'success')
   }
   const batchGenerate = async () => {
     if (!prompt.trim()) { toast('请先填写场景/角色描述', 'error'); return }
@@ -3704,11 +3750,29 @@ function Inner({ onReload }: { onReload: () => void }) {
           onDelete={delShot}
           onRename={renameShot}
           onCycleTake={cycleTake}
+          onVersions={setVersionShotIndex}
           onReorder={reorderShots}
           onBatchGenerate={() => { void batchGenerate() }}
           onExport={exportStoryboard}
         />
       </div>
+
+      {versionShotIndex != null && shots[versionShotIndex] && (() => {
+        const versionShot = shots[versionShotIndex]
+        const versionState = readDirectorTakeVersions(versionShot)
+        return (
+          <div className="fixed inset-0 z-[1000] grid place-items-center bg-black/70 p-5" onClick={() => setVersionShotIndex(null)}>
+            <div data-interactive onClick={(event) => event.stopPropagation()} className="flex h-[86vh] w-[min(1380px,96vw)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 text-white shadow-2xl">
+              <div className="flex h-12 shrink-0 items-center gap-2 border-b border-white/10 px-4"><Film size={16} className="text-amber-300" /><b className="text-sm">导演 Take 版本</b><span className="text-xs text-white/40">· {versionShot.name}</span><button onClick={() => setVersionShotIndex(null)} className="ml-auto grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10"><X size={16} /></button></div>
+              <VersionWorkspace state={versionState}
+                onAdopt={(id) => adoptDirectorTake(versionShotIndex, id)}
+                onDisposition={(id, value) => setDirectorTakeDisposition(versionShotIndex, id, value)}
+                onCompare={(id, slot) => setDirectorTakeCompare(versionShotIndex, id, slot)}
+                onBranch={(id) => branchDirectorTake(versionShotIndex, id)} />
+            </div>
+          </div>
+        )
+      })()}
 
       {/* 底：场景描述 + 生成 */}
       <div className="absolute bottom-3 flex items-end gap-2" style={viewportStyle}>

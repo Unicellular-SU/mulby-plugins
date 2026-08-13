@@ -11,7 +11,7 @@ import {
 } from '../src/ui/services/references.ts'
 import { canConnect } from '../src/ui/services/connectionPolicy.ts'
 import { canGenerateCard } from '../src/ui/services/nodeCapabilities.ts'
-import type { Board, Card } from '../src/ui/types.ts'
+import type { AssetAnchor, Board, Card, ProjectDoc } from '../src/ui/types.ts'
 
 function card(id: string, patch: Partial<Card> & Pick<Card, 'kind'>): Card {
   return {
@@ -212,6 +212,55 @@ function testEmbeddedTextSurvivesMissingOriginalFile() {
   assert.deepEqual(resolveGenInputs(b.cards.me, b).texts, [{ label: '设定', text: '白发剑客' }])
 }
 
+function testStableAnchorBindingAndExplicitNarrowing() {
+  const b = board({
+    story: card('story', { kind: 'text', title: '剧情', text: '阿星在雨夜推开旧仓库的门' }),
+    source: card('source', { kind: 'image', title: '随时可改名的源卡', assetUrl: 'file:///role.png', assetLocalPath: '/role.png' }),
+    me: card('me', {
+      kind: 'video',
+      prompt: '镜头缓慢推进',
+      anchorRefs: [{ anchorId: 'anchor-role', mention: '阿星', acceptedAt: 1 }]
+    })
+  })
+  b.edges.story = { id: 'story', source: 'story', target: 'me', kind: 'ref' }
+  const anchor: AssetAnchor = {
+    id: 'anchor-role',
+    role: 'character',
+    name: '阿星',
+    aliases: [],
+    description: '',
+    tags: [],
+    mediaKind: 'image',
+    source: { boardId: b.id, cardId: 'source' },
+    revision: 1,
+    locked: false,
+    createdAt: 1,
+    updatedAt: 1
+  }
+  const project: ProjectDoc = {
+    id: 'p1',
+    name: 'test',
+    boards: [b],
+    activeBoardId: b.id,
+    globalModelId: null,
+    assetAnchors: { [anchor.id]: anchor },
+    createdAt: 1,
+    updatedAt: 1,
+    schemaVersion: 3
+  }
+
+  const combined = resolveGenerationPrompt(b.cards.me, b, 'media', project)
+  assert.equal(combined.inputs.images.length, 1, '接受建议后锚点应进入真实视觉输入')
+  assert.equal(combined.inputs.texts.length, 1, '稳定绑定本身不应排除上游剧情')
+  assert.equal(combined.hasExplicitMentions, false)
+
+  const explicit = resolveGenerationPrompt({ ...b.cards.me, prompt: '让 @阿星 缓慢转身' }, b, 'media', project)
+  assert.equal(explicit.inputs.images.length, 1)
+  assert.equal(explicit.inputs.texts.length, 0, '只有显式 @ 才缩小本次生成的素材范围')
+  assert.equal(explicit.hasExplicitMentions, true)
+  assert.equal(explicit.text, '让 参考图「阿星」 缓慢转身')
+}
+
 testExtractMentions()
 testUnresolved()
 testSelectedGenMaterials()
@@ -227,4 +276,5 @@ testUnsupportedMediaNeverBecomesGenerationInput()
 testImportedMediaIsSourceOnly()
 testMissingMediaStaysVisibleButCannotBeConsumed()
 testEmbeddedTextSurvivesMissingOriginalFile()
-console.log('references: 15 tests OK')
+testStableAnchorBindingAndExplicitNarrowing()
+console.log('references: 16 tests OK')

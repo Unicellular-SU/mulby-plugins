@@ -230,7 +230,7 @@ const IMPORT_EXTENSIONS: Record<MaterialKind, string[]> = {
   image: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'],
   video: ['mp4', 'mov', 'webm'],
   audio: ['mp3', 'wav', 'aac', 'opus', 'm4a', 'flac', 'ogg'],
-  text: ['txt', 'md', 'json', 'srt']
+  text: ['txt', 'md', 'json', 'srt', 'vtt']
 }
 
 export async function pickImportPaths(kinds: readonly MaterialKind[] = ['image', 'video', 'audio', 'text']): Promise<string[]> {

@@ -5,7 +5,7 @@ const SUPPORTED_IMPORT_MIMES = new Set([
   'image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif',
   'video/mp4', 'video/quicktime', 'video/webm',
   'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/opus', 'audio/mp4', 'audio/flac', 'audio/ogg',
-  'text/plain', 'text/markdown', 'application/json', 'application/x-subrip'
+  'text/plain', 'text/markdown', 'text/vtt', 'application/json', 'application/x-subrip'
 ])
 
 export function extensionOf(name: string): string {

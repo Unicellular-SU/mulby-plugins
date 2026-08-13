@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images, FolderOpen, Clapperboard, Search } from 'lucide-react'
+import { Plus, Sparkles, Check, Loader2, Settings, LayoutTemplate, ListChecks, Images, FolderOpen, Clapperboard, Search, LayoutDashboard, Rows3, Bot } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useTask } from '../store/taskStore'
@@ -19,7 +19,10 @@ export function TopBar() {
   const stylePackId = useGraph((s) => s.getActiveBoard().stylePackId || '')
   const setStylePack = useGraph((s) => s.setStylePack)
   const saving = useUi((s) => s.saving)
+  const workspaceView = useUi((s) => s.workspaceView)
+  const setWorkspaceView = useUi((s) => s.setWorkspaceView)
   const active = useTask((s) => s.active)
+  const workflowActive = useGraph((s) => Object.values(s.project.workflowRuns || {}).filter((run) => run.status === 'running' || run.status === 'paused' || run.status === 'error').length)
 
   return (
     <div
@@ -37,12 +40,34 @@ export function TopBar() {
       >
         <FolderOpen size={15} />
       </button>
+      <button onClick={() => useUi.getState().setShowAgent(!useUi.getState().showAgent)} title="创作 Agent" className="relative h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+        <Bot size={15} />
+        {workflowActive > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-indigo-500 text-white text-[8px] grid place-items-center">{Math.min(9, workflowActive)}</span>}
+      </button>
       <input
         value={name}
         onChange={(e) => renameProject(e.target.value)}
         className="px-2 py-1 rounded-md bg-black/5 dark:bg-white/10 text-sm w-44 outline-none focus:ring-1 focus:ring-indigo-400"
         placeholder="工程名称"
       />
+      <div className="shrink-0 flex items-center rounded-md bg-black/5 dark:bg-white/10 p-0.5 text-[11px]">
+        <button
+          type="button"
+          onClick={() => setWorkspaceView('canvas')}
+          title="自由画布视图"
+          className={`h-6 px-1.5 rounded flex items-center gap-1 ${workspaceView === 'canvas' ? 'bg-white dark:bg-white/15 text-indigo-500 shadow-sm' : 'opacity-60 hover:opacity-100'}`}
+        >
+          <LayoutDashboard size={12} /> 画布
+        </button>
+        <button
+          type="button"
+          onClick={() => setWorkspaceView('storyboard')}
+          title="故事板工作区"
+          className={`h-6 px-1.5 rounded flex items-center gap-1 ${workspaceView === 'storyboard' ? 'bg-white dark:bg-white/15 text-indigo-500 shadow-sm' : 'opacity-60 hover:opacity-100'}`}
+        >
+          <Rows3 size={12} /> 故事板
+        </button>
+      </div>
       <Select
         className="w-44"
         value={stylePackId}

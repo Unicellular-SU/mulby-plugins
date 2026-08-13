@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { ProjectDoc } from '../types'
 import { useGraph, createDefaultProject } from './graphStore'
 import { resumeInflightVideos, abortAllInflightVideos } from '../services/generate'
+import { resumePendingVideoReshoots } from '../services/videoReshoot'
 import { uid } from '../util'
 import {
   type ProjectMeta,
@@ -186,6 +187,7 @@ async function loadIntoGraph(pid: string, name?: string): Promise<void> {
   }
   applyLoaded(pid, doc)
   void resumeInflightVideos() // 断点续跑：重开/切换后继续在途视频任务的轮询
+  resumePendingVideoReshoots() // 已生成替换片段但宿主中途退出：重开后继续非破坏回填
 }
 
 interface ProjectState {

@@ -6,13 +6,13 @@ function ai() {
   return window.mulby.ai
 }
 
-// 提示词增强：LLM 改写得更具体、更有画面感
-export async function enhancePrompt(cardId: string): Promise<void> {
+// 输入框润色：只改写 card.prompt；素材/风格/参数的上下文规划由 directorPrompt 负责。
+export async function polishPrompt(cardId: string): Promise<void> {
   const g = useGraph.getState()
   const card = g.getActiveBoard().cards[cardId]
   if (!card) return
   const base = (card.prompt || '').trim()
-  if (!base) throw new Error('请先填写一些提示词再增强')
+  if (!base) throw new Error('请先填写一些提示词再润色')
   const isVideo = card.kind === 'video'
   const option: any = {
     messages: [
@@ -26,7 +26,10 @@ export async function enhancePrompt(cardId: string): Promise<void> {
   if (g.project.defaultTextModel) option.model = g.project.defaultTextModel
   const final = await ai().call(option)
   const out = typeof final?.content === 'string' ? final.content.trim() : ''
-  if (out) useGraph.getState().updateCard(cardId, { prompt: out })
+  if (out) {
+    useGraph.getState().pushHistory()
+    useGraph.getState().updateCard(cardId, { prompt: out })
+  }
 }
 
 // 描述图片 → 提示词（图反推）：把连入/上传的第一张图交给视觉模型生成提示词
@@ -35,7 +38,7 @@ export async function describeImage(cardId: string): Promise<void> {
   const board = g.getActiveBoard()
   const card = board.cards[cardId]
   if (!card) return
-  const inputs = resolveGenInputs(card, board)
+  const inputs = resolveGenInputs(card, board, g.project)
   const img = inputs.images[0]
   if (!img) throw new Error('没有可描述的图片（先连入或上传一张图）')
   const buf = await loadImageInput(img)

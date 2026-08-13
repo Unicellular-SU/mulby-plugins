@@ -1,5 +1,6 @@
-import type { Board, Card, Material, MaterialKind } from '../types'
+import type { Board, Card, Material, MaterialKind, ProjectDoc } from '../types'
 import { acceptsMaterialKind, consumableMaterials, materialKindOfCard } from './nodeCapabilities'
+import { materialFromAnchor } from './semanticAssets'
 
 const KIND_LABEL: Record<MaterialKind, string> = { image: '图片', video: '视频', audio: '音频', text: '文本' }
 
@@ -7,7 +8,7 @@ const KIND_LABEL: Record<MaterialKind, string> = { image: '图片', video: '视�
 const DEFAULT_TITLES = new Set(['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'])
 
 // 汇总一个节点的素材：上游连线 + 显式引用 + 本节点上传；标签优先用节点真实名称，否则按 kind 自动编号
-export function buildMaterials(card: Card, board: Board): Material[] {
+export function buildMaterials(card: Card, board: Board, project?: ProjectDoc): Material[] {
   const mats: Material[] = []
   const counters: Record<MaterialKind, number> = { image: 0, video: 0, audio: 0, text: 0 }
   const used = new Set<string>()
@@ -24,6 +25,19 @@ export function buildMaterials(card: Card, board: Board): Material[] {
       ? ((card.meta as { missingMediaReferences: string[] }).missingMediaReferences)
       : []
   )
+
+  // 稳定语义锚点优先于普通卡片引用：视频节点有图片数量上限时，用户明确接受的角色/场景锚点
+  // 不应被一张泛化上游图挤出真实生成输入。
+  if (project) {
+    for (const ref of card.anchorRefs || []) {
+      const anchor = project.assetAnchors?.[ref.anchorId]
+      if (!anchor || seen.has('anchor:' + anchor.id)) continue
+      seen.add('anchor:' + anchor.id)
+      const material = materialFromAnchor(anchor, project)
+      counters[material.kind]++
+      mats.push({ ...material, label: uniq(anchor.name || ref.mention || `${KIND_LABEL[material.kind]}${counters[material.kind]}`) })
+    }
+  }
 
   const edgeSources = Object.values(board.edges)
     .filter((e) => e.target === card.id)
@@ -134,15 +148,16 @@ function inputsFromMaterials(selected: Material[]): GenInputs {
 }
 
 // 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
-export function resolveGenInputs(card: Card, board: Board): GenInputs {
-  const mats = buildMaterials(card, board)
+export function resolveGenInputs(card: Card, board: Board, project?: ProjectDoc): GenInputs {
+  const mats = buildMaterials(card, board, project)
   const selected = selectedGenMaterials(card, board, mats)
   return inputsFromMaterials(selected)
 }
 
 /** 本次生成将使用的素材（与 resolveGenInputs 同源） */
-export function selectedGenMaterials(card: Card, board: Board, mats = buildMaterials(card, board)): Material[] {
-  const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+export function selectedGenMaterials(card: Card, board: Board, mats?: Material[], project?: ProjectDoc): Material[] {
+  const available = mats ?? buildMaterials(card, board, project)
+  const accepted = available.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
   const refd = mentionedMaterials(card.prompt || '', accepted)
   const picked = refd.length ? refd : accepted
   return consumableMaterials(card, picked)
@@ -162,9 +177,10 @@ function formatTextInputs(texts: GenInputs['texts']): string {
 export function resolveGenerationPrompt(
   card: Card,
   board: Board,
-  purpose: GenerationPromptPurpose = 'media'
+  purpose: GenerationPromptPurpose = 'media',
+  project?: ProjectDoc
 ): ResolvedGenerationPrompt {
-  const mats = buildMaterials(card, board)
+  const mats = buildMaterials(card, board, project)
   const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
   const mentioned = mentionedMaterials(card.prompt || '', accepted)
   const hasExplicitMentions = mentioned.length > 0

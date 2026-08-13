@@ -1,6 +1,7 @@
 import type { Board, Card } from '../types'
 import { resolveGenerationPrompt } from './references'
 import { loadImageInput } from './media'
+import { useGraph } from '../store/graphStore'
 
 function ai() {
   return window.mulby.ai
@@ -12,7 +13,7 @@ export async function generateText(
   onChunk: (text: string) => void,
   onRequestId: (id: string) => void
 ): Promise<string> {
-  const resolved = resolveGenerationPrompt(card, board, 'text')
+  const resolved = resolveGenerationPrompt(card, board, 'text', useGraph.getState().project)
   const inputs = resolved.inputs
 
   // 参考图片 → vision 附件

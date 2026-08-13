@@ -22,16 +22,32 @@ export function durationValues(modelId?: string | null): number[] {
   return range(1, 15) // 未知模型：1–15 自由
 }
 
-export function snapDuration(modelId: string | null | undefined, v: number): number {
-  const vals = durationValues(modelId)
-  let best = vals[0]
-  let bd = Infinity
-  for (const x of vals) {
-    const d = Math.abs(x - v)
-    if (d < bd) {
-      bd = d
-      best = x
+/** Provider 明确声明时优先用 Provider 档位，否则回退到模型规格。 */
+export function effectiveDurationValues(modelId?: string | null, providerValues?: number[] | null): number[] {
+  const configured = (providerValues || []).filter((value) => Number.isFinite(value) && value > 0)
+  return configured.length ? configured : durationValues(modelId)
+}
+
+/**
+ * 节点面板、导演增强和真实视频提交共用的时长解析。
+ * 未显式写入 params.duration 时，使用当前面板显示的第一个合法档位，不再硬编码 5s。
+ */
+export function effectiveVideoDuration(modelId: string | null | undefined, value: unknown, providerValues?: number[] | null): number {
+  const values = effectiveDurationValues(modelId, providerValues)
+  const numeric = Number(value)
+  const requested = Number.isFinite(numeric) && numeric > 0 ? numeric : values[0] || 5
+  let best = values[0] || 5
+  let distance = Infinity
+  for (const candidate of values) {
+    const nextDistance = Math.abs(candidate - requested)
+    if (nextDistance < distance) {
+      distance = nextDistance
+      best = candidate
     }
   }
   return best
+}
+
+export function snapDuration(modelId: string | null | undefined, v: number): number {
+  return effectiveVideoDuration(modelId, v)
 }

@@ -3,7 +3,7 @@ import { Dices } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { Select } from './Select'
 import type { Card } from '../types'
-import { durationValues } from '../services/videoSpecs'
+import { effectiveDurationValues, effectiveVideoDuration } from '../services/videoSpecs'
 import { getParamSchema } from '../services/paramSchema'
 import { useProviders } from '../store/providerStore'
 import { resolveVideoCapabilities } from '../services/providers/config'
@@ -110,8 +110,9 @@ export function ParamControls({ card }: { card: Card }) {
       {fields.map((f) => {
         if (f.type === 'seed') return <SeedControl key={f.key} value={p[f.key] as number | undefined} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
         if (f.type === 'duration') {
-          const values = videoCapabilities?.durations?.length ? videoCapabilities.durations : durationValues(card.modelId)
-          return <DurationSlider key={f.key} values={values} value={Number(p[f.key]) || values[0] || 5} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
+          const durationModelId = card.modelId || videoProvider?.model
+          const values = effectiveDurationValues(durationModelId, videoCapabilities?.durations)
+          return <DurationSlider key={f.key} values={values} value={effectiveVideoDuration(durationModelId, p[f.key], videoCapabilities?.durations)} onChange={(v) => set(f.key, v)} onCommitStart={commitStart} />
         }
         const cur = p[f.key] !== undefined && p[f.key] !== null ? String(p[f.key]) : f.default
         return (

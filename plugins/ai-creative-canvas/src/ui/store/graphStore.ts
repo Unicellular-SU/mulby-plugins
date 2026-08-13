@@ -1,9 +1,12 @@
 import { create } from 'zustand'
-import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate, Annotation } from '../types'
+import type { Board, Card, CardKind, Edge, ProjectDoc, Viewport, GroupTemplate, Annotation, WorkflowRun } from '../types'
 import { CARD_DEFAULT_SIZE, SCHEMA_VERSION } from '../types'
 import { uid } from '../util'
 import { canConnect } from '../services/connectionPolicy'
-import { findLabelForSourceCard, replaceMentionInPrompt } from '../services/references'
+import { findLabelForSourceCard, isUsableMaterial, replaceMentionInPrompt } from '../services/references'
+import { acceptsMaterialKind } from '../services/nodeCapabilities'
+import { makeAssetAnchor, materialFromAnchor, semanticAnchorIdOfCard, type AssetAnchorDraft } from '../services/semanticAssets'
+import { detachCardsFromStoryboards } from '../services/storyboardV2'
 import { toast } from './toastStore'
 
 const HISTORY_LIMIT = 100
@@ -12,6 +15,7 @@ interface BoardSnap {
   boardId: string
   cards: Record<string, Card>
   edges: Record<string, Edge>
+  label?: string
 }
 
 type BoardHist = { past: BoardSnap[]; future: BoardSnap[] }
@@ -54,6 +58,8 @@ export function createDefaultProject(name = '未命名工程'): ProjectDoc {
     style: '',
     defaultImageModel: null,
     defaultTextModel: null,
+    assetAnchors: {},
+    workflowRuns: {},
     concurrency: 4,
     createdAt: now,
     updatedAt: now,
@@ -100,6 +106,38 @@ function wouldCycle(nodeId: string, target: string | null, cards: Record<string,
   return false
 }
 
+export interface GraphTransaction {
+  readonly boardId: string
+  getCard: (id: string) => Card | undefined
+  createCard: (kind: CardKind, world: { x: number; y: number }, partial?: Partial<Card>) => string
+  updateCard: (id: string, patch: Partial<Card>) => boolean
+  removeCard: (id: string) => boolean
+  ensureEdge: (source: string, target: string, kind?: Edge['kind']) => string | null
+  removeEdge: (id: string) => boolean
+  select: (ids: string[]) => void
+}
+
+function validateTransactionBoard(boardId: string, cards: Record<string, Card>, edges: Record<string, Edge>): void {
+  for (const [id, card] of Object.entries(cards)) {
+    if (card.id !== id) throw new Error(`图事务失败：卡片键与 id 不一致（${id}）`)
+    if (!Number.isFinite(card.x) || !Number.isFinite(card.y) || !Number.isFinite(card.w) || !Number.isFinite(card.h) || card.w <= 0 || card.h <= 0) {
+      throw new Error(`图事务失败：卡片几何无效（${id}）`)
+    }
+    if (card.parentId && (!cards[card.parentId] || wouldCycle(id, card.parentId, cards))) {
+      throw new Error(`图事务失败：卡片父级无效或形成循环（${id}）`)
+    }
+  }
+  const pairs = new Set<string>()
+  for (const [id, edge] of Object.entries(edges)) {
+    if (edge.id !== id || edge.source === edge.target || !cards[edge.source] || !cards[edge.target]) {
+      throw new Error(`图事务失败：画布 ${boardId} 存在悬空连线（${id}）`)
+    }
+    const pair = `${edge.source}\u0000${edge.target}\u0000${edge.kind}`
+    if (pairs.has(pair)) throw new Error(`图事务失败：存在重复连线（${edge.source} → ${edge.target}）`)
+    pairs.add(pair)
+  }
+}
+
 interface GraphState {
   project: ProjectDoc
   selectedIds: string[]
@@ -117,6 +155,7 @@ interface GraphState {
   redo: () => void
   canUndo: () => boolean
   canRedo: () => boolean
+  applyGraphTransaction: <T>(label: string, mutate: (transaction: GraphTransaction) => T, boardId?: string) => T | undefined
 
   // 工程
   replaceProject: (p: ProjectDoc) => void
@@ -127,6 +166,14 @@ interface GraphState {
   setDefaultModel: (kind: 'image' | 'text' | 'pano' | 'control', id: string | null) => void
   setDirectorScene: (s: import('../types').DirectorScene | null) => void
   setConcurrency: (n: number) => void
+  upsertWorkflowRun: (run: WorkflowRun) => void
+  removeWorkflowRun: (runId: string) => void
+
+  // 工程级语义素材
+  upsertAssetAnchor: (sourceCardId: string, draft: AssetAnchorDraft) => string | null
+  removeAssetAnchor: (anchorId: string) => void
+  addAnchorReference: (cardId: string, anchorId: string) => boolean
+  removeAnchorReference: (cardId: string, anchorId: string) => void
 
   // 画布(board)
   addBoard: () => void
@@ -226,6 +273,116 @@ export const useGraph = create<GraphState>((set, get) => ({
   canUndo: () => (get().boardHistories[get().project.activeBoardId]?.past.length ?? 0) > 0,
   canRedo: () => (get().boardHistories[get().project.activeBoardId]?.future.length ?? 0) > 0,
 
+  applyGraphTransaction: (label, mutate, requestedBoardId) => {
+    let output: unknown
+    set((s) => {
+      const targetId = requestedBoardId || s.project.activeBoardId
+      const target = s.project.boards.find((board) => board.id === targetId)
+      if (!target) return s
+      const cards = { ...target.cards }
+      const edges = { ...target.edges }
+      let graphChanged = false
+      let selection: string[] | null = null
+      const transaction: GraphTransaction = {
+        boardId: target.id,
+        getCard: (id) => cards[id],
+        createCard: (kind, world, partial = {}) => {
+          const size = CARD_DEFAULT_SIZE[kind]
+          let id = uid('card')
+          while (cards[id]) id = uid('card')
+          const { id: _ignoredId, kind: _ignoredKind, ...safePartial } = partial
+          void _ignoredId
+          void _ignoredKind
+          cards[id] = {
+            id,
+            kind,
+            x: Math.round(world.x - size.w / 2),
+            y: Math.round(world.y - size.h / 2),
+            w: size.w,
+            h: size.h,
+            title: defaultTitle(kind),
+            prompt: '',
+            modelId: null,
+            providerId: null,
+            params: {},
+            status: 'idle',
+            progress: 0,
+            error: null,
+            assetUrl: null,
+            assetLocalPath: null,
+            attachmentId: null,
+            mime: null,
+            text: null,
+            refIds: [],
+            assets: [],
+            meta: {},
+            parentId: null,
+            ...safePartial
+          }
+          graphChanged = true
+          return id
+        },
+        updateCard: (id, patch) => {
+          const current = cards[id]
+          if (!current) return false
+          const changed = Object.entries(patch).some(([key, value]) => current[key as keyof Card] !== value)
+          if (!changed) return false
+          cards[id] = { ...current, ...patch, id: current.id }
+          graphChanged = true
+          return true
+        },
+        removeCard: (id) => {
+          if (!cards[id]) return false
+          delete cards[id]
+          for (const [edgeId, edge] of Object.entries(edges)) {
+            if (edge.source === id || edge.target === id) delete edges[edgeId]
+          }
+          for (const [cardId, card] of Object.entries(cards)) {
+            if (card.parentId === id) cards[cardId] = { ...card, parentId: null }
+          }
+          graphChanged = true
+          return true
+        },
+        ensureEdge: (source, targetId2, kind = 'ref') => {
+          if (source === targetId2 || !cards[source] || !cards[targetId2]) return null
+          const existing = Object.values(edges).find((edge) => edge.source === source && edge.target === targetId2 && edge.kind === kind)
+          if (existing) return existing.id
+          if (!canConnect(cards[source], cards[targetId2]).ok) return null
+          let id = uid('edge')
+          while (edges[id]) id = uid('edge')
+          edges[id] = { id, source, target: targetId2, kind }
+          graphChanged = true
+          return id
+        },
+        removeEdge: (id) => {
+          if (!edges[id]) return false
+          delete edges[id]
+          graphChanged = true
+          return true
+        },
+        select: (ids) => { selection = [...new Set(ids)].filter((id) => !!cards[id]) }
+      }
+      output = mutate(transaction)
+      if (graphChanged) validateTransactionBoard(target.id, cards, edges)
+      const selectionChanged = selection !== null && target.id === s.project.activeBoardId
+      if (!graphChanged && !selectionChanged) return s
+      return {
+        ...(graphChanged
+          ? {
+              project: {
+                ...s.project,
+                boards: s.project.boards.map((board) => board.id === target.id ? { ...board, cards, edges } : board),
+                updatedAt: Date.now()
+              },
+              boardHistories: pushBoardSnap(s.boardHistories, { boardId: target.id, cards: target.cards, edges: target.edges, label })
+            }
+          : {}),
+        ...(selectionChanged ? { selectedIds: selection ?? [] } : {})
+      }
+    })
+    return output as any
+  },
+
   replaceProject: (p) => set({ project: p, selectedIds: [], boardHistories: {} }), // 换工程：清空全部画布历史
   renameProject: (name) => set((s) => ({ project: { ...s.project, name, updatedAt: Date.now() } })),
   setGlobalModel: (modelId) => set((s) => ({ project: { ...s.project, globalModelId: modelId, updatedAt: Date.now() } })),
@@ -241,6 +398,127 @@ export const useGraph = create<GraphState>((set, get) => ({
     })),
   setDirectorScene: (s2) => set((s) => ({ project: { ...s.project, director: s2, updatedAt: Date.now() } })),
   setConcurrency: (concurrency) => set((s) => ({ project: { ...s.project, concurrency, updatedAt: Date.now() } })),
+  upsertWorkflowRun: (run) => set((s) => ({
+    project: {
+      ...s.project,
+      workflowRuns: { ...(s.project.workflowRuns || {}), [run.id]: run },
+      updatedAt: Date.now()
+    }
+  })),
+  removeWorkflowRun: (runId) => set((s) => {
+    if (!s.project.workflowRuns?.[runId]) return s
+    const workflowRuns = { ...s.project.workflowRuns }
+    delete workflowRuns[runId]
+    return { project: { ...s.project, workflowRuns, updatedAt: Date.now() } }
+  }),
+
+  upsertAssetAnchor: (sourceCardId, draft) => {
+    if (!draft.name.trim()) return null
+    let result: string | null = null
+    set((s) => {
+      const located = s.project.boards.find((board) => board.cards[sourceCardId])
+      const sourceCard = located?.cards[sourceCardId]
+      if (!located || !sourceCard) return s
+      const anchors = s.project.assetAnchors || {}
+      const existingId = draft.id || semanticAnchorIdOfCard(sourceCard) || undefined
+      const previous = existingId ? anchors[existingId] : undefined
+      const anchor = makeAssetAnchor(s.project, sourceCardId, draft, previous)
+      result = anchor.id
+      const oldName = previous?.name || ''
+      const boards = s.project.boards.map((board) => {
+        let changed = false
+        const cards = { ...board.cards }
+        for (const [cardId, card] of Object.entries(board.cards)) {
+          let next = card
+          if (cardId === sourceCardId) {
+            const meta = { ...(card.meta || {}), semanticAnchorId: anchor.id }
+            next = { ...next, meta }
+          }
+          if ((card.anchorRefs || []).some((ref) => ref.anchorId === anchor.id)) {
+            const anchorRefs = (card.anchorRefs || []).map((ref) => ref.anchorId === anchor.id ? { ...ref, mention: anchor.name } : ref)
+            const prompt = oldName && oldName !== anchor.name ? replaceMentionInPrompt(next.prompt || '', oldName, anchor.name) : next.prompt
+            next = { ...next, anchorRefs, prompt }
+          }
+          if (next !== card) {
+            cards[cardId] = next
+            changed = true
+          }
+        }
+        return changed ? { ...board, cards } : board
+      })
+      return {
+        project: {
+          ...s.project,
+          boards,
+          assetAnchors: { ...anchors, [anchor.id]: anchor },
+          updatedAt: Date.now()
+        }
+      }
+    })
+    return result
+  },
+
+  removeAssetAnchor: (anchorId) =>
+    set((s) => {
+      const anchors = { ...(s.project.assetAnchors || {}) }
+      if (!anchors[anchorId]) return s
+      delete anchors[anchorId]
+      const boards = s.project.boards.map((board) => {
+        let changed = false
+        const cards = { ...board.cards }
+        for (const [cardId, card] of Object.entries(board.cards)) {
+          const refs = (card.anchorRefs || []).filter((ref) => ref.anchorId !== anchorId)
+          const sourceLinked = semanticAnchorIdOfCard(card) === anchorId
+          if (refs.length === (card.anchorRefs || []).length && !sourceLinked) continue
+          const meta = { ...(card.meta || {}) }
+          if (sourceLinked) delete meta.semanticAnchorId
+          cards[cardId] = { ...card, anchorRefs: refs, meta }
+          changed = true
+        }
+        return changed ? { ...board, cards } : board
+      })
+      return { project: { ...s.project, boards, assetAnchors: anchors, updatedAt: Date.now() } }
+    }),
+
+  addAnchorReference: (cardId, anchorId) => {
+    const project = get().project
+    const anchor = project.assetAnchors?.[anchorId]
+    const card = get().getCard(cardId)
+    if (!anchor || !card || (card.anchorRefs || []).some((ref) => ref.anchorId === anchorId)) return false
+    const material = materialFromAnchor(anchor, project)
+    if (!acceptsMaterialKind(card, material.kind) || !isUsableMaterial(material)) return false
+    if (get().boardIdOfCard(cardId) === project.activeBoardId) get().pushHistory()
+    set((s) => ({
+      project: withBoardOfCard(s.project, cardId, (board) => {
+        const current = board.cards[cardId]
+        if (!current) return board
+        return {
+          ...board,
+          cards: {
+            ...board.cards,
+            [cardId]: {
+              ...current,
+              anchorRefs: [...(current.anchorRefs || []), { anchorId, mention: anchor.name, acceptedAt: Date.now() }]
+            }
+          }
+        }
+      })
+    }))
+    return true
+  },
+
+  removeAnchorReference: (cardId, anchorId) => {
+    const card = get().getCard(cardId)
+    if (!card || !(card.anchorRefs || []).some((ref) => ref.anchorId === anchorId)) return
+    if (get().boardIdOfCard(cardId) === get().project.activeBoardId) get().pushHistory()
+    set((s) => ({
+      project: withBoardOfCard(s.project, cardId, (board) => {
+        const current = board.cards[cardId]
+        if (!current) return board
+        return { ...board, cards: { ...board.cards, [cardId]: { ...current, anchorRefs: (current.anchorRefs || []).filter((ref) => ref.anchorId !== anchorId) } } }
+      })
+    }))
+  },
 
   addBoard: () => {
     const board = createDefaultBoard(`画布 ${get().project.boards.length + 1}`)
@@ -360,7 +638,7 @@ export const useGraph = create<GraphState>((set, get) => ({
     get().pushHistory()
     set((s) => ({
       project: withActiveBoard(s.project, (b) => {
-        const cards = { ...b.cards }
+        let cards = { ...b.cards }
         for (const id of valid) if (cards[id]) cards[id] = { ...cards[id], parentId }
         return { ...b, cards }
       })
@@ -467,7 +745,7 @@ export const useGraph = create<GraphState>((set, get) => ({
     const idSet = new Set(ids)
     set((s) => ({
       project: withActiveBoard(s.project, (b) => {
-        const cards = { ...b.cards }
+        let cards = { ...b.cards }
         // 记录被删卡的父，删除后把其直接子上提到（仍存在的）祖先，保留嵌套层级
         const parentOf = new Map<string, string | null>()
         for (const id of ids) {
@@ -484,6 +762,7 @@ export const useGraph = create<GraphState>((set, get) => ({
           const p = cards[k].parentId
           if (p && parentOf.has(p)) cards[k] = { ...cards[k], parentId: resolveParent(p) }
         }
+        cards = detachCardsFromStoryboards(cards, idSet)
         const edges: Record<string, Edge> = {}
         for (const [eid, e] of Object.entries(b.edges)) {
           if (!idSet.has(e.source) && !idSet.has(e.target)) edges[eid] = e

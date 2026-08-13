@@ -28,7 +28,8 @@ const IMPORT_MIME_BY_EXT: Record<string, string> = {
   txt: 'text/plain',
   md: 'text/markdown',
   json: 'application/json',
-  srt: 'application/x-subrip'
+  srt: 'application/x-subrip',
+  vtt: 'text/vtt'
 }
 
 /** 只从最后一个路径段取扩展名；不把隐藏文件或末尾点误判成扩展名。 */
@@ -43,7 +44,7 @@ export function localImportMime(name: string): string {
 }
 
 export function isTextImportName(name: string): boolean {
-  return ['txt', 'md', 'json', 'srt'].includes(localImportExtension(name))
+  return ['txt', 'md', 'json', 'srt', 'vtt'].includes(localImportExtension(name))
 }
 
 const AI_IMAGE_EXT_BY_MIME: Record<string, string> = {
