@@ -69,6 +69,7 @@ import {
 } from './directorSceneExchange'
 import { confirmDialog } from '../store/dialogStore'
 import type { DirectorEnvironment, DirectorScene, DirectorShot } from '../types'
+import { findFreeCardSpot } from '../services/cardPlacement'
 
 // 3D 导演台 v12：13 套独立人物网格、20 种语义姿势、全景环境融合 + CC0 humanoid 人台；
 // 高精模型加载失败时自动回退到程序化人台，仍可导入用户自己的 GLB/GLTF。
@@ -2965,7 +2966,7 @@ function Inner({ onReload }: { onReload: () => void }) {
       const wx = (-vp.x + 360) / vp.zoom
       const wy = (-vp.y + 320) / vp.zoom
       // 两张卡并排共 600×320，避开现有节点（不能压在已有卡片上）
-      const spot = findFreeSpot(g.getActiveBoard(), 600, 320, wx + 300, wy)
+      const spot = findFreeCardSpot(g.getActiveBoard(), 600, 320, wx + 300, wy)
       const refTitle = usePose ? '导演台·骨架控制图' : useControl ? '导演台·深度控制图' : '导演台·参考图'
       const refId = g.addCard('image', { x: spot.x - 160, y: spot.y }, { title: refTitle, status: 'done', assetUrl: saved.url, assetLocalPath: saved.path, mime: 'image/png' }, boardId)
       const genId = g.addCard(
@@ -3163,30 +3164,6 @@ function Inner({ onReload }: { onReload: () => void }) {
     if (activeShotId === id) setActiveShotId(null)
   }
 
-  // 避障落位：从首选点向右/向下扫描，找一块 w×h（中心坐标，含边距）不与现有卡片重叠的空位；
-  // 视口内全满则放到最低卡片下方
-  const findFreeSpot = (
-    board: { cards: Record<string, { x: number; y: number; w: number; h: number }> },
-    w: number,
-    h: number,
-    startX: number,
-    startY: number
-  ): { x: number; y: number } => {
-    const M = 24
-    const cards = Object.values(board.cards)
-    const hit = (cx: number, cy: number) =>
-      cards.some((c) => Math.abs(cx - (c.x + c.w / 2)) < (w + c.w) / 2 + M && Math.abs(cy - (c.y + c.h / 2)) < (h + c.h) / 2 + M)
-    for (let row = 0; row < 8; row++) {
-      for (let col = 0; col < 8; col++) {
-        const cx = startX + col * 120
-        const cy = startY + row * 120
-        if (!hit(cx, cy)) return { x: cx, y: cy }
-      }
-    }
-    const maxY = cards.reduce((m, c) => Math.max(m, c.y + c.h), startY)
-    return { x: startX, y: maxY + M + h / 2 }
-  }
-
   // 分镜导出：机位表 → 画布分镜卡（4 列网格）。有 take 的直接带成片(status=done)，
   // 没出片的带装配好的提示词(status=idle) 可「生成选中」；meta.shot 兼容分镜生态（shotToVideo 等）。
   const exportStoryboard = () => {
@@ -3203,7 +3180,7 @@ function Inner({ onReload }: { onReload: () => void }) {
     const totalW = cols * W + (cols - 1) * gapX
     const totalH = rows * H + (rows - 1) * gapY
     // 整个网格找空位，避免压到现有节点
-    const spot = findFreeSpot(g.getActiveBoard(), totalW, totalH, (-vp.x + 360) / vp.zoom + totalW / 2, (-vp.y + 200) / vp.zoom + totalH / 2)
+    const spot = findFreeCardSpot(g.getActiveBoard(), totalW, totalH, (-vp.x + 360) / vp.zoom + totalW / 2, (-vp.y + 200) / vp.zoom + totalH / 2)
     const left = spot.x - totalW / 2
     const top = spot.y - totalH / 2
     const ids: string[] = []

@@ -1,9 +1,11 @@
 import type { WorkflowLogEntry, WorkflowRun, WorkflowStep } from '../types'
 import { uid } from '../util'
+import { focusCard } from '../focusCard'
 import { useGraph } from '../store/graphStore'
 import { stopCard } from './generate'
 import { storyboardSourceFingerprint } from './storyboardV2'
 import { executeAgentCommand } from './agentCommands'
+import { visualContinuitySuggestions } from './workflowContinuity'
 
 const locks = new Set<string>()
 const controllers = new Map<string, AbortController>()
@@ -82,10 +84,28 @@ export function retryWorkflowStep(runId: string, stepId: string): void {
   const index = run.steps.findIndex((step) => step.id === stepId)
   if (index < 0) return
   const target = run.steps[index]
-  if (target.command === 'generate_images' || target.command === 'generate_videos') {
+  if (target.command === 'generate_continuity' || target.command === 'generate_images' || target.command === 'generate_videos') {
     for (const cardId of target.outputCardIds) {
       const card = useGraph.getState().getCard(cardId)
-      if (card) useGraph.getState().updateCard(cardId, { meta: { ...(card.meta || {}), storyboardInputStale: true } })
+      if (!card) continue
+      if (target.command === 'generate_continuity') {
+        const continuity = (card.meta as any)?.workflowContinuityV1
+        if (continuity?.runId !== run.id) continue // 复用的用户素材只读，不允许“重跑”时被生成任务覆盖。
+        const anchorId = (card.meta as any)?.semanticAnchorId
+        const anchor = typeof anchorId === 'string' ? useGraph.getState().project.assetAnchors?.[anchorId] : undefined
+        if (anchor?.locked) {
+          useGraph.getState().upsertAssetAnchor(cardId, {
+            id: anchor.id,
+            role: anchor.role,
+            name: anchor.name,
+            aliases: anchor.aliases,
+            description: anchor.description,
+            tags: anchor.tags,
+            locked: false
+          })
+        }
+      }
+      useGraph.getState().updateCard(cardId, { meta: { ...(card.meta || {}), storyboardInputStale: true } })
     }
   }
   save({
@@ -122,13 +142,18 @@ export async function resumeWorkflow(runId: string): Promise<void> {
         return
       }
       if (step.status === 'canceled' || step.status === 'stale') return
-      if (step.requiresApproval && !step.approvedAt) {
+      const emptyContinuityCheckpoint = step.command === 'lock_continuity' && visualContinuitySuggestions(run).length === 0
+      if (step.requiresApproval && !step.approvedAt && !emptyContinuityCheckpoint) {
         patchStep(run, step.id, { status: 'checkpoint', error: undefined }, { status: 'paused' }, log(`等待确认：${step.title}`, 'info', step.id))
         return
       }
       run = patchStep(run, step.id, { status: 'running', startedAt: Date.now(), error: undefined }, { status: 'running' }, log(`开始：${step.title}`, 'info', step.id))
       try {
         const outputCardIds = await executeAgentCommand(run, run.steps.find((item) => item.id === step.id)!, controller.signal)
+        if (step.command === 'generate_continuity' && outputCardIds[0]) {
+          const boardId = useGraph.getState().boardIdOfCard(outputCardIds[0])
+          if (boardId) focusCard(boardId, outputCardIds[0])
+        }
         run = latest(runId) || run
         patchStep(run, step.id, { status: 'completed', outputCardIds, completedAt: Date.now(), error: undefined }, { status: 'running' }, log(`完成：${step.title}`, 'success', step.id))
       } catch (error: any) {

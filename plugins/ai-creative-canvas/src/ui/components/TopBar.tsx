@@ -6,6 +6,7 @@ import { Select } from './Select'
 import { STYLE_PACKS } from '../services/stylePacks'
 import { ProjectSettings } from './ProjectSettings'
 import { promptDialog, confirmDialog } from '../store/dialogStore'
+import { useWorkflowUi } from '../store/workflowStore'
 
 export function TopBar() {
   const name = useGraph((s) => s.project.name)
@@ -22,7 +23,22 @@ export function TopBar() {
   const workspaceView = useUi((s) => s.workspaceView)
   const setWorkspaceView = useUi((s) => s.setWorkspaceView)
   const active = useTask((s) => s.active)
-  const workflowActive = useGraph((s) => Object.values(s.project.workflowRuns || {}).filter((run) => run.status === 'running' || run.status === 'paused' || run.status === 'error').length)
+  const workflowAttention = useGraph((s) => Object.values(s.project.workflowRuns || {}).filter((run) => run.status !== 'completed' && run.status !== 'canceled').length)
+  const workflowTotal = useGraph((s) => Object.keys(s.project.workflowRuns || {}).length)
+
+  const toggleAgent = () => {
+    const ui = useUi.getState()
+    const opening = !ui.showAgent
+    if (opening) {
+      const workflowUi = useWorkflowUi.getState()
+      const project = useGraph.getState().project
+      if (!workflowUi.selectedRunId || !project.workflowRuns?.[workflowUi.selectedRunId]) {
+        workflowUi.setSelectedRunId(null)
+        workflowUi.setShowHistory(workflowTotal > 0)
+      }
+    }
+    ui.setShowAgent(opening)
+  }
 
   return (
     <div
@@ -40,9 +56,9 @@ export function TopBar() {
       >
         <FolderOpen size={15} />
       </button>
-      <button onClick={() => useUi.getState().setShowAgent(!useUi.getState().showAgent)} title="创作 Agent" className="relative h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
+      <button onClick={toggleAgent} title={`创作 Agent${workflowAttention ? ` · ${workflowAttention} 个待处理` : ''}${workflowTotal ? ` · ${workflowTotal} 条记录` : ''}`} className="relative h-7 w-7 grid place-items-center rounded-md hover:bg-black/10 dark:hover:bg-white/20">
         <Bot size={15} />
-        {workflowActive > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-indigo-500 text-white text-[8px] grid place-items-center">{Math.min(9, workflowActive)}</span>}
+        {workflowAttention > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full bg-indigo-500 text-white text-[8px] grid place-items-center">{workflowAttention > 9 ? '9+' : workflowAttention}</span>}
       </button>
       <input
         value={name}

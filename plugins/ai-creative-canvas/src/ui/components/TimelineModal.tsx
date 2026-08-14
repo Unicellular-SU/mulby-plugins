@@ -7,6 +7,7 @@ import { Select } from './Select'
 import { composeTimeline, ensureFfmpeg, probeDuration, timelineThumbs, toFileUrl, type FilmTransition } from '../services/mediaVideo'
 import { toast } from '../store/toastStore'
 import type { Card } from '../types'
+import { plannedVideoClipDuration } from '../services/videoSpecs'
 
 const ASPECT_WH: Record<string, [number, number]> = {
   '16:9': [1280, 720],
@@ -25,6 +26,7 @@ interface Clip {
   dur: number
   inSec: number
   outSec: number
+  plannedDur?: number
   thumbs?: string[] // 缩略图条（本地路径）
 }
 interface ATrack {
@@ -86,7 +88,8 @@ function Inner() {
       const out: Clip[] = []
       for (const v of vids) {
         const dur = (await probeDuration(v.assetLocalPath!)) || 5
-        out.push({ id: v.id, title: v.title || '片段', path: v.assetLocalPath!, dur, inSec: 0, outSec: dur })
+        const plannedDur = plannedVideoClipDuration(v.params?.plannedDuration, dur)
+        out.push({ id: v.id, title: v.title || '片段', path: v.assetLocalPath!, dur, inSec: 0, outSec: plannedDur, ...(plannedDur < dur - 0.05 ? { plannedDur } : {}) })
       }
       if (!alive) return
       setClips(out)
@@ -314,7 +317,7 @@ function Inner() {
                       <span className="w-10 text-right tabular-nums">{(gaps[sel - 1] ?? 0.5).toFixed(1)}s</span>
                     </label>
                   )}
-                  <div className="text-[10px] opacity-50">原长 {cur.dur.toFixed(1)}s · 裁剪后 {len(cur).toFixed(1)}s</div>
+                  <div className="text-[10px] opacity-50">原始素材 {cur.dur.toFixed(1)}s{cur.plannedDur ? ` · 工作流计划 ${cur.plannedDur.toFixed(1)}s` : ''} · 当前使用 {len(cur).toFixed(1)}s</div>
                 </div>
               )}
 

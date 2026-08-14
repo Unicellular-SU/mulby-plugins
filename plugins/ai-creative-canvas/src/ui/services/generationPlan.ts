@@ -5,6 +5,8 @@ import { buildMaterials, isUsableMaterial } from './references'
 import { canGenerateCard } from './nodeCapabilities'
 import { resolveModelId } from './models'
 import { resolveVideoCapabilities, validateProviderConfig } from './providers/config'
+import { coveringVideoDuration } from './videoSpecs'
+import { continuityNeedsGeneration, visualContinuitySuggestions } from './workflowContinuity'
 
 export type GenerationPlanIssueLevel = 'error' | 'warning' | 'info'
 
@@ -155,33 +157,56 @@ export async function buildCardGenerationPlan(cardIds: string[], title = '批量
 export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<GenerationPlan> {
   const graph = useGraph.getState()
   const imageModelId = await resolveModelId('image', null, graph.project.defaultImageModel || null)
-  const pseudoItems: GenerationPlanItem[] = run.brief.shots.map((shot, index) => ({
+  const allContinuity = visualContinuitySuggestions(run)
+  const continuityToGenerate = continuityNeedsGeneration(run, graph.project)
+  const pseudoItems: GenerationPlanItem[] = continuityToGenerate.map((suggestion, index) => ({
+    id: `planned-continuity-${index}`,
+    kind: 'image',
+    title: `设定图 · ${suggestion.name}`,
+    quantity: 1,
+    aspect: '1:1',
+    resolution: '1K',
+    modelId: imageModelId || undefined
+  }))
+  pseudoItems.push(...run.brief.shots.map((shot, index): GenerationPlanItem => ({
     id: `planned-image-${index}`,
     kind: 'image',
     title: `镜 ${shot.shotNumber || index + 1} 静帧`,
     quantity: 1,
     aspect: run.brief.aspect,
     modelId: imageModelId || undefined
-  }))
+  })))
   const videoProvider = useProviders.getState().activeFor('video')
   const issues: GenerationPlanIssue[] = []
+  const capabilities = resolveVideoCapabilities(videoProvider)
   if (!imageModelId) issues.push({ level: 'error', message: '没有可用的图片模型，静帧步骤无法执行。' })
+  if (allContinuity.length) {
+    const reused = allContinuity.length - continuityToGenerate.length
+    issues.push({ level: 'info', message: `正式生成镜头前会先确认 ${allContinuity.length} 个视觉设定：新增生成 ${continuityToGenerate.length} 张${reused > 0 ? `，复用已有素材 ${reused} 个` : ''}；确认后相关镜头会共同引用这些已锁定素材。` })
+  }
   if (!videoProvider) issues.push({ level: 'error', message: '尚未配置视频 Provider；可先确认并生成静帧，视频步骤会在此暂停。' })
   if (videoProvider) {
     for (const issue of validateProviderConfig(videoProvider)) issues.push({ level: issue.level, message: `视频 Provider：${issue.message}` })
-    const capabilities = resolveVideoCapabilities(videoProvider)
     if (!capabilities.imageToVideo) issues.push({ level: 'error', message: '当前视频 Provider 不支持图生视频，无法使用镜头静帧作为首帧。' })
     if (capabilities.aspects?.length && !capabilities.aspects.includes(run.brief.aspect)) issues.push({ level: 'error', message: `当前视频 Provider 不支持计划画幅 ${run.brief.aspect}。` })
-    const unsupported = run.brief.shots.map((shot) => shot.duration || 5).filter((duration) => capabilities.durations?.length && !capabilities.durations.includes(duration))
-    if (unsupported.length) issues.push({ level: 'warning', message: `部分镜头时长（${[...new Set(unsupported)].join('、')}s）不在 Provider 声明范围，提交时会自动适配。` })
   }
+  let generatedMaterialDuration = 0
+  let plannedEditDuration = 0
+  const uncoveredShots: number[] = []
   for (const [index, shot] of run.brief.shots.entries()) {
+    const plannedDuration = shot.duration || 5
+    const generationDuration = videoProvider
+      ? coveringVideoDuration(videoProvider.model, plannedDuration, capabilities.durations)
+      : plannedDuration
+    plannedEditDuration += plannedDuration
+    generatedMaterialDuration += generationDuration
+    if (generationDuration + 0.05 < plannedDuration) uncoveredShots.push(shot.shotNumber || index + 1)
     const item: GenerationPlanItem = {
       id: `planned-video-${index}`,
       kind: 'video',
-      title: `镜 ${shot.shotNumber || index + 1} 视频`,
+      title: `镜 ${shot.shotNumber || index + 1} 视频素材（成片用 ${plannedDuration}s）`,
       quantity: 1,
-      duration: shot.duration || 5,
+      duration: generationDuration,
       aspect: run.brief.aspect,
       providerId: videoProvider?.id,
       modelId: videoProvider?.model
@@ -192,6 +217,15 @@ export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<Gen
       item.confirmationThreshold = videoProvider.pricing.confirmAbove
     }
     pseudoItems.push(item)
+  }
+  if (uncoveredShots.length) {
+    issues.push({ level: 'error', message: `镜头 ${uncoveredShots.join('、')} 的计划时长超过当前 Provider 最大生成时长，请拆分镜头或更换 Provider。` })
+  }
+  if (videoProvider && generatedMaterialDuration > plannedEditDuration + 0.05) {
+    issues.push({
+      level: 'warning',
+      message: `目标成片为 ${run.brief.totalDuration}s；当前 Provider 需生成约 ${Number(generatedMaterialDuration.toFixed(1))}s 原始视频素材。送入时间线时会按每镜计划时长自动裁切为约 ${Number(plannedEditDuration.toFixed(1))}s，费用仍按原始生成量计算。`
+    })
   }
   issues.push({ level: 'info', message: '图片模型费用无法从宿主统一获得，相关费用显示为未知；执行前请以模型服务商账单为准。' })
   return finalize(`${run.brief.title} · 生成计划`, 'workflow', pseudoItems, issues)

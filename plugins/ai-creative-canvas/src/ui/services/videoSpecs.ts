@@ -48,6 +48,25 @@ export function effectiveVideoDuration(modelId: string | null | undefined, value
   return best
 }
 
+/**
+ * 工作流镜头需要覆盖计划剪辑时长：优先选择不短于计划值的最小 Provider 档位。
+ * 生成素材可以更长，进入时间线时再按 plannedDuration 非破坏裁切。
+ */
+export function coveringVideoDuration(modelId: string | null | undefined, value: unknown, providerValues?: number[] | null): number {
+  const values = [...effectiveDurationValues(modelId, providerValues)].sort((a, b) => a - b)
+  const numeric = Number(value)
+  const requested = Number.isFinite(numeric) && numeric > 0 ? numeric : values[0] || 5
+  return values.find((candidate) => candidate >= requested) || values[values.length - 1] || requested
+}
+
+/** 时间线只使用计划片长；Provider 多生成的尾部素材保留在原视频卡中。 */
+export function plannedVideoClipDuration(plannedValue: unknown, actualValue: unknown): number {
+  const actual = Number(actualValue)
+  const safeActual = Number.isFinite(actual) && actual > 0 ? actual : 5
+  const planned = Number(plannedValue)
+  return Number.isFinite(planned) && planned > 0 ? Math.min(safeActual, planned) : safeActual
+}
+
 export function snapDuration(modelId: string | null | undefined, v: number): number {
   return effectiveVideoDuration(modelId, v)
 }

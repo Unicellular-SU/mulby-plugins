@@ -286,11 +286,14 @@ export interface DirectorScene {
   environment?: DirectorEnvironment | null // 可选等距柱状全景背景
 }
 
-export type WorkflowRecipeId = 'script-to-short-film'
+export type WorkflowRecipeId = 'script-to-short-film' | 'product-ad-film'
 
 /** Agent 能执行的动作白名单。模型只产出创作规格，不得自行发明命令。 */
 export type AgentCommandName =
   | 'save_storyboard'
+  | 'materialize_continuity'
+  | 'generate_continuity'
+  | 'lock_continuity'
   | 'materialize_images'
   | 'generate_images'
   | 'create_videos'
@@ -306,6 +309,18 @@ export interface WorkflowAnchorSuggestion {
   description: string
 }
 
+/** 产品广告配方补充的营销约束；剧本配方无需填写。 */
+export interface WorkflowProductBrief {
+  productName: string
+  /** 必须逐字保留的品牌/Logo 文字；没有可验证文字时留空。 */
+  brandText?: string
+  campaignObjective: string
+  coreProposition: string
+  sellingPoints: string[]
+  mandatoryElements: string[]
+  callToAction: string
+}
+
 export interface WorkflowCreativeBrief {
   title: string
   summary: string
@@ -315,6 +330,7 @@ export interface WorkflowCreativeBrief {
   ending: string
   anchorSuggestions: WorkflowAnchorSuggestion[]
   shots: Shot[]
+  product?: WorkflowProductBrief
 }
 
 export interface WorkflowStep {
@@ -474,7 +490,7 @@ export interface VideoAnalysisReport {
   updatedAt: number
 }
 
-export const SCHEMA_VERSION = 6 // v6：统一媒体版本 + 视频局部重拍；v5 为可恢复 Agent Workflow
+export const SCHEMA_VERSION = 7 // v7：多 Canvas Recipe 与产品广告创作规格；v6 为统一媒体版本 + 视频局部重拍
 
 // 类型色 —— 单一真相：JS 侧用此处，CSS 侧 styles.css 的 --kind-* 须与之同源
 export const KIND_ACCENT: Record<CardKind, string> = {

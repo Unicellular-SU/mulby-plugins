@@ -450,11 +450,13 @@ function Inner({ cardId }: { cardId: string }) {
       const composite = await buildComposite(hasMask, finalAnnotations)
       if (!composite) throw new Error('无法读取或合成原图')
       const mask = hasMask ? buildMask() : undefined
-      await inpaint(cardId, op, composite, prompt.trim(), mask, {
+      const result = await inpaint(cardId, op, composite, prompt.trim(), mask, {
         hasAnnotations: finalAnnotations.length > 0,
         annotationTexts
       })
-      notify(op === 'remove' ? '已擦除，结果落为新卡' : '局部重绘完成，结果落为新卡', 'success')
+      notify(result.replacedCurrentSetting
+        ? '视觉设定已更新，旧图已保留在版本记录中'
+        : op === 'remove' ? '已擦除，结果落为新卡' : '局部重绘完成，结果落为新卡', 'success')
       useUi.getState().setMaskCardId(null)
     } catch (error: any) {
       notify('处理失败：' + (error?.message || String(error)), 'error')

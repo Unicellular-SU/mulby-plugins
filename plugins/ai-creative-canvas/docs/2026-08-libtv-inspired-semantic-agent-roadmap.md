@@ -702,10 +702,10 @@ applyGraphTransaction(label: string, mutate: (draft: GraphTransaction) => void):
 
 - [x] GenerationPlan 和 Provider 能力预检：批量生成与 Agent 都展示任务规模、模型 / Provider、参数冲突、Token 与费用可知性；不支持的画幅 / 分辨率 / 图生视频能力在提交前拦截。
 - [x] Mulby Skill 列表、预览和手选：只使用宿主已启用 Skill，明确展示选择原因；调用时固定关闭 MCP、内部工具和额外 capabilities。
-- [x] 计划 JSON Schema、白名单命令和 dry-run：模型只返回严格 `short_film_creative_brief`，本地固定生成六步配方；工程加载时拒绝非固定顺序或未知命令。
+- [x] 计划 JSON Schema、白名单命令和 dry-run：模型按 Recipe 只返回严格 `short_film_creative_brief` 或 `product_ad_creative_brief`，本地注册表固定生成九步配方；工程加载时拒绝未知 Recipe、非固定顺序或未知命令，并以本地定义恢复检查点权限；旧六步运行记录会安全迁移且不会突然增加生成费用。
 - [x] WorkflowRun 状态机、检查点、恢复和取消：步骤、输出卡 ID 和日志随工程持久化；重开将运行态安全降为暂停，视频 Provider 原任务继续按 taskId 恢复；支持暂停、取消、错误重试和从任一步重跑。
-- [x] “故事 / 剧本转短片”固定配方：创作规格确认 → 故事板 → 静帧卡 → 静帧生成 → 静帧确认 → 视频卡 → 视频生成 → 时间线。
-- [x] Task Center 与 Agent 抽屉联动：任务中心展示工作流状态并可定位到 Agent；抽屉展示计划、语义锚点建议、生成规模、检查点、步骤产物和日志。
+- [x] “故事 / 剧本转短片”固定配方：创作规格确认 → 故事板 → 复用或生成连续性设定图 → 视觉设定确认并锁定 → 静帧卡 → 静帧生成 → 静帧确认 → 视频卡 → 视频生成 → 时间线。
+- [x] Task Center 与 Agent 抽屉联动：任务中心展示工作流状态并可定位到 Agent；抽屉展示计划、语义锚点建议、生成规模、检查点、步骤产物和日志。顶栏角标明确表示待处理数量，抽屉提供全部历史记录列表、详情切换、逐条删除和已结束记录批量清理；删除运行中记录前会先取消任务，所有删除操作都保留画布产物。
 - [x] 超阈值批量任务确认：多任务、能力警告 / 错误、十任务以上批次或 Provider 自定义费用阈值会触发确认；未知费用如实标记，不以虚构价格填充。
 
 代码出口已满足：从文本卡到故事板、静帧和视频卡的完整流程可暂停、恢复、取消及从任一步重跑；故事板、静帧卡与视频卡均通过 backlink 幂等复用，生成步骤跳过已完成且输入未失效的卡片。发布前仍需在真实 Mulby 宿主用至少一个文本模型、图片模型和视频 Provider 完成一次全链路费用 / 质量验收。
@@ -722,9 +722,12 @@ applyGraphTransaction(label: string, mutate: (draft: GraphTransaction) => void):
 
 代码出口已满足：统一版本、局部重拍区间规范化、替换编译与媒体迁移测试通过。当前 V1 刻意只允许一次创建一个重拍区间；可在新成片上再次局部重拍形成可追踪分支。发布前需在真实 Mulby 宿主分别使用支持首尾帧、仅支持首帧的两个视频 Provider 验证边界衔接质量，并检查一条带音轨视频的原声连续性。
 
-### M6 · 后续评估，不纳入近期承诺
+### M6 · Recipe 扩展与后续评估
 
-- [ ] 第二、第三个 Canvas Recipe。
+- [x] Recipe 注册表与第二个 Canvas Recipe：新增“产品广告短片”，拥有独立输入语义、严格 JSON Schema、广告策略字段、规划提示词、步骤文案和详情展示；继续复用本地命令白名单、检查点、幂等执行与恢复机制。
+- [x] Recipe 画幅与时长闭环：计划画幅写入静帧和视频卡；目标总时长在本地按 0.1 秒精度分配给镜头。Provider 固定档位作为“原始生成时长”，时间线按 `plannedDuration` 预裁切为目标成片长度，费用预检按原始生成量展示。
+- [x] 多镜头视觉连续性闸门：优先复用源卡相连图片和已有图片锚点；缺失主体先生成角色 / 场景 / 道具设定图，人工确认后锁定当前媒体快照，并将稳定 `anchorRefs` 注入所有相关镜头。生成计划会单列新增设定图数量，设定卡和锚点绑定均可幂等重跑。
+- [ ] 第三个 Canvas Recipe（候选：讲解视频或素材混剪；需先完成真实用户验收再选型）。
 - [ ] Skill 配方导出和分享。
 - [ ] glTF / Blender 相机交换。
 - [ ] 工程间素材库。
@@ -839,7 +842,7 @@ applyGraphTransaction(label: string, mutate: (draft: GraphTransaction) => void):
 
 ## 11. 迁移与兼容策略
 
-### 11.1 Schema v3 / v4
+### 11.1 Schema v3–v7
 
 工程级语义锚点已在 v3 引入，Storyboard V2 稳定关联在 v4 引入：
 
@@ -847,6 +850,7 @@ applyGraphTransaction(label: string, mutate: (draft: GraphTransaction) => void):
 - `workflowRuns` 缺省为 `{}`。
 - `Card.anchorRefs` 缺省为 `[]`。
 - v4 把旧 `meta.shots` 迁移到 `meta.storyboardV2`，复用现有分镜图片卡并补齐 backlink。
+- v5 引入可恢复的 `WorkflowRun`；v6 引入统一媒体版本和视频局部重拍；v7 允许工作流持久化多个 Recipe 及可选产品广告策略字段。
 - 仍保留读取旧 `meta.shots` 的兼容逻辑；分片工程即使 manifest 已升级，也会幂等修复旧 card shard。
 
 ### 11.2 旧引用兼容

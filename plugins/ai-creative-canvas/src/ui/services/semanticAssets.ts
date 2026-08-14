@@ -45,6 +45,18 @@ export function projectCard(project: ProjectDoc, cardId: string): { boardId: str
   return null
 }
 
+/**
+ * Agent 的自动检索以画布为边界。语义素材本身仍可在素材面板中跨画布手动引用，
+ * 但不能因为名称相同就被另一个画布的工作流隐式选中。
+ */
+export function assetAnchorsForBoard(project: ProjectDoc, boardId: string): AssetAnchor[] {
+  return Object.values(project.assetAnchors || {}).filter((anchor) => {
+    const sourceCardId = anchor.source?.cardId
+    const located = sourceCardId ? projectCard(project, sourceCardId) : null
+    return located ? located.boardId === boardId : anchor.source?.boardId === boardId
+  })
+}
+
 export function semanticAnchorIdOfCard(card: Card): string | null {
   const value = (card.meta as { semanticAnchorId?: unknown })?.semanticAnchorId
   return typeof value === 'string' && value ? value : null

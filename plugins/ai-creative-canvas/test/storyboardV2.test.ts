@@ -10,6 +10,7 @@ import {
   updateStoryboardShot
 } from '../src/ui/services/storyboardV2.ts'
 import type { Board, Card, Shot } from '../src/ui/types.ts'
+import { cardBoundsOverlap } from '../src/ui/services/cardPlacement.ts'
 
 function reset() {
   useGraph.setState({ project: createDefaultProject(), selectedIds: [], boardHistories: {}, clipboard: { cards: [], edges: [] } })
@@ -117,15 +118,20 @@ function testDeletingOutputClearsOnlyStoryboardLink() {
 
 function testShotToVideoIsIdempotentForV2() {
   const { ownerId } = setupOwner()
-  const first = materializeStoryboardShots(ownerId, createStoryboardDoc(useGraph.getState().getCard(ownerId)!, shots(1)))!
+  const first = materializeStoryboardShots(ownerId, createStoryboardDoc(useGraph.getState().getCard(ownerId)!, shots(1)), undefined, { aspect: '1:1' })!
   const imageId = first.cardIds[0]
-  shotToVideo(imageId)
+  assert.equal(useGraph.getState().getCard(imageId)?.params.aspect, '1:1')
+  shotToVideo(imageId, { aspect: '1:1', plannedDuration: 1.7, generationDuration: 5 })
   const afterFirst = readStoryboardDoc(useGraph.getState().getCard(ownerId)!)!
   const videoId = afterFirst.shots[0].videoCardId
   assert.ok(videoId)
-  assert.equal(storyboardBacklink(useGraph.getState().getCard(videoId!))?.stage, 'video')
+  const video = useGraph.getState().getCard(videoId!)!
+  assert.equal(storyboardBacklink(video)?.stage, 'video')
+  assert.equal(video.params.aspect, '1:1')
+  assert.equal(video.params.duration, 5)
+  assert.equal(video.params.plannedDuration, 1.7)
 
-  shotToVideo(imageId)
+  shotToVideo(imageId, { aspect: '1:1', plannedDuration: 1.7, generationDuration: 5 })
   const afterSecond = readStoryboardDoc(useGraph.getState().getCard(ownerId)!)!
   assert.equal(afterSecond.shots[0].videoCardId, videoId)
   assert.equal(Object.values(useGraph.getState().getActiveBoard().cards).filter((card) => card.kind === 'video').length, 1)
@@ -150,10 +156,40 @@ function testLegacyBoardMigrationLinksExistingImage() {
   assert.equal('shots' in migrated.cards.owner.meta, false)
 }
 
+function testAgentMaterializationAvoidsExistingCards() {
+  const { ownerId } = setupOwner()
+  const graph = useGraph.getState()
+  const blockerId = graph.addCard('group', { x: 760, y: 320 }, { title: '已有内容区', w: 1200, h: 720 })
+  const existing = [graph.getCard(ownerId)!, graph.getCard(blockerId)!]
+  const materialized = materializeStoryboardShots(ownerId, createStoryboardDoc(graph.getCard(ownerId)!, shots(6)))!
+  const images = materialized.cardIds.map((id) => useGraph.getState().getCard(id)!)
+  for (const image of images) {
+    assert.equal(existing.some((card) => cardBoundsOverlap(image, card)), false, `${image.title} 不得遮盖已有卡片`)
+  }
+  for (let index = 0; index < images.length; index++) {
+    for (let other = index + 1; other < images.length; other++) {
+      assert.equal(cardBoundsOverlap(images[index], images[other]), false, '同批静帧卡不得互相重叠')
+    }
+  }
+
+  const videoIds = images.map((image) => shotToVideo(image.id)!).filter(Boolean)
+  const videos = videoIds.map((id) => useGraph.getState().getCard(id)!)
+  const nonVideos = Object.values(useGraph.getState().getActiveBoard().cards).filter((card) => card.kind !== 'video')
+  for (const video of videos) {
+    assert.equal(nonVideos.some((card) => cardBoundsOverlap(video, card)), false, `${video.title} 不得遮盖已有卡片或静帧`)
+  }
+  for (let index = 0; index < videos.length; index++) {
+    for (let other = index + 1; other < videos.length; other++) {
+      assert.equal(cardBoundsOverlap(videos[index], videos[other]), false, '同批视频卡不得互相重叠')
+    }
+  }
+}
+
 testLegacyIdsAreStableAndRegenerationPreservesLinks()
 testAtomicAndIdempotentMaterialization()
 testEditingMarksExistingOutputStaleAndReusesCard()
 testDeletingOutputClearsOnlyStoryboardLink()
 testShotToVideoIsIdempotentForV2()
 testLegacyBoardMigrationLinksExistingImage()
-console.log('storyboard v2: 6 tests OK')
+testAgentMaterializationAvoidsExistingCards()
+console.log('storyboard v2: 7 tests OK')

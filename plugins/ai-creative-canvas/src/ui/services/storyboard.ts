@@ -8,6 +8,7 @@ import {
   storyboardBacklink,
   storyboardShotFingerprint
 } from './storyboardV2'
+import { findFreeCardSpot } from './cardPlacement'
 
 function ai() {
   return window.mulby.ai
@@ -114,7 +115,15 @@ export async function generateShots(sourceText: string, modelId: string | null, 
 function shotPrompt(s: Shot): string {
   const base = (s.imagePrompt && s.imagePrompt.trim()) || s.desc
   const hint = [s.shotSize, s.camera].filter(Boolean).join('，')
-  return hint ? `${hint}：${base}` : base
+  const visual = hint ? `${hint}：${base}` : base
+  const anchorIds = Array.isArray((s as StoryboardShotV2).anchorIds) ? (s as StoryboardShotV2).anchorIds : []
+  const continuity = anchorIds.flatMap((anchorId) => {
+    const anchor = useGraph.getState().project.assetAnchors?.[anchorId]
+    if (!anchor || (anchor.mediaKind !== 'image' && anchor.mediaKind !== 'video')) return []
+    return [`「${anchor.name}」${anchor.description ? `：${anchor.description}` : ''}`]
+  })
+  if (!continuity.length) return visual
+  return `${visual}\n\n连续性锁定：严格参考已附视觉设定图，保持以下主体在所有镜头中的身份、结构、材质、服装和配色不变；只改变本镜头要求的动作、表情、机位和构图。${continuity.join('；')}`
 }
 
 // 文本卡上游连入/引用的图像（角色/场景）→ 每个镜头的一致性参考图
@@ -240,6 +249,19 @@ export interface MaterializeStoryboardResult {
   updated: number
 }
 
+export interface MaterializeStoryboardOptions {
+  /** 工作流计划画幅；普通故事板未指定时保留卡片原设置。 */
+  aspect?: string
+}
+
+export interface ShotToVideoOptions {
+  aspect?: string
+  /** 最终时间线实际使用的镜头长度。 */
+  plannedDuration?: number
+  /** Provider 请求的原始素材长度，可大于计划剪辑长度。 */
+  generationDuration?: number
+}
+
 export interface LayoutStoryboardResult {
   cardIds: string[]
   moved: number
@@ -290,7 +312,7 @@ export function layoutStoryboardCards(cardId: string, value: StoryboardDocV2): L
  * 幂等落地故事板图片卡：已有 backlink 时原位同步，没有时才创建。
  * 故事板写回、卡片更新、连线与选择在同一图事务中完成。
  */
-export function materializeStoryboardShots(cardId: string, value: StoryboardDocV2, selectedShotIds?: ReadonlySet<string>): MaterializeStoryboardResult | null {
+export function materializeStoryboardShots(cardId: string, value: StoryboardDocV2, selectedShotIds?: ReadonlySet<string>, options?: MaterializeStoryboardOptions): MaterializeStoryboardResult | null {
   const g = useGraph.getState()
   const boardId = g.boardIdOfCard(cardId)
   if (!boardId) return null
@@ -308,17 +330,32 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
     const cols = 4
     const gapX = 40
     const gapY = 48
-    const baseX = owner.x + owner.w + 140
-    const baseY = owner.y
+    const pendingShots = doc0.shots.filter((shot) => {
+      if (selectedShotIds && !selectedShotIds.has(shot.id)) return false
+      const linked = shot.imageCardId ? board.cards[shot.imageCardId] : undefined
+      return !validLinkedCard(linked, doc0, shot, 'image')
+    })
+    const pendingColumns = Math.min(cols, Math.max(1, pendingShots.length))
+    const pendingRows = Math.ceil(pendingShots.length / pendingColumns)
+    const totalW = pendingColumns * W + Math.max(0, pendingColumns - 1) * gapX
+    const totalH = pendingRows * H + Math.max(0, pendingRows - 1) * gapY
+    const spot = pendingShots.length
+      ? findFreeCardSpot(board, totalW, totalH, owner.x + owner.w + 140 + totalW / 2, owner.y + totalH / 2)
+      : null
+    const pendingPositions = new Map(pendingShots.map((shot, pendingIndex) => {
+      const col = pendingIndex % pendingColumns
+      const row = Math.floor(pendingIndex / pendingColumns)
+      return [shot.id, {
+        x: spot!.x - totalW / 2 + col * (W + gapX) + W / 2,
+        y: spot!.y - totalH / 2 + row * (H + gapY) + H / 2
+      }] as const
+    }))
     let created = 0
     let updated = 0
     const cardIds: string[] = []
     let linksChanged = false
     const shots = doc0.shots.map((shot, index) => {
       if (selectedShotIds && !selectedShotIds.has(shot.id)) return shot
-      const col = index % cols
-      const row = Math.floor(index / cols)
-      const center = { x: baseX + col * (W + gapX) + W / 2, y: baseY + row * (H + gapY) + H / 2 }
       let imageCardId = shot.imageCardId
       let imageCard = imageCardId ? tx.getCard(imageCardId) : undefined
       if (!validLinkedCard(imageCard, doc0, shot, 'image')) {
@@ -329,7 +366,10 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
       const prompt = shotPrompt(shot)
       const anchorRefs = anchorReferences(shot, imageCard)
       const fingerprint = storyboardShotFingerprint(shot)
+      const aspect = typeof options?.aspect === 'string' && options.aspect.trim() ? options.aspect.trim() : undefined
       if (!imageCard) {
+        const center = pendingPositions.get(shot.id)
+        if (!center) return shot
         imageCardId = tx.createCard('image', center, {
           w: W,
           h: H,
@@ -337,6 +377,7 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
           prompt,
           refIds: [...refs],
           anchorRefs,
+          ...(aspect ? { params: { aspect } } : {}),
           meta: { shot: legacyShot(shot), storyboardBacklink: backlinkFor(doc0, shot, 'image') }
         })
         imageCard = tx.getCard(imageCardId)
@@ -345,7 +386,9 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
       } else {
         const oldBacklink = storyboardBacklink(imageCard)
         const hasOutput = !!(imageCard.assetUrl || imageCard.assetLocalPath)
-        const stale = !!(imageCard.meta as any)?.storyboardInputStale || (hasOutput && oldBacklink?.materializedFingerprint !== fingerprint)
+        const params = aspect ? { ...imageCard.params, aspect } : imageCard.params
+        const paramsChanged = !sameJson(imageCard.params, params)
+        const stale = !!(imageCard.meta as any)?.storyboardInputStale || (hasOutput && (oldBacklink?.materializedFingerprint !== fingerprint || paramsChanged))
         const meta = { ...(imageCard.meta || {}), shot: legacyShot(shot), storyboardBacklink: backlinkFor(doc0, shot, 'image') } as Record<string, unknown>
         if (stale) meta.storyboardInputStale = true
         else delete meta.storyboardInputStale
@@ -353,9 +396,10 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
           || imageCard.prompt !== prompt
           || !sameJson(imageCard.refIds, refs)
           || !sameJson(imageCard.anchorRefs || [], anchorRefs)
+          || paramsChanged
           || !sameJson(imageCard.meta, meta)
         if (needsUpdate) {
-          tx.updateCard(imageCard.id, { title, prompt, refIds: [...refs], anchorRefs, meta })
+          tx.updateCard(imageCard.id, { title, prompt, refIds: [...refs], anchorRefs, params, meta })
           updated++
         }
       }
@@ -394,7 +438,7 @@ export function materializeShots(cardId: string, shots: Shot[]): void {
 }
 
 // 镜头图 → 视频卡（优先用该镜头的视频提示词；以该图为首帧/参考）
-export function shotToVideo(imageCardId: string): string | null {
+export function shotToVideo(imageCardId: string, options?: ShotToVideoOptions): string | null {
   const g = useGraph.getState()
   const boardId = g.boardIdOfCard(imageCardId)
   const board = g.project.boards.find((item) => item.id === boardId)
@@ -402,8 +446,13 @@ export function shotToVideo(imageCardId: string): string | null {
   if (!c) return null
   const shot = (c.meta as any)?.shot as Shot | undefined
   const motion = (shot?.videoPrompt && shot.videoPrompt.trim()) || ((shot?.camera ? `运镜：${shot.camera}。` : '') + (shot?.desc || ''))
-  const prompt = (motion || c.prompt || '').trim()
-  const center = { x: c.x + c.w / 2, y: c.y + c.h + 200 }
+  const plannedDuration = Number(options?.plannedDuration) > 0 ? Number(options?.plannedDuration) : shot?.duration || 5
+  const generationDuration = Number(options?.generationDuration) > 0 ? Number(options?.generationDuration) : plannedDuration
+  const timingHint = generationDuration > plannedDuration + 0.05
+    ? `剪辑计划只使用本素材前 ${plannedDuration}s：核心动作必须在前 ${plannedDuration}s 内完成并形成清晰切点，后续画面自然保持。`
+    : ''
+  const prompt = [motion || c.prompt || '', timingHint].filter(Boolean).join('\n\n').trim()
+  const center = findFreeCardSpot(board!, 320, 280, c.x + c.w / 2, c.y + c.h + 200)
   const title = (c.title || '镜头').replace(/^镜/, '片')
   const imageBacklink = storyboardBacklink(c)
   const owner = imageBacklink && board
@@ -411,6 +460,8 @@ export function shotToVideo(imageCardId: string): string | null {
     : undefined
   const doc0 = owner ? readStoryboardDoc(owner) : null
   const storyboardShot = doc0?.shots.find((item) => item.id === imageBacklink?.shotId)
+  const aspect = (typeof options?.aspect === 'string' && options.aspect.trim()) || (c.params?.aspect as string) || '16:9'
+  const videoParams = { duration: generationDuration, plannedDuration, aspect }
   let videoId: string | null = null
   let created = false
   g.applyGraphTransaction('创建分镜视频卡', (tx) => {
@@ -421,7 +472,7 @@ export function shotToVideo(imageCardId: string): string | null {
         title,
         prompt,
         refIds: [imageCardId],
-        params: { duration: shot?.duration || 5, aspect: (c.params?.aspect as string) || '16:9' },
+        params: videoParams,
         meta: storyboardShot && doc0 ? { storyboardBacklink: backlinkFor(doc0, storyboardShot, 'video') } : {}
       })
       created = true
@@ -429,8 +480,8 @@ export function shotToVideo(imageCardId: string): string | null {
       videoId = existing.id
       const meta = { ...(existing.meta || {}), storyboardBacklink: backlinkFor(doc0!, storyboardShot!, 'video') } as Record<string, unknown>
       const hasOutput = !!(existing.assetUrl || existing.assetLocalPath)
-      if (hasOutput && (existing.prompt !== prompt || storyboardBacklink(existing)?.materializedFingerprint !== storyboardShotFingerprint(storyboardShot!))) meta.storyboardInputStale = true
-      const params = { ...existing.params, duration: shot?.duration || 5, aspect: (c.params?.aspect as string) || '16:9' }
+      const params = { ...existing.params, ...videoParams }
+      if (hasOutput && (existing.prompt !== prompt || !sameJson(existing.params, params) || storyboardBacklink(existing)?.materializedFingerprint !== storyboardShotFingerprint(storyboardShot!))) meta.storyboardInputStale = true
       if (existing.title !== title || existing.prompt !== prompt || !sameJson(existing.refIds, [imageCardId]) || !sameJson(existing.params, params) || !sameJson(existing.meta, meta)) {
         tx.updateCard(existing.id, { title, prompt, refIds: [imageCardId], params, meta })
       }

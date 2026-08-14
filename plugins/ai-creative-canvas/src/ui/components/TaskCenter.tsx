@@ -5,6 +5,7 @@ import { KIND_ACCENT, KIND_LABEL, type Card } from '../types'
 import { stopCard, generateCard, canGenerate } from '../services/generate'
 import { focusCard } from '../focusCard'
 import { useWorkflowUi } from '../store/workflowStore'
+import { getWorkflowRecipe } from '../services/workflowRecipes'
 import { Z } from '../zlayers'
 
 interface Entry { card: Card; boardId: string; boardName: string }
@@ -98,9 +99,9 @@ export function TaskCenter() {
         {empty && <div className="py-8 text-center text-xs opacity-50">暂无进行中或失败的任务</div>}
         {workflows.length > 0 && <div className="px-1.5 py-1 text-[10px] uppercase tracking-wide opacity-50 flex items-center gap-1"><Bot size={10} /> 工作流（{workflows.length}）</div>}
         {workflows.map((run) => (
-          <button key={run.id} type="button" onClick={() => { useWorkflowUi.getState().setSelectedRunId(run.id); useUi.getState().setShowAgent(true); close() }} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left hover:bg-black/5 dark:hover:bg-white/10">
+          <button key={run.id} type="button" onClick={() => { useWorkflowUi.getState().setSelectedRunId(run.id); useWorkflowUi.getState().setShowHistory(false); useUi.getState().setShowAgent(true); close() }} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-left hover:bg-black/5 dark:hover:bg-white/10">
             {run.status === 'running' ? <Loader2 size={12} className="animate-spin text-indigo-500" /> : run.status === 'error' || run.status === 'stale' ? <Ban size={12} className="text-red-500" /> : <Clock size={12} className="text-amber-500" />}
-            <span className="min-w-0 flex-1"><span className="block text-xs font-medium truncate">{run.brief.title}</span><span className={`block text-[10px] ${run.status === 'error' || run.status === 'stale' ? 'text-red-500' : 'opacity-55'}`}>{run.status === 'running' ? '执行中' : run.status === 'paused' ? '等待确认或继续' : run.status === 'error' ? '步骤失败，等待处理' : run.status === 'stale' ? '源文本已变化' : '待确认'}</span></span>
+            <span className="min-w-0 flex-1"><span className="block text-xs font-medium truncate">{run.brief.title}</span><span className={`block text-[10px] ${run.status === 'error' || run.status === 'stale' ? 'text-red-500' : 'opacity-55'}`}>{getWorkflowRecipe(run.recipe).shortLabel} · {run.status === 'running' ? '执行中' : run.status === 'paused' ? '等待确认或继续' : run.status === 'error' ? '步骤失败，等待处理' : run.status === 'stale' ? '源文本已变化' : '待确认'}</span></span>
             <ChevronRight size={12} className="opacity-35" />
           </button>
         ))}

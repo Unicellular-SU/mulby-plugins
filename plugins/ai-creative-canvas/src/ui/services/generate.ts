@@ -10,7 +10,7 @@ import { resolveGenerationPrompt, findUnresolvedMentions, buildMaterials, isUsab
 import { useProviders } from '../store/providerStore'
 import { submitVideoJob, runTts, resumeVideoJob } from './providers/engine'
 import { resolveVideoCapabilities } from './providers/config'
-import { effectiveVideoDuration } from './videoSpecs'
+import { coveringVideoDuration, effectiveVideoDuration } from './videoSpecs'
 import { videoStyleTag } from './stylePacks'
 import { directorPromptStatus, readDirectorPrompt } from './directorPrompt'
 import { resolveModelId } from './models'
@@ -377,7 +377,10 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const vprompt = directorPrompt || regularPrompt
       // 兜底默认：比例/时长可能只是下拉里显示的默认值而未真正写入 params；不发就会用供应商默认(grok 默认竖屏)
       const configuredDurations = capabilities.durations || []
-      const duration = effectiveVideoDuration(card.modelId || cfg.model, card.params?.duration, configuredDurations)
+      const plannedDuration = Number(card.params?.plannedDuration)
+      const duration = Number.isFinite(plannedDuration) && plannedDuration > 0
+        ? coveringVideoDuration(card.modelId || cfg.model, Math.max(plannedDuration, Number(card.params?.duration) || 0), configuredDurations)
+        : effectiveVideoDuration(card.modelId || cfg.model, card.params?.duration, configuredDurations)
       const sentParams = {
         ...card.params,
         aspect: (card.params?.aspect as string) || capabilities.aspects?.[0] || '16:9',

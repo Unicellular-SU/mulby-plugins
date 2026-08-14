@@ -105,6 +105,10 @@ export function ParamControls({ card }: { card: Card }) {
   const commitStart = () => useGraph.getState().pushHistory()
   const fields = getParamSchema(card, videoCapabilities)
   if (!fields.length) return null
+  const plannedDuration = Number(p.plannedDuration)
+  const generatedDuration = card.kind === 'video'
+    ? effectiveVideoDuration(card.modelId || videoProvider?.model, p.duration, videoCapabilities?.durations)
+    : 0
   return (
     <>
       {fields.map((f) => {
@@ -121,6 +125,11 @@ export function ParamControls({ card }: { card: Card }) {
           </div>
         )
       })}
+      {card.kind === 'video' && Number.isFinite(plannedDuration) && plannedDuration > 0 && generatedDuration > plannedDuration + 0.05 && (
+        <div className="basis-full text-[10px] text-amber-600 dark:text-amber-300">
+          Provider 生成 {generatedDuration}s 原始素材；成片计划使用 {plannedDuration}s，送入时间线时自动裁切。
+        </div>
+      )}
     </>
   )
 }
