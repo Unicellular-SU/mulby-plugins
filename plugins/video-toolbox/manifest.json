@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/.mulby/manifest-schema.json",
+  "id": "video-toolbox",
+  "name": "video-toolbox",
+  "version": "1.0.0",
+  "author": "mulby",
+  "displayName": "视频工具箱",
+  "description": "轻量视频处理工具：格式转码与压缩、区间剪切（快速/精确双模式）、当前帧截图与连续抽帧。",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "permissions": {
+    "clipboard": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true,
+    "defaultDetached": true,
+    "idleTimeoutMs": "never"
+  },
+  "window": {
+    "type": "default",
+    "width": 1180,
+    "height": 780,
+    "minWidth": 960,
+    "minHeight": 640
+  },
+  "features": [
+    {
+      "code": "toolbox",
+      "explain": "视频转码、剪切、截图工具箱",
+      "mode": "detached",
+      "cmds": [
+        { "type": "keyword", "value": "视频工具" },
+        { "type": "keyword", "value": "视频转码" },
+        { "type": "keyword", "value": "videotoolbox" },
+        {
+          "type": "files",
+          "label": "用视频工具箱打开",
+          "fileType": "file",
+          "exts": [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".flv", ".ts", ".wmv"]
+        }
+      ]
+    }
+  ]
+}
