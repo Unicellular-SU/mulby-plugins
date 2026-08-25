@@ -53,7 +53,13 @@ function Inner() {
   )
   const [clips, setClips] = useState<Clip[]>([])
   const [gaps, setGaps] = useState<number[]>([]) // 逐间隔转场时长（位置语义，长度 = clips.length-1）
-  const [aTracks, setATracks] = useState<ATrack[]>(() => audioPool.map((c) => ({ id: c.id, title: c.title || '音频', path: c.assetLocalPath!, volume: 1, offset: 0 })))
+  const [aTracks, setATracks] = useState<ATrack[]>(() => audioPool.map((c) => ({
+    id: c.id,
+    title: c.title || '音频',
+    path: c.assetLocalPath!,
+    volume: 1,
+    offset: Math.max(0, Number(c.params?.timelineOffset) || 0)
+  })))
   const [sel, setSel] = useState(0)
   const dragCleanup = useRef<null | (() => void)>(null) // 当前拖拽裁剪的清理器（卸载时调用，防监听泄漏）
   const [transition, setTransition] = useState<FilmTransition>('none')

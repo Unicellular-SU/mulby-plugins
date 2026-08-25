@@ -5,7 +5,18 @@ import { useGraph } from '../store/graphStore'
 import { stopCard } from './generate'
 import { storyboardSourceFingerprint } from './storyboardV2'
 import { executeAgentCommand } from './agentCommands'
-import { visualContinuitySuggestions } from './workflowContinuity'
+import { useProviders } from '../store/providerStore'
+import { refreshAgentCompiledPlan } from './agentPlanRuntime'
+import { observeAgentCommandFailure, observeAgentCommandOutputs } from './agentObservations'
+import { plannedNodesForCommand } from './agentNodePlan'
+import {
+  confirmWorkflowLocalReplan,
+  rejectWorkflowNode,
+  restoreWorkflowNode,
+  retryWorkflowNode,
+  runnableAgentNodes,
+  stageWorkflowLocalReplan
+} from './agentNodeRuntime'
 
 const locks = new Set<string>()
 const controllers = new Map<string, AbortController>()
@@ -84,7 +95,8 @@ export function retryWorkflowStep(runId: string, stepId: string): void {
   const index = run.steps.findIndex((step) => step.id === stepId)
   if (index < 0) return
   const target = run.steps[index]
-  if (target.command === 'generate_continuity' || target.command === 'generate_images' || target.command === 'generate_videos') {
+  if (target.command === 'generate_texts' || target.command === 'generate_continuity' || target.command === 'generate_environments'
+    || target.command === 'generate_images' || target.command === 'generate_videos' || target.command === 'generate_audio') {
     for (const cardId of target.outputCardIds) {
       const card = useGraph.getState().getCard(cardId)
       if (!card) continue
@@ -121,12 +133,37 @@ export function retryWorkflowStep(runId: string, stepId: string): void {
   })
 }
 
+export { confirmWorkflowLocalReplan, rejectWorkflowNode, restoreWorkflowNode, retryWorkflowNode }
+
 export async function resumeWorkflow(runId: string): Promise<void> {
   if (locks.has(runId)) return
   let run = latest(runId)
   if (!run || run.status === 'completed' || run.status === 'canceled') return
   if (workflowIsStale(run)) {
     save({ ...run, status: 'stale', logs: [...run.logs, log('源文本已经变化，请重新生成计划，避免按旧剧本继续。', 'warning')].slice(-200) })
+    return
+  }
+  if (run.pendingReplanNodeIds?.length) return
+  const staleReport = stageWorkflowLocalReplan(runId)
+  if (staleReport?.staleNodeIds.length) return
+  const providers = useProviders.getState()
+  const refreshed = await refreshAgentCompiledPlan(
+    run,
+    useGraph.getState().project,
+    providers.activeFor('video'),
+    providers.activeFor('audio')
+  )
+  if (refreshed.changed) {
+    run = save({
+      ...refreshed.run,
+      logs: [...refreshed.run.logs, log('节点或 Provider 能力已重新读取，执行计划已由本地编译器刷新。', 'info')].slice(-200)
+    })
+  } else {
+    run = refreshed.run
+  }
+  if (refreshed.blocked) {
+    const message = run.compiledPlan?.issues.filter((item) => item.level === 'error').map((item) => item.message).join('；') || '节点计划编译失败，请重新生成计划。'
+    save({ ...run, status: 'error', logs: [...run.logs, log(message, 'error')].slice(-200) })
     return
   }
   const controller = new AbortController()
@@ -138,24 +175,25 @@ export async function resumeWorkflow(runId: string): Promise<void> {
       if (!run) return
       const step = run.steps.find((item) => item.status !== 'completed')
       if (!step) {
-        save({ ...run, status: 'completed', logs: [...run.logs, log('工作流已完成，视频片段已送入时间线。', 'success')].slice(-200) })
+        save({ ...run, status: 'completed', logs: [...run.logs, log('工作流已完成，视频与配音素材已送入时间线。', 'success')].slice(-200) })
         return
       }
       if (step.status === 'canceled' || step.status === 'stale') return
-      const emptyContinuityCheckpoint = step.command === 'lock_continuity' && visualContinuitySuggestions(run).length === 0
-      if (step.requiresApproval && !step.approvedAt && !emptyContinuityCheckpoint) {
+      const emptyPlannedCheckpoint = step.command !== 'save_storyboard' && runnableAgentNodes(run, plannedNodesForCommand(run, step.command)).length === 0
+      if (step.requiresApproval && !step.approvedAt && !emptyPlannedCheckpoint) {
         patchStep(run, step.id, { status: 'checkpoint', error: undefined }, { status: 'paused' }, log(`等待确认：${step.title}`, 'info', step.id))
         return
       }
       run = patchStep(run, step.id, { status: 'running', startedAt: Date.now(), error: undefined }, { status: 'running' }, log(`开始：${step.title}`, 'info', step.id))
       try {
         const outputCardIds = await executeAgentCommand(run, run.steps.find((item) => item.id === step.id)!, controller.signal)
-        if (step.command === 'generate_continuity' && outputCardIds[0]) {
+        if ((step.command === 'generate_continuity' || step.command === 'generate_environments') && outputCardIds[0]) {
           const boardId = useGraph.getState().boardIdOfCard(outputCardIds[0])
           if (boardId) focusCard(boardId, outputCardIds[0])
         }
         run = latest(runId) || run
-        patchStep(run, step.id, { status: 'completed', outputCardIds, completedAt: Date.now(), error: undefined }, { status: 'running' }, log(`完成：${step.title}`, 'success', step.id))
+        const observations = observeAgentCommandOutputs(run, step.command, outputCardIds)
+        patchStep(run, step.id, { status: 'completed', outputCardIds, completedAt: Date.now(), error: undefined }, { status: 'running', observations }, log(`完成：${step.title}`, 'success', step.id))
       } catch (error: any) {
         if (controller.signal.aborted || error?.name === 'AbortError') {
           const current = latest(runId)
@@ -164,7 +202,8 @@ export async function resumeWorkflow(runId: string): Promise<void> {
         }
         const message = error?.message || String(error)
         const current = latest(runId) || run
-        patchStep(current, step.id, { status: 'error', error: message }, { status: 'error' }, log(message, 'error', step.id))
+        const observations = observeAgentCommandFailure(current, step.command, message)
+        patchStep(current, step.id, { status: 'error', error: message }, { status: 'error', observations }, log(message, 'error', step.id))
         return
       }
     }

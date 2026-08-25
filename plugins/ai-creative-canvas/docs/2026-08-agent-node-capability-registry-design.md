@@ -2,7 +2,7 @@
 
 日期：2026-08-14
 适用范围：AI 创意画布 Agent、节点创建、生成计划、Provider 能力校验
-状态：设计完成，待分阶段实施
+状态：N0–N4 已完成，N5 待评估
 关联方案：`2026-08-libtv-inspired-semantic-agent-roadmap.md`、`2026-08-product-visual-continuity-hardening.md`
 
 ## 1. 执行摘要
@@ -94,6 +94,7 @@ type AgentNodeAction =
   | 'create'
   | 'update-owned'
   | 'generate'
+  | 'organize'
   | 'inspect-output'
 
 interface NodeInputSlotSpec {
@@ -448,6 +449,9 @@ interface AgentExecutionObservationV1 {
   planNodeId: string
   cardId?: string
   status: 'created' | 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | 'stale'
+  inputFingerprint?: string
+  attempt?: number
+  outputFingerprint?: string
   resolvedInputs: Array<{
     slot: string
     sourceCardId?: string
@@ -545,6 +549,8 @@ interface WorkflowRunV2Extension {
 
 目标：建立唯一真相来源，现有 UI 和生成链保持不变。
 
+实施进度（2026-08-14）：已完成。8 类卡片已纳入统一注册表，输入策略和参数面板已从注册表派生，并通过完整性、参数等价、Provider 动态能力与全量回归测试。
+
 - 新增 `nodeSpecs.ts` 和 `resolveNodeSpec`。
 - 覆盖 8 种 `CardKind`。
 - `nodeCapabilities.ts` 改为兼容包装。
@@ -556,6 +562,8 @@ interface WorkflowRunV2Extension {
 ### N1：能力快照进入 Planner
 
 目标：模型明确知道可用节点、输入、参数和输出。
+
+实施进度（2026-08-14）：已完成。Planner 现会接收按配方裁剪的板级能力快照，包含 NodeSpec、Provider 动态能力、当前画布资源和稳定哈希；快照具有跨画布隔离、敏感字段脱敏、资源数量与字节大小上限，并在模型调用前后校验画幅与单片时长。
 
 - 生成板级 `AgentCapabilitySnapshotV1`。
 - 按配方裁剪节点目录。
@@ -569,6 +577,8 @@ interface WorkflowRunV2Extension {
 
 目标：产品广告和剧本短片都先形成可见、可校验的节点计划。
 
+实施进度（2026-08-14）：已完成。Creative Brief 现由本地确定性投影器生成 `AgentNodePlanV1`，编译器校验节点权限、参数、输入槽、同画布引用、依赖、Provider 时长/画幅、任务数与费用阈值，只产生注册表允许的白名单操作。恢复执行前会按当前能力重编译，不信任工程中持久化的旧操作；Agent 新建卡片带有计划节点归属，执行结果记录为 Observation。Agent 面板可展开查看节点意图、输入、参数修正、输出、依赖与实际状态。
+
 - 定义严格 `AgentNodePlanV1` Schema。
 - 实现参数、输入槽、依赖、Provider 和费用编译校验。
 - 把现有连续性、静帧和视频步骤投影为节点计划。
@@ -581,11 +591,21 @@ interface WorkflowRunV2Extension {
 
 目标：在注册表和编译器保护下扩展能力。
 
+实施进度（2026-08-14）：已完成。固定工作流扩展为 17 个可恢复步骤，新增导演创作指南、重复核心场景全景、导演环境应用、镜头 TTS 配音与本地阶段分组。文本、全景和音频卡均由节点计划编译后的 `create-owned-card` / `generate-card` 操作授权；分组只会编译为 `organize-stage-group`，不会调用模型。旧 6 步与 N2 9 步工程会安全迁移，新增阶段按已完成处理，避免恢复旧任务时意外产生费用。
+
 - 文本节点：摘要、导演增强、提示词中间产物。
 - 音频节点：旁白与角色配音，进入时间线。
 - 全景节点：环境设定和 3D 导演台背景。
 - 分组节点：由本地布局器按阶段整理 Agent 产物。
 - 仍不让模型创建便签和素材节点。
+
+具体行为：
+
+- 每次工作流生成一份简洁导演创作指南，作为视觉设定、全景与镜头静帧的文本基准。
+- 同名场景在两个以上镜头出现时，最多建立三个固定 2:1 的 360° 环境节点；首个已完成全景可复制到 3D 导演台，已有人工环境不会被覆盖。
+- 只为非空对白创建音频节点；结构化对白只朗读引号内台词，卡片记录 `timelineOffset` 和 `plannedDuration`，时间线按偏移载入。
+- 分组布局只移动同一 `runId` 拥有的卡片，使用画布避让算法寻找整组位置，不接管复用素材或用户卡片。
+- 音频 Provider 缺失只警告并在配音检查点暂停，不阻止先完成画面和视频阶段。
 
 验收：音频不会被接入图片节点，全景固定 2:1，视频首尾帧顺序正确。
 
@@ -598,6 +618,8 @@ interface WorkflowRunV2Extension {
 - 上游编辑基于指纹传播 `stale`。
 - 检查点支持拒绝单个计划节点并局部重规划。
 - 对重复失败设置重试上限，避免自动消耗额度。
+
+实施进度（2026-08-25）：已完成。`agentNodeRuntime.ts` 为每个已执行节点持久化输入/输出指纹、显式排除状态和按输入指纹隔离的尝试次数（默认最多 3 次）。恢复执行前会比较真实卡片与上次 Observation：用户编辑主设定被视为新的权威输出，只把 stale 传播到依赖闭包；输入或参数变化则把节点本身及下游加入待确认局部重规划。Agent 面板支持“重做此节点”“排除节点”“恢复节点”，确认局部重做后只重置受影响步骤，现有卡片保留。执行器在生成前登记节点尝试，超过上限会停止并要求修改输入；Provider 能力重新编译不进入输入指纹。
 
 验收：编辑产品主设定只重做包装、动作、品牌和相关镜头，不重建无关场景。
 
@@ -656,7 +678,7 @@ interface WorkflowRunV2Extension {
 | `src/ui/services/agentCapabilitySnapshot.ts` | 新增板级能力快照与脱敏 |
 | `src/ui/services/agentNodePlan.ts` | 计划类型、Schema、清理和指纹 |
 | `src/ui/services/agentPlanCompiler.ts` | 参数、输入、依赖、权限和 Provider 编译 |
-| `src/ui/services/agentPlanExecutor.ts` | 白名单操作、幂等和所有权 |
+| `src/ui/services/agentPlanMaterialization.ts` | 文本/全景物化、导演环境、阶段分组、幂等和所有权 |
 | `src/ui/services/agentObservations.ts` | 真实执行结果与错误分类 |
 | `src/ui/services/workflowPlanner.ts` | 注入能力快照并逐步输出 NodePlan |
 | `src/ui/services/agentCommands.ts` | 兼容映射到编译计划与执行器 |
@@ -669,7 +691,7 @@ interface WorkflowRunV2Extension {
 
 ## 16. 验收标准
 
-完成 N0–N2 后必须满足：
+完成 N0–N4 后必须满足：
 
 - Agent 规划上下文明确包含允许创建的节点、输入、参数和输出。
 - UI、Agent、预检和执行不再各自维护不同的节点能力表。
@@ -679,10 +701,11 @@ interface WorkflowRunV2Extension {
 - 任何自动引用都严格限制在任务发起画布。
 - 错误的音乐、旁白、否定角色不会产生图片任务。
 - 生成计划与实际提交参数的差异对用户可见。
+- Observation 包含输入/输出指纹与尝试次数；用户编辑已完成主设定时，只有相关派生节点进入待局部重做。
+- 排除一个节点不会删除画布卡片，也不会执行其依赖下游；恢复后可继续使用同一工作流。
+- 同一输入指纹的节点最多自动/手动尝试 3 次；修改输入后重新计数，避免无提示消耗额度。
 - 全量测试、生产构建和 Mulby Verify 通过。
 
 ## 17. 推荐实施顺序
 
-下一步直接进入 N0，不先扩展 Agent 自主能力。N0 的价值是把当前散落的节点知识收敛为稳定契约，同时保持行为不变；它是后续能力快照和节点计划编译器的必要基础。
-
-N0 完成后进入 N1，让模型第一次真正“知道”节点；N2 再让节点知识影响计划和执行。这样可以分别验证“注册表是否准确”“模型是否理解”“本地编译器是否安全”，避免三层同时变化后难以定位问题。
+N0–N4 已完成。下一步只评估 N5 的只读模型工具调用；便签和素材节点仍不向 Agent 开放。

@@ -1,25 +1,10 @@
 import type { Card, CardKind, Material, MaterialKind } from '../types'
+import { isRegisteredNodeKind, resolveNodeInputPolicy, resolveNodeSpec, type NodeInputPolicy } from './nodeSpecs'
 
-export interface NodeInputPolicy {
-  accepted: readonly MaterialKind[]
-  maxByKind?: Partial<Record<MaterialKind, number>>
-}
-
-// 节点输入能力的单一真相：连线校验、节点素材导入、引用预览与生成解析必须共用本表。
-// 上限按当前真实生成实现声明：视频通用参考只消费首图，首尾帧模式消费前两张图。
-const INPUT_POLICY: Record<CardKind, NodeInputPolicy> = {
-  text: { accepted: ['text', 'image'] },
-  image: { accepted: ['text', 'image'] },
-  pano: { accepted: ['text', 'image'] },
-  video: { accepted: ['text', 'image'], maxByKind: { image: 1 } },
-  audio: { accepted: ['text'] },
-  source: { accepted: [] },
-  group: { accepted: [] },
-  note: { accepted: [] }
-}
+export type { NodeInputPolicy } from './nodeSpecs'
 
 export function canGenerateKind(kind: CardKind | string): boolean {
-  return kind === 'text' || kind === 'image' || kind === 'pano' || kind === 'video' || kind === 'audio'
+  return isRegisteredNodeKind(kind) && resolveNodeSpec(kind).lifecycle.generatable
 }
 
 /** 同一种媒体外观可承担“生成节点”或“只读资源节点”；导入资源不能被批量生成意外覆盖。 */
@@ -28,26 +13,18 @@ export function canGenerateCard(card: Card): boolean {
 }
 
 export function materialKindOfCard(card: Card): MaterialKind | null {
-  if (card.kind === 'group' || card.kind === 'note') return null
-  if (card.kind === 'text') return 'text'
-  if (card.kind === 'video') return 'video'
-  if (card.kind === 'audio') return 'audio'
   if (card.kind === 'source') {
     const mime = String(card.mime || '').toLowerCase()
     if (mime.startsWith('video/')) return 'video'
     if (mime.startsWith('audio/')) return 'audio'
     if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/x-subrip') return 'text'
+    return 'image'
   }
-  return 'image'
+  return resolveNodeSpec(card.kind).output.materialKind || null
 }
 
 export function inputPolicyFor(card: Card): NodeInputPolicy {
-  const base = INPUT_POLICY[card.kind]
-  if (card.kind !== 'video') return base
-  return {
-    ...base,
-    maxByKind: { ...base.maxByKind, image: card.params?.refMode === 'keyframe' ? 2 : 1 }
-  }
+  return resolveNodeInputPolicy(card.kind, { params: card.params })
 }
 
 export function acceptsMaterialKind(card: Card, kind: MaterialKind): boolean {

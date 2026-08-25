@@ -156,10 +156,20 @@ export async function buildCardGenerationPlan(cardIds: string[], title = '批量
 
 export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<GenerationPlan> {
   const graph = useGraph.getState()
-  const imageModelId = await resolveModelId('image', null, graph.project.defaultImageModel || null)
+  const [textModelId, imageModelId, panoModelId] = await Promise.all([
+    resolveModelId('text', null, graph.project.defaultTextModel || null),
+    resolveModelId('image', null, graph.project.defaultImageModel || null),
+    resolveModelId('image', null, graph.project.defaultPanoModel || graph.project.defaultImageModel || null)
+  ])
   const allContinuity = visualContinuitySuggestions(run)
   const continuityToGenerate = continuityNeedsGeneration(run, graph.project)
-  const pseudoItems: GenerationPlanItem[] = continuityToGenerate.map((suggestion, index) => ({
+  const pseudoItems: GenerationPlanItem[] = [{
+    id: 'planned-director-guide',
+    kind: 'text',
+    title: '导演创作指南',
+    quantity: 1,
+    modelId: textModelId || undefined
+  }, ...continuityToGenerate.map((suggestion, index): GenerationPlanItem => ({
     id: `planned-continuity-${index}`,
     kind: 'image',
     title: `设定图 · ${suggestion.name}`,
@@ -167,7 +177,17 @@ export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<Gen
     aspect: '1:1',
     resolution: '1K',
     modelId: imageModelId || undefined
-  }))
+  }))]
+  const environmentNodes = run.nodePlan?.nodes.filter((node) => node.kind === 'pano') || []
+  pseudoItems.push(...environmentNodes.map((node): GenerationPlanItem => ({
+    id: `planned-${node.id}`,
+    kind: 'pano',
+    title: node.title,
+    quantity: 1,
+    aspect: '2:1',
+    resolution: typeof node.params.resolution === 'string' ? node.params.resolution : '2K',
+    modelId: panoModelId || undefined
+  })))
   pseudoItems.push(...run.brief.shots.map((shot, index): GenerationPlanItem => ({
     id: `planned-image-${index}`,
     kind: 'image',
@@ -177,9 +197,12 @@ export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<Gen
     modelId: imageModelId || undefined
   })))
   const videoProvider = useProviders.getState().activeFor('video')
+  const audioProvider = useProviders.getState().activeFor('audio')
   const issues: GenerationPlanIssue[] = []
   const capabilities = resolveVideoCapabilities(videoProvider)
   if (!imageModelId) issues.push({ level: 'error', message: '没有可用的图片模型，静帧步骤无法执行。' })
+  if (!textModelId) issues.push({ level: 'error', message: '没有可用的文本模型，导演创作指南无法执行。' })
+  if (environmentNodes.length && !panoModelId) issues.push({ level: 'error', message: '没有可用的全景/图片模型，360° 环境步骤无法执行。' })
   if (allContinuity.length) {
     const reused = allContinuity.length - continuityToGenerate.length
     issues.push({ level: 'info', message: `正式生成镜头前会先确认 ${allContinuity.length} 个视觉设定：新增生成 ${continuityToGenerate.length} 张${reused > 0 ? `，复用已有素材 ${reused} 个` : ''}；确认后相关镜头会共同引用这些已锁定素材。` })
@@ -218,6 +241,29 @@ export async function buildWorkflowGenerationPlan(run: WorkflowRun): Promise<Gen
     }
     pseudoItems.push(item)
   }
+  const audioNodes = run.nodePlan?.nodes.filter((node) => node.kind === 'audio') || []
+  if (audioNodes.length && !audioProvider) {
+    issues.push({ level: 'warning', message: `计划包含 ${audioNodes.length} 条配音，但尚未配置音频 Provider；画面与视频阶段可继续，配音检查点会暂停。` })
+  }
+  if (audioProvider) {
+    for (const providerIssue of validateProviderConfig(audioProvider)) issues.push({ level: providerIssue.level, message: `音频 Provider：${providerIssue.message}` })
+  }
+  pseudoItems.push(...audioNodes.map((node): GenerationPlanItem => {
+    const item: GenerationPlanItem = {
+      id: `planned-${node.id}`,
+      kind: 'audio',
+      title: node.title,
+      quantity: 1,
+      providerId: audioProvider?.id,
+      modelId: audioProvider?.ttsModel || audioProvider?.model
+    }
+    if (audioProvider?.pricing?.currency && (audioProvider.pricing.perRequest != null || audioProvider.pricing.perSecond != null)) {
+      item.currency = audioProvider.pricing.currency
+      item.estimatedCost = audioProvider.pricing.perRequest || 0
+      item.confirmationThreshold = audioProvider.pricing.confirmAbove
+    }
+    return item
+  }))
   if (uncoveredShots.length) {
     issues.push({ level: 'error', message: `镜头 ${uncoveredShots.join('、')} 的计划时长超过当前 Provider 最大生成时长，请拆分镜头或更换 Provider。` })
   }

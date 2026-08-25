@@ -17,15 +17,26 @@ import { resolveModelId } from './models'
 import { storyboardSourceFingerprint, storyboardSourceText } from './storyboardV2'
 import { getWorkflowRecipe, isWorkflowRecipeId } from './workflowRecipes'
 import { assetAnchorsForBoard } from './semanticAssets'
+import { buildAgentCapabilitySnapshot, type AgentCapabilitySnapshotResult } from './agentCapabilitySnapshot'
+import type { ProviderConfig } from './providers/types'
+import { projectWorkflowNodePlan, sanitizeAgentNodePlan } from './agentNodePlan'
+import { compileAgentNodePlan } from './agentPlanCompiler'
 
 const COMMANDS = new Set<AgentCommandName>([
-  'save_storyboard', 'materialize_continuity', 'generate_continuity', 'lock_continuity',
+  'save_storyboard', 'materialize_texts', 'generate_texts',
+  'materialize_continuity', 'generate_continuity', 'lock_continuity',
+  'materialize_environments', 'generate_environments', 'apply_environment',
   'materialize_images', 'generate_images',
-  'create_videos', 'generate_videos', 'prepare_timeline'
+  'create_videos', 'generate_videos', 'create_audio', 'generate_audio',
+  'organize_groups', 'prepare_timeline'
 ])
-const LEGACY_COMMANDS: AgentCommandName[] = [
+const LEGACY_V1_COMMANDS: AgentCommandName[] = [
   'save_storyboard', 'materialize_images', 'generate_images',
   'create_videos', 'generate_videos', 'prepare_timeline'
+]
+const LEGACY_N2_COMMANDS: AgentCommandName[] = [
+  'save_storyboard', 'materialize_continuity', 'generate_continuity', 'lock_continuity',
+  'materialize_images', 'generate_images', 'create_videos', 'generate_videos', 'prepare_timeline'
 ]
 const STEP_STATUSES = new Set<WorkflowStepStatus>(['pending', 'running', 'checkpoint', 'completed', 'error', 'canceled', 'stale'])
 const RUN_STATUSES = new Set<WorkflowStatus>(['planned', 'running', 'paused', 'completed', 'error', 'canceled', 'stale'])
@@ -107,6 +118,8 @@ export interface WorkflowPlanningInput {
   totalDuration?: number
   ending?: string
   selectedSkillIds?: string[]
+  videoProvider?: ProviderConfig | null
+  audioProvider?: ProviderConfig | null
 }
 
 function cleanText(value: unknown, fallback = '', limit = 8000): string {
@@ -141,6 +154,18 @@ function cleanList(value: unknown, limit = 12): string[] {
   return Array.isArray(value)
     ? [...new Set<string>(value.map((item) => cleanText(item, '', 300)).filter(Boolean))].slice(0, limit)
     : []
+}
+
+function cleanPrimitiveRecord(value: unknown, limit = 40): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const result: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, limit)) {
+    const safeKey = cleanText(key, '', 80)
+    if (!safeKey || ['__proto__', 'prototype', 'constructor'].includes(safeKey)) continue
+    if (typeof item === 'string') result[safeKey] = item.slice(0, 1000)
+    else if (typeof item === 'number' && Number.isFinite(item) || typeof item === 'boolean') result[safeKey] = item
+  }
+  return result
 }
 
 function normalizeProductBrief(value: any, fallback?: Partial<WorkflowProductBrief>): WorkflowProductBrief {
@@ -208,7 +233,7 @@ export function fixedWorkflowSteps(recipe: WorkflowRecipeId = 'script-to-short-f
   }))
 }
 
-export function createWorkflowRun(input: WorkflowPlanningInput, brief: WorkflowCreativeBrief): WorkflowRun {
+export function createWorkflowRun(input: WorkflowPlanningInput, brief: WorkflowCreativeBrief, capability?: AgentCapabilitySnapshotResult): WorkflowRun {
   const now = Date.now()
   const recipe = input.recipe || 'script-to-short-film'
   const definition = getWorkflowRecipe(recipe)
@@ -221,10 +246,19 @@ export function createWorkflowRun(input: WorkflowPlanningInput, brief: WorkflowC
     goal: cleanText(input.goal, definition.defaultGoal, 1200),
     status: 'planned',
     sourceFingerprint: storyboardSourceFingerprint(input.sourceCard),
+    ...(capability ? {
+      capabilitySnapshotHash: capability.hash,
+      capabilityRegistryVersion: capability.snapshot.registryVersion
+    } : {}),
     selectedSkillIds: [...new Set(input.selectedSkillIds || [])].slice(0, 12),
     brief,
     steps: fixedWorkflowSteps(recipe),
-    logs: [{ id: uid('log'), at: now, level: 'info', message: `「${definition.label}」计划已生成，等待确认。` }],
+    logs: [{
+      id: uid('log'), at: now, level: 'info',
+      message: capability
+        ? `「${definition.label}」计划已基于节点能力 ${capability.snapshot.registryVersion} 生成，等待确认。`
+        : `「${definition.label}」计划已生成，等待确认。`
+    }],
     createdAt: now,
     updatedAt: now
   }
@@ -242,7 +276,12 @@ export async function planWorkflow(input: WorkflowPlanningInput): Promise<Workfl
   const definition = getWorkflowRecipe(recipe)
   const source = storyboardSourceText(input.sourceCard)
   if (!source) throw new Error(`请选择包含${definition.sourceLabel.replace('卡片', '')}内容的文本卡片`)
-  const model = await resolveModelId('text', input.sourceCard.modelId, null)
+  const board = input.project?.boards.find((item) => item.id === input.sourceBoardId)
+  if (input.project && !board?.cards[input.sourceCard.id]) throw new Error('源卡片不属于发起 Agent 的画布，请重新选择当前画布中的文本卡片')
+  const [model, imageModel] = await Promise.all([
+    resolveModelId('text', input.sourceCard.modelId, input.project?.defaultTextModel || null),
+    resolveModelId('image', null, input.project?.defaultImageModel || null)
+  ])
   const constraints = {
     goal: cleanText(input.goal, definition.defaultGoal),
     audience: cleanText(input.audience, '未指定'),
@@ -250,7 +289,6 @@ export async function planWorkflow(input: WorkflowPlanningInput): Promise<Workfl
     totalDuration: positive(input.totalDuration, definition.defaultDuration),
     ending: cleanText(input.ending, definition.defaultEnding)
   }
-  const board = input.project?.boards.find((item) => item.id === input.sourceBoardId)
   const boardCards = Object.values(board?.cards || {})
   const boardAnchors = input.project ? assetAnchorsForBoard(input.project, input.sourceBoardId) : []
   const boardAnchorIds = new Set(boardAnchors.map((anchor) => anchor.id))
@@ -276,15 +314,34 @@ export async function planWorkflow(input: WorkflowPlanningInput): Promise<Workfl
       return card ? [{ kind: card.kind, title: card.title, description: (card.text || card.prompt || '').slice(0, 1600), hasMedia: !!(card.assetUrl || card.assetLocalPath) }] : []
     })
   }
+  const capability = buildAgentCapabilitySnapshot({
+    recipe,
+    project: input.project,
+    sourceBoardId: input.sourceBoardId,
+    sourceCardId: input.sourceCard.id,
+    aspect: constraints.aspect,
+    textModelId: model,
+    imageModelId: imageModel,
+    videoProvider: input.videoProvider,
+    audioProvider: input.audioProvider
+  })
+  const imageAspect = capability.snapshot.nodes.find((node) => node.kind === 'image')?.params.find((param) => param.key === 'aspect')?.allowed
+  const videoAspect = capability.snapshot.nodes.find((node) => node.kind === 'video')?.params.find((param) => param.key === 'aspect')?.allowed
+  if (imageAspect?.length && !imageAspect.includes(constraints.aspect)) {
+    throw new Error(`图片节点不支持画幅 ${constraints.aspect}，请调整画幅后重新规划`)
+  }
+  if (input.videoProvider && videoAspect?.length && !videoAspect.includes(constraints.aspect)) {
+    throw new Error(`当前视频 Provider 不支持画幅 ${constraints.aspect}；支持：${videoAspect.join('、')}`)
+  }
   const schema = recipe === 'product-ad-film' ? PRODUCT_WORKFLOW_SCHEMA : SCRIPT_WORKFLOW_SCHEMA
   const option: AiOption = {
     ...(model ? { model } : {}),
     messages: [
       {
         role: 'system',
-        content: definition.systemPrompt
+        content: `${definition.systemPrompt}\n\n你必须以用户消息中的 AgentCapabilitySnapshotV1 为唯一节点能力依据：只能使用其中列出的节点、输入类型、参数枚举和 Provider 能力；快照中 unavailable 的 Provider 不得被描述为可立即执行。仍然只输出本次严格 JSON Schema 要求的创作规格，不输出节点命令或额外字段。`
       },
-      { role: 'user', content: `创作约束：${JSON.stringify(constraints)}\n工程上下文：${JSON.stringify(projectContext)}\n\n${definition.sourceHeading}：\n${source.slice(0, 30000)}` }
+      { role: 'user', content: `创作约束：${JSON.stringify(constraints)}\nAgentCapabilitySnapshotV1（hash=${capability.hash}）：${JSON.stringify(capability.snapshot)}\n工程上下文：${JSON.stringify(projectContext)}\n\n${definition.sourceHeading}：\n${source.slice(0, 30000)}` }
     ],
     params: { responseFormat: 'json_schema', jsonSchema: schema as unknown as Record<string, unknown>, jsonSchemaName: definition.schemaName, strict: true },
     skills: input.selectedSkillIds?.length ? { mode: 'manual', skillIds: input.selectedSkillIds } : { mode: 'off' },
@@ -296,8 +353,24 @@ export async function planWorkflow(input: WorkflowPlanningInput): Promise<Workfl
   }
   const response = await window.mulby.ai.call(option)
   const brief = normalizeWorkflowBrief(parseJson(response?.content), { ...constraints, title: definition.label }, recipe, constraints.totalDuration)
+  brief.aspect = constraints.aspect
   if (!brief.shots.length) throw new Error(`创作计划没有有效镜头，请调整${definition.sourceLabel.replace('卡片', '')}后重试`)
-  return createWorkflowRun({ ...input, recipe }, brief)
+  const supportedDurations = capability.snapshot.nodes.find((node) => node.kind === 'video')?.params.find((param) => param.key === 'duration')?.allowed
+    ?.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+  const maxProviderDuration = supportedDurations?.length ? Math.max(...supportedDurations) : 0
+  if (input.videoProvider && maxProviderDuration > 0) {
+    const oversized = brief.shots.find((shot) => Number(shot.duration || 0) > maxProviderDuration + 0.05)
+    if (oversized) throw new Error(`镜头 ${oversized.shotNumber || brief.shots.indexOf(oversized) + 1} 计划使用 ${oversized.duration}s，超过当前视频 Provider 单片最大 ${maxProviderDuration}s；请增加镜头数或缩短总时长后重试`)
+  }
+  const baseRun = createWorkflowRun({ ...input, recipe }, brief, capability)
+  const nodePlan = projectWorkflowNodePlan(baseRun, input.project)
+  const compiledPlan = compileAgentNodePlan(nodePlan, {
+    snapshot: capability.snapshot,
+    project: input.project,
+    videoProvider: input.videoProvider,
+    audioProvider: input.audioProvider
+  })
+  return { ...baseRun, nodePlan, compiledPlan }
 }
 
 /** 兼容现有调用方；新界面使用 planWorkflow 按所选配方规划。 */
@@ -353,7 +426,7 @@ export function sanitizeWorkflowRuns(project: ProjectDoc): Record<string, Workfl
     const parsedSteps: WorkflowStep[] = (Array.isArray(raw.steps) ? raw.steps as unknown[] : []).map((step) => validStep(step)).filter((step): step is WorkflowStep => !!step)
     const canonicalSteps = fixedWorkflowSteps(recipe)
     const isCanonical = parsedSteps.length === canonicalSteps.length && parsedSteps.every((step, index) => step.command === canonicalSteps[index].command)
-    const isLegacy = parsedSteps.length === LEGACY_COMMANDS.length && parsedSteps.every((step, index) => step.command === LEGACY_COMMANDS[index])
+    const isLegacy = [LEGACY_V1_COMMANDS, LEGACY_N2_COMMANDS].some((commands) => parsedSteps.length === commands.length && parsedSteps.every((step, index) => step.command === commands[index]))
     if (!isCanonical && !isLegacy) continue
     const migratedSteps = isLegacy
       ? canonicalSteps.map((canonical) => {
@@ -379,6 +452,7 @@ export function sanitizeWorkflowRuns(project: ProjectDoc): Record<string, Workfl
     if (!id) continue
     const loadedStatus: WorkflowStatus = RUN_STATUSES.has(raw.status) ? raw.status : 'paused'
     const status = loadedStatus === 'running' ? 'paused' : loadedStatus
+    const nodePlan = sanitizeAgentNodePlan(raw.nodePlan, cleanText(raw.sourceBoardId, project.activeBoardId, 160))
     result[id] = {
       version: 1, id, recipe,
       sourceBoardId: cleanText(raw.sourceBoardId, project.activeBoardId, 160),
@@ -386,6 +460,58 @@ export function sanitizeWorkflowRuns(project: ProjectDoc): Record<string, Workfl
       goal: cleanText(raw.goal, definition.defaultGoal, 1200),
       status,
       sourceFingerprint: cleanText(raw.sourceFingerprint, storyboardSourceFingerprint(sourceCard), 160),
+      ...(typeof raw.capabilitySnapshotHash === 'string' && raw.capabilitySnapshotHash ? { capabilitySnapshotHash: cleanText(raw.capabilitySnapshotHash, '', 160) } : {}),
+      ...(typeof raw.capabilityRegistryVersion === 'string' && raw.capabilityRegistryVersion ? { capabilityRegistryVersion: cleanText(raw.capabilityRegistryVersion, '', 80) } : {}),
+      ...(nodePlan ? { nodePlan } : {}),
+      observations: (Array.isArray(raw.observations) ? raw.observations : []).slice(-500).flatMap((entry: any) => {
+        if (!entry || entry.version !== 1 || typeof entry.operationId !== 'string' || typeof entry.planNodeId !== 'string') return []
+        const status = ['created', 'queued', 'running', 'completed', 'failed', 'skipped', 'stale'].includes(entry.status) ? entry.status : 'failed'
+        const outputKind = ['image', 'video', 'audio', 'text'].includes(entry.output?.materialKind) ? entry.output.materialKind : undefined
+        return [{
+          version: 1 as const,
+          runId: id,
+          operationId: cleanText(entry.operationId, '', 160),
+          planNodeId: cleanText(entry.planNodeId, '', 160),
+          ...(typeof entry.cardId === 'string' ? { cardId: cleanText(entry.cardId, '', 160) } : {}),
+          status,
+          ...(typeof entry.inputFingerprint === 'string' && entry.inputFingerprint ? { inputFingerprint: cleanText(entry.inputFingerprint, '', 160) } : {}),
+          ...(Number.isFinite(entry.attempt) ? { attempt: Math.max(1, Math.min(20, Math.floor(entry.attempt))) } : {}),
+          ...(typeof entry.outputFingerprint === 'string' && entry.outputFingerprint ? { outputFingerprint: cleanText(entry.outputFingerprint, '', 160) } : {}),
+          resolvedParams: cleanPrimitiveRecord(entry.resolvedParams),
+          ...(outputKind ? { output: { materialKind: outputKind, quantity: Math.max(0, Math.min(20, Math.floor(Number(entry.output?.quantity) || 0))), assetAvailable: !!entry.output?.assetAvailable, ...(typeof entry.output?.mime === 'string' ? { mime: cleanText(entry.output.mime, '', 160) } : {}) } } : {}),
+          ...(entry.error && typeof entry.error.message === 'string' ? { error: {
+            category: ['plan-invalid', 'capability-mismatch', 'input-missing', 'approval-required', 'execution-error'].includes(entry.error.category) ? entry.error.category : 'execution-error',
+            message: cleanText(entry.error.message, '执行失败', 2000),
+            retryable: !!entry.error.retryable
+          } } : {}),
+          ...(Number.isFinite(entry.completedAt) ? { completedAt: entry.completedAt } : {})
+        }]
+      }),
+      ...(raw.nodeDecisions && typeof raw.nodeDecisions === 'object' && !Array.isArray(raw.nodeDecisions) ? {
+        nodeDecisions: Object.fromEntries(Object.entries(raw.nodeDecisions).slice(0, 128).flatMap(([nodeId, value]: [string, any]) => {
+          if (!nodeId || value?.version !== 1 || value.decision !== 'rejected') return []
+          return [[cleanText(nodeId, '', 160), {
+            version: 1 as const,
+            decision: 'rejected' as const,
+            ...(typeof value.reason === 'string' && value.reason ? { reason: cleanText(value.reason, '', 300) } : {}),
+            decidedAt: Number.isFinite(value.decidedAt) ? value.decidedAt : Date.now()
+          }]]
+        }))
+      } : {}),
+      ...(raw.nodeAttempts && typeof raw.nodeAttempts === 'object' && !Array.isArray(raw.nodeAttempts) ? {
+        nodeAttempts: Object.fromEntries(Object.entries(raw.nodeAttempts).slice(0, 128).flatMap(([nodeId, value]: [string, any]) => {
+          if (!nodeId || value?.version !== 1 || typeof value.inputFingerprint !== 'string') return []
+          return [[cleanText(nodeId, '', 160), {
+            version: 1 as const,
+            inputFingerprint: cleanText(value.inputFingerprint, '', 160),
+            count: Math.max(0, Math.min(20, Math.floor(Number(value.count) || 0))),
+            maxAttempts: Math.max(1, Math.min(20, Math.floor(Number(value.maxAttempts) || 3))),
+            ...(Number.isFinite(value.lastAttemptAt) ? { lastAttemptAt: value.lastAttemptAt } : {}),
+            ...(typeof value.lastError === 'string' && value.lastError ? { lastError: cleanText(value.lastError, '', 500) } : {})
+          }]]
+        }))
+      } : {}),
+      ...(Array.isArray(raw.pendingReplanNodeIds) ? { pendingReplanNodeIds: [...new Set<string>(raw.pendingReplanNodeIds.map((value: unknown) => cleanText(value, '', 160)).filter(Boolean))].slice(0, 128) } : {}),
       selectedSkillIds: Array.isArray(raw.selectedSkillIds) ? [...new Set<string>(raw.selectedSkillIds.map((value: unknown) => String(value)))].slice(0, 12) : [],
       brief: normalizeWorkflowBrief(raw.brief, { title: definition.label, totalDuration: definition.defaultDuration, ending: definition.defaultEnding }, recipe),
       steps,

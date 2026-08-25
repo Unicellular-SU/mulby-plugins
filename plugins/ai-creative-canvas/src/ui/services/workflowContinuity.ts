@@ -4,7 +4,9 @@ import type {
   AssetRole,
   Card,
   ProjectDoc,
+  WorkflowOwnershipV1,
   WorkflowAnchorSuggestion,
+  WorkflowContinuitySubjectKind,
   WorkflowRun
 } from '../types'
 import { isUsableMaterial } from './references'
@@ -21,17 +23,7 @@ import { findFreeCardSpot } from './cardPlacement'
 const VISUAL_ROLES = new Set<AssetRole>(['character', 'scene', 'prop', 'style', 'reference'])
 const MAX_CONTINUITY_REFERENCES = 12
 
-export type WorkflowContinuitySubjectKind =
-  | 'product-master'
-  | 'product-packaging'
-  | 'product-brand'
-  | 'product-action'
-  | 'product-detail'
-  | 'character-master'
-  | 'scene'
-  | 'style'
-  | 'prop'
-  | 'reference'
+export type { WorkflowContinuitySubjectKind } from '../types'
 
 interface WorkflowContinuityMetaV1 {
   version: 1
@@ -92,17 +84,33 @@ function expectedBrandTexts(run: WorkflowRun): string[] {
   return [...new Set([...latin, ...mandatory].map((item) => item.trim()).filter(Boolean))].slice(0, 4)
 }
 
-function productRelated(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): boolean {
-  if (!run.brief.product || !['prop', 'reference', 'character'].includes(suggestion.role)) return false
-  const product = normalizeName(run.brief.product.productName)
-  const target = normalizeName([suggestion.name, suggestion.description].join(' '))
-  if (!product || !target) return false
-  if (product.includes(target) || target.includes(product)) return true
-  const threshold = Math.max(3, Math.min(6, Math.floor(product.length * 0.3)))
-  return longestCommonSubstringLength(product, target) >= threshold
+/**
+ * 产品派生设定的命名经常只写品牌名（例如“Quick 通勤收纳动作”），而产品主设定可能只写品类名。
+ * 仅比较 productName 会把这类节点误判为普通 reference，导致它没有继承产品锚点。
+ */
+function productIdentityTerms(run: WorkflowRun): string[] {
+  const seeds = [run.brief.product?.productName, run.brief.product?.brandText].filter((value): value is string => !!value?.trim())
+  const terms = new Set<string>()
+  for (const seed of seeds) {
+    const normalized = normalizeName(seed)
+    if (normalized.length >= 2) terms.add(normalized)
+    for (const token of seed.toLocaleLowerCase().match(/[a-z0-9]{2,}|[\u4e00-\u9fff]{2,}/g) || []) {
+      const value = normalizeName(token)
+      if (value.length >= 2) terms.add(value)
+    }
+  }
+  return [...terms].sort((left, right) => right.length - left.length)
 }
 
-function continuitySubjectKind(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): WorkflowContinuitySubjectKind {
+function productRelated(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): boolean {
+  if (!run.brief.product || !['prop', 'reference', 'character'].includes(suggestion.role)) return false
+  const target = normalizeName([suggestion.name, suggestion.description].join(' '))
+  if (!target) return false
+  if (suggestion.role === 'character' && !/(?:动作|手持|拿取|拿起|握持|使用|开盖|包装|产品|logo|品牌)/i.test(target)) return false
+  return productIdentityTerms(run).some((term) => target.includes(term))
+}
+
+export function continuitySubjectKind(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): WorkflowContinuitySubjectKind {
   if (suggestion.role === 'style') return 'style'
   if (suggestion.role === 'scene') return 'scene'
   if (suggestion.role === 'character') return 'character-master'
@@ -150,6 +158,15 @@ function canonicalProductSuggestion(run: WorkflowRun, suggestions: WorkflowAncho
 
 function suggestionKey(suggestion: Pick<WorkflowAnchorSuggestion, 'role' | 'name'>): string {
   return `${suggestion.role}:${normalizeName(suggestion.name)}`
+}
+
+function continuityOwnership(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): WorkflowOwnershipV1 | undefined {
+  const subjectKind = continuitySubjectKind(run, suggestion)
+  const node = run.nodePlan?.nodes.find((candidate) => candidate.semanticSubjectKind === subjectKind && candidate.title === `设定·${suggestion.name}`)
+  if (!node) return undefined
+  const operationId = run.compiledPlan?.operations.find((operation) => operation.type === 'create-owned-card' && operation.planNodeId === node.id)?.id
+    || `op-create-${node.id}`
+  return { version: 1, runId: run.id, planNodeId: node.id, operationId, createdBy: 'agent', boardId: run.sourceBoardId }
 }
 
 function splitCharacterNames(value: unknown): string[] {
@@ -316,7 +333,7 @@ function shotContinuityNames(run: WorkflowRun, shotIndex: number): string[] {
   return [...names]
 }
 
-function referencePrompt(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): string {
+export function referencePrompt(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): string {
   const base = `为「${suggestion.name}」制作后续所有镜头共用且唯一的视觉设定基准。${suggestion.description ? `\n设定要求：${suggestion.description}` : ''}`
   const kind = continuitySubjectKind(run, suggestion)
   const exactTexts = expectedBrandTexts(run)
@@ -379,6 +396,20 @@ function resolveContinuityTargets(run: WorkflowRun, project: ProjectDoc): Contin
       return { suggestion, anchor: matchingAnchors[0], card: relatedCard, needsGeneration: false }
     }
     return { suggestion, anchor: matchingAnchors[0], needsGeneration: true }
+  })
+}
+
+function targetPlanNodeId(run: WorkflowRun, suggestion: WorkflowAnchorSuggestion): string | undefined {
+  const title = `设定·${suggestion.name}`
+  return run.nodePlan?.nodes.find((node) => node.title === title && !!node.semanticSubjectKind)?.id
+}
+
+function filterContinuityTargets(run: WorkflowRun, project: ProjectDoc, allowedNodeIds?: ReadonlySet<string>): ContinuityTarget[] {
+  const targets = resolveContinuityTargets(run, project)
+  if (!allowedNodeIds) return targets
+  return targets.filter((target) => {
+    const nodeId = targetPlanNodeId(run, target.suggestion)
+    return !nodeId || allowedNodeIds.has(nodeId)
   })
 }
 
@@ -510,7 +541,7 @@ export function refreshWorkflowContinuityInputs(run: WorkflowRun, cardId: string
       ? `第一张「${dependencies[0].suggestion.name}」是产品身份主参考，第二张「${dependencies[1].suggestion.name}」是包装参考；不得混入角色或动作。`
       : ''
   const dependencyPrompt = dependencyRefs.length
-    ? `${CONTINUITY_DEPENDENCY_MARKER}${hierarchy}必须严格沿用已附设定图中的「${dependencies.map((dependency) => dependency.suggestion.name).join('」「')}」：完整复刻其身份、几何结构、材质、颜色、Logo、已有文字和关键细节。只改变当前要求中的姿态、手部关系、视角或构图，不得重新设计、替换或概括该主体。${exactTexts.length ? `所有可见品牌文字必须逐字保持为“${exactTexts.join('”“')}”。` : ''}`
+    ? `${CONTINUITY_DEPENDENCY_MARKER}${hierarchy}生成请求中的参考图顺序必须保持为：${dependencies.map((dependency, index) => `第${index + 1}张「${dependency.suggestion.name}」`).join('、')}。第一张是产品/主体身份主参考，后续图片只能补充当前动作或人物信息，绝不能覆盖第一张的产品身份。必须严格沿用已附设定图中的「${dependencies.map((dependency) => dependency.suggestion.name).join('」「')}」：完整复刻其身份、几何结构、材质、颜色、Logo、已有文字和关键细节。只改变当前要求中的姿态、手部关系、视角或构图，不得重新设计、替换或概括该主体。${exactTexts.length ? `所有可见品牌文字必须逐字保持为“${exactTexts.join('”“')}”。` : ''}`
     : ''
   const meta = {
     ...(card.meta || {}),
@@ -589,12 +620,12 @@ function bindStoryboardAnchors(run: WorkflowRun): void {
 }
 
 /** 复用已有视觉素材，并幂等创建设定图卡。 */
-export function prepareWorkflowContinuity(run: WorkflowRun): string[] {
+export function prepareWorkflowContinuity(run: WorkflowRun, allowedNodeIds?: ReadonlySet<string>): string[] {
   const graph = useGraph.getState()
   const source = graph.getCard(run.sourceCardId)
   const board = graph.project.boards.find((item) => item.id === run.sourceBoardId)
   if (!source || !board) throw new Error('工作流源卡片或画布已不存在')
-  const targets = resolveContinuityTargets(run, graph.project)
+  const targets = filterContinuityTargets(run, graph.project, allowedNodeIds)
   if (!targets.length) {
     bindStoryboardAnchors(run)
     return []
@@ -621,6 +652,7 @@ export function prepareWorkflowContinuity(run: WorkflowRun): string[] {
       const centerY = spot!.y - totalH / 2 + row * (H + gapY) + H / 2
       const extraRefs = initialRelatedReferenceIds(run, target, related)
       const key = suggestionKey(target.suggestion)
+      const ownership = continuityOwnership(run, target.suggestion)
       const cardId = tx.createCard('image', { x: centerX, y: centerY }, {
         title: `设定·${target.suggestion.name}`,
         prompt: referencePrompt(run, target.suggestion),
@@ -637,7 +669,8 @@ export function prepareWorkflowContinuity(run: WorkflowRun): string[] {
             expectedTexts: ['product-master', 'product-packaging', 'product-brand', 'product-action', 'product-detail'].includes(continuitySubjectKind(run, target.suggestion))
               ? expectedBrandTexts(run)
               : []
-          } satisfies WorkflowContinuityMetaV1
+          } satisfies WorkflowContinuityMetaV1,
+          ...(ownership ? { workflowOwnershipV1: ownership } : {})
         }
       })
       tx.ensureEdge(source.id, cardId, 'ref')
@@ -659,9 +692,9 @@ export function prepareWorkflowContinuity(run: WorkflowRun): string[] {
 }
 
 /** 用户确认后固定当前媒体快照；后续镜头不再各自猜测角色、产品或道具外观。 */
-export function lockWorkflowContinuity(run: WorkflowRun): string[] {
+export function lockWorkflowContinuity(run: WorkflowRun, allowedNodeIds?: ReadonlySet<string>): string[] {
   const project = useGraph.getState().project
-  const targets = resolveContinuityTargets(run, project)
+  const targets = filterContinuityTargets(run, project, allowedNodeIds)
   const missing = targets.filter((target) => !target.card || !(target.card.assetUrl || target.card.assetLocalPath))
   if (missing.length) throw new Error(`以下视觉设定尚未生成或导入：${missing.map((target) => target.suggestion.name).join('、')}`)
   const outputIds: string[] = []

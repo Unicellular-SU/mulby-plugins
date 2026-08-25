@@ -1,5 +1,5 @@
 import { useGraph } from '../store/graphStore'
-import type { AnchorReference, Board, Card, Shot, StoryboardDocV2, StoryboardShotV2 } from '../types'
+import type { AnchorReference, Board, Card, Shot, StoryboardDocV2, StoryboardShotV2, WorkflowOwnershipV1 } from '../types'
 import {
   backlinkFor,
   createStoryboardDoc,
@@ -252,6 +252,18 @@ export interface MaterializeStoryboardResult {
 export interface MaterializeStoryboardOptions {
   /** 工作流计划画幅；普通故事板未指定时保留卡片原设置。 */
   aspect?: string
+  /** 工作流局部重规划时，只同步允许执行的镜头；未选中的镜头与故事板链接保持不变。 */
+  selectedShotIds?: ReadonlySet<string>
+  /** 只标记本次由 Agent 新建的卡片；同步用户已有卡片时不会接管归属。 */
+  ownershipForShot?: (shot: StoryboardShotV2, index: number) => WorkflowOwnershipV1 | undefined
+  /** 为每个镜头补充节点计划已经解析到当前画布的只读参考卡。 */
+  refIdsForShot?: (shot: StoryboardShotV2, index: number) => string[]
+}
+
+export interface MaterializeStoryboardAudioOptions {
+  ownershipForShot?: (shot: StoryboardShotV2, index: number) => WorkflowOwnershipV1 | undefined
+  speechForShot?: (shot: StoryboardShotV2, index: number) => string
+  paramsForShot?: (shot: StoryboardShotV2, index: number, timelineOffset: number) => Record<string, unknown>
 }
 
 export interface ShotToVideoOptions {
@@ -260,6 +272,8 @@ export interface ShotToVideoOptions {
   plannedDuration?: number
   /** Provider 请求的原始素材长度，可大于计划剪辑长度。 */
   generationDuration?: number
+  /** 只写入本次由 Agent 新建的视频卡。 */
+  ownership?: WorkflowOwnershipV1
 }
 
 export interface LayoutStoryboardResult {
@@ -331,7 +345,7 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
     const gapX = 40
     const gapY = 48
     const pendingShots = doc0.shots.filter((shot) => {
-      if (selectedShotIds && !selectedShotIds.has(shot.id)) return false
+      if ((selectedShotIds || options?.selectedShotIds) && !(selectedShotIds || options?.selectedShotIds)!.has(shot.id)) return false
       const linked = shot.imageCardId ? board.cards[shot.imageCardId] : undefined
       return !validLinkedCard(linked, doc0, shot, 'image')
     })
@@ -355,7 +369,7 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
     const cardIds: string[] = []
     let linksChanged = false
     const shots = doc0.shots.map((shot, index) => {
-      if (selectedShotIds && !selectedShotIds.has(shot.id)) return shot
+      if ((selectedShotIds || options?.selectedShotIds) && !(selectedShotIds || options?.selectedShotIds)!.has(shot.id)) return shot
       let imageCardId = shot.imageCardId
       let imageCard = imageCardId ? tx.getCard(imageCardId) : undefined
       if (!validLinkedCard(imageCard, doc0, shot, 'image')) {
@@ -364,9 +378,11 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
       }
       const title = `镜${shot.shotNumber ?? index + 1}${shot.shotSize ? '·' + shot.shotSize : ''}`
       const prompt = shotPrompt(shot)
+      const shotRefs = [...new Set([...refs, ...(options?.refIdsForShot?.(shot, index) || [])])].filter((id) => !!board.cards[id])
       const anchorRefs = anchorReferences(shot, imageCard)
       const fingerprint = storyboardShotFingerprint(shot)
       const aspect = typeof options?.aspect === 'string' && options.aspect.trim() ? options.aspect.trim() : undefined
+      const ownership = options?.ownershipForShot?.(shot, index)
       if (!imageCard) {
         const center = pendingPositions.get(shot.id)
         if (!center) return shot
@@ -375,10 +391,14 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
           h: H,
           title,
           prompt,
-          refIds: [...refs],
+          refIds: shotRefs,
           anchorRefs,
           ...(aspect ? { params: { aspect } } : {}),
-          meta: { shot: legacyShot(shot), storyboardBacklink: backlinkFor(doc0, shot, 'image') }
+          meta: {
+            shot: legacyShot(shot),
+            storyboardBacklink: backlinkFor(doc0, shot, 'image'),
+            ...(ownership ? { workflowOwnershipV1: ownership } : {})
+          }
         })
         imageCard = tx.getCard(imageCardId)
         created++
@@ -394,12 +414,12 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
         else delete meta.storyboardInputStale
         const needsUpdate = imageCard.title !== title
           || imageCard.prompt !== prompt
-          || !sameJson(imageCard.refIds, refs)
+          || !sameJson(imageCard.refIds, shotRefs)
           || !sameJson(imageCard.anchorRefs || [], anchorRefs)
           || paramsChanged
           || !sameJson(imageCard.meta, meta)
         if (needsUpdate) {
-          tx.updateCard(imageCard.id, { title, prompt, refIds: [...refs], anchorRefs, params, meta })
+          tx.updateCard(imageCard.id, { title, prompt, refIds: shotRefs, anchorRefs, params, meta })
           updated++
         }
       }
@@ -410,6 +430,108 @@ export function materializeStoryboardShots(cardId: string, value: StoryboardDocV
       if (imageCardId !== shot.imageCardId) {
         linksChanged = true
         return { ...shot, imageCardId }
+      }
+      return shot
+    })
+    const doc = linksChanged ? { ...doc0, shots, updatedAt: Date.now() } : doc0
+    const ownerNow = tx.getCard(owner.id) || owner
+    const nextMeta = writeStoryboardMeta(ownerNow, doc)
+    if (!sameJson(ownerNow.meta, nextMeta)) tx.updateCard(owner.id, { meta: nextMeta })
+    tx.select(cardIds)
+    result = { doc, cardIds, created, updated }
+  }, boardId)
+  return result
+}
+
+/** 幂等落地有对白的 TTS 卡；工作流调用时只会更新属于同一 run/plan node 的卡片。 */
+export function materializeStoryboardAudio(cardId: string, value: StoryboardDocV2, options?: MaterializeStoryboardAudioOptions): MaterializeStoryboardResult | null {
+  const graph = useGraph.getState()
+  const boardId = graph.boardIdOfCard(cardId)
+  const board = graph.project.boards.find((candidate) => candidate.id === boardId)
+  if (!boardId || !board) return null
+  let result: MaterializeStoryboardResult | null = null
+  graph.applyGraphTransaction('同步故事板配音', (tx) => {
+    const owner = tx.getCard(cardId)
+    if (!owner) return
+    const doc0 = normalizeStoryboardDoc(value, owner)
+    if (!doc0) return
+    let elapsed = 0
+    const speakable = doc0.shots.flatMap((shot, index) => {
+      const offset = elapsed
+      elapsed += Number(shot.duration || 0)
+      const speech = String(options?.speechForShot?.(shot, index) ?? shot.dialogue ?? '').trim()
+      return speech ? [{ shot, index, speech, offset }] : []
+    })
+    const W = 320
+    const H = 160
+    const cols = Math.min(3, Math.max(1, speakable.length))
+    const rows = Math.ceil(speakable.length / cols)
+    const totalW = cols * W + Math.max(0, cols - 1) * 36
+    const totalH = rows * H + Math.max(0, rows - 1) * 36
+    const spot = speakable.length
+      ? findFreeCardSpot(board, totalW, totalH, owner.x + owner.w + 140 + totalW / 2, owner.y + owner.h + 180 + totalH / 2)
+      : null
+    const positions = new Map(speakable.map((item, position) => {
+      const col = position % cols
+      const row = Math.floor(position / cols)
+      return [item.shot.id, {
+        x: spot!.x - totalW / 2 + col * (W + 36) + W / 2,
+        y: spot!.y - totalH / 2 + row * (H + 36) + H / 2
+      }] as const
+    }))
+    let created = 0
+    let updated = 0
+    let linksChanged = false
+    const cardIds: string[] = []
+    const byShot = new Map(speakable.map((item) => [item.shot.id, item]))
+    const shots = doc0.shots.map((shot, index) => {
+      const item = byShot.get(shot.id)
+      if (!item) return shot
+      const ownership = options?.ownershipForShot?.(shot, index)
+      let audio = shot.audioCardId ? tx.getCard(shot.audioCardId) : undefined
+      if (!validLinkedCard(audio, doc0, shot, 'audio')) audio = undefined
+      if (audio && ownership) {
+        const currentOwnership = (audio.meta as any)?.workflowOwnershipV1 as WorkflowOwnershipV1 | undefined
+        if (currentOwnership?.runId !== ownership.runId || currentOwnership.planNodeId !== ownership.planNodeId) audio = undefined
+      }
+      const title = `配音${shot.shotNumber ?? index + 1}`
+      const params = {
+        voice: 'alloy', speed: 1, format: 'mp3',
+        ...(options?.paramsForShot?.(shot, index, item.offset) || {}),
+        timelineOffset: item.offset,
+        plannedDuration: Number(shot.duration || 0)
+      }
+      const metaFor = (base: Record<string, unknown>) => ({
+        ...base,
+        storyboardBacklink: backlinkFor(doc0, shot, 'audio'),
+        ...(ownership ? { workflowOwnershipV1: ownership } : {})
+      })
+      let audioCardId = audio?.id
+      if (!audio) {
+        audioCardId = tx.createCard('audio', positions.get(shot.id)!, {
+          w: W, h: H, title, prompt: item.speech, params,
+          meta: metaFor({})
+        })
+        created++
+        linksChanged = true
+      } else {
+        const nextMeta = metaFor(audio.meta || {})
+        const changed = audio.title !== title || audio.prompt !== item.speech || !sameJson(audio.params, params) || !sameJson(audio.meta, nextMeta)
+        if (changed) {
+          const hasOutput = !!(audio.assetUrl || audio.assetLocalPath)
+          tx.updateCard(audio.id, {
+            title, prompt: item.speech, params,
+            meta: hasOutput ? { ...nextMeta, storyboardInputStale: true } : nextMeta
+          })
+          updated++
+        }
+      }
+      if (!audioCardId) return shot
+      // 配音卡的本地 prompt 就是唯一朗读正文；不连接故事板源文本，避免 TTS 把剧本/导演说明一起念出。
+      cardIds.push(audioCardId)
+      if (audioCardId !== shot.audioCardId) {
+        linksChanged = true
+        return { ...shot, audioCardId }
       }
       return shot
     })
@@ -473,7 +595,10 @@ export function shotToVideo(imageCardId: string, options?: ShotToVideoOptions): 
         prompt,
         refIds: [imageCardId],
         params: videoParams,
-        meta: storyboardShot && doc0 ? { storyboardBacklink: backlinkFor(doc0, storyboardShot, 'video') } : {}
+        meta: {
+          ...(storyboardShot && doc0 ? { storyboardBacklink: backlinkFor(doc0, storyboardShot, 'video') } : {}),
+          ...(options?.ownership ? { workflowOwnershipV1: options.ownership } : {})
+        }
       })
       created = true
     } else {

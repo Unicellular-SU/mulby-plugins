@@ -1,4 +1,4 @@
-import type { AgentCommandName, WorkflowRecipeId } from '../types'
+import type { AgentCommandName, CardKind, WorkflowRecipeId } from '../types'
 
 export interface WorkflowRecipeStepSpec {
   command: AgentCommandName
@@ -21,10 +21,24 @@ export interface WorkflowRecipeDefinition {
   schemaName: string
   sourceHeading: string
   systemPrompt: string
+  /** N1 能力快照只向 Planner 暴露当前配方实际会引用或创建的节点。 */
+  agentNodeKinds: readonly CardKind[]
   steps: readonly WorkflowRecipeStepSpec[]
 }
 
 const COMMON_STEPS = {
+  materialize_texts: {
+    command: 'materialize_texts',
+    title: '准备导演创作指南',
+    description: '创建本次工作流专用的导演创作指南卡，用于统一后续提示词的叙事、画面与节奏要求。',
+    requiresApproval: false
+  },
+  generate_texts: {
+    command: 'generate_texts',
+    title: '生成导演创作指南',
+    description: '根据已确认的创作规格生成简洁、可复用的导演与提示词基准。',
+    requiresApproval: false
+  },
   materialize_continuity: {
     command: 'materialize_continuity',
     title: '准备连续性设定卡',
@@ -41,6 +55,24 @@ const COMMON_STEPS = {
     command: 'lock_continuity',
     title: '确认并锁定视觉设定',
     description: '检查人物外观、服装、产品结构、Logo、道具和场景；确认后锁定当前产物，并注入相关镜头。',
+    requiresApproval: true
+  },
+  materialize_environments: {
+    command: 'materialize_environments',
+    title: '准备全景环境卡',
+    description: '为重复出现的核心场景创建固定 2:1 的 360° 全景环境卡。',
+    requiresApproval: false
+  },
+  generate_environments: {
+    command: 'generate_environments',
+    title: '生成全景环境',
+    description: '生成可供镜头静帧和 3D 导演台共同引用的空间环境基准。',
+    requiresApproval: false
+  },
+  apply_environment: {
+    command: 'apply_environment',
+    title: '确认并应用导演环境',
+    description: '检查全景结果后，将首个已完成环境载入 3D 导演台；已有人工环境不会被覆盖。',
     requiresApproval: true
   },
   materialize_images: {
@@ -67,6 +99,24 @@ const COMMON_STEPS = {
     description: '按 Provider 能力与镜头时长生成视频片段。',
     requiresApproval: false
   },
+  create_audio: {
+    command: 'create_audio',
+    title: '确认台词并创建配音卡',
+    description: '仅为包含对白或旁白的镜头创建 TTS 音频卡，并按镜头累计时长写入时间线位置。',
+    requiresApproval: true
+  },
+  generate_audio: {
+    command: 'generate_audio',
+    title: '生成镜头配音',
+    description: '逐条朗读已确认的台词，不把导演说明或视觉参考混入朗读文本。',
+    requiresApproval: false
+  },
+  organize_groups: {
+    command: 'organize_groups',
+    title: '整理 Agent 产物',
+    description: '按策划、视觉设定、环境、镜头和媒体阶段整理本次 Agent 新建卡片；不会移动用户卡片。',
+    requiresApproval: false
+  },
   prepare_timeline: {
     command: 'prepare_timeline',
     title: '送入时间线',
@@ -89,16 +139,25 @@ const RECIPES: Record<WorkflowRecipeId, WorkflowRecipeDefinition> = {
     endingPlaceholder: '留白 / 反转 / 自然收束',
     schemaName: 'short_film_creative_brief',
     sourceHeading: '原始剧本',
+    agentNodeKinds: ['text', 'image', 'pano', 'video', 'audio', 'source', 'group'],
     systemPrompt: '你是资深短片导演与分镜师。只负责把用户剧本整理为结构化创作规格和镜头草案；不要输出工具调用、命令、代码或执行步骤。totalDuration 是最终成片总时长，不是每个镜头的时长；所有 shots.duration 之和必须等于 totalDuration。静帧提示词描述单一可见时刻，视频提示词必须描述动作节奏和明确运镜。前后角色、服装、场景和道具保持连续。凡是在两个以上镜头出现的角色、关键道具或核心场景，都必须写入 anchorSuggestions；description 必须给出足以锁定外观的具体视觉设定（五官与发型、体型、服装配色，或结构、材质、颜色、Logo、空间布局等），不能只写“保持一致”。每个镜头必须把实际出现的这些名称原样写入 anchorNames。anchorNames 只能填写需要图片身份基准的可见角色、产品、道具、场景或视觉风格名称；音乐、节拍、音效、旁白、配音、对白，以及“无人出镜”“无人物”等否定描述严禁写入 anchorNames 或角色设定。优先复用工程已有语义锚点的准确名称，不得臆造已有锚点的媒体内容。画布风格应融入 imagePrompt 与 videoPrompt。',
     steps: [
       { command: 'save_storyboard', title: '确认创作规格', description: '检查受众、画幅、总时长、结尾和角色 / 场景设定后保存故事板。', requiresApproval: true },
+      COMMON_STEPS.materialize_texts,
+      COMMON_STEPS.generate_texts,
       COMMON_STEPS.materialize_continuity,
       COMMON_STEPS.generate_continuity,
       COMMON_STEPS.lock_continuity,
+      COMMON_STEPS.materialize_environments,
+      COMMON_STEPS.generate_environments,
+      COMMON_STEPS.apply_environment,
       COMMON_STEPS.materialize_images,
       COMMON_STEPS.generate_images,
       COMMON_STEPS.create_videos,
       COMMON_STEPS.generate_videos,
+      COMMON_STEPS.create_audio,
+      COMMON_STEPS.generate_audio,
+      COMMON_STEPS.organize_groups,
       COMMON_STEPS.prepare_timeline
     ]
   },
@@ -115,16 +174,25 @@ const RECIPES: Record<WorkflowRecipeId, WorkflowRecipeDefinition> = {
     endingPlaceholder: 'Packshot / 品牌名 / CTA',
     schemaName: 'product_ad_creative_brief',
     sourceHeading: '产品 Brief',
+    agentNodeKinds: ['text', 'image', 'pano', 'video', 'audio', 'source', 'group'],
     systemPrompt: '你是资深品牌广告创意总监与商业分镜导演。只负责把产品 Brief 和工程素材整理成结构化广告规格与镜头草案；不要输出工具调用、命令、代码或执行步骤。totalDuration 是最终广告成片总时长，不是每个片段时长；所有 shots.duration 之和必须等于 totalDuration。先提炼产品名称、传播目标、核心主张、可验证卖点、强制露出元素和行动号召；product.brandText 必须逐字抄录 Brief 中明确给出的品牌或 Logo 文字，没有可验证文字时留空。不得杜撰原文没有提供的功能、数据、奖项、功效或合规承诺。镜头应形成“抓住注意—问题或场景—产品揭示—核心利益演示—细节或使用证据—Packshot 与 CTA”的可理解节奏，并按实际总时长取舍镜头数量。静帧提示词只描述一个可见时刻；视频提示词描述主体动作、节奏和明确运镜。只建立一个产品主设定 anchorSuggestions；包装、Logo、结构细节、使用动作分别作为派生设定，不得再创建第二个同义产品本体。description 必须具体写明不可变化的几何结构、材质、颜色、包装、Logo、已有文字或人物外观，不能只写“保持一致”。每个相关镜头都必须把这些名称原样写入 anchorNames。anchorNames 只能填写需要图片身份基准的可见角色、产品、道具、场景或视觉风格名称；音乐、节拍、音效、旁白、配音、对白，以及“无人出镜”“无人物”等否定描述严禁写入 anchorNames 或角色设定。工程中已有对应锚点时必须优先使用其准确名称；不得改变 Logo、包装结构、产品几何和已有文字。相连但未建立锚点的媒体也应按其卡片标题和描述作为视觉参考。画布风格应融入 imagePrompt 与 videoPrompt，不得把含有其他人物或产品的风格拼图当作身份参考；每个相关镜头都要明确保留强制露出元素。',
     steps: [
       { command: 'save_storyboard', title: '确认广告策略与镜头', description: '检查核心主张、卖点依据、品牌强制元素、CTA、画幅与时长后保存广告故事板。', requiresApproval: true },
+      COMMON_STEPS.materialize_texts,
+      COMMON_STEPS.generate_texts,
       { ...COMMON_STEPS.materialize_continuity, description: '优先复用相连的产品、包装和 Logo 素材，并为缺少基准的主体创建设定卡。' },
       { ...COMMON_STEPS.generate_continuity, title: '生成产品与角色设定图' },
       { ...COMMON_STEPS.lock_continuity, description: '检查产品几何、包装、Logo、人物和场景；确认后锁定当前视觉基准并注入广告镜头。' },
+      COMMON_STEPS.materialize_environments,
+      COMMON_STEPS.generate_environments,
+      COMMON_STEPS.apply_environment,
       { ...COMMON_STEPS.materialize_images, description: '按广告镜头表幂等创建或同步图片卡，并继承相连产品素材与语义锚点。' },
       { ...COMMON_STEPS.generate_images, title: '生成广告关键帧' },
       { ...COMMON_STEPS.create_videos, description: '检查产品、包装、Logo 和文案是否正确；确认后才创建视频卡。' },
       { ...COMMON_STEPS.generate_videos, title: '生成广告片段' },
+      COMMON_STEPS.create_audio,
+      COMMON_STEPS.generate_audio,
+      COMMON_STEPS.organize_groups,
       COMMON_STEPS.prepare_timeline
     ]
   }

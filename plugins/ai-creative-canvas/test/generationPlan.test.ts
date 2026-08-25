@@ -90,14 +90,14 @@ async function testWorkflowCountsContinuityReferencesAndReusesInputs() {
   const run = createWorkflowRun({ sourceCard: source, sourceBoardId: graph.project.activeBoardId, goal: '生成短片' }, brief)
   const generatedPlan = await buildWorkflowGenerationPlan(run)
   assert.equal(generatedPlan.items.filter((item) => item.title.startsWith('设定图')).length, 1)
-  assert.equal(generatedPlan.taskCount, 3, '一张设定图、一张镜头静帧和一段视频都应计入计划')
+  assert.equal(generatedPlan.taskCount, 4, '导演指南、设定图、镜头静帧和视频都应计入计划')
   assert.ok(generatedPlan.issues.some((issue) => issue.message.includes('新增生成 1 张')))
 
   const inputId = graph.addCard('image', { x: -300, y: 0 }, { title: '女孩', status: 'done', assetUrl: 'file:///girl.png', assetLocalPath: '/girl.png', mime: 'image/png' })
   graph.updateCard(sourceId, { refIds: [inputId] })
   const reusedPlan = await buildWorkflowGenerationPlan(run)
   assert.equal(reusedPlan.items.filter((item) => item.title.startsWith('设定图')).length, 0)
-  assert.equal(reusedPlan.taskCount, 2)
+  assert.equal(reusedPlan.taskCount, 3, '复用设定图后仍需生成导演指南、镜头静帧和视频')
   assert.ok(reusedPlan.issues.some((issue) => issue.message.includes('复用已有素材 1 个')))
 }
 

@@ -147,6 +147,20 @@ function inputsFromMaterials(selected: Material[]): GenInputs {
   return { texts, images }
 }
 
+/** 连续性派生图只允许消费已解析的身份锚点图片，避免包装/风格/旧引用挤掉产品主图。 */
+function continuityPreferredMaterials(card: Card, materials: Material[]): Material[] {
+  const continuity = (card.meta as any)?.workflowContinuityV1
+  const dependencyIds = Array.isArray(continuity?.dependencyAnchorIds)
+    ? continuity.dependencyAnchorIds.filter((value: unknown): value is string => typeof value === 'string' && !!value)
+    : []
+  if (!dependencyIds.length) return materials
+  const allowed = new Set(dependencyIds)
+  const identity = materials.filter((material) => !!material.anchorId && allowed.has(material.anchorId) && isUsableMaterial(material))
+  if (!identity.length) return materials
+  // 文本是上下文，不会改变第一张身份参考图的排序；其它图片引用全部排除。
+  return [...identity, ...materials.filter((material) => material.kind === 'text' && isUsableMaterial(material))]
+}
+
 // 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
 export function resolveGenInputs(card: Card, board: Board, project?: ProjectDoc): GenInputs {
   const mats = buildMaterials(card, board, project)
@@ -157,7 +171,7 @@ export function resolveGenInputs(card: Card, board: Board, project?: ProjectDoc)
 /** 本次生成将使用的素材（与 resolveGenInputs 同源） */
 export function selectedGenMaterials(card: Card, board: Board, mats?: Material[], project?: ProjectDoc): Material[] {
   const available = mats ?? buildMaterials(card, board, project)
-  const accepted = available.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+  const accepted = continuityPreferredMaterials(card, available.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material)))
   const refd = mentionedMaterials(card.prompt || '', accepted)
   const picked = refd.length ? refd : accepted
   return consumableMaterials(card, picked)
@@ -182,9 +196,10 @@ export function resolveGenerationPrompt(
 ): ResolvedGenerationPrompt {
   const mats = buildMaterials(card, board, project)
   const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
-  const mentioned = mentionedMaterials(card.prompt || '', accepted)
+  const selectedPool = continuityPreferredMaterials(card, accepted)
+  const mentioned = mentionedMaterials(card.prompt || '', selectedPool)
   const hasExplicitMentions = mentioned.length > 0
-  const selected = consumableMaterials(card, hasExplicitMentions ? mentioned : accepted)
+  const selected = consumableMaterials(card, hasExplicitMentions ? mentioned : selectedPool)
   const inputs = inputsFromMaterials(selected)
   let local = (card.prompt || '').trim()
 

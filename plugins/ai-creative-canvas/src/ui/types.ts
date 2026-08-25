@@ -291,13 +291,21 @@ export type WorkflowRecipeId = 'script-to-short-film' | 'product-ad-film'
 /** Agent 能执行的动作白名单。模型只产出创作规格，不得自行发明命令。 */
 export type AgentCommandName =
   | 'save_storyboard'
+  | 'materialize_texts'
+  | 'generate_texts'
   | 'materialize_continuity'
   | 'generate_continuity'
   | 'lock_continuity'
+  | 'materialize_environments'
+  | 'generate_environments'
+  | 'apply_environment'
   | 'materialize_images'
   | 'generate_images'
   | 'create_videos'
   | 'generate_videos'
+  | 'create_audio'
+  | 'generate_audio'
+  | 'organize_groups'
   | 'prepare_timeline'
 
 export type WorkflowStatus = 'planned' | 'running' | 'paused' | 'completed' | 'error' | 'canceled' | 'stale'
@@ -333,6 +341,209 @@ export interface WorkflowCreativeBrief {
   product?: WorkflowProductBrief
 }
 
+export type WorkflowContinuitySubjectKind =
+  | 'product-master'
+  | 'product-packaging'
+  | 'product-brand'
+  | 'product-action'
+  | 'product-detail'
+  | 'character-master'
+  | 'scene'
+  | 'style'
+  | 'prop'
+  | 'reference'
+
+export interface AgentPlannedInput {
+  slot: string
+  sourceType: 'card' | 'anchor' | 'planned-node'
+  sourceId: string
+  priority: number
+  purpose: string
+}
+
+export interface AgentPlannedNode {
+  id: string
+  kind: CardKind
+  intent: string
+  semanticRole?: AssetRole
+  semanticSubjectKind?: WorkflowContinuitySubjectKind
+  title: string
+  prompt: string
+  params: Record<string, unknown>
+  inputs: AgentPlannedInput[]
+  expectedOutput: {
+    materialKind?: MaterialKind
+    quantity: number
+    purpose: string
+  }
+  generationPolicy: 'materialize-only' | 'generate-after-approval' | 'reuse-if-ready'
+  dependsOn: string[]
+}
+
+export interface AgentPlanCheckpoint {
+  id: string
+  title: string
+  description: string
+  afterNodeIds: string[]
+  requiresApproval: boolean
+}
+
+export interface AgentNodePlanV1 {
+  version: 1
+  id: string
+  boardId: string
+  goal: string
+  capabilitySnapshotHash: string
+  nodes: AgentPlannedNode[]
+  checkpoints: AgentPlanCheckpoint[]
+}
+
+export type AgentPlanIssueCategory = 'plan-invalid' | 'capability-mismatch' | 'input-missing' | 'approval-required' | 'execution-error'
+
+export interface AgentPlanIssue {
+  level: 'error' | 'warning' | 'info'
+  category: AgentPlanIssueCategory
+  message: string
+  nodeId?: string
+  field?: string
+  autoFixed?: boolean
+}
+
+export interface AgentParamCorrection {
+  key: string
+  planned?: unknown
+  resolved?: unknown
+  reason: string
+}
+
+interface CompiledAgentOperationBase {
+  id: string
+  idempotencyKey: string
+  planNodeId?: string
+  dependsOn: string[]
+}
+
+export interface CreateOwnedCardOperation extends CompiledAgentOperationBase {
+  type: 'create-owned-card'
+  planNodeId: string
+  kind: CardKind
+  title: string
+  prompt: string
+  resolvedParams: Record<string, unknown>
+  corrections: AgentParamCorrection[]
+}
+
+export interface BindReferenceOperation extends CompiledAgentOperationBase {
+  type: 'bind-reference'
+  planNodeId: string
+  input: AgentPlannedInput
+}
+
+export interface GenerateCardOperation extends CompiledAgentOperationBase {
+  type: 'generate-card'
+  planNodeId: string
+  quantity: number
+}
+
+export interface LockAnchorOperation extends CompiledAgentOperationBase {
+  type: 'lock-anchor'
+  planNodeIds: string[]
+}
+
+export interface OpenTimelineOperation extends CompiledAgentOperationBase {
+  type: 'open-timeline'
+  planNodeIds: string[]
+}
+
+export interface ApplyDirectorEnvironmentOperation extends CompiledAgentOperationBase {
+  type: 'apply-director-environment'
+  planNodeIds: string[]
+}
+
+export interface OrganizeStageGroupOperation extends CompiledAgentOperationBase {
+  type: 'organize-stage-group'
+  planNodeId: string
+  title: string
+  color: string
+  memberPlanNodeIds: string[]
+}
+
+export type CompiledAgentOperation =
+  | CreateOwnedCardOperation
+  | BindReferenceOperation
+  | GenerateCardOperation
+  | LockAnchorOperation
+  | OpenTimelineOperation
+  | ApplyDirectorEnvironmentOperation
+  | OrganizeStageGroupOperation
+
+export interface CompiledAgentPlanV1 {
+  version: 1
+  sourcePlanId: string
+  registryVersion: string
+  capabilitySnapshotHash: string
+  boardId: string
+  operations: CompiledAgentOperation[]
+  issues: AgentPlanIssue[]
+  taskCount: number
+  estimatedCost?: number
+  currency?: string
+  requiresApproval: boolean
+}
+
+export interface WorkflowOwnershipV1 {
+  version: 1
+  runId: string
+  planNodeId: string
+  operationId: string
+  createdBy: 'agent'
+  boardId: string
+}
+
+export interface AgentExecutionObservationV1 {
+  version: 1
+  runId: string
+  operationId: string
+  planNodeId: string
+  cardId?: string
+  status: 'created' | 'queued' | 'running' | 'completed' | 'failed' | 'skipped' | 'stale'
+  /** N4：记录这次执行实际看到的输入，不把 Provider 能力快照混入指纹。 */
+  inputFingerprint?: string
+  /** N4：该节点在当前输入指纹下的第几次尝试。 */
+  attempt?: number
+  /** N4：用于识别用户编辑后的输出，并将 stale 只传播给下游。 */
+  outputFingerprint?: string
+  resolvedParams: Record<string, unknown>
+  output?: {
+    materialKind: MaterialKind
+    quantity: number
+    assetAvailable: boolean
+    mime?: string
+  }
+  error?: {
+    category: AgentPlanIssueCategory
+    message: string
+    retryable: boolean
+  }
+  completedAt?: number
+}
+
+export interface AgentNodeDecisionV1 {
+  version: 1
+  decision: 'rejected'
+  reason?: string
+  decidedAt: number
+}
+
+export interface AgentNodeAttemptV1 {
+  version: 1
+  inputFingerprint: string
+  count: number
+  maxAttempts: number
+  lastAttemptAt?: number
+  lastError?: string
+}
+
 export interface WorkflowStep {
   id: string
   command: AgentCommandName
@@ -365,6 +576,18 @@ export interface WorkflowRun {
   goal: string
   status: WorkflowStatus
   sourceFingerprint: string
+  /** 规划时所依据的节点/Provider/当前画布能力；N2 编译器将用它检测能力变化。 */
+  capabilitySnapshotHash?: string
+  capabilityRegistryVersion?: string
+  nodePlan?: AgentNodePlanV1
+  compiledPlan?: CompiledAgentPlanV1
+  observations?: AgentExecutionObservationV1[]
+  /** N4：只保存显式拒绝；依赖节点的“受影响”集合按 nodePlan 动态计算。 */
+  nodeDecisions?: Record<string, AgentNodeDecisionV1>
+  /** N4：每个节点、每个输入指纹独立计数，避免重试耗尽后阻塞新的输入。 */
+  nodeAttempts?: Record<string, AgentNodeAttemptV1>
+  /** N4：检测到输入变化后等待用户确认的局部重规划节点。 */
+  pendingReplanNodeIds?: string[]
   selectedSkillIds: string[]
   brief: WorkflowCreativeBrief
   steps: WorkflowStep[]

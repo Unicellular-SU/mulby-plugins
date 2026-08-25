@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  AlertTriangle, Bot, Check, ChevronRight, Circle, Clock3, History, Loader2, Pause,
+  AlertTriangle, Ban, Bot, Check, CheckCircle2, ChevronRight, Circle, Clock3, History, Loader2, Pause,
   Play, Plus, RefreshCw, ShieldCheck, Sparkles, Square, Trash2, WandSparkles, X
 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
@@ -8,7 +8,7 @@ import { useUi } from '../store/uiStore'
 import { useWorkflowUi } from '../store/workflowStore'
 import { toast } from '../store/toastStore'
 import { confirmDialog } from '../store/dialogStore'
-import type { WorkflowRecipeId, WorkflowRun, WorkflowStep } from '../types'
+import { KIND_LABEL, type WorkflowRecipeId, type WorkflowRun, type WorkflowStep } from '../types'
 import {
   listEnabledWorkflowSkills, planWorkflow, previewWorkflowSkills,
   type WorkflowPlanningInput
@@ -17,11 +17,15 @@ import { getWorkflowRecipe, WORKFLOW_RECIPES } from '../services/workflowRecipes
 import { buildWorkflowGenerationPlan, type GenerationPlan } from '../services/generationPlan'
 import {
   approveWorkflowCheckpoint, cancelWorkflow, pauseWorkflow, resumeWorkflow,
+  confirmWorkflowLocalReplan, rejectWorkflowNode, restoreWorkflowNode, retryWorkflowNode,
   retryWorkflowStep, workflowIsStale
 } from '../services/workflowRunner'
 import { Z } from '../zlayers'
 import { Select } from './Select'
 import { continuityLockWarnings } from '../services/workflowContinuity'
+import { useProviders } from '../store/providerStore'
+import { plannedNodesForCommand } from '../services/agentNodePlan'
+import { AGENT_NODE_MAX_ATTEMPTS, rejectedAgentNodeIds } from '../services/agentNodeRuntime'
 
 const STATUS_LABEL: Record<WorkflowRun['status'], string> = {
   planned: '待确认', running: '执行中', paused: '已暂停', completed: '已完成',
@@ -103,6 +107,94 @@ function PlanSummary({ plan }: { plan: GenerationPlan | null }) {
   )
 }
 
+function displayParam(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return JSON.stringify(value)
+}
+
+function NodeExecutionPlan({ run }: { run: WorkflowRun }) {
+  const plan = run.nodePlan
+  if (!plan) return null
+  const compiled = run.compiledPlan
+  const errors = compiled?.issues.filter((issue) => issue.level === 'error') || []
+  const warnings = compiled?.issues.filter((issue) => issue.level === 'warning') || []
+  const titleById = new Map(plan.nodes.map((node) => [node.id, node.title]))
+  const policyLabel = {
+    'materialize-only': '仅创建',
+    'generate-after-approval': '确认后生成',
+    'reuse-if-ready': '复用已有'
+  } as const
+  const rejected = rejectedAgentNodeIds(run)
+  const nodeAction = async (nodeId: string, action: 'retry' | 'reject' | 'restore') => {
+    if (action === 'reject') {
+      const node = plan.nodes.find((candidate) => candidate.id === nodeId)
+      const ok = await confirmDialog({ title: '排除这个节点', message: `排除「${node?.title || nodeId}」后，它的下游节点也不会继续生成；已有画布卡片会保留。继续？`, confirmLabel: '排除节点', cancelLabel: '取消', danger: true })
+      if (!ok) return
+      rejectWorkflowNode(run.id, nodeId)
+      toast('已排除节点及其下游生成', 'success')
+      return
+    }
+    if (action === 'restore') {
+      restoreWorkflowNode(run.id, nodeId)
+      toast('节点已恢复，可继续执行', 'success')
+      return
+    }
+    retryWorkflowNode(run.id, nodeId)
+    toast('已准备局部重做；无关节点不会重跑', 'success')
+  }
+  return <details className="rounded-lg border" style={{ borderColor: 'var(--ace-border)' }}>
+    <summary className="cursor-pointer list-none px-3 py-2.5 flex items-center gap-2 text-xs">
+      <ChevronRight size={12} className="opacity-45" />
+      <span className="font-semibold flex-1">节点执行计划</span>
+      <span className="opacity-50">{plan.nodes.length} 节点 · {compiled?.taskCount ?? '待编译'} 任务</span>
+      <span className={`rounded px-1.5 py-0.5 text-[9px] ${errors.length ? 'bg-red-500/10 text-red-500' : warnings.length ? 'bg-amber-500/10 text-amber-600 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'}`}>{errors.length ? `${errors.length} 错误` : warnings.length ? `${warnings.length} 提醒` : compiled ? '已校验' : '待重编译'}</span>
+    </summary>
+    <div className="border-t px-3 py-3" style={{ borderColor: 'var(--ace-border)' }}>
+      {!compiled && <div className="mb-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">恢复执行前会按当前节点、模型与 Provider 能力重新编译；工程文件中的旧操作不会被直接执行。</div>}
+      {!!compiled?.issues.length && <div className="mb-2 space-y-1">{compiled.issues.map((issue, index) => <div key={`${issue.nodeId || 'plan'}-${index}`} className={`text-[10px] ${issue.level === 'error' ? 'text-red-500' : issue.level === 'warning' ? 'text-amber-600 dark:text-amber-300' : 'opacity-50'}`}>• {issue.message}{issue.autoFixed ? '（已自动修正）' : ''}</div>)}</div>}
+      <div className="max-h-[380px] overflow-auto ace-scroll space-y-1.5">
+        {plan.nodes.map((node, index) => {
+          const create = compiled?.operations.find((operation) => operation.type === 'create-owned-card' && operation.planNodeId === node.id)
+          const corrections = create?.type === 'create-owned-card' ? create.corrections : []
+          const resolvedParams = create?.type === 'create-owned-card' ? create.resolvedParams : node.params
+          const nodeIssues = compiled?.issues.filter((issue) => issue.nodeId === node.id) || []
+          const observation = [...(run.observations || [])].reverse().find((item) => item.planNodeId === node.id)
+          const attempt = run.nodeAttempts?.[node.id]
+          const explicitlyRejected = !!run.nodeDecisions?.[node.id]
+          const blockedByDependency = rejected.has(node.id) && !explicitlyRejected
+          const nodeStale = observation?.status === 'stale' || run.pendingReplanNodeIds?.includes(node.id)
+          return <details key={node.id} className={`rounded-md border ${nodeIssues.some((issue) => issue.level === 'error') ? 'border-red-400/60 bg-red-500/[0.03]' : ''}`} style={nodeIssues.some((issue) => issue.level === 'error') ? undefined : { borderColor: 'var(--ace-border)' }}>
+            <summary className="cursor-pointer list-none px-2.5 py-2 flex items-center gap-2 text-[11px]">
+              <span className="w-5 h-5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-300 grid place-items-center text-[9px] font-semibold">{index + 1}</span>
+              <span className="font-medium min-w-0 flex-1 truncate">{node.title}</span>
+              <span className="opacity-45">{KIND_LABEL[node.kind]}</span>
+              {explicitlyRejected ? <span className="rounded bg-red-500/10 px-1.5 py-0.5 text-[9px] text-red-500">已排除</span> : blockedByDependency ? <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600 dark:text-amber-300">依赖被排除</span> : nodeStale ? <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-600 dark:text-amber-300">待局部重做</span> : observation && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] text-emerald-600 dark:text-emerald-300">{observation.status === 'completed' ? '已完成' : observation.status === 'created' ? '已创建' : observation.status}</span>}
+              {attempt && <span className="opacity-45">{attempt.count}/{attempt.maxAttempts || AGENT_NODE_MAX_ATTEMPTS}</span>}
+              <span className="rounded bg-black/5 dark:bg-white/10 px-1.5 py-0.5 text-[9px]">{node.kind === 'group' ? '本地整理' : policyLabel[node.generationPolicy]}</span>
+            </summary>
+            <div className="border-t px-2.5 py-2 text-[10px] space-y-1.5" style={{ borderColor: 'var(--ace-border)' }}>
+              <div><span className="opacity-45">意图：</span>{node.intent}</div>
+              {!!node.inputs.length && <div><span className="opacity-45">输入：</span>{node.inputs.map((input) => `${input.purpose || input.slot} ← ${input.sourceType}:${titleById.get(input.sourceId) || input.sourceId}`).join('；')}</div>}
+              <div><span className="opacity-45">参数：</span>{Object.entries(resolvedParams).map(([key, value]) => `${key}=${displayParam(value)}`).join(' · ') || '无'}</div>
+              {!!corrections.length && <div className="text-amber-600 dark:text-amber-300">修正：{corrections.map((item) => `${item.key}：${displayParam(item.planned)} → ${displayParam(item.resolved)}（${item.reason}）`).join('；')}</div>}
+              <div><span className="opacity-45">输出：</span>{node.expectedOutput.quantity} × {node.expectedOutput.materialKind || '无'}，{node.expectedOutput.purpose}</div>
+              {!!node.dependsOn.length && <div><span className="opacity-45">依赖：</span>{node.dependsOn.map((id) => titleById.get(id) || id).join('、')}</div>}
+              <div className="opacity-65 line-clamp-3" title={node.prompt}><span className="opacity-60">提示词：</span>{node.prompt || '无'}</div>
+              {nodeIssues.map((issue, issueIndex) => <div key={issueIndex} className={issue.level === 'error' ? 'text-red-500' : 'text-amber-600 dark:text-amber-300'}>• {issue.message}</div>)}
+              {attempt?.lastError && <div className="text-red-500">最近失败：{attempt.lastError}</div>}
+              {run.status !== 'running' && <div className="pt-1 flex flex-wrap gap-1.5">
+                {!explicitlyRejected && !blockedByDependency && <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void nodeAction(node.id, 'retry') }} className="h-6 rounded bg-indigo-500/10 px-2 text-[10px] text-indigo-600 dark:text-indigo-300 inline-flex items-center gap-1"><RefreshCw size={10} />重做此节点</button>}
+                {explicitlyRejected ? <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void nodeAction(node.id, 'restore') }} className="h-6 rounded bg-emerald-500/10 px-2 text-[10px] text-emerald-600 dark:text-emerald-300 inline-flex items-center gap-1"><CheckCircle2 size={10} />恢复节点</button> : !blockedByDependency && <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void nodeAction(node.id, 'reject') }} className="h-6 rounded bg-red-500/10 px-2 text-[10px] text-red-500 inline-flex items-center gap-1"><Ban size={10} />排除节点</button>}
+              </div>}
+            </div>
+          </details>
+        })}
+      </div>
+    </div>
+  </details>
+}
+
 export function AgentDrawer() {
   const show = useUi((state) => state.showAgent)
   const project = useGraph((state) => state.project)
@@ -145,10 +237,13 @@ export function AgentDrawer() {
   const createInput = (): WorkflowPlanningInput | null => {
     const entry = sourceCards.find(({ card }) => card.id === sourceCardId)
     if (!entry) return null
+    const providers = useProviders.getState()
     return {
       recipe: recipeId, sourceCard: entry.card, sourceBoardId: entry.board.id, project, goal,
       audience: audience || undefined, aspect, totalDuration: duration, ending: ending || undefined,
-      selectedSkillIds
+      selectedSkillIds,
+      videoProvider: providers.activeFor('video'),
+      audioProvider: providers.activeFor('audio')
     }
   }
   const startPlanning = async () => {
@@ -243,7 +338,7 @@ export function AgentDrawer() {
                 {WORKFLOW_RECIPES.map((item) => <button key={item.id} type="button" aria-pressed={recipeId === item.id} onClick={() => selectRecipe(item.id)} className={`rounded-lg border p-2.5 text-left transition-colors ${recipeId === item.id ? 'border-indigo-500 bg-indigo-500/[0.08]' : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'}`} style={recipeId === item.id ? undefined : { borderColor: 'var(--ace-border)' }}><span className="block text-xs font-semibold">{item.label}</span><span className="mt-1 block text-[10px] leading-relaxed opacity-50 line-clamp-2">{item.description}</span></button>)}
               </div>
             </div>
-            <div className="rounded-xl bg-indigo-500/[0.08] p-3 text-xs leading-relaxed"><div className="font-semibold flex items-center gap-1.5"><WandSparkles size={14} />{recipe.label}</div><div className="mt-1 opacity-65">{recipe.description} AI 只生成结构化规格和镜头草案；画布操作仍由九个本地白名单动作执行。</div></div>
+            <div className="rounded-xl bg-indigo-500/[0.08] p-3 text-xs leading-relaxed"><div className="font-semibold flex items-center gap-1.5"><WandSparkles size={14} />{recipe.label}</div><div className="mt-1 opacity-65">{recipe.description} AI 只生成结构化规格和镜头草案；文本、全景、静帧、视频、配音与分组仍由本地白名单步骤执行。</div></div>
             <label className="block text-[11px]"><span className="opacity-55">{recipe.sourceLabel}</span><Select className="mt-1" value={sourceCardId} onChange={setSourceCardId} placeholder={recipe.sourcePlaceholder} options={sourceCards.map(({ card, board }) => ({ value: card.id, label: card.title || '未命名文本', hint: board.name }))} /></label>
             <label className="block text-[11px]"><span className="opacity-55">创作目标</span><textarea className="ace-input mt-1 resize-none" rows={3} value={goal} onChange={(event) => setGoal(event.target.value)} /></label>
             <div className="grid grid-cols-2 gap-3">
@@ -273,11 +368,32 @@ export function AgentDrawer() {
 function RunDetail({ run, plan, onNewPlan, onDelete }: { run: WorkflowRun; plan: GenerationPlan | null; onNewPlan: () => void; onDelete: () => void }) {
   const recipe = getWorkflowRecipe(run.recipe)
   const stale = workflowIsStale(run)
+  const pendingReplan = run.pendingReplanNodeIds || []
+  const pendingTitles = pendingReplan.map((id) => run.nodePlan?.nodes.find((node) => node.id === id)?.title || id).slice(0, 6)
   const checkpoint = run.steps.find((step) => step.status === 'checkpoint')
   const errorStep = run.steps.find((step) => step.status === 'error')
   const active = run.status === 'running'
+  const audioProvider = useProviders((state) => {
+    const id = state.activeAudioId
+    return state.providers.find((provider) => provider.kind === 'audio' && provider.id === id)
+      || state.providers.find((provider) => provider.kind === 'audio')
+      || null
+  })
   const lockWarnings = checkpoint?.command === 'lock_continuity' ? continuityLockWarnings(run) : []
   const videoCheckpointBlocked = checkpoint?.command === 'create_videos' && (!plan || plan.issues.some((issue) => issue.level === 'error' && /视频|Provider|画幅|镜头/.test(issue.message)))
+  const audioCheckpointBlocked = checkpoint?.command === 'create_audio'
+    && plannedNodesForCommand(run, 'create_audio').length > 0
+    && !audioProvider
+  const checkpointBlocked = videoCheckpointBlocked || audioCheckpointBlocked
+  const checkpointHelp = checkpoint?.command === 'save_storyboard'
+    ? '确认创作规格后会先生成导演创作指南，再准备角色、场景和道具的统一视觉设定。'
+    : checkpoint?.command === 'lock_continuity'
+      ? '请检查画布中的设定图；可替换素材或重新生成。不满意不要确认，确认后当前人物、产品、道具和场景外观会被锁定，并作为相关镜头的共同参考。'
+      : checkpoint?.command === 'apply_environment'
+        ? '请检查固定 2:1 的 360° 全景。确认后会把首个已完成全景复制到 3D 导演台；已有人工环境不会被覆盖。'
+        : checkpoint?.command === 'create_audio'
+          ? audioCheckpointBlocked ? '当前没有可用的音频 Provider。请先在 Provider 设置中配置 TTS，再回来确认台词和配音。' : '请确认每个镜头实际朗读的对白或旁白；创建后仍可在音频卡中调整音色与语速，再重跑生成步骤。'
+          : '请检查画布中的静帧；确认后才会创建并提交视频任务。'
   const rerun = async (step: WorkflowStep) => {
     const ok = await confirmDialog({ title: '重跑工作流步骤', message: `将从「${step.title}」开始重跑，并把后续步骤恢复为待执行；已生成的卡片会复用，不会重复铺卡。继续？`, confirmLabel: '重跑', cancelLabel: '取消' })
     if (!ok) return
@@ -289,11 +405,13 @@ function RunDetail({ run, plan, onNewPlan, onDelete }: { run: WorkflowRun; plan:
       <div className="mb-1 text-[10px] text-indigo-500">{recipe.label}</div>
       <div className="flex items-center gap-2"><div className="text-base font-semibold flex-1">{run.brief.title}</div><span className={`text-[10px] px-2 py-0.5 rounded-full ${run.status === 'error' || stale ? 'bg-red-500/10 text-red-500' : active ? 'bg-indigo-500/10 text-indigo-500' : 'bg-black/5 dark:bg-white/10'}`}>{stale ? '源内容已变化' : STATUS_LABEL[run.status]}</span></div>
       <div className="mt-1 text-xs opacity-60 leading-relaxed">{run.brief.summary || run.goal}</div>
-      <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.audience}</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.aspect}</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">目标成片 {run.brief.totalDuration}s</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.shots.length} 镜</span></div>
+      <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.audience}</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.aspect}</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">目标成片 {run.brief.totalDuration}s</span><span className="px-2 py-1 rounded bg-black/5 dark:bg-white/10">{run.brief.shots.length} 镜</span>{run.capabilityRegistryVersion && <span className="px-2 py-1 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-300">节点能力 {run.capabilityRegistryVersion}</span>}</div>
     </div>
     {stale && <div className="rounded-lg bg-red-500/10 text-red-600 dark:text-red-300 p-3 text-xs"><div className="font-semibold">源文本已修改</div><div className="mt-1 opacity-70">当前计划已被冻结，防止按旧内容继续生成。请新建计划。</div></div>}
+    {!!pendingReplan.length && !stale && <div className="rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 p-3 text-xs"><div className="font-semibold">检测到局部输入变化</div><div className="mt-1 opacity-75">{pendingTitles.join('、')}{pendingReplan.length > pendingTitles.length ? ` 等 ${pendingReplan.length} 个节点` : ''}受影响。确认后只会重做这些节点及其下游，不会重新生成无关场景，也不会自动删除已有卡片。</div><button type="button" onClick={() => { confirmWorkflowLocalReplan(run.id); void resumeWorkflow(run.id) }} className="mt-2 h-8 rounded-md bg-amber-500 px-3 text-[11px] font-semibold text-white inline-flex items-center gap-1"><RefreshCw size={12} />确认局部重做</button></div>}
     {run.brief.product && <div className="rounded-lg border p-3 text-[11px]" style={{ borderColor: 'var(--ace-border)' }}><div className="flex items-center justify-between gap-2"><span className="font-semibold">{run.brief.product.productName}</span><span className="opacity-45">{run.brief.product.campaignObjective}</span></div>{run.brief.product.brandText && <div className="mt-1.5 text-[10px] text-indigo-600 dark:text-indigo-300"><span className="opacity-60">品牌文字锁：</span>{run.brief.product.brandText}</div>}<div className="mt-1.5 leading-relaxed"><span className="opacity-45">核心主张：</span>{run.brief.product.coreProposition || '待补充'}</div>{run.brief.product.sellingPoints.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{run.brief.product.sellingPoints.map((item, index) => <span key={`${item}-${index}`} className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-700 dark:text-emerald-300">{item}</span>)}</div>}{run.brief.product.mandatoryElements.length > 0 && <div className="mt-2 text-[10px]"><span className="opacity-45">必须保留：</span>{run.brief.product.mandatoryElements.join('、')}</div>}<div className="mt-1 text-[10px]"><span className="opacity-45">CTA：</span>{run.brief.product.callToAction || run.brief.ending}</div></div>}
     {!!run.brief.anchorSuggestions.length && <div><div className="text-xs font-semibold">建议语义锚点</div><div className="mt-2 flex flex-wrap gap-1.5">{run.brief.anchorSuggestions.map((anchor, index) => <span key={`${anchor.name}-${index}`} title={anchor.description} className="text-[10px] px-2 py-1 rounded-full border" style={{ borderColor: 'var(--ace-border)' }}>{anchor.role} · {anchor.name}</span>)}</div></div>}
+    <NodeExecutionPlan run={run} />
     <PlanSummary plan={plan} />
     <div>
       <div className="text-xs font-semibold mb-2">执行步骤</div>
@@ -301,9 +419,9 @@ function RunDetail({ run, plan, onNewPlan, onDelete }: { run: WorkflowRun; plan:
         {run.steps.map((step, index) => <div key={step.id} className={`rounded-lg border px-3 py-2 ${step.status === 'checkpoint' ? 'border-amber-400 bg-amber-500/[0.06]' : step.status === 'error' ? 'border-red-400/60 bg-red-500/[0.05]' : ''}`} style={step.status === 'checkpoint' || step.status === 'error' ? undefined : { borderColor: 'var(--ace-border)' }}><div className="flex items-center gap-2"><StepIcon step={step} /><span className="text-[11px] opacity-45">{index + 1}</span><span className="text-xs font-medium flex-1">{step.title}</span>{step.outputCardIds.length > 0 && <span className="text-[10px] opacity-45">{step.outputCardIds.length} 卡片</span>}{!active && (step.status === 'completed' || step.status === 'error') && <button type="button" onClick={() => void rerun(step)} className="w-6 h-6 grid place-items-center rounded hover:bg-black/5 dark:hover:bg-white/10" title="从此步骤重跑"><RefreshCw size={11} /></button>}</div><div className="ml-8 mt-0.5 text-[10px] opacity-50">{step.description}</div>{step.error && <div className="ml-8 mt-1 text-[10px] text-red-500">{step.error}</div>}</div>)}
       </div>
     </div>
-    {checkpoint && <div className="rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 p-3 text-xs"><div className="font-semibold">需要你确认：{checkpoint.title}</div><div className="mt-1 opacity-70">{checkpoint.command === 'save_storyboard' ? '确认创作规格后会先准备角色、场景和道具的统一视觉设定。' : checkpoint.command === 'lock_continuity' ? '请检查画布中的设定图；可替换素材或重新生成。不满意不要确认，确认后当前人物、产品、道具和场景外观会被锁定，并作为相关镜头的共同参考。' : '请检查画布中的静帧；确认后才会创建并提交视频任务。'}</div>{lockWarnings.map((message) => <div key={message} className="mt-2 rounded bg-white/40 dark:bg-black/15 px-2 py-1.5 text-[10px] leading-relaxed">• {message}</div>)}</div>}
+    {checkpoint && <div className="rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-300 p-3 text-xs"><div className="font-semibold">需要你确认：{checkpoint.title}</div><div className="mt-1 opacity-70">{checkpointHelp}</div>{lockWarnings.map((message) => <div key={message} className="mt-2 rounded bg-white/40 dark:bg-black/15 px-2 py-1.5 text-[10px] leading-relaxed">• {message}</div>)}</div>}
     <div className="grid grid-cols-2 gap-2">
-      {stale ? <button type="button" onClick={onNewPlan} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold">按新内容创建计划</button> : checkpoint || run.status === 'planned' ? <button type="button" disabled={videoCheckpointBlocked} onClick={() => void approveWorkflowCheckpoint(run.id)} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"><ShieldCheck size={14} />{videoCheckpointBlocked ? (plan ? '请先修复视频生成计划' : '正在检查视频生成计划…') : '确认并继续'}</button> : errorStep ? <button type="button" onClick={() => { retryWorkflowStep(run.id, errorStep.id); void resumeWorkflow(run.id) }} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><RefreshCw size={14} />修复后重试此步骤</button> : active ? <button type="button" onClick={() => pauseWorkflow(run.id)} className="col-span-2 h-10 rounded-lg bg-amber-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><Pause size={14} />暂停</button> : run.status !== 'completed' && run.status !== 'canceled' ? <button type="button" onClick={() => void resumeWorkflow(run.id)} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><Play size={14} />继续执行</button> : null}
+      {stale ? <button type="button" onClick={onNewPlan} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold">按新内容创建计划</button> : pendingReplan.length ? null : checkpoint || run.status === 'planned' ? <button type="button" disabled={checkpointBlocked} onClick={() => void approveWorkflowCheckpoint(run.id)} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-40"><ShieldCheck size={14} />{audioCheckpointBlocked ? '请先配置音频 Provider' : videoCheckpointBlocked ? (plan ? '请先修复视频生成计划' : '正在检查视频生成计划…') : '确认并继续'}</button> : errorStep ? <button type="button" onClick={() => { retryWorkflowStep(run.id, errorStep.id); void resumeWorkflow(run.id) }} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><RefreshCw size={14} />修复后重试此步骤</button> : active ? <button type="button" onClick={() => pauseWorkflow(run.id)} className="col-span-2 h-10 rounded-lg bg-amber-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><Pause size={14} />暂停</button> : run.status !== 'completed' && run.status !== 'canceled' ? <button type="button" onClick={() => void resumeWorkflow(run.id)} className="col-span-2 h-10 rounded-lg bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5"><Play size={14} />继续执行</button> : null}
       {run.status !== 'completed' && run.status !== 'canceled' && <button type="button" onClick={() => void cancelWorkflow(run.id)} className="h-8 rounded-md bg-black/5 dark:bg-white/10 text-[11px] flex items-center justify-center gap-1"><Square size={11} />取消工作流</button>}
       <button type="button" onClick={onDelete} className="h-8 rounded-md text-red-500 hover:bg-red-500/10 text-[11px] flex items-center justify-center gap-1"><Trash2 size={12} />删除记录</button>
     </div>
