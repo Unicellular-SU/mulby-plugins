@@ -509,27 +509,73 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
   const generateAsset = useProjectStore((s) => s.generateAsset)
   const generateAssetVariant = useProjectStore((s) => s.generateAssetVariant)
   const handoff = useMemo(() => buildEpisodeProductionHandoff(doc, episode), [doc, episode])
+  const [running, setRunning] = useState<string | undefined>()
+  const [error, setError] = useState<string | undefined>()
   const hasHints = handoff.carriedState.length > 0 || handoff.recaps.length > 0 || handoff.suggestions.length > 0
   const autoSuggestions = handoff.suggestions.filter((suggestion) => suggestion.autoRepairable !== false && !suggestion.disabledReason)
-  const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]) => {
-    await applyEpisodeHandoffSuggestion(suggestion, {
+  /**
+   * generateAsset/generateAssetVariant 不 reject，失败只写进 asset.error，
+   * 所以执行完必须回读资产状态——否则整条补图链会一路静默失败到底。
+   */
+  const failureOf = (assetId: string, variantId?: string): string | undefined => {
+    const asset = useProjectStore.getState().doc?.assets.find((item) => item.id === assetId)
+    if (!asset) return '资产已不存在'
+    if (variantId) {
+      const variant = asset.variants?.find((item) => item.id === variantId)
+      if (!variant) return '形态已不存在'
+      if (variant.state === 'failed') return `${asset.name}-${variant.label}：${variant.error ?? '生成失败'}`
+      return variant.refImageId ? undefined : `${asset.name}-${variant.label}：生成没有产出图片`
+    }
+    if (asset.state === 'failed') return `${asset.name}：${asset.error ?? '生成失败'}`
+    return asset.refImageId ? undefined : `${asset.name}：生成没有产出图片`
+  }
+  const runSuggestion = async (suggestion: (typeof handoff.suggestions)[number]): Promise<string | undefined> => {
+    const result = await applyEpisodeHandoffSuggestion(suggestion, {
       getDoc: () => useProjectStore.getState().doc,
       generateAsset,
       generateAssetVariant,
     })
+    if (result.skipped) return result.reason ?? '该建议被跳过'
+    return failureOf(suggestion.assetId, suggestion.variantId)
+  }
+  const runOne = async (suggestion: (typeof handoff.suggestions)[number]) => {
+    if (running) return
+    setRunning(suggestion.id)
+    setError(undefined)
+    try {
+      setError(await runSuggestion(suggestion))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunning(undefined)
+    }
   }
   const runAutoSuggestions = async () => {
-    const attempted = new Set<string>()
-    for (let i = 0; i < 24; i += 1) {
-      const latestDoc = useProjectStore.getState().doc
-      const latestEpisode = latestDoc?.episodes?.find((item) => item.id === episode.id)
-      if (!latestDoc || !latestEpisode) break
-      const suggestion = buildEpisodeProductionHandoff(latestDoc, latestEpisode).suggestions.find(
-        (item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id),
-      )
-      if (!suggestion) break
-      attempted.add(suggestion.id)
-      await runSuggestion(suggestion)
+    if (running) return
+    setRunning('all')
+    setError(undefined)
+    try {
+      const attempted = new Set<string>()
+      for (let i = 0; i < 24; i += 1) {
+        const latestDoc = useProjectStore.getState().doc
+        const latestEpisode = latestDoc?.episodes?.find((item) => item.id === episode.id)
+        if (!latestDoc || !latestEpisode) break
+        const suggestion = buildEpisodeProductionHandoff(latestDoc, latestEpisode).suggestions.find(
+          (item) => item.autoRepairable !== false && !item.disabledReason && !attempted.has(item.id),
+        )
+        if (!suggestion) break
+        attempted.add(suggestion.id)
+        const failure = await runSuggestion(suggestion)
+        // 第一处失败就停：继续跑只会把同一个错误（多半是模型/供应商问题）重复 N 遍
+        if (failure) {
+          setError(`${failure}（已停在第一处失败）`)
+          return
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunning(undefined)
     }
   }
   return (
@@ -554,6 +600,7 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
           <b>E{episode.index + 1} 开拍状态</b>
           <span>{handoff.carriedState.length} 个资产 · {handoff.recaps.length} 条回顾 · {handoff.suggestions.length} 条待补图</span>
         </div>
+        {error && <p className="afs-studio__continuityalert is-error" role="alert">{error}</p>}
         {!hasHints && <p className="afs-stwb__handoff-empty">本集之前没有任何分镜，没有需要承接的形态。</p>}
         {handoff.carriedState.length > 0 && (
           <section className="afs-stwb__handoff-sec">
@@ -581,11 +628,11 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
               <button
                 type="button"
                 className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk"
-                disabled={actionBusy || autoSuggestions.length === 0}
+                disabled={actionBusy || !!running || autoSuggestions.length === 0}
                 title={autoSuggestions.length ? `顺序执行 ${autoSuggestions.length} 条补图` : '没有可自动处理的建议'}
                 onClick={() => void runAutoSuggestions()}
               >
-                <Wand2 size={11} />
+                {running === 'all' ? <Loader2 size={11} className="afs-spin" /> : <Wand2 size={11} />}
                 一键补齐
               </button>
             </div>
@@ -597,11 +644,11 @@ function EpisodeHandoffPopover({ doc, episode }: { doc: ProjectDoc; episode: Epi
                   <button
                     type="button"
                     className="afs-stwb__handoff-action"
-                    disabled={actionBusy || !!suggestion.disabledReason}
+                    disabled={actionBusy || !!running || !!suggestion.disabledReason}
                     title={suggestion.disabledReason || suggestion.detail}
-                    onClick={() => void runSuggestion(suggestion)}
+                    onClick={() => void runOne(suggestion)}
                   >
-                    <Wand2 size={11} />
+                    {running === suggestion.id ? <Loader2 size={11} className="afs-spin" /> : <Wand2 size={11} />}
                     生成
                   </button>
                 </article>
@@ -2498,7 +2545,48 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
   const mergeProjectAssetInto = useProjectStore((s) => s.mergeProjectAssetInto)
   const distributeNovelChaptersAcrossEpisodes = useProjectStore((s) => s.distributeNovelChaptersAcrossEpisodes)
   const busy = useProjectStore((s) => s.batch.running || s.film.state === 'composing')
+  const projectImageModel = useProjectStore((s) => s.doc?.meta.imageModel)
+  const selectedImageModel = useGraphStore((s) => s.selectedImageModel)
+  const imageModelReady = !!(projectImageModel || selectedImageModel)
   const [expandedCategories, setExpandedCategories] = useState<Set<ContinuityCategory>>(new Set())
+  const [running, setRunning] = useState<string | undefined>()
+  const [lastError, setLastError] = useState<string | undefined>()
+
+  /**
+   * 修复动作的统一执行壳。
+   *
+   * generateAsset/generateAssetVariant 把异常吞进 asset.error 而不是 reject，所以
+   * 光 await 是看不出成败的——必须回读资产状态。少了这一步，生成一失败抽屉就毫无反应，
+   * 用户只会觉得"按钮点了没用"。
+   */
+  const runFix = async (label: string, task: () => Promise<void>, inspect?: () => string | undefined) => {
+    if (running) return
+    setRunning(label)
+    setLastError(undefined)
+    try {
+      await task()
+      const failure = inspect?.()
+      if (failure) setLastError(failure)
+    } catch (e) {
+      setLastError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRunning(undefined)
+    }
+  }
+
+  /** 回读资产/形态上的失败信息（store 只把错误写在那里） */
+  const readFailure = (assetId: string, variantId?: string) => () => {
+    const asset = useProjectStore.getState().doc?.assets.find((item) => item.id === assetId)
+    if (!asset) return '资产已不存在'
+    if (variantId) {
+      const variant = asset.variants?.find((item) => item.id === variantId)
+      if (!variant) return '形态已不存在'
+      if (variant.state === 'failed') return `${asset.name}-${variant.label}：${variant.error ?? '生成失败'}`
+      return variant.refImageId ? undefined : `${asset.name}-${variant.label}：生成没有产出图片`
+    }
+    if (asset.state === 'failed') return `${asset.name}：${asset.error ?? '生成失败'}`
+    return asset.refImageId ? undefined : `${asset.name}：生成没有产出图片`
+  }
 
   const grouped = useMemo(() => {
     const map = new Map<ContinuityCategory, ContinuityReportView['issues']>()
@@ -2554,8 +2642,12 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
     if (issue.code === 'missing_ref_image' && issue.assetId) {
       return [
         issue.variantId
-          ? { label: '生成形态图', run: () => void generateAssetVariant(issue.assetId!, issue.variantId!) }
-          : { label: '生成参考图', run: () => void generateAsset(issue.assetId!) },
+          ? {
+              label: '生成形态图',
+              run: () =>
+                void runFix('生成形态图', () => generateAssetVariant(issue.assetId!, issue.variantId!), readFailure(issue.assetId!, issue.variantId)),
+            }
+          : { label: '生成参考图', run: () => void runFix('生成参考图', () => generateAsset(issue.assetId!), readFailure(issue.assetId!)) },
       ]
     }
     if (issue.code === 'unexplained_appearance_change') {
@@ -2609,13 +2701,22 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
       if (!missing.length) return undefined
       return {
         label: `生成全部缺失参考图（${missing.length}）`,
-        run: async () => {
-          // 先补主图再补形态图：形态是从主图 img2img 派生的，顺序反了会失败
-          const mains = [...new Set(missing.filter((issue) => !issue.variantId).map((issue) => issue.assetId!))]
-          for (const assetId of mains) await generateAsset(assetId)
-          const variants = missing.filter((issue) => issue.variantId)
-          for (const issue of variants) await generateAssetVariant(issue.assetId!, issue.variantId!)
-        },
+        run: () =>
+          void runFix(`生成全部缺失参考图（${missing.length}）`, async () => {
+            // 先补主图再补形态图：形态是从主图 img2img 派生的，顺序反了必然失败
+            const mains = [...new Set(missing.filter((issue) => !issue.variantId).map((issue) => issue.assetId!))]
+            for (const assetId of mains) {
+              await generateAsset(assetId)
+              const failure = readFailure(assetId)()
+              // 第一处失败就停：多半是模型/供应商问题，硬跑完只会把同一个错误刷 N 遍
+              if (failure) throw new Error(`${failure}（已停在第一处失败，共 ${missing.length} 项待补）`)
+            }
+            for (const issue of missing.filter((item) => item.variantId)) {
+              await generateAssetVariant(issue.assetId!, issue.variantId!)
+              const failure = readFailure(issue.assetId!, issue.variantId)()
+              if (failure) throw new Error(`${failure}（已停在第一处失败，共 ${missing.length} 项待补）`)
+            }
+          }),
       }
     }
     if (category === 'appearance') {
@@ -2646,6 +2747,17 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
           <IconButton size="sm" variant="ghost" aria-label="关闭" icon={<X size={16} />} onClick={onClose} />
         </div>
 
+        {/* 没有图像模型时所有补图动作都会瞬间失败。与其让用户点了看不出所以然，不如直接说明 */}
+        {!imageModelReady && report.issues.some((issue) => issue.code === 'missing_ref_image') && (
+          <p className="afs-studio__continuityalert">
+            还没有选择图像模型，补参考图会直接失败。先到顶栏「模型」里选一个图像模型。
+          </p>
+        )}
+        {lastError && (
+          <p className="afs-studio__continuityalert is-error" role="alert">
+            {lastError}
+          </p>
+        )}
         {report.issues.length === 0 ? (
           <p className="afs-stwb__handoff-empty">没有发现连续性问题。</p>
         ) : (
@@ -2665,8 +2777,13 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
                   {category === 'hint' && <em>不影响生成</em>}
                   <span className="afs-series__spacer" />
                   {bulk && (
-                    <button type="button" className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk" disabled={busy} onClick={() => void bulk.run()}>
-                      <Wand2 size={11} /> {bulk.label}
+                    <button
+                      type="button"
+                      className="afs-stwb__handoff-action afs-stwb__handoff-action--bulk"
+                      disabled={busy || !!running}
+                      onClick={() => void bulk.run()}
+                    >
+                      {running === bulk.label ? <Loader2 size={11} className="afs-spin" /> : <Wand2 size={11} />} {bulk.label}
                     </button>
                   )}
                 </h4>
@@ -2684,8 +2801,8 @@ function ContinuityDetailsDrawer({ report, onClose }: { report: ContinuityReport
                         {fixes.length > 0 && (
                           <div className="afs-studio__continuityactions">
                             {fixes.map((fix) => (
-                              <button key={fix.label} type="button" className="afs-stwb__handoff-action" disabled={busy} onClick={fix.run}>
-                                {fix.label}
+                              <button key={fix.label} type="button" className="afs-stwb__handoff-action" disabled={busy || !!running} onClick={fix.run}>
+                                {running === fix.label && <Loader2 size={11} className="afs-spin" />} {fix.label}
                               </button>
                             ))}
                           </div>
