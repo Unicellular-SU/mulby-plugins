@@ -3,7 +3,7 @@
 // 从而保证 generate.ts 能在拿到 taskId 后即释放并发槽、把轮询挪到池外（长视频不再饿死文/图队列）。
 import assert from 'node:assert/strict'
 import type { ProviderConfig } from '../../src/ui/services/providers/types.ts'
-import { submitVideoJob, runVideoJob, resumeVideoJob, testProvider } from '../../src/ui/services/providers/engine.ts'
+import { pollDelayMs, retryAfterDelayMs, submitVideoJob, runVideoJob, resumeVideoJob, testProvider } from '../../src/ui/services/providers/engine.ts'
 import { PROVIDER_TEMPLATES } from '../../src/ui/services/providers/presets.ts'
 
 const cfg = {
@@ -166,6 +166,19 @@ async function testCrossOriginHealthDoesNotLeakCredentials() {
   installHttp()
 }
 
+function testPollingBackoffAndRetryAfter() {
+  const provider = { ...cfg, pollIntervalMs: 3000, pollScheduleMs: [5000, 10000, 15000, 20000, 30000] }
+  assert.deepEqual(
+    Array.from({ length: 7 }, (_, attempt) => pollDelayMs(provider, attempt)),
+    [5000, 10000, 15000, 20000, 30000, 30000, 30000],
+    '退避序列用完后应重复最后一项'
+  )
+  assert.equal(pollDelayMs(provider, 0, { 'Retry-After': '12' }), 12000, 'Retry-After 秒数应覆盖本地退避')
+  const now = Date.parse('2026-08-28T02:00:00Z')
+  assert.equal(retryAfterDelayMs({ 'retry-after': 'Fri, 28 Aug 2026 02:00:15 GMT' }, now), 15000, 'Retry-After HTTP-date 应转换为延迟')
+  assert.equal(retryAfterDelayMs({ 'Retry-After': 'invalid' }, now), undefined)
+}
+
 async function testSeedance25TemplateRequestAndPoll() {
   calls = []
   let submitRequest: any
@@ -178,15 +191,24 @@ async function testSeedance25TemplateRequestAndPoll() {
     return {
       status: 200,
       data: {
-        task_id: 'task-seedance25',
+        ok: true,
+        taskId: 'task-seedance25',
         status: 'completed',
-        result_url: 'https://raydu.liekumall.com/results/seedance25.mp4'
+        progress: 100,
+        result: {
+          ok: true,
+          videoUrl: 'https://raydu.liekumall.com/results/seedance25.mp4',
+          ossUrl: 'https://raydu.liekumall.com/results/seedance25-oss.mp4',
+          originalUrl: 'https://raydu.liekumall.com/results/seedance25-original.mp4',
+          videoUrls: ['https://raydu.liekumall.com/results/seedance25-original.mp4']
+        }
       }
     }
   }
   const template = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25')
   assert.ok(template)
-  const provider = { ...template.make(), pollIntervalMs: 1 }
+  // 保留旧 Provider 的 result_url 配置，验证引擎通用回退也能直接修复存量配置。
+  const provider = { ...template.make(), videoUrlPath: 'result_url', pollScheduleMs: [1], pollIntervalMs: 1 }
   const result = await runVideoJob(provider, 'SECRET', {
     prompt: '一只橘猫在花园里行走',
     imageDataUrls: ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND', 'data:image/png;base64,THIRD'],
@@ -273,9 +295,10 @@ async function main() {
   await testTtsAuthFailure()
   await testDefaultRequestUsesDeclaredFields()
   await testCrossOriginHealthDoesNotLeakCredentials()
+  testPollingBackoffAndRetryAfter()
   await testSeedance25TemplateRequestAndPoll()
   await testSeedance25SyncTemplateAndUrlFallbacks()
-  console.log('provider engine: 10 tests OK')
+  console.log('provider engine: 11 tests OK')
 }
 
 main().catch((e) => {

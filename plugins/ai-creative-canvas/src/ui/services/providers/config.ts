@@ -16,6 +16,9 @@ export interface ProviderRequestPreview {
   pollUrl?: string
 }
 
+export const DEFAULT_ASYNC_POLL_SCHEDULE_MS = [5000, 10000, 15000, 20000, 30000] as const
+export const RAYDU_SEEDANCE25_RESULT_PATHS = 'result.videoUrl|result.ossUrl|result.originalUrl|result.videoUrls.0|result_url|result.url|result.video_url'
+
 function httpUrl(value: string): boolean {
   try {
     const url = new URL(value)
@@ -113,12 +116,48 @@ export function isProviderConfigShape(value: unknown): value is ProviderConfig {
     && (candidate.type === 'custom-video' || candidate.type === 'openai-tts')
     && typeof candidate.baseURL === 'string'
     && (candidate.headers == null || isStringRecord(candidate.headers))
+    && (candidate.pollScheduleMs == null || (
+      Array.isArray(candidate.pollScheduleMs)
+      && candidate.pollScheduleMs.every((delay) => Number.isFinite(delay) && delay > 0)
+    ))
     && (candidate.submitRetries == null || (Number.isInteger(candidate.submitRetries) && candidate.submitRetries >= 0 && candidate.submitRetries <= 5))
     && (candidate.pricing == null || (
       typeof candidate.pricing === 'object'
       && typeof candidate.pricing.currency === 'string'
       && [candidate.pricing.perRequest, candidate.pricing.perSecond, candidate.pricing.confirmAbove].every((amount) => amount == null || (Number.isFinite(amount) && amount >= 0))
     ))
+}
+
+/**
+ * 只迁移已知内置模板的旧默认值；用户改过的路径、间隔和超时均保留。
+ * 返回原对象表示无需迁移，便于 store 判断是否需要回写。
+ */
+export function migrateProviderConfig(provider: ProviderConfig): ProviderConfig {
+  const isLegacyRayduSeedance25 = provider.type === 'custom-video'
+    && provider.model === 'seedance25'
+    && provider.submitUrl === 'https://raydu.liekumall.com/v1/video/generations'
+    && provider.pollUrl === 'https://raydu.liekumall.com/v1/video/generations/{taskId}'
+  if (!isLegacyRayduSeedance25) return provider
+
+  let changed = false
+  const next = { ...provider }
+  if (!provider.videoUrlPath?.trim() || provider.videoUrlPath === 'result_url') {
+    next.videoUrlPath = RAYDU_SEEDANCE25_RESULT_PATHS
+    changed = true
+  }
+  if (!provider.taskIdPath?.trim() || provider.taskIdPath === 'task_id') {
+    next.taskIdPath = 'task_id|taskId|id'
+    changed = true
+  }
+  if (!provider.pollScheduleMs && (provider.pollIntervalMs == null || provider.pollIntervalMs === 3000)) {
+    next.pollScheduleMs = [...DEFAULT_ASYNC_POLL_SCHEDULE_MS]
+    changed = true
+  }
+  if (provider.timeoutMs == null || provider.timeoutMs === 1800000) {
+    next.timeoutMs = 2400000
+    changed = true
+  }
+  return changed ? next : provider
 }
 
 /** 老配置自动从模板/字段推断，新配置的显式声明优先。 */
@@ -243,6 +282,13 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
   if (provider.models?.length && !provider.model) warning('model', '尚未选择默认模型，将使用模型清单第一项')
   if (provider.submitRetries != null && (!Number.isInteger(provider.submitRetries) || provider.submitRetries < 0 || provider.submitRetries > 5)) error('submitRetries', '提交重试次数必须是 0～5 的整数')
   if (provider.pollIntervalMs != null && provider.pollIntervalMs < 500) warning('pollIntervalMs', '轮询间隔低于 500ms，可能触发服务端限流')
+  if (provider.pollScheduleMs != null) {
+    if (!Array.isArray(provider.pollScheduleMs) || !provider.pollScheduleMs.length || provider.pollScheduleMs.some((delay) => !Number.isFinite(delay) || delay <= 0)) {
+      error('pollScheduleMs', '轮询退避必须是非空的正数毫秒数组')
+    } else if (provider.pollScheduleMs.some((delay) => delay < 500)) {
+      warning('pollScheduleMs', '轮询退避低于 500ms，可能触发服务端限流')
+    }
+  }
   return issues
 }
 

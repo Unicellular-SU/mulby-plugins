@@ -65,6 +65,8 @@ export interface ProviderConfig {
   failValues?: string // 终态(失败) csv
   resultPath?: string // 结果媒体 URL 的 JSON 路径；可用 | 按优先级声明多个回退路径
   pollIntervalMs?: number
+  /** 轮询退避序列；每次查询依次取值，超过数组后重复最后一项。响应头 Retry-After 优先。 */
+  pollScheduleMs?: number[]
   timeoutMs?: number
   /** 瞬时 HTTP 错误后的额外提交次数；默认 2。无幂等保证或可能重复计费时应设为 0。 */
   submitRetries?: number

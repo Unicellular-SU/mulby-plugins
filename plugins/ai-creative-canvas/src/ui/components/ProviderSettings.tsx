@@ -53,6 +53,10 @@ function csvNumbers(value: string): number[] {
   return [...new Set(value.split(/[，,\s]+/).map(Number).filter((item) => Number.isFinite(item) && item > 0))].sort((a, b) => a - b)
 }
 
+function pollScheduleNumbers(value: string): number[] {
+  return value.split(/[，,\s]+/).map((item) => item.trim()).filter(Boolean).map(Number).filter((item) => Number.isFinite(item) && item > 0)
+}
+
 function IssueList({ issues }: { issues: ProviderConfigIssue[] }) {
   if (!issues.length) {
     return (
@@ -122,6 +126,7 @@ export function ProviderSettings() {
   const [keyValue, setKeyValue] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [headersText, setHeadersText] = useState('')
+  const [pollScheduleText, setPollScheduleText] = useState('')
   const [section, setSection] = useState<SettingsSection>('basic')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null)
@@ -131,6 +136,7 @@ export function ProviderSettings() {
     const provider = providers.find((item) => item.id === selectedId) || null
     setDraft(provider ? { ...provider, capabilities: provider.capabilities ? { ...provider.capabilities } : undefined } : null)
     setHeadersText(provider?.headers ? JSON.stringify(provider.headers, null, 2) : '')
+    setPollScheduleText(provider?.pollScheduleMs?.join(', ') || '')
     setTestResult(null)
     if (provider) {
       void getKey(provider.id).then((value) => { if (alive) setKeyValue(value) })
@@ -538,6 +544,7 @@ export function ProviderSettings() {
                           <Row label="状态字段"><input className="ace-input" value={draft.statusField || ''} onChange={(event) => updateDraft({ statusField: event.target.value })} /></Row>
                           <Row label="结果 URL 路径" hint="可用 | 按优先级填写多个回退路径，例如 videoUrl|ossUrl"><input className="ace-input" value={draft.videoUrlPath || ''} onChange={(event) => updateDraft({ videoUrlPath: event.target.value })} /></Row>
                           <Row label="轮询间隔 ms"><input className="ace-input" type="number" value={draft.pollIntervalMs || 3000} onChange={(event) => updateDraft({ pollIntervalMs: Number(event.target.value) || 3000 })} /></Row>
+                          <Row label="轮询退避 ms" hint="逗号分隔，例如 5000,10000,15000,20000,30000；超过数组后重复最后一项，并优先遵循 Retry-After"><input className="ace-input" value={pollScheduleText} onChange={(event) => { const value = event.target.value; setPollScheduleText(value); updateDraft({ pollScheduleMs: value.trim() ? pollScheduleNumbers(value) : undefined }) }} placeholder="留空则使用固定间隔" /></Row>
                           <Row label="请求超时 ms"><input className="ace-input" type="number" min="1000" value={draft.timeoutMs || 600000} onChange={(event) => updateDraft({ timeoutMs: Number(event.target.value) || 600000 })} /></Row>
                           <Row label="提交重试次数" hint="无幂等保证或可能重复计费时请设为 0"><input className="ace-input" type="number" min="0" max="5" step="1" value={draft.submitRetries ?? 2} onChange={(event) => updateDraft({ submitRetries: Number(event.target.value) })} /></Row>
                         </div>
@@ -561,6 +568,7 @@ export function ProviderSettings() {
                           <Row label="状态字段"><input className="ace-input" value={draft.statusField || ''} onChange={(event) => updateDraft({ statusField: event.target.value })} /></Row>
                           <Row label="结果 URL 路径" hint="可用 | 按优先级填写多个回退路径"><input className="ace-input" value={draft.resultPath || ''} onChange={(event) => updateDraft({ resultPath: event.target.value })} /></Row>
                           <Row label="轮询间隔 ms"><input className="ace-input" type="number" value={draft.pollIntervalMs || 2000} onChange={(event) => updateDraft({ pollIntervalMs: Number(event.target.value) || 2000 })} /></Row>
+                          <Row label="轮询退避 ms" hint="逗号分隔，超过数组后重复最后一项；响应头 Retry-After 优先"><input className="ace-input" value={pollScheduleText} onChange={(event) => { const value = event.target.value; setPollScheduleText(value); updateDraft({ pollScheduleMs: value.trim() ? pollScheduleNumbers(value) : undefined }) }} placeholder="留空则使用固定间隔" /></Row>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <Row label="图片模式"><select className="ace-input" value={draft.imageMode || 'none'} onChange={(event) => updateDraft({ imageMode: event.target.value as ProviderConfig['imageMode'] })}><option value="none">不传图</option><option value="dataurl">DataURL</option><option value="url">公网 URL（先上传）</option></select></Row>

@@ -3,6 +3,7 @@ import { getParamSchema } from '../../src/ui/services/paramSchema.ts'
 import {
   buildProviderRequestPreview,
   isProviderConfigShape,
+  migrateProviderConfig,
   renderProviderTemplate,
   resolveVideoCapabilities,
   validateProviderConfig
@@ -96,9 +97,11 @@ function testSeedance25Preset() {
   assert.equal(provider.model, 'seedance25')
   assert.equal(provider.submitUrl, 'https://raydu.liekumall.com/v1/video/generations')
   assert.equal(provider.pollUrl, 'https://raydu.liekumall.com/v1/video/generations/{taskId}')
-  assert.equal(provider.taskIdPath, 'task_id')
+  assert.equal(provider.taskIdPath, 'task_id|taskId|id')
   assert.equal(provider.statusField, 'status')
-  assert.equal(provider.videoUrlPath, 'result_url')
+  assert.equal(provider.videoUrlPath, 'result.videoUrl|result.ossUrl|result.originalUrl|result.videoUrls.0|result_url|result.url|result.video_url')
+  assert.deepEqual(provider.pollScheduleMs, [5000, 10000, 15000, 20000, 30000])
+  assert.equal(provider.timeoutMs, 2400000)
   assert.equal(provider.submitRetries, 0)
   const capabilities = resolveVideoCapabilities(provider)
   assert.equal(capabilities.referenceInputs.images.max, 9)
@@ -153,8 +156,35 @@ function testSeedance25Preset() {
   assert.equal(syncPreview.pollUrl, undefined)
 }
 
+function testSeedance25StoredProviderMigration() {
+  const current = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25')?.make()
+  assert.ok(current)
+  const legacy: ProviderConfig = {
+    ...current,
+    taskIdPath: 'task_id',
+    videoUrlPath: 'result_url',
+    pollScheduleMs: undefined,
+    pollIntervalMs: 3000,
+    timeoutMs: 1800000
+  }
+  const migrated = migrateProviderConfig(legacy)
+  assert.notEqual(migrated, legacy)
+  assert.equal(migrated.taskIdPath, 'task_id|taskId|id')
+  assert.equal(migrated.videoUrlPath, 'result.videoUrl|result.ossUrl|result.originalUrl|result.videoUrls.0|result_url|result.url|result.video_url')
+  assert.deepEqual(migrated.pollScheduleMs, [5000, 10000, 15000, 20000, 30000])
+  assert.equal(migrated.timeoutMs, 2400000)
+
+  const customized = { ...legacy, pollIntervalMs: 12000, videoUrlPath: 'custom.url', timeoutMs: 900000 }
+  const preserved = migrateProviderConfig(customized)
+  assert.equal(preserved.videoUrlPath, 'custom.url', '用户自定义结果路径不应被覆盖')
+  assert.equal(preserved.pollScheduleMs, undefined, '用户自定义固定间隔不应被退避覆盖')
+  assert.equal(preserved.pollIntervalMs, 12000)
+  assert.equal(preserved.timeoutMs, 900000)
+}
+
 testTemplateAndPreview()
 testValidation()
 testCapabilitiesAndCardSchema()
 testSeedance25Preset()
+testSeedance25StoredProviderMigration()
 console.log('provider config: assertions OK')

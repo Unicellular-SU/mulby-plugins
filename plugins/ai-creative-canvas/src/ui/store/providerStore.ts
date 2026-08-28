@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ProviderConfig, ProviderKind } from '../services/providers/types'
-import { isProviderConfigShape } from '../services/providers/config'
+import { isProviderConfigShape, migrateProviderConfig } from '../services/providers/config'
 import { PLUGIN_ID } from '../services/persistence'
 
 function storage() {
@@ -35,13 +35,24 @@ export const useProviders = create<ProviderState>((set, get) => ({
     try {
       const data = (await storage()?.get('providers', PLUGIN_ID)) as { providers?: unknown; activeVideoId?: string | null; activeAudioId?: string | null } | undefined
       if (data && typeof data === 'object') {
-        const providers = Array.isArray(data.providers) ? data.providers.filter(isProviderConfigShape) : []
+        const accepted = Array.isArray(data.providers) ? data.providers.filter(isProviderConfigShape) : []
+        const providers = accepted.map(migrateProviderConfig)
+        const migrated = providers.some((provider, index) => provider !== accepted[index])
+        const activeVideoId = providers.some((provider) => provider.kind === 'video' && provider.id === data.activeVideoId) ? data.activeVideoId || null : null
+        const activeAudioId = providers.some((provider) => provider.kind === 'audio' && provider.id === data.activeAudioId) ? data.activeAudioId || null : null
         set({
           providers,
-          activeVideoId: providers.some((provider) => provider.kind === 'video' && provider.id === data.activeVideoId) ? data.activeVideoId || null : null,
-          activeAudioId: providers.some((provider) => provider.kind === 'audio' && provider.id === data.activeAudioId) ? data.activeAudioId || null : null,
+          activeVideoId,
+          activeAudioId,
           loaded: true
         })
+        if (migrated) {
+          try {
+            await storage()?.set('providers', { providers, activeVideoId, activeAudioId }, PLUGIN_ID)
+          } catch {
+            /* 内存中已应用迁移；回写失败不影响本次使用 */
+          }
+        }
       } else {
         set({ loaded: true })
       }
@@ -127,7 +138,7 @@ export const useProviders = create<ProviderState>((set, get) => ({
     try {
       const data = JSON.parse(text)
       if (!data || !Array.isArray(data.providers) || !data.providers.every(isProviderConfigShape)) return false
-      const providers = data.providers as ProviderConfig[]
+      const providers = (data.providers as ProviderConfig[]).map(migrateProviderConfig)
       const activeVideoId = providers.some((provider) => provider.kind === 'video' && provider.id === data.activeVideoId) ? data.activeVideoId : null
       const activeAudioId = providers.some((provider) => provider.kind === 'audio' && provider.id === data.activeAudioId) ? data.activeAudioId : null
       set({ providers, activeVideoId, activeAudioId })

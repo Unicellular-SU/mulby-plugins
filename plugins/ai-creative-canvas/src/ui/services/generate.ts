@@ -417,7 +417,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const vctrl = new AbortController()
       videoAborts.set(cardId, vctrl)
       const startedAt = Date.now()
-      const { url, taskId } = await submitVideoJob(
+      const { url, taskId, retryAfterMs } = await submitVideoJob(
         cfg,
         key,
         { prompt: vprompt, imageDataUrls, videoUrls, model: card.modelId || undefined, params: sentParams },
@@ -447,6 +447,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
         vctrl,
         url,
         taskId,
+        retryAfterMs,
         sentPrompt: vprompt,
         directorFingerprint: directorPrompt ? directorDraft?.contextFingerprint || null : null,
         modelId: card.modelId || cfg.model || null,
@@ -464,7 +465,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
     // ---- 轮询阶段（池外）：无同步 url 时凭 taskId 续跑 ----
     let url = submit.url
     if (!url && submit.taskId) {
-      const r = await resumeVideoJob(submit.cfg, submit.key, submit.taskId, (p) => commit({ progress: p }), submit.vctrl.signal)
+      const r = await resumeVideoJob(submit.cfg, submit.key, submit.taskId, (p) => commit({ progress: p }), submit.vctrl.signal, submit.retryAfterMs)
       url = r.url
     }
     if (!url) throw new Error('未获取到结果 URL（检查 Provider 配置）')

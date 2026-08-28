@@ -1,7 +1,7 @@
 import type { ProviderConfig } from './types'
 import { toFileUrl } from '../media'
 import { PLUGIN_ID } from '../persistence'
-import { renderProviderTemplate, resolveVideoCapabilities, validateProviderConfig, type ProviderTemplateValue } from './config'
+import { DEFAULT_ASYNC_POLL_SCHEDULE_MS, renderProviderTemplate, resolveVideoCapabilities, validateProviderConfig, type ProviderTemplateValue } from './config'
 
 function http() {
   return window.mulby.http
@@ -11,6 +11,22 @@ function host() {
 }
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms)
+  if (signal.aborted) return Promise.reject(new Error('已取消(aborted)'))
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      reject(new Error('已取消(aborted)'))
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 function parse(s: any): any {
   try {
@@ -35,6 +51,27 @@ function jgetFirst(obj: any, paths?: string): any {
   }
   return undefined
 }
+
+const COMMON_VIDEO_URL_PATHS = [
+  'result.videoUrl',
+  'result.ossUrl',
+  'result.originalUrl',
+  'result.videoUrls.0',
+  'result_url',
+  'videoUrl',
+  'ossUrl',
+  'originalUrl',
+  'video_url',
+  'result.url',
+  'result.video_url'
+].join('|')
+
+function mediaUrlFromResponse(data: any, configuredPaths?: string): string | undefined {
+  const value = jgetFirst(data, [configuredPaths, COMMON_VIDEO_URL_PATHS].filter(Boolean).join('|'))
+  if (typeof value === 'string' && value.trim()) return value.trim()
+  if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && !!item.trim())?.trim()
+  return undefined
+}
 function setPath(obj: any, path: string, val: any): void {
   const segs = path.split('.')
   let cur = obj
@@ -47,28 +84,61 @@ function setPath(obj: any, path: string, val: any): void {
 }
 
 // 经 mulby.http.request 发请求并显式给足超时（视频提交/轮询都很慢，.post/.get 快捷方法默认超时太短会报 Request timeout）
-async function httpReq(url: string, method: 'GET' | 'POST', headers: any, body: any, timeoutMs: number): Promise<{ status: number; data: any }> {
+interface HttpResult {
+  status: number
+  data: any
+  headers?: Record<string, string>
+}
+
+async function httpReq(url: string, method: 'GET' | 'POST', headers: any, body: any, timeoutMs: number): Promise<HttpResult> {
   const h = http()
   if (h?.request) {
     const r = await h.request({ url, method, headers, body, timeout: timeoutMs })
-    return { status: r.status, data: r.data }
+    return { status: r.status, data: r.data, headers: r.headers }
   }
   return method === 'POST' ? await h.post(url, body, headers) : await h.get(url, headers)
 }
 
 // 上游聚合网关常因拉取超时瞬时失败（cURL error 28 / fail_to_fetch_task / 5xx）
-function transient(r: { status: number; data: any }): boolean {
+function transient(r: HttpResult): boolean {
   if ([408, 429, 500, 502, 503, 504].includes(r.status)) return true
   return /timed out|timeout|fail_to_fetch|bad gateway|gateway timeout/i.test(String(r.data ?? ''))
 }
 // 提交带退避重试：这类瞬时上游超时重试几次往往能过
-async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: number, retries: number): Promise<{ status: number; data: any }> {
+async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: number, retries: number): Promise<HttpResult> {
   let resp = await httpReq(url, 'POST', headers, body, timeoutMs)
   for (let i = 0; i < retries && resp.status >= 400 && transient(resp); i++) {
     await sleep(3000)
     resp = await httpReq(url, 'POST', headers, body, timeoutMs)
   }
   return resp
+}
+
+function headerValue(headers: Record<string, string> | undefined, name: string): string | undefined {
+  if (!headers) return undefined
+  const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name.toLowerCase())
+  return key ? headers[key] : undefined
+}
+
+/** Retry-After 支持秒数和 HTTP-date 两种标准格式。 */
+export function retryAfterDelayMs(headers: Record<string, string> | undefined, now = Date.now()): number | undefined {
+  const raw = headerValue(headers, 'retry-after')?.trim()
+  if (!raw) return undefined
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Math.max(0, Math.round(Number(raw) * 1000))
+  const at = Date.parse(raw)
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined
+}
+
+/** Retry-After 优先；其次是退避序列、固定间隔，最后使用内置 5/10/15/20/30s 序列。 */
+export function pollDelayMs(cfg: ProviderConfig, attempt: number, responseHeaders?: Record<string, string>, now = Date.now()): number {
+  const retryAfter = retryAfterDelayMs(responseHeaders, now)
+  if (retryAfter != null) return retryAfter
+  const schedule = Array.isArray(cfg.pollScheduleMs)
+    ? cfg.pollScheduleMs.map(Number).filter((value) => Number.isFinite(value) && value > 0)
+    : []
+  if (schedule.length) return schedule[Math.min(Math.max(0, attempt), schedule.length - 1)]
+  if (cfg.pollIntervalMs != null) return Math.max(0, cfg.pollIntervalMs)
+  return DEFAULT_ASYNC_POLL_SCHEDULE_MS[Math.min(Math.max(0, attempt), DEFAULT_ASYNC_POLL_SCHEDULE_MS.length - 1)]
 }
 
 export interface VideoReq {
@@ -106,26 +176,35 @@ function requestImageDataUrls(req: VideoReq): string[] {
 }
 
 // 仅轮询模板型(pollUrl/{taskId})任务（不提交）——供首次提交后轮询 + 断点续跑复用；返回结果 URL
-async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
-  const interval = cfg.pollIntervalMs || 3000
-  const timeout = cfg.timeoutMs || 600000
+async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal, initialDelayMs?: number): Promise<string> {
+  const timeout = cfg.timeoutMs || 2400000
   const done = (cfg.doneValues || 'completed,succeeded,success').split(',').map((s) => s.trim().toLowerCase())
   const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
   const startedAt = Date.now()
+  let attempt = 0
+  let responseHeaders: Record<string, string> | undefined
+  let nextDelayMs = initialDelayMs
   // eslint-disable-next-line no-constant-condition
   while (true) {
     if (signal?.aborted) throw new Error('已取消(aborted)')
-    if (Date.now() - startedAt > timeout) throw new Error('生成超时')
-    await sleep(interval)
+    const remaining = timeout - (Date.now() - startedAt)
+    if (remaining <= 0) throw new Error('生成超时')
+    const delay = Math.min(nextDelayMs ?? pollDelayMs(cfg, attempt, responseHeaders), remaining)
+    nextDelayMs = undefined
+    attempt++
+    await sleepWithSignal(delay, signal)
     if (signal?.aborted) throw new Error('已取消(aborted)')
-    let sr: { status: number; data: any }
-    try { sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    if (Date.now() - startedAt >= timeout) throw new Error('生成超时')
+    let sr: HttpResult
+    try { sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000) } catch { responseHeaders = undefined; continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    responseHeaders = sr.headers
     if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
-    const url = jgetFirst(sd, cfg.videoUrlPath)
+    const url = mediaUrlFromResponse(sd, cfg.videoUrlPath)
     if (url) return url
     const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
-    onProgress?.(0.5)
+    const reportedProgress = Number(jget(sd, 'progress'))
+    onProgress?.(Number.isFinite(reportedProgress) ? Math.min(0.94, Math.max(0.1, reportedProgress / 100)) : 0.5)
     if (st && fail.includes(st)) throw new Error('生成失败：' + st)
     // 已完成但 videoUrlPath 取不到 URL → 大概率是路径配错，立即快速失败而非空转到超时（与 pollTaskDefault 一致）
     if (st && done.includes(st)) throw new Error('任务已完成但未取到结果 URL（请检查 Provider 的 videoUrlPath 配置）')
@@ -133,30 +212,38 @@ async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: strin
 }
 
 // 仅轮询默认(idPath/statusPath/{id})任务（不提交）——供首次提交后轮询 + 断点续跑复用；返回结果 URL
-async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
-  const interval = cfg.pollIntervalMs || 2000
-  const timeout = cfg.timeoutMs || 600000
+async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal, initialDelayMs?: number): Promise<string> {
+  const timeout = cfg.timeoutMs || 2400000
   const done = (cfg.doneValues || 'completed,succeeded,success').split(',').map((s) => s.trim().toLowerCase())
   const fail = (cfg.failValues || 'failed,error,cancelled').split(',').map((s) => s.trim().toLowerCase())
   const startedAt = Date.now()
+  let attempt = 0
+  let responseHeaders: Record<string, string> | undefined
+  let nextDelayMs = initialDelayMs
   // eslint-disable-next-line no-constant-condition
   while (true) {
     if (signal?.aborted) throw new Error('已取消(aborted)')
-    if (Date.now() - startedAt > timeout) throw new Error('生成超时')
-    await sleep(interval)
+    const remaining = timeout - (Date.now() - startedAt)
+    if (remaining <= 0) throw new Error('生成超时')
+    const delay = Math.min(nextDelayMs ?? pollDelayMs(cfg, attempt, responseHeaders), remaining)
+    nextDelayMs = undefined
+    attempt++
+    await sleepWithSignal(delay, signal)
     if (signal?.aborted) throw new Error('已取消(aborted)')
+    if (Date.now() - startedAt >= timeout) throw new Error('生成超时')
     const statusUrl = base + (cfg.statusPath || '').replace('{id}', taskId)
-    let sr: { status: number; data: any }
-    try { sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    let sr: HttpResult
+    try { sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000) } catch { responseHeaders = undefined; continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
+    responseHeaders = sr.headers
     if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
-    let url = jgetFirst(sd, cfg.resultPath)
+    let url = mediaUrlFromResponse(sd, cfg.resultPath)
     if (url) return url
     const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
     onProgress?.(0.5)
     if (st && fail.includes(st)) throw new Error('生成失败：' + st)
     if (st && done.includes(st)) {
-      url = jgetFirst(sd, cfg.resultPath)
+      url = mediaUrlFromResponse(sd, cfg.resultPath)
       if (url) return url
       throw new Error('已完成但未找到结果 URL（检查 resultPath）')
     }
@@ -164,23 +251,30 @@ async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, 
 }
 
 // 断点续跑：仅凭已持久化的 taskId 重新轮询在途视频任务（不重新提交），返回结果 URL
-export async function resumeVideoJob(cfg: ProviderConfig, key: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<{ url: string }> {
+export async function resumeVideoJob(cfg: ProviderConfig, key: string, taskId: string, onProgress?: (p: number) => void, signal?: AbortSignal, initialDelayMs?: number): Promise<{ url: string }> {
   if (cfg.bodyTemplate && cfg.submitUrl) {
     if (!cfg.pollUrl) throw new Error('该视频 Provider 未配置 pollUrl，无法断点续跑')
     const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
     if (key) headers['Authorization'] = `Bearer ${key}`
-    return { url: await pollTaskTemplate(cfg, headers, taskId, onProgress, signal) }
+    return { url: await pollTaskTemplate(cfg, headers, taskId, onProgress, signal, initialDelayMs) }
   }
   if (!cfg.statusPath) throw new Error('该视频 Provider 未配置 statusPath，无法断点续跑')
   const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
   if (key) headers['Authorization'] = `Bearer ${key}`
   const base = cfg.baseURL.replace(/\/$/, '')
-  return { url: await pollTaskDefault(cfg, headers, base, taskId, onProgress, signal) }
+  return { url: await pollTaskDefault(cfg, headers, base, taskId, onProgress, signal, initialDelayMs) }
+}
+
+export interface VideoJobSubmission {
+  url?: string
+  taskId?: string
+  /** 提交响应的 Retry-After，作为首次查询前的优先等待时间。 */
+  retryAfterMs?: number
 }
 
 // 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath。
 // 仅提交、拿到 url/taskId 即返回（轮询交给 resumeVideoJob，二者同一 pollTaskTemplate 路径）。
-async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<{ url?: string; taskId?: string }> {
+async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<VideoJobSubmission> {
   const images = await Promise.all(requestImageDataUrls(req).map((dataUrl) => prepareImageUrl(cfg, key, dataUrl)))
   const videos = (req.videoUrls || []).filter(Boolean)
   const imageUrl = images[0]
@@ -208,14 +302,14 @@ async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq
   const resp = await submitWithRetry(cfg.submitUrl as string, headers, body, cfg.timeoutMs || 600000, cfg.submitRetries ?? 2)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-  const url = jgetFirst(data, cfg.videoUrlPath)
-  const taskId = jget(data, cfg.taskIdPath)
+  const url = mediaUrlFromResponse(data, cfg.videoUrlPath)
+  const taskId = jgetFirst(data, cfg.taskIdPath)
   if (taskId) onTask?.(String(taskId))
-  return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }
+  return { url, taskId: taskId ? String(taskId) : undefined, retryAfterMs: retryAfterDelayMs(resp.headers) }
 }
 
 // 默认路径：提交视频任务、拿到 url/taskId 即返回（轮询交给 resumeVideoJob 的 pollTaskDefault）。
-async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<{ url?: string; taskId?: string }> {
+async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<VideoJobSubmission> {
   const body: any = {}
   if (cfg.extraBody && cfg.extraBody.trim()) {
     try {
@@ -257,10 +351,10 @@ async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, on
   const resp = await submitWithRetry(submitUrl, headers, body, cfg.timeoutMs || 600000, cfg.submitRetries ?? 2)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-  const url = jgetFirst(data, cfg.resultPath)
-  const taskId = jget(data, cfg.idPath)
+  const url = mediaUrlFromResponse(data, cfg.resultPath)
+  const taskId = jgetFirst(data, cfg.idPath)
   if (taskId) onTask?.(String(taskId))
-  return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }
+  return { url, taskId: taskId ? String(taskId) : undefined, retryAfterMs: retryAfterDelayMs(resp.headers) }
 }
 
 // 仅提交视频任务、拿到 taskId（或同步 url）即返回，不轮询——供 generate.ts 在并发池内提交、拿到 taskId
@@ -271,7 +365,7 @@ export async function submitVideoJob(
   req: VideoReq,
   onProgress?: (p: number) => void,
   onTask?: (taskId: string) => void
-): Promise<{ url?: string; taskId?: string }> {
+): Promise<VideoJobSubmission> {
   return cfg.bodyTemplate && cfg.submitUrl ? submitViaTemplate(cfg, key, req, onProgress, onTask) : submitDefault(cfg, key, req, onProgress, onTask)
 }
 
@@ -284,13 +378,13 @@ export async function runVideoJob(
   signal?: AbortSignal,
   onTask?: (taskId: string) => void
 ): Promise<{ url: string }> {
-  const { url, taskId } = await submitVideoJob(cfg, key, req, onProgress, onTask)
+  const { url, taskId, retryAfterMs } = await submitVideoJob(cfg, key, req, onProgress, onTask)
   if (url) {
     onProgress?.(0.95)
     return { url }
   }
   if (taskId) {
-    const r = await resumeVideoJob(cfg, key, taskId, onProgress, signal)
+    const r = await resumeVideoJob(cfg, key, taskId, onProgress, signal, retryAfterMs)
     onProgress?.(0.95)
     return r
   }

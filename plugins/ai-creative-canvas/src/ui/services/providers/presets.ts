@@ -1,5 +1,6 @@
 import type { ProviderConfig } from './types'
 import { uid } from '../../util'
+import { DEFAULT_ASYNC_POLL_SCHEDULE_MS, RAYDU_SEEDANCE25_RESULT_PATHS } from './config'
 
 // 空白工厂（手动从零配置）
 export function presetOpenAiTts(): ProviderConfig {
@@ -80,7 +81,7 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
     id: 'raydu-seedance25',
     label: 'Raydu · Seedance 2.5（异步直连）',
-    hint: 'seedance25：支持文生视频、1～9 张图片、1～3 条公开视频 URL，以及图/视频混合参考；素材数量由服务端自动推断模式。',
+    hint: 'seedance25：支持文生视频、1～9 张图片、1～3 条公开视频 URL，以及图/视频混合参考；轮询按 5/10/15/20/30s 退避，优先遵循 Retry-After，最长 40 分钟。',
     make: () =>
       base({
         label: 'Raydu Seedance 2.5',
@@ -90,11 +91,12 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
         models: ['seedance25'],
         submitUrl: 'https://raydu.liekumall.com/v1/video/generations',
         pollUrl: 'https://raydu.liekumall.com/v1/video/generations/{taskId}',
-        taskIdPath: 'task_id',
+        taskIdPath: 'task_id|taskId|id',
         statusField: 'status',
         doneValues: 'completed',
-        videoUrlPath: 'result_url',
-        timeoutMs: 1800000,
+        videoUrlPath: RAYDU_SEEDANCE25_RESULT_PATHS,
+        pollScheduleMs: [...DEFAULT_ASYNC_POLL_SCHEDULE_MS],
+        timeoutMs: 2400000,
         submitRetries: 0,
         capabilities: {
           textToVideo: true,
